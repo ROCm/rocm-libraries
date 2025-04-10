@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -262,67 +262,67 @@ namespace TensileLite
             {
                 if(logAtLevel(level))
                 {
-                    if(tensor.dataType() == DataType::Float)
+                    if(tensor.dataType() == rocisa::DataType::Float)
                         logTensorTyped(level,
                                        name,
                                        reinterpret_cast<float const*>(data),
                                        tensor,
                                        reinterpret_cast<float const*>(ptrVal));
-                    else if(tensor.dataType() == DataType::Half)
+                    else if(tensor.dataType() == rocisa::DataType::Half)
                         logTensorTyped(level,
                                        name,
                                        reinterpret_cast<Half const*>(data),
                                        tensor,
                                        reinterpret_cast<Half const*>(ptrVal));
-                    else if(tensor.dataType() == DataType::ComplexFloat)
+                    else if(tensor.dataType() == rocisa::DataType::ComplexFloat)
                         logTensorTyped(level,
                                        name,
                                        reinterpret_cast<std::complex<float> const*>(data),
                                        tensor,
                                        reinterpret_cast<std::complex<float> const*>(ptrVal));
-                    else if(tensor.dataType() == DataType::Double)
+                    else if(tensor.dataType() == rocisa::DataType::Double)
                         logTensorTyped(level,
                                        name,
                                        reinterpret_cast<double const*>(data),
                                        tensor,
                                        reinterpret_cast<double const*>(ptrVal));
-                    else if(tensor.dataType() == DataType::Int32)
+                    else if(tensor.dataType() == rocisa::DataType::Int32)
                         logTensorTyped(level,
                                        name,
                                        reinterpret_cast<int32_t const*>(data),
                                        tensor,
                                        reinterpret_cast<int32_t const*>(ptrVal));
-                    else if(tensor.dataType() == DataType::Int8)
+                    else if(tensor.dataType() == rocisa::DataType::Int8)
                         logTensorTyped(level,
                                        name,
                                        reinterpret_cast<Int8 const*>(data),
                                        tensor,
                                        reinterpret_cast<Int8 const*>(ptrVal));
-                    else if(tensor.dataType() == DataType::BFloat16)
+                    else if(tensor.dataType() == rocisa::DataType::BFloat16)
                         logTensorTyped(level,
                                        name,
                                        reinterpret_cast<BFloat16 const*>(data),
                                        tensor,
                                        reinterpret_cast<BFloat16 const*>(ptrVal));
-                    else if(tensor.dataType() == DataType::Float8)
+                    else if(tensor.dataType() == rocisa::DataType::Float8)
                         logTensorTyped(level,
                                        name,
                                        reinterpret_cast<Float8 const*>(data),
                                        tensor,
                                        reinterpret_cast<Float8 const*>(ptrVal));
-                    else if(tensor.dataType() == DataType::BFloat8)
+                    else if(tensor.dataType() == rocisa::DataType::BFloat8)
                         logTensorTyped(level,
                                        name,
                                        reinterpret_cast<BFloat8 const*>(data),
                                        tensor,
                                        reinterpret_cast<BFloat8 const*>(ptrVal));
-                    else if(tensor.dataType() == DataType::Float8_fnuz)
+                    else if(tensor.dataType() == rocisa::DataType::Float8_fnuz)
                         logTensorTyped(level,
                                        name,
                                        reinterpret_cast<Float8_fnuz const*>(data),
                                        tensor,
                                        reinterpret_cast<Float8_fnuz const*>(ptrVal));
-                    else if(tensor.dataType() == DataType::BFloat8_fnuz)
+                    else if(tensor.dataType() == rocisa::DataType::BFloat8_fnuz)
                         logTensorTyped(level,
                                        name,
                                        reinterpret_cast<BFloat8_fnuz const*>(data),

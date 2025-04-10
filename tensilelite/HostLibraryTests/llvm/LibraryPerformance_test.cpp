@@ -51,12 +51,13 @@ using namespace TensileLite;
 struct LibraryPerformanceTest
     : public ::testing::TestWithParam<std::tuple<AMDGPU, std::string, bool, bool>>
 {
-    AMDGPU                                               hardware;
-    std::string                                          filename;
-    bool                                                 hasNavi, solutionRequired;
+    AMDGPU                                                   hardware;
+    std::string                                              filename;
+    bool                                                     hasNavi, solutionRequired;
     std::shared_ptr<SolutionLibrary<ContractionProblemGemm>> library;
 
-    static std::map<std::string, std::shared_ptr<SolutionLibrary<ContractionProblemGemm>>> libraryCache;
+    static std::map<std::string, std::shared_ptr<SolutionLibrary<ContractionProblemGemm>>>
+        libraryCache;
 
     void SetUp() override
     {
@@ -164,7 +165,7 @@ TEST_P(LibraryPerformanceTest, FindCachedSolution)
 TEST_P(LibraryPerformanceTest, Solve)
 {
     float                                a, b, c, d;
-    ContractionProblemGemm                   problem;
+    ContractionProblemGemm               problem;
     std::shared_ptr<ContractionSolution> solution;
 
     for(int i = 0; i < 10 && solution == nullptr; i++)
@@ -191,7 +192,7 @@ TEST_P(LibraryPerformanceTest, Solve)
 TEST_P(LibraryPerformanceTest, SolveWithLog)
 {
     float                                a, b, c, d;
-    ContractionProblemGemm                   problem;
+    ContractionProblemGemm               problem;
     std::shared_ptr<ContractionSolution> solution;
 
     for(int i = 0; i < 10 && solution == nullptr; i++)
@@ -218,9 +219,9 @@ TEST_P(LibraryPerformanceTest, FindAndSolve)
 {
     for(int i = 0; i < 100000; i++)
     {
-        auto                          problem  = RandomGEMM();
-        auto                          solution = library->findBestSolution(problem, hardware);
-        float                         a, b, c, d;
+        auto              problem  = RandomGEMM();
+        auto              solution = library->findBestSolution(problem, hardware);
+        float             a, b, c, d;
         ContractionInputs inputs{&a, &b, &c, &d, 1.0, float(problem.beta())};
 
         if(solutionRequired)
@@ -235,9 +236,9 @@ TEST_P(LibraryPerformanceTest, FindAndSolveWithLog)
 {
     for(int i = 0; i < 100000; i++)
     {
-        auto                          problem  = RandomGEMM();
-        auto                          solution = library->findBestSolution(problem, hardware);
-        float                         a, b, c, d;
+        auto              problem  = RandomGEMM();
+        auto              solution = library->findBestSolution(problem, hardware);
+        float             a, b, c, d;
         ContractionInputs inputs{&a, &b, &c, &d, 1.0, float(problem.beta())};
 
         if(solutionRequired)
@@ -258,24 +259,24 @@ TEST_P(LibraryPerformanceTest, SpecificSizes)
     // N	N	256	12	1024	1	256	1024	0	256
 
     auto problem = ContractionProblemGemm::GEMM_Strides(false,
-                                                    false,
-                                                    DataType::Float,
-                                                    DataType::Float,
-                                                    DataType::Float,
-                                                    DataType::Float,
-                                                    256,
-                                                    12,
-                                                    1024,
-                                                    1,
-                                                    256,
-                                                    1024,
-                                                    1024,
-                                                    12,
-                                                    256,
-                                                    12,
-                                                    256,
-                                                    12,
-                                                    2.0);
+                                                        false,
+                                                        rocisa::DataType::Float,
+                                                        rocisa::DataType::Float,
+                                                        rocisa::DataType::Float,
+                                                        rocisa::DataType::Float,
+                                                        256,
+                                                        12,
+                                                        1024,
+                                                        1,
+                                                        256,
+                                                        1024,
+                                                        1024,
+                                                        12,
+                                                        256,
+                                                        12,
+                                                        256,
+                                                        12,
+                                                        2.0);
 
     auto solution = library->findBestSolution(problem, hardware);
     //ASSERT_NE(solution, nullptr) << i << problem;

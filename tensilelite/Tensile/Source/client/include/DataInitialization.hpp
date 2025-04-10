@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -384,50 +384,51 @@ namespace TensileLite
                                          hipStream_t                    stream);
 
             template <typename S>
-            void initArray(DataType dataType, InitMode initMode, void* array, S descriptor)
+            void initArray(rocisa::DataType dataType, InitMode initMode, void* array, S descriptor)
             {
                 switch(dataType)
                 {
-                case DataType::Float:
+                case rocisa::DataType::Float:
                     initArray<float>(initMode, static_cast<float*>(array), descriptor);
                     break;
-                case DataType::Double:
+                case rocisa::DataType::Double:
                     initArray<double>(initMode, static_cast<double*>(array), descriptor);
                     break;
-                case DataType::Half:
+                case rocisa::DataType::Half:
                     initArray<Half>(initMode, static_cast<Half*>(array), descriptor);
                     break;
-                case DataType::Int32:
+                case rocisa::DataType::Int32:
                     initArray<int32_t>(initMode, static_cast<int32_t*>(array), descriptor);
                     break;
-                case DataType::BFloat16:
+                case rocisa::DataType::BFloat16:
                     initArray<BFloat16>(initMode, static_cast<BFloat16*>(array), descriptor);
                     break;
-                case DataType::Int8:
+                case rocisa::DataType::Int8:
                     initArray<int8_t>(initMode, static_cast<int8_t*>(array), descriptor);
                     break;
-                case DataType::Float8:
+                case rocisa::DataType::Float8:
                     initArray<Float8>(initMode, static_cast<Float8*>(array), descriptor);
                     break;
-                case DataType::BFloat8:
+                case rocisa::DataType::BFloat8:
                     initArray<BFloat8>(initMode, static_cast<BFloat8*>(array), descriptor);
                     break;
-                case DataType::Float8_fnuz:
+                case rocisa::DataType::Float8_fnuz:
                     initArray<Float8_fnuz>(initMode, static_cast<Float8_fnuz*>(array), descriptor);
                     break;
-                case DataType::BFloat8_fnuz:
-                    initArray<BFloat8_fnuz>(initMode, static_cast<BFloat8_fnuz*>(array), descriptor);
+                case rocisa::DataType::BFloat8_fnuz:
+                    initArray<BFloat8_fnuz>(
+                        initMode, static_cast<BFloat8_fnuz*>(array), descriptor);
                     break;
-                case DataType::Int64:
-                case DataType::XFloat32:
-                case DataType::ComplexFloat:
-                case DataType::ComplexDouble:
-                case DataType::Int8x4:
-                case DataType::Count:
-                case DataType::Float8BFloat8:
-                case DataType::BFloat8Float8:
-                case DataType::Float8BFloat8_fnuz:
-                case DataType::BFloat8Float8_fnuz:;
+                case rocisa::DataType::Int64:
+                case rocisa::DataType::XFloat32:
+                case rocisa::DataType::ComplexFloat:
+                case rocisa::DataType::ComplexDouble:
+                case rocisa::DataType::Int8x4:
+                case rocisa::DataType::Count:
+                case rocisa::DataType::Float8BFloat8:
+                case rocisa::DataType::BFloat8Float8:
+                case rocisa::DataType::Float8BFloat8_fnuz:
+                case rocisa::DataType::BFloat8Float8_fnuz:;
                 }
             }
 
@@ -861,14 +862,12 @@ namespace TensileLite
             {
                 return false;
             }
-            virtual void preBenchmarkRun() override{}
-            virtual void postBenchmarkRun() override{}
-            virtual void preProblem(ContractionProblem* const problem) override{}
-            virtual void postProblem() override{}
-            virtual void preSolution(ContractionSolution const& solution) override{
-
-            }
-            virtual void postSolution() override{}
+            virtual void preBenchmarkRun() override {}
+            virtual void postBenchmarkRun() override {}
+            virtual void preProblem(ContractionProblem* const problem) override {}
+            virtual void postProblem() override {}
+            virtual void preSolution(ContractionSolution const& solution) override {}
+            virtual void postSolution() override {}
             virtual bool needMoreRunsInSolution() const override
             {
                 return m_numRunsInSolution < m_numRunsPerSolution;
@@ -878,11 +877,13 @@ namespace TensileLite
             {
                 return 0;
             };
-            virtual void setNumWarmupRuns(size_t count) override{}
-            virtual void preWarmup() override{}
+            virtual void setNumWarmupRuns(size_t count) override {}
+            virtual void preWarmup() override {}
             virtual void postWarmup(TimingEvents const& startEvents,
                                     TimingEvents const& stopEvents,
-                                    hipStream_t const&  stream) override{}
+                                    hipStream_t const&  stream) override
+            {
+            }
             virtual void validateWarmups(std::shared_ptr<ProblemInputs> inputs,
                                          TimingEvents const&            startEvents,
                                          TimingEvents const&            stopEvents) override
@@ -894,24 +895,28 @@ namespace TensileLite
             {
                 return 0;
             }
-            virtual void setNumSyncs(size_t count) override{}
-            virtual void preSyncs() override{}
-            virtual void postSyncs() override{}
+            virtual void setNumSyncs(size_t count) override {}
+            virtual void preSyncs() override {}
+            virtual void postSyncs() override {}
 
             virtual size_t numEnqueuesPerSync() override
             {
                 return 0;
             }
-            virtual void setNumEnqueuesPerSync(size_t count) override{}
-            virtual void preEnqueues(hipStream_t const& stream) override{}
+            virtual void setNumEnqueuesPerSync(size_t count) override {}
+            virtual void preEnqueues(hipStream_t const& stream) override {}
             virtual void postEnqueues(TimingEvents const& startEvents,
                                       TimingEvents const& stopEvents,
-                                      hipStream_t const&  stream) override{}
+                                      hipStream_t const&  stream) override
+            {
+            }
             virtual void validateEnqueues(std::shared_ptr<ProblemInputs> inputs,
                                           TimingEvents const&            startEvents,
-                                          TimingEvents const&            stopEvents) override{}
+                                          TimingEvents const&            stopEvents) override
+            {
+            }
 
-            virtual void finalizeReport() override{}
+            virtual void finalizeReport() override {}
 
             virtual int error() const override
             {
@@ -948,19 +953,19 @@ namespace TensileLite
             // Properties for each tensor (arranged in index)
             struct VectorDataInitProperties
             {
-                std::string                      name;
-                InitMode                         init;
-                std::map<DataType, PristineUnit> pristine;
+                std::string                              name;
+                InitMode                                 init;
+                std::map<rocisa::DataType, PristineUnit> pristine;
             };
 
             // Properties for each constants (arranged in index)
             struct ConstDataInitProperties
             {
-                std::string     name;
-                InitMode        init;
-                DataType        dataType;
-                double          freeValue; // For InitMode::Free
-                ConstantVariant value;
+                std::string      name;
+                InitMode         init;
+                rocisa::DataType dataType;
+                double           freeValue; // For InitMode::Free
+                ConstantVariant  value;
             };
 
             void allocNewCPUInputs();
@@ -1894,22 +1899,22 @@ namespace TensileLite
         //  NANOO
         // NOTE: f8/bf8 has special overloading with unit8_t, so using float val and downcast it to f8/bf8 here
         template <>
-        inline  Float8_fnuz DataInitialization::getValue<Float8_fnuz, InitMode::Zero>()
+        inline Float8_fnuz DataInitialization::getValue<Float8_fnuz, InitMode::Zero>()
         {
             return static_cast<Float8_fnuz>(0.0f);
         }
         template <>
-        inline  Float8_fnuz DataInitialization::getValue<Float8_fnuz, InitMode::One>()
+        inline Float8_fnuz DataInitialization::getValue<Float8_fnuz, InitMode::One>()
         {
             return static_cast<Float8_fnuz>(1.0f);
         }
         template <>
-        inline  Float8_fnuz DataInitialization::getValue<Float8_fnuz, InitMode::Two>()
+        inline Float8_fnuz DataInitialization::getValue<Float8_fnuz, InitMode::Two>()
         {
             return static_cast<Float8_fnuz>(2.0f);
         }
         template <>
-        inline  Float8_fnuz DataInitialization::getValue<Float8_fnuz, InitMode::NegOne>()
+        inline Float8_fnuz DataInitialization::getValue<Float8_fnuz, InitMode::NegOne>()
         {
             return static_cast<Float8_fnuz>(-1.0f);
         }
@@ -1919,8 +1924,8 @@ namespace TensileLite
             // NOTE: sign=0 exp=1111, mantissa=111.. bit pattern : 0111 1111 -> 0x7F
             union
             {
-                uint8_t bits;
-                Float8_fnuz  value;
+                uint8_t     bits;
+                Float8_fnuz value;
             } x;
 
             x.bits = 0x7F;
@@ -1933,8 +1938,8 @@ namespace TensileLite
             //return static_cast<>(0.0009765625f);
             union
             {
-                uint8_t bits;
-                Float8_fnuz  value;
+                uint8_t     bits;
+                Float8_fnuz value;
             } x;
 
             x.bits = 0x01;
@@ -1946,8 +1951,8 @@ namespace TensileLite
             // NOTE: sign=0 exp=0000, mantissa=111.. bit pattern : 0x07
             union
             {
-                uint8_t bits;
-                Float8_fnuz  value;
+                uint8_t     bits;
+                Float8_fnuz value;
             } x;
 
             x.bits = 0x07;
@@ -1959,7 +1964,7 @@ namespace TensileLite
             {
                 union
                 {
-                    uint8_t bits;
+                    uint8_t     bits;
                     Float8_fnuz value;
                 } x;
 
@@ -1973,8 +1978,8 @@ namespace TensileLite
             {
                 union
                 {
-                    uint8_t bits;
-                    Float8_fnuz  value;
+                    uint8_t     bits;
+                    Float8_fnuz value;
                 } x;
 
                 x.bits = 0x80; // no inf! returning NaN for now!
@@ -1994,7 +1999,7 @@ namespace TensileLite
             return getValue<Float8_fnuz, InitMode::NaN>();
         }
         template <>
-        inline  Float8_fnuz DataInitialization::getValue<Float8_fnuz, InitMode::BadOutput>()
+        inline Float8_fnuz DataInitialization::getValue<Float8_fnuz, InitMode::BadOutput>()
         {
             return getValue<Float8_fnuz, InitMode::Inf>();
         }
@@ -2026,11 +2031,11 @@ namespace TensileLite
             {
                 union
                 {
-                    uint8_t bits;
+                    uint8_t      bits;
                     BFloat8_fnuz value;
                 } x;
 
-                x.bits = 0x80;  // NaN
+                x.bits = 0x80; // NaN
                 return x.value;
             }
         }
@@ -2040,11 +2045,11 @@ namespace TensileLite
             {
                 union
                 {
-                    uint8_t bits;
+                    uint8_t      bits;
                     BFloat8_fnuz value;
                 } x;
 
-                x.bits = 0x80;   // no inf, returning nan
+                x.bits = 0x80; // no inf, returning nan
                 return x.value;
             }
         }
@@ -2070,11 +2075,11 @@ namespace TensileLite
         {
             union
             {
-                uint8_t bits;
+                uint8_t      bits;
                 BFloat8_fnuz value;
             } x;
 
-            x.bits = 0x7F;  // 0 11111 11 -> 0111 1111 -> 0x7B
+            x.bits = 0x7F; // 0 11111 11 -> 0111 1111 -> 0x7B
             return x.value;
         }
         template <>
@@ -2082,7 +2087,7 @@ namespace TensileLite
         {
             union
             {
-                uint8_t bits;
+                uint8_t      bits;
                 BFloat8_fnuz value;
             } x;
 
@@ -2094,7 +2099,7 @@ namespace TensileLite
         {
             union
             {
-                uint8_t bits;
+                uint8_t      bits;
                 BFloat8_fnuz value;
             } x;
 
@@ -2236,7 +2241,7 @@ namespace TensileLite
             return std::isnan(value);
         }
 
-    template <>
+        template <>
         inline bool DataInitialization::isBadInput<int8_t>(int8_t value)
         {
             return value == DataInitialization::getValue<int8_t, InitMode::BadInput>();
@@ -2309,7 +2314,7 @@ namespace TensileLite
             return std::isinf(static_cast<float>(value));
         }
 
-    template <>
+        template <>
         inline bool DataInitialization::isBadOutput<BFloat16>(BFloat16 value)
         {
             return std::isinf(value);
@@ -2365,13 +2370,15 @@ namespace TensileLite
         }
 
         template <>
-        inline Float8_fnuz DataInitialization::getTrigValue<Float8_fnuz>(int idx, bool useCos, bool useAbs)
+        inline Float8_fnuz
+            DataInitialization::getTrigValue<Float8_fnuz>(int idx, bool useCos, bool useAbs)
         {
             return static_cast<Float8_fnuz>(getTrigValue<float>(idx, useCos, useAbs));
         }
 
         template <>
-        inline BFloat8_fnuz DataInitialization::getTrigValue<BFloat8_fnuz>(int idx, bool useCos, bool useAbs)
+        inline BFloat8_fnuz
+            DataInitialization::getTrigValue<BFloat8_fnuz>(int idx, bool useCos, bool useAbs)
         {
             return static_cast<BFloat8_fnuz>(getTrigValue<float>(idx, useCos, useAbs));
         }
@@ -2696,14 +2703,16 @@ namespace TensileLite
         }
 
         template <>
-        inline Float8_fnuz DataInitialization::getValue<Float8_fnuz, InitMode::RandomNegPosLimited>()
+        inline Float8_fnuz
+            DataInitialization::getValue<Float8_fnuz, InitMode::RandomNegPosLimited>()
         {
             //return static_cast<Float8_fnuz>(getValueWithUpperLowerBoundFP<float>());
             return getValueWithUpperLowerBoundFP<Float8_fnuz>();
         }
 
         template <>
-        inline BFloat8_fnuz DataInitialization::getValue<BFloat8_fnuz, InitMode::RandomNegPosLimited>()
+        inline BFloat8_fnuz
+            DataInitialization::getValue<BFloat8_fnuz, InitMode::RandomNegPosLimited>()
         {
             //return static_cast<BFloat8_fnuz>(getValueWithUpperLowerBoundFP<float>());
             return getValueWithUpperLowerBoundFP<BFloat8_fnuz>();
@@ -2794,7 +2803,7 @@ namespace TensileLite
             return static_cast<BFloat8_fnuz>(i);
         }
 
-    template <>
+        template <>
         inline Half DataInitialization::ConvertTo<Half>(size_t i)
         {
             return static_cast<Half>(i);
@@ -2901,7 +2910,7 @@ namespace TensileLite
             return static_cast<BFloat8>(value);
         }
 
-    template <>
+        template <>
         inline Float8_fnuz DataInitialization::convertDoubleTo<Float8_fnuz>(double value)
         {
             return static_cast<Float8_fnuz>(value);

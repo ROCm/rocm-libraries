@@ -1,4 +1,5 @@
 recursive-include Tensile *.py *.h *.hpp *.cpp *.txt *.cmake *.yaml
+recursive-include rocisa/rocisa/include *.hpp
 recursive-include Tensile/CustomKernels *.s
 include Tensile/bin/Tensile Tensile/bin/TensileCreateLibrary
 include Tensile/Ops/gen_assembly.sh

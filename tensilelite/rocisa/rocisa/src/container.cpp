@@ -312,7 +312,7 @@ void init_containers(nb::module_ m)
         });
 
     nb::class_<rocisa::SDWAModifiers, rocisa::Container>(m_con, "SDWAModifiers")
-        .def(nb::init<SelectBit, UnusedBit, SelectBit, SelectBit>(),
+        .def(nb::init<rocisa::SelectBit, rocisa::UnusedBit, rocisa::SelectBit, rocisa::SelectBit>(),
              nb::arg("dst_sel")    = 0,
              nb::arg("dst_unused") = 0,
              nb::arg("src0_sel")   = 0,
@@ -327,12 +327,15 @@ void init_containers(nb::module_ m)
                  return std::make_tuple(
                      self.dst_sel, self.dst_unused, self.src0_sel, self.src1_sel);
              })
-        .def("__setstate__",
-             [](rocisa::SDWAModifiers&                                 self,
-                std::tuple<SelectBit, UnusedBit, SelectBit, SelectBit> t) {
-                 new(&self) rocisa::SDWAModifiers(
-                     std::get<0>(t), std::get<1>(t), std::get<2>(t), std::get<3>(t));
-             });
+        .def(
+            "__setstate__",
+            [](rocisa::SDWAModifiers& self,
+               std::
+                   tuple<rocisa::SelectBit, rocisa::UnusedBit, rocisa::SelectBit, rocisa::SelectBit>
+                       t) {
+                new(&self) rocisa::SDWAModifiers(
+                    std::get<0>(t), std::get<1>(t), std::get<2>(t), std::get<3>(t));
+            });
 
     nb::class_<rocisa::DPPModifiers, rocisa::Container>(m_con, "DPPModifiers")
         .def(nb::init<int, int, int>(),

@@ -177,7 +177,7 @@ namespace TensileLite
             SaturateCast(Accumulator val)
         {
             if constexpr(std::is_same<Accumulator, BFloat16>::value)
-		return static_cast<T>(static_cast<float>(val));
+                return static_cast<T>(static_cast<float>(val));
             else
                 return static_cast<T>(val);
         }
@@ -202,84 +202,84 @@ namespace TensileLite
                                     || std::is_same<int64_t, Accumulator>::value
                                     || std::is_same<int8_t, Accumulator>::value,
                                 Accumulator>::type
-            GetValue(DataType dataType, void const* voidPtr, int pos, bool aConjugate)
+            GetValue(rocisa::DataType dataType, void const* voidPtr, int pos, bool aConjugate)
         {
             switch(dataType)
             {
-            case DataType::Float:
+            case rocisa::DataType::Float:
             {
                 auto typedPtr = static_cast<float const*>(voidPtr);
                 return cast<Accumulator>(Transform<float>::Input(typedPtr[pos], aConjugate));
             }
             break;
-            case DataType::Double:
+            case rocisa::DataType::Double:
             {
                 auto typedPtr = static_cast<double const*>(voidPtr);
                 return cast<Accumulator>(Transform<double>::Input(typedPtr[pos], aConjugate));
             }
             break;
-            case DataType::Half:
+            case rocisa::DataType::Half:
             {
                 auto typedPtr = static_cast<Half const*>(voidPtr);
                 return cast<Accumulator>(Transform<Half>::Input(typedPtr[pos], aConjugate));
             }
             break;
-            case DataType::Int32:
+            case rocisa::DataType::Int32:
             {
                 auto typedPtr = static_cast<int32_t const*>(voidPtr);
                 return cast<Accumulator>(Transform<int32_t>::Input(typedPtr[pos], aConjugate));
             }
             break;
-            case DataType::Int64:
+            case rocisa::DataType::Int64:
             {
                 auto typedPtr = static_cast<int64_t const*>(voidPtr);
                 return cast<Accumulator>(Transform<int64_t>::Input(typedPtr[pos], aConjugate));
             }
             break;
-            case DataType::BFloat16:
+            case rocisa::DataType::BFloat16:
             {
                 auto typedPtr = static_cast<BFloat16 const*>(voidPtr);
                 return cast<Accumulator>(Transform<BFloat16>::Input(typedPtr[pos], aConjugate));
             }
             break;
-            case DataType::Int8:
+            case rocisa::DataType::Int8:
             {
                 auto typedPtr = static_cast<int8_t const*>(voidPtr);
                 return cast<Accumulator>(Transform<int8_t>::Input(typedPtr[pos], aConjugate));
             }
             break;
-            case DataType::Float8:
+            case rocisa::DataType::Float8:
             {
                 auto typedPtr = static_cast<Float8 const*>(voidPtr);
                 return cast<Accumulator>(Transform<Float8>::Input(typedPtr[pos], aConjugate));
             }
             break;
-            case DataType::BFloat8:
+            case rocisa::DataType::BFloat8:
             {
                 auto typedPtr = static_cast<BFloat8 const*>(voidPtr);
                 return cast<Accumulator>(Transform<BFloat8>::Input(typedPtr[pos], aConjugate));
             }
-            case DataType::Float8_fnuz:
+            case rocisa::DataType::Float8_fnuz:
             {
                 auto typedPtr = static_cast<Float8_fnuz const*>(voidPtr);
                 return cast<Accumulator>(Transform<Float8_fnuz>::Input(typedPtr[pos], aConjugate));
             }
             break;
-            case DataType::BFloat8_fnuz:
+            case rocisa::DataType::BFloat8_fnuz:
             {
                 auto typedPtr = static_cast<BFloat8_fnuz const*>(voidPtr);
                 return cast<Accumulator>(Transform<BFloat8_fnuz>::Input(typedPtr[pos], aConjugate));
             }
             break;
-            case DataType::XFloat32:
-            case DataType::ComplexFloat:
-            case DataType::ComplexDouble:
-            case DataType::Int8x4:
-            case DataType::Count:
-            case DataType::Float8BFloat8:
-            case DataType::BFloat8Float8:
-            case DataType::Float8BFloat8_fnuz:
-            case DataType::BFloat8Float8_fnuz:;
+            case rocisa::DataType::XFloat32:
+            case rocisa::DataType::ComplexFloat:
+            case rocisa::DataType::ComplexDouble:
+            case rocisa::DataType::Int8x4:
+            case rocisa::DataType::Count:
+            case rocisa::DataType::Float8BFloat8:
+            case rocisa::DataType::BFloat8Float8:
+            case rocisa::DataType::Float8BFloat8_fnuz:
+            case rocisa::DataType::BFloat8Float8_fnuz:;
             }
             return DataInitialization::getValue<Accumulator, InitMode::Zero>();
         }
@@ -297,7 +297,7 @@ namespace TensileLite
                                     && !std::is_same<Float8_fnuz, Accumulator>::value
                                     && !std::is_same<BFloat8_fnuz, Accumulator>::value,
                                 Accumulator>::type
-            GetValue(DataType biasType, void const* biasptr, int pos, bool aConjugate)
+            GetValue(rocisa::DataType biasType, void const* biasptr, int pos, bool aConjugate)
         {
             return DataInitialization::getValue<Accumulator, InitMode::Zero>();
         }
@@ -315,80 +315,80 @@ namespace TensileLite
                                        || std::is_same<int64_t, Accumulator>::value
                                        || std::is_same<int8_t, Accumulator>::value,
                                    bool> = true>
-        void SetValue(DataType dataType, Accumulator& src, void* dstPtr, size_t pos)
+        void SetValue(rocisa::DataType dataType, Accumulator& src, void* dstPtr, size_t pos)
         {
             switch(dataType)
             {
-            case DataType::Float:
+            case rocisa::DataType::Float:
             {
                 auto typedPtr = static_cast<float*>(dstPtr);
                 typedPtr[pos] = SaturateCast<float>(src);
             }
             break;
-            case DataType::Double:
+            case rocisa::DataType::Double:
             {
                 auto typedPtr = static_cast<double*>(dstPtr);
                 typedPtr[pos] = SaturateCast<double>(src);
             }
             break;
-            case DataType::Half:
+            case rocisa::DataType::Half:
             {
                 auto typedPtr = static_cast<Half*>(dstPtr);
                 typedPtr[pos] = SaturateCast<Half>(src);
             }
             break;
-            case DataType::Int32:
+            case rocisa::DataType::Int32:
             {
                 auto typedPtr = static_cast<int32_t*>(dstPtr);
                 typedPtr[pos] = SaturateCast<int32_t>(src);
             }
             break;
-            case DataType::BFloat16:
+            case rocisa::DataType::BFloat16:
             {
                 auto typedPtr = static_cast<BFloat16*>(dstPtr);
                 typedPtr[pos] = SaturateCast<BFloat16>(src);
             }
             break;
-            case DataType::Int8:
+            case rocisa::DataType::Int8:
             {
                 auto typedPtr = static_cast<int8_t*>(dstPtr);
                 typedPtr[pos] = SaturateCast<int8_t>(src);
             }
             break;
-            case DataType::Float8:
+            case rocisa::DataType::Float8:
             {
                 auto typedPtr = static_cast<Float8*>(dstPtr);
                 typedPtr[pos] = SaturateCast<Float8>(src);
             }
             break;
-            case DataType::BFloat8:
+            case rocisa::DataType::BFloat8:
             {
                 auto typedPtr = static_cast<BFloat8*>(dstPtr);
                 typedPtr[pos] = SaturateCast<BFloat8>(src);
             }
             break;
-            case DataType::Float8_fnuz:
+            case rocisa::DataType::Float8_fnuz:
             {
                 auto typedPtr = static_cast<Float8_fnuz*>(dstPtr);
                 typedPtr[pos] = SaturateCast<Float8_fnuz>(src);
             }
             break;
-            case DataType::BFloat8_fnuz:
+            case rocisa::DataType::BFloat8_fnuz:
             {
                 auto typedPtr = static_cast<BFloat8_fnuz*>(dstPtr);
                 typedPtr[pos] = SaturateCast<BFloat8_fnuz>(src);
             }
             break;
-            case DataType::XFloat32:
-            case DataType::ComplexFloat:
-            case DataType::ComplexDouble:
-            case DataType::Int8x4:
-            case DataType::Int64:
-            case DataType::Count:
-            case DataType::Float8BFloat8:
-            case DataType::BFloat8Float8:
-            case DataType::Float8BFloat8_fnuz:
-            case DataType::BFloat8Float8_fnuz:;
+            case rocisa::DataType::XFloat32:
+            case rocisa::DataType::ComplexFloat:
+            case rocisa::DataType::ComplexDouble:
+            case rocisa::DataType::Int8x4:
+            case rocisa::DataType::Int64:
+            case rocisa::DataType::Count:
+            case rocisa::DataType::Float8BFloat8:
+            case rocisa::DataType::BFloat8Float8:
+            case rocisa::DataType::Float8BFloat8_fnuz:
+            case rocisa::DataType::BFloat8Float8_fnuz:;
             }
         }
 
@@ -405,36 +405,36 @@ namespace TensileLite
                                        && !std::is_same<Float8_fnuz, Accumulator>::value
                                        && !std::is_same<BFloat8_fnuz, Accumulator>::value,
                                    bool> = true>
-        void SetValue(DataType dataType, Accumulator& src, void* dstPtr, size_t pos)
+        void SetValue(rocisa::DataType dataType, Accumulator& src, void* dstPtr, size_t pos)
         {
             switch(dataType)
             {
-            case DataType::Float:
-            case DataType::Double:
-            case DataType::Half:
-            case DataType::Int32:
-            case DataType::Int64:
-            case DataType::BFloat16:
-            case DataType::Int8:
-            case DataType::Float8:
-            case DataType::BFloat8:
-            case DataType::Float8_fnuz:
-            case DataType::BFloat8_fnuz:
-            case DataType::XFloat32:
+            case rocisa::DataType::Float:
+            case rocisa::DataType::Double:
+            case rocisa::DataType::Half:
+            case rocisa::DataType::Int32:
+            case rocisa::DataType::Int64:
+            case rocisa::DataType::BFloat16:
+            case rocisa::DataType::Int8:
+            case rocisa::DataType::Float8:
+            case rocisa::DataType::BFloat8:
+            case rocisa::DataType::Float8_fnuz:
+            case rocisa::DataType::BFloat8_fnuz:
+            case rocisa::DataType::XFloat32:
                 break;
-            case DataType::ComplexFloat:
-            case DataType::ComplexDouble:
+            case rocisa::DataType::ComplexFloat:
+            case rocisa::DataType::ComplexDouble:
                 break;
-            case DataType::Int8x4:
+            case rocisa::DataType::Int8x4:
             {
                 throw std::runtime_error("Not supported yet.");
             }
             break;
-            case DataType::Count:
-            case DataType::Float8BFloat8:
-            case DataType::BFloat8Float8:
-            case DataType::Float8BFloat8_fnuz:
-            case DataType::BFloat8Float8_fnuz:;
+            case rocisa::DataType::Count:
+            case rocisa::DataType::Float8BFloat8:
+            case rocisa::DataType::BFloat8Float8:
+            case rocisa::DataType::Float8BFloat8_fnuz:
+            case rocisa::DataType::BFloat8Float8_fnuz:;
             }
         }
 
@@ -1187,12 +1187,13 @@ namespace TensileLite
 
             // Backward-compatible: when setAlpha/BetaType() wasn't called, use the old way
             // Could remove after rocBLAS is updated
-            if(alphaType == DataType::None)
+            if(alphaType == rocisa::DataType::None)
             {
-                alphaType = problem.a().dataType() == DataType::BFloat16 ? DataType::Float
-                                                                         : problem.d().dataType();
+                alphaType = problem.a().dataType() == rocisa::DataType::BFloat16
+                                ? rocisa::DataType::Float
+                                : problem.d().dataType();
             }
-            if(betaType == DataType::None)
+            if(betaType == rocisa::DataType::None)
             {
                 betaType = alphaType;
             }
@@ -1234,7 +1235,7 @@ namespace TensileLite
             {
             case TypedGemm_S_S_S::TypeId():
             {
-                if(problem.f32XdlMathOp() == DataType::XFloat32)
+                if(problem.f32XdlMathOp() == rocisa::DataType::XFloat32)
                     return ReferenceSolution<TypedGemm_S_S_S, float, XFloat32>::SolveCPU(
                         problem, inputs, elementsToValidate);
                 else

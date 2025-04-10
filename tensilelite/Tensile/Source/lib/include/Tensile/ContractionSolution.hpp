@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -486,41 +486,43 @@ namespace TensileLite
 
         struct ProblemType
         {
-            std::string           operationIdentifier;
-            bool                  transA                    = false;
-            bool                  transB                    = false;
-            DataType              aType                     = DataType::Float;
-            DataType              bType                     = DataType::Float;
-            DataType              cType                     = DataType::Float;
-            DataType              dType                     = DataType::Float;
-            DataType              eType                     = DataType::Float;
-            DataType              computeInputType          = DataType::Float;
-            DataType              computeType               = DataType::Float;
-            DataType              f32XdlMathOp              = DataType::Float;
-            DataType              activationComputeDataType = DataType::Float;
-            bool                  highPrecisionAccumulate   = false;
-            bool                  useBeta                   = true;
-            bool                  useGradient               = false;
-            int                   useBias                   = 0;
-            bool                  useE                      = false;
-            std::string           useScaleAB                = "";
-            bool                  useScaleCD                = false;
-            int                   useScaleAlphaVec          = 0;
-            bool                  useInitialStridesAB       = false;
-            bool                  useInitialStridesCD       = false;
-            bool                  stridedBatched            = true;
-            bool                  outputAmaxD               = false;
-            bool                  groupedGemm               = false;
-            ActivationType        activationType            = ActivationType::None;
-            int                   activationArgLength       = 0;
-            bool                  activationNoGuard         = false;
-            std::vector<int>      biasSrcWhiteList;
-            std::vector<DataType> biasDataTypeWhiteList;
-            int                   sparse                     = 0;
-            bool                  stochasticRounding         = false;
-            bool                  supportDeviceUserArguments = false;
-            bool                  swizzleTensorA             = false;
-            bool                  swizzleTensorB             = false;
+            std::string      operationIdentifier;
+            bool             transA                    = false;
+            bool             transB                    = false;
+            rocisa::DataType aType                     = rocisa::DataType::Float;
+            rocisa::DataType bType                     = rocisa::DataType::Float;
+            rocisa::DataType cType                     = rocisa::DataType::Float;
+            rocisa::DataType dType                     = rocisa::DataType::Float;
+            rocisa::DataType eType                     = rocisa::DataType::Float;
+            rocisa::DataType computeInputType          = rocisa::DataType::Float;
+            rocisa::DataType computeType               = rocisa::DataType::Float;
+            rocisa::DataType f32XdlMathOp              = rocisa::DataType::Float;
+            rocisa::DataType activationComputeDataType = rocisa::DataType::Float;
+            bool             highPrecisionAccumulate   = false;
+            bool             useBeta                   = true;
+            bool             useGradient               = false;
+            int              useBias                   = 0;
+            bool             useE                      = false;
+            std::string      useScaleAB                = "";
+            bool             useScaleCD                = false;
+            int              useScaleAlphaVec          = 0;
+            bool             useInitialStridesAB       = false;
+            bool             useInitialStridesCD       = false;
+            bool             stridedBatched            = true;
+            bool             outputAmaxD               = false;
+            bool             groupedGemm               = false;
+            ActivationType   activationType            = ActivationType::None;
+            int              activationArgLength       = 0;
+            bool             activationNoGuard         = false;
+
+            std::vector<int>              biasSrcWhiteList;
+            std::vector<rocisa::DataType> biasDataTypeWhiteList;
+
+            int  sparse                     = 0;
+            bool stochasticRounding         = false;
+            bool supportDeviceUserArguments = false;
+            bool swizzleTensorA             = false;
+            bool swizzleTensorB             = false;
         };
 
         struct LinearModel

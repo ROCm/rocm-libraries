@@ -33,7 +33,7 @@ namespace nb = nanobind;
 void cmp_inst(nb::module_ m_cmp)
 {
     nb::class_<rocisa::VCmpInstruction, rocisa::CommonInstruction>(m_cmp, "VCmpInstruction")
-        .def(nb::init<InstType,
+        .def(nb::init<rocisa::InstType,
                       const std::shared_ptr<rocisa::Container>&,
                       const InstructionInput&,
                       const InstructionInput&,
@@ -48,7 +48,7 @@ void cmp_inst(nb::module_ m_cmp)
         .def("__str__", &rocisa::VCmpInstruction::toString);
 
     nb::class_<rocisa::VCmpXInstruction, rocisa::CommonInstruction>(m_cmp, "VCmpXInstruction")
-        .def(nb::init<InstType,
+        .def(nb::init<rocisa::InstType,
                       const std::shared_ptr<rocisa::Container>&,
                       const InstructionInput&,
                       const InstructionInput&,

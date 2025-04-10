@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2023 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -352,13 +352,13 @@ namespace TensileLite
         };
 
         template <typename IO>
-        struct EnumTraits<DataType, IO>
+        struct EnumTraits<rocisa::DataType, IO>
         {
             using iot = IOTraits<IO>;
 
-            static void enumeration(IO& io, DataType& value)
+            static void enumeration(IO& io, rocisa::DataType& value)
             {
-                for(int i = 0; i < static_cast<int>(DataType::Count); i++)
+                for(int i = 0; i < static_cast<int>(rocisa::DataType::Count); i++)
                 {
                     auto const& info = DataTypeInfo::Get(i);
                     iot::enumCase(io, value, info.name.c_str(), info.dataType);

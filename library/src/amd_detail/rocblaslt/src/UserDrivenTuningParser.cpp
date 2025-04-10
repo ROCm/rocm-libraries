@@ -73,11 +73,11 @@ namespace TensileLite
         bool transA = (entries[0] != "N");
         bool transB = (entries[1] != "N");
 
-        size_t   m, n, b, k;
-        DataType inputTypeA  = DataType::None;
-        DataType inputTypeB  = DataType::None;
-        DataType outputType  = DataType::None;
-        DataType computeType = DataType::None;
+        size_t           m, n, b, k;
+        rocisa::DataType inputTypeA  = rocisa::DataType::None;
+        rocisa::DataType inputTypeB  = rocisa::DataType::None;
+        rocisa::DataType outputType  = rocisa::DataType::None;
+        rocisa::DataType computeType = rocisa::DataType::None;
 
         int solution_idx = -1;
 
@@ -105,8 +105,8 @@ namespace TensileLite
             return std::make_pair(ProblemOverride{}, -1);
         }
 
-        if(inputTypeA == DataType::None || inputTypeB == DataType::None
-           || outputType == DataType::None || computeType == DataType::None)
+        if(inputTypeA == rocisa::DataType::None || inputTypeB == rocisa::DataType::None
+           || outputType == rocisa::DataType::None || computeType == rocisa::DataType::None)
         {
             return std::make_pair(ProblemOverride{}, -1);
         }
@@ -120,10 +120,10 @@ namespace TensileLite
     ProblemOverride::ProblemOverride()
         : m_transA(false)
         , m_transB(false)
-        , m_inputTypeA(DataType::None)
-        , m_inputTypeB(DataType::None)
-        , m_computeType(DataType::None)
-        , m_outputType(DataType::None)
+        , m_inputTypeA(rocisa::DataType::None)
+        , m_inputTypeB(rocisa::DataType::None)
+        , m_computeType(rocisa::DataType::None)
+        , m_outputType(rocisa::DataType::None)
         , m_m(0)
         , m_n(0)
         , m_k(0)
@@ -131,16 +131,16 @@ namespace TensileLite
     {
     }
 
-    ProblemOverride::ProblemOverride(bool     transA,
-                                     bool     transB,
-                                     DataType inputTypeA,
-                                     DataType inputTypeB,
-                                     DataType computeType,
-                                     DataType outputType,
-                                     size_t   m,
-                                     size_t   n,
-                                     size_t   k,
-                                     size_t   batchSize)
+    ProblemOverride::ProblemOverride(bool             transA,
+                                     bool             transB,
+                                     rocisa::DataType inputTypeA,
+                                     rocisa::DataType inputTypeB,
+                                     rocisa::DataType computeType,
+                                     rocisa::DataType outputType,
+                                     size_t           m,
+                                     size_t           n,
+                                     size_t           k,
+                                     size_t           batchSize)
         : m_transA(transA)
         , m_transB(transB)
         , m_inputTypeA(inputTypeA)

@@ -53,7 +53,7 @@ setup(
   license="MIT",
   install_requires=readRequirementsFromTxt(),
   python_requires='>=3.5',
-  packages=["Tensile"],
+  packages=["Tensile", "rocisa/rocisa"],
   package_data={ "Tensile": ["Tensile/cmake/*"] },
   data_files=[ ("cmake", ["Tensile/cmake/TensileConfig.cmake", "Tensile/cmake/TensileConfigVersion.cmake"]) ],
   include_package_data=True,

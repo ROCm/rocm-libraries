@@ -80,20 +80,23 @@ TYPED_TEST(TypedDataTypesTest, TypeInfo_Consistency)
     EXPECT_EQ(fromEnum.isIntegral, MyTypeInfo::IsIntegral);
 }
 
-static_assert(TensileLite::TypeInfo<float>::Enum == TensileLite::DataType::Float, "Float");
-static_assert(TensileLite::TypeInfo<double>::Enum == TensileLite::DataType::Double, "Double");
-static_assert(TensileLite::TypeInfo<std::complex<float>>::Enum == TensileLite::DataType::ComplexFloat,
+static_assert(TensileLite::TypeInfo<float>::Enum == rocisa::DataType::Float, "Float");
+static_assert(TensileLite::TypeInfo<double>::Enum == rocisa::DataType::Double, "Double");
+static_assert(TensileLite::TypeInfo<std::complex<float>>::Enum == rocisa::DataType::ComplexFloat,
               "ComplexFloat");
-static_assert(TensileLite::TypeInfo<std::complex<double>>::Enum == TensileLite::DataType::ComplexDouble,
+static_assert(TensileLite::TypeInfo<std::complex<double>>::Enum == rocisa::DataType::ComplexDouble,
               "ComplexDouble");
-static_assert(TensileLite::TypeInfo<TensileLite::Half>::Enum == TensileLite::DataType::Half, "Half");
-static_assert(TensileLite::TypeInfo<int8_t>::Enum == TensileLite::DataType::Int8, "Int8");
-static_assert(TensileLite::TypeInfo<TensileLite::Int8x4>::Enum == TensileLite::DataType::Int8x4, "Int8x4");
-static_assert(TensileLite::TypeInfo<int32_t>::Enum == TensileLite::DataType::Int32, "Int32");
-static_assert(TensileLite::TypeInfo<TensileLite::BFloat16>::Enum == TensileLite::DataType::BFloat16,
+static_assert(TensileLite::TypeInfo<TensileLite::Half>::Enum == rocisa::DataType::Half, "Half");
+static_assert(TensileLite::TypeInfo<int8_t>::Enum == rocisa::DataType::Int8, "Int8");
+static_assert(TensileLite::TypeInfo<TensileLite::Int8x4>::Enum == rocisa::DataType::Int8x4,
+              "Int8x4");
+static_assert(TensileLite::TypeInfo<int32_t>::Enum == rocisa::DataType::Int32, "Int32");
+static_assert(TensileLite::TypeInfo<TensileLite::BFloat16>::Enum == rocisa::DataType::BFloat16,
               "BFloat16");
-static_assert(TensileLite::TypeInfo<TensileLite::Float8>::Enum == TensileLite::DataType::Float8, "Float8");
-static_assert(TensileLite::TypeInfo<TensileLite::BFloat8>::Enum == TensileLite::DataType::BFloat8, "BFloat8");
+static_assert(TensileLite::TypeInfo<TensileLite::Float8>::Enum == rocisa::DataType::Float8,
+              "Float8");
+static_assert(TensileLite::TypeInfo<TensileLite::BFloat8>::Enum == rocisa::DataType::BFloat8,
+              "BFloat8");
 
 static_assert(TensileLite::TypeInfo<float>::Packing == 1, "Float");
 static_assert(TensileLite::TypeInfo<double>::Packing == 1, "Double");
@@ -107,7 +110,7 @@ static_assert(TensileLite::TypeInfo<TensileLite::BFloat16>::Packing == 1, "BFloa
 static_assert(TensileLite::TypeInfo<TensileLite::Float8>::Packing == 1, "Float8");
 static_assert(TensileLite::TypeInfo<TensileLite::BFloat8>::Packing == 1, "BFloat8");
 
-struct Enumerations : public ::testing::TestWithParam<TensileLite::DataType>
+struct Enumerations : public ::testing::TestWithParam<rocisa::DataType>
 {
 };
 
@@ -123,7 +126,7 @@ TEST_P(Enumerations, Conversions)
 
     {
         std::istringstream input(typeInfo.name);
-        TensileLite::DataType  test;
+        rocisa::DataType   test;
         input >> test;
         EXPECT_EQ(test, val);
     }
@@ -137,14 +140,14 @@ TEST_P(Enumerations, Conversions)
 
 INSTANTIATE_TEST_SUITE_P(DataTypesTest,
                          Enumerations,
-                         ::testing::Values(TensileLite::DataType::Float,
-                                           TensileLite::DataType::Double,
-                                           TensileLite::DataType::ComplexFloat,
-                                           TensileLite::DataType::ComplexDouble,
-                                           TensileLite::DataType::Half,
-                                           TensileLite::DataType::BFloat16,
-                                           TensileLite::DataType::Float8,
-                                           TensileLite::DataType::BFloat8,
-                                           TensileLite::DataType::Int8,
-                                           TensileLite::DataType::Int8x4,
-                                           TensileLite::DataType::Int32));
+                         ::testing::Values(rocisa::DataType::Float,
+                                           rocisa::DataType::Double,
+                                           rocisa::DataType::ComplexFloat,
+                                           rocisa::DataType::ComplexDouble,
+                                           rocisa::DataType::Half,
+                                           rocisa::DataType::BFloat16,
+                                           rocisa::DataType::Float8,
+                                           rocisa::DataType::BFloat8,
+                                           rocisa::DataType::Int8,
+                                           rocisa::DataType::Int8x4,
+                                           rocisa::DataType::Int32));

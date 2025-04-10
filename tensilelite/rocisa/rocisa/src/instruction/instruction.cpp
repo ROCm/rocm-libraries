@@ -76,7 +76,7 @@ void init_inst(nb::module_ m)
 
     // Base class
     nb::class_<rocisa::Instruction, rocisa::Item, rocisa::PyInstruction>(m_inst, "Instruction")
-        .def(nb::init<InstType, const std::string&>())
+        .def(nb::init<rocisa::InstType, const std::string&>())
         .def_rw("instType", &rocisa::Instruction::instType)
         .def_rw("comment", &rocisa::Instruction::comment)
         .def("setInlineAsm", &rocisa::Instruction::setInlineAsm)
@@ -93,7 +93,7 @@ void init_inst(nb::module_ m)
         });
 
     nb::class_<rocisa::CompositeInstruction, rocisa::Instruction>(m_inst, "CompositeInstruction")
-        .def(nb::init<InstType,
+        .def(nb::init<rocisa::InstType,
                       const std::shared_ptr<rocisa::Container>&,
                       const std::vector<InstructionInput>&,
                       const std::string&>())
@@ -104,7 +104,7 @@ void init_inst(nb::module_ m)
         .def("__str__", &rocisa::CompositeInstruction::toString);
 
     nb::class_<rocisa::CommonInstruction, rocisa::Instruction>(m_inst, "CommonInstruction")
-        .def(nb::init<InstType,
+        .def(nb::init<rocisa::InstType,
                       const std::shared_ptr<rocisa::RegisterContainer>&,
                       const std::vector<InstructionInput>&,
                       std::optional<rocisa::DPPModifiers>,

@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2023 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -169,12 +169,12 @@ namespace TensileLite
         }
 
         template <typename IterA, typename IterB>
-        TensorDescriptor(const char* name,
-                         DataType    t,
-                         IterA       sizesBegin,
-                         IterA       sizesEnd,
-                         IterB       stridesBegin,
-                         IterB       stridesEnd)
+        TensorDescriptor(const char*      name,
+                         rocisa::DataType t,
+                         IterA            sizesBegin,
+                         IterA            sizesEnd,
+                         IterB            stridesBegin,
+                         IterB            stridesEnd)
             : m_name(name)
             , m_sizes(sizesBegin, sizesEnd)
             , m_strides(stridesBegin, stridesEnd)
@@ -184,7 +184,7 @@ namespace TensileLite
         }
 
         template <typename Iter>
-        TensorDescriptor(const char* name, DataType t, Iter sizesBegin, Iter sizesEnd)
+        TensorDescriptor(const char* name, rocisa::DataType t, Iter sizesBegin, Iter sizesEnd)
             : m_name(name)
             , m_sizes(sizesBegin, sizesEnd)
             , m_dataType(t)
@@ -192,7 +192,7 @@ namespace TensileLite
             this->calculate();
         }
 
-        TensorDescriptor(const char* name, DataType t, std::initializer_list<size_t> sizes)
+        TensorDescriptor(const char* name, rocisa::DataType t, std::initializer_list<size_t> sizes)
             : m_name(name)
             , m_sizes(sizes)
             , m_dataType(t)
@@ -202,7 +202,7 @@ namespace TensileLite
         }
 
         TensorDescriptor(const char*                   name,
-                         DataType                      t,
+                         rocisa::DataType              t,
                          std::initializer_list<size_t> sizes,
                          std::initializer_list<size_t> strides)
             : m_name(name)
@@ -351,12 +351,12 @@ namespace TensileLite
             return DataTypeInfo::Get(m_dataType).elementSize;
         }
 
-        void setDataType(DataType type)
+        void setDataType(rocisa::DataType type)
         {
             m_dataType = type;
         }
 
-        DataType dataType() const
+        rocisa::DataType dataType() const
         {
             return m_dataType;
         }
@@ -424,7 +424,7 @@ namespace TensileLite
         size_t m_totalLogicalElements   = 0;
         size_t m_totalAllocatedElements = 0;
 
-        DataType m_dataType = DataType::Float;
+        rocisa::DataType m_dataType = rocisa::DataType::Float;
 
         bool m_isOutput = false;
     };

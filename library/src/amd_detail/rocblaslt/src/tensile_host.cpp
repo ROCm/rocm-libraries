@@ -267,28 +267,28 @@ namespace
         return rocblaslt_internal_get_so_path("libhipblaslt");
     }
 
-    static void assignAlphaBeta(TensileLite::DataType type,
-                                const void*           alphaPtr,
-                                const void*           betaPtr,
-                                double*               alpha,
-                                double*               beta)
+    static void assignAlphaBeta(rocisa::DataType type,
+                                const void*      alphaPtr,
+                                const void*      betaPtr,
+                                double*          alpha,
+                                double*          beta)
     {
         switch(type)
         {
-        case TensileLite::DataType::Half:
+        case rocisa::DataType::Half:
             *alpha = *(hipblasLtHalf*)alphaPtr;
             *beta  = *(hipblasLtHalf*)betaPtr;
             break;
-        case TensileLite::DataType::Float:
-        case TensileLite::DataType::XFloat32:
+        case rocisa::DataType::Float:
+        case rocisa::DataType::XFloat32:
             *alpha = *(float*)alphaPtr;
             *beta  = *(float*)betaPtr;
             break;
-        case TensileLite::DataType::Double:
+        case rocisa::DataType::Double:
             *alpha = *(double*)alphaPtr;
             *beta  = *(double*)betaPtr;
             break;
-        case TensileLite::DataType::Int32:
+        case rocisa::DataType::Int32:
             *alpha = *(int32_t*)alphaPtr;
             *beta  = *(int32_t*)betaPtr;
             break;
@@ -377,69 +377,69 @@ namespace
         return false;
     }
 
-    TensileLite::DataType hip2TensileType(hipDataType type)
+    rocisa::DataType hip2TensileType(hipDataType type)
     {
         switch(type)
         {
         case HIP_R_32F:
-            return TensileLite::DataType::Float;
+            return rocisa::DataType::Float;
         case HIP_R_16F:
-            return TensileLite::DataType::Half;
+            return rocisa::DataType::Half;
         case HIP_R_64F:
-            return TensileLite::DataType::Double;
+            return rocisa::DataType::Double;
         case HIP_R_16BF:
-            return TensileLite::DataType::BFloat16;
+            return rocisa::DataType::BFloat16;
         case HIP_R_8F_E4M3_FNUZ:
-            return TensileLite::DataType::Float8_fnuz;
+            return rocisa::DataType::Float8_fnuz;
         case HIP_R_8F_E5M2_FNUZ:
-            return TensileLite::DataType::BFloat8_fnuz;
+            return rocisa::DataType::BFloat8_fnuz;
 #ifdef ROCM_USE_FLOAT8
         case HIP_R_8F_E4M3:
-            return TensileLite::DataType::Float8;
+            return rocisa::DataType::Float8;
         case HIP_R_8F_E5M2:
-            return TensileLite::DataType::BFloat8;
+            return rocisa::DataType::BFloat8;
 #endif
         case HIP_R_8I:
-            return TensileLite::DataType::Int8;
+            return rocisa::DataType::Int8;
         case HIP_R_32I:
-            return TensileLite::DataType::Int32;
+            return rocisa::DataType::Int32;
         case HIP_R_6F_E2M3_EXT: // FIXME: fix this when tensile provide FP6 type
-            return TensileLite::DataType::Float8;
+            return rocisa::DataType::Float8;
         case HIP_R_6F_E3M2_EXT: // FIXME: fix this when tensile provide BF6 type
-            return TensileLite::DataType::Float8;
+            return rocisa::DataType::Float8;
         case HIP_R_4F_E2M1_EXT: // FIXME: fix this when tensile provide FP4 type
-            return TensileLite::DataType::Float8;
+            return rocisa::DataType::Float8;
         default:
             throw std::runtime_error("Unsupported type.");
         }
-        return TensileLite::DataType::None;
+        return rocisa::DataType::None;
     }
 
-    hipDataType tensile2HipType(TensileLite::DataType type)
+    hipDataType tensile2HipType(rocisa::DataType type)
     {
         switch(type)
         {
-        case TensileLite::DataType::Float:
+        case rocisa::DataType::Float:
             return HIP_R_32F;
-        case TensileLite::DataType::Half:
+        case rocisa::DataType::Half:
             return HIP_R_16F;
-        case TensileLite::DataType::Double:
+        case rocisa::DataType::Double:
             return HIP_R_64F;
-        case TensileLite::DataType::BFloat16:
+        case rocisa::DataType::BFloat16:
             return HIP_R_16BF;
-        case TensileLite::DataType::Float8_fnuz:
+        case rocisa::DataType::Float8_fnuz:
             return HIP_R_8F_E4M3_FNUZ;
-        case TensileLite::DataType::BFloat8_fnuz:
+        case rocisa::DataType::BFloat8_fnuz:
             return HIP_R_8F_E5M2_FNUZ;
 #ifdef ROCM_USE_FLOAT8
-        case TensileLite::DataType::Float8:
+        case rocisa::DataType::Float8:
             return HIP_R_8F_E4M3;
-        case TensileLite::DataType::BFloat8:
+        case rocisa::DataType::BFloat8:
             return HIP_R_8F_E5M2;
 #endif
-        case TensileLite::DataType::Int8:
+        case rocisa::DataType::Int8:
             return HIP_R_8I;
-        case TensileLite::DataType::Int32:
+        case rocisa::DataType::Int32:
             return HIP_R_32I;
         default:
             throw std::runtime_error("Unsupported type.");
@@ -447,12 +447,12 @@ namespace
         return HIP_R_32F;
     }
 
-    TensileLite::DataType roc2TensileType(rocblaslt_compute_type type, bool fallback = true)
+    rocisa::DataType roc2TensileType(rocblaslt_compute_type type, bool fallback = true)
     {
         switch(type)
         {
         case rocblaslt_compute_f16: // setting compute_type to f16_r will fallback to f32_r
-            return fallback ? TensileLite::DataType::Float : TensileLite::DataType::Half;
+            return fallback ? rocisa::DataType::Float : rocisa::DataType::Half;
         case rocblaslt_compute_f32:
         case rocblaslt_compute_f32_fast_xf32:
         case rocblaslt_compute_f32_fast_f16:
@@ -467,68 +467,66 @@ namespace
         case rocblaslt_compute_f32_fast_f8bf8:
         case rocblaslt_compute_f32_fast_bf8f8:
 #endif
-            return TensileLite::DataType::Float;
+            return rocisa::DataType::Float;
         case rocblaslt_compute_f64:
-            return TensileLite::DataType::Double;
+            return rocisa::DataType::Double;
         case rocblaslt_compute_i32:
-            return TensileLite::DataType::Int32;
+            return rocisa::DataType::Int32;
         default:
             throw std::runtime_error("Unsupported type.");
         }
-        return TensileLite::DataType::None;
+        return rocisa::DataType::None;
     }
 
-    inline const TensileLite::DataType
-        roc2TensileComputeInputType(const TensileLite::DataType&  typeA,
-                                    const TensileLite::DataType&  typeB,
+    inline const rocisa::DataType
+        roc2TensileComputeInputType(const rocisa::DataType&       typeA,
+                                    const rocisa::DataType&       typeB,
                                     const rocblaslt_compute_type& typeCompute)
     {
         switch(typeCompute)
         {
         case rocblaslt_compute_f32_fast_f16:
-            return TensileLite::DataType::Half;
+            return rocisa::DataType::Half;
         case rocblaslt_compute_f32_fast_bf16:
-            return TensileLite::DataType::BFloat16;
+            return rocisa::DataType::BFloat16;
         case rocblaslt_compute_f32_fast_f8_fnuz:
-            return TensileLite::DataType::Float8_fnuz;
+            return rocisa::DataType::Float8_fnuz;
         case rocblaslt_compute_f32_fast_bf8_fnuz:
-            return TensileLite::DataType::BFloat8_fnuz;
+            return rocisa::DataType::BFloat8_fnuz;
         case rocblaslt_compute_f32_fast_f8bf8_fnuz:
-            return TensileLite::DataType::Float8BFloat8_fnuz;
+            return rocisa::DataType::Float8BFloat8_fnuz;
         case rocblaslt_compute_f32_fast_bf8f8_fnuz:
-            return TensileLite::DataType::BFloat8Float8_fnuz;
+            return rocisa::DataType::BFloat8Float8_fnuz;
 #ifdef ROCM_USE_FLOAT8
         case rocblaslt_compute_f32_fast_f8:
-            return TensileLite::DataType::Float8;
+            return rocisa::DataType::Float8;
         case rocblaslt_compute_f32_fast_bf8:
-            return TensileLite::DataType::BFloat8;
+            return rocisa::DataType::BFloat8;
         case rocblaslt_compute_f32_fast_f8bf8:
-            return TensileLite::DataType::Float8BFloat8;
+            return rocisa::DataType::Float8BFloat8;
         case rocblaslt_compute_f32_fast_bf8f8:
-            return TensileLite::DataType::BFloat8Float8;
+            return rocisa::DataType::BFloat8Float8;
 #endif
         default:;
         }
 
-        if(typeA == TensileLite::DataType::Float8_fnuz
-           && typeB == TensileLite::DataType::BFloat8_fnuz)
+        if(typeA == rocisa::DataType::Float8_fnuz && typeB == rocisa::DataType::BFloat8_fnuz)
         {
-            return TensileLite::DataType::Float8BFloat8_fnuz;
+            return rocisa::DataType::Float8BFloat8_fnuz;
         }
-        else if(typeA == TensileLite::DataType::BFloat8_fnuz
-                && typeB == TensileLite::DataType::Float8_fnuz)
+        else if(typeA == rocisa::DataType::BFloat8_fnuz && typeB == rocisa::DataType::Float8_fnuz)
         {
-            return TensileLite::DataType::BFloat8Float8_fnuz;
+            return rocisa::DataType::BFloat8Float8_fnuz;
         }
 
 #ifdef ROCM_USE_FLOAT8
-        if(typeA == TensileLite::DataType::Float8 && typeB == TensileLite::DataType::BFloat8)
+        if(typeA == rocisa::DataType::Float8 && typeB == rocisa::DataType::BFloat8)
         {
-            return TensileLite::DataType::Float8BFloat8;
+            return rocisa::DataType::Float8BFloat8;
         }
-        else if(typeA == TensileLite::DataType::BFloat8 && typeB == TensileLite::DataType::Float8)
+        else if(typeA == rocisa::DataType::BFloat8 && typeB == rocisa::DataType::Float8)
         {
-            return TensileLite::DataType::BFloat8Float8;
+            return rocisa::DataType::BFloat8Float8;
         }
 #endif
 
@@ -565,10 +563,10 @@ namespace
                                      bool                   isGroupedGemm,
                                      size_t                 maxWorkspaceBytes)
     {
-        auto                               typeATensile = hip2TensileType(typeA);
-        auto                               typeBTensile = hip2TensileType(typeB);
-        std::vector<TensileLite::DataType> biasDataTypeWhiteList; // dummy
-        std::vector<int>                   biasSrcWhiteList; // dummy
+        auto                          typeATensile = hip2TensileType(typeA);
+        auto                          typeBTensile = hip2TensileType(typeB);
+        std::vector<rocisa::DataType> biasDataTypeWhiteList; // dummy
+        std::vector<int>              biasSrcWhiteList; // dummy
         return TensileLite::ContractionProblemGemm::createDefaultProblem(
             (opA != HIPBLAS_OP_N),
             (opB != HIPBLAS_OP_N),
@@ -590,40 +588,38 @@ namespace
             maxWorkspaceBytes);
     }
 
-    const char* tensileComputeInputType_to_bench_string(TensileLite::DataType typeCompute,
-                                                        TensileLite::DataType F32XdlMathOp,
-                                                        TensileLite::DataType typeComputeInput,
-                                                        TensileLite::DataType typeA,
-                                                        TensileLite::DataType typeB)
+    const char* tensileComputeInputType_to_bench_string(rocisa::DataType typeCompute,
+                                                        rocisa::DataType F32XdlMathOp,
+                                                        rocisa::DataType typeComputeInput,
+                                                        rocisa::DataType typeA,
+                                                        rocisa::DataType typeB)
     {
         switch(typeCompute)
         {
-        case TensileLite::DataType::Float:
+        case rocisa::DataType::Float:
             break;
-        case TensileLite::DataType::Double:
+        case rocisa::DataType::Double:
             return "f64_r";
             break;
-        case TensileLite::DataType::Int32:
+        case rocisa::DataType::Int32:
             return "i32_r";
             break;
         default:
             throw std::runtime_error("Unsupported type.");
         }
 
-        if(F32XdlMathOp == TensileLite::DataType::XFloat32)
+        if(F32XdlMathOp == rocisa::DataType::XFloat32)
         {
             return "xf32_r";
         }
-        else if(typeComputeInput == TensileLite::DataType::BFloat16
-                && typeA == TensileLite::DataType::Half && typeB == TensileLite::DataType::Half)
+        else if(typeComputeInput == rocisa::DataType::BFloat16 && typeA == rocisa::DataType::Half
+                && typeB == rocisa::DataType::Half)
         {
             return "f32_bf16_r";
         }
-        else if(typeComputeInput == TensileLite::DataType::Half
-                && (typeA == TensileLite::DataType::Float8_fnuz
-                        && typeB == TensileLite::DataType::Half
-                    || typeA == TensileLite::DataType::Half
-                           && typeB == TensileLite::DataType::Float8_fnuz))
+        else if(typeComputeInput == rocisa::DataType::Half
+                && (typeA == rocisa::DataType::Float8_fnuz && typeB == rocisa::DataType::Half
+                    || typeA == rocisa::DataType::Half && typeB == rocisa::DataType::Float8_fnuz))
         {
             return "f32_f16_r";
         }
@@ -633,40 +629,38 @@ namespace
         }
     }
 
-    const char* tensileComputeInputType_to_profile_string(TensileLite::DataType typeCompute,
-                                                          TensileLite::DataType F32XdlMathOp,
-                                                          TensileLite::DataType typeComputeInput,
-                                                          TensileLite::DataType typeA,
-                                                          TensileLite::DataType typeB)
+    const char* tensileComputeInputType_to_profile_string(rocisa::DataType typeCompute,
+                                                          rocisa::DataType F32XdlMathOp,
+                                                          rocisa::DataType typeComputeInput,
+                                                          rocisa::DataType typeA,
+                                                          rocisa::DataType typeB)
     {
         switch(typeCompute)
         {
-        case TensileLite::DataType::Float:
+        case rocisa::DataType::Float:
             break;
-        case TensileLite::DataType::Double:
+        case rocisa::DataType::Double:
             return "c_f64_r";
             break;
-        case TensileLite::DataType::Int32:
+        case rocisa::DataType::Int32:
             return "c_i32_r";
             break;
         default:
             throw std::runtime_error("Unsupported type.");
         }
 
-        if(F32XdlMathOp == TensileLite::DataType::XFloat32)
+        if(F32XdlMathOp == rocisa::DataType::XFloat32)
         {
             return "c_xf32_r";
         }
-        else if(typeComputeInput == TensileLite::DataType::BFloat16
-                && typeA == TensileLite::DataType::Half && typeB == TensileLite::DataType::Half)
+        else if(typeComputeInput == rocisa::DataType::BFloat16 && typeA == rocisa::DataType::Half
+                && typeB == rocisa::DataType::Half)
         {
             return "c_f32_fast_bf16_r";
         }
-        else if(typeComputeInput == TensileLite::DataType::Half
-                && (typeA == TensileLite::DataType::Float8_fnuz
-                        && typeB == TensileLite::DataType::Half
-                    || typeA == TensileLite::DataType::Half
-                           && typeB == TensileLite::DataType::Float8_fnuz))
+        else if(typeComputeInput == rocisa::DataType::Half
+                && (typeA == rocisa::DataType::Float8_fnuz && typeB == rocisa::DataType::Half
+                    || typeA == rocisa::DataType::Half && typeB == rocisa::DataType::Float8_fnuz))
         {
             return "c_f32_fast_f16_r";
         }
@@ -1441,7 +1435,7 @@ namespace
         auto biasType = hipDataType_to_tensile_type(prob.bias_type);
         tensileProblem.setBias(biasType, biasSize, 0, prob.gradient, biasSrc);
         tensileProblem.setParams().setBiasEnum(
-            tensileUseBias(prob.epilogue) ? biasType : TensileLite::DataType::None);
+            tensileUseBias(prob.epilogue) ? biasType : rocisa::DataType::None);
 
         tensileProblem.setUseScaleAB(
             (prob.scaleA == nullptr && prob.scaleB == nullptr)
@@ -1471,7 +1465,7 @@ namespace
         tensileProblem.setAmaxD(compute_type, true);
 
         if(prob.compute_type == rocblaslt_compute_f32_fast_xf32)
-            tensileProblem.setF32XdlMathOp(TensileLite::DataType::XFloat32);
+            tensileProblem.setF32XdlMathOp(rocisa::DataType::XFloat32);
 
         tensileProblem.setSwizzleTensorA(prob.swizzleA);
         tensileProblem.setSwizzleTensorB(prob.swizzleB);
@@ -1614,7 +1608,7 @@ namespace
         auto biasType = hipDataType_to_tensile_type(prob.bias_type);
         tensileProblem.setBias(biasType, biasSize, 0, prob.gradient, biasSrc);
         tensileProblem.setParams().setBiasEnum(
-            tensileUseBias(prob.epilogue) ? biasType : TensileLite::DataType::None);
+            tensileUseBias(prob.epilogue) ? biasType : rocisa::DataType::None);
 
         tensileProblem.setUseScaleAB(
             (prob.scaleA == nullptr && prob.scaleB == nullptr)
@@ -1657,7 +1651,7 @@ namespace
         tensileProblem.setAmaxD(compute_type, true);
 
         if(prob.compute_type == rocblaslt_compute_f32_fast_xf32)
-            tensileProblem.setF32XdlMathOp(TensileLite::DataType::XFloat32);
+            tensileProblem.setF32XdlMathOp(rocisa::DataType::XFloat32);
 
         tensileProblem.setSwizzleTensorA(prob.swizzleA);
         tensileProblem.setSwizzleTensorB(prob.swizzleB);
@@ -1702,12 +1696,12 @@ namespace
         inputs.scaleAlphaVec = reinterpret_cast<const void*>(prob.scaleAlphaVec);
         inputs.amaxD         = reinterpret_cast<void*>(prob.amaxD);
 
-        static const std::map<TensileLite::DataType, TensileLite::ConstantVariant> argument_vals = {
-            {TensileLite::DataType::Float, 0.0f},
-            {TensileLite::DataType::XFloat32, 0.0f},
-            {TensileLite::DataType::Half, (hipblasLtHalf)0.0},
-            {TensileLite::DataType::Int32, (int32_t)0},
-            {TensileLite::DataType::Double, (double)0.0},
+        static const std::map<rocisa::DataType, TensileLite::ConstantVariant> argument_vals = {
+            {rocisa::DataType::Float, 0.0f},
+            {rocisa::DataType::XFloat32, 0.0f},
+            {rocisa::DataType::Half, (hipblasLtHalf)0.0},
+            {rocisa::DataType::Int32, (int32_t)0},
+            {rocisa::DataType::Double, (double)0.0},
         };
 
         if(argument_vals.find(compute_type) == argument_vals.end())
@@ -2992,7 +2986,7 @@ rocblaslt_status getDeviceUserArgumentsValuesFromContractionProblem(rocblaslt_ha
                 = std::static_pointer_cast<TensileDataGroupedGemm>(gemmData);
             auto  solution = library->getSolutionByIndex(*hardware, data->algoIndex);
             auto& problem  = data->problem.gemms[0];
-            if(problem.activationComputeType() == TensileLite::DataType::Float)
+            if(problem.activationComputeType() == rocisa::DataType::Float)
             {
                 setDeviceUserArgs(data->problem.gemms,
                                   data->inputs,
@@ -3241,7 +3235,7 @@ std::vector<std::shared_ptr<TensileLite::ContractionSolution>>
     if(solutions.size() == 0 && prob.compute_type == rocblaslt_compute_f32_fast_xf32)
     {
         log_api(__func__, "no solutions found, try to fallback");
-        data->problem.setF32XdlMathOp(TensileLite::DataType::Float);
+        data->problem.setF32XdlMathOp(rocisa::DataType::Float);
         solutions = getSolutions(
             prob, library, hardware, data->problem, enableEpilogue, requestedAlgoCount);
     }
@@ -3289,7 +3283,7 @@ rocblaslt_status getBestSolutions(RocblasltContractionProblem const& prob,
     if(solutions.size() == 0 && prob.compute_type == rocblaslt_compute_f32_fast_xf32)
     {
         log_api(__func__, "no xf32 solutions found, try to fallback fp32");
-        data->problem.setF32XdlMathOp(TensileLite::DataType::Float);
+        data->problem.setF32XdlMathOp(rocisa::DataType::Float);
         solutions = getSolutions(
             prob, library, hardware, data->problem, enableEpilogue, requestedAlgoCount);
     }
@@ -3347,9 +3341,9 @@ rocblaslt_status getAllSolutions(MyProblem&                                     
     log_api(__func__, "Found hardware solutions: ", solutions.size());
 
     // when there is no solution for xfloat32, fallback comput_type to fp32
-    if(solutions.size() == 0 && prob.f32XdlMathOp() == TensileLite::DataType::XFloat32)
+    if(solutions.size() == 0 && prob.f32XdlMathOp() == rocisa::DataType::XFloat32)
     {
-        prob.setF32XdlMathOp(TensileLite::DataType::Float);
+        prob.setF32XdlMathOp(rocisa::DataType::Float);
         if constexpr(std::is_same<MyProblem, TensileLite::ContractionProblemGemm>::value)
         {
             solutions = library->findAllSolutions(
@@ -3693,7 +3687,7 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle              handle,
     if(gemmType == rocblaslt::RocGemmType::ROCBLASLT_GEMM)
     {
         std::shared_ptr<TensileDataGemm> data = std::static_pointer_cast<TensileDataGemm>(gemmData);
-        if(data->problem.computeType() == TensileLite::DataType::Float)
+        if(data->problem.computeType() == rocisa::DataType::Float)
         {
             setRestrictions<float>(data->problem,
                                    std::get_if<float>(&data->inputs.alpha),
@@ -3710,7 +3704,7 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle              handle,
     {
         std::shared_ptr<TensileDataGroupedGemm> data
             = std::static_pointer_cast<TensileDataGroupedGemm>(gemmData);
-        if(data->problem.gemms[0].computeType() == TensileLite::DataType::Float)
+        if(data->problem.gemms[0].computeType() == rocisa::DataType::Float)
         {
             for(int i = 0; i < data->problem.gemms.size(); i++)
             {
@@ -3764,9 +3758,9 @@ rocblaslt_status getBestSolutions(rocblaslt_handle       handle,
                                       requestedAlgoCount);
 
         // when there is no solution for xfloat32, fallback comput_type to fp32
-        if(solutions.size() == 0 && data->problem.f32XdlMathOp() == TensileLite::DataType::XFloat32)
+        if(solutions.size() == 0 && data->problem.f32XdlMathOp() == rocisa::DataType::XFloat32)
         {
-            data->problem.setF32XdlMathOp(TensileLite::DataType::Float);
+            data->problem.setF32XdlMathOp(rocisa::DataType::Float);
             solutions = getSolutions(data->inputs,
                                      library,
                                      hardware,

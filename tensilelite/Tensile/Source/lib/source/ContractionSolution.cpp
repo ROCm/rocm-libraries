@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -61,7 +61,6 @@ namespace TensileLite
             }
         } // namespace math
 
-
         constexpr size_t num_iters_total(size_t output_tiles, size_t iters_per_tile)
         {
             return output_tiles * iters_per_tile;
@@ -91,11 +90,12 @@ namespace TensileLite
                                             size_t iters_per_cta)
         {
             // If tiles don't evenly divide there are always at least 2 fixup peers, and more if iters_per_tile > iters_per_cta
-            size_t hasFixup = (iters_total % g == 0 && // Check if some WGs have more iters than others
-                            iters_per_cta % iters_per_tile
-                                == 0) // Check if WGs have an even number of full tiles
-                                ? 0
-                                : 1;
+            size_t hasFixup
+                = (iters_total % g == 0 && // Check if some WGs have more iters than others
+                   iters_per_cta % iters_per_tile
+                       == 0) // Check if WGs have an even number of full tiles
+                      ? 0
+                      : 1;
             return math::safe_ceil_div(iters_per_tile, iters_per_cta) + hasFixup;
         }
 
@@ -105,17 +105,17 @@ namespace TensileLite
         }
 
         std::tuple<double, size_t, size_t> predicted_runtime(size_t BLK_M,
-                                                            size_t BLK_N,
-                                                            size_t BLK_K,
-                                                            size_t m,
-                                                            size_t n,
-                                                            size_t k,
-                                                            size_t batch,
-                                                            int    g,
-                                                            double a,
-                                                            double b,
-                                                            double c,
-                                                            double d)
+                                                             size_t BLK_N,
+                                                             size_t BLK_K,
+                                                             size_t m,
+                                                             size_t n,
+                                                             size_t k,
+                                                             size_t batch,
+                                                             int    g,
+                                                             double a,
+                                                             double b,
+                                                             double c,
+                                                             double d)
         {
             size_t output_tiles   = number_of_output_tiles(BLK_M, BLK_N, m, n, batch);
             size_t iters_per_tile = num_iters_per_tile(BLK_K, k);
@@ -146,7 +146,7 @@ namespace TensileLite
             size_t iters_per_tile = num_iters_per_tile(BLK_K, k);
             size_t iters_total    = num_iters_total(output_tiles, iters_per_tile);
             size_t iters_per_cta  = num_iters_per_cta(iters_total, g);
-            size_t fixup_peers    = num_fixup_peers_v2(g, iters_total, iters_per_tile, iters_per_cta);
+            size_t fixup_peers = num_fixup_peers_v2(g, iters_total, iters_per_tile, iters_per_cta);
 
             size_t remainder_tiles = output_tiles % g;
             double k_split_ratio   = remainder_tiles / static_cast<double>(g);
@@ -165,22 +165,22 @@ namespace TensileLite
             }
 
             // Include the cache penalty in the runtime prediction
-            double runtime = a + (b * (fixup_peers > 1)) + (c * iters_per_cta) + (d * (fixup_peers - 1))
-                            + cache_penalty;
+            double runtime = a + (b * (fixup_peers > 1)) + (c * iters_per_cta)
+                             + (d * (fixup_peers - 1)) + cache_penalty;
 
             return std::make_tuple(runtime, iters_per_cta, fixup_peers, cache_penalty);
         }
 
         int best_predicted_grid_size(size_t BLK_M,
-                                    size_t BLK_N,
-                                    size_t BLK_K,
-                                    size_t m,
-                                    size_t n,
-                                    size_t k,
-                                    size_t batch,
-                                    int    grid_start,
-                                    int    grid_end,
-                                    bool   verbose = false)
+                                     size_t BLK_N,
+                                     size_t BLK_K,
+                                     size_t m,
+                                     size_t n,
+                                     size_t k,
+                                     size_t batch,
+                                     int    grid_start,
+                                     int    grid_end,
+                                     bool   verbose = false)
         {
 
             // Fixed overhead alpha (a), fixed-size cost incurred by
@@ -221,19 +221,19 @@ namespace TensileLite
                 if(verbose)
                 {
                     std::cout << "[original] "
-                            << "grid size: " << g << ", runtime: " << runtime
-                            << ", iters_per_cta: " << iters_per_cta << ", fixup_peers: "
-                            << fixup_peers
-                            << ", m: " << m << ", n: " << n << ", k: " << k << ", a: " << a
-                            << ", b: " << b << ", c: " << c << ", d: " << d << std::endl;
+                              << "grid size: " << g << ", runtime: " << runtime
+                              << ", iters_per_cta: " << iters_per_cta
+                              << ", fixup_peers: " << fixup_peers << ", m: " << m << ", n: " << n
+                              << ", k: " << k << ", a: " << a << ", b: " << b << ", c: " << c
+                              << ", d: " << d << std::endl;
 
                     std::cout << "[cache-offset] "
-                            << "grid size: " << g << ", runtime: " << runtime_v2
-                            << ", iters_per_cta: " << iters_per_cta_v2
-                            << ", fixup_peers: " << fixup_peers_v2
-                            << ", cache_penalty: " << cache_penalty << ", m: " << m << ", n: " << n
-                            << ", k: " << k << ", a: " << a << ", b: " << b << ", c: " << c
-                            << ", d: " << d << std::endl;
+                              << "grid size: " << g << ", runtime: " << runtime_v2
+                              << ", iters_per_cta: " << iters_per_cta_v2
+                              << ", fixup_peers: " << fixup_peers_v2
+                              << ", cache_penalty: " << cache_penalty << ", m: " << m
+                              << ", n: " << n << ", k: " << k << ", a: " << a << ", b: " << b
+                              << ", c: " << c << ", d: " << d << std::endl;
                 }
 
                 if(min_grid_runtime.second > runtime)
@@ -252,14 +252,14 @@ namespace TensileLite
             if(verbose)
             {
                 std::cout << "[original] Number of Output Tiles: "
-                        << number_of_output_tiles(BLK_M, BLK_N, m, n, batch) << std::endl;
+                          << number_of_output_tiles(BLK_M, BLK_N, m, n, batch) << std::endl;
                 std::cout << "[original] Minimum runtime: " << min_grid_runtime.second
-                        << " @ grid size: " << min_grid_runtime.first << std::endl;
+                          << " @ grid size: " << min_grid_runtime.first << std::endl;
 
                 std::cout << "[cache-offset] Number of Output Tiles: "
-                        << number_of_output_tiles(BLK_M, BLK_N, m, n, batch) << std::endl;
+                          << number_of_output_tiles(BLK_M, BLK_N, m, n, batch) << std::endl;
                 std::cout << "[cache-offset] Minimum runtime: " << min_grid_runtime_v2.second
-                        << " @ grid size: " << min_grid_runtime_v2.first << std::endl;
+                          << " @ grid size: " << min_grid_runtime_v2.first << std::endl;
             }
 
             return min_grid_runtime_v2.first;
@@ -277,41 +277,41 @@ namespace TensileLite
     void setVariantToBuffer(ConstantVariant const& value,
                             void*                  buffer,
                             size_t                 bufferLength,
-                            DataType               type)
+                            rocisa::DataType       type)
     {
         switch(type)
         {
-        case DataType::Float:
+        case rocisa::DataType::Float:
         {
             float* f_buffer = (float*)buffer;
             *f_buffer       = *std::get_if<float>(&value);
         }
         break;
-        case DataType::Double:
+        case rocisa::DataType::Double:
         {
             double* d_buffer = (double*)buffer;
             *d_buffer        = *std::get_if<double>(&value);
         }
         break;
-        case DataType::Half:
+        case rocisa::DataType::Half:
         {
             Half* fp16_buffer = (Half*)buffer;
             *fp16_buffer      = *std::get_if<Half>(&value);
         }
         break;
-        case DataType::Int32:
+        case rocisa::DataType::Int32:
         {
             int32_t* i32_buffer = (int32_t*)buffer;
             *i32_buffer         = *std::get_if<int32_t>(&value);
         }
         break;
-        case DataType::BFloat16:
+        case rocisa::DataType::BFloat16:
         {
             BFloat16* bf16_buffer = (BFloat16*)buffer;
             *bf16_buffer          = *std::get_if<BFloat16>(&value);
         }
         break;
-        case DataType::Int8:
+        case rocisa::DataType::Int8:
         {
             int8_t* i8_buffer = (int8_t*)buffer;
             *i8_buffer        = *std::get_if<int8_t>(&value);
@@ -321,13 +321,13 @@ namespace TensileLite
         {
             if(bufferLength >= 16) // For complex
             {
-                if(type == DataType::ComplexFloat)
+                if(type == rocisa::DataType::ComplexFloat)
                 {
                     std::complex<float>* c_buffer = (std::complex<float>*)buffer;
                     *c_buffer                     = *std::get_if<std::complex<float>>(&value);
                     return;
                 }
-                else if(type == DataType::ComplexDouble)
+                else if(type == rocisa::DataType::ComplexDouble)
                 {
                     std::complex<double>* z_buffer = (std::complex<double>*)buffer;
                     *z_buffer                      = *std::get_if<std::complex<double>>(&value);
@@ -342,7 +342,7 @@ namespace TensileLite
     class PrintBufferValueClass
     {
     public:
-        explicit PrintBufferValueClass(void* buffer, size_t bufferLength, DataType type)
+        explicit PrintBufferValueClass(void* buffer, size_t bufferLength, rocisa::DataType type)
             : m_buffer(buffer)
             , m_bufferLength(bufferLength)
             , m_type(type)
@@ -360,37 +360,37 @@ namespace TensileLite
         {
             switch(m_type)
             {
-            case DataType::Float:
+            case rocisa::DataType::Float:
             {
                 float* f_buffer = (float*)m_buffer;
                 os << *f_buffer;
             }
             break;
-            case DataType::Double:
+            case rocisa::DataType::Double:
             {
                 double* d_buffer = (double*)m_buffer;
                 os << *d_buffer;
             }
             break;
-            case DataType::Half:
+            case rocisa::DataType::Half:
             {
                 Half* fp16_buffer = (Half*)m_buffer;
                 os << *fp16_buffer;
             }
             break;
-            case DataType::Int32:
+            case rocisa::DataType::Int32:
             {
                 int32_t* i32_buffer = (int32_t*)m_buffer;
                 os << *i32_buffer;
             }
             break;
-            case DataType::BFloat16:
+            case rocisa::DataType::BFloat16:
             {
                 BFloat16* bf16_buffer = (BFloat16*)m_buffer;
                 os << *bf16_buffer;
             }
             break;
-            case DataType::Int8:
+            case rocisa::DataType::Int8:
             {
                 int8_t* i8_buffer = (int8_t*)m_buffer;
                 os << *i8_buffer;
@@ -400,12 +400,12 @@ namespace TensileLite
             {
                 if(m_bufferLength >= 16) // For complex
                 {
-                    if(m_type == DataType::ComplexFloat)
+                    if(m_type == rocisa::DataType::ComplexFloat)
                     {
                         std::complex<float>* c_buffer = (std::complex<float>*)m_buffer;
                         os << *c_buffer;
                     }
-                    else if(m_type == DataType::ComplexDouble)
+                    else if(m_type == rocisa::DataType::ComplexDouble)
                     {
                         std::complex<double>* z_buffer = (std::complex<double>*)m_buffer;
                         os << *z_buffer;
@@ -415,9 +415,9 @@ namespace TensileLite
             }
             }
         }
-        void*    m_buffer;
-        size_t   m_bufferLength;
-        DataType m_type;
+        void*            m_buffer;
+        size_t           m_bufferLength;
+        rocisa::DataType m_type;
     };
 
     template <typename TAct>
@@ -878,13 +878,13 @@ namespace TensileLite
         }
 
         args.append("alpha", inputs.alpha, problem.alphaType());
-        if(problem.alphaType() == DataType::Half)
+        if(problem.alphaType() == rocisa::DataType::Half)
             args.append("alpha_2", inputs.alpha, problem.alphaType());
 
         if(problemType.useBeta)
         {
             args.append("beta", inputs.beta, problem.betaType());
-            if(problem.betaType() == DataType::Half)
+            if(problem.betaType() == rocisa::DataType::Half)
                 args.append("beta_2", inputs.beta, problem.betaType());
         }
 
@@ -1043,7 +1043,7 @@ namespace TensileLite
                 std::string name = "activation_" + std::to_string(i);
                 if(inputs.activationArgs.size() < problemType.activationArgLength)
                 {
-                    if(problemType.activationComputeDataType == DataType::BFloat16)
+                    if(problemType.activationComputeDataType == rocisa::DataType::BFloat16)
                     {
                         args.template append<float>(name.c_str(), 0.f);
                     }
@@ -1054,7 +1054,7 @@ namespace TensileLite
                 }
                 else
                 {
-                    if(problemType.activationComputeDataType == DataType::BFloat16)
+                    if(problemType.activationComputeDataType == rocisa::DataType::BFloat16)
                     {
                         args.template append<float>(name.c_str(),
                                                     static_cast<float>((*std::get_if<BFloat16>(
@@ -1701,7 +1701,7 @@ namespace TensileLite
         }
         if(problemType.useBias && sizeMapping.globalAccumulation == 0 && (!problemType.useGradient))
         {
-            auto s = TypeAbbrev(problem.bias().dataType());
+            auto s = rocisa::TypeAbbrev(problem.bias().dataType());
             name += ("_Bias" + s);
         }
         if(factorDim == 2)
@@ -1809,7 +1809,7 @@ namespace TensileLite
                 std::string name = "activation_" + std::to_string(i);
                 if(inputs.activationArgs.size() < problemType.activationArgLength)
                 {
-                    if(problemType.activationComputeDataType == DataType::BFloat16)
+                    if(problemType.activationComputeDataType == rocisa::DataType::BFloat16)
                     {
                         args.template append<float>(name.c_str(), 0.f);
                     }
@@ -1820,7 +1820,7 @@ namespace TensileLite
                 }
                 else
                 {
-                    if(problemType.activationComputeDataType == DataType::BFloat16)
+                    if(problemType.activationComputeDataType == rocisa::DataType::BFloat16)
                     {
                         args.template append<float>(name.c_str(),
                                                     static_cast<float>((*std::get_if<BFloat16>(
@@ -1916,7 +1916,7 @@ namespace TensileLite
             //reach threashhold to trigger wider load
             if(problem.freeSizeA(0) % 4 == 0
                && DataTypeInfo::Get(problemType.aType).elementSize
-                      < DataTypeInfo::Get(DataType::Double).elementSize)
+                      < DataTypeInfo::Get(rocisa::DataType::Double).elementSize)
                 vw = 4;
             else if(problem.freeSizeA(0) % 2 == 0)
                 vw = 2;
@@ -1993,7 +1993,7 @@ namespace TensileLite
                     auto problem = problems[idx];
                     if(problem.freeSizeA(0) % 4 != 0
                        && DataTypeInfo::Get(problemType.aType).elementSize
-                              < DataTypeInfo::Get(DataType::Double).elementSize)
+                              < DataTypeInfo::Get(rocisa::DataType::Double).elementSize)
                         not4 = true;
                     if(problem.freeSizeA(0) % 2 != 0)
                         not2 = true;
@@ -2160,12 +2160,12 @@ namespace TensileLite
                                                                 size_t                   vw,
                                                                 size_t                   gsu) const
     {
-        auto inputTypeStr = (problem.a().dataType() == DataType::Int8
-                             || problem.a().dataType() == DataType::Int32)
-                                ? DataTypeInfo::Get(DataType::Int32).abbrev
-                            : problem.a().dataType() == DataType::Double
-                                ? DataTypeInfo::Get(DataType::Double).abbrev
-                                : DataTypeInfo::Get(DataType::Float).abbrev;
+        auto inputTypeStr = (problem.a().dataType() == rocisa::DataType::Int8
+                             || problem.a().dataType() == rocisa::DataType::Int32)
+                                ? DataTypeInfo::Get(rocisa::DataType::Int32).abbrev
+                            : problem.a().dataType() == rocisa::DataType::Double
+                                ? DataTypeInfo::Get(rocisa::DataType::Double).abbrev
+                                : DataTypeInfo::Get(rocisa::DataType::Float).abbrev;
 
         std::string name = concatenate("C",
                                        problem.cNames(),
@@ -2184,11 +2184,11 @@ namespace TensileLite
 
         if(problemType.useBias)
         {
-            auto s = TypeAbbrev(problem.bias().dataType());
+            auto s = rocisa::TypeAbbrev(problem.bias().dataType());
             if(problemType.useGradient)
             {
                 if(problem.biasSrc() == ContractionProblemGemm::TENSOR::D)
-                    s = TypeAbbrev(problem.computeType());
+                    s = rocisa::TypeAbbrev(problem.computeType());
                 if(inputs.bias != nullptr)
                 {
                     const char* alpha[5] = {"A", "B", "C", "D", "E"};
@@ -2221,7 +2221,8 @@ namespace TensileLite
 
         if(problemType.useE)
         {
-            auto s = TypeAbbrev(problem.tensors()[ContractionProblemGemm::TENSOR::E].dataType());
+            auto s = rocisa::TypeAbbrev(
+                problem.tensors()[ContractionProblemGemm::TENSOR::E].dataType());
             if(problemType.useGradient)
             {
                 name += ("_Grad" + s);
@@ -2249,7 +2250,7 @@ namespace TensileLite
                 name += actName;
             }
 
-            name += TypeAbbrev(problemType.activationComputeDataType);
+            name += rocisa::TypeAbbrev(problemType.activationComputeDataType);
 
             if(problemType.activationNoGuard)
             {
@@ -2344,7 +2345,7 @@ namespace TensileLite
             for(int i = 0; i < inputs.activationArgs.size(); i++)
             {
                 std::string name = "activation_" + std::to_string(i);
-                if(problemType.activationComputeDataType == DataType::BFloat16)
+                if(problemType.activationComputeDataType == rocisa::DataType::BFloat16)
                 {
                     rv.args.append<float>(
                         name.c_str(),
@@ -2594,12 +2595,12 @@ namespace TensileLite
         // alpha/beta type (alphaType and betaType remain None).
         // Until we fix those gtests, we need to keep this condition to adjust the missing
         // alpha/beta data types.
-        if(alphaType == DataType::None)
+        if(alphaType == rocisa::DataType::None)
         {
-            alphaType
-                = problemType.aType == DataType::BFloat16 ? DataType::Float : problemType.dType;
+            alphaType = problemType.aType == rocisa::DataType::BFloat16 ? rocisa::DataType::Float
+                                                                        : problemType.dType;
         }
-        if(betaType == DataType::None)
+        if(betaType == rocisa::DataType::None)
         {
             betaType = alphaType;
         }
@@ -2724,12 +2725,12 @@ namespace TensileLite
         // alpha/beta type (alphaType and betaType remain None).
         // Until we fix those gtests, we need to keep this condition to adjust the missing
         // alpha/beta data types.
-        if(alphaType == DataType::None)
+        if(alphaType == rocisa::DataType::None)
         {
-            alphaType
-                = problemType.aType == DataType::BFloat16 ? DataType::Float : problemType.dType;
+            alphaType = problemType.aType == rocisa::DataType::BFloat16 ? rocisa::DataType::Float
+                                                                        : problemType.dType;
         }
-        if(betaType == DataType::None)
+        if(betaType == rocisa::DataType::None)
         {
             betaType = alphaType;
         }
@@ -2895,7 +2896,7 @@ namespace TensileLite
         // Allocate and copy data to dUA
         if(problems[0].activationType() == ActivationType::None
            || (problems[0].activationType() != ActivationType::None
-               && problems[0].activationComputeType() == DataType::Float))
+               && problems[0].activationComputeType() == rocisa::DataType::Float))
         {
             auto requiredSize = sizeof(DeviceUserArguments<float>) * problems.size();
             static_cast<void>(hipHostMalloc(dUAHost, requiredSize, 0));
@@ -3054,7 +3055,7 @@ namespace TensileLite
             size += problem.d().totalLogicalElements() * sizeMapping.workspaceSizePerElemC
                     * gsuMultiplier;
             if(problemType.useGradient && problemType.useBias
-               && problem.getParams().biasEnum() != DataType::None)
+               && problem.getParams().biasEnum() != rocisa::DataType::None)
             {
                 if(problem.biasSrc() == ContractionProblemGemm::TENSOR::A)
                 {

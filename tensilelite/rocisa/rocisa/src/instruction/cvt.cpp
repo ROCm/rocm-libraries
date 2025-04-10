@@ -34,7 +34,7 @@ namespace nb = nanobind;
 void cvt_inst(nb::module_ m_inst)
 {
     nb::class_<rocisa::VCvtInstruction, rocisa::CommonInstruction>(m_inst, "VCvtInstruction")
-        .def(nb::init<CvtType,
+        .def(nb::init<rocisa::CvtType,
                       const std::shared_ptr<rocisa::RegisterContainer>&,
                       const std::vector<InstructionInput>&,
                       const std::optional<rocisa::SDWAModifiers>,

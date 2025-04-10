@@ -25,6 +25,7 @@
  *******************************************************************************/
 
 #include <Tensile/Contractions.hpp>
+#include <Tensile/DataTypes.hpp>
 #include <Tensile/EmbeddedLibrary.hpp>
 #include <Tensile/MasterSolutionLibrary.hpp>
 #include <Tensile/Tensile.hpp>
@@ -193,20 +194,20 @@ namespace TensileLite
                 ("problem-identifier",       po::value<std::string>(), "Problem identifer (Einstein notation). Either "
                                                                        "this or free/batch/bound must be specified.")
 
-                ("type",                     po::value<DataType>()->default_value(DataType::None), "Data type")
-                ("a-type",                   po::value<DataType>()->default_value(DataType::None), "A data type")
-                ("b-type",                   po::value<DataType>()->default_value(DataType::None), "B data type")
-                ("c-type",                   po::value<DataType>()->default_value(DataType::None), "C data type")
-                ("d-type",                   po::value<DataType>()->default_value(DataType::None), "D data type")
-                ("e-type",                   po::value<DataType>()->default_value(DataType::None), "E data type")
-                ("amaxD-type",               po::value<DataType>()->default_value(DataType::None), "amaxD data type")
-                ("alpha-type",               po::value<DataType>()->default_value(DataType::None), "alpha data type")
-                ("beta-type",                po::value<DataType>()->default_value(DataType::None), "beta data type")
-                ("compute-input-type",       po::value<DataType>()->default_value(DataType::None), "compute input data type")
-                ("f32-xdl-math-op",          po::value<DataType>()->default_value(DataType::None), "Use xf32 compute for float input and output matrices.")
+                ("type",                     po::value<rocisa::DataType>()->default_value(rocisa::DataType::None), "Data type")
+                ("a-type",                   po::value<rocisa::DataType>()->default_value(rocisa::DataType::None), "A data type")
+                ("b-type",                   po::value<rocisa::DataType>()->default_value(rocisa::DataType::None), "B data type")
+                ("c-type",                   po::value<rocisa::DataType>()->default_value(rocisa::DataType::None), "C data type")
+                ("d-type",                   po::value<rocisa::DataType>()->default_value(rocisa::DataType::None), "D data type")
+                ("e-type",                   po::value<rocisa::DataType>()->default_value(rocisa::DataType::None), "E data type")
+                ("amaxD-type",               po::value<rocisa::DataType>()->default_value(rocisa::DataType::None), "amaxD data type")
+                ("alpha-type",               po::value<rocisa::DataType>()->default_value(rocisa::DataType::None), "alpha data type")
+                ("beta-type",                po::value<rocisa::DataType>()->default_value(rocisa::DataType::None), "beta data type")
+                ("compute-input-type",       po::value<rocisa::DataType>()->default_value(rocisa::DataType::None), "compute input data type")
+                ("f32-xdl-math-op",          po::value<rocisa::DataType>()->default_value(rocisa::DataType::None), "Use xf32 compute for float input and output matrices.")
                 ("swizzle-tensor-a",         po::value<bool>()->default_value(false), "Swizzle input tensor A.")
                 ("swizzle-tensor-b",         po::value<bool>()->default_value(false), "Swizzle input tensor B.")
-                ("activation-compute-type",  po::value<DataType>()->default_value(DataType::None), "Activation compute type.")
+                ("activation-compute-type",  po::value<rocisa::DataType>()->default_value(rocisa::DataType::None), "Activation compute type.")
                 ("high-precision-accumulate", po::value<bool>()->default_value(false), "Use high-precision accumulate.")
                 ("sparse",                   po::value<int>()->default_value(0), "A or B matrix is sparse matrix.")
                 ("strided-batched",          po::value<bool>()->default_value(true), "Use strided-batched or general batched")
@@ -348,7 +349,7 @@ namespace TensileLite
                 ("use-scaleAB",               po::value<std::string>()->default_value(""), "Use scaleAB.")
                 ("use-scaleCD",               po::value<bool>()->default_value(false), "Use scaleCD.")
                 ("use-scaleAlphaVec",         po::value<int>()->default_value(0), "Use scaleAlphaVec.")
-                ("bias-type-args",            po::value<std::vector<DataType>>()->default_value(std::vector<DataType>(1, DataType::None), "[]"), "Bias data type args.")
+                ("bias-type-args",            po::value<std::vector<rocisa::DataType>>()->default_value(std::vector<rocisa::DataType>(1, rocisa::DataType::None), "[]"), "Bias data type args.")
                 ("factor-dim-args",           po::value<std::vector<int>>()->default_value(std::vector<int>(1, 0), "[]"), "factor dimensions args.")
                 ("icache-flush-args",         po::value<std::vector<bool>>()->default_value(std::vector<bool>(1, false), "[]"), "ICache flush args.")
                 ("use-e",                     po::value<bool>()->default_value(false), "Use E.")
@@ -493,7 +494,7 @@ namespace TensileLite
 
         void parse_bias_type_args(po::variables_map& args, std::string const& name)
         {
-            auto type             = args[name].as<std::vector<DataType>>();
+            auto type             = args[name].as<std::vector<rocisa::DataType>>();
             args.at(name).value() = boost::any(type);
         }
 
@@ -512,12 +513,13 @@ namespace TensileLite
 
         void fix_data_types(po::variables_map& args)
         {
-            auto type = args["type"].as<DataType>();
+            auto type = args["type"].as<rocisa::DataType>();
 
             // These types use the same data type for all inputs/outputs, so we allow
             // using the overarching 'type' parameter.
-            if(type == DataType::Float || type == DataType::Double || type == DataType::ComplexFloat
-               || type == DataType::ComplexDouble || type == DataType::Int32)
+            if(type == rocisa::DataType::Float || type == rocisa::DataType::Double
+               || type == rocisa::DataType::ComplexFloat || type == rocisa::DataType::ComplexDouble
+               || type == rocisa::DataType::Int32)
             {
                 args.at("a-type").value()     = boost::any(type);
                 args.at("b-type").value()     = boost::any(type);

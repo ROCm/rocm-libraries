@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2022-2023 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -59,7 +59,8 @@ if(NOT ROCmSMI_FOUND)
     find_package(ROCmSMI REQUIRED)
 endif()
 
-target_include_directories(TensileClient PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")# "${rocm_smi_root}/include")
+target_include_directories(TensileClient PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include"
+                                                "${CMAKE_CURRENT_SOURCE_DIR}/../../../rocisa")
 
 target_link_libraries(TensileClient PRIVATE TensileHost Boost::program_options Boost::filesystem rocm_smi)
 
@@ -79,6 +80,7 @@ set_target_properties(tensile_client
                       CXX_EXTENSIONS OFF)
 
 target_link_libraries(tensile_client PRIVATE TensileHost TensileClient ${Boost_LIBRARIES})
+
 if(TENSILE_USE_OPENMP)
     target_link_libraries(tensile_client PRIVATE custom_openmp_cxx)
 endif()

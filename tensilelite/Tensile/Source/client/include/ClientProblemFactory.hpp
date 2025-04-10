@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -64,11 +64,11 @@ namespace TensileLite
             ContractionProblemGemm::BatchIndices m_batchIndices;
             ContractionProblemGemm::BoundIndices m_boundIndices;
 
-            std::vector<DataType>                         m_tensorTypes;
+            std::vector<rocisa::DataType>                 m_tensorTypes;
             std::vector<std::vector<std::vector<size_t>>> m_tensorStrides;
 
-            std::vector<DataType> m_constantTypes;
-            std::vector<double>   m_constantValues;
+            std::vector<rocisa::DataType> m_constantTypes;
+            std::vector<double>           m_constantValues;
 
             bool        m_stridedBatched;
             bool        m_groupedGemm;
@@ -89,15 +89,15 @@ namespace TensileLite
             KernelLanguage                   m_kernelLanguage;
             PerformanceMetric                m_performanceMetric;
             ActivationType                   m_activationType;
-            std::vector<DataType>            m_biasTypeArgs;
+            std::vector<rocisa::DataType>    m_biasTypeArgs;
             std::vector<int>                 m_factorDimArgs;
             std::vector<bool>                m_icacheFlushArgs;
             bool                             m_activationNoGuard;
             std::vector<ActivationType>      m_activationEnumArg;
             size_t                           m_maxWorkspaceSize = 0;
-            DataType                         m_computeInputType;
-            DataType                         m_f32XdlMathOp;
-            DataType                         m_activationComputeType;
+            rocisa::DataType                 m_computeInputType;
+            rocisa::DataType                 m_f32XdlMathOp;
+            rocisa::DataType                 m_activationComputeType;
             std::vector<std::vector<size_t>> m_problemSizes;
             bool                             m_useUserArgs;
             bool                             m_swizzleTensorA;

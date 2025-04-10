@@ -38,31 +38,31 @@ namespace TensileLite
 {
     ContractionProblem::ContractionProblem(size_t size, size_t workspaceSize)
         : m_workspaceSize(workspaceSize)
-        , m_f32XdlMathOp(DataType::Float)
+        , m_f32XdlMathOp(rocisa::DataType::Float)
     {
         m_tensors.resize(size);
         m_names.resize(size);
     }
 
-    ContractionProblemGemm ContractionProblemGemm::GEMM_Strides(bool     transA,
-                                                                bool     transB,
-                                                                DataType aType,
-                                                                DataType bType,
-                                                                DataType cType,
-                                                                DataType dType,
-                                                                size_t   m,
-                                                                size_t   n,
-                                                                size_t   k,
-                                                                size_t   batchSize,
-                                                                size_t   lda,
-                                                                size_t   aStride,
-                                                                size_t   ldb,
-                                                                size_t   bStride,
-                                                                size_t   ldc,
-                                                                size_t   cStride,
-                                                                size_t   ldd,
-                                                                size_t   dStride,
-                                                                double   beta)
+    ContractionProblemGemm ContractionProblemGemm::GEMM_Strides(bool             transA,
+                                                                bool             transB,
+                                                                rocisa::DataType aType,
+                                                                rocisa::DataType bType,
+                                                                rocisa::DataType cType,
+                                                                rocisa::DataType dType,
+                                                                size_t           m,
+                                                                size_t           n,
+                                                                size_t           k,
+                                                                size_t           batchSize,
+                                                                size_t           lda,
+                                                                size_t           aStride,
+                                                                size_t           ldb,
+                                                                size_t           bStride,
+                                                                size_t           ldc,
+                                                                size_t           cStride,
+                                                                size_t           ldd,
+                                                                size_t           dStride,
+                                                                double           beta)
     {
         TensileLite::ContractionProblemGemm::FreeIndices  free(2);
         TensileLite::ContractionProblemGemm::BoundIndices bound(1);
@@ -150,10 +150,10 @@ namespace TensileLite
 
         return GEMM_Strides(transA,
                             transB,
-                            DataType::Float,
-                            DataType::Float,
-                            DataType::Float,
-                            DataType::Float,
+                            rocisa::DataType::Float,
+                            rocisa::DataType::Float,
+                            rocisa::DataType::Float,
+                            rocisa::DataType::Float,
                             m,
                             n,
                             k,
@@ -393,13 +393,13 @@ namespace TensileLite
     ContractionProblemGemm
         ContractionProblemGemm::FromIndexSizes(std::string const&         operationIdentifier,
                                                std::vector<size_t> const& indexSizes,
-                                               DataType                   aType,
+                                               rocisa::DataType           aType,
                                                std::vector<size_t> const& aStrides,
-                                               DataType                   bType,
+                                               rocisa::DataType           bType,
                                                std::vector<size_t> const& bStrides,
-                                               DataType                   cType,
+                                               rocisa::DataType           cType,
                                                std::vector<size_t> const& cStrides,
-                                               DataType                   dType,
+                                               rocisa::DataType           dType,
                                                std::vector<size_t> const& dStrides,
                                                double                     beta)
     {
@@ -439,13 +439,13 @@ namespace TensileLite
                                                BatchIndices const&        batchIndices,
                                                BoundIndices const&        boundIndices,
                                                std::vector<size_t> const& indexSizes,
-                                               DataType                   aType,
+                                               rocisa::DataType           aType,
                                                std::vector<size_t> const& aStrides,
-                                               DataType                   bType,
+                                               rocisa::DataType           bType,
                                                std::vector<size_t> const& bStrides,
-                                               DataType                   cType,
+                                               rocisa::DataType           cType,
                                                std::vector<size_t> const& cStrides,
-                                               DataType                   dType,
+                                               rocisa::DataType           dType,
                                                std::vector<size_t> const& dStrides,
                                                double                     beta)
     {
@@ -944,7 +944,7 @@ namespace TensileLite
 
             m_tensors[ContractionProblemGemm::TENSOR::METADATA]
                 = TensorDescriptor("metadata",
-                                   DataType::Int8,
+                                   rocisa::DataType::Int8,
                                    metadata_sizes.begin(),
                                    metadata_sizes.end(),
                                    metadata_strides.begin(),
@@ -1308,25 +1308,25 @@ namespace TensileLite
         return rv.str();
     }
 
-    ContractionProblemGemm
-        ContractionProblemGemm::createDefaultProblem(bool                   transA,
-                                                     bool                   transB,
-                                                     DataType               typeA,
-                                                     DataType               typeB,
-                                                     DataType               typeC,
-                                                     DataType               typeD,
-                                                     DataType               typeAlpha,
-                                                     DataType               typeBeta,
-                                                     DataType               typeComputeInput,
-                                                     DataType               typeCompute,
-                                                     double                 alpha,
-                                                     double                 beta,
-                                                     bool                   useBias,
-                                                     bool                   useGradient,
-                                                     std::vector<DataType>& biasDataTypeWhiteList,
-                                                     std::vector<int>&      biasSrcWhiteList,
-                                                     bool                   isGroupedGemm,
-                                                     size_t                 maxWorkspaceBytes)
+    ContractionProblemGemm ContractionProblemGemm::createDefaultProblem(
+        bool                           transA,
+        bool                           transB,
+        rocisa::DataType               typeA,
+        rocisa::DataType               typeB,
+        rocisa::DataType               typeC,
+        rocisa::DataType               typeD,
+        rocisa::DataType               typeAlpha,
+        rocisa::DataType               typeBeta,
+        rocisa::DataType               typeComputeInput,
+        rocisa::DataType               typeCompute,
+        double                         alpha,
+        double                         beta,
+        bool                           useBias,
+        bool                           useGradient,
+        std::vector<rocisa::DataType>& biasDataTypeWhiteList,
+        std::vector<int>&              biasSrcWhiteList,
+        bool                           isGroupedGemm,
+        size_t                         maxWorkspaceBytes)
     {
         assert(typeBeta == typeCompute);
         // Tensor descriptors for a, b
@@ -1435,7 +1435,8 @@ namespace TensileLite
         problem.setBetaType(typeBeta);
 
         // HPA is active iff sizeof(compute type) > sizeof(input type)
-        problem.setHighPrecisionAccumulate(GetElementSize(typeCompute) > GetElementSize(typeA));
+        problem.setHighPrecisionAccumulate(rocisa::GetElementSize(typeCompute)
+                                           > rocisa::GetElementSize(typeA));
 
         // set batch mode
         problem.setStridedBatched(true);
@@ -1448,11 +1449,11 @@ namespace TensileLite
         // set bias mode
         if(useBias)
         {
-            DataType                                    biasType = biasDataTypeWhiteList[0];
+            rocisa::DataType                            biasType = biasDataTypeWhiteList[0];
             TensileLite::ContractionProblemGemm::TENSOR biasSrc
                 = static_cast<TensileLite::ContractionProblemGemm::TENSOR>(biasSrcWhiteList[0]);
             problem.setBias(biasType, 1, 0, useGradient, biasSrc);
-            problem.setParams().setBiasEnum(TensileLite::DataType::None);
+            problem.setParams().setBiasEnum(rocisa::DataType::None);
         }
 
         // Add problem predicates for CEqualsD

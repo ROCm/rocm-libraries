@@ -98,7 +98,17 @@ set_target_properties(TensileHost
                       CXX_STANDARD_REQUIRED ON
                       CXX_EXTENSIONS OFF)
 
-target_include_directories(TensileHost INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/include")
+# Check if folder exists in virtual env, can remove this after virtual env is removed
+if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../../rocisa")
+    message(FATAL_ERROR "rocisa folder not found. Please check the path.")
+endif()
+
+target_include_directories(TensileHost INTERFACE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../rocisa
+)
+
+target_include_directories(TensileHost PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../../rocisa)
 
 if(TENSILE_USE_LLVM OR TENSILE_USE_MSGPACK)
     target_compile_definitions(TensileHost PUBLIC TENSILE_DEFAULT_SERIALIZATION)

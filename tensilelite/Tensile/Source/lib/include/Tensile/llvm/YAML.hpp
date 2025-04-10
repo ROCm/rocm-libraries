@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2023 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -33,7 +33,7 @@
 
 #include <cstddef>
 
-LLVM_YAML_IS_FLOW_SEQUENCE_VECTOR(TensileLite::DataType)
+LLVM_YAML_IS_FLOW_SEQUENCE_VECTOR(rocisa::DataType)
 LLVM_YAML_IS_FLOW_SEQUENCE_VECTOR(TensileLite::ActivationType)
 
 namespace llvm
@@ -297,19 +297,18 @@ namespace llvm
             "asdf");
 
         static_assert(
-            !has_SequenceTraits<Hide<
-                std::shared_ptr<TensileLite::SolutionLibrary<TensileLite::ContractionProblemGemm>>>>::value,
+            !has_SequenceTraits<Hide<std::shared_ptr<
+                TensileLite::SolutionLibrary<TensileLite::ContractionProblemGemm>>>>::value,
             "fdsa");
-        static_assert(
-            has_MappingTraits<
-                Hide<std::shared_ptr<TensileLite::SolutionLibrary<TensileLite::ContractionProblemGemm>>>,
-                EmptyContext>::value,
-            "fdsa");
+        static_assert(has_MappingTraits<Hide<std::shared_ptr<TensileLite::SolutionLibrary<
+                                            TensileLite::ContractionProblemGemm>>>,
+                                        EmptyContext>::value,
+                      "fdsa");
 
         static_assert(
-            !missingTraits<
-                Hide<std::shared_ptr<TensileLite::SolutionLibrary<TensileLite::ContractionProblemGemm>>>,
-                EmptyContext>::value,
+            !missingTraits<Hide<std::shared_ptr<
+                               TensileLite::SolutionLibrary<TensileLite::ContractionProblemGemm>>>,
+                           EmptyContext>::value,
             "fdsa");
     } // namespace yaml
 } // namespace llvm

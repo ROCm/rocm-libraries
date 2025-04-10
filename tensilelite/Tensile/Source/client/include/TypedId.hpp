@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -30,20 +30,20 @@
 
 namespace TensileLite
 {
-    constexpr uint64_t GemmTypeId(DataType aType,
-                                  DataType bType,
-                                  DataType cType,
-                                  DataType dType,
-                                  DataType alphaType,
-                                  DataType betaType,
-                                  DataType computeInputType)
+    constexpr uint64_t GemmTypeId(rocisa::DataType aType,
+                                  rocisa::DataType bType,
+                                  rocisa::DataType cType,
+                                  rocisa::DataType dType,
+                                  rocisa::DataType alphaType,
+                                  rocisa::DataType betaType,
+                                  rocisa::DataType computeInputType)
     {
-        static_assert(BitFieldGenerator::ElementWidth((uint32_t)DataType::Count) * 7
+        static_assert(BitFieldGenerator::ElementWidth((uint32_t)rocisa::DataType::Count) * 7
                           <= BitFieldGenerator::maxBitFieldWidth,
                       "Max bitfield width exceeded");
 
         return BitFieldGenerator::GenerateBitField(
-            BitFieldGenerator::ElementWidth((uint32_t)DataType::Count),
+            BitFieldGenerator::ElementWidth((uint32_t)rocisa::DataType::Count),
             (uint32_t)aType,
             (uint32_t)bType,
             (uint32_t)cType,
@@ -145,37 +145,76 @@ namespace TensileLite
     using TypedGemm_H_B8F8_H_S = TypedGemm<Half, Half, Half, Half, float, float, BFloat8Float8>;
 
     // NANOO F8
-    using TypedGemm_F8N_F8N_S = TypedGemm<Float8_fnuz, Float8_fnuz, Float8_fnuz, Float8_fnuz, float, float>;
-    using TypedGemm_F8N_B8N_S = TypedGemm<Float8_fnuz, Float8_fnuz, BFloat8_fnuz, BFloat8_fnuz, float, float>;
-    using TypedGemm_F8N_H_S  = TypedGemm<Float8_fnuz, Float8_fnuz, Half, Half, float, float>;
-    using TypedGemm_F8N_B_S  = TypedGemm<Float8_fnuz, Float8_fnuz, BFloat16, BFloat16, float, float>;
-    using TypedGemm_F8N_S_S  = TypedGemm<Float8_fnuz, Float8_fnuz, float, float>;
-    using TypedGemm_B8N_F8N_S = TypedGemm<BFloat8_fnuz, BFloat8_fnuz, Float8_fnuz, Float8_fnuz, float, float>;
-    using TypedGemm_B8N_B8N_S = TypedGemm<BFloat8_fnuz, BFloat8_fnuz, BFloat8_fnuz, BFloat8_fnuz, float, float>;
-    using TypedGemm_B8N_S_S  = TypedGemm<BFloat8_fnuz, BFloat8_fnuz, float, float>;
-    using TypedGemm_B8N_H_S  = TypedGemm<BFloat8_fnuz, BFloat8_fnuz, Half, Half, float, float>;
-    using TypedGemm_B8N_B_S  = TypedGemm<BFloat8_fnuz, BFloat8_fnuz, BFloat16, BFloat16, float, float>;
+    using TypedGemm_F8N_F8N_S
+        = TypedGemm<Float8_fnuz, Float8_fnuz, Float8_fnuz, Float8_fnuz, float, float>;
+    using TypedGemm_F8N_B8N_S
+        = TypedGemm<Float8_fnuz, Float8_fnuz, BFloat8_fnuz, BFloat8_fnuz, float, float>;
+    using TypedGemm_F8N_H_S = TypedGemm<Float8_fnuz, Float8_fnuz, Half, Half, float, float>;
+    using TypedGemm_F8N_B_S = TypedGemm<Float8_fnuz, Float8_fnuz, BFloat16, BFloat16, float, float>;
+    using TypedGemm_F8N_S_S = TypedGemm<Float8_fnuz, Float8_fnuz, float, float>;
+    using TypedGemm_B8N_F8N_S
+        = TypedGemm<BFloat8_fnuz, BFloat8_fnuz, Float8_fnuz, Float8_fnuz, float, float>;
+    using TypedGemm_B8N_B8N_S
+        = TypedGemm<BFloat8_fnuz, BFloat8_fnuz, BFloat8_fnuz, BFloat8_fnuz, float, float>;
+    using TypedGemm_B8N_S_S = TypedGemm<BFloat8_fnuz, BFloat8_fnuz, float, float>;
+    using TypedGemm_B8N_H_S = TypedGemm<BFloat8_fnuz, BFloat8_fnuz, Half, Half, float, float>;
+    using TypedGemm_B8N_B_S
+        = TypedGemm<BFloat8_fnuz, BFloat8_fnuz, BFloat16, BFloat16, float, float>;
     // hybrid
-    using TypedGemm_F8B8N_F8N_S
-        = TypedGemm<Float8_fnuz, BFloat8_fnuz, Float8_fnuz, Float8_fnuz, float, float, Float8BFloat8_fnuz>;
-    using TypedGemm_F8B8N_H_S = TypedGemm<Float8_fnuz, BFloat8_fnuz, Half, Half, float, float, Float8BFloat8_fnuz>;
-    using TypedGemm_F8B8N_B_S
-        = TypedGemm<Float8_fnuz, BFloat8_fnuz, BFloat16, BFloat16, float, float, Float8BFloat8_fnuz>;
+    using TypedGemm_F8B8N_F8N_S = TypedGemm<Float8_fnuz,
+                                            BFloat8_fnuz,
+                                            Float8_fnuz,
+                                            Float8_fnuz,
+                                            float,
+                                            float,
+                                            Float8BFloat8_fnuz>;
+    using TypedGemm_F8B8N_H_S
+        = TypedGemm<Float8_fnuz, BFloat8_fnuz, Half, Half, float, float, Float8BFloat8_fnuz>;
+    using TypedGemm_F8B8N_B_S = TypedGemm<Float8_fnuz,
+                                          BFloat8_fnuz,
+                                          BFloat16,
+                                          BFloat16,
+                                          float,
+                                          float,
+                                          Float8BFloat8_fnuz>;
     using TypedGemm_F8B8N_S_S
         = TypedGemm<Float8_fnuz, BFloat8_fnuz, float, float, float, float, Float8BFloat8_fnuz>;
-    using TypedGemm_B8F8N_F8N_S
-        = TypedGemm<BFloat8_fnuz, Float8_fnuz, Float8_fnuz, Float8_fnuz, float, float, BFloat8Float8_fnuz>;
-    using TypedGemm_B8F8N_H_S = TypedGemm<BFloat8_fnuz, Float8_fnuz, Half, Half, float, float, BFloat8Float8_fnuz>;
-    using TypedGemm_B8F8N_B_S = TypedGemm<BFloat8_fnuz, Float8_fnuz, BFloat16, BFloat16, float, float, BFloat8Float8_fnuz>;
+    using TypedGemm_B8F8N_F8N_S = TypedGemm<BFloat8_fnuz,
+                                            Float8_fnuz,
+                                            Float8_fnuz,
+                                            Float8_fnuz,
+                                            float,
+                                            float,
+                                            BFloat8Float8_fnuz>;
+    using TypedGemm_B8F8N_H_S
+        = TypedGemm<BFloat8_fnuz, Float8_fnuz, Half, Half, float, float, BFloat8Float8_fnuz>;
+    using TypedGemm_B8F8N_B_S = TypedGemm<BFloat8_fnuz,
+                                          Float8_fnuz,
+                                          BFloat16,
+                                          BFloat16,
+                                          float,
+                                          float,
+                                          BFloat8Float8_fnuz>;
     using TypedGemm_B8F8N_S_S
         = TypedGemm<BFloat8_fnuz, Float8_fnuz, float, float, float, float, BFloat8Float8_fnuz>;
-    using TypedGemm_F8B8N_B8N_S
-        = TypedGemm<Float8_fnuz, BFloat8_fnuz, BFloat8_fnuz, BFloat8_fnuz, float, float, Float8BFloat8_fnuz>;
-    using TypedGemm_B8F8N_B8N_S
-        = TypedGemm<BFloat8_fnuz, Float8_fnuz, BFloat8_fnuz, BFloat8_fnuz, float, float, BFloat8Float8_fnuz>;
-    using TypedGemm_H_F8B8N_H_S = TypedGemm<Half, Half, Half, Half, float, float, Float8BFloat8_fnuz>;
-    using TypedGemm_H_B8F8N_H_S = TypedGemm<Half, Half, Half, Half, float, float, BFloat8Float8_fnuz>;
-
+    using TypedGemm_F8B8N_B8N_S = TypedGemm<Float8_fnuz,
+                                            BFloat8_fnuz,
+                                            BFloat8_fnuz,
+                                            BFloat8_fnuz,
+                                            float,
+                                            float,
+                                            Float8BFloat8_fnuz>;
+    using TypedGemm_B8F8N_B8N_S = TypedGemm<BFloat8_fnuz,
+                                            Float8_fnuz,
+                                            BFloat8_fnuz,
+                                            BFloat8_fnuz,
+                                            float,
+                                            float,
+                                            BFloat8Float8_fnuz>;
+    using TypedGemm_H_F8B8N_H_S
+        = TypedGemm<Half, Half, Half, Half, float, float, Float8BFloat8_fnuz>;
+    using TypedGemm_H_B8F8N_H_S
+        = TypedGemm<Half, Half, Half, Half, float, float, BFloat8Float8_fnuz>;
 
 #ifdef TENSILE_USE_HALF
     // Mix precision: OCPFP8
@@ -195,20 +234,28 @@ namespace TensileLite
     using TypedGemm_F8H_FP8_FP8_S = TypedGemm<Float8, Half, Float8, Float8, float, float, Float8>;
 
     // Mix precision: NANOO
-    using TypedGemm_H_F8N_H_S      = TypedGemm<Half, Half, Half, Half, float, float, Float8_fnuz>;
-    using TypedGemm_H_B8N_H_S      = TypedGemm<Half, Half, Half, Half, float, float, BFloat8_fnuz>;
-    using TypedGemm_HF8N_H_S_S     = TypedGemm<Half, Float8_fnuz, float, float, float, float, Half>;
-    using TypedGemm_F8NH_H_S_S     = TypedGemm<Float8_fnuz, Half, float, float, float, float, Half>;
-    using TypedGemm_HF8N_H_H_S     = TypedGemm<Half, Float8_fnuz, Half, Half, float, float, Half>;
-    using TypedGemm_F8NH_H_H_S     = TypedGemm<Float8_fnuz, Half, Half, Half, float, float, Half>;
-    using TypedGemm_HF8N_H_FP8_S   = TypedGemm<Half, Float8_fnuz, Float8_fnuz, Float8_fnuz, float, float, Half>;
-    using TypedGemm_F8NH_H_FP8_S   = TypedGemm<Float8_fnuz, Half, Float8_fnuz, Float8_fnuz, float, float, Half>;
-    using TypedGemm_HF8N_FP8_S_S   = TypedGemm<Half, Float8_fnuz, float, float, float, float, Float8_fnuz>;
-    using TypedGemm_F8NH_FP8_S_S   = TypedGemm<Float8_fnuz, Half, float, float, float, float, Float8_fnuz>;
-    using TypedGemm_HF8N_FP8_H_S   = TypedGemm<Half, Float8_fnuz, Half, Half, float, float, Float8_fnuz>;
-    using TypedGemm_F8NH_FP8_H_S   = TypedGemm<Float8_fnuz, Half, Half, Half, float, float, Float8_fnuz>;
-    using TypedGemm_HF8N_FP8_FP8_S = TypedGemm<Half, Float8_fnuz, Float8_fnuz, Float8_fnuz, float, float, Float8_fnuz>;
-    using TypedGemm_F8NH_FP8_FP8_S = TypedGemm<Float8_fnuz, Half, Float8_fnuz, Float8_fnuz, float, float, Float8_fnuz>;
+    using TypedGemm_H_F8N_H_S  = TypedGemm<Half, Half, Half, Half, float, float, Float8_fnuz>;
+    using TypedGemm_H_B8N_H_S  = TypedGemm<Half, Half, Half, Half, float, float, BFloat8_fnuz>;
+    using TypedGemm_HF8N_H_S_S = TypedGemm<Half, Float8_fnuz, float, float, float, float, Half>;
+    using TypedGemm_F8NH_H_S_S = TypedGemm<Float8_fnuz, Half, float, float, float, float, Half>;
+    using TypedGemm_HF8N_H_H_S = TypedGemm<Half, Float8_fnuz, Half, Half, float, float, Half>;
+    using TypedGemm_F8NH_H_H_S = TypedGemm<Float8_fnuz, Half, Half, Half, float, float, Half>;
+    using TypedGemm_HF8N_H_FP8_S
+        = TypedGemm<Half, Float8_fnuz, Float8_fnuz, Float8_fnuz, float, float, Half>;
+    using TypedGemm_F8NH_H_FP8_S
+        = TypedGemm<Float8_fnuz, Half, Float8_fnuz, Float8_fnuz, float, float, Half>;
+    using TypedGemm_HF8N_FP8_S_S
+        = TypedGemm<Half, Float8_fnuz, float, float, float, float, Float8_fnuz>;
+    using TypedGemm_F8NH_FP8_S_S
+        = TypedGemm<Float8_fnuz, Half, float, float, float, float, Float8_fnuz>;
+    using TypedGemm_HF8N_FP8_H_S
+        = TypedGemm<Half, Float8_fnuz, Half, Half, float, float, Float8_fnuz>;
+    using TypedGemm_F8NH_FP8_H_S
+        = TypedGemm<Float8_fnuz, Half, Half, Half, float, float, Float8_fnuz>;
+    using TypedGemm_HF8N_FP8_FP8_S
+        = TypedGemm<Half, Float8_fnuz, Float8_fnuz, Float8_fnuz, float, float, Float8_fnuz>;
+    using TypedGemm_F8NH_FP8_FP8_S
+        = TypedGemm<Float8_fnuz, Half, Float8_fnuz, Float8_fnuz, float, float, Float8_fnuz>;
 #endif // TENSILE_USE_HALF
 #endif // TENSILE_USE_FP8_BF8
 } // namespace TensileLite

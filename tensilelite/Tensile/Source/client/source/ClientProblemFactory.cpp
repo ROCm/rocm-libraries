@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -43,14 +43,14 @@ namespace TensileLite
             , m_performanceMetric(args["performance-metric"].as<PerformanceMetric>())
             , m_deterministicMode(args["deterministic-mode"].as<bool>())
             , m_cEqualsD(args["c-equal-d"].as<bool>())
-            , m_biasTypeArgs(std::vector<DataType>(1, DataType::Float))
+            , m_biasTypeArgs(std::vector<rocisa::DataType>(1, rocisa::DataType::Float))
             , m_factorDimArgs(std::vector<int>(1, 0))
             , m_activationType(ActivationType::None)
             , m_activationNoGuard(false)
             , m_activationEnumArg(std::vector<ActivationType>(1, ActivationType::None))
-            , m_computeInputType(DataType::Float)
-            , m_f32XdlMathOp(DataType::Float)
-            , m_activationComputeType(DataType::Float)
+            , m_computeInputType(rocisa::DataType::Float)
+            , m_f32XdlMathOp(rocisa::DataType::Float)
+            , m_activationComputeType(rocisa::DataType::Float)
             , m_useUserArgs(false)
             , m_swizzleTensorA(false)
             , m_swizzleTensorB(false)
@@ -81,10 +81,10 @@ namespace TensileLite
             }
 
             // Default datatype
-            DataType type = DataType::None;
+            rocisa::DataType type = rocisa::DataType::None;
             if(args.count("type"))
             {
-                type = args["type"].as<DataType>();
+                type = args["type"].as<rocisa::DataType>();
             }
 
             // Should add problem type in ClientParamters.ini
@@ -103,7 +103,7 @@ namespace TensileLite
                 std::string typeName = tensors[i].getName() + "-type";
                 if(args.count(typeName))
                 {
-                    m_tensorTypes[i] = args[typeName].as<DataType>();
+                    m_tensorTypes[i] = args[typeName].as<rocisa::DataType>();
                 }
                 else
                 {
@@ -125,7 +125,7 @@ namespace TensileLite
                 std::string typeName = constants[i].name + "-type";
                 if(args.count(typeName))
                 {
-                    m_constantTypes[i] = args[typeName].as<DataType>();
+                    m_constantTypes[i] = args[typeName].as<rocisa::DataType>();
                 }
                 else
                 {
@@ -144,7 +144,7 @@ namespace TensileLite
             }
 
             if(args.count("activation-compute-type"))
-                m_activationComputeType = args["activation-compute-type"].as<DataType>();
+                m_activationComputeType = args["activation-compute-type"].as<rocisa::DataType>();
 
             if(args.count("use-e"))
                 m_useE = args["use-e"].as<bool>();
@@ -156,7 +156,7 @@ namespace TensileLite
                 m_outputAmaxD = args["output-amaxD"].as<bool>();
 
             if(args.count("bias-type-args"))
-                m_biasTypeArgs = args["bias-type-args"].as<std::vector<DataType>>();
+                m_biasTypeArgs = args["bias-type-args"].as<std::vector<rocisa::DataType>>();
             if(args.count("factor-dim-args"))
                 m_factorDimArgs = args["factor-dim-args"].as<std::vector<int>>();
             if(args.count("activation-type"))
@@ -182,12 +182,12 @@ namespace TensileLite
             if(args.count("compute-input-type"))
             {
                 //accept mix-types (i.g. Float8BFloat8); there no need to set m_computeInputTypeA and m_computeInputTypeB
-                m_computeInputType = args["compute-input-type"].as<DataType>();
+                m_computeInputType = args["compute-input-type"].as<rocisa::DataType>();
             }
 
             if(args.count("f32-xdl-math-op"))
             {
-                m_f32XdlMathOp = args["f32-xdl-math-op"].as<DataType>();
+                m_f32XdlMathOp = args["f32-xdl-math-op"].as<rocisa::DataType>();
             }
 
             if(args.count("swizzle-tensor-a"))
@@ -350,7 +350,7 @@ namespace TensileLite
                             }
                             else
                             {
-                                rv.back().setBias(DataType::None, 0, 0);
+                                rv.back().setBias(rocisa::DataType::None, 0, 0);
                             }
                             if(m_useE)
                             {
@@ -367,7 +367,7 @@ namespace TensileLite
                                 bool isOutput = true;
                                 rv.back().setAmaxD(
                                     m_tensorTypes[ContractionProblemGemm::TENSOR::AMAXD], isOutput);
-                                rv.back().setSynchronizer(DataType::Int32, 1);
+                                rv.back().setSynchronizer(rocisa::DataType::Int32, 1);
                             }
                             else
                             {

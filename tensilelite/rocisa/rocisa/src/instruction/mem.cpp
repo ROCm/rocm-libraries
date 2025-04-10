@@ -122,7 +122,7 @@ void mem_inst(nb::module_ m_mem)
 {
     nb::class_<rocisa::ReadWriteInstruction, rocisa::Instruction, rocisa::PyReadWriteInstruction>(
         m_mem, "ReadWriteInstruction")
-        .def(nb::init<InstType, rocisa::ReadWriteInstruction::RWType, const std::string&>(),
+        .def(nb::init<rocisa::InstType, rocisa::ReadWriteInstruction::RWType, const std::string&>(),
              nb::arg("instType"),
              nb::arg("rwType"),
              nb::arg("comment") = "")
@@ -131,14 +131,16 @@ void mem_inst(nb::module_ m_mem)
     nb::class_<rocisa::GlobalReadInstruction,
                rocisa::ReadWriteInstruction,
                rocisa::PyGlobalReadInstruction>(m_mem, "GlobalReadInstruction")
-        .def(nb::init<InstType, const std::shared_ptr<rocisa::Container>&, const std::string&>(),
+        .def(nb::init<rocisa::InstType,
+                      const std::shared_ptr<rocisa::Container>&,
+                      const std::string&>(),
              nb::arg("instType"),
              nb::arg("dst"),
              nb::arg("comment") = "");
 
     nb::class_<rocisa::FLATReadInstruction, rocisa::GlobalReadInstruction>(m_mem,
                                                                            "FLATReadInstruction")
-        .def(nb::init<InstType,
+        .def(nb::init<rocisa::InstType,
                       const std::shared_ptr<rocisa::Container>&,
                       const std::shared_ptr<rocisa::Container>&,
                       std::optional<rocisa::FLATModifiers>,
@@ -153,7 +155,7 @@ void mem_inst(nb::module_ m_mem)
 
     nb::class_<rocisa::MUBUFReadInstruction, rocisa::GlobalReadInstruction>(m_mem,
                                                                             "MUBUFReadInstruction")
-        .def(nb::init<InstType,
+        .def(nb::init<rocisa::InstType,
                       const std::shared_ptr<rocisa::Container>&,
                       const std::shared_ptr<rocisa::Container>&,
                       const std::shared_ptr<rocisa::Container>&,
@@ -173,7 +175,7 @@ void mem_inst(nb::module_ m_mem)
     nb::class_<rocisa::AtomicReadWriteInstruction,
                rocisa::ReadWriteInstruction,
                rocisa::PyAtomicReadWriteInstruction>(m_mem, "AtomicReadWriteInstruction")
-        .def(nb::init<InstType,
+        .def(nb::init<rocisa::InstType,
                       const std::shared_ptr<rocisa::Container>&,
                       const std::shared_ptr<rocisa::Container>&,
                       const std::string&>(),
@@ -184,7 +186,7 @@ void mem_inst(nb::module_ m_mem)
 
     nb::class_<rocisa::SMemAtomicDecInstruction, rocisa::AtomicReadWriteInstruction>(
         m_mem, "SMemAtomicDecInstruction")
-        .def(nb::init<InstType,
+        .def(nb::init<rocisa::InstType,
                       const std::shared_ptr<rocisa::Container>&,
                       const std::shared_ptr<rocisa::Container>&,
                       std::optional<rocisa::SMEMModifiers>,
@@ -199,7 +201,7 @@ void mem_inst(nb::module_ m_mem)
 
     nb::class_<rocisa::SMemLoadInstruction, rocisa::GlobalReadInstruction>(m_mem,
                                                                            "SMemLoadInstruction")
-        .def(nb::init<InstType,
+        .def(nb::init<rocisa::InstType,
                       const std::shared_ptr<rocisa::Container>&,
                       const std::shared_ptr<rocisa::Container>&,
                       const std::shared_ptr<rocisa::Container>&,
@@ -217,14 +219,16 @@ void mem_inst(nb::module_ m_mem)
     nb::class_<rocisa::GlobalWriteInstruction,
                rocisa::ReadWriteInstruction,
                rocisa::PyGlobalWriteInstruction>(m_mem, "GlobalWriteInstruction")
-        .def(nb::init<InstType, const std::shared_ptr<rocisa::Container>&, const std::string&>(),
+        .def(nb::init<rocisa::InstType,
+                      const std::shared_ptr<rocisa::Container>&,
+                      const std::string&>(),
              nb::arg("instType"),
              nb::arg("srcData"),
              nb::arg("comment") = "");
 
     nb::class_<rocisa::SMemStoreInstruction, rocisa::GlobalWriteInstruction>(m_mem,
                                                                              "SMemStoreInstruction")
-        .def(nb::init<InstType,
+        .def(nb::init<rocisa::InstType,
                       const std::shared_ptr<rocisa::Container>&,
                       const std::shared_ptr<rocisa::Container>&,
                       const std::shared_ptr<rocisa::Container>&,
@@ -241,7 +245,7 @@ void mem_inst(nb::module_ m_mem)
 
     nb::class_<rocisa::FLATStoreInstruction, rocisa::GlobalWriteInstruction>(m_mem,
                                                                              "FLATStoreInstruction")
-        .def(nb::init<InstType,
+        .def(nb::init<rocisa::InstType,
                       const std::shared_ptr<rocisa::Container>&,
                       const std::shared_ptr<rocisa::Container>&,
                       std::optional<rocisa::FLATModifiers>,
@@ -256,7 +260,7 @@ void mem_inst(nb::module_ m_mem)
 
     nb::class_<rocisa::MUBUFStoreInstruction, rocisa::GlobalWriteInstruction>(
         m_mem, "MUBUFStoreInstruction")
-        .def(nb::init<InstType,
+        .def(nb::init<rocisa::InstType,
                       const std::shared_ptr<rocisa::Container>&,
                       const std::shared_ptr<rocisa::Container>&,
                       const std::shared_ptr<rocisa::Container>&,
@@ -276,7 +280,7 @@ void mem_inst(nb::module_ m_mem)
     nb::class_<rocisa::LocalReadInstruction,
                rocisa::ReadWriteInstruction,
                rocisa::PyLocalReadInstruction>(m_mem, "LocalReadInstruction")
-        .def(nb::init<InstType,
+        .def(nb::init<rocisa::InstType,
                       const std::shared_ptr<rocisa::Container>&,
                       const std::shared_ptr<rocisa::Container>&,
                       const std::string&>(),
@@ -287,7 +291,7 @@ void mem_inst(nb::module_ m_mem)
         .def_rw("dst", &rocisa::LocalReadInstruction::dst);
 
     nb::class_<rocisa::DSLoadInstruction, rocisa::LocalReadInstruction>(m_mem, "DSLoadInstruction")
-        .def(nb::init<InstType,
+        .def(nb::init<rocisa::InstType,
                       const std::shared_ptr<rocisa::Container>&,
                       const std::shared_ptr<rocisa::Container>&,
                       std::optional<rocisa::DSModifiers>,
@@ -303,7 +307,7 @@ void mem_inst(nb::module_ m_mem)
     nb::class_<rocisa::LocalWriteInstruction,
                rocisa::ReadWriteInstruction,
                rocisa::PyLocalWriteInstruction>(m_mem, "LocalWriteInstruction")
-        .def(nb::init<InstType,
+        .def(nb::init<rocisa::InstType,
                       const std::shared_ptr<rocisa::Container>&,
                       const std::shared_ptr<rocisa::Container>&,
                       const std::shared_ptr<rocisa::Container>&,
@@ -316,7 +320,7 @@ void mem_inst(nb::module_ m_mem)
 
     nb::class_<rocisa::DSStoreInstruction, rocisa::LocalWriteInstruction>(m_mem,
                                                                           "DSStoreInstruction")
-        .def(nb::init<InstType,
+        .def(nb::init<rocisa::InstType,
                       const std::shared_ptr<rocisa::Container>&,
                       const std::shared_ptr<rocisa::Container>&,
                       const std::shared_ptr<rocisa::Container>&,

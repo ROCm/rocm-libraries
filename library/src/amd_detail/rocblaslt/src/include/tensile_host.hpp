@@ -216,41 +216,41 @@ rocblaslt_status getBestSolutions(rocblaslt_handle       handle,
 /******************************************************
  * Map a hipblaslt data type to a corresponding Tensile type *
  ******************************************************/
-inline TensileLite::DataType hipDataType_to_tensile_type(hipDataType type)
+inline rocisa::DataType hipDataType_to_tensile_type(hipDataType type)
 {
     switch(type)
     {
     case HIP_R_16F:
-        return TensileLite::DataType::Half;
+        return rocisa::DataType::Half;
     case HIP_R_32F:
-        return TensileLite::DataType::Float;
+        return rocisa::DataType::Float;
     case HIP_R_64F:
-        return TensileLite::DataType::Double;
+        return rocisa::DataType::Double;
     case HIP_R_16BF:
-        return TensileLite::DataType::BFloat16;
+        return rocisa::DataType::BFloat16;
     case HIP_R_8F_E4M3_FNUZ:
-        return TensileLite::DataType::Float8_fnuz;
+        return rocisa::DataType::Float8_fnuz;
     case HIP_R_8F_E5M2_FNUZ:
-        return TensileLite::DataType::BFloat8_fnuz;
+        return rocisa::DataType::BFloat8_fnuz;
 #ifdef ROCM_USE_FLOAT8
     case HIP_R_8F_E4M3:
-        return TensileLite::DataType::Float8;
+        return rocisa::DataType::Float8;
     case HIP_R_8F_E5M2:
-        return TensileLite::DataType::BFloat8;
+        return rocisa::DataType::BFloat8;
 #endif
     case HIP_R_8I:
-        return TensileLite::DataType::Int8;
+        return rocisa::DataType::Int8;
     case HIP_R_32I:
-        return TensileLite::DataType::Int32;
+        return rocisa::DataType::Int32;
     default:
         assert(!"hipDataType_to_tensile_type: non-supported type");
-        return TensileLite::DataType::None;
+        return rocisa::DataType::None;
     }
 }
 
 namespace
 {
-    TensileLite::DataType roc2TensileType(rocblaslt_compute_type, bool);
+    rocisa::DataType roc2TensileType(rocblaslt_compute_type, bool);
 }
 
 namespace TensileLite

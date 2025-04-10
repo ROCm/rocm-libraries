@@ -47,16 +47,16 @@ namespace TensileLite
     {
     public:
         ProblemOverride();
-        ProblemOverride(bool     transA,
-                        bool     transB,
-                        DataType inputTypeA,
-                        DataType inputTypeB,
-                        DataType computeType,
-                        DataType outputType,
-                        size_t   m,
-                        size_t   n,
-                        size_t   k,
-                        size_t   batchSize);
+        ProblemOverride(bool             transA,
+                        bool             transB,
+                        rocisa::DataType inputTypeA,
+                        rocisa::DataType inputTypeB,
+                        rocisa::DataType computeType,
+                        rocisa::DataType outputType,
+                        size_t           m,
+                        size_t           n,
+                        size_t           k,
+                        size_t           batchSize);
         ProblemOverride(const ProblemOverride& problem);
 
         inline bool transA() const
@@ -67,19 +67,19 @@ namespace TensileLite
         {
             return m_transB;
         }
-        inline DataType inputTypeA() const
+        inline rocisa::DataType inputTypeA() const
         {
             return m_inputTypeA;
         }
-        inline DataType inputTypeB() const
+        inline rocisa::DataType inputTypeB() const
         {
             return m_inputTypeB;
         }
-        inline DataType computeType() const
+        inline rocisa::DataType computeType() const
         {
             return m_computeType;
         }
-        inline DataType outputType() const
+        inline rocisa::DataType outputType() const
         {
             return m_outputType;
         }
@@ -101,16 +101,16 @@ namespace TensileLite
         }
 
     private:
-        bool     m_transA;
-        bool     m_transB;
-        DataType m_inputTypeA;
-        DataType m_inputTypeB;
-        DataType m_computeType;
-        DataType m_outputType;
-        size_t   m_m;
-        size_t   m_n;
-        size_t   m_k;
-        size_t   m_batchSize;
+        bool             m_transA;
+        bool             m_transB;
+        rocisa::DataType m_inputTypeA;
+        rocisa::DataType m_inputTypeB;
+        rocisa::DataType m_computeType;
+        rocisa::DataType m_outputType;
+        size_t           m_m;
+        size_t           m_n;
+        size_t           m_k;
+        size_t           m_batchSize;
     };
 
     std::pair<ProblemOverride, int> problemFromEntries(const std::vector<std::string>& entries);

@@ -1252,7 +1252,7 @@ namespace TensileLite
                 };
                 TypesEqual() = default;
 
-                std::array<DataType, 5> value;
+                std::array<rocisa::DataType, 5> value;
 
                 static std::string Type()
                 {
@@ -1535,7 +1535,7 @@ namespace TensileLite
                     size_t reductionSize = 0;
                     // 2d reduction
                     if(problem.useGradient() && problem.useBias()
-                       && problem.getParams().biasEnum() != DataType::None)
+                       && problem.getParams().biasEnum() != rocisa::DataType::None)
                     {
                         if(problem.biasSrc() == ContractionProblemGemm::TENSOR::D && (elemC == 0))
                             reductionSize += problem.d().totalLogicalElements()
@@ -1924,8 +1924,7 @@ namespace TensileLite
                 }
             };
 
-            struct ExperimentalMLP
-                : public Predicate_CRTP<ExperimentalMLP, ContractionProblemGemm>
+            struct ExperimentalMLP : public Predicate_CRTP<ExperimentalMLP, ContractionProblemGemm>
             {
                 enum
                 {
@@ -2153,10 +2152,10 @@ namespace TensileLite
                     HasIndex = false,
                     HasValue = true
                 };
-                DataType value;
+                rocisa::DataType value;
 
                 ActivationComputeTypeEqual() = default;
-                ActivationComputeTypeEqual(DataType value)
+                ActivationComputeTypeEqual(rocisa::DataType value)
                     : value(value)
                 {
                 }
@@ -2298,10 +2297,10 @@ namespace TensileLite
                     HasIndex = false,
                     HasValue = true
                 };
-                DataType value;
+                rocisa::DataType value;
 
                 DataTypeEEqual() = default;
-                DataTypeEEqual(DataType value)
+                DataTypeEEqual(rocisa::DataType value)
                     : value(value)
                 {
                 }
@@ -2454,7 +2453,7 @@ namespace TensileLite
                 };
                 BiasDataTypeWhiteList() = default;
 
-                std::vector<DataType> value;
+                std::vector<rocisa::DataType> value;
 
                 static std::string Type()
                 {
@@ -2694,10 +2693,10 @@ namespace TensileLite
                     HasIndex = false,
                     HasValue = true
                 };
-                DataType value;
+                rocisa::DataType value;
 
                 F32XdlMathOpEqual() = default;
-                F32XdlMathOpEqual(DataType value)
+                F32XdlMathOpEqual(rocisa::DataType value)
                     : value(value)
                 {
                 }

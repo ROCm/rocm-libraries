@@ -34,8 +34,8 @@ namespace nb = nanobind;
 void mfma_inst(nb::module_ m_mfma)
 {
     nb::class_<rocisa::MFMAInstruction, rocisa::Instruction>(m_mfma, "MFMAInstruction")
-        .def(nb::init<InstType,
-                      InstType,
+        .def(nb::init<rocisa::InstType,
+                      rocisa::InstType,
                       const std::vector<int>&,
                       bool,
                       const std::shared_ptr<rocisa::RegisterContainer>&,
@@ -65,8 +65,8 @@ void mfma_inst(nb::module_ m_mfma)
         });
 
     nb::class_<rocisa::SMFMAInstruction, rocisa::Instruction>(m_mfma, "SMFMAInstruction")
-        .def(nb::init<InstType,
-                      InstType,
+        .def(nb::init<rocisa::InstType,
+                      rocisa::InstType,
                       const std::vector<int>&,
                       bool,
                       const std::shared_ptr<rocisa::RegisterContainer>&,

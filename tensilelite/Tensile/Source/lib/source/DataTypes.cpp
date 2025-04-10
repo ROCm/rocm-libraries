@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -29,165 +29,178 @@
 
 #include <algorithm>
 
-namespace TensileLite
+namespace rocisa
 {
-    std::string ToString(DataType d)
+    std::string TypeAbbrev(rocisa::DataType d)
     {
         switch(d)
         {
-        case DataType::Float:
-            return "Float";
-        case DataType::Double:
-            return "Double";
-        case DataType::ComplexFloat:
-            return "ComplexFloat";
-        case DataType::ComplexDouble:
-            return "ComplexDouble";
-        case DataType::Half:
-            return "Half";
-        case DataType::Int8x4:
-            return "Int8x4";
-        case DataType::Int32:
-            return "Int32";
-        case DataType::Int64:
-            return "Int64";
-        case DataType::BFloat16:
-            return "BFloat16";
-        case DataType::Int8:
-            return "Int8";
-        case DataType::XFloat32:
-            return "XFloat32";
-        case DataType::Float8:
-            return "Float8";
-        case DataType::BFloat8:
-            return "BFloat8";
-        case DataType::Float8_fnuz:
-            return "Float8_fnuz";
-        case DataType::BFloat8_fnuz:
-            return "BFloat8_fnuz";
-        case DataType::Float8BFloat8:
-            return "Float8BFloat8";
-        case DataType::BFloat8Float8:
-            return "BFloat8Float8";
-        case DataType::Float8BFloat8_fnuz:
-            return "Float8BFloat8_fnuz";
-        case DataType::BFloat8Float8_fnuz:
-            return "BFloat8Float8_fnuz";
-        case DataType::Count:;
-        }
-        return "Invalid";
-    }
-
-    std::string TypeAbbrev(DataType d)
-    {
-        switch(d)
-        {
-        case DataType::Float:
+        case rocisa::DataType::Float:
             return "S";
-        case DataType::Double:
+        case rocisa::DataType::Double:
             return "D";
-        case DataType::ComplexFloat:
+        case rocisa::DataType::ComplexFloat:
             return "C";
-        case DataType::ComplexDouble:
+        case rocisa::DataType::ComplexDouble:
             return "Z";
-        case DataType::Half:
+        case rocisa::DataType::Half:
             return "H";
-        case DataType::Int8x4:
+        case rocisa::DataType::Int8x4:
             return "4xi8";
-        case DataType::Int32:
+        case rocisa::DataType::Int32:
             return "I";
-        case DataType::Int64:
+        case rocisa::DataType::Int64:
             return "I64";
-        case DataType::BFloat16:
+        case rocisa::DataType::BFloat16:
             return "B";
-        case DataType::Int8:
+        case rocisa::DataType::Int8:
             return "I8";
-        case DataType::XFloat32:
+        case rocisa::DataType::XFloat32:
             return "X";
-        case DataType::Float8:
+        case rocisa::DataType::Float8:
             return "F8";
-        case DataType::BFloat8:
+        case rocisa::DataType::BFloat8:
             return "B8";
-        case DataType::Float8_fnuz:
+        case rocisa::DataType::Float8_fnuz:
             return "F8N";
-        case DataType::BFloat8_fnuz:
+        case rocisa::DataType::BFloat8_fnuz:
             return "B8N";
-        case DataType::Float8BFloat8:
+        case rocisa::DataType::Float8BFloat8:
             return "F8B8";
-        case DataType::BFloat8Float8:
+        case rocisa::DataType::BFloat8Float8:
             return "B8F8";
-        case DataType::Float8BFloat8_fnuz:
+        case rocisa::DataType::Float8BFloat8_fnuz:
             return "F8B8N";
-        case DataType::BFloat8Float8_fnuz:
+        case rocisa::DataType::BFloat8Float8_fnuz:
             return "B8F8N";
-        case DataType::Count:;
+        case rocisa::DataType::Count:;
         }
         return "Invalid";
     }
 
-    size_t GetElementSize(DataType d)
+    size_t GetElementSize(rocisa::DataType d)
     {
         switch(d)
         {
-        case DataType::Float:
-            return TypeInfo<float>::ElementSize;
-        case DataType::Double:
-            return TypeInfo<double>::ElementSize;
-        case DataType::ComplexFloat:
-            return TypeInfo<std::complex<float>>::ElementSize;
-        case DataType::ComplexDouble:
-            return TypeInfo<std::complex<double>>::ElementSize;
-        case DataType::Half:
-            return TypeInfo<Half>::ElementSize;
-        case DataType::Int8x4:
-            return TypeInfo<Int8x4>::ElementSize;
-        case DataType::Int32:
-            return TypeInfo<int32_t>::ElementSize;
-        case DataType::Int64:
-            return TypeInfo<int64_t>::ElementSize;
-        case DataType::BFloat16:
-            return TypeInfo<BFloat16>::ElementSize;
-        case DataType::Int8:
-            return TypeInfo<int8_t>::ElementSize;
-        case DataType::XFloat32:
-            return TypeInfo<XFloat32>::ElementSize;
-        case DataType::Float8:
-            return TypeInfo<Float8>::ElementSize;
-        case DataType::BFloat8:
-            return TypeInfo<BFloat8>::ElementSize;
-        case DataType::Float8_fnuz:
-            return TypeInfo<Float8_fnuz>::ElementSize;
-        case DataType::BFloat8_fnuz:
-            return TypeInfo<BFloat8_fnuz>::ElementSize;
-        case DataType::Float8BFloat8:
-            return TypeInfo<Float8BFloat8>::ElementSize;
-        case DataType::BFloat8Float8:
-            return TypeInfo<BFloat8Float8>::ElementSize;
-        case DataType::Float8BFloat8_fnuz:
-            return TypeInfo<Float8BFloat8_fnuz>::ElementSize;
-        case DataType::BFloat8Float8_fnuz:
-            return TypeInfo<BFloat8Float8_fnuz>::ElementSize;
-        case DataType::Count:;
+        case rocisa::DataType::Float:
+            return TensileLite::TypeInfo<float>::ElementSize;
+        case rocisa::DataType::Double:
+            return TensileLite::TypeInfo<double>::ElementSize;
+        case rocisa::DataType::ComplexFloat:
+            return TensileLite::TypeInfo<std::complex<float>>::ElementSize;
+        case rocisa::DataType::ComplexDouble:
+            return TensileLite::TypeInfo<std::complex<double>>::ElementSize;
+        case rocisa::DataType::Half:
+            return TensileLite::TypeInfo<TensileLite::Half>::ElementSize;
+        case rocisa::DataType::Int8x4:
+            return TensileLite::TypeInfo<TensileLite::Int8x4>::ElementSize;
+        case rocisa::DataType::Int32:
+            return TensileLite::TypeInfo<int32_t>::ElementSize;
+        case rocisa::DataType::Int64:
+            return TensileLite::TypeInfo<int64_t>::ElementSize;
+        case rocisa::DataType::BFloat16:
+            return TensileLite::TypeInfo<TensileLite::BFloat16>::ElementSize;
+        case rocisa::DataType::Int8:
+            return TensileLite::TypeInfo<int8_t>::ElementSize;
+        case rocisa::DataType::XFloat32:
+            return TensileLite::TypeInfo<TensileLite::XFloat32>::ElementSize;
+        case rocisa::DataType::Float8:
+            return TensileLite::TypeInfo<TensileLite::Float8>::ElementSize;
+        case rocisa::DataType::BFloat8:
+            return TensileLite::TypeInfo<TensileLite::BFloat8>::ElementSize;
+        case rocisa::DataType::Float8_fnuz:
+            return TensileLite::TypeInfo<TensileLite::Float8_fnuz>::ElementSize;
+        case rocisa::DataType::BFloat8_fnuz:
+            return TensileLite::TypeInfo<TensileLite::BFloat8_fnuz>::ElementSize;
+        case rocisa::DataType::Float8BFloat8:
+            return TensileLite::TypeInfo<Float8BFloat8>::ElementSize;
+        case rocisa::DataType::BFloat8Float8:
+            return TensileLite::TypeInfo<BFloat8Float8>::ElementSize;
+        case rocisa::DataType::Float8BFloat8_fnuz:
+            return TensileLite::TypeInfo<Float8BFloat8_fnuz>::ElementSize;
+        case rocisa::DataType::BFloat8Float8_fnuz:
+            return TensileLite::TypeInfo<BFloat8Float8_fnuz>::ElementSize;
+        case rocisa::DataType::Count:;
         }
         return 1;
     }
 
-    std::map<DataType, DataTypeInfo>* DataTypeInfo::getData()
+    std::ostream& operator<<(std::ostream& stream, const rocisa::DataType& t)
     {
-        static std::map<DataType, DataTypeInfo> data;
+        return stream << rocisa::toString(t);
+    }
+
+    std::istream& operator>>(std::istream& stream, rocisa::DataType& t)
+    {
+        std::string strValue;
+        stream >> strValue;
+
+#if 1
+        t = TensileLite::DataTypeInfo::Get(strValue).dataType;
+
+#else
+
+        if(strValue == ToString(rocisa::DataType::Float))
+            t = rocisa::DataType::Float;
+        else if(strValue == ToString(rocisa::DataType::Double))
+            t = rocisa::DataType::Double;
+        else if(strValue == ToString(rocisa::DataType::ComplexFloat))
+            t = rocisa::DataType::ComplexFloat;
+        else if(strValue == ToString(rocisa::DataType::ComplexDouble))
+            t = rocisa::DataType::ComplexDouble;
+        else if(strValue == ToString(rocisa::DataType::Half))
+            t = rocisa::DataType::Half;
+        else if(strValue == ToString(rocisa::DataType::Int8x4))
+            t = rocisa::DataType::Int8x4;
+        else if(strValue == ToString(rocisa::DataType::Int32))
+            t = rocisa::DataType::Int32;
+        else if(strValue == ToString(rocisa::DataType::Int64))
+            t = rocisa::DataType::Int64;
+        else if(strValue == ToString(rocisa::DataType::Int8))
+            t = rocisa::DataType::Int8;
+        else if(strValue == ToString(rocisa::DataType::XFloat32))
+            t = rocisa::DataType::XFloat32;
+        else if(std::all_of(strValue.begin(), strValue.end(), isdigit))
+        {
+            int value = atoi(strValue.c_str());
+            if(value >= 0 && value < static_cast<int>(rocisa::DataType::Count))
+                t = static_cast<DataType>(value);
+            else
+                throw std::runtime_error(concatenate("Can't convert ", strValue, " to DataType."));
+        }
+        else
+        {
+            throw std::runtime_error(concatenate("Can't convert ", strValue, " to DataType."));
+        }
+#endif
+
+        return stream;
+    }
+}
+
+namespace TensileLite
+{
+    std::string ToString(rocisa::DataType d)
+    {
+        return rocisa::toString(d);
+    }
+
+    std::map<rocisa::DataType, DataTypeInfo>* DataTypeInfo::getData()
+    {
+        static std::map<rocisa::DataType, DataTypeInfo> data;
         return &data;
     }
 
-    std::map<std::string, DataType>* DataTypeInfo::getTypeNames()
+    std::map<std::string, rocisa::DataType>* DataTypeInfo::getTypeNames()
     {
-        static std::map<std::string, DataType> typeNames;
+        static std::map<std::string, rocisa::DataType> typeNames;
         return &typeNames;
     }
 
     template <typename T>
     void DataTypeInfo::registerTypeInfo()
     {
-        using T_Info = TypeInfo<T>;
+        using T_Info = TensileLite::TypeInfo<T>;
 
         DataTypeInfo info;
 
@@ -248,10 +261,10 @@ namespace TensileLite
 
     DataTypeInfo const& DataTypeInfo::Get(int index)
     {
-        return Get(static_cast<DataType>(index));
+        return Get(static_cast<rocisa::DataType>(index));
     }
 
-    DataTypeInfo const& DataTypeInfo::Get(DataType t)
+    DataTypeInfo const& DataTypeInfo::Get(rocisa::DataType t)
     {
         registerAllTypeInfoOnce();
 
@@ -275,58 +288,6 @@ namespace TensileLite
         return Get(iter->second);
     }
 
-    std::ostream& operator<<(std::ostream& stream, const DataType& t)
-    {
-        return stream << ToString(t);
-    }
-
-    std::istream& operator>>(std::istream& stream, DataType& t)
-    {
-        std::string strValue;
-        stream >> strValue;
-
-#if 1
-        t = DataTypeInfo::Get(strValue).dataType;
-
-#else
-
-        if(strValue == ToString(DataType::Float))
-            t = DataType::Float;
-        else if(strValue == ToString(DataType::Double))
-            t = DataType::Double;
-        else if(strValue == ToString(DataType::ComplexFloat))
-            t = DataType::ComplexFloat;
-        else if(strValue == ToString(DataType::ComplexDouble))
-            t = DataType::ComplexDouble;
-        else if(strValue == ToString(DataType::Half))
-            t = DataType::Half;
-        else if(strValue == ToString(DataType::Int8x4))
-            t = DataType::Int8x4;
-        else if(strValue == ToString(DataType::Int32))
-            t = DataType::Int32;
-        else if(strValue == ToString(DataType::Int64))
-            t = DataType::Int64;
-        else if(strValue == ToString(DataType::Int8))
-            t = DataType::Int8;
-        else if(strValue == ToString(DataType::XFloat32))
-            t = DataType::XFloat32;
-        else if(std::all_of(strValue.begin(), strValue.end(), isdigit))
-        {
-            int value = atoi(strValue.c_str());
-            if(value >= 0 && value < static_cast<int>(DataType::Count))
-                t = static_cast<DataType>(value);
-            else
-                throw std::runtime_error(concatenate("Can't convert ", strValue, " to DataType."));
-        }
-        else
-        {
-            throw std::runtime_error(concatenate("Can't convert ", strValue, " to DataType."));
-        }
-#endif
-
-        return stream;
-    }
-
     std::string ToString(ConstantVariant d)
     {
         return std::visit(
@@ -346,31 +307,31 @@ namespace TensileLite
     {
         switch(d.index())
         {
-        case static_cast<int>(DataType::Float):
+        case static_cast<int>(rocisa::DataType::Float):
             return (*std::get_if<float>(&d)) == float(value);
-        case static_cast<int>(DataType::Double):
+        case static_cast<int>(rocisa::DataType::Double):
             return (*std::get_if<double>(&d)) == double(value);
-        case static_cast<int>(DataType::ComplexFloat):
+        case static_cast<int>(rocisa::DataType::ComplexFloat):
             return (*std::get_if<std::complex<float>>(&d)) == std::complex<float>(value);
-        case static_cast<int>(DataType::ComplexDouble):
+        case static_cast<int>(rocisa::DataType::ComplexDouble):
             return (*std::get_if<std::complex<double>>(&d)) == std::complex<double>(value);
-        case static_cast<int>(DataType::Half):
+        case static_cast<int>(rocisa::DataType::Half):
             return (*std::get_if<Half>(&d)) == Half(value);
-        case static_cast<int>(DataType::Int32):
+        case static_cast<int>(rocisa::DataType::Int32):
             return (*std::get_if<int32_t>(&d)) == int32_t(value);
-        case static_cast<int>(DataType::Int64):
+        case static_cast<int>(rocisa::DataType::Int64):
             return (*std::get_if<int64_t>(&d)) == int64_t(value);
-        case static_cast<int>(DataType::BFloat16):
+        case static_cast<int>(rocisa::DataType::BFloat16):
             return (*std::get_if<BFloat16>(&d)) == BFloat16(value);
-        case static_cast<int>(DataType::Int8):
+        case static_cast<int>(rocisa::DataType::Int8):
             return (*std::get_if<int8_t>(&d)) == int8_t(value);
-        case static_cast<int>(DataType::Float8):
+        case static_cast<int>(rocisa::DataType::Float8):
             return (*std::get_if<Float8>(&d)) == Float8(static_cast<float>(value));
-        case static_cast<int>(DataType::BFloat8):
+        case static_cast<int>(rocisa::DataType::BFloat8):
             return (*std::get_if<BFloat8>(&d)) == BFloat8(static_cast<float>(value));
-        case static_cast<int>(DataType::Float8_fnuz):
+        case static_cast<int>(rocisa::DataType::Float8_fnuz):
             return (*std::get_if<Float8_fnuz>(&d)) == Float8_fnuz(static_cast<float>(value));
-        case static_cast<int>(DataType::BFloat8_fnuz):
+        case static_cast<int>(rocisa::DataType::BFloat8_fnuz):
             return (*std::get_if<BFloat8_fnuz>(&d)) == BFloat8_fnuz(static_cast<float>(value));
         default:
             throw std::runtime_error("Unsupported variant cast type.");

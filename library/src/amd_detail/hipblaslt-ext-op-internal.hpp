@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -39,64 +39,65 @@
 #include <stdexcept>
 #include <string>
 
-namespace hipblaslt_ext {
-
-class SoftmaxProblem;
-class SoftmaxSolution;
-
-class SoftmaxSolution : public TensileLite::Solution
+namespace hipblaslt_ext
 {
-public:
-    friend struct TensileLite::Serialization::MappingTraits<SoftmaxSolution,
-                                                        TensileLite::Serialization::MessagePackInput>;
 
-    using Problem = SoftmaxProblem;
-    std::string name() const override
+    class SoftmaxProblem;
+    class SoftmaxSolution;
+
+    class SoftmaxSolution : public TensileLite::Solution
     {
-        return kernelName;
-    }
+    public:
+        friend struct TensileLite::Serialization::
+            MappingTraits<SoftmaxSolution, TensileLite::Serialization::MessagePackInput>;
 
-    std::string description() const override
-    {
-        std::stringstream ss;
-        ss << "Softmax, (Datatype, tileM, tileN) = "
-           << "(" << TensileLite::ToString(datatype) << ", " << tileM << ", " << tileN << ")";
-        return ss.str();
-    }
+        using Problem = SoftmaxProblem;
+        std::string name() const override
+        {
+            return kernelName;
+        }
 
-    std::uint32_t getTileM() const
-    {
-        return tileM;
-    }
+        std::string description() const override
+        {
+            std::stringstream ss;
+            ss << "Softmax, (Datatype, tileM, tileN) = "
+               << "(" << TensileLite::ToString(datatype) << ", " << tileM << ", " << tileN << ")";
+            return ss.str();
+        }
 
-    std::uint32_t getTileN() const
-    {
-        return tileN;
-    }
+        std::uint32_t getTileM() const
+        {
+            return tileM;
+        }
 
-    std::uint32_t getNumWorkitems() const
-    {
-        return numWorkitems;
-    }
+        std::uint32_t getTileN() const
+        {
+            return tileN;
+        }
 
-    std::string getCodeObjectPath() const
-    {
-        return coPath;
-    }
+        std::uint32_t getNumWorkitems() const
+        {
+            return numWorkitems;
+        }
 
-    TensileLite::DataType getDatatype() const
-    {
-        return datatype;
-    }
+        std::string getCodeObjectPath() const
+        {
+            return coPath;
+        }
 
-private:
-    std::size_t       tileM{};
-    std::size_t       tileN{};
-    std::size_t       numWorkitems{};
-    std::string       coPath;
-    std::string       kernelName;
-    TensileLite::DataType datatype;
-};
+        rocisa::DataType getDatatype() const
+        {
+            return datatype;
+        }
+
+    private:
+        std::size_t      tileM{};
+        std::size_t      tileN{};
+        std::size_t      numWorkitems{};
+        std::string      coPath;
+        std::string      kernelName;
+        rocisa::DataType datatype;
+    };
 
 } // namespace hipblaslt
 template <typename IO>
@@ -111,7 +112,7 @@ struct TensileLite::Serialization::MappingTraits<hipblaslt_ext::SoftmaxSolution,
 
         if(datatypeStr == "S")
         {
-            s.datatype = TensileLite::DataType::Float;
+            s.datatype = rocisa::DataType::Float;
         }
         else
         {
@@ -127,157 +128,159 @@ struct TensileLite::Serialization::MappingTraits<hipblaslt_ext::SoftmaxSolution,
     const static bool flow = false;
 };
 
-namespace hipblaslt_ext {
-
-class SoftmaxProblem : public TensileLite::Problem
+namespace hipblaslt_ext
 {
-public:
-    using Solution = SoftmaxSolution;
-    SoftmaxProblem(uint32_t m, uint32_t n, TensileLite::DataType datatype)
-        : m(m)
-        , n(n)
-        , datatype(datatype)
+
+    class SoftmaxProblem : public TensileLite::Problem
     {
-    }
+    public:
+        using Solution = SoftmaxSolution;
+        SoftmaxProblem(uint32_t m, uint32_t n, rocisa::DataType datatype)
+            : m(m)
+            , n(n)
+            , datatype(datatype)
+        {
+        }
 
-    ~SoftmaxProblem() override {}
+        ~SoftmaxProblem() override {}
 
-    std::string description() const override
+        std::string description() const override
+        {
+            std::stringstream ss;
+            ss << "Softmax Problem(" << TensileLite::ToString(datatype) << ", " << m << ", " << n
+               << ")";
+            return ss.str();
+        }
+
+        std::uint32_t getM() const
+        {
+            return m;
+        }
+
+        std::uint32_t getN() const
+        {
+            return n;
+        }
+
+    private:
+        std::uint32_t    m{};
+        std::uint32_t    n{};
+        rocisa::DataType datatype{rocisa::DataType::Float};
+    };
+
+    struct ExtOpLibrary
     {
-        std::stringstream ss;
-        ss << "Softmax Problem(" << ToString(datatype) << ", " << m << ", " << n << ")";
-        return ss.str();
-    }
+        virtual ~ExtOpLibrary()                 = default;
+        virtual std::string type() const        = 0;
+        virtual std::string description() const = 0;
 
-    std::uint32_t getM() const
+        template <typename T>
+        T& as()
+        {
+            return dynamic_cast<T&>(*this);
+        }
+
+        template <typename T>
+        const T& as() const
+        {
+            return dynamic_cast<T&>(*this);
+        }
+    };
+
+    class SoftmaxSolutionLibrary : public ExtOpLibrary
     {
-        return m;
-    }
+    public:
+        static constexpr char opName[] = "Softmax";
 
-    std::uint32_t getN() const
-    {
-        return n;
-    }
+        ~SoftmaxSolutionLibrary() override {}
+        void addSolution(SoftmaxSolution& sol)
+        {
+            solutions.push_back(std::make_shared<SoftmaxSolution>(sol));
+        }
 
-private:
-    std::uint32_t     m{};
-    std::uint32_t     n{};
-    TensileLite::DataType datatype{TensileLite::DataType::Float};
-};
+        std::string type() const override
+        {
+            return "SoftmaxSolutionLibrary";
+        }
 
-struct ExtOpLibrary
-{
-    virtual ~ExtOpLibrary()                 = default;
-    virtual std::string type() const        = 0;
-    virtual std::string description() const = 0;
+        std::string description() const override
+        {
+            return "SoftmaxSolutionLibrary";
+        }
 
-    template <typename T>
-    T& as()
-    {
-        return dynamic_cast<T&>(*this);
-    }
+        std::shared_ptr<SoftmaxSolution> findBestSolution(const SoftmaxProblem&        problem,
+                                                          const TensileLite::Hardware& hardware,
+                                                          double* fitness = nullptr) const
+        {
+            auto bestSolIter = std::lower_bound(
+                begin(solutions), end(solutions), problem.getN(), [](const auto& it, auto v) {
+                    return it->getTileN() < v;
+                });
 
-    template <typename T>
-    const T& as() const
-    {
-        return dynamic_cast<T&>(*this);
-    }
-};
+            return *bestSolIter;
+        }
 
-class SoftmaxSolutionLibrary : public ExtOpLibrary
-{
-public:
-    static constexpr char opName[] = "Softmax";
-
-    ~SoftmaxSolutionLibrary() override {}
-    void addSolution(SoftmaxSolution& sol)
-    {
-        solutions.push_back(std::make_shared<SoftmaxSolution>(sol));
-    }
-
-    std::string type() const override
-    {
-        return "SoftmaxSolutionLibrary";
-    }
-
-    std::string description() const override
-    {
-        return "SoftmaxSolutionLibrary";
-    }
-
-    std::shared_ptr<SoftmaxSolution> findBestSolution(const SoftmaxProblem&    problem,
-                                                      const TensileLite::Hardware& hardware,
-                                                      double* fitness = nullptr) const
-    {
-        auto bestSolIter = std::lower_bound(
-            begin(solutions), end(solutions), problem.getN(), [](const auto& it, auto v) {
-                return it->getTileN() < v;
+        void sortSolutions()
+        {
+            std::sort(begin(solutions), end(solutions), [](const auto& lhs, const auto& rhs) {
+                return lhs->getTileN() < rhs->getTileN();
             });
+        }
 
-        return *bestSolIter;
-    }
+    private:
+        TensileLite::SolutionVector<SoftmaxSolution> solutions;
+    };
 
-    void sortSolutions()
+    class LayerNormProblem;
+    class LayerNormSolution;
+
+    class LayerNormSolution : public TensileLite::Solution
     {
-        std::sort(begin(solutions), end(solutions), [](const auto& lhs, const auto& rhs) {
-            return lhs->getTileN() < rhs->getTileN();
-        });
-    }
+    public:
+        friend struct TensileLite::Serialization::
+            MappingTraits<LayerNormSolution, TensileLite::Serialization::MessagePackInput>;
 
-private:
-    TensileLite::SolutionVector<SoftmaxSolution> solutions;
-};
+        using Problem = LayerNormProblem;
+        std::string name() const override
+        {
+            return kernelName;
+        }
 
-class LayerNormProblem;
-class LayerNormSolution;
+        std::string description() const override
+        {
+            std::stringstream ss;
+            ss << "LayerNorm, (Datatype) = "
+               << "(" << TensileLite::ToString(datatype) << ")";
+            return ss.str();
+        }
 
-class LayerNormSolution : public TensileLite::Solution
-{
-public:
-    friend struct TensileLite::Serialization::MappingTraits<LayerNormSolution,
-                                                        TensileLite::Serialization::MessagePackInput>;
+        std::uint32_t getNumWorkitems() const
+        {
+            return numWorkitems;
+        }
 
-    using Problem = LayerNormProblem;
-    std::string name() const override
-    {
-        return kernelName;
-    }
+        std::uint32_t getLimit() const
+        {
+            return limit;
+        }
 
-    std::string description() const override
-    {
-        std::stringstream ss;
-        ss << "LayerNorm, (Datatype) = "
-           << "(" << TensileLite::ToString(datatype) << ")";
-        return ss.str();
-    }
+        std::string getCodeObjectPath() const
+        {
+            return coPath;
+        }
 
-    std::uint32_t getNumWorkitems() const
-    {
-        return numWorkitems;
-    }
+        rocisa::DataType getDatatype() const
+        {
+            return datatype;
+        }
 
-    std::uint32_t getLimit() const
-    {
-        return limit;
-    }
-
-    std::string getCodeObjectPath() const
-    {
-        return coPath;
-    }
-
-    TensileLite::DataType getDatatype() const
-    {
-        return datatype;
-    }
-
-private:
-    std::size_t       numWorkitems{};
-    std::size_t       limit;
-    std::string       coPath;
-    std::string       kernelName;
-    TensileLite::DataType datatype;
-};
+    private:
+        std::size_t      numWorkitems{};
+        std::size_t      limit;
+        std::string      coPath;
+        std::string      kernelName;
+        rocisa::DataType datatype;
+    };
 
 } //namespace hipblaslt_ext
 
@@ -298,7 +301,7 @@ struct TensileLite::Serialization::MappingTraits<hipblaslt_ext::LayerNormSolutio
 
         if(datatypeStr == "S")
         {
-            s.datatype = TensileLite::DataType::Float;
+            s.datatype = rocisa::DataType::Float;
         }
         else
         {
@@ -309,150 +312,153 @@ struct TensileLite::Serialization::MappingTraits<hipblaslt_ext::LayerNormSolutio
     const static bool flow = false;
 };
 
-namespace hipblaslt_ext {
-
-class LayerNormProblem : public TensileLite::Problem
+namespace hipblaslt_ext
 {
-public:
-    using Solution = LayerNormSolution;
-    LayerNormProblem(uint32_t m, uint32_t n, TensileLite::DataType datatype)
-        : m(m)
-        , n(n)
-        , datatype(datatype)
+
+    class LayerNormProblem : public TensileLite::Problem
     {
-    }
+    public:
+        using Solution = LayerNormSolution;
+        LayerNormProblem(uint32_t m, uint32_t n, rocisa::DataType datatype)
+            : m(m)
+            , n(n)
+            , datatype(datatype)
+        {
+        }
 
-    ~LayerNormProblem() override {}
+        ~LayerNormProblem() override {}
 
-    std::string description() const override
+        std::string description() const override
+        {
+            std::stringstream ss;
+            ss << "LayerNorm Problem(" << TensileLite::ToString(datatype) << ", " << m << ", " << n
+               << ")";
+            return ss.str();
+        }
+
+        std::uint32_t getM() const
+        {
+            return m;
+        }
+
+        std::uint32_t getN() const
+        {
+            return n;
+        }
+
+    private:
+        std::uint32_t    m{};
+        std::uint32_t    n{};
+        rocisa::DataType datatype{rocisa::DataType::Float};
+    };
+
+    class LayerNormSolutionLibrary : public ExtOpLibrary
     {
-        std::stringstream ss;
-        ss << "LayerNorm Problem(" << ToString(datatype) << ", " << m << ", " << n << ")";
-        return ss.str();
-    }
+    public:
+        static constexpr char opName[] = "LayerNorm";
 
-    std::uint32_t getM() const
-    {
-        return m;
-    }
+        ~LayerNormSolutionLibrary() override {}
+        void addSolution(LayerNormSolution& sol)
+        {
+            solutions.push_back(std::make_shared<LayerNormSolution>(sol));
+        }
 
-    std::uint32_t getN() const
-    {
-        return n;
-    }
+        std::string type() const override
+        {
+            return "LayerNormSolutionLibrary";
+        }
 
-private:
-    std::uint32_t     m{};
-    std::uint32_t     n{};
-    TensileLite::DataType datatype{TensileLite::DataType::Float};
-};
+        std::string description() const override
+        {
+            return "LayerNormSolutionLibrary";
+        }
 
-class LayerNormSolutionLibrary : public ExtOpLibrary
-{
-public:
-    static constexpr char opName[] = "LayerNorm";
+        std::shared_ptr<LayerNormSolution> findBestSolution(const LayerNormProblem&      problem,
+                                                            const TensileLite::Hardware& hardware,
+                                                            double* fitness = nullptr) const
+        {
+            auto bestSolIter = std::lower_bound(
+                begin(solutions), end(solutions), problem.getN(), [](const auto& it, auto v) {
+                    return it->getLimit() < v;
+                });
 
-    ~LayerNormSolutionLibrary() override {}
-    void addSolution(LayerNormSolution& sol)
-    {
-        solutions.push_back(std::make_shared<LayerNormSolution>(sol));
-    }
+            return *bestSolIter;
+        }
 
-    std::string type() const override
-    {
-        return "LayerNormSolutionLibrary";
-    }
-
-    std::string description() const override
-    {
-        return "LayerNormSolutionLibrary";
-    }
-
-    std::shared_ptr<LayerNormSolution> findBestSolution(const LayerNormProblem&  problem,
-                                                        const TensileLite::Hardware& hardware,
-                                                        double* fitness = nullptr) const
-    {
-        auto bestSolIter = std::lower_bound(
-            begin(solutions), end(solutions), problem.getN(), [](const auto& it, auto v) {
-                return it->getLimit() < v;
+        void sortSolutions()
+        {
+            std::sort(begin(solutions), end(solutions), [](const auto& lhs, const auto& rhs) {
+                return lhs->getLimit() < rhs->getLimit();
             });
+        }
 
-        return *bestSolIter;
-    }
+    private:
+        TensileLite::SolutionVector<LayerNormSolution> solutions;
+    };
 
-    void sortSolutions()
+    class AMaxProblem;
+    class AMaxSolution;
+
+    class AMaxSolution : public TensileLite::Solution
     {
-        std::sort(begin(solutions), end(solutions), [](const auto& lhs, const auto& rhs) {
-            return lhs->getLimit() < rhs->getLimit();
-        });
-    }
+    public:
+        friend struct TensileLite::Serialization::
+            MappingTraits<AMaxSolution, TensileLite::Serialization::MessagePackInput>;
 
-private:
-    TensileLite::SolutionVector<LayerNormSolution> solutions;
-};
+        using Problem = AMaxProblem;
+        std::string name() const override
+        {
+            return kernelName;
+        }
 
-class AMaxProblem;
-class AMaxSolution;
+        std::string description() const override
+        {
+            std::stringstream ss;
+            ss << "AMax, (Datatype, outDatatype) = "
+               << "(" << TensileLite::ToString(datatype) << ", "
+               << TensileLite::ToString(outDatatype) << ")";
+            return ss.str();
+        }
 
-class AMaxSolution : public TensileLite::Solution
-{
-public:
-    friend struct TensileLite::Serialization::MappingTraits<AMaxSolution,
-                                                        TensileLite::Serialization::MessagePackInput>;
+        std::uint32_t getNumWorkitems() const
+        {
+            return numWorkitems;
+        }
 
-    using Problem = AMaxProblem;
-    std::string name() const override
-    {
-        return kernelName;
-    }
+        std::string getCodeObjectPath() const
+        {
+            return coPath;
+        }
 
-    std::string description() const override
-    {
-        std::stringstream ss;
-        ss << "AMax, (Datatype, outDatatype) = "
-           << "(" << TensileLite::ToString(datatype) << ", " << TensileLite::ToString(outDatatype) << ")";
-        return ss.str();
-    }
+        rocisa::DataType getDatatype() const
+        {
+            return datatype;
+        }
 
-    std::uint32_t getNumWorkitems() const
-    {
-        return numWorkitems;
-    }
+        rocisa::DataType getOutDatatype() const
+        {
+            return outDatatype;
+        }
 
-    std::string getCodeObjectPath() const
-    {
-        return coPath;
-    }
+        rocisa::DataType getScaleDatatype() const
+        {
+            return scaleDatatype;
+        }
 
-    TensileLite::DataType getDatatype() const
-    {
-        return datatype;
-    }
+        bool getIsScale() const
+        {
+            return isScale;
+        }
 
-    TensileLite::DataType getOutDatatype() const
-    {
-        return outDatatype;
-    }
-
-    TensileLite::DataType getScaleDatatype() const
-    {
-        return scaleDatatype;
-    }
-
-    bool getIsScale() const
-    {
-        return isScale;
-    }
-
-private:
-    std::size_t       numWorkitems{};
-    std::string       coPath;
-    std::string       kernelName;
-    TensileLite::DataType datatype;
-    TensileLite::DataType outDatatype;
-    TensileLite::DataType scaleDatatype;
-    bool              isScale;
-};
+    private:
+        std::size_t      numWorkitems{};
+        std::string      coPath;
+        std::string      kernelName;
+        rocisa::DataType datatype;
+        rocisa::DataType outDatatype;
+        rocisa::DataType scaleDatatype;
+        bool             isScale;
+    };
 
 } // namespace hipblaslt_ext
 
@@ -477,11 +483,11 @@ struct TensileLite::Serialization::MappingTraits<hipblaslt_ext::AMaxSolution, IO
 
         if(datatypeStr == "S")
         {
-            s.datatype = TensileLite::DataType::Float;
+            s.datatype = rocisa::DataType::Float;
         }
         else if(datatypeStr == "H")
         {
-            s.datatype = TensileLite::DataType::Half;
+            s.datatype = rocisa::DataType::Half;
         }
         else
         {
@@ -490,11 +496,11 @@ struct TensileLite::Serialization::MappingTraits<hipblaslt_ext::AMaxSolution, IO
 
         if(outDatatypeStr == "S")
         {
-            s.outDatatype = TensileLite::DataType::Float;
+            s.outDatatype = rocisa::DataType::Float;
         }
         else if(outDatatypeStr == "H")
         {
-            s.outDatatype = TensileLite::DataType::Half;
+            s.outDatatype = rocisa::DataType::Half;
         }
         else
         {
@@ -503,19 +509,19 @@ struct TensileLite::Serialization::MappingTraits<hipblaslt_ext::AMaxSolution, IO
 
         if(scaleDatatypeStr == "F8N")
         {
-            s.scaleDatatype = TensileLite::DataType::Float8_fnuz;
+            s.scaleDatatype = rocisa::DataType::Float8_fnuz;
         }
         else if(scaleDatatypeStr == "B8N")
         {
-            s.scaleDatatype = TensileLite::DataType::BFloat8_fnuz;
+            s.scaleDatatype = rocisa::DataType::BFloat8_fnuz;
         }
         else if(scaleDatatypeStr == "F8")
         {
-            s.scaleDatatype = TensileLite::DataType::Float8;
+            s.scaleDatatype = rocisa::DataType::Float8;
         }
         else if(scaleDatatypeStr == "B8")
         {
-            s.scaleDatatype = TensileLite::DataType::BFloat8;
+            s.scaleDatatype = rocisa::DataType::BFloat8;
         }
         else
         {
@@ -526,300 +532,303 @@ struct TensileLite::Serialization::MappingTraits<hipblaslt_ext::AMaxSolution, IO
     const static bool flow = false;
 };
 
-namespace hipblaslt_ext {
-
-class AMaxProblem : public TensileLite::Problem
+namespace hipblaslt_ext
 {
-public:
-    using Solution = AMaxSolution;
-    AMaxProblem(uint32_t length, TensileLite::DataType datatype, TensileLite::DataType outDatatype)
-        : length(length)
-        , datatype(datatype)
-        , outDatatype(outDatatype)
+
+    class AMaxProblem : public TensileLite::Problem
     {
-    }
-    AMaxProblem(uint32_t          length,
-                TensileLite::DataType datatype,
-                TensileLite::DataType outDatatype,
-                TensileLite::DataType scaleDatatype,
-                bool              isScale)
-        : length(length)
-        , datatype(datatype)
-        , outDatatype(outDatatype)
-        , scaleDatatype(scaleDatatype)
-        , isScale(isScale)
-    {
-    }
-
-    ~AMaxProblem() override {}
-
-    std::string description() const override
-    {
-        std::stringstream ss;
-        ss << "AMax Problem(" << ToString(datatype) << ", " << ToString(outDatatype) << ", "
-           << length << ")";
-        return ss.str();
-    }
-
-    std::uint32_t getLength() const
-    {
-        return length;
-    }
-
-    TensileLite::DataType getDatatype() const
-    {
-        return datatype;
-    }
-
-    TensileLite::DataType getOutDatatype() const
-    {
-        return outDatatype;
-    }
-
-    TensileLite::DataType getScaleDatatype() const
-    {
-        return scaleDatatype;
-    }
-
-    bool getIsScale() const
-    {
-        return isScale;
-    }
-
-private:
-    std::uint32_t     length{};
-    TensileLite::DataType datatype{TensileLite::DataType::Float};
-    TensileLite::DataType outDatatype{TensileLite::DataType::Float};
-    TensileLite::DataType scaleDatatype{TensileLite::DataType::Float8_fnuz};
-    bool              isScale = false;
-};
-
-class AMaxSolutionLibrary : public ExtOpLibrary
-{
-public:
-    static constexpr char opName[] = "AMax";
-
-    ~AMaxSolutionLibrary() override {}
-    void addSolution(AMaxSolution& sol)
-    {
-        solutions.push_back(std::make_shared<AMaxSolution>(sol));
-    }
-
-    std::string type() const override
-    {
-        return "AMaxSolutionLibrary";
-    }
-
-    std::string description() const override
-    {
-        return "AMaxSolutionLibrary";
-    }
-
-    std::shared_ptr<AMaxSolution> findBestSolution(const AMaxProblem&       prob,
-                                                   const TensileLite::Hardware& hardware,
-                                                   double*                  fitness = nullptr) const
-    {
-        if(prob.getIsScale())
+    public:
+        using Solution = AMaxSolution;
+        AMaxProblem(uint32_t length, rocisa::DataType datatype, rocisa::DataType outDatatype)
+            : length(length)
+            , datatype(datatype)
+            , outDatatype(outDatatype)
         {
-            for(auto sol : solutions)
-                if(sol->getOutDatatype() == prob.getOutDatatype()
-                   && sol->getScaleDatatype() == prob.getScaleDatatype() && sol->getIsScale())
-                    return sol;
         }
-        else
+        AMaxProblem(uint32_t         length,
+                    rocisa::DataType datatype,
+                    rocisa::DataType outDatatype,
+                    rocisa::DataType scaleDatatype,
+                    bool             isScale)
+            : length(length)
+            , datatype(datatype)
+            , outDatatype(outDatatype)
+            , scaleDatatype(scaleDatatype)
+            , isScale(isScale)
         {
-            for(auto sol : solutions)
-                if(sol->getOutDatatype() == prob.getOutDatatype() && !sol->getIsScale())
-                    return sol;
-        }
-        return nullptr;
-    }
-
-    void sortSolutions()
-    {
-        std::sort(begin(solutions), end(solutions), [](const auto& lhs, const auto& rhs) {
-            return lhs->getOutDatatype() < rhs->getOutDatatype();
-        });
-    }
-
-private:
-    TensileLite::SolutionVector<AMaxSolution> solutions;
-};
-
-class ExtOpMasterLibrary
-{
-public:
-    using ExtOpLibraryPtr = std::unique_ptr<ExtOpLibrary>;
-    explicit ExtOpMasterLibrary(const std::string& libPath)
-        : libPath(libPath)
-    {
-        libDir = std::string(dirname(&this->libPath[0]));
-        load(libPath);
-    }
-
-    const ExtOpLibraryPtr& getLibrary(const std::string& archName,
-                                      const std::string& opName,
-                                      const std::string& typeName) const
-    {
-        return libraries.at(archName).at(opName).at(typeName);
-    }
-
-    const std::string getLibraryPath() const
-    {
-        return libPath;
-    }
-
-    const std::string getLibraryFolder() const
-    {
-        return libDir;
-    }
-
-private:
-    bool load(const std::string& libPath)
-    {
-        msgpack::object_handle handle;
-
-        std::ifstream ifs(libPath, std::ios::in | std::ios::binary);
-
-        if(!ifs.is_open())
-        {
-            throw std::runtime_error("Invalid ext op lib path");
         }
 
-        msgpack::unpacker     unpacker;
-        bool                  finished{};
-        constexpr std::size_t bufferSize = 1 << 16;
+        ~AMaxProblem() override {}
 
-        while(!finished && !ifs.fail())
+        std::string description() const override
         {
-            unpacker.reserve_buffer(bufferSize);
-            ifs.read(unpacker.buffer(), bufferSize);
-            unpacker.buffer_consumed(ifs.gcount());
-            finished = unpacker.next(handle);
+            std::stringstream ss;
+            ss << "AMax Problem(" << TensileLite::ToString(datatype) << ", "
+               << TensileLite::ToString(outDatatype) << ", " << length << ")";
+            return ss.str();
         }
 
-        if(!finished)
+        std::uint32_t getLength() const
         {
-            throw std::runtime_error("Unexpected EOF!");
+            return length;
         }
 
-        msgpack::object                                  root = handle.get();
-        std::unordered_map<std::string, msgpack::object> objMap;
-        TensileLite::Serialization::objectToMap(root, objMap);
-
-        for(auto& archObj : objMap)
+        rocisa::DataType getDatatype() const
         {
-            libraries.emplace(archObj.first,
-                              std::map<std::string, std::map<std::string, ExtOpLibraryPtr>>());
+            return datatype;
+        }
 
-            std::unordered_map<std::string, msgpack::object> opMap;
-            TensileLite::Serialization::objectToMap(archObj.second, opMap);
+        rocisa::DataType getOutDatatype() const
+        {
+            return outDatatype;
+        }
 
-            for(auto& opObj : opMap)
+        rocisa::DataType getScaleDatatype() const
+        {
+            return scaleDatatype;
+        }
+
+        bool getIsScale() const
+        {
+            return isScale;
+        }
+
+    private:
+        std::uint32_t    length{};
+        rocisa::DataType datatype{rocisa::DataType::Float};
+        rocisa::DataType outDatatype{rocisa::DataType::Float};
+        rocisa::DataType scaleDatatype{rocisa::DataType::Float8_fnuz};
+        bool             isScale = false;
+    };
+
+    class AMaxSolutionLibrary : public ExtOpLibrary
+    {
+    public:
+        static constexpr char opName[] = "AMax";
+
+        ~AMaxSolutionLibrary() override {}
+        void addSolution(AMaxSolution& sol)
+        {
+            solutions.push_back(std::make_shared<AMaxSolution>(sol));
+        }
+
+        std::string type() const override
+        {
+            return "AMaxSolutionLibrary";
+        }
+
+        std::string description() const override
+        {
+            return "AMaxSolutionLibrary";
+        }
+
+        std::shared_ptr<AMaxSolution> findBestSolution(const AMaxProblem&           prob,
+                                                       const TensileLite::Hardware& hardware,
+                                                       double* fitness = nullptr) const
+        {
+            if(prob.getIsScale())
             {
-                libraries.at(archObj.first)
-                    .emplace(opObj.first, std::map<std::string, ExtOpLibraryPtr>());
+                for(auto sol : solutions)
+                    if(sol->getOutDatatype() == prob.getOutDatatype()
+                       && sol->getScaleDatatype() == prob.getScaleDatatype() && sol->getIsScale())
+                        return sol;
+            }
+            else
+            {
+                for(auto sol : solutions)
+                    if(sol->getOutDatatype() == prob.getOutDatatype() && !sol->getIsScale())
+                        return sol;
+            }
+            return nullptr;
+        }
 
-                std::unordered_map<std::string, msgpack::object> typeMap;
-                TensileLite::Serialization::objectToMap(opObj.second, typeMap);
+        void sortSolutions()
+        {
+            std::sort(begin(solutions), end(solutions), [](const auto& lhs, const auto& rhs) {
+                return lhs->getOutDatatype() < rhs->getOutDatatype();
+            });
+        }
 
-                for(auto& typeLib : typeMap)
+    private:
+        TensileLite::SolutionVector<AMaxSolution> solutions;
+    };
+
+    class ExtOpMasterLibrary
+    {
+    public:
+        using ExtOpLibraryPtr = std::unique_ptr<ExtOpLibrary>;
+        explicit ExtOpMasterLibrary(const std::string& libPath)
+            : libPath(libPath)
+        {
+            libDir = std::string(dirname(&this->libPath[0]));
+            load(libPath);
+        }
+
+        const ExtOpLibraryPtr& getLibrary(const std::string& archName,
+                                          const std::string& opName,
+                                          const std::string& typeName) const
+        {
+            return libraries.at(archName).at(opName).at(typeName);
+        }
+
+        const std::string getLibraryPath() const
+        {
+            return libPath;
+        }
+
+        const std::string getLibraryFolder() const
+        {
+            return libDir;
+        }
+
+    private:
+        bool load(const std::string& libPath)
+        {
+            msgpack::object_handle handle;
+
+            std::ifstream ifs(libPath, std::ios::in | std::ios::binary);
+
+            if(!ifs.is_open())
+            {
+                throw std::runtime_error("Invalid ext op lib path");
+            }
+
+            msgpack::unpacker     unpacker;
+            bool                  finished{};
+            constexpr std::size_t bufferSize = 1 << 16;
+
+            while(!finished && !ifs.fail())
+            {
+                unpacker.reserve_buffer(bufferSize);
+                ifs.read(unpacker.buffer(), bufferSize);
+                unpacker.buffer_consumed(ifs.gcount());
+                finished = unpacker.next(handle);
+            }
+
+            if(!finished)
+            {
+                throw std::runtime_error("Unexpected EOF!");
+            }
+
+            msgpack::object                                  root = handle.get();
+            std::unordered_map<std::string, msgpack::object> objMap;
+            TensileLite::Serialization::objectToMap(root, objMap);
+
+            for(auto& archObj : objMap)
+            {
+                libraries.emplace(archObj.first,
+                                  std::map<std::string, std::map<std::string, ExtOpLibraryPtr>>());
+
+                std::unordered_map<std::string, msgpack::object> opMap;
+                TensileLite::Serialization::objectToMap(archObj.second, opMap);
+
+                for(auto& opObj : opMap)
                 {
-                    auto& rawKernels = typeLib.second;
+                    libraries.at(archObj.first)
+                        .emplace(opObj.first, std::map<std::string, ExtOpLibraryPtr>());
 
-                    if(rawKernels.type != msgpack::type::ARRAY)
+                    std::unordered_map<std::string, msgpack::object> typeMap;
+                    TensileLite::Serialization::objectToMap(opObj.second, typeMap);
+
+                    for(auto& typeLib : typeMap)
                     {
-                        throw std::runtime_error("Invalid ext op lib format");
-                    }
+                        auto& rawKernels = typeLib.second;
 
-                    const auto numKernels = rawKernels.via.array.size;
-
-                    if(opObj.first == "Softmax")
-                    {
-                        libraries.at(archObj.first)
-                            .at(opObj.first)
-                            .emplace(typeLib.first, std::make_unique<SoftmaxSolutionLibrary>());
-                        auto& lib = libraries.at(archObj.first)
-                                        .at(opObj.first)
-                                        .at(typeLib.first)
-                                        ->as<SoftmaxSolutionLibrary>();
-
-                        for(uint32_t i = 0; i < numKernels; ++i)
+                        if(rawKernels.type != msgpack::type::ARRAY)
                         {
-                            auto&           rawKernel = rawKernels.via.array.ptr[i];
-                            SoftmaxSolution solution;
-                            TensileLite::Serialization::MessagePackInput msgInput(rawKernel);
-                            TensileLite::Serialization::MappingTraits<
-                                SoftmaxSolution,
-                                TensileLite::Serialization::MessagePackInput>::mapping(msgInput,
-                                                                                   solution);
-
-                            lib.addSolution(solution);
+                            throw std::runtime_error("Invalid ext op lib format");
                         }
 
-                        lib.sortSolutions();
-                    }
-                    else if(opObj.first == "LayerNorm")
-                    {
-                        libraries.at(archObj.first)
-                            .at(opObj.first)
-                            .emplace(typeLib.first, std::make_unique<LayerNormSolutionLibrary>());
-                        auto& lib = libraries.at(archObj.first)
-                                        .at(opObj.first)
-                                        .at(typeLib.first)
-                                        ->as<LayerNormSolutionLibrary>();
+                        const auto numKernels = rawKernels.via.array.size;
 
-                        for(uint32_t i = 0; i < numKernels; ++i)
+                        if(opObj.first == "Softmax")
                         {
-                            auto&             rawKernel = rawKernels.via.array.ptr[i];
-                            LayerNormSolution solution;
-                            TensileLite::Serialization::MessagePackInput msgInput(rawKernel);
-                            TensileLite::Serialization::MappingTraits<
-                                LayerNormSolution,
-                                TensileLite::Serialization::MessagePackInput>::mapping(msgInput,
-                                                                                   solution);
+                            libraries.at(archObj.first)
+                                .at(opObj.first)
+                                .emplace(typeLib.first, std::make_unique<SoftmaxSolutionLibrary>());
+                            auto& lib = libraries.at(archObj.first)
+                                            .at(opObj.first)
+                                            .at(typeLib.first)
+                                            ->as<SoftmaxSolutionLibrary>();
 
-                            lib.addSolution(solution);
+                            for(uint32_t i = 0; i < numKernels; ++i)
+                            {
+                                auto&           rawKernel = rawKernels.via.array.ptr[i];
+                                SoftmaxSolution solution;
+                                TensileLite::Serialization::MessagePackInput msgInput(rawKernel);
+                                TensileLite::Serialization::MappingTraits<
+                                    SoftmaxSolution,
+                                    TensileLite::Serialization::MessagePackInput>::
+                                    mapping(msgInput, solution);
+
+                                lib.addSolution(solution);
+                            }
+
+                            lib.sortSolutions();
                         }
-
-                        lib.sortSolutions();
-                    }
-                    else if(opObj.first == "AMax")
-                    {
-                        libraries.at(archObj.first)
-                            .at(opObj.first)
-                            .emplace(typeLib.first, std::make_unique<AMaxSolutionLibrary>());
-                        auto& lib = libraries.at(archObj.first)
-                                        .at(opObj.first)
-                                        .at(typeLib.first)
-                                        ->as<AMaxSolutionLibrary>();
-
-                        for(uint32_t i = 0; i < numKernels; ++i)
+                        else if(opObj.first == "LayerNorm")
                         {
-                            auto&        rawKernel = rawKernels.via.array.ptr[i];
-                            AMaxSolution solution;
-                            TensileLite::Serialization::MessagePackInput msgInput(rawKernel);
-                            TensileLite::Serialization::MappingTraits<
-                                AMaxSolution,
-                                TensileLite::Serialization::MessagePackInput>::mapping(msgInput,
-                                                                                   solution);
+                            libraries.at(archObj.first)
+                                .at(opObj.first)
+                                .emplace(typeLib.first,
+                                         std::make_unique<LayerNormSolutionLibrary>());
+                            auto& lib = libraries.at(archObj.first)
+                                            .at(opObj.first)
+                                            .at(typeLib.first)
+                                            ->as<LayerNormSolutionLibrary>();
 
-                            lib.addSolution(solution);
+                            for(uint32_t i = 0; i < numKernels; ++i)
+                            {
+                                auto&             rawKernel = rawKernels.via.array.ptr[i];
+                                LayerNormSolution solution;
+                                TensileLite::Serialization::MessagePackInput msgInput(rawKernel);
+                                TensileLite::Serialization::MappingTraits<
+                                    LayerNormSolution,
+                                    TensileLite::Serialization::MessagePackInput>::
+                                    mapping(msgInput, solution);
+
+                                lib.addSolution(solution);
+                            }
+
+                            lib.sortSolutions();
                         }
+                        else if(opObj.first == "AMax")
+                        {
+                            libraries.at(archObj.first)
+                                .at(opObj.first)
+                                .emplace(typeLib.first, std::make_unique<AMaxSolutionLibrary>());
+                            auto& lib = libraries.at(archObj.first)
+                                            .at(opObj.first)
+                                            .at(typeLib.first)
+                                            ->as<AMaxSolutionLibrary>();
 
-                        lib.sortSolutions();
+                            for(uint32_t i = 0; i < numKernels; ++i)
+                            {
+                                auto&        rawKernel = rawKernels.via.array.ptr[i];
+                                AMaxSolution solution;
+                                TensileLite::Serialization::MessagePackInput msgInput(rawKernel);
+                                TensileLite::Serialization::MappingTraits<
+                                    AMaxSolution,
+                                    TensileLite::Serialization::MessagePackInput>::
+                                    mapping(msgInput, solution);
+
+                                lib.addSolution(solution);
+                            }
+
+                            lib.sortSolutions();
+                        }
                     }
                 }
             }
+
+            return true;
         }
 
-        return true;
-    }
-
-private:
-    std::map<std::string, std::map<std::string, std::map<std::string, ExtOpLibraryPtr>>> libraries;
-    std::string                                                                          libPath;
-    std::string                                                                          libDir;
-};
+    private:
+        std::map<std::string, std::map<std::string, std::map<std::string, ExtOpLibraryPtr>>>
+                    libraries;
+        std::string libPath;
+        std::string libDir;
+    };
 
 } // namespace hipblaslt_ext

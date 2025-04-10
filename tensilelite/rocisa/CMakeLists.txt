@@ -26,9 +26,9 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+# set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
-set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
+# set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 
 if(DEFINED Python_EXECUTABLE AND Python_EXECUTABLE)
     message(STATUS "Manually set Python_EXECUTABLE to ${Python_EXECUTABLE}")
@@ -63,7 +63,7 @@ set(ROCISAPASS_SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/pass/pass.cpp
                       ${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/pass/graph.cpp
                       ${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/pass/composite.cpp)
 
-nanobind_add_module(rocisa NOMINSIZE NB_SUPPRESS_WARNINGS 
+nanobind_add_module(rocisa NOMINSIZE NB_SUPPRESS_WARNINGS
                         ${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/main.cpp
                         ${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/base.cpp
                         ${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/code.cpp

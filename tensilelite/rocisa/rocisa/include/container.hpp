@@ -318,13 +318,13 @@ namespace rocisa
         {
             std::string kStr;
             if(dst_sel != SelectBit::SEL_NONE)
-                kStr += " dst_sel:" + ::toString(dst_sel);
+                kStr += " dst_sel:" + ::rocisa::toString(dst_sel);
             if(dst_unused != UnusedBit::UNUSED_NONE)
-                kStr += " dst_unused:" + ::toString(dst_unused);
+                kStr += " dst_unused:" + ::rocisa::toString(dst_unused);
             if(src0_sel != SelectBit::SEL_NONE)
-                kStr += " src0_sel:" + ::toString(src0_sel);
+                kStr += " src0_sel:" + ::rocisa::toString(src0_sel);
             if(src1_sel != SelectBit::SEL_NONE)
-                kStr += " src1_sel:" + ::toString(src1_sel);
+                kStr += " src1_sel:" + ::rocisa::toString(src1_sel);
             return kStr;
         }
 

@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2023 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -139,9 +139,9 @@ namespace TensileLite
 
         void reserve(size_t bytes, size_t count);
 
-        void append(std::string const& name, ConstantVariant const& value, DataType type);
+        void append(std::string const& name, ConstantVariant const& value, rocisa::DataType type);
 
-        void append(std::string const& name, float const value, DataType type);
+        void append(std::string const& name, float const value, rocisa::DataType type);
 
         template <typename T>
         void append(std::string const& name, T value);
@@ -241,42 +241,43 @@ namespace TensileLite
 
     inline void KernelArguments::append(std::string const&     name,
                                         ConstantVariant const& value,
-                                        DataType               type)
+                                        rocisa::DataType       type)
     {
         switch(type)
         {
-        case DataType::Float:
+        case rocisa::DataType::Float:
             return append<float>(name, (*std::get_if<float>(&value)), true);
-        case DataType::Double:
+        case rocisa::DataType::Double:
             return append<double>(name, (*std::get_if<double>(&value)), true);
-        case DataType::Half:
+        case rocisa::DataType::Half:
             return append<Half>(name, (*std::get_if<Half>(&value)), true);
-        case DataType::Int32:
+        case rocisa::DataType::Int32:
             return append<int32_t>(name, (*std::get_if<int32_t>(&value)), true);
-        case DataType::BFloat16:
+        case rocisa::DataType::BFloat16:
             return append<BFloat16>(name, (*std::get_if<BFloat16>(&value)), true);
-        case DataType::Int8:
+        case rocisa::DataType::Int8:
             return append<int8_t>(name, (*std::get_if<int8_t>(&value)), true);
         default:
             throw std::runtime_error("Unsupported ConstantVariant append type.");
         }
     }
 
-    inline void KernelArguments::append(std::string const& name, float const value, DataType type)
+    inline void
+        KernelArguments::append(std::string const& name, float const value, rocisa::DataType type)
     {
         switch(type)
         {
-        case DataType::Float:
+        case rocisa::DataType::Float:
             return append<float>(name, value, true);
-        case DataType::Double:
+        case rocisa::DataType::Double:
             return append<double>(name, (double const)value, true);
-        case DataType::Half:
+        case rocisa::DataType::Half:
             return append<Half>(name, (Half const)value, true);
-        case DataType::Int32:
+        case rocisa::DataType::Int32:
             return append<int32_t>(name, (int32_t const)value, true);
-        case DataType::BFloat16:
+        case rocisa::DataType::BFloat16:
             return append<BFloat16>(name, (BFloat16 const)value, true);
-        case DataType::Int8:
+        case rocisa::DataType::Int8:
             return append<int8_t>(name, (int8_t const)value, true);
         default:
             throw std::runtime_error("Unsupported ConstantVariant append type.");
@@ -427,42 +428,43 @@ namespace TensileLite
         // Dummy function
         void reserve(size_t bytes, size_t count) {}
 
-        inline void append(std::string const& name, ConstantVariant const& value, DataType type)
+        inline void
+            append(std::string const& name, ConstantVariant const& value, rocisa::DataType type)
         {
             switch(type)
             {
-            case DataType::Float:
+            case rocisa::DataType::Float:
                 return append<float>(name, (*std::get_if<float>(&value)));
-            case DataType::Double:
+            case rocisa::DataType::Double:
                 return append<double>(name, (*std::get_if<double>(&value)));
-            case DataType::Half:
+            case rocisa::DataType::Half:
                 return append<Half>(name, (*std::get_if<Half>(&value)));
-            case DataType::Int32:
+            case rocisa::DataType::Int32:
                 return append<int32_t>(name, (*std::get_if<int32_t>(&value)));
-            case DataType::BFloat16:
+            case rocisa::DataType::BFloat16:
                 return append<BFloat16>(name, (*std::get_if<BFloat16>(&value)));
-            case DataType::Int8:
+            case rocisa::DataType::Int8:
                 return append<int8_t>(name, (*std::get_if<int8_t>(&value)));
             default:
                 throw std::runtime_error("Unsupported ConstantVariant append type.");
             }
         }
 
-        inline void append(std::string const& name, float const value, DataType type)
+        inline void append(std::string const& name, float const value, rocisa::DataType type)
         {
             switch(type)
             {
-            case DataType::Float:
+            case rocisa::DataType::Float:
                 return append<float>(name, value);
-            case DataType::Double:
+            case rocisa::DataType::Double:
                 return append<double>(name, (double const)value);
-            case DataType::Half:
+            case rocisa::DataType::Half:
                 return append<Half>(name, (Half const)value);
-            case DataType::Int32:
+            case rocisa::DataType::Int32:
                 return append<int32_t>(name, (int32_t const)value);
-            case DataType::BFloat16:
+            case rocisa::DataType::BFloat16:
                 return append<BFloat16>(name, (BFloat16 const)value);
-            case DataType::Int8:
+            case rocisa::DataType::Int8:
                 return append<int8_t>(name, (int8_t const)value);
             default:
                 throw std::runtime_error("Unsupported ConstantVariant append type.");
