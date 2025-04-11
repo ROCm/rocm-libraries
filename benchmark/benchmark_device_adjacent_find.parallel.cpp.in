@@ -28,7 +28,7 @@
 #include <stdint.h>
 
 namespace {
-    auto tmp = benchmark_utils::executor::queue_autotune(
+    auto unused = benchmark_utils::executor::queue_autotune(
         device_adjacent_find_benchmark_generator< 
         @InputType@, 
         @BlockSize@>::create);

@@ -29,7 +29,7 @@
 
 namespace
 {
-auto tmp = benchmark_utils::executor::queue_autotune(
+auto unused = benchmark_utils::executor::queue_autotune(
     device_segmented_radix_sort_pairs_benchmark_generator<
         @RadixBits@,
         @BlockSize@,

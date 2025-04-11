@@ -30,7 +30,7 @@
 #include <stdint.h>
 
 namespace {
-    auto tmp = benchmark_utils::executor::queue_autotune(
+    auto unused = benchmark_utils::executor::queue_autotune(
         device_adjacent_difference_benchmark_generator<
         @DataType@,
         @BlockSize@,

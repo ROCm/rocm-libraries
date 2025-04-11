@@ -30,7 +30,7 @@
 
 namespace
 {
-auto tmp = benchmark_utils::executor::queue_sorted_instance<device_binary_search_benchmark<
+auto unused = benchmark_utils::executor::queue_sorted_instance<device_binary_search_benchmark<
     @SubAlgorithm@_subalgorithm,
     @ValueType@,
     @OutputType@,

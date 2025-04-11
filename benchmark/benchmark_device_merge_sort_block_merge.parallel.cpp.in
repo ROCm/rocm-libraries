@@ -28,6 +28,6 @@
 #include <stdint.h>
 
 namespace {
-    auto tmp = benchmark_utils::executor::queue_autotune(
+    auto unused = benchmark_utils::executor::queue_autotune(
     device_merge_sort_block_merge_benchmark_generator<@BlockSize@, @UseMergePath@, @KeyType@, @ValueType@>::create);
 }

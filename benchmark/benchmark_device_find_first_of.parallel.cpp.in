@@ -29,6 +29,6 @@
 
 namespace
 {
-auto tmp = benchmark_utils::executor::queue_autotune(
+auto unused = benchmark_utils::executor::queue_autotune(
     device_find_first_of_benchmark_generator<@DataType@, @BlockSize@>::create);
 } // namespace

@@ -30,6 +30,6 @@
 
 namespace
 {
-auto tmp = benchmark_utils::executor::queue_autotune(
+auto unused = benchmark_utils::executor::queue_autotune(
     device_scan_benchmark_generator<@DataType@, rocprim::block_scan_algorithm::@Algo@>::create);
 } // namespace
