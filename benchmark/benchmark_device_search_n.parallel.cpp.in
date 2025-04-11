@@ -28,7 +28,7 @@
 #include <stdint.h>
 
 namespace {
-    auto benchmarks = config_autotune_register::create_bulk(
+    auto unused = benchmark_utils::executor::queue_autotune(
         device_search_n_benchmark_generator< 
         @InputType@, 
         @BlockSize@,
