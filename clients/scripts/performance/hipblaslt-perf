@@ -26,14 +26,17 @@ import os
 import argparse
 import logging
 import bench
+from dataclasses import dataclass, field
+from bench_sample import BenchSample, MeasurementKey
 from generator import SuiteProblemGenerator
 from pathlib import Path
 from git_info import create_github_file
 from specs import get_machine_specs
+from typing import Dict, List
 
 console = logging.StreamHandler()
 
-# Parameters for output csv file, we track fields according to each function.
+# Output from bench exe msg:
 matmul_paramList = ['function','transA','transB','grouped_gemm','batch_count','m','n','k','alpha','lda','stride_a','beta','ldb','stride_b',
                     'ldc','stride_c','ldd','stride_d','a_type','b_type','c_type','d_type','compute_type','scaleA','scaleB','scaleC',
                     'scaleD','amaxD','activation_type','bias_vector','bias_type','rotating_buffer','gflops','GB/s','us']
@@ -42,21 +45,52 @@ amax_paramList = ['function','m','n','type','dtype','us']
 
 api_overhead_paramList = ['function','api_name','us/iter','best_us']
 
-# maps of paramList
-benchTrackedParams = {'matmul' : matmul_paramList,
+# maps of outputParamList
+benchMsgOutParams = {'matmul' : matmul_paramList,
                       'amax' : amax_paramList,
                       'api_overhead' : api_overhead_paramList}
+
+#
+# The real key in csv file, we need to add sample-num, and corresponding mean_, median_ fields
+#
+matmul_probKey = ['function','transA','transB','grouped_gemm','batch_count','m','n','k','alpha','lda','stride_a','beta','ldb','stride_b',
+                    'ldc','stride_c','ldd','stride_d','a_type','b_type','c_type','d_type','compute_type','scaleA','scaleB','scaleC',
+                    'scaleD','amaxD','activation_type','bias_vector','bias_type','rotating_buffer']
+
+amax_probKey = ['function','m','n','type','dtype']
+
+api_overhead_probKey = ['function','api_name']
+
+# perf-measure key fields of each function
+benchProbDescKeys = {'matmul' : matmul_probKey,
+                      'amax' : amax_probKey,
+                      'api_overhead' : api_overhead_probKey}
+
+# perf-measure key fields of each function
+benchMeasuredKeys = {'matmul' : ['GB/s','gflops','us'],
+                    'amax' : ['us'],
+                    'api_overhead' : ['us/iter','best_us']}
+
+sample_filed_name = 'sample_num'
+
+#
+# full csv-file key = benchProbDescKeys + 'sample_num' + <mean,median>-of-each-(benchMeasuredKeys) + benchMeasuredKeys
+#
 
 # maps of benchmark executable
 benchExecs = {'matmul' : 'hipblaslt-bench',
               'amax' : 'hipblaslt-bench-extop-amax',
               'api_overhead' : 'hipblaslt-api-overhead'}
 
-#d is default dict or contains a superset of trackedParams
+#d is default dict or contains a superset of msgOutputParams
 def extractTrackedParams(d, trackedParam):
     return [d[p] for p in trackedParam]
 
-def runBenchmark(benchType, prob_args, executable_folder, probYamlFolder, out_csv_File, write_csv_header):
+#d is default dict or contains a superset of ProbTokenKeys, returned string is a token of this problem
+def extractProblemDescStr(d, probTokenKeys):
+    return ','.join([str(d[t]) for t in probTokenKeys])
+
+def runBenchmark(benchType, probBenchResults:Dict[str, BenchSample], prob_args, executable_folder, probYamlFolder, out_csv_File, write_csv_header, total_samples, finalize = False):
 
     # get the actual exec-path of this bench type
     benchExec = benchExecs[benchType]
@@ -64,23 +98,46 @@ def runBenchmark(benchType, prob_args, executable_folder, probYamlFolder, out_cs
 
     csvKeys, benchResults, success = bench.run_bench(benchCmd, probYamlFolder, benchType, prob_args, True)
     # get the actual params we want to track and show in csv of this bench type
-    trackedParams = benchTrackedParams[benchType]
-    # TODO- check csvKeys == trackedParams
-    header = ''
-    header += ','.join([str(key) for key in trackedParams])+'\n'
+    # TODO- check csvKeys == msgOutputParams
+    msgOutputParams = benchMsgOutParams[benchType]
+    problemDescKeys = benchProbDescKeys[benchType]
+    measurementKeys = benchMeasuredKeys[benchType]
 
     content = ''
+    # 1. Extract problem token
+    # 2. Extract perf measurement data and add single sample
+    # 3. Finalize- output mean, median and all data for each problem
     for eachResult in benchResults:
-        extracted = extractTrackedParams(eachResult, trackedParams)
-        content += ','.join([str(e) for e in extracted])+'\n'
+        # data in problem description
+        probDesc = extractProblemDescStr(eachResult, problemDescKeys)
+        if probDesc not in probBenchResults:
+            probBenchResults[probDesc] = BenchSample(probKey=probDesc)
+        benchSample = probBenchResults[probDesc]
+        for measuredKey in measurementKeys:
+            benchSample.addSampleOfKey(measuredKey, eachResult[measuredKey])
+        if finalize:
+            content += benchSample.finalize(total_samples, measurementKeys) + '\n'
+
+    header = ''
+    if write_csv_header is True:
+        measurements = []
+        for Mkey in measurementKeys:
+            measurements.append(MeasurementKey(Mkey))
+        header += ','.join([str(key) for key in problemDescKeys]) + ',' + sample_filed_name + ','
+        for measure in measurements:
+            header += measure.getMeanName() + ',' + measure.getMedianName() + ','
+        header += ','.join([m.name for m in measurements])+'\n'
 
     if out_csv_File is not None:
         if write_csv_header is True:
             out_csv_File.write(header)
-        out_csv_File.write(content)
+        if finalize:
+            out_csv_File.write(content)
     else:
-        print(header)
-        print(content)
+        if write_csv_header is True:
+            print(header)
+        if finalize:
+            print(content)
 
 def command_perf(arguments, probYaml_foler):
     """Run bench"""
@@ -105,6 +162,7 @@ def command_perf(arguments, probYaml_foler):
 
     out_folder = arguments.workspace
     exec_folder = arguments.execFolder
+    num_samples = arguments.samples
 
     needExportCSV = (arguments.csv == True) or (arguments.pts == True)
 
@@ -124,9 +182,13 @@ def command_perf(arguments, probYaml_foler):
 
         # only the first time we need to write header
         writeCSVHeader = True
-        for p in problemSet.generate_problems():
-            runBenchmark(pTypeName, p.args, exec_folder, probYaml_foler, csv_file, writeCSVHeader)
-            writeCSVHeader = False
+        curProbSet:Dict[str, BenchSample] = {}
+        for iter in range(num_samples):
+            print(f"\nSampling Iteration: {iter}")
+            finalize = (iter == num_samples - 1)
+            for p in problemSet.generate_problems():
+                runBenchmark(pTypeName, curProbSet, p.args, exec_folder, probYaml_foler, csv_file, writeCSVHeader, num_samples, finalize)
+                writeCSVHeader = False
 
         if csv_file is not None:
             print("\nResults written to {}".format(csv_file.name))
@@ -175,6 +237,11 @@ def main():
                         type=str,
                         help='subfolder under workspace, (optional, useful for comparing two commits)',
                         default='')
+
+    parser.add_argument('--samples',
+                        type=int,
+                        help='number of runs of all benchmarks, used to calculate the significance value, default is 5',
+                        default=5)
 
     parser.add_argument('--csv',
                         help='dump result to csv files, default is True',
