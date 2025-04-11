@@ -23,6 +23,7 @@
 
 #ifdef ROCSPARSE_WITH_MEMSTAT
 
+#include "control.h"
 #include "envariables.h"
 #include "memstat.h"
 #include "rocsparse-types.h"
