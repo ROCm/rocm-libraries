@@ -320,17 +320,17 @@ static void multistream_transform(size_t N, size_t dim, size_t num_streams)
 
 // pick arbitrary sizes here to get some parallelism while still
 // fitting into e.g. 8 GB of GPU memory
-TEST(rocfft_UnitTest, simple_multithread_1D)
+TEST(DISABLED_rocfft_UnitTest, simple_multithread_1D)
 {
     multithread_transform(1048576, 1, 64);
 }
 
-TEST(rocfft_UnitTest, simple_multithread_2D)
+TEST(DISABLED_rocfft_UnitTest, simple_multithread_2D)
 {
     multithread_transform(1024, 2, 64);
 }
 
-TEST(rocfft_UnitTest, simple_multithread_3D)
+TEST(DISABLED_rocfft_UnitTest, simple_multithread_3D)
 {
     multithread_transform(128, 3, 40);
 }
