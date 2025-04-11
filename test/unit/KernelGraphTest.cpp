@@ -1132,7 +1132,7 @@ namespace KernelGraphTest
         T_LOAD_TILED 1 Source 0
         Tensor.FP6.d2 2, (base=&48, lim=&56, sizes={&64 &72 }, strides={&80 &88 })
         T_LOAD_TILED 3 Source 2
-        T_Mul 1 3
+        T_Mul 1 3 Value: Float
         Tensor.Float.d2 5, (base=&96, lim=&104, sizes={&112 &120 }, strides={&128 &136 })
         T_STORE_TILED 6 Source 4 Dest 5
         ).";
@@ -1200,7 +1200,7 @@ namespace KernelGraphTest
         Tensor.UInt8.d2 7, (base=&144, lim=&152, sizes={&160 &168 }, strides={&176 &184 })
         T_LOAD_TILED 8 Source 7
         BlockScale(Separate, {32, 1}): Data: 6, Scale: 8
-        T_Mul 4 9
+        T_Mul 4 9 Value: Float
         Tensor.Float.d2 11, (base=&192, lim=&200, sizes={&208 &216 }, strides={&224 &232 })
         T_STORE_TILED 12 Source 10 Dest 11
         ).";

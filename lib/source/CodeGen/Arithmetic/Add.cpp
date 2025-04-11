@@ -40,6 +40,7 @@ namespace rocRoller
     RegisterComponentTemplateSpec(AddGenerator, Register::Type::Vector, DataType::Int64);
     RegisterComponentTemplateSpec(AddGenerator, Register::Type::Vector, DataType::Half);
     RegisterComponentTemplateSpec(AddGenerator, Register::Type::Vector, DataType::Halfx2);
+    RegisterComponentTemplateSpec(AddGenerator, Register::Type::Vector, DataType::BFloat16);
     RegisterComponentTemplateSpec(AddGenerator, Register::Type::Vector, DataType::Float);
     RegisterComponentTemplateSpec(AddGenerator, Register::Type::Vector, DataType::Double);
 
@@ -234,6 +235,28 @@ namespace rocRoller
         AssertFatal(rhs != nullptr);
 
         co_yield_(Instruction("v_add_f16", {dest}, {lhs, rhs}, {}, ""));
+    }
+
+    template <>
+    Generator<Instruction>
+        AddGenerator<Register::Type::Vector, DataType::BFloat16>::generate(Register::ValuePtr dest,
+                                                                           Register::ValuePtr lhs,
+                                                                           Register::ValuePtr rhs,
+                                                                           Expression::Add const&)
+    {
+        AssertFatal(lhs != nullptr);
+        AssertFatal(rhs != nullptr);
+
+        auto lit16 = Register::Value::Literal(16u);
+
+        co_yield generateOp<Expression::ShiftL>(lhs, lhs, lit16);
+        co_yield generateOp<Expression::ShiftL>(rhs, rhs, lit16);
+
+        co_yield_(Instruction("v_add_f32", {dest}, {lhs, rhs}, {}, ""));
+        co_yield generateOp<Expression::LogicalShiftR>(dest, dest, lit16);
+
+        co_yield generateOp<Expression::LogicalShiftR>(lhs, lhs, lit16);
+        co_yield generateOp<Expression::LogicalShiftR>(rhs, rhs, lit16);
     }
 
     template <>

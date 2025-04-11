@@ -176,7 +176,8 @@ namespace rocRoller
             {
                 auto newOp = Assign{assign.regType,
                                     reindexExpression(assign.expression, m_reindexer),
-                                    assign.valueCount};
+                                    assign.valueCount,
+                                    assign.variableType};
                 graph.control.setElement(tag, newOp);
             }
 

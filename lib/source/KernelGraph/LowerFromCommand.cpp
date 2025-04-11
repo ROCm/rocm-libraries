@@ -649,7 +649,7 @@ namespace rocRoller
                         return std::make_tuple(op.scaleMode(), op.strides());
                     }};
 
-                TensorContraction contraction({1}, {0});
+                TensorContraction contraction({1}, {0}, mul.accType);
                 std::tie(contraction.scaleModeA, contraction.scaleStridesA)
                     = std::visit(getBlockParams, *aSource);
                 std::tie(contraction.scaleModeB, contraction.scaleStridesB)

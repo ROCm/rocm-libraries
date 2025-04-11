@@ -1072,7 +1072,9 @@ int main(int argc, const char* argv[])
         "--type_C", types.typeC, "Datatype of C matrix [float | half | bf16].  Default: float.");
     app.add_option(
         "--type_D", types.typeD, "Datatype of D matrix [float | half | bf16].  Default: float.");
-    app.add_option("--type_acc", types.typeAcc, "Datatype of accumulation [float]");
+    app.add_option("--type_acc",
+                   types.typeAcc,
+                   "Datatype of accumulation [float | half | bf16].  Default: float");
     app.add_option(
         "--trans_A",
         [&types](auto res) -> bool {
@@ -1400,8 +1402,8 @@ int main(int argc, const char* argv[])
         problem.scaleValueA = 1.0f;
     }
 
-    // Currently, we only support F32 accumulation
-    AssertFatal(types.typeAcc == "float");
+    AssertFatal((types.typeAcc == "float") || (types.typeAcc == "half")
+                || (types.typeAcc == "bf16"));
 
     problem.typeA   = types.typeA;
     problem.typeB   = types.typeB;

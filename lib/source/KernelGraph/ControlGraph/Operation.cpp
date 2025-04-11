@@ -187,9 +187,11 @@ namespace rocRoller::KernelGraph::ControlGraph
 
     TensorContraction::TensorContraction() = default;
     TensorContraction::TensorContraction(std::vector<int> const& aContractedDimensions,
-                                         std::vector<int> const& bContractedDimensions)
+                                         std::vector<int> const& bContractedDimensions,
+                                         VariableType const      accType)
         : aDims(aContractedDimensions)
         , bDims(bContractedDimensions)
+        , accType(accType)
     {
     }
 

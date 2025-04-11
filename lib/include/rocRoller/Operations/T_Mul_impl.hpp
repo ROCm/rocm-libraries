@@ -34,10 +34,11 @@ namespace rocRoller
 {
     namespace Operations
     {
-        inline T_Mul::T_Mul(OperationTag a, OperationTag b)
+        inline T_Mul::T_Mul(OperationTag a, OperationTag b, VariableType accType)
             : BaseOperation()
             , a(a)
             , b(b)
+            , accType(accType)
         {
         }
 
@@ -48,12 +49,12 @@ namespace rocRoller
 
         inline std::string T_Mul::toString() const
         {
-            return fmt::format("T_Mul {} {}", a.value, b.value);
+            return fmt::format("T_Mul {} {} {}", a.value, b.value, rocRoller::toString(accType));
         }
 
         inline bool T_Mul::operator==(T_Mul const& rhs) const
         {
-            return m_tag == rhs.m_tag && a == rhs.a && b == rhs.b;
+            return m_tag == rhs.m_tag && a == rhs.a && b == rhs.b && accType == rhs.accType;
         }
     }
 }

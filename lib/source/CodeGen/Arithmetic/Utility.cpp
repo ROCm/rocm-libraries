@@ -69,7 +69,7 @@ namespace rocRoller
             case DataType::FP4x8:
                 return "0b100";
             default:
-                Throw<FatalError>("Unable to determine MFMA modifier: unhandled data type.",
+                Throw<FatalError>("Unable to determine MI modifier: unhandled data type.",
                                   ShowValue(dtype));
             }
         }

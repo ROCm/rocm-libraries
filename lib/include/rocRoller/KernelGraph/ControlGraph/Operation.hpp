@@ -214,6 +214,10 @@ namespace rocRoller
 
             size_t valueCount = 1;
 
+            // If variableType is a packed type then
+            // (valueCount / variableType.packing) registers will be allocated.
+            std::optional<VariableType> variableType = std::nullopt;
+
             std::string name() const;
             std::string toString() const;
         };
@@ -433,13 +437,15 @@ namespace rocRoller
         {
             TensorContraction();
             TensorContraction(std::vector<int> const& aContractedDimensions,
-                              std::vector<int> const& bContractedDimensions);
+                              std::vector<int> const& bContractedDimensions,
+                              VariableType const      accType = DataType::Float);
 
             std::vector<int>      aDims, bDims; // contracted dimensions
             Operations::ScaleMode scaleModeA = Operations::ScaleMode::None;
             Operations::ScaleMode scaleModeB = Operations::ScaleMode::None;
             std::vector<size_t>   scaleStridesA;
             std::vector<size_t>   scaleStridesB;
+            VariableType          accType = DataType::Float;
 
             std::string name() const;
         };

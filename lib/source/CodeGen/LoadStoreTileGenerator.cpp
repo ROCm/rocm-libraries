@@ -1426,7 +1426,7 @@ namespace rocRoller
                         ShowValue(wfs),
                         ShowValue(packing),
                         ShowValue(wfs * packing));
-            uint numVgpr = numElements / (wfs);
+            uint numVgpr = numElements / wfs;
             AssertFatal(numVgpr > 0, "Invalid load dimensions.");
 
             auto [vgprBlockNumberTag, vgprBlockNumber]
@@ -1690,7 +1690,7 @@ namespace rocRoller
                                                       ShowValue(wfs * packing),
                                                       ShowValue(store.varType)));
 
-            uint numVgpr = waveTileNumElements / (wfs);
+            uint numVgpr = waveTileNumElements / wfs;
 
             auto agpr = m_context->registerTagManager()->getRegister(macTileTag);
 
@@ -1750,8 +1750,8 @@ namespace rocRoller
                         ShowValue(wfs),
                         ShowValue(packing),
                         ShowValue(wfs * packing));
-            uint numVgpr = numElements / (wfs);
-            AssertFatal(numVgpr > 0, "Invalid store dimensions.");
+            uint numValues = numElements / wfs;
+            AssertFatal(numValues > 0, "Invalid store dimensions.");
 
             auto [vgprBlockNumberTag, vgprBlockNumber]
                 = m_graph->getDimension<VGPRBlockNumber>(tag, 0);
@@ -1771,7 +1771,17 @@ namespace rocRoller
             n /= packing;
 
             auto agpr = m_context->registerTagManager()->getRegister(macTileTag);
-            AssertFatal(agpr->registerCount() == numVgpr);
+
+            auto packedType = DataTypeInfo::Get(store.varType).packedVariableType();
+            if(packedType && agpr->variableType() == packedType.value())
+            {
+                auto packing = DataTypeInfo::Get(packedType.value()).packing;
+                AssertFatal(agpr->registerCount() == (numValues / packing));
+            }
+            else
+            {
+                AssertFatal(agpr->registerCount() == numValues);
+            }
 
             co_yield moveTile<MemoryInstructions::MemoryDirection::Store>(
                 MemoryInstructions::MemoryKind::Buffer,

@@ -30,9 +30,9 @@
 
 #pragma once
 
-#include <memory>
 #include <unordered_set>
 
+#include <rocRoller/DataTypes/DataTypes.hpp>
 #include <rocRoller/Operations/Operation.hpp>
 #include <rocRoller/Serialization/Base_fwd.hpp>
 
@@ -44,12 +44,13 @@ namespace rocRoller
         {
         public:
             T_Mul() = delete;
-            T_Mul(OperationTag a, OperationTag b);
+            T_Mul(OperationTag a, OperationTag b, VariableType accType = DataType::Float);
 
             std::unordered_set<OperationTag> getInputs() const;
             std::string                      toString() const;
 
             OperationTag a, b;
+            VariableType accType;
 
             bool operator==(T_Mul const&) const;
 

@@ -24,8 +24,6 @@
  *
  *******************************************************************************/
 
-#include <memory>
-
 #include <rocRoller/CodeGen/Arithmetic/MatrixMultiply.hpp>
 #include <rocRoller/CodeGen/Arithmetic/Utility.hpp>
 #include <rocRoller/InstructionValues/Register.hpp>
@@ -58,7 +56,7 @@ namespace rocRoller
             case DataType::FP4x8:
                 return "_f8f6f4";
             default:
-                Throw<FatalError>("Unable to determine MFMA type: unhandled data type.",
+                Throw<FatalError>("Unable to determine MI type: unhandled data type.",
                                   ShowValue(dtype));
             }
         }
@@ -87,6 +85,8 @@ namespace rocRoller
                 GPUCapability::DefaultWavefrontSize);
             auto const packingA = DataTypeInfo::Get(typeA).packing;
             auto const packingB = DataTypeInfo::Get(typeB).packing;
+            auto const packingC = DataTypeInfo::Get(typeC).packing;
+            auto const packingD = DataTypeInfo::Get(typeD).packing;
             AssertFatal(M > 0 && N > 0 && K > 0 && BATCH > 0 && lanesPerWavefront > 0,
                         "Invalid inputs",
                         ShowValue(M),
@@ -112,22 +112,26 @@ namespace rocRoller
                         ShowValue(K * N * BATCH / lanesPerWavefront),
                         ShowValue(B->valueCount()),
                         ShowValue(packingB));
-            AssertFatal(C->valueCount() == (size_t)M * N * BATCH / lanesPerWavefront,
+            AssertFatal(C->valueCount() * packingC == (size_t)M * N * BATCH / lanesPerWavefront,
                         "C matrix size mismatch",
                         ShowValue(M),
                         ShowValue(N),
                         ShowValue(BATCH),
                         ShowValue(lanesPerWavefront),
                         ShowValue(M * N * BATCH / lanesPerWavefront),
-                        ShowValue(C->valueCount()));
-            AssertFatal(D->valueCount() == (size_t)M * N * BATCH / lanesPerWavefront,
+                        ShowValue(C->valueCount()),
+                        ShowValue(typeC),
+                        ShowValue(packingC));
+            AssertFatal(D->valueCount() * packingD == (size_t)M * N * BATCH / lanesPerWavefront,
                         "D matrix size mismatch",
                         ShowValue(M),
                         ShowValue(N),
                         ShowValue(BATCH),
                         ShowValue(lanesPerWavefront),
                         ShowValue(M * N * BATCH / lanesPerWavefront),
-                        ShowValue(D->valueCount()));
+                        ShowValue(D->valueCount()),
+                        ShowValue(typeD),
+                        ShowValue(packingD));
             AssertFatal(A->regType() == Register::Type::Vector,
                         "Invalid LHS (A) register type",
                         ShowValue(A->regType()));

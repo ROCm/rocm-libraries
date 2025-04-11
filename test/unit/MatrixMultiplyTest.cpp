@@ -114,7 +114,7 @@ namespace MatrixMultiplyTest
     public:
         CommandKernelPtr commandKernel;
 
-        template <typename TA, typename TB, typename ACC>
+        template <typename TA, typename TB, typename TD, typename ACC = float>
         void matrixMultiplyMacroTile(int         wave_m,
                                      int         wave_n,
                                      int         wave_k,
@@ -137,9 +137,10 @@ namespace MatrixMultiplyTest
                 REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
             }
 
-            auto dataTypeA = TypeInfo<TA>::Var.dataType;
-            auto dataTypeB = TypeInfo<TB>::Var.dataType;
-            auto dataTypeD = TypeInfo<ACC>::Var.dataType;
+            auto dataTypeA   = TypeInfo<TA>::Var.dataType;
+            auto dataTypeB   = TypeInfo<TB>::Var.dataType;
+            auto dataTypeD   = TypeInfo<TD>::Var.dataType;
+            auto dataTypeAcc = TypeInfo<ACC>::Var.dataType;
 
             // matrix size: A is MxK; B is KxN; D is MxN
             int mac_m = wave_m;
@@ -169,8 +170,7 @@ namespace MatrixMultiplyTest
 
             Log::debug("MatrixMultiplyMacroTile: Matrix {}x{}x{}", M, N, K);
             Log::debug("MatrixMultiplyMacroTile: WGTile {}x{}x{}", mac_m, mac_n, mac_k);
-            Log::debug(
-                "MatrixMultiplyMacroTile: MFMA   {}x{}x{}x{}", wave_m, wave_n, wave_k, wave_b);
+            Log::debug("MatrixMultiplyMacroTile: MI   {}x{}x{}x{}", wave_m, wave_n, wave_k, wave_b);
 
             AssertFatal(M % mac_m == 0, "MacroTile size mismatch (M)");
             AssertFatal(N % mac_n == 0, "MacroTile size mismatch (N)");
@@ -228,7 +228,7 @@ namespace MatrixMultiplyTest
                 ASSERT_FALSE(scaleB);
 
                 tagStoreD = command->addOperation(
-                    rocRoller::Operations::T_Mul(tagLoadA, tagLoadB)); // D = A * B
+                    rocRoller::Operations::T_Mul(tagLoadA, tagLoadB, dataTypeAcc)); // D = A * B
             }
             else
             {
@@ -240,7 +240,7 @@ namespace MatrixMultiplyTest
                     tagLoadB, 2, tagLoadScaleB, {ScaleBlockSize, 1}));
 
                 tagStoreD = command->addOperation(
-                    rocRoller::Operations::T_Mul(scaledA, scaledB)); // D = A * B
+                    rocRoller::Operations::T_Mul(scaledA, scaledB, dataTypeAcc)); // D = A * B
             }
 
             auto tagTensorD = command->addOperation(rocRoller::Operations::Tensor(2, dataTypeD));
@@ -360,15 +360,15 @@ namespace MatrixMultiplyTest
 
                 commandKernel->launchKernel(commandArgs.runtimeArguments());
 
-                std::vector<ACC> D(descD.totalAllocatedElements());
+                std::vector<TD> D(descD.totalAllocatedElements());
                 ASSERT_THAT(hipMemcpy(D.data(),
                                       d_D.get(),
-                                      descD.totalAllocatedElements() * sizeof(ACC),
+                                      descD.totalAllocatedElements() * sizeof(TD),
                                       hipMemcpyDefault),
                             HasHipSuccess(0));
 
-                std::vector<ACC> c_D(descD.totalAllocatedElements(), ACC{});
-                std::vector<ACC> c_C(descD.totalAllocatedElements(), ACC{});
+                std::vector<TD> c_D(descD.totalAllocatedElements(), TD{});
+                std::vector<TD> c_C(descD.totalAllocatedElements(), TD{});
 
                 float alpha = 1.0f;
 
@@ -396,7 +396,7 @@ namespace MatrixMultiplyTest
                     CPUMM(c_D, c_C, A, B, M, N, K, alpha, 0.0, transA == "T", transB == "T");
                 }
 
-                auto tol = gemmAcceptableError<TA, TB, ACC>(
+                auto tol = gemmAcceptableError<TA, TB, TD>(
                     M, N, K, m_context->targetArchitecture().target());
                 auto res = compare(D, c_D, tol);
 
@@ -467,7 +467,7 @@ namespace MatrixMultiplyTest
                 Throw<FatalError>("Invalid type.");
         }
 
-        template <typename TA, typename TB, typename ACC>
+        template <typename TA, typename TB, typename TD, typename ACC = float>
         void matrixMultiplyAB(int  wave_m,
                               int  wave_n,
                               int  wave_k,
@@ -491,9 +491,10 @@ namespace MatrixMultiplyTest
                 REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
             }
 
-            auto dataTypeA = TypeInfo<TA>::Var.dataType;
-            auto dataTypeB = TypeInfo<TB>::Var.dataType;
-            auto dataTypeD = TypeInfo<ACC>::Var.dataType;
+            auto dataTypeA   = TypeInfo<TA>::Var.dataType;
+            auto dataTypeB   = TypeInfo<TB>::Var.dataType;
+            auto dataTypeD   = TypeInfo<TD>::Var.dataType;
+            auto dataTypeAcc = TypeInfo<ACC>::Var.dataType;
 
             const auto wavefrontCountX = 2;
             const auto wavefrontCountY = 2;
@@ -548,7 +549,7 @@ namespace MatrixMultiplyTest
             auto tagLoadB = command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorB));
 
             auto tagStoreD = command->addOperation(
-                rocRoller::Operations::T_Mul(tagLoadA, tagLoadB)); // D = A * B
+                rocRoller::Operations::T_Mul(tagLoadA, tagLoadB, dataTypeAcc)); // D = A * B
 
             auto tagTensorD
                 = command->addOperation(rocRoller::Operations::Tensor(2, dataTypeD)); // D
@@ -591,16 +592,16 @@ namespace MatrixMultiplyTest
             {
                 commandKernel.launchKernel(commandArgs.runtimeArguments());
 
-                std::vector<ACC> D(M * N);
-                ASSERT_THAT(hipMemcpy(D.data(), d_D.get(), M * N * sizeof(ACC), hipMemcpyDefault),
+                std::vector<TD> D(M * N);
+                ASSERT_THAT(hipMemcpy(D.data(), d_D.get(), M * N * sizeof(TD), hipMemcpyDefault),
                             HasHipSuccess(0));
 
-                std::vector<ACC> c_D(M * N, ACC{});
-                std::vector<ACC> c_C(M * N, ACC{});
+                std::vector<TD> c_D(M * N, TD{});
+                std::vector<TD> c_C(M * N, TD{});
 
                 CPUMM(c_D, c_C, A, B, M, N, K, 1.0f, 0.0, transA, transB);
 
-                auto tol = gemmAcceptableError<TA, TB, ACC>(
+                auto tol = gemmAcceptableError<TA, TB, TD>(
                     M, N, K, m_context->targetArchitecture().target());
                 auto res = compare(D, c_D, tol);
 
@@ -609,7 +610,7 @@ namespace MatrixMultiplyTest
             }
         }
 
-        template <typename T>
+        template <typename T, typename ACC = float>
         void matrixMultiplyABC(int wave_m, int wave_n, int wave_k, int wave_b)
         {
             REQUIRE_ANY_OF_ARCH_CAP(GPUCapability::HasMFMA, GPUCapability::HasWMMA);
@@ -643,7 +644,9 @@ namespace MatrixMultiplyTest
             auto NY = std::make_shared<Expression::Expression>(num_workgroup_y * workgroup_size_y);
             auto NZ = std::make_shared<Expression::Expression>(1u);
 
-            auto             dataType = TypeInfo<T>::Var.dataType;
+            auto dataType    = TypeInfo<T>::Var.dataType;
+            auto dataTypeAcc = TypeInfo<ACC>::Var.dataType;
+
             TensorDescriptor descA(dataType, {M, K}, {1u, M});
             TensorDescriptor descB(dataType, {K, N}, {1u, K});
             TensorDescriptor descC(dataType, {M, N}, {1u, M});
@@ -674,8 +677,8 @@ namespace MatrixMultiplyTest
                 = command->addOperation(rocRoller::Operations::Tensor(2, dataType)); // C
             auto tagLoadC = command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorC));
 
-            auto tagAB
-                = command->addOperation(rocRoller::Operations::T_Mul(tagLoadA, tagLoadB)); // A * B
+            auto tagAB = command->addOperation(
+                rocRoller::Operations::T_Mul(tagLoadA, tagLoadB, dataTypeAcc)); // A * B
 
             auto execute = rocRoller::Operations::T_Execute(command->getNextTag());
             auto tagStoreD
@@ -720,11 +723,11 @@ namespace MatrixMultiplyTest
             {
                 commandKernel.launchKernel(commandArgs.runtimeArguments());
 
-                std::vector<T> D(M * N, 0.f);
+                std::vector<T> D(M * N);
                 ASSERT_THAT(hipMemcpy(D.data(), d_D.get(), M * N * sizeof(T), hipMemcpyDefault),
                             HasHipSuccess(0));
 
-                std::vector<T> c_D(M * N, 0.f);
+                std::vector<T> c_D(M * N, T{});
                 CPUMM(c_D, C, A, B, M, N, K, 1.0, 1.0, false, false);
 
                 auto tol = gemmAcceptableError<T, T, T>(
@@ -825,6 +828,35 @@ namespace MatrixMultiplyTest
         EXPECT_EQ(countSubstring(generatedCode, wmmaMnemonic), numWMMAs);
     }
 
+    TEST_P(MatrixMultiplyWMMATestGPU, GPU_MatrixMultiplyMacroTileWMMAF16Accum)
+    {
+        const auto [typeAndWaveK, transOp] = std::get<1>(GetParam());
+        const auto [dataType, waveK]       = typeAndWaveK;
+        const auto [transA, transB]        = transOp;
+        auto typeStr{"f16"};
+        switch(dataType)
+        {
+        case DataType::Half:
+            matrixMultiplyMacroTile<Half, Half, Half, Half>(
+                16, 16, waveK, 1, false, transA, transB);
+            break;
+        case DataType::BFloat16:
+            matrixMultiplyMacroTile<BFloat16, BFloat16, BFloat16, BFloat16>(
+                16, 16, waveK, 1, false, transA, transB);
+            typeStr = "bf16";
+            break;
+        default:
+            Throw<FatalError>(fmt::format("Unexpected data type: {}. (Allowed: Half and Bfloat16)",
+                                          toString(dataType)));
+        };
+
+        const auto        numWMMAs = 4; // F16 mac_k = 4 * wave_k
+        const std::string wmmaMnemonic{
+            fmt::format("v_wmma_{}_16x16x{}_{}", typeStr, waveK, typeStr)};
+        std::string generatedCode = m_context->instructions()->toString();
+        EXPECT_EQ(countSubstring(generatedCode, wmmaMnemonic), numWMMAs);
+    }
+
     TEST_P(MatrixMultiplyWMMATestGPU, GPU_MatrixMultiplyABWMMA)
     {
         const auto [typeAndWaveK, transOp] = std::get<1>(GetParam());
@@ -850,6 +882,35 @@ namespace MatrixMultiplyTest
         const auto        numWMMAs = 2; // mac_k = 2 * wave_k
         const std::string wmmaMnemonic{fmt::format("v_wmma_f32_16x16x{}_{}", waveK, typeStr)};
         std::string       generatedCode = m_context->instructions()->toString();
+        EXPECT_EQ(countSubstring(generatedCode, wmmaMnemonic), numWMMAs);
+    }
+
+    TEST_P(MatrixMultiplyWMMATestGPU, GPU_MatrixMultiplyABWMMAF16Accum)
+    {
+        const auto [typeAndWaveK, transOp] = std::get<1>(GetParam());
+        const auto [typeAB, waveK]         = typeAndWaveK;
+        const auto [transA, transB]        = transOp;
+        auto typeStr{"f16"};
+        switch(typeAB)
+        {
+        case DataType::Half:
+            matrixMultiplyAB<Half, Half, Half, Half>(
+                16, 16, waveK, 1, false, transA == "T", transB == "T");
+            break;
+        case DataType::BFloat16:
+            matrixMultiplyAB<BFloat16, BFloat16, BFloat16, BFloat16>(
+                16, 16, waveK, 1, false, transA == "T", transB == "T");
+            typeStr = "bf16";
+            break;
+        default:
+            Throw<FatalError>(fmt::format("Unexpected data type: {}. (Allowed: Half and Bfloat16)",
+                                          toString(typeAB)));
+        };
+
+        const auto        numWMMAs = 2; // mac_k = 2 * wave_k
+        const std::string wmmaMnemonic{
+            fmt::format("v_wmma_{}_16x16x{}_{}", typeStr, waveK, typeStr)};
+        std::string generatedCode = m_context->instructions()->toString();
         EXPECT_EQ(countSubstring(generatedCode, wmmaMnemonic), numWMMAs);
     }
 
@@ -947,12 +1008,22 @@ namespace MatrixMultiplyTest
         EXPECT_EQ(countSubstring(generatedCode, wmmaMnemonic), numWMMAs);
     }
 
-    TEST_P(MatrixMultiplyABCWMMATestGPU, GPU_MatrixMultiplyABCWMMA)
+    TEST_P(MatrixMultiplyABCWMMATestGPU, GPU_MatrixMultiplyABCWMMAFP16)
     {
-        matrixMultiplyABC<Half>(16, 16, 16, 1);
+        matrixMultiplyABC<Half, Half>(16, 16, 16, 1);
 
         const auto        numWMMAs = 2; // mac_k = 2 * wave_k
-        const std::string wmmaMnemonic{"v_wmma_f32_16x16x16_f16"};
+        const std::string wmmaMnemonic{"v_wmma_f16_16x16x16_f16"};
+        std::string       generatedCode = m_context->instructions()->toString();
+        EXPECT_EQ(countSubstring(generatedCode, wmmaMnemonic), numWMMAs);
+    }
+
+    TEST_P(MatrixMultiplyABCWMMATestGPU, GPU_MatrixMultiplyABCWMMABFloat16)
+    {
+        matrixMultiplyABC<BFloat16, BFloat16>(16, 16, 16, 1);
+
+        const auto        numWMMAs = 2; // mac_k = 2 * wave_k
+        const std::string wmmaMnemonic{"v_wmma_bf16_16x16x16_bf16"};
         std::string       generatedCode = m_context->instructions()->toString();
         EXPECT_EQ(countSubstring(generatedCode, wmmaMnemonic), numWMMAs);
     }

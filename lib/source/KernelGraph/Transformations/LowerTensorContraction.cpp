@@ -24,8 +24,6 @@
  *
  *******************************************************************************/
 
-#include <algorithm>
-
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/KernelGraph/Transforms/LowerTensorContraction.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>
@@ -251,6 +249,7 @@ namespace rocRoller
             int                          userB; //< Tag of global B Tensor
             int                          userAScale; //< Tag of global A Scale Tensor
             int                          userBScale; //< Tag of global B Scale Tensor
+            VariableType                 accType;
 
             std::vector<int> dependentAssigns; //< Assign operations that use the result (D)
             std::vector<int> siblingLoads; //< Load operations that flow into dependentAssigns
@@ -388,6 +387,8 @@ namespace rocRoller
                       std::get<Operation>(elem));
             }
 
+            info.accType = graph.control.getNode<TensorContraction>(tensorContractionTag).accType;
+
             return info;
         }
 
@@ -493,15 +494,27 @@ namespace rocRoller
 
             auto [waveATag, waveA] = graph.getDimension<WaveTile>(info.loadA.load());
             auto [waveBTag, waveB] = graph.getDimension<WaveTile>(info.loadB.load());
-            uint num_elements      = waveA.sizes[0] * waveB.sizes[1];
-            uint wfs               = context->kernel()->wavefront_size();
-            uint numGPRs           = num_elements / wfs; // number of output registers per thread
 
-            const auto& arch    = context->targetArchitecture();
-            const auto  regType = arch.HasCapability(GPUCapability::HasAccCD)
-                                      ? Register::Type::Accumulator
-                                      : Register::Type::Vector;
-            auto        initD   = graph.control.addElement(Assign{regType, literal(0.f), numGPRs});
+            const auto& arch             = context->targetArchitecture();
+            const auto  regType          = arch.HasCapability(GPUCapability::HasAccCD)
+                                               ? Register::Type::Accumulator
+                                               : Register::Type::Vector;
+            uint        num_elements     = waveA.sizes[0] * waveB.sizes[1];
+            uint        wfs              = context->kernel()->wavefront_size();
+            uint        numElemPerThread = num_elements / wfs;
+
+            std::optional<VariableType> assignVarType = info.accType;
+            if(info.accType == DataType::Half || info.accType == DataType::BFloat16)
+            {
+                // TODO Add a more specific capability for 16 bit accumulation
+                AssertFatal(arch.HasCapability(GPUCapability::HasWMMA),
+                            concatenate("Architecture does not support 16 bit accumulation: ",
+                                        arch.target().toString()));
+                assignVarType = DataTypeInfo::Get(info.accType).packedVariableType();
+            }
+
+            auto initD = graph.control.addElement(
+                Assign{regType, literal(0.f), numElemPerThread, assignVarType});
 
             graph.mapper.connect(initD, d, NaryArgument::DEST);
 

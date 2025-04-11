@@ -85,7 +85,11 @@ namespace GEMMDriverTest
             return floatToScale(scaleValues[m_scaleValueIndex]);
         }
 
-        template <typename TA, typename TB = TA, typename TC = TA, typename TD = TC>
+        template <typename TA,
+                  typename TB  = TA,
+                  typename TC  = TA,
+                  typename TD  = TC,
+                  typename ACC = float>
         void basicGEMM(const GEMMProblem&      gemm,
                        bool                    debuggable  = false,
                        bool                    setIdentity = false,
@@ -120,10 +124,11 @@ namespace GEMMDriverTest
                         "Scale mode not supported!",
                         ShowValue(gemm.scaleBMode));
 
-            auto dataTypeA = TypeInfo<TA>::Var.dataType;
-            auto dataTypeB = TypeInfo<TB>::Var.dataType;
-            auto dataTypeC = TypeInfo<TC>::Var.dataType;
-            auto dataTypeD = TypeInfo<TD>::Var.dataType;
+            auto dataTypeA   = TypeInfo<TA>::Var.dataType;
+            auto dataTypeB   = TypeInfo<TB>::Var.dataType;
+            auto dataTypeC   = TypeInfo<TC>::Var.dataType;
+            auto dataTypeD   = TypeInfo<TD>::Var.dataType;
+            auto dataTypeAcc = TypeInfo<ACC>::Var.dataType;
 
             // D (MxN) = alpha * A (MxK) X B (KxN) + beta * C (MxN)
             int   M     = gemm.m;
@@ -336,7 +341,7 @@ namespace GEMMDriverTest
                 = command->addOperation(rocRoller::Operations::T_Load_Scalar(tagScalarBeta));
 
             auto tagAB = command->addOperation(
-                rocRoller::Operations::T_Mul(mulInputA, mulInputB)); // A * B
+                rocRoller::Operations::T_Mul(mulInputA, mulInputB, dataTypeAcc)); // A * B
 
             rocRoller::Operations::T_Execute execute(command->getNextTag());
             auto                             tagBetaC
@@ -820,7 +825,7 @@ namespace GEMMDriverTest
     // Params are: A & B type, K tile size, (transA, transB)
     class GEMMTestWMMAGPU
         : public BaseGEMMContextFixture<
-              std::tuple<rocRoller::DataType, int, std::pair<std::string, std::string>>>
+              std::tuple<std::pair<rocRoller::DataType, int>, std::pair<std::string, std::string>>>
     {
     };
 
@@ -3272,7 +3277,8 @@ namespace GEMMDriverTest
     TEST_P(GEMMTestWMMAGPU, GPU_BasicGEMM)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasWMMA);
-        auto [typeAB, waveK, transOp] = std::get<1>(GetParam());
+        auto [typeABAndWaveK, transOp] = std::get<1>(GetParam());
+        auto [typeAB, waveK]           = typeABAndWaveK;
         AssertFatal((waveK == 16) || (waveK == 32), "Invalid waveK value.", ShowValue(waveK));
 
         GEMMProblem gemm;
@@ -3294,6 +3300,35 @@ namespace GEMMDriverTest
         else
         {
             Throw<FatalError>("Invalid type.", ShowValue(typeAB));
+        }
+    }
+
+    TEST_P(GEMMTestWMMAGPU, GPU_BasicGEMMF16Accum)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasWMMA);
+        auto [dataTypeAndWaveK, transOp] = std::get<1>(GetParam());
+        auto [dataType, waveK]           = dataTypeAndWaveK;
+        AssertFatal((waveK == 16) || (waveK == 32), "Invalid waveK value.", ShowValue(waveK));
+
+        GEMMProblem gemm;
+        gemm.waveM = 16;
+        gemm.waveN = 16;
+        gemm.waveK = waveK;
+        gemm.wavefrontSize
+            = m_context->targetArchitecture().GetCapability(GPUCapability::DefaultWavefrontSize);
+        std::tie(gemm.transA, gemm.transB) = transOp;
+
+        if(dataType == DataType::Half)
+        {
+            basicGEMM<Half, Half, Half, Half, Half>(gemm);
+        }
+        else if(dataType == DataType::BFloat16)
+        {
+            basicGEMM<BFloat16, BFloat16, BFloat16, BFloat16, BFloat16>(gemm);
+        }
+        else
+        {
+            Throw<FatalError>("Invalid type.", ShowValue(dataType));
         }
     }
 
@@ -3458,13 +3493,13 @@ namespace GEMMDriverTest
         GEMMTestWMMAGPU,
         ::testing::Combine(
             currentGPUISA(),
-            ::testing::Combine(::testing::Values(rocRoller::DataType::Half,
-                                                 rocRoller::DataType::BFloat16),
-                               ::testing::Values(16),
-                               ::testing::Values(std::pair<std::string, std::string>("N", "N"),
-                                                 std::pair<std::string, std::string>("N", "T"),
-                                                 std::pair<std::string, std::string>("T", "N"),
-                                                 std::pair<std::string, std::string>("T", "T")))));
+            ::testing::Combine(
+                ::testing::Values(std::make_pair(rocRoller::DataType::Half, /*waveK*/ 16),
+                                  std::make_pair(rocRoller::DataType::BFloat16, /*waveK*/ 16)),
+                ::testing::Values(std::pair<std::string, std::string>("N", "N"),
+                                  std::pair<std::string, std::string>("N", "T"),
+                                  std::pair<std::string, std::string>("T", "N"),
+                                  std::pair<std::string, std::string>("T", "T")))));
     INSTANTIATE_TEST_SUITE_P(
         MixedGEMMTestWMMA,
         MixedGEMMTestWMMAGPU,

@@ -68,10 +68,11 @@ namespace rocRoller
                 {
                     auto command = std::make_shared<Command>();
 
-                    auto typeA = fromString<DataType>(solutionParams.typeA);
-                    auto typeB = fromString<DataType>(solutionParams.typeB);
-                    auto typeC = fromString<DataType>(solutionParams.typeC);
-                    auto typeD = fromString<DataType>(solutionParams.typeD);
+                    auto typeA   = fromString<DataType>(solutionParams.typeA);
+                    auto typeB   = fromString<DataType>(solutionParams.typeB);
+                    auto typeC   = fromString<DataType>(solutionParams.typeC);
+                    auto typeD   = fromString<DataType>(solutionParams.typeD);
+                    auto typeAcc = fromString<DataType>(solutionParams.typeAcc);
 
                     auto unitStrides = [](TransposeType t) -> std::vector<size_t> {
                         switch(t)
@@ -165,8 +166,8 @@ namespace rocRoller
                     auto tagLoadBeta
                         = command->addOperation(Operations::T_Load_Scalar(m_tagScalarBeta));
 
-                    auto tagAB
-                        = command->addOperation(Operations::T_Mul(mulInputA, mulInputB)); // A * B
+                    auto tagAB = command->addOperation(
+                        Operations::T_Mul(mulInputA, mulInputB, typeAcc)); // A * B
 
                     Operations::T_Execute execute(command->getNextTag());
                     auto                  tagBetaC

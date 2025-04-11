@@ -606,6 +606,15 @@ namespace rocRoller
                         auto tmp   = m_context->registerTagManager()->getRegister(dimTag);
                         valueCount = tmp->valueCount();
                     }
+
+                    auto varType = resultVariableType(assign.expression);
+                    if(assign.variableType)
+                    {
+                        varType = assign.variableType.value();
+                        // For non-packed types, the denominator is 1.
+                        valueCount /= DataTypeInfo::Get(varType).packing;
+                    }
+
                     Log::debug("  immediate: count {}", assign.valueCount);
                     if(assign.regType == Register::Type::Accumulator
                        || assign.regType == Register::Type::Vector)
@@ -613,7 +622,7 @@ namespace rocRoller
                         dest = m_context->registerTagManager()->getRegister(
                             dimTag,
                             assign.regType,
-                            resultVariableType(assign.expression),
+                            varType,
                             valueCount,
                             Register::AllocationOptions{.contiguousChunkWidth
                                                         = static_cast<int>(valueCount)});
@@ -621,10 +630,7 @@ namespace rocRoller
                     else
                     {
                         dest = m_context->registerTagManager()->getRegister(
-                            dimTag,
-                            assign.regType,
-                            resultVariableType(assign.expression),
-                            valueCount);
+                            dimTag, assign.regType, varType, valueCount);
                     }
                     if(dest->name().empty())
                         dest->setName(concatenate("DataFlowTag", dimTag));
@@ -870,26 +876,10 @@ namespace rocRoller
                 bool scaled = mult.scaleA != Operations::ScaleMode::None
                               || mult.scaleB != Operations::ScaleMode::None;
 
-                uint numElements = waveA->sizes[0] * waveB->sizes[1];
-                uint wfs         = m_context->kernel()->wavefront_size();
-                uint numGPR      = numElements / wfs;
-
                 auto [DTag, _D] = m_graph->getDimension<MacroTile>(
                     tag, Connections::typeArgument<MacroTile>(NaryArgument::DEST));
 
-                const auto& arch    = m_context->targetArchitecture();
-                const auto  regType = arch.HasCapability(GPUCapability::HasAccCD)
-                                          ? Register::Type::Accumulator
-                                          : Register::Type::Vector;
-
-                auto D = m_context->registerTagManager()->getRegister(
-                    DTag,
-                    regType,
-                    DataType::Float,
-                    numGPR,
-                    Register::AllocationOptions{.contiguousChunkWidth
-                                                = Register::FULLY_CONTIGUOUS});
-
+                auto D = m_context->registerTagManager()->getRegister(DTag);
                 auto A = std::make_shared<Expression::Expression>(waveA);
                 auto B = std::make_shared<Expression::Expression>(waveB);
 
