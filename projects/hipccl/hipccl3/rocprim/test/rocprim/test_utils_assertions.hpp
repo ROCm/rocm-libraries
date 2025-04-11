@@ -68,12 +68,29 @@ void assert_eq(const std::vector<T>& result,
                const size_t          max_length = SIZE_MAX)
 {
     if(max_length == SIZE_MAX || max_length > expected.size())
+    {
         ASSERT_EQ(result.size(), expected.size());
+    }
     for(size_t i = 0; i < std::min(result.size(), max_length); i++)
     {
         if(bit_equal(result[i], expected[i]))
             continue; // Check bitwise equality for +NaN, -NaN, +0.0, -0.0, +inf, -inf.
+#if defined(_WIN32)
+        // GTest's ASSERT_EQ prints the values if the test fails. On Windows, the version of GTest provided by vcpkg doesn't
+        // provide overloads for printing 128 bit types, resulting in linker errors.
+        // Check if we're testing with 128 bit types. If so, test using bools so GTest doesn't try to print them on failure.
+        if (test_utils::is_int128<T>::value || test_utils::is_uint128<T>::value || (typeid(T) == typeid(common::custom_type<double,double,1>)))
+        {
+            const bool values_equal = (result[i] == expected[i]);
+            ASSERT_EQ(values_equal, true) << "where index = " << i;
+        }
+        else
+        {
+            ASSERT_EQ(result[i], expected[i]) << "where index = " << i;
+        }
+#else
         ASSERT_EQ(result[i], expected[i]) << "where index = " << i;
+#endif		
     }
 }
 
@@ -90,7 +107,15 @@ void assert_eq(const std::vector<common::custom_type<T, T, true>>& result,
     {
         if(bit_equal(result[i].x, expected[i].x) && bit_equal(result[i].y, expected[i].y))
             continue; // Check bitwise equality for +NaN, -NaN, +0.0, -0.0, +inf, -inf.
+#if defined(_WIN32)
+        // GTest's ASSERT_EQ prints the values if the test fails. On Windows, the version of GTest provided by vcpkg doesn't
+        // provide overloads for printing 128 bit types, resulting in linker errors.
+        // Check if we're testing with 128 bit types. If so, test using bools so GTest doesn't try to print them on failure.
+        const bool values_equal = (result[i] == expected[i]);
+        ASSERT_EQ(values_equal, true) << "where index = " << i;
+#else
         ASSERT_EQ(result[i], expected[i]) << "where index = " << i;
+#endif		
     }
 }
 
@@ -130,7 +155,22 @@ void assert_eq(const T& result, const T& expected)
 {
     if(bit_equal(result, expected))
         return; // Check bitwise equality for +NaN, -NaN, +0.0, -0.0, +inf, -inf.
+#if defined(_WIN32)
+    // GTest's ASSERT_EQ prints the values if the test fails. On Windows, the version of GTest provided by vcpkg doesn't
+    // provide overloads for printing 128 bit types, resulting in linker errors.
+    // Check if we're testing with 128 bit types. If so, test using bools so GTest doesn't try to print them on failure.
+    if (test_utils::is_int128<T>::value || test_utils::is_uint128<T>::value)
+    {
+        const bool values_equal = (result == expected);
+        ASSERT_EQ(values_equal, true);
+	}
+    else
+    {
+        ASSERT_EQ(result, expected);
+    }
+#else		
     ASSERT_EQ(result, expected);
+#endif
 }
 
 template<class T>
