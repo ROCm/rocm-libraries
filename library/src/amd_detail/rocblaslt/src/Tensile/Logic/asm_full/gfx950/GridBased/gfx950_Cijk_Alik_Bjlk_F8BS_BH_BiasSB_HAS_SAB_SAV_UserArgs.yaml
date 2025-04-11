@@ -10,7 +10,7 @@
   AssignedDerivedParameters: true
   Batched: true
   BetaOnlyUseBias: true
-  BiasDataTypeList: [0, 4]
+  BiasDataTypeList: [0, 7]
   BiasSrc: D
   ComplexConjugateA: false
   ComplexConjugateB: false
@@ -128,7 +128,7 @@
       SupportUserGSU: true, UseUniversalArgs: true}
     Kernel: true
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT256x256x64_MI32x32x1_SN_GSU0_K1_LBSPPA256_LBSPPB0_LPB0_MIWT4_4_VWA4_VWB4
+    KernelNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT256x256x64_MI32x32x1_SN_GSU0_K1_LBSPPA256_LBSPPB0_LPB0_MIWT4_4_VWA4_VWB4
     LDSTrInst: false
     LSCA: 64
     LSCB: 256
@@ -233,7 +233,7 @@
       AssignedDerivedParameters: true
       Batched: true
       BetaOnlyUseBias: true
-      BiasDataTypeList: [0, 4]
+      BiasDataTypeList: [0, 7]
       BiasSrc: D
       ComplexConjugateA: false
       ComplexConjugateB: false
@@ -305,7 +305,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 0
-    SolutionNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT256x256x64_MI32x32x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB0_LPB0_MIWT4_4_SU0_SUM0_SUS0_VWA4_VWB4_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT256x256x64_MI32x32x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB0_LPB0_MIWT4_4_SU0_SUM0_SUS0_VWA4_VWB4_WGM8_WGMXCC1_WGMXCCGn1
     SourceSwap: true
     StaggerU: 0
     StaggerUMapping: 0
@@ -419,7 +419,7 @@
       SupportUserGSU: true, UseUniversalArgs: true}
     Kernel: true
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT256x256x64_MI32x32x1_SN_GSU0_K1_LBSPPA256_LBSPPB0_LPB0_MIWT4_4_VWA4_VWB4
+    KernelNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT256x256x64_MI32x32x1_SN_GSU0_K1_LBSPPA256_LBSPPB0_LPB0_MIWT4_4_VWA4_VWB4
     LDSTrInst: false
     LSCA: 64
     LSCB: 256
@@ -524,7 +524,7 @@
       AssignedDerivedParameters: true
       Batched: true
       BetaOnlyUseBias: true
-      BiasDataTypeList: [0, 4]
+      BiasDataTypeList: [0, 7]
       BiasSrc: D
       ComplexConjugateA: false
       ComplexConjugateB: false
@@ -596,7 +596,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 1
-    SolutionNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT256x256x64_MI32x32x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB0_LPB0_MIWT4_4_SU0_SUM0_SUS0_VWA4_VWB4_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT256x256x64_MI32x32x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB0_LPB0_MIWT4_4_SU0_SUM0_SUS0_VWA4_VWB4_WGM8_WGMXCC1_WGMXCCGn1
     SourceSwap: true
     StaggerU: 0
     StaggerUMapping: 0
@@ -710,7 +710,7 @@
       SupportUserGSU: true, UseUniversalArgs: true}
     Kernel: true
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT256x256x64_MI32x32x1_SN_GSU0_K1_LBSPPA256_LBSPPB0_LPB0_MIWT4_4_VWA4_VWB4
+    KernelNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT256x256x64_MI32x32x1_SN_GSU0_K1_LBSPPA256_LBSPPB0_LPB0_MIWT4_4_VWA4_VWB4
     LDSTrInst: false
     LSCA: 64
     LSCB: 256
@@ -815,7 +815,7 @@
       AssignedDerivedParameters: true
       Batched: true
       BetaOnlyUseBias: true
-      BiasDataTypeList: [0, 4]
+      BiasDataTypeList: [0, 7]
       BiasSrc: D
       ComplexConjugateA: false
       ComplexConjugateB: false
@@ -887,7 +887,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 2
-    SolutionNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT256x256x64_MI32x32x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB0_LPB0_MIWT4_4_SU0_SUM0_SUS0_VWA4_VWB4_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT256x256x64_MI32x32x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB0_LPB0_MIWT4_4_SU0_SUM0_SUS0_VWA4_VWB4_WGM8_WGMXCC1_WGMXCCGn1
     SourceSwap: true
     StaggerU: 0
     StaggerUMapping: 0
@@ -1001,7 +1001,7 @@
       SupportUserGSU: true, UseUniversalArgs: true}
     Kernel: true
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT256x256x64_MI32x32x1_SN_GSU0_K1_LBSPPA256_LBSPPB0_LPB0_MIWT4_4_VWA4_VWB4
+    KernelNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT256x256x64_MI32x32x1_SN_GSU0_K1_LBSPPA256_LBSPPB0_LPB0_MIWT4_4_VWA4_VWB4
     LDSTrInst: false
     LSCA: 64
     LSCB: 256
@@ -1106,7 +1106,7 @@
       AssignedDerivedParameters: true
       Batched: true
       BetaOnlyUseBias: true
-      BiasDataTypeList: [0, 4]
+      BiasDataTypeList: [0, 7]
       BiasSrc: D
       ComplexConjugateA: false
       ComplexConjugateB: false
@@ -1178,7 +1178,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 3
-    SolutionNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT256x256x64_MI32x32x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB0_LPB0_MIWT4_4_SU0_SUM0_SUS0_VWA4_VWB4_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT256x256x64_MI32x32x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB0_LPB0_MIWT4_4_SU0_SUM0_SUS0_VWA4_VWB4_WGM8_WGMXCC1_WGMXCCGn1
     SourceSwap: true
     StaggerU: 0
     StaggerUMapping: 0
@@ -1292,7 +1292,7 @@
       SupportUserGSU: true, UseUniversalArgs: true}
     Kernel: true
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT256x256x64_MI32x32x1_SN_GSU0_K1_LBSPPA256_LBSPPB0_LPB0_MIWT4_4_VWA4_VWB4
+    KernelNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT256x256x64_MI32x32x1_SN_GSU0_K1_LBSPPA256_LBSPPB0_LPB0_MIWT4_4_VWA4_VWB4
     LDSTrInst: false
     LSCA: 64
     LSCB: 256
@@ -1397,7 +1397,7 @@
       AssignedDerivedParameters: true
       Batched: true
       BetaOnlyUseBias: true
-      BiasDataTypeList: [0, 4]
+      BiasDataTypeList: [0, 7]
       BiasSrc: D
       ComplexConjugateA: false
       ComplexConjugateB: false
@@ -1469,7 +1469,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 4
-    SolutionNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT256x256x64_MI32x32x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB0_LPB0_MIWT4_4_SU0_SUM0_SUS0_VWA4_VWB4_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT256x256x64_MI32x32x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB0_LPB0_MIWT4_4_SU0_SUM0_SUS0_VWA4_VWB4_WGM8_WGMXCC1_WGMXCCGn1
     SourceSwap: true
     StaggerU: 0
     StaggerUMapping: 0
@@ -1583,7 +1583,7 @@
       SupportUserGSU: true, UseUniversalArgs: true}
     Kernel: true
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT256x256x64_MI32x32x1_SN_GSU0_K1_LBSPPA256_LBSPPB0_LPB0_MIWT4_4_VWA4_VWB4
+    KernelNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT256x256x64_MI32x32x1_SN_GSU0_K1_LBSPPA256_LBSPPB0_LPB0_MIWT4_4_VWA4_VWB4
     LDSTrInst: false
     LSCA: 64
     LSCB: 256
@@ -1688,7 +1688,7 @@
       AssignedDerivedParameters: true
       Batched: true
       BetaOnlyUseBias: true
-      BiasDataTypeList: [0, 4]
+      BiasDataTypeList: [0, 7]
       BiasSrc: D
       ComplexConjugateA: false
       ComplexConjugateB: false
@@ -1760,7 +1760,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 5
-    SolutionNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT256x256x64_MI32x32x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB0_LPB0_MIWT4_4_SU0_SUM0_SUS0_VWA4_VWB4_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT256x256x64_MI32x32x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB0_LPB0_MIWT4_4_SU0_SUM0_SUS0_VWA4_VWB4_WGM8_WGMXCC1_WGMXCCGn1
     SourceSwap: true
     StaggerU: 0
     StaggerUMapping: 0
@@ -1874,7 +1874,7 @@
       SupportUserGSU: true, UseUniversalArgs: true}
     Kernel: true
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT256x128x64_MI32x32x1_SN_GSU0_K1_LBSPPA256_LBSPPB0_LPB0_MIWT4_2_VWA4_VWB2
+    KernelNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT256x128x64_MI32x32x1_SN_GSU0_K1_LBSPPA256_LBSPPB0_LPB0_MIWT4_2_VWA4_VWB2
     LDSTrInst: false
     LSCA: 64
     LSCB: 128
@@ -1979,7 +1979,7 @@
       AssignedDerivedParameters: true
       Batched: true
       BetaOnlyUseBias: true
-      BiasDataTypeList: [0, 4]
+      BiasDataTypeList: [0, 7]
       BiasSrc: D
       ComplexConjugateA: false
       ComplexConjugateB: false
@@ -2051,7 +2051,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 6
-    SolutionNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT256x128x64_MI32x32x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB0_LPB0_MIWT4_2_SU0_SUM0_SUS0_VWA4_VWB2_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT256x128x64_MI32x32x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB0_LPB0_MIWT4_2_SU0_SUM0_SUS0_VWA4_VWB2_WGM8_WGMXCC1_WGMXCCGn1
     SourceSwap: true
     StaggerU: 0
     StaggerUMapping: 0
@@ -2165,7 +2165,7 @@
       SupportUserGSU: true, UseUniversalArgs: true}
     Kernel: true
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT256x128x64_MI32x32x1_SN_GSU0_K1_LBSPPA256_LBSPPB0_LPB0_MIWT4_2_VWA4_VWB2
+    KernelNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT256x128x64_MI32x32x1_SN_GSU0_K1_LBSPPA256_LBSPPB0_LPB0_MIWT4_2_VWA4_VWB2
     LDSTrInst: false
     LSCA: 64
     LSCB: 128
@@ -2270,7 +2270,7 @@
       AssignedDerivedParameters: true
       Batched: true
       BetaOnlyUseBias: true
-      BiasDataTypeList: [0, 4]
+      BiasDataTypeList: [0, 7]
       BiasSrc: D
       ComplexConjugateA: false
       ComplexConjugateB: false
@@ -2342,7 +2342,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 7
-    SolutionNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT256x128x64_MI32x32x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB0_LPB0_MIWT4_2_SU0_SUM0_SUS0_VWA4_VWB2_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT256x128x64_MI32x32x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB0_LPB0_MIWT4_2_SU0_SUM0_SUS0_VWA4_VWB2_WGM8_WGMXCC1_WGMXCCGn1
     SourceSwap: true
     StaggerU: 0
     StaggerUMapping: 0
@@ -2456,7 +2456,7 @@
       SupportUserGSU: true, UseUniversalArgs: true}
     Kernel: true
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT256x128x128_MI16x16x1_SN_GSU0_K1_LBSPPA1024_LBSPPB2048_LPB64_MIWT8_4_VWA8_VWB4
+    KernelNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT256x128x128_MI16x16x1_SN_GSU0_K1_LBSPPA1024_LBSPPB2048_LPB64_MIWT8_4_VWA8_VWB4
     LDSTrInst: false
     LSCA: 128
     LSCB: 128
@@ -2561,7 +2561,7 @@
       AssignedDerivedParameters: true
       Batched: true
       BetaOnlyUseBias: true
-      BiasDataTypeList: [0, 4]
+      BiasDataTypeList: [0, 7]
       BiasSrc: D
       ComplexConjugateA: false
       ComplexConjugateB: false
@@ -2633,7 +2633,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 8
-    SolutionNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT256x128x128_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA1024_LBSPPB2048_LPB64_MIWT8_4_SU0_SUM0_SUS0_VWA8_VWB4_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT256x128x128_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA1024_LBSPPB2048_LPB64_MIWT8_4_SU0_SUM0_SUS0_VWA8_VWB4_WGM8_WGMXCC1_WGMXCCGn1
     SourceSwap: true
     StaggerU: 0
     StaggerUMapping: 0
@@ -2747,7 +2747,7 @@
       SupportUserGSU: true, UseUniversalArgs: true}
     Kernel: true
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT256x128x128_MI16x16x1_SN_GSU0_K1_LBSPPA1024_LBSPPB2048_LPB64_MIWT8_4_VWA8_VWB4
+    KernelNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT256x128x128_MI16x16x1_SN_GSU0_K1_LBSPPA1024_LBSPPB2048_LPB64_MIWT8_4_VWA8_VWB4
     LDSTrInst: false
     LSCA: 128
     LSCB: 128
@@ -2852,7 +2852,7 @@
       AssignedDerivedParameters: true
       Batched: true
       BetaOnlyUseBias: true
-      BiasDataTypeList: [0, 4]
+      BiasDataTypeList: [0, 7]
       BiasSrc: D
       ComplexConjugateA: false
       ComplexConjugateB: false
@@ -2924,7 +2924,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 9
-    SolutionNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT256x128x128_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA1024_LBSPPB2048_LPB64_MIWT8_4_SU0_SUM0_SUS0_VWA8_VWB4_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT256x128x128_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA1024_LBSPPB2048_LPB64_MIWT8_4_SU0_SUM0_SUS0_VWA8_VWB4_WGM8_WGMXCC1_WGMXCCGn1
     SourceSwap: true
     StaggerU: 0
     StaggerUMapping: 0
@@ -3038,7 +3038,7 @@
       SupportUserGSU: true, UseUniversalArgs: true}
     Kernel: true
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT256x128x128_MI16x16x1_SN_GSU0_K1_LBSPPA1024_LBSPPB2048_LPB64_MIWT8_4_VWA8_VWB4
+    KernelNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT256x128x128_MI16x16x1_SN_GSU0_K1_LBSPPA1024_LBSPPB2048_LPB64_MIWT8_4_VWA8_VWB4
     LDSTrInst: false
     LSCA: 128
     LSCB: 128
@@ -3143,7 +3143,7 @@
       AssignedDerivedParameters: true
       Batched: true
       BetaOnlyUseBias: true
-      BiasDataTypeList: [0, 4]
+      BiasDataTypeList: [0, 7]
       BiasSrc: D
       ComplexConjugateA: false
       ComplexConjugateB: false
@@ -3215,7 +3215,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 10
-    SolutionNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT256x128x128_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA1024_LBSPPB2048_LPB64_MIWT8_4_SU0_SUM0_SUS0_VWA8_VWB4_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT256x128x128_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA1024_LBSPPB2048_LPB64_MIWT8_4_SU0_SUM0_SUS0_VWA8_VWB4_WGM8_WGMXCC1_WGMXCCGn1
     SourceSwap: true
     StaggerU: 0
     StaggerUMapping: 0
@@ -3329,7 +3329,7 @@
       SupportUserGSU: true, UseUniversalArgs: true}
     Kernel: true
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT128x128x128_MI16x16x1_SN_GSU0_K1_LBSPPA512_LBSPPB2048_LPB64_MIWT4_4_VWA4_VWB4
+    KernelNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT128x128x128_MI16x16x1_SN_GSU0_K1_LBSPPA512_LBSPPB2048_LPB64_MIWT4_4_VWA4_VWB4
     LDSTrInst: false
     LSCA: 128
     LSCB: 128
@@ -3434,7 +3434,7 @@
       AssignedDerivedParameters: true
       Batched: true
       BetaOnlyUseBias: true
-      BiasDataTypeList: [0, 4]
+      BiasDataTypeList: [0, 7]
       BiasSrc: D
       ComplexConjugateA: false
       ComplexConjugateB: false
@@ -3506,7 +3506,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 11
-    SolutionNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT128x128x128_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA512_LBSPPB2048_LPB64_MIWT4_4_SU0_SUM0_SUS0_VWA4_VWB4_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT128x128x128_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA512_LBSPPB2048_LPB64_MIWT4_4_SU0_SUM0_SUS0_VWA4_VWB4_WGM8_WGMXCC1_WGMXCCGn1
     SourceSwap: true
     StaggerU: 0
     StaggerUMapping: 0
@@ -3620,7 +3620,7 @@
       SupportUserGSU: true, UseUniversalArgs: true}
     Kernel: true
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT128x128x128_MI16x16x1_SN_GSU0_K1_LBSPPA512_LBSPPB2048_LPB64_MIWT4_4_VWA4_VWB4
+    KernelNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT128x128x128_MI16x16x1_SN_GSU0_K1_LBSPPA512_LBSPPB2048_LPB64_MIWT4_4_VWA4_VWB4
     LDSTrInst: false
     LSCA: 128
     LSCB: 128
@@ -3725,7 +3725,7 @@
       AssignedDerivedParameters: true
       Batched: true
       BetaOnlyUseBias: true
-      BiasDataTypeList: [0, 4]
+      BiasDataTypeList: [0, 7]
       BiasSrc: D
       ComplexConjugateA: false
       ComplexConjugateB: false
@@ -3797,7 +3797,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 12
-    SolutionNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT128x128x128_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA512_LBSPPB2048_LPB64_MIWT4_4_SU0_SUM0_SUS0_VWA4_VWB4_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT128x128x128_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA512_LBSPPB2048_LPB64_MIWT4_4_SU0_SUM0_SUS0_VWA4_VWB4_WGM8_WGMXCC1_WGMXCCGn1
     SourceSwap: true
     StaggerU: 0
     StaggerUMapping: 0
@@ -3911,7 +3911,7 @@
       SupportUserGSU: true, UseUniversalArgs: true}
     Kernel: true
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT128x128x128_MI16x16x1_SN_GSU0_K1_LBSPPA512_LBSPPB2048_LPB64_MIWT4_4_VWA4_VWB4
+    KernelNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT128x128x128_MI16x16x1_SN_GSU0_K1_LBSPPA512_LBSPPB2048_LPB64_MIWT4_4_VWA4_VWB4
     LDSTrInst: false
     LSCA: 128
     LSCB: 128
@@ -4016,7 +4016,7 @@
       AssignedDerivedParameters: true
       Batched: true
       BetaOnlyUseBias: true
-      BiasDataTypeList: [0, 4]
+      BiasDataTypeList: [0, 7]
       BiasSrc: D
       ComplexConjugateA: false
       ComplexConjugateB: false
@@ -4088,7 +4088,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 13
-    SolutionNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT128x128x128_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA512_LBSPPB2048_LPB64_MIWT4_4_SU0_SUM0_SUS0_VWA4_VWB4_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT128x128x128_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA512_LBSPPB2048_LPB64_MIWT4_4_SU0_SUM0_SUS0_VWA4_VWB4_WGM8_WGMXCC1_WGMXCCGn1
     SourceSwap: true
     StaggerU: 0
     StaggerUMapping: 0
@@ -4202,7 +4202,7 @@
       SupportUserGSU: true, UseUniversalArgs: true}
     Kernel: true
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT128x64x128_MI16x16x1_SN_GSU0_K1_LBSPPA512_LBSPPB1024_LPB32_MIWT4_2_VWA4_VWB2
+    KernelNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT128x64x128_MI16x16x1_SN_GSU0_K1_LBSPPA512_LBSPPB1024_LPB32_MIWT4_2_VWA4_VWB2
     LDSTrInst: false
     LSCA: 128
     LSCB: 64
@@ -4307,7 +4307,7 @@
       AssignedDerivedParameters: true
       Batched: true
       BetaOnlyUseBias: true
-      BiasDataTypeList: [0, 4]
+      BiasDataTypeList: [0, 7]
       BiasSrc: D
       ComplexConjugateA: false
       ComplexConjugateB: false
@@ -4379,7 +4379,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 14
-    SolutionNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT128x64x128_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA512_LBSPPB1024_LPB32_MIWT4_2_SU0_SUM0_SUS0_VWA4_VWB2_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT128x64x128_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA512_LBSPPB1024_LPB32_MIWT4_2_SU0_SUM0_SUS0_VWA4_VWB2_WGM8_WGMXCC1_WGMXCCGn1
     SourceSwap: true
     StaggerU: 0
     StaggerUMapping: 0
@@ -4493,7 +4493,7 @@
       SupportUserGSU: true, UseUniversalArgs: true}
     Kernel: true
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT128x64x128_MI16x16x1_SN_GSU0_K1_LBSPPA512_LBSPPB1024_LPB32_MIWT4_2_VWA4_VWB2
+    KernelNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT128x64x128_MI16x16x1_SN_GSU0_K1_LBSPPA512_LBSPPB1024_LPB32_MIWT4_2_VWA4_VWB2
     LDSTrInst: false
     LSCA: 128
     LSCB: 64
@@ -4598,7 +4598,7 @@
       AssignedDerivedParameters: true
       Batched: true
       BetaOnlyUseBias: true
-      BiasDataTypeList: [0, 4]
+      BiasDataTypeList: [0, 7]
       BiasSrc: D
       ComplexConjugateA: false
       ComplexConjugateB: false
@@ -4670,7 +4670,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 15
-    SolutionNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT128x64x128_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA512_LBSPPB1024_LPB32_MIWT4_2_SU0_SUM0_SUS0_VWA4_VWB2_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT128x64x128_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA512_LBSPPB1024_LPB32_MIWT4_2_SU0_SUM0_SUS0_VWA4_VWB2_WGM8_WGMXCC1_WGMXCCGn1
     SourceSwap: true
     StaggerU: 0
     StaggerUMapping: 0
@@ -4784,7 +4784,7 @@
       SupportUserGSU: true, UseUniversalArgs: true}
     Kernel: true
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT128x64x128_MI16x16x1_SN_GSU0_K1_LBSPPA512_LBSPPB1024_LPB32_MIWT4_2_VWA4_VWB2
+    KernelNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT128x64x128_MI16x16x1_SN_GSU0_K1_LBSPPA512_LBSPPB1024_LPB32_MIWT4_2_VWA4_VWB2
     LDSTrInst: false
     LSCA: 128
     LSCB: 64
@@ -4889,7 +4889,7 @@
       AssignedDerivedParameters: true
       Batched: true
       BetaOnlyUseBias: true
-      BiasDataTypeList: [0, 4]
+      BiasDataTypeList: [0, 7]
       BiasSrc: D
       ComplexConjugateA: false
       ComplexConjugateB: false
@@ -4961,7 +4961,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 16
-    SolutionNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT128x64x128_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA512_LBSPPB1024_LPB32_MIWT4_2_SU0_SUM0_SUS0_VWA4_VWB2_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT128x64x128_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA512_LBSPPB1024_LPB32_MIWT4_2_SU0_SUM0_SUS0_VWA4_VWB2_WGM8_WGMXCC1_WGMXCCGn1
     SourceSwap: true
     StaggerU: 0
     StaggerUMapping: 0
@@ -5075,7 +5075,7 @@
       SupportUserGSU: true, UseUniversalArgs: true}
     Kernel: true
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT128x64x128_MI16x16x1_SN_GSU0_K1_LBSPPA512_LBSPPB1024_LPB32_MIWT4_2_VWA4_VWB2
+    KernelNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT128x64x128_MI16x16x1_SN_GSU0_K1_LBSPPA512_LBSPPB1024_LPB32_MIWT4_2_VWA4_VWB2
     LDSTrInst: false
     LSCA: 128
     LSCB: 64
@@ -5180,7 +5180,7 @@
       AssignedDerivedParameters: true
       Batched: true
       BetaOnlyUseBias: true
-      BiasDataTypeList: [0, 4]
+      BiasDataTypeList: [0, 7]
       BiasSrc: D
       ComplexConjugateA: false
       ComplexConjugateB: false
@@ -5252,7 +5252,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 17
-    SolutionNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT128x64x128_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA512_LBSPPB1024_LPB32_MIWT4_2_SU0_SUM0_SUS0_VWA4_VWB2_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT128x64x128_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA512_LBSPPB1024_LPB32_MIWT4_2_SU0_SUM0_SUS0_VWA4_VWB2_WGM8_WGMXCC1_WGMXCCGn1
     SourceSwap: true
     StaggerU: 0
     StaggerUMapping: 0
@@ -5366,7 +5366,7 @@
       SupportUserGSU: true, UseUniversalArgs: true}
     Kernel: true
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT128x32x128_MI16x16x1_SN_GSU0_K1_LBSPPA512_LBSPPB512_LPB16_MIWT4_1_VWA4_VWB1
+    KernelNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT128x32x128_MI16x16x1_SN_GSU0_K1_LBSPPA512_LBSPPB512_LPB16_MIWT4_1_VWA4_VWB1
     LDSTrInst: false
     LSCA: 128
     LSCB: 32
@@ -5471,7 +5471,7 @@
       AssignedDerivedParameters: true
       Batched: true
       BetaOnlyUseBias: true
-      BiasDataTypeList: [0, 4]
+      BiasDataTypeList: [0, 7]
       BiasSrc: D
       ComplexConjugateA: false
       ComplexConjugateB: false
@@ -5543,7 +5543,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 18
-    SolutionNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT128x32x128_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA512_LBSPPB512_LPB16_MIWT4_1_SU0_SUM0_SUS0_VWA4_VWB1_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT128x32x128_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA512_LBSPPB512_LPB16_MIWT4_1_SU0_SUM0_SUS0_VWA4_VWB1_WGM8_WGMXCC1_WGMXCCGn1
     SourceSwap: true
     StaggerU: 0
     StaggerUMapping: 0
@@ -5657,7 +5657,7 @@
       SupportUserGSU: true, UseUniversalArgs: true}
     Kernel: true
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT64x64x128_MI16x16x1_SN_GSU0_K1_LBSPPA256_LBSPPB1024_LPB32_MIWT2_2_VWA2_VWB2
+    KernelNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT64x64x128_MI16x16x1_SN_GSU0_K1_LBSPPA256_LBSPPB1024_LPB32_MIWT2_2_VWA2_VWB2
     LDSTrInst: false
     LSCA: 128
     LSCB: 64
@@ -5762,7 +5762,7 @@
       AssignedDerivedParameters: true
       Batched: true
       BetaOnlyUseBias: true
-      BiasDataTypeList: [0, 4]
+      BiasDataTypeList: [0, 7]
       BiasSrc: D
       ComplexConjugateA: false
       ComplexConjugateB: false
@@ -5834,7 +5834,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 19
-    SolutionNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT64x64x128_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB1024_LPB32_MIWT2_2_SU0_SUM0_SUS0_VWA2_VWB2_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT64x64x128_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB1024_LPB32_MIWT2_2_SU0_SUM0_SUS0_VWA2_VWB2_WGM8_WGMXCC1_WGMXCCGn1
     SourceSwap: true
     StaggerU: 0
     StaggerUMapping: 0
@@ -5948,7 +5948,7 @@
       SupportUserGSU: true, UseUniversalArgs: true}
     Kernel: true
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT64x64x128_MI16x16x1_SN_GSU0_K1_LBSPPA256_LBSPPB1024_LPB32_MIWT2_2_VWA2_VWB2
+    KernelNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT64x64x128_MI16x16x1_SN_GSU0_K1_LBSPPA256_LBSPPB1024_LPB32_MIWT2_2_VWA2_VWB2
     LDSTrInst: false
     LSCA: 128
     LSCB: 64
@@ -6053,7 +6053,7 @@
       AssignedDerivedParameters: true
       Batched: true
       BetaOnlyUseBias: true
-      BiasDataTypeList: [0, 4]
+      BiasDataTypeList: [0, 7]
       BiasSrc: D
       ComplexConjugateA: false
       ComplexConjugateB: false
@@ -6125,7 +6125,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 20
-    SolutionNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT64x64x128_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB1024_LPB32_MIWT2_2_SU0_SUM0_SUS0_VWA2_VWB2_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT64x64x128_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB1024_LPB32_MIWT2_2_SU0_SUM0_SUS0_VWA2_VWB2_WGM8_WGMXCC1_WGMXCCGn1
     SourceSwap: true
     StaggerU: 0
     StaggerUMapping: 0
@@ -6239,7 +6239,7 @@
       SupportUserGSU: true, UseUniversalArgs: true}
     Kernel: true
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT64x64x128_MI16x16x1_SN_GSU0_K1_LBSPPA256_LBSPPB1024_LPB32_MIWT2_2_VWA2_VWB2
+    KernelNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT64x64x128_MI16x16x1_SN_GSU0_K1_LBSPPA256_LBSPPB1024_LPB32_MIWT2_2_VWA2_VWB2
     LDSTrInst: false
     LSCA: 128
     LSCB: 64
@@ -6344,7 +6344,7 @@
       AssignedDerivedParameters: true
       Batched: true
       BetaOnlyUseBias: true
-      BiasDataTypeList: [0, 4]
+      BiasDataTypeList: [0, 7]
       BiasSrc: D
       ComplexConjugateA: false
       ComplexConjugateB: false
@@ -6416,7 +6416,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 21
-    SolutionNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT64x64x128_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB1024_LPB32_MIWT2_2_SU0_SUM0_SUS0_VWA2_VWB2_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT64x64x128_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB1024_LPB32_MIWT2_2_SU0_SUM0_SUS0_VWA2_VWB2_WGM8_WGMXCC1_WGMXCCGn1
     SourceSwap: true
     StaggerU: 0
     StaggerUMapping: 0
@@ -6530,7 +6530,7 @@
       SupportUserGSU: true, UseUniversalArgs: true}
     Kernel: true
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT32x64x128_MI16x16x1_SN_GSU0_K1_LBSPPA128_LBSPPB1024_LPB32_MIWT1_2_VWA1_VWB2
+    KernelNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT32x64x128_MI16x16x1_SN_GSU0_K1_LBSPPA128_LBSPPB1024_LPB32_MIWT1_2_VWA1_VWB2
     LDSTrInst: false
     LSCA: 128
     LSCB: 64
@@ -6635,7 +6635,7 @@
       AssignedDerivedParameters: true
       Batched: true
       BetaOnlyUseBias: true
-      BiasDataTypeList: [0, 4]
+      BiasDataTypeList: [0, 7]
       BiasSrc: D
       ComplexConjugateA: false
       ComplexConjugateB: false
@@ -6707,7 +6707,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 22
-    SolutionNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT32x64x128_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA128_LBSPPB1024_LPB32_MIWT1_2_SU0_SUM0_SUS0_VWA1_VWB2_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT32x64x128_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA128_LBSPPB1024_LPB32_MIWT1_2_SU0_SUM0_SUS0_VWA1_VWB2_WGM8_WGMXCC1_WGMXCCGn1
     SourceSwap: true
     StaggerU: 0
     StaggerUMapping: 0
@@ -6821,7 +6821,7 @@
       SupportUserGSU: true, UseUniversalArgs: true}
     Kernel: true
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT64x32x128_MI16x16x1_SN_GSU0_K1_LBSPPA256_LBSPPB512_LPB16_MIWT2_1_VWA2_VWB1
+    KernelNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT64x32x128_MI16x16x1_SN_GSU0_K1_LBSPPA256_LBSPPB512_LPB16_MIWT2_1_VWA2_VWB1
     LDSTrInst: false
     LSCA: 128
     LSCB: 32
@@ -6926,7 +6926,7 @@
       AssignedDerivedParameters: true
       Batched: true
       BetaOnlyUseBias: true
-      BiasDataTypeList: [0, 4]
+      BiasDataTypeList: [0, 7]
       BiasSrc: D
       ComplexConjugateA: false
       ComplexConjugateB: false
@@ -6998,7 +6998,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 23
-    SolutionNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT64x32x128_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB512_LPB16_MIWT2_1_SU0_SUM0_SUS0_VWA2_VWB1_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT64x32x128_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB512_LPB16_MIWT2_1_SU0_SUM0_SUS0_VWA2_VWB1_WGM8_WGMXCC1_WGMXCCGn1
     SourceSwap: true
     StaggerU: 0
     StaggerUMapping: 0
@@ -7112,7 +7112,7 @@
       SupportUserGSU: true, UseUniversalArgs: true}
     Kernel: true
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT64x32x128_MI16x16x1_SN_GSU0_K1_LBSPPA256_LBSPPB512_LPB16_MIWT2_1_VWA2_VWB1
+    KernelNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT64x32x128_MI16x16x1_SN_GSU0_K1_LBSPPA256_LBSPPB512_LPB16_MIWT2_1_VWA2_VWB1
     LDSTrInst: false
     LSCA: 128
     LSCB: 32
@@ -7217,7 +7217,7 @@
       AssignedDerivedParameters: true
       Batched: true
       BetaOnlyUseBias: true
-      BiasDataTypeList: [0, 4]
+      BiasDataTypeList: [0, 7]
       BiasSrc: D
       ComplexConjugateA: false
       ComplexConjugateB: false
@@ -7289,7 +7289,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 24
-    SolutionNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT64x32x128_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB512_LPB16_MIWT2_1_SU0_SUM0_SUS0_VWA2_VWB1_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT64x32x128_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB512_LPB16_MIWT2_1_SU0_SUM0_SUS0_VWA2_VWB1_WGM8_WGMXCC1_WGMXCCGn1
     SourceSwap: true
     StaggerU: 0
     StaggerUMapping: 0
@@ -7403,7 +7403,7 @@
       SupportUserGSU: true, UseUniversalArgs: true}
     Kernel: true
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT64x32x128_MI16x16x1_SN_GSU0_K1_LBSPPA256_LBSPPB512_LPB16_MIWT2_1_VWA2_VWB1
+    KernelNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT64x32x128_MI16x16x1_SN_GSU0_K1_LBSPPA256_LBSPPB512_LPB16_MIWT2_1_VWA2_VWB1
     LDSTrInst: false
     LSCA: 128
     LSCB: 32
@@ -7508,7 +7508,7 @@
       AssignedDerivedParameters: true
       Batched: true
       BetaOnlyUseBias: true
-      BiasDataTypeList: [0, 4]
+      BiasDataTypeList: [0, 7]
       BiasSrc: D
       ComplexConjugateA: false
       ComplexConjugateB: false
@@ -7580,7 +7580,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 25
-    SolutionNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT64x32x128_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB512_LPB16_MIWT2_1_SU0_SUM0_SUS0_VWA2_VWB1_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT64x32x128_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB512_LPB16_MIWT2_1_SU0_SUM0_SUS0_VWA2_VWB1_WGM8_WGMXCC1_WGMXCCGn1
     SourceSwap: true
     StaggerU: 0
     StaggerUMapping: 0
@@ -7694,7 +7694,7 @@
       SupportUserGSU: true, UseUniversalArgs: true}
     Kernel: true
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT32x32x128_MI16x16x1_SN_GSU0_K1_LBSPPA128_LBSPPB512_LPB16_MIWT1_1_VWA1_VWB1
+    KernelNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT32x32x128_MI16x16x1_SN_GSU0_K1_LBSPPA128_LBSPPB512_LPB16_MIWT1_1_VWA1_VWB1
     LDSTrInst: false
     LSCA: 128
     LSCB: 32
@@ -7799,7 +7799,7 @@
       AssignedDerivedParameters: true
       Batched: true
       BetaOnlyUseBias: true
-      BiasDataTypeList: [0, 4]
+      BiasDataTypeList: [0, 7]
       BiasSrc: D
       ComplexConjugateA: false
       ComplexConjugateB: false
@@ -7871,7 +7871,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 26
-    SolutionNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT32x32x128_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA128_LBSPPB512_LPB16_MIWT1_1_SU0_SUM0_SUS0_VWA1_VWB1_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT32x32x128_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA128_LBSPPB512_LPB16_MIWT1_1_SU0_SUM0_SUS0_VWA1_VWB1_WGM8_WGMXCC1_WGMXCCGn1
     SourceSwap: true
     StaggerU: 0
     StaggerUMapping: 0
@@ -7985,7 +7985,7 @@
       SupportUserGSU: true, UseUniversalArgs: true}
     Kernel: true
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT32x32x128_MI16x16x1_SN_GSU0_K1_LBSPPA128_LBSPPB512_LPB16_MIWT1_1_VWA1_VWB1
+    KernelNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT32x32x128_MI16x16x1_SN_GSU0_K1_LBSPPA128_LBSPPB512_LPB16_MIWT1_1_VWA1_VWB1
     LDSTrInst: false
     LSCA: 128
     LSCB: 32
@@ -8090,7 +8090,7 @@
       AssignedDerivedParameters: true
       Batched: true
       BetaOnlyUseBias: true
-      BiasDataTypeList: [0, 4]
+      BiasDataTypeList: [0, 7]
       BiasSrc: D
       ComplexConjugateA: false
       ComplexConjugateB: false
@@ -8162,7 +8162,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 27
-    SolutionNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT32x32x128_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA128_LBSPPB512_LPB16_MIWT1_1_SU0_SUM0_SUS0_VWA1_VWB1_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT32x32x128_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA128_LBSPPB512_LPB16_MIWT1_1_SU0_SUM0_SUS0_VWA1_VWB1_WGM8_WGMXCC1_WGMXCCGn1
     SourceSwap: true
     StaggerU: 0
     StaggerUMapping: 0
@@ -8276,7 +8276,7 @@
       SupportUserGSU: true, UseUniversalArgs: true}
     Kernel: true
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT32x32x128_MI16x16x1_SN_GSU0_K1_LBSPPA128_LBSPPB512_LPB16_MIWT1_1_VWA1_VWB1
+    KernelNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT32x32x128_MI16x16x1_SN_GSU0_K1_LBSPPA128_LBSPPB512_LPB16_MIWT1_1_VWA1_VWB1
     LDSTrInst: false
     LSCA: 128
     LSCB: 32
@@ -8381,7 +8381,7 @@
       AssignedDerivedParameters: true
       Batched: true
       BetaOnlyUseBias: true
-      BiasDataTypeList: [0, 4]
+      BiasDataTypeList: [0, 7]
       BiasSrc: D
       ComplexConjugateA: false
       ComplexConjugateB: false
@@ -8453,7 +8453,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 28
-    SolutionNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT32x32x128_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA128_LBSPPB512_LPB16_MIWT1_1_SU0_SUM0_SUS0_VWA1_VWB1_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT32x32x128_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA128_LBSPPB512_LPB16_MIWT1_1_SU0_SUM0_SUS0_VWA1_VWB1_WGM8_WGMXCC1_WGMXCCGn1
     SourceSwap: true
     StaggerU: 0
     StaggerUMapping: 0
@@ -8567,7 +8567,7 @@
       SupportUserGSU: true, UseUniversalArgs: true}
     Kernel: true
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT256x256x128_MI32x32x1_SN_GSU0_K1_LBSPPA512_LBSPPB0_LPB0_MIWT4_4_VWA4_VWB4
+    KernelNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT256x256x128_MI32x32x1_SN_GSU0_K1_LBSPPA512_LBSPPB0_LPB0_MIWT4_4_VWA4_VWB4
     LDSTrInst: false
     LSCA: 128
     LSCB: 256
@@ -8672,7 +8672,7 @@
       AssignedDerivedParameters: true
       Batched: true
       BetaOnlyUseBias: true
-      BiasDataTypeList: [0, 4]
+      BiasDataTypeList: [0, 7]
       BiasSrc: D
       ComplexConjugateA: false
       ComplexConjugateB: false
@@ -8744,7 +8744,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 29
-    SolutionNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT256x256x128_MI32x32x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA512_LBSPPB0_LPB0_MIWT4_4_SU0_SUM0_SUS0_VWA4_VWB4_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT256x256x128_MI32x32x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA512_LBSPPB0_LPB0_MIWT4_4_SU0_SUM0_SUS0_VWA4_VWB4_WGM8_WGMXCC1_WGMXCCGn1
     SourceSwap: true
     StaggerU: 0
     StaggerUMapping: 0
@@ -8858,7 +8858,7 @@
       SupportUserGSU: true, UseUniversalArgs: true}
     Kernel: true
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT256x128x128_MI32x32x1_SN_GSU0_K1_LBSPPA512_LBSPPB0_LPB0_MIWT4_2_VWA4_VWB2
+    KernelNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT256x128x128_MI32x32x1_SN_GSU0_K1_LBSPPA512_LBSPPB0_LPB0_MIWT4_2_VWA4_VWB2
     LDSTrInst: false
     LSCA: 128
     LSCB: 128
@@ -8963,7 +8963,7 @@
       AssignedDerivedParameters: true
       Batched: true
       BetaOnlyUseBias: true
-      BiasDataTypeList: [0, 4]
+      BiasDataTypeList: [0, 7]
       BiasSrc: D
       ComplexConjugateA: false
       ComplexConjugateB: false
@@ -9035,7 +9035,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 30
-    SolutionNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT256x128x128_MI32x32x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA512_LBSPPB0_LPB0_MIWT4_2_SU0_SUM0_SUS0_VWA4_VWB2_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT256x128x128_MI32x32x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA512_LBSPPB0_LPB0_MIWT4_2_SU0_SUM0_SUS0_VWA4_VWB2_WGM8_WGMXCC1_WGMXCCGn1
     SourceSwap: true
     StaggerU: 0
     StaggerUMapping: 0
@@ -9149,7 +9149,7 @@
       SupportUserGSU: true, UseUniversalArgs: true}
     Kernel: true
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT256x128x128_MI32x32x1_SN_GSU0_K1_LBSPPA512_LBSPPB0_LPB0_MIWT4_2_VWA4_VWB2
+    KernelNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT256x128x128_MI32x32x1_SN_GSU0_K1_LBSPPA512_LBSPPB0_LPB0_MIWT4_2_VWA4_VWB2
     LDSTrInst: false
     LSCA: 128
     LSCB: 128
@@ -9254,7 +9254,7 @@
       AssignedDerivedParameters: true
       Batched: true
       BetaOnlyUseBias: true
-      BiasDataTypeList: [0, 4]
+      BiasDataTypeList: [0, 7]
       BiasSrc: D
       ComplexConjugateA: false
       ComplexConjugateB: false
@@ -9326,7 +9326,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 31
-    SolutionNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT256x128x128_MI32x32x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA512_LBSPPB0_LPB0_MIWT4_2_SU0_SUM0_SUS0_VWA4_VWB2_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT256x128x128_MI32x32x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA512_LBSPPB0_LPB0_MIWT4_2_SU0_SUM0_SUS0_VWA4_VWB2_WGM8_WGMXCC1_WGMXCCGn1
     SourceSwap: true
     StaggerU: 0
     StaggerUMapping: 0
@@ -9440,7 +9440,7 @@
       SupportUserGSU: true, UseUniversalArgs: true}
     Kernel: true
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT128x128x256_MI16x16x1_SN_GSU0_K1_LBSPPA1024_LBSPPB2048_LPB64_MIWT4_4_VWA4_VWB4
+    KernelNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT128x128x256_MI16x16x1_SN_GSU0_K1_LBSPPA1024_LBSPPB2048_LPB64_MIWT4_4_VWA4_VWB4
     LDSTrInst: false
     LSCA: 256
     LSCB: 128
@@ -9545,7 +9545,7 @@
       AssignedDerivedParameters: true
       Batched: true
       BetaOnlyUseBias: true
-      BiasDataTypeList: [0, 4]
+      BiasDataTypeList: [0, 7]
       BiasSrc: D
       ComplexConjugateA: false
       ComplexConjugateB: false
@@ -9617,7 +9617,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 32
-    SolutionNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT128x128x256_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA1024_LBSPPB2048_LPB64_MIWT4_4_SU0_SUM0_SUS0_VWA4_VWB4_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT128x128x256_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA1024_LBSPPB2048_LPB64_MIWT4_4_SU0_SUM0_SUS0_VWA4_VWB4_WGM8_WGMXCC1_WGMXCCGn1
     SourceSwap: true
     StaggerU: 0
     StaggerUMapping: 0
@@ -9731,7 +9731,7 @@
       SupportUserGSU: true, UseUniversalArgs: true}
     Kernel: true
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT128x64x256_MI16x16x1_SN_GSU0_K1_LBSPPA1024_LBSPPB1024_LPB32_MIWT4_2_VWA4_VWB2
+    KernelNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT128x64x256_MI16x16x1_SN_GSU0_K1_LBSPPA1024_LBSPPB1024_LPB32_MIWT4_2_VWA4_VWB2
     LDSTrInst: false
     LSCA: 256
     LSCB: 64
@@ -9836,7 +9836,7 @@
       AssignedDerivedParameters: true
       Batched: true
       BetaOnlyUseBias: true
-      BiasDataTypeList: [0, 4]
+      BiasDataTypeList: [0, 7]
       BiasSrc: D
       ComplexConjugateA: false
       ComplexConjugateB: false
@@ -9908,7 +9908,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 33
-    SolutionNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT128x64x256_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA1024_LBSPPB1024_LPB32_MIWT4_2_SU0_SUM0_SUS0_VWA4_VWB2_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT128x64x256_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA1024_LBSPPB1024_LPB32_MIWT4_2_SU0_SUM0_SUS0_VWA4_VWB2_WGM8_WGMXCC1_WGMXCCGn1
     SourceSwap: true
     StaggerU: 0
     StaggerUMapping: 0
@@ -10022,7 +10022,7 @@
       SupportUserGSU: true, UseUniversalArgs: true}
     Kernel: true
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT64x64x256_MI16x16x1_SN_GSU0_K1_LBSPPA512_LBSPPB1024_LPB32_MIWT2_2_VWA2_VWB2
+    KernelNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT64x64x256_MI16x16x1_SN_GSU0_K1_LBSPPA512_LBSPPB1024_LPB32_MIWT2_2_VWA2_VWB2
     LDSTrInst: false
     LSCA: 256
     LSCB: 64
@@ -10127,7 +10127,7 @@
       AssignedDerivedParameters: true
       Batched: true
       BetaOnlyUseBias: true
-      BiasDataTypeList: [0, 4]
+      BiasDataTypeList: [0, 7]
       BiasSrc: D
       ComplexConjugateA: false
       ComplexConjugateB: false
@@ -10199,7 +10199,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 34
-    SolutionNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT64x64x256_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA512_LBSPPB1024_LPB32_MIWT2_2_SU0_SUM0_SUS0_VWA2_VWB2_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT64x64x256_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA512_LBSPPB1024_LPB32_MIWT2_2_SU0_SUM0_SUS0_VWA2_VWB2_WGM8_WGMXCC1_WGMXCCGn1
     SourceSwap: true
     StaggerU: 0
     StaggerUMapping: 0
@@ -10313,7 +10313,7 @@
       SupportUserGSU: true, UseUniversalArgs: true}
     Kernel: true
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT32x64x256_MI16x16x1_SN_GSU0_K1_LBSPPA256_LBSPPB1024_LPB32_MIWT1_2_VWA1_VWB2
+    KernelNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT32x64x256_MI16x16x1_SN_GSU0_K1_LBSPPA256_LBSPPB1024_LPB32_MIWT1_2_VWA1_VWB2
     LDSTrInst: false
     LSCA: 256
     LSCB: 64
@@ -10418,7 +10418,7 @@
       AssignedDerivedParameters: true
       Batched: true
       BetaOnlyUseBias: true
-      BiasDataTypeList: [0, 4]
+      BiasDataTypeList: [0, 7]
       BiasSrc: D
       ComplexConjugateA: false
       ComplexConjugateB: false
@@ -10490,7 +10490,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 35
-    SolutionNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT32x64x256_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB1024_LPB32_MIWT1_2_SU0_SUM0_SUS0_VWA1_VWB2_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT32x64x256_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB1024_LPB32_MIWT1_2_SU0_SUM0_SUS0_VWA1_VWB2_WGM8_WGMXCC1_WGMXCCGn1
     SourceSwap: true
     StaggerU: 0
     StaggerUMapping: 0
@@ -10604,7 +10604,7 @@
       SupportUserGSU: true, UseUniversalArgs: true}
     Kernel: true
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT32x64x256_MI16x16x1_SN_GSU0_K1_LBSPPA256_LBSPPB1024_LPB32_MIWT1_2_VWA1_VWB2
+    KernelNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT32x64x256_MI16x16x1_SN_GSU0_K1_LBSPPA256_LBSPPB1024_LPB32_MIWT1_2_VWA1_VWB2
     LDSTrInst: false
     LSCA: 256
     LSCB: 64
@@ -10709,7 +10709,7 @@
       AssignedDerivedParameters: true
       Batched: true
       BetaOnlyUseBias: true
-      BiasDataTypeList: [0, 4]
+      BiasDataTypeList: [0, 7]
       BiasSrc: D
       ComplexConjugateA: false
       ComplexConjugateB: false
@@ -10781,7 +10781,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 36
-    SolutionNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT32x64x256_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB1024_LPB32_MIWT1_2_SU0_SUM0_SUS0_VWA1_VWB2_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT32x64x256_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB1024_LPB32_MIWT1_2_SU0_SUM0_SUS0_VWA1_VWB2_WGM8_WGMXCC1_WGMXCCGn1
     SourceSwap: true
     StaggerU: 0
     StaggerUMapping: 0
@@ -10895,7 +10895,7 @@
       SupportUserGSU: true, UseUniversalArgs: true}
     Kernel: true
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT64x32x256_MI16x16x1_SN_GSU0_K1_LBSPPA512_LBSPPB512_LPB16_MIWT2_1_VWA2_VWB1
+    KernelNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT64x32x256_MI16x16x1_SN_GSU0_K1_LBSPPA512_LBSPPB512_LPB16_MIWT2_1_VWA2_VWB1
     LDSTrInst: false
     LSCA: 256
     LSCB: 32
@@ -11000,7 +11000,7 @@
       AssignedDerivedParameters: true
       Batched: true
       BetaOnlyUseBias: true
-      BiasDataTypeList: [0, 4]
+      BiasDataTypeList: [0, 7]
       BiasSrc: D
       ComplexConjugateA: false
       ComplexConjugateB: false
@@ -11072,7 +11072,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 37
-    SolutionNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT64x32x256_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA512_LBSPPB512_LPB16_MIWT2_1_SU0_SUM0_SUS0_VWA2_VWB1_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT64x32x256_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA512_LBSPPB512_LPB16_MIWT2_1_SU0_SUM0_SUS0_VWA2_VWB1_WGM8_WGMXCC1_WGMXCCGn1
     SourceSwap: true
     StaggerU: 0
     StaggerUMapping: 0
@@ -11186,7 +11186,7 @@
       SupportUserGSU: true, UseUniversalArgs: true}
     Kernel: true
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT64x32x256_MI16x16x1_SN_GSU0_K1_LBSPPA512_LBSPPB512_LPB16_MIWT2_1_VWA2_VWB1
+    KernelNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT64x32x256_MI16x16x1_SN_GSU0_K1_LBSPPA512_LBSPPB512_LPB16_MIWT2_1_VWA2_VWB1
     LDSTrInst: false
     LSCA: 256
     LSCB: 32
@@ -11291,7 +11291,7 @@
       AssignedDerivedParameters: true
       Batched: true
       BetaOnlyUseBias: true
-      BiasDataTypeList: [0, 4]
+      BiasDataTypeList: [0, 7]
       BiasSrc: D
       ComplexConjugateA: false
       ComplexConjugateB: false
@@ -11363,7 +11363,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 38
-    SolutionNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT64x32x256_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA512_LBSPPB512_LPB16_MIWT2_1_SU0_SUM0_SUS0_VWA2_VWB1_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT64x32x256_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA512_LBSPPB512_LPB16_MIWT2_1_SU0_SUM0_SUS0_VWA2_VWB1_WGM8_WGMXCC1_WGMXCCGn1
     SourceSwap: true
     StaggerU: 0
     StaggerUMapping: 0
@@ -11477,7 +11477,7 @@
       SupportUserGSU: true, UseUniversalArgs: true}
     Kernel: true
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT64x32x256_MI16x16x1_SN_GSU0_K1_LBSPPA512_LBSPPB512_LPB16_MIWT2_1_VWA2_VWB1
+    KernelNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT64x32x256_MI16x16x1_SN_GSU0_K1_LBSPPA512_LBSPPB512_LPB16_MIWT2_1_VWA2_VWB1
     LDSTrInst: false
     LSCA: 256
     LSCB: 32
@@ -11582,7 +11582,7 @@
       AssignedDerivedParameters: true
       Batched: true
       BetaOnlyUseBias: true
-      BiasDataTypeList: [0, 4]
+      BiasDataTypeList: [0, 7]
       BiasSrc: D
       ComplexConjugateA: false
       ComplexConjugateB: false
@@ -11654,7 +11654,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 39
-    SolutionNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT64x32x256_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA512_LBSPPB512_LPB16_MIWT2_1_SU0_SUM0_SUS0_VWA2_VWB1_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT64x32x256_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA512_LBSPPB512_LPB16_MIWT2_1_SU0_SUM0_SUS0_VWA2_VWB1_WGM8_WGMXCC1_WGMXCCGn1
     SourceSwap: true
     StaggerU: 0
     StaggerUMapping: 0
@@ -11768,7 +11768,7 @@
       SupportUserGSU: true, UseUniversalArgs: true}
     Kernel: true
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT64x32x256_MI16x16x1_SN_GSU0_K1_LBSPPA512_LBSPPB512_LPB16_MIWT2_1_VWA2_VWB1
+    KernelNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT64x32x256_MI16x16x1_SN_GSU0_K1_LBSPPA512_LBSPPB512_LPB16_MIWT2_1_VWA2_VWB1
     LDSTrInst: false
     LSCA: 256
     LSCB: 32
@@ -11873,7 +11873,7 @@
       AssignedDerivedParameters: true
       Batched: true
       BetaOnlyUseBias: true
-      BiasDataTypeList: [0, 4]
+      BiasDataTypeList: [0, 7]
       BiasSrc: D
       ComplexConjugateA: false
       ComplexConjugateB: false
@@ -11945,7 +11945,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 40
-    SolutionNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT64x32x256_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA512_LBSPPB512_LPB16_MIWT2_1_SU0_SUM0_SUS0_VWA2_VWB1_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT64x32x256_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA512_LBSPPB512_LPB16_MIWT2_1_SU0_SUM0_SUS0_VWA2_VWB1_WGM8_WGMXCC1_WGMXCCGn1
     SourceSwap: true
     StaggerU: 0
     StaggerUMapping: 0
@@ -12059,7 +12059,7 @@
       SupportUserGSU: true, UseUniversalArgs: true}
     Kernel: true
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT32x32x256_MI16x16x1_SN_GSU0_K1_LBSPPA256_LBSPPB512_LPB16_MIWT1_1_VWA1_VWB1
+    KernelNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT32x32x256_MI16x16x1_SN_GSU0_K1_LBSPPA256_LBSPPB512_LPB16_MIWT1_1_VWA1_VWB1
     LDSTrInst: false
     LSCA: 256
     LSCB: 32
@@ -12164,7 +12164,7 @@
       AssignedDerivedParameters: true
       Batched: true
       BetaOnlyUseBias: true
-      BiasDataTypeList: [0, 4]
+      BiasDataTypeList: [0, 7]
       BiasSrc: D
       ComplexConjugateA: false
       ComplexConjugateB: false
@@ -12236,7 +12236,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 41
-    SolutionNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT32x32x256_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB512_LPB16_MIWT1_1_SU0_SUM0_SUS0_VWA1_VWB1_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT32x32x256_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB512_LPB16_MIWT1_1_SU0_SUM0_SUS0_VWA1_VWB1_WGM8_WGMXCC1_WGMXCCGn1
     SourceSwap: true
     StaggerU: 0
     StaggerUMapping: 0
@@ -12350,7 +12350,7 @@
       SupportUserGSU: true, UseUniversalArgs: true}
     Kernel: true
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT32x32x256_MI16x16x1_SN_GSU0_K1_LBSPPA256_LBSPPB512_LPB16_MIWT1_1_VWA1_VWB1
+    KernelNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT32x32x256_MI16x16x1_SN_GSU0_K1_LBSPPA256_LBSPPB512_LPB16_MIWT1_1_VWA1_VWB1
     LDSTrInst: false
     LSCA: 256
     LSCB: 32
@@ -12455,7 +12455,7 @@
       AssignedDerivedParameters: true
       Batched: true
       BetaOnlyUseBias: true
-      BiasDataTypeList: [0, 4]
+      BiasDataTypeList: [0, 7]
       BiasSrc: D
       ComplexConjugateA: false
       ComplexConjugateB: false
@@ -12527,7 +12527,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 42
-    SolutionNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT32x32x256_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB512_LPB16_MIWT1_1_SU0_SUM0_SUS0_VWA1_VWB1_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT32x32x256_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB512_LPB16_MIWT1_1_SU0_SUM0_SUS0_VWA1_VWB1_WGM8_WGMXCC1_WGMXCCGn1
     SourceSwap: true
     StaggerU: 0
     StaggerUMapping: 0
@@ -12641,7 +12641,7 @@
       SupportUserGSU: true, UseUniversalArgs: true}
     Kernel: true
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT32x32x256_MI16x16x1_SN_GSU0_K1_LBSPPA256_LBSPPB512_LPB16_MIWT1_1_VWA1_VWB1
+    KernelNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT32x32x256_MI16x16x1_SN_GSU0_K1_LBSPPA256_LBSPPB512_LPB16_MIWT1_1_VWA1_VWB1
     LDSTrInst: false
     LSCA: 256
     LSCB: 32
@@ -12746,7 +12746,7 @@
       AssignedDerivedParameters: true
       Batched: true
       BetaOnlyUseBias: true
-      BiasDataTypeList: [0, 4]
+      BiasDataTypeList: [0, 7]
       BiasSrc: D
       ComplexConjugateA: false
       ComplexConjugateB: false
@@ -12818,7 +12818,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 43
-    SolutionNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT32x32x256_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB512_LPB16_MIWT1_1_SU0_SUM0_SUS0_VWA1_VWB1_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT32x32x256_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB512_LPB16_MIWT1_1_SU0_SUM0_SUS0_VWA1_VWB1_WGM8_WGMXCC1_WGMXCCGn1
     SourceSwap: true
     StaggerU: 0
     StaggerUMapping: 0
@@ -12932,7 +12932,7 @@
       SupportUserGSU: true, UseUniversalArgs: true}
     Kernel: true
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT32x32x256_MI16x16x1_SN_GSU0_K1_LBSPPA256_LBSPPB512_LPB16_MIWT1_1_VWA1_VWB1
+    KernelNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT32x32x256_MI16x16x1_SN_GSU0_K1_LBSPPA256_LBSPPB512_LPB16_MIWT1_1_VWA1_VWB1
     LDSTrInst: false
     LSCA: 256
     LSCB: 32
@@ -13037,7 +13037,7 @@
       AssignedDerivedParameters: true
       Batched: true
       BetaOnlyUseBias: true
-      BiasDataTypeList: [0, 4]
+      BiasDataTypeList: [0, 7]
       BiasSrc: D
       ComplexConjugateA: false
       ComplexConjugateB: false
@@ -13109,7 +13109,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 44
-    SolutionNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT32x32x256_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB512_LPB16_MIWT1_1_SU0_SUM0_SUS0_VWA1_VWB1_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT32x32x256_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB512_LPB16_MIWT1_1_SU0_SUM0_SUS0_VWA1_VWB1_WGM8_WGMXCC1_WGMXCCGn1
     SourceSwap: true
     StaggerU: 0
     StaggerUMapping: 0
@@ -13223,7 +13223,7 @@
       SupportUserGSU: true, UseUniversalArgs: true}
     Kernel: true
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT32x32x256_MI16x16x1_SN_GSU0_K1_LBSPPA256_LBSPPB512_LPB16_MIWT1_1_VWA1_VWB1
+    KernelNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT32x32x256_MI16x16x1_SN_GSU0_K1_LBSPPA256_LBSPPB512_LPB16_MIWT1_1_VWA1_VWB1
     LDSTrInst: false
     LSCA: 256
     LSCB: 32
@@ -13328,7 +13328,7 @@
       AssignedDerivedParameters: true
       Batched: true
       BetaOnlyUseBias: true
-      BiasDataTypeList: [0, 4]
+      BiasDataTypeList: [0, 7]
       BiasSrc: D
       ComplexConjugateA: false
       ComplexConjugateB: false
@@ -13400,7 +13400,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 45
-    SolutionNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT32x32x256_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB512_LPB16_MIWT1_1_SU0_SUM0_SUS0_VWA1_VWB1_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT32x32x256_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB512_LPB16_MIWT1_1_SU0_SUM0_SUS0_VWA1_VWB1_WGM8_WGMXCC1_WGMXCCGn1
     SourceSwap: true
     StaggerU: 0
     StaggerUMapping: 0
@@ -13514,7 +13514,7 @@
       SupportUserGSU: true, UseUniversalArgs: true}
     Kernel: true
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT32x32x256_MI16x16x1_SN_GSU0_K1_LBSPPA256_LBSPPB512_LPB16_MIWT1_1_VWA1_VWB1
+    KernelNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT32x32x256_MI16x16x1_SN_GSU0_K1_LBSPPA256_LBSPPB512_LPB16_MIWT1_1_VWA1_VWB1
     LDSTrInst: false
     LSCA: 256
     LSCB: 32
@@ -13619,7 +13619,7 @@
       AssignedDerivedParameters: true
       Batched: true
       BetaOnlyUseBias: true
-      BiasDataTypeList: [0, 4]
+      BiasDataTypeList: [0, 7]
       BiasSrc: D
       ComplexConjugateA: false
       ComplexConjugateB: false
@@ -13691,7 +13691,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 46
-    SolutionNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT32x32x256_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB512_LPB16_MIWT1_1_SU0_SUM0_SUS0_VWA1_VWB1_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT32x32x256_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB512_LPB16_MIWT1_1_SU0_SUM0_SUS0_VWA1_VWB1_WGM8_WGMXCC1_WGMXCCGn1
     SourceSwap: true
     StaggerU: 0
     StaggerUMapping: 0
@@ -13805,7 +13805,7 @@
       SupportUserGSU: true, UseUniversalArgs: true}
     Kernel: true
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT32x32x256_MI16x16x1_SN_GSU0_K1_LBSPPA256_LBSPPB512_LPB16_MIWT1_1_VWA1_VWB1
+    KernelNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT32x32x256_MI16x16x1_SN_GSU0_K1_LBSPPA256_LBSPPB512_LPB16_MIWT1_1_VWA1_VWB1
     LDSTrInst: false
     LSCA: 256
     LSCB: 32
@@ -13910,7 +13910,7 @@
       AssignedDerivedParameters: true
       Batched: true
       BetaOnlyUseBias: true
-      BiasDataTypeList: [0, 4]
+      BiasDataTypeList: [0, 7]
       BiasSrc: D
       ComplexConjugateA: false
       ComplexConjugateB: false
@@ -13982,7 +13982,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 47
-    SolutionNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT32x32x256_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB512_LPB16_MIWT1_1_SU0_SUM0_SUS0_VWA1_VWB1_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT32x32x256_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB512_LPB16_MIWT1_1_SU0_SUM0_SUS0_VWA1_VWB1_WGM8_WGMXCC1_WGMXCCGn1
     SourceSwap: true
     StaggerU: 0
     StaggerUMapping: 0
@@ -14096,7 +14096,7 @@
       SupportUserGSU: true, UseUniversalArgs: true}
     Kernel: true
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT32x32x128_MI16x16x1_SN_GSU0_K1_LBSPPA128_LBSPPB256_LPB16_MIWT1_1_VWA1_VWB1
+    KernelNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT32x32x128_MI16x16x1_SN_GSU0_K1_LBSPPA128_LBSPPB256_LPB16_MIWT1_1_VWA1_VWB1
     LDSTrInst: false
     LSCA: 128
     LSCB: 32
@@ -14201,7 +14201,7 @@
       AssignedDerivedParameters: true
       Batched: true
       BetaOnlyUseBias: true
-      BiasDataTypeList: [0, 4]
+      BiasDataTypeList: [0, 7]
       BiasSrc: D
       ComplexConjugateA: false
       ComplexConjugateB: false
@@ -14273,7 +14273,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 48
-    SolutionNameMin: Cijk_Alik_Bjlk_F8HS_BH_Bias_HAS_SAB_SAV_UserArgs_MT32x32x128_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA128_LBSPPB256_LPB16_MIWT1_1_SU32_SUM0_SUS256_VWA1_VWB1_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionNameMin: Cijk_Alik_Bjlk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT32x32x128_MI16x16x1_SN_GSU0_GSUC0_GSUWGMRR0_K1_LBSPPA128_LBSPPB256_LPB16_MIWT1_1_SU32_SUM0_SUS256_VWA1_VWB1_WGM8_WGMXCC1_WGMXCCGn1
     SourceSwap: true
     StaggerU: 32
     StaggerUMapping: 0

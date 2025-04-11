@@ -437,6 +437,23 @@ Tests:
   unit_check: 1
   gpu_arch: '950'
 
+- name: matmul_f8_dst_bf16
+  category: pre_checkin
+  function:
+    matmul: *f8_precision_dst_bf16
+  M: [128, 129]
+  N: [128, 129]
+  K: [128, 129]
+  transA_transB: *transA_transB_range
+  alpha: 1
+  beta: [ 0.0, 2.0 ]
+  scaleA: [ 0, 1]
+  scaleB: [ 0, 1]
+  bias_vector: [0, 1]
+  bias_type: [f32_r, bf16_r]
+  unit_check: 1
+  gpu_arch: '950'
+
 - name: matmul_f8_bf8_dst_f16
   category: pre_checkin
   function:
