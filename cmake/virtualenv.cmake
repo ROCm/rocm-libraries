@@ -57,7 +57,12 @@ function(virtualenv_install)
       ERROR_VARIABLE error_message
       OUTPUT_VARIABLE output_message
     )
-
+    execute_process(
+      OUTPUT_VARIABLE VIRTUALENV_SITE_PATH
+      COMMAND ${VIRTUALENV_BIN_DIR}/${VIRTUALENV_PYTHON_EXENAME} -c "import sysconfig; print(sysconfig.get_path('purelib').strip())"
+    )
+    string(REGEX REPLACE "\n$" "" VIRTUALENV_SITE_PATH "${VIRTUALENV_SITE_PATH}")
+    set(VIRTUALENV_SITE_PATH ${VIRTUALENV_SITE_PATH} PARENT_SCOPE)
     if(return_code)
         message("Error Code: ${rc}")
         message("StdOut: ${output_message}")

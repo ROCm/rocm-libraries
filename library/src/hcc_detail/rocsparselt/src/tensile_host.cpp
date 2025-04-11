@@ -117,29 +117,29 @@ namespace
     };
 
     /********************************************************************
-     * Variable template to map a rocsparselt type into a TensileLite::DataType *
+     * Variable template to map a rocsparselt type into a rocisa::DataType *
      ********************************************************************/
     template <typename>
     constexpr auto tensile_datatype = nullptr;
 
     // int8_t -> int8_t (supported for MI-kernel) / rocsparselt_int8x4 -> PackedInt8x4
     template <>
-    constexpr auto tensile_datatype<int8_t> = TensileLite::DataType::Int8;
+    constexpr auto tensile_datatype<int8_t> = rocisa::DataType::Int8;
 
     template <>
-    constexpr auto tensile_datatype<__half> = TensileLite::DataType::Half;
+    constexpr auto tensile_datatype<__half> = rocisa::DataType::Half;
 
     template <>
-    constexpr auto tensile_datatype<hip_bfloat16> = TensileLite::DataType::BFloat16;
+    constexpr auto tensile_datatype<hip_bfloat16> = rocisa::DataType::BFloat16;
 
     template <>
-    constexpr auto tensile_datatype<float> = TensileLite::DataType::Float;
+    constexpr auto tensile_datatype<float> = rocisa::DataType::Float;
 
     template <>
-    constexpr auto tensile_datatype<__hip_fp8_e4m3> = TensileLite::DataType::Float8;
+    constexpr auto tensile_datatype<__hip_fp8_e4m3> = rocisa::DataType::Float8;
 
     template <>
-    constexpr auto tensile_datatype<__hip_fp8_e5m2> = TensileLite::DataType::BFloat8;
+    constexpr auto tensile_datatype<__hip_fp8_e5m2> = rocisa::DataType::BFloat8;
 
     /*************************************************************************
      * Class for converting alpha and beta between rocsparselt and Tensile types *
@@ -162,25 +162,25 @@ namespace
     /******************************************************
     * Map a rocsparselt data type to a corresponding Tensile type *
     ******************************************************/
-    inline TensileLite::DataType hipDataType_to_tensile_type(hipDataType type)
+    inline rocisa::DataType hipDataType_to_tensile_type(hipDataType type)
     {
         switch(type)
         {
         case HIP_R_16F:
-            return TensileLite::DataType::Half;
+            return rocisa::DataType::Half;
         case HIP_R_32F:
-            return TensileLite::DataType::Float;
+            return rocisa::DataType::Float;
         case HIP_R_16BF:
-            return TensileLite::DataType::BFloat16;
+            return rocisa::DataType::BFloat16;
         case HIP_R_8I:
-            return TensileLite::DataType::Int8;
+            return rocisa::DataType::Int8;
         case HIP_R_8F_E4M3:
-            return TensileLite::DataType::Float8;
+            return rocisa::DataType::Float8;
         case HIP_R_8F_E5M2:
-            return TensileLite::DataType::BFloat8;
+            return rocisa::DataType::BFloat8;
         default:
             assert(!"hipblasltDatatype_to_tensile_type: non-supported type");
-            return TensileLite::DataType::None;
+            return rocisa::DataType::None;
         }
     }
 
@@ -193,9 +193,9 @@ namespace
                                  int                                              useScaleAlphaVec = 0)
     {
         // Tensile DataTypes corresponding to rocsparselt data types
-        static constexpr TensileLite::DataType Tensile_Ti = tensile_datatype<Ti>;
-        static constexpr TensileLite::DataType Tensile_To = tensile_datatype<To>;
-        static constexpr TensileLite::DataType Tensile_Tc = tensile_datatype<Tc>;
+        static constexpr rocisa::DataType Tensile_Ti = tensile_datatype<Ti>;
+        static constexpr rocisa::DataType Tensile_To = tensile_datatype<To>;
+        static constexpr rocisa::DataType Tensile_Tc = tensile_datatype<Tc>;
 
         // Tensor descriptors for a, b
         TensileLite::TensorDescriptor a, b;
