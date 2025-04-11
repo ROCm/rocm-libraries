@@ -942,6 +942,34 @@ namespace rocRoller::Client::GEMMClient
 
         return ReturnCodes::OK;
     }
+
+    void overwriteTypesFromSolution(TypeParameters& types, SolutionParameters const& solution)
+    {
+        if((types.typeA != solution.typeA) || (types.typeB != solution.typeB)
+           || (types.typeC != solution.typeC) || (types.typeD != solution.typeD)
+           || (types.typeAcc != solution.typeAcc))
+        {
+            std::cout << "NOTE: Types have been superceded by solution." << std::endl;
+        }
+        if((types.transA != solution.transA) || (types.transB != solution.transB))
+        {
+            std::cout << "NOTE: Transposes have been superceded by solution." << std::endl;
+        }
+        if((types.scaleA != solution.scaleA) || (types.scaleA != solution.scaleB))
+        {
+            std::cout << "NOTE: MX Scalings been superceded by solution." << std::endl;
+        }
+
+        types.typeA   = solution.typeA;
+        types.typeB   = solution.typeB;
+        types.typeC   = solution.typeC;
+        types.typeD   = solution.typeD;
+        types.typeAcc = solution.typeAcc;
+        types.transA  = solution.transA;
+        types.transB  = solution.transB;
+        types.scaleA  = solution.scaleA;
+        types.scaleB  = solution.scaleB;
+    }
 }
 
 /*
@@ -1327,6 +1355,8 @@ int main(int argc, const char* argv[])
 
         if(solution.architecture.gfx == GPUArchitectureGFX::UNKNOWN)
             solution.architecture = architecture.target;
+
+        overwriteTypesFromSolution(types, solution);
     }
 
     if(!loadPath.empty())
@@ -1358,36 +1388,7 @@ int main(int argc, const char* argv[])
         solution = Serialization::readYAMLFile<rocRoller::Client::GEMMClient::SolutionParameters>(
             yamlPath);
 
-        if((types.typeA != solution.typeA) || (types.typeB != solution.typeB)
-           || (types.typeC != solution.typeC) || (types.typeD != solution.typeD)
-           || (types.typeAcc != solution.typeAcc))
-        {
-            std::cout << "NOTE: Types from command line have been superceded by types from "
-                         "solution."
-                      << std::endl;
-        }
-        if((types.transA != solution.transA) || (types.transB != solution.transB))
-        {
-            std::cout << "NOTE: Transposes from command line have been superceded by transposes "
-                         "from solution."
-                      << std::endl;
-        }
-        if((types.scaleA != solution.scaleA) || (types.scaleA != solution.scaleB))
-        {
-            std::cout << "NOTE: MX Scalings from command line have been superceded by scaling from "
-                         "solution."
-                      << std::endl;
-        }
-
-        types.typeA   = solution.typeA;
-        types.typeB   = solution.typeB;
-        types.typeC   = solution.typeC;
-        types.typeD   = solution.typeD;
-        types.typeAcc = solution.typeAcc;
-        types.transA  = solution.transA;
-        types.transB  = solution.transB;
-        types.scaleA  = solution.scaleA;
-        types.scaleB  = solution.scaleB;
+        overwriteTypesFromSolution(types, solution);
     }
 
     if(types.scaleA != Operations::ScaleMode::None && types.scaleB == Operations::ScaleMode::None)

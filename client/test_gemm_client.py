@@ -34,6 +34,7 @@ import os
 import pathlib
 import pytest
 import subprocess
+import yaml
 
 from dataclasses import dataclass
 
@@ -254,6 +255,52 @@ swizzleScale: false
 
 """
 
+DP_HGEMM = """\
+---
+architecture:
+  ArchString: gfx90a
+  Xnack: false
+  Sramecc: false
+mac_m: 64
+mac_n: 64
+mac_k: 64
+wave_m: 32
+wave_n: 32
+wave_k: 8
+wave_b: 1
+workgroup_size_x: 128
+workgroup_size_y: 2
+unroll_x: 0
+unroll_y: 0
+loadLDS_A: true
+loadLDS_B: true
+storeLDS_D: true
+direct2LDS_A: false
+direct2LDS_B: false
+prefetch: false
+prefetchInFlight: 0
+prefetchLDSFactor: 0
+betaInFma: true
+scheduler: Priority
+matchMemoryAccess: true
+trans_A: N
+trans_B: N
+type_A: half
+type_B: half
+type_C: half
+type_D: half
+type_acc: float
+scale_A: None
+scale_B: None
+loadScaleLDS_A: false
+loadScaleLDS_B: false
+swizzleScale: false
+streamK: false
+streamKTwoTile: false
+...
+"""
+
+
 
 def type_configurations():
     """Return list of type combinations to test."""
@@ -415,6 +462,29 @@ def test_gemm_example(tmp_path):
     assert example.exists()
 
 
+def test_gemm_config(tmp_path):
+    """GEMM load from config file."""
+
+    solution_params = ["--arch", "gfx90a", "--config", DP_HGEMM]
+    solution_params = write_solution_config_if_present(tmp_path, solution_params)
+
+    co_path = tmp_path / "test_config.co"
+    yaml_path = co_path.with_suffix(".yaml")
+
+    cmd = [gemm]
+    cmd.extend(["generate", "--co", co_path])
+    cmd.extend(solution_params)
+    subprocess.run(cmd, check=True)
+
+    yaml_contents = yaml_path.read_text()
+    client = yaml.load(yaml_contents, Loader=yaml.Loader)
+    del client["version"]
+
+    reference = yaml.load(DP_HGEMM, Loader=yaml.Loader)
+
+    assert client == reference
+
+
 def test_gemm_generate(tmp_path):
     """GEMM 'generate' basics."""
 
@@ -433,7 +503,7 @@ def test_gemm_generate(tmp_path):
         assert len(after) == len(before) + 2
 
         # "gemm generate --asm test.s" should write .s+.yaml pair
-        asm_path = pathlib.Path("test_asm.s")
+        asm_path = tmp_path / "test_asm.s"
         yaml_path = asm_path.with_suffix(".yaml")
         subprocess.run([gemm, "generate", "--asm", asm_path], check=True)
         assert asm_path.exists()
@@ -447,7 +517,7 @@ def test_gemm_generate(tmp_path):
         assert len(after) == len(before) + 2
 
         # "gemm generate --co test.co" should write .co+.yaml pair
-        co_path = pathlib.Path("test_co.co")
+        co_path = tmp_path / "test_co.co"
         yaml_path = asm_path.with_suffix(".yaml")
         subprocess.run([gemm, "generate", "--co", co_path], check=True)
         assert co_path.exists()
