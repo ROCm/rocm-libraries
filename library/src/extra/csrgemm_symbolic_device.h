@@ -32,7 +32,12 @@ namespace rocsparse
     // block. Splitting row into several chunks such that we can use shared memory to store
     // whether a column index is populated or not. Each row has at least 4097 non-zero
     // entries to compute.
-    template <uint32_t BLOCKSIZE, uint32_t WFSIZE, uint32_t CHUNKSIZE, typename I, typename J>
+    template <uint32_t BLOCKSIZE,
+              uint32_t WFSIZE,
+              uint32_t CHUNKSIZE,
+              uint32_t WARPSIZE,
+              typename I,
+              typename J>
     ROCSPARSE_DEVICE_ILF void
         csrgemm_symbolic_fill_block_per_row_multipass_device(J n,
                                                              const J* __restrict__ offset_,
@@ -235,16 +240,16 @@ namespace rocsparse
 
                 // Each wavefront writes its offset / nnz into shared memory so we can compute the
                 // scan offset
-                scan_offsets[hipThreadIdx_x / warpSize] = nnz;
+                scan_offsets[hipThreadIdx_x / WARPSIZE] = nnz;
 
                 // Wait for all wavefronts to finish writing
                 __syncthreads();
 
                 // Each thread accumulates the offset of all previous wavefronts to obtain its
                 // offset into C
-                for(uint32_t j = 1; j < BLOCKSIZE / warpSize; ++j)
+                for(uint32_t j = 1; j < BLOCKSIZE / WARPSIZE; ++j)
                 {
-                    if(hipThreadIdx_x >= j * warpSize)
+                    if(hipThreadIdx_x >= j * WARPSIZE)
                     {
                         offset += scan_offsets[j - 1];
                     }
@@ -264,14 +269,14 @@ namespace rocsparse
                 // entries are shifted by this offset
                 if(hipThreadIdx_x == BLOCKSIZE - 1)
                 {
-                    scan_offsets[BLOCKSIZE / warpSize - 1] = offset;
+                    scan_offsets[BLOCKSIZE / WARPSIZE - 1] = offset;
                 }
 
                 // Wait for last thread in block to finish writing
                 __syncthreads();
 
                 // Each thread reads the block-wide offset and adds it to its local offset into C
-                row_begin_C += scan_offsets[BLOCKSIZE / warpSize - 1];
+                row_begin_C += scan_offsets[BLOCKSIZE / WARPSIZE - 1];
             }
 
             // Each thread loads the new chunk beginning and end point
@@ -699,6 +704,7 @@ namespace rocsparse
               uint32_t WFSIZE,
               uint32_t HASHSIZE,
               uint32_t HASHVAL,
+              uint32_t WARPSIZE,
               typename I,
               typename J>
     ROCSPARSE_DEVICE_ILF void
@@ -819,15 +825,15 @@ namespace rocsparse
 
             // Each wavefront writes its offset / nnz into shared memory so we can compute the
             // scan offset
-            scan_offsets[hipThreadIdx_x / warpSize] = nnz;
+            scan_offsets[hipThreadIdx_x / WARPSIZE] = nnz;
 
             // Wait for all wavefronts to finish writing
             __syncthreads();
 
             // Each thread accumulates the offset of all previous wavefronts to obtain its offset
-            for(uint32_t j = 1; j < BLOCKSIZE / warpSize; ++j)
+            for(uint32_t j = 1; j < BLOCKSIZE / WARPSIZE; ++j)
             {
-                if(hipThreadIdx_x >= j * warpSize)
+                if(hipThreadIdx_x >= j * WARPSIZE)
                 {
                     offset += scan_offsets[j - 1];
                 }
@@ -847,14 +853,14 @@ namespace rocsparse
             // entries are shifted by this offset
             if(hipThreadIdx_x == BLOCKSIZE - 1)
             {
-                scan_offsets[BLOCKSIZE / warpSize - 1] = offset;
+                scan_offsets[BLOCKSIZE / WARPSIZE - 1] = offset;
             }
 
             // Wait for last thread in block to finish writing
             __syncthreads();
 
             // Each thread reads the block-wide offset and adds it to its local offset
-            hash_offset += scan_offsets[BLOCKSIZE / warpSize - 1];
+            hash_offset += scan_offsets[BLOCKSIZE / WARPSIZE - 1];
         }
 
         // Entry point into row of C
