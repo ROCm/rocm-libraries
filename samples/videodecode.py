@@ -1,3 +1,7 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+ 
+# SPDX-License-Identifier:  MIT License
+
 import pyRocVideoDecode.decoder as dec
 import pyRocVideoDecode.demuxer as dmx
 import datetime
