@@ -259,6 +259,16 @@ else()
     endif()
 endif()
 
+cmake_host_system_information(RESULT OS_PLATFORM QUERY DISTRIB_ID)
+cmake_host_system_information(RESULT OS_INFO QUERY DISTRIB_INFO)
+
+if( ${OS_PLATFORM} STREQUAL "rhel")
+  if( ${OS_INFO_VERSION_ID} VERSION_LESS "9.5")
+    message(WARNING "RHEL version ${OS_INFO_VERSION_ID} too old, not building RocRoller")
+    set(USE_ROCROLLER OFF)
+  endif()
+endif()
+
 if( LEGACY_HIPBLAS_DIRECT )
   find_package( hipblas REQUIRED CONFIG PATHS ${HIP_DIR} ${ROCM_PATH} /opt/rocm)
 else()
