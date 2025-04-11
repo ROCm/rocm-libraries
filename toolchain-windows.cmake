@@ -42,6 +42,24 @@ if (NOT HIPBLAS_TOOLCHAIN_VARS_APPENDED)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fms-extensions -fms-compatibility -D__HIP_ROCclr__=1 -D__HIP_PLATFORM_AMD__=1")
 endif()
 
+# paths required for client testing on windows
+if (NOT ROCBLAS_PATH)
+  if (ROCBLAS_CUSTOM_PATH)
+    file(TO_CMAKE_PATH "${ROCBLAS_CUSTOM_PATH}" ROCBLAS_PATH )
+  else()
+    set(ROCBLAS_PATH "C:/hipSDK")
+  endif()
+endif()
+
+# paths required for client testing on windows
+if (NOT ROCSOLVER_PATH)
+  if (ROCSOLVER_CUSTOM_PATH)
+    file(TO_CMAKE_PATH "${ROCSOLVER_CUSTOM_PATH}" ROCSOLVER_PATH )
+  else()
+    set(ROCSOLVER_PATH "C:/hipSDK")
+  endif()
+endif()
+
 if (DEFINED ENV{LAPACK_DIR})
   file(TO_CMAKE_PATH "$ENV{LAPACK_DIR}" LAPACK_DIR)
 else()
