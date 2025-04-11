@@ -44,6 +44,9 @@
 
 #define CREATE_BENCHMARK(T) executor.queue_instance(device_transform_benchmark<T, false>());
 
+#define CREATE_BENCHMARK_BINARY(T) \
+    executor.queue_instance(device_transform_benchmark<T, false, true>());
+
 int main(int argc, char* argv[])
 {
     benchmark_utils::executor executor(argc, argv, 512 * benchmark_utils::MiB, 10, 5);
@@ -66,6 +69,12 @@ int main(int argc, char* argv[])
 
     CREATE_BENCHMARK(rocprim::int128_t)
     CREATE_BENCHMARK(rocprim::uint128_t)
+
+    CREATE_BENCHMARK_BINARY(int)
+    CREATE_BENCHMARK_BINARY(float)
+    CREATE_BENCHMARK_BINARY(int8_t)
+    CREATE_BENCHMARK_BINARY(rocprim::int128_t)
+    CREATE_BENCHMARK_BINARY(custom_double2)
 #endif
 
     executor.run();

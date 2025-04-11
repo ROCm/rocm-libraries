@@ -39,29 +39,40 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-// Wrapper for unpacking tuple to be used with BinaryFunction.
-// See transform function which accepts two input iterators.
-template<class T1, class T2, class BinaryFunction>
-struct unpack_binary_op
+template<class Function, class... Ts>
+struct unpack_nary_op
 {
-    using result_type = typename ::rocprim::invoke_result<BinaryFunction, T1, T2>::type;
+    using result_type = typename ::rocprim::invoke_result<Function, Ts...>::type;
 
-    ROCPRIM_HOST_DEVICE inline unpack_binary_op() = default;
+    ROCPRIM_HOST_DEVICE inline unpack_nary_op() = default;
 
-    ROCPRIM_HOST_DEVICE inline unpack_binary_op(BinaryFunction binary_op) : binary_op_(binary_op) {}
+    ROCPRIM_HOST_DEVICE inline unpack_nary_op(Function op) : op_(op) {}
 
-    ROCPRIM_HOST_DEVICE inline ~unpack_binary_op() = default;
+    ROCPRIM_HOST_DEVICE inline ~unpack_nary_op() = default;
 
     ROCPRIM_HOST_DEVICE
     inline result_type
-        operator()(const ::rocprim::tuple<T1, T2>& t)
+        operator()(const ::rocprim::tuple<Ts...>& t) const
     {
-        return binary_op_(::rocprim::get<0>(t), ::rocprim::get<1>(t));
+        return apply_impl(t, std::index_sequence_for<Ts...>{});
     }
 
 private:
-    BinaryFunction binary_op_;
+    Function op_;
+
+    template<std::size_t... Is>
+    ROCPRIM_HOST_DEVICE
+    inline result_type apply_impl(const ::rocprim::tuple<Ts...>& t,
+                                  std::index_sequence<Is...>) const
+    {
+        return op_(::rocprim::get<Is>(t)...);
+    }
 };
+
+// Wrapper for unpacking tuple to be used with BinaryFunction.
+// See transform function which accepts two input iterators.
+template<class T1, class T2, class BinaryFunction>
+using unpack_binary_op = unpack_nary_op<BinaryFunction, T1, T2>;
 
 template<typename T, unsigned int ItemsPerThread>
 using dynamic_size_type = std::conditional_t<

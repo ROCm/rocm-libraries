@@ -40,7 +40,6 @@ This is a complete list of affected functions and how their default accumulator 
 * Added initial value support to device level inclusive scans.
 * Made new optimization for `device_transform` when the input and output are pointers.
 * Added `LoadType` to `transform_config`, which is used for the `device_transform` when the input and output are pointers.
-
 * Changed the default accumulator type for various device-level scan algorithms:
   * `rocprim::inclusive_scan`
     * Previous default: `class AccType = typename std::iterator_traits<InputIterator>::value_type>`
@@ -54,9 +53,12 @@ This is a complete list of affected functions and how their default accumulator 
   * `rocprim::deterministic_exclusive_scan`
     * Previous default: `class AccType = detail::input_type_t<InitValueType>>`
     * Current default: `class AccType = rocprim::accumulator_t<BinaryFunction, rocprim::detail::input_type_t<InitValueType>>`
-
+* Added `rocprim:device_transform` for n-ary transform operations API with as input `n` number of iterators inside a `rocprim::tuple`.
+    
 ### Deprecations
+
 * `rocprim::invoke_result_binary_op` and `rocprim::invoke_result_binary_op_t` are deprecated. Use `rocprim::accumulator_t` now.
+
 
 ### Removed
 

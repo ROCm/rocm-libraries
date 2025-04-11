@@ -21,11 +21,6 @@
 #ifndef ROCPRIM_DEVICE_DEVICE_TRANSFORM_HPP_
 #define ROCPRIM_DEVICE_DEVICE_TRANSFORM_HPP_
 
-#include <algorithm>
-#include <iostream>
-#include <iterator>
-#include <type_traits>
-
 #include "../common.hpp"
 #include "../config.hpp"
 #include "../detail/various.hpp"
@@ -34,6 +29,12 @@
 
 #include "detail/device_transform.hpp"
 #include "device_transform_config.hpp"
+
+#include <algorithm>
+#include <iostream>
+#include <iterator>
+#include <tuple>
+#include <type_traits>
 
 /// \addtogroup devicemodule
 /// @{
@@ -291,6 +292,81 @@ inline hipError_t transform(InputIterator1    input1,
         output,
         size,
         detail::unpack_binary_op<value_type1, value_type2, BinaryFunction>(transform_op),
+        stream,
+        debug_synchronous);
+}
+
+/// \brief Parallel device-level transform primitive for an arbitrary amount of inputs.
+///
+/// transform function performs a device-wide transformation operation
+/// on n input ranges using binary \p transform_op operator.
+///
+/// \par Overview
+/// * Ranges specified by \p output and all iterators in \p input_iters must have at least \p size elements.
+///
+/// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `transform_config`.
+/// \tparam InputIterators all the random-access iterator types of the input range. These types must meet the
+/// requirements of a C++ InputIterator concept. It can be a simple pointer type.
+/// \tparam OutputIterator random-access iterator type of the output range. Must meet the
+/// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
+/// \tparam BinaryFunction type of binary function used for transform.
+///
+/// \param [in] input_iters a tuple of iterators to the input sequences where num_items elements are read from each.
+/// \param [out] output iterator to the first element in the output range.
+/// \param [in] size number of element in the input range.
+/// \param [in] transform_op an n-ary function object used for the transform, where n is the number of input sequences.
+/// The function object must not modify the object passed to it.
+/// \param [in] stream [optional] HIP stream object. The default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
+/// launch is forced. Default value is \p false.
+///
+/// \par Example
+/// \parblock
+/// In this example a device-level transform operation is performed on three arrays of
+/// integer values (element-wise sum is performed).
+///
+/// \code{.cpp}
+/// #include <rocprim/rocprim.hpp>
+///
+/// // custom transform function
+/// auto transform_op =
+///     [] __device__ (int a, int b, int c) -> int
+///     {
+///         return a + b + c;
+///     };
+///
+/// // Prepare input and output (declare pointers, allocate device memory etc.)
+/// size_t size;   // e.g., 8
+/// int* input1;   // e.g., [1, 2, 3, 4, 5, 6, 7, 8]
+/// int* input2;   // e.g., [1, 2, 3, 4, 5, 6, 7, 8]
+/// int* input3;   // e.g., [1, 2, 3, 4, 5, 6, 7, 8]
+/// int* output;   // empty array of 8 elements
+///
+/// // perform transform
+/// rocprim::transform(
+///     rocprim::tuple(input1, input2, input3), output, input1.size(), transform_op
+/// );
+/// // output: [3, 6, 9, 12, 15, 18, 21, 24]
+/// \endcode
+/// \endparblock
+template<class Config = default_config,
+         class... InputIterators,
+         class OutputIterator,
+         class TransformOp>
+inline hipError_t transform(rocprim::tuple<InputIterators...> input_iters,
+                            OutputIterator                    output,
+                            const size_t                      size,
+                            TransformOp                       transform_op,
+                            const hipStream_t                 stream            = 0,
+                            bool                              debug_synchronous = false)
+{
+    return transform<Config>(
+        ::rocprim::make_zip_iterator(input_iters),
+        output,
+        size,
+        detail::unpack_nary_op<TransformOp,
+                               typename std::iterator_traits<InputIterators>::value_type...>(
+            transform_op),
         stream,
         debug_synchronous);
 }

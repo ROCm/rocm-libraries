@@ -308,6 +308,120 @@ TYPED_TEST(RocprimDeviceTransformTests, BinaryTransform)
     }
 }
 
+template<class Functor, class OutputIterator, class... Inputs>
+OutputIterator transform_nary(Functor f, size_t size, OutputIterator out, Inputs... inputs)
+{
+    for(size_t i = 0; i < size; i++)
+    {
+        *out++ = f(*inputs++...);
+    }
+
+    return out;
+}
+
+template<class T1, class T2, class T3, class U>
+struct ternary_transform
+{
+    __device__ __host__
+    inline constexpr U
+        operator()(const T1& a, const T2& b, const T3& c) const
+    {
+        return a + b + c;
+    }
+};
+
+TYPED_TEST(RocprimDeviceTransformTests, TernaryTransform)
+{
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    using T1                                    = typename TestFixture::input_type;
+    using T2                                    = typename TestFixture::input_type;
+    using U                                     = typename TestFixture::output_type;
+    static constexpr bool use_identity_iterator = TestFixture::use_identity_iterator;
+    const bool            debug_synchronous     = TestFixture::debug_synchronous;
+    using Config                                = size_limit_config_t<TestFixture::size_limit>;
+
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
+    {
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
+
+        for(auto size : test_utils::get_sizes(seed_value))
+        {
+            hipStream_t stream = 0; // default
+            if(TestFixture::use_graphs)
+            {
+                // Default stream does not support hipGraph stream capture, so create one
+                HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+            }
+
+            SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+            // Generate data
+            std::vector<T1> input1
+                = test_utils::get_random_data_wrapped<T1>(size, 1, 100, seed_value);
+            std::vector<T2> input2
+                = test_utils::get_random_data_wrapped<T2>(size, 1, 100, seed_value);
+            std::vector<T2> input3
+                = test_utils::get_random_data_wrapped<T1>(size, 1, 100, seed_value);
+
+            common::device_ptr<T1> d_input1(input1);
+            common::device_ptr<T2> d_input2(input2);
+            common::device_ptr<T2> d_input3(input3);
+            common::device_ptr<U>  d_output(input1.size());
+
+            // Calculate expected results on host
+            std::vector<U> expected(input1.size());
+
+            transform_nary(ternary_transform<T1, T2, T1, U>(),
+                           input1.size(),
+                           expected.begin(),
+                           input1.begin(),
+                           input2.begin(),
+                           input3.begin());
+
+            test_utils::GraphHelper gHelper;
+            if(TestFixture::use_graphs)
+            {
+                gHelper.startStreamCapture(stream);
+            }
+
+            // Run
+            HIP_CHECK(rocprim::transform<Config>(
+                rocprim::tuple(d_input1.get(), d_input2.get(), d_input3.get()),
+                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output.get()),
+                input1.size(),
+                ternary_transform<T1, T2, T1, U>(),
+                stream,
+                debug_synchronous));
+
+            if(TestFixture::use_graphs)
+            {
+                gHelper.createAndLaunchGraph(stream, true, false);
+            }
+
+            HIP_CHECK(hipGetLastError());
+            HIP_CHECK(hipDeviceSynchronize());
+
+            // Copy output to host
+            const auto output = d_output.load();
+
+            // Check if output values are as expected
+            ASSERT_NO_FATAL_FAILURE(
+                test_utils::assert_near(output, expected, test_utils::precision<U>));
+
+            if(TestFixture::use_graphs)
+            {
+                gHelper.cleanupGraphHelper();
+                HIP_CHECK(hipStreamDestroy(stream));
+            }
+        }
+    }
+}
+
 template<class T>
 struct flag_expected_op_t
 {

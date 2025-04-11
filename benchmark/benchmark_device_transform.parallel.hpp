@@ -59,7 +59,10 @@ inline std::string transform_config_name<rocprim::default_config>()
     return "default_config";
 }
 
-template<typename T, bool IsPointer, typename Config = rocprim::default_config>
+template<typename T,
+         bool IsPointer,
+         bool IsBinary   = false,
+         typename Config = rocprim::default_config>
 struct device_transform_benchmark : public benchmark_utils::autotune_interface
 {
 
@@ -68,7 +71,8 @@ struct device_transform_benchmark : public benchmark_utils::autotune_interface
 
         using namespace std::string_literals;
         return bench_naming::format_name(
-            "{lvl:device,algo:transform" + std::string(IsPointer ? "_pointer" : "") + ",value_type:"
+            "{lvl:device,algo:transform" + std::string(IsPointer ? "_pointer" : "")
+            + ",op:" + std::string(IsBinary ? "binary" : "unary") + ",value_type:"
             + std::string(Traits<T>::name()) + ",cfg:" + transform_config_name<Config>() + "}");
     }
 
@@ -93,20 +97,43 @@ struct device_transform_benchmark : public benchmark_utils::autotune_interface
         common::device_ptr<T>           d_input(input);
         common::device_ptr<output_type> d_output(size);
 
-        const auto launch = [&]
+        if constexpr(IsBinary)
         {
-            auto transform_op = [](T v) { return v + T(5); };
-            return rocprim::detail::transform_impl<IsPointer, Config>(d_input.get(),
-                                                                      d_output.get(),
-                                                                      size,
-                                                                      transform_op,
-                                                                      stream,
-                                                                      debug_synchronous);
-        };
+            const std::vector<T> input2
+                = get_random_data<T>(size, random_range.first, random_range.second, seed.get_0());
+            common::device_ptr<T> d_input2(input2);
 
-        state.run([&] { HIP_CHECK(launch()); });
+            // If it is not a unary operator, it can not make use of the pointer optimization.
+            const auto launch = [&]
+            {
+                auto transform_op = [](T v1, T v2) { return v1 + v2; };
+                return rocprim::transform<Config>(rocprim::tuple(d_input.get(), d_input2.get()),
+                                                  d_output.get(),
+                                                  size,
+                                                  transform_op,
+                                                  stream,
+                                                  debug_synchronous);
+            };
 
-        state.set_throughput(size, sizeof(T));
+            state.run([&] { HIP_CHECK(launch()); });
+            state.set_throughput(size, sizeof(T) + sizeof(T));
+        }
+        else
+        {
+            const auto launch = [&]
+            {
+                auto transform_op = [](T v) { return v + T(5); };
+                return rocprim::detail::transform_impl<IsPointer, Config>(d_input.get(),
+                                                                          d_output.get(),
+                                                                          size,
+                                                                          transform_op,
+                                                                          stream,
+                                                                          debug_synchronous);
+            };
+
+            state.run([&] { HIP_CHECK(launch()); });
+            state.set_throughput(size, sizeof(T));
+        }
     }
 };
 
@@ -123,7 +150,8 @@ struct device_transform_benchmark_generator
         void operator()(std::vector<std::unique_ptr<benchmark_utils::autotune_interface>>& storage)
         {
             storage.emplace_back(
-                std::make_unique<device_transform_benchmark<T, IsPointer, generated_config>>());
+                std::make_unique<
+                    device_transform_benchmark<T, IsPointer, false, generated_config>>());
         }
     };
 
