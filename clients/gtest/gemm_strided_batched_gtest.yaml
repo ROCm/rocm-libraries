@@ -699,13 +699,12 @@ Tests:
     - gemm_strided_batched_ex: *nonint8_real_precisions
     - gemm_strided_batched_ex: *int8_precision
   matrix_size:
-    - { M: 3, N: 3, K: 3, lda: 3, ldb: 3, ldc: 3, batch_count: *c_grid_yz_require_passes }
+    - { M: 3, N: 3, K: 3, lda: 3, ldb: 3, ldc: 3, ldd: 3, batch_count: *c_grid_yz_require_passes }
   pointer_mode_device: false
   transA: [ N, T ]
   transB: [ N, T ]
   alpha: 1
   beta: 1
-  stride_scale: [ 1 ]
 
 - name: gemm_strided_batched_graph_test
   category: pre_checkin
@@ -713,7 +712,7 @@ Tests:
     - gemm_strided_batched: *half_single_precisions
     - gemm_strided_batched_ex: *hpa_half_single_precisions
   matrix_size:
-      - { M:  512, N:  100 }
+      - { M:  33, N:  100, K:  32 }
   pointer_mode_device: false
   transA: N
   transB: N
@@ -728,14 +727,13 @@ Tests:
     - gemm_strided_batched_ex: *nonint8_real_precisions
     - gemm_strided_batched_ex: *int8_precision
   arguments:
-    - { M: 4, N: 4, K: 4, lda: 4, ldb: 4, ldc: 4, stride_a: 4, stride_b: 4, stride_c: 4, stride_d: 4 }
+    - { M: 4, N: 4, K: 4, lda: 4, ldb: 4, ldc: 4, ldd: 4 }
   pointer_mode_device: false
   transA: [ N ]
   transB: [ N ]
   batch_count: *c_grid_yz_require_passes
   alpha: 1
   beta: 1
-  stride_scale: [ 1 ]
   api: [ C_64 ]
   os_flags: LINUX
 
@@ -745,13 +743,12 @@ Tests:
     - gemm_strided_batched_ex: *nonint8_real_precisions
     - gemm_strided_batched_ex: *int8_precision
   matrix_size:
-    - { M: 64, N: 64, K: 64, lda: 64, ldb: 64, ldc: 64, batch_count: 511 }
+    - { M: 64, N: 64, K: 64, lda: 64, ldb: 64, ldc: 64, ldd: 64, batch_count: 511 }
   pointer_mode_device: false
   transA: [ N ]
   transB: [ T ]
   alpha: 1
   beta: 1
-  stride_scale: [ 1 ]
   api: [ C_64 ]
   os_flags: LINUX
 
@@ -763,8 +760,8 @@ Tests:
   matrix_size:
     - { M:   784, N:    64, K:   192, lda:   784, ldb:   192, ldc:   784, ldd:   784, stride_a:   150528, stride_b:        0, stride_c:    50176, stride_d:    50176 }
   initialization: hpl
-  transA: [N , T]
-  transB: [N, T]
+  transA: [ N, T ]
+  transB: [ N, T ]
   alpha_beta: *alpha_beta_range
   atomics_mode: 0
   batch_count: [ 2 ]

@@ -539,7 +539,7 @@ Tests:
     - gemm_batched: *half_single_precisions
     - gemm_batched_ex: *half_single_precisions
   matrix_size:
-      - { M:  512, N:  100 }
+      - { M:  50, N:  100,  K: 64 }
   pointer_mode_device: false
   transA: N
   transB: N
