@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
+"""Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
 
   Permission is hereby granted, free of charge, to any person obtaining a copy
   of this software and associated documentation files (the "Software"), to deal
@@ -302,23 +302,12 @@ def config_cmd():
         raw_rocblas_path = cmake_path(args.rocblas_path)
         rocblas_path_cmake =  f'"{raw_rocblas_path}"'
         cmake_options.append( f"-DCUSTOM_ROCBLAS={rocblas_path_cmake}")
-    else:
-        args.rocblas_path = "C:/hipSDK"
-        raw_rocblas_path = cmake_path(args.rocblas_path)
-        rocblas_path_cmake =  f'"{raw_rocblas_path}"'
 
     if args.rocsolver_path is not None:
         # "Custom" rocsolver
         raw_rocsolver_path = cmake_path(args.rocsolver_path)
         rocsolver_path_cmake =  f'"{raw_rocsolver_path}"'
         cmake_options.append( f"-DCUSTOM_ROCSOLVER={rocsolver_path_cmake}")
-    else:
-        args.rocsolver_path = "C:/hipSDK"
-        raw_rocsolver_path = cmake_path(args.rocsolver_path)
-        rocsolver_path_cmake =  f'"{raw_rocsolver_path}"'
-
-    cmake_options.append( f"-DROCBLAS_PATH={rocblas_path_cmake}")
-    cmake_options.append( f"-DROCSOLVER_PATH={rocsolver_path_cmake}")
 
     if args.cuda_path:
         os.environ['CUDA_BIN_PATH'] = args.cuda_path
