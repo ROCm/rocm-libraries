@@ -239,8 +239,8 @@ ParserResult AvcVideoParser::ParsePictureData(const uint8_t *p_stream, uint32_t 
                     }
 
                     // Reference picture lists construction (8.2.4)
-                    if ((ret2 = SetupReflist(&slice_info_list_[num_slices_])) != PARSER_OK) {
-                        return ret2;
+                    if (SetupReflist(&slice_info_list_[num_slices_]) != PARSER_OK) {
+                        ERR("Error occurred in SetupReflist(). Ignore and continue.");
                     }
 
                     if (num_slices_ == 0) {
@@ -2498,8 +2498,9 @@ ParserResult AvcVideoParser::SetupReflist(AvcSliceInfo *p_slice_info) {
         AvcPicture *ref_pic_list_x = p_slice_info->ref_list_0_; // RefPicListX
         AvcListMod *p_list_mod = p_slice_header->ref_pic_list.modification_l0;
         int num_ref_idx_lx_active = p_slice_header->num_ref_idx_l0_active_minus1 + 1;
-        if (ModifiyRefList(ref_pic_list_x, p_list_mod, num_ref_idx_lx_active, p_slice_header) != PARSER_OK) {
-            return PARSER_FAIL;
+        ParserResult ret;
+        if ((ret = ModifiyRefList(ref_pic_list_x, p_list_mod, num_ref_idx_lx_active, p_slice_header)) != PARSER_OK) {
+            return ret;
         }
     }
 
@@ -2508,8 +2509,9 @@ ParserResult AvcVideoParser::SetupReflist(AvcSliceInfo *p_slice_info) {
             AvcPicture *ref_pic_list_x = p_slice_info->ref_list_1_; // RefPicListX
             AvcListMod *p_list_mod = p_slice_header->ref_pic_list.modification_l1;
             int num_ref_idx_lx_active = p_slice_header->num_ref_idx_l1_active_minus1 + 1;
-            if (ModifiyRefList(ref_pic_list_x, p_list_mod, num_ref_idx_lx_active, p_slice_header) != PARSER_OK) {
-                return PARSER_FAIL;
+            ParserResult ret;
+            if ((ret = ModifiyRefList(ref_pic_list_x, p_list_mod, num_ref_idx_lx_active, p_slice_header)) != PARSER_OK) {
+                return ret;
             }
         }
     }

@@ -286,7 +286,7 @@ else:
             line = logFile.readline()
 
         print("Decode status report of the", numFiles, "streams:")
-        print("     - The number of completed decoded streams is", numDecodedStreams)
+        print("     - The number of completely decoded streams is", numDecodedStreams)
         print("     - The number of streams that did not finish decoding is " + str(numFiles - numDecodedStreams))
     logFile.close()
     if numFiles != numDecodedStreams:
