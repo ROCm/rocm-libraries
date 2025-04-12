@@ -48,7 +48,7 @@ from Tensile.Common.GlobalParameters import defaultSolution, \
                                             defaultInternalSupportParams, \
                                             internalParameters
 from Tensile.CustomKernels import isCustomKernelConfig
-from Tensile.SolutionStructs.Naming import getNameFull
+from Tensile.SolutionStructs.Naming import getSolutionNameFull
 from Tensile.SolutionStructs.Problem import ProblemType
 from Tensile.Toolchain.Component import Assembler
 
@@ -3327,7 +3327,7 @@ class Solution(collections.abc.Mapping):
 
   def __str__(self):
     if self._name is None:
-      self._name = getNameFull(self._state, self.splitGSU)
+      self._name = getSolutionNameFull(self._state, self.splitGSU)
     return self._name
 
   def __repr__(self):

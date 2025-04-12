@@ -93,16 +93,15 @@ class KernelWriterAssembly(KernelWriter):
   ##############################################################################
   def __init__(
       self,
-      kernelMinNaming,
       kernelSerialNaming,
       assembler: Assembler,
       debugConfig: DebugConfig,
     ):
-    super(KernelWriterAssembly, self).__init__(kernelMinNaming, kernelSerialNaming, assembler, debugConfig)
+    super(KernelWriterAssembly, self).__init__(kernelSerialNaming, assembler, debugConfig)
 
 
   def _getCustomKernelSource(self, useShortNames, kernel, CustomKernelDirectory):
-    kernelName = getKernelFileBase(useShortNames, self.debugConfig.splitGSU, self.kernelMinNaming, self.kernelSerialNaming, kernel)
+    kernelName = getKernelFileBase(useShortNames, self.debugConfig.splitGSU, self.kernelSerialNaming, kernel)
     with open(os.path.join(CustomKernelDirectory, (kernelName + ".s"))) as f:
       rocmVersion = self.assembler.rocm_version
       if not (rocmVersion.major >= 6 and rocmVersion.patch >= 32650):

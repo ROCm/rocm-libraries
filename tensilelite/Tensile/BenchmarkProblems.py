@@ -37,8 +37,10 @@ from Tensile.KernelWriter import DebugConfig
 from Tensile.Toolchain.Component import Assembler
 from Tensile.SolutionStructs.Problem import ProblemType, ProblemSizes
 from Tensile.SolutionStructs.Solution import Solution
-from Tensile.SolutionStructs.Validators.MatrixInstruction import matrixInstructionToMIParameters, validateMIParameters
-from Tensile.SolutionStructs.Naming import getMinNaming, getNameMin, getSerialNaming, getNameFull, getKeyNoInternalArgs
+from Tensile.SolutionStructs.Validators.MatrixInstruction import matrixInstructionToMIParameters, \
+                                                                 validateMIParameters
+from Tensile.SolutionStructs.Naming import getSerialNaming, getKeyNoInternalArgs, getSolutionNameMin, \
+                                           getKernelNameMin
 
 from .BenchmarkStructs import BenchmarkProcess, constructForkPermutations
 from .Contractions import ProblemType as ContractionsProblemType
@@ -53,7 +55,6 @@ from Tensile.Common import HR, print1, print2, IsaInfo, IsaVersion, \
         BENCHMARK_PROBLEMS_DIR, BENCHMARK_DATA_DIR, DepthUConfig
 from Tensile.Common.Architectures import isaToGfx, gfxToVariants
 from Tensile.Common.GlobalParameters import globalParameters, startTime
-
 
 
 def _generateForkedSolutions(problemType, constantParams, forkPermutations, assembler: Assembler, \
@@ -236,9 +237,7 @@ def writeBenchmarkFiles(
                 kernelHelperNames.add(kname)
 
     kernelSerialNaming = getSerialNaming(kernels)
-    kernelMinNaming = getMinNaming(kernels)
     kernelWriterAssembly = KernelWriterAssembly(
-                               kernelMinNaming,
                                kernelSerialNaming,
                                asmToolchain.assembler,
                                debugConfig,
@@ -259,13 +258,15 @@ def writeBenchmarkFiles(
                             debugConfig.splitGSU,
                             cmdLineArchs,
                             kernelSerialNaming,
-                            kernelMinNaming,
                             errorTolerant=True,
                             generateSourcesAndExit=globalParameters["GenerateSourcesAndExit"], # put in debug config
                             compress=False,
                             useShortNames=useShortNames
                         )
     # ^ this is where solutions is mutated
+    for s in solutions:
+        s["SolutionNameMin"] = getSolutionNameMin(solution, debugConfig.splitGSU)
+        s["KernelNameMin"]   = getKernelNameMin(solution, debugConfig.splitGSU)
 
     newLibraryDir = ensurePath(sourcePath / 'library')
     newLibraryFile = os.path.join(newLibraryDir, "TensileLibrary")
@@ -278,7 +279,7 @@ def writeBenchmarkFiles(
                      depthUConfig,
                      isaInfoMap,
                  )
-    newLibrary.applyNaming(debugConfig.splitGSU, kernelMinNaming)
+    newLibrary.applyNaming(debugConfig.splitGSU)
     LibraryIO.write(newLibraryFile, state(newLibrary), globalParameters["LibraryFormat"])
 
     codeObjectFiles = [os.path.relpath(f, sourcePath) \
@@ -430,7 +431,7 @@ def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSize
                 printExit(msg)
 
             for solution in solutions:
-                print2("#    ({}:{}) {}".format(0, 0, getNameFull(solution, debugConfig.splitGSU)))
+                print2("#    ({}:{}) {}".format(0, 0, getSolutionNameMin(solution, debugConfig.splitGSU)))
             print2(HR)
 
             # write benchmarkFiles
@@ -457,12 +458,11 @@ def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSize
                     .format(len(solutions), prevCount ))
 
             # add SolutionIndex and SolutionNameMin into benchmark yaml
-            solutionMinNaming = getMinNaming(solutions)
             for i in range(0, len(solutions)):
                 solution = solutions[i]
                 solution["SolutionIndex"] = i
-                solution["SolutionNameMin"] = getNameMin(solution, solutionMinNaming, debugConfig.splitGSU)
-                solution["KernelNameMin"]   = getNameMin(solution, solutionMinNaming, debugConfig.splitGSU, True)
+                solution["SolutionNameMin"] = getSolutionNameMin(solution, debugConfig.splitGSU)
+                solution["KernelNameMin"]   = getKernelNameMin(solution, debugConfig.splitGSU)
         else:
             solutions = None
             print1("# Using cached solution data")

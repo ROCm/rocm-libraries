@@ -22,7 +22,7 @@
 #
 ################################################################################
 
-from Tensile.SolutionStructs.Naming import getNameMin
+from Tensile.SolutionStructs.Naming import getSolutionNameMin, getKernelNameMin
 
 import csv
 
@@ -60,7 +60,7 @@ def updateIfGT(theDictionary, theKey, theValue):
       theDictionary[theKey] = theValue
 
 
-def updateValidSolutions(validSolutions, analyzerSolutions, solutionMinNaming):
+def updateValidSolutions(validSolutions, analyzerSolutions):
   solutionsStartIndex = len(analyzerSolutions)
   validSelectionSolutionsIncluded = []
   validSelectionSolutionsRemainder = []
@@ -90,8 +90,8 @@ def updateValidSolutions(validSolutions, analyzerSolutions, solutionMinNaming):
     selectionSolutionIndex = solutionsStartIndex + i
     selectionSolutionsIds.add(selectionSolutionIndex)
     splitGSU = False # this is a reminder that we need to add this in to the function signature
-    validSolution["SolutionNameMin"] = getNameMin(validSolution, solutionMinNaming, splitGSU)
-    validSolution["KernelNameMin"]   = getNameMin(validSolution, solutionMinNaming, splitGSU, True)
+    validSolution["SolutionNameMin"] = getSolutionNameMin(validSolution, splitGSU)
+    validSolution["KernelNameMin"]   = getKernelNameMin(validSolution, splitGSU)
     validSolution["Ideals"] = validSolutionInfo
     selectionSolutions.append(validSolution)
 
