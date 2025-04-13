@@ -43,13 +43,35 @@ if [ -d "$binary_dir" ]; then
            "rank3_permutation_test"
            "rank4_permutation_test"
            "rank5_permutation_test"
-           "rank6_permutation_test")
+           "rank6_permutation_test"
+           "rank2_elementwise_binary_op_test"
+           "rank3_elementwise_binary_op_test"
+           "rank4_elementwise_binary_op_test"
+           "rank5_elementwise_binary_op_test"
+           "rank6_elementwise_binary_op_test"
+           "rank2_elementwise_trinary_op_test"
+           "rank3_elementwise_trinary_op_test"
+           "rank4_elementwise_trinary_op_test"
+           "rank5_elementwise_trinary_op_test"
+           "rank6_elementwise_trinary_op_test"
+       )
 
     configs=("rank2_test_params.yaml"
              "rank3_test_params.yaml"
              "rank4_test_params.yaml"
              "rank5_test_params.yaml"
-             "rank6_test_params.yaml")
+             "rank6_test_params.yaml"
+             "rank2_binary_op_test_params.yaml"
+             "rank3_binary_op_test_params.yaml"
+             "rank4_binary_op_test_params.yaml"
+             "rank5_binary_op_test_params.yaml"
+             "rank6_binary_op_test_params.yaml"
+             "rank2_trinary_op_test_params.yaml"
+             "rank3_trinary_op_test_params.yaml"
+             "rank4_trinary_op_test_params.yaml"
+             "rank5_trinary_op_test_params.yaml"
+             "rank6_trinary_op_test_params.yaml"
+         )
 
     arrayLength=${#tests[@]}
 

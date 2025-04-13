@@ -18,8 +18,8 @@ Ranges:
   - [2, 8196, 2]
 Random Ranges:
 Operators:
-  - [HIPTENSOR_OP_IDENTITY, HIPTENSOR_OP_IDENTITY]
-  - [HIPTENSOR_OP_NEG, HIPTENSOR_OP_IDENTITY]
+  - [HIPTENSOR_OP_IDENTITY]
+  - [HIPTENSOR_OP_NEG]
 Permuted Dims:
   - [0, 1]
   - [1, 0]

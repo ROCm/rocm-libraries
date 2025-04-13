@@ -29,6 +29,7 @@
 
 #include <gtest/gtest.h>
 
+#include "hiptensor_length_generation.hpp"
 #include "hiptensor_options.hpp"
 #include "llvm/yaml_parser.hpp"
 
@@ -39,7 +40,7 @@
 #define HIPTENSOR_TEST_YAML_BUNDLE 0
 #endif // HIPTENSOR_TEST_YAML_INCLUDE
 
-auto inline load_config_helper()
+auto inline load_config_params()
 {
     hiptensor::PermutationTestParams testParams;
     using Options     = hiptensor::HiptensorOptions;
@@ -61,6 +62,62 @@ auto inline load_config_helper()
         if(params)
         {
             testParams = params.value();
+        }
+    }
+
+    // testParams.printParams();
+    return testParams;
+}
+
+auto inline load_config_helper()
+{
+    auto testParams = load_config_params();
+
+    // Append sizes generated from lower/upper/step parameters to problemLengths
+    if(!testParams.problemRanges().empty())
+    {
+        uint32_t rank = testParams.permutedDims()[0].size();
+
+        for(int i = 0; i < testParams.problemRanges().size(); i++)
+        {
+            auto        ranges      = testParams.problemRanges()[i];
+            std::size_t lower       = ranges[0];
+            std::size_t upper       = ranges[1];
+            std::size_t step        = ranges[2];
+            std::size_t maxElements = 134217728;
+
+            std::size_t totalSizes = 0;
+            if(ranges.size() == 4)
+            {
+                totalSizes = ranges[3];
+            }
+            std::vector<std::vector<std::size_t>> generatedLengths;
+            hiptensor::generate2DLengths(
+                generatedLengths, lower, upper, step, rank, maxElements, totalSizes);
+            testParams.problemLengths().insert(testParams.problemLengths().end(),
+                                               generatedLengths.begin(),
+                                               generatedLengths.end());
+        }
+    }
+    // Append sizes generated randomly from [lower, upper] to problemLengths
+    if(!testParams.problemRandRanges().empty())
+    {
+        uint32_t rank = testParams.permutedDims()[0].size();
+
+        for(int i = 0; i < testParams.problemRandRanges().size(); i++)
+        {
+            auto        ranges      = testParams.problemRandRanges()[i];
+            std::size_t lower       = ranges[0];
+            std::size_t upper       = ranges[1];
+            std::size_t totalSizes  = ranges[2];
+            std::size_t maxElements = 134217728;
+
+            std::vector<std::vector<std::size_t>> generatedRandLengths;
+            hiptensor::generate2DLengths(
+                generatedRandLengths, lower, upper, upper, rank, maxElements, totalSizes, true);
+            testParams.problemLengths().insert(testParams.problemLengths().end(),
+                                               generatedRandLengths.begin(),
+                                               generatedRandLengths.end());
         }
     }
 

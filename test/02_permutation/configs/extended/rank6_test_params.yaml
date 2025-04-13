@@ -16,8 +16,8 @@ Lengths:
 Ranges:
   - [2, 134217728, 4]
 Operators:
-  - [HIPTENSOR_OP_IDENTITY, HIPTENSOR_OP_IDENTITY]
-  - [HIPTENSOR_OP_NEG, HIPTENSOR_OP_IDENTITY]
+  - [HIPTENSOR_OP_IDENTITY]
+  - [HIPTENSOR_OP_NEG]
 Permuted Dims:
   - [0, 1, 2, 3, 4, 5]
   - [0, 1, 2, 3, 5, 4]
