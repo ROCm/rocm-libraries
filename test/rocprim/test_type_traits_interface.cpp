@@ -178,7 +178,7 @@ TYPED_TEST(RocprimFloatingPointTests, FloatingPoint)
     ROCPRIM_STATIC_ASSERT_EQ(input_traits.is_integral(), rocprim::is_integral<input_type>::value);
 
     // cannot do static_assert because under c++ 14 there is no if constexpr
-    if ROCPRIM_IF_CONSTEXPR(rocprim::is_arithmetic<input_type>::value)
+    if constexpr(rocprim::is_arithmetic<input_type>::value)
     { // for c++ arithmetic types
         ASSERT_EQ(input_traits.is_compound(), rocprim::is_compound<input_type>::value);
         ASSERT_EQ(input_traits.is_scalar(), rocprim::is_scalar<input_type>::value);
@@ -215,7 +215,7 @@ TYPED_TEST(RocprimIntegralTests, Integral)
                              rocprim::is_floating_point<input_type>::value);
     ROCPRIM_STATIC_ASSERT_NE(input_traits.is_signed(), input_traits.is_unsigned());
 
-    if ROCPRIM_IF_CONSTEXPR(rocprim::is_arithmetic<input_type>::value)
+    if constexpr(rocprim::is_arithmetic<input_type>::value)
     { // for c++ arithmetic types
         ASSERT_EQ(input_traits.is_compound(), rocprim::is_compound<input_type>::value);
         ASSERT_EQ(input_traits.is_scalar(), rocprim::is_scalar<input_type>::value);

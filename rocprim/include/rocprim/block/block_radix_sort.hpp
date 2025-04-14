@@ -128,12 +128,16 @@ class block_radix_sort
     static constexpr bool is_key_and_value_aligned
         = alignof(Key) == alignof(Value) && sizeof(Key) == sizeof(Value);
 
-    using block_rank_type = ::rocprim::
-        block_radix_rank<BlockSizeX, RadixBitsPerPass, RadixRankAlgorithm, BlockSizeY, BlockSizeZ, PaddingHint>;
-    using keys_exchange_type
-        = ::rocprim::block_exchange<Key, BlockSizeX, ItemsPerThread, BlockSizeY, BlockSizeZ, PaddingHint>;
-    using values_exchange_type
-        = ::rocprim::block_exchange<Value, BlockSizeX, ItemsPerThread, BlockSizeY, BlockSizeZ, PaddingHint>;
+    using block_rank_type    = ::rocprim::block_radix_rank<BlockSizeX,
+                                                        RadixBitsPerPass,
+                                                        RadixRankAlgorithm,
+                                                        BlockSizeY,
+                                                        BlockSizeZ,
+                                                        PaddingHint>;
+    using keys_exchange_type = ::rocprim::
+        block_exchange<Key, BlockSizeX, ItemsPerThread, BlockSizeY, BlockSizeZ, PaddingHint>;
+    using values_exchange_type = ::rocprim::
+        block_exchange<Value, BlockSizeX, ItemsPerThread, BlockSizeY, BlockSizeZ, PaddingHint>;
 
     // Struct used for creating a raw_storage object for this primitive's temporary storage.
     union storage_type_
@@ -1076,7 +1080,7 @@ private:
                                  std::false_type)
     {
         keys_exchange_type().blocked_to_warp_striped(keys, keys, storage.get().keys_exchange);
-        if ROCPRIM_IF_CONSTEXPR(is_key_and_value_aligned)
+        if constexpr(is_key_and_value_aligned)
         {
             // If keys and values are aligned, then the LDS for both exchanges is
             // local per wave. We can relax the data dependency!
@@ -1129,7 +1133,7 @@ private:
 
         // If we're using warp striped radix rank but our input is in a blocked layout, we
         // can emulate the correct input through an exchange to a warp striped layout.
-        if ROCPRIM_IF_CONSTEXPR(TryEmulateWarpStriped && warp_striped && ItemsPerThread > 1)
+        if constexpr(TryEmulateWarpStriped && warp_striped && ItemsPerThread > 1)
         {
             // This appears to be slower with high large items per thread.
             constexpr bool use_warp_exchange
@@ -1162,7 +1166,7 @@ private:
                 break;
             }
 
-            if ROCPRIM_IF_CONSTEXPR(warp_striped)
+            if constexpr(warp_striped)
             {
                 exchange_keys_warp_striped(storage, keys, ranks);
                 exchange_values_warp_striped(storage, values, ranks);
@@ -1177,7 +1181,7 @@ private:
             ::rocprim::syncthreads();
         }
 
-        if ROCPRIM_IF_CONSTEXPR(ToStriped)
+        if constexpr(ToStriped)
         {
             exchange_to_striped_keys(storage, keys, ranks);
             exchange_to_striped_values(storage, values, ranks);

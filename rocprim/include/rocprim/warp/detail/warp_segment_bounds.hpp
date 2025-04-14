@@ -53,7 +53,7 @@ auto last_in_warp_segment(Flag flag) ->
     // Make sure last item in logical warp is marked as a tail
     warp_flags |= lane_mask_type(1) << (WarpSize - 1U);
     // Calculate logical lane id of the last valid value in the segment
-    if ROCPRIM_IF_CONSTEXPR(arch::wavefront::min_size() == 32)
+    if constexpr(arch::wavefront::min_size() == 32)
     {
         // The static_cast prevents "error: call to '__ffs' is ambiguous"
         return ::__ffs(static_cast<unsigned int>(warp_flags)) - 1;

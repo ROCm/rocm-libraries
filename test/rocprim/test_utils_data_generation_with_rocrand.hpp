@@ -63,7 +63,7 @@ auto generate_casting(T* output, StateT& state, U min, V max)
                         * (static_cast<float>(max) - static_cast<float>(min))
                     + static_cast<float>(min);
 
-    if ROCPRIM_IF_CONSTEXPR(std::is_same<T, half>::value)
+    if constexpr(std::is_same<T, half>::value)
     {
         output[tid] = static_cast<T>(__float2half_rn(f_value));
     }

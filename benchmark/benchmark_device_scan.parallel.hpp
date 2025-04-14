@@ -103,7 +103,7 @@ struct device_scan_benchmark : public benchmark_utils::autotune_interface
                          const bool        debug = false) const ->
         typename std::enable_if<excl, hipError_t>::type
     {
-        if ROCPRIM_IF_CONSTEXPR(!Deterministic)
+        if constexpr(!Deterministic)
         {
             return rocprim::exclusive_scan<Config>(temporary_storage,
                                                    storage_size,
@@ -142,7 +142,7 @@ struct device_scan_benchmark : public benchmark_utils::autotune_interface
         typename std::enable_if<!excl, hipError_t>::type
     {
         (void)initial_value;
-        if ROCPRIM_IF_CONSTEXPR(!Deterministic)
+        if constexpr(!Deterministic)
         {
             return rocprim::inclusive_scan<Config>(temporary_storage,
                                                    storage_size,
@@ -179,7 +179,7 @@ struct device_scan_benchmark : public benchmark_utils::autotune_interface
         const auto     random_range = limit_random_range<T>(0, 1000);
         std::vector<T> input
             = get_random_data<T>(size, random_range.first, random_range.second, seed.get_0());
-        T  initial_value = T(123);
+        T                     initial_value = T(123);
         common::device_ptr<T> d_input(input);
         common::device_ptr<T> d_output(size);
         HIP_CHECK(hipDeviceSynchronize());

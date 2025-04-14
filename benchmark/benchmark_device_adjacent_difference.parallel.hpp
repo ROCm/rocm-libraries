@@ -97,7 +97,7 @@ struct device_adjacent_difference_benchmark : public benchmark_utils::autotune_i
         common::device_ptr<T>           d_input(input);
         common::device_ptr<output_type> d_output;
 
-        if ROCPRIM_IF_CONSTEXPR(Aliasing == common::api_variant::no_alias)
+        if constexpr(Aliasing == common::api_variant::no_alias)
         {
             d_output.resize(size);
         }
@@ -106,7 +106,7 @@ struct device_adjacent_difference_benchmark : public benchmark_utils::autotune_i
         static constexpr auto alias_tag = std::integral_constant<common::api_variant, Aliasing>{};
 
         // Allocate temporary storage
-        std::size_t temp_storage_size;
+        std::size_t              temp_storage_size;
         common::device_ptr<void> d_temp_storage;
 
         const auto launch = [&]

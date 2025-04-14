@@ -70,7 +70,7 @@ void rank_kernel(const T* keys_input, unsigned int* ranks_output)
         while(begin_bit < end_bit)
         {
             const unsigned pass_bits = min(RadixBits, end_bit - begin_bit);
-            if ROCPRIM_IF_CONSTEXPR(Descending)
+            if constexpr(Descending)
             {
                 rank_type().rank_keys_desc(keys, ranks, storage, begin_bit, pass_bits);
             }

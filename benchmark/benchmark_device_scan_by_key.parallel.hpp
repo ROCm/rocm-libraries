@@ -110,7 +110,7 @@ struct device_scan_by_key_benchmark : public benchmark_utils::autotune_interface
                                 const bool        debug = false) const ->
         typename std::enable_if<excl, hipError_t>::type
     {
-        if ROCPRIM_IF_CONSTEXPR(!Deterministic)
+        if constexpr(!Deterministic)
         {
             return rocprim::exclusive_scan_by_key<Config>(temporary_storage,
                                                           storage_size,
@@ -154,7 +154,7 @@ struct device_scan_by_key_benchmark : public benchmark_utils::autotune_interface
                                 const bool        debug = false) const ->
         typename std::enable_if<!excl, hipError_t>::type
     {
-        if ROCPRIM_IF_CONSTEXPR(!Deterministic)
+        if constexpr(!Deterministic)
         {
             return rocprim::inclusive_scan_by_key<Config>(temporary_storage,
                                                           storage_size,
@@ -204,7 +204,7 @@ struct device_scan_by_key_benchmark : public benchmark_utils::autotune_interface
         ScanOp    scan_op{};
         CompareOp compare_op{};
 
-        Value  initial_value = Value(123);
+        Value                     initial_value = Value(123);
         common::device_ptr<Value> d_input(input);
         common::device_ptr<Key>   d_keys(keys);
         common::device_ptr<Value> d_output(input.size());

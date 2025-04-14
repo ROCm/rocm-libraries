@@ -95,9 +95,10 @@ class warp_exchange
     };
 
     template<int NumEntries, int IdX, class U>
-    ROCPRIM_DEVICE ROCPRIM_INLINE void Foreach(const T (&input)[ItemsPerThread],
-                                               U (&output)[ItemsPerThread],
-                                               const int xor_bit_set)
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void Foreach(const T (&input)[ItemsPerThread],
+                 U (&output)[ItemsPerThread],
+                 const int xor_bit_set)
     {
         // To prevent double work for IdX and IdX + NumEntries
         if(NumEntries != 0 && (IdX / NumEntries) % 2 == 0)
@@ -110,10 +111,11 @@ class warp_exchange
     }
 
     template<int NumEntries, class U, int... Ids>
-    ROCPRIM_DEVICE ROCPRIM_INLINE void Foreach(const T (&input)[ItemsPerThread],
-                                               U (&output)[ItemsPerThread],
-                                               const std::integer_sequence<int, Ids...>,
-                                               const bool xor_bit_set)
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void Foreach(const T (&input)[ItemsPerThread],
+                 U (&output)[ItemsPerThread],
+                 const std::integer_sequence<int, Ids...>,
+                 const bool xor_bit_set)
     {
         // To create a static inner loop that executes the code with
         // the values [0, 1, ..., ItemsPerThread-1, ItemsPerThread] as IdX
@@ -122,10 +124,11 @@ class warp_exchange
     }
 
     template<unsigned int MaxIter, class U, int... Iter>
-    ROCPRIM_DEVICE ROCPRIM_INLINE void TransposeImpl(const T (&input)[ItemsPerThread],
-                                                     U (&output)[ItemsPerThread],
-                                                     const unsigned int lane_id,
-                                                     const std::integer_sequence<int, Iter...>)
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void TransposeImpl(const T (&input)[ItemsPerThread],
+                       U (&output)[ItemsPerThread],
+                       const unsigned int lane_id,
+                       const std::integer_sequence<int, Iter...>)
     {
         // To create a static outer loop that executes the code with
         // the values [ItemsPerThread/2, ItemsPerThread/4, ..., 1, 0] as NumEntries
@@ -139,9 +142,10 @@ class warp_exchange
     }
 
     template<class U>
-    ROCPRIM_DEVICE ROCPRIM_INLINE void Transpose(const T (&input)[ItemsPerThread],
-                                                 U (&output)[ItemsPerThread],
-                                                 const unsigned int lane_id)
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void Transpose(const T (&input)[ItemsPerThread],
+                   U (&output)[ItemsPerThread],
+                   const unsigned int lane_id)
     {
         constexpr unsigned int n_iter = rocprim::Log2<ItemsPerThread>::VALUE;
         TransposeImpl<n_iter - 1>(input,
@@ -236,8 +240,8 @@ class warp_exchange
     template<unsigned int Width, bool BlockedToStriped, class U>
     ROCPRIM_DEVICE ROCPRIM_INLINE
     void rearrange_items(unsigned int flat_id,
-                         U            (&input)[ItemsPerThread],
-                         U            (&output)[ItemsPerThread])
+                         U (&input)[ItemsPerThread],
+                         U (&output)[ItemsPerThread])
     {
         constexpr unsigned int ipt_div_width = ItemsPerThread / Width;
 
@@ -266,7 +270,7 @@ class warp_exchange
     typename std::enable_if<implementation_selector_bs<U>::value
                             == ImplementationType::EqualSize>::type
         blocked_to_striped_shuffle_impl(const T (&input)[ItemsPerThread],
-                                        U       (&output)[ItemsPerThread])
+                                        U (&output)[ItemsPerThread])
     {
         static constexpr bool IS_ARCH_WARP = WarpSize == ::rocprim::arch::wavefront::min_size();
         const unsigned int    flat_lane_id = ::rocprim::detail::logical_lane_id<WarpSize>();
@@ -327,7 +331,7 @@ class warp_exchange
     typename std::enable_if<implementation_selector_bs<U>::value
                             == ImplementationType::QuadCompatible>::type
         blocked_to_striped_shuffle_impl(const T (&input)[ItemsPerThread],
-                                        U       (&output)[ItemsPerThread])
+                                        U (&output)[ItemsPerThread])
     {
         constexpr unsigned int NUM_QUADS         = WarpSize / ROCPRIM_QUAD_SIZE;
         constexpr unsigned int IPT_DIV_QUAD_SIZE = ItemsPerThread / ROCPRIM_QUAD_SIZE;
@@ -390,7 +394,7 @@ class warp_exchange
             quad_perm_index--;
         }
 
-        if ROCPRIM_IF_CONSTEXPR(WarpSize > ROCPRIM_QUAD_SIZE)
+        if constexpr(WarpSize > ROCPRIM_QUAD_SIZE)
         {
             // First warp rotation
             ROCPRIM_UNROLL
@@ -408,7 +412,7 @@ class warp_exchange
 
             // Second warp rotation
             constexpr unsigned int items_per_quad_warp = ItemsPerThread / NUM_QUADS;
-            unsigned int       remaining_rotations = NUM_QUADS - 1;
+            unsigned int           remaining_rotations = NUM_QUADS - 1;
             ROCPRIM_UNROLL
             for(unsigned int i = items_per_quad_warp; i < ItemsPerThread; i += items_per_quad_warp)
             {
@@ -436,12 +440,12 @@ class warp_exchange
     typename std::enable_if<implementation_selector_bs<U>::value
                             == ImplementationType::WarpDivideItems>::type
         blocked_to_striped_shuffle_impl(const T (&input)[ItemsPerThread],
-                                        U       (&output)[ItemsPerThread])
+                                        U (&output)[ItemsPerThread])
     {
-        const unsigned int flat_id      = ::rocprim::detail::logical_lane_id<WarpSize>();
+        const unsigned int     flat_id      = ::rocprim::detail::logical_lane_id<WarpSize>();
         constexpr unsigned int ipt_div_warp = ItemsPerThread / WarpSize;
-        U                  values1[ItemsPerThread];
-        U                  values2[ItemsPerThread];
+        U                      values1[ItemsPerThread];
+        U                      values2[ItemsPerThread];
 
         ROCPRIM_UNROLL
         for(unsigned int i = 0; i < ItemsPerThread; i++)
@@ -488,7 +492,7 @@ class warp_exchange
     typename std::enable_if<implementation_selector_bs<U>::value
                             == ImplementationType::ItemsDivideWarp>::type
         blocked_to_striped_shuffle_impl(const T (&input)[ItemsPerThread],
-                                        U       (&output)[ItemsPerThread])
+                                        U (&output)[ItemsPerThread])
     {
         const unsigned int flat_id = ::rocprim::detail::logical_lane_id<WarpSize>();
         U                  work_array[ItemsPerThread];
@@ -523,7 +527,7 @@ class warp_exchange
     typename std::enable_if<implementation_selector_sb<U>::value
                             == ImplementationType::EqualSize>::type
         striped_to_blocked_shuffle_impl(const T (&input)[ItemsPerThread],
-                                        U       (&output)[ItemsPerThread])
+                                        U (&output)[ItemsPerThread])
     {
         blocked_to_striped_shuffle_impl(input, output);
     }
@@ -539,7 +543,7 @@ class warp_exchange
     typename std::enable_if<implementation_selector_sb<U>::value
                             == ImplementationType::QuadCompatible>::type
         striped_to_blocked_shuffle_impl(const T (&input)[ItemsPerThread],
-                                        U       (&output)[ItemsPerThread])
+                                        U (&output)[ItemsPerThread])
     {
         constexpr unsigned int NUM_QUADS         = WarpSize / ROCPRIM_QUAD_SIZE;
         constexpr unsigned int IPT_DIV_QUAD_SIZE = ItemsPerThread / ROCPRIM_QUAD_SIZE;
@@ -557,11 +561,11 @@ class warp_exchange
             values2[i] = input[i];
         }
 
-        if ROCPRIM_IF_CONSTEXPR(WarpSize > ROCPRIM_QUAD_SIZE)
+        if constexpr(WarpSize > ROCPRIM_QUAD_SIZE)
         {
             // First warp rotation
             constexpr unsigned int items_per_quad_warp = ItemsPerThread / NUM_QUADS;
-            unsigned int       remaining_rotations = NUM_QUADS - 1;
+            unsigned int           remaining_rotations = NUM_QUADS - 1;
             ROCPRIM_UNROLL
             for(unsigned int i = items_per_quad_warp; i < ItemsPerThread; i += items_per_quad_warp)
             {
@@ -649,12 +653,12 @@ class warp_exchange
     typename std::enable_if<implementation_selector_sb<U>::value
                             == ImplementationType::WarpDivideItems>::type
         striped_to_blocked_shuffle_impl(const T (&input)[ItemsPerThread],
-                                        U       (&output)[ItemsPerThread])
+                                        U (&output)[ItemsPerThread])
     {
-        const unsigned int flat_id      = ::rocprim::detail::logical_lane_id<WarpSize>();
+        const unsigned int     flat_id      = ::rocprim::detail::logical_lane_id<WarpSize>();
         constexpr unsigned int ipt_div_warp = ItemsPerThread / WarpSize;
-        U                  values1[ItemsPerThread];
-        U                  values2[ItemsPerThread];
+        U                      values1[ItemsPerThread];
+        U                      values2[ItemsPerThread];
 
         ROCPRIM_UNROLL
         for(unsigned int i = 0; i < ItemsPerThread; i++)
@@ -701,7 +705,7 @@ class warp_exchange
     typename std::enable_if<implementation_selector_sb<U>::value
                             == ImplementationType::ItemsDivideWarp>::type
         striped_to_blocked_shuffle_impl(const T (&input)[ItemsPerThread],
-                                        U       (&output)[ItemsPerThread])
+                                        U (&output)[ItemsPerThread])
     {
         const unsigned int flat_id = ::rocprim::detail::logical_lane_id<WarpSize>();
         U                  work_array[ItemsPerThread];
@@ -832,8 +836,8 @@ public:
     /// }
     /// \endcode
     template<class U>
-    ROCPRIM_DEVICE ROCPRIM_INLINE void blocked_to_striped_shuffle(const T (&input)[ItemsPerThread],
-                                                                  U (&output)[ItemsPerThread])
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void blocked_to_striped_shuffle(const T (&input)[ItemsPerThread], U (&output)[ItemsPerThread])
     {
         static_assert(
             conditions::is_equal_size || conditions::is_quad_compatible_bs
@@ -935,8 +939,8 @@ public:
     /// }
     /// \endcode
     template<class U>
-    ROCPRIM_DEVICE ROCPRIM_INLINE void striped_to_blocked_shuffle(const T (&input)[ItemsPerThread],
-                                                                  U (&output)[ItemsPerThread])
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void striped_to_blocked_shuffle(const T (&input)[ItemsPerThread], U (&output)[ItemsPerThread])
     {
         static_assert(
             conditions::is_equal_size || conditions::is_quad_compatible_sb
@@ -987,16 +991,15 @@ public:
     /// \endcode
     template<class U, class OffsetT>
     ROCPRIM_DEVICE ROCPRIM_INLINE
-    void scatter_to_striped(
-            const T (&input)[ItemsPerThread],
-            U (&output)[ItemsPerThread],
-            const OffsetT (&ranks)[ItemsPerThread],
-            storage_type& storage)
+    void scatter_to_striped(const T (&input)[ItemsPerThread],
+                            U (&output)[ItemsPerThread],
+                            const OffsetT (&ranks)[ItemsPerThread],
+                            storage_type& storage)
     {
         const unsigned int flat_id = ::rocprim::detail::logical_lane_id<WarpSize>();
 
         ROCPRIM_UNROLL
-        for (unsigned int i = 0; i < ItemsPerThread; i++)
+        for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
             storage.buffer.emplace(ranks[i], input[i]);
         }
@@ -1004,7 +1007,7 @@ public:
         const auto& storage_buffer = storage.buffer.get_unsafe_array();
 
         ROCPRIM_UNROLL
-        for (unsigned int i = 0; i < ItemsPerThread; i++)
+        for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
             unsigned int item_offset = (i * WarpSize) + flat_id;
             output[i]                = storage_buffer[item_offset];

@@ -71,9 +71,10 @@ private:
         typename block_scan_type::storage_type block_scan;
     };
 
-    ROCPRIM_DEVICE ROCPRIM_INLINE digit_counter_type& get_digit_counter(const unsigned int digit,
-                                                                        const unsigned int thread,
-                                                                        storage_type_&     storage)
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    digit_counter_type& get_digit_counter(const unsigned int digit,
+                                          const unsigned int thread,
+                                          storage_type_&     storage)
     {
         const unsigned int column_counter = digit % column_size;
         const unsigned int sub_counter    = digit / column_size;
@@ -82,8 +83,8 @@ private:
         return storage.digit_counters[counter];
     };
 
-    ROCPRIM_DEVICE ROCPRIM_INLINE void reset_counters(const unsigned int flat_id,
-                                                      storage_type_&     storage)
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void reset_counters(const unsigned int flat_id, storage_type_& storage)
     {
         for(unsigned int i = flat_id; i < block_size * column_size; i += block_size)
         {
@@ -91,8 +92,8 @@ private:
         }
     }
 
-    ROCPRIM_DEVICE ROCPRIM_INLINE void
-        scan_block_counters(storage_type_& storage, packed_counter_type* const packed_counters)
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void scan_block_counters(storage_type_& storage, packed_counter_type* const packed_counters)
     {
         packed_counter_type block_reduction = 0;
         ROCPRIM_UNROLL
@@ -124,13 +125,13 @@ private:
         }
     }
 
-    ROCPRIM_DEVICE ROCPRIM_INLINE void scan_counters(const unsigned int flat_id,
-                                                     storage_type_&     storage)
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void scan_counters(const unsigned int flat_id, storage_type_& storage)
     {
         packed_counter_type* const shared_counters
             = &storage.packed_counters[flat_id * column_size];
 
-        if ROCPRIM_IF_CONSTEXPR(MemoizeOuterScan)
+        if constexpr(MemoizeOuterScan)
         {
             packed_counter_type local_counters[column_size];
             ROCPRIM_UNROLL
@@ -154,10 +155,11 @@ private:
     }
 
     template<typename Key, unsigned int ItemsPerThread, typename DigitExtractor>
-    ROCPRIM_DEVICE void rank_keys_impl(const Key (&keys)[ItemsPerThread],
-                                       unsigned int (&ranks)[ItemsPerThread],
-                                       storage_type_& storage,
-                                       DigitExtractor digit_extractor)
+    ROCPRIM_DEVICE
+    void rank_keys_impl(const Key (&keys)[ItemsPerThread],
+                        unsigned int (&ranks)[ItemsPerThread],
+                        storage_type_& storage,
+                        DigitExtractor digit_extractor)
     {
         static_assert(block_size * ItemsPerThread < 1u << 16,
                       "The maximum amout of items that block_radix_rank can rank is 2**16.");
@@ -191,11 +193,12 @@ private:
     }
 
     template<bool Descending, typename Key, unsigned int ItemsPerThread>
-    ROCPRIM_DEVICE void rank_keys_impl(const Key (&keys)[ItemsPerThread],
-                                       unsigned int (&ranks)[ItemsPerThread],
-                                       storage_type_&     storage,
-                                       const unsigned int begin_bit,
-                                       const unsigned int pass_bits)
+    ROCPRIM_DEVICE
+    void rank_keys_impl(const Key (&keys)[ItemsPerThread],
+                        unsigned int (&ranks)[ItemsPerThread],
+                        storage_type_&     storage,
+                        const unsigned int begin_bit,
+                        const unsigned int pass_bits)
     {
         using key_codec
             = decltype(::rocprim::traits::get<Key>().template radix_key_codec<Descending>());
@@ -216,9 +219,10 @@ private:
     }
 
     template<unsigned int ItemsPerThread>
-    ROCPRIM_DEVICE void digit_prefix_count(unsigned int (&prefix)[digits_per_thread],
-                                           unsigned int (&counts)[digits_per_thread],
-                                           storage_type_& storage)
+    ROCPRIM_DEVICE
+    void digit_prefix_count(unsigned int (&prefix)[digits_per_thread],
+                            unsigned int (&counts)[digits_per_thread],
+                            storage_type_& storage)
     {
         const unsigned int flat_id = ::rocprim::detail::block_thread_id<0>();
 
@@ -246,39 +250,43 @@ public:
     ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_POP
 
     template<typename Key, unsigned ItemsPerThread>
-    ROCPRIM_DEVICE void rank_keys(const Key (&keys)[ItemsPerThread],
-                                  unsigned int (&ranks)[ItemsPerThread],
-                                  storage_type& storage,
-                                  unsigned int  begin_bit = 0,
-                                  unsigned int  pass_bits = RadixBits)
+    ROCPRIM_DEVICE
+    void rank_keys(const Key (&keys)[ItemsPerThread],
+                   unsigned int (&ranks)[ItemsPerThread],
+                   storage_type& storage,
+                   unsigned int  begin_bit = 0,
+                   unsigned int  pass_bits = RadixBits)
     {
         rank_keys_impl<false>(keys, ranks, storage.get(), begin_bit, pass_bits);
     }
 
     template<typename Key, unsigned ItemsPerThread>
-    ROCPRIM_DEVICE void rank_keys_desc(const Key (&keys)[ItemsPerThread],
-                                       unsigned int (&ranks)[ItemsPerThread],
-                                       storage_type& storage,
-                                       unsigned int  begin_bit = 0,
-                                       unsigned int  pass_bits = RadixBits)
+    ROCPRIM_DEVICE
+    void rank_keys_desc(const Key (&keys)[ItemsPerThread],
+                        unsigned int (&ranks)[ItemsPerThread],
+                        storage_type& storage,
+                        unsigned int  begin_bit = 0,
+                        unsigned int  pass_bits = RadixBits)
     {
         rank_keys_impl<true>(keys, ranks, storage.get(), begin_bit, pass_bits);
     }
 
     template<typename Key, unsigned ItemsPerThread, typename DigitExtractor>
-    ROCPRIM_DEVICE void rank_keys(const Key (&keys)[ItemsPerThread],
-                                  unsigned int (&ranks)[ItemsPerThread],
-                                  storage_type&  storage,
-                                  DigitExtractor digit_extractor)
+    ROCPRIM_DEVICE
+    void rank_keys(const Key (&keys)[ItemsPerThread],
+                   unsigned int (&ranks)[ItemsPerThread],
+                   storage_type&  storage,
+                   DigitExtractor digit_extractor)
     {
         rank_keys_impl(keys, ranks, storage.get(), digit_extractor);
     }
 
     template<typename Key, unsigned ItemsPerThread, typename DigitExtractor>
-    ROCPRIM_DEVICE void rank_keys_desc(const Key (&keys)[ItemsPerThread],
-                                       unsigned int (&ranks)[ItemsPerThread],
-                                       storage_type&  storage,
-                                       DigitExtractor digit_extractor)
+    ROCPRIM_DEVICE
+    void rank_keys_desc(const Key (&keys)[ItemsPerThread],
+                        unsigned int (&ranks)[ItemsPerThread],
+                        storage_type&  storage,
+                        DigitExtractor digit_extractor)
     {
         rank_keys_impl(keys,
                        ranks,
@@ -291,12 +299,13 @@ public:
     }
 
     template<typename Key, unsigned ItemsPerThread, typename DigitExtractor>
-    ROCPRIM_DEVICE void rank_keys(const Key (&keys)[ItemsPerThread],
-                                  unsigned int (&ranks)[ItemsPerThread],
-                                  storage_type&  storage,
-                                  DigitExtractor digit_extractor,
-                                  unsigned int (&prefix)[digits_per_thread],
-                                  unsigned int (&counts)[digits_per_thread])
+    ROCPRIM_DEVICE
+    void rank_keys(const Key (&keys)[ItemsPerThread],
+                   unsigned int (&ranks)[ItemsPerThread],
+                   storage_type&  storage,
+                   DigitExtractor digit_extractor,
+                   unsigned int (&prefix)[digits_per_thread],
+                   unsigned int (&counts)[digits_per_thread])
     {
         rank_keys(keys, ranks, storage, digit_extractor);
         digit_prefix_count<ItemsPerThread>(prefix, counts, storage.get());

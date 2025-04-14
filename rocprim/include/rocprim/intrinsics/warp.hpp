@@ -50,7 +50,7 @@ ROCPRIM_DEVICE ROCPRIM_INLINE
 unsigned int masked_bit_count(lane_mask_type x, unsigned int add = 0)
 {
     int c;
-    if ROCPRIM_IF_CONSTEXPR(arch::wavefront::min_size() == 32)
+    if constexpr(arch::wavefront::min_size() == 32)
     {
         c = ::__builtin_amdgcn_mbcnt_lo(x, add);
     }
@@ -77,7 +77,7 @@ int warp_all(int predicate)
     return ::__all(predicate);
 }
 
-} // end detail namespace
+} // namespace detail
 
 /// \overload
 /// \brief Group active lanes having the same bits of \p label
@@ -96,9 +96,8 @@ int warp_all(int predicate)
 /// lane <tt>i</tt>'s result includes bit <tt>j</tt> in the lane mask if lane <tt>j</tt> is part
 /// of the same group as lane <tt>i</tt>, i.e. lane <tt>i</tt> and <tt>j</tt> called with the
 /// same value for label.
-ROCPRIM_DEVICE ROCPRIM_INLINE lane_mask_type match_any(unsigned int label,
-                                                       unsigned int label_bits,
-                                                       bool         valid = true)
+ROCPRIM_DEVICE ROCPRIM_INLINE
+lane_mask_type match_any(unsigned int label, unsigned int label_bits, bool valid = true)
 {
     // Obtain a mask with the threads which are currently active.
     lane_mask_type peer_mask = ballot(valid);
@@ -147,7 +146,8 @@ ROCPRIM_DEVICE ROCPRIM_INLINE lane_mask_type match_any(unsigned int label,
 /// same value for label.
 
 template<unsigned int LabelBits>
-ROCPRIM_DEVICE ROCPRIM_INLINE lane_mask_type match_any(unsigned int label, bool valid = true)
+ROCPRIM_DEVICE ROCPRIM_INLINE
+lane_mask_type match_any(unsigned int label, bool valid = true)
 {
     // Dispatch to runtime version
     return match_any(label, LabelBits, valid);
@@ -164,7 +164,8 @@ ROCPRIM_DEVICE ROCPRIM_INLINE lane_mask_type match_any(unsigned int label, bool 
 ///
 /// \pre The relation specified by \p mask must be symmetric and transitive, in other words: the groups
 /// should be consistent between threads.
-ROCPRIM_DEVICE ROCPRIM_INLINE bool group_elect(lane_mask_type mask)
+ROCPRIM_DEVICE ROCPRIM_INLINE
+bool group_elect(lane_mask_type mask)
 {
     const unsigned int prev_same_count = ::rocprim::masked_bit_count(mask);
     return prev_same_count == 0 && mask != 0;

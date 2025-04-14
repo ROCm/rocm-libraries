@@ -133,7 +133,7 @@ struct device_reduce_by_key_benchmark : public benchmark_utils::autotune_interfa
         {
             const auto dispatch_input = [&](KeyType* d_key_input)
             {
-                if ROCPRIM_IF_CONSTEXPR(!Deterministic)
+                if constexpr(!Deterministic)
                 {
                     HIP_CHECK(rocprim::reduce_by_key<Config>(d_temp_storage,
                                                              temp_storage_size_bytes,

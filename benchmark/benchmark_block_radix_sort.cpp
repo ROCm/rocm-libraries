@@ -147,13 +147,13 @@ void run_benchmark(benchmark_utils::state&& state)
     state.run(
         [&]
         {
-            if ROCPRIM_IF_CONSTEXPR(BenchmarkKind == benchmark_kinds::sort_keys)
+            if constexpr(BenchmarkKind == benchmark_kinds::sort_keys)
             {
                 sort_keys_kernel<T, BlockSize, RadixBitsPerPass, ItemsPerThread, Trials>
                     <<<dim3(size / items_per_block), dim3(BlockSize), 0, stream>>>(d_input.get(),
                                                                                    d_output.get());
             }
-            else if ROCPRIM_IF_CONSTEXPR(BenchmarkKind == benchmark_kinds::sort_pairs)
+            else if constexpr(BenchmarkKind == benchmark_kinds::sort_pairs)
             {
                 sort_pairs_kernel<T, BlockSize, RadixBitsPerPass, ItemsPerThread, Trials>
                     <<<dim3(size / items_per_block), dim3(BlockSize), 0, stream>>>(d_input.get(),

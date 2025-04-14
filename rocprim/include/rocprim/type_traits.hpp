@@ -601,7 +601,7 @@ struct radix_key_codec
             //
             // For ascending sort, both should be mapped to 0x8000'0000,
             // and for descending sort, both should be mapped to 0x7FFF'FFFF.
-            if ROCPRIM_IF_CONSTEXPR(Descending)
+            if constexpr(Descending)
             {
                 bit_key = bit_key == sign_bit ? static_cast<bit_key_type>(~sign_bit) : bit_key;
             }

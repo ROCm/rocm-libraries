@@ -46,8 +46,7 @@
 // Global coherence of prefixes_*_values is ensured by atomic_load/atomic_store that bypass
 // cache.
 #ifndef ROCPRIM_DETAIL_LOOKBACK_SCAN_STATE_WITHOUT_SLOW_FENCES
-    #if defined(__HIP_DEVICE_COMPILE__) \
-        && (defined(__gfx942__) || defined(__gfx950__))
+    #if defined(__HIP_DEVICE_COMPILE__) && (defined(__gfx942__) || defined(__gfx950__))
         #define ROCPRIM_DETAIL_LOOKBACK_SCAN_STATE_WITHOUT_SLOW_FENCES 1
     #else
         #define ROCPRIM_DETAIL_LOOKBACK_SCAN_STATE_WITHOUT_SLOW_FENCES 0
@@ -117,9 +116,8 @@ struct lookback_scan_state;
 
 /// Reduce lanes `0-valid_items` and return the result in lane 0.
 template<typename F, typename T>
-ROCPRIM_DEVICE ROCPRIM_INLINE T lookback_reduce_forward_init(F            scan_op,
-                                                             T            block_prefix,
-                                                             unsigned int valid_items)
+ROCPRIM_DEVICE ROCPRIM_INLINE
+T lookback_reduce_forward_init(F scan_op, T block_prefix, unsigned int valid_items)
 {
     T prefix = block_prefix;
     for(unsigned int i = 0; i < valid_items; ++i)
@@ -137,7 +135,8 @@ ROCPRIM_DEVICE ROCPRIM_INLINE T lookback_reduce_forward_init(F            scan_o
 /// Reduce all lanes with the `prefix`, which is taken from lane 0,
 /// and return the result in lane 0.
 template<typename F, typename T>
-ROCPRIM_DEVICE ROCPRIM_INLINE T lookback_reduce_forward(F scan_op, T prefix, T block_prefix)
+ROCPRIM_DEVICE ROCPRIM_INLINE
+T lookback_reduce_forward(F scan_op, T prefix, T block_prefix)
 {
 #ifdef ROCPRIM_DETAIL_HAS_DPP_WF
     ROCPRIM_UNROLL
@@ -189,7 +188,7 @@ private:
     // Helper struct
     struct prefix_type
     {
-        T           value;
+        T                         value;
         lookback_scan_prefix_flag flag;
     };
 
@@ -237,8 +236,8 @@ public:
         return error;
     }
 
-    ROCPRIM_DEVICE ROCPRIM_INLINE void initialize_prefix(const unsigned int block_id,
-                                                         const unsigned int number_of_blocks)
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void initialize_prefix(const unsigned int block_id, const unsigned int number_of_blocks)
     {
         constexpr unsigned int padding = ::rocprim::arch::wavefront::min_size();
 
@@ -260,12 +259,14 @@ public:
         }
     }
 
-    ROCPRIM_DEVICE ROCPRIM_INLINE void set_partial(const unsigned int block_id, const T value)
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void set_partial(const unsigned int block_id, const T value)
     {
         this->set(block_id, lookback_scan_prefix_flag::partial, value);
     }
 
-    ROCPRIM_DEVICE ROCPRIM_INLINE void set_complete(const unsigned int block_id, const T value)
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void set_complete(const unsigned int block_id, const T value)
     {
         this->set(block_id, lookback_scan_prefix_flag::complete, value);
     }
@@ -285,7 +286,7 @@ public:
         memcpy(&prefix, &p, sizeof(prefix_type));
         while(prefix.flag == lookback_scan_prefix_flag::empty)
         {
-            if ROCPRIM_IF_CONSTEXPR(UseSleep)
+            if constexpr(UseSleep)
             {
                 for(unsigned int j = 0; j < times_through; j++)
                     __builtin_amdgcn_s_sleep(1);
@@ -304,7 +305,8 @@ public:
 
     /// \brief Gets the prefix value for a block. Should only be called after all
     /// blocks/prefixes are completed.
-    ROCPRIM_DEVICE ROCPRIM_INLINE T get_complete_value(const unsigned int block_id)
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    T get_complete_value(const unsigned int block_id)
     {
         constexpr unsigned int padding = ::rocprim::arch::wavefront::min_size();
 
@@ -315,7 +317,8 @@ public:
     }
 
     template<typename F>
-    ROCPRIM_DEVICE ROCPRIM_INLINE T get_prefix_forward(F scan_op, unsigned int block_id_)
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    T get_prefix_forward(F scan_op, unsigned int block_id_)
     {
         unsigned int lookback_block_id = block_id_ - lane_id() - 1;
 
@@ -332,7 +335,7 @@ public:
         int cache_offset = 0;
 
         lookback_scan_prefix_flag flag;
-        T           block_prefix;
+        T                         block_prefix;
         this->get(lookback_block_id, flag, block_prefix);
 
         while(warp_all(flag != lookback_scan_prefix_flag::complete
@@ -412,7 +415,7 @@ struct lookback_scan_state<T, UseSleep, false>
 
 public:
     using flag_underlying_type = std::underlying_type_t<lookback_scan_prefix_flag>;
-    using value_type = T;
+    using value_type           = T;
 
     static constexpr bool use_sleep = UseSleep;
 
@@ -469,8 +472,8 @@ public:
         return error;
     }
 
-    ROCPRIM_DEVICE ROCPRIM_INLINE void initialize_prefix(const unsigned int block_id,
-                                                         const unsigned int number_of_blocks)
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void initialize_prefix(const unsigned int block_id, const unsigned int number_of_blocks)
     {
         constexpr unsigned int padding = ::rocprim::arch::wavefront::min_size();
         if(block_id < number_of_blocks)
@@ -485,12 +488,14 @@ public:
         }
     }
 
-    ROCPRIM_DEVICE ROCPRIM_INLINE void set_partial(const unsigned int block_id, const T value)
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void set_partial(const unsigned int block_id, const T value)
     {
         this->set(block_id, lookback_scan_prefix_flag::partial, value);
     }
 
-    ROCPRIM_DEVICE ROCPRIM_INLINE void set_complete(const unsigned int block_id, const T value)
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void set_complete(const unsigned int block_id, const T value)
     {
         this->set(block_id, lookback_scan_prefix_flag::complete, value);
     }
@@ -520,13 +525,14 @@ public:
         const auto* values = static_cast<const T*>(flag == lookback_scan_prefix_flag::partial
                                                        ? prefixes_partial_values
                                                        : prefixes_complete_values);
-        value = values[padding + block_id];
+        value              = values[padding + block_id];
 #endif
     }
 
     /// \brief Gets the prefix value for a block. Should only be called after all
     /// blocks/prefixes are completed.
-    ROCPRIM_DEVICE ROCPRIM_INLINE T get_complete_value(const unsigned int block_id)
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    T get_complete_value(const unsigned int block_id)
     {
         constexpr unsigned int padding = ::rocprim::arch::wavefront::min_size();
 
@@ -546,7 +552,8 @@ public:
 #endif
     }
 
-    ROCPRIM_DEVICE ROCPRIM_INLINE T get_partial_value(const unsigned int block_id)
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    T get_partial_value(const unsigned int block_id)
     {
         constexpr unsigned int padding = ::rocprim::arch::wavefront::min_size();
 
@@ -567,7 +574,8 @@ public:
     }
 
     template<typename F>
-    ROCPRIM_DEVICE ROCPRIM_INLINE T get_prefix_forward(F scan_op, unsigned int block_id_)
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    T get_prefix_forward(F scan_op, unsigned int block_id_)
     {
         unsigned int lookback_block_id = block_id_ - lane_id() - 1;
 
@@ -699,8 +707,8 @@ private:
     // We need to separate arrays for partial and final prefixes, because
     // value can be overwritten before flag is changed (flag and value are
     // not stored in single instruction).
-    void* prefixes_partial_values;
-    void* prefixes_complete_values;
+    void*                 prefixes_partial_values;
+    void*                 prefixes_complete_values;
     flag_underlying_type* prefixes_flags;
 };
 
@@ -715,8 +723,8 @@ class lookback_scan_prefix_op
 
 public:
     ROCPRIM_DEVICE ROCPRIM_INLINE lookback_scan_prefix_op(unsigned int       block_id,
-                                                          BinaryFunction     scan_op,
-                                                          LookbackScanState& scan_state)
+                                                         BinaryFunction     scan_op,
+                                                         LookbackScanState& scan_state)
         : block_id_(block_id), scan_op_(scan_op), scan_state_(scan_state)
     {}
 
@@ -746,13 +754,14 @@ private:
             headflag_scan_op);
     }
 
-    ROCPRIM_DEVICE ROCPRIM_INLINE T get_prefix()
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    T get_prefix()
     {
-        if ROCPRIM_IF_CONSTEXPR(Determinism == lookback_scan_determinism::nondeterministic)
+        if constexpr(Determinism == lookback_scan_determinism::nondeterministic)
         {
             lookback_scan_prefix_flag flag;
-            T            partial_prefix;
-            unsigned int previous_block_id = block_id_ - ::rocprim::lane_id() - 1;
+            T                         partial_prefix;
+            unsigned int              previous_block_id = block_id_ - ::rocprim::lane_id() - 1;
 
             // reduce last warp_size() number of prefixes to
             // get the complete prefix for this block.
@@ -775,7 +784,8 @@ private:
     }
 
 public:
-    ROCPRIM_DEVICE ROCPRIM_INLINE T operator()(T reduction)
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    T operator()(T reduction)
     {
         // Set partial prefix for next block
         if(::rocprim::lane_id() == 0)
@@ -860,7 +870,8 @@ public:
     ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_POP
 
     template<typename PrefixOp>
-    static ROCPRIM_DEVICE auto create(PrefixOp& prefix_op, storage_type& storage)
+    static ROCPRIM_DEVICE
+    auto create(PrefixOp& prefix_op, storage_type& storage)
     {
         return [&](T reduction) mutable
         {
@@ -874,12 +885,14 @@ public:
         };
     }
 
-    static ROCPRIM_DEVICE T get_reduction(const storage_type& storage)
+    static ROCPRIM_DEVICE
+    T get_reduction(const storage_type& storage)
     {
         return storage.get().block_reduction;
     }
 
-    static ROCPRIM_DEVICE T get_prefix(const storage_type& storage)
+    static ROCPRIM_DEVICE
+    T get_prefix(const storage_type& storage)
     {
         return storage.get().prefix;
     }
@@ -896,7 +909,8 @@ private:
     using base_type = lookback_scan_prefix_op<T, BinaryOp, LookbackScanState, Determinism>;
     using factory   = detail::offset_lookback_scan_factory<T>;
 
-    ROCPRIM_DEVICE ROCPRIM_INLINE base_type& base()
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    base_type& base()
     {
         return *this;
     }
@@ -905,29 +919,33 @@ public:
     using storage_type = typename factory::storage_type;
 
     ROCPRIM_DEVICE ROCPRIM_INLINE offset_lookback_scan_prefix_op(unsigned int       block_id,
-                                                                 LookbackScanState& state,
-                                                                 storage_type&      storage,
-                                                                 BinaryOp binary_op = BinaryOp())
+                                                                LookbackScanState& state,
+                                                                storage_type&      storage,
+                                                                BinaryOp binary_op = BinaryOp())
         : base_type(block_id, BinaryOp(std::move(binary_op)), state), storage(storage)
     {}
 
-    ROCPRIM_DEVICE ROCPRIM_INLINE T operator()(T reduction)
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    T operator()(T reduction)
     {
         return factory::create(base(), storage)(reduction);
     }
 
-    ROCPRIM_DEVICE ROCPRIM_INLINE T get_reduction() const
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    T get_reduction() const
     {
         return factory::get_reduction(storage);
     }
 
-    ROCPRIM_DEVICE ROCPRIM_INLINE T get_prefix() const
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    T get_prefix() const
     {
         return factory::get_prefix(storage);
     }
 
     // rocThrust uses this implementation detail of rocPRIM, required for backwards compatibility
-    ROCPRIM_DEVICE ROCPRIM_INLINE T get_exclusive_prefix() const
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    T get_exclusive_prefix() const
     {
         return get_prefix();
     }
