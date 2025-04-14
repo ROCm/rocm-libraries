@@ -45,8 +45,7 @@ namespace rocRoller
 
         if(ctx->targetArchitecture().HasCapability(GPUCapability::WorkgroupIdxViaTTMP))
         {
-            m_workgroupIndex[0] = std::make_shared<Register::Value>(
-                ctx, Register::Type::TTMP9, DataType::UInt32, 1);
+            m_workgroupIndex[0] = ctx->getTTMP9();
             m_workgroupIndex[0]->setName("Workgroup Index X");
         }
         else
@@ -139,8 +138,7 @@ namespace rocRoller
             {
                 co_yield generateOp(
                     m_workgroupIndex[1],
-                    std::make_shared<Register::Value>(
-                        ctx, Register::Type::TTMP7, DataType::UInt32, 1),
+                    ctx->getTTMP7(),
                     Expression::BitFieldExtract{
                         {nullptr, "Extract 16 bit Y coordinate"}, DataType::UInt32, 0, 16});
             }
@@ -149,8 +147,7 @@ namespace rocRoller
             {
                 co_yield generateOp(
                     m_workgroupIndex[2],
-                    std::make_shared<Register::Value>(
-                        ctx, Register::Type::TTMP7, DataType::UInt32, 1),
+                    ctx->getTTMP7(),
                     Expression::BitFieldExtract{
                         {nullptr, "Extract 16 bit Z coordinate"}, DataType::UInt32, 16, 16});
             }

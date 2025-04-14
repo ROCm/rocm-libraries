@@ -122,6 +122,27 @@ namespace rocRoller
             }
         }
 
+        constexpr inline bool IsWriteableSpecial(Type t)
+        {
+            switch(t)
+            {
+            case Type::M0:
+            case Type::SCC:
+            case Type::VCC:
+            case Type::VCC_LO:
+            case Type::VCC_HI:
+            case Type::EXEC:
+            case Type::EXEC_LO:
+            case Type::EXEC_HI:
+                return true;
+
+            case Type::TTMP7:
+            case Type::TTMP9:
+            default:
+                return false;
+            }
+        }
+
         constexpr inline bool IsTTMP(Type t)
         {
             switch(t)
@@ -172,6 +193,28 @@ namespace rocRoller
                 return Type::Vector;
 
             Throw<FatalError>("Invalid Register::Type combo: ", ShowValue(lhs), ShowValue(rhs));
+        }
+
+        constexpr inline Type MapSPRTypeToGPRType(Type t)
+        {
+            switch(t)
+            {
+            case Type::M0:
+            case Type::SCC:
+            case Type::EXEC:
+            case Type::EXEC_LO:
+            case Type::EXEC_HI:
+            case Type::TTMP7:
+            case Type::TTMP9:
+            case Type::VCC:
+            case Type::VCC_LO:
+            case Type::VCC_HI:
+                return Type::Scalar;
+
+            default:
+                AssertFatal(!IsSpecial(t), "Unmapped Special type", ShowValue(t));
+                return t;
+            }
         }
 
         inline std::string toString(Type t)
@@ -814,6 +857,9 @@ namespace rocRoller
         inline bool Value::readOnly() const
         {
             if(regType() == Type::Literal)
+                return true;
+
+            if(IsSpecial(regType()) && !IsWriteableSpecial(regType()))
                 return true;
 
             if(!m_allocation)

@@ -73,7 +73,7 @@ def rocRollerDefaultParameters() {
             .parent.getJob(env.CHANGE_TARGET)
             ?.lastBuild
             ?.actions
-            ?.find {it.class.name == "hudson.model.ParametersAction"}
+            ?.find {it?.class?.name == "hudson.model.ParametersAction"}
             ?.parameters;
         if (targetParams != null)
         {

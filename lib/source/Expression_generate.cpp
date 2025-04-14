@@ -25,6 +25,7 @@
  *******************************************************************************/
 
 #include <algorithm>
+#include <numeric>
 
 #include <rocRoller/AssemblyKernelArgument.hpp>
 #include <rocRoller/CommonSubexpressionElim.hpp>
@@ -124,20 +125,16 @@ namespace rocRoller
                                                  bool              allowSpecial = true,
                                                  int               valueCount   = 1)
             {
-                if(IsSpecial(resType.regType) && resType.varType == DataType::Bool)
+                auto regType = resType.regType;
+                if(IsWriteableSpecial(regType))
                 {
                     if(allowSpecial)
-                        return m_context->getSCC();
-                    else
-                        return Register::Value::Placeholder(
-                            m_context,
-                            Register::Type::Scalar,
-                            resType.varType,
-                            valueCount,
-                            Register::AllocationOptions::FullyContiguous());
+                        return m_context->getSpecial(regType);
+                    regType = MapSPRTypeToGPRType(regType);
                 }
+
                 return Register::Value::Placeholder(m_context,
-                                                    resType.regType,
+                                                    regType,
                                                     resType.varType,
                                                     valueCount,
                                                     Register::AllocationOptions::FullyContiguous());
@@ -186,9 +183,10 @@ namespace rocRoller
              * Evaluates each expression in `exprs`, storing the results in respective indices of
              * `results`.
              *
-             * Up to one result may be stored in `scc`. If this is the case, the scheduler will be locked,
-             * and `schedulerLocked` will be set to `true`.  It's the caller's responsibility to unlock
-             * the scheduler in this case, once the value has been consumed.
+             * Each writeable special register may store up to one result. If this is the case,
+             * the scheduler will be locked, and `schedulerLocked` will be set to `true`.
+             * It's the caller's responsibility to unlock the scheduler in this case, once the
+             * value has been consumed.
              */
             Generator<Instruction> prepareSourceOperands(std::vector<Register::ValuePtr>& results,
                                                          bool&                      schedulerLocked,
@@ -196,76 +194,126 @@ namespace rocRoller
             {
                 std::vector<char>       done(exprs.size(), false);
                 std::vector<ResultType> resultTypes(exprs.size());
-
+                results         = std::vector<Register::ValuePtr>(exprs.size(), nullptr);
                 schedulerLocked = false;
 
-                results = std::vector<Register::ValuePtr>(exprs.size(), nullptr);
+                auto sprUses = [] {
+                    std::unordered_map<Register::Type, size_t> m;
+                    auto typeCount = static_cast<int>(Register::Type::Count);
+                    for(auto typeIdx = 0; typeIdx < typeCount; typeIdx++)
+                    {
+                        auto const type = static_cast<Register::Type>(typeIdx);
+                        if(IsWriteableSpecial(type))
+                            m[type] = 0;
+                    }
+                    return m;
+                }();
 
-                int specials = 0;
-                for(int i = 0; i < exprs.size(); i++)
+                for(auto i = 0; i < exprs.size(); i++)
                 {
-                    resultTypes[i] = resultType(exprs[i]);
-                    if(IsSpecial(resultTypes[i].regType))
-                        specials++;
+                    resultTypes[i]     = resultType(exprs[i]);
+                    auto const regType = resultTypes[i].regType;
+                    if(sprUses.contains(regType))
+                        sprUses[regType]++;
                 }
 
-                // Can't use SCC for two temporary values at once.
-                if(specials > 1)
+                // An SPR may only hold one temporary value at a time.
+                // If there is more than one use, a placeholder register needs to
+                // be created in place.
+                for(auto i = 0; i < exprs.size(); i++)
                 {
-                    for(int i = 0; i < exprs.size() && specials > 1; i++)
+                    auto const resType = resultTypes[i];
+                    auto const regType = resType.regType;
+                    if(sprUses.contains(regType) && sprUses[regType] > 1)
                     {
-                        if(IsSpecial(resultTypes[i].regType))
+                        results[i] = resultPlaceholder(resType, false);
+                        sprUses[regType]--;
+                    }
+                }
+
+                // Schedule all sub-expressions storing to general-purpose registers.
+                std::vector<Generator<Instruction>> schedulable;
+                for(auto i = 0; i < exprs.size(); i++)
+                {
+                    if(!IsWriteableSpecial(resultTypes[i].regType) || results[i] != nullptr)
+                    {
+                        schedulable.push_back(call(results[i], exprs[i]));
+                        done[i] = true;
+                    }
+                }
+
+                if(!schedulable.empty())
+                {
+                    auto proc = Settings::getInstance()->get(Settings::Scheduler);
+                    auto cost = Settings::getInstance()->get(Settings::SchedulerCost);
+                    auto scheduler
+                        = Component::GetNew<Scheduling::Scheduler>(proc, cost, m_context);
+
+                    co_yield (*scheduler)(schedulable);
+                }
+
+                auto sprStores = std::accumulate(
+                    sprUses.begin(), sprUses.end(), 0, [](size_t sum, const auto& sprUse) {
+                        return sum + sprUse.second;
+                    });
+
+                // Schedule all sub-expressions storing to special-purpose registers.
+                std::optional<size_t> maybeSccExprIdx = std::nullopt;
+                for(auto i = 0; i < exprs.size(); i++)
+                {
+                    if(!done[i])
+                    {
+                        auto const regType = resultTypes[i].regType;
+                        AssertFatal(IsWriteableSpecial(regType),
+                                    "Only writeable SPRs should be unscheduled at this point.");
+                        AssertFatal(sprUses.contains(regType) && (1 == sprUses[regType]),
+                                    "There should only be one remaining request for an SPR.");
+
+                        // If there is an expression storing to SCC, it must be scheduled last
+                        // to ensure that it is not overwritten by another expression.
+                        if(regType == Register::Type::SCC)
                         {
-                            results[i] = resultPlaceholder(resultTypes[i], false);
-                            specials--;
+                            maybeSccExprIdx = i;
+                            continue;
                         }
-                    }
-                }
 
-                // First, schedule any sub-expressions that will go into general-purpose registers.
-                {
-                    std::vector<Generator<Instruction>> schedulable;
-                    for(int i = 0; i < exprs.size(); i++)
-                    {
-                        if(!IsSpecial(resultTypes[i].regType) || results[i] != nullptr)
+                        sprStores--;
+                        schedulerLocked = true;
+
+                        switch(regType)
                         {
-                            schedulable.push_back(call(results[i], exprs[i]));
-                            done[i] = true;
+                        case Register::Type::M0:
+                            co_yield Instruction::Lock(
+                                Scheduling::Dependency::M0,
+                                "Expression temporary in special register (M0)");
+                            break;
+                        case Register::Type::VCC:
+                        case Register::Type::VCC_LO:
+                        case Register::Type::VCC_HI:
+                            co_yield Instruction::Lock(
+                                Scheduling::Dependency::VCC,
+                                "Expression temporary in special register (VCC)");
+                            break;
+                        default:
+                            Throw<FatalError>("Unimplemented scheduler dependency for: ",
+                                              toString(regType));
                         }
-                    }
 
-                    if(!schedulable.empty())
-                    {
-                        auto proc = Settings::getInstance()->get(Settings::Scheduler);
-                        auto cost = Settings::getInstance()->get(Settings::SchedulerCost);
-                        auto scheduler
-                            = Component::GetNew<Scheduling::Scheduler>(proc, cost, m_context);
-
-                        co_yield (*scheduler)(schedulable);
+                        co_yield call(results[i], exprs[i]);
                     }
                 }
 
-                // Then there might be 1 remaining expression that will go into SCC.
-                if(specials > 0)
+                if(maybeSccExprIdx.has_value())
                 {
-                    int unscheduled = 0;
-                    for(int i = 0; i < exprs.size(); i++)
-                    {
-                        if(!done[i])
-                        {
-                            unscheduled++;
-                            schedulerLocked = true;
-                            co_yield Instruction::Lock(Scheduling::Dependency::SCC,
-                                                       "Expression temporary in special register");
-                            co_yield call(results[i], exprs[i]);
-                        }
-                    }
-
-                    AssertFatal(unscheduled == specials && specials <= 1,
-                                "Only one special purpose register should have remained.",
-                                ShowValue(unscheduled),
-                                ShowValue(specials));
+                    auto sccExprIdx = maybeSccExprIdx.value();
+                    sprStores--;
+                    schedulerLocked = true;
+                    co_yield Instruction::Lock(Scheduling::Dependency::SCC,
+                                               "Expression temporary in special register (SCC)");
+                    co_yield call(results[sccExprIdx], exprs[sccExprIdx]);
                 }
+
+                AssertFatal(0 == sprStores, "There are unscheduled sub-expressions.", sprStores);
             }
 
             /*
@@ -516,6 +564,9 @@ namespace rocRoller
                     co_yield generateOp<T>(
                         dest->element({i}), results[0]->element({i}), results[1]->element({0}));
                 }
+
+                if(schedulerLocked)
+                    co_yield Instruction::Unlock("Expression temporary in special register");
             }
 
             template <typename T>
@@ -634,6 +685,9 @@ namespace rocRoller
 
                 //If dest, results have multiple elements, handled inside generateOp
                 co_yield generateOp<Operation>(dest, results[0], results[1], results[2]);
+
+                if(schedulerLocked)
+                    co_yield Instruction::Unlock("Expression temporary in special register");
             }
 
             Generator<Instruction> operator()(Register::ValuePtr& dest, Conditional const& expr)
@@ -670,6 +724,9 @@ namespace rocRoller
                     co_yield generateOp<Conditional>(
                         dest->element({k}), cond->element({k}), lhsVal, rhsVal, expr);
                 }
+
+                if(schedulerLocked)
+                    co_yield Instruction::Unlock("Expression temporary in special register");
             }
 
             template <CUnary Operation>

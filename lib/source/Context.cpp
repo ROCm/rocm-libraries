@@ -222,6 +222,50 @@ namespace rocRoller
         }
     }
 
+    Register::ValuePtr Context::getTTMP7()
+    {
+        return std::make_shared<Register::Value>(
+            shared_from_this(), Register::Type::TTMP7, DataType::UInt32, 1);
+    }
+
+    Register::ValuePtr Context::getTTMP9()
+    {
+        return std::make_shared<Register::Value>(
+            shared_from_this(), Register::Type::TTMP9, DataType::UInt32, 1);
+    }
+
+    Register::ValuePtr Context::getSpecial(Register::Type t)
+    {
+        using Register::Type;
+
+        switch(t)
+        {
+        case Type::M0:
+            return getM0();
+        case Type::SCC:
+            return getSCC();
+        case Type::VCC:
+            return getVCC();
+        case Type::VCC_LO:
+            return getVCC_LO();
+        case Type::VCC_HI:
+            return getVCC_HI();
+        case Type::EXEC:
+        case Type::EXEC_LO:
+        case Type::EXEC_HI:
+            return getExec();
+        case Type::TTMP7:
+            return getTTMP7();
+        case Type::TTMP9:
+            return getTTMP9();
+
+        default:
+            break;
+        }
+
+        Throw<FatalError>("Register must be Special");
+    }
+
     std::ostream& operator<<(std::ostream& stream, ContextPtr const& ctx)
     {
         return stream << "Context " << ctx.get();
