@@ -128,13 +128,11 @@ const rocshmem_team_t ROCSHMEM_TEAM_INVALID = nullptr;
 /**
  * @brief  Data structure defining the unqiueId
  */
-constexpr int ROCSHMEM_HOSTNAME_LEN = 20;
-struct rocshmem_uniqueid_t {
-  uint64_t random;
-  char hostname[ROCSHMEM_HOSTNAME_LEN];
-  uint32_t pid;
-};
-typedef struct rocshmem_uniqueid_t rocshmem_unique_id_t;
+
+
+/// Unique ID for a process. This is a ROCSHMEM_UNIQUE_ID_BYTES byte array that uniquely identifies a process.
+#define ROCSHMEM_UNIQUE_ID_BYTES 128
+using rocshmem_uniqueid_t = std::array<uint8_t, ROCSHMEM_UNIQUE_ID_BYTES>;
 
 /**
  * @brief Data structure used for attribute based 

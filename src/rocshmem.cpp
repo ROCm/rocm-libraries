@@ -49,6 +49,7 @@
 #include "team.hpp"
 #include "templates_host.hpp"
 #include "util.hpp"
+#include "bootstrap/bootstrap.hpp"
 
 #include <unistd.h>
 
@@ -102,7 +103,7 @@ rocshmem_ctx_t ROCSHMEM_HOST_CTX_DEFAULT;
 
 [[maybe_unused]] __host__ int rocshmem_init_attr(unsigned int flags,
 						 rocshmem_init_attr_t *attr) {
-  MPI_Comm comm = MPI_COMM_WORLD;
+  MPI_Comm comm = MPI_COMM_NULL;
 
   if ((attr == nullptr) || 
       ((flags != ROCSHMEM_INIT_WITH_UNIQUEID) &&
@@ -115,22 +116,69 @@ rocshmem_ctx_t ROCSHMEM_HOST_CTX_DEFAULT;
 
   if (flags == ROCSHMEM_INIT_WITH_MPI_COMM) {
     comm = *(static_cast<MPI_Comm*>(attr->mpi_comm));
+    library_init(comm);
+    return ROCSHMEM_SUCCESS;
   }
 
-  // As of right now, we require initialization through the MPI library.
-  library_init(comm);
-
-  // The unique Id can be used to verify that the processes participating matches
-  // (i.e. they all need to have the same unique Id, as well as the number of ranks.
   if (flags == ROCSHMEM_INIT_WITH_UNIQUEID) {
-    int worldsize = backend->getNumPEs();
-    if (worldsize != attr->nranks) {
-      fprintf(stderr, "ROCSHMEM_ERROR: %s in file '%s' in line %d\n",
-              "Call 'rocshmem_init_attr: mismatch between world-team size and "
-	      "attribute value'",  __FILE__, __LINE__);
-      // This is a fatal error, a fundamental mismatch between what was requested
-      // and what we have.
-      abort();
+    int initialized;
+    int world_size = -1;
+    MPI_Initialized(&initialized);
+
+    if (!initialized) {
+      // This is an Open MPI specific solution to retrieve the number of
+      // processes that have been started, value can be checked before MPI_Init
+      char *value = getenv("OMPI_COMM_WORLD_SIZE");
+      if (value != NULL) {
+        world_size = atoi(value);
+      }
+      if (world_size != attr->nranks) {
+        // This solution will require MPI_Sessions. This is planned for the
+        // future, but is not supported in the current version.
+        fprintf (stderr, "Unsupported configuration to initialize rocSHMEM. Please "
+                 "initialize the MPI library using MPI_Init first, if you want to "
+                 "initialize rocSHMEM with a subset of the processes\n");
+        abort();
+      }
+    } else {
+      MPI_Comm_size (MPI_COMM_WORLD, &world_size);
+    }
+
+    if (world_size == attr->nranks) {
+      library_init(MPI_COMM_WORLD);
+    } else {
+      MPI_Group world_group;
+      int world_rank;
+
+      MPI_Comm_rank (MPI_COMM_WORLD, &world_rank);
+      MPI_Comm_group (MPI_COMM_WORLD, &world_group);
+
+      TcpBootstrap bootstr(attr->rank, attr->nranks);
+
+      int timeout = 5;
+      char *value;
+      value = getenv("ROCSHMEM_BOOTSTRAP_TIMEOUT");
+      if (value != nullptr) {
+	timeout = atoi(value);
+      }
+
+      bootstr.initialize(attr->uid, timeout);
+      int *inc_ranks = new int[attr->nranks];
+      inc_ranks[attr->rank] = world_rank;
+
+      bootstr.allGather (inc_ranks, sizeof(int));
+
+      MPI_Group sub_group;
+      MPI_Comm sub_comm;
+      MPI_Group_incl (world_group, attr->nranks, inc_ranks, &sub_group);
+      MPI_Comm_create_group (MPI_COMM_WORLD, sub_group, 1234, &sub_comm);
+
+      library_init(sub_comm);
+
+      MPI_Group_free (&sub_group);
+      MPI_Group_free (&world_group);
+      MPI_Comm_free (&sub_comm);
+      delete[] inc_ranks;
     }
   }
 
@@ -158,6 +206,7 @@ rocshmem_ctx_t ROCSHMEM_HOST_CTX_DEFAULT;
 // Note: this function will be called before rocshmem_init_*, so one
 // cannot assume that a backend is already set
 [[maybe_unused]] __host__ int rocshmem_get_uniqueid(rocshmem_uniqueid_t *uid) {
+  rocshmem_uniqueid_t tuid;
   if (uid == nullptr) {
       fprintf(stderr, "ROCSHMEM_ERROR: %s in file '%s' in line %d\n",
               "Call 'rocshmem_get_uniqueid: invalid input argument'",
@@ -165,21 +214,8 @@ rocshmem_ctx_t ROCSHMEM_HOST_CTX_DEFAULT;
       return ROCSHMEM_ERROR;
   }
 
-  std::random_device dev;
-  std::mt19937_64 rng(dev());
-  std::uniform_int_distribution<uint64_t> dist(0, std::numeric_limits<uint64_t>::max());
-
-  char hostname[HOST_NAME_MAX+1];
-  if (0 != gethostname(hostname, HOST_NAME_MAX)) {
-      fprintf(stderr, "ROCSHMEM_ERROR: %s in file '%s' in line %d\n",
-              "Call 'rocshmem_get_uniqueid: could not get hostname'",
-	      __FILE__, __LINE__);
-      return ROCSHMEM_ERROR;
-  }
-
-  uid->random = dist(rng);
-  std::memcpy(uid->hostname, hostname, ROCSHMEM_HOSTNAME_LEN);
-  uid->pid = static_cast<uint32_t>(getpid());
+  tuid = TcpBootstrap::createUniqueId();
+  *uid = tuid;
 
   return ROCSHMEM_SUCCESS;
 }
