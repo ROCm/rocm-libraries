@@ -116,9 +116,6 @@ namespace TensileLite
                 return std::shared_ptr<MySolution>();
             }
             auto       solution = solutions.at(index);
-            const bool streamK  = Debug::Instance().useExperimentalSelection() >= 1;
-            if(solution->isStreamK() && !streamK)
-                return std::shared_ptr<MySolution>();
 
             if(solution->requiredHostWorkspaceSizePerProblem == static_cast<size_t>(-1))
             {
