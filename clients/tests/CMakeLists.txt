@@ -180,7 +180,7 @@ set( rocfft-test_include_dirs
   )
 
 set( rocfft-test_link_libs
-  ${FFTW_LIBRARIES}
+  ${FFTW_LIBRARIES} OpenMP::OpenMP_CXX
   )
 
 include( ../cmake/build-gtest.cmake )
@@ -267,14 +267,13 @@ set_property( TARGET rocfft-test APPEND PROPERTY LINK_LIBRARIES ${ROCFFT_SQLITE_
 option( BUILD_CLIENTS_TESTS_OPENMP "Build tests with OpenMP" ON )
 
 if( BUILD_CLIENTS_TESTS_OPENMP )
-  if( CMAKE_CXX_COMPILER MATCHES ".*/hipcc$" )  
-    target_compile_options( rocfft-test PRIVATE -fopenmp )
-    target_link_libraries( rocfft-test PRIVATE -fopenmp -L${HIP_CLANG_ROOT}/lib -Wl,-rpath=${HIP_CLANG_ROOT}/lib )
+  find_package(OpenMP REQUIRED)
+  if( CMAKE_CXX_COMPILER MATCHES ".*/hipcc$" )
+    target_link_libraries( rocfft-test PRIVATE OpenMP::OpenMP_CXX -L${HIP_CLANG_ROOT}/lib -Wl,-rpath=${HIP_CLANG_ROOT}/lib )
     target_include_directories( rocfft-test PRIVATE ${HIP_CLANG_ROOT}/include )
   else()
     if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-      target_compile_options( rocfft-test PRIVATE -fopenmp=libomp )
-      target_link_options( rocfft-test PRIVATE -fopenmp=libomp )
+      target_link_libraries( rocfft-test PRIVATE OpenMP::OpenMP_CXX )
     endif()
   endif()
 endif()
@@ -333,7 +332,6 @@ if( ROCFFT_MPI_ENABLE )
     if( BUILD_FFTW )
       add_dependencies( ${worker} fftw_double fftw_single )
     endif()
-    target_compile_options( ${worker} PRIVATE -fopenmp )
     target_include_directories( ${worker}
       PRIVATE
       ${CMAKE_BINARY_DIR}/include
@@ -344,8 +342,8 @@ if( ROCFFT_MPI_ENABLE )
     target_compile_options( ${worker} PRIVATE ${WARNING_FLAGS} )
 
   if ( ROCFFT_CRAY_MPI_ENABLE )
-      target_link_libraries( ${worker}
-      -fopenmp
+    target_link_libraries( ${worker}
+      OpenMP::OpenMP_CXX 
       hip::hiprand
       hip::device
       MPI::MPI_CXX
@@ -358,7 +356,7 @@ if( ROCFFT_MPI_ENABLE )
 	${MPI_LIBDIR}/../../../../gtl/lib )
     else()
     target_link_libraries( ${worker}
-      -fopenmp
+      OpenMP::OpenMP_CXX 
       hip::hiprand
       hip::device
       MPI::MPI_CXX
