@@ -3,11 +3,14 @@
 Documentation for hipSPARSE is available at
 [https://rocm.docs.amd.com/projects/hipSPARSE/en/latest/](https://rocm.docs.amd.com/projects/hipSPARSE/en/latest/).
 
-## (Unreleased) hipSPARSE 3.3.0
+## (Unreleased) hipSPARSE 3.4.0
+
+## hipSPARSE 3.3.0 for ROCm 6.5.0
 
 ### Added
 
-Add the `int8`, `int32`, and `float16` data types to `hipDataTypeToHCCDataType` so that sparse matrix descriptors can be used with them.
+* Add the `int8`, `int32`, and `float16` data types to `hipDataTypeToHCCDataType` so that sparse matrix descriptors can be used with them.
+* Add `int8` precision to `hipsparseCsr2cscEx2` routine.
 
 ### Changed
 
