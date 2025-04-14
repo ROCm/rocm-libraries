@@ -5,7 +5,7 @@
 .. _lapackfunc:
 
 ***************************
-hipSOLVER LAPACK Functions
+hipSOLVER LAPACK functions
 ***************************
 
 LAPACK routines solve complex Numerical Linear Algebra problems. These functions are organized

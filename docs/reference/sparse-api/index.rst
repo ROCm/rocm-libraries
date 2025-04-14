@@ -5,7 +5,7 @@
 .. _library_sparse:
 
 ********************************************************************
-hipSOLVER compatibility API - Sparse Matrices
+hipSOLVER compatibility API: sparse matrices
 ********************************************************************
 
 This document provides the method signatures for the wrapper functions that are currently implemented in hipSOLVER.

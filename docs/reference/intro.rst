@@ -4,9 +4,9 @@
 
 .. _api-intro:
 
-*******************************
-Introduction to hipSOLVER API
-*******************************
+*********************************
+Introduction to the hipSOLVER API
+*********************************
 
 .. note::
     The hipSOLVER library remains in active development. New features are being continuously added, with new functionality documented at each release of the ROCm platform.
