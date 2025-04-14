@@ -3,7 +3,12 @@
 Documentation for rocSPARSE is available at
 [https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/](https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/).
 
-## (Unreleased) rocSPARSE 3.5.0
+## (Unreleased) rocSPARSE 3.6.0
+
+### Added
+* Adds SpGEAM generic routine for computing sparse matrix addition in CSR format
+
+## rocSPARSE 3.5.0 for ROCm 6.5.0
 
 ### Added
 * Adds half float mixed precision to `rocsparse_spvv` where X and Y use float16 and result and the compute type use float
@@ -28,6 +33,7 @@ Documentation for rocSPARSE is available at
 * Fixed a memory access fault in the `rocsparse_Xbsrilu0` routines.
 * Fixed failures that could occur in `rocsparse_Xbsrsm_solve` or `rocsparse_spsm` with BSR format when using host pointer mode.
 * Fixed ASAN compilation failures
+* Fixed failure that occurred when using const descriptor `rocsparse_create_const_csr_descr` with the generic routine `rocsparse_sparse_to_sparse`. Issue was not observed when using non-const descriptor `rocsparse_create_csr_descr` with `rocsparse_sparse_to_sparse`.
 
 ### Upcoming changes
 
