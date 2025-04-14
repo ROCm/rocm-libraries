@@ -26,10 +26,6 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
-set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
-# set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
-
 if(DEFINED Python_EXECUTABLE AND Python_EXECUTABLE)
     message(STATUS "Manually set Python_EXECUTABLE to ${Python_EXECUTABLE}")
 endif()
@@ -75,3 +71,4 @@ nanobind_add_module(rocisa NOMINSIZE NB_SUPPRESS_WARNINGS
                         ${ROCISAINST_SOURCE}
                         ${ROCISAPASS_SOURCE})
 target_include_directories(rocisa PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/rocisa/include)
+set_target_properties(rocisa PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
