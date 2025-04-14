@@ -83,7 +83,7 @@ def matrixInstructionToMIParameters(
 
     result["WavefrontSize"] = wavefrontSize
     if workGroup:
-      # NOTE: Typically, the WorkGroup is set to the default [16, 16, 1] for a 
+      # NOTE: Typically, the WorkGroup is set to the default [16, 16, 1] for a
       # length-9 matrix instruction. However, some custom kernel solutions used
       # during benchmarking don't have WorkGroup set at all.
       result["WorkGroup"] = [wg0, waves*wavefrontSize//wg0, workGroup[2]]
@@ -133,7 +133,6 @@ def matrixInstructionToMIParameters(
     result['MIInputPerThreadA'] = result['MIInputPerThread'] if not sparseA else result['MIInputPerThread'] // 2
     result['MIInputPerThreadB'] = result['MIInputPerThread'] if not sparseB else result['MIInputPerThread'] // 2
     result['MIInputPerThreadMetadata'] = result['MIInputPerThread'] if not isSparse else result['MIInputPerThread'] // 8
-    result['Sparse'] = isSparse
 
     print2(f">> MI Parameters: {pprint.pformat(result)}")
     return result
@@ -288,7 +287,7 @@ def validateMIParameters(
         miInputPerThreadB = solution["MIInputPerThreadB"]
         sparseB = False if not isSparse else True if isSparse == 2 else False
         assert miInputPerThreadB == miInputPerThread if not sparseB else miInputPerThread // 2, elineno()
-    
+
     if "MIInputPerThreadMetadata" in solution:
         miInutPerThreadMeta = solution["MIInputPerThreadMetadata"]
         assert miInutPerThreadMeta == miInputPerThread if not isSparse else miInputPerThread // 8, elineno()
