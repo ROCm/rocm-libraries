@@ -103,15 +103,6 @@ if(NOT ROCM_FOUND)
   find_package(ROCM 0.7.3 REQUIRED CONFIG PATHS ${PROJECT_EXTERN_DIR} NO_DEFAULT_PATH)
 endif()
 
-# Restore user global state
-set(CMAKE_CXX_FLAGS ${USER_CXX_FLAGS})
-if(DEFINED USER_BUILD_SHARED_LIBS)
-  set(BUILD_SHARED_LIBS ${USER_BUILD_SHARED_LIBS})
-else()
-  unset(BUILD_SHARED_LIBS CACHE )
-endif()
-set(ROCM_WARN_TOOLCHAIN_VAR ${USER_ROCM_WARN_TOOLCHAIN_VAR} CACHE BOOL "")
-
 include(ROCMSetupVersion)
 include(ROCMCreatePackage)
 include(ROCMInstallTargets)
@@ -174,3 +165,12 @@ if(BUILD_BENCHMARK)
     FetchContent_MakeAvailable(googlebenchmark)
   endif()
 endif()
+
+# Restore user global state
+set(CMAKE_CXX_FLAGS ${USER_CXX_FLAGS})
+if(DEFINED USER_BUILD_SHARED_LIBS)
+  set(BUILD_SHARED_LIBS ${USER_BUILD_SHARED_LIBS})
+else()
+  unset(BUILD_SHARED_LIBS CACHE )
+endif()
+set(ROCM_WARN_TOOLCHAIN_VAR ${USER_ROCM_WARN_TOOLCHAIN_VAR} CACHE BOOL "")
