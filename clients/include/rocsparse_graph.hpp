@@ -303,6 +303,7 @@ namespace testing
     TESTING_TEMPLATE(spsm)
     TESTING_TEMPLATE(spmm)
     TESTING_TEMPLATE(spgemm)
+    TESTING_TEMPLATE(spgeam)
     TESTING_TEMPLATE(sddmm)
     TESTING_TEMPLATE(sddmm_buffer_size)
     TESTING_TEMPLATE(sddmm_preprocess)

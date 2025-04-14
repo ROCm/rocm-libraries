@@ -191,6 +191,13 @@ const char* rocsparse_spgemm_alg_name(rocsparse_spgemm_alg value);
 /// @param[in] value value of the enumeration.
 /// @return The litteral name of the enumeration.
 ///
+const char* rocsparse_spgeam_alg_name(rocsparse_spgeam_alg value);
+
+///
+/// @brief Get the litteral name of the enumeration.
+/// @param[in] value value of the enumeration.
+/// @return The litteral name of the enumeration.
+///
 const char* rocsparse_sparse_to_dense_alg_name(rocsparse_sparse_to_dense_alg value);
 
 ///
@@ -442,6 +449,16 @@ inline const char* rocsparse_enum_name(rocsparse_spmm_alg value)
 inline const char* rocsparse_enum_name(rocsparse_spgemm_alg value)
 {
     return rocsparse_spgemm_alg_name(value);
+}
+
+///
+/// @brief Get the litteral name of the enumeration.
+/// @param[in] value value of the enumeration.
+/// @return The litteral name of the enumeration.
+///
+inline const char* rocsparse_enum_name(rocsparse_spgeam_alg value)
+{
+    return rocsparse_spgeam_alg_name(value);
 }
 
 ///

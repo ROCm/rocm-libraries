@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -182,6 +182,10 @@ set(ROCSPARSE_TEST_SOURCES
   test_spgemm_bsr.cpp
   test_spgemm_csr.cpp
   test_spgemm_reuse_csr.cpp
+  test_spgeam_csr.cpp
+  test_spgeam_reuse_csr.cpp
+  test_spgeam_csr_2.cpp
+  test_spgeam_reuse_csr_2.cpp
   test_gtsv.cpp
   test_gemvi.cpp
   test_sddmm.cpp
@@ -314,6 +318,10 @@ set(ROCSPARSE_CLIENTS_TESTINGS
 ../testings/testing_spgemm_bsr.cpp
 ../testings/testing_spgemm_csr.cpp
 ../testings/testing_spgemm_reuse_csr.cpp
+../testings/testing_spgeam_csr.cpp
+../testings/testing_spgeam_reuse_csr.cpp
+../testings/testing_spgeam_csr_2.cpp
+../testings/testing_spgeam_reuse_csr_2.cpp
 ../testings/testing_gtsv.cpp
 ../testings/testing_gemvi.cpp
 ../testings/testing_sddmm.cpp

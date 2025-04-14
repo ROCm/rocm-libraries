@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -90,6 +90,9 @@ add_rocsparse_example(example_gpsv.cpp)
 add_rocsparse_example(example_csrgeam.cpp)
 add_rocsparse_example(example_csrgemm.cpp)
 add_rocsparse_example(example_spgemm.cpp)
+add_rocsparse_example(example_spgeam.cpp)
+add_rocsparse_example(example_spgeam_2.cpp)
+add_rocsparse_example(example_spgeam_3.cpp)
 
 # Managed
 add_rocsparse_example(example_csrmv_managed.cpp)

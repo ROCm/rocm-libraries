@@ -854,8 +854,10 @@ rocsparse_status rocsparse::copy_csrgemm_info(rocsparse_csrgemm_info       dest,
         return rocsparse_status_invalid_pointer;
     }
 
-    dest->mul = src->mul;
-    dest->add = src->add;
+    dest->buffer_size    = src->buffer_size;
+    dest->is_initialized = src->is_initialized;
+    dest->mul            = src->mul;
+    dest->add            = src->add;
 
     return rocsparse_status_success;
 }

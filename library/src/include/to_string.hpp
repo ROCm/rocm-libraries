@@ -65,6 +65,10 @@ namespace rocsparse
     const char* to_string(rocsparse_sddmm_alg value_);
     const char* to_string(rocsparse_spgemm_alg value_);
     const char* to_string(rocsparse_spgemm_stage value_);
+    const char* to_string(rocsparse_spgeam_alg value_);
+    const char* to_string(rocsparse_spgeam_stage value_);
+    const char* to_string(rocsparse_spgeam_input value_);
+    const char* to_string(rocsparse_spgeam_output value_);
     const char* to_string(rocsparse_solve_policy value_);
     const char* to_string(rocsparse_analysis_policy value_);
     const char* to_string(rocsparse_format value_);

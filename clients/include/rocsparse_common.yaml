@@ -191,6 +191,10 @@ Datatypes:
       bases: [c_int ]
       attr:
         rocsparse_spgemm_alg_default: 0
+  - rocsparse_spgeam_alg:
+      bases: [c_int ]
+      attr:
+        rocsparse_spgeam_alg_default: 0
   - rocsparse_sparse_to_dense_alg:
       bases: [c_int ]
       attr:
@@ -436,6 +440,9 @@ All rocsparse_spmm_alg: &all_rocsparse_spmm_alg
 All rocsparse_spgemm_alg: &all_rocsparse_spgemm_alg
         [rocsparse_spgemm_alg_default]
 
+All rocsparse_spgeam_alg: &all_rocsparse_spgeam_alg
+        [rocsparse_spgeam_alg_default]
+
 All rocsparse_sparse_to_dense_alg: &all_rocsparse_sparse_to_dense_alg
         [rocsparse_sparse_to_dense_alg_default]
 
@@ -521,6 +528,7 @@ Arguments:
   - spsm_alg: rocsparse_spsm_alg
   - spmm_alg: rocsparse_spmm_alg
   - spgemm_alg: rocsparse_spgemm_alg
+  - spgeam_alg: rocsparse_spgeam_alg
   - sparse_to_dense_alg: rocsparse_sparse_to_dense_alg
   - dense_to_sparse_alg: rocsparse_dense_to_sparse_alg
   - gtsv_interleaved_alg: rocsparse_gtsv_interleaved_alg
@@ -652,6 +660,7 @@ Defaults:
   spsm_alg: rocsparse_spsm_alg_default
   spmm_alg: rocsparse_spmm_alg_default
   spgemm_alg: rocsparse_spgemm_alg_default
+  spgeam_alg: rocsparse_spgeam_alg_default
   sparse_to_dense_alg: rocsparse_sparse_to_dense_alg_default
   dense_to_sparse_alg: rocsparse_dense_to_sparse_alg_default
   gtsv_interleaved_alg: rocsparse_gtsv_interleaved_alg_default

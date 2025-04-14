@@ -66,4 +66,16 @@ namespace rocsparse
                                     const T*         scalar_device_host,
                                     T*               array,
                                     rocsparse_order  order);
+
+    template <typename I, typename J>
+    rocsparse_status copy(rocsparse_handle     handle,
+                          int64_t              length,
+                          const I*             in,
+                          J*                   out,
+                          rocsparse_index_base idx_base_in,
+                          rocsparse_index_base idx_base_out);
+
+    template <typename T>
+    rocsparse_status copy_and_scale(
+        rocsparse_handle handle, int64_t length, const T* in, T* out, const T* scalar_device_host);
 }

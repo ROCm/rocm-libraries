@@ -25,7 +25,6 @@
 
 namespace rocsparse
 {
-
     template <uint32_t BLOCKSIZE,
               uint32_t WF_SIZE,
               uint32_t LOOPS,

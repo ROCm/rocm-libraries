@@ -289,6 +289,26 @@ rocsparse_destroy_extract_descr
 
 .. doxygenfunction:: rocsparse_destroy_extract_descr
 
+rocsparse_create_spgeam_descr
+-----------------------------
+
+.. doxygenfunction:: rocsparse_create_spgeam_descr
+
+rocsparse_destroy_spgeam_descr
+------------------------------
+
+.. doxygenfunction:: rocsparse_destroy_spgeam_descr
+
+rocsparse_spgeam_set_input
+--------------------------
+
+.. doxygenfunction:: rocsparse_spgeam_set_input
+
+rocsparse_spgeam_get_output
+---------------------------
+
+.. doxygenfunction:: rocsparse_spgeam_get_output
+
 rocsparse_coo_get
 -----------------
 

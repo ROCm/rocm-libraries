@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2022 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -425,17 +425,12 @@ constexpr double bsrgeam_gbyte_count(rocsparse_int Mb,
     return (size_A + size_B + size_C) / 1e9;
 }
 
-template <typename T>
-constexpr double csrgeam_gbyte_count(rocsparse_int M,
-                                     rocsparse_int nnz_A,
-                                     rocsparse_int nnz_B,
-                                     rocsparse_int nnz_C,
-                                     const T*      alpha,
-                                     const T*      beta)
+template <typename T, typename I = rocsparse_int, typename J = rocsparse_int>
+constexpr double csrgeam_gbyte_count(J M, I nnz_A, I nnz_B, I nnz_C, const T* alpha, const T* beta)
 {
-    double size_A = alpha ? (M + 1.0 + nnz_A) * sizeof(rocsparse_int) + nnz_A * sizeof(T) : 0.0;
-    double size_B = beta ? (M + 1.0 + nnz_B) * sizeof(rocsparse_int) + nnz_B * sizeof(T) : 0.0;
-    double size_C = (M + 1.0 + nnz_C) * sizeof(rocsparse_int) + nnz_C * sizeof(T);
+    double size_A = alpha ? (M + 1.0) * sizeof(I) + nnz_A * sizeof(J) + nnz_A * sizeof(T) : 0.0;
+    double size_B = beta ? (M + 1.0) * sizeof(I) + nnz_B * sizeof(J) + nnz_B * sizeof(T) : 0.0;
+    double size_C = (M + 1.0) * sizeof(I) + nnz_C * sizeof(J) + nnz_C * sizeof(T);
 
     return (size_A + size_B + size_C) / 1e9;
 }

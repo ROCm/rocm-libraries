@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -225,6 +225,14 @@ typedef struct _rocsparse_sparse_to_sparse_descr* rocsparse_sparse_to_sparse_des
  * end using rocsparse_destroy_extract_descr().
  */
 typedef struct _rocsparse_extract_descr* rocsparse_extract_descr;
+
+/*! \ingroup types_module
+ * \brief rocsparse_spgeam_descr is a structure holding the rocsparse spgeam
+ * descr data. It must be initialized using
+ * the rocsparse_create_spgeam_descr() routine. It should be destroyed at the
+ * end using rocsparse_destroy_spgeam_descr().
+ */
+typedef struct _rocsparse_spgeam_descr* rocsparse_spgeam_descr;
 
 #ifdef __cplusplus
 extern "C" {
@@ -888,6 +896,60 @@ typedef enum rocsparse_spgemm_alg_
 {
     rocsparse_spgemm_alg_default = 0 /**< Default SpGEMM algorithm for the given format. */
 } rocsparse_spgemm_alg;
+
+/*! \ingroup types_module
+ *  \brief List of SpGEAM stages.
+ *
+ *  \details
+ *  This is a list of possible stages during SpGEAM computation. Typical order is
+ *  rocsparse_spgeam_stage_buffer_size, rocsparse_spgeam_stage_analysis, rocsparse_spgeam_stage_compute.
+ */
+typedef enum rocsparse_spgeam_stage_
+{
+    rocsparse_spgeam_stage_analysis = 1, /**< Computes number of non-zero entries. */
+    rocsparse_spgeam_stage_compute  = 2, /**< Performs the actual SpGEAM computation. */
+    rocsparse_spgeam_stage_symbolic
+    = 3, /**< Performs only the symbolic SpGEAM computation to fill the column indices array. */
+    rocsparse_spgeam_stage_numeric
+    = 4 /**< Performs only the numeric SpGEAM computation to fill the values array. */
+} rocsparse_spgeam_stage;
+
+/*! \ingroup types_module
+ *  \brief List of inputs to SpGEAM descriptor.
+ *
+ *  \details
+ *  This is a list of possible inputs to the SpGEAM descriptor.
+ */
+typedef enum rocsparse_spgeam_input_
+{
+    rocsparse_spgeam_input_alg, /**< Select algorithm for input on SpGEAM descriptor. */
+    rocsparse_spgeam_input_compute_type, /**< Select compute type for input on SpGEAM descriptor. */
+    rocsparse_spgeam_input_trans_A, /**< Select A matrix transpose operation for input on SpGEAM descriptor. */
+    rocsparse_spgeam_input_trans_B /**< Select B matrix transpose operation for input on SpGEAM descriptor. */
+} rocsparse_spgeam_input;
+
+/*! \ingroup types_module
+ *  \brief List of outputs to SpGEAM descriptor.
+ *
+ *  \details
+ *  This is a list of possible outputs to the SpGEAM descriptor.
+ */
+typedef enum rocsparse_spgeam_output_
+{
+    rocsparse_spgeam_output_nnz /**< Select nnz count for output from SpGEAM descriptor. */
+} rocsparse_spgeam_output;
+
+/*! \ingroup types_module
+ *  \brief List of SpGEAM algorithms.
+ *
+ *  \details
+ *  This is a list of supported \ref rocsparse_spgeam_alg types that are used to perform
+ *  sparse matrix sparse matrix product.
+ */
+typedef enum rocsparse_spgeam_alg_
+{
+    rocsparse_spgeam_alg_default = 0 /**< Default SpGEAM algorithm for the given format. */
+} rocsparse_spgeam_alg;
 
 /*! \ingroup types_module
  *  \brief List of gpsv algorithms.

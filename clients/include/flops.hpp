@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2019-2022 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -272,9 +272,8 @@ constexpr double bsrgeam_gflop_count(rocsparse_int block_dim,
     return flops / 1e9;
 }
 
-template <typename T>
-constexpr double csrgeam_gflop_count(
-    rocsparse_int nnz_A, rocsparse_int nnz_B, rocsparse_int nnz_C, const T* alpha, const T* beta)
+template <typename T, typename I = rocsparse_int, typename J = rocsparse_int>
+constexpr double csrgeam_gflop_count(I nnz_A, I nnz_B, I nnz_C, const T* alpha, const T* beta)
 {
     // Flop counter
     double flops = 0.0;

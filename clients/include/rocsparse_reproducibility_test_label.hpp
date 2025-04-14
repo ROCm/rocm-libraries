@@ -81,6 +81,7 @@ namespace rocsparse_reproducibility_utils
     TEST_LABEL_PRINT_SPECIALIZE(rocsparse_spsm_alg);
     TEST_LABEL_PRINT_SPECIALIZE(rocsparse_spmm_alg);
     TEST_LABEL_PRINT_SPECIALIZE(rocsparse_spgemm_alg);
+    TEST_LABEL_PRINT_SPECIALIZE(rocsparse_spgeam_alg);
     TEST_LABEL_PRINT_SPECIALIZE(rocsparse_sparse_to_dense_alg);
     TEST_LABEL_PRINT_SPECIALIZE(rocsparse_dense_to_sparse_alg);
     TEST_LABEL_PRINT_SPECIALIZE(rocsparse_gtsv_interleaved_alg);

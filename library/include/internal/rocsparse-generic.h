@@ -39,6 +39,7 @@
 #include "generic/rocsparse_sddmm.h"
 #include "generic/rocsparse_sparse_to_dense.h"
 #include "generic/rocsparse_sparse_to_sparse.h"
+#include "generic/rocsparse_spgeam.h"
 #include "generic/rocsparse_spgemm.h"
 #include "generic/rocsparse_spitsv.h"
 #include "generic/rocsparse_spmm.h"

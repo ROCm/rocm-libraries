@@ -139,6 +139,8 @@ DEF(rocsparse_spmm_alg,
 
 DEF(rocsparse_spgemm_alg, rocsparse_spgemm_alg_default);
 
+DEF(rocsparse_spgeam_alg, rocsparse_spgeam_alg_default);
+
 DEF(rocsparse_sparse_to_dense_alg, rocsparse_sparse_to_dense_alg_default);
 
 DEF(rocsparse_dense_to_sparse_alg, rocsparse_dense_to_sparse_alg_default);
@@ -494,6 +496,18 @@ bool rocsparse_spgemm_alg_from_name(rocsparse_spgemm_alg value, const char* name
     return false;
 }
 
+bool rocsparse_spgeam_alg_from_name(rocsparse_spgeam_alg value, const char* name)
+{
+    for(auto v : rocsparse_spgeam_alg_st::all)
+    {
+        switch(v)
+        {
+            CASE(rocsparse_spgeam_alg_default);
+        }
+    }
+    return false;
+}
+
 bool rocsparse_sparse_to_dense_alg_from_name(rocsparse_sparse_to_dense_alg value, const char* name)
 {
     for(auto v : rocsparse_sparse_to_dense_alg_st::all)
@@ -591,6 +605,7 @@ bool convert(int& v, const char* enum_type, const char* value)
     DEF(rocsparse_spsm_alg);
     DEF(rocsparse_spmm_alg);
     DEF(rocsparse_spgemm_alg);
+    DEF(rocsparse_spgeam_alg);
     DEF(rocsparse_sparse_to_dense_alg);
     DEF(rocsparse_dense_to_sparse_alg);
     DEF(rocsparse_gtsv_interleaved_alg);
@@ -635,6 +650,7 @@ bool get_size(uint64_t& v, const char* enum_type)
     DEF(rocsparse_spsm_alg);
     DEF(rocsparse_spmm_alg);
     DEF(rocsparse_spgemm_alg);
+    DEF(rocsparse_spgeam_alg);
     DEF(rocsparse_sparse_to_dense_alg);
     DEF(rocsparse_dense_to_sparse_alg);
     DEF(rocsparse_gtsv_interleaved_alg);
@@ -678,6 +694,7 @@ const char* get_name(const char* enum_type, uint64_t index)
     DEF(rocsparse_spsm_alg);
     DEF(rocsparse_spmm_alg);
     DEF(rocsparse_spgemm_alg);
+    DEF(rocsparse_spgeam_alg);
     DEF(rocsparse_sparse_to_dense_alg);
     DEF(rocsparse_dense_to_sparse_alg);
     DEF(rocsparse_gtsv_interleaved_alg);

@@ -98,6 +98,7 @@ rocsparse_arguments_config::rocsparse_arguments_config()
         this->spsm_alg             = rocsparse_spsm_alg_default;
         this->spmm_alg             = rocsparse_spmm_alg_default;
         this->spgemm_alg           = rocsparse_spgemm_alg_default;
+        this->spgeam_alg           = rocsparse_spgeam_alg_default;
         this->sparse_to_dense_alg  = rocsparse_sparse_to_dense_alg_default;
         this->dense_to_sparse_alg  = rocsparse_dense_to_sparse_alg_default;
         this->gtsv_interleaved_alg = static_cast<rocsparse_gtsv_interleaved_alg>(0);

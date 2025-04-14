@@ -186,6 +186,12 @@ inline void auto_testing_bad_arg_set_invalid(rocsparse_spgemm_alg& p)
 }
 
 template <>
+inline void auto_testing_bad_arg_set_invalid(rocsparse_spgeam_alg& p)
+{
+    p = (rocsparse_spgeam_alg)-1;
+}
+
+template <>
 inline void auto_testing_bad_arg_set_invalid(rocsparse_itilu0_alg& p)
 {
     p = (rocsparse_itilu0_alg)-1;
@@ -297,4 +303,10 @@ template <>
 inline void auto_testing_bad_arg_set_invalid(rocsparse_spgemm_stage& p)
 {
     p = (rocsparse_spgemm_stage)-1;
+}
+
+template <>
+inline void auto_testing_bad_arg_set_invalid(rocsparse_spgeam_stage& p)
+{
+    p = (rocsparse_spgeam_stage)-1;
 }

@@ -517,6 +517,8 @@ namespace rocsparse
         if(block_dim == 1)
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrgeam_template(handle,
+                                                                  rocsparse_operation_none,
+                                                                  rocsparse_operation_none,
                                                                   mb,
                                                                   nb,
                                                                   alpha_device_host,
@@ -534,7 +536,9 @@ namespace rocsparse
                                                                   descr_C,
                                                                   bsr_val_C,
                                                                   bsr_row_ptr_C,
-                                                                  bsr_col_ind_C));
+                                                                  bsr_col_ind_C,
+                                                                  nullptr,
+                                                                  nullptr));
             return rocsparse_status_success;
         }
 

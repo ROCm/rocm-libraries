@@ -288,6 +288,15 @@ const char* rocsparse_spgemm_alg_name(rocsparse_spgemm_alg value)
     RETURN_INVALID;
 }
 
+const char* rocsparse_spgeam_alg_name(rocsparse_spgeam_alg value)
+{
+    switch(value)
+    {
+        CASE(rocsparse_spgeam_alg_default);
+    }
+    RETURN_INVALID;
+}
+
 const char* rocsparse_sparse_to_dense_alg_name(rocsparse_sparse_to_dense_alg value)
 {
     switch(value)

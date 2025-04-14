@@ -71,6 +71,16 @@ rocsparse_spgemm()
 
 .. doxygenfunction:: rocsparse_spgemm
 
+rocsparse_spgeam_buffer_size()
+------------------------------
+
+.. doxygenfunction:: rocsparse_spgeam_buffer_size
+
+rocsparse_spgeam()
+------------------
+
+.. doxygenfunction:: rocsparse_spgeam
+
 rocsparse_sddmm_buffer_size()
 -----------------------------
 

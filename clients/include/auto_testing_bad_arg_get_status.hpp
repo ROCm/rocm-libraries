@@ -192,6 +192,12 @@ inline rocsparse_status auto_testing_bad_arg_get_status(rocsparse_spgemm_alg& p)
 }
 
 template <>
+inline rocsparse_status auto_testing_bad_arg_get_status(rocsparse_spgeam_alg& p)
+{
+    return rocsparse_status_invalid_value;
+}
+
+template <>
 inline rocsparse_status auto_testing_bad_arg_get_status(rocsparse_itilu0_alg& p)
 {
     return rocsparse_status_invalid_value;
@@ -301,6 +307,12 @@ inline rocsparse_status auto_testing_bad_arg_get_status(rocsparse_spmm_stage& p)
 
 template <>
 inline rocsparse_status auto_testing_bad_arg_get_status(rocsparse_spgemm_stage& p)
+{
+    return rocsparse_status_invalid_value;
+}
+
+template <>
+inline rocsparse_status auto_testing_bad_arg_get_status(rocsparse_spgeam_stage& p)
 {
     return rocsparse_status_invalid_value;
 }

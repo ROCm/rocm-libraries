@@ -262,6 +262,7 @@ Tests:
     - csrgemm: *extra_shared
     - spgemm_bsr: *extra_shared_mixed_index
     - spgemm_csr: *extra_shared_mixed_index
+    - spgeam_csr: *extra_shared_mixed_index
 
 ###########
 # Precond #

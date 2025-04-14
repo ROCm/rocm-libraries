@@ -78,6 +78,8 @@ ROCSPARSE_TEST_NAME_SUFFIX_GENERATOR_PRINT_SPECIALIZE(rocsparse_spsm_alg, rocspa
 ROCSPARSE_TEST_NAME_SUFFIX_GENERATOR_PRINT_SPECIALIZE(rocsparse_spmm_alg, rocsparse_spmmalg2string);
 ROCSPARSE_TEST_NAME_SUFFIX_GENERATOR_PRINT_SPECIALIZE(rocsparse_spgemm_alg,
                                                       rocsparse_spgemmalg2string);
+ROCSPARSE_TEST_NAME_SUFFIX_GENERATOR_PRINT_SPECIALIZE(rocsparse_spgeam_alg,
+                                                      rocsparse_spgeamalg2string);
 ROCSPARSE_TEST_NAME_SUFFIX_GENERATOR_PRINT_SPECIALIZE(rocsparse_sparse_to_dense_alg,
                                                       rocsparse_sparsetodensealg2string);
 ROCSPARSE_TEST_NAME_SUFFIX_GENERATOR_PRINT_SPECIALIZE(rocsparse_dense_to_sparse_alg,

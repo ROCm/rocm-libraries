@@ -4787,6 +4787,142 @@ catch(...)
 }
 // LCOV_EXCL_STOP
 
+rocsparse_status rocsparse_create_spgeam_descr(rocsparse_spgeam_descr* descr)
+try
+{
+    ROCSPARSE_ROUTINE_TRACE;
+
+    ROCSPARSE_CHECKARG_POINTER(0, descr);
+
+    *descr = new _rocsparse_spgeam_descr();
+    return rocsparse_status_success;
+}
+catch(...)
+{
+    RETURN_ROCSPARSE_EXCEPTION();
+}
+
+rocsparse_status rocsparse_destroy_spgeam_descr(rocsparse_spgeam_descr descr)
+try
+{
+    ROCSPARSE_ROUTINE_TRACE;
+
+    ROCSPARSE_CHECKARG_POINTER(0, descr);
+
+    // Clean up row pointer array
+    if(descr->csr_row_ptr_C != nullptr)
+    {
+        RETURN_IF_HIP_ERROR(rocsparse_hipFree(descr->csr_row_ptr_C));
+    }
+
+    // Clean up rocprim buffer
+    if(descr->rocprim_buffer != nullptr && descr->rocprim_alloc)
+    {
+        RETURN_IF_HIP_ERROR(rocsparse_hipFree(descr->rocprim_buffer));
+    }
+
+    delete descr;
+    return rocsparse_status_success;
+}
+catch(...)
+{
+    RETURN_ROCSPARSE_EXCEPTION();
+}
+
+/********************************************************************************
+ * \brief rocsparse_spgeam_set_input gets the input on the SpGEAM descriptor.
+ *******************************************************************************/
+rocsparse_status rocsparse_spgeam_set_input(rocsparse_handle       handle,
+                                            rocsparse_spgeam_descr descr,
+                                            rocsparse_spgeam_input input,
+                                            const void*            data,
+                                            size_t                 data_size)
+try
+{
+    ROCSPARSE_ROUTINE_TRACE;
+
+    ROCSPARSE_CHECKARG_HANDLE(0, handle);
+    ROCSPARSE_CHECKARG_POINTER(1, descr);
+    ROCSPARSE_CHECKARG_ENUM(2, input);
+    ROCSPARSE_CHECKARG_POINTER(3, data);
+
+    switch(input)
+    {
+    case rocsparse_spgeam_input_alg:
+    {
+        ROCSPARSE_CHECKARG(
+            4, data_size, data_size != sizeof(rocsparse_spgeam_alg), rocsparse_status_invalid_size);
+        const rocsparse_spgeam_alg alg = *reinterpret_cast<const rocsparse_spgeam_alg*>(data);
+        descr->alg                     = alg;
+        return rocsparse_status_success;
+    }
+    case rocsparse_spgeam_input_compute_type:
+    {
+        ROCSPARSE_CHECKARG(
+            4, data_size, data_size != sizeof(rocsparse_datatype), rocsparse_status_invalid_size);
+        const rocsparse_datatype compute_type = *reinterpret_cast<const rocsparse_datatype*>(data);
+        descr->compute_type                   = compute_type;
+        return rocsparse_status_success;
+    }
+    case rocsparse_spgeam_input_trans_A:
+    {
+        ROCSPARSE_CHECKARG(
+            4, data_size, data_size != sizeof(rocsparse_operation), rocsparse_status_invalid_size);
+        const rocsparse_operation trans_A = *reinterpret_cast<const rocsparse_operation*>(data);
+        descr->trans_A                    = trans_A;
+        return rocsparse_status_success;
+    }
+    case rocsparse_spgeam_input_trans_B:
+    {
+        ROCSPARSE_CHECKARG(
+            4, data_size, data_size != sizeof(rocsparse_operation), rocsparse_status_invalid_size);
+        const rocsparse_operation trans_B = *reinterpret_cast<const rocsparse_operation*>(data);
+        descr->trans_B                    = trans_B;
+        return rocsparse_status_success;
+    }
+    }
+    return rocsparse_status_invalid_value;
+}
+catch(...)
+{
+    RETURN_ROCSPARSE_EXCEPTION();
+}
+
+/********************************************************************************
+ * \brief rocsparse_spgeam_get_output gets the output from the SpGEAM descriptor.
+ *******************************************************************************/
+rocsparse_status rocsparse_spgeam_get_output(rocsparse_handle        handle,
+                                             rocsparse_spgeam_descr  descr,
+                                             rocsparse_spgeam_output output,
+                                             void*                   data,
+                                             size_t                  data_size)
+try
+{
+    ROCSPARSE_ROUTINE_TRACE;
+
+    ROCSPARSE_CHECKARG_HANDLE(0, handle);
+    ROCSPARSE_CHECKARG_POINTER(1, descr);
+    ROCSPARSE_CHECKARG_ENUM(2, output);
+    ROCSPARSE_CHECKARG_POINTER(3, data);
+    switch(output)
+    {
+    case rocsparse_spgeam_output_nnz:
+    {
+        ROCSPARSE_CHECKARG(
+            4, data_size, data_size != sizeof(int64_t), rocsparse_status_invalid_size);
+        int64_t* nnz_C = reinterpret_cast<int64_t*>(data);
+        *nnz_C         = descr->nnz_C;
+        return rocsparse_status_success;
+    }
+    }
+
+    return rocsparse_status_invalid_value;
+}
+catch(...)
+{
+    RETURN_ROCSPARSE_EXCEPTION();
+}
+
 #ifdef __cplusplus
 }
 #endif

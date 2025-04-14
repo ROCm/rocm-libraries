@@ -538,6 +538,48 @@ const char* rocsparse::to_string(rocsparse_spgemm_stage value_)
     // LCOV_EXCL_STOP
 };
 
+const char* rocsparse::to_string(rocsparse_spgeam_alg value_)
+{
+    switch(value_)
+    {
+        CASE(rocsparse_spgeam_alg_default);
+    }
+    THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+};
+
+const char* rocsparse::to_string(rocsparse_spgeam_stage value_)
+{
+    switch(value_)
+    {
+        CASE(rocsparse_spgeam_stage_analysis);
+        CASE(rocsparse_spgeam_stage_compute);
+        CASE(rocsparse_spgeam_stage_symbolic);
+        CASE(rocsparse_spgeam_stage_numeric);
+    }
+    THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+};
+
+const char* rocsparse::to_string(rocsparse_spgeam_input value_)
+{
+    switch(value_)
+    {
+        CASE(rocsparse_spgeam_input_alg);
+        CASE(rocsparse_spgeam_input_compute_type);
+        CASE(rocsparse_spgeam_input_trans_A);
+        CASE(rocsparse_spgeam_input_trans_B);
+    }
+    THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+};
+
+const char* rocsparse::to_string(rocsparse_spgeam_output value_)
+{
+    switch(value_)
+    {
+        CASE(rocsparse_spgeam_output_nnz);
+    }
+    THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+};
+
 const char* rocsparse::to_string(rocsparse_solve_policy value_)
 {
     switch(value_)

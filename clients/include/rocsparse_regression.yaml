@@ -139,6 +139,32 @@ Tests:
   filename: [Chevron2]
 
 #################################################################################
+# SpGEAM in CSR format                                                          #
+#################################################################################
+# This algorithm uses hash tables to merge two matrix rows. It makes extensive  #
+# use of workgroup-wide atomicCAS in LDS.                                       #
+#################################################################################
+- name: extra_spgeam_csr_real
+  category: pre_checkin
+  function: spgeam_csr
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions
+  <<: *common
+  N: [13, 523]
+  alpha_beta: *alpha_beta
+  filename: [nos4]
+
+- name: extra_spgeam_csr_complex
+  category: pre_checkin
+  function: spgeam_csr
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions_complex
+  <<: *common
+  N: [21, 719]
+  alpha_beta: *alpha_beta
+  filename: [Chevron2]
+
+#################################################################################
 # csrilusv in CSR format                                                        #
 #################################################################################
 # Combination of multiple spin-looping algorithms that depend on each other.    #

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -385,6 +385,34 @@ struct _rocsparse_csrgemm_info
     bool mul{true};
     // Perform beta * D
     bool add{true};
+};
+
+/********************************************************************************
+ * \brief rocsparse_spgeam_descr is a structure holding the rocsparse spgeam
+ * descriptor. It must be initialized using rocsparse_create_spgeam_descr().
+ * It should be destroyed at the end using rocsparse_destroy_spgeam_descr().
+ *******************************************************************************/
+struct _rocsparse_spgeam_descr
+{
+    // C matrix row pointer data
+    void*               csr_row_ptr_C{};
+    int64_t             nnz_C{};
+    int64_t             m{};
+    rocsparse_indextype indextype{rocsparse_indextype_i32};
+
+    // rocprim buffer data
+    bool   rocprim_alloc{};
+    size_t rocprim_size{};
+    void*  rocprim_buffer{};
+
+    // Perform alpha * A + beta * B
+    bool alpha_mul{true};
+    bool beta_mul{true};
+
+    rocsparse_spgeam_alg alg{rocsparse_spgeam_alg_default};
+    rocsparse_datatype   compute_type{rocsparse_datatype_f32_r};
+    rocsparse_operation  trans_A{rocsparse_operation_none};
+    rocsparse_operation  trans_B{rocsparse_operation_none};
 };
 
 namespace rocsparse

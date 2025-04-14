@@ -1296,14 +1296,97 @@ rocsparse_status rocsparse_create_extract_descr(rocsparse_extract_descr*    desc
 *  \brief Sparse matrix extraction.
 *
 *  \details
-*  \p rocsparse_destroy_extract_descr destroys the descriptor of the extract algorithm.
+*  \p rocsparse_destroy_extract_descr destroys the descriptor of the \ref rocsparse_extract routine.
 *
 *  @param[in]
-*  descr        descriptor of the extract algorithm.
+*  descr        descriptor of the extract routine.
 *  \retval      rocsparse_status_success the operation completed successfully.
 */
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_destroy_extract_descr(rocsparse_extract_descr descr);
+
+/*! \ingroup aux_module
+*  \brief Sparse matrix spgeam.
+*
+*  \details
+*  \p rocsparse_create_spgeam_descr creates the descriptor of the \ref rocsparse_spgeam_buffer_size and
+*  \ref rocsparse_spgeam routines.
+
+*  @param[out]
+*  descr        pointer to the descriptor of the SpGEAM routine.
+*
+*  \retval      rocsparse_status_success the operation completed successfully.
+*  \retval      rocsparse_status_invalid_pointer \p descr pointer is invalid.
+*/
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_create_spgeam_descr(rocsparse_spgeam_descr* descr);
+
+/*! \ingroup aux_module
+*  \brief Sparse matrix spgeam.
+*
+*  \details
+*  \p rocsparse_destroy_spgeam_descr destroys the descriptor of the \ref rocsparse_spgeam_buffer_size and
+*  \ref rocsparse_spgeam routines.
+*
+*  @param[in]
+*  descr        descriptor of the spgeam routine.
+*  \retval      rocsparse_status_success the operation completed successfully.
+*/
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_destroy_spgeam_descr(rocsparse_spgeam_descr descr);
+
+/*! \ingroup aux_module
+ *  \brief Set the requested \ref rocsparse_spgeam_input data in the SpGEAM descriptor
+ *
+ *  @param[in]
+ *  handle      the pointer to the handle to the rocSPARSE library context.
+ *  @param[inout]
+ *  descr       the pointer to the SpGEAM descriptor.
+ *  @param[in]
+ *  input       \ref rocsparse_spgeam_input_alg or \ref rocsparse_spgeam_input_compute_type or
+ *              \ref rocsparse_spgeam_input_trans_A or \ref rocsparse_spgeam_input_trans_B
+ *  @param[in]
+ *  data        input data
+ *  @param[in]
+ *  data_size   input data size.
+ *
+ *  \retval rocsparse_status_success the operation completed successfully.
+ *  \retval rocsparse_status_invalid_pointer if \p descr or \p data is invalid.
+ *  \retval rocsparse_status_invalid_value if \p input is invalid.
+ *  \retval rocsparse_status_invalid_size if \p data_size is invalid.
+ */
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_spgeam_set_input(rocsparse_handle       handle,
+                                            rocsparse_spgeam_descr descr,
+                                            rocsparse_spgeam_input input,
+                                            const void*            data,
+                                            size_t                 data_size);
+
+/*! \ingroup aux_module
+ *  \brief Get the requested \ref rocsparse_spgeam_output data from the SpGEAM descriptor
+ *
+ *  @param[in]
+ *  handle      the pointer to the handle to the rocSPARSE library context.
+ *  @param[inout]
+ *  descr       the pointer to the SpGEAM descriptor.
+ *  @param[in]
+ *  output      \ref rocsparse_spgeam_output_nnz
+ *  @param[in]
+ *  data        output data
+ *  @param[in]
+ *  data_size   output data size.
+ *
+ *  \retval rocsparse_status_success the operation completed successfully.
+ *  \retval rocsparse_status_invalid_pointer if \p descr or \p data is invalid.
+ *  \retval rocsparse_status_invalid_value if \p output is invalid.
+ *  \retval rocsparse_status_invalid_size if \p data_size is invalid.
+ */
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_spgeam_get_output(rocsparse_handle        handle,
+                                             rocsparse_spgeam_descr  descr,
+                                             rocsparse_spgeam_output output,
+                                             void*                   data,
+                                             size_t                  data_size);
 
 /*! \ingroup aux_module
  *  \brief Get the fields of the sparse COO matrix descriptor

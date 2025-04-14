@@ -65,6 +65,7 @@ void rocsparse_bench::parse(int& argc, char**& argv, rocsparse_arguments_config&
     config.spsm_alg            = rocsparse_spsm_alg_default;
     config.spmm_alg            = rocsparse_spmm_alg_default;
     config.spgemm_alg          = rocsparse_spgemm_alg_default;
+    config.spgeam_alg          = rocsparse_spgeam_alg_default;
     config.sparse_to_dense_alg = rocsparse_sparse_to_dense_alg_default;
     config.dense_to_sparse_alg = rocsparse_dense_to_sparse_alg_default;
     config.precision           = 's';

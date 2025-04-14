@@ -435,6 +435,16 @@ constexpr auto rocsparse_spgemmalg2string(rocsparse_spgemm_alg alg)
     return "invalid";
 }
 
+constexpr auto rocsparse_spgeamalg2string(rocsparse_spgeam_alg alg)
+{
+    switch(alg)
+    {
+    case rocsparse_spgeam_alg_default:
+        return "default";
+    }
+    return "invalid";
+}
+
 constexpr auto rocsparse_sparsetodensealg2string(rocsparse_sparse_to_dense_alg alg)
 {
     switch(alg)

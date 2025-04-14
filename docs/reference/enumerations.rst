@@ -194,6 +194,25 @@ rocsparse_spgemm_alg
 
 .. doxygenenum:: rocsparse_spgemm_alg
 
+rocsparse_spgeam_stage
+----------------------
+
+.. doxygenenum:: rocsparse_spgeam_stage
+
+rocsparse_spgeam_alg
+--------------------
+
+.. doxygenenum:: rocsparse_spgeam_alg
+
+rocsparse_spgeam_input
+----------------------
+
+.. doxygenenum:: rocsparse_spgeam_input
+
+rocsparse_spgeam_output
+-----------------------
+
+.. doxygenenum:: rocsparse_spgeam_output
 
 rocsparse_sparse_to_dense_alg
 -----------------------------

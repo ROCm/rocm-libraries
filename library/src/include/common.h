@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -222,6 +222,33 @@ __device__ __forceinline__ float shfl(float var, int src_lane, int width = warpS
 __device__ __forceinline__ double shfl(double var, int src_lane, int width = warpSize) { return __shfl(var, src_lane, width); }
 __device__ __forceinline__ rocsparse_float_complex shfl(rocsparse_float_complex var, int src_lane, int width = warpSize) { return rocsparse_float_complex(__shfl(std::real(var), src_lane, width), __shfl(std::imag(var), src_lane, width)); }
 __device__ __forceinline__ rocsparse_double_complex shfl(rocsparse_double_complex var, int src_lane, int width = warpSize) { return rocsparse_double_complex(__shfl(std::real(var), src_lane, width), __shfl(std::imag(var), src_lane, width)); }
+
+// Count the number of bits that are set to 1 up to and including bit `lid`
+// For example, if mask = 10010111011010001111001000010101 then
+// popc<32>(mask, 0) = 1
+// popc<32>(mask, 1) = 1
+// popc<32>(mask, 2) = 1
+// popc<32>(mask, 3) = 2
+// popc<32>(mask, 4) = 2
+// popc<32>(mask, 5) = 3
+// popc<32>(mask, 6) = 4
+// popc<32>(mask, 7) = 5
+// ...
+// popc<32>(mask, 31) = 16
+// In other words this performs an inclusive scan on the bits and returns the
+// sum up to and including bit `lid`
+template<uint32_t WFSIZE>
+__device__ __forceinline__ uint32_t popc(uint64_t mask, uint32_t lid)
+{
+    if(WFSIZE == 32)
+    {
+        return __popc(mask & (0xffffffff >> (WFSIZE - 1 - lid)));
+    }
+    else
+    {
+        return __popcll(mask & (0xffffffffffffffff >> (WFSIZE - 1 - lid)));
+    }
+}
 
 template <typename T>
 __device__ __forceinline__ T atomic_min(T * ptr, T val)

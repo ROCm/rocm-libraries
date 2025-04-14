@@ -133,69 +133,6 @@ void testing_csrgeam(const Arguments& arg)
     CHECK_ROCSPARSE_ERROR(rocsparse_set_mat_index_base(descrB, baseB));
     CHECK_ROCSPARSE_ERROR(rocsparse_set_mat_index_base(descrC, baseC));
 
-    // Argument sanity check before allocating invalid memory
-    if(M <= 0 || N <= 0)
-    {
-        static const size_t safe_size = 100;
-
-        // Allocate memory on device
-        device_vector<rocsparse_int> dcsr_row_ptr_A;
-        device_vector<rocsparse_int> dcsr_col_ind_A;
-        device_vector<T>             dcsr_val_A;
-        device_vector<rocsparse_int> dcsr_row_ptr_B;
-        device_vector<rocsparse_int> dcsr_col_ind_B;
-        device_vector<T>             dcsr_val_B;
-        device_vector<rocsparse_int> dcsr_row_ptr_C;
-        device_vector<rocsparse_int> dcsr_col_ind_C;
-        device_vector<T>             dcsr_val_C;
-
-        CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
-
-        rocsparse_int nnz_C;
-
-        rocsparse_status status_1 = rocsparse_csrgeam_nnz(handle,
-                                                          M,
-                                                          N,
-                                                          descrA,
-                                                          safe_size,
-                                                          dcsr_row_ptr_A,
-                                                          dcsr_col_ind_A,
-                                                          descrB,
-                                                          safe_size,
-                                                          dcsr_row_ptr_B,
-                                                          dcsr_col_ind_B,
-                                                          descrC,
-                                                          dcsr_row_ptr_C,
-                                                          &nnz_C);
-        rocsparse_status status_2 = rocsparse_csrgeam<T>(handle,
-                                                         M,
-                                                         N,
-                                                         h_alpha,
-                                                         descrA,
-                                                         safe_size,
-                                                         dcsr_val_A,
-                                                         dcsr_row_ptr_A,
-                                                         dcsr_col_ind_A,
-                                                         h_beta,
-                                                         descrB,
-                                                         safe_size,
-                                                         dcsr_val_B,
-                                                         dcsr_row_ptr_B,
-                                                         dcsr_col_ind_B,
-                                                         descrC,
-                                                         dcsr_val_C,
-                                                         dcsr_row_ptr_C,
-                                                         dcsr_col_ind_C);
-
-        // alpha == nullptr && beta != nullptr
-        EXPECT_ROCSPARSE_STATUS(
-            status_1, (M < 0 || N < 0) ? rocsparse_status_invalid_size : rocsparse_status_success);
-        EXPECT_ROCSPARSE_STATUS(
-            status_2, (M < 0 || N < 0) ? rocsparse_status_invalid_size : rocsparse_status_success);
-
-        return;
-    }
-
     // Allocate host memory for matrices
     host_vector<rocsparse_int> hcsr_row_ptr_A;
     host_vector<rocsparse_int> hcsr_col_ind_A;
@@ -297,19 +234,19 @@ void testing_csrgeam(const Arguments& arg)
 
         // CPU csrgemm_nnz
         host_vector<rocsparse_int> hcsr_row_ptr_C_gold(M + 1);
-        host_csrgeam_nnz<T>(M,
-                            N,
-                            *h_alpha,
-                            hcsr_row_ptr_A,
-                            hcsr_col_ind_A,
-                            *h_beta,
-                            hcsr_row_ptr_B,
-                            hcsr_col_ind_B,
-                            hcsr_row_ptr_C_gold,
-                            &hnnz_C_gold,
-                            baseA,
-                            baseB,
-                            baseC);
+        host_csrgeam_nnz<T, rocsparse_int, rocsparse_int>(M,
+                                                          N,
+                                                          h_alpha,
+                                                          hcsr_row_ptr_A,
+                                                          hcsr_col_ind_A,
+                                                          h_beta,
+                                                          hcsr_row_ptr_B,
+                                                          hcsr_col_ind_B,
+                                                          hcsr_row_ptr_C_gold,
+                                                          &hnnz_C_gold,
+                                                          baseA,
+                                                          baseB,
+                                                          baseC);
 
         // Check nnz of C
         unit_check_scalar(hnnz_C_gold, hnnz_C_1);
@@ -385,22 +322,22 @@ void testing_csrgeam(const Arguments& arg)
         // CPU csrgemm
         host_vector<rocsparse_int> hcsr_col_ind_C_gold(hnnz_C_gold);
         host_vector<T>             hcsr_val_C_gold(hnnz_C_gold);
-        host_csrgeam<T>(M,
-                        N,
-                        *h_alpha,
-                        hcsr_row_ptr_A,
-                        hcsr_col_ind_A,
-                        hcsr_val_A,
-                        *h_beta,
-                        hcsr_row_ptr_B,
-                        hcsr_col_ind_B,
-                        hcsr_val_B,
-                        hcsr_row_ptr_C_gold,
-                        hcsr_col_ind_C_gold,
-                        hcsr_val_C_gold,
-                        baseA,
-                        baseB,
-                        baseC);
+        host_csrgeam<T, rocsparse_int, rocsparse_int>(M,
+                                                      N,
+                                                      h_alpha,
+                                                      hcsr_row_ptr_A,
+                                                      hcsr_col_ind_A,
+                                                      hcsr_val_A,
+                                                      h_beta,
+                                                      hcsr_row_ptr_B,
+                                                      hcsr_col_ind_B,
+                                                      hcsr_val_B,
+                                                      hcsr_row_ptr_C_gold,
+                                                      hcsr_col_ind_C_gold,
+                                                      hcsr_val_C_gold,
+                                                      baseA,
+                                                      baseB,
+                                                      baseC);
 
         if(ROCSPARSE_REPRODUCIBILITY)
         {

@@ -119,6 +119,14 @@ Auxiliary Functions
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_sparse_to_sparse_permissive`    |
 +-----------------------------------------------------+
+|:cpp:func:`rocsparse_create_spgeam_descr`            |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_destroy_spgeam_descr`           |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_spgeam_set_input`               |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_spgeam_get_output`              |
++-----------------------------------------------------+
 |:cpp:func:`rocsparse_coo_get`                        |
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_coo_aos_get`                    |
@@ -434,7 +442,7 @@ Function name                                                                   
 Sparse Generic Functions
 ------------------------
 
-The generic API allows different combinations of data types and compute types to be used. See the specific routine 
+The generic API allows different combinations of data types and compute types to be used. See the specific routine
 documentation for details on what data types and compute types are supported.
 
 +-----------------------------------------------------+
@@ -465,6 +473,10 @@ documentation for details on what data types and compute types are supported.
 |:cpp:func:`rocsparse_spsm()`                         |
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_spgemm()`                       |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_spgeam_buffer_size()`           |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_spgeam()`                       |
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_sddmm_buffer_size()`            |
 +-----------------------------------------------------+

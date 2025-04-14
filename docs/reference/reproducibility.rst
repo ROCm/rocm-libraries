@@ -303,6 +303,8 @@ Function name                                        yes no
 :cpp:func:`rocsparse_spsv()`                             x
 :cpp:func:`rocsparse_spsm()`                             x
 :cpp:func:`rocsparse_spgemm()`                           x
+:cpp:func:`rocsparse_spgeam_buffer_size()`           x
+:cpp:func:`rocsparse_spgeam()`                       x
 :cpp:func:`rocsparse_sddmm_buffer_size()`            x
 :cpp:func:`rocsparse_sddmm_preprocess()`             x
 :cpp:func:`rocsparse_sddmm()`                        x

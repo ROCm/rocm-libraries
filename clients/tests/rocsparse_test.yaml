@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -137,6 +137,10 @@ include: test_extract.yaml
 include: test_spgemm_bsr.yaml
 include: test_spgemm_csr.yaml
 include: test_spgemm_reuse_csr.yaml
+include: test_spgeam_csr.yaml
+include: test_spgeam_reuse_csr.yaml
+include: test_spgeam_csr_2.yaml
+include: test_spgeam_reuse_csr_2.yaml
 include: test_gemvi.yaml
 include: test_sddmm.yaml
 include: test_csrcolor.yaml

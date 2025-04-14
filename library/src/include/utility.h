@@ -723,6 +723,64 @@ namespace rocsparse
     };
 
     template <>
+    inline bool enum_utils::is_invalid(rocsparse_spgeam_alg value_)
+    {
+        switch(value_)
+        {
+        case rocsparse_spgeam_alg_default:
+        {
+            return false;
+        }
+        }
+        return true;
+    };
+
+    template <>
+    inline bool enum_utils::is_invalid(rocsparse_spgeam_stage value_)
+    {
+        switch(value_)
+        {
+        case rocsparse_spgeam_stage_analysis:
+        case rocsparse_spgeam_stage_compute:
+        case rocsparse_spgeam_stage_symbolic:
+        case rocsparse_spgeam_stage_numeric:
+        {
+            return false;
+        }
+        }
+        return true;
+    };
+
+    template <>
+    inline bool enum_utils::is_invalid(rocsparse_spgeam_input value_)
+    {
+        switch(value_)
+        {
+        case rocsparse_spgeam_input_alg:
+        case rocsparse_spgeam_input_compute_type:
+        case rocsparse_spgeam_input_trans_A:
+        case rocsparse_spgeam_input_trans_B:
+        {
+            return false;
+        }
+        }
+        return true;
+    };
+
+    template <>
+    inline bool enum_utils::is_invalid(rocsparse_spgeam_output value_)
+    {
+        switch(value_)
+        {
+        case rocsparse_spgeam_output_nnz:
+        {
+            return false;
+        }
+        }
+        return true;
+    };
+
+    template <>
     inline bool enum_utils::is_invalid(rocsparse_solve_policy value_)
     {
         switch(value_)

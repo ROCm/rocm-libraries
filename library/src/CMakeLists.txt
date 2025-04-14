@@ -344,8 +344,11 @@ set(rocsparse_source
 # Extra
   src/extra/rocsparse_bsrgeam.cpp
   src/extra/rocsparse_bsrgeam_nnzb.cpp
+  src/extra/rocsparse_csrgeam_numeric.cpp
+  src/extra/rocsparse_csrgeam_symbolic.cpp
   src/extra/rocsparse_csrgeam.cpp
   src/extra/rocsparse_csrgeam_nnz.cpp
+  src/extra/rocsparse_csrgeam_buffer_size.cpp
   #
   src/extra/rocsparse_csrgemm_scal_buffer_size.cpp
   src/extra/rocsparse_csrgemm_scal_nnz.cpp
@@ -390,6 +393,7 @@ set(rocsparse_source
   src/extra/rocsparse_bsrgemm_calc.cpp
   src/extra/rocsparse_bsrgemm.cpp
   src/extra/rocsparse_spgemm.cpp
+  src/extra/rocsparse_spgeam.cpp
 
 # Preconditioner
   src/precond/rocsparse_bsric0.cpp
