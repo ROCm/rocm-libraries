@@ -82,7 +82,8 @@ rocDecStatus RocDecoder::GetDecodeStatus(int pic_idx, RocdecDecodeStatus* decode
 }
 
 rocDecStatus RocDecoder::ReconfigureDecoder(RocdecReconfigureDecoderInfo *reconfig_params) {
-    if (reconfig_params == nullptr) {
+    if (reconfig_params == nullptr || reconfig_params->width == 0 || reconfig_params->height == 0 ||
+        reconfig_params->num_decode_surfaces < 1 || reconfig_params->bit_depth_minus_8 > 2) {
         return ROCDEC_INVALID_PARAMETER;
     }
     rocDecStatus rocdec_status;

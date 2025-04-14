@@ -332,11 +332,15 @@ rocDecStatus VaapiVideoDecoder::ReconfigureDecoder(RocdecReconfigureDecoderInfo 
         return ROCDEC_NOT_SUPPORTED;
     }
     CHECK_VAAPI(vaDestroySurfaces(va_display_, va_surface_ids_.data(), va_surface_ids_.size()));
-    CHECK_VAAPI(vaDestroyContext(va_display_, va_context_id_));
+    if (va_context_id_) {
+        CHECK_VAAPI(vaDestroyContext(va_display_, va_context_id_));
+        va_context_id_ = 0;
+    }
     // Need to re-create VA config if bit deepth changes
     bool create_va_config = decoder_create_info_.bit_depth_minus_8 != reconfig_params->bit_depth_minus_8 ? true : false;
     if (create_va_config) {
         CHECK_VAAPI(vaDestroyConfig(va_display_, va_config_id_));
+        va_config_id_ = 0;
     }
 
     va_surface_ids_.clear();
