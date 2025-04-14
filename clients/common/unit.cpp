@@ -49,6 +49,22 @@
 // a wrapper will cause the loop keep going
 
 template <>
+void unit_check_general(int64_t M, int64_t N, int64_t lda, int8_t* hCPU, int8_t* hGPU)
+{
+    for(int64_t j = 0; j < N; j++)
+    {
+        for(int64_t i = 0; i < M; i++)
+        {
+#ifdef GOOGLE_TEST
+            ASSERT_FLOAT_EQ(hCPU[i + j * lda], hGPU[i + j * lda]);
+#else
+            assert(hCPU[i + j * lda] == hGPU[i + j * lda]);
+#endif
+        }
+    }
+}
+
+template <>
 void unit_check_general(int64_t M, int64_t N, int64_t lda, float* hCPU, float* hGPU)
 {
     for(int64_t j = 0; j < N; j++)

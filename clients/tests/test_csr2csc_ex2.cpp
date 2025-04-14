@@ -112,6 +112,14 @@ TEST(csr2csc_ex2_bad_arg, csr2csc_ex2)
     testing_csr2csc_ex2_bad_arg<float>();
 }
 
+TEST_P(parameterized_csr2csc_ex2, csr2csc_ex2_int8)
+{
+    Arguments arg = setup_csr2csc_ex2_arguments(GetParam());
+
+    hipsparseStatus_t status = testing_csr2csc_ex2<int8_t>(arg);
+    EXPECT_EQ(status, HIPSPARSE_STATUS_SUCCESS);
+}
+
 TEST_P(parameterized_csr2csc_ex2, csr2csc_ex2_float)
 {
     Arguments arg = setup_csr2csc_ex2_arguments(GetParam());

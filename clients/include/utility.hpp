@@ -700,6 +700,12 @@ void gen_matrix_coo(I                    m,
 /* ============================================================================================ */
 /*! \brief  Read matrix from mtx file in COO format */
 template <typename I>
+static inline void read_mtx_value(std::istringstream& is, I& row, I& col, int8_t& val)
+{
+    is >> row >> col >> val;
+}
+
+template <typename I>
 static void read_mtx_value(std::istringstream& is, I& row, I& col, float& val)
 {
     is >> row >> col >> val;
@@ -6717,7 +6723,8 @@ hipsparseIndexType_t getIndexType()
 template <typename T>
 hipDataType getDataType()
 {
-    return (typeid(T) == typeid(float))
+    return (typeid(T) == typeid(int8_t)) ? HIP_R_8I
+           : (typeid(T) == typeid(float))
                ? HIP_R_32F
                : ((typeid(T) == typeid(double))
                       ? HIP_R_64F
