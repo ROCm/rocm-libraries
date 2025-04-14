@@ -217,7 +217,10 @@ ParserResult AvcVideoParser::ParsePictureData(const uint8_t *p_stream, uint32_t 
                         pic_stream_data_size_ = pic_data_size - curr_start_code_offset_;
 
                         // Decode gaps in frame_num if needed (8.2.5.2)
-                        DecodeFrameNumGaps();
+                        if (DecodeFrameNumGaps() == PARSER_NOT_SUPPORTED) {
+                            FlushDpb();
+                            break;
+                        }
 
                         // Set current picture properties
                         CalculateCurrPoc(); // 8.2.1
@@ -1912,11 +1915,13 @@ ParserResult AvcVideoParser::DecodeFrameNumGaps() {
 
     AvcSliceHeader *p_slice_header = &slice_info_list_[0].slice_header;
     int max_frame_num = 1 << (p_sps->log2_max_frame_num_minus4 + 4); // MaxFrameNum
-    int i;
 
     if (slice_nal_unit_header_.nal_unit_type == kAvcNalTypeSlice_IDR) {
         prev_ref_frame_num_ = 0;
     } else if ((p_slice_header->frame_num != prev_ref_frame_num_) && (p_slice_header->frame_num != ((prev_ref_frame_num_ + 1) % max_frame_num))) {
+        ERR("Support for gaps in frame_num is currently disabled.\n");
+        return PARSER_NOT_SUPPORTED;
+        #if 0
         int unused_short_term_frame_num = (prev_ref_frame_num_ + 1) % max_frame_num;
         while (unused_short_term_frame_num != p_slice_header->frame_num) {
             AvcPicture non_existing_pic = {0};
@@ -2091,6 +2096,7 @@ ParserResult AvcVideoParser::DecodeFrameNumGaps() {
         if (slice_nal_unit_header_.nal_ref_idc) {
             prev_ref_frame_num_ = p_slice_header->frame_num;
         }
+        #endif
     } else {
         if (slice_nal_unit_header_.nal_ref_idc) {
             prev_ref_frame_num_ = p_slice_header->frame_num;
