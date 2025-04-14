@@ -49,7 +49,7 @@ if( NOT TARGET rocfft )
 endif( )
 
 if( NOT HIP_FOUND )
-  find_package( hip REQUIRED )
+  find_package( hip REQUIRED PATHS /opt/rocm/lib/cmake/hip/ )
 endif()
 
 if( USE_HIPRAND AND NOT hiprand_FOUND )

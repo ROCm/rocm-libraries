@@ -194,7 +194,7 @@ rocm_check_target_ids(AMDGPU_TARGETS TARGETS "${AMDGPU_TARGETS}")
 set(GPU_TARGETS "${AMDGPU_TARGETS}" CACHE STRING "GPU architectures to build for")
   
 # HIP is required - library and clients use HIP to access the device
-find_package( hip REQUIRED CONFIG )
+find_package( hip REQUIRED CONFIG PATHS /opt/rocm/lib/cmake/hip/ )
 find_package( hiprtc REQUIRED CONFIG )
 
 # The nvidia backend can be used to compile for CUDA devices.
