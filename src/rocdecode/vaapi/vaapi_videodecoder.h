@@ -101,7 +101,6 @@ public:
 
 private:
     RocDecoderCreateInfo decoder_create_info_;
-    int drm_fd_;
     VADisplay va_display_;
     VAConfigAttrib va_config_attrib_;
     VAConfigID va_config_id_;
