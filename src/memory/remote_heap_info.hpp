@@ -50,7 +50,9 @@ class CommunicatorMPI {
   /**
    * @brief Primary constructor
    */
-  CommunicatorMPI(char* heap_base, size_t heap_size) {
+  CommunicatorMPI(char* heap_base, size_t heap_size,
+                  MPI_Comm comm = MPI_COMM_WORLD)
+    : comm_{comm} {
     int initialized;
     MPI_Initialized(&initialized);
     if (!initialized) {
@@ -87,8 +89,8 @@ class CommunicatorMPI {
    * @brief Performs MPI_Allgather on recvbuf
    */
   void allgather(void* recvbuf) {
-    MPI_Allgather(MPI_IN_PLACE, sizeof(void*), MPI_CHAR, recvbuf, sizeof(void*),
-                  MPI_CHAR, comm_);
+    MPI_Allgather(MPI_IN_PLACE, sizeof(void*), MPI_CHAR, recvbuf,
+                  sizeof(void*), MPI_CHAR, comm_);
   }
 
   /**
@@ -100,7 +102,7 @@ class CommunicatorMPI {
   /**
    * @brief Identifier for this processing element
    */
-  MPI_Comm comm_{MPI_COMM_WORLD};
+  MPI_Comm comm_{};
 
   /**
    * @brief Identifier for this processing element
@@ -139,8 +141,9 @@ class RemoteHeapInfo {
    * @param[in] The identifier for this processing element
    * @param[in] The total number of processing elements
    */
-  RemoteHeapInfo(char* heap_ptr, size_t heap_size)
-      : communicator_{heap_ptr, heap_size} {
+  RemoteHeapInfo(char* heap_ptr, size_t heap_size,
+                 MPI_Comm comm = MPI_COMM_WORLD)
+    : communicator_{heap_ptr, heap_size, comm} {
     heap_bases_.resize(communicator_.num_pes());
     for (auto& base : heap_bases_) {
       base = nullptr;

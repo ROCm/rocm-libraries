@@ -65,16 +65,6 @@ class IPCBackend : public Backend {
    */
   void ctx_destroy(Context *ctx) override;
 
-   /**
-   * @brief initialize MPI.
-   *
-   * IPC relies on MPI just to exchange the IPC_handle information.
-   *
-   * todo: remove the dependency on MPI and make it generic to PMI-X or just
-   * to OpenSHMEM to have support for both CPU and GPU
-   */
-  void init_mpi_once(MPI_Comm comm);
-
   /**
    * @brief Helper to initialize IPC interface.
    */

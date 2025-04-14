@@ -54,15 +54,13 @@ int get_ls_non_zero_bit(char *bitmask, int mask_length) {
 }
 
 IPCBackend::IPCBackend(MPI_Comm comm)
-    :  Backend() {
+    :  Backend(comm) {
   type = BackendType::IPC_BACKEND;
 
   if (auto maximum_num_contexts_str = getenv("ROCSHMEM_MAX_NUM_CONTEXTS")) {
     std::stringstream sstream(maximum_num_contexts_str);
     sstream >> maximum_num_contexts_;
   }
-
-  init_mpi_once(comm);
 
   initIPC();
 
@@ -74,8 +72,8 @@ IPCBackend::IPCBackend(MPI_Comm comm)
 
   /* Initialize the host interface */
   host_interface = std::make_shared<HostInterface>(hdp_proxy_.get(),
-                                                 thread_comm,
-                                                 &heap);
+                                                   backend_comm,
+                                                   &heap);
 
   default_host_ctx = std::make_unique<IPCHostContext>(this, 0);
 
@@ -156,31 +154,13 @@ void IPCBackend::setup_team_world() {
   IPCTeam *team_world{nullptr};
   CHECK_HIP(hipMalloc(&team_world, sizeof(IPCTeam)));
   new (team_world) IPCTeam(this, team_info_wrt_parent, team_info_wrt_world,
-                             num_pes, my_pe, thread_comm, 0);
+                             num_pes, my_pe, backend_comm, 0);
   team_tracker.set_team_world(team_world);
 
   /**
    * Copy the address to ROCSHMEM_TEAM_WORLD.
    */
   ROCSHMEM_TEAM_WORLD = reinterpret_cast<rocshmem_team_t>(team_world);
-}
-
-void IPCBackend::init_mpi_once(MPI_Comm comm) {
-  int init_done{};
-  NET_CHECK(MPI_Initialized(&init_done));
-
-  int provided{};
-  if (!init_done) {
-    NET_CHECK(MPI_Init_thread(0, 0, MPI_THREAD_MULTIPLE, &provided));
-    if (provided != MPI_THREAD_MULTIPLE) {
-      std::cerr << "MPI_THREAD_MULTIPLE support disabled.\n";
-    }
-  }
-  if (comm == MPI_COMM_NULL) comm = MPI_COMM_WORLD;
-
-  NET_CHECK(MPI_Comm_dup(comm, &thread_comm));
-  NET_CHECK(MPI_Comm_size(thread_comm, &num_pes));
-  NET_CHECK(MPI_Comm_rank(thread_comm, &my_pe));
 }
 
 void IPCBackend::team_destroy(rocshmem_team_t team) {
@@ -260,11 +240,11 @@ void IPCBackend::initIPC() {
   const auto &heap_bases{heap.get_heap_bases()};
 
   ipcImpl.ipcHostInit(my_pe, heap_bases,
-                      thread_comm);
+                      backend_comm);
 }
 
 void IPCBackend::global_exit(int status) {
-  MPI_Abort(MPI_COMM_WORLD, status);
+  MPI_Abort(backend_comm, status);
 }
 
 void IPCBackend::teams_destroy() {
@@ -331,7 +311,7 @@ void IPCBackend::init_wrk_sync_buffer() {
    * all-to-all exchange with each PE to share the IPC handles.
    */
   MPI_Allgather(MPI_IN_PLACE, sizeof(hipIpcMemHandle_t), MPI_CHAR,
-                ipc_handle, sizeof(hipIpcMemHandle_t), MPI_CHAR, thread_comm);
+                ipc_handle, sizeof(hipIpcMemHandle_t), MPI_CHAR, backend_comm);
 
   /*
    * Allocate device-side fine grained memory to hold IPC addresses of
@@ -399,7 +379,7 @@ void IPCBackend::rocshmem_collective_init() {
    * Make sure that all processing elements have done this before
    * continuing.
    */
-  NET_CHECK(MPI_Barrier(thread_comm));
+  NET_CHECK(MPI_Barrier(backend_comm));
 }
 
 void IPCBackend::teams_init() {
@@ -491,7 +471,7 @@ void IPCBackend::teams_init() {
    * Make sure that all processing elements have done this before
    * continuing.
    */
-  NET_CHECK(MPI_Barrier(thread_comm));
+  NET_CHECK(MPI_Barrier(backend_comm));
 }
 
 }  // namespace rocshmem

@@ -54,7 +54,7 @@ MPITransport::MPITransport(MPI_Comm comm, Queue* q)
       std::cerr << "MPI_THREAD_MULTIPLE support disabled.\n";
     }
   }
-  if (comm == MPI_COMM_NULL) comm = MPI_COMM_WORLD;
+  assert(comm != MPI_COMM_NULL);
 
   NET_CHECK(MPI_Comm_dup(comm, &ro_net_comm_world));
   NET_CHECK(MPI_Comm_size(ro_net_comm_world, &num_pes));

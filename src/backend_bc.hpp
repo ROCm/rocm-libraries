@@ -67,7 +67,7 @@ class Backend {
    * @note Implementation may reduce the number of workgroups if the
    * number exceeds hardware limits.
    */
-  explicit Backend();
+  explicit Backend(MPI_Comm comm);
 
   /**
    * @brief Destructor.
@@ -221,7 +221,7 @@ class Backend {
    * @todo document where this is used and try to coalesce this into another
    * class
    */
-  MPI_Comm thread_comm{};
+  MPI_Comm backend_comm{};
 
   /**
    * @brief Object contains the interface and internal data structures
@@ -295,6 +295,13 @@ class Backend {
    * @brief List of ctxs created by the user.
    */
   std::vector<Context*> list_of_ctxs{};
+
+  /**
+   * @brief initialize MPI.
+   *
+   * Backend relies on MPI to exchange meta data across PEs.
+   */
+  void init_mpi_once(MPI_Comm comm);
 };
 
 /**

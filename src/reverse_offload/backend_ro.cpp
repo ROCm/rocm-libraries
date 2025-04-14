@@ -45,7 +45,7 @@ namespace rocshmem {
 extern rocshmem_ctx_t ROCSHMEM_HOST_CTX_DEFAULT;
 
 ROBackend::ROBackend(MPI_Comm comm)
-    : Backend() {
+    : Backend(comm) {
   type = BackendType::RO_BACKEND;
 
   if (auto maximum_num_contexts_str = getenv("ROCSHMEM_MAX_NUM_CONTEXTS")) {
@@ -78,7 +78,7 @@ ROBackend::ROBackend(MPI_Comm comm)
 
   queue_ = Queue(maximum_num_contexts_, queue_size_);
 
-  transport_ = new MPITransport(comm, &queue_);
+  transport_ = new MPITransport(backend_comm, &queue_);
   num_pes = transport_->getNumPes();
   my_pe = transport_->getMyPe();
 

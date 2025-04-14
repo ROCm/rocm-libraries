@@ -54,6 +54,10 @@ class SymmetricHeap {
   using RemoteHeapInfoType = RemoteHeapInfo<CommunicatorMPI>;
 
  public:
+  SymmetricHeap(MPI_Comm comm = MPI_COMM_WORLD)
+    : remote_heap_info_{single_heap_.get_base_ptr(),
+                        single_heap_.get_size(),
+                        comm} {}
   /**
    * @brief Allocates heap memory and returns ptr to caller
    *
@@ -120,8 +124,7 @@ class SymmetricHeap {
   /**
    * @brief Implementation of remote heaps
    */
-  RemoteHeapInfoType remote_heap_info_{single_heap_.get_base_ptr(),
-                                       single_heap_.get_size()};
+  RemoteHeapInfoType remote_heap_info_{};
 };
 
 }  // namespace rocshmem

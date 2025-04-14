@@ -33,7 +33,15 @@
 
 namespace rocshmem {
 
-Backend::Backend() {
+#define NET_CHECK(cmd)                                       \
+  {                                                          \
+    if (cmd != MPI_SUCCESS) {                                \
+      fprintf(stderr, "Unrecoverable error: MPI Failure\n"); \
+      abort() ;                                              \
+    }                                                        \
+  }
+
+Backend::Backend(MPI_Comm comm) : heap{comm} {
   int num_cus{};
   if (hipDeviceGetAttribute(&num_cus, hipDeviceAttributeMultiprocessorCount,
                             0)) {
@@ -71,10 +79,29 @@ Backend::Backend() {
   CHECK_HIP(
       hipHostMalloc(reinterpret_cast<void**>(&done_init), sizeof(uint8_t)));
 
+  init_mpi_once(comm);
   /*
    * Notify other threads that Backend has been initialized.
    */
   *done_init = 0;
+}
+
+void Backend::init_mpi_once(MPI_Comm comm) {
+  int init_done{};
+  NET_CHECK(MPI_Initialized(&init_done));
+
+  int provided{};
+  if (!init_done) {
+    NET_CHECK(MPI_Init_thread(0, 0, MPI_THREAD_MULTIPLE, &provided));
+    if (provided != MPI_THREAD_MULTIPLE) {
+      std::cerr << "MPI_THREAD_MULTIPLE support disabled.\n";
+    }
+  }
+  if (comm == MPI_COMM_NULL) comm = MPI_COMM_WORLD;
+
+  NET_CHECK(MPI_Comm_dup(comm, &backend_comm));
+  NET_CHECK(MPI_Comm_size(backend_comm, &num_pes));
+  NET_CHECK(MPI_Comm_rank(backend_comm, &my_pe));
 }
 
 void Backend::track_ctx(Context* ctx) {

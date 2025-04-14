@@ -165,7 +165,7 @@ class WindowInfo {
   /**
    * @brief MPI Communicator
    */
-  MPI_Comm comm_{MPI_COMM_WORLD};
+  MPI_Comm comm_{};
 
   /**
    * @brief Owning pointer to MPI_Win
