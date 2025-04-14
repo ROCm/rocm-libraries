@@ -273,22 +273,24 @@ struct is_tuple_of_references<::rocprim::tuple<Args...>>
 private:
     template<size_t Index>
     ROCPRIM_HOST_DEVICE
-    constexpr bool is_tuple_of_references_impl()
+    static constexpr
+        typename std::enable_if<(Index < sizeof...(Args)), bool>::type is_tuple_of_references_impl()
     {
         using tuple_t   = ::rocprim::tuple<Args...>;
         using element_t = ::rocprim::tuple_element_t<Index, tuple_t>;
         return std::is_reference<element_t>::value && is_tuple_of_references_impl<Index + 1>();
     }
 
-    template<>
+    template<size_t Index>
     ROCPRIM_HOST_DEVICE
-    constexpr bool is_tuple_of_references_impl<sizeof...(Args)>()
+    static constexpr typename std::enable_if<(Index == sizeof...(Args)), bool>::type
+        is_tuple_of_references_impl()
     {
         return true;
     }
 
 public:
-    static constexpr bool value = is_tuple_of_references().is_tuple_of_references_impl<0>();
+    static constexpr bool value = is_tuple_of_references::is_tuple_of_references_impl<0>();
 };
 
 template<class Tuple, class Function, size_t... Indices>
