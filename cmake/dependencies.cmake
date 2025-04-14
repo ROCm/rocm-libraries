@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -24,26 +24,8 @@
 # ROCm dependencies
 # ###########################
 
-include(FetchContent)
-
-
-find_package(ROCM 0.11.0 CONFIG QUIET PATHS "${ROCM_PATH}") # First version with Sphinx doc gen improvement
-if(NOT ROCM_FOUND)
-  message(STATUS "ROCm CMake not found. Fetching...")
-  set(rocm_cmake_tag
-    "c044bb52ba85058d28afe2313be98d9fed02e293" # develop@2023.09.12. (move to 6.0 tag when released)
-    CACHE STRING "rocm-cmake tag to download")
-  FetchContent_Declare(
-    rocm-cmake
-    GIT_REPOSITORY https://github.com/ROCm/rocm-cmake.git
-    GIT_TAG        ${rocm_cmake_tag}
-    SOURCE_SUBDIR "DISABLE ADDING TO BUILD" # We don't really want to consume the build and test targets of ROCm CMake.
-  )
-  FetchContent_MakeAvailable(rocm-cmake)
-  find_package(ROCM CONFIG REQUIRED NO_DEFAULT_PATH PATHS "${rocm-cmake_SOURCE_DIR}")
-else()
-  find_package(ROCM 0.11.0 CONFIG REQUIRED PATHS "${ROCM_PATH}")
-endif()
+# This finds the rocm-cmake project, and installs it if not found
+include(get-rocm-cmake)
 
 include(ROCMSetupVersion)
 include(ROCMCreatePackage)
