@@ -50,6 +50,7 @@
 #include <iterator>
 #include <limits>
 #include <memory>
+#include <numeric>
 #include <random>
 #include <regex>
 #include <sstream>
@@ -917,107 +918,6 @@ inline const char* Traits<rocprim::uint128_t>::name()
     return "rocprim::uint128_t";
 }
 
-inline void add_common_benchmark_info()
-{
-    hipDeviceProp_t devProp;
-    int             device_id = 0;
-    HIP_CHECK(hipGetDevice(&device_id));
-    HIP_CHECK(hipGetDeviceProperties(&devProp, device_id));
-
-    auto str = [](const std::string& name, const std::string& val)
-    { benchmark::AddCustomContext(name, val); };
-
-    auto num = [](const std::string& name, const auto& value)
-    { benchmark::AddCustomContext(name, std::to_string(value)); };
-
-    auto dim2 = [num](const std::string& name, const auto* values)
-    {
-        num(name + "_x", values[0]);
-        num(name + "_y", values[1]);
-    };
-
-    auto dim3 = [num, dim2](const std::string& name, const auto* values)
-    {
-        dim2(name, values);
-        num(name + "_z", values[2]);
-    };
-
-    str("hdp_name", devProp.name);
-    num("hdp_total_global_mem", devProp.totalGlobalMem);
-    num("hdp_shared_mem_per_block", devProp.sharedMemPerBlock);
-    num("hdp_regs_per_block", devProp.regsPerBlock);
-    num("hdp_warp_size", devProp.warpSize);
-    num("hdp_max_threads_per_block", devProp.maxThreadsPerBlock);
-    dim3("hdp_max_threads_dim", devProp.maxThreadsDim);
-    dim3("hdp_max_grid_size", devProp.maxGridSize);
-    num("hdp_clock_rate", devProp.clockRate);
-    num("hdp_memory_clock_rate", devProp.memoryClockRate);
-    num("hdp_memory_bus_width", devProp.memoryBusWidth);
-    num("hdp_total_const_mem", devProp.totalConstMem);
-    num("hdp_major", devProp.major);
-    num("hdp_minor", devProp.minor);
-    num("hdp_multi_processor_count", devProp.multiProcessorCount);
-    num("hdp_l2_cache_size", devProp.l2CacheSize);
-    num("hdp_max_threads_per_multiprocessor", devProp.maxThreadsPerMultiProcessor);
-    num("hdp_compute_mode", devProp.computeMode);
-    num("hdp_clock_instruction_rate", devProp.clockInstructionRate);
-    num("hdp_concurrent_kernels", devProp.concurrentKernels);
-    num("hdp_pci_domain_id", devProp.pciDomainID);
-    num("hdp_pci_bus_id", devProp.pciBusID);
-    num("hdp_pci_device_id", devProp.pciDeviceID);
-    num("hdp_max_shared_memory_per_multi_processor", devProp.maxSharedMemoryPerMultiProcessor);
-    num("hdp_is_multi_gpu_board", devProp.isMultiGpuBoard);
-    num("hdp_can_map_host_memory", devProp.canMapHostMemory);
-    str("hdp_gcn_arch_name", devProp.gcnArchName);
-    num("hdp_integrated", devProp.integrated);
-    num("hdp_cooperative_launch", devProp.cooperativeLaunch);
-    num("hdp_cooperative_multi_device_launch", devProp.cooperativeMultiDeviceLaunch);
-    num("hdp_max_texture_1d_linear", devProp.maxTexture1DLinear);
-    num("hdp_max_texture_1d", devProp.maxTexture1D);
-    dim2("hdp_max_texture_2d", devProp.maxTexture2D);
-    dim3("hdp_max_texture_3d", devProp.maxTexture3D);
-    num("hdp_mem_pitch", devProp.memPitch);
-    num("hdp_texture_alignment", devProp.textureAlignment);
-    num("hdp_texture_pitch_alignment", devProp.texturePitchAlignment);
-    num("hdp_kernel_exec_timeout_enabled", devProp.kernelExecTimeoutEnabled);
-    num("hdp_ecc_enabled", devProp.ECCEnabled);
-    num("hdp_tcc_driver", devProp.tccDriver);
-    num("hdp_cooperative_multi_device_unmatched_func", devProp.cooperativeMultiDeviceUnmatchedFunc);
-    num("hdp_cooperative_multi_device_unmatched_grid_dim",
-        devProp.cooperativeMultiDeviceUnmatchedGridDim);
-    num("hdp_cooperative_multi_device_unmatched_block_dim",
-        devProp.cooperativeMultiDeviceUnmatchedBlockDim);
-    num("hdp_cooperative_multi_device_unmatched_shared_mem",
-        devProp.cooperativeMultiDeviceUnmatchedSharedMem);
-    num("hdp_is_large_bar", devProp.isLargeBar);
-    num("hdp_asic_revision", devProp.asicRevision);
-    num("hdp_managed_memory", devProp.managedMemory);
-    num("hdp_direct_managed_mem_access_from_host", devProp.directManagedMemAccessFromHost);
-    num("hdp_concurrent_managed_access", devProp.concurrentManagedAccess);
-    num("hdp_pageable_memory_access", devProp.pageableMemoryAccess);
-    num("hdp_pageable_memory_access_uses_host_page_tables",
-        devProp.pageableMemoryAccessUsesHostPageTables);
-
-    const auto arch = devProp.arch;
-    num("hdp_arch_has_global_int32_atomics", arch.hasGlobalInt32Atomics);
-    num("hdp_arch_has_global_float_atomic_exch", arch.hasGlobalFloatAtomicExch);
-    num("hdp_arch_has_shared_int32_atomics", arch.hasSharedInt32Atomics);
-    num("hdp_arch_has_shared_float_atomic_exch", arch.hasSharedFloatAtomicExch);
-    num("hdp_arch_has_float_atomic_add", arch.hasFloatAtomicAdd);
-    num("hdp_arch_has_global_int64_atomics", arch.hasGlobalInt64Atomics);
-    num("hdp_arch_has_shared_int64_atomics", arch.hasSharedInt64Atomics);
-    num("hdp_arch_has_doubles", arch.hasDoubles);
-    num("hdp_arch_has_warp_vote", arch.hasWarpVote);
-    num("hdp_arch_has_warp_ballot", arch.hasWarpBallot);
-    num("hdp_arch_has_warp_shuffle", arch.hasWarpShuffle);
-    num("hdp_arch_has_funnel_shift", arch.hasFunnelShift);
-    num("hdp_arch_has_thread_fence_system", arch.hasThreadFenceSystem);
-    num("hdp_arch_has_sync_threads_ext", arch.hasSyncThreadsExt);
-    num("hdp_arch_has_surface_funcs", arch.hasSurfaceFuncs);
-    num("hdp_arch_has_3d_grid", arch.has3dGrid);
-    num("hdp_arch_has_dynamic_parallelism", arch.hasDynamicParallelism);
-}
-
 inline const char* get_block_scan_algorithm_name(rocprim::block_scan_algorithm alg)
 {
     switch(alg)
@@ -1115,12 +1015,13 @@ public:
         , events(record_as_whole ? 2 : batch_iterations * 2)
     {}
 
-    // Used to reset the input array of algorithms like device_merge_inplace
+    // Used to reset the input array of algorithms like device_merge_inplace.
     void run_before_every_iteration(std::function<void()> lambda)
     {
         run_before_every_iteration_lambda = lambda;
     }
 
+    // Used to accumulate the results of state.run() calls.
     void accumulate_total_gbench_iterations_every_run()
     {
         reset_total_gbench_iterations_every_run = false;
@@ -1137,7 +1038,7 @@ public:
         for(size_t i = 0; i < warmup_iterations; ++i)
         {
             // Benchmarks may expect their kernel input to be prepared by this lambda,
-            // so to prevent any potential crashes, we call the lambda during warm-up
+            // so to prevent any potential crashes, we call the lambda during warm-up.
             if(run_before_every_iteration_lambda)
             {
                 run_before_every_iteration_lambda();
@@ -1172,6 +1073,7 @@ public:
 
                 float elapsed_mseconds;
                 HIP_CHECK(hipEventElapsedTime(&elapsed_mseconds, events[0], events[1]));
+                times.emplace_back(elapsed_mseconds);
                 gbench_state.SetIterationTime(elapsed_mseconds / 1000);
             }
             else
@@ -1188,25 +1090,26 @@ public:
                         clear_gpu_cache(stream);
                     }
 
-                    // Even events record the start time
+                    // Even events record the start time.
                     HIP_CHECK(hipEventRecord(events[i * 2], stream));
 
                     kernel();
 
-                    // Odd events record the stop time
+                    // Odd events record the stop time.
                     HIP_CHECK(hipEventRecord(events[i * 2 + 1], stream));
                 }
 
-                // Wait until the last record event has completed
+                // Wait until the last record event has completed.
                 HIP_CHECK(hipEventSynchronize(events[batch_iterations * 2 - 1]));
 
-                // Accumulate the total elapsed time
+                // Accumulate the total elapsed time.
                 double elapsed_mseconds = 0.0;
                 for(size_t i = 0; i < batch_iterations; i++)
                 {
                     float iteration_mseconds;
                     HIP_CHECK(
                         hipEventElapsedTime(&iteration_mseconds, events[i * 2], events[i * 2 + 1]));
+                    times.emplace_back(iteration_mseconds);
                     elapsed_mseconds += iteration_mseconds;
                 }
                 gbench_state.SetIterationTime(elapsed_mseconds / 1000);
@@ -1230,6 +1133,8 @@ public:
         gbench_state.SetBytesProcessed(total_gbench_iterations * batch_iterations * actual_size
                                        * type_size);
         gbench_state.SetItemsProcessed(total_gbench_iterations * batch_iterations * actual_size);
+
+        output_statistics();
     }
 
     hipStream_t       stream;
@@ -1254,6 +1159,55 @@ private:
         HIP_CHECK(hipMemsetAsync(buf, 0, buf_size, stream));
     }
 
+    void output_statistics()
+    {
+        double mean   = get_mean();
+        double median = get_median();
+        double stddev = get_stddev(mean);
+        double cv     = get_cv(stddev, mean);
+
+        gbench_state.counters["mean"]   = mean;
+        gbench_state.counters["median"] = median;
+        gbench_state.counters["stddev"] = stddev;
+        gbench_state.counters["cv"]     = cv;
+    }
+
+    double get_mean()
+    {
+        return std::reduce(times.begin(), times.end()) / times.size();
+    }
+
+    // Technically when times.size() is even, the median is the arithmetic mean
+    // of the elements k=N/2 and k=N/2+1. This would be overkill here,
+    // as times.size() is large enough, and recorded times are similar enough.
+    double get_median()
+    {
+        size_t center_index = times.size() / 2;
+        std::nth_element(times.begin(), times.begin() + center_index, times.end());
+        return times[center_index];
+    }
+
+    double get_stddev(double mean)
+    {
+        auto SumSquares = [](const std::vector<double>& v)
+        { return std::transform_reduce(v.begin(), v.end(), v.begin(), 0.0); };
+        auto Sqr  = [](double dat) { return dat * dat; };
+        auto Sqrt = [](double dat) { return dat < 0.0 ? 0.0 : std::sqrt(dat); };
+
+        double stddev = 0.0;
+        if(times.size() > 1)
+        {
+            double avg_squares = SumSquares(times) * (1.0 / times.size());
+            stddev = Sqrt(times.size() / (times.size() - 1.0) * (avg_squares - Sqr(mean)));
+        }
+        return stddev;
+    }
+
+    double get_cv(double stddev, double mean)
+    {
+        return times.size() >= 2 ? stddev / mean : 0.0;
+    }
+
     size_t                  warmup_iterations;
     bool                    cold;
     bool                    record_as_whole;
@@ -1262,6 +1216,7 @@ private:
     std::function<void()>   run_before_every_iteration_lambda = nullptr;
     size_t                  total_gbench_iterations;
     bool                    reset_total_gbench_iterations_every_run = true;
+    std::vector<double>     times;
 };
 
 struct autotune_interface
@@ -1301,7 +1256,7 @@ public:
 
         parse(parser);
 
-        add_common_benchmark_info();
+        add_context();
     }
 
     template<typename T>
@@ -1411,6 +1366,111 @@ private:
         parallel_instances = parser.get<int>("parallel_instances");
 
         bench_naming::set_format(parser.get<std::string>("name_format"));
+    }
+
+    void add_context()
+    {
+        benchmark::AddCustomContext("batch_iterations", std::to_string(batch_iterations));
+        benchmark::AddCustomContext("warmup_iterations", std::to_string(warmup_iterations));
+
+        hipDeviceProp_t devProp;
+        int             device_id = 0;
+        HIP_CHECK(hipGetDevice(&device_id));
+        HIP_CHECK(hipGetDeviceProperties(&devProp, device_id));
+
+        auto str = [](const std::string& name, const std::string& val)
+        { benchmark::AddCustomContext(name, val); };
+
+        auto num = [](const std::string& name, const auto& value)
+        { benchmark::AddCustomContext(name, std::to_string(value)); };
+
+        auto dim2 = [num](const std::string& name, const auto* values)
+        {
+            num(name + "_x", values[0]);
+            num(name + "_y", values[1]);
+        };
+
+        auto dim3 = [num, dim2](const std::string& name, const auto* values)
+        {
+            dim2(name, values);
+            num(name + "_z", values[2]);
+        };
+
+        str("hdp_name", devProp.name);
+        num("hdp_total_global_mem", devProp.totalGlobalMem);
+        num("hdp_shared_mem_per_block", devProp.sharedMemPerBlock);
+        num("hdp_regs_per_block", devProp.regsPerBlock);
+        num("hdp_warp_size", devProp.warpSize);
+        num("hdp_max_threads_per_block", devProp.maxThreadsPerBlock);
+        dim3("hdp_max_threads_dim", devProp.maxThreadsDim);
+        dim3("hdp_max_grid_size", devProp.maxGridSize);
+        num("hdp_clock_rate", devProp.clockRate);
+        num("hdp_memory_clock_rate", devProp.memoryClockRate);
+        num("hdp_memory_bus_width", devProp.memoryBusWidth);
+        num("hdp_total_const_mem", devProp.totalConstMem);
+        num("hdp_major", devProp.major);
+        num("hdp_minor", devProp.minor);
+        num("hdp_multi_processor_count", devProp.multiProcessorCount);
+        num("hdp_l2_cache_size", devProp.l2CacheSize);
+        num("hdp_max_threads_per_multiprocessor", devProp.maxThreadsPerMultiProcessor);
+        num("hdp_compute_mode", devProp.computeMode);
+        num("hdp_clock_instruction_rate", devProp.clockInstructionRate);
+        num("hdp_concurrent_kernels", devProp.concurrentKernels);
+        num("hdp_pci_domain_id", devProp.pciDomainID);
+        num("hdp_pci_bus_id", devProp.pciBusID);
+        num("hdp_pci_device_id", devProp.pciDeviceID);
+        num("hdp_max_shared_memory_per_multi_processor", devProp.maxSharedMemoryPerMultiProcessor);
+        num("hdp_is_multi_gpu_board", devProp.isMultiGpuBoard);
+        num("hdp_can_map_host_memory", devProp.canMapHostMemory);
+        str("hdp_gcn_arch_name", devProp.gcnArchName);
+        num("hdp_integrated", devProp.integrated);
+        num("hdp_cooperative_launch", devProp.cooperativeLaunch);
+        num("hdp_cooperative_multi_device_launch", devProp.cooperativeMultiDeviceLaunch);
+        num("hdp_max_texture_1d_linear", devProp.maxTexture1DLinear);
+        num("hdp_max_texture_1d", devProp.maxTexture1D);
+        dim2("hdp_max_texture_2d", devProp.maxTexture2D);
+        dim3("hdp_max_texture_3d", devProp.maxTexture3D);
+        num("hdp_mem_pitch", devProp.memPitch);
+        num("hdp_texture_alignment", devProp.textureAlignment);
+        num("hdp_texture_pitch_alignment", devProp.texturePitchAlignment);
+        num("hdp_kernel_exec_timeout_enabled", devProp.kernelExecTimeoutEnabled);
+        num("hdp_ecc_enabled", devProp.ECCEnabled);
+        num("hdp_tcc_driver", devProp.tccDriver);
+        num("hdp_cooperative_multi_device_unmatched_func",
+            devProp.cooperativeMultiDeviceUnmatchedFunc);
+        num("hdp_cooperative_multi_device_unmatched_grid_dim",
+            devProp.cooperativeMultiDeviceUnmatchedGridDim);
+        num("hdp_cooperative_multi_device_unmatched_block_dim",
+            devProp.cooperativeMultiDeviceUnmatchedBlockDim);
+        num("hdp_cooperative_multi_device_unmatched_shared_mem",
+            devProp.cooperativeMultiDeviceUnmatchedSharedMem);
+        num("hdp_is_large_bar", devProp.isLargeBar);
+        num("hdp_asic_revision", devProp.asicRevision);
+        num("hdp_managed_memory", devProp.managedMemory);
+        num("hdp_direct_managed_mem_access_from_host", devProp.directManagedMemAccessFromHost);
+        num("hdp_concurrent_managed_access", devProp.concurrentManagedAccess);
+        num("hdp_pageable_memory_access", devProp.pageableMemoryAccess);
+        num("hdp_pageable_memory_access_uses_host_page_tables",
+            devProp.pageableMemoryAccessUsesHostPageTables);
+
+        const auto arch = devProp.arch;
+        num("hdp_arch_has_global_int32_atomics", arch.hasGlobalInt32Atomics);
+        num("hdp_arch_has_global_float_atomic_exch", arch.hasGlobalFloatAtomicExch);
+        num("hdp_arch_has_shared_int32_atomics", arch.hasSharedInt32Atomics);
+        num("hdp_arch_has_shared_float_atomic_exch", arch.hasSharedFloatAtomicExch);
+        num("hdp_arch_has_float_atomic_add", arch.hasFloatAtomicAdd);
+        num("hdp_arch_has_global_int64_atomics", arch.hasGlobalInt64Atomics);
+        num("hdp_arch_has_shared_int64_atomics", arch.hasSharedInt64Atomics);
+        num("hdp_arch_has_doubles", arch.hasDoubles);
+        num("hdp_arch_has_warp_vote", arch.hasWarpVote);
+        num("hdp_arch_has_warp_ballot", arch.hasWarpBallot);
+        num("hdp_arch_has_warp_shuffle", arch.hasWarpShuffle);
+        num("hdp_arch_has_funnel_shift", arch.hasFunnelShift);
+        num("hdp_arch_has_thread_fence_system", arch.hasThreadFenceSystem);
+        num("hdp_arch_has_sync_threads_ext", arch.hasSyncThreadsExt);
+        num("hdp_arch_has_surface_funcs", arch.hasSurfaceFuncs);
+        num("hdp_arch_has_3d_grid", arch.has3dGrid);
+        num("hdp_arch_has_dynamic_parallelism", arch.hasDynamicParallelism);
     }
 
     static std::vector<std::unique_ptr<autotune_interface>>& sorted_benchmarks()
