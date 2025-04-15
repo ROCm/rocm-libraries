@@ -72,7 +72,7 @@ ROCPRIM_DEVICE ROCPRIM_INLINE
 T asm_thread_load(void* ptr)
 {
     T retval{};
-    __builtin_memcpy(&retval, ptr, sizeof(T));
+    __builtin_memcpy(static_cast<void*>(&retval), ptr, sizeof(T));
     return retval;
 }
 
