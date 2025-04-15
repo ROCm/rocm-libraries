@@ -588,9 +588,12 @@ __host__ __device__ void thread::detach() {
 [[gnu::const]]
 __host__ unsigned int thread::hardware_concurrency() noexcept {
     try {
-        uint32_t temp;
-        __LIBGPU_HIP_CHECK__(hipMemcpyFromSymbol(&temp, HIP_SYMBOL(numVcores), sizeof(temp), 0, hipMemcpyDeviceToHost));
-        return temp;
+        static uint32_t cachedNumVcores = [](){
+            uint32_t temp;
+            __LIBGPU_HIP_CHECK__(hipMemcpyFromSymbol(&temp, HIP_SYMBOL(numVcores), sizeof(temp), 0, hipMemcpyDeviceToHost));
+            return temp;
+        }();
+        return cachedNumVcores;
     }
     catch (...) {
         std::cerr << "Exception while fetching numVcores\n";
