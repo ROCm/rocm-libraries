@@ -48,9 +48,9 @@
 #define ROCBLAS_DATA_TYPE_INVALID
 #endif
 
-//#if(((ROCBLAS_VERSION_MAJOR == 3) && (ROCBLAS_VERSION_MINOR >= 1)) || (ROCBLAS_VERSION_MAJOR > 3))
-//#define ROCBLAS_DATA_TYPE_FLOAT8
-//#endif
+#if(((ROCBLAS_VERSION_MAJOR == 3) && (ROCBLAS_VERSION_MINOR >= 1)) || (ROCBLAS_VERSION_MAJOR == 4))
+#define ROCBLAS_DATA_TYPE_FLOAT8
+#endif
 
 #include "common.hpp"
 #include <rocwmma/internal/types.hpp>
