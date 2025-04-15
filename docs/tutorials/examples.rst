@@ -3,7 +3,7 @@
   :keywords: hipFORT, ROCm, API, documentation, examples, tutorials
 
 ****************
-hipFORT Examples
+hipFORT examples
 ****************
 
 Use the following examples to express Fortran 2003 (`f2003`) interfaces:

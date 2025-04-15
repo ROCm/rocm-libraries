@@ -24,7 +24,7 @@ The hipFORT public repository is located at `<https://github.com/ROCm/hipFORT>`_
 
   .. grid-item-card:: How to
 
-     * :doc:`Tutorials <./how-to/using-hipfort>`
+     * :doc:`Use hipFORT <./how-to/using-hipfort>`
 
   .. grid-item-card:: Tutorials
 
