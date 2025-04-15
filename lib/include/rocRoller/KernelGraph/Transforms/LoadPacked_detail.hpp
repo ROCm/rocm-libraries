@@ -26,8 +26,8 @@
 
 #pragma once
 
-#include "LoadPacked.hpp"
 #include <rocRoller/KernelGraph/CoordinateGraph/Transformer.hpp>
+#include <rocRoller/KernelGraph/Transforms/LoadPacked.hpp>
 
 namespace rocRoller::KernelGraph
 {

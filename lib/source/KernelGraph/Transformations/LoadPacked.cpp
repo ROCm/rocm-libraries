@@ -25,13 +25,9 @@
  *******************************************************************************/
 
 #include <rocRoller/KernelGraph/ControlGraph/ControlFlowRWTracer.hpp>
-
+#include <rocRoller/KernelGraph/CoordinateGraph/Transformer.hpp>
 #include <rocRoller/KernelGraph/Transforms/LoadPacked.hpp>
 #include <rocRoller/KernelGraph/Transforms/LoadPacked_detail.hpp>
-
-#include <rocRoller/KernelGraph/CoordinateGraph/Transformer.hpp>
-
-// #include <rocRoller/Graph/GraphUtilities.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>
 
 namespace rocRoller::KernelGraph
@@ -215,7 +211,7 @@ namespace rocRoller::KernelGraph
 
         for(auto node : rv.control.findNodes(roots, pred))
         {
-            Log::debug("Load op: ({})", node);
+            Log::debug("Load/store op: ({})", node);
             auto [target, direction] = getOperationTarget(node, rv);
             target                   = getTransformTarget(target, rv);
 
@@ -225,7 +221,6 @@ namespace rocRoller::KernelGraph
             auto packedType = DataTypeInfo::Get(varType).packedVariableType().value();
             auto packedInfo = DataTypeInfo::Get(packedType);
 
-            // auto [waveTileTag, waveTile]   = rv.getDimension<WaveTile>(node);
             auto waveTileTag = rv.mapper.get<WaveTile>(node);
             if(waveTileTag > 0)
             {
@@ -245,14 +240,6 @@ namespace rocRoller::KernelGraph
                         elementsPerThread,
                         packedInfo.packing);
                     continue;
-                }
-                else
-                {
-                    Log::debug("Not skipping node {} due to insufficient elementsPerThread: {} "
-                               "(packing {})",
-                               node,
-                               elementsPerThread,
-                               packedInfo.packing);
                 }
             }
 

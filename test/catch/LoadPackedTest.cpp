@@ -35,19 +35,21 @@
 
 #include <common/CommonGraphs.hpp>
 
-TEST_CASE("LoadPacked works", "[kernel-graph]")
+TEST_CASE("LoadPacked", "[kernel-graph]")
 {
+    using namespace rocRoller;
+    using namespace KernelGraph;
+    using namespace ControlGraph;
+
     auto context = TestContext::ForDefaultTarget();
-    using namespace rocRoller::KernelGraph;
-    auto example = rocRollerTest::Graphs::TileDoubleAdd<half>();
+
+    auto example = rocRollerTest::Graphs::TileDoubleAdd<Half>();
 
     example.setTileSize(16, 8);
     example.setSubTileSize(4, 2);
 
     auto params = example.getCommandParameters(512, 512);
-    auto kgraph = example.getKernelGraph();
-
-    // params->se
+    auto graph  = example.getKernelGraph();
 
     std::vector<GraphTransformPtr> transforms{
         std::make_shared<UpdateParameters>(params),
@@ -56,17 +58,44 @@ TEST_CASE("LoadPacked works", "[kernel-graph]")
         std::make_shared<LowerTile>(params, context.get()),
         std::make_shared<AddComputeIndex>(),
         std::make_shared<UpdateWavefrontParameters>(params),
-        std::make_shared<LoadPacked>(context.get()),
     };
 
-    for(auto xform : transforms)
-    {
-        CAPTURE(xform->name());
-        kgraph = kgraph.transform(xform);
+    for(auto const& xform : transforms)
+        graph = graph.transform(xform);
 
-        {
-            std::ofstream file("LoadPacked.dot");
-            file << kgraph.toDOT();
-        }
-    }
+    auto verifyLoadStoreOpVarType = [&graph](Operation op, VariableType variableType) {
+        std::visit(
+            [&](auto&& op) {
+                using T = std::decay_t<decltype(op)>;
+
+                if constexpr(CIsAnyOf<T, LoadTiled, StoreTiled, LoadLDSTile, StoreLDSTile>)
+                {
+                    for(auto opTag : graph.control.getElements<T>())
+                    {
+                        auto operation = graph.control.get<T>(opTag).value();
+                        CHECK(operation.varType == variableType);
+                    }
+                }
+            },
+            op);
+    };
+
+    auto variableType       = DataType::Half;
+    auto packedVariableType = DataTypeInfo::Get(variableType).packedVariableType().value();
+    verifyLoadStoreOpVarType(LoadTiled{}, variableType);
+    verifyLoadStoreOpVarType(StoreTiled{}, variableType);
+    verifyLoadStoreOpVarType(LoadLDSTile{}, variableType);
+    verifyLoadStoreOpVarType(StoreLDSTile{}, variableType);
+
+    graph = graph.transform(std::make_shared<LoadPacked>(context.get()));
+
+    // After LoadPacked, the {Load | Store}LDSTile::varType should be
+    // the corresponding packed type. The LoadPacked analysis should not
+    // identify the {Load | Store}Tiled operations as applicable for the
+    // transformation in this case, and thus the varType should remain
+    // unchanged.
+    verifyLoadStoreOpVarType(LoadTiled{}, variableType);
+    verifyLoadStoreOpVarType(StoreTiled{}, variableType);
+    verifyLoadStoreOpVarType(LoadLDSTile{}, packedVariableType);
+    verifyLoadStoreOpVarType(StoreLDSTile{}, packedVariableType);
 }
