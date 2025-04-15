@@ -75,9 +75,7 @@ rocshmem_ctx_t ROCSHMEM_HOST_CTX_DEFAULT;
 [[maybe_unused]] __host__ void inline library_init(MPI_Comm comm) {
   assert(!backend);
   int count = 0;
-  if (hipGetDeviceCount(&count) != hipSuccess) {
-    abort();
-  }
+  CHECK_HIP(hipGetDeviceCount(&count));
 
   if (count == 0) {
     printf("No GPU found! \n");

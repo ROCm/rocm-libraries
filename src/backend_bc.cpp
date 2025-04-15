@@ -42,13 +42,10 @@ namespace rocshmem {
   }
 
 Backend::Backend(MPI_Comm comm) : heap{comm} {
-  int num_cus{};
-  if (hipDeviceGetAttribute(&num_cus, hipDeviceAttributeMultiprocessorCount,
-                            0)) {
-    abort();
-  }
-
   CHECK_HIP(hipGetDevice(&hip_dev_id));
+
+  int num_cus{};
+  CHECK_HIP(hipDeviceGetAttribute(&num_cus, hipDeviceAttributeMultiprocessorCount, hip_dev_id));
 
   /*
    * Initialize 'print_lock' global and copy to the device memory space.
