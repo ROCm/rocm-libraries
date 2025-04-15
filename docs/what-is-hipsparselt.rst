@@ -1,7 +1,6 @@
 .. meta::
-   :description: hipSPARSELt is a SPARSE marshalling library that supports rocSPARSELt and cuSPARSELt
-      v0.4 backends
-   :keywords: hipSPARSELt, ROCm, SPARSE, library, API, HIP
+   :description: introduction to the hipSPARSELt SPARSE marshalling library
+   :keywords: hipSPARSELt, ROCm, SPARSE, library, API, HIP, introduction
 
 .. _what-is-hipsparselt:
 
@@ -9,15 +8,15 @@
 What is hipSPARSELt?
 *********************
 
-hipSPARSELt is a SPARSE marshalling library with multiple supported backends. It exposes a common
-interface that provides Basic Linear Algebra Subroutines (BLAS) for sparse computation implemented
-on top of AMD's ROCm runtime and toolchains.
+hipSPARSELt is a SPARSE marshalling library with multiple supported backends. It presents a common
+interface that provides Basic Linear Algebra Subroutines (BLAS) for sparse computation, implemented
+on top of the AMD ROCm runtime and toolchains.
 
-The hipSPARSELt library is created using the `HIP <https://rocm.docs.amd.com/projects/HIP/en/latest/>`_
-programming language and is optimized for AMD's latest discrete GPUs.
+The hipSPARSELt library is created using the :doc:`HIP <hip:index>`
+programming language and is optimized for the latest AMD discrete GPUs.
 
-hipSPARSELt sits between the application and a 'worker' SPARSE library, marshalling inputs into the
-backend library and marshalling results back to the application. It exports an interface that doesn't
-require the client to change, regardless of the chosen backend. Current supported backends are:
+hipSPARSELt sits between the application and a "worker" SPARSE library, marshalling inputs into the
+backend library and results back to the application. It exports an interface that doesn't
+require the client to change, regardless of the chosen backend. The supported backends are:
 `rocSPARSELt <https://github.com/ROCm/hipSPARSELt/tree/develop/library/src/hcc_detail/rocsparselt>`_
-and `cuSPARSELt v0.6.3 <https://docs.nvidia.com/cuda/cusparselt>`_.
+and NVIDIA CUDA `cuSPARSELt v0.6.3 <https://docs.nvidia.com/cuda/cusparselt>`_.

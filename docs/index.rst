@@ -1,6 +1,6 @@
 .. meta::
-  :description: hipSPARSELt documentation and API reference library
-  :keywords: hipSPARSELt, ROCm, API, documentation
+  :description: Introduction to  the hipSPARSELt documentation and API reference library
+  :keywords: hipSPARSELt, ROCm, API, documentation, introduction
 
 .. _hipsparselt-docs-home:
 
@@ -8,30 +8,42 @@
 hipSPARSELt documentation
 ********************************************************************
 
-Welcome to the hipSPARSELt docs home page! To learn more, see :ref:`what-is-hipsparselt`
+hipSPARSELt is a SPARSE marshalling library that presents a common interface for multiple supported backends.
+For more information, see :doc:`What is hipSPARSELt? <./what-is-hipsparselt>`
 
-Our documentation is structured as follows:
+The hipSPARSELt public repository is located at `<https://github.com/ROCm/hipSPARSELt>`_.
 
-.. grid:: 1 2 2 2
+.. grid:: 2
   :gutter: 3
 
-  .. grid-item-card:: Reference
+  .. grid-item-card:: Install
 
-    * :ref:`Supported functions <supported-functions>`
-    * :ref:`Data type support <data-type-support>`
-    * :ref:`Device & stream management <device-stream-manage>`
-    * :ref:`Storage formats <storage-format>`
-    * :ref:`MI300 features <mi300-features>`
-    * :ref:`Porting from CUDA <porting>`
+    * :doc:`Quick start installation guide <./install/quick-start-install>`
+    * :doc:`Detailed installation guide <./install/install-hipsparselt>`
+
+.. grid:: 2
+  :gutter: 3
+
+  .. grid-item-card:: Conceptual
+
+    * :doc:`Storage formats <./conceptual/storage-format>`
+    * :doc:`MI300 features <./conceptual/mi300-features>`
+
+  .. grid-item-card:: How to
+
+    * :doc:`Manage devices and streams <./how-to/device-stream-management>`
+    * :doc:`Port from NVIDIA CUDA <./how-to/porting>`
+
+  .. grid-item-card:: Examples
+
+    * `Client samples <https://github.com/ROCm/hipSPARSELt/tree/develop/clients/samples>`_
+
+  .. grid-item-card:: API Reference
+
+    * :doc:`Supported functions <./reference/supported-functions>`
+    * :doc:`Data type support <./reference/data-type-support>`
     * :doc:`API library <../doxygen/html/index>`
 
-  ..  grid-item-card:: Tutorials
+To contribute to the documentation, see `Contributing to ROCm <https://rocm.docs.amd.com/en/latest/contribute/contributing.html>`_.
 
-    * :ref:`install-linux-quick`
-    * :ref:`install-linux`
-
-To contribute to the documentation refer to
-`Contributing to ROCm  <https://rocm.docs.amd.com/en/latest/contribute/contributing.html>`_.
-
-Licensing information can be found on the
-`Licensing <https://rocm.docs.amd.com/en/latest/about/license.html>`_ page.
+You can find licensing information on the `Licensing <https://rocm.docs.amd.com/en/latest/about/license.html>`_ page.

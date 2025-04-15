@@ -6,32 +6,43 @@ defaults:
 root: index
 subtrees:
 - entries:
-  - file: what-is-hipsparselt.rst
+  - file: what-is-hipsparselt
     title: What is hipSPARSELt?
-  - file: tutorials/quick-start/linux.rst
-    title: Quick-start
 
-- caption: Reference
+- caption: Install
+  entries:
+  - file: install/quick-start-install
+    title: Quick start installation guide
+  - file: install/install-hipsparselt
+    title: Detailed installation guide
+
+- caption: Conceptual
+  entries:
+  - file: conceptual/storage-format
+    title: Storage formats
+  - file: conceptual/mi300-features
+    title: MI300 features
+
+- caption: How to
+  entries:
+  - file: how-to/device-stream-management
+    title: Manage devices and streams
+  - file: how-to/porting
+    title: Port from NVIDIA CUDA
+
+- caption: Examples
+  entries:
+  - url: https://github.com/ROCm/hipSPARSELt/tree/develop/clients/samples
+    title: Client samples
+
+- caption: API Reference
   entries:
     - file: reference/supported-functions.rst
       title: Supported functions
     - file: reference/data-type-support.rst
       title: Data type support
-    - file: reference/device-stream-manage.rst
-      title: Device & stream management
-    - file: reference/storage-format.rst
-      title: Storage formats
-    - file: reference/mi300-features.rst
-      title: MI300 features
-    - file: reference/porting.rst
-      title: Porting from CUDA
     - file: doxygen/html/index
       title: API library
-
-- caption: Tutorials
-  entries:
-    - file: tutorials/install/linux.rst
-      title: Installing and building hipSPARSELt for Linux
 
 - caption: About
   entries:

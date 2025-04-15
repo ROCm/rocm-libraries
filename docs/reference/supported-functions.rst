@@ -6,7 +6,7 @@
 .. _supported-functions:
 
 ******************************************************
-ROCm & CUDA supported functions
+Supported ROCm and CUDA functions
 ******************************************************
 
 * ROCm

@@ -5,7 +5,7 @@
 .. _storage-format:
 
 ********************************
- Storage format
+Storage format
 ********************************
 
 hipSPARSELt uses a structured sparsity storage format, which is represented by an

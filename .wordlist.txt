@@ -7,6 +7,7 @@ cuSPARSELt
 GeLU
 Gemm
 GoogleTest
+hardcodes
 hipSPARSELt
 html
 LeakyReLU

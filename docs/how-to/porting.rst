@@ -5,7 +5,7 @@
 .. _porting:
 
 **********************************************************************
- Porting from CUDA to hipSPARSELt
+Porting from NVIDIA CUDA to hipSPARSELt
 **********************************************************************
 
 The hipSPARSELt interface is compatible with cuSPARSELt APIs. Porting a CUDA application that
