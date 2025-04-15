@@ -1772,24 +1772,23 @@ Tests:
   category: nightly
   function:
     matmul: *real_precisions
-  M: [128]
-  N: [128]
-  K: [2048]
+  matrix_size:
+    - { M:  128,   N:  128,    K:  2048 }
+    - { M:  127,   N:  127,    K:  2047 }
   algo_method: [0,1]
   transA_transB: *transA_transB_range
   alpha: 1
   beta: [0,1]
   requested_solution_num: -1
   unit_check: 1
-  c_equal_d: [0, 1]
 
 - name: matmul_heuristic_all_solutions_real_1byte_fnuz
   category: nightly
   function:
     matmul: *real_precisions_1b_fnuz
-  M: [128]
-  N: [128]
-  K: [2048]
+  matrix_size:
+    - { M:  128,   N:  128,    K:  2048 }
+    - { M:  127,   N:  127,    K:  2047 }
   algo_method: [0,1]
   transA_transB: *transA_transB_range
   alpha: 1
@@ -1797,7 +1796,6 @@ Tests:
   requested_solution_num: -1
   unit_check: 1
   gpu_arch: '942'
-  c_equal_d: [0, 1]
 
 - name: matmul_mx_datatypes
   category: pre_checkin
