@@ -28,7 +28,10 @@ namespace rocisa
     // External structures and functions
     struct rocIsaPassOption
     {
+        bool removeDupFunc   = true;
         bool removeDupAssign = true;
+        bool getCycles       = true;
+        int  numWaves        = 0; // is used when getCycles is true
 
         bool doOpt() const
         {
@@ -36,7 +39,16 @@ namespace rocisa
         }
     };
 
-    void rocIsaPass(std::shared_ptr<KernelBody>& kernel, const rocIsaPassOption& option);
+    struct rocIsaPassResult
+    {
+        int cycles = -1;
+    };
+
+    std::string getActFuncModuleName(int gwvw, int sgpr, int tmpVgpr, int tmpSgpr);
+    std::string getActFuncBranchModuleName();
+
+    rocIsaPassResult rocIsaPass(std::shared_ptr<KernelBody>& kernel,
+                                const rocIsaPassOption& option); // Return value is std::move()d
 
     // Internal use only
     struct Graph
@@ -76,8 +88,8 @@ namespace rocisa
         std::shared_ptr<Item> _item;
     };
 
+    void removeDuplicatedFunction(std::shared_ptr<Module> module);
     void compositeToInstruction(std::shared_ptr<Module>& module);
-
     std::unordered_map<std::string, int>
           getAssignmentDict(const std::shared_ptr<Module>& module); // Return value is std::move()d
     Graph buildGraph(
@@ -86,4 +98,6 @@ namespace rocisa
         int                                   sgprMax,
         std::unordered_map<std::string, int>& assignmentDict); // Return value is std::move()d
     void removeDuplicateAssignment(Graph& graph);
+
+    int getCycles(std::shared_ptr<Module> module, int numWaves);
 } // namespace rocisa

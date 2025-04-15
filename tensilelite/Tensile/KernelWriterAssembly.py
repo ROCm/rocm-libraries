@@ -22,7 +22,9 @@
 #
 ################################################################################
 
+
 from rocisa import countInstruction, countGlobalRead, countSMemLoad
+from rocisa.asmpass import getActFuncModuleName, getActFuncBranchModuleName
 from rocisa.code import KernelBody, Label, Macro, Module, RegSet, SrdUpperValue, \
                         StructuredModule, TextBlock, ValueEndif, ValueIf, ValueSet, SignatureBase
 from rocisa.container import DSModifiers, SDWAModifiers, VOP3PModifiers, \
@@ -46,7 +48,6 @@ from .TensileInstructions import SelectBit, \
                           dataTypeToMfmaInstTypePair, dataTypeNameAbbrevToInstType, \
                           Assert
 from .TensileInstructions.Instructions import *
-from .TensilePass import getActivationFunctionModuleName, getActivationBranchModuleName
 from .Component import Component
 from .KernelWriterModules import *
 from .SolutionStructs import isPackedIndex
@@ -11293,7 +11294,7 @@ class KernelWriterAssembly(KernelWriter):
         assert activationEnumStrList and activationSetPCStruct
         for key, activationLabelModules in activationLabelList.items():
           gwvw = key
-          actModules = Module(getActivationFunctionModuleName(gwvw, \
+          actModules = Module(getActFuncModuleName(gwvw, \
             activationSetPCStruct.vgprActCopy, tmpVgpr.idx, actTempSgpr))
           for index, activationLabelModule in enumerate(activationLabelModules):
             actModule = Module(activationLabelModule.getLabelName())
@@ -11723,7 +11724,7 @@ class KernelWriterAssembly(KernelWriter):
           dst = vgpr(destVgpr, rpv//4)
           rv.add(BufferLoadB128(dst=dst, vaddr=addr0, saddr=addr1, \
                                 soffset=soffset, mubuf=mubuf, comment=comment))
-          
+
           mubuf2 = MUBUFModifiers(offen=True, offset12=int(offset + bpl/4), glc=glc, slc=slc, nt=nt, lds=lds)
           dst2 = destVgpr + "+" + str(int(rpv//4)) if isinstance(destVgpr, str) else int(destVgpr + int(rpv//4))
 
@@ -11733,14 +11734,14 @@ class KernelWriterAssembly(KernelWriter):
           #+0.5
           mubuf3 = MUBUFModifiers(offen=True, offset12=int(offset + bpl/2), glc=glc, slc=slc, nt=nt, lds=lds)
           dst3 = destVgpr + "+" + str(int(rpv//2)) if isinstance(destVgpr, str) else int(destVgpr + int(rpv//2))
-          
+
           dst = vgpr(dst3, rpv//4)
           rv.add(BufferLoadB128(dst=dst, vaddr=addr0, saddr=addr1, \
                                 soffset=soffset, mubuf=mubuf3, comment=comment))
           #+0.75
           mubuf4 = MUBUFModifiers(offen=True, offset12= int(offset + 3*bpl/4), glc=glc, slc=slc, nt=nt, lds=lds)
           dst4 = destVgpr + "+" + str(3*int(rpv//4)) if isinstance(destVgpr, str) else int(destVgpr + 3*int(rpv//4))
-          
+
           dst = vgpr(dst4, rpv//4)
           rv.add(BufferLoadB128(dst=dst, vaddr=addr0, saddr=addr1, \
                                 soffset=soffset, mubuf=mubuf4, comment=comment))
@@ -13118,7 +13119,7 @@ class KernelWriterAssembly(KernelWriter):
     toActModuleList, activationEnumStrList, activationLabelList, \
     betaIdx = -1, edgeIdx = -1):
     activationLabelModules = activationLabelList[gwvw]
-    module = Module(getActivationBranchModuleName())
+    module = Module(getActFuncBranchModuleName())
     setAddrEndLabel = Label(self.labels.getNameInc("ActivationSetPCAddrEnd"), "")
     toActModules = deepcopy(toActModuleList[gwvw])
     for index, toActModule in enumerate(toActModules):

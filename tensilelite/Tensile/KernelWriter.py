@@ -27,14 +27,13 @@ from rocisa import rocIsa, countInstruction, countGlobalRead, \
 from rocisa.code import Module, TextBlock, StructuredModule, KernelBody
 from rocisa.container import RegisterContainer
 from rocisa.label import LabelManager
-from rocisa.asmpass import rocIsaPass, rocIsaPassOption
+from rocisa.asmpass import rocIsaPass, rocIsaPassOption, rocIsaPassResult
 from rocisa.instruction import SLongBranchPositive
 from .TensileInstructions import replaceHolder, \
                           Dump, RegisterPool, Assert, \
                           SBranch, SCBranchSCC0, SCBranchSCC1
 from .TensileInstructions.Instructions import *
 from .KernelWriterModules import *
-from .TensilePass import TensilePass, TensilePassOptions, TensilePassGetCycles
 from .Component import Component, LraTileProperties
 from .Components.Signature import UserArgumentsInfo
 from .SolutionStructs import Solution, isPackedIndex
@@ -536,7 +535,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     globalReadIncACode  = self.codes.globalReadIncrements.findNamedItem("globalReadIncrementA")
     globalReadIncBCode  = self.codes.globalReadIncrements.findNamedItem("globalReadIncrementB")
-  
+
     if skipGlobalReadInc:
       globalReadIncACode  = Module()
       globalReadIncBCode  = Module()
@@ -1079,7 +1078,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       insertedPackA = 0
       insertedPackB = 0
       insertedPackM = 0
-      
+
       def hasDependency(lr: DSLoadInstruction, inst: Instruction) -> bool:
         lrDataReg = lr.dst
 
@@ -3233,13 +3232,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     module.add(self.functionEnd(kernel, addLabel=True))
 
-    # Tensile pass
-    tpo = TensilePassOptions()
-    tpo.removeDupActFunc    = kernel["ActivationFuncCall"]
-    tpo.calculateMathClocks = True
-    numWaves                = kernel["NumThreads"] // kernel["WavefrontSize"]
-    TensilePass(module, tpo)
-    kernel["MathClocksUnrolledLoop"] = TensilePassGetCycles(module, tpo, numWaves)
     # Add a label at the end of the asm for indexing.
     module.add(Label("ASM_End", "The end of the kernel"))
 
@@ -3250,9 +3242,13 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # Kernels with epilog especially with activation is too long (50000~ lines).
     # Need to refactor global write elements.
     ripo = rocIsaPassOption()
+    ripo.removeDupFunc = bool(kernel["ActivationFuncCall"])
+    ripo.numWaves = kernel["NumThreads"] // kernel["WavefrontSize"]
     if kernel["ProblemType"]["ActivationType"] == "all":
       ripo.removeDupAssign = False
-    rocIsaPass(moduleKernelBody, ripo)
+    passResult = rocIsaPass(moduleKernelBody, ripo)
+    kernel["MathClocksUnrolledLoop"] = passResult.cycles
+
 
     error = self.states.overflowedResources
     print2(f"  found error code {error} with overflowed resources set to {self.states.overflowedResources}")
@@ -3948,10 +3944,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
     self.states.b.numVgprLocalWriteAddr = 0 if kernel["LocalWriteUseSgprB"] else 1 * self.states.rpla
 
     if self.states.archCaps["HasLDSGT64K"] and not kernel["LocalWriteUseSgprA"] :
-      if (kernel["LdsOffsetA_Blk"]>=131072 and kernel["ExpandPointerSwap"]) or kernel["LdsNumElementsAlignedA"]>=131072:      
+      if (kernel["LdsOffsetA_Blk"]>=131072 and kernel["ExpandPointerSwap"]) or kernel["LdsNumElementsAlignedA"]>=131072:
         self.states.a.numVgprLocalReadAddr =3* self.states.rpla
         self.states.a.numVgprLocalWriteAddr = 3* self.states.rpla
-      elif (kernel["LdsOffsetA_Blk"]>=65536 and kernel["ExpandPointerSwap"])or kernel["LdsNumElementsAlignedA"]>=65536: 
+      elif (kernel["LdsOffsetA_Blk"]>=65536 and kernel["ExpandPointerSwap"])or kernel["LdsNumElementsAlignedA"]>=65536:
         self.states.a.numVgprLocalReadAddr =2* self.states.rpla
         self.states.a.numVgprLocalWriteAddr = 2* self.states.rpla
 
@@ -4143,7 +4139,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         vgprIdx += 2
     # dot2: alignment hack for wider local read
     if kernel["UseDotInstruction"] and kernel["InnerUnroll"] > 1:
-      vgprIdx = ((vgprIdx+3)//4)*4 
+      vgprIdx = ((vgprIdx+3)//4)*4
     self.states.a.startVgprValu  = vgprIdx
     self.states.startVgpr        = vgprIdx
     vgprIdx += self.states.a.numVgprValu
