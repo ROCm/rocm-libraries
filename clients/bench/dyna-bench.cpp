@@ -458,7 +458,10 @@ int main(int argc, char* argv[])
             params.mp_lib = fft_params::fft_mp_lib_none;
 
             int localDeviceCount = 0;
-            (void)hipGetDeviceCount(&localDeviceCount);
+            if(hipGetDeviceCount(&localDeviceCount) != hipSuccess)
+            {
+                throw std::runtime_error("hipGetDeviceCount failed");
+            }
 
             // start with all-ones in grids
             std::vector<unsigned int> input_grid(params.length.size() + 1, 1);

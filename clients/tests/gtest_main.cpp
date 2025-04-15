@@ -81,6 +81,9 @@ size_t ramgb;
 // Device memory limitation for tests (GiB):
 size_t vramgb;
 
+// Number of hip devices to use.
+int ngpus{};
+
 // Allow skipping tests if there is a runtime error
 bool skip_runtime_fails;
 // But count the number of failures
@@ -166,11 +169,8 @@ void init_gtest_flags()
     std::swap(temp_list_tests, testing::GTEST_FLAG(list_tests));
 }
 
-void precompile_test_kernels(const std::string& precompile_file)
+std::vector<std::string> tokens_to_run()
 {
-    std::cout << "precompiling test kernels...\n";
-    WorkQueue<std::string> tokenQueue;
-
     init_gtest_flags();
 
     std::vector<std::string> tokens;
@@ -218,6 +218,15 @@ void precompile_test_kernels(const std::string& precompile_file)
             }
         }
     }
+    return tokens;
+}
+
+void precompile_test_kernels(const std::string& precompile_file)
+{
+    std::cout << "precompiling test kernels...\n";
+    WorkQueue<std::string> tokenQueue;
+
+    auto tokens = tokens_to_run();
 
     std::random_device dev;
     std::mt19937       dist(dev());
@@ -319,6 +328,11 @@ int main(int argc, char* argv[])
     app.add_option("-v, --verbose", verbose, "Print out detailed information for the tests")
         ->default_val(0);
     app.add_option("--nrand", n_random_tests, "Number of extra randomized tests")->default_val(0);
+
+    app.add_option("--ngpus", ngpus, "Number of GPUs to use per rank")
+        ->default_val(-1)
+        ->check(CLI::NonNegativeNumber);
+    app.add_option("--gpus", n_random_tests, "Number of extra randomized tests")->default_val(0);
     app.add_option("--test_prob", test_prob, "Probability of running individual tests")
         ->default_val(1.0)
         ->check(CLI::Range(0.0, 1.0));
@@ -411,7 +425,7 @@ int main(int argc, char* argv[])
             if(mp_lib == fft_params::fft_mp_lib_none)
             {
                 std::cout << "--mp_launch requires an mp library (see mp_lib in --help).\n";
-                std::exit(-1);
+                std::exit(EXIT_FAILURE);
             }
         })
         ->needs("--mp_lib");
@@ -454,7 +468,7 @@ int main(int argc, char* argv[])
             std::cout << "Generating random seed: ";
             std::random_device dev;
             random_seed = dev();
-            std::cout << random_seed << "\n";
+            std::cout << random_seed << std::endl;
         }
     }
 
@@ -487,6 +501,9 @@ int main(int argc, char* argv[])
 
     // Full path to bitwise repro database file
     std::string repro_db_path;
+
+    // Bool option to just print tokens and exit
+    bool printtokens{false};
 
     // Declare the supported options. Some option pointers are declared to track passed opts.
     app.add_flag("--version", "Print queryable version information from the rocfft library")
@@ -576,6 +593,7 @@ int main(int argc, char* argv[])
                    precompile_file,
                    "Precompile kernels to a file for all test cases before running tests")
         ->default_val("");
+    app.add_flag("--printtokens", printtokens, "Print test tokens to scheduled to be run and exit");
     // Default value is set in fft_params.h based on if device-side PRNG was enabled.
     app.add_option("-g, --inputGen",
                    manual_params.igen,
@@ -612,8 +630,8 @@ int main(int argc, char* argv[])
     }
 
     std::cout << "half epsilon: " << half_epsilon << "\tsingle epsilon: " << single_epsilon
-              << "\tdouble epsilon: " << double_epsilon << "\n";
-    std::cout << "Random seed: " << random_seed << "\n";
+              << "\tdouble epsilon: " << double_epsilon << std::endl;
+    std::cout << "Random seed: " << random_seed << std::endl;
 
     // If precompiling, tell rocFFT to use the specified cache file
     // to write kernels to
@@ -628,9 +646,11 @@ int main(int argc, char* argv[])
     }
 
     rocfft_setup();
-    char v[256];
-    rocfft_get_version_string(v, 256);
-    std::cout << "rocFFT version: " << v << "\n";
+    {
+        char v[256];
+        rocfft_get_version_string(v, 256);
+        std::cout << "rocFFT version: " << v << std::endl;
+    }
 
 #ifdef FFTW_MULTITHREAD
     fftw_init_threads();
@@ -693,7 +713,7 @@ int main(int argc, char* argv[])
 
     if(!test_token.empty())
     {
-        std::cout << "Reading fft params from token:\n" << test_token << "\n";
+        std::cout << "Reading fft params from token:\n" << test_token << std::endl;
 
         try
         {
@@ -701,8 +721,8 @@ int main(int argc, char* argv[])
         }
         catch(...)
         {
-            std::cout << "Unable to parse token.\n";
-            return 1;
+            std::cout << "Unable to parse token." << std::endl;
+            return EXIT_FAILURE;
         }
     }
     else
@@ -729,6 +749,17 @@ int main(int argc, char* argv[])
     if(!precompile_file.empty())
         precompile_test_kernels(precompile_file);
 
+    if(printtokens)
+    {
+        std::cout << "Tokens:" << std::endl;
+        const auto tokens = tokens_to_run();
+        for(const auto& token : tokens)
+        {
+            std::cout << token << std::endl;
+        }
+        return EXIT_SUCCESS;
+    }
+
     auto retval = RUN_ALL_TESTS();
 
     if(use_fftw_wisdom)
@@ -749,7 +780,8 @@ int main(int argc, char* argv[])
     const auto test_minutes
         = std::chrono::duration_cast<std::chrono::minutes>(test_duration - test_hours);
     std::cout << "Test suite took " << test_hours.count() << " hours " << test_minutes.count()
-              << " minutes\n\n";
+              << " minutes\n"
+              << std::endl;
 
     std::cout << "half precision max l-inf epsilon: " << max_linf_eps_half << "\n";
     std::cout << "half precision max l2 epsilon:     " << max_l2_eps_half << "\n";
@@ -763,7 +795,7 @@ int main(int argc, char* argv[])
     std::cout << "Number of skipped tests: "
               << ::testing::UnitTest::GetInstance()->skipped_test_count() << "\n";
 
-    std::cout << "\nRandom seed: " << random_seed << "\n";
+    std::cout << "\nRandom seed: " << random_seed << std::endl;
 
     return retval;
 }

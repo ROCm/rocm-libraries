@@ -2355,7 +2355,9 @@ public:
             // otherwise split across bricks.  assume there's one
             // rank/device per brick
             if(mp_lib == fft_mp_lib_none)
+            {
                 b.device = brickIdx++;
+            }
             else
             {
                 int rank = brickIdx / ngpus; // determine MPI rank

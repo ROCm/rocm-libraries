@@ -49,19 +49,30 @@ enum SplitType
     PENCIL_3D,
 };
 
-std::vector<fft_params> param_generator_multi_gpu(const SplitType type)
+std::vector<fft_params> param_generator_multi_gpu(const SplitType type, const int ngpus)
 {
     int localDeviceCount = 0;
-    (void)hipGetDeviceCount(&localDeviceCount);
+    if(ngpus <= 0)
+    {
+        // Use the command-line option as a priority
+        if(hipGetDeviceCount(&localDeviceCount) != hipSuccess)
+        {
+            throw std::runtime_error("hipGetDeviceCount failed");
+        }
+
+        // Limit local device testing to 16 GPUs, as we have some
+        // bottlenecks with larger device counts that unreasonably slow
+        // down plan creation
+        localDeviceCount = std::min<int>(16, localDeviceCount);
+    }
+    else
+    {
+        localDeviceCount = ngpus;
+    }
 
     // need multiple devices or multiprocessing to test anything
     if(localDeviceCount < 2 && mp_lib == fft_params::fft_mp_lib_none)
         return {};
-
-    // limit local device testing to 16 GPUs, as we have some
-    // bottlenecks with larger device counts that unreasonably slow
-    // down plan creation
-    localDeviceCount = std::min<int>(16, localDeviceCount);
 
     auto params_complex = param_generator_complex(test_prob,
                                                   multi_gpu_sizes,
@@ -165,30 +176,30 @@ std::vector<fft_params> param_generator_multi_gpu(const SplitType type)
 // split both input and output on slowest FFT dim
 INSTANTIATE_TEST_SUITE_P(multi_gpu_slowest_dim,
                          accuracy_test,
-                         ::testing::ValuesIn(param_generator_multi_gpu(SLOW_INOUT)),
+                         ::testing::ValuesIn(param_generator_multi_gpu(SLOW_INOUT, ngpus)),
                          accuracy_test::TestName);
 
 // split slowest FFT dim only on input, or only on output
 INSTANTIATE_TEST_SUITE_P(multi_gpu_slowest_input_dim,
                          accuracy_test,
-                         ::testing::ValuesIn(param_generator_multi_gpu(SLOW_IN)),
+                         ::testing::ValuesIn(param_generator_multi_gpu(SLOW_IN, ngpus)),
                          accuracy_test::TestName);
 INSTANTIATE_TEST_SUITE_P(multi_gpu_slowest_output_dim,
                          accuracy_test,
-                         ::testing::ValuesIn(param_generator_multi_gpu(SLOW_OUT)),
+                         ::testing::ValuesIn(param_generator_multi_gpu(SLOW_OUT, ngpus)),
                          accuracy_test::TestName);
 
 // split input on slowest FFT and output on fastest, to minimize data
 // movement (only makes sense for rank-2 and higher FFTs)
 INSTANTIATE_TEST_SUITE_P(multi_gpu_slowin_fastout,
                          accuracy_test,
-                         ::testing::ValuesIn(param_generator_multi_gpu(SLOW_IN_FAST_OUT)),
+                         ::testing::ValuesIn(param_generator_multi_gpu(SLOW_IN_FAST_OUT, ngpus)),
                          accuracy_test::TestName);
 
 // 3D pencil decompositions
 INSTANTIATE_TEST_SUITE_P(multi_gpu_3d_pencils,
                          accuracy_test,
-                         ::testing::ValuesIn(param_generator_multi_gpu(PENCIL_3D)),
+                         ::testing::ValuesIn(param_generator_multi_gpu(PENCIL_3D, ngpus)),
                          accuracy_test::TestName);
 
 TEST(multi_gpu_validate, catch_validation_errors)
@@ -204,7 +215,7 @@ TEST(multi_gpu_validate, catch_validation_errors)
     for(auto type : all_split_types)
     {
         // gather all of the multi-GPU test cases
-        auto params = param_generator_multi_gpu(type);
+        auto params = param_generator_multi_gpu(type, ngpus);
 
         for(size_t i = 0; i < params.size(); ++i)
         {
@@ -309,7 +320,23 @@ static const auto multi_gpu_tokens = {
 std::vector<fft_params> param_generator_multi_gpu_adhoc()
 {
     int localDeviceCount = 0;
-    (void)hipGetDeviceCount(&localDeviceCount);
+    if(ngpus <= 0)
+    {
+        // Use the command-line option as a priority
+        if(hipGetDeviceCount(&localDeviceCount) != hipSuccess)
+        {
+            throw std::runtime_error("hipGetDeviceCount failed");
+        }
+
+        // Limit local device testing to 16 GPUs, as we have some
+        // bottlenecks with larger device counts that unreasonably slow
+        // down plan creation
+        localDeviceCount = std::min<int>(16, localDeviceCount);
+    }
+    else
+    {
+        localDeviceCount = ngpus;
+    }
 
     auto all_params = param_generator_token(test_prob, multi_gpu_tokens);
 
