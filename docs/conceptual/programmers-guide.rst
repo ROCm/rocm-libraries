@@ -6,7 +6,7 @@
 .. _programmers-guide:
 
 ===================
-Programmer's guide
+Programming guide
 ===================
 
 This document provides insight into the library design choices, source code organization and helpful information for new development.
