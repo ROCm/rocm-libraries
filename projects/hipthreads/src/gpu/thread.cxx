@@ -4,9 +4,6 @@ namespace gpu {
 
 namespace internal {
 
-
-__device__ uint32_t numVcores = NUM_VCORES;
-
 template <size_t queueSize>
 struct WorkQueue {
     uint32_t popCount = 0;
@@ -50,8 +47,10 @@ std::atomic<uint32_t> cpuWorkQueuePushCount = 0;
 
 __device__ WorkQueue<MAIN_WORK_QUEUE_SIZE> mainWorkQueue;
 
+__device__ uint32_t numVcores = 0;
 __device__ uint32_t activeVcoreCount = 0;
-__device__ WorkNode_Header *currentWorkNode[NUM_VCORES] = {};
+// Server GPUs can have CU/WGP counts in the hundreds, and we spawn multiple vcores per WGP.
+__device__ WorkNode_Header *currentWorkNode[8192] = {};
 
 hipStream_t mainStream;
 std::atomic<uint32_t> gpuThreadFromHost_counter = 0;
@@ -307,7 +306,11 @@ static __host__ void prepDeviceForWork() {
     }(), -1U);
 
     // cpuWorkQueue.pushCount is initialized to -1U, so we don't need to do this the first time through
-    if (!isFirstTime) {
+    if (isFirstTime) {
+        // Initalize numVcores, so device code can call gpu::thread::hardware_concurrency
+        static uint32_t temp2 = gpu::thread::hardware_concurrency();
+        __LIBGPU_HIP_CHECK__(hipMemcpyToSymbolAsync(HIP_SYMBOL(numVcores), &temp2, sizeof(temp2), 0, hipMemcpyHostToDevice, getEnqueingStream()));
+    } else {
         // Tell the device there's work coming, so threading_main doesn't immediately return. This has to happen on the
         // EnqueingStream because notifyDeviceThereMightNotBeAnyMoreWork does its copy in that stream, and we need to make
         // sure the change made by the last thread's destructor doesn't get over-written
@@ -594,17 +597,21 @@ __host__ __device__ void thread::detach() {
 [[gnu::const]]
 __host__ unsigned int thread::hardware_concurrency() noexcept {
     try {
-        static uint32_t cachedNumVcores = [](){
-            uint32_t temp;
-            __LIBGPU_HIP_CHECK__(hipMemcpyFromSymbol(&temp, HIP_SYMBOL(numVcores), sizeof(temp), 0, hipMemcpyDeviceToHost));
+        static uint32_t multiprocessorCount = [](){
+            int temp;
+            __LIBGPU_HIP_CHECK__(hipDeviceGetAttribute(&temp, hipDeviceAttributeMultiprocessorCount, 0));
+            // __LIBGPU_HIP_CHECK__(hipDeviceGetAttribute(&physicalMultiProcessorCount, hipDeviceAttributePhysicalMultiProcessorCount, 0));
             return temp;
         }();
-        return cachedNumVcores;
+        // TODO: Make this multiplier configurable
+        return multiprocessorCount * 16;
     }
     catch (...) {
-        std::cerr << "Exception while fetching numVcores\n";
+        std::cerr << "Exception while fetching multiprocessorCount\n";
         return 1;
     }
 }
-
+__device__ unsigned int thread::hardware_concurrency() noexcept {
+    return numVcores;
+}
 }
