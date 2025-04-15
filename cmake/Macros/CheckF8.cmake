@@ -3,6 +3,7 @@ macro(check_f8 RESULT_VAR)
   # Create a temporary source file
   file(WRITE ${CMAKE_BINARY_DIR}/CheckF8.cxx
     "
+    #include <hip/hip_runtime.h>
     #include <hip/hip_fp8.h>
     struct __hip_fp8_e5m2 e5m2;
     struct __hip_fp8_e4m3 e4m3;
