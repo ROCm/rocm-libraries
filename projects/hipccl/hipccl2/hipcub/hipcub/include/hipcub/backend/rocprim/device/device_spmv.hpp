@@ -36,6 +36,8 @@
 #include "../iterator/tex_ref_input_iterator.hpp"
 #include "../util_sync.hpp"
 
+#include <chrono>
+
 BEGIN_HIPCUB_NAMESPACE
 
 class DeviceSpmv

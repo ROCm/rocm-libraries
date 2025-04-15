@@ -41,6 +41,7 @@
 
 #include <rocprim/device/device_segmented_reduce.hpp>
 
+#include <chrono>
 #include <iterator>
 #include <limits>
 

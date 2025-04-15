@@ -32,6 +32,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <numeric>
+#include <chrono>
 
 // Google Benchmark
 #include "benchmark/benchmark.h"
