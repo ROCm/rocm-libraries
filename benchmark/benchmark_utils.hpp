@@ -1048,6 +1048,14 @@ public:
         }
         HIP_CHECK(hipDeviceSynchronize());
 
+        if(run_before_every_iteration_lambda && batch_iterations > 1 && record_as_whole)
+        {
+            std::cerr << "Error: This benchmark calls run_before_every_iteration() and has a "
+                         "batch_iterations count that is higher than 1, which means it does not "
+                         "support using --record_as_whole.\n";
+            exit(EXIT_FAILURE);
+        }
+
         // Run
         for(auto _ : gbench_state)
         {
@@ -1055,11 +1063,6 @@ public:
             {
                 if(run_before_every_iteration_lambda)
                 {
-                    assert(
-                        batch_iterations == 1
-                        && "Must use a batch_iterations count of 1, when having called "
-                           "run_before_every_iteration() and having set record_as_whole to true");
-
                     run_before_every_iteration_lambda();
                 }
 
