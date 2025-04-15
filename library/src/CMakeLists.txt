@@ -40,6 +40,9 @@ prepend_path( ".." hipblas_headers_public relative_hipblas_headers_public )
 
 if(HIP_PLATFORM STREQUAL amd)
   set( hipblas_source "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/hipblas.cpp" )
+
+  message(STATUS "** NOTE: amd_detail/hipblas.cpp is compiled with the verbose flag -v for QC purposes.")
+  SET_SOURCE_FILES_PROPERTIES( ${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/hipblas.cpp PROPERTIES COMPILE_FLAGS "-v" )
 else( )
   set( hipblas_source "${CMAKE_CURRENT_SOURCE_DIR}/nvidia_detail/hipblas.cpp" )
 endif( )
