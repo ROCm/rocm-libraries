@@ -171,9 +171,12 @@ include(FetchContent)
 if(USE_ROCROLLER)
   _save_var(BUILD_TESTING)
   _save_var(BUILD_CLIENTS)
+  _save_var(CMAKE_SHARED_LINKER_FLAGS)
+  _save_var(CMAKE_VISIBILITY_INLINES_HIDDEN)
   set(BUILD_CLIENTS OFF)
   set(BUILD_TESTING OFF)
-
+  set(CMAKE_SHARED_LINKER_FLAGS "-Wl,--exclude-libs,ALL")
+  set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
   FetchContent_Declare(
     rocRoller
     GIT_REPOSITORY https://github.com/ROCm/rocRoller.git
@@ -185,6 +188,8 @@ if(USE_ROCROLLER)
 
   _restore_var(BUILD_TESTING)
   _restore_var(BUILD_CLIENTS)
+  _restore_var(CMAKE_SHARED_LINKER_FLAGS)
+  _restore_var(CMAKE_VISIBILITY_INLINES_HIDDEN)
 endif()
 
 # Target properties
