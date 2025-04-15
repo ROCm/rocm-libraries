@@ -290,13 +290,19 @@ static __host__ void prepDeviceForWork() {
     if (gpuThreadFromHost_counter++ != 0) {
         return;
     }
+    // 1 zero followed by 511 ones
+    static constexpr uint32_t cuMask[] = {
+        0x7FFFFFFFU, 0xFFFFFFFFU, 0xFFFFFFFFU, 0xFFFFFFFFU, 0xFFFFFFFFU, 0xFFFFFFFFU, 0xFFFFFFFFU, 0xFFFFFFFFU,
+        0xFFFFFFFFU, 0xFFFFFFFFU, 0xFFFFFFFFU, 0xFFFFFFFFU, 0xFFFFFFFFU, 0xFFFFFFFFU, 0xFFFFFFFFU, 0xFFFFFFFFU
+    };
+
     bool isFirstTime = false;
     // This bit serves 2 purposes: The lambda is a trick to run a code snippet once, then, since we have to allocate a
     // variable for the trick anyways, and we also need some persistent memory to copy from when setting
     // cpuWorkQueue.pushCount = -1U, we'll use temp for that purpose too.
     static uint32_t temp = ([&isFirstTime]() {
         // TODO: investigate using hipExtStreamCreateWithCUMask for this
-        __LIBGPU_HIP_CHECK__(hipStreamCreateWithFlags(&mainStream, hipStreamNonBlocking));
+        __LIBGPU_HIP_CHECK__(hipExtStreamCreateWithCUMask(&mainStream, sizeof(cuMask)/sizeof(cuMask[0]), cuMask));
         isFirstTime = true;
     }(), -1U);
 
