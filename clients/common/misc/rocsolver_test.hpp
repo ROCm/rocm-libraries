@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -45,10 +45,6 @@ namespace fs = std::experimental::filesystem;
 #include <fmt/ostream.h>
 #include <fmt/ranges.h>
 #include <rocblas/rocblas.h>
-
-// If USE_ROCBLAS_REALLOC_ON_DEMAND is false, automatic reallocation is disable and we will manually
-// reallocate workspace
-#define USE_ROCBLAS_REALLOC_ON_DEMAND true
 
 #ifdef ROCSOLVER_CLIENTS_TEST
 #define ROCSOLVER_TEST_CHECK(T, max_error, tol) ASSERT_LE((max_error), (tol)*get_epsilon<T>())

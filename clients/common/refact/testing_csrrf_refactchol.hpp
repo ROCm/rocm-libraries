@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -400,7 +400,7 @@ void testing_csrrf_refactchol(Arguments& argus)
     }
 
     // memory size query if necessary
-    if(argus.mem_query || !USE_ROCBLAS_REALLOC_ON_DEMAND)
+    if(argus.mem_query)
     {
         CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query(handle));
         CHECK_ALLOC_QUERY(rocsolver_csrrf_refactchol(handle, n, nnzA, (rocblas_int*)nullptr,
@@ -410,13 +410,9 @@ void testing_csrrf_refactchol(Arguments& argus)
 
         size_t size;
         CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query(handle, &size));
-        if(argus.mem_query)
-        {
-            rocsolver_bench_inform(inform_mem_query, size);
-            return;
-        }
 
-        CHECK_ROCBLAS_ERROR(rocblas_set_device_memory_size(handle, size));
+        rocsolver_bench_inform(inform_mem_query, size);
+        return;
     }
 
     // determine sizes

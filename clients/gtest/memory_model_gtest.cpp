@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2020-2023 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -38,10 +38,6 @@ class checkin_misc_MEMORY_MODEL : public ::testing::Test
 protected:
     void SetUp() override
     {
-        if(char* envvar = getenv("ROCBLAS_DEVICE_MEMORY_SIZE"))
-            GTEST_SKIP() << "Cannot execute in dirty environment; ROCBLAS_DEVICE_MEMORY_SIZE="
-                         << envvar;
-
         ASSERT_EQ(hipMalloc(&dA, sizeof(double) * stA * bc), hipSuccess);
         ASSERT_EQ(hipMalloc(&dP, sizeof(rocblas_int) * stP * bc), hipSuccess);
         ASSERT_EQ(hipMalloc(&dinfo, sizeof(rocblas_int) * bc), hipSuccess);
@@ -49,9 +45,6 @@ protected:
 
     void TearDown() override
     {
-        if(getenv("ROCBLAS_DEVICE_MEMORY_SIZE"))
-            unset_environment_variable("ROCBLAS_DEVICE_MEMORY_SIZE");
-
         ASSERT_EQ(hipFree(dA), hipSuccess);
         ASSERT_EQ(hipFree(dP), hipSuccess);
         ASSERT_EQ(hipFree(dinfo), hipSuccess);
@@ -142,137 +135,6 @@ TEST_F(checkin_misc_MEMORY_MODEL, DISABLED_rocblas_managed)
     EXPECT_EQ(size, size1);
 
     // 16. destroy handle
-    EXPECT_EQ(rocblas_destroy_handle(handle), rocblas_status_success);
-}
-
-TEST_F(checkin_misc_MEMORY_MODEL, user_managed)
-{
-    size_t size;
-    rocblas_status status;
-    rocblas_handle handle;
-
-    /*************************************/
-    /******** user fixed size  ***********/
-    /*************************************/
-
-    // set environment variable to 2MB
-    ASSERT_TRUE(set_environment_variable("ROCBLAS_DEVICE_MEMORY_SIZE", "2000000"));
-
-    // 1. create handle
-    ASSERT_EQ(rocblas_create_handle(&handle), rocblas_status_success);
-
-    // 2. memory size is now fixed by user via the environment variable
-    EXPECT_FALSE(rocblas_is_managing_device_memory(handle));
-
-    // 3. 2MB should be reserved
-    rocblas_get_device_memory_size(handle, &size);
-    EXPECT_EQ(size, 2000000);
-
-    // 4. start query
-    rocblas_start_device_memory_size_query(handle);
-    EXPECT_TRUE(rocblas_is_device_memory_size_query(handle));
-
-    // 5. getrf small will require .5MB
-    status = rocsolver_dgetrf_strided_batched(handle, m_small, n_small, dA, lda, stA, dP, stP,
-                                              dinfo, bc_small);
-    EXPECT_EQ(status, rocblas_status_size_increased);
-
-    // 6. stop query; required size at the end of query (.5MB)
-    rocblas_stop_device_memory_size_query(handle, &size);
-    EXPECT_LT(size, 2000000);
-
-    // 7. device memory size should not change; it should be 2MB
-    rocblas_get_device_memory_size(handle, &size);
-    EXPECT_EQ(size, 2000000);
-
-    // 8. When executing getrf. Enough memory allowing execution to success
-    status = rocsolver_dgetrf_strided_batched(handle, m_small, n_small, dA, lda, stA, dP, stP,
-                                              dinfo, bc_small);
-    EXPECT_EQ(status, rocblas_status_success);
-
-    // 9. device memory size should stay the same (2MB)
-    rocblas_get_device_memory_size(handle, &size);
-    EXPECT_EQ(size, 2000000);
-
-    // 10. start query
-    rocblas_start_device_memory_size_query(handle);
-    EXPECT_TRUE(rocblas_is_device_memory_size_query(handle));
-
-    // 11. getrf baseline will require 54MB
-    status = rocsolver_dgetrf_strided_batched(handle, m, n, dA, lda, stA, dP, stP, dinfo, bc);
-    EXPECT_EQ(status, rocblas_status_size_increased);
-
-    // 12. stop query; required size at the end of query (54MB)
-    rocblas_stop_device_memory_size_query(handle, &size);
-    EXPECT_GT(size, 2000000);
-
-    // 13. device memory size should not change; it should still be 2MB
-    rocblas_get_device_memory_size(handle, &size);
-    EXPECT_EQ(size, 2000000);
-
-    // 14. When executing getrf, device memory is not enough for execution to success
-    status = rocsolver_dgetrf_strided_batched(handle, m, n, dA, lda, stA, dP, stP, dinfo, bc);
-    EXPECT_EQ(status, rocblas_status_memory_error);
-
-    // 15. device memory size should be the same 2MB
-    rocblas_get_device_memory_size(handle, &size);
-    EXPECT_EQ(size, 2000000);
-
-    // 16. set mem size to 0 get rocblas the control back
-    rocblas_set_device_memory_size(handle, 0);
-    EXPECT_TRUE(rocblas_is_managing_device_memory(handle));
-
-    /*************************************/
-    /******** user managed size  **********/
-    /*************************************/
-
-    // 1. set mem size to 2MB
-    rocblas_set_device_memory_size(handle, 2000000);
-    rocblas_get_device_memory_size(handle, &size);
-    EXPECT_EQ(size, 2000000);
-
-    // 2. memory size should now be fixed by the user
-    EXPECT_FALSE(rocblas_is_managing_device_memory(handle));
-
-    // 3. start query
-    rocblas_start_device_memory_size_query(handle);
-    EXPECT_TRUE(rocblas_is_device_memory_size_query(handle));
-
-    // 4. getrf baseline will require 54MB
-    status = rocsolver_dgetrf_strided_batched(handle, m, n, dA, lda, stA, dP, stP, dinfo, bc);
-    EXPECT_EQ(status, rocblas_status_size_increased);
-
-    // 5. call getrf small, which will require less than 54MB and so size will remain unchanged
-    status = rocsolver_dgetrf_strided_batched(handle, m_small, n_small, dA, lda, stA, dP, stP,
-                                              dinfo, bc_small);
-    EXPECT_EQ(status, rocblas_status_size_unchanged);
-
-    // 6. stop query
-    rocblas_stop_device_memory_size_query(handle, &size);
-    EXPECT_GT(size, 2000000);
-
-    // 7. device memory size should not change; it should be 2MB
-    rocblas_get_device_memory_size(handle, &size);
-    EXPECT_EQ(size, 2000000);
-
-    // 8. When executing getrf baseline, device memory is not enough for success
-    status = rocsolver_dgetrf_strided_batched(handle, m, n, dA, lda, stA, dP, stP, dinfo, bc);
-    EXPECT_EQ(status, rocblas_status_memory_error);
-
-    // 9. device memory size should be the same 2MB
-    rocblas_get_device_memory_size(handle, &size);
-    EXPECT_EQ(size, 2000000);
-
-    // 10. set mem size to 100MB
-    rocblas_set_device_memory_size(handle, 100000000);
-    rocblas_get_device_memory_size(handle, &size);
-    EXPECT_EQ(size, 100000000);
-
-    // 11. When executing getrf, device memory should now be enough for execution to success
-    status = rocsolver_dgetrf_strided_batched(handle, m, n, dA, lda, stA, dP, stP, dinfo, bc);
-    EXPECT_EQ(status, rocblas_status_success);
-
-    // 12. destroy handle
     EXPECT_EQ(rocblas_destroy_handle(handle), rocblas_status_success);
 }
 

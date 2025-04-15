@@ -332,7 +332,7 @@ void testing_latrd(Arguments& argus)
     }
 
     // memory size query is necessary
-    if(argus.mem_query || !USE_ROCBLAS_REALLOC_ON_DEMAND)
+    if(argus.mem_query)
     {
         CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query(handle));
         CHECK_ALLOC_QUERY(rocsolver_latrd(handle, uplo, n, k, (T*)nullptr, lda, (S*)nullptr,
@@ -340,13 +340,9 @@ void testing_latrd(Arguments& argus)
 
         size_t size;
         CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query(handle, &size));
-        if(argus.mem_query)
-        {
-            rocsolver_bench_inform(inform_mem_query, size);
-            return;
-        }
 
-        CHECK_ROCBLAS_ERROR(rocblas_set_device_memory_size(handle, size));
+        rocsolver_bench_inform(inform_mem_query, size);
+        return;
     }
 
     // memory allocations
