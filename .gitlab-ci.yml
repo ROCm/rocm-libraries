@@ -174,6 +174,7 @@ build:cmake-minimum-apt:
     - .rules:build
   variables:
     EXTRA_CMAKE_CXX_FLAGS: ""
+    BUILD_TOOL_ARGS: ""
   script:
     - mkdir -p $BUILD_DIR
     - cd $BUILD_DIR
@@ -196,7 +197,7 @@ build:cmake-minimum-apt:
       -D CMAKE_CXX_STANDARD="$BUILD_VERSION"
       -S $CI_PROJECT_DIR
       -B $BUILD_DIR
-    - cmake --build $BUILD_DIR
+    - cmake --build $BUILD_DIR -- ${BUILD_TOOL_ARGS}
   artifacts:
     paths:
       - $BUILD_DIR/.ninja_log
@@ -220,6 +221,12 @@ build:spirv:
     - .cmake-minimum
     - .build:common
   variables:
+    # For unknown reasons spir-v builds ignore 'clang diagnostic' pragmas that
+    # we use to ignore internal deprecations.
+    EXTRA_CMAKE_CXX_FLAGS: "-Wno-deprecated-declarations"
+    # Since not all targets are expected to build, do not stop building other
+    # targets when any target fails.
+    BUILD_TOOL_ARGS: "-k 0"
     GPU_TARGETS: "amdgcnspirv"
   image: "registry.streamhpc.internal/unstable-rocm:main"
   allow_failure: true
@@ -229,6 +236,8 @@ build:spirv:
       - BUILD_TYPE: Release
         BUILD_TARGET: [BENCHMARK, TEST]
         BUILD_VERSION: 17
+  artifacts:
+    when: always
 
 build:cmake-latest:
   stage: build
@@ -413,6 +422,60 @@ test:all-gpus:
   extends:
     - .gpus:rocm
     - .test:common
+    - .rules:test
+
+.test:common-spirv:
+  stage: test
+  tags:
+    - rocm
+    - $GPU
+  extends:
+    - .cmake-minimum
+  allow_failure: true
+  needs:
+    - job: build:spirv
+      parallel:
+        matrix:
+          - BUILD_TYPE: Release
+            BUILD_TARGET: TEST
+            BUILD_VERSION: 17
+  image: "registry.streamhpc.internal/unstable-rocm:main"
+  script:
+    - cd $BUILD_DIR
+    - cmake
+      -D CMAKE_PREFIX_PATH=/opt/rocm
+      -P $CI_PROJECT_DIR/cmake/GenerateResourceSpec.cmake
+    - cat ./resources.json
+    # Parallel execution (with other AMDGPU processes) can oversubscribe the SDMA queue.
+    # This causes the hipMemcpy to fail, which is not reported as an error by HIP.
+    # As a temporary workaround, disable the SDMA for test stability.
+    - HSA_ENABLE_SDMA=0 ctest
+      --output-on-failure
+      --repeat-until-fail 2
+      --resource-spec-file ./resources.json
+      --parallel $PARALLEL_JOBS
+
+test:any-gpu-spirv:
+  variables:
+    GPU: ""
+    PARALLEL_JOBS: 1
+  extends:
+    - .test:common-spirv
+  rules:
+    - if: $CI_MERGE_REQUEST_TITLE =~ /Draft:/ && $CI_MERGE_REQUEST_LABELS !~ /Arch::/
+
+test:label-arch-spirv:
+  extends:
+    - .gpus:rocm
+    - .test:common-spirv
+    - .rules:arch-labels
+
+test:all-gpus-spirv:
+  variables:
+    SHOULD_BE_UNDRAFTED: "true"
+  extends:
+    - .gpus:rocm
+    - .test:common-spirv
     - .rules:test
 
 .test-windows-base:
