@@ -2,18 +2,36 @@
 # These comments will also be removed.
 root: index
 subtrees:
-  - caption:  Install
-    entries:
-    - file: install/installation
-  - caption:  Conceptual
-    entries:
-    - file: conceptual/programmers-guide
-  - caption:  API reference
-    entries:
-    - file: api-reference/api-reference    
-  - caption:  Contribution
-    entries:
-    - file: contribution/contributors-guide    
-  - caption: About
-    entries:
-    - file: license
+
+- entries:
+  - file: what-is-hiptensor.rst
+    title: What is hipTensor?
+
+- caption: Install
+  entries:
+  - file: install/installation
+    title: Installation guide
+
+- caption: Conceptual
+  entries:
+  - file: conceptual/programmers-guide
+    title: Programming guide
+
+- caption: How to
+  entries:
+  - file: contribution/contributors-guide
+    title: Contribute to hipTensor
+
+- caption: Examples
+  entries:
+  - url: https://github.com/ROCm/hipTensor/tree/develop/samples
+    title: Samples
+
+- caption: API reference
+  entries:
+  - file: api-reference/api-reference
+    title: API reference guide
+
+- caption: About
+  entries:
+   - file: license

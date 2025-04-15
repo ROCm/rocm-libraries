@@ -1,5 +1,5 @@
 .. meta::
-   :description: A high-performance HIP library for tensor primitives
+   :description: Introduction to the high-performance hipTensor library for tensor primitives
    :keywords: hipTensor, ROCm, library, API, tool
 
 .. _index:
@@ -8,37 +8,42 @@
 hipTensor documentation
 ===========================
 
-hipTensor is a work-in-progress (WIP) high-performance Heterogeneous-Compute Interface for Portability (HIP) library for tensor primitives. It’s AMD’s C++ library for accelerating tensor primitives, which can leverage specialized GPU matrix cores on AMD’s latest discrete GPUs. hipTensor is currently powered by the composable kernel (CK) library backend. The API is designed to be portable with the NVIDIA CUDA cuTensor library, allowing those users to easily migrate to the AMD platform.
+hipTensor is a high-performance C++ :doc:`HIP <hip:index>` (Heterogeneous-Compute Interface for Portability)
+library for accelerating tensor primitives.
+It leverages specialized GPU matrix cores on the latest AMD discrete GPUs.
+The hipTensor API is designed to be portable with the NVIDIA CUDA cuTensor library,
+letting CUDA users easily migrate to the AMD platform. The hipTensor library is a work in progress (WIP).
+For more information, see :doc:`What is hipTensor? <./what-is-hiptensor>`
 
-The hipTensor API offers functionality for defining tensor data objects and currently supports contraction, permutation and reduction operations on the tensor objects. Users may also control several available logging options. The hipTensor library is bundled with GPU kernel instances, which are automatically selected and invoked to solve problems as defined by the API input parameters. As hipTensor is a WIP, future tensor operation support might include additional element-wise operations and caching of selection instances.
 
-Supporting host code is required for GPU device and memory management. The hipTensor code samples and tests provided are built and launched via the HIP ecosystem within ROCm.
-
-hipTensor library code is open source and available via the `GitHub repository <https://github.com/ROCm/hipTensor>`_.
-
-The documentation is structured as follows:
+The hipTensor public repository is located at `<https://github.com/ROCm/hipTensor>`_.
 
 .. grid:: 2
   :gutter: 3
 
   .. grid-item-card:: Install
 
-    * :ref:`installation`
+    * :doc:`Installation guide <./install/installation>`
+
+.. grid:: 2
+  :gutter: 3
 
   .. grid-item-card:: Conceptual
 
-    * :ref:`programmers-guide`
+    * :doc:`Programming guide <./conceptual/programmers-guide>`
+
+  .. grid-item-card:: How to
+
+    * :doc:`Contribute to hipTensor <./contribution/contributors-guide>`
+
+  .. grid-item-card:: Examples
+
+    * `Samples <https://github.com/ROCm/hipTensor/tree/develop/samples>`_
 
   .. grid-item-card:: API reference
 
-    * :ref:`api-reference`
+    * :doc:`API reference guide <./api-reference/api-reference>`
 
-  .. grid-item-card:: Contribution
+To contribute to the documentation, see `Contributing to ROCm <https://rocm.docs.amd.com/en/latest/contribute/contributing.html>`_.
 
-    * :ref:`contributors-guide`
-
-To contribute to the documentation refer to
-`Contributing to ROCm  <https://rocm.docs.amd.com/en/latest/contribute/contributing.html>`_.
-
-Licensing information can be found on the
-`Licensing <https://rocm.docs.amd.com/en/latest/about/license.html>`_ page.
+You can find licensing information on the `Licensing <https://rocm.docs.amd.com/en/latest/about/license.html>`_ page.

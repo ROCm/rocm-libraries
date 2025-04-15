@@ -22,7 +22,7 @@ Dependencies:
 * Minimum ROCm-cmake version support is 0.8.0.
 * Minimum Composable Kernel version support is composable_kernel 1.1.0 for ROCm 6.0.2 (or ROCm package composablekernel-dev).
 * Minimum HIP runtime version support is 4.3.0 (or ROCm package ROCm hip-runtime-amd).
-* Minimum LLVM dev package version support is 10.0 (available as ROCm package rocm-llvm-dev).
+* Minimum LLVM dev package version support is 7.0 (available as ROCm package rocm-llvm-dev).
 
 Optional:
 

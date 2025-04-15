@@ -17,3 +17,4 @@ mandatorily
 markdownlint
 ol
 rocm
+trinary
