@@ -1217,7 +1217,7 @@ private:
 
     std::vector<hipEvent_t> events;
     std::function<void()>   run_before_every_iteration_lambda = nullptr;
-    size_t                  total_gbench_iterations;
+    size_t                  total_gbench_iterations                 = 0;
     bool                    reset_total_gbench_iterations_every_run = true;
     std::vector<double>     times;
 };

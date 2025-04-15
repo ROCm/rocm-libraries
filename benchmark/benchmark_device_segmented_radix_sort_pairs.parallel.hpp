@@ -214,6 +214,8 @@ public:
 
     void run(benchmark_utils::state&& state) override
     {
+        total_size = 0;
+
         if(segment_counts.size() == 1)
         {
             run_benchmark(std::forward<benchmark_utils::state>(state),
