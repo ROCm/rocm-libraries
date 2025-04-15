@@ -1,3 +1,8 @@
+<!--
+Copyright (C) 2025 Advanced Micro Devices, Inc.
+SPDX-License-Identifier: MIT
+-->
+
 # Custom kernel validation
 
 In the context of TensileCreateLibrary, Custom kernel meta data is taken from the logic
