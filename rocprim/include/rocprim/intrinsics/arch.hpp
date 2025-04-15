@@ -65,7 +65,7 @@ unsigned int size()
     ROCPRIM_HOST_DEVICE ROCPRIM_INLINE
 constexpr unsigned int min_size()
 {
-#if __HIP_DEVICE_COMPILE__
+#if __HIP_DEVICE_COMPILE__ && !__SPIRV__
     #if ROCPRIM_NAVI
     return 32u;
     #endif
@@ -95,7 +95,7 @@ constexpr unsigned int min_size()
     ROCPRIM_HOST_DEVICE ROCPRIM_INLINE
 constexpr unsigned int max_size()
 {
-#if __HIP_DEVICE_COMPILE__
+#if __HIP_DEVICE_COMPILE__ && !__SPIRV__
     return min_size();
 #else
     return ROCPRIM_WARP_SIZE_64;
