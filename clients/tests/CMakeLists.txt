@@ -188,7 +188,7 @@ target_compile_options(hipsparse-test PRIVATE -Wno-unused-command-line-argument 
 target_include_directories(hipsparse-test PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>)
 
 # Target link libraries
-target_link_libraries(hipsparse-test PRIVATE GTest::GTest roc::hipsparse)
+target_link_libraries(hipsparse-test PRIVATE GTest::gtest roc::hipsparse)
 
 # Add OpenMP if available
 if(OPENMP_FOUND AND THREADS_FOUND)
