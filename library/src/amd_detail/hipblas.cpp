@@ -291,9 +291,8 @@ rocblas_gemm_flags hipblasConvertGemmFlags(hipblasGemmFlags_t flags)
         return rocblas_gemm_flags_check_solution_index;
     case HIPBLAS_GEMM_FLAGS_FP16_ALT_IMPL_RNZ:
         return rocblas_gemm_flags_fp16_alt_impl_rnz;
-    default:
-        throw HIPBLAS_STATUS_INVALID_ENUM;
     }
+    throw HIPBLAS_STATUS_INVALID_ENUM;
 }
 
 rocblas_atomics_mode hipblasConvertAtomicsMode(hipblasAtomicsMode_t mode)
@@ -316,6 +315,11 @@ rocblas_math_mode hipblasGetRocblasMathMode(hipblasMath_t mode)
         return rocblas_default_math;
     case HIPBLAS_XF32_XDL_MATH:
         return rocblas_xf32_xdl_math_op;
+    case HIPBLAS_PEDANTIC_MATH:
+    case HIPBLAS_TF32_TENSOR_OP_MATH:
+    case HIPBLAS_MATH_DISALLOW_REDUCED_PRECISION_REDUCTION:
+    case HIPBLAS_TENSOR_OP_MATH:
+        break;
     }
     throw HIPBLAS_STATUS_NOT_SUPPORTED;
 }
