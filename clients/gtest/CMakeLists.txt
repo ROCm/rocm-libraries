@@ -142,7 +142,6 @@ target_include_directories( hipblas-test
     $<BUILD_INTERFACE:${BLAS_INCLUDE_DIR}>
     $<BUILD_INTERFACE:${BLIS_INCLUDE_DIR}>
     $<BUILD_INTERFACE:${FLAME_INCLUDE_DIR}>
-    $<BUILD_INTERFACE:${GTEST_INCLUDE_DIRS}>
     ${ROCM_PATH}/include
 )
 target_include_directories( hipblas_v2-test
@@ -152,12 +151,11 @@ target_include_directories( hipblas_v2-test
     $<BUILD_INTERFACE:${BLAS_INCLUDE_DIR}>
     $<BUILD_INTERFACE:${BLIS_INCLUDE_DIR}>
     $<BUILD_INTERFACE:${FLAME_INCLUDE_DIR}>
-    $<BUILD_INTERFACE:${GTEST_INCLUDE_DIRS}>
     ${ROCM_PATH}/include
 )
 
-target_link_libraries( hipblas-test PRIVATE roc::hipblas ${GTEST_BOTH_LIBRARIES} )
-target_link_libraries( hipblas_v2-test PRIVATE roc::hipblas ${GTEST_BOTH_LIBRARIES} )
+target_link_libraries( hipblas-test PRIVATE roc::hipblas GTest::gtest GTest::gtest_main )
+target_link_libraries( hipblas_v2-test PRIVATE roc::hipblas GTest::gtest GTest::gtest_main )
 
 if (NOT WIN32)
     target_link_libraries( hipblas-test PRIVATE hipblas_fortran_client )
