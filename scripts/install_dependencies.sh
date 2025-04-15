@@ -46,6 +46,7 @@ git clone --recursive $_OMPI_REPO
 cd ompi
 git checkout $_OMPI_COMMIT_HASH
 git submodule update --init --recursive
+pip install -r docs/requirements.txt
 ./autogen.pl
 ./configure --prefix=$_OMPI_INSTALL_DIR  \
             --with-rocm=$_ROCM_DIR       \
