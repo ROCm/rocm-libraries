@@ -24,8 +24,6 @@
 // THE SOFTWARE.
 
 // <cuda/std/functional>
-// TODO(HIP): Add support for functional header.
-// UNSUPPORTED: hipcc
 
 // result_of<Fn(ArgTypes...)>
 
