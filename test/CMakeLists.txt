@@ -230,3 +230,15 @@ add_test(
             --test-command "videodecoderaw"
             -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-VP9.ivf
 )
+
+# 13 - rocDecodeNegativeApiTests
+add_test(
+  NAME
+  rocDecode_Negative_API_Tests
+  COMMAND
+    "${CMAKE_CTEST_COMMAND}"
+            --build-and-test "${ROCM_PATH}/share/rocdecode/test/rocDecodeNegativeApiTests"
+                              "${CMAKE_CURRENT_BINARY_DIR}/rocdecodenegativetest"
+            --build-generator "${CMAKE_GENERATOR}"
+            --test-command "rocdecodenegativetest"
+)
