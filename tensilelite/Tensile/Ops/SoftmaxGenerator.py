@@ -21,6 +21,7 @@
 ################################################################################
 
 from rocisa.container import MUBUFModifiers
+import rocisa.instruction as ri
 from argparse import ArgumentParser
 from dataclasses import dataclass
 from functools import wraps
@@ -539,7 +540,7 @@ class SoftmaxKernelGenerator:
 
         with auto_exec_scope(self.sgpr_pool, module):
             col_reg_idx = self.vgpr_pool.checkOut(1)
-            module.add(ti.vectorStaticRemainder(None, col_reg_idx, self.t_id_reg_idx, self.num_cols, None, None))
+            module.add(ri.vectorStaticRemainder(-1, col_reg_idx, self.t_id_reg_idx, self.num_cols, None, None))
             module.add(ti.VCmpXLtU32(ti.VCC(), ti.vgpr(col_reg_idx), ti.sgpr(n_reg_idx)))
             self.vgpr_pool.checkIn(col_reg_idx)
             local_offset_mod, local_byte_offset_reg_idx = self.local_offset(n_reg_idx)

@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -24,13 +24,13 @@
 
 from rocisa.code import RegSet
 from rocisa.container import EXEC, vgpr, sgpr
+from rocisa.instruction import vectorStaticDivide, vectorStaticRemainder
 from ..Component import SumUnroll
 from ..Common import printExit
 from ..TensileInstructions.ExtInstructions import VCvtBF16toFP32
 from ..TensileInstructions import Module, VDot2F32F16,VDot2F32BF16, SMovB32, VAddU32, VCmpXEqU32, \
     VLShiftLeftB32, VMovB32, VAddF32, SBarrier, SDWAModifiers, SelectBit, VCvtPkFP8toF32, VCvtPkBF8toF32, \
-    staticMultiply, vectorStaticDivide, vectorStaticRemainder, \
-    DSModifiers, SSetMask, DSStoreB16, DSStoreB32, DSStoreB64, \
+    staticMultiply, DSModifiers, SSetMask, DSStoreB16, DSStoreB32, DSStoreB64, \
     ContinuousRegister, log2
 
 class SumUnrollMfma(SumUnroll):

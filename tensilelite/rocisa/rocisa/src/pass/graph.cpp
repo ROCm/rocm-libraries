@@ -101,7 +101,13 @@ namespace rocisa
                         ++i)
                     {
                         auto& gprvec = graph.getGprRef(regContainer->regType);
-                        if(!gprvec[i].empty() && gprvec[i].back() == item)
+                        if(i >= gprvec.size())
+                        {
+                            std::cerr << "regContainer: " << regContainer->toString() << std::endl;
+                            std::cerr << "gprvec.size(): " << gprvec.size() << std::endl;
+                            throw std::runtime_error("GPR index out of range");
+                        }
+                        else if(!gprvec[i].empty() && gprvec[i].back() == item)
                             continue;
                         if(noOpt)
                             gprvec[i].push_back(std::make_shared<NoOptItem>(item));

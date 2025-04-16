@@ -34,6 +34,8 @@
 #include <variant>
 #include <vector>
 
+#define MAKE(FUNCTION, ...) std::make_shared<FUNCTION>(__VA_ARGS__)
+
 using InstructionInput = std::variant<std::shared_ptr<rocisa::Container>, int, double, std::string>;
 
 namespace rocisa

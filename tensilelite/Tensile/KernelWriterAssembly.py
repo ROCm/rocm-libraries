@@ -31,7 +31,8 @@ from rocisa.container import DSModifiers, SDWAModifiers, VOP3PModifiers, \
                       MUBUFModifiers, SMEMModifiers, EXEC, VCC, RegisterContainer, \
                       DPPModifiers, Holder, vgpr, sgpr, accvgpr, mgpr, HWRegContainer, \
                       ContinuousRegister
-from rocisa.instruction import SGetPositivePCOffset, SLongBranchPositive, SCLongBranchScc0, SCLongBranchScc1
+from rocisa.instruction import SGetPositivePCOffset, SLongBranchPositive, SCLongBranchScc0, SCLongBranchScc1, \
+                        vectorStaticDivide, vectorStaticRemainder, vectorUInt32CeilDivideAndRemainder
 from rocisa.enum import InstType
 from rocisa.label import LabelManager
 from rocisa.macro import MacroVMagicDiv, PseudoRandomGenerator
@@ -39,8 +40,8 @@ from . import CUSTOM_KERNEL_PATH
 from .TensileInstructions import SelectBit, \
                           SBranchIfZero, SBranchIfNotZero, SMulInt64to32, DSInit, VCvtBF16toFP32, \
                           ArgumentLoader, bomb, vectorStaticDivideAndRemainder, \
-                          vectorStaticDivide, vectorStaticRemainder, scalarStaticRemainder, \
-                          scalarUInt32RegDivide, scalarUInt32DivideAndRemainder, vectorUInt32CeilDivideAndRemainder, \
+                          scalarStaticRemainder, \
+                          scalarUInt32RegDivide, scalarUInt32DivideAndRemainder, \
                           scalarStaticDivideAndRemainder, scalarStaticCeilDivide, sMagicDiv, staticMultiply, staticMultiplyAdd, \
                           scalarStaticMultiply, \
                           RegisterPool, allocTmpGpr, allocTmpGprList, \
@@ -4031,7 +4032,9 @@ class KernelWriterAssembly(KernelWriter):
           self.vgprPool.checkIn(kidx)
         else:
           sgid = self.vgprPool.checkOut(1) # quotient
-          module.add(vectorStaticDivide(sgid, "Serial", divisor, tmpSgpr, \
+          vtmp = self.vgprPool.checkOut(1) # tmp
+          vCont = ContinuousRegister(vtmp, 1)
+          module.add(vectorStaticDivide(sgid, "Serial", divisor, vCont, \
             "LSU offset: sgid = Serial / subGroup(%u)" % divisor))
           module.add(staticMultiply(vgpr(sgid), vgpr(sgid), mtAddPad, tmpSgprInfo, \
             "LSU offset: lsuoffset = sgid*(MT%u+PAD)"%tile01))
@@ -4042,6 +4045,7 @@ class KernelWriterAssembly(KernelWriter):
           module.add(VAddLShiftLeftU32(dst=finalVgpr, shiftHex=hex(log2(tP["bpe"])), src0=vgpr(sgid), src1=vgpr(tP["gpr"]["lro"]), \
             comment="Final Offset: add padding %u per block %u" % (kernel["LdsPad%s"%tc] * tP["bpeDS"], kernel["LdsBlockSizePerPad%s"%tc])))
           self.vgprPool.checkIn(sgid)
+          self.vgprPool.checkIn(vtmp)
 
       # release resources
       self.vgprPool.checkIn(tP["gpr"]["lro"])
@@ -6110,15 +6114,14 @@ class KernelWriterAssembly(KernelWriter):
     # alloc vgpr
     kReg    = None
     abReg   = None
-    tmpVgpr = None
-    dummy   = None
+    dummy   = -1
 
     if isTail and (kernel["AssertSummationElementMultiple"] % kPerIter != 0):
       kReg    = self.vgprPool.checkOut(1,"kReg") # remainder
       loopCntSgpr = loopCounterName
 
       with self.allocTmpSgpr(1) as tmpSgprInfo:
-        shiftK.add(vectorStaticRemainder(dummy, kReg, "Serial", kernel["NumWaveSplitK"], tmpVgpr, tmpSgprInfo))
+        shiftK.add(vectorStaticRemainder(dummy, kReg, "Serial", kernel["NumWaveSplitK"], None, tmpSgprInfo))
 
       numTmpSgpr = 4 if (vgprPerInput > 2) else 3
 
@@ -6190,8 +6193,6 @@ class KernelWriterAssembly(KernelWriter):
     # release register
     if kReg is not None: self.vgprPool.checkIn(kReg)
     if abReg is not None: self.vgprPool.checkIn(abReg)
-    if tmpVgpr is not None: self.vgprPool.checkIn(tmpVgpr)
-    if dummy is not None: self.vgprPool.checkIn(dummy)
 
     if self.do["MAC"]:
       imod.add(shiftK)
@@ -6262,7 +6263,7 @@ class KernelWriterAssembly(KernelWriter):
     kReg    = None
     abReg   = None
     tmpVgpr = None
-    dummy   = None
+    dummy   = -1
 
     if (numRegistersIn < 1) and ((kernel["UnrollMajorLDSA"] == False) or (kernel["UnrollMajorLDSB"] == False)):
       s_nop = 2
@@ -6838,7 +6839,6 @@ class KernelWriterAssembly(KernelWriter):
     if kReg is not None: self.vgprPool.checkIn(kReg)
     if abReg is not None: self.vgprPool.checkIn(abReg)
     if tmpVgpr is not None: self.vgprPool.checkIn(tmpVgpr)
-    if dummy is not None: self.vgprPool.checkIn(dummy)
 
     mfmaMod = Module("mfmaCode")
     if self.do["MAC"]:

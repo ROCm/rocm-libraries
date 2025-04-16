@@ -53,7 +53,8 @@ set(ROCISAINST_SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/instruction/instruc
                       ${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/instruction/cvt.cpp
                       ${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/instruction/mem.cpp
                       ${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/instruction/mfma.cpp
-                      ${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/instruction/extension.cpp)
+                      ${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/instruction/extension.cpp
+                      ${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/instruction/math.cpp)
 
 set(ROCISAPASS_SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/pass/pass.cpp
                       ${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/pass/graph.cpp
