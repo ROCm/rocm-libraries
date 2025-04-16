@@ -966,105 +966,101 @@ class ProblemType(Mapping):
   def __str__(self):
     indexChars = INDEX_CHARS
     # C dimensions
-    name = "C"
-    for i in range(0, self["NumIndicesC"]):
-      name += indexChars[i].lower()
+    name = ["C" + "".join(indexChars[i].lower() for i in range(0, self["NumIndicesC"]))]
+      
     # A dimensions
-    name += "_A"
-    for i in self["IndexAssignmentsA"]:
-      name += indexChars[i] if i in self["MirrorDimsA"] else indexChars[i].lower()
+    name.append("A" + "".join(indexChars[i] if i in self["MirrorDimsA"] else indexChars[i].lower() for i in self["IndexAssignmentsA"]))
     if self["ComplexConjugateA"]:
-      name += "C"
+      name.append("C")
+    
     # B dimensions
-    name += "_B"
-    for i in self["IndexAssignmentsB"]:
-      name += indexChars[i] if i in self["MirrorDimsB"] else indexChars[i].lower()
+    name.append("B" + "".join(indexChars[i] if i in self["MirrorDimsB"] else indexChars[i].lower() for i in self["IndexAssignmentsB"]))
     if self["ComplexConjugateB"]:
-      name += "C"
+      name.append("C")
 
     # DataTypes
     if self["DataType"] != self["DataTypeA"] or self["DataType"] != self["DataTypeB"]:
-      name += "_"
-      name += self["DataTypeA"].toChar() + self["DataTypeB"].toChar()
-    name += "_"
-    name += self["DataType"].toChar() # Type of A/B
+      name.append(self["DataTypeA"].toChar() + self["DataTypeB"].toChar())
+    name.append(self["DataType"].toChar()) # Type of A/B
 
     # Special condition for some newly supported kernels:
     #   HHS, HSS, BSS and I8II kernels, use a clearer naming _TiToTc_
     # TODO: Distinguish all kernels by _TiToTc_ to be more consistent with rocblas
     gemmType = (self["DataType"].toChar(),self["DestDataType"].toChar(),self["ComputeDataType"].toChar() )
     if gemmType in _HPATypes:
-      name += self["DestDataType"].toChar()    # Type of C/D
-      name += self["ComputeDataType"].toChar() # Type of Alpha/Beta
-      name += "_"
+      name.append("".join([self["DestDataType"].toChar(), self["ComputeDataType"].toChar()]))
 
     if not self["F32XdlMathOp"].isSingle() and self["DataType"].isSingle():
-      name += "_M"
-      name += self["F32XdlMathOp"].toChar()
-      name += "_"
+      name.append("".join(["M", self["F32XdlMathOp"].toChar()]))
 
     if self["SwizzleTensorA"]:
-      name += "STA_"
+      name.append("STA")
 
     if self["SwizzleTensorB"]:
-      name += "STB_"
+      name.append("STB")
 
     # Other
-    if self["UseBeta"]: name += "B"
-    if self["HighPrecisionAccumulate"] and not self["SilentHighPrecisionAccumulate"]: name += "H"
-    if self["UseInitialStridesAB"]: name += "I"
-    if self["UseInitialStridesCD"]: name += "Ic"
+    other = ""
+    if self["UseBeta"]: other += "B"
+    if self["HighPrecisionAccumulate"] and not self["SilentHighPrecisionAccumulate"]: other += "H"
+    if self["UseInitialStridesAB"]: other += "I"
+    if self["UseInitialStridesCD"]: other += "Ic"
+    if other: name.append(other)
+    
     if self["UseBias"]:
-      name += "_Bias"
+      name.append("Bias")
       if self["BiasDataTypeList"] != getBiasDataTypeListDefault(self):
-        for i in self["BiasDataTypeList"]:
-          name += i.toChar()
+        name.append("".join(i.toChar() for i in self["BiasDataTypeList"]))
       if self["BiasSrc"] and self["Gradient"]: # Show bias src if gradient = True
-        name += "_BiasSrc%s"%self["BiasSrc"]
+        name.append(f"{self['BiasSrc']}")
 
     factorDim = max(self["UseScaleAlphaVec"], self["UseBias"])
     if factorDim > 1 :
-        name += "_FD%s"%("N" if factorDim == 2 else "MN")
+        s = ("N" if factorDim == 2 else "MN")
+        name.append(f"FD{s}")
 
     if self["UseE"]:
       if self["Gradient"]:
-        name += "_Grad%s"%self["DataTypeE"].toChar()
+        name.append(f"Grad{self['DataTypeE'].toChar()}")
       else:
-        name += "_Aux%s"%self["DataTypeE"].toChar()
+        name.append(f"Aux{self['DataTypeE'].toChar()}")
     if self["OutputAmaxD"]:
-      name += "_AmaxD"
+      name.append("AmaxD")
     if self["Sparse"]:
       if self["Sparse"] == 2:
-        name += "_SPB"
+        name.append("SPB")
       else:
-        name += "_SPA"
+        name.append("SPA")
 
     # precision and other
     # name += "_SB" if self["StridedBatched"] else "_GB"
     if self["GroupedGemm"]:
-      name += "_GG"
+      name.append("GG")
     else:
-      name += "" if self["StridedBatched"] else "_GB" # legacy
+      if not self["StridedBatched"]:
+        name.append("GB") # legacy
 
     # Activation Naming
     if self["ActivationType"] != 'none':
       if self["ActivationType"] == 'all':
-        name += "_A"
+        name.append("A")
       elif self["ActivationType"] == 'hipblaslt_all':
-        name += "_HA"
+        name.append("HA")
       else:
-        name += "_%s"%str(self["ActivationType"]).upper()
-      name += self["ActivationComputeDataType"].toChar()
-    if self["ActivationNoGuard"]: name += "NG"
+        name.append(f"{str(self['ActivationType']).upper()}")
+      name.append(self["ActivationComputeDataType"].toChar())
+    if self["ActivationNoGuard"]: name[-1] += "NG"
 
-    if self["UseScaleAB"] == "Scalar": name += "_SAB"
-    elif self["UseScaleAB"] == "Vector": name += "_SABV"
-    if self["UseScaleCD"]: name += "_SCD"
-    if self["UseScaleAlphaVec"]: name += "_SAV"
+    if self["UseScaleAB"] == "Scalar": 
+      name.append("SAB")
+    elif self["UseScaleAB"] == "Vector": 
+      name.append("SABV")
+    if self["UseScaleCD"]: name.append("SCD")
+    if self["UseScaleAlphaVec"]: name.append("SAV")
 
-    if self["SupportUserArgs"]: name += "_UserArgs"
+    if self["SupportUserArgs"]: name.append("UserArgs")
 
-    return name
+    return "_".join(name)
 
   def keys(self):
     return list(self.state.keys())
