@@ -160,7 +160,7 @@ struct generate_limits
 template<typename T>
 struct generate_limits<
     T,
-    std::enable_if_t<rocprim::traits::get<T>::is_build_in() && rocprim::is_integral<T>::value>>
+    std::enable_if_t<rocprim::traits::get<T>().is_build_in() && rocprim::is_integral<T>::value>>
 {
     static inline T min()
     {
@@ -174,7 +174,7 @@ struct generate_limits<
 
 template<typename T>
 struct generate_limits<T,
-                       std::enable_if_t<rocprim::traits::get<T>::is_build_in()
+                       std::enable_if_t<rocprim::traits::get<T>().is_build_in()
                                         && rocprim::is_floating_point<T>::value>>
 {
     static inline T min()
