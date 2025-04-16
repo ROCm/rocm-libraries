@@ -1,5 +1,16 @@
 # Change Log for hipfort
 
+## hipfort 0.7.0 for ROCm 6.5.0
+
+### Added
+
+* Added documentation clarifying how hipfort is built for the NVIDIA
+  platform. Thanks [@fluidnumerics-joe](https://github.com/fluidnumerics-joe)!
+
+### Changed
+
+* Updated and reorganized documentation for clarity and consistency.
+
 ## hipfort 0.6.0 for ROCm 6.4.0
 
 ### Upcoming changes
@@ -10,7 +21,7 @@
 
 ## hipfort 0.5.1 for ROCm 6.3.2
 
-### Additions
+### Added
 
 * Support for building with LLVM Flang
 
