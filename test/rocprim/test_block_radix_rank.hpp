@@ -59,7 +59,6 @@ static constexpr size_t       n_sizes                   = 12;
 static constexpr unsigned int items_per_thread[n_sizes] = {1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3};
 static constexpr unsigned int rank_desc[n_sizes]
     = {false, false, false, false, false, false, true, true, true, true, true, true};
-    // = {false, false, false, false, false, false, false, false, false, false, false, false};
 static constexpr unsigned int use_storage[n_sizes]
     = {false, true, false, true, false, true, false, true, false, true, false, true};
 static constexpr unsigned int end_bits[n_sizes]
