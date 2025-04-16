@@ -506,8 +506,7 @@ namespace rocRoller
             std::optional<VariableType> assignVarType = info.accType;
             if(info.accType == DataType::Half || info.accType == DataType::BFloat16)
             {
-                // TODO Add a more specific capability for 16 bit accumulation
-                AssertFatal(arch.HasCapability(GPUCapability::HasWMMA),
+                AssertFatal(arch.HasCapability(GPUCapability::HasWMMA_F16_ACC),
                             concatenate("Architecture does not support 16 bit accumulation: ",
                                         arch.target().toString()));
                 assignVarType = DataTypeInfo::Get(info.accType).packedVariableType();

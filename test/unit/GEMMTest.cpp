@@ -100,7 +100,8 @@ namespace GEMMDriverTest
             REQUIRE_ANY_OF_ARCH_CAP(GPUCapability::HasMFMA, GPUCapability::HasWMMA);
             if constexpr(isF8<TA> || isF8<TB>)
             {
-                REQUIRE_ANY_OF_ARCH_CAP(GPUCapability::HasMFMA_fp8, GPUCapability::HasWMMA_f8);
+                REQUIRE_ANY_OF_ARCH_CAP(GPUCapability::HasMFMA_fp8,
+                                        GPUCapability::HasWMMA_f32_16x16x16_f8);
             }
 
             if constexpr(isF6F4<TA> || isF6F4<TB>)
@@ -3279,7 +3280,15 @@ namespace GEMMDriverTest
         REQUIRE_ARCH_CAP(GPUCapability::HasWMMA);
         auto [typeABAndWaveK, transOp] = std::get<1>(GetParam());
         auto [typeAB, waveK]           = typeABAndWaveK;
-        AssertFatal((waveK == 16) || (waveK == 32), "Invalid waveK value.", ShowValue(waveK));
+
+        switch(waveK)
+        {
+        case 16:
+            REQUIRE_ARCH_CAP(GPUCapability::HasWMMA_f32_16x16x16_f16);
+            break;
+        default:
+            Throw<FatalError>("Invalid waveK value.", ShowValue(waveK));
+        }
 
         GEMMProblem gemm;
         gemm.waveM = 16;
@@ -3308,7 +3317,15 @@ namespace GEMMDriverTest
         REQUIRE_ARCH_CAP(GPUCapability::HasWMMA);
         auto [dataTypeAndWaveK, transOp] = std::get<1>(GetParam());
         auto [dataType, waveK]           = dataTypeAndWaveK;
-        AssertFatal((waveK == 16) || (waveK == 32), "Invalid waveK value.", ShowValue(waveK));
+
+        switch(waveK)
+        {
+        case 16:
+            REQUIRE_ARCH_CAP(GPUCapability::HasWMMA_f16_16x16x16_f16);
+            break;
+        default:
+            Throw<FatalError>("Invalid waveK value.", ShowValue(waveK));
+        }
 
         GEMMProblem gemm;
         gemm.waveM = 16;
@@ -3334,9 +3351,17 @@ namespace GEMMDriverTest
 
     TEST_P(MixedGEMMTestWMMAGPU, GPU_BasicGEMM)
     {
-        REQUIRE_ARCH_CAP(GPUCapability::HasWMMA_f8);
+        REQUIRE_ARCH_CAP(GPUCapability::HasWMMA);
         auto [typeA, typeB, waveK, transOp] = std::get<1>(GetParam());
-        AssertFatal((waveK == 16) || (waveK == 32), "Invalid waveK value.", ShowValue(waveK));
+
+        switch(waveK)
+        {
+        case 16:
+            REQUIRE_ARCH_CAP(GPUCapability::HasWMMA_f32_16x16x16_f8);
+            break;
+        default:
+            Throw<FatalError>("Invalid waveK value.", ShowValue(waveK));
+        }
 
         GEMMProblem gemm;
         gemm.waveM = 16;
@@ -3500,6 +3525,7 @@ namespace GEMMDriverTest
                                   std::pair<std::string, std::string>("N", "T"),
                                   std::pair<std::string, std::string>("T", "N"),
                                   std::pair<std::string, std::string>("T", "T")))));
+
     INSTANTIATE_TEST_SUITE_P(
         MixedGEMMTestWMMA,
         MixedGEMMTestWMMAGPU,
@@ -3513,5 +3539,4 @@ namespace GEMMDriverTest
                                   std::pair<std::string, std::string>("N", "T"),
                                   std::pair<std::string, std::string>("T", "N"),
                                   std::pair<std::string, std::string>("T", "T")))));
-
 }

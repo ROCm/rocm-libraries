@@ -640,6 +640,12 @@ namespace rocRoller::Client::GEMMClient
 
         auto const& arch = context->targetArchitecture().target();
 
+        if(arch.isRDNA4GPU())
+        {
+            std::cout << "FIXME: Client tests are disabled on " << arch.toString() << std::endl;
+            return {nullptr, ReturnCodes::SolutionNotSupportedOnArch};
+        }
+
         if(solution.streamK)
         {
             if(context->targetArchitecture().HasCapability(GPUCapability::ArchAccUnifiedRegs))

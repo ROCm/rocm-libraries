@@ -113,8 +113,14 @@ namespace GPUArchitectureGenerator
              {{"v_mfma_f32_32x32x16_bf16 a[0:15], v[32:35], v[36:39], a[0:15]"}, ""}},
 
             {rocRoller::GPUCapability::HasWMMA,
+             {{"v_wmma_f32_16x16x16_f16 v[0:7], v[32:35], v[36:39], v[0:7]"}, ""}},
+            {rocRoller::GPUCapability::HasWMMA_F16_ACC,
              {{"v_wmma_f16_16x16x16_f16 v[0:3], v[32:35], v[36:39], v[0:3]"}, ""}},
-            {rocRoller::GPUCapability::HasWMMA_f8,
+            {rocRoller::GPUCapability::HasWMMA_f32_16x16x16_f16,
+             {{"v_wmma_f32_16x16x16_f16 v[0:7], v[32:35], v[36:39], v[0:7]"}, ""}},
+            {rocRoller::GPUCapability::HasWMMA_f16_16x16x16_f16,
+             {{"v_wmma_f16_16x16x16_f16 v[0:3], v[32:35], v[36:39], v[0:3]"}, ""}},
+            {rocRoller::GPUCapability::HasWMMA_f32_16x16x16_f8,
              {{"v_wmma_f32_16x16x16_fp8_fp8 v[0:7], v[32:33], v[34:35], v[0:7]"}, ""}},
 
             {rocRoller::GPUCapability::HasAccumOffset,

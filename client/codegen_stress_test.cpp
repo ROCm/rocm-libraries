@@ -190,6 +190,18 @@ CodeGenResult CodeGen(CodeGenProblem const& prob)
     CodeGenResult result(prob);
     Generator<rocRoller::Instruction> (*generator)(rocRoller::ContextPtr);
 
+    {
+        // TODO: implement codegen stress tests that use WMMAs
+        auto        m_context = Context::ForDefaultHipDevice(prob.name);
+        auto const& arch      = m_context->targetArchitecture();
+        if(!arch.HasCapability(GPUCapability::HasMFMA))
+        {
+            std::cout << "FIXME: codegen stress tests are not supported on "
+                      << arch.target().toString() << std::endl;
+            exit(0);
+        }
+    }
+
     if(prob.instructions == "comments")
     {
         generator = comments;

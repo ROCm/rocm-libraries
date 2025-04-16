@@ -130,7 +130,8 @@ namespace MatrixMultiplyTest
             REQUIRE_ANY_OF_ARCH_CAP(GPUCapability::HasMFMA, GPUCapability::HasWMMA);
             if constexpr(isF8<TA> || isF8<TB>)
             {
-                REQUIRE_ANY_OF_ARCH_CAP(GPUCapability::HasMFMA_fp8, GPUCapability::HasWMMA_f8);
+                REQUIRE_ANY_OF_ARCH_CAP(GPUCapability::HasMFMA_fp8,
+                                        GPUCapability::HasWMMA_f32_16x16x16_f8);
             }
             if constexpr(isF6F4<TA> || isF6F4<TB>)
             {
@@ -484,7 +485,8 @@ namespace MatrixMultiplyTest
             REQUIRE_ANY_OF_ARCH_CAP(GPUCapability::HasMFMA, GPUCapability::HasWMMA);
             if constexpr(isF8<TA> || isF8<TB>)
             {
-                REQUIRE_ANY_OF_ARCH_CAP(GPUCapability::HasMFMA_fp8, GPUCapability::HasWMMA_f8);
+                REQUIRE_ANY_OF_ARCH_CAP(GPUCapability::HasMFMA_fp8,
+                                        GPUCapability::HasWMMA_f32_16x16x16_f8);
             }
             if constexpr(isF6F4<TA> || isF6F4<TB>)
             {
