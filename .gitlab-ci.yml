@@ -223,7 +223,7 @@ build:spirv:
   variables:
     # For unknown reasons spir-v builds ignore 'clang diagnostic' pragmas that
     # we use to ignore internal deprecations.
-    EXTRA_CMAKE_CXX_FLAGS: "-Wno-deprecated-declarations -mf16c"
+    EXTRA_CMAKE_CXX_FLAGS: "-Wno-deprecated-declarations -mf16c -DROCPRIM_EXPERIMENTAL_SPIRV"
     # Since not all targets are expected to build, do not stop building other
     # targets when any target fails.
     BUILD_TOOL_ARGS: "-k 0"
