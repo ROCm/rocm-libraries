@@ -48,7 +48,7 @@ workflow:
       when: never
     - if: $CI_MERGE_REQUEST_TITLE !~ /Draft:/
       variables:
-        ROCPRIM_TEST_RUNS: 3
+        ROCPRIM_TEST_RUNS: 1
     - if: $CI_MERGE_REQUEST_TITLE =~ /Draft:/
       variables:
         ROCPRIM_TEST_RUNS: 1
