@@ -105,8 +105,8 @@ public:
         using namespace std::string_literals;
         return bench_naming::format_name(
             "{lvl:device,algo:segmented_radix_sort,key_type:" + std::string(Traits<Key>::name())
-            + ",value_type:" + std::string(Traits<Value>::name()) + ","
-            + (segment_counts.size() == 1 ? "segment_count:"s + std::to_string(segment_counts[0])
+            + ",value_type:" + std::string(Traits<Value>::name())
+            + (segment_counts.size() == 1 ? ",segment_count:"s + std::to_string(segment_counts[0])
                                           : ""s)
             + (segment_lengths.size() == 1
                    ? ",segment_length:"s + std::to_string(segment_lengths[0])

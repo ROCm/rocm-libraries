@@ -1354,7 +1354,7 @@ private:
     {
         size = parser.get<size_t>("size");
 
-        const std::string seed_type = parser.get<std::string>("seed");
+        seed_type = parser.get<std::string>("seed");
 
         seed = managed_seed(seed_type);
 
@@ -1373,6 +1373,9 @@ private:
 
     void add_context()
     {
+        benchmark::AddCustomContext("size", std::to_string(size));
+        benchmark::AddCustomContext("seed", seed_type);
+
         benchmark::AddCustomContext("batch_iterations", std::to_string(batch_iterations));
         benchmark::AddCustomContext("warmup_iterations", std::to_string(warmup_iterations));
 
@@ -1533,6 +1536,7 @@ private:
 
     hipStream_t  stream = hipStreamDefault;
     size_t       size;
+    std::string  seed_type;
     managed_seed seed;
     size_t       batch_iterations;
     size_t       warmup_iterations;
