@@ -51,9 +51,12 @@ __global__ void TeamCtxInfraTest(ShmemContextType ctx_type,
    */
 
   rocshmem_wg_team_create_ctx(team[0], ctx_type, &ctx1);
+  assert (nullptr != ctx1.ctx_opaque);
   rocshmem_wg_team_create_ctx(team[0], ctx_type, &ctx2);
+  assert (nullptr != ctx2.ctx_opaque);
   rocshmem_wg_ctx_destroy(&ctx1);
   rocshmem_wg_team_create_ctx(team[0], ctx_type, &ctx3);
+  assert (nullptr != ctx3.ctx_opaque);
 
   __syncthreads();
 
@@ -73,6 +76,7 @@ __global__ void TeamCtxInfraTest(ShmemContextType ctx_type,
    */
   for (int team_i = 0; team_i < NUM_TEAMS; team_i++) {
     rocshmem_wg_team_create_ctx(team[team_i], ctx_type, &ctx[team_i]);
+    assert (nullptr != ctx.ctx_opaque);
   }
 
   if (ctx[0].team_opaque == ctx[NUM_TEAMS - 1].team_opaque) {
@@ -133,7 +137,7 @@ void TeamCtxInfraTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
             sizeof(rocshmem_team_t) * NUM_TEAMS, hipMemcpyHostToDevice));
 
   hipLaunchKernelGGL(TeamCtxInfraTest, gridSize, blockSize, shared_bytes,
-		     stream, _shmem_context, teams_on_device);
+                     stream, _shmem_context, teams_on_device);
 
   CHECK_HIP(hipFree(teams_on_device));
 }
