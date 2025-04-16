@@ -721,6 +721,26 @@ To capture activity logging in a file set the following environment variables as
 
     If the file cannot be opened, logging output is streamed to ``stderr``.
 
+rocTX support in rocSPARSE
+==========================
+
+The `rocTX <https://rocm.docs.amd.com/projects/roctracer/en/latest/reference/roctx-spec.html>`_ library contains application code
+instrumentation APIs to support high-level correlation of runtime API or activity events. When integrated with rocSPARSE, rocTX
+enables users to view the call stack of rocSPARSE and HIP API functions in profiling tools such as rocProf, offering better insights
+into runtime behavior and performance bottlenecks.
+
+To enable rocTX profiling, set the environment variable ``ROCSPARSE_ROCTX=1`` when running the program with rocProf:
+
+.. code-block:: shell
+
+   ROCSPARSE_ROCTX=1 /opt/rocm/bin/rocprofv3 --kernel-trace --marker-trace --hip-trace --output-format pftrace -- ./example_program
+
+This will generate a ``.pftrace`` file which can then be viewed using `perfetto ui <https://ui.perfetto.dev/>`_.
+
+.. note::
+
+   rocTX support in rocSPARSE is unavailable on Windows and is not supported in the static library version on Linux.
+
 hipSPARSE
 =========
 hipSPARSE is a SPARSE marshalling library, with multiple supported backends. It sits between the application and a `worker`

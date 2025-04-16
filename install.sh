@@ -55,6 +55,7 @@ function display_help()
   echo "    [--matrices-dir-install] install client matrices directory"
   echo "    [--rm-legacy-include-dir] Remove legacy include dir Packaging added for file/folder reorg backward compatibility."
   echo "    [--no-rocblas] Disable building rocSPARSE with rocBLAS."
+  echo "    [--no-roctx] Disable building rocSPARSE with rocTX."
   echo "    [--cmake-arg] Forward the given argument to CMake when configuring the build."
 }
 
@@ -307,7 +308,7 @@ build_address_sanitizer=false
 build_memstat=false
 build_rocsparse_ILP64=false
 build_with_rocblas=true
-build_with_roctx=false
+build_with_roctx=true
 build_with_offload_compress=true
 matrices_dir=
 matrices_dir_install=
@@ -323,7 +324,7 @@ declare -a cmake_client_options
 # check if we have a modern version of getopt that can handle whitespace and long parameters
 getopt -T
 if [[ $? -eq 4 ]]; then
- GETOPT_PARSE=$(getopt --name "${0}" --longoptions help,install,clients,dependencies,debug,hip-clang,static,relocatable,codecoverage,relwithdebinfo,memstat,rocsparse_ILP64,rocprim-path:,rocblas-path:,no-offload-compress,offload-compress,no-rocblas,roctx,address-sanitizer,matrices-dir:,matrices-dir-install:,architecture:,rm-legacy-include-dir,cmake-arg: --options hicdgrska: -- "$@")
+ GETOPT_PARSE=$(getopt --name "${0}" --longoptions help,install,clients,dependencies,debug,hip-clang,static,relocatable,codecoverage,relwithdebinfo,memstat,rocsparse_ILP64,rocprim-path:,rocblas-path:,no-offload-compress,offload-compress,no-rocblas,no-roctx,address-sanitizer,matrices-dir:,matrices-dir-install:,architecture:,rm-legacy-include-dir,cmake-arg: --options hicdgrska: -- "$@")
 
 else
   echo "Need a new version of getopt"
@@ -388,8 +389,8 @@ while true; do
         --no-rocblas)
             build_with_rocblas=false
             shift ;;
-        --roctx)
-            build_with_roctx=true
+        --no-roctx)
+            build_with_roctx=false
             shift ;;
         -k|--relwithdebinfo)
             build_release=false

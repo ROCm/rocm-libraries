@@ -27,7 +27,7 @@
 #include <fstream>
 #include <string>
 
-#if defined(ROCSPARSE_WITH_ROCTX)
+#if defined(ROCSPARSE_BUILT_WITH_ROCTX)
 #include <roctracer/roctx.h>
 #endif
 
@@ -408,18 +408,24 @@ namespace rocsparse
         return input_string;
     }
 
-#if defined(ROCSPARSE_WITH_ROCTX)
+#if defined(ROCSPARSE_BUILT_WITH_ROCTX)
     class internal_roctx
     {
     public:
         internal_roctx(const char* name)
         {
-            roctxRangePush(name);
+            if(ROCSPARSE_ENVARIABLES.get(rocsparse::envariables::ROCTX))
+            {
+                roctxRangePush(name);
+            }
         }
 
         ~internal_roctx()
         {
-            roctxRangePop();
+            if(ROCSPARSE_ENVARIABLES.get(rocsparse::envariables::ROCTX))
+            {
+                roctxRangePop();
+            }
         }
     };
 #define ROCSPARSE_ROCTX_TRACE rocsparse::internal_roctx roctx(__FUNCTION__);
