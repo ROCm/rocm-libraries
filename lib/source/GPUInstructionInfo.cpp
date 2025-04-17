@@ -181,9 +181,19 @@ namespace rocRoller
         return opCode.rfind("v_add", 0) == 0;
     }
 
+    bool GPUInstructionInfo::isVAddCarryInst(std::string const& opCode)
+    {
+        return opCode.rfind("v_addc_", 0) == 0;
+    }
+
     bool GPUInstructionInfo::isVSubInst(std::string const& opCode)
     {
         return opCode.rfind("v_sub", 0) == 0;
+    }
+
+    bool GPUInstructionInfo::isVSubCarryInst(std::string const& opCode)
+    {
+        return opCode.rfind("v_subb_", 0) == 0;
     }
 
     bool GPUInstructionInfo::isVReadlane(std::string const& opCode)

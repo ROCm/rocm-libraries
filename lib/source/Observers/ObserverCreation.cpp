@@ -52,7 +52,7 @@
 #include <rocRoller/Scheduling/Observers/WaitState/OPSEL94x.hpp>
 #include <rocRoller/Scheduling/Observers/WaitState/VALUTransWrite94x.hpp>
 #include <rocRoller/Scheduling/Observers/WaitState/VALUWriteReadlane94x.hpp>
-#include <rocRoller/Scheduling/Observers/WaitState/VALUWriteSGPRVCC94x.hpp>
+#include <rocRoller/Scheduling/Observers/WaitState/VALUWriteSGPRVCC.hpp>
 #include <rocRoller/Scheduling/Observers/WaitState/VALUWriteSGPRVMEM.hpp>
 #include <rocRoller/Scheduling/Observers/WaitState/VALUWriteVCCVDIVFMAS.hpp>
 #include <rocRoller/Scheduling/Observers/WaitState/VCMPXWrite94x.hpp>
@@ -84,7 +84,7 @@ namespace rocRoller
                 VALUTransWrite94x,
                 VALUWrite,
                 VALUWriteReadlane94x,
-                VALUWriteSGPRVCC94x,
+                VALUWriteSGPRVCC,
                 VALUWriteSGPRVMEM,
                 VALUWriteVCCVDIVFMAS,
                 VCMPXWrite94x,

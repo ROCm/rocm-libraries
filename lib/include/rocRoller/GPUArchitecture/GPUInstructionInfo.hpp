@@ -247,7 +247,9 @@ namespace rocRoller
         static bool isACCVGPRRead(std::string const& inst);
         static bool isACCVGPRWrite(std::string const& inst);
         static bool isVAddInst(std::string const& inst);
+        static bool isVAddCarryInst(std::string const& inst);
         static bool isVSubInst(std::string const& inst);
+        static bool isVSubCarryInst(std::string const& inst);
         static bool isVReadlane(std::string const& inst);
         static bool isVWritelane(std::string const& inst);
         static bool isVPermlane(std::string const& inst);

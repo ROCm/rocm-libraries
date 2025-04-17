@@ -111,24 +111,13 @@ namespace HazardObserverTest
                        Instruction("v_readlane_b32", {s[1]}, {v[1], s[0]}, {}, ""),
                        Instruction("s_endpgm", {}, {}, {}, "")};
 
-                if(arch.isCDNA1GPU() || arch.isCDNA2GPU())
-                {
-                    peekAndSchedule(context, insts[0]);
-                    peekAndSchedule(context, insts[1]);
+                peekAndSchedule(context, insts[0]);
+                peekAndSchedule(context, insts[1], 4);
 
-                    CHECK_THAT(context.output(), !(ContainsSubstring("s_nop")));
-                }
-                else
-                {
-                    // NOPs are required on 94X arch
-                    peekAndSchedule(context, insts[0]);
-                    peekAndSchedule(context, insts[1], 4);
-
-                    CHECK_THAT(context.output(), ContainsSubstring("s_nop 3"));
-                }
+                CHECK_THAT(context.output(), ContainsSubstring("s_nop 3"));
             }
 
-            SECTION("v_* (2nd op) read as constant")
+            SECTION("v_* (2nd op) read SGPR as constant")
             {
 
                 auto context = TestContext::ForTarget(arch);
@@ -144,9 +133,138 @@ namespace HazardObserverTest
                 if(arch.isCDNA1GPU() || arch.isCDNA2GPU())
                 {
                     peekAndSchedule(context, insts[0]);
-                    peekAndSchedule(context, insts[1]);
+                    peekAndSchedule(context, insts[1], 1);
 
-                    CHECK_THAT(context.output(), !(ContainsSubstring("s_nop")));
+                    CHECK_THAT(context.output(), ContainsSubstring("s_nop 0"));
+                }
+                else
+                {
+                    // NOPs are required on 94X arch
+                    peekAndSchedule(context, insts[0]);
+                    peekAndSchedule(context, insts[1], 2);
+
+                    CHECK_THAT(context.output(), ContainsSubstring("s_nop 1"));
+                }
+            }
+
+            SECTION("v_addc* reading VCC as carry")
+            {
+
+                auto context = TestContext::ForTarget(arch);
+                auto v = createRegisters(context, Register::Type::Vector, DataType::UInt32, 6);
+
+                std::vector<Instruction> insts
+                    = {Instruction("v_add_co_u32", {v[0], context->getVCC()}, {v[1], v[2]}, {}, ""),
+                       Instruction("v_addc_co_u32",
+                                   {v[5], context->getVCC()},
+                                   {v[3], v[4], context->getVCC()},
+                                   {},
+                                   ""),
+                       Instruction("s_endpgm", {}, {}, {}, "")};
+
+                peekAndSchedule(context, insts[0]);
+                peekAndSchedule(context, insts[1]);
+
+                CHECK_THAT(context.output(), !(ContainsSubstring("s_nop")));
+            }
+
+            SECTION("v_subb* reading VCC as carry")
+            {
+
+                auto context = TestContext::ForTarget(arch);
+                auto v = createRegisters(context, Register::Type::Vector, DataType::UInt32, 6);
+
+                std::vector<Instruction> insts
+                    = {Instruction("v_sub_co_u32", {v[0], context->getVCC()}, {v[1], v[2]}, {}, ""),
+                       Instruction("v_subb_co_u32",
+                                   {v[5], context->getVCC()},
+                                   {v[3], v[4], context->getVCC()},
+                                   {},
+                                   ""),
+                       Instruction("s_endpgm", {}, {}, {}, "")};
+
+                peekAndSchedule(context, insts[0]);
+                peekAndSchedule(context, insts[1]);
+
+                CHECK_THAT(context.output(), !(ContainsSubstring("s_nop")));
+            }
+
+            SECTION("v_addc* reading VCC as non-carry")
+            {
+
+                auto context = TestContext::ForTarget(arch);
+                auto v = createRegisters(context, Register::Type::Vector, DataType::UInt32, 6);
+
+                std::vector<Instruction> insts
+                    = {Instruction("v_add_co_u32", {v[0], context->getVCC()}, {v[1], v[2]}, {}, ""),
+                       Instruction("v_addc_co_u32",
+                                   {v[5], context->getVCC()},
+                                   {v[3], context->getVCC(), context->getVCC()},
+                                   {},
+                                   ""),
+                       Instruction("s_endpgm", {}, {}, {}, "")};
+
+                peekAndSchedule(context, insts[0]);
+                peekAndSchedule(context, insts[1], 1);
+
+                CHECK_THAT(context.output(), ContainsSubstring("s_nop 0"));
+            }
+
+            SECTION("v_addc* reading SGPR as non-carry")
+            {
+
+                auto context = TestContext::ForTarget(arch);
+                auto v = createRegisters(context, Register::Type::Vector, DataType::UInt32, 6);
+                auto s = createRegisters(context, Register::Type::Scalar, DataType::UInt32, 2);
+
+                std::vector<Instruction> insts
+                    = {Instruction("v_add_co_u32", {s[0], context->getVCC()}, {v[1], v[2]}, {}, ""),
+                       Instruction("v_addc_co_u32",
+                                   {v[5], context->getVCC()},
+                                   {v[3], s[0], context->getVCC()},
+                                   {},
+                                   ""),
+                       Instruction("s_endpgm", {}, {}, {}, "")};
+
+                if(arch.isCDNA1GPU() || arch.isCDNA2GPU())
+                {
+                    peekAndSchedule(context, insts[0]);
+                    peekAndSchedule(context, insts[1], 1);
+
+                    CHECK_THAT(context.output(), ContainsSubstring("s_nop 0"));
+                }
+                else
+                {
+                    // NOPs are required on 94X arch
+                    peekAndSchedule(context, insts[0]);
+                    peekAndSchedule(context, insts[1], 2);
+
+                    CHECK_THAT(context.output(), ContainsSubstring("s_nop 1"));
+                }
+            }
+
+            SECTION("v_addc* reading SGPR as non-carry")
+            {
+
+                auto context = TestContext::ForTarget(arch);
+                auto v = createRegisters(context, Register::Type::Vector, DataType::UInt32, 6);
+                auto s = createRegisters(context, Register::Type::Scalar, DataType::UInt32, 2);
+
+                std::vector<Instruction> insts
+                    = {Instruction("v_add_co_u32", {s[0], context->getVCC()}, {v[1], v[2]}, {}, ""),
+                       Instruction("v_addc_co_u32",
+                                   {v[5], context->getVCC()},
+                                   {v[3], s[0], context->getVCC()},
+                                   {},
+                                   ""),
+                       Instruction("s_endpgm", {}, {}, {}, "")};
+
+                if(arch.isCDNA1GPU() || arch.isCDNA2GPU())
+                {
+                    peekAndSchedule(context, insts[0]);
+                    peekAndSchedule(context, insts[1], 1);
+
+                    CHECK_THAT(context.output(), ContainsSubstring("s_nop 0"));
                 }
                 else
                 {
@@ -169,65 +287,26 @@ namespace HazardObserverTest
                     Instruction("v_cndmask_b32", {v[0]}, {v[2], v[3], context->getVCC()}, {}, ""),
                     Instruction("s_endpgm", {}, {}, {}, "")};
 
-                if(arch.isCDNA1GPU() || arch.isCDNA2GPU())
-                {
-                    peekAndSchedule(context, insts[0]);
-                    peekAndSchedule(context, insts[1]);
+                peekAndSchedule(context, insts[0]);
+                peekAndSchedule(context, insts[1], 1);
 
-                    CHECK_THAT(context.output(), !(ContainsSubstring("s_nop")));
-                }
-                else
-                {
-                    // NOPs are required on 94X arch
-                    peekAndSchedule(context, insts[0]);
-                    peekAndSchedule(context, insts[1], 2);
-
-                    CHECK_THAT(context.output(), ContainsSubstring("s_nop 1"));
-                }
-            }
-
-            SECTION("Try with instruction encoding `_e32`")
-            {
-                auto context = TestContext::ForTarget(arch);
-                auto v = createRegisters(context, Register::Type::Vector, DataType::UInt32, 5);
-                auto s = createRegisters(context, Register::Type::Scalar, DataType::UInt32, 2);
-
-                std::vector<Instruction> insts = {
-                    Instruction("v_cmp_ge_u32", {context->getVCC()}, {v[0], v[1]}, {}, ""),
-                    Instruction("v_cndmask_b32", {v[0]}, {v[2], v[3], context->getVCC()}, {}, ""),
-                    Instruction("s_endpgm", {}, {}, {}, "")};
-
-                if(arch.isCDNA1GPU() || arch.isCDNA2GPU())
-                {
-                    peekAndSchedule(context, insts[0]);
-                    peekAndSchedule(context, insts[1]);
-
-                    CHECK_THAT(context.output(), !(ContainsSubstring("s_nop")));
-                }
-                else
-                {
-                    // NOPs are required on 94X arch
-                    peekAndSchedule(context, insts[0]);
-                    peekAndSchedule(context, insts[1], 2);
-
-                    CHECK_THAT(context.output(), ContainsSubstring("s_nop 1"));
-                }
+                CHECK_THAT(context.output(), ContainsSubstring("s_nop 0"));
             }
 
             // TODO Fix implicit VCC observer and enable this test
 #if 0
-        // Implicit VCC write
-        {
-        std::vector<Instruction> insts
-            = {Instruction("v_add_co_u32", {v[3]}, {v[0], v[1]}, {}, ""),
-            Instruction("v_cndmask_b32", {v[4]}, {v[4], v[3], context->getVCC()}, {}, ""),
-            Instruction("s_endpgm", {}, {}, {}, "")};
+            SECTION("Implicit VCC write")
+            {
+            std::vector<Instruction> insts
+                = {Instruction("v_add_co_u32", {v[3]}, {v[0], v[1]}, {}, ""),
+                Instruction("v_cndmask_b32", {v[4]}, {v[4], v[3], context->getVCC()}, {}, ""),
+                Instruction("s_endpgm", {}, {}, {}, "")};
 
-        peekAndSchedule(context,insts[0]);
-        peekAndSchedule(context,insts[1], 2);
+            peekAndSchedule(context,insts[0]);
+            peekAndSchedule(context,insts[1], 2);
 
-        CHECK_THAT(context.output(), ContainsSubstring("s_nop 1"));
-        }
+            CHECK_THAT(context.output(), ContainsSubstring("s_nop 1"));
+            }
 #endif
         }
     }

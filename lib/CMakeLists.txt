@@ -219,7 +219,7 @@ set(rocroller_src
     source/Observers/VALUTransWrite94x.cpp
     source/Observers/VALUWrite.cpp
     source/Observers/VALUWriteReadlane94x.cpp
-    source/Observers/VALUWriteSGPRVCC94x.cpp
+    source/Observers/VALUWriteSGPRVCC.cpp
     source/Observers/VALUWriteSGPRVMEM.cpp
     source/Observers/VALUWriteVCCVDIVFMAS.cpp
     source/Observers/VCMPXWrite94x.cpp

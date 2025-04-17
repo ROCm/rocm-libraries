@@ -25,18 +25,18 @@
  *******************************************************************************/
 
 #include <rocRoller/GPUArchitecture/GPUInstructionInfo.hpp>
-#include <rocRoller/Scheduling/Observers/WaitState/VALUWriteSGPRVCC94x.hpp>
+#include <rocRoller/Scheduling/Observers/WaitState/VALUWriteSGPRVCC.hpp>
 
 namespace rocRoller
 {
     namespace Scheduling
     {
-        int VALUWriteSGPRVCC94x::getMaxNops(Instruction const& inst) const
+        int VALUWriteSGPRVCC::getMaxNops(Instruction const& inst) const
         {
             return m_maxNops;
         }
 
-        bool VALUWriteSGPRVCC94x::trigger(Instruction const& inst) const
+        bool VALUWriteSGPRVCC::trigger(Instruction const& inst) const
         {
             return GPUInstructionInfo::isVCMP(inst.getOpCode())
                    || GPUInstructionInfo::isVReadlane(inst.getOpCode())
@@ -49,7 +49,7 @@ namespace rocRoller
                            || GPUInstructionInfo::isUIntInst(inst.getOpCode())));
         };
 
-        int VALUWriteSGPRVCC94x::getNops(Instruction const& inst) const
+        int VALUWriteSGPRVCC::getNops(Instruction const& inst) const
         {
             if(GPUInstructionInfo::isVReadlane(inst.getOpCode())
                || GPUInstructionInfo::isVWritelane(inst.getOpCode()))
@@ -66,15 +66,41 @@ namespace rocRoller
             }
             else
             {
+                int pos = 0;
                 for(auto const& src : inst.getSrcs())
                 {
                     auto val = checkRegister(src);
-                    if(val.has_value()
-                       && (src->regType() == Register::Type::Scalar
-                           || src->regType() == Register::Type::VCC))
+                    if(val.has_value())
                     {
-                        return val.value() - 2;
+                        if(src->regType() == Register::Type::VCC)
+                        {
+                            // Not a hazard if reading VCC as carry
+                            if((GPUInstructionInfo::isVAddCarryInst(inst.getOpCode())
+                                || GPUInstructionInfo::isVSubCarryInst(inst.getOpCode()))
+                               && pos == 2)
+                                continue;
+
+                            return val.value() - 3;
+                        }
+                        else if(src->regType() == Register::Type::Scalar)
+                        {
+                            if(m_isCDNA1orCDNA2)
+                            {
+                                return val.value() - 3;
+                            }
+                            else
+                            {
+                                // Not a hazard if reading SGPR as carry
+                                if((GPUInstructionInfo::isVAddCarryInst(inst.getOpCode())
+                                    || GPUInstructionInfo::isVSubCarryInst(inst.getOpCode()))
+                                   && pos == 2)
+                                    continue;
+
+                                return val.value() - 2;
+                            }
+                        }
                     }
+                    pos++;
                 }
             }
 
