@@ -48,6 +48,7 @@ help() {
 }
 
 skip_diff=false
+skip_zip=false
 skip_codecov=false
 ctest_re_flag=
 ctest_re=
@@ -63,7 +64,7 @@ while getopts R:g:b:u:h:-: flag; do
           skip_diff=true
           ;;
         skip_zip)
-          skip_diff=true
+          skip_zip=true
           ;;
         *)
           echo "Unknown option --${OPTARG}"
