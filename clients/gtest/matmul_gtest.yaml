@@ -1611,7 +1611,7 @@ Tests:
   alpha: 1
   beta: [ 0, 2 ]
   unit_check: 1
-  gpu_arch: '90a'
+  gpu_arch: '9(0a|50)'
 
 - name: matmul_gemm_i8_dst_i32_94x
   category: pre_checkin
@@ -1645,7 +1645,7 @@ Tests:
   alpha: 1
   beta: [ 0, 2 ]
   unit_check: 1
-  gpu_arch: '90a'
+  gpu_arch: '9(0a|50)'
 
 - name: matmul_gemm_i8_dst_i8_94x
   category: pre_checkin

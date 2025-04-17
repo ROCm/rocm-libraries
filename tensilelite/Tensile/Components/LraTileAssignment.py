@@ -208,7 +208,7 @@ class LraTileAssignmentMFMA(LraTileAssignment):
               isSparseTrack = (kernel["ProblemType"]["Sparse"] == 2 and tP["isB"]) or (kernel["ProblemType"]["Sparse"] == 1 and tP["isA"]) or tP["isM"]
               strideK      = (inputPerThread if umlds else (mt + LdsPad) * inputPerThread) * (2 if isSparseTrack and kernel["MIInputPerThread%s"%tc] >  inputPerThread else 1)
         #special case for new F8 MFMA
-        elif kernel["MatrixInstK"] > 32:
+        elif  kernel["ProblemType"]["DataType"].is8bitFloat() and kernel["MatrixInstK"] > 32:
             if umlds:
                 strideK = 16
             else:

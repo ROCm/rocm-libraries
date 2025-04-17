@@ -525,22 +525,21 @@ class LocalReadMFMA(LocalRead):
                                         offsetPerBlock = kernel["MatrixInstK"] // divider * 16 * blockId
                                         offset_val = offset_val + (offsetPerBlock - blockId * elementsPerBlock) * kernel["MacroTile%s"%tc]
                                 offset_val = (strideK * rIdx * numElementPerRead * UnrollStride + offset_val + tP["localReadOffset"]) * tP["bpeDS"]
-                            elif writer.states.asmCaps["HasMFMA_f8f6f4"]:
+                            elif kernel["ProblemType"]["DataType"].is8bitFloat() and kernel["MatrixInstK"] > 32:
                                 incOffset = 0
                                 midIdx = numReadsPerUnroll // 2
                                 if rIdx >= midIdx:
-                                    if kernel["MatrixInstK"] > 32:
-                                        if kernel["UnrollMajorLDS%s" % tP["tensorChar"]] == False:
-                                            # TODO: why are these the offsets???
-                                            if kernel["MatrixInstM"] == 32:
-                                                incOffset = midIdx * numElementPerRead * UnrollStride
-                                            elif kernel["MatrixInstM"] == 16:
-                                                incOffset = 3 * midIdx * numElementPerRead * UnrollStride
-                                        else:
-                                            if kernel["MatrixInstM"] == 32:
-                                                incOffset = 16
-                                            elif kernel["MatrixInstM"] == 16:
-                                                incOffset = 48
+                                    if kernel["UnrollMajorLDS%s" % tP["tensorChar"]] == False:
+                                        # TODO: why are these the offsets???
+                                        if kernel["MatrixInstM"] == 32:
+                                             incOffset = midIdx * numElementPerRead * UnrollStride
+                                        elif kernel["MatrixInstM"] == 16:
+                                            incOffset = 3 * midIdx * numElementPerRead * UnrollStride
+                                    else:
+                                        if kernel["MatrixInstM"] == 32:
+                                            incOffset = 16
+                                        elif kernel["MatrixInstM"] == 16:
+                                            incOffset = 48
                                 incOffset = rIdx * numElementPerRead * UnrollStride + incOffset
                                 offset_val = (incOffset + offset_val + tP["localReadOffset"]) * tP["bpeDS"]
                             else:
