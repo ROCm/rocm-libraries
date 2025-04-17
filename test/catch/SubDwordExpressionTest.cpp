@@ -44,35 +44,35 @@ namespace SubDwordExpressionTest
         SECTION("cannot get bitfield from a literal")
         {
             auto literal = Register::Value::Literal(42);
-            CHECK_THROWS(literal->bitfield(8, 8));
+            CHECK_THROWS_AS(literal->bitfield(8, 8), FatalError);
         }
 
         SECTION("bitOffset cannot be greater than the number of bits in a Value")
         {
             auto r = std::make_shared<Register::Value>(
                 context.get(), Register::Type::Vector, DataType::UInt32, 1);
-            CHECK_THROWS(r->bitfield(32, 8));
+            CHECK_THROWS_AS(r->bitfield(32, 8), FatalError);
         }
 
         SECTION("bitwidth cannot be zero")
         {
             auto r = std::make_shared<Register::Value>(
                 context.get(), Register::Type::Vector, DataType::UInt32, 1);
-            CHECK_THROWS(r->bitfield(8, 0));
+            CHECK_THROWS_AS(r->bitfield(8, 0), FatalError);
         }
 
         SECTION("bitwidth cannot be greater than the number of bits in a register")
         {
             auto r = std::make_shared<Register::Value>(
                 context.get(), Register::Type::Vector, DataType::UInt32, 1);
-            CHECK_THROWS(r->bitfield(8, 32));
+            CHECK_THROWS_AS(r->bitfield(8, 32), FatalError);
         }
 
         SECTION("indices must refer to adjacent elements")
         {
             auto r = std::make_shared<Register::Value>(
                 context.get(), Register::Type::Vector, DataType::UInt8x4, 1);
-            CHECK_THROWS(r->segment({0, 2}));
+            CHECK_THROWS_AS(r->segment({0, 2}), FatalError);
         }
 
         SECTION("generate from expression with bitfields")

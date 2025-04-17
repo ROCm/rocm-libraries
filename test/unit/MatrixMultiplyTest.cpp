@@ -44,6 +44,7 @@
 #include <rocRoller/TensorDescriptor.hpp>
 #include <rocRoller/Utilities/Error.hpp>
 #include <rocRoller/Utilities/Timer.hpp>
+#include <rocRoller/Utilities/Utils.hpp>
 
 #include "GPUContextFixture.hpp"
 #include "SourceMatcher.hpp"

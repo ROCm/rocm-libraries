@@ -33,7 +33,7 @@ class SimpleTest
 {
 public:
     SimpleTest() = default;
-    ~SimpleTest()
+    virtual ~SimpleTest()
     {
         rocRoller::Settings::reset();
         rocRoller::Component::ComponentFactoryBase::ClearAllCaches();

@@ -50,7 +50,17 @@ namespace SettingsTest
                 {
                     val = ptr;
                 }
-                m_envVars.emplace_back(setting->name, std::move(val));
+                m_envVars[setting->name] = val;
+            }
+
+            // This is not a setting option, but affects the env
+            if(auto ptr = getenv(Settings::BitfieldName.c_str()))
+            {
+                m_envVars[Settings::BitfieldName] = ptr;
+            }
+            else
+            {
+                m_envVars[Settings::BitfieldName] = std::nullopt;
             }
 
             setenv(Settings::BitfieldName.c_str(), "0xFFFFFFFF", 1);
@@ -60,8 +70,25 @@ namespace SettingsTest
             setenv(Settings::Scheduler.name.c_str(), "invalidScheduler", 1);
         }
 
+        ~EnvSettingsTest() override
+        {
+            for(auto entry : m_envVars)
+            {
+                if(entry.second.has_value())
+                {
+                    setenv(entry.first.c_str(), entry.second.value().c_str(), 1);
+                }
+                else
+                {
+                    unsetenv(entry.first.c_str());
+                }
+            }
+
+            Settings::reset();
+        }
+
     private:
-        std::vector<std::pair<std::string, std::optional<std::string>>> m_envVars;
+        std::map<std::string, std::optional<std::string>> m_envVars;
     };
 
     TEST_CASE("Basic settings behavior", "[settings]")
@@ -86,8 +113,6 @@ namespace SettingsTest
 
         SECTION("Log levels")
         {
-            auto settings = Settings::getInstance();
-
             std::ostringstream out;
             out << LogLevel::None << std::endl;
             out << LogLevel::Error << std::endl;
@@ -138,6 +163,8 @@ namespace SettingsTest
                   == Scheduling::SchedulerProcedure::Cooperative);
 
             CHECK_THROWS_AS(settings->set(Settings::LogConsole, "invalidValue"), FatalError);
+
+            Settings::reset();
         }
 
         SECTION("Settings should be helpful")
@@ -165,7 +192,8 @@ namespace SettingsTest
             size_t numUnexpectedLogLevels = 0;
             size_t numIters               = 0;
 
-#pragma omp parallel num_threads(numTestThreads) reduction(+:numUnexpectedLogLevels) reduction(+:numIters)
+#pragma omp parallel num_threads(numTestThreads) reduction(+ : numUnexpectedLogLevels) \
+    reduction(+ : numIters)
             {
                 size_t iters = 0;
                 int    tid   = omp_get_thread_num();
@@ -193,6 +221,8 @@ namespace SettingsTest
             CHECK(numUnexpectedLogLevels == 0);
             CHECK(numIters >= numTestThreads * minIters);
         }
+
+        Settings::reset();
     }
 
     TEST_CASE("Settings with associated envvars", "[settings]")
@@ -209,6 +239,8 @@ namespace SettingsTest
             unsetenv(Settings::BitfieldName.c_str());
             auto settings = Settings::getInstance();
             CHECK_THROWS_AS(settings->get(Settings::Scheduler), FatalError);
+
+            Settings::reset();
         }
 
         SECTION("Environment variables take precedence")
@@ -221,6 +253,8 @@ namespace SettingsTest
 
             // bitfield takes precedence over default value
             CHECK(settings->get(Settings::SaveAssembly));
+
+            Settings::reset();
         }
 
         SECTION("Set and get from envvars-backed settings")
@@ -251,6 +285,8 @@ namespace SettingsTest
             settings->set(Settings::BreakOnThrow, false);
             // Fatal error reading unparseable env var
             CHECK_THROWS_AS(settings->get(Settings::Scheduler), FatalError);
+
+            Settings::reset();
         }
     }
 }
