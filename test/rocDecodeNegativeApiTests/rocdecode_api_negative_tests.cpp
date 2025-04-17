@@ -263,7 +263,7 @@ int RocDecodeApiNegativeTests::TestinvalidGetErrorName(){
     }
 
     // Scenario 2: Pass a valid error code and ensure it returns a non-null name
-    for (int i = 0; i <= -8; i--) {
+    for (int i = 0; i >= -8; i--) {
         rocDecStatus valid_status = static_cast<rocDecStatus>(i);;
         error_name = rocDecGetErrorName(valid_status);
         if (error_name == nullptr) {
