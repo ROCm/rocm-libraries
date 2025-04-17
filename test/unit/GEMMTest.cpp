@@ -830,6 +830,13 @@ namespace GEMMDriverTest
     {
     };
 
+    // Params are: A & B type, K tile size, (transA, transB)
+    class GEMMTestWMMAF16AccumGPU
+        : public BaseGEMMContextFixture<
+              std::tuple<std::pair<rocRoller::DataType, int>, std::pair<std::string, std::string>>>
+    {
+    };
+
     // Params are: A type, B type, K tile size, (transA, transB)
     class MixedGEMMTestWMMAGPU
         : public BaseGEMMContextFixture<std::tuple<rocRoller::DataType,
@@ -3312,9 +3319,9 @@ namespace GEMMDriverTest
         }
     }
 
-    TEST_P(GEMMTestWMMAGPU, GPU_BasicGEMMF16Accum)
+    TEST_P(GEMMTestWMMAF16AccumGPU, GPU_BasicGEMMF16Accum)
     {
-        REQUIRE_ARCH_CAP(GPUCapability::HasWMMA);
+        REQUIRE_ARCH_CAP(GPUCapability::HasWMMA_F16_ACC);
         auto [dataTypeAndWaveK, transOp] = std::get<1>(GetParam());
         auto [dataType, waveK]           = dataTypeAndWaveK;
 
@@ -3516,6 +3523,19 @@ namespace GEMMDriverTest
     INSTANTIATE_TEST_SUITE_P(
         GEMMTestWMMA,
         GEMMTestWMMAGPU,
+        ::testing::Combine(
+            currentGPUISA(),
+            ::testing::Combine(
+                ::testing::Values(std::make_pair(rocRoller::DataType::Half, /*waveK*/ 16),
+                                  std::make_pair(rocRoller::DataType::BFloat16, /*waveK*/ 16)),
+                ::testing::Values(std::pair<std::string, std::string>("N", "N"),
+                                  std::pair<std::string, std::string>("N", "T"),
+                                  std::pair<std::string, std::string>("T", "N"),
+                                  std::pair<std::string, std::string>("T", "T")))));
+
+    INSTANTIATE_TEST_SUITE_P(
+        GEMMTestWMMA,
+        GEMMTestWMMAF16AccumGPU,
         ::testing::Combine(
             currentGPUISA(),
             ::testing::Combine(
