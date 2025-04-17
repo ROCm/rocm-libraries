@@ -20,6 +20,12 @@ struct WorkQueue {
     [[nodiscard]] __device__ WorkNode_Header *tryPop(bool shouldIncrementActiveCount) {
         return tryPop(shouldIncrementActiveCount, atomicAdd(&popCount, 0) % queueSize);
     }
+    // Tries to fetch and simultaneously lock the next waiting worknode. If none exists, or it's currently locked, or
+    // someone else got to it first, returns nullptr. Safe to use with a queue which is written to by the CPU using
+    // hipMemcpy.
+    [[nodiscard]] __device__ WorkNode_Header *tryPop_cpuSafe(bool shouldIncrementActiveCount) {
+        return tryPop_cpuSafe(shouldIncrementActiveCount, atomicAdd(&popCount, 0) % queueSize);
+    }
     // Fetches and simultaneously lock the next waiting worknode. If the queue is empty, returns nullptr.
     [[nodiscard]] __device__ WorkNode_Header *pop(bool shouldIncrementActiveCount);
 
@@ -28,13 +34,19 @@ struct WorkQueue {
     // Tries to fetch and simultaneously lock the worknode at index. If none exists, or it's currently locked, or
     // someone else got to it first, returns nullptr.
     [[nodiscard]] __device__ WorkNode_Header *tryPop(bool shouldIncrementActiveCount, uint32_t index);
+    // Tries to fetch and simultaneously lock the worknode at index. If none exists, or it's currently locked, or
+    // someone else got to it first, returns nullptr. Safe to use with a queue which is written to by the CPU using
+    // hipMemcpy.
+    [[nodiscard]] __device__ WorkNode_Header *tryPop_cpuSafe(bool shouldIncrementActiveCount, uint32_t index);
 };
 
 // TODO: should these be static members of WorkNode_Header?
-__device__ WorkNode_Header *cpuWorkQueue[CPU_WORK_QUEUE_SIZE] = {};
-std::atomic<uint32_t> cpuWorkQueueIndex_push = 0;
-__device__ uint32_t cpuWorkQueueIndex_pop = 0;
-__device__ volatile uint32_t cpuWorkQueueIndex_last = -1U; // If cpuWorkQueueIndex_last == cpuWorkQueueIndex_pop, then we're not going to receive any more work from the CPU
+
+// Initializing cpuWorkQueue.pushCount to the maximum value of a uint32_t forces the GPU to keep polling until we update
+// cpuWorkQueue.pushCount with the value of cpuWorkQueuePushCount from the CPU. We do this update once there are no
+// more gpu::thread objects in the current scope.
+__device__ WorkQueue<CPU_WORK_QUEUE_SIZE> cpuWorkQueue = {0, -1U};
+std::atomic<uint32_t> cpuWorkQueuePushCount = 0;
 
 __device__ WorkQueue<MAIN_WORK_QUEUE_SIZE> mainWorkQueue;
 
@@ -171,27 +183,19 @@ template <size_t queueSize>
     return work;
 }
 
-// Tries to fetch and simultaneously lock the next waiting worknode in cpuWorkQueue. If none exists, or the next one is
-// currently locked, or someone else got to it first, returns nullptr.
-static inline __device__ WorkNode_Header *popWorkNodeFromCpuQueue(bool shouldIncrementActiveCount) {
-    uint32_t index = atomicAdd(&cpuWorkQueueIndex_pop, 0) % CPU_WORK_QUEUE_SIZE;
-    WorkNode_Header *work = nullptr;
+// Tries to fetch and simultaneously lock the worknode at index. If none exists, or it's currently locked, or someone
+// else got to it first, returns nullptr. Safe to use with a queue which is written to by the CPU using hipMemcpy.
+template <size_t queueSize>
+__device__ WorkNode_Header *WorkQueue<queueSize>::tryPop_cpuSafe(bool shouldIncrementActiveCount, uint32_t index) {
     // Atomic ops are only atomic with respect to the actions of other GPU cores, not the copy engine. In other words,
     // the copy engine can execute a write in the middle of an atomic op. Thus, if we don't have this 'if' guarding the
     // atomicExch, it's possible for the atomicExch to load nullptr from cpuWorkQueue[i], the copy engine writes a
     // non-null value to cpuWorkQueue[i], then the atomicExch over-writes it with null, and finally atomicExch returns
     // null as if nothing happened.
-    if (reinterpret_cast<WorkNode_Header *>(atomicAdd(reinterpret_cast<uintptr_t *>(&cpuWorkQueue[index]), 0)) != nullptr) {
-        work = reinterpret_cast<WorkNode_Header*>(atomicExch(reinterpret_cast<uintptr_t*>(&cpuWorkQueue[index]), 0));
+    if (atomicAdd(reinterpret_cast<uintptr_t *>(&queue[index]), 0) == 0) {
+        return nullptr;
     }
-    if (work != nullptr) {
-        if (shouldIncrementActiveCount) {
-            atomicAdd(&activeVcoreCount, 1);
-        }
-        __threadfence();
-        atomicAdd(&cpuWorkQueueIndex_pop, 1);
-    }
-    return work;
+    return tryPop(shouldIncrementActiveCount, index);
 }
 
 // Fetches and simultaneously lock the next waiting worknode. If the queue is empty, returns nullptr.
@@ -211,7 +215,7 @@ template <size_t queueSize>
 static inline __device__ bool invokeNext(bool yielding = false) {
     __shared__ WorkNode_Header *worknode_s;
     if (threadIdx.x == 0) {
-        WorkNode_Header *workFromCpu = popWorkNodeFromCpuQueue(!yielding);
+        WorkNode_Header *workFromCpu = cpuWorkQueue.tryPop_cpuSafe(!yielding);
         WorkNode_Header *workFromMainQueue = mainWorkQueue.tryPop(!yielding && workFromCpu == nullptr);
 
         if (workFromMainQueue != nullptr) {
@@ -261,18 +265,19 @@ static inline __device__ bool invokeNext(bool yielding = false) {
 }
 
 static __host__ WorkNode_Header **getCPUWorkQueueAddr() {
-    static WorkNode_Header ** const cpuWorkQueueAddr = static_cast<WorkNode_Header **>([](){
+    static WorkNode_Header ** const cpuWorkQueueAddr = [](){
         void *temp;
         __LIBGPU_HIP_CHECK__(hipGetSymbolAddress(&temp, HIP_SYMBOL(cpuWorkQueue)));
-        return temp;
-    }());
+        auto workQueuePtr = static_cast<decltype(cpuWorkQueue) *>(temp);
+        return &workQueuePtr->queue[0];
+    }();
     return cpuWorkQueueAddr;
 }
 
 static __host__ void waitForSpaceInCPUQueue(const uint32_t myPushCount) {
     for (uint32_t curPopCount = 0; myPushCount - curPopCount >= CPU_WORK_QUEUE_SIZE; ) {
         // TODO: should we put this in a different stream so the copy from Device to Host can happen at the same time as other copies from Host to Device?
-        __LIBGPU_HIP_CHECK__(hipMemcpyFromSymbolAsync(&curPopCount, HIP_SYMBOL(cpuWorkQueueIndex_pop), sizeof(curPopCount), 0, hipMemcpyDeviceToHost, getEnqueingStream()));
+        __LIBGPU_HIP_CHECK__(hipMemcpyFromSymbolAsync(&curPopCount, HIP_SYMBOL(cpuWorkQueue), sizeof(curPopCount), offsetof(decltype(cpuWorkQueue), popCount), hipMemcpyDeviceToHost, getEnqueingStream()));
         __LIBGPU_HIP_CHECK__(hipStreamSynchronize(getEnqueingStream()));
         // Maybe sleep or yield here? On the other hand, hipStreamSynchronize is a blocking call that is likely to take a while
     }
@@ -286,19 +291,19 @@ static __host__ void prepDeviceForWork() {
     bool isFirstTime = false;
     // This bit serves 2 purposes: The lambda is a trick to run a code snippet once, then, since we have to allocate a
     // variable for the trick anyways, and we also need some persistent memory to copy from when setting
-    // cpuWorkQueueIndex_last = -1U, we'll use temp for that purpose too.
+    // cpuWorkQueue.pushCount = -1U, we'll use temp for that purpose too.
     static uint32_t temp = ([&isFirstTime]() {
         // TODO: investigate using hipExtStreamCreateWithCUMask for this
         __LIBGPU_HIP_CHECK__(hipStreamCreateWithFlags(&mainStream, hipStreamNonBlocking));
         isFirstTime = true;
     }(), -1U);
 
-    // cpuWorkQueueIndex_last is initialized to -1U, so we don't need to do this the first time through
+    // cpuWorkQueue.pushCount is initialized to -1U, so we don't need to do this the first time through
     if (!isFirstTime) {
         // Tell the device there's work coming, so threading_main doesn't immediately return. This has to happen on the
         // EnqueingStream because notifyDeviceThereMightNotBeAnyMoreWork does its copy in that stream, and we need to make
         // sure the change made by the last thread's destructor doesn't get over-written
-        __LIBGPU_HIP_CHECK__(hipMemcpyToSymbolAsync(HIP_SYMBOL(cpuWorkQueueIndex_last), &temp, sizeof(temp), 0, hipMemcpyHostToDevice, getEnqueingStream()));
+        __LIBGPU_HIP_CHECK__(hipMemcpyToSymbolAsync(HIP_SYMBOL(cpuWorkQueue), &temp, sizeof(temp), offsetof(decltype(cpuWorkQueue), pushCount), hipMemcpyHostToDevice, getEnqueingStream()));
         __LIBGPU_HIP_CHECK__(hipStreamSynchronize(getEnqueingStream()));
     }
 
@@ -308,8 +313,8 @@ static __host__ void prepDeviceForWork() {
 static __host__ void notifyDeviceThereMightNotBeAnyMoreWork [[maybe_unused]] (bool blocking = false) {
     // Needs to be static because the copy might not be done before we return
     static uint32_t temp;
-    temp = cpuWorkQueueIndex_push;
-    __LIBGPU_HIP_CHECK__(hipMemcpyToSymbolAsync(HIP_SYMBOL(cpuWorkQueueIndex_last), &temp, sizeof(temp), 0, hipMemcpyHostToDevice, getEnqueingStream()));
+    temp = cpuWorkQueuePushCount;
+    __LIBGPU_HIP_CHECK__(hipMemcpyToSymbolAsync(HIP_SYMBOL(cpuWorkQueue), &temp, sizeof(temp), offsetof(decltype(cpuWorkQueue), pushCount), hipMemcpyHostToDevice, getEnqueingStream()));
     if (blocking) {
         // We could wait for the memcpy to finish (with hipStreamSynchronize(enqueingStream)) before
         // synchronizing on mainStream, but there's no need.
@@ -334,7 +339,7 @@ static __host__ WorkNode_Header *sendWorkNodeToGPU(WorkNode_Header *worknode_h, 
     return worknode_d.release();
 }
 __host__ WorkNode_Header *sendWorkNodeToGPU(WorkNode_Header *worknode_h) {
-    const uint32_t myPushCount = cpuWorkQueueIndex_push++;
+    const uint32_t myPushCount = cpuWorkQueuePushCount++;
     const size_t myPushIndex = myPushCount % CPU_WORK_QUEUE_SIZE;
 
     waitForSpaceInCPUQueue(myPushCount);
@@ -343,19 +348,19 @@ __host__ WorkNode_Header *sendWorkNodeToGPU(WorkNode_Header *worknode_h) {
 }
 
 static __device__ bool shouldKeepPollingForWork() {
-    // Don't bother with any of the atomic loads if the CPU hasn't told us it's done sending work.
-    if (cpuWorkQueueIndex_last == -1U) {
+    // Don't bother with any of the other atomic loads if the CPU hasn't told us it's done sending work.
+    if (atomicAdd(&cpuWorkQueue.pushCount, 0) == -1U) {
         return true;
     }
     // Pre-fetch the pop counts so that the load of activeVcoreCount happens after the load of the pop count, but
-    // before the load of the push count. This ensures that if mainWorkQueue.tryPop and/or popWorkNodeFromCpuQueue
+    // before the load of the push count. This ensures that if mainWorkQueue.tryPop and/or cpuWorkQueue.tryPop_cpuSafe
     // returned null only because someone beat us to the punch, we're guaranteed shouldKeepPollingForWork will return
     // true.
-    uint32_t cached_cpuPopIndex = atomicAdd(&cpuWorkQueueIndex_pop, 0);
+    uint32_t cached_cpuPopCount = atomicAdd(&cpuWorkQueue.popCount, 0);
     uint32_t cached_mainPopCount = atomicAdd(&mainWorkQueue.popCount, 0);
     return atomicAdd(&activeVcoreCount, 0) != 0 ||
             cached_mainPopCount         < atomicAdd(&mainWorkQueue.pushCount, 0) ||
-            cached_cpuPopIndex          < cpuWorkQueueIndex_last;
+            cached_cpuPopCount          < atomicAdd(&cpuWorkQueue.pushCount, 0);
 }
 
 //====================================================================================================================//
