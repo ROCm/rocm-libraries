@@ -79,15 +79,32 @@ template<typename T,
          typename Config         = rocprim::default_config>
 struct device_segmented_reduce_benchmark : public benchmark_utils::autotune_interface
 {
+private:
+    std::vector<size_t> desired_segments;
+    size_t              total_size;
+
+public:
+    device_segmented_reduce_benchmark()
+    {
+        this->desired_segments = std::vector<size_t>{1, 10, 100, 1000, 10000};
+    }
+
+    device_segmented_reduce_benchmark(size_t desired_segment)
+    {
+        desired_segments.push_back(desired_segment);
+    }
 
     std::string name() const override
     {
-        return bench_naming::format_name("{lvl:device,algo:segmented_reduce,key_type:"
-                                         + std::string(Traits<T>::name())
-                                         + ",cfg:" + config_name<Config>() + "}");
+        return bench_naming::format_name(
+            "{lvl:device,algo:segmented_reduce,key_type:" + std::string(Traits<T>::name())
+            + (desired_segments.size() == 1
+                   ? ",segment_count:" + std::to_string(desired_segments[0])
+                   : "")
+            + ",cfg:" + config_name<Config>() + "}");
     }
 
-    void run_benchmark(benchmark_utils::state&& state, size_t desired_segment) const
+    void run_benchmark(benchmark_utils::state&& state, size_t desired_segment)
     {
         const auto& stream = state.stream;
         const auto& bytes  = state.bytes;
@@ -160,17 +177,19 @@ struct device_segmented_reduce_benchmark : public benchmark_utils::autotune_inte
                                                        stream));
             });
 
-        state.set_throughput(size, sizeof(value_type));
+        total_size += size;
     }
 
     void run(benchmark_utils::state&& state) override
     {
-        constexpr std::array<size_t, 5> desired_segments{1, 10, 100, 1000, 10000};
+        total_size = 0;
 
         for(const auto desired_segment : desired_segments)
         {
             run_benchmark(std::forward<benchmark_utils::state>(state), desired_segment);
         }
+
+        state.set_throughput(total_size, sizeof(T));
     }
 };
 

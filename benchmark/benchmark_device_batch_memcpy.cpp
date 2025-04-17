@@ -49,6 +49,8 @@
 #include <utility>
 #include <vector>
 
+using namespace std::string_literals;
+
 template<bool IsMemCpy,
          typename InputBufferItType,
          typename OutputBufferItType,
@@ -368,79 +370,90 @@ void run_naive_benchmark(benchmark_utils::state&& state)
     state.set_throughput(data.total_num_elements, sizeof(ValueType));
 }
 
-    #define CREATE_NAIVE_BENCHMARK(item_size,                                                     \
-                                   item_alignment,                                                \
-                                   size_type,                                                     \
-                                   num_tlev,                                                      \
-                                   num_wlev,                                                      \
-                                   num_blev)                                                      \
-        executor.queue_fn(bench_naming::format_name(                                              \
-                              "{lvl:device,item_size:" #item_size                                 \
-                              ",item_alignment:" #item_alignment ",size_type:" #size_type         \
-                              ",algo:naive_memcpy,num_tlev:" #num_tlev ",num_wlev:" #num_wlev     \
-                              ",num_blev:" #num_blev ",cfg:default_config}")                      \
-                              .c_str(),                                                           \
-                          [=](benchmark_utils::state&& state)                                     \
-                          {                                                                       \
-                              run_naive_benchmark<custom_aligned_type<item_size, item_alignment>, \
-                                                  size_type,                                      \
-                                                  true,                                           \
-                                                  num_tlev,                                       \
-                                                  num_wlev,                                       \
-                                                  num_blev>(state);                               \
-                          });
+    #define CREATE_NAIVE_BENCHMARK(item_size,                                               \
+                                   item_alignment,                                          \
+                                   size_type,                                               \
+                                   num_tlev,                                                \
+                                   num_wlev,                                                \
+                                   num_blev)                                                \
+        executor.queue_fn(                                                                  \
+            bench_naming::format_name(                                                      \
+                "{lvl:device,item_size:" #item_size ",item_alignment:" #item_alignment      \
+                ",size_type:" #size_type ",algo:naive_memcpy,num_tlev:" #num_tlev           \
+                ",num_wlev:" #num_wlev ",num_blev:" #num_blev ",cfg:default_config}")       \
+                .c_str(),                                                                   \
+            [=](benchmark_utils::state&& state)                                             \
+            {                                                                               \
+                run_naive_benchmark<custom_aligned_type<item_size, item_alignment>,         \
+                                    size_type,                                              \
+                                    true,                                                   \
+                                    num_tlev,                                               \
+                                    num_wlev,                                               \
+                                    num_blev>(std::forward<benchmark_utils::state>(state)); \
+            });
 
 #endif // BUILD_NAIVE_BENCHMARK
 
-#define CREATE_BENCHMARK(item_size, item_alignment, size_type, num_tlev, num_wlev, num_blev)     \
-    executor.queue_fn(bench_naming::format_name(                                                 \
-                          "{lvl:device,item_size:" #item_size ",item_alignment:" #item_alignment \
-                          ",size_type:" #size_type ",algo:batch_memcpy,num_tlev:" #num_tlev      \
-                          ",num_wlev:" #num_wlev ",num_blev:" #num_blev ",cfg:default_config}")  \
+#define CREATE_BENCHMARK(item_size,                                                              \
+                         item_alignment,                                                         \
+                         size_type,                                                              \
+                         num_tlev,                                                               \
+                         num_wlev,                                                               \
+                         num_blev,                                                               \
+                         is_memcpy)                                                              \
+    executor.queue_fn(bench_naming::format_name("{lvl:device,item_size:" #item_size              \
+                                                ",item_alignment:" #item_alignment               \
+                                                ",size_type:" #size_type ",algo:"                \
+                                                + (is_memcpy ? "batch_memcpy"s : "batch_copy"s)  \
+                                                + ",num_tlev:" #num_tlev ",num_wlev:" #num_wlev  \
+                                                  ",num_blev:" #num_blev ",cfg:default_config}") \
                           .c_str(),                                                              \
                       [=](benchmark_utils::state&& state)                                        \
                       {                                                                          \
                           run_benchmark<custom_aligned_type<item_size, item_alignment>,          \
                                         size_type,                                               \
-                                        true,                                                    \
-                                        num_tlev,                                                \
-                                        num_wlev,                                                \
-                                        num_blev>(std::forward<benchmark_utils::state>(state));  \
-                          run_benchmark<custom_aligned_type<item_size, item_alignment>,          \
-                                        size_type,                                               \
-                                        false,                                                   \
+                                        is_memcpy,                                               \
                                         num_tlev,                                                \
                                         num_wlev,                                                \
                                         num_blev>(std::forward<benchmark_utils::state>(state));  \
                       });
 
+#define CREATE_NORMAL_BENCHMARK(item_size,                                                     \
+                                item_alignment,                                                \
+                                size_type,                                                     \
+                                num_tlev,                                                      \
+                                num_wlev,                                                      \
+                                num_blev)                                                      \
+    CREATE_BENCHMARK(item_size, item_alignment, size_type, num_tlev, num_wlev, num_blev, true) \
+    CREATE_BENCHMARK(item_size, item_alignment, size_type, num_tlev, num_wlev, num_blev, false)
+
 #ifndef BUILD_NAIVE_BENCHMARK
-    #define BENCHMARK_TYPE(item_size, item_alignment)                                 \
-        CREATE_BENCHMARK(item_size, item_alignment, uint32_t, 100000, 0, 0)           \
-        CREATE_BENCHMARK(item_size, item_alignment, uint32_t, 0, 100000, 0)           \
-        CREATE_BENCHMARK(item_size, item_alignment, uint32_t, 0, 0, 1000)             \
-        CREATE_BENCHMARK(item_size, item_alignment, uint32_t, 1000, 1000, 1000)       \
-        CREATE_BENCHMARK(item_size, item_alignment, rocprim::uint128_t, 100000, 0, 0) \
-        CREATE_BENCHMARK(item_size, item_alignment, rocprim::uint128_t, 0, 100000, 0) \
-        CREATE_BENCHMARK(item_size, item_alignment, rocprim::uint128_t, 0, 0, 1000)   \
-        CREATE_BENCHMARK(item_size, item_alignment, rocprim::uint128_t, 1000, 1000, 1000)
+    #define BENCHMARK_TYPE(item_size, item_alignment)                                        \
+        CREATE_NORMAL_BENCHMARK(item_size, item_alignment, uint32_t, 100000, 0, 0)           \
+        CREATE_NORMAL_BENCHMARK(item_size, item_alignment, uint32_t, 0, 100000, 0)           \
+        CREATE_NORMAL_BENCHMARK(item_size, item_alignment, uint32_t, 0, 0, 1000)             \
+        CREATE_NORMAL_BENCHMARK(item_size, item_alignment, uint32_t, 1000, 1000, 1000)       \
+        CREATE_NORMAL_BENCHMARK(item_size, item_alignment, rocprim::uint128_t, 100000, 0, 0) \
+        CREATE_NORMAL_BENCHMARK(item_size, item_alignment, rocprim::uint128_t, 0, 100000, 0) \
+        CREATE_NORMAL_BENCHMARK(item_size, item_alignment, rocprim::uint128_t, 0, 0, 1000)   \
+        CREATE_NORMAL_BENCHMARK(item_size, item_alignment, rocprim::uint128_t, 1000, 1000, 1000)
 #else
-    #define BENCHMARK_TYPE(item_size, item_alignment)                                       \
-        CREATE_BENCHMARK(item_size, item_alignment, uint32_t, 100000, 0, 0)                 \
-        CREATE_BENCHMARK(item_size, item_alignment, uint32_t, 0, 100000, 0)                 \
-        CREATE_BENCHMARK(item_size, item_alignment, uint32_t, 0, 0, 1000)                   \
-        CREATE_BENCHMARK(item_size, item_alignment, uint32_t, 1000, 1000, 1000)             \
-        CREATE_NAIVE_BENCHMARK(item_size, item_alignment, uint32_t, 100000, 0, 0)           \
-        CREATE_NAIVE_BENCHMARK(item_size, item_alignment, uint32_t, 0, 100000, 0)           \
-        CREATE_NAIVE_BENCHMARK(item_size, item_alignment, uint32_t, 0, 0, 1000)             \
-        CREATE_NAIVE_BENCHMARK(item_size, item_alignment, uint32_t, 1000, 1000, 1000)       \
-        CREATE_BENCHMARK(item_size, item_alignment, rocprim::uint128_t, 100000, 0, 0)       \
-        CREATE_BENCHMARK(item_size, item_alignment, rocprim::uint128_t, 0, 100000, 0)       \
-        CREATE_BENCHMARK(item_size, item_alignment, rocprim::uint128_t, 0, 0, 1000)         \
-        CREATE_BENCHMARK(item_size, item_alignment, rocprim::uint128_t, 1000, 1000, 1000)   \
-        CREATE_NAIVE_BENCHMARK(item_size, item_alignment, rocprim::uint128_t, 100000, 0, 0) \
-        CREATE_NAIVE_BENCHMARK(item_size, item_alignment, rocprim::uint128_t, 0, 100000, 0) \
-        CREATE_NAIVE_BENCHMARK(item_size, item_alignment, rocprim::uint128_t, 0, 0, 1000)   \
+    #define BENCHMARK_TYPE(item_size, item_alignment)                                            \
+        CREATE_NORMAL_BENCHMARK(item_size, item_alignment, uint32_t, 100000, 0, 0)               \
+        CREATE_NORMAL_BENCHMARK(item_size, item_alignment, uint32_t, 0, 100000, 0)               \
+        CREATE_NORMAL_BENCHMARK(item_size, item_alignment, uint32_t, 0, 0, 1000)                 \
+        CREATE_NORMAL_BENCHMARK(item_size, item_alignment, uint32_t, 1000, 1000, 1000)           \
+        CREATE_NAIVE_BENCHMARK(item_size, item_alignment, uint32_t, 100000, 0, 0)                \
+        CREATE_NAIVE_BENCHMARK(item_size, item_alignment, uint32_t, 0, 100000, 0)                \
+        CREATE_NAIVE_BENCHMARK(item_size, item_alignment, uint32_t, 0, 0, 1000)                  \
+        CREATE_NAIVE_BENCHMARK(item_size, item_alignment, uint32_t, 1000, 1000, 1000)            \
+        CREATE_NORMAL_BENCHMARK(item_size, item_alignment, rocprim::uint128_t, 100000, 0, 0)     \
+        CREATE_NORMAL_BENCHMARK(item_size, item_alignment, rocprim::uint128_t, 0, 100000, 0)     \
+        CREATE_NORMAL_BENCHMARK(item_size, item_alignment, rocprim::uint128_t, 0, 0, 1000)       \
+        CREATE_NORMAL_BENCHMARK(item_size, item_alignment, rocprim::uint128_t, 1000, 1000, 1000) \
+        CREATE_NAIVE_BENCHMARK(item_size, item_alignment, rocprim::uint128_t, 100000, 0, 0)      \
+        CREATE_NAIVE_BENCHMARK(item_size, item_alignment, rocprim::uint128_t, 0, 100000, 0)      \
+        CREATE_NAIVE_BENCHMARK(item_size, item_alignment, rocprim::uint128_t, 0, 0, 1000)        \
         CREATE_NAIVE_BENCHMARK(item_size, item_alignment, rocprim::uint128_t, 1000, 1000, 1000)
 #endif //BUILD_NAIVE_BENCHMARK
 

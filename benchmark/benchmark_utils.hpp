@@ -1133,6 +1133,14 @@ public:
 
     void set_throughput(size_t actual_size, size_t type_size)
     {
+        if(has_set_throughput)
+        {
+            std::cerr << "Error: Benchmarks should only ever call set_throughput() once, at the "
+                         "very end.\n";
+            exit(EXIT_FAILURE);
+        }
+        has_set_throughput = true;
+
         gbench_state.SetBytesProcessed(total_gbench_iterations * batch_iterations * actual_size
                                        * type_size);
         gbench_state.SetItemsProcessed(total_gbench_iterations * batch_iterations * actual_size);
@@ -1220,6 +1228,7 @@ private:
     size_t                  total_gbench_iterations                 = 0;
     bool                    reset_total_gbench_iterations_every_run = true;
     std::vector<double>     times;
+    bool                    has_set_throughput = false;
 };
 
 struct autotune_interface

@@ -59,7 +59,6 @@ This is a complete list of affected functions and how their default accumulator 
 
 * `rocprim::invoke_result_binary_op` and `rocprim::invoke_result_binary_op_t` are deprecated. Use `rocprim::accumulator_t` now.
 
-
 ### Removed
 
 * Removed `rocprim::detail::float_bit_mask` and relative tests, use `rocprim::traits::float_bit_mask` instead.
@@ -86,6 +85,11 @@ This is a complete list of affected functions and how their default accumulator 
     * Use `rocprim::arch::wavefront::min_size()` or `rocprim::arch::wavefront::max_size()` instead.
   * `__AMDGCN_WAVEFRONT_SIZE`
     * This was a fallback define for the compiler's removed symbol, having the same name. 
+
+### Resolved issues
+
+* Fixed `device_batch_memcpy` its reported benchmarking throughput being 2x lower than it was in reality.
+* Fixed `device_segmented_reduce` its reported autotuning throughput being 5x lower than it was in reality.
 
 ## rocPRIM 3.5.0 for ROCm 6.5.0
 
