@@ -53,10 +53,6 @@ ENDIF(CMAKE_Fortran_FLAGS_RELEASE AND CMAKE_Fortran_FLAGS_TESTING AND CMAKE_Fort
 
 IF(NOT CMAKE_Fortran_COMPILER_ID MATCHES "Cray")
 
-# Don't add underscores in symbols for C-compatability
-SET_COMPILE_FLAG(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS}"
-                 Fortran "-fno-underscoring")
-
 option(BUILD_NATIVE "Enable optimizations that make the binaries non-portable" OFF)
 if(BUILD_NATIVE)
   # There is some bug where -march=native doesn't work on Mac
@@ -81,12 +77,6 @@ ENDIF(NOT CMAKE_Fortran_COMPILER_ID MATCHES "Cray")
 ###################
 
 # NOTE: debugging symbols (-g or /debug:full) are already on by default
-
-# Disable optimizations
-SET_COMPILE_FLAG(CMAKE_Fortran_FLAGS_DEBUG "${CMAKE_Fortran_FLAGS_DEBUG}"
-                 Fortran REQUIRED "-O0" # All compilers not on Windows
-                                  "/Od" # Intel Windows
-                )
 
 # Turn on all warnings 
 SET_COMPILE_FLAG(CMAKE_Fortran_FLAGS_DEBUG "${CMAKE_Fortran_FLAGS_DEBUG}"
@@ -122,10 +112,7 @@ SET_COMPILE_FLAG(CMAKE_Fortran_FLAGS_DEBUG "${CMAKE_Fortran_FLAGS_DEBUG}"
 #####################
 
 # Optimizations
-SET_COMPILE_FLAG(CMAKE_Fortran_FLAGS_TESTING "${CMAKE_Fortran_FLAGS_TESTING}"
-                 Fortran REQUIRED "-O2" # All compilers not on Windows
-                                  "/O2" # Intel Windows
-                )
+SET(CMAKE_Fortran_FLAGS_TESTING "${CMAKE_Fortran_FLAGS_RELWITHDEBINFO}")
 
 #####################
 ### RELEASE FLAGS ###

@@ -41,17 +41,15 @@ Customizing the build
 
 You can customize the build by setting the following environment variables:
 
-*  ``HIPFORT_COMPILER``: The Fortran compiler to use
-*  ``HIPFORT_AR``: Static archive command
-*  ``HIPFORT_RANLIB``: The ``ranlib`` used to create the static archive
-*  ``HIPFORT_COMPILER_FLAGS``: Compiler flags for building hipFORT
-*  ``HIPFORT_BUILD_TYPE``: Set to ``RELEASE TESTING`` or ``DEBUG``
-*  ``HIPFORT_INSTALL_DIR``: The hipFORT install directory
+*  ``FC``: The Fortran compiler to use
+*  ``FFLAGS``: Compiler flags for building hipFORT
 
-.. note::
+or by setting the CMake cache variables:
 
-   Setting the ``CMAKE_INSTALL_DIR`` build variable does **not** change the installation location.
-   Setting the ``CMAKE_Fortran_COMPILER`` build variable does **not** change the Fortran compiler used to build hipFORT.
+*  ``CMAKE_BUILD_TYPE``: Set to ``RELEASE``, ``TESTING``, or ``DEBUG``
+*  ``CMAKE_AR``: Static archive command
+*  ``CMAKE_RANLIB``: The ``ranlib`` used to create the static archive
+*  ``CMAKE_INSTALL_PREFIX``: The install directory
 
 hipfc wrapper compiler and Makefile.hipfort
 ================================================
@@ -93,7 +91,7 @@ The following table lists the most important environment variables:
    * - ``CUDA_PATH``
      - Path to the CUDA installation
      - ``/usr/local/cuda``
-   * - ``HIPFORT_COMPILER``
+   * - ``FC``
      -  Fortran compiler to use
      - ``gfortran``
 

@@ -1,51 +1,55 @@
-CMAKE_MINIMUM_REQUIRED(VERSION 3.5...3.31)
+CMAKE_MINIMUM_REQUIRED(VERSION 3.18...3.31)
 
 #Setting Default value for libdir
 set(CMAKE_INSTALL_LIBDIR "lib" CACHE STRING "Library install directory")
 
+if(DEFINED HIPFORT_COMPILER)
+  message(DEPRECATION "HIPFORT_COMPILER is deprecated. Use CMAKE_Fortran_COMPILER instead.")
+  set(CMAKE_Fortran_COMPILER "${HIPFORT_COMPILER}" CACHE STRING "Fortran compiler")
+endif()
+
+if(DEFINED HIPFORT_AR)
+  message(DEPRECATION "HIPFORT_AR is deprecated. Use CMAKE_AR instead.")
+  set(CMAKE_AR "${HIPFORT_AR}" CACHE STRING "Archiving tool for static libraries")
+endif()
+
+if(DEFINED HIPFORT_RANLIB)
+  message(DEPRECATION "HIPFORT_RANLIB is deprecated. Use CMAKE_RANLIB instead.")
+  set(CMAKE_RANLIB "${HIPFORT_RANLIB}" CACHE STRING "Randomizing tool for static libraries")
+endif()
+
+if(DEFINED HIPFORT_COMPILER_FLAGS)
+  message(DEPRECATION "HIPFORT_COMPILER_FLAGS is deprecated. Use CMAKE_Fortran_FLAGS instead.")
+  set(CMAKE_Fortran_FLAGS "${HIPFORT_COMPILER_FLAGS}" CACHE STRING "Flags for the Fortran compiler and linker")
+endif()
+
+if(DEFINED HIPFORT_BUILD_TYPE)
+  message(DEPRECATION "HIPFORT_BUILD_TYPE is deprecated. Use CMAKE_BUILD_TYPE instead.")
+  set(CMAKE_BUILD_TYPE "${HIPFORT_BUILD_TYPE}" CACHE STRING "Build type to generate")
+endif()
+
+if(DEFINED HIPFORT_INSTALL_DIR)
+  message(DEPRECATION "HIPFORT_INSTALL_DIR is deprecated. Use CMAKE_INSTALL_PREFIX instead.")
+  set(CMAKE_INSTALL_PREFIX "${HIPFORT_INSTALL_DIR}" CACHE STRING "Install directory")
+endif()
+
+# hip-config.cmake requires CXX enabled
+PROJECT(hipfort VERSION 0.7 LANGUAGES Fortran C CXX)
+
 #include definitions for GNU install dir cmake flags.
 include(GNUInstallDirs)
 
-# Default compiler gfortran, otherwise cmake Fortran package will set it to f95
-# You can override the compiler with cmake -DHIPFORT_COMPILER=
-set(HIPFORT_COMPILER "/usr/bin/gfortran" CACHE STRING "Fortran Compiler to build HIPFORT")
-set(HIPFORT_AR "/usr/bin/gcc-ar" CACHE STRING "Static archive command")
-set(HIPFORT_RANLIB "/usr/bin/gcc-ranlib" CACHE STRING "ranlib used to create Static archive")
-set(HIPFORT_COMPILER_FLAGS "-ffree-form -cpp -ffree-line-length-none -fmax-errors=5" CACHE STRING "Compiler flags to build HIPFORT")
-set(HIPFORT_BUILD_TYPE "RELEASE"  CACHE STRING "Set to RELEASE TESTING or DEBUG")
-
-#  The ROCm release manager and other integrators should build hipfort as follows:
-#     cmake -DHIPFORT_INSTALL_DIR=/opt/rocm-<release>/hipfort -DHIPFORT_VERSION=<release> <githubrepo>
-
-set(HIPFORT_VERSION "0.7.0"  CACHE STRING "Version of HIPFORT to build")
-set(HIPFORT_INSTALL_DIR  "/usr/local/hipfort-${HIPFORT_VERSION}" CACHE STRING "Install directory for hipfort")
-IF(CMAKE_INSTALL_PREFIX)
-  # Make HIPFORT_INSTALL_DIR be the same as CmAKE_INSTALL_PREFIX
-  set(HIPFORT_INSTALL_DIR ${CMAKE_INSTALL_PREFIX})
-ELSE()
-  # Make CMAKE_INSTALL_PREFIX be the same as HIPFORT_INSTALL_PREFIX
-  set(CMAKE_INSTALL_PREFIX ${HIPFORT_INSTALL_DIR})
-ENDIF()
 message("-- HIPFORT -------------  cmake START -------------------")
-message("-- HIPFORT_COMPILER:       ${HIPFORT_COMPILER}")
-message("-- HIPFORT_AR:             ${HIPFORT_AR}")
-message("-- HIPFORT_RANLIB:         ${HIPFORT_RANLIB}")
-message("-- HIPFORT_COMPILER_FLAGS: ${HIPFORT_COMPILER_FLAGS}")
-message("-- HIPFORT_BUILD_TYPE:     ${HIPFORT_BUILD_TYPE}")
-message("-- HIPFORT_INSTALL_DIR:    ${HIPFORT_INSTALL_DIR}")
-message("-- HIPFORT_VERSION:        ${HIPFORT_VERSION}")
+message("-- Fortran Compiler:       ${CMAKE_Fortran_COMPILER}")
+message("-- Build Type:             ${CMAKE_BUILD_TYPE}")
+message("-- Installation Directory: ${CMAKE_INSTALL_PREFIX}")
+message("-- hipfort Version:        ${hipfort_VERSION}")
 message("-- HIPFORT ----------------------------------------------")
 
-set(CMAKE_Fortran_COMPILER_INIT ${HIPFORT_COMPILER})
-PROJECT(hipfort Fortran C CXX) # hip-config.cmake requires CXX enabled
+set(CMAKE_Fortran_FORMAT FREE)
+set(CMAKE_Fortran_PREPROCESS ON)
 
-SET(CMAKE_BUILD_TYPE ${HIPFORT_BUILD_TYPE})
-SET(VERSION ${HIPFORT_VERSION})
-SET(CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/Modules/")
-SET(CMAKE_AR ${HIPFORT_AR})
-SET(CMAKE_RANLIB ${HIPFORT_RANLIB})
-SET(CMAKE_INSTALL_PREFIX ${HIPFORT_INSTALL_DIR})
-message("-- CMAKE_INSTALL_PREFIX:${CMAKE_INSTALL_PREFIX}")
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/Modules")
 
 INCLUDE(FortranCInterface)
 FortranCInterface_VERIFY()
@@ -60,7 +64,8 @@ ENDIF(NOT CMAKE_Fortran_COMPILER_SUPPORTS_F90)
 # Test for Fortran 08 support by using an f08-specific construct.
 IF(NOT DEFINED CMAKE_Fortran_COMPILER_SUPPORTS_F08)
   MESSAGE(CHECK_START "Checking whether ${CMAKE_Fortran_COMPILER} supports Fortran 08")
-  FILE(WRITE ${CMAKE_BINARY_DIR}${CMAKE_FILES_DIRECTORY}/CMakeTmp/testFortranCompilerF08.f90 "
+  INCLUDE(CheckFortranSourceCompiles)
+  CHECK_FORTRAN_SOURCE_COMPILES("
     module mod
       interface foo
         module procedure :: foo_a,foo_b
@@ -84,10 +89,7 @@ IF(NOT DEFINED CMAKE_Fortran_COMPILER_SUPPORTS_F08)
       allocate(b,mold=a)
       deallocate(b)
     END PROGRAM TESTFortran08
-")
-  TRY_COMPILE(CMAKE_Fortran_COMPILER_SUPPORTS_F08 ${CMAKE_BINARY_DIR}
-    ${CMAKE_BINARY_DIR}${CMAKE_FILES_DIRECTORY}/CMakeTmp/testFortranCompilerF08.f90
-    OUTPUT_VARIABLE OUTPUT)
+    " CMAKE_Fortran_COMPILER_SUPPORTS_F08)
   IF(CMAKE_Fortran_COMPILER_SUPPORTS_F08)
     MESSAGE(CHECK_PASS "yes")
     file(APPEND ${CMAKE_BINARY_DIR}${CMAKE_FILES_DIRECTORY}/CMakeOutput.log
@@ -104,22 +106,12 @@ IF(NOT DEFINED CMAKE_Fortran_COMPILER_SUPPORTS_F08)
   unset(CMAKE_Fortran_COMPILER_SUPPORTS_F08 CACHE)
 ENDIF(NOT DEFINED CMAKE_Fortran_COMPILER_SUPPORTS_F08)
 
-#OPTION(USE_MPI "Use the MPI library for parallelization" OFF)
-#OPTION(USE_OPENMP "Use OpenMP for parallelization" OFF)
-
-IF(CMAKE_Fortran_COMPILER_ID MATCHES "(Cray|LLVMFlang)")
-  set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} ${HIPFORT_COMPILER_FLAGS}")
-ELSE(CMAKE_Fortran_COMPILER_ID MATCHES "(Cray|LLVMFlang)")
-IF(CMAKE_Fortran_COMPILER_SUPPORTS_F08)
-  set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} ${HIPFORT_COMPILER_FLAGS} -std=f2008")
-ELSE(CMAKE_Fortran_COMPILER_SUPPORTS_F08)
-  set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} ${HIPFORT_COMPILER_FLAGS} -std=f2003")
-ENDIF(CMAKE_Fortran_COMPILER_SUPPORTS_F08)
-ENDIF(CMAKE_Fortran_COMPILER_ID MATCHES "(Cray|LLVMFlang)")
- 
 # Set compile flags for DEBUG, # RELEASE, or TESTING.  
 INCLUDE(${CMAKE_MODULE_PATH}/SetFortranFlags.cmake) 
 message("-- Done setting FortranFlags")
+message("-- CMAKE_Fortran_FLAGS_DEBUG:   ${CMAKE_Fortran_FLAGS_DEBUG}")
+message("-- CMAKE_Fortran_FLAGS_RELEASE: ${CMAKE_Fortran_FLAGS_RELEASE}")
+message("-- CMAKE_Fortran_FLAGS_TESTING: ${CMAKE_Fortran_FLAGS_TESTING}")
 
 # There is an error in CMAKE with this flag for pgf90.  Unset it
 GET_FILENAME_COMPONENT(FCNAME ${CMAKE_Fortran_COMPILER} NAME)
