@@ -65,7 +65,7 @@ def runTestCommand (platform, project) {
                     mkdir -p rocdecode-sample && cd rocdecode-sample
                     cmake /opt/rocm/share/rocdecode/samples/videoDecode/
                     make -j8
-                    LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:/opt/rocm/lib${libLocation} ./videodecode -i /opt/rocm/share/rocdecode/video/AMD_driving_virtual_20-H265.mp4
+                    LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:/opt/rocm/lib${libLocation} ./videodecode -i /opt/rocm/share/rocdecode/video/container/AMD_driving_virtual_20-H265.mp4
                     echo rocdecode-test package verification
                     cd ../ && mkdir -p rocdecode-test && cd rocdecode-test
                     cmake /opt/rocm/share/rocdecode/test/

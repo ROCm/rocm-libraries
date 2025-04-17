@@ -187,7 +187,7 @@ To verify your installation using a sample application, run:
   mkdir rocdecode-sample && cd rocdecode-sample
   cmake /opt/rocm/share/rocdecode/samples/videoDecode/
   make -j8
-  ./videodecode -i /opt/rocm/share/rocdecode/video/AMD_driving_virtual_20-H265.mp4
+  ./videodecode -i /opt/rocm/share/rocdecode/video/container/AMD_driving_virtual_20-H265.mp4
   ```
 
 ### Using test package

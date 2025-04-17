@@ -84,7 +84,7 @@ add_test(
                               "${CMAKE_CURRENT_BINARY_DIR}/videoDecode"
             --build-generator "${CMAKE_GENERATOR}"
             --test-command "videodecode"
-            -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-H265.mp4
+            -i ${ROCM_PATH}/share/rocdecode/video/container/AMD_driving_virtual_20-H265.mp4
 )
 
 # 2 - videoDecode AVC
@@ -97,7 +97,7 @@ add_test(
                               "${CMAKE_CURRENT_BINARY_DIR}/videoDecode"
             --build-generator "${CMAKE_GENERATOR}"
             --test-command "videodecode"
-            -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-H264.mp4
+            -i ${ROCM_PATH}/share/rocdecode/video/container/AMD_driving_virtual_20-H264.mp4
 )
 
 # 3 - videoDecode AV1
@@ -110,7 +110,7 @@ add_test(
                               "${CMAKE_CURRENT_BINARY_DIR}/videoDecode"
             --build-generator "${CMAKE_GENERATOR}"
             --test-command "videodecode"
-            -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-AV1.mp4
+            -i ${ROCM_PATH}/share/rocdecode/video/container/AMD_driving_virtual_20-AV1.mp4
 )
 
 # 4 - videoDecode VP9
@@ -123,7 +123,7 @@ add_test(
                               "${CMAKE_CURRENT_BINARY_DIR}/videoDecode"
             --build-generator "${CMAKE_GENERATOR}"
             --test-command "videodecode"
-            -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-VP9.ivf
+            -i ${ROCM_PATH}/share/rocdecode/video/container/AMD_driving_virtual_20-VP9.ivf
 )
 
 # 5 - videoDecodePerf
@@ -136,7 +136,7 @@ add_test(
                               "${CMAKE_CURRENT_BINARY_DIR}/videoDecodePerf"
             --build-generator "${CMAKE_GENERATOR}"
             --test-command "videodecodeperf"
-            -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-H265.mp4
+            -i ${ROCM_PATH}/share/rocdecode/video/container/AMD_driving_virtual_20-H265.mp4
 )
 
 # 6 - videoDecodeBatch
@@ -149,7 +149,7 @@ add_test(
                               "${CMAKE_CURRENT_BINARY_DIR}/videoDecodeBatch"
             --build-generator "${CMAKE_GENERATOR}"
             --test-command "videodecodebatch"
-            -i ${ROCM_PATH}/share/rocdecode/video/ -t 2
+            -i ${ROCM_PATH}/share/rocdecode/video/container/ -t 2
 )
 
 # 7 - videoDecodeRGB
@@ -162,7 +162,7 @@ add_test(
                               "${CMAKE_CURRENT_BINARY_DIR}/videoDecodeRGB"
             --build-generator "${CMAKE_GENERATOR}"
             --test-command "videodecodergb"
-            -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-H265.mp4 -of rgb
+            -i ${ROCM_PATH}/share/rocdecode/video/container/AMD_driving_virtual_20-H265.mp4 -of rgb
 )
 
 
@@ -176,7 +176,7 @@ add_test(
                               "${CMAKE_CURRENT_BINARY_DIR}/videoDecodeMem"
             --build-generator "${CMAKE_GENERATOR}"
             --test-command "videodecodemem"
-            -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-H265.mp4
+            -i ${ROCM_PATH}/share/rocdecode/video/container/AMD_driving_virtual_20-H265.mp4
 )
 
 # 9 - videoDecodeRaw HEVC
@@ -189,7 +189,7 @@ add_test(
                               "${CMAKE_CURRENT_BINARY_DIR}/videoDecodeRaw"
             --build-generator "${CMAKE_GENERATOR}"
             --test-command "videodecoderaw"
-            -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-H265.265
+            -i ${ROCM_PATH}/share/rocdecode/video/elementary/AMD_driving_virtual_20-H265.265
 )
 
 # 10 - videoDecodeRaw AVC
@@ -202,23 +202,36 @@ add_test(
                               "${CMAKE_CURRENT_BINARY_DIR}/videoDecodeRaw"
             --build-generator "${CMAKE_GENERATOR}"
             --test-command "videodecoderaw"
-            -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-H264.264
+            -i ${ROCM_PATH}/share/rocdecode/video/elementary/AMD_driving_virtual_20-H264.264
 )
 
-# 11 - videoDecodeRaw AV1
+# 11 - videoDecodeRaw AV1 IVF
 add_test(
   NAME
-    video_decodeRaw-AV1
+    video_decodeRaw-AV1-IVF
   COMMAND
     "${CMAKE_CTEST_COMMAND}"
             --build-and-test "${ROCM_PATH}/share/rocdecode/samples/videoDecodeRaw"
                               "${CMAKE_CURRENT_BINARY_DIR}/videoDecodeRaw"
             --build-generator "${CMAKE_GENERATOR}"
             --test-command "videodecoderaw"
-            -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-AV1.ivf
+            -i ${ROCM_PATH}/share/rocdecode/video/container/AMD_driving_virtual_20-AV1.ivf
 )
 
-# 12 - videoDecodeRaw VP9
+# 12 - videoDecodeRaw AV1 OBU
+add_test(
+  NAME
+    video_decodeRaw-AV1-OBU
+  COMMAND
+    "${CMAKE_CTEST_COMMAND}"
+            --build-and-test "${ROCM_PATH}/share/rocdecode/samples/videoDecodeRaw"
+                              "${CMAKE_CURRENT_BINARY_DIR}/videoDecodeRaw"
+            --build-generator "${CMAKE_GENERATOR}"
+            --test-command "videodecoderaw"
+            -i ${ROCM_PATH}/share/rocdecode/video/elementary/AMD_driving_virtual_20-AV1.obu
+)
+
+# 13 - videoDecodeRaw VP9
 add_test(
   NAME
     video_decodeRaw-VP9
@@ -228,10 +241,10 @@ add_test(
                               "${CMAKE_CURRENT_BINARY_DIR}/videoDecodeRaw"
             --build-generator "${CMAKE_GENERATOR}"
             --test-command "videodecoderaw"
-            -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-VP9.ivf
+            -i ${ROCM_PATH}/share/rocdecode/video/container/AMD_driving_virtual_20-VP9.ivf
 )
 
-# 13 - rocDecodeNegativeApiTests
+# 14 - rocDecodeNegativeApiTests
 add_test(
   NAME
   rocDecode_Negative_API_Tests
