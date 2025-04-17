@@ -57,11 +57,14 @@ class IpcOnImpl {
 
   __host__ void ipcHostStop();
 
-  __device__ bool isIpcAvailable(int my_pe, int target_pe) {
+  __device__ bool isIpcAvailable(int my_pe, int target_pe, int *local_target_pe) {
     if (nullptr == pes_with_ipc_avail) { return false; }
 
     for (int i=0; i<shm_size; i++) {
-      if (pes_with_ipc_avail[i] == target_pe) { return true; }
+      if (pes_with_ipc_avail[i] == target_pe) {
+        *local_target_pe = i;
+        return true;
+      }
     }
 
     return false;
@@ -123,6 +126,8 @@ class IpcOffImpl {
   using HEAP_BASES_T = std::vector<char *, StdAllocatorHIP<char *>>;
 
  public:
+  int shm_rank{0};
+
   uint32_t shm_size{0};
 
   char **ipc_bases{nullptr};
@@ -134,7 +139,7 @@ class IpcOffImpl {
 
   __host__ void ipcHostStop() {}
 
-  __device__ bool isIpcAvailable(int my_pe, int target_pe) { return false; }
+  __device__ bool isIpcAvailable(int my_pe, int target_pe, int *local_target_pe) { return false; }
 
   __device__ void ipcGpuInit(Backend *rocshmem_handle, Context *ctx,
                              int thread_id) {}

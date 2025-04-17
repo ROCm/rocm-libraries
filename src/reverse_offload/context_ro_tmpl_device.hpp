@@ -145,9 +145,10 @@ __device__ void ROContext::put_nbi(T *dest, const T *source, size_t nelems,
 
 template <typename T>
 __device__ void ROContext::p(T *dest, T value, int pe) {
-  if (ipcImpl_.isIpcAvailable(my_pe, pe)) {
-    long L_offset{reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[my_pe]};
-    ipcImpl_.ipcCopy(ipcImpl_.ipc_bases[pe] + L_offset,
+  int local_pe{-1};
+  if (ipcImpl_.isIpcAvailable(my_pe, pe, &local_pe)) {
+    long L_offset{reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank]};
+    ipcImpl_.ipcCopy(ipcImpl_.ipc_bases[local_pe] + L_offset,
                      reinterpret_cast<void *>(&value), sizeof(T));
   } else {
     build_queue_element(RO_NET_P, dest, &value, sizeof(T), pe, 0, 0, 0, nullptr,
@@ -158,11 +159,12 @@ __device__ void ROContext::p(T *dest, T value, int pe) {
 
 template <typename T>
 __device__ T ROContext::g(const T *source, int pe) {
-  if (ipcImpl_.isIpcAvailable(my_pe, pe)) {
+  int local_pe{-1};
+  if (ipcImpl_.isIpcAvailable(my_pe, pe, &local_pe)) {
     const char *src_typed{reinterpret_cast<const char *>(source)};
-    long L_offset{const_cast<char *>(src_typed) - ipcImpl_.ipc_bases[my_pe]};
+    long L_offset{const_cast<char *>(src_typed) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank]};
     T dest;
-    ipcImpl_.ipcCopy(&dest, ipcImpl_.ipc_bases[pe] + L_offset, sizeof(T));
+    ipcImpl_.ipcCopy(&dest, ipcImpl_.ipc_bases[local_pe] + L_offset, sizeof(T));
     return dest;
   } else {
     auto dest{get_g_ret_buf()};
