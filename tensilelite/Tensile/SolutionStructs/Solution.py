@@ -958,10 +958,7 @@ class Solution(collections.abc.Mapping):
         return False
 
     # so far, DirectToLds does not work well with PGR=2
-    # performance is not good and a lot of ds_read for DTL can cause scheduling issue(need fix)
-    if state["PrefetchGlobalRead"] == 2:
-      reject(state, printRejectionReason, "can't use DirectToLds for PrefetchGlobalRead == 2")
-      return False
+    # performance is not good and a lot of ds_read for DTL can cause scheduling issue(TODO: need fix)
 
     # so far, DirectToLds does not work with LRVW=2
     if state["LocalReadVectorWidth"] == 2:
@@ -999,6 +996,12 @@ class Solution(collections.abc.Mapping):
        state["_DepthU%s"%tc] // state["NumLoadsCoalesced%c"%tc] < 8:
       reject(state, printRejectionReason, "DirectToLds%c does not work with TLU=False and bpe > bpr and DepthU//NumLoadsCoalesced%c < 8"%(tc, tc))
       return False
+
+    # DTL + input type conversion
+    if state["ProblemType"]["DataType%s"%tc] != state["ProblemType"]["DataType"]:
+      if not state["ConvertAfterDS"]:
+        reject(state, printRejectionReason, "DirectToLds%s + input conversion + ConvertAfterDS=False not supported"%(tc))
+        return False
 
     return True
 
@@ -1288,8 +1291,10 @@ class Solution(collections.abc.Mapping):
     state["DirectToLdsB"] = False
     state["LocalWriteUseSgprA"] = False
     state["LocalWriteUseSgprB"] = False
+    state["StoreSwapAddr"] = False
 
     state["WorkGroupMappingXCC"] = abs(state["WorkGroupMappingXCC"])
+
 
     problemType = state["ProblemType"]
 
@@ -1614,16 +1619,19 @@ class Solution(collections.abc.Mapping):
                 ldsPadA = ((16 * state["VectorWidthA"] * state["ProblemType"]["DataType"].numBytes() + state["MacroTile0"] * state["ProblemType"]["DataType"].numBytes() * state["LocalReadVectorWidth"]) % 128) // state["ProblemType"]["DataType"].numBytes()
               if state["GlobalReadVectorWidthA"] * state["ProblemType"]["DataType"].numBytes() == 32 and ldsPadA == 0:
                 ldsPadA = 16 // state["ProblemType"]["DataType"].numBytes()
+              if state["DirectToLdsA"]:
+                # TODO: Check if there are cases which benefit from padding, currently set to zero by default
+                ldsPadA = 0
             else: # mac instruction
               if state["ProblemType"]["TLUA"]:
                 ldsPadA = 0
               else:
                 ldsPadA = state["VectorWidthA"]
           else:
-            ldsPadA = max(state["GlobalReadVectorWidthA"],optPadA)
-            ## turn-off padding for directToLds
             if state["DirectToLdsA"]:
-              ldsPadA = 0
+              ldsPadA = max(lrvw, optPadA)
+            else:
+              ldsPadA = max(state["GlobalReadVectorWidthA"],optPadA)
           assert(ldsPadA >= 0)
 
         if ldsPadB == -1:
@@ -1634,15 +1642,19 @@ class Solution(collections.abc.Mapping):
                 ldsPadB = ((16 * state["VectorWidthB"] * state["ProblemType"]["DataType"].numBytes() + state["MacroTile1"] * state["ProblemType"]["DataType"].numBytes() * state["LocalReadVectorWidth"]) % 128) // state["ProblemType"]["DataType"].numBytes()
               if state["GlobalReadVectorWidthB"] * state["ProblemType"]["DataType"].numBytes() == 32 and ldsPadB == 0:
                 ldsPadB = 16 // state["ProblemType"]["DataType"].numBytes()
+              if state["DirectToLdsB"]:
+                # TODO: Check if there are cases which benefit from padding, currently set to zero by default
+                ldsPadB = 0
             else:
               if state["ProblemType"]["TLUB"]:
                 ldsPadB = 0
               else:
                 ldsPadB = state["VectorWidthB"]
           else:
-            ldsPadB = max(state["GlobalReadVectorWidthB"],optPadB)
             if state["DirectToLdsB"]:
-              ldsPadB = 0
+              ldsPadB = max(lrvw, optPadB)
+            else:
+              ldsPadB = max(state["GlobalReadVectorWidthB"],optPadB)
           assert(ldsPadB >= 0)
 
         ldsPadM = state["LdsPadMetadata"]
@@ -1663,11 +1675,10 @@ class Solution(collections.abc.Mapping):
                 ldsPadM = 0
           assert(ldsPadM >= 0)
 
-        # set ldsPadA,B=0 for DirectToLds or DirectToVgpr
-        # TODO: enable ldsPad for DirectToLds (if needed)
-        if state["DirectToLds"] or state["DirectToVgprA"]:
+        # set ldsPadA,B=0 for DirectToVgpr
+        if state["DirectToVgprA"]:
           ldsPadA = 0
-        if state["DirectToLds"] or state["DirectToVgprB"]:
+        if state["DirectToVgprB"]:
           ldsPadB = 0
 
         return ldsPadA, ldsPadB, ldsPadM
@@ -1704,11 +1715,23 @@ class Solution(collections.abc.Mapping):
           else:
             LdsBlockSizePerPadB = 0
 
-        # set LdsBlockSizePerPadA,B=0 for DirectToLds or DirectToVgpr
-        if state["DirectToLds"] or state["DirectToVgprA"]:
+        # set LdsBlockSizePerPadA,B=0 for DirectToVgpr
+        if state["DirectToVgprA"]:
           LdsBlockSizePerPadA = 0
-        if state["DirectToLds"] or state["DirectToVgprB"]:
+        if state["DirectToVgprB"]:
           LdsBlockSizePerPadB = 0
+
+        if state["DirectToLdsA"]:
+          bpeA = state["ProblemType"]["DataTypeA"].numBytes()
+          # For DTL lds padding must be a multiple of the instruction load size (in bytes)
+          MinLdsBlockSizePerPadA = (state[f"GlobalReadVectorWidthA"] * bpeA) * state["WavefrontSize"]
+          LdsBlockSizePerPadA = roundUpToNearestMultiple(LdsBlockSizePerPadA, MinLdsBlockSizePerPadA)
+
+        if state["DirectToLdsB"]:
+          bpeB = state["ProblemType"]["DataTypeB"].numBytes()
+          # For DTL lds padding must be a multiple of the instruction load size (in bytes)
+          MinLdsBlockSizePerPadB = (state[f"GlobalReadVectorWidthB"] * bpeB) * state["WavefrontSize"]
+          LdsBlockSizePerPadB = roundUpToNearestMultiple(LdsBlockSizePerPadB, MinLdsBlockSizePerPadB)
 
         return LdsBlockSizePerPadA, LdsBlockSizePerPadB
 
@@ -1722,10 +1745,10 @@ class Solution(collections.abc.Mapping):
         else:
           ldsNumBytesA = state["_DepthUA"] * (state["MacroTileA"] + ldsPadA) * bpeA
         padInterval = LdsBlockSizePerPadA
+
         if padInterval != 0:
           ldsNumBytesA = int((state["_DepthUA"] * state["MacroTileA"] * bpeA) / padInterval * (padInterval + ldsPadA * bpeA))
         ldsNumBytesAlignedA = roundUpToNearestMultiple(ldsNumBytesA, ldsAlign)
-
         # DirectToVgpr case, set 0 to lds related variables
         if state["DirectToVgprA"]:
           ldsNumBytesA = 0
@@ -2396,6 +2419,40 @@ class Solution(collections.abc.Mapping):
     if state["ProblemType"]["Sparse"] and not state["DirectToVgprSparseMetadata"]:
       state["UnrollMajorLDSMetadata"] = state["TransposeLDSMetadata"] and (not state["ProblemType"]["TLUMetadata"])
 
+    # Determine if we can load directly-to-LDS.
+    # Transpose requires a trip through registers to perform the transpose so can't use DirectToLdsA
+    # LDS loads always write 4 bytes apart so can use only 4-byte operations
+    #   TODO - for doubles we need to add something special here?
+    # The matrix must not require transposing since that is done by reading to VGPR and writing in different order
+    # The LSC (load size coalesced) must load some multiple of 256 bytes since that is what each DirectToLds load provides
+    # Note for these matrices LSC is same as MacroTile dim
+    # MatrixInstruction rules:
+    # DirectToLDS is supported for TLU=0  (make sure transposeLDS=1)
+    # LDS (load size coalesced) * LSPA must load some multiple of 256 bytes.
+    # No longer support loadX2/loadx4 .
+    if state["DirectToLds"]:
+      if (not state["DirectToVgprA"]) and Solution.isDirectToLdsDoable(state, 'A', isaInfoMap, printRejectionReason):
+        state["DirectToLdsA"] = True
+        state["LocalWriteUseSgprA"] = True
+
+      if (not state["DirectToVgprB"]) and Solution.isDirectToLdsDoable(state, 'B', isaInfoMap, printRejectionReason):
+        state["DirectToLdsB"] = True
+        state["LocalWriteUseSgprB"] = True
+
+      # Update parent variable so kernel display is accurate
+      state["DirectToLds"] = state["DirectToLdsA"] or state["DirectToLdsB"]
+      if state["1LDSBuffer"] == -1 and state["DirectToLds"]:
+        #1LDS buffer must be 0 for DirectToLdsA
+        state["1LDSBuffer"] = 0
+
+      # Re-check DTV + WaveGroup after DTL is confirmed
+      if state["DirectToLds"]:
+        if state["DirectToVgprA"] and state['MIWaveGroup'][1] > 1:
+          reject(state, printRejectionReason, "DirectToLds + (DirectToVgprA + WaveGroups along N-Dim) is not supported yet")
+          return False
+        if state["DirectToVgprB"] and state['MIWaveGroup'][0] > 1:
+          reject(state, printRejectionReason, "DirectToLds + (DirectToVgprB + WaveGroups along M-Dim) is not supported yet")
+          return False
 
     auto_LdsBlockSizePerPadA_for_mix = 0
     if state["LdsBlockSizePerPadA"] == -1:
@@ -2584,47 +2641,6 @@ class Solution(collections.abc.Mapping):
       checkLdsBlockSizePerPad("A")
       checkLdsBlockSizePerPad("B")
 
-    # Determine if we can load directly-to-LDS.
-    # Transpose requires a trip through registers to perform the transpose so can't use DirectToLdsA
-    # LDS loads always write 4 bytes apart so can use only 4-byte operations
-    #   TODO - for doubles we need to add something special here?
-    # The matrix must not require transposing since that is done by reading to VGPR and writing in different order
-    # The LSC (load size coalesced) must load some multiple of 256 bytes since that is what each DirectToLds load provides
-    # Note for these matrices LSC is same as MacroTile dim
-    # MatrixInstruction rules:
-    # DirectToLDS is supported for TLU=0  (make sure transposeLDS=1)
-    # LDS (load size coalesced) * LSPA must load some multiple of 256 bytes.
-    # No longer support loadX2/loadx4 .
-    if state["DirectToLds"]:
-      if (not state["DirectToVgprA"]) and Solution.isDirectToLdsDoable(state, 'A', isaInfoMap, printRejectionReason):
-        state["DirectToLdsA"] = True
-        state["LocalWriteUseSgprA"] = True
-        state["LdsPadA"] = 0
-        printWarning("DirectToLdsA enabled, set LdsPadA=0.")
-        #print("DirectToLdsA", state["DirectToLdsA"])
-
-      if (not state["DirectToVgprB"]) and Solution.isDirectToLdsDoable(state, 'B', isaInfoMap, printRejectionReason):
-        state["DirectToLdsB"] = True
-        state["LocalWriteUseSgprB"] = True
-        state["LdsPadB"] = 0
-        printWarning("DirectToLdsB enabled, set LdsPadB=0.")
-        #print("DirectToLdsB", state["DirectToLdsB"])
-
-      # Update parent variable so kernel display is accurate
-      state["DirectToLds"] = state["DirectToLdsA"] or state["DirectToLdsB"]
-      if state["1LDSBuffer"] == -1 and state["DirectToLds"]:
-        #1LDS buffer must be 0 for DirectToLdsA
-        state["1LDSBuffer"] = 0
-
-      # Re-check DTV + WaveGroup after DTL is confirmed
-      if state["DirectToLds"]:
-        if state["DirectToVgprA"] and state['MIWaveGroup'][1] > 1:
-          reject(state, printRejectionReason, "DirectToLds + (DirectToVgprA + WaveGroups along N-Dim) is not supported yet")
-          return False
-        if state["DirectToVgprB"] and state['MIWaveGroup'][0] > 1:
-          reject(state, printRejectionReason, "DirectToLds + (DirectToVgprB + WaveGroups along M-Dim) is not supported yet")
-          return False
-
     # set NoLdsWriteCode if (DirectToVgpr or DirectToLds)A+B is enabled
     state["NoLdsWriteCode"] = False
     if (state["DirectToVgprA"] or state["DirectToLdsA"]) and (state["DirectToVgprB"] or state["DirectToLdsB"]):
@@ -2658,8 +2674,14 @@ class Solution(collections.abc.Mapping):
       state["LdsOffsetMetadata"] = state["LdsOffsetA"] + state["LdsNumElementsAlignedA"]
       state["LdsOffsetB"] = state["LdsOffsetMetadata"] + state["LdsNumElementsAlignedMetadata"]
 
-      offsetBlk = state["LdsOffsetB"] +  ldsNumBytesAlignedB
-      if offsetBlk > 0:
+      offsetBlk = state["LdsOffsetB"] + ldsNumBytesAlignedB
+
+      state["StoreSwapAddr"] = (state["PrefetchGlobalRead"] == 2) and \
+        (state["1LDSBuffer"] == 0) and \
+        (offsetBlk + int(2**(math.ceil(math.log(offsetBlk, 2)))) > depthUConfig.maxLDS)
+
+      if offsetBlk > 0 and not state["StoreSwapAddr"]:
+        # Rounds offsetBlk to a power of two to enable inlining {s,v}_xor constants for swapping offsets
         offsetBlk = int(2**(math.ceil(math.log(offsetBlk, 2))))
 
       state["LdsOffsetA_Blk"] = offsetBlk

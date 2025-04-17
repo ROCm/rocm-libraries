@@ -697,6 +697,8 @@ def prepareLWInstToSched(writer, kernel, numLocalWritesPerSched, isNGLL=False):
         numDummy = 0
         lenA = len(list(writer.codes.globalReadA.middle.items()))
         lenB = len(list(writer.codes.globalReadB.middle.items()))
+        lenAFooter = len(list(writer.codes.globalReadA.footer.items()))
+        lenBFooter = len(list(writer.codes.globalReadB.footer.items()))
         # A/B swap check for DTV. NGLL case, no swap
         swapped = writer.isSwapGlobalReadOrderForDtvOrDtl(kernel) and (not isNGLL)
         insertDummyTop = True
@@ -706,13 +708,13 @@ def prepareLWInstToSched(writer, kernel, numLocalWritesPerSched, isNGLL=False):
         if kernel["DirectToLdsA"] or kernel["DirectToVgprA"]:
             if kernel["DirectToLdsA"]:
               # PGR2 + DTLcase, footer code is added in middle. Need to subtract 1 (for footer inst)
-              lenA -= 1
+              lenA -= lenAFooter
             numDummy += lenA
             insertDummyTop = (not swapped)
         if kernel["DirectToLdsB"] or kernel["DirectToVgprB"]:
             if kernel["DirectToLdsB"]:
               # PGR2 + DTLcase, footer code is added in middle. Need to subtract 1 (for footer inst)
-              lenB -= 1
+              lenB -= lenBFooter
             numDummy += lenB
             insertDummyTop = swapped
         for i in range(numDummy):
