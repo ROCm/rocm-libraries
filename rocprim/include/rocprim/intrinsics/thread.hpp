@@ -278,13 +278,6 @@ namespace detail
         return lane_id()%LogicalWarpSize;
     }
 
-    template<>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
-    unsigned int logical_lane_id<arch::wavefront::min_size()>()
-    {
-        return lane_id();
-    }
-
     // Return id of "logical warp" in a block
     template<unsigned int LogicalWarpSize>
     ROCPRIM_DEVICE ROCPRIM_INLINE
