@@ -459,7 +459,7 @@ void run_naive_benchmark(benchmark_utils::state&& state)
 
 int32_t main(int32_t argc, char* argv[])
 {
-    benchmark_utils::executor executor(argc, argv, 1 * benchmark_utils::KiB, 1, 5);
+    benchmark_utils::executor executor(argc, argv, 0, 1, 5);
 
     BENCHMARK_TYPE(1, 1)
     BENCHMARK_TYPE(1, 2)
