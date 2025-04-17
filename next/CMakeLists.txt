@@ -19,25 +19,20 @@
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 # ########################################################################
 
-if(NOT PROJECT_IS_TOP_LEVEL)
-    cmake_minimum_required(VERSION 3.21)
-    project(hipblas-common VERSION 1.0.0 LANGUAGES CXX)
-    # For most projects, on non-Windows platforms it is advisable to explicitly
-    # set CMAKE_INSTALL_PREFIX to a FHS-compliant /opt/... path.
-    # set(CMAKE_INSTALL_PREFIX "/opt/rocm/${PROJECT_NAME}")
-    # we conditionally set this to a different location in windows
-endif()
+cmake_minimum_required(VERSION 3.11)
+project(hipblas-common VERSION 1.0.0 LANGUAGES CXX)
 
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
 add_library(hipblas-common INTERFACE)
+add_library(hip::hipblas-common ALIAS hipblas-common)
 add_library(roc::hipblas-common ALIAS hipblas-common)
+message(DEPRECATION "roc::hipblas-common is deprecated")
 
 target_sources(hipblas-common 
-    PUBLIC
+    INTERFACE
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../library/include/hipblas-common.h>
-        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/hipblas-common/hipblas-common.h>
 )
 target_include_directories(hipblas-common
     INTERFACE
@@ -56,13 +51,13 @@ write_basic_package_version_file(
 install(
     TARGETS hipblas-common
     EXPORT hipblas-common-targets
-    COMPONENT devel
+    COMPONENT hipBLAS-common_Development
 )
 install(
     EXPORT hipblas-common-targets
     DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/hipblas-common"
     NAMESPACE roc::
-    COMPONENT devel
+    COMPONENT hipBLAS-common_Development
     FILE hipblas-common-config-targets.cmake
 )
 install(FILES
@@ -71,12 +66,64 @@ install(FILES
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipblas-common)
 install(
     FILES ${hipblas_headers_public}
-    COMPONENT devel
+    COMPONENT hipBLAS-common_Development
     DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/hipblas-common"
 )
 install(
     FILES "${CMAKE_CURRENT_SOURCE_DIR}/../LICENSE.md"
-    COMPONENT doc
+    COMPONENT hipBLAS-common_Docs
     DESTINATION "${CMAKE_INSTALL_DOCDIR}"
 )
-#export(EXPORT hipblas-common-targets FILE hipblas-common-config.cmake)
+export(EXPORT hipblas-common-targets FILE hipblas-common-config.cmake)
+
+set(CPACK_PACKAGE_NAME hipBLAS-common)
+set(CPACK_PACKAGE_VENDOR "Advanced Micro Devices, Inc")
+set(CPACK_PACKAGE_CONTACT "hipBLAS Maintainer <hipblas-maintainer@amd.com>")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Common files shared by hipBLAS and hipBLASLt")
+set(CPACK_PACKAGE_INSTALL_DIRECTORY ${CPACK_PACKAGE_NAME})
+set(CPACK_PACKAGE_VERSION_MAJOR ${PROJECT_VERSION_MAJOR})
+set(CPACK_PACKAGE_VERSION_MINOR ${PROJECT_VERSION_MINOR})
+set(CPACK_PACKAGE_VERSION_PATCH ${PROJECT_VERSION_PATCH})
+set(CPACK_VERBATIM_VARIABLES YES)
+set(CPACK_RESOURCE_FILE_LICENSE ${CMAKE_CURRENT_LIST_DIR}/../LICENSE.md)
+set(CPACK_RESOURCE_FILE_README ${CMAKE_CURRENT_LIST_DIR}/../README.md)
+set(CPACK_COMPONENTS_ALL "hipBLAS-common_Development;hipBLAS-common_Docs")
+
+set(CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT")
+set(CPACK_DEBIAN_PACKAGE_PROVIDES "hipblas-common (= 1.0.0)")
+set(CPACK_DEB_COMPONENT_INSTALL "ON")
+
+set(CPACK_DEBIAN_HIPBLAS-COMMON_DEVELOPMENT_PACKAGE_NAME "hipblas-common-dev")
+set(CPACK_DEBIAN_HIPBLAS-COMMON_DOCS_PACKAGE_NAME "hipblas-common-doc")
+set(CPACK_DEBIAN_HIPBLAS-COMMON_DOCS_PACKAGE_SECTION "doc")
+#set(CPACK_DEBIAN_PACKAGE_RELEASE "some git hash") # there is come etra functionality in rocm-cmake to compute this hash why not use the command line?
+#set(CPACK_DEBIAN_PACKAGE_DEPENDS "rocm-core") # I don't think we really need this to build
+
+set(CPACK_RPM_COMPONENT_INSTALL "ON")
+set(CPACK_RPM_FILE_NAME "RPM-DEFAULT")
+set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "${CPACK_PACKAGING_INSTALL_PREFIX}")
+set(CPACK_RPM_PACKAGE_AUTOREQPROV "Off")
+set(CPACK_RPM_PACKAGE_LICENSE "MIT")
+#set(CPACK_RPM_PACKAGE_RELOCATABLE "Off") why?
+#set(CPACK_RPM_PACKAGE_AUTOREQPROV "Off") why?
+#set(CPACK_RPM_PACKAGE_REQUIRES "rocm-core")
+#set(CPACK_RPM_PACKAGE_RELEASE "hash")
+
+set(CPACK_RPM_HIPBLAS-COMMON_DEVELOPMENT_FILE_NAME "RPM-DEFAULT")
+set(CPACK_RPM_HIPBLAS-COMMON_DEVELOPMENT_PACKAGE_NAME "hipblas-common-devel")
+set(CPACK_RPM_HIPBLAS-COMMON_DEVELOPMENT_PACKAGE_PROVIDES "hipblas-common = 1.0.0")
+
+set(CPACK_RPM_HIPBLAS-COMMON_DOCS_FILE_NAME "RPM-DEFAULT")
+set(CPACK_RPM_HIPBLAS-COMMON_DOCS_PACKAGE_NAME "hipblas-common-doc")
+
+include(CPack)
+
+cpack_add_component(hipBLAS-common_Development
+    DISPLAY_NAME "Developer pre-requisites"
+    DESCRIPTION "hipBLAS-common header files required for development"
+)
+
+cpack_add_component(hipBLAS-common_Docs
+    DISPLAY_NAME "License file"
+    DISABLED
+)
