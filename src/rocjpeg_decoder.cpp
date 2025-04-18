@@ -89,6 +89,8 @@ RocJpegStatus RocJpegDecoder::InitializeDecoder() {
         }
     } else if (backend_ == ROCJPEG_BACKEND_HYBRID) {
         return ROCJPEG_STATUS_NOT_IMPLEMENTED;
+    } else {
+        return ROCJPEG_STATUS_INVALID_PARAMETER;
     }
     return rocjpeg_status;
 }

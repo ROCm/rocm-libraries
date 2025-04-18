@@ -56,7 +56,7 @@ include(CTest)
 # add ROCm find Config location
 list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH}/lib/cmake)
 
-# find rocDecode
+# find rocjpeg
 find_package(ROCJPEG QUIET)
 
 if(ROCJPEG_FOUND)
@@ -324,4 +324,15 @@ add_test(
             --build-generator "${CMAKE_GENERATOR}"
             --test-command "jpegdecodeperf"
             -i ${ROCM_PATH}/share/rocjpeg/images/
+)
+
+add_test(
+  NAME
+    jpeg-negative-api-tests
+  COMMAND
+    "${CMAKE_CTEST_COMMAND}"
+            --build-and-test "${ROCM_PATH}/share/rocjpeg/test/rocjpeg_negative_api_tests"
+                              "${CMAKE_CURRENT_BINARY_DIR}/rocjpeg_negative_api_tests"
+            --build-generator "${CMAKE_GENERATOR}"
+            --test-command "rocjpegnegativetest"
 )
