@@ -1138,6 +1138,45 @@ namespace rocRoller
             orderMemoryNodes(graph, pairs, ordered);
         }
 
+        int getLDSOperationTarget(KernelGraph const& k, int opTag)
+        {
+            namespace CT             = rocRoller::KernelGraph::CoordinateGraph;
+            auto [target, direction] = getOperationTarget(opTag, k);
+
+            // TODO: Design a better way of binding storage to coordinates
+            auto maybeLDS = k.coordinates.get<LDS>(target);
+            if(maybeLDS)
+            {
+                // If target is LDS; it might be a duplicated LDS
+                // node.  For the purposes of figuring out required
+                // coordinates, use the parent LDS as the target
+                // instead.
+                auto maybeParentLDS
+                    = only(k.coordinates.getOutputNodeIndices(target, CT::isEdge<Duplicate>));
+                if(maybeParentLDS)
+                    target = *maybeParentLDS;
+            }
+
+            auto isDataFlow
+                = [&](int tag) -> bool { return k.coordinates.get<DataFlow>(tag).has_value(); };
+
+            while(true)
+            {
+                auto edge
+                    = only(filter(isDataFlow, k.coordinates.getNeighbours(target, direction)));
+                if(!edge)
+                    break;
+                target = *only(k.coordinates.getNeighbours(*edge, direction));
+            }
+
+            return target;
+        }
+
+        int duplicateChain(KernelGraph& graph, std::vector<int> const& startNodes)
+        {
+            return duplicateControlNodes(graph, nullptr, startNodes, [](int x) { return true; })[0];
+        }
+
     }
 
 }

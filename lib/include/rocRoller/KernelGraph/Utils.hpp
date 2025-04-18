@@ -602,6 +602,17 @@ namespace rocRoller
         *
         */
         bool hasDeallocate(const KernelGraph& graph, int tag);
+
+        /**
+         * @brief For LDS load/stores, follow DataFlow edges from the
+         * LDS node to find the associated User node.
+         */
+        int getLDSOperationTarget(KernelGraph const& k, int opTag);
+
+        /**
+         * @brief Duplicate a chain of nodes
+         */
+        int duplicateChain(KernelGraph& graph, std::vector<int> const& startNodes);
     }
 }
 

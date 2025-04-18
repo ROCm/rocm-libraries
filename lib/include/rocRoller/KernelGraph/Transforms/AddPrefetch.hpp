@@ -32,6 +32,12 @@ namespace rocRoller
 {
     namespace KernelGraph
     {
+        /**
+         * @brief Only SetCoordinate, LoadTiled, and Multiply nodes and Body and Sequence edges are allowed in the ForLoop.
+         *
+         * If there are ever any other nodes/edges, they will need to be handled.
+         */
+        ConstraintStatus AcceptablePrefetchNodes(const KernelGraph& k);
 
         /**
          * @brief Rewrite KernelGraph to add LDS operations for
@@ -39,13 +45,11 @@ namespace rocRoller
          *
          * Modifies the coordinate and control graphs to add LDS
          * information.
-         *
-         * @ingroup Transformations
          */
-        class AddLDS : public GraphTransform
+        class AddPrefetch : public GraphTransform
         {
         public:
-            AddLDS(CommandParametersPtr params, ContextPtr context)
+            AddPrefetch(CommandParametersPtr params, ContextPtr context)
                 : m_params(params)
                 , m_context(context)
             {
@@ -54,27 +58,17 @@ namespace rocRoller
             KernelGraph apply(KernelGraph const& original) override;
             std::string name() const override
             {
-                return "AddLDS";
+                return "AddPrefetch";
             }
 
-            std::vector<GraphConstraint> postConstraints() const override;
+            inline std::vector<GraphConstraint> preConstraints() const override
+            {
+                return {&AcceptablePrefetchNodes};
+            }
 
         private:
             CommandParametersPtr m_params;
             ContextPtr           m_context;
-        };
-
-        /**
-         * @brief Container for info related to loading from Global
-         * into LDS.
-         */
-        struct LDSOperationInfo
-        {
-            int user; // User coordinate
-            int globalOperation; // LoadTiled/StoreTiled operation
-            int ldsOperation; // StoreLDSTile/LoadLDSTile operation
-            int globalChain; // LoadTiled/StoreTiled operation
-            int ldsChain; // StoreLDStile/LoadLDSTile operation
         };
     }
 }

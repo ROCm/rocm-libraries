@@ -36,6 +36,7 @@
  * - AddConvert
  * - AddDeallocate
  * - AddLDS
+ * - AddPrefetch
  * - AddStreamK
  * - CleanArguments
  * - CleanLoops
