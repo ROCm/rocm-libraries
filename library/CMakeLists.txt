@@ -61,7 +61,7 @@ set(LIB_INSTALL_DIR ${CMAKE_INSTALL_LIBDIR})
 set(INCLUDE_INSTALL_DIR ${CMAKE_INSTALL_INCLUDEDIR})
 
 # Include sources
-include(src/CMakeLists.txt)
+add_subdirectory(src)
 
 # Create hipBLASLt library
 add_library(hipblaslt ${hipblaslt_source} ${RocRoller_SRC} ${hipblaslt_headers_public})

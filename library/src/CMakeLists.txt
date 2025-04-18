@@ -25,7 +25,7 @@ set(hipblaslt_source_common  src/hipblaslt_ostream.cpp)
 
 if(NOT BUILD_CUDA)
   # hipBLASLt source
-  include(src/amd_detail/rocblaslt/CMakeLists.txt)
+  add_subdirectory(amd_detail/rocblaslt)
   set(hipblaslt_source src/amd_detail/hipblaslt.cpp
                        src/amd_detail/hipblaslt-ext.cpp
                        src/amd_detail/hipblaslt-ext-op.cpp
