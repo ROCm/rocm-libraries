@@ -24,7 +24,7 @@
  *
  *******************************************************************************/
 
-#include "hipblaslt-ext.hpp"
+#include "hipblaslt/hipblaslt-ext.hpp"
 #include "exceptions.hpp"
 #include "hipblaslt_internal.hpp"
 #include <Debug.hpp>

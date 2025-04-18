@@ -44,7 +44,7 @@
 #include <stdint.h>
 #include <vector>
 
-#include <hipblaslt-ext.hpp>
+#include <hipblaslt/hipblaslt-ext.hpp>
 
 #define ROCBLASLT_KERNEL __global__
 #define ROCBLASLT_DEVICE_ILF __device__

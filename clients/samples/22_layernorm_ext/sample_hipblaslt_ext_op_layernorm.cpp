@@ -25,7 +25,7 @@
  *******************************************************************************/
 
 #include <hip/hip_runtime.h>
-#include <hipblaslt-ext-op.h>
+#include <hipblaslt/hipblaslt-ext-op.h>
 #include <hipblaslt/hipblaslt.h>
 #include <hipblaslt_arguments.hpp>
 #include <iostream>

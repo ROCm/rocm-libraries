@@ -24,7 +24,7 @@
  *
  *******************************************************************************/
 
-#include "hipblaslt-ext-op.h"
+#include "hipblaslt/hipblaslt-ext-op.h"
 #include "hipblaslt-ext-op-internal.hpp"
 #include <Tensile/hip/HipHardware.hpp>
 #include <Tensile/hip/HipSolutionAdapter.hpp>

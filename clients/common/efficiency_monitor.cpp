@@ -22,7 +22,7 @@
  * ************************************************************************ */
 
 #include "efficiency_monitor.hpp"
-#include "hipblaslt-ext-op.h"
+#include "hipblaslt/hipblaslt-ext-op.h"
 
 #include <atomic>
 #include <condition_variable>

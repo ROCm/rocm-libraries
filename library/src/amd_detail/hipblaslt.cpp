@@ -24,10 +24,10 @@
  *
  *******************************************************************************/
 
-#include "hipblaslt.h"
+#include "hipblaslt/hipblaslt.h"
 #include "UserDrivenTuningParser.hpp"
 #include "exceptions.hpp"
-#include "hipblaslt-ext-op.h"
+#include "hipblaslt/hipblaslt-ext-op.h"
 #include "hipblaslt_internal.hpp"
 
 #include <hip/hip_runtime_api.h>
