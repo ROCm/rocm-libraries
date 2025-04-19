@@ -66,29 +66,29 @@ IF(NOT DEFINED CMAKE_Fortran_COMPILER_SUPPORTS_F08)
   MESSAGE(CHECK_START "Checking whether ${CMAKE_Fortran_COMPILER} supports Fortran 08")
   INCLUDE(CheckFortranSourceCompiles)
   CHECK_FORTRAN_SOURCE_COMPILES("
-    module mod
-      interface foo
-        module procedure :: foo_a,foo_b
-      end interface
-    contains
-      subroutine foo_a(a)
-        use iso_c_binding
-        integer,target,dimension(:) :: a
-        type(c_ptr) :: a_ptr
-        a_ptr = c_loc(a) ! gfortran < 4.9 fails here
+      module mod
+        interface foo
+          module procedure :: foo_a,foo_b
+        end interface
+      contains
+        subroutine foo_a(a)
+          use iso_c_binding
+          integer,target,dimension(:) :: a
+          type(c_ptr) :: a_ptr
+          a_ptr = c_loc(a) ! gfortran < 4.9 fails here
+        end
+        subroutine foo_b(b)
+          integer,pointer,dimension(:,:) :: b
+        end
       end
-      subroutine foo_b(b)
-        integer,pointer,dimension(:,:) :: b
-      end
-    end
-    PROGRAM TESTFortran08
-      use mod
-      implicit none
-      integer :: a(5)
-      integer,allocatable :: b(:)
-      allocate(b,mold=a)
-      deallocate(b)
-    END PROGRAM TESTFortran08
+      PROGRAM TESTFortran08
+        use mod
+        implicit none
+        integer :: a(5)
+        integer,allocatable :: b(:)
+        allocate(b,mold=a)
+        deallocate(b)
+      END PROGRAM TESTFortran08
     " CMAKE_Fortran_COMPILER_SUPPORTS_F08)
   IF(CMAKE_Fortran_COMPILER_SUPPORTS_F08)
     MESSAGE(CHECK_PASS "yes")

@@ -21,7 +21,7 @@ Then build, install, and test hipfort from source with the commands below:
 ```shell
 git clone https://github.com/ROCm/hipfort.git
 cd hipfort
-cmake -S. -Bbuild -DHIPFORT_INSTALL_DIR=/tmp/hipfort -DBUILD_TESTING=ON
+cmake -S. -Bbuild -DCMAKE_INSTALL_PREFIOX=/tmp/hipfort -DBUILD_TESTING=ON
 make -C build
 make -C build check
 ```
@@ -134,7 +134,7 @@ Among the environment variables, the most important are:
 | `HIP_PLATFORM` | The platform to compile for (either 'amd' or 'nvidia') | `amd` |
 | `ROCM_PATH` | Path to ROCm installation | `/opt/rocm` |
 | `CUDA_PATH` | Path to CUDA installation | `/usr/local/cuda` | 
-| `HIPFORT_COMPILER` | Fortran compiler to be used | `gfortran` | 
+| `CMAKE_Fortran_COMPILER` | Fortran compiler to be used | `gfortran` | 
 
 ## Examples and tests
 

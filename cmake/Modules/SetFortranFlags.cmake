@@ -158,5 +158,8 @@ SET_COMPILE_FLAG(CMAKE_Fortran_FLAGS_RELEASE "${CMAKE_Fortran_FLAGS_RELEASE}"
                          "/Qvec-report0" # Intel Windows
                          "-Mvect"        # Portland Group
                 )
+SET_COMPILE_FLAG(CMAKE_Fortran_FLAGS_RELEASE "${CMAKE_Fortran_FLAGS_RELEASE}"
+                  Fortran "-ffree-line-length-none"
+                  )
 
 ENDIF(NOT CMAKE_Fortran_COMPILER_ID MATCHES "Cray")

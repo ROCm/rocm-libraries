@@ -21,14 +21,15 @@ add_custom_command( OUTPUT gputable.txt
    COMMAND /bin/cp -p ${CMAKE_CURRENT_SOURCE_DIR}/gputable.txt ${CMAKE_CURRENT_BINARY_DIR}/../libexec/hipfort/gputable.txt
    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/gputable.txt libexecdir)
 # Use relative path with respect to hipfc install directory
-file(RELATIVE_PATH HIPFORT_COMPILER_RELATIVE_PATH ${HIPFORT_INSTALL_DIR}/${CMAKE_INSTALL_BINDIR} ${HIPFORT_COMPILER})
+message(STATUS "${CMAKE_Fortran_COMPILER}")
+file(RELATIVE_PATH HIPFORT_COMPILER_RELATIVE_PATH "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}" ${CMAKE_Fortran_COMPILER})
 string(REGEX REPLACE "[/]" "\\\\/" escaped_path ${HIPFORT_COMPILER_RELATIVE_PATH})
 set(sed_str s/gfortran/${escaped_path}/g)
-file(RELATIVE_PATH HIPFORT_INSTALL_RELATIVE_PATH ${HIPFORT_INSTALL_DIR}/${CMAKE_INSTALL_BINDIR} ${HIPFORT_INSTALL_DIR})
+file(RELATIVE_PATH HIPFORT_INSTALL_RELATIVE_PATH "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}" ${CMAKE_INSTALL_PREFIX})
 string(REGEX REPLACE "[/]" "\\\\/" installed_path ${HIPFORT_INSTALL_RELATIVE_PATH})
 set(sed_str2 s/_HIPFORT_INSTALL_DIR_/${installed_path}/g)
 # Use relative path with respect to Makefile.hipfort install directory
-file(RELATIVE_PATH HIPFORT_MAKEFILE_REL_PATH ${HIPFORT_INSTALL_DIR}/${CMAKE_INSTALL_DATADIR}/hipfort ${HIPFORT_COMPILER})
+file(RELATIVE_PATH HIPFORT_MAKEFILE_REL_PATH "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_DATADIR}/hipfort" ${CMAKE_Fortran_COMPILER})
 string(REGEX REPLACE "[/]" "\\\\/" mkfile_escaped_path ${HIPFORT_MAKEFILE_REL_PATH})
 set(sed_str3 s/gfortran/${mkfile_escaped_path}/g)
 
