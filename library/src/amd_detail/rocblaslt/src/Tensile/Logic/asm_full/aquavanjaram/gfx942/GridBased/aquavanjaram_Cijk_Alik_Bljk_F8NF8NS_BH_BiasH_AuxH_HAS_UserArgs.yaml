@@ -75,7 +75,7 @@
   UseE: true
   UseInitialStridesAB: false
   UseInitialStridesCD: false
-  UseScaleAB: ''
+  UseScaleAB: Scalar
   UseScaleAlphaVec: 0
   UseScaleCD: false
 - - 1LDSBuffer: 0
@@ -296,7 +296,7 @@
       UseE: true
       UseInitialStridesAB: false
       UseInitialStridesCD: false
-      UseScaleAB: ''
+      UseScaleAB: Scalar
       UseScaleAlphaVec: 0
       UseScaleCD: false
     ScheduleGlobalRead: 1
@@ -581,7 +581,7 @@
       UseE: true
       UseInitialStridesAB: false
       UseInitialStridesCD: false
-      UseScaleAB: ''
+      UseScaleAB: Scalar
       UseScaleAlphaVec: 0
       UseScaleCD: false
     ScheduleGlobalRead: 1
@@ -866,7 +866,7 @@
       UseE: true
       UseInitialStridesAB: false
       UseInitialStridesCD: false
-      UseScaleAB: ''
+      UseScaleAB: Scalar
       UseScaleAlphaVec: 0
       UseScaleCD: false
     ScheduleGlobalRead: 1
@@ -1151,7 +1151,7 @@
       UseE: true
       UseInitialStridesAB: false
       UseInitialStridesCD: false
-      UseScaleAB: ''
+      UseScaleAB: Scalar
       UseScaleAlphaVec: 0
       UseScaleCD: false
     ScheduleGlobalRead: 1
@@ -1436,7 +1436,7 @@
       UseE: true
       UseInitialStridesAB: false
       UseInitialStridesCD: false
-      UseScaleAB: ''
+      UseScaleAB: Scalar
       UseScaleAlphaVec: 0
       UseScaleCD: false
     ScheduleGlobalRead: 1
@@ -1721,7 +1721,7 @@
       UseE: true
       UseInitialStridesAB: false
       UseInitialStridesCD: false
-      UseScaleAB: ''
+      UseScaleAB: Scalar
       UseScaleAlphaVec: 0
       UseScaleCD: false
     ScheduleGlobalRead: 1
@@ -2006,7 +2006,7 @@
       UseE: true
       UseInitialStridesAB: false
       UseInitialStridesCD: false
-      UseScaleAB: ''
+      UseScaleAB: Scalar
       UseScaleAlphaVec: 0
       UseScaleCD: false
     ScheduleGlobalRead: 1
