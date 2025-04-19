@@ -70,7 +70,7 @@
   if(Tensile_CPU_THREADS MATCHES "^[0-9]+$")
     # only including threads argument if number
     TensileCreateLibraryFiles(
-      "${CMAKE_CURRENT_SOURCE_DIR}/src/amd_detail/rocblaslt/src/Tensile/Logic/${Tensile_LOGIC}"
+      "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/Logic/${Tensile_LOGIC}"
       "${PROJECT_BINARY_DIR}/Tensile"
       "TENSILE_LIBRARY_TARGET"
       ARCHITECTURE        ${Tensile_ARCHITECTURE}
@@ -82,7 +82,7 @@
     )
   else()
     TensileCreateLibraryFiles(
-      "${CMAKE_CURRENT_SOURCE_DIR}/src/amd_detail/rocblaslt/src/Tensile/Logic/${Tensile_LOGIC}"
+      "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/Logic/${Tensile_LOGIC}"
       "${PROJECT_BINARY_DIR}/Tensile"
       "TENSILE_LIBRARY_TARGET"
       ARCHITECTURE        ${Tensile_ARCHITECTURE}
@@ -148,10 +148,9 @@ if(USE_ROCROLLER)
   set_source_files_properties(${RocRoller_SRC} PROPERTIES LANGUAGE CXX COMPILE_OPTIONS "-std=c++20;-x;c++")
 endif()
 
-include(${CMAKE_CURRENT_SOURCE_DIR}/src/amd_detail/rocblaslt/src/kernels/CompileSourceKernel.cmake)
-
-CompileSourceKernel(${CMAKE_CURRENT_SOURCE_DIR}/src/amd_detail/rocblaslt/src/kernels/matrix_transform.cpp "${Tensile_ARCHITECTURE}" "${Tensile_BUILD_ID}" ${PROJECT_BINARY_DIR}/Tensile/library)
-add_dependencies(MatrixTransformKernels TENSILE_LIBRARY_TARGET)
+if(NOT Tensile_SKIP_BUILD)
+    add_subdirectory(kernels)
+endif()
 
 set(DL_LIB dl)
 
