@@ -48,7 +48,10 @@ def CPUThreadCount(enable=True):
         return 1
     else:
         if os.name == "nt":
-            cpu_count = os.cpu_count()
+            # Windows supports at most 61 workers because the scheduler uses
+            # WaitForMultipleObjects directly, which has the limit (the limit
+            # is actually 64, but some handles are needed for accounting).
+            cpu_count = min(os.cpu_count(), 61)
         else:
             cpu_count = len(os.sched_getaffinity(0))
         cpuThreads = globalParameters["CpuThreads"]

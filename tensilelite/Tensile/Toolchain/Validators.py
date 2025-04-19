@@ -113,7 +113,7 @@ class ToolchainDefaults(NamedTuple):
     OFFLOAD_BUNDLER = osSelect(linux="clang-offload-bundler", windows="clang-offload-bundler.exe")
     DEVICE_ENUMERATOR = osSelect(linux="rocm_agent_enumerator" if isRhel8() else "amdgpu-arch", windows="hipinfo")
     ASSEMBLER = osSelect(linux="amdclang++", windows="clang++.exe")
-    HIP_CONFIG = osSelect(linux="hipconfig", windows="hipconfig")
+    HIP_CONFIG = osSelect(linux="hipconfig", windows="hipconfig.exe")
 
 
 def _supportedComponent(component: str, targets: List[str]) -> bool:

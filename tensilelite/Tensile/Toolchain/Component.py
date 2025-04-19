@@ -286,13 +286,14 @@ class Bundler(Component):
         Raises:
             RuntimeError: If compressing the code object file fails.
         """
+        devnull = "/dev/null" if os_name != "nt" else "NUL"
         args = [
             self._component_path,
             "--compress",
             "--type=o",
             "--bundle-align=4096",
             f"--targets=host-x86_64-unknown-linux-gnu,hipv4-amdgcn-amd-amdhsa-unknown-{target}",
-            "--input=/dev/null",
+            f"--input={devnull}",
             f"--input={srcPath}",
             f"--output={destPath}",
         ]
@@ -359,8 +360,7 @@ class Linker(Component):
         if os_name == "nt":
             # Use args file on Windows b/c the command may exceed the limit of 8191 characters
             with open(Path.cwd() / "clang_args.txt", "wt") as file:
-                file.write(" ".join(srcPaths))
-                file.flush()
+                file.write(" ".join(srcPaths).replace('\\', '\\\\'))
             args = [*(self.default_args), "-o", destPath, "@clang_args.txt"]
         else:
             args = [*(self.default_args), *srcPaths, "-o", destPath]

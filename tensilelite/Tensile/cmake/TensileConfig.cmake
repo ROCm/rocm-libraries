@@ -232,6 +232,7 @@ function(TensileCreateLibraryFiles
 
       add_custom_command(
         COMMENT "Generating Tensile Libraries"
+        USES_TERMINAL
         OUTPUT ${Tensile_OUTPUT_PATH}/library
         COMMAND ${CommandLine}
       )

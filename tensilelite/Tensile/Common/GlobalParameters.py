@@ -551,7 +551,8 @@ def assignGlobalParameters(config, isaInfoMap: Dict[IsaVersion, IsaInfo]):
     globalParameters["ROCmBinPath"] = os.path.join(globalParameters["ROCmPath"], "bin")
     globalParameters["ROCmSMIPath"] = locateExe(globalParameters["ROCmBinPath"], "rocm-smi")
     globalParameters["ROCmLdPath"] = locateExe(
-        os.path.join(globalParameters["ROCmPath"], "llvm/bin"), "ld.lld"
+        os.path.join(globalParameters["ROCmPath"], "lib/llvm/bin"),
+        "ld.lld" if os.name != "nt" else "ld.lld.exe"
     )
 
     if "AsanBuild" in config:
@@ -582,7 +583,10 @@ def assignGlobalParameters(config, isaInfoMap: Dict[IsaVersion, IsaInfo]):
     try:
         compiler = "hipcc"
         output = subprocess.run(
-            [compiler, "--version"], check=True, stdout=subprocess.PIPE
+            [compiler, "--version"], check=True,
+            stdout=subprocess.PIPE,
+            # Avoids some warning spam on Windows.
+            stderr=subprocess.DEVNULL,
         ).stdout.decode()
 
         for line in output.split("\n"):

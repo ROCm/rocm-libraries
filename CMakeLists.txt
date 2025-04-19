@@ -200,7 +200,11 @@ else()
 
     set( Tensile_LOGIC "asm_full" CACHE STRING "Tensile to use which logic?")
     set( Tensile_CODE_OBJECT_VERSION "4" CACHE STRING "Tensile code_object_version")
-    set( Tensile_COMPILER "amdclang++" CACHE STRING "Tensile compiler")
+    if(WIN32)
+      set( Tensile_COMPILER "clang++.exe" CACHE STRING "Tensile compiler")
+    else()
+      set( Tensile_COMPILER "amdclang++" CACHE STRING "Tensile compiler")
+    endif()
     set( Tensile_LIBRARY_FORMAT "msgpack" CACHE STRING "Tensile library format")
     set( Tensile_CPU_THREADS "" CACHE STRING "Number of threads for Tensile parallel build")
 
