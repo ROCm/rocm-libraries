@@ -53,6 +53,7 @@ function display_help()
   echo "    [--skip_rocroller] don't build with the rocRoller backend"
   echo "    [--logic-yaml-filter] logic filter for developer, example: gfx942/Equality/* for building equality of gfx942 only"
   echo "    [--experimental] include logic files in directories named 'Experimental'"
+  echo "    [--quiet] Invoke make without VERBOSE=1"
 }
 
 # This function is helpful for dockerfiles that do not have sudo installed, but the default user is root
@@ -427,6 +428,7 @@ skip_rocroller=false
 use_rocroller=false
 logic_filter=
 legacy_hipblas_direct=false
+quiet=false
 
 
 rocm_path=/opt/rocm
@@ -441,7 +443,7 @@ fi
 # check if we have a modern version of getopt that can handle whitespace and long parameters
 getopt -T
 if [[ $? -eq 4 ]]; then
-  GETOPT_PARSE=$(getopt --name "${0}" --longoptions help,install,clients,dependencies,debug,hip-clang,static,relocatable,codecoverage,relwithdebinfo,address-sanitizer,no-lazy-library-loading,no_tensile,no-tensile,client-only,msgpack,no-msgpack,logic:,cov:,fork:,branch:,test_local_path:,cpu_ref_lib:,build_dir:,use-custom-version:,architecture:,gprof,keep-build-tmp,no-compress,experimental,legacy_hipblas_direct,disable-hipblaslt-marker,enable-tensile-marker,skip_rocroller,logic-yaml-filter: --options hicdgrka:j:o:l:f:b:nu:t: -- "$@")
+  GETOPT_PARSE=$(getopt --name "${0}" --longoptions help,install,clients,dependencies,debug,hip-clang,static,relocatable,codecoverage,relwithdebinfo,address-sanitizer,no-lazy-library-loading,no_tensile,no-tensile,client-only,msgpack,no-msgpack,logic:,cov:,fork:,branch:,test_local_path:,cpu_ref_lib:,build_dir:,use-custom-version:,architecture:,gprof,keep-build-tmp,no-compress,experimental,quiet,legacy_hipblas_direct,disable-hipblaslt-marker,enable-tensile-marker,skip_rocroller,logic-yaml-filter: --options hicdgrka:j:o:l:f:b:nu:t: -- "$@")
 else
   echo "Need a new version of getopt"
   exit 1
@@ -551,6 +553,9 @@ while true; do
             shift ;;
         --experimental)
             experimental=true
+            shift ;;
+        --quiet)
+            quiet=true
             shift ;;
         --legacy_hipblas_direct)
             legacy_hipblas_direct=true
@@ -868,8 +873,12 @@ pushd .
     FC=gfortran CXX=${compiler} ${cmake_executable} ${cmake_common_options} ${cmake_client_options} -DCPACK_SET_DESTDIR=OFF -DCMAKE_INSTALL_PREFIX=${install_prefix} -DCPACK_PACKAGING_INSTALL_PREFIX=${rocm_path} -DROCM_PATH="${rocm_path}" ${root_path}
   fi
   check_exit_code "$?"
-
-  make -j$(nproc) install VERBOSE=1
+  
+  if [[ "${quiet}" == true ]]; then
+    make -j$(nproc) install
+  else
+      make -j$(nproc) install VERBOSE=1
+  fi
   check_exit_code "$?"
 
   # #################################################

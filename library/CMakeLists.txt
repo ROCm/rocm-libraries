@@ -60,12 +60,21 @@ set(BIN_INSTALL_DIR ${CMAKE_INSTALL_BINDIR})
 set(LIB_INSTALL_DIR ${CMAKE_INSTALL_LIBDIR})
 set(INCLUDE_INSTALL_DIR ${CMAKE_INSTALL_INCLUDEDIR})
 
+# Create hipBLASLt library
+add_library(hipblaslt ${hipblaslt_headers_public})
+add_library(roc::hipblaslt ALIAS hipblaslt)
+
 # Include sources
 add_subdirectory(src)
 
-# Create hipBLASLt library
-add_library(hipblaslt ${hipblaslt_source} ${RocRoller_SRC} ${hipblaslt_headers_public})
-add_library(roc::hipblaslt ALIAS hipblaslt)
+if(USE_ROCROLLER)
+    set_source_files_properties(
+      "${CMAKE_CURRENT_SOURCE_DIR}/src/amd_detail/rocblaslt/src/rocroller_host.cpp"
+        PROPERTIES 
+            LANGUAGE CXX 
+            COMPILE_OPTIONS "-std=c++20;-x;c++"
+    )
+endif()
 
 # Target compile definitions
 if(NOT BUILD_CUDA)
@@ -234,10 +243,10 @@ if ( NOT BUILD_CUDA )
       set( TENSILE_DATA_COMPONENT_NAME devel )
     endif()
 
-      rocm_install(
-        DIRECTORY ${CMAKE_BINARY_DIR}/Tensile/library
-        DESTINATION ${HIPBLASLT_TENSILE_LIBRARY_DIR}
-        COMPONENT ${TENSILE_DATA_COMPONENT_NAME})
+    rocm_install(
+      DIRECTORY ${CMAKE_BINARY_DIR}/Tensile/library
+      DESTINATION ${HIPBLASLT_TENSILE_LIBRARY_DIR}
+      COMPONENT ${TENSILE_DATA_COMPONENT_NAME})
     endif()
 endif()
 

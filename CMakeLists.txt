@@ -75,7 +75,7 @@ if (NOT DEFINED ENV{FC} AND NOT CMAKE_Fortran_COMPILER)
 endif()
 
 # hipBLASLt project
-project(hipblaslt LANGUAGES CXX)
+project(hipblaslt LANGUAGES CXX ASM)
 
 # Dependencies
 include(cmake/Dependencies.cmake)

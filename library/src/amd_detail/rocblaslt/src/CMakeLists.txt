@@ -92,14 +92,15 @@
       ${Tensile_Options}
     )
   endif()
+
   add_dependencies(TENSILE_LIBRARY_TARGET rocisa)
 
-  TensileCreateExtOpLibraries("${PROJECT_BINARY_DIR}/Tensile/library" "${Tensile_ARCHITECTURE}" "build_ext_op_library")
-  add_dependencies(build_ext_op_library rocisa)
+  if(NOT Tensile_SKIP_BUILD)
+    add_subdirectory(extops)
+  endif()
 
   # Create a unique name for TensileHost compiled for rocBLAS
   set_target_properties( TensileHost PROPERTIES OUTPUT_NAME rocblaslt-tensile CXX_EXTENSIONS NO )
-
   set_target_properties( TensileHost PROPERTIES CXX_VISIBILITY_PRESET hidden)
   set_target_properties( TensileHost PROPERTIES C_VISIBILITY_PRESET hidden)
 
@@ -132,20 +133,13 @@ if(${GCC_VERSION} VERSION_LESS "7.6.0")
     set_source_files_properties(src/amd_detail/rocblaslt/src/tensile_host.cpp PROPERTIES COMPILE_FLAGS "-ftemplate-depth=2048")
 endif()
 
-  set( Tensile_SRC
-    src/amd_detail/rocblaslt/src/tensile_host.cpp
-  )
-  set_source_files_properties(src/amd_detail/rocblaslt/src/tensile_host.cpp PROPERTIES LANGUAGE CXX COMPILE_OPTIONS "-std=c++17")
-
-  set( Tensile_INC
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/amd_detail/rocblaslt/src/Tensile
-  )
+set_source_files_properties(tensile_host.cpp PROPERTIES LANGUAGE CXX COMPILE_OPTIONS "-std=c++17")
 
 if(USE_ROCROLLER)
-  set( RocRoller_SRC
-    src/amd_detail/rocblaslt/src/rocroller_host.cpp
+  target_sources(hipblaslt
+    PRIVATE
+      rocroller_host.cpp
   )
-  set_source_files_properties(${RocRoller_SRC} PROPERTIES LANGUAGE CXX COMPILE_OPTIONS "-std=c++20;-x;c++")
 endif()
 
 if(NOT Tensile_SKIP_BUILD)
@@ -155,14 +149,16 @@ endif()
 set(DL_LIB dl)
 
 # rocBLASLt source
-set(rocblaslt_source
-  src/amd_detail/rocblaslt/src/Debug.cpp
-  src/amd_detail/rocblaslt/src/handle.cpp
-  src/amd_detail/rocblaslt/src/status.cpp
-  src/amd_detail/rocblaslt/src/rocblaslt_auxiliary.cpp
-  src/amd_detail/rocblaslt/src/rocblaslt_mat.cpp
-  src/amd_detail/rocblaslt/src/utility.cpp
-  src/amd_detail/rocblaslt/src/rocblaslt_transform.cpp
-  src/amd_detail/rocblaslt/src/UserDrivenTuningParser.cpp
-  ${Tensile_SRC}
+target_sources(
+  hipblaslt
+      PRIVATE
+          Debug.cpp
+          handle.cpp
+          status.cpp
+          rocblaslt_auxiliary.cpp
+          rocblaslt_mat.cpp
+          utility.cpp
+          rocblaslt_transform.cpp
+          UserDrivenTuningParser.cpp
+          tensile_host.cpp
 )

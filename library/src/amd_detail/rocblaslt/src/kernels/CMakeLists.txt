@@ -35,7 +35,7 @@ endif()
 add_custom_command(
     COMMAND ${CMAKE_CXX_COMPILER} -x hip ${CMAKE_CURRENT_SOURCE_DIR}/matrix_transform.cpp --offload-arch="${archs}" -c --offload-device-only -Xoffload-linker --build-id=${Tensile_BUILD_ID} -O3 -o ${output_library}
     OUTPUT ${PROJECT_BINARY_DIR}/Tensile/library/hipblasltTransform.hsaco
-    COMMENT "Compiling matrix ransform kernels"
+    COMMENT "Compiling matrix transform kernels"
 )
 
 add_custom_target(MatrixTransformKernels ALL
@@ -43,3 +43,5 @@ add_custom_target(MatrixTransformKernels ALL
 )
 
 add_dependencies(MatrixTransformKernels TENSILE_LIBRARY_TARGET)
+
+unset(output_path)

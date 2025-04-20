@@ -872,13 +872,5 @@ if __name__ == '__main__':
         f.write(k_str)
 
     output_path_basename = os.path.splitext(output_path)[0]
-
-    if debug_build:
-        build_args = ['-x', 'assembler', '-target', 'amdgcn-amd-amdhsa', '-mcode-object-version=4', f'-mcpu={arch}', '-mwavefrontsize64', '-c', '-g', '-o', f'{output_path_basename}.o', f'{output_path_basename}.s']
-    else:
-        build_args = ['-x', 'assembler', '-target', 'amdgcn-amd-amdhsa', '-mcode-object-version=4', f'-mcpu={arch}', '-mwavefrontsize64', '-c', '-o', f'{output_path_basename}.o', f'{output_path_basename}.s']
-
-    ret = subprocess.run([toolchain_path] + build_args)
-    ret = subprocess.run([toolchain_path, '-target', 'amdcgn-amdhsa', '-o', f'{output_path_basename}.co', f'{output_path_basename}.o'])
     amax.dump('yaml', f'{output_path_basename}.yaml')
 
