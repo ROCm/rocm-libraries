@@ -21,8 +21,10 @@
  *
  * ************************************************************************ */
 #pragma once
+#include <algorithm>
 #include <map>
 #include <stdexcept>
+#include <string>
 #include <time.h>
 
 #define LABEL_NAME_LENGTH 17

@@ -21,16 +21,17 @@
  *
  * ************************************************************************ */
 #pragma once
+#include <algorithm>
+#include <array>
 #include <stdexcept>
 #include <string>
-#include <sys/wait.h>
-#include <unistd.h>
 #include <vector>
-#ifdef __GNUG__
-#include <cxxabi.h>
-#endif
 
 using IsaVersion = std::array<int, 3>;
+
+std::pair<int, std::string>
+            run(const std::vector<char*>& cmd, const std::string& input, bool debug = false);
+std::string demangle(const char* name);
 
 inline std::string getGfxNameTuple(const IsaVersion& isaVersion)
 {
@@ -47,52 +48,6 @@ inline std::string getGfxNameTuple(const IsaVersion& isaVersion)
            + int_to_hex[isaVersion[2]];
 }
 
-inline std::pair<int, std::string>
-    run(const std::vector<char*>& cmd, const std::string& input, bool debug = false)
-{
-    int   p[2];
-    pid_t pid;
-    if(pipe(p) == -1)
-    {
-        throw std::runtime_error("cmd failed!");
-    }
-
-    pid = fork();
-    if(pid == 0)
-    {
-        close(p[1]);
-        dup2(p[0], STDIN_FILENO);
-        if(!debug)
-        {
-            dup2(p[0], STDERR_FILENO);
-            dup2(p[0], STDOUT_FILENO);
-        }
-        close(p[0]);
-        execvp(cmd[0], cmd.data());
-        perror("execvp");
-        exit(1);
-    }
-    else
-    {
-        close(p[0]);
-        write(p[1], input.c_str(), input.size());
-        close(p[1]);
-        char        buf[128] = {0};
-        std::string result;
-        read(p[0], buf, 128);
-        result += buf;
-        int rcode;
-        waitpid(pid, &rcode, 0);
-        if(WIFEXITED(rcode))
-        {
-            rcode = WEXITSTATUS(rcode);
-        }
-        return {rcode, result};
-    }
-    // Should not go here.
-    return {0, "0"};
-}
-
 template <typename T>
 bool checkInList(const T& a, const std::vector<T> b)
 {
@@ -103,18 +58,4 @@ template <typename T>
 bool checkNotInList(const T& a, const std::vector<T> b)
 {
     return std::find(b.begin(), b.end(), a) == b.end();
-}
-
-inline std::string demangle(const char* name)
-{
-    std::string result = name;
-#ifdef __GNUG__
-    int   status    = -1;
-    char* demangled = abi::__cxa_demangle(name, nullptr, nullptr, &status);
-    result          = (status == 0) ? demangled : name;
-    free(demangled);
-#else
-#error "Windows not supported"
-#endif
-    return result;
 }

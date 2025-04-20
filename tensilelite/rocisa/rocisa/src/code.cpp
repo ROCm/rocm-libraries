@@ -152,7 +152,13 @@ void init_code(nb::module_ m)
         .def("setInlineAsmPrintMode", &rocisa::Module::setInlineAsmPrintMode)
         .def("addSpaceLine", &rocisa::Module::addSpaceLine)
         .def("add", &rocisa::Module::add, nb::arg("item"), nb::arg("pos") = -1)
-        .def("addItems", &rocisa::Module::addItems)
+        // nanobind cannot reliably bind the same method signatures that differ
+        // only by const-ness, so indirectly bind via a lambda. This manifests
+        // as a mangled name clash on Windows.
+        .def("addItems",
+             [](rocisa::Module& self, const std::vector<std::shared_ptr<rocisa::Item>>& items) {
+                 self.addItems(items);
+             })
         .def("appendModule", &rocisa::Module::appendModule)
         .def("addModuleAsFlatItems", &rocisa::Module::addModuleAsFlatItems)
         .def("findIndex", &rocisa::Module::findIndex)
@@ -166,7 +172,13 @@ void init_code(nb::module_ m)
         .def("count", &rocisa::Module::count)
         .def("getItem", &rocisa::Module::getItem)
         .def("setItem", &rocisa::Module::setItem)
-        .def("setItems", &rocisa::Module::setItems)
+        // nanobind cannot reliably bind the same method signatures that differ
+        // only by const-ness, so indirectly bind via a lambda. This manifests
+        // as a mangled name clash on Windows.
+        .def("setItems",
+             [](rocisa::Module& self, const std::vector<std::shared_ptr<rocisa::Item>>& items) {
+                 self.setItems(items);
+             })
         .def("items", &rocisa::Module::items)
         .def("itemsSize", &rocisa::Module::itemsSize)
         .def("replaceItem", &rocisa::Module::replaceItem)
