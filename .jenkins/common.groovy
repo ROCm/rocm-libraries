@@ -33,7 +33,7 @@ def runCompileCommand(platform, project, jobName, boolean sameOrg=false)
                 cd ${project.paths.project_build_prefix}
                 ${getDependenciesCommand}
                 ${centos}
-                LD_LIBRARY_PATH=/opt/rocm/lib ${project.paths.build_command}
+                ${project.paths.build_command}
                 """
     platform.runCommand(this, command)
 }
@@ -51,11 +51,13 @@ def runTestCommand (platform, project)
         }
     }
 
-    String gtestCommonEnv = "HIPBLAS_CLIENT_RAM_GB_LIMIT=95"
+    String gtestCommonEnv = "HIPBLAS_CLIENT_RAM_GB_LIMIT=95 GTEST_LISTENER=NO_PASS_LINE_IN_LOG"
+
     def command = """#!/usr/bin/env bash
                     set -x
-                    cd ${stagingDir}
-                    ${sudo} LD_LIBRARY_PATH=/opt/rocm/lib ${gtestCommonEnv} GTEST_LISTENER=NO_PASS_LINE_IN_LOG ./hipblas-test --gtest_output=xml --gtest_color=yes
+                    pushd ${stagingDir}
+                    ${gtestCommonEnv} ./hipblas-test --gtest_output=xml --gtest_color=yes
+                    popd
                 """
 
     platform.runCommand(this, command)
@@ -65,34 +67,67 @@ def runTestCommand (platform, project)
     // using hipblasDatatype_t, and hipblas_v2-test will be testing the upcoming interfaces.
     def v2TestCommand = """#!/usr/bin/env bash
                     set -x
-                    cd ${stagingDir}
-                    ${sudo} LD_LIBRARY_PATH=/opt/rocm/lib ${gtestCommonEnv} GTEST_LISTENER=NO_PASS_LINE_IN_LOG ./hipblas_v2-test --gtest_output=xml --gtest_color=yes
+                    pushd ${stagingDir}
+                    ${gtestCommonEnv} ./hipblas_v2-test --gtest_output=xml --gtest_color=yes
+                    popd
                 """
 
     platform.runCommand(this, v2TestCommand)
 
     def yamlTestCommand = """#!/usr/bin/env bash
                     set -x
-                    cd ${stagingDir}
-                    ${sudo} LD_LIBRARY_PATH=/opt/rocm/lib ${gtestCommonEnv} GTEST_LISTENER=NO_PASS_LINE_IN_LOG ./hipblas-test --gtest_output=xml --gtest_color=yes --yaml hipblas_smoke.yaml
+                    pushd ${stagingDir}
+                    ${gtestCommonEnv} ./hipblas-test --gtest_output=xml --gtest_color=yes --yaml hipblas_smoke.yaml
+                    popd
                 """
     platform.runCommand(this, yamlTestCommand)
     junit "${stagingDir}/*.xml"
 }
 
-def runPackageCommand(platform, project, jobName, label='')
+def runCoverageCommand (platform, project, String cmdDir = "release-debug")
+{
+    //Temporary workaround due to bug in container
+    String centos7Workaround = platform.jenkinsLabel.contains('centos7') ? 'export LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:/opt/rocm/lib64/' : ''
+
+    String gtestCommonEnv = "HIPBLAS_CLIENT_RAM_GB_LIMIT=95 GTEST_LISTENER=NO_PASS_LINE_IN_LOG"
+
+    def command = """#!/usr/bin/env bash
+                set -x
+                cd ${project.paths.project_build_prefix}/build/${cmdDir}
+                export LD_LIBRARY_PATH=/opt/rocm/lib/
+                ${centos7Workaround}
+                ${gtestCommonEnv} make coverage_cleanup coverage GTEST_FILTER=-*known_bug*
+            """
+
+    platform.runCommand(this, command)
+
+    publishHTML([allowMissing: false,
+                alwaysLinkToLastBuild: false,
+                keepAll: false,
+                reportDir: "${project.paths.project_build_prefix}/build/${cmdDir}/lcoverage",
+                reportFiles: "index.html",
+                reportName: "Code coverage report",
+                reportTitles: "Code coverage report"])
+}
+
+def runPackageCommand(platform, project, jobName, label='', buildDir='')
 {
     def command
 
     label = label != '' ? '-' + label.toLowerCase() : ''
     String ext = platform.jenkinsLabel.contains('ubuntu') ? "deb" : "rpm"
     String dir = jobName.contains('Debug') ? "debug" : "release"
+
     if (env.BRANCH_NAME ==~ /PR-\d+/)
     {
         if (pullRequest.labels.contains("debug"))
         {
             dir = "debug"
         }
+    }
+    if (buildDir != '')
+    {
+        dir = buildDir
     }
 
     command = """

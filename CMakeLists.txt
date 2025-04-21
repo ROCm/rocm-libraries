@@ -115,8 +115,8 @@ endif()
 
 option(BUILD_CODE_COVERAGE "Build with code coverage enabled" OFF)
 if(BUILD_CODE_COVERAGE)
-  add_compile_options(-fprofile-arcs -ftest-coverage)
-  add_link_options(--coverage)
+  #add_compile_options(-fprofile-arcs -ftest-coverage)
+  #add_link_options(--coverage)
 endif()
 
 option(BUILD_ADDRESS_SANITIZER "Build with address sanitizer enabled" OFF)
@@ -288,25 +288,27 @@ if(BUILD_CODE_COVERAGE)
   # Prepare coverage output
   # This little script is generated because the option '--gcov-tool <program name>' of lcov cannot take arguments.
   #
-  add_custom_target(coverage_output
+
+  # source path substitute adjustment only for CI
+  get_filename_component(PARENT_DIR ${CMAKE_SOURCE_DIR} DIRECTORY)
+  get_filename_component(GRANDPARENT_DIR ${PARENT_DIR} DIRECTORY)
+  set(base_path "/var/jenkins_home/library")
+  set(hash_path ${CMAKE_SOURCE_DIR})
+  message(STATUS "BASE ${base_path} to HASHED ${hash_path}")
+
+  add_custom_target(coverage
     DEPENDS coverage_analysis
     COMMAND mkdir -p lcoverage
     COMMAND echo "\\#!/bin/bash" > llvm-gcov.sh
     COMMAND echo "\\# THIS FILE HAS BEEN GENERATED" >> llvm-gcov.sh
     COMMAND printf "exec /opt/rocm/llvm/bin/llvm-cov gcov $$\\@" >> llvm-gcov.sh
     COMMAND chmod +x llvm-gcov.sh
+    COMMAND lcov --ignore-errors unused --directory . --base-directory "${CMAKE_SOURCE_DIR}" --gcov-tool ./llvm-gcov.sh --capture --substitute "'s#${base_path}#${hash_path}#g'" -o ./lcoverage/raw_main_coverage.info
+    COMMAND lcov --ignore-errors unused --remove ./lcoverage/raw_main_coverage.info "'/opt/*'" "'/usr/*'" -o ./lcoverage/main_coverage.info
+    COMMAND genhtml --ignore-errors source ./lcoverage/main_coverage.info --output-directory ./lcoverage --prefix ${CMAKE_SOURCE_DIR}
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     )
 
-  #
-  # Generate coverage output.
-  #
-  add_custom_command(TARGET coverage_output
-    COMMAND lcov --directory . --base-directory . --gcov-tool ${CMAKE_BINARY_DIR}/llvm-gcov.sh --capture -o lcoverage/raw_main_coverage.info
-    COMMAND lcov --remove lcoverage/raw_main_coverage.info "'/opt/*'" "'/usr/*'" -o lcoverage/main_coverage.info
-    COMMAND genhtml lcoverage/main_coverage.info --output-directory lcoverage
-    )
-
-  add_custom_target(coverage DEPENDS coverage_output)
 
   #
   # Coverage cleanup
