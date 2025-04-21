@@ -32,7 +32,7 @@ message(DEPRECATION "roc::hipblas-common is deprecated")
 
 target_sources(hipblas-common 
     INTERFACE
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../library/include/hipblas-common.h>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../library/include/hipblas-common/hipblas-common.h>
 )
 target_include_directories(hipblas-common
     INTERFACE
