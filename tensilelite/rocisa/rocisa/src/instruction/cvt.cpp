@@ -230,109 +230,123 @@ void cvt_inst(nb::module_ m_inst)
             return new rocisa::VCvtSRF32toBF8(self);
         });
 
-    nb::class_<rocisa::VCvtPkFP8toF16, rocisa::VCvtInstruction>(m_inst, "VCvtPkFP8toF16")
+    nb::class_<rocisa::VCvtScalePkFP8toF16, rocisa::VCvtInstruction>(m_inst, "VCvtScalePkFP8toF16")
         .def(nb::init<const std::shared_ptr<rocisa::RegisterContainer>&,
                       const std::shared_ptr<rocisa::Container>&,
+                      const InstructionInput&,
                       std::optional<rocisa::SDWAModifiers>,
                       std::optional<rocisa::VOP3PModifiers>,
                       const std::string&>(),
              nb::arg("dst"),
              nb::arg("src"),
+             nb::arg("scale"),
              nb::arg("sdwa")    = std::nullopt,
              nb::arg("vop3")    = std::nullopt,
              nb::arg("comment") = "")
-        .def("__deepcopy__", [](const rocisa::VCvtPkFP8toF16& self, nb::dict&) {
-            return new rocisa::VCvtPkFP8toF16(self);
+        .def("__deepcopy__", [](const rocisa::VCvtScalePkFP8toF16& self, nb::dict&) {
+            return new rocisa::VCvtScalePkFP8toF16(self);
         });
 
-    nb::class_<rocisa::VCvtPkBF8toF16, rocisa::VCvtInstruction>(m_inst, "VCvtPkBF8toF16")
+    nb::class_<rocisa::VCvtScalePkBF8toF16, rocisa::VCvtInstruction>(m_inst, "VCvtScalePkBF8toF16")
         .def(nb::init<const std::shared_ptr<rocisa::RegisterContainer>&,
                       const std::shared_ptr<rocisa::Container>&,
+                      const InstructionInput&,
                       std::optional<rocisa::SDWAModifiers>,
                       std::optional<rocisa::VOP3PModifiers>,
                       const std::string&>(),
              nb::arg("dst"),
              nb::arg("src"),
+             nb::arg("scale"),
              nb::arg("sdwa")    = std::nullopt,
              nb::arg("vop3")    = std::nullopt,
              nb::arg("comment") = "")
-        .def("__deepcopy__", [](const rocisa::VCvtPkBF8toF16& self, nb::dict&) {
-            return new rocisa::VCvtPkBF8toF16(self);
+        .def("__deepcopy__", [](const rocisa::VCvtScalePkBF8toF16& self, nb::dict&) {
+            return new rocisa::VCvtScalePkBF8toF16(self);
         });
 
-    nb::class_<rocisa::VCvtFP8toF16, rocisa::VCvtInstruction>(m_inst, "VCvtFP8toF16")
+    nb::class_<rocisa::VCvtScaleFP8toF16, rocisa::VCvtInstruction>(m_inst, "VCvtScaleFP8toF16")
         .def(nb::init<const std::shared_ptr<rocisa::RegisterContainer>&,
                       const std::shared_ptr<rocisa::Container>&,
+                      const InstructionInput&,
                       std::optional<rocisa::SDWAModifiers>,
                       std::optional<rocisa::VOP3PModifiers>,
                       const std::string&>(),
              nb::arg("dst"),
              nb::arg("src"),
+             nb::arg("scale"),
              nb::arg("sdwa")    = std::nullopt,
              nb::arg("vop3")    = std::nullopt,
              nb::arg("comment") = "")
-        .def("__deepcopy__", [](const rocisa::VCvtFP8toF16& self, nb::dict&) {
-            return new rocisa::VCvtFP8toF16(self);
+        .def("__deepcopy__", [](const rocisa::VCvtScaleFP8toF16& self, nb::dict&) {
+            return new rocisa::VCvtScaleFP8toF16(self);
         });
 
-    nb::class_<rocisa::VCvtPkF16toFP8, rocisa::VCvtInstruction>(m_inst, "VCvtPkF16toFP8")
+    nb::class_<rocisa::VCvtScalePkF16toFP8, rocisa::VCvtInstruction>(m_inst, "VCvtScalePkF16toFP8")
         .def(nb::init<const std::shared_ptr<rocisa::RegisterContainer>&,
                       const std::shared_ptr<rocisa::Container>&,
+                      const InstructionInput&,
                       std::optional<rocisa::SDWAModifiers>,
                       std::optional<rocisa::VOP3PModifiers>,
                       const std::string&>(),
              nb::arg("dst"),
              nb::arg("src"),
+             nb::arg("scale"),
              nb::arg("sdwa")    = std::nullopt,
              nb::arg("vop3")    = std::nullopt,
              nb::arg("comment") = "")
-        .def("__deepcopy__", [](const rocisa::VCvtPkF16toFP8& self, nb::dict&) {
-            return new rocisa::VCvtPkF16toFP8(self);
+        .def("__deepcopy__", [](const rocisa::VCvtScalePkF16toFP8& self, nb::dict&) {
+            return new rocisa::VCvtScalePkF16toFP8(self);
         });
 
-    nb::class_<rocisa::VCvtPkF16toBF8, rocisa::VCvtInstruction>(m_inst, "VCvtPkF16toBF8")
+    nb::class_<rocisa::VCvtScalePkF16toBF8, rocisa::VCvtInstruction>(m_inst, "VCvtScalePkF16toBF8")
         .def(nb::init<const std::shared_ptr<rocisa::RegisterContainer>&,
                       const std::shared_ptr<rocisa::Container>&,
+                      const InstructionInput&,
                       std::optional<rocisa::SDWAModifiers>,
                       std::optional<rocisa::VOP3PModifiers>,
                       const std::string&>(),
              nb::arg("dst"),
              nb::arg("src"),
+             nb::arg("scale"),
              nb::arg("sdwa")    = std::nullopt,
              nb::arg("vop3")    = std::nullopt,
              nb::arg("comment") = "")
-        .def("__deepcopy__", [](const rocisa::VCvtPkF16toBF8& self, nb::dict&) {
-            return new rocisa::VCvtPkF16toBF8(self);
+        .def("__deepcopy__", [](const rocisa::VCvtScalePkF16toBF8& self, nb::dict&) {
+            return new rocisa::VCvtScalePkF16toBF8(self);
         });
 
-    nb::class_<rocisa::VCvtSRF16toFP8, rocisa::VCvtInstruction>(m_inst, "VCvtSRF16toFP8")
+    nb::class_<rocisa::VCvtScaleSRF16toFP8, rocisa::VCvtInstruction>(m_inst, "VCvtScaleSRF16toFP8")
         .def(nb::init<const std::shared_ptr<rocisa::RegisterContainer>&,
                       const std::shared_ptr<rocisa::Container>&,
+                      const InstructionInput&,
                       std::optional<rocisa::SDWAModifiers>,
                       std::optional<rocisa::VOP3PModifiers>,
                       const std::string&>(),
              nb::arg("dst"),
              nb::arg("src"),
+             nb::arg("scale"),
              nb::arg("sdwa")    = std::nullopt,
              nb::arg("vop3")    = std::nullopt,
              nb::arg("comment") = "")
-        .def("__deepcopy__", [](const rocisa::VCvtSRF16toFP8& self, nb::dict&) {
-            return new rocisa::VCvtSRF16toFP8(self);
+        .def("__deepcopy__", [](const rocisa::VCvtScaleSRF16toFP8& self, nb::dict&) {
+            return new rocisa::VCvtScaleSRF16toFP8(self);
         });
 
-    nb::class_<rocisa::VCvtSRF16toBF8, rocisa::VCvtInstruction>(m_inst, "VCvtSRF16toBF8")
+    nb::class_<rocisa::VCvtScaleSRF16toBF8, rocisa::VCvtInstruction>(m_inst, "VCvtScaleSRF16toBF8")
         .def(nb::init<const std::shared_ptr<rocisa::RegisterContainer>&,
                       const std::shared_ptr<rocisa::Container>&,
+                      const InstructionInput&,
                       std::optional<rocisa::SDWAModifiers>,
                       std::optional<rocisa::VOP3PModifiers>,
                       const std::string&>(),
              nb::arg("dst"),
              nb::arg("src"),
+             nb::arg("scale"),
              nb::arg("sdwa")    = std::nullopt,
              nb::arg("vop3")    = std::nullopt,
              nb::arg("comment") = "")
-        .def("__deepcopy__", [](const rocisa::VCvtSRF16toBF8& self, nb::dict&) {
-            return new rocisa::VCvtSRF16toBF8(self);
+        .def("__deepcopy__", [](const rocisa::VCvtScaleSRF16toBF8& self, nb::dict&) {
+            return new rocisa::VCvtScaleSRF16toBF8(self);
         });
 
     nb::class_<rocisa::VCvtPkF32toFP8, rocisa::VCvtInstruction>(m_inst, "VCvtPkF32toFP8")

@@ -9084,10 +9084,10 @@ class KernelWriterAssembly(KernelWriter):
                     sel = 1 if vi %2 == 1 else 0
                     if self.states.asmCaps["Hascvtfp8_f16"] and not kernel["ProblemType"]["StochasticRounding"] and not kernel["ProblemType"]["UseScaleAB"] == "Scalar":
                       if (toF8):
-                        localWriteCVTCode.add(VCvtPkF16toFP8(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi//2)), src=[vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi)), 0x3f800000],\
+                        localWriteCVTCode.add(VCvtScalePkF16toFP8(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi//2)), src=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi)), scale=0x3f800000,\
                                                               vop3=VOP3PModifiers(op_sel=[0,0,sel]), comment="convert F16 to F8"))
                       else:
-                        localWriteCVTCode.add(VCvtPkF16toBF8(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi//2)), src=[vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi)), 0x3f800000],\
+                        localWriteCVTCode.add(VCvtScalePkF16toBF8(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi//2)), src=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi)), scale=0x3f800000,\
                                                               vop3=VOP3PModifiers(op_sel=[0,0,sel]), comment="convert F16 to BF8"))
                     else:
                       localWriteCVTCode.add(VCvtF16toF32(dst=vgpr(vgprTmp), src=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi)), sdwa=SDWAModifiers(src0_sel=SelectBit.WORD_0), comment="convert to F32"))
@@ -9140,7 +9140,7 @@ class KernelWriterAssembly(KernelWriter):
                     dst_sel = SelectBit.WORD_1 if isHigh16Bits else SelectBit.WORD_0
                     if self.states.asmCaps["Hascvtf16_fp8"]:
                       sel = [0,1,1,0] if isHigh16Bits else [0,0,0,0]
-                      localWriteCVTCode.add(VCvtFP8toF16(dst=paramList[0], src=[new_src, 0x3f800000], vop3=VOP3PModifiers(op_sel=sel), comment="A convert fp8 to f16"))
+                      localWriteCVTCode.add(VCvtScaleFP8toF16(dst=paramList[0], src=new_src, scale=0x3f800000, vop3=VOP3PModifiers(op_sel=sel), comment="A convert fp8 to f16"))
                     else:
                       localWriteCVTCode.add(VCvtFP8toF32(dst=vgpr(vgprTmp), src=new_src , sdwa=SDWAModifiers(src0_sel=src_sel), comment="convert C to fp32"))
                       localWriteCVTCode.add(VCvtF32toF16(dst=paramList[0], src=vgpr(vgprTmp), sdwa=SDWAModifiers(dst_sel=dst_sel), comment="convert C to fp16"))
@@ -9171,7 +9171,7 @@ class KernelWriterAssembly(KernelWriter):
 
                     if new_src == paramList[0]:
                       if self.states.asmCaps["Hascvtf16_fp8"]:
-                        localWriteCVTCode.add(VCvtFP8toF16(dst=paramList[0], src=[new_src , 0x3f800000], vop3=VOP3PModifiers(op_sel=sel), comment="B convert fp8 to f16"))
+                        localWriteCVTCode.add(VCvtScaleFP8toF16(dst=paramList[0], src=new_src , scale=0x3f800000, vop3=VOP3PModifiers(op_sel=sel), comment="B convert fp8 to f16"))
                       else:
                         if src_sel == SelectBit.BYTE_0 or src_sel == SelectBit.BYTE_2:
                           if regTmpVgprBlock == None:
@@ -9184,7 +9184,7 @@ class KernelWriterAssembly(KernelWriter):
                     else:
                       vgprTmp = self.vgprPool.checkOut(1)
                       if self.states.asmCaps["Hascvtf16_fp8"]:
-                        localWriteCVTCode.add(VCvtFP8toF16(dst=paramList[0], src=[new_src, 0x3f800000], vop3=VOP3PModifiers(op_sel=sel), comment="C convert fp8 to f16"))
+                        localWriteCVTCode.add(VCvtScaleFP8toF16(dst=paramList[0], src=new_src, scale=0x3f800000, vop3=VOP3PModifiers(op_sel=sel), comment="C convert fp8 to f16"))
                       else:
                         localWriteCVTCode.add(VCvtFP8toF32(dst=vgpr(vgprTmp), src=new_src , sdwa=SDWAModifiers(src0_sel=src_sel), comment="convert C to fp32"))
                         localWriteCVTCode.add(VCvtF32toF16(dst=paramList[0], src=vgpr(vgprTmp), sdwa=SDWAModifiers(dst_sel=dst_sel), comment="convert C to fp16"))
@@ -9195,7 +9195,7 @@ class KernelWriterAssembly(KernelWriter):
                   modNum = max(1, int(newBlockWidth / blockWidth))
                   if self.states.asmCaps["Hascvtf16_fp8"]:
                     sel  = [1,0,0,0] if isCvtHighBits else [0,0,0,0]
-                    localWriteCVTCode.add(VCvtPkFP8toF16(dst=vgpr(destVgprPrefix + "+%u"%(g2lIdx)), src=[vgpr(destVgprPrefix + "+%u"%(g2lIdx)), 0x3f800000],\
+                    localWriteCVTCode.add(VCvtScalePkFP8toF16(dst=vgpr(destVgprPrefix + "+%u"%(g2lIdx)), src=vgpr(destVgprPrefix + "+%u"%(g2lIdx)), scale=0x3f800000,\
                                                           vop3=VOP3PModifiers(op_sel=sel), comment="D convert fp8 to f16"))
                   else:
                     if (not isHigh16Bits) and (g2lIdx % modNum == 0):
@@ -9212,13 +9212,13 @@ class KernelWriterAssembly(KernelWriter):
                   if (not isHigh16Bits) and (newBlockWidth <= blockWidth):
                     for vi in range(0, int(newBlockWidth)):
                       if self.states.asmCaps["Hascvtf16_fp8"]:
-                        localWriteCVTCode.add(VCvtFP8toF16(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi * 2)),     src=[vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx+tP["shiftGR"], vi)), 0x3f800000],\
+                        localWriteCVTCode.add(VCvtScaleFP8toF16(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi * 2)),     src=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx+tP["shiftGR"], vi)), scale=0x3f800000,\
                                                             vop3=VOP3PModifiers(op_sel=[0,0,0,0]), comment="E convert fp8 to f16"))
-                        localWriteCVTCode.add(VCvtFP8toF16(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi * 2)),     src=[vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx+tP["shiftGR"], vi)), 0x3f800000],\
+                        localWriteCVTCode.add(VCvtScaleFP8toF16(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi * 2)),     src=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx+tP["shiftGR"], vi)), scale=0x3f800000,\
                                                             vop3=VOP3PModifiers(op_sel=[1,0,1,0]), comment="E convert fp8 to f16"))
-                        localWriteCVTCode.add(VCvtFP8toF16(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi * 2 + 1)), src=[vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx+tP["shiftGR"], vi)), 0x3f800000],\
+                        localWriteCVTCode.add(VCvtScaleFP8toF16(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi * 2 + 1)), src=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx+tP["shiftGR"], vi)), scale=0x3f800000,\
                                                             vop3=VOP3PModifiers(op_sel=[0,1,0,0]), comment="E convert fp8 to f16"))
-                        localWriteCVTCode.add(VCvtFP8toF16(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi * 2 + 1)), src=[vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx+tP["shiftGR"], vi)), 0x3f800000],\
+                        localWriteCVTCode.add(VCvtScaleFP8toF16(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi * 2 + 1)), src=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx+tP["shiftGR"], vi)), scale=0x3f800000,\
                                                             vop3=VOP3PModifiers(op_sel=[1,1,1,0]), comment="E convert fp8 to f16"))
                       else:
                         localWriteCVTCode.add(VCvtPkFP8toF32(dst=vgpr(vgprTmp, 2), src=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx+tP["shiftGR"], vi)), sdwa=SDWAModifiers(src0_sel=SelectBit.WORD_0), comment="convert to F32"))
@@ -9236,8 +9236,8 @@ class KernelWriterAssembly(KernelWriter):
                       interOffset = 0 if idxMod % 2 == 0 else 1
                       if self.states.asmCaps["Hascvtf16_fp8"]:
                         sel = 1 if idxMod % 2 == 0 else 1
-                        localWriteCVTCode.add(VCvtPkFP8toF16(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdxTmp, vi * 2 + interOffset)),\
-                                                              src=[vgpr(destVgprPrefix + "+%u+%u"%(g2lIdxTmp+tP["shiftGR"], vi)), 0x3f800000],\
+                        localWriteCVTCode.add(VCvtScalePkFP8toF16(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdxTmp, vi * 2 + interOffset)),\
+                                                              src=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdxTmp+tP["shiftGR"], vi)), scale=0x3f800000,\
                                                               vop3=VOP3PModifiers(op_sel=[0,0,0,sel]), comment="F convert fp8 to f16"))
                       else:
                         localWriteCVTCode.add(VCvtPkFP8toF32(dst=vgpr(vgprTmp, 2), src=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdxTmp+tP["shiftGR"], vi)), sdwa=SDWAModifiers(src0_sel=selectBit), comment="convert to F32"))

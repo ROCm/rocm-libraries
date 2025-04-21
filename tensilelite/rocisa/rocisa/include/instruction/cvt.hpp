@@ -366,164 +366,171 @@ namespace rocisa
         }
     };
 
-    struct VCvtPkFP8toF16 : public VCvtInstruction
+    struct VCvtScalePkFP8toF16 : public VCvtInstruction
     {
-        VCvtPkFP8toF16(const std::shared_ptr<RegisterContainer>& dst,
+        VCvtScalePkFP8toF16(const std::shared_ptr<RegisterContainer>& dst,
                        const std::shared_ptr<Container>&         src,
+                       const InstructionInput&                   scale,
                        std::optional<SDWAModifiers>              sdwa    = std::nullopt,
                        std::optional<VOP3PModifiers>             vop3    = std::nullopt,
                        const std::string&                        comment = "")
-            : VCvtInstruction(CvtType::CVT_SCALEF32_PK_F16_FP8, dst, {src}, sdwa, vop3, comment)
+            : VCvtInstruction(CvtType::CVT_SCALEF32_PK_F16_FP8, dst, {src, scale}, sdwa, vop3, comment)
         {
             setInst("v_cvt_scalef32_pk_f16_fp8");
         }
 
-        VCvtPkFP8toF16(const VCvtPkFP8toF16& other)
+        VCvtScalePkFP8toF16(const VCvtScalePkFP8toF16& other)
             : VCvtInstruction(other)
         {
         }
 
         std::shared_ptr<Item> clone() const override
         {
-            return std::make_shared<VCvtPkFP8toF16>(*this);
+            return std::make_shared<VCvtScalePkFP8toF16>(*this);
         }
     };
 
-    struct VCvtPkBF8toF16 : public VCvtInstruction
+    struct VCvtScalePkBF8toF16 : public VCvtInstruction
     {
-        VCvtPkBF8toF16(const std::shared_ptr<RegisterContainer>& dst,
+        VCvtScalePkBF8toF16(const std::shared_ptr<RegisterContainer>& dst,
                        const std::shared_ptr<Container>&         src,
+                       const InstructionInput&                   scale,
                        std::optional<SDWAModifiers>              sdwa    = std::nullopt,
                        std::optional<VOP3PModifiers>             vop3    = std::nullopt,
                        const std::string&                        comment = "")
-            : VCvtInstruction(CvtType::CVT_SCALEF32_PK_F16_BF8, dst, {src}, sdwa, vop3, comment)
+            : VCvtInstruction(CvtType::CVT_SCALEF32_PK_F16_BF8, dst, {src, scale}, sdwa, vop3, comment)
         {
             setInst("v_cvt_scalef32_pk_f16_bf8");
         }
 
-        VCvtPkBF8toF16(const VCvtPkBF8toF16& other)
+        VCvtScalePkBF8toF16(const VCvtScalePkBF8toF16& other)
             : VCvtInstruction(other)
         {
         }
 
         std::shared_ptr<Item> clone() const override
         {
-            return std::make_shared<VCvtPkBF8toF16>(*this);
+            return std::make_shared<VCvtScalePkBF8toF16>(*this);
         }
     };
 
-    struct VCvtFP8toF16 : public VCvtInstruction
+    struct VCvtScaleFP8toF16 : public VCvtInstruction
     {
-        VCvtFP8toF16(const std::shared_ptr<RegisterContainer>& dst,
+        VCvtScaleFP8toF16(const std::shared_ptr<RegisterContainer>& dst,
                      const std::shared_ptr<Container>&         src,
+                     const InstructionInput&                   scale,
                      std::optional<SDWAModifiers>              sdwa    = std::nullopt,
                      std::optional<VOP3PModifiers>             vop3    = std::nullopt,
                      const std::string&                        comment = "")
-            : VCvtInstruction(CvtType::CVT_SCALEF32_F16_FP8, dst, {src}, sdwa, vop3, comment)
+            : VCvtInstruction(CvtType::CVT_SCALEF32_F16_FP8, dst, {src, scale}, sdwa, vop3, comment)
         {
             setInst("v_cvt_scalef32_f16_fp8");
         }
 
-        VCvtFP8toF16(const VCvtFP8toF16& other)
+        VCvtScaleFP8toF16(const VCvtScaleFP8toF16& other)
             : VCvtInstruction(other)
         {
         }
 
         std::shared_ptr<Item> clone() const override
         {
-            return std::make_shared<VCvtFP8toF16>(*this);
+            return std::make_shared<VCvtScaleFP8toF16>(*this);
         }
     };
 
-    struct VCvtPkF16toFP8 : public VCvtInstruction
+    struct VCvtScalePkF16toFP8 : public VCvtInstruction
     {
-        VCvtPkF16toFP8(const std::shared_ptr<RegisterContainer>& dst,
+        VCvtScalePkF16toFP8(const std::shared_ptr<RegisterContainer>& dst,
                        const std::shared_ptr<Container>&         src,
+                       const InstructionInput&                   scale,
                        std::optional<SDWAModifiers>              sdwa    = std::nullopt,
                        std::optional<VOP3PModifiers>             vop3    = std::nullopt,
                        const std::string&                        comment = "")
-            : VCvtInstruction(CvtType::CVT_SCALEF32_PK_FP8_F16, dst, {src}, sdwa, vop3, comment)
+            : VCvtInstruction(CvtType::CVT_SCALEF32_PK_FP8_F16, dst, {src, scale}, sdwa, vop3, comment)
         {
             setInst("v_cvt_scalef32_pk_fp8_f16");
         }
 
-        VCvtPkF16toFP8(const VCvtPkF16toFP8& other)
+        VCvtScalePkF16toFP8(const VCvtScalePkF16toFP8& other)
             : VCvtInstruction(other)
         {
         }
 
         std::shared_ptr<Item> clone() const override
         {
-            return std::make_shared<VCvtPkF16toFP8>(*this);
+            return std::make_shared<VCvtScalePkF16toFP8>(*this);
         }
     };
 
-    struct VCvtPkF16toBF8 : public VCvtInstruction
+    struct VCvtScalePkF16toBF8 : public VCvtInstruction
     {
-        VCvtPkF16toBF8(const std::shared_ptr<RegisterContainer>& dst,
+        VCvtScalePkF16toBF8(const std::shared_ptr<RegisterContainer>& dst,
                        const std::shared_ptr<Container>&         src,
+                       const InstructionInput&                   scale,
                        std::optional<SDWAModifiers>              sdwa    = std::nullopt,
                        std::optional<VOP3PModifiers>             vop3    = std::nullopt,
                        const std::string&                        comment = "")
-            : VCvtInstruction(CvtType::CVT_SCALEF32_PK_BF8_F16, dst, {src}, sdwa, vop3, comment)
+            : VCvtInstruction(CvtType::CVT_SCALEF32_PK_BF8_F16, dst, {src, scale}, sdwa, vop3, comment)
         {
             setInst("v_cvt_scalef32_pk_bf8_f16");
         }
 
-        VCvtPkF16toBF8(const VCvtPkF16toBF8& other)
+        VCvtScalePkF16toBF8(const VCvtScalePkF16toBF8& other)
             : VCvtInstruction(other)
         {
         }
 
         std::shared_ptr<Item> clone() const override
         {
-            return std::make_shared<VCvtPkF16toBF8>(*this);
+            return std::make_shared<VCvtScalePkF16toBF8>(*this);
         }
     };
 
-    struct VCvtSRF16toFP8 : public VCvtInstruction
+    struct VCvtScaleSRF16toFP8 : public VCvtInstruction
     {
-        VCvtSRF16toFP8(const std::shared_ptr<RegisterContainer>& dst,
+        VCvtScaleSRF16toFP8(const std::shared_ptr<RegisterContainer>& dst,
                        const std::shared_ptr<Container>&         src,
+                       const InstructionInput&                   scale,
                        std::optional<SDWAModifiers>              sdwa    = std::nullopt,
                        std::optional<VOP3PModifiers>             vop3    = std::nullopt,
                        const std::string&                        comment = "")
-            : VCvtInstruction(CvtType::CVT_SCALEF32_SR_FP8_F16, dst, {src}, sdwa, vop3, comment)
+            : VCvtInstruction(CvtType::CVT_SCALEF32_SR_FP8_F16, dst, {src, scale}, sdwa, vop3, comment)
         {
             setInst("v_cvt_scalef32_sr_fp8_f16");
         }
 
-        VCvtSRF16toFP8(const VCvtSRF16toFP8& other)
+        VCvtScaleSRF16toFP8(const VCvtScaleSRF16toFP8& other)
             : VCvtInstruction(other)
         {
         }
 
         std::shared_ptr<Item> clone() const override
         {
-            return std::make_shared<VCvtSRF16toFP8>(*this);
+            return std::make_shared<VCvtScaleSRF16toFP8>(*this);
         }
     };
 
-    struct VCvtSRF16toBF8 : public VCvtInstruction
+    struct VCvtScaleSRF16toBF8 : public VCvtInstruction
     {
-        VCvtSRF16toBF8(const std::shared_ptr<RegisterContainer>& dst,
+        VCvtScaleSRF16toBF8(const std::shared_ptr<RegisterContainer>& dst,
                        const std::shared_ptr<Container>&         src,
+                       const InstructionInput&                   scale,
                        std::optional<SDWAModifiers>              sdwa    = std::nullopt,
                        std::optional<VOP3PModifiers>             vop3    = std::nullopt,
                        const std::string&                        comment = "")
-            : VCvtInstruction(CvtType::CVT_SCALEF32_SR_BF8_F16, dst, {src}, sdwa, vop3, comment)
+            : VCvtInstruction(CvtType::CVT_SCALEF32_SR_BF8_F16, dst, {src, scale}, sdwa, vop3, comment)
         {
             setInst("v_cvt_scalef32_sr_bf8_f16");
         }
 
-        VCvtSRF16toBF8(const VCvtSRF16toBF8& other)
+        VCvtScaleSRF16toBF8(const VCvtScaleSRF16toBF8& other)
             : VCvtInstruction(other)
         {
         }
 
         std::shared_ptr<Item> clone() const override
         {
-            return std::make_shared<VCvtSRF16toBF8>(*this);
+            return std::make_shared<VCvtScaleSRF16toBF8>(*this);
         }
     };
 
