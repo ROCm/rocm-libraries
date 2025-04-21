@@ -7,7 +7,7 @@
 # Coverage configuration
 coverage:
   status:
-    patch: false
+    patch: true
 
   range: 60..80     # First number represents red, and second represents green
   round: nearest    # up, down, or nearest
