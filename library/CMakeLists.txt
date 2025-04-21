@@ -55,7 +55,6 @@ add_library( hipblas-common INTERFACE )
 target_include_directories( hipblas-common
   INTERFACE
           $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include>
-          $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include/hipblaslt>
           $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 
