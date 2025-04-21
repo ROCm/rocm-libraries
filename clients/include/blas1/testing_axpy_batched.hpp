@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -40,6 +40,7 @@ inline void testname_axpy_batched(const Arguments& arg, std::string& name)
 template <typename T>
 void testing_axpy_batched_bad_arg(const Arguments& arg)
 {
+    using Ts     = hipblas_internal_type<T>;
     bool FORTRAN = arg.api == hipblas_client_api::FORTRAN;
     auto hipblasAxpyBatchedFn
         = FORTRAN ? hipblasAxpyBatched<T, true> : hipblasAxpyBatched<T, false>;
@@ -60,9 +61,9 @@ void testing_axpy_batched_bad_arg(const Arguments& arg)
         device_batch_vector<T> dx(N, incx, batch_count);
         device_batch_vector<T> dy(N, incy, batch_count);
 
-        const T  h_alpha(1), h_zero(0);
-        const T* alpha = &h_alpha;
-        const T* zero  = &h_zero;
+        const Ts  h_alpha(1), h_zero(0);
+        const Ts* alpha = &h_alpha;
+        const Ts* zero  = &h_zero;
 
         if(pointer_mode == HIPBLAS_POINTER_MODE_DEVICE)
         {
@@ -103,6 +104,7 @@ void testing_axpy_batched_bad_arg(const Arguments& arg)
 template <typename T>
 void testing_axpy_batched(const Arguments& arg)
 {
+    using Ts     = hipblas_internal_type<T>;
     bool FORTRAN = arg.api == hipblas_client_api::FORTRAN;
     auto hipblasAxpyBatchedFn
         = FORTRAN ? hipblasAxpyBatched<T, true> : hipblasAxpyBatched<T, false>;
@@ -167,9 +169,15 @@ void testing_axpy_batched(const Arguments& arg)
         CHECK_HIP_ERROR(dy.transfer_from(hy_host));
 
         CHECK_HIPBLAS_ERROR(hipblasSetPointerMode(handle, HIPBLAS_POINTER_MODE_HOST));
-        DAPI_CHECK(
-            hipblasAxpyBatchedFn,
-            (handle, N, &alpha, dx.ptr_on_device(), incx, dy.ptr_on_device(), incy, batch_count));
+        DAPI_CHECK(hipblasAxpyBatchedFn,
+                   (handle,
+                    N,
+                    reinterpret_cast<Ts*>(&alpha),
+                    dx.ptr_on_device(),
+                    incx,
+                    dy.ptr_on_device(),
+                    incy,
+                    batch_count));
 
         CHECK_HIP_ERROR(hy_host.transfer_from(dy));
 

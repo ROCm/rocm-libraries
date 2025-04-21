@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -127,8 +127,12 @@ void near_check_general(int64_t          M,
 }
 
 template <>
-void near_check_general(
-    int64_t M, int64_t N, int64_t lda, hipblasComplex* hCPU, hipblasComplex* hGPU, double abs_error)
+void near_check_general(int64_t              M,
+                        int64_t              N,
+                        int64_t              lda,
+                        std::complex<float>* hCPU,
+                        std::complex<float>* hGPU,
+                        double               abs_error)
 {
     abs_error *= sqrthalf;
     NEAR_CHECK(M, N, 1, lda, 0, hCPU, hGPU, abs_error, NEAR_ASSERT_COMPLEX);
@@ -138,8 +142,8 @@ template <>
 void near_check_general(int64_t               M,
                         int64_t               N,
                         int64_t               lda,
-                        hipblasDoubleComplex* hCPU,
-                        hipblasDoubleComplex* hGPU,
+                        std::complex<double>* hCPU,
+                        std::complex<double>* hGPU,
                         double                abs_error)
 {
     abs_error *= sqrthalf;
@@ -212,14 +216,14 @@ void near_check_general(int64_t          M,
 }
 
 template <>
-void near_check_general(int64_t         M,
-                        int64_t         N,
-                        int64_t         batch_count,
-                        int64_t         lda,
-                        hipblasStride   strideA,
-                        hipblasComplex* hCPU,
-                        hipblasComplex* hGPU,
-                        double          abs_error)
+void near_check_general(int64_t              M,
+                        int64_t              N,
+                        int64_t              batch_count,
+                        int64_t              lda,
+                        hipblasStride        strideA,
+                        std::complex<float>* hCPU,
+                        std::complex<float>* hGPU,
+                        double               abs_error)
 {
     abs_error *= sqrthalf;
     NEAR_CHECK(M, N, batch_count, lda, strideA, hCPU, hGPU, abs_error, NEAR_ASSERT_COMPLEX);
@@ -231,8 +235,8 @@ void near_check_general(int64_t               M,
                         int64_t               batch_count,
                         int64_t               lda,
                         hipblasStride         strideA,
-                        hipblasDoubleComplex* hCPU,
-                        hipblasDoubleComplex* hGPU,
+                        std::complex<double>* hCPU,
+                        std::complex<double>* hGPU,
                         double                abs_error)
 {
     abs_error *= sqrthalf;
@@ -299,13 +303,13 @@ void near_check_general(int64_t             M,
 }
 
 template <>
-void near_check_general(int64_t                     M,
-                        int64_t                     N,
-                        int64_t                     batch_count,
-                        int64_t                     lda,
-                        host_vector<hipblasComplex> hCPU[],
-                        host_vector<hipblasComplex> hGPU[],
-                        double                      abs_error)
+void near_check_general(int64_t                          M,
+                        int64_t                          N,
+                        int64_t                          batch_count,
+                        int64_t                          lda,
+                        host_vector<std::complex<float>> hCPU[],
+                        host_vector<std::complex<float>> hGPU[],
+                        double                           abs_error)
 {
     abs_error *= sqrthalf;
     NEAR_CHECK_B(M, N, batch_count, lda, hCPU, hGPU, abs_error, NEAR_ASSERT_COMPLEX);
@@ -316,8 +320,8 @@ void near_check_general(int64_t                           M,
                         int64_t                           N,
                         int64_t                           batch_count,
                         int64_t                           lda,
-                        host_vector<hipblasDoubleComplex> hCPU[],
-                        host_vector<hipblasDoubleComplex> hGPU[],
+                        host_vector<std::complex<double>> hCPU[],
+                        host_vector<std::complex<double>> hGPU[],
                         double                            abs_error)
 {
     abs_error *= sqrthalf;
@@ -385,13 +389,13 @@ void near_check_general(int64_t M,
 }
 
 template <>
-void near_check_general(int64_t         M,
-                        int64_t         N,
-                        int64_t         batch_count,
-                        int64_t         lda,
-                        hipblasComplex* hCPU[],
-                        hipblasComplex* hGPU[],
-                        double          abs_error)
+void near_check_general(int64_t              M,
+                        int64_t              N,
+                        int64_t              batch_count,
+                        int64_t              lda,
+                        std::complex<float>* hCPU[],
+                        std::complex<float>* hGPU[],
+                        double               abs_error)
 {
     abs_error *= sqrthalf;
     NEAR_CHECK_B(M, N, batch_count, lda, hCPU, hGPU, abs_error, NEAR_ASSERT_COMPLEX);
@@ -402,8 +406,8 @@ void near_check_general(int64_t               M,
                         int64_t               N,
                         int64_t               batch_count,
                         int64_t               lda,
-                        hipblasDoubleComplex* hCPU[],
-                        hipblasDoubleComplex* hGPU[],
+                        std::complex<double>* hCPU[],
+                        std::complex<double>* hGPU[],
                         double                abs_error)
 {
     abs_error *= sqrthalf;

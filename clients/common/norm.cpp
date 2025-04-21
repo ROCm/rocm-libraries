@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -48,24 +48,24 @@ extern "C" {
 
 // float  slange_(char* norm_type, int* m, int* n, float* A, int* lda, float* work);
 // double dlange_(char* norm_type, int* m, int* n, double* A, int* lda, double* work);
-// float  clange_(char* norm_type, int* m, int* n, hipblasComplex* A, int* lda, float* work);
-// double zlange_(char* norm_type, int* m, int* n, hipblasDoubleComplex* A, int* lda, double* work);
+// float  clange_(char* norm_type, int* m, int* n, std::complex<float>* A, int* lda, float* work);
+// double zlange_(char* norm_type, int* m, int* n, std::complex<double>* A, int* lda, double* work);
 
 // float  slansy_(char* norm_type, char* uplo, int* n, float* A, int* lda, float* work);
 // double dlansy_(char* norm_type, char* uplo, int* n, double* A, int* lda, double* work);
-//  float  clanhe_(char* norm_type, char* uplo, int* n, hipblasComplex* A, int* lda, float* work);
-//  double zlanhe_(char* norm_type, char* uplo, int* n, hipblasDoubleComplex* A, int* lda, double*
+//  float  clanhe_(char* norm_type, char* uplo, int* n, std::complex<float>* A, int* lda, float* work);
+//  double zlanhe_(char* norm_type, char* uplo, int* n, std::complex<double>* A, int* lda, double*
 //  work);
 
 // void m_axpy_64(int* n, float* alpha, float* x, int* incx, float* y, int* incy);
 // void m_axpy_64(int* n, double* alpha, double* x, int* incx, double* y, int* incy);
 // void m_axpy_64(
-//     int* n, hipblasComplex* alpha, hipblasComplex* x, int* incx, hipblasComplex* y, int* incy);
+//     int* n, std::complex<float>* alpha, std::complex<float>* x, int* incx, std::complex<float>* y, int* incy);
 // void m_axpy_64(int*                  n,
-//             hipblasDoubleComplex* alpha,
-//             hipblasDoubleComplex* x,
+//             std::complex<double>* alpha,
+//             std::complex<double>* x,
 //             int*                  incx,
-//             hipblasDoubleComplex* y,
+//             std::complex<double>* y,
 //             int*                  incy);
 
 #ifdef __cplusplus
@@ -124,14 +124,18 @@ double norm_check_general<double>(
 }
 
 template <>
-double norm_check_general<hipblasComplex>(
-    char norm_type, int64_t M, int64_t N, int64_t lda, hipblasComplex* hCPU, hipblasComplex* hGPU)
+double norm_check_general<std::complex<float>>(char                 norm_type,
+                                               int64_t              M,
+                                               int64_t              N,
+                                               int64_t              lda,
+                                               std::complex<float>* hCPU,
+                                               std::complex<float>* hGPU)
 {
     //norm type can be M', 'I', 'F', 'l': 'F' (Frobenius norm) is used mostly
 
     host_vector<double> work(std::max(int64_t(1), M));
     int64_t             incx  = 1;
-    hipblasComplex      alpha = -1.0f;
+    std::complex<float> alpha = -1.0f;
     int64_t             size  = lda * N;
 
     double cpu_norm = lapack_xlange(norm_type, M, N, hCPU, lda, work.data());
@@ -142,18 +146,18 @@ double norm_check_general<hipblasComplex>(
 }
 
 template <>
-double norm_check_general<hipblasDoubleComplex>(char                  norm_type,
+double norm_check_general<std::complex<double>>(char                  norm_type,
                                                 int64_t               M,
                                                 int64_t               N,
                                                 int64_t               lda,
-                                                hipblasDoubleComplex* hCPU,
-                                                hipblasDoubleComplex* hGPU)
+                                                std::complex<double>* hCPU,
+                                                std::complex<double>* hGPU)
 {
     //norm type can be M', 'I', 'F', 'l': 'F' (Frobenius norm) is used mostly
 
     host_vector<double>  work(std::max(int64_t(1), M));
     int64_t              incx  = 1;
-    hipblasDoubleComplex alpha = -1.0;
+    std::complex<double> alpha = -1.0;
     int64_t              size  = lda * N;
 
     double cpu_norm = lapack_xlange(norm_type, M, N, hCPU, lda, work.data());
@@ -321,14 +325,14 @@ double norm_check_symmetric<double>(
 */
 
 // template<>
-// double norm_check_symmetric<hipblasComplex>(char norm_type, char uplo, int64_t N, int64_t lda, hipblasComplex
-// *hCPU, hipblasComplex *hGPU)
+// double norm_check_symmetric<std::complex<float>>(char norm_type, char uplo, int64_t N, int64_t lda, std::complex<float>
+// *hCPU, std::complex<float> *hGPU)
 //{
 ////norm type can be M', 'I', 'F', 'l': 'F' (Frobenius norm) is used mostly
 //
 //    float work[1];
 //    int64_t incx = 1;
-//    hipblasComplex alpha = -1.0f;
+//    std::complex<float> alpha = -1.0f;
 //    int64_t size = lda * N;
 //
 //    float cpu_norm = clanhe_(&norm_type, &uplo, &N, hCPU, &lda, work);
@@ -340,14 +344,14 @@ double norm_check_symmetric<double>(
 //}
 //
 // template<>
-// double norm_check_symmetric<hipblasDoubleComplex>(char norm_type, char uplo, int64_t N, int64_t lda,
-// hipblasDoubleComplex *hCPU, hipblasDoubleComplex *hGPU)
+// double norm_check_symmetric<std::complex<double>>(char norm_type, char uplo, int64_t N, int64_t lda,
+// std::complex<double> *hCPU, std::complex<double> *hGPU)
 //{
 ////norm type can be M', 'I', 'F', 'l': 'F' (Frobenius norm) is used mostly
 //
 //    double work[1];
 //    int64_t incx = 1;
-//    hipblasDoubleComplex alpha = -1.0;
+//    std::complex<double> alpha = -1.0;
 //    int64_t size = lda * N;
 //
 //    double cpu_norm = zlanhe_(&norm_type, &uplo, &N, hCPU, &lda, work);

@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -53,6 +53,7 @@ inline void testname_geam_batched(const Arguments& arg, std::string& name)
 template <typename T>
 void testing_geam_batched_bad_arg(const Arguments& arg)
 {
+    using Ts = hipblas_internal_type<T>;
     auto hipblasGeamBatchedFn
         = arg.api == FORTRAN ? hipblasGeamBatched<T, true> : hipblasGeamBatched<T, false>;
     auto hipblasGeamBatchedFn_64
@@ -81,11 +82,11 @@ void testing_geam_batched_bad_arg(const Arguments& arg)
     device_batch_matrix<T> dC(M, N, ldc, batch_count);
 
     device_vector<T> d_alpha(1), d_beta(1), d_zero(1);
-    const T          h_alpha(1), h_beta(2), h_zero(0);
+    const Ts         h_alpha(1), h_beta(2), h_zero(0);
 
-    const T* alpha = &h_alpha;
-    const T* beta  = &h_beta;
-    const T* zero  = &h_zero;
+    const Ts* alpha = &h_alpha;
+    const Ts* beta  = &h_beta;
+    const Ts* zero  = &h_zero;
 
     for(auto pointer_mode : {HIPBLAS_POINTER_MODE_HOST, HIPBLAS_POINTER_MODE_DEVICE})
     {
@@ -395,6 +396,7 @@ void testing_geam_batched_bad_arg(const Arguments& arg)
 template <typename T>
 void testing_geam_batched(const Arguments& arg)
 {
+    using Ts = hipblas_internal_type<T>;
     auto hipblasGeamBatchedFn
         = arg.api == FORTRAN ? hipblasGeamBatched<T, true> : hipblasGeamBatched<T, false>;
     auto hipblasGeamBatchedFn_64
@@ -503,10 +505,10 @@ void testing_geam_batched(const Arguments& arg)
                         transB,
                         M,
                         N,
-                        &h_alpha,
+                        reinterpret_cast<Ts*>(&h_alpha),
                         dA.ptr_on_device(),
                         lda,
-                        &h_beta,
+                        reinterpret_cast<Ts*>(&h_beta),
                         dB.ptr_on_device(),
                         ldb,
                         dC.ptr_on_device(),

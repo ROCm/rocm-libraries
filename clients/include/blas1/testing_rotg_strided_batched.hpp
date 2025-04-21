@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -156,7 +156,16 @@ void testing_rotg_strided_batched(const Arguments& arg)
     {
         CHECK_HIPBLAS_ERROR(hipblasSetPointerMode(handle, HIPBLAS_POINTER_MODE_HOST));
         DAPI_CHECK(hipblasRotgStridedBatchedFn,
-                   (handle, ha, stride_a, hb, stride_b, hc, stride_c, hs, stride_s, batch_count));
+                   (handle,
+                    ha.internal_type(),
+                    stride_a,
+                    hb.internal_type(),
+                    stride_b,
+                    hc.internal_type(),
+                    stride_c,
+                    hs.internal_type(),
+                    stride_s,
+                    batch_count));
 
         CHECK_HIPBLAS_ERROR(hipblasSetPointerMode(handle, HIPBLAS_POINTER_MODE_DEVICE));
         DAPI_CHECK(hipblasRotgStridedBatchedFn,

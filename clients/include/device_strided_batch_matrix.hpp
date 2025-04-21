@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -88,7 +88,7 @@ public:
     //!
     //! @brief Returns the data pointer.
     //!
-    T* data()
+    hipblas_internal_type<T>* data()
     {
         return this->m_data;
     }
@@ -96,7 +96,7 @@ public:
     //!
     //! @brief Returns the data pointer.
     //!
-    const T* data() const
+    const hipblas_internal_type<T>* data() const
     {
         return this->m_data;
     }
@@ -146,7 +146,7 @@ public:
     //! @param batch_index The batch index.
     //! @return A mutable pointer to the batch_index'th matrix.
     //!
-    T* operator[](int64_t batch_index)
+    hipblas_internal_type<T>* operator[](int64_t batch_index)
     {
         return (this->m_stride >= 0)
                    ? this->m_data + batch_index * this->m_stride
@@ -158,7 +158,7 @@ public:
     //! @param batch_index The batch index.
     //! @return A non-mutable mutable pointer to the batch_index'th matrix.
     //!
-    const T* operator[](int64_t batch_index) const
+    const hipblas_internal_type<T>* operator[](int64_t batch_index) const
     {
         return (this->m_stride >= 0)
                    ? this->m_data + batch_index * this->m_stride
@@ -169,7 +169,7 @@ public:
     //! @brief Cast operator.
     //! @remark Returns the pointer of the first matrix.
     //!
-    operator T*()
+    operator hipblas_internal_type<T>*()
     {
         return (*this)[0];
     }
@@ -178,7 +178,7 @@ public:
     //! @brief Non-mutable cast operator.
     //! @remark Returns the non-mutable pointer of the first matrix.
     //!
-    operator const T*() const
+    operator const hipblas_internal_type<T>*() const
     {
         return (*this)[0];
     }
@@ -199,8 +199,8 @@ public:
     hipError_t transfer_from(const host_strided_batch_matrix<T>& that)
     {
         return hipMemcpy(this->data(),
-                         that.data(),
-                         sizeof(T) * this->nmemb(),
+                         (hipblas_internal_type<T>*)that.data(),
+                         sizeof(hipblas_internal_type<T>) * this->nmemb(),
                          this->use_HMM ? hipMemcpyHostToHost : hipMemcpyHostToDevice);
     }
 
@@ -215,8 +215,8 @@ public:
         for(int64_t batch_index = 0; batch_index < m_batch_count; batch_index++)
         {
             status = hipMemcpy(this->data() + (batch_index * m_stride),
-                               that.data(),
-                               sizeof(T) * this->m_n * this->m_lda,
+                               (hipblas_internal_type<T>*)that.data(),
+                               sizeof(hipblas_internal_type<T>) * this->m_n * this->m_lda,
                                this->use_HMM ? hipMemcpyHostToHost : hipMemcpyHostToDevice);
             if(status != hipSuccess)
                 break;
@@ -239,12 +239,12 @@ public:
     }
 
 private:
-    size_t        m_m{};
-    size_t        m_n{};
-    size_t        m_lda{};
-    hipblasStride m_stride{};
-    int64_t       m_batch_count{};
-    T*            m_data{};
+    size_t                    m_m{};
+    size_t                    m_n{};
+    size_t                    m_lda{};
+    hipblasStride             m_stride{};
+    int64_t                   m_batch_count{};
+    hipblas_internal_type<T>* m_data{};
 
     static size_t calculate_nmemb(size_t n, size_t lda, hipblasStride stride, int64_t batch_count)
     {

@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -51,6 +51,7 @@ inline void testname_trsm_strided_batched(const Arguments& arg, std::string& nam
 template <typename T>
 void testing_trsm_strided_batched_bad_arg(const Arguments& arg)
 {
+    using Ts                            = hipblas_internal_type<T>;
     auto hipblasTrsmStridedBatchedFn    = arg.api == FORTRAN ? hipblasTrsmStridedBatched<T, true>
                                                              : hipblasTrsmStridedBatched<T, false>;
     auto hipblasTrsmStridedBatchedFn_64 = arg.api == FORTRAN_64
@@ -79,10 +80,10 @@ void testing_trsm_strided_batched_bad_arg(const Arguments& arg)
     device_strided_batch_matrix<T> dB(M, N, ldb, stride_B, batch_count);
 
     device_vector<T> d_alpha(1), d_zero(1);
-    const T          h_alpha(1), h_zero(0);
+    const Ts         h_alpha(1), h_zero(0);
 
-    const T* alpha = &h_alpha;
-    const T* zero  = &h_zero;
+    const Ts* alpha = &h_alpha;
+    const Ts* zero  = &h_zero;
 
     for(auto pointer_mode : {HIPBLAS_POINTER_MODE_HOST, HIPBLAS_POINTER_MODE_DEVICE})
     {
@@ -359,6 +360,7 @@ void testing_trsm_strided_batched_bad_arg(const Arguments& arg)
 template <typename T>
 void testing_trsm_strided_batched(const Arguments& arg)
 {
+    using Ts                            = hipblas_internal_type<T>;
     auto hipblasTrsmStridedBatchedFn    = arg.api == FORTRAN ? hipblasTrsmStridedBatched<T, true>
                                                              : hipblasTrsmStridedBatched<T, false>;
     auto hipblasTrsmStridedBatchedFn_64 = arg.api == FORTRAN_64
@@ -487,7 +489,7 @@ void testing_trsm_strided_batched(const Arguments& arg)
                     diag,
                     M,
                     N,
-                    &h_alpha,
+                    reinterpret_cast<Ts*>(&h_alpha),
                     dA,
                     lda,
                     stride_A,

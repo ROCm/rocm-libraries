@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -118,7 +118,7 @@ void unit_check_general(int64_t M, int64_t N, int64_t lda, double* hCPU, double*
 
 template <>
 void unit_check_general(
-    int64_t M, int64_t N, int64_t lda, hipblasComplex* hCPU, hipblasComplex* hGPU)
+    int64_t M, int64_t N, int64_t lda, std::complex<float>* hCPU, std::complex<float>* hGPU)
 {
 #ifdef GOOGLE_TEST
     for(int64_t j = 0; j < N; j++)
@@ -132,7 +132,7 @@ void unit_check_general(
 
 template <>
 void unit_check_general(
-    int64_t M, int64_t N, int64_t lda, hipblasDoubleComplex* hCPU, hipblasDoubleComplex* hGPU)
+    int64_t M, int64_t N, int64_t lda, std::complex<double>* hCPU, std::complex<double>* hGPU)
 {
 #ifdef GOOGLE_TEST
     for(int64_t j = 0; j < N; j++)
@@ -204,12 +204,12 @@ void unit_check_general(
 }
 
 template <>
-void unit_check_general(int64_t          M,
-                        int64_t          N,
-                        int64_t          batch_count,
-                        int64_t          lda,
-                        hipblasComplex** hCPU,
-                        hipblasComplex** hGPU)
+void unit_check_general(int64_t               M,
+                        int64_t               N,
+                        int64_t               batch_count,
+                        int64_t               lda,
+                        std::complex<float>** hCPU,
+                        std::complex<float>** hGPU)
 {
     UNIT_CHECK_B(M, N, batch_count, lda, hCPU, hGPU, ASSERT_FLOAT_COMPLEX_EQ);
 }
@@ -219,8 +219,8 @@ void unit_check_general(int64_t                M,
                         int64_t                N,
                         int64_t                batch_count,
                         int64_t                lda,
-                        hipblasDoubleComplex** hCPU,
-                        hipblasDoubleComplex** hGPU)
+                        std::complex<double>** hCPU,
+                        std::complex<double>** hGPU)
 {
     UNIT_CHECK_B(M, N, batch_count, lda, hCPU, hGPU, ASSERT_DOUBLE_COMPLEX_EQ);
 }
@@ -282,12 +282,12 @@ void unit_check_general(int64_t             M,
 }
 
 template <>
-void unit_check_general(int64_t                     M,
-                        int64_t                     N,
-                        int64_t                     batch_count,
-                        int64_t                     lda,
-                        host_vector<hipblasComplex> hCPU[],
-                        host_vector<hipblasComplex> hGPU[])
+void unit_check_general(int64_t                          M,
+                        int64_t                          N,
+                        int64_t                          batch_count,
+                        int64_t                          lda,
+                        host_vector<std::complex<float>> hCPU[],
+                        host_vector<std::complex<float>> hGPU[])
 {
     UNIT_CHECK_B(M, N, batch_count, lda, hCPU, hGPU, ASSERT_FLOAT_COMPLEX_EQ);
 }
@@ -297,8 +297,8 @@ void unit_check_general(int64_t                           M,
                         int64_t                           N,
                         int64_t                           batch_count,
                         int64_t                           lda,
-                        host_vector<hipblasDoubleComplex> hCPU[],
-                        host_vector<hipblasDoubleComplex> hGPU[])
+                        host_vector<std::complex<double>> hCPU[],
+                        host_vector<std::complex<double>> hGPU[])
 {
     UNIT_CHECK_B(M, N, batch_count, lda, hCPU, hGPU, ASSERT_DOUBLE_COMPLEX_EQ);
 }
@@ -353,13 +353,13 @@ void unit_check_general(int64_t       M,
 }
 
 template <>
-void unit_check_general(int64_t         M,
-                        int64_t         N,
-                        int64_t         batch_count,
-                        int64_t         lda,
-                        hipblasStride   strideA,
-                        hipblasComplex* hCPU,
-                        hipblasComplex* hGPU)
+void unit_check_general(int64_t              M,
+                        int64_t              N,
+                        int64_t              batch_count,
+                        int64_t              lda,
+                        hipblasStride        strideA,
+                        std::complex<float>* hCPU,
+                        std::complex<float>* hGPU)
 {
     UNIT_CHECK(M, N, batch_count, lda, strideA, hCPU, hGPU, ASSERT_FLOAT_COMPLEX_EQ);
 }
@@ -370,8 +370,8 @@ void unit_check_general(int64_t               M,
                         int64_t               batch_count,
                         int64_t               lda,
                         hipblasStride         strideA,
-                        hipblasDoubleComplex* hCPU,
-                        hipblasDoubleComplex* hGPU)
+                        std::complex<double>* hCPU,
+                        std::complex<double>* hGPU)
 {
     UNIT_CHECK(M, N, batch_count, lda, strideA, hCPU, hGPU, ASSERT_DOUBLE_COMPLEX_EQ);
 }

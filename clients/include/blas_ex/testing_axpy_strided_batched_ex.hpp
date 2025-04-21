@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -48,6 +48,7 @@ inline void testname_axpy_strided_batched_ex(const Arguments& arg, std::string& 
 template <typename Ta, typename Tx = Ta, typename Ty = Tx, typename Tex = Ty>
 void testing_axpy_strided_batched_ex_bad_arg(const Arguments& arg)
 {
+    using Ts = hipblas_internal_type<Ta>;
     auto hipblasAxpyStridedBatchedExFn
         = arg.api == FORTRAN ? hipblasAxpyStridedBatchedExFortran : hipblasAxpyStridedBatchedEx;
     auto hipblasAxpyStridedBatchedExFn_64 = arg.api == FORTRAN_64
@@ -76,9 +77,9 @@ void testing_axpy_strided_batched_ex_bad_arg(const Arguments& arg)
         device_strided_batch_vector<Tx> dx(N, incx, stridex, batch_count);
         device_strided_batch_vector<Ty> dy(N, incy, stridey, batch_count);
 
-        const Ta  h_alpha(1), h_zero(0);
-        const Ta* alpha = &h_alpha;
-        const Ta* zero  = &h_zero;
+        const Ts  h_alpha(1), h_zero(0);
+        const Ts* alpha = &h_alpha;
+        const Ts* zero  = &h_zero;
 
         if(pointer_mode == HIPBLAS_POINTER_MODE_DEVICE)
         {
@@ -232,6 +233,7 @@ void testing_axpy_strided_batched_ex_bad_arg(const Arguments& arg)
 template <typename Ta, typename Tx = Ta, typename Ty = Tx, typename Tex = Ty>
 void testing_axpy_strided_batched_ex(const Arguments& arg)
 {
+    using Ts = hipblas_internal_type<Ta>;
     auto hipblasAxpyStridedBatchedExFn
         = arg.api == FORTRAN ? hipblasAxpyStridedBatchedExFortran : hipblasAxpyStridedBatchedEx;
     auto hipblasAxpyStridedBatchedExFn_64 = arg.api == FORTRAN_64
@@ -315,7 +317,7 @@ void testing_axpy_strided_batched_ex(const Arguments& arg)
     DAPI_CHECK(hipblasAxpyStridedBatchedExFn,
                (handle,
                 N,
-                &h_alpha,
+                reinterpret_cast<Ts*>(&h_alpha),
                 alphaType,
                 dx,
                 xType,

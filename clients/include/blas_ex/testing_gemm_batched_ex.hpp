@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -58,6 +58,7 @@ inline void testname_gemm_batched_ex(const Arguments& arg, std::string& name)
 template <typename Ti, typename To = Ti, typename Tex = To>
 void testing_gemm_batched_ex_bad_arg(const Arguments& arg)
 {
+    using Ts = hipblas_internal_type<Tex>;
     // Note: hipblasGemmEx and hipblasGemmExWithFlags are essentially the exact same.
     //       Only testing WithFlags version as it has slightly more functionality.
     auto hipblasGemmBatchedExFn
@@ -100,15 +101,15 @@ void testing_gemm_batched_ex_bad_arg(const Arguments& arg)
     device_batch_matrix<To> dC(M, N, ldc, batch_count);
 
     device_vector<Tex> d_alpha(1), d_beta(1), d_one(1), d_zero(1);
-    Tex                h_alpha(1), h_beta(2), h_one(1), h_zero(0);
+    Ts                 h_alpha(1), h_beta(2), h_one(1), h_zero(0);
 
     if constexpr(std::is_same_v<Tex, hipblasHalf>)
         h_one = float_to_half(1.0f);
 
-    const Tex* alpha = &h_alpha;
-    const Tex* beta  = &h_beta;
-    const Tex* one   = &h_one;
-    const Tex* zero  = &h_zero;
+    const Ts* alpha = &h_alpha;
+    const Ts* beta  = &h_beta;
+    const Ts* one   = &h_one;
+    const Ts* zero  = &h_zero;
 
     for(auto pointer_mode : {HIPBLAS_POINTER_MODE_HOST, HIPBLAS_POINTER_MODE_DEVICE})
     {
@@ -299,6 +300,7 @@ void testing_gemm_batched_ex_bad_arg(const Arguments& arg)
 template <typename Ti, typename To = Ti, typename Tex = To>
 void testing_gemm_batched_ex(const Arguments& arg)
 {
+    using Ts = hipblas_internal_type<Tex>;
     auto hipblasGemmBatchedExFn
         = arg.api == FORTRAN ? hipblasGemmBatchedExFortran : hipblasGemmBatchedEx;
     auto hipblasGemmBatchedExWithFlagsFn
@@ -440,14 +442,14 @@ void testing_gemm_batched_ex(const Arguments& arg)
                         M,
                         N,
                         K,
-                        &h_alpha_Tex,
+                        reinterpret_cast<Ts*>(&h_alpha_Tex),
                         (const void**)(Ti**)dA.ptr_on_device(),
                         a_type,
                         lda,
                         (const void**)(Ti**)dB.ptr_on_device(),
                         b_type,
                         ldb,
-                        &h_beta_Tex,
+                        reinterpret_cast<Ts*>(&h_beta_Tex),
                         (void**)(To**)dC.ptr_on_device(),
                         c_type,
                         ldc,

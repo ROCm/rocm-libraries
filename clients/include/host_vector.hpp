@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -98,6 +98,14 @@ struct host_vector : std::vector<T, host_memory_allocator<T>>
     inline const T& operator[](int64_t idx) const
     {
         return std::vector<T, host_memory_allocator<T>>::operator[]((size_t)idx);
+    }
+
+    //!
+    //! @brief Get data reinterpretted as hipblas_internal_type
+    //!
+    inline hipblas_internal_type<T>* internal_type()
+    {
+        return reinterpret_cast<hipblas_internal_type<T>*>(this->data());
     }
 
     //!

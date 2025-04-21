@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -39,6 +39,7 @@ inline void testname_scal_ex(const Arguments& arg, std::string& name)
 template <typename Ta, typename Tx = Ta, typename Tex = Tx>
 void testing_scal_ex_bad_arg(const Arguments& arg)
 {
+    using Ts                = hipblas_internal_type<Ta>;
     auto hipblasScalExFn    = arg.api == FORTRAN ? hipblasScalExFortran : hipblasScalEx;
     auto hipblasScalExFn_64 = arg.api == FORTRAN_64 ? hipblasScalEx_64Fortran : hipblasScalEx_64;
 
@@ -48,7 +49,7 @@ void testing_scal_ex_bad_arg(const Arguments& arg)
 
     int64_t N     = 100;
     int64_t incx  = 1;
-    Ta      alpha = (Ta)0.6;
+    Ts      alpha = (Ts)0.6;
 
     hipblasLocalHandle handle(arg);
 
@@ -88,6 +89,7 @@ void testing_scal_ex_bad_arg(const Arguments& arg)
 template <typename Ta, typename Tx = Ta, typename Tex = Tx>
 void testing_scal_ex(const Arguments& arg)
 {
+    using Ts                = hipblas_internal_type<Ta>;
     auto hipblasScalExFn    = arg.api == FORTRAN ? hipblasScalExFortran : hipblasScalEx;
     auto hipblasScalExFn_64 = arg.api == FORTRAN_64 ? hipblasScalEx_64Fortran : hipblasScalEx_64;
 
@@ -149,7 +151,14 @@ void testing_scal_ex(const Arguments& arg)
         =================================================================== */
         CHECK_HIPBLAS_ERROR(hipblasSetPointerMode(handle, HIPBLAS_POINTER_MODE_HOST));
         DAPI_CHECK(hipblasScalExFn,
-                   (handle, N, &h_alpha, alphaType, dx, xType, incx, executionType));
+                   (handle,
+                    N,
+                    reinterpret_cast<Ts*>(&h_alpha),
+                    alphaType,
+                    dx,
+                    xType,
+                    incx,
+                    executionType));
 
         // copy output from device to CPU
         CHECK_HIP_ERROR(hx_host.transfer_from(dx));

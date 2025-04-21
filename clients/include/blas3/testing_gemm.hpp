@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -51,6 +51,7 @@ inline void testname_gemm(const Arguments& arg, std::string& name)
 template <typename T>
 void testing_gemm_bad_arg(const Arguments& arg)
 {
+    using Ts           = hipblas_internal_type<T>;
     auto hipblasGemmFn = arg.api == FORTRAN ? hipblasGemm<T, true> : hipblasGemm<T, false>;
     auto hipblasGemmFn_64
         = arg.api == FORTRAN_64 ? hipblasGemm_64<T, true> : hipblasGemm_64<T, false>;
@@ -78,15 +79,15 @@ void testing_gemm_bad_arg(const Arguments& arg)
     device_matrix<T> dC(M, N, ldc);
 
     device_vector<T> d_alpha(1), d_beta(1), d_one(1), d_zero(1);
-    T                h_alpha(1), h_beta(2), h_one(1), h_zero(0);
+    Ts               h_alpha(1), h_beta(2), h_one(1), h_zero(0);
 
     if constexpr(std::is_same_v<T, hipblasHalf>)
         h_one = float_to_half(1.0f);
 
-    const T* alpha = &h_alpha;
-    const T* beta  = &h_beta;
-    const T* one   = &h_one;
-    const T* zero  = &h_zero;
+    const Ts* alpha = &h_alpha;
+    const Ts* beta  = &h_beta;
+    const Ts* one   = &h_one;
+    const Ts* zero  = &h_zero;
 
     for(auto pointer_mode : {HIPBLAS_POINTER_MODE_HOST, HIPBLAS_POINTER_MODE_DEVICE})
     {
@@ -268,6 +269,7 @@ void testing_gemm_bad_arg(const Arguments& arg)
 template <typename T>
 void testing_gemm(const Arguments& arg)
 {
+    using Ts           = hipblas_internal_type<T>;
     auto hipblasGemmFn = arg.api == FORTRAN ? hipblasGemm<T, true> : hipblasGemm<T, false>;
     auto hipblasGemmFn_64
         = arg.api == FORTRAN_64 ? hipblasGemm_64<T, true> : hipblasGemm_64<T, false>;
@@ -365,7 +367,20 @@ void testing_gemm(const Arguments& arg)
 
         // library interface
         DAPI_CHECK(hipblasGemmFn,
-                   (handle, transA, transB, M, N, K, &h_alpha, dA, lda, dB, ldb, &h_beta, dC, ldc));
+                   (handle,
+                    transA,
+                    transB,
+                    M,
+                    N,
+                    K,
+                    reinterpret_cast<Ts*>(&h_alpha),
+                    dA,
+                    lda,
+                    dB,
+                    ldb,
+                    reinterpret_cast<Ts*>(&h_beta),
+                    dC,
+                    ldc));
 
         // copy output from device to CPU
         CHECK_HIP_ERROR(hC_host.transfer_from(dC));
@@ -435,9 +450,21 @@ void testing_gemm(const Arguments& arg)
             if(iter == arg.cold_iters)
                 gpu_time_used = get_time_us_sync(stream);
 
-            DAPI_DISPATCH(
-                hipblasGemmFn,
-                (handle, transA, transB, M, N, K, &h_alpha, dA, lda, dB, ldb, &h_beta, dC, ldc));
+            DAPI_DISPATCH(hipblasGemmFn,
+                          (handle,
+                           transA,
+                           transB,
+                           M,
+                           N,
+                           K,
+                           reinterpret_cast<Ts*>(&h_alpha),
+                           dA,
+                           lda,
+                           dB,
+                           ldb,
+                           reinterpret_cast<Ts*>(&h_beta),
+                           dC,
+                           ldc));
         }
         gpu_time_used = get_time_us_sync(stream) - gpu_time_used;
 

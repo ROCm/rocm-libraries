@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2023 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -25,6 +25,7 @@
 #define hipblas_DATATYPE2STRING_H_
 
 #include "hipblas.h"
+#include <complex>
 #include <ostream>
 #include <string>
 
@@ -57,13 +58,13 @@ inline std::ostream& operator<<(std::ostream& os, hipblas_initialization init)
 }
 
 // Complex output
-inline std::ostream& operator<<(std::ostream& os, const hipblasComplex& x)
+inline std::ostream& operator<<(std::ostream& os, const std::complex<float>& x)
 {
     os << "'(" << x.real() << ":" << x.imag() << ")'";
     return os;
 }
 
-inline std::ostream& operator<<(std::ostream& os, const hipblasDoubleComplex& x)
+inline std::ostream& operator<<(std::ostream& os, const std::complex<double>& x)
 {
     os << "'(" << x.real() << ":" << x.imag() << ")'";
     return os;

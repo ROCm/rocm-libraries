@@ -93,15 +93,15 @@ inline hipblasHalf convert_alpha_beta<hipblasHalf>(double r, double i)
 }
 
 template <>
-inline hipblasComplex convert_alpha_beta<hipblasComplex>(double r, double i)
+inline std::complex<float> convert_alpha_beta<std::complex<float>>(double r, double i)
 {
-    return hipblasComplex(r, i);
+    return std::complex<float>(r, i);
 }
 
 template <>
-inline hipblasDoubleComplex convert_alpha_beta<hipblasDoubleComplex>(double r, double i)
+inline std::complex<double> convert_alpha_beta<std::complex<double>>(double r, double i)
 {
-    return hipblasDoubleComplex(r, i);
+    return std::complex<double>(r, i);
 }
 
 /*! \brief Class used to parse command arguments in both benchmark & gtest   */

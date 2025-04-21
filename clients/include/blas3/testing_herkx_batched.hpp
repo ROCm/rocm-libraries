@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -50,7 +50,8 @@ inline void testname_herkx_batched(const Arguments& arg, std::string& name)
 template <typename T>
 void testing_herkx_batched_bad_arg(const Arguments& arg)
 {
-    using U = real_t<T>;
+    using U  = real_t<T>;
+    using Ts = hipblas_internal_type<T>;
     auto hipblasHerkxBatchedFn
         = arg.api == FORTRAN ? hipblasHerkxBatched<T, U, true> : hipblasHerkxBatched<T, U, false>;
     auto hipblasHerkxBatchedFn_64 = arg.api == FORTRAN_64 ? hipblasHerkxBatched_64<T, U, true>
@@ -77,13 +78,13 @@ void testing_herkx_batched_bad_arg(const Arguments& arg)
 
     device_vector<T> d_alpha(1), d_zero(1);
     device_vector<U> d_beta(1), d_one(1);
-    const T          h_alpha(1), h_zero(0);
+    const Ts         h_alpha(1), h_zero(0);
     const U          h_beta(2), h_one(1);
 
-    const T* alpha = &h_alpha;
-    const U* beta  = &h_beta;
-    const U* one   = &h_one;
-    const T* zero  = &h_zero;
+    const Ts* alpha = &h_alpha;
+    const U*  beta  = &h_beta;
+    const U*  one   = &h_one;
+    const Ts* zero  = &h_zero;
 
     for(auto pointer_mode : {HIPBLAS_POINTER_MODE_HOST, HIPBLAS_POINTER_MODE_DEVICE})
     {
@@ -361,7 +362,8 @@ void testing_herkx_batched_bad_arg(const Arguments& arg)
 template <typename T>
 void testing_herkx_batched(const Arguments& arg)
 {
-    using U = real_t<T>;
+    using U  = real_t<T>;
+    using Ts = hipblas_internal_type<T>;
     auto hipblasHerkxBatchedFn
         = arg.api == FORTRAN ? hipblasHerkxBatched<T, U, true> : hipblasHerkxBatched<T, U, false>;
     auto hipblasHerkxBatchedFn_64 = arg.api == FORTRAN_64 ? hipblasHerkxBatched_64<T, U, true>
@@ -470,7 +472,7 @@ void testing_herkx_batched(const Arguments& arg)
                     transA,
                     N,
                     K,
-                    &h_alpha,
+                    reinterpret_cast<Ts*>(&h_alpha),
                     dA.ptr_on_device(),
                     lda,
                     dB.ptr_on_device(),

@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -194,9 +194,17 @@ void testing_dot_strided_batched(const Arguments& arg)
             (handle, N, dx, incx, stridex, dy, incy, stridey, batch_count, d_hipblas_result));
 
         CHECK_HIPBLAS_ERROR(hipblasSetPointerMode(handle, HIPBLAS_POINTER_MODE_HOST));
-        DAPI_CHECK(
-            hipblasDotStridedBatchedFn,
-            (handle, N, dx, incx, stridex, dy, incy, stridey, batch_count, h_hipblas_result1));
+        DAPI_CHECK(hipblasDotStridedBatchedFn,
+                   (handle,
+                    N,
+                    dx,
+                    incx,
+                    stridex,
+                    dy,
+                    incy,
+                    stridey,
+                    batch_count,
+                    reinterpret_cast<hipblas_internal_type<T>*>(h_hipblas_result1.data())));
 
         CHECK_HIP_ERROR(hipMemcpy(
             h_hipblas_result2, d_hipblas_result, sizeof(T) * batch_count, hipMemcpyDeviceToHost));

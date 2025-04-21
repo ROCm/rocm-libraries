@@ -80,12 +80,12 @@ char type2char<double>()
 }
 
 //  template<>
-//  char type2char<hipblasComplex>(){
+//  char type2char<std::complex<float>>(){
 //      return 'c';
 //  }
 
 //  template<>
-//  char type2char<hipblasDoubleComplex>(){
+//  char type2char<std::complex<double>>(){
 //      return 'z';
 //  }
 
@@ -102,13 +102,13 @@ int type2int<double>(double val)
 }
 
 template <>
-int type2int<hipblasComplex>(hipblasComplex val)
+int type2int<std::complex<float>>(std::complex<float> val)
 {
     return (int)val.real();
 }
 
 template <>
-int type2int<hipblasDoubleComplex>(hipblasDoubleComplex val)
+int type2int<std::complex<double>>(std::complex<double> val)
 {
     return (int)val.real();
 }

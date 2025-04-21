@@ -84,10 +84,10 @@ HIPBLAS_CLANG_STATIC constexpr double
     hipblas_type_epsilon<double> = std::numeric_limits<double>::epsilon();
 template <>
 HIPBLAS_CLANG_STATIC constexpr double
-    hipblas_type_epsilon<hipblasComplex> = std::numeric_limits<float>::epsilon();
+    hipblas_type_epsilon<std::complex<float>> = std::numeric_limits<float>::epsilon();
 template <>
 HIPBLAS_CLANG_STATIC constexpr double
-    hipblas_type_epsilon<hipblasDoubleComplex> = std::numeric_limits<double>::epsilon();
+    hipblas_type_epsilon<std::complex<double>> = std::numeric_limits<double>::epsilon();
 template <>
 HIPBLAS_CLANG_STATIC constexpr double hipblas_type_epsilon<
     hipblasHalf> = 0.0009765625; // in fp16 diff between 0x3C00 (1.0) and fp16 0x3C01
@@ -174,12 +174,22 @@ public:
     }
 
     // Random NaN Complex
-    explicit operator hipblasComplex()
+    explicit operator std::complex<float>()
     {
         return {float(*this), float(*this)};
     }
 
     // Random NaN Double Complex
+    explicit operator std::complex<double>()
+    {
+        return {double(*this), double(*this)};
+    }
+
+    explicit operator hipblasComplex()
+    {
+        return {float(*this), float(*this)};
+    }
+
     explicit operator hipblasDoubleComplex()
     {
         return {double(*this), double(*this)};
@@ -258,18 +268,18 @@ inline hipblasBfloat16 random_generator<hipblasBfloat16>()
         float((rand() % 3 + 1))); // generate an integer number in range [1,2,3]
 }
 
-// for hipblasComplex, generate 2 floats
+// for std::complex<float>, generate 2 floats
 /*! \brief  generate two random numbers in range [1,2,3,4,5,6,7,8,9,10] */
 template <>
-inline hipblasComplex random_generator<hipblasComplex>()
+inline std::complex<float> random_generator<std::complex<float>>()
 {
     return {float(rand() % 10 + 1), float(rand() % 10 + 1)};
 }
 
-// for hipblasDoubleComplex, generate 2 doubles
+// for std::complex<double>, generate 2 doubles
 /*! \brief  generate two random numbers in range [1,2,3,4,5,6,7,8,9,10] */
 template <>
-inline hipblasDoubleComplex random_generator<hipblasDoubleComplex>()
+inline std::complex<double> random_generator<std::complex<double>>()
 {
     return {double(rand() % 10 + 1), double(rand() % 10 + 1)};
 }
@@ -303,13 +313,13 @@ inline hipblasBfloat16 random_generator_negative<hipblasBfloat16>()
 *           imaginary value in range [-1, -10]
 */
 template <>
-inline hipblasComplex random_generator_negative<hipblasComplex>()
+inline std::complex<float> random_generator_negative<std::complex<float>>()
 {
     return {float(-(rand() % 10 + 1)), float(-(rand() % 10 + 1))};
 }
 
 template <>
-inline hipblasDoubleComplex random_generator_negative<hipblasDoubleComplex>()
+inline std::complex<double> random_generator_negative<std::complex<double>>()
 {
     return {double(-(rand() % 10 + 1)), double(-(rand() % 10 + 1))};
 }

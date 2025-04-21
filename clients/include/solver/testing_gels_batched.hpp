@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -61,8 +61,8 @@ void testing_gels_batched_bad_arg(const Arguments& arg)
     int                info = 0;
     int                expectedInfo;
 
-    T* const* dAp = dA.ptr_on_device();
-    T* const* dBp = dB.ptr_on_device();
+    hipblas_internal_type<T>* const* dAp = dA.ptr_on_device();
+    hipblas_internal_type<T>* const* dBp = dB.ptr_on_device();
 
     EXPECT_HIPBLAS_STATUS(
         hipblasGelsBatchedFn(

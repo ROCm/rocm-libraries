@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -176,6 +176,14 @@ public:
     explicit operator bool() const
     {
         return nullptr != m_data;
+    }
+
+    //!
+    //! @brief Get data reinterpretted as hipblas_internal_type
+    //!
+    inline hipblas_internal_type<T>* internal_type()
+    {
+        return reinterpret_cast<hipblas_internal_type<T>*>((*this)[0]);
     }
 
     //!

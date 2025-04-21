@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -64,14 +64,14 @@ public:
     bool use_HMM = false;
 
 public:
-    static T m_guard[MEM_MAX_GUARD_PAD];
+    static hipblas_internal_type<T> m_guard[MEM_MAX_GUARD_PAD];
 
 #ifdef GOOGLE_TEST
     d_vector(size_t s, bool HMM = false)
         : m_size(s)
         , m_pad(std::min(g_DVEC_PAD, size_t(MEM_MAX_GUARD_PAD)))
-        , m_guard_len(m_pad * sizeof(T))
-        , m_bytes((s + m_pad * 2) * sizeof(T))
+        , m_guard_len(m_pad * sizeof(hipblas_internal_type<T>))
+        , m_bytes((s + m_pad * 2) * sizeof(hipblas_internal_type<T>))
         , use_HMM(HMM)
     {
         // Initialize m_guard with random data
@@ -85,16 +85,16 @@ public:
     d_vector(size_t s, bool HMM = false)
         : m_size(s)
         , m_pad(0) // save current pad length
-        , m_guard_len(0 * sizeof(T))
-        , m_bytes(s ? s * sizeof(T) : sizeof(T))
+        , m_guard_len(0 * sizeof(hipblas_internal_type<T>))
+        , m_bytes(s ? s * sizeof(hipblas_internal_type<T>) : sizeof(hipblas_internal_type<T>))
         , use_HMM(HMM)
     {
     }
 #endif
 
-    T* device_vector_setup()
+    hipblas_internal_type<T>* device_vector_setup()
     {
-        T* d = nullptr;
+        hipblas_internal_type<T>* d = nullptr;
         if(use_HMM ? hipMallocManaged(&d, m_bytes) : (hipMalloc)(&d, m_bytes) != hipSuccess)
         {
             std::cout << "Warning: hip can't allocate " << m_bytes << " bytes (" << (m_bytes >> 30)
@@ -123,12 +123,12 @@ public:
         return d;
     }
 
-    void device_vector_check(T* d)
+    void device_vector_check(hipblas_internal_type<T>* d)
     {
 #ifdef GOOGLE_TEST
         if(m_pad > 0)
         {
-            std::vector<T> host(m_pad);
+            std::vector<hipblas_internal_type<T>> host(m_pad);
 
             // Copy device memory after allocated memory to host
             if(hipMemcpy(host.data(), d + m_size, m_guard_len, hipMemcpyDefault) != hipSuccess)
@@ -150,7 +150,7 @@ public:
 #endif
     }
 
-    void device_vector_teardown(T* d)
+    void device_vector_teardown(hipblas_internal_type<T>* d)
     {
         if(d != nullptr)
         {
@@ -166,7 +166,7 @@ public:
 };
 
 template <typename T>
-T d_vector<T>::m_guard[MEM_MAX_GUARD_PAD] = {};
+hipblas_internal_type<T> d_vector<T>::m_guard[MEM_MAX_GUARD_PAD] = {};
 
 template <typename T>
 bool d_vector<T>::m_init_guard = false;

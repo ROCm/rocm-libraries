@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2023 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -25,7 +25,7 @@
 
 #include "hipblas.h"
 #include <complex>
-
+/*
 inline hipblasComplex& operator+=(hipblasComplex& lhs, const hipblasComplex& rhs)
 {
     reinterpret_cast<std::complex<float>&>(lhs)
@@ -206,5 +206,5 @@ namespace std
         return r;
     }
 }
-
+*/
 #endif

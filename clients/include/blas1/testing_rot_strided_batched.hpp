@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -182,7 +182,17 @@ void testing_rot_strided_batched(const Arguments& arg)
             CHECK_HIP_ERROR(dx.transfer_from(hx));
             CHECK_HIP_ERROR(dy.transfer_from(hy));
             DAPI_CHECK(hipblasRotStridedBatchedFn,
-                       (handle, N, dx, incx, stride_x, dy, incy, stride_y, hc, hs, batch_count));
+                       (handle,
+                        N,
+                        dx,
+                        incx,
+                        stride_x,
+                        dy,
+                        incy,
+                        stride_y,
+                        hc.internal_type(),
+                        hs.internal_type(),
+                        batch_count));
 
             host_strided_batch_vector<T> rx(N, incx, stride_x, batch_count);
             host_strided_batch_vector<T> ry(N, incy, stride_y, batch_count);

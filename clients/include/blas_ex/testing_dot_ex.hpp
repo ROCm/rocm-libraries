@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -123,7 +123,7 @@ void testing_dot_ex_bad_arg(const Arguments& arg)
                          nullptr,
                          yType,
                          incy,
-                         pointer_mode == HIPBLAS_POINTER_MODE_HOST ? h_res : d_res,
+                         pointer_mode == HIPBLAS_POINTER_MODE_HOST ? h_res.internal_type() : d_res,
                          resultType,
                          executionType));
         }

@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2023 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -75,27 +75,27 @@ namespace
     // This tells whether the BLAS1_EX tests are enabled
     // Appears that we will need up to 4 template variables (see dot)
     template <blas1_ex BLAS1_EX, typename T1, typename T2, typename T3, typename T4>
-    using blas1_ex_enabled = std::integral_constant<
-        bool,
-        // axpy_ex
-        // T1 is alpha_type T2 is x_type, T3 is y_type, T4 is execution_type
-        ((BLAS1_EX == blas1_ex::axpy_ex || BLAS1_EX == blas1_ex::axpy_batched_ex
-          || BLAS1_EX == blas1_ex::axpy_strided_batched_ex)
-         && ((std::is_same_v<
-                  T1,
-                  T2> && std::is_same_v<T2, T3> && std::is_same_v<T3, T4> && (std::is_same_v<T1, float> || std::is_same_v<T1, double> || std::is_same_v<T1, hipblasHalf> || std::is_same_v<T1, hipblasComplex> || std::is_same_v<T1, hipblasDoubleComplex>))
-             || (std::is_same_v<
-                     T1,
-                     T2> && std::is_same_v<T2, T3> && std::is_same_v<T1, hipblasHalf> && std::is_same_v<T4, float>)
-             || (std::is_same_v<
-                     T2,
-                     T3> && std::is_same_v<T1, T4> && std::is_same_v<T2, hipblasHalf> && std::is_same_v<T1, float>)
-             || (std::is_same_v<
-                     T1,
-                     float> && std::is_same_v<T2, hipblasBfloat16> && std::is_same_v<T2, T3> && (std::is_same_v<T1, T4>))
-             || (std::is_same_v<
-                     T1,
-                     T2> && std::is_same_v<T2, T3> && std::is_same_v<T1, hipblasBfloat16> && std::is_same_v<T4, float>)))>;
+    using blas1_ex_enabled
+        = std::integral_constant<
+            bool,
+            // axpy_ex
+            // T1 is alpha_type T2 is x_type, T3 is y_type, T4 is execution_type
+            (
+                (BLAS1_EX == blas1_ex::axpy_ex || BLAS1_EX == blas1_ex::axpy_batched_ex
+                 || BLAS1_EX == blas1_ex::axpy_strided_batched_ex)
+                && ((std::is_same_v<T1, T2> && std::is_same_v<T2, T3> && std::is_same_v<T3, T4> && (std::is_same_v<T1, float> || std::is_same_v<T1, double> || std::is_same_v<T1, hipblasHalf> || std::is_same_v<T1, std::complex<float>> || std::is_same_v<T1, std::complex<double>>))
+                    || (std::is_same_v<
+                            T1,
+                            T2> && std::is_same_v<T2, T3> && std::is_same_v<T1, hipblasHalf> && std::is_same_v<T4, float>)
+                    || (std::is_same_v<
+                            T2,
+                            T3> && std::is_same_v<T1, T4> && std::is_same_v<T2, hipblasHalf> && std::is_same_v<T1, float>)
+                    || (std::is_same_v<
+                            T1,
+                            float> && std::is_same_v<T2, hipblasBfloat16> && std::is_same_v<T2, T3> && (std::is_same_v<T1, T4>))
+                    || (std::is_same_v<
+                            T1,
+                            T2> && std::is_same_v<T2, T3> && std::is_same_v<T1, hipblasBfloat16> && std::is_same_v<T4, float>)))>;
 
 // Creates tests for one of the BLAS 1 functions
 // ARG passes 1-3 template arguments to the testing_* function

@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -62,11 +62,11 @@ inline bool hipblas_isnan(hipblasHalf arg)
     auto half_data = static_cast<unsigned short>(arg);
     return (~(half_data)&0x7c00) == 0 && (half_data & 0x3ff) != 0;
 }
-inline bool hipblas_isnan(hipblasComplex arg)
+inline bool hipblas_isnan(std::complex<float> arg)
 {
     return std::isnan(arg.real()) || std::isnan(arg.imag());
 }
-inline bool hipblas_isnan(hipblasDoubleComplex arg)
+inline bool hipblas_isnan(std::complex<double> arg)
 {
     return std::isnan(arg.real()) || std::isnan(arg.imag());
 }
@@ -168,12 +168,12 @@ inline float hipblas_abs(const float& x)
     return x < 0 ? -x : x;
 }
 
-inline double hipblas_abs(const hipblasComplex& x)
+inline double hipblas_abs(const std::complex<float>& x)
 {
     return std::abs(reinterpret_cast<const std::complex<float>&>(x));
 }
 
-inline double hipblas_abs(const hipblasDoubleComplex& x)
+inline double hipblas_abs(const std::complex<double>& x)
 {
     return std::abs(reinterpret_cast<const std::complex<double>&>(x));
 }
@@ -194,35 +194,57 @@ template <typename T>
 static constexpr bool is_complex = false;
 
 template <>
-HIPBLAS_CLANG_STATIC constexpr bool is_complex<hipblasComplex> = true;
+HIPBLAS_CLANG_STATIC constexpr bool is_complex<std::complex<float>> = true;
 
 template <>
-HIPBLAS_CLANG_STATIC constexpr bool is_complex<hipblasDoubleComplex> = true;
+HIPBLAS_CLANG_STATIC constexpr bool is_complex<std::complex<double>> = true;
 
 // Get base types from complex types.
-template <typename T, typename = void>
+template <typename T>
 struct real_t_impl
 {
     using type = T;
 };
 
-template <typename T>
-struct real_t_impl<T, std::enable_if_t<is_complex<T>>>
+template <>
+struct real_t_impl<std::complex<float>>
 {
-    using type = decltype(T{}.real());
+    using type = float;
 };
 
-template <typename T>
-struct real_t_impl<std::complex<T>>
+template <>
+struct real_t_impl<std::complex<double>>
 {
-    using type = T;
+    using type = double;
 };
 
 template <typename T>
 using real_t = typename real_t_impl<T>::type;
 
+// Using std::complex for host-side on the client, but need hipComplex for calls to hipblas
+template <typename T>
+struct hipblas_internal_type_impl
+{
+    using type = T;
+};
+
+template <>
+struct hipblas_internal_type_impl<std::complex<float>>
+{
+    using type = hipblasComplex;
+};
+
+template <>
+struct hipblas_internal_type_impl<std::complex<double>>
+{
+    using type = hipblasDoubleComplex;
+};
+
+template <typename T>
+using hipblas_internal_type = typename hipblas_internal_type_impl<T>::type;
+
 // Conjugate a value. For most types, simply return argument; for
-// hipblasComplex and hipblasDoubleComplex, return std::conj(z)
+// std::complex<float> and std::complex<double>, return std::conj(z)
 template <typename T, std::enable_if_t<!is_complex<T>, int> = 0>
 __device__ __host__ inline T hipblas_conjugate(const T& z)
 {
@@ -235,7 +257,7 @@ __device__ __host__ inline T hipblas_conjugate(const T& z)
     return std::conj(z);
 }
 
-// hipblasComplex and hipblasDoubleComplex, return real
+// std::complex<float> and std::complex<double>, return real
 template <typename T, std::enable_if_t<!is_complex<T>, int> = 0>
 __device__ __host__ inline T hipblas_real(const T& z)
 {

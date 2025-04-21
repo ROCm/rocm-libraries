@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -117,7 +117,7 @@ public:
     //!
     //! @brief Decay into pointer wherever pointer is expected.
     //!
-    operator T*()
+    operator hipblas_internal_type<T>*()
     {
         return m_data;
     }
@@ -125,7 +125,7 @@ public:
     //!
     //! @brief Decay into constant pointer wherever pointer is expected.
     //!
-    operator const T*() const
+    operator const hipblas_internal_type<T>*() const
     {
         return m_data;
     }
@@ -138,7 +138,7 @@ public:
     hipError_t transfer_from(const host_matrix<T>& that)
     {
         return hipMemcpy(m_data,
-                         (const T*)that,
+                         (const hipblas_internal_type<T>*)that.data(),
                          this->nmemb() * sizeof(T),
                          this->use_HMM ? hipMemcpyHostToHost : hipMemcpyHostToDevice);
     }
@@ -149,8 +149,8 @@ public:
     }
 
 private:
-    size_t m_m   = 0;
-    size_t m_n   = 0;
-    size_t m_lda = 0;
-    T*     m_data{};
+    size_t                    m_m   = 0;
+    size_t                    m_n   = 0;
+    size_t                    m_lda = 0;
+    hipblas_internal_type<T>* m_data{};
 };

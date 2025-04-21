@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -40,6 +40,7 @@ inline void testname_axpy_strided_batched(const Arguments& arg, std::string& nam
 template <typename T>
 void testing_axpy_strided_batched_bad_arg(const Arguments& arg)
 {
+    using Ts     = hipblas_internal_type<T>;
     bool FORTRAN = arg.api == hipblas_client_api::FORTRAN;
     auto hipblasAxpyStridedBatchedFn
         = FORTRAN ? hipblasAxpyStridedBatched<T, true> : hipblasAxpyStridedBatched<T, false>;
@@ -63,9 +64,9 @@ void testing_axpy_strided_batched_bad_arg(const Arguments& arg)
         device_strided_batch_vector<T> dx(N, incx, stride_x, batch_count);
         device_strided_batch_vector<T> dy(N, incy, stride_y, batch_count);
 
-        const T  h_alpha(1), h_zero(0);
-        const T* alpha = &h_alpha;
-        const T* zero  = &h_zero;
+        const Ts  h_alpha(1), h_zero(0);
+        const Ts* alpha = &h_alpha;
+        const Ts* zero  = &h_zero;
 
         if(pointer_mode == HIPBLAS_POINTER_MODE_DEVICE)
         {
@@ -111,6 +112,7 @@ void testing_axpy_strided_batched_bad_arg(const Arguments& arg)
 template <typename T>
 void testing_axpy_strided_batched(const Arguments& arg)
 {
+    using Ts     = hipblas_internal_type<T>;
     bool FORTRAN = arg.api == hipblas_client_api::FORTRAN;
     auto hipblasAxpyStridedBatchedFn
         = FORTRAN ? hipblasAxpyStridedBatched<T, true> : hipblasAxpyStridedBatched<T, false>;
@@ -186,7 +188,16 @@ void testing_axpy_strided_batched(const Arguments& arg)
 
         CHECK_HIPBLAS_ERROR(hipblasSetPointerMode(handle, HIPBLAS_POINTER_MODE_HOST));
         DAPI_CHECK(hipblasAxpyStridedBatchedFn,
-                   (handle, N, &alpha, dx, incx, stride_x, dy, incy, stride_y, batch_count));
+                   (handle,
+                    N,
+                    reinterpret_cast<Ts*>(&alpha),
+                    dx,
+                    incx,
+                    stride_x,
+                    dy,
+                    incy,
+                    stride_y,
+                    batch_count));
 
         // copy output from device to CPU
         CHECK_HIP_ERROR(hy_host.transfer_from(dy));

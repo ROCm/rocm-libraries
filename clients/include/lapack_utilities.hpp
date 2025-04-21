@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -82,7 +82,7 @@ void lapack_xcombssq(T* ssq, T* colssq)
 {
     if(ssq[0] >= colssq[0])
     {
-        if(ssq[0] != 0)
+        if(ssq[0] != T(0))
         {
             ssq[1] = ssq[1] + std::sqrt(colssq[0] / ssq[0]) * colssq[1];
         }
@@ -358,7 +358,7 @@ void lapack_xrotg(T& ca, T& cb, U& c, T& s)
         const U norm  = scale
                        * std::sqrt((hipblas_abs(ca / scale)) * (hipblas_abs(ca / scale))
                                    + (hipblas_abs(cb / scale)) * (hipblas_abs(cb / scale)));
-        T alpha = ca / hipblas_abs(ca);
+        T alpha = ca / T(hipblas_abs(ca));
         c       = hipblas_abs(ca) / norm;
         s       = alpha * hipblas_conjugate(cb) / norm;
         ca      = alpha * norm;
@@ -375,7 +375,7 @@ void lapack_xrotg(T& ca, T& cb, U& c, T& s)
 template <typename T>
 void lapack_xsyr(hipblasFillMode_t uplo, int64_t n, T alpha, T* xa, int64_t incx, T* A, int64_t lda)
 {
-    if(n <= 0 || alpha == 0)
+    if(n <= 0 || alpha == T(0))
         return;
 
     T* x = (incx < 0) ? xa - ptrdiff_t(incx) * (n - 1) : xa;
@@ -423,7 +423,7 @@ void lapack_xsymv(hipblasFillMode_t uplo,
     T* x = (incx < 0) ? xa - incx * (n - 1) : xa;
     T* y = (incy < 0) ? ya - incy * (n - 1) : ya;
 
-    if(beta != 1)
+    if(beta != T(1))
     {
         for(int64_t j = 0; j < n; j++)
         {
@@ -431,7 +431,7 @@ void lapack_xsymv(hipblasFillMode_t uplo,
         }
     }
 
-    if(alpha == 0)
+    if(alpha == T(0))
         return;
 
     T temp1 = T(0);
@@ -471,7 +471,7 @@ void lapack_xsymv(hipblasFillMode_t uplo,
 template <typename T>
 void lapack_xspr(hipblasFillMode_t uplo, int64_t n, T alpha, T* xa, int64_t incx, T* A)
 {
-    if(n <= 0 || alpha == 0)
+    if(n <= 0 || alpha == T(0))
         return;
 
     T*      x  = (incx < 0) ? xa - incx * (n - 1) : xa;
@@ -481,7 +481,7 @@ void lapack_xspr(hipblasFillMode_t uplo, int64_t n, T alpha, T* xa, int64_t incx
     {
         for(int64_t j = 0; j < n; ++j)
         {
-            if(x[j * incx] != 0)
+            if(x[j * incx] != T(0))
             {
                 tmpx = alpha * x[j * incx];
                 k    = kk;
@@ -499,7 +499,7 @@ void lapack_xspr(hipblasFillMode_t uplo, int64_t n, T alpha, T* xa, int64_t incx
     {
         for(int64_t j = 0; j < n; ++j)
         {
-            if(x[j * incx] != 0)
+            if(x[j * incx] != T(0))
             {
                 tmpx = alpha * x[j * incx];
                 A[kk] += x[j * incx] * tmpx;
@@ -527,7 +527,7 @@ inline void lapack_xsyr2(hipblasFillMode_t uplo,
                          T*                A,
                          int64_t           lda)
 {
-    if(n <= 0 || alpha == 0)
+    if(n <= 0 || alpha == T(0))
         return;
 
     T* x = (incx < 0) ? xa - incx * (n - 1) : xa;

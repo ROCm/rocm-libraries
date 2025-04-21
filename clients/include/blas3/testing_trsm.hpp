@@ -50,6 +50,7 @@ inline void testname_trsm(const Arguments& arg, std::string& name)
 template <typename T>
 void testing_trsm_bad_arg(const Arguments& arg)
 {
+    using Ts           = hipblas_internal_type<T>;
     auto hipblasTrsmFn = arg.api == FORTRAN ? hipblasTrsm<T, true> : hipblasTrsm<T, false>;
     auto hipblasTrsmFn_64
         = arg.api == FORTRAN_64 ? hipblasTrsm_64<T, true> : hipblasTrsm_64<T, false>;
@@ -72,10 +73,10 @@ void testing_trsm_bad_arg(const Arguments& arg)
     device_matrix<T> dB(M, N, ldb);
 
     device_vector<T> d_alpha(1), d_zero(1);
-    const T          h_alpha(1), h_zero(0);
+    const Ts         h_alpha(1), h_zero(0);
 
-    const T* alpha = &h_alpha;
-    const T* zero  = &h_zero;
+    const Ts* alpha = &h_alpha;
+    const Ts* zero  = &h_zero;
 
     for(auto pointer_mode : {HIPBLAS_POINTER_MODE_HOST, HIPBLAS_POINTER_MODE_DEVICE})
     {
@@ -199,6 +200,7 @@ void testing_trsm_bad_arg(const Arguments& arg)
 template <typename T>
 void testing_trsm(const Arguments& arg)
 {
+    using Ts           = hipblas_internal_type<T>;
     auto hipblasTrsmFn = arg.api == FORTRAN ? hipblasTrsm<T, true> : hipblasTrsm<T, false>;
     auto hipblasTrsmFn_64
         = arg.api == FORTRAN_64 ? hipblasTrsm_64<T, true> : hipblasTrsm_64<T, false>;
@@ -280,7 +282,18 @@ void testing_trsm(const Arguments& arg)
     {
         CHECK_HIPBLAS_ERROR(hipblasSetPointerMode(handle, HIPBLAS_POINTER_MODE_HOST));
         DAPI_CHECK(hipblasTrsmFn,
-                   (handle, side, uplo, transA, diag, M, N, &h_alpha, dA, lda, dB, ldb));
+                   (handle,
+                    side,
+                    uplo,
+                    transA,
+                    diag,
+                    M,
+                    N,
+                    reinterpret_cast<Ts*>(&h_alpha),
+                    dA,
+                    lda,
+                    dB,
+                    ldb));
 
         CHECK_HIP_ERROR(hB_host.transfer_from(dB));
         CHECK_HIP_ERROR(dB.transfer_from(hB_device));

@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -40,6 +40,7 @@ inline void testname_scal_batched_ex(const Arguments& arg, std::string& name)
 template <typename Ta, typename Tx = Ta, typename Tex = Tx>
 void testing_scal_batched_ex_bad_arg(const Arguments& arg)
 {
+    using Ts = hipblas_internal_type<Ta>;
     auto hipblasScalBatchedExFn
         = arg.api == FORTRAN ? hipblasScalBatchedExFortran : hipblasScalBatchedEx;
     auto hipblasScalBatchedExFn_64
@@ -52,7 +53,7 @@ void testing_scal_batched_ex_bad_arg(const Arguments& arg)
     int64_t N           = 100;
     int64_t incx        = 1;
     int64_t batch_count = 2;
-    Ta      alpha       = (Ta)0.6;
+    Ts      alpha       = (Ts)0.6;
 
     hipblasLocalHandle handle(arg);
 
@@ -102,6 +103,7 @@ void testing_scal_batched_ex_bad_arg(const Arguments& arg)
 template <typename Ta, typename Tx = Ta, typename Tex = Tx>
 void testing_scal_batched_ex(const Arguments& arg)
 {
+    using Ts = hipblas_internal_type<Ta>;
     auto hipblasScalBatchedExFn
         = arg.api == FORTRAN ? hipblasScalBatchedExFortran : hipblasScalBatchedEx;
     auto hipblasScalBatchedExFn_64
@@ -168,7 +170,7 @@ void testing_scal_batched_ex(const Arguments& arg)
         DAPI_CHECK(hipblasScalBatchedExFn,
                    (handle,
                     N,
-                    &h_alpha,
+                    reinterpret_cast<Ts*>(&h_alpha),
                     alphaType,
                     dx.ptr_on_device(),
                     xType,

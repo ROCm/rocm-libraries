@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2023 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -90,7 +90,7 @@ namespace
           || BLAS1 == blas1::iamin_batched || BLAS1 == blas1::iamin_strided_batched)
          && std::is_same_v<
              Ti,
-             To> && std::is_same_v<To, Tc> && (std::is_same_v<Ti, hipblasComplex> || std::is_same_v<Ti, hipblasDoubleComplex> || std::is_same_v<Ti, float> || std::is_same_v<Ti, double>))>;
+             To> && std::is_same_v<To, Tc> && (std::is_same_v<Ti, std::complex<float>> || std::is_same_v<Ti, std::complex<double>> || std::is_same_v<Ti, float> || std::is_same_v<Ti, double>))>;
 
 // Creates tests for one of the BLAS 1 functions
 // ARG passes 1-3 template arguments to the testing_* function

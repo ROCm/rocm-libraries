@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -91,10 +91,10 @@ template <>
 HIPBLAS_CLANG_STATIC constexpr double error_tolerance<hipblasHalf> = 0.000061035;
 
 template <>
-HIPBLAS_CLANG_STATIC constexpr double error_tolerance<hipblasComplex> = 1 / 10000.0;
+HIPBLAS_CLANG_STATIC constexpr double error_tolerance<std::complex<float>> = 1 / 10000.0;
 
 template <>
-HIPBLAS_CLANG_STATIC constexpr double error_tolerance<hipblasDoubleComplex> = 1 / 1000000.0;
+HIPBLAS_CLANG_STATIC constexpr double error_tolerance<std::complex<double>> = 1 / 1000000.0;
 
 // currently only used for gemm_ex
 template <class Tc, class Ti, class To>
@@ -122,12 +122,14 @@ HIPBLAS_CLANG_STATIC constexpr double
 
 template <>
 HIPBLAS_CLANG_STATIC constexpr double
-    sum_error_tolerance_for_gfx11<hipblasComplex, hipblasComplex, hipblasComplex> = 1 / 10000.0;
+    sum_error_tolerance_for_gfx11<std::complex<float>,
+                                  std::complex<float>,
+                                  std::complex<float>> = 1 / 10000.0;
 
 template <>
 HIPBLAS_CLANG_STATIC constexpr double
-    sum_error_tolerance_for_gfx11<hipblasDoubleComplex,
-                                  hipblasDoubleComplex,
-                                  hipblasDoubleComplex> = 1 / 1000000.0;
+    sum_error_tolerance_for_gfx11<std::complex<double>,
+                                  std::complex<double>,
+                                  std::complex<double>> = 1 / 1000000.0;
 
 #endif

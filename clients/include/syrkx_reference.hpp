@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2023 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -81,7 +81,7 @@ void syrkx_reference(hipblasFillMode_t  uplo,
     }
 
     // quick return
-    if((n == 0) || (((alpha == 0) || (k == 0)) && (beta == 1)))
+    if((n == 0) || (((alpha == T(0)) || (k == 0)) && (beta == T(1))))
         return;
 
     // rank kx update with special cases for alpha == 0, beta == 0
@@ -91,11 +91,11 @@ void syrkx_reference(hipblasFillMode_t  uplo,
         int i2_end   = HIPBLAS_FILL_MODE_LOWER == uplo ? i1 + 1 : n;
         for(int i2 = i2_start; i2 < i2_end; i2++)
         {
-            if(alpha == 0 && beta == 0)
+            if(alpha == T(0) && beta == T(0))
             {
                 c[i1 * c_s1 + i2 * c_s2] = 0.0;
             }
-            else if(alpha == 0)
+            else if(alpha == T(0))
             {
                 c[i1 * c_s1 + i2 * c_s2] *= beta;
             }
