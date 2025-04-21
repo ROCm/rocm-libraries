@@ -282,12 +282,12 @@ rocsparse_status rocsparse_spgeam_buffer_size(rocsparse_handle            handle
 *   // Set the transpose operation for sparses matrix A and B on the descriptor
 *   const rocsparse_operation trans_A = rocsparse_operation_none;
 *   const rocsparse_operation trans_B = rocsparse_operation_none;
-*   rocsparse_spgeam_set_input(handle, descr, rocsparse_spgeam_input_trans_A, &trans_A, sizeof(trans_A));
-*   rocsparse_spgeam_set_input(handle, descr, rocsparse_spgeam_input_trans_B, &trans_B, sizeof(trans_B));
+*   rocsparse_spgeam_set_input(handle, descr, rocsparse_spgeam_input_operation_A, &trans_A, sizeof(trans_A));
+*   rocsparse_spgeam_set_input(handle, descr, rocsparse_spgeam_input_operation_B, &trans_B, sizeof(trans_B));
 *
 *   // Set the compute type on the descriptor
 *   const rocsparse_datatype datatype = rocsparse_datatype_f32_r;
-*   rocsparse_spgeam_set_input(handle, descr, rocsparse_spgeam_input_compute_type, &datatype, sizeof(datatype));
+*   rocsparse_spgeam_set_input(handle, descr, rocsparse_spgeam_input_compute_datatype, &datatype, sizeof(datatype));
 *
 *   // Calculate NNZ phase
 *   size_t buffer_size_in_bytes;

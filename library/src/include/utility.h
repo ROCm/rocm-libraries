@@ -757,9 +757,9 @@ namespace rocsparse
         switch(value_)
         {
         case rocsparse_spgeam_input_alg:
-        case rocsparse_spgeam_input_compute_type:
-        case rocsparse_spgeam_input_trans_A:
-        case rocsparse_spgeam_input_trans_B:
+        case rocsparse_spgeam_input_compute_datatype:
+        case rocsparse_spgeam_input_operation_A:
+        case rocsparse_spgeam_input_operation_B:
         {
             return false;
         }

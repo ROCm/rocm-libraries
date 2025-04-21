@@ -923,9 +923,9 @@ typedef enum rocsparse_spgeam_stage_
 typedef enum rocsparse_spgeam_input_
 {
     rocsparse_spgeam_input_alg, /**< Select algorithm for input on SpGEAM descriptor. */
-    rocsparse_spgeam_input_compute_type, /**< Select compute type for input on SpGEAM descriptor. */
-    rocsparse_spgeam_input_trans_A, /**< Select A matrix transpose operation for input on SpGEAM descriptor. */
-    rocsparse_spgeam_input_trans_B /**< Select B matrix transpose operation for input on SpGEAM descriptor. */
+    rocsparse_spgeam_input_compute_datatype, /**< Select compute data type for input on SpGEAM descriptor. */
+    rocsparse_spgeam_input_operation_A, /**< Select A matrix transpose operation for input on SpGEAM descriptor. */
+    rocsparse_spgeam_input_operation_B /**< Select B matrix transpose operation for input on SpGEAM descriptor. */
 } rocsparse_spgeam_input;
 
 /*! \ingroup types_module

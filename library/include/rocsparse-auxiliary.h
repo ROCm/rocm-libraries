@@ -1343,24 +1343,23 @@ rocsparse_status rocsparse_destroy_spgeam_descr(rocsparse_spgeam_descr descr);
  *  @param[inout]
  *  descr       the pointer to the SpGEAM descriptor.
  *  @param[in]
- *  input       \ref rocsparse_spgeam_input_alg or \ref rocsparse_spgeam_input_compute_type or
- *              \ref rocsparse_spgeam_input_trans_A or \ref rocsparse_spgeam_input_trans_B
+ *  input       one of the values from \ref rocsparse_spgeam_input
  *  @param[in]
  *  data        input data
  *  @param[in]
- *  data_size   input data size.
+ *  data_size_in_bytes   input data size.
  *
  *  \retval rocsparse_status_success the operation completed successfully.
  *  \retval rocsparse_status_invalid_pointer if \p descr or \p data is invalid.
  *  \retval rocsparse_status_invalid_value if \p input is invalid.
- *  \retval rocsparse_status_invalid_size if \p data_size is invalid.
+ *  \retval rocsparse_status_invalid_size if \p data_size_in_bytes is invalid.
  */
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_spgeam_set_input(rocsparse_handle       handle,
                                             rocsparse_spgeam_descr descr,
                                             rocsparse_spgeam_input input,
                                             const void*            data,
-                                            size_t                 data_size);
+                                            size_t                 data_size_in_bytes);
 
 /*! \ingroup aux_module
  *  \brief Get the requested \ref rocsparse_spgeam_output data from the SpGEAM descriptor
@@ -1374,19 +1373,19 @@ rocsparse_status rocsparse_spgeam_set_input(rocsparse_handle       handle,
  *  @param[in]
  *  data        output data
  *  @param[in]
- *  data_size   output data size.
+ *  data_size_in_bytes   output data size.
  *
  *  \retval rocsparse_status_success the operation completed successfully.
  *  \retval rocsparse_status_invalid_pointer if \p descr or \p data is invalid.
  *  \retval rocsparse_status_invalid_value if \p output is invalid.
- *  \retval rocsparse_status_invalid_size if \p data_size is invalid.
+ *  \retval rocsparse_status_invalid_size if \p data_size_in_bytes is invalid.
  */
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_spgeam_get_output(rocsparse_handle        handle,
                                              rocsparse_spgeam_descr  descr,
                                              rocsparse_spgeam_output output,
                                              void*                   data,
-                                             size_t                  data_size);
+                                             size_t                  data_size_in_bytes);
 
 /*! \ingroup aux_module
  *  \brief Get the fields of the sparse COO matrix descriptor

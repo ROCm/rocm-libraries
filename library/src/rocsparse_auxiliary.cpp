@@ -4836,7 +4836,7 @@ rocsparse_status rocsparse_spgeam_set_input(rocsparse_handle       handle,
                                             rocsparse_spgeam_descr descr,
                                             rocsparse_spgeam_input input,
                                             const void*            data,
-                                            size_t                 data_size)
+                                            size_t                 data_size_in_bytes)
 try
 {
     ROCSPARSE_ROUTINE_TRACE;
@@ -4850,32 +4850,40 @@ try
     {
     case rocsparse_spgeam_input_alg:
     {
-        ROCSPARSE_CHECKARG(
-            4, data_size, data_size != sizeof(rocsparse_spgeam_alg), rocsparse_status_invalid_size);
+        ROCSPARSE_CHECKARG(4,
+                           data_size_in_bytes,
+                           data_size_in_bytes != sizeof(rocsparse_spgeam_alg),
+                           rocsparse_status_invalid_size);
         const rocsparse_spgeam_alg alg = *reinterpret_cast<const rocsparse_spgeam_alg*>(data);
         descr->alg                     = alg;
         return rocsparse_status_success;
     }
-    case rocsparse_spgeam_input_compute_type:
+    case rocsparse_spgeam_input_compute_datatype:
     {
-        ROCSPARSE_CHECKARG(
-            4, data_size, data_size != sizeof(rocsparse_datatype), rocsparse_status_invalid_size);
+        ROCSPARSE_CHECKARG(4,
+                           data_size_in_bytes,
+                           data_size_in_bytes != sizeof(rocsparse_datatype),
+                           rocsparse_status_invalid_size);
         const rocsparse_datatype compute_type = *reinterpret_cast<const rocsparse_datatype*>(data);
         descr->compute_type                   = compute_type;
         return rocsparse_status_success;
     }
-    case rocsparse_spgeam_input_trans_A:
+    case rocsparse_spgeam_input_operation_A:
     {
-        ROCSPARSE_CHECKARG(
-            4, data_size, data_size != sizeof(rocsparse_operation), rocsparse_status_invalid_size);
+        ROCSPARSE_CHECKARG(4,
+                           data_size_in_bytes,
+                           data_size_in_bytes != sizeof(rocsparse_operation),
+                           rocsparse_status_invalid_size);
         const rocsparse_operation trans_A = *reinterpret_cast<const rocsparse_operation*>(data);
         descr->trans_A                    = trans_A;
         return rocsparse_status_success;
     }
-    case rocsparse_spgeam_input_trans_B:
+    case rocsparse_spgeam_input_operation_B:
     {
-        ROCSPARSE_CHECKARG(
-            4, data_size, data_size != sizeof(rocsparse_operation), rocsparse_status_invalid_size);
+        ROCSPARSE_CHECKARG(4,
+                           data_size_in_bytes,
+                           data_size_in_bytes != sizeof(rocsparse_operation),
+                           rocsparse_status_invalid_size);
         const rocsparse_operation trans_B = *reinterpret_cast<const rocsparse_operation*>(data);
         descr->trans_B                    = trans_B;
         return rocsparse_status_success;
@@ -4895,7 +4903,7 @@ rocsparse_status rocsparse_spgeam_get_output(rocsparse_handle        handle,
                                              rocsparse_spgeam_descr  descr,
                                              rocsparse_spgeam_output output,
                                              void*                   data,
-                                             size_t                  data_size)
+                                             size_t                  data_size_in_bytes)
 try
 {
     ROCSPARSE_ROUTINE_TRACE;
@@ -4908,8 +4916,10 @@ try
     {
     case rocsparse_spgeam_output_nnz:
     {
-        ROCSPARSE_CHECKARG(
-            4, data_size, data_size != sizeof(int64_t), rocsparse_status_invalid_size);
+        ROCSPARSE_CHECKARG(4,
+                           data_size_in_bytes,
+                           data_size_in_bytes != sizeof(int64_t),
+                           rocsparse_status_invalid_size);
         int64_t* nnz_C = reinterpret_cast<int64_t*>(data);
         *nnz_C         = descr->nnz_C;
         return rocsparse_status_success;

@@ -99,11 +99,11 @@ void testing_spgeam_csr_2(const Arguments& arg)
     CHECK_ROCSPARSE_ERROR(
         rocsparse_spgeam_set_input(handle, descr, rocsparse_spgeam_input_alg, &alg, sizeof(alg)));
     CHECK_ROCSPARSE_ERROR(rocsparse_spgeam_set_input(
-        handle, descr, rocsparse_spgeam_input_trans_A, &trans_A, sizeof(trans_A)));
+        handle, descr, rocsparse_spgeam_input_operation_A, &trans_A, sizeof(trans_A)));
     CHECK_ROCSPARSE_ERROR(rocsparse_spgeam_set_input(
-        handle, descr, rocsparse_spgeam_input_trans_B, &trans_B, sizeof(trans_B)));
+        handle, descr, rocsparse_spgeam_input_operation_B, &trans_B, sizeof(trans_B)));
     CHECK_ROCSPARSE_ERROR(rocsparse_spgeam_set_input(
-        handle, descr, rocsparse_spgeam_input_compute_type, &ttype, sizeof(ttype)));
+        handle, descr, rocsparse_spgeam_input_compute_datatype, &ttype, sizeof(ttype)));
 
     // Calculate NNZ phase
     size_t buffer_size_in_bytes;
