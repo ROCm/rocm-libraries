@@ -20,10 +20,15 @@
  * THE SOFTWARE.
  *
  * ************************************************************************ */
-#include "internal/generic/rocsparse_sddmm.h"
+
+#include <map>
+#include <sstream>
+
 #include "common.h"
 #include "control.h"
 #include "handle.h"
+#include "internal/generic/rocsparse_sddmm.h"
+#include "to_string.hpp"
 #include "utility.h"
 
 #include "rocsparse_sddmm.hpp"
@@ -57,7 +62,7 @@ namespace rocsparse
         // LCOV_EXCL_STOP
     }
 
-    template <typename I, typename J, typename T, typename... Ts>
+    template <typename T, typename I, typename J, typename... Ts>
     static rocsparse_status sddmm_buffer_size_dispatch_format(rocsparse_format    format,
                                                               rocsparse_sddmm_alg alg,
                                                               Ts&&... ts)
@@ -116,97 +121,134 @@ namespace rocsparse
         // LCOV_EXCL_STOP
     }
 
-    template <typename... Ts>
-    static rocsparse_status sddmm_buffer_size_dispatch(rocsparse_format    format,
-                                                       rocsparse_indextype itype,
-                                                       rocsparse_indextype jtype,
-                                                       rocsparse_datatype  ctype,
-                                                       rocsparse_sddmm_alg alg,
-                                                       Ts&&... ts)
+    template <typename T, typename I, typename J>
+    static rocsparse_status sddmm_buffer_size_dispatch(rocsparse_format            format,
+                                                       rocsparse_sddmm_alg         algorithm,
+                                                       rocsparse_handle            handle,
+                                                       rocsparse_operation         trans_A,
+                                                       rocsparse_operation         trans_B,
+                                                       const void*                 alpha,
+                                                       rocsparse_const_dnmat_descr mat_A,
+                                                       rocsparse_const_dnmat_descr mat_B,
+                                                       const void*                 beta,
+                                                       const rocsparse_spmat_descr mat_C,
+                                                       rocsparse_datatype          compute_type,
+                                                       rocsparse_sddmm_alg         alg,
+                                                       size_t*                     buffer_size)
     {
         ROCSPARSE_ROUTINE_TRACE;
 
-        switch(ctype)
-        {
-
-#define DATATYPE_CASE(ENUMVAL, TYPE)                                                       \
-    case ENUMVAL:                                                                          \
-    {                                                                                      \
-        switch(itype)                                                                      \
-        {                                                                                  \
-        case rocsparse_indextype_u16:                                                      \
-        {                                                                                  \
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);                   \
-        }                                                                                  \
-        case rocsparse_indextype_i32:                                                      \
-        {                                                                                  \
-            switch(jtype)                                                                  \
-            {                                                                              \
-            case rocsparse_indextype_u16:                                                  \
-            case rocsparse_indextype_i64:                                                  \
-            {                                                                              \
-                RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);               \
-            }                                                                              \
-            case rocsparse_indextype_i32:                                                  \
-            {                                                                              \
-                RETURN_IF_ROCSPARSE_ERROR(                                                 \
-                    (rocsparse::sddmm_buffer_size_dispatch_format<int32_t, int32_t, TYPE>( \
-                        format, alg, ts...)));                                             \
-                return rocsparse_status_success;                                           \
-            }                                                                              \
-            }                                                                              \
-        }                                                                                  \
-        case rocsparse_indextype_i64:                                                      \
-        {                                                                                  \
-            switch(jtype)                                                                  \
-            {                                                                              \
-            case rocsparse_indextype_u16:                                                  \
-            {                                                                              \
-                RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);               \
-            }                                                                              \
-            case rocsparse_indextype_i32:                                                  \
-            {                                                                              \
-                RETURN_IF_ROCSPARSE_ERROR(                                                 \
-                    (rocsparse::sddmm_buffer_size_dispatch_format<int64_t, int32_t, TYPE>( \
-                        format, alg, ts...)));                                             \
-                return rocsparse_status_success;                                           \
-            }                                                                              \
-            case rocsparse_indextype_i64:                                                  \
-            {                                                                              \
-                RETURN_IF_ROCSPARSE_ERROR(                                                 \
-                    (rocsparse::sddmm_buffer_size_dispatch_format<int64_t, int64_t, TYPE>( \
-                        format, alg, ts...)));                                             \
-                return rocsparse_status_success;                                           \
-            }                                                                              \
-            }                                                                              \
-        }                                                                                  \
-        }                                                                                  \
+        return sddmm_buffer_size_dispatch_format<T, I, J>(format,
+                                                          algorithm,
+                                                          handle,
+                                                          trans_A,
+                                                          trans_B,
+                                                          alpha,
+                                                          mat_A,
+                                                          mat_B,
+                                                          beta,
+                                                          mat_C,
+                                                          compute_type,
+                                                          alg,
+                                                          buffer_size);
     }
 
-            DATATYPE_CASE(rocsparse_datatype_f32_r, float);
-            DATATYPE_CASE(rocsparse_datatype_f64_r, double);
-            DATATYPE_CASE(rocsparse_datatype_f32_c, rocsparse_float_complex);
-            DATATYPE_CASE(rocsparse_datatype_f64_c, rocsparse_double_complex);
-            //DATATYPE_CASE(rocsparse_datatype_i8_r, int8_t);
-            //DATATYPE_CASE(rocsparse_datatype_u8_r, uint8_t);
-            //DATATYPE_CASE(rocsparse_datatype_i32_r, int32_t);
-            //DATATYPE_CASE(rocsparse_datatype_u32_r, uint32_t);
+    typedef rocsparse_status (*sddmm_buffer_size_template_t)(rocsparse_format            format,
+                                                             rocsparse_sddmm_alg         algorithm,
+                                                             rocsparse_handle            handle,
+                                                             rocsparse_operation         trans_A,
+                                                             rocsparse_operation         trans_B,
+                                                             const void*                 alpha,
+                                                             rocsparse_const_dnmat_descr mat_A,
+                                                             rocsparse_const_dnmat_descr mat_B,
+                                                             const void*                 beta,
+                                                             const rocsparse_spmat_descr mat_C,
+                                                             rocsparse_datatype  compute_type,
+                                                             rocsparse_sddmm_alg alg,
+                                                             size_t*             buffer_size);
 
-        case rocsparse_datatype_i8_r:
-        case rocsparse_datatype_u8_r:
-        case rocsparse_datatype_i32_r:
-        case rocsparse_datatype_u32_r:
-        case rocsparse_datatype_f16_r:
+    using sddmm_buffer_size_template_tuple
+        = std::tuple<rocsparse_datatype, rocsparse_indextype, rocsparse_indextype>;
+
+    // clang-format off
+#define SDDMM_BUFFER_SIZE_TEMPLATE_CONFIG(T_, I_, J_)                                    \
+    {                                                                                    \
+        sddmm_buffer_size_template_tuple(T_, I_, J_),                                    \
+            sddmm_buffer_size_dispatch<typename rocsparse::datatype_traits<T_>::type_t,  \
+                                       typename rocsparse::indextype_traits<I_>::type_t, \
+                                       typename rocsparse::indextype_traits<J_>::type_t> \
+    }
+    // clang-format on
+
+    static const std::map<sddmm_buffer_size_template_tuple, sddmm_buffer_size_template_t>
+        s_sddmm_buffer_size_template_dispatch{{
+
+            SDDMM_BUFFER_SIZE_TEMPLATE_CONFIG(
+                rocsparse_datatype_f32_r, rocsparse_indextype_i32, rocsparse_indextype_i32),
+
+            SDDMM_BUFFER_SIZE_TEMPLATE_CONFIG(
+                rocsparse_datatype_f32_r, rocsparse_indextype_i64, rocsparse_indextype_i32),
+
+            SDDMM_BUFFER_SIZE_TEMPLATE_CONFIG(
+                rocsparse_datatype_f32_r, rocsparse_indextype_i64, rocsparse_indextype_i64),
+
+            SDDMM_BUFFER_SIZE_TEMPLATE_CONFIG(
+                rocsparse_datatype_f64_r, rocsparse_indextype_i32, rocsparse_indextype_i32),
+
+            SDDMM_BUFFER_SIZE_TEMPLATE_CONFIG(
+                rocsparse_datatype_f64_r, rocsparse_indextype_i64, rocsparse_indextype_i32),
+
+            SDDMM_BUFFER_SIZE_TEMPLATE_CONFIG(
+                rocsparse_datatype_f64_r, rocsparse_indextype_i64, rocsparse_indextype_i64),
+
+            SDDMM_BUFFER_SIZE_TEMPLATE_CONFIG(
+                rocsparse_datatype_f64_c, rocsparse_indextype_i32, rocsparse_indextype_i32),
+
+            SDDMM_BUFFER_SIZE_TEMPLATE_CONFIG(
+                rocsparse_datatype_f64_c, rocsparse_indextype_i64, rocsparse_indextype_i32),
+
+            SDDMM_BUFFER_SIZE_TEMPLATE_CONFIG(
+                rocsparse_datatype_f64_c, rocsparse_indextype_i64, rocsparse_indextype_i64),
+
+            SDDMM_BUFFER_SIZE_TEMPLATE_CONFIG(
+                rocsparse_datatype_f32_c, rocsparse_indextype_i32, rocsparse_indextype_i32),
+
+            SDDMM_BUFFER_SIZE_TEMPLATE_CONFIG(
+                rocsparse_datatype_f32_c, rocsparse_indextype_i64, rocsparse_indextype_i32),
+
+            SDDMM_BUFFER_SIZE_TEMPLATE_CONFIG(
+                rocsparse_datatype_f32_c, rocsparse_indextype_i64, rocsparse_indextype_i64)}};
+
+    static rocsparse_status
+        sddmm_buffer_size_template_find(sddmm_buffer_size_template_t* sddmm_buffer_size_function_,
+                                        rocsparse_datatype            compute_type_,
+                                        rocsparse_indextype           i_type_,
+                                        rocsparse_indextype           j_type_)
+    {
+        const auto& it = rocsparse::s_sddmm_buffer_size_template_dispatch.find(
+            rocsparse::sddmm_buffer_size_template_tuple(compute_type_, i_type_, j_type_));
+
+        if(it != rocsparse::s_sddmm_buffer_size_template_dispatch.end())
         {
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+            sddmm_buffer_size_function_[0] = it->second;
         }
         // LCOV_EXCL_START
-#undef DATATYPE_CASE
-        }
+        else
+        {
+            std::stringstream sstr;
+            sstr << "invalid precision configuration: "
+                 << "compute_type: " << rocsparse::to_string(compute_type_)
+                 << ", i_type: " << rocsparse::to_string(i_type_)
+                 << ", j_type: " << rocsparse::to_string(j_type_);
 
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+            RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value,
+                                                   sstr.str().c_str());
+        }
         // LCOV_EXCL_STOP
+
+        return rocsparse_status_success;
     }
+
 }
 
 extern "C" rocsparse_status rocsparse_sddmm_buffer_size(rocsparse_handle            handle,
@@ -271,24 +313,26 @@ try
                        (trans_B == rocsparse_operation_conjugate_transpose),
                        rocsparse_status_not_implemented);
 
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse::sddmm_buffer_size_dispatch(
-        C->format,
-        (C->format == rocsparse_format_csc) ? C->col_type : C->row_type,
-        (C->format == rocsparse_format_csc) ? C->row_type : C->col_type,
-        compute_type,
-        alg,
-        //
-        handle,
-        trans_A,
-        trans_B,
-        alpha,
-        A,
-        B,
-        beta,
-        C,
-        compute_type,
-        alg,
-        buffer_size));
+    rocsparse::sddmm_buffer_size_template_t sddmm_buffer_size_function;
+    RETURN_IF_ROCSPARSE_ERROR(
+        rocsparse::sddmm_buffer_size_template_find(&sddmm_buffer_size_function,
+                                                   compute_type,
+                                                   rocsparse::determine_I_index_type(C),
+                                                   rocsparse::determine_J_index_type(C)));
+
+    RETURN_IF_ROCSPARSE_ERROR(sddmm_buffer_size_function(C->format,
+                                                         alg,
+                                                         handle,
+                                                         trans_A,
+                                                         trans_B,
+                                                         alpha,
+                                                         A,
+                                                         B,
+                                                         beta,
+                                                         C,
+                                                         compute_type,
+                                                         alg,
+                                                         buffer_size));
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }
@@ -300,7 +344,7 @@ catch(...)
 
 namespace rocsparse
 {
-    template <rocsparse_format FORMAT, typename I, typename J, typename T, typename... Ts>
+    template <rocsparse_format FORMAT, typename T, typename I, typename J, typename... Ts>
     static rocsparse_status sddmm_preprocess_dispatch_alg(rocsparse_sddmm_alg alg, Ts&&... ts)
     {
         ROCSPARSE_ROUTINE_TRACE;
@@ -327,7 +371,7 @@ namespace rocsparse
         // LCOV_EXCL_STOP
     }
 
-    template <typename I, typename J, typename T, typename... Ts>
+    template <typename T, typename I, typename J, typename... Ts>
     static rocsparse_status sddmm_preprocess_dispatch_format(rocsparse_format    format,
                                                              rocsparse_sddmm_alg alg,
                                                              Ts&&... ts)
@@ -339,7 +383,7 @@ namespace rocsparse
         case rocsparse_format_coo:
         {
             RETURN_IF_ROCSPARSE_ERROR(
-                (rocsparse::sddmm_preprocess_dispatch_alg<rocsparse_format_coo, I, I, T>(alg,
+                (rocsparse::sddmm_preprocess_dispatch_alg<rocsparse_format_coo, T, I, I>(alg,
                                                                                          ts...)));
             return rocsparse_status_success;
         }
@@ -347,7 +391,7 @@ namespace rocsparse
         case rocsparse_format_csr:
         {
             RETURN_IF_ROCSPARSE_ERROR(
-                (rocsparse::sddmm_preprocess_dispatch_alg<rocsparse_format_csr, I, J, T>(alg,
+                (rocsparse::sddmm_preprocess_dispatch_alg<rocsparse_format_csr, T, I, J>(alg,
                                                                                          ts...)));
             return rocsparse_status_success;
         }
@@ -355,7 +399,7 @@ namespace rocsparse
         case rocsparse_format_coo_aos:
         {
             RETURN_IF_ROCSPARSE_ERROR(
-                (rocsparse::sddmm_preprocess_dispatch_alg<rocsparse_format_coo_aos, I, I, T>(
+                (rocsparse::sddmm_preprocess_dispatch_alg<rocsparse_format_coo_aos, T, I, I>(
                     alg, ts...)));
             return rocsparse_status_success;
         }
@@ -363,7 +407,7 @@ namespace rocsparse
         case rocsparse_format_csc:
         {
             RETURN_IF_ROCSPARSE_ERROR(
-                (rocsparse::sddmm_preprocess_dispatch_alg<rocsparse_format_csc, I, J, T>(alg,
+                (rocsparse::sddmm_preprocess_dispatch_alg<rocsparse_format_csc, T, I, J>(alg,
                                                                                          ts...)));
             return rocsparse_status_success;
         }
@@ -371,7 +415,7 @@ namespace rocsparse
         case rocsparse_format_ell:
         {
             RETURN_IF_ROCSPARSE_ERROR(
-                (rocsparse::sddmm_preprocess_dispatch_alg<rocsparse_format_ell, I, I, T>(alg,
+                (rocsparse::sddmm_preprocess_dispatch_alg<rocsparse_format_ell, T, I, I>(alg,
                                                                                          ts...)));
             return rocsparse_status_success;
         }
@@ -390,95 +434,132 @@ namespace rocsparse
         // LCOV_EXCL_STOP
     }
 
-    template <typename... Ts>
-    static rocsparse_status sddmm_preprocess_dispatch(rocsparse_format    format,
-                                                      rocsparse_indextype itype,
-                                                      rocsparse_indextype jtype,
-                                                      rocsparse_datatype  ctype,
-                                                      rocsparse_sddmm_alg alg,
-                                                      Ts&&... ts)
+    template <typename T, typename I, typename J>
+    static rocsparse_status sddmm_preprocess_dispatch(rocsparse_format            format,
+                                                      rocsparse_sddmm_alg         algorithm,
+                                                      rocsparse_handle            handle,
+                                                      rocsparse_operation         trans_A,
+                                                      rocsparse_operation         trans_B,
+                                                      const void*                 alpha,
+                                                      rocsparse_const_dnmat_descr mat_A,
+                                                      rocsparse_const_dnmat_descr mat_B,
+                                                      const void*                 beta,
+                                                      const rocsparse_spmat_descr mat_C,
+                                                      rocsparse_datatype          compute_type,
+                                                      rocsparse_sddmm_alg         alg,
+                                                      void*                       buffer)
     {
         ROCSPARSE_ROUTINE_TRACE;
 
-        switch(ctype)
-        {
-#define DATATYPE_CASE(ENUMVAL, TYPE)                                                      \
-    case ENUMVAL:                                                                         \
-    {                                                                                     \
-        switch(itype)                                                                     \
-        {                                                                                 \
-        case rocsparse_indextype_u16:                                                     \
-        {                                                                                 \
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);                  \
-        }                                                                                 \
-        case rocsparse_indextype_i32:                                                     \
-        {                                                                                 \
-            switch(jtype)                                                                 \
-            {                                                                             \
-            case rocsparse_indextype_u16:                                                 \
-            case rocsparse_indextype_i64:                                                 \
-            {                                                                             \
-                RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);              \
-            }                                                                             \
-            case rocsparse_indextype_i32:                                                 \
-            {                                                                             \
-                RETURN_IF_ROCSPARSE_ERROR(                                                \
-                    (rocsparse::sddmm_preprocess_dispatch_format<int32_t, int32_t, TYPE>( \
-                        format, alg, ts...)));                                            \
-                return rocsparse_status_success;                                          \
-            }                                                                             \
-            }                                                                             \
-        }                                                                                 \
-        case rocsparse_indextype_i64:                                                     \
-        {                                                                                 \
-            switch(jtype)                                                                 \
-            {                                                                             \
-            case rocsparse_indextype_u16:                                                 \
-            {                                                                             \
-                RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);              \
-            }                                                                             \
-            case rocsparse_indextype_i32:                                                 \
-            {                                                                             \
-                RETURN_IF_ROCSPARSE_ERROR(                                                \
-                    (rocsparse::sddmm_preprocess_dispatch_format<int64_t, int32_t, TYPE>( \
-                        format, alg, ts...)));                                            \
-                return rocsparse_status_success;                                          \
-            }                                                                             \
-            case rocsparse_indextype_i64:                                                 \
-            {                                                                             \
-                RETURN_IF_ROCSPARSE_ERROR(                                                \
-                    (rocsparse::sddmm_preprocess_dispatch_format<int64_t, int64_t, TYPE>( \
-                        format, alg, ts...)));                                            \
-                return rocsparse_status_success;                                          \
-            }                                                                             \
-            }                                                                             \
-        }                                                                                 \
-        }                                                                                 \
+        return sddmm_preprocess_dispatch_format<T, I, J>(format,
+                                                         algorithm,
+                                                         handle,
+                                                         trans_A,
+                                                         trans_B,
+                                                         alpha,
+                                                         mat_A,
+                                                         mat_B,
+                                                         beta,
+                                                         mat_C,
+                                                         compute_type,
+                                                         alg,
+                                                         buffer);
     }
 
-            DATATYPE_CASE(rocsparse_datatype_f32_r, float);
-            DATATYPE_CASE(rocsparse_datatype_f64_r, double);
-            DATATYPE_CASE(rocsparse_datatype_f32_c, rocsparse_float_complex);
-            DATATYPE_CASE(rocsparse_datatype_f64_c, rocsparse_double_complex);
-            //DATATYPE_CASE(rocsparse_datatype_i8_r, int8_t);
-            //DATATYPE_CASE(rocsparse_datatype_u8_r, uint8_t);
-            //DATATYPE_CASE(rocsparse_datatype_i32_r, int32_t);
-            //DATATYPE_CASE(rocsparse_datatype_u32_r, uint32_t);
+    typedef rocsparse_status (*sddmm_preprocess_template_t)(rocsparse_format            format,
+                                                            rocsparse_sddmm_alg         algorithm,
+                                                            rocsparse_handle            handle,
+                                                            rocsparse_operation         trans_A,
+                                                            rocsparse_operation         trans_B,
+                                                            const void*                 alpha,
+                                                            rocsparse_const_dnmat_descr mat_A,
+                                                            rocsparse_const_dnmat_descr mat_B,
+                                                            const void*                 beta,
+                                                            const rocsparse_spmat_descr mat_C,
+                                                            rocsparse_datatype  compute_type,
+                                                            rocsparse_sddmm_alg alg,
+                                                            void*               buffer);
 
-        case rocsparse_datatype_i8_r:
-        case rocsparse_datatype_u8_r:
-        case rocsparse_datatype_i32_r:
-        case rocsparse_datatype_u32_r:
-        case rocsparse_datatype_f16_r:
+    using sddmm_preprocess_template_tuple
+        = std::tuple<rocsparse_datatype, rocsparse_indextype, rocsparse_indextype>;
+
+    // clang-format off
+#define SDDMM_PREPROCESS_TEMPLATE_CONFIG(T_, I_, J_)                                    \
+    {                                                                                   \
+        sddmm_preprocess_template_tuple(T_, I_, J_),                                    \
+            sddmm_preprocess_dispatch<typename rocsparse::datatype_traits<T_>::type_t,  \
+                                      typename rocsparse::indextype_traits<I_>::type_t, \
+                                      typename rocsparse::indextype_traits<J_>::type_t> \
+    }
+    // clang-format on
+
+    static const std::map<sddmm_preprocess_template_tuple, sddmm_preprocess_template_t>
+        s_sddmm_preprocess_template_dispatch{{
+
+            SDDMM_PREPROCESS_TEMPLATE_CONFIG(
+                rocsparse_datatype_f32_r, rocsparse_indextype_i32, rocsparse_indextype_i32),
+
+            SDDMM_PREPROCESS_TEMPLATE_CONFIG(
+                rocsparse_datatype_f32_r, rocsparse_indextype_i64, rocsparse_indextype_i32),
+
+            SDDMM_PREPROCESS_TEMPLATE_CONFIG(
+                rocsparse_datatype_f32_r, rocsparse_indextype_i64, rocsparse_indextype_i64),
+
+            SDDMM_PREPROCESS_TEMPLATE_CONFIG(
+                rocsparse_datatype_f64_r, rocsparse_indextype_i32, rocsparse_indextype_i32),
+
+            SDDMM_PREPROCESS_TEMPLATE_CONFIG(
+                rocsparse_datatype_f64_r, rocsparse_indextype_i64, rocsparse_indextype_i32),
+
+            SDDMM_PREPROCESS_TEMPLATE_CONFIG(
+                rocsparse_datatype_f64_r, rocsparse_indextype_i64, rocsparse_indextype_i64),
+
+            SDDMM_PREPROCESS_TEMPLATE_CONFIG(
+                rocsparse_datatype_f64_c, rocsparse_indextype_i32, rocsparse_indextype_i32),
+
+            SDDMM_PREPROCESS_TEMPLATE_CONFIG(
+                rocsparse_datatype_f64_c, rocsparse_indextype_i64, rocsparse_indextype_i32),
+
+            SDDMM_PREPROCESS_TEMPLATE_CONFIG(
+                rocsparse_datatype_f64_c, rocsparse_indextype_i64, rocsparse_indextype_i64),
+
+            SDDMM_PREPROCESS_TEMPLATE_CONFIG(
+                rocsparse_datatype_f32_c, rocsparse_indextype_i32, rocsparse_indextype_i32),
+
+            SDDMM_PREPROCESS_TEMPLATE_CONFIG(
+                rocsparse_datatype_f32_c, rocsparse_indextype_i64, rocsparse_indextype_i32),
+
+            SDDMM_PREPROCESS_TEMPLATE_CONFIG(
+                rocsparse_datatype_f32_c, rocsparse_indextype_i64, rocsparse_indextype_i64)}};
+
+    static rocsparse_status
+        sddmm_preprocess_template_find(sddmm_preprocess_template_t* sddmm_preprocess_function_,
+                                       rocsparse_datatype           compute_type_,
+                                       rocsparse_indextype          i_type_,
+                                       rocsparse_indextype          j_type_)
+    {
+        const auto& it = rocsparse::s_sddmm_preprocess_template_dispatch.find(
+            rocsparse::sddmm_preprocess_template_tuple(compute_type_, i_type_, j_type_));
+
+        if(it != rocsparse::s_sddmm_preprocess_template_dispatch.end())
         {
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+            sddmm_preprocess_function_[0] = it->second;
         }
         // LCOV_EXCL_START
-#undef DATATYPE_CASE
-        }
+        else
+        {
+            std::stringstream sstr;
+            sstr << "invalid precision configuration: "
+                 << "compute_type: " << rocsparse::to_string(compute_type_)
+                 << ", i_type: " << rocsparse::to_string(i_type_)
+                 << ", j_type: " << rocsparse::to_string(j_type_);
 
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+            RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value,
+                                                   sstr.str().c_str());
+        }
         // LCOV_EXCL_STOP
+
+        return rocsparse_status_success;
     }
 }
 
@@ -547,24 +628,27 @@ try
         return rocsparse_status_success;
     }
 
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse::sddmm_preprocess_dispatch(
-        C->format,
-        (C->format == rocsparse_format_csc) ? C->col_type : C->row_type,
-        (C->format == rocsparse_format_csc) ? C->row_type : C->col_type,
-        compute_type,
-        alg,
-        //
-        handle,
-        trans_A,
-        trans_B,
-        alpha,
-        A,
-        B,
-        beta,
-        C,
-        compute_type,
-        alg,
-        temp_buffer));
+    rocsparse::sddmm_preprocess_template_t sddmm_preprocess_function;
+    RETURN_IF_ROCSPARSE_ERROR(
+        rocsparse::sddmm_preprocess_template_find(&sddmm_preprocess_function,
+                                                  compute_type,
+                                                  rocsparse::determine_I_index_type(C),
+                                                  rocsparse::determine_J_index_type(C)));
+
+    RETURN_IF_ROCSPARSE_ERROR(sddmm_preprocess_function(C->format,
+                                                        alg,
+                                                        handle,
+                                                        trans_A,
+                                                        trans_B,
+                                                        alpha,
+                                                        A,
+                                                        B,
+                                                        beta,
+                                                        C,
+                                                        compute_type,
+                                                        alg,
+                                                        temp_buffer));
+
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }
@@ -576,7 +660,7 @@ catch(...)
 
 namespace rocsparse
 {
-    template <rocsparse_format FORMAT, typename I, typename J, typename T, typename... Ts>
+    template <rocsparse_format FORMAT, typename T, typename I, typename J, typename... Ts>
     static rocsparse_status sddmm_dispatch_alg(rocsparse_sddmm_alg alg, Ts&&... ts)
     {
         ROCSPARSE_ROUTINE_TRACE;
@@ -601,7 +685,7 @@ namespace rocsparse
         // LCOV_EXCL_STOP
     }
 
-    template <typename I, typename J, typename T, typename... Ts>
+    template <typename T, typename I, typename J, typename... Ts>
     static rocsparse_status
         sddmm_dispatch_format(rocsparse_format format, rocsparse_sddmm_alg alg, Ts&&... ts)
     {
@@ -612,14 +696,14 @@ namespace rocsparse
         case rocsparse_format_coo:
         {
             RETURN_IF_ROCSPARSE_ERROR(
-                (rocsparse::sddmm_dispatch_alg<rocsparse_format_coo, I, I, T>(alg, ts...)));
+                (rocsparse::sddmm_dispatch_alg<rocsparse_format_coo, T, I, I>(alg, ts...)));
             return rocsparse_status_success;
         }
 
         case rocsparse_format_csr:
         {
             RETURN_IF_ROCSPARSE_ERROR(
-                (rocsparse::sddmm_dispatch_alg<rocsparse_format_csr, I, J, T>(alg, ts...)));
+                (rocsparse::sddmm_dispatch_alg<rocsparse_format_csr, T, I, J>(alg, ts...)));
             return rocsparse_status_success;
         }
 
@@ -627,21 +711,21 @@ namespace rocsparse
         {
 
             RETURN_IF_ROCSPARSE_ERROR(
-                (rocsparse::sddmm_dispatch_alg<rocsparse_format_coo_aos, I, I, T>(alg, ts...)));
+                (rocsparse::sddmm_dispatch_alg<rocsparse_format_coo_aos, T, I, I>(alg, ts...)));
             return rocsparse_status_success;
         }
 
         case rocsparse_format_csc:
         {
             RETURN_IF_ROCSPARSE_ERROR(
-                (rocsparse::sddmm_dispatch_alg<rocsparse_format_csc, I, J, T>(alg, ts...)));
+                (rocsparse::sddmm_dispatch_alg<rocsparse_format_csc, T, I, J>(alg, ts...)));
             return rocsparse_status_success;
         }
 
         case rocsparse_format_ell:
         {
             RETURN_IF_ROCSPARSE_ERROR(
-                (rocsparse::sddmm_dispatch_alg<rocsparse_format_ell, I, I, T>(alg, ts...)));
+                (rocsparse::sddmm_dispatch_alg<rocsparse_format_ell, T, I, I>(alg, ts...)));
             return rocsparse_status_success;
         }
 
@@ -659,96 +743,130 @@ namespace rocsparse
         // LCOV_EXCL_STOP
     }
 
-    template <typename... Ts>
-    static rocsparse_status sddmm_dispatch(rocsparse_format    format,
-                                           rocsparse_indextype itype,
-                                           rocsparse_indextype jtype,
-                                           rocsparse_datatype  ctype,
-                                           rocsparse_sddmm_alg alg,
-                                           Ts&&... ts)
+    template <typename T, typename I, typename J>
+    static rocsparse_status sddmm_dispatch(rocsparse_format            format,
+                                           rocsparse_sddmm_alg         algorithm,
+                                           rocsparse_handle            handle,
+                                           rocsparse_operation         trans_A,
+                                           rocsparse_operation         trans_B,
+                                           const void*                 alpha,
+                                           rocsparse_const_dnmat_descr mat_A,
+                                           rocsparse_const_dnmat_descr mat_B,
+                                           const void*                 beta,
+                                           const rocsparse_spmat_descr mat_C,
+                                           rocsparse_datatype          compute_type,
+                                           rocsparse_sddmm_alg         alg,
+                                           void*                       buffer)
     {
         ROCSPARSE_ROUTINE_TRACE;
 
-        switch(ctype)
-        {
-
-#define DATATYPE_CASE(ENUMVAL, TYPE)                                           \
-    case ENUMVAL:                                                              \
-    {                                                                          \
-        switch(itype)                                                          \
-        {                                                                      \
-        case rocsparse_indextype_u16:                                          \
-        {                                                                      \
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);       \
-        }                                                                      \
-        case rocsparse_indextype_i32:                                          \
-        {                                                                      \
-            switch(jtype)                                                      \
-            {                                                                  \
-            case rocsparse_indextype_u16:                                      \
-            case rocsparse_indextype_i64:                                      \
-            {                                                                  \
-                RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);   \
-            }                                                                  \
-            case rocsparse_indextype_i32:                                      \
-            {                                                                  \
-                RETURN_IF_ROCSPARSE_ERROR(                                     \
-                    (rocsparse::sddmm_dispatch_format<int32_t, int32_t, TYPE>( \
-                        format, alg, ts...)));                                 \
-                return rocsparse_status_success;                               \
-            }                                                                  \
-            }                                                                  \
-        }                                                                      \
-        case rocsparse_indextype_i64:                                          \
-        {                                                                      \
-            switch(jtype)                                                      \
-            {                                                                  \
-            case rocsparse_indextype_u16:                                      \
-            {                                                                  \
-                RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);   \
-            }                                                                  \
-            case rocsparse_indextype_i32:                                      \
-            {                                                                  \
-                RETURN_IF_ROCSPARSE_ERROR(                                     \
-                    (rocsparse::sddmm_dispatch_format<int64_t, int32_t, TYPE>( \
-                        format, alg, ts...)));                                 \
-                return rocsparse_status_success;                               \
-            }                                                                  \
-            case rocsparse_indextype_i64:                                      \
-            {                                                                  \
-                RETURN_IF_ROCSPARSE_ERROR(                                     \
-                    (rocsparse::sddmm_dispatch_format<int64_t, int64_t, TYPE>( \
-                        format, alg, ts...)));                                 \
-                return rocsparse_status_success;                               \
-            }                                                                  \
-            }                                                                  \
-        }                                                                      \
-        }                                                                      \
+        return sddmm_dispatch_format<T, I, J>(format,
+                                              algorithm,
+                                              handle,
+                                              trans_A,
+                                              trans_B,
+                                              alpha,
+                                              mat_A,
+                                              mat_B,
+                                              beta,
+                                              mat_C,
+                                              compute_type,
+                                              alg,
+                                              buffer);
     }
 
-            DATATYPE_CASE(rocsparse_datatype_f32_r, float);
-            DATATYPE_CASE(rocsparse_datatype_f64_r, double);
-            DATATYPE_CASE(rocsparse_datatype_f32_c, rocsparse_float_complex);
-            DATATYPE_CASE(rocsparse_datatype_f64_c, rocsparse_double_complex);
-            //DATATYPE_CASE(rocsparse_datatype_i8_r, int8_t);
-            //DATATYPE_CASE(rocsparse_datatype_u8_r, uint8_t);
-            //DATATYPE_CASE(rocsparse_datatype_i32_r, int32_t);
-            //DATATYPE_CASE(rocsparse_datatype_u32_r, uint32_t);
+    typedef rocsparse_status (*sddmm_template_t)(rocsparse_format            format,
+                                                 rocsparse_sddmm_alg         algorithm,
+                                                 rocsparse_handle            handle,
+                                                 rocsparse_operation         trans_A,
+                                                 rocsparse_operation         trans_B,
+                                                 const void*                 alpha,
+                                                 rocsparse_const_dnmat_descr mat_A,
+                                                 rocsparse_const_dnmat_descr mat_B,
+                                                 const void*                 beta,
+                                                 const rocsparse_spmat_descr mat_C,
+                                                 rocsparse_datatype          compute_type,
+                                                 rocsparse_sddmm_alg         alg,
+                                                 void*                       buffer);
 
-        case rocsparse_datatype_i8_r:
-        case rocsparse_datatype_u8_r:
-        case rocsparse_datatype_i32_r:
-        case rocsparse_datatype_u32_r:
-        case rocsparse_datatype_f16_r:
+    using sddmm_template_tuple
+        = std::tuple<rocsparse_datatype, rocsparse_indextype, rocsparse_indextype>;
+
+    // clang-format off
+#define SDDMM_TEMPLATE_CONFIG(T_, I_, J_)                                    \
+    {                                                                        \
+        sddmm_template_tuple(T_, I_, J_),                                    \
+            sddmm_dispatch<typename rocsparse::datatype_traits<T_>::type_t,  \
+                           typename rocsparse::indextype_traits<I_>::type_t, \
+                           typename rocsparse::indextype_traits<J_>::type_t> \
+    }
+    // clang-format on
+
+    static const std::map<sddmm_template_tuple, sddmm_template_t> s_sddmm_template_dispatch{{
+
+        SDDMM_TEMPLATE_CONFIG(
+            rocsparse_datatype_f32_r, rocsparse_indextype_i32, rocsparse_indextype_i32),
+
+        SDDMM_TEMPLATE_CONFIG(
+            rocsparse_datatype_f32_r, rocsparse_indextype_i64, rocsparse_indextype_i32),
+
+        SDDMM_TEMPLATE_CONFIG(
+            rocsparse_datatype_f32_r, rocsparse_indextype_i64, rocsparse_indextype_i64),
+
+        SDDMM_TEMPLATE_CONFIG(
+            rocsparse_datatype_f64_r, rocsparse_indextype_i32, rocsparse_indextype_i32),
+
+        SDDMM_TEMPLATE_CONFIG(
+            rocsparse_datatype_f64_r, rocsparse_indextype_i64, rocsparse_indextype_i32),
+
+        SDDMM_TEMPLATE_CONFIG(
+            rocsparse_datatype_f64_r, rocsparse_indextype_i64, rocsparse_indextype_i64),
+
+        SDDMM_TEMPLATE_CONFIG(
+            rocsparse_datatype_f64_c, rocsparse_indextype_i32, rocsparse_indextype_i32),
+
+        SDDMM_TEMPLATE_CONFIG(
+            rocsparse_datatype_f64_c, rocsparse_indextype_i64, rocsparse_indextype_i32),
+
+        SDDMM_TEMPLATE_CONFIG(
+            rocsparse_datatype_f64_c, rocsparse_indextype_i64, rocsparse_indextype_i64),
+
+        SDDMM_TEMPLATE_CONFIG(
+            rocsparse_datatype_f32_c, rocsparse_indextype_i32, rocsparse_indextype_i32),
+
+        SDDMM_TEMPLATE_CONFIG(
+            rocsparse_datatype_f32_c, rocsparse_indextype_i64, rocsparse_indextype_i32),
+
+        SDDMM_TEMPLATE_CONFIG(
+            rocsparse_datatype_f32_c, rocsparse_indextype_i64, rocsparse_indextype_i64)}};
+
+    static rocsparse_status sddmm_template_find(sddmm_template_t*   sddmm_function_,
+                                                rocsparse_datatype  compute_type_,
+                                                rocsparse_indextype i_type_,
+                                                rocsparse_indextype j_type_)
+    {
+        const auto& it = rocsparse::s_sddmm_template_dispatch.find(
+            rocsparse::sddmm_template_tuple(compute_type_, i_type_, j_type_));
+
+        if(it != rocsparse::s_sddmm_template_dispatch.end())
         {
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+            sddmm_function_[0] = it->second;
         }
-
         // LCOV_EXCL_START
-#undef DATATYPE_CASE
+        else
+        {
+            std::stringstream sstr;
+            sstr << "invalid precision configuration: "
+                 << "compute_type: " << rocsparse::to_string(compute_type_)
+                 << ", i_type: " << rocsparse::to_string(i_type_)
+                 << ", j_type: " << rocsparse::to_string(j_type_);
+
+            RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value,
+                                                   sstr.str().c_str());
         }
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
         // LCOV_EXCL_STOP
+
+        return rocsparse_status_success;
     }
 }
 
@@ -818,24 +936,26 @@ try
         return rocsparse_status_success;
     }
 
-    RETURN_IF_ROCSPARSE_ERROR(
-        rocsparse::sddmm_dispatch(C->format,
-                                  (C->format == rocsparse_format_csc) ? C->col_type : C->row_type,
-                                  (C->format == rocsparse_format_csc) ? C->row_type : C->col_type,
-                                  compute_type,
-                                  alg,
-                                  //
-                                  handle,
-                                  trans_A,
-                                  trans_B,
-                                  alpha,
-                                  A,
-                                  B,
-                                  beta,
-                                  C,
-                                  compute_type,
-                                  alg,
-                                  temp_buffer));
+    rocsparse::sddmm_template_t sddmm_function;
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::sddmm_template_find(&sddmm_function,
+                                                             compute_type,
+                                                             rocsparse::determine_I_index_type(C),
+                                                             rocsparse::determine_J_index_type(C)));
+
+    RETURN_IF_ROCSPARSE_ERROR(sddmm_function(C->format,
+                                             alg,
+                                             handle,
+                                             trans_A,
+                                             trans_B,
+                                             alpha,
+                                             A,
+                                             B,
+                                             beta,
+                                             C,
+                                             compute_type,
+                                             alg,
+                                             temp_buffer));
+
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }
