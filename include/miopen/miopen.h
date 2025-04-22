@@ -8229,7 +8229,7 @@ MIOPEN_EXPORT miopenStatus_t miopenMultiMarginLossForward(miopenHandle_t handle,
 /*! @ingroup handle
  * @enum miopenTuningPolicy_t
  * Tuning policy for MIOpen Find-related calls.
- * Imitates MIOpenFindEnforce but MIOPEN_FIND_ENFORCE has higher priority than TuningPolicy
+ * Imitates MIOpenFindEnforce but TuningPolicy has higher priority over MIOPEN_FIND_ENFORCE.
  */
 typedef enum
 {

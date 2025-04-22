@@ -67,6 +67,9 @@ auto FindSolutionImpl(rank<1>,
         if(options && options->find_enforce)
             return *options->find_enforce;
         const auto& handle = context.GetStream();
+        // If the tuning policy is explicitly set (not miopenTuningPolicyNone), it overrides the
+        // value of MIOPEN_FIND_ENFORCE. Otherwise, the value of MIOPEN_FIND_ENFORCE from the
+        // environment variable is used.
         if(handle.GetTuningPolicy() != miopenTuningPolicyNone)
             return FindEnforce{static_cast<FindEnforceAction>(handle.GetTuningPolicy())};
         return FindEnforce{};
