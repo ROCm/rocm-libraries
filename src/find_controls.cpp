@@ -61,7 +61,7 @@ static_assert(FindEnforceAction::DbUpdate ==
 static_assert(FindEnforceAction::Search ==
               static_cast<FindEnforceAction>(miopenTuningPolicySearch));
 static_assert(FindEnforceAction::SearchDbUpdate ==
-              static_cast<FindEnforceAction>(miopenTuningPolicySearchDnUpdate));
+              static_cast<FindEnforceAction>(miopenTuningPolicySearchDbUpdate));
 static_assert(FindEnforceAction::DbClean ==
               static_cast<FindEnforceAction>(miopenTuningPolicyDbClean));
 
