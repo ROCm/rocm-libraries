@@ -27,6 +27,7 @@
 #include "rocsparselt_spmm.hpp"
 #include "definitions.h"
 #include "handle.h"
+#include "status.h"
 #include "rocsparselt_spmm_utils.hpp"
 #include "utility.hpp"
 
@@ -165,15 +166,35 @@ rocsparselt_status rocsparselt_matmul_impl(const char*                    caller
         return rocsparselt_status_invalid_pointer;
     }
 
-    size_t workspaceSize
-        = _plan->alg_selection->config_max_id == 0
-              ? 0
-              : _plan->alg_selection->configs[_plan->alg_selection->config_id].max_workspace_bytes;
-    if(workspace == nullptr && workspaceSize != 0)
+    size_t workspaceSize = 0;
+    if(search)
+    {
+        for(int id = 0; id < _plan->alg_selection->config_max_id; id++)
+        {
+            workspaceSize = max(workspaceSize, _plan->alg_selection->configs[id].max_workspace_bytes);
+        }
+    }
+    else
+    {
+        workspaceSize = _plan->alg_selection->config_max_id == 0
+                    ? 0
+                    : _plan->alg_selection->configs[_plan->alg_selection->config_id].max_workspace_bytes;
+    }
+
+    size_t workspaceSizeIn = 0;
+    // Only check the input workspace's allocated size when the input workspace is going to be used.
+    if(workspace != nullptr && workspaceSize != 0)
+    {
+        RETURN_IF_HIP_ERROR(hipMemPtrGetInfo(workspace, &workspaceSizeIn));
+        workspaceSizeIn = min(workspaceSizeIn, workspaceSize);
+    }
+
+    // If search is enabled, it will search avaiable solutions with input workspace size.
+    if(!search && workspaceSizeIn < workspaceSize)
     {
         hipsparselt_cerr << "The parameter number 9 (workspace) had an illegal value "
                             "expected a device memroy with "
-                         << workspaceSize << " bytes, but current is nullptr" << std::endl;
+                         << workspaceSize << " bytes, but current is " << workspaceSizeIn << " bytes."<< std::endl;
         log_error(_handle, caller, "expected workspace is not a NULL pointer");
         return rocsparselt_status_invalid_value;
     }
@@ -200,8 +221,8 @@ rocsparselt_status rocsparselt_matmul_impl(const char*                    caller
     int config_max_id     = _plan->alg_selection->config_max_id;
     int search_iterations = search ? _plan->alg_selection->search_iterations : 0; //default
 
-#define EX_PARM                                                                              \
-    caller, _handle, _plan, alpha, beta, d_A, d_B, d_C, d_D, workspace, streams, numStreams, \
+#define EX_PARM                                                                                               \
+    caller, _handle, _plan, alpha, beta, d_A, d_B, d_C, d_D, workspace, workspaceSizeIn, streams, numStreams, \
         &config_id, config_max_id, search_iterations
 
     log_api(_handle,
@@ -223,7 +244,7 @@ rocsparselt_status rocsparselt_matmul_impl(const char*                    caller
             "workspace[in]",
             workspace,
             "workspaceSize[in]",
-            workspaceSize,
+            workspaceSizeIn,
             "streams[in]",
             streams,
             "numStreams[in]",

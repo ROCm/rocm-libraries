@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2022-2024 Advanced Micro Devices, Inc.
+ * Copyright (c) 2022-2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -50,6 +50,7 @@ rocsparselt_status spmm_typecasting(const char*                     caller,
                                     const void*                     c,
                                     void*                           d,
                                     void*                           workspace,
+                                    size_t                          workspaceSize,
                                     hipStream_t*                    streams,
                                     int32_t                         numStreams,
                                     int*                            config_id,
@@ -78,9 +79,7 @@ rocsparselt_status spmm_typecasting(const char*                     caller,
         (To*)d,
         true,
         workspace,
-        plan->alg_selection->config_max_id == 0
-            ? 0
-            : plan->alg_selection->configs[plan->alg_selection->config_id].max_workspace_bytes,
+        workspaceSize,
         streams,
         numStreams);
 
@@ -110,6 +109,7 @@ inline rocsparselt_status rocsparselt_spmm_template(const char*                 
                                                     const void*                     c,
                                                     void*                           d,
                                                     void*                           workspace,
+                                                    size_t                          workspaceSize,
                                                     hipStream_t*                    streams,
                                                     int32_t                         numStreams,
                                                     int*                            config_id,
@@ -118,8 +118,8 @@ inline rocsparselt_status rocsparselt_spmm_template(const char*                 
 {
     rocsparselt_status rs_status = rocsparselt_status_not_implemented;
 
-#define EX_TYPECASTING_PARM                                                                   \
-    caller, handle, plan, alpha, beta, a, b, c, d, workspace, streams, numStreams, config_id, \
+#define EX_TYPECASTING_PARM                                                                                  \
+    caller, handle, plan, alpha, beta, a, b, c, d, workspace, workspaceSize, streams, numStreams, config_id, \
         config_max_id, search_iterations
 
     hipDataType              a_type       = plan->matmul_descr->matrix_A->type;

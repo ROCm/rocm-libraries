@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2022-2024 Advanced Micro Devices, Inc.
+ * Copyright (c) 2022-2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -80,7 +80,7 @@ namespace
         return 0;
     }
 #endif
-    
+
     std::string rocsparselt_internal_get_so_path(const std::string& keyword)
     {
         std::pair<std::string, std::string> result{"", keyword};
@@ -925,7 +925,7 @@ rocsparselt_status runContractionProblem(const RocsparseltContractionProblem<Ti,
                    || (configs[*config_id].max_workspace_bytes > 0 && prob.workspace == nullptr))
                 {
                     hipsparselt_cerr << "config " << *config_id << " need extra workspace "
-                                     << configs[*config_id].max_workspace_bytes << " bytes - skip."
+                                     << configs[*config_id].max_workspace_bytes << " bytes."
                                      << std::endl;
                     return rocsparselt_status_internal_error;
                 }
