@@ -89,6 +89,7 @@ rocsparse_arguments_config::rocsparse_arguments_config()
         this->orderC          = static_cast<rocsparse_order>(0);
         this->formatA         = static_cast<rocsparse_format>(0);
         this->formatB         = static_cast<rocsparse_format>(0);
+        this->formatC         = static_cast<rocsparse_format>(0);
 
         this->itilu0_alg           = rocsparse_itilu0_alg_default;
         this->sddmm_alg            = rocsparse_sddmm_alg_default;
@@ -344,7 +345,7 @@ void rocsparse_arguments_config::set_description(options_description& desc)
      value<rocsparse_int>(&this->iters)->default_value(10),
      "Total iterations to run inside timing loop")
 
-     ("iters_inner",
+    ("iters_inner",
       value<rocsparse_int>(&this->iters_inner)->default_value(50),
       "Inner iterations to run inside timing loop")
 
@@ -376,10 +377,6 @@ void rocsparse_arguments_config::set_description(options_description& desc)
      value<rocsparse_int>(&this->b_orderC)->default_value(rocsparse_order_column),
      "Indicates whether a dense matrix is laid out in column-major storage: 1, or row-major storage 0 (default: 1)")
 
-    ("format",
-     value<rocsparse_int>(&this->b_formatA)->default_value(rocsparse_format_coo),
-     "Indicates whether a sparse matrix is laid out in coo format: 0, coo_aos format: 1, csr format: 2, csc format: 3, ell format: 4, bell format: 5, bsr format: 6 (default:0)")
-
     ("formatA",
      value<rocsparse_int>(&this->b_formatA)->default_value(rocsparse_format_coo),
      "Indicates whether a sparse matrix is laid out in coo format: 0, coo_aos format: 1, csr format: 2, csc format: 3, ell format: 4, bell format: 5, bsr format: 6 (default:0)")
@@ -387,6 +384,10 @@ void rocsparse_arguments_config::set_description(options_description& desc)
     ("formatB",
      value<rocsparse_int>(&this->b_formatB)->default_value(rocsparse_format_coo),
      "Indicates whether a sparse matrix is laid out in coo format: 0, coo_aos format: 1, csr format: 2, csc format: 3, ell format: 4, bell format: 5, bsr format: 6 (default:0)")
+
+    ("formatC",
+      value<rocsparse_int>(&this->b_formatC)->default_value(rocsparse_format_coo),
+      "Indicates whether a sparse matrix is laid out in coo format: 0, coo_aos format: 1, csr format: 2, csc format: 3, ell format: 4, bell format: 5, bsr format: 6 (default:0)")
 
     ("denseld",
      value<int64_t>(&this->denseld)->default_value(128),
@@ -461,66 +462,38 @@ int rocsparse_arguments_config::parse(int&argc,char**&argv, options_description&
     return -1;
   }
 
-  if(this->b_order != rocsparse_order_row && this->b_order != rocsparse_order_column)
+  if(rocsparse_order_t::is_invalid(this->b_order))
   {
     std::cerr << "Invalid value for --order" << std::endl;
-    return -1;
   }
 
-  if(this->b_orderB != rocsparse_order_row && this->b_orderB != rocsparse_order_column)
+  if(rocsparse_order_t::is_invalid(this->b_orderB))
   {
     std::cerr << "Invalid value for --orderB" << std::endl;
-    return -1;
   }
 
-  if(this->b_orderC != rocsparse_order_row && this->b_orderC != rocsparse_order_column)
+  if(rocsparse_order_t::is_invalid(this->b_orderC))
   {
     std::cerr << "Invalid value for --orderC" << std::endl;
+  }
+
+  if(rocsparse_format_t::is_invalid(this->b_formatA))
+  {
+    std::cerr << "Invalid value for --formatA" << std::endl;
     return -1;
   }
 
-  { bool is_format_invalid = true;
-    switch(this->b_formatA)
-      {
-      case rocsparse_format_csr:
-      case rocsparse_format_coo:
-      case rocsparse_format_ell:
-      case rocsparse_format_csc:
-      case rocsparse_format_coo_aos:
-      case rocsparse_format_bell:
-      case rocsparse_format_bsr:
-	{
-	  is_format_invalid = false;
-	  break;
-	}
-      }
+  if(rocsparse_format_t::is_invalid(this->b_formatB))
+  {
+    std::cerr << "Invalid value for --formatB" << std::endl;
+    return -1;
+  }
 
-    if(is_format_invalid)
-      {
-	std::cerr << "Invalid value for --format" << std::endl;
-	return -1;
-      } }
-  { bool is_format_invalid = true;
-    switch(this->b_formatB)
-      {
-      case rocsparse_format_csr:
-      case rocsparse_format_coo:
-      case rocsparse_format_ell:
-      case rocsparse_format_csc:
-      case rocsparse_format_coo_aos:
-      case rocsparse_format_bell:
-      case rocsparse_format_bsr:
-	{
-	  is_format_invalid = false;
-	  break;
-	}
-      }
-
-    if(is_format_invalid)
-      {
-	std::cerr << "Invalid value for --formatB" << std::endl;
-	return -1;
-      } }
+  if(rocsparse_format_t::is_invalid(this->b_formatC))
+  {
+    std::cerr << "Invalid value for --formatC" << std::endl;
+    return -1;
+  }
 
   if (rocsparse_itilu0_alg_t::is_invalid(this->b_itilu0_alg))
     {
@@ -632,6 +605,7 @@ int rocsparse_arguments_config::parse(int&argc,char**&argv, options_description&
   this->orderC  = (this->b_orderC == rocsparse_order_row) ? rocsparse_order_row : rocsparse_order_column;
   this->formatA = (rocsparse_format)this->b_formatA;
   this->formatB = (rocsparse_format)this->b_formatB;
+  this->formatC = (rocsparse_format)this->b_formatC;
   this->spmv_alg = (rocsparse_spmv_alg)this->b_spmv_alg;
   this->itilu0_alg = (rocsparse_itilu0_alg)this->b_itilu0_alg;
   this->spmm_alg = (rocsparse_spmm_alg)this->b_spmm_alg;

@@ -122,6 +122,72 @@ struct rocsparse_operation_t
     // clang-format on
 };
 
+struct rocsparse_order_t
+{
+    using value_t                     = rocsparse_order;
+    static constexpr uint32_t nvalues = 2;
+    // clang-format off
+    static constexpr value_t  values[nvalues] = {rocsparse_order_row,
+                                                 rocsparse_order_column};
+    // clang-format on
+
+    static constexpr bool is_invalid(rocsparse_int value_)
+    {
+        return is_invalid((value_t)value_);
+    };
+
+    static constexpr bool is_invalid(value_t value_)
+    {
+        switch(value_)
+        {
+        case rocsparse_order_row:
+        case rocsparse_order_column:
+        {
+            return false;
+        }
+        }
+        return true;
+    }
+};
+
+struct rocsparse_format_t
+{
+    using value_t                     = rocsparse_format;
+    static constexpr uint32_t nvalues = 7;
+    // clang-format off
+    static constexpr value_t  values[nvalues] = {rocsparse_format_coo,
+                                                 rocsparse_format_coo_aos,
+                                                 rocsparse_format_csr,
+                                                 rocsparse_format_csc,
+                                                 rocsparse_format_ell,
+                                                 rocsparse_format_bell,
+                                                 rocsparse_format_bsr};
+    // clang-format on
+
+    static constexpr bool is_invalid(rocsparse_int value_)
+    {
+        return is_invalid((value_t)value_);
+    };
+
+    static constexpr bool is_invalid(value_t value_)
+    {
+        switch(value_)
+        {
+        case rocsparse_format_coo:
+        case rocsparse_format_coo_aos:
+        case rocsparse_format_csr:
+        case rocsparse_format_csc:
+        case rocsparse_format_ell:
+        case rocsparse_format_bell:
+        case rocsparse_format_bsr:
+        {
+            return false;
+        }
+        }
+        return true;
+    }
+};
+
 struct rocsparse_storage_mode_t
 {
     using value_t                     = rocsparse_storage_mode;

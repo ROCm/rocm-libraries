@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -31,7 +31,7 @@ Tests:
   function: check_spmat_bad_arg
   indextype: *i32i32_i64i32_i64i64
   precision: *single_double_precisions_complex_real
-  format: [rocsparse_format_coo,rocsparse_format_csr,rocsparse_format_csc,rocsparse_format_ell,rocsparse_format_bsr]
+  formatA: [rocsparse_format_coo,rocsparse_format_csr,rocsparse_format_csc,rocsparse_format_ell,rocsparse_format_bsr]
 
 - name: check_spmat
   category: quick
@@ -46,7 +46,7 @@ Tests:
   uplo: [rocsparse_fill_mode_lower, rocsparse_fill_mode_upper]
   storage: [rocsparse_storage_mode_sorted, rocsparse_storage_mode_unsorted]
   matrix: [rocsparse_matrix_random]
-  format: [rocsparse_format_coo,rocsparse_format_csr,rocsparse_format_csc,rocsparse_format_ell]
+  formatA: [rocsparse_format_coo,rocsparse_format_csr,rocsparse_format_csc,rocsparse_format_ell]
 
 - name: check_spmat
   category: quick
@@ -61,7 +61,7 @@ Tests:
   uplo: [rocsparse_fill_mode_lower, rocsparse_fill_mode_upper]
   storage: [rocsparse_storage_mode_sorted, rocsparse_storage_mode_unsorted]
   matrix: [rocsparse_matrix_random]
-  format: [rocsparse_format_bsr]
+  formatA: [rocsparse_format_bsr]
 
 - name: check_spmat
   category: pre_checkin
@@ -76,7 +76,7 @@ Tests:
   uplo: [rocsparse_fill_mode_lower, rocsparse_fill_mode_upper]
   storage: [rocsparse_storage_mode_sorted, rocsparse_storage_mode_unsorted]
   matrix: [rocsparse_matrix_random]
-  format: [rocsparse_format_coo,rocsparse_format_csr,rocsparse_format_csc,rocsparse_format_ell]
+  formatA: [rocsparse_format_coo,rocsparse_format_csr,rocsparse_format_csc,rocsparse_format_ell]
 
 - name: check_spmat
   category: pre_checkin
@@ -91,7 +91,7 @@ Tests:
   uplo: [rocsparse_fill_mode_lower, rocsparse_fill_mode_upper]
   storage: [rocsparse_storage_mode_sorted, rocsparse_storage_mode_unsorted]
   matrix: [rocsparse_matrix_random]
-  format: [rocsparse_format_bsr]
+  formatA: [rocsparse_format_bsr]
 
 - name: check_spmat_file
   category: pre_checkin
@@ -112,7 +112,7 @@ Tests:
              nos7,
              mac_econ_fwd500,
              mplate]
-  format: [rocsparse_format_coo,rocsparse_format_csr,rocsparse_format_csc]
+  formatA: [rocsparse_format_coo,rocsparse_format_csr,rocsparse_format_csc]
 
 - name: check_spmat_file
   category: nightly
@@ -136,7 +136,7 @@ Tests:
              Chevron4,
              qc2534,
              rma10]
-  format: [rocsparse_format_coo,rocsparse_format_csr,rocsparse_format_csc]
+  formatA: [rocsparse_format_coo,rocsparse_format_csr,rocsparse_format_csc]
 
 - name: check_spmat_file
   category: pre_checkin
@@ -156,7 +156,7 @@ Tests:
              nos7,
              mac_econ_fwd500,
              mplate]
-  format: [rocsparse_format_bsr]
+  formatA: [rocsparse_format_bsr]
 
 - name: check_spmat_file
   category: pre_checkin
@@ -176,7 +176,7 @@ Tests:
              nos7,
              mac_econ_fwd500,
              mplate]
-  format: [rocsparse_format_ell]
+  formatA: [rocsparse_format_ell]
 
 - name: check_spmat_file
   category: nightly
@@ -200,5 +200,5 @@ Tests:
              qc2534,
              bibd_22_8,
              rma10]
-  format: [rocsparse_format_ell]
+  formatA: [rocsparse_format_ell]
 

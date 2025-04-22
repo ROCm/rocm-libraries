@@ -520,6 +520,7 @@ Arguments:
   - orderC: rocsparse_order
   - formatA: rocsparse_format
   - formatB: rocsparse_format
+  - formatC: rocsparse_format
   - itilu0_alg: rocsparse_itilu0_alg
   - sddmm_alg: rocsparse_sddmm_alg
   - spmv_alg: rocsparse_spmv_alg
@@ -624,6 +625,20 @@ Defaults:
   l: -1
   u: 1
   uu: 2
+  index_type_I: i32
+  index_type_J: i32
+  a_type: f32_r
+  b_type: f32_r
+  c_type: f32_r
+  x_type: f32_r
+  y_type: f32_r
+  compute_type: f32_r
+  A_row_indextype: i32
+  A_col_indextype: i32
+  B_row_indextype: i32
+  B_col_indextype: i32
+  C_row_indextype: i32
+  C_col_indextype: i32
   alpha: 1.0
   alphai: 0.0
   beta: 0.0
@@ -649,9 +664,9 @@ Defaults:
   order: rocsparse_order_column
   orderB: rocsparse_order_column
   orderC: rocsparse_order_column
-  format: rocsparse_format_coo
   formatA: rocsparse_format_coo
   formatB: rocsparse_format_coo
+  formatC: rocsparse_format_coo
   itilu0_alg: rocsparse_itilu0_alg_default
   sddmm_alg: rocsparse_sddmm_alg_default
   spmv_alg: rocsparse_spmv_alg_default
@@ -697,17 +712,3 @@ Defaults:
   req_memory: 4
   filename: '*'
   name: '*'
-  index_type_I: i32
-  index_type_J: i32
-  a_type: f32_r
-  b_type: f32_r
-  c_type: f32_r
-  x_type: f32_r
-  y_type: f32_r
-  compute_type: f32_r
-  A_row_indextype: i32
-  A_col_indextype: i32
-  B_row_indextype: i32
-  B_col_indextype: i32
-  C_row_indextype: i32
-  C_col_indextype: i32
