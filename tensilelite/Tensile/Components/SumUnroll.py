@@ -27,7 +27,7 @@ from rocisa.container import EXEC, vgpr, sgpr
 from ..Component import SumUnroll
 from ..Common import printExit
 from ..TensileInstructions.ExtInstructions import VCvtBF16toFP32
-from ..TensileInstructions import Module, VDot2F32F16, SMovB32, VAddU32, VCmpXEqU32, \
+from ..TensileInstructions import Module, VDot2F32F16,VDot2F32BF16, SMovB32, VAddU32, VCmpXEqU32, \
     VLShiftLeftB32, VMovB32, VAddF32, SBarrier, SDWAModifiers, SelectBit, VCvtPkFP8toF32, VCvtPkBF8toF32, \
     staticMultiply, vectorStaticDivide, vectorStaticRemainder, \
     DSModifiers, SSetMask, DSStoreB16, DSStoreB32, DSStoreB64, \
@@ -57,6 +57,10 @@ class SumUnrollMfma(SumUnroll):
                 writer.defineSgpr("SumUnrollConstOne", 1)
                 imod.add(RegSet("s", "sgprSumUnrollConstOne", writer.sgprs["SumUnrollConstOne"]))
                 imod.add(SMovB32(dst=sgpr("SumUnrollConstOne"), src=hex(0x3c003c00), comment="packed 1.0"))
+            elif kernel["ProblemType"]["DataType"].isBFloat16() and writer.states.asmCaps['v_dot2_f32_bf16']:
+                writer.defineSgpr("SumUnrollConstOne", 1)
+                imod.add(RegSet("s", "sgprSumUnrollConstOne", writer.sgprs["SumUnrollConstOne"]))
+                imod.add(SMovB32(dst=sgpr("SumUnrollConstOne"), src=hex(0x3F803F80), comment="packed 1.0"))
             else:
                 assert "[initSumUnroll] Unsupported data type"
         return imod
@@ -121,10 +125,13 @@ class SumUnrollMfma(SumUnroll):
                     tmpVgpr = writer.vgprPool.checkOutAligned(2,2)
                     if vgprPerInput > 1 and (vgprPerInput % 2 == 0):
                         for inputIdx in range(0, vgprPerInput):
-                            imod.add(VCvtBF16toFP32(dst=(tmpVgpr), src=("%s+%s"%(valuStr, iui_new_offset + inputIdx)), vgprMask=None, vi=0))
-                            imod.add(VCvtBF16toFP32(dst=(tmpVgpr+1), src=("%s+%s"%(valuStr, iui_new_offset + inputIdx)), vgprMask=hiBitsMaskVgpr, vi=1))
-                            imod.add(VAddF32(dst=vgpr(valuSumStr), src0=vgpr(tmpVgpr), src1=vgpr(valuSumStr), comment="sum K"))
-                            imod.add(VAddF32(dst=vgpr(valuSumStr), src0=vgpr(tmpVgpr+1), src1=vgpr(valuSumStr), comment="sum K"))
+                            if writer.states.asmCaps['v_dot2_f32_bf16']:
+                                imod.add(VDot2F32BF16(dst=vgpr(valuSumStr), src0=vgpr("%s+%s"%(valuStr, iui_new_offset + inputIdx)), src1=sgpr("SumUnrollConstOne"), src2=vgpr(valuSumStr), comment="sum K"))
+                            else:
+                                imod.add(VCvtBF16toFP32(dst=(tmpVgpr), src=("%s+%s"%(valuStr, iui_new_offset + inputIdx)), vgprMask=None, vi=0))
+                                imod.add(VCvtBF16toFP32(dst=(tmpVgpr+1), src=("%s+%s"%(valuStr, iui_new_offset + inputIdx)), vgprMask=hiBitsMaskVgpr, vi=1))
+                                imod.add(VAddF32(dst=vgpr(valuSumStr), src0=vgpr(tmpVgpr), src1=vgpr(valuSumStr), comment="sum K"))
+                                imod.add(VAddF32(dst=vgpr(valuSumStr), src0=vgpr(tmpVgpr+1), src1=vgpr(valuSumStr), comment="sum K"))
                     else:
                         printExit("Currently unsupported vgprPerInput %u"%vgprPerInput)
                     writer.vgprPool.checkIn(tmpVgpr)

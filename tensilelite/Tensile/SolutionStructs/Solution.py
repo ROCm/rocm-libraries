@@ -366,9 +366,11 @@ class Solution(collections.abc.Mapping):
           or state["MacroTile1"] != state["MacroTile"][1]:
         reject(state, printRejectionReason, "MacroTile mismatch")
 
-    # dot2: currently only support fp16 with HPA on gfx942
-    state["UseDotInstruction"] = (not state["EnableMatrixInstruction"]) and state["ProblemType"]["DataType"].isHalf() \
-      and state["ProblemType"]["HighPrecisionAccumulate"] and (state["ISA"] == IsaVersion(9,4,2))
+    # dot2: currently only support fp16 with HPA on gfx942 or fp16 &bf16 on gfx950
+    state["UseDotInstruction"] = (not state["EnableMatrixInstruction"]) \
+      and state["ProblemType"]["HighPrecisionAccumulate"] \
+      and ((state["ISA"] == IsaVersion(9,4,2) and state["ProblemType"]["DataType"].isHalf()) \
+      or (state["ISA"] == IsaVersion(9,5,0) and (state["ProblemType"]["DataType"].isBFloat16() or state["ProblemType"]["DataType"].isHalf())))
     if state["UseDotInstruction"]:
       # need modification for dot4 or dot8
       state["NumDotElements"] = 2
@@ -2132,8 +2134,10 @@ class Solution(collections.abc.Mapping):
         reject(state, "dot inst is for mac kernel!")
       if not bufferLoad:
         reject(state, "dot2 kernel only support bufferLoad!")
-      if not (state["ProblemType"]["DataType"].isHalf() and state["ProblemType"]["HighPrecisionAccumulate"]):
-        reject(state, "dot2 kernel only support DataType fp16 with HPA")
+      if not ((isaInfoMap[isa].asmCaps['v_dot2_f32_f16'] and state["ProblemType"]["DataType"].isHalf()) \
+      or (isaInfoMap[isa].asmCaps['v_dot2_f32_bf16'] and state["ProblemType"]["DataType"].isBFloat16())) \
+      and state["ProblemType"]["HighPrecisionAccumulate"]:
+        reject(state, "dot2 kernel only support DataType fp16 or bf16 with HPA")
       if state["InnerUnroll"] not in [1,2,4]:
         reject(state, "dot2 kernel requires InnerUnroll = 1,2 or 4")
       if state["NumWaveSplitK"] not in [1,2,4,8,16,32,64]:

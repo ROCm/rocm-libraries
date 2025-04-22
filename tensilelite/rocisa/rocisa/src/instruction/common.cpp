@@ -1131,6 +1131,21 @@ void common_inst(nb::module_ m_common)
             return new rocisa::VDot2CF32F16(self);
         });
 
+        nb::class_<rocisa::VDot2CF32BF16, rocisa::CommonInstruction>(m_common, "VDot2CF32BF16")
+        .def(nb::init<const std::shared_ptr<rocisa::Container>&,
+                      const InstructionInput&,
+                      const InstructionInput&,
+                      std::optional<rocisa::SDWAModifiers>,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("src0"),
+             nb::arg("src1"),
+             nb::arg("sdwa")    = std::nullopt,
+             nb::arg("comment") = "")
+        .def("__deepcopy__", [](const rocisa::VDot2CF32BF16& self, nb::dict&) {
+            return new rocisa::VDot2CF32BF16(self);
+        });
+
     nb::class_<rocisa::VDot2F32F16, rocisa::CommonInstruction>(m_common, "VDot2F32F16")
         .def(nb::init<const std::shared_ptr<rocisa::Container>&,
                       const InstructionInput&,

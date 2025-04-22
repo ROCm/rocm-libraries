@@ -2933,6 +2933,37 @@ namespace rocisa
         }
     };
 
+    struct VDot2CF32BF16 : public CommonInstruction
+    {
+        VDot2CF32BF16(const std::shared_ptr<Container>& dst,
+                      const InstructionInput&           src0,
+                      const InstructionInput&           src1,
+                      std::optional<SDWAModifiers>      sdwa    = std::nullopt,
+                      const std::string&                comment = "")
+            : CommonInstruction(
+                InstType::INST_F32, dst, {src0, src1}, std::nullopt, sdwa, std::nullopt, comment)
+        {
+            if(kernel().isaVersion[0] >= 11)
+            {
+                setInst("v_dot2acc_f32_bf16");
+            }
+            else
+            {
+                setInst("v_dot2c_f32_bf16");
+            }
+        }
+
+        VDot2CF32BF16(const VDot2CF32BF16& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<VDot2CF32BF16>(*this);
+        }
+    };
+
     struct VFmaF16 : public CommonInstruction
     {
         VFmaF16(const std::shared_ptr<Container>& dst,
