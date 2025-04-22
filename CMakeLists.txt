@@ -239,6 +239,7 @@ get_os_id(OS_ID)
 message (STATUS "OS detected is ${OS_ID}")
 
 if(HIPSPARSELT_ENABLE_MARKER)
+  find_path(ROCTRACER_INCLUDE_DIR "roctracer/roctx.h")
   find_library(rocTracer roctx64 PATHS ${ROCM_PATH}/lib)
   if(NOT rocTracer)
     message(FATAL_ERROR "roctracer not found, but HIPSPARSELT_ENABLE_MARKER is enabled")

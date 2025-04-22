@@ -128,6 +128,7 @@ target_include_directories(hipsparselt
                            PUBLIC  $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/library/include>
                                    $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include>
                                    $<BUILD_INTERFACE:${HIP_INCLUDE_DIRS}>
+                                   $<BUILD_INTERFACE:${HIPSPARSE_INCLUDE_DIRS}>
                                    $<INSTALL_INTERFACE:include>
 )
 
@@ -152,7 +153,8 @@ else()
 endif()
 
 if(HIPSPARSELT_ENABLE_MARKER)
-  target_link_libraries(hipsparselt PRIVATE -lroctx64)
+  target_include_directories(hipsparselt PRIVATE ${ROCTRACER_INCLUDE_DIR})
+  target_link_libraries(hipsparselt PRIVATE ${rocTracer})
 endif()
 
 # Target properties
