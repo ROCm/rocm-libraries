@@ -51,6 +51,65 @@ def runTestCommand (platform, project) {
 
     withCredentials([string(credentialsId: "mathlibs-codecov-token-rocdecode", variable: 'CODECOV_TOKEN')])
     {
+        def prereq = """
+                    if [ -d "\${JENKINS_HOME_DIR}/rocDecode" ]; then
+                        # Count the number of files in the folder
+                        FILE_COUNT=\$(find \${JENKINS_HOME_DIR}/rocDecode/AvcConformance -type f | wc -l)
+                        # Check if there are 254 files
+                        if [ "\$FILE_COUNT" -ne 254 ]; then
+                            echo "wrong file count"
+                            ls
+                            cd \${JENKINS_HOME_DIR}/rocDecode
+                            wget http://math-ci.amd.com/userContent/computer-vision/rocDecodeConformance/AvcConformance.zip
+                            unzip AvcConformance.zip
+                        fi
+                        FILE_COUNT=\$(find \${JENKINS_HOME_DIR}/rocDecode/Av1Conformance_v1.0 -type f | wc -l)
+                        # Check if there are 326 files
+                        if [ "\$FILE_COUNT" -ne 326 ]; then
+                            echo "wrong file count"
+                            ls
+                            cd \${JENKINS_HOME_DIR}/rocDecode
+                            wget http://math-ci.amd.com/userContent/computer-vision/rocDecodeConformance/Av1Conformance_v1.0.zip
+                            unzip Av1Conformance_v1.0.zip
+                        fi
+                        FILE_COUNT=\$(find \${JENKINS_HOME_DIR}/rocDecode/Vp9Conformance -type f | wc -l)
+                        # Check if there are 216 files
+                        if [ "\$FILE_COUNT" -ne 216 ]; then
+                            echo "wrong file count"
+                            ls
+                            cd \${JENKINS_HOME_DIR}/rocDecode
+                            wget http://math-ci.amd.com/userContent/computer-vision/rocDecodeConformance/Vp9Conformance.zip
+                            unzip Vp9Conformance.zip
+                        fi
+                        FILE_COUNT=\$(find \${JENKINS_HOME_DIR}/rocDecode/HevcConformance -type f | wc -l)
+                        # Check if there are 270 files
+                        if [ "\$FILE_COUNT" -ne 270 ]; then
+                            echo "wrong file count"
+                            ls                            
+                            cd \${JENKINS_HOME_DIR}/rocDecode
+                            wget http://math-ci.amd.com/userContent/computer-vision/HevcConformance/*zip*/HevcConformance.zip
+                            unzip HevcConformance.zip
+                        fi
+                        if [ ! -f \${JENKINS_HOME_DIR}/rocDecode/data1.img ]; then
+                            echo "File does not exist."
+                            cd \${JENKINS_HOME_DIR}/rocDecode
+                            wget http://math-ci.amd.com/userContent/computer-vision/data1.img
+                        fi
+                    else
+                        echo "The folder path does not exist."
+                        mkdir -p \${JENKINS_HOME_DIR}/rocDecode
+                        cd \${JENKINS_HOME_DIR}/rocDecode
+                        wget http://math-ci.amd.com/userContent/computer-vision/data1.img
+                        wget http://math-ci.amd.com/userContent/computer-vision/HevcConformance/*zip*/HevcConformance.zip
+                        wget http://math-ci.amd.com/userContent/computer-vision/rocDecodeConformance/Vp9Conformance.zip
+                        wget http://math-ci.amd.com/userContent/computer-vision/rocDecodeConformance/Av1Conformance_v1.0.zip
+                        wget http://math-ci.amd.com/userContent/computer-vision/rocDecodeConformance/AvcConformance.zip
+                        unzip HevcConformance.zip
+                        unzip Vp9Conformance.zip
+                        unzip Av1Conformance_v1.0.zip
+                        unzip AvcConformance.zip
+                    fi
+        """
         def command = """#!/usr/bin/env bash
                     set -ex
                     export HOME=/home/jenkins
@@ -74,28 +133,20 @@ def runTestCommand (platform, project) {
                     cd ../ && mkdir -p conformance && cd conformance
                     pip3 install pandas
                     mkdir hevc-conformance && cd hevc-conformance
-                    wget http://math-ci.amd.com/userContent/computer-vision/HevcConformance/*zip*/HevcConformance.zip
-                    unzip HevcConformance.zip
-                    python3 /opt/rocm/share/rocdecode/test/testScripts/run_rocDecode_Conformance.py --videodecode_exe ./../../rocdecode-sample/videodecode --files_directory ./HevcConformance --results_directory .
+                    python3 /opt/rocm/share/rocdecode/test/testScripts/run_rocDecode_Conformance.py --videodecode_exe ./../../rocdecode-sample/videodecode --files_directory \${JENKINS_HOME_DIR}/rocDecode/HevcConformance --results_directory .
                     cd ../
                     mkdir avc-conformance && cd avc-conformance
-                    wget http://math-ci.amd.com/userContent/computer-vision/rocDecodeConformance/AvcConformance.zip
-                    unzip AvcConformance.zip
-                    python3 /opt/rocm/share/rocdecode/test/testScripts/run_rocDecode_Conformance.py --videodecode_exe ./../../rocdecode-sample/videodecode --files_directory ./AvcConformance --results_directory .
+                    python3 /opt/rocm/share/rocdecode/test/testScripts/run_rocDecode_Conformance.py --videodecode_exe ./../../rocdecode-sample/videodecode --files_directory \${JENKINS_HOME_DIR}/rocDecode/AvcConformance --results_directory .
                     cd ../
                     mkdir vp9-conformance && cd vp9-conformance
-                    wget http://math-ci.amd.com/userContent/computer-vision/rocDecodeConformance/Vp9Conformance.zip
-                    unzip Vp9Conformance.zip
-                    python3 /opt/rocm/share/rocdecode/test/testScripts/run_rocDecode_Conformance.py --videodecode_exe ./../../rocdecode-sample/videodecode --files_directory ./Vp9Conformance --results_directory .
+                    python3 /opt/rocm/share/rocdecode/test/testScripts/run_rocDecode_Conformance.py --videodecode_exe ./../../rocdecode-sample/videodecode --files_directory \${JENKINS_HOME_DIR}/rocDecode/Vp9Conformance --results_directory .
                     cd ../
                     mkdir av1-conformance && cd av1-conformance
-                    wget http://math-ci.amd.com/userContent/computer-vision/rocDecodeConformance/Av1Conformance_v1.0.zip
-                    unzip Av1Conformance_v1.0.zip
-                    python3 /opt/rocm/share/rocdecode/test/testScripts/run_rocDecode_Conformance.py --videodecode_exe ./../../rocdecode-sample/videodecode --files_directory ./Av1Conformance_v1.0 --results_directory .
+                    python3 /opt/rocm/share/rocdecode/test/testScripts/run_rocDecode_Conformance.py --videodecode_exe ./../../rocdecode-sample/videodecode --files_directory \${JENKINS_HOME_DIR}/rocDecode/Av1Conformance_v1.0 --results_directory .
                     cd ../../
                     echo rocdecode-sample - videoDecode with data1 video test
                     cd rocdecode-sample
-                    wget http://math-ci.amd.com/userContent/computer-vision/data1.img
+                    cp \${JENKINS_HOME_DIR}/rocDecode/data1.img \$PWD
                     LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:/opt/rocm/lib${libLocation} ./videodecode -i ./data1.img
                     echo rocdecode-sample - videoDecodePerf with data1 video test
                     mkdir -p rocdecode-perf && cd rocdecode-perf
@@ -115,7 +166,7 @@ def runTestCommand (platform, project) {
                     chmod +x codecov
                     ./codecov -v -U \$http_proxy -t ${CODECOV_TOKEN} --file coverage.info --name rocDecode --sha ${commitSha}
                     """
-
+        platform.runCommand(this, prereq)
         platform.runCommand(this, command)
     }
 }
