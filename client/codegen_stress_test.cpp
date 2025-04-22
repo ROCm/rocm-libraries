@@ -37,8 +37,6 @@
 
 using namespace rocRoller;
 
-const int wavefront_size = 64;
-
 struct CodeGenProblem
 {
     std::string name;

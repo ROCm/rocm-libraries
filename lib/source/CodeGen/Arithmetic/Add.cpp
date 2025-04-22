@@ -24,6 +24,7 @@
  *
  *******************************************************************************/
 
+#include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/CodeGen/AddInstruction.hpp>
 #include <rocRoller/CodeGen/Arithmetic/Add.hpp>
 #include <rocRoller/Utilities/Component.hpp>
@@ -180,13 +181,31 @@ namespace rocRoller
         co_yield get2DwordsVector(r0, r1, rhs);
 
         if(r0->regType() == Register::Type::Literal)
+        {
             std::swap(l0, r0);
+        }
 
-        if(r0->regType() == Register::Type::Scalar)
+        if(r1->regType() == Register::Type::Literal)
+        {
+            std::swap(l1, r1);
+        }
+
+        if(r0->regType() == Register::Type::Scalar || r0->regType() == Register::Type::Literal)
         {
             co_yield moveToVGPR(r0);
         }
 
+        if(r1->regType() == Register::Type::Scalar || r1->regType() == Register::Type::Literal)
+        {
+            co_yield moveToVGPR(r1);
+        }
+
+        if(l0->regType() == Register::Type::Scalar)
+        {
+            co_yield moveToVGPR(l0);
+        }
+
+        // v_addc_co_u32 can only accept inline constant literals
         if(l1->regType() == Register::Type::Scalar
            || (l1->regType() == Register::Type::Literal
                && !m_context->targetArchitecture().isSupportedConstantValue(l1)))
@@ -194,21 +213,25 @@ namespace rocRoller
             co_yield moveToVGPR(l1);
         }
 
-        if(r1->regType() == Register::Type::Scalar
-           || (r1->regType() == Register::Type::Literal
-               && !m_context->targetArchitecture().isSupportedConstantValue(r1)))
-        {
-            co_yield moveToVGPR(r1);
-        }
+        bool useVCC = (l0->regType() == Register::Type::Literal
+                       && !m_context->targetArchitecture().isSupportedConstantValue(l0))
+                      || (l1->regType() == Register::Type::Literal
+                          && !m_context->targetArchitecture().isSupportedConstantValue(l1));
 
-        co_yield(Instruction::Lock(Scheduling::Dependency::VCC, "Start of Int64 add, locking VCC"));
+        if(useVCC)
+            co_yield(
+                Instruction::Lock(Scheduling::Dependency::VCC, "Start of Int64 add, locking VCC"));
+
+        auto carry
+            = useVCC ? m_context->getVCC() : Register::Value::WavefrontPlaceholder(m_context, 1);
 
         co_yield VectorAddUInt32CarryOut(
-            m_context, dest->subset({0}), l0, r0, "least significant half");
+            m_context, dest->subset({0}), carry, l0, r0, "least significant half");
         co_yield VectorAddUInt32CarryInOut(
-            m_context, dest->subset({1}), l1, r1, "most significant half");
+            m_context, dest->subset({1}), carry, carry, l1, r1, "most significant half");
 
-        co_yield(Instruction::Unlock("End of Int64 add, Unlocking VCC."));
+        if(useVCC)
+            co_yield(Instruction::Unlock("End of Int64 add, Unlocking VCC."));
     }
 
     template <>

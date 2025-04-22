@@ -1532,6 +1532,193 @@ namespace ExpressionTest
         CHECK(NormalizedSource(context.output()) == NormalizedSource(result));
     }
 
+    TEST_CASE("64bit Addition should use SGPR carry when possible", "[expression][codegen]")
+    {
+        auto context = TestContext::ForDefaultTarget();
+
+        SECTION("64bit Addition can use SGPR carry for literal 64 bit input that has "
+                "inline-constant lsb and msb",
+                "[expression][codegen]")
+        {
+            auto ra = std::make_shared<Register::Value>(
+                context.get(), Register::Type::Vector, DataType::UInt64, 1);
+            ra->setName("a");
+            ra->allocateNow();
+            auto a = ra->expression();
+
+            auto b = Expression::literal(4294967297UL); // UInt32 max + 2
+
+            auto expr1 = a + b;
+
+            Register::ValuePtr destReg;
+            context.get()->schedule(Expression::generate(destReg, expr1, context.get()));
+
+            auto result = R"(
+                v_add_co_u32 v2, s[0:1], 1, v0
+                v_addc_co_u32 v3, s[0:1], 1, v1, s[0:1]
+                )";
+
+            CHECK(NormalizedSource(context.output()) == NormalizedSource(result));
+        }
+
+        SECTION("64bit Addition should use SGPR carry for literal 64 bit input that has large msb",
+                "[expression][codegen]")
+        {
+            auto ra = std::make_shared<Register::Value>(
+                context.get(), Register::Type::Vector, DataType::UInt64, 1);
+            ra->setName("a");
+            ra->allocateNow();
+            auto a = ra->expression();
+
+            auto b = Expression::literal(549755813888UL); // 2^(32+7)
+
+            auto expr1 = a + b;
+
+            Register::ValuePtr destReg;
+            context.get()->schedule(Expression::generate(destReg, expr1, context.get()));
+
+            auto result = R"(
+                v_mov_b32 v2, 128
+                v_add_co_u32 v4, s[0:1], 0, v0
+                v_addc_co_u32 v5, s[0:1], v2, v1, s[0:1]
+            )";
+
+            CHECK(NormalizedSource(context.output()) == NormalizedSource(result));
+        }
+
+        SECTION("64bit Addition should use VCC carry for literal 64 bit input that is not an "
+                "inline-constant",
+                "[expression][codegen]")
+        {
+
+            auto ra = std::make_shared<Register::Value>(
+                context.get(), Register::Type::Vector, DataType::UInt64, 1);
+            ra->setName("a");
+            ra->allocateNow();
+            auto a = ra->expression();
+
+            auto b = Expression::literal(100); // > 64
+
+            auto expr1 = a + b;
+
+            Register::ValuePtr destReg;
+            context.get()->schedule(Expression::generate(destReg, expr1, context.get()));
+
+            auto result = R"(
+                v_add_co_u32 v2, vcc, 100, v0
+                v_addc_co_u32 v3, vcc, 0, v1, vcc
+                )";
+
+            CHECK(NormalizedSource(context.output()) == NormalizedSource(result));
+        }
+
+        SECTION("64bit Addition should not add two literals for 32bit register input",
+                "[expression][codegen]")
+        {
+            auto ra = std::make_shared<Register::Value>(
+                context.get(), Register::Type::Vector, DataType::UInt32, 1);
+            ra->setName("a");
+            ra->allocateNow();
+            auto a = ra->expression();
+
+            auto b = Expression::literal(137438953473UL); // 2^(32+5) + 1
+
+            auto expr1 = a + b;
+
+            Register::ValuePtr destReg;
+            context.get()->schedule(Expression::generate(destReg, expr1, context.get()));
+
+            auto result = R"(
+                v_mov_b32 v1, 0
+                v_add_co_u32 v2, s[0:1], 1, v0
+                v_addc_co_u32 v3, s[0:1], 32, v1, s[0:1]
+        )";
+
+            CHECK(NormalizedSource(context.output()) == NormalizedSource(result));
+        }
+
+        SECTION("64bit Addition should use VCC carry for literal 32 bit input that is an "
+                "inline-constant",
+                "[expression][codegen]")
+        {
+            auto ra = std::make_shared<Register::Value>(
+                context.get(), Register::Type::Vector, DataType::UInt64, 1);
+            ra->setName("a");
+            ra->allocateNow();
+            auto a = ra->expression();
+
+            auto b = Expression::literal(5);
+
+            auto expr1 = a + b;
+
+            Register::ValuePtr destReg;
+            context.get()->schedule(Expression::generate(destReg, expr1, context.get()));
+
+            auto result = R"(
+          v_add_co_u32 v2, s[0:1], 5, v0
+          v_addc_co_u32 v3, s[0:1], 0, v1, s[0:1]
+          )";
+
+            CHECK(NormalizedSource(context.output()) == NormalizedSource(result));
+        }
+
+        SECTION("64bit Addition should use SGPR carry for non-literal input",
+                "[expression][codegen]")
+        {
+            auto ra = std::make_shared<Register::Value>(
+                context.get(), Register::Type::Vector, DataType::UInt64, 1);
+            ra->setName("a");
+            ra->allocateNow();
+            auto a = ra->expression();
+
+            auto rb = std::make_shared<Register::Value>(
+                context.get(), Register::Type::Vector, DataType::UInt64, 1);
+            rb->setName("b");
+            rb->allocateNow();
+            auto b = rb->expression();
+
+            auto expr1 = a + b;
+
+            Register::ValuePtr destReg;
+            context.get()->schedule(Expression::generate(destReg, expr1, context.get()));
+
+            auto result = R"(
+                v_add_co_u32 v4, s[0:1], v0, v2
+                v_addc_co_u32 v5, s[0:1], v1, v3, s[0:1]
+                )";
+
+            CHECK(NormalizedSource(context.output()) == NormalizedSource(result));
+        }
+
+        SECTION("64bit Addition should use SGPR carry for non-literal 32bit input",
+                "[expression][codegen]")
+        {
+            auto ra = std::make_shared<Register::Value>(
+                context.get(), Register::Type::Vector, DataType::UInt64, 1);
+            ra->setName("a");
+            ra->allocateNow();
+            auto a = ra->expression();
+
+            auto rb = std::make_shared<Register::Value>(
+                context.get(), Register::Type::Vector, DataType::UInt32, 1);
+            rb->setName("b");
+            rb->allocateNow();
+            auto b = rb->expression();
+
+            auto expr1 = a + b;
+
+            Register::ValuePtr destReg;
+            context.get()->schedule(Expression::generate(destReg, expr1, context.get()));
+
+            auto result = R"(
+            v_add_co_u32 v4, s[0:1], v0, v2
+            v_addc_co_u32 v5, s[0:1], 0, v1, s[0:1]
+            )";
+
+            CHECK(NormalizedSource(context.output()) == NormalizedSource(result));
+        }
+    }
+
     TEST_CASE("Expression evaluate comparisons", "[expression]")
     {
         auto command = std::make_shared<Command>();

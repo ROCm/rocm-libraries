@@ -33,7 +33,7 @@ namespace rocRoller
     namespace Scheduling
     {
         /**
-         * @brief GFX9 rules for certain VALU Write of SGPR or VCC. Note that if VCC is read as carry, 0 NOPs are required
+         * @brief GFX9 rules for certain VALU Write of SGPR or VCC. Note that if VCC/SGPRs are read as carry, 0 NOPs are required
          *
          * | Arch | 1st Inst                       | 2nd Inst                               | NOPs |
          * | ---- | ------------------------------ | -------------------------------------- | ---- |

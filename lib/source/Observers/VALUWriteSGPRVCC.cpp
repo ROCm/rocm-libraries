@@ -70,34 +70,26 @@ namespace rocRoller
                 for(auto const& src : inst.getSrcs())
                 {
                     auto val = checkRegister(src);
-                    if(val.has_value())
+                    if(val.has_value()
+                       && (src->regType() == Register::Type::VCC
+                           || src->regType() == Register::Type::Scalar))
                     {
-                        if(src->regType() == Register::Type::VCC)
+                        // Not a hazard if reading VCC or SGPR as carry
+                        if((GPUInstructionInfo::isVAddCarryInst(inst.getOpCode())
+                            || GPUInstructionInfo::isVSubCarryInst(inst.getOpCode()))
+                           && pos == 2)
                         {
-                            // Not a hazard if reading VCC as carry
-                            if((GPUInstructionInfo::isVAddCarryInst(inst.getOpCode())
-                                || GPUInstructionInfo::isVSubCarryInst(inst.getOpCode()))
-                               && pos == 2)
-                                continue;
-
-                            return val.value() - 3;
+                            pos++;
+                            continue;
                         }
-                        else if(src->regType() == Register::Type::Scalar)
-                        {
-                            if(m_isCDNA1orCDNA2)
-                            {
-                                return val.value() - 3;
-                            }
-                            else
-                            {
-                                // Not a hazard if reading SGPR as carry
-                                if((GPUInstructionInfo::isVAddCarryInst(inst.getOpCode())
-                                    || GPUInstructionInfo::isVSubCarryInst(inst.getOpCode()))
-                                   && pos == 2)
-                                    continue;
 
-                                return val.value() - 2;
-                            }
+                        if(!m_isCDNA1orCDNA2 && src->regType() == Register::Type::Scalar)
+                        {
+                            return val.value() - 2;
+                        }
+                        else
+                        {
+                            return val.value() - 3;
                         }
                     }
                     pos++;
