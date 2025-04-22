@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2022-2024 Advanced Micro Devices, Inc.
+ * Copyright (c) 2022-2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -104,6 +104,11 @@ namespace
 
             if(strstr(arg.function, "_bad_arg") == nullptr)
             {
+                if(arg.search)
+                {
+                    name << "_search"  << arg.search_iters;
+                }
+
                 name << '_' << (arg.sparse_b ? "SB" : "SA");
 
                 if(arg.activation_type != hipsparselt_activation_type::none)
