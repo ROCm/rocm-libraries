@@ -34,7 +34,7 @@ if(DEFINED HIPFORT_INSTALL_DIR)
 endif()
 
 # hip-config.cmake requires CXX enabled
-PROJECT(hipfort VERSION 0.7 LANGUAGES Fortran C CXX)
+PROJECT(hipfort VERSION 0.7.0 LANGUAGES Fortran C CXX)
 
 #include definitions for GNU install dir cmake flags.
 include(GNUInstallDirs)
