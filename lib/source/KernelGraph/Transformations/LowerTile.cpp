@@ -218,16 +218,17 @@ namespace rocRoller
                                      int          wavefrontSize)
 
         {
-            AssertFatal((K == 128 || K == 64) && wavefrontSize == 64);
+            AssertFatal((K == 128 || K == 64) && (wavefrontSize == 64 || wavefrontSize == 32));
 
             uint M = 16 * 128 / K;
 
-            uint const lanesPerWave = 64;
             uint const lanesPerSIMD = 16;
-            uint const simdsPerWave = 4;
+            uint const simdsPerWave = wavefrontSize / lanesPerSIMD;
 
             uint const simdsPerSGroup = M / lanesPerSIMD;
-            uint const numVBlocks     = 2;
+            uint const numVBlocks     = wavefrontSize == 64 ? 2 : (bitsPerElement == 8 ? 4 : 2);
+
+            uint const elementsPerVGPRBlock = ((M * K) / wavefrontSize) / numVBlocks;
 
             auto SIMD = graph.coordinates.addElement(Adhoc("SIMD", literal(simdsPerWave), nullptr));
             auto laneInSIMD = graph.coordinates.addElement(Lane(literal(lanesPerSIMD), nullptr));
@@ -239,8 +240,8 @@ namespace rocRoller
 
             auto elementBlockNumber
                 = graph.coordinates.addElement(VGPRBlockNumber(literal(numVBlocks), nullptr));
-            auto elementBlockIndex
-                = graph.coordinates.addElement(VGPRBlockIndex(literal(lanesPerSIMD), nullptr));
+            auto elementBlockIndex = graph.coordinates.addElement(
+                VGPRBlockIndex(literal(elementsPerVGPRBlock), nullptr));
 
             graph.coordinates.addElement(Tile(), {iWaveX}, {simdBlockIndex, laneInSIMD});
 
