@@ -8229,7 +8229,13 @@ MIOPEN_EXPORT miopenStatus_t miopenMultiMarginLossForward(miopenHandle_t handle,
 /*! @ingroup handle
  * @enum miopenTuningPolicy_t
  * Tuning policy for MIOpen Find-related calls.
- * Imitates MIOpenFindEnforce but TuningPolicy has higher priority over MIOPEN_FIND_ENFORCE.
+ * Supports only the following policies of MIOpenFindEnforce:
+ * 1. None: Do not enforce anything.
+ * 2. DbUpdate: Tune and update the database.
+ * 3. Search: Search the database first; if no record is found, tune but do not update the database.
+ * 4. SearchDnUpdate: Combination of Search and DbUpdate.
+ * 5. DbClean: Remove existing entry, do not tune.
+ * Note: MIOpenFindEnforce has additional features that are not supported by TuningPolicy.
  */
 typedef enum
 {
