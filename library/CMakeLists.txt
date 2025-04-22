@@ -42,7 +42,7 @@ if( BUILD_VERBOSE )
 endif( )
 
 # Copy Public Headers to Build Dir
-configure_file( "${CMAKE_CURRENT_SOURCE_DIR}/include/hipblas-common.h" "${PROJECT_BINARY_DIR}/include/hipblas-common/hipblas-common.h" COPYONLY)
+configure_file( "${CMAKE_CURRENT_SOURCE_DIR}/include/hipblas-common/hipblas-common.h" "${PROJECT_BINARY_DIR}/include/hipblas-common/hipblas-common.h" COPYONLY)
 
 set( hipblas_headers_public
   include/hipblas-common.h
