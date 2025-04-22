@@ -29,8 +29,9 @@
 
 #ifdef WIN32
 
-#include <dbghelp.h>
 #include <windows.h>
+// windows.h must be loaded before other windows headers.
+#include <dbghelp.h>
 
 // Linker hint to ensure dbghelp.lib is linked.
 #pragma comment(lib, "dbghelp.lib")
