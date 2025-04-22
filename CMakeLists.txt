@@ -293,7 +293,7 @@ if(BUILD_CODE_COVERAGE)
   get_filename_component(PARENT_DIR ${CMAKE_SOURCE_DIR} DIRECTORY)
   get_filename_component(GRANDPARENT_DIR ${PARENT_DIR} DIRECTORY)
   set(base_path "/var/jenkins_home/library")
-  set(hash_path ${CMAKE_SOURCE_DIR})
+  set(hash_path "${CMAKE_SOURCE_DIR}/library")
   message(STATUS "BASE ${base_path} to HASHED ${hash_path}")
 
   add_custom_target(coverage
