@@ -58,6 +58,7 @@ from Tensile.Common.GlobalParameters import assignGlobalParameters, globalParame
 from Tensile.SolutionStructs.Naming import getKernelFileBase, getKeyNoInternalArgs, getSerialNaming, getKernelNameMin
 
 from Tensile.CustomYamlLoader import load_logic_gfx_arch
+from Tensile.KernelHelperNaming import kernelObjectNameCallables, initHelperKernelObjects
 from Tensile.KernelWriterAssembly import KernelWriterAssembly
 from Tensile.KernelWriterBase import (
     KERNEL_HELPER_FILENAME_CPP,
@@ -206,6 +207,7 @@ def writeHelpers(
         for ko in kernelHelperObjs:
             kernelName = ko.getKernelName()
             (err, src) = ko.getSourceFileString()
+
             kernelSourceFile.write(src)
             if err:
                 print("*** warning: invalid kernel#%u" % kernelName)
@@ -424,30 +426,56 @@ def copyStaticFiles(outputPath):
 @timing
 def generateKernelObjectsFromSolutions(solutions):
     kernels = []
-    kernelHelperObjs = []
     kernelNames = set()
-    kernelHelperNames = set()
-    splitGSU = False
     for solution in solutions:
         solutionKernels = solution.getKernels()
         for kernel in solutionKernels:
-            kName = getKeyNoInternalArgs(kernel, splitGSU)
+            kName = getKeyNoInternalArgs(kernel, False)
             if kName not in kernelNames:
                 kernels.append(kernel)
                 kernelNames.add(kName)
-        solutionHelperKernels = solution.getHelperKernelObjects()
-        kernelHelperObjs += solutionHelperKernels
-        for ko in solutionHelperKernels:
-            kernelHelperNames.add(ko.getKernelName())
+    return kernels
 
-    # remove duplicates while preserving order
-    numKhos = len(kernelHelperObjs)
-    kernelHelperObjs = list(dict.fromkeys(kernelHelperObjs))
 
-    print1(f"Number of kernel helper objects: {numKhos}")
-    print1(f"Number of unique kernel helper objects: {len(kernelHelperObjs)}")
+def generateKernelHelperObjects(solutions: List[Solution], cxxCompiler: str, isaInfoMap):
+    """
+    Generates a unique list of kernel helpers.
 
-    return (kernels, kernelHelperObjs, kernelHelperNames)
+    Kernel helpers are used to generate hip source code kernels called
+    before/after gemm kernels. This function creates a minimal list of
+    kernel helpers required to support the solutions reuested in a build.
+    The list of kernel helpers is then used to write Kernels.cpp/h to
+    disk. To ensure the ActivationEnumHeaders are written first, the
+    list is sorted such that those kernel helpers appear first.
+
+    Args:
+        solutions: a list of solutions to process.
+        cxxCompiler: the full path to the cxxCompiler.
+
+    Returns:
+        List of kernel helpers.
+    """
+    khos = []
+    visited = set()
+    for solution in solutions:
+        for kernelHelperType, callable in kernelObjectNameCallables():
+            buildMask = []
+            names = callable(solution)
+            if names:
+                for name in names:
+                    if name not in visited:
+                        visited.add(name)
+                        buildMask.append(True)
+                    else:
+                        buildMask.append(False)
+                if any(buildMask):
+                    kho = initHelperKernelObjects(solution, kernelHelperType, cxxCompiler, isaInfoMap)
+                    kho = list(itertools.compress(kho, buildMask))
+                    if kho:
+                        khos.extend(kho)
+    khos = list(set(khos))
+    sortByEnum = lambda x: ("Enum" in x.getKernelName(), khos.index(x))
+    return sorted(khos, key=sortByEnum, reverse=True) # Ensure that we write Enum kernel helpers are first in list
 
 
 @timing
@@ -642,7 +670,8 @@ def run():
         logicFiles, arguments, asmToolchain.assembler, isaInfoMap
     )
 
-    kernels, kernelHelperObjs, _ = generateKernelObjectsFromSolutions(solutions)
+    kernels = generateKernelObjectsFromSolutions(solutions)
+    kernelHelperObjs = generateKernelHelperObjects(kernels, str(asmToolchain.assembler.path), isaInfoMap)
     kernelSerialNaming = getSerialNaming(kernels)
     kernelWriterAssembly = KernelWriterAssembly(
         kernelSerialNaming,
@@ -695,12 +724,13 @@ def run():
         else:
             printWarning(f"Cannot remove build_tmp")
 
-    print1("# Tensile Library Writer DONE")
-    print1(HR)
-    print1("")
+    print("# Tensile Library Writer DONE")
+    print(HR)
+    print("")
 
     stop = timer()
 
-    print1(f"Total time (s): {(stop-start):3.2f}")
-    print1(f"Total kernels processed: {numKernels}")
-    print1(f"Kernels processed per second: {(numKernels/(stop-start)):3.2f}")
+    print(f"Total time (s): {(stop-start):3.2f}")
+    print(f"Total kernels processed: {numKernels}")
+    print(f"Kernels processed per second: {(numKernels/(stop-start)):3.2f}")
+    print(f"KernelHelperObjs: {len(kernelHelperObjs)}")

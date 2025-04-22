@@ -20,14 +20,14 @@
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ################################################################################
 
-from rocisa import rocIsa
-
 from copy import deepcopy
 from typing import List
 
+from rocisa import rocIsa
+
+from Tensile.Activation import ActivationInline, ActivationType
 from Tensile.Common.Architectures import isaToGfx, IsaVersion
-from .Activation import ActivationInline, ActivationType
-from .KernelWriterBase import KernelWriterBase
+from Tensile.KernelWriterBase import KernelWriterBase
 
 class KernelWriterActivationFunction(KernelWriterBase):
 
@@ -56,12 +56,18 @@ class KernelWriterActivationFunction(KernelWriterBase):
   def keys(self):
     return self.getKernelName()
 
-  def getKernelName(self):
-    return "Tensile%sActivation%s_%s_%s"%(self.actGradientPrefix, \
-                                          self.gaurdStr, \
-                                          self.state["ProblemType"]["ActivationComputeDataType"].toChar(), \
-                                          self.state["ProblemType"]["ActivationType"])
+  @staticmethod
+  def kernelName(solution):
+    state = solution._state if hasattr(solution, "_state") else solution.state
+    actGradientPrefix = "Gradient" if state["ProblemType"]["Gradient"] else ""
+    gaurdStr = "NG" if state["ProblemType"]["ActivationNoGuard"] else ""
+    return "Tensile%sActivation%s_%s_%s"%(actGradientPrefix, \
+                                          gaurdStr, \
+                                          state["ProblemType"]["ActivationComputeDataType"].toChar(), \
+                                          state["ProblemType"]["ActivationType"])
 
+  def getKernelName(self):
+    return KernelWriterActivationFunction.kernelName(self)
 
   def getSourceFileString(self):
     fileString = "// This is a dummy file."

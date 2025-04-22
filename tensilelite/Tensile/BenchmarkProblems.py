@@ -34,6 +34,7 @@ from typing import Dict
 
 from Tensile import CUSTOM_KERNEL_PATH, ClientExecutable, SolutionLibrary, LibraryIO
 from Tensile.KernelWriter import DebugConfig
+from Tensile.KernelHelperNaming import KernelHelperEnum, initHelperKernelObjects
 from Tensile.Toolchain.Component import Assembler
 from Tensile.SolutionStructs.Problem import ProblemType, ProblemSizes
 from Tensile.SolutionStructs.Solution import Solution
@@ -229,7 +230,10 @@ def writeBenchmarkFiles(
                 kernels.append(kernel)
                 kernelNames.add(kName)
 
-        solutionHelperKernels = solution.getHelperKernelObjects()
+        solutionHelperKernels = initHelperKernelObjects(solution,
+                                                        KernelHelperEnum.All,
+                                                        str(asmToolchain.assembler.path),
+                                                        isaInfoMap)
         for ko in solutionHelperKernels:
             kname = ko.getKernelName()
             if kname not in kernelHelperNames:

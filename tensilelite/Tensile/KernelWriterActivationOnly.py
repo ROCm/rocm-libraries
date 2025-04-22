@@ -208,24 +208,28 @@ class KernelWriterActivationOnly(KernelWriterBase):
     return kStr
 
 
-  def getKernelName(self):
+  @staticmethod
+  def kernelName(solution):
+    state = solution._state if hasattr(solution, "_state") else solution.state
     indexChars = INDEX_CHARS
     # C dimensions
     name = "D"
-    for i in range(0, self.state["ProblemType"]["NumIndicesC"]):
+    for i in range(0, state["ProblemType"]["NumIndicesC"]):
       name += indexChars[i].lower()
     name += "_"
-    name += self.state["ProblemType"]["DestDataType"].toChar()
-    if self.state["ProblemType"]["ActivationType"] != 'none':
-      if self.state["ProblemType"]["ActivationType"] in ['all', 'hipblaslt_all']:
+    name += state["ProblemType"]["DestDataType"].toChar()
+    if state["ProblemType"]["ActivationType"] != 'none':
+      if state["ProblemType"]["ActivationType"] in ['all', 'hipblaslt_all']:
         name += "_%s"%"A"
       else:
-        name += "_%s"%str(self.state["ProblemType"]["ActivationType"]).upper()
-      name += self.state["ProblemType"]["ActivationComputeDataType"].toChar()
-    name += ("ng" if self.state["ProblemType"]["ActivationNoGuard"] else "")
+        name += "_%s"%str(state["ProblemType"]["ActivationType"]).upper()
+      name += state["ProblemType"]["ActivationComputeDataType"].toChar()
+    name += ("ng" if state["ProblemType"]["ActivationNoGuard"] else "")
 
     return name
 
+  def getKernelName(self):
+    return KernelWriterActivationOnly.kernelName(self)
 
   def getSourceFileString(self):
     fileString = ""
