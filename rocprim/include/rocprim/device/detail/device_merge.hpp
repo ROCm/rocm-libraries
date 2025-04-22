@@ -56,20 +56,18 @@ range_t<> compute_range(const unsigned int id,
     return range_t<>{p1, p2, diag1 - p1, diag2 - p2};
 }
 
-template<
-    class IndexIterator,
-    class KeysInputIterator1,
-    class KeysInputIterator2,
-    class BinaryFunction
->
+template<class IndexIterator,
+         class KeysInputIterator1,
+         class KeysInputIterator2,
+         class BinaryFunction>
 ROCPRIM_DEVICE ROCPRIM_INLINE
-void partition_kernel_impl(IndexIterator indices,
+void partition_kernel_impl(IndexIterator      indices,
                            KeysInputIterator1 keys_input1,
                            KeysInputIterator2 keys_input2,
-                           const size_t input1_size,
-                           const size_t input2_size,
+                           const size_t       input1_size,
+                           const size_t       input2_size,
                            const unsigned int spacing,
-                           BinaryFunction compare_function)
+                           BinaryFunction     compare_function)
 {
     const unsigned int flat_id         = ::rocprim::detail::block_thread_id<0>();
     const unsigned int flat_block_id   = ::rocprim::detail::block_id<0>();
@@ -92,20 +90,18 @@ void partition_kernel_impl(IndexIterator indices,
     indices[id] = begin;
 }
 
-template<
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread,
-    class KeysInputIterator1,
-    class KeysInputIterator2,
-    class KeyType
->
+template<unsigned int BlockSize,
+         unsigned int ItemsPerThread,
+         class KeysInputIterator1,
+         class KeysInputIterator2,
+         class KeyType>
 ROCPRIM_DEVICE ROCPRIM_INLINE
-void load(unsigned int flat_id,
+void load(unsigned int       flat_id,
           KeysInputIterator1 keys_input1,
           KeysInputIterator2 keys_input2,
-          KeyType * keys_shared,
-          const size_t input1_size,
-          const size_t input2_size)
+          KeyType*           keys_shared,
+          const size_t       input1_size,
+          const size_t       input2_size)
 {
     ROCPRIM_UNROLL
     for(unsigned int i = 0; i < ItemsPerThread; ++i)
@@ -117,7 +113,7 @@ void load(unsigned int flat_id,
         }
         else if(index < input1_size + input2_size)
         {
-            keys_shared[index] = keys_input2[index - input1_size];
+            keys_shared[index] = static_cast<KeyType>(keys_input2[index - input1_size]);
         }
     }
 
@@ -140,23 +136,22 @@ void merge_keys(unsigned int       flat_id,
                 range_t<>      range,
                 BinaryFunction compare_function)
 {
-    load<BlockSize, ItemsPerThread>(
-        flat_id, keys_input1 + range.begin1, keys_input2 + range.begin2,
-        keys_shared, range.count1(), range.count2()
-    );
+    load<BlockSize, ItemsPerThread>(flat_id,
+                                    keys_input1 + range.begin1,
+                                    keys_input2 + range.begin2,
+                                    keys_shared,
+                                    range.count1(),
+                                    range.count2());
 
     range_t<> range_local{0, range.count1(), range.count1(), (range.count1() + range.count2())};
 
-    unsigned int diag = ItemsPerThread * flat_id;
-    unsigned int partition =
-        merge_path(
-            keys_shared + range_local.begin1,
-            keys_shared + range_local.begin2,
-            range_local.count1(),
-            range_local.count2(),
-            diag,
-            compare_function
-        );
+    unsigned int diag      = ItemsPerThread * flat_id;
+    unsigned int partition = merge_path(keys_shared + range_local.begin1,
+                                        keys_shared + range_local.begin2,
+                                        range_local.count1(),
+                                        range_local.count2(),
+                                        diag,
+                                        compare_function);
 
     range_t<> range_partition{range_local.begin1 + partition,
                               range_local.end1,
@@ -166,23 +161,20 @@ void merge_keys(unsigned int       flat_id,
     serial_merge<false>(keys_shared, key_inputs, index, range_partition, compare_function);
 }
 
-template<
-    bool WithValues,
-    unsigned int BlockSize,
-    class ValuesInputIterator1,
-    class ValuesInputIterator2,
-    class ValuesOutputIterator,
-    unsigned int ItemsPerThread
->
+template<bool         WithValues,
+         unsigned int BlockSize,
+         class ValuesInputIterator1,
+         class ValuesInputIterator2,
+         class ValuesOutputIterator,
+         unsigned int ItemsPerThread>
 ROCPRIM_DEVICE ROCPRIM_INLINE
-typename std::enable_if<WithValues>::type
-merge_values(unsigned int flat_id,
-             ValuesInputIterator1 values_input1,
-             ValuesInputIterator2 values_input2,
-             ValuesOutputIterator values_output,
-             unsigned int (&index)[ItemsPerThread],
-             const size_t input1_size,
-             const size_t input2_size)
+typename std::enable_if<WithValues>::type merge_values(unsigned int         flat_id,
+                                                       ValuesInputIterator1 values_input1,
+                                                       ValuesInputIterator2 values_input2,
+                                                       ValuesOutputIterator values_output,
+                                                       unsigned int (&index)[ItemsPerThread],
+                                                       const size_t input1_size,
+                                                       const size_t input2_size)
 {
     using value_type = typename std::iterator_traits<ValuesInputIterator1>::value_type;
 
@@ -195,8 +187,9 @@ merge_values(unsigned int flat_id,
         ROCPRIM_UNROLL
         for(unsigned int i = 0; i < ItemsPerThread; ++i)
         {
-            values[i] = (index[i] < input1_size) ? values_input1[index[i]] :
-                                                   values_input2[index[i] - input1_size];
+            values[i] = (index[i] < input1_size)
+                            ? values_input1[index[i]]
+                            : static_cast<value_type>(values_input2[index[i] - input1_size]);
         }
     }
     else
@@ -206,47 +199,40 @@ merge_values(unsigned int flat_id,
         {
             if(flat_id * ItemsPerThread + i < count)
             {
-                values[i] = (index[i] < input1_size) ? values_input1[index[i]] :
-                                                       values_input2[index[i] - input1_size];
+                values[i] = (index[i] < input1_size)
+                                ? values_input1[index[i]]
+                                : static_cast<value_type>(values_input2[index[i] - input1_size]);
             }
         }
     }
 
     ::rocprim::syncthreads();
 
-    block_store_direct_blocked(
-        flat_id,
-        values_output,
-        values,
-        count
-    );
+    block_store_direct_blocked(flat_id, values_output, values, count);
 }
 
-template<
-    bool WithValues,
-    unsigned int BlockSize,
-    class ValuesInputIterator1,
-    class ValuesInputIterator2,
-    class ValuesOutputIterator,
-    unsigned int ItemsPerThread
->
+template<bool         WithValues,
+         unsigned int BlockSize,
+         class ValuesInputIterator1,
+         class ValuesInputIterator2,
+         class ValuesOutputIterator,
+         unsigned int ItemsPerThread>
 ROCPRIM_DEVICE ROCPRIM_INLINE
-typename std::enable_if<!WithValues>::type
-merge_values(unsigned int flat_id,
-             ValuesInputIterator1 values_input1,
-             ValuesInputIterator2 values_input2,
-             ValuesOutputIterator values_output,
-             unsigned int (&index)[ItemsPerThread],
-             const size_t input1_size,
-             const size_t input2_size)
+typename std::enable_if<!WithValues>::type merge_values(unsigned int         flat_id,
+                                                        ValuesInputIterator1 values_input1,
+                                                        ValuesInputIterator2 values_input2,
+                                                        ValuesOutputIterator values_output,
+                                                        unsigned int (&index)[ItemsPerThread],
+                                                        const size_t input1_size,
+                                                        const size_t input2_size)
 {
-    (void) flat_id;
-    (void) values_input1;
-    (void) values_input2;
-    (void) values_output;
-    (void) index;
-    (void) input1_size;
-    (void) input2_size;
+    (void)flat_id;
+    (void)values_input1;
+    (void)values_input2;
+    (void)values_output;
+    (void)index;
+    (void)input1_size;
+    (void)input2_size;
 }
 
 template<class Config, class Key, class Value>
@@ -298,6 +284,20 @@ void merge(IndexIterator indices,
                        BinaryFunction compare_function, 
                        storage_type&           storage)
     {
+        using key_type1   = typename std::iterator_traits<KeysInputIterator1>::value_type;
+        using key_type2   = typename std::iterator_traits<KeysInputIterator2>::value_type;
+        using value_type1 = typename std::iterator_traits<ValuesInputIterator1>::value_type;
+        using value_type2 = typename std::iterator_traits<ValuesInputIterator2>::value_type;
+
+        if constexpr(with_values)
+        {
+            static_assert(std::is_convertible_v<value_type2, value_type1>,
+                          "values_input2 must be convertible to values_input1");
+        }
+
+        static_assert(std::is_convertible_v<key_type2, key_type1>,
+                      "Keys_input2 must be convertible to keys_input1");
+
         Key          input[items_per_thread];
         unsigned int index[items_per_thread];
 
@@ -349,7 +349,7 @@ void merge(IndexIterator indices,
     }
 };
 
-} // end of detail namespace
+} // namespace detail
 
 END_ROCPRIM_NAMESPACE
 

@@ -84,6 +84,8 @@ using custom_large   = common::custom_huge_type<1024, long long>;
 
 using RocprimDeviceMergeTestsParams = ::testing::Types<
     DeviceMergeParams<int, double>,
+    DeviceMergeParams<rocprim::bfloat16, half>,
+    DeviceMergeParams<short, half>,
     DeviceMergeParams<unsigned long, unsigned int, rocprim::greater<unsigned long>>,
     DeviceMergeParams<float, custom_double2>,
     DeviceMergeParams<int, float>,
