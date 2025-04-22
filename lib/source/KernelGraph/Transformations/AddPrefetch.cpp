@@ -385,6 +385,28 @@ namespace rocRoller
         }
 
         /**
+         * @brief Is the LoadLDSTile for an Exchange?
+         *
+         * Checks if the loads destination tile is connected to an
+         * Exchange operation.
+         */
+        bool isLoadLDSForExchange(int loadLDSTag, KernelGraph const& graph)
+        {
+            auto isForExchangePredicate = [&](auto const& conn) -> bool {
+                auto maybeExchange = graph.control.get<Exchange>(conn.control);
+                return maybeExchange.has_value();
+            };
+
+            auto tileTag = graph.mapper.get<MacroTile>(loadLDSTag);
+            for(auto c : graph.mapper.getCoordinateConnections(tileTag))
+            {
+                if(isForExchangePredicate(c))
+                    return true;
+            }
+            return false;
+        }
+
+        /**
         * @brief Order loads before Multiplies; and record direct
         * load operations within the segment that need to be ordered.
         *
@@ -1093,7 +1115,12 @@ namespace rocRoller
 
                     auto loadLDSTileChain = getTopSetCoordinate(k, loadLDSTileTag);
 
-                    if(splitLDSPrefetchFactor == 0)
+                    // TODO: The logic below means that loads-from-lds
+                    // that are used for exchanges aren't included in
+                    // lds-prefetching.  Alternatively, we could
+                    // duplicate+move the associated Exchange
+                    // operation alongside the LoadLDSTile operation.
+                    if(splitLDSPrefetchFactor == 0 || isLoadLDSForExchange(loadLDSTileTag, k))
                     {
                         // Keep load in same segment
                         m_loadFromLDSChains[forLoop][u].push_back(loadLDSTileChain);
