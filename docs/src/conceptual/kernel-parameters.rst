@@ -108,40 +108,7 @@ The given kernel name example is a GEMM. The different parts of the kernel name 
 
 - The second part indicates the data type supported by the kernel. In the preceding example, "S" indicates single-precision floating-point numbers and "B" indicates that the kernel can use beta values.
 
-  The following table lists the supported data types and their corresponding code names:
-
-  .. list-table:: Kernel names
-    :header-rows: 1
-
-    * - Code
-      - Type
-
-    * - ``S``
-      - Single-precision float
-
-    * - ``D``
-      - Double-precision float
-
-    * - ``C``
-      - Single-precision complex float
-
-    * - ``Z``
-      - Double-precision complex float
-
-    * - ``H``
-      - Half-precision float
-
-    * - ``4xi8``
-      - 4 x 8-bit integer (deprecated, use I8)
-
-    * - ``I``
-      - 32-bit integer
-
-    * - ``B``
-      - Bfloat16
-
-    * - ``I8``
-      - 8-bit integer
+  For a list of supported data types and their corresponding code names, please refer to :ref:`precision-support`.
 
 - The third part "MT" stands for macro tile, which is 64x256 here. The third number listed with macro tile (16 in the example) is the unroll depth, specified by the ``DepthU`` parameter.
 

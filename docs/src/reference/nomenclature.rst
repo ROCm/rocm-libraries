@@ -20,28 +20,7 @@ General matrix multiplication (GEMM) is a level 3 BLAS operation that computes t
 
 where, :math:`\alpha` and :math:`\beta` are scalars and, :math:`A` and :math:`B` are optionally transposed input matrices.
 
-.. list-table:: GEMM data types
-   :header-rows: 1
-   :widths: 30, 50, 20
-
-   * - Abbreviation
-     - Description
-     - Precision
-   * - CGEMM
-     - Single precision complex general matrix multiplication
-     - 32-bit
-   * - DGEMM
-     - Double precision general matrix multiplication
-     - 64-bit
-   * - HGEMM
-     - Half precision general matrix multiplication
-     - 16-bit
-   * - SGEMM
-     - Single precision general matrix multiplication
-     - 32-bit
-   * - ZGEMM
-     - Double precision complex general matrix multiplication
-     - 64-bit
+For supported GEMM data types, please refer to :ref:`precision-support`.
 
 .. list-table:: GEMM operations where N (non-transpose) and T (transpose) represent the transpose state of the input matrices
    :header-rows: 1
