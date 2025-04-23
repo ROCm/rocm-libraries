@@ -115,6 +115,8 @@ if CU is None:
         CU = int(match.group('COMPUTE_UNIT').strip())
     else:
         raise RuntimeError("Failed to get compute unit from rocminfo, please specific CU environment variable.")
+else:
+    CU = int(CU)
 
 XCC = os.environ.get("XCC", None)
 if ArchitectureName == 'gfx942':
@@ -124,6 +126,8 @@ if ArchitectureName == 'gfx942':
             XCC = int(res.stdout.decode("utf-8").strip())
         else:
             raise FileNotFoundError(f"{NUM_INST} not found, please specific XCC environment variable.")
+    else:
+        XCC = int(XCC)
     DeviceNames = ["Device 0049", "Device 0050"]
     ScheduleName = "aquavanjaram"
 elif ArchitectureName == 'gfx90a':
