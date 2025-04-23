@@ -609,8 +609,8 @@ bool RC3DNode::CheckPartialPassSupport()
         }
     }
 
-    // TODO: Once partial pass is property integrated into
-    // the Stockham generators, revisit these restrictions.
+    // TODO: Revisit these restrictions once partial pass is
+    //       fully configurable in kernel-generator.py. 
     bool batchCondition = (batch >= 5);
 
     size_t checkDist     = product(length.begin(), length.end());

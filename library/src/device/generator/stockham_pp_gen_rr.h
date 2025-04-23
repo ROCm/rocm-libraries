@@ -21,7 +21,11 @@
 #pragma once
 #include "stockham_gen_rr.h"
 
-// TODO: transform_per_block or max_factor_pp? Revisit all usages
+// TODO: Once partial pass is fully configurable in kernel-generator.py:
+//       - Revisit all usages of transform_per_block and max_factor_pp.
+//       - Test with factors_pp.size() > 1
+//       - Revisit lstride usage and input/output strides
+//       - Revisit factor 64 logic in calculate_offsets() with different input lengths
 
 struct StockhamPartialPassKernelRR : public StockhamKernelRR
 {
@@ -32,7 +36,6 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
         , factors_pp(ppFactors)
         , length_pp(ppLength)
     {
-        // TODO: revisit this. Test with factors_pp.size() > 1
         max_factor_pp = *std::max_element(factors_pp.begin(), factors_pp.end());
 
         R.size = Expression{std::max(nregisters, max_factor_pp)};
@@ -191,7 +194,6 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
         StatementList work;
 
         for(unsigned int w = 0; w < width; ++w)
-            //TODO: lstride not used here, address to have input/output strides working
             work += Assign(R[w], lds_complex[offset_lds + (w * stride_lds)]);
 
         return work;
@@ -229,7 +231,6 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
 
         auto load_lds = std::mem_fn(&StockhamPartialPassKernelRR::load_lds_step_1_2_generator);
         // first pass of load (full)
-        // TODO: revisit width. it used to be factors[0]
         unsigned int width  = max_factor_pp;
         float        height = static_cast<float>(length) / width / threads_per_transform;
         body += SyncThreads();
@@ -249,7 +250,6 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
         StatementList work;
 
         for(unsigned int w = 0; w < width; ++w)
-            //TODO: lstride not used here, address to have input/output strides working
             work += Assign(lds_complex[offset_lds + (w * stride_lds)], R[w]);
 
         return work;
@@ -269,7 +269,6 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
 
         auto store_lds = std::mem_fn(&StockhamPartialPassKernelRR::store_pp_step_1_2_lds_generator);
         // last pass of store (full)
-        // TODO: revisit width. it used to be factors.back()
         unsigned int width  = max_factor_pp;
         float        height = static_cast<float>(length) / width / threads_per_transform;
         body += SyncThreads();
@@ -322,12 +321,10 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
         return {scalar_type};
     }
 
-    // TODO: Move this to a device function
     StatementList perform_partial_pass_step_1_2()
     {
         StatementList stmts;
 
-        // TODO: figure out factor 1 here (what happens with different in/out strides and lengths)
         stmts += Declaration{stride_lds_pp, length};
         stmts += Declaration{offset_lds_pp,
                              Parens(block_id * transforms_per_block + thread_id) % length};
@@ -343,8 +340,7 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
 
         for(unsigned int npass = 0; npass < factors_pp.size(); ++npass)
         {
-            unsigned int width = factors_pp[npass];
-            // TODO: revisit this. Different from same function in stockham_pp_gen_cc.h
+            unsigned int width  = factors_pp[npass];
             unsigned int height = transforms_per_block / max_factor_pp;
 
             auto butterfly = std::mem_fn(&StockhamKernel::butterfly_generator);
@@ -426,7 +422,6 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
         body += Declaration{batch};
         body += Declaration{transform};
 
-        // TODO- don't override, unify them
         body += set_direct_to_from_registers();
 
         // half-lds
@@ -516,7 +511,6 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
                           pre_post_lds_args};
         body += postStore;
 
-        // partial pass here
         body += perform_partial_pass_step_1_2();
 
         body += LineBreak{};

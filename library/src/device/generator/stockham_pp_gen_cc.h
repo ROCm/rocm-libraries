@@ -21,13 +21,14 @@
 #pragma once
 #include "stockham_gen_cc.h"
 
-// TODO: - Kernel is not getting launched, found out why
-//       - Check launch bounds.
-//       - Implementation here used a kernel with work_group_size = 256, however, the prototype was using 64.
-//         Change kernel_generator.py to use 64 and fix all the issues, comparing again with the prototype.
-//       - Start testing with different threads_per_transform once the original configuration works.
-//       - Then test with other lengths and direct_from_reg=true, half_lds=true, etc.
-
+// TODO: Once partial pass is fully configurable in kernel-generator.py:
+//      - Test all "lds_linear=false" cases.
+//      - Test with factors_pp.size() > 1.
+//      - Revisit all usages of transforms_per_block_pp and threads_per_transform.
+//      - Different input/output strides.
+//      - Revisit mod 128 usage in calculate_offsets() with different input lengths,
+//        (logic is required to work with nbatch > 1)
+//      - Revisit factor 192 logic in calculate_offsets() with different input lengths
 struct StockhamPartialPassKernelCC : public StockhamKernelCC
 {
     explicit StockhamPartialPassKernelCC(const StockhamGeneratorSpecs& specs,
@@ -40,12 +41,8 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
         large_twiddle_steps.decl_default = 3;
         large_twiddle_base.decl_default  = 8;
 
-        // TODO: Address and test all "lds_linear=false" cases
-
-        // TODO: revisit this. Test with factors_pp.size() > 1
         max_factor_pp = *std::max_element(factors_pp.begin(), factors_pp.end());
 
-        // TODO: transforms_per_block_pp or threads_per_transform? Revisit all usages
         transforms_per_block_pp = transforms_per_block / max_factor_pp;
     }
 
@@ -121,7 +118,6 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
         StatementList work;
 
         for(unsigned int w = 0; w < width; ++w)
-            //TODO: lstride not used here, address to have input/output strides working
             work += Assign(lds_complex[offset_lds + (w * stride_lds)], R[w]);
 
         return work;
@@ -161,7 +157,6 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
         StatementList work;
 
         for(unsigned int w = 0; w < width; ++w)
-            //TODO: lstride not used here, address to have input/output strides working
             work += Assign(R[w], lds_complex[offset_lds + (w * stride_lds)]);
 
         return work;
@@ -226,8 +221,7 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
         stmts += Assign{num_of_tiles, (lengths[1] - 1) / transforms_per_block_pp + 1};
         stmts += Assign{plength, num_of_tiles};
         stmts += Assign{tile_index, block_id % num_of_tiles};
-        //TODO figure out mod 128 for other lengths
-        // mod 128 required to work with nbatch > 1
+
         stmts += Assign{remaining, (block_id % 128) / num_of_tiles};
         stmts += Assign{offset, tile_index * transforms_per_block_pp * stride[1]};
         stmts += For{d,
@@ -242,19 +236,14 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
         stmts += LineBreak{};
 
         stmts += Assign{batch, block_id / plength};
-        //stmts += Assign{offset, offset + batch * stride[dim]};
         if(!direct_to_from_reg)
         {
-            // TODO: figure out this branch
             stmts
                 += Assign{transform,
                           tile_index * transforms_per_block_pp + thread_id / threads_per_transform};
             stmts += Assign{stride_lds, (length + get_lds_padding())};
 
-            // TODO: figure out factor 4 for other lengths
             stmts += MultiplyAssign(stride_lds, Literal{max_factor_pp});
-
-            //stmts += Assign{offset_lds, stride_lds * (transform % transforms_per_block_pp)};
         }
         else
         {
@@ -268,13 +257,8 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
                             Ternary{lds_linear,
                                     length + get_lds_padding(),
                                     transforms_per_block_pp + get_lds_padding()}};
-            // TODO: figure out factor 4 for other lengths
-            stmts += MultiplyAssign(stride_lds, Literal{max_factor_pp});
 
-            // stmts += Assign{offset_lds,
-            //                 Ternary{lds_linear,
-            //                         stride_lds * (transform % transforms_per_block_pp),
-            //                         thread_id % transforms_per_block_pp}};
+            stmts += MultiplyAssign(stride_lds, Literal{max_factor_pp});
         }
 
         stmts += Declaration{
@@ -282,16 +266,12 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
             Ternary{
                 Parens((tile_index + 1) * transforms_per_block_pp > lengths[1]), "false", "true"}};
 
-        // [dim0, dim1] = [tid_ver, tid_hor] :
-        // each thread reads position [tid_ver, tid_hor], [tid_ver+step_height*1, tid_hor] , [tid_ver+step_height*2, tid_hor]...
-        // tid_ver walks the columns; tid_hor walks the rows
         stmts += Declaration{thread, thread_id / transforms_per_block_pp};
         stmts += Declaration{tid_hor, thread_id % transforms_per_block_pp};
 
         stmts += Declaration{thread_lds, thread_id / transforms_per_block_pp};
         stmts += Declaration{tid_hor_lds, thread_id % transforms_per_block_pp};
 
-        // TODO: figure out factor 4 here for other lengths
         stmts += Declaration(
             tid_hor_pp, thread_id % transforms_per_block_pp + length * (thread % max_factor_pp));
         stmts += Declaration(thread_new, thread_id / (transforms_per_block_pp * max_factor_pp));
@@ -300,12 +280,10 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
         stmts += Declaration(thread_idx, thread_id);
         stmts += Declaration(block_idx, block_id);
 
-        // TODO: figure out factor 192 here for other lengths
         stmts += Declaration(
             offset_pp, offset + Parens(offset / length) * Literal{192} + batch_new * stride[dim]);
         stmts += Declaration(offset_tid_hor, offset_pp + tid_hor_pp * stride[1]);
 
-        // TODO: figure out factor 4 here for other lengths
         if(!direct_to_from_reg)
             stmts += Assign{transform,
                             tile_index * transforms_per_block_pp
@@ -352,11 +330,9 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
                 "no intrinsic when load to lds. FIXME- check why use nested branch is better"};
             stmts += If{in_bound, tmp_stmts};
             stmts += If{Not{in_bound}, {If{pred, tmp_stmts}}};
-            // stmts += Else{{If{pred, tmp_stmts}}}; // FIXME: Need to check with compiler team.
         }
         else
         {
-            // TODO: Figure out this branch
             StatementList intrinsic_stmts;
             StatementList non_intrinsic_stmts;
 
@@ -392,7 +368,6 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
 
             stmts += If{intrinsic_mode != "IntrinsicAccessType::DISABLE_BOTH", intrinsic_stmts};
             stmts += Else{non_intrinsic_stmts};
-            // stmts += Else{{If{in_bound, tmp_stmts}}};
         }
 
         return stmts;
@@ -448,7 +423,6 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
             auto stripmine_w = transforms_per_block;
             auto stripmine_h = workgroup_size / stripmine_w;
 
-            // TODO: stride[1] not being handle here, address this to have output strides working
             auto offset_tile_wbuf = [&](unsigned int i) {
                 return offset_tid_hor + (thread_new + i * stripmine_h) * stride0;
             };
@@ -468,11 +442,9 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
                 "no intrinsic when store from lds. FIXME- check why use nested branch is better"};
             stmts += If{in_bound, tmp_stmts};
             stmts += If{Not{in_bound}, {If{pred, tmp_stmts}}};
-            // stmts += Else{{If{pred, tmp_stmts}}}; // FIXME: Need to check with compiler team.
         }
         else
         {
-            // TODO: figure out this branch
             StatementList intrinsic_stmts;
             StatementList non_intrinsic_stmts;
 
@@ -508,7 +480,6 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
 
             stmts += If{intrinsic_mode == "IntrinsicAccessType::ENABLE_BOTH", intrinsic_stmts};
             stmts += Else{non_intrinsic_stmts};
-            // stmts += Else{{If{in_bound, {If{pred, tmp_stmts}}}}};
         }
 
         return stmts;
@@ -729,7 +700,6 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
 
         StatementList& body = f.body;
 
-        // TODO: figure out these factors for other lengths
         auto factor_transpose_1 = (length * length) / max_factor_pp;
         auto factor_transpose_2 = length * max_factor_pp;
         auto factor_transpose_3 = length * length;
@@ -746,7 +716,6 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
                            + Parens(transpose_idx / factor_transpose_3)
                                  * (factor_transpose_3 - factor_transpose_1)};
 
-        // TODO: clean-up this expression: global_idx / factor_transpose_5 * factor_transpose_5
         body += Assign{transpose_idx,
                        transpose_idx + global_idx / factor_transpose_5 * factor_transpose_5};
 
@@ -755,12 +724,10 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
         return f;
     }
 
-    // TODO: Move this to a device function
     StatementList perform_partial_pass_step_3_4()
     {
         StatementList stmts;
 
-        // TODO: figure out factor 1 here (what happens with different in/out strides and lengths)
         stmts += Declaration{stride_lds_pp, Literal{1}};
         stmts += Declaration{offset_lds_pp, thread_id * transforms_per_block_pp};
 
@@ -768,7 +735,6 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
         auto pre_post_lds_args = device_lds_reg_inout_pp_device_call_arguments();
         pre_post_lds_tmpl.set_value(stride_type.name, "lds_linear ? SB_UNIT : SB_NONUNIT");
 
-        // TODO: handle direct_to_from_reg
         StatementList preLoad;
         preLoad += Call{"lds_to_reg_input_pp_step_3_4_length" + std::to_string(length) + "_device",
                         pre_post_lds_tmpl,
@@ -777,8 +743,7 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
 
         for(unsigned int npass = 0; npass < factors_pp.size(); ++npass)
         {
-            unsigned int width = factors_pp[npass];
-            // TODO: revisit this. Different from same function in stockham_pp_gen_rr.h
+            unsigned int width  = factors_pp[npass];
             unsigned int height = threads_per_transform / max_factor_pp;
 
             auto butterfly = std::mem_fn(&StockhamKernel::butterfly_generator);
@@ -821,7 +786,6 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
             auto tidx = cumheight - firstFactor + w - 1 + (width - 1) * (tid % cumheight);
             auto ridx = hr * width + w;
 
-            // TODO- Can try IntrinsicLoadToDest, but should not be a bottleneck
             work += Assign(W, twiddles[tidx]);
             work += Assign(t, TwiddleMultiply(R[ridx], W));
             work += Assign(R[ridx], t);
@@ -1031,7 +995,6 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
             body += Else{loadlds};
         }
 
-        // partial pass here
         body += perform_partial_pass_step_3_4();
 
         body += LineBreak{};
