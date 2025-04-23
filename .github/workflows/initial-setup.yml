@@ -35,6 +35,8 @@ jobs:
             git remote remove temp-${repo}
           done
 
+      - name: Ensure all LFS objects are downloaded
+        run: git lfs fetch --all && git lfs checkout
+
       - name: Push changes to Monorepo
-        run: |
-          git push https://${{ env.MONOREPO_URL }} ${{ env.MONOREPO_BRANCH }}
+        run: git push https://${{ env.MONOREPO_URL }} ${{ env.MONOREPO_BRANCH }}
