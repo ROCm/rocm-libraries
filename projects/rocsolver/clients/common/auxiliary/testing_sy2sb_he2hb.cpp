@@ -28,6 +28,5 @@
  #include "testing_sy2sb_he2hb.hpp"
 
  #define TESTING_SY2SB_HE2HB(...) template void testing_sy2sb_he2hb<__VA_ARGS__>(Arguments&);
- 
+
  INSTANTIATE(TESTING_SY2SB_HE2HB, FOREACH_SCALAR_TYPE, APPLY_STAMP)
- 
