@@ -1,4 +1,4 @@
-// Copyright (C) 2016 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2016 - 2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -32,11 +32,13 @@
 #include "../../../shared/gpubuf.h"
 #include "../../../shared/hip_object_wrapper.h"
 #include "../../../shared/rocfft_complex.h"
+#include "../../shared/device_properties.h"
 #include "../device/kernels/callback.h"
 #include "../device/kernels/common.h"
 #include "compute_scheme.h"
 #include "enum_printer.h"
 #include "function_map_key.h"
+#include "function_pool.h"
 #include "kargs.h"
 #include "load_store_ops.h"
 #include "rtc_kernel.h"
@@ -59,8 +61,6 @@ enum FuseType
     FT_TRANSPOSE_C2R, // transpose + pre-c2r
     FT_STOCKHAM_R2C_TRANSPOSE, // Stokham + post-r2c + transpose (Advance of FT_R2C_TRANSPOSE)
 };
-
-typedef void (*DevFnCall)(const void*, void*);
 
 struct GridParam
 {
@@ -89,8 +89,6 @@ static std::string get_arch_name(const hipDeviceProp_t& prop)
                                                        "gfx906",
                                                        "gfx908",
                                                        "gfx90a",
-                                                       "gfx940",
-                                                       "gfx941",
                                                        "gfx942",
                                                        "gfx1030",
                                                        "gfx1100",
@@ -166,6 +164,7 @@ static SchemeVec EmptySchemeVec = {};
 
 class TreeNode;
 class LeafNode;
+class function_pool;
 
 // The mininal tree node data needed to decide the scheme
 struct NodeMetaData
@@ -260,13 +259,14 @@ class TreeNode
 protected:
     TreeNode(TreeNode* p)
         : parent(p)
+        , deviceProp(p ? p->deviceProp : get_curr_device_prop())
+        , pool(deviceProp)
     {
         if(p != nullptr)
         {
-            precision  = p->precision;
-            batch      = p->batch;
-            direction  = p->direction;
-            deviceProp = p->deviceProp;
+            precision = p->precision;
+            batch     = p->batch;
+            direction = p->direction;
         }
 
         allowedOutBuf
@@ -318,9 +318,6 @@ public:
 
     // Direction of the transform (-1: forward, +1: inverse)
     int direction = -1;
-
-    // The number of padding at the end of each row in lds
-    unsigned int lds_padding = 0;
 
     // Data format parameters:
     rocfft_result_placement placement    = rocfft_placement_inplace;
@@ -403,6 +400,7 @@ public:
     UserCallbacks callbacks;
 
     hipDeviceProp_t deviceProp = {};
+    function_pool   pool;
 
     // comments inserted by optimization passes to explain changes done
     // to the node
@@ -564,7 +562,7 @@ public:
     virtual bool KernelCheck(std::vector<FMKey>& kernel_keys = EmptyFMKeyVec) = 0;
     virtual bool CreateDevKernelArgs()                                        = 0;
     virtual bool CreateDeviceResources()                                      = 0;
-    virtual void SetupGridParamAndFuncPtr(DevFnCall& fnPtr, GridParam& gp)    = 0;
+    virtual void SetupGridParam(GridParam& gp)                                = 0;
 
     // for 3D SBRC kernels, decide the transpose type based on the
     // block width and lengths that the block tiles need to align on.
@@ -625,9 +623,9 @@ protected:
         return false;
     }
 
-    void SetupGridParamAndFuncPtr(DevFnCall& fnPtr, GridParam& gp) override
+    void SetupGridParam(GridParam& gp) override
     {
-        throw std::runtime_error("Shouldn't call SetupGridParamAndFuncPtr in a non-LeafNode");
+        throw std::runtime_error("Shouldn't call SetupGridParam in a non-LeafNode");
     }
 
 public:
@@ -672,7 +670,7 @@ public:
     {
         return 0;
     }
-    virtual void SetupGPAndFnPtr_internal(DevFnCall& fnPtr, GridParam& gp) = 0;
+    virtual void SetupGridParam_internal(GridParam& gp) = 0;
 
 public:
     // leaf node would print additional informations about kernel setting
@@ -682,7 +680,7 @@ public:
                              std::vector<FMKey>& kernel_keys     = EmptyFMKeyVec) override;
     virtual bool CreateDevKernelArgs() override;
     bool         CreateDeviceResources() override;
-    void         SetupGridParamAndFuncPtr(DevFnCall& fnPtr, GridParam& gp) override;
+    void         SetupGridParam(GridParam& gp) override;
     FMKey        GetKernelKey() const override;
     virtual void GetKernelFactors();
     virtual void GetKernelPartialPassFactors();
@@ -704,7 +702,7 @@ protected:
         allowInplace = false;
     }
 
-    void SetupGPAndFnPtr_internal(DevFnCall& fnPtr, GridParam& gp) override;
+    void SetupGridParam_internal(GridParam& gp) override;
 
 public:
     // Transpose tiles read more row-ish and write more column-ish.  So
@@ -1016,19 +1014,35 @@ struct MultiPlanItem
 // Communication operations
 struct CommPointToPoint : public MultiPlanItem
 {
-    rocfft_precision  precision;
-    rocfft_array_type arrayType;
-
-    // number of elements to copy
-    size_t numElems;
-
-    rocfft_location_t srcLocation;
-    BufferPtr         srcPtr;
-    size_t            srcOffset = 0;
-
-    rocfft_location_t destLocation;
-    BufferPtr         destPtr;
-    size_t            destOffset = 0;
+    CommPointToPoint(int               local_comm_rank,
+                     rocfft_precision  _precision,
+                     rocfft_array_type _arrayType,
+                     size_t            _numElems,
+                     rocfft_location_t _srcLocation,
+                     BufferPtr         _srcPtr,
+                     size_t            _srcOffset,
+                     rocfft_location_t _destLocation,
+                     BufferPtr         _destPtr,
+                     size_t            _destOffset)
+        : precision(_precision)
+        , arrayType(_arrayType)
+        , numElems(_numElems)
+        , srcLocation(_srcLocation)
+        , srcPtr(_srcPtr)
+        , srcOffset(_srcOffset)
+        , destLocation(_destLocation)
+        , destPtr(_destPtr)
+        , destOffset(_destOffset)
+    {
+        // same-rank communication needs a stream and event to signal completion
+        if(local_comm_rank == srcLocation.comm_rank
+           && srcLocation.comm_rank == destLocation.comm_rank)
+        {
+            rocfft_scoped_device dev(srcLocation.device);
+            stream.alloc();
+            event.alloc();
+        }
+    }
 
     void ExecuteAsync(const rocfft_plan     plan,
                       void*                 in_buffer[],
@@ -1050,6 +1064,19 @@ struct CommPointToPoint : public MultiPlanItem
     }
 
 private:
+    rocfft_precision  precision;
+    rocfft_array_type arrayType;
+
+    // number of elements to copy
+    size_t numElems;
+
+    rocfft_location_t srcLocation;
+    BufferPtr         srcPtr;
+    size_t            srcOffset = 0;
+
+    rocfft_location_t destLocation;
+    BufferPtr         destPtr;
+    size_t            destOffset = 0;
     // Stream to run the async operation in
     hipStream_wrapper_t stream;
     // Event to signal when the async operations are finished.
@@ -1060,11 +1087,17 @@ private:
 // create an MPI group with those ranks.
 struct CommScatter : public MultiPlanItem
 {
-    rocfft_precision  precision;
-    rocfft_array_type arrayType;
+    CommScatter(rocfft_precision  _precision,
+                rocfft_array_type _arrayType,
 
-    rocfft_location_t srcLocation;
-    BufferPtr         srcPtr;
+                rocfft_location_t _srcLocation,
+                BufferPtr         _srcPtr)
+        : precision(_precision)
+        , arrayType(_arrayType)
+        , srcLocation(_srcLocation)
+        , srcPtr(_srcPtr)
+    {
+    }
 
     // one or more ranks to send data to
     struct ScatterOp
@@ -1091,7 +1124,22 @@ struct CommScatter : public MultiPlanItem
         // Number of elements to copy
         size_t numElems;
     };
-    std::vector<ScatterOp> ops;
+
+    // add an operation to scatter to a destination
+    void AddOperation(int local_comm_rank, ScatterOp&& op)
+    {
+        // same-rank communication needs a stream and event to signal completion
+        if(srcLocation.comm_rank == local_comm_rank
+           && op.destLocation.comm_rank == srcLocation.comm_rank)
+        {
+            rocfft_scoped_device dev(srcLocation.device);
+            if(!stream)
+                stream.alloc();
+            if(!event)
+                event.alloc();
+        }
+        ops.emplace_back(std::move(op));
+    }
 
     void ExecuteAsync(const rocfft_plan     plan,
                       void*                 in_buffer[],
@@ -1121,6 +1169,13 @@ struct CommScatter : public MultiPlanItem
     }
 
 private:
+    rocfft_precision  precision;
+    rocfft_array_type arrayType;
+    rocfft_location_t srcLocation;
+    BufferPtr         srcPtr;
+
+    std::vector<ScatterOp> ops;
+
     // Stream to run the async operations in
     hipStream_wrapper_t stream;
     // Event to signal when the async operations are finished.
@@ -1131,11 +1186,17 @@ private:
 // create an MPI group with those ranks.
 struct CommGather : public MultiPlanItem
 {
-    rocfft_precision  precision;
-    rocfft_array_type arrayType;
-
-    rocfft_location_t destLocation;
-    BufferPtr         destPtr;
+    CommGather(int               local_comm_rank,
+               rocfft_precision  _precision,
+               rocfft_array_type _arrayType,
+               rocfft_location_t _destLocation,
+               BufferPtr         _destPtr)
+        : precision(_precision)
+        , arrayType(_arrayType)
+        , destLocation(_destLocation)
+        , destPtr(_destPtr)
+    {
+    }
 
     // one or more ranks to get data from
     struct GatherOp
@@ -1162,7 +1223,27 @@ struct CommGather : public MultiPlanItem
         // Number of elements to copy
         size_t numElems;
     };
-    std::vector<GatherOp> ops;
+
+    // add an operation to gather from a source
+    void AddOperation(int local_comm_rank, GatherOp&& op)
+    {
+        // allocate space to allow each gather operation to have a
+        // stream/event, though we only allocate streams/events for
+        // rank-local communication
+        streams.resize(streams.size() + 1);
+        events.resize(events.size() + 1);
+
+        // look at the actual operation and allocate stream/event for
+        // rank-local communication, so we can get completion information
+        if(destLocation.comm_rank == op.srcLocation.comm_rank
+           && op.srcLocation.comm_rank == local_comm_rank)
+        {
+            rocfft_scoped_device dev(op.srcLocation.device);
+            streams.back().alloc();
+            events.back().alloc();
+        }
+        ops.emplace_back(std::move(op));
+    }
 
     void ExecuteAsync(const rocfft_plan     plan,
                       void*                 in_buffer[],
@@ -1185,6 +1266,15 @@ struct CommGather : public MultiPlanItem
                       return op.srcLocation.comm_rank == comm_rank;
                   });
     }
+
+private:
+    rocfft_precision  precision;
+    rocfft_array_type arrayType;
+
+    rocfft_location_t destLocation;
+    BufferPtr         destPtr;
+
+    std::vector<GatherOp> ops;
 
     // Streams to run the async operations in - since each memcpy is
     // coming from a different source device, each needs a separate
@@ -1242,6 +1332,23 @@ struct CommAllToAllv : public MultiPlanItem
 // memory allocated for things like kernel arguments and twiddles.
 struct ExecPlan : public MultiPlanItem
 {
+    ExecPlan(int local_comm_rank, bool _mgpuPlan, rocfft_location_t _location)
+        : location(_location)
+        , mgpuPlan(_mgpuPlan)
+    {
+        // in a multi-GPU plan, this plan is just one piece of the overall
+        // distributed FFT.  need to allocate stream/event for completion
+        // signalling
+        if(mgpuPlan && location.comm_rank == local_comm_rank)
+        {
+            // if the user provides a stream for us at execute time, we
+            // might not use this stream.  but allocate it during plan
+            // creation because it can be slow to do it during execution
+            rocfft_scoped_device dev(location.device);
+            stream.alloc();
+            event.alloc();
+        }
+    }
     // device where this work will be executed
     rocfft_location_t location;
 
@@ -1288,7 +1395,6 @@ struct ExecPlan : public MultiPlanItem
     // flattened potentially-fusable shims of rootPlan
     std::vector<FuseShim*> fuseShims;
 
-    std::vector<DevFnCall> devFnCall;
     std::vector<GridParam> gridParam;
 
     hipDeviceProp_t deviceProp;

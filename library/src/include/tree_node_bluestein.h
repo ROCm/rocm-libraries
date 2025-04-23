@@ -41,7 +41,8 @@ protected:
     BluesteinType DecideBlueType();
 
 public:
-    static size_t FindBlue(size_t len, rocfft_precision precision, bool forcePow2);
+    static size_t
+        FindBlue(const function_pool& pool, size_t len, rocfft_precision precision, bool forcePow2);
 };
 
 /*****************************************************
@@ -55,12 +56,12 @@ class BluesteinSingleNode : public LeafNode
 protected:
     BluesteinSingleNode(TreeNode* p, ComputeScheme s);
 
-    void   SetupGPAndFnPtr_internal(DevFnCall& fnPtr, GridParam& gp) override{};
+    void   SetupGridParam_internal(GridParam& gp) override{};
     size_t GetTwiddleTableLength() override;
 
 public:
     // check if the specified 1D length fits into single-kernel Bluestein
-    static bool SizeFits(size_t length, rocfft_precision precision);
+    static bool SizeFits(const function_pool& pool, size_t length, rocfft_precision precision);
 
     bool KernelCheck(std::vector<FMKey>& kernel_keys = EmptyFMKeyVec) override
     {
@@ -100,7 +101,7 @@ protected:
         }
     }
 
-    void SetupGPAndFnPtr_internal(DevFnCall& fnPtr, GridParam& gp) override{};
+    void SetupGridParam_internal(GridParam& gp) override{};
 };
 
 #endif // TREE_NODE_BLUE_H

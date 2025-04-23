@@ -130,12 +130,10 @@ struct StockhamKernelRC : public StockhamKernel
         return work;
     }
 
-    // we currently only use LDS padding for SBRC_3D_FFT_ERC_TRANS_Z_XY, so
-    // there's no reason to look at the lds_padding parameter
-    // otherwise.
+    // embedded real-complex needs one extra element per row
     Expression get_lds_padding() override
     {
-        return Ternary{sbrc_type != "SBRC_3D_FFT_ERC_TRANS_Z_XY", 0, lds_padding};
+        return Ternary{sbrc_type != "SBRC_3D_FFT_ERC_TRANS_Z_XY", 0, 1};
     }
 
     StatementList calculate_offsets() override

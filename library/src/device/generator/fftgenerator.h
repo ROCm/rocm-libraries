@@ -350,7 +350,6 @@ struct FFTComputeOffsets
         stmts += Assign(batch, remaining);
         stmts += Assign(offset, offset + batch * stride[dim]);
         stmts += Assign(write, Literal{"true"});
-        //        stmts += Assign(offset_lds, (lengths[0] + lds_padding) * (transform % batches_per_block));
         stmts += Assign(offset_lds, length0 * (transform % transforms_per_block));
         stmts += If(batch >= nbatch, {Return()});
 
@@ -1363,7 +1362,6 @@ struct StockhamTransform
     Variable batch{"batch", "size_t"};
 
     Variable twiddles{"twiddles", "const scalar_type", true, true};
-    Variable lds_padding{"lds_padding", "unsigned int"};
     Variable load_cb_fn{"load_cb_fn", "void*"};
     Variable load_cb_data{"load_cb_data", "void*"};
     Variable load_cb_lds_bytes{"load_cb_lds_bytes", "unsigned int"};
@@ -1383,7 +1381,6 @@ struct StockhamTransform
         context->add_argument(lengths);
         context->add_argument(stride);
         context->add_argument(nbatch);
-        context->add_argument(lds_padding);
         context->add_argument(load_cb_fn);
         context->add_argument(load_cb_data);
         context->add_argument(load_cb_lds_bytes);
@@ -1455,7 +1452,6 @@ struct StockhamDeviceTransform
     Variable batch{"batch", "size_t"};
 
     Variable twiddles{"twiddles", "scalar_type", true, true};
-    Variable lds_padding{"lds_padding", "unsigned int"};
     Variable load_cb_fn{"load_cb_fn", "void*"};
     Variable load_cb_data{"load_cb_data", "void*"};
     Variable load_cb_lds_bytes{"load_cb_lds_bytes", "unsigned int"};
@@ -1475,7 +1471,6 @@ struct StockhamDeviceTransform
         context->add_argument(lengths);
         context->add_argument(stride);
         context->add_argument(nbatch);
-        context->add_argument(lds_padding);
         context->add_argument(load_cb_fn);
         context->add_argument(load_cb_data);
         context->add_argument(load_cb_lds_bytes);
@@ -1557,7 +1552,6 @@ struct BluesteinTransform
 
     Variable buf_temp{"buf_temp", "scalar_type", true, true};
     Variable twiddles{"twiddles", "const scalar_type", true, true};
-    Variable lds_padding{"lds_padding", "unsigned int"};
 
     BluesteinTransform(unsigned int              length,
                        unsigned int              lengthBlue,
@@ -1579,7 +1573,6 @@ struct BluesteinTransform
         context->add_argument(lengths);
         context->add_argument(stride);
         context->add_argument(nbatch);
-        context->add_argument(lds_padding);
         context->add_argument(X.variable());
         R.size = compute_nregisters(lengthBlue, factors, threads_per_transform);
 

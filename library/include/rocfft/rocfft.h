@@ -546,10 +546,10 @@ ROCFFT_EXPORT rocfft_status rocfft_execution_info_set_stream(rocfft_execution_in
  *  Load callbacks have the following signature:
  *
  *  @code
- *  T load_cb(T* data, size_t offset, void* cbdata, void* sharedMem);
+ *  Tdata load_cb(Tdata* data, size_t offset, void* cbdata, void* sharedMem);
  *  @endcode
  *
- *  'T' is the type of a single element of the input buffer.  It is
+ *  'Tdata' is the type of a single element of the input buffer.  It is
  *  the caller's responsibility to ensure that the function type is
  *  appropriate for the plan (for example, a single-precision
  *  real-to-complex transform would load single-precision real
@@ -586,10 +586,10 @@ ROCFFT_EXPORT rocfft_status rocfft_execution_info_set_load_callback(rocfft_execu
  *  Store callbacks have the following signature:
  *
  *  @code
- *  void store_cb(T* data, size_t offset, T element, void* cbdata, void* sharedMem);
+ *  void store_cb(Tdata* data, size_t offset, Tdata element, void* cbdata, void* sharedMem);
  *  @endcode
  *
- *  'T' is the type of a single element of the output buffer.  It is
+ *  'Tdata' is the type of a single element of the output buffer.  It is
  *  the caller's responsibility to ensure that the function type is
  *  appropriate for the plan (for example, a single-precision
  *  real-to-complex transform would store single-precision complex

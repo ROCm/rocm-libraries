@@ -5,16 +5,16 @@
 .. _api-usage:
 
 ********************************************************************
-API Usage
+API usage
 ********************************************************************
 
-This section describes usage of the rocFFT library API.
+This section describes how to use the rocFFT library API.
 
 Types
 =====
 
 There are a few data structures that are internal to the library. The pointer types to these
-structures are given below. The user would need to use these types to create handles and pass them
+structures are listed below. Use these types to create handles and pass them
 between different library functions.
 
 .. doxygentypedef:: rocfft_plan
@@ -23,10 +23,10 @@ between different library functions.
 
 .. doxygentypedef:: rocfft_execution_info
 
-Library Setup and Cleanup
+Library setup and cleanup
 =========================
 
-The following functions deal with initialization and cleanup of the library.
+The following functions handle initialization and cleanup of the library.
 
 .. doxygenfunction:: rocfft_setup
 
@@ -51,11 +51,11 @@ Plan description
 ================
 
 Most of the time, :cpp:func:`rocfft_plan_create` is able to fully
-specify a transform.  Advanced plan details such as strides and
-offsets require creation of a plan description object, which is
+specify a transform. However, advanced plan details such as strides and
+offsets require the creation of a plan description object, which is
 configured and passed to the :cpp:func:`rocfft_plan_create` function.
 
-The plan description object can be safely destroyed after it is given
+The plan description object can be safely destroyed after it is passed
 to the :cpp:func:`rocfft_plan_create` function.
 
 .. doxygenfunction:: rocfft_plan_description_create
@@ -69,10 +69,10 @@ to the :cpp:func:`rocfft_plan_create` function.
 Execution
 =========
 
-After a plan has been created, it can be executed using the
-:cpp:func:`rocfft_execute` function,
-to compute a transform on specified data. Aspects of the execution can be controlled and any useful
-information returned to the user.
+After creating a plan, execute it using the
+:cpp:func:`rocfft_execute` function.
+This function computes a transform on the specified data. It provides control over the execution and returns useful
+information.
 
 .. doxygenfunction:: rocfft_execute
 
@@ -96,37 +96,37 @@ information such as the work buffer and compute stream for the transform.
 
 .. _hip-graph-support-for-rocfft:
 
-HIP graph Support for rocFFT
+HIP graph support for rocFFT
 ============================
 
 rocFFT supports capturing kernels launched by
-:cpp:func:`rocfft_execute` into HIP graph nodes.  This way, users can
-capture FFT execution, along with other work, into a HIP graph and
-launch the work in the graph multiple times.
+:cpp:func:`rocfft_execute` into HIP graph nodes. This approach
+captures the FFT execution and other work into a HIP graph and
+launches the work in the graph multiple times.
 
 Graph capture is only supported for single-process transforms.
-Multi-process transforms such as those that use Message Passing
-Interface cannot use graph capture, as rocFFT performs inter-process
+Multi-process transforms, such as those that use Message Passing
+Interface, cannot use graph capture because rocFFT performs inter-process
 communication in addition to launching kernels.
 
-Note that each launch of a HIP graph will provide the same arguments
+Each launch of a HIP graph provides the same arguments
 to the kernels in the graph.  In particular, this implies that all of
 the parameters to :cpp:func:`rocfft_execute` remain valid while the
-HIP graph is in use:
+HIP graph is in use, including the following:
 
 * The rocFFT plan
 
 * The input and output buffers
 
-* The :cpp:type:`rocfft_execution_info` object, if one was provided
+* The :cpp:type:`rocfft_execution_info` object, if provided
 
 rocFFT does not support capturing work performed by other API
-functions aside from :cpp:func:`rocfft_execute` into HIP graphs.
+functions, aside from :cpp:func:`rocfft_execute`, into HIP graphs.
 
 Enumerations
 ============
 
-This section provides all the enumerations used.
+This section lists all the enumerations that are used.
 
 .. doxygenenum:: rocfft_status
 

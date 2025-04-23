@@ -219,12 +219,13 @@ inline bool reverse_factors(size_t length)
 }
 
 // Search function pool for length where is_supported_factor(length) returns true.
-inline size_t search_pool(rocfft_precision                   precision,
+inline size_t search_pool(const function_pool&               pool,
+                          rocfft_precision                   precision,
                           size_t                             length,
                           const std::function<bool(size_t)>& is_supported_factor)
 {
     // query supported lengths from function pool, largest to smallest
-    auto supported  = function_pool::get_lengths(precision, CS_KERNEL_STOCKHAM);
+    auto supported  = pool.get_lengths(precision, CS_KERNEL_STOCKHAM);
     auto comparison = std::greater<size_t>();
     std::sort(supported.begin(), supported.end(), comparison);
 
@@ -248,30 +249,35 @@ inline size_t search_pool(rocfft_precision                   precision,
 }
 
 // Return largest factor that has BOTH functions in the pool.
-inline size_t get_explicitly_supported_factor(rocfft_precision precision, size_t length)
+inline size_t get_explicitly_supported_factor(const function_pool& pool,
+                                              rocfft_precision     precision,
+                                              size_t               length)
 {
-    auto supported_factor = [length, precision = precision](size_t factor) -> bool {
+    auto supported_factor = [length, precision, &pool](size_t factor) -> bool {
         bool is_factor        = length % factor == 0;
-        bool has_other_kernel = function_pool::has_function(FMKey(length / factor, precision));
+        bool has_other_kernel = pool.has_function(FMKey(length / factor, precision));
         return is_factor && has_other_kernel;
     };
-    auto factor = search_pool(precision, length, supported_factor);
+    auto factor = search_pool(pool, precision, length, supported_factor);
     if(factor > 0 && reverse_factors(length))
         return length / factor;
     return factor;
 }
 
 // Return largest factor that has a function in the pool.
-inline size_t get_largest_supported_factor(rocfft_precision precision, size_t length)
+inline size_t get_largest_supported_factor(const function_pool& pool,
+                                           rocfft_precision     precision,
+                                           size_t               length)
 {
     auto supported_factor = [length](size_t factor) -> bool {
         bool is_factor = length % factor == 0;
         return is_factor;
     };
-    return search_pool(precision, length, supported_factor);
+    return search_pool(pool, precision, length, supported_factor);
 }
 
-bool NodeFactory::Large1DLengthsValid(const NodeFactory::Map1DLength& map1DLength,
+bool NodeFactory::Large1DLengthsValid(const function_pool&            pool,
+                                      const NodeFactory::Map1DLength& map1DLength,
                                       rocfft_precision                precision)
 {
     for(const auto& pair : map1DLength)
@@ -279,10 +285,10 @@ bool NodeFactory::Large1DLengthsValid(const NodeFactory::Map1DLength& map1DLengt
         if(pair.first % pair.second != 0)
             return false;
 
-        if(!function_pool::has_SBCC_kernel(pair.second, precision))
+        if(!pool.has_SBCC_kernel(pair.second, precision))
             return false;
 
-        if(!function_pool::has_SBRC_kernel(pair.first / pair.second, precision))
+        if(!pool.has_SBRC_kernel(pair.first / pair.second, precision))
             return false;
     }
 
@@ -290,17 +296,19 @@ bool NodeFactory::Large1DLengthsValid(const NodeFactory::Map1DLength& map1DLengt
 }
 
 // helper to check 1d length maps at most once per process
-bool NodeFactory::CheckLarge1DMaps()
+bool NodeFactory::CheckLarge1DMaps(const function_pool& pool)
 {
-    static bool singleValid
-        = NodeFactory::Large1DLengthsValid(NodeFactory::map1DLengthSingle, rocfft_precision_single);
-    static bool doubleValid
-        = NodeFactory::Large1DLengthsValid(NodeFactory::map1DLengthDouble, rocfft_precision_double);
+    static bool singleValid = NodeFactory::Large1DLengthsValid(
+        pool, NodeFactory::map1DLengthSingle, rocfft_precision_single);
+    static bool doubleValid = NodeFactory::Large1DLengthsValid(
+        pool, NodeFactory::map1DLengthDouble, rocfft_precision_double);
     return singleValid && doubleValid;
 }
 
 // Checks whether the non-pow2 length input is supported for a Bluestein compute scheme
-bool NodeFactory::NonPow2LengthSupported(rocfft_precision precision, size_t length)
+bool NodeFactory::NonPow2LengthSupported(const function_pool& pool,
+                                         rocfft_precision     precision,
+                                         size_t               length)
 {
     // assume half precision behaves the same as single
     if(precision == rocfft_precision_half)
@@ -318,10 +326,10 @@ bool NodeFactory::NonPow2LengthSupported(rocfft_precision precision, size_t leng
         return false;
 
     // Look for regular Stockham kernels support
-    if(function_pool::has_function(FMKey(length, precision)))
+    if(pool.has_function(FMKey(length, precision)))
         return true;
 
-    assert(CheckLarge1DMaps());
+    assert(CheckLarge1DMaps(pool));
 
     // and for supported block CC + RC Stockham decompositions
     if(precision == rocfft_precision_single
@@ -334,15 +342,18 @@ bool NodeFactory::NonPow2LengthSupported(rocfft_precision precision, size_t leng
     return false;
 }
 
-size_t NodeFactory::GetBluesteinLength(rocfft_precision precision, size_t len)
+size_t NodeFactory::GetBluesteinLength(const function_pool& pool,
+                                       rocfft_precision     precision,
+                                       size_t               len)
 {
-    return BluesteinNode::FindBlue(len, precision, BluesteinSingleNode::SizeFits(len, precision));
+    return BluesteinNode::FindBlue(
+        pool, len, precision, BluesteinSingleNode::SizeFits(pool, len, precision));
 }
 
-bool NodeFactory::SupportedLength(rocfft_precision precision, size_t len)
+bool NodeFactory::SupportedLength(const function_pool& pool, rocfft_precision precision, size_t len)
 {
     // do we have an explicit kernel?
-    if(function_pool::has_function(FMKey(len, precision)))
+    if(pool.has_function(FMKey(len, precision)))
         return true;
 
     // can we factor with using only base radix?
@@ -366,11 +377,11 @@ bool NodeFactory::SupportedLength(rocfft_precision precision, size_t len)
         return true;
 
     // do we have an explicit kernel for the remainder?
-    if(function_pool::has_function(FMKey(p, precision)))
+    if(pool.has_function(FMKey(p, precision)))
         return true;
 
     // finally, can we factor this length with combinations of existing kernels?
-    if(get_explicitly_supported_factor(precision, len) > 0)
+    if(get_explicitly_supported_factor(pool, precision, len) > 0)
         return true;
 
     return false;
@@ -475,6 +486,8 @@ std::unique_ptr<TreeNode> NodeFactory::CreateExplicitNode(NodeMetaData& nodeData
                                                           TreeNode*     parent,
                                                           ComputeScheme determined_scheme)
 {
+    function_pool pool{nodeData.deviceProp};
+
     // when creating tree from solution map, scheme is L1D but not root
     // NB:
     //   Why we need this:
@@ -492,14 +505,14 @@ std::unique_ptr<TreeNode> NodeFactory::CreateExplicitNode(NodeMetaData& nodeData
         || determined_scheme == CS_L1D_CRT)
        && (parent != nullptr))
     {
-        auto s = DecideNodeScheme(nodeData, parent);
+        auto s = DecideNodeScheme(pool, nodeData, parent);
         if(determined_scheme != s)
             throw std::runtime_error("solution map error for L1D sub-problem");
     }
 
     // createing tree without solution map, must call DecideNodeScheme
     if(determined_scheme == CS_NONE)
-        determined_scheme = DecideNodeScheme(nodeData, parent);
+        determined_scheme = DecideNodeScheme(pool, nodeData, parent);
 
     // check if successfully created
     if(determined_scheme == CS_NONE)
@@ -536,23 +549,25 @@ std::unique_ptr<FuseShim> NodeFactory::CreateFuseShim(FuseType                  
     }
 }
 
-ComputeScheme NodeFactory::DecideNodeScheme(NodeMetaData& nodeData, TreeNode* parent)
+ComputeScheme NodeFactory::DecideNodeScheme(const function_pool& pool,
+                                            NodeMetaData&        nodeData,
+                                            TreeNode*            parent)
 {
     if((parent == nullptr)
        && ((nodeData.inArrayType == rocfft_array_type_real)
            || (nodeData.outArrayType == rocfft_array_type_real)))
     {
-        return DecideRealScheme(nodeData);
+        return DecideRealScheme(pool, nodeData);
     }
 
     switch(nodeData.dimension)
     {
     case 1:
-        return Decide1DScheme(nodeData);
+        return Decide1DScheme(pool, nodeData);
     case 2:
-        return Decide2DScheme(nodeData);
+        return Decide2DScheme(pool, nodeData);
     case 3:
-        return Decide3DScheme(nodeData);
+        return Decide3DScheme(pool, nodeData);
     default:
         throw std::runtime_error("Invalid dimension");
     }
@@ -560,7 +575,7 @@ ComputeScheme NodeFactory::DecideNodeScheme(NodeMetaData& nodeData, TreeNode* pa
     return CS_NONE;
 }
 
-ComputeScheme NodeFactory::DecideRealScheme(NodeMetaData& nodeData)
+ComputeScheme NodeFactory::DecideRealScheme(const function_pool& pool, NodeMetaData& nodeData)
 {
     // use size in real units to decide what scheme to use
     const auto& realLength = nodeData.direction == -1 ? nodeData.length : nodeData.outputLength;
@@ -583,15 +598,15 @@ ComputeScheme NodeFactory::DecideRealScheme(NodeMetaData& nodeData)
     return CS_REAL_TRANSFORM_USING_CMPLX;
 }
 
-ComputeScheme NodeFactory::Decide1DScheme(NodeMetaData& nodeData)
+ComputeScheme NodeFactory::Decide1DScheme(const function_pool& pool, NodeMetaData& nodeData)
 {
     ComputeScheme scheme = CS_NONE;
 
     // Build a node for a 1D FFT
-    if(!SupportedLength(nodeData.precision, nodeData.length[0]))
+    if(!SupportedLength(pool, nodeData.precision, nodeData.length[0]))
         return CS_BLUESTEIN;
 
-    if(function_pool::has_function(FMKey(nodeData.length[0], nodeData.precision)))
+    if(pool.has_function(FMKey(nodeData.length[0], nodeData.precision)))
     {
         return CS_KERNEL_STOCKHAM;
     }
@@ -643,7 +658,7 @@ ComputeScheme NodeFactory::Decide1DScheme(NodeMetaData& nodeData)
         }
         else
         {
-            auto largest = function_pool::get_largest_length(nodeData.precision);
+            auto largest = pool.get_largest_length(nodeData.precision);
             // need to ignore len 1, or we're going into a infinity decompostion loop
             // basically not gonna happen unless someone builds only a len1 kernel...
             if(largest <= 1)
@@ -705,14 +720,15 @@ ComputeScheme NodeFactory::Decide1DScheme(NodeMetaData& nodeData)
 
         if(failed)
         {
-            scheme     = CS_L1D_TRTRT;
-            divLength1 = get_explicitly_supported_factor(nodeData.precision, nodeData.length[0]);
+            scheme = CS_L1D_TRTRT;
+            divLength1
+                = get_explicitly_supported_factor(pool, nodeData.precision, nodeData.length[0]);
             if(divLength1 == 0)
             {
                 // We need to recurse.  Note, for CS_L1D_TRTRT,
                 // divLength0 has to be explictly supported
                 auto divLength0
-                    = get_largest_supported_factor(nodeData.precision, nodeData.length[0]);
+                    = get_largest_supported_factor(pool, nodeData.precision, nodeData.length[0]);
 
                 // should ignore factor 1 or we're going into a infinity decompostion loop,
                 // (an example is to run len-81 when we build only pow2 kernels, we'll be here)
@@ -737,29 +753,29 @@ ComputeScheme NodeFactory::Decide1DScheme(NodeMetaData& nodeData)
     return scheme;
 }
 
-ComputeScheme NodeFactory::Decide2DScheme(NodeMetaData& nodeData)
+ComputeScheme NodeFactory::Decide2DScheme(const function_pool& pool, NodeMetaData& nodeData)
 {
     // First choice is 2D_SINGLE kernel, if the problem will fit into LDS.
     // Next best is CS_2D_RC. Last resort is RTRT.
-    if(use_CS_2D_SINGLE(nodeData))
+    if(use_CS_2D_SINGLE(pool, nodeData))
         return CS_KERNEL_2D_SINGLE; // the node has all build info
-    else if(use_CS_2D_RC(nodeData))
+    else if(use_CS_2D_RC(pool, nodeData))
         return CS_2D_RC;
     else
         return CS_2D_RTRT;
 }
 
 // check if we want to use SBCR solution
-static bool Apply_SBCR(NodeMetaData& nodeData)
+static bool Apply_SBCR(const function_pool& pool, NodeMetaData& nodeData)
 {
     // NB:
     //   We enable SBCR for limited problem sizes in kernel-generator.py.
     //   Will enable it for non-unit stride cases later.
     return (((is_device_gcn_arch(nodeData.deviceProp, "gfx908")
               || is_device_gcn_arch(nodeData.deviceProp, "gfx90a"))
-             && function_pool::has_SBCR_kernel(nodeData.length[0], nodeData.precision)
-             && function_pool::has_SBCR_kernel(nodeData.length[1], nodeData.precision)
-             && function_pool::has_SBCR_kernel(nodeData.length[2], nodeData.precision)
+             && pool.has_SBCR_kernel(nodeData.length[0], nodeData.precision)
+             && pool.has_SBCR_kernel(nodeData.length[1], nodeData.precision)
+             && pool.has_SBCR_kernel(nodeData.length[2], nodeData.precision)
              && (nodeData.placement == rocfft_placement_notinplace)
              && (nodeData.inStride[0] == 1 && nodeData.outStride[0] == 1 // unit strides
                  && nodeData.inStride[1] == nodeData.length[0]
@@ -768,18 +784,18 @@ static bool Apply_SBCR(NodeMetaData& nodeData)
                  && nodeData.outStride[2] == nodeData.outStride[1] * nodeData.length[1])));
 }
 
-ComputeScheme NodeFactory::Decide3DScheme(NodeMetaData& nodeData)
+ComputeScheme NodeFactory::Decide3DScheme(const function_pool& pool, NodeMetaData& nodeData)
 {
     // this flag can be enabled when generator can do block column fft in
     // multi-dimension cases and small 2d, 3d within one kernel
     bool MultiDimFuseKernelsAvailable = false;
 
     // try 3 SBCR kernels first
-    if(Apply_SBCR(nodeData))
+    if(Apply_SBCR(pool, nodeData))
     {
         return CS_3D_BLOCK_CR;
     }
-    else if(use_CS_3D_RC(nodeData))
+    else if(use_CS_3D_RC(pool, nodeData))
     {
         return CS_3D_RC;
     }
@@ -796,7 +812,7 @@ ComputeScheme NodeFactory::Decide3DScheme(NodeMetaData& nodeData)
     else
     {
         // if we can get down to 3 or 4 kernels via SBRC, prefer that
-        if(use_CS_3D_BLOCK_RC(nodeData))
+        if(use_CS_3D_BLOCK_RC(pool, nodeData))
             return CS_3D_BLOCK_RC;
 
         // else, 3D_RTRT
@@ -807,7 +823,7 @@ ComputeScheme NodeFactory::Decide3DScheme(NodeMetaData& nodeData)
         NodeMetaData child0 = nodeData;
         child0.length       = nodeData.length;
         child0.dimension    = 2;
-        auto childScheme    = DecideNodeScheme(child0, nullptr);
+        auto childScheme    = DecideNodeScheme(pool, child0, nullptr);
 
         // TODO: investigate those SBCC kernels (84,108,112,168)
         //       in 3D C2C transforms, using 3D_RTRT (2D_RC + TRT) is slower than
@@ -833,71 +849,49 @@ ComputeScheme NodeFactory::Decide3DScheme(NodeMetaData& nodeData)
     // TODO: CS_KERNEL_3D_SINGLE?
 }
 
-bool NodeFactory::use_CS_2D_SINGLE(NodeMetaData& nodeData)
+bool NodeFactory::use_CS_2D_SINGLE(const function_pool& pool, NodeMetaData& nodeData)
 {
-    if(!function_pool::has_function(
+    if(!pool.has_function(
+
            FMKey(nodeData.length[0], nodeData.length[1], nodeData.precision, CS_KERNEL_2D_SINGLE)))
         return false;
 
     // Get actual LDS size, to check if we can run a 2D_SINGLE
     // kernel that will fit the problem into LDS.
-    //
-    // NOTE: This is potentially problematic in a heterogeneous
-    // multi-device environment.  The device we query now could
-    // differ from the device we run the plan on.  That said,
-    // it's vastly more common to have multiples of the same
-    // device in the real world.
-    int ldsSize;
-    int deviceid;
-    // if this fails, device 0 is a reasonable default
-    if(hipGetDevice(&deviceid) != hipSuccess)
-    {
-        log_trace(__func__, "warning", "hipGetDevice failed - using device 0");
-        deviceid = 0;
-    }
-    // if this fails, giving 0 to Single2DSizes will assume
-    // normal size for contemporary hardware
-    if(hipDeviceGetAttribute(&ldsSize, hipDeviceAttributeMaxSharedMemoryPerMultiprocessor, deviceid)
-       != hipSuccess)
-    {
-        log_trace(__func__,
-                  "warning",
-                  "hipDeviceGetAttribute failed - assuming normal LDS size for current hardware");
-        ldsSize = 0;
-    }
+    auto ldsSize = nodeData.deviceProp.sharedMemPerBlock;
 
-    auto kernel = function_pool::get_kernel(
+    auto kernel = pool.get_kernel(
         FMKey(nodeData.length[0], nodeData.length[1], nodeData.precision, CS_KERNEL_2D_SINGLE));
 
-    int ldsUsage = nodeData.length[0] * nodeData.length[1] * kernel.transforms_per_block
-                   * complex_type_size(nodeData.precision);
+    auto ldsUsage = nodeData.length[0] * nodeData.length[1] * kernel.transforms_per_block
+                    * complex_type_size(nodeData.precision);
     if(1.5 * ldsUsage > ldsSize)
         return false;
 
     return true;
 }
 
-bool NodeFactory::use_CS_2D_RC(NodeMetaData& nodeData)
+bool NodeFactory::use_CS_2D_RC(const function_pool& pool, NodeMetaData& nodeData)
 {
     // Do not allow SBCC for (192,y) problems, not the
     // fastest compute scheme for this configuration.
     if(nodeData.length[1] == 192)
         return false;
-    else if(function_pool::has_SBCC_kernel(nodeData.length[1], nodeData.precision))
+    else if(pool.has_SBCC_kernel(nodeData.length[1], nodeData.precision))
         return nodeData.length[0] >= 56;
 
     return false;
 }
 
-size_t NodeFactory::count_3D_SBRC_nodes(NodeMetaData& nodeData)
+size_t NodeFactory::count_3D_SBRC_nodes(const function_pool& pool, NodeMetaData& nodeData)
 {
     size_t sbrc_dimensions = 0;
     for(unsigned int i = 0; i < nodeData.length.size(); ++i)
     {
-        if(function_pool::has_SBRC_kernel(nodeData.length[i], nodeData.precision))
+        if(pool.has_SBRC_kernel(nodeData.length[i], nodeData.precision))
         {
             // make sure the SBRC kernel on that dimension would be tile-aligned
-            auto kernel = function_pool::get_kernel(FMKey(
+            auto kernel = pool.get_kernel(FMKey(
                 nodeData.length[i], nodeData.precision, CS_KERNEL_STOCKHAM_BLOCK_RC, TILE_ALIGNED));
             if(nodeData.length[(i + 2) % nodeData.length.size()] % kernel.transforms_per_block == 0)
                 ++sbrc_dimensions;
@@ -906,16 +900,16 @@ size_t NodeFactory::count_3D_SBRC_nodes(NodeMetaData& nodeData)
     return sbrc_dimensions;
 }
 
-bool NodeFactory::use_CS_3D_BLOCK_RC(NodeMetaData& nodeData)
+bool NodeFactory::use_CS_3D_BLOCK_RC(const function_pool& pool, NodeMetaData& nodeData)
 {
     // TODO: SBRC hasn't worked for inner batch (i/oDist == 1)
     if(nodeData.iDist == 1 || nodeData.oDist == 1)
         return false;
 
-    return count_3D_SBRC_nodes(nodeData) >= 2;
+    return count_3D_SBRC_nodes(pool, nodeData) >= 2;
 }
 
-bool NodeFactory::use_CS_3D_RC(NodeMetaData& nodeData)
+bool NodeFactory::use_CS_3D_RC(const function_pool& pool, NodeMetaData& nodeData)
 {
     // TODO: SBCC hasn't worked for inner batch (i/oDist == 1)
     if(nodeData.iDist == 1 || nodeData.oDist == 1)
@@ -926,7 +920,7 @@ bool NodeFactory::use_CS_3D_RC(NodeMetaData& nodeData)
     NodeMetaData child0 = nodeData;
     child0.length       = nodeData.length;
     child0.dimension    = 2;
-    auto childScheme    = DecideNodeScheme(child0, nullptr);
+    auto childScheme    = DecideNodeScheme(pool, child0, nullptr);
 
     // if first 2 dimensions can be handled with 2D_SINGLE, just run
     // with this 2-kernel plan.
@@ -934,13 +928,13 @@ bool NodeFactory::use_CS_3D_RC(NodeMetaData& nodeData)
         return true;
 
     FMKey key(nodeData.length[2], nodeData.precision, CS_KERNEL_STOCKHAM_BLOCK_CC);
-    if(!function_pool::has_function(key))
+    if(!pool.has_function(key))
         return false;
 
     // Check the C part.
     // The first R is built recursively with 2D_FFT, or with a
     // 1_D FTT + partial pass(es). leave the check part to themselves
-    auto kernel = function_pool::get_kernel(key);
+    auto kernel = pool.get_kernel(key);
 
     // hack for this special case
     // this size is rejected by the following conservative threshold (#-elems)

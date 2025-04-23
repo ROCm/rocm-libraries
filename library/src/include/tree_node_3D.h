@@ -208,7 +208,7 @@ protected:
     {
     }
 
-    void   SetupGPAndFnPtr_internal(DevFnCall& fnPtr, GridParam& gp) override;
+    void   SetupGridParam_internal(GridParam& gp) override;
     size_t sbrc_3D_alignment_dimension() const override
     {
         return length[2];
@@ -235,7 +235,7 @@ protected:
     {
     }
 
-    void   SetupGPAndFnPtr_internal(DevFnCall& fnPtr, GridParam& gp) override;
+    void   SetupGridParam_internal(GridParam& gp) override;
     size_t sbrc_3D_alignment_dimension() const override
     {
         // return length[1] * length[2];
@@ -264,7 +264,7 @@ protected:
         twd_attach_halfN = true;
     }
 
-    void   SetupGPAndFnPtr_internal(DevFnCall& fnPtr, GridParam& gp) override;
+    void   SetupGridParam_internal(GridParam& gp) override;
     size_t sbrc_3D_alignment_dimension() const override
     {
         // return length[1] * length[2];

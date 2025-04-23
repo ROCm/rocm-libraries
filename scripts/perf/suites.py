@@ -131,6 +131,19 @@ lengths = {
         43008,
     ],
 
+    'large1DExtended': [
+        4096, 4704, 4913, 5488, 6144, 6561, 8192,
+        9216, 10000, 10240, 10752, 11200, 12288,
+        15625, 16384, 16807, 17576, 18816, 19200,
+        19683, 20480, 21504, 21952, 23232, 24576,
+        26000, 28672, 32256, 32768, 34969, 36864,
+        38880, 40000, 40960, 43008, 46080, 48000,
+        49152, 51200, 53248, 57344, 65536, 68600,
+        71344, 73984, 76832, 79860, 81920, 83521,
+        87808, 95832, 98304, 102400, 106496,
+        110592, 114688, 131072, 262144,
+    ],
+
     'small1d': [
         24,
         48,
@@ -320,14 +333,6 @@ lengths = {
         2008, 2009, 2010, 2012, 2013, 2014, 2015, 2018, 2019, 2020, 2021, 2022,
         2024, 2026, 2030, 2031, 2032, 2033, 2034, 2035, 2036, 2037, 2038, 2041,
         2042, 2043, 2044, 2045, 2046, 2047,
-     ],
-
-     'newLarge1D': [
-         4704, 4913, 5488, 6144, 9216, 10240, 11200, 12288, 17576, 19200, 20480,
-         21952, 23232, 24576, 26000, 28672, 34969, 36864, 38880, 40960, 46080,
-         48000, 49152, 51200, 53248, 57344, 68600, 71344, 73984, 76832, 78125,
-         79860, 81920, 83521, 87808, 95832, 98304, 102400, 106496, 110592,
-         114688, 117649,
      ],
 
     'mgpu': [
@@ -619,15 +624,6 @@ def non_supported_lengths_1D():
 
     yield from default_length_params("non_supported_lengths_1D",
                                      lengths['nonSupported1D'], 10000)
-
-
-def new_large_1d():
-    """New large 1D lengths."""
-
-    yield from default_length_params("new_large_1d",
-                                     lengths['newLarge1D'],
-                                     1000,
-                                     reals=[False])
 
 
 def mpi():
@@ -1060,14 +1056,32 @@ def partial_pass():
                 ]:
 
                     length = (64, 64, 64)
-                    placestr = "ip" if place else "op"
                     yield Problem(length,
-                                  tag=mktag("partial_pass_" + placestr, 3,
-                                            precision, direction, False,
-                                            False),
+                                  tag=mktag("partial_pass", 1, precision,
+                                            direction, place, False),
                                   nbatch=batch,
                                   direction=direction,
                                   inplace=place,
                                   real=False,
                                   meta={'ivariable': 'batch'},
                                   precision=precision)
+
+
+def large_1d_extended():
+    """All supported L1D_CC compute scheme sizes"""
+
+    for length in lengths['large1DExtended']:
+        for direction in [-1, 1]:
+            for precision in ['single', 'double']:
+                for place in all_inplaces:
+                    for batch in [1, 10, 100, 1000, 10000]:
+                        yield Problem([length],
+                                      tag=mktag("large_1d_extended", 1,
+                                                precision, direction, place,
+                                                False),
+                                      nbatch=batch,
+                                      direction=direction,
+                                      inplace=place,
+                                      real=False,
+                                      meta={'ivariable': 'batch'},
+                                      precision=precision)

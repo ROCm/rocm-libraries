@@ -1,5 +1,5 @@
 # #############################################################################
-# Copyright (C) 2016 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2016 - 2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -52,9 +52,9 @@ project( rocfft LANGUAGES CXX C )
 # This finds the rocm-cmake project, and installs it if not found
 # rocm-cmake contains common cmake code for rocm projects to help setup and install
 set( PROJECT_EXTERN_DIR ${CMAKE_CURRENT_BINARY_DIR}/extern )
-find_package( ROCM 0.7.3 CONFIG QUIET PATHS ${ROCM_PATH} /opt/rocm )
-if( NOT ROCM_FOUND )
-  set( rocm_cmake_tag "master" CACHE STRING "rocm-cmake tag to download" )
+find_package( ROCmCMakeBuildTools PATHS ${ROCM_PATH} /opt/rocm )
+if( NOT ROCmCMakeBuildTools_FOUND )
+  set( rocm_cmake_tag "develop" CACHE STRING "rocm-cmake tag to download" )
   file( DOWNLOAD https://github.com/RadeonOpenCompute/rocm-cmake/archive/${rocm_cmake_tag}.zip
       ${PROJECT_EXTERN_DIR}/rocm-cmake-${rocm_cmake_tag}.zip STATUS status LOG log)
 
@@ -79,7 +79,7 @@ if( NOT ROCM_FOUND )
   execute_process( COMMAND ${CMAKE_COMMAND} --build rocm-cmake-${rocm_cmake_tag} --target install
     WORKING_DIRECTORY ${PROJECT_EXTERN_DIR})
 
-  find_package( ROCM 0.7.3 REQUIRED CONFIG PATHS ${PROJECT_EXTERN_DIR}/rocm-cmake )
+  find_package( ROCmCMakeBuildTools REQUIRED CONFIG PATHS ${PROJECT_EXTERN_DIR}/rocm-cmake )
 endif( )
 include( ROCMSetupVersion )
 include( ROCMCreatePackage )
@@ -90,8 +90,12 @@ include( ROCMCheckTargetIds )
 include( ROCMClients )
 include( ROCMHeaderWrapper )
 
+if( ROCM_PATH )
+  list( APPEND CMAKE_BUILD_RPATH ${ROCM_PATH}/lib )
+endif()
+
 # Using standardized versioning from rocm-cmake
-set ( VERSION_STRING "1.0.33" )
+set ( VERSION_STRING "1.0.34" )
 rocm_setup_version( VERSION ${VERSION_STRING} )
 
 # Append our library helper cmake path and the cmake path for hip (for
@@ -137,7 +141,7 @@ if(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY AND NOT WIN32)
   )
 endif()
 
-set( WARNING_FLAGS -Wall -Wno-unused-function -Wimplicit-fallthrough -Wunreachable-code -Wsign-compare )
+set( WARNING_FLAGS -Wall -Wno-unused-function -Wimplicit-fallthrough -Wunreachable-code -Wsign-compare -Wno-deprecated-declarations )
 if( WERROR )
   set( WARNING_FLAGS ${WARNING_FLAGS} -Werror )
 endif( )
@@ -148,9 +152,8 @@ set(DEFAULT_GPUS
   gfx906
   gfx908
   gfx90a
-  gfx940
-  gfx941
   gfx942
+  gfx950
   gfx1030
   gfx1100
   gfx1101
@@ -166,8 +169,6 @@ if(BUILD_ADDRESS_SANITIZER)
   SET(DEFAULT_GPUS
     gfx908:xnack+
     gfx90a:xnack+
-    gfx940:xnack+
-    gfx941:xnack+
     gfx942:xnack+)
   add_link_options(-fuse-ld=lld)
   set(ROCFFT_KERNEL_CACHE_ENABLE off)
@@ -193,8 +194,8 @@ rocm_check_target_ids(AMDGPU_TARGETS TARGETS "${AMDGPU_TARGETS}")
 set(GPU_TARGETS "${AMDGPU_TARGETS}" CACHE STRING "GPU architectures to build for")
   
 # HIP is required - library and clients use HIP to access the device
-find_package( HIP REQUIRED CONFIG )
-find_package( HIPRTC REQUIRED CONFIG )
+find_package( hip REQUIRED CONFIG PATHS /opt/rocm/lib/cmake/hip/ )
+find_package( hiprtc REQUIRED CONFIG )
 
 # The nvidia backend can be used to compile for CUDA devices.
 # Specify the CUDA prefix in the CUDA_PREFIX variable.

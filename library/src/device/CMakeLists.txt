@@ -55,61 +55,10 @@ endif()
 
 # Generated kernels
 
-# list of {"pow2" "pow3" "pow5" "pow7" "small" "large" "2D" "all"}, set to "none" if build only manual size
-# ex: "pow2" "pow5" "pow7" "2D" will generate pow2,5 + radix7,11,13 + 2D
-if( NOT GENERATOR_PATTERN )
-  set( GENERATOR_PATTERN "all" )
-endif()
-
-# list of {"single" "double" "all"}
-if( NOT GENERATOR_PRECISION )
-  set( GENERATOR_PRECISION "all" )
-endif()
-
-# list of any supported small size, "" means empty
-# ex: 1024 4096 336 56 will generat 4 kernels only
-if( NOT GENERATOR_MANUAL_SMALL_SIZE )
-  set( GENERATOR_MANUAL_SMALL_SIZE "" )
-endif()
-
-# list of any supported large size, "" means empty
-# ex: 50, 64, 81, 100, 128, 200, 256
-if( NOT GENERATOR_MANUAL_LARGE_SIZE )
-  set( GENERATOR_MANUAL_LARGE_SIZE "" )
-endif()
-
-# default:
-# not specifying any properties generate all size, with all precision
-
-# example 1:
-# Adding the following cmd lines to generate only [small-4096], [large-100-sbcc/sbrc] with single precision
-# "-DGENERATOR_PATTERN=none"
-# "-DGENERATOR_PRECISION=single"
-# "-DGENERATOR_MANUAL_SMALL_SIZE=4096"
-# "-DGENERATOR_MANUAL_LARGE_SIZE=100"
-
-# example 2:
-# Adding the following cmd lines to generate all [2D], [pow2], and [small-336, 56] with double precision
-# "-DGENERATOR_PATTERN=2D,pow2"
-# "-DGENERATOR_PRECISION=double"
-# "-DGENERATOR_MANUAL_SMALL_SIZE=56,336"
-
 # Make it possible to let install.sh control this ?
 set( kgen ${CMAKE_SOURCE_DIR}/library/src/device/kernel-generator.py )
 set( kgendeps ${CMAKE_SOURCE_DIR}/library/src/device/kernel-generator.py
               ${CMAKE_SOURCE_DIR}/library/src/device/generator.py )
-execute_process(COMMAND ${PYTHON3_EXE} ${kgen}
-  --pattern=${GENERATOR_PATTERN}
-  --precision=${GENERATOR_PRECISION}
-  --manual-small=${GENERATOR_MANUAL_SMALL_SIZE}
-  --manual-large=${GENERATOR_MANUAL_LARGE_SIZE}
-  --runtime-compile-default=${ROCFFT_RUNTIME_COMPILE_DEFAULT}
-  list
-  OUTPUT_VARIABLE gen_headers
-  RESULT_VARIABLE STATUS)
-if( STATUS AND NOT STATUS EQUAL 0 )
-  message( FATAL_ERROR "Kernel generator failed (list): ${STATUS}")
-endif()
 
 # create list of all N files that will initialize function pool
 if( ROCFFT_FUNCTION_POOL_N LESS 1 )
@@ -123,15 +72,9 @@ foreach(i RANGE ${LOOP_END})
   list(APPEND FUNCTION_POOLS "function_pool_init_${i}.cpp")
 endforeach()
 
-# stockham_gen will be having relative RUNPATH with respect to package install directory
-# Set LD_LIBRARY_PATH for running the executable from build directory
-add_custom_command(OUTPUT ${gen_headers}
+add_custom_command(OUTPUT function_pool.cpp
   OUTPUT ${FUNCTION_POOLS}
-  COMMAND ${CMAKE_COMMAND} -E env "LD_LIBRARY_PATH=$ENV{LD_LIBRARY_PATH}:${ROCM_PATH}/${CMAKE_INSTALL_LIBDIR}" ${PYTHON3_EXE} ${kgen}
-  --pattern=${GENERATOR_PATTERN}
-  --precision=${GENERATOR_PRECISION}
-  --manual-small=${GENERATOR_MANUAL_SMALL_SIZE}
-  --manual-large=${GENERATOR_MANUAL_LARGE_SIZE}
+  COMMAND ${Python3_EXECUTABLE} ${kgen}
   --runtime-compile-default=${ROCFFT_RUNTIME_COMPILE_DEFAULT}
   --num-files=${ROCFFT_FUNCTION_POOL_N}
   generate $<TARGET_FILE:stockham_gen>
@@ -141,7 +84,7 @@ add_custom_command(OUTPUT ${gen_headers}
 
 # add virtual build target for generated kernels
 add_custom_target(gen_headers_target
-  DEPENDS ${gen_headers}
+  DEPENDS function_pool.cpp
   VERBATIM
 )
 

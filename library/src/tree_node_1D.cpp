@@ -21,7 +21,6 @@
 #include "tree_node_1D.h"
 #include "../../shared/arithmetic.h"
 #include "../../shared/precision_type.h"
-#include "../device/kernels/bank_shift.h"
 #include "function_pool.h"
 #include "fuse_shim.h"
 #include "node_factory.h"
@@ -894,7 +893,7 @@ void CRT1DNode::AssignParams_internal()
 /*****************************************************
  * CS_KERNEL_STOCKHAM  *
  *****************************************************/
-void Stockham1DNode::SetupGPAndFnPtr_internal(DevFnCall& fnPtr, GridParam& gp)
+void Stockham1DNode::SetupGridParam_internal(GridParam& gp)
 {
     // get working group size and number of transforms
     size_t batch_accum = batch;
@@ -902,11 +901,7 @@ void Stockham1DNode::SetupGPAndFnPtr_internal(DevFnCall& fnPtr, GridParam& gp)
         batch_accum *= length[j];
 
     auto key    = GetKernelKey();
-    auto kernel = function_pool::get_kernel(key);
-    fnPtr       = kernel.device_function;
-
-    if(ebtype != EmbeddedType::NONE)
-        lds_padding = 1;
+    auto kernel = pool.get_kernel(key);
 
     bwd      = kernel.transforms_per_block;
     wgs      = kernel.workgroup_size;
@@ -921,15 +916,9 @@ void Stockham1DNode::SetupGPAndFnPtr_internal(DevFnCall& fnPtr, GridParam& gp)
         lds = 0;
     else
     {
-        // NB:
-        //   When lds conflict becomes significant enough, we can apply lds bank shift to reduce it.
-        //   One of the costs is extra lds allocation. We enable it for small pow of 2 cases on all
-        //   supported archs for now.
-        //   Bank-shift not supported in partial pass mode.
-        if(length[0] == 64 && !applyPartialPass)
-            lds = (length[0] + lds_padding) * bwd + length[0] * bwd / LDS_BANK_SHIFT;
-        else
-            lds = (length[0] + lds_padding) * bwd;
+        const auto lds_padding = ebtype != EmbeddedType::NONE ? 1 : 0;
+
+        lds = (length[0] + lds_padding) * bwd;
     }
 }
 
@@ -974,7 +963,7 @@ bool SBCCNode::KernelCheck(std::vector<FMKey>& kernel_keys)
     if(large1D > 0)
     {
         FMKey key      = GetKernelKey();
-        auto  kernel   = function_pool::get_kernel(key);
+        auto  kernel   = pool.get_kernel(key);
         largeTwd3Steps = kernel.use_3steps_large_twd;
         get_large_twd_base_steps(large1D, largeTwd3Steps, largeTwdBase, ltwdSteps);
     }
@@ -1070,7 +1059,7 @@ void SBCCNode::InitIntrinsicMode()
     }
 }
 
-// NB: remember set this value at this point instead of SetupGPAndFnPtr_internal()
+// NB: remember set this value at this point instead of SetupGridParam_internal()
 //     since we might need to pass this value to RTC generator
 void SBCCNode::TuneIntrinsicMode()
 {
@@ -1109,10 +1098,9 @@ void SBCCNode::TuneIntrinsicMode()
     }
 }
 
-void SBCCNode::SetupGPAndFnPtr_internal(DevFnCall& fnPtr, GridParam& gp)
+void SBCCNode::SetupGridParam_internal(GridParam& gp)
 {
-    auto kernel = function_pool::get_kernel(GetKernelKey());
-    fnPtr       = kernel.device_function;
+    auto kernel = pool.get_kernel(GetKernelKey());
     bwd         = kernel.transforms_per_block;
     wgs         = kernel.workgroup_size;
 
@@ -1151,9 +1139,9 @@ FMKey SBRCNode::GetKernelKey() const
         // if we have the base kernel, then we set the exact sbrc_trans_type and return the real key
         // if we don't, then we simply return a key with NONE sbrc_trans_type
         // which will make KernelCheck() trigger an exception
-        if(function_pool::has_function(baseKey))
+        if(pool.has_function(baseKey))
         {
-            auto bwd      = function_pool::get_kernel(baseKey).transforms_per_block;
+            auto bwd      = pool.get_kernel(baseKey).transforms_per_block;
             sbrcTranstype = sbrc_transpose_type(bwd);
         }
     }
@@ -1224,11 +1212,10 @@ void SBRCNode::TuneDirectRegType()
     }
 }
 
-void SBRCNode::SetupGPAndFnPtr_internal(DevFnCall& fnPtr, GridParam& gp)
+void SBRCNode::SetupGridParam_internal(GridParam& gp)
 {
     // sbrcTransType has already been assigned in KernelCheck();
-    auto kernel = function_pool::get_kernel(GetKernelKey());
-    fnPtr       = kernel.device_function;
+    auto kernel = pool.get_kernel(GetKernelKey());
     bwd         = kernel.transforms_per_block;
     wgs         = kernel.workgroup_size;
     lds         = length[0] * bwd;
@@ -1326,7 +1313,7 @@ void SBCRNode::InitIntrinsicMode()
     }
 }
 
-// NB: remember set this value at this point instead of SetupGPAndFnPtr_internal()
+// NB: remember set this value at this point instead of SetupGridParam_internal()
 //     since we might need to pass this value to RTC generator
 void SBCRNode::TuneIntrinsicMode()
 {
@@ -1342,20 +1329,19 @@ void SBCRNode::TuneIntrinsicMode()
     }
 }
 
-void SBCRNode::SetupGPAndFnPtr_internal(DevFnCall& fnPtr, GridParam& gp)
+void SBCRNode::SetupGridParam_internal(GridParam& gp)
 {
-    auto kernel = function_pool::get_kernel(GetKernelKey());
-    fnPtr       = kernel.device_function;
+    auto kernel = pool.get_kernel(GetKernelKey());
     wgs         = kernel.workgroup_size;
     bwd         = kernel.transforms_per_block;
-    lds         = length[0] * bwd;
-    gp.b_x      = ((length[1]) - 1) / bwd + 1;
+
+    const auto lds_padding = ebtype != EmbeddedType::NONE ? 1 : 0;
+
+    lds    = (length[0] + lds_padding) * bwd;
+    gp.b_x = ((length[1]) - 1) / bwd + 1;
     gp.b_x *= product(length.begin() + 2, length.end()) * batch;
     gp.wgs_x = wgs;
 
-    if(ebtype != EmbeddedType::NONE)
-        lds_padding = 1;
-    lds = (length[0] + lds_padding) * bwd;
     return;
 }
 

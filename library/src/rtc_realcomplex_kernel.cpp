@@ -21,6 +21,7 @@
 #include <numeric>
 
 #include "../../shared/arithmetic.h"
+#include "../../shared/array_predicate.h"
 #include "kernel_launch.h"
 #include "rtc_realcomplex_gen.h"
 #include "rtc_realcomplex_kernel.h"

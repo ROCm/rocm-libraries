@@ -129,7 +129,7 @@ private:
         if((memcg1_limit_file >> memcg1_limit_bytes) && (memcg1_usage_file >> memcg1_usage_bytes))
         {
             total_bytes = std::min<size_t>(total_bytes, memcg1_limit_bytes);
-            free_bytes  = memcg1_limit_bytes - memcg1_usage_bytes;
+            free_bytes  = total_bytes - memcg1_usage_bytes;
         }
 
         // check cgroup v2
@@ -142,7 +142,7 @@ private:
         if((memcg2_max_file >> memcg2_max_bytes) && (memcg2_current_file >> memcg2_current_bytes))
         {
             total_bytes = std::min<size_t>(total_bytes, memcg2_max_bytes);
-            free_bytes  = memcg2_max_bytes - memcg2_current_bytes;
+            free_bytes  = total_bytes - memcg2_current_bytes;
         }
 
 #endif

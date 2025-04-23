@@ -32,8 +32,10 @@ private:
     static const Map1DLength         map1DLengthSingle;
     static const Map1DLength         map1DLengthDouble;
 
-    static bool Large1DLengthsValid(const Map1DLength& map1DLength, rocfft_precision precision);
-    static bool CheckLarge1DMaps();
+    static bool Large1DLengthsValid(const function_pool& pool,
+                                    const Map1DLength&   map1DLength,
+                                    rocfft_precision     precision);
+    static bool CheckLarge1DMaps(const function_pool& pool);
 
 public:
     // Create node (user level) using this function
@@ -45,28 +47,33 @@ public:
 
     // Checks if there exists native (radix) support for a given length. If
     // no support exists for the given length, Bluestein algorithm is needed.
-    static bool SupportedLength(rocfft_precision precision, size_t len);
+    static bool SupportedLength(const function_pool& pool, rocfft_precision precision, size_t len);
 
     // Checks if  the non-pow2 length input is supported for a Bluestein compute scheme
-    static bool NonPow2LengthSupported(rocfft_precision precision, size_t len);
+    static bool
+        NonPow2LengthSupported(const function_pool& pool, rocfft_precision precision, size_t len);
 
     // Gets a (potentially non-pow2) length to run Bluestein
-    static size_t GetBluesteinLength(rocfft_precision precision, size_t len);
+    static size_t
+        GetBluesteinLength(const function_pool& pool, rocfft_precision precision, size_t len);
 
     // Decide scheme from the node meta node
-    static ComputeScheme DecideNodeScheme(NodeMetaData& nodeData, TreeNode* parent);
-    static ComputeScheme DecideRealScheme(NodeMetaData& nodeData);
-    static ComputeScheme Decide1DScheme(NodeMetaData& nodeData);
-    static ComputeScheme Decide2DScheme(NodeMetaData& nodeData);
-    static ComputeScheme Decide3DScheme(NodeMetaData& nodeData);
+    static ComputeScheme
+        DecideNodeScheme(const function_pool& pool, NodeMetaData& nodeData, TreeNode* parent);
+    static ComputeScheme DecideRealScheme(const function_pool& pool, NodeMetaData& nodeData);
+    static ComputeScheme Decide1DScheme(const function_pool& pool, NodeMetaData& nodeData);
+    static ComputeScheme Decide2DScheme(const function_pool& pool, NodeMetaData& nodeData);
+    static ComputeScheme Decide3DScheme(const function_pool& pool, NodeMetaData& nodeData);
 
     // determine function:
-    static bool use_CS_2D_SINGLE(NodeMetaData& nodeData); // using scheme CS_KERNEL_2D_SINGLE or not
-    static bool use_CS_2D_RC(NodeMetaData& nodeData); // using scheme CS_2D_RC or not
-    static bool use_CS_3D_BLOCK_RC(NodeMetaData& nodeData);
-    static bool use_CS_3D_RC(NodeMetaData& nodeData);
+    static bool use_CS_2D_SINGLE(const function_pool& pool,
+                                 NodeMetaData& nodeData); // using scheme CS_KERNEL_2D_SINGLE or not
+    static bool use_CS_2D_RC(const function_pool& pool,
+                             NodeMetaData&        nodeData); // using scheme CS_2D_RC or not
+    static bool use_CS_3D_BLOCK_RC(const function_pool& pool, NodeMetaData& nodeData);
+    static bool use_CS_3D_RC(const function_pool& pool, NodeMetaData& nodeData);
     // how many SBRC kernels can we put into a 3D transform?
-    static size_t count_3D_SBRC_nodes(NodeMetaData& nodeData);
+    static size_t count_3D_SBRC_nodes(const function_pool& pool, NodeMetaData& nodeData);
 
     // FuseShim Creator
     static std::unique_ptr<FuseShim> CreateFuseShim(FuseType                      type,

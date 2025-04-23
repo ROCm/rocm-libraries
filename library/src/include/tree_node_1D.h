@@ -89,7 +89,7 @@ protected:
         need_twd_table = true;
     }
 
-    void SetupGPAndFnPtr_internal(DevFnCall& fnPtr, GridParam& gp) override;
+    void SetupGridParam_internal(GridParam& gp) override;
 
 public:
     bool                CreateDeviceResources() override;
@@ -117,7 +117,7 @@ protected:
         need_twd_table = true;
     }
 
-    void SetupGPAndFnPtr_internal(DevFnCall& fnPtr, GridParam& gp) override;
+    void SetupGridParam_internal(GridParam& gp) override;
 
     // InitIntrinsicMode is the first step to check if eligible for buffer load/store
     void InitIntrinsicMode();
@@ -161,7 +161,7 @@ protected:
         allowInplace   = false;
     }
 
-    void SetupGPAndFnPtr_internal(DevFnCall& fnPtr, GridParam& gp) override;
+    void SetupGridParam_internal(GridParam& gp) override;
 
     void TuneDirectRegType();
 
@@ -201,7 +201,7 @@ protected:
         allowInplace   = false;
     }
 
-    void SetupGPAndFnPtr_internal(DevFnCall& fnPtr, GridParam& gp) override;
+    void SetupGridParam_internal(GridParam& gp) override;
 
     // InitIntrinsicMode is the first step to check if eligible for buffer load/store
     void InitIntrinsicMode();

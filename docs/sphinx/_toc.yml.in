@@ -3,21 +3,49 @@ defaults:
 root: index
 subtrees:
 - entries:
-  - file: what-is-rocfft.rst
+  - file: what-is-rocfft
     title: What is rocFFT?
+
+- caption: Install 
+  entries:
+  - file: install/building-installing-rocfft
+    title: Installation guide 
+
+- caption: Conceptual 
+  entries:
+  - file: conceptual/fft-computation
+    title: FFT computation 
+
+- caption: How to
+  entries:
   - file: how-to/working-with-rocfft
-    title: Working with rocFFT
+    title: Work with rocFFT
+  - file: how-to/real-data
+    title: Use real data 
   - file: how-to/load-store-callbacks
-    title: Load and Store Callbacks
+    title: Load and store callbacks
   - file: how-to/runtime-compilation
-    title: Runtime Compilation
+    title: Use runtime compilation
   - file: how-to/distributed-transforms
-    title: Distributed Transforms
+    title: Distribute transforms
+
+- caption: Samples
+  entries:
+  - url: https://github.com/ROCm/rocFFT/tree/develop/clients/samples
+    title: GitHub client examples 
+
+- caption: API reference
+  entries:
   - file: reference/reference.rst
-    title: API Reference
+    title: API reference
     subtrees:
     - entries:
       - file: reference/api
+        title: API usage
       - file: reference/allapi
+        title: API reference
+
+- caption: About
+  entries:
   - file: license.md
     title: License

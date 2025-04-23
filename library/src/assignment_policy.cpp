@@ -544,7 +544,10 @@ void AssignmentPolicy::AssignChirpBuffers(ExecPlan& execPlan)
         chirpFwdNodePlan.length    = chirpFwdNode->length;
         chirpFwdNodePlan.dimension = chirpFwdNode->dimension;
 
-        ExecPlan execPlanFwdChirp;
+        // create a temporary plan that just does chirp - the plan nodes
+        // get copied into our actual plan so the comm_rank, mgpuPlan,
+        // location don't need to be correct
+        ExecPlan execPlanFwdChirp{0, false, {}};
         execPlanFwdChirp.IsChirpPlan = true;
         execPlanFwdChirp.rootPlan    = NodeFactory::CreateExplicitNode(chirpFwdNodePlan, nullptr);
 

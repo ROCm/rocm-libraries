@@ -1,7 +1,7 @@
 
 .. meta::
-  :description: rocFFT documentation and API reference library
-  :keywords: rocFFT, FFT, ROCm, API, documentation
+  :description: Introduction to the rocFFT documentation and API reference library
+  :keywords: rocFFT, FFT, ROCm, API, documentation, introduction
 
 .. _rocfft-docs-home:
 
@@ -9,30 +9,47 @@
 rocFFT documentation
 ********************************************************************
 
-The rocFFT library provides a fast and accurate implementation of the discrete Fast Fourier Transform (FFT) written in HIP for GPU devices. The rocFFT library calculates discrete Fourier transforms for 1, 2, and 3 dimensional transforms, supporting a variety of data types for real and complex values. To learn more see :ref:`what-is-rocfft`
+The rocFFT library provides a fast and accurate implementation of the
+discrete Fast Fourier Transform (FFT) written in :doc:`HIP <hip:index>` for GPU devices.
+The rocFFT library calculates discrete Fourier transforms for one, two, and three-dimensional transforms,
+supporting various data types for real and complex values.
+To learn more, see :doc:`What is rocFFT? <./what-is-rocfft>`
 
-The code is open and hosted here: https://github.com/ROCmSoftwarePlatform/rocFFT
-
-The rocFFT documentation is structured as follows:
+The rocFFT public repository is located at `<https://github.com/ROCm/rocFFT>`_.
 
 .. grid:: 2
+  :gutter: 3
 
-    .. grid-item-card:: Conceptual
+  .. grid-item-card:: Install
 
-      * :ref:`what-is-rocfft`
+    * :doc:`Installation guide <./install/building-installing-rocfft>`
 
-    .. grid-item-card:: How To
+.. grid:: 2
+  :gutter: 3
 
-      * :ref:`working-with-rocfft`
-      * :ref:`load-store-callbacks`
-      * :ref:`runtime-compilation`
-      * :ref:`distributed-transforms`
+  .. grid-item-card:: Conceptual
 
-    .. grid-item-card:: API Reference
+    * :doc:`FFT computation <./conceptual/fft-computation>`
 
-      * :ref:`api-usage`
-      * :ref:`api-reference`
+  .. grid-item-card:: How to
 
-To contribute to the documentation refer to `Contributing to ROCm  <https://rocm.docs.amd.com/en/latest/contribute/contributing.html>`_.
+    * :doc:`Work with rocFFT <./how-to/working-with-rocfft>`
+    * :doc:`Use real data <./how-to/real-data>`
+    * :doc:`Load and store callbacks <./how-to/load-store-callbacks>`
+    * :doc:`Use runtime compilation <./how-to/runtime-compilation>`
+    * :doc:`Distribute transforms <./how-to/distributed-transforms>`
 
-You can find licensing information at the `Licensing <https://rocm.docs.amd.com/en/latest/about/license.html>`_ page.
+  .. grid-item-card:: Samples
+
+    * `rocFFT GitHub client examples <https://github.com/ROCm/rocFFT/tree/develop/clients/samples>`_
+
+  .. grid-item-card:: API reference
+
+    * :doc:`API usage <./reference/api>`
+    * :doc:`API reference <./reference/allapi>`
+
+To contribute to the documentation, see
+`Contributing to ROCm <https://rocm.docs.amd.com/en/latest/contribute/contributing.html>`_.
+
+You can find licensing information on the
+`Licensing <https://rocm.docs.amd.com/en/latest/about/license.html>`_ page.

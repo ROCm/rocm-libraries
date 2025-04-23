@@ -3,7 +3,30 @@
 Documentation for rocFFT is available at
 [https://rocm.docs.amd.com/projects/rocFFT/en/latest/](https://rocm.docs.amd.com/projects/rocFFT/en/latest/).
 
-## rocFFT 1.0.33 (unreleased)
+## rocFFT 1.0.34 (unreleased)
+
+### Removed
+
+* Removed rocfft-rider legacy compatibility from clients
+
+## rocFFT 1.0.33 for ROCm 6.5.0
+
+### Optimized
+
+* Removed unnecessary HIP event/stream allocation and synchronization during MPI transforms.
+
+### Added
+
+* Added gfx950 support.
+
+### Resolved issues
+
+* Fixed kernel faults on multi-device transforms that gather to a single device, when the input/output bricks are not 
+  contiguous.
+
+### Removed
+
+* Remove support for the gfx940 and gfx941 targets from the client programs.
 
 ## rocFFT 1.0.32 for ROCm 6.4.0
 

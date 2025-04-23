@@ -105,7 +105,15 @@ FMKey LeafNode::GetKernelKey() const
 void LeafNode::GetKernelFactors()
 {
     FMKey key     = GetKernelKey();
-    kernelFactors = function_pool::get_kernel(key).factors;
+    kernelFactors = pool.get_kernel(key).factors;
+
+    // Hard-coded kernel factors for len 64x64x64 partial-pass
+    // TODO: Remove this hard-coded logic once
+    // partial-pass is integrated into the stockham generators.
+    if(scheme == CS_KERNEL_STOCKHAM && applyPartialPass)
+        kernelFactors = {8, 8};
+    if(scheme == CS_KERNEL_STOCKHAM_BLOCK_CC && applyPartialPass)
+        kernelFactors = {8, 8};
 }
 
 void LeafNode::GetKernelPartialPassFactors()
@@ -181,7 +189,7 @@ bool LeafNode::KernelCheck(std::vector<FMKey>& kernel_keys)
             // get sbrc_trans_type from assignedKey (for sbrc)
             sbrcTranstype = assignedKey.sbrcTrans;
 
-            function_pool::add_new_kernel(assignedKey);
+            pool.add_new_kernel(assignedKey);
             specified_key = std::make_unique<FMKey>(assignedKey);
         }
     }
@@ -190,7 +198,7 @@ bool LeafNode::KernelCheck(std::vector<FMKey>& kernel_keys)
     // Note that the check is trivial if we are using "specified_key"
     // since we definitly have the kernel, but not trivial if it's the auto-gen key
     FMKey key = GetKernelKey();
-    if(!function_pool::has_function(key))
+    if(!pool.has_function(key))
     {
         if(LOG_TRACE_ENABLED())
             (*LogSingleton::GetInstance().GetTraceOS()) << PrintMissingKernelInfo(key);
@@ -198,7 +206,7 @@ bool LeafNode::KernelCheck(std::vector<FMKey>& kernel_keys)
         return false;
     }
 
-    dir2regMode = (function_pool::get_kernel(key).direct_to_from_reg)
+    dir2regMode = (pool.get_kernel(key).direct_to_from_reg)
                       ? DirectRegType::TRY_ENABLE_IF_SUPPORT
                       : DirectRegType::FORCE_OFF_OR_NOT_SUPPORT;
 
@@ -268,10 +276,10 @@ bool LeafNode::CreateDeviceResources()
     return CreateLargeTwdTable();
 }
 
-void LeafNode::SetupGridParamAndFuncPtr(DevFnCall& fnPtr, GridParam& gp)
+void LeafNode::SetupGridParam(GridParam& gp)
 {
     // derived classes setup the gp (bwd, wgs, lds, padding), funPtr
-    SetupGPAndFnPtr_internal(fnPtr, gp);
+    SetupGridParam_internal(gp);
 
     auto key = GetKernelKey();
 
@@ -279,9 +287,9 @@ void LeafNode::SetupGridParamAndFuncPtr(DevFnCall& fnPtr, GridParam& gp)
     gp.lds_bytes = lds * complex_type_size(precision);
     if(scheme == CS_KERNEL_STOCKHAM && ebtype == EmbeddedType::NONE)
     {
-        if(function_pool::has_function(key))
+        if(pool.has_function(key))
         {
-            auto kernel = function_pool::get_kernel(key);
+            auto kernel = pool.get_kernel(key);
 
             // NB:
             // Special case on specific arch:
@@ -305,9 +313,9 @@ void LeafNode::SetupGridParamAndFuncPtr(DevFnCall& fnPtr, GridParam& gp)
     {
         // SBCC support half-lds conditionally
         if((dir2regMode == DirectRegType::TRY_ENABLE_IF_SUPPORT) && (ebtype == EmbeddedType::NONE)
-           && function_pool::has_function(key))
+           && pool.has_function(key))
         {
-            auto kernel = function_pool::get_kernel(key);
+            auto kernel = pool.get_kernel(key);
             if(kernel.half_lds)
                 gp.lds_bytes /= 2;
         }
@@ -316,7 +324,7 @@ void LeafNode::SetupGridParamAndFuncPtr(DevFnCall& fnPtr, GridParam& gp)
         if(apply_large_twd && largeTwdBase < 8)
         {
             // append twiddle table to dynamic lds
-            auto kernel = function_pool::get_kernel(key);
+            auto kernel = pool.get_kernel(key);
             gp.lds_bytes += twiddles_large_size;
         }
     }
@@ -339,7 +347,7 @@ void LeafNode::SetupGridParamAndFuncPtr(DevFnCall& fnPtr, GridParam& gp)
  *****************************************************/
 
 // grid params are set up by RTC
-void TransposeNode::SetupGPAndFnPtr_internal(DevFnCall& fnPtr, GridParam& gp) {}
+void TransposeNode::SetupGridParam_internal(GridParam& gp) {}
 
 void TreeNode::SetTransposeOutputLength()
 {
@@ -519,8 +527,6 @@ void CommPointToPoint::ExecuteAsync(const rocfft_plan     plan,
                                     size_t                multiPlanIdx)
 {
     rocfft_scoped_device dev(srcLocation.device);
-    stream.alloc();
-    event.alloc();
 
     if(LOG_PLAN_ENABLED())
     {
@@ -606,7 +612,7 @@ void CommPointToPoint::Wait()
 {
     WaitCommRequests();
 
-    if(hipEventSynchronize(event) != hipSuccess)
+    if(event && hipEventSynchronize(event) != hipSuccess)
         throw std::runtime_error("hipEventSynchronize failed");
 }
 
@@ -634,8 +640,6 @@ void CommScatter::ExecuteAsync(const rocfft_plan     plan,
                                size_t                multiPlanIdx)
 {
     rocfft_scoped_device dev(srcLocation.device);
-    stream.alloc();
-    event.alloc();
 
     if(LOG_PLAN_ENABLED())
     {
@@ -719,8 +723,9 @@ void CommScatter::ExecuteAsync(const rocfft_plan     plan,
 #endif
         }
     }
-    // All work is enqueued to the stream, record the event on the stream
-    if(hipEventRecord(event, stream) != hipSuccess)
+    // All rank-local work is enqueued to the stream, record the
+    // event on the stream
+    if(event && hipEventRecord(event, stream) != hipSuccess)
         throw std::runtime_error("hipEventRecord failed");
 }
 
@@ -728,7 +733,7 @@ void CommScatter::Wait()
 {
     WaitCommRequests();
 
-    if(hipEventSynchronize(event) != hipSuccess)
+    if(event && hipEventSynchronize(event) != hipSuccess)
         throw std::runtime_error("hipEventSynchronize failed");
 }
 
@@ -762,9 +767,6 @@ void CommGather::ExecuteAsync(const rocfft_plan     plan,
                               rocfft_execution_info info,
                               size_t                multiPlanIdx)
 {
-    streams.resize(ops.size());
-    events.resize(ops.size());
-
     if(LOG_PLAN_ENABLED())
     {
         log_plan("CommGather\n");
@@ -777,8 +779,6 @@ void CommGather::ExecuteAsync(const rocfft_plan     plan,
         auto&       event  = events[opIdx];
 
         rocfft_scoped_device dev(op.srcLocation.device);
-        stream.alloc();
-        event.alloc();
 
         auto srcWithOffset  = ptr_offset(op.srcPtr.get(in_buffer, out_buffer, local_comm_rank),
                                         op.srcOffset,
@@ -852,9 +852,10 @@ void CommGather::ExecuteAsync(const rocfft_plan     plan,
 #endif
         }
 
-        // FIXME: we don't need events for MPI communications.
-        // All work for this stream is enqueued, record the event on the stream
-        if(hipEventRecord(event, stream) != hipSuccess)
+        // All work for this stream is enqueued, record the event on
+        // the stream.  The event is only allocated if necessary, so
+        // check it before recording.
+        if(event && hipEventRecord(event, stream) != hipSuccess)
             throw std::runtime_error("hipEventRecord failed");
     }
 }
@@ -865,7 +866,7 @@ void CommGather::Wait()
 
     for(const auto& event : events)
     {
-        if(hipEventSynchronize(event) != hipSuccess)
+        if(event && hipEventSynchronize(event) != hipSuccess)
             throw std::runtime_error("hipEventSynchronize failed");
     }
 }

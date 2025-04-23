@@ -32,9 +32,18 @@ def runCompileCommand(platform, project, jobName, boolean debug=false, boolean b
                 ${getDependenciesCommand}
                 set -e
 
+               # disable kernel cache on gfx90a, where we currently rely more
+               # on network storage, and SQLite (which we use for storing
+               # kernels) does not behave nicely on NFS
+               if /opt/rocm/bin/rocm_agent_enumerator | grep gfx90a ; then
+                    ROCFFT_KERNEL_CACHE_ENABLE=OFF
+                else
+                    ROCFFT_KERNEL_CACHE_ENABLE=ON
+                fi
+
                 mkdir -p build/${buildTypeDir} && cd build/${buildTypeDir}
                 ${auxiliary.gfxTargetParser()}
-                ${cmake} ${buildMPIArgs} -DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++ -DCMAKE_C_COMPILER=/opt/rocm/bin/amdclang ${buildTypeArg} ${clientArgs} ${warningArgs} ${buildTunerArgs} ${staticArg} ${amdgpuTargets} ${rtcBuildCache} ../..
+                ${cmake} ${buildMPIArgs} -DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++ -DCMAKE_C_COMPILER=/opt/rocm/bin/amdclang ${buildTypeArg} ${clientArgs} ${warningArgs} ${buildTunerArgs} ${staticArg} ${amdgpuTargets} ${rtcBuildCache} -DROCFFT_KERNEL_CACHE_ENABLE=\$ROCFFT_KERNEL_CACHE_ENABLE ../..
 
                 make -j\$(nproc)
                 sudo make install
@@ -100,37 +109,4 @@ def runPackageCommand(platform, project, jobName, boolean debug=false)
     platform.runCommand(this, command)
 }
 
-def runSubsetBuildCommand(platform, project, jobName, genPattern, genSmall, genLarge, boolean onlyDouble)
-{
-    project.paths.construct_build_prefix()
-
-    // Don't build clients, since we're just testing if the library can build
-    String clientArgs = ''
-    String warningArgs = '-DWERROR=ON'
-    String buildTypeArg = '-DCMAKE_BUILD_TYPE=Release'
-    String buildTypeDir = 'release'
-
-    String genPatternArgs = "-DGENERATOR_PATTERN=${genPattern}"
-    String manualSmallArgs = (genSmall != null) ? "-DGENERATOR_MANUAL_SMALL_SIZE=${genSmall}" : ''
-    String manualLargeArgs = (genLarge != null) ? "-DGENERATOR_MANUAL_LARGE_SIZE=${genLarge}" : ''
-    String precisionArgs = onlyDouble ? '-DGENERATOR_PRECISION=double' : ''
-    String kernelArgs = "${genPatternArgs} ${manualSmallArgs} ${manualLargeArgs} ${precisionArgs}"
-
-    String cmake = platform.jenkinsLabel.contains('centos') ? 'cmake3' : 'cmake'
-    //Set CI node's gfx arch as target if PR, otherwise use default targets of the library
-    String amdgpuTargets = env.BRANCH_NAME.startsWith('PR-') ? '-DAMDGPU_TARGETS=\$gfx_arch' : ''
-    String rtcBuildCache = "-DROCFFT_BUILD_KERNEL_CACHE_PATH=\$JENKINS_HOME_LOCAL/rocfft_build_cache.db"
-
-    def command = """#!/usr/bin/env bash
-                set -ex
-
-                cd ${project.paths.project_build_prefix}
-                rm -rf build/${buildTypeDir}
-                mkdir -p build/${buildTypeDir} && cd build/${buildTypeDir}
-                ${auxiliary.gfxTargetParser()}
-                ${cmake} -DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++ -DCMAKE_C_COMPILER=/opt/rocm/bin/amdclang ${buildTypeArg} ${clientArgs} ${kernelArgs} ${warningArgs} ${amdgpuTargets} ${rtcBuildCache} ../..
-                make -j\$(nproc)
-            """
-    platform.runCommand(this, command)
-}
 return this

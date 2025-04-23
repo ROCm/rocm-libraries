@@ -20,7 +20,10 @@
 # THE SOFTWARE.
 # #############################################################################
 
-if (DEFINED ENV{HIP_DIR})
+if (DEFINED ENV{HIP_PATH})
+  file(TO_CMAKE_PATH "$ENV{HIP_PATH}" HIP_DIR)
+  set(rocm_bin "${HIP_DIR}/bin")
+elseif (DEFINED ENV{HIP_DIR})
   file(TO_CMAKE_PATH "$ENV{HIP_DIR}" HIP_DIR)
   set(rocm_bin "${HIP_DIR}/bin")
 else()
@@ -55,5 +58,3 @@ set(CMAKE_STATIC_LIBRARY_SUFFIX ".a")
 set(CMAKE_STATIC_LIBRARY_PREFIX "static_")
 set(CMAKE_SHARED_LIBRARY_SUFFIX ".dll")
 set(CMAKE_SHARED_LIBRARY_PREFIX "")
-
-set(PYTHON3_EXE python)

@@ -70,14 +70,14 @@ You can install rocFFT using pre-built packages or building from source.
 
     ```bash
     mkdir build && cd build
-    cmake -DCMAKE_CXX_COMPILER=amdclang++ -DCMAKE_C_COMPILER=amdclang_PREFIX_PATH=/path/to/rocFFT-lib ..
+    cmake -DCMAKE_CXX_COMPILER=amdclang++ -DCMAKE_PREFIX_PATH=/path/to/rocFFT-lib ..
     make -j
     ```
 
     To install client dependencies on Ubuntu, run:
 
     ```bash
-    sudo apt install libgtest-dev libfftw3-dev
+    sudo apt install libgtest-dev libfftw3-dev libboost-dev
     ```
 
     We use version 1.11 of GoogleTest.

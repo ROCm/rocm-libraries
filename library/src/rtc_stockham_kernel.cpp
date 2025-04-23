@@ -20,6 +20,7 @@
 
 #include <optional>
 
+#include "../../shared/array_predicate.h"
 #include "function_pool.h"
 #include "kernel_launch.h"
 #include "rtc_stockham_gen.h"
@@ -33,7 +34,6 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
                                                               bool               enable_callbacks)
 {
     RTCStockhamGenerator generator;
-    function_pool&       pool = function_pool::get_function_pool();
 
     std::optional<StockhamGeneratorSpecs> specs;
     std::optional<StockhamGeneratorSpecs> specs2d;
@@ -51,8 +51,6 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
     }
 
     std::optional<FFTKernel> kernel;
-
-    bool is_pre_compiled = false;
 
     // find function pool entry so we can construct specs for the generator
     // NB: make sure all SBRC-type node have the correct trans_type value
@@ -72,15 +70,7 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
 
         // these go into the function pool normally and are passed to
         // the generator as-is
-        kernel = pool.get_kernel(key);
-        // if a kernel is already precompiled, just use that.  but
-        // changing largeTwdBatch transform count requires RTC, so we
-        // can't use a precompiled kernel in that case.
-        if(kernel->device_function && !node.loadOps.enabled() && !node.storeOps.enabled()
-           && !node.largeTwdBatchIsTransformCount)
-        {
-            is_pre_compiled = true;
-        }
+        kernel = node.pool.get_kernel(key);
 
         std::vector<unsigned int> factors;
         std::copy(kernel->factors.begin(), kernel->factors.end(), std::back_inserter(factors));
@@ -98,12 +88,7 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
     }
     case CS_KERNEL_2D_SINGLE:
     {
-        kernel = pool.get_kernel(key);
-        // already precompiled?
-        if(kernel->device_function && !node.loadOps.enabled() && !node.storeOps.enabled())
-        {
-            is_pre_compiled = true;
-        }
+        kernel = node.pool.get_kernel(key);
 
         std::vector<unsigned int> factors1d;
         std::vector<unsigned int> factors2d;
@@ -199,10 +184,6 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
                                         node.storeOps);
     };
 
-    // if is pre-compiled, we assign the name-function only
-    if(is_pre_compiled)
-        return generator;
-
     generator.generate_src = [=, &node](const std::string& kernel_name) {
         return stockham_rtc(*specs,
                             specs2d ? *specs2d : *specs,
@@ -260,8 +241,6 @@ RTCKernelArgs RTCKernelStockham::get_launch_args(DeviceCallIn& data)
         kargs.append_ptr(kargs_stride_out(data.node->devKernArg));
     // nbatch
     kargs.append_size_t(data.node->batch);
-    // lds padding
-    kargs.append_unsigned_int(data.node->lds_padding);
     // callback params
     kargs.append_ptr(data.callbacks.load_cb_fn);
     kargs.append_ptr(data.callbacks.load_cb_data);

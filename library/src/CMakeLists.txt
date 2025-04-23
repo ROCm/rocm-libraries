@@ -75,7 +75,6 @@ target_include_directories( rocfft_rtc_helper
 set(APPEND_ROCMLIB_RPATH "\$ORIGIN/../../../lib")
 target_link_libraries( rocfft_rtc_helper PRIVATE rocfft-rtc-compile )
 set_target_properties( rocfft_rtc_helper PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON
-                                         BUILD_WITH_INSTALL_RPATH TRUE
                                          INSTALL_RPATH "${APPEND_ROCMLIB_RPATH}" )
 target_link_directories( rocfft_rtc_helper PRIVATE ${ROCFFT_HOST_LINK_DIRS} )
 
@@ -84,10 +83,6 @@ target_link_directories( rocfft_rtc_helper PRIVATE ${ROCFFT_HOST_LINK_DIRS} )
 include( GenerateExportHeader )
 
 find_package (Python3 3.6 COMPONENTS Interpreter REQUIRED)
-
-if( NOT DEFINED PYTHON3_EXE )
-  set(PYTHON3_EXE python3)
-endif()
 
 add_subdirectory( device )
 
@@ -191,7 +186,7 @@ set( kgen_logic_files
 
 add_custom_command(
   OUTPUT ${kgen_embed_cpp}
-  COMMAND ${PYTHON3_EXE} ${kgen_embed_command}
+  COMMAND ${Python3_EXECUTABLE} ${kgen_embed_command}
   --embed ${kgen_embed_files} --logic ${kgen_logic_files} --output ${kgen_embed_cpp}
   DEPENDS ${kgen_embed_command} ${kgen_embed_files} ${kgen_logic_files}
 )
@@ -211,7 +206,7 @@ file(GLOB solution_map_files "${ROCFFT_SOLUTION_MAP_DIR}/*.dat")
 
 add_custom_command(
   OUTPUT ${gen_solutions}
-  COMMAND ${PYTHON3_EXE} ${solship_py}
+  COMMAND ${Python3_EXECUTABLE} ${solship_py}
   --gpu-arch="${sol_gpu_arch}"
   --data-folder=${ROCFFT_SOLUTION_MAP_DIR}
   DEPENDS ${solution_map_files}
@@ -524,11 +519,9 @@ if ( ROCFFT_KERNEL_CACHE_ENABLE )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx1102 )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx1151 )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx1200 )
-  # The binary will be having relative RUNPATH with respect to install directory
-  # Set LD_LIBRARY_PATH for executing the binary from build directory.
   add_custom_command(
     OUTPUT rocfft_kernel_cache.db
-    COMMAND ${CMAKE_COMMAND} -E env "LD_LIBRARY_PATH=$ENV{LD_LIBRARY_PATH}:${ROCM_PATH}/${CMAKE_INSTALL_LIBDIR}" ./rocfft_aot_helper \"${ROCFFT_BUILD_KERNEL_CACHE_PATH}\" ${ROCFFT_KERNEL_CACHE_PATH} $<TARGET_FILE:rocfft_rtc_helper> ${GPU_TARGETS_AOT}
+    COMMAND "${CMAKE_CURRENT_BINARY_DIR}/rocfft_aot_helper" \"${ROCFFT_BUILD_KERNEL_CACHE_PATH}\" ${ROCFFT_KERNEL_CACHE_PATH} $<TARGET_FILE:rocfft_rtc_helper> ${GPU_TARGETS_AOT}
     DEPENDS rocfft_aot_helper rocfft_rtc_helper
     COMMENT "Compile kernels into shipped cache file"
   )
@@ -594,7 +587,8 @@ else()
 endif()
 
 if( NOT ENABLE_ASAN_PACKAGING )
-  rocm_install(PROGRAMS $<TARGET_FILE:rocfft_rtc_helper>
+  set_target_properties(rocfft_rtc_helper PROPERTIES INSTALL_RPATH "$ORIGIN/../../")
+  install(TARGETS rocfft_rtc_helper
     DESTINATION "${ROCFFT_RTC_HELPER_INSTALL_DIR}"
     COMPONENT runtime
   )

@@ -49,19 +49,30 @@ enum SplitType
     PENCIL_3D,
 };
 
-std::vector<fft_params> param_generator_multi_gpu(const SplitType type)
+std::vector<fft_params> param_generator_multi_gpu(const SplitType type, const int ngpus)
 {
     int localDeviceCount = 0;
-    (void)hipGetDeviceCount(&localDeviceCount);
+    if(ngpus <= 0)
+    {
+        // Use the command-line option as a priority
+        if(hipGetDeviceCount(&localDeviceCount) != hipSuccess)
+        {
+            throw std::runtime_error("hipGetDeviceCount failed");
+        }
+
+        // Limit local device testing to 16 GPUs, as we have some
+        // bottlenecks with larger device counts that unreasonably slow
+        // down plan creation
+        localDeviceCount = std::min<int>(16, localDeviceCount);
+    }
+    else
+    {
+        localDeviceCount = ngpus;
+    }
 
     // need multiple devices or multiprocessing to test anything
     if(localDeviceCount < 2 && mp_lib == fft_params::fft_mp_lib_none)
         return {};
-
-    // limit local device testing to 16 GPUs, as we have some
-    // bottlenecks with larger device counts that unreasonably slow
-    // down plan creation
-    localDeviceCount = std::min<int>(16, localDeviceCount);
 
     auto params_complex = param_generator_complex(test_prob,
                                                   multi_gpu_sizes,
@@ -165,30 +176,30 @@ std::vector<fft_params> param_generator_multi_gpu(const SplitType type)
 // split both input and output on slowest FFT dim
 INSTANTIATE_TEST_SUITE_P(multi_gpu_slowest_dim,
                          accuracy_test,
-                         ::testing::ValuesIn(param_generator_multi_gpu(SLOW_INOUT)),
+                         ::testing::ValuesIn(param_generator_multi_gpu(SLOW_INOUT, ngpus)),
                          accuracy_test::TestName);
 
 // split slowest FFT dim only on input, or only on output
 INSTANTIATE_TEST_SUITE_P(multi_gpu_slowest_input_dim,
                          accuracy_test,
-                         ::testing::ValuesIn(param_generator_multi_gpu(SLOW_IN)),
+                         ::testing::ValuesIn(param_generator_multi_gpu(SLOW_IN, ngpus)),
                          accuracy_test::TestName);
 INSTANTIATE_TEST_SUITE_P(multi_gpu_slowest_output_dim,
                          accuracy_test,
-                         ::testing::ValuesIn(param_generator_multi_gpu(SLOW_OUT)),
+                         ::testing::ValuesIn(param_generator_multi_gpu(SLOW_OUT, ngpus)),
                          accuracy_test::TestName);
 
 // split input on slowest FFT and output on fastest, to minimize data
 // movement (only makes sense for rank-2 and higher FFTs)
 INSTANTIATE_TEST_SUITE_P(multi_gpu_slowin_fastout,
                          accuracy_test,
-                         ::testing::ValuesIn(param_generator_multi_gpu(SLOW_IN_FAST_OUT)),
+                         ::testing::ValuesIn(param_generator_multi_gpu(SLOW_IN_FAST_OUT, ngpus)),
                          accuracy_test::TestName);
 
 // 3D pencil decompositions
 INSTANTIATE_TEST_SUITE_P(multi_gpu_3d_pencils,
                          accuracy_test,
-                         ::testing::ValuesIn(param_generator_multi_gpu(PENCIL_3D)),
+                         ::testing::ValuesIn(param_generator_multi_gpu(PENCIL_3D, ngpus)),
                          accuracy_test::TestName);
 
 TEST(multi_gpu_validate, catch_validation_errors)
@@ -204,7 +215,7 @@ TEST(multi_gpu_validate, catch_validation_errors)
     for(auto type : all_split_types)
     {
         // gather all of the multi-GPU test cases
-        auto params = param_generator_multi_gpu(type);
+        auto params = param_generator_multi_gpu(type, ngpus);
 
         for(size_t i = 0; i < params.size(); ++i)
         {
@@ -284,3 +295,105 @@ TEST(multi_gpu_validate, catch_validation_errors)
         }
     }
 }
+
+static const auto multi_gpu_tokens = {
+    // clang-format off
+
+    // input bricks are not contiguous
+    "real_forward_len_160_160_160_single_op_batch_1_ifield_brick_lower_0_0_0_0_upper_1_80_160_160_stride_0_25920_162_1_dev_0_brick_lower_0_80_0_0_upper_1_160_160_160_stride_0_25920_162_1_rank_1_dev_1_ofield_brick_lower_0_0_0_0_upper_1_160_80_81_stride_0_6480_81_1_dev_0_brick_lower_0_0_80_0_upper_1_160_160_81_stride_0_6480_81_1_rank_1_dev_1",
+    // output bricks are not contiguous
+    "real_forward_len_160_160_160_single_op_batch_1_ifield_brick_lower_0_0_0_0_upper_1_80_160_160_stride_0_25600_160_1_dev_0_brick_lower_0_80_0_0_upper_1_160_160_160_stride_0_25600_160_1_rank_1_dev_1_ofield_brick_lower_0_0_0_0_upper_1_160_80_81_stride_0_6560_82_1_dev_0_brick_lower_0_0_80_0_upper_1_160_160_81_stride_0_6560_82_1_rank_1_dev_1",
+    // neither input nor output bricks are contiguous
+    "real_forward_len_160_160_160_single_op_batch_1_ifield_brick_lower_0_0_0_0_upper_1_80_160_160_stride_0_25920_162_1_dev_0_brick_lower_0_80_0_0_upper_1_160_160_160_stride_0_25920_162_1_rank_1_dev_1_ofield_brick_lower_0_0_0_0_upper_1_160_80_81_stride_0_6560_82_1_dev_0_brick_lower_0_0_80_0_upper_1_160_160_81_stride_0_6560_82_1_rank_1_dev_1",
+    // 1D multi-process batched in-place transform using 1 device per rank
+    "complex_forward_len_256_double_ip_batch_4_ifield_brick_lower_0_0_upper_4_128_stride_128_1_dev_0_brick_lower_0_128_upper_4_256_stride_128_1_rank_1_dev_1_ofield_brick_lower_0_0_upper_4_128_stride_128_1_dev_0_brick_lower_0_128_upper_4_256_stride_128_1_rank_1_dev_1",
+    // 2D multi-process out-of-place transform using 2 MPI ranks each with 2 GPUs
+    "complex_forward_len_128_256_single_op_batch_1_ifield_brick_lower_0_0_0_upper_1_128_64_stride_8192_64_1_dev_0_brick_lower_0_0_64_upper_1_128_128_stride_8192_64_1_rank_1_dev_1_brick_lower_0_0_128_upper_1_128_192_stride_8192_64_1_rank_0_dev_2_brick_lower_0_0_192_upper_1_128_256_stride_8192_64_1_rank_1_dev_3_ofield_brick_lower_0_0_0_upper_1_128_64_stride_8192_64_1_dev_0_brick_lower_0_0_64_upper_1_128_128_stride_8192_64_1_rank_1_dev_1_brick_lower_0_0_128_upper_1_128_192_stride_8192_64_1_rank_0_dev_2_brick_lower_0_0_192_upper_1_128_256_stride_8192_64_1_rank_1_dev_3",    
+    // 3D multi-process out-of-place transform using 2 MPI ranks each with 2 GPUs
+    "complex_forward_len_256_256_256_double_op_batch_1_ifield_brick_lower_0_0_0_0_upper_1_64_256_256_stride_4194304_65536_256_1_dev_0_brick_lower_0_64_0_0_upper_1_128_256_256_stride_4194304_65536_256_1_rank_0_dev_1_brick_lower_0_128_0_0_upper_1_192_256_256_stride_4194304_65536_256_1_rank_1_dev_2_brick_lower_0_192_0_0_upper_1_256_256_256_stride_4194304_65536_256_1_rank_1_dev_3_ofield_brick_lower_0_0_0_0_upper_1_256_256_64_stride_4194304_16384_64_1_dev_0_brick_lower_0_0_0_64_upper_1_256_256_128_stride_4194304_16384_64_1_rank_0_dev_1_brick_lower_0_0_0_128_upper_1_256_256_192_stride_4194304_16384_64_1_rank_1_dev_2_brick_lower_0_0_0_192_upper_1_256_256_256_stride_4194304_16384_64_1_rank_1_dev_3",
+    // 3D multi-process batched in-place transform using 2 MPI ranks each with 2 GPUs
+    "complex_forward_len_128_300_256_single_op_batch_4_ifield_brick_lower_0_0_0_0_upper_4_32_300_256_stride_2457600_76800_256_1_dev_0_brick_lower_0_32_0_0_upper_4_64_300_256_stride_2457600_76800_256_1_rank_1_dev_1_brick_lower_0_64_0_0_upper_4_96_300_256_stride_2457600_76800_256_1_rank_0_dev_2_brick_lower_0_96_0_0_upper_4_128_300_256_stride_2457600_76800_256_1_rank_1_dev_3_ofield_brick_lower_0_0_0_0_upper_4_128_300_64_stride_2457600_19200_64_1_dev_0_brick_lower_0_0_0_64_upper_4_128_300_128_stride_2457600_19200_64_1_rank_1_dev_1_brick_lower_0_0_0_128_upper_4_128_300_192_stride_2457600_19200_64_1_rank_0_dev_2_brick_lower_0_0_0_192_upper_4_128_300_256_stride_2457600_19200_64_1_rank_1_dev_3 ",
+
+    // clang-format on
+};
+
+std::vector<fft_params> param_generator_multi_gpu_adhoc()
+{
+    int localDeviceCount = 0;
+    if(ngpus <= 0)
+    {
+        // Use the command-line option as a priority
+        if(hipGetDeviceCount(&localDeviceCount) != hipSuccess)
+        {
+            throw std::runtime_error("hipGetDeviceCount failed");
+        }
+
+        // Limit local device testing to 16 GPUs, as we have some
+        // bottlenecks with larger device counts that unreasonably slow
+        // down plan creation
+        localDeviceCount = std::min<int>(16, localDeviceCount);
+    }
+    else
+    {
+        localDeviceCount = ngpus;
+    }
+
+    auto all_params = param_generator_token(test_prob, multi_gpu_tokens);
+
+    // check if fields use more bricks than we can support
+    auto too_many_bricks = [=](const std::vector<fft_params::fft_field>& fields, size_t maxBricks) {
+        for(const auto& f : fields)
+        {
+            if(f.bricks.size() > maxBricks)
+                return true;
+
+            // also remove a test case if it uses a numbered device
+            // that isn't available
+            if(std::any_of(f.bricks.begin(), f.bricks.end(), [=](const fft_params::fft_brick& b) {
+                   return b.device >= localDeviceCount;
+               }))
+                return true;
+        }
+        return false;
+    };
+
+    // remove test cases where we don't have enough ranks/devices for
+    // the number of bricks
+    all_params.erase(std::remove_if(all_params.begin(),
+                                    all_params.end(),
+                                    [=](const fft_params& params) {
+                                        size_t maxBricks = mp_lib == fft_params::fft_mp_lib_mpi
+                                                               ? mp_ranks
+                                                               : localDeviceCount;
+                                        return too_many_bricks(params.ifields, maxBricks)
+                                               || too_many_bricks(params.ofields, maxBricks);
+                                    }),
+                     all_params.end());
+
+    // set all bricks in a field to rank-0, to change an MPI test
+    // case to single-proc
+    auto set_rank_0 = [](std::vector<fft_params::fft_field>& fields) {
+        for(auto& f : fields)
+        {
+            for(auto& b : f.bricks)
+                b.rank = 0;
+        }
+    };
+
+    // modify the remaining test cases to use the current multi-GPU lib
+    for(auto& params : all_params)
+    {
+        params.mp_lib = mp_lib;
+        if(mp_lib == fft_params::fft_mp_lib_none)
+        {
+            set_rank_0(params.ifields);
+            set_rank_0(params.ofields);
+        }
+    }
+    return all_params;
+}
+
+INSTANTIATE_TEST_SUITE_P(multi_gpu_adhoc_token,
+                         accuracy_test,
+                         ::testing::ValuesIn(param_generator_multi_gpu_adhoc()),
+                         accuracy_test::TestName);
