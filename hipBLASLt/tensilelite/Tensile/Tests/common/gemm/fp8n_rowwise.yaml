@@ -1,0 +1,145 @@
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
+
+GlobalParameters:
+  NumElementsToValidate: -1
+  MinimumRequiredVersion: 4.14.0
+  PrintLevel: 1
+  PrintSolutionRejectionReason: True
+  Device: 0
+  CMakeBuildType: Release
+  KernelTime: True
+  MaxWorkspaceSize: 13421772800
+  DataInitTypeA: 21
+  DataInitTypeB: 21
+  DataInitTypeC: 0
+  DataInitTypeE: 16
+  DataInitTypeBias: 0
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  DataInitTypeScaleA: 21
+  DataInitTypeScaleB: 21
+  DataInitTypeScaleAlphaVec: 1
+  BoundsCheck: 2
+
+BenchmarkProblems:
+  ########################################
+  # F8nSS-TN
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      # DataTypeA: f8n
+      DataType: f8n
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+      BiasDataTypeList: [s]
+      UseBias:       1
+      UseE:          False
+      Activation:    True
+      UseScaleAB: "Vector"
+      UseScaleAlphaVec: 1
+      # SupportUserArgs: True
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16,16,32,1,1,4,4,1,1 ]
+          - [16,16,32,1,1,4,4,2,2 ]
+          - [16,16,32,1,1,4,4,4,4 ]
+          - [16,16,32,1,1,8,4,4,1 ]
+        - AssertFree0ElementMultiple: [1]
+        - DepthU: [32]
+        - ScheduleIterAlg: [3]
+        - InnerUnroll: [1]
+        - ExpandPointerSwap: [1]
+        - TransposeLDS: [1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - StaggerU: [4]
+        - WaveSeparateGlobalReadB: [1]
+        - 1LDSBuffer: [-1]
+        - GlobalReadPerMfma: [1]
+        - LocalWritePerMfma: [-1]
+        - VectorWidthA: [4]
+        - VectorWidthB: [4]
+        - StoreVectorWidth: [4]
+        - SourceSwap: [1]
+        - NumElementsPerBatchStore: [2]
+        - GlobalSplitU: [1, 2]
+        - PreloadKernArgs: [1]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [ 2050, 16, 1, 1024 ]
+          # - Exact: [ 2048, 16, 1, 8192 ]
+        - BiasTypeArgs: ['s']
+        - ActivationArgs:
+          - [Enum: none]
+
+  ########################################
+  # F8BS-TN
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: f8n
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+      BiasDataTypeList: [s]
+      UseBias: 1
+      UseE: False
+      Activation: True
+      ActivationType: all
+      UseScaleAB: "Vector"
+      UseScaleAlphaVec: 1
+      # SupportUserArgs: True
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16,16,32,1,1,4,4,1,1 ]
+        - AssertFree0ElementMultiple: [1]
+        - DepthU: [32]
+        - ScheduleIterAlg: [3]
+        - InnerUnroll: [1]
+        - ExpandPointerSwap: [1]
+        - TransposeLDS: [1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - StaggerU: [4]
+        - WaveSeparateGlobalReadB: [1]
+        - 1LDSBuffer: [-1]
+        - GlobalReadPerMfma: [1]
+        - LocalWritePerMfma: [-1]
+        - VectorWidthA: [4]
+        - VectorWidthB: [4]
+        - StoreVectorWidth: [4]
+        - SourceSwap: [1]
+        - NumElementsPerBatchStore: [2]
+        - GlobalSplitU: [1, 2]
+        - PreloadKernArgs: [1]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [ 2048, 16, 1, 1024 ]
+          - Exact: [ 2050, 16, 1, 1024 ]
+        - BiasTypeArgs: ['s']
+        - ActivationArgs:
+          - [Enum: none]
