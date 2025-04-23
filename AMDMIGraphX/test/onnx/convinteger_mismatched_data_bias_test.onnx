@@ -1,0 +1,34 @@
+	%convinteger_mismatched_data_bias_test:ä
+B
+0
+1
+2
+34"ConvInteger*
+	dilations@@ *
+strides@@ %convinteger_mismatched_data_bias_testZ
+0
+
+
+
+ 
+ Z
+1
+
+
+
+
+Z
+2
+
+
+Z
+3
+
+
+b
+4
+
+
+
+
+B

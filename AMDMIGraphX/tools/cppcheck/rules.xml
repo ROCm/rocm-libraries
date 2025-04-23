@@ -1,0 +1,199 @@
+<?xml version="1.0"?>
+<rule>
+    <tokenlist>normal</tokenlist>
+    <pattern> [;{}] [*] \w+? (\+\+|\-\-) ; </pattern>
+    <message>
+        <id>UnusedDeref</id>
+        <severity>style</severity>
+        <summary>Redundant * found, "*p++" is the same as "*(p++)".</summary>
+    </message>
+</rule>
+<rule>
+    <tokenlist>normal</tokenlist>
+    <pattern> if \( ([!] )*?(strlen) \( \w+? \) ([>] [0] )*?\) { </pattern>
+    <message>
+        <id>StrlenEmptyString</id>
+        <severity>performance</severity>
+        <summary>Using strlen() to check if a string is empty is not efficient.</summary>
+    </message>
+</rule>
+<rule>
+    <tokenlist>normal</tokenlist>
+    <pattern> [;{}] [*] \w+? (\+\+|\-\-) ; </pattern>
+    <message>
+        <id>UnusedDeref</id>
+        <severity>style</severity>
+        <summary>Redundant * found, "*p++" is the same as "*(p++)".</summary>
+    </message>
+</rule>
+<rule>
+    <tokenlist>define</tokenlist>
+    <pattern>define [0-9A-Z_^a-z]*[a-z]</pattern>
+    <message>
+        <id>defineUpperCase</id>
+        <severity>style</severity>
+        <summary>Macros must be uppercase</summary>
+    </message>
+</rule>
+<rule>
+    <tokenlist>define</tokenlist>
+    <pattern>define (MIGRAPH|[^X]{7})[^X][^_]</pattern>
+    <message>
+        <id>definePrefix</id>
+        <severity>style</severity>
+        <summary>Macros must be prefixed with MIGRAPHX_</summary>
+    </message>
+</rule>
+<rule>
+    <tokenlist>raw</tokenlist>
+    <pattern><![CDATA[ [^\(,;{}:]+ \w+ && (\w+|\(|\+|\-|\*)]]></pattern>
+    <message>
+        <id>UseNamedLogicOperator</id>
+        <severity>style</severity>
+        <summary>Use 'and' instead of &&</summary>
+    </message>
+</rule>
+<rule>
+    <tokenlist>raw</tokenlist>
+    <pattern><![CDATA[ (if|while) \([^\)&]+&& ]]></pattern>
+    <message>
+        <id>UseNamedLogicOperator</id>
+        <severity>style</severity>
+        <summary>Use 'and' instead of &&</summary>
+    </message>
+</rule>
+<rule>
+    <tokenlist>raw</tokenlist>
+    <pattern><![CDATA[ \|\| ]]></pattern>
+    <message>
+        <id>UseNamedLogicOperator</id>
+        <severity>style</severity>
+        <summary>Use 'or' instead of ||</summary>
+    </message>
+</rule>
+<rule>
+    <tokenlist>raw</tokenlist>
+    <pattern><![CDATA[ ! ]]></pattern>
+    <message>
+        <id>UseNamedLogicOperator</id>
+        <severity>style</severity>
+        <summary>Use 'not' instead of !</summary>
+    </message>
+</rule>
+<rule>
+    <tokenlist>normal</tokenlist>
+    <pattern><![CDATA[if (\([^()]*(?-1)*[^()]*\)) { [^{}]* (return|throw|break|continue) [^;]* ; } else {]]></pattern>
+    <message>
+        <id>UnnecessaryElseStatement</id>
+        <severity>style</severity>
+        <summary>Else statement is not necessary.</summary>
+    </message>
+</rule>
+<rule>
+    <tokenlist>normal</tokenlist>
+    <pattern><![CDATA[if \( \w+ != \w+ \) ({[^{}]*(?-1)*[^{}]*}) else { (?!if)]]></pattern>
+    <message>
+        <id>InvertedLogic</id>
+        <severity>style</severity>
+        <summary>It is cleaner to invert the logic.</summary>
+    </message>
+</rule>
+<rule>
+    <tokenlist>normal</tokenlist>
+    <pattern><![CDATA[if \( ! \w+ \) ({[^{}]*(?-1)*[^{}]*}) else { (?!if)]]></pattern>
+    <message>
+        <id>InvertedLogic</id>
+        <severity>style</severity>
+        <summary>It is cleaner to invert the logic.</summary>
+    </message>
+</rule>
+<rule>
+    <tokenlist>normal</tokenlist>
+    <pattern><![CDATA[\w+ != \w+ \?]]></pattern>
+    <message>
+        <id>InvertedLogic</id>
+        <severity>style</severity>
+        <summary>It is cleaner to invert the logic.</summary>
+    </message>
+</rule>
+<rule>
+    <tokenlist>normal</tokenlist>
+    <pattern><![CDATA[! \w+ \?]]></pattern>
+    <message>
+        <id>InvertedLogic</id>
+        <severity>style</severity>
+        <summary>It is cleaner to invert the logic.</summary>
+    </message>
+</rule>
+<rule>
+    <tokenlist>normal</tokenlist>
+    <pattern><![CDATA[for \( (?:(?:\w+|<|>|::) )*(?:\w+|>)(?: &|\*)* (\w+) = \w+ ; \1 < \w+ ; (\1 \+\+|\+\+ \1|\1 \-\-|\-\- \1) \) { \w+ \[ \1 \] = \w+ ; }]]></pattern>
+    <message>
+        <id>useStlAlgorithm</id>
+        <severity>style</severity>
+        <summary>Considering using std::fill instead.</summary>
+    </message>
+</rule>
+<rule>
+    <tokenlist>normal</tokenlist>
+    <pattern><![CDATA[for \( (?:(?:\w+|<|>|::) )*(?:\w+|>)(?: &|\*)* (\w+) = \w+ ; \1 < \w+ ; (\1 \+\+|\+\+ \1|\1 \-\-|\-\- \1) \) { \w+ \[ \1 \] = (?:\w+ :: )*\w+ \( \) ; }]]></pattern>
+    <message>
+        <id>useStlAlgorithm</id>
+        <severity>style</severity>
+        <summary>Considering using std::generate instead.</summary>
+    </message>
+</rule>
+<rule>
+    <tokenlist>normal</tokenlist>
+    <pattern><![CDATA[for \( (?:(?:\w+|<|>|::) )*(?:\w+|>)(?: &|\*)* (\w+) = \w+ ; \1 < \w+ ; (\1 \+\+|\+\+ \1|\1 \-\-|\-\- \1) \) { \w+ \[ \1 \] = (?:\w+ :: )*\w+ \( \w+ \[ \1 \] \) ; }]]></pattern>
+    <message>
+        <id>useStlAlgorithm</id>
+        <severity>style</severity>
+        <summary>Considering using std::transform instead.</summary>
+    </message>
+</rule>
+<rule>
+    <tokenlist>normal</tokenlist>
+    <pattern><![CDATA[for \( (?:(?:\w+|<|>|::) )*(?:\w+|>)(?: &|\*)* (\w+) = \w+ ; \1 < \w+ ; (\1 \+\+|\+\+ \1|\1 \-\-|\-\- \1) \) { \w+ \[ \1 \] = (?:\w+ :: )*\w+ \( \w+ \[ \1 \] , \w+ \[ \1 \] \) ; }]]></pattern>
+    <message>
+        <id>useStlAlgorithm</id>
+        <severity>style</severity>
+        <summary>Considering using std::transform instead.</summary>
+    </message>
+</rule>
+<rule>
+    <tokenlist>normal</tokenlist>
+    <pattern><![CDATA[for \( (?:(?:\w+|<|>|::) )*(?:\w+|>)(?: &|\*)* (\w+) : (?:[^()]*(\([^()]*(?-1)*[^()]*\)))*[^)]*\) { (?:(?<idx1>\w+) \+\+|\+\+ (?<idx2>\w+)) ; if (\([^()]*(?-1)*[^()]*\)) { \w+ = \g{idx1}|\g{idx2} ; (?:break ; )?(?:return [^;]*; )?} }]]></pattern>
+    <message>
+        <id>useStlAlgorithm</id>
+        <severity>style</severity>
+        <summary>Considering using std::find or std::find_if instead.</summary>
+    </message>
+</rule>
+<rule>
+    <tokenlist>normal</tokenlist>
+    <pattern><![CDATA[for \( (?:(?:\w+|<|>|::) )*(?:\w+|>)(?: &|\*)* (\w+) : (?:[^()]*(\([^()]*(?-1)*[^()]*\)))*[^)]*\) { if (\([^()]*(?-1)*[^()]*\)) { \w+ = (?<idx>\w) ; (?:break ; )?(?:return [^;]*; )?} (?:(\g{idx}) \+\+|\+\+ (\g{idx})) ; }]]></pattern>
+    <message>
+        <id>useStlAlgorithm</id>
+        <severity>style</severity>
+        <summary>Considering using std::find or std::find_if instead.</summary>
+    </message>
+</rule>
+<rule>
+    <tokenlist>normal</tokenlist>
+    <pattern><![CDATA[for \( (?:(?:\w+|<|>|::) )*(?:\w+|>)(?: &|\*)* (\w+) : (?:[^()]*(\([^()]*(?-1)*[^()]*\)))*[^)]*\) { (?:(?<idx1>\w+) \+\+|\+\+ (?<idx2>\w+)) ; if (\([^()]*(?-1)*[^()]*\)) { return \g{idx1}|\g{idx2} ; } }]]></pattern>
+    <message>
+        <id>useStlAlgorithm</id>
+        <severity>style</severity>
+        <summary>Considering using std::find or std::find_if instead.</summary>
+    </message>
+</rule>
+<rule>
+    <tokenlist>normal</tokenlist>
+    <pattern><![CDATA[for \( (?:(?:\w+|<|>|::) )*(?:\w+|>)(?: &|\*)* (\w+) : (?:[^()]*(\([^()]*(?-1)*[^()]*\)))*[^)]*\) { if (\([^()]*(?-1)*[^()]*\)) { return (?<idx>\w+) ; } (?:(\g{idx}) \+\+|\+\+ (\g{idx})) ; }]]></pattern>
+    <message>
+        <id>useStlAlgorithm</id>
+        <severity>style</severity>
+        <summary>Considering using std::find or std::find_if instead.</summary>
+    </message>
+</rule>

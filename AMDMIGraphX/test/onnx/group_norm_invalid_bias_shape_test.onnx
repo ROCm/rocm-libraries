@@ -1,0 +1,27 @@
+	"group_norm_invalid_bias_shape_test:Ã
+:
+x
+scale
+biasy"GroupNormalization*
+
+num_groups "group_norm_invalid_bias_shape_testZ
+x
+
+
+
+
+Z
+scale
+
+
+Z
+bias
+
+
+b
+y
+
+
+
+
+B

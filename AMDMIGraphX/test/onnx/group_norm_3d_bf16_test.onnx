@@ -1,0 +1,26 @@
+	group_norm_3d_bf16_test:Ã
+M
+x
+scale
+biasy"GroupNormalization*
+epsilon¬Å'7 *
+
+num_groups group_norm_3d_bf16_testZ
+x
+
+
+
+Z
+scale
+
+
+Z
+bias
+
+
+b
+y
+
+
+
+B

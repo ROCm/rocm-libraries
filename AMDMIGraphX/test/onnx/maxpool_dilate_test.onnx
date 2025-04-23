@@ -1,0 +1,17 @@
+maxpool_dilate_test:ž
+U
+xy"MaxPool*
+	dilations@ *
+kernel_shape@ *
+pads@@ *
+strides@ maxpool_dilate_testZ
+x
+
+
+
+b
+y
+
+
+
+B

@@ -1,0 +1,25 @@
+conv_autopad_same_test:»
+J
+0
+12"Conv*
+auto_pad"SAME *
+	dilations@@ *
+strides@@ conv_autopad_same_testZ
+0
+
+
+
+ 
+ Z
+1
+
+
+
+
+b
+2
+
+
+
+ 
+ B

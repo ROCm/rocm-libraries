@@ -1,0 +1,22 @@
+	.softmaxcrossentropyloss_invalid_reduction_test:Á
+G
+0
+1
+32"SoftmaxCrossEntropyLoss* 
+	reduction"BadReductionName .softmaxcrossentropyloss_invalid_reduction_testZ
+0
+
+
+Z
+1
+
+
+Z
+3
+
+
+b
+2
+
+
+B

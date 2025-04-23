@@ -1,0 +1,32 @@
+	matmulnbits_invalid_b_dims_test:ó
+e
+a
+b
+scales
+zpc"MatMulNBits*
+K *
+N *
+bits *
+
+block_size :com.microsoftmatmulnbits_invalid_b_dims_testZ
+a
+
+
+Z
+b
+
+
+
+Z
+scales
+
+
+Z
+zp
+
+
+b
+c
+
+
+B

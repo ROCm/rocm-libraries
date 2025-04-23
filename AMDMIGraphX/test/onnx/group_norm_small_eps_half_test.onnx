@@ -1,0 +1,30 @@
+group_norm_small_eps_half_test:Ê
+M
+x
+scale
+biasy"GroupNormalization*
+epsilonÌ¼Œ+ *
+
+num_groups group_norm_small_eps_half_testZ
+x
+
+
+
+
+Z
+scale
+
+
+
+Z
+bias
+
+
+
+b
+y
+
+
+
+
+B

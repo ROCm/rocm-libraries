@@ -1,0 +1,28 @@
+	group_norm_4d_bf16_test:Ë
+M
+x
+scale
+biasy"GroupNormalization*
+epsilon¬Å'7 *
+
+num_groups group_norm_4d_bf16_testZ
+x
+
+
+
+
+Z
+scale
+
+
+Z
+bias
+
+
+b
+y
+
+
+
+
+B

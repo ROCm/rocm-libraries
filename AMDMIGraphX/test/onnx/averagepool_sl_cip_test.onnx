@@ -1,0 +1,19 @@
+averagepool_sl_cip_test:´
+_
+xy"AveragePool*
+auto_pad"
+SAME_LOWER *
+count_include_pad *
+kernel_shape@@ averagepool_sl_cip_testZ
+x
+
+
+
+
+b
+y
+
+
+
+
+B

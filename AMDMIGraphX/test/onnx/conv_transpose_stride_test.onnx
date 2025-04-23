@@ -1,0 +1,23 @@
+conv_transpose_stride_test:Ÿ
+*
+x
+wy"ConvTranspose*
+strides@@ conv_transpose_stride_testZ
+x
+
+
+
+
+Z
+w
+
+
+
+
+b
+y
+
+
+
+
+B

@@ -1,0 +1,19 @@
+	.quantizelinear_blocked_invalid_block_size_test:¶
+?
+x
+y_scaley"QuantizeLinear*
+axis *
+
+block_size .quantizelinear_blocked_invalid_block_size_testZ
+x
+
+
+Z
+y_scale
+
+
+b
+y
+
+
+B

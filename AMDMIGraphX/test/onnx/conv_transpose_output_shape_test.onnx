@@ -1,0 +1,26 @@
+ conv_transpose_output_shape_test:¼
+A
+x
+wy"ConvTranspose*
+output_shape@
+@ *
+strides@@  conv_transpose_output_shape_testZ
+x
+
+
+
+
+Z
+w
+
+
+
+
+b
+y
+
+
+
+
+
+B

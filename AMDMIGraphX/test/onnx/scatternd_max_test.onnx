@@ -1,0 +1,26 @@
+	scatternd_max_test:Î
+@
+data
+indices
+updatesoutput"	ScatterND*
+	reduction"max scatternd_max_testZ
+data
+
+
+
+Z
+indices
+
+
+
+Z
+updates
+
+
+
+b
+output
+
+
+
+B

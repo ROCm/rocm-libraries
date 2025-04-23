@@ -1,0 +1,68 @@
+# Auto-generated doxygen configuration file
+
+BUILTIN_STL_SUPPORT = YES
+
+CALLER_GRAPH = YES
+
+CALL_GRAPH = YES
+
+ENUM_VALUES_PER_LINE = 1
+
+EXCLUDE_PATTERNS = ../../src/targets/gpu/kernels ../../src/targets/gpu/device
+
+EXTRACT_ALL = YES
+
+FULL_PATH_NAMES = YES
+
+GENERATE_LATEX = NO
+
+GENERATE_TREEVIEW = YES
+
+GENERATE_XML = YES
+
+INCLUDE_PATH = ../../src/include ../../src/targets/cpu/include ../../src/targets/gpu/include
+
+INPUT = ../../src
+
+MACRO_EXPANSION = YES
+
+OUTPUT_DIRECTORY = .
+
+PREDEFINED = \
+    DOXYGEN \
+    MIGRAPHX_EXPORT= \
+    MIGRAPHX_API_EXPORT= \
+    MIGRAPHX_GPU_EXPORT= \
+    MIGRAPHX_CPU_EXPORT= \
+    MIGRAPHX_ONNX_EXPORT= \
+    MIGRAPHX_TF_EXPORT= \
+    MIGRAPHX_C_EXPORT
+
+
+PROJECT_NAME = MIGraphX
+
+RECURSIVE = YES
+
+REFERENCED_BY_RELATION = YES
+
+REFERENCES_LINK_SOURCE = YES
+
+REFERENCES_RELATION = YES
+
+SEARCH_INCLUDES = YES
+
+SORT_MEMBERS_CTORS_1ST = YES
+
+SOURCE_BROWSER = YES
+
+STRIP_FROM_INC_PATH = ../../src/include ../../src/targets/cpu/include ../../src/targets/gpu/include
+
+STRIP_FROM_PATH = 
+
+USE_PDFLATEX = NO
+
+WARN_LOGFILE = DoxygenWarningLog.txt
+
+DOT_PATH = 
+
+HAVE_DOT = NO

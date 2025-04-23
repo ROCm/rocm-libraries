@@ -1,0 +1,23 @@
+
+-softmaxcrossentropyloss_label_wrong_type_test:´
+;
+0
+1
+32"SoftmaxCrossEntropyLoss*
+	reduction"none -softmaxcrossentropyloss_label_wrong_type_testZ
+0
+
+
+Z
+1
+
+
+Z
+3
+
+
+b
+2
+
+
+B

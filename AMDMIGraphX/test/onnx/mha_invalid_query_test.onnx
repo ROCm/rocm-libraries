@@ -1,0 +1,8 @@
+	mha_invalid_query_test:g
+8
+q"MultiHeadAttention*
+	num_heads :com.microsoftmha_invalid_query_testZ
+q
+
+
+B

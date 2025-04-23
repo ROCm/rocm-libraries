@@ -1,0 +1,616 @@
+name: migraphx
+
+on: 
+  pull_request:
+  push:
+    branches: 
+      - develop
+      - master
+      - 'release/**'
+
+env:
+  DOCKER_USER: ${{secrets.DOCKERHUB_USERID}}
+  DOCKER_TOKEN: ${{secrets.DOCKERHUB_TOKEN}}
+  DOCKER_IMAGE_UBUNTU: "rocm/migraphx-ci-ubuntu"
+  DOCKER_IMAGE_SLES: "rocm/migraphx-ci-sles"
+
+
+jobs:
+  cancel:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Cancel Previous Runs
+        uses: styfle/cancel-workflow-action@0.12.1
+        with:
+          access_token: ${{ github.token }}
+
+  check_image:
+    name: Check if image exists in registry
+    runs-on: ubuntu-latest
+    outputs:
+      imageexists:  ${{ steps.check_image.outputs.imageexists }}
+      imagetag:  ${{ steps.image_hash.outputs.imagetag }}
+      imageexists_sles:  ${{ steps.check_image.outputs.imageexists_sles }}
+      imagetag_sles:  ${{ steps.image_hash.outputs.imagetag_sles }}
+
+    steps: 
+      - name: Checkout Code
+        uses: actions/checkout@v4.2.2
+
+      - name: Create Image Tag
+        id: image_hash
+        run: |
+          echo "imagetag=hip-clang-${{hashFiles('**/hip-clang.docker', '**/*requirements.txt', '**/requirements-py.txt', '**/install_prereqs.sh', '**/rbuild.ini')}}" >> $GITHUB_OUTPUT
+          echo "imagetag_sles=hip-clang-${{hashFiles('**/tools/docker/sles.docker', '**/*requirements.txt','**/requirements-py.txt', '**/install_prereqs.sh', '**/rbuild.ini')}}" >> $GITHUB_OUTPUT
+
+      - name: Check if image is built already
+        id: check_image
+        env:
+          DOCKER_TAG_UBUNTU: ${{ steps.image_hash.outputs.imagetag }}
+          DOCKER_TAG_SLES: ${{ steps.image_hash.outputs.imagetag_sles }}
+        run: |
+          if [[ "$(docker manifest inspect $DOCKER_IMAGE_UBUNTU:$DOCKER_TAG_UBUNTU 2> /dev/null)" != "" ]]; then
+            echo "imageexists=true" >> $GITHUB_OUTPUT
+            echo "Image already exists, skip building available"
+          else
+            echo "imageexists=false" >> $GITHUB_OUTPUT
+            echo "Tag does not exist, build and publishing required"
+          fi
+
+          if [[ "$(docker manifest inspect $DOCKER_IMAGE_SLES:$DOCKER_TAG_SLES 2> /dev/null)" != "" ]]; then
+            echo "imageexists_sles=true" >> $GITHUB_OUTPUT
+            echo "SLES Image already exists, skip building available"
+          else
+            echo "imageexists_sles=false" >> $GITHUB_OUTPUT
+            echo "SLES Tag does not exist, build and publishing required"
+          fi
+
+
+  build_image:
+    name: Build image
+    runs-on: ROCM-Ubuntu
+    needs: check_image
+    if: ${{ needs.check_image.outputs.imageexists != 'true' }}
+    steps:
+    - uses: actions/checkout@v4.2.2
+
+    - name: Build and publish 
+      env:            
+        DOCKER_TAG_UBUNTU: ${{ needs.check_image.outputs.imagetag }}
+      run: |
+        # The TOKEN and USERID are github secrets, Action failures at this step
+        # can come from a PR from a fork changing a file which forces a rebuild
+        # Resolve by making an internal PR of the Forked PR
+        echo $DOCKER_TOKEN | docker login -u $DOCKER_USER --password-stdin
+
+        docker pull $DOCKER_IMAGE_UBUNTU:latest || true
+        docker build . --file hip-clang.docker --cache-from $DOCKER_IMAGE_UBUNTU:latest --tag $DOCKER_IMAGE_UBUNTU:$DOCKER_TAG_UBUNTU --tag $DOCKER_IMAGE_UBUNTU:latest;
+        docker push $DOCKER_IMAGE_UBUNTU:$DOCKER_TAG_UBUNTU;
+        docker push $DOCKER_IMAGE_UBUNTU:latest;
+
+  build_SLES_image:
+    name: Build SLES image
+    runs-on: ROCM-Ubuntu
+    needs: check_image
+    if: ${{ needs.check_image.outputs.imageexists_sles != 'true' }}
+    steps:
+    - uses: actions/checkout@v4.2.2
+    - name: Build and publish SLES
+      env:            
+        DOCKER_TAG_SLES: ${{ needs.check_image.outputs.imagetag_sles }}
+      run: |
+        # The TOKEN and USERID are github secrets, Action failures at this step
+        # can come from a PR from a fork changing a file wichi forces a rebuild
+        # Resolve by making an internal PR of the Forked PR
+        echo $DOCKER_TOKEN | docker login -u $DOCKER_USER --password-stdin
+
+        docker pull $DOCKER_IMAGE_SLES:latest || true
+        docker build . --file ./tools/docker/sles.docker --cache-from $DOCKER_IMAGE_SLES:latest --tag $DOCKER_IMAGE_SLES:$DOCKER_TAG_SLES --tag $DOCKER_IMAGE_SLES:latest;
+        docker push $DOCKER_IMAGE_SLES:$DOCKER_TAG_SLES;
+        docker push $DOCKER_IMAGE_SLES:latest;
+
+
+  tidy:
+    runs-on: ROCM-Ubuntu
+    needs: [ build_image, check_image ]
+    env:
+      DOCKER_TAG_UBUNTU: ${{ needs.check_image.outputs.imagetag }}
+
+    if: ${{ !cancelled() && (needs.build_image.result == 'success' || needs.build_image.result == 'skipped') }}
+    steps: 
+    - uses: actions/checkout@v4.2.2
+
+    - name: Restore cache files for tidy
+      uses: actions/cache/restore@v4.2.0
+      id: tidy_restore
+      with:
+        path: tidy-cache
+        key: tidy-cache-${{ github.ref }}
+        restore-keys: tidy-cache-
+
+    - name: Clang Tidy
+      shell: bash -c "docker run -i -v=$GITHUB_WORKSPACE:/data -w /data $DOCKER_IMAGE_UBUNTU:$DOCKER_TAG_UBUNTU bash < {0}"
+      run: |
+        mkdir build
+        cd build
+        CXX=/opt/rocm/llvm/bin/clang++ CC=/opt/rocm/llvm/bin/clang cmake \
+          -DMIGRAPHX_ENABLE_GPU=On \
+          -DMIGRAPHX_ENABLE_CPU=On \
+          -DMIGRAPHX_ENABLE_FPGA=On \
+          -DBUILD_DEV=On \
+          -DROCM_ENABLE_GH_ANNOTATIONS=On \
+          -DCLANG_TIDY_DEPEND_ON_TARGET=Off \
+          -DCLANG_TIDY_CACHE=/data/tidy-cache \
+          -DGPU_TARGETS=gfx908 \
+          ..
+        make -j$(nproc) -k onnx-proto tf-proto tidy
+
+    # GH actions can not update existing cache, as a workaround clear cache and then save it
+    - name: Clear tidy cache before saving
+      continue-on-error: true
+      if: ${{ steps.tidy_restore.outputs.cache-hit }}
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        gh extension install actions/gh-actions-cache --pin v1.0.1
+        gh actions-cache delete ${{ steps.tidy_restore.outputs.cache-matched-key }} --confirm
+
+    - name: Save cache files for tidy
+      uses: actions/cache/save@v4.2.0
+      if: always()
+      with:
+        path: tidy-cache
+        key: tidy-cache-${{ github.ref }}
+
+
+  cppcheck:
+    runs-on: ROCM-Ubuntu
+    needs: [ build_image, check_image ]
+    env:
+      DOCKER_TAG_UBUNTU: ${{ needs.check_image.outputs.imagetag }}
+
+    if: ${{ !cancelled() && (needs.build_image.result == 'success' || needs.build_image.result == 'skipped') }}
+    steps:
+    - uses: actions/checkout@v4.2.2
+
+    - name: Restore cache files for cppcheck
+      id: cppcheck_restore
+      uses: actions/cache/restore@v4.2.0
+      with:
+        path: cppcheck-cache
+        key: cppcheck-cache-1-${{ hashFiles('tools/cppcheck/rules.xml', 'tools/cppcheck/migraphx.py', 'CMakeLists.txt') }}-${{ github.ref }}
+        restore-keys: cppcheck-cache-1-${{ hashFiles('tools/cppcheck/rules.xml', 'tools/cppcheck/migraphx.py', 'CMakeLists.txt') }}-
+
+    - name: Cppcheck
+      shell: bash -c "docker run -i -v=$GITHUB_WORKSPACE:/data -w /data $DOCKER_IMAGE_UBUNTU:$DOCKER_TAG_UBUNTU bash < {0}"
+      run: |
+        mkdir build
+        cd build
+        CXX=/opt/rocm/llvm/bin/clang++ CC=/opt/rocm/llvm/bin/clang cmake \
+          -DCPPCHECK_BUILD_DIR=/data/cppcheck-cache \
+          -DBUILD_DEV=On \
+          -DROCM_ENABLE_GH_ANNOTATIONS=On \
+          -DGPU_TARGETS=gfx908 \
+          ..
+        make -j$(nproc) cppcheck
+
+    # GH actions can not update existing cache, as a workaround clear cache and then save it
+    - name: Clear cppcheck cache before saving
+      continue-on-error: true
+      if: ${{ steps.cppcheck_restore.outputs.cache-hit }}
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        gh extension install actions/gh-actions-cache --pin v1.0.1
+        gh actions-cache delete ${{ steps.cppcheck_restore.outputs.cache-matched-key }} --confirm
+
+    - name: Save cache files for cppcheck
+      uses: actions/cache/save@v4.2.0
+      if: always()
+      with:
+        path: cppcheck-cache
+        key: cppcheck-cache-${{ hashFiles('cppcheck.rules', 'CMakeLists.txt') }}-${{ github.ref }}
+
+
+  format:
+    runs-on: ubuntu-latest
+    needs: [ build_image, check_image ]
+    env:
+      DOCKER_TAG_UBUNTU: ${{ needs.check_image.outputs.imagetag }}
+
+    if: ${{ !cancelled() && (needs.build_image.result == 'success' || needs.build_image.result == 'skipped') }}
+    steps:
+    - uses: actions/checkout@v4.2.2
+      with:
+        fetch-depth: 0
+
+    - name: Free space
+      uses: jlumbroso/free-disk-space@main
+      continue-on-error: true
+      with:
+        tool-cache: true
+        android: true
+        dotnet: true
+        haskell: true
+        large-packages: true
+        swap-storage: true
+        docker-images: true
+
+    - name: Check formatting
+      shell: bash -c "docker run -i -v=$GITHUB_WORKSPACE:/data -w /data $DOCKER_IMAGE_UBUNTU:$DOCKER_TAG_UBUNTU bash < {0}"
+      run: |
+        set -e
+        git config --global --add safe.directory /data
+        python3 tools/format.py origin/${{ github.event_name == 'pull_request' && github.base_ref || 'develop' }}
+
+  sles:
+    runs-on: ROCM-Ubuntu
+    needs: [ build_SLES_image, check_image ]
+    env:
+      DOCKER_TAG_SLES: ${{ needs.check_image.outputs.imagetag_sles }}
+    
+    if: ${{ !cancelled() && (needs.build_SLES_image.result == 'success' || needs.build_SLES_image.result == 'skipped') }}      
+    steps:
+    - uses: actions/checkout@v4.2.2
+      with:
+        fetch-depth: 0
+
+    - name: Restore cache files for ccache
+      uses: actions/cache/restore@v4.2.0
+      id: ccache_restore
+      with:
+        path: ${{ github.workspace }}/ccache
+        key: ccache-sles-${{ github.ref }}
+        restore-keys: ccache-sles-
+
+    - name: Build migraphx
+      shell: bash -c "docker run -i -v=$GITHUB_WORKSPACE:/data -w /data $DOCKER_IMAGE_SLES:$DOCKER_TAG_SLES bash < {0}"
+      run: |
+        set -e
+        export CCACHE_COMPRESSLEVEL=10
+        export CCACHE_DIR=/data/ccache
+        export CCACHE_NOHASHDIR=true
+        export CCACHE_BASEDIR=/data
+        export CCACHE_MAXSIZE=1
+        mkdir build
+        cd build
+        CXX=/opt/rocm/llvm/bin/clang++ CC=/opt/rocm/llvm/bin/clang cmake \
+          -DMIGRAPHX_DISABLE_LARGE_BUFFER_TESTS=On \
+          -DBUILD_DEV=On \
+          -DCMAKE_CXX_COMPILER_LAUNCHER=/usr/local/bin/ccache \
+          -DCMAKE_C_COMPILER_LAUNCHER=/usr/local/bin/ccache \
+          -DCMAKE_CXX_FLAGS="-Werror" \
+          -DGPU_TARGETS=gfx908 \
+          ..
+        make -j$(nproc) tests driver
+
+    - name: Clear ccache cache before saving
+      continue-on-error: true
+      if: ${{ steps.ccache_restore.outputs.cache-hit }}
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        gh extension install actions/gh-actions-cache --pin v1.0.1
+        gh actions-cache delete ${{ steps.ccache_restore.outputs.cache-matched-key }} --confirm
+
+    - name: Save cache files for ccache
+      uses: actions/cache/save@v4.2.0
+      if: always()
+      with:
+        path: ${{ github.workspace }}/ccache
+        key: ccache-sles-${{ github.ref }}
+
+  pyflakes:
+    runs-on: ubuntu-24.04
+
+    steps:
+    - name: Free space
+      uses: jlumbroso/free-disk-space@main
+      continue-on-error: true
+      with:
+        tool-cache: true
+        android: true
+        dotnet: true
+        haskell: true
+        large-packages: true
+        swap-storage: true
+        docker-images: true
+
+    - uses: actions/checkout@v4.2.2
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.12
+    - name: Install pyflakes
+      run: pip install pyflakes==2.4.0 mypy==0.931
+
+    - name: Run pyflakes
+      run: |
+        pyflakes --version
+        pyflakes examples/ tools/ src/ test/ docs/
+        mypy --version
+        mypy tools/api.py
+
+  licensing:
+    runs-on: ubuntu-24.04
+
+    steps:
+    - name: Free space
+      uses: jlumbroso/free-disk-space@main
+      continue-on-error: true
+      with:
+        tool-cache: true
+        android: true
+        dotnet: true
+        haskell: true
+        large-packages: true
+        swap-storage: true
+        docker-images: true
+
+    - uses: actions/checkout@v4.2.2
+      with:
+        fetch-depth: 0 # Fetch the entire repository history and all branches
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.12
+    - name: Run License Check
+      run: python3 tools/check_stamped.py origin/${{ github.event_name == 'pull_request' && github.base_ref || 'develop' }}
+
+  linux:
+
+    runs-on: ${{ matrix.os }}
+
+    env:
+      CCACHE_COMPRESSLEVEL: 10
+      CCACHE_DIR: ${{github.workspace}}/ccache
+      CCACHE_NOHASHDIR: true
+      CCACHE_BASEDIR: ${{github.workspace}}
+      CCACHE_MAXSIZE: 1
+
+    strategy:
+      matrix:
+        os:
+          - ubuntu-24.04
+        configuration:
+          - debug
+          - release
+          - codecov
+
+    steps:
+    - name: Free space
+      uses: jlumbroso/free-disk-space@main
+      continue-on-error: true
+      with:
+        tool-cache: true
+        android: true
+        dotnet: true
+        haskell: true
+        large-packages: true
+        swap-storage: true
+        docker-images: true
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.12
+    - name: Setup cmake
+      uses: jwlawson/actions-setup-cmake@v1.9
+      with:
+        cmake-version: 3.20.0
+    - name : Install rbuild and lld
+      run: |
+        sudo apt-get install -y lld
+        python -m pip install --upgrade pip
+        pip install https://github.com/RadeonOpenCompute/rbuild/archive/master.tar.gz
+
+    - uses: actions/checkout@v4.2.2
+    - name: Cache dependencies
+      # Ignore the failure of a step and avoid terminating the job.
+      continue-on-error: true
+      uses: actions/cache@v4.2.0
+      id: deps_cache
+      with:
+        # This path is specific to Ubuntu
+        path: ${{ github.workspace }}/cget
+        # Look to see if there is a cache hit for the corresponding requirements file
+        key: ${{ matrix.os }}-cget-4-${{ hashFiles('requirements.txt', 'dev-requirements.txt', 'rbuild.ini') }}
+        restore-keys: ${{ matrix.os }}-cget-4-
+
+    - name: Install dependencies
+      run: rbuild prepare -d cget -s gh
+
+    - name: Restore cache files for ccache
+      uses: actions/cache/restore@v4.2.0
+      id: ccache_restore
+      with:
+        path: ${{ github.workspace }}/ccache
+        key: ${{ matrix.os }}-${{ matrix.configuration }}-ccache-${{ github.ref }}
+        restore-keys: ${{ matrix.os }}-${{ matrix.configuration }}-ccache-
+
+    - name: Build and test
+      env:
+        CMAKE_PREFIX_PATH: ${{ github.workspace }}/cget
+        CCACHE_LOGFILE: /tmp/ccache.log
+        CXXFLAGS: -Werror -pthread -fdebug-prefix-map=$PWD=. -fdebug-types-section -DMIGRAPHX_USE_TYPE_ERASED_MATCHERS=1 --param ggc-min-expand=5 --param ggc-min-heapsize=8192
+      run: |
+        echo "leak:dnnl::impl::malloc" > suppressions.txt
+        export LSAN_OPTIONS="suppressions=$(pwd)/suppressions.txt"
+        rbuild build -d cget -s gh -T check \
+          -DCMAKE_BUILD_TYPE=${{matrix.configuration}} \
+          -DMIGRAPHX_ENABLE_PYTHON=${{matrix.configuration == 'release' && 'On' || 'Off'}} \
+          -DMIGRAPHX_DISABLE_LARGE_BUFFER_TESTS=On \
+          -DBUILD_DEV=On \
+          -DCMAKE_CXX_FLAGS_DEBUG="-g1 -Os -fno-omit-frame-pointer -fsanitize=undefined -fno-sanitize-recover=undefined" \
+          -DCMAKE_CXX_FLAGS_CODECOV="-g1 -Og -fprofile-arcs -ftest-coverage -fno-omit-frame-pointer" \
+          -DCMAKE_EXE_LINKER_FLAGS='-fuse-ld=lld' \
+          -DCMAKE_SHARED_LINKER_FLAGS='-fuse-ld=lld'
+        ${{ github.workspace }}/cget/bin/ccache -s
+
+    # GH actions can not update existing cache, as a workaround clear cache and then save it
+    - name: Clear ccache cache before saving
+      continue-on-error: true
+      if: ${{ steps.ccache_restore.outputs.cache-hit }}
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        gh extension install actions/gh-actions-cache --pin v1.0.1
+        gh actions-cache delete ${{ steps.ccache_restore.outputs.cache-matched-key }} --confirm
+
+    - name: Save cache files for ccache
+      uses: actions/cache/save@v4.2.0
+      if: always()
+      with:
+        path: ${{ github.workspace }}/ccache
+        key: ${{ matrix.os }}-${{ matrix.configuration }}-ccache-${{ github.ref }}
+
+    - name: Upload code coverage
+      if: "matrix.configuration == 'codecov'"
+      env:
+        CODECOV_TOKEN: "f5d5a10b-3177-4c76-b25f-9b1c2f165e8b"
+      run: |
+        sudo apt-get install -y lcov
+        cd build
+        lcov --directory . --capture --output-file $(pwd)/coverage.info --ignore-errors mismatch
+        lcov --remove $(pwd)/coverage.info '/usr/*' --output-file $(pwd)/coverage.info
+        lcov --list $(pwd)/coverage.info
+        curl -Os https://uploader.codecov.io/latest/linux/codecov
+        chmod +x codecov
+        ./codecov -t ${CODECOV_TOKEN}
+        echo "Uploaded"
+
+  linux-fpga:
+    continue-on-error: true
+    runs-on: ${{ matrix.os }}
+
+    env:
+      CCACHE_COMPRESSLEVEL: 10
+      CCACHE_DIR: ${{github.workspace}}/ccache
+      CCACHE_NOHASHDIR: true
+      CCACHE_BASEDIR: ${{github.workspace}}
+      CCACHE_MAXSIZE: 1
+
+    strategy:
+      matrix:
+        os:
+          - ubuntu-24.04
+        configuration:
+          - debug
+          #- release  Uncomment when ready to test release builds
+          #- codecov  Uncomment when ready for codecov
+
+    steps:
+    - name: Free space
+      uses: jlumbroso/free-disk-space@main
+      continue-on-error: true
+      with:
+        tool-cache: true
+        android: true
+        dotnet: true
+        haskell: true
+        large-packages: true
+        swap-storage: true
+        docker-images: true
+
+    - uses: actions/checkout@v4.2.2
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.12
+
+    - name: Cache dependencies
+      # Ignore the failure of a step and avoid terminating the job.
+      continue-on-error: true
+      uses: actions/cache@v4.2.0
+      with:
+        # This path is specific to Ubuntu
+        path: ${{ github.workspace }}/cget
+        # Look to see if there is a cache hit for the corresponding requirements file
+        key: ${{ matrix.os }}-cget-4-${{ hashFiles('requirements.txt', 'dev-requirements.txt') }}
+        restore-keys: ${{ matrix.os }}-cget-4-
+
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install https://github.com/RadeonOpenCompute/rbuild/archive/master.tar.gz
+        rbuild prepare -d cget -s gh
+        sudo apt-get install -y lld
+
+    - name: Restore cache files for ccache
+      id: ccache_restore_fpga
+      uses: actions/cache/restore@v4.2.0
+      with:
+        path: ${{ github.workspace }}/ccache
+        key: ${{ matrix.os }}-${{ matrix.configuration }}-ccache-${{ github.ref }}
+        restore-keys: ${{ matrix.os }}-${{ matrix.configuration }}-ccache-
+    
+    - name: Build and test
+      env:
+        CMAKE_PREFIX_PATH: ${{ github.workspace }}/cget
+        CCACHE_LOGFILE: /tmp/ccache.log
+        CXXFLAGS: -Werror -pthread -DMIGRAPHX_USE_TYPE_ERASED_MATCHERS=1 --param ggc-min-expand=5 --param ggc-min-heapsize=8192
+      run: |
+        echo "leak:dnnl::impl::malloc" > suppressions.txt
+        export LSAN_OPTIONS="suppressions=$(pwd)/suppressions.txt"
+        rbuild build -d cget -s gh -T check \
+          -DCMAKE_BUILD_TYPE=${{matrix.configuration}} \
+          -DMIGRAPHX_ENABLE_PYTHON=${{matrix.configuration == 'release' && 'On' || 'Off'}} \
+          -DMIGRAPHX_DISABLE_LARGE_BUFFER_TESTS=On \
+          -DBUILD_DEV=On \
+          -DCMAKE_CXX_FLAGS_DEBUG="-g1 -Os -fdebug-prefix-map=$PWD=. -fdebug-types-section -fno-omit-frame-pointer -fsanitize=undefined -fno-sanitize-recover=undefined" \
+          -DCMAKE_CXX_FLAGS_CODECOV="-g1 -Og -fdebug-prefix-map=$PWD=. -fdebug-types-section -fprofile-arcs -ftest-coverage -fno-omit-frame-pointer" \
+          -DCMAKE_EXE_LINKER_FLAGS='-fuse-ld=lld' \
+          -DCMAKE_SHARED_LINKER_FLAGS='-fuse-ld=lld' \
+          -DMIGRAPHX_ENABLE_FPGA=On
+        ${{ github.workspace }}/cget/bin/ccache -s
+
+    # this is a workaround, with GH actions can not update existing cache
+    - name: Clear ccache cache before saving
+      continue-on-error: true
+      if: ${{ steps.ccache_restore_fpga.outputs.cache-hit }}
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        gh extension install actions/gh-actions-cache
+        gh actions-cache delete ${{ steps.ccache_restore_fpga.outputs.cache-matched-key }} --confirm
+
+    - name: Save cache files for ccache
+      uses: actions/cache/save@v4.2.0
+      if: always()
+      with:
+        path: ${{ github.workspace }}/ccache
+        key: ${{ matrix.os }}-${{ matrix.configuration }}-ccache-${{ github.ref }}
+
+      #- name: Upload code coverage
+      #  if: "matrix.configuration == 'codecov'"
+      #  env:
+      #    CODECOV_TOKEN: "8545af1c-f90b-4345-92a5-0d075503ca56"
+      #  run: |
+      #    sudo apt-get install -y lcov
+      #    cd build
+      #    lcov --directory . --capture --output-file $(pwd)/coverage.info
+      #    lcov --remove $(pwd)/coverage.info '/usr/*' --output-file $(pwd)/coverage.info
+      #    lcov --list $(pwd)/coverage.info
+      #    curl -Os https://uploader.codecov.io/latest/linux/codecov
+      #    chmod +x codecov
+      #    ./codecov -t ${CODECOV_TOKEN}
+      #    echo "Uploaded"
+  misspell:
+    name: misspell
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out code.
+        uses: actions/checkout@v4
+      - name: misspell
+        uses: reviewdog/action-misspell@v1
+        with:
+          locale: "US"
+          reporter: github-pr-check
+          level: warning
+

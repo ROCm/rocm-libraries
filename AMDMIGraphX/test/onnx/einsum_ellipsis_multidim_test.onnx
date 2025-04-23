@@ -1,0 +1,23 @@
+	einsum_ellipsis_multidim_test:°
+6
+x1
+x2y"Einsum*!
+equation"...ik,kj...->ij... einsum_ellipsis_multidim_testZ
+x1
+
+
+
+
+Z
+x2
+
+
+
+
+b
+y
+
+
+
+
+B

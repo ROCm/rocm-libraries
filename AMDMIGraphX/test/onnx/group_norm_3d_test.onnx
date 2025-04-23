@@ -1,0 +1,25 @@
+	group_norm_3d_test:«
+:
+x
+scale
+biasy"GroupNormalization*
+
+num_groups group_norm_3d_testZ
+x
+
+
+
+Z
+scale
+
+
+Z
+bias
+
+
+b
+y
+
+
+
+B

@@ -1,0 +1,29 @@
+	group_norm_5d_test:»
+:
+x
+scale
+biasy"GroupNormalization*
+
+num_groups group_norm_5d_testZ
+x
+
+
+
+
+
+Z
+scale
+
+
+Z
+bias
+
+
+b
+y
+
+
+
+
+
+B

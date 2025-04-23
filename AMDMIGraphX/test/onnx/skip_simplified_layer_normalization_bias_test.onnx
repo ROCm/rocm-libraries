@@ -1,0 +1,51 @@
+	-skip_simplified_layer_normalization_bias_test:˜
+…
+x
+skip
+gamma
+biasymeaninv_std_varinput_skip_bias_sum" SkipSimplifiedLayerNormalization*
+epsilon¬Å'7 :com.microsoft-skip_simplified_layer_normalization_bias_testZ
+x
+
+
+
+
+Z
+skip
+
+
+
+
+Z
+gamma
+
+
+
+Z
+bias
+
+
+
+b
+y
+
+
+
+
+b
+mean
+
+
+
+b!
+inv_std_var
+
+
+
+b)
+input_skip_bias_sum
+
+
+
+
+B

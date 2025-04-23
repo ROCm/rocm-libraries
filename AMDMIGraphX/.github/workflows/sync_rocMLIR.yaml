@@ -1,0 +1,90 @@
+name: rocMLIR sync with extended accuracy
+
+on:
+  schedule:
+    - cron: '0 7 * * sun'
+  pull_request:
+    branches: [rocMLIR-sync-*]
+    types: [synchronize, closed]
+  workflow_dispatch:
+    inputs:
+      rocm_release:
+        type: string
+        description: ROCm release version
+        required: true
+        default: '6.3.1'
+      base_image:
+        type: string
+        description: Base image for ROCm Docker build
+        required: true
+        default: 'rocm/dev-ubuntu-22.04'
+      docker_image:
+        type: string
+        description: Docker image name for rocm Docker build
+        required: true
+        default: 'rocm-migraphx'
+      build_navi:
+        type: string
+        description: Build navi number
+        required: true
+        default: '0'
+      benchmark_utils_repo:
+        type: string
+        description: Repository where benchmark utils are stored
+        required: true
+        default: 'ROCm/migraphx-benchmark-utils'
+      performance_reports_repo:
+        description: Repository where performance reports are stored
+        required: true
+        default: 'ROCm/migraphx-reports'
+      organization:
+        type: string
+        description: Organization based on which location of files will be different
+        required: true
+        default: 'AMD'
+      
+jobs:
+  get_config:
+    runs-on: ubuntu-latest
+    outputs:
+      rocm_version: ${{ steps.read_config.outputs.rocm_version }}
+      rocm_base_image: ${{ steps.read_config.outputs.rocm_base_image }}
+      rocm_built_image: ${{ steps.read_config.outputs.rocm_built_image }}
+      use_navi: ${{ steps.read_config.outputs.use_navi }}
+      utils_repo: ${{ steps.read_config.outputs.utils_repo }}
+      reports_repo: ${{ steps.read_config.outputs.reports_repo }}
+      repo_org: ${{ steps.read_config.outputs.repo_org }}
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4.2.2
+      - name: read_config
+        id: read_config
+        run: |
+          ROCM_VERSION=$(grep 'ROCM_VERSION' .github/workflows/config.md | cut -d "'" -f2)
+          ROCM_BASE_IMAGE=$(grep 'ROCM_BASE_IMAGE' .github/workflows/config.md | cut -d "'" -f2)
+          ROCM_BUILT_IMAGE=$(grep 'ROCM_BUILT_IMAGE' .github/workflows/config.md | cut -d "'" -f2)
+          BENCHMARK_UTILS_REPO=$(grep 'BENCHMARK_UTILS_REPO' .github/workflows/config.md | cut -d "'" -f2)
+          PERFORMANCE_REPORTS_REPO=$(grep 'PERFORMANCE_REPORTS_REPO' .github/workflows/config.md | cut -d "'" -f2)
+          ORGANIZATION_REPO=$(grep 'ORGANIZATION_REPO' .github/workflows/config.md | cut -d "'" -f2)
+          USE_NAVI=$(grep 'USE_NAVI' .github/workflows/config.ymd | cut -d "'" -f2)
+          echo "rocm_version=$ROCM_VERSION" >> $GITHUB_OUTPUT
+          echo "rocm_base_image=$ROCM_BASE_IMAGE" >> $GITHUB_OUTPUT
+          echo "rocm_built_image=$ROCM_BUILT_IMAGE" >> $GITHUB_OUTPUT
+          echo "use_navi=$USE_NAVI" >> $GITHUB_OUTPUT
+          echo "utils_repo=$BENCHMARK_UTILS_REPO" >> $GITHUB_OUTPUT
+          echo "reports_repo=$PERFORMANCE_REPORTS_REPO" >> $GITHUB_OUTPUT
+          echo "repo_org=$ORGANIZATION_REPO" >> $GITHUB_OUTPUT
+           
+  call_reusable:
+    needs: get_config
+    uses: ROCm/migraphx-benchmark/.github/workflows/rocMLIR_sync.yml@main
+    with:
+      rocm_release: ${{ github.event.inputs.rocm_release || needs.get_config.outputs.rocm_version }}
+      base_image: ${{ github.event.inputs.base_image || needs.get_config.outputs.rocm_base_image }}
+      docker_image: ${{ github.event.inputs.docker_image || needs.get_config.outputs.rocm_built_image }}
+      build_navi: ${{ github.event.inputs.build_navi || needs.get_config.outputs.use_navi }}
+      benchmark_utils_repo: ${{ github.event.inputs.benchmark_utils_repo || needs.get_config.outputs.utils_repo }}
+      performance_reports_repo: ${{ github.event.inputs.performance_reports_repo || needs.get_config.outputs.reports_repo }}
+      organization: ${{ github.event.inputs.organization || needs.get_config.outputs.repo_org }}
+    secrets:
+      gh_token: ${{ secrets.MIGRAPHX_BOT_TOKEN }}

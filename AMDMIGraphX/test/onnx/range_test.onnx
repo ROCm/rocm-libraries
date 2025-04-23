@@ -1,0 +1,19 @@
+
+range_test:Ú
+/start"Constant*
+value*:
+B	start_val 
+/limit"Constant*
+value*:B	limit_val 
+8delta"Constant*%
+value*:
+ýÿÿÿÿÿÿÿÿB	delta_val 
+
+start
+limit
+delta1"Range
+range_testb
+1
+
+
+B

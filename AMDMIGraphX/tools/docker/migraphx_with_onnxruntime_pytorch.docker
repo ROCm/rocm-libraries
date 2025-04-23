@@ -1,0 +1,27 @@
+FROM ubuntu:22.04
+
+ARG PREFIX=/usr/local
+
+#Prequisite packages to begin getting files
+RUN apt update && apt install -y wget
+
+#Aquire and install ROCm
+RUN wget https://repo.radeon.com/amdgpu-install/6.2/ubuntu/jammy/amdgpu-install_6.2.60200-1_all.deb
+RUN apt install -y ./amdgpu-install_6.2.60200-1_all.deb
+RUN amdgpu-install --usecase=rocm -y && rm amdgpu-install_6.2.60200-1_all.deb
+
+#Install MIGraphX from package manager
+RUN apt install -y migraphx
+
+#Pieces for Onnxruntime for ROCm and MIGraphX Execution Provider Support
+
+ RUN pip3 install https://repo.radeon.com/rocm/manylinux/rocm-rel-6.2/onnxruntime_rocm-1.18.0-cp310-cp310-linux_x86_64.whl
+
+#Pieces for pytorch
+RUN pip3 install https://repo.radeon.com/rocm/manylinux/rocm-rel-6.2/pytorch_triton_rocm-2.2.0%2Brocm6.2.0.1d36d63aa0-cp310-cp310-linux_x86_64.whl
+RUN pip3 install https://repo.radeon.com/rocm/manylinux/rocm-rel-6.2/torch-2.2.1+rocm6.2.0-cp310-cp310-linux_x86_64.whl
+RUN pip3 install https://repo.radeon.com/rocm/manylinux/rocm-rel-6.2/torchvision-0.17.1+rocm6.2.0-cp310-cp310-linux_x86_64.whl
+
+#Adjust final path for ability to use rocm components
+ENV PATH=$PATH:/opt/rocm/bin/
+

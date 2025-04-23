@@ -1,0 +1,25 @@
+"conv_transpose_output_padding_test:À
+C
+x
+wy"ConvTranspose*
+output_padding@@ *
+strides@@ "conv_transpose_output_padding_testZ
+x
+
+
+
+
+Z
+w
+
+
+
+
+b
+y
+
+
+
+
+
+B

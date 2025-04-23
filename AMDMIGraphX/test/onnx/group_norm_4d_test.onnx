@@ -1,0 +1,27 @@
+	group_norm_4d_test:³
+:
+x
+scale
+biasy"GroupNormalization*
+
+num_groups group_norm_4d_testZ
+x
+
+
+
+
+Z
+scale
+
+
+Z
+bias
+
+
+b
+y
+
+
+
+
+B

@@ -1,0 +1,26 @@
+	 scatternd_invalid_reduction_test:à
+D
+data
+indices
+updatesoutput"	ScatterND*
+	reduction"invalid  scatternd_invalid_reduction_testZ
+data
+
+
+
+Z
+indices
+
+
+
+Z
+updates
+
+
+
+b
+output
+
+
+
+B

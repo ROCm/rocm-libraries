@@ -1,0 +1,18 @@
+	pad_reflect_with_axes_test:ä
+3arg_axes"Constant*
+value**Bpad_axes 
+3arg_pad"Constant*
+value**Bpad_size 
+2
+0
+arg_pad
+arg_axes1"Pad*
+mode"reflect pad_reflect_with_axes_testZ
+0
+
+
+b
+1
+
+
+B

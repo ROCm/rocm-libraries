@@ -1,0 +1,20 @@
+	6quantizelinear_blocked_x_and_scales_rank_mismatch_test:Â
+?
+x
+y_scaley"QuantizeLinear*
+axis *
+
+block_size 6quantizelinear_blocked_x_and_scales_rank_mismatch_testZ
+x
+
+
+Z
+y_scale
+
+
+
+b
+y
+
+
+B

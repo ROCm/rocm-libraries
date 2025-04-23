@@ -1,0 +1,32 @@
+	%matmulnbits_block_size_too_small_test:ù
+e
+a
+b
+scales
+zpc"MatMulNBits*
+K *
+N *
+bits *
+
+block_size :com.microsoft%matmulnbits_block_size_too_small_testZ
+a
+
+
+Z
+b
+
+
+
+Z
+scales
+
+
+Z
+zp
+
+
+b
+c
+
+
+B

@@ -1,0 +1,33 @@
+	!rotary_embedding_interleaved_test:“
+b
+input
+pos_ids
+	cos_cache
+	sin_cacheoutput"RotaryEmbedding*
+interleaved :com.microsoft!rotary_embedding_interleaved_testZ
+input
+
+
+
+
+Z
+pos_ids
+
+
+Z
+	cos_cache
+
+
+
+Z
+	sin_cache
+
+
+
+b
+output
+
+
+
+
+B

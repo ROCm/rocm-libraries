@@ -1,0 +1,17 @@
+reducemax-example:{
+/
+xy"	ReduceMax*
+axes@ *
+keepdims test_reducemaxZ
+x
+
+
+
+
+b
+y
+
+
+
+
+B	

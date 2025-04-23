@@ -1,0 +1,5 @@
+ignore:
+  - "test/"
+  - "src/driver"
+  - "build/" 
+  - "src/netron_output.cpp"

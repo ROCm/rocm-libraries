@@ -1,0 +1,17 @@
+	einsum_broadcast_test:Š
+0
+x1
+x2y"Einsum*
+equation"ij, jk -> ik einsum_broadcast_testZ
+x1
+
+
+Z
+x2
+
+
+b
+y
+
+
+B

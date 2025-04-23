@@ -1,0 +1,26 @@
+scatternd_mul_test:Î
+@
+data
+indices
+updatesoutput"	ScatterND*
+	reduction"mul scatternd_mul_testZ
+data
+
+
+
+Z
+indices
+
+
+
+Z
+updates
+
+
+
+b
+output
+
+
+
+B

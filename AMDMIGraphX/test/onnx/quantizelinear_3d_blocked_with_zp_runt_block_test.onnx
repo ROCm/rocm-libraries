@@ -1,0 +1,28 @@
+	1quantizelinear_3d_blocked_with_zp_runt_block_test:ß
+A
+x
+scale
+zpy"QuantizeLinear*
+axis *
+
+block_size 1quantizelinear_3d_blocked_with_zp_runt_block_testZ
+x
+
+
+
+Z
+scale
+
+
+
+Z
+zp
+
+
+
+b
+y
+
+
+
+B

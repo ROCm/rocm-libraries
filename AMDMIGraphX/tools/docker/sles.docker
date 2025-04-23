@@ -1,0 +1,52 @@
+FROM registry.suse.com/suse/sle15:15.6
+
+RUN sh -c 'echo -e "\
+[rocm]\n\
+name=rocm\n\
+baseurl=https://repo.radeon.com/rocm/zyp/6.4/main\n\
+enabled=1\n\
+gpgcheck=0\n\
+gpgkey=https://repo.radeon.com/rocm/rocm.gpg.key\n\
+" > /etc/zypp/repos.d/rocm.repo'
+
+RUN cat /etc/zypp/repos.d/rocm.repo
+
+#addition of repos for packages
+RUN zypper addrepo https://download.opensuse.org/repositories/devel:/languages:/perl/15.6/devel:languages:perl.repo 
+
+RUN zypper -n --gpg-auto-import-keys refresh
+
+RUN zypper install -y -t pattern devel_basis enhanced_base
+RUN zypper --gpg-auto-import-keys install -y \
+    doxygen \
+    gcc-c++ \
+    gdb \
+    git \
+    hip-devel \
+    python3-pip \
+    rpm-build
+
+# Workaround broken rocm packages
+RUN ln -s /opt/rocm-* /opt/rocm
+RUN echo "/opt/rocm/lib" > /etc/ld.so.conf.d/rocm.conf
+RUN echo "/opt/rocm/llvm/lib" > /etc/ld.so.conf.d/rocm-llvm.conf
+RUN ldconfig
+
+ENV LC_ALL=C.UTF-8
+ENV LANG=C.UTF-8
+
+# Install yapf
+RUN pip3 install yapf==0.28.0
+
+# Install doc requirements
+# ADD docs/sphinx/requirements.txt /doc-requirements.txt
+# RUN pip3 install -r /doc-requirements.txt
+
+# Install dependencies
+ADD dev-requirements.txt /dev-requirements.txt
+ADD requirements.txt /requirements.txt
+ADD rbuild.ini /rbuild.ini
+
+COPY ./tools/install_prereqs.sh /
+COPY ./tools/requirements-py.txt /
+RUN /install_prereqs.sh /usr/local / && rm /install_prereqs.sh && rm /requirements-py.txt

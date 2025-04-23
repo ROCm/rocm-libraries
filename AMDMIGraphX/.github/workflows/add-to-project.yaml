@@ -1,0 +1,19 @@
+name: Add items to GH project
+
+on:
+  pull_request:
+    types:
+      - opened
+  issues:
+    types:
+      - opened
+
+jobs:
+  add-to-project:
+    name: Add PRs and issues to MIGX project
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/add-to-project@v0.4.0
+        with:
+          project-url: https://github.com/orgs/ROCm/projects/3
+          github-token: ${{ secrets.TEST_PR_WORKFLOW }}

@@ -1,0 +1,123 @@
+CheckOptions: 
+  - key:             bugprone-reserved-identifier.AllowedIdentifiers
+    value:           '__HIP_PLATFORM_AMD__;__HIP_ROCclr__'
+  - key:             bugprone-unused-return-value.CheckedFunctions
+    value:           '::std::async;::std::launder;::std::remove;::std::remove_if;::std::unique;::std::unique_ptr::release;::std::basic_string::empty;::std::vector::empty;::std::find;::std::find_if;::std::find_if_not;::std::all_of;::std::any_of;::std::none_of;::std::count;::std::count_if;::std::mismatch;::std::find_end;::std::find_first_of;::std::adjacent_find;::std::search;::std::search_n;::std::nth_element;::std::lower_bound;::std::upper_bound;::std::binary_search;::std::equal_range;::std::max;::std::max_element;::std::min;::std::min_element;::std::minmax;::std::minmax_element;::std::equal;::std::lexicographical_compare;::std::accumulate;::std::inner_product'
+  - key:             cppcoreguidelines-macro-usage.AllowedRegexp
+    value:           'DEBUG|ASSERT|ASSUME|UNREACHABLE|FALLTHROUGH|DEPRECATED|STRINGIZE|_HAS_|_THROW|_REQUIRES|_DECLARE_|_VISIT_|_REGISTER_|_GENERATE_|_DETAIL_|_TIDY_|_MANAGE_PTR|_MATCHER|DEVICE_SHARED|_WORKAROUND_|_PP_'
+  - key:             modernize-loop-convert.MinConfidence
+    value:           risky   
+  - key:             modernize-loop-convert.NamingStyle
+    value:           lower_case
+  - key:             misc-const-correctness.AnalyzeValues
+    value:           'false'
+  - key:             performance-unnecessary-copy-initialization.AllowedTypes
+    value:           'shape;operation;iterator;literal;tensor_view;match'
+  - key:             performance-unnecessary-value-param.AllowedTypes
+    value:           'shape;operation;iterator;literal;tensor_view;match'
+  - key:             readability-function-size.BranchThreshold
+    value:           '15'
+  - key:             readability-function-size.LineThreshold
+    value:           '350'
+  - key:             readability-function-size.NestingThreshold
+    value:           '5'
+  - key:             readability-function-size.ParameterThreshold
+    value:           '10'
+  - key:             readability-function-size.StatementThreshold
+    value:           '150'
+  - key:             readability-identifier-naming.NamespaceCase
+    value:           lower_case
+  - key:             readability-identifier-naming.InlineNamespaceCase
+    value:           UPPER_CASE
+  - key:             readability-identifier-naming.EnumConstantCase
+    value:           lower_case
+  - key:             readability-identifier-naming.ConstexprVariableCase
+    value:           lower_case
+  - key:             readability-identifier-naming.ConstantMemberCase
+    value:           lower_case
+  - key:             readability-identifier-naming.PrivateMemberCase
+    value:           lower_case
+  - key:             readability-identifier-naming.ProtectedMemberCase
+    value:           lower_case
+  - key:             readability-identifier-naming.PublicMemberCase
+    value:           lower_case
+  - key:             readability-identifier-naming.MemberCase
+    value:           lower_case
+  - key:             readability-identifier-naming.ClassConstantCase
+    value:           lower_case
+  - key:             readability-identifier-naming.ClassMemberCase
+    value:           lower_case
+  - key:             readability-identifier-naming.GlobalConstantCase
+    value:           lower_case
+  - key:             readability-identifier-naming.GlobalVariableCase
+    value:           lower_case
+  - key:             readability-identifier-naming.LocalConstantCase
+    value:           lower_case
+  - key:             readability-identifier-naming.LocalVariableCase
+    value:           lower_case
+  - key:             readability-identifier-naming.StaticConstantCase
+    value:           lower_case
+  - key:             readability-identifier-naming.StaticVariableCase
+    value:           lower_case
+  - key:             readability-identifier-naming.ConstantCase
+    value:           lower_case
+  - key:             readability-identifier-naming.VariableCase
+    value:           lower_case
+  - key:             readability-identifier-naming.ConstantParameterCase
+    value:           lower_case
+  - key:             readability-identifier-naming.ParameterPackCase
+    value:           lower_case
+  - key:             readability-identifier-naming.ParameterCase
+    value:           lower_case
+  - key:             readability-identifier-naming.AbstractClassCase
+    value:           lower_case
+  - key:             readability-identifier-naming.StructCase
+    value:           lower_case
+  - key:             readability-identifier-naming.ClassCase
+    value:           lower_case
+  - key:             readability-identifier-naming.UnionCase
+    value:           lower_case
+  - key:             readability-identifier-naming.EnumCase
+    value:           lower_case
+  - key:             readability-identifier-naming.GlobalFunctionCase
+    value:           lower_case
+  - key:             readability-identifier-naming.ConstexprFunctionCase
+    value:           lower_case
+  - key:             readability-identifier-naming.FunctionCase
+    value:           lower_case
+  - key:             readability-identifier-naming.ConstexprMethodCase
+    value:           lower_case
+  - key:             readability-identifier-naming.VirtualMethodCase
+    value:           lower_case
+  - key:             readability-identifier-naming.ClassMethodCase
+    value:           lower_case
+  - key:             readability-identifier-naming.PrivateMethodCase
+    value:           lower_case
+  - key:             readability-identifier-naming.ProtectedMethodCase
+    value:           lower_case
+  - key:             readability-identifier-naming.PublicMethodCase
+    value:           lower_case
+  - key:             readability-identifier-naming.MethodCase
+    value:           lower_case
+  - key:             readability-identifier-naming.TypedefCase
+    value:           lower_case
+  - key:             readability-identifier-naming.TypeTemplateParameterCase
+    value:           CamelCase
+  - key:             readability-identifier-naming.ValueTemplateParameterCase
+    value:           CamelCase
+  - key:             readability-identifier-naming.TemplateTemplateParameterCase
+    value:           CamelCase
+  - key:             readability-identifier-naming.TemplateParameterCase
+    value:           CamelCase
+  - key:             readability-identifier-naming.TypeAliasCase
+    value:           lower_case
+  - key:             readability-identifier-naming.MacroDefinitionCase
+    value:           UPPER_CASE
+  - key:             readability-identifier-naming.MacroDefinitionPrefix
+    value:           MIGRAPHX_
+  - key:             readability-identifier-naming.ConstexprMethodIgnoredRegexp
+    value:           'quiet_NaN|signaling_NaN'
+  - key:             readability-operators-representation.BinaryOperators
+    value:           'and;or;not'
+  - key:             readability-operators-representation.OverloadedOperators
+    value:           'and;or;not'

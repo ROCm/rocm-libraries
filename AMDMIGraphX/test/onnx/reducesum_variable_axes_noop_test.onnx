@@ -1,0 +1,22 @@
+	!reducesum_variable_axes_noop_test:¸
+E
+x
+axesy"	ReduceSum*
+keepdims *
+noop_with_empty_axes !reducesum_variable_axes_noop_testZ
+x
+
+
+
+
+Z
+axes
+
+
+b
+y
+
+
+
+
+B

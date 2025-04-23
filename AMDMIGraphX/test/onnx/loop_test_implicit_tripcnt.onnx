@@ -1,0 +1,73 @@
+	loop_test_implicit_tripcnt:ø
+¿
+max_trip_count
+keep_going_cond
+bb_loopmy_local_loopuser_defined_vals_loop"Loop*ã
+body2×
+
+a
+b_inmy_local"Add
+
+a
+b_in
+a_sub_b_in"Sub
++
+my_local
+
+a_sub_b_in
+keep_going"Greater
+0
+
+a_sub_b_in
+
+a_sub_b_inuser_defined_vals"AddbodyZ
+iteration_num
+
+
+Z
+keep_going_inp
+
+	
+Z
+b_in
+
+
+b
+
+keep_going
+
+	
+b
+
+a_sub_b_in
+
+
+b
+my_local
+
+
+b
+user_defined_vals
+
+
+ loop_test_implicit_tripcnt*:Bmax_trip_countZ
+keep_going_cond
+
+	
+Z
+a
+
+
+Z
+b
+
+
+b
+b_loop
+
+
+b(
+user_defined_vals_loop
+
+
+B

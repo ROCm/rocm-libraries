@@ -1,0 +1,24 @@
+conv_transpose_auto_pad_test:±
+:
+x
+wyconv1"ConvTranspose*
+auto_pad"
+SAME_UPPER conv_transpose_auto_pad_testZ
+x
+
+
+
+
+Z
+w
+
+
+
+
+b
+y
+
+
+
+
+B

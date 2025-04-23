@@ -1,0 +1,12 @@
+	mvn_rank_2_bf16_test:z
+3
+dataout"MeanVarianceNormalization*
+axes@ mvn_rank_2_bf16_testZ
+data
+
+
+b
+out
+
+
+B

@@ -1,0 +1,17 @@
+averagepool_dilate_test:¦
+Y
+xy"AveragePool*
+	dilations@ *
+kernel_shape@ *
+pads@@ *
+strides@ averagepool_dilate_testZ
+x
+
+
+
+b
+y
+
+
+
+B

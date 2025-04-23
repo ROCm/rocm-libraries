@@ -1,0 +1,40 @@
+name: History
+
+on:
+
+  workflow_dispatch:
+    inputs:
+      start_date:
+        description: Start date for results analysis
+        required: true
+        default: 'yyyy-mm-dd'
+      end_date:
+        description: End date for results analysis
+        required: true
+        default: 'yyyy-mm-dd'
+      history_repo:
+        description: Repository for history results between dates
+        required: true
+        default: 'ROCm/migraphx-reports'
+      benchmark_utils_repo:
+        description: Repository where benchmark utils are stored
+        required: true
+        default: "ROCm/migraphx-benchmark-utils"
+      organization:
+        description: Organization based on which location of files will be different
+        required: true
+        default: "AMD"
+
+jobs:
+  release:
+    uses: ROCm/migraphx-benchmark/.github/workflows/history.yml@main
+    with:
+      start_date: ${{ github.event.inputs.start_date || 'yyyy-mm-dd' }}
+      end_date: ${{ github.event.inputs.end_date || 'yyyy-mm-dd' }}
+      history_repo: ${{ github.event.inputs.history_repo || 'ROCm/migraphx-reports' }}
+      benchmark_utils_repo: ${{ github.event.inputs.benchmark_utils_repo || 'ROCm/migraphx-benchmark-utils' }}
+      organization: ${{ github.event.inputs.organization || 'AMD' }}
+    secrets:
+      gh_token: ${{ secrets.MIGRAPHX_BOT_TOKEN }}
+      mail_user: ${{ secrets.MAIL_USERNAME }}
+      mail_pass: ${{ secrets.MAIL_PASSWORD }}

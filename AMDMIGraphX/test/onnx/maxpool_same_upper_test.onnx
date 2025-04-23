@@ -1,0 +1,18 @@
+maxpool_same_upper_test:–
+A
+xy"MaxPool*
+auto_pad"
+SAME_UPPER *
+kernel_shape@@ maxpool_same_upper_testZ
+x
+
+
+
+
+b
+y
+
+
+
+
+B

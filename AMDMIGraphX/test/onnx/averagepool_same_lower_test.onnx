@@ -1,0 +1,18 @@
+averagepool_same_lower_test:ž
+E
+xy"AveragePool*
+auto_pad"
+SAME_LOWER *
+kernel_shape@@ averagepool_same_lower_testZ
+x
+
+
+
+
+b
+y
+
+
+
+
+B

@@ -1,0 +1,29 @@
+#conv_transpose_output_shape_3d_test:Ï
+E
+x
+wy"ConvTranspose*
+output_shape@
+@@ *
+strides@@@ #conv_transpose_output_shape_3d_testZ
+x
+
+
+
+
+
+Z
+w
+
+
+
+
+
+b
+y
+
+
+
+
+
+
+B

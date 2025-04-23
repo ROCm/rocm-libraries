@@ -1,0 +1,26 @@
++split_test_no_attribute_invalid_input_split:µ
+/
+xy1y2y3"Split*
+axis *
+
+split +split_test_no_attribute_invalid_input_splitZ
+x
+
+
+
+b
+y1
+
+
+
+b
+y2
+
+
+
+b
+y3
+
+
+
+B

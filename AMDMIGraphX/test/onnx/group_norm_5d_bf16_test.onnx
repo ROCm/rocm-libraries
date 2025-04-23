@@ -1,0 +1,30 @@
+	group_norm_5d_bf16_test:Ó
+M
+x
+scale
+biasy"GroupNormalization*
+epsilon¬Å'7 *
+
+num_groups group_norm_5d_bf16_testZ
+x
+
+
+
+
+
+Z
+scale
+
+
+Z
+bias
+
+
+b
+y
+
+
+
+
+
+B

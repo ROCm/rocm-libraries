@@ -1,0 +1,19 @@
+	5quantizelinear_blocked_non_bc_axis_size_mismatch_test:½
+?
+x
+y_scaley"QuantizeLinear*
+axis *
+
+block_size 5quantizelinear_blocked_non_bc_axis_size_mismatch_testZ
+x
+
+
+Z
+y_scale
+
+
+b
+y
+
+
+B

@@ -1,0 +1,26 @@
+{
+  "data": [
+    {
+      "paragraphs": [
+        {
+          "context": "ROCm is the first open-source exascale-class platform for accelerated computing that’s also programming-language independent. It brings a philosophy of choice, minimalism and modular software development to GPU computing. You are free to choose or even develop tools and a language run time for your application. ROCm is built for scale, it supports multi-GPU computing and has a rich system run time with the critical features that large-scale application, compiler and language-run-time development requires. Since the ROCm ecosystem is comprised of open technologies: frameworks (Tensorflow / PyTorch), libraries (MIOpen / Blas / RCCL), programming model (HIP), inter-connect (OCD) and up streamed Linux® Kernel support – the platform is continually optimized for performance and extensibility.",
+          "qas": [
+            {
+              "question": "What is ROCm?",
+              "id": "1"
+            },
+            {
+              "question": "Which frameworks does ROCm support?",
+              "id": "2"
+            },
+            {
+              "question": "What is ROCm built for?",
+              "id": "3"
+            }
+          ]
+        }
+      ],
+      "title": "AMD ROCm"
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+scatternd_add_test:Î
+@
+data
+indices
+updatesoutput"	ScatterND*
+	reduction"add scatternd_add_testZ
+data
+
+
+
+Z
+indices
+
+
+
+Z
+updates
+
+
+
+b
+output
+
+
+
+B

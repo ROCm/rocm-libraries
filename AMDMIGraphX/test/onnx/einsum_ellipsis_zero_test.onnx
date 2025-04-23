@@ -1,0 +1,20 @@
+	einsum_ellipsis_zero_test:£
+9
+x1
+x2y"Einsum*$
+equation"...qhd,...khd->...hqk einsum_ellipsis_zero_testZ
+x1
+
+
+
+Z
+x2
+
+
+
+b
+y
+
+
+
+B

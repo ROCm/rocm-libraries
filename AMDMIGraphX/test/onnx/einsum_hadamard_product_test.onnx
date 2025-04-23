@@ -1,0 +1,17 @@
+	einsum_hadamard_product_test:Ž
+-
+x1
+x2y"Einsum*
+equation"	ij,ij->ij einsum_hadamard_product_testZ
+x1
+
+
+Z
+x2
+
+
+b
+y
+
+
+B

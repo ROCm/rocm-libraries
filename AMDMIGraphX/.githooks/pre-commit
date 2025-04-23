@@ -1,0 +1,10 @@
+#!/bin/sh
+#
+# This pre-commit hook checks if any versions of clang-format
+# are installed, and if so, uses the installed version to format
+# the staged changes.
+
+# Do everything from top - level
+cd $(git rev-parse --show-toplevel)
+
+python3 tools/format.py -q -i HEAD

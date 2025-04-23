@@ -1,0 +1,99 @@
+name: MIGraphX Performance Tests
+
+on:
+  pull_request_target:
+    branches: [develop]
+    types: [opened, synchronize, closed]
+  schedule:
+    - cron: "0 7 * * 1-6"
+
+  workflow_dispatch:
+    inputs:
+      rocm_release:
+        description: ROCm Version
+        required: true
+        default: '6.3.1'
+      performance_reports_repo:
+        description: Repository where performance reports are stored
+        required: true
+        default: 'ROCm/migraphx-reports'
+      benchmark_utils_repo:
+        description: Repository where benchmark utils are stored
+        required: true
+        default: "ROCm/migraphx-benchmark-utils"
+      organization:
+        description: Organization based on which location of files will be different
+        required: true
+        default: "AMD"
+      result_number:
+        description: Last N results
+        required: true
+        default: '10'
+      model_timeout:
+        description: If model in performance test script passes this threshold, it will be skipped
+        required: true
+        default: '30m'
+      performance_backup_repo:
+        description: Repository for backup
+        required: true
+        default: migraphx-benchmark/performance-backup
+      flags:
+        description: -m for Max value; -s for Std dev; -r for Threshold file
+        required: true
+        default: '-r'
+
+concurrency: 
+  group: "perftest-${{ github.head_ref ||  github.base_ref || 'schedule' }}"
+  cancel-in-progress: true
+
+jobs:
+  get_config:
+    runs-on: ubuntu-latest
+    outputs:
+      rocm_version: ${{ steps.read_config.outputs.rocm_version }}
+      utils_repo: ${{ steps.read_config.outputs.utils_repo }}
+      reports_repo: ${{ steps.read_config.outputs.reports_repo }}
+      backup_repo: ${{ steps.read_config.outputs.backup_repo }}
+      repo_org: ${{ steps.read_config.outputs.repo_org }}
+      perf_number: ${{ steps.read_config.outputs.perf_number }}
+      perf_flag: ${{ steps.read_config.outputs.perf_flag }}
+      perf_timeout: ${{ steps.read_config.outputs.perf_timeout }}
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4.2.2
+      - name: read_config
+        id: read_config
+        run: |
+          ROCM_VERSION=$(grep 'ROCM_VERSION' .github/workflows/config.md | cut -d "'" -f2)
+          BENCHMARK_UTILS_REPO=$(grep 'BENCHMARK_UTILS_REPO' .github/workflows/config.md | cut -d "'" -f2)
+          PERFORMANCE_REPORTS_REPO=$(grep 'PERFORMANCE_REPORTS_REPO' .github/workflows/config.md | cut -d "'" -f2)
+          PERFORMANCE_BACKUP_REPO=$(grep 'PERFORMANCE_BACKUP_REPO' .github/workflows/config.md | cut -d "'" -f2)
+          ORGANIZATION_REPO=$(grep 'ORGANIZATION_REPO' .github/workflows/config.md | cut -d "'" -f2)
+          RESULTS_TO_COMPARE=$(grep 'RESULTS_TO_COMPARE' .github/workflows/config.md | cut -d "'" -f2)
+          CALCULATION_METHOD_FLAG=$(grep 'CALCULATION_METHOD_FLAG' .github/workflows/config.md | cut -d "'" -f2)
+          PERFORMANCE_TEST_TIMEOUT=$(grep 'PERFORMANCE_TEST_TIMEOUT' .github/workflows/config.md | cut -d "'" -f2)
+          echo "rocm_version=$ROCM_VERSION" >> $GITHUB_OUTPUT
+          echo "utils_repo=$BENCHMARK_UTILS_REPO" >> $GITHUB_OUTPUT
+          echo "reports_repo=$PERFORMANCE_REPORTS_REPO" >> $GITHUB_OUTPUT
+          echo "backup_repo=$PERFORMANCE_BACKUP_REPO" >> $GITHUB_OUTPUT
+          echo "repo_org=$ORGANIZATION_REPO" >> $GITHUB_OUTPUT
+          echo "perf_number=$RESULTS_TO_COMPARE" >> $GITHUB_OUTPUT
+          echo "perf_flag=$CALCULATION_METHOD_FLAG" >> $GITHUB_OUTPUT
+          echo "perf_timeout=$PERFORMANCE_TEST_TIMEOUT" >> $GITHUB_OUTPUT
+      
+  call_reusable:
+    needs: get_config
+    uses: ROCm/migraphx-benchmark/.github/workflows/perf-test.yml@main
+    with:
+      rocm_release: ${{ github.event.inputs.rocm_release || needs.get_config.outputs.rocm_version }}
+      benchmark_utils_repo: ${{ github.event.inputs.benchmark_utils_repo || needs.get_config.outputs.utils_repo }}
+      performance_reports_repo: ${{ github.event.inputs.performance_reports_repo || needs.get_config.outputs.reports_repo }}
+      performance_backup_repo: ${{ github.event.inputs.performance_backup_repo || needs.get_config.outputs.backup_repo }}
+      organization: ${{ github.event.inputs.organization || needs.get_config.outputs.repo_org }}
+      result_number: ${{ github.event.inputs.result_number || needs.get_config.outputs.perf_number }}
+      flags: ${{ github.event.inputs.flags || needs.get_config.outputs.perf_flag }}
+      model_timeout: ${{ github.event.inputs.model_timeout || needs.get_config.outputs.perf_timeout }}
+    secrets:
+      gh_token: ${{ secrets.MIGRAPHX_BOT_TOKEN }}
+      mail_user: ${{ secrets.MAIL_USERNAME }}
+      mail_pass: ${{ secrets.MAIL_PASSWORD }}

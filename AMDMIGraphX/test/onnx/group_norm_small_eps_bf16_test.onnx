@@ -1,0 +1,26 @@
+	group_norm_small_eps_bf16_test:Ê
+M
+x
+scale
+biasy"GroupNormalization*
+epsilon•¿Ö3 *
+
+num_groups group_norm_small_eps_bf16_testZ
+x
+
+
+
+Z
+scale
+
+
+Z
+bias
+
+
+b
+y
+
+
+
+B

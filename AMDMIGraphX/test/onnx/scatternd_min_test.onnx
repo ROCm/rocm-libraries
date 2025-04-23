@@ -1,0 +1,26 @@
+	scatternd_min_test:Î
+@
+data
+indices
+updatesoutput"	ScatterND*
+	reduction"min scatternd_min_testZ
+data
+
+
+
+Z
+indices
+
+
+
+Z
+updates
+
+
+
+b
+output
+
+
+
+B

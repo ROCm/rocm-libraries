@@ -1,0 +1,29 @@
+
+1group_norm_contrib_channels_last_and_silu_3d_test:ù
+i
+x
+gamma
+betay"	GroupNorm*
+
+activation *
+channels_last *
+epsilon¬Å'7 *
+groups 1group_norm_contrib_channels_last_and_silu_3d_testZ
+x
+
+
+
+Z
+gamma
+
+
+Z
+beta
+
+
+b
+y
+
+
+
+B

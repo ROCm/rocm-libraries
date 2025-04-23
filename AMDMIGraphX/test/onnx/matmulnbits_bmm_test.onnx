@@ -1,0 +1,29 @@
+	matmulnbits_bmm_test:Ú
+a
+a
+b
+scalesc"MatMulNBits*
+K *
+N *
+bits *
+
+block_size :com.microsoftmatmulnbits_bmm_testZ
+a
+
+
+
+Z
+b
+
+
+
+Z
+scales
+
+
+b
+c
+
+
+
+B

@@ -1,0 +1,43 @@
+# Anywhere {branch} is used, the branch name will be substituted.
+# These comments will also be removed.
+root: index
+subtrees:
+
+  - caption: Installation
+    entries: 
+    - file: install/installing_with_package
+    - file: install/building_migraphx
+    
+  - caption: Reference
+    entries:
+    - file: reference/cpp
+    - file: reference/py
+    - file: migraphx-driver
+      subtrees:
+        - entries:
+          - file: reference/driver-options
+    - file: dev/onnx_operators
+
+  - caption:  How to
+    entries:
+    - file: dev/contributing-to-migraphx
+      title: Develop for the MIGraphX code base
+      subtrees:
+        - entries:
+          - file: dev/data
+          - file: dev/operators
+          - file: dev/program
+          - file: dev/targets
+          - file: dev/quantization
+          - file: dev/pass
+          - file: dev/matchers
+          - file: dev/tools
+          - file: dev/env_vars            
+  
+  - caption: Examples
+    entries: 
+    - file: tutorials/MIGraphX-examples
+
+  - caption: About
+    entries:
+    - file: license

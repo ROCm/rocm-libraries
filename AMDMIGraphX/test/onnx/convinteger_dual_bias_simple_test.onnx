@@ -1,0 +1,34 @@
+	!convinteger_dual_bias_simple_test:à
+B
+0
+1
+2
+34"ConvInteger*
+	dilations@@ *
+strides@@ !convinteger_dual_bias_simple_testZ
+0
+
+
+
+
+Z
+1
+
+
+
+
+Z
+2
+
+
+Z
+3
+
+
+b
+4
+
+
+
+
+B
