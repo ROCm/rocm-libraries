@@ -24,9 +24,14 @@
  *
  *******************************************************************************/
 
+#include <catch2/catch_get_random_seed.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
+
 #include <omp.h>
+
+#include <algorithm>
+#include <random>
 
 #include "SimpleTest.hpp"
 #include "TestContext.hpp"
@@ -109,66 +114,99 @@ namespace AliasDataFlowTagsTest
         graph = transform<InlineIncrements>(graph);
         graph = transform<Simplify>(graph);
 
+        SECTION("Call findAliasCandidates directly.")
         {
             auto transformAliases = AliasDataFlowTagsDetail::findAliasCandidates(graph);
             CAPTURE(transformAliases);
             CHECK(transformAliases.size() == 59);
         }
 
-        graph = transform<AliasDataFlowTags>(graph);
-
-        namespace CT = rocRoller::KernelGraph::CoordinateGraph;
-
-        auto isAliasEdge = [&](int x) {
-            auto el = graph.coordinates.getEdge<CT::DataFlowEdge>(x);
-            return std::holds_alternative<CT::Alias>(el);
-        };
-
+        SECTION("Try different orders of inputs")
         {
-            auto aliasEdges = graph.coordinates.getEdges<CT::DataFlowEdge>()
-                                  .filter(isAliasEdge)
-                                  .to<std::vector>();
-            CHECK(aliasEdges.size() == 59);
+            using namespace AliasDataFlowTagsDetail;
+            auto groupedExtents = getGroupedTagExtents(graph);
+
+            auto seed = Catch::getSeed();
+
+            for(int j = 0; j < 10; j++)
+            {
+                std::map<int, int> aliases;
+
+                for(auto& [typeKey, extents] : groupedExtents)
+                {
+                    std::mt19937 gen(seed);
+                    seed++;
+
+                    std::vector<TagExtent> reorder{extents.begin(), extents.end()};
+                    std::ranges::shuffle(reorder, gen);
+
+                    std::list<TagExtent> e2{reorder.begin(), reorder.end()};
+
+                    auto theseAliases = findAliasCandidatesForExtents(graph, e2);
+                    aliases.insert(theseAliases.begin(), theseAliases.end());
+                }
+
+                CHECK_FALSE(aliases.empty());
+            }
         }
 
+        SECTION("Apply graph transform.")
         {
-            auto isATile = [&](int x) {
-                auto mt = graph.coordinates.getNode<CT::MacroTile>(x);
-                return mt.layoutType == LayoutType::MATRIX_A;
+            graph = transform<AliasDataFlowTags>(graph);
+
+            namespace CT = rocRoller::KernelGraph::CoordinateGraph;
+
+            auto isAliasEdge = [&](int x) {
+                auto el = graph.coordinates.getEdge<CT::DataFlowEdge>(x);
+                return std::holds_alternative<CT::Alias>(el);
             };
 
-            auto isAliasForATiles = [&](int x) {
-                auto loc = graph.coordinates.getLocation(x);
-                REQUIRE(isATile(loc.incoming.at(0)) == isATile(loc.outgoing.at(0)));
-
-                return isATile(loc.incoming.at(0));
-            };
-
-            auto aliasEdgesForA = graph.coordinates.getEdges<CT::DataFlowEdge>()
+            {
+                auto aliasEdges = graph.coordinates.getEdges<CT::DataFlowEdge>()
                                       .filter(isAliasEdge)
-                                      .filter(isAliasForATiles)
                                       .to<std::vector>();
-            CHECK(aliasEdgesForA.size() == 48);
-        }
+                CHECK(aliasEdges.size() == 59);
+            }
 
-        {
-            auto isBTile = [&](int x) {
-                auto mt = graph.coordinates.getNode<CT::MacroTile>(x);
-                return mt.layoutType == LayoutType::MATRIX_B;
-            };
+            {
+                auto isATile = [&](int x) {
+                    auto mt = graph.coordinates.getNode<CT::MacroTile>(x);
+                    return mt.layoutType == LayoutType::MATRIX_A;
+                };
 
-            auto isAliasForBTiles = [&](int x) {
-                auto loc = graph.coordinates.getLocation(x);
-                REQUIRE(isBTile(loc.incoming.at(0)) == isBTile(loc.outgoing.at(0)));
+                auto isAliasForATiles = [&](int x) {
+                    auto loc = graph.coordinates.getLocation(x);
+                    REQUIRE(isATile(loc.incoming.at(0)) == isATile(loc.outgoing.at(0)));
 
-                return isBTile(loc.incoming.at(0));
-            };
+                    return isATile(loc.incoming.at(0));
+                };
 
-            auto aliasEdgesForB = graph.coordinates.getEdges<CT::DataFlowEdge>()
-                                      .filter(isAliasEdge)
-                                      .filter(isAliasForBTiles)
-                                      .to<std::vector>();
-            CHECK(aliasEdgesForB.size() == 11);
+                auto aliasEdgesForA = graph.coordinates.getEdges<CT::DataFlowEdge>()
+                                          .filter(isAliasEdge)
+                                          .filter(isAliasForATiles)
+                                          .to<std::vector>();
+                CHECK(aliasEdgesForA.size() == 48);
+            }
+
+            {
+                auto isBTile = [&](int x) {
+                    auto mt = graph.coordinates.getNode<CT::MacroTile>(x);
+                    return mt.layoutType == LayoutType::MATRIX_B;
+                };
+
+                auto isAliasForBTiles = [&](int x) {
+                    auto loc = graph.coordinates.getLocation(x);
+                    REQUIRE(isBTile(loc.incoming.at(0)) == isBTile(loc.outgoing.at(0)));
+
+                    return isBTile(loc.incoming.at(0));
+                };
+
+                auto aliasEdgesForB = graph.coordinates.getEdges<CT::DataFlowEdge>()
+                                          .filter(isAliasEdge)
+                                          .filter(isAliasForBTiles)
+                                          .to<std::vector>();
+                CHECK(aliasEdgesForB.size() == 11);
+            }
         }
     }
 }

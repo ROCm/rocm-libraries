@@ -144,10 +144,22 @@ namespace rocRoller
                 return kgraph.control.nodeOrderTableString(allNodes);
             }
 
+            std::set<int> TagExtent::allNodes() const
+            {
+                std::set<int> rv;
+                rv.insert(extent.begin.begin(), extent.begin.end());
+                rv.insert(extent.end.begin(), extent.end.end());
+                for(auto const& gap : gaps)
+                {
+                    rv.insert(gap.begin.begin(), gap.begin.end());
+                    rv.insert(gap.end.begin(), gap.end.end());
+                }
+
+                return rv;
+            }
+
             void TagExtent::validate(KernelGraph const& kgraph) const
             {
-                std::set<int> before = extent.begin;
-
                 auto assertSetsOrdered = [&](auto const& setA, auto const& setB) {
                     for(int one : setA)
                     {
@@ -155,17 +167,26 @@ namespace rocRoller
                         {
                             if(one != two)
                             {
-                                AssertFatal(
-                                    kgraph.control.compareNodes(rocRoller::UpdateCache, one, two)
-                                        == ControlGraph::NodeOrdering::LeftFirst,
-                                    ShowValue(one),
-                                    ShowValue(two),
-                                    ShowValue(kgraph.control.compareNodes(
-                                        rocRoller::UpdateCache, one, two)));
+                                if(kgraph.control.compareNodes(UpdateCache, one, two)
+                                   != ControlGraph::NodeOrdering::LeftFirst)
+                                {
+                                    auto nodes      = allNodes();
+                                    auto orderTable = kgraph.control.nodeOrderTableString(nodes);
+                                    AssertFatal(kgraph.control.compareNodes(UpdateCache, one, two)
+                                                    == ControlGraph::NodeOrdering::LeftFirst,
+                                                ShowValue(toString()),
+                                                ShowValue(one),
+                                                ShowValue(two),
+                                                ShowValue(kgraph.control.compareNodes(
+                                                    UpdateCache, one, two)),
+                                                ShowValue(orderTable));
+                                }
                             }
                         }
                     }
                 };
+
+                std::set<int> before = extent.begin;
 
                 for(auto const& gap : gaps)
                 {
@@ -213,10 +234,13 @@ namespace rocRoller
                 GraphExtent before{std::move(whichGap->begin), inner.extent.begin};
                 GraphExtent after{inner.extent.end, std::move(whichGap->end)};
 
-                gaps.erase(whichGap);
-                gaps.push_back(before);
-                gaps.push_back(after);
-                gaps.insert(gaps.end(), inner.gaps.begin(), inner.gaps.end());
+                std::vector<GraphExtent> newGaps;
+                newGaps.push_back(before);
+                newGaps.insert(newGaps.end(), inner.gaps.begin(), inner.gaps.end());
+                newGaps.push_back(after);
+
+                auto iter = gaps.erase(whichGap);
+                gaps.insert(iter, newGaps.begin(), newGaps.end());
 
                 tags.insert(inner.tags.begin(), inner.tags.end());
             }
@@ -398,9 +422,9 @@ namespace rocRoller
                 return false;
             }
 
-            std::map<int, int> findAliasCandidates(KernelGraph const& kgraph)
+            std::map<TagExtent::CategoryKey, std::list<TagExtent>>
+                getGroupedTagExtents(KernelGraph const& kgraph)
             {
-                // Use a list so we can erase without invalidating any other iterators.
                 std::map<TagExtent::CategoryKey, std::list<TagExtent>> groupedExtents;
 
                 ControlFlowRWTracer tracer(kgraph);
@@ -444,6 +468,61 @@ namespace rocRoller
                         groupedExtents[extent.typeKey()].push_back(std::move(extent));
                     }
                 }
+                return groupedExtents;
+            }
+
+            std::map<int, int> findAliasCandidatesForExtents(KernelGraph const&   kgraph,
+                                                             std::list<TagExtent> extents)
+            {
+                std::map<int, int> aliases;
+
+                bool foundAny = false;
+                do
+                {
+                    auto e   = extents.size();
+                    foundAny = false;
+                    for(auto outer = extents.begin(); outer != extents.end(); outer++)
+                    {
+                        for(auto inner = extents.begin(); inner != extents.end();)
+                        {
+                            if(outer != inner && inner->fitsWithin(kgraph, *outer))
+                            {
+                                foundAny = true;
+                                AssertFatal(!aliases.contains(inner->baseTag));
+                                aliases[inner->baseTag] = outer->baseTag;
+                                Log::debug("{} -> {}", inner->baseTag, outer->baseTag);
+
+                                inner->validate(kgraph);
+
+                                outer->merge(kgraph, *inner);
+
+                                outer->validate(kgraph);
+
+                                Log::debug("merged {}", outer->toString());
+                                inner = extents.erase(inner);
+                            }
+                            else
+                            {
+                                inner++;
+                            }
+                        }
+                    }
+                    Log::debug("{} aliases so far.", aliases.size());
+                } while(foundAny);
+
+                for(auto ext : extents)
+                {
+                    Log::debug("{}\n{}", ext.toString(), ext.orderInfo(kgraph));
+                    ext.validate(kgraph);
+                }
+
+                return aliases;
+            }
+
+            std::map<int, int> findAliasCandidates(KernelGraph const& kgraph)
+            {
+                // Use a list so we can erase without invalidating any other iterators.
+                auto groupedExtents = getGroupedTagExtents(kgraph);
 
                 std::map<int, int> aliases;
 
@@ -456,52 +535,15 @@ namespace rocRoller
                         streamJoinTuple(msg, ", ", typeKey);
 
                         logger->debug("Aliases for {{{}}} tags:", msg.str());
-
                         logger->debug("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=");
 
                         for(auto const& ext : extents)
                             logger->debug(ext.toString());
                     }
 
-                    bool foundAny = false;
-                    do
-                    {
-                        auto e   = extents.size();
-                        foundAny = false;
-                        for(auto outer = extents.begin(); outer != extents.end(); outer++)
-                        {
-                            for(auto inner = extents.begin(); inner != extents.end();)
-                            {
-                                if(outer != inner && inner->fitsWithin(kgraph, *outer))
-                                {
-                                    foundAny = true;
-                                    AssertFatal(!aliases.contains(inner->baseTag));
-                                    aliases[inner->baseTag] = outer->baseTag;
-                                    Log::debug("{} -> {}", inner->baseTag, outer->baseTag);
+                    auto theseAliases = findAliasCandidatesForExtents(kgraph, extents);
 
-                                    inner->validate(kgraph);
-
-                                    outer->merge(kgraph, *inner);
-
-                                    outer->validate(kgraph);
-
-                                    Log::debug("merged {}", outer->toString());
-                                    inner = extents.erase(inner);
-                                }
-                                else
-                                {
-                                    inner++;
-                                }
-                            }
-                        }
-                        Log::debug("{} aliases so far.", aliases.size());
-                    } while(foundAny);
-
-                    for(auto ext : extents)
-                    {
-                        Log::debug("{}\n{}", ext.toString(), ext.orderInfo(kgraph));
-                        ext.validate(kgraph);
-                    }
+                    aliases.insert(theseAliases.begin(), theseAliases.end());
                 }
 
                 auto logger = Log::getLogger();

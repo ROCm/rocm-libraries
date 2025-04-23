@@ -100,9 +100,10 @@ namespace rocRoller
 
                 CategoryKey typeKey() const;
 
-                std::string toString() const;
-                std::string orderInfo(KernelGraph const& kgraph) const;
-                void        validate(KernelGraph const& kgraph) const;
+                std::string   toString() const;
+                std::string   orderInfo(KernelGraph const& kgraph) const;
+                void          validate(KernelGraph const& kgraph) const;
+                std::set<int> allNodes() const;
 
                 bool empty() const;
 
@@ -136,6 +137,19 @@ namespace rocRoller
              * recorded in `records`.
              */
             TagExtent getExtent(KernelGraph const& kgraph, std::vector<Record> const& records);
+
+            /**
+             * Gets all the extents for all the MacroTile tags in `kgraph`,
+             * grouped by type & size.
+             */
+            std::map<TagExtent::CategoryKey, std::list<TagExtent>>
+                getGroupedTagExtents(KernelGraph const& kgraph);
+
+            /**
+             * Finds and returns alias candidates within the extents provided.
+             */
+            std::map<int, int> findAliasCandidatesForExtents(KernelGraph const&   kgraph,
+                                                             std::list<TagExtent> extents);
 
             /**
              * Returns a set of aliases inner -> outer where `inner` can borrow
