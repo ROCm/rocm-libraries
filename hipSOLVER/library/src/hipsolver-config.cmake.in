@@ -1,0 +1,36 @@
+# ########################################################################
+# Copyright (C) 2017-2022 Advanced Micro Devices, Inc.
+# ########################################################################
+
+# Configure hipsolver package to be used in another cmake project.
+#
+# Defines the following variables:
+#
+#  hipsolver_INCLUDE_DIRS - include directories for hipsolver
+#
+# Also defines the library variables below as normal
+# variables.  These contain debug/optimized keywords when
+# a debugging library is found.
+#
+# Accepts the following variables as input:
+#
+#-----------------------
+# Example Usage:
+#
+# find_package( hipsolver REQUIRED CONFIG
+#     HINTS <hipsolver_ROOT>/package )
+#
+#    add_executable( foo foo.cc )
+
+#    # uses imported targets from package, including setting header paths
+#    target_link_libraries( foo hipsolver )
+#
+#-----------------------
+
+@PACKAGE_INIT@
+
+set_and_check( hipsolver_INCLUDE_DIR "@PACKAGE_INCLUDE_INSTALL_DIR@" )
+set_and_check( hipsolver_INCLUDE_DIRS "${hipsolver_INCLUDE_DIR}" )
+set_and_check( hipsolver_LIB_INSTALL_DIR "@PACKAGE_LIB_INSTALL_DIR@" )
+
+include( "${CMAKE_CURRENT_LIST_DIR}/hipsolver-targets.cmake" )
