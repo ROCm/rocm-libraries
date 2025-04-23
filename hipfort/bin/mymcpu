@@ -1,0 +1,268 @@
+#!/bin/bash
+#
+# mymcpu:    Print the codename the current gpu 
+# mygpu:     Print a gpu value 
+# myarchgpu: Print arch-gpu value 
+#
+
+PROGVERSION=X.Y-Z
+
+# Copyright (c) 2020-2022 Advanced Micro Devices, Inc. All rights reserved.
+# [MITx11 License]
+
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+function usage(){
+/bin/cat 2>&1 <<"EOF" 
+
+   mymcpu: Print out a codename for the gpu of the current system.
+
+   mygpu:  Print out the real gpu name for the current system .
+           mygpu will only print values accepted by cuda clang in 
+           the clang argument --cuda-gpu-arch
+   myarchgpu:  Print out the real gpu name for the current system 
+           with the arch prefix. e.g. nvptx-sm_70
+
+   Usage: myarchgpu
+
+   Options without values:
+    -h        Print this help message
+    -d        If GPU is unknown, return this default device
+    -version  Print the version of mymcpu and mygpu
+
+   Copyright (c) 2020-2022 ADVANCED MICRO DEVICES, INC.
+
+EOF
+   exit 1 
+}
+
+function version(){ 
+   echo $PROGVERSION
+   exit 0
+}
+
+function getdname(){
+   local __DIRN=`dirname "$1"`
+   if [ "$__DIRN" = "." ] ; then
+      __DIRN=$PWD;
+   else
+      if [ ${__DIRN:0:1} != "/" ] ; then
+         if [ ${__DIRN:0:2} == ".." ] ; then
+               __DIRN=`dirname $PWD`/${__DIRN:3}
+         else
+            if [ ${__DIRN:0:1} = "." ] ; then
+               __DIRN=$PWD/${__DIRN:2}
+            else
+               __DIRN=$PWD/$__DIRN
+            fi
+         fi
+      fi
+   fi
+   echo $__DIRN
+}
+
+function getarch(){ 
+  if [ "${1:0:3}" == "sm_" ] ; then 
+     echo "nvptx" 
+  else
+     echo "amdgcn"
+  fi
+}
+
+function code2gpu(){ 
+   case "$1" in 
+      "tahiti")  gpuname="gfx600"
+      ;;
+      "gfx600")  gpuname="gfx600"
+      ;;
+      "oland")  gpuname="gfx601"
+      ;;
+      "gfx601")  gpuname="gfx601"
+      ;;
+      "gfx700")  gpuname="gfx700"
+      ;;
+      "kaveri")  gpuname="gfx700"
+      ;;
+      "gfx701")  gpuname="gfx701"
+      ;;
+      "hawaii")  gpuname="gfx701"
+      ;;
+      "gfx703")  gpuname="gfx703"
+      ;;
+      "kabini")  gpuname="gfx703"
+      ;;
+      "gfx801")  gpuname="gfx801"
+      ;;
+      "carrizo") gpuname="gfx801"
+      ;;
+      "gfx802")  gpuname="gfx802"
+      ;;
+      "tonga")   gpuname="gfx802"
+      ;;
+      "gfx803")  gpuname="gfx803"
+      ;;
+      "fiji")    gpuname="gfx803"
+      ;;
+      "vega")    gpuname="gfx900"
+      ;;
+      "RavenRidge")  gpuname="gfx902"
+      ;;
+      "vega20")   gpuname="gfx906"
+      ;;
+      "NRAXJ")   gpuname="gfx908"
+      ;;
+      "NRAXJ2")   gpuname="gfx90a"
+      ;;
+      "navi12") gpuname="gfx1011"
+      ;;
+      "navi21") gpuname="gfx1030"
+      ;;
+      "n3a") gpuname="gfx1101"
+      ;;
+      "sm_30") gpuname="sm_30"
+      ;;
+      "k4000") gpuname="sm_30"
+      ;;
+      "k40c") gpuname="sm_35"
+      ;;
+      "k4200") gpuname="sm_30"
+      ;;
+      "gtx960m") gpuname="sm_50"
+      ;;
+      "gtx980") gpuname="sm_35"
+      ;;
+      "gtx1050") gpuname="sm_61"
+      ;;
+      "gtx1060") gpuname="sm_61"
+      ;;
+      "gtx1080") gpuname="sm_61"
+      ;;
+      "gt730") gpuname="sm_35"
+      ;;
+      "p100")  gpuname="sm_60"
+      ;;
+      "gv100") gpuname="sm_70"
+      ;;
+      "v100")  gpuname="sm_70"
+      ;;
+      "")  gpuname="sm_35"
+      ;;
+      *) gpuname=$unknown_value
+      ;;
+   esac
+   echo $gpuname
+}
+
+function getmycodename()
+{
+thisdir=$(getdname $0)
+if [ -L "$thisdir/mymcpu" ] ; then
+   linkfile=`readlink "$thisdir/mymcpu"`
+   if [ "${linkfile%%/*}" == ".." ] ; then
+      linkfile=$thisdir/$linkfile
+   fi
+   thisdir=$(getdname $linkfile)
+fi
+GPUTABLE_FILE=${GPUTABLE_FILE:-$thisdir/gputable.txt}
+local _found=0
+if [ -f $GPUTABLE_FILE ] ; then
+   # Look for amd cards first
+   for sysfsname in `find -L /sys/bus/pci/devices -maxdepth 2 -name uevent | xargs grep -l -E 'DRIVER=amdgpu'` ; do
+      gpuid=`cat $sysfsname | grep 'PCI_ID=' | cut -d"=" -f2 | tr '[:upper:]' '[:lower:]'`
+      if [ $_found == 0  ] ; then
+         #fixme what happens if multiple gpus,  will gpuid be multiple lines?
+         entry=`grep -m1 "^$gpuid" $GPUTABLE_FILE`
+         if [ $? == 0 ] ; then
+            codename=`echo $entry | awk '{print $4}'`
+            _found=1
+         fi
+      fi
+   done
+   if [ $_found == 0  ] ; then
+      for sysfsname in `find -L /sys/bus/pci/devices -maxdepth 2 -name uevent | xargs grep -l -E 'DRIVER=nvidia'` ; do
+         gpuid=`cat $sysfsname | grep 'PCI_ID=' | cut -d"=" -f2 | tr '[:upper:]' '[:lower:]'`
+         if [ $_found == 0  ] ; then
+            #fixme what happens if multiple gpus,  will gpuid be multiple lines?
+            entry=`grep -m1 "^$gpuid" $GPUTABLE_FILE`
+            if [ $? == 0 ] ; then
+               codename=`echo $entry | awk '{print $4}'`
+               _found=1
+            fi
+         fi
+      done
+   fi
+fi
+if [ $_found == 1  ] ; then
+   echo $codename
+else
+   echo "unknown"
+#  for debugging unknown codenames, return gpuid here
+#  echo "$gpuid"
+fi
+}
+
+#  ===========  Main code for mymcpu and mygpu starts here ========== 
+TYPERUN=${0##*\/}
+MODE=
+
+unknown_value="unknown"
+#  process args
+while [ $# -gt 0 ] ; do 
+   case "$1" in 
+      -n) 	        MODE=num; shift ;;
+      -h) 	        usage ;; 
+      -d) 	        unknown_value=$2; shift ;;
+      -help) 	        usage ;; 
+      --help) 	        usage ;; 
+      -version) 	version ;; 
+      --version) 	version ;; 
+      --) 		shift ; break;;
+      *) 		break;echo $1 ignored;
+   esac
+   shift
+done
+
+rc=0
+if [ "$TYPERUN" == "mygpu" ] ; then 
+   codename=$(getmycodename)
+   gpuname=$(code2gpu $codename)
+   [ "$gpuname" == "unknown" ] && rc=1
+   if [ -z "$MODE" ]; then
+     echo $gpuname
+   else
+     echo `echo $gpuname | sed 's/gfx//' | sed 's/sm_//'`
+   fi
+elif [ "$TYPERUN" == "myarchgpu" ] ; then 
+   codename=$(getmycodename)
+   gpuname=$(code2gpu $codename)
+   if [ "$gpuname" == "unknown" ] ; then 
+      rc=1
+      echo unknown-unknown
+   else
+      archname=$(getarch $gpuname)
+      echo $archname-$gpuname
+   fi
+else 
+   # This is mymcpu so print the codename
+   codename=$(getmycodename)
+   [ "$codename" == "unknown" ] && rc=1
+   echo $codename
+fi
+
+exit $rc
