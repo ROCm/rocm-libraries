@@ -23,10 +23,16 @@
 #ifndef TEST_BLOCK_ADJACENT_DIFFERENCE_KERNELS_HPP_
 #define TEST_BLOCK_ADJACENT_DIFFERENCE_KERNELS_HPP_
 
+#include "test_utils.hpp"
+#include "test_utils_types.hpp"
+
 #include "../common_test_header.hpp"
 
 #include "../../common/utils_device_ptr.hpp"
-#include "test_utils.hpp"
+
+#include <rocprim/block/block_adjacent_difference.hpp>
+#include <rocprim/block/block_load_func.hpp>
+#include <rocprim/block/block_store.hpp>
 
 // Host (CPU) implementaions of the wrapping function that allows to pass 3 args
 template<class T, class FlagType, class FlagOp>

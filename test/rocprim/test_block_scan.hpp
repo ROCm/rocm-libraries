@@ -20,6 +20,12 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#ifdef _CLANGD
+    // When using clangd, we require some context of the template source
+    // to allow the language server to function properly.
+    #include "test_block_scan.cpp.in"
+#endif
+
 block_reduce_test_suite_type_def(suite_name_single, name_suffix)
 block_reduce_test_suite_type_def(suite_name_array, name_suffix)
 

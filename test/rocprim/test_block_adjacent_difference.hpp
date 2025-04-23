@@ -20,6 +20,12 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#ifdef _CLANGD
+    // When using clangd, we require some context of the template source
+    // to allow the language server to function properly.
+    #include "test_block_adjacent_difference.cpp.in"
+#endif
+
 test_suite_type_def(suite_name, name_suffix)
 
 typed_test_suite_def(RocprimBlockAdjacentDifference, name_suffix, warp_params);
