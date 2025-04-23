@@ -67,7 +67,7 @@
      size_t size_workArr;
      // extra requirements
      size_t size_workT, size_workS1, size_workS2, size_workW;
-     rocsolver_sy2sb_he2hb_getMemorySize<false, T>(n, k, batch_count, &size_scalars, &size_workT,
+     rocsolver_sy2sb_he2hb_getMemorySize<false, T>(uplo, n, k, batch_count, &size_scalars, &size_workT,
                                          &size_workS1, &size_workS2, &size_workW, &size_workArr);
 
      if(rocblas_is_device_memory_size_query(handle))

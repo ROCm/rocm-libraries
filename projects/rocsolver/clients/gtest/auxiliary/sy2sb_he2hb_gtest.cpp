@@ -35,7 +35,7 @@
  
  typedef std::tuple<vector<int>, int> sy2sb_he2hb_tuple;
  
- // each matrix_size_range is a {n, lda, k, ldab}
+ // each matrix_size_range is a {n, lda, kd, ldab}
  
  // each op_range is a ul
  // if ul = 0, then uplo = 'L'
@@ -46,19 +46,19 @@
  
  // for checkin_lapack tests
  const vector<vector<int>> matrix_size_range = {
-    //  // quick return
-    //  {0, 1, 1},
-    //  // invalid
-    //  {-1, 1, 1},
-    //  {20, 5, 20},
-    //  {20, 20, 5},
+     // quick return
+     {0, 1, 1, 2},
+     // invalid
+     {-1, 1, 1, 2},
+     {20, 5, 20, 21},
+     {20, 20, 5, 5},
      // normal (valid) samples
      {10, 10, 3, 4},
      {10, 15, 3, 5},
      {128, 128, 12, 13},
     };
  
- const vector<int> op_range = {1};
+ const vector<int> op_range = {1, 0};
  
  // for daily_lapack tests
  const vector<vector<int>> large_matrix_size_range
