@@ -834,11 +834,6 @@ class Solution(collections.abc.Mapping):
       reject(state, printRejectionReason, "DirectToLds%c does not supports NumLoadsCoalesced%c > 1 for zgemm"%(tc, tc))
       return False
 
-    # Does not work with PrefetchGlobalRead=2 and PrefetchLocalRead=1 (cannot schedule DTL global read after local read)
-    if state["PrefetchGlobalRead"] == 2 and state["PrefetchLocalRead"] == 1:
-      reject(state, printRejectionReason, "DirectToLds%c does not work with PrefetchGlobalRead=2 and PrefetchLocalRead=1"%(tc))
-      return False
-
     # DirectToLds does not work if MacroTile is not power of 2
     # LDS offset swap/rotate logic works only when MacroTile is power of 2
     mt = state["MacroTile%c"%tc]
