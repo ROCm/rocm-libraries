@@ -1,0 +1,144 @@
+---
+include: hipsparselt_common.yaml
+include: known_bugs.yaml
+include: spmm_batched_common_row.yaml
+
+Definitions:
+  - &transA_transB_range
+    - { transA: N, transB: N }
+    - { transA: T, transB: T }
+
+  - &alpha_beta_range
+    - { alpha:  1.0, beta:  0.0 }
+
+Tests:
+- name: prune_batched_algorithm_real_coverage
+  category: pre_checkin
+  function:
+    - prune_batched: *real_precisions_2b
+  matrix_size: *batched_algorithm_coverage_matrix_size_range
+  transA_transB: *transA_transB_range
+  alpha_beta: *alpha_beta_range
+  batch_count: [ 1, 3 ]
+  prune_algo: [ 0, 1 ]
+  sparse_b: [ true, false]
+  orderA: [R]
+  orderB: [R]
+  orderC: [R]
+  orderD: [R]
+
+
+- name: prune_batched_small
+  category: quick
+  function:
+    - prune_batched: *real_precisions_2b
+  matrix_size: *batched_small_matrix_size_range
+  alpha_beta: *alpha_beta_range
+  transA_transB: *transA_transB_range
+  batch_count: [ 1, 3 ]
+  prune_algo: [ 0, 1 ]
+  sparse_b: [ true, false]
+  orderA: [R]
+  orderB: [R]
+  orderC: [R]
+  orderD: [R]
+
+- name: prune_batched_medium
+  category: pre_checkin
+  function:
+    - prune_batched: *real_precisions_2b
+  matrix_size: *batched_medium_matrix_size_range
+  transA_transB: *transA_transB_range
+  alpha_beta: *alpha_beta_range
+  batch_count: [ 1, 3 ]
+  prune_algo: [ 0, 1 ]
+  sparse_b: [ true, false]
+  orderA: [R]
+  orderB: [R]
+  orderC: [R]
+  orderD: [R]
+
+- name: prune_batched_large
+  category: pre_checkin
+  function:
+    - prune_batched: *real_precisions_2b
+  matrix_size: *batched_large_matrix_size_range
+  transA_transB: *transA_transB_range
+  alpha_beta: *alpha_beta_range
+  batch_count: [  1, 3 ]
+  prune_algo: [ 0, 1 ]
+  sparse_b: [ true, false]
+  orderA: [R]
+  orderB: [R]
+  orderC: [R]
+  orderD: [R]
+
+- name: prune_batched_deepbench
+  category: nightly
+  function:
+    - prune_batched: *real_precisions_2b
+  matrix_size: *batched_deepbench_vec
+  alpha: 1.0
+  beta: 0.0
+  transA: N
+  transB: T
+  batch_count: [ 2 ]
+  prune_algo: [ 0, 1 ]
+  sparse_b: [ true, false]
+  orderA: [R]
+  orderB: [R]
+  orderC: [R]
+  orderD: [R]
+
+- name: prune_batched_conv_resnet50_bwddata
+  category: nightly
+  function:
+    - prune_batched: *real_precisions_2b
+  matrix_size: *batched_conv_resnet50_bwddata
+  alpha: 1.0
+  beta: 0.0
+  transA: N
+  transB: T
+  batch_count: 4
+  prune_algo: [ 0, 1 ]
+  sparse_b: [ true, false]
+  orderA: [R]
+  orderB: [R]
+  orderC: [R]
+  orderD: [R]
+
+- name: prune_batched_conv_inception4_bwddata
+  category: nightly
+  function:
+    - prune_batched: *real_precisions_2b
+  matrix_size: *batched_conv_inception4_bwddata
+  alpha: 1.0
+  beta: 0.0
+  transA: N
+  transB: T
+  batch_count: 4
+  prune_algo: [ 0, 1 ]
+  sparse_b: [ true, false]
+  orderA: [R]
+  orderB: [R]
+  orderC: [R]
+  orderD: [R]
+
+- name: prune_batched_conv_ctest_fwd
+  category: nightly
+  function:
+    - prune_batched: *real_precisions_2b
+  matrix_size: *batched_conv_ctest_fwd
+  alpha: 1.0
+  beta: 0.0
+  transA: N
+  transB: N
+  batch_count: 1
+  prune_algo: [ 0, 1 ]
+  sparse_b: [ true, false]
+  orderA: [R]
+  orderB: [R]
+  orderC: [R]
+  orderD: [R]
+
+...
