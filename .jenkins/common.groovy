@@ -299,6 +299,10 @@ def runPerformanceCommand (platform, project)
                         #Zip archive
                         zip -r performance_${platform.gpu}_archive.zip \\
                             "./performance_build_${platform.gpu}/performance_${platform.gpu}"
+
+                        # boost has files with UTF-8 characters that cannot be parsed by the HTML publisher
+                        rm -rf build/_deps
+                        rm -rf performance_build*/**/**/_deps
                     """
             platform.runCommand(this, command)
 
@@ -392,6 +396,10 @@ def runPerformanceCommand (platform, project)
 
                         #Zip archive
                         zip -r performance_${platform.gpu}_archive.zip "./performance_${platform.gpu}"
+
+                        # boost has files with UTF-8 characters that cannot be parsed by the HTML publisher
+                        rm -rf build/_deps
+                        rm -rf performance_build*/**/**/_deps
                     """
             platform.runCommand(this, command)
 
