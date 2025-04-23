@@ -1,0 +1,138 @@
+# ########################################################################
+# Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights Reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+#
+# ########################################################################
+
+---
+include: rocsparse_common.yaml
+
+
+
+Definitions:
+  - &M_N_range_quick
+    - { M:  50, N:  50 }
+    - { M: 187, N: 187 }
+    - { M: 423, N: 423 }
+
+  - &M_N_range_checkin
+    - { M:   9381, N:   9381 }
+    - { M:  37017, N:  37017 }
+    - { M:  74217, N:  74217 }
+
+Tests:
+- name: check_matrix_coo_bad_arg
+  category: pre_checkin
+  function: check_matrix_coo_bad_arg
+  precision: *single_double_precisions_complex_real
+
+- name: check_matrix_coo
+  category: quick
+  function: check_matrix_coo
+  precision: *single_double_precisions_complex_real
+  M: [1, 8, 20, 47, 89]
+  N: [1, 8, 20, 47, 89]
+  baseA: [rocsparse_index_base_zero]
+  matrix_type: [rocsparse_matrix_type_general]
+  uplo: [rocsparse_fill_mode_lower, rocsparse_fill_mode_upper]
+  storage: [rocsparse_storage_mode_sorted, rocsparse_storage_mode_unsorted]
+  matrix: [rocsparse_matrix_random]
+
+- name: check_matrix_coo
+  category: quick
+  function: check_matrix_coo
+  precision: *single_double_precisions_complex_real
+  M_N: *M_N_range_quick
+  baseA: [rocsparse_index_base_zero]
+  matrix_type: [rocsparse_matrix_type_symmetric]
+  uplo: [rocsparse_fill_mode_lower, rocsparse_fill_mode_upper]
+  storage: [rocsparse_storage_mode_sorted, rocsparse_storage_mode_unsorted]
+  matrix: [rocsparse_matrix_random]
+
+- name: check_matrix_coo
+  category: pre_checkin
+  function: check_matrix_coo
+  precision: *single_double_precisions_complex_real
+  M: [34657, 67586]
+  N: [27465, 93287]
+  baseA: [rocsparse_index_base_zero]
+  matrix_type: [rocsparse_matrix_type_general]
+  uplo: [rocsparse_fill_mode_lower, rocsparse_fill_mode_upper]
+  storage: [rocsparse_storage_mode_sorted]
+  matrix: [rocsparse_matrix_random]
+
+- name: check_matrix_coo
+  category: pre_checkin
+  function: check_matrix_coo
+  precision: *single_double_precisions_complex_real
+  M_N: *M_N_range_checkin
+  baseA: [rocsparse_index_base_zero]
+  matrix_type: [rocsparse_matrix_type_triangular]
+  uplo: [rocsparse_fill_mode_lower, rocsparse_fill_mode_upper]
+  storage: [rocsparse_storage_mode_sorted]
+  matrix: [rocsparse_matrix_random]
+
+- name: check_matrix_coo_file
+  category: pre_checkin
+  function: check_matrix_coo
+  precision: *single_double_precisions_complex
+  M: 1
+  N: 1
+  baseA: [rocsparse_index_base_one]
+  matrix_type: [rocsparse_matrix_type_general,
+                rocsparse_matrix_type_symmetric]
+  uplo: [rocsparse_fill_mode_lower, rocsparse_fill_mode_upper]
+  storage: [rocsparse_storage_mode_unsorted]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [nos1,
+             nos2,
+             nos3,
+             nos4,
+             nos5,
+             nos6,
+             nos7,
+             mac_econ_fwd500,
+             mplate]
+
+- name: check_matrix_coo_file
+  category: nightly
+  function: check_matrix_coo
+  precision: *single_double_precisions_complex
+  M: 1
+  N: 1
+  baseA: [rocsparse_index_base_zero]
+  matrix_type: [rocsparse_matrix_type_general,
+                rocsparse_matrix_type_hermitian]
+  uplo: [rocsparse_fill_mode_lower, rocsparse_fill_mode_upper]
+  storage: [rocsparse_storage_mode_sorted]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [scircuit,
+             amazon0312,
+             sme3Dc,
+             bmwcra_1,
+             shipsec1,
+             webbase-1M,
+             Chevron2,
+             Chevron3,
+             Chevron4,
+             Chebyshev4,
+             qc2534,
+             ASIC_320k,
+             rma10]
