@@ -378,10 +378,9 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
 
     ArgumentList global_arguments() override
     {
-        auto arguments
-            = static_dim
-                  ? ArgumentList{twiddles_pp, twiddles, lengths, stride, nbatch, lds_padding}
-                  : ArgumentList{twiddles_pp, twiddles, dim, lengths, stride, nbatch, lds_padding};
+        auto arguments = static_dim
+                             ? ArgumentList{twiddles_pp, twiddles, lengths, stride, nbatch}
+                             : ArgumentList{twiddles_pp, twiddles, dim, lengths, stride, nbatch};
         for(const auto& arg : get_callback_args().arguments)
             arguments.append(arg);
         arguments.append(buf);
