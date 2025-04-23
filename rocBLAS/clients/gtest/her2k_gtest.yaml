@@ -1,0 +1,263 @@
+---
+include: rocblas_common.yaml
+include: known_bugs.yaml
+
+Definitions:
+  - &quick_matrix_size_range
+    - { N:  -1,  K:  1,  lda:  1,  ldb: 1,  ldc:  1 } # bad n
+    - { N:   2,  K: -1,  lda:  2,  ldb: 2,  ldc:  1 } # bad k
+    - { N:   0,  K:  3,  lda:  3,  ldb: 3,  ldc:  3 } # n==0
+    - { N:   3,  K:  0,  lda:  3,  ldb: 3,  ldc:  3 } # k==0
+    - { N:   3,  K:  1,  lda:  1,  ldb: 3,  ldc:  3 } # bad lda if not transpose
+    - { N:   1,  K:  3,  lda:  1,  ldb: 3,  ldc:  3 } # bad lda if transpose
+    - { N:   3,  K:  1,  lda:  3,  ldb: 1,  ldc:  3 } # bad ldb if not transpose
+    - { N:   1,  K:  3,  lda:  3,  ldb: 1,  ldc:  3 } # bad ldb if transpose
+    - { N:   3,  K:  3,  lda:  3,  ldb: 3,  ldc:  1 } # bad ldc
+    - { N:   33, K: 33,  lda: 33,  ldb: 33, ldc: 33 } # okay
+
+  - &tiny_matrix_size
+    - { N:   199, K:   33,  lda:  199,  ldb: 199,  ldc: 199 }
+
+  - &medium_matrix_size_range
+    - { N:   199, K:   33,  lda:  199,  ldb: 199,  ldc: 199 }
+    - { N:    88, K:  200,  lda:  200,  ldb: 200,  ldc: 88 }
+    - { N:    64, K:   70,  lda:  128,  ldb: 128,  ldc: 64 }
+    - { N:   199, K:  290,  lda:  290,  ldb: 290,  ldc: 200 }
+
+  - &large_matrix_size_range
+    - { N:  2011, K:  253,  lda:  2011, ldb: 2011, ldc: 2048 }
+    - { N:  1024, K:  1200, lda:  1200, ldb: 1200, ldc: 1024 }
+
+  - &alpha_beta_range
+    - { alpha:  1.5, alphai:  1.5, beta:  0.0 }
+    - { alpha: -2.0, alphai:  1.0, beta: -1.0 }
+    - { alpha:  0.0, alphai:  0.0, beta:  1.0 } # quick success
+    - { alpha:  0.0, alphai:  0.0, beta:  2.0 } # scale step only
+
+  - &alpha_beta_range_small
+    - { alpha:  0.5, beta:  1.0 }
+
+Tests:
+- name: her2k_bad
+  category: quick
+  function:
+    - her2k_bad_arg
+    - her2k_batched_bad_arg
+    - her2k_strided_batched_bad_arg
+  precision: *single_double_precisions_complex
+  api: [ C, FORTRAN, FORTRAN_64 ]
+
+- name: her2k_size_t
+  category: stress
+  function: her2k
+  precision: *single_precision_complex
+  uplo: [ U, L ]
+  transA: [ C ] # A and B ar KxN for transA=C
+  matrix_size:
+    - { N:     3, K: 46975, lda: 46975, ldb: 46975, ldc:     3 }
+    - { N: 46975, K:     3, lda:     3, ldb:     3, ldc: 46975 }
+  alpha_beta:
+    - { alpha:  0.5, alphai:  0.0, beta:  0.5, betai: 0.0 }
+  pointer_mode_host: false
+  gpu_arch: ['90a','942']
+  os_flags: LINUX
+
+- name: her2k_quick
+  category: quick
+  function: her2k
+  precision: *single_double_precisions_complex
+  uplo: [ U ]
+  transA: [ N, C ]
+  matrix_size: *quick_matrix_size_range
+  alpha: [ 0, 1 ]
+  beta: [ 0, 1 ]
+
+- name: her2k_NaN
+  category: pre_checkin
+  function: her2k
+  precision: *single_double_precisions_complex
+  uplo: [ U ]
+  transA: [ N ]
+  matrix_size: *tiny_matrix_size
+  alpha: [ 2.0, .NaN ]  # NaN is converted to 0.0 in test code
+  beta: [ 1.0, .NaN ]
+
+- name: her2k_medium
+  category: pre_checkin
+  function: her2k
+  precision: *single_double_precisions_complex
+  uplo: [ U, L ]
+  transA: [ N, C ]
+  matrix_size: *medium_matrix_size_range
+  alpha_beta: *alpha_beta_range
+  api: [ C, FORTRAN ]
+
+- name: her2k_large
+  category: nightly
+  function: her2k
+  precision: *single_double_precisions_complex
+  uplo: [ U ]
+  transA: [ N, C ]
+  matrix_size: *large_matrix_size_range
+  alpha_beta: *alpha_beta_range_small
+  pointer_mode_device: false
+
+  # batched
+
+- name: her2k_batched_quick
+  category: quick
+  function: her2k_batched
+  precision: *single_double_precisions_complex
+  uplo: [ U ]
+  transA: [ N, C ]
+  matrix_size: *quick_matrix_size_range
+  alpha: [ 0, 1 ]
+  beta: [ 0, 1 ]
+  batch_count: [ 0, 1 ]
+
+- name: her2k_batched_NaN
+  category: pre_checkin
+  function: her2k_batched
+  precision: *single_precision_complex
+  uplo: [ L ]
+  transA: [ C ]
+  matrix_size: *tiny_matrix_size
+  alpha: [ 2.0, .NaN ]  # NaN is converted to 0.0 in test code
+  beta: [ 1.0, .NaN ]
+  batch_count: [ 2 ]
+
+- name: her2k_batched_medium
+  category: pre_checkin
+  function: her2k_batched
+  precision: *single_double_precisions_complex
+  uplo: [ U, L ]
+  transA: [ N, C ]
+  matrix_size: *medium_matrix_size_range
+  alpha_beta: *alpha_beta_range
+  batch_count: [ 3 ]
+  api: [ C, FORTRAN ]
+
+- name: her2k_batched_large
+  category: nightly
+  function: her2k_batched
+  precision: *single_double_precisions_complex
+  uplo: [ L ]
+  transA: [ N ]
+  matrix_size: *large_matrix_size_range
+  alpha_beta: *alpha_beta_range_small
+  batch_count: [ 2 ]
+  pointer_mode_host: false
+
+  # strided batched
+
+- name: her2k_strided_batched_quick
+  category: quick
+  function: her2k_strided_batched
+  precision: *single_double_precisions_complex
+  uplo: [ U ]
+  transA: [ N, C ]
+  matrix_size: *quick_matrix_size_range
+  alpha: [ 0, 1 ]
+  beta: [ 0, 1 ]
+  batch_count: [ 0, 1 ]
+
+- name: her2k_strided_batched_NaN
+  category: pre_checkin
+  function: her2k_strided_batched
+  precision: *double_precision_complex
+  uplo: [ L ]
+  transA: [ C ]
+  matrix_size: *tiny_matrix_size
+  alpha: [ 2.0, .NaN ]  # NaN is converted to 0.0 in test code
+  beta: [ 1.0, .NaN ]
+  batch_count: [ 2 ]
+
+- name: her2k_strided_batched_medium
+  category: pre_checkin
+  function: her2k_strided_batched
+  precision: *single_double_precisions_complex
+  uplo: [ U, L ]
+  transA: [ C ]
+  matrix_size: *medium_matrix_size_range
+  alpha_beta: *alpha_beta_range
+  batch_count: [ 3 ]
+  api: [ C, FORTRAN ]
+
+- name: her2k_strided_batched_large
+  category: nightly
+  function: her2k_strided_batched
+  precision: *single_double_precisions_complex
+  uplo: [ L ]
+  transA: [ N, C ]
+  matrix_size: *large_matrix_size_range
+  alpha_beta: *alpha_beta_range_small
+  batch_count: [ 2 ]
+
+- name: her2k_large_batch
+  category: stress
+  uplo: [ U, L ]
+  arguments:
+    - { N:  2, K: 2, lda: 2, ldb: 2, ldc: 2, batch_count: *c_grid_yz_require_passes, transA: C}
+  alpha_beta:
+    - { alpha:  1.0, beta:  1.0 }
+  function:
+    - her2k_batched: *single_precision_complex
+    - her2k_strided_batched: *single_precision_complex
+  stride_scale: 1
+
+- name: her2k_ILP64
+  category: stress
+  uplo: [ U, L ]
+  arguments:
+    #- { N:  1, K:  2147483649,  lda:  1, ldb: 1, ldc: 2147483649, batch_count: 1, transA: N } #TODO: Commenting out big tests due to alarm time out
+    #- { N:  1, K:  2147483649,  lda: 2147483649, ldb: 2147483649, ldc: 1, batch_count: 1, transA: T } #TODO: Commenting out big tests due to alarm time out
+    - { N:  35, K:  2,  lda:  2147483649, ldb: 36, ldc: 36, batch_count: 1, transA: N }
+    - { N:  2, K:  35,  lda: 36, ldb: 2147483649, ldc: 3, batch_count: 1, transA: C }
+    - { N:  2, K: 2, lda: 2, ldb: 2, ldc: 2, batch_count: *c_grid_yz_require_passes, transA: C}
+    - { N:  2011, K:  253,  lda:  2011, ldb: 2011, ldc: 2048, batch_count: 3, transA: N }
+    - { N:  1024, K:  1200, lda:  1200, ldb: 1200, ldc: 1024, batch_count: 2, transA: C }
+  api: [ C_64 ]
+  alpha_beta:
+    - { alpha:  1.0, beta:  1.0 }
+  os_flags: [ LINUX ]
+  function:
+    - her2k_strided_batched: *single_precision_complex
+  stride_scale: 1
+  gpu_arch: '9??'
+
+- name: her2k_graph_test
+  category: pre_checkin
+  function:
+    - her2k
+    - her2k_batched
+    - her2k_strided_batched
+  precision: *single_double_precisions_complex
+  uplo: [ L ]
+  transA: [ N ]
+  matrix_size:
+    - { N:    64, K:   70,  lda:  128,  ldb: 128,  ldc: 64 }
+  batch_count: [ 2 ]
+  alpha_beta: *alpha_beta_range
+  graph_test: true
+
+- name: her2k_repeatability_check
+  category: stress
+  function:
+    - her2k
+    - her2k_batched
+    - her2k_strided_batched
+  precision: *single_double_precisions_complex
+  initialization: hpl
+  uplo: [ U , L ]
+  transA: [ N , C ]
+  matrix_size:
+    - { N:    64, K:   70,  lda:  128,  ldb: 128,  ldc: 64 }
+  batch_count: [ 2 ]
+  stride_scale: 1
+  alpha_beta: *alpha_beta_range_small
+  pointer_mode_host: false
+  iters: 5
+  atomics_mode: 0
+  devices: 4
+  repeatability_check: true
+...

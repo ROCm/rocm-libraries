@@ -1,0 +1,772 @@
+---
+include: rocblas_common.yaml
+include: known_bugs.yaml
+
+Definitions:
+
+  # using stride_x,y,d to test out offsets of rocblas_internal_gemm_interface()
+  - &gemm_internal_matrix_size
+    - { M: 511, N: 511, K: 511, lda: 511, ldb: 511, ldc: 511, ldd: 511, stride_a: 0, stride_b: 261121, stride_c: 261121, stride_x: 4294967296, stride_y: 4294967297, stride_d: 4294967298 }
+
+  - &small_matrix_size_range
+    - { M:     0, N:     8, K:     8, lda:     8, ldb:     8, ldc:     8, ldd:     8, stride_a:       64, stride_b:       64, stride_c:       64, stride_d:       64 } # m==0
+    - { M:     8, N:     0, K:     8, lda:     8, ldb:     8, ldc:     8, ldd:     8, stride_a:       64, stride_b:       64, stride_c:       64, stride_d:       64 } # n==0
+    - { M:     8, N:     8, K:     0, lda:     8, ldb:     8, ldc:     8, ldd:     8, stride_a:       64, stride_b:       64, stride_c:       64, stride_d:       64 } # k==0
+    - { M:    -1, N:    -1, K:    -1, lda:    -1, ldb:     1, ldc:     1, ldd:     1, stride_a:        1, stride_b:        1, stride_c:        1, stride_d:        1 }
+    - { M:     8, N:     9, K:    10, lda:     8, ldb:    10, ldc:     8, ldd:     8, stride_a:       80, stride_b:       90, stride_c:       82, stride_d:       82 }
+    - { M:     4, N:     3, K:     4, lda:     4, ldb:     4, ldc:     4, ldd:     4, stride_a:       16, stride_b:       12, stride_c:       12, stride_d:       12 }
+    - { M:     3, N:     3, K:     3, lda:     3, ldb:     3, ldc:     3, ldd:     3, stride_a:        0, stride_b:        9, stride_c:        9, stride_d:        9 }
+    - { M:     3, N:     3, K:     3, lda:     3, ldb:     3, ldc:     3, ldd:     3, stride_a:        9, stride_b:        0, stride_c:        9, stride_d:        9 }
+    - { M:     3, N:     3, K:     3, lda:     3, ldb:     3, ldc:     3, ldd:     3, stride_a:        9, stride_b:        9, stride_c:        9, stride_d:        9 }
+    - { M:     4, N:     3, K:     4, lda:     4, ldb:     4, ldc:     4, ldd:     4, stride_a:       16, stride_b:       16, stride_c:       16, stride_d:       16 }
+    - { M:     4, N:     4, K:     4, lda:     4, ldb:     4, ldc:     5, ldd:     5, stride_a:       16, stride_b:       16, stride_c:       20, stride_d:       20 }
+    - { M:     4, N:     4, K:     4, lda:     4, ldb:     4, ldc:     5, ldd:     5, stride_a:       17, stride_b:       17, stride_c:       20, stride_d:       20 }
+    - { M:     4, N:     4, K:     4, lda:     4, ldb:     4, ldc:     5, ldd:     5, stride_a:       17, stride_b:       16, stride_c:       20, stride_d:       20 }
+    - { M:     4, N:     4, K:     4, lda:     4, ldb:     4, ldc:     5, ldd:     5, stride_a:       16, stride_b:       17, stride_c:       20, stride_d:       20 }
+    - { M:     8, N:     8, K:     8, lda:     8, ldb:     8, ldc:     8, ldd:     8, stride_a:       64, stride_b:       64, stride_c:       64, stride_d:       64 }
+    - { M:     8, N:     9, K:    10, lda:     8, ldb:    10, ldc:     8, ldd:     8, stride_a:      100, stride_b:      100, stride_c:      100, stride_d:      100 }
+    - { M:    15, N:    15, K:    15, lda:    15, ldb:    15, ldc:    15, ldd:    15, stride_a:      225, stride_b:      225, stride_c:      225, stride_d:      225 }
+    - { M:    16, N:    16, K:    16, lda:    16, ldb:    16, ldc:    16, ldd:    16, stride_a:      256, stride_b:      256, stride_c:      256, stride_d:      256 }
+    - { M:    17, N:    17, K:    17, lda:    17, ldb:    17, ldc:    17, ldd:    17, stride_a:      289, stride_b:      289, stride_c:      289, stride_d:      289 }
+    - { M:    31, N:    33, K:    35, lda:   101, ldb:   102, ldc:   103, ldd:   103, stride_a:     3605, stride_b:     3605, stride_c:     3605, stride_d:     3605 }
+    - { M:    59, N:    61, K:    63, lda:   129, ldb:   131, ldc:   137, ldd:   137, stride_a:     8631, stride_b:     8631, stride_c:     8631, stride_d:     8631 }
+    - { M:    15, N:    15, K:    15, lda:    15, ldb:    15, ldc:    15, ldd:    15, stride_a:      225, stride_b:      225, stride_c:      225, stride_d:      225 }
+    - { M:    16, N:    16, K:    16, lda:    16, ldb:    16, ldc:    16, ldd:    16, stride_a:      256, stride_b:      256, stride_c:      256, stride_d:      256 }
+    - { M:    17, N:    17, K:    17, lda:    17, ldb:    17, ldc:    17, ldd:    17, stride_a:      289, stride_b:      289, stride_c:      289, stride_d:      289 }
+    - { M:    63, N:    63, K:    63, lda:    63, ldb:    63, ldc:    63, ldd:    63, stride_a:     3969, stride_b:     3969, stride_c:     3969, stride_d:     3969 }
+    - { M:    64, N:    64, K:    64, lda:    64, ldb:    64, ldc:    64, ldd:    64, stride_a:     4096, stride_b:     4096, stride_c:     4096, stride_d:     4096 }
+    - { M:    65, N:    65, K:    65, lda:    65, ldb:    65, ldc:    65, ldd:    65, stride_a:     4225, stride_b:     4225, stride_c:     4225, stride_d:     4225 }
+    - { M:   127, N:   127, K:   127, lda:   127, ldb:   127, ldc:   127, ldd:   127, stride_a:    16129, stride_b:    16129, stride_c:    16129, stride_d:    16129 }
+    - { M:   128, N:   128, K:   128, lda:   128, ldb:   128, ldc:   128, ldd:   128, stride_a:    16384, stride_b:    16384, stride_c:    16384, stride_d:    16384 }
+    - { M:   129, N:   129, K:   129, lda:   129, ldb:   129, ldc:   129, ldd:   129, stride_a:    16641, stride_b:    16641, stride_c:    16641, stride_d:    16641 }
+
+  - &small_matrix_size_stride_a_range
+    - { M:     3, N:     3, K:     3, lda:     3, ldb:     3, ldc:     3, ldd:     3, stride_a:        9, stride_b:        9, stride_c:        9, stride_d:        9 }
+    - { M:    15, N:    15, K:    15, lda:    15, ldb:    15, ldc:    15, ldd:    15, stride_a:      225, stride_b:        0, stride_c:      225, stride_d:      225 }
+    - { M:    16, N:    16, K:    16, lda:    16, ldb:    16, ldc:    16, ldd:    16, stride_a:        0, stride_b:      256, stride_c:      256, stride_d:      256 }
+    - { M:    17, N:    17, K:    17, lda:    17, ldb:    17, ldc:    17, ldd:    17, stride_a:      289, stride_b:        0, stride_c:      289, stride_d:      289 }
+    - { M:    63, N:    63, K:    63, lda:    63, ldb:    63, ldc:    63, ldd:    63, stride_a:        0, stride_b:     3969, stride_c:     3969, stride_d:     3969 }
+    - { M:    64, N:    64, K:    64, lda:    64, ldb:    64, ldc:    64, ldd:    64, stride_a:     4096, stride_b:        0, stride_c:     4096, stride_d:     4096 }
+    - { M:    65, N:    65, K:    65, lda:    65, ldb:    65, ldc:    65, ldd:    65, stride_a:        0, stride_b:     4225, stride_c:     4225, stride_d:     4225 }
+    - { M:   127, N:   127, K:   127, lda:   127, ldb:   127, ldc:   127, ldd:   127, stride_a:    16129, stride_b:        0, stride_c:    16129, stride_d:    16129 }
+    - { M:   128, N:   128, K:   128, lda:   128, ldb:   128, ldc:   128, ldd:   128, stride_a:        0, stride_b:    16384, stride_c:    16384, stride_d:    16384 }
+    - { M:   129, N:   129, K:   129, lda:   129, ldb:   129, ldc:   129, ldd:   129, stride_a:    16641, stride_b:        0, stride_c:    16641, stride_d:    16641 }
+
+  - &medium_matrix_size_range
+    - { M:   129, N:   130, K:   131, lda:   132, ldb:   133, ldc:   134, ldd:   134, stride_a:    17554, stride_b:    17554, stride_c:    17554, stride_d:    17554 }
+    - { M:   255, N:   255, K:   255, lda:   255, ldb:   255, ldc:   255, ldd:   255, stride_a:    65025, stride_b:    65025, stride_c:    65025, stride_d:    65025 }
+    - { M:   256, N:   256, K:   256, lda:   256, ldb:   256, ldc:   256, ldd:   256, stride_a:    65536, stride_b:    65536, stride_c:    65536, stride_d:    65536 }
+    - { M:   257, N:   257, K:   257, lda:   257, ldb:   257, ldc:   257, ldd:   257, stride_a:    66049, stride_b:    66049, stride_c:    66049, stride_d:    66049 }
+    - { M:   501, N:   502, K:   103, lda:   504, ldb:   605, ldc:   506, ldd:   506, stride_a:   340010, stride_b:   340010, stride_c:   340010, stride_d:   340010 }
+
+  - &medium_matrix_size_stride_a_range
+    - { M:   255, N:   255, K:   255, lda:   255, ldb:   255, ldc:   255, ldd:   255, stride_a:    65025, stride_b:        0, stride_c:    65025, stride_d:    65025 }
+    - { M:   256, N:   256, K:   256, lda:   256, ldb:   256, ldc:   256, ldd:   256, stride_a:        0, stride_b:    65536, stride_c:    65536, stride_d:    65536 }
+    - { M:   257, N:   257, K:   257, lda:   257, ldb:   257, ldc:   257, ldd:   257, stride_a:    66049, stride_b:        0, stride_c:    66049, stride_d:    66049 }
+
+  - &large_matrix_size_range
+    - { M:   511, N:   511, K:   511, lda:   511, ldb:   511, ldc:   511, ldd:   511, stride_a:   261121, stride_b:   261121, stride_c:   261121, stride_d:   261121 }
+    - { M:   512, N:   512, K:   512, lda:   512, ldb:   512, ldc:   512, ldd:   512, stride_a:   262144, stride_b:   262144, stride_c:   262144, stride_d:   262144 }
+    - { M:   513, N:   513, K:   513, lda:   513, ldb:   513, ldc:   513, ldd:   513, stride_a:   263169, stride_b:   263169, stride_c:   263169, stride_d:   263169 }
+    - { M:   513, N:   514, K:   515, lda:   516, ldb:   517, ldc:   518, ldd:   518, stride_a:   266771, stride_b:   266772, stride_c:   266773, stride_d:   266773 }
+
+  - &large_matrix_size_stride_a_range
+    - { M:   511, N:   511, K:   511, lda:   511, ldb:   511, ldc:   511, ldd:   511, stride_a:        0, stride_b:   261121, stride_c:   261121, stride_d:   261121 }
+    - { M:   512, N:   512, K:   512, lda:   512, ldb:   512, ldc:   512, ldd:   512, stride_a:   262144, stride_b:        0, stride_c:   262144, stride_d:   262144 }
+    - { M:   513, N:   513, K:   513, lda:   513, ldb:   513, ldc:   513, ldd:   513, stride_a:        0, stride_b:   263169, stride_c:   263169, stride_d:   263169 }
+    - { M:   513, N:   514, K:   515, lda:   516, ldb:   517, ldc:   518, ldd:   518, stride_a:   266771, stride_b:        0, stride_c:   266773, stride_d:   266773 }
+
+  - &deepbench_vec
+    - { M: 12544, N:    64, K:    64, lda: 12544, ldb:    64, ldc: 12544, ldd: 12544, stride_a:   802816, stride_b:        0, stride_c:   802816, stride_d:   802816 }
+    - { M: 12544, N:    64, K:    64, lda: 12544, ldb:    64, ldc: 12544, ldd: 12544, stride_a:   802816, stride_b:        0, stride_c:   802816, stride_d:   802816 }
+    - { M:  3136, N:   256, K:    64, lda:  3136, ldb:    64, ldc:  3136, ldd:  3136, stride_a:   200704, stride_b:        0, stride_c:   802816, stride_d:   802816 }
+    - { M:  3136, N:   256, K:    64, lda:  3136, ldb:    64, ldc:  3136, ldd:  3136, stride_a:   200704, stride_b:        0, stride_c:   802816, stride_d:   802816 }
+    - { M:  3136, N:    64, K:   256, lda:  3136, ldb:   256, ldc:  3136, ldd:  3136, stride_a:   802816, stride_b:        0, stride_c:   200704, stride_d:   200704 }
+    - { M:  3136, N:    64, K:   256, lda:  3136, ldb:   256, ldc:  3136, ldd:  3136, stride_a:   802816, stride_b:        0, stride_c:   200704, stride_d:   200704 }
+    - { M:   784, N:   128, K:   512, lda:   784, ldb:   512, ldc:   784, ldd:   784, stride_a:   401408, stride_b:        0, stride_c:   100352, stride_d:   100352 }
+    - { M:   784, N:   128, K:   512, lda:   784, ldb:   512, ldc:   784, ldd:   784, stride_a:   401408, stride_b:        0, stride_c:   100352, stride_d:   100352 }
+    - { M:   784, N:   512, K:   128, lda:   784, ldb:   128, ldc:   784, ldd:   784, stride_a:   100352, stride_b:        0, stride_c:   401408, stride_d:   401408 }
+    - { M:   784, N:   512, K:   128, lda:   784, ldb:   128, ldc:   784, ldd:   784, stride_a:   100352, stride_b:        0, stride_c:   401408, stride_d:   401408 }
+    - { M:   784, N:    64, K:   192, lda:   784, ldb:   192, ldc:   784, ldd:   784, stride_a:   150528, stride_b:        0, stride_c:    50176, stride_d:    50176 }
+    - { M: 12544, N:    64, K:    64, lda: 12544, ldb:    64, ldc: 12544, ldd: 12544, stride_a:   802816, stride_b:        0, stride_c:   802816, stride_d:   802816 }
+    - { M: 12544, N:    64, K:    64, lda: 12544, ldb:    64, ldc: 12544, ldd: 12544, stride_a:   802816, stride_b:        0, stride_c:   802816, stride_d:   802816 }
+    - { M:   196, N:  1024, K:   256, lda:   196, ldb:  1024, ldc:   196, ldd:   196, stride_a:    50176, stride_b:        0, stride_c:   200704, stride_d:   200704 }
+    - { M:   196, N:  1024, K:   256, lda:   196, ldb:  1024, ldc:   196, ldd:   196, stride_a:    50176, stride_b:        0, stride_c:   200704, stride_d:   200704 }
+    - { M:   196, N:   256, K:  1024, lda:   196, ldb:   256, ldc:   196, ldd:   196, stride_a:   200704, stride_b:        0, stride_c:    50176, stride_d:    50176 }
+    - { M:   196, N:   256, K:  1024, lda:   196, ldb:   256, ldc:   196, ldd:   196, stride_a:   200704, stride_b:        0, stride_c:    50176, stride_d:    50176 }
+    - { M:   196, N:   256, K:   256, lda:   196, ldb:   256, ldc:   196, ldd:   196, stride_a:    50176, stride_b:        0, stride_c:    50176, stride_d:    50176 }
+    - { M:   196, N:   256, K:   256, lda:   196, ldb:   256, ldc:   196, ldd:   196, stride_a:    50176, stride_b:        0, stride_c:    50176, stride_d:    50176 }
+    - { M:   196, N:   512, K:   192, lda:   196, ldb:   512, ldc:   196, ldd:   196, stride_a:    37632, stride_b:        0, stride_c:   100352, stride_d:   100352 }
+    - { M:  3136, N:   256, K:    64, lda:  3136, ldb:   256, ldc:  3136, ldd:  3136, stride_a:   200704, stride_b:        0, stride_c:   802816, stride_d:   802816 }
+    - { M:  3136, N:   256, K:    64, lda:  3136, ldb:   256, ldc:  3136, ldd:  3136, stride_a:   200704, stride_b:        0, stride_c:   802816, stride_d:   802816 }
+    - { M:  3136, N:    64, K:   256, lda:  3136, ldb:    64, ldc:  3136, ldd:  3136, stride_a:   802816, stride_b:        0, stride_c:   200704, stride_d:   200704 }
+    - { M:  3136, N:    64, K:   256, lda:  3136, ldb:    64, ldc:  3136, ldd:  3136, stride_a:   802816, stride_b:        0, stride_c:   200704, stride_d:   200704 }
+    - { M:    49, N:  2048, K:   512, lda:    49, ldb:  2048, ldc:    49, ldd:    49, stride_a:    25088, stride_b:        0, stride_c:   100352, stride_d:   100352 }
+    - { M:    49, N:  2048, K:   512, lda:    49, ldb:  2048, ldc:    49, ldd:    49, stride_a:    25088, stride_b:        0, stride_c:   100352, stride_d:   100352 }
+    - { M:    49, N:   512, K:  2048, lda:    49, ldb:   512, ldc:    49, ldd:    49, stride_a:   100352, stride_b:        0, stride_c:    25088, stride_d:    25088 }
+    - { M:    49, N:   512, K:  2048, lda:    49, ldb:   512, ldc:    49, ldd:    49, stride_a:   100352, stride_b:        0, stride_c:    25088, stride_d:    25088 }
+    - { M:    49, N:   512, K:   512, lda:    49, ldb:   512, ldc:    49, ldd:    49, stride_a:    25088, stride_b:        0, stride_c:    25088, stride_d:    25088 }
+    - { M:    49, N:   512, K:   512, lda:    49, ldb:   512, ldc:    49, ldd:    49, stride_a:    25088, stride_b:        0, stride_c:    25088, stride_d:    25088 }
+    - { M:    49, N:   832, K:   256, lda:    49, ldb:   832, ldc:    49, ldd:    49, stride_a:    12544, stride_b:        0, stride_c:    40768, stride_d:    40768 }
+    - { M:   784, N:   128, K:   512, lda:   784, ldb:   128, ldc:   784, ldd:   784, stride_a:   401408, stride_b:        0, stride_c:   100352, stride_d:   100352 }
+    - { M:   784, N:   128, K:   512, lda:   784, ldb:   128, ldc:   784, ldd:   784, stride_a:   401408, stride_b:        0, stride_c:   100352, stride_d:   100352 }
+    - { M:   784, N:   192, K:    64, lda:   784, ldb:   192, ldc:   784, ldd:   784, stride_a:    50176, stride_b:        0, stride_c:   150528, stride_d:   150528 }
+    - { M:   784, N:   512, K:   128, lda:   784, ldb:   512, ldc:   784, ldd:   784, stride_a:   100352, stride_b:        0, stride_c:   401408, stride_d:   401408 }
+    - { M:   784, N:   512, K:   128, lda:   784, ldb:   512, ldc:   784, ldd:   784, stride_a:   100352, stride_b:        0, stride_c:   401408, stride_d:   401408 }
+    - { M:  3025, N:   256, K:    64, lda:  3025, ldb:    64, ldc:  3025, ldd:  3025, stride_a:   193600, stride_b:        0, stride_c:   774400, stride_d:   774400 }
+
+  - &conv_resnet50_fwd
+    - { M:  3025, N:    64, K:   256, lda:  3025, ldb:   256, ldc:  3025, ldd:  3025, stride_a:   774400, stride_b:        0, stride_c:   193600, stride_d:   193600 }
+    - { M:  3025, N:    64, K:    64, lda:  3025, ldb:    64, ldc:  3025, ldd:  3025, stride_a:   193600, stride_b:        0, stride_c:   193600, stride_d:   193600 }
+    - { M:  3025, N:   256, K:    64, lda:  3025, ldb:    64, ldc:  3025, ldd:  3025, stride_a:   193600, stride_b:        0, stride_c:   774400, stride_d:   774400 }
+    - { M:  3136, N:   256, K:    64, lda:  3136, ldb:    64, ldc:  3136, ldd:  3136, stride_a:   200704, stride_b:        0, stride_c:   802816, stride_d:   802816 }
+    - { M:  3136, N:    64, K:   256, lda:  3136, ldb:   256, ldc:  3136, ldd:  3136, stride_a:   802816, stride_b:        0, stride_c:   200704, stride_d:   200704 }
+    - { M:  3136, N:    64, K:    64, lda:  3136, ldb:    64, ldc:  3136, ldd:  3136, stride_a:   200704, stride_b:        0, stride_c:   200704, stride_d:   200704 }
+    - { M:   784, N:   128, K:   512, lda:   784, ldb:   512, ldc:   784, ldd:   784, stride_a:   401408, stride_b:        0, stride_c:   100352, stride_d:   100352 }
+    - { M:   784, N:   512, K:   128, lda:   784, ldb:   128, ldc:   784, ldd:   784, stride_a:   100352, stride_b:        0, stride_c:   401408, stride_d:   401408 }
+
+  - &conv_resnet50_bwddata
+    - { M:   196, N:  1024, K:   256, lda:   196, ldb:  1024, ldc:   196, ldd:   196, stride_a:    50176, stride_b:        0, stride_c:   200704, stride_d:   200704 }
+    - { M:   196, N:   256, K:  1024, lda:   196, ldb:   256, ldc:   196, ldd:   196, stride_a:   200704, stride_b:        0, stride_c:    50176, stride_d:    50176 }
+    - { M:  3025, N:   256, K:    64, lda:  3025, ldb:   256, ldc:  3025, ldd:  3025, stride_a:   193600, stride_b:        0, stride_c:   774400, stride_d:   774400 }
+    - { M:  3025, N:    64, K:   256, lda:  3025, ldb:    64, ldc:  3025, ldd:  3025, stride_a:   774400, stride_b:        0, stride_c:   193600, stride_d:   193600 }
+    - { M:  3025, N:    64, K:    64, lda:  3025, ldb:    64, ldc:  3025, ldd:  3025, stride_a:   193600, stride_b:        0, stride_c:   193600, stride_d:   193600 }
+    - { M:  3136, N:   256, K:    64, lda:  3136, ldb:   256, ldc:  3136, ldd:  3136, stride_a:   200704, stride_b:        0, stride_c:   802816, stride_d:   802816 }
+    - { M:  3136, N:    64, K:   256, lda:  3136, ldb:    64, ldc:  3136, ldd:  3136, stride_a:   802816, stride_b:        0, stride_c:   200704, stride_d:   200704 }
+    - { M:  3136, N:    64, K:    64, lda:  3136, ldb:    64, ldc:  3136, ldd:  3136, stride_a:   200704, stride_b:        0, stride_c:   200704, stride_d:   200704 }
+    - { M:    49, N:  2048, K:   512, lda:    49, ldb:  2048, ldc:    49, ldd:    49, stride_a:    25088, stride_b:        0, stride_c:   100352, stride_d:   100352 }
+    - { M:    49, N:   512, K:  2048, lda:    49, ldb:   512, ldc:    49, ldd:    49, stride_a:   100352, stride_b:        0, stride_c:    25088, stride_d:    25088 }
+    - { M:   784, N:   128, K:   512, lda:   784, ldb:   128, ldc:   784, ldd:   784, stride_a:   401408, stride_b:        0, stride_c:   100352, stride_d:   100352 }
+    - { M:   784, N:   512, K:   128, lda:   784, ldb:   512, ldc:   784, ldd:   784, stride_a:   100352, stride_b:        0, stride_c:   401408, stride_d:   401408 }
+
+  - &conv_inception4_fwd
+    - { M:  1225, N:   192, K:   384, lda:  1225, ldb:   384, ldc:  1225, ldd:  1225, stride_a:   470400, stride_b:        0, stride_c:   235200, stride_d:   235200 }
+    - { M:  1225, N:    64, K:   384, lda:  1225, ldb:   384, ldc:  1225, ldd:  1225, stride_a:   470400, stride_b:        0, stride_c:    78400, stride_d:    78400 }
+    - { M:  1225, N:    96, K:   384, lda:  1225, ldb:   384, ldc:  1225, ldd:  1225, stride_a:   470400, stride_b:        0, stride_c:   117600, stride_d:   117600 }
+    - { M:   289, N:   128, K:  1024, lda:   289, ldb:  1024, ldc:   289, ldd:   289, stride_a:   295936, stride_b:        0, stride_c:    36992, stride_d:    36992 }
+    - { M:   289, N:   192, K:  1024, lda:   289, ldb:  1024, ldc:   289, ldd:   289, stride_a:   295936, stride_b:        0, stride_c:    55488, stride_d:    55488 }
+    - { M:   289, N:   256, K:  1024, lda:   289, ldb:  1024, ldc:   289, ldd:   289, stride_a:   295936, stride_b:        0, stride_c:    73984, stride_d:    73984 }
+    - { M:   289, N:   384, K:  1024, lda:   289, ldb:  1024, ldc:   289, ldd:   289, stride_a:   295936, stride_b:        0, stride_c:   110976, stride_d:   110976 }
+    - { M:  5329, N:    64, K:   160, lda:  5329, ldb:   160, ldc:  5329, ldd:  5329, stride_a:   852640, stride_b:        0, stride_c:   341056, stride_d:   341056 }
+
+  - &conv_inception4_bwddata
+    - { M:  1225, N:   384, K:   192, lda:  1225, ldb:   384, ldc:  1225, ldd:  1225, stride_a:   235200, stride_b:        0, stride_c:   470400, stride_d:   470400 }
+    - { M:  1225, N:   384, K:    64, lda:  1225, ldb:   384, ldc:  1225, ldd:  1225, stride_a:    78400, stride_b:        0, stride_c:   470400, stride_d:   470400 }
+    - { M:  1225, N:   384, K:    96, lda:  1225, ldb:   384, ldc:  1225, ldd:  1225, stride_a:   117600, stride_b:        0, stride_c:   470400, stride_d:   470400 }
+    - { M:   289, N:  1024, K:   128, lda:   289, ldb:  1024, ldc:   289, ldd:   289, stride_a:    36992, stride_b:        0, stride_c:   295936, stride_d:   295936 }
+    - { M:   289, N:  1024, K:   192, lda:   289, ldb:  1024, ldc:   289, ldd:   289, stride_a:    55488, stride_b:        0, stride_c:   295936, stride_d:   295936 }
+    - { M:   289, N:  1024, K:   256, lda:   289, ldb:  1024, ldc:   289, ldd:   289, stride_a:    73984, stride_b:        0, stride_c:   295936, stride_d:   295936 }
+    - { M:   289, N:  1024, K:   384, lda:   289, ldb:  1024, ldc:   289, ldd:   289, stride_a:   110976, stride_b:        0, stride_c:   295936, stride_d:   295936 }
+    - { M:  5329, N:   160, K:    64, lda:  5329, ldb:   160, ldc:  5329, ldd:  5329, stride_a:   341056, stride_b:        0, stride_c:   852640, stride_d:   852640 }
+    - { M:    64, N:  1536, K:   256, lda:    64, ldb:  1536, ldc:    64, ldd:    64, stride_a:    16384, stride_b:        0, stride_c:    98304, stride_d:    98304 }
+    - { M:    64, N:  1536, K:   384, lda:    64, ldb:  1536, ldc:    64, ldd:    64, stride_a:    24576, stride_b:        0, stride_c:    98304, stride_d:    98304 }
+
+  - &conv_ctest_bwddata
+    - { M:   121, N:  2048, K:     1, lda:   121, ldb:  2048, ldc:   121, ldd:   121, stride_a:      121, stride_b:        0, stride_c:   247808, stride_d:   247808 }
+    - { M: 12544, N:    64, K:     1, lda: 12544, ldb:    64, ldc: 12544, ldd: 12544, stride_a:    12544, stride_b:        0, stride_c:   802816, stride_d:   802816 }
+    - { M:   144, N:  1024, K:     1, lda:   144, ldb:  1024, ldc:   144, ldd:   144, stride_a:      144, stride_b:        0, stride_c:   147456, stride_d:   147456 }
+    - { M:   144, N:   256, K:     1, lda:   144, ldb:   256, ldc:   144, ldd:   144, stride_a:      144, stride_b:        0, stride_c:    36864, stride_d:    36864 }
+    - { M:   144, N:   512, K:     1, lda:   144, ldb:   512, ldc:   144, ldd:   144, stride_a:      144, stride_b:        0, stride_c:    73728, stride_d:    73728 }
+    - { M:   169, N:   256, K:     1, lda:   169, ldb:   256, ldc:   169, ldd:   169, stride_a:      169, stride_b:        0, stride_c:    43264, stride_d:    43264 }
+    - { M:    16, N:   512, K:     1, lda:    16, ldb:   512, ldc:    16, ldd:    16, stride_a:       16, stride_b:        0, stride_c:     8192, stride_d:     8192 }
+    - { M:    16, N:   528, K:     1, lda:    16, ldb:   528, ldc:    16, ldd:    16, stride_a:       16, stride_b:        0, stride_c:     8448, stride_d:     8448 }
+    - { M:    16, N:   576, K:     1, lda:    16, ldb:   576, ldc:    16, ldd:    16, stride_a:       16, stride_b:        0, stride_c:     9216, stride_d:     9216 }
+    - { M:    16, N:   608, K:     1, lda:    16, ldb:   608, ldc:    16, ldd:    16, stride_a:       16, stride_b:        0, stride_c:     9728, stride_d:     9728 }
+    - { M:   196, N:   128, K:     1, lda:   196, ldb:   128, ldc:   196, ldd:   196, stride_a:      196, stride_b:        0, stride_c:    25088, stride_d:    25088 }
+    - { M:   196, N:   192, K:     1, lda:   196, ldb:   192, ldc:   196, ldd:   196, stride_a:      196, stride_b:        0, stride_c:    37632, stride_d:    37632 }
+    - { M:   196, N:   256, K:     1, lda:   196, ldb:   256, ldc:   196, ldd:   196, stride_a:      196, stride_b:        0, stride_c:    50176, stride_d:    50176 }
+    - { M:   196, N:   480, K:     1, lda:   196, ldb:   480, ldc:   196, ldd:   196, stride_a:      196, stride_b:        0, stride_c:    94080, stride_d:    94080 }
+    - { M:   196, N:   512, K:     1, lda:   196, ldb:   512, ldc:   196, ldd:   196, stride_a:      196, stride_b:        0, stride_c:   100352, stride_d:   100352 }
+    - { M:   196, N:   528, K:     1, lda:   196, ldb:   528, ldc:   196, ldd:   196, stride_a:      196, stride_b:        0, stride_c:   103488, stride_d:   103488 }
+    - { M:   196, N:   576, K:     1, lda:   196, ldb:   576, ldc:   196, ldd:   196, stride_a:      196, stride_b:        0, stride_c:   112896, stride_d:   112896 }
+    - { M:   196, N:   608, K:     1, lda:   196, ldb:   608, ldc:   196, ldd:   196, stride_a:      196, stride_b:        0, stride_c:   119168, stride_d:   119168 }
+    - { M:   196, N:    64, K:     1, lda:   196, ldb:    64, ldc:   196, ldd:   196, stride_a:      196, stride_b:        0, stride_c:    12544, stride_d:    12544 }
+    - { M:  3136, N:   128, K:     1, lda:  3136, ldb:   128, ldc:  3136, ldd:  3136, stride_a:     3136, stride_b:        0, stride_c:   401408, stride_d:   401408 }
+    - { M:  3136, N:   256, K:     1, lda:  3136, ldb:   256, ldc:  3136, ldd:  3136, stride_a:     3136, stride_b:        0, stride_c:   802816, stride_d:   802816 }
+    - { M:  3136, N:    64, K:     1, lda:  3136, ldb:    64, ldc:  3136, ldd:  3136, stride_a:     3136, stride_b:        0, stride_c:   200704, stride_d:   200704 }
+    - { M: 32768, N:   480, K:     1, lda: 32768, ldb:   480, ldc: 32768, ldd: 32768, stride_a:    32768, stride_b:        0, stride_c: 15728640, stride_d: 15728640 }
+    - { M:    49, N:  1024, K:     1, lda:    49, ldb:  1024, ldc:    49, ldd:    49, stride_a:       49, stride_b:        0, stride_c:    50176, stride_d:    50176 }
+    - { M:    49, N:  1056, K:     1, lda:    49, ldb:  1056, ldc:    49, ldd:    49, stride_a:       49, stride_b:        0, stride_c:    51744, stride_d:    51744 }
+    - { M:    49, N:   192, K:     1, lda:    49, ldb:   192, ldc:    49, ldd:    49, stride_a:       49, stride_b:        0, stride_c:     9408, stride_d:     9408 }
+    - { M:    49, N:   512, K:     1, lda:    49, ldb:   512, ldc:    49, ldd:    49, stride_a:       49, stride_b:        0, stride_c:    25088, stride_d:    25088 }
+    - { M:    49, N:   832, K:     1, lda:    49, ldb:   832, ldc:    49, ldd:    49, stride_a:       49, stride_b:        0, stride_c:    40768, stride_d:    40768 }
+    - { M:   729, N:    64, K:     1, lda:   729, ldb:    64, ldc:   729, ldd:   729, stride_a:      729, stride_b:        0, stride_c:    46656, stride_d:    46656 }
+    - { M:   784, N:   128, K:     1, lda:   784, ldb:   128, ldc:   784, ldd:   784, stride_a:      784, stride_b:        0, stride_c:   100352, stride_d:   100352 }
+    - { M:   784, N:   192, K:     1, lda:   784, ldb:   192, ldc:   784, ldd:   784, stride_a:      784, stride_b:        0, stride_c:   150528, stride_d:   150528 }
+    - { M:   784, N:   256, K:     1, lda:   784, ldb:   256, ldc:   784, ldd:   784, stride_a:      784, stride_b:        0, stride_c:   200704, stride_d:   200704 }
+    - { M:   784, N:   320, K:     1, lda:   784, ldb:   320, ldc:   784, ldd:   784, stride_a:      784, stride_b:        0, stride_c:   250880, stride_d:   250880 }
+    - { M:   784, N:   512, K:     1, lda:   784, ldb:   512, ldc:   784, ldd:   784, stride_a:      784, stride_b:        0, stride_c:   401408, stride_d:   401408 }
+    - { M:   784, N:    64, K:     1, lda:   784, ldb:    64, ldc:   784, ldd:   784, stride_a:      784, stride_b:        0, stride_c:    50176, stride_d:    50176 }
+    - { M:  8192, N:   480, K:     1, lda:  8192, ldb:   480, ldc:  8192, ldd:  8192, stride_a:     8192, stride_b:        0, stride_c:  3932160, stride_d:  3932160 }
+    - { M:  8192, N:   512, K:     1, lda:  8192, ldb:   512, ldc:  8192, ldd:  8192, stride_a:     8192, stride_b:        0, stride_c:  4194304, stride_d:  4194304 }
+    - { M:  8192, N:   528, K:     1, lda:  8192, ldb:   528, ldc:  8192, ldd:  8192, stride_a:     8192, stride_b:        0, stride_c:  4325376, stride_d:  4325376 }
+    - { M:  8192, N:   832, K:     1, lda:  8192, ldb:   832, ldc:  8192, ldd:  8192, stride_a:     8192, stride_b:        0, stride_c:  6815744, stride_d:  6815744 }
+
+  - &conv_ctest_fwd
+    - { M: 12544, N:     1, K:    64, lda: 12544, ldb:    64, ldc: 12544, ldd: 12544, stride_a:   802816, stride_b:        0, stride_c:    12544, stride_d:    12544 }
+    - { M:  3136, N:     1, K:   128, lda:  3136, ldb:   128, ldc:  3136, ldd:  3136, stride_a:   401408, stride_b:        0, stride_c:     3136, stride_d:     3136 }
+    - { M:  3136, N:     1, K:   256, lda:  3136, ldb:   256, ldc:  3136, ldd:  3136, stride_a:   802816, stride_b:        0, stride_c:     3136, stride_d:     3136 }
+    - { M:  3136, N:     1, K:    64, lda:  3136, ldb:    64, ldc:  3136, ldd:  3136, stride_a:   200704, stride_b:        0, stride_c:     3136, stride_d:     3136 }
+    - { M: 32768, N:     1, K:   480, lda: 32768, ldb:   480, ldc: 32768, ldd: 32768, stride_a: 15728640, stride_b:        0, stride_c:    32768, stride_d:    32768 }
+    - { M:   729, N:     1, K:    64, lda:   729, ldb:    64, ldc:   729, ldd:   729, stride_a:    46656, stride_b:        0, stride_c:      729, stride_d:      729 }
+    - { M:   784, N:     1, K:   128, lda:   784, ldb:   128, ldc:   784, ldd:   784, stride_a:   100352, stride_b:        0, stride_c:      784, stride_d:      784 }
+    - { M:   784, N:     1, K:   192, lda:   784, ldb:   192, ldc:   784, ldd:   784, stride_a:   150528, stride_b:        0, stride_c:      784, stride_d:      784 }
+    - { M:   784, N:     1, K:   256, lda:   784, ldb:   256, ldc:   784, ldd:   784, stride_a:   200704, stride_b:        0, stride_c:      784, stride_d:      784 }
+    - { M:   784, N:     1, K:   320, lda:   784, ldb:   320, ldc:   784, ldd:   784, stride_a:   250880, stride_b:        0, stride_c:      784, stride_d:      784 }
+    - { M:   784, N:     1, K:   512, lda:   784, ldb:   512, ldc:   784, ldd:   784, stride_a:   401408, stride_b:        0, stride_c:      784, stride_d:      784 }
+    - { M:   784, N:     1, K:    64, lda:   784, ldb:    64, ldc:   784, ldd:   784, stride_a:    50176, stride_b:        0, stride_c:      784, stride_d:      784 }
+    - { M:  8192, N:     1, K:   480, lda:  8192, ldb:   480, ldc:  8192, ldd:  8192, stride_a:  3932160, stride_b:        0, stride_c:     8192, stride_d:     8192 }
+    - { M:  8192, N:     1, K:   512, lda:  8192, ldb:   512, ldc:  8192, ldd:  8192, stride_a:  4194304, stride_b:        0, stride_c:     8192, stride_d:     8192 }
+    - { M:  8192, N:     1, K:   528, lda:  8192, ldb:   528, ldc:  8192, ldd:  8192, stride_a:  4325376, stride_b:        0, stride_c:     8192, stride_d:     8192 }
+    - { M:  8192, N:     1, K:   832, lda:  8192, ldb:   832, ldc:  8192, ldd:  8192, stride_a:  6815744, stride_b:        0, stride_c:     8192, stride_d:     8192 }
+
+  - &transA_transB_range
+    - { transA: N, transB: N }
+    - { transA: N, transB: T }
+    - { transA: C, transB: N }
+    - { transA: T, transB: C }
+
+  - &alpha_beta_range
+    - { alpha:  1.0, beta:  0.0 }
+    - { alpha: -2.0, beta: -3.0 }
+    - { alpha:  0.0, beta:  1.0 }
+
+  - &complex_alpha_beta_range
+    - { alpha:  1, beta:  3, alphai:  3, betai:  1 }
+    - { alpha: -1, beta: -3, alphai:  3, betai:  1 }
+
+  - &alpha_beta_range_small
+    - { alpha: 2, alphai: 2, beta: -1.0, betai: 2.0 }
+
+Tests:
+- name: gemm_strided_batched_bad_arg
+  category: quick
+  function:
+    - gemm_strided_batched_bad_arg: *half_single_double_complex_real_precisions
+  transA: N
+  transB: N
+  api: [ FORTRAN, FORTRAN_64 ]
+
+- name: gemm_strided_batched_xx_bad_arg
+  category: quick
+  function:
+    - gemm_strided_batched_ex_bad_arg: *real_precisions
+    - gemm_strided_batched_ex_bad_arg: *complex_precisions
+  transA: N
+  transB: N
+  api: [ C, FORTRAN ]
+
+# Tests confirm no NaN propagation when alpha = 0, 2 and beta = 0. Value .NaN is converted into zero
+- {name: alpha_beta_zero_NaN, category: pre_checkin, precision: *single_precision, batch_count: 1,
+   function: gemm_strided_batched, transA: N, transB: N, M: 256, N: 128, K:  64, alpha: [ .NaN, 2 ], beta: [ .NaN, 2 ] }
+- {name: alpha_beta_zero_NaN, category: pre_checkin, precision: *double_precision, batch_count: 2,
+   function: gemm_strided_batched, transA: N, transB: T, M: 128, N:  64, K: 256, alpha: [ .NaN, 2 ], beta: [ .NaN, 2 ] }
+- {name: alpha_beta_zero_NaN, category: pre_checkin, precision: *single_precision_complex, batch_count: 3,
+   function: gemm_strided_batched, transA: T, transB: N, M:  64, N: 256, K: 128, alpha: [ .NaN, 2 ], beta: [ .NaN, 2 ] }
+- {name: alpha_beta_zero_NaN, category: pre_checkin, precision: *double_precision_complex, batch_count: 4,
+   function: gemm_strided_batched, transA: T, transB: T, M: 128, N:  64, K: 256, alpha: [ .NaN, 2 ], beta: [ .NaN, 2 ] }
+
+- {name: alpha_beta_zero_NaN, category: pre_checkin, function: gemm_strided_batched_ex, batch_count: 5,
+   a_type: f16_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: f32_r,
+   transA: N, transB: N, M: 255, N: 127, K:  63, alpha: [ .NaN, 2 ], beta: [ .NaN, 2 ] }
+- {name: alpha_beta_zero_NaN, category: pre_checkin, function: gemm_strided_batched_ex, batch_count: 6,
+   a_type: bf16_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, compute_type: f32_r,
+   transA: N, transB: T, M:  62, N: 126, K: 254, alpha: [ .NaN, 2 ], beta: [ .NaN, 2 ] }
+- {name: alpha_beta_zero_NaN, category: pre_checkin, function: gemm_strided_batched_ex, batch_count: 7,
+   a_type: f32_r, b_type: f32_r, c_type: f32_r, d_type: f32_r, compute_type: f32_r,
+   transA: T, transB: N, M: 253, N:  61, K: 125, alpha: [ .NaN, 2 ], beta: [ .NaN, 2 ] }
+- {name: alpha_beta_zero_NaN, category: pre_checkin, function: gemm_strided_batched_ex, batch_count: 8,
+   a_type: f64_r, b_type: f64_r, c_type: f64_r, d_type: f64_r, compute_type: f64_r,
+   transA: T, transB: T, M: 256, N: 128, K:  64, alpha: [ .NaN, 2 ], beta: [ .NaN, 2 ] }
+
+# Split *real_precisions into *int8 and *nonint8_real_precisions. TODO: merge nonint8 and int8 test groups
+
+- name: gemm_strided_batched_fortran
+  category: quick
+  function:
+    - gemm_strided_batched: *half_single_double_precisions
+    - gemm_strided_batched: *single_double_precisions_complex
+    - gemm_strided_batched_ex: *nonint8_real_precisions
+    - gemm_strided_batched_ex: *single_double_precisions_complex
+  matrix_size: *small_matrix_size_range
+  pointer_mode_host: false
+  transA_transB: *transA_transB_range
+  alpha_beta: *alpha_beta_range_small
+  batch_count: [ -1, 0, 3 ]
+  api: FORTRAN
+
+- name: gemm_strided_batched_int8_fortran
+  category: quick
+  function:
+    - gemm_strided_batched_ex: *int8_precision
+  matrix_size: *small_matrix_size_range
+  pointer_mode_device: false
+  transA_transB: *transA_transB_range
+  alpha_beta: *alpha_beta_range_small
+  batch_count: [ -1, 0, 3 ]
+  api: FORTRAN
+
+- name: gemm_strided_batched_internal
+  category: quick
+  function:
+    - gemm_strided_batched: *single_precision
+  matrix_size: *gemm_internal_matrix_size
+  pointer_mode_host: false
+  transA_transB: *transA_transB_range
+  alpha_beta: *alpha_beta_range_small
+  batch_count: [ 3 ]
+  api: INTERNAL
+
+- name: gemm_strided_batched_small
+  category: quick
+  function:
+    gemm_strided_batched: *half_single_double_precisions
+    gemm_strided_batched_ex: *nonint8_real_precisions
+  matrix_size: *small_matrix_size_range
+  pointer_mode_device: false
+  alpha_beta: *alpha_beta_range
+  transA_transB: *transA_transB_range
+  batch_count: [ -1, 0, 3 ]
+
+- name: gemm_strided_batched_small_int8
+  category: quick
+  function:
+    gemm_strided_batched_ex: *int8_precision
+  matrix_size: *small_matrix_size_range
+  pointer_mode_host: false
+  alpha_beta: *alpha_beta_range
+  transA_transB: *transA_transB_range
+  batch_count: [ -1, 0, 3 ]
+
+- name: gemm_strided_batched_small_complex
+  category: quick
+  function:
+    gemm_strided_batched: *single_double_precisions_complex
+    gemm_strided_batched_ex: *single_double_precisions_complex
+  matrix_size: *small_matrix_size_range
+  pointer_mode_device: false
+  alpha_beta: *complex_alpha_beta_range
+  transA_transB: *transA_transB_range
+  batch_count: [ -1, 0, 3 ]
+
+- name: gemm_strided_batched_small_stride_zero
+  category: quick
+  function:
+    gemm_strided_batched: *half_single_double_precisions
+    gemm_strided_batched_ex: *nonint8_real_precisions
+  matrix_size: *small_matrix_size_stride_a_range
+  pointer_mode_host: false
+  alpha: 2.0
+  alphai: 1.0
+  beta: 3.0
+  betai: -1.0
+  transA: N
+  transB: N
+  batch_count: [ 1, 3 ]
+
+- name: gemm_strided_batched_small_stride_zero_int8
+  category: quick
+  function:
+    gemm_strided_batched_ex: *int8_precision
+  matrix_size: *small_matrix_size_stride_a_range
+  pointer_mode_device: false
+  alpha: 2.0
+  alphai: 1.0
+  beta: 3.0
+  betai: -1.0
+  transA: N
+  transB: N
+  batch_count: [ 1, 3 ]
+
+- name: gemm_strided_batched_small_stride_zero_complex
+  category: quick
+  function:
+    gemm_strided_batched: *single_double_precisions_complex
+    gemm_strided_batched_ex: *single_double_precisions_complex
+  matrix_size: *small_matrix_size_stride_a_range
+  pointer_mode_host: false
+  alpha: 2.0
+  alphai: 1.0
+  beta: 3.0
+  betai: -1.0
+  transA: N
+  transB: N
+  batch_count: [ 3 ]
+
+- name: gemm_strided_batched_medium
+  category: pre_checkin
+  function:
+    gemm_strided_batched: *half_single_precisions
+    gemm_strided_batched_ex: *hpa_half_single_precisions
+  matrix_size: *medium_matrix_size_range
+  pointer_mode_device: false
+  transA_transB: *transA_transB_range
+  alpha_beta: *alpha_beta_range
+  batch_count: [ -1, 0, 3 ]
+
+- name: gemm_strided_batched_medium_alt
+  category: pre_checkin
+  function:
+    gemm_strided_batched_ex: *hpa_half_precision
+  matrix_size: *medium_matrix_size_range
+  pointer_mode_host: false
+  transA_transB: *transA_transB_range
+  alpha: 1
+  beta: 0
+  flags: [4, 20]
+  initialization: [ denorm, denorm2 ]
+  batch_count: [ -1, 0, 3 ]
+
+- name: gemm_strided_batched_medium_complex
+  category: pre_checkin
+  function:
+    gemm_strided_batched: *single_double_precisions_complex
+    gemm_strided_batched_ex: *single_double_precisions_complex
+  matrix_size: *medium_matrix_size_range
+  pointer_mode_device: false
+  transA_transB: *transA_transB_range
+  alpha_beta: *complex_alpha_beta_range
+  batch_count: [ 3 ]
+
+- name: gemm_strided_batched_medium_stride_zero
+  category: nightly
+  function:
+    gemm_strided_batched: *half_single_precisions
+    gemm_strided_batched_ex: *hpa_half_single_precisions
+  matrix_size: *medium_matrix_size_stride_a_range
+  pointer_mode_host: false
+  alpha: 2.0
+  alphai: 1.0
+  beta: 3.0
+  betai: -1.0
+  transA: N
+  transB: N
+  batch_count: 3
+
+- name: gemm_strided_batched_medium_stride_zero_alt
+  category: nightly
+  function:
+    gemm_strided_batched_ex: *hpa_half_precision
+  matrix_size: *medium_matrix_size_stride_a_range
+  pointer_mode_device: false
+  alpha: 1
+  beta: 0
+  flags: [4, 20]
+  initialization: [ denorm, denorm2 ]
+  transA: N
+  transB: N
+  batch_count: 3
+
+- name: gemm_strided_batched_medium_stride_zero_complex
+  category: nightly
+  function:
+    gemm_strided_batched: *single_double_precisions_complex
+    gemm_strided_batched_ex: *single_double_precisions_complex
+  matrix_size: *medium_matrix_size_stride_a_range
+  pointer_mode_host: false
+  alpha: 2.0
+  alphai: 1.0
+  beta: 3.0
+  betai: -1.0
+  transA: N
+  transB: N
+  batch_count: 3
+
+- name: gemm_strided_batched_large
+  category: pre_checkin
+  function:
+    gemm_strided_batched: *half_single_double_precisions
+    gemm_strided_batched_ex: *nonint8_real_precisions
+  matrix_size: *large_matrix_size_range
+  pointer_mode_device: false
+  transA_transB: *transA_transB_range
+  alpha_beta: *alpha_beta_range
+  batch_count: [ 3 ]
+
+- name: gemm_strided_batched_large_int8
+  category: pre_checkin
+  function:
+    gemm_strided_batched_ex: *int8_precision
+  matrix_size: *large_matrix_size_range
+  pointer_mode_host: false
+  transA_transB: *transA_transB_range
+  alpha_beta: *alpha_beta_range
+  batch_count: [ 3 ]
+
+- name: gemm_strided_batched_large_complex
+  category: pre_checkin
+  function:
+    gemm_strided_batched: *single_double_precisions_complex
+    gemm_strided_batched_ex: *single_double_precisions_complex
+  matrix_size: *large_matrix_size_range
+  pointer_mode_device: false
+  transA_transB: *transA_transB_range
+  alpha_beta: *alpha_beta_range
+  batch_count: [ 3 ]
+
+- name: gemm_strided_batched_large_stride_zero
+  category: pre_checkin
+  function:
+    gemm_strided_batched: *half_single_double_precisions
+    gemm_strided_batched_ex: *nonint8_real_precisions
+  matrix_size: *large_matrix_size_stride_a_range
+  pointer_mode_host: false
+  alpha: 2.0
+  alphai: 1.0
+  beta: 3.0
+  betai: -1.0
+  transA: N
+  transB: N
+  batch_count: [ -1, 0, 3 ]
+
+- name: gemm_strided_batched_large_stride_zero_int8
+  category: pre_checkin
+  function:
+    gemm_strided_batched_ex: *int8_precision
+  matrix_size: *large_matrix_size_stride_a_range
+  pointer_mode_device: false
+  alpha: 2.0
+  alphai: 1.0
+  beta: 3.0
+  betai: -1.0
+  transA: N
+  transB: N
+  batch_count: [ -1, 0, 3 ]
+
+- name: gemm_strided_batched_large_stride_zero_complex
+  category: pre_checkin
+  function:
+    gemm_strided_batched: *single_double_precisions_complex
+    gemm_strided_batched_ex: *single_double_precisions_complex
+  matrix_size: *large_matrix_size_stride_a_range
+  pointer_mode_host: false
+  alpha: 2.0
+  alphai: 1.0
+  beta: 3.0
+  betai: -1.0
+  transA: N
+  transB: N
+  batch_count: [ -1, 0, 3 ]
+
+- name: gemm_strided_batched_deepbench
+  category: nightly
+  function:
+    gemm_strided_batched: *half_single_precisions
+    gemm_strided_batched_ex: *hpa_half_single_precisions
+  matrix_size: *deepbench_vec
+  pointer_mode_device: false
+  alpha: 1.0
+  beta: 0.0
+  transA: N
+  transB: T
+  batch_count: [ 2 ]
+
+- name: gemm_strided_batched_deepbench_alt
+  category: nightly
+  function:
+    gemm_strided_batched_ex: *hpa_half_precision
+  matrix_size: *deepbench_vec
+  pointer_mode_host: false
+  alpha: 1.0
+  beta: 0.0
+  flags: [4, 20]
+  initialization: [ denorm, denorm2 ]
+  transA: N
+  transB: T
+  batch_count: [ 2 ]
+
+- name: gemm_strided_batched_conv_resnet50_fwd
+  category: nightly
+  function:
+    gemm_strided_batched: *half_single_precisions
+    gemm_strided_batched_ex: *hpa_half_single_precisions
+  matrix_size: *conv_resnet50_fwd
+  pointer_mode_device: false
+  alpha: 1.0
+  beta: 0.0
+  transA: N
+  transB: N
+  batch_count: 4
+
+- name: gemm_strided_batched_conv_resnet50_bwddata
+  category: nightly
+  function:
+    gemm_strided_batched: *half_single_precisions
+    gemm_strided_batched_ex: *hpa_half_single_precisions
+  matrix_size: *conv_resnet50_bwddata
+  pointer_mode_host: false
+  alpha: 1.0
+  beta: 0.0
+  transA: N
+  transB: T
+  batch_count: 4
+
+- name: gemm_strided_batched_conv_inception4_fwd
+  category: nightly
+  function:
+    gemm_strided_batched: *half_single_precisions
+    gemm_strided_batched_ex: *hpa_half_single_precisions
+  matrix_size: *conv_inception4_fwd
+  pointer_mode_device: false
+  alpha: 1.0
+  beta: 0.0
+  transA: N
+  transB: N
+  batch_count: 4
+
+- name: gemm_strided_batched_conv_inception4_bwddata
+  category: nightly
+  function:
+    gemm_strided_batched: *half_single_precisions
+    gemm_strided_batched_ex: *hpa_half_single_precisions
+  matrix_size: *conv_inception4_bwddata
+  pointer_mode_host: false
+  alpha: 1.0
+  beta: 0.0
+  transA: N
+  transB: T
+  batch_count: 4
+
+- name: gemm_strided_batched_conv_ctest_bwddata
+  category: nightly
+  function:
+    gemm_strided_batched: *half_single_precisions
+    gemm_strided_batched_ex: *hpa_half_single_precisions
+  matrix_size: *conv_ctest_bwddata
+  pointer_mode_host: false
+  alpha: 1.0
+  beta: 0.0
+  transA: N
+  transB: T
+  batch_count: 1
+
+- name: gemm_strided_batched_conv_ctest_fwd
+  category: nightly
+  function:
+    - gemm_strided_batched: *half_single_precisions
+    - gemm_strided_batched_ex: *hpa_half_single_precisions
+  matrix_size: *conv_ctest_fwd
+  pointer_mode_device: false
+  alpha: 1.0
+  beta: 0.0
+  transA: N
+  transB: N
+  batch_count: 1
+
+- name: gemm_strided_batched_ex_hpa_fp16
+  category: quick
+  function:
+    gemm_strided_batched_ex: *hpa_half_precision
+  M: 128
+  N: 128
+  K: 1000
+  pointer_mode_host: false
+  transA: N
+  transB: N
+  alpha: 0.001
+  beta: 1
+  batch_count: [ 1, 10, 12 ]
+  lda: 128
+  ldb: 1000
+  ldc: 128
+  ldd: 128
+  stride_a: 128000
+  stride_b: 128000
+  stride_c: 16384
+  stride_d: 16384
+
+- name: gemm_strided_batched_xx_zerok
+  category: quick
+  function:
+    - gemm_strided_batched: *half_single_double_precisions_complex_real
+    - gemm_strided_batched_ex: *complex_precisions
+    - gemm_strided_batched_ex: *real_precisions
+  transA_transB: *transA_transB_range
+  alpha_beta: *alpha_beta_range
+  K: 0
+  matrix_size:
+    - { M:  1,   N:  2 }
+    - { M:  3,   N:  5 }
+    - { M:  512, N:  100 }
+    - { M:  63,  N:  512 }
+  pointer_mode_host: false
+  batch_count: 1
+
+- name: gemm_ex_large_batch
+  category: stress
+  function:
+    - gemm_strided_batched: *single_precision
+    - gemm_strided_batched_ex: *nonint8_real_precisions
+    - gemm_strided_batched_ex: *int8_precision
+  matrix_size:
+    - { M: 3, N: 3, K: 3, lda: 3, ldb: 3, ldc: 3, ldd: 3, batch_count: *c_grid_yz_require_passes }
+  pointer_mode_device: false
+  transA: [ N, T ]
+  transB: [ N, T ]
+  alpha: 1
+  beta: 1
+
+- name: gemm_strided_batched_graph_test
+  category: pre_checkin
+  function:
+    - gemm_strided_batched: *half_single_precisions
+    - gemm_strided_batched_ex: *hpa_half_single_precisions
+  matrix_size:
+      - { M:  33, N:  100, K:  32 }
+  pointer_mode_device: false
+  transA: N
+  transB: N
+  alpha_beta: *alpha_beta_range
+  batch_count: [ 3 ]
+  graph_test: true
+
+- name: gemm_strided_batched_ILP64
+  category: stress
+  function:
+    - gemm_strided_batched: *half_precision
+    - gemm_strided_batched_ex: *nonint8_real_precisions
+    - gemm_strided_batched_ex: *int8_precision
+  arguments:
+    - { M: 4, N: 4, K: 4, lda: 4, ldb: 4, ldc: 4, ldd: 4 }
+  pointer_mode_device: false
+  transA: [ N ]
+  transB: [ N ]
+  batch_count: *c_grid_yz_require_passes
+  alpha: 1
+  beta: 1
+  api: [ C_64 ]
+  os_flags: LINUX
+
+- name: gemm_strided_batched_ex_ILP64
+  category: pre_checkin
+  function:
+    - gemm_strided_batched_ex: *nonint8_real_precisions
+    - gemm_strided_batched_ex: *int8_precision
+  matrix_size:
+    - { M: 64, N: 64, K: 64, lda: 64, ldb: 64, ldc: 64, ldd: 64, batch_count: 511 }
+  pointer_mode_device: false
+  transA: [ N ]
+  transB: [ T ]
+  alpha: 1
+  beta: 1
+  api: [ C_64 ]
+  os_flags: LINUX
+
+- name: gemm_strided_batched_repeatability_check
+  category: stress
+  function:
+    - gemm_strided_batched: *half_single_double_precisions_complex_real
+    - gemm_strided_batched_ex: *half_single_double_precisions_complex_real
+  matrix_size:
+    - { M:   784, N:    64, K:   192, lda:   784, ldb:   192, ldc:   784, ldd:   784, stride_a:   150528, stride_b:        0, stride_c:    50176, stride_d:    50176 }
+  initialization: hpl
+  transA: [ N, T ]
+  transB: [ N, T ]
+  alpha_beta: *alpha_beta_range
+  atomics_mode: 0
+  batch_count: [ 2 ]
+  iters: 5
+  pointer_mode_host: false
+  devices: 4
+  repeatability_check: true
+...

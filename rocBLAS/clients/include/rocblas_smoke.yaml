@@ -1,0 +1,1207 @@
+---
+include: rocblas_common.yaml
+#include: known_bugs.yaml
+
+# This is a minimal smoke test of rocblas functionality
+# It will run at least a single small sized function test for all of the L1, L2, and L3 functions.
+# Algorithm variations controlled by enums will be tested but those that are selected by size will not be
+# exhaustive as very small sizes are only used
+
+Definitions:
+
+############
+# Level 1+ #
+############
+
+  - &incx_range
+    - [1]
+
+  - &N_range
+    - [513]
+
+  - &batch_count_range
+    - [2]
+
+  - &incx_incy_range
+    - { incx:  1, incy:  1 }
+
+  - &incx_incy_range_x_y_output
+    - { incx:  1, incy:  1 }
+
+  - &incx_incy_range_y_output
+    - { incx:  1, incy:  1 }
+
+  - &alpha_range
+    - [0.5]
+
+  - &alpha_beta_range
+    - { alpha:  0.5, beta: -1.0 }
+
+  - &alphai_betai_range
+    - { alphai: 0.5 }
+
+  - &complex_alpha_range
+    - { alpha: 1.5, alphai: -1.0 }
+
+  - &complex_alpha_beta_range
+    - { alpha: -0.5, beta: -0.5, alphai: 0.5, betai: 0.5 }
+
+###########
+# Level 2 #
+###########
+
+  - &gbmv_dims
+    - { M:    20, N:    30, lda:   50, KL: 14, KU: 14 }
+
+  - &gbmv_common_args
+    precision: *single_double_precisions_complex_real
+    transA: [ N, T ]
+    incx_incy: *incx_incy_range
+    alpha_beta: *alpha_beta_range
+    matrix_size: *gbmv_dims
+
+  - &gemv_dims
+    - { M: 65, N: 65, lda: 65, stride_a: 1 }
+
+  - &gemv_common_args
+    precision: *single_double_precisions_complex_real
+    transA: [ N, T ]
+    incx_incy: *incx_incy_range
+    alpha_beta: *alpha_beta_range
+    matrix_size: *gemv_dims
+
+  - &hbmv_dims
+    - { N:    65, K:   64, lda:   65 }
+
+  - &hbmv_common_args
+    precision: *single_double_precisions_complex
+    uplo: [ U, L ]
+    incx_incy: *incx_incy_range
+    alpha_beta: *complex_alpha_beta_range
+    matrix_size: *hbmv_dims
+
+  - &hemv_dims
+    - { N:    65, lda:   65 }
+
+  - &hemv_common_args
+    precision: *single_double_precisions_complex
+    uplo: [ U, L ]
+    incx_incy: *incx_incy_range
+    alpha_beta: *complex_alpha_beta_range
+    matrix_size: *hemv_dims
+
+  - &her_dims
+    - { N:    65, lda:   65 }
+
+  - &her_common_args
+    precision: *single_double_precisions_complex
+    uplo: [ U, L ]
+    alpha_beta: *complex_alpha_beta_range
+    incx: *incx_range
+    matrix_size: *her_dims
+
+  - &her2_dims
+    - { N:    65, lda:   65 }
+
+  - &her2_common_args
+    precision: *single_double_precisions_complex
+    uplo: [ U, L ]
+    alpha_beta: *complex_alpha_beta_range
+    incx_incy: *incx_incy_range
+    matrix_size: *her2_dims
+
+  - &hpmv_dims
+    - { N:    65 }
+
+  - &hpmv_common_args
+    precision: *single_double_precisions_complex
+    uplo: [ U, L ]
+    incx_incy: *incx_incy_range
+    alpha_beta: *complex_alpha_beta_range
+    matrix_size: *hpmv_dims
+
+  - &hpr_dims
+    - { N:    65 }
+
+  - &hpr_common_args
+    precision: *single_double_precisions_complex
+    uplo: [ U, L ]
+    alpha_beta: *complex_alpha_range
+    incx: *incx_range
+    matrix_size: *hpr_dims
+
+  - &hpr2_dims
+    - { N:    65 }
+
+  - &hpr2_common_args
+    precision: *single_double_precisions_complex
+    uplo: [ U, L ]
+    alpha_beta: *complex_alpha_range
+    incx_incy: *incx_incy_range
+    matrix_size: *hpr2_dims
+
+
+  - &ger_dims
+    - { M: 65, N: 65, lda: 65, stride_a: 4225}
+
+  - &ger_common_args
+    precision: *single_double_precisions
+    incx_incy: *incx_incy_range
+    alpha: *alpha_range
+    matrix_size: *ger_dims
+
+  - &geruc_dims
+    - { M: 65, N: 65, lda: 65, stride_a: 4225}
+
+  - &geruc_common_args
+    precision: *single_double_precisions_complex
+    incx_incy: *incx_incy_range
+    alpha: *alpha_range
+    matrix_size: *geruc_dims
+
+  - &spr_dims
+    - { N:    65 }
+
+  - &spr_common_args
+    precision: *single_double_precisions_complex_real
+    uplo: [ U, L ]
+    alpha_beta: *complex_alpha_range
+    incx: *incx_range
+    matrix_size: *spr_dims
+
+  - &spr2_dims
+    - { N:    65 }
+
+  - &spr2_common_args
+    precision: *single_double_precisions
+    uplo: [ U, L ]
+    alpha: *alpha_range
+    incx_incy: *incx_incy_range
+    matrix_size: *spr2_dims
+
+  - &syr_dims
+    - { N:    65, lda:   65 }
+
+  - &syr_common_args
+    precision: *single_double_precisions_complex_real
+    uplo: [ U, L ]
+    alpha_beta: *complex_alpha_range
+    incx: *incx_range
+    matrix_size: *syr_dims
+
+  - &syr2_dims
+    - { N:    65, lda:   65 }
+
+  - &syr2_common_args
+    precision: *single_double_precisions_complex
+    uplo: [ U, L ]
+    alpha_beta: *complex_alpha_range
+    incx_incy: *incx_incy_range
+    matrix_size: *syr2_dims
+
+  - &symv_dims
+    - { N:    65, lda:   65 }
+
+  - &symv_common_args
+    precision: *single_double_precisions_complex_real
+    uplo: [ U, L ]
+    incx_incy: *incx_incy_range
+    alpha_beta: *complex_alpha_beta_range
+    matrix_size: *symv_dims
+
+  - &sbmv_dims
+    - { N: 65, K: 11, lda: 65 }
+
+  - &sbmv_common_args
+    precision: *single_double_precisions
+    uplo: [ U, L ]
+    incx_incy: *incx_incy_range
+    alpha_beta: *alpha_beta_range
+    matrix_size: *sbmv_dims
+
+  - &spmv_dims
+    - { N: 65, K: 11, lda: 65 }
+
+  - &spmv_common_args
+    precision: *single_double_precisions
+    uplo: [ U, L ]
+    incx_incy: *incx_incy_range
+    alpha_beta: *alpha_beta_range
+    matrix_size: *spmv_dims
+
+  - &tbmv_dims
+    - { M: 257, K: 11, lda: 257 }
+
+  - &tbmv_common_args
+    precision: *single_double_precisions_complex_real
+    uplo: [U, L]
+    transA: [N, T]
+    diag: [N, U]
+    incx: *incx_range
+    matrix_size: *tbmv_dims
+
+  - &tpmv_dims
+    - { M: 290, stride_a: 1 }
+
+  - &tpmv_common_args
+    precision: *single_double_precisions_complex_real
+    uplo: [U, L]
+    transA: [N, T]
+    diag: [N, U]
+    incx: *incx_range
+    matrix_size: *tpmv_dims
+
+  - &trmv_dims
+    - { M: 257, lda: 257, stride_a: 1 }
+
+  - &trmv_common_args
+    precision: *single_double_precisions_complex_real
+    uplo: [U, L]
+    transA: [N, T, C]
+    diag: [N, U]
+    incx: *incx_range
+    matrix_size: *trmv_dims
+
+  - &tbsv_dims
+    - { N: 65, K: 5, lda: 65 }
+
+  - &tbsv_common_args
+    precision: *single_double_precisions_complex_real
+    uplo: [U, L]
+    transA: [N, T]
+    diag: [N, U]
+    incx: *incx_range
+    matrix_size: *tbsv_dims
+
+  - &tpsv_dims
+    - { N: 65 }
+
+  - &tpsv_common_args
+    precision: *single_double_precisions_complex_real
+    uplo: [U, L]
+    transA: [N, T]
+    diag: [N, U]
+    incx: *incx_range
+    matrix_size: *tpsv_dims
+
+  - &trsv_dims
+    - { M: 33, lda: 33 }
+
+  - &trsv_common_args
+    precision: *single_double_precisions_complex_real
+    uplo: [U, L]
+    transA: [N, T]
+    diag: [N, U]
+    incx: *incx_range
+    matrix_size: *trsv_dims
+
+###########
+# Level 3 #
+###########
+
+  - &transA_transB_range
+    - { transA: [N,T,C], transB: [N,T,C] }
+
+  - &dgmm_dims
+    - { M:     33, N:    33, lda:    35, incx:     2, ldc:    35 }
+
+  - &dgmm_common_args
+    precision: *single_double_precisions_complex_real
+    side: [L, R]
+    matrix_size: *dgmm_dims
+
+  - &geam_dims
+    - { M:     3, N:    33, lda:    35, ldb:    35, ldc:    35 }
+
+  - &geam_common_args
+    precision: *single_double_precisions_complex_real
+    transA_transB: *transA_transB_range
+    alpha_beta: *complex_alpha_beta_range
+    matrix_size: *geam_dims
+
+  - &gemmt_dims
+    - { N: 8, K: 8, lda: 8, ldb: 8, ldc: 8 }
+
+  - &gemmt_common_args
+    precision: *single_double_precisions_complex_real
+    uplo: [ U, L ]
+    transA_transB: *transA_transB_range
+    alpha_beta: *complex_alpha_beta_range
+    matrix_size: *gemmt_dims
+
+  - &hemm_dims
+    - { M:    12, N:   33,  lda:   33,  ldb: 33,   ldc: 33 }
+
+  - &hemm_common_args
+    precision: *single_double_precisions_complex
+    uplo: [ U, L ]
+    side: [L, R]
+    transA: [ N, C ]
+    alpha_beta: *alpha_beta_range
+    matrix_size: *hemm_dims
+
+  - &herk_dims
+    - { N: 65, lda: 65, K: 33, ldc: 65 }
+
+  - &herk_common_args
+    precision: *single_double_precisions_complex
+    uplo: [ U, L ]
+    transA: [ N, C ]
+    alpha_beta: *complex_alpha_beta_range
+    matrix_size: *herk_dims
+
+  - &her2k_dims
+    - { N:    12, K:   9,   lda:  12,  ldb: 12,  ldc: 12 }
+
+  - &her2k_common_args
+    precision: *single_double_precisions_complex
+    uplo: [ U, L ]
+    transA: [ N, C ]
+    alpha_beta: *complex_alpha_beta_range
+    matrix_size: *her2k_dims
+
+  - &herkx_dims
+    - { N:    12, K:   9,   lda:  12,  ldb: 12,  ldc: 12 }
+
+  - &herkx_common_args
+    precision: *single_double_precisions_complex
+    uplo: [ U, L ]
+    transA: [ N, C ]
+    alpha_beta: *complex_alpha_beta_range
+    matrix_size: *herkx_dims
+
+  - &symm_dims
+    - { M:    12, N:   33,  lda:   33,  ldb: 33,   ldc: 33 }
+
+  - &symm_common_args
+    precision: *single_double_precisions_complex_real
+    side: [ L, R ]
+    uplo: [ U, L ]
+    alpha_beta: *complex_alpha_beta_range
+    matrix_size: *symm_dims
+
+  - &syrk_dims
+    - { N:    12, K:   9,   lda:  12,  ldb: 12,  ldc: 12 }
+
+  - &syrk_common_args
+    precision: *single_double_precisions_complex_real
+    uplo: [ U, L ]
+    transA: [ N, T ]
+    alpha_beta: *complex_alpha_beta_range
+    matrix_size: *syrk_dims
+
+  - &syr2k_dims
+    - { N:    12, K:   9,   lda:  12,  ldb: 12,  ldc: 12 }
+
+  - &syr2k_common_args
+    precision: *single_double_precisions_complex_real
+    uplo: [ U, L ]
+    transA: [ N, T ]
+    matrix_size: *syr2k_dims
+
+  - &syrkx_dims
+    - { N:    12, K:   9,   lda:  12,  ldb: 12,  ldc: 12 }
+
+  - &syrkx_common_args
+    precision: *single_double_precisions_complex_real
+    uplo: [ U, L ]
+    transA: [ N, T ]
+    alpha_beta: *complex_alpha_beta_range
+    matrix_size: *syrkx_dims
+
+  - &trmm_dims
+    - { M:     5, N:     5, lda:     5, ldb:     5, ldc:   5 }
+
+  - &trmm_common_args
+    precision: *single_double_precisions_complex_real
+    side: [ L, R ]
+    uplo: [ U, L ]
+    transA: [ N, T ]
+    diag: [ N ]
+    alpha_beta: *complex_alpha_beta_range
+    matrix_size: *trmm_dims
+
+  - &trsm_dims
+    - { M:    8, N:    8, lda:    8, ldb:   8 }
+
+  - &trsm_common_args
+    precision: *single_double_precisions_complex_real
+    side: [ L, R ]
+    uplo: [ U, L ]
+    transA: [ N, C ]
+    diag: [ N, U ]
+    alpha_beta: *complex_alpha_beta_range
+    matrix_size: *trsm_dims
+
+  - &trtri_dims
+    - { N:    10, lda:    10  }
+
+  - &trtri_common_args
+    precision: *single_double_precisions_complex_real
+    uplo: [ U, L ]
+    diag: [ N ]
+    alpha_beta: *complex_alpha_beta_range
+    matrix_size: *trtri_dims
+
+  - &gemm_dims
+    - { M:     65, N:    33, K:    33, lda:    128, ldb:    128, ldc:    128 }
+
+  - &gemm_common_args
+    precision: *single_double_precisions_complex_real
+    transA_transB: *transA_transB_range
+    alpha_beta: *complex_alpha_beta_range
+    matrix_size: *gemm_dims
+
+  - &gemm_ex_dims
+    - { M:     65, N:    33, K:    33, lda:    128, ldb:    128, ldc:    128, ldd:    128 }
+
+  - &gemm_ex_common_args
+    precision: *hpa_half_precision
+    transA_transB: *transA_transB_range
+    alpha_beta: *complex_alpha_beta_range
+    matrix_size: *gemm_ex_dims
+
+Tests:
+
+###########
+# Level 1 #
+###########
+
+# All functions with no parameters to scan over
+
+  - name: blas1
+    category: quick
+    api: [ C, C_64 ]
+    function:
+      - rotg:  *rotg_precisions
+      - rotmg: *single_double_precisions_complex_real
+
+  - name: blas1_batched
+    category: quick
+    batch_count: *batch_count_range
+    api: [ C, C_64 ]
+    function:
+      - rotg_batched: *rotg_precisions
+      - rotmg_batched: *single_double_precisions_complex_real
+
+  - name: blas1_strided_batched
+    category: quick
+    batch_count: *batch_count_range
+    stride_scale: [ 1.0 ]
+    api: [ C, C_64 ]
+    function:
+      - rotg_strided_batched: *rotg_precisions
+      - rotmg_strided_batched: *single_double_precisions_complex_real
+
+# All functions with alpha and incx and incy
+
+  - name: blas1_with_alpha
+    category: quick
+    N: *N_range
+    incx_incy: *incx_incy_range_y_output
+    alpha_beta: *alpha_beta_range
+    alphai_betai: *alphai_betai_range
+    api: [ C, C_64 ]
+    function:
+      - axpy:  *half_single_precisions_complex_real
+      - axpy_ex: *half_single_double_complex_real_precisions
+
+  - name: axpy_ex_compute_check
+    category: quick
+    N: *N_range
+    incx_incy: *incx_incy_range
+    alpha_beta: *alpha_beta_range
+    api: [ C, C_64 ]
+    function:
+      - axpy_ex: *hpa_half_precision
+
+  - name: blas1_batched_with_alpha
+    category: quick
+    N: *N_range
+    incx_incy: *incx_incy_range_y_output
+    alpha_beta: *alpha_beta_range
+    alphai_betai: *alphai_betai_range
+    batch_count: *batch_count_range
+    api: [ C, C_64 ]
+    function:
+      - axpy_batched:  *half_single_precisions_complex_real
+      - axpy_batched_ex: *half_single_double_complex_real_precisions
+
+  - name: blas1_strided_batched_with_alpha
+    category: quick
+    N: *N_range
+    incx_incy: *incx_incy_range_y_output
+    batch_count: *batch_count_range
+    stride_scale: [ 1 ]
+    alpha_beta: *alpha_beta_range
+    alphai_betai: *alphai_betai_range
+    api: [ C, C_64 ]
+    function:
+      - axpy_strided_batched: *half_single_precisions_complex_real
+      - axpy_strided_batched_ex: *half_single_double_complex_real_precisions
+
+
+# All functions with alpha and incx but no incy
+
+  - name: blas1_with_alpha
+    category: quick
+    N: *N_range
+    incx: *incx_range
+    alpha_beta: *alpha_beta_range
+    alphai_betai: *alphai_betai_range
+    api: [ C, C_64 ]
+    function:
+      - scal:  *single_double_precisions_complex_real
+      - scal:  *scal_single_double_complex_real_alpha_complex_out
+      - scal_ex: *scal_ex_bfloat_half_single_double_complex_real_precisions
+      - scal_ex: *scal_ex_single_double_complex_real_alpha_complex_out
+
+  - name: blas1_batched
+    category: quick
+    N: *N_range
+    incx: *incx_range
+    alpha_beta: *alpha_beta_range
+    alphai_betai: *alphai_betai_range
+    batch_count: *batch_count_range
+    api: [ C, C_64 ]
+    function:
+      - scal_batched:  *single_double_precisions_complex_real
+      - scal_batched:  *scal_single_double_complex_real_alpha_complex_out
+      - scal_batched_ex: *scal_ex_bfloat_half_single_double_complex_real_precisions
+      - scal_batched_ex: *scal_ex_single_double_complex_real_alpha_complex_out
+
+  - name: blas1_strided_batched
+    category: quick
+    N: *N_range
+    incx: *incx_range
+    alpha_beta: *alpha_beta_range
+    alphai_betai: *alphai_betai_range
+    batch_count: *batch_count_range
+    stride_scale: [ 1 ]
+    api: [ C, C_64 ]
+    function:
+      - scal_strided_batched:  *single_double_precisions_complex_real
+      - scal_strided_batched:  *scal_single_double_complex_real_alpha_complex_out
+      - scal_strided_batched_ex: *scal_ex_bfloat_half_single_double_complex_real_precisions
+      - scal_strided_batched_ex: *scal_ex_single_double_complex_real_alpha_complex_out
+
+
+# All functions with incx, no incy, no alpha
+# nrm2,asum,iamax,iamin all variants
+
+  - name: blas1
+    category: quick
+    N: *N_range
+    incx: *incx_range
+    api: [ C, C_64 ]
+    function:
+      - nrm2:  *single_double_precisions_complex_real
+      - asum:  *single_double_precisions_complex_real
+      - iamax: *single_double_precisions_complex_real
+      - iamin: *single_double_precisions_complex_real
+
+  - name: blas1_batched
+    category: quick
+    N: *N_range
+    incx: *incx_range
+    batch_count: *batch_count_range
+    api: [ C, C_64 ]
+    function:
+      - asum_batched: *single_double_precisions_complex_real
+      - nrm2_batched: *single_double_precisions_complex_real
+      - iamax_batched: *single_double_precisions_complex_real
+      - iamin_batched: *single_double_precisions_complex_real
+
+  - name: blas1_strided_batched
+    category: quick
+    N: *N_range
+    incx: *incx_range
+    batch_count: *batch_count_range
+    stride_scale: [ 1.0 ]
+    api: [ C, C_64 ]
+    function:
+      - asum_strided_batched: *single_double_precisions_complex_real
+      - nrm2_strided_batched: *single_double_precisions_complex_real
+      - iamax_strided_batched: *single_double_precisions_complex_real
+      - iamin_strided_batched: *single_double_precisions_complex_real
+
+# All functions with incx, incy, no alpha
+
+  - name: blas1
+    category: quick
+    N: *N_range
+    incx_incy: *incx_incy_range
+    api: [ C, C_64 ]
+    function:
+      - copy: *single_double_precisions_complex_real
+      - dot:   *half_bfloat_single_double_complex_real_precisions
+      - dotc:  *single_double_precisions_complex
+      - swap: *single_double_precisions_complex_real
+      - rot:   *rot_precisions
+      - rotm:  *single_double_precisions_complex_real
+
+
+  - name: blas1_batched
+    category: quick
+    N: *N_range
+    incx_incy: *incx_incy_range
+    batch_count: *batch_count_range
+    api: [ C, C_64 ]
+    function:
+      - copy_batched: *single_double_precisions_complex_real
+      - dot_batched:   *half_bfloat_single_double_complex_real_precisions
+      - dotc_batched:  *single_double_precisions_complex
+      - swap_batched: *single_double_precisions_complex_real
+      - rot_batched:   *rot_precisions
+      - rotm_batched:  *single_double_precisions_complex_real
+
+  - name: blas1_strided_batched
+    category: quick
+    N: *N_range
+    incx_incy: *incx_incy_range
+    batch_count: *batch_count_range
+    stride_scale: [1]
+    api: [ C, C_64 ]
+    function:
+      - copy_strided_batched: *single_double_precisions_complex_real
+      - dot_strided_batched:   *half_bfloat_single_double_complex_real_precisions
+      - dotc_strided_batched:  *single_double_precisions_complex
+      - swap_strided_batched: *single_double_precisions_complex_real
+      - rot_strided_batched:   *rot_precisions
+      - rotm_strided_batched:  *single_double_precisions_complex_real
+
+# dot alt algorithm, algo=1 forces x*x with incx=incy to test special case kernel
+  - name: blas1
+    category: quick
+    N: *N_range
+    incx_incy: *incx_incy_range
+    algo: [0, 1]
+    api: [ C, C_64 ]
+    function:
+      - dot:   *half_bfloat_single_double_complex_real_precisions
+      - dotc:  *single_double_precisions_complex
+
+  - name: blas1_batched
+    category: quick
+    N: *N_range
+    incx_incy: *incx_incy_range
+    batch_count: *batch_count_range
+    algo: [0, 1]
+    api: [ C, C_64 ]
+    function:
+      - dot_batched:   *half_bfloat_single_double_complex_real_precisions
+      - dotc_batched:  *single_double_precisions_complex
+
+  - name: blas1_strided_batched
+    category: quick
+    N: *N_range
+    incx_incy: *incx_incy_range
+    batch_count: *batch_count_range
+    stride_scale: [ 1 ]
+    algo: [0, 1]
+    api: [ C, C_64 ]
+    function:
+      - dot_strided_batched:   *half_bfloat_single_double_complex_real_precisions
+      - dotc_strided_batched:  *single_double_precisions_complex
+
+# Swap, rot, and rotm get their own for quick tests as they write to x and y
+
+  - name: blas1
+    category: quick
+    N: *N_range
+    incx_incy: *incx_incy_range_x_y_output
+    batch_count: *batch_count_range
+    stride_scale: [ 1 ]
+    api: [ C, C_64 ]
+    function:
+      - swap: *single_double_precisions_complex_real
+      - rot:   *rot_precisions
+      - rotm:  *single_double_precisions_complex_real
+
+  - name: blas1
+    category: quick
+    N: *N_range
+    incx_incy: *incx_incy_range_x_y_output
+    batch_count: *batch_count_range
+    stride_scale: [ 1 ]
+    api: [ C, C_64 ]
+    function:
+      - swap_batched: *single_double_precisions_complex_real
+      - rot_batched:   *rot_precisions
+      - rotm_batched:  *single_double_precisions_complex_real
+
+  - name: blas1
+    category: quick
+    N: *N_range
+    incx_incy: *incx_incy_range_x_y_output
+    batch_count: *batch_count_range
+    stride_scale: [ 1 ]
+    api: [ C, C_64 ]
+    function:
+      - swap_strided_batched: *single_double_precisions_complex_real
+      - rot_strided_batched:   *rot_precisions
+      - rotm_strided_batched:  *single_double_precisions_complex_real
+
+###########
+# Level 2 #
+###########
+
+# gbmv
+  - name: gbmv
+    category: quick
+    function:
+    - gbmv
+    - gbmv_batched
+    - gbmv_strided_batched
+    arguments: *gbmv_common_args
+    batch_count: *batch_count_range
+    stride_scale: [ 1 ]
+    api: [ C, C_64 ]
+
+  - name: gemv
+    category: quick
+    function:
+    - gemv
+    - gemv_batched
+    - gemv_strided_batched
+    arguments: *gemv_common_args
+    batch_count: *batch_count_range
+    stride_scale: [ 1 ]
+    api: [ C, C_64 ]
+
+  - name: ger
+    category: quick
+    function:
+    - ger
+    - ger_batched
+    - ger_strided_batched
+    arguments: *ger_common_args
+    batch_count: *batch_count_range
+    stride_scale: [ 1 ]
+    api: [ C, C_64 ]
+
+  - name: gerc
+    category: quick
+    function:
+    - gerc
+    - gerc_batched
+    - gerc_strided_batched
+    arguments: *geruc_common_args
+    batch_count: *batch_count_range
+    stride_scale: [ 1 ]
+    api: [ C, C_64 ]
+
+  - name: geru
+    category: quick
+    function:
+    - geru
+    - geru_batched
+    - geru_strided_batched
+    arguments: *geruc_common_args
+    batch_count: *batch_count_range
+    stride_scale: [ 1 ]
+    api: [ C, C_64 ]
+
+  - name: hbmv_strided_batched
+    category: quick
+    function:
+    - hbmv
+    - hbmv_batched
+    - hbmv_strided_batched
+    arguments: *hbmv_common_args
+    batch_count: *batch_count_range
+    stride_scale: [ 1 ]
+    api: [ C, C_64 ]
+
+  - name: hemv
+    category: quick
+    function:
+    - hemv
+    - hemv_batched
+    - hemv_strided_batched
+    arguments: *hemv_common_args
+    batch_count: *batch_count_range
+    stride_scale: [ 1 ]
+    api: [ C, C_64 ]
+
+  - name: her
+    category: quick
+    function:
+    - her
+    - her_batched
+    - her_strided_batched
+    arguments: *her_common_args
+    batch_count: *batch_count_range
+    stride_scale: [ 1 ]
+    api: [ C, C_64 ]
+
+  - name: her2
+    category: quick
+    function:
+    - her2
+    - her2_batched
+    - her2_strided_batched
+    arguments: *her2_common_args
+    batch_count: *batch_count_range
+    stride_scale: [ 1 ]
+    api: [ C, C_64 ]
+
+  - name: hpmv
+    category: quick
+    function:
+    - hpmv
+    - hpmv_batched
+    - hpmv_strided_batched
+    arguments: *hpmv_common_args
+    batch_count: *batch_count_range
+    stride_scale: [ 1 ]
+    api: [ C, C_64 ]
+
+  - name: hpr
+    category: quick
+    function:
+    - hpr
+    - hpr_batched
+    - hpr_strided_batched
+    arguments: *hpr_common_args
+    batch_count: *batch_count_range
+    stride_scale: [ 1 ]
+    api: [ C, C_64 ]
+
+  - name: hpr2
+    category: quick
+    function:
+    - hpr2
+    - hpr2_batched
+    - hpr2_strided_batched
+    arguments: *hpr2_common_args
+    batch_count: *batch_count_range
+    stride_scale: [ 1 ]
+    api: [ C, C_64 ]
+
+  - name: sbmv
+    category: quick
+    function:
+    - sbmv
+    - sbmv_batched
+    - sbmv_strided_batched
+    arguments: *sbmv_common_args
+    batch_count: *batch_count_range
+    stride_scale: [ 1 ]
+    api: [ C, C_64 ]
+
+  - name: spmv
+    category: quick
+    function:
+    - spmv
+    - spmv_batched
+    - spmv_strided_batched
+    arguments: *spmv_common_args
+    batch_count: *batch_count_range
+    stride_scale: [ 1 ]
+    api: [ C, C_64 ]
+
+  - name: spr
+    category: quick
+    function:
+    - spr
+    - spr_batched
+    - spr_strided_batched
+    arguments: *spr_common_args
+    batch_count: *batch_count_range
+    stride_scale: [ 1 ]
+    api: [ C, C_64 ]
+
+  - name: spr2
+    category: quick
+    function:
+    - spr2
+    - spr2_batched
+    - spr2_strided_batched
+    arguments: *spr2_common_args
+    batch_count: *batch_count_range
+    stride_scale: [ 1 ]
+    api: [ C, C_64 ]
+
+  - name: symv
+    category: quick
+    function:
+    - symv
+    - symv_batched
+    - symv_strided_batched
+    arguments: *symv_common_args
+    batch_count: *batch_count_range
+    stride_scale: [ 1 ]
+    api: [ C, C_64 ]
+
+  - name: syr
+    category: quick
+    function:
+    - syr
+    - syr_batched
+    - syr_strided_batched
+    arguments: *syr_common_args
+    batch_count: *batch_count_range
+    stride_scale: [ 1 ]
+    api: [ C, C_64 ]
+
+  - name: syr2
+    category: quick
+    function:
+    - syr2
+    - syr2_batched
+    - syr2_strided_batched
+    arguments: *syr2_common_args
+    batch_count: *batch_count_range
+    stride_scale: [ 1 ]
+    api: [ C, C_64 ]
+
+  - name: tbmv
+    category: quick
+    function:
+    - tbmv
+    - tbmv_batched
+    - tbmv_strided_batched
+    arguments: *tbmv_common_args
+    batch_count: *batch_count_range
+    stride_scale: [ 1 ]
+    api: [ C, C_64 ]
+
+  - name: tpmv
+    category: quick
+    function:
+    - tpmv
+    - tpmv_batched
+    - tpmv_strided_batched
+    arguments: *tpmv_common_args
+    batch_count: *batch_count_range
+    stride_scale: [ 1 ]
+    api: [ C, C_64 ]
+
+  - name: trmv
+    category: quick
+    function:
+    - trmv
+    - trmv_batched
+    - trmv_strided_batched
+    arguments: *trmv_common_args
+    batch_count: *batch_count_range
+    stride_scale: [ 1 ]
+    api: [ C, C_64 ]
+
+  - name: tbsv
+    category: quick
+    function:
+    - tbsv
+    - tbsv_batched
+    - tbsv_strided_batched
+    arguments: *tbsv_common_args
+    batch_count: *batch_count_range
+    stride_scale: [ 1 ]
+    api: [ C, C_64 ]
+
+  - name: tpsv
+    category: quick
+    function:
+    - tpsv
+    - tpsv_batched
+    - tpsv_strided_batched
+    arguments: *tpsv_common_args
+    batch_count: *batch_count_range
+    stride_scale: [ 1 ]
+    api: [ C, C_64 ]
+
+  - name: trsv
+    category: quick
+    function:
+    - trsv
+    - trsv_batched
+    - trsv_strided_batched
+    arguments: *trsv_common_args
+    batch_count: *batch_count_range
+    stride_scale: [ 1 ]
+    api: [ C, C_64 ]
+
+  ###########
+  # Level 3 #
+  ###########
+
+  - name: dgmm
+    category: quick
+    function:
+    - dgmm
+    - dgmm_batched
+    - dgmm_strided_batched
+    arguments: *dgmm_common_args
+    batch_count: *batch_count_range
+    stride_scale: [ 1 ]
+    api: [ C, C_64 ]
+
+  - name: geam
+    category: quick
+    function:
+    - geam
+    - geam_batched
+    - geam_strided_batched
+    arguments: *geam_common_args
+    batch_count: *batch_count_range
+    stride_scale: [ 1 ]
+    api: [ C, C_64 ]
+
+  - name: gemmt
+    category: quick
+    function:
+    - gemmt
+    - gemmt_batched
+    - gemmt_strided_batched
+    arguments: *gemmt_common_args
+    batch_count: *batch_count_range
+    stride_scale: [ 1 ]
+    api: [ C, C_64 ]
+
+  - name: hemm
+    category: quick
+    function:
+    - hemm
+    - hemm_batched
+    - hemm_strided_batched
+    arguments: *hemm_common_args
+    batch_count: *batch_count_range
+    stride_scale: [ 1 ]
+    api: [ C, C_64 ]
+
+  - name: herk
+    category: quick
+    function:
+    - herk
+    - herk_batched
+    - herk_strided_batched
+    arguments: *herk_common_args
+    batch_count: *batch_count_range
+    stride_scale: [ 1 ]
+    api: [ C, C_64 ]
+
+  - name: her2k
+    category: quick
+    function:
+    - her2k
+    - her2k_batched
+    - her2k_strided_batched
+    arguments: *her2k_common_args
+    batch_count: *batch_count_range
+    stride_scale: [ 1 ]
+    api: [ C, C_64 ]
+
+  - name: herkx
+    category: quick
+    function:
+    - herkx
+    - herkx_batched
+    - herkx_strided_batched
+    arguments: *herkx_common_args
+    batch_count: *batch_count_range
+    stride_scale: [ 1 ]
+    api: [ C, C_64 ]
+
+  - name: symm
+    category: quick
+    function:
+    - symm
+    - symm_batched
+    - symm_strided_batched
+    arguments: *symm_common_args
+    batch_count: *batch_count_range
+    stride_scale: [ 1 ]
+    api: [ C, C_64 ]
+
+  - name: syrk
+    category: quick
+    function:
+    - syrk
+    - syrk_batched
+    - syrk_strided_batched
+    arguments: *syrk_common_args
+    batch_count: *batch_count_range
+    stride_scale: [ 1 ]
+    api: [ C, C_64 ]
+
+  - name: syr2k
+    category: quick
+    function:
+    - syr2k
+    - syr2k_batched
+    - syr2k_strided_batched
+    arguments: *syr2k_common_args
+    batch_count: *batch_count_range
+    stride_scale: [ 1 ]
+    api: [ C, C_64 ]
+
+  - name: syrkx
+    category: quick
+    function:
+    - syrkx
+    - syrkx_batched
+    - syrkx_strided_batched
+    arguments: *syrkx_common_args
+    batch_count: *batch_count_range
+    stride_scale: [ 1 ]
+    api: [ C, C_64 ]
+
+  - name: trmm
+    category: quick
+    function:
+    - trmm
+    - trmm_batched
+    - trmm_strided_batched
+    arguments: *trmm_common_args
+    batch_count: *batch_count_range
+    stride_scale: [ 1 ]
+    api: [ C, C_64 ]
+
+  - name: trsm
+    category: quick
+    function:
+    - trsm
+    - trsm_batched
+    - trsm_strided_batched
+    arguments: *trsm_common_args
+    batch_count: *batch_count_range
+    stride_scale: [ 1 ]
+    api: [ C, C_64 ]
+
+  - name: trtri
+    category: quick
+    function:
+    - trtri
+    - trtri_batched
+    - trtri_strided_batched
+    arguments: *trtri_common_args
+    batch_count: *batch_count_range
+    stride_scale: [ 1 ]
+    api: [ C, C_64 ]
+
+# gemms
+
+  - name: gemm
+    category: quick
+    function:
+    - gemm
+    - gemm_batched
+    - gemm_strided_batched
+    arguments: *gemm_common_args
+    batch_count: *batch_count_range
+    stride_scale: [ 1 ]
+    api: [ C, C_64 ]
+
+  - name: gemm_ex
+    category: quick
+    function:
+    - gemm_ex
+    - gemm_ex_batched
+    - gemm_ex_strided_batched
+    arguments: *gemm_ex_common_args
+    batch_count: *batch_count_range
+    stride_scale: [ 1 ]
+    api: [ C, C_64 ]
+
+...

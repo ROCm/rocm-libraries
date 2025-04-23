@@ -1,0 +1,140 @@
+---
+include: rocblas_common.yaml
+include: known_bugs.yaml
+
+Definitions:
+  - &invalid_size_range
+    # - { M:  3, N:  3, K:  3, lda: 3, ldb: 3, ldc: 3, ldd: 3, stride_scale: 1, transA: N, transB: N, batch_count: -1 } # batch_count < 0
+    - { M: -1, N:  1, K:  1, lda: 1, ldb: 1, ldc: 1, ldd: 1, stride_scale: 1, transA: N, transB: N } # M < 0
+    - { M:  1, N: -1, K:  1, lda: 1, ldb: 1, ldc: 1, ldd: 1, stride_scale: 1, transA: N, transB: N } # N < 0
+    - { M:  1, N:  1, K: -1, lda: 1, ldb: 1, ldc: 1, ldd: 1, stride_scale: 1, transA: N, transB: N } # K < 0
+    - { M:  2, N:  1, K:  1, lda: 1, ldb: 2, ldc: 2, ldd: 2, stride_scale: 1, transA: N, transB: N } # lda < M, transA = N
+    - { M:  1, N:  1, K:  2, lda: 1, ldb: 2, ldc: 2, ldd: 2, stride_scale: 1, transA: T, transB: N } # lda < K, transA = T
+    - { M:  1, N:  1, K:  2, lda: 2, ldb: 1, ldc: 2, ldd: 2, stride_scale: 1, transA: N, transB: N } # ldb < K, transB = N
+    - { M:  2, N:  2, K:  1, lda: 2, ldb: 1, ldc: 2, ldd: 2, stride_scale: 1, transA: N, transB: T } # ldb < N, transB = T
+    - { M:  2, N:  1, K:  1, lda: 2, ldb: 2, ldc: 1, ldd: 2, stride_scale: 1, transA: N, transB: N } # ldc < M
+    - { M:  2, N:  1, K:  1, lda: 2, ldb: 2, ldc: 2, ldd: 1, stride_scale: 1, transA: N, transB: N } # ldd < M
+
+  - &small_matrix_size_range
+    - { M:     0, N:     1, K: 1,  lda:     1, ldb:     1, ldc:     1, ldd:   1 } # M == 0
+    - { M:     1, N:     0, K: 1,  lda:     1, ldb:     1, ldc:     1, ldd:   1 } # N == 0
+    - { M:   256, N:   128, K: 0,  lda:   256, ldb:   256, ldc:   256, ldd: 256 } # K == 0
+    - { M:     3, N:    33, K: 15, lda:    35, ldb:    35, ldc:    35, ldd:  85 }
+    - { M:    10, N:    11, K: 17, lda:   100, ldb:    12, ldc:    13, ldd:  10 }
+    - { M:     3, N:    33, K: 15, lda:    35, ldb:    35, ldc:    35, ldd:  35 }
+
+  - &large_matrix_size_range
+    - { M:   192, N:   193, lda:   194, ldb:   195, ldc:   196 }
+    - { M:   640, N:   641, lda:   960, ldb:   961, ldc:   961 }
+    - { M:  1001, N:  1000, lda:  1003, ldb:  1002, ldc:  1001 }
+
+  - &huge_matrix_size_range
+    - { M:  4011, N:  4012, lda:  4012, ldb:  4013, ldc:  4014 }
+
+  - &small_alpha_beta_range
+    - { alpha:  0.0, beta:  0.0 }
+    - { alpha:  2.0, beta:  0.0 }
+    - { alpha:  0.0, beta:  2.0 }
+    - { alpha: -3.0, beta: -2.0 }
+
+  - &large_alpha_beta_range
+    - { alpha:  2.0, beta:  0.0 }
+    - { alpha:  0.0, beta:  2.0 }
+    - { alpha: -2.0, beta: -3.0 }
+
+  - &huge_alpha_beta_range
+    - { alpha:  1.0, beta:  3.0 }
+
+  - &transA_transB_range
+    - { transA: [N,T], transB: [N,T] }
+
+  - &tiny_transA_transB_range
+    - { transA: N, transB: N }
+
+
+Tests:
+- name: bad_arg
+  category: quick
+  function: geam_ex_bad_arg
+  precision: *half_single_double_precisions
+  geam_op: [0, 1]
+  api: [ C, FORTRAN ]
+
+- name: geam_ex_invalid_size
+  category: quick
+  function: geam_ex
+  precision: *single_double_precisions
+  matrix_size: *invalid_size_range
+  api: [ C, FORTRAN ]
+  geam_op: [0, 1]
+
+- name: geam_ex_size_t
+  category: stress
+  function: geam_ex
+  precision: *single_precision
+  transA: [ N ]
+  transB: [ N ]
+  matrix_size:
+    - { M: 4, N:     4, K: 51200, lda: 51200, ldb:     4, ldc:     4, ldd:     4 }
+    - { M: 4, N: 51200, K:     4, lda:     4, ldb: 51200, ldc:     4, ldd:     4 }
+    - { M: 4, N: 51200, K:     4, lda:     4, ldb:     4, ldc: 51200, ldd:     4 }
+    - { M: 4, N: 51200, K:     4, lda:     4, ldb:     4, ldc:     4, ldd: 51200}
+  api: C
+  geam_op: [0, 1]
+
+- name: geam_ex_small
+  category: quick
+  function: geam_ex
+  precision: *half_single_double_precisions
+  transA_transB: *transA_transB_range
+  matrix_size: *small_matrix_size_range
+  alpha_beta: *small_alpha_beta_range
+  api: [ C, FORTRAN ]
+  geam_op: [0, 1]
+
+- name: geam_ex_large
+  category: pre_checkin
+  function: geam_ex
+  precision: *half_single_double_precisions
+  transA_transB: *transA_transB_range
+  matrix_size: *large_matrix_size_range
+  alpha_beta: *large_alpha_beta_range
+  geam_op: [0, 1]
+
+- name: geam_ex_huge
+  category: nightly
+  function: geam_ex
+  precision: *half_single_double_precisions
+  transA_transB: *transA_transB_range
+  matrix_size: *huge_matrix_size_range
+  alpha_beta: *huge_alpha_beta_range
+  geam_op: [0, 1]
+
+- name: geam_ex_graph_test
+  category: pre_checkin
+  function: geam_ex
+  precision: *half_single_double_precisions
+  transA_transB: *tiny_transA_transB_range
+  matrix_size:
+    -  { M:     3, N:    33, K: 15, lda:    35, ldb:    35, ldc:    35, ldd:  85 }
+  alpha_beta: *small_alpha_beta_range
+  geam_op: [0, 1]
+  graph_test: true
+
+- name: geam_ex_repeatability_check
+  category: stress
+  function: geam_ex
+  precision: *half_single_double_precisions
+  transA_transB: *tiny_transA_transB_range
+  matrix_size:
+    -  { M:     3, N:    33, K: 15, lda:    35, ldb:    35, ldc:    35, ldd:  85 }
+  alpha_beta: *small_alpha_beta_range
+  geam_op: [0, 1]
+  initialization: hpl
+  pointer_mode_host: false
+  iters: 5
+  atomics_mode : 0
+  devices: 4
+  repeatability_check: true
+
+...

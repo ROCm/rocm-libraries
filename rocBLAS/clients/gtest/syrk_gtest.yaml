@@ -1,0 +1,306 @@
+---
+include: rocblas_common.yaml
+include: known_bugs.yaml
+
+Definitions:
+  - &quick_matrix_size_range
+    - { N:  -1,  lda:   1,  K:  1,  ldc:  1 } # bad n
+    - { N:   2,  lda:   2,  K: -1,  ldc:  1 } # bad k
+    - { N:   0,  lda:   3,  K:  3,  ldc:  3 } # n==0
+    - { N:   3,  lda:   3,  K:  0,  ldc:  3 } # k==0
+    - { N:   3,  lda:   1,  K:  1,  ldc:  3 } # bad lda if not transpose
+    - { N:   1,  lda:   1,  K:  3,  ldc:  3 } # bad lda if transpose
+    - { N:   3,  lda:   3,  K:  3,  ldc:  1 } # bad ldc
+
+  - &tiny_matrix_size
+    - { N:   199, lda:  199, K:  32,   ldc: 199 }
+    #test the kernels which uses only gemm to compute syrk
+    - { N:   2, lda:  501, K:  501,   ldc: 2 }
+
+  - &medium_matrix_size_range
+    - { N:   199, lda:  199, K:  32,   ldc: 199 }
+    - { N:    88, lda:  200, K:  200,  ldc: 88 }
+    #test the kernels which uses only gemm to compute syrk
+    - { N:    51, lda:  201, K:  201,  ldc: 51 }
+    - { N:    601, lda:  806, K:  805,  ldc: 601 }
+
+  - &large_matrix_size_range
+    - { N:  2011, lda:  2011, K:  253, ldc: 2048 }
+    - { N:  5000, lda:  5008, K:  164, ldc: 5000 }
+    #test the kernels which uses only gemm to compute syrk
+    - { N:  601, lda:  2001, K:  2001, ldc: 601 }
+    - { N:  64, lda:  5000, K:  5000, ldc: 64 }
+
+  - &alpha_beta_range
+    - { alpha:  1.5, alphai:  1.5, beta:  0.0, betai: 0.0 }
+    - { alpha: -2.0, alphai:  1.0, beta: -1.0, betai: 0.5 }
+    - { alpha:  0.0, alphai:  0.0, beta:  1.0, betai: 0.0 } # quick success
+    - { alpha:  0.0, alphai:  0.0, beta:  2.0, betai: 0.5 } # scale step only
+
+  - &alpha_beta
+    - { alpha: -1.0, alphai:  0.5, beta: -0.5, betai: 0.5 }
+    # These larger values below on large_matrices require a tolerance rather than equality
+    # due to least significant digit difference CPU to GPU on windows
+    # I expect only accumulation difference from scheduling variation on windows
+    # - { alpha: -2.1, alphai:  1.3, beta: -0.5, betai: 0.6 }
+
+Tests:
+- name: syrk_bad
+  category: quick
+  function:
+  - syrk_bad_arg
+  - syrk_batched_bad_arg
+  - syrk_strided_batched_bad_arg
+  precision: *single_double_precisions_complex_real
+  api: [ C, FORTRAN, FORTRAN_64 ]
+
+# non batched
+
+- name: syrk_size_t_T
+  category: stress
+  function: syrk
+  precision: *single_precision
+  uplo: [ L, U ]
+  transA: [ T ] # A is KxN for tranpose, C is NxN
+  matrix_size:
+    - { N:  51201, ldc: 51201, K:     4, lda:     4 }
+    - { N:  51200, ldc: 51200, K:     8, lda:     8 } # N mod 32 == 0 && k % 8 == 0
+    - { N:  51200, ldc: 51200, K:    16, lda:    16 } # N mod 16 == 0 && k % 16 == 0
+    - { N:  51200, ldc: 51200, K:     7, lda:     7 } # N mod 16 == 0 && k % 16 != 0
+    - { N:      4, ldc:     4, K: 51201, lda: 51201 }
+    - { N:     32, ldc:    32, K: 51200, lda: 51200 } # N mod 32 == 0 && k % 8 == 0
+  alpha_beta:
+    - { alpha:  0.5, alphai:  0.0, beta:  0.5, betai: 0.0 }
+  pointer_mode_host: false
+  gpu_arch: ['90a','942']
+  os_flags: LINUX
+
+- name: syrk_size_t_N
+  category: stress
+  function: syrk
+  precision: *single_precision
+  uplo: [ L, U ]
+  transA: [ N ] # A is NxK, C is NxN
+  matrix_size:
+    - { N:  51201, ldc: 51201, K:     4, lda:     51201 }
+    - { N:  51200, ldc: 51200, K:     8, lda:     51200 } # N mod 32 == 0 && k % 8 == 0
+    - { N:  51200, ldc: 51200, K:    16, lda:     51200 } # N mod 16 == 0 && k % 16 == 0
+    - { N:  51200, ldc: 51200, K:     7, lda:     51200 } # N mod 16 == 0 && k % 16 != 0
+    - { N:      4, ldc:     4, K: 51201, lda: 4         }
+    - { N:     32, ldc:    32, K: 51200, lda: 32        } # N mod 32 == 0 && k % 8 == 0
+  alpha_beta:
+    - { alpha:  0.5, alphai:  0.0, beta:  0.5, betai: 0.0 }
+  pointer_mode_host: false
+  gpu_arch: ['90a','942']
+  os_flags: LINUX
+
+- name: syrk_quick
+  category: quick
+  function: syrk
+  precision: *single_double_precisions_complex
+  uplo: [ U ]
+  transA: [ N, T ]
+  matrix_size: *quick_matrix_size_range
+  alpha: [ 0 ]
+  beta: [ 1 ]
+
+- name: syrk_conj
+  category: quick
+  function: syrk
+  precision: *single_double_precisions # only supported for real types
+  uplo: [ U ]
+  transA: [ C ]
+  matrix_size: *tiny_matrix_size
+  alpha: [ 2.0 ]
+  beta: [ 2.0 ]
+
+- name: syrk_NaN
+  category: pre_checkin
+  function: syrk
+  precision: *single_double_precisions_complex
+  uplo: [ U ]
+  transA: [ N ]
+  matrix_size: *tiny_matrix_size
+  alpha: [ 2.0, .NaN ]  # NaN is converted to 0.0 in test code
+  beta: [ 1.0, .NaN ]
+
+- name: syrk_medium
+  category: pre_checkin
+  function: syrk
+  precision: *single_double_precisions
+  uplo: [ U, L ]
+  transA: [N, T]
+  matrix_size: *medium_matrix_size_range
+  alpha_beta: *alpha_beta_range
+  api: [ C, FORTRAN ]
+
+- name: syrk_large
+  category: nightly
+  function: syrk
+  precision: *single_double_precisions_complex_real
+  uplo: [ L ]
+  transA: [N, T]
+  matrix_size: *large_matrix_size_range
+  alpha_beta: *alpha_beta
+  pointer_mode_host: false
+
+  # batched
+
+- name: syrk_batched_quick
+  category: quick
+  function: syrk_batched
+  precision: *single_double_precisions_complex
+  uplo: [ U ]
+  transA: [ N, T ]
+  matrix_size: *quick_matrix_size_range
+  alpha: [ 0 ]
+  beta: [ 1 ]
+  batch_count: [ 0, 1 ]
+
+- name: syrk_batched_NaN
+  category: pre_checkin
+  function: syrk_batched
+  precision: *double_precision
+  uplo: [ L ]
+  transA: [ N ]
+  matrix_size: *tiny_matrix_size
+  alpha: [ 2.0, .NaN ]  # NaN is converted to 0.0 in test code
+  beta: [ 1.0, .NaN ]
+  batch_count: [ 2 ]
+
+- name: syrk_batched_medium
+  category: pre_checkin
+  function: syrk_batched
+  precision: *single_double_precisions
+  uplo: [ U, L ]
+  transA: [N, T]
+  matrix_size: *medium_matrix_size_range
+  alpha_beta: *alpha_beta_range
+  batch_count: [ 1, 7 ]
+  api: [ C, FORTRAN ]
+
+- name: syrk_batched_large
+  category: nightly
+  function: syrk_batched
+  precision: *single_double_precisions_complex_real
+  uplo: [ U, L ]
+  transA: [N]
+  matrix_size: *large_matrix_size_range
+  alpha_beta: *alpha_beta
+  batch_count: [ 2 ]
+  pointer_mode_device: false
+
+  # strided batched
+
+- name: syrk_strided_batched_quick
+  category: quick
+  function: syrk_strided_batched
+  precision: *single_double_precisions_complex
+  uplo: [ U ]
+  transA: [ N, T ]
+  matrix_size: *quick_matrix_size_range
+  alpha: [ 0 ]
+  beta: [ 1 ]
+  batch_count: [ 0, 1 ]
+
+- name: syrk_strided_batched_NaN
+  category: pre_checkin
+  function: syrk_strided_batched
+  precision: *single_precision
+  uplo: [ U ]
+  transA: [ N ]
+  matrix_size: *tiny_matrix_size
+  alpha: [ 2.0, .NaN ]  # NaN is converted to 0.0 in test code
+  beta: [ 1.0, .NaN ]
+  batch_count: [ 2 ]
+
+- name: syrk_strided_batched_medium
+  category: pre_checkin
+  function: syrk_strided_batched
+  precision: *single_double_precisions
+  uplo: [ U, L ]
+  transA: [N, T]
+  matrix_size: *medium_matrix_size_range
+  alpha_beta: *alpha_beta_range
+  batch_count: [ 1, 7 ]
+  api: [ C, FORTRAN ]
+
+- name: syrk_strided_batched_large
+  category: nightly
+  function: syrk_strided_batched
+  precision: *single_double_precisions_complex_real
+  uplo: [ U, L ]
+  transA: [N]
+  matrix_size: *large_matrix_size_range
+  alpha_beta: *alpha_beta
+  batch_count: [ 2 ]
+  pointer_mode_host: false
+
+- name: syrk_large_batch
+  category: stress
+  uplo: [ U, L ]
+  arguments:
+    - { N:  2, K: 2, lda: 2, ldb: 2, ldc: 2, batch_count: *c_grid_yz_require_passes, transA: T}
+  alpha_beta:
+    - { alpha:  1.0, beta:  1.0 }
+  function:
+    - syrk_batched: *single_precision
+    - syrk_strided_batched: *single_precision
+  stride_scale: 1
+
+- name: syrk_ILP64
+  category: stress
+  uplo: [ U, L ]
+  arguments:
+    #- { N:  1, K:  2147483649,  lda:  1, ldb: 1, batch_count: 1, transA: N } #TODO: Commenting out big tests due to alarm time out
+    #- { N:  1, K:  2147483649,  lda: 2147483649, ldc: 1, batch_count: 1, transA: T } #TODO: Commenting out big tests due to alarm time out
+    - { N:  35, K:  2,  lda:  2147483649, ldc: 36, batch_count: 1, transA: N }
+    - { N:  2, K:  35,  lda: 36, ldb: 2147483649, ldc: 2147483649, batch_count: 1, transA: T }
+    - { N:  2, K: 2, lda: 2, ldc: 2, batch_count: *c_grid_yz_require_passes, transA: T}
+    - { N:  2011, K:  253,  lda:  2011, ldc: 2048, batch_count: 3, transA: N }
+    - { N:  1024, K:  1200, lda:  1200, ldc: 1024, batch_count: 2, transA: T }
+  api: [ C_64 ]
+  alpha_beta:
+    - { alpha:  1.0, beta:  1.0 }
+  os_flags: [ LINUX ]
+  function:
+    - syrk_strided_batched: *single_precision
+  stride_scale: 1
+  #gpu_arch: '9??'
+
+- name: syrk_graph_test
+  category: pre_checkin
+  function:
+    - syrk
+    - syrk_batched
+    - syrk_strided_batched
+  precision: *single_double_precisions
+  uplo: [ L ]
+  transA: [ N, T ]
+  matrix_size:
+    - { N:   199, K:   33,  lda:  199,  ldb: 199,  ldc: 199 }
+  alpha_beta: *alpha_beta_range
+  batch_count: [ 2 ]
+  graph_test: true
+
+- name: syrk_repeatability_check
+  category: stress
+  function:
+    - syrk
+    - syrk_batched
+    - syrk_strided_batched
+  precision: *single_double_precisions
+  pointer_mode_host: false
+  initialization: hpl
+  atomics_mode: 0
+  iters: 5
+  uplo: [ L ]
+  transA: [ N, T ]
+  matrix_size:
+    - { N:   199, K:   33,  lda:  199,  ldb: 199,  ldc: 199 }
+  alpha_beta: *alpha_beta_range
+  batch_count: [ 2 ]
+  stride_scale: 1
+  devices: 4
+  repeatability_check: true
+...

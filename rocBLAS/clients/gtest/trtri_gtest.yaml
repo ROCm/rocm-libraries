@@ -1,0 +1,181 @@
+---
+include: rocblas_common.yaml
+include: known_bugs.yaml
+
+Definitions:
+
+  - &small_matrix_size_range
+    - { N:    -1, lda:    -1 }
+    - { N:     5, lda:   100 }
+    - { N:    15, lda:    16 }
+    - { N:    10, lda:    10 }
+    - { N:    10, lda:    20 }
+    - { N:    20, lda:   160 }
+    - { N:    21, lda:    14 }
+    - { N:    32, lda:    32 }
+    - { N:    48, lda:    48 }
+    - { N:    64, lda:    192 }
+    - { N:    96, lda:    96 }
+
+  - &medium_matrix_size_range
+    - { N:    128, lda:    128 }
+    - { N:    224, lda:    224 }
+    - { N:    256, lda:    256 }
+    - { N:    111, lda:    111 }
+    - { N:    160, lda:    160 }
+    - { N:    181, lda:    181 }
+    - { N:    197, lda:    275 }
+    - { N:    352, lda:    352 }
+    # below needed to test multiple iterations of remainder loop w/ IB = 32
+    - { N:    480, lda:    480 }
+    - { N:    500, lda:    500 }
+    - { N:    736, lda:    736 }
+
+  - &large_matrix_size_range
+    - { N:  357, lda:  400 }
+    - { N:  448, lda:  448 }
+    - { N:  480, lda:  480 }
+    - { N:  511, lda:  512 }
+    - { N:  736, lda:  750 }
+    - { N:  992, lda: 1000 }
+    - { N: 1023, lda: 1023 }
+    - { N: 1024, lda: 1024 }
+    - { N: 1025, lda: 1025 }
+    - { N: 2016, lda: 2016 }
+
+  - &int32_overflow_sizes
+    - { N: 8,     lda: 306783380 } # for rocblas_trtri_small
+    - { N: 737,   lda: 2921750 } # should take all paths in rocblas_trtri_large
+    # - { N: 46976, lda: 46976 } # passed initial tests with increased timeout
+
+Tests:
+- name: trtri_bad_arg
+  category: quick
+  function:
+  - trtri_bad_arg: *single_double_precisions_complex_real
+  - trtri_batched_bad_arg: *single_double_precisions_complex_real
+  - trtri_strided_batched_bad_arg: *single_double_precisions_complex_real
+  uplo: L
+  diag: N
+  api: [ C, FORTRAN ]
+
+- name: trtri_internal
+  category: pre_checkin
+  function:
+    - trtri
+    - trtri_batched
+    - trtri_strided_batched
+  precision: *single_precision
+  uplo: [ U, L ]
+  diag: [ N ]
+  N: [ 9, 736 ]
+  lda: [ 2000 ]
+  ldc: *c_pos_overflow_int32 # ldc, ldd used for internal api offset args
+  ldd: *c_neg_overflow_int32
+  stride_scale: [ 1 ]
+  batch_count: [ 3 ]
+  api: INTERNAL
+
+- name: trtri_quick
+  category: quick
+  function: trtri
+  precision: *single_double_precisions_complex_real
+  uplo: [ U, L ]
+  diag: [ N, U ]
+  matrix_size: *small_matrix_size_range
+  api: [ C, FORTRAN ]
+
+- name: trtri_batched_quick
+  category: quick
+  function:
+    - trtri_batched
+    - trtri_strided_batched
+  precision: *single_double_precisions_complex_real
+  uplo: [ U, L ]
+  diag: [ N, U ]
+  matrix_size: *small_matrix_size_range
+  batch_count: [ -1, 0, 1, 25 ]
+  api: [ C, FORTRAN ]
+
+- name: trtri_pre
+  category: pre_checkin
+  function:
+    - trtri
+    - trtri_batched
+    - trtri_strided_batched
+  precision: *single_double_precisions_complex_real
+  uplo: [ U, L ]
+  diag: [ N, U ]
+  matrix_size: *medium_matrix_size_range
+  batch_count: [ 3 ]
+
+- name: trtri_nightly
+  category: nightly
+  function:
+    - trtri
+    - trtri_batched
+    - trtri_strided_batched
+  precision: *single_double_precisions_complex_real
+  uplo: [ U, L ]
+  diag: [ N, U ]
+  matrix_size: *large_matrix_size_range
+  batch_count: [ 2 ]
+
+- name: trtri_large_batch
+  category: stress
+  arguments:
+    - { N: 3, lda: 3, batch_count: *c_grid_yz_require_passes }
+  uplo: [ U, L ]
+  diag: [ N, U ]
+  stride_scale: [ 1 ]
+  function:
+    - trtri_batched: *single_precision
+    - trtri_strided_batched: *single_precision
+
+- name: trtri_size_t
+  category: stress_trtri
+  function:
+    - trtri
+    # - trtri_batched
+    # - trtri_strided_batched
+  precision: *single_double_precisions_complex_real
+  uplo: [ U, L ]
+  diag: [ N ]
+  matrix_size: *int32_overflow_sizes
+  gpu_arch: ['90a','942']
+  os_flags: LINUX
+
+- name: trtri_graph_test
+  category: pre_checkin
+  function:
+    - trtri
+    - trtri_batched
+    - trtri_strided_batched
+  precision: *single_double_precisions_complex_real
+  uplo: [ L ]
+  diag: [ N ]
+  matrix_size:
+    - { N:    32, lda:    32 }
+  batch_count: [ 2 ]
+  graph_test: true
+
+
+- name: trtri_repeatability_check
+  category: stress
+  function:
+    - trtri
+    - trtri_batched
+    - trtri_strided_batched
+  precision: *single_double_precisions_complex_real
+  uplo: [ L ]
+  diag: [ N ]
+  matrix_size: *medium_matrix_size_range
+  batch_count: [ 2 ]
+  stride_scale: 1
+  atomics_mode: 0
+  pointer_mode_host: false
+  iters: 5
+  initialization: hpl
+  devices: 4
+  repeatability_check: true
+...

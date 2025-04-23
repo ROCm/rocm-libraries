@@ -1,0 +1,16 @@
+# By default, convert all text files to Unix line endings on check-in
+# and native line endings on check-out
+*          text=auto
+
+# Ensure these files are always treated as binary files
+*.pdf      binary
+*.doc      binary
+*.docx     binary
+*.ppt      binary
+*.pptx     binary
+*.xls      binary
+*.xlsx     binary
+*.xps      binary
+
+# Reduce CHANGELOG merge conflicts
+/CHANGELOG.md  merge=union

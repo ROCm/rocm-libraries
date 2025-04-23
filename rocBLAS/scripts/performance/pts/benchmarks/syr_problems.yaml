@@ -1,0 +1,19 @@
+---
+include: ../../../../clients/include/rocblas_common.yaml
+
+Definitions:
+  - &scan_power_2
+    - { scan: [ 1024..8192..1024], N: *c_scan_value, lda: *c_scan_value }
+
+Tests:
+  - name: syr_scal_power_2
+    category: bench
+    function: syr
+    precision: *single_precision
+    alpha: 1
+    uplo: [ U ]
+    incx: 1
+    incy: 1
+    matrix_size: *scan_power_2
+    iters: 20
+...

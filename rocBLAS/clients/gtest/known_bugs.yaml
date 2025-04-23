@@ -1,0 +1,22 @@
+# A list of known bugs/failures. The bug can be specific or general.
+# A test case is considered as matching if all indicated parameters match.
+# Wildcards can be used for the function
+# Arguments listed from a FAILED gtest test line can be used to specify the known bug, # with the exception
+# of the arguments: name, category, and known_bug_platforms: ""
+# If only failing on a single GPU arch then set the known_bug_platform, eg. known_bug_platform: gfx908
+# You cannot use the logging output from ROCBLAS_LAYER=4 to specify the test.
+# It is more efficient to only specify the minimal number of arguments to match the failed test, i.e. exclude arguments listing default or unused values.
+
+Known bugs:
+
+# example to flag all rotmg* variants (non-batched, batched, strided_batched) with a_type: f32_r as known_bug so can be filtered out
+# by --gtest_filter=-*known_bug* as name gets suffix _known_bug appended
+# - { function: rotmg*, a_type: f32_r}
+
+# examples of earlier known bugs
+#- { function: gemm_strided_batched, alpha: 1.0, alphai: 0.0, beta: 0.0, betai: 0.0, stride_a: 50176, stride_b: 0, stride_c: 200704, stride_d: 200704, M: 196, N: 1024, K: 256, lda: 196, ldb: 1024, ldc: 196, ldd: 196, batch_count: 2, a_type: f32_r, b_type: f32_r, c_type: f32_r, d_type: f32_r, compute_type: f32_r }
+#- { function: gemm_strided_batched_ex, alpha: 1.0, alphai: 0.0, beta: 0.0, betai: 0.0, stride_a: 50176, stride_b: 0, stride_c: 200704, stride_d: 200704, M: 196, N: 1024, K: 256, lda: 196, ldb: 1024, ldc: 196, ldd: 196, batch_count: 2, a_type: f32_r, b_type: f32_r, c_type: f32_r, d_type: f32_r, compute_type: f32_r }
+#- { function: gemm_ex, a_type: bf16_r, b_type: bf16_r, c_type: bf16k_r, d_type: bf16_r, compute_type: f32_r, transA: C, transB: N, M: 512, N: 512, K: 512, lda: 512, ldb: 512, ldc: 512, ldd: 512, alpha: 5.0, alphai: 0.0, beta: 0.0, betai: 0.0, known_bug_platforms: gfx908 }
+#- { function: gemm, a_type: f16_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, transA: N, transB: N, M: 3136, N: 256, K: 256, lda: 3136, ldb: 256, ldc: 3136, ldd: 3136, alpha: 1.0, alphai: 0.0, beta: 0.0, betai: 0.0 }
+
+# current known bugs list below (tests should only be listed here for the short term)

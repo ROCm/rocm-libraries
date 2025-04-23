@@ -1,0 +1,146 @@
+#!/bin/bash
+
+- { rocblas_function: "rocblas_sgemm_strided_batched", transA: 'N', transB: 'T', M: 64, N: 512, K: 512, lda: 64, stride_a: 32768, ldb: 512, stride_b: 262144, ldc: 64, stride_c: 32768, batch_count: 128, call_count: 240 }
+- { rocblas_function: "rocblas_sgemm_strided_batched", transA: 'N', transB: 'T', M: 512, N: 64, K: 512, lda: 512, stride_a: 262144, ldb: 64, stride_b: 32768, ldc: 512, stride_c: 32768, batch_count: 128, call_count: 240 }
+- { rocblas_function: "rocblas_sgemm_strided_batched", transA: 'T', transB: 'N', M: 512, N: 512, K: 64, lda: 64, stride_a: 32768, ldb: 64, stride_b: 32768, ldc: 512, stride_c: 262144, batch_count: 128, call_count: 240 }
+- { rocblas_function: "rocblas_sgemm_strided_batched", transA: 'N', transB: 'N', M: 512, N: 512, K: 64, lda: 512, stride_a: 32768, ldb: 64, stride_b: 32768, ldc: 512, stride_c: 262144, batch_count: 128, call_count: 264 }
+- { rocblas_function: "rocblas_sgemm_strided_batched", transA: 'T', transB: 'N', M: 64, N: 512, K: 512, lda: 512, stride_a: 32768, ldb: 512, stride_b: 262144, ldc: 64, stride_c: 32768, batch_count: 128, call_count: 240 }
+- { rocblas_function: "rocblas_sgemm_strided_batched", transA: 'N', transB: 'N', M: 64, N: 512, K: 512, lda: 64, stride_a: 32768, ldb: 512, stride_b: 262144, ldc: 64, stride_c: 32768, batch_count: 128, call_count: 264 }
+- { rocblas_function: "rocblas_sgemm", transA: 'N', transB: 'T', M: 30528, N: 1024, K: 4096, lda: 30528, ldb: 1024, ldc: 30528, call_count: 10 }
+- { rocblas_function: "rocblas_sgemm", transA: 'N', transB: 'T', M: 4096, N: 1024, K: 4096, lda: 4096, ldb: 1024, ldc: 4096, call_count: 240 }
+- { rocblas_function: "rocblas_sgemm", transA: 'T', transB: 'N', M: 30528, N: 4096, K: 1024, lda: 1024, ldb: 1024, ldc: 30528, call_count: 11 }
+- { rocblas_function: "rocblas_sgemm", transA: 'N', transB: 'N', M: 1024, N: 8, K: 2, lda: 1024, ldb: 2, ldc: 1024, call_count: 10 }
+- { rocblas_function: "rocblas_sgemm", transA: 'N', transB: 'N', M: 1024, N: 4096, K: 4096, lda: 1024, ldb: 4096, ldc: 1024, call_count: 264 }
+- { rocblas_function: "rocblas_sgemm", transA: 'N', transB: 'T', M: 1024, N: 1024, K: 4096, lda: 1024, ldb: 1024, ldc: 1024, call_count: 970 }
+- { rocblas_function: "rocblas_sgemm", transA: 'N', transB: 'N', M: 1024, N: 4096, K: 1024, lda: 1024, ldb: 1024, ldc: 1024, call_count: 1067 }
+- { rocblas_function: "rocblas_sgemm", transA: 'N', transB: 'T', M: 1024, N: 1024, K: 8, lda: 1024, ldb: 1024, ldc: 1024, call_count: 10 }
+- { rocblas_function: "rocblas_sgemm", transA: 'N', transB: 'T', M: 1024, N: 2, K: 8, lda: 1024, ldb: 2, ldc: 1024, call_count: 10 }
+- { rocblas_function: "rocblas_sgemm", transA: 'N', transB: 'N', M: 1024, N: 8, K: 1024, lda: 1024, ldb: 1024, ldc: 1024, call_count: 11 }
+- { rocblas_function: "rocblas_sgemm", transA: 'T', transB: 'N', M: 1024, N: 4096, K: 4096, lda: 4096, ldb: 4096, ldc: 1024, call_count: 240 }
+- { rocblas_function: "rocblas_sgemm", transA: 'N', transB: 'N', M: 1024, N: 4096, K: 30528, lda: 1024, ldb: 30528, ldc: 1024, call_count: 10 }
+- { rocblas_function: "rocblas_sgemm", transA: 'T', transB: 'N', M: 2, N: 8, K: 1024, lda: 1024, ldb: 1024, ldc: 2, call_count: 11 }
+- { rocblas_function: "rocblas_sgemm", transA: 'T', transB: 'N', M: 1024, N: 8, K: 1024, lda: 1024, ldb: 1024, ldc: 1024, call_count: 10 }
+- { rocblas_function: "rocblas_sgemm", transA: 'N', transB: 'N', M: 4096, N: 4096, K: 1024, lda: 4096, ldb: 1024, ldc: 4096, call_count: 264 }
+- { rocblas_function: "rocblas_sgemm", transA: 'T', transB: 'N', M: 1024, N: 4096, K: 1024, lda: 1024, ldb: 1024, ldc: 1024, call_count: 970 }
+- { rocblas_function: "rocblas_sgemm", transA: 'T', transB: 'N', M: 4096, N: 4096, K: 1024, lda: 1024, ldb: 1024, ldc: 4096, call_count: 240 }
+- { rocblas_function: "rocblas_sgemm", transA: 'N', transB: 'T', M: 1024, N: 4096, K: 4096, lda: 1024, ldb: 4096, ldc: 1024, call_count: 240 }
+- { rocblas_function: "rocblas_sgemm_strided_batched", transA: 'N', transB: 'T', M: 64, N: 512, K: 512, lda: 64, stride_a: 32768, ldb: 512, stride_b: 262144, ldc: 64, stride_c: 32768, batch_count: 192, call_count: 240 }
+- { rocblas_function: "rocblas_sgemm_strided_batched", transA: 'T', transB: 'N', M: 64, N: 512, K: 512, lda: 512, stride_a: 32768, ldb: 512, stride_b: 262144, ldc: 64, stride_c: 32768, batch_count: 192, call_count: 240 }
+- { rocblas_function: "rocblas_sgemm_strided_batched", transA: 'T', transB: 'N', M: 512, N: 512, K: 64, lda: 64, stride_a: 32768, ldb: 64, stride_b: 32768, ldc: 512, stride_c: 262144, batch_count: 192, call_count: 240 }
+- { rocblas_function: "rocblas_sgemm_strided_batched", transA: 'N', transB: 'T', M: 512, N: 64, K: 512, lda: 512, stride_a: 262144, ldb: 64, stride_b: 32768, ldc: 512, stride_c: 32768, batch_count: 192, call_count: 240 }
+- { rocblas_function: "rocblas_sgemm_strided_batched", transA: 'N', transB: 'N', M: 512, N: 512, K: 64, lda: 512, stride_a: 32768, ldb: 64, stride_b: 32768, ldc: 512, stride_c: 262144, batch_count: 192, call_count: 264 }
+- { rocblas_function: "rocblas_sgemm_strided_batched", transA: 'N', transB: 'N', M: 64, N: 512, K: 512, lda: 64, stride_a: 32768, ldb: 512, stride_b: 262144, ldc: 64, stride_c: 32768, batch_count: 192, call_count: 264 }
+- { rocblas_function: "rocblas_sgemm", transA: 'T', transB: 'N', M: 1024, N: 12, K: 1024, lda: 1024, ldb: 1024, ldc: 1024, call_count: 10 }
+- { rocblas_function: "rocblas_sgemm", transA: 'N', transB: 'T', M: 1024, N: 4096, K: 6144, lda: 1024, ldb: 4096, ldc: 1024, call_count: 240 }
+- { rocblas_function: "rocblas_sgemm", transA: 'N', transB: 'T', M: 30528, N: 1024, K: 6144, lda: 30528, ldb: 1024, ldc: 30528, call_count: 10 }
+- { rocblas_function: "rocblas_sgemm", transA: 'T', transB: 'N', M: 30528, N: 6144, K: 1024, lda: 1024, ldb: 1024, ldc: 30528, call_count: 11 }
+- { rocblas_function: "rocblas_sgemm", transA: 'T', transB: 'N', M: 2, N: 12, K: 1024, lda: 1024, ldb: 1024, ldc: 2, call_count: 11 }
+- { rocblas_function: "rocblas_sgemm", transA: 'N', transB: 'N', M: 1024, N: 6144, K: 30528, lda: 1024, ldb: 30528, ldc: 1024, call_count: 10 }
+- { rocblas_function: "rocblas_sgemm", transA: 'N', transB: 'T', M: 4096, N: 1024, K: 6144, lda: 4096, ldb: 1024, ldc: 4096, call_count: 240 }
+- { rocblas_function: "rocblas_sgemm", transA: 'T', transB: 'N', M: 4096, N: 6144, K: 1024, lda: 1024, ldb: 1024, ldc: 4096, call_count: 240 }
+- { rocblas_function: "rocblas_sgemm", transA: 'N', transB: 'N', M: 1024, N: 6144, K: 4096, lda: 1024, ldb: 4096, ldc: 1024, call_count: 264 }
+- { rocblas_function: "rocblas_sgemm", transA: 'N', transB: 'N', M: 1024, N: 6144, K: 1024, lda: 1024, ldb: 1024, ldc: 1024, call_count: 1067 }
+- { rocblas_function: "rocblas_sgemm", transA: 'N', transB: 'N', M: 1024, N: 12, K: 1024, lda: 1024, ldb: 1024, ldc: 1024, call_count: 11 }
+- { rocblas_function: "rocblas_sgemm", transA: 'N', transB: 'N', M: 4096, N: 6144, K: 1024, lda: 4096, ldb: 1024, ldc: 4096, call_count: 264 }
+- { rocblas_function: "rocblas_sgemm", transA: 'N', transB: 'T', M: 1024, N: 1024, K: 12, lda: 1024, ldb: 1024, ldc: 1024, call_count: 10 }
+- { rocblas_function: "rocblas_sgemm", transA: 'N', transB: 'T', M: 1024, N: 2, K: 12, lda: 1024, ldb: 2, ldc: 1024, call_count: 10 }
+- { rocblas_function: "rocblas_sgemm", transA: 'N', transB: 'N', M: 1024, N: 12, K: 2, lda: 1024, ldb: 2, ldc: 1024, call_count: 10 }
+- { rocblas_function: "rocblas_sgemm", transA: 'T', transB: 'N', M: 1024, N: 6144, K: 1024, lda: 1024, ldb: 1024, ldc: 1024, call_count: 970 }
+- { rocblas_function: "rocblas_sgemm", transA: 'N', transB: 'T', M: 1024, N: 1024, K: 6144, lda: 1024, ldb: 1024, ldc: 1024, call_count: 970 }
+- { rocblas_function: "rocblas_sgemm", transA: 'T', transB: 'N', M: 1024, N: 6144, K: 4096, lda: 4096, ldb: 4096, ldc: 1024, call_count: 240 }
+- { rocblas_function: "rocblas_sgemm_strided_batched", transA: 'N', transB: 'T', M: 64, N: 128, K: 128, lda: 64, stride_a: 8192, ldb: 128, stride_b: 16384, ldc: 64, stride_c: 8192, batch_count: 1312, call_count: 240 }
+- { rocblas_function: "rocblas_sgemm_strided_batched", transA: 'T', transB: 'N', M: 64, N: 128, K: 128, lda: 128, stride_a: 8192, ldb: 128, stride_b: 16384, ldc: 64, stride_c: 8192, batch_count: 1312, call_count: 240 }
+- { rocblas_function: "rocblas_sgemm_strided_batched", transA: 'N', transB: 'T', M: 128, N: 64, K: 128, lda: 128, stride_a: 16384, ldb: 64, stride_b: 8192, ldc: 128, stride_c: 8192, batch_count: 1312, call_count: 240 }
+- { rocblas_function: "rocblas_sgemm_strided_batched", transA: 'T', transB: 'N', M: 128, N: 128, K: 64, lda: 64, stride_a: 8192, ldb: 64, stride_b: 8192, ldc: 128, stride_c: 16384, batch_count: 1312, call_count: 240 }
+- { rocblas_function: "rocblas_sgemm_strided_batched", transA: 'N', transB: 'N', M: 128, N: 128, K: 64, lda: 128, stride_a: 8192, ldb: 64, stride_b: 8192, ldc: 128, stride_c: 16384, batch_count: 1312, call_count: 264 }
+- { rocblas_function: "rocblas_sgemm_strided_batched", transA: 'N', transB: 'N', M: 64, N: 128, K: 128, lda: 64, stride_a: 8192, ldb: 128, stride_b: 16384, ldc: 64, stride_c: 8192, batch_count: 1312, call_count: 264 }
+- { rocblas_function: "rocblas_sgemm", transA: 'N', transB: 'T', M: 4096, N: 1024, K: 10496, lda: 4096, ldb: 1024, ldc: 4096, call_count: 240 }
+- { rocblas_function: "rocblas_sgemm", transA: 'N', transB: 'T', M: 1024, N: 1024, K: 10496, lda: 1024, ldb: 1024, ldc: 1024, call_count: 970 }
+- { rocblas_function: "rocblas_sgemm", transA: 'T', transB: 'N', M: 1024, N: 10496, K: 4096, lda: 4096, ldb: 4096, ldc: 1024, call_count: 240 }
+- { rocblas_function: "rocblas_sgemm", transA: 'N', transB: 'N', M: 1024, N: 10496, K: 4096, lda: 1024, ldb: 4096, ldc: 1024, call_count: 264 }
+- { rocblas_function: "rocblas_sgemm", transA: 'T', transB: 'N', M: 1024, N: 82, K: 1024, lda: 1024, ldb: 1024, ldc: 1024, call_count: 10 }
+- { rocblas_function: "rocblas_sgemm", transA: 'N', transB: 'N', M: 1024, N: 10496, K: 1024, lda: 1024, ldb: 1024, ldc: 1024, call_count: 1067 }
+- { rocblas_function: "rocblas_sgemm", transA: 'N', transB: 'N', M: 1024, N: 82, K: 1024, lda: 1024, ldb: 1024, ldc: 1024, call_count: 11 }
+- { rocblas_function: "rocblas_sgemm", transA: 'N', transB: 'N', M: 4096, N: 10496, K: 1024, lda: 4096, ldb: 1024, ldc: 4096, call_count: 264 }
+- { rocblas_function: "rocblas_sgemm", transA: 'N', transB: 'N', M: 1024, N: 10496, K: 30528, lda: 1024, ldb: 30528, ldc: 1024, call_count: 10 }
+- { rocblas_function: "rocblas_sgemm", transA: 'N', transB: 'N', M: 1024, N: 82, K: 2, lda: 1024, ldb: 2, ldc: 1024, call_count: 10 }
+- { rocblas_function: "rocblas_sgemm", transA: 'N', transB: 'T', M: 1024, N: 4096, K: 10496, lda: 1024, ldb: 4096, ldc: 1024, call_count: 240 }
+- { rocblas_function: "rocblas_sgemm", transA: 'N', transB: 'T', M: 30528, N: 1024, K: 10496, lda: 30528, ldb: 1024, ldc: 30528, call_count: 10 }
+- { rocblas_function: "rocblas_sgemm", transA: 'T', transB: 'N', M: 30528, N: 10496, K: 1024, lda: 1024, ldb: 1024, ldc: 30528, call_count: 11 }
+- { rocblas_function: "rocblas_sgemm", transA: 'N', transB: 'T', M: 1024, N: 2, K: 82, lda: 1024, ldb: 2, ldc: 1024, call_count: 10 }
+- { rocblas_function: "rocblas_sgemm", transA: 'N', transB: 'T', M: 1024, N: 1024, K: 82, lda: 1024, ldb: 1024, ldc: 1024, call_count: 10 }
+- { rocblas_function: "rocblas_sgemm", transA: 'T', transB: 'N', M: 1024, N: 10496, K: 1024, lda: 1024, ldb: 1024, ldc: 1024, call_count: 970 }
+- { rocblas_function: "rocblas_sgemm", transA: 'T', transB: 'N', M: 2, N: 82, K: 1024, lda: 1024, ldb: 1024, ldc: 2, call_count: 11 }
+- { rocblas_function: "rocblas_sgemm", transA: 'T', transB: 'N', M: 4096, N: 10496, K: 1024, lda: 1024, ldb: 1024, ldc: 4096, call_count: 240 }
+- { rocblas_function: "rocblas_sgemm_strided_batched", transA: 'N', transB: 'T', M: 64, N: 128, K: 128, lda: 64, stride_a: 8192, ldb: 128, stride_b: 16384, ldc: 64, stride_c: 8192, batch_count: 1280, call_count: 240 }
+- { rocblas_function: "rocblas_sgemm_strided_batched", transA: 'N', transB: 'T', M: 128, N: 64, K: 128, lda: 128, stride_a: 16384, ldb: 64, stride_b: 8192, ldc: 128, stride_c: 8192, batch_count: 1280, call_count: 240 }
+- { rocblas_function: "rocblas_sgemm_strided_batched", transA: 'T', transB: 'N', M: 128, N: 128, K: 64, lda: 64, stride_a: 8192, ldb: 64, stride_b: 8192, ldc: 128, stride_c: 16384, batch_count: 1280, call_count: 240 }
+- { rocblas_function: "rocblas_sgemm_strided_batched", transA: 'N', transB: 'N', M: 128, N: 128, K: 64, lda: 128, stride_a: 8192, ldb: 64, stride_b: 8192, ldc: 128, stride_c: 16384, batch_count: 1280, call_count: 264 }
+- { rocblas_function: "rocblas_sgemm_strided_batched", transA: 'T', transB: 'N', M: 64, N: 128, K: 128, lda: 128, stride_a: 8192, ldb: 128, stride_b: 16384, ldc: 64, stride_c: 8192, batch_count: 1280, call_count: 240 }
+- { rocblas_function: "rocblas_sgemm_strided_batched", transA: 'N', transB: 'N', M: 64, N: 128, K: 128, lda: 64, stride_a: 8192, ldb: 128, stride_b: 16384, ldc: 64, stride_c: 8192, batch_count: 1280, call_count: 264 }
+- { rocblas_function: "rocblas_sgemm", transA: 'N', transB: 'N', M: 1024, N: 80, K: 1024, lda: 1024, ldb: 1024, ldc: 1024, call_count: 11 }
+- { rocblas_function: "rocblas_sgemm", transA: 'N', transB: 'N', M: 1024, N: 10240, K: 4096, lda: 1024, ldb: 4096, ldc: 1024, call_count: 264 }
+- { rocblas_function: "rocblas_sgemm", transA: 'N', transB: 'N', M: 1024, N: 10240, K: 1024, lda: 1024, ldb: 1024, ldc: 1024, call_count: 1067 }
+- { rocblas_function: "rocblas_sgemm", transA: 'N', transB: 'T', M: 30528, N: 1024, K: 10240, lda: 30528, ldb: 1024, ldc: 30528, call_count: 10 }
+- { rocblas_function: "rocblas_sgemm", transA: 'N', transB: 'T', M: 4096, N: 1024, K: 10240, lda: 4096, ldb: 1024, ldc: 4096, call_count: 240 }
+- { rocblas_function: "rocblas_sgemm", transA: 'N', transB: 'N', M: 4096, N: 10240, K: 1024, lda: 4096, ldb: 1024, ldc: 4096, call_count: 264 }
+- { rocblas_function: "rocblas_sgemm", transA: 'N', transB: 'T', M: 1024, N: 2, K: 80, lda: 1024, ldb: 2, ldc: 1024, call_count: 10 }
+- { rocblas_function: "rocblas_sgemm", transA: 'T', transB: 'N', M: 30528, N: 10240, K: 1024, lda: 1024, ldb: 1024, ldc: 30528, call_count: 11 }
+- { rocblas_function: "rocblas_sgemm", transA: 'N', transB: 'N', M: 1024, N: 10240, K: 30528, lda: 1024, ldb: 30528, ldc: 1024, call_count: 10 }
+- { rocblas_function: "rocblas_sgemm", transA: 'T', transB: 'N', M: 2, N: 80, K: 1024, lda: 1024, ldb: 1024, ldc: 2, call_count: 11 }
+- { rocblas_function: "rocblas_sgemm", transA: 'T', transB: 'N', M: 1024, N: 10240, K: 1024, lda: 1024, ldb: 1024, ldc: 1024, call_count: 970 }
+- { rocblas_function: "rocblas_sgemm", transA: 'N', transB: 'T', M: 1024, N: 1024, K: 10240, lda: 1024, ldb: 1024, ldc: 1024, call_count: 970 }
+- { rocblas_function: "rocblas_sgemm", transA: 'T', transB: 'N', M: 4096, N: 10240, K: 1024, lda: 1024, ldb: 1024, ldc: 4096, call_count: 240 }
+- { rocblas_function: "rocblas_sgemm", transA: 'N', transB: 'N', M: 1024, N: 80, K: 2, lda: 1024, ldb: 2, ldc: 1024, call_count: 10 }
+- { rocblas_function: "rocblas_sgemm", transA: 'N', transB: 'T', M: 1024, N: 1024, K: 80, lda: 1024, ldb: 1024, ldc: 1024, call_count: 10 }
+- { rocblas_function: "rocblas_sgemm", transA: 'T', transB: 'N', M: 1024, N: 80, K: 1024, lda: 1024, ldb: 1024, ldc: 1024, call_count: 10 }
+- { rocblas_function: "rocblas_sgemm", transA: 'T', transB: 'N', M: 1024, N: 10240, K: 4096, lda: 4096, ldb: 4096, ldc: 1024, call_count: 240 }
+- { rocblas_function: "rocblas_sgemm", transA: 'N', transB: 'T', M: 1024, N: 4096, K: 10240, lda: 1024, ldb: 4096, ldc: 1024, call_count: 240 }
+- { rocblas_function: "rocblas_sgemm_strided_batched", transA: 'T', transB: 'N', M: 64, N: 128, K: 128, lda: 128, stride_a: 8192, ldb: 128, stride_b: 16384, ldc: 64, stride_c: 8192, batch_count: 1024, call_count: 240 }
+- { rocblas_function: "rocblas_sgemm_strided_batched", transA: 'N', transB: 'T', M: 128, N: 64, K: 128, lda: 128, stride_a: 16384, ldb: 64, stride_b: 8192, ldc: 128, stride_c: 8192, batch_count: 1024, call_count: 240 }
+- { rocblas_function: "rocblas_sgemm_strided_batched", transA: 'N', transB: 'T', M: 64, N: 128, K: 128, lda: 64, stride_a: 8192, ldb: 128, stride_b: 16384, ldc: 64, stride_c: 8192, batch_count: 1024, call_count: 240 }
+- { rocblas_function: "rocblas_sgemm_strided_batched", transA: 'T', transB: 'N', M: 128, N: 128, K: 64, lda: 64, stride_a: 8192, ldb: 64, stride_b: 8192, ldc: 128, stride_c: 16384, batch_count: 1024, call_count: 240 }
+- { rocblas_function: "rocblas_sgemm_strided_batched", transA: 'N', transB: 'N', M: 128, N: 128, K: 64, lda: 128, stride_a: 8192, ldb: 64, stride_b: 8192, ldc: 128, stride_c: 16384, batch_count: 1024, call_count: 264 }
+- { rocblas_function: "rocblas_sgemm_strided_batched", transA: 'N', transB: 'N', M: 64, N: 128, K: 128, lda: 64, stride_a: 8192, ldb: 128, stride_b: 16384, ldc: 64, stride_c: 8192, batch_count: 1024, call_count: 264 }
+- { rocblas_function: "rocblas_sgemm", transA: 'N', transB: 'T', M: 4096, N: 1024, K: 8192, lda: 4096, ldb: 1024, ldc: 4096, call_count: 240 }
+- { rocblas_function: "rocblas_sgemm", transA: 'T', transB: 'N', M: 30528, N: 8192, K: 1024, lda: 1024, ldb: 1024, ldc: 30528, call_count: 11 }
+- { rocblas_function: "rocblas_sgemm", transA: 'T', transB: 'N', M: 4096, N: 8192, K: 1024, lda: 1024, ldb: 1024, ldc: 4096, call_count: 240 }
+- { rocblas_function: "rocblas_sgemm", transA: 'N', transB: 'N', M: 1024, N: 64, K: 1024, lda: 1024, ldb: 1024, ldc: 1024, call_count: 11 }
+- { rocblas_function: "rocblas_sgemm", transA: 'N', transB: 'N', M: 1024, N: 8192, K: 4096, lda: 1024, ldb: 4096, ldc: 1024, call_count: 264 }
+- { rocblas_function: "rocblas_sgemm", transA: 'T', transB: 'N', M: 2, N: 64, K: 1024, lda: 1024, ldb: 1024, ldc: 2, call_count: 11 }
+- { rocblas_function: "rocblas_sgemm", transA: 'T', transB: 'N', M: 1024, N: 8192, K: 4096, lda: 4096, ldb: 4096, ldc: 1024, call_count: 240 }
+- { rocblas_function: "rocblas_sgemm", transA: 'N', transB: 'N', M: 1024, N: 8192, K: 1024, lda: 1024, ldb: 1024, ldc: 1024, call_count: 1067 }
+- { rocblas_function: "rocblas_sgemm", transA: 'N', transB: 'T', M: 1024, N: 2, K: 64, lda: 1024, ldb: 2, ldc: 1024, call_count: 10 }
+- { rocblas_function: "rocblas_sgemm", transA: 'T', transB: 'N', M: 1024, N: 8192, K: 1024, lda: 1024, ldb: 1024, ldc: 1024, call_count: 970 }
+- { rocblas_function: "rocblas_sgemm", transA: 'N', transB: 'N', M: 1024, N: 8192, K: 30528, lda: 1024, ldb: 30528, ldc: 1024, call_count: 10 }
+- { rocblas_function: "rocblas_sgemm", transA: 'N', transB: 'N', M: 4096, N: 8192, K: 1024, lda: 4096, ldb: 1024, ldc: 4096, call_count: 264 }
+- { rocblas_function: "rocblas_sgemm", transA: 'N', transB: 'N', M: 1024, N: 64, K: 2, lda: 1024, ldb: 2, ldc: 1024, call_count: 10 }
+- { rocblas_function: "rocblas_sgemm", transA: 'N', transB: 'T', M: 30528, N: 1024, K: 8192, lda: 30528, ldb: 1024, ldc: 30528, call_count: 10 }
+- { rocblas_function: "rocblas_sgemm", transA: 'N', transB: 'T', M: 1024, N: 1024, K: 8192, lda: 1024, ldb: 1024, ldc: 1024, call_count: 970 }
+- { rocblas_function: "rocblas_sgemm", transA: 'N', transB: 'T', M: 1024, N: 1024, K: 64, lda: 1024, ldb: 1024, ldc: 1024, call_count: 10 }
+- { rocblas_function: "rocblas_sgemm", transA: 'T', transB: 'N', M: 1024, N: 64, K: 1024, lda: 1024, ldb: 1024, ldc: 1024, call_count: 10 }
+- { rocblas_function: "rocblas_sgemm", transA: 'N', transB: 'T', M: 1024, N: 4096, K: 8192, lda: 1024, ldb: 4096, ldc: 1024, call_count: 240 }
+- { rocblas_function: "rocblas_sgemm_strided_batched", transA: 'N', transB: 'T', M: 64, N: 128, K: 128, lda: 64, stride_a: 8192, ldb: 128, stride_b: 16384, ldc: 64, stride_c: 8192, batch_count: 512, call_count: 240 }
+- { rocblas_function: "rocblas_sgemm_strided_batched", transA: 'T', transB: 'N', M: 64, N: 128, K: 128, lda: 128, stride_a: 8192, ldb: 128, stride_b: 16384, ldc: 64, stride_c: 8192, batch_count: 512, call_count: 240 }
+- { rocblas_function: "rocblas_sgemm_strided_batched", transA: 'N', transB: 'T', M: 128, N: 64, K: 128, lda: 128, stride_a: 16384, ldb: 64, stride_b: 8192, ldc: 128, stride_c: 8192, batch_count: 512, call_count: 240 }
+- { rocblas_function: "rocblas_sgemm_strided_batched", transA: 'T', transB: 'N', M: 128, N: 128, K: 64, lda: 64, stride_a: 8192, ldb: 64, stride_b: 8192, ldc: 128, stride_c: 16384, batch_count: 512, call_count: 240 }
+- { rocblas_function: "rocblas_sgemm_strided_batched", transA: 'N', transB: 'N', M: 128, N: 128, K: 64, lda: 128, stride_a: 8192, ldb: 64, stride_b: 8192, ldc: 128, stride_c: 16384, batch_count: 512, call_count: 264 }
+- { rocblas_function: "rocblas_sgemm_strided_batched", transA: 'N', transB: 'N', M: 64, N: 128, K: 128, lda: 64, stride_a: 8192, ldb: 128, stride_b: 16384, ldc: 64, stride_c: 8192, batch_count: 512, call_count: 264 }
+- { rocblas_function: "rocblas_sgemm", transA: 'N', transB: 'T', M: 4096, N: 1024, K: 4096, lda: 4096, ldb: 1024, ldc: 4096, call_count: 240 }
+- { rocblas_function: "rocblas_sgemm", transA: 'T', transB: 'N', M: 2, N: 32, K: 1024, lda: 1024, ldb: 1024, ldc: 2, call_count: 11 }
+- { rocblas_function: "rocblas_sgemm", transA: 'T', transB: 'N', M: 1024, N: 4096, K: 4096, lda: 4096, ldb: 4096, ldc: 1024, call_count: 240 }
+- { rocblas_function: "rocblas_sgemm", transA: 'N', transB: 'N', M: 1024, N: 32, K: 1024, lda: 1024, ldb: 1024, ldc: 1024, call_count: 11 }
+- { rocblas_function: "rocblas_sgemm", transA: 'T', transB: 'N', M: 30528, N: 4096, K: 1024, lda: 1024, ldb: 1024, ldc: 30528, call_count: 11 }
+- { rocblas_function: "rocblas_sgemm", transA: 'N', transB: 'N', M: 1024, N: 4096, K: 4096, lda: 1024, ldb: 4096, ldc: 1024, call_count: 264 }
+- { rocblas_function: "rocblas_sgemm", transA: 'N', transB: 'T', M: 1024, N: 1024, K: 4096, lda: 1024, ldb: 1024, ldc: 1024, call_count: 970 }
+- { rocblas_function: "rocblas_sgemm", transA: 'N', transB: 'N', M: 1024, N: 4096, K: 1024, lda: 1024, ldb: 1024, ldc: 1024, call_count: 1067 }
+- { rocblas_function: "rocblas_sgemm", transA: 'N', transB: 'T', M: 30528, N: 1024, K: 4096, lda: 30528, ldb: 1024, ldc: 30528, call_count: 10 }
+- { rocblas_function: "rocblas_sgemm", transA: 'N', transB: 'T', M: 1024, N: 2, K: 32, lda: 1024, ldb: 2, ldc: 1024, call_count: 10 }
+- { rocblas_function: "rocblas_sgemm", transA: 'N', transB: 'N', M: 1024, N: 4096, K: 30528, lda: 1024, ldb: 30528, ldc: 1024, call_count: 10 }
+- { rocblas_function: "rocblas_sgemm", transA: 'N', transB: 'N', M: 1024, N: 32, K: 2, lda: 1024, ldb: 2, ldc: 1024, call_count: 10 }
+- { rocblas_function: "rocblas_sgemm", transA: 'N', transB: 'T', M: 1024, N: 1024, K: 32, lda: 1024, ldb: 1024, ldc: 1024, call_count: 10 }
+- { rocblas_function: "rocblas_sgemm", transA: 'T', transB: 'N', M: 1024, N: 32, K: 1024, lda: 1024, ldb: 1024, ldc: 1024, call_count: 10 }
+- { rocblas_function: "rocblas_sgemm", transA: 'N', transB: 'N', M: 4096, N: 4096, K: 1024, lda: 4096, ldb: 1024, ldc: 4096, call_count: 264 }
+- { rocblas_function: "rocblas_sgemm", transA: 'T', transB: 'N', M: 1024, N: 4096, K: 1024, lda: 1024, ldb: 1024, ldc: 1024, call_count: 970 }
+- { rocblas_function: "rocblas_sgemm", transA: 'T', transB: 'N', M: 4096, N: 4096, K: 1024, lda: 1024, ldb: 1024, ldc: 4096, call_count: 240 }
+- { rocblas_function: "rocblas_sgemm", transA: 'N', transB: 'T', M: 1024, N: 4096, K: 4096, lda: 1024, ldb: 4096, ldc: 1024, call_count: 240 }

@@ -1,0 +1,97 @@
+---
+include: rocblas_common.yaml
+include: known_bugs.yaml
+
+Definitions:
+  - &transA_transB_range
+    - { transA: N, transB: N }
+    - { transA: N, transB: T }
+    - { transA: C, transB: N }
+    - { transA: T, transB: C }
+
+Tests:
+- name: gemm_ex_get_solutions
+  category: pre_checkin
+  function: gemm_ex_get_solutions
+  M: 250
+  N: 250
+  K: 250
+  lda: 250
+  ldb: 250
+  ldc: 250
+  ldd: 250
+  alpha_beta: { alpha:  1, beta:  1 }
+  transA_transB: *transA_transB_range
+  precision : *real_precisions
+
+- name: gemm_strided_batched_ex_get_solutions
+  category: pre_checkin
+  function: gemm_strided_batched_ex_get_solutions
+  M: 250
+  N: 250
+  K: 250
+  lda: 250
+  ldb: 250
+  ldc: 250
+  ldd: 250
+  alpha_beta: { alpha:  1, beta:  1 }
+  transA_transB: *transA_transB_range
+  precision : *complex_precisions
+  batch_count: [ 1, 3 ]
+
+- name: gemm_batched_ex_get_solutions
+  category: pre_checkin
+  function: gemm_batched_ex_get_solutions
+  M: 250
+  N: 250
+  K: 250
+  lda: 250
+  ldb: 250
+  ldc: 250
+  ldd: 250
+  alpha_beta: { alpha:  1, beta:  1 }
+  transA_transB: *transA_transB_range
+  precision : *single_double_precisions
+  batch_count: [ 1, 3 ]
+
+- name: gemm_ex_gemv_get_solutions
+  category: pre_checkin
+  function:
+    - gemm_ex_get_solutions: *real_precisions
+    - gemm_batched_ex_get_solutions: *real_precisions
+    - gemm_strided_batched_ex_get_solutions: *real_precisions
+  precision: *real_precisions
+  M: [1, 256, 1024]
+  N: [1, 256, 1024]
+  K: 256
+  lda: [1, 1024]
+  ldb: [1, 1024]
+  ldc: [1, 1024]
+  ldd: [1, 1024]
+  alpha_beta: { alpha: 1, beta: 1 }
+  transA_transB: *transA_transB_range
+  outofplace: [false, true]
+
+# special form of get_solutions testing via gemm_ex harness
+- name: gemm_ex_get_solutions_custom
+  category: pre_checkin
+  function:
+  - gemm_ex
+  - gemm_batched_ex
+  - gemm_strided_batched_ex
+  M: 16
+  N: 16
+  K: 1
+  lda: 16
+  ldb: 16
+  ldc: 16
+  ldd: 16
+  batch_count: 2
+  alpha_beta: { alpha:  1, beta:  1 }
+  transA: N
+  transB: T
+  precision : *real_precisions
+  solution_index: -2 # do get solutions and repeat for all
+  algo: 1
+
+...
