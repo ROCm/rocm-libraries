@@ -1,0 +1,30 @@
+package:
+  name: rocpydecode  # package name
+  version: "0.4.0"   # package version
+
+source:
+  path: ../dist  # Directory containing the wheel
+
+build:
+  number: 0
+  script: |
+    {{ PYTHON }} -m pip install --no-deps --ignore-installed *.whl
+
+requirements:
+  build:
+    - python >=3.6
+    - pybind11
+    - pip
+  run:
+    - python >=3.6
+    - pybind11
+    - numpy
+
+test:
+  imports:
+    - pyRocVideoDecode  # Make sure the package is installed correctly by importing it
+
+about:
+  home: https://github.com/ROCm/rocPyDecode/
+  license: MIT  # License type
+  summary: "rocPyDecode built from a wheel"

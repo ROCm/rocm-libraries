@@ -1,0 +1,51 @@
+defaults:
+  numbered: False
+  maxdepth: 6
+root: index
+subtrees:
+- entries:
+  - file: what-is-rocPyDecode.rst
+    title: What is rocPyDecode?
+
+- caption: Install
+  entries:
+  - file: install/rocPyDecode-prerequisites
+    title: rocPyDecode prerequisites
+  - file: install/rocPyDecode-install
+    title: Installing rocPyDecode
+  - file: install/rocPyDecode-cmake-install
+    title: Installing rocPyDecode with CMake
+  - file: install/rocPyDecode-pip-install
+    title: Installing rocPyDecode with pip
+
+- caption: Conceptual
+  entries:
+  - file: conceptual/rocPyDecode-mem-types.rst
+    title: rocPyDecode surface data memory locations
+
+- caption: How to
+  entries:
+  - file: how-to/using-rocPydecode.rst
+    title: Use rocPyDecode
+
+- caption: Tutorials
+  entries:
+  - url: https://github.com/ROCm/rocPyDecode/tree/develop/samples
+    title: rocPyDecode samples
+
+- caption: Reference
+  entries:
+  - file: reference/rocPyDecode-codecs-and-hardware
+    title: rocPyDecode supported codecs and hardware
+  - file: reference/rocPyDecode
+    title: rocPyDecode API
+    subtrees:
+    - entries:
+      - file: reference/structures.rst
+        title: rocPyDecode Structures
+      - file: reference/decoderClass.rst
+      - file: reference/demuxerClass.rst
+
+- caption: About
+  entries:
+  - file: license.md
