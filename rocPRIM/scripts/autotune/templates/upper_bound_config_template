@@ -1,0 +1,20 @@
+{% extends "config_template" %}
+
+{% macro get_header_guard() %}
+ROCPRIM_DEVICE_DETAIL_CONFIG_DEVICE_UPPER_BOUND_HPP_
+{%- endmacro %}
+
+{% macro kernel_configuration(measurement) -%}
+upper_bound_config<{{ measurement['cfg']['bs'] }}, {{ measurement['cfg']['ipt'] }}> { };
+{%- endmacro %}
+
+{% macro general_case() -%}
+template<unsigned int arch, class value_type, class output_type, class enable = void>
+struct default_upper_bound_config : default_binary_search_config_base<value_type, output_type>
+{};
+{%- endmacro %}
+
+{% macro configuration_fallback(benchmark_of_architecture, based_on_type, fallback_selection_criteria) -%}
+// Based on {{ based_on_type }}
+template<class value_type, class output_type> struct default_upper_bound_config<static_cast<unsigned int>({{ benchmark_of_architecture.name }}), value_type, output_type, {{ fallback_selection_criteria }}> :
+{%- endmacro %}
