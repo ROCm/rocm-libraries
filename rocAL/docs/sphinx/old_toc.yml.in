@@ -1,0 +1,40 @@
+defaults:
+  numbered: False
+#root: doxygen/html/index
+root: index
+subtrees:
+- entries:
+  - file: install/install.rst
+    title: Installation
+  - file: how-to/index.rst
+    title: How to
+    subtrees:
+    - entries:
+  - file: how-to/index.rst
+    title: How to
+    subtrees:
+    - entries:
+      - file: how-to/overview.rst
+      - file: how-to/architecture.rst
+      - file: how-to/using-with-cpp.rst
+      - file: how-to/using-with-python.rst
+      - file: how-to/framework.rst
+  - file: doxygen/html/modules
+    title: rocAL API Reference
+    subtrees:
+    - entries:
+      - file: doxygen/html/group__group__rocal
+      - file: doxygen/html/group__group__rocal__types
+      - file: doxygen/html/group__group__rocal__augmentations
+      - file: doxygen/html/group__group__rocal__data__loaders
+      - file: doxygen/html/group__group__rocal__data__transfer
+      - file: doxygen/html/group__group__rocal__info
+      - file: doxygen/html/group__group__rocal__meta__data
+      - file: doxygen/html/group__group__rocal__parameters
+      - file: doxygen/html/files
+        title: rocAL Header files
+  - file: examples/examples.rst
+    title: rocAL examples
+  - file: reference/rocAL-and-RNNT.rst
+    title: rocAL RNNT dataloading
+  - file: license.rst

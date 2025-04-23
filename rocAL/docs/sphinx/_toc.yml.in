@@ -1,0 +1,58 @@
+defaults:
+  numbered: False
+#root: doxygen/html/index
+root: index
+subtrees:
+
+- caption: Installation
+  entries:
+  - file: install/rocAL-prerequisites.rst
+    title: rocAL prerequisites
+  - file: install/rocAL-package-install.rst
+    title: Installing rocAL with the package installer
+  - file: install/rocAL-build-and-install.rst
+    title: Building and installing rocAL from source
+
+- caption: Conceptual
+  entries:
+  - file: conceptual/overview.rst
+    title: rocAL Overview
+  - file: conceptual/architecture.rst
+    title: Architecture components
+
+- caption: How to
+  entries:
+  - file: how-to/using-with-cpp.rst
+    title: Use the rocAL C++ API
+  - file: how-to/using-with-python.rst
+    title: Use the rocAL Python API
+  - file: how-to/framework.rst
+    title: Use ML framework integration
+
+- caption: Examples
+  entries:
+  - url: https://github.com/ROCm/rocAL/tree/master/docs/examples/image_processing
+    title: rocAL image processing examples
+  - url: https://github.com/ROCm/rocAL/tree/master/docs/examples/pytorch
+    title: rocAL PyTorch examples
+  - url: https://github.com/ROCm/rocAL/tree/master/docs/examples/tf
+    title: rocAL TensorFlow examples
+  - url: https://github.com/ROCm/rocAL/tree/master/docs/examples/notebooks
+    title: rocAL Jupyter notebooks
+  
+- caption: Reference
+  entries:
+  - file: reference/rocAL-and-RNNT.rst
+    title: rocAL RNNT dataloading
+  - file: doxygen/html/group__group__rocal
+  - file: doxygen/html/group__group__rocal__types
+  - file: doxygen/html/group__group__rocal__augmentations
+  - file: doxygen/html/group__group__rocal__data__loaders
+  - file: doxygen/html/group__group__rocal__data__transfer
+  - file: doxygen/html/group__group__rocal__info
+  - file: doxygen/html/group__group__rocal__meta__data
+  - file: doxygen/html/group__group__rocal__parameters
+  - file: doxygen/html/files
+    title: rocAL Header files
+
+  - file: license.rst
