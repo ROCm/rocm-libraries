@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+# To enable this hook, move this file to ".git/hooks/post-commit"
+
+set -euo pipefail
+
+# utility function to display message in color (if supported)
+highlight() {
+  tput -S << EOF
+bold
+setaf $1
+EOF
+  echo "$2"
+  tput sgr0
+}
+
+# utility function to search for a program (in a subshell)
+find_program() (
+  PATH="$(git rev-parse --git-path hooks):/opt/rocm-4.3.1/llvm/bin:/opt/rocm-4.3.0/llvm/bin:$PATH"
+  export PATH
+  command -v "$1" >/dev/null
+)
+
+# utility function to find the number of parents of a git commit
+get_commit_parent_count() {
+  git log -n 1 --format=%P "$1^!" | wc --words
+}
+
+# gather commit information
+commit=$(git rev-parse HEAD)
+short_commit=$(git rev-parse --short "$commit")
+
+# setup cleanup
+ok=0
+on_exit() {
+  if [ $ok -ne 1 ]; then
+    highlight 1 'post-commit: formatting failed'
+  fi
+  chmod +x "${BASH_SOURCE[0]}" # re-enable hook
+}
+trap on_exit EXIT
+
+# check for unstaged changes
+if git diff-index --quiet HEAD; then
+  dirty=false
+else
+  dirty=true
+fi
+
+>&2 echo "post-commit: processing commit $short_commit"
+
+# save workspace
+if [ "$dirty" = true ]; then
+  >&2 echo 'post-commit: stashing uncommitted changes'
+  git stash push --quiet --message 'post-commit: uncommitted changes'
+fi
+
+# check if clang-format is available
+declare -a format_options
+if ! find_program clang-format; then
+  format_options+=('--no-clang-format')
+  >&2 highlight 3 "post-commit: clang-format not found"
+fi
+
+# apply formatting and stage changes
+script_dir=$(dirname "${BASH_SOURCE[0]}")
+while IFS= read -r -d '' file; do
+  >&2 echo "post-commit: reformatting $file"
+  "$script_dir/reformat-files" "${format_options[@]}" -- "$file"
+  git add --update -- "$file"
+done < <(git diff-tree --no-commit-id --name-only -r --diff-filter=d -z HEAD)
+
+# commit changes and restore workspace
+if git diff --quiet --staged; then
+  >&2 echo 'post-commit: files unchanged after reformatting'
+else
+  >&2 echo 'post-commit: amending commit with reformatted files'
+  chmod -x "${BASH_SOURCE[0]}" # prevent recursion
+  git config advice.ignoredHook false # disable warning
+  git commit --amend --allow-empty --no-edit --no-verify --no-post-rewrite
+
+  # warn if commit is empty
+  if [ "$(get_commit_parent_count HEAD)" -eq 1 ] && git diff --quiet HEAD HEAD^@; then
+    >&2 highlight 3 "post-commit: commit is empty"
+  fi
+fi
+
+# restore workspace
+if [ "$dirty" = true ]; then
+  >&2 echo 'post-commit: restoring uncommitted changes from stash'
+  git stash pop --quiet
+fi
+ok=1

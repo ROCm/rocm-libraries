@@ -1,0 +1,57 @@
+defaults:
+  numbered: False
+root: index
+subtrees:
+- caption: Install
+  entries:
+  - file: installation/installlinux
+    title: Installation guide
+
+- caption: How to
+  entries:
+  - file: howto/using
+    title: Use rocSOLVER
+  - file: howto/memory
+    title: Apply the memory model
+  - file: howto/logging
+    title: Use multi-level logging
+  - file: howto/clients
+    title: Run rocSOLVER clients
+  - file: howto/contribute
+    title: Contribute to rocSOLVER
+
+
+- caption: Examples
+  entries:
+  - url: https://github.com/ROCm/rocSOLVER/tree/develop/clients/samples
+    title: Client samples
+
+- caption: API reference
+  entries:
+  - file: reference/index.rst
+    subtrees:
+    - entries:
+      - file: reference/intro.rst
+        title: rocSOLVER API introduction
+      - file: reference/types.rst
+        title: rocSOLVER types
+      - file: reference/precision.rst
+        title: rocSOLVER precision support
+      - file: reference/auxiliary.rst
+        title: LAPACK auxiliary functions
+      - file: reference/lapack.rst
+        title: LAPACK functions
+      - file: reference/lapacklike.rst
+        title: LAPACK-like functions
+      - file: reference/refact.rst
+        title: Refactorization and direct solvers
+      - file: reference/helpers.rst
+        title: Library and logging functions
+      - file: reference/tuning.rst
+        title: rocSOLVER performance tuning
+      - file: reference/deprecated.rst
+        title: Deprecated components
+
+- caption: About
+  entries:
+  - file: license.rst
