@@ -107,7 +107,7 @@
  
  extern "C" {
 
- rocblas_status rocsolver_ssy2sb(rocblas_handle handle,
+ ROCSOLVER_EXPORT rocblas_status rocsolver_ssy2sb(rocblas_handle handle,
                                  const rocblas_fill uplo,
                                  const rocblas_int n,
                                  const rocblas_int k,
@@ -120,7 +120,7 @@
      return rocsolver::rocsolver_sy2sb_he2hb_impl<float>(handle, uplo, n, k, A, lda, AB, ldab, tau);
  }
 
- rocblas_status rocsolver_dsy2sb(rocblas_handle handle,
+ ROCSOLVER_EXPORT rocblas_status rocsolver_dsy2sb(rocblas_handle handle,
                                  const rocblas_fill uplo,
                                  const rocblas_int n,
                                  const rocblas_int k,
@@ -133,7 +133,7 @@
      return rocsolver::rocsolver_sy2sb_he2hb_impl<double>(handle, uplo, n, k, A, lda, AB, ldab, tau);
  }
 
- rocblas_status rocsolver_che2hb(rocblas_handle handle,
+ ROCSOLVER_EXPORT rocblas_status rocsolver_che2hb(rocblas_handle handle,
                                  const rocblas_fill uplo,
                                  const rocblas_int n,
                                  const rocblas_int k,
@@ -146,7 +146,7 @@
      return rocsolver::rocsolver_sy2sb_he2hb_impl<rocblas_float_complex>(handle, uplo, n, k, A, lda, AB, ldab, tau);
  }
 
- rocblas_status rocsolver_zhe2hb(rocblas_handle handle,
+ ROCSOLVER_EXPORT rocblas_status rocsolver_zhe2hb(rocblas_handle handle,
                                  const rocblas_fill uplo,
                                  const rocblas_int n,
                                  const rocblas_int k,

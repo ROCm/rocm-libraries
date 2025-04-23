@@ -311,8 +311,8 @@ rocblas_status rocsolver_sy2sb_he2hb_template(rocblas_handle handle,
         // Copy A to AB
         const rocblas_int cpy_blks = (k) / 32 + 1;
         ROCSOLVER_LAUNCH_KERNEL((copyTBand), dim3(cpy_blks, cpy_blks, batch_count),
-                                dim3(32, 32), 0, stream, uplo, k, A, shiftA, lda, strideA,
-                                AB, shiftAB, ldab, strideAB);
+                                dim3(32, 32), 0, stream, uplo, k, A, shiftA + idx2D(n-k, n-k, lda), lda, strideA,
+                                AB, shiftAB + idx2D(0, n-k, ldab), ldab, strideAB);
     }
     else
     {

@@ -326,6 +326,46 @@ rocblas_status rocsolver_zgemm_strided_batched(rocblas_handle handle,
                                                rocblas_stride strideC,
                                                rocblas_int batch_count);
 
+rocblas_status rocsolver_ssy2sb(rocblas_handle handle,
+                                const rocblas_fill uplo,
+                                const rocblas_int n,
+                                const rocblas_int k,
+                                float* A,
+                                const rocblas_int lda,
+                                float* AB,
+                                const rocblas_int ldab,
+                                float* tau);
+
+rocblas_status rocsolver_dsy2sb(rocblas_handle handle,
+                                const rocblas_fill uplo,
+                                const rocblas_int n,
+                                const rocblas_int k,
+                                double* A,
+                                const rocblas_int lda,
+                                double* AB,
+                                const rocblas_int ldab,
+                                double* tau);
+
+rocblas_status rocsolver_che2hb(rocblas_handle handle,
+                                const rocblas_fill uplo,
+                                const rocblas_int n,
+                                const rocblas_int k,
+                                rocblas_float_complex* A,
+                                const rocblas_int lda,
+                                rocblas_float_complex* AB,
+                                const rocblas_int ldab,
+                                rocblas_float_complex* tau);
+
+rocblas_status rocsolver_zhe2hb(rocblas_handle handle,
+                                const rocblas_fill uplo,
+                                const rocblas_int n,
+                                const rocblas_int k,
+                                rocblas_double_complex* A,
+                                const rocblas_int lda,
+                                rocblas_double_complex* AB,
+                                const rocblas_int ldab,
+                                rocblas_double_complex* tau);
+
 rocblas_status rocsolver_sstedcx(rocblas_handle handle,
                                  const rocblas_evect evect,
                                  const rocblas_erange range,
@@ -2436,6 +2476,61 @@ inline rocblas_status rocsolver_labrd(rocblas_handle handle,
     return rocsolver_zlabrd(handle, m, n, nb, A, lda, D, E, tauq, taup, X, ldx, Y, ldy);
 }
 /***************************************************************/
+
+/******************** SY2SB_HE2HB ********************/
+inline rocblas_status rocsolver_sy2sb_he2hb(rocblas_handle handle,
+    const rocblas_fill uplo,
+    const rocblas_int n,
+    const rocblas_int k,
+    float* A,
+    const rocblas_int lda,
+    float* AB,
+    const rocblas_int ldab,
+    float* tau)
+{
+return rocsolver_ssy2sb(handle, uplo, n, k, A, lda, AB, ldab, tau);
+}
+
+inline rocblas_status rocsolver_sy2sb_he2hb(rocblas_handle handle,
+    const rocblas_fill uplo,
+    const rocblas_int n,
+    const rocblas_int k,
+    double* A,
+    const rocblas_int lda,
+    double* AB,
+    const rocblas_int ldab,
+    double* tau)
+{
+return rocsolver_dsy2sb(handle, uplo, n, k, A, lda, AB, ldab, tau);
+}
+
+inline rocblas_status rocsolver_sy2sb_he2hb(rocblas_handle handle,
+    const rocblas_fill uplo,
+    const rocblas_int n,
+    const rocblas_int k,
+    rocblas_float_complex* A,
+    const rocblas_int lda,
+    rocblas_float_complex* AB,
+    const rocblas_int ldab,
+    rocblas_float_complex* tau)
+{
+return rocsolver_che2hb(handle, uplo, n, k, A, lda, AB, ldab, tau);
+}
+
+inline rocblas_status rocsolver_sy2sb_he2hb(rocblas_handle handle,
+    const rocblas_fill uplo,
+    const rocblas_int n,
+    const rocblas_int k,
+    rocblas_double_complex* A,
+    const rocblas_int lda,
+    rocblas_double_complex* AB,
+    const rocblas_int ldab,
+    rocblas_double_complex* tau)
+{
+return rocsolver_zhe2hb(handle, uplo, n, k, A, lda, AB, ldab, tau);
+}
+/***************************************************************/
+
 
 /******************** ORGxR_UNGxR ********************/
 inline rocblas_status rocsolver_orgxr_ungxr(bool GQR,
