@@ -1,0 +1,40 @@
+data input_yuv = image:1280,720,NV12:READ,inputs/dino_1280x720.nv12
+
+#convert the original NV12 to RGB
+data output_rgb = image:1280,720,RGB2:WRITE,openvx_test_results/42_dino_rgb_1280x720.rgb
+node org.khronos.openvx.color_convert input_yuv output_rgb
+
+#extract the Y component from the original NV12 image
+data inter_y = image:1280,720,U008
+node org.khronos.openvx.channel_extract input_yuv !CHANNEL_Y inter_y
+
+#extract the U component from the original NV12 image
+data inter_u = image:640,360,U008
+node org.khronos.openvx.channel_extract input_yuv !CHANNEL_U inter_u
+
+#extract the V component from the original NV12 image
+data inter_v = image:640,360,U008
+node org.khronos.openvx.channel_extract input_yuv !CHANNEL_V inter_v
+
+#scale the Y component
+data output_Yscaled = image:640,360,U008
+node org.khronos.openvx.scale_image inter_y output_Yscaled !BILINEAR
+
+#scale the U component
+data output_Uscaled = image:320,180,U008
+node org.khronos.openvx.scale_image inter_u output_Uscaled !BILINEAR
+
+#scale the V component
+data output_Vscaled = image:320,180,U008
+node org.khronos.openvx.scale_image inter_v output_Vscaled !BILINEAR
+
+# combine the scaled Y, U, and V components to build a scaled nv12 image
+data output_YUV_scaled = image:640,360,NV12:WRITE,openvx_test_results/42_dino_nv12_scaled_640x360.nv12
+node org.khronos.openvx.channel_combine output_Yscaled output_Uscaled output_Vscaled null output_YUV_scaled
+
+#convert the scaled NV12 to RGB
+data output_rgb_scaled = image:640,360,RGB2:WRITE,openvx_test_results/42_dino_rgb_scaled_640x360.rgb
+node org.khronos.openvx.color_convert output_YUV_scaled output_rgb_scaled
+
+
+

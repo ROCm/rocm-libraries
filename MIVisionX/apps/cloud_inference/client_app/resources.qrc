@@ -1,0 +1,14 @@
+<RCC>
+    <qresource prefix="/">
+        <file>images/vega_icon_150.png</file>
+        <file>images/vega_icon_200.png</file>
+        <file>images/vega_icon_250.png</file>
+        <file>images/inference_app_splash.png</file>
+        <file>images/display_panel_logo.png</file>
+        <file>images/AMD_logo_white.png</file>
+        <file>images/amd-logo-150x150.jpg</file>
+        <file>images/small_radeon_logo.png</file>
+        <file>images/small_amd_logo.png</file>
+        <file>images/rocm_logo.png</file>
+    </qresource>
+</RCC>

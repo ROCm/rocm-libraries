@@ -1,0 +1,8 @@
+data input_iyuv = image:1280,720,IYUV:READ,inputs/stm_1280x720.yuv
+data inter_luma = image:1280,720,U008
+node org.khronos.openvx.channel_extract input_iyuv !CHANNEL_Y inter_luma
+
+data output_canny_edge = image:1280,720,U008:WRITE,openvx_test_results/08_canny_1280x720.yuv
+data input_hyst = threshold:RANGE,U008,U008:INIT,80,100
+data input_gradient_size = scalar:INT32,3
+node org.khronos.openvx.canny_edge_detector inter_luma input_hyst input_gradient_size !NORM_L1 output_canny_edge

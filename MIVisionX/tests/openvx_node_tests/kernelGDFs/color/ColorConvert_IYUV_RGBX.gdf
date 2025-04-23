@@ -1,0 +1,4 @@
+# agoKernel_ColorConvert_IYUV_RGBX
+data input_1 = uniform-image:1920,1080,RGBA,0x1a2b3c4d
+data output_1 = image:1920,1080,IYUV
+node org.khronos.openvx.color_convert input_1 output_1

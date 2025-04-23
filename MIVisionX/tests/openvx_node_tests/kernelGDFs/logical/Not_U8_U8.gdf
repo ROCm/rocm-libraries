@@ -1,0 +1,4 @@
+# agoKernel_Not_U8_U8
+data input_1 = uniform-image:1920,1080,U008,125
+data output_1 = image:1920,1080,U008
+node org.khronos.openvx.not input_1 output_1

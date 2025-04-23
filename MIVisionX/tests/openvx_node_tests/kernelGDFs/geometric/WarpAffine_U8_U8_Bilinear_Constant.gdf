@@ -1,0 +1,5 @@
+# agoKernel_WarpAffine_U8_U8_Bilinear_Constant
+data input_1 = uniform-image:1920,1080,U008,125
+data output_1 = image:1920,1080,U008
+data affine_matrix = matrix:FLOAT32,2,3:INIT,{0.25;0;0;0.5;20;20}
+node org.khronos.openvx.warp_affine input_1 affine_matrix !BILINEAR output_1 attr:BORDER_MODE:CONSTANT,0

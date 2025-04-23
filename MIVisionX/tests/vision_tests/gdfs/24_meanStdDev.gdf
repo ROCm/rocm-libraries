@@ -1,0 +1,7 @@
+data input_iyuv = image:1280,720,IYUV:READ,inputs/stm_1280x720.yuv
+data inter_luma = image:1280,720,U008
+node org.khronos.openvx.channel_extract input_iyuv !CHANNEL_Y inter_luma
+
+data output_mean = scalar:FLOAT32,0.0:WRITE,openvx_test_results/24_mean_stddev_mean.txt
+data output_stddev = scalar:FLOAT32,0.0:WRITE,openvx_test_results/24_mean_stddev_stdev.txt
+node org.khronos.openvx.mean_stddev inter_luma output_mean output_stddev

@@ -1,0 +1,7 @@
+import vx_opencv
+
+data inter_luma = image:1280,720,U008:READ,inputs/stm_1280x720.y
+data output = image:1280,720,U008:WRITE,amd_opencv_test_results/medianblur_1280x720.u8
+data Ksize = scalar:INT32,5
+
+node org.opencv.medianblur inter_luma output Ksize

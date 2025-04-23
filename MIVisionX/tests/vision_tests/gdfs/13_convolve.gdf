@@ -1,0 +1,7 @@
+data input_iyuv = image:1280,720,IYUV:READ,inputs/stm_1280x720.yuv
+data inter_luma = image:1280,720,U008
+node org.khronos.openvx.channel_extract input_iyuv !CHANNEL_Y inter_luma
+
+data output_convolve = image:1280,720,S016:WRITE,openvx_test_results/13_convolve_1280x720.yuv
+data input_matrix = convolution:3,3:INIT,{-1;-1;-1;-1;16;-1;-1;-1;-1}
+node org.khronos.openvx.custom_convolution inter_luma input_matrix output_convolve

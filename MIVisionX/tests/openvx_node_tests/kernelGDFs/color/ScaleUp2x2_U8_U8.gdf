@@ -1,0 +1,4 @@
+# agoKernel_ScaleUp2x2_U8_U8
+data input_1 = uniform-image:1920,1080,IYUV,0x1a2b3c
+data output_1 = image:1920,1080,YUV4
+node org.khronos.openvx.color_convert input_1 output_1

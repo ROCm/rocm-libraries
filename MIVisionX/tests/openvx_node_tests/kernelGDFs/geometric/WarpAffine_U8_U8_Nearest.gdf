@@ -1,0 +1,8 @@
+# agoKernel_WarpAffine_U8_U8_Nearest
+data input_1 = uniform-image:1920,1080,U008,125
+data output_1 = image:1920,1080,U008
+# data affine_matrix = matrix:FLOAT32,2,3:INIT,{0.25;0;0;0.5;20;20}
+# data affine_matrix = matrix:FLOAT32,2,3:INIT,{1.23;0.5;0;-0.8;0.83;0}
+# data affine_matrix = matrix:FLOAT32,2,3:INIT,{1;0;5;0;1;5}
+data affine_matrix = matrix:FLOAT32,2,3:INIT,{1;0;0;1;5;5}
+node org.khronos.openvx.warp_affine input_1 affine_matrix !NEAREST_NEIGHBOR output_1

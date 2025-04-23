@@ -1,0 +1,5 @@
+# agoKernel_Threshold_U1_U8_Binary
+data input_1 = uniform-image:1920,1080,U008,125
+data output_1 = image:1920,1080,U001
+data value = threshold:BINARY,U008,U001:INIT,127
+node org.khronos.openvx.threshold input_1 value output_1

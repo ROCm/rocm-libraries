@@ -1,0 +1,6 @@
+# agoKernel_ChannelCombine_U24_U8U8U8_RGB
+data input_1 = uniform-image:1920,1080,U008,0xaa
+data input_2 = uniform-image:1920,1080,U008,0xbb
+data input_3 = uniform-image:1920,1080,U008,0xcc
+data output_1 = image:1920,1080,RGB2
+node org.khronos.openvx.channel_combine input_1 input_2 input_3 null output_1

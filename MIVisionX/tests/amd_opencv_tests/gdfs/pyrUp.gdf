@@ -1,0 +1,9 @@
+import vx_opencv
+
+data inter_luma = image:1280,720,U008:READ,inputs/stm_1280x720.y
+data output = image:2560,1440,U008:WRITE,amd_opencv_test_results/pyrup_2560x1440.u8
+data K_width = scalar:INT32,2560
+data K_height = scalar:INT32,1440
+data border = scalar:INT32,4
+
+node org.opencv.pyrup inter_luma output K_width K_height border

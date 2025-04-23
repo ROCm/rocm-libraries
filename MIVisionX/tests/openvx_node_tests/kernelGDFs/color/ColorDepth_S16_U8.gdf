@@ -1,0 +1,5 @@
+# agoKernel_ColorDepth_S16_U8
+data input_1 = uniform-image:1920,1080,U008,125
+data output_1 = image:1920,1080,S016
+data scalar = scalar:INT32,1
+node org.khronos.openvx.convertdepth input_1 output_1 !WRAP scalar

@@ -1,0 +1,44 @@
+# Get WinML Extension DLL
+import vx_winml
+
+data result_image  = image:640,50,RGB2
+data input_image  = image:224,224,RGB2
+data input_tensor = tensor:4,{224,224,3,1},VX_TYPE_FLOAT32,0
+data a = scalar:FLOAT32,1.0
+data b = scalar:FLOAT32,0.0
+data reverse_channel_order = scalar:BOOL,0
+
+read input_image FULL_PATH_TO\data\car.JPEG
+view input_image inputImageWindow
+view result_image resultWindow
+
+# Use convert to tensor node - convert input image to tensor 
+node com.winml.convert_image_to_tensor input_image input_tensor a b reverse_channel_order
+
+# write input tensor
+write input_tensor input_tensor.f32
+
+data modelLocation = scalar:STRING,FULL_PATH_TO\squeezenet\model.onnx:view,resultWindow
+data modelInputName = scalar:STRING,data_0
+data modelOutputName = scalar:STRING,softmaxout_1 
+data output = tensor:4,{1,1,1000,1},VX_TYPE_FLOAT32,0
+data deviceKind = scalar:INT32,0
+data setupArray = array:SIZE,1
+
+
+
+# Use Import ONNX Node to run Inference
+node com.winml.onnx_to_mivisionx modelLocation modelInputName modelOutputName input_tensor setupArray output deviceKind 
+
+# write output tensor
+write output output_tensor.f32
+
+data labelLocation = scalar:STRING,FULL_PATH_TO\data\Labels.txt
+data top1 = scalar:STRING,TOPK:view,resultWindow
+data top2 = scalar:STRING,TOPK:view,resultWindow
+data top3 = scalar:STRING,TOPK:view,resultWindow
+data top4 = scalar:STRING,TOPK:view,resultWindow
+data top5 = scalar:STRING,TOPK:view,resultWindow
+
+# Use get top K label node to display results
+node com.winml.get_top_k_labels output labelLocation top1 top2 top3 top4 top5

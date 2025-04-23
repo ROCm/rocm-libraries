@@ -1,0 +1,5 @@
+# agoKernel_WarpPerspective_U8_U8_Nearest
+data input_1 = uniform-image:1920,1080,U008,125
+data output_1 = image:1920,1080,U008
+data perspective_matrix = matrix:FLOAT32,3,3:INIT,{2;0.1;0;2;1.9;0;-1200;-360;1}
+node org.khronos.openvx.warp_perspective input_1 perspective_matrix !NEAREST_NEIGHBOR output_1

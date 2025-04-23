@@ -1,0 +1,7 @@
+data input_iyuv = image:1280,720,IYUV:READ,inputs/stm_1280x720.yuv
+data inter_luma = image:1280,720,U008
+node org.khronos.openvx.channel_extract input_iyuv !CHANNEL_Y inter_luma
+
+data output_accumulate_square = image:1280,720,S016:WRITE,openvx_test_results/03_accumulate_square_1280x720.yuv
+data input_shift = scalar:UINT32,0
+node org.khronos.openvx.accumulate_square inter_luma input_shift output_accumulate_square

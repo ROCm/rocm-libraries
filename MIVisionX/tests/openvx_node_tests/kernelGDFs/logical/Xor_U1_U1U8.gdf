@@ -1,0 +1,5 @@
+# agoKernel_Xor_U1_U1U8
+data input_1 = uniform-image:1920,1080,U001,125
+data input_2 = uniform-image:1920,1080,U008,132
+data output_1 = image:1920,1080,U001
+node org.khronos.openvx.xor input_1 input_2 output_1

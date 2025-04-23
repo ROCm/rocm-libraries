@@ -1,0 +1,214 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{24F44D6B-92FD-3080-AF31-693411708E82}</ProjectGuid>
+    <RootNamespace>vx_opencv</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v142</PlatformToolset>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v142</PlatformToolset>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup>
+    <_ProjectFileVersion>10.0.20506.1</_ProjectFileVersion>
+    <OutDir Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(SolutionDir)$(Platform)\$(Configuration)\</OutDir>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(Platform)\$(Configuration)\</IntDir>
+    <TargetName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">vx_opencv</TargetName>
+    <TargetExt Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">.dll</TargetExt>
+    <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</LinkIncremental>
+    <GenerateManifest Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</GenerateManifest>
+    <OutDir Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(SolutionDir)$(Platform)\$(Configuration)\</OutDir>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(Platform)\$(Configuration)\</IntDir>
+    <TargetName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">vx_opencv</TargetName>
+    <TargetExt Condition="'$(Configuration)|$(Platform)'=='Release|x64'">.dll</TargetExt>
+    <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</LinkIncremental>
+    <GenerateManifest Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</GenerateManifest>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <AdditionalIncludeDirectories>include;..\..\amd_openvx\openvx\include;$(OpenCV_DIR)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AssemblerListingLocation>Debug/</AssemblerListingLocation>
+      <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
+      <CompileAs>CompileAsCpp</CompileAs>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <ExceptionHandling>Sync</ExceptionHandling>
+      <InlineFunctionExpansion>Disabled</InlineFunctionExpansion>
+      <Optimization>Disabled</Optimization>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
+      <RuntimeTypeInfo>true</RuntimeTypeInfo>
+      <WarningLevel>Level3</WarningLevel>
+      <PreprocessorDefinitions>WIN32;_WINDOWS;USE_OPENCV_CONTRIB=0;CMAKE_INTDIR="Debug";vx_opencv_EXPORTS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ObjectFileName>$(IntDir)</ObjectFileName>
+    </ClCompile>
+    <ResourceCompile>
+      <PreprocessorDefinitions>WIN32;_DEBUG;_WINDOWS;USE_OPENCV_CONTRIB=0;CMAKE_INTDIR=\"Debug\";vx_opencv_EXPORTS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>include;..\..\amd_openvx\openvx\include;$(OpenCV_DIR)\include\opencv;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
+    <Midl>
+      <AdditionalIncludeDirectories>include;..\..\amd_openvx\openvx\include;$(OpenCV_DIR)\include\opencv;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
+      <HeaderFileName>%(Filename).h</HeaderFileName>
+      <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
+      <InterfaceIdentifierFileName>%(Filename)_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>%(Filename)_p.c</ProxyFileName>
+    </Midl>
+    <Link>
+      <AdditionalDependencies>$(OpenCV_DIR)\x64\vc15\lib\opencv_world340d.lib;OpenVX.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
+      <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories);$(SolutionDir)\$(Platform)\$(Configuration)\</AdditionalLibraryDirectories>
+      <AdditionalOptions>%(AdditionalOptions) /machine:x64</AdditionalOptions>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <IgnoreSpecificDefaultLibraries>%(IgnoreSpecificDefaultLibraries)</IgnoreSpecificDefaultLibraries>
+      <ImportLibrary>
+      </ImportLibrary>
+      <ProgramDataBaseFile>
+      </ProgramDataBaseFile>
+      <SubSystem>Console</SubSystem>
+    </Link>
+    <ProjectReference>
+      <LinkLibraryDependencies>false</LinkLibraryDependencies>
+    </ProjectReference>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <AdditionalIncludeDirectories>include;..\..\amd_openvx\openvx\include;$(OpenCV_DIR)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AssemblerListingLocation>Release/</AssemblerListingLocation>
+      <CompileAs>CompileAsCpp</CompileAs>
+      <ExceptionHandling>Sync</ExceptionHandling>
+      <InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
+      <Optimization>MaxSpeed</Optimization>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <RuntimeTypeInfo>true</RuntimeTypeInfo>
+      <WarningLevel>Level3</WarningLevel>
+      <PreprocessorDefinitions>WIN32;_WINDOWS;NDEBUG;USE_OPENCV_CONTRIB=0;CMAKE_INTDIR="Release";vx_opencv_EXPORTS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ObjectFileName>$(IntDir)</ObjectFileName>
+      <DebugInformationFormat>
+      </DebugInformationFormat>
+    </ClCompile>
+    <ResourceCompile>
+      <PreprocessorDefinitions>WIN32;_WINDOWS;NDEBUG;USE_OPENCV_CONTRIB=0;CMAKE_INTDIR=\"Release\";vx_opencv_EXPORTS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>include;..\..\amd_openvx\openvx\include;$(OpenCV_DIR)\include\opencv;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
+    <Midl>
+      <AdditionalIncludeDirectories>include;..\..\amd_openvx\openvx\include;$(OpenCV_DIR)\include\opencv;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
+      <HeaderFileName>%(Filename).h</HeaderFileName>
+      <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
+      <InterfaceIdentifierFileName>%(Filename)_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>%(Filename)_p.c</ProxyFileName>
+    </Midl>
+    <Link>
+      <AdditionalDependencies>$(OpenCV_DIR)\x64\vc15\lib\opencv_world340.lib;OpenVX.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
+      <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories);$(SolutionDir)\$(Platform)\$(Configuration)\</AdditionalLibraryDirectories>
+      <AdditionalOptions>%(AdditionalOptions) /machine:x64</AdditionalOptions>
+      <GenerateDebugInformation>false</GenerateDebugInformation>
+      <IgnoreSpecificDefaultLibraries>%(IgnoreSpecificDefaultLibraries)</IgnoreSpecificDefaultLibraries>
+      <ImportLibrary>
+      </ImportLibrary>
+      <ProgramDataBaseFile>
+      </ProgramDataBaseFile>
+      <SubSystem>Console</SubSystem>
+    </Link>
+    <ProjectReference>
+      <LinkLibraryDependencies>false</LinkLibraryDependencies>
+    </ProjectReference>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="source\internal_dataTranslator.cpp" />
+    <ClCompile Include="source\internal_publishKernels.cpp" />
+    <ClCompile Include="source\internal_vxNodes.cpp" />
+    <ClCompile Include="source\OpenCV_absDiff.cpp" />
+    <ClCompile Include="source\OpenCV_adaptiveThreshold.cpp" />
+    <ClCompile Include="source\OpenCV_add.cpp" />
+    <ClCompile Include="source\OpenCV_addWeighted.cpp" />
+    <ClCompile Include="source\OpenCV_bilateralFilter.cpp" />
+    <ClCompile Include="source\OpenCV_bitwiseAnd.cpp" />
+    <ClCompile Include="source\OpenCV_bitwiseNot.cpp" />
+    <ClCompile Include="source\OpenCV_bitwiseOr.cpp" />
+    <ClCompile Include="source\OpenCV_bitwiseXor.cpp" />
+    <ClCompile Include="source\OpenCV_blur.cpp" />
+    <ClCompile Include="source\OpenCV_boxFilter.cpp" />
+    <ClCompile Include="source\OpenCV_briskCompute.cpp" />
+    <ClCompile Include="source\OpenCV_briskDetector.cpp" />
+    <ClCompile Include="source\OpenCV_buildOpticalFlowPyramid.cpp" />
+    <ClCompile Include="source\OpenCV_buildPyramid.cpp" />
+    <ClCompile Include="source\OpenCV_canny.cpp" />
+    <ClCompile Include="source\OpenCV_compare.cpp" />
+    <ClCompile Include="source\OpenCV_convertScaleAbs.cpp" />
+    <ClCompile Include="source\OpenCV_cornerHarris.cpp" />
+    <ClCompile Include="source\OpenCV_cornerMinEigenVal.cpp" />
+    <ClCompile Include="source\OpenCV_countNonZero.cpp" />
+    <ClCompile Include="source\OpenCV_cvtColor.cpp" />
+    <ClCompile Include="source\OpenCV_dilate.cpp" />
+    <ClCompile Include="source\OpenCV_distanceTransform.cpp" />
+    <ClCompile Include="source\OpenCV_divide.cpp" />
+    <ClCompile Include="source\OpenCV_erode.cpp" />
+    <ClCompile Include="source\OpenCV_fastFeatureDetector.cpp" />
+    <ClCompile Include="source\OpenCV_fastNlMeansDenoising.cpp" />
+    <ClCompile Include="source\OpenCV_fastNlMeansDenoisingColored.cpp" />
+    <ClCompile Include="source\OpenCV_filter2D.cpp" />
+    <ClCompile Include="source\OpenCV_flip.cpp" />
+    <ClCompile Include="source\OpenCV_gaussianBlur.cpp" />
+    <ClCompile Include="source\OpenCV_goodFeaturesToTrackdetector.cpp" />
+    <ClCompile Include="source\OpenCV_integral.cpp" />
+    <ClCompile Include="source\OpenCV_laplacian.cpp" />
+    <ClCompile Include="source\OpenCV_medianBlur.cpp" />
+    <ClCompile Include="source\OpenCV_morphologyEx.cpp" />
+    <ClCompile Include="source\OpenCV_mserFeatureDetector.cpp" />
+    <ClCompile Include="source\OpenCV_multiply.cpp" />
+    <ClCompile Include="source\OpenCV_norm.cpp" />
+    <ClCompile Include="source\OpenCV_orbCompute.cpp" />
+    <ClCompile Include="source\OpenCV_orbDetector.cpp" />
+    <ClCompile Include="source\OpenCV_pyrDown.cpp" />
+    <ClCompile Include="source\OpenCV_pyrUp.cpp" />
+    <ClCompile Include="source\OpenCV_resize.cpp" />
+    <ClCompile Include="source\OpenCV_scharr.cpp" />
+    <ClCompile Include="source\OpenCV_sepFilter2D.cpp" />
+    <ClCompile Include="source\OpenCV_siftCompute.cpp" />
+    <ClCompile Include="source\OpenCV_siftDetect.cpp" />
+    <ClCompile Include="source\OpenCV_simpleBlobDetector.cpp" />
+    <ClCompile Include="source\OpenCV_sobel.cpp" />
+    <ClCompile Include="source\OpenCV_starFeatureDetector.cpp" />
+    <ClCompile Include="source\OpenCV_subtract.cpp" />
+    <ClCompile Include="source\OpenCV_surfCompute.cpp" />
+    <ClCompile Include="source\OpenCV_surfDetect.cpp" />
+    <ClCompile Include="source\OpenCV_threshold.cpp" />
+    <ClCompile Include="source\OpenCV_transpose.cpp" />
+    <ClCompile Include="source\OpenCV_warpAffine.cpp" />
+    <ClCompile Include="source\OpenCV_warpPerspective.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="include\internal_opencvTunnel.h" />
+    <ClInclude Include="include\internal_publishKernels.h" />
+    <ClInclude Include="include\vx_ext_opencv.h" />
+    <ClInclude Include="include\vx_opencv.h" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+  </ImportGroup>
+</Project>

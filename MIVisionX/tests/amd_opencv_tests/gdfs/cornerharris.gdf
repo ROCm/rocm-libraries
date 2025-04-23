@@ -1,0 +1,10 @@
+import vx_opencv
+
+data inter_luma = image:1280,720,U008:READ,inputs/stm_1280x720.yuv
+data output = image:1280,720,S016:WRITE,amd_opencv_test_results/warpperspective_1280x720.s16
+data blocksize = scalar:INT32,3
+data ksize = scalar:INT32,3
+data k = scalar:FLOAT32,0.04
+data border = scalar:INT32,1
+
+node org.opencv.cornerharris inter_luma output blocksize ksize k border

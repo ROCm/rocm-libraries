@@ -1,0 +1,13 @@
+import vx_opencv
+
+data inter_luma = image:1280,720,U008:READ,inputs/stm_1280x720.y
+data output = image:1280,720,U008:WRITE,amd_opencv_test_results/sepfilter2d_1280x720.u8
+data Ddepth = scalar:INT32,-1
+data KernelX = matrix:FLOAT32,1,3:INIT,{0.2;0.5;0.2}
+data KernelY = matrix:FLOAT32,3,1:INIT,{0.2;0.5;0.2}
+data anchorX = scalar:INT32,-1
+data anchorY = scalar:INT32,-1
+data delta = scalar:FLOAT32,0
+data BORDER = scalar:INT32,4
+
+node org.opencv.sepfilter2d inter_luma output Ddepth KernelX KernelY anchorX anchorY delta BORDER

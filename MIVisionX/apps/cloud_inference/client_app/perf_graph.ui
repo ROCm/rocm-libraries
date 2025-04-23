@@ -1,0 +1,276 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>perf_graph</class>
+ <widget class="QDialog" name="perf_graph">
+  <property name="enabled">
+   <bool>true</bool>
+  </property>
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>984</width>
+    <height>900</height>
+   </rect>
+  </property>
+  <property name="sizePolicy">
+   <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+    <horstretch>0</horstretch>
+    <verstretch>0</verstretch>
+   </sizepolicy>
+  </property>
+  <property name="windowTitle">
+   <string>AMD MIVisionX Inference Performance</string>
+  </property>
+  <property name="styleSheet">
+   <string notr="true">
+background-color: rgb(235, 235, 235);</string>
+  </property>
+  <layout class="QGridLayout" name="gridLayout">
+   <item row="1" column="3" colspan="3">
+    <widget class="QLabel" name="modelName_label">
+     <property name="styleSheet">
+      <string notr="true">color: rgb(170, 0, 0);
+font: 75 36pt &quot;Ubuntu&quot;;</string>
+     </property>
+     <property name="text">
+      <string/>
+     </property>
+    </widget>
+   </item>
+   <item row="8" column="2">
+    <widget class="QPushButton" name="reset_pushButton">
+     <property name="styleSheet">
+      <string notr="true">background-color: rgb(0, 0, 0);
+color: rgb(255, 255, 255);</string>
+     </property>
+     <property name="text">
+      <string>Reset All</string>
+     </property>
+    </widget>
+   </item>
+   <item row="2" column="1">
+    <widget class="QLabel" name="TotalGPU_label">
+     <property name="styleSheet">
+      <string notr="true">color: rgb(0, 0, 0);
+font: 75 36pt &quot;Ubuntu&quot;;</string>
+     </property>
+     <property name="text">
+      <string>GPUs:</string>
+     </property>
+     <property name="alignment">
+      <set>Qt::AlignCenter</set>
+     </property>
+    </widget>
+   </item>
+   <item row="5" column="0" colspan="3">
+    <widget class="QLabel" name="images_label">
+     <property name="styleSheet">
+      <string notr="true">color: rgb(0, 0, 0);
+font: 75 36pt &quot;Ubuntu&quot;;</string>
+     </property>
+     <property name="text">
+      <string>Img Processed:</string>
+     </property>
+     <property name="alignment">
+      <set>Qt::AlignCenter</set>
+     </property>
+    </widget>
+   </item>
+   <item row="0" column="0">
+    <widget class="QLabel" name="logo_label_2">
+     <property name="text">
+      <string/>
+     </property>
+     <property name="pixmap">
+      <pixmap resource="resources.qrc">:/images/amd-logo-150x150.jpg</pixmap>
+     </property>
+    </widget>
+   </item>
+   <item row="8" column="3">
+    <widget class="QPushButton" name="close_pushButton">
+     <property name="styleSheet">
+      <string notr="true">background-color: rgb(0, 0, 0);
+color: rgb(255, 255, 255);</string>
+     </property>
+     <property name="text">
+      <string>Close</string>
+     </property>
+    </widget>
+   </item>
+   <item row="1" column="0" colspan="3">
+    <widget class="QLabel" name="Model_label">
+     <property name="styleSheet">
+      <string notr="true">color: rgb(0, 0, 0);
+font: 75 36pt &quot;Ubuntu&quot;;</string>
+     </property>
+     <property name="text">
+      <string>Model:</string>
+     </property>
+     <property name="alignment">
+      <set>Qt::AlignCenter</set>
+     </property>
+    </widget>
+   </item>
+   <item row="6" column="3" colspan="3">
+    <widget class="QLabel" name="StartTime_label">
+     <property name="styleSheet">
+      <string notr="true">color: rgb(170, 0, 0);
+font: 75 28pt &quot;Ubuntu&quot;;</string>
+     </property>
+     <property name="text">
+      <string/>
+     </property>
+    </widget>
+   </item>
+   <item row="0" column="1" colspan="4">
+    <widget class="QLabel" name="header_label">
+     <property name="styleSheet">
+      <string notr="true">color: rgb(0, 0, 0);
+font: 75 48pt &quot;Ubuntu&quot;;</string>
+     </property>
+     <property name="text">
+      <string>Performance</string>
+     </property>
+     <property name="alignment">
+      <set>Qt::AlignCenter</set>
+     </property>
+    </widget>
+   </item>
+   <item row="0" column="5">
+    <widget class="QLabel" name="logo_label">
+     <property name="text">
+      <string/>
+     </property>
+     <property name="pixmap">
+      <pixmap resource="resources.qrc">:/images/vega_icon_150.png</pixmap>
+     </property>
+    </widget>
+   </item>
+   <item row="6" column="0" colspan="3">
+    <widget class="QLabel" name="startName_label">
+     <property name="styleSheet">
+      <string notr="true">color: rgb(0, 0, 0);
+font: 75 36pt &quot;Ubuntu&quot;;</string>
+     </property>
+     <property name="text">
+      <string>Start Time:</string>
+     </property>
+     <property name="alignment">
+      <set>Qt::AlignCenter</set>
+     </property>
+    </widget>
+   </item>
+   <item row="4" column="3" colspan="2">
+    <widget class="QLCDNumber" name="fps_lcdNumber">
+     <property name="styleSheet">
+      <string notr="true">background-color: rgb(255, 255, 255);
+color: rgb(0, 0, 0);</string>
+     </property>
+     <property name="frameShape">
+      <enum>QFrame::Box</enum>
+     </property>
+     <property name="smallDecimalPoint">
+      <bool>false</bool>
+     </property>
+     <property name="digitCount">
+      <number>6</number>
+     </property>
+    </widget>
+   </item>
+   <item row="7" column="3" colspan="3">
+    <widget class="QLabel" name="elapsedTime_label">
+     <property name="styleSheet">
+      <string notr="true">color: rgb(170, 0, 0);
+font: 75 28pt &quot;Ubuntu&quot;;</string>
+     </property>
+     <property name="text">
+      <string/>
+     </property>
+    </widget>
+   </item>
+   <item row="4" column="0" colspan="3">
+    <widget class="QLabel" name="fps_label">
+     <property name="styleSheet">
+      <string notr="true">color: rgb(0, 0, 0);
+font: 75 36pt &quot;Ubuntu&quot;;</string>
+     </property>
+     <property name="text">
+      <string>Images/Sec:</string>
+     </property>
+     <property name="alignment">
+      <set>Qt::AlignCenter</set>
+     </property>
+    </widget>
+   </item>
+   <item row="7" column="0" colspan="3">
+    <widget class="QLabel" name="ElapsedTimeName_label">
+     <property name="styleSheet">
+      <string notr="true">color: rgb(0, 0, 0);
+font: 75 36pt &quot;Ubuntu&quot;;</string>
+     </property>
+     <property name="text">
+      <string>Elapsed Time:</string>
+     </property>
+     <property name="alignment">
+      <set>Qt::AlignCenter</set>
+     </property>
+    </widget>
+   </item>
+   <item row="3" column="3" colspan="2">
+    <widget class="QLCDNumber" name="maxFPS_lcdNumber">
+     <property name="styleSheet">
+      <string notr="true">background-color: rgb(255, 255, 255);
+color: rgb(0, 0, 0);</string>
+     </property>
+     <property name="digitCount">
+      <number>6</number>
+     </property>
+    </widget>
+   </item>
+   <item row="2" column="3">
+    <widget class="QLCDNumber" name="GPU_lcdNumber">
+     <property name="styleSheet">
+      <string notr="true">background-color: rgb(255, 255, 255);
+color: rgb(0, 0, 0);</string>
+     </property>
+     <property name="digitCount">
+      <number>3</number>
+     </property>
+    </widget>
+   </item>
+   <item row="3" column="0" colspan="3">
+    <widget class="QLabel" name="maxFPS_label">
+     <property name="styleSheet">
+      <string notr="true">font: 75 36pt &quot;Ubuntu&quot;;
+color: rgb(0, 0, 0);</string>
+     </property>
+     <property name="text">
+      <string>MAX FPS:</string>
+     </property>
+     <property name="alignment">
+      <set>Qt::AlignCenter</set>
+     </property>
+    </widget>
+   </item>
+   <item row="5" column="3" colspan="3">
+    <widget class="QLCDNumber" name="images_lcdNumber">
+     <property name="styleSheet">
+      <string notr="true">background-color: rgb(255, 255, 255);
+color: rgb(0, 0, 0);</string>
+     </property>
+     <property name="digitCount">
+      <number>15</number>
+     </property>
+     <property name="value" stdset="0">
+      <double>0.000000000000000</double>
+     </property>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <resources>
+  <include location="resources.qrc"/>
+ </resources>
+ <connections/>
+</ui>

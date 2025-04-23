@@ -1,0 +1,49 @@
+# Anywhere {branch} is used, the branch name will be substituted.
+# These comments will also be removed.
+root: index
+subtrees:
+- entries:
+  - file: what-is-mivisionx.rst
+    title: What is MIVisionX?
+
+- caption: Install
+  entries:
+  - file: install/installation.rst
+    title: Installation
+  - file: install/amd_openvx-install.rst
+    title: AMD OpenVX Installation
+  - file: install/model-compiler-install.rst
+    title: Model Compiler Installation
+
+- caption: How to
+  entries:
+  - file: how-to/amd_openvx.rst
+    title: Using AMD OpenVX
+  - file: how-to/model-compiler.rst
+    title: Working with model compiler
+  - file: how-to/mivisionx-docker.rst
+    title: Using Docker
+
+- caption: API reference
+  entries:
+  - file: doxygen/html/modules
+    title: MIVisionX APIs
+  - file: doxygen/html/files
+    title: MIVisionX Files
+  - file: reference/toolkit.rst
+    title: MIVisionX toolkit documentation
+  - file: reference/utilities.rst
+    title: MIVisionX utilities documentation
+
+- caption: Tutorials
+  entries:
+  - file: tutorials/mivisionx-apps.rst     
+    title: MIVisionX applications
+  - file: tutorials/mivisionx-samples.rst     
+    title: MIVisionX samples documentation
+  - file: tutorials/mivisionx-tests.rst     
+    title: MIVisionX tests
+
+- caption: About
+  entries:
+  - file: license.rst

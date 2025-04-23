@@ -1,0 +1,7 @@
+import vx_rpp
+
+data input = tensor:3,{3,3,3},FLOAT32,1
+data output = tensor:3,{3,3,3},FLOAT32,1
+data size = scalar:UINT32,3
+
+node org.rpp.Nop input output size

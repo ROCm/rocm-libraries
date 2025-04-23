@@ -1,0 +1,8 @@
+
+data input_iyuv = image:1280,720,IYUV:READ,inputs/stm_1280x720.yuv
+data inter_luma = image:1280,720,U008
+node org.khronos.openvx.channel_extract input_iyuv !CHANNEL_Y inter_luma
+
+data output_threshold_image = image:1280,720,U008:WRITE,openvx_test_results/38_threshold_1280x720.yuv
+data input_threshold = threshold:BINARY,U008,U008:INIT,127
+node org.khronos.openvx.threshold inter_luma input_threshold output_threshold_image

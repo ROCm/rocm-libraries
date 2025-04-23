@@ -1,0 +1,22 @@
+version 1.0;
+
+graph CNTKGraph( input ) -> ( output )
+{
+    input = external<scalar>(shape = [3, 1, 28, 28]);
+    variable1 = variable<scalar>(shape = [8, 1, 5, 5], label = 'variable1');
+    variable2 = variable<scalar>(shape = [1, 8, 1, 1], label = 'variable2');
+    variable3 = variable<scalar>(shape = [16, 8, 5, 5], label = 'variable3');
+    variable4 = variable<scalar>(shape = [1, 16, 1, 1], label = 'variable4');
+    variable5 = variable<scalar>(shape = [1, 10], label = 'variable5');
+    variable6 = variable<scalar>(shape = [10, 256], label = 'variable6');
+    conv1 = conv(input, variable1, stride = [1, 1], dilation = [1, 1], padding = [], groups = 1);
+    add1 = add(conv1, variable2);
+    relu1 = relu(add1);
+    max_pool1 = max_pool(relu1, size = [1, 1, 2, 2], stride = [1, 1, 2, 2], dilation = [1, 1, 1, 1], padding = [(0, 0), (0, 0), (0, 0), (0, 0)], border = 'ignore');
+    conv2 = conv(max_pool1, variable3, stride = [1, 1], dilation = [1, 1], padding = [], groups = 1);
+    add2 = add(conv2, variable4);
+    relu2 = relu(add2);
+    max_pool2 = max_pool(relu2, size = [1, 1, 3, 3], stride = [1, 1, 3, 3], dilation = [1, 1, 1, 1], padding = [(0, 0), (0, 0), (0, 0), (0, 0)], border = 'ignore');
+    reshape1 = reshape(max_pool2, shape = [0, 256]);
+    output = linear(reshape1, variable6, variable5);
+}

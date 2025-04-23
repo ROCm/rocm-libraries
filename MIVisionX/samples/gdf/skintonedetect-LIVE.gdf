@@ -1,0 +1,50 @@
+# create input and output images
+data input  = image:480,360,RGB2
+data output = image:480,360,U008
+
+# specify input source for input image and request for displaying input and output images
+camera input 0
+view input  inputWindow
+view output skintoneWindow
+
+# threshold objects
+data thr95  = threshold:BINARY,U008,U008:INIT,95 # threshold for computing R > 95
+data thr40  = threshold:BINARY,U008,U008:INIT,40 # threshold for computing G > 40
+data thr20  = threshold:BINARY,U008,U008:INIT,20 # threshold for computing B > 20
+data thr15  = threshold:BINARY,U008,U008:INIT,15 # threshold for computing R-G > 15
+data thr0   = threshold:BINARY,U008,U008:INIT,0  # threshold for computing R-B > 0
+
+# virtual image objects for intermediate results
+data R      = image-virtual:0,0,U008
+data G      = image-virtual:0,0,U008
+data B      = image-virtual:0,0,U008
+data RmG    = image-virtual:0,0,U008
+data RmB    = image-virtual:0,0,U008
+data R95    = image-virtual:0,0,U008
+data G40    = image-virtual:0,0,U008
+data B20    = image-virtual:0,0,U008
+data RmG15  = image-virtual:0,0,U008
+data RmB0   = image-virtual:0,0,U008
+data and1   = image-virtual:0,0,U008
+data and2   = image-virtual:0,0,U008
+data and3   = image-virtual:0,0,U008
+
+# extract R,G,B channels and compute R-G and R-B
+node org.khronos.openvx.channel_extract input !CHANNEL_R R # extract R channel
+node org.khronos.openvx.channel_extract input !CHANNEL_G G # extract G channel
+node org.khronos.openvx.channel_extract input !CHANNEL_B B # extract B channel
+node org.khronos.openvx.subtract R   G   !SATURATE RmG  # compute R-G
+node org.khronos.openvx.subtract R   B   !SATURATE RmB  # compute R-B
+
+# compute threshold
+node org.khronos.openvx.threshold R   thr95 R95         # compute R > 95
+node org.khronos.openvx.threshold G   thr40 G40         # compute G > 40
+node org.khronos.openvx.threshold B   thr20 B20         # compute B > 20
+node org.khronos.openvx.threshold RmG thr15 RmG15       # compute RmG > 15
+node org.khronos.openvx.threshold RmB thr0  RmB0        # compute RmB > 0
+
+# aggregate all thresholded values to produce SKIN pixels
+node org.khronos.openvx.and R95   G40   and1            # compute R95 & G40
+node org.khronos.openvx.and and1  B20   and2            # compute B20 & and1
+node org.khronos.openvx.and RmG15 RmB0  and3            # compute RmG15 & RmB0
+node org.khronos.openvx.and and2 and3 output            # compute and2 & and3 as output

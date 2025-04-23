@@ -1,0 +1,126 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
+      <Extensions>cpp;c;cc;cxx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
+    </Filter>
+    <Filter Include="Header Files">
+      <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
+      <Extensions>h;hh;hpp;hxx;hm;inl;inc;xsd</Extensions>
+    </Filter>
+    <Filter Include="Resource Files">
+      <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
+      <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
+    </Filter>
+    <Filter Include="Header Files\kernels">
+      <UniqueIdentifier>{77e4d5b2-8e9f-4250-8d6f-dde058aa69b3}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\kernels">
+      <UniqueIdentifier>{34af00e9-36b1-4878-b0de-796cd627dba7}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="live_stitch_api.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="kernels\exp_comp.h">
+      <Filter>Header Files\kernels</Filter>
+    </ClInclude>
+    <ClInclude Include="kernels\kernels.h">
+      <Filter>Header Files\kernels</Filter>
+    </ClInclude>
+    <ClInclude Include="kernels\lens_distortion_remap.h">
+      <Filter>Header Files\kernels</Filter>
+    </ClInclude>
+    <ClInclude Include="kernels\seam_find.h">
+      <Filter>Header Files\kernels</Filter>
+    </ClInclude>
+    <ClInclude Include="kernels\multiband_blender.h">
+      <Filter>Header Files\kernels</Filter>
+    </ClInclude>
+    <ClInclude Include="kernels\pyramid_scale.h">
+      <Filter>Header Files\kernels</Filter>
+    </ClInclude>
+    <ClInclude Include="kernels\alpha_blend.h">
+      <Filter>Header Files\kernels</Filter>
+    </ClInclude>
+    <ClInclude Include="kernels\color_convert.h">
+      <Filter>Header Files\kernels</Filter>
+    </ClInclude>
+    <ClInclude Include="kernels\warp.h">
+      <Filter>Header Files\kernels</Filter>
+    </ClInclude>
+    <ClInclude Include="kernels\merge.h">
+      <Filter>Header Files\kernels</Filter>
+    </ClInclude>
+    <ClInclude Include="kernels\exposure_compensation.h">
+      <Filter>Header Files\kernels</Filter>
+    </ClInclude>
+    <ClInclude Include="kernels\chroma_key.h">
+      <Filter>Header Files\kernels</Filter>
+    </ClInclude>
+    <ClInclude Include="kernels\noise_filter.h">
+      <Filter>Header Files\kernels</Filter>
+    </ClInclude>
+    <ClInclude Include="kernels\warp_eqr_to_aze.h">
+      <Filter>Header Files\kernels</Filter>
+    </ClInclude>
+    <ClInclude Include="profiler.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="kernels\warp.cpp">
+      <Filter>Source Files\kernels</Filter>
+    </ClCompile>
+    <ClCompile Include="kernels\alpha_blend.cpp">
+      <Filter>Source Files\kernels</Filter>
+    </ClCompile>
+    <ClCompile Include="kernels\color_convert.cpp">
+      <Filter>Source Files\kernels</Filter>
+    </ClCompile>
+    <ClCompile Include="kernels\exp_comp.cpp">
+      <Filter>Source Files\kernels</Filter>
+    </ClCompile>
+    <ClCompile Include="kernels\exposure_compensation.cpp">
+      <Filter>Source Files\kernels</Filter>
+    </ClCompile>
+    <ClCompile Include="kernels\lens_distortion_remap.cpp">
+      <Filter>Source Files\kernels</Filter>
+    </ClCompile>
+    <ClCompile Include="kernels\merge.cpp">
+      <Filter>Source Files\kernels</Filter>
+    </ClCompile>
+    <ClCompile Include="kernels\pyramid_scale.cpp">
+      <Filter>Source Files\kernels</Filter>
+    </ClCompile>
+    <ClCompile Include="kernels\seam_find.cpp">
+      <Filter>Source Files\kernels</Filter>
+    </ClCompile>
+    <ClCompile Include="live_stitch_api.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="kernels\kernels.cpp">
+      <Filter>Source Files\kernels</Filter>
+    </ClCompile>
+    <ClCompile Include="kernels\multiband_blender.cpp">
+      <Filter>Source Files\kernels</Filter>
+    </ClCompile>
+    <ClCompile Include="kernels\chroma_key.cpp">
+      <Filter>Source Files\kernels</Filter>
+    </ClCompile>
+    <ClCompile Include="kernels\noise_filter.cpp">
+      <Filter>Source Files\kernels</Filter>
+    </ClCompile>
+    <ClCompile Include="kernels\warp_eqr_to_aze.cpp">
+      <Filter>Source Files\kernels</Filter>
+    </ClCompile>
+    <ClCompile Include="kernels\initialize_setup_tables.cpp">
+      <Filter>Source Files\kernels</Filter>
+    </ClCompile>
+    <ClCompile Include="profiler.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+</Project>

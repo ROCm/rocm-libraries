@@ -1,0 +1,419 @@
+body,
+div,
+table,
+thead,
+tbody,
+tfoot,
+tr,
+th,
+td,
+p {
+  font-family: "Liberation Sans", sans-serif;
+}
+
+.comment {
+  display: none;
+}
+
+a.comment-indicator:hover+.comment {
+  background: #ffd;
+  position: absolute;
+  display: block;
+  border: 1px solid black;
+  padding: 0.5em;
+}
+
+a.comment-indicator {
+  background: red;
+  display: inline-block;
+  border: 1px solid black;
+  width: 0.5em;
+  height: 0.5em;
+}
+
+tr:nth-of-type(odd) {
+  background-color: #f2f2f2;
+}
+
+#myImg {
+  border-radius: 5px;
+  cursor: pointer;
+  transition: 0.3s;
+}
+
+#myImg:hover {
+  opacity: 0.7;
+}
+
+.modal {
+  display: none;
+  position: fixed;
+  z-index: 8;
+  padding-top: 100px;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+  background-color: rgb(0, 0, 0);
+  background-color: rgba(0, 0, 0, 0.9);
+}
+
+.modal-content {
+  margin: auto;
+  display: block;
+  width: 80%;
+  max-width: 500px;
+}
+
+#caption {
+  margin: auto;
+  display: block;
+  width: 80%;
+  max-width: 700px;
+  text-align: center;
+  color: white;
+  font-size: 18px;
+  padding: 10px 0;
+  height: 150px;
+}
+
+.modal-content,
+#caption {
+  -webkit-animation-name: zoom;
+  -webkit-animation-duration: 0.6s;
+  animation-name: zoom;
+  animation-duration: 0.6s;
+}
+
+@-webkit-keyframes zoom {
+  from {
+    -webkit-transform: scale(0);
+  }
+
+  to {
+    -webkit-transform: scale(1);
+  }
+}
+
+@keyframes zoom {
+  from {
+    transform: scale(0);
+  }
+
+  to {
+    transform: scale(1);
+  }
+}
+
+.close {
+  position: absolute;
+  top: 15px;
+  right: 35px;
+  color: #f1f1f1;
+  font-size: 40px;
+  font-weight: bold;
+  transition: 0.3s;
+}
+
+.close:hover,
+.close:focus {
+  color: #bbb;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+@media only screen and (max-width: 400px) {
+  .modal-content {
+    width: 100%;
+  }
+}
+
+body {
+  font-family: "Lato", sans-serif;
+}
+
+.sidenav {
+  height: 100%;
+  width: 0;
+  position: fixed;
+  z-index: 7;
+  top: 0;
+  left: 0;
+  background-color: #111;
+  overflow-x: hidden;
+  transition: 0.5s;
+  padding-top: 60px;
+}
+
+.sidenav a {
+  padding: 8px 8px 8px 32px;
+  text-decoration: none;
+  font-size: 25px;
+  color: #818181;
+  display: block;
+  transition: 0.3s;
+}
+
+.sidenav a:hover {
+  color: #f1f1f1;
+}
+
+.sidenav .closebtn {
+  position: absolute;
+  top: 0;
+  right: 25px;
+  font-size: 36px;
+  margin-left: 50px;
+}
+
+#main {
+  transition: margin-left 0.5s;
+  padding: 16px;
+}
+
+@media screen and (max-height: 450px) {
+  .sidenav {
+    padding-top: 15px;
+  }
+
+  .sidenav a {
+    font-size: 18px;
+  }
+}
+
+body {
+  margin: 0;
+}
+
+.navbar {
+  overflow: hidden;
+  background-color: #333;
+  position: fixed;
+  z-index: 6;
+  top: 0;
+  width: 100%;
+}
+
+.navbar a {
+  float: left;
+  display: block;
+  color: #f2f2f2;
+  text-align: center;
+  padding: 14px 16px;
+  text-decoration: none;
+  font-size: 17px;
+}
+
+.navbar a:hover {
+  background: #ddd;
+  color: black;
+}
+
+.main {
+  padding: 16px;
+  margin-top: 30px;
+}
+
+select {
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  text-indent: 0;
+  text-overflow: '';
+  color: maroon;
+}
+
+.tooltip {
+  position: relative;
+  display: inline-block;
+}
+
+.tooltip .tooltiptext {
+  visibility: hidden;
+  width: 150px;
+  background-color: black;
+  color: gold;
+  text-align: center;
+  border-radius: 6px;
+  padding: 5px;
+  position: absolute;
+  z-index: 3;
+}
+
+.tooltip:hover .tooltiptext {
+  visibility: visible;
+}
+
+.footer {
+  position: fixed;
+  left: 0;
+  bottom: 0;
+  width: 100%;
+  background-color: #333;
+  color: white;
+  text-align: center;
+}
+
+#mySideNav .nav-item {
+  font-size: large;
+}
+
+.header {
+  color: dodgerblue;
+  font-size: 2em;
+  text-align: center;
+}
+
+.center {
+  text-align: center;
+  margin: auto;
+}
+
+.marron-header th {
+  color: maroon;
+}
+
+#top-5-match-table th {
+  color: maroon;
+  font-weight: bold;
+  text-align: center;
+}
+
+#image-results-table td {
+  font-size: small;
+}
+
+#image-results-table th {
+  color: maroon;
+  font-weight: bold;
+  text-align: center;
+  font-size: small;
+}
+
+#label-summary-table th {
+  color: maroon;
+  font-weight: bold;
+  text-align: center;
+}
+
+#label-summary-table th .blue {
+  color: blue;
+}
+
+#label-summary-table th .black {
+  color: black;
+}
+
+#label-summary-table tbody td {
+  font-size: small;
+  font-weight: bold;
+}
+
+.left-align {
+  text-align: left;
+  font-size: x-small !important;
+}
+
+.color-blue {
+  color: blue;
+}
+
+.color-green {
+  color: green;
+}
+
+.color-red {
+  color: red;
+}
+
+.color-black {
+  color: black;
+}
+
+.highlight-row {
+  background-color: #d5f5e3 !important;
+}
+
+#image-results-table {
+  width: 98%;
+}
+
+.bold {
+  font-weight: bold;
+}
+
+.item-count {
+  margin-left: 10px;
+  float: left;
+}
+
+.column {
+  float: left;
+  width: 50%;
+  text-align: center;
+}
+
+.row::after {
+  content: "";
+  display: table;
+  clear: both;
+}
+
+.column-3 {
+  float: left;
+  width: 24.5%;
+  border: 1px solid #ccc;
+}
+
+.scoring-table {
+  font-weight: bold;
+  width: 40%;
+}
+
+.score-heading {
+  color: darksalmon;
+  font-size: large;
+}
+
+.sort-field {
+  cursor: pointer;
+}
+
+.hidden {
+  display: none !important;
+}
+
+.pass-fail-chart {
+  border: 0 solid #ccc;
+  display: inline-block;
+}
+
+.result-history-check {
+  display: block;
+}
+
+#old-data-list {
+  text-align: left;
+  height: 600px;
+  margin-left: 10px;
+  overflow: auto;
+}
+
+.col-30 {
+  width: 30%;
+  float: left;
+}
+
+.col-70 {
+  width: 70%;
+  float: left;
+}
+
+#hierarchy-summary-table {
+  width: 80%;
+}
+
+#hierarchy-summary-table tbody {
+  font-size: small;
+  font-weight: bold;
+}

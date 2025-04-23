@@ -1,0 +1,1000 @@
+animal,sea,fish,,,tench
+animal,sea,fish,,,goldfish
+animal,sea,fish,cartilaginous,shark,great white shark
+animal,sea,fish,cartilaginous,shark,tiger shark
+animal,sea,fish,cartilaginous,shark,hammerhead
+animal,sea,fish,cartilaginous,,electric ray
+animal,sea,fish,cartilaginous,,stingray
+animal,bird,fowl,,,cock
+animal,bird,fowl,,,hen
+animal,bird,land,,,ostrich
+animal,bird,,,,brambling
+animal,bird,,,,goldfinch
+animal,bird,,,,house finch
+animal,bird,,,,junco
+animal,bird,,,,indigo bunting
+animal,bird,,,,robin
+animal,bird,,,,bulbul
+animal,bird,,,,jay
+animal,bird,,,,magpie (crow)
+animal,bird,,,,chickadee
+animal,bird,,,,water ouzel
+animal,bird,prey,,,kite
+animal,bird,prey,,,bald eagle
+animal,bird,prey,,,vulture
+animal,bird,owl,,,great grey
+animal,amphibian,salamander,,,salamander
+animal,amphibian,salamander,,,common newt
+animal,amphibian,salamander,,,eft
+animal,amphibian,salamander,,,spotted salamander
+animal,amphibian,salamander,,,mud puppy
+animal,amphibian,frog,,,bullfrog
+animal,amphibian,frog,,,tree frog
+animal,amphibian,frog,,,tailed frog
+animal,reptile,turtle,,,loggerhead
+animal,reptile,turtle,,,turtle
+animal,reptile,turtle,,,mud turtle
+animal,reptile,turtle,,,terrapin
+animal,reptile,turtle,,,box turtle
+animal,reptile,lizard,,,banded gecko
+animal,reptile,lizard,,,common iguana
+animal,reptile,lizard,,,American chameleon
+animal,reptile,lizard,,,whiptail
+animal,reptile,lizard,,,agama
+animal,reptile,lizard,,,frilled lizard
+animal,reptile,lizard,,,alligator lizard
+animal,reptile,lizard,venomous,,Gila monster
+animal,reptile,lizard,,,green lizard
+animal,reptile,lizard,,,African chameleon
+animal,reptile,lizard,,,Komodo dragon
+animal,reptile,crocodile,,,African crocodile
+animal,reptile,crocodile,,,American alligator
+animal,extinct,dinosaur,,,triceratops
+animal,reptile,snake,venomous,,thunder snake
+animal,reptile,snake,non-venomous,,ringneck snake
+animal,reptile,snake,non-venomous,,hognose snake
+animal,reptile,snake,non-venomous,,green snake
+animal,reptile,snake,non-venomous,,king snake
+animal,reptile,snake,non-venomous,,garter snake
+animal,reptile,snake,non-venomous,,water snake
+animal,reptile,snake,venomous,,vine snake
+animal,reptile,snake,venomous,,night snake
+animal,reptile,snake,non-venomous,,boa constrictor
+animal,reptile,snake,non-venomous,,rock python
+animal,reptile,snake,venomous,,Indian cobra
+animal,reptile,snake,venomous,,green mamba
+animal,reptile,snake,venomous,,sea snake
+animal,reptile,snake,non-venomous,,horned viper
+animal,reptile,snake,venomous,,diamondback rattlesnake
+animal,reptile,snake,venomous,,sidewinder
+animal,extinct,fossil,,,trilobite
+animal,arachnid,spider,,,harvestman
+animal,arachnid,scorpion,venomous,,scorpion
+animal,arachnid,spider,,,black and gold garden spider
+animal,arachnid,spider,,,barn spider
+animal,arachnid,spider,,,garden spider
+animal,arachnid,spider,venomous,,black widow
+animal,arachnid,spider,,,tarantula
+animal,arachnid,spider,,,wolf spider
+animal,insect,,,,tick
+animal,insect,,,,centipede
+animal,bird,,,,black grouse
+animal,bird,,,,ptarmigan
+animal,bird,,,,ruffed grouse
+animal,bird,fowl,,,prairie chicken
+animal,bird,,,,peacock
+animal,bird,,,,quail
+animal,bird,fowl,,,partridge
+animal,bird,,,,African grey
+animal,bird,,,,macaw
+animal,bird,,,,sulphur-crested cockatoo
+animal,bird,,,,lorikeet
+animal,bird,,,,coucal
+animal,bird,,,,bee eater
+animal,bird,,,,hornbill
+animal,bird,hummingbird,,,hummingbird
+animal,bird,,,,jacamar
+animal,bird,,,,toucan
+animal,bird,fowl,,,drake
+animal,bird,,,,red-breasted merganser
+animal,bird,fowl,,,goose
+animal,bird,,,,black swan
+animal,mammal,elephant,elephant,,tusker
+animal,mammal,placental mammal,,,"echidna, spiny anteater"
+animal,mammal,monotreme,,,platypus
+animal,mammal,marsupial,,,wallaby
+animal,mammal,marsupial,,,koala
+animal,mammal,marsupial,,,wombat
+animal,invertebrate,jellyfish,,,jellyfish
+animal,sea,,,,sea anemone
+animal,sea,,,,brain coral
+animal,invertebrate,,,,flatworm
+animal,parasite,,,,nematode
+animal,mollusc,,,,conch
+animal,mollusc,,,,snail
+animal,mollusc,,,,slug
+animal,mollusc,,,,sea slug
+animal,mollusc,,,,chiton
+animal,mollusc,,,,chambered nautilus
+animal,crustacean,crab,,,Dungeness crab
+animal,crustacean,crab,,,rock crab
+animal,crustacean,crab,,,fiddler crab
+animal,crustacean,crab,,,king crab
+animal,crustacean,lobster,,,American lobster
+animal,crustacean,lobster,,,spiny lobster
+animal,crustacean,lobster,,,crayfish
+animal,crustacean,crab,,,hermit crab
+animal,crustacean,,,,isopod
+animal,bird,,,,white stork
+animal,bird,,,,black stork
+animal,bird,,,,spoonbill
+animal,bird,,,,flamingo
+animal,bird,,,,little blue
+animal,bird,,,,American egret
+animal,bird,,,,bittern
+animal,bird,,,,crane
+animal,bird,,,,limpkin
+animal,bird,,,,European gallinule
+animal,bird,,,,American coot
+animal,bird,,,,bustard
+animal,bird,,,,ruddy turn stone
+animal,bird,,,,red-backed sandpiper
+animal,bird,,,,redshank
+animal,bird,,,,dowitcher
+animal,bird,,,,oystercatcher
+animal,bird,,,,pelican
+animal,bird,water bird,,,king penguin
+animal,bird,,,,albatross
+animal,mammal,marine mammal,whale,,grey whale
+animal,mammal,marine mammal,whale,,killer whale
+animal,mammal,marine mammal,,,dugong
+animal,mammal,carnivora,Caniformia,pinniped,sea lion
+animal,mammal,carnivora,dog-like,dog,Chihuahua
+animal,mammal,carnivora,dog-like,dog,Japanese spaniel
+animal,mammal,carnivora,dog-like,dog,Maltese dog
+animal,mammal,carnivora,dog-like,dog,Pekinese
+animal,mammal,carnivora,dog-like,dog,Shih-Tzu
+animal,mammal,carnivora,dog-like,dog,Blenheim spaniel
+animal,mammal,carnivora,dog-like,dog,papillon
+animal,mammal,carnivora,dog-like,dog,toy terrier
+animal,mammal,carnivora,dog-like,dog,Rhodesian ridgeback
+animal,mammal,carnivora,dog-like,dog,Afghan hound
+animal,mammal,carnivora,dog-like,dog,basset
+animal,mammal,carnivora,dog-like,dog,beagle
+animal,mammal,carnivora,dog-like,dog,bloodhound
+animal,mammal,carnivora,dog-like,dog,bluetick
+animal,mammal,carnivora,dog-like,dog,black-and-tan coonhound
+animal,mammal,carnivora,dog-like,dog,Walker hound
+animal,mammal,carnivora,dog-like,dog,English foxhound
+animal,mammal,carnivora,dog-like,dog,redbone
+animal,mammal,carnivora,dog-like,dog,borzoi
+animal,mammal,carnivora,dog-like,dog,Irish wolf
+animal,mammal,carnivora,dog-like,dog,Italian greyhound
+animal,mammal,carnivora,dog-like,dog,whippet
+animal,mammal,carnivora,dog-like,dog,Ibizan hound
+animal,mammal,carnivora,dog-like,dog,Norwegian elkhound
+animal,mammal,carnivora,dog-like,dog,otterhound
+animal,mammal,carnivora,dog-like,dog,Saluki
+animal,mammal,carnivora,dog-like,dog,Scottish deerhound
+animal,mammal,carnivora,dog-like,dog,Weimaraner
+animal,mammal,carnivora,dog-like,dog,Staffordshire bullterrier
+animal,mammal,carnivora,dog-like,dog,American Staffordshire terrier
+animal,mammal,carnivora,dog-like,dog,Bedlington terrier
+animal,mammal,carnivora,dog-like,dog,Border terrier
+animal,mammal,carnivora,dog-like,dog,Kerry blue terrier
+animal,mammal,carnivora,dog-like,dog,Irish terrier
+animal,mammal,carnivora,dog-like,dog,Norfolk terrier
+animal,mammal,carnivora,dog-like,dog,Norwich terrier
+animal,mammal,carnivora,dog-like,dog,Yorkshire terrier
+animal,mammal,carnivora,dog-like,dog,wire-haired fox terrier
+animal,mammal,carnivora,dog-like,dog,Lakeland terrier
+animal,mammal,carnivora,dog-like,dog,Sealyham terrier
+animal,mammal,carnivora,dog-like,dog,Airedale
+animal,mammal,carnivora,dog-like,dog,cairn
+animal,mammal,carnivora,dog-like,dog,Australian terrier
+animal,mammal,carnivora,dog-like,dog,Dandie Dinmont
+animal,mammal,carnivora,dog-like,dog,Boston bull
+animal,mammal,carnivora,dog-like,dog,miniature schnauzer
+animal,mammal,carnivora,dog-like,dog,giant schnauzer
+animal,mammal,carnivora,dog-like,dog,standard schnauzer
+animal,mammal,carnivora,dog-like,dog,Scotch terrier
+animal,mammal,carnivora,dog-like,dog,Tibetan terrier
+animal,mammal,carnivora,dog-like,dog,silky terrier
+animal,mammal,carnivora,dog-like,dog,soft-coated wheaten terrier
+animal,mammal,carnivora,dog-like,dog,West Highland white terrier
+animal,mammal,carnivora,dog-like,dog,Lhasa
+animal,mammal,carnivora,dog-like,dog,flat-coated retriever
+animal,mammal,carnivora,dog-like,dog,curly-coat retriever
+animal,mammal,carnivora,dog-like,dog,golden retriever
+animal,mammal,carnivora,dog-like,dog,Labrador retriever
+animal,mammal,carnivora,dog-like,dog,Chesapeake Bay retriever
+animal,mammal,carnivora,dog-like,dog,German short-haired pointer
+animal,mammal,carnivora,dog-like,dog,"vizsla, Hungarian pointer"
+animal,mammal,carnivora,dog-like,dog,English setter
+animal,mammal,carnivora,dog-like,dog,Irish setter
+animal,mammal,carnivora,dog-like,dog,Gordon setter
+animal,mammal,carnivora,dog-like,dog,Brittany spaniel
+animal,mammal,carnivora,dog-like,dog,clumber
+animal,mammal,carnivora,dog-like,dog,English springer
+animal,mammal,carnivora,dog-like,dog,Welsh springer spaniel
+animal,mammal,carnivora,dog-like,dog,cocker spaniel
+animal,mammal,carnivora,dog-like,dog,Sussex spa
+animal,mammal,carnivora,dog-like,dog,Irish water spaniel
+animal,mammal,carnivora,dog-like,dog,kuvasz
+animal,mammal,carnivora,dog-like,dog,schipperke
+animal,mammal,carnivora,dog-like,dog,groenendael
+animal,mammal,carnivora,dog-like,dog,malinois
+animal,mammal,carnivora,dog-like,dog,briard
+animal,mammal,carnivora,dog-like,dog,kelpie
+animal,mammal,carnivora,dog-like,dog,komondor
+animal,mammal,carnivora,dog-like,dog,Old English sheepdog
+animal,mammal,carnivora,dog-like,dog,Shetland sheepdog
+animal,mammal,carnivora,dog-like,dog,collie
+animal,mammal,carnivora,dog-like,dog,Border collie
+animal,mammal,carnivora,dog-like,dog,Bouvier des Flandres
+animal,mammal,carnivora,dog-like,dog,Rottweiler
+animal,mammal,carnivora,dog-like,dog,German shepherd
+animal,mammal,carnivora,dog-like,dog,Doberman
+animal,mammal,carnivora,dog-like,dog,miniature pinscher
+animal,mammal,carnivora,dog-like,dog,Greater Swiss Mountain dog
+animal,mammal,carnivora,dog-like,dog,Bernese mountain dog
+animal,mammal,carnivora,dog-like,dog,Appenzeller
+animal,mammal,carnivora,dog-like,dog,EntleBucher
+animal,mammal,carnivora,dog-like,dog,boxer
+animal,mammal,carnivora,dog-like,dog,bull mastiff
+animal,mammal,carnivora,dog-like,dog,Tibetan mastiff
+animal,mammal,carnivora,dog-like,dog,French bulldog
+animal,mammal,carnivora,dog-like,dog,Great Dane
+animal,mammal,carnivora,dog-like,dog,Saint Bernard
+animal,mammal,carnivora,dog-like,dog,Eskimo dog
+animal,mammal,carnivora,dog-like,dog,malamute
+animal,mammal,carnivora,dog-like,dog,Siberian husky
+animal,mammal,carnivora,dog-like,dog,dalmatian
+animal,mammal,carnivora,dog-like,dog,affenpinscher
+animal,mammal,carnivora,dog-like,dog,basenji
+animal,mammal,carnivora,dog-like,dog,pug
+animal,mammal,carnivora,dog-like,dog,Leonberg
+animal,mammal,carnivora,dog-like,dog,Newfoundland
+animal,mammal,carnivora,dog-like,dog,Great Pyrenees
+animal,mammal,carnivora,dog-like,dog,Samoyed
+animal,mammal,carnivora,dog-like,dog,Pomeranian
+animal,mammal,carnivora,dog-like,dog,chow
+animal,mammal,carnivora,dog-like,dog,keeshond
+animal,mammal,carnivora,dog-like,dog,Brabancon griffon
+animal,mammal,carnivora,dog-like,dog,Pembroke
+animal,mammal,carnivora,dog-like,dog,Cardigan
+animal,mammal,carnivora,dog-like,dog,toy poodle
+animal,mammal,carnivora,dog-like,dog,miniature poodle
+animal,mammal,carnivora,dog-like,dog,standard poodle
+animal,mammal,carnivora,dog-like,dog,Mexican hairless
+animal,mammal,carnivora,dog-like,wolf,timber wolf
+animal,mammal,carnivora,dog-like,wolf,white wolf
+animal,mammal,carnivora,dog-like,wolf,red wolf
+animal,mammal,carnivora,dog-like,,coyote
+animal,mammal,carnivora,dog-like,,dingo
+animal,mammal,carnivora,dog-like,,dhole
+animal,mammal,carnivora,dog-like,dog,African hunting dog
+animal,mammal,carnivora,dog-like,,hyena
+animal,mammal,carnivora,dog-like,fox,red fox
+animal,mammal,carnivora,dog-like,fox,kit fox
+animal,mammal,carnivora,dog-like,fox,Arctic fox
+animal,mammal,carnivora,dog-like,fox,grey fox
+animal,mammal,carnivora,feline,house,tabby
+animal,mammal,carnivora,feline,house,tiger cat
+animal,mammal,carnivora,feline,house,Persian cat
+animal,mammal,carnivora,feline,house,Siamese cat
+animal,mammal,carnivora,feline,house,Egyptian cat
+animal,mammal,carnivora,feline,wild,cougar
+animal,mammal,carnivora,feline,wild,lynx
+animal,mammal,carnivora,feline,wild,leopard
+animal,mammal,carnivora,feline,wild,snow leopard
+animal,mammal,carnivora,feline,wild,jaguar
+animal,mammal,carnivora,feline,wild,lion
+animal,mammal,carnivora,feline,wild,tiger
+animal,mammal,carnivora,feline,wild,cheetah
+animal,mammal,carnivora,dog-like,bear,brown bear
+animal,mammal,carnivora,dog-like,bear,American black bear
+animal,mammal,carnivora,dog-like,bear,ice bear
+animal,mammal,carnivora,dog-like,bear,sloth bear
+animal,mammal,carnivora,dog-like,,mongoose
+animal,mammal,carnivora,dog-like,,meerkat
+animal,insect,,,,tiger beetle
+animal,insect,winged,,,ladybug
+animal,insect,,,,ground beetle
+animal,insect,,,,long-horned beetle
+animal,insect,,,,leaf beetle
+animal,insect,,,,dung beetle
+animal,insect,,,,rhinoceros beetle
+animal,insect,,,,weevil
+animal,insect,winged,,,fly
+animal,insect,winged,,,bee
+animal,insect,,,,ant
+animal,insect,winged,,,grasshopper
+animal,insect,winged,,,cricket
+animal,insect,,,,walking stick
+animal,insect,,,,cockroach
+animal,insect,winged,,,mantis
+animal,insect,winged,,,cicada
+animal,insect,jumping,,,leafhopper
+animal,insect,winged,,,lacewing
+animal,insect,winged,,,dragonfly
+animal,insect,winged,,,damselfly
+animal,insect,winged,butterfly,,admiral
+animal,insect,winged,butterfly,,ringlet
+animal,insect,winged,butterfly,,monarch
+animal,insect,winged,butterfly,,cabbage butterfly
+animal,insect,winged,butterfly,,sulphur butterfly
+animal,insect,winged,butterfly,,lycaenid
+animal,sea,,,,starfish
+animal,sea,,,,sea urchin
+animal,sea,,,,sea cucumber
+animal,mammal,hares & rabbits,rabbit,,wood rabbit
+animal,mammal,hares & rabbits,hare,,hare
+animal,mammal,hares & rabbits,rabbit,,Angora
+animal,mammal,rodent,,,hamster
+animal,mammal,rodent,,,porcupine
+animal,mammal,rodent,,,fox squirrel
+animal,mammal,rodent,,,marmot
+animal,mammal,rodent,,,beaver
+animal,mammal,rodent,,,guinea pig
+animal,mammal,hoofed,grazing,horse,sorrel
+animal,mammal,hoofed,grazing,,zebra
+animal,mammal,hoofed,,,hog
+animal,mammal,carnivora,dog-like,,wild boar
+animal,mammal,hoofed,,,warthog
+animal,mammal,hoofed,semi-aquatic,,hippopotamus
+animal,mammal,hoofed,grazing,,ox
+animal,mammal,hoofed,grazing,,water buffalo
+animal,mammal,hoofed,grazing,,bison
+animal,mammal,hoofed,grazing,,ram
+animal,mammal,hoofed,grazing,sheep,bighorn
+animal,mammal,hoofed,,,ibex
+animal,mammal,hoofed,grazing,,hartebeest
+animal,mammal,hoofed,grazing,,impala
+animal,mammal,hoofed,grazing,,gazelle
+animal,mammal,hoofed,camel,,Arabian camel
+animal,mammal,hoofed,grazing,,llama
+animal,mammal,carnivora,dog-like,,weasel
+animal,mammal,carnivora,dog-like,,mink
+animal,mammal,carnivora,dog-like,ferret,polecat
+animal,mammal,carnivora,dog-like,ferret,black-footed ferret
+animal,mammal,carnivora,dog-like,water,otter
+animal,mammal,carnivora,dog-like,,skunk
+animal,mammal,carnivora,dog-like,,badger
+animal,mammal,placental mammal,,,armadillo
+animal,mammal,placental mammal,,,three-toed sloth
+animal,mammal,primate,ape,,orangutan
+animal,mammal,primate,ape,,gorilla
+animal,mammal,primate,ape,,chimpanzee
+animal,mammal,primate,ape,gibbon,gibbon
+animal,mammal,primate,ape,gibbon,siamang
+animal,mammal,primate,old world monkey,,guenon
+animal,mammal,primate,old world monkey,,patas
+animal,mammal,primate,old world monkey,,baboon
+animal,mammal,primate,old world monkey,,macaque
+animal,mammal,primate,old world monkey,,langur
+animal,mammal,primate,old world monkey,,colobus
+animal,mammal,primate,old world monkey,,proboscis monkey
+animal,mammal,primate,new world monkey,,marmoset
+animal,mammal,primate,new world monkey,,capuchin
+animal,mammal,primate,new world monkey,,howler monkey
+animal,mammal,primate,new world monkey,,titi
+animal,mammal,primate,new world monkey,,spider monkey
+animal,mammal,primate,new world monkey,,squirrel monkey
+animal,mammal,primate,lemur,lemur,ring-tailed lemur
+animal,mammal,primate,lemur,lemur,indri
+animal,mammal,elephant,elephant,,Indian elephant
+animal,mammal,elephant,elephant,,African elephant
+animal,mammal,carnivora,dog-like,panda,lesser panda
+animal,mammal,carnivora,dog-like,panda,giant panda
+animal,sea,fish,,,barracouta
+animal,sea,fish,,,eel
+animal,sea,fish,salmon,,coho
+animal,sea,fish,,,rock beauty
+animal,sea,fish,,,aka clown fish
+animal,sea,fish,,,sturgeon
+animal,sea,fish,,,gar
+animal,sea,fish,,,lionfish
+animal,sea,fish,,,puffer
+artifact,tool,calculation,,,abacus
+artifact,clothing,over garment,,,abaya
+artifact,clothing,over garment,,,academic gown
+artifact,music,instrument,portable,,accordion
+artifact,music,instrument,portable,,acoustic guitar
+artifact,military,vehicle,naval,,aircraft carrier
+artifact,vehicle,air,,,airliner
+artifact,vehicle,air,,,airship
+place,religious,structure,,,altar
+artifact,vehicle,land,street,,ambulance
+artifact,vehicle,vehicle,,,amphibian
+artifact,measure,time,,,analog clock
+artifact,place,bees,,,apiary
+artifact,clothing,over garment,,,apron
+artifact,container,trash,,,trash can
+artifact,military,weapon,handheld,,assault rifle
+artifact,sports,equipment,,,backpack
+place,shop,food,bread,,bakery
+artifact,sports,equipment,gym,,balance beam
+artifact,vehicle,air,,,balloon
+artifact,office,tool,writing,,ballpoint pen
+artifact,medical,dressing,,,Band Aid
+artifact,music,instrument,portable,,banjo
+artifact,home,,,,bannister
+artifact,sports,equipment,,,barbell
+artifact,furniture,haircut,,,barber chair
+place,shop,hair,,,barbershop
+artifact,structure,farm,,,barn
+artifact,tool,measure,,,barometer
+artifact,container,,,,barrel
+artifact,tool,transporting,,,wheelbarrow
+artifact,sports,ball,,,baseball
+artifact,sports,ball,,,basketball
+artifact,home,bedroom,furniture,infant,bassinet
+artifact,music,instrument,portable,,bassoon
+artifact,clothing,swimming,,,bathing cap
+artifact,bathroom,fabric,,,bath towel
+artifact,bathroom,water,,,bathtub
+artifact,vehicle,land,transportation,,station wagon
+artifact,structure,navigation,lighting,,lighthouse
+artifact,lab,container,,,beaker
+artifact,misc,,,,bearskin
+artifact,food,container,,,beer bottle
+artifact,home,kitchen,drinking,,beer glass
+artifact,structure,bell tower,,,bell cote
+artifact,clothing,infant,,,bib
+artifact,vehicle,sports,transportation,,tandem bicycle
+artifact,clothing,swimming,,,bikini
+artifact,office,storage,paper,,binder
+artifact,sport,equipment,,,binoculars
+artifact,misc,,,,birdhouse
+place,storage,water,boat,,boathouse
+artifact,sports,equipment,,,bobsled
+artifact,clothing,neck,,,bolo tie
+artifact,clothing,headwear,,,bonnet
+artifact,office,storage,book,,bookcase
+place,shop,book,,,bookshop
+artifact,home,kitchen,drinking,,bottlecap
+artifact,weapon,,,,bow
+artifact,clothing,neck,,,bow tie
+artifact,plaque,,,,plaque
+artifact,clothing,undergarment,,,brassiere
+place,water,,,,breakwater
+artifact,armor,,,,breastplate
+artifact,home,cleaning,,,broom
+artifact,home,storage,,,bucket
+artifact,connector,buckle,,,buckle
+artifact,clothing,protective,,,bulletproof vest
+artifact,vehicle,land,rail,,bullet train
+place,shop,food,meat,,butcher shop
+artifact,vehicle,land,hire,,cab
+artifact,pot,,,,caldron
+artifact,home,lighting,fire,,candle
+artifact,military,weapon,,,cannon
+artifact,vehicle,water,transportation,,canoe
+artifact,home,kitchen,tool,,can opener
+artifact,clothing,over garment,,,cardigan
+artifact,vehicle,land,part,,car mirror
+artifact,entertainment,ride,,,carousel
+artifact,tool,carpenter,,,carpenter's kit
+artifact,storage,,,,carton
+artifact,vehicle,land,part,,car wheel
+artifact,place,money,,,ATM
+artifact,electronics,audio,,,cassette
+artifact,electronics,audio,,,cassette player
+artifact,structure,fortified,,,castle
+artifact,vehicle,water,transportation,,catamaran
+artifact,music,player,,,CD player
+artifact,music,instrument,portable,,cello
+artifact,electronics,communication,,,mobile phone
+artifact,chain ,,,,chain
+artifact,barrier,fence,,,chainlink
+artifact,armor,,,,chain mail
+artifact,tool,cutting,,,chain saw
+artifact,storage,,,,chest
+artifact,bathroom,,,,chiffonier
+artifact,decoration,chime,,,chime
+artifact,home,storage,china,,china cabinet
+artifact,home,seasonal,,,Christmas stocking
+place,religious,structure,,,church
+place,entertainment,movie,,,cinema
+artifact,home,kitchen,tool,,cleaver
+place,ancient,,,,cliff dwelling
+artifact,clothing,over garment,,,cloak
+artifact,clothing,shoe,,,clog
+artifact,home,kitchen,,,cocktail 
+artifact,home,kitchen,drinking,,coffee mug
+artifact,home,kitchen,drinking,,coffeepot
+artifact,spiral,,,,"coil, spiral"
+artifact,security,lock,,,combination lock
+artifact,office,computer,part,,computer keyboard
+place,shop,food,dessert,,candy store
+artifact,vehicle,water,transportation,,container ship
+artifact,vehicle,land,transportation,,convertible
+artifact,home,kitchen,tool,,corkscrew
+artifact,music,instrument,portable,,cornet
+artifact,clothing,shoe,,,cowboy boot
+artifact,clothing,headwear,,,cowboy hat
+artifact,home,bedroom,furniture,infant,cradle
+artifact,construction,crane,,,crane
+artifact,sports,equipment,,,crash helmet
+artifact,storage,,,,crate
+artifact,home,bedroom,furniture,infant,crib
+artifact,home,kitchen,cooking,,Crock Pot
+artifact,sports,ball,,,croquet ball
+artifact,medical,aid,,,crutch
+artifact,armor,,,,cuirass
+artifact,container,water,,,dam
+artifact,office,furniture,,,desk
+artifact,office,computer,,,desktop computer
+artifact,office,communication,,,dial telephone
+artifact,bathroom,infant,,,diaper
+artifact,electronics,time,,,digital clock
+artifact,electronics,time,,,digital watch
+artifact,home,kitchen,,,dining table
+artifact,home,kitchen,,,dishrag
+artifact,home,kitchen,cleaning,,dishwasher
+artifact,vehicle,land,part,,disk brake
+place,water,boat,,,dock
+artifact,sports,equipment,,,dogsled
+artifact,place,,,,dome
+artifact,home,cleaning,,,doormat
+artifact,tool,oil,,,drilling platform
+artifact,music,instrument,portable,,drum
+artifact,music,tool,,,drumstick
+artifact,sports,equipment,,,dumbbell
+artifact,home,kitchen,cooking,,Dutch oven
+artifact,home,heating,,,electric fan
+artifact,music,instrument,portable,,electric guitar
+artifact,vehicle,land,rail,,electric locomotive
+artifact,home,entertainment,,,entertainment center
+artifact,office,paper,,,envelope
+artifact,home,kitchen,drinking,,espresso maker
+artifact,bathroom,cosmetic,,,face powder
+artifact,clothing,decorative,,,feather boa
+artifact,office,storage,paper,,filing cabinet
+artifact,vehicle,water,,,fireboat
+artifact,vehicle,land,street,,fire engine
+artifact,home,heating,,,fire screen
+artifact,office,outside,,,flagpole
+artifact,music,instrument,portable,,flute
+artifact,home,furniture,,,folding chair
+artifact,sports,equipment,,,football helmet
+artifact,vehicle,land,lifting,,forklift
+artifact,decorative,water,,,fountain
+artifact,office,tool,writing,,fountain pen
+artifact,home,bedroom,furniture,,four-poster
+artifact,vehicle,land,rail,,freight car
+artifact,music,instrument,portable,,French horn
+artifact,home,kitchen,cooking,,frying pan
+artifact,clothing,over garment,,,fur coat
+artifact,vehicle,land,utility,,garbage truck
+artifact,medical,mask,,,gasmask
+artifact,place,fuel,,,gas pump
+artifact,home,kitchen,drinking,,goblet
+artifact,vehicle,land,street,,go-kart
+artifact,sports,ball,,,golf ball
+artifact,vehicle,sports,transportation,,golfcart
+artifact,vehicle,water,transportation,,gondola
+artifact,misc,,,,gong
+artifact,clothing,dress,,,gown
+artifact,music,instrument,stationary,,grand piano
+artifact,place,plants,,,greenhouse
+artifact,vehicle,land,part,,grille
+place,shop,food,,,grocery store
+artifact,military,weapon,,,guillotine
+artifact,clothing,hair pin,,,hair slide
+artifact,bathroom,cosmetic,,,hair spray
+artifact,military,vehicle,land,,half track
+artifact,tool,carpenter,hitting,,hammer
+artifact,bathroom,clothes,,,hamper
+artifact,bathroom,electric,blower,,hand blower
+artifact,office,computer,,,hand-held
+artifact,clothing,,,,handkerchief
+artifact,office,computer,part,,hard disc
+artifact,music,instrument,portable,,harmonica
+artifact,music,instrument,stationary,,harp
+artifact,vehicle,land,farming,,harvester
+artifact,tool,cutting,,,hatchet
+artifact,clothing,belt,,,holster
+artifact,home,entertainment,,,home theater
+nature,animal,wax,,,honeycomb
+artifact,tool,,,,"hook, claw"
+artifact,clothing,skirt,,,hoopskirt
+artifact,sports,equipment,gym,,horizontal bar
+artifact,vehicle,land,,,horse cart
+artifact,home,kitchen,tool,,hourglass
+artifact,music,player,,,iPod
+artifact,home,,,,iron
+artifact,home,decoration,,,jack-o'-lantern
+artifact,clothing,,,,jean
+artifact,vehicle,land,transportation,,jeep
+artifact,clothing,,,,tee shirt
+artifact,entertainment,puzzle,,,jigsaw puzzle
+artifact,vehicle,land,,,jinrikisha
+artifact,office,computer,part,,joystick
+artifact,clothing,robe,,,kimono
+artifact,clothing,protective,,,knee pad
+artifact,home,,,,knot
+artifact,office,clothing,,,lab coat
+artifact,home,kitchen,utensil,,ladle
+artifact,home,lighting,,,lampshade
+artifact,office,computer,,,laptop
+artifact,tool,cutting,garden,,lawn mower
+artifact,photo,camera,equipment,,lens cap
+artifact,office,tool,paper,,letter opener
+place,collection,book,,,library
+artifact,vehicle,water,transportation,,lifeboat
+artifact,home,,,,lighter
+artifact,vehicle,land,hire,,limousine
+artifact,vehicle,water,transportation,,ocean liner
+artifact,bathroom,cosmetic,,,lipstick
+artifact,clothing,shoe,,,Loafer
+artifact,bathroom,cosmetic,,,lotion
+artifact,home,entertainment,,,loudspeaker
+artifact,tool,jeweler,,,loupe
+place,factory,wood,,,lumbermill
+artifact,home,navigation,,,magnetic compass
+artifact,container,,,,mailbag
+artifact,place,,,,mailbox
+artifact,clothing,swimming,,,maillot
+artifact,clothing,,,,maillot
+artifact,street,,,,manhole cover
+artifact,music,instrument,portable,,maraca
+artifact,music,instrument,portable,,marimba
+artifact,mask,,,,mask
+artifact,home,lighting,fire,,matchstick
+artifact,entertainment,,,,maypole
+artifact,entertainment,puzzle,,,maze
+artifact,home,kitchen,measuring,,measuring cup
+artifact,bathroom,storage,medicine,,medicine chest
+nature,geological,,,,megalith
+artifact,electronics,audio,,,microphone
+artifact,home,kitchen,cooking,,microwave
+artifact,military,clothing,,,military uniform
+artifact,container,milk,,,milk can
+artifact,vehicle,land,transportation,,minibus
+artifact,clothing,skirt,,,miniskirt
+artifact,vehicle,land,transportation,,minivan
+artifact,military,weapon,,,missile
+artifact,clothing,hand,,,mitten
+artifact,home,kitchen,cooking,,mixing bowl
+artifact,vehicle,land,,,mobile home
+artifact,vehicle,land,transportation,,Model T
+artifact,office,communication,,,modem
+place,religious,structure,,,monastery
+artifact,office,computer,display,,monitor
+artifact,vehicle,land,transportation,,moped
+artifact,home,kitchen,tool,bowl and crusher,mortar
+artifact,clothing,headwear,,,mortarboard
+place,religious,structure,,,mosque
+artifact,misc,,,,mosquito net
+artifact,vehicle,land,transportation,,motor scooter
+artifact,vehicle,sports,transportation,,mountain bike
+artifact,outdoors,equipment,,,mountain tent
+artifact,office,computer,part,,computer mouse
+artifact,misc,,,,mousetrap
+artifact,vehicle,land,,,moving van
+artifact,military,weapon,,,muzzle
+artifact,tool,connector,,,nail
+artifact,medical,aid,,,neck brace
+artifact,clothing,neck,,,necklace
+artifact,home,infant,,,nipple
+artifact,office,computer,,,notebook computer
+artifact,monument,,,,obelisk
+artifact,music,instrument,portable,,oboe
+artifact,music,instrument,portable,,ocarina
+artifact,vehicle,land,part,,odometer
+artifact,vehicle,land,part,,oil filter
+artifact,music,instrument,stationary,,pipe organ
+artifact,tool,measure,,,oscilloscope
+artifact,clothing,skirt,,,overskirt
+artifact,vehicle,land,,,oxcart
+artifact,medical,mask,,,oxygen mask
+artifact,misc,,,,packet
+artifact,vehicle,water,part,,paddle
+artifact,vehicle,water,part,,paddlewheel
+artifact,security,lock,,,padlock
+artifact,tool,painting,,,paintbrush
+artifact,clothing,sleep,,,pajama
+place,royalty,structure,,,palace
+artifact,music,instrument,portable,,panpipe
+artifact,bathroom,paper,,,paper towel
+artifact,sports,equipment,,,parachute
+artifact,sports,equipment,gym,,parallel bars
+artifact,outdoors,furniture,,,park bench
+artifact,city,street,parking,,parking meter
+artifact,vehicle,land,rail,,passenger car
+artifact,outdoors,,,,patio
+artifact,place,communication,,,pay-phone
+artifact,misc,,,,pedestal
+artifact,office,storage,tools,writing,pencil box
+artifact,office,tool,writing,,pencil sharpener
+artifact,bathroom,cosmetic,,,perfume
+artifact,lab,container,,,Petri dish
+artifact,office,copier,,,photocopier
+artifact,music,tool,,,pick
+artifact,armor,,,,pickelhaube
+artifact,outdoors,fence,,,picket fence
+artifact,vehicle,land,transportation,,pickup truck
+place,water,boat,,,pier
+artifact,container,money,,,piggy bank
+artifact,bathroom,container,medicine,,pill bottle
+artifact,home,bedroom,,,pillow
+artifact,sports,ball,,,ping-pong
+artifact,decoration,,,,pinwheel
+artifact,vehicle,water,,,pirate ship
+artifact,home,kitchen,drinking,,pitcher
+artifact,tool,cutting,wood,,woodworking plane
+place,learn,astronomy,,,planetarium
+artifact,home,kitchen,,,plastic bag
+artifact,home,kitchen,,,plate rack
+artifact,tool,farming,,,plow
+artifact,bathroom,tool,,,plunger
+artifact,photo,camera,,,Polaroid camera
+artifact,misc,,,,pole
+artifact,vehicle,land,street,,police van
+artifact,clothing,over garment,,,poncho
+artifact,sports,equipment,,,pool table
+artifact,food,container,,,pop bottle
+artifact,home,decoration,,,flowerpot
+artifact,home,tool,,,potter's wheel
+artifact,tool,cutting,wood,,power drill
+artifact,religious,mat,,,prayer rug
+artifact,office,computer,printer,,printer
+place,structure,confinment,prison,,prison
+artifact,military,weapon,,,missile
+artifact,office,computer,display,,projector
+artifact,sports,equipment,,,puck
+artifact,sports,equipment,,,punching bag
+artifact,clothing,storage,,,purse
+artifact,office,tool,writing,,quill
+artifact,home,bedroom,,,quilt
+artifact,vehicle,sports,sports,,racer
+artifact,sports,equipment,,,racket
+artifact,vehicle,land,part,,radiator
+artifact,electronics,communication,,,radio
+artifact,tool,,,,radio telescope
+artifact,container,water,,,rain barrel
+artifact,vehicle,land,,,recreational vehicle
+artifact,sports,equipment,,,reel
+artifact,photo,camera,,,reflex cam
+artifact,home,kitchen,storage,,refrigerator
+artifact,home,entertainment,,,remote control
+place,shop,food,prepared,,restaurant
+artifact,military,weapon,handheld,,revolver
+artifact,military,weapon,handheld,,rifle
+artifact,home,furniture,,,rocking chair
+artifact,home,kitchen,cooking,,rotisserie
+artifact,office,tool,writing,,rubber eraser
+artifact,sports,ball,,,rugby ball
+artifact,office,tool,measuring,,ruler
+artifact,sports,clothing,,,running shoe
+artifact,home,storage,,,safe
+artifact,home,,,,safety pin
+artifact,home,kitchen,,,saltshaker
+artifact,clothing,shoe,,,sandal
+artifact,clothing,,,,sarong
+artifact,music,instrument,portable,,saxophone
+artifact,armor,,,,scabbard
+artifact,bathroom,tool,,,scale
+artifact,vehicle,land,transportation,,school bus
+artifact,vehicle,water,transportation,,schooner
+artifact,sports,stadium,,,scoreboard
+artifact,office,computer,display,,CRT screen
+artifact,tool,connector,,,screw
+artifact,tool,carpenter,,,screwdriver
+artifact,vehicle,land,part,,seat belt
+artifact,home,tool,,,sewing machine
+artifact,armor,,,,shield
+place,shop,shoe ,,,shoe shop
+artifact,misc,,,,shoji
+artifact,container,shopping,,,shopping basket
+artifact,store,container,,,shopping cart
+artifact,tool,digging,,,shovel
+artifact,bathroom,,,,shower cap
+artifact,bathroom,,,,shower curtain
+artifact,sports,equipment,,,ski
+artifact,sports,clothing,,,ski mask
+artifact,outdoors,equipment,,,sleeping bag
+artifact,tool,calculation,,,slide rule
+artifact,home,,,,sliding door
+artifact,entertainment,gambling,,,slot
+artifact,sports,equipment,water,,snorkel
+artifact,vehicle,sports,transportation,,snowmobile
+artifact,vehicle,land,utility,,snowplow
+artifact,bathroom,soap,,,soap dispenser
+artifact,sports,ball,,,soccer ball
+artifact,clothing,foot,,,sock
+artifact,misc,,,,solar dish
+artifact,clothing,headwear,,,sombrero
+artifact,home,kitchen,dish,,soup bowl
+artifact,office,computer,part,,space bar
+artifact,home,heating,,,space heater
+artifact,vehicle,air,,,space shuttle
+artifact,home,kitchen,utensil,,spatula
+artifact,vehicle,water,transportation,,speedboat
+nature,animal,silk,,,spider web
+artifact,toy,wooden top,,,spindle
+artifact,vehicle,land,transportation,,sports car
+artifact,theater,light,,,spotlight
+artifact,theater,,,,stage
+artifact,vehicle,land,rail,,steam locomotive
+artifact,road,bridge,,,steel arch bridge
+artifact,music,instrument,portable,,steel drum
+artifact,medical,tool,,,stethoscope
+artifact,clothing,over garment,,,stole
+artifact,barrier,stone,,,stone wall
+artifact,tool,measure,time,,stopwatch
+artifact,home,kitchen,cooking,,stove
+artifact,home,kitchen,tool,,strainer
+artifact,vehicle,land,transportation,,streetcar
+artifact,medical,transportation,,,stretcher
+artifact,theater,,,,studio couch
+artifact,religious,,,,stupa
+artifact,military,vehicle,naval,,submarine
+artifact,clothing,,,,suit
+artifact,tool,measure,time,,sundial
+artifact,eyewear,,,,sunglass
+artifact,eyewear,,,,sunglasses
+artifact,bathroom,cosmetic,,,sunscreen
+artifact,road,bridge,,,suspension
+artifact,home,cleaning,,,mop 
+artifact,clothing,over garment,,,sweatshirt
+artifact,clothing,swimming,,,swimming trunks
+artifact,outdoors,playground,,,swing
+artifact,electric,,,,electric switch
+artifact,medical,tool,,,syringe
+artifact,home,lighting,,,table lamp
+artifact,military,vehicle,land,,army tank
+artifact,electronics,audio,,,tape player
+artifact,home,kitchen,cooking,,teapot
+artifact,toy,animal,bear,,teddy bear
+artifact,home,entertainment,,,television
+artifact,sports,ball,,,tennis ball
+artifact,home,structure,,,thatched roof
+artifact,theater,,,,theater curtain
+artifact,home,tool,,,thimble
+artifact,farm,tool,,,thresher
+artifact,furniture,royalty,,,throne
+artifact,home,structure,,,tile roof
+artifact,home,kitchen,cooking,,toaster
+place,shop,tobacco,,,tobacco shop
+artifact,bathroom,,,,toilet seat
+artifact,fire,,,,torch
+artifact,decoration,,,,totem pole
+artifact,vehicle,land,transportation,,tow truck
+place,shop,toy,,,toyshop
+artifact,vehicle,land,farming,,tractor
+artifact,vehicle,land,transportation,trucking,semi
+artifact,home,kitchen,dish,,tray
+artifact,clothing,over garment,,,trench coat
+artifact,vehicle,sports,transportation,,tricycle
+artifact,vehicle,water,transportation,,trimaran
+artifact,photo,camera,equipment,,tripod
+artifact,monument,,,,triumphal
+artifact,vehicle,land,transportation,,trolleybus
+artifact,music,instrument,portable,,trombone
+artifact,container,water,,,tub
+artifact,misc,,,,turnstile
+artifact,office,tool,writing,,typewriter
+artifact,home,,,,umbrella
+artifact,sports,equipment,,,unicycle
+artifact,music,instrument,stationary,,upright piano
+artifact,home,cleaning,,,vacuum cleaner
+artifact,home,decoration,,,vase
+artifact,structure,ceiling,,,vault
+artifact,fabric,,,,velvet
+artifact,office,food,,,vending machine
+artifact,religious,clothing,,,vestment
+artifact,misc,,,,viaduct
+artifact,music,instrument,portable,,violin
+artifact,sports,ball,,,volleyball
+artifact,home,kitchen,cooking,,waffle iron
+artifact,tool,measure,time,,wall clock
+artifact,home,storage,,,wallet
+artifact,home,furniture,storage,,wardrobe
+artifact,military,vehicle,air,,warplane
+artifact,bathroom,water,,,washbasin
+artifact,home,cleaning,,,washer
+artifact,food,container,,,water bottle
+artifact,food,container,,,water jug
+artifact,container,water,,,water tower
+artifact,food,container,,,whiskey jug
+artifact,music,instrument,portable,,whistle
+artifact,clothing,headwear,,,wig
+artifact,home,,,,window screen
+artifact,home,,,,window shade
+artifact,clothing,neck,,,Windsor tie
+artifact,home,kitchen,drinking,,wine bottle
+artifact,misc,,,,wing
+artifact,home,kitchen,cooking,,wok
+artifact,home,kitchen,utensil,,wooden spoon
+artifact,fabric,,,,wool
+artifact,barrier,fence,,,worm fence
+artifact,ship,damaged,,,wreck
+artifact,vehicle,water,transportation,,yawl
+artifact,home,structure,,,yurt
+artifact,electronics,computer,,,web site
+artifact,book,,,,comic book
+artifact,entertainment,puzzle,,,crossword
+artifact,traffic,information,,,street sign
+artifact,traffic,control,,,traffic light
+artifact,cover,book,,,book jacket
+artifact,food,,,,menu
+artifact,home,kitchen,dish,,plate
+food,prepared,avocado,,,guacamole
+food,prepared,soup,,,consomme
+food,prepared,,,,hot pot
+food,prepared,dessert,,,trifle
+food,frozen,dessert,,,ice cream
+food,frozen,dessert,,,ice lolly
+food,bread,,,,French loaf
+food,prepared,bread,,,bagel
+food,prepared,snack,,,pretzel
+food,prepared,meat,,,cheeseburger
+food,prepared,meat,,,hotdog
+food,prepared,vegetable,,,mashed potato
+plant,food,vegetable,,,head cabbage
+plant,food,vegetable,,,broccoli
+plant,food,vegetable,,,cauliflower
+plant,food,vegetable,,,zucchini
+plant,food,fruit,,,spaghetti squash
+plant,food,fruit,,,acorn squash
+plant,food,fruit,,,butternut squash
+plant,food,fruit,,,cucumber
+plant,food,vegetable,,,artichoke
+plant,food,vegetable,,,bell pepper
+food,vegetable,,,,cardoon
+fungus,food,mushroom,,,mushroom
+plant,food,fruit,,,Granny Smith
+plant,food,fruit,,,strawberry
+plant,food,citrus,fruit,,orange
+plant,food,citrus,fruit,,lemon
+plant,food,fruit,,,fig
+plant,food,fruit,,,pineapple
+plant,food,fruit,,,banana
+plant,food,fruit,,,jackfruit
+plant,food,vegetable,,,custard apple
+plant,food,fruit,,,pomegranate
+food,crop,,,,hay
+food,prepared,hot,italian,,carbonara
+food,ingredient,dessert,,,chocolate
+food,bread,,,,dough
+food,prepared,meat,,,meat loaf
+food,prepared,hot,italian,,pizza
+food,prepared,hot,pie,,potpie
+food,prepared,hot,mexican,,burrito
+food,beverage,alcohol,,,red wine
+food,beverage,coffee,,,espresso
+artifact,home,kitchen,drinking,,cup
+food,beverage,festive,,,eggnog
+nature,geological,mountain,,,alp
+artifact,misc,,,,bubble
+nature,geological,rock,,,cliff
+nature,water,underwater,,,coral reef
+nature,geological,water,,,geyser
+nature,water,shore,,,lakeside
+nature,geological,rock,,,promontory
+nature,geological,sand,,,sandbar
+nature,geological,water,,,seashore
+nature,geological,mountain,,,valley
+nature,geological,mountain,,,volcano
+person,sports,baseball,,,ballplayer
+person,wedding,male,,,groom
+person,sports,water,,,scuba diver
+plant,flower,,,,rapeseed
+plant,flower,,,,daisy
+plant,flower,,,,yellow lady's slipper
+plant,food,vegetable,,,corn
+plant,food,nut,,,acorn
+plant,flower,,,,hip
+plant,tree,,,,buckeye
+fungus,food,mushroom,,,coral fungus
+fungus,food,mushroom,,,agaric
+fungus,food,mushroom,,,gyromitra
+fungus,food,mushroom,,,stinkhorn
+fungus,food,mushroom,,,earthstar
+fungus,food,mushroom,,,hen-of-the-woods
+fungus,food,mushroom,,,bolete
+plant,food,vegetable,corn,,ear
+artifact,bathroom,paper,,,toilet tissue

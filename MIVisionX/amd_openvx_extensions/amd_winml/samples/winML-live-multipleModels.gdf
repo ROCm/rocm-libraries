@@ -1,0 +1,50 @@
+# Get WinML Extension DLL
+import vx_winml
+
+# Get input from camera: one for display & another for input
+data input_view  = image:1080,720,RGB2:camera,0:view,classificationWindow
+data input_image  = image:224,224,RGB2:camera,0
+
+data input_tensor = tensor:4,{224,224,3,1},VX_TYPE_FLOAT32,0
+data a = scalar:FLOAT32,1.0
+data b = scalar:FLOAT32,0.0
+data reverse_channel_order = scalar:BOOL,0
+
+# Use convert to tensor node - convert input image to tensor 
+node com.winml.convert_image_to_tensor input_image input_tensor a b reverse_channel_order
+
+#model 1:vgg19
+data modelLocation_vgg = scalar:STRING,FULL_PATH_TO\vgg19\model.onnx:view,classificationWindow
+data modelInputName_vgg = scalar:STRING,data_0
+data modelOutputName_vgg = scalar:STRING,prob_1 
+data output_vgg = tensor:2,{1000,1},VX_TYPE_FLOAT32,0
+data deviceKind_vgg = scalar:INT32,0
+data setupArray_vgg = array:SIZE,1
+
+# Use Import ONNX Node to run Inference
+node com.winml.onnx_to_mivisionx modelLocation_vgg modelInputName_vgg modelOutputName_vgg input_tensor setupArray_vgg output_vgg deviceKind_vgg 
+
+# write output tensor
+write output_vgg output_tensor_vgg.f32
+
+#model 2:squeezenet
+data modelLocation_squeezenet = scalar:STRING,FULL_PATH_TO\squeezenet\model.onnx:view,classificationWindow
+data modelInputName_squeezenet = scalar:STRING,data_0
+data modelOutputName_squeezenet = scalar:STRING,softmaxout_1 
+data output_squeezenet = tensor:4,{1,1,1000,1},VX_TYPE_FLOAT32,0
+data deviceKind_squeezenet = scalar:INT32,0
+data setupArray_squeezenet = array:SIZE,1
+
+# Use Import ONNX Node to run Inference
+node com.winml.onnx_to_mivisionx modelLocation_squeezenet modelInputName_squeezenet modelOutputName_squeezenet input_tensor setupArray_squeezenet output_squeezenet deviceKind_squeezenet 
+
+# write output tensor
+write output_squeezenet output_tensor_squeezenet.f32
+
+data labelLocation = scalar:STRING,FULL_PATH_TO\data\Labels.txt
+data top1_vgg = scalar:STRING,TOPK:view,classificationWindow
+data top1_squeeznet = scalar:STRING,TOPK:view,classificationWindow
+
+# Use get top K label node to display results
+node com.winml.get_top_k_labels output_vgg labelLocation top1_vgg
+node com.winml.get_top_k_labels output_squeezenet labelLocation top1_squeeznet 

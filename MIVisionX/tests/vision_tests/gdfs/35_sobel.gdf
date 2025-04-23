@@ -1,0 +1,7 @@
+data input_iyuv = image:1280,720,IYUV:READ,inputs/stm_1280x720.yuv
+data inter_luma = image:1280,720,U008
+node org.khronos.openvx.channel_extract input_iyuv !CHANNEL_Y inter_luma
+
+data output_sobel_3x3_x = image:1280,720,S016:WRITE,openvx_test_results/35_sobelx_1280x720.yuv
+data output_sobel_3x3_y = image:1280,720,S016:WRITE,openvx_test_results/35_sobely_1280x720.yuv
+node org.khronos.openvx.sobel_3x3 inter_luma output_sobel_3x3_x output_sobel_3x3_y

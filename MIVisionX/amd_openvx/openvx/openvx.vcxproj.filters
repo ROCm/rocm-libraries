@@ -1,0 +1,176 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
+      <Extensions>cpp;c;cc;cxx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
+    </Filter>
+    <Filter Include="Header Files">
+      <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
+      <Extensions>h;hh;hpp;hxx;hm;inl;inc;xsd</Extensions>
+    </Filter>
+    <Filter Include="Source Files\api">
+      <UniqueIdentifier>{86e09a40-2462-4cda-b926-dcf406735f76}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\ago">
+      <UniqueIdentifier>{faccb16a-5a94-4cc5-8ad6-8ef797c2a218}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\VX">
+      <UniqueIdentifier>{02732ce8-1c1f-4990-8bb3-259058b2f6ed}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\ago">
+      <UniqueIdentifier>{8ea93c93-a932-4579-9fed-6abdd5c359be}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="ago\ago_drama.cpp">
+      <Filter>Source Files\ago</Filter>
+    </ClCompile>
+    <ClCompile Include="ago\ago_drama_alloc.cpp">
+      <Filter>Source Files\ago</Filter>
+    </ClCompile>
+    <ClCompile Include="ago\ago_drama_analyze.cpp">
+      <Filter>Source Files\ago</Filter>
+    </ClCompile>
+    <ClCompile Include="ago\ago_drama_divide.cpp">
+      <Filter>Source Files\ago</Filter>
+    </ClCompile>
+    <ClCompile Include="ago\ago_drama_merge.cpp">
+      <Filter>Source Files\ago</Filter>
+    </ClCompile>
+    <ClCompile Include="ago\ago_drama_remove.cpp">
+      <Filter>Source Files\ago</Filter>
+    </ClCompile>
+    <ClCompile Include="ago\ago_haf_cpu.cpp">
+      <Filter>Source Files\ago</Filter>
+    </ClCompile>
+    <ClCompile Include="ago\ago_haf_cpu_arithmetic.cpp">
+      <Filter>Source Files\ago</Filter>
+    </ClCompile>
+    <ClCompile Include="ago\ago_haf_cpu_canny.cpp">
+      <Filter>Source Files\ago</Filter>
+    </ClCompile>
+    <ClCompile Include="ago\ago_haf_cpu_ch_extract_combine.cpp">
+      <Filter>Source Files\ago</Filter>
+    </ClCompile>
+    <ClCompile Include="ago\ago_haf_cpu_color_convert.cpp">
+      <Filter>Source Files\ago</Filter>
+    </ClCompile>
+    <ClCompile Include="ago\ago_haf_cpu_fast_corners.cpp">
+      <Filter>Source Files\ago</Filter>
+    </ClCompile>
+    <ClCompile Include="ago\ago_haf_cpu_filter.cpp">
+      <Filter>Source Files\ago</Filter>
+    </ClCompile>
+    <ClCompile Include="ago\ago_haf_cpu_geometric.cpp">
+      <Filter>Source Files\ago</Filter>
+    </ClCompile>
+    <ClCompile Include="ago\ago_haf_cpu_harris.cpp">
+      <Filter>Source Files\ago</Filter>
+    </ClCompile>
+    <ClCompile Include="ago\ago_haf_cpu_histogram.cpp">
+      <Filter>Source Files\ago</Filter>
+    </ClCompile>
+    <ClCompile Include="ago\ago_haf_cpu_logical.cpp">
+      <Filter>Source Files\ago</Filter>
+    </ClCompile>
+    <ClCompile Include="ago\ago_haf_cpu_opticalflow.cpp">
+      <Filter>Source Files\ago</Filter>
+    </ClCompile>
+    <ClCompile Include="ago\ago_haf_cpu_pyramid.cpp">
+      <Filter>Source Files\ago</Filter>
+    </ClCompile>
+    <ClCompile Include="ago\ago_haf_gpu_common.cpp">
+      <Filter>Source Files\ago</Filter>
+    </ClCompile>
+    <ClCompile Include="ago\ago_haf_gpu_conversion.cpp">
+      <Filter>Source Files\ago</Filter>
+    </ClCompile>
+    <ClCompile Include="ago\ago_haf_gpu_corners.cpp">
+      <Filter>Source Files\ago</Filter>
+    </ClCompile>
+    <ClCompile Include="ago\ago_haf_gpu_linear_filter.cpp">
+      <Filter>Source Files\ago</Filter>
+    </ClCompile>
+    <ClCompile Include="ago\ago_haf_gpu_special_filters.cpp">
+      <Filter>Source Files\ago</Filter>
+    </ClCompile>
+    <ClCompile Include="ago\ago_interface.cpp">
+      <Filter>Source Files\ago</Filter>
+    </ClCompile>
+    <ClCompile Include="ago\ago_kernel_api.cpp">
+      <Filter>Source Files\ago</Filter>
+    </ClCompile>
+    <ClCompile Include="ago\ago_kernel_list.cpp">
+      <Filter>Source Files\ago</Filter>
+    </ClCompile>
+    <ClCompile Include="ago\ago_util.cpp">
+      <Filter>Source Files\ago</Filter>
+    </ClCompile>
+    <ClCompile Include="ago\ago_util_opencl.cpp">
+      <Filter>Source Files\ago</Filter>
+    </ClCompile>
+    <ClCompile Include="api\vx_api.cpp">
+      <Filter>Source Files\api</Filter>
+    </ClCompile>
+    <ClCompile Include="api\vx_nodes.cpp">
+      <Filter>Source Files\api</Filter>
+    </ClCompile>
+    <ClCompile Include="api\vxu.cpp">
+      <Filter>Source Files\api</Filter>
+    </ClCompile>
+    <ClCompile Include="ago\ago_platform.cpp">
+      <Filter>Source Files\ago</Filter>
+    </ClCompile>
+    <ClCompile Include="ago\ago_haf_cpu_generic_functions.cpp">
+      <Filter>Source Files\ago</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="include\VX\vx.h">
+      <Filter>Header Files\VX</Filter>
+    </ClInclude>
+    <ClInclude Include="include\VX\vx_api.h">
+      <Filter>Header Files\VX</Filter>
+    </ClInclude>
+    <ClInclude Include="include\VX\vx_kernels.h">
+      <Filter>Header Files\VX</Filter>
+    </ClInclude>
+    <ClInclude Include="include\VX\vx_nodes.h">
+      <Filter>Header Files\VX</Filter>
+    </ClInclude>
+    <ClInclude Include="include\VX\vx_types.h">
+      <Filter>Header Files\VX</Filter>
+    </ClInclude>
+    <ClInclude Include="include\VX\vx_vendors.h">
+      <Filter>Header Files\VX</Filter>
+    </ClInclude>
+    <ClInclude Include="include\VX\vxu.h">
+      <Filter>Header Files\VX</Filter>
+    </ClInclude>
+    <ClInclude Include="include\vx_ext_amd.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="ago\ago_haf_cpu.h">
+      <Filter>Header Files\ago</Filter>
+    </ClInclude>
+    <ClInclude Include="ago\ago_haf_gpu.h">
+      <Filter>Header Files\ago</Filter>
+    </ClInclude>
+    <ClInclude Include="ago\ago_internal.h">
+      <Filter>Header Files\ago</Filter>
+    </ClInclude>
+    <ClInclude Include="ago\ago_kernel_api.h">
+      <Filter>Header Files\ago</Filter>
+    </ClInclude>
+    <ClInclude Include="ago\ago_kernels.h">
+      <Filter>Header Files\ago</Filter>
+    </ClInclude>
+    <ClInclude Include="ago\ago_platform.h">
+      <Filter>Header Files\ago</Filter>
+    </ClInclude>
+    <ClInclude Include="include\VX\vx_compatibility.h">
+      <Filter>Header Files\VX</Filter>
+    </ClInclude>
+  </ItemGroup>
+</Project>

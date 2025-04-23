@@ -1,0 +1,57 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio 15
+VisualStudioVersion = 15.0.28307.271
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "vx_loomsl", "amd_loomsl\vx_loomsl.vcxproj", "{C5F3ED68-728A-4610-A37F-89323A93DD82}"
+	ProjectSection(ProjectDependencies) = postProject
+		{973F2004-2215-431F-8A2C-93ABAAFB6A24} = {973F2004-2215-431F-8A2C-93ABAAFB6A24}
+	EndProjectSection
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "loom_shell", "..\utilities\loom_shell\loom_shell.vcxproj", "{7BB60B2E-EDC4-496B-B258-0735FF02F32E}"
+	ProjectSection(ProjectDependencies) = postProject
+		{C5F3ED68-728A-4610-A37F-89323A93DD82} = {C5F3ED68-728A-4610-A37F-89323A93DD82}
+	EndProjectSection
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "openvx", "..\amd_openvx\openvx\openvx.vcxproj", "{973F2004-2215-431F-8A2C-93ABAAFB6A24}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "runvx", "..\utilities\runvx\runvx.vcxproj", "{E14F83E9-2295-466C-9647-7BD0D03ECE4B}"
+	ProjectSection(ProjectDependencies) = postProject
+		{973F2004-2215-431F-8A2C-93ABAAFB6A24} = {973F2004-2215-431F-8A2C-93ABAAFB6A24}
+	EndProjectSection
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "runcl", "..\utilities\runcl\runcl.vcxproj", "{026F975C-4F8D-4908-8A55-A5B3B643AD59}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|x64 = Debug|x64
+		Release|x64 = Release|x64
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{C5F3ED68-728A-4610-A37F-89323A93DD82}.Debug|x64.ActiveCfg = Debug|x64
+		{C5F3ED68-728A-4610-A37F-89323A93DD82}.Debug|x64.Build.0 = Debug|x64
+		{C5F3ED68-728A-4610-A37F-89323A93DD82}.Release|x64.ActiveCfg = Release|x64
+		{C5F3ED68-728A-4610-A37F-89323A93DD82}.Release|x64.Build.0 = Release|x64
+		{7BB60B2E-EDC4-496B-B258-0735FF02F32E}.Debug|x64.ActiveCfg = Debug|x64
+		{7BB60B2E-EDC4-496B-B258-0735FF02F32E}.Debug|x64.Build.0 = Debug|x64
+		{7BB60B2E-EDC4-496B-B258-0735FF02F32E}.Release|x64.ActiveCfg = Release|x64
+		{7BB60B2E-EDC4-496B-B258-0735FF02F32E}.Release|x64.Build.0 = Release|x64
+		{973F2004-2215-431F-8A2C-93ABAAFB6A24}.Debug|x64.ActiveCfg = Debug|x64
+		{973F2004-2215-431F-8A2C-93ABAAFB6A24}.Debug|x64.Build.0 = Debug|x64
+		{973F2004-2215-431F-8A2C-93ABAAFB6A24}.Release|x64.ActiveCfg = Release|x64
+		{973F2004-2215-431F-8A2C-93ABAAFB6A24}.Release|x64.Build.0 = Release|x64
+		{E14F83E9-2295-466C-9647-7BD0D03ECE4B}.Debug|x64.ActiveCfg = Debug|x64
+		{E14F83E9-2295-466C-9647-7BD0D03ECE4B}.Debug|x64.Build.0 = Debug|x64
+		{E14F83E9-2295-466C-9647-7BD0D03ECE4B}.Release|x64.ActiveCfg = Release|x64
+		{E14F83E9-2295-466C-9647-7BD0D03ECE4B}.Release|x64.Build.0 = Release|x64
+		{026F975C-4F8D-4908-8A55-A5B3B643AD59}.Debug|x64.ActiveCfg = Debug|x64
+		{026F975C-4F8D-4908-8A55-A5B3B643AD59}.Debug|x64.Build.0 = Debug|x64
+		{026F975C-4F8D-4908-8A55-A5B3B643AD59}.Release|x64.ActiveCfg = Debug|x64
+		{026F975C-4F8D-4908-8A55-A5B3B643AD59}.Release|x64.Build.0 = Debug|x64
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {4AE0943C-DD0A-49DE-92D5-F537F4F1B84F}
+	EndGlobalSection
+EndGlobal

@@ -1,0 +1,969 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>MainWindow</class>
+ <widget class="QMainWindow" name="MainWindow">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>809</width>
+    <height>732</height>
+   </rect>
+  </property>
+  <property name="sizePolicy">
+   <sizepolicy hsizetype="Minimum" vsizetype="Minimum">
+    <horstretch>0</horstretch>
+    <verstretch>0</verstretch>
+   </sizepolicy>
+  </property>
+  <property name="windowTitle">
+   <string>MIVisionX Validation Tool</string>
+  </property>
+  <property name="windowIcon">
+   <iconset>
+    <normaloff>data/images/rocm_logo.png</normaloff>data/images/rocm_logo.png</iconset>
+  </property>
+  <widget class="QWidget" name="centralwidget">
+   <layout class="QVBoxLayout" name="verticalLayout">
+    <item>
+     <layout class="QHBoxLayout" name="logos_layout">
+      <item>
+       <widget class="QLabel" name="AMD_logo">
+        <property name="sizePolicy">
+         <sizepolicy hsizetype="Preferred" vsizetype="Fixed">
+          <horstretch>0</horstretch>
+          <verstretch>0</verstretch>
+         </sizepolicy>
+        </property>
+        <property name="maximumSize">
+         <size>
+          <width>16777215</width>
+          <height>100</height>
+         </size>
+        </property>
+        <property name="text">
+         <string/>
+        </property>
+        <property name="pixmap">
+         <pixmap>data/images/AMD_Radeon.png</pixmap>
+        </property>
+        <property name="alignment">
+         <set>Qt::AlignCenter</set>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QLabel" name="MIVisionX_logo">
+        <property name="sizePolicy">
+         <sizepolicy hsizetype="Preferred" vsizetype="Fixed">
+          <horstretch>0</horstretch>
+          <verstretch>0</verstretch>
+         </sizepolicy>
+        </property>
+        <property name="maximumSize">
+         <size>
+          <width>16777214</width>
+          <height>100</height>
+         </size>
+        </property>
+        <property name="text">
+         <string/>
+        </property>
+        <property name="pixmap">
+         <pixmap>data/images/MIVisionX-logo.png</pixmap>
+        </property>
+        <property name="alignment">
+         <set>Qt::AlignCenter</set>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QLabel" name="EPYC_logo">
+        <property name="sizePolicy">
+         <sizepolicy hsizetype="Preferred" vsizetype="Fixed">
+          <horstretch>0</horstretch>
+          <verstretch>0</verstretch>
+         </sizepolicy>
+        </property>
+        <property name="maximumSize">
+         <size>
+          <width>16777215</width>
+          <height>100</height>
+         </size>
+        </property>
+        <property name="text">
+         <string/>
+        </property>
+        <property name="pixmap">
+         <pixmap>data/images/EPYC-blue.png</pixmap>
+        </property>
+        <property name="alignment">
+         <set>Qt::AlignCenter</set>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </item>
+    <item>
+     <spacer name="verticalSpacer_3">
+      <property name="orientation">
+       <enum>Qt::Vertical</enum>
+      </property>
+      <property name="sizeType">
+       <enum>QSizePolicy::Fixed</enum>
+      </property>
+      <property name="sizeHint" stdset="0">
+       <size>
+        <width>20</width>
+        <height>40</height>
+       </size>
+      </property>
+     </spacer>
+    </item>
+    <item>
+     <widget class="QFrame" name="frame">
+      <property name="frameShape">
+       <enum>QFrame::HLine</enum>
+      </property>
+      <property name="frameShadow">
+       <enum>QFrame::Sunken</enum>
+      </property>
+      <property name="lineWidth">
+       <number>2</number>
+      </property>
+     </widget>
+    </item>
+    <item>
+     <layout class="QGridLayout" name="gridLayout">
+      <item row="5" column="1">
+       <widget class="QLabel" name="padd_label">
+        <property name="font">
+         <font>
+          <family>Ubuntu</family>
+         </font>
+        </property>
+        <property name="text">
+         <string>Preprocess(add)</string>
+        </property>
+        <property name="alignment">
+         <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+        </property>
+       </widget>
+      </item>
+      <item row="4" column="5" colspan="2">
+       <widget class="QLineEdit" name="odims_lineEdit">
+        <property name="text">
+         <string/>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="2" colspan="5">
+       <widget class="QComboBox" name="upload_comboBox">
+        <item>
+         <property name="text">
+          <string>Choose or Upload a pre-trained model</string>
+         </property>
+        </item>
+       </widget>
+      </item>
+      <item row="3" column="4">
+       <widget class="QLabel" name="mode_label">
+        <property name="text">
+         <string>rocAL Mode</string>
+        </property>
+        <property name="alignment">
+         <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="1">
+       <widget class="QLabel" name="format_label">
+        <property name="font">
+         <font>
+          <family>Ubuntu</family>
+         </font>
+        </property>
+        <property name="text">
+         <string>Format</string>
+        </property>
+        <property name="alignment">
+         <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="5" colspan="2">
+       <widget class="QComboBox" name="mode_comboBox">
+        <property name="enabled">
+         <bool>true</bool>
+        </property>
+        <item>
+         <property name="text">
+          <string>Augmentation Set 1</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>Augmentation Set 2</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>Augmentation Set 3</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>Augmentation Set 4</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>Augmentation Set 5</string>
+         </property>
+        </item>
+       </widget>
+      </item>
+      <item row="6" column="4">
+       <widget class="QCheckBox" name="fp16_checkBox">
+        <property name="layoutDirection">
+         <enum>Qt::RightToLeft</enum>
+        </property>
+        <property name="text">
+         <string>FP16</string>
+        </property>
+       </widget>
+      </item>
+      <item row="6" column="5">
+       <widget class="QCheckBox" name="verbose_checkBox">
+        <property name="layoutDirection">
+         <enum>Qt::RightToLeft</enum>
+        </property>
+        <property name="text">
+         <string>Verbose</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="6">
+       <widget class="QPushButton" name="file_pushButton">
+        <property name="text">
+         <string>Browse...</string>
+        </property>
+       </widget>
+      </item>
+      <item row="6" column="2">
+       <widget class="QCheckBox" name="gui_checkBox">
+        <property name="layoutDirection">
+         <enum>Qt::RightToLeft</enum>
+        </property>
+        <property name="text">
+         <string>GUI</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <widget class="QLabel" name="file_label">
+        <property name="minimumSize">
+         <size>
+          <width>111</width>
+          <height>0</height>
+         </size>
+        </property>
+        <property name="font">
+         <font>
+          <family>Ubuntu</family>
+         </font>
+        </property>
+        <property name="text">
+         <string>Model File</string>
+        </property>
+        <property name="alignment">
+         <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+        </property>
+       </widget>
+      </item>
+      <item row="4" column="1">
+       <widget class="QLabel" name="idims__label">
+        <property name="font">
+         <font>
+          <family>Ubuntu</family>
+         </font>
+        </property>
+        <property name="text">
+         <string>Input Dims</string>
+        </property>
+        <property name="alignment">
+         <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="0" rowspan="4">
+       <widget class="QFrame" name="model_frame">
+        <property name="sizePolicy">
+         <sizepolicy hsizetype="MinimumExpanding" vsizetype="Preferred">
+          <horstretch>0</horstretch>
+          <verstretch>0</verstretch>
+         </sizepolicy>
+        </property>
+        <property name="minimumSize">
+         <size>
+          <width>150</width>
+          <height>0</height>
+         </size>
+        </property>
+        <property name="maximumSize">
+         <size>
+          <width>150</width>
+          <height>16777215</height>
+         </size>
+        </property>
+        <property name="frameShape">
+         <enum>QFrame::NoFrame</enum>
+        </property>
+        <property name="frameShadow">
+         <enum>QFrame::Raised</enum>
+        </property>
+        <layout class="QVBoxLayout" name="verticalLayout_2">
+         <item>
+          <widget class="QLabel" name="model_label">
+           <property name="font">
+            <font>
+             <family>Ubuntu</family>
+             <pointsize>20</pointsize>
+             <weight>50</weight>
+             <bold>false</bold>
+            </font>
+           </property>
+           <property name="text">
+            <string>Model</string>
+           </property>
+           <property name="alignment">
+            <set>Qt::AlignCenter</set>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <spacer name="verticalSpacer">
+           <property name="orientation">
+            <enum>Qt::Vertical</enum>
+           </property>
+           <property name="sizeHint" stdset="0">
+            <size>
+             <width>20</width>
+             <height>40</height>
+            </size>
+           </property>
+          </spacer>
+         </item>
+        </layout>
+       </widget>
+      </item>
+      <item row="2" column="5" colspan="2">
+       <widget class="QLineEdit" name="name_lineEdit">
+        <property name="text">
+         <string/>
+        </property>
+       </widget>
+      </item>
+      <item row="4" column="2" colspan="2">
+       <widget class="QLineEdit" name="idims_lineEdit">
+        <property name="text">
+         <string/>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="2">
+       <widget class="QComboBox" name="format_comboBox">
+        <property name="font">
+         <font>
+          <family>Ubuntu</family>
+         </font>
+        </property>
+        <item>
+         <property name="text">
+          <string>caffe</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>onnx</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>nnef</string>
+         </property>
+        </item>
+       </widget>
+      </item>
+      <item row="5" column="5" colspan="2">
+       <widget class="QLineEdit" name="pmul_lineEdit">
+        <property name="text">
+         <string/>
+        </property>
+       </widget>
+      </item>
+      <item row="5" column="4">
+       <widget class="QLabel" name="pmul_label">
+        <property name="font">
+         <font>
+          <family>Ubuntu</family>
+         </font>
+        </property>
+        <property name="text">
+         <string>Preprocess(mul)</string>
+        </property>
+        <property name="alignment">
+         <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+        </property>
+       </widget>
+      </item>
+      <item row="6" column="6">
+       <widget class="QCheckBox" name="loop_checkBox">
+        <property name="layoutDirection">
+         <enum>Qt::RightToLeft</enum>
+        </property>
+        <property name="text">
+         <string>Loop</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="4">
+       <widget class="QLabel" name="name_label">
+        <property name="text">
+         <string>Model Name</string>
+        </property>
+        <property name="alignment">
+         <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+        </property>
+       </widget>
+      </item>
+      <item row="6" column="3">
+       <widget class="QCheckBox" name="replace_checkBox">
+        <property name="layoutDirection">
+         <enum>Qt::RightToLeft</enum>
+        </property>
+        <property name="text">
+         <string>Replace</string>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="1">
+       <widget class="QLabel" name="batch_label">
+        <property name="text">
+         <string>Batch Size</string>
+        </property>
+        <property name="alignment">
+         <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+        </property>
+       </widget>
+      </item>
+      <item row="4" column="4">
+       <widget class="QLabel" name="odims_label">
+        <property name="font">
+         <font>
+          <family>Ubuntu</family>
+         </font>
+        </property>
+        <property name="text">
+         <string>Output Dims</string>
+        </property>
+        <property name="alignment">
+         <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+        </property>
+       </widget>
+      </item>
+      <item row="5" column="2" colspan="2">
+       <widget class="QLineEdit" name="padd_lineEdit">
+        <property name="text">
+         <string/>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="1">
+       <widget class="QLabel" name="upload_label">
+        <property name="layoutDirection">
+         <enum>Qt::RightToLeft</enum>
+        </property>
+        <property name="text">
+         <string>Preloaded Model</string>
+        </property>
+        <property name="alignment">
+         <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="2" colspan="4">
+       <widget class="QLineEdit" name="file_lineEdit">
+        <property name="sizePolicy">
+         <sizepolicy hsizetype="Expanding" vsizetype="Preferred">
+          <horstretch>0</horstretch>
+          <verstretch>0</verstretch>
+         </sizepolicy>
+        </property>
+        <property name="text">
+         <string/>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="2">
+       <widget class="QComboBox" name="batch_comboBox">
+        <item>
+         <property name="text">
+          <string>64</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>16</string>
+         </property>
+        </item>
+       </widget>
+      </item>
+     </layout>
+    </item>
+    <item>
+     <widget class="QFrame" name="frame_2">
+      <property name="frameShape">
+       <enum>QFrame::HLine</enum>
+      </property>
+      <property name="frameShadow">
+       <enum>QFrame::Sunken</enum>
+      </property>
+      <property name="lineWidth">
+       <number>5</number>
+      </property>
+     </widget>
+    </item>
+    <item>
+     <layout class="QGridLayout" name="inference_gridLayout">
+      <item row="4" column="1">
+       <widget class="QLabel" name="hier_label">
+        <property name="text">
+         <string>Hierarchy</string>
+        </property>
+        <property name="alignment">
+         <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="2" colspan="6">
+       <widget class="QLineEdit" name="label_lineEdit">
+        <property name="enabled">
+         <bool>true</bool>
+        </property>
+        <property name="text">
+         <string/>
+        </property>
+       </widget>
+      </item>
+      <item row="5" column="2">
+       <widget class="QComboBox" name="container_comboBox">
+        <property name="sizePolicy">
+         <sizepolicy hsizetype="Preferred" vsizetype="Fixed">
+          <horstretch>0</horstretch>
+          <verstretch>0</verstretch>
+         </sizepolicy>
+        </property>
+        <item>
+         <property name="text">
+          <string>None</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>Docker</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>Singularity</string>
+         </property>
+        </item>
+       </widget>
+      </item>
+      <item row="0" column="8">
+       <widget class="QPushButton" name="output_pushButton">
+        <property name="enabled">
+         <bool>true</bool>
+        </property>
+        <property name="text">
+         <string>Browse...</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="2" colspan="6">
+       <widget class="QLineEdit" name="image_lineEdit">
+        <property name="enabled">
+         <bool>true</bool>
+        </property>
+        <property name="text">
+         <string/>
+        </property>
+       </widget>
+      </item>
+      <item row="4" column="2" colspan="6">
+       <widget class="QLineEdit" name="hier_lineEdit">
+        <property name="enabled">
+         <bool>true</bool>
+        </property>
+        <property name="text">
+         <string/>
+        </property>
+       </widget>
+      </item>
+      <item row="5" column="5">
+       <widget class="QLabel" name="gpu_label">
+        <property name="sizePolicy">
+         <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+          <horstretch>0</horstretch>
+          <verstretch>0</verstretch>
+         </sizepolicy>
+        </property>
+        <property name="minimumSize">
+         <size>
+          <width>50</width>
+          <height>0</height>
+         </size>
+        </property>
+        <property name="text">
+         <string>GPU</string>
+        </property>
+        <property name="alignment">
+         <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="2" colspan="6">
+       <widget class="QLineEdit" name="val_lineEdit">
+        <property name="enabled">
+         <bool>true</bool>
+        </property>
+        <property name="text">
+         <string/>
+        </property>
+       </widget>
+      </item>
+      <item row="5" column="6">
+       <widget class="QComboBox" name="gpu_comboBox">
+        <item>
+         <property name="text">
+          <string>Radeon VII</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>Vega 10</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>Vega 20</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>MI25</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>MI50</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>MI60</string>
+         </property>
+        </item>
+       </widget>
+      </item>
+      <item row="5" column="3">
+       <widget class="QLabel" name="cpu_label">
+        <property name="sizePolicy">
+         <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+          <horstretch>0</horstretch>
+          <verstretch>0</verstretch>
+         </sizepolicy>
+        </property>
+        <property name="minimumSize">
+         <size>
+          <width>50</width>
+          <height>0</height>
+         </size>
+        </property>
+        <property name="text">
+         <string>CPU</string>
+        </property>
+        <property name="alignment">
+         <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="8">
+       <widget class="QPushButton" name="val_pushButton">
+        <property name="enabled">
+         <bool>true</bool>
+        </property>
+        <property name="text">
+         <string>Browse...</string>
+        </property>
+       </widget>
+      </item>
+      <item row="5" column="1">
+       <widget class="QLabel" name="container_label">
+        <property name="text">
+         <string>Container</string>
+        </property>
+        <property name="alignment">
+         <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="1">
+       <widget class="QLabel" name="image_label">
+        <property name="text">
+         <string>Image Directory</string>
+        </property>
+        <property name="alignment">
+         <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="1">
+       <widget class="QLabel" name="output_label">
+        <property name="text">
+         <string>Output Directory</string>
+        </property>
+        <property name="alignment">
+         <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="8">
+       <widget class="QPushButton" name="label_pushButton">
+        <property name="enabled">
+         <bool>true</bool>
+        </property>
+        <property name="text">
+         <string>Browse...</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="8">
+       <widget class="QPushButton" name="image_pushButton">
+        <property name="enabled">
+         <bool>true</bool>
+        </property>
+        <property name="text">
+         <string>Browse...</string>
+        </property>
+       </widget>
+      </item>
+      <item row="5" column="8">
+       <widget class="QPushButton" name="run_pushButton">
+        <property name="enabled">
+         <bool>false</bool>
+        </property>
+        <property name="text">
+         <string>Run</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <widget class="QLabel" name="label">
+        <property name="text">
+         <string>Label txt file</string>
+        </property>
+        <property name="alignment">
+         <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+        </property>
+       </widget>
+      </item>
+      <item row="4" column="8">
+       <widget class="QPushButton" name="hier_pushButton">
+        <property name="enabled">
+         <bool>true</bool>
+        </property>
+        <property name="text">
+         <string>Browse...</string>
+        </property>
+       </widget>
+      </item>
+      <item row="5" column="4">
+       <widget class="QComboBox" name="cpu_comboBox">
+        <item>
+         <property name="text">
+          <string>Threadripper</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>Ryzen 3</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>Ryzen 5</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>Ryzen 7</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>Ryzen 9</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>EPYC</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>EPYC 2</string>
+         </property>
+        </item>
+       </widget>
+      </item>
+      <item row="0" column="0" rowspan="5">
+       <widget class="QFrame" name="inference_frame">
+        <property name="sizePolicy">
+         <sizepolicy hsizetype="MinimumExpanding" vsizetype="Preferred">
+          <horstretch>0</horstretch>
+          <verstretch>0</verstretch>
+         </sizepolicy>
+        </property>
+        <property name="minimumSize">
+         <size>
+          <width>150</width>
+          <height>0</height>
+         </size>
+        </property>
+        <property name="maximumSize">
+         <size>
+          <width>150</width>
+          <height>16777215</height>
+         </size>
+        </property>
+        <property name="frameShape">
+         <enum>QFrame::NoFrame</enum>
+        </property>
+        <property name="frameShadow">
+         <enum>QFrame::Raised</enum>
+        </property>
+        <layout class="QVBoxLayout" name="verticalLayout_3">
+         <item>
+          <widget class="QLabel" name="inference_label">
+           <property name="font">
+            <font>
+             <pointsize>20</pointsize>
+            </font>
+           </property>
+           <property name="text">
+            <string>Inference</string>
+           </property>
+           <property name="alignment">
+            <set>Qt::AlignCenter</set>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <spacer name="verticalSpacer_2">
+           <property name="orientation">
+            <enum>Qt::Vertical</enum>
+           </property>
+           <property name="sizeHint" stdset="0">
+            <size>
+             <width>20</width>
+             <height>40</height>
+            </size>
+           </property>
+          </spacer>
+         </item>
+        </layout>
+       </widget>
+      </item>
+      <item row="3" column="1">
+       <widget class="QLabel" name="val_label">
+        <property name="text">
+         <string>Validation txt file</string>
+        </property>
+        <property name="alignment">
+         <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+        </property>
+       </widget>
+      </item>
+      <item row="5" column="7">
+       <widget class="QPushButton" name="close_pushButton">
+        <property name="sizePolicy">
+         <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+          <horstretch>0</horstretch>
+          <verstretch>0</verstretch>
+         </sizepolicy>
+        </property>
+        <property name="text">
+         <string>Close</string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="2" colspan="6">
+       <widget class="QLineEdit" name="output_lineEdit">
+        <property name="enabled">
+         <bool>true</bool>
+        </property>
+        <property name="text">
+         <string/>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </item>
+   </layout>
+  </widget>
+  <widget class="QMenuBar" name="menubar">
+   <property name="geometry">
+    <rect>
+     <x>0</x>
+     <y>0</y>
+     <width>809</width>
+     <height>22</height>
+    </rect>
+   </property>
+  </widget>
+  <widget class="QStatusBar" name="statusbar"/>
+ </widget>
+ <tabstops>
+  <tabstop>upload_comboBox</tabstop>
+  <tabstop>file_lineEdit</tabstop>
+  <tabstop>file_pushButton</tabstop>
+  <tabstop>format_comboBox</tabstop>
+  <tabstop>name_lineEdit</tabstop>
+  <tabstop>mode_comboBox</tabstop>
+  <tabstop>idims_lineEdit</tabstop>
+  <tabstop>odims_lineEdit</tabstop>
+  <tabstop>padd_lineEdit</tabstop>
+  <tabstop>pmul_lineEdit</tabstop>
+  <tabstop>gui_checkBox</tabstop>
+  <tabstop>replace_checkBox</tabstop>
+  <tabstop>fp16_checkBox</tabstop>
+  <tabstop>verbose_checkBox</tabstop>
+  <tabstop>loop_checkBox</tabstop>
+  <tabstop>output_lineEdit</tabstop>
+  <tabstop>output_pushButton</tabstop>
+  <tabstop>label_lineEdit</tabstop>
+  <tabstop>label_pushButton</tabstop>
+  <tabstop>image_lineEdit</tabstop>
+  <tabstop>image_pushButton</tabstop>
+  <tabstop>val_lineEdit</tabstop>
+  <tabstop>val_pushButton</tabstop>
+  <tabstop>hier_lineEdit</tabstop>
+  <tabstop>hier_pushButton</tabstop>
+  <tabstop>close_pushButton</tabstop>
+  <tabstop>run_pushButton</tabstop>
+ </tabstops>
+ <resources/>
+ <connections/>
+</ui>

@@ -1,0 +1,4 @@
+
+# $1 data $1 = image:1280,720,IYUV:read,stm_1280x720.yuv
+# $2 data output_luma = image:1280,720,U008:write,channelextract_CPU/GPU_1280x720.yuv
+node org.khronos.openvx.channel_extract $1 !CHANNEL_Y $2

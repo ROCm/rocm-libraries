@@ -1,0 +1,7 @@
+import vx_nn
+
+data input = tensor:4,{1,1,1,10},FLOAT32,1
+data output = tensor:4,{1,1,1,10},FLOAT32,1
+data size = scalar:INT32,1
+
+node org.khronos.nn_extension.softmax_layer input output size

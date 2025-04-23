@@ -1,0 +1,32 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Text Include="readme.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="include">
+      <UniqueIdentifier>{5d6784ca-78d3-4291-8d2b-e16424b30ab5}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="source">
+      <UniqueIdentifier>{d89e209c-69e5-4b69-8d04-3d360cbd0ea2}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="package">
+      <UniqueIdentifier>{c23161eb-a1f9-49f5-9110-c17a0f948984}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="include\mivisionx_winml_validate.h">
+      <Filter>include</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="source\mivisionx_winml_validate.cpp">
+      <Filter>source</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="packages.config">
+      <Filter>package</Filter>
+    </None>
+  </ItemGroup>
+</Project>

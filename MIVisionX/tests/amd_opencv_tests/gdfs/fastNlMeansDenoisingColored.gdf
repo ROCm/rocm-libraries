@@ -1,0 +1,10 @@
+import vx_opencv
+
+data inter_luma = image:1280,720,RGB2:READ,inputs/stmrgb.rgb
+data output = image:1280,720,RGB2:WRITE,amd_opencv_test_results/fastnlmeansdenoisingcolored_1280x720.rgb2
+data H = scalar:FLOAT32,5
+data H_C = scalar:FLOAT32,5
+data Temp = scalar:INT32,2
+data BORDER = scalar:INT32,4
+
+node org.opencv.fastnlmeansdenoisingcolored inter_luma output H H_C Temp BORDER

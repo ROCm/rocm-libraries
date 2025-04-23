@@ -1,0 +1,4 @@
+# agoKernel_Erode_U1_U1_3x3
+data input_1 = uniform-image:1920,1080,U001,125
+data output_1 = image:1920,1080,U001
+node org.khronos.openvx.erode_3x3 input_1 output_1

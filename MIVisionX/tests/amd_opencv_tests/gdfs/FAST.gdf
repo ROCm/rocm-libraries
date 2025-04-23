@@ -1,0 +1,8 @@
+import vx_opencv
+
+data inter_luma = image:1280,720,U008:READ,inputs/stm_1280x720.y
+data keypoint = array:KEYPOINT,10000:WRITE,amd_opencv_test_results/opencv_Fast_corners.txt
+data Threshold = scalar:INT32,80
+data NonMaxSuppression = scalar:BOOL,0
+
+node org.opencv.fast inter_luma keypoint Threshold NonMaxSuppression

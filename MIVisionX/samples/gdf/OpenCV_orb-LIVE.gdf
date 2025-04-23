@@ -1,0 +1,16 @@
+import vx_opencv
+
+data inter_luma = image:1280,720,U008:camera,0:view,orb_detect
+data keypoints = array:KEYPOINT,10000:view,orb_detect
+
+data nFeatures = scalar:INT32,1000:view,orb_detect
+data scaleFactor = scalar:FLOAT32,1.2:view,orb_detect
+data nlevels = scalar:INT32,8:view,orb_detect 
+data edgeThreshold = scalar:INT32,31:view,orb_detect
+data firstLevel = scalar:INT32,0:view,orb_detect 
+data WTA_K = scalar:INT32,2:view,orb_detect
+data scoreType = scalar:INT32,0:view,orb_detect 
+data patchSize = scalar:INT32,31:view,orb_detect
+
+
+node org.opencv.orb_detect inter_luma inter_luma keypoints nFeatures scaleFactor nlevels edgeThreshold firstLevel WTA_K scoreType patchSize

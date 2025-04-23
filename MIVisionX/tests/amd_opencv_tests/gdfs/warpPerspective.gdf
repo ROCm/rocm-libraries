@@ -1,0 +1,11 @@
+import vx_opencv
+
+data inter_luma = image:1280,720,U008:READ,inputs/stm_1280x720.y
+data output = image:1280,720,U008:WRITE,amd_opencv_test_results/warpperspective_1280x720.u8
+data M = matrix:FLOAT32,3,3:INIT,{0.02;0.003;0.03;0.1;0;0;0;0;0}
+data SizeX = scalar:INT32,1280
+data SizeY = scalar:INT32,720
+data Flag = scalar:INT32,8
+data BORDER = scalar:INT32,4
+
+node org.opencv.warpperspective inter_luma output M SizeX SizeY Flag BORDER

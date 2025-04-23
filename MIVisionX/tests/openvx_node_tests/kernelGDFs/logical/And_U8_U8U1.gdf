@@ -1,0 +1,5 @@
+# agoKernel_And_U8_U8U1
+data input_1 = uniform-image:1920,1080,U008,125
+data input_2 = uniform-image:1920,1080,U001,132
+data output_1 = image:1920,1080,U008
+node org.khronos.openvx.and input_1 input_2 output_1

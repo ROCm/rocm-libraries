@@ -1,0 +1,13 @@
+data input_iyuv = image:1280,720,IYUV:READ,inputs/stm_1280x720.yuv
+data inter_luma = image:1280,720,U008
+node org.khronos.openvx.channel_extract input_iyuv !CHANNEL_Y inter_luma
+
+data input_strength_thresh = scalar:FLOAT32,0.00001
+data input_min_distance = scalar:FLOAT32,20.0
+data input_sensitivity = scalar:FLOAT32,0.10
+data input_grad_size = scalar:INT32,3
+data input_block_size = scalar:INT32,5
+data output_harris_arr = array:KEYPOINT,1000:WRITE,openvx_test_results/19_harris_corner_arr.txt
+#data output_num_corners_harris = scalar:UINT32,0:WRITE,openvx_test_results/19_harris_corner_corners.txt
+#node org.khronos.openvx.harris_corners inter_luma input_strength_thresh input_min_distance input_sensitivity input_grad_size input_block_size output_harris_arr output_num_corners_harris
+node org.khronos.openvx.harris_corners inter_luma input_strength_thresh input_min_distance input_sensitivity input_grad_size input_block_size output_harris_arr

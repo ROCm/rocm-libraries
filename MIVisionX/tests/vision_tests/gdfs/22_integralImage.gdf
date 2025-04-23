@@ -1,0 +1,6 @@
+data input_iyuv = image:1280,720,IYUV:READ,inputs/stm_1280x720.yuv
+data inter_luma = image:1280,720,U008
+node org.khronos.openvx.channel_extract input_iyuv !CHANNEL_Y inter_luma
+
+data output_integral_image = image:1280,720,U032:WRITE,openvx_test_results/22_integral_image_1280x720.yuv
+node org.khronos.openvx.integral_image inter_luma output_integral_image

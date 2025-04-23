@@ -1,0 +1,5 @@
+# agoKernel_Remap_U8_U8_Bilinear
+data input_1 = uniform-image:1280,720,U008,125
+data output_1 = image:1280,720,U008
+data remap_table = remap:1280,720,1280,720:READ,../../kernelGDFs/geometric/inputs/remap_1280x720_mirror.txt
+node org.khronos.openvx.remap input_1 remap_table !BILINEAR output_1

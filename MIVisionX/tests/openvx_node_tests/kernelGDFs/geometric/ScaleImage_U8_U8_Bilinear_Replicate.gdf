@@ -1,0 +1,4 @@
+# agoKernel_ScaleImage_U8_U8_Bilinear_Replicate
+data input_1 = uniform-image:1920,1080,U008,125
+data output_1 = image:960,540,U008
+node org.khronos.openvx.scale_image input_1 output_1 !BILINEAR attr:BORDER_MODE:REPLICATE

@@ -1,0 +1,5 @@
+# agoKernel_ScaleGaussianHalf_U8_U8_3x3
+data input_1 = uniform-image:1920,1080,U008,125
+data output_1 = image:960,540,U008
+data scalar = scalar:INT32,3
+node org.khronos.openvx.halfscale_gaussian input_1 output_1 scalar

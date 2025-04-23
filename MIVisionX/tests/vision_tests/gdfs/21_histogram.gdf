@@ -1,0 +1,6 @@
+data input_iyuv = image:1280,720,IYUV:READ,inputs/stm_1280x720.yuv
+data inter_luma = image:1280,720,U008
+node org.khronos.openvx.channel_extract input_iyuv !CHANNEL_Y inter_luma
+
+data output_histogram_dist = distribution:2,0,256:WRITE,openvx_test_results/21_histogram_dist.txt
+node org.khronos.openvx.histogram inter_luma output_histogram_dist

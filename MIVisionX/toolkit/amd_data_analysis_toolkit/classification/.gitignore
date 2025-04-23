@@ -1,0 +1,8 @@
+output/
+assets/templates/icons
+assets/templates/images
+node_modules
+.eslintrc.json
+.stylelintrc.json
+package.json
+package-lock.json

@@ -1,0 +1,8 @@
+import vx_amd_media
+
+# read input sequences
+data vid1 = scalar:STRING,"1,/opt/rocm/share/mivisionx/test/videos/AMD_driving_virtual_20.mp4:0"
+data nvimg  = image:1920,1080,NV12
+data loop = scalar:INT32,0
+data gpu_out = scalar:INT32,0
+node com.amd.amd_media.decode vid1 nvimg NULL loop gpu_out

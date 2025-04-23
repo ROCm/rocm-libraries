@@ -1,0 +1,10 @@
+import vx_opencv
+
+data inter_luma = image:1280,720,U008:READ,inputs/stm_1280x720.y
+data output = image:1280,720,U008:WRITE,amd_opencv_test_results/bilateralfilter_1280x720.u8
+data D = scalar:INT32,5
+data Sigma_C = scalar:FLOAT32,100
+data Sigma_S = scalar:FLOAT32,30
+data Border = scalar:INT32,4
+
+node org.opencv.bilateralfilter inter_luma output D Sigma_C Sigma_S Border

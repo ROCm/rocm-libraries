@@ -1,0 +1,13 @@
+import vx_opencv
+
+data inter_luma = image:1280,720,U008:READ,inputs/stm_1280x720.y
+data output = image:1280,720,U008:WRITE,amd_opencv_test_results/boxfilter_1280x720.u8
+data ddepth = scalar:INT32,-1
+data K_rows = scalar:INT32,3
+data K_columns = scalar:INT32,3
+data anchor_x = scalar:INT32,-1
+data anchor_y = scalar:INT32,-1
+data normalized = scalar:BOOL,1
+data border = scalar:INT32,4
+
+node org.opencv.boxfilter inter_luma output ddepth K_rows K_columns anchor_x anchor_y normalized border

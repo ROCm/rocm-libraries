@@ -1,0 +1,7 @@
+import vx_opencv
+
+data inter_luma = image:1280,720,U008:READ,inputs/stm_1280x720.y
+data output = image:1280,720,U008:WRITE,amd_opencv_test_results/cvtcolor_1280x720.u8
+data CODE = scalar:INT32,30
+
+node org.opencv.cvtcolor inter_luma output CODE

@@ -1,0 +1,7 @@
+# Source code
+* @kiritigowda @rrawther
+# Documentation files
+docs/ @ROCm/rocm-documentation @kiritigowda @rrawther
+*.md @ROCm/rocm-documentation @kiritigowda @rrawther
+*.rst @ROCm/rocm-documentation @kiritigowda @rrawther
+.readthedocs.yaml @ROCm/rocm-documentation @kiritigowda @rrawther

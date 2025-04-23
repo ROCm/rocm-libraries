@@ -1,0 +1,66 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio 15
+VisualStudioVersion = 15.0.28307.438
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "winml_classifier", "winml_classifier.vcxproj", "{8317099C-DCD6-4944-82F5-3FE55BA3A824}"
+	ProjectSection(ProjectDependencies) = postProject
+		{973F2004-2215-431F-8A2C-93ABAAFB6A24} = {973F2004-2215-431F-8A2C-93ABAAFB6A24}
+		{24F44D6B-92FD-3080-AF31-693411708E82} = {24F44D6B-92FD-3080-AF31-693411708E82}
+		{505373D1-F60A-43E5-B292-66FF4A646902} = {505373D1-F60A-43E5-B292-66FF4A646902}
+	EndProjectSection
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "vx_winml", "..\..\amd_openvx_extensions\amd_winml\vx_winml.vcxproj", "{505373D1-F60A-43E5-B292-66FF4A646902}"
+	ProjectSection(ProjectDependencies) = postProject
+		{973F2004-2215-431F-8A2C-93ABAAFB6A24} = {973F2004-2215-431F-8A2C-93ABAAFB6A24}
+	EndProjectSection
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "vx_opencv", "..\..\amd_openvx_extensions\amd_opencv\vx_opencv.vcxproj", "{24F44D6B-92FD-3080-AF31-693411708E82}"
+	ProjectSection(ProjectDependencies) = postProject
+		{973F2004-2215-431F-8A2C-93ABAAFB6A24} = {973F2004-2215-431F-8A2C-93ABAAFB6A24}
+	EndProjectSection
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "openvx", "..\..\amd_openvx\openvx\openvx.vcxproj", "{973F2004-2215-431F-8A2C-93ABAAFB6A24}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|x64 = Debug|x64
+		Debug|x86 = Debug|x86
+		Release|x64 = Release|x64
+		Release|x86 = Release|x86
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{8317099C-DCD6-4944-82F5-3FE55BA3A824}.Debug|x64.ActiveCfg = Debug|x64
+		{8317099C-DCD6-4944-82F5-3FE55BA3A824}.Debug|x64.Build.0 = Debug|x64
+		{8317099C-DCD6-4944-82F5-3FE55BA3A824}.Debug|x86.ActiveCfg = Debug|Win32
+		{8317099C-DCD6-4944-82F5-3FE55BA3A824}.Debug|x86.Build.0 = Debug|Win32
+		{8317099C-DCD6-4944-82F5-3FE55BA3A824}.Release|x64.ActiveCfg = Debug|x64
+		{8317099C-DCD6-4944-82F5-3FE55BA3A824}.Release|x64.Build.0 = Debug|x64
+		{8317099C-DCD6-4944-82F5-3FE55BA3A824}.Release|x86.ActiveCfg = Release|Win32
+		{8317099C-DCD6-4944-82F5-3FE55BA3A824}.Release|x86.Build.0 = Release|Win32
+		{505373D1-F60A-43E5-B292-66FF4A646902}.Debug|x64.ActiveCfg = Debug|x64
+		{505373D1-F60A-43E5-B292-66FF4A646902}.Debug|x64.Build.0 = Debug|x64
+		{505373D1-F60A-43E5-B292-66FF4A646902}.Debug|x86.ActiveCfg = Debug|x64
+		{505373D1-F60A-43E5-B292-66FF4A646902}.Release|x64.ActiveCfg = Debug|x64
+		{505373D1-F60A-43E5-B292-66FF4A646902}.Release|x64.Build.0 = Debug|x64
+		{505373D1-F60A-43E5-B292-66FF4A646902}.Release|x86.ActiveCfg = Release|x64
+		{24F44D6B-92FD-3080-AF31-693411708E82}.Debug|x64.ActiveCfg = Debug|x64
+		{24F44D6B-92FD-3080-AF31-693411708E82}.Debug|x64.Build.0 = Debug|x64
+		{24F44D6B-92FD-3080-AF31-693411708E82}.Debug|x86.ActiveCfg = Debug|x64
+		{24F44D6B-92FD-3080-AF31-693411708E82}.Release|x64.ActiveCfg = Debug|x64
+		{24F44D6B-92FD-3080-AF31-693411708E82}.Release|x64.Build.0 = Debug|x64
+		{24F44D6B-92FD-3080-AF31-693411708E82}.Release|x86.ActiveCfg = Release|x64
+		{973F2004-2215-431F-8A2C-93ABAAFB6A24}.Debug|x64.ActiveCfg = Debug|x64
+		{973F2004-2215-431F-8A2C-93ABAAFB6A24}.Debug|x64.Build.0 = Debug|x64
+		{973F2004-2215-431F-8A2C-93ABAAFB6A24}.Debug|x86.ActiveCfg = Debug|x64
+		{973F2004-2215-431F-8A2C-93ABAAFB6A24}.Release|x64.ActiveCfg = Debug|x64
+		{973F2004-2215-431F-8A2C-93ABAAFB6A24}.Release|x64.Build.0 = Debug|x64
+		{973F2004-2215-431F-8A2C-93ABAAFB6A24}.Release|x86.ActiveCfg = Release|x64
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {3CFA5F0E-2493-44DB-8036-C700F7172C3D}
+	EndGlobalSection
+EndGlobal

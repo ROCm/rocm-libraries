@@ -1,0 +1,4 @@
+pmc: Wavefronts VALUInsts VFetchInsts VWriteInsts VALUUtilization VALUBusy WriteSize
+pmc: SALUInsts SFetchInsts LDSInsts FlatLDSInsts GDSInsts SALUBusy FetchSize
+pmc: L2CacheHit MemUnitBusy MemUnitStalled WriteUnitStalled ALUStalledByLDS LDSBankConflict
+pmc: TCC_EA_WRREQ_sum TCC_EA_RDREQ_sum GPUBusy

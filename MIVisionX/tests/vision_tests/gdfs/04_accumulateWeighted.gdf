@@ -1,0 +1,8 @@
+
+data input_iyuv = image:1280,720,IYUV:READ,inputs/stm_1280x720.yuv
+data inter_luma = image:1280,720,U008
+node org.khronos.openvx.channel_extract input_iyuv !CHANNEL_Y inter_luma
+
+data output_accumulate_weighted = image:1280,720,U008:WRITE,openvx_test_results/04_accumulate_weighted_1280x720.yuv
+data input_alpha = scalar:FLOAT32,0.3
+node org.khronos.openvx.accumulate_weighted inter_luma input_alpha output_accumulate_weighted

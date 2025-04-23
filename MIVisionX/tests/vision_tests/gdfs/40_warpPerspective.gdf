@@ -1,0 +1,7 @@
+data input_iyuv = image:1280,720,IYUV:READ,inputs/stm_1280x720.yuv
+data inter_luma = image:1280,720,U008
+node org.khronos.openvx.channel_extract input_iyuv !CHANNEL_Y inter_luma
+
+data output_warp_perspective = image:1280,720,U008:WRITE,openvx_test_results/40_warp_perspective_1280x720.yuv
+data input_matrix = matrix:FLOAT32,3,3:INIT,{2;0.1;0;2;1.9;0;-1200;-360;1}
+node org.khronos.openvx.warp_perspective inter_luma input_matrix !NEAREST_NEIGHBOR output_warp_perspective

@@ -1,0 +1,42 @@
+# Profiler Attribute
+setGlobalAttribute(0,1); 	# 0 -- Profiler::0:OFF 1:ON Default:OFF
+
+# simple/quality stitch
+setGlobalAttribute(7,0); 	# 7 -- simple/quality stitch::0:quality stitch 1:simple stitch Default:quality stitch
+
+# Turn Off/ON ExpoComp
+setGlobalAttribute(1,0);  	# 1 -- ExpoComp::0:OFF 1:ON Default:ON
+
+# Turn Off/ON SeamFind
+setGlobalAttribute(2,0); 	# 2 -- SeamFind::0:OFF 1:ON Default:ON
+
+# Turn Off/ON Multiband & Num Bands
+setGlobalAttribute(5,0); 	# 5 -- Multiband::0:OFF 1:ON Default:ON
+
+# Multiband bands
+setGlobalAttribute(6,4); 	# 6 -- Multiband Bands
+
+ls_context context;
+context = lsCreateContext();
+lsSetOutputConfig(context,VX_DF_IMAGE_RGB,3840,1920);
+lsSetCameraConfig(context,4,1,VX_DF_IMAGE_RGB,2048,3072*4);
+lsImportConfiguration(context,"pts","calibration.pts");
+lsInitialize(context);
+
+cl_mem mem[2];
+cl_context opencl_context;
+lsGetOpenCLContext(context,&opencl_context);
+createBuffer(opencl_context,3*2048*3072*4,&mem[0]);
+createBuffer(opencl_context,3*3840*1920,&mem[1]);
+
+loadBufferFromMultipleImages(mem[0], "cam0%d.bmp",4,1,VX_DF_IMAGE_RGB, 2048, 3072*4);
+lsSetCameraBuffer(context,&mem[0]);
+lsSetOutputBuffer(context,&mem[1]);
+run(context,100);
+saveBufferToImage(mem[1],"LoomOutputStitch.bmp",VX_DF_IMAGE_RGB,3840,1920);
+lsExportConfiguration(context,"pts","cap.txt");
+#lsExportConfiguration(context, "data", "z-");
+
+releaseBuffer(&mem[0]);
+releaseBuffer(&mem[1]);
+lsReleaseContext(&context);

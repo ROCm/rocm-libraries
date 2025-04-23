@@ -1,0 +1,5 @@
+# agoKernel_Threshold_U8_U8_Range
+data input_1 = uniform-image:1920,1080,U008,125
+data output_1 = image:1920,1080,U008
+data range_threshold = threshold:RANGE,U008,U008:INIT,100,200
+node org.khronos.openvx.threshold input_1 range_threshold output_1

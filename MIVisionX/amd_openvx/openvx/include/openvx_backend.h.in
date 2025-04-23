@@ -1,0 +1,7 @@
+#ifndef GUARD_OPENVX_BACKEND_H_IN
+#define GUARD_OPENVX_BACKEND_H_IN
+
+#cmakedefine01 ENABLE_OPENCL
+#cmakedefine01 ENABLE_HIP
+
+#endif 

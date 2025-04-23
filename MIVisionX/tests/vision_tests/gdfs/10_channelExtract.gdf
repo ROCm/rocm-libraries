@@ -1,0 +1,3 @@
+data input_iyuv = image:1280,720,IYUV:read,inputs/stm_1280x720.yuv
+data output_luma = image:1280,720,U008:write,openvx_test_results/10_channel_extract_1280x720.yuv
+node org.khronos.openvx.channel_extract input_iyuv !CHANNEL_Y output_luma

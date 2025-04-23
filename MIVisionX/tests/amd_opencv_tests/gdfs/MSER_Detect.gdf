@@ -1,0 +1,19 @@
+import vx_opencv
+
+data inter_luma = image:1280,720,U008:READ,inputs/stm_1280x720.y
+data keypoint = array:KEYPOINT,1000
+
+
+data delta = scalar:INT32,5
+data min_area = scalar:INT32,60
+data max_area = scalar:INT32,14400
+data max_evolution = scalar:INT32,200
+data edge_blur_size = scalar:INT32,5
+
+
+data max_variation = scalar:FLOAT32,0.25
+data min_diversity = scalar:FLOAT32,0.2
+data area_threshold = scalar:FLOAT32,1.01
+data min_margin = scalar:FLOAT32,0.003
+
+node org.opencv.mser_detect inter_luma keypoint inter_luma delta min_area max_area max_variation min_diversity max_evolution area_threshold min_margin edge_blur_size

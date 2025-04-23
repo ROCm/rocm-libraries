@@ -1,0 +1,9 @@
+# agoKernel_FastCorners_XY_U8_Supression
+data input_iyuv = image:1280,720,IYUV:READ,../../kernelGDFs/vision/inputs/stm_1280x720.yuv
+data inter_luma = image:1280,720,U008
+node org.khronos.openvx.channel_extract input_iyuv !CHANNEL_Y inter_luma
+data input_strength_thresh = scalar:FLOAT32,80.0
+data input_nonmax_suppression = scalar:BOOL,1
+data output_1 = array:KEYPOINT,1000
+data output_2 = scalar:SIZE,0
+node org.khronos.openvx.fast_corners inter_luma input_strength_thresh input_nonmax_suppression output_1 output_2

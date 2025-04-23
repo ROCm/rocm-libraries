@@ -1,0 +1,811 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AMD Dataset Analysis Tool</title>
+    <link rel="icon" href="icons/vega_icon_150.png">
+    <script src="https://code.jquery.com/jquery-3.5.1.min.js"
+        integrity="sha256-9/aliU8dGd2tb6OSsuzixeV4y/faTqgFtohetphbbj0=" crossorigin="anonymous"></script>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/simplePagination.js/1.6/jquery.simplePagination.min.js"
+        integrity="sha512-9Dh726RTZVE1k5R1RNEzk1ex4AoRjxNMFKtZdcWaG2KUgjEmFYN3n17YLUrbHm47CRQB1mvVBHDFXrcnx/deDA=="
+        crossorigin="anonymous"></script>
+
+    <script src="results/results_1.js"></script>
+    <script src="results/labelSummary.js"></script>
+    <script src="results/imageSummary.js"></script>
+    <script src="results/hierarchySummary.js"></script>
+
+    <script src="scripts/app.js"></script>
+    <script src="utils/sorttable.js"></script>
+    <script src="results/resultHistory.js"></script>
+
+    <link rel="stylesheet" href="styles/style.css">
+    <link type="text/css" rel="stylesheet" href="styles/simplePagination.css" />
+
+</head>
+
+<body>
+    <!-- Modal dialog element -->
+    <div id="myModal" class="modal">
+        <span class="close" onclick="closeModal()">&times;</span>
+        <img class="modal-content" id="img01" alt="image" src="">
+        <div id="caption"></div>
+    </div>
+
+    <!-- Navigation menus -->
+    <div id="mySidenav" class="sidenav">
+        <a href="javascript:void(0)" class="closebtn" onclick="closeNav()">&times;</a>
+        <a class="nav-item" href="#table0">
+            Summary
+        </a><br>
+        <a class="nav-item" href="#table1">
+            Graphs
+        </a><br>
+        <a class="nav-item hidden has-hierarchy" href="#table2">
+            Hierarchy
+        </a><br class="hidden has-hierarchy">
+        <a class="nav-item" href="#table3">
+            Labels
+        </a><br>
+        <a class="nav-item" href="#table4">
+            Image Results
+        </a><br>
+        <a class="nav-item" href="#table5">
+            Compare
+        </a><br>
+        <a class="nav-item" href="#table6">
+            Model Score
+        </a><br>
+        <a class="nav-item" href="#table7">
+            Help
+        </a><br>
+    </div>
+
+
+    <!-- Top navbar -->
+    <div class="navbar">
+        <a href="#">
+            <div id="main">
+                <span style="font-size:30px;cursor:pointer" onclick="openNav()">&#9776; Views</span>
+            </div>
+        </a>
+        <a href="https://www.amd.com/en" target="_blank">
+            <img src=" icons/small_amd_logo.png" alt="AMD" /></a>
+        <a href="https://gpuopen.com/" target="_blank">
+            <img src=" icons/small_radeon_logo.png" alt="GPUopen" /></a>
+        <a href="https://github.com/ROCm/amdovx-modules#amd-openvx-modules-amdovx-modules"
+            target="_blank">
+            <img src=" icons/small_github_logo.png" alt="AMD GitHub" /></a>
+        <img src=" icons/ADAT_500x100.png" alt="AMD Inference ToolKit" hspace="100" height="90" />
+    </div>
+
+
+    <!-- Overall Summary -->
+    <a id="table0">
+        <h1 class="header">
+            <br><br><em id="modelNameText">Generic Model Overall Summary</em>
+        </h1>
+    </a>
+
+    <table class="center">
+        <col width="265">
+        <col width="50">
+        <tr>
+            <td>
+                Images <b>With Ground Truth</b>
+            </td>
+            <td onclick="findImagesWithGroundTruthLabel()" class="center">
+                <b id="stat_totalImages" data-round="0">loading..</b>
+            </td>
+        </tr>
+        <tr>
+            <td>
+                Images <b>Without Ground Truth</b>
+            </td>
+            <td class="center" onclick="findImagesWithNoGroundTruthLabel()">
+                <b id="stat_totalNoGroundTruth" data-round="0">0</b>
+            </td>
+        </tr>
+        <tr>
+            <td>
+                <b>Total Images</b>
+            </td>
+            <td onclick="clearResultFilter();goToImageResults();" class="center">
+                <b id="stat_netSummaryImages" data-round="0"></b>
+            </td>
+        </tr>
+    </table>
+
+    <br><br><br>
+
+    <table class="center">
+        <col width="300">
+        <col width="100">
+        <col width="350">
+        <col width="100">
+        <tr>
+            <td>
+                Total <b>Top 5 Match</b>
+            </td>
+
+            <td class="center" onclick="findTopKMatch()">
+                <b id="stat_passCount" data-round="0"></b>
+            </td>
+            <td>
+                Total <b>Mismatch</b>
+            </td>
+            <td class="center" onclick="findImageMisMatch()">
+                <b id="stat_totalMismatch" data-round="0"></b>
+            </td>
+        </tr>
+        <tr>
+            <td>
+                <b>Accuracy on Top 5</b>
+            </td>
+            <td class="center">
+                <b id="stat_accuracyPer" data-round="2"></b><b> %</b>
+            </td>
+            <td>
+                <b>Mismatch Percentage</b>
+            </td>
+            <td class="center">
+                <b id="stat_mismatchPer" data-round="2"></b><b> %</b>
+            </td>
+        </tr>
+        <tr>
+            <td>
+                Average Pass Confidence for Top 5
+            </td>
+            <td class="center">
+                <b id="stat_avgPassProb" data-round="2"> %</b>
+            </td>
+            <td>
+                Average mismatch Confidence for Top 1
+            </td>
+            <td class="center">
+                <b id="stat_avgMismatchProb" data-round="2"></b><b> </b>
+            </td>
+        </tr>
+    </table>
+    <br><br><br>
+    <table class="center" id="top-5-match-table" style="width: 40%">
+        <tr>
+            <th>
+                1st Match
+            </th>
+            <th>
+                2nd Match
+            </th>
+            <th>
+                3rd Match
+            </th>
+            <th>
+                4th Match
+            </th>
+            <th>
+                5th Match
+            </th>
+        </tr>
+    </table>
+    <br>
+    <br>
+    <h1 class="center">
+        <span style="color:dodgerblue; font-size: large;">Summary Generated On: </span>
+        <span style="color:black; font-size: large;" id="generation-date"></span>
+    </h1>
+
+    <!-- Graph Summary -->
+    <a id="table1">
+        <h1 class="header">
+            <br><br><em>Graphs</em>
+        </h1>
+    </a>
+
+    <div style="text-align: center;">
+        <div id="Model_Stats" class="center" style="border: 1px solid #ccc; display: inline-block;"></div>
+    </div>
+
+    <div class="row">
+        <div class="column">
+            <div id="result_chart_div" style="border: 0px solid #ccc; display:inline-block"></div>
+
+        </div>
+        <div class="column">
+            <div id="topK_result_chart_div" style="border: 0px solid #ccc; display:inline-block"></div>
+
+        </div>
+    </div>
+
+    <div id="passFailGraphs" class="row">
+
+    </div>
+
+    <div class="center">
+        <div style="display: inline-block;" id="Hierarchy_pass_fail_chart">
+
+        </div>
+    </div>
+
+
+    <div class="hierarchy-summary-div has-hierarchy hidden">
+        <a id="table2">
+            <h1 class="header">
+                <br><br><em>Hierarchy Summary (by Confidence level)</em>
+            </h1>
+        </a>
+
+        <table class="center marron-header" id="hierarchy-summary-table">
+            <thead>
+                <th>Confidence</th>
+                <th>Pass</th>
+                <th>Fail</th>
+                <th>Category 1 Pass</th>
+                <th>Category 1 Fail</th>
+                <th>Category 2 Pass</th>
+                <th>Category 2 Fail</th>
+                <th>Category 3 Pass</th>
+                <th>Category 3 Fail</th>
+                <th>Category 4 Pass</th>
+                <th>Category 4 Fail</th>
+                <th>Category 5 Pass</th>
+                <th>Category 5 Fail</th>
+                <th>Category 6 Pass</th>
+                <th>Category 6 Fail</th>
+            </thead>
+
+            <tbody>
+                <tr></tr>
+            </tbody>
+        </table>
+    </div>
+
+
+    <!-- Label SUmmary Filter -->
+    <a id="table3">
+        <h1 class="header">
+            <br><br><em>Label Summary (stats per image class)
+            </em>
+        </h1>
+    </a>
+    <table id="filterLabelTable" cellspacing="2" class="center" style="width: 70%">
+        <tr>
+            <td><input type="text" size="10" id="fl_id" onkeyup="filterLabelTable(0,id)" placeholder="Label ID"
+                    title="Label ID"></td>
+            <td><input type="text" size="10" id="fl_label" onkeyup="filterLabelTable(1,id)"
+                    placeholder="Label Description" data-compare="contains" title="Label Description"></td>
+            <td><input type="text" size="10" id="fl_totalImages" onkeyup="filterLabelTable(2,id)"
+                    placeholder="Images in DataBase" title="Images in DataBase"></td>
+            <td><input type="text" size="10" id="fl_matchedTop1Per" onkeyup="filterLabelTable(3,id)"
+                    placeholder="Matched Top1 %" title="Matched Top1 %"></td>
+            <td><input type="text" size="10" id="fl_matchedTop5Per" onkeyup="filterLabelTable(4,id)"
+                    placeholder="Matched Top5 %" title="Matched Top5 %"></td>
+            <td><input type="text" size="10" id="fl_match1" onkeyup="filterLabelTable(5,id)" placeholder="Matched 1st"
+                    title="Matched 1st"></td>
+        </tr>
+        <tr>
+            <td><input type="text" size="10" id="fl_match2" onkeyup="filterLabelTable(6,id)" placeholder="Matched 2nd"
+                    title="Matched 2nd"></td>
+            <td><input type="text" size="10" id="fl_match3" onkeyup="filterLabelTable(7,id)" placeholder="Matched 3th"
+                    title="Matched 3th"></td>
+            <td><input type="text" size="10" id="fl_match4" onkeyup="filterLabelTable(8,id)" placeholder="Matched 4th"
+                    title="Matched 4th"></td>
+            <td><input type="text" size="10" id="fl_match5" onkeyup="filterLabelTable(9,id)" placeholder="Matched 5th"
+                    title="Matched 5th"></td>
+            <td><input type="text" size="14" id="fl_misclassifiedTop1" onkeyup="filterLabelTable(10,id)"
+                    placeholder="Misclassified Top1 Label" title="Misclassified Top1 Label"></td>
+            <td><button style="background-color:yellow;" onclick="clearLabelFilter()">Clear
+                    Filter</button></td>
+        </tr>
+    </table>
+    <br>
+    <table class="sortable center" id="label-summary-table">
+        <col width="80">
+        <col width="200">
+        <col width="100">
+        <col width="100">
+        <col width="100">
+        <col width="100">
+        <col width="100">
+        <col width="100">
+        <col width="100">
+        <col width="100">
+        <col width="150">
+        <col width="60">
+        <thead>
+            <tr>
+                <th>Label ID</th>
+                <th>Label Description</th>
+                <th>Images in Database</th>
+                <th>Matched Top1%</th>
+                <th>Matched Top5%</th>
+                <th>Matched 1st</th>
+                <th>Matched 2nd</th>
+                <th>Matched 3rd</th>
+                <th>Matched 4th</th>
+                <th>Matched 5th</th>
+                <th style="color:blue">Misclassified Top1 Label</th>
+                <th style="color:black">Check</th>
+            </tr>
+        </thead>
+
+        <tbody>
+            <tr>
+                <td></td>
+            </tr>
+        </tbody>
+    </table>
+
+    <!-- Label SUmmary Main Table -->
+    <a id="table4">
+        <h1 class="header">
+            <br><br><em>Image Results
+            </em>
+        </h1>
+    </a>
+
+
+
+    <!-- Image Results FIlter -->
+    <table id="filterTable" class="center" style="width: 80%">
+        <tr>
+            <td>
+                <select id="fli_op_gtText">
+                    <option value="eq">=</option>
+                    <option value="neq">!=</option>
+                    <option value="gt">&gt;</option>
+                    <option value="lt">&lt;</option>
+                    <option value="gte">&gt;=</option>
+                    <option value="lte">&lt;=</option>
+                    <option value="contains" selected>Inc.</option>
+                </select>
+                <input type="text" size="10" id="fli_gtText" data-compare="contains" onkeyup="filterResultTable(event)"
+                    placeholder="Ground Truth Text" title="Ground Truth Text">
+
+            </td>
+            <td>
+                <select id="fli_op_gt">
+                    <option value="eq" selected>=</option>
+                    <option value="neq">!=</option>
+                    <option value="gt">&gt;</option>
+                    <option value="lt">&lt;</option>
+                    <option value="gte">&gt;=</option>
+                    <option value="lte">&lt;=</option>
+                    <option value="contains">Inc.</option>
+                </select>
+                <input type="text" size="10" id="fli_gt" onkeyup="filterResultTable(event)"
+                    placeholder="Ground Truth ID" title="Ground Truth ID"></td>
+            <td>
+                <select id="fli_op_match">
+                    <option value="eq" selected>=</option>
+                    <option value="neq">!=</option>
+                    <option value="gt">&gt;</option>
+                    <option value="lt">&lt;</option>
+                    <option value="gte">&gt;=</option>
+                    <option value="lte">&lt;=</option>
+                    <option value="contains">Inc.</option>
+                </select>
+
+                <input type="text" size="10" maxlength="2" id="fli_match" onkeyup="filterResultTable(9,id)"
+                    placeholder="Matched" title="Type in a name"></td>
+            <td>
+                <select id="fli_op_labels_0">
+                    <option value="eq" selected>=</option>
+                    <option value="neq">!=</option>
+                    <option value="gt">&gt;</option>
+                    <option value="lt">&lt;</option>
+                    <option value="gte">&gt;=</option>
+                    <option value="lte">&lt;=</option>
+                    <option value="contains">Inc.</option>
+                </select>
+
+                <input type="text" size="10" data-is-array="true" id="fli_labels_0" onkeyup="filterResultTable(event)"
+                    placeholder="1st Match" title="1st Match"></td>
+            <td>
+                <select id="fli_op_probs_0">
+                    <option value="eq" selected>=</option>
+                    <option value="neq">!=</option>
+                    <option value="gt">&gt;</option>
+                    <option value="lt">&lt;</option>
+                    <option value="gte">&gt;=</option>
+                    <option value="lte">&lt;=</option>
+                    <option value="contains">Inc.</option>
+                </select>
+
+                <input type="text" size="10" data-is-array="true" id="fli_probs_0" onkeyup="filterResultTable(event)"
+                    placeholder="1st Match Conf" title="1st Match Prob"></td>
+            <td>
+                <select id="fli_op_labelTexts_0">
+                    <option value="eq">=</option>
+                    <option value="neq">!=</option>
+                    <option value="gt">&gt;</option>
+                    <option value="lt">&lt;</option>
+                    <option value="gte">&gt;=</option>
+                    <option value="lte">&lt;=</option>
+                    <option value="contains" selected>Inc.</option>
+                </select>
+
+                <input type="text" size="10" data-is-array="true" data-compare="contains" id="fli_labelTexts_0"
+                    onkeyup="filterResultTable(10,id)" placeholder="Text 1" title="Text1"></td>
+            <td>
+                <select id="fli_op_labels_1">
+                    <option value="eq" selected>=</option>
+                    <option value="neq">!=</option>
+                    <option value="gt">&gt;</option>
+                    <option value="lt">&lt;</option>
+                    <option value="gte">&gt;=</option>
+                    <option value="lte">&lt;=</option>
+                    <option value="contains">Inc.</option>
+                </select>
+
+                <input type="text" size="10" data-is-array="true" id="fli_labels_1" onkeyup="filterResultTable(event)"
+                    placeholder="2nd Match" title="2nd Match"></td>
+            <td>
+                <select id="fli_op_probs_1">
+                    <option value="eq" selected>=</option>
+                    <option value="neq">!=</option>
+                    <option value="gt">&gt;</option>
+                    <option value="lt">&lt;</option>
+                    <option value="gte">&gt;=</option>
+                    <option value="lte">&lt;=</option>
+                    <option value="contains">Inc.</option>
+                </select>
+
+                <input type="text" size="10" data-is-array="true" id="fli_probs_1" onkeyup="filterResultTable(event)"
+                    placeholder="2nd Match Conf" title="2nd Match Prob"></td>
+        </tr>
+        <tr>
+            <td>
+                <select id="fli_op_labels_2">
+                    <option value="eq" selected>=</option>
+                    <option value="neq">!=</option>
+                    <option value="gt">&gt;</option>
+                    <option value="lt">&lt;</option>
+                    <option value="gte">&gt;=</option>
+                    <option value="lte">&lt;=</option>
+                    <option value="contains">Inc.</option>
+                </select>
+
+                <input type="text" size="10" data-is-array="true" id="fli_labels_2" onkeyup="filterResultTable(event)"
+                    placeholder="3rd Match" title="3rd Match"></td>
+            <td>
+                <select id="fli_op_probs_2">
+                    <option value="eq" selected>=</option>
+                    <option value="neq">!=</option>
+                    <option value="gt">&gt;</option>
+                    <option value="lt">&lt;</option>
+                    <option value="gte">&gt;=</option>
+                    <option value="lte">&lt;=</option>
+                    <option value="contains">Inc.</option>
+                </select>
+                <input type="text" size="10" data-is-array="true" id="fli_probs_2" onkeyup="filterResultTable(event)"
+                    placeholder="3rd Match Conf" title="3rd Match Prob"></td>
+            <td>
+                <select id="fli_op_labels_3">
+                    <option value="eq" selected>=</option>
+                    <option value="neq">!=</option>
+                    <option value="gt">&gt;</option>
+                    <option value="lt">&lt;</option>
+                    <option value="gte">&gt;=</option>
+                    <option value="lte">&lt;=</option>
+                    <option value="contains">Inc.</option>
+                </select>
+                <input type="text" size="10" data-is-array="true" id="fli_labels_3" onkeyup="filterResultTable(event)"
+                    placeholder="4th Match" title="4th Match"></td>
+            <td>
+                <select id="fli_op_probs_3">
+                    <option value="eq" selected>=</option>
+                    <option value="neq">!=</option>
+                    <option value="gt">&gt;</option>
+                    <option value="lt">&lt;</option>
+                    <option value="gte">&gt;=</option>
+                    <option value="lte">&lt;=</option>
+                    <option value="contains">Inc.</option>
+                </select>
+                <input type="text" size="10" data-is-array="true" id="fli_probs_3" onkeyup="filterResultTable(event)"
+                    placeholder="4th Match Conf" title="4th Match Prob"></td>
+            <td>
+                <select id="fli_op_labels_4">
+                    <option value="eq" selected>=</option>
+                    <option value="neq">!=</option>
+                    <option value="gt">&gt;</option>
+                    <option value="lt">&lt;</option>
+                    <option value="gte">&gt;=</option>
+                    <option value="lte">&lt;=</option>
+                    <option value="contains">Inc.</option>
+                </select>
+                <input type="text" size="10" data-is-array="true" id="fli_labels_4" onkeyup="filterResultTable(event)"
+                    placeholder="5th Match" title="5th Match"></td>
+            <td>
+                <select id="fli_op_probs_4">
+                    <option value="eq" selected>=</option>
+                    <option value="neq">!=</option>
+                    <option value="gt">&gt;</option>
+                    <option value="lt">&lt;</option>
+                    <option value="gte">&gt;=</option>
+                    <option value="lte">&lt;=</option>
+                    <option value="contains">Inc.</option>
+                </select>
+                <input type="text" size="10" data-is-array="true" id="fli_probs_4" onkeyup="filterResultTable(event)"
+                    placeholder="5th Match Conf" title="5th Match Prob"></td>
+            <td></td>
+            <td><button style="background-color:yellow;" onclick="clearResultFilter()">Clear
+                    Filter</button></td>
+        </tr>
+        <tr>
+            <td colspan="3">
+                <input type="radio" name="filterType" value="and" checked>And
+                <input type="radio" name="filterType" value="or">Or
+                <input id="not-op" type="checkbox" name="filterType" value="true">Not
+            </td>
+            <!-- <td align="center"><button style="background-color:salmon;" onclick="notResultFilter()">Not Filter</button>
+            </td>
+            <td align="center"><button style="background-color:salmon;" onclick="andResultFilter()">AND Filter</button>
+            </td>
+            <td align="center"><button style="background-color:salmon;" onclick="orResultFilter()">OR Filter</button>
+            </td> -->
+        </tr>
+    </table>
+    <br>
+
+    <div style="padding:10px">
+        <div class="item-count" id='table-item-count' style="display: inline-block;"></div>
+        <div class="pagination-page" style="float:right"></div>
+    </div>
+
+    <table id="image-results-table" class="center">
+        <thead>
+            <tr>
+                <th>Image</th>
+                <th>FileName</th>
+                <th class="sort-field" data-field="gtText">Ground Truth Text<span></span></th>
+                <th class="sort-field" data-field="gt">Ground Truth<span></span></th>
+                <th class="sort-field" data-field="labels_0">1st<span></span></th>
+                <th class="sort-field" data-field="labels_1">2nd<span></span></th>
+                <th class="sort-field" data-field="labels_2">3rd<span></span></th>
+                <th class="sort-field" data-field="labels_3">4th<span></span></th>
+                <th class="sort-field" data-field="labels_4">5th<span></span></th>
+                <th class="sort-field" data-field="match">Matched<span></span></th>
+                <th class="sort-field" data-field="labelTexts_0">Text-1<span></span></th>
+                <th class="sort-field" data-field="labelTexts_1">Text-2<span></span></th>
+                <th class="sort-field" data-field="labelTexts_2">Text-3<span></span></th>
+                <th class="sort-field" data-field="labelTexts_3">Text-4<span></span></th>
+                <th class="sort-field" data-field="labelTexts_4">Text-5<span></span></th>
+                <th class="sort-field" data-field="probs_0">Conf-1<span></span></th>
+                <th class="sort-field" data-field="probs_1">Conf-2<span></span></th>
+                <th class="sort-field" data-field="probs_2">Conf-3<span></span></th>
+                <th class="sort-field" data-field="probs_3">Conf-4<span></span></th>
+                <th class="sort-field" data-field="probs_4">Conf-5<span></span></th>
+            </tr>
+        </thead>
+
+        <tbody>
+            <tr>
+                <td>Loading...</td>
+            </tr>
+        </tbody>
+    </table>
+
+
+    <div style="padding:10px">
+        <div class="pagination-page" style="float:right"></div>
+    </div>
+
+
+    <!-- Compare ResultSummary -->
+    <a id="table5">
+        <h1 class="header">
+            <br><br><em>Compare Results Summary
+            </em>
+        </h1>
+    </a>
+
+    <div class="row">
+        <div class="col-30">
+            <div id="old-data-list">
+                <table class="sortable">
+                    <thead>
+                        <th>Select</th>
+                        <th>Name</th>
+                        <th id="date_sort_header">Gen Date</th>
+                        <th>Total Images</th>
+                    </thead>
+                    <tbody id="history-tbody">
+
+                    </tbody>
+                </table>
+
+
+            </div>
+
+        </div>
+        <div class="col-70">
+            <div id="Model_Stats_master" style="border: 1px solid #ccc; width:50%"></div>
+
+        </div>
+    </div>
+
+
+    <div class="row" id="compare-result-graphs">
+
+    </div>
+
+
+
+    <!-- Scores -->
+    <a id="table6">
+        <h1 class="header">
+            <br><br><em>Model Score
+            </em>
+        </h1>
+    </a>
+    <br>
+
+
+    <h1 class="center score-heading">
+        Standard Scoring
+    </h1>
+    <table id="standard-scoring-table" class="center marron-header scoring-table">
+        <thead>
+            <th>1st Match</th>
+            <th>2nd Match</th>
+            <th>3rd Match</th>
+            <th>4th Match</th>
+            <th>5th Match</th>
+        </thead>
+        <tbody>
+            <tr>
+                <td>Loading..</td>
+            </tr>
+        </tbody>
+    </table>
+
+
+    <div id="hierarchial-scoring" class="hidden">
+        <br>
+        <h1 class="center score-heading">
+            Method 1 Scoring - Confidence Aware
+        </h1>
+        <table id="method1-scoring-table" class="center marron-header scoring-table">
+            <thead>
+                <th>1st Match</th>
+                <th>2nd Match</th>
+                <th>3rd Match</th>
+                <th>4th Match</th>
+                <th>5th Match</th>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>Loading..</td>
+                </tr>
+            </tbody>
+        </table>
+        <br>
+        <h1 class="center score-heading">
+            Method 2 Scoring - Error Aware
+        </h1>
+        <table id="method2-scoring-table" class="center marron-header scoring-table">
+            <thead>
+                <th>1st Match</th>
+                <th>2nd Match</th>
+                <th>3rd Match</th>
+                <th>4th Match</th>
+                <th>5th Match</th>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>Loading..</td>
+                </tr>
+            </tbody>
+        </table>
+        <br>
+
+        <h1 class="center score-heading">
+            Method 3 Scoring - Hierarchy Aware
+        </h1>
+        <table id="method3-scoring-table" class="center marron-header scoring-table">
+            <thead>
+                <th>1st Match</th>
+                <th>2nd Match</th>
+                <th>3rd Match</th>
+                <th>4th Match</th>
+                <th>5th Match</th>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>Loading..</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div id="score-chart-div" class="row">
+
+    </div>
+
+
+    <!-- HELP -->
+    <a id="table7">
+        <h1 class="header">
+            <br><br><em>Help
+            </em>
+        </h1>
+    </a>
+
+    <div class="help center" style="width: 65%; font-size: small; text-align: justify;">
+        <h1 class="center">AMD Neural Net ToolKit</h1>
+        <p>AMD Neural Net ToolKit is a comprehensive set of help tools for neural net creation, development,
+            training and
+            deployment. The ToolKit provides you with help tools to design, develop, quantize, prune, retrain,
+            and infer your neural
+            network work in any framework. The ToolKit is designed help you deploy your work to any AMD or 3rd
+            party hardware, from
+            embedded to servers.</p>
+        <p>AMD Neural Net ToolKit provides you with tools for accomplishing your tasks throughout the whole
+            neural net life-cycle,
+            from creating a model to deploying them for your target platforms.</p>
+        <h2>List of Features Available in this release</h2>
+        <ul>
+            <li>Overall Summary</li>
+            <li>Graphs</li>
+            <li>Hierarchy</li>
+            <li>Labels</li>
+            <li>Image Results</li>
+            <li>Compare</li>
+            <li>Help</li>
+        </ul>
+        <h3>Overall Summary</h3>
+        <p>This section summarizes the results for the current session, with information on the dataset and the
+            model.
+            The section classifies the dataset into images with or without ground truth and only considers the
+            images with ground truth
+            for analysis to avoid skewing the results.</p>
+        <p>The summary calculates all the metrics to evaluate the current run session, helps evaluate the
+            quality of the data set,
+            accuracy of the current version of the model and links all the high level result to individual
+            images to help the user to
+            quickly analyze and detect if there are any problems.</p>
+        <p>The summary also timestamps the results to avoid confusion with different iterations.</p>
+        <h3>Graphs</h3>
+        <p>The graph section allows the user to visualize the dataset and model accurately. The graphs can help
+            detect any
+            anomalies with the data or the model from a higher level. The graphs can be saved or shared with
+            others.</p>
+        <h3>Hierarchy</h3>
+        <p>This section has AMD proprietary hierarchical result analysis. Please contact us to get more
+            information.</p>
+        <h3>Labels</h3>
+        <p>Label section is the summary of all the classes the model has been trained to detect. The Label
+            Summary presents the
+            highlights of all the classes of images available in the database. The summary reports if the
+            classes are found or not
+            found.</p>
+        <p>Click on any of the label description and zoom into all the images from that class in the database.
+        </p>
+        <h3>Image Results</h3>
+        <p>The Image results has all the low level information about each of the individual images in the
+            database. It reports on
+            the results obtained for the image in the session and allows quick view of the image.</p>
+        <h3>Compare</h3>
+        <p>This section compares the results of a database or the model between different sessions. If the
+            database was tested with
+            different models, this section reports and compares results among them.</p>
+
+    </div>
+
+    <br><br><br>
+    <div class="footer">
+        <p>2018 - 2024 Advanced Micro Devices, Inc</p>
+    </div>
+
+
+    <script type="text/javascript" src="https://www.gstatic.com/charts/loader.js"></script>
+    <script src="scripts/charts.js"></script>
+
+
+
+</body>
+
+</html>

@@ -1,0 +1,5 @@
+# agoKernel_Sobel_S16S16_U8_3x3_GXY
+data input_1 = uniform-image:1920,1080,U008,125
+data output_1 = image:1920,1080,S016
+data output_2 = image:1920,1080,S016
+node org.khronos.openvx.sobel_3x3 input_1 output_1 output_2

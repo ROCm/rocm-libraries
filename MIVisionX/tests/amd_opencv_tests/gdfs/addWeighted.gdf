@@ -1,0 +1,10 @@
+import vx_opencv
+
+data inter_luma = image:1280,720,U008:READ,inputs/stm_1280x720.y
+data output = image:1280,720,U008:WRITE,amd_opencv_test_results/addweighted_1280x720.u8
+data alpha = scalar:FLOAT32,0.5
+data beta = scalar:FLOAT32,0.5
+data gamma = scalar:FLOAT32,0
+data dtype = scalar:INT32,1
+
+node org.opencv.addweighted inter_luma alpha inter_luma beta gamma output dtype

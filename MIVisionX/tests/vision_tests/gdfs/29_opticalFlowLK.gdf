@@ -1,0 +1,24 @@
+data input_iyuv = image:1280,720,IYUV:READ,inputs/stm_1280x720.yuv
+data inter_luma = image:1280,720,U008
+node org.khronos.openvx.channel_extract input_iyuv !CHANNEL_Y inter_luma
+
+data inter_new_pyramid = pyramid:4,HALF,1280,720,U008
+node org.khronos.openvx.gaussian_pyramid inter_luma inter_new_pyramid
+
+data inter_old_pyramid = pyramid:4,HALF,1280,720,U008
+node org.khronos.openvx.gaussian_pyramid inter_luma inter_old_pyramid
+
+data input_strength_thresh = scalar:FLOAT32,80.0
+data input_nonmax_suppression = scalar:BOOL,1
+data inter_fast_corners_points = array:KEYPOINT,1000
+data inter_fast_corners_count = scalar:SIZE,0
+node org.khronos.openvx.fast_corners inter_luma input_strength_thresh input_nonmax_suppression inter_fast_corners_points inter_fast_corners_count
+
+data output_new_points = array:KEYPOINT,1000:WRITE,openvx_test_results/29_optical_flow_lk_points.txt
+data input_termination = scalar:ENUM,CRITERIA_BOTH
+data input_epsilon = scalar:FLOAT32,0.1
+data input_num_iterations = scalar:UINT32,4
+data input_use_initial_estimate = scalar:BOOL,0
+data input_window_dimension = scalar:SIZE,5
+
+node org.khronos.openvx.optical_flow_pyr_lk inter_old_pyramid inter_new_pyramid inter_fast_corners_points inter_fast_corners_points output_new_points input_termination input_epsilon input_num_iterations input_use_initial_estimate input_window_dimension  

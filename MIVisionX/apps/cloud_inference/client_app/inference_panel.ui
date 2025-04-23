@@ -1,0 +1,298 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>inference_panel</class>
+ <widget class="QDialog" name="inference_panel">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>430</width>
+    <height>700</height>
+   </rect>
+  </property>
+  <property name="minimumSize">
+   <size>
+    <width>430</width>
+    <height>700</height>
+   </size>
+  </property>
+  <property name="maximumSize">
+   <size>
+    <width>430</width>
+    <height>700</height>
+   </size>
+  </property>
+  <property name="windowTitle">
+   <string>Inference Statistics Panel</string>
+  </property>
+  <property name="styleSheet">
+   <string notr="true">background-color: rgb(109, 109, 109);</string>
+  </property>
+  <widget class="QLCDNumber" name="lcdNumber">
+   <property name="geometry">
+    <rect>
+     <x>300</x>
+     <y>160</y>
+     <width>91</width>
+     <height>41</height>
+    </rect>
+   </property>
+   <property name="intValue" stdset="0">
+    <number>0</number>
+   </property>
+  </widget>
+  <widget class="QLabel" name="imagesPerSecLabel">
+   <property name="geometry">
+    <rect>
+     <x>40</x>
+     <y>160</y>
+     <width>181</width>
+     <height>41</height>
+    </rect>
+   </property>
+   <property name="styleSheet">
+    <string notr="true">color: rgb(241, 216, 26);
+font: 75 14pt &quot;Calibri&quot;;</string>
+   </property>
+   <property name="text">
+    <string>Images per second</string>
+   </property>
+  </widget>
+  <widget class="QLabel" name="performace_graph_Label">
+   <property name="geometry">
+    <rect>
+     <x>40</x>
+     <y>220</y>
+     <width>231</width>
+     <height>41</height>
+    </rect>
+   </property>
+   <property name="minimumSize">
+    <size>
+     <width>191</width>
+     <height>41</height>
+    </size>
+   </property>
+   <property name="styleSheet">
+    <string notr="true">color: rgb(241, 216, 26);
+font: 75 14pt &quot;Calibri&quot;;</string>
+   </property>
+   <property name="text">
+    <string>View Performace Graph</string>
+   </property>
+  </widget>
+  <widget class="QPushButton" name="viewGraph_pushButton">
+   <property name="geometry">
+    <rect>
+     <x>340</x>
+     <y>230</y>
+     <width>51</width>
+     <height>28</height>
+    </rect>
+   </property>
+   <property name="styleSheet">
+    <string notr="true">color: rgb(0, 0, 0);
+background-color: rgb(255, 255, 255);</string>
+   </property>
+   <property name="text">
+    <string>View</string>
+   </property>
+  </widget>
+  <widget class="QLabel" name="view_classes_Label">
+   <property name="geometry">
+    <rect>
+     <x>40</x>
+     <y>280</y>
+     <width>241</width>
+     <height>41</height>
+    </rect>
+   </property>
+   <property name="styleSheet">
+    <string notr="true">color: rgb(241, 216, 26);
+font: 75 14pt &quot;Calibri&quot;;</string>
+   </property>
+   <property name="text">
+    <string>View Identified Classes</string>
+   </property>
+  </widget>
+  <widget class="QPushButton" name="viewclass_pushButton">
+   <property name="geometry">
+    <rect>
+     <x>340</x>
+     <y>290</y>
+     <width>51</width>
+     <height>28</height>
+    </rect>
+   </property>
+   <property name="styleSheet">
+    <string notr="true">color: rgb(0, 0, 0);
+background-color: rgb(255, 255, 255);</string>
+   </property>
+   <property name="text">
+    <string>View</string>
+   </property>
+  </widget>
+  <widget class="QPushButton" name="GPUView_pushButton">
+   <property name="geometry">
+    <rect>
+     <x>340</x>
+     <y>350</y>
+     <width>51</width>
+     <height>28</height>
+    </rect>
+   </property>
+   <property name="styleSheet">
+    <string notr="true">color: rgb(0, 0, 0);
+background-color: rgb(255, 255, 255);</string>
+   </property>
+   <property name="text">
+    <string>View</string>
+   </property>
+  </widget>
+  <widget class="QLabel" name="view_GPU_Label">
+   <property name="geometry">
+    <rect>
+     <x>40</x>
+     <y>340</y>
+     <width>191</width>
+     <height>41</height>
+    </rect>
+   </property>
+   <property name="styleSheet">
+    <string notr="true">color: rgb(241, 216, 26);
+font: 75 14pt &quot;Calibri&quot;;</string>
+   </property>
+   <property name="text">
+    <string>View GPU Usage</string>
+   </property>
+  </widget>
+  <widget class="QLabel" name="view_GPU_Label_2">
+   <property name="geometry">
+    <rect>
+     <x>40</x>
+     <y>400</y>
+     <width>251</width>
+     <height>41</height>
+    </rect>
+   </property>
+   <property name="styleSheet">
+    <string notr="true">color: rgb(241, 216, 26);
+font: 75 14pt &quot;Calibri&quot;;</string>
+   </property>
+   <property name="text">
+    <string>View Inference Statistics</string>
+   </property>
+  </widget>
+  <widget class="QPushButton" name="GPUView_pushButton_2">
+   <property name="geometry">
+    <rect>
+     <x>340</x>
+     <y>410</y>
+     <width>51</width>
+     <height>28</height>
+    </rect>
+   </property>
+   <property name="styleSheet">
+    <string notr="true">color: rgb(0, 0, 0);
+background-color: rgb(255, 255, 255);</string>
+   </property>
+   <property name="text">
+    <string>View</string>
+   </property>
+  </widget>
+  <widget class="QWidget" name="gridLayoutWidget">
+   <property name="geometry">
+    <rect>
+     <x>10</x>
+     <y>10</y>
+     <width>411</width>
+     <height>110</height>
+    </rect>
+   </property>
+   <layout class="QGridLayout" name="panel_gridLayout" rowminimumheight="0">
+    <property name="sizeConstraint">
+     <enum>QLayout::SetNoConstraint</enum>
+    </property>
+    <property name="leftMargin">
+     <number>5</number>
+    </property>
+    <property name="topMargin">
+     <number>5</number>
+    </property>
+    <property name="rightMargin">
+     <number>5</number>
+    </property>
+    <property name="bottomMargin">
+     <number>5</number>
+    </property>
+    <item row="0" column="0" alignment="Qt::AlignHCenter">
+     <widget class="QLabel" name="logo_label">
+      <property name="text">
+       <string/>
+      </property>
+      <property name="pixmap">
+       <pixmap resource="resources.qrc">:/images/display_panel_logo.png</pixmap>
+      </property>
+     </widget>
+    </item>
+   </layout>
+  </widget>
+  <widget class="QWidget" name="verticalLayoutWidget">
+   <property name="geometry">
+    <rect>
+     <x>10</x>
+     <y>110</y>
+     <width>411</width>
+     <height>43</height>
+    </rect>
+   </property>
+   <layout class="QVBoxLayout" name="verticalLayout">
+    <item alignment="Qt::AlignHCenter">
+     <widget class="QLabel" name="header_label">
+      <property name="minimumSize">
+       <size>
+        <width>251</width>
+        <height>41</height>
+       </size>
+      </property>
+      <property name="styleSheet">
+       <string notr="true">color: rgb(255, 255, 255);
+font: 16pt &quot;Georgia&quot;;</string>
+      </property>
+      <property name="text">
+       <string>Inference Statistics Panel</string>
+      </property>
+     </widget>
+    </item>
+   </layout>
+  </widget>
+  <widget class="QWidget" name="verticalLayoutWidget_2">
+   <property name="geometry">
+    <rect>
+     <x>10</x>
+     <y>660</y>
+     <width>411</width>
+     <height>31</height>
+    </rect>
+   </property>
+   <layout class="QVBoxLayout" name="verticalLayout_2">
+    <item alignment="Qt::AlignHCenter">
+     <widget class="QPushButton" name="reset_pushButton">
+      <property name="styleSheet">
+       <string notr="true">background-color: rgb(255, 0, 0);
+color: rgb(255, 255, 255);
+font: 75 10pt &quot;Georgia&quot;;</string>
+      </property>
+      <property name="text">
+       <string>RESET ALL</string>
+      </property>
+     </widget>
+    </item>
+   </layout>
+  </widget>
+ </widget>
+ <resources>
+  <include location="resources.qrc"/>
+ </resources>
+ <connections/>
+</ui>

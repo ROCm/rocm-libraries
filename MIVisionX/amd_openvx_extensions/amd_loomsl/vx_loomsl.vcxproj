@@ -1,0 +1,116 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{C5F3ED68-728A-4610-A37F-89323A93DD82}</ProjectGuid>
+    <RootNamespace>vx_loomsl</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v142</PlatformToolset>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v142</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+  </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup />
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>Disabled</Optimization>
+      <SDLCheck>true</SDLCheck>
+      <AdditionalIncludeDirectories>.;kernels;..\..\amd_openvx\openvx\include;$(OCL_ROOT)\include;$(OpenCV_DIR)\include</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>_WINDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalLibraryDirectories>$(TargetDir);..\amd_openvx\x64\Debug;..\amd_openvx\openvx\x64\Debug;$(OCL_ROOT)\lib\x86_64</AdditionalLibraryDirectories>
+      <AdditionalDependencies>opencl.lib;openvx.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;</AdditionalDependencies>
+      <LinkTimeCodeGeneration>Default</LinkTimeCodeGeneration>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>MaxSpeed</Optimization>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <AdditionalIncludeDirectories>.;kernels;..\..\amd_openvx\openvx\include;$(OCL_ROOT)\include;$(OpenCV_DIR)\include</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>_WINDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <AdditionalLibraryDirectories>$(TargetDir);..\amd_openvx\x64\Release;..\amd_openvx\openvx\x64\Release;$(OCL_ROOT)\lib\x86_64</AdditionalLibraryDirectories>
+      <AdditionalDependencies>opencl.lib;openvx.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClInclude Include="kernels\alpha_blend.h" />
+    <ClInclude Include="kernels\chroma_key.h" />
+    <ClInclude Include="kernels\color_convert.h" />
+    <ClInclude Include="kernels\exposure_compensation.h" />
+    <ClInclude Include="kernels\exp_comp.h" />
+    <ClInclude Include="kernels\kernels.h" />
+    <ClInclude Include="kernels\lens_distortion_remap.h" />
+    <ClInclude Include="kernels\merge.h" />
+    <ClInclude Include="kernels\multiband_blender.h" />
+    <ClInclude Include="kernels\noise_filter.h" />
+    <ClInclude Include="kernels\pyramid_scale.h" />
+    <ClInclude Include="kernels\seam_find.h" />
+    <ClInclude Include="kernels\warp.h" />
+    <ClInclude Include="kernels\warp_eqr_to_aze.h" />
+    <ClInclude Include="live_stitch_api.h" />
+    <ClInclude Include="profiler.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="kernels\alpha_blend.cpp" />
+    <ClCompile Include="kernels\chroma_key.cpp" />
+    <ClCompile Include="kernels\color_convert.cpp" />
+    <ClCompile Include="kernels\exposure_compensation.cpp" />
+    <ClCompile Include="kernels\exp_comp.cpp" />
+    <ClCompile Include="kernels\initialize_setup_tables.cpp" />
+    <ClCompile Include="kernels\kernels.cpp" />
+    <ClCompile Include="kernels\lens_distortion_remap.cpp" />
+    <ClCompile Include="kernels\merge.cpp" />
+    <ClCompile Include="kernels\multiband_blender.cpp" />
+    <ClCompile Include="kernels\noise_filter.cpp" />
+    <ClCompile Include="kernels\pyramid_scale.cpp" />
+    <ClCompile Include="kernels\seam_find.cpp" />
+    <ClCompile Include="kernels\warp.cpp" />
+    <ClCompile Include="kernels\warp_eqr_to_aze.cpp" />
+    <ClCompile Include="live_stitch_api.cpp" />
+    <ClCompile Include="profiler.cpp" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+  </ImportGroup>
+</Project>

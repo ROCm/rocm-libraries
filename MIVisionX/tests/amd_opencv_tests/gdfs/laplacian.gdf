@@ -1,0 +1,12 @@
+
+import vx_opencv
+
+data inter_luma = image:1280,720,U008:READ,inputs/stm_1280x720.yuv
+data output = image:1280,720,U008:WRITE,amd_opencv_test_results/laplacian_1280x720.u8
+data size_x = scalar:INT32,-1
+data size_y = scalar:INT32,3
+data sigma_x = scalar:FLOAT32,1
+data sigma_y = scalar:FLOAT32,0
+data border = scalar:INT32,4
+
+node org.opencv.laplacian inter_luma output size_x size_y sigma_x sigma_y border

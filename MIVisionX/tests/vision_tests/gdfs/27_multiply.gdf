@@ -1,0 +1,7 @@
+data input_iyuv = image:1280,720,IYUV:READ,inputs/stm_1280x720.yuv
+data inter_luma = image:1280,720,U008
+node org.khronos.openvx.channel_extract input_iyuv !CHANNEL_Y inter_luma
+
+data output_multiply = image:1280,720,S016:WRITE,openvx_test_results/27_multiply_1280x720.yuv
+data input_scale = scalar:FLOAT32,1.0
+node org.khronos.openvx.multiply inter_luma inter_luma input_scale !WRAP !ROUND_POLICY_TO_NEAREST_EVEN output_multiply

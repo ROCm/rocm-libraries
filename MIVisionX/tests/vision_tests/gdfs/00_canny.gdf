@@ -1,0 +1,14 @@
+# create input and output images
+data input  = image:480,360,RGB2
+data output = image:480,360,U008
+
+# compute luma image channel from input RGB image
+data yuv  = image-virtual:0,0,IYUV
+data luma = image-virtual:0,0,U008
+node org.khronos.openvx.color_convert input yuv
+node org.khronos.openvx.channel_extract yuv !CHANNEL_Y luma
+
+# compute edges in luma image using Canny edge detector
+data hyst = threshold:RANGE,U008,U008:INIT,80,100
+data gradient_size = scalar:INT32,3
+node org.khronos.openvx.canny_edge_detector luma hyst gradient_size !NORM_L1 output

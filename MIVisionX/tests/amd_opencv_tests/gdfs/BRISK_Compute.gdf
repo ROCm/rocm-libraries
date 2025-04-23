@@ -1,0 +1,11 @@
+import vx_opencv
+
+data inter_luma = image:1280,720,U008:READ,inputs/stm_1280x720.y
+data keypoint = array:KEYPOINT,3000
+type desp userstruct:64
+data Descriptor = array:desp,3000
+data Threshold = scalar:INT32,30
+data Octaves = scalar:INT32,3
+data patternscale = scalar:FLOAT32,1.0
+
+node org.opencv.brisk_compute inter_luma inter_luma keypoint Descriptor Threshold Octaves patternscale

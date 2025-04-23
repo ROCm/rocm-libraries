@@ -1,0 +1,11 @@
+import vx_opencv
+
+data inter_luma = image:1280,720,U008:READ,inputs/stm_1280x720.y
+data output = image:600,400,U008:WRITE,amd_opencv_test_results/resize_600x400.u8
+data SizeX = scalar:INT32,600
+data SizeY = scalar:INT32,400
+data FX = scalar:FLOAT32,0
+data FY = scalar:FLOAT32,0
+data INTER = scalar:INT32,4
+
+node org.opencv.resize inter_luma output SizeX SizeY FX FY INTER

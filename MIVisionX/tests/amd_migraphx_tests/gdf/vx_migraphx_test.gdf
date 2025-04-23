@@ -1,0 +1,14 @@
+import vx_amd_migraphx
+import vx_nn
+
+data input = image:28,28,U008
+data a = scalar:FLOAT32,0.00392157
+data b = scalar:FLOAT32,0.0
+data reverse_channel_order = scalar:BOOL,0
+data image_tensor = tensor:4,{28,28,1,1},VX_TYPE_FLOAT32,0
+node com.amd.nn_extension.convert_image_to_tensor input image_tensor a b reverse_channel_order
+
+data model = scalar:STRING,"mnist-8.onnx"
+data output_tensor = tensor:2,{10,1},VX_TYPE_FLOAT32,0
+
+node com.amd.amd_migraphx_node model image_tensor output_tensor

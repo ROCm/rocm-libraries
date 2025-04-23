@@ -1,0 +1,17 @@
+import vx_opencv
+
+data inter_luma = image:1280,720,U008:READ,inputs/stm_1280x720.y
+data ddepth = scalar:INT32,-1
+data scale = scalar:FLOAT32,1.0
+data delta = scalar:FLOAT32,0.0
+data bordertype = scalar:INT32,4
+data output_x = image:1280,720,U008:WRITE,amd_opencv_test_results/scharr_x_1280x720.u8
+data Dx_1 = scalar:INT32,1
+data Dy_1 = scalar:INT32,0
+
+data output_y = image:1280,720,U008:WRITE,amd_opencv_test_results/scharr_y_1280x720.u8
+data Dx_2 = scalar:INT32,0
+data Dy_2 = scalar:INT32,1
+
+node org.opencv.scharr inter_luma output_x ddepth Dx_1 Dy_1 scale delta bordertype
+node org.opencv.scharr inter_luma output_y ddepth Dx_2 Dy_2 scale delta bordertype

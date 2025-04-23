@@ -1,0 +1,4 @@
+# agoKernel_ChannelExtract_U8_U16_Pos1
+data input_1 = uniform-image:1920,1080,YUYV,0xaabbcc
+data output_1 = image:1920,1080,U008
+node org.khronos.openvx.channel_extract input_1 !CHANNEL_Y output_1

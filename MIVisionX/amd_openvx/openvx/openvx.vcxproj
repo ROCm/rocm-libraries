@@ -1,0 +1,149 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{973F2004-2215-431F-8A2C-93ABAAFB6A24}</ProjectGuid>
+    <Keyword>Win32Proj</Keyword>
+    <RootNamespace>agodll</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v142</PlatformToolset>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v142</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+  </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <LinkIncremental>true</LinkIncremental>
+    <IncludePath>$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
+    <TargetName>OpenVX</TargetName>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <LinkIncremental>false</LinkIncremental>
+    <IncludePath>$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
+    <TargetName>OpenVX</TargetName>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <PrecompiledHeader>
+      </PrecompiledHeader>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>Disabled</Optimization>
+      <PreprocessorDefinitions>ENABLE_OPENCL=1;VX_API_ENTRY=__declspec(dllexport);_DEBUG;_WINDOWS;_USRDLL;AGODLL_EXPORTS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <SDLCheck>true</SDLCheck>
+      <AdditionalIncludeDirectories>include;$(OCL_ROOT)\include;ago;api</AdditionalIncludeDirectories>
+      <TreatWarningAsError>false</TreatWarningAsError>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalDependencies>kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(OCL_ROOT)\lib\x86_64</AdditionalLibraryDirectories>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <PrecompiledHeader>
+      </PrecompiledHeader>
+      <Optimization>MaxSpeed</Optimization>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <PreprocessorDefinitions>ENABLE_OPENCL=1;VX_API_ENTRY=__declspec(dllexport);NDEBUG;_WINDOWS;_USRDLL;AGODLL_EXPORTS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <SDLCheck>true</SDLCheck>
+      <AdditionalIncludeDirectories>include;$(OCL_ROOT)\include;ago;api</AdditionalIncludeDirectories>
+      <TreatWarningAsError>false</TreatWarningAsError>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <AdditionalDependencies>kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(OCL_ROOT)\lib\x86_64</AdditionalLibraryDirectories>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="ago\ago_drama.cpp" />
+    <ClCompile Include="ago\ago_drama_alloc.cpp" />
+    <ClCompile Include="ago\ago_drama_analyze.cpp" />
+    <ClCompile Include="ago\ago_drama_divide.cpp" />
+    <ClCompile Include="ago\ago_drama_merge.cpp" />
+    <ClCompile Include="ago\ago_drama_remove.cpp" />
+    <ClCompile Include="ago\ago_haf_cpu.cpp" />
+    <ClCompile Include="ago\ago_haf_cpu_arithmetic.cpp" />
+    <ClCompile Include="ago\ago_haf_cpu_canny.cpp" />
+    <ClCompile Include="ago\ago_haf_cpu_ch_extract_combine.cpp" />
+    <ClCompile Include="ago\ago_haf_cpu_color_convert.cpp" />
+    <ClCompile Include="ago\ago_haf_cpu_fast_corners.cpp" />
+    <ClCompile Include="ago\ago_haf_cpu_filter.cpp" />
+    <ClCompile Include="ago\ago_haf_cpu_geometric.cpp" />
+	<ClCompile Include="ago\ago_haf_cpu_generic_functions.cpp" />
+    <ClCompile Include="ago\ago_haf_cpu_harris.cpp" />
+    <ClCompile Include="ago\ago_haf_cpu_histogram.cpp" />
+    <ClCompile Include="ago\ago_haf_cpu_logical.cpp" />
+    <ClCompile Include="ago\ago_haf_cpu_opticalflow.cpp" />
+    <ClCompile Include="ago\ago_haf_cpu_pyramid.cpp" />
+    <ClCompile Include="ago\ago_haf_gpu_common.cpp" />
+    <ClCompile Include="ago\ago_haf_gpu_conversion.cpp" />
+    <ClCompile Include="ago\ago_haf_gpu_corners.cpp" />
+    <ClCompile Include="ago\ago_haf_gpu_linear_filter.cpp" />
+    <ClCompile Include="ago\ago_haf_gpu_special_filters.cpp" />
+    <ClCompile Include="ago\ago_interface.cpp" />
+    <ClCompile Include="ago\ago_kernel_api.cpp" />
+    <ClCompile Include="ago\ago_kernel_list.cpp" />
+    <ClCompile Include="ago\ago_platform.cpp" />
+    <ClCompile Include="ago\ago_util.cpp" />
+    <ClCompile Include="ago\ago_util_opencl.cpp" />
+    <ClCompile Include="api\vxu.cpp" />
+    <ClCompile Include="api\vx_api.cpp" />
+    <ClCompile Include="api\vx_nodes.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="ago\ago_haf_cpu.h" />
+    <ClInclude Include="ago\ago_haf_gpu.h" />
+    <ClInclude Include="ago\ago_internal.h" />
+    <ClInclude Include="ago\ago_kernels.h" />
+    <ClInclude Include="ago\ago_kernel_api.h" />
+    <ClInclude Include="ago\ago_platform.h" />
+    <ClInclude Include="include\VX\vx_compatibility.h" />
+    <ClInclude Include="include\vx_ext_amd.h" />
+    <ClInclude Include="include\VX\vx.h" />
+    <ClInclude Include="include\VX\vxu.h" />
+    <ClInclude Include="include\VX\vx_api.h" />
+    <ClInclude Include="include\VX\vx_kernels.h" />
+    <ClInclude Include="include\VX\vx_nodes.h" />
+    <ClInclude Include="include\VX\vx_types.h" />
+    <ClInclude Include="include\VX\vx_vendors.h" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+  </ImportGroup>
+</Project>

@@ -1,0 +1,5 @@
+# agoKernel_Convolve_S16_U8_3x3
+data input_1 = uniform-image:1920,1080,U008,125
+data output_1 = image:1920,1080,S016
+data input_matrix = convolution:3,3:INIT,{-1;-1;-1;-1;16;-1;-1;-1;-1}
+node org.khronos.openvx.custom_convolution input_1 input_matrix output_1

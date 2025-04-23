@@ -1,0 +1,15 @@
+# agoKernel_HarrisSobel_HG3_U8_3x3
+# agoKernel_HarrisScore_HVC_HG3_3x3
+# agoKernel_NonMaxSupp_XY_ANY_3x3
+# agoKernel_HarrisMergeSortAndPick_XY_XYS
+data input_iyuv = image:1280,720,IYUV:READ,../../kernelGDFs/vision/inputs/stm_1280x720.yuv
+data inter_luma = image:1280,720,U008
+node org.khronos.openvx.channel_extract input_iyuv !CHANNEL_Y inter_luma
+data input_strength_thresh = scalar:FLOAT32,0.00001
+data input_min_distance = scalar:FLOAT32,20.0
+data input_sensitivity = scalar:FLOAT32,0.10
+data input_grad_size = scalar:INT32,3
+data input_block_size = scalar:INT32,3
+data output_1 = array:KEYPOINT,1000
+data output_2 = scalar:SIZE,0
+node org.khronos.openvx.harris_corners inter_luma input_strength_thresh input_min_distance input_sensitivity input_grad_size input_block_size output_1 output_2

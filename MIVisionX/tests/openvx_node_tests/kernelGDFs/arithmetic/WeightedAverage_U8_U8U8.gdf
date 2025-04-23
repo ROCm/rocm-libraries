@@ -1,0 +1,6 @@
+# agoKernel_WeightedAverage_U8_U8U8
+data input_1 = uniform-image:1920,1080,U008,125
+data input_2 = uniform-image:1920,1080,U008,132
+data scalar = scalar:FLOAT32,0.25
+data output_1 = image:1920,1080,U008
+node org.khronos.openvx.weighted_average input_1 scalar input_2 output_1
