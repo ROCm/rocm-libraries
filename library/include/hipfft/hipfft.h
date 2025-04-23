@@ -137,10 +137,18 @@ typedef int hipfftHandle;
 typedef struct hipfftHandle_t* hipfftHandle;
 #endif
 
-typedef hipComplex       hipfftComplex;
+/*! @brief Single-precision floating point complex type
+ *  */
+typedef hipComplex hipfftComplex;
+/*! @brief Double-precision floating point complex type
+ *  */
 typedef hipDoubleComplex hipfftDoubleComplex;
-typedef float            hipfftReal;
-typedef double           hipfftDoubleReal;
+/*! @brief Single-precision floating point type
+ *  */
+typedef float hipfftReal;
+/*! @brief Double-precision floating point type
+ *  */
+typedef double hipfftDoubleReal;
 
 /*! @brief Create a new one-dimensional FFT plan.
  *
@@ -191,24 +199,24 @@ HIPFFT_EXPORT hipfftResult
  * @details Allocate and initialize a new batched rank-dimensional
  *  FFT plan. The number of elements to transform in each direction of
  *  the input data is specified in n.
- * 
- *  The batch parameter tells hipFFT how many transforms to perform. 
- *  The distance between the first elements of two consecutive batches 
- *  of the input and output data are specified with the idist and odist 
+ *
+ *  The batch parameter tells hipFFT how many transforms to perform.
+ *  The distance between the first elements of two consecutive batches
+ *  of the input and output data are specified with the idist and odist
  *  parameters.
- * 
+ *
  *  The inembed and onembed parameters define the input and output data
- *  layouts. The number of elements in the data is assumed to be larger 
- *  than the number of elements in the transform. Strided data layouts 
+ *  layouts. The number of elements in the data is assumed to be larger
+ *  than the number of elements in the transform. Strided data layouts
  *  are also supported. Strides along the fastest direction in the input
- *  and output data are specified via the istride and ostride parameters.  
- * 
- *  If both inembed and onembed parameters are set to NULL, all the 
- *  advanced data layout parameters are ignored and reverted to default 
+ *  and output data are specified via the istride and ostride parameters.
+ *
+ *  If both inembed and onembed parameters are set to NULL, all the
+ *  advanced data layout parameters are ignored and reverted to default
  *  values, i.e., the batched transform is performed with non-strided data
- *  access and the number of data/transform elements are assumed to be  
+ *  access and the number of data/transform elements are assumed to be
  *  equivalent.
- * 
+ *
  *  @param[out] plan Pointer to the FFT plan handle.
  *  @param[in] rank Dimension of transform (1, 2, or 3).
  *  @param[in] n Number of elements to transform in the x/y/z directions.
@@ -310,27 +318,27 @@ HIPFFT_EXPORT hipfftResult
 /*! @brief Initialize a new batched rank-dimensional FFT plan with advanced data layout.
  *
  *  @details Assumes that the plan has been created already, and
- *  modifies the plan associated with the plan handle. The number 
- *  of elements to transform in each direction of the input data 
+ *  modifies the plan associated with the plan handle. The number
+ *  of elements to transform in each direction of the input data
  *  in the FFT plan is specified in n.
- * 
- *  The batch parameter tells hipFFT how many transforms to perform. 
- *  The distance between the first elements of two consecutive batches 
- *  of the input and output data are specified with the idist and odist 
+ *
+ *  The batch parameter tells hipFFT how many transforms to perform.
+ *  The distance between the first elements of two consecutive batches
+ *  of the input and output data are specified with the idist and odist
  *  parameters.
- * 
+ *
  *  The inembed and onembed parameters define the input and output data
- *  layouts. The number of elements in the data is assumed to be larger 
- *  than the number of elements in the transform. Strided data layouts 
+ *  layouts. The number of elements in the data is assumed to be larger
+ *  than the number of elements in the transform. Strided data layouts
  *  are also supported. Strides along the fastest direction in the input
- *  and output data are specified via the istride and ostride parameters.  
- * 
- *  If both inembed and onembed parameters are set to NULL, all the 
- *  advanced data layout parameters are ignored and reverted to default 
+ *  and output data are specified via the istride and ostride parameters.
+ *
+ *  If both inembed and onembed parameters are set to NULL, all the
+ *  advanced data layout parameters are ignored and reverted to default
  *  values, i.e., the batched transform is performed with non-strided data
- *  access and the number of data/transform elements are assumed to be  
+ *  access and the number of data/transform elements are assumed to be
  *  equivalent.
- * 
+ *
  *  @param[out] plan Pointer to the FFT plan handle.
  *  @param[in] rank Dimension of transform (1, 2, or 3).
  *  @param[in] n Number of elements to transform in the x/y/z directions.

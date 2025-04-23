@@ -31,6 +31,20 @@ different library functions.
 
 .. doxygenenum:: hipfftResult
 
+Precision types
+---------------
+
+This section describes the precision types that are supported as inputs
+and outputs in hipFFT.
+
+.. doxygentypedef:: hipfftComplex
+
+.. doxygentypedef:: hipfftDoubleComplex
+
+.. doxygentypedef:: hipfftReal
+
+.. doxygentypedef:: hipfftDoubleReal
+
 
 Simple plans
 ============
@@ -107,7 +121,7 @@ obtained using these routines.
 .. doxygenfunction:: hipfftGetSizeMany
 
 .. doxygenfunction:: hipfftXtGetSizeMany
-		     
+
 
 Executing plans
 ===============
@@ -128,7 +142,7 @@ After you have created an FFT plan, you can execute it using one of the
 .. doxygenfunction:: hipfftExecZ2D
 
 .. doxygenfunction:: hipfftXtExec
-		     
+
 .. _hip-graph-support-for-hipfft:
 
 HIP graph support for hipFFT
@@ -171,10 +185,10 @@ Callbacks
 =========
 
 .. doxygenfunction:: hipfftXtSetCallback
-.. doxygenfunction:: hipfftXtClearCallback	     
+.. doxygenfunction:: hipfftXtClearCallback
 .. doxygenfunction:: hipfftXtSetCallbackSharedSize
 
-		     
+
 Single-process multi-GPU transforms
 ===================================
 
@@ -228,13 +242,13 @@ To implement this functionality, use the API as follows:
 .. doxygenfunction:: hipfftXtMalloc
 .. doxygenfunction:: hipfftXtFree
 .. doxygenfunction:: hipfftXtMemcpy
-		     
+
 .. doxygengroup:: hipfftXtExecDescriptor
 
 Multi-process transforms
 ========================
 
-hipFFT has experimental support for transforms that are distributed across MPI (Message 
+hipFFT has experimental support for transforms that are distributed across MPI (Message
 Passing Interface) processes.
 
 Support for MPI transforms was introduced in ROCm 6.4 as part of hipFFT 1.0.18.
