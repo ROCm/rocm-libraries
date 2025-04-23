@@ -387,8 +387,7 @@ TYPED_TEST(RocprimDevicePartitionTests, Predicate)
             common::device_ptr<U>            d_output;
             common::device_ptr<unsigned int> d_selected_count_output;
 
-            if(!d_input.resize_with_memory_check(size)
-               || !d_output.resize_with_memory_check(size)
+            if(!d_input.resize_with_memory_check(size) || !d_output.resize_with_memory_check(size)
                || !d_selected_count_output.resize_with_memory_check(1))
             {
                 std::cout << "Out of memory. Skipping test for size = " << size << std::endl;
