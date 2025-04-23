@@ -1,0 +1,193 @@
+#!/bin/bash
+
+
+# #################################################
+# helper functions
+# #################################################
+function display_help()
+{
+    echo "hipRAND build & installation helper script"
+    echo "./install [-h|--help] "
+    echo "    [-h|--help] prints this help message"
+    echo "    [-i|--install] install after build"
+    echo "    [-p|--package] build package"
+    echo "    [-r]--relocatable] create a package to support relocatable ROCm"
+    echo "    [-d|--dependencies] install build dependencies"
+    echo "    [-c|--clients] build library clients too (combines with -i & -d)"
+    echo "    [-g|--debug] -DCMAKE_BUILD_TYPE=Debug (default is =Release)"
+    echo "    [--hip-clang] build library for amdgpu backend using hip-clang"
+    echo "    [--address-sanitizer] build with address sanitizer enabled"
+}
+
+
+# #################################################
+# global variables
+# #################################################
+install_package=false
+build_package=false
+build_clients=false
+build_release=true
+run_tests=false
+build_hip_clang=false
+rocm_path=/opt/rocm
+build_relocatable=false
+install_dependencies=false
+build_address_sanitizer=false
+
+# #################################################
+# Parameter parsing
+# #################################################
+
+# check if we have a modern version of getopt that can handle whitespace and long parameters
+getopt -T
+if [[ $? -eq 4 ]]; then
+    GETOPT_PARSE=$(getopt --name "${0}" --longoptions help,install,clients,debug,hip-clang,test,package,relocatable,dependencies,address-sanitizer --options hicgtprd -- "$@")
+else
+    echo "Need a new version of getopt"
+    exit 1
+fi
+
+if [[ $? -ne 0 ]]; then
+    echo "getopt invocation failed; could not parse the command line";
+    exit 1
+fi
+
+eval set -- "${GETOPT_PARSE}"
+
+check_exit_code( )
+{
+    if (( $1 != 0 )); then
+	exit $1
+    fi
+}
+
+while true; do
+    case "${1}" in
+	-h|--help)
+	    display_help
+	    exit 0
+	    ;;
+	-i|--install)
+	    install_package=true
+	    shift ;;
+	-p|--package)
+	    build_package=true
+	    shift ;;
+    -r|--relocatable)
+        build_relocatable=true
+        shift ;;
+    -d|--dependencies)
+        install_dependencies=true
+        shift ;;
+	-c|--clients)
+	    build_clients=true
+	    shift ;;
+	-g|--debug)
+	    build_release=false
+	    shift ;;
+	-t|--test)
+	    run_tests=true
+	    shift ;;
+    --hip-clang)
+        build_hip_clang=true
+        shift ;;
+    --address-sanitizer)
+        build_address_sanitizer=true
+        shift ;;
+	--) shift ; break ;;
+	*)  echo "Unexpected command line parameter received; aborting";
+	    exit 1
+	    ;;
+    esac
+    done
+
+if [[ "${build_relocatable}" == true ]]; then
+    if ! [ -z ${ROCM_PATH+x} ]; then
+        rocm_path=${ROCM_PATH}
+    fi
+
+    rocm_rpath=" -Wl,--enable-new-dtags -Wl,--rpath,/opt/rocm/lib:/opt/rocm/lib64"
+    if ! [ -z ${ROCM_RPATH+x} ]; then
+        rocm_rpath=" -Wl,--enable-new-dtags -Wl,--rpath,${ROCM_RPATH}"
+    fi
+fi
+
+# Instal the pre-commit hook
+#bash .githooks/install
+
+
+# Create and go to the build directory.
+mkdir -p build; cd build
+
+if ($build_release); then
+    mkdir -p release; cd release
+else
+    mkdir -p debug; cd debug
+fi
+
+# build type
+if [[ "${build_release}" == true ]]; then
+    cmake_common_options="${cmake_common_options} -DCMAKE_BUILD_TYPE=Release"
+else
+    cmake_common_options="${cmake_common_options} -DCMAKE_BUILD_TYPE=Debug"
+fi
+
+# Configure hipCUB, setup options for your system.
+# Build options:
+#   BUILD_TEST - on by default,
+#   BUILD_BENCHMARK - off by default.
+#
+# ! IMPORTANT !
+# On ROCm software set C++ compiler to HIPCC. You can do it by adding 'CXX=<path-to-hipcc>'
+# before 'cmake' or setting cmake option 'CMAKE_CXX_COMPILER' to path to the HIPCC compiler.
+#
+
+compiler="hipcc"
+
+cmake_executable="cmake"
+
+if($build_clients); then
+    clients=" -DBUILD_TEST=ON -DBUILD_BENCHMARK=ON "
+fi
+
+if ($build_address_sanitizer); then
+    cmake_common_options="$cmake_common_options -DBUILD_ADDRESS_SANITIZER=ON"
+fi
+
+if($install_dependencies); then
+cmake_common_options="${cmake_common_options} -DDEPENDENCIES_FORCE_DOWNLOAD=ON"
+fi
+
+if [[ "${build_relocatable}" == true ]]; then
+    CXX=${rocm_path}/bin/$compiler ${cmake_executable}  -DCMAKE_INSTALL_PREFIX="${rocm_path}" \
+    -DBUILD_TEST=ON -DBUILD_BENCHMARK=ON ${cmake_common_options} \
+    -DCMAKE_PREFIX_PATH="${rocm_path} ${rocm_path}/hip" \
+    -DCMAKE_SHARED_LINKER_FLAGS="${rocm_rpath}" \
+    -DROCM_DISABLE_LDCONFIG=ON \
+    -DCMAKE_MODULE_PATH="${rocm_path}/hip/cmake" \
+    ../../. # or cmake-gui ../.
+else
+    CXX=${rocm_path}/bin/$compiler ${cmake_executable} ${clients} ${cmake_common_options} ../../. # or cmake-gui ../.
+fi
+check_exit_code "$?"
+
+# Build
+make -j$(nproc)
+check_exit_code "$?"
+
+if ($run_tests); then
+# Optionally, run tests if they're enabled.
+ctest --output-on-failure
+fi
+
+if ($install_package); then
+    # Install
+    make install
+    check_exit_code "$?"
+fi
+
+if ($build_package); then
+    # Package
+    make package -j$(nproc)
+    check_exit_code "$?"
+fi
