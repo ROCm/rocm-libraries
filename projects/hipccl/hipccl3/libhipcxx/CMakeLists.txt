@@ -84,7 +84,7 @@ option(LIBCUDACXX_ENABLE_CUDA "Enable the CUDA language support." OFF)
 option(LIBCUDACXX_ENABLE_HIP "Enable the HIP language support." ON)
 
 if (LIBCUDACXX_ENABLE_CUDA AND LIBCUDACXX_ENABLE_HIP)
-  message(FATAL_ERROR "HIP and CUDA compilers cannot be used at the same time, CMake will exit." )    
+  message(FATAL_ERROR "HIP and CUDA compilers cannot be used at the same time, CMake will exit." )
 endif()
 
 if (LIBCUDACXX_ENABLE_CUDA)
@@ -94,6 +94,18 @@ endif()
 if (LIBCUDACXX_ENABLE_CUDA)
   enable_language(CUDA)
 elseif (LIBCUDACXX_ENABLE_HIP)
+  # sync variables used by HIP CMake package etc.
+  if ("${AMDGPU_TARGETS}" STREQUAL "")
+    set(AMDGPU_TARGETS ${CMAKE_HIP_ARCHITECTURES})
+  elseif(NOT "${AMDGPU_TARGETS}" STREQUAL "${CMAKE_HIP_ARCHITECTURES}")
+    message(FATAL_ERROR "mismatch between CMAKE_HIP_ARCHITECTURES and AMDGPU_TARGETS; CMAKE_HIP_ARCHITECTURES='${CMAKE_HIP_ARCHITECTURES}', AMDGPU_TARGETS='${AMDGPU_TARGETS}'")
+  endif()
+  if ("${GPU_TARGETS}" STREQUAL "")
+    set(GPU_TARGETS ${CMAKE_HIP_ARCHITECTURES})
+  elseif(NOT "${GPU_TARGETS}" STREQUAL "${CMAKE_HIP_ARCHITECTURES}")
+    message(FATAL_ERROR "mismatch between CMAKE_HIP_ARCHITECTURES and GPU_TARGETS; CMAKE_HIP_ARCHITECTURES='${CMAKE_HIP_ARCHITECTURES}', GPU_TARGETS='${GPU_TARGETS}'")
+  endif()
+
   find_package(hip REQUIRED)
   enable_language(HIP)
 endif ()
@@ -163,7 +175,7 @@ rocm_create_package(
   NAME libhipcxx
   DESCRIPTION "ROCm libhipcxx library"
   # FIXME(HIP/AMD): A maintainer string is required
-  # Set to the following when available: 
+  # Set to the following when available:
   # MAINTAINER "libhipcxx-maintainer@amd.com"
   MAINTAINER "AMD, Inc."
   HEADER_ONLY
