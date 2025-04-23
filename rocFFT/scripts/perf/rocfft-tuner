@@ -1,0 +1,689 @@
+#!/usr/bin/env python3
+
+# Copyright (C) 2021 - 2022 Advanced Micro Devices, Inc. All rights reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+"""Offline tuning utilities for rocFFT.
+
+Overview
+========
+
+General workflow:
+
+- tune: runs a suite of FFTs to collect timing information
+- merge: post processes timing information to compute various statistics
+
+General arguments shared between tune and merge commands:
+
+--workspace :
+--tuner     :
+--bench     :
+
+Runs/subprocesses are logged to `rocfft-tuner.log`.
+
+
+Tune
+===
+
+The 'run' command drives rocfft-offline-tuner. To use this executable,
+you must add -DROCFFT_BUILD_OFFLINE_TUNER=ON to the build option. There
+is handy argument -t | --tuner for install.sh (`./install.sh -t or --tuner`)
+
+Test problems are generated using a `ProblemGenerator` and a filter.
+The problems generator is the same one as rocfft-perf (bench)
+
+See
+
+  $ rocfft-tuner -h
+
+Using the `--suite/-S` option, problems are loaded from a "suites"
+file.  The default suites file is `suites.py`.  Alternatively, you can
+load the suite named "qa1" from a file called "mysuites.py" like this:
+
+  $ rocfft-tuner -w [workspace] tune -s mysuites:qa1 ...
+
+That is, FILENAME:SUITENAME.
+
+All the output files are stored in the workspace directory.
+Sub-foler `ResultSolutions` contains the tuned solution map.
+Sub-foler `TuningCandidates` contains intermediate candidate solutions
+which are for debugging purpose.
+Sub-foler `TuningData` contains csv files recording some benchmarking
+numbers and kernel information, which is for analysis purpose.
+
+Merge
+===============
+
+Dynamic testing is enabled by specifying more than one `--lib/-i`
+option.  These are passed down to the benchmarker, and hence it is
+assumed that the specific benchmarker is a "dyna" bench.
+
+Multiple output directories are used to store the results.
+
+"""
+
+import argparse
+import logging
+import subprocess
+import statistics
+import sys
+import os
+import tempfile
+import re
+import collections
+import json
+import pathlib
+
+from os import listdir
+from os.path import isfile, join
+from copy import deepcopy
+from pathlib import Path
+
+from multiprocessing import Pool
+
+top = Path(__file__).resolve().parent
+sys.path.append(str(top))
+
+import perflib
+
+from perflib.generators import Problem
+from perflib.utils import flatten
+
+console = logging.StreamHandler()
+
+import types
+
+
+#
+# Helpers
+#
+def create_launcher(generator):
+    launcher = collections.defaultdict(list)
+    for problem in generator.generate_problems():
+        launcher['problems'].append(problem.toJSON())
+
+    return launcher
+
+
+# get gfx___ which is the prefix of the solution map
+def get_local_gpu_gfx():
+    try:
+        for line in subprocess.Popen(
+                args=["rocminfo"], stdout=subprocess.PIPE).stdout.readlines():
+            if b'amdgcn-amd-amdhsa--' in line:
+                # gfxNNN[:sramecc][:xnack+/-]
+                gcn_arch = line.split(b'--')[1].strip()
+                # raw gfxNNN
+                gfx_target = gcn_arch.split(b':')[0]
+                return gfx_target.decode('utf-8')
+    except:
+        pass
+    return ''
+
+
+# #
+# # Commands
+# #
+def command_tuning(arguments):
+    """Run tuning."""
+
+    if arguments.workspace:
+        workspace = Path(arguments.workspace)
+        workspace.mkdir(parents=True, exist_ok=True)
+        dump_folder = workspace / "TuningCandidates"
+        result_folder = workspace / "ResultSolutions"
+        csv_folder = workspace / "TuningData"
+        dump_folder.mkdir(parents=True, exist_ok=True)
+        result_folder.mkdir(parents=True, exist_ok=True)
+        csv_folder.mkdir(parents=True, exist_ok=True)
+        os.environ['TUNING_WORKSPACE'] = arguments.workspace
+    else:
+        print(
+            "Workspace not set. use -w /path/of/workspace before command arg")
+        return
+
+    if arguments.input:
+        tuning_metadata_file = open(arguments.input, 'r')
+        launcher = json.load(tuning_metadata_file)
+        print('load from json file, suite argument will be ignored')
+    elif arguments.suite:
+        # set up problems
+        generator = perflib.generators.SuiteProblemGenerator(arguments.suite)
+        launcher = create_launcher(generator)
+    else:
+        print(
+            "No input data, use -i /path/to/jsonfile or -s suite_name for input"
+        )
+        return
+
+    # check flag setting, could be from --input file or from argument list
+    if 'dump_candidates' not in launcher:
+        launcher['dump_candidates'] = arguments.dump
+    if 'print_reject_reason' not in launcher:
+        launcher['print_reject_reason'] = arguments.print_reject
+    if 'force_full_token' not in launcher and arguments.exact_token is True:
+        launcher['force_full_token'] = True
+    if 'overwrite_max_wgs' not in launcher and arguments.max_wgs is not None:
+        launcher['overwrite_max_wgs'] = arguments.max_wgs
+    if 'overwrite_min_wgs' not in launcher and arguments.min_wgs is not None:
+        launcher['overwrite_min_wgs'] = arguments.min_wgs
+
+    # remind users if we are using a global value
+    if 'force_full_token' in launcher:
+        print("export-full-token is turned on for all problems")
+    if 'overwrite_max_wgs' in launcher:
+        print("max-workgroup-sizes is globally overwritten to {}".format(
+            arguments.max_wgs))
+    if 'overwrite_min_wgs' in launcher:
+        print("min-workgroup-sizes is globally overwritten to {}".format(
+            arguments.min_wgs))
+
+    # dump the tuning configuration to a file, next time we can directly use it
+    tuning_metadata_file = open(workspace / 'tuning_meta_data.json', 'w')
+    json.dump(launcher, tuning_metadata_file)
+
+    # the launcher dict MUST contain the following 3 keys (since we have default value in args)
+    # set env variable: dump
+    if launcher['dump_candidates'] == True:
+        os.environ['DUMP_TUNING'] = '1'
+    elif 'DUMP_TUNING' in os.environ:
+        del os.environ['DUMP_TUNING']
+
+    # set env variable: print rejection reason
+    if launcher['print_reject_reason'] == True:
+        os.environ['PRINT_REJECT_REASON'] = '1'
+    elif 'PRINT_REJECT_REASON' in os.environ:
+        del os.environ['PRINT_REJECT_REASON']
+
+    # log layer
+    os.environ['ROCFFT_LAYER'] = '64'
+
+    # enable cache file to speed up tuning
+    os.environ['ROCFFT_RTC_CACHE_PATH'] = 'rocFFT_kernel_cache.db'
+
+    tuning_summaries = []
+    single_summary = {}
+    merging_metadata = []
+    single_merging_meta = {}
+
+    for prob in launcher['problems']:
+        # set TUNE_EXACT_PROB when it's set true from cmd, or use the setting in each problem
+        if 'force_full_token' in launcher or prob['full_token'] == True:
+            os.environ['TUNE_EXACT_PROB'] = '1'
+        # overwritting min_ and max_wgs are optional, when not specified, we use the setting in each problem
+        os.environ['MAX_WGS'] = str(
+            launcher['overwrite_max_wgs']
+        ) if 'overwrite_max_wgs' in launcher else str(prob['max_wgs'])
+        os.environ['MIN_WGS'] = str(
+            launcher['overwrite_min_wgs']
+        ) if 'overwrite_min_wgs' in launcher else str(prob['min_wgs'])
+
+        token, outfile, summary, success = perflib.tuner.run(
+            arguments.tuner,
+            prob['length'],
+            direction=prob['direction'],
+            real=prob['real'],
+            inplace=prob['inplace'],
+            precision=prob['precision'],
+            nbatch=prob['nbatch'],
+            ntrial=10)
+        single_summary['problem'] = prob
+        single_summary['token'] = token
+        single_summary['outfile'] = outfile
+        single_summary['result'] = summary
+        single_summary['valid'] = success
+        tuning_summaries.append(deepcopy(single_summary))
+        if success:
+            single_merging_meta['problem'] = prob
+            single_merging_meta['outfile'] = outfile
+            single_merging_meta['token'] = token
+            merging_metadata.append(deepcopy(single_merging_meta))
+        if 'TUNE_EXACT_PROB' in os.environ:
+            del os.environ['TUNE_EXACT_PROB']
+
+    del os.environ['ROCFFT_RTC_CACHE_PATH']
+    del os.environ['MIN_WGS']
+    del os.environ['MAX_WGS']
+
+    # print all summary
+    print('==================\n[Tuning Summaries]\n==================\n')
+    for summary in tuning_summaries:
+        print('===================================================')
+        print('[Token]: ' + summary['token'])
+        print(summary['result'])
+        if (summary['valid'] == False):
+            print('Tuning Failed.')
+        else:
+            print('[Export to File]: ' + summary['outfile'])
+
+    # write a summary file saving problems and output file and valid status,
+    # this file will be used in merging
+    merging_metadata_file = open(workspace / 'merging_meta_data.json', 'w')
+    json.dump(merging_metadata, merging_metadata_file)
+
+
+def validate(validator, testing_meta_data, skip):
+
+    for single_meta in testing_meta_data:
+        if skip is True:
+            single_meta['Valid'] = True
+            continue
+
+        prob = single_meta['problem']
+        new_single_solution_file = Path(single_meta['outfile'])
+        print("\nAccuracy test for the new solution {}...".format(
+            new_single_solution_file))
+
+        # check the solution map file
+        if not new_single_solution_file.exists():
+            print("\tNot valid solution map file found! Abort")
+            continue
+
+        # set the explicit solution map filepath for running test
+        os.environ['ROCFFT_READ_EXPLICIT_SOL_MAP_FILE'] = str(
+            new_single_solution_file)
+
+        # use token, change batch to at least 10, since we are running validation,
+        # but if the sol is exported with full_token, then we don't modify the token
+        token = str(single_meta['token'])
+        if prob['nbatch'] < 10 and prob['full_token'] == False:
+            old_batch_str = '_batch_' + str(prob['nbatch']) + '_'
+            new_batch_str = '_batch_10_'
+            token = token.replace(old_batch_str, new_batch_str)
+
+        # run rocfft-test
+        single_meta['Valid'] = perflib.tuner.accuracy_test(
+            validator,
+            prob['length'],
+            direction=prob['direction'],
+            real=prob['real'],
+            inplace=prob['inplace'],
+            precision=str(prob['precision']),
+            nbatch=max(prob['nbatch'], 10),
+            token=token)
+
+        del os.environ['ROCFFT_READ_EXPLICIT_SOL_MAP_FILE']
+
+
+def output_merge_file(solution_merger, old_sol_filepath, insertions,
+                      output_filepath):
+    """Merge solutions."""
+
+    print("Step1: \n\tReading old solution map from: {}".format(
+        old_sol_filepath))
+    if not old_sol_filepath.exists():
+        old_sol_filepath = None
+
+    print("Step2:")
+    num_inserts = len(insertions)
+    for i in range(num_inserts):
+        if i > 0:
+            old_sol_filepath = output_filepath
+
+        new_sol = insertions[i]
+        probKey = str(new_sol['arch']) + ':' + str(new_sol['probToken'])
+        print("\t\tInserting new solutions of {}".format(probKey))
+
+        success = perflib.tuner.merge(solution_merger,
+                                      base_file_path=old_sol_filepath,
+                                      new_files=new_sol['solutionFile'],
+                                      new_probTokens=probKey,
+                                      out_file_path=output_filepath)
+
+        print("\t\t\tDone!" if success else "\t\t\tFailed!")
+
+    print("Step3:\n\tFinishing writing merge solution map to: {}".format(
+        output_filepath))
+
+
+def command_merging(arguments):
+    """Merge solutions."""
+
+    prefix = get_local_gpu_gfx()
+    sol_map_filename = Path(prefix + '_rocfft_solution_map.dat')
+
+    if arguments.workspace:
+        workspace = Path(arguments.workspace)
+    else:
+        print(
+            "Workspace not set. use -w /path/of/workspace before command arg")
+        return
+
+    if arguments.metafile:
+        merging_meta_file = open(arguments.metafile, 'r')
+        merging_meta_data = json.load(merging_meta_file)
+    else:
+        print("No input data, use --metafile=/path/of/merging-meta-file")
+        return
+
+    if arguments.outfolder:
+        outfolder = workspace / Path(arguments.outfolder)
+        outfolder.mkdir(parents=True, exist_ok=True)
+        output_file = outfolder / sol_map_filename
+    else:
+        print(
+            "output folder is not set. use -outfolder=/subfolder/of/outputfolder"
+        )
+        return
+
+    reference_sol_folder = Path(arguments.ref_sol_folder)
+    reference_file = reference_sol_folder / sol_map_filename
+
+    # check if everything is well...
+    print("\nThe local AMDGPU is {}".format(prefix))
+
+    os.environ['ROCFFT_LAYER'] = '64'
+
+    # we disable the build-in solution library,
+    os.environ['ROCFFT_USE_EMPTY_SOL_MAP'] = '1'
+
+    # Do validation first to make it more robust:
+    #   Our kernels might still have un-discovered bugs so we need to do that.
+    #   Finding incorrect kernels also helps us improving kernels.
+    print("\n###############################################")
+    print("First, run validation to skip wrong solutions..")
+    print("###############################################")
+    skipValidation = arguments.validation == 0
+    if skipValidation:
+        print("\nAccuracy test is set to be skipped")
+    validate(arguments.validator, merging_meta_data, skipValidation)
+
+    RunRecord = {}
+
+    # First Run - reference
+    os.environ['ROCFFT_READ_SOL_MAP_FROM_FOLDER'] = str(reference_sol_folder)
+
+    print("\n###################################")
+    print("First run with reference solution..")
+    print("###################################\n")
+    print(
+        "The reference solution map file is {}...\n\n".format(reference_file))
+    if not reference_file.exists():
+        print("\tNot valid reference solution map file found! " \
+            "Will compare with the default plan/kernels in rocFFT\n")
+
+    for single_meta in merging_meta_data:
+        if not single_meta['Valid']:
+            continue
+
+        prob = single_meta['problem']
+        token, times, success, solToken, matchType = perflib.bench.run(
+            arguments.bench,
+            prob['length'],
+            direction=prob['direction'],
+            real=prob['real'],
+            inplace=prob['inplace'],
+            precision=str(prob['precision']),
+            nbatch=prob['nbatch'],
+            ntrial=20,
+            verbose=True)
+
+        times_str = ' '.join(str(t) for t in times)
+        print("\ntoken: " + token)
+        print("found root solution with key: " + solToken)
+        print("times: " + times_str + '\n')
+        print('---------------------------------------------------\n')
+        times = flatten(times)
+
+        RunRecord[token] = {'RefTimes': times, 'RefSolToken': solToken}
+
+    # Second Run - load new solution map from "ROCFFT_READ_EXPLICIT_SOL_MAP_FILE"
+    print("\n###################################")
+    print("Second run with new solution map...")
+    print("###################################\n")
+    for single_meta in merging_meta_data:
+        if not single_meta['Valid']:
+            continue
+
+        # get the <problem, out_solution_path> information
+        prob = single_meta['problem']
+        new_single_solution_file = Path(single_meta['outfile'])
+        # check the solution map file
+        print("The testing solution map file is {}...\n".format(
+            new_single_solution_file))
+        if not new_single_solution_file.exists():
+            print("\tNot valid solution map file found! Abort")
+            continue
+
+        # set the explicit solution map filepath
+        os.environ['ROCFFT_READ_EXPLICIT_SOL_MAP_FILE'] = str(
+            new_single_solution_file)
+        token, times, success, solToken, matchType = perflib.bench.run(
+            arguments.bench,
+            prob['length'],
+            direction=prob['direction'],
+            real=prob['real'],
+            inplace=prob['inplace'],
+            precision=str(prob['precision']),
+            nbatch=prob['nbatch'],
+            ntrial=20,
+            verbose=True)
+
+        times_str = ' '.join(str(t) for t in times)
+        print("\ntoken: " + token)
+        print("found root solution with key: " + solToken)
+        print("times: " + times_str + '\n')
+        print('---------------------------------------------------\n')
+        times = flatten(times)
+
+        RunRecord[token].update({
+            'NewTimes': times,
+            'NewSolToken': solToken,
+            'SolutionFile': new_single_solution_file
+        })
+
+    import scipy.stats
+
+    for token, result in RunRecord.items():
+        Avals = result['RefTimes']
+        Bvals = result['NewTimes']
+        result['RefTimes'] = statistics.median(Avals)
+        result['NewTimes'] = statistics.median(Bvals)
+        speedup = result['RefTimes'] / result['NewTimes']
+        _, pval, _, _ = scipy.stats.median_test(Avals, Bvals)
+        result['SpeedUp'] = speedup
+        result['Significance'] = pval
+
+    del os.environ['ROCFFT_USE_EMPTY_SOL_MAP']
+    del os.environ['ROCFFT_READ_SOL_MAP_FROM_FOLDER']
+    if 'ROCFFT_READ_EXPLICIT_SOL_MAP_FILE' in os.environ:
+        del os.environ['ROCFFT_READ_EXPLICIT_SOL_MAP_FILE']
+
+    NewSolutionsToInsert = []
+    InsertionInfo = {}
+
+    # Analysis Summary
+    print('\n==================\n[Merge Summaries]\n==================')
+    for single_meta in merging_meta_data:
+        if not single_meta['Valid']:
+            print('\n===================================================')
+            print("The solution in {}:".format(single_meta['outfile']))
+            print("\tFailed the accuracy test. Please be aware of this")
+            continue
+
+    for token, result in RunRecord.items():
+        # the problem is not contained in our new solution map, don't waste time comparing
+        # but it's possible RefSolToken is "" which means we didn't have the solution before
+        if result['NewSolToken'] == "":
+            continue
+
+        speed_up = result['SpeedUp']
+        signficance = result['Significance']
+        confident: bool = signficance <= 0.05
+        new_is_faster: bool = speed_up > 1.01 and confident
+
+        if new_is_faster:
+            InsertionInfo['arch'] = prefix
+            InsertionInfo['probToken'] = result['NewSolToken']
+            InsertionInfo['solutionFile'] = result['SolutionFile']
+            NewSolutionsToInsert.append(deepcopy(InsertionInfo))
+
+        print('\n===================================================')
+        print("For problem {}:\n".format(token))
+        print("\tReference solution: {}".format(result['RefSolToken']))
+        print("\tTime (Median): {} ms ...".format(result['RefTimes']))
+
+        print("\tNew solution: {} from file: {}".format(
+            result['NewSolToken'], result['SolutionFile']))
+        print("\tTime (Median): {} ms ...".format(result['NewTimes']))
+        print("\tSpeed-Up run2 over run1: {} / Pval: {} : {}, {}".format(
+            speed_up, signficance, 'FASTER' if speed_up > 1.0 else 'SLOWER',
+            'Confident' if confident else 'Not Confident'))
+        print("\t\t--> {} the new solution\n".format(
+            'PICK' if new_is_faster else 'DISCARD'))
+
+    output_merge_file(arguments.tuner, reference_file, NewSolutionsToInsert,
+                      output_file)
+
+
+#
+# Main
+#
+def main():
+    parser = argparse.ArgumentParser(prog='rocfft-tuner')
+
+    subparsers = parser.add_subparsers(dest='command')
+    tuning_parser = subparsers.add_parser('tune', help='tune problems')
+    merge_parser = subparsers.add_parser('merge', help='merge solutions')
+
+    #################
+    # Shared Arguments
+    #################
+    # parser can add arguments shared by both tuner and merger
+    parser.add_argument('-w',
+                        '--workspace',
+                        type=str,
+                        help='workspace folder keeping all the tuning data',
+                        default="./TUNING_WORKSPACE")
+
+    parser.add_argument(
+        '--tuner',
+        type=str,
+        help='tuner executable path, used as tuner and merger',
+        default='./build/release/library/src/rocfft_offline_tuner')
+
+    parser.add_argument('--bench',
+                        type=str,
+                        help='rocfft-bench executable path, used when merging',
+                        default='./build/release/clients/staging/rocfft-bench')
+
+    parser.add_argument('--validator',
+                        type=str,
+                        help='rocfft-test executable path, used when merging',
+                        default='./build/release/clients/staging/rocfft-test')
+
+    #################
+    # TUNING COMMAND
+    #################
+    tuning_parser.add_argument('-s',
+                               '--suite',
+                               type=str,
+                               help='suite',
+                               action='append')
+
+    tuning_parser.add_argument(
+        '--dump',
+        help='dump the candidates data file in the workspace, default False',
+        action='store_true',
+        default=False)
+
+    tuning_parser.add_argument(
+        '--exact_token',
+        help=
+        '(Overwrite globally) output solution for the exact problem (using token including batch, stride, dist, offset), default False',
+        action='store_true',
+        default=False)
+
+    tuning_parser.add_argument(
+        '--print_reject',
+        help='print the configuration rejection reason, default False',
+        action='store_true',
+        default=False)
+
+    tuning_parser.add_argument(
+        '--max_wgs',
+        type=int,
+        help=
+        '(Overwrite globally) tuning max workgroups size to the specified value for ALL kernels.',
+        default=None)
+
+    tuning_parser.add_argument(
+        '--min_wgs',
+        type=int,
+        help=
+        '(Overwrite globally) tuning min workgroups size to the specified value for ALL kernels.',
+        default=None)
+
+    tuning_parser.add_argument(
+        '-i',
+        '--input',
+        type=str,
+        help='input of tuning meta file including suite, dump, exact setting',
+        default='')
+
+    #################
+    # MERGE COMMAND
+    #################
+    merge_parser.add_argument(
+        '--ref_sol_folder',
+        type=str,
+        help=
+        'folder of the original solution map data, default is [repo_folder]/solution_map/',
+        default='./solution_map')
+
+    merge_parser.add_argument(
+        '--outfolder',
+        type=str,
+        help=
+        'folder of the merged solution map data (under workspace), must specify',
+        default=None)
+
+    merge_parser.add_argument(
+        '--metafile',
+        type=str,
+        help='path of the merging meta file, must specify',
+        default=None)
+
+    merge_parser.add_argument(
+        '--validation',
+        type=int,
+        help='do validation test before merge, 1 for True/0 for False, default 1',
+        default=1)
+
+    arguments = parser.parse_args()
+
+    if arguments.command == 'tune':
+        command_tuning(arguments)
+
+    if arguments.command == 'merge':
+        command_merging(arguments)
+
+    sys.exit(0)
+
+
+if __name__ == '__main__':
+    logging.basicConfig(filename='rocfft-tuner.log',
+                        format='%(asctime)s %(levelname)s: %(message)s',
+                        level=logging.DEBUG)
+
+    console.setLevel(logging.WARNING)
+    console.setFormatter(logging.Formatter('%(levelname)-8s: %(message)s'))
+    logging.getLogger('').addHandler(console)
+
+    main()
