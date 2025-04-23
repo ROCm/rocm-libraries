@@ -38,18 +38,18 @@ def runCompileCommand(platform, project, jobName, settings, boolean sameOrg=fals
             dynamicBuildCommand = dynamicBuildCommand + ' -d'
         }
 
-        // in PR if we are targeting develop branch build ONLY what CI pipeline will test, unless bug label
-        if (env.CHANGE_TARGET == "develop" && !pullRequest.labels.contains("bug"))
+        // in PR if we are targeting develop branch build ONLY what CI pipeline will test, unless gfxall label
+        if (env.CHANGE_TARGET == "develop" && !pullRequest.labels.contains("gfxall"))
         {
+            // requires at command execution time ${auxiliary.gfxTargetParser()} to set gfx_var variable
             if (settings.addressSanitizer)
-                {
-                     dynamicOptions = dynamicOptions + ' -a \$gfx_arch:xnack+'
-                }
-                else
-                {
-                    // requires at command execution time ${auxiliary.gfxTargetParser()} to set gfx_var variable
-                    dynamicOptions = dynamicOptions + ' -a \$gfx_arch'
-                }
+            {
+                dynamicOptions = dynamicOptions + ' -a \$gfx_arch:xnack+'
+            }
+            else
+            {
+                dynamicOptions = dynamicOptions + ' -a \$gfx_arch'
+            }
         }
 
         if (env.CHANGE_TARGET == "develop" && pullRequest.labels.contains("ci:static-libraries"))
