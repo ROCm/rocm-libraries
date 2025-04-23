@@ -1,0 +1,7 @@
+* @cgmillette @congma13 @bragadeesh @dlangbe @Ryker0627
+# Documentation files
+docs/* @ROCm/rocm-documentation
+*.md @ROCm/rocm-documentation
+*.rst @ROCm/rocm-documentation
+# Header directory for Doxygen documentation
+library/include/* @ROCm/rocm-documentation

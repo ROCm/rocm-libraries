@@ -1,0 +1,6 @@
+# documentation artifacts
+_build/
+_doxygen/
+sphinx/_toc.yml
+doxygen/html/
+doxygen/xml/
