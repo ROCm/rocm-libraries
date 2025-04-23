@@ -23,6 +23,7 @@
 #include "../../shared/concurrency.h"
 #include "../../shared/environment.h"
 #include "../../shared/gpubuf.h"
+#include "../../shared/precision_type.h"
 #include "../../shared/rocfft_complex.h"
 #include "hip/hip_runtime_api.h"
 #include <boost/scope_exit.hpp>
@@ -190,6 +191,77 @@ TEST(rocfft_UnitTest, plan_description_reuse)
     }
 
     ASSERT_EQ(rocfft_plan_description_destroy(desc), rocfft_status_success);
+}
+
+// run a transform with all log levels enabled
+TEST(rocfft_UnitTest, log_levels)
+{
+    // clean up environment and temporary file when we exit
+    BOOST_SCOPE_EXIT_ALL(=)
+    {
+        rocfft_cleanup();
+        // re-init logs with default logging
+        rocfft_setup();
+    };
+    rocfft_cleanup();
+
+    // enumerate all known log levels and direct all of the logs to nowhere
+    EnvironmentSetTemp layer("ROCFFT_LAYER", std::to_string(0xffffffff).c_str());
+#ifdef WIN32
+    static const char* log_output = "NUL";
+#else
+    static const char* log_output   = "/dev/null";
+#endif
+    EnvironmentSetTemp log_trace_path("ROCFFT_LOG_TRACE_PATH", log_output);
+    EnvironmentSetTemp log_bench_path("ROCFFT_LOG_BENCH_PATH", log_output);
+    EnvironmentSetTemp log_profile_path("ROCFFT_LOG_PROFILE_PATH", log_output);
+    EnvironmentSetTemp log_plan_path("ROCFFT_LOG_PLAN_PATH", log_output);
+    EnvironmentSetTemp log_kernelio_path("ROCFFT_LOG_KERNELIO_PATH", log_output);
+    EnvironmentSetTemp log_rtc_path("ROCFFT_LOG_RTC_PATH", log_output);
+    EnvironmentSetTemp log_tuning_path("ROCFFT_LOG_TUNING_PATH", log_output);
+    EnvironmentSetTemp log_graph_path("ROCFFT_LOG_GRAPH_PATH", log_output);
+
+    rocfft_setup();
+
+    // Test single-kernel Bluestein and a multi-kernel plan
+    //
+    // TODO: add fused L1D Bluestein case like 8191, as that does weird
+    // things with buffers
+    for(const size_t length : {
+            37,
+            64,
+            32768,
+        })
+    {
+        for(const auto type : {rocfft_transform_type_complex_forward,
+                               rocfft_transform_type_real_forward,
+                               rocfft_transform_type_real_inverse})
+        {
+            for(const auto precision :
+                {rocfft_precision_single, rocfft_precision_double, rocfft_precision_half})
+            {
+                rocfft_plan plan = nullptr;
+                ASSERT_EQ(
+                    rocfft_plan_create(
+                        &plan, rocfft_placement_inplace, type, precision, 1, &length, 1, nullptr),
+                    rocfft_status_success);
+
+                // assume transform uses complex, will overallocate for real
+                // transforms but we only care about logging
+                gpubuf data_dev;
+                ASSERT_EQ(
+                    data_dev.alloc(element_size(precision, rocfft_array_type_complex_interleaved)
+                                   * length),
+                    hipSuccess);
+
+                void* data_dev_ptr = data_dev.data();
+                ASSERT_EQ(rocfft_execute(plan, &data_dev_ptr, nullptr, nullptr),
+                          rocfft_status_success);
+
+                rocfft_plan_destroy(plan);
+            }
+        }
+    }
 }
 
 // Check whether logs can be emitted from multiple threads properly
