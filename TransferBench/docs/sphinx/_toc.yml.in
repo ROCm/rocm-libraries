@@ -1,0 +1,21 @@
+defaults:
+  numbered: False
+root: index
+subtrees:
+- caption: Install
+  entries:
+  - file: install/install.rst
+    title: Installation
+
+- caption: API reference
+  entries:
+  - file: reference/api.rst
+    title: API library
+
+- caption: How to
+  entries:
+  - file: how to/use-transferbench.rst
+
+- caption: About
+  entries:
+  - file: license.md
