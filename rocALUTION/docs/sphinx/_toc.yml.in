@@ -1,0 +1,48 @@
+# Anywhere {branch} is used, the branch name will be substituted.
+# These comments will also be removed.
+root: index
+subtrees:
+  - numbered: False
+    entries:
+    - file: what-is-rocalution
+
+  - caption: Install
+    entries:
+    - file: install/rocALUTION-prerequisites.rst
+    - file: install/rocALUTION-general-install.rst
+    - file: install/rocALUTION-linux-build-and-install.rst
+    - file: install/rocALUTION-windows-build-and-install.rst
+  
+  - caption: Conceptual
+    entries:
+    - file: conceptual/rocALUTION-design.rst
+    - file: conceptual/rocALUTION-organization.rst
+    
+  - caption: How to
+    entries:
+    - file: how-to/extending-rocALUTION.rst
+      title: Extend rocALUTION
+    - file: how-to/include-rocALUTION.rst
+      title: Include rocALUTION
+  
+  - caption: Samples
+    entries:
+    - file: tutorials/rocALUTION-client-examples
+  
+  - caption: Reference
+    entries:
+    - file: reference/rocALUTION-api-basics.rst
+    - file: reference/rocALUTION-single-node-comp.rst
+    - file: reference/rocALUTION-multi-node-comp.rst
+    - file: reference/rocALUTION-solvers.rst
+    - file: reference/rocALUTION-preconditioners.rst
+    - file: reference/rocALUTION-accelerators.rst
+    - file: reference/rocALUTION-api.rst
+    - file: reference/rocALUTION-functionality-table.rst
+    - file: reference/rocALUTION-library-notes.rst
+
+
+  - caption: About
+    entries:
+    - file: license
+
