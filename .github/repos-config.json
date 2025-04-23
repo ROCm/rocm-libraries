@@ -1,0 +1,184 @@
+{
+  "repositories": [
+    {
+      "name": "AMDMIGraphX",
+      "url": "ROCm/AMDMIGraphX",
+      "branch": "develop"
+    },
+    {
+      "name": "MIOpen",
+      "url": "ROCm/MIOpen",
+      "branch": "develop"
+    },
+    {
+      "name": "MIVisionX",
+      "url": "ROCm/MIVisionX",
+      "branch": "develop"
+    },
+    {
+      "name": "Tensile",
+      "url": "ROCm/Tensile",
+      "branch": "develop"
+    },
+    {
+      "name": "TransferBench",
+      "url": "ROCm/TransferBench",
+      "branch": "develop"
+    },
+    {
+      "name": "composable_kernel",
+      "url": "ROCm/composable_kernel",
+      "branch": "develop"
+    },
+    {
+      "name": "hipBLAS",
+      "url": "ROCm/hipBLAS",
+      "branch": "develop"
+    },
+    {
+      "name": "hipBLAS-common",
+      "url": "ROCm/hipBLAS-common",
+      "branch": "develop"
+    },
+    {
+      "name": "hipBLASLt",
+      "url": "ROCm/hipBLASLt",
+      "branch": "develop"
+    },
+    {
+      "name": "hipCUB",
+      "url": "ROCm/hipCUB",
+      "branch": "develop"
+    },
+    {
+      "name": "hipFFT",
+      "url": "ROCm/hipFFT",
+      "branch": "develop"
+    },
+    {
+      "name": "hipRAND",
+      "url": "ROCm/hipRAND",
+      "branch": "develop"
+    },
+    {
+      "name": "hipSOLVER",
+      "url": "ROCm/hipSOLVER",
+      "branch": "develop"
+    },
+    {
+      "name": "hipSPARSE",
+      "url": "ROCm/hipSPARSE",
+      "branch": "develop"
+    },
+    {
+      "name": "hipSPARSELt",
+      "url": "ROCm/hipSPARSELt",
+      "branch": "develop"
+    },
+    {
+      "name": "hipTensor",
+      "url": "ROCm/hipTensor",
+      "branch": "develop"
+    },
+    {
+      "name": "hipfort",
+      "url": "ROCm/hipfort",
+      "branch": "develop"
+    },
+    {
+      "name": "Oragami",
+      "url": "ROCm/Oragami",
+      "branch": "develop"
+    },
+    {
+      "name": "rccl",
+      "url": "ROCm/rccl",
+      "branch": "develop"
+    },
+    {
+      "name": "rocAL",
+      "url": "ROCm/rocAL",
+      "branch": "develop"
+    },
+    {
+      "name": "rocALUTION",
+      "url": "ROCm/rocALUTION",
+      "branch": "develop"
+    },
+    {
+      "name": "rocBLAS",
+      "url": "ROCm/rocBLAS",
+      "branch": "develop"
+    },
+    {
+      "name": "rocDecode",
+      "url": "ROCm/rocDecode",
+      "branch": "develop"
+    },
+    {
+      "name": "rocFFT",
+      "url": "ROCm/rocFFT",
+      "branch": "develop"
+    },
+    {
+      "name": "rocJPEG",
+      "url": "ROCm/rocJPEG",
+      "branch": "develop"
+    },
+    {
+      "name": "rocJenkins",
+      "url": "ROCm/rocJenkins",
+      "branch": "pong"
+    },
+    {
+      "name": "rocPRIM",
+      "url": "ROCm/rocPRIM",
+      "branch": "develop"
+    },
+    {
+      "name": "rocPyDecode",
+      "url": "ROCm/rocPyDecode",
+      "branch": "develop"
+    },
+    {
+      "name": "rocRAND",
+      "url": "ROCm/rocRAND",
+      "branch": "develop"
+    },
+    {
+      "name": "rocRoller",
+      "url": "ROCm/rocRoller",
+      "branch": "main"
+    },
+    {
+      "name": "rocSHMEM",
+      "url": "ROCm/rocSHMEM",
+      "branch": "develop"
+    },
+    {
+      "name": "rocSOLVER",
+      "url": "ROCm/rocSOLVER",
+      "branch": "develop"
+    },
+    {
+      "name": "rocSPARSE",
+      "url": "ROCm/rocSPARSE",
+      "branch": "develop"
+    },
+    {
+      "name": "rocThrust",
+      "url": "ROCm/rocThrust",
+      "branch": "develop"
+    },
+    {
+      "name": "rocWMMA",
+      "url": "ROCm/rocWMMA",
+      "branch": "develop"
+    },
+    {
+      "name": "rpp",
+      "url": "ROCm/rpp",
+      "branch": "develop"
+    }
+  ]
+}
