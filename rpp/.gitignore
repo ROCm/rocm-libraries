@@ -1,0 +1,25 @@
+.vscode
+build/
+build*
+sample_test
+build.sh
+temp/
+Gtest
+opencv_test
+cmake-3.16.0-rc2-Linux-x86_64/
+stb-test/
+hip_build/
+OUTPUT_IMAGES*
+OUTPUT_PERFORMANCE*
+QA_RESULTS*
+OUTPUT_VOXEL*
+doxygen_output*
+
+# documentation artifacts
+_build/
+_images/
+_static/
+_templates/
+_toc.yml
+docBin/
+_doxygen/

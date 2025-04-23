@@ -1,0 +1,34 @@
+**image_augmentations**,**CPU**,**GPU**,,**advanced_augmentations**,**CPU**,**GPU**,,**arithmetic_operations**,**CPU**,**GPU**
+brightness,**Y**,**Y**,,water,**Y**,**Y**,,absolute_difference,**Y**,**Y**
+gamma_correction,**Y**,**Y**,,non_linear_blend,**Y**,**Y**,,accumulate_weighted,**Y**,**Y**
+blend,**Y**,**Y**,,color_cast,**Y**,**Y**,,accumulate,**Y**,**Y**
+blur,**Y**,**Y**,,erase,**Y**,**Y**,,add,**Y**,**Y**
+contrast,**Y**,**Y**,,crop_and_patch,**Y**,**Y**,,subtract,**Y**,**Y**
+pixelate,**Y**,**Y**,,lut,**Y**,**Y**,,magnitude,**Y**,**Y**
+jitter,**Y**,**Y**,,glitch,**Y**,**Y**,,multiply,**Y**,**Y**
+snow,**Y**,**Y**,,**fused functions**,**Y**,**Y**,,phase,**Y**,**Y**
+noise,**Y**,**Y**,,color_twist,**Y**,**Y**,,tensor_add,**Y**,**Y**
+random_shadow,**Y**,**Y**,,crop,**Y**,**Y**,,tensor_subtract,**Y**,**Y**
+fog,**Y**,**Y**,,crop_mirror_normalize,**Y**,**Y**,,tensor_multiply,**Y**,**Y**
+rain,**Y**,**Y**,,resize_crop_mirror,**Y**,**Y**,,accumulate_squared,**Y**,**Y**
+random_crop_letterbox,**Y**,**Y**,,**morphological_transforms**,**CPU**,**GPU**,,**logical_operations**,**CPU**,**GPU**
+exposure,**Y**,**Y**,,erode,**Y**,**Y**,,bitwise_AND,**Y**,**Y**
+histogram_balance ,**Y**,*N*,,dilate,**Y**,**Y**,,bitwise_NOT,**Y**,**Y**
+**statistical_functions**,**CPU**,**GPU**,,**color_model_conversions**,**CPU**,**GPU**,,exclusive_OR,**Y**,**Y**
+thresholding,**Y**,**Y**,,hue,**Y**,**Y**,,inclusive_OR,**Y**,**Y**
+min,**Y**,**Y**,,saturation,**Y**,**Y**,,**computer_vision**,**CPU**,**GPU**
+max,**Y**,**Y**,,color_convert,**Y**,**Y**,,local_binary_pattern,**Y**,**Y**
+min_max_loc,**Y**,*N*,,color_temperature,**Y**,**Y**,,data_object_copy,**Y**,**Y**
+integral,**Y**,*N*,,vignette,**Y**,**Y**,,gaussian_image_pyramid,**Y**,**Y**
+histogram_equalization,**Y**,*N*,,channel_extract,**Y**,*N*,,laplacian_image_pyramid,**Y**,**Y**
+mean_stddev,**Y**,*N*,,channel_combine,**Y**,*N*,,canny_edge_detector,**Y**,**Y**
+**geometry_transforms**,**CPU**,**GPU**,,look_up_table,**Y**,**Y**,,harris_corner_detector,**Y**,**Y**
+flip,**Y**,**Y**,,tensor_table_lookup,**Y**,*N*,,tensor_convert_bit_depth,**Y**,*N*
+resize,**Y**,**Y**,,**filter_operations**,**CPU**,**GPU**,,fast_corner_detector,**Y**,*N*
+resize_crop,**Y**,**Y**,,box_filter,**Y**,**Y**,,reconstruction_laplacian_image_pyramid,**Y**,*N*
+rotate,**Y**,**Y**,,sobel_filter,**Y**,**Y**,,control_flow,**Y**,**Y**
+warp_affine,**Y**,**Y**,,median_filter,**Y**,**Y**,,hough_lines,**Y**,*N*
+fisheye,**Y**,**Y**,,custom_convolution,**Y**,*N*,,hog,**Y**,*N*
+lens_correction,**Y**,**Y**,,non_max_suppression,**Y**,**Y**,,remap,**Y**,*N*
+scale,**Y**,**Y**,,gaussian_filter,**Y**,**Y**,,tensor_matrix_multiply,**Y**,**Y**
+warp_perspective,**Y**,**Y**,,nonlinear_filter,**Y**,**Y**,,tensor_transpose,**Y**,**Y**

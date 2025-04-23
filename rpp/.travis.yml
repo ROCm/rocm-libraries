@@ -1,0 +1,45 @@
+language: cpp
+sudo: required
+dist: bionic
+os:
+  - linux
+compiler:
+  - g++
+  
+services:
+  - docker
+
+branches:
+  - master
+
+install:
+  - sudo apt update
+  
+before_script:
+  - docker pull kiritigowda/ubuntu-18.04:rpp
+  - docker run -it -d --name rocm_image --network host kiritigowda/ubuntu-18.04:rpp bash
+  - docker cp ../rpp rocm_image:/rpp
+
+script:
+  # OpenCL Backend
+  - docker exec rocm_image cmake -H/rpp -B/_buildOCL -DCMAKE_BUILD_TYPE=Release -DBACKEND=OCL
+  - docker exec rocm_image cmake --build /_buildOCL
+  # HIP Backend - Turn OFF HIP - (TBD - Turn ON all tests)
+  ##- docker exec rocm_image cmake -H/rpp -B/_buildHIP -DCMAKE_BUILD_TYPE=Release -DBACKEND=HIP
+  ##- docker exec rocm_image cmake --build /_buildHIP
+  # HIP Backend - Static 
+  ##- docker exec rocm_image cmake -H/rpp -B/_buildHIPStatic -DCMAKE_BUILD_TYPE=Release -DBACKEND=HIP -DCOMPILE=STATIC
+  ##- docker exec rocm_image cmake --build /_buildHIPStatic
+  # HIP Backend - HSACOO
+  ##- docker exec rocm_image cmake -H/rpp -B/_buildHIPHSACOO -DCMAKE_BUILD_TYPE=Release -DBACKEND=HIP -DCOMPILE=HSACOO
+  ##- docker exec rocm_image cmake --build /_buildHIPHSACOO
+  # HIP Backend - HIPRTC
+  ##- docker exec rocm_image cmake -H/rpp -B/_buildHIPRTC -DCMAKE_BUILD_TYPE=Release -DBACKEND=HIP -DCOMPILE=HIPRTC
+  ##- docker exec rocm_image cmake --build /_buildHIPRTC
+
+after_success:
+
+notifications:
+  email:
+    - kiriti.nageshgowda@amd.com
+    - pavel.tcherniaev@amd.com
