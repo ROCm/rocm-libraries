@@ -200,11 +200,11 @@ inline std::map<std::string, int>
           || tryAssembler(isaVersion, assemblerPath, "v_dot2acc_f32_f16 v47, v36, v34", isDebug);
 
     rv["v_dot2_f32_bf16"]
-          = tryAssembler(isaVersion, assemblerPath, "v_dot2_f32_bf16 v20, v36, v34, v20", isDebug);
+        = tryAssembler(isaVersion, assemblerPath, "v_dot2_f32_bf16 v20, v36, v34, v20", isDebug);
     rv["v_dot2c_f32_bf16"]
-          = tryAssembler(isaVersion, assemblerPath, "v_dot2c_f32_bf16 v47, v36, v34", isDebug)
-            || tryAssembler(isaVersion, assemblerPath, "v_dot2acc_f32_bf16 v47, v36, v34", isDebug);
-  
+        = tryAssembler(isaVersion, assemblerPath, "v_dot2c_f32_bf16 v47, v36, v34", isDebug)
+          || tryAssembler(isaVersion, assemblerPath, "v_dot2acc_f32_bf16 v47, v36, v34", isDebug);
+
     rv["v_dot4_i32_i8"]
         = tryAssembler(isaVersion, assemblerPath, "v_dot4_i32_i8 v47, v36, v34", isDebug);
     rv["v_dot4c_i32_i8"]
