@@ -1,0 +1,8 @@
+* @cgmillette @dlangbe @congma13 @afanfa @Ryker0627
+# Documentation files
+docs/ @ROCm/rocm-documentation
+*.md @ROCm/rocm-documentation
+*.rst @ROCm/rocm-documentation
+.readthedocs.yaml @ROCm/rocm-documentation
+# Header directory
+library/include/ @ROCm/rocm-documentation @cgmillette @dlangbe @congma13 @afanfa @Ryker0627

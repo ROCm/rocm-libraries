@@ -1,0 +1,68 @@
+---
+Log Level:
+  # Constrain the logger output based on the following available levels:
+    # HIPTENSOR_LOG_LEVEL_OFF - No logging
+    # HIPTENSOR_LOG_LEVEL_ERROR - Log errors
+    # HIPTENSOR_LOG_LEVEL_PERF_TRACE - Log performance messages
+    # HIPTENSOR_LOG_LEVEL_PERF_HINT - Log performance hints
+    # HIPTENSOR_LOG_LEVEL_HEURISTICS_TRACE - Log selection messages
+    # HIPTENSOR_LOG_LEVEL_API_TRACE - Log a trace of API calls
+
+  # Example:
+[ HIPTENSOR_LOG_LEVEL_ERROR, HIPTENSOR_LOG_LEVEL_PERF_TRACE, HIPTENSOR_LOG_LEVEL_HEURISTICS_TRACE ]
+Tensor Data Types:
+  # Data types for tensorA/B, typeCompute
+  # Supported type combinations are:
+    # - [ HIP_R_32F, HIP_R_32F]
+    # - [ HIP_R_16F, HIP_R_16F]
+    # - [ HIP_R_16F, HIP_R_32F]
+
+  # Example:
+  - [ HIP_R_32F, HIP_R_32F ]
+Alphas:
+  # Scaling parameter for tensorA of data type 'typeCompute'
+
+  # Example:
+  - [1.1]
+Lengths:
+  # Lengths for tensorA/B given as [LengthsA/B]
+
+  # Example:
+  - [15, 12]
+Ranges:
+  # Generate tensor lengths from a range of set values:
+    # [lower bound, upper bound, step size/num sizes, optional: total lengths]
+  # Values are created as:
+    # for (val = lower; val <= upper; val *= step)
+  # Lengths generated from Ranges and Random Ranges are appended to lengths given in Lengths
+
+  # Examples:
+  # Generate all possible length combinations of 2, 4, 8, 16 for rank N dimensions
+  - [2, 16, 2]
+
+  # Generate 16 total lengths with each dim randombly chosen from set = [2, 4, 8, 16]
+  - [2, 16, 2, 16]
+Random Ranges:
+  # Randomly generate tensor lengths from a range of values:
+    # [lower bound, upper bound, total lengths]
+  # Values are randomly chosen from the range [lower, upper]
+
+  # Example:
+  # Generate 100 total lengths with each dim with each dim randomly chosen from range [2, 16]
+  - [2, 16, 100]
+Operators:
+  # Element-wise operations to be performed on tensorA
+  # Supported operations are:
+  # Unary:
+    # HIPTENSOR_OP_IDENTITY - Identity operator
+    # HIPTENSOR_OP_SQRT - Square root operator
+
+  # Example:
+  - HIPTENSOR_OP_IDENTITY
+Permuted Dims:
+  # The permuted dimensions (modes) of tensorA are given as [dimsA]
+  # The assumed modes of input tensorA are in the form [0, ..., N-1] for rank N tensors
+
+  # Example:
+  - [1, 0]
+...

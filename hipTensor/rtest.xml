@@ -1,0 +1,434 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testset failure-regex="$.^">
+    <var name="SMOKE_PARAMS">--hot_runs 1 --cold_runs 0 </var>
+    <var name="REGRESSION_PARAMS">--hot_runs 1 --cold_runs 0 </var>
+    <var name="EXTENDED_PARAMS">--hot_runs 1 --cold_runs 0 </var>
+    <var name="CONTRACTION_CONFIGS">./test_emulation/01_contraction</var>
+    <var name="PERMUTE_CONFIGS">./test_emulation/02_permutation</var>
+    <var name="REDUCTION_CONFIGS">./test_emulation/03_reduction</var>
+    <emulation sets="smoke">
+        <run name="smoke001">./bin/logger_test {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke002">./bin/yaml_test {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke101">./bin/bilinear_contraction_test_m1n1k1 -y {CONTRACTION_CONFIGS}/smoke/bilinear_test_params_rank1.yaml {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke102">./bin/bilinear_contraction_test_m2n2k2 -y {CONTRACTION_CONFIGS}/smoke/bilinear_test_params_rank2.yaml {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke103">./bin/bilinear_contraction_test_m3n3k3 -y {CONTRACTION_CONFIGS}/smoke/bilinear_test_params_rank3.yaml {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke104">./bin/bilinear_contraction_test_m4n4k4 -y {CONTRACTION_CONFIGS}/smoke/bilinear_test_params_rank4.yaml {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke105">./bin/bilinear_contraction_test_m5n5k5 -y {CONTRACTION_CONFIGS}/smoke/bilinear_test_params_rank5.yaml {SMOKE_PARAMS} </run>
+    </emulation>
+	<emulation sets="smoke">
+		<run name="smoke106">./bin/bilinear_contraction_test_m6n6k6 -y {CONTRACTION_CONFIGS}/smoke/bilinear_test_params_rank6.yaml {SMOKE_PARAMS} </run>
+	</emulation>
+    <emulation sets="smoke">
+        <run name="smoke111">./bin/complex_bilinear_contraction_test_m1n1k1 -y {CONTRACTION_CONFIGS}/smoke/complex_bilinear_test_params_rank1.yaml {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke112">./bin/complex_bilinear_contraction_test_m2n2k2 -y {CONTRACTION_CONFIGS}/smoke/complex_bilinear_test_params_rank2.yaml {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke113">./bin/complex_bilinear_contraction_test_m3n3k3 -y {CONTRACTION_CONFIGS}/smoke/complex_bilinear_test_params_rank3.yaml {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke114">./bin/complex_bilinear_contraction_test_m4n4k4 -y {CONTRACTION_CONFIGS}/smoke/complex_bilinear_test_params_rank4.yaml {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke115">./bin/complex_bilinear_contraction_test_m5n5k5 -y {CONTRACTION_CONFIGS}/smoke/complex_bilinear_test_params_rank5.yaml {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke116">./bin/complex_bilinear_contraction_test_m6n6k6 -y {CONTRACTION_CONFIGS}/smoke/complex_bilinear_test_params_rank6.yaml {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke121">./bin/scale_contraction_test_m1n1k1 -y {CONTRACTION_CONFIGS}/smoke/scale_test_params_rank1.yaml {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke122">./bin/scale_contraction_test_m2n2k2 -y {CONTRACTION_CONFIGS}/smoke/scale_test_params_rank2.yaml {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke123">./bin/scale_contraction_test_m3n3k3 -y {CONTRACTION_CONFIGS}/smoke/scale_test_params_rank3.yaml {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke124">./bin/scale_contraction_test_m4n4k4 -y {CONTRACTION_CONFIGS}/smoke/scale_test_params_rank4.yaml {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke125">./bin/scale_contraction_test_m5n5k5 -y {CONTRACTION_CONFIGS}/smoke/scale_test_params_rank5.yaml {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke126">./bin/scale_contraction_test_m6n6k6 -y {CONTRACTION_CONFIGS}/smoke/scale_test_params_rank6.yaml {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke131">./bin/complex_scale_contraction_test_m1n1k1 -y {CONTRACTION_CONFIGS}/smoke/complex_scale_test_params_rank1.yaml {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke132">./bin/complex_scale_contraction_test_m2n2k2 -y {CONTRACTION_CONFIGS}/smoke/complex_scale_test_params_rank2.yaml {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke133">./bin/complex_scale_contraction_test_m3n3k3 -y {CONTRACTION_CONFIGS}/smoke/complex_scale_test_params_rank3.yaml {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke134">./bin/complex_scale_contraction_test_m4n4k4 -y {CONTRACTION_CONFIGS}/smoke/complex_scale_test_params_rank4.yaml {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke135">./bin/complex_scale_contraction_test_m5n5k5 -y {CONTRACTION_CONFIGS}/smoke/complex_scale_test_params_rank5.yaml {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke136">./bin/complex_scale_contraction_test_m6n6k6 -y {CONTRACTION_CONFIGS}/smoke/complex_scale_test_params_rank6.yaml {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke201">./bin/rank2_permutation_test -y {PERMUTE_CONFIGS}/smoke/permutation/rank2_test_params.yaml {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke202">./bin/rank3_permutation_test -y {PERMUTE_CONFIGS}/smoke/permutation/rank3_test_params.yaml {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke203">./bin/rank4_permutation_test -y {PERMUTE_CONFIGS}/smoke/permutation/rank4_test_params.yaml {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke204">./bin/rank5_permutation_test -y {PERMUTE_CONFIGS}/smoke/permutation/rank5_test_params.yaml {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke205">./bin/rank6_permutation_test -y {PERMUTE_CONFIGS}/smoke/permutation/rank6_test_params.yaml {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke211">./bin/rank2_elementwise_binary_op_test -y {PERMUTE_CONFIGS}/smoke/binary_op/rank2_binary_op_test_params.yaml {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke212">./bin/rank3_elementwise_binary_op_test -y {PERMUTE_CONFIGS}/smoke/binary_op/rank3_binary_op_test_params.yaml {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke213">./bin/rank4_elementwise_binary_op_test -y {PERMUTE_CONFIGS}/smoke/binary_op/rank4_binary_op_test_params.yaml {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke214">./bin/rank5_elementwise_binary_op_test -y {PERMUTE_CONFIGS}/smoke/binary_op/rank5_binary_op_test_params.yaml {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke215">./bin/rank6_elementwise_binary_op_test -y {PERMUTE_CONFIGS}/smoke/binary_op/rank6_binary_op_test_params.yaml {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke221">./bin/rank2_elementwise_trinary_op_test -y {PERMUTE_CONFIGS}/smoke/trinary_op/rank2_trinary_op_test_params.yaml {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke222">./bin/rank3_elementwise_trinary_op_test -y {PERMUTE_CONFIGS}/smoke/trinary_op/rank3_trinary_op_test_params.yaml {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke223">./bin/rank4_elementwise_trinary_op_test -y {PERMUTE_CONFIGS}/smoke/trinary_op/rank4_trinary_op_test_params.yaml {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke224">./bin/rank5_elementwise_trinary_op_test -y {PERMUTE_CONFIGS}/smoke/trinary_op/rank5_trinary_op_test_params.yaml {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke225">./bin/rank6_elementwise_trinary_op_test -y {PERMUTE_CONFIGS}/smoke/trinary_op/rank6_trinary_op_test_params.yaml {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke301">./bin/rank1_reduction_test -y {REDUCTION_CONFIGS}/smoke/rank1_test_params.yaml {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke302">./bin/rank2_reduction_test -y {REDUCTION_CONFIGS}/smoke/rank2_test_params.yaml {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke303">./bin/rank3_reduction_test -y {REDUCTION_CONFIGS}/smoke/rank3_test_params.yaml {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke304">./bin/rank4_reduction_test -y {REDUCTION_CONFIGS}/smoke/rank4_test_params.yaml {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke305">./bin/rank5_reduction_test -y {REDUCTION_CONFIGS}/smoke/rank5_test_params.yaml {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke306">./bin/rank6_reduction_test -y {REDUCTION_CONFIGS}/smoke/rank6_test_params.yaml {SMOKE_PARAMS} </run>
+    </emulation>
+
+    <emulation sets="regression">
+        <run name="regression001">./bin/logger_test {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="regression">
+        <run name="regression002">./bin/yaml_test {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="regression">
+        <run name="regression101">./bin/bilinear_contraction_test_m1n1k1 -y {CONTRACTION_CONFIGS}/regression/bilinear_test_params_rank1.yaml {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="regression">
+        <run name="regression102">./bin/bilinear_contraction_test_m2n2k2 -y {CONTRACTION_CONFIGS}/regression/bilinear_test_params_rank2.yaml {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="regression">
+        <run name="regression103">./bin/bilinear_contraction_test_m3n3k3 -y {CONTRACTION_CONFIGS}/regression/bilinear_test_params_rank3.yaml {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="regression">
+        <run name="regression104">./bin/bilinear_contraction_test_m4n4k4 -y {CONTRACTION_CONFIGS}/regression/bilinear_test_params_rank4.yaml {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="regression">
+        <run name="regression105">./bin/bilinear_contraction_test_m5n5k5 -y {CONTRACTION_CONFIGS}/regression/bilinear_test_params_rank5.yaml {REGRESSION_PARAMS} </run>
+    </emulation>
+	<emulation sets="regression">
+		<run name="regression106">./bin/bilinear_contraction_test_m6n6k6 -y {CONTRACTION_CONFIGS}/regression/bilinear_test_params_rank6.yaml {REGRESSION_PARAMS} </run>
+	</emulation>
+    <emulation sets="regression">
+        <run name="regression111">./bin/complex_bilinear_contraction_test_m1n1k1 -y {CONTRACTION_CONFIGS}/regression/complex_bilinear_test_params_rank1.yaml {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="regression">
+        <run name="regression112">./bin/complex_bilinear_contraction_test_m2n2k2 -y {CONTRACTION_CONFIGS}/regression/complex_bilinear_test_params_rank2.yaml {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="regression">
+        <run name="regression113">./bin/complex_bilinear_contraction_test_m3n3k3 -y {CONTRACTION_CONFIGS}/regression/complex_bilinear_test_params_rank3.yaml {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="regression">
+        <run name="regression114">./bin/complex_bilinear_contraction_test_m4n4k4 -y {CONTRACTION_CONFIGS}/regression/complex_bilinear_test_params_rank4.yaml {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="regression">
+        <run name="regression115">./bin/complex_bilinear_contraction_test_m5n5k5 -y {CONTRACTION_CONFIGS}/regression/complex_bilinear_test_params_rank5.yaml {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="regression">
+        <run name="regression116">./bin/complex_bilinear_contraction_test_m6n6k6 -y {CONTRACTION_CONFIGS}/regression/complex_bilinear_test_params_rank6.yaml {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="regression">
+        <run name="regression121">./bin/scale_contraction_test_m1n1k1 -y {CONTRACTION_CONFIGS}/regression/scale_test_params_rank1.yaml {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="regression">
+        <run name="regression122">./bin/scale_contraction_test_m2n2k2 -y {CONTRACTION_CONFIGS}/regression/scale_test_params_rank2.yaml {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="regression">
+        <run name="regression123">./bin/scale_contraction_test_m3n3k3 -y {CONTRACTION_CONFIGS}/regression/scale_test_params_rank3.yaml {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="regression">
+        <run name="regression124">./bin/scale_contraction_test_m4n4k4 -y {CONTRACTION_CONFIGS}/regression/scale_test_params_rank4.yaml {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="regression">
+        <run name="regression125">./bin/scale_contraction_test_m5n5k5 -y {CONTRACTION_CONFIGS}/regression/scale_test_params_rank5.yaml {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="regression">
+        <run name="regression126">./bin/scale_contraction_test_m6n6k6 -y {CONTRACTION_CONFIGS}/regression/scale_test_params_rank6.yaml {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="regression">
+        <run name="regression131">./bin/complex_scale_contraction_test_m1n1k1 -y {CONTRACTION_CONFIGS}/regression/complex_scale_test_params_rank1.yaml {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="regression">
+        <run name="regression132">./bin/complex_scale_contraction_test_m2n2k2 -y {CONTRACTION_CONFIGS}/regression/complex_scale_test_params_rank2.yaml {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="regression">
+        <run name="regression133">./bin/complex_scale_contraction_test_m3n3k3 -y {CONTRACTION_CONFIGS}/regression/complex_scale_test_params_rank3.yaml {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="regression">
+        <run name="regression134">./bin/complex_scale_contraction_test_m4n4k4 -y {CONTRACTION_CONFIGS}/regression/complex_scale_test_params_rank4.yaml {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="regression">
+        <run name="regression135">./bin/complex_scale_contraction_test_m5n5k5 -y {CONTRACTION_CONFIGS}/regression/complex_scale_test_params_rank5.yaml {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="regression">
+        <run name="regression136">./bin/complex_scale_contraction_test_m6n6k6 -y {CONTRACTION_CONFIGS}/regression/complex_scale_test_params_rank6.yaml {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="regression">
+        <run name="regression201">./bin/rank2_permutation_test -y {PERMUTE_CONFIGS}/regression/permutation/rank2_test_params.yaml {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="regression">
+        <run name="regression202">./bin/rank3_permutation_test -y {PERMUTE_CONFIGS}/regression/permutation/rank3_test_params.yaml {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="regression">
+        <run name="regression203">./bin/rank4_permutation_test -y {PERMUTE_CONFIGS}/regression/permutation/rank4_test_params.yaml {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="regression">
+        <run name="regression204">./bin/rank5_permutation_test -y {PERMUTE_CONFIGS}/regression/permutation/rank5_test_params.yaml {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="regression">
+        <run name="regression205">./bin/rank6_permutation_test -y {PERMUTE_CONFIGS}/regression/permutation/rank6_test_params.yaml {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="regression">
+        <run name="regression211">./bin/rank2_elementwise_binary_op_test -y {PERMUTE_CONFIGS}/regression/binary_op/rank2_binary_op_test_params.yaml {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="regression">
+        <run name="regression212">./bin/rank3_elementwise_binary_op_test -y {PERMUTE_CONFIGS}/regression/binary_op/rank3_binary_op_test_params.yaml {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="regression">
+        <run name="regression213">./bin/rank4_elementwise_binary_op_test -y {PERMUTE_CONFIGS}/regression/binary_op/rank4_binary_op_test_params.yaml {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="regression">
+        <run name="regression214">./bin/rank5_elementwise_binary_op_test -y {PERMUTE_CONFIGS}/regression/binary_op/rank5_binary_op_test_params.yaml {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="regression">
+        <run name="regression215">./bin/rank6_elementwise_binary_op_test -y {PERMUTE_CONFIGS}/regression/binary_op/rank6_binary_op_test_params.yaml {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="regression">
+        <run name="regression221">./bin/rank2_elementwise_trinary_op_test -y {PERMUTE_CONFIGS}/regression/trinary_op/rank2_trinary_op_test_params.yaml {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="regression">
+        <run name="regression222">./bin/rank3_elementwise_trinary_op_test -y {PERMUTE_CONFIGS}/regression/trinary_op/rank3_trinary_op_test_params.yaml {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="regression">
+        <run name="regression223">./bin/rank4_elementwise_trinary_op_test -y {PERMUTE_CONFIGS}/regression/trinary_op/rank4_trinary_op_test_params.yaml {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="regression">
+        <run name="regression224">./bin/rank5_elementwise_trinary_op_test -y {PERMUTE_CONFIGS}/regression/trinary_op/rank5_trinary_op_test_params.yaml {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="regression">
+        <run name="regression225">./bin/rank6_elementwise_trinary_op_test -y {PERMUTE_CONFIGS}/regression/trinary_op/rank6_trinary_op_test_params.yaml {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="regression">
+        <run name="regression301">./bin/rank1_reduction_test -y {REDUCTION_CONFIGS}/regression/rank1_test_params.yaml {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="regression">
+        <run name="regression302">./bin/rank2_reduction_test -y {REDUCTION_CONFIGS}/regression/rank2_test_params.yaml {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="regression">
+        <run name="regression303">./bin/rank3_reduction_test -y {REDUCTION_CONFIGS}/regression/rank3_test_params.yaml {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="regression">
+        <run name="regression304">./bin/rank4_reduction_test -y {REDUCTION_CONFIGS}/regression/rank4_test_params.yaml {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="regression">
+        <run name="regression305">./bin/rank5_reduction_test -y {REDUCTION_CONFIGS}/regression/rank5_test_params.yaml {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="regression">
+        <run name="regression306">./bin/rank6_reduction_test -y {REDUCTION_CONFIGS}/regression/rank6_test_params.yaml {REGRESSION_PARAMS} </run>
+    </emulation>
+
+    <emulation sets="extended">
+        <run name="extended001">./bin/logger_test {EXTENDED_PARAMS} </run>
+    </emulation>
+    <emulation sets="extended">
+        <run name="extended002">./bin/yaml_test {EXTENDED_PARAMS} </run>
+    </emulation>
+    <emulation sets="extended">
+        <run name="extended101">./bin/bilinear_contraction_test_m1n1k1 -y {CONTRACTION_CONFIGS}/extended/bilinear_test_params_rank1.yaml {EXTENDED_PARAMS} </run>
+    </emulation>
+    <emulation sets="extended">
+        <run name="extended102">./bin/bilinear_contraction_test_m2n2k2 -y {CONTRACTION_CONFIGS}/extended/bilinear_test_params_rank2.yaml {EXTENDED_PARAMS} </run>
+    </emulation>
+    <emulation sets="extended">
+        <run name="extended103">./bin/bilinear_contraction_test_m3n3k3 -y {CONTRACTION_CONFIGS}/extended/bilinear_test_params_rank3.yaml {EXTENDED_PARAMS} </run>
+    </emulation>
+    <emulation sets="extended">
+        <run name="extended104">./bin/bilinear_contraction_test_m4n4k4 -y {CONTRACTION_CONFIGS}/extended/bilinear_test_params_rank4.yaml {EXTENDED_PARAMS} </run>
+    </emulation>
+    <emulation sets="extended">
+        <run name="extended105">./bin/bilinear_contraction_test_m5n5k5 -y {CONTRACTION_CONFIGS}/extended/bilinear_test_params_rank5.yaml {EXTENDED_PARAMS} </run>
+    </emulation>
+	<emulation sets="extended">
+		<run name="extended106">./bin/bilinear_contraction_test_m6n6k6 -y {CONTRACTION_CONFIGS}/extended/bilinear_test_params_rank6.yaml {EXTENDED_PARAMS} </run>
+	</emulation>
+    <emulation sets="extended">
+        <run name="extended111">./bin/complex_bilinear_contraction_test_m1n1k1 -y {CONTRACTION_CONFIGS}/extended/complex_bilinear_test_params_rank1.yaml {EXTENDED_PARAMS} </run>
+    </emulation>
+    <emulation sets="extended">
+        <run name="extended112">./bin/complex_bilinear_contraction_test_m2n2k2 -y {CONTRACTION_CONFIGS}/extended/complex_bilinear_test_params_rank2.yaml {EXTENDED_PARAMS} </run>
+    </emulation>
+    <emulation sets="extended">
+        <run name="extended113">./bin/complex_bilinear_contraction_test_m3n3k3 -y {CONTRACTION_CONFIGS}/extended/complex_bilinear_test_params_rank3.yaml {EXTENDED_PARAMS} </run>
+    </emulation>
+    <emulation sets="extended">
+        <run name="extended114">./bin/complex_bilinear_contraction_test_m4n4k4 -y {CONTRACTION_CONFIGS}/extended/complex_bilinear_test_params_rank4.yaml {EXTENDED_PARAMS} </run>
+    </emulation>
+    <emulation sets="extended">
+        <run name="extended115">./bin/complex_bilinear_contraction_test_m5n5k5 -y {CONTRACTION_CONFIGS}/extended/complex_bilinear_test_params_rank5.yaml {EXTENDED_PARAMS} </run>
+    </emulation>
+    <emulation sets="extended">
+        <run name="extended116">./bin/complex_bilinear_contraction_test_m6n6k6 -y {CONTRACTION_CONFIGS}/extended/complex_bilinear_test_params_rank6.yaml {EXTENDED_PARAMS} </run>
+    </emulation>
+    <emulation sets="extended">
+        <run name="extended121">./bin/scale_contraction_test_m1n1k1 -y {CONTRACTION_CONFIGS}/extended/scale_test_params_rank1.yaml {EXTENDED_PARAMS} </run>
+    </emulation>
+    <emulation sets="extended">
+        <run name="extended122">./bin/scale_contraction_test_m2n2k2 -y {CONTRACTION_CONFIGS}/extended/scale_test_params_rank2.yaml {EXTENDED_PARAMS} </run>
+    </emulation>
+    <emulation sets="extended">
+        <run name="extended123">./bin/scale_contraction_test_m3n3k3 -y {CONTRACTION_CONFIGS}/extended/scale_test_params_rank3.yaml {EXTENDED_PARAMS} </run>
+    </emulation>
+    <emulation sets="extended">
+        <run name="extended124">./bin/scale_contraction_test_m4n4k4 -y {CONTRACTION_CONFIGS}/extended/scale_test_params_rank4.yaml {EXTENDED_PARAMS} </run>
+    </emulation>
+    <emulation sets="extended">
+        <run name="extended125">./bin/scale_contraction_test_m5n5k5 -y {CONTRACTION_CONFIGS}/extended/scale_test_params_rank5.yaml {EXTENDED_PARAMS} </run>
+    </emulation>
+    <emulation sets="extended">
+        <run name="extended126">./bin/scale_contraction_test_m6n6k6 -y {CONTRACTION_CONFIGS}/extended/scale_test_params_rank6.yaml {EXTENDED_PARAMS} </run>
+    </emulation>
+    <emulation sets="extended">
+        <run name="extended131">./bin/complex_scale_contraction_test_m1n1k1 -y {CONTRACTION_CONFIGS}/extended/complex_scale_test_params_rank1.yaml {EXTENDED_PARAMS} </run>
+    </emulation>
+    <emulation sets="extended">
+        <run name="extended132">./bin/complex_scale_contraction_test_m2n2k2 -y {CONTRACTION_CONFIGS}/extended/complex_scale_test_params_rank2.yaml {EXTENDED_PARAMS} </run>
+    </emulation>
+    <emulation sets="extended">
+        <run name="extended133">./bin/complex_scale_contraction_test_m3n3k3 -y {CONTRACTION_CONFIGS}/extended/complex_scale_test_params_rank3.yaml {EXTENDED_PARAMS} </run>
+    </emulation>
+    <emulation sets="extended">
+        <run name="extended134">./bin/complex_scale_contraction_test_m4n4k4 -y {CONTRACTION_CONFIGS}/extended/complex_scale_test_params_rank4.yaml {EXTENDED_PARAMS} </run>
+    </emulation>
+    <emulation sets="extended">
+        <run name="extended135">./bin/complex_scale_contraction_test_m5n5k5 -y {CONTRACTION_CONFIGS}/extended/complex_scale_test_params_rank5.yaml {EXTENDED_PARAMS} </run>
+    </emulation>
+    <emulation sets="extended">
+        <run name="extended136">./bin/complex_scale_contraction_test_m6n6k6 -y {CONTRACTION_CONFIGS}/extended/complex_scale_test_params_rank6.yaml {EXTENDED_PARAMS} </run>
+    </emulation>
+    <emulation sets="extended">
+        <run name="extended201">./bin/rank2_permutation_test -y {PERMUTE_CONFIGS}/extended/permutation/rank2_test_params.yaml {EXTENDED_PARAMS} </run>
+    </emulation>
+    <emulation sets="extended">
+        <run name="extended202">./bin/rank3_permutation_test -y {PERMUTE_CONFIGS}/extended/permutation/rank3_test_params.yaml {EXTENDED_PARAMS} </run>
+    </emulation>
+    <emulation sets="extended">
+        <run name="extended203">./bin/rank4_permutation_test -y {PERMUTE_CONFIGS}/extended/permutation/rank4_test_params.yaml {EXTENDED_PARAMS} </run>
+    </emulation>
+    <emulation sets="extended">
+        <run name="extended204">./bin/rank5_permutation_test -y {PERMUTE_CONFIGS}/extended/permutation/rank5_test_params.yaml {EXTENDED_PARAMS} </run>
+    </emulation>
+    <emulation sets="extended">
+        <run name="extended205">./bin/rank6_permutation_test -y {PERMUTE_CONFIGS}/extended/permutation/rank6_test_params.yaml {EXTENDED_PARAMS} </run>
+    </emulation>
+    <emulation sets="extended">
+        <run name="extended211">./bin/rank2_elementwise_binary_op_test -y {PERMUTE_CONFIGS}/extended/binary_op/rank2_binary_op_test_params.yaml {EXTENDED_PARAMS} </run>
+    </emulation>
+    <emulation sets="extended">
+        <run name="extended212">./bin/rank3_elementwise_binary_op_test -y {PERMUTE_CONFIGS}/extended/binary_op/rank3_binary_op_test_params.yaml {EXTENDED_PARAMS} </run>
+    </emulation>
+    <emulation sets="extended">
+        <run name="extended213">./bin/rank4_elementwise_binary_op_test -y {PERMUTE_CONFIGS}/extended/binary_op/rank4_binary_op_test_params.yaml {EXTENDED_PARAMS} </run>
+    </emulation>
+    <emulation sets="extended">
+        <run name="extended214">./bin/rank5_elementwise_binary_op_test -y {PERMUTE_CONFIGS}/extended/binary_op/rank5_binary_op_test_params.yaml {EXTENDED_PARAMS} </run>
+    </emulation>
+    <emulation sets="extended">
+        <run name="extended215">./bin/rank6_elementwise_binary_op_test -y {PERMUTE_CONFIGS}/extended/binary_op/rank6_binary_op_test_params.yaml {EXTENDED_PARAMS} </run>
+    </emulation>
+    <emulation sets="extended">
+        <run name="extended221">./bin/rank2_elementwise_trinary_op_test -y {PERMUTE_CONFIGS}/extended/trinary_op/rank2_trinary_op_test_params.yaml {EXTENDED_PARAMS} </run>
+    </emulation>
+    <emulation sets="extended">
+        <run name="extended222">./bin/rank3_elementwise_trinary_op_test -y {PERMUTE_CONFIGS}/extended/trinary_op/rank3_trinary_op_test_params.yaml {EXTENDED_PARAMS} </run>
+    </emulation>
+    <emulation sets="extended">
+        <run name="extended223">./bin/rank4_elementwise_trinary_op_test -y {PERMUTE_CONFIGS}/extended/trinary_op/rank4_trinary_op_test_params.yaml {EXTENDED_PARAMS} </run>
+    </emulation>
+    <emulation sets="extended">
+        <run name="extended224">./bin/rank5_elementwise_trinary_op_test -y {PERMUTE_CONFIGS}/extended/trinary_op/rank5_trinary_op_test_params.yaml {EXTENDED_PARAMS} </run>
+    </emulation>
+    <emulation sets="extended">
+        <run name="extended225">./bin/rank6_elementwise_trinary_op_test -y {PERMUTE_CONFIGS}/extended/trinary_op/rank6_trinary_op_test_params.yaml {EXTENDED_PARAMS} </run>
+    </emulation>
+    <emulation sets="extended">
+        <run name="extended301">./bin/rank1_reduction_test -y {REDUCTION_CONFIGS}/extended/rank1_test_params.yaml {EXTENDED_PARAMS} </run>
+    </emulation>
+    <emulation sets="extended">
+        <run name="extended302">./bin/rank2_reduction_test -y {REDUCTION_CONFIGS}/extended/rank2_test_params.yaml {EXTENDED_PARAMS} </run>
+    </emulation>
+    <emulation sets="extended">
+        <run name="extended303">./bin/rank3_reduction_test -y {REDUCTION_CONFIGS}/extended/rank3_test_params.yaml {EXTENDED_PARAMS} </run>
+    </emulation>
+    <emulation sets="extended">
+        <run name="extended304">./bin/rank4_reduction_test -y {REDUCTION_CONFIGS}/extended/rank4_test_params.yaml {EXTENDED_PARAMS} </run>
+    </emulation>
+    <emulation sets="extended">
+        <run name="extended305">./bin/rank5_reduction_test -y {REDUCTION_CONFIGS}/extended/rank5_test_params.yaml {EXTENDED_PARAMS} </run>
+    </emulation>
+    <emulation sets="extended">
+        <run name="extended306">./bin/rank6_reduction_test -y {REDUCTION_CONFIGS}/extended/rank6_test_params.yaml {EXTENDED_PARAMS} </run>
+    </emulation>
+</testset>

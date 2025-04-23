@@ -1,0 +1,30 @@
+---
+Log Level:       [ HIPTENSOR_LOG_LEVEL_ERROR, HIPTENSOR_LOG_LEVEL_PERF_TRACE ]
+Tensor Data Types:
+  - [ HIP_R_16F, HIP_R_16F]
+  - [ HIP_R_16F, HIP_R_32F]
+  - [ HIP_R_16BF, HIP_R_16BF]
+  - [ HIP_R_16BF, HIP_R_32F]
+  - [ HIP_R_64F, HIP_R_64F]
+  - [ HIP_R_32F, HIP_R_32F]
+Alphas:
+  - 2.3
+Betas:
+  - 0.0
+Lengths:
+  - [ 13, 11, 8, 5, 4]
+  - [ 3, 5, 6, 4, 5]
+Operators:
+  - HIPTENSOR_OP_MIN
+Output Dims:
+  - [1, 2, 3, 4]
+  - [0, 1, 2, 3]
+  - [0, 1, 2]
+  - [2, 3, 4]
+  - [0, 3]
+  - [2, 4]
+  - [1]
+  - [2]
+  - []
+
+...

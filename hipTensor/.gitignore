@@ -1,0 +1,54 @@
+# Compiled Object files
+*.slo
+*.lo
+*.o
+*.obj
+
+# Generated version file
+hiptensor_version.hpp
+hiptensor-version.hpp
+
+# Generated source file
+test/*/configs/*.hpp
+test/*/configs/**/*.hpp
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Fortran module files
+*.mod
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app
+
+# vim tags
+tags
+.tags
+.*.swp
+
+# Editors
+.vscode
+
+# build-in-source directory
+build*
+
+# emacs temporary/backup files
+.\#*
+\#*\#
+*~
+*.log
+*.csv

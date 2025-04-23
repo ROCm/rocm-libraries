@@ -1,0 +1,32 @@
+---
+Log Level:       [ HIPTENSOR_LOG_LEVEL_ERROR, HIPTENSOR_LOG_LEVEL_PERF_TRACE ]
+Tensor Data Types:
+  - [ HIP_C_32F, HIP_C_32F, NONE_TYPE, HIP_C_32F, HIP_C_32F ]
+  - [ HIP_C_64F, HIP_C_64F, NONE_TYPE, HIP_C_64F, HIP_C_64F ]
+Algorithm Types:
+  - HIPTENSOR_ALGO_DEFAULT
+  - HIPTENSOR_ALGO_DEFAULT_PATIENT
+  - HIPTENSOR_ALGO_ACTOR_CRITIC
+Operators:
+  - HIPTENSOR_OP_IDENTITY
+Worksize Prefs:
+  - HIPTENSOR_WORKSPACE_RECOMMENDED
+  - HIPTENSOR_WORKSPACE_MIN
+  - HIPTENSOR_WORKSPACE_MAX
+Alphas:
+  - [0, 0]
+  - [1, 1]
+  - [1.1, 1.2]
+Betas:
+  - [2, 2]
+  - [0, 0]
+  - [2.2, 2.3]
+Lengths:
+  - [[96, 96], [96, 96], [96, 96]]
+  - [[57, 64], [123, 64], [57, 123]]
+  - [[111, 69], [113, 69], [111, 113]]
+Strides:
+  - []
+Modes:
+  - [[0, 1], [2, 1], [0, 2]]
+...
