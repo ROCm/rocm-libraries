@@ -1,0 +1,60 @@
+defaults:
+  numbered: False
+root: index
+subtrees:
+- entries:
+  - file: what-is-rocDecode.rst
+    title: What is rocDecode?
+
+- caption: Install
+  entries:
+  - file: install/rocDecode-prerequisites.rst
+    title: rocDecode prerequisites
+  - file: install/rocDecode-package-install.rst
+    title: Installing rocDecode with the package installer
+  - file: install/rocDecode-build-and-install.rst
+    title: Installing rocDecode from its source code
+  - url: https://github.com/ROCm/rocDecode/tree/develop/docker
+    title: rocDecode Docker containers
+
+- caption: Conceptual
+  entries:
+  - file: conceptual/video-decoding-pipeline.rst
+    title: Video decoding pipeline
+  - file: conceptual/rocDecode-memory-types.rst
+    title: rocDecode surface memory locations
+
+- caption: Samples
+  entries:
+  - file: tutorials/rocDecode-samples.rst
+    title: rocDecode samples
+
+- caption: How to
+  entries:
+  - file: how-to/using-rocDecode-videodecode-sample.rst
+    title: Understand the rocDecode videodecode sample
+  - file: how-to/using-rocDecode-video-decoder.rst
+    title: Use the rocDecode RocVideoDecoder
+  - file: how-to/using-rocDecode-ffmpeg.rst
+    title: Use the rocDecode FFmpeg demultiplexer
+  - file: how-to/using-rocDecode-bitstream.rst
+    title: Use the rocDecode bitstream reader APIs  
+  - file: how-to/using-rocdecode.rst
+    title: Use the rocDecode core APIs
+
+- caption: Reference
+  entries:
+  - file: reference/rocDecode-formats-and-architectures.rst
+    title: rocDecode supported codecs and architectures
+  - file: reference/rocDecode-tested-configurations.rst
+    title: rocDecode tested configurations
+  - file: doxygen/html/files
+    title: rocDecode API library
+  - file: doxygen/html/globals
+    title: rocDecode functions
+  - file: doxygen/html/annotated
+    title: rocDecode data structures
+
+- caption: About
+  entries:
+  - file: license.md
