@@ -25,12 +25,11 @@
 from rocisa import rocIsa, countInstruction, countGlobalRead, \
             countLocalRead, countLocalWrite, countDSStoreB256
 from rocisa.code import Module, TextBlock, StructuredModule, KernelBody
-from rocisa.container import RegisterContainer
+from rocisa.container import RegisterContainer, replaceHolder
 from rocisa.label import LabelManager
 from rocisa.asmpass import rocIsaPass, rocIsaPassOption, rocIsaPassResult
 from rocisa.instruction import SLongBranchPositive
-from .TensileInstructions import replaceHolder, \
-                          Dump, RegisterPool, Assert, \
+from .TensileInstructions import Dump, RegisterPool, Assert, \
                           SBranch, SCBranchSCC0, SCBranchSCC1
 from .TensileInstructions.Instructions import *
 from .KernelWriterModules import *

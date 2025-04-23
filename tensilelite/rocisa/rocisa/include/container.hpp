@@ -1084,6 +1084,8 @@ namespace rocisa
         std::optional<RegName> name;
     };
 
+    std::shared_ptr<Item> replaceHolder(std::shared_ptr<Item> inst, int dst);
+
     // Overloaded functions to create specific GPR containers with default regNum = 1.f
     std::shared_ptr<RegisterContainer> vgpr(const Holder& holder, float regNum = 1.f);
     std::shared_ptr<RegisterContainer> vgpr(int idx, float regNum = 1.f);

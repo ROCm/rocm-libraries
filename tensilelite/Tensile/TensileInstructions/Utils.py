@@ -95,28 +95,3 @@ def ceilDivide(numerator, denominator):
 
 def roundUpToNearestMultiple(numerator, denominator):
     return ceilDivide(numerator,denominator)*int(denominator)
-
-########################################
-# Others
-########################################
-
-def replaceHolder(module, dst):
-    if isinstance(module, Module):
-        for item in module.items():
-            replaceHolder(item, dst)
-    elif isinstance(module, Instruction):
-        for param in module.getParams():
-            if isinstance(param, HolderContainer):
-                param.setRegNum(dst)
-                param = param.getCopiedRC()
-    elif isinstance(module, SWaitCnt):
-        assert(isinstance(dst, int))
-        if isinstance(module.vmcnt, HolderContainer):
-            module.vmcnt = module.vmcnt.holderIdx + dst
-        if isinstance(module.lgkmcnt, HolderContainer):
-            module.lgkmcnt = module.lgkmcnt.holderIdx + dst
-        if isinstance(module.vscnt, HolderContainer):
-            module.vscnt = module.vscnt.holderIdx + dst
-
-    return module
-

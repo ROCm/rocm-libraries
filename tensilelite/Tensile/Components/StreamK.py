@@ -21,11 +21,11 @@
 ################################################################################
 
 from rocisa.code import Module, Label
-from rocisa.container import sgpr, SMEMModifiers
+from rocisa.container import sgpr, SMEMModifiers, replaceHolder
 from ..TensileInstructions import SAddU32, ContinuousRegister, scalarStaticDivideAndRemainder, \
     SCmpLtU32, SCSelectB32, sMagicDivAlg2, SMulI32, SSubU32, SMinU32, SMovB32, SMovB64, SCBranchSCC1, SCmpLeU32, VMovB32, \
     vgpr, SAddCU32, SCmpGtU32, SCMovB32, SAddI32, SCmpEQU32, SCBranchSCC0, SLShiftLeftB32, SLoadB32, SWaitCnt, \
-    log2, SBarrier, SStoreB32, SBranch, ceilDivide, replaceHolder, SNop, staticMultiply, SSleep, \
+    log2, SBarrier, SStoreB32, SBranch, ceilDivide, SNop, staticMultiply, SSleep, \
     VAddU32, VAddF32, VAddF64, SAndB32, SLShiftRightB32, VReadfirstlaneB32, SBranchIfNotZero
 from ..Common import print2
 # from ..TensileInstructions.Containers import SMEMModifiers

@@ -20,7 +20,7 @@
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ################################################################################
 
-from rocisa.container import SMEMModifiers, VOP3PModifiers, MUBUFModifiers
+from rocisa.container import SMEMModifiers, VOP3PModifiers, MUBUFModifiers, replaceHolder
 from rocisa.enum import CvtType, RoundType
 from ..Common import DataDirection, SemanticVersion
 from ..Component import GlobalWriteComponents
@@ -28,7 +28,7 @@ from ..SolutionStructs import Solution
 from ..Activation import ActivationModule, ActivationType
 from ..AsmStoreState import StoreState
 from ..TensileInstructions import Label, Module, EXEC, SDWAModifiers, VCC, SelectBit, \
-                            vgpr, sgpr, replaceHolder, SaturateCastType, VCvtBF16toFP32, \
+                            vgpr, sgpr, SaturateCastType, VCvtBF16toFP32, \
                             DataType
 from ..TensileInstructions.Instructions import *
 from ..AsmAddressCalculation import AddrCalculation

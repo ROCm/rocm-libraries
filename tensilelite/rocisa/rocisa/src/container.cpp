@@ -21,6 +21,10 @@
  *
  * ************************************************************************ */
 #include "container.hpp"
+#include "code.hpp"
+#include "instruction/branch.hpp"
+#include "instruction/common.hpp"
+#include "instruction/instruction.hpp"
 
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/map.h>
@@ -36,6 +40,37 @@ namespace nb = nanobind;
 
 namespace rocisa
 {
+    std::shared_ptr<Item> replaceHolder(std::shared_ptr<Item> inst, int dst)
+    {
+        if(auto mod = std::dynamic_pointer_cast<Module>(inst))
+        {
+            for(auto& item : mod->items())
+            {
+                // We don't need the output
+                static_cast<void>(replaceHolder(item, dst));
+            }
+        }
+        else if(auto _inst = std::dynamic_pointer_cast<Instruction>(inst))
+        {
+            for(auto& param : _inst->getParams())
+            {
+                if(auto container = std::get_if<std::shared_ptr<Container>>(&param))
+                {
+                    if(auto holder = std::dynamic_pointer_cast<HolderContainer>(*container))
+                    {
+                        holder->setRegNum(dst);
+                        param = std::make_shared<RegisterContainer>(holder->getCopiedRC());
+                    }
+                }
+            }
+        }
+        else if(auto waitcnt = std::dynamic_pointer_cast<SWaitCnt>(inst))
+        {
+            throw std::runtime_error("SWaitCnt is not supported yet");
+        }
+        return inst;
+    }
+
     struct PyContainer : public Container
     {
         NB_TRAMPOLINE(Container, 0);
@@ -140,6 +175,7 @@ namespace rocisa
 void init_containers(nb::module_ m)
 {
     auto m_con = m.def_submodule("container", "rocIsa container submodule.");
+    m_con.def("replaceHolder", &rocisa::replaceHolder, nb::arg("inst"), nb::arg("dst"));
     m_con.def("vgpr",
               nb::overload_cast<const rocisa::Holder&, float>(&rocisa::vgpr),
               nb::arg("holder"),
