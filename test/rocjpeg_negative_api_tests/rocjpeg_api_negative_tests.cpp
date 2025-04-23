@@ -334,7 +334,7 @@ int RocJpegApiNegativeTests::TestInvalidGetErrorName() {
     }
 
     // Scenario 2: Pass a valid error code and ensure it returns a non-null name
-    for (int i = 0; i >= -8; i--) {
+    for (int i = 0; i >= ROCJPEG_STATUS_MAX_VALUE; i--) {
         RocJpegStatus valid_status = static_cast<RocJpegStatus>(i);;
         error_name = rocJpegGetErrorName(valid_status);
         if (error_name == nullptr) {

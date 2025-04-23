@@ -63,6 +63,7 @@ typedef enum {
     ROCJPEG_STATUS_HW_JPEG_DECODER_NOT_SUPPORTED = -10, /**< Hardware JPEG decoder is not supported. */
     ROCJPEG_STATUS_RUNTIME_ERROR = -11, /**< Runtime error occurred. */
     ROCJPEG_STATUS_NOT_IMPLEMENTED = -12, /**< The requested feature is not implemented. */
+    ROCJPEG_STATUS_MAX_VALUE = -13, /**< Maximum status code value. */
 } RocJpegStatus;
 
 /**
