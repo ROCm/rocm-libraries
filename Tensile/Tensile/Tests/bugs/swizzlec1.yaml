@@ -1,0 +1,52 @@
+BenchmarkProblems:
+- - DataType: s
+    IndexAssignmentsA: [3, 1, 2]
+    IndexAssignmentsB: [3, 0, 2]
+    NumIndicesC: 3
+    OperationType: TensorContraction
+    #SetConstStrideA:
+    #- [3, 1]
+    #SetConstStrideB:
+    #- [2, 0]
+    #- [3, 1]
+    UseBeta: false
+    UseInitialStridesAB: false
+  - BenchmarkCommonParameters:
+    - EdgeType: [ShiftPtr]
+    BenchmarkFinalParameters:
+    - ProblemSizes:
+      - Exact: [16, 16, 1, 8] # passes on source and asm
+      - Exact: [16, 32, 1, 8] # fails - multiple tiles.
+      - Exact: [32, 16, 1, 8] # fails - multiple tiles.
+    BenchmarkForkParameters: null
+    BenchmarkJoinParameters: null
+    ForkParameters:
+    - PrefetchGlobalRead: [0]
+    - KernelLanguage: [Source,Assembly]
+    - ThreadTile:
+      - [2, 2]
+    - WorkGroup:
+      - [8, 8, 1]
+    - DepthU: [8]
+    - GlobalReadVectorWidth: [1]
+    - VectorWidth: [1]
+    - FractionalLoad: [0]
+    InitialSolutionParameters: null
+    JoinParameters: null
+GlobalParameters: {CMakeBuildType: Release, EnqueuesPerSync: 1, ForceRedoBenchmarkProblems: true,
+  ForceRedoLibraryClient: true, ForceRedoLibraryLogic: true, KernelTime: true, LibraryPrintDebug: false,
+  MergeFiles: true, MinimumRequiredVersion: 4.2.0, NumElementsToValidate: 1000,
+  ShortNames: false, SolutionSelectionAlg: 1, SyncsPerBenchmark: 1,
+  ValidationMaxToPrint: 4, ValidationPrintValids: false,
+  DataInitTypeAB: 1,
+      }
+
+# Case has free index for A is 1 and for B is 0.
+# So does interesting transpose in the output space.
+# Bug appears to be in the store path with second work-group, set AB=1 still fails.
+#   Check usage of WorkGroup0/1 and consistency of output space assignment in reads and stores.
+#   store code takes WG1 and
+#
+#   Check cstrides0/1 written by host code - seems ok, likely WG-related problem.
+#
+#   Diff code with slightly different mapping

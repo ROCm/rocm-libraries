@@ -1,0 +1,124 @@
+GlobalParameters:
+  MinimumRequiredVersion: 4.1.0
+  NumElementsToValidate: 0
+  ValidationMaxToPrint: 16
+  PinClocks: False
+  SleepPercent: 0
+  DataInitTypeA: 0
+  DataInitTypeB: 0
+  EnqueuesPerSync: 1
+  KernelTime: True
+  NewClient: 2
+  LegacyComponents: False
+  PrintConvolutionUsage: 0
+  PrintSolutionRejectionReason: 0
+BenchmarkProblems:
+  -
+    - # ProblemType
+      OperationType: ConvolutionBackwardData
+      DataType: s
+      ConvolutionConfig:
+      - Dilation: 1x1
+      - Filter: 1x1
+      - Stride: 1x1
+      - TensorAFormat: NCHW
+      #TileAwareSelection: True
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - EdgeType: ["ShiftPtr"]
+      ForkParameters:
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [0,1]
+        - ThreadTile:
+          - [ 8, 4 ]
+          - [ 6, 8 ]
+          - [ 4, 8 ]
+          - [ 8, 8 ]
+        - WorkGroup:
+          - [ 8, 16, 1 ]
+          - [ 32, 8, 1 ]
+          - [ 16, 16, 1 ]
+          - [ 32, 16, 1 ]
+          - [ 16, 32, 1 ]
+        - GlobalSplitU: [1,2,4,8]
+        - DepthU: [4,8,16]
+        - GlobalReadVectorWidth: [1, -1]
+        - StaggerU: [0,32]
+        - WorkGroupMapping: [1,8,64]
+        - VectorWidth: [1,-1]
+        - PackBatchDims: [0,1]
+        - FractionalLoad: [1]
+        - AssertFree0ElementMultiple: [4]
+      BenchmarkForkParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+# inception 1x1 convs:
+          - Conv: { n: 64, c: 1280, h: 8, w: 8, k: 192, y: 1, x: 1, p: 0, q: 0, u: 1, v: 1, l: 1, j: 1 }
+          - Conv: { n: 64, c: 1280, h: 8, w: 8, k: 320, y: 1, x: 1, p: 0, q: 0, u: 1, v: 1, l: 1, j: 1 }
+          - Conv: { n: 64, c: 1280, h: 8, w: 8, k: 384, y: 1, x: 1, p: 0, q: 0, u: 1, v: 1, l: 1, j: 1 }
+          - Conv: { n: 64, c: 1280, h: 8, w: 8, k: 448, y: 1, x: 1, p: 0, q: 0, u: 1, v: 1, l: 1, j: 1 }
+          - Conv: { n: 64, c: 2048, h: 8, w: 8, k: 192, y: 1, x: 1, p: 0, q: 0, u: 1, v: 1, l: 1, j: 1 }
+          - Conv: { n: 64, c: 2048, h: 8, w: 8, k: 320, y: 1, x: 1, p: 0, q: 0, u: 1, v: 1, l: 1, j: 1 }
+          - Conv: { n: 64, c: 2048, h: 8, w: 8, k: 384, y: 1, x: 1, p: 0, q: 0, u: 1, v: 1, l: 1, j: 1 }
+          - Conv: { n: 64, c: 2048, h: 8, w: 8, k: 448, y: 1, x: 1, p: 0, q: 0, u: 1, v: 1, l: 1, j: 1 }
+          - Conv: { n: 64, c: 64, h: 56, w: 56, k: 256, y: 1, x: 1, p: 0, q: 0, u: 1, v: 1, l: 1, j: 1 }
+          - Conv: { n: 64, c: 64, h: 56, w: 56, k: 64, y: 1, x: 1, p: 0, q: 0, u: 1, v: 1, l: 1, j: 1 }
+          - Conv: { n: 64, c: 256, h: 56, w: 56, k: 64, y: 1, x: 1, p: 0, q: 0, u: 1, v: 1, l: 1, j: 1 }
+          - Conv: { n: 64, c: 128, h: 28, w: 28, k: 512, y: 1, x: 1, p: 0, q: 0, u: 1, v: 1, l: 1, j: 1 }
+          - Conv: { n: 64, c: 512, h: 28, w: 28, k: 128, y: 1, x: 1, p: 0, q: 0, u: 1, v: 1, l: 1, j: 1 }
+          - Conv: { n: 64, c: 256, h: 14, w: 14, k: 1024, y: 1, x: 1, p: 0, q: 0, u: 1, v: 1, l: 1, j: 1 }
+          - Conv: { n: 64, c: 1024, h: 14, w: 14, k: 256, y: 1, x: 1, p: 0, q: 0, u: 1, v: 1, l: 1, j: 1 }
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - EdgeType: ["ShiftPtr"]
+      ForkParameters:
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [0,1]
+        - ThreadTile:
+          - [ 8, 4 ]
+          - [ 6, 8 ]
+          - [ 4, 8 ]
+          - [ 8, 8 ]
+        - WorkGroup:
+          - [ 8, 16, 1 ]
+          - [ 32, 8, 1 ]
+          - [ 16, 16, 1 ]
+          - [ 32, 16, 1 ]
+          - [ 16, 32, 1 ]
+        - GlobalSplitU: [1,2,4,8]
+        - DepthU: [4,8,16]
+        - GlobalReadVectorWidth: [1, -1]
+        - StaggerU: [0,32]
+        - WorkGroupMapping: [1,8,64]
+        - VectorWidth: [1,-1]
+        - PackBatchDims: [0,1]
+        - FractionalLoad: [1]
+        - AssertFree0ElementMultiple: [1]
+      BenchmarkForkParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+# inception 1x1 convs:
+          - Conv: { n: 64, c: 192, h: 35, w: 35, k: 32, y: 1, x: 1, p: 0, q: 0, u: 1, v: 1, l: 1, j: 1 }
+          - Conv: { n: 64, c: 192, h: 35, w: 35, k: 48, y: 1, x: 1, p: 0, q: 0, u: 1, v: 1, l: 1, j: 1 }
+          - Conv: { n: 64, c: 192, h: 35, w: 35, k: 64, y: 1, x: 1, p: 0, q: 0, u: 1, v: 1, l: 1, j: 1 }
+          - Conv: { n: 64, c: 256, h: 35, w: 35, k: 48, y: 1, x: 1, p: 0, q: 0, u: 1, v: 1, l: 1, j: 1 }
+          - Conv: { n: 64, c: 256, h: 35, w: 35, k: 64, y: 1, x: 1, p: 0, q: 0, u: 1, v: 1, l: 1, j: 1 }
+          - Conv: { n: 64, c: 288, h: 35, w: 35, k: 48, y: 1, x: 1, p: 0, q: 0, u: 1, v: 1, l: 1, j: 1 }
+          - Conv: { n: 64, c: 288, h: 35, w: 35, k: 64, y: 1, x: 1, p: 0, q: 0, u: 1, v: 1, l: 1, j: 1 }
+          - Conv: { n: 64, c: 64, h: 73, w: 73, k: 80, y: 1, x: 1, p: 0, q: 0, u: 1, v: 1, l: 1, j: 1 }
+          - Conv: { n: 64, c: 768, h: 17, w: 17, k: 128, y: 1, x: 1, p: 0, q: 0, u: 1, v: 1, l: 1, j: 1 }
+          - Conv: { n: 64, c: 768, h: 17, w: 17, k: 160, y: 1, x: 1, p: 0, q: 0, u: 1, v: 1, l: 1, j: 1 }
+          - Conv: { n: 64, c: 768, h: 17, w: 17, k: 192, y: 1, x: 1, p: 0, q: 0, u: 1, v: 1, l: 1, j: 1 }
+          - Conv: { n: 64, c: 512, h: 7, w: 7, k: 2048, y: 1, x: 1, p: 0, q: 0, u: 1, v: 1, l: 1, j: 1 }
+          - Conv: { n: 64, c: 2048, h: 7, w: 7, k: 512, y: 1, x: 1, p: 0, q: 0, u: 1, v: 1, l: 1, j: 1 }
+LibraryLogic:
+  ArchitectureName: gfx906
+  DeviceNames: [Device 66a0, Device 66a1, Device 66a7, Vega 20]
+  ScheduleName: vega20
+LibraryClient:

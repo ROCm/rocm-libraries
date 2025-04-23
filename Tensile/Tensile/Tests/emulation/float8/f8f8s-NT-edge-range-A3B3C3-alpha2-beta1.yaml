@@ -1,0 +1,97 @@
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1151, emulation5] # not supported by arch
+
+GlobalParameters:
+  #MinimumRequiredVersion: 4.14.0
+  #PrintLevel: 2
+  ClientLogLevel: 3
+  #ForceRedoBenchmarkProblems: True
+  #ForceRedoLibraryLogic: True
+  #ForceRedoLibraryClient: True
+  #CMakeBuildType: Release
+  #EnqueuesPerSync: 1
+  #SyncsPerBenchmark: 1
+  #LibraryPrintDebug: False
+  #NumElementsToValidate: 16384
+  
+  NumElementsToValidate: -1   # everything 
+  ValidationMaxToPrint: 16384 
+  
+  #ValidationPrintValids: False
+  #ShortNames: False
+  #MergeFiles: True
+  #Platform: 0
+  #Device: 0
+  KernelTime: True
+  #PinClocks: False
+  #SleepPercent: 200
+  PrintSolutionRejectionReason: True
+  #DataInitTypeA: 3
+  #DataInitTypeB: 3
+  
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeC: 3  # SerialIdx%4 
+
+  #DataInitTypeD: 0
+  DataInitTypeBeta: 1   
+  DataInitTypeAlpha: 2
+ 
+  #BoundsCheck: 1 
+
+  #PrintTensorA: 0x1
+  #PrintTensorB: 0x1
+  #PrintTensorD: 0x3  ## both init and copy back 
+  NewClient: 2
+
+BenchmarkProblems:
+  ########################################
+  # NT - standard
+  ########################################
+  -
+    - # ProblemType - NT
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: F8
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+      #Fp8NoPackUpConversion: True    # for non-zero beta 
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - EdgeType: ["ShiftPtr"]
+        - LoopTail: [True]
+        - PrefetchLocalRead: [True]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 1, 1, 1, 1]
+          - [16, 16, 32, 1, 1, 1, 1, 2, 2]
+          - [32, 32, 16, 1, 1, 1, 1, 1, 1]
+          - [32, 32, 16, 1, 1, 1, 1, 2, 2]
+        - PrefetchGlobalRead: [True]
+        #- WorkGroupMapping: [8]
+        #- GlobalSplitU: [1]
+        - DepthU: [64]
+        #- VectorWidth: [-1]
+        #- AssertSummationElementMultiple: [4]
+        #- AssertFree0ElementMultiple: [4]
+        - StoreRemapVectorWidth: [0, 4]    
+          #- 1LDSBuffer: [0,1]
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          #- Exact: [ 16, 16, 1, 32 ]
+          #- Exact: [ 64, 64, 1, 64 ]
+            #- Exact: [ 128, 128, 1, 128 ]
+            #- Exact: [ 111, 111, 1, 111 ]
+            #- Exact: [ 111, 111, 1, 64 ]
+          - Range : [ [99, 1, 117], [111], [1], [64] ]
+          #- Exact: [ 128, 128, 1, 256 ]    # larger K to test clipping
+

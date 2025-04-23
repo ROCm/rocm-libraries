@@ -1,0 +1,144 @@
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1151] # not supported by arch
+
+GlobalParameters:
+  NumElementsToValidate: 65536
+  BoundsCheck: True
+BenchmarkProblems:
+
+  ########################################
+  # TN - standard
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - EdgeType: ["ShiftPtr"]
+      ForkParameters:
+        - TransposeLDS: [0, 1]
+        - MatrixInstruction:
+          - [32, 32, 4, 2]
+          - [32, 32, 8, 1]
+        - PrefetchLocalRead: [0, 1, 3, 5, 9]
+        - PrefetchGlobalRead: [0, 1]
+        - ThreadTile:
+          - [ 2, 32 ]
+        - WorkGroup:
+          - [  16,16, 1 ]
+        - WorkGroupMapping: [8]
+        - InnerUnroll: [2]
+        - DepthU: [64, 128]
+        - DepthULdsDivisor: [1,2]
+        - ScheduleIterAlg: [3]
+        - VectorWidth: [4, 8]
+        - 1LDSBuffer: [0, 1]
+        - StaggerU: [0,32]
+        - PersistentKernel: [0, 1]
+        - PersistentKernelAlongBatch: [False]
+        - PrefetchAcrossPersistent: [0, 1]
+        - GlobalSplitUAlgorithm: ["SingleBuffer", "MultipleBuffer"]
+        - GlobalSplitU: [1, 2, 5]
+        - LocalReadVectorWidth: [8]
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [1024], [1024], [1], [1024] ]
+          - Range: [ [1031], [1031], [16], [1031] ]
+
+    # test cases when each compute loop contains 1 or 2 loopIter
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - EdgeType: ["ShiftPtr"]
+      ForkParameters:
+        - TransposeLDS: [1]
+        - MatrixInstruction:
+          - [32, 32, 8, 1, 1, 1, 1, 2, 2]  # 64x64
+        - PrefetchLocalRead: [1,2]
+        - PrefetchGlobalRead: [1]
+        - ThreadTile:
+          - [ 1, 32 ] # param ignored since 9-tuple MI format
+        - WorkGroup:
+          - [ 16, 16, 1 ] # param ignored since 9-tuple MI format
+        - DepthU: [64]
+        - InnerUnroll: [2,4]
+        - DepthULdsDivisor: [2]
+        - ScheduleIterAlg: [3]
+        - GlobalReadVectorWidth: [4]
+        - LocalReadVectorWidth: [4]
+        - 1LDSBuffer: [0,1]
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [1280], [1280], [1], [2560] ]
+
+    # test cases for a regression case in scheduler due to recent refactor
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - EdgeType: ["ShiftPtr"]
+      ForkParameters:
+        - TransposeLDS: [1]
+        - MatrixInstruction:
+          - [32, 32, 8, 1, 1, 1, 1, 2, 2]  # 64x64
+        - PrefetchLocalRead: [5]
+        - PrefetchGlobalRead: [2]
+        - ThreadTile:
+          - [ 1, 32 ] # param ignored since 9-tuple MI format
+        - WorkGroup:
+          - [ 16, 16, 1 ] # param ignored since 9-tuple MI format
+        - DepthU: [32]
+        - DepthULdsDivisor: [1]
+        - ScheduleIterAlg: [3]
+        - GlobalReadVectorWidth: [4]
+        - LocalReadVectorWidth: [8]
+        - 1LDSBuffer: [0,1]
+        - StaggerU: [0,16]
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [128], [128], [1], [256] ]
+
+    # test case for one LDS buffer  + SplitLDS
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - EdgeType: ["ShiftPtr"]
+      ForkParameters:
+        - TransposeLDS: [1]
+        - MatrixInstruction:
+          - [32, 32, 8, 1, 1, 1, 3, 4, 1]  # 128x96
+        - PrefetchLocalRead: [5]
+        - PrefetchGlobalRead: [1]
+        - ThreadTile:
+          - [ 1, 32 ] # param ignored since 9-tuple MI format
+        - WorkGroup:
+          - [ 16, 16, 1 ] # param ignored since 9-tuple MI format
+        - DepthU: [64]
+        - DepthULdsDivisor: [2]
+        - ScheduleIterAlg: [3]
+        - GlobalReadVectorWidth: [8]
+        - LocalReadVectorWidth: [8]
+        - 1LDSBuffer: [1]
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [128], [128], [1], [256] ]

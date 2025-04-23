@@ -1,0 +1,84 @@
+GlobalParameters:
+  MinimumRequiredVersion: 4.0.0
+  PrintLevel: 1
+  ForceRedoBenchmarkProblems: True
+  ForceRedoLibraryLogic: True
+  ForceRedoLibraryClient: True
+  CMakeBuildType: Release
+  EnqueuesPerSync: 1
+  SyncsPerBenchmark: 1
+  LibraryPrintDebug: False
+  NumElementsToValidate: 1000
+  ValidationMaxToPrint: 10
+  ValidationPrintValids: False
+  ShortNames: False
+  MergeFiles: True
+  Platform: 0
+  Device: 0
+  KernelTime: True
+  PinClocks: False
+  SleepPercent: 200
+  DataInitTypeAlpha : 1
+  DataInitTypeA : 3
+  DataInitTypeB : 3
+  PrintSolutionRejectionReason : 0
+
+BenchmarkProblems:
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      DestDataType: s
+      TransposeA: True
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+  ########################################
+  # NN - Batch
+  ########################################
+    - # Benchmark Group - ResNet 1x1:
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - EdgeType: ["ShiftPtr"]
+        - KernelLanguage: ["Assembly"]
+
+      ForkParameters:
+        - FractionalLoad: [1]
+        - PrefetchGlobalRead: [0,1]
+        - PrefetchLocalRead: [1]
+        - ThreadTile:
+          - [ 3, 3 ]
+          - [ 4, 5 ]
+          - [ 4, 7 ]
+          - [ 8, 6 ]
+          - [ 8, 8 ]
+        - WorkGroup:
+          - [ 32, 8, 1 ]
+          - [ 8, 16, 1 ]
+            #- [ 16, 16, 1 ]
+        - WorkGroupMapping: [64]
+          #  - DepthU: [3,5,7,9,16] # some bugs with odd unroll dims
+        - DepthU: [4,6,8,10,16]
+        - VectorWidth: [1,2]
+        - GlobalReadVectorWidth: [1,2,4]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+            #- Range: [ [127,1,127], 0, [1], [64,1,64] ]
+             - Range: [ [240,1,270], 0, [1], [64,1,64] ] # every 4th breaks
+             - Range: [ [256,1,256], 0, [1], [50,1,70] ] # every 4th breaks
+             - Exact: [ 49,  512, 64, 2048 ]
+             - Exact: [ 49,  512, 64, 16 ]
+
+            #Cijk_Ailk_Bljk_HB_MT128x128x16_GRVW08_K1_LPB02_PGR0_TT08_08_VW08_WG16_16_01
+            #
+#Cijk_Ailk_Bljk_SB_MT032x128x24_DTL0_GRVW04_LPB02_PBC0_PGR1_PLR0_TT04_08_USFGRO00_VW04_WG08_16_01_WGM08
+#Cijk_Ailk_Bljk_SB_MT064x064x08_DTL0_GRVW04_LPB00_PBC0_PGR0_PLR1_TT04_04_USFGRO00_VW02_WG16_16_01_WGM08
+#Cijk_Ailk_Bljk_SB_MT256x048x16_DTL0_GRVW04_K1_LPB02_PBC0_PGR1_PLR1_TT08_06_USFGRO00_VW02_WG32_08_01_WGM64'
+#Problem[0/31]: 49, 512, 64, 2048
+#
+
+

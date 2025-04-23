@@ -1,0 +1,64 @@
+GlobalParameters:
+  MinimumRequiredVersion: 4.0.0
+  PrintLevel: 1
+  ForceRedoBenchmarkProblems: True
+  ForceRedoLibraryLogic: True
+  ForceRedoLibraryClient: True
+  CMakeBuildType: Release
+  EnqueuesPerSync: 1
+  SyncsPerBenchmark: 1
+  LibraryPrintDebug: True
+  NumElementsToValidate: 1000
+  ValidationMaxToPrint: 100
+  ValidationPrintValids: False
+  ShortNames: False
+  MergeFiles: True
+  Platform: 0
+  Device: 0
+  KernelTime: True
+  PinClocks: False
+  SleepPercent: 0
+  PrintSolutionRejectionReason : 1
+
+BenchmarkProblems:
+  ########################################
+  # NT - standard
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: d
+      DestDataType: d
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: False
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - EdgeType: ["ShiftPtr"]
+      ForkParameters:
+        - CheckDimOverflow: [0, 1, 2]
+        - PrefetchLocalRead: [False]
+        - PrefetchGlobalRead: [False]
+        - ThreadTile:
+          - [ 4, 4 ]
+        - WorkGroup:
+          - [ 16, 16, 1 ]
+        - WorkGroupMapping: [64]
+        - GlobalSplitU: [1]
+        - DepthU: [ 4 ]
+        - VectorWidth: [2]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - MinStride: [1296, 24296, 31296]
+          - Exact: [804, 20732, 184]
+
+  ########################################
+
+# Cijk_Ailk_Bljk_DB_MT064x064x04_AF0EM01_ASEM01_BL1_GRVW02_GSU01_ISA900_K1_KLA_LPB00_MGWVW01_NLCA01_NLCB01_PBC1_PGR1_PLR1_TT04_04_USFGRO00_VAW01_VW02_WG16_16_01_WGM08
+# ./rocblas-bench -f gemm -r d -m 11804 -n 25732 -k 384 --lda 31296 --ldb 31296 --ldc 31296    --transposeB N --transposeA N  -v 1
+

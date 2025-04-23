@@ -1,0 +1,255 @@
+GlobalParameters:
+  MinimumRequiredVersion: 4.4.0
+  PrintLevel: 1
+  ForceRedoBenchmarkProblems: True
+  ForceRedoLibraryLogic: True
+  ForceRedoLibraryClient: True
+  CMakeBuildType: Release
+  EnqueuesPerSync: 1
+  SyncsPerBenchmark: 1
+  NumElementsToValidate: 0
+  ValidationMaxToPrint: 4
+  ValidationPrintValids: False
+  Platform: 0
+  Device: 0
+  KernelTime: True
+  PinClocks: True
+  SleepPercent: 200
+  DataInitTypeBeta : 0
+
+BenchmarkProblems:
+
+  ########################################
+  ########################################
+  ###
+  ###   TT
+  ###
+  ########################################
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: 4xi8
+      DestDataType: I
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+  ########################################
+  # TT - Small or Skinny
+  ########################################
+    - # Benchmark Group
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - EdgeType: ["ShiftPtr"]
+        - LoopTail: [True]
+        - KernelLanguage: ["Source"]
+        - PrefetchGlobalRead: [True]
+        - PrefetchLocalRead: [True]
+      ForkParameters:
+        - ThreadTile:
+          - [ 2, 2 ]
+          - [ 2, 4 ]
+          - [ 4, 4 ]
+          - [ 4, 8 ]
+          - [ 8, 8 ]
+        - WorkGroup:
+          - [ 32, 4, 1 ]
+          - [ 8, 8, 1 ]
+          - [ 16, 16, 1 ]
+          - [ 16, 8, 1 ]
+          - [ 8, 16, 1 ]
+        - WorkGroupMapping: [1, 4]
+        - GlobalSplitU: [1]
+        - DepthU: [ 8 ]
+        - VectorWidth: [-1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [64, 128], [64, 64, 64, 7000], [1], [128] ] # skinny-0, source code for k<=128
+          - Range: [ [64, 64, 64, 7000], [64, 128], [1], [128] ] # skinny-1, source code for k<=128
+          - Range: [ [64, 64, 64, 700], [64, 64, 64, 700], [1], [128] ] # small, source code for k<=128
+
+    - # Benchmark Group
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - EdgeType: ["ShiftPtr"]
+        - LoopTail: [True]
+        - KernelLanguage: ["Assembly"]
+        - PrefetchGlobalRead: [True]
+        - PrefetchLocalRead: [True]
+      ForkParameters:
+        - ThreadTile:
+          - [ 2, 2 ]
+          - [ 2, 4 ]
+          - [ 4, 4 ]
+          - [ 4, 8 ]
+          - [ 8, 8 ]
+        - WorkGroup:
+          - [ 32, 4, 2 ]
+          - [ 4, 8, 4 ]
+          - [ 8, 8, 2 ]
+          - [ 16, 8, 4 ]
+          - [ 8, 16, 2 ]
+        - WorkGroupMapping: [1, 4]
+        - GlobalSplitU: [2, 4, 8]
+        - DepthU: [ 8, 16, 24, 32 ]
+        - VectorWidth: [-1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [64, 128], [64, 64, 64, 7000], [1], [256, 1024, 1024, 4096] ] # skinny-0
+          - Range: [ [64, 64, 64, 7000], [64, 128], [1], [256, 1024, 1024, 4096] ] # skinny-1
+          - Range: [ [64, 64, 64, 700], [64, 64, 64, 700], [1], [256, 1024, 1024, 4096] ] # small
+
+  ########################################
+  # TT - Large
+  ########################################
+    - # Benchmark Group
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - EdgeType: ["ShiftPtr"]
+        - LoopTail: [True]
+        - KernelLanguage: ["Source"]
+        - PrefetchLocalRead: [True]
+        - GlobalSplitU: [1]
+      ForkParameters:
+        - PrefetchGlobalRead: [False, True]
+        - ThreadTile:
+          - [ 4, 4 ]
+          - [ 4, 8 ]
+          - [ 6, 8 ]
+          - [ 8, 4 ]
+          - [ 8, 6 ]
+          - [ 8, 8 ]
+        - WorkGroup:
+          - [ 16, 16, 1 ]
+        - WorkGroupMapping: [1, 4]
+        - DepthU: [ 8 ]
+        - VectorWidth: [-1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [64, 64, 64, 7000], [64, 64, 64, 7000], [1], [128] ] # large, source code for k<=128
+
+    - # Benchmark Group
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - EdgeType: ["ShiftPtr"]
+        - LoopTail: [True]
+        - KernelLanguage: ["Assembly"]
+        - PrefetchLocalRead: [True]
+        - GlobalSplitU: [1]
+      ForkParameters:
+        - PrefetchGlobalRead: [False, True]
+        - ThreadTile:
+          - [ 4, 4 ]
+          - [ 4, 8 ]
+          - [ 6, 8 ]
+          - [ 8, 4 ]
+          - [ 8, 6 ]
+          - [ 8, 8 ]
+        - WorkGroup:
+          - [ 16, 16, 1 ]
+        - WorkGroupMapping: [1, 4]
+        - DepthU: [ 8, 16, 24, 32 ]
+        - VectorWidth: [-1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [64, 64, 64, 7000], [64, 64, 64, 7000], [1], [256, 1024, 1024, 4096] ] # large
+          - Exact: [ 1024, 1024, 1, 1024 ]
+
+  ########################################
+  # TT - VectorWidth Correctness
+  ########################################
+    - # Benchmark Group
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - EdgeType: ["ShiftPtr"]
+        - LoopTail: [True]
+        - KernelLanguage: ["Source"]
+        - PrefetchGlobalRead: [True]
+        - PrefetchLocalRead: [True]
+        - WorkGroupMapping: [1]
+      ForkParameters:
+        - ThreadTile:
+          - [ 2, 2 ]
+          - [ 4, 4 ]
+        - WorkGroup:
+          - [ 8, 8, 1 ]
+        - GlobalSplitU: [1]
+        - DepthU: [ -1 ]
+        - VectorWidth: [-1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [4], [4], [1], [128] ] # corner, source code for k<=128
+          - Range: [ [4], [64, 64, 64, 7000], [1], [128] ] # skinny-0, source code for k<=128
+          - Range: [ [64, 64, 64, 7000], [4], [1], [128] ] # skinny-1, source code for k<=128
+
+    - # Benchmark Group
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - EdgeType: ["ShiftPtr"]
+        - LoopTail: [True]
+        - KernelLanguage: ["Assembly"]
+        - PrefetchGlobalRead: [True]
+        - PrefetchLocalRead: [True]
+        - WorkGroupMapping: [1]
+      ForkParameters:
+        - ThreadTile:
+          - [ 2, 2 ]
+          - [ 4, 4 ]
+        - WorkGroup:
+          - [ 8, 8, 1 ]
+          - [ 8, 8, 2 ]
+          - [ 4, 4, 4 ]
+          - [ 8, 8, 4 ]
+        - GlobalSplitU: [1, 2, 4, 8, 16]
+        - DepthU: [ -1 ]
+        - VectorWidth: [-1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [4], [4], [1], [256, 1024, 1024, 4096] ] # corner
+          - Range: [ [4], [64, 64, 64, 7000], [1], [256, 1024, 1024, 4096] ] # skinny-0
+          - Range: [ [64, 64, 64, 7000], [4], [1], [256, 1024, 1024, 4096] ] # skinny-1
+
+LibraryLogic:
+    ScheduleName: "vega20"
+    DeviceNames: ["Device 66a0", "Device 66a1", "Device 66a7", "Device 66af", "Vega 20"]
+    ArchitectureName: "gfx906"
+
+#   ScheduleName: "vega10"
+#   DeviceNames: ["Device 6863", "Device 6862", "Device 687f", "Device 6860", "Device 6861", "Vega 10 XTX [Radeon Vega Frontier Edition]", "Vega [Radeon RX Vega]",
+#       Vega, Device 6864, Device 686c]
+#   ArchitectureName: "gfx900"
+
+#   ScheduleName: "mi25"
+#   DeviceNames: ["Device 6860"]
+#   ArchitectureName: "gfx900"
+
+#   ScheduleName: "r9nano"
+#   DeviceNames: ["Device 7300"]
+#   ArchitectureName: "gfx803"
+
+#   ScheduleName: "hip"
+#   DeviceNames: ["Device 0000"]
+#   ArchitectureName: "fallback"
+
+LibraryClient:
