@@ -67,7 +67,7 @@
   UseE: false
   UseInitialStridesAB: false
   UseInitialStridesCD: false
-  UseScaleAB: ""
+  UseScaleAB: ''
   UseScaleAlphaVec: 1
 - - 1LDSBuffer: 1
     ActivationAlt: false
@@ -173,7 +173,7 @@
     NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 0
-    NonTemporalD: 0
+    NonTemporalD: 4
     NonTemporalE: 0
     NonTemporalMetadata: 0
     NumElementsPerBatchStore: 0
@@ -259,7 +259,7 @@
       UseE: false
       UseInitialStridesAB: false
       UseInitialStridesCD: false
-      UseScaleAB: ""
+      UseScaleAB: ''
       UseScaleAlphaVec: 1
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -316,7 +316,7 @@
     _staggerStrideShift: 2
 - [2, 3, 0, 1]
 - - - [5120, 4244, 1, 1280, 5120, 5120, 5120, 1280]
-    - [0, 66986.6]
+    - [0, 0.0]
 - null
 - null
 - DeviceEfficiency

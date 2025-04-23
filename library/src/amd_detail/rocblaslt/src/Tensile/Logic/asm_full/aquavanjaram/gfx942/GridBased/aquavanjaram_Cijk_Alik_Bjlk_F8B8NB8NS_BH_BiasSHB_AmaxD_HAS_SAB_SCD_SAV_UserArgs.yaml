@@ -190,7 +190,7 @@
     NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 0
-    NonTemporalD: 0
+    NonTemporalD: 4
     NonTemporalE: 0
     NonTemporalMetadata: 0
     NumElementsPerBatchStore: 0
@@ -329,8 +329,8 @@
     WavefrontSize: 64
     WorkGroup: [16, 4, 1]
     WorkGroupMapping: 8
-    WorkGroupMappingXCC: 1
-    WorkGroupMappingXCCGroup: 0
+    WorkGroupMappingXCC: 8
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 32
@@ -457,7 +457,7 @@
     NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 0
-    NonTemporalD: 0
+    NonTemporalD: 4
     NonTemporalE: 0
     NonTemporalMetadata: 0
     NumElementsPerBatchStore: 0
@@ -596,8 +596,8 @@
     WavefrontSize: 64
     WorkGroup: [16, 4, 1]
     WorkGroupMapping: 8
-    WorkGroupMappingXCC: 1
-    WorkGroupMappingXCCGroup: 0
+    WorkGroupMappingXCC: 8
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 32
@@ -724,7 +724,7 @@
     NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 0
-    NonTemporalD: 0
+    NonTemporalD: 4
     NonTemporalE: 0
     NonTemporalMetadata: 0
     NumElementsPerBatchStore: 0
@@ -863,8 +863,8 @@
     WavefrontSize: 64
     WorkGroup: [16, 4, 1]
     WorkGroupMapping: 8
-    WorkGroupMappingXCC: 1
-    WorkGroupMappingXCCGroup: 0
+    WorkGroupMappingXCC: 8
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 64
@@ -991,7 +991,7 @@
     NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 0
-    NonTemporalD: 0
+    NonTemporalD: 4
     NonTemporalE: 0
     NonTemporalMetadata: 0
     NumElementsPerBatchStore: 0
@@ -1130,8 +1130,8 @@
     WavefrontSize: 64
     WorkGroup: [16, 4, 1]
     WorkGroupMapping: 8
-    WorkGroupMappingXCC: 1
-    WorkGroupMappingXCCGroup: 0
+    WorkGroupMappingXCC: 8
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 64
@@ -1258,7 +1258,7 @@
     NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 0
-    NonTemporalD: 0
+    NonTemporalD: 4
     NonTemporalE: 0
     NonTemporalMetadata: 0
     NumElementsPerBatchStore: 0
@@ -1397,8 +1397,8 @@
     WavefrontSize: 64
     WorkGroup: [16, 4, 1]
     WorkGroupMapping: 8
-    WorkGroupMappingXCC: 1
-    WorkGroupMappingXCCGroup: 0
+    WorkGroupMappingXCC: 8
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 64
@@ -1525,7 +1525,7 @@
     NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 0
-    NonTemporalD: 0
+    NonTemporalD: 4
     NonTemporalE: 0
     NonTemporalMetadata: 0
     NumElementsPerBatchStore: 2
@@ -1664,8 +1664,8 @@
     WavefrontSize: 64
     WorkGroup: [16, 4, 1]
     WorkGroupMapping: 8
-    WorkGroupMappingXCC: 1
-    WorkGroupMappingXCCGroup: 0
+    WorkGroupMappingXCC: 8
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 64
@@ -1792,7 +1792,7 @@
     NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 0
-    NonTemporalD: 0
+    NonTemporalD: 4
     NonTemporalE: 0
     NonTemporalMetadata: 0
     NumElementsPerBatchStore: 2
@@ -1931,8 +1931,8 @@
     WavefrontSize: 64
     WorkGroup: [16, 4, 1]
     WorkGroupMapping: 8
-    WorkGroupMappingXCC: 1
-    WorkGroupMappingXCCGroup: 0
+    WorkGroupMappingXCC: 8
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 64
@@ -1947,25 +1947,25 @@
     _staggerStrideShift: 2
 - [2, 3, 0, 1]
 - - - [128, 1, 1, 128, 128, 128, 128, 1]
-    - [6, 2.22096]
+    - [6, 0.0]
   - - [1, 128, 1, 128, 1, 1, 128, 128]
-    - [1, 2.17367]
+    - [1, 0.0]
   - - [1, 1, 1, 128, 1, 1, 128, 1]
-    - [4, 0.0244625]
+    - [4, 0.0]
   - - [128, 16, 1, 128, 128, 128, 128, 16]
-    - [0, 36.2252]
+    - [0, 0.0]
   - - [16, 128, 1, 128, 16, 16, 128, 128]
-    - [2, 33.4453]
+    - [2, 0.0]
   - - [16, 16, 1, 128, 16, 16, 128, 16]
-    - [3, 6.59117]
+    - [3, 0.0]
   - - [128, 128, 1, 128, 128, 128, 128, 128]
-    - [4, 268.247]
+    - [4, 0.0]
   - - [127, 127, 1, 127, 127, 127, 127, 127]
-    - [4, 255.457]
+    - [4, 0.0]
   - - [129, 129, 1, 129, 129, 129, 129, 129]
-    - [2, 258.047]
+    - [2, 0.0]
   - - [3, 3, 1, 3, 3, 3, 3, 3]
-    - [5, 0.00488025]
+    - [5, 0.0]
 - null
 - null
 - DeviceEfficiency

@@ -70,7 +70,7 @@
   UseE: false
   UseInitialStridesAB: false
   UseInitialStridesCD: false
-  UseScaleAB: "Scalar"
+  UseScaleAB: Scalar
   UseScaleAlphaVec: 1
   UseScaleCD: true
 - - 1LDSBuffer: 0
@@ -179,7 +179,7 @@
     NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 0
-    NonTemporalD: 0
+    NonTemporalD: 4
     NonTemporalE: 0
     NonTemporalMetadata: 0
     NumElementsPerBatchStore: 0
@@ -269,7 +269,7 @@
       UseE: false
       UseInitialStridesAB: false
       UseInitialStridesCD: false
-      UseScaleAB: "Scalar"
+      UseScaleAB: Scalar
       UseScaleAlphaVec: 1
       UseScaleCD: true
     ScheduleGlobalRead: 1
@@ -431,7 +431,7 @@
     NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 0
-    NonTemporalD: 0
+    NonTemporalD: 4
     NonTemporalE: 0
     NonTemporalMetadata: 0
     NumElementsPerBatchStore: 0
@@ -521,7 +521,7 @@
       UseE: false
       UseInitialStridesAB: false
       UseInitialStridesCD: false
-      UseScaleAB: "Scalar"
+      UseScaleAB: Scalar
       UseScaleAlphaVec: 1
       UseScaleCD: true
     ScheduleGlobalRead: 1
@@ -683,7 +683,7 @@
     NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 0
-    NonTemporalD: 0
+    NonTemporalD: 4
     NonTemporalE: 0
     NonTemporalMetadata: 0
     NumElementsPerBatchStore: 0
@@ -773,7 +773,7 @@
       UseE: false
       UseInitialStridesAB: false
       UseInitialStridesCD: false
-      UseScaleAB: "Scalar"
+      UseScaleAB: Scalar
       UseScaleAlphaVec: 1
       UseScaleCD: true
     ScheduleGlobalRead: 1
@@ -935,7 +935,7 @@
     NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 0
-    NonTemporalD: 0
+    NonTemporalD: 4
     NonTemporalE: 0
     NonTemporalMetadata: 0
     NumElementsPerBatchStore: 0
@@ -1025,7 +1025,7 @@
       UseE: false
       UseInitialStridesAB: false
       UseInitialStridesCD: false
-      UseScaleAB: "Scalar"
+      UseScaleAB: Scalar
       UseScaleAlphaVec: 1
       UseScaleCD: true
     ScheduleGlobalRead: 1
@@ -1083,17 +1083,17 @@
     _staggerStrideShift: 2
 - [2, 3, 0, 1]
 - - - [128, 1, 1, 640, 128, 128, 640, 1]
-    - [2, 2.3246]
+    - [2, 0.0]
   - - [1, 128, 1, 640, 1, 1, 640, 128]
-    - [3, 3.15806]
+    - [3, 0.0]
   - - [1, 1, 1, 640, 1, 1, 640, 1]
-    - [0, 0.0188565]
+    - [0, 0.0]
   - - [128, 128, 1, 640, 128, 128, 640, 128]
-    - [1, 420.777]
+    - [1, 0.0]
   - - [127, 127, 1, 640, 127, 127, 640, 127]
-    - [1, 406.72]
+    - [1, 0.0]
   - - [129, 129, 1, 640, 129, 129, 640, 129]
-    - [1, 400.385]
+    - [1, 0.0]
 - null
 - null
 - DeviceEfficiency

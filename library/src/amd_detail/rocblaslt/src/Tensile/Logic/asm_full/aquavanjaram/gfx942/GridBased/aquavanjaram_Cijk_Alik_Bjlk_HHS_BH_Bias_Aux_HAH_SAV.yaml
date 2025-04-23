@@ -156,7 +156,7 @@
     NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 0
-    NonTemporalD: 0
+    NonTemporalD: 4
     NonTemporalE: 0
     NumElementsPerBatchStore: 2
     NumElementsPerThread: 128
@@ -378,7 +378,7 @@
     NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 0
-    NonTemporalD: 0
+    NonTemporalD: 4
     NonTemporalE: 0
     NumElementsPerBatchStore: 2
     NumElementsPerThread: 128
@@ -600,7 +600,7 @@
     NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 0
-    NonTemporalD: 0
+    NonTemporalD: 4
     NonTemporalE: 0
     NumElementsPerBatchStore: 2
     NumElementsPerThread: 128
@@ -729,13 +729,13 @@
     allowLRVWforTLUandMI: false
 - [2, 3, 0, 1]
 - - - [4607, 1335, 1, 320, 4607, 4607, 320, 1335]
-    - [1, 20381.2]
+    - [1, 0.0]
   - - [4608, 1335, 1, 320, 4608, 4608, 320, 1335]
-    - [0, 27784.6]
+    - [0, 0.0]
   - - [4608, 1408, 1, 320, 4608, 4608, 320, 1408]
-    - [0, 30258.4]
+    - [0, 0.0]
   - - [128, 128, 1, 320, 128, 128, 320, 128]
-    - [2, 149.626]
+    - [2, 0.0]
 - null
 - null
 - DeviceEfficiency

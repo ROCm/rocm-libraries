@@ -187,7 +187,7 @@
     NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 0
-    NonTemporalD: 0
+    NonTemporalD: 4
     NonTemporalE: 0
     NonTemporalMetadata: 0
     NumElementsPerBatchStore: 16
@@ -324,8 +324,8 @@
     WavefrontSize: 64
     WorkGroup: [16, 4, 1]
     WorkGroupMapping: 8
-    WorkGroupMappingXCC: 1
-    WorkGroupMappingXCCGroup: 0
+    WorkGroupMappingXCC: 8
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 32
@@ -451,7 +451,7 @@
     NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 0
-    NonTemporalD: 0
+    NonTemporalD: 4
     NonTemporalE: 0
     NonTemporalMetadata: 0
     NumElementsPerBatchStore: 16
@@ -588,8 +588,8 @@
     WavefrontSize: 64
     WorkGroup: [32, 4, 1]
     WorkGroupMapping: 8
-    WorkGroupMappingXCC: 1
-    WorkGroupMappingXCCGroup: 0
+    WorkGroupMappingXCC: 8
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 64
@@ -715,7 +715,7 @@
     NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 0
-    NonTemporalD: 0
+    NonTemporalD: 4
     NonTemporalE: 0
     NonTemporalMetadata: 0
     NumElementsPerBatchStore: 16
@@ -852,8 +852,8 @@
     WavefrontSize: 64
     WorkGroup: [64, 4, 1]
     WorkGroupMapping: 8
-    WorkGroupMappingXCC: 1
-    WorkGroupMappingXCCGroup: 0
+    WorkGroupMappingXCC: 8
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 64
@@ -979,7 +979,7 @@
     NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 0
-    NonTemporalD: 0
+    NonTemporalD: 4
     NonTemporalE: 0
     NonTemporalMetadata: 0
     NumElementsPerBatchStore: 16
@@ -1116,8 +1116,8 @@
     WavefrontSize: 64
     WorkGroup: [64, 4, 1]
     WorkGroupMapping: 8
-    WorkGroupMappingXCC: 1
-    WorkGroupMappingXCCGroup: 0
+    WorkGroupMappingXCC: 8
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 64
@@ -1243,7 +1243,7 @@
     NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 0
-    NonTemporalD: 0
+    NonTemporalD: 4
     NonTemporalE: 0
     NonTemporalMetadata: 0
     NumElementsPerBatchStore: 16
@@ -1380,8 +1380,8 @@
     WavefrontSize: 64
     WorkGroup: [64, 4, 1]
     WorkGroupMapping: 8
-    WorkGroupMappingXCC: 1
-    WorkGroupMappingXCCGroup: 0
+    WorkGroupMappingXCC: 8
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 64
@@ -1507,7 +1507,7 @@
     NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 0
-    NonTemporalD: 0
+    NonTemporalD: 4
     NonTemporalE: 0
     NonTemporalMetadata: 0
     NumElementsPerBatchStore: 16
@@ -1644,8 +1644,8 @@
     WavefrontSize: 64
     WorkGroup: [32, 4, 1]
     WorkGroupMapping: 8
-    WorkGroupMappingXCC: 1
-    WorkGroupMappingXCCGroup: 0
+    WorkGroupMappingXCC: 8
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 128
@@ -1771,7 +1771,7 @@
     NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 0
-    NonTemporalD: 0
+    NonTemporalD: 4
     NonTemporalE: 0
     NonTemporalMetadata: 0
     NumElementsPerBatchStore: 16
@@ -1908,8 +1908,8 @@
     WavefrontSize: 64
     WorkGroup: [64, 4, 1]
     WorkGroupMapping: 8
-    WorkGroupMappingXCC: 1
-    WorkGroupMappingXCCGroup: 0
+    WorkGroupMappingXCC: 8
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 128
@@ -2043,7 +2043,7 @@
     NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 0
-    NonTemporalD: 0
+    NonTemporalD: 4
     NonTemporalE: 0
     NonTemporalMetadata: 0
     NonTemporalWS: 0
@@ -2186,8 +2186,8 @@
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 1
-    WorkGroupMappingXCC: 1
-    WorkGroupMappingXCCGroup: 304
+    WorkGroupMappingXCC: 8
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 32
@@ -2464,8 +2464,8 @@
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 1
-    WorkGroupMappingXCC: 1
-    WorkGroupMappingXCCGroup: 304
+    WorkGroupMappingXCC: 8
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 64
@@ -2743,7 +2743,7 @@
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 1
     WorkGroupMappingXCC: 8
-    WorkGroupMappingXCCGroup: 304
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 32
@@ -2877,7 +2877,7 @@
     NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 0
-    NonTemporalD: 0
+    NonTemporalD: 4
     NonTemporalE: 0
     NonTemporalMetadata: 0
     NonTemporalWS: 0
@@ -3021,7 +3021,7 @@
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 1
     WorkGroupMappingXCC: 8
-    WorkGroupMappingXCCGroup: 304
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 64
@@ -3299,7 +3299,7 @@
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 1
     WorkGroupMappingXCC: 8
-    WorkGroupMappingXCCGroup: 304
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 32
@@ -3577,7 +3577,7 @@
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 1
     WorkGroupMappingXCC: 8
-    WorkGroupMappingXCCGroup: 304
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 32
@@ -3711,7 +3711,7 @@
     NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 0
-    NonTemporalD: 0
+    NonTemporalD: 4
     NonTemporalE: 0
     NonTemporalMetadata: 0
     NonTemporalWS: 0
@@ -3855,7 +3855,7 @@
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 1
     WorkGroupMappingXCC: 8
-    WorkGroupMappingXCCGroup: 304
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 32
@@ -3989,7 +3989,7 @@
     NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 0
-    NonTemporalD: 0
+    NonTemporalD: 4
     NonTemporalE: 0
     NonTemporalMetadata: 0
     NonTemporalWS: 0
@@ -4132,8 +4132,8 @@
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 1
-    WorkGroupMappingXCC: 1
-    WorkGroupMappingXCCGroup: 304
+    WorkGroupMappingXCC: 8
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 32
@@ -4410,8 +4410,8 @@
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 1
-    WorkGroupMappingXCC: 1
-    WorkGroupMappingXCCGroup: 304
+    WorkGroupMappingXCC: 8
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 32
@@ -4545,7 +4545,7 @@
     NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 0
-    NonTemporalD: 0
+    NonTemporalD: 4
     NonTemporalE: 0
     NonTemporalMetadata: 0
     NonTemporalWS: 0
@@ -4689,7 +4689,7 @@
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 1
     WorkGroupMappingXCC: 8
-    WorkGroupMappingXCCGroup: 304
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 64
@@ -4967,7 +4967,7 @@
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 1
     WorkGroupMappingXCC: 8
-    WorkGroupMappingXCCGroup: 304
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 32
@@ -5245,7 +5245,7 @@
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 1
     WorkGroupMappingXCC: 8
-    WorkGroupMappingXCCGroup: 304
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 32
@@ -5379,7 +5379,7 @@
     NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 0
-    NonTemporalD: 0
+    NonTemporalD: 4
     NonTemporalE: 0
     NonTemporalMetadata: 0
     NonTemporalWS: 0
@@ -5523,7 +5523,7 @@
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 1
     WorkGroupMappingXCC: 8
-    WorkGroupMappingXCCGroup: 304
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 32
@@ -5657,7 +5657,7 @@
     NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 0
-    NonTemporalD: 0
+    NonTemporalD: 4
     NonTemporalE: 0
     NonTemporalMetadata: 0
     NonTemporalWS: 0
@@ -5801,7 +5801,7 @@
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 1
     WorkGroupMappingXCC: 8
-    WorkGroupMappingXCCGroup: 304
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 32
@@ -6079,7 +6079,7 @@
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 1
     WorkGroupMappingXCC: 8
-    WorkGroupMappingXCCGroup: 304
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 64
@@ -6357,7 +6357,7 @@
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 1
     WorkGroupMappingXCC: 8
-    WorkGroupMappingXCCGroup: 304
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 32
@@ -6491,7 +6491,7 @@
     NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 0
-    NonTemporalD: 0
+    NonTemporalD: 4
     NonTemporalE: 0
     NonTemporalMetadata: 0
     NonTemporalWS: 0
@@ -6635,7 +6635,7 @@
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 1
     WorkGroupMappingXCC: 8
-    WorkGroupMappingXCCGroup: 304
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 32
@@ -6769,7 +6769,7 @@
     NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 0
-    NonTemporalD: 0
+    NonTemporalD: 4
     NonTemporalE: 0
     NonTemporalMetadata: 0
     NonTemporalWS: 0
@@ -6913,7 +6913,7 @@
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 1
     WorkGroupMappingXCC: 8
-    WorkGroupMappingXCCGroup: 304
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 32
@@ -7191,7 +7191,7 @@
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 1
     WorkGroupMappingXCC: 8
-    WorkGroupMappingXCCGroup: 304
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 32
@@ -7469,7 +7469,7 @@
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 1
     WorkGroupMappingXCC: 8
-    WorkGroupMappingXCCGroup: 304
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 32
@@ -7603,7 +7603,7 @@
     NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 0
-    NonTemporalD: 0
+    NonTemporalD: 4
     NonTemporalE: 0
     NonTemporalMetadata: 0
     NonTemporalWS: 0
@@ -7747,7 +7747,7 @@
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 1
     WorkGroupMappingXCC: 8
-    WorkGroupMappingXCCGroup: 304
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 32
@@ -8025,7 +8025,7 @@
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 1
     WorkGroupMappingXCC: 8
-    WorkGroupMappingXCCGroup: 304
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 32
@@ -8159,7 +8159,7 @@
     NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 0
-    NonTemporalD: 0
+    NonTemporalD: 4
     NonTemporalE: 0
     NonTemporalMetadata: 0
     NonTemporalWS: 0
@@ -8303,7 +8303,7 @@
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 1
     WorkGroupMappingXCC: 8
-    WorkGroupMappingXCCGroup: 304
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 32
@@ -8580,8 +8580,8 @@
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 1
-    WorkGroupMappingXCC: 1
-    WorkGroupMappingXCCGroup: 304
+    WorkGroupMappingXCC: 8
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 32
@@ -8859,7 +8859,7 @@
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 1
     WorkGroupMappingXCC: 8
-    WorkGroupMappingXCCGroup: 304
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 32
@@ -8993,7 +8993,7 @@
     NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 0
-    NonTemporalD: 0
+    NonTemporalD: 4
     NonTemporalE: 0
     NonTemporalMetadata: 0
     NonTemporalWS: 0
@@ -9137,7 +9137,7 @@
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 1
     WorkGroupMappingXCC: 8
-    WorkGroupMappingXCCGroup: 304
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 32
@@ -9271,7 +9271,7 @@
     NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 0
-    NonTemporalD: 0
+    NonTemporalD: 4
     NonTemporalE: 0
     NonTemporalMetadata: 0
     NonTemporalWS: 0
@@ -9414,8 +9414,8 @@
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 1
-    WorkGroupMappingXCC: 1
-    WorkGroupMappingXCCGroup: 304
+    WorkGroupMappingXCC: 8
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 32
@@ -9692,8 +9692,8 @@
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 1
-    WorkGroupMappingXCC: 1
-    WorkGroupMappingXCCGroup: 304
+    WorkGroupMappingXCC: 8
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 32
@@ -9971,7 +9971,7 @@
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 1
     WorkGroupMappingXCC: 8
-    WorkGroupMappingXCCGroup: 304
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 32
@@ -10105,7 +10105,7 @@
     NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 0
-    NonTemporalD: 0
+    NonTemporalD: 4
     NonTemporalE: 0
     NonTemporalMetadata: 0
     NonTemporalWS: 0
@@ -10249,7 +10249,7 @@
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 1
     WorkGroupMappingXCC: 8
-    WorkGroupMappingXCCGroup: 304
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 32
@@ -10526,8 +10526,8 @@
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 1
-    WorkGroupMappingXCC: 1
-    WorkGroupMappingXCCGroup: 304
+    WorkGroupMappingXCC: 8
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 64
@@ -10805,7 +10805,7 @@
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 8
     WorkGroupMappingXCC: 8
-    WorkGroupMappingXCCGroup: 304
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 32
@@ -10939,7 +10939,7 @@
     NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 0
-    NonTemporalD: 0
+    NonTemporalD: 4
     NonTemporalE: 0
     NonTemporalMetadata: 0
     NonTemporalWS: 0
@@ -11083,7 +11083,7 @@
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 6
     WorkGroupMappingXCC: 8
-    WorkGroupMappingXCCGroup: 304
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 32
@@ -11217,7 +11217,7 @@
     NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 0
-    NonTemporalD: 0
+    NonTemporalD: 4
     NonTemporalE: 0
     NonTemporalMetadata: 0
     NonTemporalWS: 0
@@ -11360,8 +11360,8 @@
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 1
-    WorkGroupMappingXCC: 1
-    WorkGroupMappingXCCGroup: 304
+    WorkGroupMappingXCC: 8
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 32
@@ -11495,7 +11495,7 @@
     NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 0
-    NonTemporalD: 0
+    NonTemporalD: 4
     NonTemporalE: 0
     NonTemporalMetadata: 0
     NonTemporalWS: 0
@@ -11638,8 +11638,8 @@
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 1
-    WorkGroupMappingXCC: 1
-    WorkGroupMappingXCCGroup: 304
+    WorkGroupMappingXCC: 8
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 32
@@ -11916,8 +11916,8 @@
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
-    WorkGroupMappingXCCGroup: 304
+    WorkGroupMappingXCC: 8
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 32
@@ -12051,7 +12051,7 @@
     NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 0
-    NonTemporalD: 0
+    NonTemporalD: 4
     NonTemporalE: 0
     NonTemporalMetadata: 0
     NonTemporalWS: 0
@@ -12195,7 +12195,7 @@
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 8
     WorkGroupMappingXCC: 8
-    WorkGroupMappingXCCGroup: 304
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 32
@@ -12472,8 +12472,8 @@
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 1
-    WorkGroupMappingXCC: 1
-    WorkGroupMappingXCCGroup: 304
+    WorkGroupMappingXCC: 8
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 64
@@ -12751,7 +12751,7 @@
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 1
     WorkGroupMappingXCC: 8
-    WorkGroupMappingXCCGroup: 304
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 32
@@ -12885,7 +12885,7 @@
     NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 0
-    NonTemporalD: 0
+    NonTemporalD: 4
     NonTemporalE: 0
     NonTemporalMetadata: 0
     NonTemporalWS: 0
@@ -13029,7 +13029,7 @@
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 6
     WorkGroupMappingXCC: 8
-    WorkGroupMappingXCCGroup: 304
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 32
@@ -13163,7 +13163,7 @@
     NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 0
-    NonTemporalD: 0
+    NonTemporalD: 4
     NonTemporalE: 0
     NonTemporalMetadata: 0
     NonTemporalWS: 0
@@ -13307,7 +13307,7 @@
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 8
     WorkGroupMappingXCC: 8
-    WorkGroupMappingXCCGroup: 304
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 32
@@ -13441,7 +13441,7 @@
     NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 0
-    NonTemporalD: 0
+    NonTemporalD: 4
     NonTemporalE: 0
     NonTemporalMetadata: 0
     NonTemporalWS: 0
@@ -13585,7 +13585,7 @@
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 1
     WorkGroupMappingXCC: 8
-    WorkGroupMappingXCCGroup: 304
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 32
@@ -13863,7 +13863,7 @@
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 1
     WorkGroupMappingXCC: 8
-    WorkGroupMappingXCCGroup: 304
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 32
@@ -13997,7 +13997,7 @@
     NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 0
-    NonTemporalD: 0
+    NonTemporalD: 4
     NonTemporalE: 0
     NonTemporalMetadata: 0
     NonTemporalWS: 0
@@ -14140,8 +14140,8 @@
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 1
-    WorkGroupMappingXCC: 1
-    WorkGroupMappingXCCGroup: 304
+    WorkGroupMappingXCC: 8
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 32
@@ -14275,7 +14275,7 @@
     NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 0
-    NonTemporalD: 0
+    NonTemporalD: 4
     NonTemporalE: 0
     NonTemporalMetadata: 0
     NonTemporalWS: 0
@@ -14418,8 +14418,8 @@
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 1
-    WorkGroupMappingXCC: 1
-    WorkGroupMappingXCCGroup: 304
+    WorkGroupMappingXCC: 8
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 32
@@ -14553,7 +14553,7 @@
     NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 0
-    NonTemporalD: 0
+    NonTemporalD: 4
     NonTemporalE: 0
     NonTemporalMetadata: 0
     NonTemporalWS: 0
@@ -14697,7 +14697,7 @@
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 1
     WorkGroupMappingXCC: 8
-    WorkGroupMappingXCCGroup: 304
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 32
@@ -14975,7 +14975,7 @@
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 1
     WorkGroupMappingXCC: 8
-    WorkGroupMappingXCCGroup: 304
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 32
@@ -15109,7 +15109,7 @@
     NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 0
-    NonTemporalD: 0
+    NonTemporalD: 4
     NonTemporalE: 0
     NonTemporalMetadata: 0
     NonTemporalWS: 0
@@ -15252,8 +15252,8 @@
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 8
-    WorkGroupMappingXCC: 1
-    WorkGroupMappingXCCGroup: 304
+    WorkGroupMappingXCC: 8
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 32
@@ -15387,7 +15387,7 @@
     NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 0
-    NonTemporalD: 0
+    NonTemporalD: 4
     NonTemporalE: 0
     NonTemporalMetadata: 0
     NonTemporalWS: 0
@@ -15531,7 +15531,7 @@
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 1
     WorkGroupMappingXCC: 8
-    WorkGroupMappingXCCGroup: 304
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 32
@@ -15808,8 +15808,8 @@
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 1
-    WorkGroupMappingXCC: 1
-    WorkGroupMappingXCCGroup: 304
+    WorkGroupMappingXCC: 8
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 32
@@ -16086,8 +16086,8 @@
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 1
-    WorkGroupMappingXCC: 1
-    WorkGroupMappingXCCGroup: 304
+    WorkGroupMappingXCC: 8
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 32
@@ -16365,7 +16365,7 @@
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 4
     WorkGroupMappingXCC: 8
-    WorkGroupMappingXCCGroup: 304
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 32
@@ -16499,7 +16499,7 @@
     NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 0
-    NonTemporalD: 0
+    NonTemporalD: 4
     NonTemporalE: 0
     NonTemporalMetadata: 0
     NonTemporalWS: 0
@@ -16642,8 +16642,8 @@
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 1
-    WorkGroupMappingXCC: 1
-    WorkGroupMappingXCCGroup: 304
+    WorkGroupMappingXCC: 8
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 32
@@ -16777,7 +16777,7 @@
     NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 0
-    NonTemporalD: 0
+    NonTemporalD: 4
     NonTemporalE: 0
     NonTemporalMetadata: 0
     NonTemporalWS: 0
@@ -16920,8 +16920,8 @@
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 8
-    WorkGroupMappingXCC: 1
-    WorkGroupMappingXCCGroup: 304
+    WorkGroupMappingXCC: 8
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 32
@@ -17055,7 +17055,7 @@
     NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 0
-    NonTemporalD: 0
+    NonTemporalD: 4
     NonTemporalE: 0
     NonTemporalMetadata: 0
     NonTemporalWS: 0
@@ -17199,7 +17199,7 @@
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 1
     WorkGroupMappingXCC: 8
-    WorkGroupMappingXCCGroup: 304
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 32
@@ -17334,7 +17334,7 @@
     NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 0
-    NonTemporalD: 0
+    NonTemporalD: 4
     NonTemporalE: 0
     NonTemporalMetadata: 0
     NonTemporalWS: 0
@@ -17480,7 +17480,7 @@
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 8
     WorkGroupMappingXCC: 8
-    WorkGroupMappingXCCGroup: 304
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 32
@@ -17615,7 +17615,7 @@
     NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 0
-    NonTemporalD: 0
+    NonTemporalD: 4
     NonTemporalE: 0
     NonTemporalMetadata: 0
     NonTemporalWS: 0
@@ -17757,7 +17757,7 @@
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 1
     WorkGroupMappingXCC: 8
-    WorkGroupMappingXCCGroup: 304
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 32
@@ -17892,7 +17892,7 @@
     NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 0
-    NonTemporalD: 0
+    NonTemporalD: 4
     NonTemporalE: 0
     NonTemporalMetadata: 0
     NonTemporalWS: 0
@@ -18034,7 +18034,7 @@
     WorkGroup: [16, 16, 1]
     WorkGroupMapping: 1
     WorkGroupMappingXCC: 8
-    WorkGroupMappingXCCGroup: 304
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 64
@@ -18170,7 +18170,7 @@
     NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 0
-    NonTemporalD: 0
+    NonTemporalD: 4
     NonTemporalE: 0
     NonTemporalMetadata: 0
     NonTemporalWS: 0
@@ -18311,8 +18311,8 @@
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 1
-    WorkGroupMappingXCC: 1
-    WorkGroupMappingXCCGroup: 304
+    WorkGroupMappingXCC: 8
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 32
@@ -18446,7 +18446,7 @@
     NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 0
-    NonTemporalD: 0
+    NonTemporalD: 4
     NonTemporalE: 0
     NonTemporalMetadata: 0
     NonTemporalWS: 0
@@ -18588,7 +18588,7 @@
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 1
     WorkGroupMappingXCC: 8
-    WorkGroupMappingXCCGroup: 304
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 32
@@ -18722,7 +18722,7 @@
     NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 0
-    NonTemporalD: 0
+    NonTemporalD: 4
     NonTemporalE: 0
     NonTemporalMetadata: 0
     NonTemporalWS: 0
@@ -18863,8 +18863,8 @@
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 1
-    WorkGroupMappingXCC: 1
-    WorkGroupMappingXCCGroup: 304
+    WorkGroupMappingXCC: 8
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 32
@@ -18998,7 +18998,7 @@
     NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 0
-    NonTemporalD: 0
+    NonTemporalD: 4
     NonTemporalE: 0
     NonTemporalMetadata: 0
     NonTemporalWS: 0
@@ -19140,7 +19140,7 @@
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 8
     WorkGroupMappingXCC: 8
-    WorkGroupMappingXCCGroup: 304
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 32
@@ -19275,7 +19275,7 @@
     NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 0
-    NonTemporalD: 0
+    NonTemporalD: 4
     NonTemporalE: 0
     NonTemporalMetadata: 0
     NonTemporalWS: 0
@@ -19418,7 +19418,7 @@
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 1
     WorkGroupMappingXCC: 8
-    WorkGroupMappingXCCGroup: 304
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 64
@@ -19554,7 +19554,7 @@
     NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 0
-    NonTemporalD: 0
+    NonTemporalD: 4
     NonTemporalE: 0
     NonTemporalMetadata: 0
     NonTemporalWS: 0
@@ -19696,7 +19696,7 @@
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 1
     WorkGroupMappingXCC: 8
-    WorkGroupMappingXCCGroup: 304
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 32
@@ -19830,7 +19830,7 @@
     NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 0
-    NonTemporalD: 0
+    NonTemporalD: 4
     NonTemporalE: 0
     NonTemporalMetadata: 0
     NonTemporalWS: 0
@@ -19972,7 +19972,7 @@
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 6
     WorkGroupMappingXCC: 8
-    WorkGroupMappingXCCGroup: 304
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 32
@@ -20106,7 +20106,7 @@
     NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 0
-    NonTemporalD: 0
+    NonTemporalD: 4
     NonTemporalE: 0
     NonTemporalMetadata: 0
     NonTemporalWS: 0
@@ -20248,7 +20248,7 @@
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 1
     WorkGroupMappingXCC: 8
-    WorkGroupMappingXCCGroup: 304
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 32
@@ -20382,7 +20382,7 @@
     NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 0
-    NonTemporalD: 0
+    NonTemporalD: 4
     NonTemporalE: 0
     NonTemporalMetadata: 0
     NonTemporalWS: 0
@@ -20523,8 +20523,8 @@
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 1
-    WorkGroupMappingXCC: 1
-    WorkGroupMappingXCCGroup: 304
+    WorkGroupMappingXCC: 8
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 32
@@ -20658,7 +20658,7 @@
     NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 0
-    NonTemporalD: 0
+    NonTemporalD: 4
     NonTemporalE: 0
     NonTemporalMetadata: 0
     NonTemporalWS: 0
@@ -20799,8 +20799,8 @@
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 8
-    WorkGroupMappingXCC: 1
-    WorkGroupMappingXCCGroup: 304
+    WorkGroupMappingXCC: 8
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 32
@@ -20935,7 +20935,7 @@
     NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 0
-    NonTemporalD: 0
+    NonTemporalD: 4
     NonTemporalE: 0
     NonTemporalMetadata: 0
     NonTemporalWS: 0
@@ -21077,7 +21077,7 @@
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 8
     WorkGroupMappingXCC: 8
-    WorkGroupMappingXCCGroup: 304
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 32
@@ -21353,8 +21353,8 @@
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 6
-    WorkGroupMappingXCC: 1
-    WorkGroupMappingXCCGroup: 304
+    WorkGroupMappingXCC: 8
+    WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
     _DepthU: 32
@@ -21369,127 +21369,127 @@
     _staggerStrideShift: 0
 - [2, 3, 0, 1]
 - - - [1024, 1, 1, 256]
-    - [0, 81.9512]
+    - [0, 0.0]
   - - [4096, 1, 1, 256]
-    - [6, 290.293]
+    - [6, 0.0]
   - - [16384, 1, 1, 256]
-    - [6, 1069.21]
+    - [6, 0.0]
   - - [65536, 1, 1, 256]
-    - [3, 2220.6]
+    - [3, 0.0]
   - - [262144, 1, 1, 256]
-    - [2, 2891.53]
+    - [2, 0.0]
   - - [1024, 1, 1, 1024]
-    - [5, 187.547]
+    - [5, 0.0]
   - - [4096, 1, 1, 1024]
-    - [5, 728.137]
+    - [5, 0.0]
   - - [16384, 1, 1, 1024]
-    - [6, 2177.77]
+    - [6, 0.0]
   - - [65536, 1, 1, 1024]
-    - [2, 2970.89]
+    - [2, 0.0]
   - - [262144, 1, 1, 1024]
-    - [2, 3382.82]
+    - [2, 0.0]
   - - [1024, 1, 1, 4096]
-    - [5, 363.399]
+    - [5, 0.0]
   - - [4096, 1, 1, 4096]
-    - [5, 1404.42]
+    - [5, 0.0]
   - - [16384, 1, 1, 4096]
-    - [1, 2248.02]
+    - [1, 0.0]
   - - [65536, 1, 1, 4096]
-    - [3, 3303.42]
+    - [3, 0.0]
   - - [262144, 1, 1, 4096]
-    - [4, 3603.88]
+    - [4, 0.0]
   - - [24, 128, 38, 6]
-    - [7, 0.14]
+    - [7, 0.0]
   - - [32, 256, 38, 52]
-    - [8, 2.53]
+    - [8, 0.0]
   - - [32, 256, 38, 110]
-    - [9, 4.65]
+    - [9, 0.0]
   - - [56, 256, 38, 128]
-    - [10, 10.61]
+    - [10, 0.0]
   - - [56, 256, 38, 52]
-    - [11, 4.21]
+    - [11, 0.0]
   - - [96, 256, 38, 90]
-    - [12, 12.31]
+    - [12, 0.0]
   - - [112, 256, 38, 90]
-    - [13, 13.73]
+    - [13, 0.0]
   - - [24, 128, 76, 6]
-    - [14, 0.27]
+    - [14, 0.0]
   - - [32, 256, 76, 52]
-    - [15, 4.89]
+    - [15, 0.0]
   - - [32, 256, 76, 110]
-    - [9, 8.82]
+    - [9, 0.0]
   - - [56, 256, 76, 128]
-    - [16, 18.13]
+    - [16, 0.0]
   - - [56, 256, 76, 52]
-    - [17, 7.72]
+    - [17, 0.0]
   - - [96, 256, 76, 90]
-    - [18, 20.93]
+    - [18, 0.0]
   - - [112, 256, 76, 90]
-    - [19, 21.24]
+    - [19, 0.0]
   - - [24, 128, 152, 6]
-    - [20, 0.5]
+    - [20, 0.0]
   - - [32, 256, 152, 52]
-    - [11, 9.17]
+    - [11, 0.0]
   - - [32, 256, 152, 110]
-    - [11, 16.14]
+    - [11, 0.0]
   - - [56, 256, 152, 128]
-    - [21, 27.09]
+    - [21, 0.0]
   - - [56, 256, 152, 52]
-    - [22, 12.01]
+    - [22, 0.0]
   - - [96, 256, 152, 90]
-    - [23, 31.12]
+    - [23, 0.0]
   - - [112, 256, 152, 90]
-    - [24, 30.12]
+    - [24, 0.0]
   - - [24, 128, 304, 6]
-    - [15, 0.9]
+    - [15, 0.0]
   - - [32, 256, 304, 52]
-    - [25, 14.65]
+    - [25, 0.0]
   - - [32, 256, 304, 110]
-    - [25, 20.93]
+    - [25, 0.0]
   - - [56, 256, 304, 128]
-    - [26, 30.35]
+    - [26, 0.0]
   - - [56, 256, 304, 52]
-    - [27, 17.0]
+    - [27, 0.0]
   - - [96, 256, 304, 90]
-    - [28, 32.02]
+    - [28, 0.0]
   - - [112, 256, 304, 90]
-    - [29, 26.85]
+    - [29, 0.0]
   - - [24, 128, 608, 6]
-    - [30, 1.5]
+    - [30, 0.0]
   - - [32, 256, 608, 52]
-    - [31, 15.73]
+    - [31, 0.0]
   - - [32, 256, 608, 110]
-    - [32, 21.93]
+    - [32, 0.0]
   - - [56, 256, 608, 128]
-    - [33, 31.38]
+    - [33, 0.0]
   - - [56, 256, 608, 52]
-    - [34, 17.07]
+    - [34, 0.0]
   - - [96, 256, 608, 90]
-    - [35, 37.97]
+    - [35, 0.0]
   - - [112, 256, 608, 90]
-    - [36, 29.99]
+    - [36, 0.0]
   - - [24, 128, 912, 6]
-    - [37, 1.78]
+    - [37, 0.0]
   - - [32, 256, 912, 52]
-    - [38, 15.97]
+    - [38, 0.0]
   - - [32, 256, 912, 110]
-    - [39, 24.51]
+    - [39, 0.0]
   - - [56, 256, 912, 128]
-    - [40, 30.22]
+    - [40, 0.0]
   - - [56, 256, 912, 52]
-    - [41, 16.49]
+    - [41, 0.0]
   - - [96, 256, 912, 90]
-    - [42, 37.54]
+    - [42, 0.0]
   - - [112, 256, 912, 90]
-    - [43, 30.56]
+    - [43, 0.0]
   - - [24, 128, 1287, 6]
-    - [44, 1.69]
+    - [44, 0.0]
   - - [32, 256, 1287, 52]
     - [45, 0.0]
   - - [32, 256, 1287, 110]
     - [46, 0.0]
   - - [56, 256, 1287, 128]
-    - [47, 31.8]
+    - [47, 0.0]
   - - [56, 256, 1287, 52]
     - [48, 0.0]
   - - [96, 256, 1287, 90]
@@ -21497,999 +21497,999 @@
   - - [112, 256, 1287, 90]
     - [62, 0.0]
   - - [24, 128, 1520, 6]
-    - [37, 1.81]
+    - [37, 0.0]
   - - [32, 256, 1520, 52]
-    - [50, 17.15]
+    - [50, 0.0]
   - - [32, 256, 1520, 110]
-    - [51, 24.51]
+    - [51, 0.0]
   - - [56, 256, 1520, 128]
-    - [52, 32.36]
+    - [52, 0.0]
   - - [56, 256, 1520, 52]
-    - [53, 18.22]
+    - [53, 0.0]
   - - [96, 256, 1520, 90]
-    - [54, 37.74]
+    - [54, 0.0]
   - - [112, 256, 1520, 90]
-    - [55, 33.72]
+    - [55, 0.0]
   - - [24, 128, 2048, 6]
-    - [56, 1.81]
+    - [56, 0.0]
   - - [32, 256, 2048, 52]
-    - [57, 18.55]
+    - [57, 0.0]
   - - [32, 256, 2048, 110]
-    - [58, 26.48]
+    - [58, 0.0]
   - - [56, 256, 2048, 128]
-    - [52, 34.6]
+    - [52, 0.0]
   - - [56, 256, 2048, 52]
-    - [59, 18.62]
+    - [59, 0.0]
   - - [96, 256, 2048, 90]
-    - [60, 40.16]
+    - [60, 0.0]
   - - [112, 256, 2048, 90]
-    - [61, 34.71]
+    - [61, 0.0]
   - - [512, 1, 1, 256]
-    - [0, 81.9512]
+    - [0, 0.0]
   - - [512, 1, 1, 1024]
-    - [5, 187.547]
+    - [5, 0.0]
   - - [512, 1, 1, 4096]
-    - [5, 363.399]
+    - [5, 0.0]
   - - [512, 16384, 1, 256]
-    - [0, 81.9512]
+    - [0, 0.0]
   - - [512, 16384, 1, 512]
     - [63, 0.0]
   - - [512, 16384, 1, 1024]
-    - [5, 187.547]
+    - [5, 0.0]
   - - [512, 16384, 1, 4096]
-    - [5, 363.399]
+    - [5, 0.0]
   - - [3, 1, 1, 256]
-    - [0, 81.9512]
+    - [0, 0.0]
   - - [3, 1, 1, 1024]
-    - [5, 187.547]
+    - [5, 0.0]
   - - [3, 1, 1, 4096]
-    - [5, 363.399]
+    - [5, 0.0]
   - - [3, 16384, 1, 256]
-    - [0, 81.9512]
+    - [0, 0.0]
   - - [3, 16384, 1, 512]
     - [63, 0.0]
   - - [3, 16384, 1, 1024]
-    - [5, 187.547]
+    - [5, 0.0]
   - - [3, 16384, 1, 4096]
-    - [5, 363.399]
+    - [5, 0.0]
   - - [3, 80640, 1, 128]
     - [65, 0.0]
   - - [3, 80640, 1, 256]
-    - [0, 81.9512]
+    - [0, 0.0]
   - - [3, 80640, 1, 512]
     - [63, 0.0]
   - - [3, 80640, 1, 1024]
-    - [5, 187.547]
+    - [5, 0.0]
   - - [3, 80640, 1, 4096]
-    - [5, 363.399]
+    - [5, 0.0]
   - - [3, 134400, 1, 128]
     - [73, 0.0]
   - - [3, 134400, 1, 256]
-    - [0, 81.9512]
+    - [0, 0.0]
   - - [3, 134400, 1, 512]
     - [63, 0.0]
   - - [3, 134400, 1, 1024]
-    - [5, 187.547]
+    - [5, 0.0]
   - - [3, 134400, 1, 4096]
-    - [5, 363.399]
+    - [5, 0.0]
   - - [3, 276480, 1, 128]
     - [65, 0.0]
   - - [3, 276480, 1, 256]
-    - [0, 81.9512]
+    - [0, 0.0]
   - - [3, 276480, 1, 512]
     - [63, 0.0]
   - - [3, 276480, 1, 1024]
-    - [5, 187.547]
+    - [5, 0.0]
   - - [3, 276480, 1, 4096]
-    - [5, 363.399]
+    - [5, 0.0]
   - - [3, 288000, 1, 128]
     - [67, 0.0]
   - - [3, 288000, 1, 256]
-    - [0, 81.9512]
+    - [0, 0.0]
   - - [3, 288000, 1, 512]
     - [63, 0.0]
   - - [3, 288000, 1, 1024]
-    - [5, 187.547]
+    - [5, 0.0]
   - - [3, 288000, 1, 4096]
-    - [5, 363.399]
+    - [5, 0.0]
   - - [3, 354816, 1, 128]
     - [67, 0.0]
   - - [3, 354816, 1, 256]
-    - [0, 81.9512]
+    - [0, 0.0]
   - - [3, 354816, 1, 512]
     - [63, 0.0]
   - - [3, 354816, 1, 1024]
-    - [5, 187.547]
+    - [5, 0.0]
   - - [3, 354816, 1, 4096]
-    - [5, 363.399]
+    - [5, 0.0]
   - - [3, 403200, 1, 128]
     - [71, 0.0]
   - - [3, 403200, 1, 256]
-    - [0, 81.9512]
+    - [0, 0.0]
   - - [3, 403200, 1, 512]
     - [63, 0.0]
   - - [3, 403200, 1, 1024]
-    - [5, 187.547]
+    - [5, 0.0]
   - - [3, 403200, 1, 4096]
-    - [5, 363.399]
+    - [5, 0.0]
   - - [3, 460800, 1, 128]
     - [67, 0.0]
   - - [3, 460800, 1, 256]
-    - [0, 81.9512]
+    - [0, 0.0]
   - - [3, 460800, 1, 512]
     - [63, 0.0]
   - - [3, 460800, 1, 1024]
-    - [5, 187.547]
+    - [5, 0.0]
   - - [3, 460800, 1, 4096]
-    - [5, 363.399]
+    - [5, 0.0]
   - - [3, 480000, 1, 128]
     - [67, 0.0]
   - - [3, 480000, 1, 256]
-    - [0, 81.9512]
+    - [0, 0.0]
   - - [3, 480000, 1, 512]
     - [63, 0.0]
   - - [3, 480000, 1, 1024]
-    - [5, 187.547]
+    - [5, 0.0]
   - - [3, 480000, 1, 4096]
-    - [5, 363.399]
+    - [5, 0.0]
   - - [3, 672000, 1, 128]
     - [67, 0.0]
   - - [3, 672000, 1, 256]
-    - [0, 81.9512]
+    - [0, 0.0]
   - - [3, 672000, 1, 512]
     - [63, 0.0]
   - - [3, 672000, 1, 1024]
-    - [5, 187.547]
+    - [5, 0.0]
   - - [3, 672000, 1, 4096]
-    - [5, 363.399]
+    - [5, 0.0]
   - - [3, 1216512, 1, 128]
     - [67, 0.0]
   - - [3, 1216512, 1, 256]
-    - [0, 81.9512]
+    - [0, 0.0]
   - - [3, 1216512, 1, 512]
     - [63, 0.0]
   - - [3, 1216512, 1, 1024]
-    - [5, 187.547]
+    - [5, 0.0]
   - - [3, 1216512, 1, 4096]
-    - [5, 363.399]
+    - [5, 0.0]
   - - [3, 1240000, 1, 128]
     - [65, 0.0]
   - - [3, 1240000, 1, 256]
-    - [0, 81.9512]
+    - [0, 0.0]
   - - [3, 1240000, 1, 512]
     - [63, 0.0]
   - - [3, 1240000, 1, 1024]
-    - [5, 187.547]
+    - [5, 0.0]
   - - [3, 1240000, 1, 4096]
-    - [5, 363.399]
+    - [5, 0.0]
   - - [3, 1267200, 1, 128]
     - [65, 0.0]
   - - [3, 1267200, 1, 256]
-    - [0, 81.9512]
+    - [0, 0.0]
   - - [3, 1267200, 1, 512]
     - [63, 0.0]
   - - [3, 1267200, 1, 1024]
-    - [5, 187.547]
+    - [5, 0.0]
   - - [3, 1267200, 1, 4096]
-    - [5, 363.399]
+    - [5, 0.0]
   - - [3, 1382400, 1, 128]
     - [65, 0.0]
   - - [3, 1382400, 1, 256]
-    - [0, 81.9512]
+    - [0, 0.0]
   - - [3, 1382400, 1, 512]
     - [63, 0.0]
   - - [3, 1382400, 1, 1024]
-    - [5, 187.547]
+    - [5, 0.0]
   - - [3, 1382400, 1, 4096]
-    - [5, 363.399]
+    - [5, 0.0]
   - - [3, 1440000, 1, 128]
     - [65, 0.0]
   - - [3, 1440000, 1, 256]
-    - [0, 81.9512]
+    - [0, 0.0]
   - - [3, 1440000, 1, 512]
     - [63, 0.0]
   - - [3, 1440000, 1, 1024]
-    - [5, 187.547]
+    - [5, 0.0]
   - - [3, 1440000, 1, 4096]
-    - [5, 363.399]
+    - [5, 0.0]
   - - [3, 2112000, 1, 128]
     - [65, 0.0]
   - - [3, 2112000, 1, 256]
-    - [0, 81.9512]
+    - [0, 0.0]
   - - [3, 2112000, 1, 512]
     - [63, 0.0]
   - - [3, 2112000, 1, 1024]
-    - [5, 187.547]
+    - [5, 0.0]
   - - [3, 2112000, 1, 4096]
-    - [5, 363.399]
+    - [5, 0.0]
   - - [3, 2200000, 1, 128]
     - [67, 0.0]
   - - [3, 2200000, 1, 256]
-    - [0, 81.9512]
+    - [0, 0.0]
   - - [3, 2200000, 1, 512]
     - [63, 0.0]
   - - [3, 2200000, 1, 1024]
-    - [5, 187.547]
+    - [5, 0.0]
   - - [3, 2200000, 1, 4096]
-    - [5, 363.399]
+    - [5, 0.0]
   - - [3, 2304000, 1, 128]
     - [72, 0.0]
   - - [3, 2304000, 1, 256]
-    - [0, 81.9512]
+    - [0, 0.0]
   - - [3, 2304000, 1, 512]
     - [63, 0.0]
   - - [3, 2304000, 1, 1024]
-    - [5, 187.547]
+    - [5, 0.0]
   - - [3, 2304000, 1, 4096]
-    - [5, 363.399]
+    - [5, 0.0]
   - - [3, 2400000, 1, 128]
     - [70, 0.0]
   - - [3, 2400000, 1, 256]
-    - [0, 81.9512]
+    - [0, 0.0]
   - - [3, 2400000, 1, 512]
     - [63, 0.0]
   - - [3, 2400000, 1, 1024]
-    - [5, 187.547]
+    - [5, 0.0]
   - - [3, 2400000, 1, 4096]
-    - [5, 363.399]
+    - [5, 0.0]
   - - [512, 20160, 1, 256]
     - [64, 0.0]
   - - [512, 20160, 1, 512]
     - [63, 0.0]
   - - [512, 20160, 1, 1024]
-    - [5, 187.547]
+    - [5, 0.0]
   - - [512, 20160, 1, 4096]
-    - [5, 363.399]
+    - [5, 0.0]
   - - [512, 33600, 1, 256]
     - [64, 0.0]
   - - [512, 33600, 1, 512]
     - [63, 0.0]
   - - [512, 33600, 1, 1024]
-    - [5, 187.547]
+    - [5, 0.0]
   - - [512, 33600, 1, 4096]
-    - [5, 363.399]
+    - [5, 0.0]
   - - [512, 69120, 1, 256]
     - [64, 0.0]
   - - [512, 69120, 1, 512]
     - [63, 0.0]
   - - [512, 69120, 1, 1024]
-    - [5, 187.547]
+    - [5, 0.0]
   - - [512, 69120, 1, 4096]
-    - [5, 363.399]
+    - [5, 0.0]
   - - [512, 72000, 1, 256]
     - [64, 0.0]
   - - [512, 72000, 1, 512]
     - [63, 0.0]
   - - [512, 72000, 1, 1024]
-    - [5, 187.547]
+    - [5, 0.0]
   - - [512, 72000, 1, 4096]
-    - [5, 363.399]
+    - [5, 0.0]
   - - [512, 88704, 1, 256]
     - [64, 0.0]
   - - [512, 88704, 1, 512]
     - [63, 0.0]
   - - [512, 88704, 1, 1024]
-    - [5, 187.547]
+    - [5, 0.0]
   - - [512, 88704, 1, 4096]
-    - [5, 363.399]
+    - [5, 0.0]
   - - [512, 100800, 1, 256]
     - [64, 0.0]
   - - [512, 100800, 1, 512]
     - [63, 0.0]
   - - [512, 100800, 1, 1024]
-    - [5, 187.547]
+    - [5, 0.0]
   - - [512, 100800, 1, 4096]
-    - [5, 363.399]
+    - [5, 0.0]
   - - [512, 115200, 1, 256]
     - [64, 0.0]
   - - [512, 115200, 1, 512]
     - [63, 0.0]
   - - [512, 115200, 1, 1024]
-    - [5, 187.547]
+    - [5, 0.0]
   - - [512, 115200, 1, 4096]
-    - [5, 363.399]
+    - [5, 0.0]
   - - [512, 120000, 1, 256]
     - [64, 0.0]
   - - [512, 120000, 1, 512]
     - [63, 0.0]
   - - [512, 120000, 1, 1024]
-    - [5, 187.547]
+    - [5, 0.0]
   - - [512, 120000, 1, 4096]
-    - [5, 363.399]
+    - [5, 0.0]
   - - [512, 147840, 1, 256]
     - [64, 0.0]
   - - [512, 147840, 1, 512]
     - [63, 0.0]
   - - [512, 147840, 1, 1024]
-    - [5, 187.547]
+    - [5, 0.0]
   - - [512, 147840, 1, 4096]
-    - [5, 363.399]
+    - [5, 0.0]
   - - [512, 168000, 1, 256]
     - [64, 0.0]
   - - [512, 168000, 1, 512]
     - [63, 0.0]
   - - [512, 168000, 1, 1024]
-    - [5, 187.547]
+    - [5, 0.0]
   - - [512, 168000, 1, 4096]
-    - [5, 363.399]
+    - [5, 0.0]
   - - [512, 304128, 1, 256]
     - [66, 0.0]
   - - [512, 304128, 1, 512]
     - [63, 0.0]
   - - [512, 304128, 1, 1024]
-    - [5, 187.547]
+    - [5, 0.0]
   - - [512, 304128, 1, 4096]
-    - [5, 363.399]
+    - [5, 0.0]
   - - [512, 310000, 1, 256]
     - [66, 0.0]
   - - [512, 310000, 1, 512]
     - [63, 0.0]
   - - [512, 310000, 1, 1024]
-    - [5, 187.547]
+    - [5, 0.0]
   - - [512, 310000, 1, 4096]
-    - [5, 363.399]
+    - [5, 0.0]
   - - [512, 316800, 1, 256]
     - [66, 0.0]
   - - [512, 316800, 1, 512]
     - [63, 0.0]
   - - [512, 316800, 1, 1024]
-    - [5, 187.547]
+    - [5, 0.0]
   - - [512, 316800, 1, 4096]
-    - [5, 363.399]
+    - [5, 0.0]
   - - [512, 345600, 1, 256]
     - [66, 0.0]
   - - [512, 345600, 1, 512]
     - [63, 0.0]
   - - [512, 345600, 1, 1024]
-    - [5, 187.547]
+    - [5, 0.0]
   - - [512, 345600, 1, 4096]
-    - [5, 363.399]
+    - [5, 0.0]
   - - [512, 360000, 1, 256]
     - [66, 0.0]
   - - [512, 360000, 1, 512]
     - [63, 0.0]
   - - [512, 360000, 1, 1024]
-    - [5, 187.547]
+    - [5, 0.0]
   - - [512, 360000, 1, 4096]
-    - [5, 363.399]
+    - [5, 0.0]
   - - [512, 528000, 1, 256]
     - [66, 0.0]
   - - [512, 528000, 1, 512]
     - [63, 0.0]
   - - [512, 528000, 1, 1024]
-    - [5, 187.547]
+    - [5, 0.0]
   - - [512, 528000, 1, 4096]
-    - [5, 363.399]
+    - [5, 0.0]
   - - [512, 550000, 1, 256]
     - [68, 0.0]
   - - [512, 550000, 1, 512]
     - [63, 0.0]
   - - [512, 550000, 1, 1024]
-    - [5, 187.547]
+    - [5, 0.0]
   - - [512, 550000, 1, 4096]
-    - [5, 363.399]
+    - [5, 0.0]
   - - [512, 576000, 1, 256]
     - [66, 0.0]
   - - [512, 576000, 1, 512]
     - [63, 0.0]
   - - [512, 576000, 1, 1024]
-    - [5, 187.547]
+    - [5, 0.0]
   - - [512, 576000, 1, 4096]
-    - [5, 363.399]
+    - [5, 0.0]
   - - [512, 600000, 1, 256]
     - [66, 0.0]
   - - [512, 600000, 1, 512]
     - [63, 0.0]
   - - [512, 600000, 1, 1024]
-    - [5, 187.547]
+    - [5, 0.0]
   - - [512, 600000, 1, 4096]
-    - [5, 363.399]
+    - [5, 0.0]
   - - [2048, 1, 1, 256]
-    - [6, 290.293]
+    - [6, 0.0]
   - - [2048, 1, 1, 1024]
-    - [5, 728.137]
+    - [5, 0.0]
   - - [2048, 1, 1, 4096]
-    - [5, 1404.42]
+    - [5, 0.0]
   - - [2048, 2520, 1, 256]
-    - [6, 290.293]
+    - [6, 0.0]
   - - [2048, 2520, 1, 512]
     - [69, 0.0]
   - - [2048, 2520, 1, 1024]
-    - [5, 728.137]
+    - [5, 0.0]
   - - [2048, 2520, 1, 4096]
-    - [5, 1404.42]
+    - [5, 0.0]
   - - [2048, 4200, 1, 256]
-    - [6, 290.293]
+    - [6, 0.0]
   - - [2048, 4200, 1, 512]
     - [69, 0.0]
   - - [2048, 4200, 1, 1024]
-    - [5, 728.137]
+    - [5, 0.0]
   - - [2048, 4200, 1, 4096]
-    - [5, 1404.42]
+    - [5, 0.0]
   - - [2048, 8640, 1, 256]
-    - [6, 290.293]
+    - [6, 0.0]
   - - [2048, 8640, 1, 512]
     - [64, 0.0]
   - - [2048, 8640, 1, 1024]
-    - [5, 728.137]
+    - [5, 0.0]
   - - [2048, 8640, 1, 4096]
-    - [5, 1404.42]
+    - [5, 0.0]
   - - [2048, 9000, 1, 256]
-    - [6, 290.293]
+    - [6, 0.0]
   - - [2048, 9000, 1, 512]
     - [64, 0.0]
   - - [2048, 9000, 1, 1024]
-    - [5, 728.137]
+    - [5, 0.0]
   - - [2048, 9000, 1, 4096]
-    - [5, 1404.42]
+    - [5, 0.0]
   - - [2048, 11088, 1, 256]
-    - [6, 290.293]
+    - [6, 0.0]
   - - [2048, 11088, 1, 512]
     - [64, 0.0]
   - - [2048, 11088, 1, 1024]
-    - [5, 728.137]
+    - [5, 0.0]
   - - [2048, 11088, 1, 4096]
-    - [5, 1404.42]
+    - [5, 0.0]
   - - [2048, 11200, 1, 256]
-    - [6, 290.293]
+    - [6, 0.0]
   - - [2048, 11200, 1, 512]
     - [64, 0.0]
   - - [2048, 11200, 1, 1024]
-    - [5, 728.137]
+    - [5, 0.0]
   - - [2048, 11200, 1, 4096]
-    - [5, 1404.42]
+    - [5, 0.0]
   - - [2048, 12600, 1, 256]
-    - [6, 290.293]
+    - [6, 0.0]
   - - [2048, 12600, 1, 512]
     - [64, 0.0]
   - - [2048, 12600, 1, 1024]
-    - [5, 728.137]
+    - [5, 0.0]
   - - [2048, 12600, 1, 4096]
-    - [5, 1404.42]
+    - [5, 0.0]
   - - [2048, 14400, 1, 256]
-    - [6, 290.293]
+    - [6, 0.0]
   - - [2048, 14400, 1, 512]
     - [64, 0.0]
   - - [2048, 14400, 1, 1024]
-    - [5, 728.137]
+    - [5, 0.0]
   - - [2048, 14400, 1, 4096]
-    - [5, 1404.42]
+    - [5, 0.0]
   - - [2048, 15000, 1, 256]
-    - [6, 290.293]
+    - [6, 0.0]
   - - [2048, 15000, 1, 512]
     - [64, 0.0]
   - - [2048, 15000, 1, 1024]
-    - [5, 728.137]
+    - [5, 0.0]
   - - [2048, 15000, 1, 4096]
-    - [5, 1404.42]
+    - [5, 0.0]
   - - [2048, 18480, 1, 256]
-    - [6, 290.293]
+    - [6, 0.0]
   - - [2048, 18480, 1, 512]
     - [64, 0.0]
   - - [2048, 18480, 1, 1024]
-    - [5, 728.137]
+    - [5, 0.0]
   - - [2048, 18480, 1, 4096]
-    - [5, 1404.42]
+    - [5, 0.0]
   - - [2048, 21000, 1, 256]
-    - [6, 290.293]
+    - [6, 0.0]
   - - [2048, 21000, 1, 512]
     - [64, 0.0]
   - - [2048, 21000, 1, 1024]
-    - [5, 728.137]
+    - [5, 0.0]
   - - [2048, 21000, 1, 4096]
-    - [5, 1404.42]
+    - [5, 0.0]
   - - [2048, 38016, 1, 256]
-    - [6, 290.293]
+    - [6, 0.0]
   - - [2048, 38016, 1, 512]
     - [64, 0.0]
   - - [2048, 38016, 1, 1024]
-    - [5, 728.137]
+    - [5, 0.0]
   - - [2048, 38016, 1, 4096]
-    - [5, 1404.42]
+    - [5, 0.0]
   - - [2048, 39600, 1, 256]
-    - [6, 290.293]
+    - [6, 0.0]
   - - [2048, 39600, 1, 512]
     - [64, 0.0]
   - - [2048, 39600, 1, 1024]
-    - [5, 728.137]
+    - [5, 0.0]
   - - [2048, 39600, 1, 4096]
-    - [5, 1404.42]
+    - [5, 0.0]
   - - [2048, 40000, 1, 256]
-    - [6, 290.293]
+    - [6, 0.0]
   - - [2048, 40000, 1, 512]
     - [64, 0.0]
   - - [2048, 40000, 1, 1024]
-    - [5, 728.137]
+    - [5, 0.0]
   - - [2048, 40000, 1, 4096]
-    - [5, 1404.42]
+    - [5, 0.0]
   - - [2048, 43200, 1, 256]
-    - [6, 290.293]
+    - [6, 0.0]
   - - [2048, 43200, 1, 512]
     - [64, 0.0]
   - - [2048, 43200, 1, 1024]
-    - [5, 728.137]
+    - [5, 0.0]
   - - [2048, 43200, 1, 4096]
-    - [5, 1404.42]
+    - [5, 0.0]
   - - [2048, 45000, 1, 256]
-    - [6, 290.293]
+    - [6, 0.0]
   - - [2048, 45000, 1, 512]
     - [64, 0.0]
   - - [2048, 45000, 1, 1024]
-    - [5, 728.137]
+    - [5, 0.0]
   - - [2048, 45000, 1, 4096]
-    - [5, 1404.42]
+    - [5, 0.0]
   - - [2048, 66000, 1, 256]
-    - [6, 290.293]
+    - [6, 0.0]
   - - [2048, 66000, 1, 512]
     - [64, 0.0]
   - - [2048, 66000, 1, 1024]
-    - [5, 728.137]
+    - [5, 0.0]
   - - [2048, 66000, 1, 4096]
-    - [5, 1404.42]
+    - [5, 0.0]
   - - [2048, 67200, 1, 256]
-    - [6, 290.293]
+    - [6, 0.0]
   - - [2048, 67200, 1, 512]
     - [64, 0.0]
   - - [2048, 67200, 1, 1024]
-    - [5, 728.137]
+    - [5, 0.0]
   - - [2048, 67200, 1, 4096]
-    - [5, 1404.42]
+    - [5, 0.0]
   - - [2048, 70000, 1, 256]
-    - [6, 290.293]
+    - [6, 0.0]
   - - [2048, 70000, 1, 512]
     - [64, 0.0]
   - - [2048, 70000, 1, 1024]
-    - [5, 728.137]
+    - [5, 0.0]
   - - [2048, 70000, 1, 4096]
-    - [5, 1404.42]
+    - [5, 0.0]
   - - [2048, 72000, 1, 256]
-    - [6, 290.293]
+    - [6, 0.0]
   - - [2048, 72000, 1, 512]
     - [64, 0.0]
   - - [2048, 72000, 1, 1024]
-    - [5, 728.137]
+    - [5, 0.0]
   - - [2048, 72000, 1, 4096]
-    - [5, 1404.42]
+    - [5, 0.0]
   - - [2048, 75000, 1, 256]
-    - [6, 290.293]
+    - [6, 0.0]
   - - [2048, 75000, 1, 512]
     - [64, 0.0]
   - - [2048, 75000, 1, 1024]
-    - [5, 728.137]
+    - [5, 0.0]
   - - [2048, 75000, 1, 4096]
-    - [5, 1404.42]
+    - [5, 0.0]
   - - [6144, 1, 1, 256]
-    - [6, 1069.21]
+    - [6, 0.0]
   - - [6144, 1, 1, 1024]
-    - [6, 2177.77]
+    - [6, 0.0]
   - - [6144, 1, 1, 4096]
-    - [1, 2248.02]
+    - [1, 0.0]
   - - [6144, 210, 1, 256]
-    - [6, 1069.21]
+    - [6, 0.0]
   - - [6144, 210, 1, 768]
     - [64, 0.0]
   - - [6144, 210, 1, 1024]
-    - [6, 2177.77]
+    - [6, 0.0]
   - - [6144, 210, 1, 4096]
-    - [1, 2248.02]
+    - [1, 0.0]
   - - [6144, 720, 1, 256]
-    - [6, 1069.21]
+    - [6, 0.0]
   - - [6144, 720, 1, 768]
     - [64, 0.0]
   - - [6144, 720, 1, 1024]
-    - [6, 2177.77]
+    - [6, 0.0]
   - - [6144, 720, 1, 4096]
-    - [1, 2248.02]
+    - [1, 0.0]
   - - [6144, 750, 1, 256]
-    - [6, 1069.21]
+    - [6, 0.0]
   - - [6144, 750, 1, 768]
     - [64, 0.0]
   - - [6144, 750, 1, 1024]
-    - [6, 2177.77]
+    - [6, 0.0]
   - - [6144, 750, 1, 4096]
-    - [1, 2248.02]
+    - [1, 0.0]
   - - [6144, 924, 1, 256]
-    - [6, 1069.21]
+    - [6, 0.0]
   - - [6144, 924, 1, 768]
     - [69, 0.0]
   - - [6144, 924, 1, 1024]
-    - [6, 2177.77]
+    - [6, 0.0]
   - - [6144, 924, 1, 4096]
-    - [1, 2248.02]
+    - [1, 0.0]
   - - [6144, 1050, 1, 256]
-    - [6, 1069.21]
+    - [6, 0.0]
   - - [6144, 1050, 1, 768]
     - [69, 0.0]
   - - [6144, 1050, 1, 1024]
-    - [6, 2177.77]
+    - [6, 0.0]
   - - [6144, 1050, 1, 4096]
-    - [1, 2248.02]
+    - [1, 0.0]
   - - [6144, 1250, 1, 256]
-    - [6, 1069.21]
+    - [6, 0.0]
   - - [6144, 1250, 1, 768]
     - [69, 0.0]
   - - [6144, 1250, 1, 1024]
-    - [6, 2177.77]
+    - [6, 0.0]
   - - [6144, 1250, 1, 4096]
-    - [1, 2248.02]
+    - [1, 0.0]
   - - [6144, 1750, 1, 256]
-    - [6, 1069.21]
+    - [6, 0.0]
   - - [6144, 1750, 1, 768]
     - [64, 0.0]
   - - [6144, 1750, 1, 1024]
-    - [6, 2177.77]
+    - [6, 0.0]
   - - [6144, 1750, 1, 4096]
-    - [1, 2248.02]
+    - [1, 0.0]
   - - [6144, 3168, 1, 256]
-    - [6, 1069.21]
+    - [6, 0.0]
   - - [6144, 3168, 1, 768]
     - [64, 0.0]
   - - [6144, 3168, 1, 1024]
-    - [6, 2177.77]
+    - [6, 0.0]
   - - [6144, 3168, 1, 4096]
-    - [1, 2248.02]
+    - [1, 0.0]
   - - [6144, 3300, 1, 256]
-    - [6, 1069.21]
+    - [6, 0.0]
   - - [6144, 3300, 1, 768]
     - [64, 0.0]
   - - [6144, 3300, 1, 1024]
-    - [6, 2177.77]
+    - [6, 0.0]
   - - [6144, 3300, 1, 4096]
-    - [1, 2248.02]
+    - [1, 0.0]
   - - [6144, 3600, 1, 256]
-    - [6, 1069.21]
+    - [6, 0.0]
   - - [6144, 3600, 1, 768]
     - [64, 0.0]
   - - [6144, 3600, 1, 1024]
-    - [6, 2177.77]
+    - [6, 0.0]
   - - [6144, 3600, 1, 4096]
-    - [1, 2248.02]
+    - [1, 0.0]
   - - [6144, 3750, 1, 256]
-    - [6, 1069.21]
+    - [6, 0.0]
   - - [6144, 3750, 1, 768]
     - [64, 0.0]
   - - [6144, 3750, 1, 1024]
-    - [6, 2177.77]
+    - [6, 0.0]
   - - [6144, 3750, 1, 4096]
-    - [1, 2248.02]
+    - [1, 0.0]
   - - [6144, 5500, 1, 256]
-    - [6, 1069.21]
+    - [6, 0.0]
   - - [6144, 5500, 1, 768]
     - [64, 0.0]
   - - [6144, 5500, 1, 1024]
-    - [6, 2177.77]
+    - [6, 0.0]
   - - [6144, 5500, 1, 4096]
-    - [1, 2248.02]
+    - [1, 0.0]
   - - [6144, 6000, 1, 256]
-    - [6, 1069.21]
+    - [6, 0.0]
   - - [6144, 6000, 1, 768]
     - [64, 0.0]
   - - [6144, 6000, 1, 1024]
-    - [6, 2177.77]
+    - [6, 0.0]
   - - [6144, 6000, 1, 4096]
-    - [1, 2248.02]
+    - [1, 0.0]
   - - [6144, 6250, 1, 256]
-    - [6, 1069.21]
+    - [6, 0.0]
   - - [6144, 6250, 1, 768]
     - [64, 0.0]
   - - [6144, 6250, 1, 1024]
-    - [6, 2177.77]
+    - [6, 0.0]
   - - [6144, 6250, 1, 4096]
-    - [1, 2248.02]
+    - [1, 0.0]
   - - [384, 1, 1, 256]
-    - [0, 81.9512]
+    - [0, 0.0]
   - - [384, 1, 1, 1024]
-    - [5, 187.547]
+    - [5, 0.0]
   - - [384, 1, 1, 4096]
-    - [5, 363.399]
+    - [5, 0.0]
   - - [384, 16384, 1, 256]
-    - [0, 81.9512]
+    - [0, 0.0]
   - - [384, 16384, 1, 512]
     - [63, 0.0]
   - - [384, 16384, 1, 1024]
-    - [5, 187.547]
+    - [5, 0.0]
   - - [384, 16384, 1, 4096]
-    - [5, 363.399]
+    - [5, 0.0]
   - - [384, 20160, 1, 256]
     - [64, 0.0]
   - - [384, 20160, 1, 512]
     - [63, 0.0]
   - - [384, 20160, 1, 1024]
-    - [5, 187.547]
+    - [5, 0.0]
   - - [384, 20160, 1, 4096]
-    - [5, 363.399]
+    - [5, 0.0]
   - - [384, 33600, 1, 256]
     - [64, 0.0]
   - - [384, 33600, 1, 512]
     - [63, 0.0]
   - - [384, 33600, 1, 1024]
-    - [5, 187.547]
+    - [5, 0.0]
   - - [384, 33600, 1, 4096]
-    - [5, 363.399]
+    - [5, 0.0]
   - - [384, 34680, 1, 256]
     - [64, 0.0]
   - - [384, 34680, 1, 512]
     - [63, 0.0]
   - - [384, 34680, 1, 1024]
-    - [5, 187.547]
+    - [5, 0.0]
   - - [384, 34680, 1, 3072]
     - [64, 0.0]
   - - [384, 34680, 1, 4096]
-    - [5, 363.399]
+    - [5, 0.0]
   - - [384, 69120, 1, 256]
     - [64, 0.0]
   - - [384, 69120, 1, 512]
     - [63, 0.0]
   - - [384, 69120, 1, 1024]
-    - [5, 187.547]
+    - [5, 0.0]
   - - [384, 69120, 1, 4096]
-    - [5, 363.399]
+    - [5, 0.0]
   - - [384, 72000, 1, 256]
     - [64, 0.0]
   - - [384, 72000, 1, 512]
     - [63, 0.0]
   - - [384, 72000, 1, 1024]
-    - [5, 187.547]
+    - [5, 0.0]
   - - [384, 72000, 1, 4096]
-    - [5, 363.399]
+    - [5, 0.0]
   - - [384, 88704, 1, 256]
     - [64, 0.0]
   - - [384, 88704, 1, 512]
     - [63, 0.0]
   - - [384, 88704, 1, 1024]
-    - [5, 187.547]
+    - [5, 0.0]
   - - [384, 88704, 1, 4096]
-    - [5, 363.399]
+    - [5, 0.0]
   - - [384, 100800, 1, 256]
     - [64, 0.0]
   - - [384, 100800, 1, 512]
     - [63, 0.0]
   - - [384, 100800, 1, 1024]
-    - [5, 187.547]
+    - [5, 0.0]
   - - [384, 100800, 1, 4096]
-    - [5, 363.399]
+    - [5, 0.0]
   - - [384, 115200, 1, 256]
     - [64, 0.0]
   - - [384, 115200, 1, 512]
     - [63, 0.0]
   - - [384, 115200, 1, 1024]
-    - [5, 187.547]
+    - [5, 0.0]
   - - [384, 115200, 1, 4096]
-    - [5, 363.399]
+    - [5, 0.0]
   - - [384, 120000, 1, 256]
     - [64, 0.0]
   - - [384, 120000, 1, 512]
     - [63, 0.0]
   - - [384, 120000, 1, 1024]
-    - [5, 187.547]
+    - [5, 0.0]
   - - [384, 120000, 1, 4096]
-    - [5, 363.399]
+    - [5, 0.0]
   - - [384, 147840, 1, 256]
     - [64, 0.0]
   - - [384, 147840, 1, 512]
     - [63, 0.0]
   - - [384, 147840, 1, 1024]
-    - [5, 187.547]
+    - [5, 0.0]
   - - [384, 147840, 1, 4096]
-    - [5, 363.399]
+    - [5, 0.0]
   - - [384, 168000, 1, 256]
     - [64, 0.0]
   - - [384, 168000, 1, 512]
     - [63, 0.0]
   - - [384, 168000, 1, 1024]
-    - [5, 187.547]
+    - [5, 0.0]
   - - [384, 168000, 1, 4096]
-    - [5, 363.399]
+    - [5, 0.0]
   - - [384, 304128, 1, 256]
     - [66, 0.0]
   - - [384, 304128, 1, 512]
     - [63, 0.0]
   - - [384, 304128, 1, 1024]
-    - [5, 187.547]
+    - [5, 0.0]
   - - [384, 304128, 1, 4096]
-    - [5, 363.399]
+    - [5, 0.0]
   - - [384, 310000, 1, 256]
     - [66, 0.0]
   - - [384, 310000, 1, 512]
     - [63, 0.0]
   - - [384, 310000, 1, 1024]
-    - [5, 187.547]
+    - [5, 0.0]
   - - [384, 310000, 1, 4096]
-    - [5, 363.399]
+    - [5, 0.0]
   - - [384, 316800, 1, 256]
     - [66, 0.0]
   - - [384, 316800, 1, 512]
     - [63, 0.0]
   - - [384, 316800, 1, 1024]
-    - [5, 187.547]
+    - [5, 0.0]
   - - [384, 316800, 1, 4096]
-    - [5, 363.399]
+    - [5, 0.0]
   - - [384, 345600, 1, 256]
     - [66, 0.0]
   - - [384, 345600, 1, 512]
     - [63, 0.0]
   - - [384, 345600, 1, 1024]
-    - [5, 187.547]
+    - [5, 0.0]
   - - [384, 345600, 1, 4096]
-    - [5, 363.399]
+    - [5, 0.0]
   - - [384, 360000, 1, 256]
     - [66, 0.0]
   - - [384, 360000, 1, 512]
     - [63, 0.0]
   - - [384, 360000, 1, 1024]
-    - [5, 187.547]
+    - [5, 0.0]
   - - [384, 360000, 1, 4096]
-    - [5, 363.399]
+    - [5, 0.0]
   - - [384, 528000, 1, 256]
     - [66, 0.0]
   - - [384, 528000, 1, 512]
     - [63, 0.0]
   - - [384, 528000, 1, 1024]
-    - [5, 187.547]
+    - [5, 0.0]
   - - [384, 528000, 1, 4096]
-    - [5, 363.399]
+    - [5, 0.0]
   - - [384, 550000, 1, 256]
     - [68, 0.0]
   - - [384, 550000, 1, 512]
     - [63, 0.0]
   - - [384, 550000, 1, 1024]
-    - [5, 187.547]
+    - [5, 0.0]
   - - [384, 550000, 1, 4096]
-    - [5, 363.399]
+    - [5, 0.0]
   - - [384, 576000, 1, 256]
     - [66, 0.0]
   - - [384, 576000, 1, 512]
     - [63, 0.0]
   - - [384, 576000, 1, 1024]
-    - [5, 187.547]
+    - [5, 0.0]
   - - [384, 576000, 1, 4096]
-    - [5, 363.399]
+    - [5, 0.0]
   - - [384, 600000, 1, 256]
     - [66, 0.0]
   - - [384, 600000, 1, 512]
     - [63, 0.0]
   - - [384, 600000, 1, 1024]
-    - [5, 187.547]
+    - [5, 0.0]
   - - [384, 600000, 1, 4096]
-    - [5, 363.399]
+    - [5, 0.0]
   - - [3072, 1, 1, 256]
-    - [6, 290.293]
+    - [6, 0.0]
   - - [3072, 1, 1, 1024]
-    - [5, 728.137]
+    - [5, 0.0]
   - - [3072, 1, 1, 4096]
-    - [5, 1404.42]
+    - [5, 0.0]
   - - [3072, 384, 1, 256]
-    - [6, 290.293]
+    - [6, 0.0]
   - - [3072, 384, 1, 1024]
-    - [5, 728.137]
+    - [5, 0.0]
   - - [3072, 384, 1, 4096]
-    - [5, 1404.42]
+    - [5, 0.0]
   - - [3072, 384, 1, 34680]
     - [64, 0.0]
   - - [34680, 1, 1, 256]
-    - [3, 2220.6]
+    - [3, 0.0]
   - - [34680, 1, 1, 1024]
-    - [2, 2970.89]
+    - [2, 0.0]
   - - [34680, 1, 1, 4096]
-    - [3, 3303.42]
+    - [3, 0.0]
   - - [34680, 3072, 1, 256]
-    - [3, 2220.6]
+    - [3, 0.0]
   - - [34680, 3072, 1, 384]
     - [75, 0.0]
   - - [34680, 3072, 1, 1024]
-    - [2, 2970.89]
+    - [2, 0.0]
   - - [34680, 3072, 1, 4096]
-    - [3, 3303.42]
+    - [3, 0.0]
   - - [67320, 1, 1, 256]
-    - [2, 2891.53]
+    - [2, 0.0]
   - - [67320, 1, 1, 1024]
-    - [2, 3382.82]
+    - [2, 0.0]
   - - [67320, 1, 1, 4096]
-    - [4, 3603.88]
+    - [4, 0.0]
   - - [67320, 3072, 1, 256]
-    - [2, 2891.53]
+    - [2, 0.0]
   - - [67320, 3072, 1, 384]
     - [75, 0.0]
   - - [67320, 3072, 1, 1024]
-    - [2, 3382.82]
+    - [2, 0.0]
   - - [67320, 3072, 1, 3072]
     - [74, 0.0]
   - - [67320, 3072, 1, 4096]
-    - [4, 3603.88]
+    - [4, 0.0]
   - - [67320, 3072, 1, 12288]
     - [74, 0.0]
   - - [67320, 3072, 1, 15360]
     - [4, 0.0]
   - - [67576, 1, 1, 256]
-    - [2, 2891.53]
+    - [2, 0.0]
   - - [67576, 1, 1, 1024]
-    - [2, 3382.82]
+    - [2, 0.0]
   - - [67576, 1, 1, 4096]
-    - [4, 3603.88]
+    - [4, 0.0]
   - - [67576, 3072, 1, 256]
-    - [2, 2891.53]
+    - [2, 0.0]
   - - [67576, 3072, 1, 1024]
-    - [2, 3382.82]
+    - [2, 0.0]
   - - [67576, 3072, 1, 4096]
-    - [4, 3603.88]
+    - [4, 0.0]
   - - [67576, 3072, 1, 15360]
     - [74, 0.0]
   - - [118800, 1, 1, 256]
-    - [2, 2891.53]
+    - [2, 0.0]
   - - [118800, 1, 1, 1024]
-    - [2, 3382.82]
+    - [2, 0.0]
   - - [118800, 1, 1, 4096]
-    - [4, 3603.88]
+    - [4, 0.0]
   - - [118800, 3072, 1, 256]
-    - [2, 2891.53]
+    - [2, 0.0]
   - - [118800, 3072, 1, 384]
     - [64, 0.0]
   - - [118800, 3072, 1, 1024]
-    - [2, 3382.82]
+    - [2, 0.0]
   - - [118800, 3072, 1, 3072]
     - [74, 0.0]
   - - [118800, 3072, 1, 4096]
-    - [4, 3603.88]
+    - [4, 0.0]
   - - [118800, 3072, 1, 12288]
     - [76, 0.0]
   - - [118800, 3072, 1, 15360]
     - [4, 0.0]
   - - [119056, 1, 1, 256]
-    - [2, 2891.53]
+    - [2, 0.0]
   - - [119056, 1, 1, 1024]
-    - [2, 3382.82]
+    - [2, 0.0]
   - - [119056, 1, 1, 4096]
-    - [4, 3603.88]
+    - [4, 0.0]
   - - [119056, 3072, 1, 256]
-    - [2, 2891.53]
+    - [2, 0.0]
   - - [119056, 3072, 1, 1024]
-    - [2, 3382.82]
+    - [2, 0.0]
   - - [119056, 3072, 1, 4096]
-    - [4, 3603.88]
+    - [4, 0.0]
   - - [119056, 3072, 1, 15360]
     - [74, 0.0]
   - - [269280, 1, 1, 256]
-    - [2, 2891.53]
+    - [2, 0.0]
   - - [269280, 1, 1, 1024]
-    - [2, 3382.82]
+    - [2, 0.0]
   - - [269280, 1, 1, 4096]
-    - [4, 3603.88]
+    - [4, 0.0]
   - - [269280, 3072, 1, 256]
-    - [2, 2891.53]
+    - [2, 0.0]
   - - [269280, 3072, 1, 384]
     - [75, 0.0]
   - - [269280, 3072, 1, 1024]
-    - [2, 3382.82]
+    - [2, 0.0]
   - - [269280, 3072, 1, 4096]
-    - [4, 3603.88]
+    - [4, 0.0]
   - - [475200, 1, 1, 256]
-    - [2, 2891.53]
+    - [2, 0.0]
   - - [475200, 1, 1, 1024]
-    - [2, 3382.82]
+    - [2, 0.0]
   - - [475200, 1, 1, 4096]
-    - [4, 3603.88]
+    - [4, 0.0]
   - - [475200, 3072, 1, 256]
-    - [2, 2891.53]
+    - [2, 0.0]
   - - [475200, 3072, 1, 384]
     - [75, 0.0]
   - - [475200, 3072, 1, 1024]
-    - [2, 3382.82]
+    - [2, 0.0]
   - - [475200, 3072, 1, 4096]
-    - [4, 3603.88]
+    - [4, 0.0]
   - - [538560, 1, 1, 256]
-    - [2, 2891.53]
+    - [2, 0.0]
   - - [538560, 1, 1, 1024]
-    - [2, 3382.82]
+    - [2, 0.0]
   - - [538560, 1, 1, 4096]
-    - [4, 3603.88]
+    - [4, 0.0]
   - - [538560, 3072, 1, 256]
-    - [2, 2891.53]
+    - [2, 0.0]
   - - [538560, 3072, 1, 384]
     - [75, 0.0]
   - - [538560, 3072, 1, 1024]
-    - [2, 3382.82]
+    - [2, 0.0]
   - - [538560, 3072, 1, 4096]
-    - [4, 3603.88]
+    - [4, 0.0]
 - null
 - null
 - DeviceEfficiency

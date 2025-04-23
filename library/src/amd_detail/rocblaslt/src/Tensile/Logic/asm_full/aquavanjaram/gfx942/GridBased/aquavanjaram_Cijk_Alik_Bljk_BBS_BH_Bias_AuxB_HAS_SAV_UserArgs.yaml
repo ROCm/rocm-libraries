@@ -70,7 +70,7 @@
   UseE: true
   UseInitialStridesAB: false
   UseInitialStridesCD: false
-  UseScaleAB: ""
+  UseScaleAB: ''
   UseScaleAlphaVec: 1
   UseScaleCD: false
 - - 1LDSBuffer: 0
@@ -182,7 +182,7 @@
     NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 0
-    NonTemporalD: 0
+    NonTemporalD: 4
     NonTemporalE: 0
     NonTemporalMetadata: 0
     NumElementsPerBatchStore: 0
@@ -272,7 +272,7 @@
       UseE: true
       UseInitialStridesAB: false
       UseInitialStridesCD: false
-      UseScaleAB: ""
+      UseScaleAB: ''
       UseScaleAlphaVec: 1
       UseScaleCD: false
     ScheduleGlobalRead: 1
@@ -437,7 +437,7 @@
     NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 0
-    NonTemporalD: 0
+    NonTemporalD: 4
     NonTemporalE: 0
     NonTemporalMetadata: 0
     NumElementsPerBatchStore: 0
@@ -527,7 +527,7 @@
       UseE: true
       UseInitialStridesAB: false
       UseInitialStridesCD: false
-      UseScaleAB: ""
+      UseScaleAB: ''
       UseScaleAlphaVec: 1
       UseScaleCD: false
     ScheduleGlobalRead: 1
@@ -692,7 +692,7 @@
     NonTemporalA: 0
     NonTemporalB: 0
     NonTemporalC: 0
-    NonTemporalD: 0
+    NonTemporalD: 4
     NonTemporalE: 0
     NonTemporalMetadata: 0
     NumElementsPerBatchStore: 0
@@ -782,7 +782,7 @@
       UseE: true
       UseInitialStridesAB: false
       UseInitialStridesCD: false
-      UseScaleAB: ""
+      UseScaleAB: ''
       UseScaleAlphaVec: 1
       UseScaleCD: false
     ScheduleGlobalRead: 1
@@ -840,17 +840,17 @@
     _staggerStrideShift: 1
 - [2, 3, 0, 1]
 - - - [128, 1, 1, 128, 128, 128, 128, 128]
-    - [2, 1.22314]
+    - [2, 0.0]
   - - [1, 128, 1, 128, 1, 1, 128, 128]
-    - [0, 1.53107]
+    - [0, 0.0]
   - - [1, 1, 1, 128, 1, 1, 128, 128]
-    - [2, 0.0115743]
+    - [2, 0.0]
   - - [128, 128, 1, 128, 128, 128, 128, 128]
-    - [2, 17.5656]
+    - [2, 0.0]
   - - [127, 127, 1, 128, 127, 127, 128, 128]
-    - [0, 17.2534]
+    - [0, 0.0]
   - - [129, 129, 1, 128, 129, 129, 129, 129]
-    - [1, 17.8457]
+    - [1, 0.0]
 - null
 - null
 - DeviceEfficiency
