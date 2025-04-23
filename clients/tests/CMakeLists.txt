@@ -94,6 +94,12 @@ set( rocfft-test_source
 add_executable( rocfft-test ${rocfft-test_source} ${rocfft-test_includes} )
 add_executable( rtc_helper_crash rtc_helper_crash.cpp )
 
+# rocFFT device code builds with -O3 by default.  rocfft-test
+# contains device code for callback functions, so ensure the device
+# code is built with the same optimization level to minimize chance
+# of a mismatch
+target_compile_options( rocfft-test PRIVATE -Xarch_device -O3 )
+
 find_package( Boost REQUIRED )
 set( Boost_DEBUG ON )
 set( Boost_DETAILED_FAILURE_MSG ON )
