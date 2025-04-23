@@ -610,7 +610,7 @@ bool RC3DNode::CheckPartialPassSupport()
     }
 
     // TODO: Revisit these restrictions once partial pass is
-    //       fully configurable in kernel-generator.py. 
+    //       fully configurable in kernel-generator.py.
     bool batchCondition = (batch >= 5);
 
     size_t checkDist     = product(length.begin(), length.end());

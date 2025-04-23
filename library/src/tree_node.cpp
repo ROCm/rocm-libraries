@@ -111,7 +111,7 @@ void LeafNode::GetKernelFactors()
 void LeafNode::GetKernelPartialPassFactors()
 {
     // Hard-coded kernel partial-pass factors for len 64x64x64.
-    // TODO: Remove this hard-coded logic once partial-pass 
+    // TODO: Remove this hard-coded logic once partial-pass
     // kernels are configurable in kernel-generator.py.
     if(scheme == CS_KERNEL_STOCKHAM && applyPartialPass)
     {
