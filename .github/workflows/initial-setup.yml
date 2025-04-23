@@ -1,32 +1,40 @@
-name: Setup EMU Monorepo
+name: Setup Monorepo
 
 on:
   workflow_dispatch:
 
 env:
-  MONOREPO_URL: github.com/ROCm/rocm-system.git
+  MONOREPO_URL: github.com/ROCm/rocm-libraries.git
   MONOREPO_BRANCH: develop
 
 jobs:
   setup-monorepo:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout the EMU Monorepo
-        uses: actions/checkout@v3
+      - name: Checkout the Monorepo
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.MONOREPO_BOT_TOKEN }}
 
-      - name: Set up Git user
+      - name: Set up Git user and Git LFS
         run: |
-          git config --global user.name "${{ github.actor }}"
-          git config --global user.email "${{ github.actor }}@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git lfs install
 
-      - name: Add Repositories to the EMU Monorepo
+      - name: Add Repositories to the Monorepo
         run: |
-          for repo in $(cat .github/repos-config.json | jq -r '.repositories[].name'); do
-            url=$(cat .github/repos-config.json | jq -r ".repositories[] | select(.name == \"$repo\") | .url")
-            branch=$(cat .github/repos-config.json | jq -r ".repositories[] | select(.name == \"$repo\") | .branch")
-            git subtree add --prefix $repo https://github.com/${url}.git $branch
+          for repo in $(jq -r '.repositories[].name' .github/repos-config.json); do
+            url=$(jq -r --arg repo "$repo" '.repositories[] | select(.name == $repo) | .url' .github/repos-config.json)
+            branch=$(jq -r --arg repo "$repo" '.repositories[] | select(.name == $repo) | .branch' .github/repos-config.json)
+            echo "Processing $repo from $url ($branch)"
+            export GIT_LFS_SKIP_SMUDGE=1
+            git remote add temp-${repo} https://github.com/${url}.git
+            git fetch temp-${repo} ${branch}
+            git subtree add --prefix $repo temp-${repo}/${branch}
+            git remote remove temp-${repo}
           done
 
-      - name: Push changes to EMU Monorepo
+      - name: Push changes to Monorepo
         run: |
           git push https://${{ env.MONOREPO_URL }} ${{ env.MONOREPO_BRANCH }}

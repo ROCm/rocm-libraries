@@ -86,8 +86,8 @@
       "branch": "develop"
     },
     {
-      "name": "Oragami",
-      "url": "ROCm/Oragami",
+      "name": "origami",
+      "url": "ROCm/origami",
       "branch": "develop"
     },
     {

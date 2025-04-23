@@ -6,24 +6,25 @@ on:
     - cron: '0 * * * *'
 
 env:
-  MONOREPO_URL: github.com/ROCm/rocm-system.git
+  MONOREPO_URL: github.com/ROCm/rocm-libraries.git
   MONOREPO_BRANCH: develop
 
 jobs:
   synchronize-subtrees:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout the EMU Monorepo
-        uses: actions/checkout@v3
+      - name: Checkout the Monorepo
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0 # needed for git subtree pull/push
           token: ${{ secrets.MONOREPO_BOT_TOKEN }}
+
       - name: Set up Git user
         run: |
-          git config --global user.name "${{ github.actor }}"
-          git config --global user.email "${{ github.actor }}@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Update Repositories in the EMU Monorepo
+      - name: Update Repositories in the Monorepo
         run: |
           has_errors=false
           for repo in $(cat .github/repos-config.json | jq -r '.repositories[].name'); do
