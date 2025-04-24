@@ -205,13 +205,16 @@ struct ncclTaskColl {
   int32_t algorithm:8, protocol:8;
   uint32_t isCollnet:1, isNvls:1;
   uint32_t devFuncId:30;
-  enum ncclRegBufferType regBufType;
+  int regBufType;
   uint64_t opCount;
   // number of elements in planner->ipcMemQueue associated with this collective
   int nCleanupQueueElts;
 
   void* sendMhandle;
   void* recvMhandle;
+  void** sendNetHandles;
+  void** recvNetHandles;
+  void** srecvNetHandles;
   // index for IPC record lookup
   uintptr_t sendbuffOffset;
   uintptr_t recvbuffOffset;
@@ -246,6 +249,7 @@ struct ncclKernelPlan {
   struct ncclKernelPlan* next;
 
   bool persistent; // aka captured in a graph
+  bool isHostCbEnq;
   enum ncclDevWorkStorageType workStorageType;
   bool kernelSpecialized;
   void *kernelFn;
@@ -377,6 +381,7 @@ struct ncclKernelPlanner {
 
   struct ncclIntruQueue<struct ncclTaskColl, &ncclTaskColl::next> collTaskQueue;
   struct ncclIntruQueue<struct ncclWorkList, &ncclWorkList::next> collWorkQueue;
+  struct ncclIntruQueue<struct ncclWorkList, &ncclWorkList::next> tmpCollWorkQueue;
   struct ncclIntruQueue<struct ncclCommCallback, &ncclCommCallback::next> collCleanupQueue;
 
   //////////////////////////////////////////////////////////////////////////////
@@ -494,6 +499,8 @@ struct ncclComm {
 
   // Counter for tracking CUDA launches (P2P and collectives included)
   uint64_t opCount;
+  // Collective operation counter
+  uint64_t collOpCount;
 
   // Channels for collectives
   int nChannels; // connection nChannels
@@ -517,7 +524,6 @@ struct ncclComm {
   ssize_t threadThresholds[NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS];
   float latencies[NCCL_NUM_FUNCTIONS][NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS];
   float bandwidths[NCCL_NUM_FUNCTIONS][NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS];
-  float ringbdw[NCCL_NUM_FUNCTIONS][NCCL_NUM_PROTOCOLS];
   int maxThreads[NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS];
   uint64_t minMaxLLRange[RCCL_TUNABLE_COLLS][NCCL_NUM_PROTOCOLS - 1][RCCL_PROTOCOL_ENTRY_SIZE];
 
@@ -569,7 +575,7 @@ struct ncclComm {
   int proxyRefCountOld; /* store proxy post-atomic-sub refcount */
   // Whether this communicator uses collNet
   int collNetSupport;
-  bool collNetRegSupport;
+  bool isOneRPN;
   uint8_t collNetSupportMatrix[4/*sum,prod,max,min*/][ncclNumTypes];
   bool intraNodeP2pSupport;
   int* collNetHeads;
@@ -597,6 +603,7 @@ struct ncclComm {
   // Subset of those in groupNext list. Holds 0x1 if not needing preconnect.
   struct ncclComm* preconnectNext;
   int persistentRefs; // number of persistent plan-lists capturing this comm
+  int noncapturedRefs; // number of non-captured hostStreamPlanCallback on the stream
   struct P2pSchedulePair { int sendRank; int recvRank; } *p2pSchedule;
 
   struct ncclKernelPlanner planner;
@@ -664,11 +671,19 @@ struct ncclComm {
 
   // buffer registration cache
   struct ncclRegCache regCache;
-  uint64_t endMagic;
+  int isAllNvlink;
+  bool useNetPXN;
+  bool useGdr;
+  int splitCount;
 
   // Unroll factor for comm [RCCL]
   int unroll;
+
+  uint64_t endMagic;
 };
+
+static_assert(offsetof(struct ncclComm, startMagic) == 0, "startMagic must be the first field of ncclComm");
+static_assert(offsetof(struct ncclComm, endMagic) == sizeof(struct ncclComm) - sizeof(uint64_t), "endMagic must be the last field of ncclComm");
 
 enum ncclLaunchMode {
   ncclLaunchModeInvalid=0,

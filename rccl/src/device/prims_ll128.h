@@ -20,9 +20,9 @@
 #endif
 #endif
 
-template<typename T, typename RedOp, typename Fan, int Direct, int P2p>
-class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p>:
-  public PrimitivesWithoutDirect<Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p>> {
+template<typename T, typename RedOp, typename Fan, int Direct, int P2p, bool isNetOffload>
+class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload>:
+  public PrimitivesWithoutDirect<Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload>> {
 
   static constexpr int MaxRecv = Fan::MaxRecv, MaxSend = Fan::MaxSend;
   static constexpr int Input=0, Output=1;

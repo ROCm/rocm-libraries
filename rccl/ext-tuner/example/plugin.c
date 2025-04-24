@@ -226,7 +226,7 @@ __hidden ncclResult_t pluginDestroy(void* context) { return ncclSuccess; }
 
 #define PLUGIN_NAME "Example"
 
-const ncclTuner_v3_t ncclTunerPlugin_v3 = {
+const ncclTuner_v4_t ncclTunerPlugin_v4 = {
   .name = PLUGIN_NAME,
   .init = pluginInit,
   .getCollInfo = pluginGetCollInfo,

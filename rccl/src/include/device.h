@@ -98,24 +98,18 @@ static_assert(NCCL_LL_CLEAN_MASK % NCCL_STEPS == 0, "Invalid NCCL_LL_CLEAN_MASK 
 #define NCCL_LL128_SHMEM_ELEMS_PER_THREAD 4
 #define NCCL_LL128_SHMEM_SIZE (NCCL_LL128_SHMEM_ELEMS_PER_THREAD*NCCL_LL128_MAX_NTHREADS)
 
-#define NCCL_DIRECT_WRITE 0x01
-#define NCCL_DIRECT_READ  0x02
+#define NCCL_P2P_WRITE 0x01
+#define NCCL_P2P_READ  0x02
 #define NCCL_DIRECT_NIC   0x04
-#define NCCL_IPC_WRITE    0x08
-#define NCCL_IPC_READ     0x10
-#define NCCL_NVLS_MIN_POLL 0x20
+#define NCCL_NVLS_MIN_POLL 0x80
 
 // Number of named barriers supported by CUDA
 #define NCCL_MAX_GROUPS (NCCL_MAX_NTHREADS/WARP_SIZE)
 
-#define NCCL_MAX_COLLNET_SIZE (1L << 29)
-
-enum ncclRegBufferType {
-  NCCL_REGULAR_BUFFER = 0,
-  NCCL_IPC_REG_BUFFER = 1,
-  NCCL_NVLS_REG_BUFFER = 2,
-  NCCL_COLLNET_REG_BUFFER = 3
-};
+#define NCCL_REGULAR_BUFFER 0x00
+#define NCCL_IPC_REG_BUFFER 0x01
+#define NCCL_NVLS_REG_BUFFER 0x02
+#define NCCL_NET_REG_BUFFER 0x04
 
 struct ncclConnInfo {
   // Regular comm mechanism
@@ -159,8 +153,6 @@ struct ncclConnector {
   struct ncclTransportComm* transportComm;
   void* transportResources;
   struct ncclConnInfo conn;
-  int sendMemSameProcess;
-  int recvMemSameProcess;
 };
 
 struct ncclRing {
@@ -249,8 +241,7 @@ struct alignas(16) ncclDevWorkP2p {
   uint8_t sendChunkSize_u32fp8, recvChunkSize_u32fp8;
 
   uint8_t sendProtoLL:1, recvProtoLL:1;
-  uint8_t sendRegistered:1, recvRegistered:1;
-
+  uint8_t sendNetReg:1, recvNetReg:1;
   uint8_t sendIpcReg:1, recvIpcReg:1;
 
   uint8_t sendConnIndex:2, recvConnIndex:2;
@@ -299,7 +290,7 @@ struct alignas(16) ncclDevWorkColl {
   //   nChannels == (channelHi - channelLo) + 1
   uint32_t channelLo:8, channelHi:8;
   uint32_t nWarps:8;
-  uint32_t redOpArgIsPtr:1, regUsed:2, oneNode:1, direct:4;
+  uint32_t redOpArgIsPtr:1, regUsed:1, netRegUsed:1, oneNode:1, direct:2, isOneRPN:1;
   uint32_t root:30, connIndex:2;
   uint16_t pivotA2ANumBiRings;
   void* recvbuff;
@@ -504,7 +495,7 @@ struct ncclDevComm {
   int nNodes;
   int buffSizes[NCCL_NUM_PROTOCOLS];
   int p2pChunkSize;
-  int isNvlink;
+  int isAllNvlink;
   int p2pnChannelsPerPeer;
 
   // Work fifo return credits
@@ -665,13 +656,7 @@ inline bool ncclNvlsSupported(int devRedOp, int type) {
   case ncclInt64:
   case ncclUint64:
   case ncclFloat16:
-#if defined(RCCL_BFLOAT16)
   case ncclBfloat16:
-#endif
-#if defined(RCCL_FLOAT8)
-  case ncclFp8E4M3:
-  case ncclFp8E5M2:
-#endif
     return devRedOp == ncclDevSum || devRedOp == ncclDevMinMax;
   case ncclFloat:
   case ncclDouble:

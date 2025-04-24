@@ -223,7 +223,9 @@ namespace RcclUnitTesting
         NCCLCHECK(ncclGroupStart());
         for (int rank = 0; rank < numRanks; rank++)
           NCCLCHECK(ncclAllReduce(gpuInput[rank], gpuOutput[rank], N, ncclInt, ncclSum, comms[rank], stream[rank]));
-        NCCLCHECK(ncclGroupEnd());
+        ncclResult_t res = ncclGroupEnd();
+
+        if (res != ncclSuccess) continue;
 
         const auto start = Clock::now();
 

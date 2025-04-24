@@ -6,7 +6,7 @@ import subprocess
 # Order of redops, tys, protos, algos must match src/include/device.h
 all_colls =  ["AllGather","AllReduce","AllToAllPivot","Broadcast","Reduce","ReduceScatter","SendRecv"]
 all_redops = ["Sum","Prod","MinMax","PreMulSum","SumPostDiv"]
-all_tys =    ["i8","u8","i32","u32","i64","u64","f16","f32","f64","bf16", "f8", "bf8"]
+all_tys =    ["i8","u8","i32","u32","i64","u64","f16","f32","f64","bf16","f8e4m3","f8e5m2"]
 all_protos = ["LL","LL128","SIMPLE"]
 all_algos =  ["TREE","RING"]
 all_unroll = ["1", "2", "4"]
@@ -253,7 +253,7 @@ def equivalent_primary(coll, algo, proto, redop, ty, unroll):
     unroll = str(coll_unroll)
   if coll in ("AllReduce", "Reduce", "ReduceScatter"):
     # map signed integer sum/prod to unsigned
-    if redop in ("Sum","Prod","PreMulSum") and ty[0]=="i":
+    if redop in ("Sum","Prod","PreMulSum","SumPostDiv") and ty[0]=="i":
       ty = "u"+ty[1:]
     # map signed integer min/max to unsigned for non-NVLS
     elif redop=="MinMax" and ty[0]=="i" and ("NVLS" not in algo):
@@ -510,8 +510,8 @@ ty_to_cxx = {
   "f32": "float",
   "f64": "double",
   "bf16": "hip_bfloat16",
-  "f8":  "rccl_float8",
-  "bf8": "rccl_bfloat8",
+  "f8e4m3":  "rccl_float8",
+  "f8e5m2": "rccl_bfloat8"
 }
 
 # Generate each <gensrc>/<impl>.cpp:

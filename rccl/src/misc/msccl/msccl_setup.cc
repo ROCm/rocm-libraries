@@ -112,9 +112,8 @@ ncclResult_t mscclSetupConnections(struct mscclAlgo* hostAlgo, ncclComm_t comm) 
 
   // Connect MSCCL connections
   mscclSetIsCallerFlag();
-  int highestTransportType = TRANSPORT_P2P;
   bool needsProxy = false;
-  NCCLCHECK(ncclTransportP2pSetup(comm, NULL, 0, &highestTransportType, &needsProxy));
+  NCCLCHECK(ncclTransportP2pSetup(comm, NULL, 0, &needsProxy));
   status.needsProxy |= needsProxy;
   mscclClearIsCallerFlag();
 
@@ -273,11 +272,11 @@ static ncclResult_t hostToDevRedOp(
       break;
     #endif
     #if defined(RCCL_FLOAT8)
-    case ncclFp8E4M3:
+    case ncclFloat8e4m3:
       opFull->op = ncclDevPreMulSum;
       fp8_e4m3 = (rccl_float8)(float(1.0/comm->nRanks));
       break;
-    case ncclFp8E5M2:
+    case ncclFloat8e5m2:
       opFull->op = ncclDevPreMulSum;
       fp8_e5m2 = (rccl_bfloat8)(float(1.0/comm->nRanks));
       break;

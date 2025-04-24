@@ -111,13 +111,13 @@ ncclResult_t ncclTransportCheckP2pType(struct ncclComm* comm, bool* intraNodeP2p
   }
   *intraNodeP2pSupport = supportFlag;
   *directMode = directFlag;
+  if (comm->rank == 0) INFO(NCCL_INIT, "Check P2P Type intraNodeP2pSupport %d directMode %d", supportFlag, directFlag);
   return ncclSuccess;
 }
 
-ncclResult_t ncclTransportP2pSetup(struct ncclComm* comm, struct ncclTopoGraph* graph, int connIndex, int* highestTransportType/*=NULL*/, bool* needsProxy/*=NULL*/) {
+ncclResult_t ncclTransportP2pSetup(struct ncclComm* comm, struct ncclTopoGraph* graph, int connIndex, bool* needsProxy/*=NULL*/) {
   // Stream used during transport setup; need for P2P pre-connect + CUDA Graph
   ncclResult_t ret = ncclSuccess;
-  int highestType = TRANSPORT_UNDEFINED;  // track highest transport type
   bool needsProxyResult = false;
   struct ncclConnect** data; // Store intermediate send/recvData structs for connect
   struct ncclConnect** recvData = NULL; // Points to entries inside data for given recv connection within a channel
@@ -162,8 +162,11 @@ ncclResult_t ncclTransportP2pSetup(struct ncclComm* comm, struct ncclTopoGraph* 
     }
 
     //if ((recvMask.masks[0]) || (sendMask.masks[0])) NCCLCHECK(ncclCalloc(data+p, 2*MAXCHANNELS));
-    if (count) NCCLCHECKGOTO(ncclCalloc(data+p, 2*MAXCHANNELS), ret, fail);
+    if (count) {
+      if (data[p] == NULL) NCCLCHECKGOTO(ncclCalloc(data + p, 2 * MAXCHANNELS), ret, fail);
 
+      else memset(data[p], 0, 2 * MAXCHANNELS * sizeof(struct ncclConnect));
+    }
     recvData[p] = data[p];
     int sendChannels = 0, recvChannels = 0;
     int type;
@@ -173,7 +176,6 @@ ncclResult_t ncclTransportP2pSetup(struct ncclComm* comm, struct ncclTopoGraph* 
       //if (recvMask & (1UL<<c)) {
       if (recvMask.masks[c/64] & (1UL<<(c%64))) {
         NCCLCHECKGOTO(selectTransport<0>(comm, graph, recvData[p]+recvChannels++, c, recvPeer, connIndex, &type, &proxy), ret, fail);
-        if (type > highestType) highestType = type;
       }
     }
     TIME_STOP(0);
@@ -183,7 +185,6 @@ ncclResult_t ncclTransportP2pSetup(struct ncclComm* comm, struct ncclTopoGraph* 
       //if (sendMask & (1UL<<c)) {
       if (sendMask.masks[c/64] & (1UL<<(c%64))) {
         NCCLCHECKGOTO(selectTransport<1>(comm, graph, sendData[p]+sendChannels++, c, sendPeer, connIndex, &type, &proxy), ret, fail);
-        if (type > highestType) highestType = type;
         needsProxyResult |= proxy;
       }
     }
@@ -262,30 +263,18 @@ ncclResult_t ncclTransportP2pSetup(struct ncclComm* comm, struct ncclTopoGraph* 
             }
             TIME_STOP(4);
           }
-
-    count = 0;
-          for (int j = 0; j < num; j++) {
-            if ((recvMask.masks[j]) || (sendMask.masks[j])) {
-              count++;
-            }
-          }
-          //if (sendMask.masks[0] || recvMask.masks[0]) {
-    if (count) {
-            free(data[p]);
-            data[p] = NULL;
-          }
         }
-  if (ncclParamReportConnectProgress() && comm->rank == 0 && done > 0) {
+        if (ncclParamReportConnectProgress() && comm->rank == 0 && done > 0) {
           struct timeval now;
           gettimeofday(&now, NULL);
-          if (((now.tv_sec - timeLast.tv_sec)*1.0 + (now.tv_usec-timeLast.tv_usec)*1e-6) > 1) {
-            float elapsed = (now.tv_sec - timeStart.tv_sec)*1.0 + (now.tv_usec-timeStart.tv_usec)*1e-6;
-      float remaining = elapsed*(comm->nRanks-done)/done;
+          if (((now.tv_sec - timeLast.tv_sec) * 1.0 + (now.tv_usec - timeLast.tv_usec) * 1e-6) > 1) {
+            float elapsed = (now.tv_sec - timeStart.tv_sec) * 1.0 + (now.tv_usec - timeStart.tv_usec) * 1e-6;
+            float remaining = elapsed * (comm->nRanks - done) / done;
             printf("%sP2p connect: %g%% Elapsed %d:%02d Remaining %d:%02d                                       ",
-                timeReported ? "\r" : "", done*100.0/comm->nRanks, ((int)elapsed)/60, ((int)elapsed)%60, ((int)remaining)/60, ((int)remaining)%60);
+              timeReported ? "\r" : "", done * 100.0 / comm->nRanks, ((int)elapsed) / 60, ((int)elapsed) % 60, ((int)remaining) / 60, ((int)remaining) % 60);
             fflush(stdout);
             timeReported = true;
-      timeLast = now; // struct copy;
+            timeLast = now; // struct copy;
           }
         }
       }
@@ -332,7 +321,6 @@ ncclResult_t ncclTransportP2pSetup(struct ncclComm* comm, struct ncclTopoGraph* 
     }
   }
 
-  if (highestTransportType != NULL) *highestTransportType = highestType;
   if (needsProxy != NULL) *needsProxy = needsProxyResult;
   TIME_PRINT("P2P Setup/Connect");
 exit:

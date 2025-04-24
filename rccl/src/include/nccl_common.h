@@ -32,7 +32,8 @@ typedef enum {
   NCCL_BOOTSTRAP = 0x1000,
   NCCL_REG = 0x2000,
   NCCL_PROFILE = 0x4000,
-  NCCL_VERBS = 0x8000,
+  NCCL_RAS = 0x8000,
+  NCCL_VERBS = 0x10000,
   NCCL_ALL = ~0
 } ncclDebugLogSubSys;
 

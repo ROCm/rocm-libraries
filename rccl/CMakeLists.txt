@@ -423,7 +423,6 @@ set(SRC_FILES
   src/msccl.cc
   src/proxy.cc
   src/rccl_wrap.cc
-  src/register.cc
   src/transport.cc
   src/device/all_gather.h
   src/device/all_reduce.h
@@ -499,6 +498,7 @@ set(SRC_FILES
   src/include/param.h
   src/include/profiler.h
   src/include/proxy.h
+  src/include/ras.h
   src/include/rccl_common.h
   src/include/rccl_vars.h
   src/include/register.h
@@ -589,6 +589,16 @@ set(SRC_FILES
   src/misc/msccl/msccl_parser.cc
   src/misc/msccl/msccl_setup.cc
   src/misc/msccl/msccl_status.cc
+  src/ras/client.cc
+  src/ras/client_support.cc
+  src/ras/collectives.cc
+  src/ras/peers.cc
+  src/ras/ras.cc
+  src/ras/ras_internal.h
+  src/ras/rasnet.cc
+  src/register/coll_reg.cc
+  src/register/register.cc
+  src/register/sendrecv_reg.cc
   src/transport/coll_net.cc
   src/transport/generic.cc
   src/transport/net.cc

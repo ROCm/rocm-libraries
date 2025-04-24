@@ -47,16 +47,12 @@ const char* ncclDatatypeToString(ncclDataType_t type) {
   case ncclUint32: return "ncclUint32";
   case ncclInt64: return "ncclInt64";
   case ncclUint64: return "ncclUint64";
-#if defined(RCCL_FLOAT8)
-  case ncclFp8E4M3: return "ncclFp8E4M3";
-  case ncclFp8E5M2: return "ncclFp8E5M2";
-#endif
   case ncclFloat16: return "ncclFloat16";
   case ncclFloat32: return "ncclFloat32";
   case ncclFloat64: return "ncclFloat64";
-#if defined(RCCL_BFLOAT16)
   case ncclBfloat16: return "ncclBfloat16";
-#endif
+  case ncclFloat8e4m3: return "ncclFloat8e4m3";
+  case ncclFloat8e5m2: return "ncclFloat8e5m2";
   default: return "Unknown";
   }
 }
@@ -116,8 +112,7 @@ ncclResult_t ncclAllGather_impl(const void* sendbuff, void* recvbuff, size_t sen
       sendcount, datatype, 0, 0, ncclSum, mscclFuncAllGather, comm, stream);
   }
 
-  NCCLCHECK(ncclEnqueueCheck(&info));
-  return ncclSuccess;
+  return ncclEnqueueCheck(&info);
 }
 
 NCCL_API(ncclResult_t, ncclAllReduce, const void* sendbuff, void* recvbuff, size_t count,
@@ -156,8 +151,7 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
       count, datatype, 0, 0, op, mscclFuncAllReduce, comm, stream);
   }
 
-  NCCLCHECK(ncclEnqueueCheck(&info));
-  return ncclSuccess;
+  return ncclEnqueueCheck(&info);
 }
 
 RCCL_PARAM(AllToAllPivotEnable, "ALL_TO_ALL_PIVOT_ENABLE", 0);
@@ -309,8 +303,7 @@ ncclResult_t ncclBroadcast_impl(const void* sendbuff, void* recvbuff, size_t cou
       count, datatype, root, 0, ncclSum, mscclFuncBroadcast, comm, stream);
   }
 
-  NCCLCHECK(ncclEnqueueCheck(&info));
-  return ncclSuccess;
+  return ncclEnqueueCheck(&info);
 }
 /* Deprecated original "in place" function, similar to MPI */
 NCCL_API(ncclResult_t, ncclBcast, void* buff, size_t count, ncclDataType_t datatype, int root,
@@ -318,8 +311,7 @@ NCCL_API(ncclResult_t, ncclBcast, void* buff, size_t count, ncclDataType_t datat
 ncclResult_t ncclBcast(void* buff, size_t count, ncclDataType_t datatype, int root,
     ncclComm_t comm, cudaStream_t stream) {
   NCCLCHECK(Recorder::instance().record(rrBcast, buff, buff, count, datatype, comm, stream, root));
-  NCCLCHECK(ncclBroadcast(buff, buff, count, datatype, root, comm, stream));
-  return ncclSuccess;
+  return ncclBroadcast(buff, buff, count, datatype, root, comm, stream);
 }
 
 NCCL_API(ncclResult_t, ncclGather, const void* sendbuff, void* recvbuff, size_t sendcount,
@@ -405,8 +397,7 @@ ncclResult_t ncclReduce_impl(const void* sendbuff, void* recvbuff, size_t count,
       count, datatype, root, 0, op, mscclFuncReduce, comm, stream);
   }
 
-  NCCLCHECK(ncclEnqueueCheck(&info));
-  return ncclSuccess;
+  return ncclEnqueueCheck(&info);
 }
 
 NCCL_API(ncclResult_t, ncclReduceScatter, const void* sendbuff, void* recvbuff, size_t recvcount,
@@ -445,8 +436,7 @@ ncclResult_t ncclReduceScatter_impl(const void* sendbuff, void* recvbuff, size_t
       recvcount, datatype, 0, 0, op, mscclFuncReduceScatter, comm, stream);
   }
 
-  NCCLCHECK(ncclEnqueueCheck(&info));
-  return ncclSuccess;
+  return ncclEnqueueCheck(&info);
 }
 
 NCCL_API(ncclResult_t, ncclScatter, const void* sendbuff, void* recvbuff, size_t recvcount, ncclDataType_t datatype, int root,
@@ -532,12 +522,7 @@ ncclResult_t ncclSend_impl(const void* sendbuff, size_t count, ncclDataType_t da
       count, datatype, 0, peer, ncclSum, mscclFuncSend, comm, stream);
   }
 
-  ncclResult_t ret;
-  NCCLCHECK(ncclGroupStart());
-  NCCLCHECKGOTO(ncclEnqueueCheck(&info), ret, exit);
-exit:
-  NCCLCHECK(ncclGroupEnd());
-  return ret;
+  return ncclEnqueueCheck(&info);
 }
 
 NCCL_API(ncclResult_t, ncclRecv, void* recvbuff, size_t count, ncclDataType_t datatype, int peer,
@@ -563,10 +548,5 @@ ncclResult_t ncclRecv_impl(void* recvbuff, size_t count, ncclDataType_t datatype
       count, datatype, 0, peer, ncclSum, mscclFuncRecv, comm, stream);
   }
 
-  ncclResult_t ret;
-  NCCLCHECK(ncclGroupStart());
-  NCCLCHECKGOTO(ncclEnqueueCheck(&info), ret, exit);
-exit:
-  NCCLCHECK(ncclGroupEnd());
-  return ret;
+  return ncclEnqueueCheck(&info);
 }

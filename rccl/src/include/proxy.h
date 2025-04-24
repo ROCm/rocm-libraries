@@ -17,6 +17,7 @@
 #include <pthread.h>
 #include "shmutils.h"
 #include "p2p.h"
+#include "collectives.h"
 
 typedef enum : uint8_t {
   ncclPatternRing,
@@ -60,7 +61,11 @@ struct ncclProxyOp {
   uint32_t connIndex:2;
   int next;
   int nsteps;
-  int chunkSize;
+  size_t chunkSize;
+  size_t sliceSize;
+  size_t loopSize;
+  size_t loopOffset;
+  size_t channelSize;
   uint8_t sliceSteps;
   uint8_t chunkSteps;
   uint8_t channelId;
@@ -69,16 +74,17 @@ struct ncclProxyOp {
   uint8_t /*ncclFunc_t*/ coll;
   uint8_t /*ncclPattern_t*/ pattern;
   uint8_t protocol;
+  uint8_t algorithm;
   uint8_t reg;
-  // collnet buffer reg handles
+  // collnet/p2p/coll buffer reg handles
   void* sendMhandle;
   void* recvMhandle;
   uint8_t* sendbuff;
   uint8_t* recvbuff;
-
+  int isOneRPN;
+  RingAlgorithm *ringAlgo;
   int nextRank;
   int prevRank;
-
   union ncclProxyOpSpecifics specifics;
 
   // Profiler plugin
@@ -100,19 +106,21 @@ struct ncclProxyOp {
 struct ncclProxySubArgs {
   struct ncclProxyConnection* connection;
   int reg;
-  // p2p mhandle
-  void* mhandle;
   // collnet handles
   void* sendMhandle;
   void* recvMhandle;
   uint8_t* sendbuff;
   uint8_t* recvbuff;
   size_t offset;
+  ssize_t loopSize;
+  ssize_t loopOffset;
   int channelId;
   int nsteps;
   ssize_t nbytes;
+  ssize_t chunkSize;
   int peer;
-
+  int isOneRPN;
+  RingAlgorithm *ringAlgo;
   int groupSize; // Number of consecutive sub operations sharing the same recvComm
   uint64_t base;
   uint64_t posted;
@@ -121,11 +129,14 @@ struct ncclProxySubArgs {
   uint64_t transmitted;
   uint64_t done;
   uint64_t end;
+  int regBufferReady;
   void* requests[NCCL_STEPS];
 
   // Profiler plugin
   int eActivationMask;
   int rank;
+  pid_t pid;
+  void* profilerContext;
   void* taskEventHandle;
   void* opEventHandle;
   void* stepEventHandles[NCCL_STEPS];
@@ -145,10 +156,11 @@ struct ncclProxyArgs {
   proxyProgressFunc_t progress;
   int nsubs;
   int done;
+  int onePPN;
   uint64_t opCount;
   int sliceSteps;
   int chunkSteps;
-  int chunkSize;
+  size_t chunkSize;
   size_t totalSendSize;
   size_t totalRecvSize;
   size_t sendSizePerRound;
@@ -158,16 +170,13 @@ struct ncclProxyArgs {
   uint8_t /*ncclPattern_t*/ pattern;
   uint8_t /*ncclFunc_t*/ coll;
   uint8_t protocol;
+  uint8_t algorithm;
   int state;
   char* sharedBuff[NCCL_STEPS];
   int sharedSize[NCCL_STEPS];
 
   int idle;
   uint64_t hdp_flushed;
-
-  // Profiler plugin
-  pid_t pid;
-  void* profilerContext;
 
   // Element linking
   struct ncclProxyArgs* next;

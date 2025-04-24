@@ -44,10 +44,10 @@ namespace RcclUnitTesting
     int64_t*       I8; // ncclInt64
     uint64_t*      U8; // ncclUint64
     __half*        F2; // ncclFloat16
-    rccl_float8*   F1; // ncclFp8E4M3
+    rccl_float8*   F1; // ncclFloat8e4m3
     float*         F4; // ncclFloat32
     double*        F8; // ncclFloat64
-    rccl_bfloat8*  B1; // ncclFp8E5M2
+    rccl_bfloat8*  B1; // ncclFloat8e5m2
     hip_bfloat16*  B2; // ncclBfloat16
 
     constexpr PtrUnion() : ptr(nullptr) {}

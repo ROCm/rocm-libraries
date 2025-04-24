@@ -20,13 +20,15 @@ namespace {
     const int rank = ring->userRanks[0];
     const int nextRank = ring->userRanks[1];
     const int root = work->root;
-    size_t size;
-    size_t chunkCount;
-    size_t channelCount;
-    size_t gridOffset;
+    ssize_t size;
+    ssize_t chunkCount;
+    ssize_t channelCount;
+    ssize_t gridOffset;
     ncclCollCbdPart(work, ncclShmem.channelId, Proto::Id, sizeof(T), &size, &gridOffset, &channelCount, &chunkCount);
     size_t offset;
     int nelem;
+    int workNthreads;
+    bool isNetOffload = work->isOneRPN && work->netRegUsed;
 
 #if defined(ENABLE_NPKIT)
     int npKitCtxIdx = bid;
@@ -55,39 +57,51 @@ namespace {
 
     T *inputBuf = (T*)work->sendbuff;
     T *outputBuf = (T*)work->recvbuff;
-    // Coverity reports that the callee treats &ring->next as an array.  However, due to the use of
-    // FanSymmetric<1>, only the first element is ever accessed, so it's fine.
-    // coverity[callee_ptr_arith:FALSE]
-    Primitives<T, RedOp, FanSymmetric<1>, 0, Proto, 0>
-      prims(tid, nthreads, &ring->prev, &ring->next, inputBuf, outputBuf, work->redOpArg, 0, work->connIndex, work->connIndex, work);
+    workNthreads = isNetOffload ? WARP_SIZE : nthreads;
+
+    if (tid < workNthreads) {
+      // Coverity reports that the callee treats &ring->next as an array.  However, due to the use of
+      // FanSymmetric<1>, only the first element is ever accessed, so it's fine.
+      // coverity[callee_ptr_arith:FALSE]
+      Primitives<T, RedOp, FanSymmetric<1>, 0, Proto, 0>
+        prims(tid, workNthreads, &ring->prev, &ring->next, inputBuf, outputBuf, work->redOpArg, 0, work->connIndex, work->connIndex, work);
 
 #if defined(ENABLE_NPKIT)
-    if (tid == 0) {
-      prims.npKitCtxIdx = npKitCtxIdx;
-    }
+      if (tid == 0) {
+        prims.npKitCtxIdx = npKitCtxIdx;
+      }
 #endif
 
-    for (size_t elemOffset = 0; elemOffset < channelCount; elemOffset += chunkCount) {
-      offset = gridOffset + elemOffset;
-      nelem = min(chunkCount, channelCount - elemOffset);
+      for (size_t elemOffset = 0; elemOffset < channelCount; elemOffset += chunkCount) {
+        offset = gridOffset + elemOffset;
+        nelem = min(chunkCount, channelCount - elemOffset);
 
-      if (rank == root) {
-        if (inputBuf == outputBuf) {
-          prims.directSend(offset, offset, nelem);
+        if (rank == root) {
+          if (inputBuf == outputBuf || isNetOffload) {
+            prims.directSend(offset, offset, nelem);
+          } else {
+            prims.directCopySend(offset, offset, nelem);
+          }
+        } else if (nextRank == root) {
+          prims.directRecv(offset, offset, nelem);
         } else {
-          prims.directCopySend(offset, offset, nelem);
+          prims.directRecvCopyDirectSend(offset, offset, nelem);
         }
-      } else if (nextRank == root) {
-        prims.directRecv(offset, offset, nelem);
-      } else {
-        prims.directRecvCopyDirectSend(offset, nelem);
       }
+    } else if (inputBuf != outputBuf && rank == root) {
+      inputBuf = inputBuf + gridOffset;
+      outputBuf = outputBuf + gridOffset;
+      reduceCopy<COLL_UNROLL, RedOp, T, 0, 1, 1, 0, 1, 1, /*PreOpSrcs=*/0>
+        (tid - workNthreads, nthreads - workNthreads, work->redOpArg, &work->redOpArg, false, 1, (void**)&inputBuf, 1, (void**)&outputBuf, channelCount);
     }
 #if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_BROADCAST_RING_EXIT)
     if (tid == 0) {
       NpKit::CollectGpuEvent(NPKIT_EVENT_BROADCAST_RING_EXIT, size*sizeof(T), 0, NPKIT_GET_GPU_TIMESTAMP(),
           ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
     }
+#endif
+#if !defined(__HIP_PLATFORM_AMD__) && !defined(__HIPCC__)
+    if (isNetOffload) barrier_sync(14, nThreads);
 #endif
   }
 }

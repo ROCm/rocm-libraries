@@ -59,8 +59,8 @@
       collTrace->p2p.recvConnIndex = p2pWork->recvConnIndex; \
       collTrace->p2p.sendProtoLL = p2pWork->sendProtoLL; \
       collTrace->p2p.recvProtoLL = p2pWork->recvProtoLL; \
-      collTrace->p2p.sendRegistered = p2pWork->sendRegistered; \
-      collTrace->p2p.recvRegistered = p2pWork->recvRegistered; \
+      collTrace->p2p.sendRegistered = p2pWork->sendNetReg; \
+      collTrace->p2p.recvRegistered = p2pWork->recvNetReg; \
       collTrace->p2pOpCount[0] = p2pWork->sendOpCount; \
       collTrace->p2pOpCount[1] = p2pWork->recvOpCount; \
       collTrace->type = (launch_type) | ncclCollTraceP2pElemType; \
@@ -627,6 +627,9 @@ __global__ void ncclDevKernelDebug_Generic_1(ncclDevKernelArgs4K NCCL_GRID_CONST
 __global__ void ncclDevKernelDebug_Generic_2(ncclDevKernelArgs4K NCCL_GRID_CONSTANT const args4K);
 __global__ void ncclDevKernelDebug_Generic_4(ncclDevKernelArgs4K NCCL_GRID_CONSTANT const args4K);
 #endif
+
+#define DEFINE_ncclDevKernel_nop(suffix, coll, redop, ty, algo, proto, specializedFnId) \
+  __global__ void ncclDevKernel_##suffix(ncclDevKernelArgs4K NCCL_GRID_CONSTANT const args4K) {}
 
 #ifdef USE_INDIRECT_FUNCTION_CALL
 #define DEFINE_ncclDevFunc(suffix, coll, redop, ty, algo, proto, unroll) \

@@ -19,7 +19,9 @@ struct RunWorkBatch<ncclFuncSendRecv, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPL
   template<typename Proto>
   __device__ void runSend(int tid, int tn, int group, struct ncclDevWorkP2p* work) {
     size_t bytes = work->sendBytes;
-    int chunkSize = work->sendIpcReg && ncclShmem.comm.isNvlink ? (1 << 30) : u32fp8Decode(work->sendChunkSize_u32fp8);
+    bool useLargeChunk = (work->sendIpcReg && ncclShmem.comm.isAllNvlink) || work->sendNetReg;
+    int chunkSize = useLargeChunk ? NCCL_MAX_NET_SIZE : u32fp8Decode(work->sendChunkSize_u32fp8);
+    int stepSize = useLargeChunk ? NCCL_MAX_NET_SIZE : ncclShmem.comm.p2pChunkSize;
   
 #if defined(ENABLE_NPKIT)
     bool isNpKitThread = (tid == 0);
@@ -42,8 +44,7 @@ struct RunWorkBatch<ncclFuncSendRecv, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPL
 
     Primitives<T, RedOp, FanAsymmetric<0, 1>, 0, Proto, 1>
       prims(tid, tn, nullptr, &work->sendRank, work->sendAddr, nullptr,
-            /*redOpArg(ignored)=*/0, group, work->sendConnIndex, work->sendConnIndex, nullptr,
-            /*ipcReg=*/work->sendIpcReg, /*netReg=*/work->sendRegistered, ncclShmem.comm.p2pChunkSize);
+            /*redOpArg(ignored)=*/0, group, work->sendConnIndex, work->sendConnIndex, nullptr, work, stepSize);
 
 #if defined(ENABLE_NPKIT)
       if (isNpKitThread) {
@@ -64,7 +65,7 @@ struct RunWorkBatch<ncclFuncSendRecv, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPL
       int n = min(size_t(chunkSize), bytes-cursor);
       prims.directSend(cursor, cursor, n);
       cursor += n;
-    } while (cursor < bytes && work->sendRegistered == 0);
+    } while (cursor < bytes);
 
 #if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_SEND_RECV_SEND_EXIT)
       if (isNpKitThread) {
@@ -77,7 +78,9 @@ struct RunWorkBatch<ncclFuncSendRecv, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPL
   template<typename Proto>
   __device__ void runRecv(int tid, int tn, int group, struct ncclDevWorkP2p* work) {
     size_t bytes = work->recvBytes;
-    int chunkSize = work->recvIpcReg && ncclShmem.comm.isNvlink ? (1 << 30) : u32fp8Decode(work->recvChunkSize_u32fp8);
+    bool useLargeChunk = (work->recvIpcReg && ncclShmem.comm.isAllNvlink) || work->recvNetReg;
+    int chunkSize = useLargeChunk ? NCCL_MAX_NET_SIZE : u32fp8Decode(work->recvChunkSize_u32fp8);
+    int stepSize = useLargeChunk ? NCCL_MAX_NET_SIZE : ncclShmem.comm.p2pChunkSize;
 
 #if defined(ENABLE_NPKIT)
     bool isNpKitThread = (tid == 0);
@@ -100,8 +103,7 @@ struct RunWorkBatch<ncclFuncSendRecv, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPL
 
     Primitives<T, RedOp, FanAsymmetric<1, 0>, 0, Proto, 1>
       prims(tid, tn, &work->recvRank, nullptr, nullptr, work->recvAddr,
-            /*redOpArg(ignored)=*/0, group, work->recvConnIndex, work->recvConnIndex, nullptr,
-            /*ipcReg=*/work->recvIpcReg, /*netReg=*/work->recvRegistered, ncclShmem.comm.p2pChunkSize);
+            /*redOpArg(ignored)=*/0, group, work->recvConnIndex, work->recvConnIndex, nullptr, work, stepSize);
 
 #if defined(ENABLE_NPKIT)
       if (isNpKitThread) {
@@ -122,7 +124,7 @@ struct RunWorkBatch<ncclFuncSendRecv, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPL
       int n = min(size_t(chunkSize), bytes-cursor);
       prims.directRecv(cursor, cursor, n);
       cursor += n;
-    } while (cursor < bytes && work->recvRegistered == 0);
+    } while (cursor < bytes);
 
 #if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_SEND_RECV_RECV_EXIT)
       if (isNpKitThread) {

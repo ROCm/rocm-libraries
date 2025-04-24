@@ -21,14 +21,11 @@
 HIP_FILE=$1
 
 if [[ "$HIP_FILE" =~ .*/src/device/.*\.h ]]; then
-  sed -i "s/template<typename T, typename RedOp, typename Proto>/template<typename T, typename RedOp, typename Proto, int COLL_UNROLL>/g" "$HIP_FILE"
-  sed -i "s/template<typename T, typename RedOp>/template<typename T, typename RedOp, int COLL_UNROLL>/g" "$HIP_FILE"
-  sed -i "s/ProtoSimple<1, 1>/ProtoSimple<1, 1, COLL_UNROLL>/" "$HIP_FILE"
-  sed -i "s/ProtoSimple<1,1>/ProtoSimple<1,1,COLL_UNROLL>/" "$HIP_FILE"
-  sed -i "s/\\(using Proto = ProtoSimple<[^1][^>]*\\)>*/\\1, COLL_UNROLL>/" "$HIP_FILE"
-  sed -i "s/\\(runRing<T[^>]*\\)>*/\\1, COLL_UNROLL>/" "$HIP_FILE"
-  sed -i "s/runTreeUpDown<T, RedOp, ProtoSimple<1, 1, COLL_UNROLL>>/runTreeUpDown<T, RedOp, ProtoSimple<1, 1, COLL_UNROLL>, COLL_UNROLL>/" "$HIP_FILE"
-  sed -i "s/\\(runTreeSplit<T[^>]*\\)>*/\\1, COLL_UNROLL>/" "$HIP_FILE"
+  perl -pi -e 's/(template<typename T, typename RedOp(?:, typename Proto)?)(, bool isNetOffload.*?)?>/\1, int COLL_UNROLL\2>/g' "$HIP_FILE"
+  perl -pi -e 's/(ProtoSimple<[^,]*?,[^,]+?)>/\1, COLL_UNROLL>/g' "$HIP_FILE"
+  perl -pi -e 's/(runRing<T.*?)((, (true|false))?>\()/\1, COLL_UNROLL\2/g' "$HIP_FILE"
+  perl -pi -e 's/(runTreeUpDown<T.*?)>\(/\1, COLL_UNROLL>(/' "$HIP_FILE"
+  perl -pi -e 's/(runTreeSplit<T.*?)>\(/\1, COLL_UNROLL>(/' "$HIP_FILE"
   sed -i "s/\\(struct RunWorkColl<ncclFunc[^>]*\\)>*/\\1, COLL_UNROLL>/" "$HIP_FILE"
   sed -i "s/\\(struct RunWorkBatch<ncclFunc[^>]*\\)>*/\\1, COLL_UNROLL>/" "$HIP_FILE"
 

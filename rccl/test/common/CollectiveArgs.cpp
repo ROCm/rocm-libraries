@@ -195,18 +195,18 @@ namespace RcclUnitTesting
         scalarsPerRank.Attach(scalarsPerRank.ptr);
         switch (this->dataType)
         {
-        case ncclInt8:     ss << scalarsPerRank.I1[this->globalRank]; break;
-        case ncclUint8:    ss << scalarsPerRank.U1[this->globalRank]; break;
-        case ncclInt32:    ss << scalarsPerRank.I4[this->globalRank]; break;
-        case ncclUint32:   ss << scalarsPerRank.U4[this->globalRank]; break;
-        case ncclInt64:    ss << scalarsPerRank.I8[this->globalRank]; break;
-        case ncclUint64:   ss << scalarsPerRank.U8[this->globalRank]; break;
-        case ncclFp8E4M3:  ss << scalarsPerRank.F1[this->globalRank]; break;
-        case ncclFloat32:  ss << scalarsPerRank.F4[this->globalRank]; break;
-        case ncclFloat64:  ss << scalarsPerRank.F8[this->globalRank]; break;
-        case ncclFp8E5M2:  ss << scalarsPerRank.B1[this->globalRank]; break;
-        case ncclBfloat16: ss << scalarsPerRank.B2[this->globalRank]; break;
-        default:           ss << "(UNKNOWN)";
+        case ncclInt8:       ss << scalarsPerRank.I1[this->globalRank]; break;
+        case ncclUint8:      ss << scalarsPerRank.U1[this->globalRank]; break;
+        case ncclInt32:      ss << scalarsPerRank.I4[this->globalRank]; break;
+        case ncclUint32:     ss << scalarsPerRank.U4[this->globalRank]; break;
+        case ncclInt64:      ss << scalarsPerRank.I8[this->globalRank]; break;
+        case ncclUint64:     ss << scalarsPerRank.U8[this->globalRank]; break;
+        case ncclFloat8e4m3: ss << scalarsPerRank.F1[this->globalRank]; break;
+        case ncclFloat32:    ss << scalarsPerRank.F4[this->globalRank]; break;
+        case ncclFloat64:    ss << scalarsPerRank.F8[this->globalRank]; break;
+        case ncclFloat8e5m2: ss << scalarsPerRank.B1[this->globalRank]; break;
+        case ncclBfloat16:   ss << scalarsPerRank.B2[this->globalRank]; break;
+        default:             ss << "(UNKNOWN)";
         }
         ss << " ";
       }

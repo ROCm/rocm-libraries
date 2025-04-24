@@ -16,8 +16,8 @@ typedef enum { ncclInt8       = 0, ncclChar       = 0,
                ncclFloat32    = 7, ncclFloat      = 7,
                ncclFloat64    = 8, ncclDouble     = 8,
                ncclBfloat16   = 9,
-               ncclFp8E4M3    = 10,
-               ncclFp8E5M2    = 11,
+               ncclFloat8e4m3 = 10,
+               ncclFloat8e5m2 = 11,
 } ncclDataType_t;
 
 #endif
