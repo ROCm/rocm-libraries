@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2022 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -22,7 +22,7 @@
 #
 ################################################################################
 
-from .TensileInstructions import DSStoreB8, DSStoreB8HID16, ReadWriteInstruction, \
+from rocisa.instruction import DSStoreB8, DSStoreB8HID16, ReadWriteInstruction, \
                         DSLoadD16HIU16, DSLoadD16HIU8, \
                         DSLoadU8, DSLoadU16, DSStoreD16HIB16, \
                         DSStoreB16

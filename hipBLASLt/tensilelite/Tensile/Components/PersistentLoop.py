@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2024 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -20,7 +20,8 @@
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ################################################################################
 
-from ..TensileInstructions import Module, Label, VMovB32, vgpr, sgpr, SCmpGeU32
+from rocisa.instruction import VMovB32, SCmpGeU32
+from ..TensileInstructions import Module, Label, vgpr, sgpr
 from ..Component import Component
 import abc
 
@@ -54,7 +55,7 @@ class PersistentLoopOff(PersistentLoop):
     def openPersistentLoop(self, writer, kernel):
         module = Module("PersistentLoop Off openPersistentLoop")
         return module
-    
+
     def recalcLocalWriteAddresses(self, writer, kernel, tc):
         module = Module("PersistentLoop Off recalcLocalWriteAddresses")
         return module
@@ -62,11 +63,11 @@ class PersistentLoopOff(PersistentLoop):
     def recalcLocalReadAddressesAB(self, writer, kernel):
         module = Module("PersistentLoop Off recalcLocalReadAddressesAB")
         return module
-    
+
     def closePersistentLoop(self, writer, kernel):
         module = Module("PersistentLoop Off closePersistentLoop")
         return module
-    
+
 
 class PersistentLoopOn(PersistentLoop):
     # Stream-K persistent loop
@@ -74,7 +75,7 @@ class PersistentLoopOn(PersistentLoop):
     @classmethod
     def matches(cls, writer, debug=False):
         return writer.states.kernel["StreamK"] > 0
-    
+
     def openPersistentLoop(self, writer, kernel):
         module = Module("PersistentLoop On openPersistentLoop")
 
@@ -87,7 +88,7 @@ class PersistentLoopOn(PersistentLoop):
         # kStr += inst("s_add_u32", sgpr("PersistentLoopIter"), sgpr("PersistentLoopIter"), hex(1), "Inc PersistentLoop Iter")     # Back-up: not needed now
         #kStr += str(Code.WaitCnt(self.version, 0,0,"wait for outstanding stores"))
         return module
-    
+
     def recalcLocalWriteAddresses(self, writer, kernel, tc):
         module = Module("PersistentLoop On recalcLocalWriteAddresses")
 
@@ -96,7 +97,7 @@ class PersistentLoopOn(PersistentLoop):
             module.add(VMovB32(dst=vgpr(getattr(writer, "oriLwa%s" % tc)), src=vgpr("LocalWriteAddr%s" % tc), comment="back up LWA for persistent kernel + wider local read"))
 
         return module
-    
+
     def recalcLocalReadAddressesAB(self, writer, kernel):
         module = Module("PersistentLoop On recalcLocalReadAddressesAB")
 
@@ -121,7 +122,7 @@ class PersistentLoopOn(PersistentLoop):
         #         module.add(VMovB32(dst=vgpr(writer.oriLraB), src=vgpr("LocalReadAddrB"), comment="back up LRA for persistent kernel + wider local read"))
 
         return module
-    
+
     def closePersistentLoop(self, writer, kernel):
         module = Module("PersistentLoop On closePersistentLoop")
         # endIter = "StreamKIterEnd" if kernel["StreamK"] == 1 else "TotalIters"

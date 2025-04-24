@@ -21,8 +21,13 @@
 ################################################################################
 
 from rocisa.code import Module
-from rocisa.container import vgpr, sgpr, EXEC, VCC, HWRegContainer, RegisterContainer
-from rocisa.instruction import *
+from rocisa.container import vgpr, sgpr, EXEC, HWRegContainer, RegisterContainer
+from rocisa.instruction import SAddCU32, SAddU32, SAndB32, SCmpLgU32, SGetRegB32, \
+    SLShiftLeftB64, SLShiftRightB32, SLShiftRightB64, SMovB32, SMovB64, SMulHIU32, \
+    SMulI32, SNop, SSetRegB32, SSetRegIMM32B32, SSubU32, VAddF32, VAddU32, \
+    VCmpXEqU32, VCmpXGtU32, VCvtF32toU32, VCvtU32toF32, VLShiftLeftAddU32, \
+    VLShiftLeftB32, VMadU32U24, VMovB32, VMulF32, VMulLOU32, VMulU32U24, \
+    VRcpIFlagF32, VReadfirstlaneB32, VSubU32
 
 from typing import Optional
 from .ExtInstructions import SMulInt64to32

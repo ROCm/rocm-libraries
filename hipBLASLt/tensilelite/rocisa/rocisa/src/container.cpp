@@ -21,6 +21,10 @@
  *
  * ************************************************************************ */
 #include "container.hpp"
+#include "code.hpp"
+#include "instruction/branch.hpp"
+#include "instruction/common.hpp"
+#include "instruction/instruction.hpp"
 
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/map.h>
@@ -36,6 +40,37 @@ namespace nb = nanobind;
 
 namespace rocisa
 {
+    std::shared_ptr<Item> replaceHolder(std::shared_ptr<Item> inst, int dst)
+    {
+        if(auto mod = std::dynamic_pointer_cast<Module>(inst))
+        {
+            for(auto& item : mod->items())
+            {
+                // We don't need the output
+                static_cast<void>(replaceHolder(item, dst));
+            }
+        }
+        else if(auto _inst = std::dynamic_pointer_cast<Instruction>(inst))
+        {
+            for(auto& param : _inst->getParams())
+            {
+                if(auto container = std::get_if<std::shared_ptr<Container>>(&param))
+                {
+                    if(auto holder = std::dynamic_pointer_cast<HolderContainer>(*container))
+                    {
+                        holder->setRegNum(dst);
+                        param = std::make_shared<RegisterContainer>(holder->getCopiedRC());
+                    }
+                }
+            }
+        }
+        else if(auto waitcnt = std::dynamic_pointer_cast<SWaitCnt>(inst))
+        {
+            throw std::runtime_error("SWaitCnt is not supported yet");
+        }
+        return inst;
+    }
+
     struct PyContainer : public Container
     {
         NB_TRAMPOLINE(Container, 0);
@@ -69,10 +104,11 @@ namespace rocisa
     std::shared_ptr<RegisterContainer> createGPR(const std::string& gprType,
                                                  const std::string& name,
                                                  float              regNum  = 1.f,
-                                                 bool               isMacro = false)
+                                                 bool               isMacro = false,
+                                                 bool               isAbs   = false)
     {
         RegName regname = generateRegName(name);
-        return std::make_shared<RegisterContainer>(gprType, regname, isMacro, -1, regNum);
+        return std::make_shared<RegisterContainer>(gprType, regname, isAbs, isMacro, -1, regNum);
     }
 
     // Overloaded functions to create specific GPR containers with default regNum = 1.f
@@ -86,9 +122,10 @@ namespace rocisa
         return createGPR("v", idx, regNum);
     }
 
-    std::shared_ptr<RegisterContainer> vgpr(const std::string& name, float regNum, bool isMacro)
+    std::shared_ptr<RegisterContainer>
+        vgpr(const std::string& name, float regNum, bool isMacro, bool isAbs)
     {
-        return createGPR("v", name, regNum, isMacro);
+        return createGPR("v", name, regNum, isMacro, isAbs);
     }
 
     std::shared_ptr<RegisterContainer> sgpr(const Holder& holder, float regNum)
@@ -140,6 +177,7 @@ namespace rocisa
 void init_containers(nb::module_ m)
 {
     auto m_con = m.def_submodule("container", "rocIsa container submodule.");
+    m_con.def("replaceHolder", &rocisa::replaceHolder, nb::arg("inst"), nb::arg("dst"));
     m_con.def("vgpr",
               nb::overload_cast<const rocisa::Holder&, float>(&rocisa::vgpr),
               nb::arg("holder"),
@@ -149,10 +187,11 @@ void init_containers(nb::module_ m)
               nb::arg("idx"),
               nb::arg("regNum") = 1.f);
     m_con.def("vgpr",
-              nb::overload_cast<const std::string&, float, bool>(&rocisa::vgpr),
+              nb::overload_cast<const std::string&, float, bool, bool>(&rocisa::vgpr),
               nb::arg("name"),
               nb::arg("regNum")  = 1.f,
-              nb::arg("isMacro") = false);
+              nb::arg("isMacro") = false,
+              nb::arg("isAbs")   = false);
 
     m_con.def("sgpr",
               nb::overload_cast<const rocisa::Holder&, float>(&rocisa::sgpr),

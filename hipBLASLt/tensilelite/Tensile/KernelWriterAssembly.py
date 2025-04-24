@@ -29,31 +29,54 @@ from rocisa.code import KernelBody, Label, Macro, Module, RegSet, SrdUpperValue,
                         StructuredModule, TextBlock, ValueEndif, ValueIf, ValueSet, SignatureBase
 from rocisa.container import DSModifiers, SDWAModifiers, VOP3PModifiers, \
                       MUBUFModifiers, SMEMModifiers, EXEC, VCC, RegisterContainer, \
-                      DPPModifiers, Holder, vgpr, sgpr, accvgpr, mgpr, HWRegContainer, \
-                      ContinuousRegister
+                      DPPModifiers, vgpr, sgpr, accvgpr, mgpr, ContinuousRegister
 from rocisa.instruction import SGetPositivePCOffset, SLongBranchPositive, SCLongBranchScc0, SCLongBranchScc1, \
-                        vectorStaticDivide, vectorStaticRemainder, vectorUInt32CeilDivideAndRemainder
+                        vectorStaticDivide, vectorStaticRemainder, vectorUInt32CeilDivideAndRemainder, \
+                        vectorStaticDivideAndRemainder
 from rocisa.enum import InstType
-from rocisa.label import LabelManager
 from rocisa.macro import MacroVMagicDiv, PseudoRandomGenerator
 from . import CUSTOM_KERNEL_PATH
 from .TensileInstructions import SelectBit, \
                           SBranchIfZero, SBranchIfNotZero, SMulInt64to32, DSInit, VCvtBF16toFP32, \
-                          ArgumentLoader, bomb, vectorStaticDivideAndRemainder, \
-                          scalarStaticRemainder, \
-                          scalarUInt32RegDivide, scalarUInt32DivideAndRemainder, \
-                          scalarStaticDivideAndRemainder, scalarStaticCeilDivide, sMagicDiv, staticMultiply, staticMultiplyAdd, \
-                          scalarStaticMultiply, \
-                          RegisterPool, allocTmpGpr, allocTmpGprList, \
-                          log2, ceilDivide, DataType, \
-                          dataTypeToMfmaInstTypePair, dataTypeNameAbbrevToInstType, \
-                          Assert
-from .TensileInstructions.Instructions import *
+                          ArgumentLoader, bomb, scalarStaticRemainder, \
+                          scalarUInt32DivideAndRemainder, scalarStaticDivideAndRemainder, \
+                          scalarStaticCeilDivide, sMagicDiv, staticMultiply, staticMultiplyAdd, scalarStaticMultiply, \
+                          RegisterPool, \
+                          allocTmpGpr, allocTmpGprList, log2, \
+                          ceilDivide, DataType, dataTypeToMfmaInstTypePair, \
+                          dataTypeNameAbbrevToInstType
+from rocisa.instruction import BranchInstruction, BufferLoadB128, BufferLoadB32, \
+  BufferLoadB64, BufferLoadD16B16, BufferLoadD16HIB16, BufferLoadD16HIU8, \
+  BufferLoadD16U8, BufferStoreB128, BufferStoreB16, BufferStoreB32, BufferStoreB64, \
+  BufferStoreB8, BufferStoreD16HIB16, CommonInstruction, DSBPermuteB32, DSLoadB128, \
+  DSLoadB16, DSLoadB32, DSLoadB64, DSLoadU16, DSStoreB128, DSStoreB16, DSStoreB32, \
+  DSStoreB64, DSStoreB8, DSStoreInstruction, FlatLoadB128, FlatLoadB32, FlatLoadB64, \
+  FlatLoadD16B16, FlatLoadD16HIB16, FlatStoreB128, FlatStoreB32, FlatStoreB64, \
+  FlatStoreD16B16, FlatStoreD16HIB16, MFMAInstruction, MUBUFReadInstruction, \
+  MacroInstruction, SAShiftRightI32, SAbsI32, SAddCU32, SAddI32, SAddU32, SAndB32, \
+  SAndB64, SAndN2B32, SAtomicDec, SBarrier, SBfmB32, SBitcmp1B32, SBranch, SCBranchSCC0, \
+  SCBranchSCC1, SCBranchVCCNZ, SCBranchVCCZ, SCMovB32, SCSelectB32, SCmpEQI32, \
+  SCmpEQU32, SCmpEQU64, SCmpGeI32, SCmpGeU32, SCmpGtI32, SCmpGtU32, SCmpKEQU32, \
+  SCmpKGeU32, SCmpKGtU32, SCmpKLGU32, SCmpLeI32, SCmpLeU32, SCmpLgU32, SCmpLtU32, \
+  SEndpgm, SFf1B32, SLShiftLeft2AddU32, SLShiftLeftB32, SLShiftLeftB64, SLShiftRightB32, \
+  SLShiftRightB64, SLoadB32, SLoadB64, SMFMAInstruction, SMemLoadInstruction, SMinI32, \
+  SMinU32, SMovB32, SMovB64, SMulHIU32, SMulI32, SNop, SOrB32, SOrSaveExecB32, \
+  SOrSaveExecB64, SSExtI16toI32, SSetPCB64, SSetPrior, SSubBU32, SSubI32, SSubU32, \
+  SWaitCnt, SXorB32, VAShiftRightI32, VAccvgprReadB32, VAccvgprWrite, VAccvgprWriteB32, \
+  VAdd3U32, VAddCCOU32, VAddCOU32, VAddF32, VAddF64, VAddLShiftLeftU32, VAddU32, VAndB32, \
+  VBfeU32, VCmpEQI32, VCmpEQU32, VCmpGEI32, VCmpGEU32, VCmpGtU32, VCmpLeI32, VCmpLtI32, \
+  VCmpLtU32, VCmpUF32, VCmpXGeU32, VCmpXLtU32, VCmpXLtU64, VCndMaskB32, VCvtF16toF32, \
+  VCvtF32toF16, VCvtFP8toF32, VCvtInstruction, VCvtPkF32toBF16, VCvtPkF32toBF8, \
+  VCvtPkF32toFP8, VCvtPkFP8toF32, VCvtSRF32toBF8, VCvtSRF32toFP8, VCvtScaleFP8toF16, \
+  VCvtScalePkF16toBF8, VCvtScalePkF16toFP8, VCvtScalePkFP8toF16, VLShiftLeftB32, \
+  VLShiftLeftB64, VLShiftRightB32, VMadU32U24, VMaxF32, VMinI32, VMovB32, VMulF32, \
+  VMulHIU32, VMulLOU32, VMulPKF32S, VMulU32U24, VNotB32, VOrB32, VPackF16toB32, \
+  VPrngB32, VReadfirstlaneB32, VSubF32, VSubI32, VSubU32, VXorB32
+
 from .Component import Component
 from .KernelWriterModules import *
 from .SolutionStructs import isPackedIndex
 from .AsmStoreState import StoreState, VectorDataTypes
-from .AsmMemoryInstruction import MemoryInstruction
 from .Activation import ActivationType
 from .CustomKernels import isCustomKernelConfig
 from .Common import roundUp
@@ -62,13 +85,12 @@ from Tensile.KernelWriter import KernelWriter
 from Tensile.SolutionStructs.Naming import getKernelFileBase
 from Tensile.Toolchain.Component import Assembler
 
-from math import ceil, log, floor
+from math import ceil, log
 from copy import deepcopy
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import List, NamedTuple, Optional, Tuple, Union
 
 import os
-import subprocess
 @dataclass
 class TailOptParams:
   idx:                 int         = 0
@@ -13187,7 +13209,7 @@ class KernelWriterAssembly(KernelWriter):
     mod.addSpaceLine()
 
     # TODO- F16?
-    mod.add(VMaxF32(vgpr("AmaxOut"), vgpr("AmaxOut"), SrcAbs(vgpr("Value"))))
+    mod.add(VMaxF32(vgpr("AmaxOut"), vgpr("AmaxOut"), vgpr("Value", isAbs=True)))
     mod.addSpaceLine()
 
     mod.add(SMovB32(sgpr("Tmp"), wave_size * amaxInType.numBytes()))

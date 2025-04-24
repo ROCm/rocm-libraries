@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -24,13 +24,21 @@ from rocisa import rocIsa
 from rocisa.code import Module, Label, TextBlock
 from rocisa.container import vgpr, sgpr, DSModifiers, SDWAModifiers, RegisterContainer, VCC
 from rocisa.enum import SelectBit
-from rocisa.instruction import *
+from rocisa.instruction import DSLoadB32, DSStoreB32, FlatLoadB32, FlatStoreB32, \
+    Instruction, PVCvtBF16toFP32, SAddU32, SAndB32, SAndB64, SAndSaveExecB32, \
+    SAndSaveExecB64, SBarrier, SCBranchSCC0, SCBranchSCC1, SCBranchVCCNZ, \
+    SCBranchVCCZ, SCMovB32, SCMovB64, SCmpEQU32, SCmpEQU64, SCmpLtU32, SLoadB128, \
+    SLoadB256, SLoadB32, SLoadB512, SLoadB64, SMovB32, SMovB64, SMovkI32, SMulHII32, \
+    SMulHIU32, SMulI32, SOrSaveExecB32, SOrSaveExecB64, SWaitCnt, VAddCOU32, VAndB32, \
+    VCmpEQF32, VCmpEQF64, VCmpXEqU32, VCmpXGeU32, VCmpXGtU32, VCmpXInstruction, \
+    VCmpXLeU32, VCmpXLtI32, VCmpXLtU32, VCmpXNeU16, VCmpXNeU32, VLShiftLeftB32, \
+    VMaxI32, VMed3I32, VMinI32, VMovB32, VMulHII32, VMulHIU32, VMulLOU32, VReadfirstlaneB32
 
 from .DataType import DataType
 from .RegisterPool import ContinuousRegister
 from .Utils import log2
 
-from enum import Enum 
+from enum import Enum
 
 
 from typing import Union

@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -32,12 +32,17 @@ from rocisa import rocIsa
 from rocisa.code import Module, TextBlock
 from rocisa.container import VCC, EXEC, vgpr, sgpr, HolderContainer, RegisterContainer, Holder
 from rocisa.enum import InstType
+from rocisa.instruction import Instruction, SMovB32, SNop, SSetMask, VAddF16, VAddF32, \
+    VAddPKF16, VAndB32, VCmpGEF16, VCmpGEF32, VCmpGEF64, VCmpGEI32, VCmpGTF16, VCmpGTF32, \
+    VCmpGTF64, VCmpGTI32, VCmpXClassF32, VCmpXLtF32, VCndMaskB32, VExpF16, VExpF32, VFmaF16, \
+    VFmaF32, VFmaPKF16, VMaxF32, VMaxF64, VMaxI32, VMaxPKF16, VMed3I32, VMinF16, VMinF32, \
+    VMinF64, VMinI32, VMovB32, VMulF16, VMulF32, VMulF64, VMulLOU32, VMulPKF16, VRcpF16, \
+    VRcpF32, VSubF32, VSubI32
 
 from .TensileInstructions import DataType
-from .TensileInstructions.Instructions import *
 from Tensile.Common.Utilities import printExit, printWarning
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 ################################################################################
 # How to add an activation
@@ -1308,7 +1313,7 @@ class ActivationInline:
       kStr += (asm + " // geluscaling\n")
       module = activation.getGeluModule(self.dataType, 0, 0, 1)
       kStr += self.getActivationAsmStr(activation, module, (len(asm) * " "))
-      kStr += addSpace(asm, ": \"+v\"(value) : \"s\"(alpha)\n")        
+      kStr += addSpace(asm, ": \"+v\"(value) : \"s\"(alpha)\n")
       kStr += self.getRequiredRegStr(asm, activation.vgprCounter, activation.sgprCounter)
     elif (activationType == 'leakyrelu'):
       if (self.dataType.isSingle() or self.dataType.isHalf() or self.dataType.isDouble()):
