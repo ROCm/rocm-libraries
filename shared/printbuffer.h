@@ -24,7 +24,6 @@
 #include "hostbuf.h"
 #include "increment.h"
 #include <algorithm>
-#include <iomanip>
 #include <vector>
 
 // Output a formatted general-dimensional array with given length and stride in batches
