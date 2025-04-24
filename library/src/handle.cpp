@@ -266,7 +266,7 @@ _rocblas_handle::_rocblas_handle()
         hipblasltEnvVar = -1;
     }
 
-    if(useHipBLASLt())
+    if(isHipBLASLtEnabled())
     {
         hipblasLtHandle                = std::make_shared<hipblasLtHandle_t>();
         hipblasStatus_t hipblas_status = hipblasLtCreate(&(*hipblasLtHandle));

@@ -191,67 +191,111 @@ namespace
                                         hipblaslt_datatype<To>,
                                         hipblaslt_compute_type<Tc>);
 
-        hipblaslt_ext::GemmProblemType problemType;
-        problemType.op_a         = (hipblasOperation_t)prob.trans_a;
-        problemType.op_b         = (hipblasOperation_t)prob.trans_b;
-        problemType.type_a       = hipblaslt_datatype<Ti>;
-        problemType.type_b       = hipblaslt_datatype<Ti>;
-        problemType.type_c       = hipblaslt_datatype<To>;
-        problemType.type_d       = hipblaslt_datatype<To>;
-        problemType.type_compute = hipblaslt_compute_type<Tc>;
-
-        std::vector<int64_t>                     Ms(prob.batch_count);
-        std::vector<int64_t>                     Ns(prob.batch_count);
-        std::vector<int64_t>                     Ks(prob.batch_count);
-        std::vector<int64_t>                     ldas(prob.batch_count);
-        std::vector<int64_t>                     ldbs(prob.batch_count);
-        std::vector<int64_t>                     ldcs(prob.batch_count);
-        std::vector<int64_t>                     ldds(prob.batch_count);
-        std::vector<int64_t>                     strideas(prob.batch_count);
-        std::vector<int64_t>                     stridebs(prob.batch_count);
-        std::vector<int64_t>                     stridecs(prob.batch_count);
-        std::vector<int64_t>                     strideds(prob.batch_count);
-        std::vector<int64_t>                     batch_counts(prob.batch_count);
-        std::vector<hipblaslt_ext::GemmEpilogue> epilogues(prob.batch_count);
-        std::vector<hipblaslt_ext::GemmInputs>   inputs(prob.batch_count);
-
-        for(int batch = 0; batch < prob.batch_count; batch++)
+        try
         {
-            Ms[batch]           = prob.m;
-            Ns[batch]           = prob.n;
-            Ks[batch]           = prob.k;
-            ldas[batch]         = prob.col_stride_a;
-            ldbs[batch]         = prob.col_stride_b;
-            ldcs[batch]         = prob.col_stride_c;
-            ldds[batch]         = prob.col_stride_d;
-            strideas[batch]     = prob.batch_stride_a;
-            stridebs[batch]     = prob.batch_stride_b;
-            stridecs[batch]     = prob.batch_stride_c;
-            strideds[batch]     = prob.batch_stride_d;
-            batch_counts[batch] = 1;
-            inputs[batch].a     = (void*)(prob.batch_A[batch] + prob.buffer_offset_a);
-            inputs[batch].b     = (void*)(prob.batch_B[batch] + prob.buffer_offset_b);
-            inputs[batch].c     = (void*)(prob.batch_C[batch] + prob.buffer_offset_c);
-            inputs[batch].d     = (void*)(prob.batch_D[batch] + prob.buffer_offset_d);
-            inputs[batch].alpha = (void*)prob.alpha;
-            inputs[batch].beta  = (void*)prob.beta;
-        }
+            hipblaslt_ext::GemmProblemType problemType;
+            problemType.op_a         = (hipblasOperation_t)prob.trans_a;
+            problemType.op_b         = (hipblasOperation_t)prob.trans_b;
+            problemType.type_a       = hipblaslt_datatype<Ti>;
+            problemType.type_b       = hipblaslt_datatype<Ti>;
+            problemType.type_c       = hipblaslt_datatype<To>;
+            problemType.type_d       = hipblaslt_datatype<To>;
+            problemType.type_compute = hipblaslt_compute_type<Tc>;
 
-        gemm.setProblem(Ms,
-                        Ns,
-                        Ks,
-                        batch_counts,
-                        ldas,
-                        ldbs,
-                        ldcs,
-                        ldds,
-                        strideas,
-                        stridebs,
-                        stridecs,
-                        strideds,
-                        epilogues,
-                        inputs,
-                        problemType);
+            std::vector<int64_t>                     Ms(prob.batch_count);
+            std::vector<int64_t>                     Ns(prob.batch_count);
+            std::vector<int64_t>                     Ks(prob.batch_count);
+            std::vector<int64_t>                     ldas(prob.batch_count);
+            std::vector<int64_t>                     ldbs(prob.batch_count);
+            std::vector<int64_t>                     ldcs(prob.batch_count);
+            std::vector<int64_t>                     ldds(prob.batch_count);
+            std::vector<int64_t>                     strideas(prob.batch_count);
+            std::vector<int64_t>                     stridebs(prob.batch_count);
+            std::vector<int64_t>                     stridecs(prob.batch_count);
+            std::vector<int64_t>                     strideds(prob.batch_count);
+            std::vector<int64_t>                     batch_counts(prob.batch_count);
+            std::vector<hipblaslt_ext::GemmEpilogue> epilogues(prob.batch_count);
+            std::vector<hipblaslt_ext::GemmInputs>   inputs(prob.batch_count);
+
+            int batch_count = prob.batch_count;
+
+            std::vector<Ti const*> A(batch_count, nullptr);
+            std::vector<Ti const*> B(batch_count, nullptr);
+            std::vector<To*>       C(batch_count, nullptr);
+            std::vector<To*>       D(batch_count, nullptr);
+            if(prob.batch_A)
+            {
+                THROW_IF_HIP_ERROR(hipMemcpy((void*)(&A[0]),
+                                             prob.batch_A,
+                                             sizeof(void*) * batch_count,
+                                             hipMemcpyDeviceToHost));
+            }
+            if(prob.batch_B)
+            {
+                THROW_IF_HIP_ERROR(hipMemcpy((void*)(&B[0]),
+                                             prob.batch_B,
+                                             sizeof(void*) * batch_count,
+                                             hipMemcpyDeviceToHost));
+            }
+            if(prob.batch_C)
+            {
+                THROW_IF_HIP_ERROR(hipMemcpy((void*)(&C[0]),
+                                             prob.batch_C,
+                                             sizeof(void*) * batch_count,
+                                             hipMemcpyDeviceToHost));
+            }
+            if(prob.batch_D)
+            {
+                THROW_IF_HIP_ERROR(hipMemcpy((void*)(&D[0]),
+                                             prob.batch_D,
+                                             sizeof(void*) * batch_count,
+                                             hipMemcpyDeviceToHost));
+            }
+
+            for(int batch = 0; batch < batch_count; batch++)
+            {
+                Ms[batch]           = prob.m;
+                Ns[batch]           = prob.n;
+                Ks[batch]           = prob.k;
+                ldas[batch]         = prob.col_stride_a;
+                ldbs[batch]         = prob.col_stride_b;
+                ldcs[batch]         = prob.col_stride_c;
+                ldds[batch]         = prob.col_stride_d;
+                strideas[batch]     = prob.batch_stride_a;
+                stridebs[batch]     = prob.batch_stride_b;
+                stridecs[batch]     = prob.batch_stride_c;
+                strideds[batch]     = prob.batch_stride_d;
+                batch_counts[batch] = 1;
+                inputs[batch].a     = (void*)(A[batch] + prob.buffer_offset_a);
+                inputs[batch].b     = (void*)(B[batch] + prob.buffer_offset_b);
+                inputs[batch].c     = (void*)(C[batch] + prob.buffer_offset_c);
+                inputs[batch].d     = (void*)(D[batch] + prob.buffer_offset_d);
+                inputs[batch].alpha = (void*)prob.alpha;
+                inputs[batch].beta  = (void*)prob.beta;
+            }
+
+            gemm.setProblem(Ms,
+                            Ns,
+                            Ks,
+                            batch_counts,
+                            ldas,
+                            ldbs,
+                            ldcs,
+                            ldds,
+                            strideas,
+                            stridebs,
+                            stridecs,
+                            strideds,
+                            epilogues,
+                            inputs,
+                            problemType);
+        }
+        catch(...)
+        {
+            rocblas_internal_ostream msg;
+            print_if_verbose(
+                msg << "rocBLAS warning: hipBlasLT grouped gemm construction exception");
+        }
         return gemm;
     }
 
@@ -315,7 +359,8 @@ namespace
                 if(!solution_query)
                 {
                     rocblas_internal_ostream msg;
-                    print_if_verbose(msg << "rocBLAS error: hipBLASLt heuristic fetch failed!");
+                    print_if_verbose(msg
+                                     << "rocBLAS error: hipBLASLt default heuristic fetch failed!");
                     return rocblas_status_internal_error;
                 }
                 else
@@ -327,7 +372,7 @@ namespace
                 if(!solution_query)
                 {
                     rocblas_internal_ostream msg;
-                    print_if_verbose(msg << "rocBLAS warning: No hipBLASLt solution found");
+                    print_if_verbose(msg << "rocBLAS warning: No hipBLASLt default solution found");
                     return rocblas_status_not_implemented;
                 }
                 else
@@ -484,10 +529,25 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
         auto h_alpha = *(prob.alpha);
         auto h_beta  = *(prob.beta);
 
+        int batch_count = prob.batch_count;
+
+        std::vector<Ti const*> A(batch_count);
+        std::vector<Ti const*> B(batch_count);
+        std::vector<To*>       C(batch_count);
+        std::vector<To*>       D(batch_count);
+        RETURN_IF_HIP_ERROR(hipMemcpy(
+            (void*)(&A[0]), prob.batch_A, sizeof(void*) * batch_count, hipMemcpyDeviceToHost));
+        RETURN_IF_HIP_ERROR(hipMemcpy(
+            (void*)(&B[0]), prob.batch_B, sizeof(void*) * batch_count, hipMemcpyDeviceToHost));
+        RETURN_IF_HIP_ERROR(hipMemcpy(
+            (void*)(&C[0]), prob.batch_C, sizeof(void*) * batch_count, hipMemcpyDeviceToHost));
+        RETURN_IF_HIP_ERROR(hipMemcpy(
+            (void*)(&D[0]), prob.batch_D, sizeof(void*) * batch_count, hipMemcpyDeviceToHost));
+
         hipblaslt_ext::UserArguments* userArgs;
         hipHostMalloc(&userArgs, userArgsSize);
         gemm.getDefaultValueForDeviceUserArguments(userArgs);
-        for(int batch = 0; batch < prob.batch_count; batch++)
+        for(int batch = 0; batch < batch_count; batch++)
         {
             userArgs[batch].m        = prob.m;
             userArgs[batch].n        = prob.n;
@@ -501,10 +561,10 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
             userArgs[batch].strideC2 = prob.batch_stride_c;
             userArgs[batch].strideD2 = prob.batch_stride_d;
             userArgs[batch].batch    = 1;
-            userArgs[batch].a        = (void*)(prob.batch_A[batch] + prob.buffer_offset_a);
-            userArgs[batch].b        = (void*)(prob.batch_B[batch] + prob.buffer_offset_b);
-            userArgs[batch].c        = (void*)(prob.batch_C[batch] + prob.buffer_offset_c);
-            userArgs[batch].d        = (void*)(prob.batch_D[batch] + prob.buffer_offset_d);
+            userArgs[batch].a        = (void*)(A[batch] + prob.buffer_offset_a);
+            userArgs[batch].b        = (void*)(B[batch] + prob.buffer_offset_b);
+            userArgs[batch].c        = (void*)(C[batch] + prob.buffer_offset_c);
+            userArgs[batch].d        = (void*)(D[batch] + prob.buffer_offset_d);
 
             userArgs[batch].alpha[0] = convertScalarForHipblasLT(h_alpha);
             userArgs[batch].beta[0]  = convertScalarForHipblasLT(h_beta);
@@ -562,14 +622,16 @@ rocblas_status getAllSolutionsHipBlasLT(const RocblasContractionProblem<Ti, To, 
         {
             std::vector<hipblasLtMatmulHeuristicResult_t> heuristicResults;
             std::vector<hipblasOperation_t> ops = {HIPBLAS_OP_N, HIPBLAS_OP_T, HIPBLAS_OP_C};
-
+            hipblaslt_ext::GemmType         gemmType
+                = prob.batch_A == 0 ? hipblaslt_ext::GemmType::HIPBLASLT_GEMM
+                                    : hipblaslt_ext::GemmType::HIPBLASLT_GROUPED_GEMM;
             for(auto op1 : ops)
             {
                 for(auto op2 : ops)
                 {
                     std::vector<hipblasLtMatmulHeuristicResult_t> heuristicResults_temp;
                     auto fetch = hipblaslt_ext::getAllAlgos(handle,
-                                                            hipblaslt_ext::GemmType::HIPBLASLT_GEMM,
+                                                            gemmType,
                                                             op1,
                                                             op2,
                                                             hipblaslt_datatype<Ti>,
@@ -620,9 +682,12 @@ rocblas_status getAllSolutionsHipBlasLT(const RocblasContractionProblem<Ti, To, 
         }
         else if(option == CAN_SOLVE)
         {
+            hipblaslt_ext::GemmType gemmType
+                = prob.batch_A == 0 ? hipblaslt_ext::GemmType::HIPBLASLT_GEMM
+                                    : hipblaslt_ext::GemmType::HIPBLASLT_GROUPED_GEMM;
             std::vector<hipblasLtMatmulHeuristicResult_t> heuristicResults;
             auto                                          fetch = hipblaslt_ext::getAllAlgos(handle,
-                                                    hipblaslt_ext::GemmType::HIPBLASLT_GEMM,
+                                                    gemmType,
                                                     (hipblasOperation_t)prob.trans_a,
                                                     (hipblasOperation_t)prob.trans_b,
                                                     hipblaslt_datatype<Ti>,

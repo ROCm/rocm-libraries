@@ -290,34 +290,54 @@ public:
     }
 
     /*******************************************************************************
-     * This function determines whether or not to use the hipBLASLt backend based
-     * on the state of the environment variable and the current architecture.
-     *
+     * This function determines whether or not to try using the hipBLASLt backend
      * - If the enviornment variable is set, its value determines whether ot not to
-     *   use the hipBLASLt backend.
-     * - If the current architecture is supported, then the `prob_specific_useHipBLASLt`
-     *   input determines whether ot not to use the hipBLASLt backend.
-     * - Otherwise, the hipBLASLt backend is not used.
+     *   try the hipBLASLt backend.
+     * - Otherwise try when the current architecture is defaulted to hipBLASLt support
+     * - Always disable for any `batched` API when the current handle is in stream
+     *   capture mode (as hipblaslt batched dispatch does synchronous memory copies)
      ******************************************************************************/
-    auto useHipBLASLt(bool prob_specific_useHipBLASLt = true)
+    bool tryHipBLASLt(bool batched)
     {
+        bool status = false;
 
 #ifdef BUILD_WITH_HIPBLASLT
         if(hipblasltEnvVar < 0)
         {
             if(isDefaultHipBLASLtArch())
             {
-                return prob_specific_useHipBLASLt;
-            }
-            else
-            {
-                return false;
+                status = true;
             }
         }
-        return hipblasltEnvVar == 1;
-#else
-        return false;
+        else
+            status = hipblasltEnvVar == 1;
 #endif
+
+        if(status && batched)
+        {
+            status = !is_stream_in_capture_mode();
+        }
+
+        return status;
+    }
+
+    bool isHipBLASLtEnabled()
+    {
+        bool status = false;
+
+#ifdef BUILD_WITH_HIPBLASLT
+        if(hipblasltEnvVar < 0)
+        {
+            if(isDefaultHipBLASLtArch())
+            {
+                status = true;
+            }
+        }
+        else
+            status = hipblasltEnvVar == 1;
+#endif
+
+        return status;
     }
 
     inline int getDefaultDeviceMemorySize()
