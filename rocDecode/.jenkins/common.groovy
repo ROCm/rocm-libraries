@@ -30,6 +30,7 @@ def runTestCommand (platform, project) {
     String packageManager = 'apt -y'
     String toolsPackage = 'llvm-amdgpu-dev'
     String llvmLocation = '/opt/amdgpu/lib/x86_64-linux-gnu/llvm-20.1/bin'
+    boolean runHevcStability = true;
 
     if (platform.jenkinsLabel.contains('rhel')) {
         libLocation = ':/usr/local/lib'
@@ -43,6 +44,10 @@ def runTestCommand (platform, project) {
         packageManager = 'zypper -n'
         toolsPackage = 'llvm-amdgpu-devel'
         llvmLocation = '/opt/amdgpu/lib64/llvm-20.1/bin'
+    }
+
+    if (platform.jenkinsLabel.contains('gfx90a') || platform.jenkinsLabel.contains('gfx908')) {
+        runHevcStability = false;
     }
     
     String commitSha
@@ -90,6 +95,26 @@ def runTestCommand (platform, project) {
                             wget http://math-ci.amd.com/userContent/computer-vision/HevcConformance/*zip*/HevcConformance.zip
                             unzip HevcConformance.zip
                         fi
+                        FILE_COUNT=\$(find \${JENKINS_HOME_DIR}/rocDecode/AvcStability -type f | wc -l)
+                        # Check if there are 22 files
+                        if [ "\$FILE_COUNT" -ne 22 ]; then
+                            echo "wrong file count"
+                            ls
+                            cd \${JENKINS_HOME_DIR}/rocDecode
+                            wget http://math-ci.amd.com/userContent/computer-vision/rocDecodeStability/AvcStability.zip
+                            unzip AvcStability.zip
+                        fi
+                        if ${runHevcStability}; then
+                            FILE_COUNT=\$(find \${JENKINS_HOME_DIR}/rocDecode/HevcStability -type f | wc -l)
+                            # Check if there are 44 files
+                            if [ "\$FILE_COUNT" -ne 44 ]; then
+                                echo "wrong file count"
+                                ls
+                                cd \${JENKINS_HOME_DIR}/rocDecode
+                                wget http://math-ci.amd.com/userContent/computer-vision/rocDecodeStability/HevcStability.zip
+                                unzip HevcStability.zip
+                            fi
+                        fi
                         if [ ! -f \${JENKINS_HOME_DIR}/rocDecode/data1.img ]; then
                             echo "File does not exist."
                             cd \${JENKINS_HOME_DIR}/rocDecode
@@ -104,10 +129,16 @@ def runTestCommand (platform, project) {
                         wget http://math-ci.amd.com/userContent/computer-vision/rocDecodeConformance/Vp9Conformance.zip
                         wget http://math-ci.amd.com/userContent/computer-vision/rocDecodeConformance/Av1Conformance_v1.0.zip
                         wget http://math-ci.amd.com/userContent/computer-vision/rocDecodeConformance/AvcConformance.zip
+                        wget http://math-ci.amd.com/userContent/computer-vision/rocDecodeStability/AvcStability.zip
                         unzip HevcConformance.zip
                         unzip Vp9Conformance.zip
                         unzip Av1Conformance_v1.0.zip
                         unzip AvcConformance.zip
+                        unzip AvcStability.zip
+                        if ${runHevcStability}; then
+                            wget http://math-ci.amd.com/userContent/computer-vision/rocDecodeStability/HevcStability.zip
+                            unzip HevcStability.zip
+                        fi
                     fi
         """
         def command = """#!/usr/bin/env bash
@@ -143,6 +174,14 @@ def runTestCommand (platform, project) {
                     cd ../
                     mkdir av1-conformance && cd av1-conformance
                     python3 /opt/rocm/share/rocdecode/test/testScripts/run_rocDecode_Conformance.py --videodecode_exe ./../../rocdecode-sample/videodecode --files_directory \${JENKINS_HOME_DIR}/rocDecode/Av1Conformance_v1.0 --results_directory .
+                    echo rocdecode stability tests
+                    cd ../../ && mkdir -p stability && cd stability
+                    mkdir avc-stability && cd avc-stability
+                    python3 /opt/rocm/share/rocdecode/test/testScripts/run_rocDecodeSamples.py --videodecode_exe ./../../rocdecode-sample/videodecode --files_directory \${JENKINS_HOME_DIR}/rocDecode/AvcStability --results_directory . --check_decode_status 1
+                    if ${runHevcStability}; then
+                        cd ../ && mkdir hevc-stability && cd hevc-stability
+                        python3 /opt/rocm/share/rocdecode/test/testScripts/run_rocDecodeSamples.py --videodecode_exe ./../../rocdecode-sample/videodecode --files_directory \${JENKINS_HOME_DIR}/rocDecode//HevcStability --results_directory . --check_decode_status 1
+                    fi
                     cd ../../
                     echo rocdecode-sample - videoDecode with data1 video test
                     cd rocdecode-sample
