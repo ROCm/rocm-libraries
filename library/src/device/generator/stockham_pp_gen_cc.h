@@ -22,13 +22,14 @@
 #include "stockham_gen_cc.h"
 
 // TODO: Once partial pass is fully configurable in kernel-generator.py:
-//      - Test all "lds_linear=false" cases.
 //      - Test with factors_pp.size() > 1.
 //      - Revisit all usages of transforms_per_block_pp and threads_per_transform.
 //      - Different input/output strides.
 //      - Revisit mod 128 usage in calculate_offsets() with different input lengths,
 //        (logic is required to work with nbatch > 1)
 //      - Revisit factor 192 logic in calculate_offsets() with different input lengths
+//      - Revisit and test local transpose logic for different input lengths
+
 struct StockhamPartialPassKernelCC : public StockhamKernelCC
 {
     explicit StockhamPartialPassKernelCC(const StockhamGeneratorSpecs& specs,
@@ -54,12 +55,10 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
     std::vector<size_t> factors_pp;
 
     Variable thread_lds{"thread_lds", "unsigned int"};
-    Variable idx_lds{"idx_lds", "unsigned int"};
     Variable stride_lds_pp{"stride_lds_pp", "unsigned int"};
     Variable offset_lds_pp{"offset_lds_pp", "unsigned int"};
 
     Variable tid_hor_lds{"tid_hor_lds", "unsigned int"};
-    Variable offfset_unbatched{"offfset_unbatched", "unsigned int"};
     Variable tid_hor_pp{"tid_hor_pp", "unsigned int"};
     Variable offset_tid_hor{"offset_tid_hor", "unsigned int"};
     Variable offset_pp{"offset_pp", "unsigned int"};

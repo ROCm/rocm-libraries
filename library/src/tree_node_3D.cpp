@@ -644,6 +644,11 @@ void RC3DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
 
     if(CheckPartialPassSupport())
     {
+        // TODO: Child nodes currently hardcoded to a x+z configuration
+        //       in 3D partial-pass. Add support for other configurations,
+        //       e.g., x+y, y+z, once partial pass is fully configurable
+        //       in kernel-generator.py.
+
         // work along y will be split between x and z
         applyPartialPass = true;
 

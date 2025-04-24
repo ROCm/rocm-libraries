@@ -74,6 +74,9 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
 
         if(node.applyPartialPass)
         {
+            // TODO: Hardcoded configuration for 64 x 64 x 64.
+            // Remove this once the partial-pass kernels are
+            // fully configurable in kernel-generator.py.
             if(node.scheme == CS_KERNEL_STOCKHAM_BLOCK_CC)
             {
                 kernel->threads_per_transform[0] = 8;

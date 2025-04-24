@@ -456,7 +456,6 @@ std::string stockham_rtc(const StockhamGeneratorSpecs& specs,
         src += large_twiddles_h;
     // append the neccessary functions only
     append_radix_h(src, all_factors);
-
     // SBCCs don't need this
     if(scheme != CS_KERNEL_STOCKHAM_BLOCK_CC)
         src += real2complex_device_h;
