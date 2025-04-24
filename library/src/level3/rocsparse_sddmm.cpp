@@ -35,37 +35,9 @@
 
 namespace rocsparse
 {
-    template <rocsparse_format FORMAT, typename I, typename J, typename T, typename... Ts>
-    static rocsparse_status sddmm_buffer_size_dispatch_alg(rocsparse_sddmm_alg alg, Ts&&... ts)
-    {
-        ROCSPARSE_ROUTINE_TRACE;
-
-        switch(alg)
-        {
-        case rocsparse_sddmm_alg_default:
-        {
-            RETURN_IF_ROCSPARSE_ERROR(
-                (rocsparse::rocsparse_sddmm_st<FORMAT, rocsparse_sddmm_alg_default, I, J, T>::
-                     buffer_size_template(ts...)));
-            return rocsparse_status_success;
-        }
-        case rocsparse_sddmm_alg_dense:
-        {
-            RETURN_IF_ROCSPARSE_ERROR(
-                (rocsparse::rocsparse_sddmm_st<FORMAT, rocsparse_sddmm_alg_dense, I, J, T>::
-                     buffer_size_template(ts...)));
-            return rocsparse_status_success;
-        }
-        }
-        // LCOV_EXCL_START
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-        // LCOV_EXCL_STOP
-    }
 
     template <typename T, typename I, typename J, typename... Ts>
-    static rocsparse_status sddmm_buffer_size_dispatch_format(rocsparse_format    format,
-                                                              rocsparse_sddmm_alg alg,
-                                                              Ts&&... ts)
+    static rocsparse_status sddmm_buffer_size_dispatch_format(rocsparse_format format, Ts&&... ts)
     {
         ROCSPARSE_ROUTINE_TRACE;
 
@@ -74,40 +46,40 @@ namespace rocsparse
         case rocsparse_format_coo:
         {
             RETURN_IF_ROCSPARSE_ERROR(
-                (rocsparse::sddmm_buffer_size_dispatch_alg<rocsparse_format_coo, I, I, T>(alg,
-                                                                                          ts...)));
+                (rocsparse::rocsparse_sddmm_st<rocsparse_format_coo, I, I, T>::buffer_size_template(
+                    ts...)));
             return rocsparse_status_success;
         }
 
         case rocsparse_format_csr:
         {
             RETURN_IF_ROCSPARSE_ERROR(
-                (rocsparse::sddmm_buffer_size_dispatch_alg<rocsparse_format_csr, I, J, T>(alg,
-                                                                                          ts...)));
+                (rocsparse::rocsparse_sddmm_st<rocsparse_format_csr, I, J, T>::buffer_size_template(
+                    ts...)));
             return rocsparse_status_success;
         }
 
         case rocsparse_format_coo_aos:
         {
             RETURN_IF_ROCSPARSE_ERROR(
-                (rocsparse::sddmm_buffer_size_dispatch_alg<rocsparse_format_coo_aos, I, I, T>(
-                    alg, ts...)));
+                (rocsparse::rocsparse_sddmm_st<rocsparse_format_coo_aos, I, I, T>::
+                     buffer_size_template(ts...)));
             return rocsparse_status_success;
         }
 
         case rocsparse_format_csc:
         {
             RETURN_IF_ROCSPARSE_ERROR(
-                (rocsparse::sddmm_buffer_size_dispatch_alg<rocsparse_format_csc, I, J, T>(alg,
-                                                                                          ts...)));
+                (rocsparse::rocsparse_sddmm_st<rocsparse_format_csc, I, J, T>::buffer_size_template(
+                    ts...)));
             return rocsparse_status_success;
         }
 
         case rocsparse_format_ell:
         {
             RETURN_IF_ROCSPARSE_ERROR(
-                (rocsparse::sddmm_buffer_size_dispatch_alg<rocsparse_format_ell, I, I, T>(alg,
-                                                                                          ts...)));
+                (rocsparse::rocsparse_sddmm_st<rocsparse_format_ell, I, I, T>::buffer_size_template(
+                    ts...)));
             return rocsparse_status_success;
         }
         case rocsparse_format_bell:
@@ -123,7 +95,6 @@ namespace rocsparse
 
     template <typename T, typename I, typename J>
     static rocsparse_status sddmm_buffer_size_dispatch(rocsparse_format            format,
-                                                       rocsparse_sddmm_alg         algorithm,
                                                        rocsparse_handle            handle,
                                                        rocsparse_operation         trans_A,
                                                        rocsparse_operation         trans_B,
@@ -139,7 +110,6 @@ namespace rocsparse
         ROCSPARSE_ROUTINE_TRACE;
 
         return sddmm_buffer_size_dispatch_format<T, I, J>(format,
-                                                          algorithm,
                                                           handle,
                                                           trans_A,
                                                           trans_B,
@@ -154,7 +124,6 @@ namespace rocsparse
     }
 
     typedef rocsparse_status (*sddmm_buffer_size_template_t)(rocsparse_format            format,
-                                                             rocsparse_sddmm_alg         algorithm,
                                                              rocsparse_handle            handle,
                                                              rocsparse_operation         trans_A,
                                                              rocsparse_operation         trans_B,
@@ -320,19 +289,8 @@ try
                                                    rocsparse::determine_I_index_type(C),
                                                    rocsparse::determine_J_index_type(C)));
 
-    RETURN_IF_ROCSPARSE_ERROR(sddmm_buffer_size_function(C->format,
-                                                         alg,
-                                                         handle,
-                                                         trans_A,
-                                                         trans_B,
-                                                         alpha,
-                                                         A,
-                                                         B,
-                                                         beta,
-                                                         C,
-                                                         compute_type,
-                                                         alg,
-                                                         buffer_size));
+    RETURN_IF_ROCSPARSE_ERROR(sddmm_buffer_size_function(
+        C->format, handle, trans_A, trans_B, alpha, A, B, beta, C, compute_type, alg, buffer_size));
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }
@@ -344,37 +302,9 @@ catch(...)
 
 namespace rocsparse
 {
-    template <rocsparse_format FORMAT, typename T, typename I, typename J, typename... Ts>
-    static rocsparse_status sddmm_preprocess_dispatch_alg(rocsparse_sddmm_alg alg, Ts&&... ts)
-    {
-        ROCSPARSE_ROUTINE_TRACE;
-
-        switch(alg)
-        {
-        case rocsparse_sddmm_alg_default:
-        {
-            RETURN_IF_ROCSPARSE_ERROR(
-                (rocsparse::rocsparse_sddmm_st<FORMAT, rocsparse_sddmm_alg_default, I, J, T>::
-                     preprocess_template(ts...)));
-            return rocsparse_status_success;
-        }
-        case rocsparse_sddmm_alg_dense:
-        {
-            RETURN_IF_ROCSPARSE_ERROR(
-                (rocsparse::rocsparse_sddmm_st<FORMAT, rocsparse_sddmm_alg_dense, I, J, T>::
-                     preprocess_template(ts...)));
-            return rocsparse_status_success;
-        }
-        }
-        // LCOV_EXCL_START
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-        // LCOV_EXCL_STOP
-    }
 
     template <typename T, typename I, typename J, typename... Ts>
-    static rocsparse_status sddmm_preprocess_dispatch_format(rocsparse_format    format,
-                                                             rocsparse_sddmm_alg alg,
-                                                             Ts&&... ts)
+    static rocsparse_status sddmm_preprocess_dispatch_format(rocsparse_format format, Ts&&... ts)
     {
         ROCSPARSE_ROUTINE_TRACE;
 
@@ -383,40 +313,40 @@ namespace rocsparse
         case rocsparse_format_coo:
         {
             RETURN_IF_ROCSPARSE_ERROR(
-                (rocsparse::sddmm_preprocess_dispatch_alg<rocsparse_format_coo, T, I, I>(alg,
-                                                                                         ts...)));
+                (rocsparse::rocsparse_sddmm_st<rocsparse_format_coo, I, I, T>::preprocess_template(
+                    ts...)));
             return rocsparse_status_success;
         }
 
         case rocsparse_format_csr:
         {
             RETURN_IF_ROCSPARSE_ERROR(
-                (rocsparse::sddmm_preprocess_dispatch_alg<rocsparse_format_csr, T, I, J>(alg,
-                                                                                         ts...)));
+                (rocsparse::rocsparse_sddmm_st<rocsparse_format_csr, I, J, T>::preprocess_template(
+                    ts...)));
             return rocsparse_status_success;
         }
 
         case rocsparse_format_coo_aos:
         {
             RETURN_IF_ROCSPARSE_ERROR(
-                (rocsparse::sddmm_preprocess_dispatch_alg<rocsparse_format_coo_aos, T, I, I>(
-                    alg, ts...)));
+                (rocsparse::rocsparse_sddmm_st<rocsparse_format_coo_aos, I, I, T>::
+                     preprocess_template(ts...)));
             return rocsparse_status_success;
         }
 
         case rocsparse_format_csc:
         {
             RETURN_IF_ROCSPARSE_ERROR(
-                (rocsparse::sddmm_preprocess_dispatch_alg<rocsparse_format_csc, T, I, J>(alg,
-                                                                                         ts...)));
+                (rocsparse::rocsparse_sddmm_st<rocsparse_format_csc, I, J, T>::preprocess_template(
+                    ts...)));
             return rocsparse_status_success;
         }
 
         case rocsparse_format_ell:
         {
             RETURN_IF_ROCSPARSE_ERROR(
-                (rocsparse::sddmm_preprocess_dispatch_alg<rocsparse_format_ell, T, I, I>(alg,
-                                                                                         ts...)));
+                (rocsparse::rocsparse_sddmm_st<rocsparse_format_ell, I, I, T>::preprocess_template(
+                    ts...)));
             return rocsparse_status_success;
         }
 
@@ -436,7 +366,6 @@ namespace rocsparse
 
     template <typename T, typename I, typename J>
     static rocsparse_status sddmm_preprocess_dispatch(rocsparse_format            format,
-                                                      rocsparse_sddmm_alg         algorithm,
                                                       rocsparse_handle            handle,
                                                       rocsparse_operation         trans_A,
                                                       rocsparse_operation         trans_B,
@@ -452,7 +381,6 @@ namespace rocsparse
         ROCSPARSE_ROUTINE_TRACE;
 
         return sddmm_preprocess_dispatch_format<T, I, J>(format,
-                                                         algorithm,
                                                          handle,
                                                          trans_A,
                                                          trans_B,
@@ -467,7 +395,6 @@ namespace rocsparse
     }
 
     typedef rocsparse_status (*sddmm_preprocess_template_t)(rocsparse_format            format,
-                                                            rocsparse_sddmm_alg         algorithm,
                                                             rocsparse_handle            handle,
                                                             rocsparse_operation         trans_A,
                                                             rocsparse_operation         trans_B,
@@ -635,19 +562,8 @@ try
                                                   rocsparse::determine_I_index_type(C),
                                                   rocsparse::determine_J_index_type(C)));
 
-    RETURN_IF_ROCSPARSE_ERROR(sddmm_preprocess_function(C->format,
-                                                        alg,
-                                                        handle,
-                                                        trans_A,
-                                                        trans_B,
-                                                        alpha,
-                                                        A,
-                                                        B,
-                                                        beta,
-                                                        C,
-                                                        compute_type,
-                                                        alg,
-                                                        temp_buffer));
+    RETURN_IF_ROCSPARSE_ERROR(sddmm_preprocess_function(
+        C->format, handle, trans_A, trans_B, alpha, A, B, beta, C, compute_type, alg, temp_buffer));
 
     return rocsparse_status_success;
     // LCOV_EXCL_START
@@ -660,34 +576,9 @@ catch(...)
 
 namespace rocsparse
 {
-    template <rocsparse_format FORMAT, typename T, typename I, typename J, typename... Ts>
-    static rocsparse_status sddmm_dispatch_alg(rocsparse_sddmm_alg alg, Ts&&... ts)
-    {
-        ROCSPARSE_ROUTINE_TRACE;
-
-        switch(alg)
-        {
-        case rocsparse_sddmm_alg_default:
-        {
-            RETURN_IF_ROCSPARSE_ERROR(
-                (rocsparse::rocsparse_sddmm_st<FORMAT, rocsparse_sddmm_alg_default, I, J, T>::
-                     compute_template(ts...)));
-            return rocsparse_status_success;
-        }
-        case rocsparse_sddmm_alg_dense:
-        {
-            return rocsparse::rocsparse_sddmm_st<FORMAT, rocsparse_sddmm_alg_dense, I, J, T>::
-                compute_template(ts...);
-        }
-        }
-        // LCOV_EXCL_START
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-        // LCOV_EXCL_STOP
-    }
 
     template <typename T, typename I, typename J, typename... Ts>
-    static rocsparse_status
-        sddmm_dispatch_format(rocsparse_format format, rocsparse_sddmm_alg alg, Ts&&... ts)
+    static rocsparse_status sddmm_dispatch_format(rocsparse_format format, Ts&&... ts)
     {
         ROCSPARSE_ROUTINE_TRACE;
 
@@ -696,36 +587,40 @@ namespace rocsparse
         case rocsparse_format_coo:
         {
             RETURN_IF_ROCSPARSE_ERROR(
-                (rocsparse::sddmm_dispatch_alg<rocsparse_format_coo, T, I, I>(alg, ts...)));
+                (rocsparse::rocsparse_sddmm_st<rocsparse_format_coo, I, I, T>::compute_template(
+                    ts...)));
             return rocsparse_status_success;
         }
 
         case rocsparse_format_csr:
         {
             RETURN_IF_ROCSPARSE_ERROR(
-                (rocsparse::sddmm_dispatch_alg<rocsparse_format_csr, T, I, J>(alg, ts...)));
+                (rocsparse::rocsparse_sddmm_st<rocsparse_format_csr, I, J, T>::compute_template(
+                    ts...)));
             return rocsparse_status_success;
         }
 
         case rocsparse_format_coo_aos:
         {
-
             RETURN_IF_ROCSPARSE_ERROR(
-                (rocsparse::sddmm_dispatch_alg<rocsparse_format_coo_aos, T, I, I>(alg, ts...)));
+                (rocsparse::rocsparse_sddmm_st<rocsparse_format_coo_aos, I, I, T>::compute_template(
+                    ts...)));
             return rocsparse_status_success;
         }
 
         case rocsparse_format_csc:
         {
             RETURN_IF_ROCSPARSE_ERROR(
-                (rocsparse::sddmm_dispatch_alg<rocsparse_format_csc, T, I, J>(alg, ts...)));
+                (rocsparse::rocsparse_sddmm_st<rocsparse_format_csc, I, J, T>::compute_template(
+                    ts...)));
             return rocsparse_status_success;
         }
 
         case rocsparse_format_ell:
         {
             RETURN_IF_ROCSPARSE_ERROR(
-                (rocsparse::sddmm_dispatch_alg<rocsparse_format_ell, T, I, I>(alg, ts...)));
+                (rocsparse::rocsparse_sddmm_st<rocsparse_format_ell, I, I, T>::compute_template(
+                    ts...)));
             return rocsparse_status_success;
         }
 
@@ -745,7 +640,6 @@ namespace rocsparse
 
     template <typename T, typename I, typename J>
     static rocsparse_status sddmm_dispatch(rocsparse_format            format,
-                                           rocsparse_sddmm_alg         algorithm,
                                            rocsparse_handle            handle,
                                            rocsparse_operation         trans_A,
                                            rocsparse_operation         trans_B,
@@ -761,7 +655,6 @@ namespace rocsparse
         ROCSPARSE_ROUTINE_TRACE;
 
         return sddmm_dispatch_format<T, I, J>(format,
-                                              algorithm,
                                               handle,
                                               trans_A,
                                               trans_B,
@@ -776,7 +669,6 @@ namespace rocsparse
     }
 
     typedef rocsparse_status (*sddmm_template_t)(rocsparse_format            format,
-                                                 rocsparse_sddmm_alg         algorithm,
                                                  rocsparse_handle            handle,
                                                  rocsparse_operation         trans_A,
                                                  rocsparse_operation         trans_B,
@@ -942,19 +834,8 @@ try
                                                              rocsparse::determine_I_index_type(C),
                                                              rocsparse::determine_J_index_type(C)));
 
-    RETURN_IF_ROCSPARSE_ERROR(sddmm_function(C->format,
-                                             alg,
-                                             handle,
-                                             trans_A,
-                                             trans_B,
-                                             alpha,
-                                             A,
-                                             B,
-                                             beta,
-                                             C,
-                                             compute_type,
-                                             alg,
-                                             temp_buffer));
+    RETURN_IF_ROCSPARSE_ERROR(sddmm_function(
+        C->format, handle, trans_A, trans_B, alpha, A, B, beta, C, compute_type, alg, temp_buffer));
 
     return rocsparse_status_success;
     // LCOV_EXCL_START

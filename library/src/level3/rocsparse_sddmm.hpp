@@ -28,7 +28,7 @@
 
 namespace rocsparse
 {
-    template <rocsparse_format FORMAT, rocsparse_sddmm_alg ALG, typename I, typename J, typename T>
+    template <rocsparse_format FORMAT, typename I, typename J, typename T>
     struct rocsparse_sddmm_st
     {
 
@@ -118,7 +118,7 @@ namespace rocsparse
             case rocsparse_format_csr:
             case rocsparse_format_coo:
             {
-                RETURN_IF_ROCSPARSE_ERROR((rocsparse_sddmm_st<FORMAT, ALG, I, J, T>::buffer_size(
+                RETURN_IF_ROCSPARSE_ERROR((rocsparse_sddmm_st<FORMAT, I, J, T>::buffer_size(
                     handle,
                     trans_A,
                     trans_B,
@@ -146,7 +146,7 @@ namespace rocsparse
 
             case rocsparse_format_csc:
             {
-                RETURN_IF_ROCSPARSE_ERROR((rocsparse_sddmm_st<FORMAT, ALG, I, J, T>::buffer_size(
+                RETURN_IF_ROCSPARSE_ERROR((rocsparse_sddmm_st<FORMAT, I, J, T>::buffer_size(
                     handle,
                     trans_A,
                     trans_B,
@@ -173,7 +173,7 @@ namespace rocsparse
             }
             case rocsparse_format_ell:
             {
-                RETURN_IF_ROCSPARSE_ERROR((rocsparse_sddmm_st<FORMAT, ALG, I, J, T>::buffer_size(
+                RETURN_IF_ROCSPARSE_ERROR((rocsparse_sddmm_st<FORMAT, I, J, T>::buffer_size(
                     handle,
                     trans_A,
                     trans_B,
@@ -201,7 +201,7 @@ namespace rocsparse
 
             case rocsparse_format_coo_aos:
             {
-                RETURN_IF_ROCSPARSE_ERROR((rocsparse_sddmm_st<FORMAT, ALG, I, J, T>::buffer_size(
+                RETURN_IF_ROCSPARSE_ERROR((rocsparse_sddmm_st<FORMAT, I, J, T>::buffer_size(
                     handle,
                     trans_A,
                     trans_B,
@@ -249,7 +249,7 @@ namespace rocsparse
             case rocsparse_format_csr:
             case rocsparse_format_coo:
             {
-                RETURN_IF_ROCSPARSE_ERROR((rocsparse_sddmm_st<FORMAT, ALG, I, J, T>::preprocess(
+                RETURN_IF_ROCSPARSE_ERROR((rocsparse_sddmm_st<FORMAT, I, J, T>::preprocess(
                     handle,
                     trans_A,
                     trans_B,
@@ -276,7 +276,7 @@ namespace rocsparse
             }
             case rocsparse_format_csc:
             {
-                RETURN_IF_ROCSPARSE_ERROR((rocsparse_sddmm_st<FORMAT, ALG, I, J, T>::preprocess(
+                RETURN_IF_ROCSPARSE_ERROR((rocsparse_sddmm_st<FORMAT, I, J, T>::preprocess(
                     handle,
                     trans_A,
                     trans_B,
@@ -303,7 +303,7 @@ namespace rocsparse
             }
             case rocsparse_format_ell:
             {
-                RETURN_IF_ROCSPARSE_ERROR((rocsparse_sddmm_st<FORMAT, ALG, I, J, T>::preprocess(
+                RETURN_IF_ROCSPARSE_ERROR((rocsparse_sddmm_st<FORMAT, I, J, T>::preprocess(
                     handle,
                     trans_A,
                     trans_B,
@@ -330,7 +330,7 @@ namespace rocsparse
             }
             case rocsparse_format_coo_aos:
             {
-                RETURN_IF_ROCSPARSE_ERROR((rocsparse_sddmm_st<FORMAT, ALG, I, J, T>::preprocess(
+                RETURN_IF_ROCSPARSE_ERROR((rocsparse_sddmm_st<FORMAT, I, J, T>::preprocess(
                     handle,
                     trans_A,
                     trans_B,
@@ -378,7 +378,7 @@ namespace rocsparse
             case rocsparse_format_csr:
             case rocsparse_format_coo:
             {
-                RETURN_IF_ROCSPARSE_ERROR((rocsparse_sddmm_st<FORMAT, ALG, I, J, T>::compute(
+                RETURN_IF_ROCSPARSE_ERROR((rocsparse_sddmm_st<FORMAT, I, J, T>::compute(
                     handle,
                     trans_A,
                     trans_B,
@@ -405,7 +405,7 @@ namespace rocsparse
             }
             case rocsparse_format_csc:
             {
-                RETURN_IF_ROCSPARSE_ERROR((rocsparse_sddmm_st<FORMAT, ALG, I, J, T>::compute(
+                RETURN_IF_ROCSPARSE_ERROR((rocsparse_sddmm_st<FORMAT, I, J, T>::compute(
                     handle,
                     trans_A,
                     trans_B,
@@ -432,7 +432,7 @@ namespace rocsparse
             }
             case rocsparse_format_ell:
             {
-                RETURN_IF_ROCSPARSE_ERROR((rocsparse_sddmm_st<FORMAT, ALG, I, J, T>::compute(
+                RETURN_IF_ROCSPARSE_ERROR((rocsparse_sddmm_st<FORMAT, I, J, T>::compute(
                     handle,
                     trans_A,
                     trans_B,
@@ -459,7 +459,7 @@ namespace rocsparse
             }
             case rocsparse_format_coo_aos:
             {
-                RETURN_IF_ROCSPARSE_ERROR((rocsparse_sddmm_st<FORMAT, ALG, I, J, T>::compute(
+                RETURN_IF_ROCSPARSE_ERROR((rocsparse_sddmm_st<FORMAT, I, J, T>::compute(
                     handle,
                     trans_A,
                     trans_B,
