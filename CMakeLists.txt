@@ -36,9 +36,10 @@ option(BUILD_CUDA "Look for CUDA and use that as a backend if found" OFF)
 include(CMakeDependentOption)
 cmake_dependent_option(HIPSPARSELT_ENABLE_MARKER "Enable roctx marker in hipSPARSELt" ON "BUILD_SHARED_LIBS" OFF)
 
-# IF cuda backend disable clients tests.
+# IF cuda backend disable clients tests and marker.
 if(BUILD_CUDA)
     set(BUILD_CLIENTS_TESTS OFF)
+    set(HIPSPARSELT_ENABLE_MARKER OFF)
 endif()
 
 # This will add compile option: -std=c++17
