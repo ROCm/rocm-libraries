@@ -56,7 +56,8 @@ struct make_vector_type
 
 /// \brief Empty type used as a placeholder, usually used to flag that given
 /// template parameter should not be used.
-struct empty_type {};
+struct empty_type
+{};
 
 /// \brief A decomposer that must be passed to the radix sort algorithms when
 /// sorting keys that are arithmetic types.
@@ -76,11 +77,19 @@ using bfloat16 = ::hip_bfloat16;
 
 /// \brief The lane_mask_type is an integer that contains one bit per thread.
 ///
-/// The total number of bits is equal to the total number of threads in a
-/// warp. Used to for warp-level operations.
-/// \note This is defined only on the device side.
-using lane_mask_type
-    = std::conditional_t<arch::wavefront::min_size() == 32, unsigned int, unsigned long long int>;
+/// When targeting AMDGCN, the total number of bits is equal to the total
+/// number of threads in a warp. Used for warp-level operations. When
+/// targeting SPIR-V, it assumes 64 threads per warp.
+///
+/// \note When called on the host, assumes 64-bit wide masks.
+///
+/// \note When targeting SPIR-V, this type will be 64-bit wide. Extra
+/// precaution must be taken as the number of bits in this type is not
+/// always the same as the number of lanes.
+using lane_mask_type = std::conditional_t<::rocprim::arch::wavefront::get_target()
+                                              == ::rocprim::arch::wavefront::target::size32,
+                                          unsigned int,
+                                          unsigned long long int>;
 
 /// \brief Native half-precision floating point type
 using native_half = _Float16;

@@ -23,6 +23,9 @@
 
 #include "../config.hpp"
 
+#include <hip/hip_runtime.h>
+#include <limits>
+
 BEGIN_ROCPRIM_NAMESPACE
 
 /// \brief Utilities to query architecture details.

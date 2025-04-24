@@ -21,8 +21,12 @@
 #ifndef ROCPRIM_INTRINSICS_WARP_HPP_
 #define ROCPRIM_INTRINSICS_WARP_HPP_
 
+#include "arch.hpp"
+
 #include "../config.hpp"
 #include "../types.hpp"
+
+#include <hip/device_functions.h>
 
 #include <type_traits>
 
@@ -50,14 +54,16 @@ ROCPRIM_DEVICE ROCPRIM_INLINE
 unsigned int masked_bit_count(lane_mask_type x, unsigned int add = 0)
 {
     int c;
-    if constexpr(arch::wavefront::min_size() == 32)
+    c = ::__builtin_amdgcn_mbcnt_lo(static_cast<unsigned int>(x), add);
+    if constexpr(sizeof(lane_mask_type) == 8)
     {
-        c = ::__builtin_amdgcn_mbcnt_lo(x, add);
-    }
-    else
-    {
-        c = ::__builtin_amdgcn_mbcnt_lo(static_cast<int>(x), add);
-        c = ::__builtin_amdgcn_mbcnt_hi(static_cast<int>(x >> 32), c);
+        // SPIR-V: We assumed 64 threads per wave, but this might not
+        // be correct. Do an extra check to only do the upper half, when
+        // there actually is an upper half.
+        if(::rocprim::arch::wavefront::size() == ROCPRIM_WARP_SIZE_64)
+        {
+            c = ::__builtin_amdgcn_mbcnt_hi(static_cast<unsigned int>(x >> 32), c);
+        }
     }
     return c;
 }
