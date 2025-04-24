@@ -4,18 +4,24 @@ Full documentation forrocALUTION is available at [https://rocm.docs.amd.com/proj
 
 ## (Unreleased) rocALUTION 3.2.4
 
-## rocALUTION 3.2.3 for ROCm 6.5.0
+## rocALUTION 3.2.4 for ROCm 6.5.0
 
 ### Added
-* The `-a` option has been added to the `rmake.py` build script. This option provides a way to select specific architectures when building on Windows.
 * Added support for gfx950.
 
 ### Optimized
 * Improved the user documentation
 
 ### Resolved issues
-* Fixed an issue where the `HIP_PATH` environment variable was being ignored when compiling on Windows.
 * Fix for GPU hashing algorithm when not compiling with -O2/O3
+
+## rocALUTION 3.2.3 for ROCm 6.4.1
+
+### Added
+* The `-a` option has been added to the `rmake.py` build script. This option provides a way to select specific architectures when building on Windows.
+
+### Resolved issues
+* Fixed an issue where the `HIP_PATH` environment variable was being ignored when compiling on Windows.
 
 ## rocALUTION 3.2.2 for ROCm 6.4.0
 
