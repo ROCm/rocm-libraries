@@ -1105,6 +1105,7 @@ class Solution(collections.abc.Mapping):
 
 
     if state["ProblemType"]["Sparse"]:
+      state["LocalWriteUseSgprMetadata"] = False
       if state["ProblemType"]["Sparse"] == 2:
         if not state["DirectToVgprSparseMetadata"]:
           state["ThreadTileMetadata"] = state["ThreadTileB"]
@@ -1112,7 +1113,6 @@ class Solution(collections.abc.Mapping):
           state["MacroTileMetadata"] = state["MacroTileB"]
           state["WaveSeparateGlobalReadMetadata"] = state["WaveSeparateGlobalReadB"]
           state["DirectToLdsMetadata"] = False
-          state["LocalWriteUseSgprMetadat"] = False
           state["ProblemType"]["MirrorDimsMetadata"]  = list(state["ProblemType"]["MirrorDimsB"])
           state["VectorWidthMetadata"] = state["VectorWidthB"]
         if state["EnableMatrixInstruction"]:
@@ -1124,7 +1124,6 @@ class Solution(collections.abc.Mapping):
           state["MacroTileMetadata"] = state["MacroTileA"]
           state["WaveSeparateGlobalReadMetadata"] = state["WaveSeparateGlobalReadA"]
           state["DirectToLdsMetadata"] = False
-          state["LocalWriteUseSgprMetadat"] = False
           state["ProblemType"]["MirrorDimsMetadata"]  = list(state["ProblemType"]["MirrorDimsA"])
           state["VectorWidthMetadata"] = state["VectorWidthA"]
         if state["EnableMatrixInstruction"]:
@@ -2521,12 +2520,13 @@ class Solution(collections.abc.Mapping):
     ldsNumBytesA, ldsNumBytesAlignedA, ldsNumBytesB, ldsNumBytesAlignedB, ldsNumBytesMetadata, ldsNumBytesAlignedMetadata = calcLdsNumBytes(state["LdsPadA"], state["LdsBlockSizePerPadA"], state["LdsPadB"], state["LdsBlockSizePerPadB"])
     state["LdsOffsetA_Blk"]=0
     state["LdsOffsetB_Blk"]=0
+    state["LdsOffsetMetadata_Blk"]=0
     # todo, can the alignment be a power of 2?
     state["LdsOffsetA"] = 0
     state["LdsNumElementsAlignedA"] = ldsNumBytesAlignedA
     state["LdsNumElementsAlignedB"] = ldsNumBytesAlignedB
+    state["LdsNumElementsAlignedMetadata"] = ldsNumBytesAlignedMetadata
     if state["PrefetchGlobalRead"]:
-      state["LdsNumElementsAlignedMetadata"] = ldsNumBytesAlignedMetadata
       state["LdsOffsetMetadata"] = state["LdsOffsetA"] + state["LdsNumElementsAlignedA"]
       state["LdsOffsetB"] = state["LdsOffsetMetadata"] + state["LdsNumElementsAlignedMetadata"]
 
