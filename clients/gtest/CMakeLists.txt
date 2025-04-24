@@ -120,6 +120,8 @@ set_target_properties( hipblaslt-test PROPERTIES
   IMPORT_SUFFIX ".lib"
   LINKER_LANGUAGE CXX
   RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging"
+  BUILD_RPATH "${HIP_CLANG_ROOT}/lib"
+  INSTALL_RPATH "$ORIGIN/../llvm/lib"
 )
 
 set( HIPBLASLT_TEST_DATA "${PROJECT_BINARY_DIR}/staging/hipblaslt_gtest.data")

@@ -51,7 +51,7 @@ find_package(OpenMP)
 
 if (TARGET OpenMP::OpenMP_CXX)
   set( COMMON_LINK_LIBS "OpenMP::OpenMP_CXX")
-  list( APPEND COMMON_LINK_LIBS "-L${HIP_CLANG_ROOT}/lib;-Wl,-rpath=${HIP_CLANG_ROOT}/lib")
+  list( APPEND COMMON_LINK_LIBS "-L${HIP_CLANG_ROOT}/lib")
 endif()
 
 if (TARGET Threads::Threads)
