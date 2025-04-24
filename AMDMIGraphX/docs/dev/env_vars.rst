@@ -116,6 +116,11 @@ Disables the ``schedule`` pass.
 Set to "1", "enable", "enabled", "yes", or "true" to use.
 Disables the ``fuse_reduce`` pass.
 
+.. envvar:: MIGRAPHX_DISABLE_MULTI_OUTPUT_FUSION
+
+Set to "1", "enable", "enabled", "yes", or "true" to use.
+Disables multi-output fusions.
+
 .. envvar:: MIGRAPHX_ENABLE_REWRITE_DOT
 
 Set to "1", "enable", "enabled", "yes", or "true" to use.

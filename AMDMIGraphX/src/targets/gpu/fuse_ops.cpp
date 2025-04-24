@@ -954,8 +954,10 @@ struct find_layernorm_pointwise
 {
     auto matcher() const
     {
-        return precompile_name("pointwise")(match::arg(0)(
-            precompile_name("gpu::prelayernorm", "gpu::preadd_layernorm").bind("layernorm")));
+        return precompile_name("pointwise")(
+            match::not_tuple(),
+            match::arg(0)(
+                precompile_name("gpu::prelayernorm", "gpu::preadd_layernorm").bind("layernorm")));
     }
 
     void apply(module& m, const match::matcher_result& r) const

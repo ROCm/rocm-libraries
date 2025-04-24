@@ -657,6 +657,10 @@ MIGRAPHX_PRED_MATCHER(transpose_shape, instruction_ref ins)
 {
     return ins->get_shape().transposed();
 }
+MIGRAPHX_PRED_MATCHER(not_tuple, instruction_ref ins)
+{
+    return ins->get_shape().type() != shape::tuple_type;
+}
 
 MIGRAPHX_PRED_MATCHER(same_input_shapes, instruction_ref ins)
 {

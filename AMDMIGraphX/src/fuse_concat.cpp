@@ -35,12 +35,6 @@
 namespace migraphx {
 inline namespace MIGRAPHX_INLINE_NS {
 
-static unsigned int get_noop_counter()
-{
-    static unsigned int counter = 0;
-    return counter++;
-}
-
 struct fused_concat
 {
     int64_t axis = 0;
@@ -104,11 +98,37 @@ struct fused_concat
 MIGRAPHX_REGISTER_OP(fused_concat);
 
 namespace {
-struct find_concat_pointwise
+
+bool is_fusable_pointwise(instruction_ref ins)
+{
+    return ins->name() == "pointwise" and ins->outputs().size() == 1 and
+           ins->get_shape().type() != shape::tuple_type;
+}
+
+template <class... Ts>
+auto fusable_pointwise(Ts... xs)
+{
+    return match::name("pointwise")(match::not_tuple(), xs...);
+}
+
+template <std::size_t N, std::size_t Max = 2>
+struct concat_counter
+{
+    static_assert(N < Max, "Factor N must be less than Max");
+    std::shared_ptr<unsigned int> counter = std::make_shared<unsigned int>(0);
+    unsigned int get_noop_counter() const
+    {
+        if(counter == nullptr)
+            MIGRAPHX_THROW("Invalid counter");
+        return N + Max * (*counter)++;
+    }
+};
+
+struct find_concat_pointwise : concat_counter<0>
 {
     auto matcher() const
     {
-        auto pointwise_used_once = match::name("pointwise")(match::used_once());
+        auto pointwise_used_once = fusable_pointwise(match::used_once());
         return match::name("concat")(match::used_once(),
                                      match::any_of[match::inputs()](pointwise_used_once));
     }
@@ -140,7 +160,7 @@ struct find_concat_pointwise
                        concat_ins->inputs().end(),
                        std::back_inserter(module_inputs),
                        [&](instruction_ref input) {
-                           if(input->name() == "pointwise" and input->outputs().size() == 1)
+                           if(is_fusable_pointwise(input))
                            {
                                auto* pm = input->module_inputs().front();
                                return mpm.create_module("concat:" + pm->name(), *pm);
@@ -163,14 +183,14 @@ struct find_concat_pointwise
     }
 };
 
-struct find_pointwise_concat_pointwise
+struct find_pointwise_concat_pointwise : concat_counter<1>
 {
     auto matcher() const
     {
-        auto pointwise = match::name("pointwise")(match::used_once());
+        auto pointwise = fusable_pointwise(match::used_once());
         auto concat =
             match::name("concat")(match::used_once(), match::any_of[match::inputs()](pointwise));
-        return match::name("pointwise")(match::any_of[match::inputs()](concat.bind("concat")));
+        return fusable_pointwise(match::any_of[match::inputs()](concat.bind("concat")));
     }
 
     void apply(module_pass_manager& mpm, const match::matcher_result& r) const
@@ -198,7 +218,7 @@ struct find_pointwise_concat_pointwise
                        concat_ins->inputs().end(),
                        std::back_inserter(module_inputs),
                        [&](instruction_ref input) {
-                           if(input->name() == "pointwise" and input->outputs().size() == 1)
+                           if(is_fusable_pointwise(input))
                            {
                                auto* pm = input->module_inputs().front();
                                return mpm.create_module("concat:" + pm->name(), *pm);

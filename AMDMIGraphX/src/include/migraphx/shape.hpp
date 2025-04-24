@@ -453,6 +453,8 @@ struct MIGRAPHX_EXPORT shape
 
     const std::vector<shape>& sub_shapes() const;
 
+    std::size_t tuple_size() const;
+
     /*!
      * Returns the number of elements in the data buffer.
      * For a dynamic shape, returns the maximum number of elements of the data buffer and assumes it

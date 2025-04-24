@@ -1,7 +1,7 @@
 /*
  * The MIT License (MIT)
  *
- * Copyright (c) 2015-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (c) 2015-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -164,6 +164,8 @@ struct mod_pass_op
         if(not mods.empty())
         {
             auto out_shapes = mods[0]->get_output_shapes();
+            if(out_shapes.size() > 1)
+                return migraphx::shape{out_shapes};
             return out_shapes[0];
         }
         if(not inputs.empty())
