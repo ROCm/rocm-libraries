@@ -659,9 +659,18 @@ namespace rocRoller
         }
 
         template <typename Node, typename Edge, bool Hyper>
-        Generator<int> Hypergraph<Node, Edge, Hyper>::breadthFirstVisit(int start) const
+        Generator<int> Hypergraph<Node, Edge, Hyper>::breadthFirstVisit(int       start,
+                                                                        Direction dir) const
         {
-            // Only downstream is implemented for now.
+            if(dir == Direction::Downstream)
+                co_yield breadthFirstVisitDownstream(start);
+            else
+                co_yield breadthFirstVisitUpstream(start);
+        }
+
+        template <typename Node, typename Edge, bool Hyper>
+        Generator<int> Hypergraph<Node, Edge, Hyper>::breadthFirstVisitDownstream(int start) const
+        {
             std::unordered_set<int> visitedNodes;
 
             visitedNodes.insert(start);
@@ -680,6 +689,43 @@ namespace rocRoller
             };
 
             auto const& lookup = m_incidence.template get<BySrc>();
+
+            auto startIter = lookup.lower_bound(std::make_tuple(start, 0));
+            auto iters     = std::vector{std::make_pair(startIter, start)};
+
+            for(int node : chain(iters, lookup.end()))
+            {
+                if(visitedNodes.count(node))
+                    continue;
+
+                visitedNodes.insert(node);
+                co_yield node;
+
+                iters.emplace_back(lookup.lower_bound(std::make_tuple(node, 0)), node);
+            }
+        }
+
+        template <typename Node, typename Edge, bool Hyper>
+        Generator<int> Hypergraph<Node, Edge, Hyper>::breadthFirstVisitUpstream(int start) const
+        {
+            std::unordered_set<int> visitedNodes;
+
+            visitedNodes.insert(start);
+
+            co_yield start;
+
+            auto chain = [](auto& iters, auto end) -> Generator<int> {
+                for(int i = 0; i < iters.size(); i++)
+                {
+                    int dst = iters[i].second;
+                    for(auto iter = iters[i].first; iter != end && iter->dst == dst; iter++)
+                    {
+                        co_yield iter->src;
+                    }
+                }
+            };
+
+            auto const& lookup = m_incidence.template get<ByDst>();
 
             auto startIter = lookup.lower_bound(std::make_tuple(start, 0));
             auto iters     = std::vector{std::make_pair(startIter, start)};

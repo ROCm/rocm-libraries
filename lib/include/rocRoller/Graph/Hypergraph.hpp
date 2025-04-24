@@ -277,7 +277,10 @@ namespace rocRoller
             /**
              * @brief Yields node indices connected downstream of start, in breadth-first order.
              */
-            Generator<int> breadthFirstVisit(int start) const;
+            Generator<int> breadthFirstVisit(int       start,
+                                             Direction dir = Direction::Downstream) const;
+            Generator<int> breadthFirstVisitDownstream(int start) const;
+            Generator<int> breadthFirstVisitUpstream(int start) const;
 
             /**
             * @brief Yields element indices (both nodes and edges) that form the paths

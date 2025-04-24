@@ -27,12 +27,19 @@
 #include <compare>
 #include <fstream>
 
-#include "SimpleFixture.hpp"
-#include "SourceMatcher.hpp"
+#include "CustomMatchers.hpp"
+#include "CustomSections.hpp"
+#include "ExpressionMatchers.hpp"
+#include "TestContext.hpp"
+
+#include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
+
+#include <common/SourceMatcher.hpp>
 
 #include <rocRoller/Graph/Hypergraph.hpp>
 
-namespace rocRollerTest
+namespace HypergraphTest
 {
     using namespace rocRoller;
 
@@ -139,11 +146,7 @@ namespace rocRollerTest
 
     using myHypergraph = Graph::Hypergraph<TestDimension, TestTransform>;
 
-    class HypergraphTest : public SimpleFixture
-    {
-    };
-
-    TEST_F(HypergraphTest, Basic)
+    TEST_CASE("Basic Hypergraph", "[kernel-graph]")
     {
 
         myHypergraph g;
@@ -160,6 +163,7 @@ namespace rocRollerTest
         auto TestVGPR1   = g.addElement(TestVGPR{});
         auto TestForget1 = g.addElement(TestForget{}, {sd0, sd1}, {TestVGPR1});
 
+        SECTION("toDOT")
         {
             std::string expected = R".(
             digraph {
@@ -198,144 +202,153 @@ namespace rocRollerTest
                 }
             ).";
 
-            EXPECT_EQ(NormalizedSource(expected), NormalizedSource(g.toDOT()));
+            CHECK(NormalizedSource(expected) == NormalizedSource(g.toDOT()));
         }
 
+        SECTION("Get should not throw")
         {
-            EXPECT_NO_THROW(std::get<TestUser>(std::get<TestDimension>(g.getElement(u0))));
-            EXPECT_NO_THROW(
-                std::get<TestForget>(std::get<TestTransform>(g.getElement(TestForget1))));
+            CHECK_NOTHROW(std::get<TestUser>(std::get<TestDimension>(g.getElement(u0))));
+            CHECK_NOTHROW(std::get<TestForget>(std::get<TestTransform>(g.getElement(TestForget1))));
         }
 
+        SECTION("Get TestSubDimension")
         {
             auto subDimensions = g.getNodes<TestSubDimension>().to<std::vector>();
-            EXPECT_EQ(subDimensions.size(), 2);
-            EXPECT_EQ(std::count(subDimensions.begin(), subDimensions.end(), sd0), 1);
-            EXPECT_EQ(std::count(subDimensions.begin(), subDimensions.end(), sd1), 1);
+            CHECK(subDimensions.size() == 2);
+            CHECK(std::count(subDimensions.begin(), subDimensions.end(), sd0) == 1);
+            CHECK(std::count(subDimensions.begin(), subDimensions.end(), sd1) == 1);
         }
 
+        SECTION("Get TestSplit")
         {
             auto inputNodes = g.getInputNodeIndices<TestSplit>(sd0).to<std::vector>();
-            EXPECT_EQ(inputNodes.size(), 1);
-            EXPECT_EQ(inputNodes.at(0), u0);
+            CHECK(inputNodes.size() == 1);
+            CHECK(inputNodes.at(0) == u0);
         }
 
+        SECTION("Get TestForget")
         {
             auto outputNodes = g.getOutputNodeIndices<TestForget>(sd0).to<std::vector>();
-            EXPECT_EQ(outputNodes.size(), 2);
-            EXPECT_EQ(std::count(outputNodes.begin(), outputNodes.end(), TestVGPR0), 1);
-            EXPECT_EQ(std::count(outputNodes.begin(), outputNodes.end(), TestVGPR1), 1);
+            CHECK(outputNodes.size() == 2);
+            CHECK(std::count(outputNodes.begin(), outputNodes.end(), TestVGPR0) == 1);
+            CHECK(std::count(outputNodes.begin(), outputNodes.end(), TestVGPR1) == 1);
         }
 
+        SECTION("depthFirstVisit")
         {
             auto             nodes = g.depthFirstVisit(u0).to<std::vector>();
             std::vector<int> expectedNodes{
                 u0, TestSplit0, sd0, TestForget0, TestVGPR0, TestForget1, TestVGPR1, sd1};
-            EXPECT_EQ(expectedNodes, nodes);
+            CHECK(expectedNodes == nodes);
 
             auto loc = g.getLocation(nodes[0]);
-            EXPECT_EQ(u0, loc.index);
-            EXPECT_TRUE(std::holds_alternative<TestDimension>(loc.element));
-            EXPECT_TRUE(std::holds_alternative<TestUser>(std::get<TestDimension>(loc.element)));
-            EXPECT_EQ(0, loc.incoming.size());
-            EXPECT_EQ(std::vector<int>{TestSplit0}, loc.outgoing);
+            CHECK(u0 == loc.index);
+            CHECK(std::holds_alternative<TestDimension>(loc.element));
+            CHECK(std::holds_alternative<TestUser>(std::get<TestDimension>(loc.element)));
+            CHECK(0 == loc.incoming.size());
+            CHECK(std::vector<int>{TestSplit0} == loc.outgoing);
 
             auto loc2 = g.getLocation(u0);
-            EXPECT_EQ(loc, loc2);
+            CHECK(loc == loc2);
 
             loc = g.getLocation(nodes[1]);
             myHypergraph::Location expected{
                 TestSplit0, {u0}, {sd0, sd1}, TestTransform{TestSplit{}}};
-            EXPECT_TRUE(expected == loc);
+            CHECK(expected == loc);
 
-            EXPECT_EQ(TestSplit0, loc.index);
+            CHECK(TestSplit0 == loc.index);
 
-            EXPECT_EQ(myHypergraph::Element{TestTransform{TestSplit{}}}, loc.element);
-            EXPECT_EQ(std::vector<int>{u0}, loc.incoming);
-            EXPECT_EQ((std::vector<int>{sd0, sd1}), loc.outgoing);
+            CHECK(myHypergraph::Element{TestTransform{TestSplit{}}} == loc.element);
+            CHECK(std::vector<int>{u0} == loc.incoming);
+            CHECK((std::vector<int>{sd0, sd1}) == loc.outgoing);
 
-            EXPECT_EQ(std::vector<int>{u0}, g.parentNodes(sd0).to<std::vector>());
-            EXPECT_EQ((std::vector<int>{sd0, sd1}), g.childNodes(u0).to<std::vector>());
+            CHECK(std::vector<int>{u0} == g.parentNodes(sd0).to<std::vector>());
+            CHECK((std::vector<int>{sd0, sd1}) == g.childNodes(u0).to<std::vector>());
 
-            EXPECT_EQ(std::vector<int>{u0}, g.parentNodes(TestSplit0).to<std::vector>());
-            EXPECT_EQ((std::vector<int>{sd0, sd1}), g.childNodes(TestSplit0).to<std::vector>());
+            CHECK(std::vector<int>{u0} == g.parentNodes(TestSplit0).to<std::vector>());
+            CHECK((std::vector<int>{sd0, sd1}) == g.childNodes(TestSplit0).to<std::vector>());
 
-            EXPECT_EQ((std::vector<int>{sd0, sd1}), g.parentNodes(TestVGPR0).to<std::vector>());
-            EXPECT_EQ((std::vector<int>{TestVGPR0, TestVGPR1}),
-                      g.childNodes(sd1).to<std::vector>());
+            CHECK((std::vector<int>{sd0, sd1}) == g.parentNodes(TestVGPR0).to<std::vector>());
+            CHECK((std::vector<int>{TestVGPR0, TestVGPR1}) == g.childNodes(sd1).to<std::vector>());
         }
 
+        SECTION("depthFirstVisit with multiple leaf nodes doesn't give us whole graph")
         {
-            // Since there are multiple leaf nodes, we don't expect this to visit the entire graph.
             auto nodes = g.depthFirstVisit(TestVGPR0, Graph::Direction::Upstream).to<std::vector>();
             std::vector<int> expectedNodes{TestVGPR0, TestForget0, sd0, TestSplit0, u0, sd1};
-            EXPECT_EQ(expectedNodes, nodes);
+            CHECK(expectedNodes == nodes);
         }
 
+        SECTION("Visiting from all the leaf nodes gives us the whole graph")
         {
-            // Visiting from all the leaf nodes gives us the whole graph.
             // TODO: "Make generators less lazy" once the generator semantics have been made less lazy, this can be collapsed into the next line and we can avoid converting the 'leaves' generator into a vector.
             auto leaves = g.leaves().to<std::vector>();
             auto nodes  = g.depthFirstVisit(leaves, Graph::Direction::Upstream).to<std::vector>();
             std::vector<int> expectedNodes{
                 TestVGPR0, TestForget0, sd0, TestSplit0, u0, sd1, TestVGPR1, TestForget1};
-            EXPECT_EQ(expectedNodes, nodes);
+            CHECK(expectedNodes == nodes);
         }
 
+        SECTION("breadthFirstVisit")
         {
             auto             nodes = g.breadthFirstVisit(u0).to<std::vector>();
             std::vector<int> expectedNodes{
                 u0, TestSplit0, sd0, sd1, TestForget0, TestForget1, TestVGPR0, TestVGPR1};
-            EXPECT_EQ(expectedNodes, nodes);
+            CHECK(expectedNodes == nodes);
         }
 
+        SECTION("roots")
         {
             auto             nodes         = g.roots().to<std::vector>();
             std::vector<int> expectedNodes = {u0};
-            EXPECT_EQ(expectedNodes, nodes);
+            CHECK(expectedNodes == nodes);
         }
 
+        SECTION("leaves")
         {
             auto             nodes         = g.leaves().to<std::vector>();
             std::vector<int> expectedNodes = {TestVGPR0, TestVGPR1};
-            EXPECT_EQ(expectedNodes, nodes);
+            CHECK(expectedNodes == nodes);
         }
 
+        SECTION("getNeighbours")
         {
-            EXPECT_EQ((std::vector<int>{u0}),
-                      g.getNeighbours<Graph::Direction::Upstream>(TestSplit0).to<std::vector>());
-            EXPECT_EQ((std::vector<int>{TestSplit0}),
-                      g.getNeighbours<Graph::Direction::Upstream>(sd0).to<std::vector>());
-            EXPECT_EQ((std::vector<int>{TestSplit0}),
-                      g.getNeighbours<Graph::Direction::Upstream>(sd1).to<std::vector>());
-            EXPECT_EQ((std::vector<int>{sd0, sd1}),
-                      g.getNeighbours<Graph::Direction::Downstream>(TestSplit0).to<std::vector>());
+            CHECK((std::vector<int>{u0})
+                  == g.getNeighbours<Graph::Direction::Upstream>(TestSplit0).to<std::vector>());
+            CHECK((std::vector<int>{TestSplit0})
+                  == g.getNeighbours<Graph::Direction::Upstream>(sd0).to<std::vector>());
+            CHECK((std::vector<int>{TestSplit0})
+                  == g.getNeighbours<Graph::Direction::Upstream>(sd1).to<std::vector>());
+            CHECK((std::vector<int>{sd0, sd1})
+                  == g.getNeighbours<Graph::Direction::Downstream>(TestSplit0).to<std::vector>());
         }
 
-        // Add a for loop.
-        auto loop = g.addElement(TestForLoop{}, {TestSplit0}, {TestForget0});
-
+        SECTION("Adding a node to the graph")
         {
-            auto             loc           = g.getLocation(TestSplit0);
-            std::vector<int> expectedNodes = {sd0, sd1, loop};
-            EXPECT_EQ(expectedNodes, loc.outgoing);
-        }
+            // Add a for loop.
+            auto loop = g.addElement(TestForLoop{}, {TestSplit0}, {TestForget0});
 
-        {
-            auto             loc           = g.getLocation(TestForget0);
-            std::vector<int> expectedNodes = {sd0, sd1, loop};
-            EXPECT_EQ(expectedNodes, loc.incoming);
-        }
+            {
+                auto             loc           = g.getLocation(TestSplit0);
+                std::vector<int> expectedNodes = {sd0, sd1, loop};
+                CHECK(expectedNodes == loc.outgoing);
+            }
 
-        {
-            auto             nodes = g.depthFirstVisit(u0).to<std::vector>();
-            std::vector<int> expectedNodes{
-                u0, TestSplit0, sd0, TestForget0, TestVGPR0, TestForget1, TestVGPR1, sd1, loop};
-            EXPECT_EQ(expectedNodes, nodes);
-        }
+            {
+                auto             loc           = g.getLocation(TestForget0);
+                std::vector<int> expectedNodes = {sd0, sd1, loop};
+                CHECK(expectedNodes == loc.incoming);
+            }
 
-        {
-            std::string expected = R".(
+            {
+                auto             nodes = g.depthFirstVisit(u0).to<std::vector>();
+                std::vector<int> expectedNodes{
+                    u0, TestSplit0, sd0, TestForget0, TestVGPR0, TestForget1, TestVGPR1, sd1, loop};
+                CHECK(expectedNodes == nodes);
+            }
+
+            {
+                std::string expected = R".(
                 digraph {
                     "1"[label="TestUser(1)"];
                     "2"[label="TestSubDimension(2)"];
@@ -375,24 +388,26 @@ namespace rocRollerTest
                 }
             ).";
 
-            EXPECT_EQ(NormalizedSource(expected), NormalizedSource(g.toDOT()));
-        }
+                CHECK(NormalizedSource(expected) == NormalizedSource(g.toDOT()));
+            }
 
-        EXPECT_EQ(std::set({u0, sd0, sd1, TestVGPR0, TestVGPR1, loop}),
-                  g.getNodes().to<std::set>());
-        EXPECT_EQ(std::set({TestSplit0, TestForget0, TestForget1}), g.getEdges().to<std::set>());
+            CHECK(std::set({u0, sd0, sd1, TestVGPR0, TestVGPR1, loop})
+                  == g.getNodes().to<std::set>());
+            CHECK(std::set({TestSplit0, TestForget0, TestForget1}) == g.getEdges().to<std::set>());
 
-        EXPECT_EQ(std::set({TestVGPR0, TestVGPR1}), g.getNodes<TestVGPR>().to<std::set>());
-        EXPECT_EQ(std::set({TestForget0, TestForget1}), g.getElements<TestForget>().to<std::set>());
+            CHECK(std::set({TestVGPR0, TestVGPR1}) == g.getNodes<TestVGPR>().to<std::set>());
+            CHECK(std::set({TestForget0, TestForget1})
+                  == g.getElements<TestForget>().to<std::set>());
 
-        {
-            EXPECT_EQ(std::get<TestUser>(std::get<TestDimension>(g.getElement(u0))), TestUser{});
+            {
+                CHECK(std::get<TestUser>(std::get<TestDimension>(g.getElement(u0))) == TestUser{});
 
-            EXPECT_THROW(g.getElement(-1), FatalError);
+                CHECK_THROWS_AS(g.getElement(-1), FatalError);
+            }
         }
     }
 
-    TEST_F(HypergraphTest, Path)
+    TEST_CASE("Hypergraph pathing", "[kernel-graph]")
     {
 
         myHypergraph g;
@@ -412,33 +427,33 @@ namespace rocRollerTest
         auto TestSplit10 = g.addElement(TestSplit{}, {sd3, sd8}, {sd6});
         auto TestSplit11 = g.addElement(TestSplit{}, {sd3}, {sd7});
 
-        EXPECT_EQ((std::vector<int>{u1, TestSplit4, sd2}),
-                  g.path<Graph::Direction::Downstream>(std::vector<int>{u1}, std::vector<int>{sd2})
-                      .to<std::vector>());
+        CHECK((std::vector<int>{u1, TestSplit4, sd2})
+              == g.path<Graph::Direction::Downstream>(std::vector<int>{u1}, std::vector<int>{sd2})
+                     .to<std::vector>());
 
-        EXPECT_EQ(
-            (std::vector<int>{sd2, sd3, TestSplit4, u1}),
-            g.path<Graph::Direction::Upstream>(std::vector<int>{sd2, sd3}, std::vector<int>{u1})
-                .to<std::vector>());
+        CHECK(
+            (std::vector<int>{sd2, sd3, TestSplit4, u1})
+            == g.path<Graph::Direction::Upstream>(std::vector<int>{sd2, sd3}, std::vector<int>{u1})
+                   .to<std::vector>());
 
-        EXPECT_EQ((std::vector<int>{}),
-                  g.path<Graph::Direction::Upstream>(std::vector<int>{sd2}, std::vector<int>{u1})
-                      .to<std::vector>());
+        CHECK((std::vector<int>{})
+              == g.path<Graph::Direction::Upstream>(std::vector<int>{sd2}, std::vector<int>{u1})
+                     .to<std::vector>());
 
-        EXPECT_EQ((std::vector<int>{sd6, TestSplit10, sd8, TestSplit9, sd2, sd3, TestSplit4, u1}),
-                  g.path<Graph::Direction::Upstream>(std::vector<int>{sd6}, std::vector<int>{u1})
-                      .to<std::vector>());
+        CHECK((std::vector<int>{sd6, TestSplit10, sd8, TestSplit9, sd2, sd3, TestSplit4, u1})
+              == g.path<Graph::Direction::Upstream>(std::vector<int>{sd6}, std::vector<int>{u1})
+                     .to<std::vector>());
 
-        EXPECT_EQ((std::vector<int>{u1, TestSplit4, sd3, TestSplit11, sd7}),
-                  g.path<Graph::Direction::Downstream>(std::vector<int>{u1}, std::vector<int>{sd7})
-                      .to<std::vector>());
+        CHECK((std::vector<int>{u1, TestSplit4, sd3, TestSplit11, sd7})
+              == g.path<Graph::Direction::Downstream>(std::vector<int>{u1}, std::vector<int>{sd7})
+                     .to<std::vector>());
 
-        EXPECT_EQ((std::vector<int>{u1, TestSplit4, sd3, sd2, TestSplit9, sd8, TestSplit10, sd6}),
-                  g.path<Graph::Direction::Downstream>(std::vector<int>{u1}, std::vector<int>{sd6})
-                      .to<std::vector>());
+        CHECK((std::vector<int>{u1, TestSplit4, sd3, sd2, TestSplit9, sd8, TestSplit10, sd6})
+              == g.path<Graph::Direction::Downstream>(std::vector<int>{u1}, std::vector<int>{sd6})
+                     .to<std::vector>());
     }
 
-    TEST_F(HypergraphTest, BadGraph)
+    TEST_CASE("Bad Hypergraph setup", "[kernel-graph]")
     {
         myHypergraph g;
 
@@ -455,16 +470,14 @@ namespace rocRollerTest
         auto TestForget1 = g.addElement(TestForget{}, {sd0, sd1}, {TestVGPR1});
 
         // Edges to Edges
-        EXPECT_THROW({ auto TestForget4 = g.addElement(TestForget{}, {u0}, {TestSplit0}); },
-                     FatalError);
-        EXPECT_THROW({ auto TestForget5 = g.addElement(TestForget{}, {}, {TestSplit0}); },
-                     FatalError);
+        CHECK_THROWS_AS(g.addElement(TestForget{}, {u0}, {TestSplit0}), FatalError);
+        CHECK_THROWS_AS(g.addElement(TestForget{}, {}, {TestSplit0}), FatalError);
 
         // Nodes to nodes
-        EXPECT_THROW({ auto sd2 = g.addElement(TestSubDimension{}, {u0}, {}); }, FatalError);
+        CHECK_THROWS_AS(g.addElement(TestSubDimension{}, {u0}, {}), FatalError);
     }
 
-    TEST_F(HypergraphTest, TopoSort)
+    TEST_CASE("Hypergraph sorting and visiting", "[kernel-graph]")
     {
         myHypergraph g;
 
@@ -482,14 +495,47 @@ namespace rocRollerTest
         auto sd8 = g.addElement(TestSubDimension{});
         auto sp9 = g.addElement(TestSplit{}, {sd2, sd6}, {sd8});
 
-        auto topo = g.topologicalSort().to<std::vector>();
-        EXPECT_EQ(topo, std::vector<int>({1, 3, 2, 5, 4, 7, 6, 9, 8}));
+        // 1
+        // | \
+        // 3  5
+        // |  |
+        // 2  4
+        // |  |
+        // |  7
+        // |  |
+        // |  6
+        // | /
+        // 9
+        // |
+        // 8
 
-        auto bfs = g.breadthFirstVisit(*g.roots().begin()).to<std::vector>();
-        EXPECT_EQ(bfs, std::vector<int>({1, 3, 5, 2, 4, 9, 7, 8, 6}));
+        SECTION("Topological sort")
+        {
+            auto topo = g.topologicalSort().to<std::vector>();
+            CHECK(topo == std::vector<int>({1, 3, 2, 5, 4, 7, 6, 9, 8}));
+        }
+
+        SECTION("Breadth first visit")
+        {
+            auto bfs = g.breadthFirstVisit(*g.roots().begin(), Graph::Direction::Downstream)
+                           .to<std::vector>();
+            CHECK(bfs == std::vector<int>({1, 3, 5, 2, 4, 9, 7, 8, 6}));
+
+            bfs = g.breadthFirstVisit(sp3, Graph::Direction::Downstream).to<std::vector>();
+            CHECK(bfs == std::vector<int>({3, 2, 9, 8}));
+
+            bfs = g.breadthFirstVisit(sp9, Graph::Direction::Downstream).to<std::vector>();
+            CHECK(bfs == std::vector<int>({9, 8}));
+
+            bfs = g.breadthFirstVisit(sp9, Graph::Direction::Upstream).to<std::vector>();
+            CHECK(bfs == std::vector<int>({9, 2, 6, 3, 7, 1, 4, 5}));
+
+            bfs = g.breadthFirstVisit(sp7, Graph::Direction::Upstream).to<std::vector>();
+            CHECK(bfs == std::vector<int>({7, 4, 5, 1}));
+        }
     }
 
-    TEST_F(HypergraphTest, DeleteElement)
+    TEST_CASE("Hypergraph delete element", "[kernel-graph]")
     {
         myHypergraph g;
 
@@ -505,14 +551,14 @@ namespace rocRollerTest
         auto TestVGPR1   = g.addElement(TestVGPR{});
         auto TestForget1 = g.addElement(TestForget{}, {sd0, sd1}, {TestVGPR1});
 
-        EXPECT_THROW(
-            { g.deleteElement<TestForget>(std::vector<int>{sd0}, std::vector<int>{TestVGPR0}); },
+        CHECK_THROWS_AS(
+            g.deleteElement<TestForget>(std::vector<int>{sd0}, std::vector<int>{TestVGPR0}),
             FatalError);
 
         g.deleteElement<TestForget>(std::vector<int>{sd0, sd1}, std::vector<int>{TestVGPR0});
     }
 
-    TEST_F(HypergraphTest, ParallelEdges)
+    TEST_CASE("Hypergraph with parallel edges", "[kernel-graph]")
     {
         myHypergraph g;
 
@@ -526,11 +572,11 @@ namespace rocRollerTest
         auto childVec  = g.childNodes(1).to<std::vector>();
         auto parentVec = g.parentNodes(2).to<std::vector>();
 
-        EXPECT_EQ(childVec, std::vector<int>({2, 3}));
-        EXPECT_EQ(parentVec, std::vector<int>({1}));
+        CHECK(childVec == std::vector<int>({2, 3}));
+        CHECK(parentVec == std::vector<int>({1}));
     }
 
-    TEST_F(HypergraphTest, FollowEdges)
+    TEST_CASE("Follow Hypergraph edges", "[kernel-graph]")
     {
         myHypergraph g;
 
@@ -544,16 +590,16 @@ namespace rocRollerTest
         auto TestSplit2  = g.addElement(TestSplit{}, {sd1}, {sd2});
         auto TestForget0 = g.addElement(TestForget{}, {sd0}, {sd2});
 
-        EXPECT_EQ(g.followEdges<TestSplit>({}), std::set<int>());
-        EXPECT_EQ(g.followEdges<TestSplit>({u0}), std::set<int>({u0, sd0, sd1, sd2}));
-        EXPECT_EQ(g.followEdges<TestSplit>({sd0}), std::set<int>({sd0}));
-        EXPECT_EQ(g.followEdges<TestSplit>({sd1}), std::set<int>({sd1, sd2}));
-        EXPECT_EQ(g.followEdges<TestSplit>({sd2}), std::set<int>({sd2}));
-        EXPECT_EQ(g.followEdges<TestForget>({sd0}), std::set<int>({sd0, sd2}));
-        EXPECT_EQ(g.followEdges<TestForget>({sd2}), std::set<int>({sd2}));
+        CHECK(g.followEdges<TestSplit>({}) == std::set<int>());
+        CHECK(g.followEdges<TestSplit>({u0}) == std::set<int>({u0, sd0, sd1, sd2}));
+        CHECK(g.followEdges<TestSplit>({sd0}) == std::set<int>({sd0}));
+        CHECK(g.followEdges<TestSplit>({sd1}) == std::set<int>({sd1, sd2}));
+        CHECK(g.followEdges<TestSplit>({sd2}) == std::set<int>({sd2}));
+        CHECK(g.followEdges<TestForget>({sd0}) == std::set<int>({sd0, sd2}));
+        CHECK(g.followEdges<TestForget>({sd2}) == std::set<int>({sd2}));
     }
 
-    TEST_F(HypergraphTest, ReachableNodes)
+    TEST_CASE("Hypergraph with reachable nodes", "[kernel-graph]")
     {
         myHypergraph g;
 
@@ -583,29 +629,26 @@ namespace rocRollerTest
 
         auto truePred = [](auto const& node) { return true; };
 
-        EXPECT_EQ(reachableNodes<Graph::Direction::Downstream>(
-                      g, u0, isSubDimension, isSplit, isSubDimension)
-                      .to<std::set>(),
-                  std::set<int>({sd0, sd1, sd2}));
+        CHECK(reachableNodes<Graph::Direction::Downstream>(
+                  g, u0, isSubDimension, isSplit, isSubDimension)
+                  .to<std::set>()
+              == std::set<int>({sd0, sd1, sd2}));
 
-        EXPECT_EQ(
-            reachableNodes<Graph::Direction::Downstream>(g, u0, isSubDimension, isSplit, truePred)
-                .to<std::set>(),
-            std::set<int>({sd0, sd1, sd2, u1}));
+        CHECK(reachableNodes<Graph::Direction::Downstream>(g, u0, isSubDimension, isSplit, truePred)
+                  .to<std::set>()
+              == std::set<int>({sd0, sd1, sd2, u1}));
 
-        EXPECT_EQ(
-            reachableNodes<Graph::Direction::Upstream>(g, sd3, isSubDimension, truePred, isUser)
-                .to<std::set>(),
-            std::set<int>({u1}));
+        CHECK(reachableNodes<Graph::Direction::Upstream>(g, sd3, isSubDimension, truePred, isUser)
+                  .to<std::set>()
+              == std::set<int>({u1}));
 
-        EXPECT_EQ(
-            reachableNodes<Graph::Direction::Upstream>(g, u1, isSubDimension, truePred, isUser)
-                .to<std::set>(),
-            std::set<int>({u0}));
+        CHECK(reachableNodes<Graph::Direction::Upstream>(g, u1, isSubDimension, truePred, isUser)
+                  .to<std::set>()
+              == std::set<int>({u0}));
 
-        EXPECT_EQ(reachableNodes<Graph::Direction::Upstream>(g, u1, truePred, truePred, isUser)
-                      .to<std::set>(),
-                  std::set<int>({u0, u2}));
+        CHECK(reachableNodes<Graph::Direction::Upstream>(g, u1, truePred, truePred, isUser)
+                  .to<std::set>()
+              == std::set<int>({u0, u2}));
     }
 
 }
