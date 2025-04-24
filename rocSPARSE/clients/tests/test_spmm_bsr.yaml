@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2024 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2024-2025 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -473,7 +473,28 @@ Tests:
   spmm_alg: [rocsparse_spmm_alg_bsr]
   orderB: [rocsparse_order_column]
   orderC: [rocsparse_order_column]
-  filename: [Chevron3, Chevron4]
+  filename: [Chevron3]
+
+- name: spmm_bsr_file
+  category: nightly
+  function: spmm_bsr
+  indextype: *i32_i64
+  precision: *single_double_precisions_complex
+  M: 1
+  N: [12]
+  K: 1
+  block_dim: [9]
+  alpha_beta: *alpha_beta_range_nightly
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_transpose]
+  baseA: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_row]
+  matrix: [rocsparse_matrix_file_rocalution]
+  spmm_alg: [rocsparse_spmm_alg_bsr]
+  orderB: [rocsparse_order_column]
+  orderC: [rocsparse_order_column]
+  filename: [Chevron4]
+  req_memory: 14
 
 - name: spmm_bsr_file
   category: nightly
