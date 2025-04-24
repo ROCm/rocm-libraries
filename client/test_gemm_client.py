@@ -301,7 +301,6 @@ streamKTwoTile: false
 """
 
 
-
 def type_configurations():
     """Return list of type combinations to test."""
     typeAs = ["fp4"]

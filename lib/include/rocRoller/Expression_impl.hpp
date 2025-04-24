@@ -436,6 +436,7 @@ namespace rocRoller
         EXPRESSION_INFO_CUSTOM(WaveTilePtr, "WaveTile");
 
         EXPRESSION_INFO(DataFlowTag);
+        EXPRESSION_INFO(PositionalArgument);
 
 #undef EXPRESSION_INFO
 #undef EXPRESSION_INFO_CUSTOM
@@ -563,6 +564,11 @@ namespace rocRoller
             constexpr EvaluationTimes operator()(DataFlowTag const& expr) const
             {
                 return {EvaluationTime::KernelExecute};
+            }
+
+            constexpr EvaluationTimes operator()(PositionalArgument const& expr) const
+            {
+                return {EvaluationTime::Translate};
             }
 
             constexpr EvaluationTimes operator()(CommandArgumentPtr const& expr) const

@@ -192,6 +192,11 @@ namespace rocRoller
                 return a == b;
             }
 
+            constexpr bool operator()(PositionalArgument const& a, PositionalArgument const& b)
+            {
+                return a == b;
+            }
+
             bool operator()(WaveTilePtr const& a, WaveTilePtr const& b)
             {
                 return a == b;
@@ -389,6 +394,11 @@ namespace rocRoller
             }
 
             constexpr bool operator()(DataFlowTag const& a, DataFlowTag const& b)
+            {
+                return a == b;
+            }
+
+            constexpr bool operator()(PositionalArgument const& a, PositionalArgument const& b)
             {
                 return a == b;
             }

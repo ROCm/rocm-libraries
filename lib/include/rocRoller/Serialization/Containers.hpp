@@ -184,5 +184,26 @@ namespace rocRoller
                 return v[index];
             }
         };
+
+        template <typename T, typename IO>
+        struct SequenceTraits<std::pair<T, T>, IO>
+        {
+            static const bool flow = true;
+
+            using Value = T;
+            static size_t size(IO& io, std::pair<T, T>& v)
+            {
+                return 2;
+            }
+
+            static T& element(IO& io, std::pair<T, T>& v, size_t index)
+            {
+                AssertFatal(index == 0 || index == 1);
+                if(index == 0)
+                    return v.first;
+                return v.second;
+            }
+        };
+
     } // namespace Serialization
 } // namespace rocRoller

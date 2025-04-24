@@ -27,6 +27,7 @@
 rocroller_add_dependency(
     mxDataGenerator HASH e74b2c1b6f357c053b27958177ca454ba21918b7
 )
+rocroller_add_dependency(boost)
 
 add_library(
     common_test_utilities
@@ -44,9 +45,11 @@ target_compile_options(
 target_link_options(common_test_utilities PUBLIC ${EXTRA_LINK_OPTIONS})
 target_link_libraries(
     common_test_utilities
+    PUBLIC
     mxDataGenerator
     openblas
     rocroller_interface
+    $<BUILD_INTERFACE:Boost::multi_index>
 )
 
 target_include_directories(common_test_utilities PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

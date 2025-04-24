@@ -83,6 +83,31 @@ namespace rocRoller
                 return {result};
             }
 
+            std::vector<Expression::ExpressionPtr> operator()(PiecewiseAffineJoin const& e)
+            {
+                AssertFatal(srcs.size() == e.strides.first.size(),
+                            ShowValue(e.strides.first.size()));
+                AssertFatal(dsts.size() == 1, ShowValue(dsts.size()));
+                auto branchTrue  = indexes[0] * e.strides.first[0];
+                auto branchFalse = indexes[0] * e.strides.second[0];
+                for(uint d = 1; d < srcs.size(); ++d)
+                {
+                    branchTrue  = branchTrue + indexes[d] * e.strides.first[d];
+                    branchFalse = branchFalse + indexes[d] * e.strides.second[d];
+                }
+                if(e.initialValues.first)
+                    branchTrue = branchTrue + e.initialValues.first;
+                if(e.initialValues.second)
+                    branchFalse = branchFalse + e.initialValues.second;
+
+                auto condition = positionalArgumentPropagation(e.condition, indexes);
+
+                auto result = std::make_shared<Expression::Expression>(
+                    Expression::Conditional{condition, branchTrue, branchFalse});
+                setComment(result, "PiecewiseAffineJoin");
+                return {result};
+            }
+
             std::vector<Expression::ExpressionPtr> operator()(Sunder const& e)
             {
                 AssertFatal(dsts.size() == 1, ShowValue(dsts.size()));
@@ -193,6 +218,31 @@ namespace rocRoller
                     result = result + indexes[d] * getStride(dsts[d]);
 
                 setComment(result, "Split");
+                return {result};
+            }
+
+            std::vector<Expression::ExpressionPtr> operator()(PiecewiseAffineJoin const& e)
+            {
+                AssertFatal(dsts.size() == e.strides.first.size(),
+                            ShowValue(e.strides.first.size()));
+                AssertFatal(srcs.size() == 1, ShowValue(srcs.size()));
+                auto branchTrue  = indexes[0] * e.strides.first[0];
+                auto branchFalse = indexes[0] * e.strides.second[0];
+                for(uint d = 1; d < dsts.size(); ++d)
+                {
+                    branchTrue  = branchTrue + indexes[d] * e.strides.first[d];
+                    branchFalse = branchFalse + indexes[d] * e.strides.second[d];
+                }
+                if(e.initialValues.first)
+                    branchTrue = branchTrue + e.initialValues.first;
+                if(e.initialValues.second)
+                    branchFalse = branchFalse + e.initialValues.second;
+
+                auto condition = positionalArgumentPropagation(e.condition, indexes);
+
+                auto result = std::make_shared<Expression::Expression>(
+                    Expression::Conditional{condition, branchTrue, branchFalse});
+                setComment(result, "PiecewiseAffineJoin");
                 return {result};
             }
 

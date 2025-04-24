@@ -245,6 +245,31 @@ namespace rocRoller
         {
         };
 
+        ROCROLLER_SERIALIZE_VECTOR(false, Expression::ExpressionPtr);
+
+        template <typename IO, typename Context>
+        struct MappingTraits<KernelGraph::CoordinateGraph::PiecewiseAffineJoin, IO, Context>
+        {
+            using iot = IOTraits<IO>;
+
+            static void mapping(IO&                                                io,
+                                KernelGraph::CoordinateGraph::PiecewiseAffineJoin& edge,
+                                Context&                                           ctx)
+            {
+                iot::mapRequired(io, "condition", edge.condition);
+                iot::mapRequired(io, "strides", edge.strides);
+                iot::mapRequired(io, "initialValues", edge.initialValues);
+            }
+
+            static void mapping(IO& io, KernelGraph::CoordinateGraph::PiecewiseAffineJoin& edge)
+            {
+                AssertFatal((std::same_as<EmptyContext, Context>));
+
+                Context ctx;
+                mapping(io, edge, ctx);
+            }
+        };
+
         template <typename IO, typename Context>
         struct MappingTraits<KernelGraph::CoordinateGraph::Index, IO, Context>
         {

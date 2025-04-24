@@ -92,6 +92,8 @@ namespace rocRoller
         struct SRConvert;
 
         struct DataFlowTag;
+        struct PositionalArgument;
+
         using WaveTilePtr = std::shared_ptr<KernelGraph::CoordinateGraph::WaveTile>;
 
         using Expression = std::variant<
@@ -149,6 +151,8 @@ namespace rocRoller
             SRConvert<DataType::BF8>,
 
             // --- Values ---
+            PositionalArgument,
+
             // Literal: Always available
             CommandArgumentValue,
 

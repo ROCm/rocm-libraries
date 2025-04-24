@@ -28,6 +28,7 @@
 
 #include <string>
 
+#include <rocRoller/Expression_fwd.hpp>
 #include <rocRoller/KernelGraph/CoordinateGraph/CoordinateEdge_fwd.hpp>
 #include <rocRoller/KernelGraph/StructUtils.hpp>
 #include <rocRoller/Utilities/Utils.hpp>
@@ -239,6 +240,61 @@ namespace rocRoller
          * Forward and reverse transforms are the identity.
          */
         RR_EMPTY_STRUCT_WITH_NAME(PassThrough);
+
+        /**
+         * Join dimensions using conditional strides and initial values.
+         *
+         * The strides and initial values are passed in.  They are not
+         * queried from the graph.
+         *
+         * For example, with input dimensions
+         *
+         *   I = Dimension()
+         *   J = Dimension()
+         *
+         * and output dimensions
+         *
+         *   F = Dimension()
+         *
+         * the coordinate transform is
+         *
+         *   selector = Condition(I, J)
+         *   Join(I, J; F)(i, j) = i * strides[selector]_i + j * strides[selector]_j + initial[selector]
+         *
+         */
+        struct PiecewiseAffineJoin
+        {
+            using ExpressionPtr     = Expression::ExpressionPtr;
+            using ExpressionPtrPair = std::pair<ExpressionPtr, ExpressionPtr>;
+            using ExpressionPtrVectorPair
+                = std::pair<std::vector<ExpressionPtr>, std::vector<ExpressionPtr>>;
+
+            ExpressionPtr           condition;
+            ExpressionPtrVectorPair strides;
+            ExpressionPtrPair       initialValues;
+
+            PiecewiseAffineJoin() = default;
+
+            PiecewiseAffineJoin(ExpressionPtr                  condition,
+                                ExpressionPtrVectorPair const& strides,
+                                ExpressionPtrPair const&       initialValues)
+                : condition(condition)
+                , strides(strides)
+                , initialValues(initialValues)
+            {
+                AssertFatal(strides.first.size() == strides.second.size());
+            }
+
+            std::string toString() const
+            {
+                return name();
+            }
+
+            std::string name() const
+            {
+                return "PiecewiseAffineJoin";
+            }
+        };
 
         /**
          * Duplicate (identity) -- THIS IS TEMPORARY.

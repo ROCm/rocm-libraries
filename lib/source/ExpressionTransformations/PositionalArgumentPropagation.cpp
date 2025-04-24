@@ -31,10 +31,12 @@ namespace rocRoller
 {
     namespace Expression
     {
-        struct DataFlowTagPropagationVisitor
+        struct PositionalArgumentPropagationVisitor
         {
-            DataFlowTagPropagationVisitor(ContextPtr context)
+            PositionalArgumentPropagationVisitor(ContextPtr                 context,
+                                                 std::vector<ExpressionPtr> arguments)
                 : m_context(context)
+                , m_arguments(arguments)
             {
             }
 
@@ -111,20 +113,9 @@ namespace rocRoller
 
             ExpressionPtr operator()(DataFlowTag const& expr)
             {
-                AssertFatal(m_context);
-                if(m_context->registerTagManager()->hasExpression(expr.tag))
-                {
-                    auto [tagExpr, _ignore]
-                        = m_context->registerTagManager()->getExpression(expr.tag);
-                    return call(tagExpr);
-                }
-                else
-                {
-                    AssertFatal(m_context->registerTagManager()->hasRegister(expr.tag),
-                                ShowValue(expr.tag));
-                    return std::make_shared<Expression>(
-                        m_context->registerTagManager()->getRegister(expr.tag));
-                }
+                AssertFatal(expr.tag >= 0);
+                AssertFatal(expr.tag < m_arguments.size());
+                return call(m_arguments[expr.tag]);
             }
 
             template <CValue Value>
@@ -142,13 +133,16 @@ namespace rocRoller
             }
 
         private:
-            ContextPtr m_context;
+            ContextPtr                 m_context;
+            std::vector<ExpressionPtr> m_arguments;
         };
 
-        ExpressionPtr dataFlowTagPropagation(ExpressionPtr expr, ContextPtr context)
+        ExpressionPtr positionalArgumentPropagation(ExpressionPtr              expr,
+                                                    std::vector<ExpressionPtr> arguments)
         {
-            auto visitor = DataFlowTagPropagationVisitor(context);
+            auto visitor = PositionalArgumentPropagationVisitor(nullptr, arguments);
             return visitor.call(expr);
         }
+
     }
 }

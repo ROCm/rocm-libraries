@@ -40,6 +40,7 @@ namespace rocRoller
         struct Join;
         struct MakeOutput;
         struct PassThrough;
+        struct PiecewiseAffineJoin;
         struct Split;
         struct Sunder;
         struct Tile;
@@ -52,6 +53,7 @@ namespace rocRoller
                                                      Join,
                                                      MakeOutput,
                                                      PassThrough,
+                                                     PiecewiseAffineJoin,
                                                      Split,
                                                      Sunder,
                                                      Tile>;

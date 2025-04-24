@@ -392,6 +392,26 @@ namespace rocRoller
         };
 
         template <typename IO, typename Context>
+        struct MappingTraits<Expression::PositionalArgument, IO, Context>
+        {
+            static const bool flow = true;
+            using iot              = IOTraits<IO>;
+
+            static void mapping(IO& io, Expression::PositionalArgument& val, Context& ctx)
+            {
+                iot::mapRequired(io, "slot", val.slot);
+            }
+
+            static void mapping(IO& io, Expression::PositionalArgument& val)
+            {
+                AssertFatal((std::same_as<EmptyContext, Context>));
+
+                Context ctx;
+                mapping(io, val, ctx);
+            }
+        };
+
+        template <typename IO, typename Context>
         struct MappingTraits<Expression::WaveTilePtr, IO, Context>
         {
             static const bool flow = true;

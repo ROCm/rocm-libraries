@@ -549,6 +549,16 @@ namespace rocRoller
             bool operator==(DataFlowTag const&) const = default;
         };
 
+        /**
+         * @brief Positional argument
+         */
+        struct PositionalArgument
+        {
+            int slot;
+
+            bool operator==(PositionalArgument const&) const = default;
+        };
+
         ExpressionPtr operator+(ExpressionPtr a, ExpressionPtr b);
         ExpressionPtr operator-(ExpressionPtr a, ExpressionPtr b);
         ExpressionPtr operator*(ExpressionPtr a, ExpressionPtr b);
@@ -610,6 +620,7 @@ namespace rocRoller
                                   CommandArgumentPtr,
                                   CommandArgumentValue,
                                   DataFlowTag,
+                                  PositionalArgument,
                                   Register::ValuePtr,
                                   WaveTilePtr>;
 

@@ -2957,7 +2957,7 @@ namespace KernelGraphTest
         transforms.push_back(std::make_shared<LowerLinear>(m_context));
         transforms.push_back(std::make_shared<LowerTile>(params, m_context));
         transforms.push_back(std::make_shared<LowerTensorContraction>(params, m_context));
-        transforms.push_back(std::make_shared<ConnectWorkgroups>());
+        transforms.push_back(std::make_shared<ConnectWorkgroups>(params, m_context));
         transforms.push_back(std::make_shared<AddPrefetch>(params, m_context));
         transforms.push_back(std::make_shared<AddComputeIndex>());
         transforms.push_back(std::make_shared<AddDeallocate>());

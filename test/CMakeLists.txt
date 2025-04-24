@@ -163,6 +163,7 @@ set(
     catch/BranchGeneratorTest.cpp
     catch/CommandArgumentValueTest.cpp
     catch/CommandTest.cpp
+    catch/ConnectWorkgroupsTest.cpp
     catch/CustomAssertionTest.cpp
     catch/CustomMatcherTest.cpp
     catch/DataTypesTest.cpp

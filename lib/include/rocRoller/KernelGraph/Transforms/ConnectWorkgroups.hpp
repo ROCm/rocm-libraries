@@ -42,11 +42,17 @@ namespace rocRoller
         class ConnectWorkgroups : public GraphTransform
         {
         public:
+            ConnectWorkgroups(CommandParametersPtr params, ContextPtr context);
+
             KernelGraph apply(KernelGraph const& original) override;
             std::string name() const override
             {
                 return "ConnectWorkgroups";
             }
+
+        private:
+            CommandParametersPtr m_params;
+            ContextPtr           m_context;
         };
     }
 }

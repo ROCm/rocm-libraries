@@ -114,6 +114,15 @@ namespace rocRoller
         ExpressionPtr dataFlowTagPropagation(ExpressionPtr expr, ContextPtr context);
 
         /**
+         * Resolve all PositionalArguments in the given expression.
+	 *
+	 * Each PositionalArgument is transformed into the expression
+	 * in position `slot` of `arguments`.
+         */
+        ExpressionPtr positionalArgumentPropagation(ExpressionPtr              expr,
+                                                    std::vector<ExpressionPtr> arguments);
+
+        /**
          * @brief Attempt to compute e^x operations by using exp2(x * log2(e)).
          *
          * @param expr Input expression

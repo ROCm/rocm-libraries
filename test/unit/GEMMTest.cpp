@@ -201,10 +201,6 @@ namespace GEMMDriverTest
                 numWorkgroupY = N / gemm.macN;
             }
 
-            auto NX = std::make_shared<Expression::Expression>(numWorkgroupX * workgroupSizeX);
-            auto NY = std::make_shared<Expression::Expression>(numWorkgroupY * workgroupSizeY);
-            auto NZ = std::make_shared<Expression::Expression>(1u);
-
             // Host data
             using PackedTypeA = typename PackedTypeOf<TA>::type;
             using PackedTypeB = typename PackedTypeOf<TB>::type;
@@ -415,7 +411,12 @@ namespace GEMMDriverTest
 
             auto params = std::make_shared<CommandParameters>();
             params->setManualKernelDimension(2);
+            params->setManualWorkgroupSize({workgroupSizeX, workgroupSizeY, 1});
+
             // TODO: Calculate these values internally based on workgroup sizes.
+            params->setManualWavefrontCount(
+                {static_cast<uint>(gemm.macM / gemm.waveM / wavetilePerWavefrontM),
+                 static_cast<uint>(gemm.macN / gemm.waveN / wavetilePerWavefrontN)});
             params->setWaveTilesPerWavefront(wavetilePerWavefrontM, wavetilePerWavefrontN);
             params->setSplitStoreTileIntoWaveBlocks(gemm.splitStoreTileIntoWaveBlocks);
 
@@ -530,14 +531,6 @@ namespace GEMMDriverTest
                 params->setDimensionInfo(tagStoreD, macTileD);
             }
 
-            params->setManualWorkgroupSize({workgroupSizeX, workgroupSizeY, 1});
-            Log::debug("GEMM workgroup sizes {} {} {}", workgroupSizeX, workgroupSizeY, 1);
-            Log::debug("GEMM workitem counts {} {} {}", toString(NX), toString(NY), toString(NZ));
-
-            params->setManualWavefrontCount(
-                {static_cast<uint>(gemm.macM / gemm.waveM / wavetilePerWavefrontM),
-                 static_cast<uint>(gemm.macN / gemm.waveN / wavetilePerWavefrontN)});
-
             CommandKernel commandKernel(command, testKernelName());
 
             // TODO Some test have loops, we need to reset the context.
@@ -546,10 +539,6 @@ namespace GEMMDriverTest
             commandKernel.setContext(m_context);
             commandKernel.setCommandParameters(params);
             commandKernel.generateKernel();
-
-            auto launch = std::make_shared<CommandLaunchParameters>();
-            launch->setManualWorkitemCount({NX, NY, NZ});
-            commandKernel.setLaunchParameters(launch);
 
             CommandArguments commandArgs = command->createArguments();
 

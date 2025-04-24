@@ -146,6 +146,11 @@ namespace rocRoller
                 return concatenate("DataFlowTag(", expr.tag, ")");
             }
 
+            std::string operator()(PositionalArgument const& expr) const
+            {
+                return concatenate("PositionalArgument(", expr.slot, ")");
+            }
+
             std::string call(Expression const& expr) const
             {
                 auto functionalPart = std::visit(*this, expr);

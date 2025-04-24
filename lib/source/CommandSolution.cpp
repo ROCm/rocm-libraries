@@ -377,7 +377,8 @@ namespace rocRoller
                 m_commandParameters->loopOverOutputTilesTopLoop,
                 m_context));
         }
-        transforms.push_back(std::make_shared<KernelGraph::ConnectWorkgroups>());
+        transforms.push_back(
+            std::make_shared<KernelGraph::ConnectWorkgroups>(m_commandParameters, m_context));
         transforms.push_back(
             std::make_shared<KernelGraph::UnrollLoops>(m_commandParameters, m_context));
         if(m_commandParameters->fuseLoops)

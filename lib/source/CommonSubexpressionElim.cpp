@@ -443,6 +443,12 @@ namespace rocRoller
             {
                 return {};
             }
+
+            ExpressionTree operator()(PositionalArgument const& value) const
+            {
+                return {};
+            }
+
             ExpressionTree operator()(Register::ValuePtr const& value) const
             {
                 return {{value, value->expression(), {}, 0}};

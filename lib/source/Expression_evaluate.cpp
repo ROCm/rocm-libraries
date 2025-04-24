@@ -824,6 +824,12 @@ namespace rocRoller
                 Throw<FatalError>("Data flow tag present in runtime expression", ShowValue(expr));
             }
 
+            CommandArgumentValue operator()(PositionalArgument const& expr)
+            {
+                Throw<FatalError>("Positional argument present in runtime expression",
+                                  ShowValue(expr));
+            }
+
             CommandArgumentValue operator()(WaveTilePtr const& expr)
             {
                 Throw<FatalError>("Wave tile present in runtime expression", ShowValue(expr));

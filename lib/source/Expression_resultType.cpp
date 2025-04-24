@@ -333,6 +333,11 @@ namespace rocRoller
                 return {expr.regType, expr.varType};
             }
 
+            ResultType operator()(PositionalArgument const& expr)
+            {
+                Throw<FatalError>("Can not get result type of PositionalArgument.");
+            }
+
             ResultType operator()(WaveTilePtr const& expr)
             {
                 return call(expr->vgpr);
