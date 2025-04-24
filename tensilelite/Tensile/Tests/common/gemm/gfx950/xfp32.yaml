@@ -18,6 +18,8 @@ GlobalParameters:
   KeepBuildTmp: True
   EnqueuesPerSync: 10
   NumWarmups: 5
+  MaxLDS: 163840
+  DeviceLDS: 163840
 
 BenchmarkProblems:
   ########################################

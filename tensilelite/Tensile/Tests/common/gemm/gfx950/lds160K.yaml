@@ -65,9 +65,11 @@ BenchmarkProblems:
         - MatrixInstruction:
           - [16, 16,32, 1, 1, 8, 8, 2, 2 ] # 256x256
           - [16, 16,32, 1, 1, 4, 4, 2, 2 ] # 128x128
+          - [16, 16,32, 1, 1, 14, 2, 4, 1 ] # 128K A
+          - [16, 16,32, 1, 1, 6, 13, 1, 4 ] # 128K B
           - [32, 32,16, 1, 1, 4, 4, 2, 2 ] # 256x256
           - [32, 32,16, 1, 1, 2, 2, 2, 2 ] # 128x128
-        - PrefetchGlobalRead: [1,2]
+        - PrefetchGlobalRead: [0,1,2]
         - PrefetchLocalRead: [1]
         - DepthU: [64, 128]  # 256x256x64 and 128x128x128 with padding overflow 64KB lds
         - TransposeLDS: [1]

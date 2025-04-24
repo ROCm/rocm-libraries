@@ -14,6 +14,8 @@ GlobalParameters:
   CSVMergeSameProblemID: 1
   #Device: 0
   PruneSparseMode: 0
+  MaxLDS: 163840
+  DeviceLDS: 163840
 BenchmarkProblems:
   #######################################
   # NN - standard
@@ -52,23 +54,26 @@ BenchmarkProblems:
           - [16, 16, 64, 1, 1, 8, 6, 1, 1 ]
           - [16, 16, 64, 1, 1, 8, 8, 2, 2 ]
           - [16, 16, 64, 1, 1, 7, 2, 2, 2 ]
+          - [16, 16, 64, 1, 1, 9, 3, 4, 1 ] # LDS 128K A
+          - [16, 16, 64, 1, 1, 4, 4, 2, 4 ] # StoreSwapAddr
+          - [16, 16, 64, 1, 1, 8, 1, 2, 4 ] # StoreSwapAddr
 
-        - PrefetchGlobalRead: [2]
+        - PrefetchGlobalRead: [0,2]
         - PrefetchLocalRead: [0,1,2]
-        - ClusterLocalRead: [1]
+        - ClusterLocalRead: [0]
         - DepthU: [64,128]
         #- LocalReadVectorWidth: [8] #
         - ScheduleIterAlg: [3]
         - ExpandPointerSwap: [0,1]       #
-        - TransposeLDS: [1]
-        - LdsPadA: [-1]
-        - LdsPadB: [-1]
-        - LdsPadMetadata: [-1]
-        - 1LDSBuffer: [-1]
+        - TransposeLDS: [-1]
+        - LdsPadA: [0,-1]
+        - LdsPadB: [0,-1]
+        - LdsPadMetadata: [0,-1]
+        - 1LDSBuffer: [0]
         - GlobalSplitU: [1,2]
         - GlobalSplitUAlgorithm: ["MultipleBuffer"]
         - SourceSwap: [1]
-        - StoreRemapVectorWidth: [-1]
+        - StoreRemapVectorWidth: [0,-1]
         #- GlobalReadVectorWidthA: [4]
         #- VectorWidthA: [1]
         #- VectorWidthB: [1]

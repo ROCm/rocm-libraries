@@ -17,6 +17,8 @@ GlobalParameters:
   BoundsCheck: 2
   KeepBuildTmp: True
 #  GenerateSourcesAndExit : True
+  MaxLDS: 163840
+  DeviceLDS: 163840
   
 BenchmarkProblems:
   -
