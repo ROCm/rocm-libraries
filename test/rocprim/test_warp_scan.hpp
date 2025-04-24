@@ -39,7 +39,7 @@
 
 test_suite_type_def(suite_name, name_suffix)
 
-typed_test_suite_def(RocprimWarpScanTests, name_suffix, warp_params);
+    typed_test_suite_def(RocprimWarpScanTests, name_suffix, warp_params);
 
 typed_test_def(RocprimWarpScanTests, name_suffix, InclusiveScan)
 {
@@ -61,36 +61,42 @@ typed_test_def(RocprimWarpScanTests, name_suffix, InclusiveScan)
     static constexpr size_t ws64 = size_t(ROCPRIM_WARP_SIZE_64);
 
     // Block size of warp size 32
-    static constexpr size_t block_size_ws32 =
-        rocprim::detail::is_power_of_two(logical_warp_size)
-            ? rocprim::max<size_t>(ws32, logical_warp_size * 4)
-            : rocprim::max<size_t>((ws32/logical_warp_size), 1) * logical_warp_size;
+    static constexpr size_t block_size_ws32
+        = rocprim::detail::is_power_of_two(logical_warp_size)
+              ? rocprim::max<size_t>(ws32, logical_warp_size * 4)
+              : rocprim::max<size_t>((ws32 / logical_warp_size), 1) * logical_warp_size;
 
     // Block size of warp size 64
-    static constexpr size_t block_size_ws64 =
-        rocprim::detail::is_power_of_two(logical_warp_size)
-            ? rocprim::max<size_t>(ws64, logical_warp_size * 4)
-            : rocprim::max<size_t>((ws64/logical_warp_size), 1) * logical_warp_size;
+    static constexpr size_t block_size_ws64
+        = rocprim::detail::is_power_of_two(logical_warp_size)
+              ? rocprim::max<size_t>(ws64, logical_warp_size * 4)
+              : rocprim::max<size_t>((ws64 / logical_warp_size), 1) * logical_warp_size;
 
     unsigned int current_device_warp_size;
     HIP_CHECK(::rocprim::host_warp_size(device_id, current_device_warp_size));
 
     const size_t block_size = current_device_warp_size == ws32 ? block_size_ws32 : block_size_ws64;
     const unsigned int grid_size = 4;
+
     const size_t size = block_size * grid_size;
 
     // Check if warp size is supported
-    if( (logical_warp_size > current_device_warp_size) ||
-        (current_device_warp_size != ws32 && current_device_warp_size != ws64) ) // Only WarpSize 32 and 64 is supported
+    if((logical_warp_size > current_device_warp_size)
+       || (current_device_warp_size != ws32
+           && current_device_warp_size != ws64)) // Only VirtualWaveSize 32 and 64 is supported
     {
-        printf("Unsupported test warp size/computed block size: %zu/%zu. Current device warp size: %u.    Skipping test\n",
-            logical_warp_size, block_size, current_device_warp_size);
+        printf("Unsupported test warp size/computed block size: %zu/%zu. Current device warp size: "
+               "%u.    Skipping test\n",
+               logical_warp_size,
+               block_size,
+               current_device_warp_size);
         GTEST_SKIP();
     }
 
     for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
-        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate data
@@ -104,8 +110,8 @@ typed_test_def(RocprimWarpScanTests, name_suffix, InclusiveScan)
             acc_type accumulator(0);
             for(size_t j = 0; j < logical_warp_size; j++)
             {
-                auto idx = i * logical_warp_size + j;
-                accumulator = binary_op_host(input[idx], accumulator);
+                auto idx      = i * logical_warp_size + j;
+                accumulator   = binary_op_host(input[idx], accumulator);
                 expected[idx] = static_cast<T>(accumulator);
             }
         }
@@ -115,7 +121,7 @@ typed_test_def(RocprimWarpScanTests, name_suffix, InclusiveScan)
         common::device_ptr<T> device_output(output.size());
 
         // Launching kernel
-        if (current_device_warp_size == ws32)
+        if(current_device_warp_size == ws32)
         {
             hipLaunchKernelGGL(
                 HIP_KERNEL_NAME(warp_inclusive_scan_kernel<T, block_size_ws32, logical_warp_size>),
@@ -126,7 +132,7 @@ typed_test_def(RocprimWarpScanTests, name_suffix, InclusiveScan)
                 device_input.get(),
                 device_output.get());
         }
-        else if (current_device_warp_size == ws64)
+        else if(current_device_warp_size == ws64)
         {
             hipLaunchKernelGGL(
                 HIP_KERNEL_NAME(warp_inclusive_scan_kernel<T, block_size_ws64, logical_warp_size>),
@@ -147,7 +153,6 @@ typed_test_def(RocprimWarpScanTests, name_suffix, InclusiveScan)
         // Validating results
         test_utils::assert_near(output, expected, test_utils::precision<T> * logical_warp_size);
     }
-
 }
 
 typed_test_def(RocprimWarpScanTests, name_suffix, InclusiveScanInitialValue)
@@ -186,12 +191,13 @@ typed_test_def(RocprimWarpScanTests, name_suffix, InclusiveScanInitialValue)
 
     const size_t block_size = current_device_warp_size == ws32 ? block_size_ws32 : block_size_ws64;
     const unsigned int grid_size = 4;
-    const size_t       size      = block_size * grid_size;
+
+    const size_t size = block_size * grid_size;
 
     // Check if warp size is supported
     if((logical_warp_size > current_device_warp_size)
        || (current_device_warp_size != ws32
-           && current_device_warp_size != ws64)) // Only WarpSize 32 and 64 is supported
+           && current_device_warp_size != ws64)) // Only VirtualWaveSize 32 and 64 is supported
     {
         printf("Unsupported test warp size/computed block size: %zu/%zu. Current device warp size: "
                "%u.    Skipping test\n",
@@ -291,36 +297,42 @@ typed_test_def(RocprimWarpScanTests, name_suffix, InclusiveScanReduce)
     static constexpr size_t ws64 = size_t(ROCPRIM_WARP_SIZE_64);
 
     // Block size of warp size 32
-    static constexpr size_t block_size_ws32 =
-        rocprim::detail::is_power_of_two(logical_warp_size)
-            ? rocprim::max<size_t>(ws32, logical_warp_size * 4)
-            : rocprim::max<size_t>((ws32/logical_warp_size), 1) * logical_warp_size;
+    static constexpr size_t block_size_ws32
+        = rocprim::detail::is_power_of_two(logical_warp_size)
+              ? rocprim::max<size_t>(ws32, logical_warp_size * 4)
+              : rocprim::max<size_t>((ws32 / logical_warp_size), 1) * logical_warp_size;
 
     // Block size of warp size 64
-    static constexpr size_t block_size_ws64 =
-        rocprim::detail::is_power_of_two(logical_warp_size)
-            ? rocprim::max<size_t>(ws64, logical_warp_size * 4)
-            : rocprim::max<size_t>((ws64/logical_warp_size), 1) * logical_warp_size;
+    static constexpr size_t block_size_ws64
+        = rocprim::detail::is_power_of_two(logical_warp_size)
+              ? rocprim::max<size_t>(ws64, logical_warp_size * 4)
+              : rocprim::max<size_t>((ws64 / logical_warp_size), 1) * logical_warp_size;
 
     unsigned int current_device_warp_size;
     HIP_CHECK(::rocprim::host_warp_size(device_id, current_device_warp_size));
 
     const size_t block_size = current_device_warp_size == ws32 ? block_size_ws32 : block_size_ws64;
     const unsigned int grid_size = 4;
+
     const size_t size = block_size * grid_size;
 
     // Check if warp size is supported
-    if( (logical_warp_size > current_device_warp_size) ||
-        (current_device_warp_size != ws32 && current_device_warp_size != ws64) ) // Only WarpSize 32 and 64 is supported
+    if((logical_warp_size > current_device_warp_size)
+       || (current_device_warp_size != ws32
+           && current_device_warp_size != ws64)) // Only VirtualWaveSize 32 and 64 is supported
     {
-        printf("Unsupported test warp size/computed block size: %zu/%zu. Current device warp size: %u.    Skipping test\n",
-            logical_warp_size, block_size, current_device_warp_size);
+        printf("Unsupported test warp size/computed block size: %zu/%zu. Current device warp size: "
+               "%u.    Skipping test\n",
+               logical_warp_size,
+               block_size,
+               current_device_warp_size);
         GTEST_SKIP();
     }
 
     for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
-        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate data
@@ -336,11 +348,11 @@ typed_test_def(RocprimWarpScanTests, name_suffix, InclusiveScanReduce)
             acc_type accumulator(0);
             for(size_t j = 0; j < logical_warp_size; j++)
             {
-                auto idx = i * logical_warp_size + j;
-                accumulator = binary_op_host(input[idx],accumulator);
+                auto idx      = i * logical_warp_size + j;
+                accumulator   = binary_op_host(input[idx], accumulator);
                 expected[idx] = static_cast<T>(accumulator);
             }
-            expected_reductions[i] = expected[(i+1) * logical_warp_size - 1];
+            expected_reductions[i] = expected[(i + 1) * logical_warp_size - 1];
         }
 
         // Writing to device memory
@@ -349,7 +361,7 @@ typed_test_def(RocprimWarpScanTests, name_suffix, InclusiveScanReduce)
         common::device_ptr<T> device_output_reductions(output_reductions.size());
 
         // Launching kernel
-        if (current_device_warp_size == ws32)
+        if(current_device_warp_size == ws32)
         {
             hipLaunchKernelGGL(
                 HIP_KERNEL_NAME(
@@ -389,7 +401,6 @@ typed_test_def(RocprimWarpScanTests, name_suffix, InclusiveScanReduce)
                                 expected_reductions,
                                 test_utils::precision<T> * logical_warp_size);
     }
-
 }
 
 typed_test_def(RocprimWarpScanTests, name_suffix, InclusiveScanReduceInitialValue)
@@ -428,12 +439,13 @@ typed_test_def(RocprimWarpScanTests, name_suffix, InclusiveScanReduceInitialValu
 
     const size_t block_size = current_device_warp_size == ws32 ? block_size_ws32 : block_size_ws64;
     const unsigned int grid_size = 4;
-    const size_t       size      = block_size * grid_size;
+
+    const size_t size = block_size * grid_size;
 
     // Check if warp size is supported
     if((logical_warp_size > current_device_warp_size)
        || (current_device_warp_size != ws32
-           && current_device_warp_size != ws64)) // Only WarpSize 32 and 64 is supported
+           && current_device_warp_size != ws64)) // Only VirtualWaveSize 32 and 64 is supported
     {
         printf("Unsupported test warp size/computed block size: %zu/%zu. Current device warp size: "
                "%u.    Skipping test\n",
@@ -543,43 +555,49 @@ typed_test_def(RocprimWarpScanTests, name_suffix, ExclusiveScan)
     static constexpr size_t ws64 = size_t(ROCPRIM_WARP_SIZE_64);
 
     // Block size of warp size 32
-    static constexpr size_t block_size_ws32 =
-        rocprim::detail::is_power_of_two(logical_warp_size)
-            ? rocprim::max<size_t>(ws32, logical_warp_size * 4)
-            : rocprim::max<size_t>((ws32/logical_warp_size), 1) * logical_warp_size;
+    static constexpr size_t block_size_ws32
+        = rocprim::detail::is_power_of_two(logical_warp_size)
+              ? rocprim::max<size_t>(ws32, logical_warp_size * 4)
+              : rocprim::max<size_t>((ws32 / logical_warp_size), 1) * logical_warp_size;
 
     // Block size of warp size 64
-    static constexpr size_t block_size_ws64 =
-        rocprim::detail::is_power_of_two(logical_warp_size)
-            ? rocprim::max<size_t>(ws64, logical_warp_size * 4)
-            : rocprim::max<size_t>((ws64/logical_warp_size), 1) * logical_warp_size;
+    static constexpr size_t block_size_ws64
+        = rocprim::detail::is_power_of_two(logical_warp_size)
+              ? rocprim::max<size_t>(ws64, logical_warp_size * 4)
+              : rocprim::max<size_t>((ws64 / logical_warp_size), 1) * logical_warp_size;
 
     unsigned int current_device_warp_size;
     HIP_CHECK(::rocprim::host_warp_size(device_id, current_device_warp_size));
 
     const size_t block_size = current_device_warp_size == ws32 ? block_size_ws32 : block_size_ws64;
     const unsigned int grid_size = 4;
+
     const size_t size = block_size * grid_size;
 
     // Check if warp size is supported
-    if( (logical_warp_size > current_device_warp_size) ||
-        (current_device_warp_size != ws32 && current_device_warp_size != ws64) ) // Only WarpSize 32 and 64 is supported
+    if((logical_warp_size > current_device_warp_size)
+       || (current_device_warp_size != ws32
+           && current_device_warp_size != ws64)) // Only VirtualWaveSize 32 and 64 is supported
     {
-        printf("Unsupported test warp size/computed block size: %zu/%zu. Current device warp size: %u.    Skipping test\n",
-            logical_warp_size, block_size, current_device_warp_size);
+        printf("Unsupported test warp size/computed block size: %zu/%zu. Current device warp size: "
+               "%u.    Skipping test\n",
+               logical_warp_size,
+               block_size,
+               current_device_warp_size);
         GTEST_SKIP();
     }
 
     for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
-        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate data
         std::vector<T> input = test_utils::get_random_data_wrapped<T>(size, 2, 50, seed_value);
         std::vector<T> output(size);
         std::vector<T> expected(input.size(), T(0));
-        const T init = test_utils::get_random_value<T>(0, 100, seed_value);
+        const T        init = test_utils::get_random_value<T>(0, 100, seed_value);
 
         // Calculate expected results on host
         for(size_t i = 0; i < input.size() / logical_warp_size; i++)
@@ -588,8 +606,8 @@ typed_test_def(RocprimWarpScanTests, name_suffix, ExclusiveScan)
             expected[i * logical_warp_size] = init;
             for(size_t j = 1; j < logical_warp_size; j++)
             {
-                auto idx = i * logical_warp_size + j;
-                accumulator = binary_op_host(input[idx-1], accumulator);
+                auto idx      = i * logical_warp_size + j;
+                accumulator   = binary_op_host(input[idx - 1], accumulator);
                 expected[idx] = static_cast<T>(accumulator);
             }
         }
@@ -599,7 +617,7 @@ typed_test_def(RocprimWarpScanTests, name_suffix, ExclusiveScan)
         common::device_ptr<T> device_output(output.size());
 
         // Launching kernel
-        if (current_device_warp_size == ws32)
+        if(current_device_warp_size == ws32)
         {
             hipLaunchKernelGGL(
                 HIP_KERNEL_NAME(warp_exclusive_scan_kernel<T, block_size_ws32, logical_warp_size>),
@@ -611,7 +629,7 @@ typed_test_def(RocprimWarpScanTests, name_suffix, ExclusiveScan)
                 device_output.get(),
                 init);
         }
-        else if (current_device_warp_size == ws64)
+        else if(current_device_warp_size == ws64)
         {
             hipLaunchKernelGGL(
                 HIP_KERNEL_NAME(warp_exclusive_scan_kernel<T, block_size_ws64, logical_warp_size>),
@@ -633,7 +651,6 @@ typed_test_def(RocprimWarpScanTests, name_suffix, ExclusiveScan)
         // Validating results
         test_utils::assert_near(output, expected, test_utils::precision<T> * logical_warp_size);
     }
-
 }
 
 typed_test_def(RocprimWarpScanTests, name_suffix, Broadcast)
@@ -672,12 +689,13 @@ typed_test_def(RocprimWarpScanTests, name_suffix, Broadcast)
 
     const size_t block_size = current_device_warp_size == ws32 ? block_size_ws32 : block_size_ws64;
     const unsigned int grid_size = 4;
-    const size_t       size      = block_size * grid_size;
+
+    const size_t size = block_size * grid_size;
 
     // Check if warp size is supported
     if((logical_warp_size > current_device_warp_size)
        || (current_device_warp_size != ws32
-           && current_device_warp_size != ws64)) // Only WarpSize 32 and 64 is supported
+           && current_device_warp_size != ws64)) // Only VirtualWaveSize 32 and 64 is supported
     {
         GTEST_SKIP() << "Unsupported test warp size/computed block size: " << logical_warp_size
                      << "/" << block_size
@@ -782,12 +800,13 @@ typed_test_def(RocprimWarpScanTests, name_suffix, ExclusiveScanWoInit)
 
     const size_t block_size = current_device_warp_size == ws32 ? block_size_ws32 : block_size_ws64;
     const unsigned int grid_size = 4;
-    const size_t       size      = block_size * grid_size;
+
+    const size_t size = block_size * grid_size;
 
     // Check if warp size is supported
     if((logical_warp_size > current_device_warp_size)
        || (current_device_warp_size != ws32
-           && current_device_warp_size != ws64)) // Only WarpSize 32 and 64 is supported
+           && current_device_warp_size != ws64)) // Only VirtualWaveSize 32 and 64 is supported
     {
         printf("Unsupported test warp size/computed block size: %zu/%zu. Current device warp size: "
                "%d.    Skipping test\n",
@@ -894,36 +913,42 @@ typed_test_def(RocprimWarpScanTests, name_suffix, ExclusiveReduceScan)
     static constexpr size_t ws64 = size_t(ROCPRIM_WARP_SIZE_64);
 
     // Block size of warp size 32
-    static constexpr size_t block_size_ws32 =
-        rocprim::detail::is_power_of_two(logical_warp_size)
-            ? rocprim::max<size_t>(ws32, logical_warp_size * 4)
-            : rocprim::max<size_t>((ws32/logical_warp_size), 1) * logical_warp_size;
+    static constexpr size_t block_size_ws32
+        = rocprim::detail::is_power_of_two(logical_warp_size)
+              ? rocprim::max<size_t>(ws32, logical_warp_size * 4)
+              : rocprim::max<size_t>((ws32 / logical_warp_size), 1) * logical_warp_size;
 
     // Block size of warp size 64
-    static constexpr size_t block_size_ws64 =
-        rocprim::detail::is_power_of_two(logical_warp_size)
-            ? rocprim::max<size_t>(ws64, logical_warp_size * 4)
-            : rocprim::max<size_t>((ws64/logical_warp_size), 1) * logical_warp_size;
+    static constexpr size_t block_size_ws64
+        = rocprim::detail::is_power_of_two(logical_warp_size)
+              ? rocprim::max<size_t>(ws64, logical_warp_size * 4)
+              : rocprim::max<size_t>((ws64 / logical_warp_size), 1) * logical_warp_size;
 
     unsigned int current_device_warp_size;
     HIP_CHECK(::rocprim::host_warp_size(device_id, current_device_warp_size));
 
     const size_t block_size = current_device_warp_size == ws32 ? block_size_ws32 : block_size_ws64;
     const unsigned int grid_size = 4;
+
     const size_t size = block_size * grid_size;
 
     // Check if warp size is supported
-    if( (logical_warp_size > current_device_warp_size) ||
-        (current_device_warp_size != ws32 && current_device_warp_size != ws64) ) // Only WarpSize 32 and 64 is supported
+    if((logical_warp_size > current_device_warp_size)
+       || (current_device_warp_size != ws32
+           && current_device_warp_size != ws64)) // Only VirtualWaveSize 32 and 64 is supported
     {
-        printf("Unsupported test warp size/computed block size: %zu/%zu. Current device warp size: %u.    Skipping test\n",
-            logical_warp_size, block_size, current_device_warp_size);
+        printf("Unsupported test warp size/computed block size: %zu/%zu. Current device warp size: "
+               "%u.    Skipping test\n",
+               logical_warp_size,
+               block_size,
+               current_device_warp_size);
         GTEST_SKIP();
     }
 
     for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
-        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate data
@@ -932,7 +957,7 @@ typed_test_def(RocprimWarpScanTests, name_suffix, ExclusiveReduceScan)
         std::vector<T> output_reductions(size / logical_warp_size);
         std::vector<T> expected(input.size(), T(0));
         std::vector<T> expected_reductions(output_reductions.size(), T(0));
-        const T init = test_utils::get_random_value<T>(0, 100, seed_value);
+        const T        init = test_utils::get_random_value<T>(0, 100, seed_value);
 
         // Calculate expected results on host
         for(size_t i = 0; i < input.size() / logical_warp_size; i++)
@@ -941,15 +966,15 @@ typed_test_def(RocprimWarpScanTests, name_suffix, ExclusiveReduceScan)
             expected[i * logical_warp_size] = init;
             for(size_t j = 1; j < logical_warp_size; j++)
             {
-                auto idx = i * logical_warp_size + j;
-                accumulator = binary_op_host(input[idx-1], accumulator);
+                auto idx      = i * logical_warp_size + j;
+                accumulator   = binary_op_host(input[idx - 1], accumulator);
                 expected[idx] = static_cast<T>(accumulator);
             }
 
             acc_type accumulator_reductions(0);
             for(size_t j = 0; j < logical_warp_size; j++)
             {
-                auto idx = i * logical_warp_size + j;
+                auto idx               = i * logical_warp_size + j;
                 accumulator_reductions = binary_op_host(input[idx], accumulator_reductions);
                 expected_reductions[i] = static_cast<T>(accumulator_reductions);
             }
@@ -961,7 +986,7 @@ typed_test_def(RocprimWarpScanTests, name_suffix, ExclusiveReduceScan)
         common::device_ptr<T> device_output_reductions(output_reductions.size());
 
         // Launching kernel
-        if (current_device_warp_size == ws32)
+        if(current_device_warp_size == ws32)
         {
             hipLaunchKernelGGL(
                 HIP_KERNEL_NAME(
@@ -975,7 +1000,7 @@ typed_test_def(RocprimWarpScanTests, name_suffix, ExclusiveReduceScan)
                 device_output_reductions.get(),
                 init);
         }
-        else if (current_device_warp_size == ws64)
+        else if(current_device_warp_size == ws64)
         {
             hipLaunchKernelGGL(
                 HIP_KERNEL_NAME(
@@ -1002,7 +1027,6 @@ typed_test_def(RocprimWarpScanTests, name_suffix, ExclusiveReduceScan)
                                 expected_reductions,
                                 test_utils::precision<T> * logical_warp_size);
     }
-
 }
 
 typed_test_def(RocprimWarpScanTests, name_suffix, ExclusiveReduceScanWoInit)
@@ -1041,12 +1065,13 @@ typed_test_def(RocprimWarpScanTests, name_suffix, ExclusiveReduceScanWoInit)
 
     const size_t block_size = current_device_warp_size == ws32 ? block_size_ws32 : block_size_ws64;
     const unsigned int grid_size = 4;
-    const size_t       size      = block_size * grid_size;
+
+    const size_t size = block_size * grid_size;
 
     // Check if warp size is supported
     if((logical_warp_size > current_device_warp_size)
        || (current_device_warp_size != ws32
-           && current_device_warp_size != ws64)) // Only WarpSize 32 and 64 is supported
+           && current_device_warp_size != ws64)) // Only VirtualWaveSize 32 and 64 is supported
     {
         printf("Unsupported test warp size/computed block size: %zu/%zu. Current device warp size: "
                "%d.    Skipping test\n",
@@ -1170,36 +1195,42 @@ typed_test_def(RocprimWarpScanTests, name_suffix, Scan)
     static constexpr size_t ws64 = size_t(ROCPRIM_WARP_SIZE_64);
 
     // Block size of warp size 32
-    static constexpr size_t block_size_ws32 =
-        rocprim::detail::is_power_of_two(logical_warp_size)
-            ? rocprim::max<size_t>(ws32, logical_warp_size * 4)
-            : rocprim::max<size_t>((ws32/logical_warp_size), 1) * logical_warp_size;
+    static constexpr size_t block_size_ws32
+        = rocprim::detail::is_power_of_two(logical_warp_size)
+              ? rocprim::max<size_t>(ws32, logical_warp_size * 4)
+              : rocprim::max<size_t>((ws32 / logical_warp_size), 1) * logical_warp_size;
 
     // Block size of warp size 64
-    static constexpr size_t block_size_ws64 =
-        rocprim::detail::is_power_of_two(logical_warp_size)
-            ? rocprim::max<size_t>(ws64, logical_warp_size * 4)
-            : rocprim::max<size_t>((ws64/logical_warp_size), 1) * logical_warp_size;
+    static constexpr size_t block_size_ws64
+        = rocprim::detail::is_power_of_two(logical_warp_size)
+              ? rocprim::max<size_t>(ws64, logical_warp_size * 4)
+              : rocprim::max<size_t>((ws64 / logical_warp_size), 1) * logical_warp_size;
 
     unsigned int current_device_warp_size;
     HIP_CHECK(::rocprim::host_warp_size(device_id, current_device_warp_size));
 
     const size_t block_size = current_device_warp_size == ws32 ? block_size_ws32 : block_size_ws64;
     const unsigned int grid_size = 4;
+
     const size_t size = block_size * grid_size;
 
     // Check if warp size is supported
-    if( (logical_warp_size > current_device_warp_size) ||
-        (current_device_warp_size != ws32 && current_device_warp_size != ws64) ) // Only WarpSize 32 and 64 is supported
+    if((logical_warp_size > current_device_warp_size)
+       || (current_device_warp_size != ws32
+           && current_device_warp_size != ws64)) // Only VirtualWaveSize 32 and 64 is supported
     {
-        printf("Unsupported test warp size/computed block size: %zu/%zu. Current device warp size: %u.    Skipping test\n",
-            logical_warp_size, block_size, current_device_warp_size);
+        printf("Unsupported test warp size/computed block size: %zu/%zu. Current device warp size: "
+               "%u.    Skipping test\n",
+               logical_warp_size,
+               block_size,
+               current_device_warp_size);
         GTEST_SKIP();
     }
 
     for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
-        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate data
@@ -1208,22 +1239,22 @@ typed_test_def(RocprimWarpScanTests, name_suffix, Scan)
         std::vector<T> output_exclusive(size);
         std::vector<T> expected_inclusive(output_inclusive.size(), T(0));
         std::vector<T> expected_exclusive(output_exclusive.size(), T(0));
-        const T init = test_utils::get_random_value<T>(0, 100, seed_value);
+        const T        init = test_utils::get_random_value<T>(0, 100, seed_value);
 
         // Calculate expected results on host
         for(size_t i = 0; i < input.size() / logical_warp_size; i++)
         {
             acc_type accumulator_inclusive(0);
-            acc_type accumulator_exclusive = init;
+            acc_type accumulator_exclusive            = init;
             expected_exclusive[i * logical_warp_size] = init;
             for(size_t j = 0; j < logical_warp_size; j++)
             {
-                auto idx = i * logical_warp_size + j;
-                accumulator_inclusive = binary_op_host(input[idx], accumulator_inclusive);
+                auto idx                = i * logical_warp_size + j;
+                accumulator_inclusive   = binary_op_host(input[idx], accumulator_inclusive);
                 expected_inclusive[idx] = static_cast<T>(accumulator_inclusive);
                 if(j > 0)
                 {
-                    accumulator_exclusive = binary_op_host(input[idx-1], accumulator_exclusive);
+                    accumulator_exclusive   = binary_op_host(input[idx - 1], accumulator_exclusive);
                     expected_exclusive[idx] = static_cast<T>(accumulator_exclusive);
                 }
             }
@@ -1235,7 +1266,7 @@ typed_test_def(RocprimWarpScanTests, name_suffix, Scan)
         common::device_ptr<T> device_exclusive_output(output_exclusive.size());
 
         // Launching kernel
-        if (current_device_warp_size == ws32)
+        if(current_device_warp_size == ws32)
         {
             hipLaunchKernelGGL(
                 HIP_KERNEL_NAME(warp_scan_kernel<T, block_size_ws32, logical_warp_size>),
@@ -1248,7 +1279,7 @@ typed_test_def(RocprimWarpScanTests, name_suffix, Scan)
                 device_exclusive_output.get(),
                 init);
         }
-        else if (current_device_warp_size == ws64)
+        else if(current_device_warp_size == ws64)
         {
             hipLaunchKernelGGL(
                 HIP_KERNEL_NAME(warp_scan_kernel<T, block_size_ws64, logical_warp_size>),
@@ -1299,36 +1330,42 @@ typed_test_def(RocprimWarpScanTests, name_suffix, ScanReduce)
     static constexpr size_t ws64 = size_t(ROCPRIM_WARP_SIZE_64);
 
     // Block size of warp size 32
-    static constexpr size_t block_size_ws32 =
-        rocprim::detail::is_power_of_two(logical_warp_size)
-            ? rocprim::max<size_t>(ws32, logical_warp_size * 4)
-            : rocprim::max<size_t>((ws32/logical_warp_size), 1) * logical_warp_size;
+    static constexpr size_t block_size_ws32
+        = rocprim::detail::is_power_of_two(logical_warp_size)
+              ? rocprim::max<size_t>(ws32, logical_warp_size * 4)
+              : rocprim::max<size_t>((ws32 / logical_warp_size), 1) * logical_warp_size;
 
     // Block size of warp size 64
-    static constexpr size_t block_size_ws64 =
-        rocprim::detail::is_power_of_two(logical_warp_size)
-            ? rocprim::max<size_t>(ws64, logical_warp_size * 4)
-            : rocprim::max<size_t>((ws64/logical_warp_size), 1) * logical_warp_size;
+    static constexpr size_t block_size_ws64
+        = rocprim::detail::is_power_of_two(logical_warp_size)
+              ? rocprim::max<size_t>(ws64, logical_warp_size * 4)
+              : rocprim::max<size_t>((ws64 / logical_warp_size), 1) * logical_warp_size;
 
     unsigned int current_device_warp_size;
     HIP_CHECK(::rocprim::host_warp_size(device_id, current_device_warp_size));
 
     const size_t block_size = current_device_warp_size == ws32 ? block_size_ws32 : block_size_ws64;
     const unsigned int grid_size = 4;
+
     const size_t size = block_size * grid_size;
 
     // Check if warp size is supported
-    if( (logical_warp_size > current_device_warp_size) ||
-        (current_device_warp_size != ws32 && current_device_warp_size != ws64) ) // Only WarpSize 32 and 64 is supported
+    if((logical_warp_size > current_device_warp_size)
+       || (current_device_warp_size != ws32
+           && current_device_warp_size != ws64)) // Only VirtualWaveSize 32 and 64 is supported
     {
-        printf("Unsupported test warp size/computed block size: %zu/%zu. Current device warp size: %u.    Skipping test\n",
-            logical_warp_size, block_size, current_device_warp_size);
+        printf("Unsupported test warp size/computed block size: %zu/%zu. Current device warp size: "
+               "%u.    Skipping test\n",
+               logical_warp_size,
+               block_size,
+               current_device_warp_size);
         GTEST_SKIP();
     }
 
     for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
-        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate data
@@ -1339,7 +1376,7 @@ typed_test_def(RocprimWarpScanTests, name_suffix, ScanReduce)
         std::vector<T> expected_inclusive(output_inclusive.size(), T(0));
         std::vector<T> expected_exclusive(output_exclusive.size(), T(0));
         std::vector<T> expected_reductions(output_reductions.size(), T(0));
-        const T init = test_utils::get_random_value<T>(0, 100, seed_value);
+        const T        init = test_utils::get_random_value<T>(0, 100, seed_value);
 
         // Calculate expected results on host
         for(size_t i = 0; i < input.size() / logical_warp_size; i++)
@@ -1349,16 +1386,16 @@ typed_test_def(RocprimWarpScanTests, name_suffix, ScanReduce)
             expected_exclusive[i * logical_warp_size] = init;
             for(size_t j = 0; j < logical_warp_size; j++)
             {
-                auto idx = i * logical_warp_size + j;
-                accumulator_inclusive = binary_op_host(input[idx], accumulator_inclusive);
+                auto idx                = i * logical_warp_size + j;
+                accumulator_inclusive   = binary_op_host(input[idx], accumulator_inclusive);
                 expected_inclusive[idx] = static_cast<T>(accumulator_inclusive);
                 if(j > 0)
                 {
-                    accumulator_exclusive = binary_op_host(input[idx-1], accumulator_exclusive);
+                    accumulator_exclusive   = binary_op_host(input[idx - 1], accumulator_exclusive);
                     expected_exclusive[idx] = static_cast<T>(accumulator_exclusive);
                 }
             }
-            expected_reductions[i] = expected_inclusive[(i+1) * logical_warp_size - 1];
+            expected_reductions[i] = expected_inclusive[(i + 1) * logical_warp_size - 1];
         }
 
         // Writing to device memory
@@ -1368,7 +1405,7 @@ typed_test_def(RocprimWarpScanTests, name_suffix, ScanReduce)
         common::device_ptr<T> device_output_reductions(output_reductions.size());
 
         // Launching kernel
-        if (current_device_warp_size == ws32)
+        if(current_device_warp_size == ws32)
         {
             hipLaunchKernelGGL(
                 HIP_KERNEL_NAME(warp_scan_reduce_kernel<T, block_size_ws32, logical_warp_size>),
@@ -1382,7 +1419,7 @@ typed_test_def(RocprimWarpScanTests, name_suffix, ScanReduce)
                 device_output_reductions.get(),
                 init);
         }
-        else if (current_device_warp_size == ws64)
+        else if(current_device_warp_size == ws64)
         {
             hipLaunchKernelGGL(
                 HIP_KERNEL_NAME(warp_scan_reduce_kernel<T, block_size_ws64, logical_warp_size>),
@@ -1416,7 +1453,6 @@ typed_test_def(RocprimWarpScanTests, name_suffix, ScanReduce)
                                 expected_reductions,
                                 test_utils::precision<T> * logical_warp_size);
     }
-
 }
 
 typed_test_def(RocprimWarpScanTests, name_suffix, InclusiveScanCustomType)
@@ -1437,36 +1473,42 @@ typed_test_def(RocprimWarpScanTests, name_suffix, InclusiveScanCustomType)
     static constexpr size_t ws64 = size_t(ROCPRIM_WARP_SIZE_64);
 
     // Block size of warp size 32
-    static constexpr size_t block_size_ws32 =
-        rocprim::detail::is_power_of_two(logical_warp_size)
-            ? rocprim::max<size_t>(ws32, logical_warp_size * 4)
-            : rocprim::max<size_t>((ws32/logical_warp_size), 1) * logical_warp_size;
+    static constexpr size_t block_size_ws32
+        = rocprim::detail::is_power_of_two(logical_warp_size)
+              ? rocprim::max<size_t>(ws32, logical_warp_size * 4)
+              : rocprim::max<size_t>((ws32 / logical_warp_size), 1) * logical_warp_size;
 
     // Block size of warp size 64
-    static constexpr size_t block_size_ws64 =
-        rocprim::detail::is_power_of_two(logical_warp_size)
-            ? rocprim::max<size_t>(ws64, logical_warp_size * 4)
-            : rocprim::max<size_t>((ws64/logical_warp_size), 1) * logical_warp_size;
+    static constexpr size_t block_size_ws64
+        = rocprim::detail::is_power_of_two(logical_warp_size)
+              ? rocprim::max<size_t>(ws64, logical_warp_size * 4)
+              : rocprim::max<size_t>((ws64 / logical_warp_size), 1) * logical_warp_size;
 
     unsigned int current_device_warp_size;
     HIP_CHECK(::rocprim::host_warp_size(device_id, current_device_warp_size));
 
     const size_t block_size = current_device_warp_size == ws32 ? block_size_ws32 : block_size_ws64;
     const unsigned int grid_size = 4;
+
     const size_t size = block_size * grid_size;
 
     // Check if warp size is supported
-    if( (logical_warp_size > current_device_warp_size) ||
-        (current_device_warp_size != ws32 && current_device_warp_size != ws64) ) // Only WarpSize 32 and 64 is supported
+    if((logical_warp_size > current_device_warp_size)
+       || (current_device_warp_size != ws32
+           && current_device_warp_size != ws64)) // Only VirtualWaveSize 32 and 64 is supported
     {
-        printf("Unsupported test warp size/computed block size: %zu/%zu. Current device warp size: %u.    Skipping test\n",
-            logical_warp_size, block_size, current_device_warp_size);
+        printf("Unsupported test warp size/computed block size: %zu/%zu. Current device warp size: "
+               "%u.    Skipping test\n",
+               logical_warp_size,
+               block_size,
+               current_device_warp_size);
         GTEST_SKIP();
     }
 
     for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
-        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate data
@@ -1492,7 +1534,7 @@ typed_test_def(RocprimWarpScanTests, name_suffix, InclusiveScanCustomType)
             common::custom_type<acc_type, acc_type, true> accumulator(acc_type(0));
             for(size_t j = 0; j < logical_warp_size; j++)
             {
-                auto idx = i * logical_warp_size + j;
+                auto idx    = i * logical_warp_size + j;
                 accumulator = static_cast<common::custom_type<acc_type, acc_type, true>>(input[idx])
                               + accumulator;
                 expected[idx] = static_cast<T>(accumulator);
@@ -1504,7 +1546,7 @@ typed_test_def(RocprimWarpScanTests, name_suffix, InclusiveScanCustomType)
         common::device_ptr<T> device_output(output.size());
 
         // Launching kernel
-        if (current_device_warp_size == ws32)
+        if(current_device_warp_size == ws32)
         {
             hipLaunchKernelGGL(
                 HIP_KERNEL_NAME(warp_inclusive_scan_kernel<T, block_size_ws32, logical_warp_size>),
@@ -1515,7 +1557,7 @@ typed_test_def(RocprimWarpScanTests, name_suffix, InclusiveScanCustomType)
                 device_input.get(),
                 device_output.get());
         }
-        else if (current_device_warp_size == ws64)
+        else if(current_device_warp_size == ws64)
         {
             hipLaunchKernelGGL(
                 HIP_KERNEL_NAME(warp_inclusive_scan_kernel<T, block_size_ws64, logical_warp_size>),

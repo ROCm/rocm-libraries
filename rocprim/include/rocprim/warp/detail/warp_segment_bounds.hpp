@@ -41,7 +41,7 @@ template<bool         HeadSegmented,
          arch::wavefront::target Target = arch::wavefront::get_target()>
 ROCPRIM_DEVICE ROCPRIM_INLINE
 auto last_in_warp_segment(Flag flag) ->
-    typename std::enable_if<(WarpSize <= arch::wavefront::min_size()), unsigned int>::type
+    typename std::enable_if<(WarpSize <= arch::wavefront::max_size()), unsigned int>::type
 {
     // Get flags (now every thread know where the flags are)
     lane_mask_type warp_flags = ::rocprim::ballot(flag);

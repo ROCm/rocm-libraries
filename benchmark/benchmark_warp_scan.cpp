@@ -46,16 +46,19 @@ enum class scan_type
     broadcast
 };
 
-template<class Runner, class T, unsigned int WarpSize, unsigned int Trials>
+template<class Runner, class T, unsigned int VirtualWaveSize, unsigned int Trials>
 __global__ __launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE)
 void kernel(const T* input, T* output, const T init)
 {
-    Runner::template run<T, WarpSize, Trials>(input, output, init);
+    if constexpr(VirtualWaveSize <= rocprim::arch::wavefront::max_size())
+    {
+        Runner::template run<T, VirtualWaveSize, Trials>(input, output, init);
+    }
 }
 
 struct inclusive_scan
 {
-    template<typename T, unsigned int WarpSize, unsigned int Trials>
+    template<typename T, unsigned int VirtualWaveSize, unsigned int Trials>
     __device__
     static void run(const T* input, T* output, const T init)
     {
@@ -63,7 +66,7 @@ struct inclusive_scan
         const unsigned int i     = blockIdx.x * blockDim.x + threadIdx.x;
         auto               value = input[i];
 
-        using wscan_t = rocprim::warp_scan<T, WarpSize>;
+        using wscan_t = rocprim::warp_scan<T, VirtualWaveSize>;
         __shared__ typename wscan_t::storage_type storage;
         ROCPRIM_NO_UNROLL
         for(unsigned int trial = 0; trial < Trials; ++trial)
@@ -77,14 +80,14 @@ struct inclusive_scan
 
 struct exclusive_scan
 {
-    template<typename T, unsigned int WarpSize, unsigned int Trials>
+    template<typename T, unsigned int VirtualWaveSize, unsigned int Trials>
     __device__
     static void run(const T* input, T* output, const T init)
     {
         const unsigned int i     = blockIdx.x * blockDim.x + threadIdx.x;
         auto               value = input[i];
 
-        using wscan_t = rocprim::warp_scan<T, WarpSize>;
+        using wscan_t = rocprim::warp_scan<T, VirtualWaveSize>;
         __shared__ typename wscan_t::storage_type storage;
         ROCPRIM_NO_UNROLL
         for(unsigned int trial = 0; trial < Trials; ++trial)
@@ -98,17 +101,17 @@ struct exclusive_scan
 
 struct broadcast
 {
-    template<typename T, unsigned int WarpSize, unsigned int Trials>
+    template<typename T, unsigned int VirtualWaveSize, unsigned int Trials>
     __device__
     static void run(const T* input, T* output, const T init)
     {
         (void)init;
         const unsigned int i        = blockIdx.x * blockDim.x + threadIdx.x;
-        const unsigned int warp_id  = i / WarpSize;
-        const unsigned int src_lane = warp_id % WarpSize;
+        const unsigned int warp_id  = i / VirtualWaveSize;
+        const unsigned int src_lane = warp_id % VirtualWaveSize;
         auto               value    = input[i];
 
-        using wscan_t = rocprim::warp_scan<T, WarpSize>;
+        using wscan_t = rocprim::warp_scan<T, VirtualWaveSize>;
         __shared__ typename wscan_t::storage_type storage;
         ROCPRIM_NO_UNROLL
         for(unsigned int trial = 0; trial < Trials; ++trial)
@@ -122,7 +125,7 @@ struct broadcast
 
 template<typename T,
          unsigned int BlockSize,
-         unsigned int WarpSize,
+         unsigned int VirtualWaveSize,
          class Type,
          unsigned int Trials = 100>
 void run_benchmark(benchmark_utils::state&& state)
@@ -136,7 +139,7 @@ void run_benchmark(benchmark_utils::state&& state)
     // Make sure size is a multiple of BlockSize
     size = BlockSize * ((size + BlockSize - 1) / BlockSize);
     // Allocate and fill memory
-    std::vector<T> input(size, (T)1);
+    std::vector<T>        input(size, (T)1);
     common::device_ptr<T> d_input(input);
     common::device_ptr<T> d_output(size);
     HIP_CHECK(hipDeviceSynchronize());
@@ -144,7 +147,7 @@ void run_benchmark(benchmark_utils::state&& state)
     state.run(
         [&]
         {
-            hipLaunchKernelGGL(HIP_KERNEL_NAME(kernel<Type, T, WarpSize, Trials>),
+            hipLaunchKernelGGL(HIP_KERNEL_NAME(kernel<Type, T, VirtualWaveSize, Trials>),
                                dim3(size / BlockSize),
                                dim3(BlockSize),
                                0,

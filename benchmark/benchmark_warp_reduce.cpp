@@ -40,48 +40,54 @@
 #include <type_traits>
 #include <vector>
 
-template<bool AllReduce, typename T, unsigned int WarpSize, unsigned int Trials>
+template<bool AllReduce, typename T, unsigned int VirtualWaveSize, unsigned int Trials>
 __global__ __launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE)
 void warp_reduce_kernel(const T* d_input, T* d_output)
 {
-    const unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
-
-    auto value = d_input[i];
-
-    using wreduce_t = rocprim::warp_reduce<T, WarpSize, AllReduce>;
-    __shared__ typename wreduce_t::storage_type storage;
-    ROCPRIM_NO_UNROLL
-    for(unsigned int trial = 0; trial < Trials; ++trial)
+    if constexpr(VirtualWaveSize <= rocprim::arch::wavefront::max_size())
     {
-        wreduce_t().reduce(value, value, storage);
-    }
+        const unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
 
-    d_output[i] = value;
+        auto value = d_input[i];
+
+        using wreduce_t = rocprim::warp_reduce<T, VirtualWaveSize, AllReduce>;
+        __shared__ typename wreduce_t::storage_type storage;
+        ROCPRIM_NO_UNROLL
+        for(unsigned int trial = 0; trial < Trials; ++trial)
+        {
+            wreduce_t().reduce(value, value, storage);
+        }
+
+        d_output[i] = value;
+    }
 }
 
-template<typename T, typename Flag, unsigned int WarpSize, unsigned int Trials>
+template<typename T, typename Flag, unsigned int VirtualWaveSize, unsigned int Trials>
 __global__ __launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE)
 void segmented_warp_reduce_kernel(const T* d_input, Flag* d_flags, T* d_output)
 {
-    const unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
-
-    auto value = d_input[i];
-    auto flag  = d_flags[i];
-
-    using wreduce_t = rocprim::warp_reduce<T, WarpSize>;
-    __shared__ typename wreduce_t::storage_type storage;
-    ROCPRIM_NO_UNROLL
-    for(unsigned int trial = 0; trial < Trials; ++trial)
+    if constexpr(VirtualWaveSize <= rocprim::arch::wavefront::max_size())
     {
-        wreduce_t().head_segmented_reduce(value, value, flag, storage);
-    }
+        const unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
 
-    d_output[i] = value;
+        auto value = d_input[i];
+        auto flag  = d_flags[i];
+
+        using wreduce_t = rocprim::warp_reduce<T, VirtualWaveSize>;
+        __shared__ typename wreduce_t::storage_type storage;
+        ROCPRIM_NO_UNROLL
+        for(unsigned int trial = 0; trial < Trials; ++trial)
+        {
+            wreduce_t().head_segmented_reduce(value, value, flag, storage);
+        }
+
+        d_output[i] = value;
+    }
 }
 
 template<bool         AllReduce,
          bool         Segmented,
-         unsigned int WarpSize,
+         unsigned int VirtualWaveSize,
          unsigned int BlockSize,
          unsigned int Trials,
          typename T,
@@ -90,7 +96,7 @@ inline auto execute_warp_reduce_kernel(
     T* input, T* output, Flag* /* flags */, size_t size, hipStream_t stream) ->
     typename std::enable_if<!Segmented>::type
 {
-    hipLaunchKernelGGL(HIP_KERNEL_NAME(warp_reduce_kernel<AllReduce, T, WarpSize, Trials>),
+    hipLaunchKernelGGL(HIP_KERNEL_NAME(warp_reduce_kernel<AllReduce, T, VirtualWaveSize, Trials>),
                        dim3(size / BlockSize),
                        dim3(BlockSize),
                        0,
@@ -102,7 +108,7 @@ inline auto execute_warp_reduce_kernel(
 
 template<bool         AllReduce,
          bool         Segmented,
-         unsigned int WarpSize,
+         unsigned int VirtualWaveSize,
          unsigned int BlockSize,
          unsigned int Trials,
          typename T,
@@ -111,21 +117,22 @@ inline auto
     execute_warp_reduce_kernel(T* input, T* output, Flag* flags, size_t size, hipStream_t stream) ->
     typename std::enable_if<Segmented>::type
 {
-    hipLaunchKernelGGL(HIP_KERNEL_NAME(segmented_warp_reduce_kernel<T, Flag, WarpSize, Trials>),
-                       dim3(size / BlockSize),
-                       dim3(BlockSize),
-                       0,
-                       stream,
-                       input,
-                       flags,
-                       output);
+    hipLaunchKernelGGL(
+        HIP_KERNEL_NAME(segmented_warp_reduce_kernel<T, Flag, VirtualWaveSize, Trials>),
+        dim3(size / BlockSize),
+        dim3(BlockSize),
+        0,
+        stream,
+        input,
+        flags,
+        output);
     HIP_CHECK(hipGetLastError());
 }
 
 template<bool AllReduce,
          bool Segmented,
          typename T,
-         unsigned int WarpSize,
+         unsigned int VirtualWaveSize,
          unsigned int BlockSize,
          unsigned int Trials = 100>
 void run_benchmark(benchmark_utils::state&& state)
@@ -144,7 +151,7 @@ void run_benchmark(benchmark_utils::state&& state)
     const auto     random_range = limit_random_range<T>(0, 10);
     std::vector<T> input
         = get_random_data<T>(size, random_range.first, random_range.second, seed.get_0());
-    std::vector<flag_type> flags = get_random_data<flag_type>(size, 0, 1, seed.get_1());
+    std::vector<flag_type>        flags = get_random_data<flag_type>(size, 0, 1, seed.get_1());
     common::device_ptr<T>         d_input(input);
     common::device_ptr<flag_type> d_flags(flags);
     common::device_ptr<T>         d_output(size);
@@ -153,7 +160,7 @@ void run_benchmark(benchmark_utils::state&& state)
     state.run(
         [&]
         {
-            execute_warp_reduce_kernel<AllReduce, Segmented, WarpSize, BlockSize, Trials>(
+            execute_warp_reduce_kernel<AllReduce, Segmented, VirtualWaveSize, BlockSize, Trials>(
                 d_input.get(),
                 d_output.get(),
                 d_flags.get(),
