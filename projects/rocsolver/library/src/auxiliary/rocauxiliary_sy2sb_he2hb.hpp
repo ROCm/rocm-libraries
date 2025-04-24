@@ -180,13 +180,13 @@ void rocsolver_sy2sb_he2hb_getMemorySize(const rocblas_fill uplo,
     *size_workArr = 0;
 
     // if quick return no workspace needed
-    if(n == 0 || batch_count == 0)
+    if(n == 0 || batch_count == 0 || n <= k + 1)
         return;
 
     *size_workT = sizeof(T) * k * k * batch_count;
     *size_workS1 = sizeof(T) * k * k * batch_count;
-    *size_workS2 = sizeof(T) * n * k * batch_count;
-    *size_workW = sizeof(T) * n * k * batch_count;
+    *size_workS2 = sizeof(T) * (n - k) * k * batch_count;
+    *size_workW = sizeof(T) * (n - k) * k * batch_count;
     *size_workArr = BATCHED ? sizeof(T*) * 2 * batch_count : false;
 
     size_t w, wa, s1, s2;
@@ -289,15 +289,37 @@ rocblas_status rocsolver_sy2sb_he2hb_template(rocblas_handle handle,
 
     const bool upper = (uplo == rocblas_fill_upper);
 
+    if(n <= k + 1)
+    {
+        const rocblas_int cpy_blks = (n) / 32 + 1;
+        if(upper)
+        {
+            // Copy A to AB
+            ROCSOLVER_LAUNCH_KERNEL((copyTBand), dim3(cpy_blks, cpy_blks, batch_count),
+                                    dim3(32, 32), 0, stream, uplo, n, A, shiftA, lda, strideA,
+                                    AB, shiftAB + idx2D(k - n, 0, ldab), ldab, strideAB);
+        }
+        else
+        {
+            // Copy A to AB
+            ROCSOLVER_LAUNCH_KERNEL((copyTBand), dim3(cpy_blks, cpy_blks, batch_count),
+                                    dim3(32, 32), 0, stream, uplo, n, A, shiftA, lda, strideA,
+                                    AB, shiftAB, ldab, strideAB);
+        }
+
+        rocblas_set_pointer_mode(handle, old_mode);
+        return rocblas_status_success;
+    }
+
     rocblas_int ldt = k;
     rocblas_int lds1 = k;
-    rocblas_int lds2 = upper ? k : n;
-    rocblas_int ldw = upper ? k : n;
+    rocblas_int lds2 = upper ? k : (n - k);
+    rocblas_int ldw = upper ? k : (n - k);
 
     rocblas_stride strideT = k * k;
     rocblas_stride strideS1 = k * k;
-    rocblas_stride strideS2 = n * k;
-    rocblas_stride strideW = n * k;
+    rocblas_stride strideS2 = (n - k) * k;
+    rocblas_stride strideW = (n - k) * k;
     
     // set T to zero
     // const rocblas_int reset_nblks = (k - 1) / 32 + 1;

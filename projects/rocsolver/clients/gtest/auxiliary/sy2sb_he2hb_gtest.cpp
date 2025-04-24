@@ -53,16 +53,19 @@
      {20, 5, 20, 21},
      {20, 20, 5, 5},
      // normal (valid) samples
+     {10, 10, 1, 2},
      {10, 10, 3, 4},
      {10, 15, 3, 5},
+     {20, 20, 18, 30},
      {128, 128, 12, 13},
+     {128, 128, 150, 151},
     };
 
  const vector<int> op_range = {1, 0};
 
  // for daily_lapack tests
  const vector<vector<int>> large_matrix_size_range
-     = {{152, 152, 64, 65}, {640, 640, 500, 501}, {1000, 1024, 800, 810}};
+     = {{152, 152, 64, 65}, {640, 640, 500, 501}, {1000, 1024, 800, 810}, {512, 512, 511, 512}};
 
  Arguments sy2sb_he2hb_setup_arguments(sy2sb_he2hb_tuple tup)
  {

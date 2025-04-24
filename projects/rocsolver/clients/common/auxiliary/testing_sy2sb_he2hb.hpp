@@ -198,8 +198,12 @@ void sy2sb_he2hb_getError(const rocblas_handle handle,
     *max_err = 0;
     err = norm_error('F', k+1, n, ldab, hAB[0], hABRes[0]);
     *max_err = err > *max_err ? err : *max_err;
-    err = norm_error('F', n - k, 1, 1, hTau[0], hTauRes[0]);
-    *max_err = err > *max_err ? err : *max_err;
+
+    if(n > k + 1)
+    {
+        err = norm_error('F', n - k, 1, 1, hTau[0], hTauRes[0]);
+        *max_err = err > *max_err ? err : *max_err;
+    }
 
     // TODO: Check HH reflectors in A
 }
@@ -233,7 +237,7 @@ void testing_sy2sb_he2hb(Arguments& argus)
     // determine sizes
     size_t size_A = lda * n;
     size_t size_AB = ldab * n;
-    size_t size_tau = n-k;
+    size_t size_tau = std::max(n - k, 0);
     double max_error = 0, gpu_time_used = 0, cpu_time_used = 0;
 
     size_t size_ARes = (argus.unit_check || argus.norm_check) ? size_A : 0;
