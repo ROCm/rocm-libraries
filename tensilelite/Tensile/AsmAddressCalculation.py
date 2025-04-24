@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -22,8 +22,13 @@
 
 from rocisa.code import Module
 from rocisa.container import EXEC, VCC, vgpr, sgpr
+from rocisa.instruction import MacroInstruction, SAddCU32, SAddU32, SAndB32, \
+    SAndB64, SLShiftLeftB32, SMovB32, SMovB64, SMulI32, SSubBU32, SSubU32, \
+    VAddCCOU32, VAddCOU32, VAddI32, VAddLShiftLeftU32, VAddU32, VAndB32, VBfiB32, \
+    VCmpEQU32, VCmpGtU32, VCmpLtU32, VCmpXNeU32, VCndMaskB32, VLShiftLeftB32, \
+    VMadI32I24, VMovB32, VMulLOU32, VSubI32, VSubU32
+
 from .TensileInstructions import log2
-from .TensileInstructions.Instructions import *
 from .Common import INDEX_CHARS, DataDirection
 
 ##############################################################################

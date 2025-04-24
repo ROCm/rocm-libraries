@@ -23,10 +23,10 @@
 ################################################################################
 
 from rocisa.container import ContinuousRegister
-from rocisa.instruction import vectorStaticRemainder, vectorStaticDivideAndRemainder
-from ..TensileInstructions import Module, SMulI32, VAddLShiftLeftU32, VAddU32, VMulLOU32, \
-                            VMovB32, VAddCOU32, staticMultiply, vectorStaticDivide, \
-                            vgpr, sgpr, log2
+from rocisa.instruction import SMulI32, VAddLShiftLeftU32, VAddU32, VMovB32, VMulLOU32, \
+    vectorStaticRemainder, vectorStaticDivideAndRemainder, vectorStaticDivide
+from ..TensileInstructions import Module, staticMultiply, vgpr, \
+                            sgpr, log2
 
 from ..Component import ComputeStoreVgprs
 from ..Common import DataDirection

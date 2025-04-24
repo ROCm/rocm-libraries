@@ -104,10 +104,11 @@ namespace rocisa
     std::shared_ptr<RegisterContainer> createGPR(const std::string& gprType,
                                                  const std::string& name,
                                                  float              regNum  = 1.f,
-                                                 bool               isMacro = false)
+                                                 bool               isMacro = false,
+                                                 bool               isAbs   = false)
     {
         RegName regname = generateRegName(name);
-        return std::make_shared<RegisterContainer>(gprType, regname, isMacro, -1, regNum);
+        return std::make_shared<RegisterContainer>(gprType, regname, isAbs, isMacro, -1, regNum);
     }
 
     // Overloaded functions to create specific GPR containers with default regNum = 1.f
@@ -121,9 +122,10 @@ namespace rocisa
         return createGPR("v", idx, regNum);
     }
 
-    std::shared_ptr<RegisterContainer> vgpr(const std::string& name, float regNum, bool isMacro)
+    std::shared_ptr<RegisterContainer>
+        vgpr(const std::string& name, float regNum, bool isMacro, bool isAbs)
     {
-        return createGPR("v", name, regNum, isMacro);
+        return createGPR("v", name, regNum, isMacro, isAbs);
     }
 
     std::shared_ptr<RegisterContainer> sgpr(const Holder& holder, float regNum)
@@ -185,10 +187,11 @@ void init_containers(nb::module_ m)
               nb::arg("idx"),
               nb::arg("regNum") = 1.f);
     m_con.def("vgpr",
-              nb::overload_cast<const std::string&, float, bool>(&rocisa::vgpr),
+              nb::overload_cast<const std::string&, float, bool, bool>(&rocisa::vgpr),
               nb::arg("name"),
               nb::arg("regNum")  = 1.f,
-              nb::arg("isMacro") = false);
+              nb::arg("isMacro") = false,
+              nb::arg("isAbs")   = false);
 
     m_con.def("sgpr",
               nb::overload_cast<const rocisa::Holder&, float>(&rocisa::sgpr),

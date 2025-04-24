@@ -638,6 +638,7 @@ namespace rocisa
 
         RegisterContainer(const std::string&            regType,
                           const std::optional<RegName>& regName,
+                          bool                          isAbs,
                           bool                          isMacro,
                           int                           regIdx = 0,
                           float                         regNum = 1)
@@ -648,7 +649,7 @@ namespace rocisa
             , regNum(int(ceil(regNum)))
             , isInlineAsm(false)
             , isMinus(false)
-            , isAbs(false)
+            , isAbs(isAbs)
             , isMacro(isMacro)
         {
         }
@@ -1090,7 +1091,7 @@ namespace rocisa
     std::shared_ptr<RegisterContainer> vgpr(const Holder& holder, float regNum = 1.f);
     std::shared_ptr<RegisterContainer> vgpr(int idx, float regNum = 1.f);
     std::shared_ptr<RegisterContainer>
-        vgpr(const std::string& name, float regNum = 1.f, bool isMacro = false);
+        vgpr(const std::string& name, float regNum = 1.f, bool isMacro = false, bool isAbs = false);
     std::shared_ptr<RegisterContainer> sgpr(const Holder& holder, float regNum = 1.f);
     std::shared_ptr<RegisterContainer> sgpr(int idx, float regNum = 1.f);
     std::shared_ptr<RegisterContainer>

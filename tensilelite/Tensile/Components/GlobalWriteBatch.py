@@ -22,15 +22,28 @@
 
 from rocisa.container import SMEMModifiers, VOP3PModifiers, MUBUFModifiers, replaceHolder
 from rocisa.enum import CvtType, RoundType
+from rocisa.instruction import BufferAtomicAddF32, BufferAtomicCmpswapB32, \
+  BufferAtomicCmpswapB64, FlatAtomicCmpswapB32, SAddCU32, SAddU32, SAndB32, \
+  SAndB64, SAtomicDec, SBarrier, SBranch, SCBranchExecNZ, SCBranchExecZ, \
+  SCBranchSCC1, SCSelectB32, SCmpEQI32, SCmpEQU32, SCmpGtI32, SCmpLeI32, \
+  SLShiftLeftB32, SLShiftLeftB64, SLShiftRightB32, SMovB32, SMovB64, SMulI32, \
+  SNop, SOrB32, SOrB64, SOrSaveExecB32, SOrSaveExecB64, SSleep, SSubI32, SSubU32, \
+  SSwapPCB64, SWaitCnt, VAShiftRightI32, VAddCCOU32, VAddCOU32, VAddF32, VAddF64, \
+  VAddI32, VAddPKF16, VAddPKF32, VAddU32, VBfeI32, VCmpEQU32, VCmpGEI32, VCmpGtU32, \
+  VCmpNeU32, VCmpNeU64, VCndMaskB32, VCvtBF8toF32, VCvtF16toF32, VCvtF32toI32, \
+  VCvtFP8toF32, VCvtI32toF32, VCvtPkBF8toF32, VCvtPkFP8toF32, VFmaF64, VFmaMixF32, \
+  VLShiftRightB32, VMacF32, VMadMixF32, VMaxF32, VMovB32, VMovB64, VMulF32, VMulF64, \
+  VMulLOU32, VMulPKF16, VMulPKF32, VPackF16toB32, VReadfirstlaneB32, VRndneF32
+
 from ..Common import DataDirection, SemanticVersion
 from ..Component import GlobalWriteComponents
 from ..SolutionStructs import Solution
-from ..Activation import ActivationModule, ActivationType
+from ..Activation import ActivationModule
 from ..AsmStoreState import StoreState
 from ..TensileInstructions import Label, Module, EXEC, SDWAModifiers, VCC, SelectBit, \
                             vgpr, sgpr, SaturateCastType, VCvtBF16toFP32, \
                             DataType
-from ..TensileInstructions.Instructions import *
+
 from ..AsmAddressCalculation import AddrCalculation
 from ..Components.PackData import formatting, PackData_F16, PackData_BF16, PackData_FLOAT8, PackData_FLOAT8_fnuz
 
@@ -1618,9 +1631,9 @@ class GlobalWriteBatchWriter:
                 if self.edge:
                   activationModule.add(VCmpEQU32(dst=VCC(), src0="BufferOOB", src1=(vgpr(addrCalc.addrDVgpr)), comment =""))
                   activationModule.add(VCndMaskB32(dst=vgpr("AmaxOutB"), src0=vgpr("ValuC+%d"%vgprIdx), src1=0, src2=VCC(), comment="Check If OOB, put zero if OOB"))
-                  activationModule.add(VMaxF32(dst=vgpr("AmaxOut"), src0=vgpr("AmaxOut"), src1=SrcAbs(vgpr("AmaxOutB")), comment="absmax"))
+                  activationModule.add(VMaxF32(dst=vgpr("AmaxOut"), src0=vgpr("AmaxOut"), src1=vgpr("AmaxOutB", isAbs=True), comment="absmax"))
                 else:
-                  activationModule.add(VMaxF32(dst=vgpr("AmaxOut"), src0=vgpr("AmaxOut"), src1=SrcAbs(vgpr("ValuC+%d"%vgprIdx)), comment="absmax"))
+                  activationModule.add(VMaxF32(dst=vgpr("AmaxOut"), src0=vgpr("AmaxOut"), src1=vgpr("ValuC+%d"%vgprIdx, isAbs=True), comment="absmax"))
               activationModule.add(VMulF32(dst=vgpr("ValuC+%d"%vgprIdx), src0=vgpr("ValuC+%d"%vgprIdx), src1=sgpr("ScaleD"), comment="result *= ScaleD"))
             # Original packed route
             elif vi%2 == 1:

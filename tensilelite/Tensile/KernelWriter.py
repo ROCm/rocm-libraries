@@ -27,11 +27,18 @@ from rocisa import rocIsa, countInstruction, countGlobalRead, \
 from rocisa.code import Module, TextBlock, StructuredModule, KernelBody
 from rocisa.container import RegisterContainer, replaceHolder
 from rocisa.label import LabelManager
-from rocisa.asmpass import rocIsaPass, rocIsaPassOption, rocIsaPassResult
-from rocisa.instruction import SLongBranchPositive
-from .TensileInstructions import Dump, RegisterPool, Assert, \
-                          SBranch, SCBranchSCC0, SCBranchSCC1
-from .TensileInstructions.Instructions import *
+from rocisa.asmpass import rocIsaPass, rocIsaPassOption
+from rocisa.instruction import BufferLoadB128, BufferLoadB32, BufferLoadB64, \
+  BufferLoadD16B16, BufferLoadD16U8, DSLoad2B32, DSLoad2B64, DSLoadB128, \
+  DSLoadB32, DSLoadB64, DSLoadB64TrB16, DSLoadInstruction, DSLoadU16, \
+  DSLoadU8, DSStore2B32, DSStore2B64, DSStoreB128, DSStoreB16, DSStoreB256, \
+  DSStoreB32, DSStoreB64, DSStoreB8, DSStoreInstruction, FlatLoadB128, FlatLoadB32, \
+  FlatLoadB64, FlatStoreB128, FlatStoreB32, FlatStoreB64, Instruction, \
+  MFMAInstruction, SBarrier, SBranch, SCBranchSCC0, SCBranchSCC1, SCmpLeU32, \
+  SMFMAInstruction, SNop, SSetPrior, SSubU32, SWaitCnt, VFmaMixF32, VMadMixF32, VMovB32, \
+  SLongBranchPositive
+
+from .TensileInstructions import Dump, RegisterPool, Assert
 from .KernelWriterModules import *
 from .Component import Component, LraTileProperties
 from .Components.Signature import UserArgumentsInfo
@@ -44,8 +51,6 @@ from Tensile.SolutionStructs.Naming import getKernelNameMin
 from Tensile.Toolchain.Component import Assembler
 
 import abc
-import os
-import shutil
 import sys
 import collections
 from copy import deepcopy
@@ -749,7 +754,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
       iterCode.add(pointerLWCode)
       iterCode.add(pointerLRCode)
       iterCode.add(SSetPrior(prior=2, comment="Raise priority while processing macs"))
-      pass
     elif self.states.scheduleIterAlg == 3:
       iterCode.addComment0(" grEndMfmaIndex:%u, lwStartMfmaIndex:%u, lwEndMfmaIndex:%u "\
                           %(self.states.grEndMfmaIndex, self.states.lwStartMfmaIndex, self.states.lwEndMfmaIndex))
@@ -5494,7 +5498,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
      * A code object file
      * A Python script which can create byte array variable definitions.
     """
-    pass
 
   def getHeaderFileString(self, kernel):
     kernelName = getKernelNameMin(kernel, self.debugConfig.splitGSU)

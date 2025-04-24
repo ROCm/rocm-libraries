@@ -22,10 +22,11 @@
 #
 ################################################################################
 
-from rocisa.container import ContinuousRegister
-from rocisa.instruction import vectorStaticRemainder, vectorStaticDivideAndRemainder
-from ..TensileInstructions import Module, VAddU32, staticMultiply, staticMultiplyAdd, vectorStaticDivide, \
-                                vgpr
+from rocisa.code import Module
+from rocisa.container import vgpr, ContinuousRegister
+from rocisa.instruction import VAddU32, vectorStaticRemainder, vectorStaticDivideAndRemainder, vectorStaticDivide
+from ..TensileInstructions import staticMultiply, staticMultiplyAdd
+
 from ..Component import LraTileAssignment, LraTileProperties
 from dataclasses import dataclass
 

@@ -21,16 +21,22 @@
 ################################################################################
 
 from rocisa.code import Module, Label
-from rocisa.container import sgpr, SMEMModifiers, replaceHolder
-from ..TensileInstructions import SAddU32, ContinuousRegister, scalarStaticDivideAndRemainder, \
-    SCmpLtU32, SCSelectB32, sMagicDivAlg2, SMulI32, SSubU32, SMinU32, SMovB32, SMovB64, SCBranchSCC1, SCmpLeU32, VMovB32, \
-    vgpr, SAddCU32, SCmpGtU32, SCMovB32, SAddI32, SCmpEQU32, SCBranchSCC0, SLShiftLeftB32, SLoadB32, SWaitCnt, \
-    log2, SBarrier, SStoreB32, SBranch, ceilDivide, SNop, staticMultiply, SSleep, \
-    VAddU32, VAddF32, VAddF64, SAndB32, SLShiftRightB32, VReadfirstlaneB32, SBranchIfNotZero
+from rocisa.container import vgpr, sgpr, SMEMModifiers, replaceHolder, EXEC,\
+    VOP3PModifiers
+from rocisa.instruction import SAddCU32, SAddI32, SAddU32, SAndB32, SBarrier, \
+    SBranch, SCBranchSCC0, SCBranchSCC1, SCMovB32, SCSelectB32, SCmpEQU32, \
+    SCmpGtU32, SCmpLeU32, SCmpLtU32, SLShiftLeftB32, SLShiftRightB32, SLoadB32, \
+    SMinU32, SMovB32, SMovB64, SMulI32, SNop, SSleep, SStoreB32, SSubU32, \
+    SWaitCnt, VAddF32, VAddF64, VAddPKF16, VAddU32, VLShiftRightB32, VMovB32, \
+    VReadfirstlaneB32
+
+from ..TensileInstructions import ContinuousRegister, sMagicDivAlg2, SBranchIfNotZero, \
+    ceilDivide, VCvtBF16toFP32, staticMultiply, scalarStaticDivideAndRemainder, log2
 from ..Common import print2
 # from ..TensileInstructions.Containers import SMEMModifiers
 from ..Component import Component
 from ..AsmStoreState import StoreState, VectorDataTypes
+from ..AsmAddressCalculation import AddrCalculation
 import abc
 
 from copy import deepcopy
@@ -39,7 +45,6 @@ class XCCMapping(Component):
     """
     XCC mapping code.
     """
-    pass
 
 class XCCMappingOff(XCCMapping):
     kernel = {"StreamKXCCMapping": 0}
@@ -72,7 +77,7 @@ class XCCMappingOn(XCCMapping):
 
             # sGridC = ceil(grid / xccm)
             module.add(SAddU32(dst=sgpr(sGridC), src0=sgpr("skGrid"), src1=hex(kernel["StreamKXCCMapping"] - 1), comment="ceil(grid/xccm)"))
-            module.add(scalarStaticDivideAndRemainder(qReg=sGridC, rReg=None, dReg=sGridC, divisor=kernel["StreamKXCCMapping"], tmpSgprRes=sTmpRes, doRemainder=0))
+            module.add(scalarStaticDivideAndRemainder(qReg=sGridC, rReg=-1, dReg=sGridC, divisor=kernel["StreamKXCCMapping"], tmpSgprRes=sTmpRes, doRemainder=0))
             # sGridF = floor(grid / xccm)
             # sGridM = grid % xccm
             module.add(scalarStaticDivideAndRemainder(qReg=sGridF, rReg=sGridM, dReg="skGrid", divisor=kernel["StreamKXCCMapping"], tmpSgprRes=sTmpRes))
@@ -85,7 +90,7 @@ class XCCMappingOn(XCCMapping):
             module.add(SCSelectB32(dst=sgpr(sGridC), src0=sgpr(sGridC), src1=sgpr(sGridF), comment="Select multiplier"))
             module.add(SCSelectB32(dst=sgpr(sGridM), src0=0, src1=sgpr(sGridM), comment="Select remainder"))
             # WG = floor(wg0 / xccm) * xccm + XCCoffset + optional remainder
-            module.add(scalarStaticDivideAndRemainder(qReg="WorkGroup0", rReg=None, dReg="WorkGroup0", divisor=kernel["StreamKXCCMapping"], tmpSgprRes=sTmpRes, doRemainder=0))
+            module.add(scalarStaticDivideAndRemainder(qReg="WorkGroup0", rReg=-1, dReg="WorkGroup0", divisor=kernel["StreamKXCCMapping"], tmpSgprRes=sTmpRes, doRemainder=0))
             module.add(SMulI32(dst=sgpr(sXCC), src0=sgpr(sXCC), src1=sgpr(sGridC), comment="XCC group id"))
             module.add(SAddU32(dst=sgpr("WorkGroup0"), src0=sgpr("WorkGroup0"), src1=sgpr(sXCC), comment="Add XCC group offset"))
             module.add(SAddU32(dst=sgpr("WorkGroup0"), src0=sgpr("WorkGroup0"), src1=sgpr(sGridM), comment="Add remainder offset"))
@@ -1535,9 +1540,9 @@ class StreamKOff(StreamK):
         if kernel["NoTailLoop"] and kernel["AssertSummationElementMultiple"] % kernel["DepthU"] != 0:
             # round up SizesSum/DepthU for noTailLoop case
             module.add(SAddI32(dst=sgpr(quotient), src0=(divisor - 1), src1=sgpr(dividend), comment="round up SizeSum / DepthU" ))
-            module.add(scalarStaticDivideAndRemainder(qReg=quotient, rReg=None, dReg=quotient, divisor=divisor, tmpSgprRes=tmpSgprInfo, doRemainder=0))
+            module.add(scalarStaticDivideAndRemainder(qReg=quotient, rReg=-1, dReg=quotient, divisor=divisor, tmpSgprRes=tmpSgprInfo, doRemainder=0))
         else:
-            module.add(scalarStaticDivideAndRemainder(qReg=quotient, rReg=None, dReg=dividend, divisor=divisor, tmpSgprRes=tmpSgprInfo, doRemainder=0))
+            module.add(scalarStaticDivideAndRemainder(qReg=quotient, rReg=-1, dReg=dividend, divisor=divisor, tmpSgprRes=tmpSgprInfo, doRemainder=0))
 
         return module
 
