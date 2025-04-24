@@ -599,6 +599,8 @@ namespace rocRoller::KernelGraph
     void ControlFlowRWTracer::operator()(Exchange const& op, int tag)
     {
         auto src = m_graph.mapper.get<MacroTile>(tag);
+        src      = only(m_graph.coordinates.getOutputNodeIndices(src, CT::isEdge<CT::Index>))
+                  .value_or(src);
         trackRegister(tag, src, ReadWrite::READ);
 
         auto dst

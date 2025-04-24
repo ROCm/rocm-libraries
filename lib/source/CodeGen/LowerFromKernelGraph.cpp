@@ -1123,8 +1123,9 @@ namespace rocRoller
                                 "Exchange: SIMDBlock must be the fastest running dimension");
                 }
 
-                const uint wfs     = m_context->kernel()->wavefront_size();
-                const uint numVgpr = waveTileSize / wfs;
+                const uint wfs = m_context->kernel()->wavefront_size();
+                // Exchange tile fixed size: 64 x 4
+                const uint numVgpr = 64 * 4 / wfs;
 
                 auto vgpr = m_context->registerTagManager()->getRegister(macTileTag);
 

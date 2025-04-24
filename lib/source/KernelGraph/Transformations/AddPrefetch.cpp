@@ -226,6 +226,8 @@ namespace rocRoller
 
             std::map<int, std::map<int, std::vector<int>>> m_deferredToOrder;
 
+            std::map<int, int> m_exchangeLoadMap;
+
             CommandParametersPtr m_params;
             ContextPtr           m_context;
 
@@ -385,28 +387,6 @@ namespace rocRoller
         }
 
         /**
-         * @brief Is the LoadLDSTile for an Exchange?
-         *
-         * Checks if the loads destination tile is connected to an
-         * Exchange operation.
-         */
-        bool isLoadLDSForExchange(int loadLDSTag, KernelGraph const& graph)
-        {
-            auto isForExchangePredicate = [&](auto const& conn) -> bool {
-                auto maybeExchange = graph.control.get<Exchange>(conn.control);
-                return maybeExchange.has_value();
-            };
-
-            auto tileTag = graph.mapper.get<MacroTile>(loadLDSTag);
-            for(auto c : graph.mapper.getCoordinateConnections(tileTag))
-            {
-                if(isForExchangePredicate(c))
-                    return true;
-            }
-            return false;
-        }
-
-        /**
         * @brief Order loads before Multiplies; and record direct
         * load operations within the segment that need to be ordered.
         *
@@ -441,7 +421,7 @@ namespace rocRoller
                        || *nary == NaryArgument::LHS_SCALE || *nary == NaryArgument::RHS_SCALE;
             };
 
-            std::map<int, int> loadMap;
+            std::map<int, int> loadMap = m_exchangeLoadMap;
             for(auto loadTag : graph.control.findNodes(starts, isLoadPredicate))
             {
                 auto tileTag     = graph.mapper.get<MacroTile>(loadTag);
@@ -449,17 +429,37 @@ namespace rocRoller
             }
 
             auto isExchangePredicate = graph.control.isElemType<Exchange>();
+
+            for(auto exchangeTag : graph.control.findNodes(starts, isExchangePredicate))
+            {
+                for(auto conn : graph.mapper.getConnections(exchangeTag))
+                {
+                    auto coord = only(graph.coordinates.getOutputNodeIndices(conn.coordinate,
+                                                                             CT::isEdge<CT::Index>))
+                                     .value_or(conn.coordinate);
+                    if(not loadMap.contains(coord))
+                        continue;
+
+                    Log::debug("Adding load-before-exchange Sequence edge from {} to {} for {}",
+                               loadMap[coord],
+                               exchangeTag,
+                               toString(conn.connection));
+
+                    graph.control.addElement(Sequence(), {loadMap[coord]}, {exchangeTag});
+                    m_exchangeLoadMap[coord] = loadMap[coord];
+                }
+                m_prefetchUnrollBodyStarts[forLoop][u].erase(exchangeTag);
+            }
+
             for(auto exchangeTag : graph.control.findNodes(starts, isExchangePredicate))
             {
                 auto destTileTag = graph.mapper.get(exchangeTag, NaryArgument::DEST);
-                auto loadTag     = only(graph.control.getInputNodeIndices<Sequence>(exchangeTag));
-                AssertFatal(loadTag.has_value(), "load associated with Exchange not found");
                 auto tileTags
                     = graph.coordinates.getInputNodeIndices(destTileTag, CT::isEdge<Index>)
                           .to<std::vector>();
                 AssertFatal(!tileTags.empty(), "swizzle indexed tiles not found");
                 for(auto tileTag : tileTags)
-                    loadMap[tileTag] = getTopSetCoordinate(graph, *loadTag);
+                    loadMap[tileTag] = getTopSetCoordinate(graph, exchangeTag);
             }
 
             for(auto multiplyTag : graph.control.findNodes(starts, isMultiplyPredicate))
@@ -1115,12 +1115,7 @@ namespace rocRoller
 
                     auto loadLDSTileChain = getTopSetCoordinate(k, loadLDSTileTag);
 
-                    // TODO: The logic below means that loads-from-lds
-                    // that are used for exchanges aren't included in
-                    // lds-prefetching.  Alternatively, we could
-                    // duplicate+move the associated Exchange
-                    // operation alongside the LoadLDSTile operation.
-                    if(splitLDSPrefetchFactor == 0 || isLoadLDSForExchange(loadLDSTileTag, k))
+                    if(splitLDSPrefetchFactor == 0)
                     {
                         // Keep load in same segment
                         m_loadFromLDSChains[forLoop][u].push_back(loadLDSTileChain);

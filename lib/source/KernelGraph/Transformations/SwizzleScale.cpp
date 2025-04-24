@@ -63,6 +63,9 @@ namespace rocRoller
                 auto tileTag = graph.mapper.get<MacroTile>(loadTag);
                 if(scaleTiles.contains(tileTag))
                 {
+                    // TODO: skip the swizzle pass for scale loaded via LDS.
+                    if(isOperation<LoadLDSTile>(graph.control.getElement(loadTag)))
+                        return std::map<int, int>();
                     scaleLoads.insert(std::make_pair(loadTag, tileTag));
                 }
             }
@@ -130,12 +133,15 @@ namespace rocRoller
             uint const wfs           = static_cast<uint>(wavefrontSize);
             uint const numVgpr       = numElements / wfs;
             uint const nVgprIndex    = macTile.miTileSizes[2];
-            uint const nVgprBlock    = numVgpr / nVgprIndex;
+            uint const nVgprBlock    = 4 / nVgprIndex;
+            uint const nBlocks       = numVgpr / nVgprBlock / nVgprIndex;
 
             auto vgprBlock
                 = graph.coordinates.addElement(VGPRBlockNumber(literal(nVgprBlock), literal(1u)));
             auto vgprIndex
                 = graph.coordinates.addElement(VGPRBlockIndex(literal(nVgprIndex), literal(1u)));
+            auto block
+                = graph.coordinates.addElement(Adhoc("Block", literal(nBlocks), literal(1u)));
 
             connections.push_back(DC<WaveTile>(waveTileTag));
             connections.push_back(DC<Adhoc>(SIMDBlock, 0));
@@ -148,14 +154,14 @@ namespace rocRoller
             {
                 graph.coordinates.addElement(
                     Flatten(), {vgprIndex, SIMDIndex, laneInSIMD}, {iWaveX});
-                graph.coordinates.addElement(Flatten(), {vgprBlock, SIMDBlock}, {iWaveY});
+                graph.coordinates.addElement(Flatten(), {block, vgprBlock, SIMDBlock}, {iWaveY});
                 graph.coordinates.addElement(Flatten(), {iWaveX, iWaveY}, {waveTileTag});
             }
             if(arg == NaryArgument::RHS_SCALE)
             {
                 graph.coordinates.addElement(
                     Flatten(), {vgprIndex, SIMDIndex, laneInSIMD}, {iWaveY});
-                graph.coordinates.addElement(Flatten(), {vgprBlock, SIMDBlock}, {iWaveX});
+                graph.coordinates.addElement(Flatten(), {block, vgprBlock, SIMDBlock}, {iWaveX});
                 graph.coordinates.addElement(Flatten(), {iWaveY, iWaveX}, {waveTileTag});
             }
 
@@ -167,6 +173,8 @@ namespace rocRoller
                    std::map<int, int>>
             addSwizzleLoadCT(KernelGraph& graph, ContextPtr context, int tag, NaryArgument arg)
         {
+            AssertFatal(arg == NaryArgument::LHS_SCALE || arg == NaryArgument::RHS_SCALE);
+
             std::vector<DeferredConnection> connections;
 
             auto wavefrontSize = context->kernel()->wavefront_size();
@@ -175,12 +183,32 @@ namespace rocRoller
                 = graph.coordinates.getNode<MacroTile>(graph.mapper.get<MacroTile>(tag));
             AssertFatal(existingMacTile.subTileSizes.size() == 4, "Invalid tile specification");
 
+            auto existingUnroll0 = graph.mapper.get<Unroll>(tag, 0);
+            auto existingUnroll1 = graph.mapper.get<Unroll>(tag, 1);
+            auto existingUnroll2 = graph.mapper.get<Unroll>(tag, 2);
+
+            // if unroll2 is -1, this returns 1.
+            int unrollKSize = getUnrollSize(graph, existingUnroll2);
+
+            int macKUnrollSize;
+            if(arg == NaryArgument::LHS_SCALE)
+            {
+                AssertFatal(existingUnroll1 != -1);
+                macKUnrollSize = getUnrollSize(graph, existingUnroll1);
+            }
+            else
+            {
+                AssertFatal(existingUnroll0 != -1);
+                macKUnrollSize = getUnrollSize(graph, existingUnroll0);
+            }
+
             // create new macrotile
-            auto macTile    = MacroTile(existingMacTile.sizes,
-                                     existingMacTile.layoutType,
-                                     {64, 64, 4, 1},
-                                     MemoryType::WAVE_SWIZZLE,
-                                     existingMacTile.subTileSizes);
+            auto macTile = MacroTile(
+                existingMacTile.sizes,
+                existingMacTile.layoutType,
+                {64, 64, existingMacTile.subTileSizes[2] * macKUnrollSize * unrollKSize, 1},
+                MemoryType::WAVE_SWIZZLE,
+                existingMacTile.subTileSizes);
             auto macTileTag = graph.coordinates.addElement(macTile);
             connections.push_back(DC<MacroTile>(macTileTag));
 
@@ -305,13 +333,16 @@ namespace rocRoller
             uint numVgpr     = numElements / wfs;
 
             uint const nVgprIndex = macTile.miTileSizes[2];
-            uint const nVgprBlock = numVgpr / nVgprIndex;
+            uint const nVgprBlock = 4 / nVgprIndex;
+            uint const nBlocks    = numVgpr / nVgprBlock / nVgprIndex;
             auto       vgprBlock
                 = graph.coordinates.addElement(VGPRBlockNumber(literal(nVgprBlock), literal(1u)));
             auto vgprIndex
                 = graph.coordinates.addElement(VGPRBlockIndex(literal(nVgprIndex), literal(1u)));
+            auto block
+                = graph.coordinates.addElement(Adhoc("Block", literal(nBlocks), literal(1u)));
             auto vgpr = graph.coordinates.addElement(VGPR(literal(numVgpr), literal(1u)));
-            graph.coordinates.addElement(Flatten(), {vgprBlock, vgprIndex}, {vgpr});
+            graph.coordinates.addElement(Flatten(), {block, vgprBlock, vgprIndex}, {vgpr});
             connections.push_back(DC<VGPRBlockNumber>(vgprBlock));
             connections.push_back(DC<VGPRBlockIndex>(vgprIndex));
             connections.push_back(DC<VGPR>(vgpr));
@@ -329,10 +360,6 @@ namespace rocRoller
             graph.coordinates.addElement(Flatten(), {SIMDBlock, SIMDIndex, laneInSIMD}, {lane});
 
             std::map<int, int> unrolls;
-
-            auto existingUnroll0 = graph.mapper.get<Unroll>(tag, 0);
-            auto existingUnroll1 = graph.mapper.get<Unroll>(tag, 1);
-            auto existingUnroll2 = graph.mapper.get<Unroll>(tag, 2);
 
             if(arg == NaryArgument::LHS_SCALE)
             {
@@ -426,11 +453,10 @@ namespace rocRoller
             return std::make_pair(waveSwizzleMN / waveM, waveSwizzleK / waveK);
         }
 
-        std::map<int, std::vector<int>>
+        std::map<int, std::vector<std::pair<int, int>>>
             findMergeableLoads(KernelGraph&                       graph,
                                std::map<int, int> const&          scaleLoads,
                                std::map<int, std::map<int, int>>& loadUnrollMap,
-                               int                                unrollKDimVal,
                                NaryArgument                       arg)
         {
             AssertFatal(!scaleLoads.empty() && !loadUnrollMap.empty());
@@ -438,40 +464,49 @@ namespace rocRoller
             auto sampleTile          = scaleLoads.begin()->second;
             auto [factorMN, factorK] = getMergeFactors(graph, sampleTile);
 
-            std::map<int, std::vector<int>> mergeables;
+            std::map<int, std::vector<std::pair<int, int>>> mergeables;
 
-            auto mergeLoadsByUnroll =
-                [&](int fastDim, int slowDim, int factor, int fixDim, int fixDimVal) {
-                    if(factor <= 1)
-                        return;
+            auto mergeLoadsByUnroll = [&](int fastDim,
+                                          int slowDim0,
+                                          int slowDim1,
+                                          int innerFactor,
+                                          int outerFactor,
+                                          int indexFactor = 0) {
+                AssertFatal(innerFactor <= outerFactor);
+                if(innerFactor <= 1 && outerFactor <= 1)
+                    return;
 
-                    // (slowDimVal, fastDimVal, load)
-                    std::map<int, std::map<int, int>> unrollLoadMap;
-                    for(auto load : loadUnrollMap)
+                // (slowDimVal1, slowDimVal0, fastDimVal, load)
+                std::map<int, std::map<int, std::map<int, int>>> unrollLoadMap;
+                for(auto load : loadUnrollMap)
+                {
+                    auto unrollMap = loadUnrollMap[load.first];
+                    AssertFatal(unrollMap.contains(fastDim), ShowValue(fastDim));
+                    AssertFatal(unrollMap.contains(slowDim0), ShowValue(slowDim0));
+                    AssertFatal(slowDim1 == -1 || unrollMap.contains(slowDim1),
+                                ShowValue(slowDim1));
+                    int slowDimVal1 = (slowDim1 == -1) ? 0 : unrollMap[slowDim1];
+                    for(auto unroll : unrollMap)
                     {
-                        auto unrollMap = loadUnrollMap[load.first];
-                        AssertFatal(unrollMap.contains(fastDim), ShowValue(fastDim));
-                        AssertFatal(unrollMap.contains(slowDim), ShowValue(slowDim));
-                        AssertFatal(fixDim == -1 || unrollMap.contains(fixDim), ShowValue(fixDim));
-                        for(auto unroll : unrollMap)
+                        if(unroll.first == fastDim)
                         {
-                            if(unroll.first == fastDim
-                               && (fixDim == -1 || unrollMap[fixDim] == fixDimVal))
-                            {
-                                unrollLoadMap[unrollMap[slowDim]][unrollMap[fastDim]] = load.first;
-                            }
+                            unrollLoadMap[slowDimVal1][unrollMap[slowDim0]][unrollMap[fastDim]]
+                                = load.first;
                         }
                     }
+                }
 
-                    for(auto sDim : unrollLoadMap)
+                for(auto const sDim1 : unrollLoadMap)
+                {
+                    for(auto const sDim0 : sDim1.second)
                     {
                         int mergeOp = -1;
-                        for(auto fDim : sDim.second)
+                        for(auto const fDim : sDim0.second)
                         {
-                            if(fDim.first % factor == 0)
+                            if(fDim.first % outerFactor == 0)
                             {
                                 mergeOp = fDim.second;
-                                loadUnrollMap[mergeOp][fastDim] /= factor;
+                                loadUnrollMap[mergeOp][fastDim] /= outerFactor;
                             }
                             else
                             {
@@ -481,10 +516,21 @@ namespace rocRoller
                                             == NodeOrdering::LeftFirst);
                                 loadUnrollMap.erase(fDim.second);
 
+                                int index  = 0;
+                                int factor = fDim.first * indexFactor;
+                                if(fDim.first % innerFactor == 0)
+                                    index = fDim.first / innerFactor;
+
                                 // insertion order matters here
-                                mergeables[mergeOp].push_back(fDim.second);
+                                mergeables[mergeOp].push_back(
+                                    std::make_pair(fDim.second, index + factor));
                                 if(mergeables.count(fDim.second) > 0)
                                 {
+                                    for(auto& pair : mergeables[fDim.second])
+                                    {
+                                        if(pair.second > 0)
+                                            pair.second += factor;
+                                    }
                                     mergeables[mergeOp].insert(mergeables[mergeOp].end(),
                                                                mergeables[fDim.second].begin(),
                                                                mergeables[fDim.second].end());
@@ -493,12 +539,16 @@ namespace rocRoller
                             }
                         }
                     }
-                };
+                }
+            };
 
             auto sampleLoad = loadUnrollMap.begin()->first;
             auto unroll0    = graph.mapper.get<Unroll>(sampleLoad, 0);
             auto unroll1    = graph.mapper.get<Unroll>(sampleLoad, 1);
             auto unroll2    = graph.mapper.get<Unroll>(sampleLoad, 2);
+
+            // if unroll2 is -1, this returns 1.
+            auto unrollKSize = getUnrollSize(graph, unroll2);
 
             if(arg == NaryArgument::LHS_SCALE)
             {
@@ -509,8 +559,14 @@ namespace rocRoller
                 // merge scale loads
                 if(xUnrollSize % factorMN == 0 && macKUnrollSize % factorK == 0)
                 {
-                    mergeLoadsByUnroll(unroll0, unroll1, factorMN, unroll2, unrollKDimVal);
-                    mergeLoadsByUnroll(unroll1, unroll0, factorK, unroll2, unrollKDimVal);
+                    mergeLoadsByUnroll(unroll0, unroll1, unroll2, factorMN, factorMN);
+                    mergeLoadsByUnroll(unroll1, unroll0, unroll2, factorK, macKUnrollSize);
+                    mergeLoadsByUnroll(unroll2,
+                                       unroll1,
+                                       unroll0,
+                                       unrollKSize,
+                                       unrollKSize,
+                                       macKUnrollSize / factorK);
                 }
             }
             if(arg == NaryArgument::RHS_SCALE)
@@ -522,8 +578,14 @@ namespace rocRoller
                 // merge scale loads
                 if(yUnrollSize % factorMN == 0 && macKUnrollSize % factorK == 0)
                 {
-                    mergeLoadsByUnroll(unroll1, unroll0, factorMN, unroll2, unrollKDimVal);
-                    mergeLoadsByUnroll(unroll0, unroll1, factorK, unroll2, unrollKDimVal);
+                    mergeLoadsByUnroll(unroll1, unroll0, unroll2, factorMN, factorMN);
+                    mergeLoadsByUnroll(unroll0, unroll1, unroll2, factorK, macKUnrollSize);
+                    mergeLoadsByUnroll(unroll2,
+                                       unroll0,
+                                       unroll1,
+                                       unrollKSize,
+                                       unrollKSize,
+                                       macKUnrollSize / factorK);
                 }
             }
 
@@ -532,115 +594,136 @@ namespace rocRoller
 
         void swizzleScaleLoads(KernelGraph& graph, ContextPtr context, NaryArgument arg)
         {
-            auto allScaleLoads = findScaleLoads(graph, arg);
-            if(allScaleLoads.empty())
+            auto scaleLoads = findScaleLoads(graph, arg);
+            if(scaleLoads.empty())
             {
                 // TODO: Change this to let RR know that the SwizzleScale transform was applied but didn't do anything
                 Log::debug("Unable to find SwizzleScale candidates");
                 return;
             }
 
-            auto sampleLoad     = allScaleLoads.begin()->first;
+            auto sampleLoad     = scaleLoads.begin()->first;
             auto unrollK        = graph.mapper.get<Unroll>(sampleLoad, 2);
             auto forKUnrollSize = getUnrollSize(graph, unrollK);
 
             auto colouring = colourByUnrollValue(graph);
 
-            for(auto unrollKDimVal = 0; unrollKDimVal < forKUnrollSize; unrollKDimVal++)
+            auto loadUnrollMap = filterLoadUnrollColouring(colouring, scaleLoads);
+            if(loadUnrollMap.empty())
+                return;
+
+            auto mergeables = findMergeableLoads(graph, scaleLoads, loadUnrollMap, arg);
+
+            if(mergeables.empty())
+                return;
+
+            sampleLoad = mergeables.begin()->first;
+            auto [loadConnections, exchangeConnections, unrollReindexMap]
+                = addSwizzleLoadCT(graph, context, sampleLoad, arg);
+
+            for(auto const load : mergeables)
             {
-                std::map<int, int> scaleLoads;
-                for(const auto& load : allScaleLoads)
+                // add coordinate connections for LoadTiled
+                for(auto& dc : loadConnections)
                 {
-                    auto unrollMap = colouring.operationColour.at(load.first);
-                    if(unrollK == -1
-                       || (unrollMap.contains(unrollK) && unrollMap[unrollK] == unrollKDimVal))
-                        scaleLoads.insert(load);
+                    graph.mapper.connect(load.first, dc.coordinate, dc.connectionSpec);
                 }
 
-                auto loadUnrollMap = filterLoadUnrollColouring(colouring, scaleLoads);
-                if(loadUnrollMap.empty())
-                    return;
+                // make a copy of MacroTile for separate register tagging
+                if(load.first != sampleLoad)
+                    duplicateMacroTile(graph, load.first);
 
-                auto mergeables
-                    = findMergeableLoads(graph, scaleLoads, loadUnrollMap, unrollKDimVal, arg);
+                // add exchange node after load
+                auto exchange
+                    = graph.control.addElement(Exchange(getVariableType(graph, load.first)));
+                auto topOp = getTopSetCoordinate(graph, load.first);
+                insertAfter(graph, topOp, exchange, exchange);
 
-                if(mergeables.empty())
-                    return;
-
-                auto sampleLoad = mergeables.begin()->first;
-                auto [loadConnections, exchangeConnections, unrollReindexMap]
-                    = addSwizzleLoadCT(graph, context, sampleLoad, arg);
-
-                for(auto load : mergeables)
+                // add coordinate connections for Exchange
+                for(auto& dc : exchangeConnections)
                 {
-                    // merge the loads
-                    auto topOp = getTopSetCoordinate(graph, load.first);
-                    for(auto merge : load.second)
+                    graph.mapper.connect(exchange, dc.coordinate, dc.connectionSpec);
+                }
+
+                // Since the load tile size (e.g. 64x4, 64x8, 64x12, 64x16) can be
+                // greater than equal to the exchange tile size (64x4),
+                // add index edge to point to the register allocation (subset).
+                auto tileTag         = graph.mapper.get<MacroTile>(load.first);
+                auto exchangeTileTag = graph.coordinates.addElement(MacroTile());
+                graph.coordinates.addElement(Index(0), {exchangeTileTag}, {tileTag});
+                graph.mapper.connect<MacroTile>(exchange, exchangeTileTag);
+
+                auto destMacTileTag = graph.coordinates.addElement(MacroTile());
+                graph.mapper.connect(exchange, destMacTileTag, NaryArgument::DEST);
+
+                // add index edge to point to exchange output tile.
+                int index = 0;
+                graph.coordinates.addElement(
+                    Index(index++), {scaleLoads.at(load.first)}, {destMacTileTag});
+
+                // merge the loads
+                for(auto const merge : load.second)
+                {
+                    auto mergeTopOp = getTopSetCoordinate(graph, merge.first);
+                    auto ordering
+                        = graph.control.compareNodes(rocRoller::UpdateCache, topOp, mergeTopOp);
+                    AssertFatal(ordering == NodeOrdering::LeftFirst);
+                    int replaceOp = -1;
+                    if(merge.second > 0)
                     {
-                        auto mergeTopOp = getTopSetCoordinate(graph, merge);
-                        auto ordering
-                            = graph.control.compareNodes(rocRoller::UpdateCache, topOp, mergeTopOp);
-                        AssertFatal(ordering == NodeOrdering::LeftFirst);
-                        auto nop = graph.control.addElement(NOP());
-                        replaceWith(graph, mergeTopOp, nop, false);
-                        purgeNodeAndChildren(graph, mergeTopOp);
-                    }
+                        replaceOp = graph.control.addElement(
+                            Exchange(getVariableType(graph, load.first)));
 
-                    // update the SetCoordinate value and its Unroll coordinate connection
-                    auto maybeSetCoordinate
-                        = findContainingOperation<SetCoordinate>(load.first, graph);
-                    while(maybeSetCoordinate)
-                    {
-                        auto tag = *maybeSetCoordinate;
+                        // add coordinate connections for Exchange
+                        for(auto& dc : exchangeConnections)
+                        {
+                            graph.mapper.connect(replaceOp, dc.coordinate, dc.connectionSpec);
+                        }
 
-                        auto unroll = graph.mapper.get<Unroll>(tag);
-                        AssertFatal(unroll > 0,
-                                    "SetCoordinate is not connected to the Unroll dimension");
-
-                        auto newOp
-                            = SetCoordinate(Expression::literal(loadUnrollMap[load.first][unroll]));
-                        graph.control.setElement(tag, newOp);
-
-                        auto newUnroll = unrollReindexMap.at(unroll);
-                        graph.mapper.disconnect<Unroll>(tag, unroll);
-                        graph.mapper.connect<Unroll>(tag, newUnroll);
-
-                        maybeSetCoordinate = findContainingOperation<SetCoordinate>(tag, graph);
-                    }
-
-                    // add coordinate connections for LoadTiled
-                    for(auto& dc : loadConnections)
-                    {
-                        graph.mapper.connect(load.first, dc.coordinate, dc.connectionSpec);
-                    }
-
-                    // make a copy of MacroTile for separate register tagging
-                    if(load.first != sampleLoad)
-                        duplicateMacroTile(graph, load.first);
-
-                    auto exchange
-                        = graph.control.addElement(Exchange(getVariableType(graph, load.first)));
-                    graph.control.addElement(Sequence(), {load.first}, {exchange});
-                    auto tileTag = graph.mapper.get<MacroTile>(load.first);
-                    graph.mapper.connect<MacroTile>(exchange, tileTag);
-                    auto destMacTileTag = graph.coordinates.addElement(MacroTile());
-                    graph.mapper.connect(exchange, destMacTileTag, NaryArgument::DEST);
-
-                    // add coordinate connections for Exchange
-                    for(auto& dc : exchangeConnections)
-                    {
-                        graph.mapper.connect(exchange, dc.coordinate, dc.connectionSpec);
-                    }
-
-                    // add Index edges
-                    int index = 0;
-                    graph.coordinates.addElement(
-                        Index(index++), {scaleLoads.at(load.first)}, {destMacTileTag});
-                    for(auto merge : load.second)
-                    {
+                        // Since the load tile size (e.g. 64x4, 64x8, 64x12, 64x16) can be
+                        // greater than equal to the exchange tile size (64x4),
+                        // add index edge to point to the register allocation (subset).
+                        exchangeTileTag = graph.coordinates.addElement(MacroTile());
                         graph.coordinates.addElement(
-                            Index(index++), {scaleLoads.at(merge)}, {destMacTileTag});
+                            Index(merge.second), {exchangeTileTag}, {tileTag});
+                        graph.mapper.connect<MacroTile>(replaceOp, exchangeTileTag);
+
+                        destMacTileTag = graph.coordinates.addElement(MacroTile());
+                        graph.mapper.connect(replaceOp, destMacTileTag, NaryArgument::DEST);
+
+                        // reset the index
+                        index = 0;
                     }
+                    else
+                    {
+                        replaceOp = graph.control.addElement(NOP());
+                    }
+                    replaceWith(graph, mergeTopOp, replaceOp, false);
+                    purgeNodeAndChildren(graph, mergeTopOp);
+
+                    graph.coordinates.addElement(
+                        Index(index++), {scaleLoads.at(merge.first)}, {destMacTileTag});
+                }
+
+                // update the SetCoordinate value and its Unroll coordinate connection
+                auto maybeSetCoordinate = findContainingOperation<SetCoordinate>(load.first, graph);
+                while(maybeSetCoordinate)
+                {
+                    auto tag = *maybeSetCoordinate;
+
+                    auto unroll = graph.mapper.get<Unroll>(tag);
+                    AssertFatal(unroll > 0,
+                                "SetCoordinate is not connected to the Unroll dimension");
+
+                    auto newOp
+                        = SetCoordinate(Expression::literal(loadUnrollMap[load.first][unroll]));
+                    graph.control.setElement(tag, newOp);
+
+                    auto newUnroll = unrollReindexMap.at(unroll);
+                    graph.mapper.disconnect<Unroll>(tag, unroll);
+                    graph.mapper.connect<Unroll>(tag, newUnroll);
+
+                    maybeSetCoordinate = findContainingOperation<SetCoordinate>(tag, graph);
                 }
             }
         }

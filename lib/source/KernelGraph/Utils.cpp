@@ -404,6 +404,9 @@ namespace rocRoller
             auto location = graph.control.getLocation(op);
             for(auto const& output : location.outgoing)
             {
+                auto maybeBody = graph.control.get<Body>(output);
+                if(maybeBody)
+                    continue;
                 auto edge = graph.control.getElement(output);
                 int  child
                     = *graph.control.getNeighbours<Graph::Direction::Downstream>(output).begin();
