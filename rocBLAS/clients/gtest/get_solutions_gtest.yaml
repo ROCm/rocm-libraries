@@ -23,6 +23,7 @@ Tests:
   alpha_beta: { alpha:  1, beta:  1 }
   transA_transB: *transA_transB_range
   precision : *real_precisions
+  pointer_mode_device: false
 
 - name: gemm_strided_batched_ex_get_solutions
   category: pre_checkin
@@ -38,6 +39,7 @@ Tests:
   transA_transB: *transA_transB_range
   precision : *complex_precisions
   batch_count: [ 1, 3 ]
+  pointer_mode_device: false
 
 - name: gemm_batched_ex_get_solutions
   category: pre_checkin
@@ -53,6 +55,7 @@ Tests:
   transA_transB: *transA_transB_range
   precision : *single_double_precisions
   batch_count: [ 1, 3 ]
+  pointer_mode_device: false
 
 - name: gemm_ex_gemv_get_solutions
   category: pre_checkin
@@ -71,6 +74,7 @@ Tests:
   alpha_beta: { alpha: 1, beta: 1 }
   transA_transB: *transA_transB_range
   outofplace: [false, true]
+  pointer_mode_device: false
 
 # special form of get_solutions testing via gemm_ex harness
 - name: gemm_ex_get_solutions_custom
@@ -93,5 +97,6 @@ Tests:
   precision : *real_precisions
   solution_index: -2 # do get solutions and repeat for all
   algo: 1
+  pointer_mode_device: false
 
 ...

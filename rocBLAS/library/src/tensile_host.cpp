@@ -1052,6 +1052,11 @@ namespace
                - c_rocblas_solutions_reserved; //  zero based to one based offset negative
     }
 
+    inline rocblas_int map_index_rocblas_to_hipblaslt(rocblas_int idx)
+    {
+        return idx < 0 ? 0 : idx; // map -1 and all negatives to default
+    }
+
 } // namespace
 
 inline bool fallbackTensileProblem(Tensile::ContractionProblem& tensile_prob)
@@ -1072,8 +1077,8 @@ template <typename Ti, typename To, typename Tc>
 bool useHipBLASLt(const RocblasContractionProblem<Ti, To, Tc>& prob)
 {
 #ifdef BUILD_WITH_HIPBLASLT
-    bool problemSpecific = prob.batch_A == 0; // Only use hipblaslt for non-batch problems.
-    return prob.handle->useHipBLASLt(problemSpecific);
+    bool batched = prob.batch_A != nullptr;
+    return prob.handle->tryHipBLASLt(batched);
 #else
     return false;
 #endif
@@ -1108,8 +1113,10 @@ rocblas_status runContractionProblem(const RocblasContractionProblem<Ti, To, Tc>
         {
             try
             {
+                rocblas_int hipblaslt_idx = map_index_rocblas_to_hipblaslt(solution_index);
+
                 rocblas_internal_ostream msg;
-                auto hipblasltResult = runContractionProblemHipBlasLT(prob, algo, solution_index);
+                auto hipblasltResult = runContractionProblemHipBlasLT(prob, algo, hipblaslt_idx);
 
                 if(hipblasltResult == rocblas_status_success || (solutionBased && hipBLASLtOnly))
                 {

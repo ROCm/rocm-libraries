@@ -122,17 +122,8 @@ void testing_gemm_batched_ex_get_solutions(const Arguments& arg)
 #define GEMM_B_EX_ARGS                                                                        \
     handle, transA, transB, M, N, K, &h_alpha_Tc, dA.ptr_on_device(), arg.a_type, lda,        \
         dB.ptr_on_device(), arg.b_type, ldb, &h_beta_Tc, dC.ptr_on_device(), arg.c_type, ldc, \
-        dD.ptr_on_device(), arg.d_type, ldd, batch_count, arg.compute_type, algo
+        dDref.ptr_on_device(), arg.d_type, ldd, batch_count, arg.compute_type, algo
 #define rocblas_gemm_batched_exM(...) rocblas_gemm_batched_ex(__VA_ARGS__)
-
-    // Testing 0 and negative values work (uses default solution)
-    CHECK_ROCBLAS_ERROR(
-        rocblas_gemm_batched_exM(GEMM_B_EX_ARGS, 0, rocblas_gemm_flags_check_solution_index));
-    CHECK_ROCBLAS_ERROR(
-        rocblas_gemm_batched_exM(GEMM_B_EX_ARGS, -1, rocblas_gemm_flags_check_solution_index));
-    // always have rocblas fallback
-    // CHECK_ROCBLAS_ERROR(rocblas_gemm_batched_exM(
-    //     GEMM_B_EX_ARGS, c_rocblas_source_solution, rocblas_gemm_flags_check_solution_index));
 
     // bad arg
     EXPECT_ROCBLAS_STATUS(rocblas_gemm_batched_ex_get_solutions(
@@ -158,9 +149,10 @@ void testing_gemm_batched_ex_get_solutions(const Arguments& arg)
         EXPECT_EQ(ary[size_small], 0);
     }
 
+    // full set of solutions should be padded with 0
     CHECK_ROCBLAS_ERROR(rocblas_gemm_batched_ex_get_solutions(
         GEMM_B_EX_ARGS, rocblas_gemm_flags_none, ary.data(), &size_large));
-    EXPECT_EQ(ary[size], 0);
+    EXPECT_EQ(ary[size], 0); // one past last index
     EXPECT_EQ(ary[size_large - 1], 0);
 
     for(auto sol : ary)
@@ -169,16 +161,18 @@ void testing_gemm_batched_ex_get_solutions(const Arguments& arg)
             rocblas_gemm_batched_exM(GEMM_B_EX_ARGS, sol, rocblas_gemm_flags_check_solution_index));
     }
 
-    // Testing 0 and negative values work (uses default solution)
+    // Testing 0 and -1 values work (uses default solution)
     CHECK_ROCBLAS_ERROR(
         rocblas_gemm_batched_exM(GEMM_B_EX_ARGS, 0, rocblas_gemm_flags_check_solution_index));
     CHECK_ROCBLAS_ERROR(
         rocblas_gemm_batched_exM(GEMM_B_EX_ARGS, -1, rocblas_gemm_flags_check_solution_index));
+    // always have rocblas fallback
+    // CHECK_ROCBLAS_ERROR(rocblas_gemm_batched_exM(
+    //     GEMM_B_EX_ARGS, c_rocblas_source_solution, rocblas_gemm_flags_check_solution_index));
 
     // full set of solutions
     CHECK_ROCBLAS_ERROR(rocblas_gemm_batched_ex_get_solutions(
         GEMM_B_EX_ARGS, rocblas_gemm_flags_none, ary.data(), &size));
-    EXPECT_EQ(ary[size], 0);
 
     // Testing get solutions by type - should be superset of solutions that solve problem
     rocblas_int size_type;
