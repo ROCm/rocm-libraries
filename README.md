@@ -50,8 +50,8 @@ build (for all supported platforms).
   require sudo access, so it may prompt you for a password.
 
     ```bash
-    `./install -h`  # shows help
-    `./install -id` # builds library, dependencies, then installs (the `-d` flag only needs to be passed once on a system)
+    ./install.sh -h  # shows help
+    ./install.sh -id # builds library, dependencies, then installs (the `-d` flag only needs to be passed once on a system)
     ```
 
 * Manual build:
