@@ -28,10 +28,10 @@ from rocisa.instruction import SAddCU32, SAddI32, SAddU32, SAndB32, SBarrier, \
     SCmpGtU32, SCmpLeU32, SCmpLtU32, SLShiftLeftB32, SLShiftRightB32, SLoadB32, \
     SMinU32, SMovB32, SMovB64, SMulI32, SNop, SSleep, SStoreB32, SSubU32, \
     SWaitCnt, VAddF32, VAddF64, VAddPKF16, VAddU32, VLShiftRightB32, VMovB32, \
-    VReadfirstlaneB32
+    VReadfirstlaneB32, scalarStaticDivideAndRemainder
 
 from ..TensileInstructions import ContinuousRegister, sMagicDivAlg2, SBranchIfNotZero, \
-    ceilDivide, VCvtBF16toFP32, staticMultiply, scalarStaticDivideAndRemainder, log2
+    ceilDivide, VCvtBF16toFP32, staticMultiply, log2
 from ..Common import print2
 # from ..TensileInstructions.Containers import SMEMModifiers
 from ..Component import Component
@@ -1540,9 +1540,9 @@ class StreamKOff(StreamK):
         if kernel["NoTailLoop"] and kernel["AssertSummationElementMultiple"] % kernel["DepthU"] != 0:
             # round up SizesSum/DepthU for noTailLoop case
             module.add(SAddI32(dst=sgpr(quotient), src0=(divisor - 1), src1=sgpr(dividend), comment="round up SizeSum / DepthU" ))
-            module.add(scalarStaticDivideAndRemainder(qReg=quotient, rReg=-1, dReg=quotient, divisor=divisor, tmpSgprRes=tmpSgprInfo, doRemainder=0))
+            module.add(scalarStaticDivideAndRemainder(qReg=quotient, rReg=-1, dReg=quotient, divisor=divisor, tmpSgprRes=tmpSgprInfo, doRemainder=False))
         else:
-            module.add(scalarStaticDivideAndRemainder(qReg=quotient, rReg=-1, dReg=dividend, divisor=divisor, tmpSgprRes=tmpSgprInfo, doRemainder=0))
+            module.add(scalarStaticDivideAndRemainder(qReg=quotient, rReg=-1, dReg=dividend, divisor=divisor, tmpSgprRes=tmpSgprInfo, doRemainder=False))
 
         return module
 

@@ -33,15 +33,15 @@ from rocisa.container import DSModifiers, SDWAModifiers, VOP3PModifiers, \
                       HWRegContainer
 from rocisa.instruction import SGetPositivePCOffset, SLongBranchPositive, SCLongBranchScc0, SCLongBranchScc1, \
                         vectorStaticDivide, vectorStaticRemainder, vectorUInt32CeilDivideAndRemainder, \
-                        vectorStaticDivideAndRemainder
+                        vectorStaticDivideAndRemainder, scalarStaticDivideAndRemainder, scalarStaticCeilDivide, \
+                        scalarStaticRemainder, scalarUInt32DivideAndRemainder
 from rocisa.enum import InstType
 from rocisa.macro import MacroVMagicDiv, PseudoRandomGenerator
 from . import CUSTOM_KERNEL_PATH
 from .TensileInstructions import SelectBit, \
                           SBranchIfZero, SBranchIfNotZero, SMulInt64to32, DSInit, VCvtBF16toFP32, \
-                          ArgumentLoader, bomb, scalarStaticRemainder, \
-                          scalarUInt32DivideAndRemainder, scalarStaticDivideAndRemainder, \
-                          scalarStaticCeilDivide, sMagicDiv, staticMultiply, staticMultiplyAdd, scalarStaticMultiply, \
+                          ArgumentLoader, bomb, \
+                          sMagicDiv, staticMultiply, staticMultiplyAdd, scalarStaticMultiply, \
                           RegisterPool, \
                           allocTmpGpr, allocTmpGprList, log2, \
                           ceilDivide, DataType, dataTypeToMfmaInstTypePair, \
@@ -1516,14 +1516,14 @@ class KernelWriterAssembly(KernelWriter):
       # CU_count > 0
       module.add(label_XCCG_nonzero)
       module.addComment0("temp0 = (wg//CU_Count)*CU_Count")
-      module.add(scalarUInt32DivideAndRemainder(qReg=tmpSgpr0, dReg="WorkGroup0", divReg=CU_CountSgpr, rReg=tmpSgpr1, tmpVgprRes=tmpVgprRes, wavewidth=kernel["WavefrontSize"], doRemainder=1, comment="wg//CU_Count"))
+      module.add(scalarUInt32DivideAndRemainder(qReg=tmpSgpr0, dReg="WorkGroup0", divReg=CU_CountSgpr, rReg=tmpSgpr1, tmpVgprRes=tmpVgprRes, wavewidth=kernel["WavefrontSize"], doRemainder=True, comment="wg//CU_Count"))
       module.add(SMulI32(dst=sgpr(tmpSgpr0), src0=sgpr(tmpSgpr0), src1=sgpr(CU_CountSgpr)))
       module.addComment0("temp1 = (wg%CU_Count)//WGMXCC")
       module.add(SLShiftRightB32(dst=sgpr(tmpSgpr1), shiftHex=sgpr(WGMXCCSgpr), src=sgpr(tmpSgpr1)))
       module.addComment0("temp0 = temp0 + temp1")
       module.add(SAddU32(dst=sgpr(tmpSgpr0), src0=sgpr(tmpSgpr0), src1=sgpr(tmpSgpr1)))
       module.addComment0("temp1 = (wg%WGMXCC) * ((WGs - (WGs//CU_Count) * CU_Count) if (wg > (WGs//CU_Count) * CU_Count) else CU_Count)//WGMXCC")
-      module.add(scalarUInt32DivideAndRemainder(qReg=tmpSgpr1, dReg=tmpSgprNumWorkGroups, divReg=CU_CountSgpr, rReg=None, tmpVgprRes=tmpVgprRes, wavewidth=kernel["WavefrontSize"], doRemainder=0, comment="WGs//CU_Count"))
+      module.add(scalarUInt32DivideAndRemainder(qReg=tmpSgpr1, dReg=tmpSgprNumWorkGroups, divReg=CU_CountSgpr, rReg=-1, tmpVgprRes=tmpVgprRes, wavewidth=kernel["WavefrontSize"], doRemainder=False, comment="WGs//CU_Count"))
       module.add(SMulI32(dst=sgpr(tmpSgpr1), src0=sgpr(tmpSgpr1), src1=sgpr(CU_CountSgpr)))
       module.add(SSubU32(dst=sgpr(tmpSgpr2), src0=sgpr(tmpSgprNumWorkGroups), src1=sgpr(tmpSgpr1)))
       module.add(SCmpGtU32(src0=sgpr("WorkGroup0"), src1=sgpr(tmpSgpr1)))

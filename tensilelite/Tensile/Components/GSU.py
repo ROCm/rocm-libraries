@@ -24,9 +24,10 @@ from rocisa import countInstruction
 from rocisa.container import ContinuousRegister
 from rocisa.instruction import SAddCU32, SAddU32, SAndB32, SBranch, SCBranchSCC0, \
     SCBranchSCC1, SCMovB32, SCSelectB32, SCmpEQU32, SCmpLgU32, SCmpLtU32, \
-    SLShiftLeftB64, SLShiftRightB32, SMovB32, SMovB64, SMulI32, SSubU32
+    SLShiftLeftB64, SLShiftRightB32, SMovB32, SMovB64, SMulI32, SSubU32, \
+    scalarUInt32DivideAndRemainder
 
-from ..TensileInstructions import Module, Label, scalarUInt32DivideAndRemainder, sgpr, log2
+from ..TensileInstructions import Module, Label, sgpr, log2
 from ..Component import Component
 import abc
 

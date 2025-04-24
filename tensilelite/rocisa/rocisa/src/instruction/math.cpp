@@ -29,6 +29,7 @@
 
 namespace rocisa
 {
+    // template of vectorStaticDivide
     template std::shared_ptr<Module> vectorStaticDivideAndRemainder<int, int>(
         int, int, int, int, std::optional<ContinuousRegister>, bool, const std::string&);
     template std::shared_ptr<Module> vectorStaticDivideAndRemainder<int, std::string>(
@@ -39,6 +40,7 @@ namespace rocisa
         int, std::string, int, std::optional<ContinuousRegister>, const std::string&);
     template std::shared_ptr<Module> vectorStaticDivide<std::string, std::string>(
         std::string, std::string, int, std::optional<ContinuousRegister>, const std::string&);
+    // template of vectorStaticRemainder
     template std::shared_ptr<Module>
         vectorStaticRemainder<int, int>(int,
                                         int,
@@ -63,6 +65,83 @@ namespace rocisa
                                                 std::optional<ContinuousRegister>,
                                                 std::optional<ContinuousRegister>,
                                                 const std::string&);
+    // template of scalarStaticDivideAndRemainder
+    template std::shared_ptr<Module> scalarStaticDivideAndRemainder<int, int, int>(
+        int, int, int, int, std::optional<ContinuousRegister>, int);
+    template std::shared_ptr<Module> scalarStaticDivideAndRemainder<int, int, std::string>(
+        int, int, std::string, int, std::optional<ContinuousRegister>, int);
+    template std::shared_ptr<Module> scalarStaticDivideAndRemainder<int, std::string, int>(
+        int, std::string, int, int, std::optional<ContinuousRegister>, int);
+    template std::shared_ptr<Module> scalarStaticDivideAndRemainder<std::string, int, std::string>(
+        std::string, int, std::string, int, std::optional<ContinuousRegister>, int);
+    template std::shared_ptr<Module> scalarStaticDivideAndRemainder<int, std::string, std::string>(
+        int, std::string, std::string, int, std::optional<ContinuousRegister>, int);
+    template std::shared_ptr<Module>
+        scalarStaticDivideAndRemainder<int, int, std::shared_ptr<RegisterContainer>>(
+            int,
+            int,
+            std::shared_ptr<RegisterContainer>,
+            int,
+            std::optional<ContinuousRegister>,
+            int);
+    // template of scalarStaticCeilDivide
+    template std::shared_ptr<Module> scalarStaticCeilDivide<std::shared_ptr<RegisterContainer>,
+                                                            std::shared_ptr<RegisterContainer>>(
+        std::shared_ptr<RegisterContainer>,
+        std::shared_ptr<RegisterContainer>,
+        int,
+        std::optional<ContinuousRegister>);
+    // template of scalarStaticRemainder
+    template std::shared_ptr<Module> scalarStaticRemainder<int, int>(
+        int, int, int, int, std::optional<ContinuousRegister>, const std::string&);
+    // template of scalarUInt32DivideAndRemainder
+    template std::shared_ptr<Module> scalarUInt32DivideAndRemainder<int, int, int, int>(
+        int, int, int, int, ContinuousRegister, int, bool, const std::string&);
+    template std::shared_ptr<Module>
+        scalarUInt32DivideAndRemainder<std::string, std::string, std::string, int>(
+            std::string,
+            std::string,
+            std::string,
+            int,
+            ContinuousRegister,
+            int,
+            bool,
+            const std::string&);
+    template std::shared_ptr<Module> scalarUInt32DivideAndRemainder<int, int, std::string, int>(
+        int, int, std::string, int, ContinuousRegister, int, bool, const std::string&);
+    template std::shared_ptr<Module> scalarUInt32DivideAndRemainder<int, std::string, int, int>(
+        int, std::string, int, int, ContinuousRegister, int, bool, const std::string&);
+    template std::shared_ptr<Module>
+        scalarUInt32DivideAndRemainder<std::string, std::string, int, int>(
+            std::string, std::string, int, int, ContinuousRegister, int, bool, const std::string&);
+    template std::shared_ptr<Module>
+        scalarUInt32DivideAndRemainder<int, std::string, std::string, int>(
+            int, std::string, std::string, int, ContinuousRegister, int, bool, const std::string&);
+    template std::shared_ptr<Module>
+        scalarUInt32DivideAndRemainder<std::string, std::string, int, std::string>(
+            std::string,
+            std::string,
+            int,
+            std::string,
+            ContinuousRegister,
+            int,
+            bool,
+            const std::string&);
+    template std::shared_ptr<Module>
+        scalarUInt32DivideAndRemainder<std::string, std::string, std::string, std::string>(
+            std::string,
+            std::string,
+            std::string,
+            std::string,
+            ContinuousRegister,
+            int,
+            bool,
+            const std::string&);
+    template std::shared_ptr<Module>
+        scalarUInt32DivideAndRemainder<std::string, int, int, std::string>(
+            std::string, int, int, std::string, ContinuousRegister, int, bool, const std::string&);
+    template std::shared_ptr<Module> scalarUInt32DivideAndRemainder<int, int, int, std::string>(
+        int, int, int, std::string, ContinuousRegister, int, bool, const std::string&);
 }
 
 void math_inst(nb::module_ m)
@@ -193,4 +272,290 @@ void math_inst(nb::module_ m)
           nb::arg("tmpVgprRes") = std::nullopt,
           nb::arg("tmpSgprRes") = std::nullopt,
           nb::arg("comment")    = "");
+
+    m.def("scalarStaticDivideAndRemainder",
+          nb::overload_cast<int, int, int, int, std::optional<rocisa::ContinuousRegister>, int>(
+              &rocisa::scalarStaticDivideAndRemainder<int, int, int>),
+          nb::arg("qReg"),
+          nb::arg("rReg"),
+          nb::arg("dReg"),
+          nb::arg("divisor"),
+          nb::arg("tmpSgprRes")  = std::nullopt,
+          nb::arg("doRemainder") = 1);
+    m.def("scalarStaticDivideAndRemainder",
+          nb::overload_cast<int,
+                            int,
+                            std::string,
+                            int,
+                            std::optional<rocisa::ContinuousRegister>,
+                            int>(&rocisa::scalarStaticDivideAndRemainder<int, int, std::string>),
+          nb::arg("qReg"),
+          nb::arg("rReg"),
+          nb::arg("dReg"),
+          nb::arg("divisor"),
+          nb::arg("tmpSgprRes")  = std::nullopt,
+          nb::arg("doRemainder") = 1);
+    m.def("scalarStaticDivideAndRemainder",
+          nb::overload_cast<int,
+                            std::string,
+                            int,
+                            int,
+                            std::optional<rocisa::ContinuousRegister>,
+                            int>(&rocisa::scalarStaticDivideAndRemainder<int, std::string, int>),
+          nb::arg("qReg"),
+          nb::arg("rReg"),
+          nb::arg("dReg"),
+          nb::arg("divisor"),
+          nb::arg("tmpSgprRes")  = std::nullopt,
+          nb::arg("doRemainder") = 1);
+    m.def("scalarStaticDivideAndRemainder",
+          nb::overload_cast<std::string,
+                            int,
+                            std::string,
+                            int,
+                            std::optional<rocisa::ContinuousRegister>,
+                            int>(
+              &rocisa::scalarStaticDivideAndRemainder<std::string, int, std::string>),
+          nb::arg("qReg"),
+          nb::arg("rReg"),
+          nb::arg("dReg"),
+          nb::arg("divisor"),
+          nb::arg("tmpSgprRes")  = std::nullopt,
+          nb::arg("doRemainder") = 1);
+    m.def("scalarStaticDivideAndRemainder",
+          nb::overload_cast<int,
+                            std::string,
+                            std::string,
+                            int,
+                            std::optional<rocisa::ContinuousRegister>,
+                            int>(
+              &rocisa::scalarStaticDivideAndRemainder<int, std::string, std::string>),
+          nb::arg("qReg"),
+          nb::arg("rReg"),
+          nb::arg("dReg"),
+          nb::arg("divisor"),
+          nb::arg("tmpSgprRes")  = std::nullopt,
+          nb::arg("doRemainder") = 1);
+    m.def("scalarStaticDivideAndRemainder",
+          nb::overload_cast<int,
+                            int,
+                            std::shared_ptr<rocisa::RegisterContainer>,
+                            int,
+                            std::optional<rocisa::ContinuousRegister>,
+                            int>(
+              &rocisa::scalarStaticDivideAndRemainder<int,
+                                                      int,
+                                                      std::shared_ptr<rocisa::RegisterContainer>>),
+          nb::arg("qReg"),
+          nb::arg("rReg"),
+          nb::arg("dReg"),
+          nb::arg("divisor"),
+          nb::arg("tmpSgprRes")  = std::nullopt,
+          nb::arg("doRemainder") = 1);
+    m.def("scalarStaticCeilDivide",
+          nb::overload_cast<std::shared_ptr<rocisa::RegisterContainer>,
+                            std::shared_ptr<rocisa::RegisterContainer>,
+                            int,
+                            std::optional<rocisa::ContinuousRegister>>(
+              &rocisa::scalarStaticCeilDivide<std::shared_ptr<rocisa::RegisterContainer>,
+                                              std::shared_ptr<rocisa::RegisterContainer>>),
+          nb::arg("qReg"),
+          nb::arg("dReg"),
+          nb::arg("divisor"),
+          nb::arg("tmpSgprRes") = std::nullopt);
+    m.def("scalarStaticRemainder",
+          nb::overload_cast<int,
+                            int,
+                            int,
+                            int,
+                            std::optional<rocisa::ContinuousRegister>,
+                            const std::string&>(&rocisa::scalarStaticRemainder<int, int, int>),
+          nb::arg("qReg"),
+          nb::arg("rReg"),
+          nb::arg("dReg"),
+          nb::arg("divisor"),
+          nb::arg("tmpSgprRes") = std::nullopt,
+          nb::arg("comment")    = "");
+    m.def("scalarUInt32DivideAndRemainder",
+          nb::overload_cast<int,
+                            int,
+                            int,
+                            int,
+                            rocisa::ContinuousRegister,
+                            int,
+                            bool,
+                            const std::string&>(
+              &rocisa::scalarUInt32DivideAndRemainder<int, int, int, int>),
+          nb::arg("qReg"),
+          nb::arg("dReg"),
+          nb::arg("divReg"),
+          nb::arg("rReg"),
+          nb::arg("tmpVgprRes"),
+          nb::arg("wavewidth"),
+          nb::arg("doRemainder") = true,
+          nb::arg("comment")     = "");
+    m.def("scalarUInt32DivideAndRemainder",
+          nb::overload_cast<int,
+                            int,
+                            std::string,
+                            int,
+                            rocisa::ContinuousRegister,
+                            int,
+                            bool,
+                            const std::string&>(
+              &rocisa::scalarUInt32DivideAndRemainder<int, int, std::string, int>),
+          nb::arg("qReg"),
+          nb::arg("dReg"),
+          nb::arg("divReg"),
+          nb::arg("rReg"),
+          nb::arg("tmpVgprRes"),
+          nb::arg("wavewidth"),
+          nb::arg("doRemainder") = true,
+          nb::arg("comment")     = "");
+    m.def("scalarUInt32DivideAndRemainder",
+          nb::overload_cast<int,
+                            std::string,
+                            int,
+                            int,
+                            rocisa::ContinuousRegister,
+                            int,
+                            bool,
+                            const std::string&>(
+              &rocisa::scalarUInt32DivideAndRemainder<int, std::string, int, int>),
+          nb::arg("qReg"),
+          nb::arg("dReg"),
+          nb::arg("divReg"),
+          nb::arg("rReg"),
+          nb::arg("tmpVgprRes"),
+          nb::arg("wavewidth"),
+          nb::arg("doRemainder") = true,
+          nb::arg("comment")     = "");
+    m.def("scalarUInt32DivideAndRemainder",
+          nb::overload_cast<std::string,
+                            std::string,
+                            int,
+                            int,
+                            rocisa::ContinuousRegister,
+                            int,
+                            bool,
+                            const std::string&>(
+              &rocisa::scalarUInt32DivideAndRemainder<std::string, std::string, int, int>),
+          nb::arg("qReg"),
+          nb::arg("dReg"),
+          nb::arg("divReg"),
+          nb::arg("rReg"),
+          nb::arg("tmpVgprRes"),
+          nb::arg("wavewidth"),
+          nb::arg("doRemainder") = true,
+          nb::arg("comment")     = "");
+    m.def("scalarUInt32DivideAndRemainder",
+          nb::overload_cast<int,
+                            std::string,
+                            std::string,
+                            int,
+                            rocisa::ContinuousRegister,
+                            int,
+                            bool,
+                            const std::string&>(
+              &rocisa::scalarUInt32DivideAndRemainder<int, std::string, std::string, int>),
+          nb::arg("qReg"),
+          nb::arg("dReg"),
+          nb::arg("divReg"),
+          nb::arg("rReg"),
+          nb::arg("tmpVgprRes"),
+          nb::arg("wavewidth"),
+          nb::arg("doRemainder") = true,
+          nb::arg("comment")     = "");
+    m.def("scalarUInt32DivideAndRemainder",
+          nb::overload_cast<std::string,
+                            std::string,
+                            std::string,
+                            int,
+                            rocisa::ContinuousRegister,
+                            int,
+                            bool,
+                            const std::string&>(
+              &rocisa::scalarUInt32DivideAndRemainder<std::string, std::string, std::string, int>),
+          nb::arg("qReg"),
+          nb::arg("dReg"),
+          nb::arg("divReg"),
+          nb::arg("rReg"),
+          nb::arg("tmpVgprRes"),
+          nb::arg("wavewidth"),
+          nb::arg("doRemainder") = true,
+          nb::arg("comment")     = "");
+    m.def("scalarUInt32DivideAndRemainder",
+          nb::overload_cast<std::string,
+                            std::string,
+                            int,
+                            std::string,
+                            rocisa::ContinuousRegister,
+                            int,
+                            bool,
+                            const std::string&>(
+              &rocisa::scalarUInt32DivideAndRemainder<std::string, std::string, int, std::string>),
+          nb::arg("qReg"),
+          nb::arg("dReg"),
+          nb::arg("divReg"),
+          nb::arg("rReg"),
+          nb::arg("tmpVgprRes"),
+          nb::arg("wavewidth"),
+          nb::arg("doRemainder") = true,
+          nb::arg("comment")     = "");
+    m.def(
+        "scalarUInt32DivideAndRemainder",
+        nb::overload_cast<std::string,
+                          std::string,
+                          std::string,
+                          std::string,
+                          rocisa::ContinuousRegister,
+                          int,
+                          bool,
+                          const std::string&>(
+            &rocisa::
+                scalarUInt32DivideAndRemainder<std::string, std::string, std::string, std::string>),
+        nb::arg("qReg"),
+        nb::arg("dReg"),
+        nb::arg("divReg"),
+        nb::arg("rReg"),
+        nb::arg("tmpVgprRes"),
+        nb::arg("wavewidth"),
+        nb::arg("doRemainder") = true,
+        nb::arg("comment")     = "");
+    m.def("scalarUInt32DivideAndRemainder",
+          nb::overload_cast<std::string,
+                            int,
+                            int,
+                            std::string,
+                            rocisa::ContinuousRegister,
+                            int,
+                            bool,
+                            const std::string&>(
+              &rocisa::scalarUInt32DivideAndRemainder<std::string, int, int, std::string>),
+          nb::arg("qReg"),
+          nb::arg("dReg"),
+          nb::arg("divReg"),
+          nb::arg("rReg"),
+          nb::arg("tmpVgprRes"),
+          nb::arg("wavewidth"),
+          nb::arg("doRemainder") = true,
+          nb::arg("comment")     = "");
+    m.def("scalarUInt32DivideAndRemainder",
+          nb::overload_cast<int,
+                            int,
+                            int,
+                            std::string,
+                            rocisa::ContinuousRegister,
+                            int,
+                            bool,
+                            const std::string&>(
+              &rocisa::scalarUInt32DivideAndRemainder<int, int, int, std::string>),
+          nb::arg("qReg"),
+          nb::arg("dReg"),
+          nb::arg("divReg"),
+          nb::arg("rReg"),
+          nb::arg("tmpVgprRes"),
+          nb::arg("wavewidth"),
+          nb::arg("doRemainder") = true,
+          nb::arg("comment")     = "");
 }
