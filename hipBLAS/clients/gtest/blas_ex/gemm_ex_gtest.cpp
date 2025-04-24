@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -49,14 +49,6 @@ namespace
                 // additional global filters applied first
                 if(!hipblas_client_global_filters(args))
                     return false;
-
-#ifndef HIPBLAS_V2
-                // cuBLAS backend doesn't support 64-bit gemm_ex with original interface (with hipblasDatatype
-                // instead of hipblasComputeType)
-                if(args.api == hipblas_client_api::C_64
-                   || args.api == hipblas_client_api::FORTRAN_64)
-                    return false;
-#endif
 
                 // type filters
                 return static_cast<bool>(FILTER<T...>{});

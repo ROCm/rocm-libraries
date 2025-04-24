@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Copyright (C) 2018-2023 Advanced Micro Devices, Inc. All rights reserved.
+"""Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
 
   Permission is hereby granted, free of charge, to any person obtaining a copy
   of this software and associated documentation files (the "Software"), to deal
@@ -114,9 +114,6 @@ Expand hipBLAS YAML test data file into binary Arguments records
                         default=[])
     parser.add_argument('-t', '--template',
                         type=argparse.FileType('r'))
-    parser.add_argument('--hipblas_v2',
-                        action='store_true',
-                        help="Uses HIPBLAS_V2 datatypes, ensure HIPBLAS_V2 is defined in your build when using this.")
     return parser.parse_args()
 
 
@@ -185,7 +182,7 @@ def get_datatypes(doc):
         for name, decl in declaration.items():
             if isinstance(decl, dict):
                 # Create derived class type based on bases and attr entries
-                decl_attr = decl.get('attr_v2') if args.get('hipblas_v2') else decl.get('attr')
+                decl_attr = decl.get('attr')
                 dt[name] = type(name,
                                 tuple([eval(t, dt)
                                        for t in decl.get('bases') or ()

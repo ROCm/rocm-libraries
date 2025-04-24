@@ -10,6 +10,13 @@ Deprecations by version
 
 This topic lists the deprecated hipBLAS API elements by release, from newest to oldest. 
 
+Removed in hipBLAS 3.0
+**********************
+``hipblasDatatype_t`` was replaced with ``hipDataType`` in hipBLAS 3.0. All functions which previously used ``hipblasDatatype_t`` now
+use ``hipDataType`` for every instance, except for as the ``compute_type`` in GEMM functions, in which ``hipblasComputeType_t`` is now used.
+
+``hipblasComplex`` and ``hipblasDoubleComplex`` were replaced with ``hipComplex`` and ``hipDoubleComplex`` in hipBLAS 3.0.
+
 Announced in hipBLAS 2.0
 ************************
 
@@ -29,7 +36,7 @@ hipblasComplex and hipblasDoubleComplex will be replaced by hipComplex and hipDo
 ===========================================================================================
 
 Use of these datatypes will give deprecation warnings telling you to compile with ``-DHIPBLAS_V2`` and to use HIP complex types
-instead. All functions which currently use ``hipblasComplex`` and ``hipblasDoubleComplex`` are therefore deprecated as well,
+instead. All functions which currently use ``hipblasComplex`` and ``hipblasDoubleComplex`` are therefore deprecated as well
 and will be replaced with functions which use ``hipComplex`` and ``hipDoubleComplex`` in their place.
 
 Note that there are no deprecation warnings for the hipBLAS Fortran API.
@@ -45,7 +52,7 @@ Removed in hipBLAS 2.0
 Legacy BLAS in-place trmm is removed 
 ====================================
 
-The legacay BLAS in-place ``hipblasXtrmm`` that calculates ``B <- alpha * op(A) * B`` is removed and replaced with the
+The legacy BLAS in-place ``hipblasXtrmm`` that calculates ``B <- alpha * op(A) * B`` is removed and replaced with the
 out-of-place ``hipblasXtrmm`` that calculates ``C <- alpha * op(A) * B``.
 
 The prototype for the removed legacy BLAS in-place functionality was
@@ -87,7 +94,7 @@ The prototype for the replacement in-place and out-of-place functionality is
 The legacy BLAS in-place functionality can be obtained with the new function if you set pointer ``C`` equal to pointer ``B`` and
 ``ldc`` equal to ``ldb``.
 
-The out-of-place functionality is from setting pointer ``B`` distinct from pointer ``C``.
+The out-of-place functionality is from setting pointer ``B`` so it is distinct from pointer ``C``.
 
 
 Announced in hipBLAS 1.0

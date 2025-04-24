@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -52,9 +52,9 @@ void testing_nrm2_strided_batched_ex_bad_arg(const Arguments& arg)
 
     hipblasStride stridex = N * incx;
 
-    hipblasDatatype_t xType         = arg.a_type;
-    hipblasDatatype_t resultType    = arg.b_type;
-    hipblasDatatype_t executionType = arg.compute_type;
+    hipDataType xType         = arg.a_type;
+    hipDataType resultType    = arg.b_type;
+    hipDataType executionType = arg.compute_type;
 
     hipblasLocalHandle handle(arg);
 
@@ -134,9 +134,9 @@ void testing_nrm2_strided_batched_ex(const Arguments& arg)
 
     hipblasStride stridex = N * incx * stride_scale;
 
-    hipblasDatatype_t xType         = arg.a_type;
-    hipblasDatatype_t resultType    = arg.b_type;
-    hipblasDatatype_t executionType = arg.compute_type;
+    hipDataType xType         = arg.a_type;
+    hipDataType resultType    = arg.b_type;
+    hipDataType executionType = arg.compute_type;
 
     hipblasLocalHandle handle(arg);
 

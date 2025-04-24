@@ -51,10 +51,10 @@ void testing_dot_ex_bad_arg(const Arguments& arg)
                                  ? (CONJ ? hipblasDotcEx_64Fortran : hipblasDotEx_64Fortran)
                                  : (CONJ ? hipblasDotcEx_64 : hipblasDotEx_64);
 
-    hipblasDatatype_t xType         = arg.a_type;
-    hipblasDatatype_t yType         = arg.b_type;
-    hipblasDatatype_t resultType    = arg.c_type;
-    hipblasDatatype_t executionType = arg.compute_type;
+    hipDataType xType         = arg.a_type;
+    hipDataType yType         = arg.b_type;
+    hipDataType resultType    = arg.c_type;
+    hipDataType executionType = arg.compute_type;
 
     for(auto pointer_mode : {HIPBLAS_POINTER_MODE_HOST, HIPBLAS_POINTER_MODE_DEVICE})
     {
@@ -149,10 +149,10 @@ void testing_dot_ex(const Arguments& arg)
     int64_t incx = arg.incx;
     int64_t incy = arg.incy;
 
-    hipblasDatatype_t xType         = arg.a_type;
-    hipblasDatatype_t yType         = arg.b_type;
-    hipblasDatatype_t resultType    = arg.c_type;
-    hipblasDatatype_t executionType = arg.compute_type;
+    hipDataType xType         = arg.a_type;
+    hipDataType yType         = arg.b_type;
+    hipDataType resultType    = arg.c_type;
+    hipDataType executionType = arg.compute_type;
 
     hipblasLocalHandle handle(arg);
 

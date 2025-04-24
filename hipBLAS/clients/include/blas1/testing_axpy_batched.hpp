@@ -61,7 +61,7 @@ void testing_axpy_batched_bad_arg(const Arguments& arg)
         device_batch_vector<T> dx(N, incx, batch_count);
         device_batch_vector<T> dy(N, incy, batch_count);
 
-        const Ts  h_alpha(1), h_zero(0);
+        const Ts  h_alpha{1}, h_zero{0};
         const Ts* alpha = &h_alpha;
         const Ts* zero  = &h_zero;
 

@@ -53,9 +53,9 @@ void testing_scal_strided_batched_ex_bad_arg(const Arguments& arg)
                                                 ? hipblasScalStridedBatchedEx_64Fortran
                                                 : hipblasScalStridedBatchedEx_64;
 
-    hipblasDatatype_t alphaType     = arg.a_type;
-    hipblasDatatype_t xType         = arg.b_type;
-    hipblasDatatype_t executionType = arg.compute_type;
+    hipDataType alphaType     = arg.a_type;
+    hipDataType xType         = arg.b_type;
+    hipDataType executionType = arg.compute_type;
 
     int64_t N           = 100;
     int64_t incx        = 1;
@@ -63,7 +63,7 @@ void testing_scal_strided_batched_ex_bad_arg(const Arguments& arg)
 
     hipblasStride stridex = N * incx;
 
-    Ts alpha = (Ts)0.6;
+    Ta alpha = (Ta)0.6;
 
     hipblasLocalHandle handle(arg);
 
@@ -154,9 +154,9 @@ void testing_scal_strided_batched_ex(const Arguments& arg)
 
     hipblasLocalHandle handle(arg);
 
-    hipblasDatatype_t alphaType     = arg.a_type;
-    hipblasDatatype_t xType         = arg.b_type;
-    hipblasDatatype_t executionType = arg.compute_type;
+    hipDataType alphaType     = arg.a_type;
+    hipDataType xType         = arg.b_type;
+    hipDataType executionType = arg.compute_type;
 
     // argument sanity check, quick return if input parameters are invalid before allocating invalid
     // memory

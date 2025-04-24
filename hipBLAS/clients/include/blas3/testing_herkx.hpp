@@ -67,8 +67,8 @@ void testing_herkx_bad_arg(const Arguments& arg)
 
     device_vector<T> d_alpha(1), d_zero(1);
     device_vector<U> d_beta(1), d_one(1);
-    const Ts         h_alpha(1), h_zero(0);
-    const U          h_beta(2), h_one(1);
+    const Ts         h_alpha{1}, h_zero{0};
+    const U          h_beta{2}, h_one{1};
 
     const Ts* alpha = &h_alpha;
     const U*  beta  = &h_beta;

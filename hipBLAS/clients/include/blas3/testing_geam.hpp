@@ -71,7 +71,7 @@ void testing_geam_bad_arg(const Arguments& arg)
     device_matrix<T> dC(M, N, ldc);
 
     device_vector<T> d_alpha(1), d_beta(1), d_zero(1);
-    const Ts         h_alpha(1), h_beta(2), h_zero(0);
+    const Ts         h_alpha{1}, h_beta{2}, h_zero{0};
 
     const Ts* alpha = &h_alpha;
     const Ts* beta  = &h_beta;

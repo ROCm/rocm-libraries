@@ -74,7 +74,7 @@ void testing_her2_strided_batched_bad_arg(const Arguments& arg)
 
         device_vector<T> d_alpha(1), d_zero(1);
 
-        const Ts  h_alpha(1), h_zero(0);
+        const Ts  h_alpha{1}, h_zero{0};
         const Ts* alpha = &h_alpha;
         const Ts* zero  = &h_zero;
 

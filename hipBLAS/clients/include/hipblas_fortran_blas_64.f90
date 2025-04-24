@@ -11981,14 +11981,14 @@ function hipblasAxpyEx_64Fortran(handle, n, alpha, alphaType, x, xType, incx, y,
     type(c_ptr), value :: handle
     integer(c_int64_t), value :: n
     type(c_ptr), value :: alpha
-    integer(kind(HIPBLAS_R_16F)), value :: alphaType
+    integer(kind(HIP_R_16F)), value :: alphaType
     type(c_ptr), value :: x
-    integer(kind(HIPBLAS_R_16F)), value :: xType
+    integer(kind(HIP_R_16F)), value :: xType
     integer(c_int64_t), value :: incx
     type(c_ptr), value :: y
-    integer(kind(HIPBLAS_R_16F)), value :: yType
+    integer(kind(HIP_R_16F)), value :: yType
     integer(c_int64_t), value :: incy
-    integer(kind(HIPBLAS_R_16F)), value :: executionType
+    integer(kind(HIP_R_16F)), value :: executionType
             hipblasAxpyEx_64Fortran = &
         hipblasAxpyEx_64(handle, n, alpha, alphaType, x, xType, incx, y, yType, incy, executionType)
     return
@@ -12003,15 +12003,15 @@ function hipblasAxpyBatchedEx_64Fortran(handle, n, alpha, alphaType, x, xType, i
     type(c_ptr), value :: handle
     integer(c_int64_t), value :: n
     type(c_ptr), value :: alpha
-    integer(kind(HIPBLAS_R_16F)), value :: alphaType
+    integer(kind(HIP_R_16F)), value :: alphaType
     type(c_ptr), value :: x
-    integer(kind(HIPBLAS_R_16F)), value :: xType
+    integer(kind(HIP_R_16F)), value :: xType
     integer(c_int64_t), value :: incx
     type(c_ptr), value :: y
-    integer(kind(HIPBLAS_R_16F)), value :: yType
+    integer(kind(HIP_R_16F)), value :: yType
     integer(c_int64_t), value :: incy
     integer(c_int64_t), value :: batch_count
-    integer(kind(HIPBLAS_R_16F)), value :: executionType
+    integer(kind(HIP_R_16F)), value :: executionType
             hipblasAxpyBatchedEx_64Fortran = &
         hipblasAxpyBatchedEx_64(handle, n, alpha, alphaType, x, xType, incx, y, yType, incy, batch_count, executionType)
     return
@@ -12027,17 +12027,17 @@ function hipblasAxpyStridedBatchedEx_64Fortran(handle, n, alpha, alphaType, x, x
     type(c_ptr), value :: handle
     integer(c_int64_t), value :: n
     type(c_ptr), value :: alpha
-    integer(kind(HIPBLAS_R_16F)), value :: alphaType
+    integer(kind(HIP_R_16F)), value :: alphaType
     type(c_ptr), value :: x
-    integer(kind(HIPBLAS_R_16F)), value :: xType
+    integer(kind(HIP_R_16F)), value :: xType
     integer(c_int64_t), value :: incx
     integer(c_int64_t), value :: stridex
     type(c_ptr), value :: y
-    integer(kind(HIPBLAS_R_16F)), value :: yType
+    integer(kind(HIP_R_16F)), value :: yType
     integer(c_int64_t), value :: incy
     integer(c_int64_t), value :: stridey
     integer(c_int64_t), value :: batch_count
-    integer(kind(HIPBLAS_R_16F)), value :: executionType
+    integer(kind(HIP_R_16F)), value :: executionType
             hipblasAxpyStridedBatchedEx_64Fortran = &
         hipblasAxpyStridedBatchedEx_64(handle, n, alpha, alphaType, x, xType, incx, stridex, &
                                     y, yType, incy, stridey, batch_count, executionType)
@@ -12055,14 +12055,14 @@ function hipblasDotEx_64Fortran(handle, n, x, xType, incx, y, yType, incy, resul
     type(c_ptr), value :: handle
     integer(c_int64_t), value :: n
     type(c_ptr), value :: x
-    integer(kind(HIPBLAS_R_16F)), value :: xType
+    integer(kind(HIP_R_16F)), value :: xType
     integer(c_int64_t), value :: incx
     type(c_ptr), value :: y
-    integer(kind(HIPBLAS_R_16F)), value :: yType
+    integer(kind(HIP_R_16F)), value :: yType
     integer(c_int64_t), value :: incy
     type(c_ptr), value :: result
-    integer(kind(HIPBLAS_R_16F)), value :: resultType
-    integer(kind(HIPBLAS_R_16F)), value :: executionType
+    integer(kind(HIP_R_16F)), value :: resultType
+    integer(kind(HIP_R_16F)), value :: executionType
             hipblasDotEx_64Fortran = &
         hipblasDotEx_64(handle, n, x, xType, incx, y, yType, incy, result, resultType, executionType)
     return
@@ -12078,14 +12078,14 @@ function hipblasDotcEx_64Fortran(handle, n, x, xType, incx, y, yType, incy, resu
     type(c_ptr), value :: handle
     integer(c_int64_t), value :: n
     type(c_ptr), value :: x
-    integer(kind(HIPBLAS_R_16F)), value :: xType
+    integer(kind(HIP_R_16F)), value :: xType
     integer(c_int64_t), value :: incx
     type(c_ptr), value :: y
-    integer(kind(HIPBLAS_R_16F)), value :: yType
+    integer(kind(HIP_R_16F)), value :: yType
     integer(c_int64_t), value :: incy
     type(c_ptr), value :: result
-    integer(kind(HIPBLAS_R_16F)), value :: resultType
-    integer(kind(HIPBLAS_R_16F)), value :: executionType
+    integer(kind(HIP_R_16F)), value :: resultType
+    integer(kind(HIP_R_16F)), value :: executionType
             hipblasDotcEx_64Fortran = &
         hipblasDotcEx_64(handle, n, x, xType, incx, y, yType, incy, result, resultType, executionType)
     return
@@ -12101,15 +12101,15 @@ function hipblasDotBatchedEx_64Fortran(handle, n, x, xType, incx, y, yType, incy
     type(c_ptr), value :: handle
     integer(c_int64_t), value :: n
     type(c_ptr), value :: x
-    integer(kind(HIPBLAS_R_16F)), value :: xType
+    integer(kind(HIP_R_16F)), value :: xType
     integer(c_int64_t), value :: incx
     type(c_ptr), value :: y
-    integer(kind(HIPBLAS_R_16F)), value :: yType
+    integer(kind(HIP_R_16F)), value :: yType
     integer(c_int64_t), value :: incy
     integer(c_int64_t), value :: batch_count
     type(c_ptr), value :: result
-    integer(kind(HIPBLAS_R_16F)), value :: resultType
-    integer(kind(HIPBLAS_R_16F)), value :: executionType
+    integer(kind(HIP_R_16F)), value :: resultType
+    integer(kind(HIP_R_16F)), value :: executionType
             hipblasDotBatchedEx_64Fortran = &
         hipblasDotBatchedEx_64(handle, n, x, xType, incx, y, yType, incy, batch_count, result, resultType, executionType)
     return
@@ -12125,15 +12125,15 @@ function hipblasDotcBatchedEx_64Fortran(handle, n, x, xType, incx, y, yType, inc
     type(c_ptr), value :: handle
     integer(c_int64_t), value :: n
     type(c_ptr), value :: x
-    integer(kind(HIPBLAS_R_16F)), value :: xType
+    integer(kind(HIP_R_16F)), value :: xType
     integer(c_int64_t), value :: incx
     type(c_ptr), value :: y
-    integer(kind(HIPBLAS_R_16F)), value :: yType
+    integer(kind(HIP_R_16F)), value :: yType
     integer(c_int64_t), value :: incy
     integer(c_int64_t), value :: batch_count
     type(c_ptr), value :: result
-    integer(kind(HIPBLAS_R_16F)), value :: resultType
-    integer(kind(HIPBLAS_R_16F)), value :: executionType
+    integer(kind(HIP_R_16F)), value :: resultType
+    integer(kind(HIP_R_16F)), value :: executionType
             hipblasDotcBatchedEx_64Fortran = &
         hipblasDotcBatchedEx_64(handle, n, x, xType, incx, y, yType, incy, batch_count, result, resultType, executionType)
     return
@@ -12149,17 +12149,17 @@ function hipblasDotStridedBatchedEx_64Fortran(handle, n, x, xType, incx, stridex
     type(c_ptr), value :: handle
     integer(c_int64_t), value :: n
     type(c_ptr), value :: x
-    integer(kind(HIPBLAS_R_16F)), value :: xType
+    integer(kind(HIP_R_16F)), value :: xType
     integer(c_int64_t), value :: incx
     integer(c_int64_t), value :: stridex
     type(c_ptr), value :: y
-    integer(kind(HIPBLAS_R_16F)), value :: yType
+    integer(kind(HIP_R_16F)), value :: yType
     integer(c_int64_t), value :: incy
     integer(c_int64_t), value :: stridey
     integer(c_int64_t), value :: batch_count
     type(c_ptr), value :: result
-    integer(kind(HIPBLAS_R_16F)), value :: resultType
-    integer(kind(HIPBLAS_R_16F)), value :: executionType
+    integer(kind(HIP_R_16F)), value :: resultType
+    integer(kind(HIP_R_16F)), value :: executionType
             hipblasDotStridedBatchedEx_64Fortran = &
         hipblasDotStridedBatchedEx_64(handle, n, x, xType, incx, stridex, &
                                     y, yType, incy, stridey, batch_count, result, resultType, executionType)
@@ -12176,17 +12176,17 @@ function hipblasDotcStridedBatchedEx_64Fortran(handle, n, x, xType, incx, stride
     type(c_ptr), value :: handle
     integer(c_int64_t), value :: n
     type(c_ptr), value :: x
-    integer(kind(HIPBLAS_R_16F)), value :: xType
+    integer(kind(HIP_R_16F)), value :: xType
     integer(c_int64_t), value :: incx
     integer(c_int64_t), value :: stridex
     type(c_ptr), value :: y
-    integer(kind(HIPBLAS_R_16F)), value :: yType
+    integer(kind(HIP_R_16F)), value :: yType
     integer(c_int64_t), value :: incy
     integer(c_int64_t), value :: stridey
     integer(c_int64_t), value :: batch_count
     type(c_ptr), value :: result
-    integer(kind(HIPBLAS_R_16F)), value :: resultType
-    integer(kind(HIPBLAS_R_16F)), value :: executionType
+    integer(kind(HIP_R_16F)), value :: resultType
+    integer(kind(HIP_R_16F)), value :: executionType
             hipblasDotcStridedBatchedEx_64Fortran = &
         hipblasDotcStridedBatchedEx_64(handle, n, x, xType, incx, stridex, &
                                     y, yType, incy, stridey, batch_count, result, resultType, executionType)
@@ -12203,11 +12203,11 @@ function hipblasNrm2Ex_64Fortran(handle, n, x, xType, incx, result, resultType, 
     type(c_ptr), value :: handle
     integer(c_int64_t), value :: n
     type(c_ptr), value :: x
-    integer(kind(HIPBLAS_R_16F)), value :: xType
+    integer(kind(HIP_R_16F)), value :: xType
     integer(c_int64_t), value :: incx
     type(c_ptr), value :: result
-    integer(kind(HIPBLAS_R_16F)), value :: resultType
-    integer(kind(HIPBLAS_R_16F)), value :: executionType
+    integer(kind(HIP_R_16F)), value :: resultType
+    integer(kind(HIP_R_16F)), value :: executionType
             hipblasNrm2Ex_64Fortran = &
         hipblasNrm2Ex_64(handle, n, x, xType, incx, result, resultType, executionType)
     return
@@ -12222,12 +12222,12 @@ function hipblasNrm2BatchedEx_64Fortran(handle, n, x, xType, incx, batch_count, 
     type(c_ptr), value :: handle
     integer(c_int64_t), value :: n
     type(c_ptr), value :: x
-    integer(kind(HIPBLAS_R_16F)), value :: xType
+    integer(kind(HIP_R_16F)), value :: xType
     integer(c_int64_t), value :: incx
     integer(c_int64_t), value :: batch_count
     type(c_ptr), value :: result
-    integer(kind(HIPBLAS_R_16F)), value :: resultType
-    integer(kind(HIPBLAS_R_16F)), value :: executionType
+    integer(kind(HIP_R_16F)), value :: resultType
+    integer(kind(HIP_R_16F)), value :: executionType
             hipblasNrm2BatchedEx_64Fortran = &
         hipblasNrm2BatchedEx_64(handle, n, x, xType, incx, batch_count, result, resultType, executionType)
     return
@@ -12243,13 +12243,13 @@ function hipblasNrm2StridedBatchedEx_64Fortran(handle, n, x, xType, incx, stride
     type(c_ptr), value :: handle
     integer(c_int64_t), value :: n
     type(c_ptr), value :: x
-    integer(kind(HIPBLAS_R_16F)), value :: xType
+    integer(kind(HIP_R_16F)), value :: xType
     integer(c_int64_t), value :: incx
     integer(c_int64_t), value :: stridex
     integer(c_int64_t), value :: batch_count
     type(c_ptr), value :: result
-    integer(kind(HIPBLAS_R_16F)), value :: resultType
-    integer(kind(HIPBLAS_R_16F)), value :: executionType
+    integer(kind(HIP_R_16F)), value :: resultType
+    integer(kind(HIP_R_16F)), value :: executionType
             hipblasNrm2StridedBatchedEx_64Fortran = &
         hipblasNrm2StridedBatchedEx_64(handle, n, x, xType, incx, stridex, &
                                     batch_count, result, resultType, executionType)
@@ -12267,15 +12267,15 @@ function hipblasRotEx_64Fortran(handle, n, x, xType, incx, y, yType, incy, c, s,
     type(c_ptr), value :: handle
     integer(c_int64_t), value :: n
     type(c_ptr), value :: x
-    integer(kind(HIPBLAS_R_16F)), value :: xType
+    integer(kind(HIP_R_16F)), value :: xType
     integer(c_int64_t), value :: incx
     type(c_ptr), value :: y
-    integer(kind(HIPBLAS_R_16F)), value :: yType
+    integer(kind(HIP_R_16F)), value :: yType
     integer(c_int64_t), value :: incy
     type(c_ptr), value :: c
     type(c_ptr), value :: s
-    integer(kind(HIPBLAS_R_16F)), value :: csType
-    integer(kind(HIPBLAS_R_16F)), value :: executionType
+    integer(kind(HIP_R_16F)), value :: csType
+    integer(kind(HIP_R_16F)), value :: executionType
             hipblasRotEx_64Fortran = &
         hipblasRotEx_64(handle, n, x, xType, incx, y, yType, incy, c, s, csType, executionType)
     return
@@ -12291,16 +12291,16 @@ function hipblasRotBatchedEx_64Fortran(handle, n, x, xType, incx, y, yType, incy
     type(c_ptr), value :: handle
     integer(c_int64_t), value :: n
     type(c_ptr), value :: x
-    integer(kind(HIPBLAS_R_16F)), value :: xType
+    integer(kind(HIP_R_16F)), value :: xType
     integer(c_int64_t), value :: incx
     type(c_ptr), value :: y
-    integer(kind(HIPBLAS_R_16F)), value :: yType
+    integer(kind(HIP_R_16F)), value :: yType
     integer(c_int64_t), value :: incy
     type(c_ptr), value :: c
     type(c_ptr), value :: s
-    integer(kind(HIPBLAS_R_16F)), value :: csType
+    integer(kind(HIP_R_16F)), value :: csType
     integer(c_int64_t), value :: batch_count
-    integer(kind(HIPBLAS_R_16F)), value :: executionType
+    integer(kind(HIP_R_16F)), value :: executionType
             hipblasRotBatchedEx_64Fortran = &
         hipblasRotBatchedEx_64(handle, n, x, xType, incx, y, yType, incy, c, s, csType, batch_count, executionType)
     return
@@ -12316,18 +12316,18 @@ function hipblasRotStridedBatchedEx_64Fortran(handle, n, x, xType, incx, stridex
     type(c_ptr), value :: handle
     integer(c_int64_t), value :: n
     type(c_ptr), value :: x
-    integer(kind(HIPBLAS_R_16F)), value :: xType
+    integer(kind(HIP_R_16F)), value :: xType
     integer(c_int64_t), value :: incx
     integer(c_int64_t), value :: stridex
     type(c_ptr), value :: y
-    integer(kind(HIPBLAS_R_16F)), value :: yType
+    integer(kind(HIP_R_16F)), value :: yType
     integer(c_int64_t), value :: incy
     integer(c_int64_t), value :: stridey
     type(c_ptr), value :: c
     type(c_ptr), value :: s
-    integer(kind(HIPBLAS_R_16F)), value :: csType
+    integer(kind(HIP_R_16F)), value :: csType
     integer(c_int64_t), value :: batch_count
-    integer(kind(HIPBLAS_R_16F)), value :: executionType
+    integer(kind(HIP_R_16F)), value :: executionType
             hipblasRotStridedBatchedEx_64Fortran = &
         hipblasRotStridedBatchedEx_64(handle, n, x, xType, incx, stridex, &
                                     y, yType, incy, stridey, c, s, csType, batch_count, executionType)
@@ -12344,11 +12344,11 @@ function hipblasScalEx_64Fortran(handle, n, alpha, alphaType, x, xType, incx, ex
     type(c_ptr), value :: handle
     integer(c_int64_t), value :: n
     type(c_ptr), value :: alpha
-    integer(kind(HIPBLAS_R_16F)), value :: alphaType
+    integer(kind(HIP_R_16F)), value :: alphaType
     type(c_ptr), value :: x
-    integer(kind(HIPBLAS_R_16F)), value :: xType
+    integer(kind(HIP_R_16F)), value :: xType
     integer(c_int64_t), value :: incx
-    integer(kind(HIPBLAS_R_16F)), value :: executionType
+    integer(kind(HIP_R_16F)), value :: executionType
             hipblasScalEx_64Fortran = &
         hipblasScalEx_64(handle, n, alpha, alphaType, x, xType, incx, executionType)
     return
@@ -12363,12 +12363,12 @@ function hipblasScalBatchedEx_64Fortran(handle, n, alpha, alphaType, x, xType, i
     type(c_ptr), value :: handle
     integer(c_int64_t), value :: n
     type(c_ptr), value :: alpha
-    integer(kind(HIPBLAS_R_16F)), value :: alphaType
+    integer(kind(HIP_R_16F)), value :: alphaType
     type(c_ptr), value :: x
-    integer(kind(HIPBLAS_R_16F)), value :: xType
+    integer(kind(HIP_R_16F)), value :: xType
     integer(c_int64_t), value :: incx
     integer(c_int64_t), value :: batch_count
-    integer(kind(HIPBLAS_R_16F)), value :: executionType
+    integer(kind(HIP_R_16F)), value :: executionType
             hipblasScalBatchedEx_64Fortran = &
         hipblasScalBatchedEx_64(handle, n, alpha, alphaType, x, xType, incx, batch_count, executionType)
     return
@@ -12384,13 +12384,13 @@ function hipblasScalStridedBatchedEx_64Fortran(handle, n, alpha, alphaType, x, x
     type(c_ptr), value :: handle
     integer(c_int64_t), value :: n
     type(c_ptr), value :: alpha
-    integer(kind(HIPBLAS_R_16F)), value :: alphaType
+    integer(kind(HIP_R_16F)), value :: alphaType
     type(c_ptr), value :: x
-    integer(kind(HIPBLAS_R_16F)), value :: xType
+    integer(kind(HIP_R_16F)), value :: xType
     integer(c_int64_t), value :: incx
     integer(c_int64_t), value :: stridex
     integer(c_int64_t), value :: batch_count
-    integer(kind(HIPBLAS_R_16F)), value :: executionType
+    integer(kind(HIP_R_16F)), value :: executionType
             hipblasScalStridedBatchedEx_64Fortran = &
         hipblasScalStridedBatchedEx_64(handle, n, alpha, alphaType, x, xType, incx, stridex, &
                                     batch_count, executionType)
@@ -12414,16 +12414,16 @@ function hipblasGemmEx_64Fortran(handle, transA, transB, m, n, k, alpha, a, a_ty
     integer(c_int64_t), value :: k
     type(c_ptr), value :: alpha
     type(c_ptr), value :: a
-    integer(kind(HIPBLAS_R_16F)), value :: a_type
+    integer(kind(HIP_R_16F)), value :: a_type
     integer(c_int64_t), value :: lda
     type(c_ptr), value :: b
-    integer(kind(HIPBLAS_R_16F)), value :: b_type
+    integer(kind(HIP_R_16F)), value :: b_type
     integer(c_int64_t), value :: ldb
     type(c_ptr), value :: beta
     type(c_ptr), value :: c
-    integer(kind(HIPBLAS_R_16F)), value :: c_type
+    integer(kind(HIP_R_16F)), value :: c_type
     integer(c_int64_t), value :: ldc
-    integer(kind(HIPBLAS_R_16F)), value :: compute_type
+    integer(kind(HIPBLAS_COMPUTE_16F)), value :: compute_type
     integer(kind(HIPBLAS_GEMM_DEFAULT)), value :: algo
             hipblasGemmEx_64Fortran = &
         hipblasGemmEx_64(handle, transA, transB, m, n, k, alpha, &
@@ -12447,17 +12447,17 @@ function hipblasGemmBatchedEx_64Fortran(handle, transA, transB, m, n, k, alpha, 
     integer(c_int64_t), value :: k
     type(c_ptr), value :: alpha
     type(c_ptr), value :: a
-    integer(kind(HIPBLAS_R_16F)), value :: a_type
+    integer(kind(HIP_R_16F)), value :: a_type
     integer(c_int64_t), value :: lda
     type(c_ptr), value :: b
-    integer(kind(HIPBLAS_R_16F)), value :: b_type
+    integer(kind(HIP_R_16F)), value :: b_type
     integer(c_int64_t), value :: ldb
     type(c_ptr), value :: beta
     type(c_ptr), value :: c
-    integer(kind(HIPBLAS_R_16F)), value :: c_type
+    integer(kind(HIP_R_16F)), value :: c_type
     integer(c_int64_t), value :: ldc
     integer(c_int64_t), value :: batch_count
-    integer(kind(HIPBLAS_R_16F)), value :: compute_type
+    integer(kind(HIPBLAS_COMPUTE_16F)), value :: compute_type
     integer(kind(HIPBLAS_GEMM_DEFAULT)), value :: algo
             hipblasGemmBatchedEx_64Fortran = &
         hipblasGemmBatchedEx_64(handle, transA, transB, m, n, k, alpha, &
@@ -12481,20 +12481,20 @@ function hipblasGemmStridedBatchedEx_64Fortran(handle, transA, transB, m, n, k, 
     integer(c_int64_t), value :: k
     type(c_ptr), value :: alpha
     type(c_ptr), value :: a
-    integer(kind(HIPBLAS_R_16F)), value :: a_type
+    integer(kind(HIP_R_16F)), value :: a_type
     integer(c_int64_t), value :: lda
     integer(c_int64_t), value :: stride_a
     type(c_ptr), value :: b
-    integer(kind(HIPBLAS_R_16F)), value :: b_type
+    integer(kind(HIP_R_16F)), value :: b_type
     integer(c_int64_t), value :: ldb
     integer(c_int64_t), value :: stride_b
     type(c_ptr), value :: beta
     type(c_ptr), value :: c
-    integer(kind(HIPBLAS_R_16F)), value :: c_type
+    integer(kind(HIP_R_16F)), value :: c_type
     integer(c_int64_t), value :: ldc
     integer(c_int64_t), value :: stride_c
     integer(c_int64_t), value :: batch_count
-    integer(kind(HIPBLAS_R_16F)), value :: compute_type
+    integer(kind(HIPBLAS_COMPUTE_16F)), value :: compute_type
     integer(kind(HIPBLAS_GEMM_DEFAULT)), value :: algo
             hipblasGemmStridedBatchedEx_64Fortran = &
         hipblasGemmStridedBatchedEx_64(handle, transA, transB, m, n, k, alpha, &
@@ -12518,16 +12518,16 @@ function hipblasGemmExWithFlags_64Fortran(handle, transA, transB, m, n, k, alpha
     integer(c_int64_t), value :: k
     type(c_ptr), value :: alpha
     type(c_ptr), value :: a
-    integer(kind(HIPBLAS_R_16F)), value :: a_type
+    integer(kind(HIP_R_16F)), value :: a_type
     integer(c_int64_t), value :: lda
     type(c_ptr), value :: b
-    integer(kind(HIPBLAS_R_16F)), value :: b_type
+    integer(kind(HIP_R_16F)), value :: b_type
     integer(c_int64_t), value :: ldb
     type(c_ptr), value :: beta
     type(c_ptr), value :: c
-    integer(kind(HIPBLAS_R_16F)), value :: c_type
+    integer(kind(HIP_R_16F)), value :: c_type
     integer(c_int64_t), value :: ldc
-    integer(kind(HIPBLAS_R_16F)), value :: compute_type
+    integer(kind(HIPBLAS_COMPUTE_16F)), value :: compute_type
     integer(kind(HIPBLAS_GEMM_DEFAULT)), value :: algo
     integer(kind(HIPBLAS_GEMM_FLAGS_NONE)), value :: flags
             hipblasGemmExWithFlags_64Fortran = &
@@ -12552,17 +12552,17 @@ function hipblasGemmBatchedExWithFlags_64Fortran(handle, transA, transB, m, n, k
     integer(c_int64_t), value :: k
     type(c_ptr), value :: alpha
     type(c_ptr), value :: a
-    integer(kind(HIPBLAS_R_16F)), value :: a_type
+    integer(kind(HIP_R_16F)), value :: a_type
     integer(c_int64_t), value :: lda
     type(c_ptr), value :: b
-    integer(kind(HIPBLAS_R_16F)), value :: b_type
+    integer(kind(HIP_R_16F)), value :: b_type
     integer(c_int64_t), value :: ldb
     type(c_ptr), value :: beta
     type(c_ptr), value :: c
-    integer(kind(HIPBLAS_R_16F)), value :: c_type
+    integer(kind(HIP_R_16F)), value :: c_type
     integer(c_int64_t), value :: ldc
     integer(c_int64_t), value :: batch_count
-    integer(kind(HIPBLAS_R_16F)), value :: compute_type
+    integer(kind(HIPBLAS_COMPUTE_16F)), value :: compute_type
     integer(kind(HIPBLAS_GEMM_DEFAULT)), value :: algo
     integer(kind(HIPBLAS_GEMM_FLAGS_NONE)), value :: flags
             hipblasGemmBatchedExWithFlags_64Fortran = &
@@ -12587,20 +12587,20 @@ function hipblasGemmStridedBatchedExWithFlags_64Fortran(handle, transA, transB, 
     integer(c_int64_t), value :: k
     type(c_ptr), value :: alpha
     type(c_ptr), value :: a
-    integer(kind(HIPBLAS_R_16F)), value :: a_type
+    integer(kind(HIP_R_16F)), value :: a_type
     integer(c_int64_t), value :: lda
     integer(c_int64_t), value :: stride_a
     type(c_ptr), value :: b
-    integer(kind(HIPBLAS_R_16F)), value :: b_type
+    integer(kind(HIP_R_16F)), value :: b_type
     integer(c_int64_t), value :: ldb
     integer(c_int64_t), value :: stride_b
     type(c_ptr), value :: beta
     type(c_ptr), value :: c
-    integer(kind(HIPBLAS_R_16F)), value :: c_type
+    integer(kind(HIP_R_16F)), value :: c_type
     integer(c_int64_t), value :: ldc
     integer(c_int64_t), value :: stride_c
     integer(c_int64_t), value :: batch_count
-    integer(kind(HIPBLAS_R_16F)), value :: compute_type
+    integer(kind(HIPBLAS_COMPUTE_16F)), value :: compute_type
     integer(kind(HIPBLAS_GEMM_DEFAULT)), value :: algo
     integer(kind(HIPBLAS_GEMM_FLAGS_NONE)), value :: flags
             hipblasGemmStridedBatchedExWithFlags_64Fortran = &

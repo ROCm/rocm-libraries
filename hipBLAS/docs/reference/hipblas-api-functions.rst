@@ -90,31 +90,6 @@ The functionality of the ILP64 interfaces depends on the backend being used,
 see the :doc:`rocBLAS <rocblas:index>` or NVIDIA CUDA cuBLAS documentation for more
 information about support for ILP64 interfaces.
 
-.. _HIPBLASV2 DEP:
-
-HIPBLAS_V2 and deprecations
-===========================
-
-As of hipBLAS version 2.0.0, ``hipblasDatatype_t`` is deprecated, along with all functions which use this data type.
-In a future release, all instances of ``hipblasDatatype_t``
-will be replaced by ``hipDataType``. See the :any:`hipblasGemmEx` documentation for information about a small exception
-in which ``hipblasComputeType_t`` replaces ``hipblasDatatype_t`` for the
-``computeType`` parameter.
-
-``hipblasComplex`` and ``hipblasDoubleComplex`` are also deprecated. In a future release,
-all instances of these data types will be replaced with their HIP counterparts
-``hipComplex`` and ``hipDoubleComplex``.
-
-While ``hipblasDatatype_t``, ``hipblasComplex``, and ``hipblasDoubleComplex`` are deprecated,
-users can use the compiler define or inline ``#define HIPBLAS_V2`` before including the header
-file ``<hipblas.h>`` to access the updated API. In a future release, this define will no longer
-be needed and the deprecated functions will be removed, leaving only the updated interface.
-
-To review the new interfaces that are using ``hipDataType``,
-refer to the documentation for the following functions: ``hipblasTrsmEx``, ``hipblasGemmEx``,
-``hipblasAxpyEx``, ``hipblasDot(c)Ex``, ``hipblasNrm2Ex``, ``hipblasRotEx``, ``hipblasScalEx``,
-and all batched and strided-batched variants.
-
 The bfloat 16 data type
 =======================
 
@@ -135,31 +110,7 @@ using ``hip_bfloat16``, define ``HIPBLAS_USE_HIP_BFLOAT16`` before including the
 Complex data types
 ==================
 
-hipBLAS defines ``hipblasComplex`` and ``hipblasDoubleComplex`` structs.
-These types contain ``x`` and ``y`` components and have an identical memory layout to ``std::complex``
-for float and double precision.
-
-For simplified usage with Hipified code, there is an option to interpret the API
-as using ``hipComplex`` and ``hipDoubleComplex``
-types (for example, ``typedef hipComplex hipblasComplex``). This is provided for users who want
-to avoid casting when using the HIP complex types in their code.
-Because the memory layout is consistent across all three types, it is safe to
-cast arguments to API calls between the 3 types ``hipComplex``,
-``std::complex<float>``, and ``hipblasComplex``, as well as for the double-precision
-variants.
-
-To expose an API that uses the HIP-defined complex types,
-use a compiler define or inline ``#define ROCM_MATHLIBS_API_USE_HIP_COMPLEX``
-before including the header file ``<hipblas.h>``. The
-API is therefore compatible with both forms, but recompilation is required
-to avoid casting if switching to passing in the HIP complex types.
-
-.. note::
-
-    ``hipblasComplex``, ``hipblasDoubleComplex``, and the use of ``ROCM_MATHLIBS_API_USE_HIP_COMPLEX``
-    are now deprecated. The API will provide interfaces
-    that only use ``hipComplex`` and ``hipDoubleComplex`` in the future.
-    For more information, see :ref:`HIPBLASV2 DEP`.
+hipBLAS uses the HIP types ``hipComplex`` and ``hipDoubleComplex`` in its API.
 
 Atomic operations
 =================
@@ -248,10 +199,6 @@ hipblasDiagType_t
 hipblasSideMode_t
 -----------------
 .. doxygenenum:: hipblasSideMode_t
-
-hipblasDatatype_t
-------------------
-.. doxygenenum:: hipblasDatatype_t
 
 hipblasComputeType_t
 --------------------

@@ -29,7 +29,6 @@
 #include <stdlib.h>
 #include <vector>
 
-#define ROCM_MATHLIBS_API_USE_HIP_COMPLEX
 #include <hipblas/hipblas.h>
 
 #ifndef CHECK_HIP_ERROR

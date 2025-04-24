@@ -265,7 +265,7 @@ void run_function(const func_map& map, const Arguments& arg, const std::string& 
     auto match = map.find(arg.function);
     if(match == map.end())
         throw std::invalid_argument("Invalid combination --function "s + arg.function
-                                    + " --a_type "s + hipblas_datatype2string(arg.a_type) + msg);
+                                    + " --a_type "s + hip_datatype2string(arg.a_type) + msg);
     match->second(arg);
 }
 

@@ -47,7 +47,7 @@ void testing_scal_bad_arg(const Arguments& arg)
 
     int64_t N     = 100;
     int64_t incx  = 1;
-    Ts      alpha = (Ts)0.6;
+    U       alpha = (U)0.6;
 
     hipblasLocalHandle handle(arg);
 

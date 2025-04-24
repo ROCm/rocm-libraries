@@ -58,7 +58,7 @@ void testing_axpy_bad_arg(const Arguments& arg)
         device_vector<T> dx(N, incx);
         device_vector<T> dy(N, incy);
 
-        const Ts  h_alpha(1), h_zero(0);
+        const Ts  h_alpha{1}, h_zero{0};
         const Ts* alpha = &h_alpha;
         const Ts* zero  = &h_zero;
 

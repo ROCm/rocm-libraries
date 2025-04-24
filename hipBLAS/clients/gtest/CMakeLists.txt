@@ -114,25 +114,18 @@ set( hipblas_test_common
   ../common/hipblas_arguments.cpp
   ../common/hipblas_parse_data.cpp
   ../common/hipblas_datatype2string.cpp
-  ../common/hipblas_template_specialization.cpp
   ../common/host_alloc.cpp
   ${BLIS_CPP}
 )
 
 add_executable( hipblas-test ${hipblas_f90_source} ${hipblas_test_source} ${hipblas_solver_test_source} ${hipblas_test_common} )
-add_executable( hipblas_v2-test ${hipblas_f90_source} ${hipblas_test_source} ${hipblas_solver_test_source} ${hipblas_test_common} )
 
 target_include_directories( hipblas-test
   PRIVATE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>
 )
-target_include_directories( hipblas_v2-test
-  PRIVATE
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>
-)
 
 target_compile_definitions( hipblas-test PRIVATE GOOGLE_TEST ${BLIS_DEFINES} )
-target_compile_definitions( hipblas_v2-test PRIVATE GOOGLE_TEST ${BLIS_DEFINES} )
 
 # External header includes included as SYSTEM files
 target_include_directories( hipblas-test
@@ -144,48 +137,30 @@ target_include_directories( hipblas-test
     $<BUILD_INTERFACE:${FLAME_INCLUDE_DIR}>
     ${ROCM_PATH}/include
 )
-target_include_directories( hipblas_v2-test
-  SYSTEM PRIVATE
-    $<BUILD_INTERFACE:${HIP_INCLUDE_DIRS}>
-    $<BUILD_INTERFACE:${CBLAS_INCLUDE_DIRS}>
-    $<BUILD_INTERFACE:${BLAS_INCLUDE_DIR}>
-    $<BUILD_INTERFACE:${BLIS_INCLUDE_DIR}>
-    $<BUILD_INTERFACE:${FLAME_INCLUDE_DIR}>
-    ${ROCM_PATH}/include
-)
 
 target_link_libraries( hipblas-test PRIVATE roc::hipblas GTest::gtest GTest::gtest_main )
-target_link_libraries( hipblas_v2-test PRIVATE roc::hipblas GTest::gtest GTest::gtest_main )
 
 if (NOT WIN32)
     target_link_libraries( hipblas-test PRIVATE hipblas_fortran_client )
-    target_link_libraries( hipblas_v2-test PRIVATE hipblas_fortran_client )
 endif()
 
 # need mf16c flag for float->half convertion
 target_compile_options( hipblas-test PRIVATE -mf16c ) # -Wno-deprecated-declarations )
-target_compile_options( hipblas_v2-test PRIVATE -mf16c ) # -Wno-deprecated-declarations )
 
 target_compile_options(hipblas-test PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${COMMON_CXX_OPTIONS}>)
-target_compile_options(hipblas_v2-test PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${COMMON_CXX_OPTIONS}>)
 
 target_compile_definitions( hipblas-test PRIVATE ${COMMON_DEFINES} )
-target_compile_definitions( hipblas_v2-test PRIVATE ${COMMON_DEFINES} HIPBLAS_V2 )
 
 target_link_libraries( hipblas-test PRIVATE ${BLAS_LIBRARY} ${COMMON_LINK_LIBS} )
-target_link_libraries( hipblas_v2-test PRIVATE ${BLAS_LIBRARY} ${COMMON_LINK_LIBS} )
 if (NOT WIN32)
     target_link_libraries( hipblas-test PRIVATE stdc++fs )
-    target_link_libraries( hipblas_v2-test PRIVATE stdc++fs )
 endif()
 
 if(HIP_PLATFORM STREQUAL amd)
   target_link_libraries( hipblas-test PRIVATE hip::host )
-  target_link_libraries( hipblas_v2-test PRIVATE hip::host )
 
   if( CUSTOM_TARGET )
     target_link_libraries( hipblas-test PRIVATE hip::${CUSTOM_TARGET} )
-    target_link_libraries( hipblas_v2-test PRIVATE hip::${CUSTOM_TARGET} )
   endif( )
 
 else( )
@@ -193,13 +168,8 @@ else( )
     PRIVATE
       $<BUILD_INTERFACE:${CUDA_INCLUDE_DIRS}>
   )
-  target_include_directories( hipblas_v2-test
-    PRIVATE
-      $<BUILD_INTERFACE:${CUDA_INCLUDE_DIRS}>
-  )
 
   target_link_libraries( hipblas-test PRIVATE ${CUDA_LIBRARIES} )
-  target_link_libraries( hipblas_v2-test PRIVATE ${CUDA_LIBRARIES} )
 endif( )
 
 if (WIN32)
@@ -233,17 +203,8 @@ set_target_properties( hipblas-test PROPERTIES
     IMPORT_SUFFIX ".lib"
     LINKER_LANGUAGE CXX
     RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging" )
-  set_target_properties( hipblas_v2-test PROPERTIES
-    CXX_STANDARD 17
-    CXX_STANDARED_REQUIRED ON
-    CXX_EXTENSIONS OFF
-    IMPORT_PREFIX ""
-    IMPORT_SUFFIX ".lib"
-    LINKER_LANGUAGE CXX
-    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging" )
 
 set( HIPBLAS_TEST_DATA "${PROJECT_BINARY_DIR}/staging/hipblas_gtest.data")
-set( HIPBLAS_V2_TEST_DATA "${PROJECT_BINARY_DIR}/staging/hipblas_v2_gtest.data")
 
 set( HIPBLAS_AUX_YAML_DATA auxil/set_get_matrix_vector_gtest.yaml auxil/set_get_mode_gtest.yaml )
 
@@ -277,18 +238,9 @@ add_custom_command( OUTPUT "${HIPBLAS_TEST_DATA}"
                     DEPENDS ../common/hipblas_gentest.py ../include/hipblas_common.yaml "${HIPBLAS_AUX_YAML_DATA}" "${HIPBLAS_L1_YAML_DATA}" "${HIPBLAS_L2_YAML_DATA}" "${HIPBLAS_L3_YAML_DATA}" "${HIPBLAS_EX_YAML_DATA}" "${HIPBLAS_SOLVER_YAML_DATA}" hipblas_gtest.yaml
                     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" )
 
-add_custom_command( OUTPUT "${HIPBLAS_V2_TEST_DATA}"
-                    COMMAND ${python} ../common/hipblas_gentest.py -I ../include hipblas_gtest.yaml -o "${HIPBLAS_V2_TEST_DATA}" --hipblas_v2
-                    DEPENDS ../common/hipblas_gentest.py ../include/hipblas_common.yaml "${HIPBLAS_AUX_YAML_DATA}" "${HIPBLAS_L1_YAML_DATA}" "${HIPBLAS_L2_YAML_DATA}" "${HIPBLAS_L3_YAML_DATA}" "${HIPBLAS_EX_YAML_DATA}" "${HIPBLAS_SOLVER_YAML_DATA}" hipblas_gtest.yaml
-                    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" )
-
 add_custom_target( hipblas-test-data DEPENDS "${HIPBLAS_TEST_DATA}" )
-add_custom_target( hipblas_v2-test-data DEPENDS "${HIPBLAS_V2_TEST_DATA}" )
 
 add_dependencies( hipblas-test hipblas-test-data hipblas-clients-common )
-add_dependencies( hipblas_v2-test hipblas_v2-test-data hipblas-clients-common )
 
 rocm_install(TARGETS hipblas-test COMPONENT tests)
-rocm_install(TARGETS hipblas_v2-test COMPONENT tests)
 rocm_install(FILES ${HIPBLAS_TEST_DATA} DESTINATION "${CMAKE_INSTALL_BINDIR}" COMPONENT tests)
-rocm_install(FILES ${HIPBLAS_V2_TEST_DATA} DESTINATION "${CMAKE_INSTALL_BINDIR}" COMPONENT tests)

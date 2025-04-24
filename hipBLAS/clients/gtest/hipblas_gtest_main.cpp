@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -324,11 +324,7 @@ int main(int argc, char** argv)
 
     hipblas_print_usage_warning();
 
-#ifdef HIPBLAS_V2
-    bool datafile = hipblas_parse_data(argc, argv, hipblas_exepath() + "hipblas_v2_gtest.data");
-#else
     bool datafile = hipblas_parse_data(argc, argv, hipblas_exepath() + "hipblas_gtest.data");
-#endif
 
     ::testing::InitGoogleTest(&argc, argv);
 

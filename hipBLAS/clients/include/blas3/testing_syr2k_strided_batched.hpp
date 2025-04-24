@@ -82,7 +82,9 @@ void testing_syr2k_strided_batched_bad_arg(const Arguments& arg)
     device_strided_batch_matrix<T> dC(N, N, ldc, stride_C, batch_count);
 
     device_vector<T> d_alpha(1), d_zero(1), d_beta(1), d_one(1);
-    const Ts         h_alpha(1), h_zero(0), h_beta(2), h_one(1);
+    Ts               h_alpha{1}, h_zero{0}, h_beta{2}, h_one{1};
+    if constexpr(is_complex<T>)
+        h_one = {1, 0};
 
     const Ts* alpha = &h_alpha;
     const Ts* beta  = &h_beta;

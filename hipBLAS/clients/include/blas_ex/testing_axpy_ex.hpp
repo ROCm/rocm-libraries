@@ -49,10 +49,10 @@ void testing_axpy_ex_bad_arg(const Arguments& arg)
         hipblasLocalHandle handle(arg);
         CHECK_HIPBLAS_ERROR(hipblasSetPointerMode(handle, pointer_mode));
 
-        hipblasDatatype_t alphaType     = arg.a_type;
-        hipblasDatatype_t xType         = arg.b_type;
-        hipblasDatatype_t yType         = arg.c_type;
-        hipblasDatatype_t executionType = arg.compute_type;
+        hipDataType alphaType     = arg.a_type;
+        hipDataType xType         = arg.b_type;
+        hipDataType yType         = arg.c_type;
+        hipDataType executionType = arg.compute_type;
 
         int64_t N    = 100;
         int64_t incx = 1;
@@ -62,7 +62,7 @@ void testing_axpy_ex_bad_arg(const Arguments& arg)
         device_vector<Tx> dx(N, incx);
         device_vector<Ty> dy(N, incy);
 
-        const Ts  h_alpha(1), h_zero(0);
+        const Ts  h_alpha{1}, h_zero{0};
         const Ts* alpha = &h_alpha;
         const Ts* zero  = &h_zero;
 
@@ -177,10 +177,10 @@ void testing_axpy_ex(const Arguments& arg)
 
     hipblasLocalHandle handle(arg);
 
-    hipblasDatatype_t alphaType     = arg.a_type;
-    hipblasDatatype_t xType         = arg.b_type;
-    hipblasDatatype_t yType         = arg.c_type;
-    hipblasDatatype_t executionType = arg.compute_type;
+    hipDataType alphaType     = arg.a_type;
+    hipDataType xType         = arg.b_type;
+    hipDataType yType         = arg.c_type;
+    hipDataType executionType = arg.compute_type;
 
     // argument sanity check, quick return if input parameters are invalid before allocating invalid
     // memory

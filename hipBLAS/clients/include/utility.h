@@ -185,12 +185,12 @@ public:
         return {double(*this), double(*this)};
     }
 
-    explicit operator hipblasComplex()
+    explicit operator hipComplex()
     {
         return {float(*this), float(*this)};
     }
 
-    explicit operator hipblasDoubleComplex()
+    explicit operator hipDoubleComplex()
     {
         return {double(*this), double(*this)};
     }

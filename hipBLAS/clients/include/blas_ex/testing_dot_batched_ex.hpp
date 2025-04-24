@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -59,10 +59,10 @@ void testing_dot_batched_ex_bad_arg(const Arguments& arg)
               ? (CONJ ? hipblasDotcBatchedEx_64Fortran : hipblasDotBatchedEx_64Fortran)
               : (CONJ ? hipblasDotcBatchedEx_64 : hipblasDotBatchedEx_64);
 
-    hipblasDatatype_t xType         = arg.a_type;
-    hipblasDatatype_t yType         = arg.b_type;
-    hipblasDatatype_t resultType    = arg.c_type;
-    hipblasDatatype_t executionType = arg.compute_type;
+    hipDataType xType         = arg.a_type;
+    hipDataType yType         = arg.b_type;
+    hipDataType resultType    = arg.c_type;
+    hipDataType executionType = arg.compute_type;
 
     for(auto pointer_mode : {HIPBLAS_POINTER_MODE_HOST, HIPBLAS_POINTER_MODE_DEVICE})
     {
@@ -185,10 +185,10 @@ void testing_dot_batched_ex(const Arguments& arg)
 
     hipblasLocalHandle handle(arg);
 
-    hipblasDatatype_t xType         = arg.a_type;
-    hipblasDatatype_t yType         = arg.b_type;
-    hipblasDatatype_t resultType    = arg.c_type;
-    hipblasDatatype_t executionType = arg.compute_type;
+    hipDataType xType         = arg.a_type;
+    hipDataType yType         = arg.b_type;
+    hipDataType resultType    = arg.c_type;
+    hipDataType executionType = arg.compute_type;
     // argument sanity check, quick return if input parameters are invalid before allocating invalid
     // memory
     if(N <= 0 || batch_count <= 0)
