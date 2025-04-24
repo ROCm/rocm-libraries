@@ -76,6 +76,8 @@ def print_bitrate(current_file):
 parser = argparse.ArgumentParser()
 parser.add_argument('--rocDecode_directory',   type=str, default='',
                     help='The rocDecode Directory - required')
+parser.add_argument('--videodecode_exe',   type=str, default='',
+                    help='Video decode sample app exe - optional')
 parser.add_argument('--gpu_device_id',      type=int, default=0,
                     help='The GPU device ID that will be used to run the test on it - optional (default:0 [range:0 - N-1] N = total number of available GPUs on a machine)')
 parser.add_argument('--files_directory',    type=str, default='',
@@ -86,6 +88,8 @@ parser.add_argument('--num_threads',          type=int, default=1,
                     help='The number of threads is only for the videoDecodePerf sample (sample_mode = 1) - optional (default:1)')
 parser.add_argument('--max_num_decoded_frames',          type=int, default=0,
                     help='The max number of decoded frames. Useful for partial decoding of a long stream. - optional (default:0, meaning no limit)')
+parser.add_argument('--results_directory',    type=str, default='',
+                    help='The path to a dirctory to store results - optional')
 parser.add_argument('--check_decode_status',          type=int, default=0,
                     help='Report the number of streams that have completed decoding without abortion. For decoder stability check. - optional (default:0, meaning normal performance report)')
 
@@ -95,6 +99,8 @@ rocDecodeDirectory = args.rocDecode_directory
 gpuDeviceID = args.gpu_device_id
 filesDir = args.files_directory
 filesDirPath = Path(filesDir)
+videoDecodeEXE = args.videodecode_exe
+resultsDir = args.results_directory
 sampleMode = args.sample_mode
 numThreads = args.num_threads
 maxNumFrames = args.max_num_decoded_frames
@@ -106,12 +112,21 @@ print("\nrunrocDecodeTests V"+__version__+"\n")
 
 # rocDecode Application
 scriptPath = os.path.dirname(os.path.realpath(__file__))
-if sampleMode == 0:
-    rocDecode_exe = rocDecodeDirectory+'/samples/videoDecode/build/videodecode'
-    resultsPath = scriptPath+'/rocDecode_videoDecode_results'
-elif sampleMode == 1:
-    rocDecode_exe = rocDecodeDirectory+'/samples/videoDecodePerf/build/videodecodeperf'
-    resultsPath = scriptPath+'/rocDecode_videoDecodePerf_results'
+if videoDecodeEXE == '':
+    if sampleMode == 0:
+        rocDecode_exe = rocDecodeDirectory+'/samples/videoDecode/build/videodecode'
+    elif sampleMode == 1:
+        rocDecode_exe = rocDecodeDirectory+'/samples/videoDecodePerf/build/videodecodeperf'
+else:
+    rocDecode_exe = videoDecodeEXE
+if resultsDir == '':
+    if sampleMode == 0:
+        resultsPath = scriptPath+'/rocDecode_videoDecode_results'
+    elif sampleMode == 1:
+        resultsPath = scriptPath+'/rocDecode_videoDecodePerf_results'
+else:
+    resultsPath = resultsDir+'/rocDecode_videoDecode_results'
+
 run_rocDecode_app = os.path.abspath(rocDecode_exe)
 os.system('(mkdir -p ' +  resultsPath + ')')
 if(os.path.isfile(run_rocDecode_app)):
