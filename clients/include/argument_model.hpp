@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2023 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -121,15 +121,15 @@ public:
         {
             auto delim = ",";
             name_list << "a_type" << delim;
-            value_list << hipblas_datatype2string(arg.a_type) << delim;
+            value_list << hip_datatype2string(arg.a_type) << delim;
             name_list << "b_type" << delim;
-            value_list << hipblas_datatype2string(arg.b_type) << delim;
+            value_list << hip_datatype2string(arg.b_type) << delim;
             name_list << "c_type" << delim;
-            value_list << hipblas_datatype2string(arg.c_type) << delim;
+            value_list << hip_datatype2string(arg.c_type) << delim;
             name_list << "d_type" << delim;
-            value_list << hipblas_datatype2string(arg.d_type) << delim;
+            value_list << hip_datatype2string(arg.d_type) << delim;
             name_list << "compute_type" << delim;
-            value_list << hipblas_datatype2string(arg.compute_type) << delim;
+            value_list << hip_datatype2string(arg.compute_type) << delim;
             name_list << "compute_type_gemm" << delim;
             value_list << hipblas_computetype2string(arg.compute_type_gemm) << delim;
         }

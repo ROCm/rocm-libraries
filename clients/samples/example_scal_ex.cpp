@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -109,12 +109,7 @@ int main()
     /* =====================================================================
          ROCBLAS  C interface
     =================================================================== */
-
-#ifdef HIPBLAS_V2
     status = hipblasScalEx(handle, N, &alpha, HIP_R_16F, dx, HIP_R_16F, 1, HIP_R_32F);
-#else
-    status = hipblasScalEx(handle, N, &alpha, HIPBLAS_R_16F, dx, HIPBLAS_R_16F, 1, HIPBLAS_R_32F);
-#endif
 
     if(status != HIPBLAS_STATUS_SUCCESS)
     {

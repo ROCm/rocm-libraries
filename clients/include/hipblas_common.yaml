@@ -2,27 +2,9 @@
 # or enums defined with c_int base clases and attributes.
 Datatypes:
   - int: c_int
-  - hipblasDatatype_t:
+  - hipDataType:
       bases: [ c_int ]
       attr:
-        f16_r: 150
-        f32_r: 151
-        f64_r: 152
-        f16_c: 153
-        f32_c: 154
-        f64_c: 155
-        i8_r:  160
-        u8_r:  161
-        i32_r: 162
-        u32_r: 163
-        i8_c:  164
-        u8_c:  165
-        i32_c: 166
-        u32_c: 167
-        bf16_r: 168
-        bf16_c: 169
-      attr_v2:
-        # temporary workaround for using HIPBLAS_V2 define. Parsed in hipblas_gentest.py
         f32_r:   0
         f64_r:   1
         f16_r:   2
@@ -51,6 +33,10 @@ Datatypes:
         i64_c:  25
         u64_r:  26
         u64_c:  27
+        f8_r: 28
+        bf8_r: 29
+        f8_r_fnuz: 1000
+        bf8_r_fnuz: 1001
   - { half: f16_r, single: f32_r, double: f64_r }
   - { half complex: f16_c, single complex: f32_c, double complex: f64_c }
   - hipblas_initialization:
@@ -59,33 +45,14 @@ Datatypes:
         rand_int: 111
         trig_float: 222
         hpl: 333
-      attr_v2:
-        rand_int: 111
-        trig_float: 222
-        hpl: 333
   - hipblas_atomics_mode:
       bases: [ c_int ]
       attr:
         atomics_not_allowed: 0
         atomics_allowed: 1
-      attr_v2:
-        atomics_not_allowed: 0
-        atomics_allowed: 1
   - hipblasComputeType_t:
       bases: [ c_int ]
       attr:
-        c16f: 0
-        c16f_pedantic: 1
-        c32f: 2
-        c32f_pedantic: 3
-        c32f_fast_16f: 4
-        c32f_fast_16bf: 5
-        c32f_fast_tf32: 6
-        c64f: 7
-        c64f_pedantic: 8
-        c32i: 9
-        c32i_pedantic: 10
-      attr_v2:
         c16f: 0
         c16f_pedantic: 1
         c32f: 2
@@ -103,28 +70,15 @@ Datatypes:
         LINUX: 1
         WINDOWS: 2
         ALL_OS: 3
-      attr_v2:
-        LINUX: 1
-        WINDOWS: 2
-        ALL_OS: 3
   - hipblas_backend:
       bases: [ c_uint32 ]
       attr:
         AMD: 1
         NVIDIA: 2
         ALL_BACKEND: 3
-      attr_v2:
-        AMD: 1
-        NVIDIA: 2
-        ALL_BACKEND: 3
   - hipblas_client_api:
       bases: [ c_uint32 ]
       attr:
-        C: 0
-        C_64: 1
-        FORTRAN: 2
-        FORTRAN_64: 3
-      attr_v2:
         C: 0
         C_64: 1
         FORTRAN: 2
@@ -473,11 +427,11 @@ Arguments:
   - ldb: c_int64
   - ldc: c_int64
   - ldd: c_int64
-  - a_type: hipblasDatatype_t
-  - b_type: hipblasDatatype_t
-  - c_type: hipblasDatatype_t
-  - d_type: hipblasDatatype_t
-  - compute_type: hipblasDatatype_t
+  - a_type: hipDataType
+  - b_type: hipDataType
+  - c_type: hipDataType
+  - d_type: hipDataType
+  - compute_type: hipDataType
   - compute_type_gemm: hipblasComputeType_t
   - incx: c_int64
   - incy: c_int64

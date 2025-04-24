@@ -46,14 +46,14 @@ void testing_scal_batched_ex_bad_arg(const Arguments& arg)
     auto hipblasScalBatchedExFn_64
         = arg.api == FORTRAN_64 ? hipblasScalBatchedEx_64Fortran : hipblasScalBatchedEx_64;
 
-    hipblasDatatype_t alphaType     = arg.a_type;
-    hipblasDatatype_t xType         = arg.b_type;
-    hipblasDatatype_t executionType = arg.compute_type;
+    hipDataType alphaType     = arg.a_type;
+    hipDataType xType         = arg.b_type;
+    hipDataType executionType = arg.compute_type;
 
     int64_t N           = 100;
     int64_t incx        = 1;
     int64_t batch_count = 2;
-    Ts      alpha       = (Ts)0.6;
+    Ta      alpha       = Ta(0.6);
 
     hipblasLocalHandle handle(arg);
 
@@ -68,7 +68,15 @@ void testing_scal_batched_ex_bad_arg(const Arguments& arg)
         // None of these test cases will write to result so using device pointer is fine for both modes
         DAPI_EXPECT(HIPBLAS_STATUS_NOT_INITIALIZED,
                     hipblasScalBatchedExFn,
-                    (nullptr, N, &alpha, alphaType, dx, xType, incx, batch_count, executionType));
+                    (nullptr,
+                     N,
+                     reinterpret_cast<Ts*>(&alpha),
+                     alphaType,
+                     dx,
+                     xType,
+                     incx,
+                     batch_count,
+                     executionType));
 
         if(arg.bad_arg_all)
         {
@@ -76,10 +84,17 @@ void testing_scal_batched_ex_bad_arg(const Arguments& arg)
                 HIPBLAS_STATUS_INVALID_VALUE,
                 hipblasScalBatchedExFn,
                 (handle, N, nullptr, alphaType, dx, xType, incx, batch_count, executionType));
-            DAPI_EXPECT(
-                HIPBLAS_STATUS_INVALID_VALUE,
-                hipblasScalBatchedExFn,
-                (handle, N, &alpha, alphaType, nullptr, xType, incx, batch_count, executionType));
+            DAPI_EXPECT(HIPBLAS_STATUS_INVALID_VALUE,
+                        hipblasScalBatchedExFn,
+                        (handle,
+                         N,
+                         reinterpret_cast<Ts*>(&alpha),
+                         alphaType,
+                         nullptr,
+                         xType,
+                         incx,
+                         batch_count,
+                         executionType));
 
             // This is a little different than the checks for L2. In rocBLAS implementation n <= 0 is a quick-return success before other arg checks.
             // Here, for 32-bit API, I'm counting on the rollover to return success, and for the 64-bit API I'm passing in invalid
@@ -121,9 +136,9 @@ void testing_scal_batched_ex(const Arguments& arg)
 
     hipblasLocalHandle handle(arg);
 
-    hipblasDatatype_t alphaType     = arg.a_type;
-    hipblasDatatype_t xType         = arg.b_type;
-    hipblasDatatype_t executionType = arg.compute_type;
+    hipDataType alphaType     = arg.a_type;
+    hipDataType xType         = arg.b_type;
+    hipDataType executionType = arg.compute_type;
 
     // argument sanity check, quick return if input parameters are invalid before allocating invalid
     // memory

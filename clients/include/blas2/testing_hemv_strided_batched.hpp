@@ -75,7 +75,10 @@ void testing_hemv_strided_batched_bad_arg(const Arguments& arg)
 
         device_vector<T> d_alpha(1), d_beta(1), d_one(1), d_zero(1);
 
-        const Ts  h_alpha(1), h_beta(2), h_one(1), h_zero(0);
+        Ts h_alpha{1}, h_beta{2}, h_one{1}, h_zero{0};
+        if constexpr(is_complex<T>)
+            h_one = {1, 0};
+
         const Ts* alpha = &h_alpha;
         const Ts* beta  = &h_beta;
         const Ts* one   = &h_one;

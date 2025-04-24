@@ -77,7 +77,7 @@ void testing_trmm_strided_batched_bad_arg(const Arguments& arg)
 
         device_vector<T> alpha_d(1), zero_d(1);
 
-        const Ts alpha_h(1), zero_h(0);
+        const Ts alpha_h{1}, zero_h{0};
 
         const Ts* alpha = &alpha_h;
         const Ts* zero  = &zero_h;

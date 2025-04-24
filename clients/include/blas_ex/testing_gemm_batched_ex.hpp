@@ -68,16 +68,12 @@ void testing_gemm_batched_ex_bad_arg(const Arguments& arg)
 
     hipblasLocalHandle handle(arg);
 
-    hipblasDatatype_t aType = arg.a_type;
-    hipblasDatatype_t bType = arg.b_type;
-    hipblasDatatype_t cType = arg.c_type;
-#ifdef HIPBLAS_V2
+    hipDataType          aType       = arg.a_type;
+    hipDataType          bType       = arg.b_type;
+    hipDataType          cType       = arg.c_type;
     hipblasComputeType_t computeType = arg.compute_type_gemm;
-#else
-    hipblasDatatype_t computeType  = arg.compute_type;
-#endif
-    hipblasGemmFlags_t flags = HIPBLAS_GEMM_FLAGS_NONE;
-    hipblasGemmAlgo_t  algo  = HIPBLAS_GEMM_DEFAULT;
+    hipblasGemmFlags_t   flags       = HIPBLAS_GEMM_FLAGS_NONE;
+    hipblasGemmAlgo_t    algo        = HIPBLAS_GEMM_DEFAULT;
 
     int64_t M           = 101;
     int64_t N           = 100;
@@ -101,10 +97,12 @@ void testing_gemm_batched_ex_bad_arg(const Arguments& arg)
     device_batch_matrix<To> dC(M, N, ldc, batch_count);
 
     device_vector<Tex> d_alpha(1), d_beta(1), d_one(1), d_zero(1);
-    Ts                 h_alpha(1), h_beta(2), h_one(1), h_zero(0);
+    Ts                 h_alpha{1}, h_beta{2}, h_one{1}, h_zero{0};
 
     if constexpr(std::is_same_v<Tex, hipblasHalf>)
         h_one = float_to_half(1.0f);
+    else if constexpr(is_complex<Tex>)
+        h_one = {1, 0};
 
     const Ts* alpha = &h_alpha;
     const Ts* beta  = &h_beta;
@@ -326,16 +324,12 @@ void testing_gemm_batched_ex(const Arguments& arg)
 
     int64_t batch_count = arg.batch_count;
 
-    hipblasDatatype_t a_type = arg.a_type;
-    hipblasDatatype_t b_type = arg.b_type;
-    hipblasDatatype_t c_type = arg.c_type;
+    hipDataType a_type = arg.a_type;
+    hipDataType b_type = arg.b_type;
+    hipDataType c_type = arg.c_type;
 
-#ifdef HIPBLAS_V2
     hipblasComputeType_t compute_type = arg.compute_type_gemm;
-#else
-    hipblasDatatype_t compute_type = arg.compute_type;
-#endif
-    hipblasGemmFlags_t flags = hipblasGemmFlags_t(arg.flags);
+    hipblasGemmFlags_t   flags        = hipblasGemmFlags_t(arg.flags);
 
     Tex h_alpha_Tex = arg.get_alpha<Tex>();
     Tex h_beta_Tex  = arg.get_beta<Tex>();

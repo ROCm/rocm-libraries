@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -65,7 +65,7 @@ void testing_her_strided_batched_bad_arg(const Arguments& arg)
 
         device_vector<U> d_alpha(1), d_zero(1);
 
-        const U  h_alpha(1), h_zero(0);
+        const U  h_alpha{1}, h_zero{0};
         const U* alpha = &h_alpha;
         const U* zero  = &h_zero;
 

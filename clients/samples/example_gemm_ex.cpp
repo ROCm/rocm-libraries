@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2023 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -120,20 +120,12 @@ int main()
     hipblasGemmAlgo_t algo = HIPBLAS_GEMM_DEFAULT;
 
     // HPA
-    using T   = __half;
-    using Tex = float;
-#ifdef HIPBLAS_V2
-    // Compiling with HIPBLAS_V2 in cmake
+    using T                           = __half;
+    using Tex                         = float;
     hipDataType          a_type       = HIP_R_16F;
     hipDataType          b_type       = HIP_R_16F;
     hipDataType          c_type       = HIP_R_16F;
     hipblasComputeType_t compute_type = HIPBLAS_COMPUTE_32F;
-#else
-    hipblasDatatype_t a_type       = HIPBLAS_R_16F;
-    hipblasDatatype_t b_type       = HIPBLAS_R_16F;
-    hipblasDatatype_t c_type       = HIPBLAS_R_16F;
-    hipblasDatatype_t compute_type = HIPBLAS_R_32F;
-#endif
 
     std::cout << "hipblasGemmEx example" << std::endl;
     if(transa == HIPBLAS_OP_N)

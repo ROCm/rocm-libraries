@@ -277,7 +277,7 @@ try
          "Options: h,s,d,c,z,f16_r,f32_r,f64_r,bf16_r,f32_c,f64_c,i8_r,i32_r")
 
         ("compute_type_gemm",
-         value<std::string>(&compute_type_gemm), "Precision of computation for gemm_ex with HIPBLAS_V2 define"
+         value<std::string>(&compute_type_gemm), "Precision of computation for gemm_ex"
          "Options: c16f,c16f_pedantic,c32f,c32f_pedantic,c32f_fast_16f,c32f_fast_16bf,c32f_fast_tf32,c64f,c64f_pedantic,c32i,c32i_pedantic")
 
         ("initialization",
@@ -422,30 +422,13 @@ try
         return hipblas_bench_datafile();
 
     std::transform(precision.begin(), precision.end(), precision.begin(), ::tolower);
-    auto prec = string2hipblas_datatype(precision);
-    if(prec == HIPBLAS_DATATYPE_INVALID)
-        throw std::invalid_argument("Invalid value for --precision " + precision);
+    auto prec = string2hip_datatype(precision);
 
-    arg.a_type = a_type == "" ? prec : string2hipblas_datatype(a_type);
-    if(arg.a_type == HIPBLAS_DATATYPE_INVALID)
-        throw std::invalid_argument("Invalid value for --a_type " + a_type);
-
-    arg.b_type = b_type == "" ? prec : string2hipblas_datatype(b_type);
-    if(arg.b_type == HIPBLAS_DATATYPE_INVALID)
-        throw std::invalid_argument("Invalid value for --b_type " + b_type);
-
-    arg.c_type = c_type == "" ? prec : string2hipblas_datatype(c_type);
-    if(arg.c_type == HIPBLAS_DATATYPE_INVALID)
-        throw std::invalid_argument("Invalid value for --c_type " + c_type);
-
-    arg.d_type = d_type == "" ? prec : string2hipblas_datatype(d_type);
-    if(arg.d_type == HIPBLAS_DATATYPE_INVALID)
-        throw std::invalid_argument("Invalid value for --d_type " + d_type);
-
-    arg.compute_type = compute_type == "" ? prec : string2hipblas_datatype(compute_type);
-    if(arg.compute_type == HIPBLAS_DATATYPE_INVALID)
-        throw std::invalid_argument("Invalid value for --compute_type " + compute_type);
-
+    arg.a_type            = a_type == "" ? prec : string2hip_datatype(a_type);
+    arg.b_type            = b_type == "" ? prec : string2hip_datatype(b_type);
+    arg.c_type            = c_type == "" ? prec : string2hip_datatype(c_type);
+    arg.d_type            = d_type == "" ? prec : string2hip_datatype(d_type);
+    arg.compute_type      = compute_type == "" ? prec : string2hip_datatype(compute_type);
     arg.compute_type_gemm = string2hipblas_computetype(compute_type_gemm);
 
     arg.initialization = string2hipblas_initialization(initialization);

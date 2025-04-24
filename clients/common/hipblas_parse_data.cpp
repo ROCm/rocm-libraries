@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2019-2023 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -37,13 +37,8 @@ static std::string hipblas_parse_yaml(const std::string& yaml)
 {
     std::string tmp     = hipblas_tempname();
     auto        exepath = hipblas_exepath();
-#ifdef HIPBLAS_V2
-    auto cmd = exepath + "hipblas_gentest.py --hipblas_v2 --template " + exepath
-               + "hipblas_template.yaml -o " + tmp + " " + yaml;
-#else
     auto cmd = exepath + "hipblas_gentest.py --template " + exepath + "hipblas_template.yaml -o "
                + tmp + " " + yaml;
-#endif
     std::cerr << cmd << std::endl;
 
 #ifdef WIN32

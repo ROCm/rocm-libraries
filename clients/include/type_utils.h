@@ -27,8 +27,8 @@
 #include <stdbool.h>
 
 #ifdef __cplusplus
-#include "complex.hpp"
 #include <cmath>
+#include <complex>
 #include <cstdio>
 #include <immintrin.h>
 #include <iostream>
@@ -231,13 +231,13 @@ struct hipblas_internal_type_impl
 template <>
 struct hipblas_internal_type_impl<std::complex<float>>
 {
-    using type = hipblasComplex;
+    using type = hipComplex;
 };
 
 template <>
 struct hipblas_internal_type_impl<std::complex<double>>
 {
-    using type = hipblasDoubleComplex;
+    using type = hipDoubleComplex;
 };
 
 template <typename T>

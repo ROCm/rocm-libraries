@@ -67,7 +67,7 @@ void testing_trsm_batched_ex_bad_arg(const Arguments& arg)
     hipblasFillMode_t  uplo        = HIPBLAS_FILL_MODE_LOWER;
     hipblasOperation_t transA      = HIPBLAS_OP_N;
     hipblasDiagType_t  diag        = HIPBLAS_DIAG_NON_UNIT;
-    hipblasDatatype_t  computeType = arg.compute_type;
+    hipDataType        computeType = arg.compute_type;
 
     int64_t K        = side == HIPBLAS_SIDE_LEFT ? M : N;
     int64_t invAsize = TRSM_BLOCK * K;
@@ -78,7 +78,7 @@ void testing_trsm_batched_ex_bad_arg(const Arguments& arg)
     device_batch_matrix<T> dinvA(TRSM_BLOCK, TRSM_BLOCK, K, batch_count);
 
     device_vector<T> d_alpha(1), d_zero(1);
-    const Ts         h_alpha(1), h_zero(0);
+    const Ts         h_alpha{1}, h_zero{0};
 
     const Ts* alpha = &h_alpha;
     const Ts* zero  = &h_zero;
@@ -198,7 +198,7 @@ void testing_trsm_batched_ex_bad_arg(const Arguments& arg)
                                                      batch_count,
                                                      dinvA.ptr_on_device(),
                                                      invAsize,
-                                                     HIPBLAS_R_16F),
+                                                     HIP_R_16F),
                               HIPBLAS_STATUS_NOT_SUPPORTED);
 
         EXPECT_HIPBLAS_STATUS(hipblasTrsmBatchedExFn(handle,

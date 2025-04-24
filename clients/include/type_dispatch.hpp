@@ -43,19 +43,17 @@ auto hipblas_simple_dispatch(const Arguments& arg)
 {
     switch(arg.a_type)
     {
-    case HIPBLAS_R_16F:
+    case HIP_R_16F:
         return TEST<hipblasHalf>{}(arg);
-    case HIPBLAS_R_16B:
+    case HIP_R_16BF:
         return TEST<hipblasBfloat16>{}(arg);
-    case HIPBLAS_R_32F:
+    case HIP_R_32F:
         return TEST<float>{}(arg);
-    case HIPBLAS_R_64F:
+    case HIP_R_64F:
         return TEST<double>{}(arg);
-    //  case hipblas_datatype_f16_c:
-    //      return TEST<hipblas_half_complex>{}(arg);
-    case HIPBLAS_C_32F:
+    case HIP_C_32F:
         return TEST<std::complex<float>>{}(arg);
-    case HIPBLAS_C_64F:
+    case HIP_C_64F:
         return TEST<std::complex<double>>{}(arg);
     default:
         return TEST<void>{}(arg);
@@ -73,21 +71,21 @@ auto hipblas_blas1_dispatch(const Arguments& arg)
             return hipblas_simple_dispatch<TEST>(arg);
         else
         { // for csscal and zdscal and complex rotg only
-            if(Ti == HIPBLAS_C_32F && Tb == HIPBLAS_R_32F)
+            if(Ti == HIP_C_32F && Tb == HIP_R_32F)
                 return TEST<std::complex<float>, float>{}(arg);
-            else if(Ti == HIPBLAS_C_64F && Tb == HIPBLAS_R_64F)
+            else if(Ti == HIP_C_64F && Tb == HIP_R_64F)
                 return TEST<std::complex<double>, double>{}(arg);
         }
     }
-    else if(Ti == HIPBLAS_C_32F && Tb == HIPBLAS_R_32F)
+    else if(Ti == HIP_C_32F && Tb == HIP_R_32F)
         return TEST<std::complex<float>, float>{}(arg);
-    else if(Ti == HIPBLAS_C_64F && Tb == HIPBLAS_R_64F)
+    else if(Ti == HIP_C_64F && Tb == HIP_R_64F)
         return TEST<std::complex<double>, double>{}(arg);
-    else if(Ti == HIPBLAS_R_32F && Tb == HIPBLAS_R_32F)
+    else if(Ti == HIP_R_32F && Tb == HIP_R_32F)
         return TEST<float, float>{}(arg);
-    else if(Ti == HIPBLAS_R_64F && Tb == HIPBLAS_R_64F)
+    else if(Ti == HIP_R_64F && Tb == HIP_R_64F)
         return TEST<double, double>{}(arg);
-    //  else if(Ti == hipblas_datatype_f16_c && To == HIPBLAS_R_16F)
+    //  else if(Ti == hipblas_datatype_f16_c && To == HIP_R_16F)
     //      return TEST<hipblas_half_complex, hipblasHalf>{}(arg);
 
     return TEST<void>{}(arg);
@@ -121,32 +119,32 @@ auto hipblas_blas1_ex_dispatch(const Arguments& arg)
         // hscal with f16_r compute (scal doesn't care about Ty)
         return hipblas_simple_dispatch<TEST>(arg);
     }
-    else if((is_rot || is_dot || is_axpy) && Ta == Tx && Tx == Ty && Ta == HIPBLAS_R_16F
-            && Tex == HIPBLAS_R_32F)
+    else if((is_rot || is_dot || is_axpy) && Ta == Tx && Tx == Ty && Ta == HIP_R_16F
+            && Tex == HIP_R_32F)
     {
         return TEST<hipblasHalf, hipblasHalf, hipblasHalf, float>{}(arg);
     }
-    else if((is_rot || is_dot || is_axpy) && Ta == Tx && Tx == Ty && Ta == HIPBLAS_R_16B
-            && Tex == HIPBLAS_R_32F)
+    else if((is_rot || is_dot || is_axpy) && Ta == Tx && Tx == Ty && Ta == HIP_R_16BF
+            && Tex == HIP_R_32F)
     {
         return TEST<hipblasBfloat16, hipblasBfloat16, hipblasBfloat16, float>{}(arg);
     }
-    else if(is_axpy && Ta == Tex && Tx == Ty && Tx == HIPBLAS_R_16F && Tex == HIPBLAS_R_32F)
+    else if(is_axpy && Ta == Tex && Tx == Ty && Tx == HIP_R_16F && Tex == HIP_R_32F)
     {
         return TEST<float, hipblasHalf, hipblasHalf, float>{}(arg);
     }
-    else if((is_scal || is_nrm2) && Ta == Tx && Ta == HIPBLAS_R_16F && Tex == HIPBLAS_R_32F)
+    else if((is_scal || is_nrm2) && Ta == Tx && Ta == HIP_R_16F && Tex == HIP_R_32F)
     {
         // half scal, nrm2, axpy
         return TEST<hipblasHalf, hipblasHalf, float>{}(arg);
     }
-    else if((is_scal || is_nrm2) && Ta == Tx && Ta == HIPBLAS_R_16B && Tex == HIPBLAS_R_32F)
+    else if((is_scal || is_nrm2) && Ta == Tx && Ta == HIP_R_16BF && Tex == HIP_R_32F)
     {
         // bfloat16 scal, nrm2
         return TEST<hipblasBfloat16, hipblasBfloat16, float>{}(arg);
     }
-    else if(is_axpy && Ta == Tex && Tx == Ty && (Tx == HIPBLAS_R_16B || Tx == HIPBLAS_R_16F)
-            && Tex == HIPBLAS_R_32F)
+    else if(is_axpy && Ta == Tex && Tx == Ty && (Tx == HIP_R_16BF || Tx == HIP_R_16F)
+            && Tex == HIP_R_32F)
     {
         // axpy bfloat16 with float alpha
         return TEST<float, hipblasBfloat16, hipblasBfloat16, float>{}(arg);
@@ -155,22 +153,22 @@ auto hipblas_blas1_ex_dispatch(const Arguments& arg)
     else if(is_scal)
     {
         // scal_ex ordering: <alphaType, dataType, exType> opposite order of scal test
-        if(Ta == Tex && Tx == HIPBLAS_R_16B && Tex == HIPBLAS_R_32F)
+        if(Ta == Tex && Tx == HIP_R_16BF && Tex == HIP_R_32F)
         {
             // scal bfloat16 with float alpha
             return TEST<float, hipblasBfloat16, float>{}(arg);
         }
-        else if(Ta == HIPBLAS_R_32F && Tx == HIPBLAS_R_16F && Tex == HIPBLAS_R_32F)
+        else if(Ta == HIP_R_32F && Tx == HIP_R_16F && Tex == HIP_R_32F)
         {
             // scal half with float alpha
             return TEST<float, hipblasHalf, float>{}(arg);
         }
-        else if(Ta == HIPBLAS_R_32F && Tx == HIPBLAS_C_32F && Tex == HIPBLAS_C_32F)
+        else if(Ta == HIP_R_32F && Tx == HIP_C_32F && Tex == HIP_C_32F)
         {
             // csscal-like
             return TEST<float, std::complex<float>, std::complex<float>>{}(arg);
         }
-        else if(Ta == HIPBLAS_R_64F && Tx == HIPBLAS_C_64F && Tex == HIPBLAS_C_64F)
+        else if(Ta == HIP_R_64F && Tx == HIP_C_64F && Tex == HIP_C_64F)
         {
             // zdscal-like
             return TEST<double, std::complex<double>, std::complex<double>>{}(arg);
@@ -178,12 +176,12 @@ auto hipblas_blas1_ex_dispatch(const Arguments& arg)
     }
     else if(is_nrm2)
     {
-        if(Ta == HIPBLAS_C_32F && Tx == HIPBLAS_R_32F && Tex == HIPBLAS_R_32F)
+        if(Ta == HIP_C_32F && Tx == HIP_R_32F && Tex == HIP_R_32F)
         {
             // scnrm2
             return TEST<std::complex<float>, float, float>{}(arg);
         }
-        else if(Ta == HIPBLAS_C_64F && Tx == HIPBLAS_R_64F && Tex == HIPBLAS_R_64F)
+        else if(Ta == HIP_C_64F && Tx == HIP_R_64F && Tex == HIP_R_64F)
         {
             // dznrm2
             return TEST<std::complex<double>, double, double>{}(arg);
@@ -191,15 +189,13 @@ auto hipblas_blas1_ex_dispatch(const Arguments& arg)
     }
     else if(is_rot)
     {
-        if(Ta == HIPBLAS_C_32F && Tx == HIPBLAS_C_32F && Ty == HIPBLAS_R_32F
-           && Tex == HIPBLAS_C_32F)
+        if(Ta == HIP_C_32F && Tx == HIP_C_32F && Ty == HIP_R_32F && Tex == HIP_C_32F)
         {
             // rot with complex x/y/compute and real cs
             return TEST<std::complex<float>, std::complex<float>, float, std::complex<float>>{}(
                 arg);
         }
-        else if(Ta == HIPBLAS_C_64F && Tx == HIPBLAS_C_64F && Ty == HIPBLAS_R_64F
-                && Tex == HIPBLAS_C_64F)
+        else if(Ta == HIP_C_64F && Tx == HIP_C_64F && Ty == HIP_R_64F && Tex == HIP_C_64F)
         {
             // rot with complex x/y/compute and real cs
             return TEST<std::complex<double>, std::complex<double>, double, std::complex<double>>{}(
@@ -221,22 +217,22 @@ auto hipblas_rot_dispatch(const Arguments& arg)
         // srot, drot
         return hipblas_simple_dispatch<TEST>(arg);
     }
-    else if(Ta == HIPBLAS_C_32F && Tb == HIPBLAS_R_32F && Tc == Tb)
+    else if(Ta == HIP_C_32F && Tb == HIP_R_32F && Tc == Tb)
     {
         // csrot
         return TEST<std::complex<float>, float, float>{}(arg);
     }
-    else if(Ta == HIPBLAS_C_64F && Tb == HIPBLAS_R_64F && Tc == Tb)
+    else if(Ta == HIP_C_64F && Tb == HIP_R_64F && Tc == Tb)
     {
         // zdrot
         return TEST<std::complex<double>, double, double>{}(arg);
     }
-    else if(Ta == HIPBLAS_C_32F && Tb == HIPBLAS_R_32F && Tc == Ta)
+    else if(Ta == HIP_C_32F && Tb == HIP_R_32F && Tc == Ta)
     {
         // crot
         return TEST<std::complex<float>, float, std::complex<float>>{}(arg);
     }
-    else if(Ta == HIPBLAS_C_64F && Tb == HIPBLAS_R_64F && Tc == Ta)
+    else if(Ta == HIP_C_64F && Tb == HIP_R_64F && Tc == Ta)
     {
         // zrot
         return TEST<std::complex<double>, double, std::complex<double>>{}(arg);
@@ -255,16 +251,16 @@ auto hipblas_gemm_dispatch(const Arguments& arg)
     {
         if(Ti != To)
         {
-            if(Ti == HIPBLAS_R_8I && To == HIPBLAS_R_32I && Tc == To)
+            if(Ti == HIP_R_8I && To == HIP_R_32I && Tc == To)
                 return TEST<int8_t, int32_t, int32_t>{}(arg);
         }
         else if(Tc != To)
         {
-            if(To == HIPBLAS_R_16F && Tc == HIPBLAS_R_32F)
+            if(To == HIP_R_16F && Tc == HIP_R_32F)
             {
                 return TEST<hipblasHalf, hipblasHalf, float>{}(arg);
             }
-            else if(To == HIPBLAS_R_16B && Tc == HIPBLAS_R_32F)
+            else if(To == HIP_R_16BF && Tc == HIP_R_32F)
             {
                 return TEST<hipblasBfloat16, hipblasBfloat16, float>{}(arg);
             }

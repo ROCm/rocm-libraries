@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -272,12 +272,6 @@ bool hipblas_client_global_filters(const Arguments& args)
     static constexpr hipblas_backend backend = hipblas_backend::NVIDIA;
 #else
     static constexpr hipblas_backend   backend = hipblas_backend::AMD;
-#endif
-
-#ifdef HIPBLAS_V2
-    // no fortran tests for new API while in transition period
-    if(args.api == hipblas_client_api::FORTRAN || args.api == hipblas_client_api::FORTRAN_64)
-        return false;
 #endif
 
 #if defined(__HIP_PLATFORM_NVCC__) && CUBLAS_VER_MAJOR < 12

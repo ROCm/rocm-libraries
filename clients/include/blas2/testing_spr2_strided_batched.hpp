@@ -48,7 +48,7 @@ void testing_spr2_strided_batched_bad_arg(const Arguments& arg)
                                               ? hipblasSpr2StridedBatched_64<T, true>
                                               : hipblasSpr2StridedBatched_64<T, false>;
 
-    const Ts          h_alpha(1), h_zero(0);
+    const Ts          h_alpha{1}, h_zero{0};
     const Ts*         alpha = &h_alpha;
     const Ts*         zero  = &h_zero;
     hipblasFillMode_t uplo  = HIPBLAS_FILL_MODE_UPPER;

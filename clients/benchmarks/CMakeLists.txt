@@ -43,23 +43,15 @@ set( hipblas_benchmark_common
       ../common/near.cpp
       ../common/arg_check.cpp
       ../common/argument_model.cpp
-      ../common/hipblas_template_specialization.cpp
       ../common/host_alloc.cpp
       ${BLIS_CPP}
     )
 
 add_executable( hipblas-bench ${hipblas_bench_source} ${hipblas_benchmark_common} )
-add_executable( hipblas_v2-bench ${hipblas_bench_source} ${hipblas_benchmark_common} )
 
 target_compile_features( hipblas-bench PRIVATE cxx_static_assert cxx_nullptr cxx_auto_type )
-target_compile_features( hipblas_v2-bench PRIVATE cxx_static_assert cxx_nullptr cxx_auto_type )
-
 # Internal header includes
 target_include_directories( hipblas-bench
-  PRIVATE
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>
-)
-target_include_directories( hipblas_v2-bench
   PRIVATE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>
 )
@@ -73,47 +65,30 @@ target_include_directories( hipblas-bench
     $<BUILD_INTERFACE:${BLIS_INCLUDE_DIR}>
     $<BUILD_INTERFACE:${FLAME_INCLUDE_DIR}>
 )
-target_include_directories( hipblas_v2-bench
-  SYSTEM PRIVATE
-    $<BUILD_INTERFACE:${HIP_INCLUDE_DIRS}>
-    $<BUILD_INTERFACE:${CBLAS_INCLUDE_DIRS}>
-    $<BUILD_INTERFACE:${BLAS_INCLUDE_DIR}>
-    $<BUILD_INTERFACE:${BLIS_INCLUDE_DIR}>
-    $<BUILD_INTERFACE:${FLAME_INCLUDE_DIR}>
-)
 
 target_link_libraries( hipblas-bench PRIVATE roc::hipblas GTest::gtest GTest::gtest_main )
-target_link_libraries( hipblas_v2-bench PRIVATE roc::hipblas GTest::gtest GTest::gtest_main )
 
 if (NOT WIN32)
     target_link_libraries( hipblas-bench PRIVATE hipblas_fortran_client )
-    target_link_libraries( hipblas_v2-bench PRIVATE hipblas_fortran_client )
 endif()
 
 # need mf16c flag for float->half convertion
 target_compile_options( hipblas-bench PRIVATE -mf16c ) # -Wno-deprecated-declarations )
-target_compile_options( hipblas_v2-bench PRIVATE -mf16c ) # -Wno-deprecated-declarations )
 
 target_compile_options(hipblas-bench PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${COMMON_CXX_OPTIONS}>)
-target_compile_options(hipblas_v2-bench PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${COMMON_CXX_OPTIONS}>)
 
 target_compile_definitions( hipblas-bench PRIVATE HIPBLAS_BENCH ${COMMON_DEFINES} ${BLIS_DEFINES} )
-target_compile_definitions( hipblas_v2-bench PRIVATE HIPBLAS_BENCH ${COMMON_DEFINES} ${BLIS_DEFINES} HIPBLAS_V2 )
 
 target_link_libraries( hipblas-bench PRIVATE ${BLAS_LIBRARY} ${COMMON_LINK_LIBS} )
-target_link_libraries( hipblas_v2-bench PRIVATE ${BLAS_LIBRARY} ${COMMON_LINK_LIBS} )
 if (NOT WIN32)
     target_link_libraries( hipblas-bench PRIVATE stdc++fs )
-    target_link_libraries( hipblas_v2-bench PRIVATE stdc++fs )
 endif()
 
 if(HIP_PLATFORM STREQUAL amd)
   target_link_libraries( hipblas-bench PRIVATE hip::host )
-  target_link_libraries( hipblas_v2-bench PRIVATE hip::host )
 
   if( CUSTOM_TARGET )
     target_link_libraries( hipblas-bench PRIVATE hip::${CUSTOM_TARGET} )
-    target_link_libraries( hipblas_v2-bench PRIVATE hip::${CUSTOM_TARGET} )
   endif()
 
 else( )
@@ -121,26 +96,15 @@ else( )
     PRIVATE
       $<BUILD_INTERFACE:${CUDA_INCLUDE_DIRS}>
   )
-  target_include_directories( hipblas_v2-bench
-    PRIVATE
-      $<BUILD_INTERFACE:${CUDA_INCLUDE_DIRS}>
-  )
 
   target_link_libraries( hipblas-bench PRIVATE ${CUDA_LIBRARIES} )
-  target_link_libraries( hipblas_v2-bench PRIVATE ${CUDA_LIBRARIES} )
 endif( )
 
 set_target_properties( hipblas-bench PROPERTIES
   CXX_EXTENSIONS OFF
   RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging"
 )
-set_target_properties( hipblas_v2-bench PROPERTIES
-  CXX_EXTENSIONS OFF
-  RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging"
-)
 
 add_dependencies( hipblas-bench hipblas-clients-common )
-add_dependencies( hipblas_v2-bench hipblas-clients-common )
 
 rocm_install(TARGETS hipblas-bench COMPONENT benchmarks)
-rocm_install(TARGETS hipblas_v2-bench COMPONENT benchmarks)

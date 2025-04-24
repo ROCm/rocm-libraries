@@ -52,7 +52,7 @@ void testing_scal_strided_batched_bad_arg(const Arguments& arg)
     int64_t       incx        = 1;
     int64_t       batch_count = 2;
     hipblasStride stride_x    = N * incx;
-    Ts            alpha       = (Ts)0.6;
+    U             alpha       = (U)0.6;
 
     hipblasLocalHandle handle(arg);
 

@@ -79,10 +79,12 @@ void testing_gemm_bad_arg(const Arguments& arg)
     device_matrix<T> dC(M, N, ldc);
 
     device_vector<T> d_alpha(1), d_beta(1), d_one(1), d_zero(1);
-    Ts               h_alpha(1), h_beta(2), h_one(1), h_zero(0);
+    Ts               h_alpha{1}, h_beta{2}, h_one{1}, h_zero{0};
 
     if constexpr(std::is_same_v<T, hipblasHalf>)
         h_one = float_to_half(1.0f);
+    else if constexpr(is_complex<T>)
+        h_one = {1, 0};
 
     const Ts* alpha = &h_alpha;
     const Ts* beta  = &h_beta;

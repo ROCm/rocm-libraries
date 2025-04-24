@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2023 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -165,28 +165,30 @@ hipblasSideMode_t char2hipblas_side(char value)
 }
 
 // clang-format off
-hipblasDatatype_t string2hipblas_datatype(const std::string& value)
+/*! \brief Convert string to a hipDataType. Returns HIP_R_32F if invalid string. */
+hipDataType string2hip_datatype(const std::string& value)
 {
     return
-        value == "f16_r" || value == "h" ? HIPBLAS_R_16F  :
-        value == "f32_r" || value == "s" ? HIPBLAS_R_32F  :
-        value == "f64_r" || value == "d" ? HIPBLAS_R_64F  :
-        value == "bf16_r"                ? HIPBLAS_R_16B :
-        value == "f16_c"                 ? HIPBLAS_C_16B  :
-        value == "f32_c" || value == "c" ? HIPBLAS_C_32F  :
-        value == "f64_c" || value == "z" ? HIPBLAS_C_64F  :
-        value == "bf16_c"                ? HIPBLAS_C_16B :
-        value == "i8_r"                  ? HIPBLAS_R_8I   :
-        value == "i32_r"                 ? HIPBLAS_R_32I  :
-        value == "i8_c"                  ? HIPBLAS_C_8I   :
-        value == "i32_c"                 ? HIPBLAS_C_32I  :
-        value == "u8_r"                  ? HIPBLAS_R_8U   :
-        value == "u32_r"                 ? HIPBLAS_R_32U  :
-        value == "u8_c"                  ? HIPBLAS_C_8U   :
-        value == "u32_c"                 ? HIPBLAS_C_32U  :
-        HIPBLAS_DATATYPE_INVALID;
+        value == "f16_r" || value == "h" ? HIP_R_16F  :
+        value == "f32_r" || value == "s" ? HIP_R_32F  :
+        value == "f64_r" || value == "d" ? HIP_R_64F  :
+        value == "bf16_r"                ? HIP_R_16BF :
+        value == "f16_c"                 ? HIP_C_16BF  :
+        value == "f32_c" || value == "c" ? HIP_C_32F  :
+        value == "f64_c" || value == "z" ? HIP_C_64F  :
+        value == "bf16_c"                ? HIP_C_16BF :
+        value == "i8_r"                  ? HIP_R_8I   :
+        value == "i32_r"                 ? HIP_R_32I  :
+        value == "i8_c"                  ? HIP_C_8I   :
+        value == "i32_c"                 ? HIP_C_32I  :
+        value == "u8_r"                  ? HIP_R_8U   :
+        value == "u32_r"                 ? HIP_R_32U  :
+        value == "u8_c"                  ? HIP_C_8U   :
+        value == "u32_c"                 ? HIP_C_32U  :
+        HIP_R_32F;
 }
 
+/*! \brief Convert string to a hipblasComputeType_t. Returns HIPBLAS_COMPUTE_32F if invalid string. */
 hipblasComputeType_t string2hipblas_computetype(const std::string& value)
 {
     return value == "c16f"           ? HIPBLAS_COMPUTE_16F :

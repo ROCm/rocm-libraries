@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -22,14 +22,14 @@
 set( hipblas_samples_common ../common/utility.cpp )
 
 add_executable( hipblas-example-sscal example_sscal.cpp ${hipblas_samples_common} )
-add_executable( hipblas-example-scal-ex-v2 example_scal_ex_v2.cpp ${hipblas_samples_common} )
+add_executable( hipblas-example-scal-ex example_scal_ex.cpp ${hipblas_samples_common} )
 add_executable( hipblas-example-sgemm example_sgemm.cpp ${hipblas_samples_common} )
 add_executable( hipblas-example-strmm example_strmm.cpp ${hipblas_samples_common} )
 add_executable( hipblas-example-sgemm-strided-batched example_sgemm_strided_batched.cpp ${hipblas_samples_common} )
 add_executable( hipblas-example-c example_c.c ${hipblas_samples_common} )
 add_executable( hipblas-example-hip-complex-her2 example_hip_complex_her2.cpp ${hipblas_samples_common} )
 add_executable( hipblas-example-hgemm-half example_hgemm_hip_half.cpp ${hipblas_samples_common})
-add_executable( hipblas-example-gemmEx_v2 example_gemm_ex_v2.cpp ${hipblas_samples_common})
+add_executable( hipblas-example-gemmEx example_gemm_ex.cpp ${hipblas_samples_common})
 
 if( CMAKE_CXX_COMPILER MATCHES ".*/hipcc$" OR CMAKE_CXX_COMPILER MATCHES ".*/amdclang\\+\\+$")
   add_executable( hipblas-example-hgemm example_hgemm.cpp ${hipblas_samples_common} )
@@ -62,7 +62,7 @@ if( NOT TARGET hipblas )
   endif( )
 endif( )
 
-list (APPEND hipblas-example-executables hipblas-example-sscal hipblas-example-scal-ex-v2 hipblas-example-strmm hipblas-example-sgemm hipblas-example-sgemm-strided-batched hipblas-example-gemmEx_v2 hipblas-example-hip-complex-her2 hipblas-example-hgemm-half hipblas-example-c ${sample_list_fortran} )
+list (APPEND hipblas-example-executables hipblas-example-sscal hipblas-example-scal-ex hipblas-example-strmm hipblas-example-sgemm hipblas-example-sgemm-strided-batched hipblas-example-gemmEx hipblas-example-hip-complex-her2 hipblas-example-hgemm-half hipblas-example-c ${sample_list_fortran} )
 if( CMAKE_CXX_COMPILER MATCHES ".*/hipcc$" OR CMAKE_CXX_COMPILER MATCHES ".*/amdclang\\+\\+$")
   list (APPEND hipblas-example-executables hipblas-example-hgemm)
 endif( )
@@ -72,13 +72,12 @@ if(HIP_PLATFORM STREQUAL amd)
 endif()
 
 target_compile_options( hipblas-example-hgemm-half PRIVATE -DHIPBLAS_USE_HIP_HALF )
-target_compile_options( hipblas-example-gemmEx_v2 PRIVATE -DHIPBLAS_USE_HIP_HALF -DHIPBLAS_V2 )
-target_compile_options( hipblas-example-scal-ex-v2 PRIVATE -DHIPBLAS_V2)
+target_compile_options( hipblas-example-gemmEx PRIVATE -DHIPBLAS_USE_HIP_HALF )
 
 # HIP on Windows: xhip is required with clang++ to get __half defined
 if ( WIN32 )
 target_compile_options( hipblas-example-hgemm-half PRIVATE -xhip )
-target_compile_options( hipblas-example-gemmEx_v2 PRIVATE -xhip )
+target_compile_options( hipblas-example-gemmEx PRIVATE -xhip )
 endif()
 
 foreach( exe IN LISTS hipblas-example-executables)
