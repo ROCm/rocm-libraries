@@ -448,10 +448,7 @@ struct radix_key_codec
     template<typename Destination, typename Source>
     static ROCPRIM_HOST_DEVICE
     auto bit_cast(const Source& source)
-        -> std::enable_if_t<sizeof(Destination) == sizeof(Source)
-                                && std::is_trivially_copyable<Destination>::value
-                                && std::is_trivially_copyable<Source>::value,
-                            Destination>
+        -> std::enable_if_t<rocprim::detail::is_valid_bit_cast<Destination, Source>, Destination>
     {
     #if defined(__has_builtin) && __has_builtin(__builtin_bit_cast)
         return __builtin_bit_cast(Destination, source);

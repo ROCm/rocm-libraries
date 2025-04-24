@@ -443,7 +443,9 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKeyValue)
     }
 
     if (TestFixture::use_graphs)
+    {
         HIP_CHECK(hipStreamDestroy(stream));
+    }
 }
 
 template<bool UseGraphs = false, typename config = rocprim::default_config>

@@ -545,6 +545,14 @@ struct word_type<const volatile T> : word_type<T>
 
 } // namespace detail
 
+namespace detail
+{
+template<typename Destination, typename Source>
+constexpr bool is_valid_bit_cast
+    = sizeof(Destination) == sizeof(Source) && std::is_trivially_copyable<Destination>::value
+      && std::is_trivially_copyable<Source>::value;
+} // namespace detail
+
 END_ROCPRIM_NAMESPACE
 
 /// @}
