@@ -43,7 +43,10 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
 
         max_factor_pp = *std::max_element(factors_pp.begin(), factors_pp.end());
 
-        transforms_per_block_pp = transforms_per_block / max_factor_pp;
+        transforms_per_block_pp = transforms_per_block;
+
+        transforms_per_block *= max_factor_pp;
+        workgroup_size *= max_factor_pp;
     }
 
     unsigned int        transforms_per_block_pp;
@@ -236,30 +239,12 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
         stmts += LineBreak{};
 
         stmts += Assign{batch, block_id / plength};
-        if(!direct_to_from_reg)
-        {
-            stmts
-                += Assign{transform,
-                          tile_index * transforms_per_block_pp + thread_id / threads_per_transform};
-            stmts += Assign{stride_lds, (length + get_lds_padding())};
 
-            stmts += MultiplyAssign(stride_lds, Literal{max_factor_pp});
-        }
-        else
-        {
-            stmts += Assign{
-                transform,
-                Ternary{lds_linear,
-                        tile_index * transforms_per_block_pp + thread_id / threads_per_transform,
-                        tile_index * transforms_per_block_pp
-                            + thread_id % transforms_per_block_pp}};
-            stmts += Assign{stride_lds,
-                            Ternary{lds_linear,
-                                    length + get_lds_padding(),
-                                    transforms_per_block_pp + get_lds_padding()}};
+        stmts += Assign{transform,
+                        tile_index * transforms_per_block_pp + thread_id / threads_per_transform};
+        stmts += Assign{stride_lds, (length + get_lds_padding())};
 
-            stmts += MultiplyAssign(stride_lds, Literal{max_factor_pp});
-        }
+        stmts += MultiplyAssign(stride_lds, Literal{max_factor_pp});
 
         stmts += Declaration{
             in_bound,
@@ -284,17 +269,9 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
             offset_pp, offset + Parens(offset / length) * Literal{192} + batch_new * stride[dim]);
         stmts += Declaration(offset_tid_hor, offset_pp + tid_hor_pp * stride[1]);
 
-        if(!direct_to_from_reg)
-            stmts += Assign{transform,
-                            tile_index * transforms_per_block_pp
-                                + thread_id / (threads_per_transform * max_factor_pp)};
-        else
-            stmts += Assign{transform,
-                            Ternary{lds_linear,
-                                    tile_index * transforms_per_block_pp
-                                        + thread_id / (threads_per_transform * max_factor_pp),
-                                    tile_index * transforms_per_block_pp
-                                        + thread_id % transforms_per_block_pp}};
+        stmts += Assign{transform,
+                        tile_index * transforms_per_block_pp
+                            + thread_id / (threads_per_transform * max_factor_pp)};
 
         stmts += Assign{offset_lds,
                         Ternary{lds_linear,
@@ -412,75 +389,33 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
         return work;
     }
 
-    StatementList store_to_global(bool store_registers) override
+    StatementList store_to_global(bool store_registers = false) override
     {
         StatementList stmts;
         StatementList tmp_stmts;
         Expression    pred{tile_index * transforms_per_block_pp + tid_hor < lengths[1]};
 
-        if(!store_registers)
-        {
-            auto stripmine_w = transforms_per_block;
-            auto stripmine_h = workgroup_size / stripmine_w;
+        auto stripmine_w = transforms_per_block;
+        auto stripmine_h = workgroup_size / stripmine_w;
 
-            auto offset_tile_wbuf = [&](unsigned int i) {
-                return offset_tid_hor + (thread_new + i * stripmine_h) * stride0;
-            };
-            auto offset_tile_rlds = [&](unsigned int i) {
-                return tid_hor_lds * stride_lds
-                       + (thread_lds + i * stripmine_h * max_factor_pp) * 1;
-            };
+        auto offset_tile_wbuf = [&](unsigned int i) {
+            return offset_tid_hor + (thread_new + i * stripmine_h) * stride0;
+        };
+        auto offset_tile_rlds = [&](unsigned int i) {
+            return tid_hor_lds * stride_lds + (thread_lds + i * stripmine_h * max_factor_pp) * 1;
+        };
 
-            for(unsigned int i = 0; i < length / stripmine_h; ++i)
-                tmp_stmts += StoreGlobal{
-                    buf,
-                    CallExpr{"local_transpose_pp_length" + std::to_string(length) + "_device",
-                             {offset_tile_wbuf(i)}},
-                    lds_complex[offset_tile_rlds(i)]};
+        for(unsigned int i = 0; i < length / stripmine_h; ++i)
+            tmp_stmts += StoreGlobal{
+                buf,
+                CallExpr{"local_transpose_pp_length" + std::to_string(length) + "_device",
+                         {offset_tile_wbuf(i)}},
+                lds_complex[offset_tile_rlds(i)]};
 
-            stmts += CommentLines{
-                "no intrinsic when store from lds. FIXME- check why use nested branch is better"};
-            stmts += If{in_bound, tmp_stmts};
-            stmts += If{Not{in_bound}, {If{pred, tmp_stmts}}};
-        }
-        else
-        {
-            StatementList intrinsic_stmts;
-            StatementList non_intrinsic_stmts;
-
-            auto width     = factors.back();
-            auto cumheight = product(factors.begin(), factors.begin() + (factors.size() - 1));
-            auto height    = static_cast<float>(length) / width / threads_per_transform;
-
-            auto store_global = std::mem_fn(&StockhamKernelCC::store_global_generator);
-            intrinsic_stmts += CommentLines{"use intrinsic store"};
-            intrinsic_stmts += add_work(std::bind(store_global,
-                                                  this,
-                                                  _1,
-                                                  _2,
-                                                  _3,
-                                                  _4,
-                                                  _5,
-                                                  cumheight,
-                                                  true,
-                                                  Expression{Parens(in_bound || pred)}),
-                                        width,
-                                        height,
-                                        ThreadGuardMode::GURAD_BY_FUNC_ARG);
-
-            tmp_stmts += add_work(
-                std::bind(
-                    store_global, this, _1, _2, _3, _4, _5, cumheight, false, Expression{in_bound}),
-                width,
-                height,
-                ThreadGuardMode::GUARD_BY_IF);
-            non_intrinsic_stmts += CommentLines{"can't use intrinsic store"};
-            non_intrinsic_stmts += If{in_bound, tmp_stmts};
-            non_intrinsic_stmts += If{!in_bound, {If{pred, tmp_stmts}}};
-
-            stmts += If{intrinsic_mode == "IntrinsicAccessType::ENABLE_BOTH", intrinsic_stmts};
-            stmts += Else{non_intrinsic_stmts};
-        }
+        stmts += CommentLines{
+            "no intrinsic when store from lds. FIXME- check why use nested branch is better"};
+        stmts += If{in_bound, tmp_stmts};
+        stmts += If{Not{in_bound}, {If{pred, tmp_stmts}}};
 
         return stmts;
     }
@@ -793,6 +728,16 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
         return work;
     }
 
+    // Partial-pass steps 3/4 right after load_from_global
+    // and local transposition just before store_to_global
+    // do not allow direct_from_reg
+    StatementList set_direct_to_from_registers() override
+    {
+        return {Declaration{direct_load_to_reg, Literal{"false"}},
+                Declaration{direct_store_from_reg, Literal{"false"}},
+                Declaration{lds_linear, Literal{"true"}}};
+    }
+
     ArgumentList device_arguments() override
     {
         ArgumentList args = StockhamKernel::device_arguments();
@@ -981,19 +926,7 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
         loadlds += load_from_global(false);
         loadlds += LineBreak{};
 
-        if(!direct_to_from_reg)
-        {
-            body += loadlds;
-        }
-        else
-        {
-            StatementList loadr;
-            loadr += CommentLines{"load global into registers"};
-            loadr += load_from_global(true);
-
-            body += If{direct_load_to_reg, loadr};
-            body += Else{loadlds};
-        }
+        body += loadlds;
 
         body += perform_partial_pass_step_3_4();
 
@@ -1018,10 +951,8 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
         preLoad += Call{"lds_to_reg_input_pp_length" + std::to_string(length) + "_device",
                         pre_post_lds_tmpl,
                         pre_post_lds_args};
-        if(!direct_to_from_reg)
-            body += preLoad;
-        else
-            body += If{!direct_load_to_reg, preLoad};
+
+        body += preLoad;
 
         body += LineBreak{};
         body += CommentLines{"transform"};
@@ -1040,18 +971,15 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
         }
 
         // after finishing the transform job (core device function)
-        // we call a post-store reg-to-lds function here, but it's not always doing things.
-        // If we're doing direct-from-reg, this function simply returns.
+        // we call a post-store reg-to-lds function here
         body += LineBreak{};
         body += CommentLines{"call a post-store from registers to lds (if necessary)"};
         StatementList postStore;
         postStore += Call{"lds_from_reg_output_pp_length" + std::to_string(length) + "_device",
                           pre_post_lds_tmpl,
                           pre_post_lds_args};
-        if(!direct_to_from_reg)
-            body += postStore;
-        else
-            body += If{!direct_store_from_reg, postStore};
+
+        body += postStore;
 
         body += LineBreak{};
         StatementList storelds;
@@ -1060,21 +988,9 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
         storelds += LineBreak{};
         storelds += CommentLines{"store global"};
         storelds += SyncThreads{};
-        storelds += store_to_global(false);
+        storelds += store_to_global();
 
-        if(!direct_to_from_reg)
-        {
-            body += storelds;
-        }
-        else
-        {
-            StatementList storer;
-            storer += CommentLines{"store registers into global"};
-            storer += store_to_global(true);
-
-            body += If{direct_store_from_reg, storer};
-            body += Else{storelds};
-        }
+        body += storelds;
 
         f.templates = global_templates();
         f.arguments = global_arguments();

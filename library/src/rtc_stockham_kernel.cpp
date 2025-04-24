@@ -72,6 +72,23 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
         // the generator as-is
         kernel = node.pool.get_kernel(key);
 
+        if(node.applyPartialPass)
+        {
+            if(node.scheme == CS_KERNEL_STOCKHAM_BLOCK_CC)
+            {
+                kernel->threads_per_transform[0] = 8;
+                kernel->workgroup_size           = 64;
+            }
+            else if(node.scheme == CS_KERNEL_STOCKHAM)
+            {
+                kernel->threads_per_transform[0] = 8;
+                kernel->workgroup_size           = 128;
+            }
+
+            kernel->transforms_per_block
+                = kernel->workgroup_size / kernel->threads_per_transform[0];
+        }
+
         std::vector<unsigned int> factors;
         std::copy(kernel->factors.begin(), kernel->factors.end(), std::back_inserter(factors));
         std::vector<unsigned int> precisions = {static_cast<unsigned int>(node.precision)};
