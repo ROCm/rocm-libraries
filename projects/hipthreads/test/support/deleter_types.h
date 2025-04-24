@@ -211,6 +211,8 @@ class CDeleter {
 public:
   __host__ __device__ TEST_CONSTEXPR_CXX23 CDeleter() : state_(0) {}
   __host__ __device__ TEST_CONSTEXPR_CXX23 explicit CDeleter(int s) : state_(s) {}
+  __host__ __device__ TEST_CONSTEXPR_CXX23 CDeleter(const CDeleter&) = default;
+  __host__ __device__ TEST_CONSTEXPR_CXX23 CDeleter& operator=(const CDeleter&) = default;
   __host__ __device__ TEST_CONSTEXPR_CXX23 ~CDeleter() {
     assert(state_ >= 0);
     state_ = -1;
@@ -244,7 +246,8 @@ public:
   __host__ __device__ TEST_CONSTEXPR_CXX23 explicit CDeleter(int s) : state_(s) {}
   template <class U>
   __host__ __device__ TEST_CONSTEXPR_CXX23 CDeleter(const CDeleter<U>& d) : state_(d.state()) {}
-
+  __host__ __device__ TEST_CONSTEXPR_CXX23 CDeleter(const CDeleter&) = default;
+  __host__ __device__ TEST_CONSTEXPR_CXX23 CDeleter& operator=(const CDeleter&) = default;
   __host__ __device__ TEST_CONSTEXPR_CXX23 ~CDeleter() {
     assert(state_ >= 0);
     state_ = -1;
