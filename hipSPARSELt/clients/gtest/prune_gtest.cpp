@@ -69,6 +69,8 @@ namespace
                 testing_prune<Ti, To, Tc, hipsparselt_batch_type::strided_batched>(arg);
             else if(!strcmp(arg.function, "prune_bad_arg"))
                 testing_prune_bad_arg<Ti, To, Tc>(arg);
+            else if(!strcmp(arg.function, "prune_check_bad_arg"))
+                testing_prune_check_bad_arg<Ti, To, Tc>(arg);
             else
                 FAIL() << "Internal error: Test called with unknown function: " << arg.function;
         }
@@ -87,7 +89,8 @@ namespace
         {
             return !strcmp(arg.function, "prune") || !strcmp(arg.function, "prune_batched")
                    || !strcmp(arg.function, "prune_strided_batched")
-                   || !strcmp(arg.function, "prune_bad_arg");
+                   || !strcmp(arg.function, "prune_bad_arg")
+                   || !strcmp(arg.function, "prune_check_bad_arg");
         }
 
         // Google Test name suffix based on parameters
@@ -130,10 +133,9 @@ namespace
 
                 if(strstr(arg.function, "_strided_batched") != nullptr)
                     name << '_' << (arg.sparse_b ? arg.stride_b : arg.stride_a);
-
-                if(arg.func_version > 1)
-                    name << "_v" << arg.func_version;
             }
+            if(arg.func_version > 1)
+                name << "_v" << arg.func_version;
             return std::move(name);
         }
     };

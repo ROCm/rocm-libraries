@@ -210,6 +210,7 @@ else()
 
         message (STATUS "using GIT Tensile fork=${tensile_fork} from branch=${tensile_tag}")
       endif()
+      add_subdirectory(${VIRTUALENV_SITE_PATH}/rocisa)
       message(STATUS "Adding ${VIRTUALENV_HOME_DIR} to CMAKE_PREFIX_PATH")
       list(APPEND CMAKE_PREFIX_PATH ${VIRTUALENV_HOME_DIR})
       if (TENSILE_VERSION)

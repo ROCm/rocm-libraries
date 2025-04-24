@@ -12,13 +12,6 @@ Definitions:
     - { transA: T, transB: T }
 
 Tests:
-- name: prune_bad_arg
-  category: pre_checkin
-  function:
-    - prune_bad_arg: *real_precisions_2b
-  transA: N
-  transB: N
-
 # Split *real_precisions_2b into *int8 and *nonint8_real_precisions. Since int8 has flags 0,1
 
 - name: prune_small

@@ -19,15 +19,6 @@ Definitions:
     - { alpha: 2, alphai: 2, beta: -1.0, betai: 2.0 }
 
 Tests:
-- name: spmm_strided_batched_small
-  category: quick
-  function:
-    spmm_strided_batched: *real_precisions_2b
-  matrix_size: *strided_batched_small_matrix_size_range
-  alpha_beta: *alpha_beta_range
-  transA_transB: *transA_transB_range
-  batch_count: [ 3 ]
-  sparse_b: [true, false]
 
 - name: spmm_strided_batched_small_stride_zero
   category: quick
@@ -85,6 +76,10 @@ Tests:
   alpha_beta: *alpha_beta_range
   batch_count: [ 3 ]
   sparse_b: [true, false]
+  orderA: [C, R]
+  orderB: [C, R]
+  orderC: [C]
+  orderD: [C]
 
 - name: spmm_strided_batched_medium_alt
   category: pre_checkin

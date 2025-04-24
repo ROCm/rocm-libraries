@@ -59,31 +59,6 @@ extern "C" {
         }                                                                 \
     }
 
-hipsparseStatus_t hipErrorToHIPSPARSEStatus(hipError_t status)
-{
-    switch(status)
-    {
-    case hipSuccess:
-        return HIPSPARSE_STATUS_SUCCESS;
-    case hipErrorMemoryAllocation:
-        return HIPSPARSE_STATUS_ALLOC_FAILED;
-    case hipErrorLaunchOutOfResources:
-        return HIPSPARSE_STATUS_INSUFFICIENT_RESOURCES;
-    case hipErrorInvalidDevicePointer:
-        return HIPSPARSE_STATUS_INVALID_VALUE;
-    case hipErrorInvalidDevice:
-    case hipErrorInvalidResourceHandle:
-        return HIPSPARSE_STATUS_NOT_INITIALIZED;
-    case hipErrorInvalidValue:
-        return HIPSPARSE_STATUS_INVALID_VALUE;
-    case hipErrorNoDevice:
-    case hipErrorUnknown:
-        return HIPSPARSE_STATUS_INTERNAL_ERROR;
-    default:
-        return HIPSPARSE_STATUS_INTERNAL_ERROR;
-    }
-}
-
 hipsparseStatus_t RocSparseLtStatusToHIPStatus(rocsparselt_status_ status)
 {
     switch(status)
@@ -1106,7 +1081,7 @@ catch(...)
 hipsparseStatus_t hipsparseLtGetGitRevision(hipsparseLtHandle_t handle, char* rev)
 try
 {
-    // Get hipSPARSE revision
+    // Get hipSPARSELt revision
     if(rev == nullptr)
     {
         return HIPSPARSE_STATUS_INVALID_VALUE;

@@ -117,10 +117,9 @@ namespace
 
                 if(strstr(arg.function, "_strided_batched") != nullptr)
                     name << '_' << (arg.sparse_b ? arg.stride_b : arg.stride_a);
-
-                if(arg.func_version > 1)
-                    name << "_v" << arg.func_version;
             }
+            if(arg.func_version > 1)
+                name << "_v" << arg.func_version;
             return std::move(name);
         }
     };

@@ -72,6 +72,7 @@ if(NOT BUILD_CUDA)
       TensileCreateLibraryFiles(
         "${CMAKE_CURRENT_SOURCE_DIR}/src/hcc_detail/rocsparselt/src/spmm/Tensile/Logic/${Tensile_LOGIC}"
         "${PROJECT_BINARY_DIR}/Tensile"
+        "TENSILE_LIBRARY_TARGET"
         ARCHITECTURE        ${Tensile_ARCHITECTURE}
         CODE_OBJECT_VERSION ${Tensile_CODE_OBJECT_VERSION}
         COMPILER            ${Tensile_COMPILER}
@@ -84,6 +85,7 @@ if(NOT BUILD_CUDA)
       TensileCreateLibraryFiles(
         "${CMAKE_CURRENT_SOURCE_DIR}/src/hcc_detail/rocsparselt/src/spmm/Tensile/Logic/${Tensile_LOGIC}"
         "${PROJECT_BINARY_DIR}/Tensile"
+        "TENSILE_LIBRARY_TARGET"
         ARCHITECTURE        ${Tensile_ARCHITECTURE}
         CODE_OBJECT_VERSION ${Tensile_CODE_OBJECT_VERSION}
         COMPILER            ${Tensile_COMPILER}
@@ -93,6 +95,7 @@ if(NOT BUILD_CUDA)
       )
     endif()
 
+    add_dependencies(TENSILE_LIBRARY_TARGET rocisa)
     # Create a unique name for TensileHost compiled for rocBLAS
     set_target_properties( TensileHost PROPERTIES OUTPUT_NAME rocsparselt-tensile CXX_EXTENSIONS NO )
 
