@@ -44,7 +44,9 @@ namespace
     struct logging_testing<
         T,
         std::enable_if_t<
-            std::is_same_v<T, float> || std::is_same_v<T, double> || rocblas_is_complex<T>>>
+            std::is_same_v<
+                T,
+                rocblas_half> || std::is_same_v<T, float> || std::is_same_v<T, double> || rocblas_is_complex<T>>>
         : rocblas_test_valid
     {
         void operator()(const Arguments& arg)

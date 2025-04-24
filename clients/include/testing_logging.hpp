@@ -274,21 +274,29 @@ void testing_logging(const Arguments& arg)
         rocblas_set_pointer_mode(handle, test_pointer_mode);
         rocblas_get_pointer_mode(handle, &mode);
 
-        // *************************************************** BLAS1 ***************************************************
-        if(arg.api == C_64)
+        if constexpr(!std::is_same_v<T, rocblas_half>)
         {
-            rocblas_iamax_64<T>(handle, n, dx, incx, i64_result);
-            rocblas_iamin_64<T>(handle, n, dx, incx, i64_result);
-        }
-        else
-        {
-            rocblas_iamax<T>(handle, n, dx, incx, i32_result);
-            rocblas_iamin<T>(handle, n, dx, incx, i32_result);
-        }
 
-        auto rocblas_asum_fn    = rocblas_asum<T>;
-        auto rocblas_asum_fn_64 = rocblas_asum_64<T>;
-        DAPI_CHECK(rocblas_asum_fn, (handle, n, dx, incx, real_result));
+            // *************************************************** BLAS1 ***************************************************
+            if(arg.api == C_64)
+            {
+                rocblas_iamax_64<T>(handle, n, dx, incx, i64_result);
+                rocblas_iamin_64<T>(handle, n, dx, incx, i64_result);
+            }
+            else
+            {
+                rocblas_iamax<T>(handle, n, dx, incx, i32_result);
+                rocblas_iamin<T>(handle, n, dx, incx, i32_result);
+            }
+
+            auto rocblas_asum_fn    = rocblas_asum<T>;
+            auto rocblas_asum_fn_64 = rocblas_asum_64<T>;
+            DAPI_CHECK(rocblas_asum_fn, (handle, n, dx, incx, real_result));
+
+            auto rocblas_copy_fn    = rocblas_copy<T>;
+            auto rocblas_copy_fn_64 = rocblas_copy_64<T>;
+            DAPI_CHECK(rocblas_copy_fn, (handle, n, dx, incx, dy, incy));
+        }
 
         auto rocblas_axpy_fn    = rocblas_axpy<T>;
         auto rocblas_axpy_fn_64 = rocblas_axpy_64<T>;
@@ -300,137 +308,140 @@ void testing_logging(const Arguments& arg)
         rocblas_datatype dt = rocblas_type2datatype<T>();
         DAPI_CHECK(rocblas_axpy_ex_fn, (handle, n, alpha, dt, dx, dt, incx, dy, dt, incy, dt));
 
-        auto rocblas_copy_fn    = rocblas_copy<T>;
-        auto rocblas_copy_fn_64 = rocblas_copy_64<T>;
-        DAPI_CHECK(rocblas_copy_fn, (handle, n, dx, incx, dy, incy));
-
         auto rocblas_dot_fn    = rocblas_dot<T>;
         auto rocblas_dot_fn_64 = rocblas_dot_64<T>;
         DAPI_CHECK(rocblas_dot_fn, (handle, n, dx, incx, dy, incy, result));
 
-        auto rocblas_nrm2_fn    = rocblas_nrm2<T>;
-        auto rocblas_nrm2_fn_64 = rocblas_nrm2_64<T>;
-        DAPI_CHECK(rocblas_nrm2_fn, (handle, n, dx, incx, real_result));
-
-        auto rocblas_scal_r_fn    = rocblas_scal<T, real_t<T>>;
-        auto rocblas_scal_r_fn_64 = rocblas_scal_64<T, real_t<T>>;
-        DAPI_CHECK(rocblas_scal_r_fn, (handle, n, real_alpha, dx, incx));
-
-        auto rocblas_scal_fn    = rocblas_scal<T>;
-        auto rocblas_scal_fn_64 = rocblas_scal_64<T>;
-        DAPI_CHECK(rocblas_scal_fn, (handle, n, alpha, dx, incx));
-
-        auto rocblas_swap_fn    = rocblas_swap<T>;
-        auto rocblas_swap_fn_64 = rocblas_swap_64<T>;
-        DAPI_CHECK(rocblas_swap_fn, (handle, n, dx, incx, dy, incy));
-
-        // *************************************************** BLAS2 ***************************************************
-
-        auto rocblas_gbmv_fn    = rocblas_gbmv<T>;
-        auto rocblas_gbmv_fn_64 = rocblas_gbmv_64<T>;
-        DAPI_CHECK(rocblas_gbmv_fn,
-                   (handle, transA, m, n, kl, ku, alpha, da, lda, dx, incx, beta, dy, incy));
-
-        auto rocblas_gemv_fn    = rocblas_gemv<T>;
-        auto rocblas_gemv_fn_64 = rocblas_gemv_64<T>;
-        DAPI_CHECK(rocblas_gemv_fn,
-                   (handle, transA, m, n, alpha, da, lda, dx, incx, beta, dy, incy));
-
-        auto rocblas_ger_fn    = rocblas_ger<T, false>;
-        auto rocblas_ger_fn_64 = rocblas_ger_64<T, false>;
-        DAPI_CHECK(rocblas_ger_fn, (handle, m, n, alpha, dx, incx, dy, incy, da, lda));
-
-        if constexpr(!rocblas_is_complex<T>)
+        if constexpr(!std::is_same_v<T, rocblas_half>)
         {
-            auto rocblas_sbmv_fn    = rocblas_sbmv<T>;
-            auto rocblas_sbmv_fn_64 = rocblas_sbmv_64<T>;
-            DAPI_CHECK(rocblas_sbmv_fn,
-                       (handle, uplo, n, k, alpha, da, lda, dx, incx, beta, dy, incy));
 
-            auto rocblas_spmv_fn    = rocblas_spmv<T>;
-            auto rocblas_spmv_fn_64 = rocblas_spmv_64<T>;
-            DAPI_CHECK(rocblas_spmv_fn, (handle, uplo, n, alpha, da, dx, incx, beta, dy, incy));
+            auto rocblas_nrm2_fn    = rocblas_nrm2<T>;
+            auto rocblas_nrm2_fn_64 = rocblas_nrm2_64<T>;
+            DAPI_CHECK(rocblas_nrm2_fn, (handle, n, dx, incx, real_result));
 
-            auto rocblas_spr_fn    = rocblas_spr<T>;
-            auto rocblas_spr_fn_64 = rocblas_spr_64<T>;
-            DAPI_CHECK(rocblas_spr_fn, (handle, uplo, n, alpha, dx, incx, da));
+            auto rocblas_scal_r_fn    = rocblas_scal<T, real_t<T>>;
+            auto rocblas_scal_r_fn_64 = rocblas_scal_64<T, real_t<T>>;
+            DAPI_CHECK(rocblas_scal_r_fn, (handle, n, real_alpha, dx, incx));
 
-            auto rocblas_spr2_fn    = rocblas_spr2<T>;
-            auto rocblas_spr2_fn_64 = rocblas_spr2_64<T>;
-            DAPI_CHECK(rocblas_spr2_fn, (handle, uplo, n, alpha, dx, incx, dy, incy, da));
-        }
+            auto rocblas_scal_fn    = rocblas_scal<T>;
+            auto rocblas_scal_fn_64 = rocblas_scal_64<T>;
+            DAPI_CHECK(rocblas_scal_fn, (handle, n, alpha, dx, incx));
 
-        auto rocblas_symv_fn    = rocblas_symv<T>;
-        auto rocblas_symv_fn_64 = rocblas_symv_64<T>;
-        DAPI_CHECK(rocblas_symv_fn, (handle, uplo, n, alpha, da, lda, dx, incx, beta, dy, incy));
+            auto rocblas_swap_fn    = rocblas_swap<T>;
+            auto rocblas_swap_fn_64 = rocblas_swap_64<T>;
+            DAPI_CHECK(rocblas_swap_fn, (handle, n, dx, incx, dy, incy));
 
-        auto rocblas_syr_fn    = rocblas_syr<T>;
-        auto rocblas_syr_fn_64 = rocblas_syr_64<T>;
-        DAPI_CHECK(rocblas_syr_fn, (handle, uplo, n, alpha, dx, incx, da, lda));
+            // *************************************************** BLAS2 ***************************************************
 
-        auto rocblas_syr2_fn    = rocblas_syr2<T>;
-        auto rocblas_syr2_fn_64 = rocblas_syr2_64<T>;
-        DAPI_CHECK(rocblas_syr2_fn, (handle, uplo, n, alpha, dx, incx, dy, incy, da, lda));
+            auto rocblas_gbmv_fn    = rocblas_gbmv<T>;
+            auto rocblas_gbmv_fn_64 = rocblas_gbmv_64<T>;
+            DAPI_CHECK(rocblas_gbmv_fn,
+                       (handle, transA, m, n, kl, ku, alpha, da, lda, dx, incx, beta, dy, incy));
 
-        auto rocblas_tbmv_fn    = rocblas_tbmv<T>;
-        auto rocblas_tbmv_fn_64 = rocblas_tbmv_64<T>;
-        DAPI_CHECK(rocblas_tbmv_fn, (handle, uplo, transA, diag, n, k, da, lda, dx, incx));
+            auto rocblas_gemv_fn    = rocblas_gemv<T>;
+            auto rocblas_gemv_fn_64 = rocblas_gemv_64<T>;
+            DAPI_CHECK(rocblas_gemv_fn,
+                       (handle, transA, m, n, alpha, da, lda, dx, incx, beta, dy, incy));
 
-        auto rocblas_tpmv_fn    = rocblas_tpmv<T>;
-        auto rocblas_tpmv_fn_64 = rocblas_tpmv_64<T>;
-        DAPI_CHECK(rocblas_tpmv_fn, (handle, uplo, transA, diag, n, da, dx, incx));
+            auto rocblas_ger_fn    = rocblas_ger<T, false>;
+            auto rocblas_ger_fn_64 = rocblas_ger_64<T, false>;
+            DAPI_CHECK(rocblas_ger_fn, (handle, m, n, alpha, dx, incx, dy, incy, da, lda));
 
-        auto rocblas_trmv_fn    = rocblas_trmv<T>;
-        auto rocblas_trmv_fn_64 = rocblas_trmv_64<T>;
-        DAPI_CHECK(rocblas_trmv_fn, (handle, uplo, transA, diag, n, da, lda, dx, incx));
+            if constexpr(!rocblas_is_complex<T>)
+            {
+                auto rocblas_sbmv_fn    = rocblas_sbmv<T>;
+                auto rocblas_sbmv_fn_64 = rocblas_sbmv_64<T>;
+                DAPI_CHECK(rocblas_sbmv_fn,
+                           (handle, uplo, n, k, alpha, da, lda, dx, incx, beta, dy, incy));
 
-        auto rocblas_tbsv_fn    = rocblas_tbsv<T>;
-        auto rocblas_tbsv_fn_64 = rocblas_tbsv_64<T>;
-        DAPI_CHECK(rocblas_tbsv_fn, (handle, uplo, transA, diag, n, k, da, lda, dx, incx));
+                auto rocblas_spmv_fn    = rocblas_spmv<T>;
+                auto rocblas_spmv_fn_64 = rocblas_spmv_64<T>;
+                DAPI_CHECK(rocblas_spmv_fn, (handle, uplo, n, alpha, da, dx, incx, beta, dy, incy));
 
-        auto rocblas_tpsv_fn    = rocblas_tpsv<T>;
-        auto rocblas_tpsv_fn_64 = rocblas_tpsv_64<T>;
-        DAPI_CHECK(rocblas_tpsv_fn, (handle, uplo, transA, diag, n, da, dx, incx));
+                auto rocblas_spr_fn    = rocblas_spr<T>;
+                auto rocblas_spr_fn_64 = rocblas_spr_64<T>;
+                DAPI_CHECK(rocblas_spr_fn, (handle, uplo, n, alpha, dx, incx, da));
 
-        auto rocblas_trsv_fn    = rocblas_trsv<T>;
-        auto rocblas_trsv_fn_64 = rocblas_trsv_64<T>;
-        DAPI_CHECK(rocblas_trsv_fn, (handle, uplo, transA, diag, n, da, lda, dx, incx));
+                auto rocblas_spr2_fn    = rocblas_spr2<T>;
+                auto rocblas_spr2_fn_64 = rocblas_spr2_64<T>;
+                DAPI_CHECK(rocblas_spr2_fn, (handle, uplo, n, alpha, dx, incx, dy, incy, da));
+            }
 
-        // *************************************************** BLAS3 ***************************************************
-        auto rocblas_trsm_fn    = rocblas_trsm<T>;
-        auto rocblas_trsm_fn_64 = rocblas_trsm_64<T>;
-        DAPI_CHECK(rocblas_trsm_fn,
-                   (handle, side, uplo, transA, diag, m, n, alpha, da, lda, db, ldb));
+            auto rocblas_symv_fn    = rocblas_symv<T>;
+            auto rocblas_symv_fn_64 = rocblas_symv_64<T>;
+            DAPI_CHECK(rocblas_symv_fn,
+                       (handle, uplo, n, alpha, da, lda, dx, incx, beta, dy, incy));
 
-        auto rocblas_geam_fn    = rocblas_geam<T>;
-        auto rocblas_geam_fn_64 = rocblas_geam_64<T>;
-        DAPI_CHECK(rocblas_geam_fn,
-                   (handle, transA, transB, m, n, alpha, da, lda, beta, db, ldb, dc, ldc));
+            auto rocblas_syr_fn    = rocblas_syr<T>;
+            auto rocblas_syr_fn_64 = rocblas_syr_64<T>;
+            DAPI_CHECK(rocblas_syr_fn, (handle, uplo, n, alpha, dx, incx, da, lda));
 
-        auto rocblas_symm_fn    = rocblas_symm<T>;
-        auto rocblas_symm_fn_64 = rocblas_symm_64<T>;
-        DAPI_CHECK(rocblas_symm_fn,
-                   (handle, side, uplo, m, n, alpha, da, lda, db, ldb, beta, dc, ldc));
+            auto rocblas_syr2_fn    = rocblas_syr2<T>;
+            auto rocblas_syr2_fn_64 = rocblas_syr2_64<T>;
+            DAPI_CHECK(rocblas_syr2_fn, (handle, uplo, n, alpha, dx, incx, dy, incy, da, lda));
 
-        auto rocblas_syrk_fn    = rocblas_syrk<T>;
-        auto rocblas_syrk_fn_64 = rocblas_syrk_64<T>;
-        DAPI_CHECK(rocblas_syrk_fn, (handle, uplo, transA, n, k, alpha, da, lda, beta, dc, ldc));
+            auto rocblas_tbmv_fn    = rocblas_tbmv<T>;
+            auto rocblas_tbmv_fn_64 = rocblas_tbmv_64<T>;
+            DAPI_CHECK(rocblas_tbmv_fn, (handle, uplo, transA, diag, n, k, da, lda, dx, incx));
 
-        auto rocblas_syr2k_fn    = rocblas_syr2k<T>;
-        auto rocblas_syr2k_fn_64 = rocblas_syr2k_64<T>;
-        DAPI_CHECK(rocblas_syr2k_fn,
-                   (handle, uplo, transA, n, k, alpha, da, lda, db, ldb, beta, dc, ldc));
+            auto rocblas_tpmv_fn    = rocblas_tpmv<T>;
+            auto rocblas_tpmv_fn_64 = rocblas_tpmv_64<T>;
+            DAPI_CHECK(rocblas_tpmv_fn, (handle, uplo, transA, diag, n, da, dx, incx));
 
-        auto rocblas_syrkx_fn    = rocblas_syrkx<T>;
-        auto rocblas_syrkx_fn_64 = rocblas_syrkx_64<T>;
-        DAPI_CHECK(rocblas_syrkx_fn,
-                   (handle, uplo, transA, n, k, alpha, da, lda, db, ldb, beta, dc, ldc));
+            auto rocblas_trmv_fn    = rocblas_trmv<T>;
+            auto rocblas_trmv_fn_64 = rocblas_trmv_64<T>;
+            DAPI_CHECK(rocblas_trmv_fn, (handle, uplo, transA, diag, n, da, lda, dx, incx));
 
-        auto rocblas_trmm_fn    = rocblas_trmm<T>;
-        auto rocblas_trmm_fn_64 = rocblas_trmm_64<T>;
-        DAPI_CHECK(rocblas_trmm_fn,
-                   (handle, side, uplo, transA, diag, m, n, alpha, da, lda, db, ldb, dc, ldc));
+            auto rocblas_tbsv_fn    = rocblas_tbsv<T>;
+            auto rocblas_tbsv_fn_64 = rocblas_tbsv_64<T>;
+            DAPI_CHECK(rocblas_tbsv_fn, (handle, uplo, transA, diag, n, k, da, lda, dx, incx));
 
+            auto rocblas_tpsv_fn    = rocblas_tpsv<T>;
+            auto rocblas_tpsv_fn_64 = rocblas_tpsv_64<T>;
+            DAPI_CHECK(rocblas_tpsv_fn, (handle, uplo, transA, diag, n, da, dx, incx));
+
+            auto rocblas_trsv_fn    = rocblas_trsv<T>;
+            auto rocblas_trsv_fn_64 = rocblas_trsv_64<T>;
+            DAPI_CHECK(rocblas_trsv_fn, (handle, uplo, transA, diag, n, da, lda, dx, incx));
+
+            // *************************************************** BLAS3 ***************************************************
+            auto rocblas_trsm_fn    = rocblas_trsm<T>;
+            auto rocblas_trsm_fn_64 = rocblas_trsm_64<T>;
+            DAPI_CHECK(rocblas_trsm_fn,
+                       (handle, side, uplo, transA, diag, m, n, alpha, da, lda, db, ldb));
+
+            auto rocblas_geam_fn    = rocblas_geam<T>;
+            auto rocblas_geam_fn_64 = rocblas_geam_64<T>;
+            DAPI_CHECK(rocblas_geam_fn,
+                       (handle, transA, transB, m, n, alpha, da, lda, beta, db, ldb, dc, ldc));
+
+            auto rocblas_symm_fn    = rocblas_symm<T>;
+            auto rocblas_symm_fn_64 = rocblas_symm_64<T>;
+            DAPI_CHECK(rocblas_symm_fn,
+                       (handle, side, uplo, m, n, alpha, da, lda, db, ldb, beta, dc, ldc));
+
+            auto rocblas_syrk_fn    = rocblas_syrk<T>;
+            auto rocblas_syrk_fn_64 = rocblas_syrk_64<T>;
+            DAPI_CHECK(rocblas_syrk_fn,
+                       (handle, uplo, transA, n, k, alpha, da, lda, beta, dc, ldc));
+
+            auto rocblas_syr2k_fn    = rocblas_syr2k<T>;
+            auto rocblas_syr2k_fn_64 = rocblas_syr2k_64<T>;
+            DAPI_CHECK(rocblas_syr2k_fn,
+                       (handle, uplo, transA, n, k, alpha, da, lda, db, ldb, beta, dc, ldc));
+
+            auto rocblas_syrkx_fn    = rocblas_syrkx<T>;
+            auto rocblas_syrkx_fn_64 = rocblas_syrkx_64<T>;
+            DAPI_CHECK(rocblas_syrkx_fn,
+                       (handle, uplo, transA, n, k, alpha, da, lda, db, ldb, beta, dc, ldc));
+
+            auto rocblas_trmm_fn    = rocblas_trmm<T>;
+            auto rocblas_trmm_fn_64 = rocblas_trmm_64<T>;
+            DAPI_CHECK(rocblas_trmm_fn,
+                       (handle, side, uplo, transA, diag, m, n, alpha, da, lda, db, ldb, dc, ldc));
+        } // !half
+
+        // half allowed
         auto rocblas_gemm_fn    = rocblas_gemm<T>;
         auto rocblas_gemm_fn_64 = rocblas_gemm_64<T>;
         DAPI_CHECK(rocblas_gemm_fn,
@@ -494,7 +505,7 @@ void testing_logging(const Arguments& arg)
             DEVICE_MEMCHECK(device_vector<double>, d_alpha_double, (1));
             DEVICE_MEMCHECK(device_vector<double>, d_beta_double, (1));
 
-            if(std::is_same_v<T, rocblas_half>)
+            if constexpr(std::is_same_v<T, rocblas_half>)
             {
                 a_type        = rocblas_datatype_f16_r;
                 b_type        = rocblas_datatype_f16_r;
@@ -513,7 +524,7 @@ void testing_logging(const Arguments& arg)
                     beta_gemm_ex  = d_beta_half;
                 }
             }
-            else if(std::is_same_v<T, float>)
+            else if constexpr(std::is_same_v<T, float>)
             {
                 a_type        = rocblas_datatype_f32_r;
                 b_type        = rocblas_datatype_f32_r;
@@ -532,7 +543,7 @@ void testing_logging(const Arguments& arg)
                     beta_gemm_ex  = d_beta_float;
                 }
             }
-            else if(std::is_same_v<T, double>)
+            else if constexpr(std::is_same_v<T, double>)
             {
                 a_type        = rocblas_datatype_f64_r;
                 b_type        = rocblas_datatype_f64_r;
@@ -672,33 +683,50 @@ void testing_logging(const Arguments& arg)
     trace_ofs2 << "rocblas_set_pointer_mode," << pmode << ",atomics_allowed\n";
     trace_ofs2 << "rocblas_get_pointer_mode," << pmode << ",atomics_allowed\n";
 
+    auto transA_letter = rocblas2char_operation(transA);
+    auto transB_letter = rocblas2char_operation(transB);
+    auto side_letter   = rocblas2char_side(side);
+    auto uplo_letter   = rocblas2char_fill(uplo);
+    auto diag_letter   = rocblas2char_diagonal(diag);
+
     // *************************************************** BLAS1 ***************************************************
 
     const char* bench_endl = " \n"; // space for empty atomics enabled default
 
-    //
-    // AMAX
-    //
-    trace_ofs2 << replaceX<T>(arg.api, "rocblas_iXamax") << "," << n << "," << (void*)dx << ","
-               << incx << ",atomics_allowed\n";
-    bench_ofs2 << bench.c_str() << " -f iamax -r " << rocblas_precision_string<T> << " -n " << n
-               << " --incx " << incx << bench_endl;
+    if constexpr(!std::is_same_v<T, rocblas_half>)
+    {
+        //
+        // AMAX
+        //
+        trace_ofs2 << replaceX<T>(arg.api, "rocblas_iXamax") << "," << n << "," << (void*)dx << ","
+                   << incx << ",atomics_allowed\n";
+        bench_ofs2 << bench.c_str() << " -f iamax -r " << rocblas_precision_string<T> << " -n " << n
+                   << " --incx " << incx << bench_endl;
 
-    //
-    // AMIN
-    //
-    trace_ofs2 << replaceX<T>(arg.api, "rocblas_iXamin") << "," << n << "," << (void*)dx << ","
-               << incx << ",atomics_allowed\n";
-    bench_ofs2 << bench.c_str() << " -f iamin -r " << rocblas_precision_string<T> << " -n " << n
-               << " --incx " << incx << bench_endl;
+        //
+        // AMIN
+        //
+        trace_ofs2 << replaceX<T>(arg.api, "rocblas_iXamin") << "," << n << "," << (void*)dx << ","
+                   << incx << ",atomics_allowed\n";
+        bench_ofs2 << bench.c_str() << " -f iamin -r " << rocblas_precision_string<T> << " -n " << n
+                   << " --incx " << incx << bench_endl;
 
-    //
-    // ASUM
-    //
-    trace_ofs2 << replaceX<T>(arg.api, "rocblas_PXasum") << "," << n << "," << (void*)dx << ","
-               << incx << ",atomics_allowed\n";
-    bench_ofs2 << bench.c_str() << " -f asum -r " << rocblas_precision_string<T> << " -n " << n
-               << " --incx " << incx << bench_endl;
+        //
+        // ASUM
+        //
+        trace_ofs2 << replaceX<T>(arg.api, "rocblas_PXasum") << "," << n << "," << (void*)dx << ","
+                   << incx << ",atomics_allowed\n";
+        bench_ofs2 << bench.c_str() << " -f asum -r " << rocblas_precision_string<T> << " -n " << n
+                   << " --incx " << incx << bench_endl;
+
+        //
+        // COPY
+        //
+        trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xcopy") << "," << n << "," << (void*)dx << ","
+                   << incx << "," << (void*)dy << "," << incy << ",atomics_allowed\n";
+        bench_ofs2 << bench.c_str() << " -f copy -r " << rocblas_precision_string<T> << " -n " << n
+                   << " --incx " << incx << " --incy " << incy << bench_endl;
+    }
 
     //
     // AXPY
@@ -734,14 +762,6 @@ void testing_logging(const Arguments& arg)
     }
 
     //
-    // COPY
-    //
-    trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xcopy") << "," << n << "," << (void*)dx << ","
-               << incx << "," << (void*)dy << "," << incy << ",atomics_allowed\n";
-    bench_ofs2 << bench.c_str() << " -f copy -r " << rocblas_precision_string<T> << " -n " << n
-               << " --incx " << incx << " --incy " << incy << bench_endl;
-
-    //
     // DOT
     //
     trace_ofs2 << replaceX<T>(arg.api, "rocblas_XdotU") << "," << n << "," << (void*)dx << ","
@@ -749,348 +769,355 @@ void testing_logging(const Arguments& arg)
     bench_ofs2 << bench.c_str() << " -f dot -r " << rocblas_precision_string<T> << " -n " << n
                << " --incx " << incx << " --incy " << incy << bench_endl;
 
-    //
-    // NRM2
-    //
-    trace_ofs2 << replaceX<T>(arg.api, "rocblas_PXnrm2") << "," << n << "," << (void*)dx << ","
-               << incx << ",atomics_allowed\n";
-    bench_ofs2 << bench.c_str() << " -f nrm2 -r " << rocblas_precision_string<T> << " -n " << n
-               << " --incx " << incx << bench_endl;
-
-    //
-    // SCAL (real alpha)
-    //
-    trace_ofs2 << replaceX<T>(arg.api, "rocblas_XPscal") << "," << n << "," << h_real_alpha << ","
-               << (void*)dx << "," << incx << ",atomics_allowed\n";
-    bench_ofs2 << bench.c_str() << " -f scal --a_type "
-               << rocblas_precision_string<T> << " --b_type "
-               << rocblas_precision_string<real_t<T>> << " -n " << n << " "
-               << rocblas_internal_log_bench_scalar_value("alpha", &h_real_alpha) << " --incx "
-               << incx << bench_endl;
-
-    //
-    // SCAL
-    //
-    trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xscal") << "," << n << "," << h_alpha << ","
-               << (void*)dx << "," << incx << ",atomics_allowed\n";
-    bench_ofs2 << bench.c_str() << " -f scal --a_type "
-               << rocblas_precision_string<T> << " --b_type "
-               << rocblas_precision_string<T> << " -n " << n << " "
-               << rocblas_internal_log_bench_scalar_value("alpha", &h_alpha) << " --incx " << incx
-               << bench_endl;
-
-    //
-    // SWAP
-    //
-    trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xswap") << "," << n << "," << (void*)dx << ","
-               << incx << "," << (void*)dy << "," << incy << ",atomics_allowed\n";
-
-    bench_ofs2 << bench.c_str() << " -f swap -r " << rocblas_precision_string<T> << " -n " << n
-               << " --incx " << incx << " --incy " << incy << bench_endl;
-
-    // *************************************************** BLAS2 ***************************************************
-
-    auto transA_letter = rocblas2char_operation(transA);
-    auto transB_letter = rocblas2char_operation(transB);
-    auto side_letter   = rocblas2char_side(side);
-    auto uplo_letter   = rocblas2char_fill(uplo);
-    auto diag_letter   = rocblas2char_diagonal(diag);
-
-    //
-    // GBMV
-    //
-    trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xgbmv") << "," << transA << "," << m << "," << n
-               << "," << kl << "," << ku << "," << h_alpha << "," << (void*)da << "," << lda << ","
-               << (void*)dx << "," << incx << "," << h_beta << "," << (void*)dy << "," << incy
-               << ",atomics_allowed\n";
-
-    bench_ofs2 << bench.c_str() << " -f gbmv -r " << rocblas_precision_string<T> << " --transposeA "
-               << transA_letter << " -m " << m << " -n " << n << " --kl " << kl << " --ku " << ku
-               << " " << rocblas_internal_log_bench_scalar_value("alpha", &h_alpha) << " --lda "
-               << lda << " --incx " << incx << " "
-               << rocblas_internal_log_bench_scalar_value("beta", &h_beta) << " --incy " << incy
-               << bench_endl;
-
-    //
-    // GEMV
-    //
-    trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xgemv") << "," << transA << "," << m << "," << n
-               << "," << h_alpha << "," << (void*)da << "," << lda << "," << (void*)dx << ","
-               << incx << "," << h_beta << "," << (void*)dy << "," << incy << ",atomics_allowed\n";
-
-    bench_ofs2 << bench.c_str() << " -f gemv -r " << rocblas_precision_string<T> << " --transposeA "
-               << transA_letter << " -m " << m << " -n " << n << " "
-               << rocblas_internal_log_bench_scalar_value("alpha", &h_alpha) << " --lda " << lda
-               << " --incx " << incx << " "
-               << rocblas_internal_log_bench_scalar_value("beta", &h_beta) << " --incy " << incy
-               << bench_endl;
-
-    //
-    // GER
-    //
-    trace_ofs2 << replaceX<T>(arg.api, "rocblas_XgerU") << "," << m << "," << n << "," << h_alpha
-               << "," << (void*)dx << "," << incx << "," << (void*)dy << "," << incy << ","
-               << (void*)da << "," << lda << ",atomics_allowed\n";
-    bench_ofs2 << bench.c_str() << " -f " << replaceX<T>(rocblas_client_api::C, "gerU") << " -r "
-               << rocblas_precision_string<T> << " -m " << m << " -n " << n << " "
-               << rocblas_internal_log_bench_scalar_value("alpha", &h_alpha) << " --incx " << incx
-               << " --incy " << incy << " --lda " << lda << bench_endl;
-
-    if constexpr(!rocblas_is_complex<T>)
+    if constexpr(!std::is_same_v<T, rocblas_half>)
     {
+
         //
-        // SBMV
+        // NRM2
         //
-        trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xsbmv") << "," << uplo << "," << n << "," << k
-                   << "," << h_alpha << "," << (void*)da << "," << lda << "," << (void*)dx << ","
-                   << incx << "," << h_beta << "," << (void*)dy << "," << incy
-                   << ",atomics_allowed\n";
-        bench_ofs2 << bench.c_str() << " -f sbmv -r " << rocblas_precision_string<T> << " --uplo "
-                   << uplo_letter << " -n " << n << " -k " << k << " "
+        trace_ofs2 << replaceX<T>(arg.api, "rocblas_PXnrm2") << "," << n << "," << (void*)dx << ","
+                   << incx << ",atomics_allowed\n";
+        bench_ofs2 << bench.c_str() << " -f nrm2 -r " << rocblas_precision_string<T> << " -n " << n
+                   << " --incx " << incx << bench_endl;
+
+        //
+        // SCAL (real alpha)
+        //
+        trace_ofs2 << replaceX<T>(arg.api, "rocblas_XPscal") << "," << n << "," << h_real_alpha
+                   << "," << (void*)dx << "," << incx << ",atomics_allowed\n";
+        bench_ofs2 << bench.c_str() << " -f scal --a_type "
+                   << rocblas_precision_string<T> << " --b_type "
+                   << rocblas_precision_string<real_t<T>> << " -n " << n << " "
+                   << rocblas_internal_log_bench_scalar_value("alpha", &h_real_alpha) << " --incx "
+                   << incx << bench_endl;
+
+        //
+        // SCAL
+        //
+        trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xscal") << "," << n << "," << h_alpha << ","
+                   << (void*)dx << "," << incx << ",atomics_allowed\n";
+        bench_ofs2 << bench.c_str() << " -f scal --a_type "
+                   << rocblas_precision_string<T> << " --b_type "
+                   << rocblas_precision_string<T> << " -n " << n << " "
+                   << rocblas_internal_log_bench_scalar_value("alpha", &h_alpha) << " --incx "
+                   << incx << bench_endl;
+
+        //
+        // SWAP
+        //
+        trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xswap") << "," << n << "," << (void*)dx << ","
+                   << incx << "," << (void*)dy << "," << incy << ",atomics_allowed\n";
+
+        bench_ofs2 << bench.c_str() << " -f swap -r " << rocblas_precision_string<T> << " -n " << n
+                   << " --incx " << incx << " --incy " << incy << bench_endl;
+
+        // *************************************************** BLAS2 ***************************************************
+
+        //
+        // GBMV
+        //
+        trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xgbmv") << "," << transA << "," << m << "," << n
+                   << "," << kl << "," << ku << "," << h_alpha << "," << (void*)da << "," << lda
+                   << "," << (void*)dx << "," << incx << "," << h_beta << "," << (void*)dy << ","
+                   << incy << ",atomics_allowed\n";
+
+        bench_ofs2 << bench.c_str() << " -f gbmv -r "
+                   << rocblas_precision_string<T> << " --transposeA " << transA_letter << " -m "
+                   << m << " -n " << n << " --kl " << kl << " --ku " << ku << " "
                    << rocblas_internal_log_bench_scalar_value("alpha", &h_alpha) << " --lda " << lda
                    << " --incx " << incx << " "
                    << rocblas_internal_log_bench_scalar_value("beta", &h_beta) << " --incy " << incy
                    << bench_endl;
 
         //
-        // SPMV
+        // GEMV
         //
-        trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xspmv") << "," << uplo << "," << n << ","
-                   << h_alpha << "," << (void*)da << "," << (void*)dx << "," << incx << ","
-                   << h_beta << "," << (void*)dy << "," << incy << ",atomics_allowed\n";
-        bench_ofs2 << bench.c_str() << " -f spmv -r " << rocblas_precision_string<T> << " --uplo "
-                   << uplo_letter << " -n " << n << " "
-                   << rocblas_internal_log_bench_scalar_value("alpha", &h_alpha) << " --incx "
-                   << incx << " " << rocblas_internal_log_bench_scalar_value("beta", &h_beta)
-                   << " --incy " << incy << bench_endl;
-
-        //
-        // SPR
-        //
-        trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xspr") << "," << uplo << "," << n << ","
-                   << h_alpha << "," << (void*)dx << "," << incx << "," << (void*)da
+        trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xgemv") << "," << transA << "," << m << "," << n
+                   << "," << h_alpha << "," << (void*)da << "," << lda << "," << (void*)dx << ","
+                   << incx << "," << h_beta << "," << (void*)dy << "," << incy
                    << ",atomics_allowed\n";
-        bench_ofs2 << bench.c_str() << " -f spr -r " << rocblas_precision_string<T> << " --uplo "
-                   << uplo_letter << " -n " << n << " "
-                   << rocblas_internal_log_bench_scalar_value("alpha", &h_alpha) << " --incx "
-                   << incx << bench_endl;
+
+        bench_ofs2 << bench.c_str() << " -f gemv -r "
+                   << rocblas_precision_string<T> << " --transposeA " << transA_letter << " -m "
+                   << m << " -n " << n << " "
+                   << rocblas_internal_log_bench_scalar_value("alpha", &h_alpha) << " --lda " << lda
+                   << " --incx " << incx << " "
+                   << rocblas_internal_log_bench_scalar_value("beta", &h_beta) << " --incy " << incy
+                   << bench_endl;
 
         //
-        // SPR2
+        // GER
         //
-        trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xspr2") << "," << uplo << "," << n << ","
+        trace_ofs2 << replaceX<T>(arg.api, "rocblas_XgerU") << "," << m << "," << n << ","
                    << h_alpha << "," << (void*)dx << "," << incx << "," << (void*)dy << "," << incy
-                   << "," << (void*)da << ",atomics_allowed\n";
-        bench_ofs2 << bench.c_str() << " -f spr2 -r " << rocblas_precision_string<T> << " --uplo "
+                   << "," << (void*)da << "," << lda << ",atomics_allowed\n";
+        bench_ofs2 << bench.c_str() << " -f " << replaceX<T>(rocblas_client_api::C, "gerU")
+                   << " -r " << rocblas_precision_string<T> << " -m " << m << " -n " << n << " "
+                   << rocblas_internal_log_bench_scalar_value("alpha", &h_alpha) << " --incx "
+                   << incx << " --incy " << incy << " --lda " << lda << bench_endl;
+
+        if constexpr(!rocblas_is_complex<T>)
+        {
+            //
+            // SBMV
+            //
+            trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xsbmv") << "," << uplo << "," << n << ","
+                       << k << "," << h_alpha << "," << (void*)da << "," << lda << "," << (void*)dx
+                       << "," << incx << "," << h_beta << "," << (void*)dy << "," << incy
+                       << ",atomics_allowed\n";
+            bench_ofs2 << bench.c_str() << " -f sbmv -r "
+                       << rocblas_precision_string<T> << " --uplo " << uplo_letter << " -n " << n
+                       << " -k " << k << " "
+                       << rocblas_internal_log_bench_scalar_value("alpha", &h_alpha) << " --lda "
+                       << lda << " --incx " << incx << " "
+                       << rocblas_internal_log_bench_scalar_value("beta", &h_beta) << " --incy "
+                       << incy << bench_endl;
+
+            //
+            // SPMV
+            //
+            trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xspmv") << "," << uplo << "," << n << ","
+                       << h_alpha << "," << (void*)da << "," << (void*)dx << "," << incx << ","
+                       << h_beta << "," << (void*)dy << "," << incy << ",atomics_allowed\n";
+            bench_ofs2 << bench.c_str() << " -f spmv -r "
+                       << rocblas_precision_string<T> << " --uplo " << uplo_letter << " -n " << n
+                       << " " << rocblas_internal_log_bench_scalar_value("alpha", &h_alpha)
+                       << " --incx " << incx << " "
+                       << rocblas_internal_log_bench_scalar_value("beta", &h_beta) << " --incy "
+                       << incy << bench_endl;
+
+            //
+            // SPR
+            //
+            trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xspr") << "," << uplo << "," << n << ","
+                       << h_alpha << "," << (void*)dx << "," << incx << "," << (void*)da
+                       << ",atomics_allowed\n";
+            bench_ofs2 << bench.c_str() << " -f spr -r "
+                       << rocblas_precision_string<T> << " --uplo " << uplo_letter << " -n " << n
+                       << " " << rocblas_internal_log_bench_scalar_value("alpha", &h_alpha)
+                       << " --incx " << incx << bench_endl;
+
+            //
+            // SPR2
+            //
+            trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xspr2") << "," << uplo << "," << n << ","
+                       << h_alpha << "," << (void*)dx << "," << incx << "," << (void*)dy << ","
+                       << incy << "," << (void*)da << ",atomics_allowed\n";
+            bench_ofs2 << bench.c_str() << " -f spr2 -r "
+                       << rocblas_precision_string<T> << " --uplo " << uplo_letter << " -n " << n
+                       << " " << rocblas_internal_log_bench_scalar_value("alpha", &h_alpha)
+                       << " --incx " << incx << " --incy " << incy << bench_endl;
+        }
+
+        //
+        // SYMV
+        //
+        trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xsymv") << "," << uplo << "," << n << ","
+                   << h_alpha << "," << (void*)da << "," << lda << "," << (void*)dx << "," << incx
+                   << "," << h_beta << "," << (void*)dy << "," << incy << ",atomics_allowed\n";
+        bench_ofs2 << bench.c_str() << " -f symv -r " << rocblas_precision_string<T> << " --uplo "
+                   << uplo_letter << " -n " << n << " "
+                   << rocblas_internal_log_bench_scalar_value("alpha", &h_alpha) << " --lda " << lda
+                   << " --incx " << incx << " "
+                   << rocblas_internal_log_bench_scalar_value("beta", &h_beta) << " --incy " << incy
+                   << bench_endl;
+
+        //
+        // SYR
+        //
+        trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xsyr") << "," << uplo << "," << n << ","
+                   << h_alpha << "," << (void*)dx << "," << incx << "," << (void*)da << "," << lda
+                   << ",atomics_allowed\n";
+        bench_ofs2 << bench.c_str() << " -f syr -r " << rocblas_precision_string<T> << " --uplo "
                    << uplo_letter << " -n " << n << " "
                    << rocblas_internal_log_bench_scalar_value("alpha", &h_alpha) << " --incx "
-                   << incx << " --incy " << incy << bench_endl;
-    }
+                   << incx << " --lda " << lda << bench_endl;
 
-    //
-    // SYMV
-    //
-    trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xsymv") << "," << uplo << "," << n << "," << h_alpha
-               << "," << (void*)da << "," << lda << "," << (void*)dx << "," << incx << "," << h_beta
-               << "," << (void*)dy << "," << incy << ",atomics_allowed\n";
-    bench_ofs2 << bench.c_str() << " -f symv -r " << rocblas_precision_string<T> << " --uplo "
-               << uplo_letter << " -n " << n << " "
-               << rocblas_internal_log_bench_scalar_value("alpha", &h_alpha) << " --lda " << lda
-               << " --incx " << incx << " "
-               << rocblas_internal_log_bench_scalar_value("beta", &h_beta) << " --incy " << incy
-               << bench_endl;
+        //
+        // SYR2
+        //
+        trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xsyr2") << "," << uplo << "," << n << ","
+                   << h_alpha << "," << (void*)dx << "," << incx << "," << (void*)dy << "," << incy
+                   << "," << (void*)da << "," << lda << ",atomics_allowed\n";
+        bench_ofs2 << bench.c_str() << " -f syr2 -r " << rocblas_precision_string<T> << " --uplo "
+                   << uplo_letter << " -n " << n << " "
+                   << rocblas_internal_log_bench_scalar_value("alpha", &h_alpha) << " --lda " << lda
+                   << " --incx " << incx << " --incy " << incy << bench_endl;
 
-    //
-    // SYR
-    //
-    trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xsyr") << "," << uplo << "," << n << "," << h_alpha
-               << "," << (void*)dx << "," << incx << "," << (void*)da << "," << lda
-               << ",atomics_allowed\n";
-    bench_ofs2 << bench.c_str() << " -f syr -r " << rocblas_precision_string<T> << " --uplo "
-               << uplo_letter << " -n " << n << " "
-               << rocblas_internal_log_bench_scalar_value("alpha", &h_alpha) << " --incx " << incx
-               << " --lda " << lda << bench_endl;
+        //
+        // TBMV
+        //
+        trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xtbmv") << "," << uplo << "," << transA << ","
+                   << diag << "," << n << "," << k << "," << (void*)da << "," << lda << ","
+                   << (void*)dx << "," << incx << ",atomics_allowed\n";
 
-    //
-    // SYR2
-    //
-    trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xsyr2") << "," << uplo << "," << n << "," << h_alpha
-               << "," << (void*)dx << "," << incx << "," << (void*)dy << "," << incy << ","
-               << (void*)da << "," << lda << ",atomics_allowed\n";
-    bench_ofs2 << bench.c_str() << " -f syr2 -r " << rocblas_precision_string<T> << " --uplo "
-               << uplo_letter << " -n " << n << " "
-               << rocblas_internal_log_bench_scalar_value("alpha", &h_alpha) << " --lda " << lda
-               << " --incx " << incx << " --incy " << incy << bench_endl;
-
-    //
-    // TBMV
-    //
-    trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xtbmv") << "," << uplo << "," << transA << ","
-               << diag << "," << n << "," << k << "," << (void*)da << "," << lda << "," << (void*)dx
-               << "," << incx << ",atomics_allowed\n";
-
-    bench_ofs2 << bench.c_str() << " -f tbmv -r " << rocblas_precision_string<T> << " --uplo "
-               << uplo_letter << " --transposeA " << transA_letter << " --diag " << diag_letter
-               << " -n " << n << " -k " << k << " --lda " << lda << " --incx " << incx
-               << bench_endl;
-
-    //
-    // TPMV
-    //
-    trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xtpmv") << "," << uplo << "," << transA << ","
-               << diag << "," << n << "," << (void*)da << "," << (void*)dx << "," << incx
-               << ",atomics_allowed\n";
-
-    bench_ofs2 << bench.c_str() << " -f tpmv -r " << rocblas_precision_string<T> << " --uplo "
-               << uplo_letter << " --transposeA " << transA_letter << " --diag " << diag_letter
-               << " -n " << n << " --incx " << incx << bench_endl;
-
-    //
-    // TRMV
-    //
-    trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xtrmv") << "," << uplo << "," << transA << ","
-               << diag << "," << n << "," << (void*)da << "," << lda << "," << (void*)dx << ","
-               << incx << ",atomics_allowed\n";
-
-    bench_ofs2 << bench.c_str() << " -f trmv -r " << rocblas_precision_string<T> << " --uplo "
-               << uplo_letter << " --transposeA " << transA_letter << " --diag " << diag_letter
-               << " -n " << n << " --lda " << lda << " --incx " << incx << bench_endl;
-
-    //
-    // TBSV
-    //
-    trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xtbsv") << "," << uplo << "," << transA << ","
-               << diag << "," << n << "," << k << "," << (void*)da << "," << lda << "," << (void*)dx
-               << "," << incx << ",atomics_allowed\n";
-    if(test_pointer_mode == rocblas_pointer_mode_host)
-        bench_ofs2 << bench.c_str() << " -f tbsv -r " << rocblas_precision_string<T> << " --uplo "
+        bench_ofs2 << bench.c_str() << " -f tbmv -r " << rocblas_precision_string<T> << " --uplo "
                    << uplo_letter << " --transposeA " << transA_letter << " --diag " << diag_letter
                    << " -n " << n << " -k " << k << " --lda " << lda << " --incx " << incx
                    << bench_endl;
 
-    //
-    // TPSV
-    //
-    trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xtpsv") << "," << uplo << "," << transA << ","
-               << diag << "," << n << "," << (void*)da << "," << (void*)dx << "," << incx
-               << ",atomics_allowed\n";
-    if(test_pointer_mode == rocblas_pointer_mode_host)
-        bench_ofs2 << bench.c_str() << " -f tpsv -r " << rocblas_precision_string<T> << " --uplo "
+        //
+        // TPMV
+        //
+        trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xtpmv") << "," << uplo << "," << transA << ","
+                   << diag << "," << n << "," << (void*)da << "," << (void*)dx << "," << incx
+                   << ",atomics_allowed\n";
+
+        bench_ofs2 << bench.c_str() << " -f tpmv -r " << rocblas_precision_string<T> << " --uplo "
                    << uplo_letter << " --transposeA " << transA_letter << " --diag " << diag_letter
                    << " -n " << n << " --incx " << incx << bench_endl;
 
-    //
-    // TRSV
-    //
-    trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xtrsv") << "," << uplo << "," << transA << ","
-               << diag << "," << n << "," << (void*)da << "," << lda << "," << (void*)dx << ","
-               << incx << ",atomics_allowed\n";
+        //
+        // TRMV
+        //
+        trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xtrmv") << "," << uplo << "," << transA << ","
+                   << diag << "," << n << "," << (void*)da << "," << lda << "," << (void*)dx << ","
+                   << incx << ",atomics_allowed\n";
 
-    if(test_pointer_mode == rocblas_pointer_mode_host)
-        bench_ofs2 << bench.c_str() << " -f trsv -r " << rocblas_precision_string<T> << " --uplo "
+        bench_ofs2 << bench.c_str() << " -f trmv -r " << rocblas_precision_string<T> << " --uplo "
                    << uplo_letter << " --transposeA " << transA_letter << " --diag " << diag_letter
                    << " -n " << n << " --lda " << lda << " --incx " << incx << bench_endl;
 
-    // *************************************************** BLAS3 ***************************************************
+        //
+        // TBSV
+        //
+        trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xtbsv") << "," << uplo << "," << transA << ","
+                   << diag << "," << n << "," << k << "," << (void*)da << "," << lda << ","
+                   << (void*)dx << "," << incx << ",atomics_allowed\n";
+        if(test_pointer_mode == rocblas_pointer_mode_host)
+            bench_ofs2 << bench.c_str() << " -f tbsv -r "
+                       << rocblas_precision_string<T> << " --uplo " << uplo_letter
+                       << " --transposeA " << transA_letter << " --diag " << diag_letter << " -n "
+                       << n << " -k " << k << " --lda " << lda << " --incx " << incx << bench_endl;
 
-    //
-    // TRSM
-    //
-    trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xtrsm") << "," << side << "," << uplo << ","
-               << transA << "," << diag << "," << m << "," << n << "," << h_alpha << ","
-               << (void*)da << "," << lda << "," << (void*)db << "," << ldb << ",atomics_allowed\n";
+        //
+        // TPSV
+        //
+        trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xtpsv") << "," << uplo << "," << transA << ","
+                   << diag << "," << n << "," << (void*)da << "," << (void*)dx << "," << incx
+                   << ",atomics_allowed\n";
+        if(test_pointer_mode == rocblas_pointer_mode_host)
+            bench_ofs2 << bench.c_str() << " -f tpsv -r "
+                       << rocblas_precision_string<T> << " --uplo " << uplo_letter
+                       << " --transposeA " << transA_letter << " --diag " << diag_letter << " -n "
+                       << n << " --incx " << incx << bench_endl;
 
-    bench_ofs2 << bench.c_str() << " -f trsm -r " << rocblas_precision_string<T> << " --side "
-               << side_letter << " --uplo " << uplo_letter << " --transposeA " << transA_letter
-               << " --diag " << diag_letter << " -m " << m << " -n " << n << " "
-               << rocblas_internal_log_bench_scalar_value("alpha", &h_alpha) << " --lda " << lda
-               << " --ldb " << ldb << bench_endl;
+        //
+        // TRSV
+        //
+        trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xtrsv") << "," << uplo << "," << transA << ","
+                   << diag << "," << n << "," << (void*)da << "," << lda << "," << (void*)dx << ","
+                   << incx << ",atomics_allowed\n";
 
-    //
-    // GEAM
-    //
-    trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xgeam") << "," << transA << "," << transB << ","
-               << m << "," << n << "," << h_alpha << "," << (void*)da << "," << lda << "," << h_beta
-               << "," << (void*)db << "," << ldb << "," << (void*)dc << "," << ldc
-               << ",atomics_allowed\n";
+        if(test_pointer_mode == rocblas_pointer_mode_host)
+            bench_ofs2 << bench.c_str() << " -f trsv -r "
+                       << rocblas_precision_string<T> << " --uplo " << uplo_letter
+                       << " --transposeA " << transA_letter << " --diag " << diag_letter << " -n "
+                       << n << " --lda " << lda << " --incx " << incx << bench_endl;
 
-    bench_ofs2 << bench.c_str() << " -f geam -r " << rocblas_precision_string<T> << " --transposeA "
-               << transA_letter << " --transposeB " << transB_letter << " -m " << m << " -n " << n
-               << " " << rocblas_internal_log_bench_scalar_value("alpha", &h_alpha) << " --lda "
-               << lda << " " << rocblas_internal_log_bench_scalar_value("beta", &h_beta)
-               << " --ldb " << ldb << " --ldc " << ldc << bench_endl;
+        // *************************************************** BLAS3 ***************************************************
 
-    //
-    // SYMM
-    //
-    trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xsymm") << "," << side << "," << uplo << "," << m
-               << "," << n << "," << h_alpha << "," << (void*)da << "," << lda << "," << (void*)db
-               << "," << ldb << "," << h_beta << "," << (void*)dc << "," << ldc
-               << ",atomics_allowed\n";
+        //
+        // TRSM
+        //
+        trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xtrsm") << "," << side << "," << uplo << ","
+                   << transA << "," << diag << "," << m << "," << n << "," << h_alpha << ","
+                   << (void*)da << "," << lda << "," << (void*)db << "," << ldb
+                   << ",atomics_allowed\n";
 
-    bench_ofs2 << bench.c_str() << " -f symm -r " << rocblas_precision_string<T> << " --side "
-               << side_letter << " --uplo " << uplo_letter << " -m " << m << " -n " << n << " "
-               << rocblas_internal_log_bench_scalar_value("alpha", &h_alpha) << " --lda " << lda
-               << " --ldb " << ldb << " "
-               << rocblas_internal_log_bench_scalar_value("beta", &h_beta) << " --ldc " << ldc
-               << bench_endl;
+        bench_ofs2 << bench.c_str() << " -f trsm -r " << rocblas_precision_string<T> << " --side "
+                   << side_letter << " --uplo " << uplo_letter << " --transposeA " << transA_letter
+                   << " --diag " << diag_letter << " -m " << m << " -n " << n << " "
+                   << rocblas_internal_log_bench_scalar_value("alpha", &h_alpha) << " --lda " << lda
+                   << " --ldb " << ldb << bench_endl;
 
-    //
-    // SYRK
-    //
-    trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xsyrk") << "," << uplo << "," << transA << "," << n
-               << "," << k << "," << h_alpha << "," << (void*)da << "," << lda << "," << h_beta
-               << "," << (void*)dc << "," << ldc << ",atomics_allowed\n";
+        //
+        // GEAM
+        //
+        trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xgeam") << "," << transA << "," << transB << ","
+                   << m << "," << n << "," << h_alpha << "," << (void*)da << "," << lda << ","
+                   << h_beta << "," << (void*)db << "," << ldb << "," << (void*)dc << "," << ldc
+                   << ",atomics_allowed\n";
 
-    bench_ofs2 << bench.c_str() << " -f syrk -r " << rocblas_precision_string<T> << " --uplo "
-               << uplo_letter << " --transposeA " << transA_letter << " -n " << n << " -k " << k
-               << " " << rocblas_internal_log_bench_scalar_value("alpha", &h_alpha) << " --lda "
-               << lda << " " << rocblas_internal_log_bench_scalar_value("beta", &h_beta)
-               << " --ldc " << ldc << bench_endl;
+        bench_ofs2 << bench.c_str() << " -f geam -r "
+                   << rocblas_precision_string<T> << " --transposeA " << transA_letter
+                   << " --transposeB " << transB_letter << " -m " << m << " -n " << n << " "
+                   << rocblas_internal_log_bench_scalar_value("alpha", &h_alpha) << " --lda " << lda
+                   << " " << rocblas_internal_log_bench_scalar_value("beta", &h_beta) << " --ldb "
+                   << ldb << " --ldc " << ldc << bench_endl;
 
-    //
-    // SYR2K
-    //
-    trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xsyr2k") << "," << uplo << "," << transA << "," << n
-               << "," << k << "," << h_alpha << "," << (void*)da << "," << lda << "," << (void*)db
-               << "," << ldb << "," << h_beta << "," << (void*)dc << "," << ldc
-               << ",atomics_allowed\n";
+        //
+        // SYMM
+        //
+        trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xsymm") << "," << side << "," << uplo << ","
+                   << m << "," << n << "," << h_alpha << "," << (void*)da << "," << lda << ","
+                   << (void*)db << "," << ldb << "," << h_beta << "," << (void*)dc << "," << ldc
+                   << ",atomics_allowed\n";
 
-    bench_ofs2 << bench.c_str() << " -f syr2k -r " << rocblas_precision_string<T> << " --uplo "
-               << uplo_letter << " --transposeA " << transA_letter << " -n " << n << " -k " << k
-               << " " << rocblas_internal_log_bench_scalar_value("alpha", &h_alpha) << " --lda "
-               << lda << " --ldb " << ldb << " "
-               << rocblas_internal_log_bench_scalar_value("beta", &h_beta) << " --ldc " << ldc
-               << bench_endl;
+        bench_ofs2 << bench.c_str() << " -f symm -r " << rocblas_precision_string<T> << " --side "
+                   << side_letter << " --uplo " << uplo_letter << " -m " << m << " -n " << n << " "
+                   << rocblas_internal_log_bench_scalar_value("alpha", &h_alpha) << " --lda " << lda
+                   << " --ldb " << ldb << " "
+                   << rocblas_internal_log_bench_scalar_value("beta", &h_beta) << " --ldc " << ldc
+                   << bench_endl;
 
-    //
-    // SYRKX
-    //
-    trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xsyrkx") << "," << uplo << "," << transA << "," << n
-               << "," << k << "," << h_alpha << "," << (void*)da << "," << lda << "," << (void*)db
-               << "," << ldb << "," << h_beta << "," << (void*)dc << "," << ldc
-               << ",atomics_allowed\n";
+        //
+        // SYRK
+        //
+        trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xsyrk") << "," << uplo << "," << transA << ","
+                   << n << "," << k << "," << h_alpha << "," << (void*)da << "," << lda << ","
+                   << h_beta << "," << (void*)dc << "," << ldc << ",atomics_allowed\n";
 
-    bench_ofs2 << bench.c_str() << " -f syrkx -r " << rocblas_precision_string<T> << " --uplo "
-               << uplo_letter << " --transposeA " << transA_letter << " -n " << n << " -k " << k
-               << " " << rocblas_internal_log_bench_scalar_value("alpha", &h_alpha) << " --lda "
-               << lda << " --ldb " << ldb << " "
-               << rocblas_internal_log_bench_scalar_value("beta", &h_beta) << " --ldc " << ldc
-               << bench_endl;
+        bench_ofs2 << bench.c_str() << " -f syrk -r " << rocblas_precision_string<T> << " --uplo "
+                   << uplo_letter << " --transposeA " << transA_letter << " -n " << n << " -k " << k
+                   << " " << rocblas_internal_log_bench_scalar_value("alpha", &h_alpha) << " --lda "
+                   << lda << " " << rocblas_internal_log_bench_scalar_value("beta", &h_beta)
+                   << " --ldc " << ldc << bench_endl;
 
-    //
-    // TRMM
-    //
-    trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xtrmm") << "," << side << "," << uplo << ","
-               << transA << "," << diag << "," << m << "," << n << "," << h_alpha << ","
-               << (void*)da << "," << lda << "," << (void*)db << "," << ldb << "," << (void*)dc
-               << "," << ldc << ",atomics_allowed\n";
+        //
+        // SYR2K
+        //
+        trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xsyr2k") << "," << uplo << "," << transA << ","
+                   << n << "," << k << "," << h_alpha << "," << (void*)da << "," << lda << ","
+                   << (void*)db << "," << ldb << "," << h_beta << "," << (void*)dc << "," << ldc
+                   << ",atomics_allowed\n";
 
-    bench_ofs2 << bench.c_str() << " -f trmm -r " << rocblas_precision_string<T> << " --side "
-               << side_letter << " --uplo " << uplo_letter << " --transposeA " << transA_letter
-               << " --diag " << diag_letter << " -m " << m << " -n " << n << " "
-               << rocblas_internal_log_bench_scalar_value("alpha", &h_alpha) << " --lda " << lda
-               << " --ldb " << ldb << " --ldc " << ldc << bench_endl;
+        bench_ofs2 << bench.c_str() << " -f syr2k -r " << rocblas_precision_string<T> << " --uplo "
+                   << uplo_letter << " --transposeA " << transA_letter << " -n " << n << " -k " << k
+                   << " " << rocblas_internal_log_bench_scalar_value("alpha", &h_alpha) << " --lda "
+                   << lda << " --ldb " << ldb << " "
+                   << rocblas_internal_log_bench_scalar_value("beta", &h_beta) << " --ldc " << ldc
+                   << bench_endl;
+
+        //
+        // SYRKX
+        //
+        trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xsyrkx") << "," << uplo << "," << transA << ","
+                   << n << "," << k << "," << h_alpha << "," << (void*)da << "," << lda << ","
+                   << (void*)db << "," << ldb << "," << h_beta << "," << (void*)dc << "," << ldc
+                   << ",atomics_allowed\n";
+
+        bench_ofs2 << bench.c_str() << " -f syrkx -r " << rocblas_precision_string<T> << " --uplo "
+                   << uplo_letter << " --transposeA " << transA_letter << " -n " << n << " -k " << k
+                   << " " << rocblas_internal_log_bench_scalar_value("alpha", &h_alpha) << " --lda "
+                   << lda << " --ldb " << ldb << " "
+                   << rocblas_internal_log_bench_scalar_value("beta", &h_beta) << " --ldc " << ldc
+                   << bench_endl;
+
+        //
+        // TRMM
+        //
+        trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xtrmm") << "," << side << "," << uplo << ","
+                   << transA << "," << diag << "," << m << "," << n << "," << h_alpha << ","
+                   << (void*)da << "," << lda << "," << (void*)db << "," << ldb << "," << (void*)dc
+                   << "," << ldc << ",atomics_allowed\n";
+
+        bench_ofs2 << bench.c_str() << " -f trmm -r " << rocblas_precision_string<T> << " --side "
+                   << side_letter << " --uplo " << uplo_letter << " --transposeA " << transA_letter
+                   << " --diag " << diag_letter << " -m " << m << " -n " << n << " "
+                   << rocblas_internal_log_bench_scalar_value("alpha", &h_alpha) << " --lda " << lda
+                   << " --ldb " << ldb << " --ldc " << ldc << bench_endl;
+    } // !half
 
     //
     // GEMM
