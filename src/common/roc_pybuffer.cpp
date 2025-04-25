@@ -122,17 +122,13 @@ const DLTensor &BufferInterface::dlTensor() const {
     return *m_dlTensor;
 }
 
-void BufferInterface::Export(py::module &m) {
+void BufferInterface::ExportToPython(py::module &m) {
     py::class_<BufferInterface, std::shared_ptr<BufferInterface>>(m, "BufferInterface", py::dynamic_attr())
         .def_property_readonly("shape", &BufferInterface::shape, "Get the shape of the buffer as an array")
         .def_property_readonly("strides", &BufferInterface::strides, "Get the strides of the buffer")
         .def_property_readonly("dtype", &BufferInterface::dtype, "Get the data type of the buffer")
         .def("__dlpack__", &BufferInterface::dlpack, "stream"_a=1, "Export the buffer as a DLPack tensor")
         .def("__dlpack_device__", &BufferInterface::dlpackDevice, "Get the device associated with the buffer");
-}
-
-void PyExportInitializer(py::module& m) {  
-    BufferInterface::Export(m);
 }
 
 int BufferInterface::LoadDLPack(std::vector<size_t>& _shape, std::vector<size_t>& _stride, uint32_t bit_depth, std::string& _type_str, void* _data, int device_id_) {

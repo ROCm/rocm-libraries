@@ -183,32 +183,32 @@ endif()
 # HIP
 if(NOT HIP_FOUND)
     set(BUILD_ROCPYDECODE false)
-    message("-- ${Yellow}NOTE: {PROJECT_NAME} library requires HIP, Not Found ${ColourReset}")
+    message("-- ${Yellow}NOTE: ${PROJECT_NAME} library requires HIP, Not Found ${ColourReset}")
 endif()
 # rocDecode
 if(NOT ROCDECODE_FOUND)
     set(BUILD_ROCPYDECODE false)
-    message("-- ${Yellow}NOTE: {PROJECT_NAME} library requires rocDecode, Not Found ${ColourReset}")
+    message("-- ${Yellow}NOTE: ${PROJECT_NAME} library requires rocDecode, Not Found ${ColourReset}")
 endif()
 # Python3
 if(NOT Python3_FOUND)
     set(BUILD_ROCPYDECODE false)
-    message("-- ${Yellow}NOTE: {PROJECT_NAME} library requires Python3, Not Found ${ColourReset}")	
+    message("-- ${Yellow}NOTE: ${PROJECT_NAME} library requires Python3, Not Found ${ColourReset}")	
 endif()
 # pybind11
 if(NOT pybind11_FOUND)
     set(BUILD_ROCPYDECODE false)
-    message("-- ${Yellow}NOTE: {PROJECT_NAME} library requires pybind11, Not Found ${ColourReset}")	
+    message("-- ${Yellow}NOTE: ${PROJECT_NAME} library requires pybind11, Not Found ${ColourReset}")	
 endif()
 # dlpack
 if(NOT dlpack_FOUND)
     set(BUILD_ROCPYDECODE false)
-    message("-- ${Yellow}NOTE: {PROJECT_NAME} library requires dlpack, Not Found ${ColourReset}")	
+    message("-- ${Yellow}NOTE: ${PROJECT_NAME} library requires dlpack, Not Found ${ColourReset}")	
 endif()
 # FFmpeg
 if(NOT FFMPEG_FOUND)
     set(BUILD_ROCPYDECODE false)
-    message("-- ${Yellow}NOTE: {PROJECT_NAME} library requires FFmpeg, Not Found ${ColourReset}")	
+    message("-- ${Yellow}NOTE: ${PROJECT_NAME} library requires FFmpeg, Not Found ${ColourReset}")	
 endif()
 
 if(BUILD_ROCPYDECODE)
@@ -226,9 +226,9 @@ if(BUILD_ROCPYDECODE)
     # rocPyDecode include
     include_directories(src)
 
-    file(GLOB_RECURSE pyfiles pyRocVideoDecode/*.py pyRocVideoDecode/*.pyi)
-    file(GLOB_RECURSE include src/*.h ${ROCM_PATH}/share/rocdecode/utils/rocvideodecode/*.h ${ROCM_PATH}/share/rocdecode/utils/ffmpegvideodecode/*.h)
-    file(GLOB_RECURSE sources src/*.cpp  ${ROCM_PATH}/share/rocdecode/utils/*.cpp ${ROCM_PATH}/share/rocdecode/utils/rocvideodecode/*.cpp ${ROCM_PATH}/share/rocdecode/utils/ffmpegvideodecode/*.cpp)
+    file(GLOB pyfiles pyRocVideoDecode/*.py pyRocVideoDecode/*.pyi)
+    file(GLOB include src/rocdecode/*.h src/common/*.h ${ROCM_PATH}/share/rocdecode/utils/rocvideodecode/*.h ${ROCM_PATH}/share/rocdecode/utils/ffmpegvideodecode/*.h)
+    file(GLOB sources src/rocdecode/*.cpp src/common/*.cpp ${ROCM_PATH}/share/rocdecode/utils/*.cpp ${ROCM_PATH}/share/rocdecode/utils/rocvideodecode/*.cpp ${ROCM_PATH}/share/rocdecode/utils/ffmpegvideodecode/*.cpp)
 
     message("-- ${White}rocPyDecode -- Link Libraries: ${LINK_LIBRARY_LIST}${ColourReset}")
     message("-- ${White}rocPyDecode -- CMAKE_CXX_FLAGS:${CMAKE_CXX_FLAGS}${ColourReset}")

@@ -27,8 +27,6 @@ THE SOFTWARE.
 namespace py = pybind11;
 #include "roc_pydlpack.h"
 
- 
-
 DLPackPyTensor::DLPackPyTensor() noexcept : m_tensor{} {
 }
 

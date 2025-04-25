@@ -32,7 +32,7 @@ namespace py = pybind11;
 
 class BufferInterface final : public std::enable_shared_from_this<BufferInterface> {
     public:
-        static void Export(py::module &m);
+        static void ExportToPython(py::module &m);
 
         const DLTensor &dlTensor() const;
 
