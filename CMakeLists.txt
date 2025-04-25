@@ -179,14 +179,8 @@ if(ROCROLLER_USE_HIP)
     )
 endif()
 
-# shows up in headers, system package required
-rocroller_add_dependency(
-    msgpack
-    VERSION 3.3.0
-    COMPONENTS devel
-)
-
 # does not show up in headers, no system package required
+rocroller_add_dependency(msgpack VERSION 3.3.0)
 rocroller_add_dependency(fmt VERSION 11.1.3)
 rocroller_add_dependency(spdlog VERSION 1.15.1)
 

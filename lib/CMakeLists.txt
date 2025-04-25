@@ -331,8 +331,7 @@ endif()
 
 target_link_libraries(
     rocroller
-    PRIVATE ${llvm_libs} ${llvm_yaml_libs} lldELF
-    PUBLIC msgpackc-cxx
+    PRIVATE ${llvm_libs} ${llvm_yaml_libs} lldELF msgpackc-cxx
 )
 target_include_directories(rocroller SYSTEM PUBLIC ${LLD_INCLUDE_DIRS})
 
@@ -356,6 +355,4 @@ rocm_export_targets(
     TARGETS roc::rocroller roc::rocroller_interface
     NAMESPACE roc::
     EXPORT rocroller_targets
-    DEPENDS
-        PACKAGE msgpack VERSION 3.3.0
 )
