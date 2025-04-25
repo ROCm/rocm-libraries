@@ -96,7 +96,7 @@ namespace rocRoller
             Throw<FatalError>("Can not copy accumulator register into scalar register");
         }
 
-        if(src->sameAs(dest))
+        if(src->sameRegistersAs(dest))
         {
             if(Settings::Get(Settings::LogLvl) >= LogLevel::Debug)
                 co_yield Instruction::Comment("Omitting copy to same register: " + dest->toString()

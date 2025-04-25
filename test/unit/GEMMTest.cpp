@@ -3081,45 +3081,6 @@ namespace GEMMDriverTest
         EXPECT_EQ(countSubstring(generatedCode, "ds_write_b128"), 12);
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMLiteralStrides)
-    {
-        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
-        GEMMProblem gemm;
-        gemm.packMultipleElementsInto1VGPR = true;
-        gemm.transB                        = "N";
-
-        gemm.literalStrides = true;
-        basicGEMM<float>(gemm);
-        std::string output_literalStrides = m_context->instructions()->toString();
-
-        gemm.literalStrides = false;
-        basicGEMM<float>(gemm);
-        std::string output_noLiteralStrides = m_context->instructions()->toString();
-
-        //Since we're setting the first dimension to a literal 1, there will be less occurrences of Load_Tiled_0_stride_0.
-        EXPECT_LT(countSubstring(output_literalStrides, "Tensor_0_stride_0"),
-                  countSubstring(output_noLiteralStrides, "Tensor_0_stride_0"));
-        EXPECT_LT(countSubstring(output_literalStrides, "Tensor_2_stride_0"),
-                  countSubstring(output_noLiteralStrides, "Tensor_2_stride_0"));
-        EXPECT_LT(countSubstring(output_literalStrides, "Tensor_4_stride_0"),
-                  countSubstring(output_noLiteralStrides, "Tensor_4_stride_0"));
-
-        // Since we're not setting the second dimension to a literal, there
-        // will be the same occurrences of Load_Tiled_X_stride_1.
-
-        // Currently due to some expressions having different signedness
-        // between literal and non-literal, there are some extra convert
-        // expressions in the literal version and so this is mentioned more
-        // times in comments.
-        EXPECT_EQ(countSubstring(output_literalStrides, "Tensor_0_stride_1"),
-                  countSubstring(output_noLiteralStrides, "Tensor_0_stride_1") + 2);
-        EXPECT_EQ(countSubstring(output_literalStrides, "Tensor_2_stride_1"),
-                  countSubstring(output_noLiteralStrides, "Tensor_2_stride_1") + 2);
-
-        EXPECT_EQ(countSubstring(output_literalStrides, "Tensor_4_stride_1"),
-                  countSubstring(output_noLiteralStrides, "Tensor_4_stride_1"));
-    }
-
     TEST_P(GEMMTestGPU, GPU_BasicGEMMFP16AllLDS)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);

@@ -273,16 +273,44 @@ namespace rocRoller
                 }
 
                 AssertFatal(tree.back().deps.size() == 1);
-                for(auto dep : tree.back().deps)
+
+                auto        depIdx = *tree.back().deps.begin();
+                auto const& dep    = tree.at(depIdx);
+
+                if(dep.reg->variableType() == expr.destinationType)
                 {
-                    if(tree.at(dep).reg->variableType() == expr.destinationType)
+                    // Simplify
+                    tree.pop_back();
+                    tree.back().reg = nullptr;
+                    return tree;
+                }
+                else
+                {
+                    auto depTypeInfo = DataTypeInfo::Get(dep.reg->variableType());
+                    auto expTypeInfo = DataTypeInfo::Get(expr.destinationType);
+
+                    if(depTypeInfo.isIntegral && expTypeInfo.isIntegral
+                       && depTypeInfo.elementBits == expTypeInfo.elementBits)
                     {
-                        // Simplify
+                        auto valueRange = iota(0ul, dep.reg->valueCount()).to<std::vector>();
+
+                        auto reg = dep.reg->element(valueRange);
+                        reg->setVariableType(expr.destinationType);
+
+                        auto regWithName = tree.back().reg ? tree.back().reg : reg;
+                        reg->setName(regWithName->name() + " convertInPlace");
+
+                        Log::trace(
+                            "Forwarding {} to {}", dep.reg->description(), reg->description());
+                        Log::trace("Forwarding {} to {}",
+                                   (void*)dep.reg->allocation().get(),
+                                   (void*)reg->allocation().get());
+
                         tree.pop_back();
-                        tree.back().reg = nullptr;
-                        return tree;
+                        tree.back().reg = reg;
                     }
                 }
+
                 return tree;
             }
 
@@ -713,6 +741,31 @@ namespace rocRoller
                 return nullptr;
             }
             return rebuildExpressionHelper(tree, tree.size() - 1);
+        }
+
+        std::string describe(ExpressionNode const& node)
+        {
+            return toString(node.expr);
+        }
+
+        std::string toDOT(ExpressionTree const& tree)
+        {
+            std::ostringstream msg;
+            msg << "digraph {" << std::endl;
+            for(size_t i = 0; i < tree.size(); i++)
+            {
+                msg << fmt::format("\"node{}\"[label=\"{}\"]\n", i, describe(tree[i]));
+            }
+
+            for(size_t i = 0; i < tree.size(); i++)
+            {
+                for(auto j : tree[i].deps)
+                    msg << fmt::format("\"node{}\" -> \"node{}\"\n", i, j);
+            }
+
+            msg << "}\n";
+
+            return msg.str();
         }
     }
 }

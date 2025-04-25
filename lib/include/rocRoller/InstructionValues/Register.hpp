@@ -339,10 +339,16 @@ namespace rocRoller
             ContextPtr context() const;
 
             /**
-             * @brief Determine if the other register is the same as this one
+             * @brief Determine if the other registers are the same as this one, including datatype
              *
              */
             bool sameAs(ValuePtr) const;
+
+            /**
+             * @brief Determine if the registers are the same as this one (ignoring datatype)
+             *
+             */
+            bool sameRegistersAs(ValuePtr) const;
 
             /**
              * Return the bitfield located at bitOffset with bitWidth bits
