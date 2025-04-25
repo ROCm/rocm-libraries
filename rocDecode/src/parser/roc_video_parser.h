@@ -166,8 +166,8 @@ protected:
 
     // Picture bit stream info
     uint8_t *pic_data_buffer_ptr_;  // bit stream buffer pointer of the current frame from the demuxer
-    int pic_data_size_;             // bit stream size of the current frame
-    int curr_byte_offset_;            // current parsing byte offset
+    uint32_t pic_data_size_;        // bit stream size of the current frame
+    uint32_t curr_byte_offset_;     // current parsing byte offset
 
     // NAL unit info
     int start_code_num_;              // number of start codes found so far

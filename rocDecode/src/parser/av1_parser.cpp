@@ -58,8 +58,8 @@ rocDecStatus Av1VideoParser::ParseVideoData(RocdecSourceDataPacket *p_data) {
     if (p_data->payload && p_data->payload_size) {
         curr_pts_ = p_data->pts;
         if (ParsePictureData(p_data->payload, p_data->payload_size) != PARSER_OK) {
-            ERR(STR("Parser failed!"));
-            return ROCDEC_RUNTIME_ERROR;
+            ERR("Error occurred in picture data parsing.");
+            return ROCDEC_SUCCESS;
         }
     } else if (!(p_data->flags & ROCDEC_PKT_ENDOFSTREAM)) {
         // If no payload and EOS is not set, treated as invalid.
@@ -711,21 +711,20 @@ ParserResult Av1VideoParser::ParseObuHeader(const uint8_t *p_stream) {
         obu_header_.temporal_id = Parser::ReadBits(p_stream, offset, 3);
         obu_header_.spatial_id = Parser::ReadBits(p_stream, offset, 2);
         if (Parser::ReadBits(p_stream, offset, 3) != 0) {
-            ERR("Syntax error: extension_header_reserved_3bits must be set to 0.\n");
-        return PARSER_INVALID_ARG;
+            ERR("Syntax error: extension_header_reserved_3bits must be set to 0.");
+            return PARSER_INVALID_ARG;
         }
     }
     return PARSER_OK;
 }
 
 ParserResult Av1VideoParser::ReadObuHeaderAndSize() {
-    ParserResult ret = PARSER_OK;
     if (curr_byte_offset_ >= pic_data_size_) {
         return PARSER_EOF;
     }
     uint8_t *p_stream = pic_data_buffer_ptr_ + curr_byte_offset_;
-    if ((ret = ParseObuHeader(p_stream)) != PARSER_OK) {
-        return ret;
+    if (ParseObuHeader(p_stream) != PARSER_OK) {
+        ERR("Syntax error(s) found in OBU header.")
     }
     curr_byte_offset_ += obu_header_.size;
     p_stream += obu_header_.size;
@@ -734,7 +733,12 @@ ParserResult Av1VideoParser::ReadObuHeaderAndSize() {
     obu_size_ = ReadLeb128(p_stream, &bytes_read);
     obu_byte_offset_ = curr_byte_offset_ + bytes_read;
     curr_byte_offset_ = obu_byte_offset_ + obu_size_;
-    return PARSER_OK;
+    if (curr_byte_offset_ > pic_data_size_) {
+        ERR("Invalid obu_size value.");
+        return PARSER_EOF;
+    } else {
+        return PARSER_OK;
+    }
 }
 
 void Av1VideoParser::ParseSequenceHeaderObu(uint8_t *p_stream, size_t size) {
