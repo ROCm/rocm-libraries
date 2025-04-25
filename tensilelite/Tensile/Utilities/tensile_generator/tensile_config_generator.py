@@ -284,7 +284,7 @@ def extract_dtype(match):
         else:
             DataType = DataTypeA
 
-        if ArchitectureName == "gfx94a":
+        if ArchitectureName == "gfx942":
             # Nanno FP8
             DataType += "N"
     else:
