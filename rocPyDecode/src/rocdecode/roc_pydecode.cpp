@@ -20,6 +20,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
+#include "common/roc_pybuffer.h"
 #include "roc_pyvideodecode.h"
 
 using namespace std;
@@ -90,7 +91,7 @@ PYBIND11_MODULE(rocpydecode, m) {
     // ---------
     // PyExport
     // ---------
-    PyExportInitializer(m);
+    BufferInterface::ExportToPython(m);
 
     // -----------------------------
     // User Demuxer 'PyVideoDemuxer'

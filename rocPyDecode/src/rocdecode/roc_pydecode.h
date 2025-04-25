@@ -33,7 +33,7 @@ extern "C" {
 }
 
 #include "roc_video_dec.h"
-#include "roc_pybuffer.h"
+#include "common/roc_pybuffer.h"
   
 #include <pybind11/pybind11.h>	 
 #include <pybind11/functional.h>
@@ -82,6 +82,3 @@ void PyRocVideoDecoderInitializer(py::module& m);
 
 // defined in roc_pyvideodecodercpu.cpp
 void PyRocVideoDecoderCpuInitializer(py::module& m);
-
-// defined in BufferInterface.cpp
-void PyExportInitializer(py::module& m);

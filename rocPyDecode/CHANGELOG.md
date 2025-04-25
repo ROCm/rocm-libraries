@@ -6,6 +6,11 @@ Full documentation for for rocPyDecode is available at [https://rocm.docs.amd.co
 
 ### Added
 * rocpydecode package 
+* Moved rocPyDecode source files into new subfolder src/rocdecode
+* Moved the dlpack and buffer CPP & H files into src/common new subfolder
+* Created new samples/rocdecode sub-folder
+* Moved rocPyDecode Python Samples under samples/rocdecode
+* Moved rocPyDecode notebook under samples/rocdecode
 
 ### Changed
 
