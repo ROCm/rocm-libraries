@@ -302,17 +302,7 @@ using bool_constant = std::integral_constant<bool, Value>;
 inline hipError_t memcpy_and_sync(
     void* dst, const void* src, size_t size_bytes, hipMemcpyKind kind, hipStream_t stream)
 {
-    // hipMemcpyWithStream is only supported on rocm 3.1 and above
-#if(HIP_VERSION_MAJOR == 3 && HIP_VERSION_MINOR >= 1) || HIP_VERSION_MAJOR > 3
     return hipMemcpyWithStream(dst, src, size_bytes, kind, stream);
-#else
-    const hipError_t result = hipMemcpyAsync(dst src, size_bytes, kind, stream);
-    if(hipSuccess != result)
-    {
-        return result;
-    }
-    return hipStreamSynchronize(stream);
-#endif
 }
 
 #if __cpp_lib_as_const >= 201510L
