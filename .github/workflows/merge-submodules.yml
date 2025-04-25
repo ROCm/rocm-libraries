@@ -16,7 +16,7 @@ jobs:
           python-version: "3.x"
 
       - name: Run Merge Script
-        run: python .github/scripts/merge-gitmodules.py
+        run: python .github/scripts/merge-submodules.py
 
       - name: Commit Merged .gitmodules
         run: |
