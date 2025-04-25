@@ -11,6 +11,7 @@ Documentation for hipSPARSE is available at
 
 * Add the `int8`, `int32`, and `float16` data types to `hipDataTypeToHCCDataType` so that sparse matrix descriptors can be used with them.
 * Add `int8` precision to `hipsparseCsr2cscEx2` routine.
+* Add the `almalinux` OS name to correct the gfortran dependency
 
 ### Changed
 
