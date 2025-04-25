@@ -17,6 +17,7 @@ Documentation for rocSPARSE is available at
 * Added `rocsparse_spmv_alg_csr_rowsplit` algorithm.
 * Added support for gfx950
 * Add ROC-TX instrumentation that can be enabled when compiling rocSPARSE from source.
+* Added the `almalinux` OS name to correct the gfortran dependency
 
 ### Changed
 
