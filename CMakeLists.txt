@@ -139,8 +139,8 @@ set_property(CACHE YAML_BACKEND PROPERTY STRINGS YAML_CPP LLVM)
 add_compile_options(-fmacro-prefix-map=${PROJECT_SOURCE_DIR}=.)
 
 if(BUILD_ADDRESS_SANITIZER)
-    list(APPEND CMAKE_CXX_FLAGS "-fsanitize=address -shared-libasan")
-    list(APPEND CMAKE_C_FLAGS "-fsanitize=address -shared-libasan")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -shared-libasan")
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=address -shared-libasan")
 endif()
 
 if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
