@@ -111,13 +111,22 @@ struct FFTKernel
     }
 };
 
+typedef std::unordered_map<FMKey, FMKey, SimpleHash>       FPKeyMap;
+typedef std::unordered_map<FMKeyPP, FMKeyPP, SimpleHashPP> FPKeyMapPP;
+
+typedef std::unordered_map<FMKey, FFTKernel, SimpleHash>                    FPMap;
+typedef std::unordered_map<FMKeyPP, std::array<FFTKernel, 2>, SimpleHashPP> FPMapPP;
+
 struct function_pool_data
 {
     // when AOT generator adds a default key-kernel,
     // we get the keys of two version: empty-config vs full-config
     // make the pair as an entry in a map so that we know they are the same things
-    std::unordered_map<FMKey, FMKey, SimpleHash>     def_key_pool;
-    std::unordered_map<FMKey, FFTKernel, SimpleHash> function_map;
+    FPKeyMap   def_key_pool;
+    FPKeyMapPP def_key_pool_pp;
+
+    FPMap   function_map;
+    FPMapPP function_map_pp;
 
     function_pool_data();
 
@@ -130,9 +139,9 @@ struct function_pool_data
 
 class function_pool
 {
-    unsigned int                                      max_lds_bytes;
-    std::unordered_map<FMKey, FMKey, SimpleHash>&     def_key_pool;
-    std::unordered_map<FMKey, FFTKernel, SimpleHash>& function_map;
+    unsigned int max_lds_bytes;
+    FPKeyMap&    def_key_pool;
+    FPMap&       function_map;
 
     const FMKey& get_actual_key(const FMKey& key) const
     {
@@ -250,10 +259,10 @@ public:
 // That is, the default kernel-config we set in the kernel-generator.py we save a pair as
 // <key-empty-config, key-actual-config> that allows us to use
 // the empty-config key to get the default kernel
-static bool insert_default_entry(const FMKey&                                      def_key,
-                                 const FFTKernel&                                  kernel,
-                                 std::unordered_map<FMKey, FMKey, SimpleHash>&     def_key_pool,
-                                 std::unordered_map<FMKey, FFTKernel, SimpleHash>& function_map)
+static bool insert_default_entry(const FMKey&     def_key,
+                                 const FFTKernel& kernel,
+                                 FPKeyMap&        def_key_pool,
+                                 FPMap&           function_map)
 {
     // simple_key means the same thing as def_key, but we just remove kernel-config
     // so we don't need to know the exact config when we're lookin' for the default kernel

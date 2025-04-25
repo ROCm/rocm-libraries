@@ -128,7 +128,8 @@ static const std::set<ComputeScheme>& ProblemScheme()
                                                              (CS_3D_RTRT),
                                                              (CS_3D_BLOCK_RC),
                                                              (CS_3D_BLOCK_CR),
-                                                             (CS_3D_RC)};
+                                                             (CS_3D_RC),
+                                                             (CS_3D_PP)};
 
     return ProblemSchemeSet;
 }

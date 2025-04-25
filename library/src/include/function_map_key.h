@@ -478,4 +478,81 @@ struct SimpleHash
     }
 };
 
+struct FMKeyPP
+{
+    std::array<size_t, 3> lengths;
+    rocfft_precision      precision;
+    ComputeScheme         scheme          = CS_3D_PP;
+    KernelConfig          kernel_config_1 = KernelConfig::EmptyConfig();
+    KernelConfig          kernel_config_2 = KernelConfig::EmptyConfig();
+
+    FMKeyPP()               = default;
+    FMKeyPP(const FMKeyPP&) = default;
+
+    // with every data
+    FMKeyPP(size_t           length0,
+            size_t           length1,
+            size_t           length2,
+            rocfft_precision precision,
+            ComputeScheme    scheme          = CS_3D_PP,
+            KernelConfig     kernel_config_1 = KernelConfig::EmptyConfig(),
+            KernelConfig     kernel_config_2 = KernelConfig::EmptyConfig())
+        : lengths({length0, length1, length2})
+        , precision(precision)
+        , scheme(scheme)
+        , kernel_config_1(kernel_config_1)
+        , kernel_config_2(kernel_config_2)
+    {
+    }
+
+    FMKeyPP& operator=(const FMKeyPP&) = default;
+
+    bool operator==(const FMKeyPP& rhs) const
+    {
+        return std::tie(lengths, precision, scheme, kernel_config_1, kernel_config_2)
+               == std::tie(rhs.lengths,
+                           rhs.precision,
+                           rhs.scheme,
+                           rhs.kernel_config_1,
+                           rhs.kernel_config_2);
+    }
+
+    bool operator!=(const FMKeyPP& rhs) const
+    {
+        return !((*this) == rhs);
+    }
+
+    bool operator<(const FMKeyPP& rhs) const
+    {
+        return std::tie(lengths, precision, scheme, kernel_config_1, kernel_config_2)
+               < std::tie(rhs.lengths,
+                          rhs.precision,
+                          rhs.scheme,
+                          rhs.kernel_config_1,
+                          rhs.kernel_config_2);
+    }
+
+    static FMKeyPP EmptyFMKeyPP()
+    {
+        static FMKeyPP empty;
+        return empty;
+    }
+};
+
+struct SimpleHashPP
+{
+    size_t operator()(const FMKeyPP& p) const noexcept
+    {
+        size_t h = 0;
+        for(auto& v : p.lengths)
+            h ^= std::hash<int>{}(v);
+        h ^= std::hash<rocfft_precision>{}(p.precision);
+        h ^= std::hash<ComputeScheme>{}(p.scheme);
+        h ^= std::hash<KernelConfig>{}(p.kernel_config_1);
+        h ^= std::hash<KernelConfig>{}(p.kernel_config_2);
+
+        return h;
+    }
+};
+
 #endif

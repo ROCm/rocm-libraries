@@ -152,7 +152,7 @@ def generate_cpu_function_pool_main(num_files):
             type='void',
             name=f'function_pool_init_{i}',
             value=
-            'std::unordered_map<FMKey, FMKey, SimpleHash>& def_key_pool, std::unordered_map<FMKey, FFTKernel, SimpleHash>& function_map'
+            'FPKeyMap& def_key_pool, FPMap& function_map'
         )
 
     call_list = StatementList()
@@ -176,8 +176,6 @@ def generate_cpu_function_pool_pieces(functions, num_files):
         'half': 'rocfft_precision_half',
     }
     var_kernel = Variable('kernel', 'FFTKernel')
-    initial_statement = StatementList()
-    initial_statement += var_kernel.declaration()
 
     # Init list to store contents of function_pool_init function per file being generated
     piece_contents = [
@@ -204,8 +202,8 @@ def generate_cpu_function_pool_pieces(functions, num_files):
     # Assemble contents of each file to return in a list
     pieces = [None] * num_files
     piece_args = ArgumentList(
-        'std::unordered_map<FMKey, FMKey, SimpleHash>& def_key_pool',
-        'std::unordered_map<FMKey, FFTKernel, SimpleHash>& function_map')
+        'FPKeyMap& def_key_pool',
+        'FPMap& function_map')
     for i in range(num_files):
         pieces[i] = StatementList(
             Include('"../include/function_pool.h"'),
@@ -1004,6 +1002,20 @@ def list_large_kernels():
             k.length = functools.reduce(lambda a, b: a * b, k.factors)
 
     return sbcc_kernels + sbcr_kernels + sbrc_kernels
+
+def list_3d_partial_pass_kernels():
+    """Return list of to generate."""
+    
+    pp_3d_kernels = [                
+        NS(length=[64,64,64], dims=[0, 2], factors=[[4, 4, 4],[8, 8]], factors_pp=[[16], [4]], threads_per_transform=[8, 16], workgroup_size=[128, 256], direct_to_from_reg=[False, False])
+    ]
+
+    expanded = []
+    expanded.extend(NS(**kernel.__dict__,
+                       scheme='CS_3D_PP', runtime_compile=True) for kernel in pp_3d_kernels)
+
+    return expanded
+
 # yapf: enable
 
 
@@ -1032,9 +1044,14 @@ def generate_kernel_functions(kernels, precisions, launchers_json):
             launcher = NS(**launcher_dict)
 
             factors = launcher.factors
-            length = launcher.lengths[0] if len(
-                launcher.lengths) == 1 else (launcher.lengths[0],
-                                             launcher.lengths[1])
+            
+            if len(launcher.lengths) == 1:
+                length = launcher.lengths[0]
+            elif len(launcher.lengths) == 2:
+                length = (launcher.lengths[0], launcher.lengths[1])
+            elif len(launcher.lengths) == 3:
+                length = (launcher.lengths[0], launcher.lengths[1], launcher.lengths[2])
+
             transforms_per_block = launcher.transforms_per_block
             workgroup_size = launcher.workgroup_size
             threads_per_transform = workgroup_size // transforms_per_block
@@ -1149,13 +1166,33 @@ def generate_kernels(kernels, precisions, stockham_gen):
             if len(k.factors) == 1:
                 half_lds = False
 
-            # for unspecified direct_to_from_reg, default is True only for CS_KERNEL_STOCKHAM and SBCC
-            direct_to_from_reg = getattr(k, 'direct_to_from_reg', True)
-
             # Send data over to subprocess
-            proc.stdin.write(f' {str(k.workgroup_size)}')
+            if isinstance(k.workgroup_size, list):
+                proc.stdin.write(" " + ','.join([str(f) for f in k.workgroup_size]))
+            else: 
+                proc.stdin.write(f' {str(k.workgroup_size)}')
+            
             proc.stdin.write(' 1' if half_lds else ' 0')
-            proc.stdin.write(' 1' if direct_to_from_reg else ' 0')
+                        
+            direct_to_from_reg = getattr(k, 'direct_to_from_reg', True)
+            
+            if isinstance(direct_to_from_reg, list):
+                proc.stdin.write(" " + ','.join(['1' if f else '0' for f in direct_to_from_reg]))
+            else:
+                # for unspecified direct_to_from_reg, default is True only for CS_KERNEL_STOCKHAM and SBCC
+                direct_to_from_reg = getattr(k, 'direct_to_from_reg', True)
+                proc.stdin.write(' 1' if direct_to_from_reg else ' 0')
+            
+            if hasattr(k, 'dims'):
+                proc.stdin.write(" " + ','.join([str(f) for f in k.dims]))
+
+            if hasattr(k, 'factors_pp'):
+                proc.stdin.write(" " + ','.join([str(f)
+                                           for f in k.factors_pp[0]]) + " ")
+                proc.stdin.write(','.join([str(f)
+                                           for f in k.factors_pp[1]]) + " ")
+                proc.stdin.write(str(k.length[1]))
+            
             proc.stdin.write(f' {k.scheme}')
             proc.stdin.write(f' {kernel_name(k)}\n')
 
@@ -1211,11 +1248,12 @@ def cli():
     #
 
     kernels = []
-    # move 2d out from all, no need to iterate the 2d-kernels for non-2d patterns
+    # move 2d out from all, no need to iterate the 2d-kernels for non-2d patterns    
     kernels_2d = list_2d_kernels()
+    kernel_3d_pp = list_3d_partial_pass_kernels()
     all_kernels = list_small_kernels() + list_large_kernels()
 
-    kernels += all_kernels + kernels_2d
+    kernels += all_kernels + kernels_2d + kernel_3d_pp
 
     kernels = unique(kernels)
 

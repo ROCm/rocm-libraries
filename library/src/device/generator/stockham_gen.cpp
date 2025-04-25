@@ -144,6 +144,26 @@ void make_launcher(const std::vector<unsigned int>& precision_types,
     }
 }
 
+// parse comma-separated string booleans
+std::vector<bool> parse_bool_csv(const std::string& arg)
+{
+    std::vector<bool> bools;
+
+    size_t prev_pos = 0;
+    for(;;)
+    {
+        auto pos = arg.find(',', prev_pos);
+        if(pos == std::string::npos)
+        {
+            bools.push_back(arg.substr(prev_pos) == "1");
+            break;
+        }
+        bools.push_back(arg.substr(prev_pos, pos - prev_pos) == "1");
+        prev_pos = pos + 1;
+    }
+    return bools;
+}
+
 // parse comma-separated string uints
 std::vector<unsigned int> parse_uints_csv(const std::string& arg)
 {
@@ -165,6 +185,73 @@ std::vector<unsigned int> parse_uints_csv(const std::string& arg)
 }
 
 const char* COMMA = ",";
+
+void output_json(const std::vector<GeneratedLauncher>& launchers,
+                 const std::string&                    kernel_name,
+                 std::ostream&                         output)
+{
+    // output json (via stdout) describing the launchers that were generated, so
+    // kernel-generator can generate the function pool
+
+    const char* LIST_DELIM = "";
+
+    // store all variants of one kernel in a list, and store with kernel name as key
+    output << "\"" << kernel_name << "\" : ";
+    output << "[";
+    for(auto& launcher : launchers)
+    {
+        output << LIST_DELIM;
+        output << launcher.to_string() << "\n";
+        LIST_DELIM = COMMA;
+    }
+    output << "]";
+}
+
+void stockham_partial_pass_variants(const std::string&               kernel_name,
+                                    const size_t&                    pp_length,
+                                    const StockhamGeneratorSpecs&    specs1,
+                                    const std::vector<unsigned int>& pp_factors1,
+                                    const StockhamGeneratorSpecs&    specs2,
+                                    const std::vector<unsigned int>& pp_factors2,
+                                    std::ostream&                    output)
+{
+    std::vector<GeneratedLauncher> launchers;
+
+    if(specs1.scheme == "CS_3D_PP" && specs2.scheme == "CS_3D_PP")
+    {
+        // SBRR_PP + SBCC_PP
+        if(specs1.static_dim == 0 && specs2.static_dim == 2)
+        {
+            std::vector<size_t>         factors1(pp_factors1.begin(), pp_factors1.end());
+            StockhamPartialPassKernelRR kernelRR(specs1, factors1, pp_length);
+            make_launcher(
+                specs1.precisions, {{"pp_stoc", specs1.scheme, "", ""}}, kernelRR, launchers);
+
+            std::vector<size_t>         factors2(pp_factors2.begin(), pp_factors2.end());
+            StockhamPartialPassKernelCC kernelCC(specs2, false, factors2);
+            make_launcher(
+                specs2.precisions, {{"pp_sbcc", specs2.scheme, "", ""}}, kernelCC, launchers);
+        }
+        // SBRR_PP + SBCC_PP
+        else if(specs1.static_dim == 1 && specs2.static_dim == 2)
+        {
+        }
+        // SBRR_PP + SBRR_PP
+        else if(specs1.static_dim == 0 && specs2.static_dim == 1)
+        {
+        }
+        else
+        {
+            throw std::runtime_error("invalid dimensions for CS_3D_PP");
+        }
+    }
+    else
+    {
+        throw std::runtime_error("unhandled scheme");
+    }
+
+    output_json(launchers, kernel_name, output);
+}
 
 void stockham_variants(const std::string&            kernel_name,
                        const StockhamGeneratorSpecs& specs,
@@ -247,32 +334,16 @@ void stockham_variants(const std::string&            kernel_name,
     else
         throw std::runtime_error("unhandled scheme");
 
-    // output json (via stdout) describing the launchers that were generated, so
-    // kernel-generator can generate the function pool
-
-    const char* LIST_DELIM = "";
-
-    // store all variants of one kernel in a list, and store with kernel name as key
-    output << "\"" << kernel_name << "\" : ";
-    output << "[";
-    for(auto& launcher : launchers)
-    {
-        output << LIST_DELIM;
-        output << launcher.to_string() << "\n";
-        LIST_DELIM = COMMA;
-    }
-    output << "]";
+    output_json(launchers, kernel_name, output);
 }
 
 int main()
 {
     std::string line;
 
-    std::string  kernel_name;
-    std::string  scheme;
-    bool         direct_to_from_reg;
-    bool         half_lds;
-    unsigned int workgroup_size;
+    std::string kernel_name;
+    std::string scheme;
+    bool        half_lds;
 
     const char* DELIM = "";
     std::cout << "{";
@@ -297,14 +368,33 @@ int main()
         ++arg;
         scheme = *arg;
 
+        unsigned int              pp_length;
+        std::vector<unsigned int> dims, pp_factors_1, pp_factors_2;
+        if(scheme == "CS_3D_PP")
+        {
+            ++arg;
+            pp_length = std::stoul(*arg);
+
+            ++arg;
+            pp_factors_2 = parse_uints_csv(*arg);
+
+            ++arg;
+            pp_factors_1 = parse_uints_csv(*arg);
+
+            ++arg;
+            dims = parse_uints_csv(*arg);
+        }
+
         ++arg;
-        direct_to_from_reg = *arg == "1";
+        std::vector<bool> direct_to_from_reg;
+        direct_to_from_reg = parse_bool_csv(*arg);
 
         ++arg;
         half_lds = *arg == "1";
 
         ++arg;
-        workgroup_size = std::stoul(*arg);
+        std::vector<unsigned int> workgroup_size;
+        workgroup_size = parse_uints_csv(*arg);
 
         ++arg;
         std::vector<unsigned int> threads_per_transform;
@@ -314,31 +404,70 @@ int main()
         std::vector<unsigned int> precisions;
         precisions = parse_uints_csv(*arg);
 
-        std::vector<unsigned int> factors;
-        std::vector<unsigned int> factors2d;
-        if(scheme == "CS_KERNEL_2D_SINGLE")
-        {
-            ++arg;
-            factors2d = parse_uints_csv(*arg);
-        }
-
-        ++arg;
-        factors = parse_uints_csv(*arg);
-
-        StockhamGeneratorSpecs specs(factors, factors2d, precisions, workgroup_size, scheme);
-        specs.half_lds           = half_lds;
-        specs.direct_to_from_reg = direct_to_from_reg;
-
-        specs.threads_per_transform = threads_per_transform.front();
-
-        // second dimension for 2D_SINGLE
-        StockhamGeneratorSpecs specs2d(factors2d, factors, precisions, workgroup_size, scheme);
-        if(!threads_per_transform.empty())
-            specs2d.threads_per_transform = threads_per_transform.back();
-
         // create spec and pass to stockham_variants, writes partial output to stdout
         std::cout << DELIM;
-        stockham_variants(kernel_name, specs, specs2d, std::cout);
+
+        if(scheme == "CS_3D_PP")
+        {
+            std::vector<unsigned int> factors1, factors2;
+
+            ++arg;
+            factors2 = parse_uints_csv(*arg);
+
+            ++arg;
+            factors1 = parse_uints_csv(*arg);
+
+            if(dims.size() != 2)
+                throw std::runtime_error("CS_3D_PP requires two dimensions configuration");
+
+            if(threads_per_transform.size() != 2)
+                throw std::runtime_error(
+                    "CS_3D_PP requires two threads_per_transform configuration");
+
+            if(direct_to_from_reg.size() != 2)
+                throw std::runtime_error("CS_3D_PP requires two direct_to_from_reg configuration");
+
+            StockhamGeneratorSpecs specs1(factors1, {}, precisions, workgroup_size[0], scheme);
+            specs1.static_dim            = dims[0];
+            specs1.direct_to_from_reg    = direct_to_from_reg[0];
+            specs1.threads_per_transform = threads_per_transform[0];
+
+            StockhamGeneratorSpecs specs2(factors2, {}, precisions, workgroup_size[1], scheme);
+            specs2.static_dim            = dims[1];
+            specs2.direct_to_from_reg    = direct_to_from_reg[1];
+            specs2.threads_per_transform = threads_per_transform[1];
+
+            stockham_partial_pass_variants(
+                kernel_name, pp_length, specs1, pp_factors_1, specs2, pp_factors_2, std::cout);
+        }
+        else
+        {
+            std::vector<unsigned int> factors;
+            std::vector<unsigned int> factors2d;
+            if(scheme == "CS_KERNEL_2D_SINGLE")
+            {
+                ++arg;
+                factors2d = parse_uints_csv(*arg);
+            }
+
+            ++arg;
+            factors = parse_uints_csv(*arg);
+
+            StockhamGeneratorSpecs specs(factors, factors2d, precisions, workgroup_size[0], scheme);
+            specs.half_lds           = half_lds;
+            specs.direct_to_from_reg = direct_to_from_reg[0];
+
+            specs.threads_per_transform = threads_per_transform.front();
+
+            // second dimension for 2D_SINGLE
+            StockhamGeneratorSpecs specs2d(
+                factors2d, factors, precisions, workgroup_size[0], scheme);
+            if(!threads_per_transform.empty())
+                specs2d.threads_per_transform = threads_per_transform.back();
+
+            stockham_variants(kernel_name, specs, specs2d, std::cout);
+        }
+
         DELIM = COMMA;
         std::cout << std::flush;
     }

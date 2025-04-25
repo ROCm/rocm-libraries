@@ -60,6 +60,8 @@ struct StockhamGeneratorSpecs
     unsigned int static_dim = 0;
     std::string  scheme;
 
+    unsigned int pp_dim = 0;
+
     // this value indicating if the wgs, tpt are excatly what we want
     // (i.e. were already derived somewhere)
     // to tell StockhamKernel not to do its auto-derivation again.
