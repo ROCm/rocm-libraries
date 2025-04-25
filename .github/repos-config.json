@@ -6,6 +6,11 @@
       "branch": "develop"
     },
     {
+      "name": "MIOpen",
+      "url": "ROCm/MIOpen",
+      "branch": "develop"
+    },
+    {
       "name": "MIVisionX",
       "url": "ROCm/MIVisionX",
       "branch": "develop"
