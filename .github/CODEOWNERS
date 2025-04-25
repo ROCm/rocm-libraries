@@ -1,0 +1,167 @@
+# Auto-generated CODEOWNERS file
+
+/AMDMIGraphX/* @causten
+/AMDMIGraphX/*.md @ROCm/rocm-documentation
+/AMDMIGraphX/*.rst @ROCm/rocm-documentation
+/AMDMIGraphX/docs/* @ROCm/rocm-documentation
+/MIOpen/* @BrianHarrisonAMD @BradPepersAMD @adickin-amd @JonathanLichtnerAMD
+/MIOpen/*.md @ROCm/rocm-documentation
+/MIOpen/*.rst @ROCm/rocm-documentation
+/MIOpen/.readthedocs.yaml @ROCm/rocm-documentation
+/MIOpen/docs/ @ROCm/rocm-documentation
+/MIVisionX/* @kiritigowda @rrawther
+/MIVisionX/*.md @ROCm/rocm-documentation @kiritigowda @rrawther
+/MIVisionX/*.rst @ROCm/rocm-documentation @kiritigowda @rrawther
+/MIVisionX/.readthedocs.yaml @ROCm/rocm-documentation @kiritigowda @rrawther
+/MIVisionX/docs/ @ROCm/rocm-documentation @kiritigowda @rrawther
+/Tensile/* @babakpst @yoichiyoshida @bragadeesh @AlexBrownAMD @nakajee
+/TransferBench/* @ROCm/RCCL-Reviewers
+/TransferBench/*.md @ROCm/rocm-documentation
+/TransferBench/*.rst @ROCm/rocm-documentation
+/TransferBench/.readthedocs.yaml @ROCm/rocm-documentation
+/TransferBench/docs/ @ROCm/rocm-documentation
+/composable_kernel/* @illsilin @carlushuang @qianfengz @aosewski @poyenc @geyyer @bartekxk @andriy-ca @afagaj @asleepzzz @tenpercent @ThomasNing @coderfeli
+/composable_kernel/*.md @ROCm/rocm-documentation @illsilin @carlushuang @qianfengz @aosewski @poyenc @geyyer @bartekxk @andriy-ca @afagaj @asleepzzz @ThomasNing @coderfeli
+/composable_kernel/*.rst @ROCm/rocm-documentation @illsilin @carlushuang @qianfengz @aosewski @poyenc @geyyer @bartekxk @andriy-ca @afagaj @asleepzzz @ThomasNing @coderfeli
+/composable_kernel/.readthedocs.yaml @ROCm/rocm-documentation @illsilin @carlushuang @qianfengz @aosewski @poyenc @geyyer @bartekxk @andriy-ca @afagaj @asleepzzz @ThomasNing @coderfeli
+/composable_kernel/docs/ @ROCm/rocm-documentation @illsilin @carlushuang @qianfengz @aosewski @poyenc @geyyer @bartekxk @andriy-ca @afagaj @asleepzzz @ThomasNing @coderfeli
+/composable_kernel/library/include/ @ROCm/rocm-documentation @illsilin @carlushuang @qianfengz @aosewski @poyenc @geyyer @bartekxk @andriy-ca @afagaj @asleepzzz @ThomasNing @coderfeli
+/hipBLAS-common/* @bnemanich @daineAMD @TorreZuk
+/hipBLAS-common/*.md @ROCm/rocm-documentation @bnemanich @daineAMD @TorreZuk
+/hipBLAS-common/*.rst @ROCm/rocm-documentation @bnemanich @daineAMD @TorreZuk
+/hipBLAS/* @amcamd @TorreZuk @mahmoodw @daineAMD @bragadeesh @NaveenElumalaiAMD @rkamd
+/hipBLAS/*.md @ROCm/rocm-documentation @amcamd @TorreZuk @mahmoodw @daineAMD @bragadeesh @NaveenElumalaiAMD @rkamd
+/hipBLAS/*.rst @ROCm/rocm-documentation @amcamd @TorreZuk @mahmoodw @daineAMD @bragadeesh @NaveenElumalaiAMD @rkamd
+/hipBLAS/.readthedocs.yaml @ROCm/rocm-documentation @amcamd @TorreZuk @mahmoodw @daineAMD @bragadeesh @NaveenElumalaiAMD @rkamd
+/hipBLAS/docs/* @ROCm/rocm-documentation @amcamd @TorreZuk @mahmoodw @daineAMD @bragadeesh @NaveenElumalaiAMD @rkamd
+/hipBLAS/library/include/* @ROCm/rocm-documentation @amcamd @TorreZuk @mahmoodw @daineAMD @bragadeesh @NaveenElumalaiAMD @rkamd
+/hipBLASLt/* @jichangjichang @KKyang @vin-huang @imcarsonliao @hcman2 @Serge45 @Jinp800125 @TonyYHsieh @solaslin @aazz44ss
+/hipBLASLt/*.md @ROCm/rocm-documentation @jichangjichang @KKyang @vin-huang @imcarsonliao @hcman2 @Serge45 @Jinp800125 @TonyYHsieh @solaslin @aazz44ss
+/hipBLASLt/*.rst @ROCm/rocm-documentation @jichangjichang @KKyang @vin-huang @imcarsonliao @hcman2 @Serge45 @Jinp800125 @TonyYHsieh @solaslin @aazz44ss
+/hipBLASLt/.readthedocs.yaml @ROCm/rocm-documentation @jichangjichang @KKyang @vin-huang @imcarsonliao @hcman2 @Serge45 @Jinp800125 @TonyYHsieh @solaslin @aazz44ss
+/hipBLASLt/docs/ @ROCm/rocm-documentation @jichangjichang @KKyang @vin-huang @imcarsonliao @hcman2 @Serge45 @Jinp800125 @TonyYHsieh @solaslin @aazz44ss
+/hipCUB/* @stanleytsang-amd @umfranzw @RobsonRLemos @lawruble13
+/hipCUB/*.md @ROCm/rocm-documentation
+/hipCUB/*.rst @ROCm/rocm-documentation
+/hipCUB/.readthedocs.yaml @ROCm/rocm-documentation
+/hipCUB/docs/* @ROCm/rocm-documentation
+/hipFFT/* @af-ayala @eng-flavio-teixeira @evetsso @feizheng10 @malcolmroberts
+/hipFFT/*.md @ROCm/rocm-documentation
+/hipFFT/*.rst @ROCm/rocm-documentation
+/hipFFT/.readthedocs.yaml @ROCm/rocm-documentation
+/hipFFT/docs/ @ROCm/rocm-documentation
+/hipFFT/library/include/ @ROCm/rocm-documentation @af-ayala @eng-flavio-teixeira @evetsso @feizheng10 @malcolmroberts
+/hipRAND/* @stanleytsang-amd @umfranzw @RobsonRLemos @lawruble13
+/hipRAND/*.md @ROCm/rocm-documentation
+/hipRAND/*.rst @ROCm/rocm-documentation
+/hipRAND/.readthedocs.yaml @ROCm/rocm-documentation
+/hipRAND/docs/ @ROCm/rocm-documentation
+/hipRAND/library/include/ @ROCm/rocm-documentation @stanleytsang-amd @umfranzw @RobsonRLemos @lawruble13
+/hipSOLVER/* @jzuniga-amd @tfalders @cgmb @qjojo @EdDAzevedo @jmachado-amd
+/hipSOLVER/*.md @ROCm/rocm-documentation @jzuniga-amd @tfalders @cgmb @qjojo @EdDAzevedo @jmachado-amd
+/hipSOLVER/*.rst @ROCm/rocm-documentation @jzuniga-amd @tfalders @cgmb @qjojo @EdDAzevedo @jmachado-amd
+/hipSOLVER/.readthedocs.yaml @ROCm/rocm-documentation @jzuniga-amd @tfalders @cgmb @qjojo @EdDAzevedo @jmachado-amd
+/hipSOLVER/docs/ @ROCm/rocm-documentation @jzuniga-amd @tfalders @cgmb @qjojo @EdDAzevedo @jmachado-amd
+/hipSOLVER/library/include/ @ROCm/rocm-documentation @jzuniga-amd @tfalders @cgmb @qjojo @EdDAzevedo @jmachado-amd
+/hipSPARSE/* @ntrost57 @YvanMokwinski @jsandham
+/hipSPARSE/*.md @ROCm/rocm-documentation
+/hipSPARSE/*.rst @ROCm/rocm-documentation
+/hipSPARSE/.readthedocs.yaml @ROCm/rocm-documentation
+/hipSPARSE/docs/* @ROCm/rocm-documentation
+/hipSPARSE/library/include/* @ROCm/rocm-documentation
+/hipSPARSELt/* @vin-huang @jichangjichang @hcman2 @imcarsonliao @Jay0521 @alex391a
+/hipSPARSELt/*.md @ROCm/rocm-documentation
+/hipSPARSELt/*.rst @ROCm/rocm-documentation
+/hipSPARSELt/.readthedocs.yaml @ROCm/rocm-documentation
+/hipSPARSELt/docs/ @ROCm/rocm-documentation
+/hipSPARSELt/library/include/ @ROCm/rocm-documentation @vin-huang @jichangjichang @hcman2 @imcarsonliao @Jay0521 @alex391a
+/hipTensor/* @cgmillette @dlangbe @congma13 @afanfa @Ryker0627
+/hipTensor/*.md @ROCm/rocm-documentation
+/hipTensor/*.rst @ROCm/rocm-documentation
+/hipTensor/.readthedocs.yaml @ROCm/rocm-documentation
+/hipTensor/docs/ @ROCm/rocm-documentation
+/hipTensor/library/include/ @ROCm/rocm-documentation @cgmillette @dlangbe @congma13 @afanfa @Ryker0627
+/hipfort/* @cgmb
+/hipfort/*.md @ROCm/rocm-documentation
+/hipfort/*.rst @ROCm/rocm-documentation
+/hipfort/.readthedocs.yaml @ROCm/rocm-documentation
+/hipfort/docs/ @ROCm/rocm-documentation
+/rccl/* @wenkaidu @gilbertlee-amd @akolliasAMD @PedramAlizadeh @nusislam @nileshnegi @KawtharShafie @AtlantaPepsi @mberenjk @corey-derochie-amd @mustafabar @thananon @JhaShweta1 @BertanDogancay @rahulvaidya20 @jee7s @isaki001 @PJAvinash @AbandiGa @Nikhil-Nunna @haripriya-amd# Documentation files
+/rccl/*.md @ROCm/rocm-documentation
+/rccl/*.rst @ROCm/rocm-documentation
+/rccl/.readthedocs.yaml @ROCm/rocm-documentation
+/rccl/docs/ @ROCm/rocm-documentation
+/rocAL/* @kiritigowda @rrawther
+/rocAL/*.md @ROCm/rocm-documentation @kiritigowda @rrawther
+/rocAL/*.rst @ROCm/rocm-documentation @kiritigowda @rrawther
+/rocAL/.readthedocs.yaml @ROCm/rocm-documentation
+/rocAL/docs/ @ROCm/rocm-documentation @kiritigowda @rrawther
+/rocAL/library/include/ @ROCm/rocm-documentation @kiritigowda @rrawther
+/rocALUTION/* @ntrost57 @YvanMokwinski @jsandham @kliegeois
+/rocALUTION/*.md @ROCm/rocm-documentation
+/rocALUTION/*.rst @ROCm/rocm-documentation
+/rocALUTION/.readthedocs.yaml @ROCm/rocm-documentation
+/rocALUTION/docs/* @ROCm/rocm-documentation
+/rocBLAS/* @amcamd @TorreZuk @mahmoodw @daineAMD @bragadeesh @NaveenElumalaiAMD @rkamd @yoichiyoshida @babakpst
+/rocBLAS/*.md @ROCm/rocm-documentation @amcamd @TorreZuk @mahmoodw @daineAMD @bragadeesh @NaveenElumalaiAMD @rkamd
+/rocBLAS/*.rst @ROCm/rocm-documentation @amcamd @TorreZuk @mahmoodw @daineAMD @bragadeesh @NaveenElumalaiAMD @rkamd
+/rocBLAS/.readthedocs.yaml @ROCm/rocm-documentation @amcamd @TorreZuk @mahmoodw @daineAMD @bragadeesh @NaveenElumalaiAMD @rkamd
+/rocBLAS/docs/ @ROCm/rocm-documentation @amcamd @TorreZuk @mahmoodw @daineAMD @bragadeesh @NaveenElumalaiAMD @rkamd
+/rocBLAS/library/include/* @ROCm/rocm-documentation @amcamd @TorreZuk @mahmoodw @daineAMD @bragadeesh @NaveenElumalaiAMD @rkamd
+/rocDecode/* @rrawther @AryanSalmanpour
+/rocDecode/*.md @ROCm/rocm-documentation
+/rocDecode/*.rst @ROCm/rocm-documentation
+/rocDecode/.readthedocs.yaml @ROCm/rocm-documentation
+/rocDecode/docs/ @ROCm/rocm-documentation
+/rocFFT/* @af-ayala @eng-flavio-teixeira @evetsso @feizheng10 @malcolmroberts
+/rocFFT/*.md @ROCm/rocm-documentation
+/rocFFT/*.rst @ROCm/rocm-documentation
+/rocFFT/.readthedocs.yaml @ROCm/rocm-documentation
+/rocFFT/docs/ @ROCm/rocm-documentation
+/rocFFT/library/include/ @ROCm/rocm-documentation @af-ayala @eng-flavio-teixeira @evetsso @feizheng10 @malcolmroberts
+/rocJPEG/* @AryanSalmanpour @rrawther @kiritigowda
+/rocJPEG/*.md @ROCm/rocm-documentation
+/rocJPEG/*.rst @ROCm/rocm-documentation
+/rocJPEG/.readthedocs.yaml @ROCm/rocm-documentation
+/rocJPEG/docs/ @ROCm/rocm-documentation
+/rocPRIM/* @stanleytsang-amd @umfranzw @RobsonRLemos @lawruble13
+/rocPRIM/*.md @ROCm/rocm-documentation
+/rocPRIM/*.rst @ROCm/rocm-documentation
+/rocPRIM/.readthedocs.yaml @ROCm/rocm-documentation
+/rocPRIM/docs/ @ROCm/rocm-documentation
+/rocPyDecode/* @essamROCm @LakshmiKumar23 @AryanSalmanpour @rrawther @kiritigowda
+/rocPyDecode/*.md @ROCm/rocm-documentation
+/rocPyDecode/*.rst @ROCm/rocm-documentation
+/rocPyDecode/.readthedocs.yaml @ROCm/rocm-documentation
+/rocPyDecode/docs/ @ROCm/rocm-documentation
+/rocRAND/* @stanleytsang-amd @umfranzw @RobsonRLemos @lawruble13
+/rocRAND/*.md @ROCm/rocm-documentation
+/rocRAND/*.rst @ROCm/rocm-documentation
+/rocRAND/docs/ @ROCm/rocm-documentation
+/rocRAND/library/include/ @ROCm/rocm-documentation @stanleytsang-amd @umfranzw @RobsonRLemos @lawruble13
+/rocSHMEM/* @avinashkethineedi @Yiltan @BKP @abouteiller @edgargabriel @gaoikawa
+/rocSOLVER/* @jzuniga-amd @tfalders @cgmb @qjojo @EdDAzevedo @jmachado-amd @AGonzales-amd
+/rocSOLVER/*.md @ROCm/rocm-documentation @jzuniga-amd @tfalders @cgmb @qjojo @EdDAzevedo @jmachado-amd @AGonzales-amd
+/rocSOLVER/*.rst @ROCm/rocm-documentation @jzuniga-amd @tfalders @cgmb @qjojo @EdDAzevedo @jmachado-amd @AGonzales-amd
+/rocSOLVER/docs/ @ROCm/rocm-documentation @jzuniga-amd @tfalders @cgmb @qjojo @EdDAzevedo @jmachado-amd @AGonzales-amd
+/rocSOLVER/library/include/ @ROCm/rocm-documentation @jzuniga-amd @tfalders @cgmb @qjojo @EdDAzevedo @jmachado-amd @AGonzales-amd
+/rocSPARSE/* @ntrost57 @YvanMokwinski @jsandham @kliegeois
+/rocSPARSE/*.md @ROCm/rocm-documentation
+/rocSPARSE/*.rst @ROCm/rocm-documentation
+/rocSPARSE/docs/* @ROCm/rocm-documentation
+/rocSPARSE/library/include/* @ROCm/rocm-documentation
+/rocThrust/* @stanleytsang-amd @umfranzw @RobsonRLemos @lawruble13
+/rocThrust/*.md @ROCm/rocm-documentation
+/rocThrust/*.rst @ROCm/rocm-documentation
+/rocThrust/.readthedocs.yaml @ROCm/rocm-documentation
+/rocThrust/docs/ @ROCm/rocm-documentation
+/rocWMMA/* @cgmillette @congma13 @bragadeesh @dlangbe @Ryker0627
+/rocWMMA/*.md @ROCm/rocm-documentation
+/rocWMMA/*.rst @ROCm/rocm-documentation
+/rocWMMA/docs/* @ROCm/rocm-documentation
+/rocWMMA/library/include/* @ROCm/rocm-documentation
+/rpp/*.md @ROCm/rocm-documentation
+/rpp/*.rst @ROCm/rocm-documentation
+/rpp/@kiritigowda @rrawther
+/rpp/docs/* @ROCm/rocm-documentation
+/rpp/library/include/* @ROCm/rocm-documentation @kiritigowda @rrawther
