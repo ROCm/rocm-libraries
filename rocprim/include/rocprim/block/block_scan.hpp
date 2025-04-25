@@ -60,20 +60,29 @@ struct select_block_scan_impl;
 template<>
 struct select_block_scan_impl<block_scan_algorithm::using_warp_scan>
 {
-    template<class T, unsigned int BlockSizeX, unsigned int BlockSizeY, unsigned int BlockSizeZ>
-    using type = block_scan_warp_scan<T, BlockSizeX, BlockSizeY, BlockSizeZ>;
+    template<class T,
+             unsigned int            BlockSizeX,
+             unsigned int            BlockSizeY,
+             unsigned int            BlockSizeZ,
+             arch::wavefront::target TargetWaveSize>
+    using type = block_scan_warp_scan<T, BlockSizeX, BlockSizeY, BlockSizeZ, TargetWaveSize>;
 };
 
 template<>
 struct select_block_scan_impl<block_scan_algorithm::reduce_then_scan>
 {
-    template<class T, unsigned int BlockSizeX, unsigned int BlockSizeY, unsigned int BlockSizeZ>
+    template<class T,
+             unsigned int            BlockSizeX,
+             unsigned int            BlockSizeY,
+             unsigned int            BlockSizeZ,
+             arch::wavefront::target TargetWaveSize>
     // When BlockSize is less than hardware warp size block_scan_warp_scan performs better than
     // block_scan_reduce_then_scan by specializing for warps
     using type = typename std::conditional<
-        (BlockSizeX * BlockSizeY * BlockSizeZ <= ::rocprim::arch::wavefront::min_size()),
-        block_scan_warp_scan<T, BlockSizeX, BlockSizeY, BlockSizeZ>,
-        block_scan_reduce_then_scan<T, BlockSizeX, BlockSizeY, BlockSizeZ>>::type;
+        (BlockSizeX * BlockSizeY * BlockSizeZ
+         <= (arch::wavefront::size_from_target<TargetWaveSize>())),
+        block_scan_warp_scan<T, BlockSizeX, BlockSizeY, BlockSizeZ, TargetWaveSize>,
+        block_scan_reduce_then_scan<T, BlockSizeX, BlockSizeY, BlockSizeZ, TargetWaveSize>>::type;
 };
 
 } // end namespace detail
@@ -124,19 +133,21 @@ struct select_block_scan_impl<block_scan_algorithm::reduce_then_scan>
 /// }
 /// \endcode
 /// \endparblock
-template<
-    class T,
-    unsigned int BlockSizeX,
-    block_scan_algorithm Algorithm = block_scan_algorithm::default_algorithm,
-    unsigned int BlockSizeY = 1,
-    unsigned int BlockSizeZ = 1
->
+template<class T,
+         unsigned int            BlockSizeX,
+         block_scan_algorithm    Algorithm      = block_scan_algorithm::default_algorithm,
+         unsigned int            BlockSizeY     = 1,
+         unsigned int            BlockSizeZ     = 1,
+         arch::wavefront::target TargetWaveSize = arch::wavefront::get_target()>
 class block_scan
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
-    : private detail::select_block_scan_impl<Algorithm>::template type<T, BlockSizeX, BlockSizeY, BlockSizeZ>
+    : private detail::select_block_scan_impl<
+          Algorithm>::template type<T, BlockSizeX, BlockSizeY, BlockSizeZ, TargetWaveSize>
 #endif
 {
-    using base_type = typename detail::select_block_scan_impl<Algorithm>::template type<T, BlockSizeX, BlockSizeY, BlockSizeZ>;
+    using base_type = typename detail::select_block_scan_impl<
+        Algorithm>::template type<T, BlockSizeX, BlockSizeY, BlockSizeZ, TargetWaveSize>;
+
 public:
     /// \brief Struct used to allocate a temporary memory that is required for thread
     /// communication during operations provided by related parallel primitive.
@@ -1502,6 +1513,49 @@ public:
         }
     }
 };
+
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
+template<class T,
+         unsigned int         BlockSizeX,
+         block_scan_algorithm Algorithm,
+         unsigned int         BlockSizeY,
+         unsigned int         BlockSizeZ>
+class block_scan<T, BlockSizeX, Algorithm, BlockSizeY, BlockSizeZ, arch::wavefront::target::dynamic>
+{
+private:
+    using block_scan_wave32 = block_scan<T,
+                                         BlockSizeX,
+                                         Algorithm,
+                                         BlockSizeY,
+                                         BlockSizeZ,
+                                         arch::wavefront::target::size32>;
+    using block_scan_wave64 = block_scan<T,
+                                         BlockSizeX,
+                                         Algorithm,
+                                         BlockSizeY,
+                                         BlockSizeZ,
+                                         arch::wavefront::target::size64>;
+
+    using dispatch = detail::dispatch_wave_size<block_scan_wave32, block_scan_wave64>;
+
+public:
+    using storage_type = typename dispatch::storage_type;
+
+    template<typename... Args>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    auto inclusive_scan(Args&&... args)
+    {
+        dispatch{}([](auto impl, auto&&... args) { impl.inclusive_scan(args...); }, args...);
+    }
+
+    template<typename... Args>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    auto exclusive_scan(Args&&... args)
+    {
+        dispatch{}([](auto impl, auto&&... args) { impl.exclusive_scan(args...); }, args...);
+    }
+};
+#endif // DOXYGEN_SHOULD_SKIP_THIS
 
 END_ROCPRIM_NAMESPACE
 

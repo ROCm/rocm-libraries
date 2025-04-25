@@ -86,7 +86,6 @@ static_assert(rocprim::detail::is_valid_bit_cast<Group32_I, int>,
 template<typename Source, typename Destination>
 void TestBitCastCombinationImpl(const Source& source)
 {
-
     if constexpr(rocprim::detail::is_valid_bit_cast<Destination, Source>)
     {
         Destination dest_memcpy;
@@ -208,7 +207,7 @@ TYPED_TEST(BitCastPairTest, BitCastPairTest)
         buffer[i] = static_cast<unsigned char>(rand() & 0xFF);
     }
     Source source;
-    std::memcpy(&source, buffer, sizeof(Source));
+    std::memcpy(reinterpret_cast<void*>(&source), buffer, sizeof(Source));
 
     TestBitCastForDestinations<Source, AllTypesTuple>(source);
 }

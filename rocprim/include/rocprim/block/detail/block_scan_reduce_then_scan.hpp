@@ -36,12 +36,11 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-template<
-    class T,
-    unsigned int BlockSizeX,
-    unsigned int BlockSizeY,
-    unsigned int BlockSizeZ
->
+template<class T,
+         unsigned int            BlockSizeX,
+         unsigned int            BlockSizeY,
+         unsigned int            BlockSizeZ,
+         arch::wavefront::target TargetWaveSize>
 class block_scan_reduce_then_scan
 {
     static constexpr unsigned int BlockSize = BlockSizeX * BlockSizeY * BlockSizeZ;
@@ -53,7 +52,7 @@ class block_scan_reduce_then_scan
     // Warp scan, warp_scan_crosslane does not require shared memory (storage), but
     // logical warp size must be a power of two.
     static constexpr unsigned int warp_size_
-        = detail::get_min_warp_size(BlockSize, ::rocprim::arch::wavefront::min_size());
+        = detail::get_min_warp_size(BlockSize, arch::wavefront::size_from_target<TargetWaveSize>());
     using warp_scan_prefix_type = ::rocprim::detail::warp_scan_crosslane<T, warp_size_>;
 
     // Minimize LDS bank conflicts
