@@ -75,7 +75,8 @@ add_executable(${PROJECT_NAME} ${My_Source_Files})
 
 # Link Libraries & Set CXX Flags
 target_link_libraries(${PROJECT_NAME} vx_nn openvx pthread dl)
-# -mf16c -- Support F16C built-in functions and code generation.
+# -msse4.2 -- Support MMX, SSE, SSE2, SSE3, SSSE3, SSE4.1 and SSE4.2 built-in functions and code generation.
+# -mf16c   -- Support F16C built-in functions and code generation.
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -msse4.2 -mf16c")
 
 # Link OpenCL/HIP

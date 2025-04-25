@@ -42,6 +42,8 @@ add_executable(mv_compile mv_compile.cpp)
 # install MIVisionX executables -- {ROCM_PATH}/bin
 install(TARGETS mv_compile DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT runtime)
 
+# -msse4.2 -- Support MMX, SSE, SSE2, SSE3, SSSE3, SSE4.1 and SSE4.2 built-in functions and code generation.
+# -mf16c   -- Support F16C built-in functions and code generation.
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -msse4.2 -mf16c")
 target_link_libraries(mv_compile ${CMAKE_DL_LIBS} stdc++fs)
 
