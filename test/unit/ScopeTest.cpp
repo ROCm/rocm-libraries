@@ -112,7 +112,7 @@ namespace ScopeTest
             // (op 1) Assign VGPR 11:U32(4) BEGIN
             // (op 4) Assign dim(1) = 11:U32
             // tag 1: v**UNALLOCATED**
-            // (op 4) Generate 11:U32 into v**UNALLOCATED**
+            // (op 4) Generate 11:U32 into DataFlowTag1: VGPR Value: UInt32 x 1: (unallocated)
             // Allocated DataFlowTag1: 1 VGPR (Value: UInt32) (op 4): v0
             v_mov_b32 v0, 11 // (op 4) call()
             // (op 1) Assign VGPR 11:U32(4) END
@@ -125,13 +125,13 @@ namespace ScopeTest
             // (op 3) Assign VGPR 33:U32(6) BEGIN
             // (op 6) Assign dim(3) = 33:U32
             // tag 3: v**UNALLOCATED**
-            // (op 6) Generate 33:U32 into v**UNALLOCATED**
+            // (op 6) Generate 33:U32 into DataFlowTag3: VGPR Value: UInt32 x 1: (unallocated)
             // Allocated DataFlowTag3: 1 VGPR (Value: UInt32) (op 6): v1
             v_mov_b32 v1, 33 // (op 6) call()
             // (op 3) Assign VGPR 33:U32(6) END
             // (op 3) Assign VGPR 44:U32(7) BEGIN
             // (op 7) Assign dim(1) = 44:U32
-            // (op 7) Generate 44:U32 into v0
+            // (op 7) Generate 44:U32 into DataFlowTag1: VGPR Value: UInt32 x 1: v0
             v_mov_b32 v0, 44 // (op 7) call()
             // (op 3) Assign VGPR 44:U32(7) END
             // (op 3) end: generate({6})
@@ -142,7 +142,7 @@ namespace ScopeTest
             // (op 2) Assign VGPR 22:U32(5) BEGIN
             // (op 5) Assign dim(2) = 22:U32
             // tag 2: v**UNALLOCATED**
-            // (op 5) Generate 22:U32 into v**UNALLOCATED**
+            // (op 5) Generate 22:U32 into DataFlowTag2: VGPR Value: UInt32 x 1: (unallocated)
             // Allocated DataFlowTag2: 1 VGPR (Value: UInt32) (op 5): v1
             v_mov_b32 v1, 22 // (op 5) call()
             // (op 2) Assign VGPR 22:U32(5) END

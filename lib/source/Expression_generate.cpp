@@ -32,6 +32,7 @@
 #include <rocRoller/Context.hpp>
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/ExpressionTransformations.hpp>
+#include <rocRoller/ReplaceKernelArgs.hpp>
 
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
 #include <rocRoller/CodeGen/Arithmetic/MatrixMultiply.hpp>
@@ -1121,7 +1122,7 @@ namespace rocRoller
         {
             std::string destStr = "nullptr";
             if(dest)
-                destStr = dest->toString();
+                destStr = dest->description();
             co_yield Instruction::Comment("Generate " + toString(expr) + " into " + destStr);
 
             // Replace RandomNumber expression with expressions that implement the PRNG algorithm
@@ -1140,6 +1141,8 @@ namespace rocRoller
             }
 
             expr = lowerBitfieldValues(expr);
+            // Replace kernel args with registers.
+            co_yield replaceKernelArgs(context, expr, expr);
 
             CodeGeneratorVisitor v{context};
 

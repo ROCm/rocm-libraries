@@ -79,6 +79,7 @@ set(rocroller_src
     source/Logging.cpp
     source/Random.cpp
     source/Register.cpp
+    source/ReplaceKernelArgs.cpp
     source/ScheduledInstructions.cpp
     source/Scheduler.cpp
     source/Timer.cpp

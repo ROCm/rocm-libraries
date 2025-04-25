@@ -115,9 +115,9 @@ namespace rocRoller
 
         /**
          * Resolve all PositionalArguments in the given expression.
-	 *
-	 * Each PositionalArgument is transformed into the expression
-	 * in position `slot` of `arguments`.
+         *
+         * Each PositionalArgument is transformed into the expression
+         * in position `slot` of `arguments`.
          */
         ExpressionPtr positionalArgumentPropagation(ExpressionPtr              expr,
                                                     std::vector<ExpressionPtr> arguments);
@@ -146,7 +146,6 @@ namespace rocRoller
             explicit FastArithmetic(ContextPtr);
 
             ExpressionPtr operator()(ExpressionPtr) const;
-            ExpressionPtr call(ExpressionPtr) const;
 
         private:
             ContextPtr m_context;
