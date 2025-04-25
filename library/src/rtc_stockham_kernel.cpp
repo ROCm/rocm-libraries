@@ -86,6 +86,7 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
             {
                 kernel->threads_per_transform[0] = 8;
                 kernel->workgroup_size           = 128;
+                kernel->direct_to_from_reg       = false;
             }
 
             kernel->transforms_per_block
