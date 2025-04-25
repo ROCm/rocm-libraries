@@ -264,6 +264,9 @@ __device__ inline int __FFS<uint64_t>(uint64_t v) {
 #ifndef cudaMemsetAsync
 #  define cudaMemsetAsync hipMemsetAsync
 #endif
+#ifndef cudaMemset
+#  define cudaMemset hipMemset
+#endif
 
 #ifndef cudaSetDevice
 #  define cudaSetDevice hipSetDevice
