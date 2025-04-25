@@ -122,6 +122,19 @@ set(ARCH_FILE_DIR ${PROJECT_BINARY_DIR}/share/rocRoller)
 
 file(MAKE_DIRECTORY ${ARCH_FILE_DIR})
 
+set(GPUArchitectureGeneratorBin $<TARGET_FILE:GPUArchitectureGenerator>)
+
+if(BUILD_ADDRESS_SANITIZER OR "${CMAKE_CXX_FLAGS}" MATCHES "-fsanitize=address")
+    # Must populate LD_PRELOAD with ASAN runtime if ASAN is being used.
+    # Find the ASAN RT with compiler and update env for Tensile call.
+    execute_process(
+        COMMAND ${CMAKE_CXX_COMPILER} --print-file-name=libclang_rt.asan-x86_64.so
+        OUTPUT_VARIABLE ASAN_LIB_PATH
+        COMMAND_ECHO STDOUT)
+    string(STRIP ${ASAN_LIB_PATH} ASAN_LIB_PATH)
+    set(GPUArchitectureGeneratorBin LD_PRELOAD=${ASAN_LIB_PATH} ASAN_OPTIONS=detect_leaks=0 ${GPUArchitectureGeneratorBin})
+endif()
+
 if(NOT ROCROLLER_USE_PREGENERATED_ARCH_DEF)
 
     file(MAKE_DIRECTORY ${ARCH_FILE_DIR}/split_yamls)
@@ -129,7 +142,7 @@ if(NOT ROCROLLER_USE_PREGENERATED_ARCH_DEF)
     add_custom_command(
         OUTPUT ${ARCH_FILE_DIR}/GPUArchitecture_def.yaml
         COMMAND
-            GPUArchitectureGenerator
+            ${GPUArchitectureGeneratorBin}
             ${ARCH_FILE_DIR}/split_yamls/GPUArchitecture_def.yaml
             ${ROCROLLER_ASSEMBLER_PATH}
             -Y
@@ -137,12 +150,12 @@ if(NOT ROCROLLER_USE_PREGENERATED_ARCH_DEF)
             --xml_dir
             ${mrisa_xml_SOURCE_DIR}
         COMMAND
-            GPUArchitectureGenerator
+            ${GPUArchitectureGeneratorBin}
             ${ARCH_FILE_DIR}/GPUArchitecture_def.yaml
             ${ROCROLLER_ASSEMBLER_PATH}
             -Y
             --xml_dir ${mrisa_xml_SOURCE_DIR}
-        DEPENDS ${INTERNAL_MRISA_TARGETS}
+        DEPENDS GPUArchitectureGenerator ${INTERNAL_MRISA_TARGETS}
     )
 
 else()
@@ -156,11 +169,11 @@ else()
     add_custom_command(
         OUTPUT ${ARCH_FILE_DIR}/GPUArchitecture_def.yaml
         COMMAND
-            GPUArchitectureGenerator
+            ${GPUArchitectureGeneratorBin}
             ${ARCH_FILE_DIR}/GPUArchitecture_def.yaml
             ${ROCROLLER_ASSEMBLER_PATH}
             -Y ${YAML_ARGS}
-        DEPENDS "${YAML_FILES}"
+        DEPENDS GPUArchitectureGenerator "${YAML_FILES}"
     )
 
 endif()
@@ -168,11 +181,11 @@ endif()
 add_custom_command(
     OUTPUT ${ARCH_FILE_DIR}/GPUArchitecture_def.msgpack
     COMMAND
-        GPUArchitectureGenerator
+        ${GPUArchitectureGeneratorBin}
         ${ARCH_FILE_DIR}/GPUArchitecture_def.msgpack
         ${ROCROLLER_ASSEMBLER_PATH}
         --yaml ${ARCH_FILE_DIR}/GPUArchitecture_def.yaml
-    DEPENDS ${ARCH_FILE_DIR}/GPUArchitecture_def.yaml
+    DEPENDS GPUArchitectureGenerator ${ARCH_FILE_DIR}/GPUArchitecture_def.yaml
 )
 
 if(INTERNAL_MRISA_FILES)
