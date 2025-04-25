@@ -115,6 +115,8 @@ if CU is None:
         CU = int(match.group('COMPUTE_UNIT').strip())
     else:
         raise RuntimeError("Failed to get compute unit from rocminfo, please specific CU environment variable.")
+else:
+    CU = int(CU)
 
 XCC = os.environ.get("XCC", None)
 if ArchitectureName == 'gfx942':
@@ -124,6 +126,8 @@ if ArchitectureName == 'gfx942':
             XCC = int(res.stdout.decode("utf-8").strip())
         else:
             raise FileNotFoundError(f"{NUM_INST} not found, please specific XCC environment variable.")
+    else:
+        XCC = int(XCC)
     DeviceNames = ["Device 0049", "Device 0050"]
     ScheduleName = "aquavanjaram"
 elif ArchitectureName == 'gfx90a':
@@ -196,6 +200,11 @@ def build_pattern(has_bias=False):
 HIPBLASLT_BENCH_RE = build_pattern()
 HIPBLASLT_BENCH_RE_BIAS = build_pattern(has_bias=True)
 
+FP8_DTYPES = ["F8","F8N","B8","B8N","F8B8N","B8F8N","F8B8","B8F8"]
+
+def is_fp8(dtype):
+    return dtype in FP8_DTYPES
+
 # Function to extract problem sizes from a line
 def extract_problem_size(match):
     return [int(match.group('M').strip()), int(match.group('N').strip()), int(match.group('BATCH_COUNT').strip()), int(match.group('K').strip())]
@@ -209,7 +218,7 @@ def instruction_map(dtype_dict):
         return fp16_instructions
     elif dtype_dict["DataType"] == 'B':
         return bf16_instructions
-    elif dtype_dict["DataType"] == 'F8':
+    elif is_fp8(dtype_dict["DataType"]):
         return fp8_instructions
     else:
         return None
@@ -225,6 +234,8 @@ def datatype_map(dtype):
         return "B"
     elif dtype == "f8_r":
         return "F8"
+    elif dtype == "bf8_r":
+        return "B8"
     else:
         return None
 
@@ -251,7 +262,7 @@ def bias_datatype_map(dtype):
         return []
 
 def get_high_precision_accumulate(DataType):
-    if DataType in ["H", "B", "F8"]:
+    if DataType in ["H", "B"] + FP8_DTYPES:
         return True
     else:
         return False
@@ -264,7 +275,21 @@ def adapt_xf32(ComputeDataType):
 
 def extract_dtype(match):
     gdict = match.groupdict()
-    DataType = datatype_map(gdict.get('A_TYPE', '').strip())
+    DataTypeA = datatype_map(gdict.get('A_TYPE', '').strip())
+    DataTypeB = datatype_map(gdict.get('B_TYPE', '').strip())
+
+    if is_fp8(DataTypeA) and is_fp8(DataTypeB):
+        if DataTypeA != DataTypeB:
+            DataType = DataTypeA + DataTypeB
+        else:
+            DataType = DataTypeA
+
+        if ArchitectureName == "gfx942":
+            # Nanno FP8
+            DataType += "N"
+    else:
+        DataType = DataTypeA
+    
     DestDataType = datatype_map(gdict.get('C_TYPE', '').strip())
     ComputeDataType = datatype_map(gdict.get('COMPUTE_TYPE', '').strip())
     TransposeA = trans_map(gdict.get('TRANS_A', '').strip())
