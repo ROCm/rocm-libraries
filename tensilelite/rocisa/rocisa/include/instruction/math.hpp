@@ -28,6 +28,7 @@
 #include "instruction/cmp.hpp"
 #include "instruction/common.hpp"
 #include "instruction/cvt.hpp"
+#include "instruction/extension.hpp"
 
 #include <cmath>
 #include <memory>
@@ -631,14 +632,14 @@ namespace rocisa
     }
 
     template <typename QREG, typename DREG, typename DIVREG, typename RREG>
-    std::shared_ptr<Module> scalarUInt32DivideAndRemainder(QREG               qReg,
-                                                           DREG               dReg,
-                                                           DIVREG             divReg,
-                                                           RREG               rReg,
-                                                           ContinuousRegister tmpVgprRes,
-                                                           int                wavewidth,
-                                                           bool               doRemainder = true,
-                                                           const std::string& comment     = "")
+    std::shared_ptr<Module> scalarUInt32DivideAndRemainder(QREG                qReg,
+                                                           DREG                dReg,
+                                                           DIVREG              divReg,
+                                                           RREG                rReg,
+                                                           ContinuousRegister& tmpVgprRes,
+                                                           int                 wavewidth,
+                                                           bool                doRemainder = true,
+                                                           const std::string&  comment     = "")
     {
         auto module = std::make_shared<Module>("scalarUInt32DivideAndRemainder");
 
@@ -714,4 +715,98 @@ namespace rocisa
 
         return module;
     }
+
+    // Perform a magic division (mul by magic number and shift)
+    // dest is two consec SGPR, used for intermediate temp as well as final result
+    // result quotient returned in sgpr(dest,1)
+    // tmpVgpr: Size 2
+    template <typename DEST>
+    std::shared_ptr<Module> sMagicDiv(DEST                dest,
+                                      bool                hasSMulHi,
+                                      int                 dividend,
+                                      int                 magicNumber,
+                                      int                 magicShift,
+                                      ContinuousRegister& tmpVgpr)
+    {
+        auto module = std::make_shared<Module>("sMagicDiv");
+
+        auto destSgpr  = sgpr(dest, 2);
+        auto destSgpr0 = sgpr(dest);
+        auto destSgpr1 = [&dest]() {
+            if constexpr(std::is_same_v<DEST, int>)
+            {
+                return sgpr(dest + 1);
+            }
+            else if constexpr(std::is_same_v<DEST, std::string>)
+            {
+                std::string destStr = dest + "+1";
+                return sgpr(destStr);
+            }
+            return sgpr(-1);
+        }();
+        auto continuousReg = ContinuousRegister(tmpVgpr.idx, 2);
+
+        module->addModuleAsFlatItems(SMulInt64to32(destSgpr0,
+                                                   destSgpr1,
+                                                   dividend,
+                                                   magicNumber,
+                                                   continuousReg,
+                                                   hasSMulHi,
+                                                   false,
+                                                   "s_magic mul"));
+        module->addT<SLShiftRightB64>(destSgpr, magicShift, destSgpr, "sMagicDiv");
+        return module;
+    }
+
+    // Perform a sgpr version of magic division algo 2 (mul by magic number, Abit and shift)
+    // dest is three consec SGPR, used for intermediate temp as well as final result
+    // result quotient returned in sgpr(dest,1)
+    std::shared_ptr<Module> sMagicDiv2(const std::shared_ptr<RegisterContainer>& dst,
+                                       const std::shared_ptr<RegisterContainer>& dst2,
+                                       const std::shared_ptr<RegisterContainer>& dividend,
+                                       const std::shared_ptr<RegisterContainer>& magicNumber,
+                                       const std::shared_ptr<RegisterContainer>& magicShiftAbit,
+                                       const std::shared_ptr<RegisterContainer>& tmpSgpr)
+    {
+        auto module = std::make_shared<Module>("sMagicDiv2");
+
+        module->addT<SMulHIU32>(dst2, dividend, magicNumber, "s_magic mul, div alg 2");
+        module->addT<SLShiftRightB32>(tmpSgpr, 31, magicShiftAbit, "tmpS = extract abit");
+        module->addT<SMulI32>(dst, dividend, tmpSgpr, "s_magic mul, div alg 2");
+        module->addT<SAddU32>(dst, dst, dst2);
+
+        module->addT<SAndB32>(
+            tmpSgpr, magicShiftAbit, 0x7fffffff, "tmpS = remove abit to final shift");
+        module->addT<SLShiftRightB32>(dst, tmpSgpr, dst, "sMagicDiv Alg 2");
+
+        return module;
+    }
+
+    // Multiply
+    // product register, operand register, multiplier
+    std::shared_ptr<Module> vectorStaticMultiply(const std::shared_ptr<RegisterContainer>& product,
+                                                 const std::shared_ptr<RegisterContainer>& operand,
+                                                 int multiplier,
+                                                 const std::optional<ContinuousRegister>& tmpSgprRes
+                                                 = std::nullopt,
+                                                 const std::string& comment = "");
+
+    // MultiplyAdd
+    // product register, operand register, multiplier, accumulator
+    std::shared_ptr<Module>
+        vectorStaticMultiplyAdd(const std::shared_ptr<RegisterContainer>& product,
+                                const std::shared_ptr<RegisterContainer>& operand,
+                                int                                       multiplier,
+                                const std::shared_ptr<RegisterContainer>& accumulator,
+                                const std::optional<ContinuousRegister>&  tmpSgprRes = std::nullopt,
+                                const std::string&                        comment    = "");
+
+    // Multiply scalar for 64bit
+    // product register, operand register, multiplier
+    std::shared_ptr<Module>
+        scalarStaticMultiply64(const std::shared_ptr<RegisterContainer>& product,
+                               const std::shared_ptr<RegisterContainer>& operand,
+                               int                                       multiplier,
+                               const std::optional<ContinuousRegister>&  tmpSgprRes = std::nullopt,
+                               const std::string&                        comment    = "");
 } // namespace rocisa
