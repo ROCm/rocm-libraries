@@ -70,8 +70,8 @@ add_subdirectory(src)
 if(USE_ROCROLLER)
     set_source_files_properties(
       "${CMAKE_CURRENT_SOURCE_DIR}/src/amd_detail/rocblaslt/src/rocroller_host.cpp"
-        PROPERTIES 
-            LANGUAGE CXX 
+        PROPERTIES
+            LANGUAGE CXX
             COMPILE_OPTIONS "-std=c++20;-x;c++"
     )
 endif()
@@ -180,7 +180,7 @@ if(USE_ROCROLLER)
   FetchContent_Declare(
     rocRoller
     GIT_REPOSITORY https://github.com/ROCm/rocRoller.git
-    GIT_TAG 34307b30956cac16e459db6cfdd3ba1f07c7e9b8
+    GIT_TAG b6512d0f05a5bec4fd8ec89bd596f4c7d9e536b0
   )
   FetchContent_MakeAvailable(rocRoller)
   target_link_libraries(hipblaslt PRIVATE rocroller_interface)
