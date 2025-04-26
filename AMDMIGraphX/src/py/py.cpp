@@ -1,7 +1,7 @@
 /*
  * The MIT License (MIT)
  *
- * Copyright (c) 2015-2023 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (c) 2015-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -27,6 +27,12 @@
 #include <migraphx/file_buffer.hpp>
 #include <pybind11/embed.h>
 
+#ifdef _WIN32
+#define MIGRAPHX_PY_VERSION_EXPORT __declspec(dllexport)
+#else
+#define MIGRAPHX_PY_VERSION_EXPORT
+#endif
+
 namespace py = pybind11;
 
 namespace migraphx {
@@ -37,7 +43,7 @@ inline namespace MIGRAPHX_INLINE_NS {
 #pragma clang diagnostic ignored "-Wreturn-type-c-linkage"
 #endif
 // extern "C" is used to disable name mangling, but the function will still be called from C++
-extern "C" program migraphx_load_py(const std::string& filename);
+MIGRAPHX_PY_VERSION_EXPORT extern "C" program migraphx_load_py(const std::string& filename);
 #ifdef __clang__
 #pragma clang diagnostic pop
 #endif

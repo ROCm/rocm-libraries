@@ -55,11 +55,7 @@ include(CTest)
 find_package(ROCM REQUIRED)
 find_package(Threads REQUIRED)
 
-if(WIN32)
-option(MIGRAPHX_ENABLE_PYTHON "Enable python bindings" OFF)
-else()
 option(MIGRAPHX_ENABLE_PYTHON "Enable python bindings" ON)
-endif()
 
 if(WIN32)
 option(MIGRAPHX_USE_ROCBLAS "Enable MIGraphX to use rocBLAS" OFF)
