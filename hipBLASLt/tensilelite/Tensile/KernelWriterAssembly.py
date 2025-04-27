@@ -8533,7 +8533,6 @@ class KernelWriterAssembly(KernelWriter):
                                src1=sgpr(tmpsgpr), comment="Set LWA to first buffer offset" ))
             self.sgprPool.checkIn(tmpsgpr)
           else:
-            print('tc write', tc)
             tmpvgpr = self.vgprPool.checkOut(1)
             module.add(VXorB32(
               dst=vgpr(tmpvgpr), \
