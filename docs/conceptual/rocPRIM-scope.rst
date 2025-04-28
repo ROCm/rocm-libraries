@@ -2,8 +2,6 @@
   :description: rocPRIM scope 
   :keywords: rocPRIM, ROCm, API, documentation, scope
 
-.. _rocprim-intro:
-
 ********************************************************************
 rocPRIM operation scope
 ********************************************************************

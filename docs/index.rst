@@ -24,22 +24,25 @@ The rocPRIM public repository is located at https://github.com/ROCmSoftwarePlatf
 
   .. grid-item-card:: Conceptual
 
-    * :ref:`rocprim-intro`
-    * :ref:`glossary`
+    * :doc:`Scope <./conceptual/rocPRIM-scope>`
+    * :doc:`Operations <./conceptual/rocPRIM-operations>`
+    * :doc:`Block and stripe arrangements <./conceptual/rocPRIM-stripe-block>`
     * :ref:`tuning`
-    * :ref:`developer`
 
   .. grid-item-card:: Reference
 
-    * :ref:`ops-summary`
+    * :ref:`glossary`
     * :ref:`data-type-support`
+    * :ref:`iterators` 
+    * :ref:`intrinsics` 
+    * :ref:`types`
+    * :ref:`type_traits`
     * :ref:`dev-index`
     * :ref:`block-index`
     * :ref:`warp-index` 
     * :ref:`thread-index`
-    * :ref:`iterators` 
-    * :ref:`intrinsics` 
-    * :ref:`type_traits`
+    * :ref:`developer`
+
 
 To contribute to the documentation refer to `Contributing to ROCm  <https://rocm.docs.amd.com/en/latest/contribute/contributing.html>`_.
 

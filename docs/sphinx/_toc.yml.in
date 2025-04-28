@@ -14,23 +14,20 @@ subtrees:
 
 - caption: Conceptual
   entries:
-    - file: conceptual/concepts.rst
-    - file: conceptual/intro.rst
-    - file: conceptual/tuning.rst
-    - file: conceptual/developer.rst
+    - file: conceptual/rocPRIM-stripe-block.rst
     - file: conceptual/rocPRIM-operations.rst
+    - file: conceptual/rocPRIM-scope.rst
+    - file: conceptual/rocPRIM-performance-tuning.rst
+    - file: conceptual/rocPRIM-type-traits.rst
 
 - caption: Reference
   entries:
-    - file: reference/reference.rst
-    - file: reference/ops_summary.rst
+    - file: reference/rocPRIM-glossary.rst
     - file: reference/data-type-support.rst
     - file: reference/iterators.rst
-    - file: reference/intrinsics.rst
-    - file: conceptual/type_traits.rst
     - file: reference/types.rst
+    - file: conceptual/type_traits.rst
     - file: device_ops/index.rst
-    - file: reference/rocPRIM-glossary.rst
       subtrees:
       - entries: 
         - file: device_ops/config.rst
@@ -93,5 +90,5 @@ subtrees:
         - file: thread_ops/thread_scan.rst
         - file: thread_ops/thread_search.rst
         - file: thread_ops/thread_store.rst
-    
+    - file: reference/developer.rst    
     - file: license.rst

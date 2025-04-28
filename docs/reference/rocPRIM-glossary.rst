@@ -23,6 +23,9 @@ This glossary is to help users understand the basic concepts or terminologies us
 
     Block
         A group of warps that run on the same streaming multiprocessor (SM). Threads in the block can be indexed using one dimension, {X}, two dimensions, {X, Y}, or three dimensions, {X, Y, Z}. 
+    
+    Stride
+        The number of threads per block.
 
     Tile
         The name for a block in C++ AMP and HIPCC.
@@ -41,3 +44,4 @@ This glossary is to help users understand the basic concepts or terminologies us
 
     Flat ID
         The flattened block or thread idex. The flat ID is a one-dimensional index created from two-dimensional or three-dimensional indices. For example the flat ID of a two-dimensional thread ID {X, Y} in a two-dimensional ``128x4`` block is ``Y*128*X``.
+    
