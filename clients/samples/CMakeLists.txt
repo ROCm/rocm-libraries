@@ -52,6 +52,14 @@ function(add_hipsparse_example EXAMPLE_SOURCE)
 endfunction()
 
 # Examples
+if (NOT WIN32)
+  # C program for checking hipsparse headers are C compatible.
+  add_hipsparse_example(example_c_headers.c)
+  if(NOT USE_CUDA)
+    add_hipsparse_example(example_axpyi.c)
+  endif()
+endif()
+
 add_hipsparse_example(example_handle.cpp)
 
 if(NOT USE_CUDA OR (USE_CUDA AND CUDA_VERSION LESS 11))
@@ -60,23 +68,22 @@ add_hipsparse_example(example_hybmv.cpp)
 endif()
 
 if (NOT WIN32)
-# Fortran examples
-if(TARGET hipsparse AND NOT USE_CUDA)
-  # Compile Fortran examples only if built directly with package
-  # else the Fortran module file is not generated
-  
-  
-  add_hipsparse_example(example_fortran_auxiliary.f90)
-  add_hipsparse_example(example_fortran_csrsv2.f90)
-  add_hipsparse_example(example_fortran_bsric02.f90)
-  add_hipsparse_example(example_fortran_csric02.f90)
-  add_hipsparse_example(example_fortran_bsrilu02.f90)
-  add_hipsparse_example(example_fortran_csrilu02.f90)
-  add_hipsparse_example(example_fortran_csrsm2.f90)
-  add_hipsparse_example(example_fortran_dotci.f90)
-  add_hipsparse_example(example_fortran_roti.f90)
-  add_hipsparse_example(example_fortran_spmv.f90)
-  add_hipsparse_example(example_fortran_bsrmm.f90)
-  
-endif()
+  # Fortran examples
+  if(TARGET hipsparse AND NOT USE_CUDA)
+    # Compile Fortran examples only if built directly with package
+    # else the Fortran module file is not generated
+    
+    add_hipsparse_example(example_fortran_auxiliary.f90)
+    add_hipsparse_example(example_fortran_csrsv2.f90)
+    add_hipsparse_example(example_fortran_bsric02.f90)
+    add_hipsparse_example(example_fortran_csric02.f90)
+    add_hipsparse_example(example_fortran_bsrilu02.f90)
+    add_hipsparse_example(example_fortran_csrilu02.f90)
+    add_hipsparse_example(example_fortran_csrsm2.f90)
+    add_hipsparse_example(example_fortran_dotci.f90)
+    add_hipsparse_example(example_fortran_roti.f90)
+    add_hipsparse_example(example_fortran_spmv.f90)
+    add_hipsparse_example(example_fortran_bsrmm.f90)
+    
+  endif()
 endif()
