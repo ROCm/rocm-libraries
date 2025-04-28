@@ -41,8 +41,10 @@ endfunction()
 # Examples
 
 # Empty C program for checking rocsparse headers are C compatible.
-# Post-poned, weird compiler flags on Windows.
-# add_rocsparse_example(example_c_headers.c)
+# weird compiler flags on Windows.
+if(NOT WIN32)
+  add_rocsparse_example(example_c_headers.c)
+endif()
 
 # Auxiliary
 add_rocsparse_example(example_handle.cpp)

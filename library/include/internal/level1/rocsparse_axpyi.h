@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -28,7 +28,9 @@
 #include "../../rocsparse-types.h"
 #include "rocsparse/rocsparse-export.h"
 
+#ifdef __cplusplus
 extern "C" {
+#endif
 
 /*
 * ===========================================================================
@@ -173,6 +175,8 @@ rocsparse_status rocsparse_zaxpyi(rocsparse_handle                handle,
                                   rocsparse_double_complex*       y,
                                   rocsparse_index_base            idx_base);
 /**@}*/
+#ifdef __cplusplus
 }
+#endif
 
 #endif // ROCSPARSE_AXPYI_H
