@@ -300,7 +300,7 @@ namespace hipblaslt_ext
     class GemmTuningV2::GemmTuningImpl
     {
     public:
-        u_int16_t splitK = 0;
+        uint16_t  splitK = 0;
         int16_t   wgm    = 0;
     };
 
@@ -325,7 +325,7 @@ namespace hipblaslt_ext
     GemmTuningV2::GemmTuningV2(GemmTuningV2&& tuning)            = default;
     GemmTuningV2& GemmTuningV2::operator=(GemmTuningV2&& tuning) = default;
 
-    void GemmTuningV2::setSplitK(u_int16_t splitK)
+    void GemmTuningV2::setSplitK(uint16_t splitK)
     {
         pimpl->splitK = splitK;
     }
@@ -335,7 +335,7 @@ namespace hipblaslt_ext
         pimpl->wgm = wgm;
     }
 
-    u_int16_t GemmTuningV2::getSplitK() const
+    uint16_t GemmTuningV2::getSplitK() const
     {
         return pimpl->splitK;
     }

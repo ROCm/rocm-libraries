@@ -24,15 +24,22 @@
  *
  *******************************************************************************/
 
-#include "utility.hpp"
+#ifdef _WIN32
+#include <windows.h>
+// Must include windows.h before dependent headers.
+#include <libloaderapi.h>
+#endif
+
 #include "d_vector.hpp"
+#include "utility.hpp"
+#include <atomic>
 #include <chrono>
 #include <cstdlib>
+#include <fcntl.h>
+#include <limits.h>
 #include <new>
 #include <stdexcept>
 #include <stdlib.h>
-
-#include <fcntl.h>
 
 #include "Tensile/Source/client/include/Utility.hpp"
 
@@ -48,27 +55,65 @@ namespace fs = std::experimental::filesystem;
 
 /* ============================================================================================ */
 // Return path of this executable
+static std::string get_self_path()
+{
+#ifdef _WIN32
+    std::string result(MAX_PATH + 1, '\0');
+    DWORD       length = 0;
+    for(;;)
+    {
+        length = GetModuleFileNameA(nullptr, result.data(), result.size());
+        if(length < result.size() - 1)
+        {
+            result.resize(length);
+            return result;
+        }
+        result.resize(result.size() * 2);
+    }
+#else
+    return std::string(realpath("/proc/self/exe", 0));
+#endif
+}
+
 std::string hipblaslt_exepath()
 {
-    std::string pathstr;
-    char*       path = realpath("/proc/self/exe", 0);
-    if(path)
-    {
-        char* p = strrchr(path, '/');
-        if(p)
-        {
-            p[1]    = 0;
-            pathstr = path;
-        }
-        free(path);
-    }
-    return pathstr;
+    fs::path exepath(get_self_path());
+    exepath.remove_filename();
+    std::string result = exepath.string();
+    if(result.empty())
+        result.append("/");
+    return result;
 }
 
 /* ============================================================================================ */
 // Temp directory rooted random path
+// TODO: This function is inherently unsafe because it returns a string vs an open
+// file handle which will block further colliding creates. On Posix, this will leak
+// a file handle for the life of the process. On Windows, there is no way to ensure that
+// the created file name is unique without racing. To counter this on Windows, we
+// also include the process id and a process specific counter in the generated name,
+// as that will at least race consistently vs based on a random number generator
+// collision. This and its consumers should be rewritten and under no circumstances
+// copied to new code.
 std::string hipblaslt_tempname()
 {
+#ifdef _WIN32
+    static std::atomic<int> counter;
+    // Generate "/tmp/rocblas-XXXXXX" like file name
+    const std::string alphanum     = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuv";
+    int               stringlength = alphanum.length() - 1;
+    std::string       uniquestr    = "hipblaslt-";
+    uniquestr.append(std::to_string(GetCurrentProcessId()));
+    uniquestr.append("-");
+    uniquestr.append(std::to_string(counter.fetch_add(1)));
+    uniquestr.append("-");
+
+    for(auto n : {0, 1, 2, 3, 4, 5})
+        uniquestr += alphanum.at(rand() % stringlength);
+
+    fs::path tmpname = fs::temp_directory_path() / uniquestr;
+    return tmpname.string();
+#else
     char tmp[] = "/tmp/hipblaslt-XXXXXX";
     int  fd    = mkostemp(tmp, O_CLOEXEC);
     if(fd == -1)
@@ -78,6 +123,7 @@ std::string hipblaslt_tempname()
     }
 
     return std::string(tmp);
+#endif
 }
 
 /* ============================================================================================ */
@@ -145,7 +191,7 @@ double get_time_us_no_sync(void)
 
 /* ============================================================================================ */
 /*  device query and print out their ID and name; return number of compute-capable devices. */
-int64_t query_device_property(int device_id, hipDeviceProp_t &props)
+int64_t query_device_property(int device_id, hipDeviceProp_t& props)
 {
     int             device_count;
     hipblasStatus_t status = (hipblasStatus_t)hipGetDeviceCount(&device_count);
@@ -230,6 +276,15 @@ hipblaslt_local_handle::hipblaslt_local_handle()
 #endif
 }
 
+static void portable_setenv(const char* name, const char* value)
+{
+#ifdef _WIN32
+    _putenv_s(name, value);
+#else
+    setenv(name, value, /*overwrite=*/true);
+#endif
+}
+
 hipblaslt_local_handle::hipblaslt_local_handle(const Arguments& arg)
     : hipblaslt_local_handle()
 {
@@ -239,7 +294,8 @@ hipblaslt_local_handle::hipblaslt_local_handle(const Arguments& arg)
         if(sol_selec_env)
             m_sol_selec_saved_status = std::string(sol_selec_env);
         m_sol_selec_env_set = true;
-        setenv("TENSILE_SOLUTION_SELECTION_METHOD", std::to_string(arg.tensile_solution_selection_method).c_str(), true);
+        portable_setenv("TENSILE_SOLUTION_SELECTION_METHOD",
+                        std::to_string(arg.tensile_solution_selection_method).c_str());
     }
     // memory guard control, with multi-threading should not change values across threads
     d_vector_set_pad_length(arg.pad);
@@ -249,7 +305,7 @@ hipblaslt_local_handle::~hipblaslt_local_handle()
 {
     if(m_sol_selec_env_set)
     {
-        setenv("TENSILE_SOLUTION_SELECTION_METHOD", m_sol_selec_saved_status.c_str(), true);
+        portable_setenv("TENSILE_SOLUTION_SELECTION_METHOD", m_sol_selec_saved_status.c_str());
     }
     hipblasLtDestroy(m_handle);
 }

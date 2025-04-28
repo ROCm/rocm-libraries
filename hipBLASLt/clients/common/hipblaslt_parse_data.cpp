@@ -37,13 +37,16 @@
 // Parse YAML data
 static std::string hipblaslt_parse_yaml(const std::string& yaml)
 {
+    // TODO: This function is inherently unsafe because it returns a string vs an open
+    // file handle which will block further colliding creates. See comments in
+    // hipblaslt_tempname() and under no circumstances copy this to new code.
     std::string tmp     = hipblaslt_tempname();
     auto        exepath = hipblaslt_exepath();
     auto        cmd     = exepath + "hipblaslt_gentest.py --template " + exepath
                + "hipblaslt_template.yaml -o " + tmp + " " + yaml;
     hipblaslt_cerr << cmd << std::endl;
 
-#ifdef WIN32
+#ifdef _WIN32
     int status = std::system(cmd.c_str());
     if(status == -1)
         exit(EXIT_FAILURE);

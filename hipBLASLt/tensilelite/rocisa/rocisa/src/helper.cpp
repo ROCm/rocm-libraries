@@ -27,7 +27,7 @@
 // Windows. The alternatives are switched at a whole-file level. Please do
 // not use inline/fine-grained ifdefs.
 
-#ifdef WIN32
+#ifdef _WIN32
 
 #include <windows.h>
 // windows.h must be loaded before other windows headers.

@@ -25,7 +25,18 @@
  *******************************************************************************/
 #include "utility.hpp"
 #include <sys/types.h>
+#include <time.h>
+
+#ifdef _WIN32
+#include <process.h>
+#else
 #include <unistd.h>
+#endif
+
+#include <iostream>
+#include <memory>
+#include <string>
+
 std::ostream* get_logger_os()
 {
     LoggerSingleton& s = LoggerSingleton::getInstance();

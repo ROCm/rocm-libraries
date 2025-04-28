@@ -32,8 +32,8 @@
 #include <Tensile/msgpack/MessagePack.hpp>
 #include <algorithm>
 #include <cstdint>
+#include <filesystem>
 #include <fstream>
-#include <libgen.h>
 #include <msgpack.hpp>
 #include <sstream>
 #include <stdexcept>
@@ -660,7 +660,7 @@ namespace hipblaslt_ext
         explicit ExtOpMasterLibrary(const std::string& libPath)
             : libPath(libPath)
         {
-            libDir = std::string(dirname(&this->libPath[0]));
+            libDir = std::filesystem::path(this->libPath).parent_path().string();
             load(libPath);
         }
 

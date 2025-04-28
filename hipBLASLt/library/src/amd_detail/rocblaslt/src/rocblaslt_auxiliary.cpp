@@ -24,6 +24,17 @@
  *
  * ************************************************************************ */
 
+#ifdef _WIN32
+#include <Windows.h>
+#include <io.h>
+#include <libloaderapi.h>
+#else
+#define _GNU_SOURCE
+#include <dlfcn.h>
+#include <link.h>
+#include <unistd.h>
+#endif
+
 #include "UserDrivenTuningParser.hpp"
 #include "definitions.h"
 #include "handle.h"
@@ -33,13 +44,8 @@
 #include "tensile_host.hpp"
 #include "utility.hpp"
 
-#ifndef WIN32
-#include <link.h>
-#endif
-
 #include <hip/hip_runtime_api.h>
 #include <map>
-#include <unistd.h>
 #include <utility>
 
 #define TO_STR2(x) #x
@@ -2119,35 +2125,55 @@ std::string rocblaslt_internal_get_arch_name()
 
 bool rocblaslt_internal_test_path(const std::string& path)
 {
-#ifdef WIN32
+#ifdef _WIN32
     return ((_access(path.c_str(), 4) != -1) || (_access(path.c_str(), 6) != -1));
 #else
     return access(path.c_str(), R_OK) == 0;
 #endif
 }
 
-#ifndef WIN32
-int hipblaslt_dl_iterate_phdr_callback(struct dl_phdr_info* hdr_info, size_t size, void* data)
+#ifdef _WIN32
+std::string rocblaslt_internal_get_so_path()
 {
-    // uncomment to see all dependent .so files
-    // fprintf(stderr, "hipblaslt so file: %s\n", hdr_info->dlpi_name);
-    std::pair<std::string, std::string>* typedData
-        = reinterpret_cast<std::pair<std::string, std::string>*>(data);
-    if(hdr_info->dlpi_name && strstr(hdr_info->dlpi_name, typedData->second.c_str()))
+    HMODULE hModule = NULL;
+    if(!GetModuleHandleEx(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
+                          // Should be the address of code in this library.
+                          (LPCTSTR)rocblaslt_internal_get_so_path,
+                          &hModule))
     {
-        typedData->first.assign(hdr_info->dlpi_name);
-        return 1;
+        throw std::runtime_error("Cannot get module for function");
     }
-    return 0;
+
+    std::string path;
+    path.resize(256);
+    for(;;)
+    {
+        auto stored_size = GetModuleFileNameA(hModule, path.data(), path.size());
+        if(stored_size < path.size())
+        {
+            // Success: size to what was stored (which does not include NUL).
+            path.resize(stored_size);
+            return path;
+        }
+        // Insufficient size.
+        path.resize(path.size() * 2);
+    }
+}
+#else
+std::string rocblaslt_internal_get_so_path()
+{
+    Dl_info info;
+    if(dladdr(reinterpret_cast<void*>(&rocblaslt_internal_get_so_path), &info) == 0)
+    {
+        throw std::runtime_error("Cannot get address of module function");
+    }
+    if(!info.dli_fname)
+    {
+        throw std::runtime_error("Containing binary does not have a file system path");
+    }
+    return std::string(info.dli_fname);
 }
 #endif
-
-std::string rocblaslt_internal_get_so_path(const std::string& keyword)
-{
-    std::pair<std::string, std::string> result{"", keyword};
-    dl_iterate_phdr(hipblaslt_dl_iterate_phdr_callback, &result);
-    return result.first;
-}
 
 void rocblaslt_log_error(const char* func, const char* var, const char* msg)
 {
