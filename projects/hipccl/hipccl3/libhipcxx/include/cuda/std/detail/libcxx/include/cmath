@@ -895,6 +895,22 @@ _LIBCUDACXX_HIDE_FROM_ABI _CCCL_CONSTEXPR_CXX14_COMPLEX _Tp __constexpr_logb(_Tp
 }
 #endif // !_MSVC
 
+#ifdef _LIBCUDACXX_HIPCC
+template <>
+_LIBCUDACXX_HIDE_FROM_ABI _CCCL_CONSTEXPR_CXX14_COMPLEX __half __constexpr_logb(__half __x)
+{
+  return __float2half(logb(__half2float(__x)));
+}
+#endif
+
+#ifdef _LIBCUDACXX_HIPCC
+template <>
+_LIBCUDACXX_HIDE_FROM_ABI _CCCL_CONSTEXPR_CXX14_COMPLEX __hip_bfloat16 __constexpr_logb(__hip_bfloat16 __x)
+{
+  return __float2bfloat16(logb(__bfloat162float(__x)));
+}
+#endif
+
 #if defined(_CCCL_COMPILER_MSVC) || defined(_CCCL_COMPILER_NVRTC) || defined(_CCCL_CUDA_COMPILER_CLANG)
 template <class _Tp>
 _LIBCUDACXX_HIDE_FROM_ABI _Tp __constexpr_scalbn(_Tp __x, int __i)
@@ -984,6 +1000,20 @@ _LIBCUDACXX_HIDE_FROM_ABI _CCCL_CONSTEXPR_CXX14_COMPLEX _Tp __constexpr_scalbn(_
 #endif
 }
 #endif // !_CCCL_COMPILER_MSVC
+
+#ifdef _LIBCUDACXX_HIPCC
+template <>
+_LIBCUDACXX_HIDE_FROM_ABI _CCCL_CONSTEXPR_CXX14_COMPLEX __half __constexpr_scalbn(__half __x, int __exp)
+{
+  return __float2half(scalbn(__half2float(__x), __exp));
+}
+
+template <>
+_LIBCUDACXX_HIDE_FROM_ABI _CCCL_CONSTEXPR_CXX14_COMPLEX __hip_bfloat16 __constexpr_scalbn(__hip_bfloat16 __x, int __exp)
+{
+  return __float2bfloat16(scalbn(__bfloat162float(__x), __exp));
+}
+#endif
 
 #if _CCCL_STD_VER > 2017
 template <typename _Fp>
