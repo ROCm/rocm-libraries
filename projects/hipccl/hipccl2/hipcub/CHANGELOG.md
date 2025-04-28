@@ -2,7 +2,7 @@
 
 Full documentation for hipCUB is available at [https://rocm.docs.amd.com/projects/hipCUB/en/latest/](https://rocm.docs.amd.com/projects/hipCUB/en/latest/).
 
-## (Unreleased) hipCUB-3.5.0 for ROCm 6.5.0
+## hipCUB-3.5.0 for ROCm 6.5.0
 
 ### Added
 
@@ -55,6 +55,9 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 * The `rtest.py` options have changed. `rtest.py` is now run with at least either `--test|-t` or `--emulation|-e`, but not both options.
 * The NVIDIA backend now requires CUB, Thrust and libcu++ 2.5.0. If it is not found it will be downloaded from the NVIDIA CCCL repository.
 * Changed the C++ version from 14 to 17. C++14 will be deprecated in the next major release.
+
+### Known issues
+* When building on Windows using HIP SDK for ROCm 6.4, ``hipMalloc`` returns ``hipSuccess`` even when the size passed to it is too large and the allocation fails. Because of this, limits have been set for the maximum test case sizes for some unit tests such as HipcubDeviceRadixSort's SortKeysLargeSizes .
 
 ## hipCUB 3.3.0 for ROCm 6.3.0
 
