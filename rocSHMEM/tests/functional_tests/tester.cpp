@@ -83,6 +83,8 @@ Tester::Tester(TesterArguments args) : args(args) {
   CHECK_HIP(hipMalloc((void**)&timer, sizeof(long long int) * num_timers));
   CHECK_HIP(hipMalloc((void**)&start_time, sizeof(long long int) * num_timers));
   CHECK_HIP(hipMalloc((void**)&end_time, sizeof(long long int) * num_timers));
+  CHECK_HIP(hipHostMalloc((void**)&verification_error, sizeof(bool)));
+  *verification_error = false;
 }
 
 Tester::~Tester() {
@@ -92,6 +94,7 @@ Tester::~Tester() {
   CHECK_HIP(hipEventDestroy(stop_event));
   CHECK_HIP(hipEventDestroy(start_event));
   CHECK_HIP(hipStreamDestroy(stream));
+  CHECK_HIP(hipFree(verification_error));
 }
 
 std::vector<Tester*> Tester::create(TesterArguments args) {

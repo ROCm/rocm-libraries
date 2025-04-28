@@ -31,6 +31,7 @@
 
 #include "tester_arguments.hpp"
 #include "../src/util.hpp"
+#include "verify_results_kernels.hpp"
 
 /******************************************************************************
  * TESTER CLASS TYPES
@@ -161,6 +162,8 @@ class Tester {
   long long int min_start_time = 0;
   long long int max_end_time = 0;
   uint32_t num_timers = 0;
+
+  bool *verification_error;
 
  private:
   bool _print_header = 1;

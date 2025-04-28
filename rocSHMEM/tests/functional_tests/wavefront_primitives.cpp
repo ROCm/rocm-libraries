@@ -145,13 +145,23 @@ void WaveFrontPrimitiveTester::verifyResults(uint64_t size) {
 
   if (args.myid == check_id) {
     size_t buff_size = size * args.num_wgs * num_warps;
-    for (size_t i = 0; i < buff_size; i++) {
-      if (dest[i] != source[i]) {
-        std::cerr << "Data validation error at idx " << i << std::endl;
-        std::cerr << " Got " << dest[i] << ", Expected "
-                  << source[i] << std::endl;
-        exit(-1);
+    size_t verify_wg_size = std::min((size_t) 1024, buff_size);
+    size_t verify_num_wgs = buff_size / verify_wg_size;
+
+    hipLaunchKernelGGL(verify_results_kernel_char, verify_num_wgs, verify_wg_size, 0, stream,
+                       source, dest, buff_size, verification_error);
+    CHECK_HIP(hipStreamSynchronize(stream));
+
+    if (*verification_error) {
+      for (size_t i = 0; i < buff_size; i++) {
+        if (dest[i] != source[i]) {
+          std::cerr << "Data validation error at idx " << i << std::endl;
+          std::cerr << " Got " << dest[i] << ", Expected "
+                    << source[i] << std::endl;
+          exit(-1);
+        }
       }
+      *verification_error = false;
     }
   }
 }
