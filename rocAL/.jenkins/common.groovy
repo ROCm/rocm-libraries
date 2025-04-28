@@ -93,6 +93,27 @@ def runTestCommand (platform, project) {
                     ./external_source ../MIVisionX-data-main/rocal_data/coco/coco_10_img/images/ 1
                     cd ../ && mkdir -p audio-tests && cd audio-tests
                     python3 /opt/rocm/share/rocal/test/audio_tests/audio_tests.py
+                    cd ../ && mkdir -p cifar10-dataloader-test && cd cifar10-dataloader-test
+                    cmake /opt/rocm/share/rocal/test/dataloader/
+                    make -j
+                    wget https://www.cs.toronto.edu/~kriz/cifar-10-binary.tar.gz
+                    tar xvf cifar-10-binary.tar.gz
+                    ./dataloader ./cifar-10-batches-bin/ 0 64 64 1 1
+                    ./dataloader ./cifar-10-batches-bin/ 1 64 64 1 1
+                    cd ../ && mkdir -p video-tests && cd video-tests
+                    cp -r /opt/rocm/share/rocal/test/video_tests/* .
+                    mkdir -p build && cd build
+                    cmake ..
+                    make -j
+                    ./video_tests /opt/rocm/share/rocal/test/data/videos/AMD_driving_virtual_20.mp4 1 0 0 1 3 3 1 1 1 0 1280 720 1 1 0 0 1
+                    cd ..
+                    chmod a+x ./testScript.sh
+                    ./testScript.sh ../MIVisionX-data-main/rocal_data/video_and_sequence_samples/labelled_videos/ 2
+                    ./testScript.sh ../MIVisionX-data-main/rocal_data/video_and_sequence_samples/sequence/ 3
+                    cd ../ && mkdir -p image-augmentation-app && cd image-augmentation-app
+                    cmake /opt/rocm/share/rocal/test/image_augmentation/
+                    make -j
+                    ./image_augmentation /opt/rocm/share/rocal/test/data/images/AMD-tinyDataSet/ 0 416 416 0 1 1 1 0 1
                     cd ../ && mkdir -p python-api-tests && cd python-api-tests
                     export LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:/opt/rocm/lib/
                     export PATH=\$PATH:/opt/rocm/bin

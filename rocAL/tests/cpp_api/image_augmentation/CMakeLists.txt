@@ -47,8 +47,7 @@ project(image_augmentation)
 
 list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/../../../cmake)
 
-find_package(AMDRPP REQUIRED)
-find_package(MIVisionX REQUIRED)
+find_package(AMDRPP QUIET)
 find_package(OpenCV QUIET)
 
 # Application Includes & Libraries

@@ -94,7 +94,7 @@ def main():
             golden_file_path = aug_name
 
         # For randomized augmentation
-        if file_name_split[0] in randomized_augmentation:
+        if file_name_split[0] in randomized_augmentation or "Random" in file_name_split[0]:
             total_case_count = total_case_count + 1
             augmentation_name = aug_name.split(".")[0]
             logging.info("Running %s", augmentation_name)
