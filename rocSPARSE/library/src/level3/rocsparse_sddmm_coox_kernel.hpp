@@ -33,9 +33,12 @@ namespace rocsparse
     template <rocsparse_int BLOCKSIZE,
               rocsparse_int NTHREADS_PER_DOTPRODUCT,
               bool          AOS,
+              typename T,
               typename I,
               typename J,
-              typename T>
+              typename A,
+              typename B,
+              typename C>
     ROCSPARSE_KERNEL_W(BLOCKSIZE, 1)
     void sddmm_coox_kernel(rocsparse_operation transA,
                            rocsparse_operation transB,
@@ -46,17 +49,16 @@ namespace rocsparse
                            J                   K,
                            I                   nnz,
                            ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
-                           const T* __restrict__ A,
-                           J lda,
-                           const T* __restrict__ B,
-                           J ldb,
+                           const A* __restrict__ dense_A,
+                           int64_t lda,
+                           const B* __restrict__ dense_B,
+                           int64_t ldb,
                            ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),
-                           T* __restrict__ coo_val,
+                           C* __restrict__ coo_val,
                            const I* __restrict__ coo_row_ind,
                            const I* __restrict__ coo_col_ind,
                            rocsparse_index_base coo_base,
-                           T* __restrict__ workspace,
-                           bool is_host_mode)
+                           bool                 is_host_mode)
     {
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
@@ -89,13 +91,15 @@ namespace rocsparse
         const I i = coo_row_ind[innz * ((AOS) ? 2 : 1)] - coo_base;
         const I j = coo_col_ind[innz * ((AOS) ? 2 : 1)] - coo_base;
 
-        const T* x = (orderA == rocsparse_order_column)
-                         ? ((transA == rocsparse_operation_none) ? (A + i) : (A + lda * i))
-                         : ((transA == rocsparse_operation_none) ? (A + lda * i) : (A + i));
+        const A* x
+            = (orderA == rocsparse_order_column)
+                  ? ((transA == rocsparse_operation_none) ? (dense_A + i) : (dense_A + lda * i))
+                  : ((transA == rocsparse_operation_none) ? (dense_A + lda * i) : (dense_A + i));
 
-        const T* y = (orderB == rocsparse_order_column)
-                         ? ((transB == rocsparse_operation_none) ? (B + ldb * j) : (B + j))
-                         : ((transB == rocsparse_operation_none) ? (B + j) : (B + ldb * j));
+        const B* y
+            = (orderB == rocsparse_order_column)
+                  ? ((transB == rocsparse_operation_none) ? (dense_B + ldb * j) : (dense_B + j))
+                  : ((transB == rocsparse_operation_none) ? (dense_B + j) : (dense_B + ldb * j));
 
         T sum = static_cast<T>(0);
         for(J k = local_thread_index; k < K; k += NTHREADS_PER_DOTPRODUCT)
@@ -122,14 +126,14 @@ namespace rocsparse
         }
     }
 
-    template <rocsparse_int BLOCKSIZE, bool AOS, typename I, typename J, typename T>
+    template <rocsparse_int BLOCKSIZE, bool AOS, typename T, typename I, typename J, typename C>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void sddmm_coox_sample_kernel(J M,
                                   J N,
                                   I nnz,
-                                  const T* __restrict__ A,
+                                  const C* __restrict__ dense_C,
                                   J lda,
-                                  T* __restrict__ coo_val,
+                                  C* __restrict__ coo_val,
                                   const I* __restrict__ coo_row,
                                   const I* __restrict__ coo_col,
                                   rocsparse_index_base coo_base)
@@ -143,7 +147,7 @@ namespace rocsparse
             const I row = coo_row[idx * ((AOS) ? 2 : 1)] - coo_base;
             const I col = coo_col[idx * ((AOS) ? 2 : 1)] - coo_base;
 
-            coo_val[idx] = A[col * lda + row];
+            coo_val[idx] = dense_C[col * lda + row];
         }
     }
 }

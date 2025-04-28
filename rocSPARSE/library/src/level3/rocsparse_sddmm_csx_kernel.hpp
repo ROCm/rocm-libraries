@@ -33,9 +33,12 @@ namespace rocsparse
     template <rocsparse_int       BLOCKSIZE,
               rocsparse_int       NTHREADS_PER_DOTPRODUCT,
               rocsparse_direction DIRECTION,
+              typename T,
               typename I,
               typename J,
-              typename T>
+              typename A,
+              typename B,
+              typename C>
     ROCSPARSE_KERNEL_W(BLOCKSIZE, 1)
     void sddmm_csx_kernel(rocsparse_operation transA,
                           rocsparse_operation transB,
@@ -46,17 +49,16 @@ namespace rocsparse
                           J                   K,
                           I                   nnz,
                           ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
-                          const T* __restrict__ A,
+                          const A* __restrict__ dense_A,
                           int64_t lda,
-                          const T* __restrict__ B,
+                          const B* __restrict__ dense_B,
                           int64_t ldb,
                           ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),
-                          T* __restrict__ csx_val,
+                          C* __restrict__ csx_val,
                           const I* __restrict__ csx_ptr,
                           const J* __restrict__ csx_ind,
                           rocsparse_index_base csx_base,
-                          T* __restrict__ workspace,
-                          bool is_host_mode)
+                          bool                 is_host_mode)
     {
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
@@ -92,51 +94,90 @@ namespace rocsparse
 
         __shared__ T s[NUM_SEQS][NTHREADS_PER_DOTPRODUCT];
 
-        const T* x
-            = (row_oriented)
-                  ? ((orderA == rocsparse_order_column)
-                         ? ((transA == rocsparse_operation_none) ? (A + tid) : (A + lda * tid))
-                         : ((transA == rocsparse_operation_none) ? (A + lda * tid) : (A + tid)))
-                  : ((orderB == rocsparse_order_column)
-                         ? ((transB == rocsparse_operation_none) ? (B + ldb * tid) : (B + tid))
-                         : ((transB == rocsparse_operation_none) ? (B + tid) : (B + ldb * tid)));
-
-        for(I at = csx_ptr[tid] - csx_base; at < csx_ptr[tid + 1] - csx_base; ++at)
+        if(row_oriented)
         {
-            I        ind = csx_ind[at] - csx_base;
-            const T* y
-                = (row_oriented)
-                      ? ((orderB == rocsparse_order_column)
-                             ? ((transB == rocsparse_operation_none) ? (B + ldb * ind) : (B + ind))
-                             : ((transB == rocsparse_operation_none) ? (B + ind) : (B + ldb * ind)))
-                      : ((orderA == rocsparse_order_column)
-                             ? ((transA == rocsparse_operation_none) ? (A + ind) : (A + lda * ind))
-                             : ((transA == rocsparse_operation_none) ? (A + lda * ind)
-                                                                     : (A + ind)));
+            const A* x = ((orderA == rocsparse_order_column)
+                              ? ((transA == rocsparse_operation_none) ? (dense_A + tid)
+                                                                      : (dense_A + lda * tid))
+                              : ((transA == rocsparse_operation_none) ? (dense_A + lda * tid)
+                                                                      : (dense_A + tid)));
 
-            T sum = static_cast<T>(0);
-            for(J k = local_thread_index; k < K; k += NTHREADS_PER_DOTPRODUCT)
+            for(I at = csx_ptr[tid] - csx_base; at < csx_ptr[tid + 1] - csx_base; ++at)
             {
-                sum += x[k * xinc] * y[k * yinc];
-            }
-            s[local_seq_index][local_thread_index] = sum;
-            __syncthreads();
+                I        ind = csx_ind[at] - csx_base;
+                const B* y   = ((orderB == rocsparse_order_column)
+                                    ? ((transB == rocsparse_operation_none) ? (dense_B + ldb * ind)
+                                                                            : (dense_B + ind))
+                                    : ((transB == rocsparse_operation_none) ? (dense_B + ind)
+                                                                            : (dense_B + ldb * ind)));
+
+                T sum = static_cast<T>(0);
+                for(J k = local_thread_index; k < K; k += NTHREADS_PER_DOTPRODUCT)
+                {
+                    sum += x[k * xinc] * y[k * yinc];
+                }
+                s[local_seq_index][local_thread_index] = sum;
+                __syncthreads();
 
 #pragma unroll
-            for(int ipow2_ = 2; ipow2_ <= NTHREADS_PER_DOTPRODUCT; ipow2_ *= 2)
-            {
-                if(local_thread_index < NTHREADS_PER_DOTPRODUCT / ipow2_)
+                for(int ipow2_ = 2; ipow2_ <= NTHREADS_PER_DOTPRODUCT; ipow2_ *= 2)
                 {
-                    s[local_seq_index][local_thread_index]
-                        += s[local_seq_index]
-                            [local_thread_index + NTHREADS_PER_DOTPRODUCT / ipow2_];
+                    if(local_thread_index < NTHREADS_PER_DOTPRODUCT / ipow2_)
+                    {
+                        s[local_seq_index][local_thread_index]
+                            += s[local_seq_index]
+                                [local_thread_index + NTHREADS_PER_DOTPRODUCT / ipow2_];
+                    }
+                    __syncthreads();
                 }
-                __syncthreads();
-            }
 
-            if(local_thread_index == 0)
+                if(local_thread_index == 0)
+                {
+                    csx_val[at] = csx_val[at] * beta + alpha * s[local_seq_index][0];
+                }
+            }
+        }
+        else
+        {
+            const B* x = ((orderB == rocsparse_order_column)
+                              ? ((transB == rocsparse_operation_none) ? (dense_B + ldb * tid)
+                                                                      : (dense_B + tid))
+                              : ((transB == rocsparse_operation_none) ? (dense_B + tid)
+                                                                      : (dense_B + ldb * tid)));
+
+            for(I at = csx_ptr[tid] - csx_base; at < csx_ptr[tid + 1] - csx_base; ++at)
             {
-                csx_val[at] = csx_val[at] * beta + alpha * s[local_seq_index][0];
+                I        ind = csx_ind[at] - csx_base;
+                const A* y   = ((orderA == rocsparse_order_column)
+                                    ? ((transA == rocsparse_operation_none) ? (dense_A + ind)
+                                                                            : (dense_A + lda * ind))
+                                    : ((transA == rocsparse_operation_none) ? (dense_A + lda * ind)
+                                                                            : (dense_A + ind)));
+
+                T sum = static_cast<T>(0);
+                for(J k = local_thread_index; k < K; k += NTHREADS_PER_DOTPRODUCT)
+                {
+                    sum += x[k * xinc] * y[k * yinc];
+                }
+                s[local_seq_index][local_thread_index] = sum;
+                __syncthreads();
+
+#pragma unroll
+                for(int ipow2_ = 2; ipow2_ <= NTHREADS_PER_DOTPRODUCT; ipow2_ *= 2)
+                {
+                    if(local_thread_index < NTHREADS_PER_DOTPRODUCT / ipow2_)
+                    {
+                        s[local_seq_index][local_thread_index]
+                            += s[local_seq_index]
+                                [local_thread_index + NTHREADS_PER_DOTPRODUCT / ipow2_];
+                    }
+                    __syncthreads();
+                }
+
+                if(local_thread_index == 0)
+                {
+                    csx_val[at] = csx_val[at] * beta + alpha * s[local_seq_index][0];
+                }
             }
         }
     }
@@ -144,16 +185,17 @@ namespace rocsparse
     template <rocsparse_int       BLOCKSIZE,
               rocsparse_int       NTHREADS_PER_GROUP,
               rocsparse_direction DIRECTION,
+              typename T,
               typename I,
               typename J,
-              typename T>
+              typename C>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void sddmm_csx_sample_kernel(J M,
                                  J N,
                                  I nnz,
-                                 const T* __restrict__ A,
+                                 const C* __restrict__ dense_C,
                                  J lda,
-                                 T* __restrict__ csx_val,
+                                 C* __restrict__ csx_val,
                                  const I* __restrict__ csx_ptr,
                                  const J* __restrict__ csx_ind,
                                  rocsparse_index_base csx_base)
@@ -180,7 +222,7 @@ namespace rocsparse
             const J row = (row_oriented) ? gwid : ind;
             const J col = (row_oriented) ? ind : gwid;
 
-            csx_val[at] = A[col * lda + row];
+            csx_val[at] = dense_C[col * lda + row];
         }
     }
 }

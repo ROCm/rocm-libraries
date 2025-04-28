@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -35,7 +35,7 @@
 #include <omp.h>
 #endif
 
-template <typename T, typename I, typename J>
+template <typename T, typename I, typename J, typename A, typename B, typename C>
 struct rocsparse_host
 {
 
@@ -48,14 +48,14 @@ struct rocsparse_host
                         J                    K,
                         I                    nnz,
                         const T*             alpha,
-                        const T*             A,
+                        const A*             dense_A,
                         int64_t              lda,
-                        const T*             B,
+                        const B*             dense_B,
                         int64_t              ldb,
                         const T*             beta,
                         const I*             csr_row_ptr_C,
                         const J*             csr_col_ind_C,
-                        T*                   csr_val_C,
+                        C*                   csr_val_C,
                         rocsparse_index_base base_C);
 
     static void cscddmm(rocsparse_operation  trans_A,
@@ -67,14 +67,14 @@ struct rocsparse_host
                         J                    K,
                         I                    nnz,
                         const T*             alpha,
-                        const T*             A,
+                        const A*             dense_A,
                         int64_t              lda,
-                        const T*             B,
+                        const B*             dense_B,
                         int64_t              ldb,
                         const T*             beta,
                         const I*             csr_row_ptr_C,
                         const J*             csr_col_ind_C,
-                        T*                   csr_val_C,
+                        C*                   csr_val_C,
                         rocsparse_index_base base_C);
 
     static void cooddmm(rocsparse_operation  trans_A,
@@ -86,14 +86,14 @@ struct rocsparse_host
                         J                    K,
                         I                    nnz,
                         const T*             alpha,
-                        const T*             A,
+                        const A*             dense_A,
                         int64_t              lda,
-                        const T*             B,
+                        const B*             dense_B,
                         int64_t              ldb,
                         const T*             beta,
                         const I*             coo_row_ind_C,
                         const I*             coo_col_ind_C,
-                        T*                   coo_val_C,
+                        C*                   coo_val_C,
                         rocsparse_index_base base_C);
 
     static void cooaosddmm(rocsparse_operation  trans_A,
@@ -105,14 +105,14 @@ struct rocsparse_host
                            J                    K,
                            I                    nnz,
                            const T*             alpha,
-                           const T*             A,
+                           const A*             dense_A,
                            int64_t              lda,
-                           const T*             B,
+                           const B*             dense_B,
                            int64_t              ldb,
                            const T*             beta,
                            const I*             coo_row_ind_C,
                            const I*             coo_col_ind_C,
-                           T*                   coo_val_C,
+                           C*                   coo_val_C,
                            rocsparse_index_base base_C);
 
     static void ellddmm(rocsparse_operation  trans_A,
@@ -124,14 +124,14 @@ struct rocsparse_host
                         J                    K,
                         I                    nnz,
                         const T*             alpha,
-                        const T*             A,
+                        const A*             dense_A,
                         int64_t              lda,
-                        const T*             B,
+                        const B*             dense_B,
                         int64_t              ldb,
                         const T*             beta,
                         const J              ell_width,
                         const I*             ell_ind_C,
-                        T*                   ell_val_C,
+                        C*                   ell_val_C,
                         rocsparse_index_base base_C);
 };
 

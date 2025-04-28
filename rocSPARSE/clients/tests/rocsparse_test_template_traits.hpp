@@ -101,3 +101,11 @@ struct rocsparse_test_template_traits<ROUTINE, rocsparse_test_dispatch_enum::ija
     template <typename... P>
     using caller = typename rocsparse_test_ijabct_template<ROUTINE>::template test_call<P...>;
 };
+
+template <rocsparse_test_enum::value_type ROUTINE>
+struct rocsparse_test_template_traits<ROUTINE, rocsparse_test_dispatch_enum::ijabct_sddmm>
+{
+    using filter = typename rocsparse_test_ijabct_sddmm_template<ROUTINE>::test;
+    template <typename... P>
+    using caller = typename rocsparse_test_ijabct_sddmm_template<ROUTINE>::template test_call<P...>;
+};

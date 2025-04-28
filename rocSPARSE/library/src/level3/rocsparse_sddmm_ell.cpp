@@ -34,9 +34,12 @@ namespace rocsparse
 {
     template <rocsparse_int BLOCKSIZE,
               rocsparse_int NTHREADS_PER_DOTPRODUCT,
+              typename T,
               typename I,
               typename J,
-              typename T>
+              typename A,
+              typename B,
+              typename C>
     ROCSPARSE_KERNEL_W(BLOCKSIZE, 1)
     void sddmm_ell_kernel(rocsparse_operation transA,
                           rocsparse_operation transB,
@@ -47,16 +50,15 @@ namespace rocsparse
                           J                   K,
                           I                   nnz,
                           ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
-                          const T* __restrict__ A,
+                          const A* __restrict__ dense_A,
                           int64_t lda,
-                          const T* __restrict__ B,
+                          const B* __restrict__ dense_B,
                           int64_t ldb,
                           ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),
-                          T* __restrict__ val,
+                          C* __restrict__ val,
                           const J* __restrict__ ind,
                           rocsparse_index_base base,
-                          T* __restrict__ workspace,
-                          bool is_host_mode)
+                          bool                 is_host_mode)
     {
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
@@ -92,13 +94,15 @@ namespace rocsparse
         {
             return;
         }
-        const T* x = (orderA == rocsparse_order_column)
-                         ? ((transA == rocsparse_operation_none) ? (A + i) : (A + lda * i))
-                         : ((transA == rocsparse_operation_none) ? (A + lda * i) : (A + i));
+        const A* x
+            = (orderA == rocsparse_order_column)
+                  ? ((transA == rocsparse_operation_none) ? (dense_A + i) : (dense_A + lda * i))
+                  : ((transA == rocsparse_operation_none) ? (dense_A + lda * i) : (dense_A + i));
 
-        const T* y = (orderB == rocsparse_order_column)
-                         ? ((transB == rocsparse_operation_none) ? (B + ldb * j) : (B + j))
-                         : ((transB == rocsparse_operation_none) ? (B + j) : (B + ldb * j));
+        const B* y
+            = (orderB == rocsparse_order_column)
+                  ? ((transB == rocsparse_operation_none) ? (dense_B + ldb * j) : (dense_B + j))
+                  : ((transB == rocsparse_operation_none) ? (dense_B + j) : (dense_B + ldb * j));
 
         T sum = static_cast<T>(0);
         for(J k = local_thread_index; k < K; k += NTHREADS_PER_DOTPRODUCT)
@@ -127,15 +131,16 @@ namespace rocsparse
 
     template <rocsparse_int NUM_ELL_COLUMNS_PER_BLOCK,
               rocsparse_int WF_SIZE,
+              typename T,
               typename I,
-              typename T>
+              typename C>
     ROCSPARSE_KERNEL(WF_SIZE* NUM_ELL_COLUMNS_PER_BLOCK)
     void sddmm_ell_sample_kernel(I m,
                                  I n,
-                                 const T* __restrict__ dense_val,
+                                 const C* __restrict__ dense_val,
                                  int64_t ld,
                                  I       ell_width,
-                                 T* __restrict__ ell_val,
+                                 C* __restrict__ ell_val,
                                  const I* __restrict__ ell_col_ind,
                                  rocsparse_index_base ell_base)
     {
@@ -162,10 +167,9 @@ namespace rocsparse
     }
 }
 
-template <typename I, typename J, typename T>
-struct rocsparse::rocsparse_sddmm_st<rocsparse_format_ell, I, J, T>
+template <typename T, typename I, typename J, typename A, typename B, typename C>
+struct rocsparse::rocsparse_sddmm_st<rocsparse_format_ell, T, I, J, A, B, C>
 {
-
     static rocsparse_status buffer_size(rocsparse_handle     handle,
                                         rocsparse_operation  trans_A,
                                         rocsparse_operation  trans_B,
@@ -176,14 +180,14 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_ell, I, J, T>
                                         J                    k,
                                         I                    nnz,
                                         const T*             alpha,
-                                        const T*             A_val,
+                                        const A*             A_val,
                                         int64_t              A_ld,
-                                        const T*             B_val,
+                                        const B*             B_val,
                                         int64_t              B_ld,
                                         const T*             beta,
                                         const I*             C_row_data,
                                         const J*             C_col_data,
-                                        T*                   C_val_data,
+                                        C*                   C_val_data,
                                         rocsparse_index_base C_base,
                                         rocsparse_mat_descr  C_descr,
                                         rocsparse_sddmm_alg  alg,
@@ -201,7 +205,7 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_ell, I, J, T>
                 return rocsparse_status_success;
             }
 
-            *buffer_size = ((sizeof(T) * m * n - 1) / 256 + 1) * 256;
+            *buffer_size = ((sizeof(C) * m * n - 1) / 256 + 1) * 256;
             return rocsparse_status_success;
         }
         case rocsparse_sddmm_alg_default:
@@ -225,14 +229,14 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_ell, I, J, T>
                                        J                    k,
                                        I                    nnz,
                                        const T*             alpha,
-                                       const T*             A_val,
+                                       const A*             A_val,
                                        int64_t              A_ld,
-                                       const T*             B_val,
+                                       const B*             B_val,
                                        int64_t              B_ld,
                                        const T*             beta,
                                        const I*             C_row_data,
                                        const J*             C_col_data,
-                                       T*                   C_val_data,
+                                       C*                   C_val_data,
                                        rocsparse_index_base C_base,
                                        rocsparse_mat_descr  C_descr,
                                        rocsparse_sddmm_alg  alg,
@@ -262,14 +266,14 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_ell, I, J, T>
                                     J                    k,
                                     I                    nnz,
                                     const T*             alpha,
-                                    const T*             A_val,
+                                    const A*             A_val,
                                     int64_t              A_ld,
-                                    const T*             B_val,
+                                    const B*             B_val,
                                     int64_t              B_ld,
                                     const T*             beta,
                                     const I*             C_row_data,
                                     const J*             C_col_data,
-                                    T*                   C_val_data,
+                                    C*                   C_val_data,
                                     rocsparse_index_base C_base,
                                     rocsparse_mat_descr  C_descr,
                                     rocsparse_sddmm_alg  alg,
@@ -292,7 +296,7 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_ell, I, J, T>
             }
 
             char* ptr   = reinterpret_cast<char*>(buffer);
-            T*    dense = reinterpret_cast<T*>(ptr);
+            C*    dense = reinterpret_cast<C*>(ptr);
 
             const auto ell_width = static_cast<J>(nnz / m);
 
@@ -329,17 +333,17 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_ell, I, J, T>
                                                               k,
                                                               alpha,
                                                               A_val,
-                                                              rocsparse::get_datatype<T>(),
+                                                              rocsparse::get_datatype<A>(),
                                                               A_ld,
                                                               B_val,
-                                                              rocsparse::get_datatype<T>(),
+                                                              rocsparse::get_datatype<B>(),
                                                               B_ld,
                                                               beta,
                                                               dense,
-                                                              rocsparse::get_datatype<T>(),
+                                                              rocsparse::get_datatype<C>(),
                                                               m,
                                                               dense,
-                                                              rocsparse::get_datatype<T>(),
+                                                              rocsparse::get_datatype<C>(),
                                                               m,
                                                               rocsparse::get_datatype<T>(),
                                                               rocsparse::blas_gemm_alg_standard,
@@ -356,8 +360,7 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_ell, I, J, T>
                 dim3          k_blocks(blocks), k_threads(WAVEFRONT_SIZE * NELL_COLUMNS_PER_BLOCK);
 
                 RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                    (rocsparse::
-                         sddmm_ell_sample_kernel<NELL_COLUMNS_PER_BLOCK, WAVEFRONT_SIZE, I, T>),
+                    (rocsparse::sddmm_ell_sample_kernel<NELL_COLUMNS_PER_BLOCK, WAVEFRONT_SIZE, T>),
                     k_blocks,
                     k_threads,
                     0,
@@ -380,8 +383,7 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_ell, I, J, T>
                 dim3          k_blocks(blocks), k_threads(WAVEFRONT_SIZE * NELL_COLUMNS_PER_BLOCK);
 
                 RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                    (rocsparse::
-                         sddmm_ell_sample_kernel<NELL_COLUMNS_PER_BLOCK, WAVEFRONT_SIZE, I, T>),
+                    (rocsparse::sddmm_ell_sample_kernel<NELL_COLUMNS_PER_BLOCK, WAVEFRONT_SIZE, T>),
                     k_blocks,
                     k_threads,
                     0,
@@ -406,7 +408,7 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_ell, I, J, T>
     int64_t num_blocks_x = (nnz - 1) / (NB / K_) + 1;                                    \
     dim3    blocks(num_blocks_x);                                                        \
     dim3    threads(NB);                                                                 \
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::sddmm_ell_kernel<NB, K_, I, J, T>),   \
+    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::sddmm_ell_kernel<NB, K_, T>),         \
                                        blocks,                                           \
                                        threads,                                          \
                                        0,                                                \
@@ -425,10 +427,9 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_ell, I, J, T>
                                        B_val,                                            \
                                        B_ld,                                             \
                                        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta),  \
-                                       (T*)C_val_data,                                   \
-                                       (const J*)C_col_data,                             \
+                                       C_val_data,                                       \
+                                       C_col_data,                                       \
                                        C_base,                                           \
-                                       (T*)buffer,                                       \
                                        handle->pointer_mode == rocsparse_pointer_mode_host)
 
             if(handle->pointer_mode == rocsparse_pointer_mode_host)
@@ -463,17 +464,39 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_ell, I, J, T>
     }
 };
 
-#define INSTANTIATE(ITYPE_, JTYPE_, TTYPE_) \
-    template struct rocsparse::rocsparse_sddmm_st<rocsparse_format_ell, ITYPE_, JTYPE_, TTYPE_>
+#define INSTANTIATE(TTYPE, ITYPE, JTYPE, ATYPE, BTYPE, CTYPE) \
+    template struct rocsparse::                               \
+        rocsparse_sddmm_st<rocsparse_format_ell, TTYPE, ITYPE, JTYPE, ATYPE, BTYPE, CTYPE>
 
-INSTANTIATE(int32_t, int32_t, float);
-INSTANTIATE(int32_t, int32_t, double);
-INSTANTIATE(int32_t, int32_t, rocsparse_float_complex);
-INSTANTIATE(int32_t, int32_t, rocsparse_double_complex);
+INSTANTIATE(float, int32_t, int32_t, _Float16, _Float16, float);
+INSTANTIATE(float, int32_t, int32_t, float, float, float);
+INSTANTIATE(double, int32_t, int32_t, double, double, double);
+INSTANTIATE(rocsparse_float_complex,
+            int32_t,
+            int32_t,
+            rocsparse_float_complex,
+            rocsparse_float_complex,
+            rocsparse_float_complex);
+INSTANTIATE(rocsparse_double_complex,
+            int32_t,
+            int32_t,
+            rocsparse_double_complex,
+            rocsparse_double_complex,
+            rocsparse_double_complex);
 
-INSTANTIATE(int64_t, int64_t, float);
-INSTANTIATE(int64_t, int64_t, double);
-INSTANTIATE(int64_t, int64_t, rocsparse_float_complex);
-INSTANTIATE(int64_t, int64_t, rocsparse_double_complex);
-
+INSTANTIATE(float, int64_t, int64_t, _Float16, _Float16, float);
+INSTANTIATE(float, int64_t, int64_t, float, float, float);
+INSTANTIATE(double, int64_t, int64_t, double, double, double);
+INSTANTIATE(rocsparse_float_complex,
+            int64_t,
+            int64_t,
+            rocsparse_float_complex,
+            rocsparse_float_complex,
+            rocsparse_float_complex);
+INSTANTIATE(rocsparse_double_complex,
+            int64_t,
+            int64_t,
+            rocsparse_double_complex,
+            rocsparse_double_complex,
+            rocsparse_double_complex);
 #undef INSTANTIATE
