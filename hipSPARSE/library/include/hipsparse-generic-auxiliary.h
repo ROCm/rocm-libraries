@@ -24,6 +24,10 @@
 #ifndef HIPSPARSE_GENERIC_AUXILIARY_H
 #define HIPSPARSE_GENERIC_AUXILIARY_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /*! \ingroup generic_module
 *  \brief Create a sparse vector.
 *
@@ -941,6 +945,10 @@ HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseDnMatSetStridedBatch(hipsparseDnMatDescr_t dnMatDescr,
                                                 int                   batchCount,
                                                 int64_t               batchStride);
+#endif
+
+#ifdef __cplusplus
+}
 #endif
 
 #endif /* HIPSPARSE_GENERIC_AUXILIARY_H */

@@ -85,10 +85,6 @@
 #endif
 #endif
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 #include "hipsparse-types.h"
 
 #include "hipsparse-auxiliary.h"
@@ -225,9 +221,5 @@ extern "C" {
 #include "internal/generic/hipsparse_spsm.h"
 #include "internal/generic/hipsparse_spsv.h"
 #include "internal/generic/hipsparse_spvv.h"
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif // HIPSPARSE_H

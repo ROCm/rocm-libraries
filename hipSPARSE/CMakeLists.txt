@@ -64,7 +64,7 @@ if (NOT WIN32)
 endif( )
 
 # hipSPARSE project
-project(hipsparse LANGUAGES CXX ${fortran_language})
+project(hipsparse LANGUAGES CXX C ${fortran_language})
 
 # Set CXX flags
 if (NOT DEFINED CMAKE_CXX_STANDARD)
