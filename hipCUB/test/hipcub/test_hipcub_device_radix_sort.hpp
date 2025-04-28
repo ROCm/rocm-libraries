@@ -1179,7 +1179,13 @@ inline void sort_keys_large_sizes()
 
     hipStream_t stream = 0;
 
+    // Workaround: `hipMalloc` always returns `hipSuccess` even when allocation fails.
+    // We limit the maximum size so this bug doesn't occur.
+#ifdef _WIN32
+    const std::vector<size_t> sizes = test_utils::get_large_sizes<34>(seeds[0]);
+#else
     const std::vector<size_t> sizes = test_utils::get_large_sizes(seeds[0]);
+#endif
     for(const size_t size : sizes)
     {
         SCOPED_TRACE(testing::Message() << "with size = " << size);

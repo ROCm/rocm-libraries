@@ -469,18 +469,19 @@ inline std::vector<T> get_random_data01(size_t size, float p, int seed_value)
     return data;
 }
 
+template<unsigned int MaxPow2 = 35>
 inline std::vector<size_t> get_large_sizes(int seed_value)
 {
     // clang-format off
     std::vector<size_t> sizes = {
         (size_t{1} << 32) - 1, size_t{1} << 32,
-        (size_t{1} << 35) - 1, size_t{1} << 35
+        (size_t{1} << MaxPow2) - 1, size_t{1} << MaxPow2
     };
     // clang-format on
     const std::vector<size_t> random_sizes
         = test_utils::get_random_data<size_t>(2,
                                               (size_t{1} << 30) + 1,
-                                              (size_t{1} << 35) - 2,
+                                              (size_t{1} << MaxPow2) - 2,
                                               seed_value);
     sizes.insert(sizes.end(), random_sizes.begin(), random_sizes.end());
     std::sort(sizes.begin(), sizes.end());
