@@ -327,3 +327,13 @@ __device__ inline int __FFS<uint64_t>(uint64_t v) {
 #ifndef cudaStreamAddCallback
 #  define cudaStreamAddCallback hipStreamAddCallback
 #endif
+
+#ifndef __nv_bfloat16
+#  define __nv_bfloat16 __hip_bfloat16
+#endif
+#ifndef __nv_bfloat16_raw
+#  define __nv_bfloat16_raw __hip_bfloat16_raw
+#endif
+#ifndef __nv_bfloat162
+#  define __nv_bfloat162 __hip_bfloat162
+#endif
