@@ -33,7 +33,7 @@ if(HIPBLASLT_DEVICE_JOBS)
 endif()
 set(output_dir "${CMAKE_CURRENT_BINARY_DIR}/Tensile")
 set(TENSILE_CREATE_LIBRARY_COMMAND
-    ${TENSILELITE_DIR}/Tensile/bin/TensileCreateLibrary
+    ${HIPBLASLT_PYTHON_COMMAND} -m Tensile.TensileCreateLibrary
     ${TENSILE_BUILD_OPTS}
     "${CMAKE_CURRENT_SOURCE_DIR}/../../library"
     ${output_dir}
@@ -44,6 +44,7 @@ add_custom_command(
     COMMENT "Building device libraries..."
     COMMAND ${TENSILE_CREATE_LIBRARY_COMMAND}
     OUTPUT "${output_dir}/library"
+    DEPENDS ${HIPBLASLT_PYTHON_DEPS}
 )
 
 add_custom_target(tensilelite-device-libraries ALL

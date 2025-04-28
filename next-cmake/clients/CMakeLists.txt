@@ -44,7 +44,10 @@ if(HIPBLASLT_ENABLE_BLIS)
     target_link_libraries(hipblaslt-clients-common PRIVATE BLIS::BLIS)
 endif()
 
-target_link_libraries(hipblaslt-clients-common PUBLIC roc::hipblaslt lapack)
+target_link_libraries(hipblaslt-clients-common PUBLIC
+    roc::hipblaslt
+    ${LAPACK_LIBRARIES} ${BLAS_LIBRARIES}
+)
 target_compile_definitions(hipblaslt-clients-common PRIVATE CLIENTS_NO_FORTRAN) # necessary?
 
 target_link_libraries(hipblaslt-bench PRIVATE hipblaslt-clients-common)
@@ -57,7 +60,13 @@ add_subdirectory(bench)
 if(BUILD_TESTING OR HIPBLSALT_BUILD_TESTING)
     find_package(GTest REQUIRED)
     add_executable(hipblaslt-test)
-    target_link_libraries(hipblaslt-test PRIVATE hipblaslt-clients-common GTest::gtest rocm_smi64)
+    if(rocm_smi_FOUND)
+        target_link_libraries(hipblaslt-test PRIVATE rocm_smi64)
+    endif()
+    target_link_libraries(hipblaslt-test PRIVATE hipblaslt-clients-common
+        ${LAPACK_LIBRARIES} ${BLAS_LIBRARIES}
+        GTest::gtest
+    )
     if(HIPBLASLT_ENABLE_BLIS)
         target_link_libraries(hipblaslt-test PRIVATE BLIS::BLIS) # necessary?
     endif()
