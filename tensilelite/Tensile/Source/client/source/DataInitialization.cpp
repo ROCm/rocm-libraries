@@ -1485,7 +1485,7 @@ namespace TensileLite
                                        .pristine[problem.metadata().dataType()];
                     initGPUSparseInput(pUnit.gpuInput.current.get(),
                                        pUnitM.gpuInput.current.get(),
-                                       pUnit.cpuInput.current.get(),
+                                       m_cpuPtrs.empty() ? pUnit.cpuInput.valid.get() : pUnit.cpuInput.current.get(),
                                        problem.sparse() == 2 ? problem.b() : problem.a(),
                                        problem.compressed(),
                                        problem.metadata(),
