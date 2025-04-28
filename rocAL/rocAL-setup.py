@@ -1,4 +1,4 @@
-# Copyright (c) 2022 - 2024 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2022 - 2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -28,7 +28,7 @@ if sys.version_info[0] < 3:
 else:
     import subprocess
 
-__copyright__ = "Copyright 2022 - 2024, AMD ROCm Augmentation Library"
+__copyright__ = "Copyright 2022 - 2025, AMD ROCm Augmentation Library"
 __license__ = "MIT"
 __version__ = "3.0.0"
 __email__ = "mivisionx.support@amd.com"
