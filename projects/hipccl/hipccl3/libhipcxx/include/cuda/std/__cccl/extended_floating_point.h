@@ -8,6 +8,23 @@
 //
 //===----------------------------------------------------------------------===//
 
+// Modifications Copyright (c) 2025 Advanced Micro Devices, Inc.
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+// THE SOFTWARE.
+
 #ifndef __CCCL_EXTENDED_FLOATING_POINT_H
 #define __CCCL_EXTENDED_FLOATING_POINT_H
 
@@ -34,8 +51,14 @@
     && !defined(CCCL_DISABLE_FP16_SUPPORT)
 #    define _CCCL_HAS_NVFP16 1
 #  endif
+#if defined(__HIP_PLATFORM_AMD__)
+#  if __has_include(<hip/hip_bf16.h>)                                              \
+    && (defined(_CCCL_CUDA_COMPILER) || defined(_CCCL_HIP_COMPILER) || defined(LIBCUDACXX_ENABLE_HOST_NVFP16)) \
+    && !defined(CCCL_DISABLE_FP16_SUPPORT)
+#    define _CCCL_HAS_NVFP16 1
+#  endif
+#endif
 #endif // !_CCCL_HAS_NVFP16
-
 #if !defined(_CCCL_HAS_NVBF16)
 #  if __has_include(<cuda_bf16.h>)         \
     && defined(_CCCL_HAS_NVFP16)           \
@@ -43,16 +66,32 @@
     && !defined(CUB_DISABLE_BF16_SUPPORT)
 #    define _CCCL_HAS_NVBF16 1
 #  endif
+#if defined(__HIP_PLATFORM_AMD__)
+#  if __has_include(<hip/hip_fp16.h>)         \
+    && defined(_CCCL_HAS_NVFP16)           \
+    && !defined(CCCL_DISABLE_BF16_SUPPORT) \
+    && !defined(CUB_DISABLE_BF16_SUPPORT)
+#    define _CCCL_HAS_NVBF16 1
+#  endif
+#endif
 #endif // !_CCCL_HAS_NVBF16
 
 #if defined(_CCCL_HAS_NVFP16)
+#if defined(__HIP_PLATFORM_AMD__)
+#  include <hip/hip_fp16.h>
+#else
 #  include <cuda_fp16.h>
+#endif
 #endif // _CCCL_HAS_NVFP16
 
 #if defined(_CCCL_HAS_NVBF16)
 _CCCL_DIAG_PUSH
 _CCCL_DIAG_SUPPRESS_CLANG("-Wunused-function")
+#if defined(__HIP_PLATFORM_AMD__)
+#  include <hip/hip_bf16.h>
+#else
 #  include <cuda_bf16.h>
+#endif
 _CCCL_DIAG_POP
 #endif // _CCCL_HAS_NVFP16
 
