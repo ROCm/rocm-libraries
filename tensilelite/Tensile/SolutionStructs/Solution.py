@@ -27,7 +27,7 @@ import collections
 import math
 
 from enum import Enum
-from typing import List, Dict
+from typing import List, Dict, Literal
 
 from Tensile.AsmStoreState import VectorDataTypes
 from Tensile.Activation import ActivationType
@@ -1371,6 +1371,55 @@ class Solution(collections.abc.Mapping):
         break
     if "ValidDepthU" in state:
       del state["ValidDepthU"]
+
+    # 0: Normal mode. Hardware applies all of the normal data dependency checks
+    # 1: Full expert mode (not suppoeted yet). Disable hardware checks against: VA_VDST, VA_SDST, VA_SSRC, VA_VCC, VM_VSRC and SA_SDST.
+    # 2: Disable only VA_VDST and VM_VSRC checks.
+    def evaluateExpertSchedulingMode() -> Literal[0, 1, 2]:
+      # Check if the current parameters is supported by the ExpertSchedulingMode
+      if not isaInfoMap[isa].archCaps["HasSchedMode"]: return 0
+      if state["ProblemType"]["Sparse"]: return 0
+      if state["ProblemType"]["DataType"].isSingle(): return 0
+
+      # parameters not tested yet:
+      supportedParameters = {
+        "EnableMatrixInstruction": state["EnableMatrixInstruction"],
+        "ScheduleIterAlg": state["ScheduleIterAlg"] == 3,
+        "WavefrontSize": state["WavefrontSize"] == 32,
+        "UnrollLoopSwapGlobalReadOrder": not state["UnrollLoopSwapGlobalReadOrder"],
+        "SuppressNoLoadLoop": not state["SuppressNoLoadLoop"],
+        "ScheduleGlobalRead": state["ScheduleGlobalRead"] == 1,
+        "ScheduleLocalWrite": state["ScheduleLocalWrite"] == 1,
+        "GlobalReadPerMfma": state["GlobalReadPerMfma"] == 1,
+        "InterleaveAlpha": not state["InterleaveAlpha"],
+        "DirectToVgprA": not state["DirectToVgprA"],
+        "DirectToLds": not state["DirectToLds"],
+        "UseSgprForGRO": state["UseSgprForGRO"] == -1,
+        "UseInstOffsetForGRO": not state["UseInstOffsetForGRO"],
+        "Use64bShadowLimit": state["Use64bShadowLimit"] == 1,
+        "StorePriorityOpt": not state["StorePriorityOpt"],
+        "StoreSyncOpt": not state["StoreSyncOpt"],
+        "GroupLoadStore": not state["GroupLoadStore"],
+        "StreamK": not state["StreamK"],
+        "StreamKAtomic": not state["StreamKAtomic"],
+        "StreamKXCCMapping": not state["StreamKXCCMapping"],
+        "DebugStreamK": not state["DebugStreamK"],
+        "WorkGroupReduction": not state["WorkGroupReduction"],
+        "ConvertAfterDS": not state["ConvertAfterDS"],
+        "ForceDisableShadowInit": not state["ForceDisableShadowInit"],
+      }
+      
+      for key, supported in supportedParameters.items():
+        if supported:
+          continue
+
+        print2(f"ExpertSchedulingMode not supported with {key}={state[key]}")
+        return 0
+
+      # Currently, only the mode that disables VA_VDST and VM_VSRC checks is supported.
+      return 2
+
+    state["ExpertSchedulingMode"] = evaluateExpertSchedulingMode()
 
   def depthUIteration(
       state,

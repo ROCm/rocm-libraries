@@ -154,6 +154,7 @@ BenchmarkProblems:
         - GlobalSplitU: [1] #,2] #known bug
         - GlobalSplitUAlgorithm: ["MultipleBuffer"]
         - SourceSwap: [0,1]
+        - DirectToVgprB: [0,1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
