@@ -1263,6 +1263,47 @@ def bf16bf16gemm_32x32x4():
     )
 
 
+def fp4_target():
+    yield GEMMRun(
+        M=4096,
+        N=4096,
+        K=32768,
+        mac_m=256,
+        mac_n=256,
+        mac_k=128,
+        wave_m=32,
+        wave_n=32,
+        wave_k=64,
+        wave_b=1,
+        workgroup_size_x=128,
+        workgroup_size_y=2,
+        unroll_x=0,
+        unroll_y=0,
+        loadLDS_A=True,
+        loadLDS_B=True,
+        loadLDSScale_A=True,
+        loadLDSScale_B=True,
+        storeLDS_D=True,
+        prefetch=True,
+        prefetchInFlight=2,
+        prefetchLDSFactor=2,
+        betaInFma=True,
+        scheduler="Priority",
+        match_memory_access=True,
+        trans_A="T",
+        trans_B="N",
+        type_A="fp4",
+        type_B="fp4",
+        type_C="half",
+        type_D="half",
+        type_acc="float",
+        scale_A="Separate",
+        scale_B="Separate",
+        numOuter=1,
+        numWarmUp=1000,
+        numInner=1000)
+
+
 def all():
     yield from sgemm()
     yield from hgemm()
