@@ -1,7 +1,7 @@
 /*
  * The MIT License (MIT)
  *
- * Copyright (c) 2015-2023 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (c) 2015-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -74,7 +74,8 @@ struct parse_layernorm : op_parser<parse_layernorm>
 
         if(x_rank < 2)
         {
-            MIGRAPHX_THROW("PARSE_LAYERNORM: invalid input shape");
+            MIGRAPHX_THROW("PARSE_LAYERNORM: invalid ndims=" + std::to_string(x_rank) +
+                           ", must be at least 2");
         }
 
         // If rank(X) is r, axis' allowed range is [-r, r)
@@ -112,16 +113,23 @@ struct parse_layernorm : op_parser<parse_layernorm>
         if(skipped_axes > 0)
         {
             auto x_dims = x_shape.lens();
-            scale_bcast = info.add_instruction(
-                make_op("broadcast", {{"axis", skipped_axes}, {"out_lens", x_dims}}), scale);
+            if(scale->get_shape().ndim() == 1)
+            {
+                scale_bcast = info.add_instruction(
+                    make_op("broadcast", {{"axis", skipped_axes}, {"out_lens", x_dims}}), scale);
+            }
+
             if(not skip_bias)
             {
-                bias_bcast = info.add_instruction(
-                    make_op("broadcast", {{"axis", skipped_axes}, {"out_lens", x_dims}}), bias);
+                if(bias->get_shape().ndim() == 1)
+                {
+                    bias_bcast = info.add_instruction(
+                        make_op("broadcast", {{"axis", skipped_axes}, {"out_lens", x_dims}}), bias);
+                }
             }
         }
-        auto scaled = info.add_instruction(make_op("mul"), result, scale_bcast);
-        auto y      = skip_bias ? scaled : info.add_instruction(make_op("add"), scaled, bias_bcast);
+        auto scaled = info.add_common_op("mul", result, scale_bcast);
+        auto y      = skip_bias ? scaled : info.add_common_op("add", scaled, bias_bcast);
         return {y, mean, rsqrt};
     }
 };

@@ -1,7 +1,7 @@
 /*
  * The MIT License (MIT)
  *
- * Copyright (c) 2015-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (c) 2015-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -73,9 +73,10 @@ struct parse_simplified_layer_normalization : op_parser<parse_simplified_layer_n
         int64_t x_rank = x_shape.ndim();
         axis           = axis < 0 ? axis + x_rank : axis;
 
-        if(x_rank < 2 or x_rank > 3)
+        if(x_rank < 2)
         {
-            MIGRAPHX_THROW("PARSE_SIMPLIFIED_LAYER_NORMALIZATION: invalid input shape");
+            MIGRAPHX_THROW("PARSE_SIMPLIFIED_LAYER_NORMALIZATION: invalid ndims=" +
+                           std::to_string(x_rank) + ", must be at least 2");
         }
 
         // Convert to float before reduce_mean
