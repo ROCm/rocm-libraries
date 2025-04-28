@@ -47,7 +47,9 @@
 #  define _CCCL_MSVC_VERSION_FULL _MSC_FULL_VER
 #elif defined(__CUDACC_RTC__)
 #  define _CCCL_COMPILER_NVRTC
-#elif defined(__HIPCC__)
+#endif
+
+#if defined(__HIPCC__)
 # define _CCCL_HIPCC
 # define _CCCL_COMPILER_HIPCC
 #elif defined(__HIPCC_RTC__)
@@ -79,6 +81,10 @@
   || defined(_CCCL_COMPILER_NVRTC)
 #  define _CCCL_CUDA_COMPILER
 #endif // cuda compiler available
+
+#if defined(__HIP_PLATFORM_AMD__) || defined(_CCCL_COMPILER_HIPCC)
+# define _CCCL_HIP_COMPILER
+#endif
 
 // clang-cuda does not define __CUDACC_VER_MAJOR__ and friends. They are instead retrieved from the CUDA_VERSION macro
 // defined in "cuda.h". clang-cuda automatically pre-includes "__clang_cuda_runtime_wrapper.h" which includes "cuda.h"
