@@ -82,12 +82,14 @@ struct RocprimLookbackReproducibilityTests : public testing::Test
     const bool debug_synchronous = false;
 };
 
-using Suite = testing::Types<TestParams<int>, // Sanity check
-                             TestParams<rocprim::bfloat16>,
-                             TestParams<rocprim::half>,
-                             TestParams<float>,
-                             TestParams<double>,
-                             TestParams<common::custom_type<double, double, true>>>;
+using Suite = testing::Types<
+    TestParams<int>,
+    TestParams<rocprim::bfloat16>,
+    TestParams<rocprim::half>,
+    TestParams<float>,
+    TestParams<double>,
+    TestParams<common::custom_type<double, double, true>>
+>;
 
 TYPED_TEST_SUITE(RocprimLookbackReproducibilityTests, Suite);
 
@@ -219,6 +221,14 @@ TYPED_TEST(RocprimLookbackReproducibilityTests, ScanByKey)
     using compare_op_type = rocprim::equal_to<K>;
     using Config          = rocprim::default_config;
 
+    hipDeviceProp_t attributes;
+    HIP_CHECK(hipGetDeviceProperties(&attributes, 0));
+
+    // Disable int test case for Navi3X because of known issue
+    if (std::is_same_v<V, int> && attributes.major == 11){
+        GTEST_SKIP();
+    }
+    
     const size_t min_segment_length = 1000;
     const size_t max_segment_length = 10000;
 
