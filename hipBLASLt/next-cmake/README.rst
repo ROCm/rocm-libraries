@@ -21,27 +21,6 @@ Each component has a corresponding subdirectory. The host and device libraries a
 configurable and buildable but the client applications require the host library build time and the
 device libraries at runtime.
 
-^^^^^^^^^^^^^^^
-Python packages
-^^^^^^^^^^^^^^^
-
-hipBLASLt has two internal python packages:
-
-- rocisa
-- tensilelite
-
-These must be installed into the local environment in order to use the device libraries. Assuming
-the project is cloned into a directory named *hipBLASLt* one can install the python packages as
-follows:
-
-   .. code-block:: bash
-      :linenos:
-      :emphasize-lines: 1,2,4
-
-      cd hipBLASLt
-      pip install tensilelite/rocisa
-      pip install tensilelite
-
 ^^^^^^^^^^^^^^^^^^^
 Configure and build
 ^^^^^^^^^^^^^^^^^^^
@@ -90,6 +69,7 @@ Options
 -------
 
 *Project wide options*:
+
 * `HIPBLASLT_ENABLE_HOST`: enables generation of host library (default: `ON`)
 * `HIPBLASLT_ENABLE_DEVICE`: enables generation of device libraries (default: `ON`)
 * `HIPBLASLT_ENABLE_CLIENT`: enables generation of client applications (default: `ON`)
@@ -98,6 +78,7 @@ Options
 
 
 *Host library options:*
+
 * `HIPBLASLT_ENABLE_BLIS`: Enable BLIS support (default `ON`)
 * `HIPBLASLT_ENABLE_HIP`: Use the HIP runtime (default `ON`)
 * `HIPBLASLT_ENABLE_LLVM`: Use msgpack for parsing configuration files (default `OFF`)
@@ -106,6 +87,7 @@ Options
 * `HIPBLASLT_ENABLE_ROCROLLER:` Use RocRoller library (default `OFF`)
 
 *Device libraries options:*
+
 * `HIPBLASLT_DEVICE_JOBS:` Allow N jobs generating device code libraries (default empty, use nproc jobs)
 
 *Client options:*

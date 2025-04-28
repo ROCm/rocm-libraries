@@ -26,7 +26,7 @@
 #   - Library: target associated creation of .dat
 #   - Cp: target associated with cp of *.co and *.dat into Tensile/library
 
-set(ops_path ${PROJECT_SOURCE_DIR}/tensilelite/Tensile/Ops)
+set(ops_path ${PROJECT_SOURCE_DIR}/tensilelite)
 
 string(REGEX MATCHALL "gfx[a-z0-9]+" archs "${Tensile_ARCHITECTURE}")
 list(REMOVE_DUPLICATES archs)
@@ -147,7 +147,3 @@ add_custom_target(ExtOpCp ALL
     COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_CURRENT_BINARY_DIR}/*.dat" ${PROJECT_BINARY_DIR}/Tensile/library
     COMMENT "Copying ExtOp Library"
 )
-
-unset(ops_path)
-unset(python_venv_executable)
-unset(python_launch_prefix)
