@@ -1035,12 +1035,18 @@ _LIBCUDACXX_HIDE_FROM_ABI complex<_Tp> polar(const _Tp& __rho, const _Tp& __thet
   _Tp __x = __rho * _CUDA_VSTD::cos(__theta);
   if (_CUDA_VSTD::__constexpr_isnan(__x))
   {
-    __x = 0;
+    // NOTE(HIP/AMD): fp16 currently does not provide assignement operator __half& operator=(T x) for host code when x is
+    // an int (device only see https://github.com/ROCm/clr/blob/amd-staging/hipamd/include/hip/amd_detail/amd_hip_fp16.h)
+    // corresponding ticket SWDEV-529927
+    __x = static_cast<_Tp>(0); 
   }
   _Tp __y = __rho * _CUDA_VSTD::sin(__theta);
   if (_CUDA_VSTD::__constexpr_isnan(__y))
   {
-    __y = 0;
+    // NOTE(HIP/AMD): fp16 currently does not provide assignement operator __half& operator=(T x) for host code when x is
+    // an int (device only see https://github.com/ROCm/clr/blob/amd-staging/hipamd/include/hip/amd_detail/amd_hip_fp16.h)
+    // corresponding ticket SWDEV-529927
+    __y = static_cast<_Tp>(0);
   }
   return complex<_Tp>(__x, __y);
 }

@@ -291,7 +291,10 @@ _LIBCUDACXX_HIDE_FROM_ABI complex<double>& complex<double>::operator=(const comp
 
 _LIBCUDACXX_HIDE_FROM_ABI __nv_bfloat16 arg(__nv_bfloat16 __re)
 {
-  return _CUDA_VSTD::atan2(__int2bfloat16_rn(0), __re);
+  // NOTE(HIP/AMD): bfloat16 currently does not provide __int2bfloat16_rn for; this is only implementated for floating point types
+  // (see https://github.com/ROCm/clr/blob/amd-staging/hipamd/include/hip/amd_detail/amd_hip_bf16.h)
+  // corresponding ticket SWDEV-529927
+  return _CUDA_VSTD::atan2(__float2bfloat16(0.0f), __re);
 }
 
 // We have performance issues with some trigonometric functions with __nv_bfloat16

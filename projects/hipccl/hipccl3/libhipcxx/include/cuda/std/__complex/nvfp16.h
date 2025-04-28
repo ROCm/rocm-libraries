@@ -119,7 +119,10 @@ _LIBCUDACXX_HIDE_FROM_ABI __half __convert_to_half(const float& __value) noexcep
 
 _LIBCUDACXX_HIDE_FROM_ABI __half __convert_to_half(const double& __value) noexcept
 {
-  return __double2half(__value);
+  // NOTE(HIP/AMD): fp16 currently does not provide a __double2half conversion
+  // (see https://github.com/ROCm/clr/blob/amd-staging/hipamd/include/hip/amd_detail/amd_hip_fp16.h)
+  // corresponding ticket SWDEV-529927
+  return __float2half(static_cast<float>(__value));
 }
 
 template <>
@@ -288,7 +291,10 @@ _LIBCUDACXX_HIDE_FROM_ABI complex<double>& complex<double>::operator=(const comp
 
 _LIBCUDACXX_HIDE_FROM_ABI __half arg(__half __re)
 {
-  return _CUDA_VSTD::atan2(__int2half_rn(0), __re);
+  // NOTE(HIP/AMD): fp16 currently does not provide __int2half_rn for host code; this is implementated for floating point alternatives
+  // (device only see https://github.com/ROCm/clr/blob/amd-staging/hipamd/include/hip/amd_detail/amd_hip_fp16.h)
+  // corresponding ticket SWDEV-529927
+  return _CUDA_VSTD::atan2(__float2half_rn(0.0f), __re);
 }
 
 // We have performance issues with some trigonometric functions with __half
