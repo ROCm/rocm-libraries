@@ -27,7 +27,7 @@
 
 TEST_ROUTINE_WITH_CONFIG(sddmm,
                          level3,
-                         rocsparse_test_config_ijt,
+                         rocsparse_test_config_ijabct_sddmm,
                          arg.M,
                          arg.N,
                          arg.K,

@@ -5098,25 +5098,25 @@ void host_csrgemm(J                    M,
     }
 }
 
-template <typename T, typename I, typename J>
-void rocsparse_host<T, I, J>::cooddmm(rocsparse_operation  transA,
-                                      rocsparse_operation  transB,
-                                      rocsparse_order      orderA,
-                                      rocsparse_order      orderB,
-                                      J                    M,
-                                      J                    N,
-                                      J                    K,
-                                      I                    nnz,
-                                      const T*             alpha,
-                                      const T*             A,
-                                      int64_t              lda,
-                                      const T*             B,
-                                      int64_t              ldb,
-                                      const T*             beta,
-                                      const I*             coo_row_ind_C,
-                                      const I*             coo_col_ind_C,
-                                      T*                   coo_val_C,
-                                      rocsparse_index_base base_C)
+template <typename T, typename I, typename J, typename A, typename B, typename C>
+void rocsparse_host<T, I, J, A, B, C>::cooddmm(rocsparse_operation  transA,
+                                               rocsparse_operation  transB,
+                                               rocsparse_order      orderA,
+                                               rocsparse_order      orderB,
+                                               J                    M,
+                                               J                    N,
+                                               J                    K,
+                                               I                    nnz,
+                                               const T*             alpha,
+                                               const A*             dense_A,
+                                               int64_t              lda,
+                                               const B*             dense_B,
+                                               int64_t              ldb,
+                                               const T*             beta,
+                                               const I*             coo_row_ind_C,
+                                               const I*             coo_col_ind_C,
+                                               C*                   coo_val_C,
+                                               rocsparse_index_base base_C)
 {
 
     const T a = *alpha;
@@ -5137,13 +5137,15 @@ void rocsparse_host<T, I, J>::cooddmm(rocsparse_operation  transA,
         const I i = coo_row_ind_C[s] - base_C;
         const I j = coo_col_ind_C[s] - base_C;
 
-        const T* x = (orderA == rocsparse_order_column)
-                         ? ((transA == rocsparse_operation_none) ? (A + i) : (A + lda * i))
-                         : ((transA == rocsparse_operation_none) ? (A + lda * i) : (A + i));
+        const A* x
+            = (orderA == rocsparse_order_column)
+                  ? ((transA == rocsparse_operation_none) ? (dense_A + i) : (dense_A + lda * i))
+                  : ((transA == rocsparse_operation_none) ? (dense_A + lda * i) : (dense_A + i));
 
-        const T* y = (orderB == rocsparse_order_column)
-                         ? ((transB == rocsparse_operation_none) ? (B + ldb * j) : (B + j))
-                         : ((transB == rocsparse_operation_none) ? (B + j) : (B + ldb * j));
+        const B* y
+            = (orderB == rocsparse_order_column)
+                  ? ((transB == rocsparse_operation_none) ? (dense_B + ldb * j) : (dense_B + j))
+                  : ((transB == rocsparse_operation_none) ? (dense_B + j) : (dense_B + ldb * j));
 
         T sum = static_cast<T>(0);
         for(J k = 0; k < K; ++k)
@@ -5154,25 +5156,25 @@ void rocsparse_host<T, I, J>::cooddmm(rocsparse_operation  transA,
     }
 }
 
-template <typename T, typename I, typename J>
-void rocsparse_host<T, I, J>::cooaosddmm(rocsparse_operation  transA,
-                                         rocsparse_operation  transB,
-                                         rocsparse_order      orderA,
-                                         rocsparse_order      orderB,
-                                         J                    M,
-                                         J                    N,
-                                         J                    K,
-                                         I                    nnz,
-                                         const T*             alpha,
-                                         const T*             A,
-                                         int64_t              lda,
-                                         const T*             B,
-                                         int64_t              ldb,
-                                         const T*             beta,
-                                         const I*             coo_row_ind_C,
-                                         const I*             coo_col_ind_C,
-                                         T*                   coo_val_C,
-                                         rocsparse_index_base base_C)
+template <typename T, typename I, typename J, typename A, typename B, typename C>
+void rocsparse_host<T, I, J, A, B, C>::cooaosddmm(rocsparse_operation  transA,
+                                                  rocsparse_operation  transB,
+                                                  rocsparse_order      orderA,
+                                                  rocsparse_order      orderB,
+                                                  J                    M,
+                                                  J                    N,
+                                                  J                    K,
+                                                  I                    nnz,
+                                                  const T*             alpha,
+                                                  const A*             dense_A,
+                                                  int64_t              lda,
+                                                  const B*             dense_B,
+                                                  int64_t              ldb,
+                                                  const T*             beta,
+                                                  const I*             coo_row_ind_C,
+                                                  const I*             coo_col_ind_C,
+                                                  C*                   coo_val_C,
+                                                  rocsparse_index_base base_C)
 {
 
     const T a = *alpha;
@@ -5193,13 +5195,15 @@ void rocsparse_host<T, I, J>::cooaosddmm(rocsparse_operation  transA,
         const I i = coo_row_ind_C[2 * s] - base_C;
         const I j = coo_col_ind_C[2 * s] - base_C;
 
-        const T* x = (orderA == rocsparse_order_column)
-                         ? ((transA == rocsparse_operation_none) ? (A + i) : (A + lda * i))
-                         : ((transA == rocsparse_operation_none) ? (A + lda * i) : (A + i));
+        const A* x
+            = (orderA == rocsparse_order_column)
+                  ? ((transA == rocsparse_operation_none) ? (dense_A + i) : (dense_A + lda * i))
+                  : ((transA == rocsparse_operation_none) ? (dense_A + lda * i) : (dense_A + i));
 
-        const T* y = (orderB == rocsparse_order_column)
-                         ? ((transB == rocsparse_operation_none) ? (B + ldb * j) : (B + j))
-                         : ((transB == rocsparse_operation_none) ? (B + j) : (B + ldb * j));
+        const B* y
+            = (orderB == rocsparse_order_column)
+                  ? ((transB == rocsparse_operation_none) ? (dense_B + ldb * j) : (dense_B + j))
+                  : ((transB == rocsparse_operation_none) ? (dense_B + j) : (dense_B + ldb * j));
 
         T sum = static_cast<T>(0);
         for(J k = 0; k < K; ++k)
@@ -5210,25 +5214,25 @@ void rocsparse_host<T, I, J>::cooaosddmm(rocsparse_operation  transA,
     }
 }
 
-template <typename T, typename I, typename J>
-void rocsparse_host<T, I, J>::csrddmm(rocsparse_operation  transA,
-                                      rocsparse_operation  transB,
-                                      rocsparse_order      orderA,
-                                      rocsparse_order      orderB,
-                                      J                    M,
-                                      J                    N,
-                                      J                    K,
-                                      I                    nnz,
-                                      const T*             alpha,
-                                      const T*             A,
-                                      int64_t              lda,
-                                      const T*             B,
-                                      int64_t              ldb,
-                                      const T*             beta,
-                                      const I*             csr_row_ptr_C,
-                                      const J*             csr_col_ind_C,
-                                      T*                   csr_val_C,
-                                      rocsparse_index_base base_C)
+template <typename T, typename I, typename J, typename A, typename B, typename C>
+void rocsparse_host<T, I, J, A, B, C>::csrddmm(rocsparse_operation  transA,
+                                               rocsparse_operation  transB,
+                                               rocsparse_order      orderA,
+                                               rocsparse_order      orderB,
+                                               J                    M,
+                                               J                    N,
+                                               J                    K,
+                                               I                    nnz,
+                                               const T*             alpha,
+                                               const A*             dense_A,
+                                               int64_t              lda,
+                                               const B*             dense_B,
+                                               int64_t              ldb,
+                                               const T*             beta,
+                                               const I*             csr_row_ptr_C,
+                                               const J*             csr_col_ind_C,
+                                               C*                   csr_val_C,
+                                               rocsparse_index_base base_C)
 {
     const T a = *alpha;
     const T b = *beta;
@@ -5250,12 +5254,16 @@ void rocsparse_host<T, I, J>::csrddmm(rocsparse_operation  transA,
         {
             J j = csr_col_ind_C[at] - base_C;
 
-            const T* x = (orderA == rocsparse_order_column)
-                             ? ((transA == rocsparse_operation_none) ? (A + i) : (A + lda * i))
-                             : ((transA == rocsparse_operation_none) ? (A + lda * i) : (A + i));
-            const T* y = (orderB == rocsparse_order_column)
-                             ? ((transB == rocsparse_operation_none) ? (B + ldb * j) : (B + j))
-                             : ((transB == rocsparse_operation_none) ? (B + j) : (B + ldb * j));
+            const A* x
+                = (orderA == rocsparse_order_column)
+                      ? ((transA == rocsparse_operation_none) ? (dense_A + i) : (dense_A + lda * i))
+                      : ((transA == rocsparse_operation_none) ? (dense_A + lda * i)
+                                                              : (dense_A + i));
+            const B* y
+                = (orderB == rocsparse_order_column)
+                      ? ((transB == rocsparse_operation_none) ? (dense_B + ldb * j) : (dense_B + j))
+                      : ((transB == rocsparse_operation_none) ? (dense_B + j)
+                                                              : (dense_B + ldb * j));
 
             T sum = static_cast<T>(0);
             for(J k = 0; k < K; ++k)
@@ -5267,25 +5275,25 @@ void rocsparse_host<T, I, J>::csrddmm(rocsparse_operation  transA,
     }
 }
 
-template <typename T, typename I, typename J>
-void rocsparse_host<T, I, J>::ellddmm(rocsparse_operation  transA,
-                                      rocsparse_operation  transB,
-                                      rocsparse_order      orderA,
-                                      rocsparse_order      orderB,
-                                      J                    M,
-                                      J                    N,
-                                      J                    K,
-                                      I                    nnz,
-                                      const T*             alpha,
-                                      const T*             A,
-                                      int64_t              lda,
-                                      const T*             B,
-                                      int64_t              ldb,
-                                      const T*             beta,
-                                      const J              ell_width,
-                                      const I*             ell_ind_C,
-                                      T*                   ell_val_C,
-                                      rocsparse_index_base ell_base)
+template <typename T, typename I, typename J, typename A, typename B, typename C>
+void rocsparse_host<T, I, J, A, B, C>::ellddmm(rocsparse_operation  transA,
+                                               rocsparse_operation  transB,
+                                               rocsparse_order      orderA,
+                                               rocsparse_order      orderB,
+                                               J                    M,
+                                               J                    N,
+                                               J                    K,
+                                               I                    nnz,
+                                               const T*             alpha,
+                                               const A*             dense_A,
+                                               int64_t              lda,
+                                               const B*             dense_B,
+                                               int64_t              ldb,
+                                               const T*             beta,
+                                               const J              ell_width,
+                                               const I*             ell_ind_C,
+                                               C*                   ell_val_C,
+                                               rocsparse_index_base ell_base)
 {
     const T a = *alpha;
     const T b = *beta;
@@ -5309,12 +5317,16 @@ void rocsparse_host<T, I, J>::ellddmm(rocsparse_operation  transA,
             J j  = ell_ind_C[at] - ell_base;
             if(j >= 0 && j < N)
             {
-                const T* x = (orderA == rocsparse_order_column)
-                                 ? ((transA == rocsparse_operation_none) ? (A + i) : (A + lda * i))
-                                 : ((transA == rocsparse_operation_none) ? (A + lda * i) : (A + i));
-                const T* y = (orderB == rocsparse_order_column)
-                                 ? ((transB == rocsparse_operation_none) ? (B + ldb * j) : (B + j))
-                                 : ((transB == rocsparse_operation_none) ? (B + j) : (B + ldb * j));
+                const A* x = (orderA == rocsparse_order_column)
+                                 ? ((transA == rocsparse_operation_none) ? (dense_A + i)
+                                                                         : (dense_A + lda * i))
+                                 : ((transA == rocsparse_operation_none) ? (dense_A + lda * i)
+                                                                         : (dense_A + i));
+                const B* y = (orderB == rocsparse_order_column)
+                                 ? ((transB == rocsparse_operation_none) ? (dense_B + ldb * j)
+                                                                         : (dense_B + j))
+                                 : ((transB == rocsparse_operation_none) ? (dense_B + j)
+                                                                         : (dense_B + ldb * j));
 
                 T sum = static_cast<T>(0);
                 for(J k = 0; k < K; ++k)
@@ -5327,25 +5339,25 @@ void rocsparse_host<T, I, J>::ellddmm(rocsparse_operation  transA,
     }
 }
 
-template <typename T, typename I, typename J>
-void rocsparse_host<T, I, J>::cscddmm(rocsparse_operation  transA,
-                                      rocsparse_operation  transB,
-                                      rocsparse_order      orderA,
-                                      rocsparse_order      orderB,
-                                      J                    M,
-                                      J                    N,
-                                      J                    K,
-                                      I                    nnz,
-                                      const T*             alpha,
-                                      const T*             A,
-                                      int64_t              lda,
-                                      const T*             B,
-                                      int64_t              ldb,
-                                      const T*             beta,
-                                      const I*             csr_ptr_C,
-                                      const J*             csr_ind_C,
-                                      T*                   csr_val_C,
-                                      rocsparse_index_base base_C)
+template <typename T, typename I, typename J, typename A, typename B, typename C>
+void rocsparse_host<T, I, J, A, B, C>::cscddmm(rocsparse_operation  transA,
+                                               rocsparse_operation  transB,
+                                               rocsparse_order      orderA,
+                                               rocsparse_order      orderB,
+                                               J                    M,
+                                               J                    N,
+                                               J                    K,
+                                               I                    nnz,
+                                               const T*             alpha,
+                                               const A*             dense_A,
+                                               int64_t              lda,
+                                               const B*             dense_B,
+                                               int64_t              ldb,
+                                               const T*             beta,
+                                               const I*             csr_ptr_C,
+                                               const J*             csr_ind_C,
+                                               C*                   csr_val_C,
+                                               rocsparse_index_base base_C)
 {
     const T a = *alpha;
     const T b = *beta;
@@ -5367,12 +5379,16 @@ void rocsparse_host<T, I, J>::cscddmm(rocsparse_operation  transA,
         for(I at = csr_ptr_C[j] - base_C; at < csr_ptr_C[j + 1] - base_C; ++at)
         {
             J        i = csr_ind_C[at] - base_C;
-            const T* x = (orderA == rocsparse_order_column)
-                             ? ((transA == rocsparse_operation_none) ? (A + i) : (A + lda * i))
-                             : ((transA == rocsparse_operation_none) ? (A + lda * i) : (A + i));
-            const T* y = (orderB == rocsparse_order_column)
-                             ? ((transB == rocsparse_operation_none) ? (B + ldb * j) : (B + j))
-                             : ((transB == rocsparse_operation_none) ? (B + j) : (B + ldb * j));
+            const A* x
+                = (orderA == rocsparse_order_column)
+                      ? ((transA == rocsparse_operation_none) ? (dense_A + i) : (dense_A + lda * i))
+                      : ((transA == rocsparse_operation_none) ? (dense_A + lda * i)
+                                                              : (dense_A + i));
+            const B* y
+                = (orderB == rocsparse_order_column)
+                      ? ((transB == rocsparse_operation_none) ? (dense_B + ldb * j) : (dense_B + j))
+                      : ((transB == rocsparse_operation_none) ? (dense_B + j)
+                                                              : (dense_B + ldb * j));
 
             T sum = static_cast<T>(0);
             for(J k = 0; k < K; ++k)
@@ -8393,20 +8409,53 @@ void host_bsrpad_value(rocsparse_int m,
 
 // INSTANTIATE
 
-template struct rocsparse_host<float, int32_t, int32_t>;
-template struct rocsparse_host<double, int32_t, int32_t>;
-template struct rocsparse_host<rocsparse_float_complex, int32_t, int32_t>;
-template struct rocsparse_host<rocsparse_double_complex, int32_t, int32_t>;
+template struct rocsparse_host<float, int32_t, int32_t, _Float16, _Float16, float>;
+template struct rocsparse_host<float, int32_t, int32_t, float, float, float>;
+template struct rocsparse_host<double, int32_t, int32_t, double, double, double>;
+template struct rocsparse_host<rocsparse_float_complex,
+                               int32_t,
+                               int32_t,
+                               rocsparse_float_complex,
+                               rocsparse_float_complex,
+                               rocsparse_float_complex>;
+template struct rocsparse_host<rocsparse_double_complex,
+                               int32_t,
+                               int32_t,
+                               rocsparse_double_complex,
+                               rocsparse_double_complex,
+                               rocsparse_double_complex>;
 
-template struct rocsparse_host<float, int64_t, int32_t>;
-template struct rocsparse_host<double, int64_t, int32_t>;
-template struct rocsparse_host<rocsparse_float_complex, int64_t, int32_t>;
-template struct rocsparse_host<rocsparse_double_complex, int64_t, int32_t>;
+template struct rocsparse_host<float, int64_t, int32_t, _Float16, _Float16, float>;
+template struct rocsparse_host<float, int64_t, int32_t, float, float, float>;
+template struct rocsparse_host<double, int64_t, int32_t, double, double, double>;
+template struct rocsparse_host<rocsparse_float_complex,
+                               int64_t,
+                               int32_t,
+                               rocsparse_float_complex,
+                               rocsparse_float_complex,
+                               rocsparse_float_complex>;
+template struct rocsparse_host<rocsparse_double_complex,
+                               int64_t,
+                               int32_t,
+                               rocsparse_double_complex,
+                               rocsparse_double_complex,
+                               rocsparse_double_complex>;
 
-template struct rocsparse_host<float, int64_t, int64_t>;
-template struct rocsparse_host<double, int64_t, int64_t>;
-template struct rocsparse_host<rocsparse_float_complex, int64_t, int64_t>;
-template struct rocsparse_host<rocsparse_double_complex, int64_t, int64_t>;
+template struct rocsparse_host<float, int64_t, int64_t, _Float16, _Float16, float>;
+template struct rocsparse_host<float, int64_t, int64_t, float, float, float>;
+template struct rocsparse_host<double, int64_t, int64_t, double, double, double>;
+template struct rocsparse_host<rocsparse_float_complex,
+                               int64_t,
+                               int64_t,
+                               rocsparse_float_complex,
+                               rocsparse_float_complex,
+                               rocsparse_float_complex>;
+template struct rocsparse_host<rocsparse_double_complex,
+                               int64_t,
+                               int64_t,
+                               rocsparse_double_complex,
+                               rocsparse_double_complex,
+                               rocsparse_double_complex>;
 
 #define INSTANTIATE_GATHER_SCATTER(ITYPE, TTYPE)                                                 \
     template void host_gthr<ITYPE, TTYPE>(                                                       \

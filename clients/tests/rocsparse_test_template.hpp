@@ -279,6 +279,7 @@ namespace
                     break;
                 }
                 case rocsparse_test_dispatch_enum::ijabct:
+                case rocsparse_test_dispatch_enum::ijabct_sddmm:
                 {
                     s << rocsparse_indextype2string(arg.index_type_I) << '_'
                       << rocsparse_indextype2string(arg.index_type_J) << '_'
@@ -410,6 +411,37 @@ namespace
 
     template <rocsparse_test_enum::value_type ROUTINE>
     struct rocsparse_test_ijabct_template
+    {
+        template <typename A,
+                  typename B,
+                  typename C,
+                  typename T,
+                  typename I,
+                  typename J,
+                  typename = void>
+        struct test_call : rocsparse_test_invalid
+        {
+        };
+
+        template <typename I, typename J, typename A, typename B, typename C, typename T>
+        struct test_call<I,
+                         J,
+                         A,
+                         B,
+                         C,
+                         T,
+                         typename std::enable_if<std::is_integral<I>::value>::type>
+            : rocsparse_test_template<ROUTINE>::template test_call_proxy<I, J, A, B, C, T>
+        {
+        };
+
+        struct test : rocsparse_test_template<ROUTINE>::template test_proxy<test, test_call>
+        {
+        };
+    };
+
+    template <rocsparse_test_enum::value_type ROUTINE>
+    struct rocsparse_test_ijabct_sddmm_template
     {
         template <typename A,
                   typename B,

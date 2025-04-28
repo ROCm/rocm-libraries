@@ -119,3 +119,13 @@ struct rocsparse_test_dispatch<rocsparse_test_dispatch_enum::ijabct>
         return rocsparse_ijabct_dispatch<TEST>(arg);
     }
 };
+
+template <>
+struct rocsparse_test_dispatch<rocsparse_test_dispatch_enum::ijabct_sddmm>
+{
+    template <template <typename...> class TEST>
+    static auto dispatch(const Arguments& arg)
+    {
+        return rocsparse_ijabct_sddmm_dispatch<TEST>(arg);
+    }
+};

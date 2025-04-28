@@ -853,6 +853,12 @@ namespace rocsparse
     rocsparse_datatype get_datatype();
 
     template <>
+    inline rocsparse_datatype get_datatype<_Float16>()
+    {
+        return rocsparse_datatype_f16_r;
+    }
+
+    template <>
     inline rocsparse_datatype get_datatype<float>()
     {
         return rocsparse_datatype_f32_r;

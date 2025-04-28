@@ -588,7 +588,7 @@ rocsparse_status rocsparse_routine::dispatch_call(const Arguments& arg)
         DEFINE_CASE_T_REAL_ONLY(prune_dense2csr_by_percentage);
         DEFINE_CASE_T_REAL_ONLY(roti);
         DEFINE_CASE_T(sctr);
-        DEFINE_CASE_IJT(sddmm);
+        DEFINE_CASE_IJABCT(sddmm);
         DEFINE_CASE_IT(sparse_to_dense_coo);
         DEFINE_CASE_IJT(sparse_to_dense_csc);
         DEFINE_CASE_IJT(sparse_to_dense_csr);
