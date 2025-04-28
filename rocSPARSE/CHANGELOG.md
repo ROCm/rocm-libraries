@@ -5,6 +5,9 @@ Documentation for rocSPARSE is available at
 
 ## (Unreleased) rocSPARSE 3.6.0
 
+### Resolved issues
+* Fixed an issue in the public headers where `extern "C"` was not wrapped by `#ifdef __cplusplus`, which caused failures when building C programs with rocSPARSE.
+
 ### Added
 * Adds SpGEAM generic routine for computing sparse matrix addition in CSR format
 
