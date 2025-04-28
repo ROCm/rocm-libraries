@@ -42,7 +42,7 @@ namespace gpu {
 struct context;
 
 template <class Op>
-struct hip_gemm
+struct MIGRAPHX_GPU_EXPORT hip_gemm
 {
     Op op;
     float alpha          = 1;

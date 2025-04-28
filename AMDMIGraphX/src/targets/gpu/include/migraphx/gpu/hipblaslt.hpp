@@ -1,7 +1,7 @@
 /*
  * The MIT License (MIT)
  *
- * Copyright (c) 2015-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (c) 2015-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -100,7 +100,7 @@ using hipblaslt_preference_ptr = MIGRAPHX_MANAGE_PTR(hipblasLtMatmulPreference_t
 
 hipblaslt_handle_ptr create_hipblaslt_handle_ptr();
 hipblaslt_preference_ptr create_hipblaslt_preference_ptr();
-bool hipblaslt_supported();
+MIGRAPHX_GPU_EXPORT bool hipblaslt_supported();
 const size_t hipblaslt_workspace_size = 2 * 128 * 1024 * 1024;
 } // namespace gpu
 } // namespace MIGRAPHX_INLINE_NS

@@ -41,6 +41,8 @@ MIGRAPHX_GPU_EXPORT bool gfx_has_fp8fnuz_intrinsics();
 
 MIGRAPHX_GPU_EXPORT bool gfx_has_fp8ocp_intrinsics();
 
+MIGRAPHX_GPU_EXPORT bool gfx_has_bf16_intrinsics();
+
 MIGRAPHX_GPU_EXPORT bool gfx_has_fp8fnuz_support();
 
 MIGRAPHX_GPU_EXPORT bool gfx_default_rocblas();
