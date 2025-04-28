@@ -65,6 +65,10 @@ The following is the complete list of affected functions and how their default a
   * `rocprim::warp_size()`
   * `ROCPRIM_WAVEFRONT_SIZE`
 
+### Known issues
+* When using `rocprim::deterministic_inclusive_scan_by_key` and `rocprim::deterministic_exclusive_scan_by_key` the intermediate values can change order on Navi3x
+  * However if a commutative scan operator is used then the final scan value (output array) will still always be consistent between runs
+
 ## rocPRIM 3.4.0 for ROCm 6.4.0
 
 ### Added
