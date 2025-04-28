@@ -26,7 +26,7 @@
  * ************************************************************************ */
 
 /*********************************************************
- * Declaration of the rocBLAS<->rocRoller interface layer. *
+ * Declaration of the rocblaslt<->rocRoller interface layer. *
  *********************************************************/
 
 #pragma once

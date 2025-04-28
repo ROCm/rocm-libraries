@@ -1826,6 +1826,102 @@ namespace rocisa
         bool waitAll;
     };
 
+    /*
+        GFX12:
+        +-----------------------+-----------------+---------+-----+-----------+-----------------+--------+---------+
+        | 15  | 14  | 13  | 12  | 11  | 10  |  9  |    8    |  7  |  6  |  5  |  4  |  3  |  2  |    1   |    0    |
+        |-----------------------+-----------------+---------+-----+-----------+-----------------+--------+---------|
+        |        va_vdst        |     va_sdst     | va_ssrc | hc  |   rsvd    |     vm_vsrc     | va_vcc | sa_sdst |
+        +-----------------------+-----------------+---------+-----+-----------+-----------------+--------+---------+
+    */
+    struct SWaitAlu : public Instruction
+    {
+        SWaitAlu(int                va_vdst  = -1,
+                 int                va_sdst  = -1,
+                 int                va_ssrc  = -1,
+                 int                hold_cnt = -1,
+                 int                vm_vsrc  = -1,
+                 int                va_vcc   = -1,
+                 int                sa_sdst  = -1,
+                 const std::string& comment  = "")
+            : Instruction(InstType::INST_NOTYPE, comment)
+            , va_vdst(va_vdst)
+            , va_sdst(va_sdst)
+            , va_ssrc(va_ssrc)
+            , hold_cnt(hold_cnt)
+            , vm_vsrc(vm_vsrc)
+            , va_vcc(va_vcc)
+            , sa_sdst(sa_sdst)
+        {
+            if(kernel().isaVersion[0] < 12)
+            {
+                setInst("s_waitcnt_depctr");
+            }
+            else
+            {
+                setInst("s_wait_alu");
+            }
+        }
+
+        SWaitAlu(const SWaitAlu& other)
+            : SWaitAlu(other.va_vdst,
+                       other.va_sdst,
+                       other.va_ssrc,
+                       other.hold_cnt,
+                       other.vm_vsrc,
+                       other.va_vcc,
+                       other.sa_sdst,
+                       other.comment)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<SWaitAlu>(*this);
+        }
+
+        std::vector<InstructionInput> getParams() const override
+        {
+            return {va_vdst, va_sdst, va_ssrc, hold_cnt, vm_vsrc, va_vcc, sa_sdst};
+        }
+
+        std::string toString() const override
+        {
+            if(!getArchCaps()["HasSchedMode"])
+                return "";
+
+            std::string result;
+            if(va_vdst != -1)
+                result += " depctr_va_vdst(" + std::to_string(va_vdst) + ")";
+            if(va_sdst != -1)
+                result += " depctr_va_sdst(" + std::to_string(va_sdst) + ")";
+            if(va_ssrc != -1)
+                result += " depctr_va_ssrc(" + std::to_string(va_ssrc) + ")";
+            if(hold_cnt != -1)
+                result += " depctr_hold_cnt(" + std::to_string(hold_cnt) + ")";
+            if(vm_vsrc != -1)
+                result += " depctr_vm_vsrc(" + std::to_string(vm_vsrc) + ")";
+            if(va_vcc != -1)
+                result += " depctr_va_vcc(" + std::to_string(va_vcc) + ")";
+            if(sa_sdst != -1)
+                result += " depctr_sa_sdst(" + std::to_string(sa_sdst) + ")";
+
+            if(result.empty())
+                return "";
+
+            return formatWithComment(instStr + result);
+        }
+
+    private:
+        int  va_vdst;
+        int  va_sdst;
+        int  va_ssrc;
+        int  hold_cnt;
+        int  vm_vsrc;
+        int  va_vcc;
+        int  sa_sdst;
+    };
+
     struct VAddF16 : public CommonInstruction
     {
         VAddF16(const std::shared_ptr<Container>& dst,

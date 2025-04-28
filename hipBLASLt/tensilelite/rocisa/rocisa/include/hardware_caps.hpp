@@ -307,6 +307,7 @@ inline std::map<std::string, bool> initArchCaps(const IsaVersion& isaVersion)
     rv["SeparateVMcnt"]    = isaVersion[0] == 12;
     rv["CMPXWritesSGPR"]   = checkNotInList(isaVersion[0], {10, 11, 12});
     rv["HasWave32"]        = checkInList(isaVersion[0], {10, 11, 12});
+    rv["HasSchedMode"]     = checkInList(isaVersion[0], {12});
     rv["HasAccCD"]         = checkInList(isaVersion, {{9, 0, 10}, {9, 4, 2}, {9, 5, 0}});
     rv["ArchAccUnifiedRegs"] = checkInList(isaVersion, {{9, 0, 10}, {9, 4, 2}, {9, 5, 0}});
     rv["CrosslaneWait"]      = checkInList(isaVersion, {{9, 4, 2}, {9, 5, 0}});
