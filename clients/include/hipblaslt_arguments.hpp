@@ -296,7 +296,7 @@ struct Arguments
     // Function to read Arguments data from stream
     friend std::istream& operator>>(std::istream& str, Arguments& arg);
 
-#ifdef WIN32
+#ifdef _WIN32
     // Clang specific code
     template <typename T>
     friend hipblaslt_internal_ostream& operator<<(hipblaslt_internal_ostream& os,

@@ -30,7 +30,7 @@ static void hipblaslt_abort_once [[noreturn]] ();
 #include <fcntl.h>
 #include <iostream>
 #include <type_traits>
-#ifdef WIN32
+#ifdef _WIN32
 #include <io.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -52,7 +52,7 @@ static void hipblaslt_abort_once [[noreturn]] ();
 // Abort function which is called only once by hipblaslt_abort
 static void hipblaslt_abort_once()
 {
-#ifndef WIN32
+#ifndef _WIN32
     // Make sure the alarm and abort actions are default
     signal(SIGALRM, SIG_DFL);
     signal(SIGABRT, SIG_DFL);
@@ -108,7 +108,7 @@ std::shared_ptr<hipblaslt_internal_ostream::worker> hipblaslt_internal_ostream::
                       && std::is_same<decltype(file_id_t::st_ino), decltype(stat::st_ino)>{},
                   "struct stat and file_id_t are not layout-compatible");
 
-#ifndef WIN32
+#ifndef _WIN32
     // Get the device ID and inode, to detect common files
     if(fstat(fd, &statbuf))
     {
@@ -226,7 +226,7 @@ void hipblaslt_internal_ostream::worker::send(std::string str)
     // The future indicating when the operation has completed
     auto future = promise.get_future();
 
-#ifdef WIN32
+#ifdef _WIN32
     // Passing an empty string will make the worker thread exit.
     // The below flag will be used to handle worker thread exit condition for Windows
     bool empty_string = str.empty();
@@ -247,7 +247,7 @@ void hipblaslt_internal_ostream::worker::send(std::string str)
     }
 
 // Wait for the task to be completed, to ensure flushed IO
-#ifdef WIN32
+#ifdef _WIN32
     if(empty_string)
         // Occassionaly this thread is not getting the promise set by the 'worker' thread during exit condition.
         // Added a timed wait to exit after one second, if we do not get the promise from worker thread.
@@ -313,7 +313,7 @@ void hipblaslt_internal_ostream::worker::thread_function()
 hipblaslt_internal_ostream::worker::worker(int fd)
 {
     // The worker duplicates the file descriptor (RAII)
-#ifdef WIN32
+#ifdef _WIN32
     fd = _dup(fd);
 #else
     fd = fcntl(fd, F_DUPFD_CLOEXEC, 0);

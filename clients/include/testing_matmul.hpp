@@ -29,6 +29,7 @@
 #include "TensorDataManipulation.hpp"
 #include "allclose.hpp"
 #include "cblas_interface.hpp"
+#include "efficiency_monitor.hpp"
 #include "flops.hpp"
 #include "hipBuffer.hpp"
 #include "hipblaslt_datatype2string.hpp"
@@ -40,7 +41,6 @@
 #include "mxDataGen.hpp"
 #include "near.hpp"
 #include "norm.hpp"
-#include "efficiency_monitor.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
 #include <cstddef>
@@ -49,6 +49,7 @@
 #include <hipblaslt/hipblaslt-ext.hpp>
 #include <hipblaslt/hipblaslt.h>
 #include <map>
+#include <numeric>
 #include <omp.h>
 #include <set>
 
@@ -1815,16 +1816,16 @@ void testing_matmul_with_bias(const Arguments& arg,
         else
         {
 #endif
-            hipblaslt_init_device(ABC::A,
-                              arg.initialization,
-                              alpha_isnan_type(arg, Talpha),
-                              dA[i].buf(),
-                              A_row[i],
-                              A_col[i],
-                              (arg.swizzle_a) ? A_row[i] : lda[i],
-                              TiA,
-                              (arg.swizzle_a) ? A_row[i] * A_col[i] : stride_a[i],
-                              num_batches[i]);
+            hipblaslt_init_device(ABC_dims::A,
+                                  arg.initialization,
+                                  alpha_isnan_type(arg, Talpha),
+                                  dA[i].buf(),
+                                  A_row[i],
+                                  A_col[i],
+                                  (arg.swizzle_a) ? A_row[i] : lda[i],
+                                  TiA,
+                                  (arg.swizzle_a) ? A_row[i] * A_col[i] : stride_a[i],
+                                  num_batches[i]);
 #ifdef USE_ROCROLLER
         }
         if(arg.scaleB == hipblaslt_scaling_format::Block)
@@ -1865,20 +1866,20 @@ void testing_matmul_with_bias(const Arguments& arg,
         else
         {
 #endif
-            hipblaslt_init_device(ABC::B,
-                              arg.initialization,
-                              alpha_isnan_type(arg, Talpha),
-                              dB[i].buf(),
-                              B_row[i],
-                              B_col[i],
-                              ldb[i],
-                              TiB,
-                              stride_b[i],
-                              num_batches[i]);
+            hipblaslt_init_device(ABC_dims::B,
+                                  arg.initialization,
+                                  alpha_isnan_type(arg, Talpha),
+                                  dB[i].buf(),
+                                  B_row[i],
+                                  B_col[i],
+                                  ldb[i],
+                                  TiB,
+                                  stride_b[i],
+                                  num_batches[i]);
 #ifdef USE_ROCROLLER
         }
 #endif
-        hipblaslt_init_device(ABC::C,
+        hipblaslt_init_device(ABC_dims::C,
                               arg.initialization,
                               beta_isnan_type(arg, Talpha),
                               dC[i].buf(),

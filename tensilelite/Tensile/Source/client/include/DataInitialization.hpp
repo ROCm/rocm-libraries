@@ -2601,13 +2601,25 @@ namespace TensileLite
         template <>
         inline Float8 DataInitialization::getValue<Float8, InitMode::RandomNarrow>()
         {
+#if _WIN32
+            //msvc's STL implementation follows [rand.req.genl](1.5), so Float8 as template arg
+            //is not allowed
+            return Float8(rocm_random_narrow_range<float>{}());
+#else
             return rocm_random_narrow_range<Float8>{}();
+#endif
         }
 
         template <>
         inline BFloat8 DataInitialization::getValue<BFloat8, InitMode::RandomNarrow>()
         {
+#if _WIN32
+            //msvc's STL implementation follows [rand.req.genl](1.5), so BFloat8 as template arg
+            //is not allowed
+            return BFloat8(rocm_random_narrow_range<float>{}());
+#else
             return rocm_random_narrow_range<BFloat8>{}();
+#endif
         }
 
         template <>

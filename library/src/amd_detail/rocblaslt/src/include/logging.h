@@ -44,9 +44,12 @@
 #include <sys/types.h>
 #include <tuple>
 #include <type_traits>
-#include <unistd.h>
 #include <unordered_map>
 #include <utility>
+
+#ifndef _WIN32
+#include <unistd.h>
+#endif
 
 /************************************************************************************
  * Profile kernel arguments

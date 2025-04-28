@@ -32,11 +32,12 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <hip/hip_ext.h>
 #include <hip/hip_runtime_api.h>
-#include <libgen.h>
 #include <memory>
+#include <optional>
 #include <rocblaslt-auxiliary.h>
 #include <sstream>
 #include <string>
@@ -162,22 +163,22 @@ namespace
             return libPath;
         }
 
-        auto        soPath = rocblaslt_internal_get_so_path("hipblaslt");
-        std::string libPath(dirname(&soPath[0]));
+        auto                  soPath = rocblaslt_internal_get_so_path();
+        std::filesystem::path libPath(std::filesystem::path(soPath).parent_path());
 
-        if(rocblaslt_internal_test_path(libPath + "/../Tensile/library"))
-            libPath += "/../Tensile/library";
-        else if(rocblaslt_internal_test_path(libPath + "library"))
-            libPath += "/library";
-        else
-            libPath += "/hipblaslt/library";
+        auto pathIfExists = [](std::filesystem::path p) -> std::optional<std::filesystem::path> {
+            if(std::filesystem::exists(p))
+                return p;
+            return {};
+        };
 
-        libPath += "/hipblasltExtOpLibrary.dat";
-
-        if(rocblaslt_internal_test_path(libPath))
-        {
-            return libPath;
-        }
+        if(auto p
+           = pathIfExists(libPath / ".." / "Tensile" / "library" / "hipblasltExtOpLibrary.dat"))
+            return p->string();
+        if(auto p = pathIfExists(libPath / "library" / "hipblasltExtOpLibrary.dat"))
+            return p->string();
+        if(auto p = pathIfExists(libPath / "hipblaslt" / "library" / "hipblasltExtOpLibrary.dat"))
+            return p->string();
 
         return DEFAULT_EXT_OP_LIBRARY_PATH;
     }
@@ -483,9 +484,9 @@ hipblasStatus_t hipblasltAMaxWithScaleRun(const hipDataType datatype,
     if(datatype != HIP_R_32F
        || scaleDatatype != HIP_R_8F_E4M3_FNUZ && scaleDatatype != HIP_R_8F_E5M2_FNUZ
 #ifdef ROCM_USE_FLOAT8
-          && scaleDatatype != HIP_R_8F_E4M3 && scaleDatatype != HIP_R_8F_E5M2
+              && scaleDatatype != HIP_R_8F_E4M3 && scaleDatatype != HIP_R_8F_E5M2
 #endif
-      )
+    )
     {
         return HIPBLAS_STATUS_NOT_SUPPORTED;
     }

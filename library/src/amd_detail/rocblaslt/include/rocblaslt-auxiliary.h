@@ -403,7 +403,8 @@ std::string rocblaslt_internal_get_arch_name();
 // for internal use of testing existence of path
 bool rocblaslt_internal_test_path(const std::string&);
 
-std::string rocblaslt_internal_get_so_path(const std::string& keyword);
+// Gets the absolute path of the so/dll/exe containing this function.
+std::string rocblaslt_internal_get_so_path();
 
 void rocblaslt_log_error(const char* func, const char* var, const char* msg);
 #endif
