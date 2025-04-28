@@ -54,7 +54,8 @@ if(HIPBLASLT_ENABLE_HOST)
 endif()
 
 if(HIPBLASLT_ENABLE_DEVICE)
-    set(HIPBLASLT_DEVICE_JOBS "" CACHE STRING "Number of CPU threads to use for building device libraries (will use nproc if unset)")
+    set(HIPBLASLT_BUNDLE_PYTHON_DEPS ON CACHE BOOL "Build python dependencies requied for device code generation.")
+    set(HIPBLASLT_DEVICE_JOBS "" CACHE STRING "Number of CPU threads to use for building device libraries (will use nproc if unset).")
     set(device_library_dir "${CMAKE_BINARY_DIR}/Tensile/library")
     file(MAKE_DIRECTORY "${device_library_dir}")
 endif()
@@ -102,74 +103,81 @@ if(HIPBLASLT_ENABLE_LLVM)
 endif()
 if(HIPBLASLT_ENABLE_DEVICE)
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    if(HIPBLASLT_BUNDLE_PYTHON_DEPS)
+    set(HIPBLASLT_PYTHON_COMMAND 
+        "cmake -E env PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}/rocisa -- ${Python3_EXECUTABLE}" 
+        CACHE STRING "Command for invoking tensile python sripts")
+    else()
+        set(HIPBLASLT_PYTHON_COMMAND "${Python3_EXECUTABLE}" CACHE STRING "Command for invoking tensile python sripts")
+    endif()
 endif()
+if(HIPBLASLT_ENABLE_HOST)
+    add_library(hipblaslt)
+    add_library(roc::hipblaslt ALIAS hipblaslt)
 
-add_library(hipblaslt)
-add_library(roc::hipblaslt ALIAS hipblaslt)
+    target_link_libraries(hipblaslt
+        PUBLIC
+            roc::hipblas-common
+            hip::device
+        PRIVATE
+            rocisa::rocisa-cpp
+            dl
+    )
+    if(HIPBLASLT_ENABLE_OPENMP)
+        target_link_libraries(hipblaslt PUBLIC OpenMP::OpenMP_CXX)
+    endif()
 
-target_link_libraries(hipblaslt
-    PUBLIC
-        roc::hipblas-common
-        hip::device
-    PRIVATE
-        rocisa::rocisa-cpp
-        dl
-)
-if(HIPBLASLT_ENABLE_OPENMP)
-    target_link_libraries(hipblaslt PUBLIC OpenMP::OpenMP_CXX)
-endif()
+    target_compile_features(hipblaslt PUBLIC cxx_std_17) # I would like to make this configurable
 
-target_compile_features(hipblaslt PUBLIC cxx_std_17) # I would like to make this configurable
-
-target_compile_definitions(hipblaslt
-    PRIVATE
-        TENSILE_DEFAULT_SERIALIZATION
-    PUBLIC
-        ROCM_USE_FLOAT16
-        __HIP_PLATFORM_AMD__
-)
-
-if(HIPBLASLT_ENABLE_LAZY_LOAD)
     target_compile_definitions(hipblaslt
         PRIVATE
-            ROCBLASLT_TENSILE_LAZY_LOAD
+            TENSILE_DEFAULT_SERIALIZATION
+        PUBLIC
+            ROCM_USE_FLOAT16
+            __HIP_PLATFORM_AMD__
     )
-endif()
 
-if(HIPBLASLT_ENABLE_HIP)
-    target_compile_definitions(hipblaslt PRIVATE TENSILE_USE_HIP)
-endif()
-if(HIPBLASLT_ENABLE_MSGPACK)
-    if(msgpack-cxx_FOUND)
-        target_link_libraries(hipblaslt PUBLIC msgpack-cxx)
-    else()
-        target_link_libraries(hipblaslt PUBLIC msgpackc)
+    if(HIPBLASLT_ENABLE_LAZY_LOAD)
+        target_compile_definitions(hipblaslt
+            PRIVATE
+                ROCBLASLT_TENSILE_LAZY_LOAD
+        )
     endif()
-    target_compile_definitions(hipblaslt PRIVATE TENSILE_MSGPACK)
-endif()
 
-target_include_directories(hipblaslt
-    PUBLIC
-        $<BUILD_INTERFACE:${HIPBLASLT_LIB_DIR}/src/include>
-        $<BUILD_INTERFACE:${HIPBLASLT_LIB_DIR}/include>
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/host-library/include>
-        $<BUILD_INTERFACE:${TEMP_TENSILE_HOST_SOURCE_DIR}/include>
-        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
-    PRIVATE
-        "${ROCBLASLT_LIB_DIR}/include"
-        "${ROCBLASLT_LIB_DIR}/src/include"
-        "${CMAKE_CURRENT_BINARY_DIR}/include"
-)
+    if(HIPBLASLT_ENABLE_HIP)
+        target_compile_definitions(hipblaslt PRIVATE TENSILE_USE_HIP)
+    endif()
+    if(HIPBLASLT_ENABLE_MSGPACK)
+        if(msgpack-cxx_FOUND)
+            target_link_libraries(hipblaslt PUBLIC msgpack-cxx)
+        else()
+            target_link_libraries(hipblaslt PUBLIC msgpackc)
+        endif()
+        target_compile_definitions(hipblaslt PRIVATE TENSILE_MSGPACK)
+    endif()
 
-set_target_properties(hipblaslt
-    PROPERTIES
-    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/host-library
-)
+    target_include_directories(hipblaslt
+        PUBLIC
+            $<BUILD_INTERFACE:${HIPBLASLT_LIB_DIR}/src/include>
+            $<BUILD_INTERFACE:${HIPBLASLT_LIB_DIR}/include>
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/host-library/include>
+            $<BUILD_INTERFACE:${TEMP_TENSILE_HOST_SOURCE_DIR}/include>
+            $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+        PRIVATE
+            "${ROCBLASLT_LIB_DIR}/include"
+            "${ROCBLASLT_LIB_DIR}/src/include"
+            "${CMAKE_CURRENT_BINARY_DIR}/include"
+    )
 
-if(HIPBLASLT_ENABLE_HOST)
-    add_subdirectory(rocisa/rocisa-cpp)
+    set_target_properties(hipblaslt
+        PROPERTIES
+        LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/host-library
+    )
+
+    add_subdirectory(rocisa)
     add_subdirectory(host-library)
 endif()
+
 if(HIPBLASLT_ENABLE_DEVICE)
     add_subdirectory(device-library)
 endif()
@@ -177,185 +185,185 @@ if(HIPBLASLT_ENABLE_CLIENT)
     add_subdirectory(clients)
 endif()
 
-install(TARGETS hipblaslt rocisa-cpp
-    EXPORT hipblaslt-targets
-    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-    COMPONENT hipBLASLt_Runtime
-    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-    COMPONENT hipBLASLt_Development
-    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-    COMPONENT hipBLASLt_Runtime
-    INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-    COMPONENT hipBLASLt_Development
-)
-install(
-    EXPORT hipblaslt-targets
-    NAMESPACE roc::
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipblaslt
-)
-get_target_property(hipblaslt_public_headers roc::hipblaslt INTERFACE_SOURCES)
-install(
-    FILES ${hipblaslt_public_headers}
-    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/hipblaslt"
-    COMPONENT hipBLASLt_Development
-)
-# temporary workaround to avoid updating downstream components
-# TODO: remove the follow file install once rocblas is updated
-install(
-    FILES
-        "${CMAKE_CURRENT_BINARY_DIR}/host-library/include/hipblaslt/hipblaslt-export.h"
-        "${CMAKE_CURRENT_BINARY_DIR}/host-library/include/hipblaslt/hipblaslt-version.h"
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-    COMPONENT hipBLASLt_Development
-)
-install(
-    FILES "${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindBLIS.cmake"
-    DESTINATION ${CMAKE_INSTALL_DATADIR}/cmake/hipblaslt
-    COMPONENT hipBLASLt_Development
-)
-install(FILES
-    "${CMAKE_CURRENT_BINARY_DIR}/hipblaslt-config-version.cmake"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/hipblaslt-config.cmake"
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipblaslt
-    COMPONENT hipBLASLt_Development
-)
-install(
-    FILES "${CMAKE_CURRENT_SOURCE_DIR}/../LICENSE.md"
-    DESTINATION "${CMAKE_INSTALL_DOCDIR}"
-    COMPONENT hipBLASLt_Docs
-)
-write_basic_package_version_file(
-    "${CMAKE_CURRENT_BINARY_DIR}/hipblaslt-config-version.cmake"
-    VERSION ${PROJECT_VERSION}
-    COMPATIBILITY SameMajorVersion
-)
-
-if(HIPBLASLT_ENABLE_DEVICE)
-    install(
-        DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/Tensile/library"
-        DESTINATION "${CMAKE_INSTALL_LIBDIR}/hipblaslt"
-        COMPONENT hipBLASLt_Runtime
-    )
-endif()
-
-if(HIPBLASLT_ENABLE_CLIENT)
-    install(
-        TARGETS hipblaslt-bench hipblaslt-clients-common
+if(HIPBLASLT_ENABLE_HOST)
+    install(TARGETS hipblaslt rocisa-cpp
         EXPORT hipblaslt-targets
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
         COMPONENT hipBLASLt_Runtime
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        COMPONENT hipBLASLt_Development
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+        COMPONENT hipBLASLt_Runtime
+        INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+        COMPONENT hipBLASLt_Development
     )
-    if(BUILD_TESTING OR HIPBLASLT_BUILD_TESTING)
+    install(
+        EXPORT hipblaslt-targets
+        NAMESPACE roc::
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipblaslt
+    )
+    get_target_property(hipblaslt_public_headers roc::hipblaslt INTERFACE_SOURCES)
+    install(
+        FILES ${hipblaslt_public_headers}
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/hipblaslt"
+        COMPONENT hipBLASLt_Development
+    )
+    # temporary workaround to avoid updating downstream components
+    # TODO: remove the follow file install once rocblas is updated
+    install(
+        FILES
+            "${CMAKE_CURRENT_BINARY_DIR}/host-library/include/hipblaslt/hipblaslt-export.h"
+            "${CMAKE_CURRENT_BINARY_DIR}/host-library/include/hipblaslt/hipblaslt-version.h"
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+        COMPONENT hipBLASLt_Development
+    )
+    install(
+        FILES "${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindBLIS.cmake"
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/cmake/hipblaslt
+        COMPONENT hipBLASLt_Development
+    )
+    install(FILES
+        "${CMAKE_CURRENT_BINARY_DIR}/hipblaslt-config-version.cmake"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/hipblaslt-config.cmake"
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipblaslt
+        COMPONENT hipBLASLt_Development
+    )
+    install(
+        FILES "${CMAKE_CURRENT_SOURCE_DIR}/../LICENSE.md"
+        DESTINATION "${CMAKE_INSTALL_DOCDIR}"
+        COMPONENT hipBLASLt_Docs
+    )
+    write_basic_package_version_file(
+        "${CMAKE_CURRENT_BINARY_DIR}/hipblaslt-config-version.cmake"
+        VERSION ${PROJECT_VERSION}
+        COMPATIBILITY SameMajorVersion
+    )
+
+    if(HIPBLASLT_ENABLE_DEVICE)
         install(
-            TARGETS hipblaslt-test
-            EXPORT hipblaslt-targets
-            COMPONENT hipBLASLt_Runtime
-        )
-        install(
-            FILES "${CMAKE_CURRENT_BINARY_DIR}/clients/hipblaslt_gtest.data"
-            DESTINATION "${CMAKE_INSTALL_BINDIR}"
-            COMPONENT hipBLASLt_Runtime
-        )
-    endif()
-    if(BUILD_SAMPLES)
-        install(
-            TARGETS
-                hipblaslt_gemm
-                hipblaslt_gemm_ext
-                hipblaslt_gemm_batched
-                hipblaslt_gemm_batched_ext
-                hipblaslt_gemm_tuning_splitk_ext
-                hipblaslt_gemm_bias
-                hipblaslt_gemm_bias_ext
-                hipblaslt_gemm_get_all_algos
-                hipblaslt_gemm_get_all_algos_ext
-                hipblaslt_gemm_get_algo_by_index_ext
-                hipblaslt_gemm_alphavec_ext
-                hipblaslt_gemm_gelu_aux_bias
-                hipblaslt_gemm_gelu_aux_bias_ext
-                hipblaslt_gemm_amax
-                hipblaslt_gemm_amax_ext
-                hipblaslt_gemm_amax_with_scale
-                hipblaslt_gemm_amax_with_scale_ext
-                hipblaslt_gemm_bgradb
-                hipblaslt_gemm_ext_bgradb
-                hipblaslt_gemm_dgelu_bgrad
-                hipblaslt_gemm_dgelu_bgrad_ext
-                hipblaslt_gemm_is_tuned_ext
-                hipblaslt_gemm_tuning_wgm_ext
-                hipblaslt_gemm_with_scale_a_b
-                hipblaslt_gemm_with_scale_a_b_ext
-                hipblaslt_groupedgemm_ext
-                hipblaslt_groupedgemm_fixed_mk_ext
-                hipblaslt_groupedgemm_get_all_algos_ext
-                hipblaslt_gemm_mix_precision
-                hipblaslt_gemm_mix_precision_ext
-                hipblaslt_gemm_mix_precision_with_amax_ext
-                hipblaslt_gemm_attr_tciA_tciB
-                hipblaslt_ext_op_layernorm
-                hipblaslt_ext_op_amax
-                hipblaslt_ext_op_amax_with_scale
-                hipblaslt_gemm_with_TF32
-                hipblaslt_gemm_swizzle_a
-                hipblaslt_gemm_bias_swizzle_a_ext
-                hipblaslt_weight_swizzle_padding
-                hipblaslt_gemm_swish_bias
-            EXPORT hipblaslt-targets
+            DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/Tensile/library"
+            DESTINATION "${CMAKE_INSTALL_LIBDIR}/hipblaslt"
             COMPONENT hipBLASLt_Runtime
         )
     endif()
+
+    if(HIPBLASLT_ENABLE_CLIENT)
+        install(
+            TARGETS hipblaslt-bench hipblaslt-clients-common
+            EXPORT hipblaslt-targets
+            COMPONENT hipBLASLt_Runtime
+        )
+        if(BUILD_TESTING OR HIPBLASLT_BUILD_TESTING)
+            install(
+                TARGETS hipblaslt-test
+                EXPORT hipblaslt-targets
+                COMPONENT hipBLASLt_Runtime
+            )
+            install(
+                FILES "${CMAKE_CURRENT_BINARY_DIR}/clients/hipblaslt_gtest.data"
+                DESTINATION "${CMAKE_INSTALL_BINDIR}"
+                COMPONENT hipBLASLt_Runtime
+            )
+        endif()
+        if(BUILD_SAMPLES)
+            install(
+                TARGETS
+                    hipblaslt_gemm
+                    hipblaslt_gemm_ext
+                    hipblaslt_gemm_batched
+                    hipblaslt_gemm_batched_ext
+                    hipblaslt_gemm_tuning_splitk_ext
+                    hipblaslt_gemm_bias
+                    hipblaslt_gemm_bias_ext
+                    hipblaslt_gemm_get_all_algos
+                    hipblaslt_gemm_get_all_algos_ext
+                    hipblaslt_gemm_get_algo_by_index_ext
+                    hipblaslt_gemm_alphavec_ext
+                    hipblaslt_gemm_gelu_aux_bias
+                    hipblaslt_gemm_gelu_aux_bias_ext
+                    hipblaslt_gemm_amax
+                    hipblaslt_gemm_amax_ext
+                    hipblaslt_gemm_amax_with_scale
+                    hipblaslt_gemm_amax_with_scale_ext
+                    hipblaslt_gemm_bgradb
+                    hipblaslt_gemm_ext_bgradb
+                    hipblaslt_gemm_dgelu_bgrad
+                    hipblaslt_gemm_dgelu_bgrad_ext
+                    hipblaslt_gemm_is_tuned_ext
+                    hipblaslt_gemm_tuning_wgm_ext
+                    hipblaslt_gemm_with_scale_a_b
+                    hipblaslt_gemm_with_scale_a_b_ext
+                    hipblaslt_groupedgemm_ext
+                    hipblaslt_groupedgemm_fixed_mk_ext
+                    hipblaslt_groupedgemm_get_all_algos_ext
+                    hipblaslt_gemm_mix_precision
+                    hipblaslt_gemm_mix_precision_ext
+                    hipblaslt_gemm_mix_precision_with_amax_ext
+                    hipblaslt_gemm_attr_tciA_tciB
+                    hipblaslt_ext_op_layernorm
+                    hipblaslt_ext_op_amax
+                    hipblaslt_ext_op_amax_with_scale
+                    hipblaslt_gemm_with_TF32
+                    hipblaslt_gemm_swizzle_a
+                    hipblaslt_gemm_bias_swizzle_a_ext
+                    hipblaslt_weight_swizzle_padding
+                    hipblaslt_gemm_swish_bias
+                EXPORT hipblaslt-targets
+                COMPONENT hipBLASLt_Runtime
+            )
+        endif()
+    endif()
+
+    set(CPACK_PACKAGE_NAME "hipBLASLt")
+    set(CPACK_PACKAGE_VENDOR "Advanced Micro Devices, Inc.")
+    set(CPACK_PACKAGE_CONTACT "hipBLASLt Maintainer <hipblaslt-maintainer@amd.com>")
+    set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "HIP library for GEMM operation with extended functionality")
+    set(CPACK_PACKAGE_VERSION_MAJOR ${PROJECT_VERSION_MAJOR})
+    set(CPACK_PACKAGE_VERSION_MINOR ${PROJECT_VERSION_MINOR})
+    set(CPACK_PACKAGE_VERSION_PATCH ${PROJECT_VERSION_PATCH})
+    set(CPACK_PACKAGE_INSTALL_DIRECTORY ${CPACK_PACKAGE_NAME})
+    set(CPACK_RESOURCE_FILE_LICENSE ${CMAKE_CURRENT_LIST_DIR}/../LICENSE.md)
+    set(CPACK_RESOURCE_FILE_README ${CMAKE_CURRENT_LIST_DIR}/../README.md)
+    set(CPACK_VERBATIM_VARIABLES YES)
+    set(CPACK_COMPONENTS_ALL "hipBLASLt_Runtime;hipBLASLt_Development;hipBLASLt_Docs")
+
+    set(CPACK_COMPONENTS_GROUPING IGNORE)
+
+    set(CPACK_DEB_COMPONENT_INSTALL ON)
+    set(CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT")
+    set(CPACK_DEBIAN_HIPBLASLT_RUNTIME_PACKAGE_NAME "hipblaslt")
+    set(CPACK_DEBIAN_HIPBLASLT_RUNTIME_PACKAGE_SECTION "runtime")
+    set(CPACK_DEBIAN_HIPBLASLT_DEVELOPMENT_PACKAGE_NAME "hipblaslt-dev")
+    set(CPACK_DEBIAN_HIPBLASLT_DOCS_PACKAGE_NAME "hipblaslt-docs")
+    set(CPACK_DEBIAN_PACKAGE_PROVIDES "hipblaslt (= ${PROJECT_VERSION})")
+    set(CPACK_DEBIAN_PACKAGE_DEPENDS "hipblas-common (>=1.0)")
+
+    set(CPACK_RPM_COMPONENT_INSTALL ON)
+    set(CPACK_RPM_FILE_NAME "RPM-DEFAULT")
+    set(CPACK_RPM_HIPBLASLT_RUNTIME_PACKAGE_NAME "hipblaslt")
+    set(CPACK_RPM_HIPBLASLT_DEVELOPMENT_PACKAGE_NAME "hipblaslt-devel")
+    set(CPACK_RPM_HIPBLASLT_DOCS_PACKAGE_NAME "hipblaslt-docs")
+    set(CPACK_RPM_HIPBLASLT_RUNTIME_PACKAGE_REQUIRES "hipblaslt (= ${PROJECT_VERSION})")
+    set(CPACK_RPM_PACKAGE_PROVIDES "hipblaslt (= ${PROJECT_VERSION})")
+    set(CPACK_RPM_PACKAGE_DEPENDS "hipblas-common (>=1.0)")
+    
+    include(CPack)
+    
+    cpack_add_component(hipBLASLt_Runtime
+        DISPLAY_NAME "Runtime"
+        DESCRIPTION "Runtime libraries for hipBLASLt"
+        # GROUP Runtime
+        REQUIRED
+    )
+    cpack_add_component(hipBLASLt_Development
+        DISPLAY_NAME "Development"
+        DESCRIPTION "Headers and CMake files for hipBLASLt"
+        # GROUP Development
+        DEPENDS hipBLASLt_Runtime
+    )
+    cpack_add_component(hipBLASLt_Docs
+        DISPLAY_NAME "Documentation"
+        DESCRIPTION "Documentation for hipBLASLt"
+        # GROUP Documentation
+    )
 endif()
-
-set(CPACK_PACKAGE_NAME "hipBLASLt")
-set(CPACK_PACKAGE_VENDOR "Advanced Micro Devices, Inc.")
-set(CPACK_PACKAGE_CONTACT "hipBLASLt Maintainer <hipblaslt-maintainer@amd.com>")
-set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "HIP library for GEMM operation with extended functionality")
-set(CPACK_PACKAGE_VERSION_MAJOR ${PROJECT_VERSION_MAJOR})
-set(CPACK_PACKAGE_VERSION_MINOR ${PROJECT_VERSION_MINOR})
-set(CPACK_PACKAGE_VERSION_PATCH ${PROJECT_VERSION_PATCH})
-set(CPACK_PACKAGE_INSTALL_DIRECTORY ${CPACK_PACKAGE_NAME})
-set(CPACK_RESOURCE_FILE_LICENSE ${CMAKE_CURRENT_LIST_DIR}/../LICENSE.md)
-set(CPACK_RESOURCE_FILE_README ${CMAKE_CURRENT_LIST_DIR}/../README.md)
-set(CPACK_VERBATIM_VARIABLES YES)
-set(CPACK_COMPONENTS_ALL "hipBLASLt_Runtime;hipBLASLt_Development;hipBLASLt_Docs")
-
-set(CPACK_COMPONENTS_GROUPING IGNORE)
-
-set(CPACK_DEB_COMPONENT_INSTALL ON)
-set(CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT")
-set(CPACK_DEBIAN_HIPBLASLT_RUNTIME_PACKAGE_NAME "hipblaslt")
-set(CPACK_DEBIAN_HIPBLASLT_RUNTIME_PACKAGE_SECTION "runtime")
-set(CPACK_DEBIAN_HIPBLASLT_DEVELOPMENT_PACKAGE_NAME "hipblaslt-dev")
-set(CPACK_DEBIAN_HIPBLASLT_DOCS_PACKAGE_NAME "hipblaslt-docs")
-set(CPACK_DEBIAN_PACKAGE_PROVIDES "hipblaslt (= ${PROJECT_VERSION})")
-set(CPACK_DEBIAN_PACKAGE_DEPENDS "hipblas-common (>=1.0)")
-
-set(CPACK_RPM_COMPONENT_INSTALL ON)
-set(CPACK_RPM_FILE_NAME "RPM-DEFAULT")
-set(CPACK_RPM_HIPBLASLT_RUNTIME_PACKAGE_NAME "hipblaslt")
-set(CPACK_RPM_HIPBLASLT_DEVELOPMENT_PACKAGE_NAME "hipblaslt-devel")
-set(CPACK_RPM_HIPBLASLT_DOCS_PACKAGE_NAME "hipblaslt-docs")
-set(CPACK_RPM_HIPBLASLT_RUNTIME_PACKAGE_REQUIRES "hipblaslt (= ${PROJECT_VERSION})")
-set(CPACK_RPM_PACKAGE_PROVIDES "hipblaslt (= ${PROJECT_VERSION})")
-set(CPACK_RPM_PACKAGE_DEPENDS "hipblas-common (>=1.0)")
-
-include(CPack)
-
-cpack_add_component(hipBLASLt_Runtime
-    DISPLAY_NAME "Runtime"
-    DESCRIPTION "Runtime libraries for hipBLASLt"
-    # GROUP Runtime
-    REQUIRED
-)
-
-cpack_add_component(hipBLASLt_Development
-    DISPLAY_NAME "Development"
-    DESCRIPTION "Headers and CMake files for hipBLASLt"
-    # GROUP Development
-    DEPENDS hipBLASLt_Runtime
-)
-
-cpack_add_component(hipBLASLt_Docs
-    DISPLAY_NAME "Documentation"
-    DESCRIPTION "Documentation for hipBLASLt"
-    # GROUP Documentation
-)
