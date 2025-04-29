@@ -26,6 +26,8 @@ subtrees:
     title: hipBLAS client examples
 - caption: API Reference
   entries:
+    - file: reference/data-type-support
+      title: Data type support
     - file: reference/hipblas-api-functions
       title: hipBLAS API
     - file: reference/deprecation

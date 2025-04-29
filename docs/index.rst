@@ -44,6 +44,7 @@ The hipBLAS public repository is located at  `<https://github.com/ROCm/hipBLAS>`
 
   .. grid-item-card:: API Reference
 
+    * :doc:`Data type support <./reference/data-type-support>`
     * :doc:`hipBLAS API <./reference/hipblas-api-functions>`
     * :doc:`Deprecations by version <./reference/deprecation>`
 
