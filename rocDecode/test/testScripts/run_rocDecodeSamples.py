@@ -92,6 +92,8 @@ parser.add_argument('--results_directory',    type=str, default='',
                     help='The path to a dirctory to store results - optional')
 parser.add_argument('--check_decode_status',          type=int, default=0,
                     help='Report the number of streams that have completed decoding without abortion. For decoder stability check. - optional (default:0, meaning normal performance report)')
+parser.add_argument('--use_ffmpeg_demuxer',   type=int, default=1,
+                    help='Indicator to use FFMPEG demuxer - optional (default:1). If set to 0, built-in bitstream reader is used.')
 
 args = parser.parse_args()
 
@@ -105,8 +107,14 @@ sampleMode = args.sample_mode
 numThreads = args.num_threads
 maxNumFrames = args.max_num_decoded_frames
 checkDecStatus = args.check_decode_status
+useFFDemuxer = args.use_ffmpeg_demuxer
 if checkDecStatus == 1:
     sampleMode = 0
+
+if useFFDemuxer == 1:
+    bsReaderOption = ''
+else:
+    bsReaderOption = '-no_ffmpeg_demux'
 
 print("\nrunrocDecodeTests V"+__version__+"\n")
 
@@ -156,7 +164,7 @@ if sampleMode == 0:
     for current_file in iter_files(filesDirPath):
         print_bitrate(current_file)
 
-        os.system(run_rocDecode_app+' -i '+str(current_file)+' -d '+str(gpuDeviceID)+' -f '+str(maxNumFrames)+' | tee -a '+resultsPath+'/rocDecode_output.log')
+        os.system(run_rocDecode_app + ' -i ' + str(current_file) + ' -d ' + str(gpuDeviceID) + ' -f ' + str(maxNumFrames) + ' ' + str(bsReaderOption) + ' | tee -a '+resultsPath+'/rocDecode_output.log')
         print("\n\n")
 
     if checkDecStatus == 0:
