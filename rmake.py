@@ -87,10 +87,11 @@ def config_cmd():
     cmake_executable = ""
     cmake_options = []
     cmake_platform_opts = []
-    
+
     if (OS_info["ID"] == 'windows'):
         # we don't have ROCM on windows but have hip, ROCM can be downloaded if required
-        rocm_path = os.getenv( 'ROCM_PATH', "C:/hipsdk/rocm-cmake-master") #C:/hip") # rocm/Utils/cmake-rocm4.2.0"
+        raw_rocm_path = cmake_path(os.getenv('HIP_PATH', "C:/hip"))
+        rocm_path = f'"{raw_rocm_path}"' # guard against spaces in path
         cmake_executable = "cmake.exe"
         toolchain = os.path.join( src_path, "toolchain-windows.cmake" )
         #set CPACK_PACKAGING_INSTALL_PREFIX= defined as blank as it is appended to end of path for archive creation
@@ -174,6 +175,11 @@ def config_cmd():
 
     return cmake_executable, cmd_opts
 
+def cmake_path(os_path):
+    if OS_info["ID"] == "windows":
+        return os_path.replace("\\", "/")
+    else:
+        return os.path.realpath(os_path)
 
 def make_cmd():
     global args
