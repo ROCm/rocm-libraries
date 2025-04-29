@@ -62,6 +62,8 @@ function( rocblas_library_settings lib_target_ )
 
   # Do not allow Variable Length Arrays (use unique_ptr instead)
   target_compile_options( ${lib_target_} PRIVATE -Werror=vla )
+  # We widely use extensions and AMD Clang in use
+  target_compile_options( ${lib_target_} PRIVATE -Wno-c++17-extensions )
 
   target_compile_definitions( ${lib_target_} PRIVATE ROCM_USE_FLOAT16 ROCBLAS_INTERNAL_API ROCBLAS_BETA_FEATURES_API )
 
