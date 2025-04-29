@@ -18,12 +18,12 @@
 # Parse version information from version header:
 include("${CMAKE_CURRENT_LIST_DIR}/libhipcxx-header-search.cmake")
 
-file(READ "${_libhipcxx_VERSION_INCLUDE_DIR}/cuda/std/detail/__config"
+file(READ "${_libhipcxx_VERSION_INCLUDE_DIR}/cuda/std/__cccl/version.h"
   libhipcxx_VERSION_HEADER
 )
 
 string(REGEX MATCH
-  "#define[ \t]+_LIBCUDACXX_CUDA_API_VERSION[ \t]+([0-9]+)" unused_var
+  "#define[ \t]+CCCL_VERSION[ \t]+([0-9]+)" unused_var
   "${libhipcxx_VERSION_HEADER}"
 )
 
