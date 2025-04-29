@@ -1349,6 +1349,73 @@ Tests:
   norm_check: 1
   gpu_arch: '942'
 
+- name: matmul_bias_gelu_aux_fp8_fnuz_scale_ab_TN
+  category: pre_checkin
+  function:
+    matmul: *f8_fnuz_precision_dst_f8_fnuz
+  M: [128, 129]
+  N: [128, 129]
+  K: [128, 129]
+  transA: T
+  transB: N
+  alpha: 1
+  beta: [ 0.0, 2.0 ]
+  use_e: 1
+  activation_type: gelu
+  bias_vector: [0, 1]
+  bias_type: f16_r
+  scaleA: [1]
+  scaleB: [1]
+  unit_check: 0
+  norm_check: 1
+  gpu_arch: '942'
+
+- name: matmul_bias_gelu_f16aux_fp8_fnuz_scale_ab_TN
+  category: pre_checkin
+  function:
+    matmul: *f8_fnuz_precision_dst_f8_fnuz
+  M: [128, 129]
+  N: [128, 129]
+  K: [128, 129]
+  transA: T
+  transB: N
+  alpha: 1
+  beta: [ 0.0, 2.0 ]
+  use_e: 1
+  aux_type: f16_r
+  activation_type: gelu
+  bias_vector: [0, 1]
+  bias_type: f16_r
+  scaleA: [1]
+  scaleB: [1]
+  unit_check: 0
+  norm_check: 1
+  gpu_arch: '942'
+
+- name: matmul_bias_gelu_f16aux_fp8_fnuz_amaxD_TN
+  category: pre_checkin
+  function:
+    matmul: *f8_fnuz_precision_dst_f8_fnuz
+  M: [128, 129]
+  N: [128, 129]
+  K: [128, 129]
+  transA: T
+  transB: N
+  alpha: 1
+  beta: [ 0.0, 2.0 ]
+  use_e: 1
+  aux_type: f16_r
+  activation_type: gelu
+  bias_vector: [0, 1]
+  bias_type: f16_r
+  scaleA: [1]
+  scaleB: [1]
+  scaleD: [1]
+  amaxD: [1]
+  unit_check: 0
+  norm_check: 1
+  gpu_arch: '942'
+
 - name: matmul_dgelu_fp16
   category: pre_checkin
   function:
