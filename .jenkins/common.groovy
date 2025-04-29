@@ -108,6 +108,17 @@ def runTestCommand (platform, project) {
                             wget http://math-ci.amd.com/userContent/computer-vision/rocDecodeStability/AvcStability.zip
                             unzip AvcStability.zip
                         fi
+                        if ${runAv1Test}; then
+                            FILE_COUNT=\$(find \${JENKINS_HOME_DIR}/rocDecode/Av1Stability -type f | wc -l)
+                            # Check if there are 24 files
+                            if [ "\$FILE_COUNT" -ne 24 ]; then
+                                echo "wrong file count"
+                                ls
+                                cd \${JENKINS_HOME_DIR}/rocDecode
+                                wget http://math-ci.amd.com/userContent/computer-vision/rocDecodeStability/Av1Stability.zip
+                                unzip Av1Stability.zip
+                            fi
+                        fi
                         if ${runHevcStability}; then
                             FILE_COUNT=\$(find \${JENKINS_HOME_DIR}/rocDecode/HevcStability -type f | wc -l)
                             # Check if there are 44 files
@@ -140,6 +151,8 @@ def runTestCommand (platform, project) {
                         if ${runAv1Test}; then
                             wget http://math-ci.amd.com/userContent/computer-vision/rocDecodeConformance/Av1Conformance_v1.0.zip
                             unzip Av1Conformance_v1.0.zip
+                            wget http://math-ci.amd.com/userContent/computer-vision/rocDecodeStability/Av1Stability.zip
+                            unzip Av1Stability.zip
                         fi
                         if ${runHevcStability}; then
                             wget http://math-ci.amd.com/userContent/computer-vision/rocDecodeStability/HevcStability.zip
@@ -188,7 +201,11 @@ def runTestCommand (platform, project) {
                     python3 /opt/rocm/share/rocdecode/test/testScripts/run_rocDecodeSamples.py --videodecode_exe ./../../rocdecode-sample/videodecode --files_directory \${JENKINS_HOME_DIR}/rocDecode/AvcStability --results_directory . --check_decode_status 1
                     if ${runHevcStability}; then
                         cd ../ && mkdir hevc-stability && cd hevc-stability
-                        python3 /opt/rocm/share/rocdecode/test/testScripts/run_rocDecodeSamples.py --videodecode_exe ./../../rocdecode-sample/videodecode --files_directory \${JENKINS_HOME_DIR}/rocDecode//HevcStability --results_directory . --check_decode_status 1
+                        python3 /opt/rocm/share/rocdecode/test/testScripts/run_rocDecodeSamples.py --videodecode_exe ./../../rocdecode-sample/videodecode --files_directory \${JENKINS_HOME_DIR}/rocDecode/HevcStability --results_directory . --check_decode_status 1
+                    fi
+                    if ${runAv1Test}; then
+                        cd ../ && mkdir av1-stability && cd av1-stability
+                        python3 /opt/rocm/share/rocdecode/test/testScripts/run_rocDecodeSamples.py --videodecode_exe ./../../rocdecode-sample/videodecode --files_directory \${JENKINS_HOME_DIR}/rocDecode/Av1Stability --results_directory . --check_decode_status 1 --use_ffmpeg_demuxer 0
                     fi
                     cd ../../
                     echo rocdecode-sample - videoDecode with data1 video test
