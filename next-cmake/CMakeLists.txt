@@ -47,6 +47,7 @@ if(HIPBLASLT_ENABLE_CLIENT)
 endif()
 
 if(HIPBLASLT_ENABLE_HOST)
+    set(HIPBLASLT_BUILD_SHARED ON CACHE BOOL "Build the hipblaslt library as shared vs static")
     set(HIPBLASLT_ENABLE_HIP ON CACHE BOOL "Use the HIP runtime.")
     set(HIPBLASLT_ENABLE_MSGPACK ON CACHE BOOL "Use msgpack for parsing configuration files.")
     set(HIPBLASLT_ENABLE_OPENMP ON CACHE BOOL "Use OpenMP to improve performance.")
@@ -135,7 +136,12 @@ if(HIPBLASLT_ENABLE_DEVICE)
     endif()
 endif()
 if(HIPBLASLT_ENABLE_HOST)
-    add_library(hipblaslt)
+    if(HIPBLASLT_BUILD_SHARED)
+        add_library(hipblaslt SHARED)
+    else()
+        add_library(hipblaslt STATIC)
+        target_compile_definitions(hipblaslt PRIVATE HIPBLASLT_STATIC_LIB)
+    endif()
     add_library(roc::hipblaslt ALIAS hipblaslt)
 
     target_link_libraries(hipblaslt
@@ -144,7 +150,7 @@ if(HIPBLASLT_ENABLE_HOST)
             hip::device
         PRIVATE
             rocisa::rocisa-cpp
-            dl
+            ${CMAKE_DL_LIBS}
     )
     if(HIPBLASLT_ENABLE_OPENMP)
         target_link_libraries(hipblaslt PUBLIC OpenMP::OpenMP_CXX)
