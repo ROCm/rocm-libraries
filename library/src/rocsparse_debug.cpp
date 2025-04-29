@@ -1,7 +1,7 @@
 /*! \file */
 
 /* ************************************************************************
- * Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -213,12 +213,14 @@ void rocsparse_disable_debug_force_host_assert()
 void rocsparse_enable_debug()
 {
     rocsparse_debug_variables.set_debug(true);
+    rocsparse_enable_debug_verbose();
     rocsparse_enable_debug_arguments();
 }
 
 void rocsparse_disable_debug()
 {
     rocsparse_debug_variables.set_debug(false);
+    rocsparse_disable_debug_verbose();
     rocsparse_disable_debug_arguments();
 }
 }
