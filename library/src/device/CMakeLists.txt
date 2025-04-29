@@ -98,6 +98,11 @@ add_library( rocfft-function-pool OBJECT
   ${FUNCTION_POOLS}
   function_pool.cpp
 )
+# Don't add function pool to coverage as it's just generated code
+# that sets up kernel config data structures, and isn't interesting
+# to cover.
+#rocfft_add_coverage_flags( rocfft-function-pool )
+
 target_include_directories( rocfft-function-pool
   PRIVATE
   $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/src/device>

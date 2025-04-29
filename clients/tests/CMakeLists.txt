@@ -389,3 +389,48 @@ if( ROCFFT_MPI_ENABLE )
   )
 
 endif()
+
+set(COVERAGE_TEST_OPTIONS "--smoketest" CACHE STRING "Command line arguments for rocfft-test when generating a code coverage report")
+
+if(BUILD_CODE_COVERAGE)
+  # Coverage won't work in a standalone build of the tests, as we can't
+  # guarantee the library was built with coverage enabled
+  if( NOT TARGET rocfft )
+    message( FATAL_ERROR "BUILD_CODE_COVERAGE requires building from the root of rocFFT" )
+  endif()
+
+  add_custom_target(
+    code_cov_tests
+    DEPENDS rocfft-test rocfft_rtc_helper
+    COMMAND ${CMAKE_COMMAND} -E rm -rf ./coverage-report
+    COMMAND ${CMAKE_COMMAND} -E make_directory ./coverage-report/profraw
+    COMMAND ${CMAKE_COMMAND} -E env LLVM_PROFILE_FILE="./coverage-report/profraw/rocfft-coverage_%p.profraw" GTEST_LISTENER=NO_PASS_LINE_IN_LOG $<TARGET_FILE:rocfft-test> --precompile=rocfft-test-precompile.db ${COVERAGE_TEST_OPTIONS}
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+  )
+
+  find_program(
+    LLVM_PROFDATA
+    llvm-profdata
+    REQUIRED
+    HINTS ${ROCM_PATH}/llvm/bin
+    PATHS /opt/rocm/llvm/bin
+  )
+
+  find_program(
+    LLVM_COV
+    llvm-cov
+    REQUIRED
+    HINTS ${ROCM_PATH}/llvm/bin
+    PATHS /opt/rocm/llvm/bin
+  )
+
+  add_custom_target(
+    coverage
+    DEPENDS code_cov_tests
+    COMMAND ${LLVM_PROFDATA} merge -sparse ./coverage-report/profraw/rocfft-coverage_*.profraw -o ./coverage-report/rocfft.profdata
+    COMMAND ${LLVM_COV} report -object ./library/src/librocfft.so -instr-profile=./coverage-report/rocfft.profdata
+    COMMAND ${LLVM_COV} show -object ./library/src/librocfft.so -instr-profile=./coverage-report/rocfft.profdata -format=html -output-dir=coverage-report
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+  )
+
+endif()
