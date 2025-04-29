@@ -83,7 +83,10 @@ _rocsparse_handle::_rocsparse_handle()
     THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&zone, sizeof(rocsparse_double_complex)));
 
     // Execute empty kernel for initialization
-    THROW_IF_HIPLAUNCHKERNELGGL_ERROR(init_kernel, dim3(1), dim3(1), 0, stream);
+
+    THROW_WITH_MESSAGE_IF_HIP_ERROR(hipGetLastError(), "prior to hipLaunchKernelGGL");
+    hipLaunchKernelGGL(init_kernel, dim3(1), dim3(1), 0, stream);
+    THROW_WITH_MESSAGE_IF_HIP_ERROR(hipGetLastError(), "'empty kernel execution failed'");
 
     // Execute memset for initialization
     THROW_IF_HIP_ERROR(hipMemsetAsync(sone, 0, sizeof(float), stream));

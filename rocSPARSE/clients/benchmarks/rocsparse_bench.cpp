@@ -35,13 +35,43 @@ std::string rocsparse_get_version()
 {
     int  rocsparse_ver;
     char rocsparse_rev[64];
+
+    rocsparse_handle handle;
+    rocsparse_status status = rocsparse_create_handle(&handle);
+    if(rocsparse_status_success != status)
     {
-        rocsparse_handle handle;
-        rocsparse_create_handle(&handle);
-        rocsparse_get_version(handle, &rocsparse_ver);
-        rocsparse_get_git_rev(handle, rocsparse_rev);
-        rocsparse_destroy_handle(handle);
+        std::cerr << "The creation of the rocsparse_handle failed." << std::endl;
+        if(0 == rocsparse_state_debug())
+        {
+            std::cerr << "To get more information, please export the ROCSPARSE_DEBUG environment "
+                         "variable:"
+                      << std::endl;
+            std::cerr << "export ROCSPARSE_DEBUG=1" << std::endl;
+        }
+        throw(status);
     }
+
+    status = rocsparse_get_version(handle, &rocsparse_ver);
+    if(rocsparse_status_success != status)
+    {
+        std::cerr << "rocsparse_get_version failed." << std::endl;
+        throw(status);
+    }
+
+    status = rocsparse_get_git_rev(handle, rocsparse_rev);
+    if(rocsparse_status_success != status)
+    {
+        std::cerr << "rocsparse_get_git_rev failed." << std::endl;
+        throw(status);
+    }
+
+    status = rocsparse_destroy_handle(handle);
+    if(rocsparse_status_success != status)
+    {
+        std::cerr << "rocsparse_destroy_handle failed." << std::endl;
+        throw(status);
+    }
+
     std::ostringstream os;
     os << rocsparse_ver / 100000 << "." << rocsparse_ver / 100 % 1000 << "." << rocsparse_ver % 100
        << "-" << rocsparse_rev;

@@ -175,15 +175,43 @@ int main(int argc, char** argv)
 {
     // Get version
     rocsparse_handle handle;
-    rocsparse_create_handle(&handle);
+    rocsparse_status status = rocsparse_create_handle(&handle);
+    if(rocsparse_status_success != status)
+    {
+        std::cerr << "The creation of the rocsparse_handle failed." << std::endl;
+        if(0 == rocsparse_state_debug())
+        {
+            std::cerr << "To get more information, please export the ROCSPARSE_DEBUG environment "
+                         "variable:"
+                      << std::endl;
+            std::cerr << "export ROCSPARSE_DEBUG=1" << std::endl;
+        }
+        return status;
+    }
 
     int  ver;
     char rev[64];
 
-    rocsparse_get_version(handle, &ver);
-    rocsparse_get_git_rev(handle, rev);
+    status = rocsparse_get_version(handle, &ver);
+    if(rocsparse_status_success != status)
+    {
+        std::cerr << "rocsparse_get_version failed." << std::endl;
+        return status;
+    }
 
-    rocsparse_destroy_handle(handle);
+    status = rocsparse_get_git_rev(handle, rev);
+    if(rocsparse_status_success != status)
+    {
+        std::cerr << "rocsparse_get_git_rev failed." << std::endl;
+        return status;
+    }
+
+    status = rocsparse_destroy_handle(handle);
+    if(rocsparse_status_success != status)
+    {
+        std::cerr << "rocsparse_destroy_handle failed." << std::endl;
+        return status;
+    }
 
     // Get user device id from command line
     int dev = 0;
