@@ -26,30 +26,33 @@ project(device-library VERSION 0.0.1 LANGUAGES CXX ASM)
 
 set(TENSILELITE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../tensilelite)
 
-set(TENSILE_BUILD_OPTS ${TENSILE_BUILD_OPTS} "--architecture=${GPU_TARGETS}")
+list(JOIN GPU_TARGETS "$<SEMICOLON>" TENSILE_GPU_TARGETS_SEMI_ESCAPED)
+set(TENSILE_BUILD_OPTS ${TENSILE_BUILD_OPTS} "--architecture=${TENSILE_GPU_TARGETS_SEMI_ESCAPED}")
 set(TENSILE_BUILD_OPTS ${TENSILE_BUILD_OPTS} "--cxx-compiler=${CMAKE_CXX_COMPILER}")
 if(HIPBLASLT_DEVICE_JOBS)
     set(TENSILE_BUILD_OPTS ${TENSILE_BUILD_OPTS} "--jobs=${HIPBLASLT_DEVICE_JOBS}")
 endif()
-set(output_dir "${CMAKE_CURRENT_BINARY_DIR}/Tensile")
+set(output_dir "${hipblaslt_BINARY_DIR}/Tensile")
+set(output_stamp "${CMAKE_CURRENT_BINARY_DIR}/Tensile.stamp")
 set(TENSILE_CREATE_LIBRARY_COMMAND
     ${HIPBLASLT_PYTHON_COMMAND} -m Tensile.TensileCreateLibrary
     ${TENSILE_BUILD_OPTS}
     "${CMAKE_CURRENT_SOURCE_DIR}/../../library"
-    ${output_dir}
+    "${output_dir}"
     HIP
 )
 
-add_custom_command(
-    COMMENT "Building device libraries..."
-    COMMAND ${TENSILE_CREATE_LIBRARY_COMMAND}
-    OUTPUT "${output_dir}/library"
-    DEPENDS ${HIPBLASLT_PYTHON_DEPS}
-)
-
 add_custom_target(tensilelite-device-libraries ALL
-    DEPENDS "${output_dir}/library"
-    COMMAND ${CMAKE_COMMAND} -E copy_directory ${output_dir} "${CMAKE_BINARY_DIR}/Tensile"
+    COMMENT "Building device libraries to ${output_dir} ..."
+    COMMAND ${TENSILE_CREATE_LIBRARY_COMMAND}
+    COMMAND ${CMAKE_COMMAND} -E touch "${output_stamp}"
+    BYPRODUCTS "${output_stamp}"
+    DEPENDS ${HIPBLASLT_PYTHON_DEPS}
+    # Because the command can contain special characters
+    VERBATIM
+    # Because this can be very long running and difficult to debug deadlocks
+    # without streaming.
+    USES_TERMINAL
 )
 
 add_subdirectory(extops) # can't add this given current architecture of Tensile
