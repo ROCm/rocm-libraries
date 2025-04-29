@@ -33,18 +33,6 @@
 
 #define ERROR(...) { fprintf(stderr, __VA_ARGS__); abort(); }
 
-#ifdef ROCSHMEM_ENABLE_TRACE
-#define TRACE(...) printf(__VA_ARGS__)
-#else
-#define TRACE(...)
-#endif
-
-#if defined ROCSHMEM_ENABLE_INFO
-#define INFO(FLAGS, ...)printf(__VA_ARGS__)
-#else
-#define INFO(...)
-#endif
-
 namespace rocshmem {
 
 struct Timer {

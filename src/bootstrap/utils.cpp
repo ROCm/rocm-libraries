@@ -34,7 +34,7 @@
 #include <iostream>
 
 #include "utils.hpp"
-#include "env.hpp"
+#include "../util.hpp"
 
 constexpr char HOSTID_FILE[32] = "/proc/sys/kernel/random/boot_id";
 
@@ -101,7 +101,7 @@ uint64_t computeHostHash(void) {
   std::string hostName = getHostName(hashLen, '\0');
   strncpy(hostHash, hostName.c_str(), hostName.size());
 
-  std::string hostid = env()->hostid;
+  std::string hostid = rocshmem_env_.get_bootstrap_hostid();
   if (hostid != "") {
     strncpy(hostHash, hostid.c_str(), hashLen);
   } else if (hostName.size() < hashLen) {
@@ -113,7 +113,7 @@ uint64_t computeHostHash(void) {
 
   // Make sure the string is terminated
   hostHash[sizeof(hostHash) - 1] = '\0';
-  TRACE("unique hostname '%s'", hostHash);
+  DPRINTF("unique hostname '%s'", hostHash);
   return getHash(hostHash, strlen(hostHash));
 }
 
@@ -141,7 +141,7 @@ uint64_t computePidHash(void) {
   if (len < 0) len = 0;
 
   pname[plen + len] = '\0';
-  TRACE("unique PID '%s'", pname);
+  DPRINTF("unique PID '%s'", pname);
 
   return getHash(pname, strlen(pname));
 }

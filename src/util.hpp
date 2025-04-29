@@ -268,13 +268,27 @@ int rocm_init();
 void rocm_memory_lock_to_fine_grain(void* ptr, size_t size, void** gpu_ptr,
                                     int gpu_id);
 
-struct rocshmem_env_config_t {
+class rocshmem_env_config {
+public:
+  rocshmem_env_config();
+
+  int get_ro_disable_ipc();
+  int get_ro_progress_delay();
+  int get_bootstrap_timeout();
+  std::string get_bootstrap_hostid();
+  std::string get_bootstrap_socket_family();
+  std::string get_bootstrap_socket_ifname();
+
+private:
   int ro_disable_ipc = 0;
   int ro_progress_delay = 3;
+  int bootstrap_timeout = 5;
+  std::string bootstrap_hostid;
+  std::string bootstrap_socket_family;
+  std::string bootstrap_socket_ifname;
 };
-extern struct rocshmem_env_config_t rocshmem_env_config;
 
-void rocshmem_env_config_init(void);
+extern rocshmem_env_config rocshmem_env_;
 
 }  // namespace rocshmem
 

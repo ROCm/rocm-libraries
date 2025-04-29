@@ -32,6 +32,7 @@
 
 #include "bootstrap.hpp"
 #include "utils.hpp"
+#include "../util.hpp"
 #include "socket.hpp"
 
 namespace rocshmem {
@@ -39,12 +40,12 @@ namespace rocshmem {
 static void setFilesLimit() {
   rlimit filesLimit;
   if (getrlimit(RLIMIT_NOFILE, &filesLimit) != 0) {
-    INFO("getrlimit failed\n");
+    DPRINTF("getrlimit failed\n");
     return;
   }
   filesLimit.rlim_cur = filesLimit.rlim_max;
   if (setrlimit(RLIMIT_NOFILE, &filesLimit) != 0) {
-    INFO("setrlimit failed\n");
+    DPRINTF("setrlimit failed\n");
     return;
   }
 }
@@ -193,7 +194,7 @@ void TcpBootstrap::Impl::initialize(const rocshmem_uniqueid_t& uniqueId, int64_t
 
   char line[MAX_IF_NAME_SIZE + 1];
   SocketToString(&uniqueId_.addr, line);
-  TRACE("rank %d nranks %d - connecting to %s\n", rank_, nRanks_, line);
+  DPRINTF("rank %d nranks %d - connecting to %s\n", rank_, nRanks_, line);
   establishConnections(timeoutSec);
 }
 
@@ -305,28 +306,28 @@ void TcpBootstrap::Impl::bootstrapRoot() {
   std::memset(rankAddressesRoot.data(), 0, sizeof(SocketAddress) * nRanks_);
   setFilesLimit();
 
-  TRACE("BEGIN bootstrapRoot\n");
+  DPRINTF("BEGIN bootstrapRoot\n");
   /* Receive addresses from all ranks */
   do {
     int rank;
     getRemoteAddresses(listenSockRoot_.get(), rankAddresses, rankAddressesRoot, rank);
     ++numCollected;
-    TRACE("Received connect from rank %d total %d/%d\n", rank, numCollected, nRanks_);
+    DPRINTF("Received connect from rank %d total %d/%d\n", rank, numCollected, nRanks_);
   } while (numCollected < nRanks_ && (!abortFlag_ || *abortFlag_ == 0));
 
   if (abortFlag_ && *abortFlag_) {
-    TRACE("ABORTED\n");
+    DPRINTF("ABORTED\n");
     return;
   }
 
-  TRACE("COLLECTED ALL %d HANDLES\n", nRanks_);
+  DPRINTF("COLLECTED ALL %d HANDLES\n", nRanks_);
 
   // Send the connect handle for the next rank in the AllGather ring
   for (int peer = 0; peer < nRanks_; ++peer) {
     sendHandleToPeer(peer, rankAddresses, rankAddressesRoot);
   }
 
-  TRACE("DONE bootstrapRoot\n");
+  DPRINTF("DONE bootstrapRoot\n");
 }
 
 void TcpBootstrap::Impl::netInit(std::string ipPortPair, std::string interface,
@@ -361,7 +362,7 @@ void TcpBootstrap::Impl::netInit(std::string ipPortPair, std::string interface,
   char line[SOCKET_NAME_MAXLEN + MAX_IF_NAME_SIZE + 2];
   std::sprintf(line, " %s:", netIfName);
   SocketToString(&netIfAddr, line + strlen(line));
-  TRACE("TcpBootstrap : Using%s", line);
+  DPRINTF("TcpBootstrap : Using%s", line);
 }
 
 #define TIMEOUT(__exp)                                                      \
@@ -382,7 +383,7 @@ void TcpBootstrap::Impl::establishConnections(int64_t timeoutSec) {
   SocketAddress nextAddr;
   ExtInfo info;
 
-  TRACE("establishConnections: rank %d nranks %d\n", rank_, nRanks_);
+  DPRINTF("establishConnections: rank %d nranks %d\n", rank_, nRanks_);
 
   auto getLeftTime = [&]() {
     if (connectionTimeoutUs < 0) {
@@ -417,7 +418,7 @@ void TcpBootstrap::Impl::establishConnections(int64_t timeoutSec) {
       timespec tv;
       tv.tv_sec = rank / 1000;
       tv.tv_nsec = 1000000 * (rank % 1000);
-      TRACE("rank %d delaying connection to root by %ld sec %ld nsec\n", rank,
+      DPRINTF("rank %d delaying connection to root by %ld sec %ld nsec\n", rank,
             tv.tv_sec, tv.tv_nsec);
       (void)nanosleep(&tv, NULL);
     };
@@ -455,7 +456,7 @@ void TcpBootstrap::Impl::establishConnections(int64_t timeoutSec) {
   peerCommAddresses_[rank_] = listenSock_->getAddr();
   allGather(peerCommAddresses_.data(), sizeof(SocketAddress));
 
-  TRACE("rank %d nranks %d - DONE\n", rank_, nRanks_);
+  DPRINTF("rank %d nranks %d - DONE\n", rank_, nRanks_);
 }
 
 int TcpBootstrap::Impl::getNranksPerNode() {
@@ -485,7 +486,7 @@ void TcpBootstrap::Impl::allGather(void* allData, int size) {
   int rank = rank_;
   int nRanks = nRanks_;
 
-  TRACE("allGather: rank %d nranks %d size %d\n", rank, nRanks, size);
+  DPRINTF("allGather: rank %d nranks %d size %d\n", rank, nRanks, size);
 
   /* Simple ring based AllGather
    * At each step i receive data from (rank-i-1) from left
@@ -501,7 +502,7 @@ void TcpBootstrap::Impl::allGather(void* allData, int size) {
     netRecv(ringRecvSocket_.get(), data + rSlice * size, size);
   }
 
-  TRACE("allGather: rank %d nranks %d size %d - DONE\n", rank, nRanks, size);
+  DPRINTF("allGather: rank %d nranks %d size %d - DONE\n", rank, nRanks, size);
 }
 
 std::shared_ptr<Socket> TcpBootstrap::Impl::getPeerSendSocket(int peer, int tag) {

@@ -109,7 +109,7 @@ __host__ void IpcOnImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
    */
   free(vec_ipc_handle);
 
-  if (0 == rocshmem_env_config.ro_disable_ipc) {
+  if (0 == rocshmem_env_.get_ro_disable_ipc()) {
     int thread_comm_rank;
 
     CHECK_HIP(hipMalloc(reinterpret_cast<void**>(&pes_with_ipc_avail), shm_size * sizeof(int)));
