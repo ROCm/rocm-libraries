@@ -3834,7 +3834,7 @@ class KernelWriterAssembly(KernelWriter):
 
     # LdsBlockSizePerPad: add padding
     if kernel["LdsBlockSizePerPad%s"%tc] != 0 and kernel["LdsPad%s"%tc] != 0:
-      tmpVgpr = self.vgprPool.checkOut(1)
+      tmpVgpr = self.vgprPool.checkOutAligned(2, 2)
       tmpVgprRes = ContinuousRegister(tmpVgpr, 2)
       module.add(vectorStaticDivide(tmpVgpr, destVgpr, kernel["LdsBlockSizePerPad%s"%tc], tmpVgprRes, \
         "padding %u per block %u" % (kernel["LdsPad%s"%tc] * tP["bpeDS"], kernel["LdsBlockSizePerPad%s"%tc])))
