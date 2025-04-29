@@ -80,7 +80,9 @@ set(ROCBLASLT_LIB_DIR "${HIPBLASLT_LIB_DIR}/src/amd_detail/rocblaslt")
 
 find_package(hip REQUIRED)
 if(HIPBLASLT_ENABLE_HOST)
-    find_package(hipblas-common REQUIRED)
+    if(NOT TARGET hip::hipblas-common)
+        find_package(hipblas-common REQUIRED)
+    endif()
     if(HIPBLASLT_ENABLE_BLIS)
         find_package(BLIS REQUIRED)
     endif()
@@ -146,7 +148,7 @@ if(HIPBLASLT_ENABLE_HOST)
 
     target_link_libraries(hipblaslt
         PUBLIC
-            roc::hipblas-common
+            hip::hipblas-common
             hip::device
         PRIVATE
             rocisa::rocisa-cpp
