@@ -86,8 +86,6 @@ rocshmem_ctx_t ROCSHMEM_HOST_CTX_DEFAULT;
 
   rocm_init();
 
-  rocshmem_env_config_init();
-
 #ifdef USE_RO
   CHECK_HIP(hipHostMalloc(&backend, sizeof(ROBackend)));
   backend = new (backend) ROBackend(comm);
@@ -155,14 +153,7 @@ rocshmem_ctx_t ROCSHMEM_HOST_CTX_DEFAULT;
 
       TcpBootstrap bootstr(attr->rank, attr->nranks);
 
-      int timeout = 5;
-      char *value;
-      value = getenv("ROCSHMEM_BOOTSTRAP_TIMEOUT");
-      if (value != nullptr) {
-	timeout = atoi(value);
-      }
-
-      bootstr.initialize(attr->uid, timeout);
+      bootstr.initialize(attr->uid, rocshmem_env_.get_bootstrap_timeout());
       int *inc_ranks = new int[attr->nranks];
       inc_ranks[attr->rank] = world_rank;
 

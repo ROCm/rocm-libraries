@@ -30,6 +30,5 @@ target_sources(
   PRIVATE
     socket.cpp
     bootstrap.cpp
-    env.cpp
     utils.cpp
 )

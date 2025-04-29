@@ -34,6 +34,8 @@ namespace rocshmem {
 
 __constant__ int* print_lock;
 
+rocshmem_env_config rocshmem_env_;
+
 typedef struct device_agent {
   hsa_agent_t agent;
   hsa_amd_memory_pool_t pool;
@@ -121,21 +123,63 @@ void rocm_memory_lock_to_fine_grain(void* ptr, size_t size, void** gpu_ptr,
   }
 }
 
-struct rocshmem_env_config_t rocshmem_env_config;
 
-void rocshmem_env_config_init(void) {
+rocshmem_env_config::rocshmem_env_config() {
   char* env_value = NULL;
 
   env_value = getenv("ROCSHMEM_RO_DISABLE_IPC");
   if (NULL != env_value) {
-    rocshmem_env_config.ro_disable_ipc = atoi(env_value);
+    ro_disable_ipc = atoi(env_value);
   }
 
   env_value = getenv("ROCSHMEM_RO_PROGRESS_DELAY");
   if (nullptr != env_value) {
-    rocshmem_env_config.ro_progress_delay = atoi(env_value);
+    ro_progress_delay = atoi(env_value);
   }
 
+  env_value = getenv("ROCSHMEM_BOOTSTRAP_TIMEOUT");
+  if (nullptr != env_value) {
+    bootstrap_timeout = atoi(env_value);
+  }
+
+  env_value = getenv("ROCSHMEM_BOOTSTRAP_HOSTID");
+  if (nullptr != env_value) {
+    bootstrap_hostid = std::string(env_value);
+  }
+
+  env_value = getenv("ROCSHMEM_BOOTSTRAP_SOCKET_FAMILY");
+  if (nullptr != env_value) {
+    bootstrap_socket_family = std::string(env_value);
+  }
+
+  env_value = getenv("ROCSHMEM_BOOTSTRAP_SOCKET_IFNAME");
+  if (nullptr != env_value) {
+    bootstrap_socket_ifname = std::string(env_value);
+  }
+}
+
+int rocshmem_env_config::get_ro_disable_ipc() {
+  return ro_disable_ipc;
+}
+
+int rocshmem_env_config::get_ro_progress_delay() {
+  return ro_progress_delay;
+}
+
+int rocshmem_env_config::get_bootstrap_timeout() {
+  return bootstrap_timeout;
+}
+
+std::string rocshmem_env_config::get_bootstrap_hostid() {
+  return bootstrap_hostid;
+}
+
+std::string rocshmem_env_config::get_bootstrap_socket_family() {
+  return bootstrap_socket_family;
+}
+
+std::string rocshmem_env_config::get_bootstrap_socket_ifname() {
+  return bootstrap_socket_ifname;
 }
 
 }  // namespace rocshmem
