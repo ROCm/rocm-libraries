@@ -153,7 +153,7 @@ if(HIPBLASLT_ENABLE_HOST)
             ${CMAKE_DL_LIBS}
     )
     if(HIPBLASLT_ENABLE_OPENMP)
-        target_link_libraries(hipblaslt PUBLIC OpenMP::OpenMP_CXX)
+        target_link_libraries(hipblaslt PRIVATE OpenMP::OpenMP_CXX)
     endif()
 
     target_compile_features(hipblaslt PUBLIC cxx_std_17) # I would like to make this configurable
@@ -178,9 +178,9 @@ if(HIPBLASLT_ENABLE_HOST)
     endif()
     if(HIPBLASLT_ENABLE_MSGPACK)
         if(msgpack-cxx_FOUND)
-            target_link_libraries(hipblaslt PUBLIC msgpack-cxx)
+            target_link_libraries(hipblaslt PRIVATE msgpack-cxx)
         else()
-            target_link_libraries(hipblaslt PUBLIC msgpackc)
+            target_link_libraries(hipblaslt PRIVATE msgpackc)
         endif()
         target_compile_definitions(hipblaslt PRIVATE TENSILE_MSGPACK)
     endif()
@@ -217,14 +217,19 @@ endif()
 if(HIPBLASLT_ENABLE_HOST)
     install(TARGETS hipblaslt rocisa-cpp
         EXPORT hipblaslt-targets
-        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-        COMPONENT hipBLASLt_Runtime
-        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-        COMPONENT hipBLASLt_Development
-        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-        COMPONENT hipBLASLt_Runtime
-        INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-        COMPONENT hipBLASLt_Development
+        LIBRARY
+            DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+            COMPONENT hipBLASLt_Runtime
+        ARCHIVE
+            DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+            COMPONENT hipBLASLt_Development
+        RUNTIME
+            DESTINATION "${CMAKE_INSTALL_BINDIR}"
+            COMPONENT hipBLASLt_Runtime
+        PUBLIC_HEADER
+            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+            COMPONENT hipBLASLt_Development
+        INCLUDES DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
     )
     install(
         EXPORT hipblaslt-targets
@@ -243,29 +248,26 @@ if(HIPBLASLT_ENABLE_HOST)
         FILES
             "${CMAKE_CURRENT_BINARY_DIR}/host-library/include/hipblaslt/hipblaslt-export.h"
             "${CMAKE_CURRENT_BINARY_DIR}/host-library/include/hipblaslt/hipblaslt-version.h"
-        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
         COMPONENT hipBLASLt_Development
     )
-    install(
-        FILES "${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindBLIS.cmake"
-        DESTINATION ${CMAKE_INSTALL_DATADIR}/cmake/hipblaslt
-        COMPONENT hipBLASLt_Development
+    write_basic_package_version_file(
+        "${CMAKE_CURRENT_BINARY_DIR}/hipblaslt-config-version.cmake"
+        VERSION ${PROJECT_VERSION}
+        COMPATIBILITY SameMajorVersion
     )
+    configure_file("${CMAKE_CURRENT_SOURCE_DIR}/cmake/hipblaslt-config.cmake.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/hipblaslt-config.cmake" @ONLY)
     install(FILES
         "${CMAKE_CURRENT_BINARY_DIR}/hipblaslt-config-version.cmake"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/hipblaslt-config.cmake"
-        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipblaslt
+        "${CMAKE_CURRENT_BINARY_DIR}/hipblaslt-config.cmake"
+        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/hipblaslt"
         COMPONENT hipBLASLt_Development
     )
     install(
         FILES "${CMAKE_CURRENT_SOURCE_DIR}/../LICENSE.md"
         DESTINATION "${CMAKE_INSTALL_DOCDIR}"
         COMPONENT hipBLASLt_Docs
-    )
-    write_basic_package_version_file(
-        "${CMAKE_CURRENT_BINARY_DIR}/hipblaslt-config-version.cmake"
-        VERSION ${PROJECT_VERSION}
-        COMPATIBILITY SameMajorVersion
     )
 
     if(HIPBLASLT_ENABLE_DEVICE)
@@ -278,7 +280,7 @@ if(HIPBLASLT_ENABLE_HOST)
 
     if(HIPBLASLT_ENABLE_CLIENT)
         install(
-            TARGETS hipblaslt-bench hipblaslt-clients-common
+            TARGETS hipblaslt-bench
             EXPORT hipblaslt-targets
             COMPONENT hipBLASLt_Runtime
         )

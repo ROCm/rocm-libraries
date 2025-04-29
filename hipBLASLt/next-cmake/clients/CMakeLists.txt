@@ -29,7 +29,7 @@ set(TEMP_TENSILE_CLIENT_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../tensilelit
 set(TEMP_TENSILELITE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../tensilelite")
 
 add_executable(hipblaslt-bench)
-add_library(hipblaslt-clients-common)
+add_library(hipblaslt-clients-common STATIC)
 
 target_include_directories(hipblaslt-clients-common
     PUBLIC
