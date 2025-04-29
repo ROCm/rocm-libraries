@@ -86,7 +86,7 @@ _rocsparse_handle::_rocsparse_handle()
 
     THROW_WITH_MESSAGE_IF_HIP_ERROR(hipGetLastError(), "prior to hipLaunchKernelGGL");
     hipLaunchKernelGGL(init_kernel, dim3(1), dim3(1), 0, stream);
-    THROW_WITH_MESSAGE_IF_HIP_ERROR(hipGetLastError(), "'empty kernel execution failed'");
+    THROW_WITH_MESSAGE_IF_HIP_ERROR(hipGetLastError(), "'empty kernel scheduling failed'");
 
     // Execute memset for initialization
     THROW_IF_HIP_ERROR(hipMemsetAsync(sone, 0, sizeof(float), stream));
