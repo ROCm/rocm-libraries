@@ -4788,8 +4788,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.states.localReadDoCntMetadata  = 0
 
     if kernel["EnableMatrixInstruction"]:
+      numBytes = kernel["ProblemType"]["DataType"].numBytes()
       mi_divisor = 2
-
       miIssueLatency = 2
       if (self.states.version == (9,4,0) or self.states.version == (9,4,1) or self.states.version == (9,4,2) or self.states.version == (9,5,0)) and kernel["MatrixInstB"] == 1 and \
          (kernel["ProblemType"]["DataType"].isHalf() or \
@@ -4798,6 +4798,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
           kernel["ProblemType"]["DataType"].is8bitFloat()):
         mi_divisor = 4
         miIssueLatency = 1
+      if (self.states.version == (9,5,0) and numBytes ==2):
+        mi_divisor = 2
+        miIssueLatency = 2
 
       if kernel["ProblemType"]["Sparse"] or (kernel["EnableF32XdlMathOp"] and kernel["ProblemType"]["F32XdlMathOp"].isXFloat32()):
         mi_divisor = 4
