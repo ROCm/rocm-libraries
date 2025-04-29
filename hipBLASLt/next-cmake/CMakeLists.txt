@@ -33,6 +33,7 @@ include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 include(GenerateExportHeader)
 include(CMakeDependentOption)
+include(hipblaslt_python)
 
 set(HIPBLASLT_ENABLE_DEVICE ON CACHE BOOL "Build hipBLASLt device libraries.")
 set(HIPBLASLT_ENABLE_CLIENT ON CACHE BOOL "Build hipBLASLt client apps.")
@@ -41,6 +42,8 @@ cmake_dependent_option(HIPBLASLT_ENABLE_HOST "Build hipBLASLt host library." ON 
 if(HIPBLASLT_ENABLE_CLIENT)
     set(HIPBLASLT_BUILD_TESTING ON CACHE BOOL "Build hipblaslt client tests.")
     set(HIPBLASLT_ENABLE_SAMPLES ON CACHE BOOL "Build client samples.")
+    # rocm-smi is not presently available on Windows so we do not require it.
+    cmake_dependent_option(HIPBLASLT_REQUIRE_ROCM_SMI "Require rocm_smi." ON "NOT WIN32" OFF)
 endif()
 
 if(HIPBLASLT_ENABLE_HOST)
@@ -81,9 +84,15 @@ if(HIPBLASLT_ENABLE_HOST)
         find_package(BLIS REQUIRED)
     endif()
 endif()
+if(HIPBLASLT_REQUIRE_ROCM_SMI)
+    find_package(rocm_smi REQUIRED)
+else()
+    find_package(rocm_smi)
+endif()
 if(HIPBLASLT_ENABLE_CLIENT)
     #find_package(Threads REQUIRED) # TODO: We don't fail to build or link without Threads remove?
-    find_package(cblas REQUIRED)
+    find_package(BLAS REQUIRED)
+    find_package(LAPACK REQUIRED)
 endif()
 if(HIPBLASLT_ENABLE_OPENMP)
     find_package(OpenMP REQUIRED)
@@ -106,11 +115,23 @@ endif()
 if(HIPBLASLT_ENABLE_DEVICE)
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
     if(HIPBLASLT_BUNDLE_PYTHON_DEPS)
-    set(HIPBLASLT_PYTHON_COMMAND 
-        "cmake -E env PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}/rocisa -- ${Python3_EXECUTABLE}" 
-        CACHE STRING "Command for invoking tensile python sripts")
+        # Build the rocisa python extension.
+        add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../tensilelite/rocisa"
+            "${CMAKE_CURRENT_BINARY_DIR}/rocisa_pyext")
+        set(HIPBLASLT_PYTHON_DEPS "rocisa")
+        # TODO: The rocisa build explicitly sets the LIBRARY_OUTPUT_DIR to the
+        # (top-level!) CMAKE_BINARY_DIR/lib directory. This is not a great idea
+        # and should be removed/changed to a locally scoped directory. However,
+        # that is hard to do while this is all glued together with the old venv
+        # setup. In the meantime, the directory passed here must match the
+        # what is set there. Failure to do so will cause a ModuleNotFoundError
+        # trying to load rocisa.
+        hipblaslt_configure_bundled_python_command("${CMAKE_BINARY_DIR}/lib")
     else()
-        set(HIPBLASLT_PYTHON_COMMAND "${Python3_EXECUTABLE}" CACHE STRING "Command for invoking tensile python sripts")
+        # Just pass through to the found python executable and trust that the
+        # user set it up properly.
+        set(HIPBLASLT_PYTHON_COMMAND "${Python3_EXECUTABLE}")
+        set(HIPBLASLT_PYTHON_DEPS)
     endif()
 endif()
 if(HIPBLASLT_ENABLE_HOST)
@@ -176,7 +197,7 @@ if(HIPBLASLT_ENABLE_HOST)
         LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/host-library
     )
 
-    add_subdirectory(rocisa)
+    add_subdirectory(rocisa/rocisa-cpp)
     add_subdirectory(host-library)
 endif()
 

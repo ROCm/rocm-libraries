@@ -77,6 +77,7 @@ foreach(arch IN LISTS archs)
         COMMAND ${HIPBLASLT_PYTHON_COMMAND} AMaxGenerator.py -o "${CMAKE_CURRENT_BINARY_DIR}/A_S_H_256_4_${arch}.s" -t S -d H -w 256 -c 4 --arch ${arch}
         COMMENT "Creating Layer Norm, Softmax and Amax Assembly for ${arch}"
         WORKING_DIRECTORY ${ops_dir}
+        DEPENDS ${HIPBLASLT_PYTHON_DEPS}
     )
     if(arch STREQUAL "gfx942")
         add_custom_command(
@@ -91,6 +92,7 @@ foreach(arch IN LISTS archs)
             COMMAND ${HIPBLASLT_PYTHON_COMMAND} AMaxGenerator.py --is-scale -o "${CMAKE_CURRENT_BINARY_DIR}/A_S_H_B8N_256_4_${arch}.s" -t S -d H -s B8N -w 256 -c 4 --arch ${arch}
             COMMENT "Creating Extra Amax Assembly for gfx942"
             WORKING_DIRECTORY ${ops_dir}
+            DEPENDS ${HIPBLASLT_PYTHON_DEPS}
         )
         target_sources(extop-obj-${arch}
             PRIVATE
@@ -113,6 +115,7 @@ foreach(arch IN LISTS archs)
             COMMAND ${HIPBLASLT_PYTHON_COMMAND} AMaxGenerator.py --is-scale -o "${CMAKE_CURRENT_BINARY_DIR}/A_S_H_B8_256_4_${arch}.s" -t S -d H -s B8 -w 256 -c 4 --arch ${arch}
             COMMENT "Creating Extra Amax Assembly for gfx950"
             WORKING_DIRECTORY ${ops_dir}
+            DEPENDS ${HIPBLASLT_PYTHON_DEPS}
         )
         target_sources(extop-obj-${arch}
             PRIVATE
@@ -132,7 +135,7 @@ foreach(arch IN LISTS archs)
     )
     list(APPEND extop_cp_depends "extop-library-${arch}")
     add_custom_target(extop-library-${arch}
-        DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/extop_${arch}.co
+        DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/extop_${arch}.co ${HIPBLASLT_PYTHON_DEPS}
         COMMAND ${HIPBLASLT_PYTHON_COMMAND} ExtOpCreateLibrary.py --src=${CMAKE_CURRENT_BINARY_DIR} --co=${output_dir}/extop_${arch}.co --output=${output_dir} --arch=${arch}
         COMMENT "Creating hipblasltExtOpLibrary.dat for ${arch}"
         WORKING_DIRECTORY ${ops_dir}

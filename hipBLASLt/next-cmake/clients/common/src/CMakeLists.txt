@@ -41,3 +41,7 @@ if(HIPBLASLT_ENABLE_BLIS)
             "${_CMAKE_CURRENT_SOURCE_DIR}/blis_interface.cpp"
     )
 endif()
+
+if(rocm_smi_FOUND)
+    target_link_libraries(hipblaslt-clients-common PRIVATE rocm_smi64)
+endif()
