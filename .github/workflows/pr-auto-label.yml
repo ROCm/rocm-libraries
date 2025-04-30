@@ -61,12 +61,18 @@ jobs:
 
           if [ ${#labels_to_add[@]} -gt 0 ]; then
             echo "Applying labels: ${labels_to_add[*]}"
-            gh pr edit ${{ github.event.pull_request.number }} --add-label "${labels_to_add[@]}"
+            for label in "${labels_to_add[@]}"; do
+              # Apply each label individually, ensuring labels with spaces are properly quoted
+              gh pr edit 5 --add-label "$label"
+            done
           fi
 
           if [ ${#labels_to_remove[@]} -gt 0 ]; then
             echo "Removing labels: ${labels_to_remove[*]}"
-            gh pr edit ${{ github.event.pull_request.number }} --remove-label "${labels_to_remove[@]}"
+            for label in "${labels_to_remove[@]}"; do
+              # Remove each label individually, ensuring labels with spaces are properly quoted
+              gh pr edit 5 --remove-label "$label"
+            done
           fi
-        env:
+          env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
