@@ -205,6 +205,8 @@ do
   shift
 done
 
+# LIBCXX tests were removed but might come back later so we disable them here
+LIBCUDACXX_SKIP_LIBCXX_TESTS=1
 LIBCXX_TEST_TARGETS="${LIBCUDACXX_PATH}/libcxx/test"
 LIBCUDACXX_TEST_TARGETS="${LIBCUDACXX_PATH}/test"
 
