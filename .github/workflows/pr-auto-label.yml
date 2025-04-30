@@ -61,7 +61,7 @@ jobs:
             label="${category}: ${name}"                   # e.g., "projects: hipsparse"
 
             # Use full path with leading slash for exact match
-            if echo "$changed_files" | grep -qE "\b/${category_repo}/"; then
+            if echo "$changed_files" | grep -qE "\^${category_repo}/"; then
               labels_to_add+=("$label")
             else
               if echo "$current_labels" | grep -q "$label"; then
