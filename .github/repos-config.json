@@ -1,6 +1,11 @@
 {
   "repositories": [
     {
+      "name": "MIFin",
+      "url": "ROCm/MIFin",
+      "branch": "develop"
+    },
+    {
       "name": "MIOpen",
       "url": "ROCm/MIOpen",
       "branch": "develop"
