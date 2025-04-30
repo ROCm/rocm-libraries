@@ -5,7 +5,7 @@ on:
 
 env:
   MONOREPO_URL: github.com/ROCm/rocm-libraries.git
-  MONOREPO_BRANCH: develop
+  MONOREPO_BRANCH: mainline
 
 jobs:
   setup-monorepo:
@@ -27,10 +27,8 @@ jobs:
             url=$(cat .github/repos-config.json | jq -r ".repositories[] | select(.name == \"$repo\") | .url")
             branch=$(cat .github/repos-config.json | jq -r ".repositories[] | select(.name == \"$repo\") | .branch")
             revision=$(cat .github/repos-config.json | jq -r ".repositories[] | select(.name == \"$repo\") | .revision")
+            git subtree add --prefix $repo https://github.com/${url}.git $branch
             if [ -z "$revision" ]; then
-              git subtree add --prefix $repo https://github.com/${url}.git $branch
-            else
-              git subtree add --prefix $repo https://github.com/${url}.git
               git reset --hard $revision
             fi
           done
