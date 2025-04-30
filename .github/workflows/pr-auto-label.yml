@@ -74,5 +74,5 @@ jobs:
               gh pr edit 5 --remove-label "$label"
             done
           fi
-          env:
+        env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
