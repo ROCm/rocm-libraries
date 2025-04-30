@@ -23,13 +23,13 @@ jobs:
 
       - name: Add Repositories to the Monorepo
         run: |
-          for row in $(jq -c '.repositories[]' .github/repos-config.json); do
-            name=$(echo "$row" | jq -r '.name')
-            repo_name=$(echo "$row" | jq -r '.repo-name')
-            category=$(echo "$row" | jq -r '.category')
-            url=$(echo "$row" | jq -r '.url')
-            branch=$(echo "$row" | jq -r '.branch')
-            git subtree add --prefix "${category}/${name}" https://github.com/${url}.git "$branch"
+          for repo in $(cat .github/repos-config.json | jq -r '.repositories[].name'); do
+            repo_name=$(cat .github/repos-config.json | jq -r ".repositories[] | select(.name == \"$repo\") | .repo-name")
+            url=$(cat .github/repos-config.json | jq -r ".repositories[] | select(.name == \"$repo\") | .url")
+            branch=$(cat .github/repos-config.json | jq -r ".repositories[] | select(.name == \"$repo\") | .branch")
+            category=$(cat .github/repos-config.json | jq -r ".repositories[] | select(.name == \"$repo\") | .category")
+
+            git subtree add --prefix "${category}/${repo}" https://github.com/${url}.git "$branch"
           done
 
       - name: Push changes to Monorepo
