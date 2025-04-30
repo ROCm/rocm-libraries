@@ -1,0 +1,11 @@
+# Template used to process YAML from log files
+---
+include: hipsparselt_common.yaml
+
+Functions:
+
+  # prune
+  hipsparselt_hprune: { function: prune, <<: *half_precision}
+  hipsparselt_bprune: { function: prune, <<: *bf16_precision}
+
+Tests:

@@ -1,0 +1,152 @@
+---
+include: hipsparselt_common.yaml
+include: known_bugs.yaml
+include: spmm_common.yaml
+
+Tests:
+- name: aux_handle_init_bad_arg
+  category: pre_checkin
+  function:
+    - aux_handle_init_bad_arg: *hpa_half_precision
+
+- name: aux_handle_destroy_bad_arg
+  category: pre_checkin
+  function:
+    - aux_handle_destroy_bad_arg: *hpa_half_precision
+
+- name: aux_handle
+  category: pre_checkin
+  function:
+    - aux_handle: *hpa_half_precision
+
+- name: aux_mat_init_dense_bad_arg
+  category: pre_checkin
+  function:
+    - aux_mat_init_dense_bad_arg: *real_precisions
+
+- name: aux_mat_init_structured_bad_arg
+  category: pre_checkin
+  function:
+    - aux_mat_init_structured_bad_arg: *real_precisions
+
+- name: aux_mat_destroy_bad_arg
+  category: pre_checkin
+  function:
+    - aux_mat_destroy_bad_arg: *real_precisions
+
+- name: aux_mat_set_attr_bad_arg
+  category: pre_checkin
+  function:
+    - aux_mat_set_attr_bad_arg: *real_precisions
+
+- name: aux_mat_get_attr_bad_arg
+  category: pre_checkin
+  function:
+    - aux_mat_get_attr_bad_arg: *real_precisions
+
+- name: aux_mat_dense_init_arg
+  category: pre_checkin
+  function:
+    - aux_mat_dense_init_arg: *real_precisions
+
+- name: aux_mat_structured_init
+  category: pre_checkin
+  function:
+    - aux_mat_structured_init: *real_precisions
+
+- name: aux_mat_assign
+  category: pre_checkin
+  function:
+    - aux_mat_assign: *hpa_int8_precision
+
+- name: aux_mat_set_get_attr
+  category: pre_checkin
+  function:
+    - aux_mat_set_get_attr: *real_precisions
+
+- name: aux_matmul_init_bad_arg
+  category: pre_checkin
+  function:
+    - aux_matmul_init_bad_arg: *real_precisions
+
+- name: aux_matmul_init
+  category: pre_checkin
+  function:
+    - aux_matmul_init: *real_precisions
+
+- name: aux_matmul_assign
+  category: pre_checkin
+  function:
+    - aux_matmul_assign: *hpa_int8_precision
+
+- name: aux_matmul_set_attr_bad_arg
+  category: pre_checkin
+  function:
+    - aux_matmul_set_attr_bad_arg: *real_precisions
+
+- name: aux_matmul_get_attr_bad_arg
+  category: pre_checkin
+  function:
+    - aux_matmul_get_attr_bad_arg: *real_precisions
+
+- name: aux_matmul_set_get_attr
+  category: pre_checkin
+  function:
+    - aux_matmul_set_get_attr: *real_precisions
+
+- name: aux_matmul_set_get_bias_vector
+  category: pre_checkin
+  function:
+    - aux_matmul_set_get_bias_vector: *hpa_int8_precision
+
+- name: aux_matmul_alg_init_bad_arg
+  category: pre_checkin
+  function:
+    - aux_matmul_alg_init_bad_arg: *real_precisions
+
+- name: aux_matmul_alg_init
+  category: pre_checkin
+  function:
+    - aux_matmul_alg_init: *real_precisions
+
+- name: aux_matmul_alg_assign
+  category: pre_checkin
+  function:
+    - aux_matmul_alg_assign: *hpa_int8_precision
+
+- name: aux_matmul_alg_set_attr_bad_arg
+  category: pre_checkin
+  function:
+    - aux_matmul_alg_set_attr_bad_arg: *real_precisions
+
+- name: aux_matmul_alg_get_attr_bad_arg
+  category: pre_checkin
+  function:
+    - aux_matmul_alg_get_attr_bad_arg: *real_precisions
+
+- name: aux_matmul_plan_init_bad_arg
+  category: pre_checkin
+  function:
+    - aux_matmul_plan_init_bad_arg: *real_precisions
+
+- name: aux_matmul_plan_init
+  category: pre_checkin
+  function:
+    - aux_matmul_plan_init: *real_precisions
+
+- name: aux_matmul_plan_destroy_bad_arg
+  category: pre_checkin
+  function:
+    - aux_matmul_plan_destroy_bad_arg: *hpa_half_precision
+
+- name: aux_get_workspace_size_bad_arg
+  category: pre_checkin
+  function:
+    - aux_get_workspace_size_bad_arg: *real_precisions
+
+- name: aux_get_workspace_size
+  category: pre_checkin
+  function:
+    - aux_get_workspace_size: *real_precisions
+
+...
