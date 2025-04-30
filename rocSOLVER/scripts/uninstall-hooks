@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+
+set -eu
+
+hooks_dir="$(git rev-parse --git-path hooks)"
+
+rm --verbose -- "$hooks_dir/post-commit"
+rm --verbose -- "$hooks_dir/reformat-files"

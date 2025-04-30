@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Copyright (c) 2022 Advanced Micro Devices, Inc.
+
+set -eux
+
+# ensure this script is in the cwd
+cd "$(dirname "${BASH_SOURCE[0]}")"
+
+temp_dir=raw
+output_dir=rocsolver-benchmarks
+
+# setup output directory for raw data
+mkdir -p "$temp_dir"
+
+# run benchmarks
+for p in s d c z; do
+  for f in geqrf geqrf_strided_batched getrf getrf_strided_batched getri getri_strided_batched; do
+    python3 rocsolver-bench-suite.py -v $p $f -o "$temp_dir/$p${f}_benchmarks.csv"
+  done
+done
+
+# setup output directory for final data
+mkdir -p "$output_dir"
+
+# do post-processing
+for input_file in "$temp_dir"/*.csv; do
+  filename=$(basename "$input_file")
+  output_file="$output_dir/$filename"
+  python3 postprocess.py "$input_file" "$output_file"
+done
