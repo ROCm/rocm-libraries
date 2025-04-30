@@ -149,11 +149,12 @@ if(HIPBLASLT_ENABLE_HOST)
     target_link_libraries(hipblaslt
         PUBLIC
             hip::hipblas-common
-            hip::device
         PRIVATE
+            hip::device
             rocisa::rocisa-cpp
             ${CMAKE_DL_LIBS}
     )
+
     if(HIPBLASLT_ENABLE_OPENMP)
         target_link_libraries(hipblaslt PRIVATE OpenMP::OpenMP_CXX)
     endif()

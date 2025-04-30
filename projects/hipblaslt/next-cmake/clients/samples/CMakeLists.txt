@@ -28,11 +28,8 @@ add_library(sample-helper INTERFACE)
 if(HIPBLASLT_ENABLE_BLIS)
     target_link_libraries(sample-helper INTERFACE BLIS::BLIS)
 endif()
+target_link_libraries(sample-helper INTERFACE hip::device)
 
-#if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-#    # GCC or hip-clang needs specific flags to turn on f16c intrinsics
-#    target_compile_options(sample-helper INTERFACE -mf16c) # necessary?
-#endif()
 target_compile_features(sample-helper INTERFACE cxx_std_17)
 
 target_sources(sample-helper
