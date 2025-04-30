@@ -55,9 +55,10 @@ jobs:
           labels_to_remove=()
 
           for entry in $repo_paths; do
-            category_repo="${entry}"                     # e.g., projects/hipsparse
-            label_name="${category_repo##*/}"            # e.g., hipsparse
-            label="project: ${label_name}"
+            category_repo="${entry}"                      # e.g., "projects/hipsparse"
+            category="${category_repo%%/*}"                # e.g., "projects"
+            name="${category_repo##*/}"                    # e.g., "hipsparse"
+            label="${category}: ${name}"                   # e.g., "projects: hipsparse"
 
             # Use full path with leading slash for exact match
             if echo "$changed_files" | grep -qE "\b/${category_repo}/"; then
