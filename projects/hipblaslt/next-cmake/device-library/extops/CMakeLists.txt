@@ -124,23 +124,22 @@ foreach(arch IN LISTS archs)
         )
     endif()
 
+    set(output_code_object_file "${CMAKE_CURRENT_BINARY_DIR}/extop_${arch}.co")
     add_custom_command(
         DEPENDS extop-obj-${arch}
-        OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/extop_${arch}.co
-        COMMAND ${CMAKE_CXX_COMPILER};-target;amdgcn-amdhsa;-Xlinker;$<TARGET_OBJECTS:extop-obj-${arch}>;-o;${output_dir}/extop_${arch}.co
+        OUTPUT "${output_code_object_file}"
+        COMMAND ${CMAKE_CXX_COMPILER};-target;amdgcn-amdhsa;-Xlinker;$<TARGET_OBJECTS:extop-obj-${arch}>;-o;${output_code_object_file}
+        COMMAND ${CMAKE_COMMAND} -E copy "${output_code_object_file}" "${device_library_dir}"
         COMMENT "Creating extop_${arch}"
         COMMAND_EXPAND_LISTS
     )
     list(APPEND extop_cp_depends "extop-library-${arch}")
-    add_custom_target(extop-library-${arch}
-        DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/extop_${arch}.co ${HIPBLASLT_PYTHON_DEPS}
-        COMMAND ${HIPBLASLT_PYTHON_COMMAND} "${ops_dir}/ExtOpCreateLibrary.py" --src=${CMAKE_CURRENT_BINARY_DIR} --co=${output_dir}/extop_${arch}.co --output=${output_dir} --arch=${arch}
+    add_custom_target(extop-library-${arch} ALL
+        DEPENDS
+            "${output_code_object_file}"
+            ${HIPBLASLT_PYTHON_DEPS}
+        COMMAND ${HIPBLASLT_PYTHON_COMMAND} "${ops_dir}/ExtOpCreateLibrary.py" --src=${CMAKE_CURRENT_BINARY_DIR} --co=${output_code_object_file} --output=${output_dir} --arch=${arch}
+        COMMAND ${CMAKE_COMMAND} -E copy "${output_dir}/hipblasltExtOpLibrary.dat" "${device_library_dir}"
         COMMENT "Creating hipblasltExtOpLibrary.dat for ${arch}"
     )
 endforeach()
-
-add_custom_target(extop-cp ALL
-    DEPENDS ${extop_cp_depends}
-    COMMAND ${CMAKE_COMMAND} -E copy "${output_dir}/*.co" ${device_library_dir}
-    COMMAND ${CMAKE_COMMAND} -E copy "${output_dir}/*.dat" ${device_library_dir}
-)

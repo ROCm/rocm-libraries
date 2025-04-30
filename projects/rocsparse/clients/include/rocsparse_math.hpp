@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -26,8 +26,8 @@
 #ifndef ROCSPARSE_MATH_HPP
 #define ROCSPARSE_MATH_HPP
 
+#include "rocsparse.h"
 #include <cmath>
-#include <rocsparse.h>
 
 /* =================================================================================== */
 /*! \brief  returns true if value is NaN */

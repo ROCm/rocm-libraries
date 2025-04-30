@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -26,6 +26,7 @@
 #include "display.hpp"
 #include "flops.hpp"
 #include "gbyte.hpp"
+#include "rocsparse.hpp"
 #include "rocsparse_check.hpp"
 #include "rocsparse_graph.hpp"
 #include "rocsparse_matrix_factory.hpp"
@@ -33,7 +34,6 @@
 #include "rocsparse_reproducibility_test_save.hpp"
 #include "rocsparse_vector_utils.hpp"
 #include "utility.hpp"
-#include <rocsparse.hpp>
 
 template <typename T>
 inline T* rocsparse_fake_pointer()

@@ -10,6 +10,8 @@ Documentation for rocThrust available at
 * Added gfx950 support.
 * Merged changes from upstream CCCL/thrust 2.6.0
 
+### Known Issues
+* The order of the values being compared by thrust::exclusive_scan_by_key and thrust::inclusive_scan_by_key can change between runs when integers are being compared. This can cause incorrect output when a non-commutative operator such as division is being used.
 ## rocThrust 3.3.0 for ROCm 6.4
 
 ### Added

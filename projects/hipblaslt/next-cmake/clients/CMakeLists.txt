@@ -44,13 +44,21 @@ if(HIPBLASLT_ENABLE_BLIS)
     target_link_libraries(hipblaslt-clients-common PRIVATE BLIS::BLIS)
 endif()
 
-target_link_libraries(hipblaslt-clients-common PUBLIC
-    roc::hipblaslt
-    ${LAPACK_LIBRARIES} ${BLAS_LIBRARIES}
+target_link_libraries(hipblaslt-clients-common
+    PUBLIC
+        roc::hipblaslt
+        ${LAPACK_LIBRARIES} 
+        ${BLAS_LIBRARIES}
+    PRIVATE
+        hip::device
 )
 target_compile_definitions(hipblaslt-clients-common PRIVATE CLIENTS_NO_FORTRAN) # necessary?
 
-target_link_libraries(hipblaslt-bench PRIVATE hipblaslt-clients-common)
+target_link_libraries(hipblaslt-bench 
+    PRIVATE
+        hip::device
+        hipblaslt-clients-common
+)
 
 # TODO: Still haven't added hipblaslt-bench-groupedgemm-fixed-mk and related targets
 
@@ -63,9 +71,13 @@ if(BUILD_TESTING OR HIPBLASLT_BUILD_TESTING)
     if(rocm_smi_FOUND)
         target_link_libraries(hipblaslt-test PRIVATE rocm_smi64)
     endif()
-    target_link_libraries(hipblaslt-test PRIVATE hipblaslt-clients-common
-        ${LAPACK_LIBRARIES} ${BLAS_LIBRARIES}
-        GTest::gtest
+    target_link_libraries(hipblaslt-test 
+        PRIVATE
+            hip::device
+            hipblaslt-clients-common
+            ${LAPACK_LIBRARIES}
+            ${BLAS_LIBRARIES}
+            GTest::gtest
     )
     if(HIPBLASLT_ENABLE_BLIS)
         target_link_libraries(hipblaslt-test PRIVATE BLIS::BLIS) # necessary?

@@ -25,10 +25,10 @@
 #include "bitwise_repro/bwr_utils.hpp"
 
 using ReproducibilityTestParams = ::testing::Types<
-    Params<thrust::device_vector<int>, std::decay_t<decltype(thrust::hip::par_det)>>,
+    Params<thrust::device_vector<int>, std::decay_t<decltype(thrust::hip::par_det)>>, 
     Params<thrust::device_vector<float>, std::decay_t<decltype(thrust::hip::par_det)>>,
     Params<thrust::device_vector<double>, std::decay_t<decltype(thrust::hip::par_det)>>,
-    Params<thrust::device_vector<int>, std::decay_t<decltype(thrust::hip::par_det_nosync)>>,
+    Params<thrust::device_vector<int>, std::decay_t<decltype(thrust::hip::par_det_nosync)>>, 
     Params<thrust::device_vector<float>, std::decay_t<decltype(thrust::hip::par_det_nosync)>>,
     Params<thrust::device_vector<double>, std::decay_t<decltype(thrust::hip::par_det_nosync)>>>;
 
@@ -171,6 +171,14 @@ TYPED_TEST(ReproducibilityTests, ScanByKey)
     using Policy = typename TestFixture::execution_policy;
     using T      = typename Vector::value_type;
     using ScanOp = eepy_scan_op<thrust::plus<T>>;
+
+    hipDeviceProp_t attributes;
+    HIP_CHECK(hipGetDeviceProperties(&attributes, 0));
+
+    // Disable int test case for Navi3X because of known issue
+    if (std::is_same_v<T, int> && attributes.major == 11){
+        GTEST_SKIP();
+    }
 
     bwr_utils::TokenHelper token_helper;
 
