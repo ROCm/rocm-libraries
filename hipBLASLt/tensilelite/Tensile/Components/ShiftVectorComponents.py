@@ -31,8 +31,8 @@ from rocisa.instruction import DSBPermuteB32, SBranch, SCBranchVCCNZ, \
                                 VAndB32, VCmpEQU32, VCmpLtU32, VCmpXEqU32, \
                                 VCndMaskB32, VMovB32, VMulI32I24, VLShiftLeftB32, \
                                 VLShiftRightB32, VSubU32, vectorStaticRemainder, \
-                                vectorStaticDivide
-from ..TensileInstructions import ContinuousRegister, staticMultiply, log2
+                                vectorStaticDivide, vectorStaticMultiply
+from ..TensileInstructions import ContinuousRegister, log2
 from ..Component import ShiftVectorComponents
 from ..KernelWriterModules import *
 
@@ -209,7 +209,7 @@ class ShiftVectorComponentsMFMA(ShiftVectorComponents):
             mbReg = writer.vgprPool.checkOut(1)
             tReg  = writer.vgprPool.checkOut(1)
             module.add(vectorStaticDivide(mbReg, wgMT, subMBShapeCoal, tmpVgprRes))
-            module.add(staticMultiply(vgpr(tReg), vgpr(wReg), (matrixInstBCoal * OutBlocksInMI), tmpSgprInfo))
+            module.add(vectorStaticMultiply(vgpr(tReg), vgpr(wReg), (matrixInstBCoal * OutBlocksInMI), tmpSgprInfo))
             module.add(VSubU32(dst=vgpr(mbReg), src0=vgpr(mbReg), src1=vgpr(tReg)))
             writer.vgprPool.checkIn(tReg)
 
@@ -223,9 +223,9 @@ class ShiftVectorComponentsMFMA(ShiftVectorComponents):
             tgbReg = writer.vgprPool.checkOut(1)
             module.add(vectorStaticDivide(tgbReg, "Serial", threadInterval, tmpVgprRes))
             module.add(vectorStaticRemainder(dummy, tgbReg, tgbReg, numThreadInCoal, tmpVgprRes, tmpSgprInfo))
-            module.add(staticMultiply(vgpr(tgbReg), vgpr(tgbReg), allContOutCoal, tmpSgprInfo))
+            module.add(vectorStaticMultiply(vgpr(tgbReg), vgpr(tgbReg), allContOutCoal, tmpSgprInfo))
             module.add(vectorStaticDivide(tgbReg, tgbReg, glvw, tmpVgprRes))
-            module.add(staticMultiply(vgpr(wReg), vgpr(wReg), MIBShapeCoal//glvw, tmpSgprInfo))
+            module.add(vectorStaticMultiply(vgpr(wReg), vgpr(wReg), MIBShapeCoal//glvw, tmpSgprInfo))
             module.add(VAddCOU32(dst=vgpr(tgbReg), dst1=VCC(), src0=vgpr(wReg), src1=vgpr(tgbReg), comment="tgbReg = (tid_coal * continOut) / GLVW"))
             module.add(VSubU32(dst=vgpr(gbReg), src0=vgpr(gbReg), src1=vgpr(tgbReg)))
             writer.vgprPool.checkIn(wReg)
@@ -489,7 +489,7 @@ class ShiftVectorComponentsMFMA(ShiftVectorComponents):
                         module.addComment2("shift d%u shift=%u glvwblk=%u"%(tP["idx"], shift, glvwBlk))
                         module.add(GLVWBLKLabels[shift-1][label])
                         module.add(VAndB32(dst=vgpr(permuteIndexReg), src0=kernel["WavefrontSize"]-1, src1=vgpr("Serial"), comment="permute register between threads"))
-                        module.add(staticMultiply(vgpr(permuteIndexReg), vgpr(permuteIndexReg), writer.states.bpr, sgpr(tmpSgpr), "permute register between threads"))
+                        module.add(vectorStaticMultiply(vgpr(permuteIndexReg), vgpr(permuteIndexReg), writer.states.bpr, tmpSgprInfo, comment="permute register between threads"))
                         module.add(vectorStaticDivide(threadIdInCoalReg, "Serial", threadInterval, tmpVgprRes))
                         module.add(vectorStaticRemainder(dummy, threadIdInCoalReg, threadIdInCoalReg, numThreadInCoal, tmpVgprRes, tmpSgprInfo))
 

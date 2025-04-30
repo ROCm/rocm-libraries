@@ -24,6 +24,8 @@
 
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/shared_ptr.h>
+#include <nanobind/stl/string.h>
+#include <nanobind/stl/variant.h>
 
 namespace nb = nanobind;
 
@@ -66,4 +68,14 @@ void ext_inst(nb::module_ m)
           nb::arg("positiveLabelStr"),
           nb::arg("posNeg")  = 0,
           nb::arg("comment") = "");
+    m.def("SMulInt64to32",
+          &rocisa::SMulInt64to32,
+          nb::arg("dst0"),
+          nb::arg("dst1"),
+          nb::arg("src0"),
+          nb::arg("src1"),
+          nb::arg("tmpVgprRes"),
+          nb::arg("hasSMulHi") = false,
+          nb::arg("sign")      = false,
+          nb::arg("comment")   = "");
 }

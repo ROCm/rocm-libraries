@@ -33,16 +33,15 @@ from rocisa.container import DSModifiers, SDWAModifiers, VOP3PModifiers, \
                       HWRegContainer
 from rocisa.instruction import SGetPositivePCOffset, SLongBranchPositive, SCLongBranchScc0, SCLongBranchScc1, \
                         vectorStaticDivide, vectorStaticRemainder, vectorUInt32CeilDivideAndRemainder, \
-                        vectorStaticDivideAndRemainder
+                        vectorStaticDivideAndRemainder, scalarStaticDivideAndRemainder, scalarStaticCeilDivide, \
+                        scalarStaticRemainder, scalarUInt32DivideAndRemainder, sMagicDiv, vectorStaticMultiply, \
+                        vectorStaticMultiplyAdd, scalarStaticMultiply64, SMulInt64to32
 from rocisa.enum import InstType
 from rocisa.macro import MacroVMagicDiv, PseudoRandomGenerator
 from . import CUSTOM_KERNEL_PATH
 from .TensileInstructions import SelectBit, \
-                          SBranchIfZero, SBranchIfNotZero, SMulInt64to32, DSInit, VCvtBF16toFP32, \
-                          ArgumentLoader, bomb, scalarStaticRemainder, \
-                          scalarUInt32DivideAndRemainder, scalarStaticDivideAndRemainder, \
-                          scalarStaticCeilDivide, sMagicDiv, staticMultiply, staticMultiplyAdd, scalarStaticMultiply, \
-                          RegisterPool, \
+                          SBranchIfZero, SBranchIfNotZero, DSInit, VCvtBF16toFP32, \
+                          ArgumentLoader, bomb, RegisterPool, \
                           allocTmpGpr, allocTmpGprList, log2, \
                           ceilDivide, DataType, dataTypeToMfmaInstTypePair, \
                           dataTypeNameAbbrevToInstType
@@ -1245,7 +1244,7 @@ class KernelWriterAssembly(KernelWriter):
       bpeGR = tP["bpeGR"] if not tP["isM"] else tP["bpe"]
       # addr *= bytes/element
       if justOffset32:
-        macro.add(staticMultiply(vgpr("Addr+0", isMacro=True), "v[\\vgprAddr+0]", bpeGR, None, "offset *= bytes/element"))
+        macro.add(vectorStaticMultiply(vgpr("Addr+0", isMacro=True), vgpr("Addr+0", isMacro=True), bpeGR, None, "offset *= bytes/element"))
       else:
         macro.add(VLShiftLeftB64(dst=vgpr("Addr+0", 2, isMacro=True), \
             shiftHex=hex(log2(bpeGR)), \
@@ -1516,14 +1515,14 @@ class KernelWriterAssembly(KernelWriter):
       # CU_count > 0
       module.add(label_XCCG_nonzero)
       module.addComment0("temp0 = (wg//CU_Count)*CU_Count")
-      module.add(scalarUInt32DivideAndRemainder(qReg=tmpSgpr0, dReg="WorkGroup0", divReg=CU_CountSgpr, rReg=tmpSgpr1, tmpVgprRes=tmpVgprRes, wavewidth=kernel["WavefrontSize"], doRemainder=1, comment="wg//CU_Count"))
+      module.add(scalarUInt32DivideAndRemainder(qReg=tmpSgpr0, dReg="WorkGroup0", divReg=CU_CountSgpr, rReg=tmpSgpr1, tmpVgprRes=tmpVgprRes, wavewidth=kernel["WavefrontSize"], doRemainder=True, comment="wg//CU_Count"))
       module.add(SMulI32(dst=sgpr(tmpSgpr0), src0=sgpr(tmpSgpr0), src1=sgpr(CU_CountSgpr)))
       module.addComment0("temp1 = (wg%CU_Count)//WGMXCC")
       module.add(SLShiftRightB32(dst=sgpr(tmpSgpr1), shiftHex=sgpr(WGMXCCSgpr), src=sgpr(tmpSgpr1)))
       module.addComment0("temp0 = temp0 + temp1")
       module.add(SAddU32(dst=sgpr(tmpSgpr0), src0=sgpr(tmpSgpr0), src1=sgpr(tmpSgpr1)))
       module.addComment0("temp1 = (wg%WGMXCC) * ((WGs - (WGs//CU_Count) * CU_Count) if (wg > (WGs//CU_Count) * CU_Count) else CU_Count)//WGMXCC")
-      module.add(scalarUInt32DivideAndRemainder(qReg=tmpSgpr1, dReg=tmpSgprNumWorkGroups, divReg=CU_CountSgpr, rReg=None, tmpVgprRes=tmpVgprRes, wavewidth=kernel["WavefrontSize"], doRemainder=0, comment="WGs//CU_Count"))
+      module.add(scalarUInt32DivideAndRemainder(qReg=tmpSgpr1, dReg=tmpSgprNumWorkGroups, divReg=CU_CountSgpr, rReg=-1, tmpVgprRes=tmpVgprRes, wavewidth=kernel["WavefrontSize"], doRemainder=False, comment="WGs//CU_Count"))
       module.add(SMulI32(dst=sgpr(tmpSgpr1), src0=sgpr(tmpSgpr1), src1=sgpr(CU_CountSgpr)))
       module.add(SSubU32(dst=sgpr(tmpSgpr2), src0=sgpr(tmpSgprNumWorkGroups), src1=sgpr(tmpSgpr1)))
       module.add(SCmpGtU32(src0=sgpr("WorkGroup0"), src1=sgpr(tmpSgpr1)))
@@ -2155,7 +2154,7 @@ class KernelWriterAssembly(KernelWriter):
       module.add(VAddCOU32(dst=vgpr(v), dst1=VCC(), src0=vgpr(v), src1=vgpr(v+1), \
           comment="%s=wg1*nwg0+wg0"%vgpr(v) ))
       with self.allocTmpSgpr(1) as tmpSgprInfo:
-        module.add(staticMultiply(vgpr(v), vgpr(v), kernel["NumThreads"], tmpSgprInfo))
+        module.add(vectorStaticMultiply(vgpr(v), vgpr(v), kernel["NumThreads"], tmpSgprInfo))
       module.add(VAddCOU32(dst=vgpr(v), dst1=VCC(), src0=vgpr(v), src1=vgpr("Serial"), \
           comment="%s=tid+NT*(wg1*nwg0+wg0)=serial"%vgpr(v) ))
       module.add(VMulLOU32(dst=vgpr(v), src0=hex(self.nipt*4), src1=vgpr(v), \
@@ -2347,7 +2346,7 @@ class KernelWriterAssembly(KernelWriter):
               "2. wave offset in N dimen: wtid = tid / dividedForWaveId(%u)" % dividedForWaveId))
           module.add(vectorStaticRemainder(dummy, wReg, wReg, num1DWaves, tmpVgprRes, tmpSgprInfo, \
               "2. wave offset in M dimen: wtid0 = wtid / num1DWaves(%u)" % num1DWaves))
-          module.add(staticMultiplyAdd(vgpr("GlobalReadOffsetMetadata"), vgpr(wReg), offsetWave, vgpr(tReg), tmpSgprInfo, \
+          module.add(vectorStaticMultiplyAdd(vgpr("GlobalReadOffsetMetadata"), vgpr(wReg), offsetWave, vgpr(tReg), tmpSgprInfo, \
                                        "2. wave offset in M dimen: wOffset = wtid0 * W0 offset(%u); 2. tile coord = tileOffset + wOffset" % offsetWave))
         else:
           module.add(VMovB32(vgpr("GlobalReadOffsetMetadata"), vgpr(tReg), \
@@ -2392,7 +2391,7 @@ class KernelWriterAssembly(KernelWriter):
         tmpVgpr = self.vgprPool.checkOut(1, 'graTA vgpr', self.states.preventVgprOverflowDuringNewTile)
         # Buffer Load will set the SRD to start of the MacroTile
         # So don't add the static wg-related component here - save for later.
-        module.add(staticMultiply(vgpr(tmpVgpr), sgpr(tP["wg"]), kernel[tP["mt"]], tmpSgprInfo))  # workgroup
+        module.add(vectorStaticMultiply(vgpr(tmpVgpr), sgpr(tP["wg"]), kernel[tP["mt"]], tmpSgprInfo))  # workgroup
         module.add(VAddCOU32(dst=vgpr(tReg2), dst1=VCC(), src0=vgpr(tmpVgpr), \
             src1=vgpr(tReg), comment="gro%s-tile = serial%s%s*VW + (wg%s*MT%s)" \
             % (tc, tOpStr, divisorName, tc, tc) ))
@@ -2414,7 +2413,7 @@ class KernelWriterAssembly(KernelWriter):
 
       with self.allocTmpSgpr(1) as tmpSgprInfo:
         # graUnrollAssignment += gsuSumIdx*DepthU
-        module.add(staticMultiply(vgpr(gsuOffset), vgpr(gsuOffset), kernel["DepthU"], tmpSgprInfo))
+        module.add(vectorStaticMultiply(vgpr(gsuOffset), vgpr(gsuOffset), kernel["DepthU"], tmpSgprInfo))
 
       module.add(VAddCOU32(dst=vgpr(tP["gpr"]["uReg"]), dst1=VCC(), \
           src0=vgpr(gsuOffset), src1=vgpr(tP["gpr"]["uReg"]), \
@@ -2834,7 +2833,7 @@ class KernelWriterAssembly(KernelWriter):
           "0. thread id in wave: wtid = tid %% wavelength(%u)" % waveWidth))
       module.add(vectorStaticDivide(kReg, kReg, dividendForKId, tmpVgprRes, \
           "1. unroll offset: kIdx = wtid / (MIN(%u) )" % (kernel["MatrixInstN"])))
-      module.add(staticMultiply(vgpr(kReg), vgpr(kReg), strideK, tmpSgprInfo, \
+      module.add(vectorStaticMultiply(vgpr(kReg), vgpr(kReg), strideK, tmpSgprInfo, \
           "1. unroll offset: grKOffset = kIdx * mStride(%u)" % strideK))
 
     # Calculate final element offset
@@ -3166,11 +3165,11 @@ class KernelWriterAssembly(KernelWriter):
       actualBatchSize = stmp+5 #for broadcast
       actualBatchIndex = stmp+5 #for broadcast
 
-      module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tileStart+0), sgpr(tileStart+1), sgpr(tP["wg"]), kernel[tP["mt"]], "WorkGroup[01] * MT"))
+      module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tileStart+0), sgpr(tileStart+1), sgpr(tP["wg"]), kernel[tP["mt"]], comment="WorkGroup[01] * MT"))
 
       unrollSummation = [ i for i in tP["ia"] if i in kernel["ProblemType"]["IndicesSummation"] ]
       module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tileStart), sgpr(tileStart+1), sgpr(tileStart+0), self.sizeRef(unrollSummation[-1]), \
-                                "scaled tile-offset by Summation size"))
+                                comment="scaled tile-offset by Summation size"))
 
       depthU = kernel["DepthU"]
       gsucLabel    = Label(label=self.labels.getNameInc("GSUC_M"), comment="")
@@ -3178,7 +3177,7 @@ class KernelWriterAssembly(KernelWriter):
       module.add(SAndB32(dst=sgpr(tmpSgprInfo.idx), src0=sgpr("GSU"), src1=hex(0x8000), comment="SCC = (GSUC == 1) ?"))
       gsuOffsetStr = "gsuOffset = DepthU*GSUSumIdx"
       module.add(SCBranchSCC1(labelName=gsucLabel.getLabelName(), comment="branch if GSUC == 1"))
-      module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(stmp+0), sgpr(stmp+1), depthU, sgpr("GSUSumIdx"), gsuOffsetStr))
+      module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(stmp+0), sgpr(stmp+1), depthU, sgpr("GSUSumIdx"), comment=gsuOffsetStr))
       module.add(SBranch(gsucLabelEnd.getLabelName()))
       module.add(gsucLabel)
       gsuOffsetStr = "gsuOffset = DepthU*accumulatedNumOfLoopCounterL"
@@ -3186,7 +3185,7 @@ class KernelWriterAssembly(KernelWriter):
       module.add(SLShiftRightB32(dst=sgpr(loopCounterName), src=sgpr("SizesSum"), shiftHex=log2(depthU), \
                                   comment="s[%s] = s[sgprSizesSum] / %s"%(loopCounterName, depthU)))
       module.add(self.calculateLoopNumIterOffsetGsu(kernel, loopCounterName, tmpSgprInfo))
-      module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(stmp+0), sgpr(stmp+1), sgpr(stmp+0), depthU, gsuOffsetStr))
+      module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(stmp+0), sgpr(stmp+1), sgpr(stmp+0), depthU, comment=gsuOffsetStr))
       module.add(gsucLabelEnd)
       module.add(SAddU32(dst=sgpr(tileStart+0), src0=sgpr(tileStart+0), src1=sgpr(stmp+0), comment="accum GsuOffet term to tilestart"))
       module.add(SAddCU32(dst=sgpr(tileStart+1), src0=sgpr(tileStart+1), src1=sgpr(stmp+1), comment="accum GsuOffet term to tilestart"))
@@ -3194,12 +3193,12 @@ class KernelWriterAssembly(KernelWriter):
       sizeIndex = [ dim for dim in tP["ia"] ]
       assert(len(sizeIndex) >= 2)
       module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(blockOffset), sgpr(blockOffset+1), self.sizeRef(sizeIndex[0]), self.sizeRef(sizeIndex[1]), \
-                                "calculate metadata tensor size"))
+                                comment="calculate metadata tensor size"))
       for dim in sizeIndex[2:]:
         module.add(SCmpEQU32(src0=sgpr("Stride%s%s"%(tc,self.states.indexChars[tP['ia'][dim]])), src1=0, comment="broadcast %s?"%tc))
         module.add(SCSelectB32(dst=sgpr(actualBatchSize), src0=hex(1) , src1=self.sizeRef(sizeIndex[dim]), comment="set batchSize as 1 for boardcast %s"%tc))
         module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tensorSize), sgpr(tensorSize+1), sgpr(blockOffset), sgpr(actualBatchSize), \
-                                "calculate metadata tensor size"))
+                                comment="calculate metadata tensor size"))
         module.add(SCSelectB32(dst=sgpr(actualBatchIndex), src0=0 , src1=sgpr("WorkGroup2"), comment="set batchIndex as 0 for boardcast %s"%tc))
 
       if self.states.use64bShadowLimit:
@@ -3229,10 +3228,10 @@ class KernelWriterAssembly(KernelWriter):
             or isPackedIndex(kernel, idx)):
           assert(wg==2)
           if not wroteTileStart:
-            module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tileStart+0), sgpr(tileStart+1), sgpr(blockOffset), sgpr("WorkGroup2"), "block offset*WG"))
+            module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tileStart+0), sgpr(tileStart+1), sgpr(blockOffset), sgpr("WorkGroup2"), comment="block offset*WG"))
             wroteTileStart = True
           else:
-            module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(stmp+0), sgpr(stmp+1), sgpr(blockOffset), sgpr(actualBatchIndex), "block offset*WG"))
+            module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(stmp+0), sgpr(stmp+1), sgpr(blockOffset), sgpr(actualBatchIndex), comment="block offset*WG"))
             module.add(SAddU32(sgpr(tileStart+0), sgpr(tileStart+0), sgpr(stmp+0), "accum wg term to tilestart"))
             module.add(SAddCU32(sgpr(tileStart+1), sgpr(tileStart+1), sgpr(stmp+1), "accum wg term to tilestart"))
 
@@ -3277,11 +3276,11 @@ class KernelWriterAssembly(KernelWriter):
         #tP['ia'][1]
 
         # This is guaranteed to fit in 32-bit since the WG*MT is a number of elements in some unsigned direction:
-        module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tileStart+0), sgpr(tileStart+1), sgpr(tP["wg"]), kernel[tP["mt"]], "WorkGroup[01] * MT"))
+        module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tileStart+0), sgpr(tileStart+1), sgpr(tP["wg"]), kernel[tP["mt"]], comment="WorkGroup[01] * MT"))
         strideF = self.strideRef(tc, tP['tileIdx'])
         if not self.isConstUnitStride(strideF):
           module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tileStart), sgpr(tileStart+1), sgpr(tileStart+0), \
-                    strideF, "tlu=0, scaled tile-offset by stride"))
+                    strideF, comment="tlu=0, scaled tile-offset by stride"))
 
         skComponent = Component.StreamK.find(self)
         module.add(skComponent.computeLoadSrd(self, kernel, tc, stmp))
@@ -3340,7 +3339,7 @@ class KernelWriterAssembly(KernelWriter):
             else:
               module.add(SSubU32(dst=sgpr(stmp), src0=size, src1=0x1, comment="(size-1)"))
           module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(stmp), sgpr(stmp+1), stride, \
-                      sgpr(stmp), "stride x (size-1)"))
+                      sgpr(stmp), comment="stride x (size-1)"))
           module.add(SAddU32(dst=sgpr(tensor2dSize0), src0=sgpr(tensor2dSize0), src1=sgpr(stmp+0), comment="sum tensor size"))
           module.add(SAddCU32(dst=sgpr(tensor2dSize1), src0=sgpr(tensor2dSize1), src1=sgpr(stmp+1), comment="sum tensor size"))
 
@@ -3397,17 +3396,17 @@ class KernelWriterAssembly(KernelWriter):
             assert(wg==2) # can only have one wg2 with a batch. Other dimensions should be packed into wg0/wg1
             stride = "Stride%s%s"%(tc,self.states.indexChars[tP['ia'][i]])
             if not wroteTileStart:
-              module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tileStart+0), sgpr(tileStart+1), sgpr(stride), sgpr("WorkGroup2"), "Stride*WG"))
+              module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tileStart+0), sgpr(tileStart+1), sgpr(stride), sgpr("WorkGroup2"), comment="Stride*WG"))
               wroteTileStart = True
             else:
-              module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(stmp+0), sgpr(stmp+1), sgpr(stride), sgpr("WorkGroup2"), "Stride*WG"))
+              module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(stmp+0), sgpr(stmp+1), sgpr(stride), sgpr("WorkGroup2"), comment="Stride*WG"))
               module.add(SAddU32(dst=sgpr(tileStart+0), src0=sgpr(tileStart+0), src1=sgpr(stmp+0), comment="accum wg term to tilestart"))
               module.add(SAddCU32(dst=sgpr(tileStart+1), src0=sgpr(tileStart+1), src1=sgpr(stmp+1), comment="accum wg term to tilestart"))
             wg+=1
 
     # Add the tile start to the SRD
     if wroteTileStart:
-      module.add(scalarStaticMultiply(sgpr(tileStart,2), sgpr(tileStart,2), tP["bpeGR"], None, "tileStart *= BPE"))
+      module.add(scalarStaticMultiply64(sgpr(tileStart,2), sgpr(tileStart,2), tP["bpeGR"], None, "tileStart *= BPE"))
       module.add(SAddU32(dst=sgpr("Srd%s+0"%tc), src0=sgpr("Address%s+0"%tc), src1=sgpr(tileStart+0), comment="SRD base = Address+ tileStart0"))
       module.add(SAddCU32(dst=sgpr("Srd%s+1"%tc), src0=sgpr("Address%s+1"%tc), src1=sgpr(tileStart+1), comment="SRD base = Address+ tileStart1"))
     else:
@@ -3721,7 +3720,7 @@ class KernelWriterAssembly(KernelWriter):
       if  tluOther and tP["tlu"]:
         # DirectToVgpr + both TLU case, multiply qReg by kernel["MIInputPerThread"]
         dtvKInterval = kernel["MIInputPerThread"]
-      module.add(staticMultiply(vgpr(qReg), vgpr(qReg), dtvKInterval, None))
+      module.add(vectorStaticMultiply(vgpr(qReg), vgpr(qReg), dtvKInterval, None))
 
       # DTV+localSplitU case. Calculate LSU offset here
       if kernel["LocalSplitU"] > 1:
@@ -3766,10 +3765,10 @@ class KernelWriterAssembly(KernelWriter):
       if tP["glvw"] > 1:
         if tP["tlu"]:
           module.addComment0("tile *= glvw")
-          module.add(staticMultiply(vgpr(tReg), vgpr(tReg), tP["glvw"], tmpSgprInfo))
+          module.add(vectorStaticMultiply(vgpr(tReg), vgpr(tReg), tP["glvw"], tmpSgprInfo))
         else:
           module.addComment0("unroll *= glvw")
-          module.add(staticMultiply(vgpr(uReg), vgpr(uReg), tP["glvw"], tmpSgprInfo))
+          module.add(vectorStaticMultiply(vgpr(uReg), vgpr(uReg), tP["glvw"], tmpSgprInfo))
 
 
     uReg2 = self.vgprPool.checkOut(1, "uReg2", self.states.preventVgprOverflowDuringNewTile)
@@ -3839,7 +3838,7 @@ class KernelWriterAssembly(KernelWriter):
       module.add(vectorStaticDivide(tmpVgpr, destVgpr, kernel["LdsBlockSizePerPad%s"%tc], tmpVgprRes, \
         "padding %u per block %u" % (kernel["LdsPad%s"%tc] * tP["bpeDS"], kernel["LdsBlockSizePerPad%s"%tc])))
       with self.allocTmpSgpr(1) as tmpSgprInfo:
-        module.add(staticMultiplyAdd(vgpr(destVgpr), vgpr(tmpVgpr), kernel["LdsPad%s"%tc] * tP["bpeDS"], vgpr(destVgpr), tmpSgprInfo, \
+        module.add(vectorStaticMultiplyAdd(vgpr(destVgpr), vgpr(tmpVgpr), kernel["LdsPad%s"%tc] * tP["bpeDS"], vgpr(destVgpr), tmpSgprInfo, \
           "padding %u per block %u" % (kernel["LdsPad%s"%tc] * tP["bpeDS"], kernel["LdsBlockSizePerPad%s"%tc])))
       self.vgprPool.checkIn(tmpVgpr)
 
@@ -4031,7 +4030,7 @@ class KernelWriterAssembly(KernelWriter):
         module.add(vectorStaticDivide(rReg, "LocalReadAddr%s"%tc, kernel["LdsBlockSizePerPad%s"%tc], tmpVgprRes, \
           "Final Offset: padding %u per block %u" % (kernel["LdsPad%s"%tc] * tP["bpeDS"], kernel["LdsBlockSizePerPad%s"%tc])))
         with self.allocTmpSgpr(1) as tmpSgprInfo:
-          module.add(staticMultiplyAdd(vgpr("LocalReadAddr%s"%tc), vgpr(rReg), kernel["LdsPad%s"%tc] * tP["bpeDS"], vgpr("LocalReadAddr%s"%tc), tmpSgprInfo, \
+          module.add(vectorStaticMultiplyAdd(vgpr("LocalReadAddr%s"%tc), vgpr(rReg), kernel["LdsPad%s"%tc] * tP["bpeDS"], vgpr("LocalReadAddr%s"%tc), tmpSgprInfo, \
                                        "Final Offset: padding %u per block %u" % (kernel["LdsPad%s"%tc] * tP["bpeDS"], kernel["LdsBlockSizePerPad%s"%tc])))
 
       # release resources
@@ -4057,7 +4056,7 @@ class KernelWriterAssembly(KernelWriter):
         if kernel["UseDotInstruction"]:
           kidx = self.vgprPool.checkOut(1) # remainder
           module.add(VAndB32(dst=vgpr(kidx), src0=(kernel["NumWaveSplitK"]-1), src1=vgpr("Serial"), comment="kidx = Serial % NumWaveSplitK"))
-          module.add(staticMultiply(vgpr(kidx), vgpr(kidx), lrvw, tmpSgprInfo, \
+          module.add(vectorStaticMultiply(vgpr(kidx), vgpr(kidx), lrvw, tmpSgprInfo, \
             "*= lrvw"))
           # Final offset
           module.add(VAddLShiftLeftU32(dst=finalVgpr, shiftHex=hex(log2(tP["bpe"])), src0=vgpr(kidx), src1=vgpr(tP["gpr"]["lro"]), \
@@ -4069,11 +4068,11 @@ class KernelWriterAssembly(KernelWriter):
           vCont = ContinuousRegister(vtmp, 1)
           module.add(vectorStaticDivide(sgid, "Serial", divisor, vCont, \
             "LSU offset: sgid = Serial / subGroup(%u)" % divisor))
-          module.add(staticMultiply(vgpr(sgid), vgpr(sgid), mtAddPad, tmpSgprInfo, \
+          module.add(vectorStaticMultiply(vgpr(sgid), vgpr(sgid), mtAddPad, tmpSgprInfo, \
             "LSU offset: lsuoffset = sgid*(MT%u+PAD)"%tile01))
           # module.add(SMovB32(dst=sgpr(tmpSgpr), src=mtAddPad*lsuStride, \
           #   comment="LSU offset: stride = lsuStride(%u)*(MT%u(%u) + PAD%u(%u))" % (lsuStride,tile01, kernel["MacroTile%u" % tile01], tile01, LdsPad)))
-          module.add(staticMultiply(vgpr(tP["gpr"]["lro"]), vgpr(tP["gpr"]["lro"]), kernel["VectorWidthB"], tmpSgprInfo, \
+          module.add(vectorStaticMultiply(vgpr(tP["gpr"]["lro"]), vgpr(tP["gpr"]["lro"]), kernel["VectorWidthB"], tmpSgprInfo, \
             "Final Offset: lr%sOffset * VW" % tc))
           module.add(VAddLShiftLeftU32(dst=finalVgpr, shiftHex=hex(log2(tP["bpe"])), src0=vgpr(sgid), src1=vgpr(tP["gpr"]["lro"]), \
             comment="Final Offset: add padding %u per block %u" % (kernel["LdsPad%s"%tc] * tP["bpeDS"], kernel["LdsBlockSizePerPad%s"%tc])))
@@ -4090,7 +4089,7 @@ class KernelWriterAssembly(KernelWriter):
           rReg    = self.vgprPool.checkOut(1) # remainder, unused here
           module.add(vectorStaticDivide(rReg, "LocalReadAddr%s"%tc, kernel["LdsBlockSizePerPad%s"%tc], tmpSgpr, \
             "Final Offset: padding %u per block %u" % (kernel["LdsPad%s"%tc], kernel["LdsBlockSizePerPad%s"%tc])))
-          module.add(staticMultiplyAdd(vgpr("LocalReadAddr%s"%tc), vgpr(rReg), kernel["LdsPad%s"%tc] * tP["bpe"], vgpr("LocalReadAddr%s"%tc), tmpSgprInfo, \
+          module.add(vectorStaticMultiplyAdd(vgpr("LocalReadAddr%s"%tc), vgpr(rReg), kernel["LdsPad%s"%tc] * tP["bpe"], vgpr("LocalReadAddr%s"%tc), tmpSgprInfo, \
             "Final Offset: padding %u per block %u" % (kernel["LdsPad%s"%tc] * tP["bpeDS"], kernel["LdsBlockSizePerPad%s"%tc])))
           self.vgprPool.checkIn(rReg)
 
@@ -6179,7 +6178,7 @@ class KernelWriterAssembly(KernelWriter):
           tmpSgprX1 = tmpSgprInfo.idx
 
         # replace 0 for differnet thread
-        shiftK.add(staticMultiply(vgpr(kReg), vgpr(kReg), numInput, tmpSgprInfo))
+        shiftK.add(vectorStaticMultiply(vgpr(kReg), vgpr(kReg), numInput, tmpSgprInfo))
         shiftK.add(VCmpGEI32(dst=sgpr(tmpSgprX2, self.states.laneSGPRCount), src0=vgpr(kReg), src1=sgpr(loopCntSgpr), comment="check K index >= Size L"))
         for a in range(0, kernel["ThreadTileA"]):
           for iui in range(0, iuiCount):
@@ -6366,7 +6365,7 @@ class KernelWriterAssembly(KernelWriter):
           if kernel["ProblemType"]["Sparse"] == 1 and numMIInput//8 >= 1:
             vgprPerSet0Group = 1
           elif vgprPerInputA <= 2:
-            shiftK.add(staticMultiply(vgpr(kReg_first), vgpr(kReg_first), numMIInput * numReadsIterCoalesced, tmpSgprInfo))
+            shiftK.add(vectorStaticMultiply(vgpr(kReg_first), vgpr(kReg_first), numMIInput * numReadsIterCoalesced, tmpSgprInfo))
             kStepForCoalesced = (u%numReadsIterCoalesced) * numMIInput
             if kStepForCoalesced > 0:
               shiftK.add(VAddU32(vgpr(kReg_first), hex(kStepForCoalesced), vgpr(kReg_first), "k += (u%%numReadsIterCoalesced) * numMIInput"))
@@ -6386,7 +6385,7 @@ class KernelWriterAssembly(KernelWriter):
                     multiplyBy = numMIInput//sparseInputBlocksA
                 else:
                     multiplyBy = numMIInput//2 if vgprPerInputA == 8 else numMIInput
-                shiftK.add(staticMultiply(vgpr(kReg_first), vgpr(kReg_first), multiplyBy, tmpSgprInfo))
+                shiftK.add(vectorStaticMultiply(vgpr(kReg_first), vgpr(kReg_first), multiplyBy, tmpSgprInfo))
                 shiftK.add(VAddU32(vgpr(kReg), vgpr(kReg_first), 0, ""))
               elif kernel["ProblemType"]["Sparse"] == 2 and group == 2 and sparseInputBlocksA == 2:
                 is8bits = kernel["ProblemType"]["DataType"].numBytes() == 1
@@ -6432,7 +6431,7 @@ class KernelWriterAssembly(KernelWriter):
                     multiplyBy = numMIInput//sparseInputBlocksB
                 else:
                     multiplyBy = numMIInput//2 if vgprPerInputB == 8 else numMIInput
-                shiftK.add(staticMultiply(vgpr(kReg_first), vgpr(kReg_first), multiplyBy, tmpSgprInfo))
+                shiftK.add(vectorStaticMultiply(vgpr(kReg_first), vgpr(kReg_first), multiplyBy, tmpSgprInfo))
                 shiftK.add(VAddU32(vgpr(kReg), vgpr(kReg_first), 0, ""))
               elif kernel["ProblemType"]["Sparse"] == 1 and group == 2 and sparseInputBlocksB == 2:
                 is8bits = kernel["ProblemType"]["DataType"].numBytes() == 1
@@ -7439,7 +7438,7 @@ class KernelWriterAssembly(KernelWriter):
         module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(maxAddrSgpr+0), sgpr(maxAddrSgpr+1),  \
                     sgpr("Sizes%s+%u"%("Sum" if sizeIdxIsSum else "Free", sizeIdx)),  \
                     sgpr("Stride%s%s"%(tc, self.states.indexChars[tP['ia'][-1]])), \
-                    "64b tensor%s size in elements"%tc))
+                    comment="64b tensor%s size in elements"%tc))
         if log2(tP["bpeGR"]) > 0:
           module.add(SLShiftLeftB64(dst=sgpr(maxAddrSgpr,2), src=sgpr(maxAddrSgpr,2), \
             shiftHex=hex(log2(tP["bpeGR"])), comment="<- tensor%s size in bytes"%tc))
@@ -9807,13 +9806,13 @@ class KernelWriterAssembly(KernelWriter):
                 for x in range(2, i - 1):
                   strideC = "Size%s"%(INDEX_CHARS[x])
                   module.add(SMulI32(dst=sgpr(tmpS0), src0=sgpr(tmpS0), src1=sgpr(strideC)))
-                module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tmpS0), sgpr(tmpS1), coord, sgpr(tmpS0), "Scale%s %s by Stride"%(mat, coord)))
+                module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tmpS0), sgpr(tmpS1), coord, sgpr(tmpS0), comment="Scale%s %s by Stride"%(mat, coord)))
               else:
                 strideC = "Size%s"%(INDEX_CHARS[i-1])
-                module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tmpS0), sgpr(tmpS1), coord, sgpr(strideC), "Scale%s %s by Stride"%(mat, coord)))
+                module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tmpS0), sgpr(tmpS1), coord, sgpr(strideC), comment="Scale%s %s by Stride"%(mat, coord)))
             else:
               strideC = "Stride%s%s"%(mat, self.states.indexChars[i])
-              module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tmpS0), sgpr(tmpS1), coord, sgpr(strideC), "Scale%s %s by Stride"%(mat, coord)))
+              module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tmpS0), sgpr(tmpS1), coord, sgpr(strideC), comment="Scale%s %s by Stride"%(mat, coord)))
             module.add(SLShiftLeftB64(dst=sgpr(tmpS0,2), src=sgpr(tmpS0,2), shiftHex=bpe, comment="scale by bpe"))
 
             module.add(SAddU32(dst=sgpr("Srd%s+0"%mat), src0=sgpr("%s%s+0"%(addrSrcSgpr, mat)), src1=sgpr(tmpS0), comment="add lo to SRD"))
@@ -12790,21 +12789,21 @@ class KernelWriterAssembly(KernelWriter):
         size =   self.sizeRef(idx)
         module.add(SSubU32(dst=sgpr(tmpSgpr+2), src0=size, src1=0x1, comment="(size-1)"))
         module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tmpSgpr+2), sgpr(tmpSgpr+3), stride, \
-                    sgpr(tmpSgpr+2), "stride x (size-1)"))
+                    sgpr(tmpSgpr+2), comment="stride x (size-1)"))
         module.add(SAddU32(dst=sgpr(tmpSgpr+0), src0=sgpr(tmpSgpr+0), src1=sgpr(tmpSgpr+2), comment="sum tensor size"))
         module.add(SAddCU32(dst=sgpr(tmpSgpr+1), src0=sgpr(tmpSgpr+1), src1=sgpr(tmpSgpr+3), comment="sum tensor size"))
       # SingleBuffer works on the same work space for every gsu
       if kernel["GlobalSplitUAlgorithm"] == "MultipleBuffer":
         module.add(SAndB32(dst=sgpr(tmpSgpr+2), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
         module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tmpSgpr+0), sgpr(tmpSgpr+1), sgpr(tmpSgpr+2), \
-                        sgpr(tmpSgpr+0), "Recalculate gsu stride (size * gsu)"))
+                        sgpr(tmpSgpr+0), comment="Recalculate gsu stride (size * gsu)"))
         module.add(SMovB32(dst=sgpr(tmpSgpr+2), src=sgpr("GSUSumIdx"), comment="Init tensor size"))
         module.add(SMovB32(dst=sgpr(tmpSgpr+3), src=0x0, comment="Init tensor size"))
         module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tmpSgpr+2), sgpr(tmpSgpr+3), self.sizeRef(tP["idx"]), \
-                        sgpr(tmpSgpr+2), "Reduction GSU offset *stride"))
+                        sgpr(tmpSgpr+2), comment="Reduction GSU offset *stride"))
         module.add(SAddU32(dst=sgpr(tmpSgpr+0), src0=sgpr(tmpSgpr+0), src1=sgpr(tmpSgpr+2), comment="sum gsu offset"))
         module.add(SAddCU32(dst=sgpr(tmpSgpr+1), src0=sgpr(tmpSgpr+1), src1=sgpr(tmpSgpr+3), comment="sum gsu offset"))
-      module.add(scalarStaticMultiply(sgpr(tmpSgpr, 2), sgpr(tmpSgpr, 2), biasBpe, None, comment="stride * bpe"))
+      module.add(scalarStaticMultiply64(sgpr(tmpSgpr, 2), sgpr(tmpSgpr, 2), biasBpe, None, comment="stride * bpe"))
       module.add(SAddU32(dst=sgpr("SrdBias+0"), src0=sgpr("SrdBias+0"), src1=sgpr(tmpSgpr), comment="Recalculate start address for GSU."))
       module.add(SAddCU32(dst=sgpr("SrdBias+1"), src0=sgpr("SrdBias+1"), src1=sgpr(tmpSgpr+1), comment="Recalculate start address for GSU."))
     # Num records
@@ -12812,9 +12811,9 @@ class KernelWriterAssembly(KernelWriter):
 
     # Local read
     # remaining size % VW
-    module.add(staticMultiply(vgpr(offsetVgpr), vgpr("Serial"), maxKId, tmpSgprRes, \
+    module.add(vectorStaticMultiply(vgpr(offsetVgpr), vgpr("Serial"), maxKId, tmpSgprRes, \
             "offset = serial * maxKId"))
-    module.add(staticMultiply(vgpr(offsetVgpr), vgpr(offsetVgpr), gwvw, tmpSgprRes, \
+    module.add(vectorStaticMultiply(vgpr(offsetVgpr), vgpr(offsetVgpr), gwvw, tmpSgprRes, \
             "apply VectorWidth: offset = bnOffset * vw(%u)" % gwvw))
 
     enableEdge = False
@@ -12859,7 +12858,7 @@ class KernelWriterAssembly(KernelWriter):
             offset_at_g += shit_offset
           ds_read vpgr_at_g, offset_at_g
         '''
-        module.add(staticMultiply(vgpr(serialOffsetVgpr), vgpr("Serial"), gwvw, tmpSgprShift, comment="serial = serial * gwvw"))
+        module.add(vectorStaticMultiply(vgpr(serialOffsetVgpr), vgpr("Serial"), gwvw, tmpSgprShift, comment="serial = serial * gwvw"))
         for g in range(gwvw):
           if g != 0:
             module.add(VAddU32(dst=vgpr(offsetVgpr+g), src0=vgpr(offsetVgpr+(g-1)), src1=maxKId, comment="new offset = offset + maxKId"))
@@ -12960,7 +12959,7 @@ class KernelWriterAssembly(KernelWriter):
     # Calculate global offset- macro tile 0 part
     tmpSgpr = tmpSgprRes.idx
     module.add(SMulI32(dst=sgpr(tmpSgpr), src0=mt, src1=sgpr("WorkGroup%u" % tile01), comment="wgp * MT"))
-    module.add(staticMultiply(vgpr(offsetVgpr), vgpr("Serial"), gwvw, tmpSgprRes, \
+    module.add(vectorStaticMultiply(vgpr(offsetVgpr), vgpr("Serial"), gwvw, tmpSgprRes, \
             "apply VectorWidth: offset = serial * vw(%u)" % gwvw))
     module.add(VAddU32(dst=vgpr(offsetVgpr), src0=sgpr(tmpSgpr), src1=vgpr(offsetVgpr), comment="coord = wgp * MT + thread offset"))
     module.add(VLShiftLeftB32(dst=vgpr(offsetVgpr), \
@@ -13609,22 +13608,23 @@ class KernelWriterAssembly(KernelWriter):
 
   def sMagicDivWrapper(self, dest, dividend, magicNumber, magicShift):
     tmpVgpr = self.vgprPool.checkOut(2)
-    module = sMagicDiv(dest, self.states.asmCaps["HasSMulHi"], dividend, magicNumber, magicShift, tmpVgpr)
+    tmpVgprRes = ContinuousRegister(tmpVgpr, 2)
+    module = sMagicDiv(dest, self.states.asmCaps["HasSMulHi"], dividend, magicNumber, magicShift, tmpVgprRes)
     self.vgprPool.checkIn(tmpVgpr)
     return module
 
   def s_mul_u64_u32 (self, dst0, dst1,  src0, src1, tmpVgpr=None, comment=""):
     vtmp0 = self.vgprPool.checkOut(2) if tmpVgpr == None else tmpVgpr
-    module = SMulInt64to32(self.states.asmCaps["HasSMulHi"], \
-                           dst0, dst1, src0, src1, False, vtmp0, comment)
+    tmpVgprRes = ContinuousRegister(vtmp0, 2)
+    module = SMulInt64to32(dst0, dst1, src0, src1, tmpVgprRes, bool(self.states.asmCaps["HasSMulHi"]), False, comment)
     if tmpVgpr == None:
       self.vgprPool.checkIn(vtmp0)
     return module
 
   def s_mul_i64_i32 (self, dst0, dst1,  src0, src1, comment):
     vtmp0 = self.vgprPool.checkOut(2)
-    module = SMulInt64to32(self.states.asmCaps["HasSMulHi"], \
-                           dst0, dst1, src0, src1, True, vtmp0, comment)
+    tmpVgprRes = ContinuousRegister(vtmp0, 2)
+    module = SMulInt64to32(dst0, dst1, src0, src1, tmpVgprRes, bool(self.states.asmCaps["HasSMulHi"]), True, comment)
     self.vgprPool.checkIn(vtmp0)
     return module
 
@@ -13635,13 +13635,12 @@ class KernelWriterAssembly(KernelWriter):
     multiplydoneLabel = Label((self.labels.getUniqueNamePrefix("MultiplyDone")), comment="")
     module.add(SCmpGeI32(src0, 0))
     module.add(SCBranchSCC0(labelName=negativeLabel.getLabelName(), comment=""))
-    module.add(SMulInt64to32(self.states.asmCaps["HasSMulHi"], \
-                           dst0, dst1, src0, src1, False, vtmp0, comment))
+    tmpVgprRes = ContinuousRegister(vtmp0, 2)
+    module.add(SMulInt64to32(dst0, dst1, src0, src1, tmpVgprRes, bool(self.states.asmCaps["HasSMulHi"]), False, comment))
     module.add(SBranch(labelName=multiplydoneLabel.getLabelName(), comment=""))
     module.add(negativeLabel)
     module.add(SAbsI32(src0, src0, comment=""))
-    module.add(SMulInt64to32(self.states.asmCaps["HasSMulHi"], \
-                             dst0, dst1, src0, src1, False, vtmp0, comment))
+    module.add(SMulInt64to32(dst0, dst1, src0, src1, tmpVgprRes, bool(self.states.asmCaps["HasSMulHi"]), False, comment))
     module.add(SXorB32(dst0, dst0, hex(0xFFFFFFFF), comment=""))
     module.add(SXorB32(dst1, dst1, hex(0xFFFFFFFF), comment=""))
     module.add(SAddU32(dst0, dst0, hex(0x1), comment=""))
