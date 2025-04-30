@@ -1,0 +1,15 @@
+- Sample tuning configs for some popular sizes.
+
+- For tuning, recommended to set:
+  - Initialize data to 0 to minimize power and avoid frequency fluctations:
+    DataInitTypeA: 0
+    DataInitTypeB: 0
+    DataInitTypeAlpha: 1
+  - Disable validation - this eliminates copy-backs and can be a ~2X speed improvement.
+    NumElementsToValidate: 0
+
+- For functional correctness check:
+    DataInitTypeA: 3
+    DataInitTypeB: 3
+    DataInitTypeAlpha: 1
+    NumElementsToValidate: 1000

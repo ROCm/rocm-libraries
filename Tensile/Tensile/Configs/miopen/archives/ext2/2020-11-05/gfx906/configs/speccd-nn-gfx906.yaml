@@ -1,0 +1,82 @@
+# A config to generate a fast kernel for large DGEMMs
+GlobalParameters:
+  EnqueuesPerSync: 100
+  NumElementsToValidate: -1
+  KernelTime: True
+  SleepPercent: 0
+  DataInitTypeBeta : 1
+  DataInitTypeAB: 0
+  PrintSolutionRejectionReason: 1
+  PrintWinnersOnly: 1
+  NewClient: 2
+  CEqualD: 0
+
+BenchmarkProblems:
+  -
+    - # ProblemType
+      OperationType: TensorContraction
+      DataType: s
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      NumIndicesC: 3
+      IndexAssignmentsA: [ 0, 3, 2 ]
+      IndexAssignmentsB: [ 3, 1, 2 ]
+      #UseInitialStridesAB: True
+      UseInitialStridesCD: True
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - EdgeType: ["ShiftPtr"]
+      ForkParameters:
+        - LdcEqualsLdd: [0]
+        - ThreadTile:
+          - [ 4, 4 ]
+          - [ 8, 8 ]
+        - WorkGroup:
+          - [ 8, 8, 1 ]
+          - [ 16, 16, 1 ]
+            #- [ 32, 16, 1 ]
+            #- [ 16, 16, 1 ]
+          #- WorkGroupMapping: [1,8,64]
+        - StaggerU: [32]
+        - StaggerUMapping: [1]
+        - DepthU: [ 16 ]
+        - VectorWidth: [-1]
+        - GlobalReadVectorWidth: [-1] # specialize, since strideA0=strideB0=1 can use wider loads
+        #- GlobalSplitU: [ 1, 2 ]
+        - FractionalLoad: [1]
+        #- AssertStrideAEqual: [ { 0: 1 } ]  # specialize
+        #- AssertStrideBEqual: [ { 0: 1 } ]  # specialize
+        - AssertStrideCEqual: [ { 0: 0 } ]  # specialize
+        - AssertStrideDEqual: [ { 0: 1 } ]  # specialize
+      BenchmarkForkParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: {sizes: [480,512,1,512], stridesC: [0]}
+          - Exact: {sizes: [512,512,1,512], stridesC: [0]}
+          - Exact: {sizes: [960,1024,1,1024], stridesC: [0]}
+          - Exact: {sizes: [1024,1024,1,1024], stridesC: [0]}
+          - Exact: {sizes: [1920,2048,1,2048], stridesC: [0]}
+          - Exact: {sizes: [2048,2048,1,2048], stridesC: [0]}
+
+########################################
+LibraryLogic:
+#    ScheduleName: "arcturus"
+#    DeviceNames: ["Device 7380", "Device 7388", "Device 738c", "Device 7390"]
+#    ArchitectureName: "gfx908"
+
+    ScheduleName: "vega20"
+    DeviceNames: [Device 66a0, Device 66a1, Device 66a7, Device 66af, Vega 20]
+    ArchitectureName: "gfx906"
+
+#    ScheduleName: "vega10"
+#    DeviceNames: ["Device 6863", "Device 6862", "Device 687f", "Device 6860",
+#        "Device 6861", "Vega 10 XTX [Radeon Vega Frontier Edition]",
+#        "Vega [Radeon RX Vega]", "Vega", "Device 6864", "Device 686c",
+#        "Vega 10 [Radeon Instinct MI25 MxGPU]"]
+#    ArchitectureName: "gfx900"

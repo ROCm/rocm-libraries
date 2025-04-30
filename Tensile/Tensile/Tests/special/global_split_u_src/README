@@ -1,0 +1,4 @@
+These are source-tests for GSU.
+Based on asm test with same name.
+Place in special rather than nightly since they are somewhat long-running but maybe useful
+for any work which modifies the GSU code

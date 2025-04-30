@@ -1,0 +1,197 @@
+GlobalParameters:
+  MinimumRequiredVersion: 4.4.0
+  PrintLevel: 1
+  ForceRedoBenchmarkProblems: True
+  ForceRedoLibraryLogic: True
+  ForceRedoLibraryClient: True
+  CMakeBuildType: Release
+  EnqueuesPerSync: 1
+  SyncsPerBenchmark: 2
+  LibraryPrintDebug: False
+  NumElementsToValidate: 128
+  ValidationMaxToPrint: 4
+  ValidationPrintValids: False
+  ShortNames: False
+  MergeFiles: True
+  Platform: 0
+  Device: 0
+  KernelTime: True
+  DataInitTypeBeta : 0
+
+BenchmarkProblems:
+  - # zgemm NN
+    - # ProblemType
+      OperationType: GEMM
+      DataType: z
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - ProblemSizes:
+          - Exact: [ 1536, 1536, 2, 1536 ]
+        - EdgeType: ["ShiftPtr"]
+        - LoopTail: [True]
+      ForkParameters:
+        - ThreadTile:
+          - [ 4, 4 ]
+          - [ 2, 4 ]
+          - [ 2, 2 ]
+        - WorkGroup:
+          - [  4,  4, 16 ]
+          - [  4,  8,  8 ]
+          - [  8,  8,  4 ]
+          - [  8, 16,  2 ]
+          - [ 16, 16,  1 ]
+        - PrefetchGlobalRead: [False, True]
+        - PrefetchLocalRead: [False, True]
+        - DepthU: [ 4, 8, 16, 32 ]
+      BenchmarkForkParameters:
+      JoinParameters:
+        - MacroTile
+      BenchmarkJoinParameters:
+        - WorkGroupMapping: [1, 2, 4, 8, 16, 32, 64]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [32, 32, 32, 2000], [32, 32, 32, 2000], [2], [1536] ]
+
+  - # zgemm NT
+    - # ProblemType
+      OperationType: GEMM
+      DataType: z
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - ProblemSizes:
+          - Exact: [ 1536, 1536, 2, 1536 ]
+        - EdgeType: ["ShiftPtr"]
+        - LoopTail: [True]
+      ForkParameters:
+        - ThreadTile:
+          - [ 4, 4 ]
+          - [ 2, 4 ]
+          - [ 2, 2 ]
+        - WorkGroup:
+          - [  4,  4, 16 ]
+          - [  4,  8,  8 ]
+          - [  8,  8,  4 ]
+          - [  8, 16,  2 ]
+          - [ 16, 16,  1 ]
+        - PrefetchGlobalRead: [False, True]
+        - PrefetchLocalRead: [False, True]
+        - DepthU: [ 4, 8, 16, 32]
+      BenchmarkForkParameters:
+      JoinParameters:
+        - MacroTile
+      BenchmarkJoinParameters:
+        - WorkGroupMapping: [1, 2, 4, 8, 16, 32, 64]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [32, 32, 32, 2000], [32, 32, 32, 2000], [2], [1536] ]
+
+  - # zgemm TN
+    - # ProblemType
+      OperationType: GEMM
+      DataType: z
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - ProblemSizes:
+          - Exact: [ 1536, 1536, 2, 1536 ]
+        - EdgeType: ["ShiftPtr"]
+        - LoopTail: [True]
+      ForkParameters:
+        - ThreadTile:
+          - [ 4, 4 ]
+          - [ 2, 4 ]
+          - [ 2, 2 ]
+        - WorkGroup:
+          - [  4,  4, 16 ]
+          - [  4,  8,  8 ]
+          - [  8,  8,  4 ]
+          - [  8, 16,  2 ]
+          - [ 16, 16,  1 ]
+        - PrefetchGlobalRead: [False, True]
+        - PrefetchLocalRead: [False, True]
+        - DepthU: [ 4, 8, 16, 32]
+      BenchmarkForkParameters:
+      JoinParameters:
+        - MacroTile
+      BenchmarkJoinParameters:
+        - WorkGroupMapping: [1, 2, 4, 8, 16, 32, 64]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [32, 32, 32, 2000], [32, 32, 32, 2000], [2], [1536] ]
+
+  - # zgemm TT
+    - # ProblemType
+      OperationType: GEMM
+      DataType: z
+      TransposeA: True
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+        - WorkGroupMapping: [1]
+      BenchmarkCommonParameters:
+        - ProblemSizes:
+          - Exact: [ 1536, 1536, 2, 1536 ]
+        - EdgeType: ["ShiftPtr"]
+        - LoopTail: [True]
+      ForkParameters:
+        - ThreadTile:
+          - [ 4, 4 ]
+          - [ 2, 4 ]
+          - [ 2, 2 ]
+        - WorkGroup:
+          - [  4,  4, 16 ]
+          - [  4,  8,  8 ]
+          - [  8,  8,  4 ]
+          - [  8, 16,  2 ]
+          - [ 16, 16,  1 ]
+        - PrefetchGlobalRead: [False, True]
+        - PrefetchLocalRead: [False, True]
+        - DepthU: [ 4, 8, 16, 32]
+      BenchmarkForkParameters:
+      JoinParameters:
+        - MacroTile
+      BenchmarkJoinParameters:
+        - WorkGroupMapping: [1, 2, 4, 8, 16, 32, 64]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [32, 32, 32, 2000], [32, 32, 32, 2000], [2], [1536] ]
+
+LibraryLogic:
+    ScheduleName: "vega10"
+    DeviceNames: ["Device 6863", "Device 6862", "Device 687f", "Device 6860", "Device 6861", "Vega 10 XTX [Radeon Vega Frontier Edition]", "Vega [Radeon RX Vega]",
+        Vega, Device 6864, Device 686c]
+    ArchitectureName: "gfx900"
+
+#   ScheduleName: "mi25"
+#   DeviceNames: ["Device 6860"]
+#   ArchitectureName: "gfx900"
+
+#   ScheduleName: "r9nano"
+#   DeviceNames: ["Device 7300"]
+#   ArchitectureName: "gfx803"
+
+#   ScheduleName: "hip"
+#   DeviceNames: ["Device 0000"]
+#   ArchitectureName: "fallback"
+
+LibraryClient:

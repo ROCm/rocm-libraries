@@ -1,0 +1,54 @@
+# A config to generate a fast kernel for large DGEMMs
+GlobalParameters:
+  EnqueuesPerSync: 1
+  LibraryPrintDebug: True
+  NumElementsToValidate: 1000
+  KernelTime: True
+  PinClocks: False
+  SleepPercent: 0
+  DataInitTypeBeta : 1
+  PrintSolutionRejectionReason: 1
+
+BenchmarkProblems:
+  ########################################
+  # NT - standard
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - EdgeType: ["ShiftPtr"]
+      ForkParameters:
+        - PrefetchLocalRead: [True]
+        - PrefetchGlobalRead: [True]
+        - ThreadTile:
+          - [ 8, 8 ]
+        - WorkGroup:
+          - [ 8, 8, 1 ]
+            #- [ 16, 4, 4 ]
+        - WorkGroupMapping: [1]
+        - StaggerU: [32]
+          #- GlobalSplitU: [2]
+          #- SuppressNoLoadLoop: [0]
+          #- StaggerUMapping: [0,1]
+        - DepthU: [ 16 ]
+        - VectorWidth: [4]
+          #- UseSgprForGRO: [0]
+      BenchmarkForkParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # A > 4GB
+          - Range: [ [26880], [256], [1], [20224] ]
+
+  ########################################
+

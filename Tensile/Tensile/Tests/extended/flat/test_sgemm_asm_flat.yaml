@@ -1,0 +1,64 @@
+# benchmark assembly and source kernels
+GlobalParameters:
+  MinimumRequiredVersion: 4.2.0
+  CMakeBuildType: Release
+  PrintLevel: 1
+  ForceRedoBenchmarkProblems: True
+  ForceRedoLibraryLogic: True
+  ForceRedoLibraryClient: True
+  EnqueuesPerSync: 1
+  SyncsPerBenchmark: 1
+  NumElementsToValidate: -1
+  ValidationMaxToPrint: 4
+  ValidationPrintValids: False
+  ShortNames: False
+  MergeFiles: True
+  DataInitTypeAB: 3
+  DataInitTypeC: 3
+  KernelTime: True
+
+BenchmarkProblems:
+
+  - # sgemm NN
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      DestDataType: s
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup - Assembly
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - BufferLoad: [0,1]
+        - BufferStore: [0,1]
+        - GlobalSplitU: [1, 3]
+        - PrefetchLocalRead: [False]
+        - PrefetchGlobalRead: [True]
+        - LdcEqualsLdd: [True, False]
+        - ThreadTile:
+          - [ 3, 5 ]
+          - [ 4, 8 ]
+          - [ 8, 8 ]
+        - WorkGroup:
+          - [ 32,  4,  1 ]
+          - [  8,  8,  1 ]
+          - [  4,  8,  4 ]
+        - DepthU: [-3]
+        - VectorWidth: [-1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [127,1,129], 0, [2], [63,1,65] ]
+
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [127,1,129], 0, [2], [63,1,65] ]
+

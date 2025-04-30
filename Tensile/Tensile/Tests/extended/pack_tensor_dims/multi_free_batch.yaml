@@ -1,0 +1,63 @@
+# benchmark assembly and source kernels
+GlobalParameters:
+  MinimumRequiredVersion: 4.2.0
+  CMakeBuildType: Release
+  PrintLevel: 1
+  ForceRedoBenchmarkProblems: True
+  ForceRedoLibraryLogic: True
+  ForceRedoLibraryClient: True
+  EnqueuesPerSync: 1
+  SyncsPerBenchmark: 1
+  NumElementsToValidate: -1
+  ValidationMaxToPrint: 4
+  ValidationPrintValids: False
+  ShortNames: False
+  MergeFiles: False
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeC: 2
+  DataInitTypeBeta: 0
+  KernelTime: True
+  LibraryPrintDebug: 0
+
+BenchmarkProblems:
+
+  -
+    -
+      OperationType: TensorContraction
+      DataType: s
+      DestDataType: s
+      UseBeta: True
+      #SetConstStrideB: [[2,0]]
+      NumIndicesC: 4
+      IndexAssignmentsA: [0, 2, 3, 4]
+      IndexAssignmentsB: [   1, 4, 3]
+      SetConstStrideB: [[3,0]]
+
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - LoopTail: [True]
+        - EdgeType: ["ShiftPtr"]
+      ForkParameters:
+        - KernelLanguage: ["Source","Assembly"]
+        - ThreadTile:
+          - [ 4, 4 ]
+          - [ 8, 8 ]
+        - WorkGroup:
+          - [  8, 8, 4 ]
+          - [  16, 8, 1 ]
+        - DepthU: [8]
+        - GlobalReadVectorWidth: [1,4]
+        - VectorWidth: [1,4]
+        - WorkGroupMapping: [1,8]
+
+        - FractionalLoad: [1]
+        - PackBatchDims: [1]  # pack into A
+        - AssertFree0ElementMultiple: [4]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [124,4,132], [127,1,129], [4], [4], [16]]

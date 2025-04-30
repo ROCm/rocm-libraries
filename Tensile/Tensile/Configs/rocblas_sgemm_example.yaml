@@ -1,0 +1,71 @@
+GlobalParameters:
+  MinimumRequiredVersion: 4.4.0
+  PrintLevel: 1
+  ForceRedoBenchmarkProblems: True
+  ForceRedoLibraryLogic: True
+  ForceRedoLibraryClient: True
+  CMakeBuildType: Release
+  EnqueuesPerSync: 5
+  SyncsPerBenchmark: 3
+  LibraryPrintDebug: False
+  NumElementsToValidate: 128
+  ValidationMaxToPrint: 4
+  ValidationPrintValids: False
+  ShortNames: False
+  MergeFiles: False
+  Platform: 0
+  Device: 0
+  KernelTime: True
+  SleepPercent: 0
+  DataInitTypeBeta : 0
+  PrintSolutionRejectionReason: True # Route rejected configs to std out.
+  PrintWinnersOnly: 0
+
+BenchmarkProblems:
+  ########################################
+  # NN - standard
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup - standard
+      BenchmarkCommonParameters:
+        # Specify parameters that are to take a single value that is
+        # the same for every solution.
+        - KernelLanguage: ["Assembly"]
+        - EdgeType: ["ShiftPtr"]
+        - LoopTail: [True]
+      ForkParameters:
+        # Specify parameters with a set of values, yielding a 
+        # solution space spanning the cartesian product of all 
+        # parameter sets.
+        - PrefetchLocalRead: [False, True]
+        - PrefetchGlobalRead: [False, True]
+        - ThreadTile:
+          - [2, 2]
+          - [4, 4]
+        - WorkGroup:
+          - [16, 16, 1]
+          - [8, 8, 4]
+        - WorkGroupMapping: [1, 4]
+        - TransposeLDS: [0, 1]
+        - LdsBlockSizePerPad: [-1, 0, 64]
+        - DepthU: [4, 8]
+        - StoreVectorWidth: [-1, 1, 2, 4]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # Specify the dimensions of the problems that the solutions
+          # should be evaluated on.
+          - Exact: [2048, 2048, 1, 4096]
+          - Range: [ [128, 128, 128, 1408], [128, 128, 128, 1408], [1], [256, 512, 512, 2048] ]
+
+# Specify appropriate parameters for your target device.
+LibraryLogic:
+  ScheduleName: "navi21"
+  ArchitectureName: "gfx1030"

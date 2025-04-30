@@ -1,0 +1,74 @@
+# benchmark assembly and source kernels
+GlobalParameters:
+  MinimumRequiredVersion: 4.2.0
+  CMakeBuildType: Release
+  PrintLevel: 1
+  ForceRedoBenchmarkProblems: True
+  ForceRedoLibraryLogic: True
+  ForceRedoLibraryClient: True
+  EnqueuesPerSync: 1
+  SyncsPerBenchmark: 1
+  NumElementsToValidate: -1
+  ValidationMaxToPrint: 4
+  ValidationPrintValids: False
+  ShortNames: False
+  MergeFiles: True
+  DataInitTypeA: 1
+  DataInitTypeB: 1
+  DataInitTypeC: 2
+  DataInitTypeBeta: 0
+  KernelTime: True
+  LibraryPrintDebug: 0
+  #RuntimeLanguage: ["OCL"]
+  #PrintTensorC : 2
+
+BenchmarkProblems:
+
+  - # sgemm NT
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      DestDataType: s
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+      SetConstStrideA: [[2,0]]
+
+    - # BenchmarkProblemSizeGroup - Assembly
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - LoopTail: [True]
+        - EdgeType: ["ShiftPtr"]
+      ForkParameters:
+        - KernelLanguage: ["Source"]
+        - PrefetchLocalRead: [True]
+        - PrefetchGlobalRead: [True]
+        - ThreadTile:
+          #- [ 4, 4 ]
+          #- [ 6, 8 ]
+          - [ 8, 8 ]
+        - WorkGroup:
+          - [  8, 8,  1 ]
+            #- [  16, 8,  1 ]
+        - DepthU: [2,8]
+        - GlobalReadVectorWidth: [1]
+        - VectorWidth: [4]
+        - WorkGroupMapping: [0]
+
+        - FractionalLoad: [1]
+        - PackBatchDims: [2]
+        - PackGranularity: [2]
+        - AssertFree1ElementMultiple: [4]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [16,4,64], [32], [1,1,4], [8,1,8] ]
+          #- Range: [ [16,4,128], [120,1,130], [1,1,4], [8,1,33] ]
+          #- Range: [ [20,4,20], [32], [4,1,4], [8] ]
+          #- Range: [ [64], [32], [2], [8] ]
+          #- Range: [ [16], [32], [2], [8] ] # easy?
+          #- Range: [ [16], [32], [3], [8] ] # easy2?
+

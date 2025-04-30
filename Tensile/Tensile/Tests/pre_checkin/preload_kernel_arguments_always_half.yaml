@@ -1,0 +1,56 @@
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908,
+          skip-gfx1010, skip-gfx1011, skip-gfx1012,
+          skip-gfx1030, skip-gfx1031, skip-gfx1032,
+          skip-gfx1034, skip-gfx1035, skip-gfx1100,
+          skip-gfx1101, skip-gfx1102, skip-gfx1151]
+
+GlobalParameters:
+  MinimumRequiredVersion: 4.2.0
+  NumElementsToValidate: -1
+  BoundsCheck: False
+  KernelTime: True
+  HardwareMonitor: False
+
+BenchmarkProblems:
+  - # hgemm TT
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup - Assembly
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - LoopTail: [True]
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - PreloadKernelArguments:  [1]
+        - DelayRemainingArguments: [True]
+
+        - PrefetchLocalRead: [False]
+        - PrefetchGlobalRead: [True]
+
+        - EdgeType: ["Branch"]
+        - ThreadTile:
+          - [ 16, 8 ]
+        - WorkGroup:
+          - [ 16, 16,  1 ]
+        - DepthU: [32]
+        - VectorWidth: [-1]
+        - AssertSummationElementMultiple: [1]
+        - AssertFree0ElementMultiple: [1]
+        - StaggerU: [0]
+        - WorkGroupMapping: [ 1 ]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [129,1,129], 0, [2], [62,1,62] ]

@@ -1,0 +1,200 @@
+GlobalParameters:
+  CMakeBuildType: Release
+  DataInitTypeAB: 0
+  DataInitTypeBeta: 0
+  Device: 0
+  EnqueuesPerSync: 1
+  ForceRedoBenchmarkProblems: true
+  ForceRedoLibraryClient: true
+  ForceRedoLibraryLogic: true
+  KernelTime: true
+  LibraryPrintDebug: false
+  MergeFiles: true
+  MinimumRequiredVersion: 4.2.0
+  NumElementsToValidate: 0
+  PinClocks: false
+  Platform: 0
+  PrintWinnersOnly: 1
+  ShortNames: false
+  SleepPercent: 50
+  SolutionSelectionAlg: 1
+  SyncsPerBenchmark: 1
+  ValidationMaxToPrint: 4
+  ValidationPrintValids: false
+BenchmarkProblems:
+- - {Batched: true, DataType: s, OperationType: GEMM, TransposeA: true, TransposeB: false,
+    UseBeta: true}
+  - BenchmarkCommonParameters:
+    - LoopTail: [true]
+    - KernelLanguage: [Assembly]
+    - EdgeType: [ShiftPtr]
+    - GlobalSplitU: [1]
+    BenchmarkFinalParameters:
+    - ProblemSizes:
+      - Exact: [684, 8976, 1, 256]
+      - Exact: [2048, 684, 1, 512]
+      - Exact: [2048, 1536, 1, 512]
+      - Exact: [2048, 1536, 1, 768]
+      - Exact: [256, 22344, 1, 1024]
+      - Exact: [18176, 8976, 1, 256]
+      - Exact: [256, 18176, 1, 1024]
+      - Exact: [15104, 8976, 1, 256]
+      - Exact: [256, 15104, 1, 1024]
+      - Exact: [44505, 8976, 1, 256]
+      - Exact: [256, 44505, 1, 1024]
+      - Exact: [2048, 215, 1, 512]
+      - Exact: [2048, 215, 1, 768]
+      - Exact: [19968, 8976, 1, 256]
+      - Exact: [16128, 8976, 1, 256]
+      - Exact: [33536, 8976, 1, 256]
+      - Exact: [256, 33536, 1, 1024]
+      - Exact: [20992, 8976, 1, 256]
+      - Exact: [256, 20992, 1, 1024]
+      - Exact: [20480, 8976, 1, 256]
+      - Exact: [19712, 8976, 1, 256]
+      - Exact: [1280, 8976, 1, 256]
+      - Exact: [256, 1280, 1, 1024]
+      - Exact: [256, 7168, 1, 1024]
+      - Exact: [256, 22016, 1, 1024]
+      - Exact: [13568, 8976, 1, 256]
+      - Exact: [256, 18944, 1, 1024]
+      - Exact: [256, 31488, 1, 1024]
+      - Exact: [3072, 8976, 1, 256]
+      - Exact: [9984, 8976, 1, 256]
+      - Exact: [256, 9984, 1, 1024]
+      - Exact: [2048, 256, 1, 512]
+      - Exact: [5888, 8976, 1, 256]
+      - Exact: [256, 5888, 1, 1024]
+      - Exact: [13312, 8976, 1, 256]
+      - Exact: [256, 11776, 1, 1024]
+      - Exact: [9728, 8976, 1, 256]
+      - Exact: [15360, 8976, 1, 256]
+      - Exact: [2048, 8976, 1, 256]
+      - Exact: [256, 7424, 1, 1024]
+      - Exact: [2816, 8976, 1, 256]
+      - Exact: [10496, 8976, 1, 256]
+      - Exact: [21248, 8976, 1, 256]
+      - Exact: [256, 14336, 1, 1024]
+      - Exact: [256, 6400, 1, 1024]
+      - Exact: [18688, 8976, 1, 256]
+      - Exact: [256, 23296, 1, 1024]
+      - Exact: [9472, 8976, 1, 256]
+      - Exact: [18944, 8976, 1, 256]
+      - Exact: [256, 3584, 1, 1024]
+      - Exact: [3328, 8976, 1, 256]
+      - Exact: [256, 13312, 1, 1024]
+      - Exact: [256, 3328, 1, 1024]
+      - Exact: [6400, 8976, 1, 256]
+      - Exact: [256, 7936, 1, 1024]
+      - Exact: [15872, 8976, 1, 256]
+      - Exact: [256, 5376, 1, 1024]
+      - Exact: [256, 2560, 1, 1024]
+      - Exact: [13824, 8976, 1, 256]
+      - Exact: [4352, 8976, 1, 256]
+      - Exact: [11776, 8976, 1, 256]
+      - Exact: [256, 2304, 1, 1024]
+      - Exact: [256, 2816, 1, 1024]
+      - Exact: [7936, 8976, 1, 256]
+      - Exact: [11264, 8976, 1, 256]
+      - Exact: [256, 6656, 1, 1024]
+      - Exact: [256, 21504, 1, 1024]
+      - Exact: [4096, 8976, 1, 256]
+      - Exact: [1792, 8976, 1, 256]
+      - Exact: [28672, 8976, 1, 256]
+      - Exact: [31488, 8976, 1, 256]
+      - Exact: [256, 11520, 1, 1024]
+      - Exact: [256, 1536, 1, 1024]
+      - Exact: [5376, 8976, 1, 256]
+      - Exact: [256, 6144, 1, 1024]
+      - Exact: [256, 8448, 1, 1024]
+      - Exact: [5632, 8976, 1, 256]
+      - Exact: [2048, 256, 1, 768]
+      - Exact: [256, 19200, 1, 1024]
+      - Exact: [4864, 8976, 1, 256]
+      - Exact: [256, 16128, 1, 1024]
+      - Exact: [256, 12544, 1, 1024]
+      - Exact: [6144, 8976, 1, 256]
+      - Exact: [8448, 8976, 1, 256]
+      - Exact: [2304, 8976, 1, 256]
+      - Exact: [256, 4608, 1, 1024]
+      - Exact: [12544, 8976, 1, 256]
+      - Exact: [8960, 8976, 1, 256]
+      - Exact: [256, 20480, 1, 1024]
+      - Exact: [5120, 8976, 1, 256]
+      - Exact: [256, 8192, 1, 1024]
+      - Exact: [8192, 8976, 1, 256]
+      - Exact: [256, 14848, 1, 1024]
+      - Exact: [256, 23552, 1, 1024]
+      - Exact: [256, 10496, 1, 1024]
+      - Exact: [256, 14592, 1, 1024]
+      - Exact: [2560, 8976, 1, 256]
+      - Exact: [256, 11264, 1, 1024]
+      - Exact: [4608, 8976, 1, 256]
+      - Exact: [256, 8960, 1, 1024]
+      - Exact: [10240, 8976, 1, 256]
+      - Exact: [256, 21248, 1, 1024]
+      - Exact: [3840, 8976, 1, 256]
+      - Exact: [23552, 8976, 1, 256]
+      - Exact: [2048, 684, 1, 768]
+      - Exact: [7168, 8976, 1, 256]
+      - Exact: [256, 4864, 1, 1024]
+      - Exact: [17152, 8976, 1, 256]
+    BenchmarkForkParameters: null
+    BenchmarkJoinParameters: null
+    ForkParameters:
+    - PrefetchGlobalRead: [false, true]
+    - WorkGroupMapping: [1, 8]
+    - DepthU: [8, 16, 32]
+    - PrefetchLocalRead: [false, true]
+    - VectorWidth: [2, 4]
+    - GlobalReadVectorWidth: [1, 2, 4]
+    - FractionalLoad: [0, 1]
+    - ThreadTile:
+      - [4, 4]
+      - [6, 4]
+      - [4, 6]
+      - [4, 8]
+      - [8, 4]
+      - [8, 8]
+    - WorkGroup:
+      - [16, 16, 1]
+    InitialSolutionParameters: null
+    JoinParameters: null
+  - BenchmarkCommonParameters:
+    - LoopTail: [true]
+    - KernelLanguage: [Assembly]
+    - EdgeType: [ShiftPtr]
+    BenchmarkFinalParameters:
+    - ProblemSizes:
+      - Exact: [2048, 114, 1, 768]
+      - Exact: [2048, 114, 1, 512]
+      - Exact: [256, 684, 1, 1024]
+    BenchmarkForkParameters: null
+    BenchmarkJoinParameters: null
+    ForkParameters:
+    - PrefetchGlobalRead: [false, true]
+    - WorkGroupMapping: [1, 8]
+    - DepthU: [8, 16]
+    - PrefetchLocalRead: [false, true]
+    - GlobalSplitU: [1, 8]
+    - VectorWidth: [2, 4]
+    - GlobalReadVectorWidth: [1, 2, 4]
+    - FractionalLoad: [0, 1]
+    - ThreadTile:
+      - [2, 2]
+      - [4, 2]
+      - [2, 4]
+      - [4, 4]
+    - WorkGroup:
+      - [16, 16, 1]
+      - [8, 16, 2]
+      - [16, 8, 2]
+      - [4, 16, 4]
+      - [16, 4, 4]
+    InitialSolutionParameters: null
+    JoinParameters: null
+LibraryLogic:
+  ArchitectureName: gfx906
+  DeviceNames: [Device 66a0, Device 66a1, Device 66a7, Vega 20]
+  ScheduleName: vega20
+LibraryClient:

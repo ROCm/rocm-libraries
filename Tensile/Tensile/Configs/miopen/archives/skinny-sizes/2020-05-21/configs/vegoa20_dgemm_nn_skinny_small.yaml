@@ -1,0 +1,65 @@
+GlobalParameters:
+  BoundsCheck: False
+  KernelTime: True
+  NewClient: 2
+  NumBenchmarks: 20
+
+BenchmarkProblems:
+
+  ########################################
+  # NN
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: d
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - BufferLoad: [True]
+        - BufferStore: [True]
+        - KernelLanguage: ["Assembly"]
+        - EdgeType: ["ShiftPtr"]
+        - LoopTail: [True]
+        - WorkGroupMapping: [8]
+      ForkParameters:
+        - PersistentKernel: [0,4]   # 2 never wins
+        - VectorWidth: [2]          # 4 never wins
+        - PrefetchLocalRead: [0,1]
+        - PrefetchGlobalRead: [False, True]
+        - ThreadTile:
+          - [ 2, 4 ]                  # [2,4] always the best
+        - WorkGroup:
+          - [ 8, 8, 1 ]    # 16x32
+          - [ 16, 16, 1 ]  # 32x64
+          - [ 16, 16, 2 ]  # 32x64, LSU=2
+        - DepthU: [8,16]                    # 32 never wins
+        - StaggerU: [32]
+        - StaggerUStride: [128]
+        - StaggerUMapping: [1]
+        - LdsPadB: [2]                      # 2 almost the best
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [ 32, 4096, 1, 32, 32, 32, 32, 32 ] # padding = 0
+          - Exact: [ 32, 8192, 1, 32, 32, 32, 32, 32 ] # padding = 0
+          - Exact: [ 32, 12288, 1, 32, 32, 32, 32, 32 ] # padding = 0
+          - Exact: [ 32, 16384, 1, 32, 32, 32, 32, 32 ] # padding = 0
+          - Exact: [ 32, 20480, 1, 32, 32, 32, 32, 32 ] # padding = 0
+          - Exact: [ 32, 24576, 1, 32, 32, 32, 32, 32 ] # padding = 0
+          - Exact: [ 32, 28672, 1, 32, 32, 32, 32, 32 ] # padding = 0
+          - Exact: [ 32, 32768, 1, 32, 32, 32, 32, 32 ] # padding = 0
+
+LibraryLogic:
+    ScheduleName: "vega20"
+    DeviceNames: ["Device 66a0", "Device 66a1", "Device 66a7", "Device 66af", "Vega 20"]
+    ArchitectureName: "gfx906"
+
+LibraryClient:

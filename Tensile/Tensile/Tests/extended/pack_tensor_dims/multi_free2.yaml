@@ -1,0 +1,66 @@
+# benchmark assembly and source kernels
+TestParameters:
+  # Skip since this is a known failure.
+  marks: [skip]
+GlobalParameters:
+  MinimumRequiredVersion: 4.2.0
+  #CMakeBuildType: Debug
+  PrintLevel: 1
+  ForceRedoBenchmarkProblems: True
+  ForceRedoLibraryLogic: True
+  ForceRedoLibraryClient: True
+  EnqueuesPerSync: 1
+  SyncsPerBenchmark: 1
+  NumElementsToValidate: -1
+  ValidationMaxToPrint: 4
+  ValidationPrintValids: False
+  ShortNames: False
+  MergeFiles: True
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeC: 2
+  DataInitTypeBeta: 0
+  KernelTime: True
+  LibraryPrintDebug: 0
+
+BenchmarkProblems:
+
+  -
+    -
+      OperationType: TensorContraction
+      DataType: s
+      DestDataType: s
+      UseBeta: True
+      NumIndicesC : 4
+      IndexAssignmentsA : [1, 0, 4, 3]
+      IndexAssignmentsB : [4, 2, 3]
+      SetConstStrideA : []
+      SetConstStrideB : [[3, 0]]
+      UseBeta : False
+
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - LoopTail: [True]
+        - EdgeType: ["ShiftPtr"]
+      ForkParameters:
+        - KernelLanguage: ["Source","Assembly"]
+        - ThreadTile:
+          - [ 2, 2 ]
+        - WorkGroup:
+          - [  8, 8, 1 ]
+            #- [  16, 8, 1 ]
+        - DepthU: [8]
+        - GlobalReadVectorWidth: [1]
+        - VectorWidth: [1]
+
+        - FractionalLoad: [1]
+        - PackBatchDims: [1]  # pack into A
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+            - Range: [ [1,1,8], [1,1,8], [4], [1], [16]]  # small ones to test magix number range
+            - Range: [ [124,4,132], [124,4,132], [4], [1], [16]]
+            - Range: [ [124,4,132], [124,4,132], [4], [6], [16]]

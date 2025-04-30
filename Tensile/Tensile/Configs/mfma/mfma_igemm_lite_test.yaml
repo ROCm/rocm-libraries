@@ -1,0 +1,92 @@
+GlobalParameters:
+  MinimumRequiredVersion: 4.4.0
+  PrintLevel: 1
+  CMakeBuildType: Release
+  EnqueuesPerSync: 1
+  SyncsPerBenchmark: 1
+  LibraryPrintDebug: False
+  NumElementsToValidate: 16384
+  ValidationMaxToPrint: 4
+  ValidationPrintValids: False
+  ShortNames: False
+  MergeFiles: True
+  Platform: 0
+  Device: 0
+  KernelTime: True
+  SleepPercent: 200
+  PrintSolutionRejectionReason: False
+  # for debugging
+  # EnableAsserts: True
+  # EnableDebugA: True
+  # EnableDebugB: True
+  # EnableDebugC: True
+  # ExpectedValueC: 128
+  # ForceCExpectedValue: False
+  #
+  # DataInitTypeA: 1
+  # DataInitTypeB: 1
+  # DataInitTypeC: 0
+  # DataInitTypeD: 0
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  CSVExportWinner: True
+  CSVMergeSameProblemID: True
+
+BenchmarkProblems:
+  ########################################
+  -
+    - # ProblemType - Simplest
+      OperationType: GEMM
+      #####################################
+      DataType: I8
+      DestDataType: I
+      HighPrecisionAccumulate: True
+      #####################################
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - LoopTail: [True]
+        - OptNoLoadLoop: [True]
+        - ExpandPointerSwap: [True]
+        - EdgeType: ["ShiftPtr"]
+        - ScheduleGlobalRead: [True] # default
+        - ScheduleLocalWrite: [True] # default
+      ForkParameters:
+        - MatrixInstruction:
+          - [32,32, 8, 1, 1, 2,2, 1,1]  # 64x64
+        - ThreadTile:
+          - [ 4, 4 ]
+        - WorkGroup:
+          - [ 16, 16, 1 ]
+        - PrefetchGlobalRead: [1,2]
+        - PrefetchLocalRead: [1,5,9]
+        - DepthU: [32,64]
+        - GlobalReadVectorWidth: [8,16]
+        - LocalReadVectorWidth: [-1,8,16]
+        - WaveSeparateGlobalReadA: [1]
+        - WaveSeparateGlobalReadB: [1]
+        - TransposeLDS: [True]
+        - StoreRemapVectorWidth: [0,4]
+        - ScheduleIterAlg: [2,3]
+        - 1LDSBuffer: [0,1]
+        - PersistentKernel: [-1,0]
+        - PrefetchAcrossPersistent: [True]
+      BenchmarkForkParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # - Range: [ [1024], [1024], [1], [128] ]
+          - Range: [ [4093, 3, 4096], [8189, 3, 8192], [1,3,4], [125, 3, 128] ]
+
+LibraryLogic:
+    ScheduleName: "arcturus"
+    DeviceNames: ["Device 7380", "Device 7388", "Device 738c", "Device 7390"]
+    ArchitectureName: "gfx908"
+
+LibraryClient:

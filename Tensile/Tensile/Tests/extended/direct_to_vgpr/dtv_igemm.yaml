@@ -1,0 +1,688 @@
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1151] # not supported by arch
+
+GlobalParameters:
+  NumElementsToValidate: -1
+  #BoundsCheck: True
+  KernelTime: True
+  #PrintSolutionRejectionReason: True
+  #MaxFileName: 256
+
+BenchmarkProblems:
+
+  ########################################
+  # I8II TN - DTVA + DTL + max load width for TailLoop
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: I8
+      DestDataType: I
+      ComputeDataType: I
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - EdgeType: ["ShiftPtr"]
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+            - [16, 16, 16, 1, 1, 4, 2, 4,1]  # 256x32
+            - [32, 32, 8, 1, 1, 4, 1, 4,1]  # 512x32
+            - [32, 32, 8, 1, 1, 2, 2, 4,1]  # 256x64
+        #- ThreadTile:
+        #  - [ 2, 2 ]
+        - WorkGroup:
+          - [ 64, 1, 1 ] # only WG2 is effective for 9 parameter MI
+        - AssertFree0ElementMultiple : [16]
+        - AssertFree1ElementMultiple : [16]
+        - AssertSummationElementMultiple: [16]
+        - DepthU: [64,128]
+        - 1LDSBuffer: [0]
+        - PrefetchGlobalRead: [1,2]
+        - PrefetchLocalRead: [1,5,9] # 2, 3
+        - ScheduleIterAlg: [3]
+        # - StaggerU: [0,32]
+        - SourceSwap: [0,1]
+        - TransposeLDS: [1]
+        - GlobalReadVectorWidth: [8,16]
+        - LocalReadVectorWidth: [8,16]
+        - VectorWidth: [2,4]
+        - UseSgprForGRO: [0]
+        - DirectToVgprA: [1] # 0
+        #- DirectToLdsA: [False, True]
+        #- DirectToLdsB: [False, True]
+        - NumLoadsCoalescedA: [1]
+        - GlobalSplitU: [1,3]
+        - GlobalSplitUAlgorithm: ["SingleBuffer"]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [496], [496], [1], [2000, 32, 2032] ]
+
+  ########################################
+  # I8II TN - DTVA + DTL + 2 pack load width for TailLoop
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: I8
+      DestDataType: I
+      ComputeDataType: I
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - EdgeType: ["ShiftPtr"]
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+            - [16, 16, 16, 1, 1, 4, 2, 4,1]  # 256x32
+            #- [32, 32, 8, 1, 1, 4, 1, 4,1]  # 512x32
+            - [32, 32, 8, 1, 1, 2, 2, 4,1]  # 256x64
+            - [32, 32, 8, 1, 1, 2, 2, 2,1]  # 128x64
+        #- ThreadTile:
+        #  - [ 2, 2 ]
+        - WorkGroup:
+          - [ 64, 1, 1 ] # only WG2 is effective for 9 parameter MI
+          - [ 64, 1, 2 ] # only WG2 is effective for 9 parameter MI
+        - AssertFree0ElementMultiple : [2]
+        - AssertFree1ElementMultiple : [2]
+        - AssertSummationElementMultiple: [2]
+        - DepthU: [32,64]
+        - 1LDSBuffer: [0]
+        - LoopTail: [True]
+        - OptNoLoadLoop: [1]
+        - PrefetchGlobalRead: [1]#[1,2]
+        - PrefetchLocalRead: [3,5,9] # 2
+        - ScheduleIterAlg: [3]
+        - StaggerU: [0,32]
+        - SourceSwap: [1] # 0
+        - TransposeLDS: [1]
+        - GlobalReadVectorWidth: [4,8,16]
+        - LocalReadVectorWidth: [4,8,16]
+        - VectorWidth: [1,2]
+        - UseSgprForGRO: [0]
+        - DirectToVgprA: [1] # 0
+        - DirectToLdsA: [False, True]
+        - DirectToLdsB: [False, True]
+        - NumLoadsCoalescedA: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [510], [510], [1], [1984, 32, 2016] ]
+
+  ########################################
+  # I8II TN - DTVA + DTL + min load width for TailLoop
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: I8
+      DestDataType: I
+      ComputeDataType: I
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - EdgeType: ["ShiftPtr"]
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+            - [16, 16, 16, 1, 1, 4, 2, 4,1]  # 256x32
+            #- [32, 32, 8, 1, 1, 4, 1, 4,1]  # 512x32
+            - [32, 32, 8, 1, 1, 2, 2, 4,1]  # 256x64
+            - [32, 32, 8, 1, 1, 2, 2, 2,1]  # 128x64
+        #- ThreadTile:
+        #  - [ 2, 2 ]
+        - WorkGroup:
+          - [ 64, 1, 1 ] # only WG2 is effective for 9 parameter MI
+          - [ 64, 1, 2 ] # only WG2 is effective for 9 parameter MI
+        - AssertFree0ElementMultiple : [1]
+        - AssertFree1ElementMultiple : [1]
+        - AssertSummationElementMultiple: [1]
+        - DepthU: [32,64]
+        - 1LDSBuffer: [0]
+        - LoopTail: [True]
+        - OptNoLoadLoop: [1]
+        - PrefetchGlobalRead: [1]#[1,2]
+        - PrefetchLocalRead: [2,3,5,9]
+        - ScheduleIterAlg: [3]
+        - StaggerU: [0,32]
+        - SourceSwap: [0,1]
+        - TransposeLDS: [1]
+        - GlobalReadVectorWidth: [8,16] # 4
+        - LocalReadVectorWidth: [8,16] # 4
+        - VectorWidth: [1,2]
+        - UseSgprForGRO: [0]
+        - DirectToVgprA: [1] # 0
+        - DirectToLdsA: [False, True]
+        - DirectToLdsB: [False, True]
+        - NumLoadsCoalescedA: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [511], [511], [1], [1985, 32, 2017] ]
+
+  ########################################
+  # I8II TT - DTVA + DTL + max load width for TailLoop
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: I8
+      DestDataType: I
+      ComputeDataType: I
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - EdgeType: ["ShiftPtr"]
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+            - [16, 16, 16, 1, 1, 4, 2, 4,1]  # 256x32
+            - [32, 32, 8, 1, 1, 4, 1, 4,1]  # 512x32
+            - [32, 32, 8, 1, 1, 2, 2, 4,1]  # 256x64
+        #- ThreadTile:
+        #  - [ 2, 2 ]
+        - WorkGroup:
+          - [ 64, 1, 1 ] # only WG2 is effective for 9 parameter MI
+        - AssertFree0ElementMultiple : [16]
+        - AssertFree1ElementMultiple : [16]
+        - AssertSummationElementMultiple: [16]
+        - DepthU: [32]
+        - 1LDSBuffer: [0]
+        - LoopTail: [True]
+        - OptNoLoadLoop: [1]
+        - PrefetchGlobalRead: [1,2]
+        - PrefetchLocalRead: [1,2,3,5,9]
+        - ScheduleIterAlg: [3]
+        - StaggerU: [0,32]
+        - SourceSwap: [0,1]
+        - TransposeLDS: [1]
+        # - GlobalReadVectorWidth: [8,16]
+        # - LocalReadVectorWidth: [8,16]
+        - VectorWidth: [2,4]
+        - UseSgprForGRO: [0]
+        - DirectToVgprA: [1] # 0
+        #- DirectToLdsA: [False, True]
+        #- DirectToLdsB: [False, True]
+        - NumLoadsCoalescedA: [1]
+        - BufferLoad: [0,1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [496], [496], [1], [2000, 32, 2032] ]
+
+  ########################################
+  # I8II TT - DTVA + DTL + 2 pack load width for TailLoop
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: I8
+      DestDataType: I
+      ComputeDataType: I
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - EdgeType: ["ShiftPtr"]
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+            - [16, 16, 16, 1, 1, 4, 2, 4,1]  # 256x32
+            #- [32, 32, 8, 1, 1, 4, 1, 4,1]  # 512x32
+            # - [32, 32, 8, 1, 1, 2, 2, 4,1]  # 256x64
+            - [32, 32, 8, 1, 1, 2, 2, 2,1]  # 128x64
+        #- ThreadTile:
+        #  - [ 2, 2 ]
+        - WorkGroup:
+          - [ 64, 1, 1 ] # only WG2 is effective for 9 parameter MI
+          - [ 64, 1, 2 ] # only WG2 is effective for 9 parameter MI
+        - AssertFree0ElementMultiple : [2]
+        - AssertFree1ElementMultiple : [2]
+        - AssertSummationElementMultiple: [2]
+        - DepthU: [32,64]
+        - 1LDSBuffer: [0]
+        - PrefetchGlobalRead: [1]#[1,2]
+        - PrefetchLocalRead: [2,3,5,9]
+        - ScheduleIterAlg: [3]
+        - StaggerU: [0,32]
+        - SourceSwap: [1]#[0,1]
+        - TransposeLDS: [1]
+        - GlobalReadVectorWidth: [4,8,16]
+        - LocalReadVectorWidth: [4,8,16]
+        - VectorWidth: [1,2]
+        #- WaveSeparateGlobalReadB: [1]
+        - NumElementsPerBatchStore: [4]
+        - UseSgprForGRO: [0]
+        - DirectToVgprA: [1] # 0
+        - DirectToLdsA: [False, True]
+        - DirectToLdsB: [False, True]
+        - NumLoadsCoalescedA: [1]
+        - BufferLoad: [0,1]
+        #- GlobalSplitU: [1,2]
+        #- GlobalSplitUAlgorithm: ["SingleBuffer"]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [510], [510], [1], [1984, 32, 2016] ]
+
+  ########################################
+  # I8II TT - DTVA + DTL + min load width for TailLoop + VFLRP
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: I8
+      DestDataType: I
+      ComputeDataType: I
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - EdgeType: ["ShiftPtr"]
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+            - [16, 16, 16, 1, 1, 4, 2, 4,1]  # 256x32
+            #- [32, 32, 8, 1, 1, 4, 1, 4,1]  # 512x32
+            - [32, 32, 8, 1, 1, 2, 2, 4,1]  # 256x64
+            - [32, 32, 8, 1, 1, 2, 2, 2,1]  # 128x64
+        #- ThreadTile:
+        #  - [ 2, 2 ]
+        - WorkGroup:
+          - [ 64, 1, 1 ] # only WG2 is effective for 9 parameter MI
+          - [ 64, 1, 2 ] # only WG2 is effective for 9 parameter MI
+        - AssertFree0ElementMultiple : [1]
+        - AssertFree1ElementMultiple : [1]
+        - AssertSummationElementMultiple: [1]
+        - DepthU: [32,64]
+        - 1LDSBuffer: [0]
+        - PrefetchGlobalRead: [1]#[1,2]
+        - PrefetchLocalRead: [1,3,5,9] # 2
+        - ScheduleIterAlg: [3]
+        # - StaggerU: [0,32]
+        - SourceSwap: [1]#[0,1]
+        - TransposeLDS: [1]
+        - GlobalReadVectorWidth: [4,8] # 16
+        - LocalReadVectorWidth: [4,8,16]
+        - VectorWidth: [1,2]
+        #- WaveSeparateGlobalReadB: [1]
+        - NumElementsPerBatchStore: [4]
+        - UseSgprForGRO: [0]
+        - DirectToVgprA: [1] # 0
+        - DirectToLdsA: [False, True]
+        - DirectToLdsB: [False, True]
+        - NumLoadsCoalescedA: [1]
+        - BufferLoad: [0,1]
+        - GlobalSplitU: [1,2]
+        - GlobalSplitUAlgorithm: ["SingleBuffer"]
+        - VgprForLocalReadPacking: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [511], [511], [1], [1985, 32, 2017] ]
+
+  ########################################
+  # I8II TN - DTVB (+ DTL) + max load width for TailLoop
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: I8
+      DestDataType: I
+      ComputeDataType: I
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - EdgeType: ["ShiftPtr"]
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+            - [16, 16, 16, 1, 1, 4, 2, 1,4]  # 64x128
+            - [32, 32, 8, 1, 1, 2, 2, 1,4]  # 64x256
+            - [32, 32, 8, 1, 1, 4, 2, 1,4]  # 128x256
+        #- ThreadTile:
+        #  - [ 2, 2 ]
+        - WorkGroup:
+          - [ 64, 1, 1 ] # only WG2 is effective for 9 parameter MI
+        - AssertFree0ElementMultiple : [16]
+        - AssertFree1ElementMultiple : [16]
+        - AssertSummationElementMultiple: [16]
+        - DepthU: [64,128]
+        - 1LDSBuffer: [0]
+        - OptNoLoadLoop: [1]
+        - PrefetchGlobalRead: [1,2]
+        - PrefetchLocalRead: [1,2,3,5,9]
+        - ScheduleIterAlg: [3]
+        - StaggerU: [0,32]
+        - SourceSwap: [0,1]
+        - TransposeLDS: [1]
+        - GlobalReadVectorWidth: [8,16]
+        - LocalReadVectorWidth: [8,16]
+        - VectorWidth: [2,4]
+        - UseSgprForGRO: [0]
+        - DirectToVgprB: [1] # 0
+        #- DirectToLds: [0]#[0,1] # no valid scenario with DTL=1
+        - NumLoadsCoalescedB: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [496], [496], [1], [2000, 32, 2032] ]
+
+  ########################################
+  # I8II TN - DTVB (+ DTL) + 2 pack load width for TailLoop
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: I8
+      DestDataType: I
+      ComputeDataType: I
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - EdgeType: ["ShiftPtr"]
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+            - [16, 16, 16, 1, 1, 4, 2, 1,4]  # 64x128
+            #- [32, 32, 8, 1, 1, 2, 2, 1,4]  # 64x256
+            - [32, 32, 8, 1, 1, 4, 2, 1,4]  # 128x256
+            - [32, 32, 8, 1, 1, 4, 2, 1,2]  # 128x128
+        #- ThreadTile:
+        #  - [ 2, 2 ]
+        - WorkGroup:
+          - [ 64, 1, 1 ] # only WG2 is effective for 9 parameter MI
+          - [ 64, 1, 2 ] # only WG2 is effective for 9 parameter MI
+        - AssertFree0ElementMultiple : [2]
+        - AssertFree1ElementMultiple : [2]
+        - AssertSummationElementMultiple: [2]
+        - DepthU: [16,32] # 64
+        - 1LDSBuffer: [0]
+        - OptNoLoadLoop: [1]
+        - PrefetchGlobalRead: [1]#[1,2]
+        - PrefetchLocalRead: [2,3,5,9]
+        - ScheduleIterAlg: [3]
+        - StaggerU: [0,32]
+        - SourceSwap: [0,1]
+        - TransposeLDS: [1]
+        - GlobalReadVectorWidth: [4,8,16]
+        - LocalReadVectorWidth: [4,8,16]
+        - VectorWidth: [1,2]
+        - UseSgprForGRO: [0]
+        - DirectToVgprB: [1] # 0
+        #- DirectToLds: [0]#[0,1] # no valid scenario with DTL=1
+        - NumLoadsCoalescedB: [1]
+        #- GlobalSplitU: [1,3]
+        #- GlobalSplitUAlgorithm: ["SingleBuffer"]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [510], [510], [1], [1984, 32, 2016] ]
+
+  ########################################
+  # I8II TN - DTVB (+ DTL) + min load width for TailLoop
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: I8
+      DestDataType: I
+      ComputeDataType: I
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - EdgeType: ["ShiftPtr"]
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+            - [16, 16, 16, 1, 1, 4, 2, 1,4]  # 64x128
+            #- [32, 32, 8, 1, 1, 2, 2, 1,4]  # 64x256
+            - [32, 32, 8, 1, 1, 4, 2, 1,4]  # 128x256
+            - [32, 32, 8, 1, 1, 4, 2, 1,2]  # 128x128
+        #- ThreadTile:
+        #  - [ 2, 2 ]
+        - WorkGroup:
+          - [ 64, 1, 1 ] # only WG2 is effective for 9 parameter MI
+          - [ 64, 1, 2 ] # only WG2 is effective for 9 parameter MI
+        - AssertFree0ElementMultiple : [1]
+        - AssertFree1ElementMultiple : [1]
+        - AssertSummationElementMultiple: [1]
+        - DepthU: [16,32,64]
+        - 1LDSBuffer: [0]
+        - OptNoLoadLoop: [1]
+        - PrefetchGlobalRead: [1]#[1,2]
+        - PrefetchLocalRead: [2,3,5,9]
+        - ScheduleIterAlg: [3]
+        # - StaggerU: [0,32]
+        - SourceSwap: [0,1]
+        - TransposeLDS: [1]
+        - GlobalReadVectorWidth: [4,8,16]
+        - LocalReadVectorWidth: [4,8,16]
+        - VectorWidth: [1,2]
+        - UseSgprForGRO: [0]
+        - DirectToVgprB: [1] # 0
+        #- DirectToLds: [0]#[0,1] # no valid scenario with DTL=1
+        - NumLoadsCoalescedB: [1]
+        - GlobalSplitU: [1,3]
+        - GlobalSplitUAlgorithm: ["SingleBuffer"]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [511], [511], [1], [1985, 32, 2017] ]
+
+  ########################################
+  # I8II NN - DTVB (+ DTL) + max load width for TailLoop
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: I8
+      DestDataType: I
+      ComputeDataType: I
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - EdgeType: ["ShiftPtr"]
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+            - [16, 16, 16, 1, 1, 4, 2, 1,4]  # 64x128
+            - [32, 32, 8, 1, 1, 2, 2, 1,4]  # 64x256
+            - [32, 32, 8, 1, 1, 4, 2, 1,4]  # 128x256
+        #- ThreadTile:
+        #  - [ 2, 2 ]
+        - WorkGroup:
+          - [ 64, 1, 1 ] # only WG2 is effective for 9 parameter MI
+          #- [ 64, 1, 2 ] # only WG2 is effective for 9 parameter MI
+          #- [ 64, 1, 4 ] # only WG2 is effective for 9 parameter MI
+        - AssertFree0ElementMultiple : [16]
+        - AssertFree1ElementMultiple : [16]
+        - AssertSummationElementMultiple: [16]
+        - DepthU: [64,128]
+        - 1LDSBuffer: [0]
+        - PrefetchGlobalRead: [1,2]
+        - PrefetchLocalRead: [1,2,3,5,9]
+        - ScheduleIterAlg: [3]
+        - StaggerU: [0,32]
+        - SourceSwap: [1]#[0,1]
+        - TransposeLDS: [1]
+        - GlobalReadVectorWidth: [8,16]
+        - LocalReadVectorWidth: [8,16]
+        - VectorWidth: [2,4]
+        - UseSgprForGRO: [0]
+        - DirectToVgprB: [1] # 0
+        #- DirectToLdsA: [False, True]
+        #- DirectToLdsB: [False, True]
+        - NumLoadsCoalescedB: [1]
+        - BufferLoad: [0,1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [496], [496], [1], [2000, 32, 2032] ]
+
+  ########################################
+  # I8II NN - DTVB (+ DTL) + 2 pack load width for TailLoop
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: I8
+      DestDataType: I
+      ComputeDataType: I
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - EdgeType: ["ShiftPtr"]
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+            - [16, 16, 16, 1, 1, 4, 2, 1,4]  # 64x128
+            #- [32, 32, 8, 1, 1, 2, 2, 1,4]  # 64x256
+            - [32, 32, 8, 1, 1, 4, 2, 1,4]  # 128x256
+            - [32, 32, 8, 1, 1, 4, 2, 1,2]  # 128x128
+        #- ThreadTile:
+        #  - [ 2, 2 ]
+        - WorkGroup:
+          - [ 64, 1, 1 ] # only WG2 is effective for 9 parameter MI
+          - [ 64, 1, 2 ] # only WG2 is effective for 9 parameter MI
+          #- [ 64, 1, 4 ] # only WG2 is effective for 9 parameter MI
+        - AssertFree0ElementMultiple : [2]
+        - AssertFree1ElementMultiple : [2]
+        - AssertSummationElementMultiple: [2]
+        - DepthU: [32,64]
+        - 1LDSBuffer: [0]
+        - PrefetchGlobalRead: [1]#[1,2]
+        - PrefetchLocalRead: [2,3,5,9]
+        - ScheduleIterAlg: [3]
+        - StaggerU: [0,32]
+        - SourceSwap: [1]#[0,1]
+        - TransposeLDS: [1]
+        - GlobalReadVectorWidth: [4,8,16]
+        - LocalReadVectorWidth: [4,8,16]
+        - VectorWidth: [1,2]
+        - UseSgprForGRO: [0]
+        - DirectToVgprB: [1]
+        - DirectToLdsA: [False, True]
+        #- DirectToLdsB: [False, True]
+        - NumLoadsCoalescedB: [1]
+        #- BufferLoad: [0,1]
+        #- GlobalSplitU: [1,2]
+        #- GlobalSplitUAlgorithm: ["SingleBuffer"]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [510], [510], [1], [1984, 32, 2016] ]
+
+  ########################################
+  # I8II NN - DTVB (+ DTL) + min load width for TailLoop + VFLRP
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: I8
+      DestDataType: I
+      ComputeDataType: I
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - EdgeType: ["ShiftPtr"]
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+            - [16, 16, 16, 1, 1, 4, 2, 1,4]  # 64x128
+            #- [32, 32, 8, 1, 1, 2, 2, 1,4]  # 64x256
+            - [32, 32, 8, 1, 1, 4, 2, 1,4]  # 128x256
+            - [32, 32, 8, 1, 1, 4, 2, 1,2]  # 128x128
+        #- ThreadTile:
+        #  - [ 2, 2 ]
+        - WorkGroup:
+          - [ 64, 1, 1 ] # only WG2 is effective for 9 parameter MI
+          - [ 64, 1, 2 ] # only WG2 is effective for 9 parameter MI
+          #- [ 64, 1, 4 ] # only WG2 is effective for 9 parameter MI
+        - AssertFree0ElementMultiple : [1]
+        - AssertFree1ElementMultiple : [1]
+        - AssertSummationElementMultiple: [1]
+        - DepthU: [32,64]
+        - 1LDSBuffer: [0]
+        - PrefetchGlobalRead: [1]#[1,2]
+        - PrefetchLocalRead: [1,3,5,9] # 2
+        - ScheduleIterAlg: [3]
+        #- StaggerU: [0,32]
+        - SourceSwap: [1]#[0,1]
+        - TransposeLDS: [1]
+        - GlobalReadVectorWidth: [4,8,16]
+        - LocalReadVectorWidth: [4,8,16]
+        - VectorWidth: [1,2]
+        - UseSgprForGRO: [0]
+        - DirectToVgprB: [1]
+        - DirectToLdsA: [False, True]
+        #- DirectToLdsB: [False, True]
+        - NumLoadsCoalescedB: [1]
+        #- BufferLoad: [0,1]
+        - GlobalSplitU: [1,2]
+        - GlobalSplitUAlgorithm: ["SingleBuffer"]
+        - VgprForLocalReadPacking: [1]
+        - ClusterLocalRead: [1] # 0
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [511], [511], [1], [1985, 32, 2017] ]

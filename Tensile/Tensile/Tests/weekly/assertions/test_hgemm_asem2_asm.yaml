@@ -1,0 +1,304 @@
+# benchmark assembly and source kernels
+GlobalParameters:
+  MinimumRequiredVersion: 4.2.0
+  CMakeBuildType: Release
+  PrintLevel: 1
+  ForceRedoBenchmarkProblems: True
+  ForceRedoLibraryLogic: True
+  ForceRedoLibraryClient: True
+  EnqueuesPerSync: 1
+  SyncsPerBenchmark: 1
+  NumElementsToValidate: -1
+  ValidationMaxToPrint: 4
+  ValidationPrintValids: False
+  ShortNames: False
+  MergeFiles: True
+  DataInitTypeAB: 3
+  DataInitTypeC: 3
+  KernelTime: True
+
+BenchmarkProblems:
+
+  - # hgemm NN
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup - Assembly
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - LoopTail: [True]
+        - EdgeType: ["ShiftPtr"]
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - AssertSummationElementMultiple: [2]
+        - AssertFree0ElementMultiple: [1,2]
+        - GlobalSplitU: [1, 3]
+        - PrefetchLocalRead: [False]
+        - PrefetchGlobalRead: [True]
+        - ThreadTile:
+          - [ 2, 4 ]
+          - [ 4, 8 ]
+          - [ 16, 8 ]
+        - WorkGroup:
+          - [ 32,  4,  1 ]
+          - [  8,  8,  1 ]
+        - DepthU: [8]
+        - VectorWidth: [-1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [126,2,130], 0, [2], [62,2,66] ]
+
+    - # BenchmarkProblemSizeGroup - Assembly
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - LoopTail: [True]
+        - EdgeType: ["ShiftPtr"]
+      ForkParameters:
+        - AssertSummationElementMultiple: [2]
+        - AssertFree0ElementMultiple: [1,2]
+        - KernelLanguage: ["Assembly"]
+        - GlobalSplitU: [1, 3]
+        - PrefetchLocalRead: [False]
+        - PrefetchGlobalRead: [True]
+        - ThreadTile:
+          - [ 4, 2 ]
+          - [ 4, 8 ]
+          - [ 16, 16 ]
+          - [ 8, 8 ]
+        - WorkGroup:
+          - [ 16, 16,  1 ]
+          - [  8,  8,  1 ]
+        - DepthU: [16]
+        - VectorWidth: [-1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [126,2,130], 0, [2], [62,2,66] ]
+
+  - # hgemm NT
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup - Assembly
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - LoopTail: [True]
+        - EdgeType: ["ShiftPtr"]
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - AssertSummationElementMultiple: [2]
+        - AssertFree0ElementMultiple: [1,2]
+        - GlobalSplitU: [1, 3]
+        - PrefetchLocalRead: [True]
+        - PrefetchGlobalRead: [True]
+        - ThreadTile:
+          - [ 2, 2 ]
+          - [ 4, 4 ]
+          - [ 8, 16 ]
+        - WorkGroup:
+          - [ 16, 16,  1 ]
+          - [  8, 16,  1 ]
+        - DepthU: [32]
+        - VectorWidth: [-1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [126,2,130], 0, [2], [62,2,66] ]
+
+    - # BenchmarkProblemSizeGroup - Assembly
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - LoopTail: [True]
+        - EdgeType: ["ShiftPtr"]
+      ForkParameters:
+        - AssertSummationElementMultiple: [2]
+        - AssertFree0ElementMultiple: [1,2]
+        - KernelLanguage: ["Assembly"]
+        - GlobalSplitU: [1, 3]
+        - PrefetchLocalRead: [True]
+        - PrefetchGlobalRead: [True]
+        - ThreadTile:
+          - [ 4, 2 ]
+          - [ 8, 8 ]
+          - [ 8, 4 ]
+        - WorkGroup:
+          - [ 16, 16,  1 ]
+          - [ 16,  8,  1 ]
+        - DepthU: [16]
+        - VectorWidth: [-1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [126,2,130], 0, [2], [62,2,66] ]
+
+  - # hgemm TN
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup - Assembly
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - LoopTail: [True]
+        - EdgeType: ["ShiftPtr"]
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - AssertSummationElementMultiple: [2]
+        - AssertFree0ElementMultiple: [1,2]
+        - GlobalSplitU: [1, 3]
+        - PrefetchLocalRead: [True]
+        - PrefetchGlobalRead: [False]
+        - ThreadTile:
+          - [ 4, 2 ]
+          - [ 4, 8 ]
+          - [ 8, 8 ]
+        - WorkGroup:
+          - [ 16, 16,  1 ]
+          - [ 32,  4,  1 ]
+        - DepthU: [8]
+        - VectorWidth: [-1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [126,2,130], 0, [2], [62,2,66] ]
+
+    - # BenchmarkProblemSizeGroup - Assembly
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - LoopTail: [True]
+        - EdgeType: ["ShiftPtr"]
+      ForkParameters:
+        - AssertSummationElementMultiple: [2]
+        - AssertFree0ElementMultiple: [1,2]
+        - KernelLanguage: ["Assembly"]
+        - GlobalSplitU: [1, 3]
+        - PrefetchLocalRead: [True]
+        - PrefetchGlobalRead: [False]
+        - ThreadTile:
+          - [ 8, 2 ]
+          - [ 2, 8 ]
+          - [ 16, 2 ]
+          - [ 2, 16 ]
+        - WorkGroup:
+          - [ 16, 16,  1 ]
+          - [  8,  8,  1 ]
+        - DepthU: [16]
+        - VectorWidth: [-1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [126,2,130], 0, [2], [62,2,66] ]
+
+  - # hgemm TT
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      TransposeA: True
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup - Assembly
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - LoopTail: [True]
+        - EdgeType: ["ShiftPtr"]
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - AssertSummationElementMultiple: [2]
+        - AssertFree0ElementMultiple: [1,2]
+        - PrefetchLocalRead: [False]
+        - PrefetchGlobalRead: [False]
+        - ThreadTile:
+          - [ 16, 4 ]
+          - [ 16, 8 ]
+          - [ 8, 8 ]
+        - WorkGroup:
+          - [ 16, 16,  1 ]
+          - [  8,  8,  1 ]
+        - DepthU: [32]
+        - VectorWidth: [-1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [126,2,130], 0, [2], [62,2,66] ]
+
+    - # BenchmarkProblemSizeGroup - Assembly
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - LoopTail: [True]
+        - EdgeType: ["ShiftPtr"]
+      ForkParameters:
+        - AssertSummationElementMultiple: [2]
+        - AssertFree0ElementMultiple: [1,2]
+        - KernelLanguage: ["Assembly"]
+        - PrefetchLocalRead: [False]
+        - PrefetchGlobalRead: [False]
+        - ThreadTile:
+          - [ 8, 2 ]
+          - [ 2, 2 ]
+          - [ 4, 2 ]
+          - [ 8, 4 ]
+        - WorkGroup:
+          - [ 16, 16,  1 ]
+          - [  8,  8,  1 ]
+        - DepthU: [16]
+        - VectorWidth: [-1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [126,2,130], 0, [2], [62,2,66] ]
+
+LibraryLogic:
+    ScheduleName: "vega10"
+    DeviceNames: ["Device 6863", "Device 6862", "Device 687f", "Device 6860", "Device 6861"]
+    ArchitectureName: "gfx900"
+
+#   ScheduleName: "mi25"
+#   DeviceNames: ["Device 6860"]
+#   ArchitectureName: "gfx900"
+
+#   ScheduleName: "r9nano"
+#   DeviceNames: ["Device 7300"]
+#   ArchitectureName: "gfx803"
+
+#   ScheduleName: "hip"
+#   DeviceNames: ["Device 0000"]
+#   ArchitectureName: "fallback"
+
+LibraryClient:

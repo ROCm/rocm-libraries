@@ -1,0 +1,125 @@
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1151] # not supported by arch
+
+GlobalParameters:
+  NumElementsToValidate: -1
+  BoundsCheck: True
+  KernelTime: True
+  #PrintSolutionRejectionReason: True
+  #MaxFileName: 256
+
+BenchmarkProblems:
+  ########################################
+  # NT - standard
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: z
+      DestDataType: z
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+  ########################################
+  # NT - LSU
+  ########################################
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - EdgeType: ["ShiftPtr"]
+        - LoopTail: [True]
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 4, 1, 1, 4,2, 1,1]  # 64x32
+          - [16, 16, 4, 1, 1, 2,2, 2,1]  # 64x32
+          - [16, 16, 4, 1, 1, 2,2, 1,2]  # 32x64
+        - ThreadTile:
+          - [ 1, 32 ]
+        - WorkGroup:
+          #- [ 64, 1, 1 ] # only WG2 is effective for 9 parameter MI
+          - [ 64, 1, 2 ] # only WG2 is effective for 9 parameter MI
+          - [ 64, 1, 4 ] # only WG2 is effective for 9 parameter MI
+        - SourceSwap: [0,1]
+        - DepthU: [8,16]
+        - VectorWidth: [1]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - GlobalReadVectorWidth: [1]
+        - WaveSeparateGlobalReadA: [0,1]
+        - WaveSeparateGlobalReadB: [0,1]
+        - GlobalSplitU: [1,2]
+        - GlobalSplitUAlgorithm: ["SingleBuffer","MultipleBuffer"]
+        - StaggerU: [0]
+        - ScheduleIterAlg: [3]
+        - DirectToVgprA: [False, True] #[True, False]
+        - DirectToVgprB: [False, True] #[True, False]
+        - NumElementsPerBatchStore: [2]
+        - 1LDSBuffer: [0]
+        - MIArchVgpr: [0,1]
+      BenchmarkForkParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          #- Exact: [ M, N, B, K, ldc, ldc, lda, ldb ]
+          - Exact: [1022, 1022, 1, 2050]
+
+  ########################################
+  # NN - standard
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: z
+      DestDataType: z
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+  ########################################
+  # NN - LSU + GSU + BS[0,1]
+  ########################################
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - EdgeType: ["ShiftPtr"]
+        - LoopTail: [True]
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 4, 1, 1, 4,2, 1,1]  # 64x32
+          - [16, 16, 4, 1, 1, 2,2, 2,1]  # 64x32
+          - [16, 16, 4, 1, 1, 2,2, 1,2]  # 32x64
+          - [16, 16, 4, 1, 1, 2,1, 2,2]  # 64x32
+        - ThreadTile:
+          - [ 1, 32 ]
+        - WorkGroup:
+          - [ 64, 1, 1 ] # only WG2 is effective for 9 parameter MI
+          - [ 64, 1, 2 ] # only WG2 is effective for 9 parameter MI
+          - [ 64, 1, 4 ] # only WG2 is effective for 9 parameter MI
+        - SourceSwap: [0,1]
+        - DepthU: [8,16]
+        - VectorWidth: [1]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - GlobalReadVectorWidth: [1]
+        #- WaveSeparateGlobalReadA: [0,1]
+        #- WaveSeparateGlobalReadB: [0,1]
+        - GlobalSplitU: [1,4]
+        - GlobalSplitUAlgorithm: ["SingleBuffer","MultipleBuffer"]
+        - StaggerU: [0]
+        - ScheduleIterAlg: [3]
+        #- DirectToVgprA: [False, True] #[True, False]
+        #- DirectToVgprB: [False, True] #[True, False]
+        - NumElementsPerBatchStore: [2]
+        - 1LDSBuffer: [0]
+        #- MIArchVgpr: [0,1]
+        - BufferStore: [0,1]
+      BenchmarkForkParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          #- Exact: [ M, N, B, K, ldc, ldc, lda, ldb ]
+          - Exact: [1021, 1021, 1, 2051]
+

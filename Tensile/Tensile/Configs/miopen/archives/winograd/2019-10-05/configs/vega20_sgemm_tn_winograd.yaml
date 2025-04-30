@@ -1,0 +1,129 @@
+GlobalParameters:
+  CMakeBuildType: Release
+  DataInitTypeAB: 0
+  DataInitTypeBeta: 0
+  Device: 0
+  EnqueuesPerSync: 1
+  ForceRedoBenchmarkProblems: true
+  ForceRedoLibraryClient: true
+  ForceRedoLibraryLogic: true
+  KernelTime: true
+  LibraryPrintDebug: false
+  MergeFiles: true
+  MinimumRequiredVersion: 4.2.0
+  NumElementsToValidate: 0
+  PinClocks: false
+  Platform: 0
+  PrintWinnersOnly: 1
+  ShortNames: false
+  SleepPercent: 50
+  SolutionSelectionAlg: 1
+  SyncsPerBenchmark: 1
+  ValidationMaxToPrint: 4
+  ValidationPrintValids: false
+BenchmarkProblems:
+- - {Batched: true, DataType: s, OperationType: GEMM, TransposeA: true, TransposeB: false,
+    UseBeta: true}
+  - BenchmarkCommonParameters:
+    - LoopTail: [true]
+    - KernelLanguage: [Assembly]
+    - EdgeType: [ShiftPtr]
+    - GlobalSplitU: [1]
+    BenchmarkFinalParameters:
+    - ProblemSizes:
+      - Exact: [64, 64, 9, 86432]
+      - Exact: [128, 128, 9, 4896]
+      - Exact: [192, 128, 9, 4896]
+      - Exact: [160, 160, 9, 4896]
+      - Exact: [192, 160, 9, 4896]
+      - Exact: [192, 192, 9, 4896]
+      - Exact: [224, 192, 9, 4896]
+      - Exact: [224, 224, 9, 4896]
+      - Exact: [256, 224, 9, 4896]
+      - Exact: [256, 256, 9, 4896]
+      - Exact: [320, 256, 9, 4896]
+      - Exact: [64, 64, 9, 172864]
+      - Exact: [128, 128, 9, 9792]
+      - Exact: [192, 128, 9, 9792]
+      - Exact: [160, 160, 9, 9792]
+      - Exact: [192, 160, 9, 9792]
+      - Exact: [192, 192, 9, 9792]
+      - Exact: [224, 192, 9, 9792]
+      - Exact: [224, 224, 9, 9792]
+      - Exact: [256, 224, 9, 9792]
+      - Exact: [256, 256, 9, 9792]
+      - Exact: [320, 256, 9, 9792]
+      - Exact: [64, 64, 9, 345728]
+      - Exact: [128, 128, 9, 19584]
+      - Exact: [192, 128, 9, 19584]
+      - Exact: [160, 160, 9, 19584]
+      - Exact: [192, 160, 9, 19584]
+      - Exact: [192, 192, 9, 19584]
+      - Exact: [224, 192, 9, 19584]
+      - Exact: [224, 224, 9, 19584]
+      - Exact: [256, 224, 9, 19584]
+      - Exact: [256, 256, 9, 19584]
+      - Exact: [320, 256, 9, 19584]
+      - Exact: [64, 64, 11, 58400]
+      - Exact: [128, 128, 11, 3264]
+      - Exact: [192, 128, 11, 3264]
+      - Exact: [160, 160, 11, 3264]
+      - Exact: [192, 160, 11, 3264]
+      - Exact: [192, 192, 11, 3264]
+      - Exact: [224, 192, 11, 3264]
+      - Exact: [224, 224, 11, 3264]
+      - Exact: [256, 224, 11, 3264]
+      - Exact: [256, 256, 11, 3264]
+      - Exact: [320, 256, 11, 3264]
+      - Exact: [64, 64, 11, 116800]
+      - Exact: [128, 128, 11, 6528]
+      - Exact: [192, 128, 11, 6528]
+      - Exact: [160, 160, 11, 6528]
+      - Exact: [192, 160, 11, 6528]
+      - Exact: [192, 192, 11, 6528]
+      - Exact: [224, 192, 11, 6528]
+      - Exact: [224, 224, 11, 6528]
+      - Exact: [256, 224, 11, 6528]
+      - Exact: [256, 256, 11, 6528]
+      - Exact: [320, 256, 11, 6528]
+      - Exact: [64, 64, 11, 233600]
+      - Exact: [128, 128, 11, 13056]
+      - Exact: [192, 128, 11, 13056]
+      - Exact: [160, 160, 11, 13056]
+      - Exact: [192, 160, 11, 13056]
+      - Exact: [192, 192, 11, 13056]
+      - Exact: [224, 192, 11, 13056]
+      - Exact: [224, 224, 11, 13056]
+      - Exact: [256, 224, 11, 13056]
+      - Exact: [256, 256, 11, 13056]
+      - Exact: [320, 256, 11, 13056]
+    BenchmarkForkParameters: null
+    BenchmarkJoinParameters: null
+    ForkParameters:
+    - PrefetchGlobalRead: [false, true]
+    - WorkGroupMapping: [1, 8]
+    - DepthU: [8, 16, 32]
+    - LdsPadA: [0, -1]
+    - PrefetchLocalRead: [false, true]
+    - LdsPadB: [0, -1]
+    - VectorWidth: [2, 4]
+    - GlobalReadVectorWidth: [1, 2, 4]
+    - FractionalLoad: [0, 1]
+    - ThreadTile:
+      - [4, 4]
+      - [4, 2]
+      - [2, 4]
+      - [4, 8]
+      - [8, 4]
+      - [8, 8]
+    - WorkGroup:
+      - [16, 16, 1]
+      - [16, 8, 1]
+      - [8, 16, 1]
+    InitialSolutionParameters: null
+    JoinParameters: null
+LibraryLogic:
+  ArchitectureName: gfx906
+  DeviceNames: [Device 66a0, Device 66a1, Device 66a7, Vega 20]
+  ScheduleName: vega20
+LibraryClient:
