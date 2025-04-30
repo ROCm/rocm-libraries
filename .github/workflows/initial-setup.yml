@@ -31,7 +31,7 @@ jobs:
             git subtree add --prefix $repo https://github.com/${url}.git $branch
             if [ "$revision" ]; then
               echo "Resetting $repo to master-no-npi mainline revision $revision"
-              git reset --hard $revision
+              cd $repo && git reset --hard $revision && cd ..
             fi
           done
 
