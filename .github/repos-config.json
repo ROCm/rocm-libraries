@@ -3,7 +3,8 @@
     {
       "name": "composable_kernel",
       "url": "ROCm/composable_kernel",
-      "branch": "amd-master"
+      "branch": "amd-master",
+      "revision": "8fcb4dff1af2c44581a01607626927dd23297163"
     },
     {
       "name": "hipBLAS",
