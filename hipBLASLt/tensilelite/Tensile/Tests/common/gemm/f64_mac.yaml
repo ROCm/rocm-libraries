@@ -1,0 +1,207 @@
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950] # not supported by arch
+
+GlobalParameters:
+  MinimumRequiredVersion: 4.14.0
+  SleepPercent: 50
+  NumElementsToValidate: 128
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  NewClient: 2
+  CSVExportWinner: 1
+  CSVMergeSameProblemID: 1
+  Device: 0
+  PrintSolutionRejectionReason: True
+
+BenchmarkProblems:
+  ########################################
+  # NN - standard
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: d
+      TransposeA: false
+      TransposeB: false
+      # UseScaleAlphaVec: 1
+      # UseBeta: true
+      # UseBias: 1
+      Batched: true
+      # Activation: true
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: [Assembly]
+      ForkParameters:
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - WavefrontSize: [32]
+        - ThreadTile:
+          - [1, 1]
+          - [2, 2]
+          - [4, 4]
+          - [8, 8]
+        - WorkGroup:
+          - [4, 8, 1]
+          - [8, 4, 1]
+          - [2, 16, 1]
+          - [16, 2, 1]
+        - DepthU: [8, 16, 32]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - LocalReadVectorWidth: [1]
+        - GlobalReadVectorWidthA: [1]
+        - GlobalReadVectorWidthB: [1]
+        - ScheduleIterAlg: [1]
+        - WorkGroupMapping: [1]
+        - GlobalSplitU: [1]
+        - LdsPadA: [0]
+        - LdsPadB: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [64, 64, 1024], [64, 64, 1024], [1], [32] ]
+
+  ########################################
+  # NT - standard
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: d
+      TransposeA: false
+      TransposeB: true
+      # UseScaleAlphaVec: 1
+      # UseBeta: true
+      # UseBias: 1
+      Batched: true
+      # Activation: true
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: [Assembly]
+      ForkParameters:
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - WavefrontSize: [32]
+        - ThreadTile:
+          - [1, 1]
+          - [2, 2]
+          - [4, 4]
+          - [8, 8]
+        - WorkGroup:
+          - [4, 8, 1]
+          - [8, 4, 1]
+          - [2, 16, 1]
+          - [16, 2, 1]
+        - DepthU: [8, 16, 32]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - LocalReadVectorWidth: [1]
+        - GlobalReadVectorWidthA: [1]
+        - GlobalReadVectorWidthB: [1]
+        - ScheduleIterAlg: [1]
+        - WorkGroupMapping: [1]
+        - GlobalSplitU: [1]
+        - LdsPadA: [0]
+        - LdsPadB: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [64, 64, 1024], [64, 64, 1024], [1], [32] ]
+
+  ########################################
+  # TN - standard
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: d
+      TransposeA: true
+      TransposeB: false
+      # UseScaleAlphaVec: 1
+      # UseBeta: true
+      # UseBias: 1
+      Batched: true
+      # Activation: true
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: [Assembly]
+      ForkParameters:
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - WavefrontSize: [32]
+        - ThreadTile:
+          - [1, 1]
+          - [2, 2]
+          - [4, 4]
+          - [8, 8]
+        - WorkGroup:
+          - [4, 8, 1]
+          - [8, 4, 1]
+          - [2, 16, 1]
+          - [16, 2, 1]
+        - DepthU: [8, 16, 32]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - LocalReadVectorWidth: [1]
+        - GlobalReadVectorWidthA: [1]
+        - GlobalReadVectorWidthB: [1]
+        - ScheduleIterAlg: [1]
+        - WorkGroupMapping: [1]
+        - GlobalSplitU: [1]
+        - LdsPadA: [0]
+        - LdsPadB: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [64, 64, 1024], [64, 64, 1024], [1], [32] ]
+
+  ########################################
+  # TT - standard
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: d
+      TransposeA: true
+      TransposeB: true
+      # UseScaleAlphaVec: 1
+      # UseBeta: true
+      # UseBias: 1
+      Batched: true
+      # Activation: true
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: [Assembly]
+      ForkParameters:
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - WavefrontSize: [32]
+        - ThreadTile:
+          - [1, 1]
+          - [2, 2]
+          - [4, 4]
+          - [8, 8]
+        - WorkGroup:
+          - [4, 8, 1]
+          - [8, 4, 1]
+          - [2, 16, 1]
+          - [16, 2, 1]
+        - DepthU: [8, 16, 32]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - LocalReadVectorWidth: [1]
+        - GlobalReadVectorWidthA: [1]
+        - GlobalReadVectorWidthB: [1]
+        - ScheduleIterAlg: [1]
+        - WorkGroupMapping: [1]
+        - GlobalSplitU: [1]
+        - LdsPadA: [0]
+        - LdsPadB: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [64, 64, 1024], [64, 64, 1024], [1], [32] ]

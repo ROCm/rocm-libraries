@@ -1,0 +1,60 @@
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
+
+GlobalParameters:
+  MinimumRequiredVersion: 4.14.0
+  SleepPercent: 50
+  EnqueuesPerSync: 1
+  NumWarmups: 0
+  KernelTime: true
+  NumElementsToValidate: -1
+  DataInitTypeBeta: 1
+  DataInitTypeAlpha: 1
+  # DataInitTypeA: 12
+  # DataInitTypeB: 13
+  # DataInitTypeC: 12
+  # DataInitSeed: 1
+  # CSVExportWinner: 1
+  # CSVMergeSameProblemID: 1
+  PreciseKernelTime: 0
+  # Device: 0
+  MaxFileName: 256
+  #RotatingBufferSize: 1024
+  # PrintSolutionRejectionReason: true
+
+BenchmarkProblems:
+- - OperationType: GEMM
+    DataType: H
+    DestDataType: H
+    ComputeDataType: S
+    HighPrecisionAccumulate: true
+    TransposeA: False
+    TransposeB: True
+    UseBeta: True
+    #UseBias: 1
+    Batched: True
+    #Activation: True
+    ActivationType: all
+    #ActivationHPA: True
+  - InitialSolutionParameters: 
+    BenchmarkCommonParameters:
+    - KernelLanguage: [Assembly]
+    ForkParameters:
+    - 1LDSBuffer: [1]
+    - DepthU: [64]
+    - PrefetchGlobalRead: [2]
+    - PrefetchLocalRead: [1]
+    - SourceSwap: [1]
+    - StaggerU: [0]
+    - GlobalSplitU: [0]
+    - StreamK: [3]
+    - Groups:
+      - 
+        - NonTemporalC: 0
+          NonTemporalD: 0
+      - 
+        - MatrixInstruction: [16, 16, 16,  1,  1,  4,  8,  4,  1] # MT 256x128
+    BenchmarkJoinParameters: 
+    BenchmarkFinalParameters:
+    - ProblemSizes:
+      - Range: [ [256, 263, 2097], [256, 263, 2097], [1], [256, 263, 1045] ]

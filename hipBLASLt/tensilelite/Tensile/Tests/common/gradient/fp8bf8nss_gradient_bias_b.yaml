@@ -1,0 +1,157 @@
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
+
+GlobalParameters:
+  MinimumRequiredVersion: 4.14.0
+  MergeFiles: False
+  SleepPercent: 50
+  NumElementsToValidate: -1
+  DataInitTypeBias: 0
+  DataInitTypeBeta: 1
+  DataInitTypeAlpha: 1
+  DataInitTypeScaleA: 2
+  DataInitTypeScaleB: 3
+  NewClient: 2
+  CSVExportWinner: 1
+  CSVMergeSameProblemID: 1
+  Device: 0
+  MaxWorkspaceSize: 3355443200
+
+BenchmarkProblems:
+  ########################################
+  # TN - standard (BiasSrc B)
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8B8N
+      DestDataType: S
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+      Gradient: True
+      UseBias: 1
+      BiasSrc: "B"
+      BiasDataTypeList: [s,b]
+      UseScaleAB: "Scalar"
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16,16,32, 1, 1, 1,1, 1,1]  # 16x16
+          - [16,16,32, 1, 1, 1,1, 2,2]  # 32x32
+          - [16,16,32, 1, 1, 2,2, 1,1]  # 32x32
+          - [16,16,32, 1, 1, 2,2, 2,2]  # 64x64
+          - [32,32, 16, 1, 1, 1,1, 1,1]  # 32x32
+          - [32,32, 16, 1, 1, 1,1, 2,2]  # 64x64
+          - [32,32, 16, 1, 1, 2,2, 1,1]  # 64x64
+          - [32,32, 16, 1, 1, 2,2, 2,2]  # 128x128
+        - DepthU: [ 32, 64 ]
+        - AssertFree0ElementMultiple: [1, 8]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - LocalReadVectorWidth: [8]
+        - ScheduleIterAlg: [3]
+        - InnerUnroll: [1]
+        - ExpandPointerSwap: [1]
+        - TransposeLDS: [1]
+        - LdsBlockSizePerPadA: [0]
+        - LdsBlockSizePerPadB: [0]
+        - LdsPadA: [0]
+        - LdsPadB: [0]
+        - WaveSeparateGlobalReadB: [1]
+        - 1LDSBuffer: [-1]
+        - GlobalSplitU: [1, 2]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel"]
+        - GlobalReadPerMfma: [1]
+        - LocalWritePerMfma: [-1]
+        - StoreVectorWidth: [-1]
+        - SourceSwap: [1]
+        - NumElementsPerBatchStore: [0,2]
+        - StorePriorityOpt: [0,1]
+        - ActivationFuncCall: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [511, 256, 1,1024]
+          - Exact: [512, 256, 1, 511]
+          - Exact: [512, 256, 1,1023]
+        - BiasTypeArgs: ['s', 'b']
+
+  ########################################
+  # NT - standard (BiasSrc B)
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8B8N
+      DestDataType: S
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      TransposeA: 0
+      TransposeB: 1
+      UseBeta: True
+      Batched: True
+      Gradient: True
+      UseBias: 1
+      BiasSrc: "B"
+      BiasDataTypeList: [s,b]
+      UseScaleAB: "Scalar"
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16,16,32, 1, 1, 1,1, 1,1]  # 16x16
+          - [16,16,32, 1, 1, 1,1, 2,2]  # 32x32
+          - [16,16,32, 1, 1, 2,2, 1,1]  # 32x32
+          - [16,16,32, 1, 1, 2,2, 2,2]  # 64x64
+          - [32,32, 16, 1, 1, 1,1, 1,1]  # 32x32
+          - [32,32, 16, 1, 1, 1,1, 2,2]  # 64x64
+          - [32,32, 16, 1, 1, 2,2, 1,1]  # 64x64
+          - [32,32, 16, 1, 1, 2,2, 2,2]  # 128x128
+        - DepthU: [ 32, 64 ]
+        - AssertFree0ElementMultiple: [1, 8]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - ScheduleIterAlg: [3]
+        - InnerUnroll: [1]
+        - ExpandPointerSwap: [1]
+        - TransposeLDS: [0]
+        - LdsBlockSizePerPadA: [0]
+        - LdsBlockSizePerPadB: [0]
+        - LdsPadA: [0]
+        - LdsPadB: [0]
+        - WaveSeparateGlobalReadB: [1]
+        - 1LDSBuffer: [-1]
+        - GlobalSplitU: [1, 2]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel"]
+        - GlobalReadPerMfma: [1]
+        - LocalWritePerMfma: [-1]
+        - StoreVectorWidth: [-1]
+        - SourceSwap: [1]
+        - NumElementsPerBatchStore: [0,2]
+        - StorePriorityOpt: [0,1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [121, 128, 1, 129]
+          - Exact: [511, 256, 1,1024]
+          - Exact: [512, 256, 1, 511]
+          - Exact: [512, 256, 1,1023]
+          # - Exact: []
+        - BiasTypeArgs: ['s', 'b']

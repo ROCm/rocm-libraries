@@ -1,0 +1,666 @@
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
+
+GlobalParameters:
+  NumElementsToValidate: -1
+  BoundsCheck: False
+  KernelTime: False
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeC: 3
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 1
+  DataInitTypeBias: 3
+  DataInitTypeScaleA: 2
+  DataInitTypeScaleB: 2
+  DataInitTypeScaleC: 1
+  DataInitTypeScaleD: 2
+  DataInitTypeScaleAlphaVec: 21
+  MaxWorkspaceSize: 134217728
+  DeviceLDS: 163840
+  MaxLDS: 163840
+  PrintSolutionRejectionReason: True
+
+BenchmarkProblems:
+  - # F8SS NN
+    -
+      OperationType: GEMM
+      DataType: F8
+      # DataTypeA: F8
+      # DataTypeB: h
+      DestDataType: S
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      TransposeA: 0
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+      Activation:    True
+      # UseScaleAB: "Vector"
+      # UseScaleAB: "Scalar"
+      # UseScaleCD: True
+      # UseScaleAlphaVec: 3
+      # UseBias: 3
+      # BiasDataTypeList: [s]
+      # UseE: True
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - 1LDSBuffer: [-1]
+        # - AssertFree0ElementMultiple: [1]
+        - ClusterLocalRead: [1]
+        - DepthU: [ 128 ]
+        - ExpandPointerSwap: [1]
+        - GlobalReadPerMfma: [1]
+        - GlobalReadVectorWidthA: [4]
+        - GlobalReadVectorWidthB: [4]
+        # - GlobalSplitU: [0]
+        # - GlobalSplitUAlgorithm: ["MultipleBuffer"]
+        - InnerUnroll: [1]
+        - MatrixInstruction:
+          - [16,16,32, 1, 1, 2,2, 2,2]
+          - [16,16,128, 1, 1, 2,2, 2,2]
+          - [32,32,16,1, 1, 2,1, 2,2]
+          - [32,32,64,1, 1, 1,1, 2,2]
+        - LdsBlockSizePerPadA: [0]
+        - LdsBlockSizePerPadB: [0]
+        - LdsPadA: [0]
+        - LdsPadB: [0]
+        - LocalWritePerMfma: [-1]
+        - NumElementsPerBatchStore: [0]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - SourceSwap: [1]
+        - StorePriorityOpt: [0]
+        - StoreVectorWidth: [-1]
+        - StreamK: [3]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - WaveSeparateGlobalReadB: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 128]
+          - Exact: [1024, 1024, 1, 1024]
+          # - Exact: [4096, 1024, 1, 1024]
+          # - Exact: [1024, 4096, 1, 1024]
+          # - Exact: [1024, 1024, 1, 4096]
+          # - Exact: [4096, 4096, 1, 4096]
+          # - Exact: [4111, 4096, 1, 4096]
+          # - Exact: [4096, 4111, 1, 4096]
+          # - Exact: [4096, 4096, 1, 4111]
+          - Exact: [4111, 4111, 1, 4111]
+          # - Exact: [1024, 1024, 1, 512]
+          # - Exact: [127,   128, 1, 640]
+          # - Exact: [128,   128, 1, 640]
+          # - Exact: [129,   128, 1, 640]
+        - BiasTypeArgs: ['s']
+        - ActivationArgs:
+          - [Enum: none]
+
+  - # F8SS NT ScaleAB=Vector ScaleCD ScaleAlpha Bias
+    -
+      OperationType: GEMM
+      DataType: F8
+      # DataTypeA: F8
+      # DataTypeB: h
+      DestDataType: S
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      TransposeA: 0
+      TransposeB: 1
+      UseBeta: True
+      Batched: True
+      Activation:    True
+      UseScaleAB: "Vector"
+      # UseScaleAB: "Scalar"
+      # UseScaleCD: True
+      UseScaleAlphaVec: 3
+      UseBias: 3
+      BiasDataTypeList: [s]
+      UseE: True
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - 1LDSBuffer: [-1]
+        # - AssertFree0ElementMultiple: [1]
+        - ClusterLocalRead: [1]
+        - DepthU: [ 128 ]
+        - ExpandPointerSwap: [1]
+        - GlobalReadPerMfma: [1]
+        - GlobalReadVectorWidthA: [4]
+        - GlobalReadVectorWidthB: [4]
+        # - GlobalSplitU: [0]
+        # - GlobalSplitUAlgorithm: ["MultipleBuffer"]
+        - InnerUnroll: [1]
+        - MatrixInstruction:
+          - [16,16,32, 1, 1, 2,2, 2,2]
+          - [16,16,128, 1, 1, 2,2, 2,2]
+          - [32,32,16,1, 1, 2,1, 2,2]
+          - [32,32,64,1, 1, 1,1, 2,2]
+        - LdsBlockSizePerPadA: [0]
+        - LdsBlockSizePerPadB: [0]
+        - LdsPadA: [0]
+        - LdsPadB: [0]
+        - LocalReadVectorWidth: [8]
+        - LocalWritePerMfma: [-1]
+        - NumElementsPerBatchStore: [0]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - SourceSwap: [1]
+        - StorePriorityOpt: [0]
+        - StoreVectorWidth: [-1]
+        - StreamK: [3]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - WaveSeparateGlobalReadB: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 128]
+          - Exact: [1024, 1024, 1, 1024]
+          # - Exact: [4096, 1024, 1, 1024]
+          # - Exact: [1024, 4096, 1, 1024]
+          # - Exact: [1024, 1024, 1, 4096]
+          # - Exact: [4096, 4096, 1, 4096]
+          # - Exact: [4111, 4096, 1, 4096]
+          # - Exact: [4096, 4111, 1, 4096]
+          # - Exact: [4096, 4096, 1, 4111]
+          - Exact: [4111, 4111, 1, 4111]
+          # - Exact: [1024, 1024, 1, 512]
+          # - Exact: [127,   128, 1, 640]
+          # - Exact: [128,   128, 1, 640]
+          # - Exact: [129,   128, 1, 640]
+        - BiasTypeArgs: ['s']
+        - ActivationArgs:
+          - [Enum: none]
+
+  - # F8HS TN ScaleAB=Vector ScaleCD ScaleAlpha Bias
+    -
+      OperationType: GEMM
+      DataType: F8
+      # DataTypeA: F8
+      # DataTypeB: h
+      DestDataType: h
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+      Activation:    True
+      UseScaleAB: "Vector"
+      # UseScaleAB: "Scalar"
+      # UseScaleCD: True
+      UseScaleAlphaVec: 3
+      UseBias: 3
+      BiasDataTypeList: [s]
+      UseE: True
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - 1LDSBuffer: [-1]
+        # - AssertFree0ElementMultiple: [1]
+        - ClusterLocalRead: [1]
+        - DepthU: [ 128 ]
+        - ExpandPointerSwap: [1]
+        - GlobalReadPerMfma: [1]
+        - GlobalReadVectorWidthA: [4]
+        - GlobalReadVectorWidthB: [4]
+        # - GlobalSplitU: [0]
+        # - GlobalSplitUAlgorithm: ["MultipleBuffer"]
+        - InnerUnroll: [1]
+        - MatrixInstruction:
+          - [16,16,32, 1, 1, 2,2, 2,2]
+          - [16,16,128, 1, 1, 2,2, 2,2]
+          - [32,32,16,1, 1, 2,1, 2,2]
+          - [32,32,64,1, 1, 1,1, 2,2]
+        - LdsBlockSizePerPadA: [0]
+        - LdsBlockSizePerPadB: [0]
+        - LdsPadA: [0]
+        - LdsPadB: [0]
+        - LocalReadVectorWidth: [8]
+        - LocalWritePerMfma: [-1]
+        - NumElementsPerBatchStore: [0]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - SourceSwap: [1]
+        - StorePriorityOpt: [0]
+        - StoreVectorWidth: [-1]
+        - StreamK: [3]
+        - UseSgprForGRO: [0]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - WaveSeparateGlobalReadB: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 128]
+          - Exact: [1024, 1024, 1, 1024]
+          # - Exact: [4096, 1024, 1, 1024]
+          # - Exact: [1024, 4096, 1, 1024]
+          # - Exact: [1024, 1024, 1, 4096]
+          # - Exact: [4096, 4096, 1, 4096]
+          # - Exact: [4111, 4096, 1, 4096]
+          # - Exact: [4096, 4111, 1, 4096]
+          # - Exact: [4096, 4096, 1, 4111]
+          - Exact: [4111, 4111, 1, 4111]
+          # - Exact: [1024, 1024, 1, 512]
+          # - Exact: [127,   128, 1, 640]
+          # - Exact: [128,   128, 1, 640]
+          # - Exact: [129,   128, 1, 640]
+        - BiasTypeArgs: ['s']
+        - ActivationArgs:
+          - [Enum: none]
+
+  - # F8F8S TT ScaleAB=Vector ScaleCD ScaleAlpha Bias
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      # DataTypeA: F8
+      # DataTypeB: h
+      DestDataType: F8
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 1
+      UseBeta: True
+      Batched: True
+      Activation:    True
+      UseScaleAB: "Vector"
+      # UseScaleAB: "Scalar"
+      # UseScaleCD: True
+      UseScaleAlphaVec: 3
+      UseBias: 3
+      BiasDataTypeList: [s]
+      UseE: True
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - 1LDSBuffer: [-1]
+        # - AssertFree0ElementMultiple: [1]
+        - ClusterLocalRead: [1]
+        - DepthU: [ 128 ]
+        - ExpandPointerSwap: [1]
+        - GlobalReadPerMfma: [1]
+        - GlobalReadVectorWidthA: [4]
+        - GlobalReadVectorWidthB: [4]
+        # - GlobalSplitU: [0]
+        # - GlobalSplitUAlgorithm: ["MultipleBuffer"]
+        - InnerUnroll: [1]
+        - MatrixInstruction:
+          - [16,16,32, 1, 1, 2,2, 2,2]
+          - [16,16,128, 1, 1, 2,2, 2,2]
+          - [32,32,16,1, 1, 2,1, 2,2]
+          - [32,32,64,1, 1, 1,1, 2,2]
+        - LdsBlockSizePerPadA: [0]
+        - LdsBlockSizePerPadB: [0]
+        - LdsPadA: [0]
+        - LdsPadB: [0]
+        - LocalReadVectorWidth: [8]
+        - LocalWritePerMfma: [-1]
+        - NumElementsPerBatchStore: [0]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - SourceSwap: [1]
+        - StorePriorityOpt: [0]
+        - StoreVectorWidth: [-1]
+        - StreamK: [3]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - WaveSeparateGlobalReadB: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 128]
+          - Exact: [1024, 1024, 1, 1024]
+          # - Exact: [4096, 1024, 1, 1024]
+          # - Exact: [1024, 4096, 1, 1024]
+          # - Exact: [1024, 1024, 1, 4096]
+          # - Exact: [4096, 4096, 1, 4096]
+          # - Exact: [4111, 4096, 1, 4096]
+          # - Exact: [4096, 4111, 1, 4096]
+          # - Exact: [4096, 4096, 1, 4111]
+          - Exact: [4111, 4111, 1, 4111]
+          # - Exact: [1024, 1024, 1, 512]
+          # - Exact: [127,   128, 1, 640]
+          # - Exact: [128,   128, 1, 640]
+          # - Exact: [129,   128, 1, 640]
+        - BiasTypeArgs: ['s']
+        - ActivationArgs:
+          - [Enum: none]
+
+  - # B8SS TN ScaleAB=Vector ScaleCD ScaleAlpha Bias
+    -
+      OperationType: GEMM
+      DataType: B8
+      # DataTypeA: F8
+      # DataTypeB: h
+      DestDataType: S
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+      Activation:    True
+      UseScaleAB: "Vector"
+      # UseScaleAB: "Scalar"
+      # UseScaleCD: True
+      UseScaleAlphaVec: 3
+      UseBias: 3
+      BiasDataTypeList: [s]
+      UseE: True
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - 1LDSBuffer: [-1]
+        # - AssertFree0ElementMultiple: [1]
+        - ClusterLocalRead: [1]
+        - DepthU: [ 128 ]
+        - ExpandPointerSwap: [1]
+        - GlobalReadPerMfma: [1]
+        - GlobalReadVectorWidthA: [4]
+        - GlobalReadVectorWidthB: [4]
+        # - GlobalSplitU: [0]
+        # - GlobalSplitUAlgorithm: ["MultipleBuffer"]
+        - InnerUnroll: [1]
+        - MatrixInstruction:
+          - [16,16,32, 1, 1, 2,2, 2,2]
+          - [16,16,128, 1, 1, 2,2, 2,2]
+          - [32,32,16,1, 1, 2,1, 2,2]
+          - [32,32,64,1, 1, 1,1, 2,2]
+        - LdsBlockSizePerPadA: [0]
+        - LdsBlockSizePerPadB: [0]
+        - LdsPadA: [0]
+        - LdsPadB: [0]
+        - LocalReadVectorWidth: [8]
+        - LocalWritePerMfma: [-1]
+        - NumElementsPerBatchStore: [0]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - SourceSwap: [1]
+        - StorePriorityOpt: [0]
+        - StoreVectorWidth: [-1]
+        - StreamK: [3]
+        - UseSgprForGRO: [0]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - WaveSeparateGlobalReadB: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 128]
+          - Exact: [1024, 1024, 1, 1024]
+          # - Exact: [4096, 1024, 1, 1024]
+          # - Exact: [1024, 4096, 1, 1024]
+          # - Exact: [1024, 1024, 1, 4096]
+          # - Exact: [4096, 4096, 1, 4096]
+          # - Exact: [4111, 4096, 1, 4096]
+          # - Exact: [4096, 4111, 1, 4096]
+          # - Exact: [4096, 4096, 1, 4111]
+          - Exact: [4111, 4111, 1, 4111]
+          # - Exact: [1024, 1024, 1, 512]
+          # - Exact: [127,   128, 1, 640]
+          # - Exact: [128,   128, 1, 640]
+          # - Exact: [129,   128, 1, 640]
+        - BiasTypeArgs: ['s']
+        - ActivationArgs:
+          - [Enum: none]
+
+  - # F8H_F8SS NN
+    -
+      OperationType: GEMM
+      DataType: F8
+      DataTypeA: F8
+      DataTypeB: h
+      DestDataType: S
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      TransposeA: 0
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+      Activation:    True
+      # UseScaleAB: "Vector"
+      # UseScaleAB: "Scalar"
+      # UseScaleCD: True
+      # UseScaleAlphaVec: 3
+      # UseBias: 3
+      # BiasDataTypeList: [s]
+      # UseE: True
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - 1LDSBuffer: [-1]
+        # - AssertFree0ElementMultiple: [1]
+        - ClusterLocalRead: [1]
+        - DepthU: [ 128 ]
+        - ExpandPointerSwap: [1]
+        - GlobalReadPerMfma: [1]
+        - GlobalReadVectorWidthA: [4]
+        - GlobalReadVectorWidthB: [4]
+        # - GlobalSplitU: [0]
+        # - GlobalSplitUAlgorithm: ["MultipleBuffer"]
+        - InnerUnroll: [1]
+        - MatrixInstruction:
+          - [16,16,32, 1, 1, 2,2, 2,2]
+          - [16,16,128, 1, 1, 2,2, 2,2]
+          - [32,32,16,1, 1, 2,1, 2,2]
+          - [32,32,64,1, 1, 1,1, 2,2]
+        - LdsBlockSizePerPadA: [0]
+        - LdsBlockSizePerPadB: [0]
+        - LdsPadA: [0]
+        - LdsPadB: [0]
+        - LocalReadVectorWidth: [8]
+        - LocalWritePerMfma: [-1]
+        - NumElementsPerBatchStore: [0]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - SourceSwap: [1]
+        - StorePriorityOpt: [0]
+        - StoreVectorWidth: [-1]
+        - StreamK: [3]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - WaveSeparateGlobalReadB: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 128]
+          - Exact: [1024, 1024, 1, 1024]
+          # - Exact: [4096, 1024, 1, 1024]
+          # - Exact: [1024, 4096, 1, 1024]
+          # - Exact: [1024, 1024, 1, 4096]
+          # - Exact: [4096, 4096, 1, 4096]
+          # - Exact: [4111, 4096, 1, 4096]
+          # - Exact: [4096, 4111, 1, 4096]
+          # - Exact: [4096, 4096, 1, 4111]
+          - Exact: [4111, 4111, 1, 4111]
+          # - Exact: [1024, 1024, 1, 512]
+          # - Exact: [127,   128, 1, 640]
+          # - Exact: [128,   128, 1, 640]
+          # - Exact: [129,   128, 1, 640]
+        - BiasTypeArgs: ['s']
+        - ActivationArgs:
+          - [Enum: none]
+
+  - # F8F8S_SR NT ScaleAB=Vector ScaleCD ScaleAlpha Bias
+    -
+      OperationType: GEMM
+      DataType: F8
+      # DataTypeA: F8
+      # DataTypeB: h
+      DestDataType: F8
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      TransposeA: 0
+      TransposeB: 1
+      UseBeta: True
+      Batched: True
+      Activation:    True
+      UseScaleAB: "Vector"
+      # UseScaleAB: "Scalar"
+      # UseScaleCD: True
+      UseScaleAlphaVec: 3
+      UseBias: 3
+      BiasDataTypeList: [s]
+      UseE: True
+      StochasticRounding: True
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - 1LDSBuffer: [-1]
+        # - AssertFree0ElementMultiple: [1]
+        - ClusterLocalRead: [1]
+        - DepthU: [ 128 ]
+        - ExpandPointerSwap: [1]
+        - GlobalReadPerMfma: [1]
+        - GlobalReadVectorWidthA: [4]
+        - GlobalReadVectorWidthB: [4]
+        # - GlobalSplitU: [0]
+        # - GlobalSplitUAlgorithm: ["MultipleBuffer"]
+        - InnerUnroll: [1]
+        - MatrixInstruction:
+          - [16,16,32, 1, 1, 2,2, 2,2]
+          - [16,16,128, 1, 1, 2,2, 2,2]
+          - [32,32,16,1, 1, 2,1, 2,2]
+          - [32,32,64,1, 1, 1,1, 2,2]
+        - LdsBlockSizePerPadA: [0]
+        - LdsBlockSizePerPadB: [0]
+        - LdsPadA: [0]
+        - LdsPadB: [0]
+        - LocalReadVectorWidth: [8]
+        - LocalWritePerMfma: [-1]
+        - NumElementsPerBatchStore: [0]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - SourceSwap: [1]
+        - StorePriorityOpt: [0]
+        - StoreVectorWidth: [-1]
+        - StreamK: [3]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - WaveSeparateGlobalReadB: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 128]
+          - Exact: [1024, 1024, 1, 1024]
+          # - Exact: [4096, 1024, 1, 1024]
+          # - Exact: [1024, 4096, 1, 1024]
+          # - Exact: [1024, 1024, 1, 4096]
+          # - Exact: [4096, 4096, 1, 4096]
+          # - Exact: [4111, 4096, 1, 4096]
+          # - Exact: [4096, 4111, 1, 4096]
+          # - Exact: [4096, 4096, 1, 4111]
+          - Exact: [4111, 4111, 1, 4111]
+          # - Exact: [1024, 1024, 1, 512]
+          # - Exact: [127,   128, 1, 640]
+          # - Exact: [128,   128, 1, 640]
+          # - Exact: [129,   128, 1, 640]
+        - BiasTypeArgs: ['s']
+        - ActivationArgs:
+          - [Enum: none]
+
+  - # B8F8BS TN ScaleAB=Vector ScaleCD ScaleAlpha Bias
+    - # ProblemType
+      OperationType: GEMM
+      DataType: B8F8
+      # DataTypeA: F8
+      # DataTypeB: h
+      DestDataType: b
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+      Activation:    True
+      UseScaleAB: "Vector"
+      # UseScaleAB: "Scalar"
+      # UseScaleCD: True
+      UseScaleAlphaVec: 3
+      UseBias: 3
+      BiasDataTypeList: [s]
+      UseE: True
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - 1LDSBuffer: [-1]
+        # - AssertFree0ElementMultiple: [1]
+        - ClusterLocalRead: [1]
+        - DepthU: [ 128 ]
+        - ExpandPointerSwap: [1]
+        - GlobalReadPerMfma: [1]
+        - GlobalReadVectorWidthA: [4]
+        - GlobalReadVectorWidthB: [4]
+        # - GlobalSplitU: [0]
+        # - GlobalSplitUAlgorithm: ["MultipleBuffer"]
+        - InnerUnroll: [1]
+        - MatrixInstruction:
+          - [16,16,32, 1, 1, 2,2, 2,2]
+          - [16,16,128, 1, 1, 2,2, 2,2]
+          - [32,32,16,1, 1, 2,1, 2,2]
+          - [32,32,64,1, 1, 1,1, 2,2]
+        - LdsBlockSizePerPadA: [0]
+        - LdsBlockSizePerPadB: [0]
+        - LdsPadA: [0]
+        - LdsPadB: [0]
+        - LocalReadVectorWidth: [8]
+        - LocalWritePerMfma: [-1]
+        - NumElementsPerBatchStore: [0]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - SourceSwap: [1]
+        - StorePriorityOpt: [0]
+        - StoreVectorWidth: [-1]
+        - StreamK: [3]
+        - UseSgprForGRO: [0]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - WaveSeparateGlobalReadB: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 128]
+          - Exact: [1024, 1024, 1, 1024]
+          # - Exact: [4096, 1024, 1, 1024]
+          # - Exact: [1024, 4096, 1, 1024]
+          # - Exact: [1024, 1024, 1, 4096]
+          # - Exact: [4096, 4096, 1, 4096]
+          # - Exact: [4111, 4096, 1, 4096]
+          # - Exact: [4096, 4111, 1, 4096]
+          # - Exact: [4096, 4096, 1, 4111]
+          - Exact: [4111, 4111, 1, 4111]
+          # - Exact: [1024, 1024, 1, 512]
+          # - Exact: [127,   128, 1, 640]
+          # - Exact: [128,   128, 1, 640]
+          # - Exact: [129,   128, 1, 640]
+        - BiasTypeArgs: ['s']
+        - ActivationArgs:
+          - [Enum: none]
