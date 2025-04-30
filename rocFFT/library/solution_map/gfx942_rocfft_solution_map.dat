@@ -1,0 +1,47 @@
+{"Version":3,
+"Data":[ 
+{"Problem":{"arch":"gfx942","token":"kernel_len100_single_sbrr"},
+ "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 100,0 ],"precision":"single","scheme":"CS_KERNEL_STOCKHAM","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":true,"buffer_inst":false,"tpb":6,"wgs":120,"tpt":[ 20,0 ],"factors":[ 5,5,4 ],"ebtype":"R2C_POST","direction":-1,"static_dim":1,"placement":"OP","iAryType":"CI","oAryType":"CI"}}}
+               ]},
+{"Problem":{"arch":"gfx942","token":"kernel_len200_single_sbcc"},
+ "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 200,0 ],"precision":"single","scheme":"CS_KERNEL_STOCKHAM_BLOCK_CC","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":true,"dir_reg":true,"buffer_inst":true,"tpb":20,"wgs":400,"tpt":[ 20,0 ],"factors":[ 5,5,2,4 ],"ebtype":"NONE","direction":-1,"static_dim":3,"placement":"IP","iAryType":"CI","oAryType":"CI"}}}
+              ,{"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 200,0 ],"precision":"single","scheme":"CS_KERNEL_STOCKHAM_BLOCK_CC","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":true,"dir_reg":true,"buffer_inst":true,"tpb":16,"wgs":320,"tpt":[ 20,0 ],"factors":[ 2,2,5,10 ],"ebtype":"NONE","direction":-1,"static_dim":2,"placement":"IP","iAryType":"CI","oAryType":"HI"}}}
+               ]},
+{"Problem":{"arch":"gfx942","token":"100_sp_ip_complex"},
+ "Solutions":[ {"sol_node_type":"SOL_DUMMY","using_scheme":"CS_NONE","solution_childnodes":[  ]}
+              ,{"sol_node_type":"SOL_LEAF_NODE","using_scheme":"CS_KERNEL_STOCKHAM","solution_childnodes":[ {"child_token":"kernel_len100_single_sbrr","child_option":0} ]}
+               ]},
+{"Problem":{"arch":"gfx942","token":"sbcc_200_sp_ip_complex"},
+ "Solutions":[ {"sol_node_type":"SOL_LEAF_NODE","using_scheme":"CS_KERNEL_STOCKHAM_BLOCK_CC","solution_childnodes":[ {"child_token":"kernel_len200_single_sbcc","child_option":0} ]}
+              ,{"sol_node_type":"SOL_LEAF_NODE","using_scheme":"CS_KERNEL_STOCKHAM_BLOCK_CC","solution_childnodes":[ {"child_token":"kernel_len200_single_sbcc","child_option":1} ]}
+               ]},
+{"Problem":{"arch":"gfx942","token":"200_sp_ip_complex"},
+ "Solutions":[ {"sol_node_type":"SOL_DUMMY","using_scheme":"CS_NONE","solution_childnodes":[  ]}
+              ,{"sol_node_type":"SOL_INTERNAL_NODE","using_scheme":"CS_REAL_TRANSFORM_EVEN","solution_childnodes":[ {"child_token":"100_sp_ip_complex","child_option":1} ]}
+               ]},
+{"Problem":{"arch":"gfx942","token":"200_200_200_sp_op_real_fwd"},
+ "Solutions":[ {"sol_node_type":"SOL_INTERNAL_NODE","using_scheme":"CS_REAL_3D_EVEN","solution_childnodes":[ {"child_token":"200_sp_ip_complex","child_option":1},{"child_token":"sbcc_200_sp_ip_complex","child_option":0},{"child_token":"sbcc_200_sp_ip_complex","child_option":1} ]}
+               ]},
+{"Problem":{"arch":"gfx942","token":"kernel_len128_double_sbrr"},
+ "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 128,0 ],"precision":"double","scheme":"CS_KERNEL_STOCKHAM","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":true,"buffer_inst":false,"tpb":8,"wgs":128,"tpt":[ 16,0 ],"factors":[ 8,2,8 ],"ebtype":"R2C_POST","direction":-1,"static_dim":1,"placement":"IP","iAryType":"CI","oAryType":"CI"}}}
+               ]},
+{"Problem":{"arch":"gfx942","token":"kernel_len256_double_sbcc"},
+ "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 256,0 ],"precision":"double","scheme":"CS_KERNEL_STOCKHAM_BLOCK_CC","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":true,"buffer_inst":false,"tpb":16,"wgs":512,"tpt":[ 32,0 ],"factors":[ 8,4,8 ],"ebtype":"NONE","direction":-1,"static_dim":3,"placement":"IP","iAryType":"CI","oAryType":"CI"}}}
+              ,{"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 256,0 ],"precision":"double","scheme":"CS_KERNEL_STOCKHAM_BLOCK_CC","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":true,"buffer_inst":false,"tpb":16,"wgs":512,"tpt":[ 32,0 ],"factors":[ 8,4,8 ],"ebtype":"NONE","direction":-1,"static_dim":2,"placement":"IP","iAryType":"CI","oAryType":"HI"}}}
+               ]},
+{"Problem":{"arch":"gfx942","token":"128_dp_ip_complex"},
+ "Solutions":[ {"sol_node_type":"SOL_DUMMY","using_scheme":"CS_NONE","solution_childnodes":[  ]}
+              ,{"sol_node_type":"SOL_LEAF_NODE","using_scheme":"CS_KERNEL_STOCKHAM","solution_childnodes":[ {"child_token":"kernel_len128_double_sbrr","child_option":0} ]}
+               ]},
+{"Problem":{"arch":"gfx942","token":"sbcc_256_dp_ip_complex"},
+ "Solutions":[ {"sol_node_type":"SOL_LEAF_NODE","using_scheme":"CS_KERNEL_STOCKHAM_BLOCK_CC","solution_childnodes":[ {"child_token":"kernel_len256_double_sbcc","child_option":0} ]}
+              ,{"sol_node_type":"SOL_LEAF_NODE","using_scheme":"CS_KERNEL_STOCKHAM_BLOCK_CC","solution_childnodes":[ {"child_token":"kernel_len256_double_sbcc","child_option":1} ]}
+               ]},
+{"Problem":{"arch":"gfx942","token":"256_dp_ip_complex"},
+ "Solutions":[ {"sol_node_type":"SOL_DUMMY","using_scheme":"CS_NONE","solution_childnodes":[  ]}
+              ,{"sol_node_type":"SOL_INTERNAL_NODE","using_scheme":"CS_REAL_TRANSFORM_EVEN","solution_childnodes":[ {"child_token":"128_dp_ip_complex","child_option":1} ]}
+               ]},
+{"Problem":{"arch":"gfx942","token":"256_256_256_dp_ip_real_fwd"},
+ "Solutions":[ {"sol_node_type":"SOL_INTERNAL_NODE","using_scheme":"CS_REAL_3D_EVEN","solution_childnodes":[ {"child_token":"256_dp_ip_complex","child_option":1},{"child_token":"sbcc_256_dp_ip_complex","child_option":0},{"child_token":"sbcc_256_dp_ip_complex","child_option":1} ]}
+               ]} ]
+}
