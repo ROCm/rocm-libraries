@@ -1,0 +1,164 @@
+# Style file for MLSE Libraries based on the modified rocBLAS style
+
+# Common settings
+BasedOnStyle:  LLVM
+TabWidth:        2
+IndentWidth:     2
+UseTab:          Never
+ColumnLimit: 120
+
+# Other languages JavaScript, Proto
+
+---
+Language: Cpp
+
+# http://releases.llvm.org/6.0.1/tools/clang/docs/ClangFormatStyleOptions.html#disabling-formatting-on-a-piece-of-code
+# int formatted_code;
+# // clang-format off
+#     void    unformatted_code  ;
+# // clang-format on
+# void formatted_code_again;
+
+DisableFormat:   false
+Standard: c++14
+AccessModifierOffset: -2
+AlignAfterOpenBracket: true
+AlignConsecutiveAssignments: true
+AlignConsecutiveDeclarations: true
+AlignEscapedNewlinesLeft: true
+AlignOperands:   true
+AllowAllArgumentsOnNextLine: true
+AlignTrailingComments: false
+AllowAllParametersOfDeclarationOnNextLine: true
+AllowShortBlocksOnASingleLine: false
+AllowShortCaseLabelsOnASingleLine: false
+AllowShortFunctionsOnASingleLine: Empty
+AllowShortIfStatementsOnASingleLine: false
+AllowShortLoopsOnASingleLine: false
+AlwaysBreakAfterDefinitionReturnType: false
+AlwaysBreakAfterReturnType: None
+AlwaysBreakBeforeMultilineStrings: false
+AlwaysBreakTemplateDeclarations: true
+AttributeMacros: [
+                  'THRUST_DEVICE',
+                  'THRUST_FORCEINLINE',
+                  'THRUST_HOST_DEVICE',
+                  'THRUST_HOST',
+                  '_CCCL_DEVICE',
+                  '_CCCL_FORCEINLINE',
+                  '_CCCL_HOST_DEVICE',
+                  '_CCCL_HOST',
+                  'THRUST_RUNTIME_FUNCTION',
+                  'THRUST_DETAIL_KERNEL_ATTRIBUTES',
+                 ]
+BinPackArguments: false
+BinPackParameters: false
+
+# Configure each individual brace in BraceWrapping
+BreakBeforeBraces: Custom
+# Control of individual brace wrapping cases
+BraceWrapping: {
+    AfterCaseLabel: 'false'
+    AfterClass: 'true'
+    AfterControlStatement: 'true'
+    AfterEnum : 'true'
+    AfterFunction : 'true'
+    AfterNamespace : 'true'
+    AfterStruct : 'true'
+    AfterUnion : 'true'
+    BeforeCatch : 'true'
+    BeforeElse : 'true'
+    IndentBraces : 'false'
+    SplitEmptyFunction: 'false'
+    SplitEmptyRecord: 'false'
+}
+
+BreakBeforeConceptDeclarations: true
+BreakBeforeBinaryOperators: NonAssignment
+BreakBeforeTernaryOperators: true
+BreakConstructorInitializers: BeforeComma
+BreakInheritanceList: BeforeComma
+EmptyLineAfterAccessModifier: Never
+EmptyLineBeforeAccessModifier: Always
+
+InsertBraces: true
+InsertNewlineAtEOF: true
+InsertTrailingCommas: Wrapped
+IndentRequires: true
+IndentPPDirectives: AfterHash
+PackConstructorInitializers: Never
+PenaltyBreakAssignment: 30
+PenaltyBreakTemplateDeclaration: 0
+PenaltyIndentedWhitespace: 2
+RemoveSemicolon: false
+SpaceAfterLogicalNot: false
+SpaceAfterTemplateKeyword: true
+SpaceBeforeCtorInitializerColon: true
+SpaceBeforeInheritanceColon: true
+SpaceBeforeRangeBasedForLoopColon: true
+
+
+CommentPragmas:  '^ IWYU pragma:'
+CompactNamespaces: false
+ConstructorInitializerAllOnOneLineOrOnePerLine: false
+ConstructorInitializerIndentWidth: 4
+ContinuationIndentWidth: 2
+Cpp11BracedListStyle: true
+SpaceBeforeCpp11BracedList: false
+ExperimentalAutoDetectBinPacking: false
+ForEachMacros:   [ foreach, Q_FOREACH, BOOST_FOREACH ]
+IndentCaseLabels: true
+FixNamespaceComments: true
+IndentWrappedFunctionNames: false
+KeepEmptyLinesAtTheStartOfBlocks: false
+MacroBlockBegin: ''
+MacroBlockEnd:   ''
+#JavaScriptQuotes: Double
+MaxEmptyLinesToKeep: 1
+NamespaceIndentation: None
+ObjCBlockIndentWidth: 4
+#ObjCSpaceAfterProperty: true
+#ObjCSpaceBeforeProtocolList: true
+PenaltyBreakBeforeFirstCallParameter: 50
+PenaltyBreakComment: 0
+PenaltyBreakFirstLessLess: 0
+PenaltyBreakString: 70
+PenaltyExcessCharacter: 100
+PenaltyReturnTypeOnItsOwnLine: 90
+PointerAlignment: Left
+SpaceAfterCStyleCast: true
+SpaceBeforeAssignmentOperators: true
+SpaceBeforeParens: ControlStatements
+SpaceInEmptyParentheses: false
+SpacesBeforeTrailingComments: 1
+SpacesInAngles: Never
+SpacesInContainerLiterals: true
+SpacesInCStyleCastParentheses: false
+SpacesInParentheses: false
+SpacesInSquareBrackets: false
+#SpaceAfterTemplateKeyword: true
+#SpaceBeforeInheritanceColon: true
+
+#SortUsingDeclarations: true
+SortIncludes: CaseInsensitive
+
+ReflowComments: true
+
+#IncludeBlocks: Preserve
+#IndentPPDirectives: AfterHash
+
+StatementMacros: [
+  'THRUST_EXEC_CHECK_DISABLE',
+  'THRUST_NAMESPACE_BEGIN',
+  'THRUST_NAMESPACE_END',
+  'THRUST_EXEC_CHECK_DISABLE',
+  'CUB_NAMESPACE_BEGIN',
+  'CUB_NAMESPACE_END',
+  'THRUST_NAMESPACE_BEGIN',
+  'THRUST_NAMESPACE_END',
+  '_LIBCUDACXX_BEGIN_NAMESPACE_STD',
+  '_LIBCUDACXX_END_NAMESPACE_STD',
+]
+TabWidth: 2
+UseTab: Never
+---
