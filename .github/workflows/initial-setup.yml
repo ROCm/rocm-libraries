@@ -29,9 +29,7 @@ jobs:
             category=$(echo "$row" | jq -r '.category')
             url=$(echo "$row" | jq -r '.url')
             branch=$(echo "$row" | jq -r '.branch')
-            pushd "${category}"
-              git subtree add --prefix "${name}" https://github.com/${url}.git "$branch"
-            popd
+            git subtree add --prefix "${category}/${name}" https://github.com/${url}.git "$branch"
           done
 
       - name: Push changes to Monorepo

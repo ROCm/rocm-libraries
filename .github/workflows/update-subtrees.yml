@@ -34,16 +34,13 @@ jobs:
             url=$(echo "$row" | jq -r '.url')
             branch=$(echo "$row" | jq -r '.branch')
 
-            pushd "${category}"
-              git subtree pull --prefix "$name" https://github.com/${url}.git "$branch" || {
-                has_errors=true
-              }
-            popd
+            git subtree pull --prefix "${category}/${name}" https://github.com/${url}.git "$branch" || {
+              has_errors=true
+            }
 
-            # pushd "${category}"
-            #   git subtree push --prefix "$name" https://github.com/${url}.git "$branch" || {
-            #     has_errors=true
-            #   }
+            # git subtree push --prefix "${category}/${name}" https://github.com/${url}.git "$branch" || {
+            #  has_errors=true
+            # }
             # popd
           done
 
