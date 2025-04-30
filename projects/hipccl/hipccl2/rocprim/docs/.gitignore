@@ -1,0 +1,6 @@
+/_build/
+/_doxygen/
+/doxygen/html
+/doxygen/xml
+/doxygen/*.tag
+/sphinx/_toc.yml
