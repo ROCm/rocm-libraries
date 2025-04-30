@@ -1,0 +1,252 @@
+---
+include: rocblas_common.yaml
+include: known_bugs.yaml
+
+Definitions:
+  - &invalid_size_range
+    - { M:     3, N:     3, lda:     3, incx:     3, ldc:     3, stride_scale: 1, batch_count: -1 } # batch_count < 0
+    - { M:    -1, N:     1, lda:     1, incx:     1, ldc:     1, stride_scale: 1 } # M < 0
+    - { M:     1, N:    -1, lda:     1, incx:     1, ldc:     1, stride_scale: 1 } # N < 0
+    - { M:     2, N:     2, lda:     1, incx:     1, ldc:     2, stride_scale: 1 } # lda < M
+    - { M:     2, N:     2, lda:     2, incx:     1, ldc:     1, stride_scale: 1 } # ldc < M
+
+  - &quick_return_size_range
+    - { M:     3, N:     3, lda:     3, incx:     3, ldc:     3, batch_count: 0 } # batch_count == 0
+    - { M:     0, N:     1, lda:     1, incx:     1, ldc:     1 } # M == 0
+    - { M:     1, N:     0, lda:     1, incx:     1, ldc:     1 } # N == 0
+
+  - &small_matrix_size_range
+    - { M:     2, N:     2, lda:     2, incx:     0, ldc:     2 } # incx = 0
+    - { M:     3, N:     3, lda:     3, incx:    -1, ldc:     3 }
+    - { M:     3, N:    33, lda:    35, incx:     2, ldc:    35 }
+    - { M:    10, N:    11, lda:   100, incx:     3, ldc:    13 }
+
+  - &large_matrix_size_range
+    - { M:   192, N:     193,   lda:   194, incx:     1, ldc:   196 }
+    - { M:   640, N:     641,   lda:   960, incx:    -2, ldc:   962 }
+    - { M:  1001, N:    1000,   lda:  1003, incx:     3, ldc:  1001 }
+    - { M:     2, N: 4300000,   lda:     2, incx:     1, ldc:     4 } # Test 16-bit overflow in grid Y
+
+  - &huge_matrix_size_range
+    - { M:  4011, N:  4012, lda:  4012, incx:     2, ldc:  4014 }
+
+Tests:
+- name: bad_arg
+  category: quick
+  function:
+  - dgmm_bad_arg
+  - dgmm_batched_bad_arg
+  - dgmm_strided_batched_bad_arg
+  precision: *single_double_precisions_complex_real
+  side: [R]
+  api: [ C, FORTRAN ]
+
+- name: invalid_size
+  category: quick
+  function:
+  - dgmm
+  - dgmm_batched
+  - dgmm_strided_batched
+  precision: *single_double_precisions
+  side: [L]
+  matrix_size: *invalid_size_range
+  api: [ C, FORTRAN ]
+
+- name: dgmm_size_t
+  category: stress
+  function: dgmm
+  precision: *single_precision
+  side: [ L, R ]
+  matrix_size:
+    - { M:  2048, N:  2048, lda: 1049100, ldc:    2048, incx:        1}
+    - { M:  2048, N:  2048, lda:    2048, ldc: 1049100, incx:        1}
+    - { M:  2048, N:  2048, lda:    2048, ldc:    2048, incx: 1049100 }
+  batch_count: [        1    ]
+  api: C
+  gpu_arch: ['90a','942']
+  os_flags: LINUX
+
+- name: dgmm_quick_return
+  category: quick
+  function: dgmm
+  precision: *single_double_precisions
+  side: [L]
+  matrix_size: *quick_return_size_range
+
+- name: dgmm_batched_quick_return
+  category: quick
+  function: dgmm_batched
+  precision: *single_double_precisions
+  side: [L]
+  matrix_size: *quick_return_size_range
+
+- name: dgmm_strided_batched_quick_return
+  category: quick
+  function: dgmm_strided_batched
+  precision: *single_double_precisions
+  side: [L]
+  matrix_size: *quick_return_size_range
+  stride_scale: [ 1]
+
+
+- name: dgmm_small
+  category: quick
+  function: dgmm
+  precision: *single_double_precisions
+  side: [L, R]
+  matrix_size: *small_matrix_size_range
+  api: [ C, FORTRAN ]
+
+- name: dgmm_batched_small
+  category: quick
+  function: dgmm_batched
+  precision: *single_double_precisions
+  side: [L, R]
+  matrix_size: *small_matrix_size_range
+  batch_count: [        1, 2 ]
+  api: [ C, FORTRAN ]
+
+- name: dgmm_strided_batched_small
+  category: quick
+  function: dgmm_strided_batched
+  precision: *single_double_precisions
+  side: [L, R]
+  matrix_size: *small_matrix_size_range
+  stride_scale: [ 1, 2      ]
+  batch_count: [        1, 2 ]
+  api: [ C, FORTRAN ]
+
+
+- name: dgmm_small_complex
+  category: quick
+  function: dgmm
+  precision: *single_double_precisions_complex
+  side: [L, R]
+  matrix_size: *small_matrix_size_range
+  api: [ C, FORTRAN ]
+
+- name: dgmm_batched_small_complex
+  category: quick
+  function: dgmm_batched
+  precision: *single_double_precisions_complex
+  side: [L, R]
+  matrix_size: *small_matrix_size_range
+  batch_count: [        1, 2 ]
+  api: [ C, FORTRAN ]
+
+- name: dgmm_strided_batched_small_complex
+  category: quick
+  function: dgmm_strided_batched
+  precision: *single_double_precisions_complex
+  side: [L, R]
+  matrix_size: *small_matrix_size_range
+  stride_scale: [ 1, 2      ]
+  batch_count: [        1, 2 ]
+  api: [ C, FORTRAN ]
+
+
+- name: dgmm_large
+  category: pre_checkin
+  function: dgmm
+  precision: *single_double_precisions
+  side: [L, R]
+  matrix_size: *large_matrix_size_range
+
+
+- name: dgmm_large_complex
+  category: pre_checkin
+  function: dgmm
+  precision: *single_double_precisions_complex
+  side: [L, R]
+  matrix_size: *large_matrix_size_range
+
+- name: dgmm_batched_large_complex
+  category: pre_checkin
+  function: dgmm_batched
+  precision: *single_double_precisions_complex
+  side: [L, R]
+  matrix_size: *large_matrix_size_range
+  batch_count: [        1, 2 ]
+
+- name: dgmm_strided_batched_large_complex
+  category: pre_checkin
+  function: dgmm_strided_batched
+  precision: *single_double_precisions_complex
+  side: [L, R]
+  matrix_size: *large_matrix_size_range
+  stride_scale: [ 1, 2      ]
+  batch_count: [        1, 2 ]
+
+
+- name: dgmm_huge
+  category: nightly
+  function: dgmm
+  precision: *single_double_precisions
+  side: [L, R]
+  matrix_size: *huge_matrix_size_range
+
+- name: dgmm_huge_complex
+  category: nightly
+  function: dgmm
+  precision: *single_double_precisions_complex
+  side: [L, R]
+  matrix_size: *huge_matrix_size_range
+
+- name: dgmm_large_batch
+  category: pre_checkin # TODO
+  arguments:
+    - {  M: 2, N: 2, lda: 2, ldb: 2, ldc: 2, incx: 1, batch_count: *c_grid_yz_require_passes }
+  side: [L, R]
+  function:
+    - dgmm_batched: *single_precision
+    - dgmm_strided_batched: *single_precision
+  stride_scale: 1
+
+- name: dgmm_ILP64
+  category: stress
+  arguments:
+    - {  M: 2147483649, N: 1, lda: 2147483649, incx: 1,  ldc: 2147483649, batch_count: 1 }
+    - {  M: 1, N: 2147483649, lda: 1, incx: 1,  ldc: 1, batch_count: 1 }
+    - {  M: 1, N: 1, lda: 1, incx: -2147483649,  batch_count: 1 }
+    - {  M: 2, N: 2, lda: 4, incx: 2, batch_count: *c_grid_yz_require_passes }
+  api: [ C_64 ]
+  side: [L, R]
+  os_flags: [ LINUX ]
+  function:
+    - dgmm: *single_precision
+  stride_scale: 1
+  gpu_arch: '9??'
+
+- name: dgmm_graph_test
+  category: pre_checkin
+  function:
+    - dgmm
+    - dgmm_batched
+    - dgmm_strided_batched
+  precision: *single_double_precisions_complex
+  side: [L]
+  matrix_size:
+    - {M:     3, N:    33, lda:    35, incx:     2, ldc:    35 }
+  stride_scale: [ 1 ]
+  batch_count: [ 2 ]
+  graph_test: true
+
+- name: dgmm_repeatability_check
+  category: stress
+  function:
+    - dgmm
+    - dgmm_batched
+    - dgmm_strided_batched
+  precision: *single_double_precisions_complex
+  side: [L]
+  matrix_size:
+    - {M:     3, N:    33, lda:    35, incx:     2, ldc:    35 }
+  stride_scale: [ 1 ]
+  batch_count: [ 2 ]
+  atomics_mode : 0
+  initialization: hpl
+  pointer_mode_host: false
+  iters : 5
+  devices: 4
+  repeatability_check: true
+...

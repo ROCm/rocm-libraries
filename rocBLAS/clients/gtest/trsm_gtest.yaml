@@ -1,0 +1,1351 @@
+---
+include: rocblas_common.yaml
+include: known_bugs.yaml
+
+Definitions:
+  - &small_matrix_size_range
+    - { M:    -1, N:    -1, lda:     1, ldb:     1 }
+    - { M:    10, N:    10, lda:    20, ldb:   100 }
+
+    # These were previously failing for trsm_ex
+    - { M:    24, N:    33, lda:    33, ldb:    33 }
+    - { M:    32, N:    33, lda:    33, ldb:    33 }
+    - { M:    33, N:    32, lda:    33, ldb:    33 }
+    - { M:    64, N: 65, lda: 65, ldb: 65 }
+    - { M:    65, N: 64, lda: 64, ldb: 65 }
+
+    # Trsv kernel
+    - { M:   128, N:    1, lda:  128, ldb:  128 }
+    - { M:  1024, N:    1, lda: 2000, ldb: 1024 }
+
+  - &medium_matrix_size_range
+    - { M: 129, N: 129, lda: 129, ldb: 129 }
+    - { M: 192, N: 192, lda: 192, ldb: 192 }
+    - { M: 600, N: 500, lda: 600, ldb: 600 }
+    - { M: 800, N: 700, lda: 801, ldb: 701 }
+    - { M: 500, N: 32, lda: 500, ldb: 500 }
+
+  # - &small_substitution_size_range
+    - { M:  2, N:  1, lda: 30, ldb: 30 }
+    - { M:  1, N:  2, lda: 30, ldb: 30 }
+
+    - { M: 32, N:   3, lda: 32, ldb: 32 }
+    - { M: 32, N:  32, lda: 32, ldb: 32 }
+    - { M: 32, N:  31, lda: 32, ldb: 32 }
+    - { M: 31, N:  31, lda: 32, ldb: 32 }
+    - { M: 17, N: 800, lda: 20, ldb: 21 }
+
+    - { M: 33, N:   35, lda:  62, ldb:  61 }
+    - { M: 35, N:   33, lda:  61, ldb:  62 }
+    - { M:  7, N:   58, lda:  59, ldb: 130 }
+    - { M: 58, N:    7, lda: 130, ldb: 129 }
+    - { M: 49, N: 1004, lda: 130, ldb: 129 }
+
+    # not small
+    - { M: 8, N: 128, lda: 200, ldb: 200 }
+    - { M: 128, N: 8, lda: 200, ldb: 200 }
+
+  - &large_substitution_size_range
+    - { M: 500, N: 32, lda: 500, ldb: 500 }
+    - { M: 450, N: 19, lda: 500, ldb: 500 }
+    - { M: 300, N: 100, lda: 300, ldb: 300 }
+    - { M: 340, N: 128, lda: 340, ldb: 340 }
+
+  - &medium_matrix_size_extra
+    - { M:   256, N:   14848, lda:   256, ldb:   256 }
+
+  - &large_matrix_size_range
+    - { M:   640, N:   640, lda:   960, ldb:   960 }
+    - { M:  1000, N:  1000, lda:  1000, ldb:  1000 }
+    - { M:  1024, N:  1024, lda:  1024, ldb:  1024 }
+    # - { M:  2000, N:  2000, lda:  2000, ldb:  2000 }
+
+  - &large_memory_matrix_size_range
+    - { M: 8320, N: 128, lda: 8320, ldb: 8320 }
+
+  - &size_t_left_matrix_size_range
+#   - { M: 4, N: 46435, lda: 4, ldb: 46435 }
+    - { M: 46345, N: 4, lda: 46345, ldb: 46345 }
+#   - { M: 47000, N: 4, lda: 47000, ldb: 47000 } # calls rocblas_internal_gemm_template with batch_count=367, stride_a=6016128
+
+  - &size_t_right_matrix_size_range
+    - { M: 4, N: 46345, lda: 46345, ldb: 4 }
+#   - { M: 4, N: 47000, lda: 47000, ldb: 4 }  # calls rocblas_internal_gemm_template with batch_count=367, stride_a=6016128
+
+  - &substitution_size_range_thorough
+    - { M:   1, N:  1, lda: 100, ldb: 100 }
+    - { M:   1, N: 32, lda: 100, ldb: 100 }
+    - { M:   1, N: 64, lda: 100, ldb: 100 }
+    - { M:   2, N:  1, lda: 100, ldb: 100 }
+    - { M:   2, N: 32, lda: 100, ldb: 100 }
+    - { M:   2, N: 64, lda: 100, ldb: 100 }
+    - { M:   4, N:  1, lda: 100, ldb: 100 }
+    - { M:   4, N: 32, lda: 100, ldb: 100 }
+    - { M:   4, N: 64, lda: 100, ldb: 100 }
+    - { M:   7, N:  1, lda: 100, ldb: 100 }
+    - { M:   7, N: 32, lda: 100, ldb: 100 }
+    - { M:   7, N: 64, lda: 100, ldb: 100 }
+    - { M:  16, N:  1, lda: 100, ldb: 100 }
+    - { M:  16, N: 32, lda: 100, ldb: 100 }
+    - { M:  16, N: 64, lda: 100, ldb: 100 }
+    - { M:  32, N:  1, lda: 100, ldb: 100 }
+    - { M:  32, N: 32, lda: 100, ldb: 100 }
+    - { M:  32, N: 64, lda: 100, ldb: 100 }
+    - { M:  64, N:  1, lda: 100, ldb: 100 }
+    - { M:  64, N: 32, lda: 100, ldb: 100 }
+    - { M:  64, N: 64, lda: 100, ldb: 100 }
+    - { M:  35, N:  7, lda:  48, ldb:  52 }
+    - { M:   3, N: 61, lda:  62, ldb:  63 }
+
+  - &substitution_size_range_skinny_left
+    - { M: 31, N: 4000, lda: 4000, ldb: 4000 }
+    - { M:  2, N:  256, lda:  256, ldb:  256 }
+    - { M:  8, N: 4000, lda: 4000, ldb: 4000 }
+    - { M: 15, N: 2000, lda: 2000, ldb: 2000 }
+    - { M: 16, N:  999, lda: 1000, ldb: 1001 }
+    - { M: 17, N: 8000, lda: 8000, ldb: 8000 }
+    - { M: 24, N: 1001, lda: 1001, ldb: 1001 }
+    - { M: 32, N:   80, lda:   81, ldb:  100 }
+
+  - &substitution_size_range_skinny_right
+    - { M: 4000, N: 31, lda: 4000, ldb: 4000 }
+    - { M:  256, N:  2, lda:  256, ldb:  256 }
+
+  - &alpha_zero_matrix_size
+    - { M: 64, N: 50, lda: 64, ldb: 128 }
+
+  - &left_overflow_sizes
+    # LHS "special" kernel
+    - { M: 128, N: 128, lda: 16777220, ldb: 128 }
+    - { M: 128, N: 128, lda: 128, ldb: 16777220 }
+    # LHS "left" kernel
+    - { M: 1000, N: 4, lda: 2147500, ldb: 1000 }
+    - { M: 1000, N: 4, lda: 1000, ldb: 2147500 }
+    # LHS "small" kernel
+    - { M: 16, N: 16, lda: 143165578, ldb: 16 }
+    - { M: 16, N: 16, lda: 16, ldb: 143165578 }
+    # LHS "subsitution" kernel
+    - { M: 33, N: 65, lda: 65075300, ldb: 128 }
+    - { M: 33, N: 65, lda: 128, ldb: 33554450 }
+
+  - &right_overflow_sizes
+    # RHS "special" kernel
+    - { M: 128, N: 128, lda: 16777220, ldb: 128 }
+    - { M: 128, N: 128, lda: 128, ldb: 16777220 }
+    # RHS "right" kernel
+    - { M: 4, N: 1000, lda: 2147500, ldb: 1000 }
+    - { M: 4, N: 1000, lda: 1000, ldb: 2147500 }
+    # RHS "small" kernel
+    - { M: 16, N: 16, lda: 143165578, ldb: 16 }
+    - { M: 16, N: 16, lda: 16, ldb: 143165578 }
+
+  - &internal_interface_sizes_left
+    - { M:  128, N: 128, lda:  128, ldb:  128, ldc: 4294967296, ldd: 4294967297 }
+    - { M: 1000, N:   4, lda: 1000, ldb: 1000, ldc: 4294967297, ldd: 4294967296 }
+    - { M:   16, N:  16, lda:   16, ldb:   16, ldc: 4294967296, ldd: 4294967297 }
+    - { M:   33, N:  65, lda:  128, ldb:  128, ldc: 4294967297, ldd: 4294967296 }
+
+  - &internal_interface_sizes_right
+    - { M:  128, N:  128, lda:  128, ldb:  128, ldc: 4294967297, ldd: 4294967296 }
+    - { M:    4, N: 1000, lda: 1000, ldb: 1000, ldc: 4294967296, ldd: 4294967297 }
+    - { M:   16, N:   16, lda:   16, ldb:   16, ldc: 4294967297, ldd: 4294967296 }
+
+
+  - &alpha_range_sub
+    - { alpha: 2.0 }
+
+  - &alpha_range [ 1.0, -5.0 ]
+
+  - &complex_alpha_range
+    - { alpha: -5, alphai: -5 }
+    - { alpha:  1, alphai:  3 }
+
+  - &zero_alpha [0.0]
+
+  - &testset1_small_matrix_size_range
+    - { M:      256,    N:      256,    lda:    256,    ldb:    256     }
+    - { M:      512,    N:      256,    lda:    256,    ldb:    512     }
+    - { M:      512,    N:      512,    lda:    512,    ldb:    512     }
+    - { M:      768,    N:      256,    lda:    256,    ldb:    768     }
+    - { M:      1024,   N:      256,    lda:    256,    ldb:    1024    }
+    - { M:      1280,   N:      256,    lda:    256,    ldb:    1280    }
+    - { M:      1536,   N:      256,    lda:    256,    ldb:    1536    }
+    - { M:      1792,   N:      256,    lda:    256,    ldb:    1792    }
+    - { M:      2048,   N:      256,    lda:    256,    ldb:    2048    }
+    - { M:      384,    N:      384,    lda:    384,    ldb:    384     }
+    - { M:      768,    N:      384,    lda:    384,    ldb:    768     }
+    - { M:      1152,   N:      384,    lda:    384,    ldb:    1152    }
+    - { M:      1536,   N:      384,    lda:    384,    ldb:    1536    }
+    - { M:      1920,   N:      384,    lda:    384,    ldb:    1920    }
+    - { M:      2304,   N:      384,    lda:    384,    ldb:    2304    }
+    - { M:      2688,   N:      384,    lda:    384,    ldb:    2688    }
+    - { M:      3072,   N:      384,    lda:    384,    ldb:    3072    }
+
+
+  - &testset2_small_matrix_size_range
+    - { M:      256,    N:      256,    lda:    256,    ldb:    256     }
+    - { M:      256,    N:      512,    lda:    512,    ldb:    256     }
+    - { M:      256,    N:      768,    lda:    768,    ldb:    256     }
+    - { M:      256,    N:      1024,   lda:    1024,   ldb:    256     }
+    - { M:      256,    N:      1280,   lda:    1280,   ldb:    256     }
+    - { M:      256,    N:      1536,   lda:    1536,   ldb:    256     }
+    - { M:      256,    N:      1792,   lda:    1792,   ldb:    256     }
+    - { M:      256,    N:      2048,   lda:    2048,   ldb:    256     }
+    - { M:      384,    N:      384,    lda:    384,    ldb:    384     }
+    - { M:      384,    N:      768,    lda:    768,    ldb:    384     }
+    - { M:      384,    N:      1152,   lda:    1152,   ldb:    384     }
+    - { M:      384,    N:      1536,   lda:    1536,   ldb:    384     }
+    - { M:      384,    N:      1920,   lda:    1920,   ldb:    384     }
+    - { M:      384,    N:      2304,   lda:    2304,   ldb:    384     }
+    - { M:      384,    N:      2688,   lda:    2688,   ldb:    384     }
+    - { M:      384,    N:      3072,   lda:    3072,   ldb:    384     }
+
+
+  - &testset1_matrix_size_range
+    - { M:   128, N:    2048, lda:   128, ldb:   128 }
+    - { M:   128, N:   16848, lda:   128, ldb:   128 }
+    - { M:   128, N:   29696, lda:   128, ldb:   128 }
+    - { M:   128, N:   44544, lda:   128, ldb:   128 }
+    - { M:   128, N:   53632, lda:   128, ldb:   128 }
+    - { M:   256, N:    2048, lda:   256, ldb:   256 }
+    - { M:   256, N:   29696, lda:   256, ldb:   256 }
+    - { M:   256, N:   44544, lda:   256, ldb:   256 }
+    - { M:   256, N:   53504, lda:   256, ldb:   256 }
+    - { M:   384, N:    2048, lda:   384, ldb:   384 }
+    - { M:   384, N:   14976, lda:   384, ldb:   384 }
+    - { M:   384, N:   29952, lda:   384, ldb:   384 }
+    - { M:   384, N:   44928, lda:   384, ldb:   384 }
+    - { M:   384, N:   53376, lda:   384, ldb:   384 }
+
+  - &testset2_matrix_size_range
+    - { M:   2048,  N: 128,  lda:  2048, ldb:    2048 }
+    - { M:  16848,  N: 128,  lda: 16848, ldb:   16848 }
+    - { M:  29696,  N: 128,  lda: 29696, ldb:   29696 }
+    - { M:  44544,  N: 128,  lda: 44544, ldb:   44544 }
+    - { M:  53632,  N: 128,  lda: 53632, ldb:   53632 }
+    - { M:   2048,  N: 256,  lda:  2048, ldb:    2048 }
+    - { M:  14848,  N: 256,  lda: 14848, ldb:   14848 }
+    - { M:  29696,  N: 256,  lda: 29696, ldb:   29696 }
+    - { M:  44544,  N: 256,  lda: 44544, ldb:   44544 }
+    - { M:  53504,  N: 256,  lda: 53504, ldb:   53504 }
+    - { M:   2048,  N: 384,  lda:  2048, ldb:    2048 }
+    - { M:  14976,  N: 384,  lda: 14976, ldb:   14976 }
+    - { M:  29952,  N: 384,  lda: 29952, ldb:   29952 }
+    - { M:  44928,  N: 384,  lda: 44928, ldb:   44928 }
+    - { M:  53376,  N: 384,  lda: 53376, ldb:   53376 }
+
+  - &testsize_internal_workspace_range
+    # substitution kernels depending on side
+    - { M: 33, N: 8191, batch_count: 5 }
+    - { M: 31, N: 8000, batch_count: 1 }
+    - { M: 8001, N: 31, batch_count: 5 }
+    - { M: 8000, N: 33, batch_count: 1 }
+    - { M: 300, N: 100, batch_count: 5 }
+
+    # always substitution kernel
+    - { M: 30, N: 15, batch_count: 64 }
+
+    # "special" kernel
+    - { M: 8192, N: 8192, batch_count: 5 }
+
+    # non-special kernel
+    - { M: 7999, N: 3001, batch_count: 5 }
+
+    # quick-return
+    - { M: 1024, N: 1024, batch_count: 0 }
+
+Tests:
+
+- name: trsm_bad_arg
+  category: quick
+  function:
+    - trsm_bad_arg
+    - trsm_batched_bad_arg
+    - trsm_strided_batched_bad_arg
+  precision: *single_precision
+  side: [L]
+  uplo: [L]
+  transA: [N]
+  diag: [N]
+  api: [ C, FORTRAN, FORTRAN_64 ]
+
+# explicit tests for trsm max_size interface
+- name: trsm_internal_interfaces_tests
+  category: quick
+  function:
+    - trsm_internal_interfaces
+    - trsm_batched_internal_interfaces
+  precision: *single_double_precisions_complex_real
+  matrix_size: *testsize_internal_workspace_range
+  side: [ L, R ]
+  uplo: [ L ]
+  transA: [ N ]
+  diag: [ N ]
+  # api implied to be internal
+
+# alpha = 0 tests
+- name: trsm_zero
+  category: quick
+  function:
+    - trsm
+    - trsm_batched
+    - trsm_strided_batched
+  precision: *single_double_precisions
+  matrix_size: *alpha_zero_matrix_size
+  side: [L]
+  uplo: [L]
+  transA: [N]
+  diag: [N]
+  alpha: *zero_alpha
+  batch_count: [ 3 ]
+  stride_scale: [ 2 ]
+
+# Small - quick
+- name: trsm_small
+  category: quick
+  function: trsm
+  precision: *single_double_precisions
+  side: [L, R]
+  uplo: [L, U]
+  transA: [N, C]
+  diag: [N, U]
+  matrix_size: *small_matrix_size_range
+  alpha: *alpha_range
+  api: [ C, FORTRAN, FORTRAN_64 ]
+  user_allocated_workspace: [0, 1000000]
+
+- name: trsm_small_complex
+  category: quick
+  function: trsm
+  precision: *single_double_precisions_complex
+  side: [L, R]
+  uplo: [L, U]
+  transA: [N, C]
+  diag: [N, U]
+  matrix_size: *small_matrix_size_range
+  alpha_beta: *complex_alpha_range
+  api: [ C, FORTRAN, FORTRAN_64 ]
+  user_allocated_workspace: [0, 1000000]
+
+- name: trsm_batched_small
+  category: quick
+  function: trsm_batched
+  precision: *single_double_precisions
+  arguments:
+    - { side: L, uplo: L, transA: N, diag: U }
+    - { side: R, uplo: L, transA: C, diag: N }
+    - { side: L, uplo: U, transA: C, diag: N }
+    - { side: R, uplo: U, transA: N, diag: U }
+  matrix_size: *small_matrix_size_range
+  alpha: *alpha_range
+  batch_count: [-1, 0, 1, 3]
+  api: [ C, FORTRAN, FORTRAN_64 ]
+  user_allocated_workspace: [0, 1000000]
+
+- name: trsm_batched_small_complex
+  category: quick
+  function: trsm_batched
+  precision: *single_double_precisions_complex
+  arguments:
+    - { side: L, uplo: L, transA: N, diag: U }
+    - { side: R, uplo: L, transA: C, diag: N }
+    - { side: L, uplo: U, transA: C, diag: N }
+    - { side: R, uplo: U, transA: N, diag: U }
+  matrix_size: *small_matrix_size_range
+  alpha_beta: *complex_alpha_range
+  batch_count: [-1, 0, 1, 3]
+  api: [ C, FORTRAN, FORTRAN_64 ]
+  user_allocated_workspace: [0, 1000000]
+
+- name: trsm_strided_batched_small
+  category: quick
+  function: trsm_strided_batched
+  precision: *single_double_precisions
+  arguments:
+    - { side: L, uplo: L, transA: N, diag: U }
+    - { side: R, uplo: L, transA: C, diag: N }
+    - { side: L, uplo: U, transA: C, diag: N }
+    - { side: R, uplo: U, transA: N, diag: U }
+  matrix_size: *small_matrix_size_range
+  alpha: *alpha_range
+  stride_scale: [ 1 ]
+  batch_count: [ -1, 0, 1, 3 ]
+  api: [ C, FORTRAN, FORTRAN_64 ]
+  user_allocated_workspace: [0, 1000000]
+
+- name: trsm_strided_batched_small_complex
+  category: quick
+  function: trsm_strided_batched
+  precision: *single_double_precisions_complex
+  arguments:
+    - { side: L, uplo: L, transA: N, diag: U }
+    - { side: R, uplo: L, transA: C, diag: N }
+    - { side: L, uplo: U, transA: C, diag: N }
+    - { side: R, uplo: U, transA: N, diag: U }
+  matrix_size: *small_matrix_size_range
+  alpha_beta: *complex_alpha_range
+  stride_scale: [ 3 ]
+  batch_count: [ -1, 0, 1, 3 ]
+  api: [ C, FORTRAN, FORTRAN_64 ]
+  user_allocated_workspace: [0, 1000000]
+
+# Medium - pre_checkin
+- name: trsm_medium_HMM
+  category: HMM
+  function: trsm
+  precision: *single_double_precisions
+  side: [L]
+  uplo: [L]
+  transA: [N]
+  diag: [U]
+  matrix_size: *medium_matrix_size_range
+  alpha: 1
+  user_allocated_workspace: [0, 20000000]
+  HMM: true
+
+- name: trsm_medium
+  category: pre_checkin
+  function: trsm
+  precision: *single_double_precisions
+  side: [L, R]
+  uplo: [L, U]
+  transA: [N, C]
+  diag: [N, U]
+  matrix_size: *medium_matrix_size_range
+  alpha: *alpha_range
+  user_allocated_workspace: [0, 20000000]
+
+- name: trsm_medium_extra
+  category: pre_checkin
+  function: trsm
+  precision: *single_double_precisions
+  side: [L]
+  uplo: [L]
+  transA: [N]
+  diag: [U]
+  matrix_size: *medium_matrix_size_extra
+  alpha: [ 1 ]
+  # workspace 32000000 vs 20000000 to allow non-special kernel in no tensile build
+  user_allocated_workspace: [0, 32000000]
+
+- name: trsm_medium_complex
+  category: pre_checkin
+  function: trsm
+  precision: *single_double_precisions_complex
+  side: [L, R]
+  uplo: [L, U]
+  transA: [N, C]
+  diag: [N, U]
+  matrix_size: *medium_matrix_size_range
+  alpha_beta: *complex_alpha_range
+  user_allocated_workspace: [0, 20000000]
+# if adjusting algo add back in for local testing
+#  pad: [0, 4096]
+
+- name: trsm_batched_medium
+  category: pre_checkin
+  function: trsm_batched
+  precision: *single_double_precisions
+  arguments:
+    - { side: L, uplo: L, transA: N, diag: U }
+    - { side: R, uplo: L, transA: C, diag: N }
+    - { side: L, uplo: U, transA: C, diag: N }
+    - { side: R, uplo: U, transA: N, diag: U }
+  matrix_size: *medium_matrix_size_range
+  alpha: *alpha_range
+  batch_count: [3]
+  user_allocated_workspace: [0, 20000000]
+# if adjusting algo add back in for local testing
+#  pad: [0, 4096]
+
+- name: trsm_batched_medium_complex
+  category: pre_checkin
+  function: trsm_batched
+  precision: *single_double_precisions_complex
+  arguments:
+    - { side: L, uplo: L, transA: N, diag: U }
+    - { side: R, uplo: L, transA: C, diag: N }
+    - { side: L, uplo: U, transA: C, diag: N }
+    - { side: R, uplo: U, transA: N, diag: U }
+  matrix_size: *medium_matrix_size_range
+  alpha_beta: *complex_alpha_range
+  batch_count: [3]
+  user_allocated_workspace: [0, 20000000]
+# if adjusting algo add back in for local testing
+#  pad: [0, 4096]
+
+- name: trsm_strided_batched_medium
+  category: pre_checkin
+  function: trsm_strided_batched
+  precision: *single_double_precisions
+  arguments:
+    - { side: L, uplo: L, transA: N, diag: U }
+    - { side: R, uplo: L, transA: C, diag: N }
+    - { side: L, uplo: U, transA: C, diag: N }
+    - { side: R, uplo: U, transA: N, diag: U }
+  matrix_size: *medium_matrix_size_range
+  alpha: *alpha_range
+  stride_scale: [ 1 ]
+  batch_count: [ 3 ]
+  user_allocated_workspace: [0, 20000000]
+
+- name: trsm_strided_batched_medium_complex
+  category: pre_checkin
+  function: trsm_strided_batched
+  precision: *single_double_precisions_complex
+  arguments:
+    - { side: L, uplo: L, transA: N, diag: U }
+    - { side: R, uplo: L, transA: C, diag: N }
+    - { side: L, uplo: U, transA: C, diag: N }
+    - { side: R, uplo: U, transA: N, diag: U }
+  matrix_size: *medium_matrix_size_range
+  alpha_beta: *complex_alpha_range
+  stride_scale: [ 3 ]
+  batch_count: [ 3 ]
+  user_allocated_workspace: [0, 20000000]
+
+- name: trsm_medium_substitution
+  category: pre_checkin
+  function: trsm
+  precision: *single_double_precisions_complex_real
+  side: [L]
+  uplo: [L, U]
+  transA: [N, C]
+  diag: [N, U]
+  matrix_size: *large_substitution_size_range
+  alpha_beta: *alpha_range_sub
+
+- name: trsm_batched_medium_substitution
+  category: pre_checkin
+  function: trsm_batched
+  precision: *single_double_precisions_complex_real
+  side: [L]
+  uplo: [L, U]
+  transA: [N, C]
+  diag: [N, U]
+  matrix_size: *large_substitution_size_range
+  batch_count: [ 16 ]
+  alpha_beta: *alpha_range_sub
+
+# nightly
+- name: trsm_medium_multi_gpu
+  category: multi_gpu
+  function: trsm
+  precision: *single_double_precisions
+  side: [L, R]
+  uplo: [L, U]
+  transA: [N]
+  diag: [N]
+  threads_streams: *common_threads_streams
+  matrix_size: *medium_matrix_size_range
+  alpha: 1
+  devices: [0, 2, 4]
+
+- name: trsm_medium_multi_threads_streams
+  category: nightly
+  function: trsm
+  precision: *single_double_precisions
+  side: [L, R]
+  uplo: [L, U]
+  transA: [N, C]
+  diag: [N, U]
+  threads_streams: *common_threads_streams
+  matrix_size: *medium_matrix_size_range
+  alpha: *alpha_range
+
+- name: trsm_testset1
+  category: nightly
+  function: trsm
+  precision: *single_double_precisions
+  side: [L]
+  uplo: [L]
+  transA: [N]
+  diag: [U]
+  matrix_size: *testset1_matrix_size_range
+  alpha: [ 1 ]
+
+- name: trsm_testset2
+  category: nightly
+  function: trsm
+  precision: *single_double_precisions
+  side: [R]
+  uplo: [L]
+  transA: [T]
+  diag: [U]
+  matrix_size: *testset2_matrix_size_range
+  alpha: [ 1 ]
+
+- name: trsm_size_t_left
+  category: stress
+  function: trsm
+  precision: *single_precision
+  arguments:
+    - { side: L, uplo: L, transA: N, diag: N }
+  matrix_size: *size_t_left_matrix_size_range
+  alpha: [2]
+
+- name: trsm_size_t_right
+  category: stress
+  function: trsm
+  precision: *single_precision
+  arguments:
+    - { side: R, uplo: L, transA: N, diag: N }
+  matrix_size: *size_t_right_matrix_size_range
+  alpha: [2]
+
+- name: trsm_large
+  category: nightly
+  function: trsm
+  precision: *single_double_precisions
+  arguments:
+    - { side: L, uplo: L, transA: N, diag: N }
+    - { side: R, uplo: L, transA: N, diag: N }
+    - { side: L, uplo: U, transA: C, diag: N }
+  matrix_size: *large_matrix_size_range
+  alpha: *alpha_range
+
+- name: trsm_large_complex
+  category: nightly
+  function: trsm
+  precision: *single_double_precisions_complex
+  arguments:
+    - { side: L, uplo: L, transA: N, diag: N }
+    - { side: R, uplo: L, transA: N, diag: N }
+    - { side: L, uplo: U, transA: C, diag: N }
+  matrix_size: *large_matrix_size_range
+  alpha_beta: *complex_alpha_range
+
+- name: trsm_batched_testset1
+  category: nightly
+  function: trsm_batched
+  precision: *single_double_precisions
+  side: [L]
+  uplo: [L]
+  transA: [N]
+  diag: [U]
+  matrix_size: *testset1_matrix_size_range
+  alpha: [ 1 ]
+  batch_count: [ 2 ]
+
+- name: trsm_batched_testset2
+  category: nightly
+  function: trsm_batched
+  precision: *single_double_precisions
+  side: [R]
+  uplo: [L]
+  transA: [T]
+  diag: [U]
+  matrix_size: *testset2_matrix_size_range
+  alpha: [ 1 ]
+  batch_count: [ 2 ]
+
+- name: trsm_batched_large
+  category: nightly
+  function: trsm_batched
+  precision: *single_double_precisions
+  arguments:
+    - { side: L, uplo: L, transA: N, diag: N }
+    - { side: R, uplo: L, transA: N, diag: N }
+    - { side: L, uplo: U, transA: C, diag: N }
+  matrix_size: *large_matrix_size_range
+  alpha: *alpha_range
+  batch_count: [ 2 ]
+
+- name: trsm_batched_large_complex
+  category: nightly
+  function: trsm_batched
+  precision: *single_double_precisions_complex
+  arguments:
+    - { side: L, uplo: L, transA: N, diag: N }
+    - { side: R, uplo: L, transA: N, diag: N }
+    - { side: L, uplo: U, transA: C, diag: N }
+  matrix_size: *large_matrix_size_range
+  alpha_beta: *complex_alpha_range
+  batch_count: [ 2 ]
+
+- name: trsm_strided_batched_testset1
+  category: nightly
+  function: trsm_strided_batched
+  precision: *single_double_precisions
+  side: [L]
+  uplo: [L]
+  transA: [N]
+  diag: [U]
+  matrix_size: *testset1_matrix_size_range
+  alpha: [ 1 ]
+  stride_scale: [ 2 ]
+  batch_count: [ 2 ]
+
+- name: trsm_strided_batched_testset2
+  category: nightly
+  function: trsm_strided_batched
+  precision: *single_double_precisions
+  side: [R]
+  uplo: [L]
+  transA: [T]
+  diag: [U]
+  matrix_size: *testset2_matrix_size_range
+  alpha: [ 1 ]
+  stride_scale: [ 2 ]
+  batch_count: [ 2 ]
+
+- name: trsm_strided_batched_large
+  category: nightly
+  function: trsm_strided_batched
+  precision: *single_double_precisions
+  arguments:
+    - { side: L, uplo: L, transA: N, diag: N }
+    - { side: R, uplo: L, transA: N, diag: N }
+    - { side: L, uplo: U, transA: C, diag: N }
+  matrix_size: *large_matrix_size_range
+  alpha: *alpha_range
+  stride_scale: [ 2 ]
+  batch_count: [ 2 ]
+
+- name: trsm_strided_batched_large_complex
+  category: nightly
+  function: trsm_strided_batched
+  precision: *single_double_precisions_complex
+  arguments:
+    - { side: L, uplo: L, transA: N, diag: N }
+    - { side: R, uplo: L, transA: N, diag: N }
+    - { side: L, uplo: U, transA: C, diag: N }
+  matrix_size: *large_matrix_size_range
+  alpha_beta: *complex_alpha_range
+  stride_scale: [ 2 ]
+  batch_count: [ 2 ]
+
+# nightly - large memory allocation
+# - name: trsm_batched_largememory
+#   category: nightly
+#   function: trsm_batched
+#   precision: *double_precision
+#   side: [L]
+#   uplo: [U]
+#   transA: [N]
+#   diag: [U]
+#   matrix_size: *large_memory_matrix_size_range
+#   alpha: [1]
+#   batch_count: [16]
+
+# nightly - many batches
+
+- name: trsm_batched_manybatch
+  category: nightly
+  function: trsm_batched
+  precision: *single_double_precisions
+  arguments:
+    - { side: L, uplo: L, transA: N, diag: N }
+    - { side: R, uplo: L, transA: N, diag: N }
+    - { side: L, uplo: U, transA: C, diag: N }
+  matrix_size: *small_matrix_size_range
+  alpha: *alpha_range
+  batch_count: [128]
+
+- name: trsm_strided_batched_manybatch
+  category: nightly
+  function: trsm_strided_batched
+  precision: *single_double_precisions
+  arguments:
+    - { side: R, uplo: L, transA: N, diag: N }
+    - { side: L, uplo: L, transA: N, diag: N }
+    - { side: R, uplo: U, transA: C, diag: N }
+  matrix_size: *small_matrix_size_range
+  alpha: *alpha_range
+  stride_scale: [ 1 ]
+  batch_count: [128]
+
+# nightly - substitution method
+- name: trsm_small_left
+  category: nightly
+  function: trsm
+  precision: *single_double_precisions_complex_real
+  side: [L]
+  uplo: [L, U]
+  transA: [N, C]
+  diag: [N, U]
+  matrix_size: *substitution_size_range_skinny_left
+  alpha_beta: *alpha_range_sub
+
+- name: trsm_small_right
+  category: nightly
+  function: trsm
+  precision: *single_double_precisions_complex_real
+  side: [R]
+  uplo: [L, U]
+  transA: [N, C]
+  diag: [N, U]
+  matrix_size: *substitution_size_range_skinny_right
+  alpha_beta: *alpha_range_sub
+
+- name: trsm_small_complex
+  category: nightly
+  function: trsm
+  precision: *single_double_precisions_complex_real
+  side: [L, R]
+  uplo: [L, U]
+  transA: [N, C]
+  diag: [N, U]
+  matrix_size: *substitution_size_range_thorough
+  alpha_beta: *alpha_range_sub
+
+- name: trsm_batched_small_left
+  category: nightly
+  function: trsm_batched
+  precision: *single_double_precisions_complex_real
+  side: [L]
+  uplo: [L, U]
+  transA: [N, C]
+  diag: [N]
+  matrix_size: *substitution_size_range_skinny_left
+  alpha_beta: *alpha_range_sub
+  batch_count: [ 1, 4 ]
+
+- name: trsm_batched_small_right
+  category: nightly
+  function: trsm_batched
+  precision: *single_double_precisions_complex_real
+  side: [R]
+  uplo: [L, U]
+  transA: [N, C]
+  diag: [N]
+  matrix_size: *substitution_size_range_skinny_right
+  alpha_beta: *alpha_range_sub
+  batch_count: [ 1, 4 ]
+
+- name: trsm_batched_small_complex
+  category: nightly
+  function: trsm_batched
+  precision: *single_double_precisions_complex_real
+  side: [L, R]
+  uplo: [L, U]
+  transA: [N, C]
+  diag: [N, U]
+  matrix_size: *substitution_size_range_thorough
+  alpha_beta: *alpha_range_sub
+  batch_count: [ 1, 4 ]
+
+- name: trsm_strided_batched_small_left
+  category: nightly
+  function: trsm_strided_batched
+  precision: *single_double_precisions_complex_real
+  side: [L]
+  uplo: [L, U]
+  transA: [N, C]
+  diag: [U]
+  matrix_size: *substitution_size_range_skinny_left
+  alpha_beta: *alpha_range_sub
+  stride_scale: [ 1.5]
+  batch_count: [ 1, 4 ]
+
+- name: trsm_strided_batched_small_right
+  category: nightly
+  function: trsm_strided_batched
+  precision: *single_double_precisions_complex_real
+  side: [R]
+  uplo: [L, U]
+  transA: [N, C]
+  diag: [U]
+  matrix_size: *substitution_size_range_skinny_right
+  alpha_beta: *alpha_range_sub
+  stride_scale: [ 1.5]
+  batch_count: [ 1, 4 ]
+
+- name: trsm_strided_batched_small_complex
+  category: nightly
+  function: trsm_strided_batched
+  precision: *single_double_precisions_complex_real
+  side: [L, R]
+  uplo: [L, U]
+  transA: [N, C]
+  diag: [N, U]
+  matrix_size: *substitution_size_range_thorough
+  alpha_beta: *alpha_range_sub
+  stride_scale: [ 1.5 ]
+  batch_count: [ 1, 4 ]
+
+# 32-bit overflow tests
+# currently very slow so not feasable to add to nightly
+# also use a lot of memory
+# Only testing non-unit-diag as unit-diag should never
+# be indexing non-shared memory outside of what non-unit-diag does
+- name: trsm_left_size_t_overflow
+  category: stress
+  function:
+    - trsm
+    - trsm_batched
+    # - trsm_strided_batched
+  precision: *single_double_precisions_complex_real
+  side: [L]
+  uplo: [L, U]
+  transA: [N, C]
+  diag: [ N ] #, U]
+  matrix_size: *left_overflow_sizes
+  alpha_beta: *alpha_range_sub
+  stride_scale: [ 1 ]
+  batch_count: [ 1 ]
+  pointer_mode_device: false
+  gpu_arch: ['90a','942']
+  os_flags: LINUX
+
+- name: trsm_right_size_t_overflow
+  category: stress
+  function:
+    - trsm
+    - trsm_batched
+    # - trsm_strided_batched
+  precision: *single_double_precisions_complex_real
+  side: [R]
+  uplo: [L, U]
+  transA: [N, C]
+  diag: [ N ] #, U]
+  matrix_size: *right_overflow_sizes
+  alpha_beta: *alpha_range_sub
+  stride_scale: [ 1 ]
+  batch_count: [ 1 ]
+  pointer_mode_device: false
+  gpu_arch: ['90a','942']
+  os_flags: LINUX
+
+- name: trsm_left_internal_api
+  category: pre_checkin
+  function:
+    - trsm: *single_precision
+    - trsm_batched: *single_precision
+    - trsm_strided_batched: *single_precision
+  side: [ L ]
+  uplo: [ L, U ]
+  transA: [ N, C ]
+  diag: [ N ]
+  matrix_size: *internal_interface_sizes_left
+  alpha_beta: *alpha_range_sub
+  stride_scale: [ 1 ]
+  batch_count: [ 3 ]
+  pointer_mode_device: false
+  api: INTERNAL
+
+- name: trsm_right_internal_api
+  category: pre_checkin
+  function:
+    - trsm: *single_precision
+    - trsm_batched: *single_precision
+    - trsm_strided_batched: *single_precision
+  side: [ R ]
+  uplo: [ L, U ]
+  transA: [ N, C ]
+  diag: [ N ]
+  matrix_size: *internal_interface_sizes_right
+  alpha_beta: *alpha_range_sub
+  stride_scale: [ 1 ]
+  batch_count: [ 3 ]
+  pointer_mode_device: false
+  api: INTERNAL
+
+#############
+## trsm_ex ##
+#############
+
+- name: trsm_ex_bad_arg
+  category: quick
+  function:
+    - trsm_ex_bad_arg
+    - trsm_batched_ex_bad_arg
+    - trsm_strided_batched_ex_bad_arg
+  precision: *single_precision
+  side: [L]
+  uplo: [L]
+  transA: [N]
+  diag: [N]
+  api: [ C, FORTRAN ]
+
+# Small - quick
+- name: trsm_ex_small
+  category: quick
+  function: trsm_ex
+  precision: *single_double_precisions
+  side: [L, R]
+  uplo: [L, U]
+  transA: [N, C]
+  diag: [N, U]
+  matrix_size: *small_matrix_size_range
+  alpha: *alpha_range
+
+- name: trsm_ex_small_complex
+  category: quick
+  function: trsm_ex
+  precision: *single_double_precisions_complex
+  side: [L, R]
+  uplo: [L, U]
+  transA: [N, C]
+  diag: [N, U]
+  matrix_size: *small_matrix_size_range
+  alpha_beta: *complex_alpha_range
+
+- name: trsm_batched_ex_small
+  category: quick
+  function: trsm_batched_ex
+  precision: *single_double_precisions
+  arguments:
+    - { side: L, uplo: L, transA: N, diag: U }
+    - { side: R, uplo: L, transA: C, diag: N }
+    - { side: L, uplo: U, transA: C, diag: N }
+    - { side: R, uplo: U, transA: N, diag: U }
+  matrix_size: *small_matrix_size_range
+  alpha: *alpha_range
+  batch_count: [-1, 0, 1, 3]
+
+- name: trsm_batched_ex_small_complex
+  category: quick
+  function: trsm_batched_ex
+  precision: *single_double_precisions_complex
+  arguments:
+    - { side: L, uplo: L, transA: N, diag: U }
+    - { side: R, uplo: L, transA: C, diag: N }
+    - { side: L, uplo: U, transA: C, diag: N }
+    - { side: R, uplo: U, transA: N, diag: U }
+  matrix_size: *small_matrix_size_range
+  alpha_beta: *complex_alpha_range
+  batch_count: [-1, 0, 1, 3]
+
+- name: trsm_strided_batched_ex_small
+  category: quick
+  function: trsm_strided_batched_ex
+  precision: *single_double_precisions
+  arguments:
+    - { side: L, uplo: L, transA: N, diag: U }
+    - { side: R, uplo: L, transA: C, diag: N }
+    - { side: L, uplo: U, transA: C, diag: N }
+    - { side: R, uplo: U, transA: N, diag: U }
+  matrix_size: *small_matrix_size_range
+  alpha: *alpha_range
+  stride_scale: [ 1, 3 ]
+  batch_count: [-1, 0, 1, 3]
+
+- name: trsm_strided_batched_ex_small_complex
+  category: quick
+  function: trsm_strided_batched_ex
+  precision: *single_double_precisions_complex
+  arguments:
+    - { side: L, uplo: L, transA: N, diag: U }
+    - { side: R, uplo: L, transA: C, diag: N }
+    - { side: L, uplo: U, transA: C, diag: N }
+    - { side: R, uplo: U, transA: N, diag: U }
+  matrix_size: *small_matrix_size_range
+  alpha_beta: *complex_alpha_range
+  stride_scale: [ 1, 1.5 ]
+  batch_count: [-1, 0, 1, 3]
+
+# Medium - pre_checkin
+- name: trsm_ex_medium
+  category: pre_checkin
+  function: trsm_ex
+  precision: *single_double_precisions
+  side: [L, R]
+  uplo: [L, U]
+  transA: [N, C]
+  diag: [N, U]
+  matrix_size: *medium_matrix_size_range
+  alpha: *alpha_range
+
+- name: trsm_batched_ex_medium
+  category: pre_checkin
+  function: trsm_batched_ex
+  precision: *single_double_precisions
+  arguments:
+    - { side: L, uplo: L, transA: N, diag: U }
+    - { side: R, uplo: L, transA: C, diag: N }
+    - { side: L, uplo: U, transA: C, diag: N }
+    - { side: R, uplo: U, transA: N, diag: U }
+  matrix_size: *medium_matrix_size_range
+  alpha: *alpha_range
+  batch_count: [1, 3]
+
+- name: trsm_strided_batched_ex_medium
+  category: pre_checkin
+  function: trsm_strided_batched_ex
+  precision: *single_double_precisions
+  arguments:
+    - { side: L, uplo: L, transA: N, diag: U }
+    - { side: R, uplo: L, transA: C, diag: N }
+    - { side: L, uplo: U, transA: C, diag: N }
+    - { side: R, uplo: U, transA: N, diag: U }
+  matrix_size: *medium_matrix_size_range
+  alpha: *alpha_range
+  stride_scale: [ 1, 1.5 ]
+  batch_count: [ 1, 3 ]
+
+- name: trsm_ex_testset1_small
+  category: pre_checkin
+  function: trsm_ex
+  precision: *single_double_precisions
+  side: [R]
+  uplo: [L]
+  transA: [T]
+  diag: [U]
+  matrix_size: *testset1_small_matrix_size_range
+  alpha: *alpha_range
+
+- name: trsm_ex_testset2_small
+  category: pre_checkin
+  function: trsm_ex
+  precision: *single_double_precisions
+  side: [L]
+  uplo: [L]
+  transA: [N]
+  diag: [U]
+  matrix_size: *testset2_small_matrix_size_range
+  alpha: *alpha_range
+
+# nightly
+- name: trsm_ex_testset1
+  category: nightly
+  function: trsm_ex
+  precision: *single_double_precisions
+  side: [L]
+  uplo: [L]
+  transA: [N]
+  diag: [U]
+  matrix_size: *testset1_matrix_size_range
+  alpha: [ 1 ]
+
+- name: trsm_batched_ex_testset1
+  category: nightly
+  function: trsm_batched_ex
+  precision: *single_double_precisions
+  side: [L]
+  uplo: [L]
+  transA: [N]
+  diag: [U]
+  matrix_size: *testset1_matrix_size_range
+  alpha: [ 1 ]
+  batch_count: [ 2 ]
+
+- name: trsm_strided_batched_ex_testset1
+  category: nightly
+  function: trsm_strided_batched_ex
+  precision: *single_double_precisions
+  side: [L]
+  uplo: [L]
+  transA: [N]
+  diag: [U]
+  matrix_size: *testset1_matrix_size_range
+  alpha: [ 1 ]
+  stride_scale: [ 2 ]
+  batch_count: [ 2 ]
+
+- name: trsm_ex_testset2
+  category: nightly
+  function: trsm_ex
+  precision: *single_double_precisions
+  side: [R]
+  uplo: [L]
+  transA: [T]
+  diag: [U]
+  matrix_size: *testset2_matrix_size_range
+  alpha: [ 1 ]
+
+- name: trsm_batched_ex_testset2
+  category: nightly
+  function: trsm_batched_ex
+  precision: *single_double_precisions
+  side: [R]
+  uplo: [L]
+  transA: [T]
+  diag: [U]
+  matrix_size: *testset2_matrix_size_range
+  alpha: [ 1 ]
+  batch_count: [ 2 ]
+
+- name: trsm_strided_batched_ex_testset2
+  category: nightly
+  function: trsm_strided_batched_ex
+  precision: *single_double_precisions
+  side: [R]
+  uplo: [L]
+  transA: [T]
+  diag: [U]
+  matrix_size: *testset2_matrix_size_range
+  alpha: [ 1 ]
+  stride_scale: [ 2 ]
+  batch_count: [ 2 ]
+
+- name: trsm_ex_large
+  category: nightly
+  function: trsm_ex
+  precision: *single_double_precisions
+  arguments:
+    - { side: L, uplo: L, transA: N, diag: N }
+    - { side: R, uplo: L, transA: N, diag: N }
+    - { side: L, uplo: U, transA: C, diag: N }
+  matrix_size: *large_matrix_size_range
+  alpha: *alpha_range
+
+- name: trsm_batched_ex_large
+  category: nightly
+  function: trsm_batched_ex
+  precision: *single_double_precisions
+  arguments:
+    - { side: L, uplo: L, transA: N, diag: N }
+    - { side: R, uplo: L, transA: N, diag: N }
+    - { side: L, uplo: U, transA: C, diag: N }
+  matrix_size: *large_matrix_size_range
+  alpha: *alpha_range
+  batch_count: [ 2 ]
+
+- name: trsm_strided_batched_ex_large
+  category: nightly
+  function: trsm_strided_batched_ex
+  precision: *single_double_precisions
+  arguments:
+    - { side: L, uplo: L, transA: N, diag: N }
+    - { side: R, uplo: L, transA: N, diag: N }
+    - { side: L, uplo: U, transA: C, diag: N }
+  matrix_size: *large_matrix_size_range
+  alpha: *alpha_range
+  stride_scale: [ 2 ]
+  batch_count: [ 2 ]
+
+# nightly - many batches
+- name: trsm_batched_ex_manybatch
+  category: nightly
+  function: trsm_batched_ex
+  precision: *single_double_precisions
+  arguments:
+    - { side: L, uplo: L, transA: N, diag: U }
+    - { side: R, uplo: L, transA: C, diag: N }
+    - { side: L, uplo: U, transA: C, diag: N }
+    - { side: R, uplo: U, transA: N, diag: U }
+  matrix_size: *small_matrix_size_range
+  alpha: *alpha_range
+  batch_count: [64]
+
+- name: trsm_strided_batched_ex_manybatch
+  category: nightly
+  function: trsm_strided_batched_ex
+  precision: *single_double_precisions
+  arguments:
+    - { side: L, uplo: L, transA: N, diag: U }
+    - { side: R, uplo: L, transA: C, diag: N }
+    - { side: L, uplo: U, transA: C, diag: N }
+    - { side: R, uplo: U, transA: N, diag: U }
+  matrix_size: *small_matrix_size_range
+  alpha: *alpha_range
+  stride_scale: [ 1 ]
+  batch_count: [64]
+
+- name: trsm_left_ILP64
+  category: stress
+  arguments:
+    # - { M: 2, N: 2147483649, lda: 4, ldb: 4, batch_count: 1 }
+    - { M: 4, N: 8000, lda: 2147483649, ldb: 10, batch_count: 1 }
+    - { M: 8000, N: 4, lda: 8001, ldb: 2147483649, batch_count: 1 }
+    # - { M: 2, N: 2147483646, lda: 2, ldb: 2, batch_count: 1 } # non-64-bit size
+  side: [ L ]
+  uplo: [ L, U ]
+  transA: [ N, T ]
+  diag: [ N ]
+  api: [ C_64 ]
+  os_flags: [ LINUX ]
+  stride_scale: [ 1 ]
+  function: trsm
+  precision: *single_precision
+  pointer_mode_host: false
+
+- name: trsm_right_ILP64
+  category: stress
+  arguments:
+    # - { M: 2147483649, N: 2, lda: 10, ldb: 2147483650, batch_count: 1 }
+    - { M: 512, N: 4, lda: 2147483649, ldb: 10, batch_count: 1 }
+    # - { M: 2147483646, N: 2, lda: 2, ldb: 2147483646, batch_count: 1 } # non-64-bit-size
+  side: [ R ]
+  uplo: [ L, U ]
+  transA: [ N, T ]
+  diag: [ U ]
+  api: [ C_64 ]
+  os_flags: [ LINUX ]
+  stride_scale: [ 1 ]
+  function: trsm
+  precision: *single_precision
+  pointer_mode_host: false
+
+- name: trsm_large_batch
+  category: stress
+  arguments:
+    - { M: 3, N: 3, lda: 3, ldb: 3, batch_count: *c_grid_yz_require_passes }
+  side: [ L, R ]
+  uplo: [ L, U ]
+  transA: [ N ]
+  diag: [ U ]
+  stride_scale: [ 1 ]
+  function:
+    - trsm_batched: *single_precision
+    - trsm_strided_batched: *single_precision
+    - trsm_batched_ex: *single_precision
+    - trsm_strided_batched_ex: *single_precision
+  pointer_mode_host: false
+
+- name: trsm_batched_ILP64
+  category: stress
+  arguments:
+    - { M: 4, N: 4, lda: 4, ldb: 4, batch_count: *c_grid_yz_require_passes }
+  side: [ L ]
+  uplo: [ L ]
+  transA: [ N ]
+  diag: [ U ]
+  api: [ C_64 ]
+  os_flags: [ LINUX ]
+  stride_scale: [ 1 ]
+  function:
+    - trsm_batched: *single_precision
+    - trsm_strided_batched: *single_precision
+  pointer_mode_host: false
+
+- name: trsm_graph_test
+  category: pre_checkin
+  function:
+    - trsm
+    - trsm_batched
+    - trsm_strided_batched
+    - trsm_ex
+    - trsm_batched_ex
+    - trsm_strided_batched_ex
+  precision: *single_double_precisions
+  arguments:
+    - { side: L, uplo: L, transA: N, diag: U }
+    - { side: R, uplo: L, transA: C, diag: N }
+    - { side: L, uplo: U, transA: C, diag: N }
+    - { side: R, uplo: U, transA: N, diag: U }
+  matrix_size:
+    - { M: 31, N: 31, lda: 32, ldb: 32 }
+  alpha_beta: *complex_alpha_range
+  stride_scale: [ 1 ]
+  batch_count: [ 3 ]
+  user_allocated_workspace: [0, 1000000]
+  graph_test: true
+
+- name: trsm_repeatability_check
+  category: stress
+  function:
+    - trsm
+    - trsm_batched
+    - trsm_strided_batched
+    - trsm_ex
+    - trsm_batched_ex
+    - trsm_strided_batched_ex
+  precision: *single_double_precisions
+  arguments:
+    - { side: L, uplo: L, transA: N, diag: U }
+    - { side: L, uplo: L, transA: C, diag: N }
+    - { side: R, uplo: U, transA: C, diag: N }
+    - { side: R, uplo: U, transA: N, diag: U }
+  matrix_size: *medium_matrix_size_extra
+  alpha_beta: *complex_alpha_range
+  stride_scale: [ 1 ]
+  batch_count: [ 2 ]
+  atomics_mode: 0
+  iters: 5
+  initialization: hpl
+  pointer_mode_host : false
+  devices: 4
+  repeatability_check: true
+...

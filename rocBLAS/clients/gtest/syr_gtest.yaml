@@ -1,0 +1,304 @@
+---
+include: rocblas_common.yaml
+include: known_bugs.yaml
+
+Definitions:
+  - &size_t_n_lda_incx_range
+    - { N:     2048, lda:  2097200, incx: 1       }  #  lda overflow
+    - { N:     2048, lda:  2097200, incx: 2       }  #  lda overflow
+    - { N:     2048, lda:     2048, incx: 2097200 }  # incx overflow
+
+  - &small_matrix_size_range
+    - { N:     1, lda:     1 }
+    - { N:    11, lda:    12 }
+    - { N:    16, lda:    16 }
+    - { N:    33, lda:    32 }
+    - { N:    65, lda:    66 }
+
+  - &special_case_range
+    # Quick return
+    - { N: 0, lda: 1, incx: 1, batch_count: 1 }
+    - { N: 1, lda: 1, incx: 1, batch_count: 0 }
+    # invalid_arg checks
+    - { N: -1, lda: 1, incx: 1, batch_count:  0 }
+    - { N:  0, lda: 0, incx: 1, batch_count:  0 }
+    - { N:  2, lda: 1, incx: 1, batch_count:  0 }
+    - { N:  0, lda: 1, incx: 0, batch_count:  0 }
+    - { N:  0, lda: 1, incx: 1, batch_count: -1 }
+
+  - &medium_matrix_size_range
+    - { N:  1000, lda:  1000 }
+    - { N:  2011, lda:  2011 }
+
+  - &large_matrix_size_range
+    - { N:  3000, lda:  3000 }
+    - { N:  6001, lda:  6001 }
+
+  - &alpha_range
+    - { alpha: -0.5, alphai:  1.5 }
+    - { alpha:  0.0, alphai:  0.0 }
+    - { alpha:  0.0, alphai:  2.0 }
+    - { alpha:  1.0, alphai:  0.0 }
+
+  - &alpha_range_small
+    - { alpha: 2.0, alphai: 0.5 }
+
+  - &alpha_nan
+    - { alpha: .NaN, alphai: .NaN }
+
+Tests:
+
+- name: syr_bad_arg
+  category: quick
+  function:
+  - syr_bad_arg: *single_precision
+  - syr_batched_bad_arg: *single_precision
+  - syr_strided_batched_bad_arg: *single_precision
+  api: [ C, FORTRAN, FORTRAN_64 ]
+
+- name: syr_arg_check
+  category: quick
+  function:
+  - syr: *single_precision
+  - syr_batched: *single_precision
+  - syr_strided_batched: *single_precision
+  uplo: L
+  matrix_size: *special_case_range
+
+- name: syr_fortran
+  category: quick
+  function: syr
+  precision: *single_double_precisions_complex_real
+  uplo: [ U, L ]
+  matrix_size: *small_matrix_size_range
+  incx: [ -2, 2 ]
+  alpha_beta: *alpha_range_small
+  api: FORTRAN
+
+- name: syr_NaN
+  category: quick
+  function: syr
+  precision: *single_double_precisions_complex_real
+  uplo: [ U, L ]
+  N: [ 32 ]
+  lda: [ 32 ]
+  incx: [ 1 ]
+  alpha_beta: *alpha_nan
+
+- name: syr_small
+  category: quick
+  function: syr
+  precision: *single_double_precisions_complex_real
+  uplo: [ U, L ]
+  matrix_size: *small_matrix_size_range
+  incx: [ 1, -2, 10 ]
+  alpha_beta: *alpha_range
+
+- name: syr_medium
+  category: pre_checkin
+  function: syr
+  precision: *single_double_precisions_complex_real
+  uplo: [ U, L ]
+  matrix_size: *medium_matrix_size_range
+  pointer_mode_host: false
+  incx: [ 2, -2 ]
+  alpha_beta: *alpha_range_small
+
+- name: syr_large
+  category: nightly
+  function: syr
+  precision: *single_double_precisions_complex_real
+  uplo: [ U, L ]
+  matrix_size: *large_matrix_size_range
+  pointer_mode_host: false
+  incx: [ 3 ]
+  alpha_beta: *alpha_range_small
+
+- name: syr_size_t
+  category: stress
+  function: syr
+  precision: *single_precision
+  uplo: [ U    ]
+  matrix_size: *size_t_n_lda_incx_range
+  pointer_mode_device: false
+  alpha_beta: *alpha_range_small
+  gpu_arch: ['90a','942']
+  os_flags: LINUX
+
+- name: syr_ILP64
+  category: stress
+  arguments:
+    - { N: 2, lda: 2147483649, incx: 1, batch_count: 1 }
+    - { N: 2, lda: 2, incx: 2147483649, batch_count: 1 }
+    - { N: 2, lda: 2, incx: -2147483649, batch_count: 1 }
+    - { N: 2, lda: 2, stride_a: 2, incx: 1, batch_count: *c_grid_yz_require_passes }
+  uplo: [ U, L ]
+  stride_scale: [ 1 ]
+  alpha_beta: *alpha_range_small
+  pointer_mode_host: false
+  api: [ C_64 ]
+  os_flags: [ LINUX ]
+  function:
+    - syr:  *single_precision
+    - syr_batched:  *single_precision
+    - syr_strided_batched:  *single_precision
+
+# batched
+- name: syr_batched_fortran
+  category: quick
+  function: syr_batched
+  precision: *single_double_precisions_complex_real
+  uplo: [ U, L ]
+  matrix_size: *small_matrix_size_range
+  incx: [ -2, 2 ]
+  alpha_beta: *alpha_range_small
+  batch_count: [ -1, 0, 3 ]
+  api: FORTRAN
+
+- name: syr_batched_NaN
+  category: quick
+  function: syr_batched
+  precision: *double_precision
+  uplo: [ L ]
+  N: [ 32 ]
+  lda: [ 32 ]
+  incx: [ 1 ]
+  alpha_beta: *alpha_nan
+  batch_count: [ 2 ]
+
+- name: syr_batched_small
+  category: quick
+  function: syr_batched
+  precision: *single_double_precisions_complex_real
+  uplo: [ U, L ]
+  matrix_size: *small_matrix_size_range
+  incx: [ -1, 2, 10 ]
+  alpha_beta: *alpha_range
+  batch_count: [ 1, 5 ]
+
+- name: syr_batched_medium
+  category: pre_checkin
+  function: syr_batched
+  precision: *single_double_precisions_complex_real
+  uplo: [ U, L ]
+  matrix_size: *medium_matrix_size_range
+  pointer_mode_device: false
+  incx: [ 2, -2 ]
+  alpha_beta: *alpha_range_small
+  batch_count: [ 1, 3 ]
+
+- name: syr_batched_large
+  category: nightly
+  function: syr_batched
+  precision: *single_double_precisions_complex_real
+  uplo: [ U ]
+  matrix_size: *large_matrix_size_range
+  pointer_mode_host: false
+  incx: [ 3 ]
+  alpha_beta: *alpha_range_small
+  batch_count: [ 1, 3 ]
+
+- name: syr_batched_grid_z_16bit
+  category: stress
+  arguments:
+    - { N: 3, lda:  3, incx: 1, batch_count: *c_grid_yz_require_passes} #generic kernel
+  alpha: [ 2.0 ]
+  uplo: [ U, L ]
+  pointer_mode_host: false
+  function:
+    - syr_batched: *single_precision
+    - syr_strided_batched: *single_precision
+  stride_scale: 1
+
+# strided batched
+- name: syr_strided_batched_fortran
+  category: quick
+  function: syr_strided_batched
+  precision: *single_double_precisions_complex_real
+  uplo: [ U, L ]
+  matrix_size: *small_matrix_size_range
+  incx: [ -2, 2 ]
+  alpha_beta: *alpha_range_small
+  batch_count: [ -1, 0, 3 ]
+  api: FORTRAN
+
+- name: syr_strided_batched_NaN
+  category: quick
+  function: syr_strided_batched
+  precision: *single_precision
+  uplo: [ U ]
+  N: [ 32 ]
+  lda: [ 32 ]
+  incx: [ 1 ]
+  alpha_beta: *alpha_nan
+  batch_count: [ 2 ]
+
+- name: syr_strided_batched_small
+  category: quick
+  function: syr_strided_batched
+  precision: *single_double_precisions_complex_real
+  uplo: [ U, L ]
+  matrix_size: *small_matrix_size_range
+  incx: [ 1, -2, 10 ]
+  alpha_beta: *alpha_range
+  batch_count: [ 1, 5 ]
+
+- name: syr_strided_batched_medium
+  category: pre_checkin
+  function: syr_strided_batched
+  precision: *single_double_precisions_complex_real
+  uplo: [ U, L ]
+  matrix_size: *medium_matrix_size_range
+  pointer_mode_host: false
+  incx: [ 2, -2 ]
+  alpha_beta: *alpha_range_small
+  batch_count: [ 1, 3 ]
+
+- name: syr_strided_large
+  category: nightly
+  function: syr_strided_batched
+  precision: *single_double_precisions_complex_real
+  uplo: [ L ]
+  matrix_size: *large_matrix_size_range
+  pointer_mode_device: false
+  incx: [ 3 ]
+  alpha_beta: *alpha_range_small
+  batch_count: [ 1, 3 ]
+
+- name: syr_graph_test
+  category: pre_checkin
+  function:
+        - syr
+        - syr_batched
+        - syr_strided_batched
+  precision: *single_double_precisions_complex_real
+  matrix_size:
+        - { N:    33, lda:    32 }
+  uplo: [ U ]
+  incx: [ 1 ]
+  alpha: [ 2.0 ]
+  stride_scale: [ 1 ]
+  batch_count: [ 5 ]
+  graph_test: true
+
+- name: syr_repeatability_check
+  category: stress
+  function:
+        - syr
+        - syr_batched
+        - syr_strided_batched
+  precision: *single_double_precisions_complex_real
+  matrix_size:
+        - { N:    33, lda:    32 }
+  uplo: [ U ]
+  incx: [ 1 ]
+  alpha: [ 2.0 ]
+  stride_scale: [ 1 ]
+  batch_count: [ 2 ]
+  initialization: hpl
+  atomics_mode: 0
+  iters: 5
+  pointer_mode_host: false
+  devices: 4
+  repeatability_check: true
+...

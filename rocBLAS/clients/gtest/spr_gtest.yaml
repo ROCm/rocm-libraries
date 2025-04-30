@@ -1,0 +1,283 @@
+---
+include: rocblas_common.yaml
+include: known_bugs.yaml
+
+Definitions:
+  - &small_matrix_size_range
+    - { N:     1 }
+    - { N:    11 }
+    - { N:    16 }
+    - { N:    33 }
+    - { N:    65 }
+
+  - &special_case_range
+    # Quick return
+    - { N: 0, incx: 1, batch_count: 1 }
+    - { N: 1, incx: 1, batch_count: 0 }
+    # invalid_arg checks
+    - { N: -1, incx: 1, batch_count:  0 }
+    - { N:  0, incx: 0, batch_count:  0 }
+    - { N:  0, incx: 1, batch_count: -1 }
+
+  - &medium_matrix_size_range
+    - { N:  1000 }
+    - { N:  2011 }
+
+  - &large_matrix_size_range
+    - { N:  2048 }
+    - { N:  4011 }
+
+  - &alpha_range
+    - { alpha: -0.5, alphai:  1.5 }
+    - { alpha:  0.0, alphai:  0.0 }
+    - { alpha:  0.0, alphai:  2.0 }
+    - { alpha:  1.0, alphai:  0.0 }
+
+  - &alpha_range_small
+    - { alpha: 2.0, alphai: 0.5 }
+
+  - &alpha_nan
+    - { alpha: .NaN, alphai: .NaN }
+
+Tests:
+
+- name: spr_bad_arg
+  category: quick
+  function:
+  - spr_bad_arg: *single_double_precisions
+  - spr_batched_bad_arg: *single_double_precisions
+  - spr_strided_batched_bad_arg: *single_double_precisions
+  api: [ C, FORTRAN, FORTRAN_64 ]
+
+- name: spr_arg_check
+  category: quick
+  function:
+  - spr
+  - spr_batched
+  - spr_strided_batched
+  precision: *single_double_precisions
+  uplo: L
+  matrix_size: *special_case_range
+
+- name: spr_fortran
+  category: quick
+  function: spr
+  precision: *single_double_precisions_complex_real
+  uplo: [ U, L ]
+  matrix_size: *small_matrix_size_range
+  incx: [ 2 ]
+  alpha_beta: *alpha_range_small
+  api: FORTRAN
+
+- name: spr_small
+  category: quick
+  function: spr
+  precision: *single_double_precisions_complex_real
+  uplo: [ U, L ]
+  matrix_size: *small_matrix_size_range
+  incx: [ 1, -2, 10 ]
+  alpha_beta: *alpha_range
+
+- name: spr_NaN
+  category: quick
+  function: spr
+  precision: *single_double_precisions
+  uplo: [ U, L ]
+  N: [ 33 ]
+  incx: [ 1 ]
+  alpha_beta: *alpha_nan
+
+- name: spr_medium
+  category: pre_checkin
+  function: spr
+  precision: *single_double_precisions_complex_real
+  uplo: [ U, L ]
+  matrix_size: *medium_matrix_size_range
+  incx: [ 2, -1 ]
+  alpha_beta: *alpha_range_small
+
+- name: spr_large
+  category: nightly
+  function: spr
+  precision: *single_double_precisions_complex_real
+  uplo: [ U, L ]
+  matrix_size: *large_matrix_size_range
+  incx: [ 1 ]
+  alpha_beta: *alpha_range_small
+
+# batched
+- name: spr_batched_fortran
+  category: quick
+  function: spr_batched
+  precision: *single_double_precisions_complex_real
+  uplo: [ U, L ]
+  matrix_size: *small_matrix_size_range
+  incx: [ 2 ]
+  alpha_beta: *alpha_range_small
+  batch_count: [ -1, 0, 3 ]
+  api: FORTRAN
+
+- name: spr_batched_small
+  category: quick
+  function: spr_batched
+  precision: *single_double_precisions_complex_real
+  uplo: [ U, L ]
+  matrix_size: *small_matrix_size_range
+  incx: [ 1, -2, 10 ]
+  alpha_beta: *alpha_range
+  batch_count: [ 1, 5 ]
+
+- name: spr_batched_NaN
+  category: quick
+  function: spr_batched
+  precision: *single_double_precisions_complex
+  uplo: [ U ]
+  N: [ 33 ]
+  incx: [ 1 ]
+  alpha_beta: *alpha_nan
+  batch_count: [ 2 ]
+
+- name: spr_batched_medium
+  category: pre_checkin
+  function: spr_batched
+  precision: *single_double_precisions_complex_real
+  uplo: [ U, L ]
+  matrix_size: *medium_matrix_size_range
+  incx: [ 2, -2 ]
+  alpha_beta: *alpha_range_small
+  batch_count: [ 1, 3 ]
+
+- name: spr_batched_large
+  category: nightly
+  function: spr_batched
+  precision: *single_double_precisions_complex_real
+  uplo: [ L ]
+  matrix_size: *large_matrix_size_range
+  incx: [ 1 ]
+  alpha_beta: *alpha_range_small
+  batch_count: [ 1, 3 ]
+
+- name: spr_batched_grid_z_16bit
+  category: stress
+  arguments:
+    - { N:   3, incx: 1, batch_count: *c_grid_yz_require_passes} #generic kernel
+  uplo: [ U, L ]
+  alpha_beta: *alpha_range_small
+  pointer_mode_host: false
+  function:
+    - spr_batched: *single_precision
+    - spr_strided_batched: *single_precision
+  stride_scale: 1
+
+# strided batched
+- name: spr_strided_batched_fortran
+  category: quick
+  function: spr_strided_batched
+  precision: *single_double_precisions_complex_real
+  uplo: [ U, L ]
+  matrix_size: *small_matrix_size_range
+  incx: [ 2 ]
+  alpha_beta: *alpha_range_small
+  batch_count: [ -1, 0, 3 ]
+  stride_scale: [ 2 ]
+  api: FORTRAN
+
+- name: spr_strided_batched_small
+  category: quick
+  function: spr_strided_batched
+  precision: *single_double_precisions_complex_real
+  uplo: [ U, L ]
+  matrix_size: *small_matrix_size_range
+  incx: [ 1, -2, 10 ]
+  alpha_beta: *alpha_range
+  stride_scale: [ 1.0, 2.0 ]
+  batch_count: [ 1, 5 ]
+
+- name: spr_strided_batched_NaN
+  category: quick
+  function: spr_strided_batched
+  precision: *single_precision
+  uplo: [ L ]
+  N: [ 33 ]
+  incx: [ 1 ]
+  alpha_beta: *alpha_nan
+  batch_count: [ 2 ]
+  stride_scale: [ 2 ]
+
+- name: spr_strided_batched_medium
+  category: pre_checkin
+  function: spr_strided_batched
+  precision: *single_double_precisions_complex_real
+  uplo: [ U, L ]
+  matrix_size: *medium_matrix_size_range
+  incx: [ 2, -1 ]
+  alpha_beta: *alpha_range_small
+  stride_scale: [ 1.0 ]
+  batch_count: [ 1, 3 ]
+
+- name: spr_strided_large
+  category: nightly
+  function: spr_strided_batched
+  precision: *single_double_precisions_complex_real
+  uplo: [ U ]
+  matrix_size: *large_matrix_size_range
+  incx: [ 1 ]
+  alpha_beta: *alpha_range_small
+  stride_scale: [ 1.0 ]
+  batch_count: [ 1, 3 ]
+
+# 64-bit test
+- name: spr_ILP64
+  category: stress
+  arguments:
+    - { N: 2, incx: 2147483649, batch_count: 1 }
+    - { N: 2, stride_a: 2, incx: 1, batch_count: *c_grid_yz_require_passes }
+  uplo: [ U, L ]
+  stride_scale: [ 1 ]
+  alpha_beta: *alpha_range_small
+  pointer_mode_host: false
+  api: [ C_64 ]
+  os_flags: [ LINUX ]
+  function:
+    - spr: *single_precision
+    - spr_batched: *single_precision
+    - spr_strided_batched: *single_precision
+
+# graph test
+- name: spr_graph_test
+  category: pre_checkin
+  function:
+        - spr
+        - spr_batched
+        - spr_strided_batched
+  precision: *single_double_precisions_complex_real
+  matrix_size:
+        - { N : 33 }
+  uplo: [ U ]
+  incx: [ 1 ]
+  alpha: [ 2.0 ]
+  stride_scale: [ 1 ]
+  batch_count: [ 5 ]
+  graph_test: true
+
+- name: spr_repeatability_check
+  category: stress
+  function:
+        - spr
+        - spr_batched
+        - spr_strided_batched
+  precision: *single_double_precisions_complex_real
+  matrix_size:
+        - { N : 33 }
+  uplo: [ U ]
+  incx: [ 1 ]
+  alpha: [ 2.0 ]
+  stride_scale: [ 1 ]
+  batch_count: [ 2 ]
+  initialization: hpl
+  atomics_mode: 0
+  pointer_mode_host: false
+  iters: 5
+  devices: 4
+  repeatability_check: true
+...

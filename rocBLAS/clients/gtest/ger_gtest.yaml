@@ -1,0 +1,347 @@
+---
+include: rocblas_common.yaml
+include: known_bugs.yaml
+
+Definitions:
+
+  - &tiny_matrix
+    - { M:   16, N:   16, lda:   16, stride_a:  256 }
+
+  - &small_matrix_size_range
+    - { M:   11, N:   12, lda:   13, stride_a:  156 }
+    - { M:   16, N:   16, lda:   16, stride_a:  256 }
+    - { M:   33, N:   32, lda:   33, stride_a: 1056 }
+    - { M:   10, N:   60, lda:   20, stride_a: 1200 }
+    - { M:   24, N:    1, lda:   24, stride_a: 24 }
+    - { M:    1, N:   11, lda:    4, stride_a: 44 }
+
+  - &special_case_range
+    # Quick return
+    - { M:    0, N:   1, lda:   1, incx: 1, incy: 1, batch_count: 1 }
+    - { M:    1, N:   0, lda:   1, incx: 1, incy: 1, batch_count: 1 }
+    - { M:    1, N:   1, lda:   1, incx: 1, incy: 1, batch_count: 0 }
+
+    # invalid arg checks
+    - { M:   -1, N:   0, lda:   1, incx: 1, incy: 1, batch_count:  0 }
+    - { M:    0, N:  -1, lda:   1, incx: 1, incy: 1, batch_count:  0 }
+    - { M:    5, N:   0, lda:   4, incx: 1, incy: 1, batch_count:  0 }
+    - { M:    0, N:   0, lda:   0, incx: 1, incy: 1, batch_count:  0 }
+    - { M:    0, N:   0, lda:   1, incx: 0, incy: 1, batch_count:  0 }
+    - { M:    0, N:   0, lda:   1, incx: 1, incy: 0, batch_count:  0 }
+    - { M:    0, N:   0, lda:   1, incx: 1, incy: 1, batch_count: -1 }
+
+  - &medium_matrix_size_range
+    - { M:  600, N:  500, lda:  600, stride_a:  300000 }
+    - { M:  500, N:  700, lda:  500, stride_a:  350000 }
+    - { M: 1000, N: 1000, lda: 1000, stride_a: 1000100 }
+
+  - &large_matrix_size_range
+    - { M: 1025, N: 4011, lda: 1025, stride_a:   4111275 }
+    - { M: 7001, N: 2000, lda: 7000, stride_a:   14000000 }
+    - { M: 4300001, N: 2, lda: 4300000, stride_a: 9000000 }
+    - { M: 2, N: 4300000, lda: 2, stride_a: 9000000 }
+
+  - &double_buffered_size_range
+    - { M:  2560, N:  2560, lda:  2570, stride_a:  6579200 }
+
+  - &incx_incy_range
+    - { incx:   1, incy:   1}
+    - { incx:  -1, incy:  -1}
+    - { incx:   1, incy:  -1}
+    - { incx:   1, incy:   2}
+    - { incx:   2, incy:   1}
+    - { incx:  10, incy:  99}
+
+  - &incx_incy_range_small
+    - { incx: 1, incy: 1 }
+
+  - &size_t_index
+    - { M: 4,     N: 46976, lda: 46976, stride_a: 93952 }      # default kernel
+
+  - &size_t_index_gfx90a
+    - { M: 46976, N: 46976, lda: 46976, stride_a: 2206744576 } # m == n && m > 2000 && mod 128 == 0 && gfx90a
+
+  - &size_t_MN_incx_incy
+    - { M: 3,     N: 3,     lda: 3,     stride_a: 16,    incx: *c_pos_x2_overflow_int32, incy: 1 }  # x is m element
+    - { M: 3,     N: 3,     lda: 3,     stride_a: 16,    incx: *c_neg_x2_overflow_int32, incy: 1 }  # x is m element
+    - { M: 3,     N: 3,     lda: 3,     stride_a: 16,    incx: 1,     incy: *c_pos_x2_overflow_int32 } # y is n element
+    - { M: 3,     N: 3,     lda: 3,     stride_a: 16,    incx: 1,     incy: *c_neg_x2_overflow_int32 } # y is n element
+    - { M: 2176,     N: 2176,     lda: 2176,     stride_a: 16,    incx: 1,       incy: 1973792 } # m == n && m > 2000 && mod 128 == 0 && gfx90a
+    - { M: 2176,     N: 2176,     lda: 2176,     stride_a: 16,    incx: 1973792, incy: 1  }
+
+Tests:
+- name: ger_bad_arg
+  category: quick
+  function:
+  - ger_bad_arg
+  - ger_batched_bad_arg
+  - ger_strided_batched_bad_arg
+  precision: *single_double_precisions
+  api: [ C, FORTRAN, FORTRAN_64 ]
+
+- name: ger_arg_check
+  category: quick
+  function:
+  - ger
+  - ger_batched
+  - ger_strided_batched
+  precision: *single_double_precisions
+  transA: N
+  matrix_size: *special_case_range
+
+- name: ger_size_t_M
+  category: stress
+  function:
+  - ger
+  # shared code for size_t with non-batched
+  #- ger_batched
+  #- ger_strided_batched
+  precision: *single_precision
+  matrix_size: *size_t_index
+  incx_incy: *incx_incy_range_small
+  alpha: [ -0.5 ]
+  pointer_mode_host: false
+
+- name: ger_size_t_M
+  category: stress
+  function:
+  - ger
+  precision: *single_precision
+  matrix_size: *size_t_index_gfx90a
+  incx_incy: *incx_incy_range_small
+  alpha: [ -0.5 ]
+  pointer_mode_host: false
+  gpu_arch: ['90a','942']
+
+- name: ger_size_t_inc
+  category: stress
+  function:
+  - ger
+  # shared code for size_t with non-batched
+  #- ger_batched
+  #- ger_strided_batched
+  precision: *single_precision
+  arguments: *size_t_MN_incx_incy
+  alpha: [ 0.5 ]
+  pointer_mode_host: false
+  os_flags: LINUX
+
+# Regular ger
+- name: ger_fortran
+  category: quick
+  function: ger
+  precision: *single_double_precisions
+  matrix_size: *small_matrix_size_range
+  incx_incy: *incx_incy_range_small
+  alpha: [ 2.0 ]
+  api: FORTRAN
+
+- name: ger_NaN
+  category: quick
+  function: ger
+  precision: *single_double_precisions
+  transA: N
+  matrix_size: *tiny_matrix
+  incx_incy: *incx_incy_range_small
+  alpha: [ .NaN ]
+
+- name: ger_small
+  category: quick
+  function: ger
+  precision: *single_double_precisions
+  matrix_size: *small_matrix_size_range
+  incx_incy: *incx_incy_range
+  alpha: [ -0.5, 2.0, 0.0 ]
+
+- name: ger_medium
+  category: pre_checkin
+  function: ger
+  precision: *single_double_precisions
+  matrix_size: *medium_matrix_size_range
+  incx_incy: *incx_incy_range
+  alpha: [ -0.5, 2.0, 0.0 ]
+
+- name: ger_medium
+  category: pre_checkin
+  function: ger
+  precision: *single_double_precisions
+  matrix_size: *double_buffered_size_range
+  incx_incy: *incx_incy_range
+  alpha: [ -0.5 ]
+
+- name: ger_large
+  category: nightly
+  function: ger
+  precision: *single_double_precisions
+  matrix_size: *large_matrix_size_range
+  incx_incy: *incx_incy_range_small
+  alpha: [ -0.5, 2.0, 0.0 ]
+
+# ger_batched
+- name: ger_batched_fortran
+  category: quick
+  function: ger_batched
+  precision: *single_double_precisions
+  matrix_size: *small_matrix_size_range
+  incx_incy: *incx_incy_range_small
+  alpha: [ 2.0 ]
+  batch_count: [ -1, 0, 3 ]
+  api: FORTRAN
+
+- name: ger_batched_NaN
+  category: quick
+  function: ger_batched
+  precision: *single_double_precisions
+  matrix_size: *tiny_matrix
+  incx_incy: *incx_incy_range_small
+  alpha: [ .NaN ]
+  batch_count: [ 2 ]
+
+- name: ger_batched_small
+  category: quick
+  function: ger_batched
+  precision: *single_double_precisions
+  matrix_size: *small_matrix_size_range
+  incx_incy: *incx_incy_range
+  alpha: [ -0.5, 2.0, 0.0 ]
+  batch_count: [ -5, 0, 1, 5, 10 ]
+
+- name: ger_batched_medium
+  category: pre_checkin
+  function: ger_batched
+  precision: *single_double_precisions
+  matrix_size: *medium_matrix_size_range
+  incx_incy: *incx_incy_range_small
+  alpha: [ 2.0, 0.0 ]
+  batch_count: [ 1, 10 ]
+
+- name: ger_batched_large
+  category: nightly
+  function: ger_batched
+  precision: *single_double_precisions
+  matrix_size: *large_matrix_size_range
+  incx_incy: *incx_incy_range_small
+  alpha: [ 2.0, 0.0 ]
+  batch_count: [ 3 ]
+
+- name: ger_batched_grid_z_16bit
+  category: stress
+  arguments:
+    - { M: 1025, N:   1, lda: 1025, incx: 1, incy: 1, stride_a: 1025, batch_count: *c_grid_yz_require_passes } #generic float kernel
+    - { M:  128, N: 128, lda:  128, incx: 1, incy: 1, stride_a: 16384, batch_count: *c_grid_yz_require_passes} #double buffered loads
+  alpha: [ 2.0 ]
+  pointer_mode_host: false
+  function:
+    - ger_batched: *single_precision
+    - ger_strided_batched: *single_precision
+
+# ger_strided_batched
+- name: ger_strided_batched_fortran
+  category: quick
+  function: ger_strided_batched
+  precision: *single_double_precisions
+  matrix_size: *small_matrix_size_range
+  incx_incy: *incx_incy_range_small
+  alpha: [ 2.0 ]
+  batch_count: [ -1, 0, 3 ]
+  stride_scale: [ 2 ]
+  api: FORTRAN
+
+- name: ger_strided_batched_NaN
+  category: quick
+  function: ger_strided_batched
+  precision: *single_precision
+  matrix_size: *tiny_matrix
+  incx_incy: *incx_incy_range_small
+  alpha: [ .NaN ]
+  batch_count: [ 2 ]
+  stride_scale: [ 2 ]
+
+- name: ger_strided_batched_small
+  category: quick
+  function: ger_strided_batched
+  precision: *single_double_precisions
+  matrix_size: *small_matrix_size_range
+  incx_incy: *incx_incy_range
+  alpha: [ -0.5, 0.0 ]
+  stride_scale: [ 1, 2 ]
+  batch_count: [ -5, 0, 1, 5, 10 ]
+
+- name: ger_strided_batched_medium
+  category: pre_checkin
+  function: ger_strided_batched
+  precision: *single_double_precisions
+  matrix_size: *medium_matrix_size_range
+  incx_incy: *incx_incy_range_small
+  alpha: [ -0.5, 0.0 ]
+  stride_scale: [ 1 ]
+  batch_count: [ 1, 10 ]
+
+- name: ger_strided_batched_medium
+  category: pre_checkin
+  function: ger_strided_batched
+  precision: *single_double_precisions
+  matrix_size: *double_buffered_size_range
+  incx_incy: *incx_incy_range_small
+  alpha: [ 2.0 ]
+  stride_scale: [ 1 ]
+  batch_count: [ 5 ]
+
+- name: ger_strided_batched_large
+  category: nightly
+  function: ger_strided_batched
+  precision: *single_double_precisions
+  matrix_size: *large_matrix_size_range
+  incx_incy: *incx_incy_range_small
+  alpha: [ -0.5, 0.0 ]
+  stride_scale: [ 1 ]
+  batch_count: [ 3 ]
+
+- name: ger_ILP64
+  category: stress
+  arguments:
+    - { M: 2147483649, N: 1, lda: 2147483649, incx: 1, incy: 1, batch_count: 1 }
+    - { M: 1, N: 2147483649, lda: 1, incx: 1, incy: 1, batch_count: 1 }
+    - { M: 1, N: 2, lda: 1, stride_a: 2, incx: 1, incy: -1, batch_count: *c_grid_yz_require_passes }
+  stride_scale: [ 1 ]
+  pointer_mode_host: false
+  api: [ C_64 ]
+  os_flags: [ LINUX ]
+  function:
+    - ger: *single_precision
+    - ger_batched: *single_precision
+    - ger_strided_batched: *single_precision
+
+- name: ger_graph_test
+  category: pre_checkin
+  function:
+        - ger
+        - ger_batched
+        - ger_strided_batched
+  precision: *single_double_precisions
+  matrix_size:
+        - { M:   33, N:   32, lda:   33, stride_a: 1056 }
+  alpha: [ 2.0 ]
+  stride_scale: [ 1 ]
+  batch_count: [ 5 ]
+  graph_test: true
+
+- name: ger_repeatability_check
+  category: stress
+  function:
+        - ger
+        - ger_batched
+        - ger_strided_batched
+  precision: *single_double_precisions
+  matrix_size:
+        - { M:   33, N:   32, lda:   33, stride_a: 1056 }
+  alpha: [ 2.0 ]
+  stride_scale: [ 1 ]
+  batch_count: [ 2 ]
+  atomics_mode: 0
+  initialization: hpl
+  iters: 5
+  pointer_mode_host: false
+  devices: 4
+  repeatability_check: true
+...

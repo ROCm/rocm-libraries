@@ -1,0 +1,334 @@
+---
+include: rocblas_common.yaml
+include: known_bugs.yaml
+
+Definitions:
+  - &size_t_matrix_size_range
+    - { N: 4097, K: 6, lda: 1048600, incx:       1 }
+    - { N: 4097, K: 6, lda:       6, incx: 1048600 }
+
+  - &small_matrix_size_range
+    - { N:     4, K:     2, lda:    10 }
+    - { N:    10, K:     2, lda:    10 }
+    - { N:    10, K:     8, lda:    9  }
+    - { N:     1, K:     0, lda:    1  }
+    - { N:    10, K:    10, lda:    2  }
+    - { N:     9, K:     9, lda:   20  }
+    - { N:     9, K:    15, lda:   20  }
+    - { N:     9, K:    10, lda:   11  }
+    - { N:   100, K:    60, lda:   65  }
+
+  - &special_case_range
+    - { N: 0, K: 0, lda: 1, incx: 1, batch_count: 1 }
+    - { N: 1, K: 1, lda: 2, incx: 1, batch_count: 0 }
+
+    - { N: -1, K:  0, lda: 1, incx: 1, batch_count:  0 }
+    - { N:  0, K: -1, lda: 1, incx: 1, batch_count:  0 }
+    - { N:  0, K:  0, lda: 0, incx: 1, batch_count:  0 }
+    - { N:  0, K:  4, lda: 4, incx: 1, batch_count:  0 }
+    - { N:  0, K:  0, lda: 1, incx: 0, batch_count:  0 }
+    - { N:  0, K:  0, lda: 1, incx: 1, batch_count: -1 }
+
+  - &manybatch_range
+    - { N:  10, K:   5, lda:   7 }
+    - { N: 150, K: 125, lda: 151 }
+
+  - &medium_matrix_size_range
+    - { N:   63,  K:   8,   lda:  128 }
+    - { N:   65,  K:   8,   lda:   10 }
+    - { N:   65,  K:   12,  lda:  128 }
+    - { N:   65,  K:   32,  lda:  128 }
+    - { N:   64,  K:   8,   lda:  128 }
+    - { N:   64,  K:   45,  lda:  128 }
+    - { N:   127, K:   8,   lda:  127 }
+    - { N:   127, K:   100, lda:  101 }
+    - { N:   128, K:   20,  lda:  128 }
+    - { N:   128, K:   60,  lda:   63 }
+    - { N:   128, K:   63,  lda:  128 }
+    - { N:   128, K:   64,  lda:  128 }
+    - { N:   128, K:   100, lda:  128 }
+    - { N:   512, K:   256, lda:  512 }
+    - { N:   512, K:   5,   lda:  512 }
+    - { N:   512, K:   9,   lda:  512 }
+    - { N:   512, K:   20,  lda:  511 }
+    - { N:   600, K:   500, lda:  601 }
+
+  - &large_matrix_size_range
+    - { N:  1000, K:  5,    lda: 1000 }
+    - { N:  2000, K:  1999, lda: 2000 }
+    - { N:  4011, K:  512,  lda: 550 }
+
+  - &incx_range
+    - { incx:  -5 }
+    - { incx:   1 }
+    - { incx:  10 }
+
+  - &incx_range_small
+    - { incx: 2 }
+
+
+Tests:
+- name: tbmv_bad_arg
+  category: quick
+  function:
+    - tbmv_bad_arg
+    - tbmv_batched_bad_arg
+    - tbmv_strided_batched_bad_arg
+  precision: *single_double_precisions
+  uplo: U
+  transA: N
+  diag: N
+  api: [ C, FORTRAN, FORTRAN_64 ]
+
+- name: tbmv_arg_check
+  category: quick
+  function:
+  - tbmv: *single_double_precisions
+  - tbmv_batched: *single_double_precisions
+  - tbmv_strided_batched: *single_double_precisions
+  uplo: L
+  transA: N
+  diag: N
+  matrix_size: *special_case_range
+
+- name: tbmv_fortran
+  category: quick
+  function: tbmv
+  precision: *single_double_precisions_complex_real
+  uplo: [U, L]
+  transA: [ N, T, C ]
+  diag: [U, N]
+  matrix_size: *small_matrix_size_range
+  incx_incy: *incx_range_small
+  api: FORTRAN
+
+- name: tbmv_batched_fortran
+  category: quick
+  function: tbmv_batched
+  precision: *single_double_precisions_complex_real
+  uplo: [U, L]
+  transA: [ N, T, C ]
+  diag: [U, N]
+  matrix_size: *small_matrix_size_range
+  incx_incy: *incx_range_small
+  batch_count: [ -1, 0, 3 ]
+  api: FORTRAN
+
+- name: tbmv_strided_batched_fortran
+  category: quick
+  function: tbmv_strided_batched
+  precision: *single_double_precisions_complex_real
+  uplo: [U, L]
+  transA: [ N, T, C ]
+  diag: [U, N]
+  matrix_size: *small_matrix_size_range
+  incx_incy: *incx_range_small
+  batch_count: [ 3 ]
+  stride_scale: [ 2 ]
+  api: FORTRAN
+
+- name: tbmv_small
+  category: quick
+  function: tbmv
+  precision: *single_double_precisions_complex_real
+  uplo: [U, L]
+  transA: [ N, T, C ]
+  diag: [U, N]
+  matrix_size: *small_matrix_size_range
+  incx_incy: *incx_range
+
+- name: tbmv_batched_small
+  category: quick
+  function: tbmv_batched
+  precision: *single_double_precisions_complex_real
+  uplo: [U, L]
+  transA: [ N, T, C ]
+  diag: [U, N]
+  matrix_size: *small_matrix_size_range
+  incx_incy: *incx_range
+  batch_count: [ 3 ]
+
+- name: tbmv_strided_batched_small
+  category: quick
+  function: tbmv_strided_batched
+  precision: *single_double_precisions_complex_real
+  uplo: [U, L]
+  transA: [ N, T, C ]
+  diag: [U, N]
+  matrix_size: *small_matrix_size_range
+  incx_incy: *incx_range
+  stride_scale: [ 2 ]
+  batch_count: [ 3 ]
+
+- name: tbmv_medium
+  category: pre_checkin
+  function: tbmv
+  precision: *single_double_precisions_complex_real
+  uplo: [U, L]
+  transA: [ N, T, C ]
+  diag: [U, N]
+  matrix_size: *medium_matrix_size_range
+  incx_incy: *incx_range
+
+- name: tbmv_batched_medium
+  category: pre_checkin
+  function: tbmv_batched
+  precision: *single_double_precisions_complex_real
+  uplo: [U, L]
+  transA: [ N, T, C ]
+  diag: [U, N]
+  batch_count: [3]
+  matrix_size: *medium_matrix_size_range
+  incx_incy: *incx_range
+
+- name: tbmv_strided_batched_medium
+  category: pre_checkin
+  function: tbmv_strided_batched
+  precision: *single_double_precisions_complex_real
+  uplo: [U, L]
+  transA: [ N, T, C ]
+  diag: [U, N]
+  stride_scale: [ 1 ]
+  batch_count: [3]
+  matrix_size: *medium_matrix_size_range
+  incx_incy: *incx_range
+
+- name: tbmv_large
+  category: nightly
+  function: tbmv
+  precision: *single_double_precisions_complex_real
+  uplo: [U, L]
+  transA: [ N, T, C ]
+  diag: [U, N]
+  matrix_size: *large_matrix_size_range
+  incx_incy: *incx_range_small
+  batch_count: [ 3 ]
+
+- name: tbmv_batched_large
+  category: nightly
+  function: tbmv_batched
+  precision: *single_double_precisions_complex_real
+  uplo: [U, L]
+  transA: [ N, T, C ]
+  diag: [U, N]
+  matrix_size: *large_matrix_size_range
+  incx_incy: *incx_range_small
+  batch_count: [ 3 ]
+
+- name: tbmv_batched_grid_z_16bit
+  category: stress
+  arguments:
+    - { N: 3, K: 3, lda: 3, incx: 1, batch_count: *c_grid_yz_require_passes }
+  uplo: [ U, L ]
+  transA: [ N, T, C ]
+  diag: [U, N]
+  pointer_mode_host: false
+  function:
+    - tbmv_batched: *single_precision
+    - tbmv_strided_batched: *single_precision
+  stride_scale: 1
+
+- name: tbmv_strided_batched_large
+  category: nightly
+  function: tbmv_strided_batched
+  precision: *single_double_precisions_complex_real
+  uplo: [U, L]
+  transA: [ N, T, C ]
+  diag: [U, N]
+  matrix_size: *large_matrix_size_range
+  incx_incy: *incx_range_small
+  stride_scale: [ 1 ]
+  batch_count: [ 3 ]
+
+- name: tbmv_batched_manybatch
+  category: nightly
+  function: tbmv_batched
+  precision: *single_double_precisions
+  uplo: [U, L]
+  transA: [ N, T, C ]
+  diag: [N]
+  matrix_size: *manybatch_range
+  incx_incy: *incx_range_small
+  batch_count: [256]
+
+- name: tbmv_strided_batched_manybatch
+  category: nightly
+  function: tbmv_strided_batched
+  precision: *single_double_precisions
+  uplo: [U, L]
+  transA: [ N, T, C ]
+  diag: [N]
+  matrix_size: *manybatch_range
+  incx_incy: *incx_range_small
+  stride_scale: [ 1.5 ]
+  batch_count: [256]
+
+- name: tbmv_ILP64
+  category: stress
+  arguments:
+    # - { N: 2147483649, K: 1, lda: 1, incx: 1, batch_count: 1 }
+    # - { N: 2, K: 2147483649, lda: 2147483650, incx: 1, batch_count: 1 }
+    - { N: 2, K: 2, lda: 2147483649, incx: 1, batch_count: 1 }
+    - { N: 2, K: 2, lda: 2, incx: 2147483649, batch_count: 1 }
+    - { N: 2, K: 2, lda: 2, incx: 1, batch_count: *c_grid_yz_require_passes }
+  uplo: [ U, L ]
+  transA: [ N, T ]
+  diag: [ N ]
+  stride_scale: [ 1 ]
+  api: [ C_64 ]
+  os_flags: [ LINUX ]
+  function:
+    - tbmv: *single_precision
+    - tbmv_batched: *single_precision
+    - tbmv_strided_batched: *single_precision
+
+- name: tbmv_graph_test
+  category: pre_checkin
+  function:
+        - tbmv
+        - tbmv_batched
+        - tbmv_strided_batched
+  precision: *single_double_precisions_complex_real
+  matrix_size:
+          - { N:   100, K:    60, lda:   65  }
+  uplo: [ U ]
+  transA: [ N ]
+  diag: [ N ]
+  stride_scale: [ 1 ]
+  batch_count: [3]
+  incx_incy: *incx_range
+  graph_test: true
+
+- name: tbmv_size_t
+  category: stress
+  function: tbmv
+  precision: *single_precision
+  matrix_size: *size_t_matrix_size_range
+  uplo: [ U, L ]
+  transA: [ N, T ]
+  diag: [ U, N ]
+  gpu_arch: ['90a','942']
+  os_flags: LINUX
+
+- name: tbmv_repeatability_check
+  category: stress
+  function:
+        - tbmv
+        - tbmv_batched
+        - tbmv_strided_batched
+  precision: *single_double_precisions_complex_real
+  matrix_size:
+        - { N:   100, K:    60, lda:   65  }
+  uplo: [ U ]
+  transA: [ N ]
+  diag: [ N ]
+  stride_scale: [ 1 ]
+  batch_count: [2]
+  incx_incy: *incx_range
+  initialization: hpl
+  atomics_mode: 0
+  pointer_mode_host: false
+  iters: 5
+  devices: 4
+  repeatability_check: true
+...

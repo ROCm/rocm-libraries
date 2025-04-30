@@ -1,0 +1,691 @@
+---
+include: rocblas_common.yaml
+#include: known_bugs.yaml
+
+Definitions:
+
+############
+# Level 1+ #
+############
+
+  - &incx_range_small
+    - [1]
+
+  - &incx_range
+    - [1]
+
+  - &N_range
+    - [65]
+
+  - &batch_count_range
+    - [1]
+
+  - &incx_incy_range
+    - { incx:  1, incy:  1, stride_scale: 1 }
+
+  - &alpha_range
+    - { alpha:  2.0 }
+
+  - &alpha_beta_range
+    - { alpha:  2.0, beta: -1.0 }
+
+  - &alphai_betai_range
+    - { alphai: 2.0 }
+
+  - &complex_alpha_range
+    - { alpha: 3.0, alphai: -2.0 }
+
+  - &complex_alpha_beta_range
+    - { alpha: -2, beta: -3, alphai: -4, betai: -5 }
+
+###########
+# Level 2 #
+###########
+
+  - &L1_dims
+    - { M:   192, K: 192, N: 192,  lda:   192, stride_a: 36864 }
+
+  - &trsv_dims
+    - { M:   192, K: 192, N: 192,  lda:   192, stride_a: 36864, stride_x: 192 }
+
+  # - &trsv_dims
+  #   - { M:   64, K: 64, N: 64,  lda:   64, stride_a: 4096, stride_x: 64 }
+
+  - &gbmv_dims
+    - { M:   100, N:   200, lda:  200, KL: 20, KU:  8 }
+
+  - &hbmv_dims
+    - { N:   192, K: 192,  lda:   192, stride_a: 36864 }
+
+  - &L1_common_args
+    precision: *single_double_precisions_complex_real
+    uplo: [L]
+    transA: [T]
+    diag: [U]
+    incx_incy: *incx_incy_range
+    alpha_beta: *complex_alpha_range
+    matrix_size: *L1_dims
+    stride_scale: [ 1 ]
+
+  - &trsv_common_args
+    # precision: *single_double_precisions_complex_real
+    precision: *single_double_precisions
+    uplo: [L]
+    transA: [T]
+    diag: [U]
+    incx: *incx_range
+    alpha_beta: *complex_alpha_range
+    matrix_size: *trsv_dims
+
+  - &gbmv_common_args
+    precision: *single_double_precisions_complex_real
+    transA: [T]
+    incx_incy: *incx_incy_range
+    alpha_beta: *complex_alpha_range
+    matrix_size: *gbmv_dims
+
+  - &ger_common_args
+    precision: *single_double_precisions_complex_real
+    incx_incy: *incx_incy_range
+    alpha_beta: *complex_alpha_range
+    matrix_size: *trsv_dims
+
+  - &hbmv_common_args
+    precision: *single_double_precisions_complex_real
+    uplo: [L]
+    incx_incy: *incx_incy_range
+    alpha_beta: *complex_alpha_beta_range
+    matrix_size: *hbmv_dims
+
+
+###########
+# Level 3 #
+###########
+
+
+  - &transA_transB_range
+    - { transA: N, transB: T }
+    - { transA: C, transB: N }
+
+  - &gemm_dims
+    - { M:   129, N:   127, K:    64, lda:   129, ldb:   129, ldc:   129, ldd:   129, stride_a: 16641, stride_b: 16641,
+      stride_c: 16641, stride_x: 16641}
+
+  - &gemm_common_args
+    precision: *single_double_precisions_complex_real
+    transA_transB: *transA_transB_range
+    alpha_beta: *alpha_beta_range
+    matrix_size: *gemm_dims
+
+  - &syr2k_common_args
+    precision: *single_double_precisions_complex_real
+    transA: [ N, T]
+    alpha_beta: *alpha_beta_range
+    matrix_size: *gemm_dims
+
+
+  - &trmm_dims
+    - { M:   192, N:   129, lda:   192, ldb:   129 }
+
+  - &trmm_common_args
+    precision: *single_double_precisions_complex_real
+    side: [R, L]
+    uplo: [L]
+    transA: [T]
+    diag: [U]
+    alpha_beta: *complex_alpha_range
+    matrix_size: *trmm_dims
+
+  - &trsm_dims
+    - { M:   128, N:   128, lda:   128, ldb:   128 }
+
+  - &trsm_common_args
+    precision: *single_double_precisions_complex_real
+    side: [R]
+    uplo: [L, U]
+    transA: [T]
+    diag: [U]
+    alpha_beta: *complex_alpha_range
+    matrix_size: *trsm_dims
+
+  - &trtri_dims
+    - { N:   129, lda:   129 }
+
+  - &trtri_common_args
+    precision: *single_double_precisions_complex_real
+    uplo: [L, U]
+    diag: [U]
+    matrix_size: *trtri_dims
+
+Tests:
+
+# hipMemcpy2DAsync
+  - name: set_get_matrix_medium
+    category: pre_checkin
+    precision: *single_double_precisions
+    matrix_size: *gemm_dims
+    function:
+     - set_get_matrix_sync
+     - set_get_matrix_async
+
+  - name: set_get_vector_medium
+    category: pre_checkin
+    precision: *single_double_precisions
+    M: [ 60000 ]
+    incx: [1,3]
+    incy: [1,3]
+    ldd: [1,3]
+    function:
+     - set_get_vector_sync
+     - set_get_vector_async
+
+#
+# start section with category: regression if such tests exist
+
+###########
+# Level 1 #
+###########
+
+  - name: L1_quick
+    category: quick
+    function:
+      - iamax: *single_double_precisions_complex_real
+      - iamin: *single_double_precisions_complex_real
+      - asum:  *single_double_precisions_complex_real
+      - axpy:  *single_double_precisions_complex_real
+      - copy: *single_double_precisions_complex_real
+      - dot:   *single_double_precisions_complex_real
+      - nrm2:  *single_double_precisions_complex_real
+      - rot:  *single_double_precisions_complex_real
+      - rotg:  *single_double_precisions_complex_real
+      - rotm:  *single_double_precisions_complex_real
+      - rotmg:  *single_double_precisions_complex_real
+      - scal:  *single_double_precisions_complex_real
+      - swap:  *single_double_precisions_complex_real
+    arguments: *L1_common_args
+
+  - name: L1_pre_checkin
+    category: pre_checkin
+    function:
+      - iamax_batched: *single_double_precisions_complex_real
+      - iamin_batched: *single_double_precisions_complex_real
+      - asum_batched:  *single_double_precisions_complex_real
+      - axpy_batched:  *single_double_precisions_complex_real
+      - copy_batched: *single_double_precisions_complex_real
+      - dot_batched:   *single_double_precisions_complex_real
+      - nrm2_batched:  *single_double_precisions_complex_real
+      - rot_batched:  *single_double_precisions_complex_real
+      - rotg_batched:  *single_double_precisions_complex_real
+      - rotm_batched:  *single_double_precisions_complex_real
+      - rotmg_batched:  *single_double_precisions_complex_real
+      - scal_batched:  *single_double_precisions_complex_real
+      - swap_batched:  *single_double_precisions_complex_real
+    arguments: *L1_common_args
+    batch_count: *batch_count_range
+
+  - name: L1_nightly
+    category: nightly
+    function:
+      - iamax_strided_batched: *single_double_precisions_complex_real
+      - iamin_strided_batched: *single_double_precisions_complex_real
+      - asum_strided_batched:  *single_double_precisions_complex_real
+      - axpy_strided_batched:  *single_double_precisions_complex_real
+      - copy_strided_batched: *single_double_precisions_complex_real
+      - dot_strided_batched:   *single_double_precisions_complex_real
+      - nrm2_strided_batched:  *single_double_precisions_complex_real
+      - rot_strided_batched:  *single_double_precisions_complex_real
+      - rotg_strided_batched:  *single_double_precisions_complex_real
+      - rotm_strided_batched:  *single_double_precisions_complex_real
+      - rotmg_strided_batched:  *single_double_precisions_complex_real
+      - scal_strided_batched:  *single_double_precisions_complex_real
+      - swap_strided_batched:  *single_double_precisions_complex_real
+    arguments: *L1_common_args
+    batch_count: *batch_count_range
+    stride_scale: [ 1 ]
+
+
+###########
+# Level 2 #
+###########
+
+# trsv
+  - name: trsv_L2_quick
+    category: quick
+    function: trsv
+    arguments: *trsv_common_args
+
+  - name: trsv_batched_L2_pre_checkin
+    category: pre_checkin
+    function: trsv_batched
+    arguments: *trsv_common_args
+    batch_count: *batch_count_range
+
+  - name: trsv_strided_batched_L2_nightly
+    category: nightly
+    function: trsv_strided_batched
+    arguments: *trsv_common_args
+    batch_count: *batch_count_range
+    stride_scale: [ 1 ]
+
+  - name: gemv_L2_quick
+    category: quick
+    function: gemv
+    arguments: *gemm_common_args
+    incx_incy: *incx_incy_range
+
+  - name: gemv_batched_L2_pre_checkin
+    category: pre_checkin
+    function: gemv_batched
+    arguments: *gemm_common_args
+    incx_incy: *incx_incy_range
+    batch_count: *batch_count_range
+
+  - name: gemv_strided_batched_L2_nightly
+    category: nightly
+    function: gemv_strided_batched
+    arguments: *gemm_common_args
+    incx_incy: *incx_incy_range
+    batch_count: *batch_count_range
+
+  - name: gbmv_L2_quick
+    category: quick
+    function: gbmv
+    arguments: *gbmv_common_args
+
+  - name: gbmv_batched_L2_pre_checkin
+    category: pre_checkin
+    function: gbmv_batched
+    arguments: *gbmv_common_args
+    batch_count: *batch_count_range
+
+  - name: gbmv_strided_batched_L2_nightly
+    category: nightly
+    function: gbmv_strided_batched
+    arguments: *gbmv_common_args
+    batch_count: *batch_count_range
+
+  - name: ger_L2_quick
+    category: quick
+    function: ger
+    arguments: *ger_common_args
+
+  - name: ger_batched_L2_pre_checkin
+    category: pre_checkin
+    function: ger_batched
+    arguments: *ger_common_args
+    batch_count: *batch_count_range
+
+  - name: ger_strided_batched_L2_nightly
+    category: nightly
+    function: ger_strided_batched
+    arguments: *ger_common_args
+    batch_count: *batch_count_range
+
+  - name: L2_quick2
+    category: quick
+    function:
+      - syr2: *single_double_precisions_complex_real
+      - syr: *single_double_precisions_complex_real
+      - symv: *single_double_precisions_complex_real
+      - spr2: *single_double_precisions_complex_real
+      - spr: *single_double_precisions_complex_real
+      - spmv: *single_double_precisions_complex_real
+      - sbmv: *single_double_precisions_complex_real
+      - hpr2: *single_double_precisions_complex_real
+      - hpr: *single_double_precisions_complex_real
+      - hpmv: *single_double_precisions_complex_real
+      - her2: *single_double_precisions_complex_real
+      - her: *single_double_precisions_complex_real
+      - hemv: *single_double_precisions_complex_real
+      - hbmv: *single_double_precisions_complex_real
+      - spr: *single_double_precisions_complex_real
+      - spmv: *single_double_precisions_complex_real
+      - sbmv: *single_double_precisions_complex_real
+      - hpr2: *single_double_precisions_complex_real
+      - hpr: *single_double_precisions_complex_real
+      - hpmv: *single_double_precisions_complex_real
+    arguments: *hbmv_common_args
+
+  - name: L2_pre_checkin2
+    category: pre_checkin
+    function:
+      - syr2_batched: *single_double_precisions_complex_real
+      - syr_batched: *single_double_precisions_complex_real
+      - symv_batched: *single_double_precisions_complex_real
+      - spr2_batched: *single_double_precisions_complex_real
+      - spr_batched: *single_double_precisions_complex_real
+      - spmv_batched: *single_double_precisions_complex_real
+      - sbmv_batched: *single_double_precisions_complex_real
+      - hpr2_batched: *single_double_precisions_complex_real
+      - hpr_batched: *single_double_precisions_complex_real
+      - hpmv_batched: *single_double_precisions_complex_real
+      - her2_batched: *single_double_precisions_complex_real
+      - her_batched: *single_double_precisions_complex_real
+      - hemv_batched: *single_double_precisions_complex_real
+      - hbmv_batched: *single_double_precisions_complex_real
+      - spr_batched: *single_double_precisions_complex_real
+      - spmv_batched: *single_double_precisions_complex_real
+      - sbmv_batched: *single_double_precisions_complex_real
+      - hpr2_batched: *single_double_precisions_complex_real
+      - hpr_batched: *single_double_precisions_complex_real
+      - hpmv_batched: *single_double_precisions_complex_real
+    arguments: *hbmv_common_args
+    batch_count: *batch_count_range
+
+  - name: L2_nightly2
+    category: nightly
+    function:
+      - syr2_strided_batched: *single_double_precisions_complex_real
+      - syr_strided_batched: *single_double_precisions_complex_real
+      - symv_strided_batched: *single_double_precisions_complex_real
+      - spr2_strided_batched: *single_double_precisions_complex_real
+      - spr_strided_batched: *single_double_precisions_complex_real
+      - spmv_strided_batched: *single_double_precisions_complex_real
+      - sbmv_strided_batched: *single_double_precisions_complex_real
+      - hpr2_strided_batched: *single_double_precisions_complex_real
+      - hpr_strided_batched: *single_double_precisions_complex_real
+      - hpmv_strided_batched: *single_double_precisions_complex_real
+      - her2_strided_batched: *single_double_precisions_complex_real
+      - her_strided_batched: *single_double_precisions_complex_real
+      - hemv_strided_batched: *single_double_precisions_complex_real
+      - hbmv_strided_batched: *single_double_precisions_complex_real
+      - spr_strided_batched: *single_double_precisions_complex_real
+      - spmv_strided_batched: *single_double_precisions_complex_real
+      - sbmv_strided_batched: *single_double_precisions_complex_real
+      - hpr2_strided_batched: *single_double_precisions_complex_real
+      - hpr_strided_batched: *single_double_precisions_complex_real
+      - hpmv_strided_batched: *single_double_precisions_complex_real
+    arguments: *hbmv_common_args
+    batch_count: *batch_count_range
+
+  - name: L2_quick
+    category: quick
+    function:
+      - trmv: *single_double_precisions_complex_real
+      - tpsv: *single_double_precisions_complex_real
+      - tpmv: *single_double_precisions_complex_real
+      - tbmv: *single_double_precisions_complex_real
+      - tbsv: *single_double_precisions_complex_real
+    arguments: *trsv_common_args
+
+  - name: L2_pre_checkin
+    category: pre_checkin
+    function:
+      - trmv_batched: *single_double_precisions_complex_real
+      - tpsv_batched: *single_double_precisions_complex_real
+      - tpmv_batched: *single_double_precisions_complex_real
+      - tbmv_batched: *single_double_precisions_complex_real
+      - tbsv_batched: *single_double_precisions_complex_real
+    arguments: *trsv_common_args
+    batch_count: *batch_count_range
+
+  - name: L2_nightly
+    category: nightly
+    function:
+      - trmv_strided_batched: *single_double_precisions_complex_real
+      - tpsv_strided_batched: *single_double_precisions_complex_real
+      - tpmv_strided_batched: *single_double_precisions_complex_real
+      - tbmv_strided_batched: *single_double_precisions_complex_real
+      - tbsv_strided_batched: *single_double_precisions_complex_real
+    arguments: *trsv_common_args
+    batch_count: *batch_count_range
+
+  ###########
+  # Level 3 #
+  ###########
+
+# gemm
+
+  - name: gemm_L3
+    category: regression
+    transA_transB: *transA_transB_range
+    alpha_beta: *alpha_beta_range
+    matrix_size: *gemm_dims
+    function:
+      - gemm: *half_single_double_precisions
+      - gemm_ex: *hpa_half_precision
+      - gemm_ex: *hpa_bf16_precision
+
+  - name: gemm_alt
+    category: regression
+    function:
+      - gemm_ex: *hpa_half_precision
+    matrix_size: *gemm_dims
+    pointer_mode_host: false
+    transA_transB: *transA_transB_range
+    alpha: 1
+    beta: 0
+    flags: [4, 20]
+    initialization: [ denorm ]
+
+  - name: atomics_mode_L3_quick
+    category: quick
+    atomics_mode: atomics_not_allowed
+    function:
+      - gemm: *single_double_precisions_complex
+      - gemm_ex: *single_double_precisions_complex
+    arguments: *gemm_common_args
+
+  - name: gemm_L3_quick
+    category: quick
+    function:
+      - gemm: *half_single_double_precisions
+      - gemm_ex: *real_precisions
+    arguments: *gemm_common_args
+
+  - name: gemm_batched_L3_pre_checkin
+    category: pre_checkin
+    function:
+      - gemm_batched: *half_single_double_precisions
+      - gemm_batched_ex: *half_single_double_precisions
+    arguments: *gemm_common_args
+    batch_count: *batch_count_range
+
+  - name: gemm_strided_batched_L3_nightly
+    category: nightly
+    function:
+      - gemm_strided_batched: *half_single_double_precisions
+      - gemm_strided_batched_ex: *single_double_precisions_complex_real
+    arguments: *gemm_common_args
+    batch_count: *batch_count_range
+
+# trmm
+  - name: trmm_L3_quick
+    category: quick
+    function: trmm
+    arguments: *trmm_common_args
+
+  - name: trmm_batched_L3_pre_checkin
+    category: pre_checkin
+    function: trmm_batched
+    arguments: *trmm_common_args
+    batch_count: *batch_count_range
+
+  - name: trmm_strided_batched_L3_nightly
+    category: nightly
+    function: trmm_strided_batched
+    arguments: *trmm_common_args
+    batch_count: *batch_count_range
+
+# trsm
+  - name: trsm_L3_quick
+    category: quick
+    function: trsm
+    arguments: *trsm_common_args
+
+  - name: trsm_batched_L3_pre_checkin
+    category: pre_checkin
+    function: trsm_batched
+    arguments: *trsm_common_args
+    batch_count: *batch_count_range
+
+  - name: trsm_strided_batched_L3_nightly
+    category: nightly
+    function: trsm_strided_batched
+    arguments: *trsm_common_args
+    batch_count: *batch_count_range
+
+# trtri
+  - name: trtri_L3_quick
+    category: quick
+    function: trtri
+    arguments: *trtri_common_args
+
+  - name: trtri_batched_L3_pre_checkin
+    category: pre_checkin
+    function: trtri_batched
+    arguments: *trtri_common_args
+    batch_count: *batch_count_range
+
+  - name: trtri_strided_batched_L3_nightly
+    category: nightly
+    function: trtri_strided_batched
+    arguments: *trtri_common_args
+    batch_count: *batch_count_range
+
+  - name: dgmm_L3_quick
+    category: quick
+    function:
+      - dgmm: *single_double_precisions_complex
+    arguments: *gemm_common_args
+    incx: *incx_range
+    side: [ L ]
+
+  - name: dgmm_batched_L3_pre_checkin
+    category: pre_checkin
+    function:
+      - dgmm_batched: *single_double_precisions_complex
+    arguments: *gemm_common_args
+    batch_count: *batch_count_range
+    incx: *incx_range
+    side: [ L ]
+
+  - name: dgmm_strided_batched_L3_nightly
+    category: nightly
+    function:
+      - dgmm_strided_batched: *single_double_precisions_complex
+    arguments: *gemm_common_args
+    batch_count: *batch_count_range
+    incx: *incx_range
+    side: [ L ]
+
+  - name: geam_L3_quick
+    category: quick
+    function:
+      - geam: *single_double_precisions_complex
+    arguments: *gemm_common_args
+
+  - name: geam_batched_L3_pre_checkin
+    category: pre_checkin
+    function:
+      - geam_batched: *single_double_precisions_complex
+    arguments: *gemm_common_args
+    batch_count: *batch_count_range
+
+  - name: geam_strided_batched_L3_nightly
+    category: nightly
+    function:
+      - geam_strided_batched: *single_double_precisions_complex
+    arguments: *gemm_common_args
+    batch_count: *batch_count_range
+
+  - name: her2k_L3_quick
+    category: quick
+    function:
+      - her2k: *single_double_precisions_complex
+    arguments: *gemm_common_args
+    uplo: [ L ]
+
+  - name: her2k_batched_L3_pre_checkin
+    category: pre_checkin
+    function:
+      - her2k_batched: *single_double_precisions_complex
+    arguments: *gemm_common_args
+    batch_count: *batch_count_range
+    uplo: [ L ]
+
+  - name: her2k_strided_batched_L3_nightly
+    category: nightly
+    function:
+      - her2k_strided_batched: *single_double_precisions_complex
+    arguments: *gemm_common_args
+    batch_count: *batch_count_range
+    uplo: [ L ]
+
+  - name: herk_L3_quick
+    category: quick
+    function:
+      - herk: *single_double_precisions_complex
+    arguments: *gemm_common_args
+    uplo: [ L ]
+
+  - name: herk_batched_L3_pre_checkin
+    category: pre_checkin
+    function:
+      - herk_batched: *single_double_precisions_complex
+    arguments: *gemm_common_args
+    batch_count: *batch_count_range
+    uplo: [ L ]
+
+  - name: herk_strided_batched_L3_nightly
+    category: nightly
+    function:
+      - herk_strided_batched: *single_double_precisions_complex
+    arguments: *gemm_common_args
+    batch_count: *batch_count_range
+    uplo: [ L ]
+
+  - name: symm_L3_quick
+    category: quick
+    function:
+      - symm: *single_double_precisions_complex
+    arguments: *gemm_common_args
+    uplo: [ L ]
+    side: [ L ]
+
+  - name: symm_batched_L3_pre_checkin
+    category: pre_checkin
+    function:
+      - symm_batched: *single_double_precisions_complex
+    arguments: *gemm_common_args
+    batch_count: *batch_count_range
+    uplo: [ L ]
+    side: [ L ]
+
+  - name: symm_strided_batched_L3_nightly
+    category: nightly
+    function:
+      - symm_strided_batched: *single_double_precisions_complex
+    arguments: *gemm_common_args
+    batch_count: *batch_count_range
+    uplo: [ L ]
+    side: [ L ]
+
+  - name: syr2k_L3_quick
+    category: quick
+    function:
+      - syr2k: *single_double_precisions_complex
+    arguments: *syr2k_common_args
+    incx_incy: *incx_incy_range
+    uplo: [ L ]
+
+  - name: syr2k_batched_L3_pre_checkin
+    category: pre_checkin
+    function:
+      - syr2k_batched: *single_double_precisions_complex
+    arguments: *syr2k_common_args
+    batch_count: *batch_count_range
+    incx_incy: *incx_incy_range
+    uplo: [ L ]
+
+  - name: syr2k_strided_batched_L3_nightly
+    category: nightly
+    function:
+      - syr2k_strided_batched: *single_double_precisions_complex
+    arguments: *syr2k_common_args
+    batch_count: *batch_count_range
+    incx_incy: *incx_incy_range
+    uplo: [ L ]
+
+...
+

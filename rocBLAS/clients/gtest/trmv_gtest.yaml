@@ -1,0 +1,316 @@
+---
+include: rocblas_common.yaml
+include: known_bugs.yaml
+
+Definitions:
+  - &small_matrix_size_range
+    - { N:    -1, lda:    1, stride_a:       1 }
+    - { N:     1, lda:    0, stride_a:       1 }
+    - { N:     0, lda:    1, stride_a:       1 }
+    - { N:     1, lda:    -1, stride_a:       1 }
+    - { N:    10, lda:   10, stride_a:       100 }
+    - { N:    1, lda:   -1, stride_a:       1 }
+    - { N:    10, lda:    2, stride_a:      20 }
+    - { N:   100, lda:  200, stride_a:    40000 }
+
+  - &special_case_range
+    - { N: 0, lda: 1, incx: 1, batch_count: 1, stride_a: 1 }
+    - { N: 1, lda: 1, incx: 1, batch_count: 0, stride_a: 1 }
+
+    - { N: -1, lda: 1, incx: 1, batch_count:  0, stride_a: 1 }
+    - { N:  0, lda: 0, incx: 1, batch_count:  0, stride_a: 1 }
+    - { N:  2, lda: 1, incx: 1, batch_count:  0, stride_a: 1 }
+    - { N:  0, lda: 1, incx: 0, batch_count:  0, stride_a: 1 }
+    - { N:  0, lda: 1, incx: 1, batch_count: -1, stride_a: 1 }
+
+  - &medium_matrix_size_range
+    - { N:   300, lda:  400, stride_a:   160000 }
+    - { N:   600, lda:  601, stride_a:   400000 }
+
+  - &large_matrix_size_range
+    - { N:  1000, lda: 1000, stride_a:  1000000 }
+    - { N:  2000, lda: 2000, stride_a:  4000000 }
+    - { N:  4011, lda: 4011, stride_a: 16088200 }
+    - { N:  8000, lda: 8000, stride_a: 64000000 }
+
+  - &size_t_index
+    - { N:  46341, lda: 46341, stride_a:  2147488281, stride_x: 46341, incx: 1 }
+
+  - &size_t_incx
+    - { N: 3, lda: 3, incx: *c_pos_x2_overflow_int32 }
+    - { N: 3, lda: 3, incx: *c_neg_x2_overflow_int32 }
+
+  - &incx_range
+    - [2, -2, 1, -1, 3, 10]
+
+  - &incx_range_small
+    - [ 2 ]
+
+
+Tests:
+- name: trmv_bad_arg
+  category: quick
+  function: trmv_bad_arg
+  precision: *single_double_precisions
+  uplo: L
+  transA: N
+  diag: N
+  api: [ C, FORTRAN, FORTRAN_64 ]
+
+- name: trmv_arg_check
+  category: quick
+  function:
+  - trmv: *single_double_precisions
+  - trmv_batched: *single_double_precisions
+  - trmv_strided_batched: *single_double_precisions
+  uplo: L
+  transA: N
+  diag: N
+  matrix_size: *special_case_range
+
+- name: trmv_size_t_lda
+  category: stress
+  function: trmv
+  precision: *single_precision
+  uplo: [U, L]
+  transA: [N, T]
+  diag: [N, U]
+  matrix_size: *size_t_index
+  os_flags: LINUX
+  gpu_arch: ['90a','942']
+
+- name: trmv_size_t_inc
+  category: stress
+  function: trmv
+  precision: *single_precision
+  uplo: [U, L]
+  transA: [N, T]
+  diag: [N, U]
+  matrix_size: *size_t_incx
+  os_flags: LINUX
+  gpu_arch: ['90a','942']
+
+- name: trmv_fortran
+  category: quick
+  function: trmv
+  precision: *single_double_precisions_complex_real
+  uplo: [L, U]
+  transA: [N, T, C]
+  diag: [N, U]
+  matrix_size: *small_matrix_size_range
+  incx: *incx_range_small
+  api: FORTRAN
+
+- name: trmv_small
+  category: quick
+  function: trmv
+  precision: *single_double_precisions_complex_real
+  uplo: [L, U]
+  transA: [N, T, C]
+  diag: [N, U]
+  matrix_size: *small_matrix_size_range
+  incx: *incx_range
+
+- name: trmv_medium
+  category: pre_checkin
+  function: trmv
+  precision: *single_double_precisions_complex_real
+  uplo: [L, U]
+  transA: [N, T, C]
+  diag: [N, U]
+  matrix_size: *medium_matrix_size_range
+  incx: *incx_range
+
+- name: trmv_large
+  category: nightly
+  function: trmv
+  precision: *single_double_precisions_complex_real
+  uplo: [L, U]
+  transA: [  N, T, C ]
+  diag: [N, U]
+  matrix_size: *large_matrix_size_range
+  incx: *incx_range_small
+
+- name: trmv_ILP64
+  category: stress
+  arguments:
+    - { N: 2, lda: 2, incx: 2147483649, batch_count: 1 }
+    - { N: 2, lda: 2, incx: -2147483649, batch_count: 1 }
+    - { N: 2, lda: 2147483649, incx: 1, batch_count: 1 }
+    - { N: 2, stride_a: 4, stride_x: 2, incx: 1, batch_count: *c_grid_yz_require_passes }
+  uplo: [ L ]
+  transA: [  N, T ]
+  diag: [ N ]
+  api: [ C_64 ]
+  os_flags: [ LINUX ]
+  function:
+    - trmv: *single_precision
+    - trmv_batched: *single_precision
+    - trmv_strided_batched: *single_precision
+
+- name: trmv_batched_bad_arg
+  category: quick
+  function: trmv_batched_bad_arg
+  precision: *single_double_precisions
+  uplo: [L, U]
+  transA: [  N, T, C ]
+  diag: [N, U]
+  api: [ C, FORTRAN, FORTRAN_64 ]
+
+- name: trmv_batched_fortran
+  category: quick
+  function: trmv_batched
+  precision: *single_double_precisions_complex_real
+  uplo: [L, U]
+  transA: [N, T, C]
+  diag: [N, U]
+  matrix_size: *small_matrix_size_range
+  incx: *incx_range_small
+  batch_count: [ -1, 0, 3 ]
+  api: FORTRAN
+
+- name: trmv_batched_small
+  category: quick
+  function: trmv_batched
+  precision: *single_double_precisions
+  uplo: [L, U]
+  transA: [N, T, C]
+  diag: [N, U]
+  matrix_size: *small_matrix_size_range
+  incx: *incx_range
+  batch_count: [ -1, 0, 1, 3 ]
+
+- name: trmv_batched_medium
+  category: pre_checkin
+  function: trmv_batched
+  precision: *single_double_precisions_complex_real
+  uplo: [L, U]
+  transA: [N, T, C]
+  diag: [N, U]
+  matrix_size: *medium_matrix_size_range
+  incx: *incx_range
+  batch_count: [ 3 ]
+
+- name: trmv_batched_large
+  category: nightly
+  function: trmv_batched
+  precision: *single_double_precisions
+  uplo: [L, U]
+  transA: [N, T, C]
+  diag: [N, U]
+  matrix_size: *large_matrix_size_range
+  incx: *incx_range_small
+  batch_count: [ 3 ]
+
+- name: trmv_batched_grid_z_16bit
+  category: stress
+  arguments:
+    - { N:   3, lda:    3, incx: 1, batch_count: *c_grid_yz_require_passes} #generic kernel
+  uplo: [ U, L ]
+  transA: [N, T, C]
+  diag: [N, U]
+  pointer_mode_host: false
+  function:
+    - trmv_batched: *single_precision
+    - trmv_strided_batched: *single_precision
+  stride_scale: 1
+
+- name: trmv_strided_batched_bad_arg
+  category: quick
+  function: trmv_strided_batched_bad_arg
+  precision: *single_double_precisions
+  transA: N
+  uplo: [L]
+  transA: [  T ]
+  diag: [N]
+  stride_scale: [ 1 ]
+  api: [ C, FORTRAN, FORTRAN_64 ]
+
+- name: trmv_strided_batched_fortran
+  category: quick
+  function: trmv_strided_batched
+  precision: *single_double_precisions_complex_real
+  uplo: [L, U]
+  transA: [N, T, C]
+  diag: [N, U]
+  matrix_size: *small_matrix_size_range
+  incx: *incx_range_small
+  batch_count: [ -1, 0, 3 ]
+  stride_scale: [ 2 ]
+  api: FORTRAN
+
+- name: trmv_strided_batched_small
+  category: quick
+  function: trmv_strided_batched
+  precision: *single_double_precisions
+  uplo: [L, U]
+  transA: [N, T, C]
+  diag: [N, U]
+  matrix_size: *small_matrix_size_range
+  incx: *incx_range
+  batch_count: [ -1, 0, 1, 3 ]
+  stride_scale: [ 2 ]
+
+- name: trmv_strided_batched_medium
+  category: pre_checkin
+  function: trmv_strided_batched
+  precision: *single_double_precisions_complex_real
+  uplo: [L, U]
+  transA: [N, T, C]
+  diag: [N, U]
+  matrix_size: *medium_matrix_size_range
+  incx: *incx_range
+  batch_count: [ 3 ]
+  stride_scale: [ 1.2 ]
+
+- name: trmv_strided_batched_large
+  category: nightly
+  function: trmv_strided_batched
+  precision: *single_double_precisions
+  uplo: [L, U]
+  transA: [N, T, C]
+  diag: [N, U]
+  matrix_size: *large_matrix_size_range
+  incx: *incx_range_small
+  batch_count: [ 3 ]
+  stride_scale: [ 1.2 ]
+
+- name: trmv_graph_test
+  category: pre_checkin
+  function:
+        - trmv
+        - trmv_batched
+        - trmv_strided_batched
+  precision: *single_double_precisions_complex_real
+  uplo: [ U ]
+  transA: [N ]
+  diag: [ N ]
+  matrix_size:
+    - { N:    10, lda:    2, stride_a:      20 }
+  incx: *incx_range
+  batch_count: [ 3 ]
+  stride_scale: [ 1.2 ]
+  graph_test: true
+
+- name: trmv_repeatability_check
+  category: stress
+  function:
+        - trmv
+        - trmv_batched
+        - trmv_strided_batched
+  precision: *single_double_precisions_complex_real
+  uplo: [ U ]
+  transA: [N ]
+  diag: [ N ]
+  matrix_size:
+    - { N:    10, lda:    2, stride_a:      20 }
+  incx: *incx_range
+  batch_count: [ 2 ]
+  stride_scale: [ 1 ]
+  initialization: hpl
+  pointer_mode_host: false
+  atomics_mode: 0
+  iters: 5
+  devices: 4
+  repeatability_check: true
+...

@@ -1,0 +1,261 @@
+---
+include: rocblas_common.yaml
+include: known_bugs.yaml
+
+Definitions:
+  - &small_matrix_size_range
+    - { N:     4, lda:     4, stride_a: 16 }
+    - { N:    10, lda:    20, stride_a: 300 }
+    - { N:   10, lda:   10, stride_a: 100 }
+    - { N:   33, lda:   33, stride_a: 1100}
+    - { N:   128, lda:   128, stride_a: 32768 }
+
+  - &special_case_range
+    - { N: 0, lda: 1, incx: 1, batch_count: 1 }
+    - { N: 1, lda: 1, incx: 1, batch_count: 0 }
+
+    - { N: -1, lda: 1, incx: 1, batch_count:  0 }
+    - { N:  0, lda: 0, incx: 1, batch_count:  0 }
+    - { N:  2, lda: 1, incx: 1, batch_count:  0 }
+    - { N:  0, lda: 1, incx: 0, batch_count:  0 }
+    - { N:  0, lda: 1, incx: 1, batch_count: -1 }
+
+  - &medium_matrix_size_range
+    - { N:   192, lda:   192, stride_a: 36864 }
+    - { N:   256, lda:   256, stride_a: 65536 }
+    - { N:   511, lda:   613, stride_a: 413243 }
+    - { N:   800, lda:   801, stride_a: 640800 }
+
+  - &large_matrix_size_range
+    - { N:  1000, lda:  1000, stride_a: 1000000 }
+    - { N:  1024, lda:  1024, stride_a: 1048576 }
+    - { N:  2000, lda:  2000, stride_a: 4000000 }
+    - { N:  1000, lda:  4096, stride_a: 10000000 }
+
+  - &size_t_index
+    - { N:  46341, lda: 46341, stride_a:  2147488281, stride_x: 46341, incx: 1 }
+
+  # large enough to get overflow in inversion part of code
+  - &size_t_incx
+    - { N: 581, lda: 581, incx:  3896187 }
+    - { N: 581, lda: 581, incx: -3896187 }
+
+  - &common_args
+    precision: *single_double_precisions_complex_real
+    uplo: [L, U]
+    transA: [N, T, C]
+    diag: [N, U]
+
+Tests:
+- name: trsv_bad_arg
+  category: quick
+  function:
+  - trsv_bad_arg: *single_double_precisions
+  - trsv_batched_bad_arg: *single_double_precisions
+  - trsv_strided_batched_bad_arg: *single_double_precisions
+  uplo: L
+  transA: N
+  diag: N
+  api: [ C, FORTRAN, FORTRAN_64 ]
+
+- name: trsv_arg_check
+  category: quick
+  function:
+  - trsv: *single_double_precisions
+  - trsv_batched: *single_double_precisions
+  - trsv_strided_batched: *single_double_precisions
+  uplo: L
+  transA: N
+  diag: N
+  matrix_size: *special_case_range
+  api: [ C, FORTRAN ]
+
+- name: trsv_size_t_lda
+  category: stress
+  function: trsv
+  precision: *single_precision
+  uplo: [ L, U ]
+  transA: [ N, T ]
+  diag: [ N, U ]
+  matrix_size: *size_t_index
+  pointer_mode_device: false
+  os_flags: LINUX
+  gpu_arch: ['90a','942']
+
+- name: trsv_size_t_inc
+  category: stress
+  function: trsv
+  precision: *single_precision
+  uplo: [ L, U ]
+  transA: [ N, T ]
+  diag: [ N, U ]
+  matrix_size: *size_t_incx
+  pointer_mode_device: false
+  os_flags: LINUX
+  gpu_arch: ['90a','942']
+
+# Regular trsv
+- name: trsv_fortran
+  category: quick
+  function: trsv
+  arguments: *common_args
+  matrix_size: *small_matrix_size_range
+  incx: [ 2 ]
+  api: FORTRAN
+
+- name: trsv_small
+  category: quick
+  function: trsv
+  arguments: *common_args
+  matrix_size: *small_matrix_size_range
+  incx: [ -3, -1, 1, 3, 100 ]
+
+- name: trsv_medium
+  category: pre_checkin
+  function: trsv
+  arguments: *common_args
+  matrix_size: *medium_matrix_size_range
+  incx: [ -1, 2 ]
+
+- name: trsv_large
+  category: nightly
+  function: trsv
+  arguments: *common_args
+  matrix_size: *large_matrix_size_range
+  incx: [ 2 ]
+
+- name: trsv_ILP64
+  category: stress
+  arguments:
+    - { N: 2, lda: 2, incx: 2147483649, batch_count: 1 }
+    - { N: 2, lda: 2, incx: -2147483649, batch_count: 1 }
+    - { N: 2, lda: 2147483649, incx: 1, batch_count: 1 }
+    - { N: 2, stride_a: 4, stride_x: 2, incx: 1, batch_count: *c_grid_yz_require_passes }
+  uplo: [ U ]
+  transA: [  N, T ]
+  diag: [ N ]
+  api: [ C_64 ]
+  os_flags: [ LINUX ]
+  function:
+    - trsv: *single_precision
+    - trsv_batched: *single_precision
+    - trsv_strided_batched: *single_precision
+
+# trsv_batched
+- name: trsv_batched_fortran
+  category: quick
+  function: trsv_batched
+  arguments: *common_args
+  matrix_size: *small_matrix_size_range
+  incx: [ 2 ]
+  batch_count: [ -1, 0, 3 ]
+  api: FORTRAN
+
+- name: trsv_batched_small
+  category: quick
+  function: trsv_batched
+  arguments: *common_args
+  matrix_size: *small_matrix_size_range
+  incx: [ -3, -1, 1, 3, 100 ]
+  batch_count: [ 1, 3, 5 ]
+
+- name: trsv_batched_medium
+  category: pre_checkin
+  function: trsv_batched
+  arguments: *common_args
+  matrix_size: *medium_matrix_size_range
+  incx: [ -1, 2 ]
+  batch_count: [ 1, 3 ]
+
+- name: trsv_batched_large
+  category: nightly
+  function: trsv_batched
+  arguments: *common_args
+  matrix_size: *large_matrix_size_range
+  incx: [ 2 ]
+  batch_count: [ 3 ]
+
+- name: trsv_batched_grid_z_16bit
+  category: stress
+  arguments:
+    - { N:   3, lda:    3, incx: 1, batch_count: *c_grid_yz_require_passes} #generic kernel
+  uplo: [ U, L ]
+  transA: [N, T, C]
+  diag: [N, U]
+  pointer_mode_host: false
+  function:
+    - trsv_batched: *single_precision
+    - trsv_strided_batched: *single_precision
+  stride_scale: 1
+
+# trsv_strided_batched
+- name: trsv_strided_batched_fortran
+  category: quick
+  function: trsv_strided_batched
+  arguments: *common_args
+  matrix_size: *small_matrix_size_range
+  incx: [ 2 ]
+  batch_count: [ -1, 0, 3 ]
+  stride_scale: [ 2 ]
+  api: FORTRAN
+
+- name: trsv_strided_batched_small
+  category: quick
+  function: trsv_strided_batched
+  arguments: *common_args
+  matrix_size: *small_matrix_size_range
+  incx: [ -3, -1, 1, 3, 100 ]
+  stride_scale: [ 1, 10 ]
+  batch_count: [ 1, 3, 5 ]
+
+- name: trsv_strided_batched_medium
+  category: pre_checkin
+  function: trsv_strided_batched
+  arguments: *common_args
+  matrix_size: *medium_matrix_size_range
+  incx: [ -2, 1 ]
+  stride_scale: [ 1 ]
+  batch_count: [ 1, 3 ]
+
+- name: trsv_strided_batched_large
+  category: nightly
+  function: trsv_strided_batched
+  arguments: *common_args
+  matrix_size: *large_matrix_size_range
+  incx: [ -1, 1, 2, 3 ]
+  stride_scale: [ 1 ]
+  batch_count: [ 3 ]
+
+- name: trsv_graph_test
+  category: pre_checkin
+  function:
+        - trsv
+        - trsv_batched
+        - trsv_strided_batched
+  arguments: *common_args
+  matrix_size:
+    - { N:   192, lda:   192, stride_a: 36864 }
+  incx: [ 1 ]
+  stride_scale: [ 1 ]
+  batch_count: [ 3 ]
+  graph_test: true
+
+- name: trsv_repeatability_check
+  category: stress
+  function:
+        - trsv
+        - trsv_batched
+        - trsv_strided_batched
+  arguments: *common_args
+  matrix_size:
+    - { N:   192, lda:   192, stride_a: 36864 }
+  incx: [ 1 ]
+  stride_scale: [ 1 ]
+  batch_count: [ 3 ]
+  initialization: hpl
+  pointer_mode_host: false
+  atomics_mode: 0
+  iters: 5
+  devices: 4
+  repeatability_check: true
+...

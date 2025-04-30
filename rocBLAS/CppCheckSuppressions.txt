@@ -1,0 +1,15 @@
+
+// List of global false positives to be suppressed
+
+// cpccheck has an open issue ticket to address this issue https://trac.cppcheck.net/ticket/9301
+// we will suppress this error globally until the fix.
+internalAstError
+
+// cppcheck community recommends disabling 'unusedFunction' check for library code.
+unusedFunction
+
+// To suppress missing include false positives
+missingInclude
+
+// To suppress any unmatched suppression in a file
+unmatchedSuppression

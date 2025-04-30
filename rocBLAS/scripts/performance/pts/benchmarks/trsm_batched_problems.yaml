@@ -1,0 +1,66 @@
+---
+include: ../../../../clients/include/rocblas_common.yaml
+
+Definitions:
+  - &qmcpack_sizes
+    - { scan: [2..32..1], M: *c_scan_value, N: *c_scan_value, lda: *c_scan_value, ldb: *c_scan_value, batch_count: 256 }
+
+  - &additional_sizes_m64
+    - { scan: [32..64..2], M: *c_scan_value, N: *c_scan_value, lda: *c_scan_value, ldb: *c_scan_value, batch_count: 256 }
+
+  - &additional_sizes_largen
+    - { scan: [8..32..4],  M: *c_scan_value, N: [256..2048..256], lda: *c_scan_value, ldb: *c_scan_value, batch_count: 256 }
+
+  - &trsm_batched_substitution_sizes
+    - { scan: [128..384..128], M: *c_scan_value, N: [8..32..8], lda: *c_scan_value, ldb: *c_scan_value, batch_count: [128..512..128] }
+
+Tests:
+  - name: trsm_batched_qmcpack_size
+    category: bench
+    function: trsm_batched
+    precision: *single_double_precisions
+    transA: [ N, T ]
+    side: [ L ]
+    uplo: [ L, U ]
+    diag: N
+    alpha: 1
+    matrix_size: *qmcpack_sizes
+    iters: 10
+
+  - name: trsm_batched_additional_sizes_m64
+    category: bench
+    function: trsm_batched
+    precision: *single_double_precisions
+    transA: [ N, T ]
+    side: [ L ]
+    uplo: [ L, U ]
+    diag: N
+    alpha: 1
+    matrix_size: *additional_sizes_m64
+    iters: 10
+
+  - name: trsm_batched_additional_sizes_largen
+    category: bench
+    function: trsm_batched
+    precision: *single_double_precisions
+    transA: [ N, T ]
+    side: [ L ]
+    uplo: [ L, U ]
+    diag: N
+    alpha: 1
+    matrix_size: *additional_sizes_largen
+    iters: 10
+
+  - name: trsm_batched_substitution
+    category: bench
+    function: trsm_batched
+    precision: *single_double_precisions
+    transA: [ N, C ]
+    side: [ L ]
+    uplo: [ L, U ]
+    diag: [ N ]
+    alpha: 1
+    matrix_size: *trsm_batched_substitution_sizes
+    cold_iters: 20
+    iters: 50
+...
