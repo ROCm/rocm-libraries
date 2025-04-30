@@ -27,6 +27,7 @@
 #include "instruction/branch.hpp"
 #include "instruction/cmp.hpp"
 #include "instruction/common.hpp"
+#include "instruction/cvt.hpp"
 
 namespace rocisa
 {
@@ -323,5 +324,43 @@ namespace rocisa
             module->addT<VReadfirstlaneB32>(dst0, vgprTmp1, comment);
         }
         return module;
+    }
+
+    inline std::shared_ptr<Item>
+        VCvtBF16toFP32(const std::shared_ptr<RegisterContainer>&         dst,
+                       const std::shared_ptr<RegisterContainer>&         src,
+                       std::optional<std::shared_ptr<RegisterContainer>> vgprMask,
+                       int                                               vi,
+                       const std::string&                                comment = "")
+    {
+        auto& instance = rocIsa::getInstance();
+        if(instance.getAsmCaps()["HasBF16CVT"])
+        {
+            auto select_bit = SelectBit::WORD_0;
+            if(vi % 2 == 1)
+            {
+                select_bit = SelectBit::WORD_1;
+            }
+            auto sdwa     = SDWAModifiers();
+            sdwa.src0_sel = select_bit;
+            return std::make_shared<PVCvtBF16toFP32>(dst, src, sdwa, "cvt bf16 to f32");
+        }
+        else
+        {
+            if((vi % 2) == 1)
+            {
+                if(!vgprMask.has_value())
+                {
+                    throw std::runtime_error("vgprMask is null");
+                }
+                return std::make_shared<VAndB32>(
+                    dst, src, *vgprMask, "cvt bf16 to fp32. " + comment);
+            }
+            else
+            {
+                return std::make_shared<VLShiftLeftB32>(
+                    dst, 16, src, "cvt bf16 to fp32. " + comment);
+            }
+        }
     }
 } // namespace rocisa

@@ -1913,13 +1913,13 @@ namespace rocisa
         }
 
     private:
-        int  va_vdst;
-        int  va_sdst;
-        int  va_ssrc;
-        int  hold_cnt;
-        int  vm_vsrc;
-        int  va_vcc;
-        int  sa_sdst;
+        int va_vdst;
+        int va_sdst;
+        int va_ssrc;
+        int hold_cnt;
+        int vm_vsrc;
+        int va_vcc;
+        int sa_sdst;
     };
 
     struct VAddF16 : public CommonInstruction

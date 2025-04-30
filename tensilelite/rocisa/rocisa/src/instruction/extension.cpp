@@ -23,6 +23,7 @@
 #include "instruction/extension.hpp"
 
 #include <nanobind/nanobind.h>
+#include <nanobind/stl/optional.h>
 #include <nanobind/stl/shared_ptr.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/variant.h>
@@ -78,4 +79,11 @@ void ext_inst(nb::module_ m)
           nb::arg("hasSMulHi") = false,
           nb::arg("sign")      = false,
           nb::arg("comment")   = "");
+    m.def("VCvtBF16toFP32",
+          &rocisa::VCvtBF16toFP32,
+          nb::arg("dst"),
+          nb::arg("src"),
+          nb::arg("vgprMask").none(),
+          nb::arg("vi"),
+          nb::arg("comment") = "");
 }

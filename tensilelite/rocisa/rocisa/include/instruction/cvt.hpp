@@ -20,6 +20,7 @@
  * THE SOFTWARE.
  *
  * ************************************************************************ */
+#pragma once
 #include "instruction.hpp"
 
 namespace rocisa

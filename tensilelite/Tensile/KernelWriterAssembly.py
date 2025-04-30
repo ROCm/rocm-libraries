@@ -35,12 +35,12 @@ from rocisa.instruction import SGetPositivePCOffset, SLongBranchPositive, SCLong
                         vectorStaticDivide, vectorStaticRemainder, vectorUInt32CeilDivideAndRemainder, \
                         vectorStaticDivideAndRemainder, scalarStaticDivideAndRemainder, scalarStaticCeilDivide, \
                         scalarStaticRemainder, scalarUInt32DivideAndRemainder, sMagicDiv, vectorStaticMultiply, \
-                        vectorStaticMultiplyAdd, scalarStaticMultiply64, SMulInt64to32
+                        vectorStaticMultiplyAdd, scalarStaticMultiply64, SMulInt64to32, VCvtBF16toFP32
 from rocisa.enum import InstType
 from rocisa.macro import MacroVMagicDiv, PseudoRandomGenerator
 from . import CUSTOM_KERNEL_PATH
 from .TensileInstructions import SelectBit, \
-                          SBranchIfZero, SBranchIfNotZero, DSInit, VCvtBF16toFP32, \
+                          SBranchIfZero, SBranchIfNotZero, DSInit, \
                           ArgumentLoader, bomb, RegisterPool, \
                           allocTmpGpr, allocTmpGprList, log2, \
                           ceilDivide, DataType, dataTypeToMfmaInstTypePair, \
@@ -6778,25 +6778,25 @@ class KernelWriterAssembly(KernelWriter):
                 tf32mod.add(VCvtPkF32toBF16(dst=vgpr("Cvt+3"), src0=vgpr(bStr_base + "+2"), src1=vgpr(bStr_base + "+3")))
                 tf32mod.add(TextBlock("/*bf16ALow = A - float32(bf16AHigh)*/\n"))
                 if not kernel["EnableF32XEmulationLds"]:
-                  tf32mod.add(VCvtBF16toFP32(dst="Cvt+8", src="Cvt+0", vgprMask="", vi=0))
+                  tf32mod.add(VCvtBF16toFP32(dst=vgpr("Cvt+8"), src=vgpr("Cvt+0"), vgprMask=None, vi=0))
                   tf32mod.add(VSubF32(dst=vgpr("Cvt+8"), src0=vgpr(aStr_base+"+0"), src1=vgpr("Cvt+8")))
-                  tf32mod.add(VCvtBF16toFP32(dst="Cvt+9", src="Cvt+0", vgprMask="", vi=1))
+                  tf32mod.add(VCvtBF16toFP32(dst=vgpr("Cvt+9"), src=vgpr("Cvt+0"), vgprMask=None, vi=1))
                   tf32mod.add(VSubF32(dst=vgpr("Cvt+9"), src0=vgpr(aStr_base+"+1"), src1=vgpr("Cvt+9")))
                   tf32mod.add(VCvtPkF32toBF16(dst=vgpr("Cvt+4"), src0=vgpr("Cvt+8"), src1=vgpr("Cvt+9")))
-                  tf32mod.add(VCvtBF16toFP32(dst="Cvt+8", src="Cvt+1", vgprMask="", vi=0))
+                  tf32mod.add(VCvtBF16toFP32(dst=vgpr("Cvt+8"), src=vgpr("Cvt+1"), vgprMask=None, vi=0))
                   tf32mod.add(VSubF32(dst=vgpr("Cvt+8"), src0=vgpr(aStr_base+"+2"), src1=vgpr("Cvt+8")))
-                  tf32mod.add(VCvtBF16toFP32(dst="Cvt+9", src="Cvt+1", vgprMask="", vi=1))
+                  tf32mod.add(VCvtBF16toFP32(dst=vgpr("Cvt+9"), src=vgpr("Cvt+1"), vgprMask=None, vi=1))
                   tf32mod.add(VSubF32(dst=vgpr("Cvt+9"), src0=vgpr(aStr_base+"+3"), src1=vgpr("Cvt+9")))
                   tf32mod.add(VCvtPkF32toBF16(dst=vgpr("Cvt+5"), src0=vgpr("Cvt+8"), src1=vgpr("Cvt+9")))
                 tf32mod.add(TextBlock("/*bf16BLow = B - float32(bf16BHigh)*/\n"))
-                tf32mod.add(VCvtBF16toFP32(dst="Cvt+8", src="Cvt+2", vgprMask="", vi=0))
+                tf32mod.add(VCvtBF16toFP32(dst=vgpr("Cvt+8"), src=vgpr("Cvt+2"), vgprMask=None, vi=0))
                 tf32mod.add(VSubF32(dst=vgpr("Cvt+8"), src0=vgpr(bStr_base+"+0"), src1=vgpr("Cvt+8")))
-                tf32mod.add(VCvtBF16toFP32(dst="Cvt+9", src="Cvt+2", vgprMask="", vi=1))
+                tf32mod.add(VCvtBF16toFP32(dst=vgpr("Cvt+9"), src=vgpr("Cvt+2"), vgprMask=None, vi=1))
                 tf32mod.add(VSubF32(dst=vgpr("Cvt+9"), src0=vgpr(bStr_base+"+1"), src1=vgpr("Cvt+9")))
                 tf32mod.add(VCvtPkF32toBF16(dst=vgpr("Cvt+6"), src0=vgpr("Cvt+8"), src1=vgpr("Cvt+9")))
-                tf32mod.add(VCvtBF16toFP32(dst="Cvt+8", src="Cvt+3", vgprMask="", vi=0))
+                tf32mod.add(VCvtBF16toFP32(dst=vgpr("Cvt+8"), src=vgpr("Cvt+3"), vgprMask=None, vi=0))
                 tf32mod.add(VSubF32(dst=vgpr("Cvt+8"), src0=vgpr(bStr_base+"+2"), src1=vgpr("Cvt+8")))
-                tf32mod.add(VCvtBF16toFP32(dst="Cvt+9", src="Cvt+3", vgprMask="", vi=1))
+                tf32mod.add(VCvtBF16toFP32(dst=vgpr("Cvt+9"), src=vgpr("Cvt+3"), vgprMask=None, vi=1))
                 tf32mod.add(VSubF32(dst=vgpr("Cvt+9"), src0=vgpr(bStr_base+"+3"), src1=vgpr("Cvt+9")))
                 tf32mod.add(VCvtPkF32toBF16(dst=vgpr("Cvt+7"), src0=vgpr("Cvt+8"), src1=vgpr("Cvt+9")))
 
@@ -9285,13 +9285,13 @@ class KernelWriterAssembly(KernelWriter):
                 tf32mod.add(TextBlock("/*TF32 Emulation write lds*/\n"))
                 tf32mod.add(VCvtPkF32toBF16(dst=vgpr("Cvt+0"), src0=vgpr("G2LA+0"), src1=vgpr("G2LA+1")))
                 tf32mod.add(VCvtPkF32toBF16(dst=vgpr("Cvt+1"), src0=vgpr("G2LA+2"), src1=vgpr("G2LA+3")))
-                tf32mod.add(VCvtBF16toFP32(dst="Cvt+8", src="Cvt+0", vgprMask="", vi=0))
+                tf32mod.add(VCvtBF16toFP32(dst=vgpr("Cvt+8"), src=vgpr("Cvt+0"), vgprMask=None, vi=0))
                 tf32mod.add(VSubF32(dst=vgpr("Cvt+2"), src0=vgpr("G2LA+0"), src1=vgpr("Cvt+8")))
-                tf32mod.add(VCvtBF16toFP32(dst="Cvt+9", src="Cvt+0", vgprMask="", vi=1))
+                tf32mod.add(VCvtBF16toFP32(dst=vgpr("Cvt+9"), src=vgpr("Cvt+0"), vgprMask=None, vi=1))
                 tf32mod.add(VSubF32(dst=vgpr("Cvt+3"), src0=vgpr("G2LA+1"), src1=vgpr("Cvt+9")))
-                tf32mod.add(VCvtBF16toFP32(dst="Cvt+8", src="Cvt+1", vgprMask="", vi=0))
+                tf32mod.add(VCvtBF16toFP32(dst=vgpr("Cvt+8"), src="Cvt+1", vgprMask=None, vi=0))
                 tf32mod.add(VSubF32(dst=vgpr("Cvt+4"), src0=vgpr("G2LA+2"), src1=vgpr("Cvt+8")))
-                tf32mod.add(VCvtBF16toFP32(dst="Cvt+9", src="Cvt+1", vgprMask="", vi=1))
+                tf32mod.add(VCvtBF16toFP32(dst=vgpr("Cvt+9"), src=vgpr("Cvt+1"), vgprMask=None, vi=1))
                 tf32mod.add(VSubF32(dst=vgpr("Cvt+5"), src0=vgpr("G2LA+3"), src1=vgpr("Cvt+9")))
                 tf32mod.add(VCvtPkF32toBF16(dst=vgpr("G2LA+0"), src0=vgpr("Cvt+2"), src1=vgpr("G2LA+0")))
                 tf32mod.add(VCvtPkF32toBF16(dst=vgpr("G2LA+1"), src0=vgpr("Cvt+3"), src1=vgpr("G2LA+1")))
@@ -12428,7 +12428,7 @@ class KernelWriterAssembly(KernelWriter):
           if dataType.isHalf():
             module.add(VCvtF16toF32(dst=vgpr(tmpVgpr1 + vi + i * gwvw), src=vgpr(tmpVgpr1 + shiftOffset2+ i * gwvw), comment="convert to FP32"))
           elif dataType.isBFloat16():
-            module.add(VCvtBF16toFP32(dst=(tmpVgpr1 + vi + i * gwvw), src=(tmpVgpr1 + shiftOffset2+ i * gwvw), vgprMask=None, vi=0))
+            module.add(VCvtBF16toFP32(dst=vgpr(tmpVgpr1 + vi + i * gwvw), src=vgpr(tmpVgpr1 + shiftOffset2+ i * gwvw), vgprMask=None, vi=0))
           elif dataType == kernel["ProblemType"]["ComputeDataType"]:
             pass # Same, no need to convert
           else:
