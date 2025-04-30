@@ -28,6 +28,9 @@
 #include <Windows.h>
 #include <io.h>
 #include <libloaderapi.h>
+
+// Remove defines that conflict locally.
+#undef CONST
 #else
 #define _GNU_SOURCE
 #include <dlfcn.h>
