@@ -111,16 +111,10 @@ namespace rocRoller
 
         case MemoryKind::Buffer2LDS:
             AssertFatal(bufDesc);
-            // If the provided offset is not a literal, create a new register that will store the value
-            // of addr + offset and pass it to bufferLoad2LDS
-            if(offset && offset->regType() != Register::Type::Literal)
-            {
-                newAddr
-                    = Register::Value::Placeholder(context, addr->regType(), DataType::Int32, 1);
-                co_yield generateOp<Expression::Add>(newAddr, addr, offset);
-            }
 
-            co_yield bufferLoad2LDS(newAddr->subset({0}), bufDesc, buffOpts, numBytes);
+            AssertFatal(offset->regType() == Register::Type::Literal
+                        || offset->regType() == Register::Type::Scalar);
+            co_yield bufferLoad2LDS(newAddr->subset({0}), bufDesc, buffOpts, numBytes, offset);
 
             break;
         default:
@@ -733,7 +727,8 @@ namespace rocRoller
         MemoryInstructions::bufferLoad2LDS(Register::ValuePtr                data,
                                            std::shared_ptr<BufferDescriptor> buffDesc,
                                            BufferInstructionOptions          buffOpts,
-                                           int                               numBytes)
+                                           int                               numBytes,
+                                           Register::ValuePtr                soffset)
     {
         AssertFatal(data != nullptr);
         AssertFatal(buffOpts.lds);
@@ -793,8 +788,8 @@ namespace rocRoller
         }
 
         const auto& gpu = ctx->targetArchitecture().target();
-        const auto  soffset
-            = gpu.isGFX12GPU() ? Register::Value::NullLiteral() : Register::Value::Literal(0);
+        if(gpu.isGFX12GPU())
+            soffset = Register::Value::NullLiteral();
         co_yield_(Instruction("buffer_load_" + opEnd,
                               {},
                               {data, sgprSrd, soffset},
@@ -935,26 +930,20 @@ namespace rocRoller
                 WaitCount::Zero(ctx->targetArchitecture(), "DEBUG: Wait after store"));
     }
 
-    inline Generator<Instruction> MemoryInstructions::barrier()
+    inline Generator<Instruction> MemoryInstructions::barrier(std::string comment)
     {
         const auto& arch = m_context.lock()->targetArchitecture();
         if(arch.HasCapability(GPUCapability::s_barrier))
         {
-            co_yield Instruction("s_barrier", {}, {}, {}, "Memory barrier");
+            co_yield Instruction("s_barrier", {}, {}, {}, comment);
         }
         else if(arch.HasCapability(GPUCapability::s_barrier_signal))
         {
             const auto normalBarrierID = -1;
-            co_yield_(Instruction("s_barrier_signal",
-                                  {},
-                                  {Register::Value::Literal(normalBarrierID)},
-                                  {},
-                                  "Memory barrier signal"));
-            co_yield_(Instruction("s_barrier_wait",
-                                  {},
-                                  {Register::Value::Literal(normalBarrierID)},
-                                  {},
-                                  "Memory barrier wait"));
+            co_yield_(Instruction(
+                "s_barrier_signal", {}, {Register::Value::Literal(normalBarrierID)}, {}, comment));
+            co_yield_(Instruction(
+                "s_barrier_wait", {}, {Register::Value::Literal(normalBarrierID)}, {}, comment));
         }
         else
         {

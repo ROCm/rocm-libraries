@@ -251,6 +251,9 @@ namespace rocRoller
 
                 insertBefore(graph, storeLDSTileTag, preBarrier, preBarrier);
                 insertAfter(graph, storeLDSTileTag, postBarrier, postBarrier);
+
+                auto ldsTileTag = graph.mapper.get<LDS>(storeLDSTileTag);
+                graph.mapper.connect<LDS>(postBarrier, ldsTileTag, 0);
             }
         }
 
@@ -563,12 +566,17 @@ namespace rocRoller
             }
 
             // StoreLDS next
+            auto count = 0;
             for(auto load : loadsByUnroll[0])
             {
                 logger->debug("  prefetch: pre-loop commit lds: unroll {} user {}", 0, load.user);
                 auto storeChain = duplicateChain(graph, {load.ldsChain});
                 trackStores(graph, storeChain);
                 preChain.push_back(storeChain);
+
+                auto ldsTileTag = graph.mapper.get<LDS>(storeChain);
+                graph.mapper.connect<LDS>(preBarrier, ldsTileTag, count);
+                count++;
             }
 
             graph.control.addElement(Body(), {scope}, {preChain[0]});
@@ -767,6 +775,9 @@ namespace rocRoller
                     logger->debug("  prefetch: in-loop: commit lds {} user {}",
                                   ldsPrefetchU,
                                   globalStores[i].user);
+
+                    auto ldsTileTag = graph.mapper.get<LDS>(globalStores[i].ldsChain);
+                    graph.mapper.connect<LDS>(barrier, ldsTileTag, i);
                 }
 
                 graph.control.addElement(

@@ -291,10 +291,13 @@ namespace rocRoller
         struct LoadTiled
         {
             LoadTiled();
-            explicit LoadTiled(VariableType const varType, bool const isTransposedTile = false);
+            explicit LoadTiled(VariableType const varType,
+                               bool const         isTransposedTile = false,
+                               bool const         isDirect2LDS     = false);
 
             VariableType varType;
             bool         isTransposedTile;
+            bool         isDirect2LDS;
 
             std::string name() const;
         };

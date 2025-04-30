@@ -207,7 +207,7 @@ namespace rocRoller
                                                                  bool               preserveOffset,
                                                                  bool               direct2LDS)
         {
-            auto offsetTag = m_graph->mapper.get<Offset>(tag, direct2LDS ? 1 : 0);
+            auto offsetTag = m_graph->mapper.get<Offset>(tag, direct2LDS ? 2 : 0);
             rocRoller::Log::getLogger()->debug("KernelGraph::LoadStoreTileGenerator::getOffset(tag:"
                                                " {}, offsetTag: {})",
                                                tag,
@@ -584,12 +584,8 @@ namespace rocRoller
         }
 
         template <MemoryInstructions::MemoryDirection Dir>
-        Generator<Instruction>
-            LoadStoreTileGenerator::moveTileDirect2LDS(LoadStoreTileInfo& info,
-                                                       int                numBytes,
-                                                       bool               setM0,
-                                                       Register::ValuePtr readOffset,
-                                                       Register::ValuePtr readAddr)
+        Generator<Instruction> LoadStoreTileGenerator::moveTileDirect2LDS(
+            LoadStoreTileInfo& info, int numBytes, bool setM0, Register::ValuePtr readAddr)
         {
             //TODO: enable to load 12 bytes
             if(m_context->targetArchitecture().HasCapability(GPUCapability::HasWiderDirectToLds))
@@ -614,7 +610,7 @@ namespace rocRoller
             co_yield m_context->mem()->moveData<Dir>(info.kind,
                                                      readAddr,
                                                      nullptr,
-                                                     readOffset,
+                                                     info.offset,
                                                      numBytes,
                                                      "",
                                                      false,
@@ -693,11 +689,7 @@ namespace rocRoller
                         if(info.bufOpts.lds)
                         {
                             co_yield moveTileDirect2LDS<Dir>(
-                                info,
-                                bytesPerMove,
-                                (i == 0 && r == 0),
-                                Register::Value::Literal(offsetValue + r * elementBlockStride),
-                                info.rowOffsetReg);
+                                info, bytesPerMove, (i == 0 && r == 0), info.rowOffsetReg);
                         }
                         else
                         {
@@ -796,12 +788,10 @@ namespace rocRoller
                     {
                         if(info.bufOpts.lds)
                         {
-                            co_yield moveTileDirect2LDS<Dir>(
-                                info,
-                                CeilDivide(info.elementBits, 8u),
-                                (i == 0 && j == 0),
-                                Register::Value::Literal(offsetValue + j * colStride),
-                                info.rowOffsetReg);
+                            co_yield moveTileDirect2LDS<Dir>(info,
+                                                             CeilDivide(info.elementBits, 8u),
+                                                             (i == 0 && j == 0),
+                                                             info.rowOffsetReg);
                         }
                         else
                         {
@@ -880,12 +870,20 @@ namespace rocRoller
                     auto stop  = (i * numVGPRBlocks + r + 1) * elementsPerMove;
                     if(info.bufOpts.lds)
                     {
+                        if(r * bytesPerMove > 0)
+                        {
+                            const auto newOffsetValue = offsetValue + r * bytesPerMove;
+                            if(!m_context->targetArchitecture().isSupportedConstantValue(
+                                   Register::Value::Literal(newOffsetValue)))
+                            {
+                                info.offset = Register::Value::Placeholder(
+                                    m_context, Register::Type::Scalar, DataType::UInt32, 1);
+                            }
+                            co_yield generate(info.offset, Expression::literal(newOffsetValue));
+                        }
+
                         co_yield moveTileDirect2LDS<Dir>(
-                            info,
-                            bytesPerMove,
-                            (i == 0 && r == 0),
-                            Register::Value::Literal(offsetValue + r * bytesPerMove),
-                            info.rowOffsetReg->subset({0}));
+                            info, bytesPerMove, (i == 0 && r == 0), info.rowOffsetReg->subset({0}));
                     }
                     else
                     {
@@ -925,6 +923,8 @@ namespace rocRoller
             Log::debug("KernelGraph::LoadStoreTileGenerator::moveTileRuntimeStrides<{}>",
                        toString(Dir));
 
+            AssertFatal(!info.bufOpts.lds);
+
             auto colOffsetReg = info.rowOffsetReg->placeholder();
 
             for(uint64_t i = 0; i < info.m; ++i)
@@ -933,28 +933,17 @@ namespace rocRoller
 
                 for(uint64_t j = 0; j < info.n; ++j)
                 {
-                    if(info.bufOpts.lds)
-                    {
-                        co_yield moveTileDirect2LDS<Dir>(info,
-                                                         CeilDivide(info.elementBits, 8u),
-                                                         i == 0 && j == 0,
-                                                         info.offset,
-                                                         colOffsetReg->subset({0}));
-                    }
-                    else
-                    {
-                        co_yield m_context->mem()->moveData<Dir>(
-                            info.kind,
-                            colOffsetReg->subset({0}),
-                            info.data->element(
-                                {static_cast<int>((i * info.n + j) / info.packedAmount)}),
-                            info.offset,
-                            CeilDivide(info.elementBits, 8u),
-                            "",
-                            j % info.packedAmount == 1,
-                            info.bufDesc,
-                            info.bufOpts);
-                    }
+                    co_yield m_context->mem()->moveData<Dir>(
+                        info.kind,
+                        colOffsetReg->subset({0}),
+                        info.data->element(
+                            {static_cast<int>((i * info.n + j) / info.packedAmount)}),
+                        info.offset,
+                        CeilDivide(info.elementBits, 8u),
+                        "",
+                        j % info.packedAmount == 1,
+                        info.bufDesc,
+                        info.bufOpts);
 
                     if(j < info.n - 1)
                     {
@@ -1164,6 +1153,15 @@ namespace rocRoller
                     info.data, info.data, Register::Type::Vector);
                 co_yield getOffset(
                     info, coords, tag, false /* preserveOffset */, true /* direct2LDS */);
+
+                // set global read offset
+                if(!m_context->targetArchitecture().isSupportedConstantValue(info.offset))
+                {
+                    const auto offsetValue = getUnsignedInt(info.offset->getLiteralValue());
+                    info.offset            = Register::Value::Placeholder(
+                        m_context, Register::Type::Scalar, DataType::UInt32, 1);
+                    co_yield generate(info.offset, Expression::literal(offsetValue));
+                }
             }
 
             if(allStridesAreLiteral)
@@ -1268,7 +1266,6 @@ namespace rocRoller
         Generator<Instruction> LoadStoreTileGenerator::loadMacroTileDirect2LDS(
             int tag, LoadTileDirect2LDS const& load, Transformer coords)
         {
-
             auto [ldsTag, lds]   = m_graph->getDimension<LDS>(tag);
             auto [tileTag, tile] = m_graph->getDimension<MacroTile>(tag);
             auto dataType        = load.varType;
@@ -1303,7 +1300,15 @@ namespace rocRoller
             auto [elemXTag, elemX] = m_graph->getDimension<ElementNumber>(tag, 0);
             auto [elemYTag, elemY] = m_graph->getDimension<ElementNumber>(tag, 1);
             auto const m           = getUnsignedInt(evaluate(elemX.size));
-            auto const n           = getUnsignedInt(evaluate(elemY.size));
+            auto       n           = getUnsignedInt(evaluate(elemY.size));
+
+            auto packing = DataTypeInfo::Get(load.varType).packing;
+            AssertFatal(n % packing == 0,
+                        ShowValue(m),
+                        ShowValue(n),
+                        ShowValue(packing),
+                        ShowValue(load.varType));
+            n /= packing;
 
             co_yield Instruction::Lock(Scheduling::Dependency::M0, "Lock M0");
             co_yield moveTile<MemoryInstructions::MemoryDirection::Load>(

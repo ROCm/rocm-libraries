@@ -125,9 +125,12 @@ namespace rocRoller::KernelGraph::ControlGraph
     }
 
     LoadTiled::LoadTiled() = default;
-    LoadTiled::LoadTiled(rocRoller::VariableType const varType, bool const isTransposedTile)
+    LoadTiled::LoadTiled(rocRoller::VariableType const varType,
+                         bool const                    isTransposedTile,
+                         bool const                    isDirect2LDS)
         : varType(varType)
         , isTransposedTile(isTransposedTile)
+        , isDirect2LDS(isDirect2LDS)
     {
     }
 

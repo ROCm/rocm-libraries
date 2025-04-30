@@ -150,8 +150,12 @@ namespace rocRoller
          *
          * For stores, the target is the destination (User or LDS) of
          * the store.
+         *
+         * For load direct-to-lds, the target is the source (User) and destination (LDS) of
+         * the operation.
          */
-        std::pair<int, Graph::Direction> getOperationTarget(int tag, KernelGraph const& kgraph);
+        std::pair<int, Graph::Direction>
+            getOperationTarget(int tag, KernelGraph const& kgraph, bool isDirect2LDS = false);
 
         /**
          * Returns the true coordinate that should be the target of a
@@ -576,14 +580,19 @@ namespace rocRoller
                               int                            newMacTileTag);
 
         /**
-         * @brief
+         * @brief Move connections of LoadTiled and StoreLDSTile to new LoadTileDirect2LDS
+         *
          *
          * @param kgraph
-         * @param opTag1 LoadTiled or StoreLDSTile operation
-         * @param opTag2 LoadTileDirect2LDS operation
+         * @param op LoadTiled or StoreLDSTile operation
+         * @param newOp LoadTileDirect2LDS operation
+         * @param subdimStride newSubdim = subdim + subdimStride
          *
          */
-        void moveConnections(rocRoller::KernelGraph::KernelGraph& kgraph, int opTag1, int opTag2);
+        void moveConnections(rocRoller::KernelGraph::KernelGraph& kgraph,
+                             int                                  op,
+                             int                                  newOp,
+                             int                                  subdimStride);
 
         /**
         * @brief ceil(a/b) = (a+b-1)/b
@@ -613,6 +622,13 @@ namespace rocRoller
          * @brief Duplicate a chain of nodes
          */
         int duplicateChain(KernelGraph& graph, std::vector<int> const& startNodes);
+
+        /**
+        * @brief Get coordinates required by the code-generator.
+        */
+        std::vector<int> getCodeGeneratorCoordinates(KernelGraph const& graph,
+                                                     int                tag,
+                                                     bool               isDirect2LDS = false);
     }
 }
 

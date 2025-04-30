@@ -1379,6 +1379,8 @@ namespace MemoryInstructionsTest
             auto wordgroupSizeTotal = product(m_context->kernel()->workgroupSize());
             auto m0                 = m_context->getM0();
 
+            const auto soffset = Register::Value::Literal(0);
+
             do
             {
                 if(bytesPerMove == 0)
@@ -1419,7 +1421,7 @@ namespace MemoryInstructionsTest
                 }
                 co_yield m_context->mem()->barrier();
                 co_yield m_context->mem()->bufferLoad2LDS(
-                    vgprSerial, bufDesc, bufInstOpts, bytesPerMove);
+                    vgprSerial, bufDesc, bufInstOpts, bytesPerMove, soffset);
                 remain -= bytesPerMove;
             } while(remain > 0);
 

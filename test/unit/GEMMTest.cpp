@@ -2764,6 +2764,118 @@ namespace GEMMDriverTest
                         gemm.workgroupSizeX * gemm.workgroupSizeY);
     }
 
+    TEST_P(GEMMF8F6F4TestGPU, GPU_ScaledBasicGEMMF8F6F4_Direct2LDS_Prefetch2)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+
+        auto [typeAB, MFMAK, transOp] = std::get<1>(GetParam());
+
+        int waveM = (MFMAK == 128) ? 16 : 32;
+        int waveN = (MFMAK == 128) ? 16 : 32;
+        int waveK = MFMAK;
+
+        auto problem = setup_GEMMF8F6F4(waveM, waveN, waveK);
+
+        std::tie(problem.transA, problem.transB) = transOp;
+
+        problem.scaleAMode = Operations::ScaleMode::Separate;
+        problem.scaleBMode = Operations::ScaleMode::Separate;
+
+        problem.direct2LDSA = true;
+        problem.direct2LDSB = true;
+        problem.storeLDSD   = false;
+
+        problem.prefetch         = true;
+        problem.prefetchInFlight = 2;
+        problem.unrollK          = 2;
+
+        std::string modifiers{"cbsz:0b000 blgp:0b000"};
+
+        auto const numBitsPerElementAB = DataTypeInfo::Get(typeAB).elementBits;
+
+        switch(typeAB)
+        {
+        case DataType::FP8:
+            basicGEMM<FP8, FP8, float>(problem);
+            break;
+        case DataType::BF8:
+            basicGEMM<BF8, BF8, float>(problem);
+            modifiers = "cbsz:0b001 blgp:0b001";
+            break;
+        case DataType::FP6:
+            GTEST_SKIP() << "Test not yet supported for FP6" << std::endl;
+            break;
+        case DataType::BF6:
+            GTEST_SKIP() << "Test not yet supported for BF6" << std::endl;
+            break;
+        case DataType::FP4:
+            basicGEMM<FP4, FP4, float>(problem);
+            modifiers = "cbsz:0b100 blgp:0b100";
+            break;
+        default:
+            Throw<FatalError>(
+                fmt::format("Unexpected data type: {}. (Allowed FP8, BF8, FP6, BF6, and FP4)",
+                            toString(typeAB)));
+        }
+
+        std::string generatedCode = m_context->instructions()->toString();
+        EXPECT_EQ(countSubstring(generatedCode, "ds_write"), 0);
+    }
+
+    TEST_P(GEMMF8F6F4TestGPU, GPU_BasicGEMMF8F6F4_Direct2LDS_Prefetch2)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+
+        auto [typeAB, MFMAK, transOp] = std::get<1>(GetParam());
+
+        int waveM = (MFMAK == 128) ? 16 : 32;
+        int waveN = (MFMAK == 128) ? 16 : 32;
+        int waveK = MFMAK;
+
+        auto problem = setup_GEMMF8F6F4(waveM, waveN, waveK);
+
+        std::tie(problem.transA, problem.transB) = transOp;
+
+        problem.direct2LDSA = true;
+        problem.direct2LDSB = true;
+        problem.storeLDSD   = false;
+
+        problem.prefetch         = true;
+        problem.prefetchInFlight = 2;
+        problem.unrollK          = 2;
+
+        std::string modifiers{"cbsz:0b000 blgp:0b000"};
+
+        auto const numBitsPerElementAB = DataTypeInfo::Get(typeAB).elementBits;
+
+        switch(typeAB)
+        {
+        case DataType::FP8:
+            basicGEMM<FP8, FP8, float>(problem);
+            break;
+        case DataType::BF8:
+            basicGEMM<BF8, BF8, float>(problem);
+            modifiers = "cbsz:0b001 blgp:0b001";
+            break;
+        case DataType::FP6:
+            GTEST_SKIP() << "Test not yet supported for FP6" << std::endl;
+            break;
+        case DataType::BF6:
+            GTEST_SKIP() << "Test not yet supported for BF6" << std::endl;
+            break;
+        case DataType::FP4:
+            basicGEMM<FP4, FP4, float>(problem);
+            modifiers = "cbsz:0b100 blgp:0b100";
+            break;
+        default:
+            Throw<FatalError>(
+                fmt::format("Unexpected data type: {}. (Allowed FP8, BF8, FP6, BF6, and FP4)",
+                            toString(typeAB)));
+        }
+        std::string generatedCode = m_context->instructions()->toString();
+        EXPECT_EQ(countSubstring(generatedCode, "ds_write"), 0);
+    }
+
     TEST_P(GEMMJammedTestGPU, GPU_BasicGEMMFP16Jammed2X2)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);

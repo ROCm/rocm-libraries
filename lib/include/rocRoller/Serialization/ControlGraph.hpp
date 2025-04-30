@@ -318,6 +318,8 @@ namespace rocRoller
                                            KernelGraph::ControlGraph::LoadLDSTile>)
                 {
                     iot::mapRequired(io, "isTransposedTile", op.isTransposedTile);
+                    if constexpr(std::same_as<Op, KernelGraph::ControlGraph::LoadTiled>)
+                        iot::mapRequired(io, "isDirect2LDS", op.isDirect2LDS);
                 }
                 else
                 {

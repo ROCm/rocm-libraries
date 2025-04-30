@@ -367,7 +367,7 @@ namespace rocRoller
                     if(solutionParams.prefetch)
                     {
                         params->prefetch          = true;
-                        params->unrollK           = solutionParams.prefetchInFlight;
+                        params->unrollK           = std::max(2, solutionParams.prefetchInFlight);
                         params->prefetchInFlight  = solutionParams.prefetchInFlight;
                         params->prefetchLDSFactor = solutionParams.prefetchLDSFactor;
                         params->prefetchMixMemOps = false;
@@ -381,6 +381,11 @@ namespace rocRoller
 
                         if(solutionParams.scaleA == Operations::ScaleMode::Separate
                            && !solutionParams.loadLDSScaleA)
+                            params->prefetchMixMemOps = false;
+
+                        // TODO: enable (prefetchMixMemOps == true && prefetchLDSFactor == 2 && direct2LDSA/B = true)
+                        if(solutionParams.prefetchLDSFactor == 2
+                           && (solutionParams.direct2LDSA || solutionParams.direct2LDSB))
                             params->prefetchMixMemOps = false;
                     }
                     else

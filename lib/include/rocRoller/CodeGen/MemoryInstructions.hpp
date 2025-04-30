@@ -351,14 +351,15 @@ namespace rocRoller
         Generator<Instruction> bufferLoad2LDS(Register::ValuePtr                data,
                                               std::shared_ptr<BufferDescriptor> buffDesc,
                                               BufferInstructionOptions          buffOpts,
-                                              int                               numBytes);
+                                              int                               numBytes,
+                                              Register::ValuePtr                soffset);
 
         /**
          * @brief Generate the instructions required to add a memory barrier.
          *
          * @return Generator<Instruction>
          */
-        Generator<Instruction> barrier();
+        Generator<Instruction> barrier(std::string comment = "");
 
         /**
          * @brief Add the offset to a new register if the offset is greater than maxOffset allowed by the

@@ -438,7 +438,8 @@ namespace rocRoller
         bool needsComputeIndex(Operation const& op)
         {
             if(std::holds_alternative<StoreTiled>(op) || std::holds_alternative<StoreLDSTile>(op)
-               || std::holds_alternative<LoadTiled>(op) || std::holds_alternative<LoadLDSTile>(op))
+               || std::holds_alternative<LoadTiled>(op) || std::holds_alternative<LoadLDSTile>(op)
+               || std::holds_alternative<LoadTileDirect2LDS>(op))
                 return true;
             return false;
         }
@@ -540,15 +541,24 @@ namespace rocRoller
             return kgraph.coordinates.get<LDS>(tag) || kgraph.coordinates.get<User>(tag);
         }
 
-        std::pair<int, Graph::Direction> getOperationTarget(int tag, KernelGraph const& kgraph)
+        std::pair<int, Graph::Direction>
+            getOperationTarget(int tag, KernelGraph const& kgraph, bool isDirect2LDS)
         {
             auto elem = kgraph.control.getElement(tag);
+            if(isDirect2LDS)
+            {
+                return {kgraph.mapper.get<LDS>(tag), GD::Upstream};
+            }
+
             return std::visit(
                 rocRoller::overloaded{
                     [&](StoreTiled const& op) -> std::pair<int, Graph::Direction> {
                         return {kgraph.mapper.get<User>(tag), GD::Upstream};
                     },
                     [&](LoadTiled const& op) -> std::pair<int, Graph::Direction> {
+                        return {kgraph.mapper.get<User>(tag), GD::Downstream};
+                    },
+                    [&](LoadTileDirect2LDS const& op) -> std::pair<int, Graph::Direction> {
                         return {kgraph.mapper.get<User>(tag), GD::Downstream};
                     },
                     [&](StoreLDSTile const& op) -> std::pair<int, Graph::Direction> {
@@ -1024,44 +1034,32 @@ namespace rocRoller
             }
         }
 
-        void moveConnections(rocRoller::KernelGraph::KernelGraph& k, int opTag1, int opTag2)
+        void moveConnections(rocRoller::KernelGraph::KernelGraph& kgraph,
+                             int                                  op,
+                             int                                  newOp,
+                             int                                  subdimStride)
         {
-            auto maybeGlobalOp   = k.control.get<LoadTiled>(opTag1);
-            auto maybeStoreLDSOp = k.control.get<StoreLDSTile>(opTag1);
-            for(auto& c : k.mapper.getConnections(opTag1))
+            for(auto& c : kgraph.mapper.getConnections(op))
             {
-
-                if(maybeGlobalOp)
+                auto curConnection = c.connection;
+                auto maybeLDSTile  = kgraph.coordinates.get<LDS>(c.coordinate);
+                if(maybeLDSTile || subdimStride == 0)
                 {
-                    k.mapper.connect(opTag2, c.coordinate, c.connection);
+                    kgraph.mapper.connect(newOp, c.coordinate, c.connection);
                 }
-                else if(maybeStoreLDSOp)
+                else if(std::holds_alternative<Connections::TypeAndSubDimension>(c.connection))
                 {
-                    auto maybeLDSTile = k.coordinates.get<LDS>(c.coordinate);
-                    auto maybeOffset  = k.coordinates.get<Offset>(c.coordinate);
-                    auto maybeStride  = k.coordinates.get<Stride>(c.coordinate);
-
-                    if(maybeLDSTile)
-                    {
-                        k.mapper.connect(opTag2, c.coordinate, c.connection);
-                    }
-                    if(maybeOffset || maybeStride)
-                    {
-                        auto newDimension = maybeOffset ? 1 : 2;
-                        if(std::holds_alternative<Connections::TypeAndSubDimension>(c.connection))
-                        {
-                            auto curConnection
-                                = std::get<Connections::TypeAndSubDimension>(c.connection);
-                            if(curConnection.subdimension == 0)
-                            {
-                                auto newConnection = Connections::TypeAndSubDimension{
-                                    curConnection.id, newDimension};
-                                k.mapper.connect(opTag2, c.coordinate, newConnection);
-                            }
-                        }
-                    }
+                    auto curConnection = std::get<Connections::TypeAndSubDimension>(c.connection);
+                    auto subdim        = curConnection.subdimension;
+                    auto newSubdim     = subdim + subdimStride;
+                    auto newConnection
+                        = Connections::TypeAndSubDimension{curConnection.id, newSubdim};
+                    kgraph.mapper.connect(newOp, c.coordinate, newConnection);
                 }
-                k.mapper.disconnect(opTag1, c.coordinate, c.connection);
+                else
+                {
+                    kgraph.mapper.connect(newOp, c.coordinate, c.connection);
+                }
             }
         }
 
@@ -1178,6 +1176,40 @@ namespace rocRoller
         int duplicateChain(KernelGraph& graph, std::vector<int> const& startNodes)
         {
             return duplicateControlNodes(graph, nullptr, startNodes, [](int x) { return true; })[0];
+        }
+
+        /**
+        * @brief Get coordinates required by the code-generator.
+        */
+        std::vector<int>
+            getCodeGeneratorCoordinates(KernelGraph const& graph, int tag, bool isDirect2LDS)
+        {
+            auto [tileTag, tile] = graph.getDimension<MacroTile>(tag);
+            if(isDirect2LDS)
+            {
+                return {graph.mapper.get<ElementNumber>(tag, 2),
+                        graph.mapper.get<ElementNumber>(tag, 3)};
+            }
+            if(tile.memoryType == MemoryType::VGPR || tile.memoryType == MemoryType::WAVE_SPLIT)
+            {
+                return {graph.mapper.get<ElementNumber>(tag, 0),
+                        graph.mapper.get<ElementNumber>(tag, 1)};
+            }
+            if(tile.layoutType == LayoutType::MATRIX_A)
+            {
+                return {graph.mapper.get<WaveTileNumber>(tag, 1), graph.mapper.get<VGPR>(tag)};
+            }
+            if(tile.layoutType == LayoutType::MATRIX_B)
+            {
+                return {graph.mapper.get<WaveTileNumber>(tag, 0), graph.mapper.get<VGPR>(tag)};
+            }
+            if(tile.layoutType == LayoutType::MATRIX_ACCUMULATOR)
+            {
+                return {graph.mapper.get<VGPRBlockNumber>(tag),
+                        graph.mapper.get<VGPRBlockIndex>(tag)};
+            }
+
+            Throw<FatalError>("getCodeGeneratorCoordinates tile type not implemented yet.");
         }
 
     }

@@ -2981,6 +2981,13 @@ namespace KernelGraphTest
             return maybeForLoop->loopName == rocRoller::KLOOP;
         };
 
+        auto storeLDSPredicate = [&](int tag) -> bool {
+            auto maybeStoreLDSTile = kgraph.control.get<StoreLDSTile>(tag);
+            if(!maybeStoreLDSTile)
+                return false;
+            return true;
+        };
+
         auto kernel  = *only(kgraph.control.roots());
         auto forLoop = *only(kgraph.control.findNodes(kernel, forKLoopPredicate, GD::Downstream));
 
@@ -2998,6 +3005,13 @@ namespace KernelGraphTest
 
         EXPECT_FALSE(ldsDeallocateFromKernel.empty());
         EXPECT_TRUE(ldsDeallocateInsideLoop.empty());
+
+        for(auto storeLDS : kgraph.control.findNodes(kernel, storeLDSPredicate, GD::Downstream))
+        {
+            auto deallocate = only(kgraph.control.getOutputNodeIndices<Sequence>(storeLDS));
+            auto barrier    = only(kgraph.control.getOutputNodeIndices<Sequence>(*deallocate));
+            EXPECT_EQ(kgraph.mapper.get<LDS>(storeLDS), kgraph.mapper.get<LDS>(*barrier));
+        }
     }
 
     TEST_F(KernelGraphTest, WaitZero)

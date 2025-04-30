@@ -655,9 +655,17 @@ namespace rocRoller
                 m_context->registerTagManager()->deleteTag(dimTag);
             }
 
-            Generator<Instruction> operator()(int, Barrier const&, Transformer)
+            Generator<Instruction> operator()(int tag, Barrier const&, Transformer)
             {
-                co_yield m_context->mem()->barrier();
+                std::string comment = "Wait for LDS Tile: ";
+                for(auto& c : m_graph->mapper.getConnections(tag))
+                {
+                    auto ldsTileTag = c.coordinate;
+                    comment += std::to_string(ldsTileTag);
+                    comment += " ";
+                }
+
+                co_yield m_context->mem()->barrier(comment);
             }
 
             Generator<Instruction> operator()(int tag, ComputeIndex const& ci, Transformer coords)

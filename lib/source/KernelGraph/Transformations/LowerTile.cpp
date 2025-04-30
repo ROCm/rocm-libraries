@@ -1738,8 +1738,6 @@ namespace rocRoller
 
                 auto originalUserTag = original.mapper.get<User>(tag);
                 auto originalTileTag = original.mapper.get<MacroTile>(tag);
-                auto LDSTileTag      = original.mapper.get<LDS>(tag);
-                auto isDirect2LDS    = (LDSTileTag != -1);
                 auto userTag         = reindexer.coordinates.at(originalUserTag);
                 auto tileTag         = reindexer.coordinates.at(originalTileTag);
 
@@ -1753,6 +1751,9 @@ namespace rocRoller
                 copyOperation(graph, original, reindexer, tag);
 
                 auto tile = graph.coordinates.getNode<MacroTile>(tileTag);
+
+                auto load         = original.control.get<LoadTiled>(tag).value();
+                auto isDirect2LDS = load.isDirect2LDS;
 
                 AssertFatal(tile.rank == 2, "Rank /= 2 not implemented yet.");
 
