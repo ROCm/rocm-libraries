@@ -18,7 +18,7 @@ if("$ENV{Python_ROOT}" STREQUAL "" AND NOT Python_ROOT AND "$ENV{Python_ROOT_DIR
             set(Python_ROOT /usr)
         endif()
     else()
-        message(STATUS "PYENV_ROOT is set. set Python_ROOT to $ENV{PYENV_ROOT}.")
+        message(STATUS "PYENV_ROOT is set. set Python_ROOT to $ENV{PYENV_ROOT}!")
         set(Python_ROOT $ENV{PYENV_ROOT})
     endif()
 endif()
