@@ -5,7 +5,7 @@ on:
 
 env:
   MONOREPO_URL: github.com/ROCm/rocm-libraries.git
-  MONOREPO_BRANCH: mainline
+  MONOREPO_BRANCH: main
 
 jobs:
   setup-monorepo:
