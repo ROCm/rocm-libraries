@@ -19,10 +19,17 @@ jobs:
       - name: Get changed files
         id: files
         run: |
-          files=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            "https://api.github.com/repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
-            | jq -r '.[].filename' | tr '\n' ' ')
-          echo "changed_files=${files}" >> "$GITHUB_OUTPUT"
+          api="https://api.github.com/repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files?per_page=100"
+          files=""
+
+          while [ -n "$api" ]; do
+            response=$(curl -sS -D headers -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" "$api")
+            files+=$(echo "$response" | jq -r '.[].filename')$'\n'
+
+            api=$(grep -i '^link:' headers | sed -n 's/.*<\([^>]*\)>; rel="next".*/\1/p')
+          done
+
+          echo "changed_files=$(echo "$files" | tr '\n' ' ' | xargs)" >> "$GITHUB_OUTPUT"
 
       - name: Get current labels
         id: current_labels
@@ -63,7 +70,7 @@ jobs:
             echo "Applying labels: ${labels_to_add[*]}"
             for label in "${labels_to_add[@]}"; do
               # Apply each label individually, ensuring labels with spaces are properly quoted
-              gh pr edit 5 --add-label "$label"
+              gh pr edit "${{ github.event.pull_request.number }}" --add-label "$label"
             done
           fi
 
@@ -71,7 +78,7 @@ jobs:
             echo "Removing labels: ${labels_to_remove[*]}"
             for label in "${labels_to_remove[@]}"; do
               # Remove each label individually, ensuring labels with spaces are properly quoted
-              gh pr edit 5 --remove-label "$label"
+              gh pr edit "${{ github.event.pull_request.number }}" --remove-label "$label"
             done
           fi
         env:
