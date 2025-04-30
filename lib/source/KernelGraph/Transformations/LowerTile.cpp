@@ -542,6 +542,9 @@ namespace rocRoller
                 }
                 else if(!isF8F6F4)
                 {
+                    AssertFatal(
+                        K_L != 0,
+                        "Invalid operand: cannot divide by zero to compute the BlockNumber");
                     auto blockNumber = graph.coordinates.addElement(
                         Adhoc("BlockNumber", literal(static_cast<uint>(K / K_L)), nullptr));
                     auto blockIndex = graph.coordinates.addElement(
@@ -580,6 +583,9 @@ namespace rocRoller
                 }
                 else if(!isF8F6F4)
                 {
+                    AssertFatal(
+                        K_L != 0,
+                        "Invalid operand: cannot divide by zero to compute the BlockNumber");
                     auto blockNumber = graph.coordinates.addElement(
                         Adhoc("BlockNumber", literal(static_cast<uint>(K / K_L)), nullptr));
                     auto blockIndex = graph.coordinates.addElement(

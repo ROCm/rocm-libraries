@@ -257,9 +257,16 @@ namespace GPUArchitectureGenerator
                                                  {.sramecc = true}},
             }},
            {rocRoller::GPUCapability::HasWave64,
-            std::vector<rocRoller::GPUArchitectureTarget>(
-                rocRoller::SupportedArchitectures.begin(),
-                rocRoller::SupportedArchitectures.end())}};
+            std::vector<rocRoller::GPUArchitectureTarget>(rocRoller::SupportedArchitectures.begin(),
+                                                          rocRoller::SupportedArchitectures.end())},
+           {rocRoller::GPUCapability::HasBlockScaling32,
+            {
+                rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX950},
+                rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX950,
+                                                 {.xnack = true}},
+                rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX950,
+                                                 {.sramecc = true}},
+            }}};
 
     inline std::vector<rocRoller::GPUArchitectureTarget> gfx908ISAs()
     {

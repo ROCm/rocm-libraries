@@ -42,8 +42,6 @@ namespace rocRoller
     {
         namespace GEMMClient
         {
-            constexpr int elementsPerMXBlock = 32;
-
             /**
              * @brief Indicates whether a matrix is supplied in transposed form or not
              */
@@ -88,6 +86,8 @@ namespace rocRoller
 
                 // When scaleA/B is ScaleMode::SingleScale
                 float scaleValueA, scaleValueB;
+
+                int scaleBlockSize;
             };
 
             /**
@@ -124,6 +124,8 @@ namespace rocRoller
 
                 Operations::ScaleMode scaleA;
                 Operations::ScaleMode scaleB;
+
+                int scaleBlockSize;
 
                 bool loadLDSScaleA = false;
                 bool loadLDSScaleB = false;

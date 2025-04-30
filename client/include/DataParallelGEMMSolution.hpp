@@ -117,7 +117,10 @@ namespace rocRoller
 
                         m_tagBlockScaleA = mulInputA
                             = command->addOperation(rocRoller::Operations::BlockScale(
-                                m_tagA, 2, m_tagLoadScaleA, {1, elementsPerMXBlock}));
+                                m_tagA,
+                                2,
+                                m_tagLoadScaleA,
+                                {1, static_cast<unsigned long>(solutionParams.scaleBlockSize)}));
                     }
                     else if(solutionParams.scaleA == Operations::ScaleMode::SingleScale)
                     {
@@ -139,7 +142,10 @@ namespace rocRoller
 
                         m_tagBlockScaleB = mulInputB
                             = command->addOperation(rocRoller::Operations::BlockScale(
-                                m_tagB, 2, m_tagLoadScaleB, {elementsPerMXBlock, 1}));
+                                m_tagB,
+                                2,
+                                m_tagLoadScaleB,
+                                {static_cast<unsigned long>(solutionParams.scaleBlockSize), 1}));
                     }
                     else if(solutionParams.scaleB == Operations::ScaleMode::SingleScale)
                     {
@@ -296,6 +302,22 @@ namespace rocRoller
                                 ShowValue(wave_n),
                                 ShowValue(wavetilePerWavefrontN));
 
+                    if(solutionParams.scaleA == Operations::ScaleMode::Separate
+                       || solutionParams.scaleB == Operations::ScaleMode::Separate)
+                    {
+                        AssertFatal(
+                            arch.isSupportedScaleBlockSize(solutionParams.scaleBlockSize),
+                            fmt::format(
+                                "Architecture {} does not support block scaling (size: {}).",
+                                solutionParams.architecture.toString(),
+                                solutionParams.scaleBlockSize));
+                        AssertFatal(
+                            solutionParams.waveK % solutionParams.scaleBlockSize == 0,
+                            fmt::format("waveK: {} must be a multiple of the scale block size: {}",
+                                        solutionParams.waveK,
+                                        solutionParams.scaleBlockSize));
+                    }
+
                     params->setManualKernelDimension(2);
                     params->setWaveTilesPerWavefront(wavetilePerWavefrontM, wavetilePerWavefrontN);
 
@@ -338,11 +360,12 @@ namespace rocRoller
                     if(solutionParams.scaleA == Operations::ScaleMode::Separate)
                     {
                         auto macTileAScale = KernelGraph::CoordinateGraph::MacroTile(
-                            {solutionParams.macM, solutionParams.macK / elementsPerMXBlock},
+                            {solutionParams.macM,
+                             solutionParams.macK / solutionParams.scaleBlockSize},
                             LayoutType::MATRIX_A,
                             {solutionParams.waveM,
                              solutionParams.waveN,
-                             solutionParams.waveK / elementsPerMXBlock,
+                             solutionParams.waveK / solutionParams.scaleBlockSize,
                              solutionParams.waveB},
                             solutionParams.loadLDSScaleA ? MemoryType::LDS : MemoryType::WAVE);
                         params->setDimensionInfo(*m_tagLoadScaleA, macTileAScale);
@@ -350,11 +373,12 @@ namespace rocRoller
                     if(solutionParams.scaleB == Operations::ScaleMode::Separate)
                     {
                         auto macTileBScale = KernelGraph::CoordinateGraph::MacroTile(
-                            {solutionParams.macK / elementsPerMXBlock, solutionParams.macN},
+                            {solutionParams.macK / solutionParams.scaleBlockSize,
+                             solutionParams.macN},
                             LayoutType::MATRIX_B,
                             {solutionParams.waveM,
                              solutionParams.waveN,
-                             solutionParams.waveK / elementsPerMXBlock,
+                             solutionParams.waveK / solutionParams.scaleBlockSize,
                              solutionParams.waveB},
                             solutionParams.loadLDSScaleB ? MemoryType::LDS : MemoryType::WAVE);
                         params->setDimensionInfo(*m_tagLoadScaleB, macTileBScale);

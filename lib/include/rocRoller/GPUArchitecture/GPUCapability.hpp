@@ -137,6 +137,9 @@ namespace rocRoller
             ArchAccUnifiedRegs,
             PackedWorkitemIDs,
 
+            HasBlockScaling32,
+            DefaultScaleBlockSize,
+
             HasXnack,
 
             UnalignedVGPRs,

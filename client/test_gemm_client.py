@@ -175,6 +175,7 @@ class Scale:
     mode: str  # Separate, SingleScale, etc
     lds: bool  # load through LDS
     value: float  # for SingleScale, the value
+    blockSize: int  # for scale block size
 
     def client_arguments(self):
         params = []
@@ -185,6 +186,14 @@ class Scale:
             if self.lds:
                 params.append("--loadLDSScale_" + self.argument)
         return params
+
+    def maybe_add_block_size(self, params):
+        if self.blockSize is None:
+            return
+
+        scaleBlockSizeStr = "--scaleBlockSize"
+        if scaleBlockSizeStr not in params:
+            params.extend([scaleBlockSizeStr, str(self.blockSize)])
 
 
 @dataclass
@@ -248,6 +257,7 @@ streamKTwoTile: false
 matchMemoryAccess: true
 scale_A: None
 scale_B: None
+scaleBlockSize: 0
 loadScaleLDS_A: false
 loadScaleLDS_B: false
 swizzleScale: false
@@ -292,6 +302,7 @@ type_D: half
 type_acc: float
 scale_A: None
 scale_B: None
+scaleBlockSize: 0
 loadScaleLDS_A: false
 loadScaleLDS_B: false
 swizzleScale: false
@@ -314,15 +325,16 @@ def scale_configurations(argument):
     modes = [None, "None", "Separate", "SingleScale"]
     ldss = [True, False]
     values = [0.5, 1.0]
+    blockSize = 32
 
     rv = []
     for mode in modes:
         if mode is not None and mode == "Separate":
-            rv.extend([Scale(argument, mode, lds, None) for lds in ldss])
+            rv.extend([Scale(argument, mode, lds, None, blockSize) for lds in ldss])
         elif mode is not None and mode == "SingleScale":
-            rv.extend([Scale(argument, mode, False, value) for value in values])
+            rv.extend([Scale(argument, mode, False, value, None) for value in values])
         else:
-            rv.append(Scale(argument, mode, False, None))
+            rv.append(Scale(argument, mode, False, None, None))
     return rv
 
 
@@ -369,6 +381,10 @@ def build_solution_params():
         ]
         for x in [type, prefetch, scaleA, scaleB]:
             params.extend(x.client_arguments())
+
+        scaleA.maybe_add_block_size(params)
+        scaleB.maybe_add_block_size(params)
+
         solution_params.append(params)
 
     return solution_params

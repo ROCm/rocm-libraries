@@ -155,6 +155,9 @@ namespace rocRoller
             {"HasWave64", Value::HasWave64},
             {"DefaultWavefrontSize", Value::DefaultWavefrontSize},
 
+            {"HasBlockScaling32", Value::HasBlockScaling32},
+            {"DefaultScaleBlockSize", Value::DefaultScaleBlockSize},
+
             {"UnalignedVGPRs", Value::UnalignedVGPRs},
             {"UnalignedSGPRs", Value::UnalignedSGPRs},
 

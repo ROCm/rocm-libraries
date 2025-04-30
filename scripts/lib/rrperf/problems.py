@@ -136,6 +136,10 @@ class GEMMSolution:
     scale_A: str = "None"
     scale_B: str = "None"
 
+    # If scale_A or scale_B is Separate, scaleBlockSize
+    # needs to be set to a valid block size (e.g. 32)
+    scaleBlockSize: int = -1
+
     loadLDSScale_A: bool = False
     loadLDSScale_B: bool = False
     swizzleScale: bool = False

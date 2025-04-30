@@ -1299,6 +1299,7 @@ def fp4_target():
         type_acc="float",
         scale_A="Separate",
         scale_B="Separate",
+        scaleBlockSize=32,
         numOuter=1,
         numWarmUp=1000,
         numInner=1000)

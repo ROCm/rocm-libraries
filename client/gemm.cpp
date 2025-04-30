@@ -91,6 +91,7 @@ struct rocRoller::Serialization::
 
         iot::mapRequired(io, "scale_A", result.solutionParams.scaleA);
         iot::mapRequired(io, "scale_B", result.solutionParams.scaleB);
+        iot::mapRequired(io, "scaleBlockSize", result.solutionParams.scaleBlockSize);
         iot::mapRequired(io, "loadLDSScale_A", result.solutionParams.loadLDSScaleA);
         iot::mapRequired(io, "loadLDSScale_B", result.solutionParams.loadLDSScaleB);
         iot::mapRequired(io, "swizzleScale", result.solutionParams.swizzleScale);
@@ -186,6 +187,7 @@ struct rocRoller::Serialization::MappingTraits<Client::GEMMClient::SolutionParam
 
         iot::mapRequired(io, "scale_A", params.scaleA);
         iot::mapRequired(io, "scale_B", params.scaleB);
+        iot::mapRequired(io, "scaleBlockSize", params.scaleBlockSize);
         iot::mapRequired(io, "loadScaleLDS_A", params.loadLDSScaleA);
         iot::mapRequired(io, "loadScaleLDS_B", params.loadLDSScaleB);
         iot::mapRequired(io, "swizzleScale", params.swizzleScale);
@@ -356,11 +358,22 @@ namespace rocRoller::Client::GEMMClient
 
         if(problemParams.scaleA == Operations::ScaleMode::Separate)
         {
-            auto dataTypeA  = TypeInfo<A>::Var.dataType;
-            auto descAScale = TensorDescriptor(
-                dataTypeA,
-                {size_t(problemParams.m), size_t(problemParams.k / elementsPerMXBlock)},
-                problemParams.transA == TransposeType::T ? "T" : "N");
+            auto scaleBlockSize = problemParams.scaleBlockSize;
+            AssertFatal(scaleBlockSize != -1, "scaleBlockSize must be set to scale A.");
+            AssertFatal(arch.isSupportedScaleBlockSize(scaleBlockSize),
+                        fmt::format("Architecture {} does not support block scaling (size: {}).",
+                                    arch.target().toString(),
+                                    scaleBlockSize));
+            AssertFatal(problemParams.k % scaleBlockSize == 0,
+                        fmt::format("K: {} must be a multiple of the scale block size: {}",
+                                    problemParams.k,
+                                    scaleBlockSize));
+            auto dataTypeA = TypeInfo<A>::Var.dataType;
+            auto descAScale
+                = TensorDescriptor(dataTypeA,
+                                   {static_cast<size_t>(problemParams.m),
+                                    static_cast<size_t>(problemParams.k / scaleBlockSize)},
+                                   problemParams.transA == TransposeType::T ? "T" : "N");
             auto [aScaleTag, bScaleTag] = gemm->getABScaleTags();
             setCommandTensorArg(commandArgs, aScaleTag.value(), descAScale, deviceScaleA.get());
         }
@@ -375,11 +388,22 @@ namespace rocRoller::Client::GEMMClient
 
         if(problemParams.scaleB == Operations::ScaleMode::Separate)
         {
-            auto dataTypeB  = TypeInfo<A>::Var.dataType;
-            auto descBScale = TensorDescriptor(
-                dataTypeB,
-                {size_t(problemParams.k / elementsPerMXBlock), size_t(problemParams.n)},
-                problemParams.transB == TransposeType::T ? "T" : "N");
+            auto scaleBlockSize = problemParams.scaleBlockSize;
+            AssertFatal(scaleBlockSize != -1, "scaleBlockSize must be set to scale B.");
+            AssertFatal(arch.isSupportedScaleBlockSize(scaleBlockSize),
+                        fmt::format("Architecture {} does not support block scaling (size: {}).",
+                                    arch.target().toString(),
+                                    scaleBlockSize));
+            AssertFatal(problemParams.k % scaleBlockSize == 0,
+                        fmt::format("K: {} must be a multiple of the scale block size: {}",
+                                    problemParams.k,
+                                    scaleBlockSize));
+            auto dataTypeB = TypeInfo<A>::Var.dataType;
+            auto descBScale
+                = TensorDescriptor(dataTypeB,
+                                   {static_cast<size_t>(problemParams.k / scaleBlockSize),
+                                    static_cast<size_t>(problemParams.n)},
+                                   problemParams.transB == TransposeType::T ? "T" : "N");
             auto [aScaleTag, bScaleTag] = gemm->getABScaleTags();
             setCommandTensorArg(commandArgs, bScaleTag.value(), descBScale, deviceScaleB.get());
         }
@@ -686,6 +710,8 @@ namespace rocRoller::Client::GEMMClient
 
         Operations::ScaleMode scaleA = Operations::ScaleMode::None;
         Operations::ScaleMode scaleB = Operations::ScaleMode::None;
+
+        int scaleBlockSize = -1;
     };
 
     struct IOParameters
@@ -963,18 +989,23 @@ namespace rocRoller::Client::GEMMClient
         }
         if((types.scaleA != solution.scaleA) || (types.scaleA != solution.scaleB))
         {
-            std::cout << "NOTE: MX Scalings been superceded by solution." << std::endl;
+            std::cout << "NOTE: MX Scalings have been superceded by solution." << std::endl;
+        }
+        if(types.scaleBlockSize != solution.scaleBlockSize)
+        {
+            std::cout << "NOTE: MX scale block size has been superceded by solution." << std::endl;
         }
 
-        types.typeA   = solution.typeA;
-        types.typeB   = solution.typeB;
-        types.typeC   = solution.typeC;
-        types.typeD   = solution.typeD;
-        types.typeAcc = solution.typeAcc;
-        types.transA  = solution.transA;
-        types.transB  = solution.transB;
-        types.scaleA  = solution.scaleA;
-        types.scaleB  = solution.scaleB;
+        types.typeA          = solution.typeA;
+        types.typeB          = solution.typeB;
+        types.typeC          = solution.typeC;
+        types.typeD          = solution.typeD;
+        types.typeAcc        = solution.typeAcc;
+        types.transA         = solution.transA;
+        types.transB         = solution.transB;
+        types.scaleA         = solution.scaleA;
+        types.scaleB         = solution.scaleB;
+        types.scaleBlockSize = solution.scaleBlockSize;
     }
 }
 
@@ -1007,6 +1038,8 @@ int main(int argc, const char* argv[])
 
         .scaleA = Operations::ScaleMode::None,
         .scaleB = Operations::ScaleMode::None,
+
+        .scaleBlockSize = -1,
 
         .loadLDSScaleA = false,
         .loadLDSScaleB = false,
@@ -1141,6 +1174,9 @@ int main(int argc, const char* argv[])
         },
         "Enable MX scaling of B matrix [None | Separate | SingleScale].",
         "Default: None.");
+    app.add_option("--scaleBlockSize",
+                   types.scaleBlockSize,
+                   "Set MX scaling block size for A and B. (default: 32)");
 
     //
     // Kernel options
@@ -1409,28 +1445,42 @@ int main(int argc, const char* argv[])
         problem.scaleValueA = 1.0f;
     }
 
+    if(types.scaleBlockSize == -1
+       && (types.scaleA == Operations::ScaleMode::Separate
+           || types.scaleB == Operations::ScaleMode::Separate))
+    {
+        auto const& arch = GPUArchitectureLibrary::getInstance()->GetArch(solution.architecture);
+        AssertFatal(arch.HasCapability(GPUCapability::HasBlockScaling32),
+                    fmt::format("Architecture {} does not support block scaling.",
+                                arch.target().toString()));
+        types.scaleBlockSize   = arch.GetCapability(GPUCapability::DefaultScaleBlockSize);
+        problem.scaleBlockSize = types.scaleBlockSize;
+    }
+
     AssertFatal((types.typeAcc == "float") || (types.typeAcc == "half")
                 || (types.typeAcc == "bf16"));
 
-    problem.typeA   = types.typeA;
-    problem.typeB   = types.typeB;
-    problem.typeC   = types.typeC;
-    problem.typeD   = types.typeD;
-    problem.typeAcc = types.typeAcc;
-    problem.transA  = types.transA;
-    problem.transB  = types.transB;
-    problem.scaleA  = types.scaleA;
-    problem.scaleB  = types.scaleB;
+    problem.typeA          = types.typeA;
+    problem.typeB          = types.typeB;
+    problem.typeC          = types.typeC;
+    problem.typeD          = types.typeD;
+    problem.typeAcc        = types.typeAcc;
+    problem.transA         = types.transA;
+    problem.transB         = types.transB;
+    problem.scaleA         = types.scaleA;
+    problem.scaleB         = types.scaleB;
+    problem.scaleBlockSize = types.scaleBlockSize;
 
-    solution.typeA   = types.typeA;
-    solution.typeB   = types.typeB;
-    solution.typeC   = types.typeC;
-    solution.typeD   = types.typeD;
-    solution.typeAcc = types.typeAcc;
-    solution.transA  = types.transA;
-    solution.transB  = types.transB;
-    solution.scaleA  = types.scaleA;
-    solution.scaleB  = types.scaleB;
+    solution.typeA          = types.typeA;
+    solution.typeB          = types.typeB;
+    solution.typeC          = types.typeC;
+    solution.typeD          = types.typeD;
+    solution.typeAcc        = types.typeAcc;
+    solution.transA         = types.transA;
+    solution.transB         = types.transB;
+    solution.scaleA         = types.scaleA;
+    solution.scaleB         = types.scaleB;
+    solution.scaleBlockSize = types.scaleBlockSize;
 
     run.check = !noCheckResult;
 

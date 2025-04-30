@@ -38,14 +38,26 @@ namespace rocRoller
                 rv << "GEMM_" << toString(transA) << toString(transB);
 
                 if(scaleA != rocRoller::Operations::ScaleMode::None)
+                {
                     rv << "_mx" << typeA;
+                    if(scaleA == rocRoller::Operations::ScaleMode::Separate)
+                        rv << "_bs" << scaleBlockSize;
+                }
                 else
+                {
                     rv << "_" << typeA;
+                }
 
                 if(scaleB != rocRoller::Operations::ScaleMode::None)
+                {
                     rv << "_mx" << typeB;
+                    if(scaleB == rocRoller::Operations::ScaleMode::Separate)
+                        rv << "_bs" << scaleBlockSize;
+                }
                 else
+                {
                     rv << "_" << typeB;
+                }
 
                 for(auto const& t : {typeC, typeD, typeAcc})
                     rv << "_" << t;
@@ -138,7 +150,13 @@ namespace rocRoller
                 s << "Tiling:    " << x.macM << "x" << x.macN << "x" << x.macK << std::endl;
                 s << "MI:        " << x.waveM << "x" << x.waveN << "x" << x.waveK << "x" << x.waveB
                   << std::endl;
-                s << "Scaling:   A:" << x.scaleA << " B:" << x.scaleB << std::endl;
+                s << "Scaling:   A:" << x.scaleA << " B:" << x.scaleB;
+                if(x.scaleA == rocRoller::Operations::ScaleMode::Separate
+                   or x.scaleB == rocRoller::Operations::ScaleMode::Separate)
+                {
+                    s << " BlockSize:" << x.scaleBlockSize;
+                }
+                s << std::endl;
                 s << "SwizzleScale:        " << x.swizzleScale << std::endl;
                 s << "LDS:       " << x.loadLDSA << x.loadLDSB << x.storeLDSD << std::endl;
                 s << "Direct2LDS:       " << x.direct2LDSA << x.direct2LDSB << std::endl;

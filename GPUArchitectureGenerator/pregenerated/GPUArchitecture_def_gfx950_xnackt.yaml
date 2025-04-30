@@ -3,11 +3,13 @@ Architectures:
     Capabilities:
       ArchAccUnifiedRegs: 0
       CMPXWritesSGPR: 0
+      DefaultScaleBlockSize: 32
       DefaultWavefrontSize: 64
       HasAccCD: 0
       HasAccumOffset: 0
       HasAddLshl: 0
       HasAtomicAdd: 0
+      HasBlockScaling32: 0
       HasCodeObjectV4: 0
       HasCodeObjectV5: 0
       HasDSReadTransposeB16: 0
