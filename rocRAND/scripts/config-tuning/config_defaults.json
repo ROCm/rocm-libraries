@@ -1,0 +1,60 @@
+// This file is used for generating rng/config/config_defaults.hpp and for
+// select_best_config.py to find the baseline performance for config-tuning.
+// The names of the generators have to fit the ones in benchmark/benchmark_rocrand_utils.hpp.
+{
+    "xorwow":
+    {
+        "block_size": 256,
+        "grid_size": 512
+    },
+    "mrg32k3a":
+    {
+        "block_size": 256,
+        "grid_size": 512
+    },
+    "mtgp32":
+    {
+        "block_size": 256,
+        "grid_size": 512
+    },
+    "philox4_32_10":
+    {
+        "block_size": 256,
+        "grid_size": 1024
+    },
+    "mrg31k3p":
+    {
+        "block_size": 256,
+        "grid_size": 512
+    },
+    "lfsr113":
+    {
+        "block_size": 256,
+        "grid_size": 512
+    },
+    "mt19937":
+    {
+        "block_size": 256,
+        "grid_size": 256
+    },
+    "threefry2_32_20":
+    {
+        "block_size": 256,
+        "grid_size": 1024
+    },
+    "threefry2_64_20":
+    {
+        "block_size": 256,
+        "grid_size": 1024
+    },
+    "threefry4_32_20":
+    {
+        "block_size": 256,
+        "grid_size": 1024
+    },
+    "threefry4_64_20":
+    {
+        "block_size": 256,
+        "grid_size": 1024
+    }
+}

@@ -1,0 +1,10 @@
+/**
+@brief rocRAND Host API Module.
+@author
+@file
+*/
+
+/**
+ * \rocrand_internal \defgroup rocrandhost rocRAND host API
+ *
+ */
