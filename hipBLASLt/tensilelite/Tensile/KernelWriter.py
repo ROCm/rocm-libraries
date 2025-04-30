@@ -2298,8 +2298,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     if not self.states.numItersPLR:
       if kernel["DirectToLdsA"] or kernel["DirectToLdsB"]:
-        module.add(self._wait(kernel, tensorParametersA, tensorParametersB, 0, -1, -1, "10wait for global read"))
-      module.add(self._wait(kernel, tensorParametersA, tensorParametersB, -1, 0, -1, "4wait for local write"))
+        vmcntVal = 1 if kernel["PrefetchGlobalRead"] == 2 and isNGLL else 0
+        module.add(self._wait(kernel, tensorParametersA, tensorParametersB, vmcntVal, -1, -1, "10wait for global read"))
+      if not kernel["NoLdsWriteCode"]:
+        module.add(self._wait(kernel, tensorParametersA, tensorParametersB, -1, 0, -1, "4wait for local write"))
       module.add(self._syncThreads(kernel))
 
     # generate no Load Loop Body code
@@ -2330,8 +2332,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
       module.addComment2("Unrolled Loop %u/%u - Begin" % (lc+1, loopCopies))
     if kernel["PrefetchGlobalRead"] and not self.states.numItersPLR and not kernel["ScheduleIterAlg"] == 2:
       if kernel["DirectToLdsA"] or kernel["DirectToLdsB"]:
-        module.add(self._wait(kernel, tensorParametersA, tensorParametersB, 0, -1, -1, "11wait for global read"))
-      module.add(self._wait(kernel, tensorParametersA, tensorParametersB, 1, 0, -1, "1wait for local write"))
+        vmcntVal = 1 if kernel["PrefetchGlobalRead"] == 2 else 0
+        module.add(self._wait(kernel, tensorParametersA, tensorParametersB, vmcntVal, -1, -1, "11wait for global read"))
+      if not kernel["NoLdsWriteCode"]:
+        module.add(self._wait(kernel, tensorParametersA, tensorParametersB, 1, 0, -1, "1wait for local write"))
       module.add(self._syncThreads(kernel, "4sync for global read"))
 
     module.addComment1("Begin Each Unroll: Check VGPR.checkin for INT8 LW")
