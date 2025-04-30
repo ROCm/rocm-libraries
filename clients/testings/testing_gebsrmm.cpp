@@ -21,9 +21,9 @@
  * THE SOFTWARE.
  *
  * ************************************************************************ */
+#include "rocsparse.hpp"
 #include "testing.hpp"
 #include "utility.hpp"
-#include <rocsparse.hpp>
 
 template <typename T>
 void testing_gebsrmm_bad_arg(const Arguments& arg)
