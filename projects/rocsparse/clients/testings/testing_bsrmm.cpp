@@ -21,9 +21,9 @@
  * THE SOFTWARE.
  *
  * ************************************************************************ */
+#include "rocsparse.hpp"
 #include "testing.hpp"
 #include "utility.hpp"
-#include <rocsparse.hpp>
 
 #include "rocsparse_enum.hpp"
 
