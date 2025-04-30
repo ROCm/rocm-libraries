@@ -1,0 +1,101 @@
+/* ************************************************************************
+ * Copyright (C) 2021 Advanced Micro Devices, Inc. All rights Reserved.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ *
+ * ************************************************************************ */
+
+/*! \file
+ *  \brief doxygen group definitions
+ */
+
+/*! \defgroup aux_module SPARSE Auxiliary functions
+ *  \brief This module holds all sparse auxiliary functions.
+ *
+ *  \details
+ *  The functions that are contained in the auxiliary module describe all available
+ *  helper functions that are required for subsequent library calls.
+ */
+
+/*! \defgroup types_module SPARSE Types
+ *  \brief This module holds all sparse types.
+ */
+
+/*! \defgroup level1_module SPARSE Level 1 routines
+ *  \brief This module holds all sparse level 1 routines.
+ *
+ *  \details
+ *  The sparse level 1 routines describe operations between a vector in sparse format
+ *  and a vector in dense format.
+ */
+
+/*! \defgroup level2_module SPARSE Level 2 routines
+ *  \brief This module holds all sparse level 2 routines.
+ *
+ *  \details
+ *  The sparse level 2 routines describe operations between a matrix in sparse format
+ *  and a vector in dense format.
+ */
+
+/*! \defgroup level3_module SPARSE Level 3 routines
+ *  \brief This module holds all sparse level 3 routines.
+ *
+ *  \details
+ *  The sparse level 3 routines describe operations between a matrix in sparse format
+ *  and multiple vectors in dense format that can also be seen as a dense matrix.
+ */
+
+/*! \defgroup extra_module SPARSE Extra routines
+ *  \brief This module holds all sparse extra routines.
+ *
+ *  \details
+ *  The sparse extra routines describe operations that manipulate sparse matrices.
+ */
+
+/*! \defgroup precond_module SPARSE Preconditioners
+ *  \brief This module holds all sparse preconditioners.
+ *
+ *  \details
+ *  The sparse preconditioners describe manipulations on a matrix in sparse format to
+ *  obtain a sparse preconditioner matrix.
+ */
+
+/*! \defgroup conv_module SPARSE Conversion routines
+ *  \brief This module holds all sparse conversion routines.
+ *
+ *  \details
+ *  The sparse conversion routines describe operations on a matrix in sparse format to
+ *  obtain a matrix in a different sparse format.
+ */
+
+/*! \defgroup reordering_module
+ *  \brief This module holds all sparse reordering routines.
+ *
+ *  \details
+ *  The sparse reordering routines describe operations on a matrix in sparse format that
+ *  reorder the matrix.
+ */
+
+/*! \defgroup generic_module SPARSE Generic routines
+ *  \brief This module holds all sparse generic routines.
+ *
+ *  \details
+ *  The sparse generic routines are a set of functions that can be used if index and
+ *  data types need to be mixed.
+ */
