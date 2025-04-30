@@ -30,16 +30,14 @@ jobs:
       - name: Read repo configurations
         id: repos_config
         run: |
-          repos_config=$(cat .github/repos-config.json)
-          echo "repos_config=${repos_config}" >> "$GITHUB_OUTPUT"
+          repos=$(jq -r '.repositories[].name' .github/repos-config.json | tr '\n' ' ')
+          echo "repos=$repos" >> "$GITHUB_OUTPUT"
 
       - name: Apply and remove labels
         run: |
           changed_files="${{ steps.files.outputs.changed_files }}"
           current_labels="${{ steps.current_labels.outputs.current_labels }}"
-          repos_config="${{ steps.repos_config.outputs.repos_config }}"
-
-          repos=$(echo "$repos_config" | jq -r '.repositories[].name')
+          repos="${{ steps.repos_config.outputs.repos }}"
 
           labels_to_add=()
           labels_to_remove=()
