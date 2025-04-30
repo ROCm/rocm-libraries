@@ -86,7 +86,6 @@ class ComplexLiteral;
 class Add;
 class Subtract;
 class Multiply;
-class ComplexMultiply;
 class Divide;
 class Modulus;
 
@@ -130,7 +129,6 @@ using Expression = std::variant<Variable,
                                 Add,
                                 Subtract,
                                 Multiply,
-                                ComplexMultiply,
                                 Divide,
                                 Modulus,
                                 ShiftLeft,
@@ -231,12 +229,6 @@ public:
              bool restrict              = false,
              unsigned int size          = 0);
 
-    Variable(const std::string& _name,
-             const std::string& _type,
-             bool               pointer,
-             bool restrict,
-             const Expression& _size);
-
     Variable(const Variable& v);
     Variable(Variable&& v) = default;
     Variable(const Variable& v, const Expression& _index);
@@ -313,24 +305,6 @@ public:
     CallExpr& operator=(const CallExpr&) = default;
 
     std::string render() const;
-};
-
-class ComplexMultiply
-{
-public:
-    static const unsigned int precedence = 5;
-    explicit ComplexMultiply(const std::vector<Expression>& args)
-        : args(args)
-    {
-    }
-    ComplexMultiply(ComplexMultiply&&)      = default;
-    ComplexMultiply(const ComplexMultiply&) = default;
-    ComplexMultiply& operator=(ComplexMultiply&&) = default;
-    ComplexMultiply& operator=(const ComplexMultiply&) = default;
-
-    std::string render() const;
-
-    std::vector<Expression> args;
 };
 
 class Ternary
@@ -416,9 +390,7 @@ class Parens
 public:
     static const unsigned int precedence = 0;
     explicit Parens(Expression&& inside);
-    explicit Parens(const Expression& inside);
     explicit Parens(std::vector<Expression>&& args);
-    explicit Parens(const std::vector<Expression>& args);
     Parens(Parens&&)      = default;
     Parens(const Parens&) = default;
     Parens& operator=(Parens&&) = default;
@@ -627,7 +599,6 @@ class StatementList;
 class Butterfly;
 class IntrinsicStore;
 class IntrinsicStorePlanar;
-class IntrinsicLoadToDest;
 
 struct LineBreak
 {
@@ -703,8 +674,7 @@ using Statement = std::variant<Assign,
                                SyncThreads,
                                Butterfly,
                                IntrinsicStore,
-                               IntrinsicStorePlanar,
-                               IntrinsicLoadToDest>;
+                               IntrinsicStorePlanar>;
 
 class Assign
 {
@@ -1064,34 +1034,6 @@ public:
     Expression rw_flag;
 };
 
-class IntrinsicLoadToDest
-{
-public:
-    IntrinsicLoadToDest(const Expression& dest,
-                        const Expression& data,
-                        const Expression& voffset,
-                        const Expression& soffset,
-                        const Expression& rw_flag)
-        : dest{dest}
-        , data{data}
-        , voffset{voffset}
-        , soffset{soffset}
-        , rw_flag{rw_flag}
-    {
-    }
-    std::string render() const
-    {
-        return "intrinsic_load_to_dest(" + vrender(dest) + "," + vrender(data) + ","
-               + vrender(voffset) + "," + vrender(soffset) + "," + vrender(rw_flag) + ");";
-    }
-
-    Expression dest;
-    Expression data;
-    Expression voffset;
-    Expression soffset;
-    Expression rw_flag;
-};
-
 // end of Statement class declarations
 
 static void operator+=(StatementList& stmts, const Statement& s)
@@ -1190,7 +1132,6 @@ struct BaseVisitor
     MAKE_VISITOR_OPERATOR(Expression, Ternary);
     MAKE_VISITOR_OPERATOR(Expression, LoadGlobal);
     MAKE_VISITOR_OPERATOR(Expression, LoadGlobalPlanar);
-    MAKE_VISITOR_OPERATOR(Expression, ComplexMultiply);
     MAKE_VISITOR_OPERATOR(Expression, TwiddleMultiply);
     MAKE_VISITOR_OPERATOR(Expression, TwiddleMultiplyConjugate);
     MAKE_VISITOR_OPERATOR(Expression, Parens);
@@ -1220,7 +1161,6 @@ struct BaseVisitor
     MAKE_VISITOR_OPERATOR(StatementList, Butterfly);
     MAKE_VISITOR_OPERATOR(StatementList, IntrinsicStore);
     MAKE_VISITOR_OPERATOR(StatementList, IntrinsicStorePlanar);
-    MAKE_VISITOR_OPERATOR(StatementList, IntrinsicLoadToDest);
 
     MAKE_VISITOR_OPERATOR(ArgumentList, ArgumentList);
 
@@ -1299,7 +1239,6 @@ struct BaseVisitor
     MAKE_EXPR_VISIT(LoadGlobal);
     MAKE_EXPR_VISIT(LoadGlobalPlanar);
 
-    MAKE_TRIVIAL_VISIT(Expression, ComplexMultiply);
     MAKE_TRIVIAL_VISIT(Expression, TwiddleMultiply);
     MAKE_TRIVIAL_VISIT(Expression, TwiddleMultiplyConjugate);
 
@@ -1322,7 +1261,6 @@ struct BaseVisitor
     MAKE_TRIVIAL_STATEMENT_VISIT(Break)
     MAKE_TRIVIAL_STATEMENT_VISIT(SyncThreads)
     MAKE_TRIVIAL_STATEMENT_VISIT(Butterfly);
-    MAKE_TRIVIAL_STATEMENT_VISIT(IntrinsicLoadToDest);
 
     MAKE_TRIVIAL_VISIT(Expression, Variable)
 
