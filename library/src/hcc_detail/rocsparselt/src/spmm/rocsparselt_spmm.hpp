@@ -116,90 +116,34 @@ inline rocsparselt_status rocsparselt_spmm_template(const char*                 
                                                     const int                       config_max_id,
                                                     const int search_iterations)
 {
-    rocsparselt_status rs_status = rocsparselt_status_not_implemented;
-
 #define EX_TYPECASTING_PARM                                                                                  \
     caller, handle, plan, alpha, beta, a, b, c, d, workspace, workspaceSize, streams, numStreams, config_id, \
         config_max_id, search_iterations
 
-    hipDataType              a_type       = plan->matmul_descr->matrix_A->type;
-    hipDataType              b_type       = plan->matmul_descr->matrix_B->type;
-    hipDataType              c_type       = plan->matmul_descr->matrix_C->type;
-    hipDataType              d_type       = plan->matmul_descr->matrix_D->type;
-    rocsparselt_compute_type compute_type = plan->matmul_descr->compute_type;
+    const hipDataType              a_type       = plan->matmul_descr->matrix_A->type;
+    const hipDataType              b_type       = plan->matmul_descr->matrix_B->type;
+    const hipDataType              c_type       = plan->matmul_descr->matrix_C->type;
+    const hipDataType              d_type       = plan->matmul_descr->matrix_D->type;
+    const rocsparselt_compute_type compute_type = plan->matmul_descr->compute_type;
 
-    if(a_type == HIP_R_16F && b_type == HIP_R_16F)
+    switch(is_matmul_datatype_valid(a_type, b_type, c_type, d_type, compute_type))
     {
-        if(c_type == HIP_R_16F && d_type == HIP_R_16F)
-        {
-            if(compute_type == rocsparselt_compute_f32)
-            {
-                rs_status = spmm_typecasting<__half, __half, float>(EX_TYPECASTING_PARM);
-            }
-        }
+    case MATMUL_DATATYPE_H_H_S:
+        return spmm_typecasting<__half, __half, float>(EX_TYPECASTING_PARM);
+    case MATMUL_DATATYPE_B_B_S:
+        return spmm_typecasting<hip_bfloat16, hip_bfloat16, float>(EX_TYPECASTING_PARM);
+    case MATMUL_DATATYPE_I8_I8_S:
+        return spmm_typecasting<int8_t, int8_t, float>(EX_TYPECASTING_PARM);
+    case MATMUL_DATATYPE_I8_H_S:
+        return spmm_typecasting<int8_t, __half, float>(EX_TYPECASTING_PARM);
+    case MATMUL_DATATYPE_I8_B_S:
+        return spmm_typecasting<int8_t, hip_bfloat16, float>(EX_TYPECASTING_PARM);
+    case MATMUL_DATATYPE_E4M3_S_S:
+        return spmm_typecasting<__hip_fp8_e4m3, float, float>(EX_TYPECASTING_PARM);
+    case MATMUL_DATATYPE_E5M2_S_S:
+        return spmm_typecasting<__hip_fp8_e5m2, float, float>(EX_TYPECASTING_PARM);
+    default:
+        return rocsparselt_status_not_implemented;
     }
-    else if(a_type == HIP_R_16BF && b_type == HIP_R_16BF)
-    {
-        if(c_type == HIP_R_16BF && d_type == HIP_R_16BF)
-        {
-            if(compute_type == rocsparselt_compute_f32)
-            {
-                rs_status
-                    = spmm_typecasting<hip_bfloat16, hip_bfloat16, float>(EX_TYPECASTING_PARM);
-            }
-        }
-    }
-    else if(a_type == HIP_R_8I && b_type == HIP_R_8I)
-    {
-        if(c_type == HIP_R_8I && d_type == HIP_R_8I)
-        {
-            if(compute_type == rocsparselt_compute_i32)
-            {
-                rs_status = spmm_typecasting<int8_t, int8_t, float>(EX_TYPECASTING_PARM);
-            }
-        }
-        else if(c_type == HIP_R_16F && d_type == HIP_R_16F)
-        {
-            if(compute_type == rocsparselt_compute_i32)
-            {
-                rs_status = spmm_typecasting<int8_t, __half, float>(EX_TYPECASTING_PARM);
-            }
-        }
-        else if(c_type == HIP_R_16BF && d_type == HIP_R_16BF)
-        {
-            if(compute_type == rocsparselt_compute_i32)
-            {
-                rs_status = spmm_typecasting<int8_t, hip_bfloat16, float>(EX_TYPECASTING_PARM);
-            }
-        }
-    }
-    else if(a_type == HIP_R_8F_E4M3 && b_type == HIP_R_8F_E4M3)
-    {
-        if(c_type == HIP_R_32F && d_type == HIP_R_32F)
-        {
-            if(compute_type == rocsparselt_compute_f32)
-            {
-                rs_status
-                    = spmm_typecasting<__hip_fp8_e4m3, float, float>(EX_TYPECASTING_PARM);
-            }
-        }
-    }
-    else if(a_type == HIP_R_8F_E5M2 && b_type == HIP_R_8F_E5M2)
-    {
-        if(c_type == HIP_R_32F && d_type == HIP_R_32F)
-        {
-            if(compute_type == rocsparselt_compute_f32)
-            {
-                rs_status
-                    = spmm_typecasting<__hip_fp8_e5m2, float, float>(EX_TYPECASTING_PARM);
-            }
-        }
-    }
-    else
-    {
-        rs_status = rocsparselt_status_not_implemented;
-    }
-
-    return rs_status;
 }
 #endif

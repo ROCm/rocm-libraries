@@ -347,43 +347,28 @@ inline rocsparselt_status validateMatmulDescrArgs(const _rocsparselt_handle* han
         return rocsparselt_status_invalid_size;
     }
 
-    switch(type_a)
+    switch(is_matmul_datatype_valid(type_a, type_b, type_c, type_d, compute_type))
     {
-    case HIP_R_16BF:
-    case HIP_R_16F:
-        if(!(type_a == type_b && type_a == type_c && type_a == type_d))
-        {
-            log_error(handle, __func__, "datatype of matrices are inconsistent");
-            return rocsparselt_status_not_implemented;
-        }
-    case HIP_R_8F_E4M3_FNUZ:
-    case HIP_R_8F_E5M2_FNUZ:
-    case HIP_R_8F_E4M3:
-    case HIP_R_8F_E5M2:
-        if(compute_type != rocsparselt_compute_f32)
-        {
-            log_error(handle, __func__, "computType must be f32");
-            return rocsparselt_status_not_implemented;
-        }
-        break;
-    case HIP_R_8I:
-        // I8/I8/I and I8/H/I
-        if(type_a != type_b || type_c != type_d
-           || (type_a != type_d && !((type_d == HIP_R_16F) || (type_d == HIP_R_16BF))))
-
-        {
-            log_error(handle, __func__, "datatype of matrices are inconsistent");
-            return rocsparselt_status_not_implemented;
-        }
-        if(compute_type != rocsparselt_compute_i32)
-        {
+    case MATMUL_DATATYPE_UNKNOWN:
+        if(type_a == HIP_R_8I && compute_type != rocsparselt_compute_i32)
             log_error(handle, __func__, "computType must be i32");
-            return rocsparselt_status_not_implemented;
+        else if(type_a != HIP_R_8I && compute_type != rocsparselt_compute_f32)
+            log_error(handle, __func__, "computType must be f32");
+        else
+        {
+            std::ostringstream stringStream;
+            stringStream << "datatype A=" << hipDataType_to_string(type_a);
+            stringStream << " B=" << hipDataType_to_string(type_b);
+            stringStream << " C=" << hipDataType_to_string(type_c);
+            stringStream << " D=" << hipDataType_to_string(type_d);
+            stringStream << " computeType=" << rocsparselt_compute_type_to_string(compute_type);
+            stringStream << " is not supported";
+            auto msg = stringStream.str();
+            log_error(handle, __func__, msg);
         }
-        break;
-    default:
-        log_error(handle, __func__, "datatype", hipDataType_to_string(type_a), "is not supported");
         return rocsparselt_status_not_implemented;
+    default:
+        break;
     }
 
     if((matrix_type_a != rocsparselt_matrix_type_structured
