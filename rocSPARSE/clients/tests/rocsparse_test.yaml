@@ -1,0 +1,156 @@
+# ########################################################################
+# Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+#
+# ########################################################################
+
+include: test_axpby.yaml
+include: test_axpyi.yaml
+include: test_doti.yaml
+include: test_dotci.yaml
+include: test_gather.yaml
+include: test_scatter.yaml
+include: test_gthr.yaml
+include: test_gthrz.yaml
+include: test_rot.yaml
+include: test_roti.yaml
+include: test_sctr.yaml
+include: test_bsrmv.yaml
+include: test_bsrxmv.yaml
+include: test_bsrsv.yaml
+include: test_coomv.yaml
+include: test_csrmv.yaml
+include: test_csrmv_managed.yaml
+include: test_csrsv.yaml
+include: test_csritsv.yaml
+include: test_ellmv.yaml
+include: test_hybmv.yaml
+include: test_gebsrmv.yaml
+include: test_bsrmm.yaml
+include: test_gebsrmm.yaml
+include: test_csrmm.yaml
+include: test_csrsm.yaml
+include: test_bsrsm.yaml
+include: test_gemmi.yaml
+include: test_bsrgeam.yaml
+include: test_bsrgemm.yaml
+include: test_csrgeam.yaml
+include: test_csrgemm.yaml
+include: test_csrgemm_reuse.yaml
+include: test_bsric0.yaml
+include: test_bsrilu0.yaml
+include: test_csric0.yaml
+include: test_csrilu0.yaml
+include: test_csritilu0.yaml
+include: test_csritilu0_ex.yaml
+include: test_gtsv.yaml
+include: test_gtsv_no_pivot.yaml
+include: test_gtsv_no_pivot_strided_batch.yaml
+include: test_gtsv_interleaved_batch.yaml
+include: test_gpsv_interleaved_batch.yaml
+include: test_nnz.yaml
+include: test_dense2csr.yaml
+include: test_dense2coo.yaml
+include: test_prune_dense2csr.yaml
+include: test_prune_dense2csr_by_percentage.yaml
+include: test_dense2csc.yaml
+include: test_csr2dense.yaml
+include: test_csc2dense.yaml
+include: test_coo2dense.yaml
+include: test_csr2coo.yaml
+include: test_csr2csc.yaml
+include: test_gebsr2gebsc.yaml
+include: test_csr2ell.yaml
+include: test_csr2hyb.yaml
+include: test_csr2bsr.yaml
+include: test_csr2gebsr.yaml
+include: test_coo2csr.yaml
+include: test_ell2csr.yaml
+include: test_hyb2csr.yaml
+include: test_bsr2csr.yaml
+include: test_gebsr2csr.yaml
+include: test_gebsr2gebsr.yaml
+include: test_csr2csr_compress.yaml
+include: test_prune_csr2csr.yaml
+include: test_prune_csr2csr_by_percentage.yaml
+include: test_identity.yaml
+include: test_inverse_permutation.yaml
+include: test_csrsort.yaml
+include: test_cscsort.yaml
+include: test_coosort.yaml
+include: test_csricsv.yaml
+include: test_csrilusv.yaml
+include: test_spvec_descr.yaml
+include: test_spmat_descr.yaml
+include: test_dnvec_descr.yaml
+include: test_dnmat_descr.yaml
+include: test_const_spvec_descr.yaml
+include: test_const_spmat_descr.yaml
+include: test_const_dnvec_descr.yaml
+include: test_const_dnmat_descr.yaml
+include: test_spmv_bsr.yaml
+include: test_spmv_coo.yaml
+include: test_spmv_coo_aos.yaml
+include: test_spmv_csr.yaml
+include: test_spmv_csc.yaml
+include: test_spmv_ell.yaml
+include: test_spsv_csr.yaml
+include: test_spitsv_csr.yaml
+include: test_spsv_coo.yaml
+include: test_spsm_csr.yaml
+include: test_spsm_coo.yaml
+include: test_spmm_bsr.yaml
+include: test_spmm_csr.yaml
+include: test_spmm_csc.yaml
+include: test_spmm_coo.yaml
+include: test_spmm_bell.yaml
+include: test_spmm_batched_csr.yaml
+include: test_spmm_batched_csc.yaml
+include: test_spmm_batched_coo.yaml
+include: test_spmm_batched_bell.yaml
+include: test_spvv.yaml
+include: test_sparse_to_dense_coo.yaml
+include: test_sparse_to_dense_csr.yaml
+include: test_sparse_to_dense_csc.yaml
+include: test_dense_to_sparse_coo.yaml
+include: test_dense_to_sparse_csr.yaml
+include: test_dense_to_sparse_csc.yaml
+include: test_sparse_to_sparse.yaml
+include: test_extract.yaml
+include: test_spgemm_bsr.yaml
+include: test_spgemm_csr.yaml
+include: test_spgemm_reuse_csr.yaml
+include: test_spgeam_csr.yaml
+include: test_spgeam_reuse_csr.yaml
+include: test_spgeam_csr_2.yaml
+include: test_spgeam_reuse_csr_2.yaml
+include: test_gemvi.yaml
+include: test_sddmm.yaml
+include: test_csrcolor.yaml
+include: test_copy_info.yaml
+include: test_check_matrix_csr.yaml
+include: test_check_matrix_coo.yaml
+include: test_check_matrix_gebsr.yaml
+include: test_check_matrix_gebsc.yaml
+include: test_check_matrix_csc.yaml
+include: test_check_matrix_ell.yaml
+include: test_check_matrix_hyb.yaml
+include: test_check_spmat.yaml
+include: test_bsrpad_value.yaml

@@ -1,0 +1,223 @@
+# ########################################################################
+# Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights Reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+#
+# ########################################################################
+
+---
+include: rocsparse_common.yaml
+
+
+Definitions:
+  - &M_N_range_quick
+    - { M:  50, N:  50 }
+    - { M: 187, N: 187 }
+
+  - &M_N_range_checkin
+    - { M:  -1, N:  -1 }
+    - { M:   0, N:   0 }
+    - { M:  79, N:  79 }
+    - { M: 428, N: 428 }
+
+  - &M_N_range_nightly
+    - { M:   9381, N:   9381 }
+    - { M:  37017, N:  37017 }
+    - { M: 505194, N: 505194 }
+
+  - &M_N_range_extra
+    - { M: 10, N: 10 }
+    - { M: 235, N: 235 }
+    - { M: 1200, N: 1200 }
+
+Tests:
+- name: csric0_bad_arg
+  category: pre_checkin
+  function: csric0_bad_arg
+  precision: *single_double_precisions_complex_real
+
+- name: csric0_extra
+  category: quick
+  M_N: *M_N_range_extra
+  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
+  spol: [rocsparse_solve_policy_auto]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  function: csric0_extra
+
+- name: csric0
+  category: quick
+  function: csric0
+  precision: *single_double_precisions_complex_real
+  M_N: *M_N_range_quick
+  transA: [rocsparse_operation_none]
+  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
+  spol: [rocsparse_solve_policy_auto]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_zero]
+
+- name: csric0
+  category: quick
+  function: csric0
+  precision: *single_double_precisions_complex_real
+  M_N: *M_N_range_quick
+  transA: [rocsparse_operation_none]
+  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
+  spol: [rocsparse_solve_policy_auto]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_random]
+
+- name: csric0
+  category: pre_checkin
+  function: csric0
+  precision: *double_only_precisions_complex
+  M_N: *M_N_range_checkin
+  transA: [rocsparse_operation_none]
+  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
+  spol: [rocsparse_solve_policy_auto]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_random]
+
+- name: csric0
+  category: nightly
+  function: csric0
+  precision: *single_double_precisions_complex_real
+  M_N: *M_N_range_nightly
+  transA: [rocsparse_operation_none]
+  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
+  spol: [rocsparse_solve_policy_auto]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_random]
+
+- name: csric0_file
+  category: quick
+  function: csric0
+  precision: *single_double_precisions
+  M: 1
+  N: 1
+  transA: [rocsparse_operation_none]
+  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
+  spol: [rocsparse_solve_policy_auto]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [mac_econ_fwd500,
+             nos4,
+             nos6,
+             scircuit]
+
+- name: csric0_file
+  category: pre_checkin
+  function: csric0
+  precision: *double_precision
+  M: 1
+  N: 1
+  transA: [rocsparse_operation_none]
+  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
+  spol: [rocsparse_solve_policy_auto]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [rma10,
+             mc2depi,
+             nos1,
+             nos2]
+
+- name: csric0_file
+  category: nightly
+  function: csric0
+  precision: *single_double_precisions
+  M: 1
+  N: 1
+  transA: [rocsparse_operation_none]
+  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
+  spol: [rocsparse_solve_policy_auto]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [amazon0312,
+             nos3,
+             nos5,
+             nos7]
+
+- name: csric0_file
+  category: nightly
+  function: csric0
+  precision: *single_double_precisions
+  M: 1
+  N: 1
+  transA: [rocsparse_operation_none]
+  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
+  spol: [rocsparse_solve_policy_auto]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [ASIC_320k,
+             Chebyshev4]
+  skip_hardware: gfx940, gfx941
+
+- name: csric0_file
+  category: quick
+  function: csric0
+  precision: *single_double_precisions_complex
+  M: 1
+  N: 1
+  transA: [rocsparse_operation_none]
+  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
+  spol: [rocsparse_solve_policy_auto]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [Chevron2]
+
+- name: csric0_file
+  category: pre_checkin
+  function: csric0
+  precision: *single_double_precisions_complex
+  M: 1
+  N: 1
+  transA: [rocsparse_operation_none]
+  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
+  spol: [rocsparse_solve_policy_auto]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [Chevron3]
+
+- name: csric0_file
+  category: nightly
+  function: csric0
+  precision: *single_double_precisions_complex
+  M: 1
+  N: 1
+  transA: [rocsparse_operation_none]
+  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
+  spol: [rocsparse_solve_policy_auto]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [Chevron4]
+
+- name: csric0_graph_test
+  category: pre_checkin
+  function: csric0
+  precision: *single_double_precisions_complex_real
+  M_N: *M_N_range_quick
+  transA: [rocsparse_operation_none]
+  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
+  spol: [rocsparse_solve_policy_auto]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_random]
+  graph_test: true
+
+- name: csric0_extra
+  category: pre_checkin
+  function: csric0_extra

@@ -1,0 +1,78 @@
+# ########################################################################
+# Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+#
+# ########################################################################
+
+---
+include: rocsparse_common.yaml
+
+
+Tests:
+- name: dense_to_sparse_coo_bad_arg
+  category: pre_checkin
+  function: dense_to_sparse_coo_bad_arg
+  indextype: *i32_i64
+  precision: *single_double_precisions_complex_real
+
+- name: dense_to_sparse_coo
+  category: quick
+  function: dense_to_sparse_coo
+  indextype: *i32_i64
+  precision: *single_double_precisions_complex_real
+  M: [0, 5, 17, 64, 128]
+  N: [0, 11, 17, 64, 128]
+  denseld: [57, 342]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  order: [rocsparse_order_row, rocsparse_order_column]
+
+- name: dense_to_sparse_coo
+  category: pre_checkin
+  function: dense_to_sparse_coo
+  indextype: *i32_i64
+  precision: *single_double_precisions_complex_real
+  M: [-1, 0, 341, 1000]
+  N: [-2, 0, 457]
+  denseld: [100, 1000]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  order: [rocsparse_order_row, rocsparse_order_column]
+
+- name: dense_to_sparse_coo
+  category: nightly
+  function: dense_to_sparse_coo
+  indextype: *i32_i64
+  precision: *single_double_precisions_complex_real
+  M: [2000, 4000]
+  N: [2000, 4000]
+  denseld: [ 8000 ]
+  baseA: [rocsparse_index_base_one]
+  order: [rocsparse_order_row, rocsparse_order_column]
+
+- name: dense_to_sparse_coo
+  category: stress
+  hardware: [gfx90a]
+  function: dense_to_sparse_coo
+  indextype: *i32
+  precision: *single_only_precisions
+  M: [2]
+  N: [2]
+  denseld: [ 2400000000 ]
+  baseA: [rocsparse_index_base_one]
+  order: [rocsparse_order_row, rocsparse_order_column]

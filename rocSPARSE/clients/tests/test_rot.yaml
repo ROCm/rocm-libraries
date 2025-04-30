@@ -1,0 +1,70 @@
+# ########################################################################
+# Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+#
+# ########################################################################
+
+---
+include: rocsparse_common.yaml
+
+
+Tests:
+- name: rot_bad_arg
+  category: pre_checkin
+  function: rot_bad_arg
+  indextype: *i32_i64
+  precision: *single_double_precisions_complex_real
+
+- name: rot
+  category: quick
+  function: rot
+  indextype: *i32_i64
+  precision: *single_double_precisions_complex_real
+  M: [1200]
+  nnz: [5, 10, 500]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+
+- name: rot
+  category: pre_checkin
+  function: rot
+  indextype: *i32_i64
+  precision: *single_double_precisions_complex_real
+  M: [15332, 22031, 31958]
+  nnz: [0, 1543, 7111, 10000]
+  baseA: [rocsparse_index_base_one]
+
+- name: rot
+  category: nightly
+  function: rot
+  indextype: *i32_i64
+  precision: *single_double_precisions_complex_real
+  M: [735519, 1452387, 7834525]
+  nnz: [23512, 84412, 311983]
+  baseA: [rocsparse_index_base_zero]
+
+- name: rot_graph_test
+  category: pre_checkin
+  function: rot
+  indextype: *i32_i64
+  precision: *single_double_precisions_complex_real
+  M: [1200]
+  nnz: [5, 10, 500]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  graph_test: true

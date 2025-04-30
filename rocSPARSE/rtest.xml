@@ -1,0 +1,28 @@
+<testset>
+    <fileversion>0.1</fileversion>
+    <var name="COMMAND" value="rocsparse-test --gtest_color=yes --gtest_output=xml"></var>
+    <var name="GTEST_FILTER" value="*"></var>
+    <test sets="psdb">
+        <run name="quick_pre_checkin">{COMMAND}:output_psdb.xml --gtest_filter=*quick*:*pre_checkin*</run>
+    </test>
+    <test sets="osdb">
+        <run name="nightly">{COMMAND}:output_osdb.xml --gtest_filter=*nightly*:*pre_checkin*</run>
+    </test>
+    <test sets="custom">
+        <run name="custom_filter">{COMMAND}:output_custom.xml --gtest_filter={GTEST_FILTER}</run>
+    </test>
+    <test sets="hmm">
+        <!-- * This test suite should be run with the command : -->
+        <!-- HSA_XNACK=1 rtest.py -t hmm [...] -->
+        <run name="managed_memory">{COMMAND}:output_hmm.xml --gtest_filter=*csrmv_managed*</run>
+    </test>
+    <test sets="smoke">
+        <run name="smoke_test">GTEST_LISTENER=NO_PASS_LINE_IN_LOG {COMMAND}:output_smoke.xml --yaml rocsparse_smoke.yaml</run>
+    </test>
+    <test sets="regression">
+        <run name="regression_test">GTEST_LISTENER=NO_PASS_LINE_IN_LOG {COMMAND}:output_regression.xml --matrices-dir ../matrices --yaml rocsparse_regression.yaml</run>
+    </test>
+    <test sets="extended">
+        <run name="extended_test">GTEST_LISTENER=NO_PASS_LINE_IN_LOG {COMMAND}:output_extended.xml --matrices-dir ../matrices --yaml rocsparse_extended.yaml</run>
+    </test>
+</testset>

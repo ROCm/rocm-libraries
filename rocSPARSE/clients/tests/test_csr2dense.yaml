@@ -1,0 +1,69 @@
+# ########################################################################
+# Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights Reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+#
+# ########################################################################
+
+---
+include: rocsparse_common.yaml
+
+
+Tests:
+- name: csr2dense_bad_arg
+  category: pre_checkin
+  function: csr2dense_bad_arg
+  precision: *single_double_precisions_complex_real
+
+- name: csr2dense
+  category: quick
+  function: csr2dense
+  precision: *single_double_precisions_complex_real
+  M: [0, 3, 8, 13, 64, 256]
+  N: [0, 3, 8, 13, 64, 256]
+  denseld: [-8, 64, 512]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+
+- name: csr2dense
+  category: pre_checkin
+  function: csr2dense
+  precision: *single_double_precisions_complex_real
+  M: [0, 531, 1000]
+  N: [0, 241, 1000]
+  denseld: [100, 1000, 2000]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+
+- name: csr2dense
+  category: pre_checkin
+  function: csr2dense
+  precision: *single_double_precisions_complex_real
+  M: [0, 531, 1000]
+  N: [0, 241, 1000]
+  denseld: [100, 1000, 2000]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  graph_test: true
+
+- name: csr2dense
+  category: nightly
+  function: csr2dense
+  precision: *single_double_precisions_complex_real
+  M: [2000, 4000, 8000]
+  N: [2000, 4000]
+  denseld: [ 8000 ]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]

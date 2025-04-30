@@ -1,0 +1,92 @@
+# ########################################################################
+# Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+#
+# ########################################################################
+
+---
+include: rocsparse_common.yaml
+
+
+Tests:
+- name: prune_dense2csr_by_percentage_bad_arg
+  category: pre_checkin
+  function: prune_dense2csr_by_percentage_bad_arg
+  precision: *single_double_precisions
+
+- name: prune_dense2csr_by_percentage
+  category: quick
+  function: prune_dense2csr_by_percentage
+  precision: *single_double_precisions
+  M: [3, 8, 13, 64, 256]
+  N: [3, 8, 13, 64, 256]
+  denseld: [-8, 64, 512]
+  percentage: [0.0, 10.0, 20.0, 50.0, 100.0]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+
+- name: prune_dense2csr_by_percentage
+  category: pre_checkin
+  function: prune_dense2csr_by_percentage
+  precision: *single_double_precisions
+  M: [531, 1000]
+  N: [241, 1000]
+  denseld: [100, 1000, 2000]
+  percentage: [0.1, 33.0, 100.0]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+
+- name: prune_dense2csr_by_percentage
+  category: nightly
+  function: prune_dense2csr_by_percentage
+  precision: *single_double_precisions
+  M: [2000, 4000, 8000]
+  N: [2000, 4000]
+  denseld: [ 8000 ]
+  percentage: [45.0, 15.0, 90.0]
+  baseA: [rocsparse_index_base_zero]
+
+- name: prune_dense2csr_by_percentage
+  category: quick
+  function: prune_dense2csr_by_percentage
+  precision: *single_double_precisions
+  M: [5, 7, 10]
+  N: [2, 17, 33]
+  denseld: [50]
+  percentage: [67.0, 35.0, 99.0, 100.0]
+  baseA: [rocsparse_index_base_one]
+
+- name: prune_dense2csr_by_percentage
+  category: pre_checkin
+  function: prune_dense2csr_by_percentage
+  precision: *single_double_precisions
+  M: [500, 872]
+  N: [242, 623]
+  denseld: [500]
+  percentage: [0.0, 55.0]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+
+- name: prune_dense2csr_by_percentage
+  category: nightly
+  function: prune_dense2csr_by_percentage
+  precision: *single_double_precisions
+  M: [1000]
+  N: [1000]
+  denseld: [ 1000 ]
+  percentage: [100.0, 88.0]
+  baseA: [rocsparse_index_base_one]
