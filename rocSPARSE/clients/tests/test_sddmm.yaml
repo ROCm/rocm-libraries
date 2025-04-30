@@ -1,0 +1,226 @@
+# ########################################################################
+# Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+#
+# ########################################################################
+
+---
+include: rocsparse_common.yaml
+
+
+Definitions:
+  - &alpha_beta_range_quick
+    - { alpha:   1.0, beta: -1.0, alphai:  1.0, betai: -0.5 }
+    - { alpha:   2.0, beta: -2.0, alphai:  2.0, betai: -1.5 }
+  - &alpha_beta_range_pre_checkin
+    - { alpha:   0.0, beta:  1.0, alphai:  1.0, betai: -0.5 }
+    - { alpha:   2.0, beta: -2.0, alphai:  1.0, betai: -0.5 }
+
+Tests:
+#
+# CHECKIN
+#
+- name: sddmm_bad_arg
+  category: pre_checkin
+  function: sddmm_bad_arg
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions_complex_real
+  formatC: [rocsparse_format_coo,rocsparse_format_coo_aos,rocsparse_format_csr,rocsparse_format_csc,rocsparse_format_ell]
+
+- name: sddmm
+  category: pre_checkin
+  function: sddmm
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions_complex_real
+  M: [2,4,8]
+  N: [1,4,8]
+  K: [1,2,8]
+  alpha_beta: *alpha_beta_range_pre_checkin
+  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
+  transB: [rocsparse_operation_none, rocsparse_operation_transpose]
+  baseC: [rocsparse_index_base_one]
+  order: [rocsparse_order_row]
+  sddmm_alg: [rocsparse_sddmm_alg_default, rocsparse_sddmm_alg_dense]
+  matrix: [rocsparse_matrix_random]
+  formatC: [rocsparse_format_coo,rocsparse_format_coo_aos,rocsparse_format_csr,rocsparse_format_csc,rocsparse_format_ell]
+
+- name: sddmm
+  category: pre_checkin
+  function: sddmm
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions
+  M: [256, 512]
+  N: [256, 512]
+  K: [512]
+  alpha_beta: *alpha_beta_range_pre_checkin
+  transA: [rocsparse_operation_transpose]
+  transB: [rocsparse_operation_none]
+  baseC: [rocsparse_index_base_zero]
+  order: [rocsparse_order_column]
+  sddmm_alg: [rocsparse_sddmm_alg_default, rocsparse_sddmm_alg_dense]
+  matrix: [rocsparse_matrix_random]
+  formatC: [rocsparse_format_coo,rocsparse_format_coo_aos,rocsparse_format_csr,rocsparse_format_csc,rocsparse_format_ell]
+
+- name: sddmm_file
+  category: pre_checkin
+  function: sddmm
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions
+  M: 1
+  N: 1
+  K: [4, 8]
+  alpha_beta: *alpha_beta_range_pre_checkin
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_transpose]
+  baseA: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  sddmm_alg: [rocsparse_sddmm_alg_default, rocsparse_sddmm_alg_dense]
+  order: [rocsparse_order_column]
+  filename: [nos3,
+             nos4]
+  formatC: [rocsparse_format_coo,rocsparse_format_coo_aos,rocsparse_format_csr,rocsparse_format_csc,rocsparse_format_ell]
+
+- name: sddmm
+  category: pre_checkin
+  function: sddmm
+  indextype: *i32i32_i64i32_i64i64
+  precision: *float16_float16_float32_float32_abct_precision
+  M: [457, 879]
+  N: [254, 586]
+  K: [310, 708]
+  alpha_beta: *alpha_beta_range_pre_checkin
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseC: [rocsparse_index_base_zero]
+  order: [rocsparse_order_column]
+  sddmm_alg: [rocsparse_sddmm_alg_default, rocsparse_sddmm_alg_dense]
+  matrix: [rocsparse_matrix_random]
+  formatC: [rocsparse_format_coo,rocsparse_format_coo_aos,rocsparse_format_csr,rocsparse_format_csc,rocsparse_format_ell]
+
+- name: sddmm_graph_test
+  category: pre_checkin
+  function: sddmm
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions
+  M: [12, 16, 43]
+  N: [93, 130, 220]
+  K: [3, 34, 59]
+  alpha_beta: *alpha_beta_range_pre_checkin
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseC: [rocsparse_index_base_zero]
+  order: [rocsparse_order_column]
+  sddmm_alg: [rocsparse_sddmm_alg_default]
+  matrix: [rocsparse_matrix_random]
+  formatC: [rocsparse_format_coo,rocsparse_format_coo_aos,rocsparse_format_csr,rocsparse_format_csc,rocsparse_format_ell]
+  graph_test: true
+
+#
+# QUICK
+#
+- name: sddmm_file
+  category: quick
+  function: sddmm
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions
+  M: 1
+  N: 1
+  K: [4, 8]
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_transpose]
+  baseA: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  sddmm_alg: [rocsparse_sddmm_alg_default, rocsparse_sddmm_alg_dense]
+  order: [rocsparse_order_column]
+  filename: [nos1,
+             nos2]
+  formatC: [rocsparse_format_coo,rocsparse_format_coo_aos,rocsparse_format_csr,rocsparse_format_csc,rocsparse_format_ell]
+
+- name: sddmm
+  category: quick
+  function: sddmm
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions
+  M: [12, 16, 43]
+  N: [93, 130, 220]
+  K: [3, 34, 59]
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseC: [rocsparse_index_base_zero]
+  order: [rocsparse_order_column]
+  sddmm_alg: [rocsparse_sddmm_alg_default, rocsparse_sddmm_alg_dense]
+  matrix: [rocsparse_matrix_random]
+  formatC: [rocsparse_format_coo,rocsparse_format_coo_aos,rocsparse_format_csr,rocsparse_format_csc,rocsparse_format_ell]
+
+- name: sddmm
+  category: quick
+  function: sddmm
+  indextype: *i32i32_i64i32_i64i64
+  precision: *float16_float16_float32_float32_abct_precision
+  M: [44, 88]
+  N: [103, 257]
+  K: [32, 128]
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseC: [rocsparse_index_base_zero]
+  order: [rocsparse_order_column]
+  sddmm_alg: [rocsparse_sddmm_alg_default, rocsparse_sddmm_alg_dense]
+  matrix: [rocsparse_matrix_random]
+  formatC: [rocsparse_format_coo,rocsparse_format_coo_aos,rocsparse_format_csr,rocsparse_format_csc,rocsparse_format_ell]
+
+#
+# NIGHTLY
+#
+- name: sddmm
+  category: nightly
+  function: sddmm
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions
+  M: [1000]
+  N: [1000]
+  K: [40000]
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_one]
+  transB: [rocsparse_operation_none]
+  order: [rocsparse_order_column]
+  sddmm_alg: [rocsparse_sddmm_alg_default, rocsparse_sddmm_alg_dense]
+  matrix: [rocsparse_matrix_random]
+  formatC: [rocsparse_format_coo,rocsparse_format_coo_aos,rocsparse_format_csr,rocsparse_format_csc,rocsparse_format_ell]
+
+- name: sddmm
+  category: nightly
+  function: sddmm
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions
+  M: [400000]
+  N: [400000]
+  K: [32, 64]
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_one]
+  transB: [rocsparse_operation_none]
+  order: [rocsparse_order_column]
+  sddmm_alg: [rocsparse_sddmm_alg_default]
+  matrix: [rocsparse_matrix_random]
+  formatC: [rocsparse_format_coo,rocsparse_format_coo_aos,rocsparse_format_csr,rocsparse_format_csc,rocsparse_format_ell]

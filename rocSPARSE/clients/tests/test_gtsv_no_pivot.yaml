@@ -1,0 +1,123 @@
+# ########################################################################
+# Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights Reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+#
+# ########################################################################
+
+---
+include: rocsparse_common.yaml
+
+
+Tests:
+- name: gtsv_no_pivot_bad_arg
+  category: pre_checkin
+  function: gtsv_no_pivot_bad_arg
+  precision: *single_double_precisions_complex_real
+
+- name: gtsv_no_pivot
+  category: quick
+  function: gtsv_no_pivot
+  precision: *single_double_precisions_complex_real
+  M: [2, 3, 7, 11, 17, 32, 77, 142, 231]
+  N: [0, 1, 2, 3, 10, 45, 111, 213]
+  denseld: [-8, 64, 512, 1024]
+  matrix: [rocsparse_matrix_random]
+
+- name: gtsv_no_pivot
+  category: pre_checkin
+  function: gtsv_no_pivot
+  precision: *single_double_precisions_complex_real
+  M: [256, 456, 1107, 1804, 3380]
+  N: [1, 27, 299]
+  denseld: [200, 800, 1600]
+  matrix: [rocsparse_matrix_random]
+
+- name: gtsv_no_pivot
+  category: nightly
+  function: gtsv_no_pivot
+  precision: *single_double_precisions_complex_real
+  M: [12057, 17283, 34905, 77043]
+  N: [12, 15, 21]
+  denseld: [20000, 40000, 80000]
+  matrix: [rocsparse_matrix_random]
+
+- name: gtsv_no_pivot
+  category: quick
+  function: gtsv_no_pivot
+  precision: *single_double_precisions_complex_real
+  M: [2, 4, 8, 16, 32, 64]
+  N: [2, 4, 8, 16, 32, 64]
+  denseld: [2, 4, 8, 16, 32, 64]
+  matrix: [rocsparse_matrix_random]
+
+- name: gtsv_no_pivot
+  category: pre_checkin
+  function: gtsv_no_pivot
+  precision: *single_double_precisions
+  M: [128, 256, 512, 1024]
+  N: [32, 45, 128]
+  denseld: [128, 256, 512, 1024]
+  matrix: [rocsparse_matrix_random]
+
+- name: gtsv_no_pivot
+  category: nightly
+  function: gtsv_no_pivot
+  precision: *single_double_precisions
+  M: [2048, 4096, 8192, 16384]
+  N: [256, 512]
+  denseld: [2048, 4096, 8192, 16384]
+  matrix: [rocsparse_matrix_random]
+
+- name: gtsv_no_pivot
+  category: quick
+  function: gtsv_no_pivot
+  precision: *single_double_precisions_complex_real
+  M: [131072, 424576, 1048576]
+  N: [1, 2]
+  denseld: [131072, 424576, 1048576]
+  matrix: [rocsparse_matrix_random]
+
+- name: gtsv_no_pivot
+  category: pre_checkin
+  function: gtsv_no_pivot
+  precision: *single_double_precisions
+  M: [231772, 262144, 1143576]
+  N: [32]
+  denseld: [231772, 262144, 1143576]
+  matrix: [rocsparse_matrix_random]
+
+- name: gtsv_no_pivot
+  category: nightly
+  function: gtsv_no_pivot
+  precision: *single_double_precisions
+  M: [4194304]
+  N: [7]
+  denseld: [4194304]
+  matrix: [rocsparse_matrix_random]
+
+- name: gtsv_no_pivot_graph_test
+  category: pre_checkin
+  function: gtsv_no_pivot
+  precision: *single_double_precisions_complex_real
+  M: [131072, 424576, 1048576]
+  N: [1, 2]
+  denseld: [131072, 424576, 1048576]
+  matrix: [rocsparse_matrix_random]
+  graph_test: true
