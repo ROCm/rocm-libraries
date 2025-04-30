@@ -1,0 +1,173 @@
+TestParameters:
+  marks: [skip-gfx950, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported yet
+
+GlobalParameters:
+  NumElementsToValidate: -1
+  MinimumRequiredVersion: 4.14.0
+  PrintLevel: 1
+  PrintSolutionRejectionReason: True
+  Device: 0
+  CMakeBuildType: Release
+  KernelTime: True
+  MaxWorkspaceSize: 13421772800
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 0
+  DataInitTypeA: 1
+  DataInitTypeB: 1
+
+BenchmarkProblems:
+  ########################################
+  # NN - standard
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: d
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: False
+      B2BGemm: False
+
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+      ForkParameters:
+        - KernelLanguage: ["Assembly"]
+        - DepthU: [8, 16]
+        - GlobalSplitU: [1]
+        - ScheduleIterAlg: [3]
+        - MatrixInstruction:
+          - [16, 16, 4, 1, 1, 1, 1, 1, 1]
+        - AssertFree0ElementMultiple: [1]
+        - VectorWidthA: [1, 2]
+        - VectorWidthB: [1, 2]
+        - GlobalSplitU: [1,2]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel"]
+        - SourceSwap: [0,1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 1024]
+          - Exact: [4608, 1335, 1, 640]
+
+  ########################################
+  # TN - standard
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: d
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: False
+      B2BGemm: False
+
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+      ForkParameters:
+        - KernelLanguage: ["Assembly"]
+        - DepthU: [8, 16]
+        - GlobalSplitU: [1]
+        - ScheduleIterAlg: [3]
+        - MatrixInstruction:
+          - [16, 16, 4, 1, 1, 1, 1, 1, 1]
+        - AssertFree0ElementMultiple: [1]
+        - VectorWidthA: [1, 2]
+        - VectorWidthB: [1, 2]
+        - GlobalSplitU: [1,2]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel"]
+        - SourceSwap: [0,1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 1024]
+          - Exact: [4608, 1335, 1, 640]
+
+  ########################################
+  # NT - standard
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: d
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+      Activation: False
+      B2BGemm: False
+
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+      ForkParameters:
+        - KernelLanguage: ["Assembly"]
+        - DepthU: [8, 16]
+        - GlobalSplitU: [1]
+        - ScheduleIterAlg: [3]
+        - MatrixInstruction:
+          - [16, 16, 4, 1, 1, 1, 1, 1, 1]
+        - AssertFree0ElementMultiple: [1]
+        - VectorWidthA: [1, 2]
+        - VectorWidthB: [1, 2]
+        - GlobalSplitU: [1,2]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel"]
+        - SourceSwap: [0,1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 1024]
+          - Exact: [4608, 1335, 1, 640]
+
+  ########################################
+  # TT - standard
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: d
+      TransposeA: True
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+      Activation: False
+      B2BGemm: False
+
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+      ForkParameters:
+        - KernelLanguage: ["Assembly"]
+        - DepthU: [8, 16]
+        - GlobalSplitU: [1]
+        - ScheduleIterAlg: [3]
+        - MatrixInstruction:
+          - [16, 16, 4, 1, 1, 1, 1, 1, 1]
+        - AssertFree0ElementMultiple: [1]
+        - VectorWidthA: [1, 2]
+        - VectorWidthB: [1, 2]
+        - GlobalSplitU: [1,2]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel"]
+        - SourceSwap: [0,1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 1024]
+          - Exact: [4608, 1335, 1, 640]

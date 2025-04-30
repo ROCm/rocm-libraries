@@ -1,0 +1,401 @@
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
+
+GlobalParameters:
+  NumElementsToValidate: -1
+  MinimumRequiredVersion: 4.14.0
+  PrintLevel: 1
+  #PrintSolutionRejectionReason: True
+  Device: 0
+  CMakeBuildType: Release
+  KernelTime: True
+  MaxWorkspaceSize: 13421772800
+  DataInitTypeA: 13
+  DataInitTypeB: 12
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 1
+  DataInitTypeBias: 13
+  DataInitTypeScaleAlphaVec: 12
+  BoundsCheck: 2
+  #MaxFileName: 256
+
+BenchmarkProblems:
+  ########################################
+  # HHS TN DTVB + SWIZZLED_B + BIAS + Activation + SAV
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 0
+      SwizzleTensorB: True
+      UseBeta: True
+      Batched: True
+      UseBias: 1
+      Activation: True
+      BiasDataTypeList: ['h']
+      UseScaleAlphaVec: 1
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 16, 1,  1,   1, 1,  1,4 ] # MT = 16x64
+          - [16, 16, 16, 1,  1,   1, 2,  1,4 ] # MT = 16x128
+          - [16, 16, 16, 1,  1,   1, 4,  1,4 ] # MT = 16x256
+          - [16, 16, 16, 1,  1,   1, 8,  1,4 ] # MT = 16x512
+          - [16, 16, 16, 1,  1,   1, 5,  1,2 ] # MT = 16x160
+
+          - [16, 16, 16, 1,  1,   8,  1,  1,4 ] # MT = 128x64
+          - [16, 16, 16, 1,  1,   16, 1,  1,4 ] # MT = 256x64
+          - [16, 16, 16, 1,  1,   8,  2,  1,4 ] # MT = 128x128
+          - [16, 16, 16, 1,  1,   16, 2,  1,4 ] # MT = 256x128
+          - [16, 16, 16, 1,  1,   8,  4,  1,4 ] # MT = 128x256
+          - [16, 16, 16, 1,  1,   16, 4,  1,4 ] # MT = 256x256
+          - [16, 16, 16, 1,  1,   8,  8,  1,4 ] # MT = 128x512
+          - [16, 16, 16, 1,  1,   16, 8,  1,4 ] # MT = 256x512
+          - [16, 16, 16, 1,  1,   8,  5,  1,2 ] # MT = 128x160
+
+          - [16, 16, 16, 1,  1,   4, 2,   2,2 ] # MT = 128x64
+          - [16, 16, 16, 1,  1,   8, 2,   2,2 ] # MT = 256x64
+          - [16, 16, 16, 1,  1,   4, 4,   2,2 ] # MT = 128x128
+          - [16, 16, 16, 1,  1,   8, 4,   2,2 ] # MT = 256x128
+          - [16, 16, 16, 1,  1,   4, 8,   2,2 ] # MT = 128x256
+          - [16, 16, 16, 1,  1,   8, 8,   2,2 ] # MT = 256x256
+          - [16, 16, 16, 1,  1,   4, 16,  2,2 ] # MT = 128x512
+          - [16, 16, 16, 1,  1,   8, 16,  2,2 ] # MT = 256x512
+          - [16, 16, 16, 1,  1,   4, 5,   2,2 ] # MT = 128x160
+
+          - [16, 16, 16, 1,  1,   2, 4,   4,1 ] # MT = 128x64
+          - [16, 16, 16, 1,  1,   4, 4,   4,1 ] # MT = 256x64
+          - [16, 16, 16, 1,  1,   2, 8,   4,1 ] # MT = 128x128
+          - [16, 16, 16, 1,  1,   4, 8,   4,1 ] # MT = 256x128
+          - [16, 16, 16, 1,  1,   2, 16,  4,1 ] # MT = 128x256
+          - [16, 16, 16, 1,  1,   4, 16,  4,1 ] # MT = 256x256
+          - [16, 16, 16, 1,  1,   2, 10,  4,1 ] # MT = 128x160
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [8]
+        - PrefetchGlobalRead: [1,2]
+        - PrefetchLocalRead: [1,4]
+        - ClusterLocalRead: [1]
+        - NumElementsPerBatchStore: [0]
+        - DepthU: [32,64,128]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [1]
+        - LocalWritePerMfma: [-1]
+        - StaggerU: [4]
+        - StaggerUStride: [256]
+        - StaggerUMapping: [0]
+        - WorkGroupMappingXCC: [8]
+        - ScheduleIterAlg: [3]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - StorePriorityOpt: [0]
+        - VectorStore: [-1]
+        - StoreSyncOpt: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - 1LDSBuffer: [1]
+        - GlobalSplitU: [1,3]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel"]
+        - LocalReadVectorWidth: [2,4,8]
+        - DirectToVgprB: [1]
+        - UseSgprForGRO: [0,1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 160,   1, 224]
+          - Exact: [256, 160,   1, 256]
+          - Exact: [256, 160,   1, 288]
+          - Exact: [512, 1600,  1, 992]
+          - Exact: [512, 1600,  1, 1024]
+          - Exact: [512, 1600,  1, 1056]
+          - Exact: [256, 512,   1, 224]
+          - Exact: [256, 512,   1, 256]
+          - Exact: [256, 512,   1, 288]
+          - Exact: [127, 127, 1, 127]
+          - Exact: [128, 127, 1, 127]
+          - Exact: [127, 128, 1, 127]
+          - Exact: [1, 127, 1, 127]
+          - Exact: [127, 1, 1, 127]
+        - BiasTypeArgs: ['h']
+        - ActivationArgs:
+          - [Enum: relu]
+
+  ########################################
+  # BBS TN DTVB + SWIZZLED_B
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 0
+      SwizzleTensorB: True
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 16, 1,  1,   8,  1, 1,4 ] # MT = 128x64
+          - [16, 16, 16, 1,  1,   16, 1, 1,4 ] # MT = 256x64
+          - [16, 16, 16, 1,  1,   8,  2, 1,4 ] # MT = 128x128
+          - [16, 16, 16, 1,  1,   16, 2, 1,4 ] # MT = 256x128
+
+          - [16, 16, 16, 1,  1,   4,  2, 2,2 ] # MT = 128x64
+          - [16, 16, 16, 1,  1,   8,  2, 2,2 ] # MT = 256x64
+          - [16, 16, 16, 1,  1,   4,  4, 2,2 ] # MT = 128x128
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [8]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
+        - NumElementsPerBatchStore: [0]
+        - DepthU: [32,64]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [1,2]
+        - LocalWritePerMfma: [-1]
+        - StaggerU: [4]
+        - StaggerUStride: [256]
+        - StaggerUMapping: [0]
+        - WorkGroupMappingXCC: [8]
+        - ScheduleIterAlg: [3]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - StorePriorityOpt: [0]
+        - VectorStore: [-1]
+        - StoreSyncOpt: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - 1LDSBuffer: [1]
+        - GlobalSplitU: [1,3]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
+        - LocalReadVectorWidth: [2,4,8]
+        - DirectToVgprB: [1]
+        - UseSgprForGRO: [0,1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256,   160, 1, 224]
+          - Exact: [256,   160, 1, 256]
+          - Exact: [256,   160, 1, 288]
+          - Exact: [127, 127, 1, 127]
+          - Exact: [127, 128, 1, 127]
+          - Exact: [1, 127, 1, 127]
+          - Exact: [127, 1, 1, 127]
+
+  ########################################
+  # F8B8NHS TN DTVB + SWIZZLED_B
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8B8N
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 0
+      SwizzleTensorB: True
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1,   8,  1,  1,4 ] # MT = 128x64
+          - [16, 16, 32, 1,  1,   16, 1,  1,4 ] # MT = 256x64
+          - [16, 16, 32, 1,  1,   8,  2,  1,4 ] # MT = 128x128
+          - [16, 16, 32, 1,  1,   16, 2,  1,4 ] # MT = 256x128
+
+          - [16, 16, 32, 1,  1,   4,  16, 2,2 ] # MT = 128x512
+          - [16, 16, 32, 1,  1,   8,  16, 2,2 ] # MT = 256x512
+          - [16, 16, 32, 1,  1,   4,  5,  2,2 ] # MT = 128x160
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [16]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
+        - NumElementsPerBatchStore: [0]
+        - DepthU: [64,128]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [1,4]
+        - LocalWritePerMfma: [-1]
+        - StaggerU: [4]
+        - StaggerUStride: [256]
+        - StaggerUMapping: [0]
+        - WorkGroupMappingXCC: [8]
+        - ScheduleIterAlg: [3]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - StorePriorityOpt: [0]
+        - VectorStore: [-1]
+        - StoreSyncOpt: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - 1LDSBuffer: [1]
+        - GlobalSplitU: [1,3]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
+        - LocalReadVectorWidth: [16]
+        - DirectToVgprB: [1]
+        - UseSgprForGRO: [0,1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256,   160, 1, 224]
+          - Exact: [256,   160, 1, 256]
+          - Exact: [256,   160, 1, 288]
+          - Exact: [127, 127, 1, 127]
+          - Exact: [127, 128, 1, 127]
+          - Exact: [1, 127, 1, 127]
+          - Exact: [127, 1, 1, 127]
+
+  ########################################
+  # XFloat TN DTVB + SWIZZLED_B
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      DestDataType: s
+      ComputeDataType: s
+      F32XdlMathOp: X
+      HighPrecisionAccumulate: False
+      TransposeA: 1
+      TransposeB: 0
+      SwizzleTensorB: True
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 8, 1,  1,   16, 4, 1,4 ] # MT = 256x256
+          - [16, 16, 8, 1,  1,   8,  8, 1,4 ] # MT = 128x512
+          - [16, 16, 8, 1,  1,   16, 8, 1,4 ] # MT = 256x512
+          - [16, 16, 8, 1,  1,   8,  5, 1,2 ] # MT = 128x160
+
+          - [16, 16, 8, 1,  1,   8,  4, 2,2 ] # MT = 256x128
+          - [16, 16, 8, 1,  1,   4,  8, 2,2 ] # MT = 128x256
+          - [16, 16, 8, 1,  1,   8,  8, 2,2 ] # MT = 256x256
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [4]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
+        - NumElementsPerBatchStore: [0]
+        - DepthU: [32,64]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [1,8]
+        - LocalWritePerMfma: [-1]
+        - StaggerU: [4]
+        - StaggerUStride: [256]
+        - StaggerUMapping: [0]
+        - WorkGroupMappingXCC: [8]
+        - ScheduleIterAlg: [3]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - StorePriorityOpt: [0]
+        - VectorStore: [-1]
+        - StoreSyncOpt: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - 1LDSBuffer: [1]
+        - GlobalSplitU: [1,3]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
+        - LocalReadVectorWidth: [2,4,8]
+        - DirectToVgprB: [1]
+        - UseSgprForGRO: [0,1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256,   160, 1, 224]
+          - Exact: [256,   160, 1, 256]
+          - Exact: [256,   160, 1, 288]
+          - Exact: [127, 127, 1, 127]
+          - Exact: [127, 128, 1, 127]
+          - Exact: [1, 127, 1, 127]
+          - Exact: [127, 1, 1, 127]
+
+  ########################################
+  # SSS TN DTVB + SWIZZLED_B
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: False
+      TransposeA: 1
+      TransposeB: 0
+      SwizzleTensorB: True
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 4, 1,  1,   8,  2,  1,4 ] # MT = 128x128
+          - [16, 16, 4, 1,  1,   16, 2,  1,4 ] # MT = 256x128
+          - [16, 16, 4, 1,  1,   8,  4,  1,4 ] # MT = 128x256
+          - [16, 16, 4, 1,  1,   16, 4,  1,4 ] # MT = 256x256
+
+          - [16, 16, 4, 1,  1,   4,  16, 2,2 ] # MT = 128x512
+          - [16, 16, 4, 1,  1,   8,  16, 2,2 ] # MT = 256x512
+          - [16, 16, 4, 1,  1,   4,  5,  2,2 ] # MT = 128x160
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [4]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
+        - NumElementsPerBatchStore: [0]
+        - DepthU: [32,64]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [1,2]
+        - LocalWritePerMfma: [-1]
+        - StaggerU: [4]
+        - StaggerUStride: [256]
+        - StaggerUMapping: [0]
+        - WorkGroupMappingXCC: [8]
+        - ScheduleIterAlg: [3]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - StorePriorityOpt: [0]
+        - VectorStore: [-1]
+        - StoreSyncOpt: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - 1LDSBuffer: [1]
+        - GlobalSplitU: [1,3]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
+        - LocalReadVectorWidth: [2,4,8]
+        - DirectToVgprB: [1]
+        - UseSgprForGRO: [0,1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256,   160, 1, 224]
+          - Exact: [256,   160, 1, 256]
+          - Exact: [256,   160, 1, 288]
+          - Exact: [127, 127, 1, 127]
+          - Exact: [127, 128, 1, 127]
+          - Exact: [1, 127, 1, 127]
+          - Exact: [127, 1, 1, 127]

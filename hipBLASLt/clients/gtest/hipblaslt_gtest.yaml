@@ -1,0 +1,3 @@
+include: matmul_gtest.yaml
+include: auxiliary_gtest.yaml
+include: smoke_gtest.yaml

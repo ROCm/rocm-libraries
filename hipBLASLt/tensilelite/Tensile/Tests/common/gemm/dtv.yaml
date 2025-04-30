@@ -1,0 +1,2109 @@
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
+
+GlobalParameters:
+  NumElementsToValidate: -1
+  MinimumRequiredVersion: 4.14.0
+  PrintLevel: 1
+  #PrintSolutionRejectionReason: True
+  Device: 0
+  CMakeBuildType: Release
+  KernelTime: True
+  MaxWorkspaceSize: 13421772800
+  DataInitTypeA: 13
+  DataInitTypeB: 12
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 1
+  DataInitTypeBias: 13
+  DataInitTypeScaleAlphaVec: 12
+  #MaxFileName: 256
+
+BenchmarkProblems:
+  ########################################
+  # HHS NN DTVA pack
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 0
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        #- MatrixInstruction:
+        #  - [16, 16, 16, 1,  1,   2, 2,  4,1 ]
+        #  - [16, 16, 16, 1,  1,   4, 1,  4,1 ]
+        #  - [16, 16, 16, 1,  1,   8, 1,  4,1 ]
+        #  - [32, 32,  8, 1,  1,   1, 4,  4,1 ]
+        #  - [32, 32,  8, 1,  1,   2, 2,  4,1 ]
+        #  - [32, 32,  8, 1,  1,   4, 1,  4,1 ]
+        #  - [16, 16,  4, 4,  4,   1, 4,  4,1 ]
+        #  - [ 4,  4,  4,16, 16,   2, 2,  4,1 ]
+        #  - [16, 16,  4, 4,  4,   2, 2,  4,1 ]
+        #  - [32, 32,  4, 2,  2,   2, 2,  4,1 ]
+        - WorkGroup:
+          - [16,16,1]
+        - GlobalReadVectorWidthA: [2,4,8]
+        - GlobalReadVectorWidthB: [4,8]
+        - PrefetchGlobalRead: [0,1,2]
+        - PrefetchLocalRead: [1,2]
+        - ClusterLocalRead: [1]
+        - NumElementsPerBatchStore: [0]
+        - DepthU: [16,64]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - MIArchVgpr: [0]
+        - LocalWritePerMfma: [-1]
+        - StaggerU: [4]
+        - StaggerUStride: [256]
+        - WorkGroupMapping: [1]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [0,1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - StorePriorityOpt: [0]
+        - VectorStore: [-1]
+        - StoreSyncOpt: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - 1LDSBuffer: [1]
+        - GlobalSplitU: [1,2]
+        #- GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel"]
+        #- SourceSwap: [0, 1]
+        #- LocalReadVectorWidth: [4,8]
+        - DirectToVgprA: [1]
+        - UseSgprForGRO: [0,1]
+        - TransposeLDS: [0,1]
+        - StreamK: [0,3]
+        - Groups:
+          -
+            - MatrixInstruction: [16, 16, 16, 1,  1,   2, 2,  4,1 ]
+            - MatrixInstruction: [16, 16, 16, 1,  1,   4, 1,  4,1 ]
+            - MatrixInstruction: [16, 16, 16, 1,  1,   8, 1,  4,1 ]
+            - MatrixInstruction: [32, 32,  8, 1,  1,   1, 4,  4,1 ]
+            - MatrixInstruction: [32, 32,  8, 1,  1,   2, 2,  4,1 ]
+            - MatrixInstruction: [32, 32,  8, 1,  1,   4, 1,  4,1 ]
+            - MatrixInstruction: [16, 16,  4, 4,  4,   1, 4,  4,1 ]
+            - MatrixInstruction: [ 4,  4,  4,16, 16,   2, 2,  4,1 ]
+            - MatrixInstruction: [16, 16,  4, 4,  4,   2, 2,  4,1 ]
+            - MatrixInstruction: [32, 32,  4, 2,  2,   2, 2,  4,1 ]
+            - MatrixInstruction: [16, 16, 16, 1,  1,   4, 2,  2,1 ]
+              WorkGroup: [16,8,2]
+            - MatrixInstruction: [32, 32,  8, 1,  1,   2, 2,  2,1 ]
+              WorkGroup: [16,8,2]
+            - MatrixInstruction: [16, 16, 16, 1,  1,   4, 2,  1,1 ]
+              WorkGroup: [16,4,4]
+            - MatrixInstruction: [32, 32,  8, 1,  1,   2, 2,  1,1 ]
+              WorkGroup: [16,4,4]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [255,   255, 1,  15]
+          - Exact: [255,   255, 1,  17]
+          - Exact: [255,   255, 1,  32]
+          - Exact: [255,   255, 1,  33]
+          - Exact: [255,   255, 1,  47]
+          - Exact: [255,   255, 1,  63]
+          - Exact: [255,   255, 1,  79]
+          - Exact: [255,   255, 1,  95]
+          - Exact: [255,   255, 1, 111]
+          - Exact: [255,   255, 1, 127]
+          - Exact: [255,   255, 1, 191]
+          - Exact: [255,   255, 1, 255]
+          - Exact: [255,   255, 1, 256]
+
+  ########################################
+  # HHS NT DTVA pack
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 0
+      TransposeB: 1
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        #- MatrixInstruction:
+        #  - [16, 16, 16, 1,  1,   2, 1,  4,1 ]
+        #  - [16, 16, 16, 1,  1,   4, 1,  4,1 ]
+        #  - [16, 16, 16, 1,  1,   8, 1,  4,1 ]
+        #  - [32, 32,  8, 1,  1,   1, 1,  4,1 ]
+        #  - [32, 32,  8, 1,  1,   2, 1,  4,1 ]
+        #  - [32, 32,  8, 1,  1,   4, 1,  4,1 ]
+        #  - [16, 16,  4, 4,  4,   2, 2,  4,1 ]
+        #  - [ 4,  4,  4,16, 16,   2, 2,  4,1 ]
+        - WorkGroup:
+          - [16,16,1]
+        - GlobalReadVectorWidthA: [2,4,8]
+        - GlobalReadVectorWidthB: [4,8]
+        - PrefetchGlobalRead: [0,1,2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
+        - NumElementsPerBatchStore: [0]
+        - DepthU: [16,32,64]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - MIArchVgpr: [0]
+        - LocalWritePerMfma: [-1]
+        - StaggerU: [4]
+        - StaggerUStride: [256]
+        - WorkGroupMapping: [1]
+        - ScheduleIterAlg: [3]
+        #- ExpandPointerSwap: [0,1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - StorePriorityOpt: [0]
+        - VectorStore: [-1]
+        - StoreSyncOpt: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - 1LDSBuffer: [1]
+        - GlobalSplitU: [1,2]
+        #- GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel"]
+        - SourceSwap: [0, 1]
+        #- LocalReadVectorWidth: [4,8]
+        - DirectToVgprA: [1]
+        - UseSgprForGRO: [0,1]
+        - TransposeLDS: [0,1]
+        - StreamK: [0,2]
+        - Groups:
+          -
+            - MatrixInstruction: [16, 16, 16, 1,  1,   2, 1,  4,1 ]
+            - MatrixInstruction: [16, 16, 16, 1,  1,   4, 1,  4,1 ]
+            - MatrixInstruction: [16, 16, 16, 1,  1,   8, 1,  4,1 ]
+            - MatrixInstruction: [32, 32,  8, 1,  1,   1, 1,  4,1 ]
+            - MatrixInstruction: [32, 32,  8, 1,  1,   2, 1,  4,1 ]
+            - MatrixInstruction: [32, 32,  8, 1,  1,   4, 1,  4,1 ]
+            - MatrixInstruction: [16, 16,  4, 4,  4,   2, 2,  4,1 ]
+            - MatrixInstruction: [ 4,  4,  4,16, 16,   2, 2,  4,1 ]
+            - MatrixInstruction: [16, 16, 16, 1,  1,   4, 2,  2,1 ]
+              WorkGroup: [16,8,2]
+            - MatrixInstruction: [32, 32,  8, 1,  1,   2, 2,  2,1 ]
+              WorkGroup: [16,8,2]
+            - MatrixInstruction: [16, 16, 16, 1,  1,   4, 2,  1,1 ]
+              WorkGroup: [16,4,4]
+            - MatrixInstruction: [32, 32,  8, 1,  1,   2, 2,  1,1 ]
+              WorkGroup: [16,4,4]
+            - MatrixInstruction: [16, 16, 16, 1,  1,   2, 8,  4,1 ]
+            - MatrixInstruction: [16, 16, 16, 1,  1,   4, 16,  4,1 ]
+
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [255,   255, 1,  15]
+          - Exact: [255,   255, 1,  17]
+          - Exact: [255,   255, 1,  32]
+          - Exact: [255,   255, 1,  33]
+          - Exact: [255,   255, 1,  47]
+          - Exact: [255,   255, 1,  63]
+          - Exact: [255,   255, 1,  79]
+          - Exact: [255,   255, 1,  95]
+          - Exact: [255,   255, 1, 111]
+          - Exact: [255,   255, 1, 127]
+          - Exact: [255,   255, 1, 191]
+          - Exact: [255,   255, 1, 255]
+          - Exact: [255,   255, 1, 256]
+
+  ########################################
+  # HHS NT DTVB pack
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 0
+      TransposeB: 1
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        #- MatrixInstruction:
+        #  - [16, 16, 16, 1,  1,   1, 2,  1,4 ]
+        #  - [16, 16, 16, 1,  1,   1, 4,  1,4 ]
+        #  - [16, 16, 16, 1,  1,   1, 8,  1,4 ]
+        #  - [32, 32,  8, 1,  1,   1, 1,  1,4 ]
+        #  - [32, 32,  8, 1,  1,   1, 2,  1,4 ]
+        #  - [32, 32,  8, 1,  1,   1, 4,  1,4 ]
+        #  - [16, 16,  4, 4,  4,   2, 2,  1,4 ]
+        #  - [ 4,  4,  4,16, 16,   2, 2,  1,4 ]
+        - WorkGroup:
+          - [16,16,1]
+        - GlobalReadVectorWidthA: [4,8]
+        - GlobalReadVectorWidthB: [2,4,8]
+        - PrefetchGlobalRead: [1,2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
+        - NumElementsPerBatchStore: [0]
+        - DepthU: [16,64]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [2,4,8]
+        - MIArchVgpr: [0]
+        - LocalWritePerMfma: [-1]
+        - StaggerU: [0]
+        - WorkGroupMapping: [1]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [0,1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - StorePriorityOpt: [0]
+        - VectorStore: [-1]
+        - StoreSyncOpt: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - 1LDSBuffer: [1]
+        - GlobalSplitU: [1,2]
+        #- SourceSwap: [0, 1]
+        - DirectToVgprB: [1]
+        - UseSgprForGRO: [0,1]
+        - StreamK: [0,1]
+        - Groups:
+          -
+            - MatrixInstruction: [16, 16, 16, 1,  1,   1, 2,  1,4 ]
+            - MatrixInstruction: [16, 16, 16, 1,  1,   1, 4,  1,4 ]
+            - MatrixInstruction: [16, 16, 16, 1,  1,   1, 8,  1,4 ]
+            - MatrixInstruction: [32, 32,  8, 1,  1,   1, 1,  1,4 ]
+            - MatrixInstruction: [32, 32,  8, 1,  1,   1, 2,  1,4 ]
+            - MatrixInstruction: [32, 32,  8, 1,  1,   1, 4,  1,4 ]
+            - MatrixInstruction: [16, 16,  4, 4,  4,   2, 2,  1,4 ]
+            - MatrixInstruction: [ 4,  4,  4,16, 16,   2, 2,  1,4 ]
+            - MatrixInstruction: [16, 16, 16, 1,  1,   2, 4,  1,2 ]
+              WorkGroup: [16,8,2]
+            - MatrixInstruction: [32, 32,  8, 1,  1,   2, 2,  1,2 ]
+              WorkGroup: [16,8,2]
+            - MatrixInstruction: [16, 16, 16, 1,  1,   2, 4,  1,1 ]
+              WorkGroup: [16,4,4]
+            - MatrixInstruction: [32, 32,  8, 1,  1,   2, 2,  1,1 ]
+              WorkGroup: [16,4,4]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [255,   255, 1,  15]
+          - Exact: [255,   255, 1,  17]
+          - Exact: [255,   255, 1,  32]
+          - Exact: [255,   255, 1,  33]
+          - Exact: [255,   255, 1,  47]
+          - Exact: [255,   255, 1,  63]
+          - Exact: [255,   255, 1,  79]
+          - Exact: [255,   255, 1,  95]
+          - Exact: [255,   255, 1, 111]
+          - Exact: [255,   255, 1, 127]
+          - Exact: [255,   255, 1, 191]
+          - Exact: [255,   255, 1, 255]
+          - Exact: [255,   255, 1, 256]
+
+  ########################################
+  # HHS TN DTVA
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        #- MatrixInstruction:
+        #  - [16, 16, 16, 1,  1,   2, 1,  4,1 ]
+        #  - [16, 16, 16, 1,  1,   4, 1,  4,1 ]
+        #  - [16, 16, 16, 1,  1,   8, 1,  4,1 ]
+        #  - [32, 32,  8, 1,  1,   1, 1,  4,1 ]
+        #  - [32, 32,  8, 1,  1,   2, 1,  4,1 ]
+        #  - [32, 32,  8, 1,  1,   4, 1,  4,1 ]
+        #  - [16, 16,  4, 4,  4,   2, 2,  4,1 ]
+        #  - [ 4,  4,  4,16, 16,   2, 2,  4,1 ]
+        - WorkGroup:
+          - [16,16,1]
+        - GlobalReadVectorWidthA: [4,8]
+        - GlobalReadVectorWidthB: [4,8]
+        - PrefetchGlobalRead: [0,1,2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
+        - NumElementsPerBatchStore: [0]
+        - DepthU: [16,64]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - MIArchVgpr: [0]
+        - LocalWritePerMfma: [-1]
+        - StaggerU: [4]
+        - StaggerUStride: [256]
+        - StaggerUMapping: [2]
+        - WorkGroupMapping: [1]
+        - ScheduleIterAlg: [3]
+        #- ExpandPointerSwap: [0,1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - StorePriorityOpt: [0]
+        - VectorStore: [-1]
+        - StoreSyncOpt: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - 1LDSBuffer: [1]
+        - GlobalSplitU: [1,2]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel"]
+        - SourceSwap: [0, 1]
+        - LocalReadVectorWidth: [4,8]
+        - DirectToVgprA: [1]
+        - UseSgprForGRO: [0,1]
+        - TransposeLDS: [0,1]
+        - StreamK: [0,3]
+        - Groups:
+          -
+            - MatrixInstruction: [16, 16, 16, 1,  1,   2, 1,  4,1 ]
+            - MatrixInstruction: [16, 16, 16, 1,  1,   4, 1,  4,1 ]
+            - MatrixInstruction: [16, 16, 16, 1,  1,   8, 1,  4,1 ]
+            - MatrixInstruction: [32, 32,  8, 1,  1,   1, 1,  4,1 ]
+            - MatrixInstruction: [32, 32,  8, 1,  1,   2, 1,  4,1 ]
+            - MatrixInstruction: [32, 32,  8, 1,  1,   4, 1,  4,1 ]
+            - MatrixInstruction: [16, 16,  4, 4,  4,   2, 2,  4,1 ]
+            - MatrixInstruction: [ 4,  4,  4,16, 16,   2, 2,  4,1 ]
+            - MatrixInstruction: [16, 16, 16, 1,  1,   4, 2,  2,1 ]
+              WorkGroup: [16,8,2]
+            - MatrixInstruction: [32, 32,  8, 1,  1,   2, 2,  2,1 ]
+              WorkGroup: [16,8,2]
+            - MatrixInstruction: [16, 16, 16, 1,  1,   4, 2,  1,1 ]
+              WorkGroup: [16,4,4]
+            - MatrixInstruction: [32, 32,  8, 1,  1,   2, 2,  1,1 ]
+              WorkGroup: [16,4,4]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [255,   255, 1,  15]
+          - Exact: [255,   255, 1,  17]
+          - Exact: [255,   255, 1,  32]
+          - Exact: [255,   255, 1,  33]
+          - Exact: [255,   255, 1,  47]
+          - Exact: [255,   255, 1,  63]
+          - Exact: [255,   255, 1,  79]
+          - Exact: [255,   255, 1,  95]
+          - Exact: [255,   255, 1, 111]
+          - Exact: [255,   255, 1, 127]
+          - Exact: [255,   255, 1, 191]
+          - Exact: [255,   255, 1, 255]
+          - Exact: [255,   255, 1, 256]
+
+  ########################################
+  # HHS TN DTVA + BIAS + Activation
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+      UseBias: 1
+      Activation: True
+      UseScaleAlphaVec: 1
+      UseScaleAB: "Scalar"
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 16, 1,  1,   1, 1,  4,1 ] # MT = 64x16. Case to check kernel writer works
+          - [16, 16, 16, 1,  1,   2, 1,  4,1 ] # MT = 128x16. Check kernel works without vgprValuA
+          - [16, 16, 16, 1,  1,   4, 1,  4,1 ]
+          - [16, 16, 16, 1,  1,   8, 1,  4,1 ] # MT = 512x16. Case to check LDS usage of Epilogues
+          - [16, 16, 16, 1,  1,   5, 1,  2,1 ] # MT = 160x16. Case to check kernel writer works
+          - [32, 32,  8, 1,  1,   2, 1,  4,1 ]
+          - [32, 32,  8, 1,  1,   4, 1,  4,1 ]
+
+          - [16, 16, 16, 1,  1,  8,1,   1,4 ] # 128x64
+          - [16, 16, 16, 1,  1,  8,1,   2,2 ] # 256x32
+          - [16, 16, 16, 1,  1,  16,1,  2,2 ] # 512x32
+          - [16, 16, 16, 1,  1,  10,1,  2,2 ] # 160x32
+        - WorkGroup:
+          - [16,16,1]
+        - GlobalReadVectorWidthA: [2,4,8]
+        - GlobalReadVectorWidthB: [2,4,8]
+        - PrefetchGlobalRead: [0,1,2]
+        - PrefetchLocalRead: [1,2]
+        - ClusterLocalRead: [1]
+        - NumElementsPerBatchStore: [0]
+        - DepthU: [32,64,128]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - MIArchVgpr: [0, 1]
+        - LocalWritePerMfma: [-1]
+        - StaggerU: [4]
+        - StaggerUStride: [256]
+        - StaggerUMapping: [2]
+        - WorkGroupMapping: [1]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [0]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - StorePriorityOpt: [0]
+        - VectorStore: [-1]
+        - StoreSyncOpt: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - 1LDSBuffer: [1]
+        #- GlobalSplitU: [1,2]
+        #- GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel"]
+        - SourceSwap: [0, 1]
+        - LocalReadVectorWidth: [2,4,8]
+        - DirectToVgprA: [1]
+        - UseSgprForGRO: [0,1]
+        - TransposeLDS: [0,1]
+        - ActivationFuncCall: [0, 1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [127,   128, 1, 640]
+          - Exact: [129,   128, 1, 640]
+          - Exact: [256,   255, 1, 1101]
+          - Exact: [256,   257, 1, 1101]
+          - Exact: [512,   128, 1, 256]
+        - BiasTypeArgs: ['s']
+        - ActivationArgs:
+          - [Enum: relu]
+
+  ########################################
+  # HHS TN DTVB
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        #- MatrixInstruction:
+        #  - [16, 16, 16, 1,  1,   1, 2,  1,4 ]
+        #  - [16, 16, 16, 1,  1,   1, 4,  1,4 ]
+        #  - [16, 16, 16, 1,  1,   1, 8,  1,4 ]
+        #  - [32, 32,  8, 1,  1,   1, 1,  1,4 ]
+        #  - [32, 32,  8, 1,  1,   1, 2,  1,4 ]
+        #  - [32, 32,  8, 1,  1,   1, 4,  1,4 ]
+        #  - [16, 16,  4, 4,  4,   4, 1,  1,4 ]
+        #  - [ 4,  4,  4,16, 16,   2, 2,  1,4 ]
+        - WorkGroup:
+          - [16,16,1]
+        - GlobalReadVectorWidthA: [4,8]
+        - GlobalReadVectorWidthB: [4,8]
+        - PrefetchGlobalRead: [1,2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
+        - NumElementsPerBatchStore: [0]
+        - DepthU: [16,64]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - MIArchVgpr: [0]
+        - LocalWritePerMfma: [-1]
+        - StaggerU: [4]
+        - StaggerUStride: [256]
+        - StaggerUMapping: [2]
+        - WorkGroupMapping: [1]
+        - ScheduleIterAlg: [3]
+        #- ExpandPointerSwap: [0,1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - StorePriorityOpt: [0]
+        - VectorStore: [-1]
+        - StoreSyncOpt: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - 1LDSBuffer: [1]
+        - GlobalSplitU: [1,2]
+        #- GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel"]
+        - SourceSwap: [0, 1]
+        - LocalReadVectorWidth: [4,8]
+        - DirectToVgprB: [1]
+        - UseSgprForGRO: [0,1]
+        - Groups:
+          -
+            - MatrixInstruction: [16, 16, 16, 1,  1,   1, 2,  1,4 ]
+            - MatrixInstruction: [16, 16, 16, 1,  1,   1, 4,  1,4 ]
+            - MatrixInstruction: [16, 16, 16, 1,  1,   1, 8,  1,4 ]
+            - MatrixInstruction: [32, 32,  8, 1,  1,   1, 1,  1,4 ]
+            - MatrixInstruction: [32, 32,  8, 1,  1,   1, 2,  1,4 ]
+            - MatrixInstruction: [32, 32,  8, 1,  1,   1, 4,  1,4 ]
+            - MatrixInstruction: [16, 16,  4, 4,  4,   2, 2,  1,4 ]
+            - MatrixInstruction: [ 4,  4,  4,16, 16,   2, 2,  1,4 ]
+            - MatrixInstruction: [16, 16, 16, 1,  1,   2, 4,  1,2 ]
+              WorkGroup: [16,8,2]
+            - MatrixInstruction: [32, 32,  8, 1,  1,   2, 2,  1,2 ]
+              WorkGroup: [16,8,2]
+            - MatrixInstruction: [16, 16, 16, 1,  1,   2, 4,  1,1 ]
+              WorkGroup: [16,4,4]
+            - MatrixInstruction: [32, 32,  8, 1,  1,   2, 2,  1,1 ]
+              WorkGroup: [16,4,4]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [255,   255, 1,  15]
+          - Exact: [255,   255, 1,  17]
+          - Exact: [255,   255, 1,  32]
+          - Exact: [255,   255, 1,  33]
+          - Exact: [255,   255, 1,  47]
+          - Exact: [255,   255, 1,  63]
+          - Exact: [255,   255, 1,  79]
+          - Exact: [255,   255, 1,  95]
+          - Exact: [255,   255, 1, 111]
+          - Exact: [255,   255, 1, 127]
+          - Exact: [255,   255, 1, 191]
+          - Exact: [255,   255, 1, 255]
+          - Exact: [255,   255, 1, 256]
+
+  ########################################
+  # HHS TN DTVB + BIAS + Activation
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+      UseBias: 1
+      Activation: True
+      UseScaleAlphaVec: 1
+      UseScaleAB: "Scalar"
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 16, 1,  1,   1, 1,  1,4 ] # MT = 16x64. Case to check kernel writer works
+          - [16, 16, 16, 1,  1,   1, 2,  1,4 ] # MT = 16x128. Check kernel works without vgprValuA
+          - [16, 16, 16, 1,  1,   1, 4,  1,4 ]
+          - [16, 16, 16, 1,  1,   1, 8,  1,4 ] # MT = 16x512. Case to check LDS usage of Epilogues
+          - [16, 16, 16, 1,  1,   1, 5,  1,2 ] # MT = 16x160. Case to check kernel writer works
+          - [32, 32,  8, 1,  1,   1, 2,  1,4 ]
+          - [32, 32,  8, 1,  1,   1, 4,  1,4 ]
+
+          - [16, 16, 16, 1,  1,  1,8,   4,1 ] # 64x128
+          - [16, 16, 16, 1,  1,  1,8,   2,2 ] # 32x256
+          - [16, 16, 16, 1,  1,  1,16,  2,2 ] # 32x512
+          - [16, 16, 16, 1,  1,  1,10,  2,2 ] # 32x160
+        - WorkGroup:
+          - [16,16,1]
+        - GlobalReadVectorWidthA: [2,4,8]
+        - GlobalReadVectorWidthB: [2,4,8]
+        - PrefetchGlobalRead: [1,2]
+        - PrefetchLocalRead: [1,2]
+        - ClusterLocalRead: [1]
+        - NumElementsPerBatchStore: [0]
+        - DepthU: [32,64,128]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - MIArchVgpr: [0, 1]
+        - LocalWritePerMfma: [-1]
+        - StaggerU: [4]
+        - StaggerUStride: [256]
+        - StaggerUMapping: [2]
+        - WorkGroupMapping: [1]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [0]
+        - TransposeLDS: [1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - StorePriorityOpt: [0]
+        - VectorStore: [-1]
+        - StoreSyncOpt: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - 1LDSBuffer: [1]
+        - TransposeLDS: [0,1]
+        - GlobalSplitU: [1,2]
+        #- GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel"]
+        - SourceSwap: [0, 1]
+        - LocalReadVectorWidth: [2,4,8]
+        - DirectToVgprB: [1]
+        - UseSgprForGRO: [0,1]
+        - ActivationFuncCall: [0, 1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [127,   128, 1, 640]
+          - Exact: [129,   128, 1, 640]
+          - Exact: [256,   255, 1, 1101]
+          - Exact: [256,   257, 1, 1101]
+          - Exact: [128,   512, 1, 256]
+        - BiasTypeArgs: ['s']
+        - ActivationArgs:
+          - [Enum: relu]
+
+  ########################################
+  # HHS TT DTVB pack
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 1
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        #- MatrixInstruction:
+        #  - [16, 16, 16, 1,  1,   2, 2,  1,4 ]
+        #  - [16, 16, 16, 1,  1,   1, 4,  1,4 ]
+        #  - [16, 16, 16, 1,  1,   1, 8,  1,4 ]
+        #  - [32, 32,  8, 1,  1,   2, 2,  1,4 ]
+        #  - [32, 32,  8, 1,  1,   1, 4,  1,4 ]
+        #  - [ 4,  4,  4,16,  1,   2, 2,  1,4 ]
+        #  - [16, 16,  4, 4,  1,   2, 2,  1,4 ]
+        #  - [32, 32,  4, 2,  1,   2, 2,  1,4 ]
+        - WorkGroup:
+          - [16,16,1]
+        - GlobalReadVectorWidthA: [4,8]
+        - GlobalReadVectorWidthB: [2,4,8]
+        - PrefetchGlobalRead: [1,2]
+        - PrefetchLocalRead: [1,2]
+        - ClusterLocalRead: [1]
+        - NumElementsPerBatchStore: [0]
+        - DepthU: [16,64]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [2,4,8]
+        - MIArchVgpr: [0]
+        - LocalWritePerMfma: [-1]
+        - StaggerU: [0]
+        - WorkGroupMapping: [1]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [0,1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - StorePriorityOpt: [0]
+        - VectorStore: [-1]
+        - StoreSyncOpt: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - 1LDSBuffer: [1]
+        - GlobalSplitU: [1,2]
+        #- SourceSwap: [0, 1]
+        - DirectToVgprB: [1]
+        - UseSgprForGRO: [0,1]
+        - StreamK: [0,2]
+        - Groups:
+          -
+            - MatrixInstruction: [16, 16, 16, 1,  1,   1, 2,  1,4 ]
+            - MatrixInstruction: [16, 16, 16, 1,  1,   1, 4,  1,4 ]
+            - MatrixInstruction: [16, 16, 16, 1,  1,   1, 8,  1,4 ]
+            - MatrixInstruction: [32, 32,  8, 1,  1,   1, 1,  1,4 ]
+            - MatrixInstruction: [32, 32,  8, 1,  1,   1, 2,  1,4 ]
+            - MatrixInstruction: [32, 32,  8, 1,  1,   1, 4,  1,4 ]
+            - MatrixInstruction: [16, 16,  4, 4,  4,   2, 2,  1,4 ]
+            - MatrixInstruction: [ 4,  4,  4,16, 16,   2, 2,  1,4 ]
+            - MatrixInstruction: [16, 16, 16, 1,  1,   2, 4,  1,2 ]
+              WorkGroup: [16,8,2]
+            - MatrixInstruction: [32, 32,  8, 1,  1,   2, 2,  1,2 ]
+              WorkGroup: [16,8,2]
+            - MatrixInstruction: [16, 16, 16, 1,  1,   2, 4,  1,1 ]
+              WorkGroup: [16,4,4]
+            - MatrixInstruction: [32, 32,  8, 1,  1,   2, 2,  1,1 ]
+              WorkGroup: [16,4,4]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [255,   255, 1,  15]
+          - Exact: [255,   255, 1,  17]
+          - Exact: [255,   255, 1,  32]
+          - Exact: [255,   255, 1,  33]
+          - Exact: [255,   255, 1,  47]
+          - Exact: [255,   255, 1,  63]
+          - Exact: [255,   255, 1,  79]
+          - Exact: [255,   255, 1,  95]
+          - Exact: [255,   255, 1, 111]
+          - Exact: [255,   255, 1, 127]
+          - Exact: [255,   255, 1, 191]
+          - Exact: [255,   255, 1, 256]
+
+  ########################################
+  # SGEMM NT DTVA
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      DestDataType: s
+      ComputeDataType: s
+      TransposeA: 0
+      TransposeB: 1
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        #- MatrixInstruction:
+        #  - [16, 16,  4, 1,  1,   1, 1,  4,1 ]
+        #  - [16, 16,  4, 1,  1,   2, 1,  4,1 ]
+        #  - [16, 16,  4, 1,  1,   4, 1,  4,1 ]
+        #  - [32, 32,  2, 1,  1,   1, 1,  4,1 ]
+        #  - [32, 32,  2, 1,  1,   2, 1,  4,1 ]
+        #  - [ 4,  4,  1,16, 16,   1, 8,  4,1 ]
+        - WorkGroup:
+          - [16,16,1]
+        - GlobalReadVectorWidthA: [1,2,4]
+        - GlobalReadVectorWidthB: [1,2]
+        - PrefetchGlobalRead: [0,1,2]
+        - PrefetchLocalRead: [1]
+        - NumElementsPerBatchStore: [0]
+        - DepthU: [16]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - MIArchVgpr: [0]
+        - LocalWritePerMfma: [-1]
+        - StaggerU: [4]
+        - StaggerUStride: [256]
+        - StaggerUMapping: [2]
+        - WorkGroupMapping: [1]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [0,1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - StorePriorityOpt: [0]
+        - VectorStore: [-1]
+        - StoreSyncOpt: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - 1LDSBuffer: [1]
+        - GlobalSplitU: [1,2]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel"]
+        #- SourceSwap: [0, 1]
+        - DirectToVgprA: [1]
+        - UseSgprForGRO: [0,1]
+        - TransposeLDS: [0,1]
+        - StreamK: [0,1]
+        - Groups:
+          -
+            - MatrixInstruction: [16, 16,  4, 1,  1,   1, 1,  4,1 ]
+            - MatrixInstruction: [16, 16,  4, 1,  1,   2, 1,  4,1 ]
+            - MatrixInstruction: [16, 16,  4, 1,  1,   4, 1,  4,1 ]
+            - MatrixInstruction: [32, 32,  2, 1,  1,   1, 1,  4,1 ]
+            - MatrixInstruction: [32, 32,  2, 1,  1,   2, 1,  4,1 ]
+            - MatrixInstruction: [ 4,  4,  1,16, 16,   1, 8,  4,1 ]
+            - MatrixInstruction: [16, 16,  4, 1,  1,   2, 2,  2,1 ]
+              WorkGroup: [16,8,2]
+            - MatrixInstruction: [16, 16,  4, 1,  1,   2, 2,  1,1 ]
+              WorkGroup: [16,4,4]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [255,   255, 1,  15]
+          - Exact: [255,   255, 1,  17]
+          - Exact: [255,   255, 1,  32]
+          - Exact: [255,   255, 1,  33]
+          - Exact: [255,   255, 1,  47]
+          - Exact: [255,   255, 1,  63]
+          - Exact: [255,   255, 1,  79]
+          - Exact: [255,   255, 1,  95]
+          - Exact: [255,   255, 1, 111]
+          - Exact: [255,   255, 1, 127]
+          - Exact: [255,   255, 1, 128]
+
+  ########################################
+  # SGEMM NT DTVB
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      DestDataType: s
+      ComputeDataType: s
+      TransposeA: 0
+      TransposeB: 1
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        #- MatrixInstruction:
+        #  - [16, 16,  4, 1,  1,   1, 1,  1,4 ]
+        #  - [16, 16,  4, 1,  1,   1, 2,  1,4 ]
+        #  - [16, 16,  4, 1,  1,   1, 4,  1,4 ]
+        #  - [32, 32,  2, 1,  1,   1, 1,  1,4 ]
+        #  - [32, 32,  2, 1,  1,   1, 2,  1,4 ]
+        #  - [ 4,  4,  1,16,  1,   8, 1,  1,4 ]
+        - WorkGroup:
+          - [16,16,1]
+        - GlobalReadVectorWidthA: [1,2]
+        - GlobalReadVectorWidthB: [1,2,4]
+        - PrefetchGlobalRead: [1,2]
+        - PrefetchLocalRead: [1]
+        - NumElementsPerBatchStore: [0]
+        - DepthU: [16]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - MIArchVgpr: [0]
+        - LocalWritePerMfma: [-1]
+        - StaggerU: [0]
+        #- StaggerUStride: [256]
+        #- StaggerUMapping: [2]
+        - WorkGroupMapping: [1]
+        - ScheduleIterAlg: [3]
+        #- ExpandPointerSwap: [0,1]
+        - TransposeLDS: [0]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - StorePriorityOpt: [0]
+        - VectorStore: [-1]
+        - StoreSyncOpt: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - 1LDSBuffer: [1]
+        #- GlobalSplitU: [1,2]
+        #- GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel"]
+        - SourceSwap: [0, 1]
+        - DirectToVgprB: [1]
+        - UseSgprForGRO: [0,1]
+        - StreamK: [0,3]
+        - Groups:
+          -
+            - MatrixInstruction: [16, 16,  4, 1,  1,   1, 1,  1,4 ]
+            - MatrixInstruction: [16, 16,  4, 1,  1,   1, 2,  1,4 ]
+            - MatrixInstruction: [16, 16,  4, 1,  1,   1, 4,  1,4 ]
+            - MatrixInstruction: [32, 32,  2, 1,  1,   1, 1,  1,4 ]
+            - MatrixInstruction: [32, 32,  2, 1,  1,   1, 2,  1,4 ]
+            - MatrixInstruction: [ 4,  4,  1,16,  1,   8, 1,  1,4 ]
+            - MatrixInstruction: [16, 16,  4, 1,  1,   2, 2,  1,2 ]
+              WorkGroup: [16,8,2]
+            - MatrixInstruction: [16, 16,  4, 1,  1,   2, 2,  1,1 ]
+              WorkGroup: [16,4,4]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [255,   255, 1,  15]
+          - Exact: [255,   255, 1,  17]
+          - Exact: [255,   255, 1,  32]
+          - Exact: [255,   255, 1,  33]
+          - Exact: [255,   255, 1,  47]
+          - Exact: [255,   255, 1,  63]
+          - Exact: [255,   255, 1,  79]
+          - Exact: [255,   255, 1,  95]
+          - Exact: [255,   255, 1, 111]
+          - Exact: [255,   255, 1, 127]
+          - Exact: [255,   255, 1, 128]
+
+  ########################################
+  # SGEMM NN DTVA
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      DestDataType: s
+      ComputeDataType: s
+      TransposeA: 0
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        #- MatrixInstruction:
+        #  - [16, 16,  4, 1,  1,   1, 1,  4,1 ]
+        #  - [16, 16,  4, 1,  1,   2, 1,  4,1 ]
+        #  - [16, 16,  4, 1,  1,   4, 1,  4,1 ]
+        #  - [32, 32,  2, 1,  1,   1, 1,  4,1 ]
+        #  - [32, 32,  2, 1,  1,   2, 1,  4,1 ]
+        #  - [ 4,  4,  1,16, 16,   1, 8,  4,1 ]
+        #  - [32, 32,  1, 2,  2,   1, 1,  4,1 ]
+        - WorkGroup:
+          - [16,16,1]
+        - GlobalReadVectorWidthA: [1,2,4]
+        - GlobalReadVectorWidthB: [1,2]
+        - PrefetchGlobalRead: [0,1,2]
+        - PrefetchLocalRead: [1,2]
+        - NumElementsPerBatchStore: [0]
+        - DepthU: [16]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - MIArchVgpr: [0]
+        - LocalWritePerMfma: [-1]
+        - StaggerU: [4]
+        - StaggerUStride: [256]
+        - StaggerUMapping: [2]
+        - WorkGroupMapping: [1]
+        - ScheduleIterAlg: [3]
+        #- ExpandPointerSwap: [0,1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - StorePriorityOpt: [0]
+        - VectorStore: [-1]
+        - StoreSyncOpt: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - 1LDSBuffer: [1]
+        #- GlobalSplitU: [1,2]
+        #- GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel"]
+        - SourceSwap: [1]#[0, 1]
+        - DirectToVgprA: [1]
+        - UseSgprForGRO: [0,1]
+        - TransposeLDS: [0,1]
+        - StreamK: [0,2]
+        - Groups:
+          -
+            - MatrixInstruction: [16, 16,  4, 1,  1,   1, 1,  4,1 ]
+            - MatrixInstruction: [16, 16,  4, 1,  1,   2, 1,  4,1 ]
+            - MatrixInstruction: [16, 16,  4, 1,  1,   4, 1,  4,1 ]
+            - MatrixInstruction: [32, 32,  2, 1,  1,   1, 1,  4,1 ]
+            - MatrixInstruction: [32, 32,  2, 1,  1,   2, 1,  4,1 ]
+            - MatrixInstruction: [ 4,  4,  1,16, 16,   1, 8,  4,1 ]
+            - MatrixInstruction: [32, 32,  1, 2,  2,   1, 1,  4,1 ]
+            - MatrixInstruction: [16, 16,  4, 1,  1,   2, 2,  2,1 ]
+              WorkGroup: [16,8,2]
+            - MatrixInstruction: [16, 16,  4, 1,  1,   2, 2,  1,1 ]
+              WorkGroup: [16,4,4]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [255,   255, 1,  15]
+          - Exact: [255,   255, 1,  17]
+          - Exact: [255,   255, 1,  32]
+          - Exact: [255,   255, 1,  33]
+          - Exact: [255,   255, 1,  47]
+          - Exact: [255,   255, 1,  63]
+          - Exact: [255,   255, 1,  79]
+          - Exact: [255,   255, 1,  95]
+          - Exact: [255,   255, 1, 111]
+          - Exact: [255,   255, 1, 127]
+          - Exact: [255,   255, 1, 128]
+
+  ########################################
+  # SGEMM TN DTVA
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      DestDataType: s
+      ComputeDataType: s
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        #- MatrixInstruction:
+        #  - [16, 16,  4, 1,  1,   1, 1,  4,1 ]
+        #  - [16, 16,  4, 1,  1,   2, 1,  4,1 ]
+        #  - [16, 16,  4, 1,  1,   4, 1,  4,1 ]
+        #  - [32, 32,  2, 1,  1,   1, 1,  4,1 ]
+        #  - [32, 32,  2, 1,  1,   2, 1,  4,1 ]
+        #  - [ 4,  4,  1,16, 16,   1, 8,  4,1 ]
+        #  - [32, 32,  1, 2,  2,   1, 1,  4,1 ]
+        - WorkGroup:
+          - [16,16,1]
+        - GlobalReadVectorWidthA: [1,2,4]
+        - GlobalReadVectorWidthB: [1,2]
+        - PrefetchGlobalRead: [0,1,2]
+        - PrefetchLocalRead: [1]
+        - NumElementsPerBatchStore: [0]
+        - DepthU: [16]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - MIArchVgpr: [0]
+        - LocalWritePerMfma: [-1]
+        - StaggerU: [4]
+        - StaggerUStride: [256]
+        - StaggerUMapping: [2]
+        - WorkGroupMapping: [1]
+        - ScheduleIterAlg: [3]
+        #- ExpandPointerSwap: [0,1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - StorePriorityOpt: [0]
+        - VectorStore: [-1]
+        - StoreSyncOpt: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - 1LDSBuffer: [1]
+        - GlobalSplitU: [1,2]
+        #- GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel"]
+        - SourceSwap: [0, 1]
+        - DirectToVgprA: [1]
+        - UseSgprForGRO: [0,1]
+        - TransposeLDS: [0,1]
+        - Groups:
+          -
+            - MatrixInstruction: [16, 16,  4, 1,  1,   1, 1,  4,1 ]
+            - MatrixInstruction: [16, 16,  4, 1,  1,   2, 1,  4,1 ]
+            - MatrixInstruction: [16, 16,  4, 1,  1,   4, 1,  4,1 ]
+            - MatrixInstruction: [32, 32,  2, 1,  1,   1, 1,  4,1 ]
+            - MatrixInstruction: [32, 32,  2, 1,  1,   2, 1,  4,1 ]
+            - MatrixInstruction: [ 4,  4,  1,16, 16,   1, 8,  4,1 ]
+            - MatrixInstruction: [32, 32,  1, 2,  2,   1, 1,  4,1 ]
+            - MatrixInstruction: [16, 16,  4, 1,  1,   2, 2,  2,1 ]
+              WorkGroup: [16,8,2]
+            - MatrixInstruction: [16, 16,  4, 1,  1,   2, 2,  1,1 ]
+              WorkGroup: [16,4,4]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [255,   255, 1,  15]
+          - Exact: [255,   255, 1,  17]
+          - Exact: [255,   255, 1,  32]
+          - Exact: [255,   255, 1,  33]
+          - Exact: [255,   255, 1,  47]
+          - Exact: [255,   255, 1,  63]
+          - Exact: [255,   255, 1,  79]
+          - Exact: [255,   255, 1,  95]
+          - Exact: [255,   255, 1, 111]
+          - Exact: [255,   255, 1, 127]
+          - Exact: [255,   255, 1, 128]
+
+  ########################################
+  # DGEMM NT DTVA
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: d
+      DestDataType: d
+      ComputeDataType: d
+      TransposeA: 0
+      TransposeB: 1
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        #- MatrixInstruction:
+        #  - [16, 16,  4, 1,  1,   1, 1,  4,1 ]
+        #  - [16, 16,  4, 1,  1,   2, 1,  4,1 ]
+        #  - [16, 16,  4, 1,  1,   4, 1,  4,1 ]
+        #  - [ 4,  4,  4, 4,  4,   2, 2,  4,1 ]
+        - WorkGroup:
+          - [16,16,1]
+        - GlobalReadVectorWidthA: [1,2]
+        - GlobalReadVectorWidthB: [1,2]
+        - PrefetchGlobalRead: [0,1,2]
+        - PrefetchLocalRead: [1]
+        - NumElementsPerBatchStore: [0]
+        - DepthU: [16]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - MIArchVgpr: [0]
+        - LocalWritePerMfma: [-1]
+        - StaggerU: [4]
+        - StaggerUStride: [256]
+        - StaggerUMapping: [2]
+        - WorkGroupMapping: [1]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [0,1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - StorePriorityOpt: [0]
+        - VectorStore: [-1]
+        - StoreSyncOpt: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - 1LDSBuffer: [1]
+        - GlobalSplitU: [1,2]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel"]
+        #- SourceSwap: [0, 1]
+        - DirectToVgprA: [1]
+        - UseSgprForGRO: [0,1]
+        - TransposeLDS: [0,1]
+        #- StreamK: [0,1]
+        - Groups:
+          -
+            - MatrixInstruction: [16, 16,  4, 1,  1,   1, 1,  4,1 ]
+            - MatrixInstruction: [16, 16,  4, 1,  1,   2, 1,  4,1 ]
+            - MatrixInstruction: [16, 16,  4, 1,  1,   4, 1,  4,1 ]
+            - MatrixInstruction: [ 4,  4,  4, 4,  4,   2, 2,  4,1 ]
+            - MatrixInstruction: [16, 16,  4, 1,  1,   2, 1,  2,1 ]
+              WorkGroup: [16,8,2]
+            - MatrixInstruction: [16, 16,  4, 1,  1,   2, 1,  1,1 ]
+              WorkGroup: [16,4,4]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [255,   255, 1,  15]
+          - Exact: [255,   255, 1,  17]
+          - Exact: [255,   255, 1,  32]
+          - Exact: [255,   255, 1,  33]
+          - Exact: [255,   255, 1,  47]
+          - Exact: [255,   255, 1,  63]
+          - Exact: [255,   255, 1,  79]
+          - Exact: [255,   255, 1,  95]
+          - Exact: [255,   255, 1, 111]
+          - Exact: [255,   255, 1, 127]
+          - Exact: [255,   255, 1, 128]
+
+  ########################################
+  # DGEMM NT DTVB
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: d
+      DestDataType: d
+      ComputeDataType: d
+      TransposeA: 0
+      TransposeB: 1
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        #- MatrixInstruction:
+        #  - [16, 16,  4, 1,  1,   1, 1,  1,4 ]
+        #  - [16, 16,  4, 1,  1,   1, 2,  1,4 ]
+        #  - [16, 16,  4, 1,  1,   1, 4,  1,4 ]
+        #  - [ 4,  4,  4, 4,  4,   2, 2,  4,1 ]
+        - WorkGroup:
+          - [16,16,1]
+        - GlobalReadVectorWidthA: [1,2]
+        - GlobalReadVectorWidthB: [1,2]
+        - PrefetchGlobalRead: [1,2]
+        - PrefetchLocalRead: [1]
+        - NumElementsPerBatchStore: [0]
+        - DepthU: [16]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - MIArchVgpr: [0]
+        - LocalWritePerMfma: [-1]
+        - StaggerU: [0]
+        #- StaggerUStride: [256]
+        #- StaggerUMapping: [2]
+        - WorkGroupMapping: [1]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [0,1]
+        - TransposeLDS: [0]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - StorePriorityOpt: [0]
+        - VectorStore: [-1]
+        - StoreSyncOpt: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - 1LDSBuffer: [1]
+        - GlobalSplitU: [1,2]
+        #- GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel"]
+        #- SourceSwap: [0, 1]
+        - DirectToVgprB: [1]
+        - UseSgprForGRO: [0,1]
+        #- StreamK: [0,3]
+        - Groups:
+          -
+            - MatrixInstruction: [16, 16,  4, 1,  1,   1, 1,  1,4 ]
+            - MatrixInstruction: [16, 16,  4, 1,  1,   1, 2,  1,4 ]
+            - MatrixInstruction: [16, 16,  4, 1,  1,   1, 4,  1,4 ]
+            - MatrixInstruction: [ 4,  4,  4, 4,  4,   2, 2,  4,1 ]
+            - MatrixInstruction: [16, 16,  4, 1,  1,   1, 2,  1,2 ]
+              WorkGroup: [16,8,2]
+            - MatrixInstruction: [16, 16,  4, 1,  1,   1, 2,  1,1 ]
+              WorkGroup: [16,4,4]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [255,   255, 1,  15]
+          - Exact: [255,   255, 1,  17]
+          - Exact: [255,   255, 1,  32]
+          - Exact: [255,   255, 1,  33]
+          - Exact: [255,   255, 1,  47]
+          - Exact: [255,   255, 1,  63]
+          - Exact: [255,   255, 1,  79]
+          - Exact: [255,   255, 1,  95]
+          - Exact: [255,   255, 1, 111]
+          - Exact: [255,   255, 1, 127]
+          - Exact: [255,   255, 1, 128]
+
+  ########################################
+  # DGEMM NN DTVA
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: d
+      DestDataType: d
+      ComputeDataType: d
+      TransposeA: 0
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        #- MatrixInstruction:
+        #  - [16, 16,  4, 1,  1,   1, 1,  4,1 ]
+        #  - [16, 16,  4, 1,  1,   2, 1,  4,1 ]
+        #  - [16, 16,  4, 1,  1,   4, 1,  4,1 ]
+        #  - [ 4,  4,  4, 4,  4,   2, 2,  4,1 ]
+        - WorkGroup:
+          - [16,16,1]
+        - GlobalReadVectorWidthA: [1,2]
+        - GlobalReadVectorWidthB: [1,2]
+        - PrefetchGlobalRead: [0,1,2]
+        - PrefetchLocalRead: [1,2]
+        - NumElementsPerBatchStore: [0]
+        - DepthU: [16]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - MIArchVgpr: [0]
+        - LocalWritePerMfma: [-1]
+        - StaggerU: [4]
+        - StaggerUStride: [256]
+        - StaggerUMapping: [2]
+        - WorkGroupMapping: [1]
+        - ScheduleIterAlg: [3]
+        #- ExpandPointerSwap: [0,1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - StorePriorityOpt: [0]
+        - VectorStore: [-1]
+        - StoreSyncOpt: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - 1LDSBuffer: [1]
+        #- GlobalSplitU: [1,2]
+        #- GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel"]
+        - SourceSwap: [1]#[0, 1]
+        - DirectToVgprA: [1]
+        - UseSgprForGRO: [0,1]
+        - TransposeLDS: [0,1]
+        - Groups:
+          -
+            - MatrixInstruction: [16, 16,  4, 1,  1,   1, 1,  4,1 ]
+            - MatrixInstruction: [16, 16,  4, 1,  1,   2, 1,  4,1 ]
+            - MatrixInstruction: [16, 16,  4, 1,  1,   4, 1,  4,1 ]
+            - MatrixInstruction: [ 4,  4,  4, 4,  4,   2, 2,  4,1 ]
+            - MatrixInstruction: [16, 16,  4, 1,  1,   2, 1,  2,1 ]
+              WorkGroup: [16,8,2]
+            - MatrixInstruction: [16, 16,  4, 1,  1,   2, 1,  1,1 ]
+              WorkGroup: [16,4,4]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [255,   255, 1,  15]
+          - Exact: [255,   255, 1,  17]
+          - Exact: [255,   255, 1,  32]
+          - Exact: [255,   255, 1,  33]
+          - Exact: [255,   255, 1,  47]
+          - Exact: [255,   255, 1,  63]
+          - Exact: [255,   255, 1,  79]
+          - Exact: [255,   255, 1,  95]
+          - Exact: [255,   255, 1, 111]
+          - Exact: [255,   255, 1, 127]
+          - Exact: [255,   255, 1, 128]
+
+  ########################################
+  # F8F8S NT DTVA pack
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: f8n
+      DestDataType: f8n
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 0
+      TransposeB: 1
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1,   1, 1,  4,1 ]
+          - [16, 16, 32, 1,  1,   2, 1,  4,1 ]
+          - [16, 16, 32, 1,  1,   4, 1,  4,1 ]
+          - [16, 16, 32, 1,  1,   8, 1,  4,1 ]
+        - WorkGroup:
+          - [16,16,1]
+        - GlobalReadVectorWidthA: [4,8]
+        - GlobalReadVectorWidthB: [4,8]
+        - PrefetchGlobalRead: [0,1,2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
+        - NumElementsPerBatchStore: [0]
+        - DepthU: [64]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - MIArchVgpr: [0]
+        - LocalWritePerMfma: [-1]
+        - StaggerU: [4]
+        - StaggerUStride: [256]
+        - WorkGroupMapping: [1]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [0,1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - StorePriorityOpt: [0]
+        - VectorStore: [-1]
+        - StoreSyncOpt: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - 1LDSBuffer: [1]
+        #- GlobalSplitU: [1,2]
+        #- GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel"]
+        - SourceSwap: [1]#[0, 1]
+        #- LocalReadVectorWidth: [4,8]
+        - DirectToVgprA: [1]
+        - UseSgprForGRO: [0,1]
+        - TransposeLDS: [0,1]
+        - Groups:
+          -
+            - MatrixInstruction: [16, 16, 32, 1,  1,   1, 1,  4,1 ]
+            - MatrixInstruction: [16, 16, 32, 1,  1,   2, 1,  4,1 ]
+            - MatrixInstruction: [16, 16, 32, 1,  1,   4, 1,  4,1 ]
+            - MatrixInstruction: [16, 16, 32, 1,  1,   8, 1,  4,1 ]
+            - MatrixInstruction: [16, 16, 32, 1,  1,   2, 1,  2,1 ]
+              WorkGroup: [16,8,2]
+            - MatrixInstruction: [16, 16, 32, 1,  1,   2, 1,  1,1 ]
+              WorkGroup: [16,4,4]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [255,   255, 1, 193]
+          - Exact: [255,   255, 1, 256]
+
+  ########################################
+  # F8F8S NT DTVB pack
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: f8n
+      DestDataType: f8n
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 0
+      TransposeB: 1
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1,   1, 1,  1,4 ]
+          - [16, 16, 32, 1,  1,   1, 2,  1,4 ]
+          - [16, 16, 32, 1,  1,   1, 4,  1,4 ]
+          - [16, 16, 32, 1,  1,   1, 8,  1,4 ]
+        - WorkGroup:
+          - [16,16,1]
+        - GlobalReadVectorWidthA: [4,8]
+        - GlobalReadVectorWidthB: [4,8]
+        - PrefetchGlobalRead: [2]#[1,2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
+        - NumElementsPerBatchStore: [0]
+        - DepthU: [32,64]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - MIArchVgpr: [0]
+        - LocalWritePerMfma: [-1]
+        - StaggerU: [0]
+        - WorkGroupMapping: [1]
+        - ScheduleIterAlg: [3]
+        #- ExpandPointerSwap: [0,1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - StorePriorityOpt: [0]
+        - VectorStore: [-1]
+        - StoreSyncOpt: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - 1LDSBuffer: [1]
+        #- GlobalSplitU: [1,2]
+        - SourceSwap: [0, 1]
+        - DirectToVgprB: [1]
+        - UseSgprForGRO: [0,1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [255,   255, 1, 193]
+          - Exact: [255,   255, 1, 256]
+
+  ########################################
+  # F8F8S TN DTVA
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: f8n
+      DestDataType: f8n
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1,   4, 1,  4,1 ]
+          - [16, 16, 32, 1,  1,   8, 1,  4,1 ]
+        - WorkGroup:
+          - [16,16,1]
+        - GlobalReadVectorWidthA: [4,8]
+        - GlobalReadVectorWidthB: [4,8]
+        - PrefetchGlobalRead: [0,2] #[1,2]
+        - PrefetchLocalRead: [1,2]
+        - ClusterLocalRead: [1]
+        - NumElementsPerBatchStore: [0]
+        - DepthU: [64]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - MIArchVgpr: [0]
+        - LocalWritePerMfma: [-1]
+        - StaggerU: [4]
+        - StaggerUStride: [256]
+        - StaggerUMapping: [2]
+        - WorkGroupMapping: [1]
+        - ScheduleIterAlg: [3]
+        #- ExpandPointerSwap: [0,1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - StorePriorityOpt: [0]
+        - VectorStore: [-1]
+        - StoreSyncOpt: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - 1LDSBuffer: [1]
+        #- GlobalSplitU: [1,2]
+        #- GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel"]
+        - SourceSwap: [0, 1]
+        #- LocalReadVectorWidth: [4,8]
+        - DirectToVgprA: [1]
+        - UseSgprForGRO: [0,1]
+        - TransposeLDS: [0,1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [255,   255, 1, 191]
+          - Exact: [255,   255, 1, 256]
+
+  ########################################
+  # F8F8S TN DTVB
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: f8n
+      DestDataType: f8n
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1,   1, 4,  1,4 ]
+          - [16, 16, 32, 1,  1,   1, 8,  1,4 ]
+        - WorkGroup:
+          - [16,16,1]
+        - GlobalReadVectorWidthA: [4,8]
+        - GlobalReadVectorWidthB: [4,8]
+        - PrefetchGlobalRead: [1,2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
+        - NumElementsPerBatchStore: [0]
+        - DepthU: [64]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - MIArchVgpr: [0]
+        - LocalWritePerMfma: [-1]
+        - StaggerU: [4]
+        - StaggerUStride: [256]
+        - StaggerUMapping: [2]
+        - WorkGroupMapping: [1]
+        - ScheduleIterAlg: [3]
+        #- ExpandPointerSwap: [0,1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - StorePriorityOpt: [0]
+        - VectorStore: [-1]
+        - StoreSyncOpt: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - 1LDSBuffer: [1]
+        #- GlobalSplitU: [1,2]
+        #- GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel"]
+        - SourceSwap: [1]#[0, 1]
+        #- LocalReadVectorWidth: [4,8]
+        - DirectToVgprB: [1]
+        - UseSgprForGRO: [0,1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [255,   255, 1, 193]
+          - Exact: [255,   255, 1, 256]
+
+  ########################################
+  # F8H_HHS NT DTVA pack+input conversion
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DataTypeA: f8n
+      DataTypeB: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 0
+      TransposeB: 1
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        #- MatrixInstruction:
+        #  - [16, 16, 16, 1,  1,   2, 1,  4,1 ]
+        #  - [16, 16, 16, 1,  1,   4, 1,  4,1 ]
+        #  - [16, 16, 16, 1,  1,   8, 1,  4,1 ]
+        #  - [32, 32,  8, 1,  1,   1, 1,  4,1 ]
+        #  - [32, 32,  8, 1,  1,   2, 1,  4,1 ]
+        #  - [32, 32,  8, 1,  1,   4, 1,  4,1 ]
+        #  - [16, 16,  4, 4,  4,   2, 2,  4,1 ]
+        #  - [ 4,  4,  4,16, 16,   2, 2,  4,1 ]
+        - WorkGroup:
+          - [16,16,1]
+        - GlobalReadVectorWidthA: [2,4,8]
+        - GlobalReadVectorWidthB: [4,8]
+        - PrefetchGlobalRead: [0,1,2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
+        - NumElementsPerBatchStore: [0]
+        - DepthU: [64]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - MIArchVgpr: [0]
+        - LocalWritePerMfma: [-1]
+        - StaggerU: [4]
+        - StaggerUStride: [256]
+        - WorkGroupMapping: [1]
+        - ScheduleIterAlg: [3]
+        #- ExpandPointerSwap: [0,1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - StorePriorityOpt: [0]
+        - VectorStore: [-1]
+        - StoreSyncOpt: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - 1LDSBuffer: [1]
+        #- GlobalSplitU: [1,2]
+        #- GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel"]
+        - SourceSwap: [0, 1]
+        #- LocalReadVectorWidth: [4,8]
+        - DirectToVgprA: [1]
+        - UseSgprForGRO: [0,1]
+        - TransposeLDS: [0,1]
+        - ConvertAfterDS: [1]
+        #- StreamK: [0,2]
+        - Groups:
+          -
+            - MatrixInstruction: [16, 16, 16, 1,  1,   2, 1,  4,1 ]
+            - MatrixInstruction: [16, 16, 16, 1,  1,   4, 1,  4,1 ]
+            - MatrixInstruction: [16, 16, 16, 1,  1,   8, 1,  4,1 ]
+            - MatrixInstruction: [32, 32,  8, 1,  1,   1, 1,  4,1 ]
+            - MatrixInstruction: [32, 32,  8, 1,  1,   2, 1,  4,1 ]
+            - MatrixInstruction: [32, 32,  8, 1,  1,   4, 1,  4,1 ]
+            - MatrixInstruction: [16, 16, 16, 1,  1,   4, 2,  2,1 ]
+              WorkGroup: [16,8,2]
+            - MatrixInstruction: [32, 32,  8, 1,  1,   2, 2,  1,1 ]
+              WorkGroup: [16,4,4]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [255,   255, 1,  32]
+          - Exact: [255,   255, 1,  33]
+          - Exact: [255,   255, 1,  47]
+          - Exact: [255,   255, 1,  63]
+          - Exact: [255,   255, 1,  79]
+          - Exact: [255,   255, 1,  95]
+          - Exact: [255,   255, 1, 111]
+          - Exact: [255,   255, 1, 127]
+          - Exact: [255,   255, 1, 191]
+          - Exact: [255,   255, 1, 255]
+          - Exact: [255,   255, 1, 256]
+
+  ########################################
+  # HF8_HHS NT DTVB pack+input conversion
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DataTypeA: h
+      DataTypeB: f8n
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 0
+      TransposeB: 1
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        #- MatrixInstruction:
+        #  - [16, 16, 16, 1,  1,   1, 2,  1,4 ]
+        #  - [16, 16, 16, 1,  1,   1, 4,  1,4 ]
+        #  - [16, 16, 16, 1,  1,   1, 8,  1,4 ]
+        #  - [32, 32,  8, 1,  1,   1, 1,  1,4 ]
+        #  - [32, 32,  8, 1,  1,   1, 2,  1,4 ]
+        #  - [32, 32,  8, 1,  1,   1, 4,  1,4 ]
+        #  - [16, 16,  4, 4,  4,   2, 2,  1,4 ]
+        #  - [ 4,  4,  4,16, 16,   2, 2,  1,4 ]
+        - WorkGroup:
+          - [16,16,1]
+        - GlobalReadVectorWidthA: [4,8]
+        - GlobalReadVectorWidthB: [2,4,8]
+        - PrefetchGlobalRead: [1,2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
+        - NumElementsPerBatchStore: [0]
+        - DepthU: [64]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [2,4,8]
+        - MIArchVgpr: [0]
+        - LocalWritePerMfma: [-1]
+        - StaggerU: [0]
+        - WorkGroupMapping: [1]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [0,1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - StorePriorityOpt: [0]
+        - VectorStore: [-1]
+        - StoreSyncOpt: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - 1LDSBuffer: [1]
+        #- GlobalSplitU: [1,2]
+        #- SourceSwap: [0, 1]
+        - DirectToVgprB: [1]
+        - UseSgprForGRO: [0,1]
+        - ConvertAfterDS: [1]
+        #- StreamK: [0,1]
+        - Groups:
+          -
+            - MatrixInstruction: [16, 16, 16, 1,  1,   1, 2,  1,4 ]
+            - MatrixInstruction: [16, 16, 16, 1,  1,   1, 4,  1,4 ]
+            - MatrixInstruction: [16, 16, 16, 1,  1,   1, 8,  1,4 ]
+            - MatrixInstruction: [32, 32,  8, 1,  1,   1, 1,  1,4 ]
+            - MatrixInstruction: [32, 32,  8, 1,  1,   1, 2,  1,4 ]
+            - MatrixInstruction: [32, 32,  8, 1,  1,   1, 4,  1,4 ]
+            - MatrixInstruction: [16, 16, 16, 1,  1,   4, 2,  2,1 ]
+              WorkGroup: [16,8,2]
+            - MatrixInstruction: [32, 32,  8, 1,  1,   2, 2,  1,1 ]
+              WorkGroup: [16,4,4]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [255,   255, 1,  15]
+          - Exact: [255,   255, 1,  33]
+          - Exact: [255,   255, 1,  47]
+          - Exact: [255,   255, 1,  63]
+          - Exact: [255,   255, 1,  79]
+          - Exact: [255,   255, 1,  95]
+          - Exact: [255,   255, 1, 111]
+          - Exact: [255,   255, 1, 127]
+          - Exact: [255,   255, 1, 191]
+          - Exact: [255,   255, 1, 255]
+          - Exact: [255,   255, 1, 256]
+
+  ########################################
+  # F8H_HHS TN DTVA+input conversion
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DataTypeA: f8n
+      DataTypeB: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        #- MatrixInstruction:
+        #  - [16, 16, 16, 1,  1,   2, 1,  4,1 ]
+        #  - [16, 16, 16, 1,  1,   4, 1,  4,1 ]
+        #  - [16, 16, 16, 1,  1,   8, 1,  4,1 ]
+        #  - [32, 32,  8, 1,  1,   1, 1,  4,1 ]
+        #  - [32, 32,  8, 1,  1,   2, 1,  4,1 ]
+        #  - [32, 32,  8, 1,  1,   4, 1,  4,1 ]
+        #  - [16, 16,  4, 4,  4,   2, 2,  4,1 ]
+        #  - [ 4,  4,  4,16, 16,   2, 2,  4,1 ]
+        - WorkGroup:
+          - [16,16,1]
+        - GlobalReadVectorWidthA: [4,8]
+        - GlobalReadVectorWidthB: [4,8]
+        - PrefetchGlobalRead: [0,1,2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
+        - NumElementsPerBatchStore: [0]
+        - DepthU: [64]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - MIArchVgpr: [0]
+        - LocalWritePerMfma: [-1]
+        - StaggerU: [4]
+        - StaggerUStride: [256]
+        - StaggerUMapping: [2]
+        - WorkGroupMapping: [1]
+        - ScheduleIterAlg: [3]
+        #- ExpandPointerSwap: [0,1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - StorePriorityOpt: [0]
+        - VectorStore: [-1]
+        - StoreSyncOpt: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - 1LDSBuffer: [1]
+        #- GlobalSplitU: [1,2]
+        #- GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel"]
+        - SourceSwap: [0, 1]
+        - LocalReadVectorWidth: [4,8]
+        - DirectToVgprA: [1]
+        - UseSgprForGRO: [0,1]
+        - TransposeLDS: [0,1]
+        - ConvertAfterDS: [1]
+        # - StreamK: [0,3]
+        - Groups:
+          -
+            - MatrixInstruction: [16, 16, 16, 1,  1,   2, 1,  4,1 ]
+            - MatrixInstruction: [16, 16, 16, 1,  1,   4, 1,  4,1 ]
+            - MatrixInstruction: [16, 16, 16, 1,  1,   8, 1,  4,1 ]
+            - MatrixInstruction: [32, 32,  8, 1,  1,   1, 1,  4,1 ]
+            - MatrixInstruction: [32, 32,  8, 1,  1,   2, 1,  4,1 ]
+            - MatrixInstruction: [32, 32,  8, 1,  1,   4, 1,  4,1 ]
+            - MatrixInstruction: [16, 16, 16, 1,  1,   4, 2,  2,1 ]
+              WorkGroup: [16,8,2]
+            - MatrixInstruction: [32, 32,  8, 1,  1,   2, 2,  1,1 ]
+              WorkGroup: [16,4,4]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [255,   255, 1,  32]
+          - Exact: [255,   255, 1,  33]
+          - Exact: [255,   255, 1,  47]
+          - Exact: [255,   255, 1,  63]
+          - Exact: [255,   255, 1,  79]
+          - Exact: [255,   255, 1,  95]
+          - Exact: [255,   255, 1, 111]
+          - Exact: [255,   255, 1, 127]
+          - Exact: [255,   255, 1, 191]
+          - Exact: [255,   255, 1, 255]
+          - Exact: [255,   255, 1, 256]
+
+  ########################################
+  # HF8_HHS TN DTVB
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DataTypeA: h
+      DataTypeB: f8n
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        #- MatrixInstruction:
+        #  - [16, 16, 16, 1,  1,   1, 2,  1,4 ]
+        #  - [16, 16, 16, 1,  1,   1, 4,  1,4 ]
+        #  - [16, 16, 16, 1,  1,   1, 8,  1,4 ]
+        #  - [32, 32,  8, 1,  1,   1, 1,  1,4 ]
+        #  - [32, 32,  8, 1,  1,   1, 2,  1,4 ]
+        #  - [32, 32,  8, 1,  1,   1, 4,  1,4 ]
+        #  - [16, 16,  4, 4,  4,   4, 1,  1,4 ]
+        #  - [ 4,  4,  4,16, 16,   2, 2,  1,4 ]
+        - WorkGroup:
+          - [16,16,1]
+        - GlobalReadVectorWidthA: [4,8]
+        - GlobalReadVectorWidthB: [4,8]
+        - PrefetchGlobalRead: [1,2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
+        - NumElementsPerBatchStore: [0]
+        - DepthU: [64]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - MIArchVgpr: [0]
+        - LocalWritePerMfma: [-1]
+        - StaggerU: [4]
+        - StaggerUStride: [256]
+        - StaggerUMapping: [2]
+        - WorkGroupMapping: [1]
+        - ScheduleIterAlg: [3]
+        #- ExpandPointerSwap: [0,1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - StorePriorityOpt: [0]
+        - VectorStore: [-1]
+        - StoreSyncOpt: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - 1LDSBuffer: [1]
+        #- GlobalSplitU: [1,2]
+        #- GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel"]
+        - SourceSwap: [0, 1]
+        - LocalReadVectorWidth: [4,8]
+        - DirectToVgprB: [1]
+        - UseSgprForGRO: [0,1]
+        - ConvertAfterDS: [1]
+        - Groups:
+          -
+            - MatrixInstruction: [16, 16, 16, 1,  1,   1, 2,  1,4 ]
+            - MatrixInstruction: [16, 16, 16, 1,  1,   1, 4,  1,4 ]
+            - MatrixInstruction: [16, 16, 16, 1,  1,   1, 8,  1,4 ]
+            - MatrixInstruction: [32, 32,  8, 1,  1,   1, 1,  1,4 ]
+            - MatrixInstruction: [32, 32,  8, 1,  1,   1, 2,  1,4 ]
+            - MatrixInstruction: [32, 32,  8, 1,  1,   1, 4,  1,4 ]
+            - MatrixInstruction: [16, 16, 16, 1,  1,   2, 4,  1,2 ]
+              WorkGroup: [16,8,2]
+            - MatrixInstruction: [32, 32,  8, 1,  1,   2, 2,  1,1 ]
+              WorkGroup: [16,4,4]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [255,   255, 1,  32]
+          - Exact: [255,   255, 1,  33]
+          - Exact: [255,   255, 1,  47]
+          - Exact: [255,   255, 1,  63]
+          - Exact: [255,   255, 1,  79]
+          - Exact: [255,   255, 1,  95]
+          - Exact: [255,   255, 1, 111]
+          - Exact: [255,   255, 1, 127]
+          - Exact: [255,   255, 1, 191]
+          - Exact: [255,   255, 1, 255]
+          - Exact: [255,   255, 1, 256]
+
+  ########################################
+  # HHS TT DTVA with/wo tail loop
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 1
+      UseBeta: True
+      Batched: True
+      # UseBias: 1
+      # BiasDataTypeList: [s,h]
+      # Activation: True
+      # ActivationType: hipblaslt_all
+      # UseScaleAlphaVec: 1
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 16, 1,  1,  1,8,   4,1 ] # 64x128
+          - [16, 16, 16, 1,  1,  2,8,  4,1 ] # 128x128
+          - [16, 16, 16, 1,  1,  4,16,  4,1 ] # 256x256
+
+          - [16, 16, 16, 1,  1,  4,2,   1,4 ] # 64x128
+          - [16, 16, 16, 1,  1,  8,2,   1,4 ] # 128x128
+          - [16, 16, 16, 1,  1,  16,4,  1,4 ] # 256x256
+        - AssertFree0ElementMultiple: [16]
+        - AssertFree1ElementMultiple: [16]
+        - AssertSummationElementMultiple: [32]
+        - PrefetchGlobalRead: [1,2]
+        - PrefetchLocalRead: [1,2,4]
+        - DepthU: [128] # Has tail
+        - GlobalReadVectorWidthA: [-1,8] # force testing 8 (prepared for swizzleA)
+        - GlobalReadVectorWidthB: [-1]
+        - VectorWidthA: [-1,1] # force testing 1 (prepared for swizzleA)
+        - VectorWidthB: [-1]
+        - LocalReadVectorWidth: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        # - StaggerU: [0] #
+        # - StaggerUStride: [-1] #
+        # - WorkGroupMapping: [1] #
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - 1LDSBuffer: [0,1]
+        - GlobalReadPerMfma: [1]
+        - LocalWritePerMfma: [-1]
+        - StoreRemapVectorWidth: [0]
+        - StoreVectorWidth: [-1]
+        - NumElementsPerBatchStore: [0]
+        - ClusterLocalRead: [1]
+        - WorkGroupMappingXCC: [8]
+        - UseSgprForGRO: [0]
+        - DirectToVgprA: [1]
+
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [960, 1280, 1, 192]
+          - Exact: [960, 1280, 1, 256] # no tail
+          - Exact: [1280, 1280, 1, 192]
+          - Exact: [1600, 1280, 1, 192]
+
+  ########################################
+  # HHS NN DTVB with/wo tail loop
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 0
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+      # UseBias: 1
+      # BiasDataTypeList: [s,h]
+      # Activation: True
+      # ActivationType: hipblaslt_all
+      # UseScaleAlphaVec: 1
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 16, 1,  1,  4,2,   1,4 ] # 64x128
+          - [16, 16, 16, 1,  1,  8,2,  1,4 ] # 128x128
+          - [16, 16, 16, 1,  1,  16,4,  1,4 ] # 256x256
+
+          - [16, 16, 16, 1,  1,  2,4,   4,1 ] # 128x64
+          - [16, 16, 16, 1,  1,  2,8,  4,1 ] # 128x128
+          - [16, 16, 16, 1,  1,  4,16,  4,1 ] # 256x256
+        - AssertFree0ElementMultiple: [16]
+        - AssertFree1ElementMultiple: [16]
+        - AssertSummationElementMultiple: [32]
+        - PrefetchGlobalRead: [1,2]
+        - PrefetchLocalRead: [1,2,4]
+        - DepthU: [128] # Has tail
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1,8] # force testing 8 (prepared for swizzleB)
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1,1] # force testing 1 (prepared for swizzleB)
+        - LocalReadVectorWidth: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        # - StaggerU: [0] #
+        # - StaggerUStride: [-1] #
+        # - WorkGroupMapping: [1] #
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - 1LDSBuffer: [0,1]
+        - GlobalReadPerMfma: [1]
+        - LocalWritePerMfma: [-1]
+        - StoreRemapVectorWidth: [0]
+        - StoreVectorWidth: [-1]
+        - NumElementsPerBatchStore: [0]
+        - ClusterLocalRead: [1]
+        - WorkGroupMappingXCC: [8]
+        - UseSgprForGRO: [0]
+        - DirectToVgprB: [1]
+
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [960, 1280, 1, 192]
+          - Exact: [960, 1280, 1, 256]
+          - Exact: [1280, 1280, 1, 192]
+          - Exact: [1600, 1280, 1, 192]
