@@ -29,8 +29,10 @@ jobs:
             branch=$(cat .github/repos-config.json | jq -r ".repositories[] | select(.name == \"$repo\") | .branch")
             revision=$(cat .github/repos-config.json | jq -r ".repositories[] | select(.name == \"$repo\") | .revision")
             git subtree add --prefix $repo https://github.com/${url}.git $branch
-            if [ "$revision" ]; then
-              echo "Resetting $repo to mainline revision $revision"
+            if [ -z "$revision" ]; then
+              echo "No revision specified for $repo, skipping reset."
+            else
+              echo "Resetting $repo to master-no-npi mainline revision $revision"
               git reset --hard $revision
             fi
           done
