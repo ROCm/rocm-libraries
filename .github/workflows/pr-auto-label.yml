@@ -42,22 +42,25 @@ jobs:
       - name: Read repo configurations
         id: repos_config
         run: |
-          repos=$(jq -r '.repositories[].name' .github/repos-config.json | tr '\n' ' ')
-          echo "repos=$repos" >> "$GITHUB_OUTPUT"
+          repo_paths=$(jq -r '.repositories[] | "\(.category)/\(.name)"' .github/repos-config.json | tr '\n' ' ')
+          echo "repo_paths=$repo_paths" >> "$GITHUB_OUTPUT"
 
       - name: Apply and remove labels
         run: |
           changed_files="${{ steps.files.outputs.changed_files }}"
           current_labels="${{ steps.current_labels.outputs.current_labels }}"
-          repos="${{ steps.repos_config.outputs.repos }}"
+          repo_paths="${{ steps.repos_config.outputs.repo_paths }}"
 
           labels_to_add=()
           labels_to_remove=()
 
-          for repo in $repos; do
-            label="project: ${repo}"
+          for entry in $repo_paths; do
+            category_repo="${entry}"                     # e.g., projects/hipsparse
+            label_name="${category_repo##*/}"            # e.g., hipsparse
+            label="project: ${label_name}"
 
-            if echo "$changed_files" | grep -qE "\b${repo}/"; then
+            # Use full path with leading slash for exact match
+            if echo "$changed_files" | grep -qE "\b/${category_repo}/"; then
               labels_to_add+=("$label")
             else
               if echo "$current_labels" | grep -q "$label"; then
@@ -69,7 +72,6 @@ jobs:
           if [ ${#labels_to_add[@]} -gt 0 ]; then
             echo "Applying labels: ${labels_to_add[*]}"
             for label in "${labels_to_add[@]}"; do
-              # Apply each label individually, ensuring labels with spaces are properly quoted
               gh pr edit "${{ github.event.pull_request.number }}" --add-label "$label"
             done
           fi
@@ -77,7 +79,6 @@ jobs:
           if [ ${#labels_to_remove[@]} -gt 0 ]; then
             echo "Removing labels: ${labels_to_remove[*]}"
             for label in "${labels_to_remove[@]}"; do
-              # Remove each label individually, ensuring labels with spaces are properly quoted
               gh pr edit "${{ github.event.pull_request.number }}" --remove-label "$label"
             done
           fi

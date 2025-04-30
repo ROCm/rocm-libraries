@@ -1,0 +1,19 @@
+{
+   <Hip>
+   Memcheck:Leak
+   match-leak-kinds: possible
+   ...
+   obj:/opt/rocm-4.5.2/hip/lib/libamdhip64.so.4.4.40502
+}
+{
+   <ROCr>
+   Memcheck:Leak
+   ...
+   fun:_ZN4rocr*
+}
+{
+   <hipInit>
+   Memcheck:Leak
+   ...
+   fun:hipInit
+}
