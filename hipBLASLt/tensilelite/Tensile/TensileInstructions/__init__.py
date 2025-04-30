@@ -31,6 +31,5 @@ from .Base import *
 from .DataType import *
 from .ExtInstructions import *
 from .Formatting import *
-from .Math import *
 from .RegisterPool import *
 from .Utils import *

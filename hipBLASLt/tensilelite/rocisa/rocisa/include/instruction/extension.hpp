@@ -244,4 +244,84 @@ namespace rocisa
         module->addT<Label>(noBranchLabel);
         return module;
     }
+
+    // Perform 32-bit scalar mul and save 64-bit result in two SGPR
+    // src0 and src1 are 32-bit ints in scalar sgpr or small int constants (<64?))
+    // sign indicates if input and output data is signed
+    // return returns in dst0:dest (lower 32-bit in dst0, high 64-bit in dst1))
+    // Requires 2 tmp vgprs
+    inline std::shared_ptr<Module> SMulInt64to32(const std::shared_ptr<RegisterContainer>& dst0,
+                                                 const std::shared_ptr<RegisterContainer>& dst1,
+                                                 const InstructionInput&                   src0,
+                                                 const InstructionInput&                   src1,
+                                                 const ContinuousRegister& tmpVgprRes,
+                                                 bool                      hasSMulHi,
+                                                 bool                      sign,
+                                                 const std::string&        comment = "")
+    {
+        auto module = std::make_shared<Module>("SMulInt64to32");
+        if(tmpVgprRes.size < 2)
+        {
+            throw std::runtime_error("ContinuousRegister size must be at least 2.");
+        }
+        if(auto src0data = std::get_if<std::shared_ptr<Container>>(&src0))
+        {
+            if(auto src0Reg = std::dynamic_pointer_cast<RegisterContainer>(*src0data))
+            {
+                if(dst1 == src0Reg)
+                {
+                    throw std::runtime_error("dst1 cannot be the same as src0.");
+                }
+            }
+        }
+        if(auto src1data = std::get_if<std::shared_ptr<Container>>(&src1))
+        {
+            if(auto src1Reg = std::dynamic_pointer_cast<RegisterContainer>(*src1data))
+            {
+                if(dst1 == src1Reg)
+                {
+                    throw std::runtime_error("dst1 cannot be the same as src1.");
+                }
+            }
+        }
+        // the else path below has less restrictions but prefer consistency
+        if(hasSMulHi)
+        {
+            if(sign)
+            {
+                module->addT<SMulHII32>(dst1, src0, src1, comment);
+            }
+            else
+            {
+                module->addT<SMulHIU32>(dst1, src0, src1, comment);
+            }
+            module->addT<SMulI32>(dst0, src0, src1, comment);
+        }
+        else
+        {
+            auto swapSrc = [&src0, &src1]() {
+                if(auto src1data = std::get_if<std::shared_ptr<Container>>(&src1))
+                {
+                    return std::make_pair(src0, src1);
+                }
+                return std::make_pair(src1, src0);
+            };
+            auto [swapSrc0, swapSrc1] = swapSrc();
+            auto vgprTmp              = vgpr(tmpVgprRes.idx);
+            auto vgprTmp1             = vgpr(tmpVgprRes.idx + 1);
+            module->addT<VMovB32>(vgprTmp, swapSrc0, std::nullopt, comment);
+            if(sign)
+            {
+                module->addT<VMulHII32>(vgprTmp1, vgprTmp, swapSrc1, comment);
+            }
+            else
+            {
+                module->addT<VMulHIU32>(vgprTmp1, vgprTmp, swapSrc1, comment);
+            }
+            module->addT<VReadfirstlaneB32>(dst1, vgprTmp1, comment);
+            module->addT<VMulLOU32>(vgprTmp1, vgprTmp, swapSrc1, comment);
+            module->addT<VReadfirstlaneB32>(dst0, vgprTmp1, comment);
+        }
+        return module;
+    }
 } // namespace rocisa

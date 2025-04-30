@@ -27,12 +27,12 @@ from rocisa.container import EXEC, vgpr, sgpr
 from rocisa.instruction import DSStoreB16, DSStoreB32, DSStoreB64, SBarrier, \
     SMovB32, SSetMask, VAddF32, VAddU32, VCmpXEqU32, VCvtPkBF8toF32, VCvtPkFP8toF32, \
     VDot2F32BF16, VDot2F32F16, VLShiftLeftB32, VMovB32, vectorStaticDivide, \
-    vectorStaticRemainder
+    vectorStaticRemainder, vectorStaticMultiply
 from ..Component import SumUnroll
 from ..Common import printExit
 from ..TensileInstructions.ExtInstructions import VCvtBF16toFP32
 from ..TensileInstructions import Module, SDWAModifiers, SelectBit, \
-    staticMultiply, DSModifiers, ContinuousRegister, log2
+    DSModifiers, ContinuousRegister, log2
 
 class SumUnrollMfma(SumUnroll):
     kernel = {"EnableMatrixInstruction": True}
@@ -230,7 +230,7 @@ class SumUnrollMfma(SumUnroll):
                 "0. thread id in wave: wtid = tid %% wavelength(%u)" % waveWidth))
             imod.add(vectorStaticRemainder(dummy, tReg, kReg, kernel["MatrixInstN"], tmpVgprRes, tmpSgprInfo, \
                 "1. N offset: nIdx = wtid %% MI_N(%u)" % kernel["MatrixInstN"]))
-            imod.add(staticMultiply(vgpr(tReg), vgpr(tReg), strideTile, tmpSgprInfo, \
+            imod.add(vectorStaticMultiply(vgpr(tReg), vgpr(tReg), strideTile, tmpSgprInfo, \
                 "1. N offset: nOffset = nIdx * nStride(%u)" % strideTile))
             # block offset
             # Here we calculate the coordinate of the block offset, and remove the duplicated blocks.
@@ -247,16 +247,16 @@ class SumUnrollMfma(SumUnroll):
                 "2. block offset: bnIdx = wtid / dividedForBlkId(%u)" % dividedForBlkId))
             imod.add(vectorStaticRemainder(dummy, wReg, wReg, num1DBlocks, tmpVgprRes, tmpSgprInfo, \
                 "2. block offset: bnIdx = bnIdx %% num1DBlocks(%u)" % num1DBlocks))
-            imod.add(staticMultiply(vgpr(wReg), vgpr(wReg), strideBlock, tmpSgprInfo, \
+            imod.add(vectorStaticMultiply(vgpr(wReg), vgpr(wReg), strideBlock, tmpSgprInfo, \
                 "2. block offset: bnOffset = bnIdx * strideBlock(%u)" % strideBlock))
             imod.add(VAddU32(dst=vgpr(tReg), src0=vgpr(wReg), src1=vgpr(tReg), \
                 comment="3. add N and block offset: bnOffset = block and N offset"))
-            imod.add(staticMultiply(vgpr(tReg), vgpr(tReg), vectorWidth, tmpSgprInfo, \
+            imod.add(vectorStaticMultiply(vgpr(tReg), vgpr(tReg), vectorWidth, tmpSgprInfo, \
                 "3. apply VectorWidth: bnOffset = bnOffset * vw(%u)" % vectorWidth))
             # unroll offset
             imod.add(vectorStaticDivide(kReg, kReg, dividendForKId, tmpVgprRes, \
                 "4. K offset: kIdx = wtid / (MIN(%u) * MIBB(%u))" % (kernel["MatrixInstN"], kernel["MatrixInstB"])))
-            imod.add(staticMultiply(vgpr(kReg), vgpr(kReg), 1, tmpSgprInfo, \
+            imod.add(vectorStaticMultiply(vgpr(kReg), vgpr(kReg), 1, tmpSgprInfo, \
                 "4. K offset: lrKOffset = kIdx * mStride(1)"))
 
             imod.add(VAddU32(dst=vgpr(tReg), src0=vgpr(kReg), src1=vgpr(tReg), \
@@ -278,7 +278,7 @@ class SumUnrollMfma(SumUnroll):
                 imod.add(VCmpXEqU32(dst=EXEC(), src0=vgpr(dummy), src1=0, comment="6-1. True if ans = 0"))
                 imod.add(vectorStaticRemainder(dummy, wReg, wReg, num1DWaves, tmpVgprRes, tmpSgprInfo, \
                     "6. wave offset in M dimen: wtid0 = wtid %% num1DWaves(%u)" % num1DWaves))
-                imod.add(staticMultiply(vgpr(wReg), vgpr(wReg), strideWave, tmpSgprInfo, \
+                imod.add(vectorStaticMultiply(vgpr(wReg), vgpr(wReg), strideWave, tmpSgprInfo, \
                     "6. wave offset in M dimen: wOffset = wtid0 * W0Stride(%u)" % strideWave))
                 imod.add(VAddU32(dst=vgpr(tReg), src0=vgpr(wReg), src1=vgpr(tReg), \
                     comment="7. final local read offset: flrOffset = lrOffset + WOffset"))
