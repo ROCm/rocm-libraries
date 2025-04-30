@@ -1,0 +1,75 @@
+name: Auto Label PR based on Changed Files
+
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+jobs:
+  label-pr:
+    runs-on: ubuntu-latest
+    steps:
+      # Step 1: Checkout the repository
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Step 2: Get the list of changed files
+      - name: Get changed files
+        id: files
+        run: |
+          echo "::set-output name=changed_files::$(git diff --name-only ${{ github.event.before }} ${{ github.sha }})"
+
+      # Step 3: Get the current labels of the PR
+      - name: Get current labels
+        id: current_labels
+        run: |
+          current_labels=$(gh pr view ${{ github.event.pull_request.number }} --json labels -q '.labels[].name')
+          echo "::set-output name=current_labels::$current_labels"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Step 4: Read .github/repos-config.json to dynamically fetch repo configurations
+      - name: Read repo configurations
+        id: repos-config
+        run: |
+          REPOS_JSON=$(cat .github/repos-config.json)
+          echo "::set-output name=repos-config::$REPOS_JSON"
+
+      # Step 5: Apply and remove labels based on changed files and repos-config.json
+      - name: Apply and remove labels
+        run: |
+          changed_files="${{ steps.files.outputs.changed_files }}"
+          current_labels="${{ steps.current_labels.outputs.current_labels }}"
+          repos_config="${{ steps.repos-config.outputs.repos-config }}"
+
+          repos=$(echo "$repos_config" | jq -r '.repositories[].name')
+
+          labels_to_add=""
+          labels_to_remove=""
+
+          for repo in $repos; do
+            label="project: ${repo}"
+
+            if echo "$changed_files" | grep -q "^$repo/"; then
+              labels_to_add="$labels_to_add $label"
+            else
+              if echo "$current_labels" | grep -q "$label"; then
+                labels_to_remove="$labels_to_remove $label"
+              fi
+            fi
+          done
+
+          if [ -n "$labels_to_add" ]; then
+            echo "Applying labels: $labels_to_add"
+            gh pr label ${{ github.event.pull_request.number }} --add "$labels_to_add"
+          fi
+
+          # Remove the old labels that are no longer relevant
+          if [ -n "$labels_to_remove" ]; then
+            echo "Removing labels: $labels_to_remove"
+            gh pr label ${{ github.event.pull_request.number }} --remove "$labels_to_remove"
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
