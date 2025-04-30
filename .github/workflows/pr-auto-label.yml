@@ -11,6 +11,11 @@ jobs:
   label-pr:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout workflows
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: '.github/*'
+
       - name: Get changed files
         id: files
         run: |
