@@ -60,11 +60,6 @@
       "revision": "d8d914a2e1e60b6474fe67c09ed7d36fb49006a4"
     },
     {
-      "name": "MIOpen",
-      "url": "ROCm/MIOpen",
-      "branch": "amd-master"
-    },
-    {
       "name": "rocBLAS",
       "url": "ROCm/rocBLAS",
       "branch": "develop",
