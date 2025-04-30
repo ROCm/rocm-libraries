@@ -1,0 +1,74 @@
+Spmm Matrix Strided Batched Sizes:
+- &strided_batched_small_matrix_size_range
+  - { M: 8, N: 8, K: 8, lda: 8, ldb: 8, ldc: 8, ldd: 8, stride_a: 64, stride_b: 64, stride_c: 64, stride_d: 64 }
+  - { M: 16, N: 16, K: 16, lda: 16, ldb: 16, ldc: 16, ldd: 16, stride_a: 256, stride_b: 256, stride_c: 256, stride_d: 256 }
+  - { M: 16, N: 16, K: 16, lda: 16, ldb: 16, ldc: 16, ldd: 16, stride_a: 256, stride_b: 256, stride_c: 256, stride_d: 256 }
+  - { M: 64, N: 64, K: 64, lda: 64, ldb: 64, ldc: 64, ldd: 64, stride_a: 4096, stride_b: 4096, stride_c: 4096, stride_d: 4096 }
+  - { M: 128, N: 128, K: 128, lda: 128, ldb: 128, ldc: 128, ldd: 128, stride_a: 16384, stride_b: 16384, stride_c: 16384, stride_d: 16384 }
+
+- &strided_batched_small_matrix_size_stride_a_range
+  - { M: 16, N: 16, K: 16, lda: 16, ldb: 16, ldc: 16, ldd: 16, stride_a: 0, stride_b: 256, stride_c: 256, stride_d: 256 }
+  - { M: 64, N: 64, K: 64, lda: 64, ldb: 64, ldc: 64, ldd: 64, stride_a: 4096, stride_b: 0, stride_c: 4096, stride_d: 4096 }
+  - { M: 128, N: 128, K: 128, lda: 128, ldb: 128, ldc: 128, ldd: 128, stride_a: 0, stride_b: 16384, stride_c: 16384, stride_d: 16384 }
+
+- &strided_batched_medium_matrix_size_range
+  - { M: 256, N: 256, K: 256, lda: 256, ldb: 256, ldc: 256, ldd: 256, stride_a: 65536, stride_b: 65536, stride_c: 65536, stride_d: 65536 }
+
+- &strided_batched_medium_matrix_size_stride_a_range
+  - { M: 256, N: 256, K: 256, lda: 256, ldb: 256, ldc: 256, ldd: 256, stride_a: 0, stride_b: 65536, stride_c: 65536, stride_d: 65536 }
+
+- &strided_batched_large_matrix_size_range
+  - { M: 512, N: 512, K: 512, lda: 512, ldb: 512, ldc: 512, ldd: 512, stride_a: 262144, stride_b: 262144, stride_c: 262144, stride_d: 262144 }
+
+- &strided_batched_large_matrix_size_stride_a_range
+  - { M: 512, N: 512, K: 512, lda: 512, ldb: 512, ldc: 512, ldd: 512, stride_a: 262144, stride_b: 0, stride_c: 262144, stride_d: 262144 }
+
+- &strided_batched_deepbench_vec
+  - { M: 12544, N: 64, K: 64, lda: 12544, ldb: 64, ldc: 12544, ldd: 12544, stride_a: 802816, stride_b: 0, stride_c: 802816, stride_d: 802816 }
+  - { M: 3136, N: 256, K: 64, lda: 3136, ldb: 64, ldc: 3136, ldd: 3136, stride_a: 200704, stride_b: 0, stride_c: 802816, stride_d: 802816 }
+  - { M: 3136, N: 64, K: 256, lda: 3136, ldb: 256, ldc: 3136, ldd: 3136, stride_a: 802816, stride_b: 0, stride_c: 200704, stride_d: 200704 }
+  - { M: 784, N: 128, K: 512, lda: 784, ldb: 512, ldc: 784, ldd: 784, stride_a: 401408, stride_b: 0, stride_c: 100352, stride_d: 100352 }
+  - { M: 784, N: 512, K: 128, lda: 784, ldb: 128, ldc: 784, ldd: 784, stride_a: 100352, stride_b: 0, stride_c: 401408, stride_d: 401408 }
+  - { M: 784, N: 64, K: 192, lda: 784, ldb: 192, ldc: 784, ldd: 784, stride_a: 150528, stride_b: 0, stride_c: 50176, stride_d: 50176 }
+  - { M: 12544, N: 64, K: 64, lda: 12544, ldb: 64, ldc: 12544, ldd: 12544, stride_a: 802816, stride_b: 0, stride_c: 802816, stride_d: 802816 }
+  - { M: 3136, N: 256, K: 64, lda: 3136, ldb: 256, ldc: 3136, ldd: 3136, stride_a: 200704, stride_b: 0, stride_c: 802816, stride_d: 802816 }
+  - { M: 3136, N: 64, K: 256, lda: 3136, ldb: 64, ldc: 3136, ldd: 3136, stride_a: 802816, stride_b: 0, stride_c: 200704, stride_d: 200704 }
+  - { M: 784, N: 128, K: 512, lda: 784, ldb: 128, ldc: 784, ldd: 784, stride_a: 401408, stride_b: 0, stride_c: 100352, stride_d: 100352 }
+  - { M: 784, N: 192, K: 64, lda: 784, ldb: 192, ldc: 784, ldd: 784, stride_a: 50176, stride_b: 0, stride_c: 150528, stride_d: 150528 }
+  - { M: 784, N: 512, K: 128, lda: 784, ldb: 512, ldc: 784, ldd: 784, stride_a: 100352, stride_b: 0, stride_c: 401408, stride_d: 401408 }
+
+- &strided_batched_conv_resnet50_fwd
+  - { M: 3136, N: 256, K: 64, lda: 3136, ldb: 64, ldc: 3136, ldd: 3136, stride_a: 200704, stride_b: 0, stride_c: 802816, stride_d: 802816 }
+  - { M: 3136, N: 64, K: 256, lda: 3136, ldb: 256, ldc: 3136, ldd: 3136, stride_a: 802816, stride_b: 0, stride_c: 200704, stride_d: 200704 }
+  - { M: 3136, N: 64, K: 64, lda: 3136, ldb: 64, ldc: 3136, ldd: 3136, stride_a: 200704, stride_b: 0, stride_c: 200704, stride_d: 200704 }
+  - { M: 784, N: 128, K: 512, lda: 784, ldb: 512, ldc: 784, ldd: 784, stride_a: 401408, stride_b: 0, stride_c: 100352, stride_d: 100352 }
+  - { M: 784, N: 512, K: 128, lda: 784, ldb: 128, ldc: 784, ldd: 784, stride_a: 100352, stride_b: 0, stride_c: 401408, stride_d: 401408 }
+
+- &strided_batched_conv_resnet50_bwddata
+  - { M: 3136, N: 256, K: 64, lda: 3136, ldb: 256, ldc: 3136, ldd: 3136, stride_a: 200704, stride_b: 0, stride_c: 802816, stride_d: 802816 }
+  - { M: 3136, N: 64, K: 256, lda: 3136, ldb: 64, ldc: 3136, ldd: 3136, stride_a: 802816, stride_b: 0, stride_c: 200704, stride_d: 200704 }
+  - { M: 3136, N: 64, K: 64, lda: 3136, ldb: 64, ldc: 3136, ldd: 3136, stride_a: 200704, stride_b: 0, stride_c: 200704, stride_d: 200704 }
+  - { M: 784, N: 128, K: 512, lda: 784, ldb: 128, ldc: 784, ldd: 784, stride_a: 401408, stride_b: 0, stride_c: 100352, stride_d: 100352 }
+  - { M: 784, N: 512, K: 128, lda: 784, ldb: 512, ldc: 784, ldd: 784, stride_a: 100352, stride_b: 0, stride_c: 401408, stride_d: 401408 }
+
+
+- &strided_batched_conv_inception4_bwddata
+  - { M: 64, N: 1536, K: 256, lda: 64, ldb: 1536, ldc: 64, ldd: 64, stride_a: 16384, stride_b: 0, stride_c: 98304, stride_d: 98304 }
+  - { M: 64, N: 1536, K: 384, lda: 64, ldb: 1536, ldc: 64, ldd: 64, stride_a: 24576, stride_b: 0, stride_c: 98304, stride_d: 98304 }
+
+- &strided_batched_conv_ctest_fwd
+  - { M: 12544, N: 16, K: 64, lda: 12544, ldb: 64, ldc: 12544, ldd: 12544, stride_a: 802816, stride_b: 0, stride_c: 200704, stride_d: 200704 }
+  - { M: 3136, N: 16, K: 128, lda: 3136, ldb: 128, ldc: 3136, ldd: 3136, stride_a: 401408, stride_b: 0, stride_c: 50176, stride_d: 50176 }
+  - { M: 3136, N: 16, K: 256, lda: 3136, ldb: 256, ldc: 3136, ldd: 3136, stride_a: 802816, stride_b: 0, stride_c: 50176, stride_d: 50176 }
+  - { M: 3136, N: 16, K: 64, lda: 3136, ldb: 64, ldc: 3136, ldd: 3136, stride_a: 200704, stride_b: 0, stride_c: 50176, stride_d: 50176 }
+  - { M: 32768, N: 16, K: 480, lda: 32768, ldb: 480, ldc: 32768, ldd: 32768, stride_a: 15728640, stride_b: 0, stride_c: 524288, stride_d: 524288 }
+  - { M: 784, N: 16, K: 128, lda: 784, ldb: 128, ldc: 784, ldd: 784, stride_a: 100352, stride_b: 0, stride_c: 12544, stride_d: 12544 }
+  - { M: 784, N: 16, K: 192, lda: 784, ldb: 192, ldc: 784, ldd: 784, stride_a: 150528, stride_b: 0, stride_c: 12544, stride_d: 12544 }
+  - { M: 784, N: 16, K: 256, lda: 784, ldb: 256, ldc: 784, ldd: 784, stride_a: 200704, stride_b: 0, stride_c: 12544, stride_d: 12544 }
+  - { M: 784, N: 16, K: 320, lda: 784, ldb: 320, ldc: 784, ldd: 784, stride_a: 250880, stride_b: 0, stride_c: 12544, stride_d: 12544 }
+  - { M: 784, N: 16, K: 512, lda: 784, ldb: 512, ldc: 784, ldd: 784, stride_a: 401408, stride_b: 0, stride_c: 12544, stride_d: 12544 }
+  - { M: 784, N: 16, K: 64, lda: 784, ldb: 64, ldc: 784, ldd: 784, stride_a: 50176, stride_b: 0, stride_c: 12544, stride_d: 12544 }
+  - { M: 8192, N: 16, K: 480, lda: 8192, ldb: 480, ldc: 8192, ldd: 8192, stride_a: 3932160, stride_b: 0, stride_c: 131072, stride_d: 131072 }
+  - { M: 8192, N: 16, K: 512, lda: 8192, ldb: 512, ldc: 8192, ldd: 8192, stride_a: 4194304, stride_b: 0, stride_c: 131072, stride_d: 131072 }
+  - { M: 8192, N: 16, K: 528, lda: 8192, ldb: 528, ldc: 8192, ldd: 8192, stride_a: 4325376, stride_b: 0, stride_c: 131072, stride_d: 131072 }
+  - { M: 8192, N: 16, K: 832, lda: 8192, ldb: 832, ldc: 8192, ldd: 8192, stride_a: 6815744, stride_b: 0, stride_c: 131072, stride_d: 131072 }
