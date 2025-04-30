@@ -1,0 +1,14184 @@
+- MinimumRequiredVersion: 4.9.5
+- vega10
+- gfx900
+- - Device 6863
+  - Device 6862
+  - Device 687f
+  - Device 6860
+  - Device 6861
+  - Vega 10 XTX [Radeon Vega Frontier Edition]
+  - Vega [Radeon RX Vega]
+  - Vega 10 [Radeon Instinct MI25]
+  - Vega
+  - Device 6864
+  - Device 686c
+- AssignedDerivedParameters: true
+  Batched: true
+  ComplexConjugateA: false
+  ComplexConjugateB: false
+  ComputeDataType: 0
+  DataType: 0
+  DestDataType: 0
+  HighPrecisionAccumulate: false
+  Index0: 0
+  Index01A: 0
+  Index01B: 1
+  Index1: 1
+  IndexAssignmentsA:
+  - 0
+  - 3
+  - 2
+  IndexAssignmentsB:
+  - 1
+  - 3
+  - 2
+  IndexAssignmentsLD:
+  - 4
+  - 5
+  - 6
+  - 7
+  IndexUnroll: 3
+  IndexUnrollA: 1
+  IndexUnrollB: 1
+  IndicesBatch:
+  - 2
+  IndicesFree:
+  - 0
+  - 1
+  IndicesSummation:
+  - 3
+  NumIndicesBatch: 1
+  NumIndicesC: 3
+  NumIndicesFree: 2
+  NumIndicesLD: 4
+  NumIndicesSummation: 1
+  OperationType: GEMM
+  SilentHighPrecisionAccumulate: false
+  TLUA: true
+  TLUB: true
+  Tensor0: 0
+  Tensor1: 1
+  TileA: 0
+  TileB: 1
+  TotalIndices: 4
+  TransposeA: false
+  TransposeB: true
+  UseBeta: true
+  UseInitialStridesAB: false
+- - AggressivePerfMode: 1
+    AssertFree0ElementMultiple: 1
+    AssertFree1ElementMultiple: 1
+    AssertMinApproxSize: 2
+    AssertSummationElementMultiple: 1
+    AssignedDerivedParameters: false
+    AssignedProblemIndependentDerivedParameters: true
+    BenchmarkFork: 0
+    BufferLoad: false
+    BufferStore: true
+    CheckDimOverflow: 0
+    CheckTensorDimAsserts: false
+    DepthU: 8
+    DirectToLds: false
+    DirectToLdsA: false
+    DirectToLdsB: false
+    DisableKernelPieces: 0
+    EdgeType: ShiftPtr
+    ExpandPointerSwap: false
+    FractionalLoad: false
+    GlobalLoadVectorWidthA: 4
+    GlobalLoadVectorWidthB: 4
+    GlobalRead2A: true
+    GlobalRead2B: true
+    GlobalReadCoalesceGroupA: true
+    GlobalReadCoalesceGroupB: true
+    GlobalReadCoalesceVectorA: true
+    GlobalReadCoalesceVectorB: true
+    GlobalReadVectorWidth: 4
+    GlobalSplitU: 1
+    GlobalSplitUSummationAssignmentRoundRobin: true
+    GlobalSplitUWorkGroupMappingRoundRobin: false
+    GlobalWriteVectorWidth: 4
+    GuaranteeNoPartialA: false
+    GuaranteeNoPartialB: false
+    InnerUnroll: 1
+    InterleaveAlpha: 0
+    KernelLanguage: Source
+    LSCA: 32
+    LSCB: 32
+    LSPA: 8
+    LSPB: 8
+    LVCA: 8
+    LVCB: 8
+    LVPA: 2
+    LVPB: 2
+    LdcEqualsLdd: true
+    LdsNumElements: 1024
+    LdsNumElementsAlignedA: 256
+    LdsNumElementsAlignedB: 256
+    LdsOffsetA: 0
+    LdsOffsetA_Blk: 512
+    LdsOffsetB: 256
+    LdsOffsetB_Blk: 768
+    LdsPadA: 0
+    LdsPadB: 0
+    LocalDotLayout: 1
+    LocalRead2A: true
+    LocalRead2B: true
+    LocalSplitU: 1
+    LocalWrite2A: true
+    LocalWrite2B: true
+    LocalWriteUseSgprA: false
+    LocalWriteUseSgprB: false
+    LoopDoWhile: false
+    LoopTail: true
+    LoopUnroll: 8
+    MacroTile0: 32
+    MacroTile1: 32
+    MacroTileA: 32
+    MacroTileB: 32
+    MacroTileShapeMax: 64
+    MacroTileShapeMin: 1
+    MaxOccupancy: 40
+    MinGlobalWriteVectorWidth: 1
+    NonTemporalA: 0
+    NonTemporalB: 0
+    NonTemporalC: 0
+    NumElementsPerThread: 16
+    NumGlobalWriteVectorsPerThread: 4
+    NumLoadsA: 1
+    NumLoadsB: 1
+    NumLoadsCoalescedA: 1
+    NumLoadsCoalescedB: 1
+    NumLoadsPerpendicularA: 1
+    NumLoadsPerpendicularB: 1
+    NumThreads: 64
+    PackBatchDims: 0
+    PackFreeDims: 1
+    PackGranularity: 2
+    PackedC0Indices:
+    - I
+    PackedC1Indices:
+    - J
+    PerformanceSyncLocation: -1
+    PerformanceWaitCount: -1
+    PerformanceWaitLocation: -1
+    PersistentKernel: 0
+    PrefetchAcrossPersistent: 0
+    PrefetchGlobalRead: true
+    PrefetchLocalRead: true
+    ProblemType:
+      AssignedDerivedParameters: true
+      Batched: true
+      ComplexConjugateA: false
+      ComplexConjugateB: false
+      ComputeDataType: 0
+      DataType: 0
+      DestDataType: 0
+      HighPrecisionAccumulate: false
+      Index0: 0
+      Index01A: 0
+      Index01B: 1
+      Index1: 1
+      IndexAssignmentsA:
+      - 0
+      - 3
+      - 2
+      IndexAssignmentsB:
+      - 1
+      - 3
+      - 2
+      IndexAssignmentsLD:
+      - 4
+      - 5
+      - 6
+      - 7
+      IndexUnroll: 3
+      IndexUnrollA: 1
+      IndexUnrollB: 1
+      IndicesBatch:
+      - 2
+      IndicesFree:
+      - 0
+      - 1
+      IndicesSummation:
+      - 3
+      NumIndicesBatch: 1
+      NumIndicesC: 3
+      NumIndicesFree: 2
+      NumIndicesLD: 4
+      NumIndicesSummation: 1
+      OperationType: GEMM
+      SilentHighPrecisionAccumulate: false
+      TLUA: true
+      TLUB: true
+      Tensor0: 0
+      Tensor1: 1
+      TileA: 0
+      TileB: 1
+      TotalIndices: 4
+      TransposeA: false
+      TransposeB: true
+      UseBeta: true
+      UseInitialStridesAB: false
+    ReplacementKernel: false
+    ScheduleGlobalRead: 1
+    ScheduleIterAlg: 1
+    ScheduleLocalWrite: 1
+    SolutionIndex: 0
+    SolutionNameMin: Cijk_Ailk_Bjlk_SB_MT32x32x8_SE_AMAS2_GRVW4_GSU1_VW4
+    StaggerU: 32
+    StaggerUMapping: 0
+    StaggerUStride: 256
+    SubGroup0: 8
+    SubGroup1: 8
+    SubGroupA: 8
+    SubGroupB: 8
+    SuppressNoLoadLoop: false
+    ThreadTile:
+    - 4
+    - 4
+    ThreadTile0: 4
+    ThreadTile1: 4
+    ThreadTileA: 4
+    ThreadTileB: 4
+    UnrollMemFence: false
+    UseSgprForGRO: 0
+    Valid: true
+    VectorAtomicWidth: 1
+    VectorStore: true
+    VectorWidth: 4
+    WorkGroup:
+    - 8
+    - 8
+    - 1
+    WorkGroupMapping: 1
+    WorkGroupMappingType: B
+    _staggerStrideShift: 3
+  - AggressivePerfMode: 1
+    AssertFree0ElementMultiple: 1
+    AssertFree1ElementMultiple: 1
+    AssertMinApproxSize: 2
+    AssertSummationElementMultiple: 1
+    AssignedDerivedParameters: false
+    AssignedProblemIndependentDerivedParameters: true
+    BenchmarkFork: 0
+    BufferLoad: false
+    BufferStore: true
+    CheckDimOverflow: 0
+    CheckTensorDimAsserts: false
+    DepthU: 16
+    DirectToLds: false
+    DirectToLdsA: false
+    DirectToLdsB: false
+    DisableKernelPieces: 0
+    EdgeType: ShiftPtr
+    ExpandPointerSwap: false
+    FractionalLoad: false
+    GlobalLoadVectorWidthA: 4
+    GlobalLoadVectorWidthB: 4
+    GlobalRead2A: true
+    GlobalRead2B: true
+    GlobalReadCoalesceGroupA: true
+    GlobalReadCoalesceGroupB: true
+    GlobalReadCoalesceVectorA: true
+    GlobalReadCoalesceVectorB: true
+    GlobalReadVectorWidth: 4
+    GlobalSplitU: 1
+    GlobalSplitUSummationAssignmentRoundRobin: true
+    GlobalSplitUWorkGroupMappingRoundRobin: false
+    GlobalWriteVectorWidth: 4
+    GuaranteeNoPartialA: false
+    GuaranteeNoPartialB: false
+    InnerUnroll: 1
+    InterleaveAlpha: 0
+    KernelLanguage: Source
+    LSCA: 64
+    LSCB: 64
+    LSPA: 16
+    LSPB: 16
+    LVCA: 16
+    LVCB: 16
+    LVPA: 4
+    LVPB: 4
+    LdcEqualsLdd: true
+    LdsNumElements: 2048
+    LdsOffsetA: 0
+    LdsOffsetB: 1024
+    LdsPadA: 0
+    LdsPadB: 0
+    LocalDotLayout: 1
+    LocalRead2A: true
+    LocalRead2B: true
+    LocalSplitU: 1
+    LocalWrite2A: true
+    LocalWrite2B: true
+    LocalWriteUseSgprA: false
+    LocalWriteUseSgprB: false
+    LoopDoWhile: false
+    LoopTail: true
+    LoopUnroll: 16
+    MacroTile0: 64
+    MacroTile1: 64
+    MacroTileA: 64
+    MacroTileB: 64
+    MacroTileShapeMax: 64
+    MacroTileShapeMin: 1
+    MaxOccupancy: 40
+    MinGlobalWriteVectorWidth: 1
+    NonTemporalA: 0
+    NonTemporalB: 0
+    NonTemporalC: 0
+    NumElementsPerThread: 16
+    NumGlobalWriteVectorsPerThread: 4
+    NumLoadsA: 1
+    NumLoadsB: 1
+    NumLoadsCoalescedA: 1
+    NumLoadsCoalescedB: 1
+    NumLoadsPerpendicularA: 1
+    NumLoadsPerpendicularB: 1
+    NumThreads: 256
+    PackBatchDims: 0
+    PackFreeDims: 1
+    PackGranularity: 2
+    PackedC0Indices:
+    - I
+    PackedC1Indices:
+    - J
+    PerformanceSyncLocation: -1
+    PerformanceWaitCount: -1
+    PerformanceWaitLocation: -1
+    PersistentKernel: 0
+    PrefetchAcrossPersistent: 0
+    PrefetchGlobalRead: false
+    PrefetchLocalRead: true
+    ProblemType:
+      AssignedDerivedParameters: true
+      Batched: true
+      ComplexConjugateA: false
+      ComplexConjugateB: false
+      ComputeDataType: 0
+      DataType: 0
+      DestDataType: 0
+      HighPrecisionAccumulate: false
+      Index0: 0
+      Index01A: 0
+      Index01B: 1
+      Index1: 1
+      IndexAssignmentsA:
+      - 0
+      - 3
+      - 2
+      IndexAssignmentsB:
+      - 1
+      - 3
+      - 2
+      IndexAssignmentsLD:
+      - 4
+      - 5
+      - 6
+      - 7
+      IndexUnroll: 3
+      IndexUnrollA: 1
+      IndexUnrollB: 1
+      IndicesBatch:
+      - 2
+      IndicesFree:
+      - 0
+      - 1
+      IndicesSummation:
+      - 3
+      NumIndicesBatch: 1
+      NumIndicesC: 3
+      NumIndicesFree: 2
+      NumIndicesLD: 4
+      NumIndicesSummation: 1
+      OperationType: GEMM
+      SilentHighPrecisionAccumulate: false
+      TLUA: true
+      TLUB: true
+      Tensor0: 0
+      Tensor1: 1
+      TileA: 0
+      TileB: 1
+      TotalIndices: 4
+      TransposeA: false
+      TransposeB: true
+      UseBeta: true
+      UseInitialStridesAB: false
+    ReplacementKernel: false
+    ScheduleGlobalRead: 1
+    ScheduleIterAlg: 1
+    ScheduleLocalWrite: 1
+    SolutionIndex: 1
+    SolutionNameMin: Cijk_Ailk_Bjlk_SB_MT64x64x16_SE_AMAS2_GRVW4_GSU1_VW4
+    StaggerU: 32
+    StaggerUMapping: 0
+    StaggerUStride: 256
+    SubGroup0: 16
+    SubGroup1: 16
+    SubGroupA: 16
+    SubGroupB: 16
+    SuppressNoLoadLoop: false
+    ThreadTile:
+    - 4
+    - 4
+    ThreadTile0: 4
+    ThreadTile1: 4
+    ThreadTileA: 4
+    ThreadTileB: 4
+    UnrollMemFence: false
+    UseSgprForGRO: 0
+    Valid: true
+    VectorAtomicWidth: 1
+    VectorStore: true
+    VectorWidth: 4
+    WorkGroup:
+    - 16
+    - 16
+    - 1
+    WorkGroupMapping: 8
+    WorkGroupMappingType: B
+    _staggerStrideShift: 2
+  - AggressivePerfMode: 1
+    AssertFree0ElementMultiple: 1
+    AssertFree1ElementMultiple: 1
+    AssertMinApproxSize: 0
+    AssertSummationElementMultiple: 1
+    AssignedDerivedParameters: false
+    AssignedProblemIndependentDerivedParameters: true
+    BenchmarkFork: 0
+    BufferLoad: false
+    BufferStore: true
+    CheckDimOverflow: 0
+    CheckTensorDimAsserts: false
+    DepthU: 8
+    DirectToLds: false
+    DirectToLdsA: false
+    DirectToLdsB: false
+    DisableKernelPieces: 0
+    EdgeType: ShiftPtr
+    ExpandPointerSwap: false
+    FractionalLoad: false
+    GlobalLoadVectorWidthA: 1
+    GlobalLoadVectorWidthB: 1
+    GlobalRead2A: true
+    GlobalRead2B: true
+    GlobalReadCoalesceGroupA: true
+    GlobalReadCoalesceGroupB: true
+    GlobalReadCoalesceVectorA: true
+    GlobalReadCoalesceVectorB: true
+    GlobalReadVectorWidth: 1
+    GlobalSplitU: 1
+    GlobalSplitUSummationAssignmentRoundRobin: true
+    GlobalSplitUWorkGroupMappingRoundRobin: false
+    GlobalWriteVectorWidth: 1
+    GuaranteeNoPartialA: true
+    GuaranteeNoPartialB: true
+    InnerUnroll: 1
+    InterleaveAlpha: 0
+    KernelLanguage: Source
+    LSCA: 64
+    LSCB: 128
+    LSPA: 4
+    LSPB: 2
+    LVCA: 64
+    LVCB: 128
+    LVPA: 4
+    LVPB: 2
+    LdcEqualsLdd: true
+    LdsNumElements: 1536
+    LdsOffsetA: 0
+    LdsOffsetB: 512
+    LdsPadA: 0
+    LdsPadB: 0
+    LocalDotLayout: 1
+    LocalRead2A: true
+    LocalRead2B: true
+    LocalSplitU: 1
+    LocalWrite2A: true
+    LocalWrite2B: true
+    LocalWriteUseSgprA: false
+    LocalWriteUseSgprB: false
+    LoopDoWhile: false
+    LoopTail: true
+    LoopUnroll: 8
+    MacroTile0: 64
+    MacroTile1: 128
+    MacroTileA: 64
+    MacroTileB: 128
+    MacroTileShapeMax: 64
+    MacroTileShapeMin: 1
+    MaxOccupancy: 40
+    MinGlobalWriteVectorWidth: 1
+    NonTemporalA: 0
+    NonTemporalB: 0
+    NonTemporalC: 0
+    NumElementsPerThread: 32
+    NumGlobalWriteVectorsPerThread: 32
+    NumLoadsA: 2
+    NumLoadsB: 4
+    NumLoadsCoalescedA: 1
+    NumLoadsCoalescedB: 1
+    NumLoadsPerpendicularA: 2
+    NumLoadsPerpendicularB: 4
+    NumThreads: 256
+    PackBatchDims: 0
+    PackFreeDims: 1
+    PackGranularity: 2
+    PackedC0Indices:
+    - I
+    PackedC1Indices:
+    - J
+    PerformanceSyncLocation: -1
+    PerformanceWaitCount: -1
+    PerformanceWaitLocation: -1
+    PersistentKernel: 0
+    PrefetchAcrossPersistent: 0
+    PrefetchGlobalRead: false
+    PrefetchLocalRead: true
+    ProblemType:
+      AssignedDerivedParameters: true
+      Batched: true
+      ComplexConjugateA: false
+      ComplexConjugateB: false
+      ComputeDataType: 0
+      DataType: 0
+      DestDataType: 0
+      HighPrecisionAccumulate: false
+      Index0: 0
+      Index01A: 0
+      Index01B: 1
+      Index1: 1
+      IndexAssignmentsA:
+      - 0
+      - 3
+      - 2
+      IndexAssignmentsB:
+      - 1
+      - 3
+      - 2
+      IndexAssignmentsLD:
+      - 4
+      - 5
+      - 6
+      - 7
+      IndexUnroll: 3
+      IndexUnrollA: 1
+      IndexUnrollB: 1
+      IndicesBatch:
+      - 2
+      IndicesFree:
+      - 0
+      - 1
+      IndicesSummation:
+      - 3
+      NumIndicesBatch: 1
+      NumIndicesC: 3
+      NumIndicesFree: 2
+      NumIndicesLD: 4
+      NumIndicesSummation: 1
+      OperationType: GEMM
+      SilentHighPrecisionAccumulate: false
+      TLUA: true
+      TLUB: true
+      Tensor0: 0
+      Tensor1: 1
+      TileA: 0
+      TileB: 1
+      TotalIndices: 4
+      TransposeA: false
+      TransposeB: true
+      UseBeta: true
+      UseInitialStridesAB: false
+    ReplacementKernel: false
+    ScheduleGlobalRead: 1
+    ScheduleIterAlg: 1
+    ScheduleLocalWrite: 1
+    SolutionIndex: 2
+    SolutionNameMin: Cijk_Ailk_Bjlk_SB_MT64x128x8_SE_AMAS0_GRVW1_GSU1_VW1
+    StaggerU: 32
+    StaggerUMapping: 0
+    StaggerUStride: 256
+    SubGroup0: 16
+    SubGroup1: 16
+    SubGroupA: 16
+    SubGroupB: 16
+    SuppressNoLoadLoop: false
+    ThreadTile:
+    - 4
+    - 8
+    ThreadTile0: 4
+    ThreadTile1: 8
+    ThreadTileA: 4
+    ThreadTileB: 8
+    UnrollMemFence: false
+    UseSgprForGRO: 0
+    Valid: true
+    VectorAtomicWidth: 1
+    VectorStore: true
+    VectorWidth: 1
+    WorkGroup:
+    - 16
+    - 16
+    - 1
+    WorkGroupMapping: 8
+    WorkGroupMappingType: B
+    _staggerStrideShift: 3
+  - AggressivePerfMode: 1
+    AssertFree0ElementMultiple: 1
+    AssertFree1ElementMultiple: 1
+    AssertMinApproxSize: 1
+    AssertSummationElementMultiple: 1
+    AssignedDerivedParameters: false
+    AssignedProblemIndependentDerivedParameters: true
+    BenchmarkFork: 0
+    BufferLoad: true
+    BufferStore: true
+    CheckDimOverflow: 0
+    CheckTensorDimAsserts: false
+    DepthU: 16
+    DirectToLds: false
+    DirectToLdsA: false
+    DirectToLdsB: false
+    DisableKernelPieces: 0
+    EdgeType: ShiftPtr
+    ExpandPointerSwap: true
+    FractionalLoad: 0
+    GlobalLoadVectorWidthA: 1
+    GlobalLoadVectorWidthB: 1
+    GlobalRead2A: true
+    GlobalRead2B: true
+    GlobalReadCoalesceGroupA: true
+    GlobalReadCoalesceGroupB: true
+    GlobalReadCoalesceVectorA: true
+    GlobalReadCoalesceVectorB: true
+    GlobalReadVectorWidth: 1
+    GlobalSplitU: 1
+    GlobalSplitUSummationAssignmentRoundRobin: true
+    GlobalSplitUWorkGroupMappingRoundRobin: false
+    GlobalWriteVectorWidth: 1
+    GuaranteeNoPartialA: true
+    GuaranteeNoPartialB: true
+    InnerUnroll: 1
+    InterleaveAlpha: 0
+    KernelLanguage: Assembly
+    LSCA: 64
+    LSCB: 32
+    LSPA: 4
+    LSPB: 8
+    LVCA: 64
+    LVCB: 32
+    LVPA: 4
+    LVPB: 8
+    LdcEqualsLdd: true
+    LdsNumElements: 8192
+    LdsNumElementsAlignedA: 1024
+    LdsNumElementsAlignedB: 512
+    LdsOffsetA: 0
+    LdsOffsetA_Blk: 2048
+    LdsOffsetB: 1024
+    LdsOffsetB_Blk: 3072
+    LdsPadA: 0
+    LdsPadB: 0
+    LocalDotLayout: 1
+    LocalRead2A: true
+    LocalRead2B: true
+    LocalSplitU: 4
+    LocalWrite2A: true
+    LocalWrite2B: true
+    LocalWriteUseSgprA: false
+    LocalWriteUseSgprB: false
+    LoopDoWhile: false
+    LoopTail: true
+    LoopUnroll: 4
+    MacroTile0: 64
+    MacroTile1: 32
+    MacroTileA: 64
+    MacroTileB: 32
+    MacroTileShapeMax: 64
+    MacroTileShapeMin: 1
+    MaxOccupancy: 40
+    MinGlobalWriteVectorWidth: 1
+    NonTemporalA: 0
+    NonTemporalB: 0
+    NonTemporalC: 0
+    NumElementsPerThread: 8
+    NumGlobalWriteVectorsPerThread: 8
+    NumLoadsA: 4
+    NumLoadsB: 2
+    NumLoadsCoalescedA: 1
+    NumLoadsCoalescedB: 1
+    NumLoadsPerpendicularA: 4
+    NumLoadsPerpendicularB: 2
+    NumThreads: 256
+    PackBatchDims: 0
+    PackFreeDims: 1
+    PackGranularity: 2
+    PackedC0Indices:
+    - I
+    PackedC1Indices:
+    - J
+    PerformanceSyncLocation: -1
+    PerformanceWaitCount: -1
+    PerformanceWaitLocation: -1
+    PersistentKernel: 0
+    PrefetchAcrossPersistent: 0
+    PrefetchGlobalRead: true
+    PrefetchLocalRead: true
+    ProblemType:
+      AssignedDerivedParameters: true
+      Batched: true
+      ComplexConjugateA: false
+      ComplexConjugateB: false
+      ComputeDataType: 0
+      DataType: 0
+      DestDataType: 0
+      HighPrecisionAccumulate: false
+      Index0: 0
+      Index01A: 0
+      Index01B: 1
+      Index1: 1
+      IndexAssignmentsA:
+      - 0
+      - 3
+      - 2
+      IndexAssignmentsB:
+      - 1
+      - 3
+      - 2
+      IndexAssignmentsLD:
+      - 4
+      - 5
+      - 6
+      - 7
+      IndexUnroll: 3
+      IndexUnrollA: 1
+      IndexUnrollB: 1
+      IndicesBatch:
+      - 2
+      IndicesFree:
+      - 0
+      - 1
+      IndicesSummation:
+      - 3
+      NumIndicesBatch: 1
+      NumIndicesC: 3
+      NumIndicesFree: 2
+      NumIndicesLD: 4
+      NumIndicesSummation: 1
+      OperationType: GEMM
+      SilentHighPrecisionAccumulate: false
+      TLUA: true
+      TLUB: true
+      Tensor0: 0
+      Tensor1: 1
+      TileA: 0
+      TileB: 1
+      TotalIndices: 4
+      TransposeA: false
+      TransposeB: true
+      UseBeta: true
+      UseInitialStridesAB: false
+    ReplacementKernel: false
+    ScheduleGlobalRead: 1
+    ScheduleIterAlg: 1
+    ScheduleLocalWrite: 1
+    SolutionIndex: 3
+    SolutionNameMin: Cijk_Ailk_Bjlk_SB_MT64x32x16_SE_AMAS1_GRVW1_GSU1_VW1
+    StaggerU: 32
+    StaggerUMapping: 0
+    StaggerUStride: 256
+    SubGroup0: 8
+    SubGroup1: 8
+    SubGroupA: 8
+    SubGroupB: 8
+    SuppressNoLoadLoop: false
+    ThreadTile:
+    - 8
+    - 4
+    ThreadTile0: 8
+    ThreadTile1: 4
+    ThreadTileA: 8
+    ThreadTileB: 4
+    UnrollMemFence: false
+    UseSgprForGRO: 1
+    Valid: true
+    VectorAtomicWidth: 1
+    VectorStore: true
+    VectorWidth: 1
+    WorkGroup:
+    - 8
+    - 8
+    - 4
+    WorkGroupMapping: 8
+    WorkGroupMappingType: B
+    _staggerStrideShift: 2
+  - AggressivePerfMode: 1
+    AssertFree0ElementMultiple: 1
+    AssertFree1ElementMultiple: 1
+    AssertMinApproxSize: 2
+    AssertSummationElementMultiple: 1
+    AssignedDerivedParameters: false
+    AssignedProblemIndependentDerivedParameters: true
+    BufferLoad: false
+    BufferStore: true
+    CheckDimOverflow: 0
+    CheckTensorDimAsserts: false
+    DepthU: 4
+    DirectToLds: false
+    DirectToLdsA: false
+    DirectToLdsB: false
+    DisableKernelPieces: 0
+    EdgeType: ShiftPtr
+    ExpandPointerSwap: false
+    FractionalLoad: false
+    GlobalLoadVectorWidthA: 1
+    GlobalLoadVectorWidthB: 1
+    GlobalRead2A: true
+    GlobalRead2B: true
+    GlobalReadCoalesceGroupA: true
+    GlobalReadCoalesceGroupB: true
+    GlobalReadCoalesceVectorA: true
+    GlobalReadCoalesceVectorB: true
+    GlobalReadVectorWidth: 2
+    GlobalSplitU: 1
+    GlobalSplitUSummationAssignmentRoundRobin: true
+    GlobalSplitUWorkGroupMappingRoundRobin: false
+    GlobalWriteVectorWidth: 2
+    GuaranteeNoPartialA: true
+    GuaranteeNoPartialB: true
+    InnerUnroll: 1
+    InterleaveAlpha: 0
+    KernelLanguage: Source
+    LSCA: 16
+    LSCB: 16
+    LSPA: 4
+    LSPB: 4
+    LVCA: 16
+    LVCB: 16
+    LVPA: 4
+    LVPB: 4
+    LdcEqualsLdd: true
+    LdsNumElements: 409
+    LdsNumElementsAlignedA: 64
+    LdsNumElementsAlignedB: 64
+    LdsOffsetA: 0
+    LdsOffsetA_Blk: 128
+    LdsOffsetB: 64
+    LdsOffsetB_Blk: 192
+    LdsPadA: 0
+    LdsPadB: 0
+    LocalDotLayout: 1
+    LocalRead2A: true
+    LocalRead2B: true
+    LocalSplitU: 1
+    LocalWrite2A: true
+    LocalWrite2B: true
+    LocalWriteUseSgprA: false
+    LocalWriteUseSgprB: false
+    LoopDoWhile: false
+    LoopTail: true
+    LoopUnroll: 4
+    MacroTile0: 16
+    MacroTile1: 16
+    MacroTileA: 16
+    MacroTileB: 16
+    MacroTileShapeMax: 64
+    MacroTileShapeMin: 1
+    MaxOccupancy: 40
+    MinGlobalWriteVectorWidth: 1
+    NonTemporalA: 0
+    NonTemporalB: 0
+    NonTemporalC: 0
+    NumElementsPerThread: 4
+    NumGlobalWriteVectorsPerThread: 2
+    NumLoadsA: 1
+    NumLoadsB: 1
+    NumLoadsCoalescedA: 1
+    NumLoadsCoalescedB: 1
+    NumLoadsPerpendicularA: 1
+    NumLoadsPerpendicularB: 1
+    NumThreads: 64
+    PackBatchDims: 0
+    PackFreeDims: 1
+    PackGranularity: 2
+    PackedC0Indices:
+    - I
+    PackedC1Indices:
+    - J
+    PerformanceSyncLocation: -1
+    PerformanceWaitCount: -1
+    PerformanceWaitLocation: -1
+    PersistentKernel: 0
+    PrefetchAcrossPersistent: 0
+    PrefetchGlobalRead: true
+    PrefetchLocalRead: true
+    ProblemType:
+      AssignedDerivedParameters: true
+      Batched: true
+      ComplexConjugateA: false
+      ComplexConjugateB: false
+      ComputeDataType: 0
+      DataType: 0
+      DestDataType: 0
+      HighPrecisionAccumulate: false
+      Index0: 0
+      Index01A: 0
+      Index01B: 1
+      Index1: 1
+      IndexAssignmentsA:
+      - 0
+      - 3
+      - 2
+      IndexAssignmentsB:
+      - 1
+      - 3
+      - 2
+      IndexAssignmentsLD:
+      - 4
+      - 5
+      - 6
+      - 7
+      IndexUnroll: 3
+      IndexUnrollA: 1
+      IndexUnrollB: 1
+      IndicesBatch:
+      - 2
+      IndicesFree:
+      - 0
+      - 1
+      IndicesSummation:
+      - 3
+      NumIndicesBatch: 1
+      NumIndicesC: 3
+      NumIndicesFree: 2
+      NumIndicesLD: 4
+      NumIndicesSummation: 1
+      OperationType: GEMM
+      SilentHighPrecisionAccumulate: false
+      TLUA: true
+      TLUB: true
+      Tensor0: 0
+      Tensor1: 1
+      TileA: 0
+      TileB: 1
+      TotalIndices: 4
+      TransposeA: false
+      TransposeB: true
+      UseBeta: true
+      UseInitialStridesAB: false
+    ReplacementKernel: false
+    ScheduleGlobalRead: 1
+    ScheduleIterAlg: 1
+    ScheduleLocalWrite: 1
+    SolutionIndex: 4
+    SolutionNameMin: Cijk_Ailk_Bjlk_SB_MT16x16x4_SE_AMAS2_GRVW2_GSU1_VW2
+    StaggerU: 32
+    StaggerUMapping: 0
+    StaggerUStride: 256
+    SubGroup0: 8
+    SubGroup1: 8
+    SubGroupA: 8
+    SubGroupB: 8
+    SuppressNoLoadLoop: false
+    ThreadTile:
+    - 2
+    - 2
+    ThreadTile0: 2
+    ThreadTile1: 2
+    ThreadTileA: 2
+    ThreadTileB: 2
+    UnrollMemFence: false
+    UseSgprForGRO: 0
+    Valid: true
+    VectorAtomicWidth: 1
+    VectorStore: true
+    VectorWidth: 2
+    WorkGroup:
+    - 8
+    - 8
+    - 1
+    WorkGroupMapping: 1
+    WorkGroupMappingType: B
+    _staggerStrideShift: 4
+  - AggressivePerfMode: 1
+    AssertFree0ElementMultiple: 1
+    AssertFree1ElementMultiple: 1
+    AssertMinApproxSize: 0
+    AssertSummationElementMultiple: 1
+    AssignedDerivedParameters: false
+    AssignedProblemIndependentDerivedParameters: true
+    BufferLoad: false
+    BufferStore: true
+    CheckDimOverflow: 0
+    CheckTensorDimAsserts: false
+    DepthU: 4
+    DirectToLds: false
+    DirectToLdsA: false
+    DirectToLdsB: false
+    DisableKernelPieces: 0
+    EdgeType: ShiftPtr
+    ExpandPointerSwap: false
+    FractionalLoad: false
+    GlobalLoadVectorWidthA: 1
+    GlobalLoadVectorWidthB: 1
+    GlobalRead2A: true
+    GlobalRead2B: true
+    GlobalReadCoalesceGroupA: true
+    GlobalReadCoalesceGroupB: true
+    GlobalReadCoalesceVectorA: true
+    GlobalReadCoalesceVectorB: true
+    GlobalReadVectorWidth: 1
+    GlobalSplitU: 1
+    GlobalSplitUSummationAssignmentRoundRobin: true
+    GlobalSplitUWorkGroupMappingRoundRobin: false
+    GlobalWriteVectorWidth: 1
+    GuaranteeNoPartialA: true
+    GuaranteeNoPartialB: true
+    InnerUnroll: 1
+    InterleaveAlpha: 0
+    KernelLanguage: Source
+    LSCA: 16
+    LSCB: 16
+    LSPA: 4
+    LSPB: 4
+    LVCA: 16
+    LVCB: 16
+    LVPA: 4
+    LVPB: 4
+    LdcEqualsLdd: true
+    LdsNumElements: 409
+    LdsNumElementsAlignedA: 64
+    LdsNumElementsAlignedB: 64
+    LdsOffsetA: 0
+    LdsOffsetA_Blk: 128
+    LdsOffsetB: 64
+    LdsOffsetB_Blk: 192
+    LdsPadA: 0
+    LdsPadB: 0
+    LocalDotLayout: 1
+    LocalRead2A: true
+    LocalRead2B: true
+    LocalSplitU: 1
+    LocalWrite2A: true
+    LocalWrite2B: true
+    LocalWriteUseSgprA: false
+    LocalWriteUseSgprB: false
+    LoopDoWhile: false
+    LoopTail: true
+    LoopUnroll: 4
+    MacroTile0: 16
+    MacroTile1: 16
+    MacroTileA: 16
+    MacroTileB: 16
+    MacroTileShapeMax: 64
+    MacroTileShapeMin: 1
+    MaxOccupancy: 40
+    MinGlobalWriteVectorWidth: 1
+    NonTemporalA: 0
+    NonTemporalB: 0
+    NonTemporalC: 0
+    NumElementsPerThread: 4
+    NumGlobalWriteVectorsPerThread: 4
+    NumLoadsA: 1
+    NumLoadsB: 1
+    NumLoadsCoalescedA: 1
+    NumLoadsCoalescedB: 1
+    NumLoadsPerpendicularA: 1
+    NumLoadsPerpendicularB: 1
+    NumThreads: 64
+    PackBatchDims: 0
+    PackFreeDims: 1
+    PackGranularity: 2
+    PackedC0Indices:
+    - I
+    PackedC1Indices:
+    - J
+    PerformanceSyncLocation: -1
+    PerformanceWaitCount: -1
+    PerformanceWaitLocation: -1
+    PersistentKernel: 0
+    PrefetchAcrossPersistent: 0
+    PrefetchGlobalRead: true
+    PrefetchLocalRead: true
+    ProblemType:
+      AssignedDerivedParameters: true
+      Batched: true
+      ComplexConjugateA: false
+      ComplexConjugateB: false
+      ComputeDataType: 0
+      DataType: 0
+      DestDataType: 0
+      HighPrecisionAccumulate: false
+      Index0: 0
+      Index01A: 0
+      Index01B: 1
+      Index1: 1
+      IndexAssignmentsA:
+      - 0
+      - 3
+      - 2
+      IndexAssignmentsB:
+      - 1
+      - 3
+      - 2
+      IndexAssignmentsLD:
+      - 4
+      - 5
+      - 6
+      - 7
+      IndexUnroll: 3
+      IndexUnrollA: 1
+      IndexUnrollB: 1
+      IndicesBatch:
+      - 2
+      IndicesFree:
+      - 0
+      - 1
+      IndicesSummation:
+      - 3
+      NumIndicesBatch: 1
+      NumIndicesC: 3
+      NumIndicesFree: 2
+      NumIndicesLD: 4
+      NumIndicesSummation: 1
+      OperationType: GEMM
+      SilentHighPrecisionAccumulate: false
+      TLUA: true
+      TLUB: true
+      Tensor0: 0
+      Tensor1: 1
+      TileA: 0
+      TileB: 1
+      TotalIndices: 4
+      TransposeA: false
+      TransposeB: true
+      UseBeta: true
+      UseInitialStridesAB: false
+    ReplacementKernel: false
+    ScheduleGlobalRead: 1
+    ScheduleIterAlg: 1
+    ScheduleLocalWrite: 1
+    SolutionIndex: 5
+    SolutionNameMin: Cijk_Ailk_Bjlk_SB_MT16x16x4_SE_AMAS0_GRVW1_GSU1_VW1
+    StaggerU: 32
+    StaggerUMapping: 0
+    StaggerUStride: 256
+    SubGroup0: 8
+    SubGroup1: 8
+    SubGroupA: 8
+    SubGroupB: 8
+    SuppressNoLoadLoop: false
+    ThreadTile:
+    - 2
+    - 2
+    ThreadTile0: 2
+    ThreadTile1: 2
+    ThreadTileA: 2
+    ThreadTileB: 2
+    UnrollMemFence: false
+    UseSgprForGRO: 0
+    Valid: true
+    VectorAtomicWidth: 1
+    VectorStore: true
+    VectorWidth: 1
+    WorkGroup:
+    - 8
+    - 8
+    - 1
+    WorkGroupMapping: 1
+    WorkGroupMappingType: B
+    _staggerStrideShift: 4
+  - AggressivePerfMode: 1
+    AssertFree0ElementMultiple: 1
+    AssertFree1ElementMultiple: 1
+    AssertMinApproxSize: 3
+    AssertSummationElementMultiple: 1
+    AssignedDerivedParameters: false
+    AssignedProblemIndependentDerivedParameters: true
+    BufferLoad: true
+    BufferStore: true
+    CheckDimOverflow: 0
+    CheckTensorDimAsserts: false
+    DepthU: 8
+    DirectToLds: false
+    DirectToLdsA: false
+    DirectToLdsB: false
+    DisableKernelPieces: 0
+    EdgeType: ShiftPtr
+    ExpandPointerSwap: true
+    FractionalLoad: 0
+    GlobalLoadVectorWidthA: 1
+    GlobalLoadVectorWidthB: 1
+    GlobalRead2A: true
+    GlobalRead2B: true
+    GlobalReadCoalesceGroupA: true
+    GlobalReadCoalesceGroupB: true
+    GlobalReadCoalesceVectorA: true
+    GlobalReadCoalesceVectorB: true
+    GlobalReadVectorWidth: 2
+    GlobalSplitU: 2
+    GlobalSplitUSummationAssignmentRoundRobin: true
+    GlobalSplitUWorkGroupMappingRoundRobin: false
+    GlobalWriteVectorWidth: 1
+    GuaranteeNoPartialA: true
+    GuaranteeNoPartialB: true
+    InnerUnroll: 1
+    InterleaveAlpha: 0
+    KernelLanguage: Assembly
+    LSCA: 8
+    LSCB: 8
+    LSPA: 8
+    LSPB: 8
+    LVCA: 8
+    LVCB: 8
+    LVPA: 8
+    LVPB: 8
+    LdcEqualsLdd: true
+    LdsNumElements: 409
+    LdsNumElementsAlignedA: 64
+    LdsNumElementsAlignedB: 64
+    LdsOffsetA: 0
+    LdsOffsetA_Blk: 128
+    LdsOffsetB: 64
+    LdsOffsetB_Blk: 192
+    LdsPadA: 0
+    LdsPadB: 0
+    LocalDotLayout: 1
+    LocalRead2A: true
+    LocalRead2B: true
+    LocalSplitU: 4
+    LocalWrite2A: true
+    LocalWrite2B: true
+    LocalWriteUseSgprA: false
+    LocalWriteUseSgprB: false
+    LoopDoWhile: false
+    LoopTail: true
+    LoopUnroll: 2
+    MacroTile0: 8
+    MacroTile1: 8
+    MacroTileA: 8
+    MacroTileB: 8
+    MacroTileShapeMax: 64
+    MacroTileShapeMin: 1
+    MaxOccupancy: 40
+    MinGlobalWriteVectorWidth: 1
+    NonTemporalA: 0
+    NonTemporalB: 0
+    NonTemporalC: 0
+    NumElementsPerThread: 1
+    NumGlobalWriteVectorsPerThread: 1
+    NumLoadsA: 1
+    NumLoadsB: 1
+    NumLoadsCoalescedA: 1
+    NumLoadsCoalescedB: 1
+    NumLoadsPerpendicularA: 1
+    NumLoadsPerpendicularB: 1
+    NumThreads: 64
+    PackBatchDims: 0
+    PackFreeDims: 1
+    PackGranularity: 2
+    PackedC0Indices:
+    - I
+    PackedC1Indices:
+    - J
+    PerformanceSyncLocation: -1
+    PerformanceWaitCount: -1
+    PerformanceWaitLocation: -1
+    PersistentKernel: 0
+    PrefetchAcrossPersistent: 0
+    PrefetchGlobalRead: true
+    PrefetchLocalRead: true
+    ProblemType:
+      AssignedDerivedParameters: true
+      Batched: true
+      ComplexConjugateA: false
+      ComplexConjugateB: false
+      ComputeDataType: 0
+      DataType: 0
+      DestDataType: 0
+      HighPrecisionAccumulate: false
+      Index0: 0
+      Index01A: 0
+      Index01B: 1
+      Index1: 1
+      IndexAssignmentsA:
+      - 0
+      - 3
+      - 2
+      IndexAssignmentsB:
+      - 1
+      - 3
+      - 2
+      IndexAssignmentsLD:
+      - 4
+      - 5
+      - 6
+      - 7
+      IndexUnroll: 3
+      IndexUnrollA: 1
+      IndexUnrollB: 1
+      IndicesBatch:
+      - 2
+      IndicesFree:
+      - 0
+      - 1
+      IndicesSummation:
+      - 3
+      NumIndicesBatch: 1
+      NumIndicesC: 3
+      NumIndicesFree: 2
+      NumIndicesLD: 4
+      NumIndicesSummation: 1
+      OperationType: GEMM
+      SilentHighPrecisionAccumulate: false
+      TLUA: true
+      TLUB: true
+      Tensor0: 0
+      Tensor1: 1
+      TileA: 0
+      TileB: 1
+      TotalIndices: 4
+      TransposeA: false
+      TransposeB: true
+      UseBeta: true
+      UseInitialStridesAB: false
+    ReplacementKernel: false
+    ScheduleGlobalRead: 1
+    ScheduleIterAlg: 1
+    ScheduleLocalWrite: 1
+    SolutionIndex: 6
+    SolutionNameMin: Cijk_Ailk_Bjlk_SB_MT8x8x8_SE_AMAS3_GRVW2_GSU2_VW2
+    StaggerU: 32
+    StaggerUMapping: 0
+    StaggerUStride: 256
+    SubGroup0: 4
+    SubGroup1: 4
+    SubGroupA: 4
+    SubGroupB: 4
+    SuppressNoLoadLoop: false
+    ThreadTile:
+    - 2
+    - 2
+    ThreadTile0: 2
+    ThreadTile1: 2
+    ThreadTileA: 2
+    ThreadTileB: 2
+    UnrollMemFence: false
+    UseSgprForGRO: 1
+    Valid: true
+    VectorAtomicWidth: 1
+    VectorStore: true
+    VectorWidth: 2
+    WorkGroup:
+    - 4
+    - 4
+    - 4
+    WorkGroupMapping: 1
+    WorkGroupMappingType: B
+    _staggerStrideShift: 3
+- - 2
+  - 3
+  - 0
+  - 1
+- - - - 128
+      - 5056
+      - 1
+      - 1792
+      - 128
+      - 128
+      - 128
+      - 5056
+    - - 3
+      - 0.0
+  - - - 4288
+      - 1408
+      - 1
+      - 3328
+      - 4288
+      - 4288
+      - 4288
+      - 1408
+    - - 3
+      - 0.0
+  - - - 1408
+      - 704
+      - 1
+      - 128
+      - 1408
+      - 1408
+      - 1408
+      - 704
+    - - 0
+      - 2168.13
+  - - - 1856
+      - 256
+      - 1
+      - 768
+      - 1856
+      - 1856
+      - 1856
+      - 256
+    - - 3
+      - 0.0
+  - - - 128
+      - 64
+      - 1
+      - 256
+      - 128
+      - 128
+      - 128
+      - 64
+    - - 3
+      - 0.0
+  - - - 5056
+      - 704
+      - 1
+      - 3328
+      - 5056
+      - 5056
+      - 5056
+      - 704
+    - - 3
+      - 0.0
+  - - - 3584
+      - 1856
+      - 1
+      - 3328
+      - 3584
+      - 3584
+      - 3584
+      - 1856
+    - - 3
+      - 0.0
+  - - - 448
+      - 1408
+      - 1
+      - 256
+      - 448
+      - 448
+      - 448
+      - 1408
+    - - 3
+      - 0.0
+  - - - 5056
+      - 448
+      - 1
+      - 1792
+      - 5056
+      - 5056
+      - 5056
+      - 448
+    - - 3
+      - 0.0
+  - - - 2944
+      - 1024
+      - 1
+      - 256
+      - 2944
+      - 2944
+      - 2944
+      - 1024
+    - - 3
+      - 0.0
+  - - - 6784
+      - 128
+      - 1
+      - 768
+      - 6784
+      - 6784
+      - 6784
+      - 128
+    - - 3
+      - 0.0
+  - - - 2944
+      - 1024
+      - 1
+      - 1792
+      - 2944
+      - 2944
+      - 2944
+      - 1024
+    - - 3
+      - 0.0
+  - - - 5056
+      - 256
+      - 1
+      - 768
+      - 5056
+      - 5056
+      - 5056
+      - 256
+    - - 3
+      - 0.0
+  - - - 1024
+      - 4288
+      - 1
+      - 1792
+      - 1024
+      - 1024
+      - 1024
+      - 4288
+    - - 3
+      - 0.0
+  - - - 1408
+      - 448
+      - 1
+      - 3328
+      - 1408
+      - 1408
+      - 1408
+      - 448
+    - - 3
+      - 0.0
+  - - - 4
+      - 448
+      - 1
+      - 128
+      - 4
+      - 4
+      - 4
+      - 448
+    - - 5
+      - 9.95664
+  - - - 448
+      - 6784
+      - 1
+      - 768
+      - 448
+      - 448
+      - 448
+      - 6784
+    - - 3
+      - 0.0
+  - - - 64
+      - 1856
+      - 1
+      - 256
+      - 64
+      - 64
+      - 64
+      - 1856
+    - - 3
+      - 0.0
+  - - - 1408
+      - 128
+      - 1
+      - 1792
+      - 1408
+      - 1408
+      - 1408
+      - 128
+    - - 3
+      - 0.0
+  - - - 1408
+      - 4288
+      - 1
+      - 3328
+      - 1408
+      - 1408
+      - 1408
+      - 4288
+    - - 3
+      - 0.0
+  - - - 64
+      - 1408
+      - 1
+      - 3328
+      - 64
+      - 64
+      - 64
+      - 1408
+    - - 3
+      - 0.0
+  - - - 4
+      - 6784
+      - 1
+      - 768
+      - 4
+      - 4
+      - 4
+      - 6784
+    - - 6
+      - 0.0
+  - - - 256
+      - 5888
+      - 1
+      - 1792
+      - 256
+      - 256
+      - 256
+      - 5888
+    - - 3
+      - 0.0
+  - - - 256
+      - 448
+      - 1
+      - 1792
+      - 256
+      - 256
+      - 256
+      - 448
+    - - 3
+      - 0.0
+  - - - 704
+      - 1408
+      - 1
+      - 768
+      - 704
+      - 704
+      - 704
+      - 1408
+    - - 3
+      - 0.0
+  - - - 6784
+      - 4288
+      - 1
+      - 3328
+      - 6784
+      - 6784
+      - 6784
+      - 4288
+    - - 3
+      - 0.0
+  - - - 2368
+      - 6784
+      - 1
+      - 128
+      - 2368
+      - 2368
+      - 2368
+      - 6784
+    - - 0
+      - 3791.17
+  - - - 1024
+      - 5888
+      - 1
+      - 128
+      - 1024
+      - 1024
+      - 1024
+      - 5888
+    - - 2
+      - 3200.76
+  - - - 256
+      - 6784
+      - 1
+      - 256
+      - 256
+      - 256
+      - 256
+      - 6784
+    - - 3
+      - 0.0
+  - - - 5056
+      - 448
+      - 1
+      - 768
+      - 5056
+      - 5056
+      - 5056
+      - 448
+    - - 3
+      - 0.0
+  - - - 128
+      - 6784
+      - 1
+      - 1792
+      - 128
+      - 128
+      - 128
+      - 6784
+    - - 3
+      - 0.0
+  - - - 448
+      - 1856
+      - 1
+      - 3328
+      - 448
+      - 448
+      - 448
+      - 1856
+    - - 3
+      - 0.0
+  - - - 4
+      - 1408
+      - 1
+      - 256
+      - 4
+      - 4
+      - 4
+      - 1408
+    - - 6
+      - 0.0
+  - - - 128
+      - 1856
+      - 1
+      - 256
+      - 128
+      - 128
+      - 128
+      - 1856
+    - - 3
+      - 0.0
+  - - - 5888
+      - 4288
+      - 1
+      - 256
+      - 5888
+      - 5888
+      - 5888
+      - 4288
+    - - 3
+      - 0.0
+  - - - 5888
+      - 1856
+      - 1
+      - 256
+      - 5888
+      - 5888
+      - 5888
+      - 1856
+    - - 3
+      - 0.0
+  - - - 64
+      - 64
+      - 1
+      - 768
+      - 64
+      - 64
+      - 64
+      - 64
+    - - 3
+      - 0.0
+  - - - 2944
+      - 448
+      - 1
+      - 256
+      - 2944
+      - 2944
+      - 2944
+      - 448
+    - - 3
+      - 0.0
+  - - - 4
+      - 4
+      - 1
+      - 1792
+      - 4
+      - 4
+      - 4
+      - 4
+    - - 6
+      - 0.0
+  - - - 1408
+      - 6784
+      - 1
+      - 768
+      - 1408
+      - 1408
+      - 1408
+      - 6784
+    - - 3
+      - 0.0
+  - - - 64
+      - 6784
+      - 1
+      - 256
+      - 64
+      - 64
+      - 64
+      - 6784
+    - - 3
+      - 0.0
+  - - - 3584
+      - 128
+      - 1
+      - 3328
+      - 3584
+      - 3584
+      - 3584
+      - 128
+    - - 3
+      - 0.0
+  - - - 1408
+      - 64
+      - 1
+      - 128
+      - 1408
+      - 1408
+      - 1408
+      - 64
+    - - 0
+      - 394.202
+  - - - 4
+      - 3584
+      - 1
+      - 3328
+      - 4
+      - 4
+      - 4
+      - 3584
+    - - 6
+      - 0.0
+  - - - 2944
+      - 1024
+      - 1
+      - 3328
+      - 2944
+      - 2944
+      - 2944
+      - 1024
+    - - 3
+      - 0.0
+  - - - 4288
+      - 1856
+      - 1
+      - 3328
+      - 4288
+      - 4288
+      - 4288
+      - 1856
+    - - 3
+      - 0.0
+  - - - 448
+      - 128
+      - 1
+      - 1792
+      - 448
+      - 448
+      - 448
+      - 128
+    - - 3
+      - 0.0
+  - - - 1856
+      - 64
+      - 1
+      - 768
+      - 1856
+      - 1856
+      - 1856
+      - 64
+    - - 3
+      - 0.0
+  - - - 1024
+      - 1856
+      - 1
+      - 1792
+      - 1024
+      - 1024
+      - 1024
+      - 1856
+    - - 3
+      - 0.0
+  - - - 5056
+      - 4
+      - 1
+      - 1792
+      - 5056
+      - 5056
+      - 5056
+      - 4
+    - - 6
+      - 0.0
+  - - - 256
+      - 4288
+      - 1
+      - 128
+      - 256
+      - 256
+      - 256
+      - 4288
+    - - 1
+      - 1801.37
+  - - - 6784
+      - 6784
+      - 1
+      - 1792
+      - 6784
+      - 6784
+      - 6784
+      - 6784
+    - - 3
+      - 0.0
+  - - - 4
+      - 1024
+      - 1
+      - 768
+      - 4
+      - 4
+      - 4
+      - 1024
+    - - 6
+      - 0.0
+  - - - 1024
+      - 1856
+      - 1
+      - 768
+      - 1024
+      - 1024
+      - 1024
+      - 1856
+    - - 3
+      - 0.0
+  - - - 4
+      - 5888
+      - 1
+      - 3328
+      - 4
+      - 4
+      - 4
+      - 5888
+    - - 6
+      - 0.0
+  - - - 704
+      - 64
+      - 1
+      - 768
+      - 704
+      - 704
+      - 704
+      - 64
+    - - 3
+      - 0.0
+  - - - 1856
+      - 3584
+      - 1
+      - 768
+      - 1856
+      - 1856
+      - 1856
+      - 3584
+    - - 3
+      - 0.0
+  - - - 448
+      - 1024
+      - 1
+      - 1792
+      - 448
+      - 448
+      - 448
+      - 1024
+    - - 3
+      - 0.0
+  - - - 3584
+      - 448
+      - 1
+      - 3328
+      - 3584
+      - 3584
+      - 3584
+      - 448
+    - - 3
+      - 0.0
+  - - - 1856
+      - 1408
+      - 1
+      - 128
+      - 1856
+      - 1856
+      - 1856
+      - 1408
+    - - 0
+      - 3053.15
+  - - - 4288
+      - 128
+      - 1
+      - 256
+      - 4288
+      - 4288
+      - 4288
+      - 128
+    - - 3
+      - 0.0
+  - - - 4288
+      - 1408
+      - 1
+      - 256
+      - 4288
+      - 4288
+      - 4288
+      - 1408
+    - - 3
+      - 0.0
+  - - - 1408
+      - 5888
+      - 1
+      - 128
+      - 1408
+      - 1408
+      - 1408
+      - 5888
+    - - 0
+      - 3510.26
+  - - - 448
+      - 4
+      - 1
+      - 128
+      - 448
+      - 448
+      - 448
+      - 4
+    - - 5
+      - 10.0537
+  - - - 2368
+      - 2368
+      - 1
+      - 1792
+      - 2368
+      - 2368
+      - 2368
+      - 2368
+    - - 3
+      - 0.0
+  - - - 64
+      - 5056
+      - 1
+      - 1792
+      - 64
+      - 64
+      - 64
+      - 5056
+    - - 3
+      - 0.0
+  - - - 3584
+      - 1856
+      - 1
+      - 768
+      - 3584
+      - 3584
+      - 3584
+      - 1856
+    - - 3
+      - 0.0
+  - - - 256
+      - 1408
+      - 1
+      - 1792
+      - 256
+      - 256
+      - 256
+      - 1408
+    - - 3
+      - 0.0
+  - - - 64
+      - 3584
+      - 1
+      - 1792
+      - 64
+      - 64
+      - 64
+      - 3584
+    - - 3
+      - 0.0
+  - - - 1856
+      - 2368
+      - 1
+      - 128
+      - 1856
+      - 1856
+      - 1856
+      - 2368
+    - - 0
+      - 3352.95
+  - - - 2944
+      - 448
+      - 1
+      - 128
+      - 2944
+      - 2944
+      - 2944
+      - 448
+    - - 0
+      - 2327.92
+  - - - 6784
+      - 4
+      - 1
+      - 256
+      - 6784
+      - 6784
+      - 6784
+      - 4
+    - - 6
+      - 0.0
+  - - - 4
+      - 2944
+      - 1
+      - 256
+      - 4
+      - 4
+      - 4
+      - 2944
+    - - 6
+      - 0.0
+  - - - 2944
+      - 256
+      - 1
+      - 256
+      - 2944
+      - 2944
+      - 2944
+      - 256
+    - - 3
+      - 0.0
+  - - - 4
+      - 1856
+      - 1
+      - 128
+      - 4
+      - 4
+      - 4
+      - 1856
+    - - 5
+      - 39.4721
+  - - - 704
+      - 4
+      - 1
+      - 128
+      - 704
+      - 704
+      - 704
+      - 4
+    - - 5
+      - 15.4968
+  - - - 64
+      - 128
+      - 1
+      - 1792
+      - 64
+      - 64
+      - 64
+      - 128
+    - - 3
+      - 0.0
+  - - - 1856
+      - 6784
+      - 1
+      - 3328
+      - 1856
+      - 1856
+      - 1856
+      - 6784
+    - - 3
+      - 0.0
+  - - - 704
+      - 4
+      - 1
+      - 256
+      - 704
+      - 704
+      - 704
+      - 4
+    - - 6
+      - 0.0
+  - - - 4288
+      - 4288
+      - 1
+      - 256
+      - 4288
+      - 4288
+      - 4288
+      - 4288
+    - - 3
+      - 0.0
+  - - - 256
+      - 2944
+      - 1
+      - 3328
+      - 256
+      - 256
+      - 256
+      - 2944
+    - - 3
+      - 0.0
+  - - - 3584
+      - 2944
+      - 1
+      - 256
+      - 3584
+      - 3584
+      - 3584
+      - 2944
+    - - 3
+      - 0.0
+  - - - 2368
+      - 128
+      - 1
+      - 768
+      - 2368
+      - 2368
+      - 2368
+      - 128
+    - - 3
+      - 0.0
+  - - - 1024
+      - 64
+      - 1
+      - 3328
+      - 1024
+      - 1024
+      - 1024
+      - 64
+    - - 3
+      - 0.0
+  - - - 5888
+      - 128
+      - 1
+      - 1792
+      - 5888
+      - 5888
+      - 5888
+      - 128
+    - - 3
+      - 0.0
+  - - - 704
+      - 704
+      - 1
+      - 768
+      - 704
+      - 704
+      - 704
+      - 704
+    - - 3
+      - 0.0
+  - - - 3584
+      - 1856
+      - 1
+      - 256
+      - 3584
+      - 3584
+      - 3584
+      - 1856
+    - - 3
+      - 0.0
+  - - - 3584
+      - 3584
+      - 1
+      - 1792
+      - 3584
+      - 3584
+      - 3584
+      - 3584
+    - - 3
+      - 0.0
+  - - - 128
+      - 448
+      - 1
+      - 256
+      - 128
+      - 128
+      - 128
+      - 448
+    - - 3
+      - 0.0
+  - - - 1856
+      - 128
+      - 1
+      - 768
+      - 1856
+      - 1856
+      - 1856
+      - 128
+    - - 3
+      - 0.0
+  - - - 448
+      - 4288
+      - 1
+      - 1792
+      - 448
+      - 448
+      - 448
+      - 4288
+    - - 3
+      - 0.0
+  - - - 4288
+      - 2368
+      - 1
+      - 3328
+      - 4288
+      - 4288
+      - 4288
+      - 2368
+    - - 3
+      - 0.0
+  - - - 6784
+      - 5056
+      - 1
+      - 256
+      - 6784
+      - 6784
+      - 6784
+      - 5056
+    - - 3
+      - 0.0
+  - - - 704
+      - 6784
+      - 1
+      - 128
+      - 704
+      - 704
+      - 704
+      - 6784
+    - - 0
+      - 3287.92
+  - - - 5056
+      - 4
+      - 1
+      - 128
+      - 5056
+      - 5056
+      - 5056
+      - 4
+    - - 5
+      - 102.784
+  - - - 4
+      - 2944
+      - 1
+      - 3328
+      - 4
+      - 4
+      - 4
+      - 2944
+    - - 6
+      - 0.0
+  - - - 448
+      - 704
+      - 1
+      - 768
+      - 448
+      - 448
+      - 448
+      - 704
+    - - 3
+      - 0.0
+  - - - 4
+      - 704
+      - 1
+      - 256
+      - 4
+      - 4
+      - 4
+      - 704
+    - - 6
+      - 0.0
+  - - - 128
+      - 704
+      - 1
+      - 768
+      - 128
+      - 128
+      - 128
+      - 704
+    - - 3
+      - 0.0
+  - - - 1856
+      - 2944
+      - 1
+      - 256
+      - 1856
+      - 1856
+      - 1856
+      - 2944
+    - - 3
+      - 0.0
+  - - - 704
+      - 2368
+      - 1
+      - 1792
+      - 704
+      - 704
+      - 704
+      - 2368
+    - - 3
+      - 0.0
+  - - - 128
+      - 704
+      - 1
+      - 3328
+      - 128
+      - 128
+      - 128
+      - 704
+    - - 3
+      - 0.0
+  - - - 4
+      - 2368
+      - 1
+      - 3328
+      - 4
+      - 4
+      - 4
+      - 2368
+    - - 6
+      - 0.0
+  - - - 5888
+      - 1408
+      - 1
+      - 1792
+      - 5888
+      - 5888
+      - 5888
+      - 1408
+    - - 3
+      - 0.0
+  - - - 448
+      - 64
+      - 1
+      - 128
+      - 448
+      - 448
+      - 448
+      - 64
+    - - 0
+      - 123.859
+  - - - 4
+      - 256
+      - 1
+      - 128
+      - 4
+      - 4
+      - 4
+      - 256
+    - - 5
+      - 5.65319
+  - - - 256
+      - 1408
+      - 1
+      - 256
+      - 256
+      - 256
+      - 256
+      - 1408
+    - - 3
+      - 0.0
+  - - - 5888
+      - 1024
+      - 1
+      - 768
+      - 5888
+      - 5888
+      - 5888
+      - 1024
+    - - 3
+      - 0.0
+  - - - 704
+      - 4288
+      - 1
+      - 1792
+      - 704
+      - 704
+      - 704
+      - 4288
+    - - 3
+      - 0.0
+  - - - 6784
+      - 2944
+      - 1
+      - 3328
+      - 6784
+      - 6784
+      - 6784
+      - 2944
+    - - 3
+      - 0.0
+  - - - 5056
+      - 2368
+      - 1
+      - 256
+      - 5056
+      - 5056
+      - 5056
+      - 2368
+    - - 3
+      - 0.0
+  - - - 1856
+      - 128
+      - 1
+      - 128
+      - 1856
+      - 1856
+      - 1856
+      - 128
+    - - 0
+      - 894.36
+  - - - 128
+      - 6784
+      - 1
+      - 3328
+      - 128
+      - 128
+      - 128
+      - 6784
+    - - 3
+      - 0.0
+  - - - 64
+      - 448
+      - 1
+      - 1792
+      - 64
+      - 64
+      - 64
+      - 448
+    - - 3
+      - 0.0
+  - - - 2944
+      - 2368
+      - 1
+      - 768
+      - 2944
+      - 2944
+      - 2944
+      - 2368
+    - - 3
+      - 0.0
+  - - - 5888
+      - 3584
+      - 1
+      - 3328
+      - 5888
+      - 5888
+      - 5888
+      - 3584
+    - - 3
+      - 0.0
+  - - - 4288
+      - 6784
+      - 1
+      - 128
+      - 4288
+      - 4288
+      - 4288
+      - 6784
+    - - 0
+      - 3874.68
+  - - - 1856
+      - 4288
+      - 1
+      - 128
+      - 1856
+      - 1856
+      - 1856
+      - 4288
+    - - 0
+      - 3585.94
+  - - - 4288
+      - 2368
+      - 1
+      - 768
+      - 4288
+      - 4288
+      - 4288
+      - 2368
+    - - 3
+      - 0.0
+  - - - 448
+      - 1408
+      - 1
+      - 768
+      - 448
+      - 448
+      - 448
+      - 1408
+    - - 3
+      - 0.0
+  - - - 448
+      - 2944
+      - 1
+      - 768
+      - 448
+      - 448
+      - 448
+      - 2944
+    - - 3
+      - 0.0
+  - - - 2368
+      - 4
+      - 1
+      - 128
+      - 2368
+      - 2368
+      - 2368
+      - 4
+    - - 5
+      - 50.0533
+  - - - 4288
+      - 448
+      - 1
+      - 1792
+      - 4288
+      - 4288
+      - 4288
+      - 448
+    - - 3
+      - 0.0
+  - - - 256
+      - 1408
+      - 1
+      - 3328
+      - 256
+      - 256
+      - 256
+      - 1408
+    - - 3
+      - 0.0
+  - - - 704
+      - 6784
+      - 1
+      - 768
+      - 704
+      - 704
+      - 704
+      - 6784
+    - - 3
+      - 0.0
+  - - - 1024
+      - 448
+      - 1
+      - 128
+      - 1024
+      - 1024
+      - 1024
+      - 448
+    - - 0
+      - 1190.25
+  - - - 1856
+      - 64
+      - 1
+      - 128
+      - 1856
+      - 1856
+      - 1856
+      - 64
+    - - 0
+      - 508.056
+  - - - 3584
+      - 1024
+      - 1
+      - 256
+      - 3584
+      - 3584
+      - 3584
+      - 1024
+    - - 3
+      - 0.0
+  - - - 2368
+      - 1856
+      - 1
+      - 3328
+      - 2368
+      - 2368
+      - 2368
+      - 1856
+    - - 3
+      - 0.0
+  - - - 64
+      - 64
+      - 1
+      - 3328
+      - 64
+      - 64
+      - 64
+      - 64
+    - - 3
+      - 0.0
+  - - - 5888
+      - 1856
+      - 1
+      - 128
+      - 5888
+      - 5888
+      - 5888
+      - 1856
+    - - 2
+      - 3449.66
+  - - - 1408
+      - 2944
+      - 1
+      - 3328
+      - 1408
+      - 1408
+      - 1408
+      - 2944
+    - - 3
+      - 0.0
+  - - - 5888
+      - 3584
+      - 1
+      - 1792
+      - 5888
+      - 5888
+      - 5888
+      - 3584
+    - - 3
+      - 0.0
+  - - - 704
+      - 2944
+      - 1
+      - 1792
+      - 704
+      - 704
+      - 704
+      - 2944
+    - - 3
+      - 0.0
+  - - - 5888
+      - 704
+      - 1
+      - 768
+      - 5888
+      - 5888
+      - 5888
+      - 704
+    - - 3
+      - 0.0
+  - - - 1024
+      - 256
+      - 1
+      - 1792
+      - 1024
+      - 1024
+      - 1024
+      - 256
+    - - 3
+      - 0.0
+  - - - 128
+      - 1024
+      - 1
+      - 256
+      - 128
+      - 128
+      - 128
+      - 1024
+    - - 3
+      - 0.0
+  - - - 2944
+      - 5056
+      - 1
+      - 256
+      - 2944
+      - 2944
+      - 2944
+      - 5056
+    - - 3
+      - 0.0
+  - - - 448
+      - 448
+      - 1
+      - 256
+      - 448
+      - 448
+      - 448
+      - 448
+    - - 3
+      - 0.0
+  - - - 448
+      - 6784
+      - 1
+      - 128
+      - 448
+      - 448
+      - 448
+      - 6784
+    - - 0
+      - 3069.37
+  - - - 5056
+      - 4288
+      - 1
+      - 768
+      - 5056
+      - 5056
+      - 5056
+      - 4288
+    - - 3
+      - 0.0
+  - - - 5056
+      - 4
+      - 1
+      - 768
+      - 5056
+      - 5056
+      - 5056
+      - 4
+    - - 6
+      - 0.0
+  - - - 4288
+      - 5888
+      - 1
+      - 256
+      - 4288
+      - 4288
+      - 4288
+      - 5888
+    - - 3
+      - 0.0
+  - - - 3584
+      - 128
+      - 1
+      - 256
+      - 3584
+      - 3584
+      - 3584
+      - 128
+    - - 3
+      - 0.0
+  - - - 1408
+      - 64
+      - 1
+      - 256
+      - 1408
+      - 1408
+      - 1408
+      - 64
+    - - 3
+      - 0.0
+  - - - 1408
+      - 1856
+      - 1
+      - 768
+      - 1408
+      - 1408
+      - 1408
+      - 1856
+    - - 3
+      - 0.0
+  - - - 128
+      - 4
+      - 1
+      - 128
+      - 128
+      - 128
+      - 128
+      - 4
+    - - 5
+      - 3.02987
+  - - - 6784
+      - 5056
+      - 1
+      - 3328
+      - 6784
+      - 6784
+      - 6784
+      - 5056
+    - - 3
+      - 0.0
+  - - - 2944
+      - 1856
+      - 1
+      - 3328
+      - 2944
+      - 2944
+      - 2944
+      - 1856
+    - - 3
+      - 0.0
+  - - - 704
+      - 128
+      - 1
+      - 3328
+      - 704
+      - 704
+      - 704
+      - 128
+    - - 3
+      - 0.0
+  - - - 448
+      - 6784
+      - 1
+      - 1792
+      - 448
+      - 448
+      - 448
+      - 6784
+    - - 3
+      - 0.0
+  - - - 2944
+      - 128
+      - 1
+      - 1792
+      - 2944
+      - 2944
+      - 2944
+      - 128
+    - - 3
+      - 0.0
+  - - - 704
+      - 4
+      - 1
+      - 3328
+      - 704
+      - 704
+      - 704
+      - 4
+    - - 6
+      - 0.0
+  - - - 1024
+      - 1408
+      - 1
+      - 768
+      - 1024
+      - 1024
+      - 1024
+      - 1408
+    - - 3
+      - 0.0
+  - - - 1856
+      - 1856
+      - 1
+      - 1792
+      - 1856
+      - 1856
+      - 1856
+      - 1856
+    - - 3
+      - 0.0
+  - - - 2368
+      - 5056
+      - 1
+      - 768
+      - 2368
+      - 2368
+      - 2368
+      - 5056
+    - - 3
+      - 0.0
+  - - - 128
+      - 2368
+      - 1
+      - 256
+      - 128
+      - 128
+      - 128
+      - 2368
+    - - 3
+      - 0.0
+  - - - 5888
+      - 5888
+      - 1
+      - 768
+      - 5888
+      - 5888
+      - 5888
+      - 5888
+    - - 3
+      - 0.0
+  - - - 256
+      - 1856
+      - 1
+      - 256
+      - 256
+      - 256
+      - 256
+      - 1856
+    - - 3
+      - 0.0
+  - - - 128
+      - 1856
+      - 1
+      - 128
+      - 128
+      - 128
+      - 128
+      - 1856
+    - - 0
+      - 918.373
+  - - - 1856
+      - 4288
+      - 1
+      - 1792
+      - 1856
+      - 1856
+      - 1856
+      - 4288
+    - - 3
+      - 0.0
+  - - - 5056
+      - 256
+      - 1
+      - 1792
+      - 5056
+      - 5056
+      - 5056
+      - 256
+    - - 3
+      - 0.0
+  - - - 128
+      - 128
+      - 1
+      - 1792
+      - 128
+      - 128
+      - 128
+      - 128
+    - - 3
+      - 0.0
+  - - - 256
+      - 4
+      - 1
+      - 3328
+      - 256
+      - 256
+      - 256
+      - 4
+    - - 6
+      - 0.0
+  - - - 2368
+      - 4288
+      - 1
+      - 3328
+      - 2368
+      - 2368
+      - 2368
+      - 4288
+    - - 3
+      - 0.0
+  - - - 4
+      - 128
+      - 1
+      - 1792
+      - 4
+      - 4
+      - 4
+      - 128
+    - - 6
+      - 0.0
+  - - - 1408
+      - 704
+      - 1
+      - 768
+      - 1408
+      - 1408
+      - 1408
+      - 704
+    - - 3
+      - 0.0
+  - - - 256
+      - 2368
+      - 1
+      - 768
+      - 256
+      - 256
+      - 256
+      - 2368
+    - - 3
+      - 0.0
+  - - - 4
+      - 1408
+      - 1
+      - 3328
+      - 4
+      - 4
+      - 4
+      - 1408
+    - - 6
+      - 0.0
+  - - - 5888
+      - 704
+      - 1
+      - 1792
+      - 5888
+      - 5888
+      - 5888
+      - 704
+    - - 3
+      - 0.0
+  - - - 6784
+      - 2944
+      - 1
+      - 128
+      - 6784
+      - 6784
+      - 6784
+      - 2944
+    - - 0
+      - 3689.85
+  - - - 448
+      - 256
+      - 1
+      - 128
+      - 448
+      - 448
+      - 448
+      - 256
+    - - 0
+      - 490.537
+  - - - 704
+      - 1024
+      - 1
+      - 3328
+      - 704
+      - 704
+      - 704
+      - 1024
+    - - 3
+      - 0.0
+  - - - 5888
+      - 1856
+      - 1
+      - 768
+      - 5888
+      - 5888
+      - 5888
+      - 1856
+    - - 3
+      - 0.0
+  - - - 6784
+      - 1024
+      - 1
+      - 768
+      - 6784
+      - 6784
+      - 6784
+      - 1024
+    - - 3
+      - 0.0
+  - - - 64
+      - 4288
+      - 1
+      - 128
+      - 64
+      - 64
+      - 64
+      - 4288
+    - - 0
+      - 839.312
+  - - - 1408
+      - 2368
+      - 1
+      - 128
+      - 1408
+      - 1408
+      - 1408
+      - 2368
+    - - 0
+      - 3126.04
+  - - - 704
+      - 2944
+      - 1
+      - 3328
+      - 704
+      - 704
+      - 704
+      - 2944
+    - - 3
+      - 0.0
+  - - - 4
+      - 1408
+      - 1
+      - 128
+      - 4
+      - 4
+      - 4
+      - 1408
+    - - 5
+      - 30.1302
+  - - - 2368
+      - 64
+      - 1
+      - 1792
+      - 2368
+      - 2368
+      - 2368
+      - 64
+    - - 3
+      - 0.0
+  - - - 128
+      - 5056
+      - 1
+      - 768
+      - 128
+      - 128
+      - 128
+      - 5056
+    - - 3
+      - 0.0
+  - - - 448
+      - 1856
+      - 1
+      - 768
+      - 448
+      - 448
+      - 448
+      - 1856
+    - - 3
+      - 0.0
+  - - - 4
+      - 1856
+      - 1
+      - 256
+      - 4
+      - 4
+      - 4
+      - 1856
+    - - 6
+      - 0.0
+  - - - 2944
+      - 6784
+      - 1
+      - 1792
+      - 2944
+      - 2944
+      - 2944
+      - 6784
+    - - 3
+      - 0.0
+  - - - 2368
+      - 5888
+      - 1
+      - 128
+      - 2368
+      - 2368
+      - 2368
+      - 5888
+    - - 0
+      - 3727.79
+  - - - 64
+      - 256
+      - 1
+      - 3328
+      - 64
+      - 64
+      - 64
+      - 256
+    - - 3
+      - 0.0
+  - - - 2368
+      - 1856
+      - 1
+      - 128
+      - 2368
+      - 2368
+      - 2368
+      - 1856
+    - - 0
+      - 3336.74
+  - - - 2944
+      - 4
+      - 1
+      - 128
+      - 2944
+      - 2944
+      - 2944
+      - 4
+    - - 5
+      - 62.8053
+  - - - 1856
+      - 4
+      - 1
+      - 256
+      - 1856
+      - 1856
+      - 1856
+      - 4
+    - - 6
+      - 0.0
+  - - - 256
+      - 448
+      - 1
+      - 128
+      - 256
+      - 256
+      - 256
+      - 448
+    - - 0
+      - 483.358
+  - - - 3584
+      - 256
+      - 1
+      - 128
+      - 3584
+      - 3584
+      - 3584
+      - 256
+    - - 2
+      - 1828.62
+  - - - 1856
+      - 448
+      - 1
+      - 128
+      - 1856
+      - 1856
+      - 1856
+      - 448
+    - - 0
+      - 1962.81
+  - - - 1408
+      - 3584
+      - 1
+      - 1792
+      - 1408
+      - 1408
+      - 1408
+      - 3584
+    - - 3
+      - 0.0
+  - - - 1024
+      - 2944
+      - 1
+      - 1792
+      - 1024
+      - 1024
+      - 1024
+      - 2944
+    - - 3
+      - 0.0
+  - - - 4
+      - 5056
+      - 1
+      - 128
+      - 4
+      - 4
+      - 4
+      - 5056
+    - - 4
+      - 102.481
+  - - - 5056
+      - 704
+      - 1
+      - 1792
+      - 5056
+      - 5056
+      - 5056
+      - 704
+    - - 3
+      - 0.0
+  - - - 5888
+      - 256
+      - 1
+      - 768
+      - 5888
+      - 5888
+      - 5888
+      - 256
+    - - 3
+      - 0.0
+  - - - 3584
+      - 2944
+      - 1
+      - 1792
+      - 3584
+      - 3584
+      - 3584
+      - 2944
+    - - 3
+      - 0.0
+  - - - 2944
+      - 3584
+      - 1
+      - 3328
+      - 2944
+      - 2944
+      - 2944
+      - 3584
+    - - 3
+      - 0.0
+  - - - 256
+      - 704
+      - 1
+      - 3328
+      - 256
+      - 256
+      - 256
+      - 704
+    - - 3
+      - 0.0
+  - - - 4288
+      - 5056
+      - 1
+      - 1792
+      - 4288
+      - 4288
+      - 4288
+      - 5056
+    - - 3
+      - 0.0
+  - - - 1856
+      - 5888
+      - 1
+      - 1792
+      - 1856
+      - 1856
+      - 1856
+      - 5888
+    - - 3
+      - 0.0
+  - - - 2368
+      - 2944
+      - 1
+      - 3328
+      - 2368
+      - 2368
+      - 2368
+      - 2944
+    - - 3
+      - 0.0
+  - - - 256
+      - 3584
+      - 1
+      - 128
+      - 256
+      - 256
+      - 256
+      - 3584
+    - - 2
+      - 1822.31
+  - - - 64
+      - 5056
+      - 1
+      - 3328
+      - 64
+      - 64
+      - 64
+      - 5056
+    - - 3
+      - 0.0
+  - - - 1408
+      - 1856
+      - 1
+      - 256
+      - 1408
+      - 1408
+      - 1408
+      - 1856
+    - - 3
+      - 0.0
+  - - - 2944
+      - 4288
+      - 1
+      - 768
+      - 2944
+      - 2944
+      - 2944
+      - 4288
+    - - 3
+      - 0.0
+  - - - 2368
+      - 6784
+      - 1
+      - 1792
+      - 2368
+      - 2368
+      - 2368
+      - 6784
+    - - 3
+      - 0.0
+  - - - 4
+      - 1024
+      - 1
+      - 1792
+      - 4
+      - 4
+      - 4
+      - 1024
+    - - 6
+      - 0.0
+  - - - 4288
+      - 3584
+      - 1
+      - 1792
+      - 4288
+      - 4288
+      - 4288
+      - 3584
+    - - 3
+      - 0.0
+  - - - 2944
+      - 1408
+      - 1
+      - 768
+      - 2944
+      - 2944
+      - 2944
+      - 1408
+    - - 3
+      - 0.0
+  - - - 3584
+      - 4
+      - 1
+      - 128
+      - 3584
+      - 3584
+      - 3584
+      - 4
+    - - 4
+      - 75.7548
+  - - - 2944
+      - 5056
+      - 1
+      - 128
+      - 2944
+      - 2944
+      - 2944
+      - 5056
+    - - 0
+      - 3717.92
+  - - - 128
+      - 1024
+      - 1
+      - 768
+      - 128
+      - 128
+      - 128
+      - 1024
+    - - 3
+      - 0.0
+  - - - 5888
+      - 3584
+      - 1
+      - 768
+      - 5888
+      - 5888
+      - 5888
+      - 3584
+    - - 3
+      - 0.0
+  - - - 1408
+      - 128
+      - 1
+      - 768
+      - 1408
+      - 1408
+      - 1408
+      - 128
+    - - 3
+      - 0.0
+  - - - 4288
+      - 1408
+      - 1
+      - 128
+      - 4288
+      - 4288
+      - 4288
+      - 1408
+    - - 0
+      - 3470.59
+  - - - 1408
+      - 1856
+      - 1
+      - 128
+      - 1408
+      - 1408
+      - 1408
+      - 1856
+    - - 0
+      - 2951.39
+  - - - 1856
+      - 448
+      - 1
+      - 3328
+      - 1856
+      - 1856
+      - 1856
+      - 448
+    - - 3
+      - 0.0
+  - - - 5056
+      - 1856
+      - 1
+      - 768
+      - 5056
+      - 5056
+      - 5056
+      - 1856
+    - - 3
+      - 0.0
+  - - - 3584
+      - 1408
+      - 1
+      - 128
+      - 3584
+      - 3584
+      - 3584
+      - 1408
+    - - 2
+      - 3197.57
+  - - - 1024
+      - 6784
+      - 1
+      - 256
+      - 1024
+      - 1024
+      - 1024
+      - 6784
+    - - 3
+      - 0.0
+  - - - 1024
+      - 64
+      - 1
+      - 768
+      - 1024
+      - 1024
+      - 1024
+      - 64
+    - - 3
+      - 0.0
+  - - - 5888
+      - 4
+      - 1
+      - 768
+      - 5888
+      - 5888
+      - 5888
+      - 4
+    - - 6
+      - 0.0
+  - - - 128
+      - 1408
+      - 1
+      - 768
+      - 128
+      - 128
+      - 128
+      - 1408
+    - - 3
+      - 0.0
+  - - - 64
+      - 6784
+      - 1
+      - 3328
+      - 64
+      - 64
+      - 64
+      - 6784
+    - - 3
+      - 0.0
+  - - - 1408
+      - 4
+      - 1
+      - 128
+      - 1408
+      - 1408
+      - 1408
+      - 4
+    - - 5
+      - 29.8526
+  - - - 6784
+      - 4288
+      - 1
+      - 256
+      - 6784
+      - 6784
+      - 6784
+      - 4288
+    - - 3
+      - 0.0
+  - - - 128
+      - 5888
+      - 1
+      - 3328
+      - 128
+      - 128
+      - 128
+      - 5888
+    - - 3
+      - 0.0
+  - - - 128
+      - 5888
+      - 1
+      - 256
+      - 128
+      - 128
+      - 128
+      - 5888
+    - - 3
+      - 0.0
+  - - - 3584
+      - 4
+      - 1
+      - 256
+      - 3584
+      - 3584
+      - 3584
+      - 4
+    - - 6
+      - 0.0
+  - - - 2368
+      - 64
+      - 1
+      - 768
+      - 2368
+      - 2368
+      - 2368
+      - 64
+    - - 3
+      - 0.0
+  - - - 5888
+      - 1408
+      - 1
+      - 128
+      - 5888
+      - 5888
+      - 5888
+      - 1408
+    - - 2
+      - 3470.3
+  - - - 256
+      - 2944
+      - 1
+      - 1792
+      - 256
+      - 256
+      - 256
+      - 2944
+    - - 3
+      - 0.0
+  - - - 2944
+      - 5888
+      - 1
+      - 768
+      - 2944
+      - 2944
+      - 2944
+      - 5888
+    - - 3
+      - 0.0
+  - - - 704
+      - 448
+      - 1
+      - 256
+      - 704
+      - 704
+      - 704
+      - 448
+    - - 3
+      - 0.0
+  - - - 4288
+      - 4
+      - 1
+      - 128
+      - 4288
+      - 4288
+      - 4288
+      - 4
+    - - 5
+      - 90.0866
+  - - - 128
+      - 256
+      - 1
+      - 128
+      - 128
+      - 128
+      - 128
+      - 256
+    - - 0
+      - 144.813
+  - - - 2944
+      - 2944
+      - 1
+      - 256
+      - 2944
+      - 2944
+      - 2944
+      - 2944
+    - - 3
+      - 0.0
+  - - - 64
+      - 4288
+      - 1
+      - 1792
+      - 64
+      - 64
+      - 64
+      - 4288
+    - - 3
+      - 0.0
+  - - - 4288
+      - 4
+      - 1
+      - 256
+      - 4288
+      - 4288
+      - 4288
+      - 4
+    - - 6
+      - 0.0
+  - - - 256
+      - 2368
+      - 1
+      - 256
+      - 256
+      - 256
+      - 256
+      - 2368
+    - - 3
+      - 0.0
+  - - - 1024
+      - 64
+      - 1
+      - 128
+      - 1024
+      - 1024
+      - 1024
+      - 64
+    - - 0
+      - 274.196
+  - - - 1856
+      - 5888
+      - 1
+      - 256
+      - 1856
+      - 1856
+      - 1856
+      - 5888
+    - - 3
+      - 0.0
+  - - - 448
+      - 256
+      - 1
+      - 256
+      - 448
+      - 448
+      - 448
+      - 256
+    - - 3
+      - 0.0
+  - - - 256
+      - 4
+      - 1
+      - 768
+      - 256
+      - 256
+      - 256
+      - 4
+    - - 6
+      - 0.0
+  - - - 3584
+      - 64
+      - 1
+      - 768
+      - 3584
+      - 3584
+      - 3584
+      - 64
+    - - 3
+      - 0.0
+  - - - 5056
+      - 2368
+      - 1
+      - 768
+      - 5056
+      - 5056
+      - 5056
+      - 2368
+    - - 3
+      - 0.0
+  - - - 5888
+      - 5056
+      - 1
+      - 1792
+      - 5888
+      - 5888
+      - 5888
+      - 5056
+    - - 3
+      - 0.0
+  - - - 1408
+      - 3584
+      - 1
+      - 256
+      - 1408
+      - 1408
+      - 1408
+      - 3584
+    - - 3
+      - 0.0
+  - - - 1856
+      - 704
+      - 1
+      - 3328
+      - 1856
+      - 1856
+      - 1856
+      - 704
+    - - 3
+      - 0.0
+  - - - 128
+      - 1856
+      - 1
+      - 3328
+      - 128
+      - 128
+      - 128
+      - 1856
+    - - 3
+      - 0.0
+  - - - 2944
+      - 1024
+      - 1
+      - 128
+      - 2944
+      - 2944
+      - 2944
+      - 1024
+    - - 2
+      - 2852.8
+  - - - 4
+      - 1024
+      - 1
+      - 256
+      - 4
+      - 4
+      - 4
+      - 1024
+    - - 6
+      - 0.0
+  - - - 5056
+      - 6784
+      - 1
+      - 1792
+      - 5056
+      - 5056
+      - 5056
+      - 6784
+    - - 3
+      - 0.0
+  - - - 1856
+      - 5056
+      - 1
+      - 256
+      - 1856
+      - 1856
+      - 1856
+      - 5056
+    - - 3
+      - 0.0
+  - - - 128
+      - 2944
+      - 1
+      - 3328
+      - 128
+      - 128
+      - 128
+      - 2944
+    - - 3
+      - 0.0
+  - - - 448
+      - 448
+      - 1
+      - 3328
+      - 448
+      - 448
+      - 448
+      - 448
+    - - 3
+      - 0.0
+  - - - 64
+      - 4288
+      - 1
+      - 768
+      - 64
+      - 64
+      - 64
+      - 4288
+    - - 3
+      - 0.0
+  - - - 1024
+      - 448
+      - 1
+      - 1792
+      - 1024
+      - 1024
+      - 1024
+      - 448
+    - - 3
+      - 0.0
+  - - - 256
+      - 2944
+      - 1
+      - 768
+      - 256
+      - 256
+      - 256
+      - 2944
+    - - 3
+      - 0.0
+  - - - 1024
+      - 2368
+      - 1
+      - 1792
+      - 1024
+      - 1024
+      - 1024
+      - 2368
+    - - 3
+      - 0.0
+  - - - 64
+      - 1024
+      - 1
+      - 3328
+      - 64
+      - 64
+      - 64
+      - 1024
+    - - 3
+      - 0.0
+  - - - 3584
+      - 2368
+      - 1
+      - 256
+      - 3584
+      - 3584
+      - 3584
+      - 2368
+    - - 3
+      - 0.0
+  - - - 5056
+      - 448
+      - 1
+      - 256
+      - 5056
+      - 5056
+      - 5056
+      - 448
+    - - 3
+      - 0.0
+  - - - 4
+      - 2368
+      - 1
+      - 1792
+      - 4
+      - 4
+      - 4
+      - 2368
+    - - 6
+      - 0.0
+  - - - 448
+      - 4
+      - 1
+      - 256
+      - 448
+      - 448
+      - 448
+      - 4
+    - - 6
+      - 0.0
+  - - - 704
+      - 3584
+      - 1
+      - 768
+      - 704
+      - 704
+      - 704
+      - 3584
+    - - 3
+      - 0.0
+  - - - 64
+      - 5888
+      - 1
+      - 1792
+      - 64
+      - 64
+      - 64
+      - 5888
+    - - 3
+      - 0.0
+  - - - 2368
+      - 1408
+      - 1
+      - 256
+      - 2368
+      - 2368
+      - 2368
+      - 1408
+    - - 3
+      - 0.0
+  - - - 448
+      - 1856
+      - 1
+      - 128
+      - 448
+      - 448
+      - 448
+      - 1856
+    - - 0
+      - 1946.87
+  - - - 3584
+      - 256
+      - 1
+      - 1792
+      - 3584
+      - 3584
+      - 3584
+      - 256
+    - - 3
+      - 0.0
+  - - - 704
+      - 1856
+      - 1
+      - 128
+      - 704
+      - 704
+      - 704
+      - 1856
+    - - 0
+      - 2522.69
+  - - - 256
+      - 128
+      - 1
+      - 768
+      - 256
+      - 256
+      - 256
+      - 128
+    - - 3
+      - 0.0
+  - - - 1856
+      - 1408
+      - 1
+      - 1792
+      - 1856
+      - 1856
+      - 1856
+      - 1408
+    - - 3
+      - 0.0
+  - - - 4
+      - 448
+      - 1
+      - 1792
+      - 4
+      - 4
+      - 4
+      - 448
+    - - 6
+      - 0.0
+  - - - 128
+      - 5056
+      - 1
+      - 256
+      - 128
+      - 128
+      - 128
+      - 5056
+    - - 3
+      - 0.0
+  - - - 1856
+      - 64
+      - 1
+      - 3328
+      - 1856
+      - 1856
+      - 1856
+      - 64
+    - - 3
+      - 0.0
+  - - - 64
+      - 2944
+      - 1
+      - 1792
+      - 64
+      - 64
+      - 64
+      - 2944
+    - - 3
+      - 0.0
+  - - - 1408
+      - 5056
+      - 1
+      - 1792
+      - 1408
+      - 1408
+      - 1408
+      - 5056
+    - - 3
+      - 0.0
+  - - - 4
+      - 2944
+      - 1
+      - 768
+      - 4
+      - 4
+      - 4
+      - 2944
+    - - 6
+      - 0.0
+  - - - 256
+      - 64
+      - 1
+      - 3328
+      - 256
+      - 256
+      - 256
+      - 64
+    - - 3
+      - 0.0
+  - - - 4
+      - 3584
+      - 1
+      - 256
+      - 4
+      - 4
+      - 4
+      - 3584
+    - - 6
+      - 0.0
+  - - - 6784
+      - 3584
+      - 1
+      - 3328
+      - 6784
+      - 6784
+      - 6784
+      - 3584
+    - - 3
+      - 0.0
+  - - - 256
+      - 1408
+      - 1
+      - 128
+      - 256
+      - 256
+      - 256
+      - 1408
+    - - 1
+      - 993.376
+  - - - 1856
+      - 704
+      - 1
+      - 256
+      - 1856
+      - 1856
+      - 1856
+      - 704
+    - - 3
+      - 0.0
+  - - - 4288
+      - 704
+      - 1
+      - 128
+      - 4288
+      - 4288
+      - 4288
+      - 704
+    - - 0
+      - 3084.75
+  - - - 5056
+      - 6784
+      - 1
+      - 256
+      - 5056
+      - 5056
+      - 5056
+      - 6784
+    - - 3
+      - 0.0
+  - - - 5888
+      - 1024
+      - 1
+      - 128
+      - 5888
+      - 5888
+      - 5888
+      - 1024
+    - - 2
+      - 3272.13
+  - - - 4288
+      - 1856
+      - 1
+      - 768
+      - 4288
+      - 4288
+      - 4288
+      - 1856
+    - - 3
+      - 0.0
+  - - - 5056
+      - 64
+      - 1
+      - 128
+      - 5056
+      - 5056
+      - 5056
+      - 64
+    - - 0
+      - 1148.14
+  - - - 5888
+      - 704
+      - 1
+      - 256
+      - 5888
+      - 5888
+      - 5888
+      - 704
+    - - 3
+      - 0.0
+  - - - 2368
+      - 1024
+      - 1
+      - 128
+      - 2368
+      - 2368
+      - 2368
+      - 1024
+    - - 2
+      - 2668.81
+  - - - 1856
+      - 6784
+      - 1
+      - 128
+      - 1856
+      - 1856
+      - 1856
+      - 6784
+    - - 0
+      - 3719.78
+  - - - 5056
+      - 1408
+      - 1
+      - 256
+      - 5056
+      - 5056
+      - 5056
+      - 1408
+    - - 3
+      - 0.0
+  - - - 448
+      - 6784
+      - 1
+      - 3328
+      - 448
+      - 448
+      - 448
+      - 6784
+    - - 3
+      - 0.0
+  - - - 256
+      - 448
+      - 1
+      - 256
+      - 256
+      - 256
+      - 256
+      - 448
+    - - 3
+      - 0.0
+  - - - 2368
+      - 128
+      - 1
+      - 256
+      - 2368
+      - 2368
+      - 2368
+      - 128
+    - - 3
+      - 0.0
+  - - - 1408
+      - 704
+      - 1
+      - 256
+      - 1408
+      - 1408
+      - 1408
+      - 704
+    - - 3
+      - 0.0
+  - - - 1024
+      - 6784
+      - 1
+      - 3328
+      - 1024
+      - 1024
+      - 1024
+      - 6784
+    - - 3
+      - 0.0
+  - - - 2944
+      - 448
+      - 1
+      - 768
+      - 2944
+      - 2944
+      - 2944
+      - 448
+    - - 3
+      - 0.0
+  - - - 64
+      - 1408
+      - 1
+      - 768
+      - 64
+      - 64
+      - 64
+      - 1408
+    - - 3
+      - 0.0
+  - - - 704
+      - 4
+      - 1
+      - 768
+      - 704
+      - 704
+      - 704
+      - 4
+    - - 6
+      - 0.0
+  - - - 1024
+      - 256
+      - 1
+      - 768
+      - 1024
+      - 1024
+      - 1024
+      - 256
+    - - 3
+      - 0.0
+  - - - 5888
+      - 128
+      - 1
+      - 768
+      - 5888
+      - 5888
+      - 5888
+      - 128
+    - - 3
+      - 0.0
+  - - - 704
+      - 3584
+      - 1
+      - 256
+      - 704
+      - 704
+      - 704
+      - 3584
+    - - 3
+      - 0.0
+  - - - 256
+      - 3584
+      - 1
+      - 3328
+      - 256
+      - 256
+      - 256
+      - 3584
+    - - 3
+      - 0.0
+  - - - 6784
+      - 3584
+      - 1
+      - 128
+      - 6784
+      - 6784
+      - 6784
+      - 3584
+    - - 2
+      - 3710.46
+  - - - 4288
+      - 5056
+      - 1
+      - 768
+      - 4288
+      - 4288
+      - 4288
+      - 5056
+    - - 3
+      - 0.0
+  - - - 256
+      - 4288
+      - 1
+      - 3328
+      - 256
+      - 256
+      - 256
+      - 4288
+    - - 3
+      - 0.0
+  - - - 6784
+      - 2944
+      - 1
+      - 768
+      - 6784
+      - 6784
+      - 6784
+      - 2944
+    - - 3
+      - 0.0
+  - - - 64
+      - 704
+      - 1
+      - 3328
+      - 64
+      - 64
+      - 64
+      - 704
+    - - 3
+      - 0.0
+  - - - 256
+      - 2368
+      - 1
+      - 3328
+      - 256
+      - 256
+      - 256
+      - 2368
+    - - 3
+      - 0.0
+  - - - 5888
+      - 64
+      - 1
+      - 768
+      - 5888
+      - 5888
+      - 5888
+      - 64
+    - - 3
+      - 0.0
+  - - - 4288
+      - 64
+      - 1
+      - 128
+      - 4288
+      - 4288
+      - 4288
+      - 64
+    - - 0
+      - 963.831
+  - - - 6784
+      - 6784
+      - 1
+      - 768
+      - 6784
+      - 6784
+      - 6784
+      - 6784
+    - - 3
+      - 0.0
+  - - - 704
+      - 64
+      - 1
+      - 256
+      - 704
+      - 704
+      - 704
+      - 64
+    - - 3
+      - 0.0
+  - - - 3584
+      - 1024
+      - 1
+      - 1792
+      - 3584
+      - 3584
+      - 3584
+      - 1024
+    - - 3
+      - 0.0
+  - - - 2368
+      - 5888
+      - 1
+      - 1792
+      - 2368
+      - 2368
+      - 2368
+      - 5888
+    - - 3
+      - 0.0
+  - - - 2944
+      - 4
+      - 1
+      - 256
+      - 2944
+      - 2944
+      - 2944
+      - 4
+    - - 6
+      - 0.0
+  - - - 256
+      - 1408
+      - 1
+      - 768
+      - 256
+      - 256
+      - 256
+      - 1408
+    - - 3
+      - 0.0
+  - - - 4
+      - 4288
+      - 1
+      - 256
+      - 4
+      - 4
+      - 4
+      - 4288
+    - - 6
+      - 0.0
+  - - - 1024
+      - 5888
+      - 1
+      - 3328
+      - 1024
+      - 1024
+      - 1024
+      - 5888
+    - - 3
+      - 0.0
+  - - - 5888
+      - 704
+      - 1
+      - 128
+      - 5888
+      - 5888
+      - 5888
+      - 704
+    - - 0
+      - 2918.78
+  - - - 3584
+      - 5888
+      - 1
+      - 128
+      - 3584
+      - 3584
+      - 3584
+      - 5888
+    - - 2
+      - 3674.76
+  - - - 4
+      - 4
+      - 1
+      - 768
+      - 4
+      - 4
+      - 4
+      - 4
+    - - 6
+      - 0.0
+  - - - 4288
+      - 5056
+      - 1
+      - 256
+      - 4288
+      - 4288
+      - 4288
+      - 5056
+    - - 3
+      - 0.0
+  - - - 128
+      - 64
+      - 1
+      - 1792
+      - 128
+      - 128
+      - 128
+      - 64
+    - - 3
+      - 0.0
+  - - - 5056
+      - 4288
+      - 1
+      - 1792
+      - 5056
+      - 5056
+      - 5056
+      - 4288
+    - - 3
+      - 0.0
+  - - - 256
+      - 64
+      - 1
+      - 128
+      - 256
+      - 256
+      - 256
+      - 64
+    - - 0
+      - 72.2222
+  - - - 6784
+      - 448
+      - 1
+      - 1792
+      - 6784
+      - 6784
+      - 6784
+      - 448
+    - - 3
+      - 0.0
+  - - - 256
+      - 5888
+      - 1
+      - 3328
+      - 256
+      - 256
+      - 256
+      - 5888
+    - - 3
+      - 0.0
+  - - - 6784
+      - 5888
+      - 1
+      - 3328
+      - 6784
+      - 6784
+      - 6784
+      - 5888
+    - - 3
+      - 0.0
+  - - - 128
+      - 6784
+      - 1
+      - 768
+      - 128
+      - 128
+      - 128
+      - 6784
+    - - 3
+      - 0.0
+  - - - 6784
+      - 4
+      - 1
+      - 768
+      - 6784
+      - 6784
+      - 6784
+      - 4
+    - - 6
+      - 0.0
+  - - - 6784
+      - 5056
+      - 1
+      - 128
+      - 6784
+      - 6784
+      - 6784
+      - 5056
+    - - 0
+      - 3783.78
+  - - - 704
+      - 3584
+      - 1
+      - 3328
+      - 704
+      - 704
+      - 704
+      - 3584
+    - - 3
+      - 0.0
+  - - - 2944
+      - 1024
+      - 1
+      - 768
+      - 2944
+      - 2944
+      - 2944
+      - 1024
+    - - 3
+      - 0.0
+  - - - 2944
+      - 704
+      - 1
+      - 768
+      - 2944
+      - 2944
+      - 2944
+      - 704
+    - - 3
+      - 0.0
+  - - - 704
+      - 2944
+      - 1
+      - 768
+      - 704
+      - 704
+      - 704
+      - 2944
+    - - 3
+      - 0.0
+  - - - 1408
+      - 6784
+      - 1
+      - 256
+      - 1408
+      - 1408
+      - 1408
+      - 6784
+    - - 3
+      - 0.0
+  - - - 704
+      - 4288
+      - 1
+      - 256
+      - 704
+      - 704
+      - 704
+      - 4288
+    - - 3
+      - 0.0
+  - - - 3584
+      - 4288
+      - 1
+      - 1792
+      - 3584
+      - 3584
+      - 3584
+      - 4288
+    - - 3
+      - 0.0
+  - - - 1024
+      - 1024
+      - 1
+      - 768
+      - 1024
+      - 1024
+      - 1024
+      - 1024
+    - - 3
+      - 0.0
+  - - - 3584
+      - 5056
+      - 1
+      - 1792
+      - 3584
+      - 3584
+      - 3584
+      - 5056
+    - - 3
+      - 0.0
+  - - - 5888
+      - 704
+      - 1
+      - 3328
+      - 5888
+      - 5888
+      - 5888
+      - 704
+    - - 3
+      - 0.0
+  - - - 3584
+      - 64
+      - 1
+      - 128
+      - 3584
+      - 3584
+      - 3584
+      - 64
+    - - 0
+      - 837.963
+  - - - 1408
+      - 704
+      - 1
+      - 3328
+      - 1408
+      - 1408
+      - 1408
+      - 704
+    - - 3
+      - 0.0
+  - - - 4
+      - 64
+      - 1
+      - 128
+      - 4
+      - 4
+      - 4
+      - 64
+    - - 5
+      - 1.42696
+  - - - 4288
+      - 2944
+      - 1
+      - 768
+      - 4288
+      - 4288
+      - 4288
+      - 2944
+    - - 3
+      - 0.0
+  - - - 2944
+      - 1856
+      - 1
+      - 1792
+      - 2944
+      - 2944
+      - 2944
+      - 1856
+    - - 3
+      - 0.0
+  - - - 5888
+      - 1408
+      - 1
+      - 256
+      - 5888
+      - 5888
+      - 5888
+      - 1408
+    - - 3
+      - 0.0
+  - - - 256
+      - 5888
+      - 1
+      - 128
+      - 256
+      - 256
+      - 256
+      - 5888
+    - - 2
+      - 2413.91
+  - - - 1408
+      - 1024
+      - 1
+      - 3328
+      - 1408
+      - 1408
+      - 1408
+      - 1024
+    - - 3
+      - 0.0
+  - - - 1408
+      - 5888
+      - 1
+      - 768
+      - 1408
+      - 1408
+      - 1408
+      - 5888
+    - - 3
+      - 0.0
+  - - - 256
+      - 3584
+      - 1
+      - 768
+      - 256
+      - 256
+      - 256
+      - 3584
+    - - 3
+      - 0.0
+  - - - 5056
+      - 128
+      - 1
+      - 1792
+      - 5056
+      - 5056
+      - 5056
+      - 128
+    - - 3
+      - 0.0
+  - - - 64
+      - 64
+      - 1
+      - 256
+      - 64
+      - 64
+      - 64
+      - 64
+    - - 3
+      - 0.0
+  - - - 5056
+      - 256
+      - 1
+      - 3328
+      - 5056
+      - 5056
+      - 5056
+      - 256
+    - - 3
+      - 0.0
+  - - - 6784
+      - 6784
+      - 1
+      - 256
+      - 6784
+      - 6784
+      - 6784
+      - 6784
+    - - 3
+      - 0.0
+  - - - 256
+      - 256
+      - 1
+      - 1792
+      - 256
+      - 256
+      - 256
+      - 256
+    - - 3
+      - 0.0
+  - - - 448
+      - 1024
+      - 1
+      - 256
+      - 448
+      - 448
+      - 448
+      - 1024
+    - - 3
+      - 0.0
+  - - - 6784
+      - 4288
+      - 1
+      - 1792
+      - 6784
+      - 6784
+      - 6784
+      - 4288
+    - - 3
+      - 0.0
+  - - - 4
+      - 2368
+      - 1
+      - 768
+      - 4
+      - 4
+      - 4
+      - 2368
+    - - 6
+      - 0.0
+  - - - 128
+      - 3584
+      - 1
+      - 256
+      - 128
+      - 128
+      - 128
+      - 3584
+    - - 3
+      - 0.0
+  - - - 64
+      - 5888
+      - 1
+      - 768
+      - 64
+      - 64
+      - 64
+      - 5888
+    - - 3
+      - 0.0
+  - - - 256
+      - 5056
+      - 1
+      - 768
+      - 256
+      - 256
+      - 256
+      - 5056
+    - - 3
+      - 0.0
+  - - - 1024
+      - 2944
+      - 1
+      - 256
+      - 1024
+      - 1024
+      - 1024
+      - 2944
+    - - 3
+      - 0.0
+  - - - 1408
+      - 448
+      - 1
+      - 1792
+      - 1408
+      - 1408
+      - 1408
+      - 448
+    - - 3
+      - 0.0
+  - - - 704
+      - 5888
+      - 1
+      - 128
+      - 704
+      - 704
+      - 704
+      - 5888
+    - - 2
+      - 3045.36
+  - - - 6784
+      - 2368
+      - 1
+      - 1792
+      - 6784
+      - 6784
+      - 6784
+      - 2368
+    - - 3
+      - 0.0
+  - - - 448
+      - 3584
+      - 1
+      - 1792
+      - 448
+      - 448
+      - 448
+      - 3584
+    - - 3
+      - 0.0
+  - - - 128
+      - 2944
+      - 1
+      - 128
+      - 128
+      - 128
+      - 128
+      - 2944
+    - - 0
+      - 1148.41
+  - - - 2944
+      - 1856
+      - 1
+      - 768
+      - 2944
+      - 2944
+      - 2944
+      - 1856
+    - - 3
+      - 0.0
+  - - - 1856
+      - 3584
+      - 1
+      - 3328
+      - 1856
+      - 1856
+      - 1856
+      - 3584
+    - - 3
+      - 0.0
+  - - - 704
+      - 6784
+      - 1
+      - 1792
+      - 704
+      - 704
+      - 704
+      - 6784
+    - - 3
+      - 0.0
+  - - - 2944
+      - 128
+      - 1
+      - 128
+      - 2944
+      - 2944
+      - 2944
+      - 128
+    - - 0
+      - 1279.28
+  - - - 704
+      - 448
+      - 1
+      - 128
+      - 704
+      - 704
+      - 704
+      - 448
+    - - 0
+      - 1140.13
+  - - - 3584
+      - 4288
+      - 1
+      - 3328
+      - 3584
+      - 3584
+      - 3584
+      - 4288
+    - - 3
+      - 0.0
+  - - - 704
+      - 1856
+      - 1
+      - 256
+      - 704
+      - 704
+      - 704
+      - 1856
+    - - 3
+      - 0.0
+  - - - 1024
+      - 448
+      - 1
+      - 3328
+      - 1024
+      - 1024
+      - 1024
+      - 448
+    - - 3
+      - 0.0
+  - - - 4288
+      - 3584
+      - 1
+      - 256
+      - 4288
+      - 4288
+      - 4288
+      - 3584
+    - - 3
+      - 0.0
+  - - - 2944
+      - 448
+      - 1
+      - 3328
+      - 2944
+      - 2944
+      - 2944
+      - 448
+    - - 3
+      - 0.0
+  - - - 4288
+      - 3584
+      - 1
+      - 3328
+      - 4288
+      - 4288
+      - 4288
+      - 3584
+    - - 3
+      - 0.0
+  - - - 3584
+      - 5888
+      - 1
+      - 1792
+      - 3584
+      - 3584
+      - 3584
+      - 5888
+    - - 3
+      - 0.0
+  - - - 2368
+      - 256
+      - 1
+      - 768
+      - 2368
+      - 2368
+      - 2368
+      - 256
+    - - 3
+      - 0.0
+  - - - 128
+      - 4288
+      - 1
+      - 3328
+      - 128
+      - 128
+      - 128
+      - 4288
+    - - 3
+      - 0.0
+  - - - 256
+      - 6784
+      - 1
+      - 768
+      - 256
+      - 256
+      - 256
+      - 6784
+    - - 3
+      - 0.0
+  - - - 704
+      - 5056
+      - 1
+      - 3328
+      - 704
+      - 704
+      - 704
+      - 5056
+    - - 3
+      - 0.0
+  - - - 128
+      - 5056
+      - 1
+      - 128
+      - 128
+      - 128
+      - 128
+      - 5056
+    - - 0
+      - 1546.73
+  - - - 5888
+      - 2368
+      - 1
+      - 256
+      - 5888
+      - 5888
+      - 5888
+      - 2368
+    - - 3
+      - 0.0
+  - - - 64
+      - 4
+      - 1
+      - 128
+      - 64
+      - 64
+      - 64
+      - 4
+    - - 5
+      - 1.46965
+  - - - 128
+      - 1856
+      - 1
+      - 1792
+      - 128
+      - 128
+      - 128
+      - 1856
+    - - 3
+      - 0.0
+  - - - 3584
+      - 4288
+      - 1
+      - 768
+      - 3584
+      - 3584
+      - 3584
+      - 4288
+    - - 3
+      - 0.0
+  - - - 3584
+      - 1856
+      - 1
+      - 128
+      - 3584
+      - 3584
+      - 3584
+      - 1856
+    - - 2
+      - 3182.25
+  - - - 2368
+      - 2944
+      - 1
+      - 768
+      - 2368
+      - 2368
+      - 2368
+      - 2944
+    - - 3
+      - 0.0
+  - - - 2944
+      - 5888
+      - 1
+      - 3328
+      - 2944
+      - 2944
+      - 2944
+      - 5888
+    - - 3
+      - 0.0
+  - - - 1024
+      - 5056
+      - 1
+      - 3328
+      - 1024
+      - 1024
+      - 1024
+      - 5056
+    - - 3
+      - 0.0
+  - - - 64
+      - 6784
+      - 1
+      - 1792
+      - 64
+      - 64
+      - 64
+      - 6784
+    - - 3
+      - 0.0
+  - - - 1856
+      - 128
+      - 1
+      - 256
+      - 1856
+      - 1856
+      - 1856
+      - 128
+    - - 3
+      - 0.0
+  - - - 2944
+      - 704
+      - 1
+      - 3328
+      - 2944
+      - 2944
+      - 2944
+      - 704
+    - - 3
+      - 0.0
+  - - - 256
+      - 2944
+      - 1
+      - 128
+      - 256
+      - 256
+      - 256
+      - 2944
+    - - 0
+      - 1669.63
+  - - - 1024
+      - 256
+      - 1
+      - 256
+      - 1024
+      - 1024
+      - 1024
+      - 256
+    - - 3
+      - 0.0
+  - - - 448
+      - 128
+      - 1
+      - 256
+      - 448
+      - 448
+      - 448
+      - 128
+    - - 3
+      - 0.0
+  - - - 1856
+      - 4
+      - 1
+      - 128
+      - 1856
+      - 1856
+      - 1856
+      - 4
+    - - 5
+      - 39.9635
+  - - - 5056
+      - 6784
+      - 1
+      - 768
+      - 5056
+      - 5056
+      - 5056
+      - 6784
+    - - 3
+      - 0.0
+  - - - 6784
+      - 2368
+      - 1
+      - 256
+      - 6784
+      - 6784
+      - 6784
+      - 2368
+    - - 3
+      - 0.0
+  - - - 128
+      - 448
+      - 1
+      - 768
+      - 128
+      - 128
+      - 128
+      - 448
+    - - 3
+      - 0.0
+  - - - 4288
+      - 4288
+      - 1
+      - 1792
+      - 4288
+      - 4288
+      - 4288
+      - 4288
+    - - 3
+      - 0.0
+  - - - 2368
+      - 2368
+      - 1
+      - 256
+      - 2368
+      - 2368
+      - 2368
+      - 2368
+    - - 3
+      - 0.0
+  - - - 2944
+      - 4288
+      - 1
+      - 128
+      - 2944
+      - 2944
+      - 2944
+      - 4288
+    - - 0
+      - 3711.7
+  - - - 256
+      - 3584
+      - 1
+      - 256
+      - 256
+      - 256
+      - 256
+      - 3584
+    - - 3
+      - 0.0
+  - - - 1856
+      - 1024
+      - 1
+      - 128
+      - 1856
+      - 1856
+      - 1856
+      - 1024
+    - - 1
+      - 2495.5
+  - - - 1856
+      - 704
+      - 1
+      - 1792
+      - 1856
+      - 1856
+      - 1856
+      - 704
+    - - 3
+      - 0.0
+  - - - 1856
+      - 2944
+      - 1
+      - 1792
+      - 1856
+      - 1856
+      - 1856
+      - 2944
+    - - 3
+      - 0.0
+  - - - 4288
+      - 704
+      - 1
+      - 1792
+      - 4288
+      - 4288
+      - 4288
+      - 704
+    - - 3
+      - 0.0
+  - - - 1408
+      - 5056
+      - 1
+      - 256
+      - 1408
+      - 1408
+      - 1408
+      - 5056
+    - - 3
+      - 0.0
+  - - - 1856
+      - 1856
+      - 1
+      - 768
+      - 1856
+      - 1856
+      - 1856
+      - 1856
+    - - 3
+      - 0.0
+  - - - 1856
+      - 448
+      - 1
+      - 1792
+      - 1856
+      - 1856
+      - 1856
+      - 448
+    - - 3
+      - 0.0
+  - - - 256
+      - 1024
+      - 1
+      - 256
+      - 256
+      - 256
+      - 256
+      - 1024
+    - - 3
+      - 0.0
+  - - - 2368
+      - 704
+      - 1
+      - 768
+      - 2368
+      - 2368
+      - 2368
+      - 704
+    - - 3
+      - 0.0
+  - - - 2368
+      - 1856
+      - 1
+      - 1792
+      - 2368
+      - 2368
+      - 2368
+      - 1856
+    - - 3
+      - 0.0
+  - - - 64
+      - 3584
+      - 1
+      - 256
+      - 64
+      - 64
+      - 64
+      - 3584
+    - - 3
+      - 0.0
+  - - - 1856
+      - 128
+      - 1
+      - 3328
+      - 1856
+      - 1856
+      - 1856
+      - 128
+    - - 3
+      - 0.0
+  - - - 5888
+      - 5056
+      - 1
+      - 768
+      - 5888
+      - 5888
+      - 5888
+      - 5056
+    - - 3
+      - 0.0
+  - - - 64
+      - 2368
+      - 1
+      - 128
+      - 64
+      - 64
+      - 64
+      - 2368
+    - - 0
+      - 625.007
+  - - - 3584
+      - 448
+      - 1
+      - 256
+      - 3584
+      - 3584
+      - 3584
+      - 448
+    - - 3
+      - 0.0
+  - - - 448
+      - 2368
+      - 1
+      - 1792
+      - 448
+      - 448
+      - 448
+      - 2368
+    - - 3
+      - 0.0
+  - - - 4288
+      - 2368
+      - 1
+      - 128
+      - 4288
+      - 4288
+      - 4288
+      - 2368
+    - - 0
+      - 3669.12
+  - - - 64
+      - 1856
+      - 1
+      - 768
+      - 64
+      - 64
+      - 64
+      - 1856
+    - - 3
+      - 0.0
+  - - - 3584
+      - 1408
+      - 1
+      - 1792
+      - 3584
+      - 3584
+      - 3584
+      - 1408
+    - - 3
+      - 0.0
+  - - - 128
+      - 1408
+      - 1
+      - 128
+      - 128
+      - 128
+      - 128
+      - 1408
+    - - 0
+      - 715.907
+  - - - 5888
+      - 1024
+      - 1
+      - 256
+      - 5888
+      - 5888
+      - 5888
+      - 1024
+    - - 3
+      - 0.0
+  - - - 256
+      - 704
+      - 1
+      - 1792
+      - 256
+      - 256
+      - 256
+      - 704
+    - - 3
+      - 0.0
+  - - - 4288
+      - 128
+      - 1
+      - 768
+      - 4288
+      - 4288
+      - 4288
+      - 128
+    - - 3
+      - 0.0
+  - - - 5888
+      - 6784
+      - 1
+      - 768
+      - 5888
+      - 5888
+      - 5888
+      - 6784
+    - - 3
+      - 0.0
+  - - - 2368
+      - 3584
+      - 1
+      - 1792
+      - 2368
+      - 2368
+      - 2368
+      - 3584
+    - - 3
+      - 0.0
+  - - - 2368
+      - 704
+      - 1
+      - 3328
+      - 2368
+      - 2368
+      - 2368
+      - 704
+    - - 3
+      - 0.0
+  - - - 5056
+      - 64
+      - 1
+      - 768
+      - 5056
+      - 5056
+      - 5056
+      - 64
+    - - 3
+      - 0.0
+  - - - 448
+      - 5056
+      - 1
+      - 3328
+      - 448
+      - 448
+      - 448
+      - 5056
+    - - 3
+      - 0.0
+  - - - 704
+      - 2368
+      - 1
+      - 768
+      - 704
+      - 704
+      - 704
+      - 2368
+    - - 3
+      - 0.0
+  - - - 4288
+      - 5888
+      - 1
+      - 768
+      - 4288
+      - 4288
+      - 4288
+      - 5888
+    - - 3
+      - 0.0
+  - - - 4288
+      - 128
+      - 1
+      - 1792
+      - 4288
+      - 4288
+      - 4288
+      - 128
+    - - 3
+      - 0.0
+  - - - 4
+      - 4
+      - 1
+      - 128
+      - 4
+      - 4
+      - 4
+      - 4
+    - - 5
+      - 0.0861282
+  - - - 5888
+      - 64
+      - 1
+      - 3328
+      - 5888
+      - 5888
+      - 5888
+      - 64
+    - - 3
+      - 0.0
+  - - - 3584
+      - 4288
+      - 1
+      - 256
+      - 3584
+      - 3584
+      - 3584
+      - 4288
+    - - 3
+      - 0.0
+  - - - 4288
+      - 448
+      - 1
+      - 3328
+      - 4288
+      - 4288
+      - 4288
+      - 448
+    - - 3
+      - 0.0
+  - - - 6784
+      - 128
+      - 1
+      - 3328
+      - 6784
+      - 6784
+      - 6784
+      - 128
+    - - 3
+      - 0.0
+  - - - 3584
+      - 5056
+      - 1
+      - 128
+      - 3584
+      - 3584
+      - 3584
+      - 5056
+    - - 2
+      - 3651.97
+  - - - 6784
+      - 64
+      - 1
+      - 3328
+      - 6784
+      - 6784
+      - 6784
+      - 64
+    - - 3
+      - 0.0
+  - - - 2368
+      - 2368
+      - 1
+      - 128
+      - 2368
+      - 2368
+      - 2368
+      - 2368
+    - - 0
+      - 3439.63
+  - - - 1856
+      - 5888
+      - 1
+      - 128
+      - 1856
+      - 1856
+      - 1856
+      - 5888
+    - - 0
+      - 3666.69
+  - - - 448
+      - 448
+      - 1
+      - 1792
+      - 448
+      - 448
+      - 448
+      - 448
+    - - 3
+      - 0.0
+  - - - 1856
+      - 4288
+      - 1
+      - 256
+      - 1856
+      - 1856
+      - 1856
+      - 4288
+    - - 3
+      - 0.0
+  - - - 4288
+      - 2944
+      - 1
+      - 256
+      - 4288
+      - 4288
+      - 4288
+      - 2944
+    - - 3
+      - 0.0
+  - - - 4288
+      - 5056
+      - 1
+      - 128
+      - 4288
+      - 4288
+      - 4288
+      - 5056
+    - - 0
+      - 3826.62
+  - - - 704
+      - 704
+      - 1
+      - 3328
+      - 704
+      - 704
+      - 704
+      - 704
+    - - 3
+      - 0.0
+  - - - 1408
+      - 5056
+      - 1
+      - 128
+      - 1408
+      - 1408
+      - 1408
+      - 5056
+    - - 0
+      - 3494.64
+  - - - 4
+      - 256
+      - 1
+      - 768
+      - 4
+      - 4
+      - 4
+      - 256
+    - - 6
+      - 0.0
+  - - - 1408
+      - 64
+      - 1
+      - 3328
+      - 1408
+      - 1408
+      - 1408
+      - 64
+    - - 3
+      - 0.0
+  - - - 4288
+      - 704
+      - 1
+      - 768
+      - 4288
+      - 4288
+      - 4288
+      - 704
+    - - 3
+      - 0.0
+  - - - 2944
+      - 256
+      - 1
+      - 3328
+      - 2944
+      - 2944
+      - 2944
+      - 256
+    - - 3
+      - 0.0
+  - - - 6784
+      - 3584
+      - 1
+      - 1792
+      - 6784
+      - 6784
+      - 6784
+      - 3584
+    - - 3
+      - 0.0
+  - - - 1024
+      - 128
+      - 1
+      - 1792
+      - 1024
+      - 1024
+      - 1024
+      - 128
+    - - 3
+      - 0.0
+  - - - 1024
+      - 6784
+      - 1
+      - 768
+      - 1024
+      - 1024
+      - 1024
+      - 6784
+    - - 3
+      - 0.0
+  - - - 2944
+      - 1856
+      - 1
+      - 256
+      - 2944
+      - 2944
+      - 2944
+      - 1856
+    - - 3
+      - 0.0
+  - - - 64
+      - 448
+      - 1
+      - 256
+      - 64
+      - 64
+      - 64
+      - 448
+    - - 3
+      - 0.0
+  - - - 6784
+      - 64
+      - 1
+      - 1792
+      - 6784
+      - 6784
+      - 6784
+      - 64
+    - - 3
+      - 0.0
+  - - - 256
+      - 704
+      - 1
+      - 768
+      - 256
+      - 256
+      - 256
+      - 704
+    - - 3
+      - 0.0
+  - - - 2368
+      - 1856
+      - 1
+      - 256
+      - 2368
+      - 2368
+      - 2368
+      - 1856
+    - - 3
+      - 0.0
+  - - - 128
+      - 128
+      - 1
+      - 256
+      - 128
+      - 128
+      - 128
+      - 128
+    - - 3
+      - 0.0
+  - - - 1408
+      - 2368
+      - 1
+      - 256
+      - 1408
+      - 1408
+      - 1408
+      - 2368
+    - - 3
+      - 0.0
+  - - - 4288
+      - 2368
+      - 1
+      - 256
+      - 4288
+      - 4288
+      - 4288
+      - 2368
+    - - 3
+      - 0.0
+  - - - 1856
+      - 704
+      - 1
+      - 128
+      - 1856
+      - 1856
+      - 1856
+      - 704
+    - - 0
+      - 2522.69
+  - - - 2944
+      - 1856
+      - 1
+      - 128
+      - 2944
+      - 2944
+      - 2944
+      - 1856
+    - - 0
+      - 3380.49
+  - - - 2944
+      - 64
+      - 1
+      - 256
+      - 2944
+      - 2944
+      - 2944
+      - 64
+    - - 3
+      - 0.0
+  - - - 256
+      - 4288
+      - 1
+      - 768
+      - 256
+      - 256
+      - 256
+      - 4288
+    - - 3
+      - 0.0
+  - - - 1024
+      - 4
+      - 1
+      - 1792
+      - 1024
+      - 1024
+      - 1024
+      - 4
+    - - 6
+      - 0.0
+  - - - 2368
+      - 1408
+      - 1
+      - 128
+      - 2368
+      - 2368
+      - 2368
+      - 1408
+    - - 0
+      - 3184.79
+  - - - 704
+      - 256
+      - 1
+      - 256
+      - 704
+      - 704
+      - 704
+      - 256
+    - - 3
+      - 0.0
+  - - - 4
+      - 128
+      - 1
+      - 768
+      - 4
+      - 4
+      - 4
+      - 128
+    - - 6
+      - 0.0
+  - - - 2368
+      - 3584
+      - 1
+      - 256
+      - 2368
+      - 2368
+      - 2368
+      - 3584
+    - - 3
+      - 0.0
+  - - - 128
+      - 2368
+      - 1
+      - 1792
+      - 128
+      - 128
+      - 128
+      - 2368
+    - - 3
+      - 0.0
+  - - - 4288
+      - 2944
+      - 1
+      - 1792
+      - 4288
+      - 4288
+      - 4288
+      - 2944
+    - - 3
+      - 0.0
+  - - - 3584
+      - 704
+      - 1
+      - 256
+      - 3584
+      - 3584
+      - 3584
+      - 704
+    - - 3
+      - 0.0
+  - - - 1408
+      - 2944
+      - 1
+      - 128
+      - 1408
+      - 1408
+      - 1408
+      - 2944
+    - - 0
+      - 3242.51
+  - - - 64
+      - 1408
+      - 1
+      - 128
+      - 64
+      - 64
+      - 64
+      - 1408
+    - - 0
+      - 402.356
+  - - - 5056
+      - 1024
+      - 1
+      - 256
+      - 5056
+      - 5056
+      - 5056
+      - 1024
+    - - 3
+      - 0.0
+  - - - 1408
+      - 6784
+      - 1
+      - 128
+      - 1408
+      - 1408
+      - 1408
+      - 6784
+    - - 0
+      - 3609.3
+  - - - 2944
+      - 128
+      - 1
+      - 3328
+      - 2944
+      - 2944
+      - 2944
+      - 128
+    - - 3
+      - 0.0
+  - - - 4
+      - 5056
+      - 1
+      - 768
+      - 4
+      - 4
+      - 4
+      - 5056
+    - - 6
+      - 0.0
+  - - - 1408
+      - 1408
+      - 1
+      - 3328
+      - 1408
+      - 1408
+      - 1408
+      - 1408
+    - - 3
+      - 0.0
+  - - - 128
+      - 256
+      - 1
+      - 768
+      - 128
+      - 128
+      - 128
+      - 256
+    - - 3
+      - 0.0
+  - - - 3584
+      - 64
+      - 1
+      - 3328
+      - 3584
+      - 3584
+      - 3584
+      - 64
+    - - 3
+      - 0.0
+  - - - 1856
+      - 1024
+      - 1
+      - 1792
+      - 1856
+      - 1856
+      - 1856
+      - 1024
+    - - 3
+      - 0.0
+  - - - 4
+      - 128
+      - 1
+      - 128
+      - 4
+      - 4
+      - 4
+      - 128
+    - - 5
+      - 2.88184
+  - - - 1856
+      - 2944
+      - 1
+      - 128
+      - 1856
+      - 1856
+      - 1856
+      - 2944
+    - - 0
+      - 3442.12
+  - - - 4
+      - 2368
+      - 1
+      - 256
+      - 4
+      - 4
+      - 4
+      - 2368
+    - - 6
+      - 0.0
+  - - - 64
+      - 128
+      - 1
+      - 3328
+      - 64
+      - 64
+      - 64
+      - 128
+    - - 3
+      - 0.0
+  - - - 6784
+      - 256
+      - 1
+      - 768
+      - 6784
+      - 6784
+      - 6784
+      - 256
+    - - 3
+      - 0.0
+  - - - 2944
+      - 4288
+      - 1
+      - 1792
+      - 2944
+      - 2944
+      - 2944
+      - 4288
+    - - 3
+      - 0.0
+  - - - 128
+      - 3584
+      - 1
+      - 768
+      - 128
+      - 128
+      - 128
+      - 3584
+    - - 3
+      - 0.0
+  - - - 6784
+      - 1408
+      - 1
+      - 128
+      - 6784
+      - 6784
+      - 6784
+      - 1408
+    - - 0
+      - 3517.76
+  - - - 3584
+      - 6784
+      - 1
+      - 1792
+      - 3584
+      - 3584
+      - 3584
+      - 6784
+    - - 3
+      - 0.0
+  - - - 1856
+      - 1856
+      - 1
+      - 3328
+      - 1856
+      - 1856
+      - 1856
+      - 1856
+    - - 3
+      - 0.0
+  - - - 4288
+      - 4
+      - 1
+      - 768
+      - 4288
+      - 4288
+      - 4288
+      - 4
+    - - 6
+      - 0.0
+  - - - 4288
+      - 4
+      - 1
+      - 3328
+      - 4288
+      - 4288
+      - 4288
+      - 4
+    - - 6
+      - 0.0
+  - - - 5056
+      - 3584
+      - 1
+      - 1792
+      - 5056
+      - 5056
+      - 5056
+      - 3584
+    - - 3
+      - 0.0
+  - - - 1408
+      - 1024
+      - 1
+      - 128
+      - 1408
+      - 1408
+      - 1408
+      - 1024
+    - - 2
+      - 2345.93
+  - - - 4
+      - 6784
+      - 1
+      - 3328
+      - 4
+      - 4
+      - 4
+      - 6784
+    - - 6
+      - 0.0
+  - - - 1408
+      - 256
+      - 1
+      - 1792
+      - 1408
+      - 1408
+      - 1408
+      - 256
+    - - 3
+      - 0.0
+  - - - 2368
+      - 448
+      - 1
+      - 768
+      - 2368
+      - 2368
+      - 2368
+      - 448
+    - - 3
+      - 0.0
+  - - - 3584
+      - 448
+      - 1
+      - 768
+      - 3584
+      - 3584
+      - 3584
+      - 448
+    - - 3
+      - 0.0
+  - - - 448
+      - 64
+      - 1
+      - 256
+      - 448
+      - 448
+      - 448
+      - 64
+    - - 3
+      - 0.0
+  - - - 128
+      - 64
+      - 1
+      - 128
+      - 128
+      - 128
+      - 128
+      - 64
+    - - 0
+      - 36.4836
+  - - - 1024
+      - 6784
+      - 1
+      - 128
+      - 1024
+      - 1024
+      - 1024
+      - 6784
+    - - 2
+      - 3244.29
+  - - - 704
+      - 6784
+      - 1
+      - 256
+      - 704
+      - 704
+      - 704
+      - 6784
+    - - 3
+      - 0.0
+  - - - 2368
+      - 64
+      - 1
+      - 256
+      - 2368
+      - 2368
+      - 2368
+      - 64
+    - - 3
+      - 0.0
+  - - - 5888
+      - 4
+      - 1
+      - 3328
+      - 5888
+      - 5888
+      - 5888
+      - 4
+    - - 6
+      - 0.0
+  - - - 1024
+      - 3584
+      - 1
+      - 1792
+      - 1024
+      - 1024
+      - 1024
+      - 3584
+    - - 3
+      - 0.0
+  - - - 448
+      - 3584
+      - 1
+      - 256
+      - 448
+      - 448
+      - 448
+      - 3584
+    - - 3
+      - 0.0
+  - - - 64
+      - 5056
+      - 1
+      - 768
+      - 64
+      - 64
+      - 64
+      - 5056
+    - - 3
+      - 0.0
+  - - - 256
+      - 2944
+      - 1
+      - 256
+      - 256
+      - 256
+      - 256
+      - 2944
+    - - 3
+      - 0.0
+  - - - 128
+      - 256
+      - 1
+      - 1792
+      - 128
+      - 128
+      - 128
+      - 256
+    - - 3
+      - 0.0
+  - - - 5888
+      - 1856
+      - 1
+      - 3328
+      - 5888
+      - 5888
+      - 5888
+      - 1856
+    - - 3
+      - 0.0
+  - - - 2368
+      - 448
+      - 1
+      - 256
+      - 2368
+      - 2368
+      - 2368
+      - 448
+    - - 3
+      - 0.0
+  - - - 2944
+      - 2944
+      - 1
+      - 128
+      - 2944
+      - 2944
+      - 2944
+      - 2944
+    - - 0
+      - 3600.99
+  - - - 64
+      - 256
+      - 1
+      - 128
+      - 64
+      - 64
+      - 64
+      - 256
+    - - 0
+      - 72.5922
+  - - - 3584
+      - 256
+      - 1
+      - 3328
+      - 3584
+      - 3584
+      - 3584
+      - 256
+    - - 3
+      - 0.0
+  - - - 4
+      - 3584
+      - 1
+      - 128
+      - 4
+      - 4
+      - 4
+      - 3584
+    - - 5
+      - 75.7548
+  - - - 1408
+      - 3584
+      - 1
+      - 128
+      - 1408
+      - 1408
+      - 1408
+      - 3584
+    - - 0
+      - 3204.63
+  - - - 4
+      - 64
+      - 1
+      - 1792
+      - 4
+      - 4
+      - 4
+      - 64
+    - - 6
+      - 0.0
+  - - - 3584
+      - 3584
+      - 1
+      - 768
+      - 3584
+      - 3584
+      - 3584
+      - 3584
+    - - 3
+      - 0.0
+  - - - 6784
+      - 1856
+      - 1
+      - 1792
+      - 6784
+      - 6784
+      - 6784
+      - 1856
+    - - 3
+      - 0.0
+  - - - 64
+      - 256
+      - 1
+      - 1792
+      - 64
+      - 64
+      - 64
+      - 256
+    - - 3
+      - 0.0
+  - - - 2368
+      - 704
+      - 1
+      - 128
+      - 2368
+      - 2368
+      - 2368
+      - 704
+    - - 0
+      - 2623.55
+  - - - 1024
+      - 6784
+      - 1
+      - 1792
+      - 1024
+      - 1024
+      - 1024
+      - 6784
+    - - 3
+      - 0.0
+  - - - 448
+      - 256
+      - 1
+      - 768
+      - 448
+      - 448
+      - 448
+      - 256
+    - - 3
+      - 0.0
+  - - - 64
+      - 4
+      - 1
+      - 1792
+      - 64
+      - 64
+      - 64
+      - 4
+    - - 6
+      - 0.0
+  - - - 704
+      - 128
+      - 1
+      - 768
+      - 704
+      - 704
+      - 704
+      - 128
+    - - 3
+      - 0.0
+  - - - 704
+      - 1408
+      - 1
+      - 3328
+      - 704
+      - 704
+      - 704
+      - 1408
+    - - 3
+      - 0.0
+  - - - 256
+      - 1856
+      - 1
+      - 1792
+      - 256
+      - 256
+      - 256
+      - 1856
+    - - 3
+      - 0.0
+  - - - 3584
+      - 1024
+      - 1
+      - 768
+      - 3584
+      - 3584
+      - 3584
+      - 1024
+    - - 3
+      - 0.0
+  - - - 1024
+      - 2368
+      - 1
+      - 128
+      - 1024
+      - 1024
+      - 1024
+      - 2368
+    - - 2
+      - 2658.65
+  - - - 5888
+      - 64
+      - 1
+      - 256
+      - 5888
+      - 5888
+      - 5888
+      - 64
+    - - 3
+      - 0.0
+  - - - 704
+      - 5056
+      - 1
+      - 128
+      - 704
+      - 704
+      - 704
+      - 5056
+    - - 0
+      - 3188.48
+  - - - 1856
+      - 448
+      - 1
+      - 768
+      - 1856
+      - 1856
+      - 1856
+      - 448
+    - - 3
+      - 0.0
+  - - - 704
+      - 6784
+      - 1
+      - 3328
+      - 704
+      - 704
+      - 704
+      - 6784
+    - - 3
+      - 0.0
+  - - - 448
+      - 4288
+      - 1
+      - 3328
+      - 448
+      - 448
+      - 448
+      - 4288
+    - - 3
+      - 0.0
+  - - - 448
+      - 2944
+      - 1
+      - 128
+      - 448
+      - 448
+      - 448
+      - 2944
+    - - 0
+      - 2381.43
+  - - - 64
+      - 448
+      - 1
+      - 768
+      - 64
+      - 64
+      - 64
+      - 448
+    - - 3
+      - 0.0
+  - - - 704
+      - 3584
+      - 1
+      - 128
+      - 704
+      - 704
+      - 704
+      - 3584
+    - - 0
+      - 2916.31
+  - - - 4288
+      - 2368
+      - 1
+      - 1792
+      - 4288
+      - 4288
+      - 4288
+      - 2368
+    - - 3
+      - 0.0
+  - - - 448
+      - 5056
+      - 1
+      - 128
+      - 448
+      - 448
+      - 448
+      - 5056
+    - - 0
+      - 2888.57
+  - - - 2944
+      - 6784
+      - 1
+      - 768
+      - 2944
+      - 2944
+      - 2944
+      - 6784
+    - - 3
+      - 0.0
+  - - - 448
+      - 448
+      - 1
+      - 768
+      - 448
+      - 448
+      - 448
+      - 448
+    - - 3
+      - 0.0
+  - - - 256
+      - 1024
+      - 1
+      - 128
+      - 256
+      - 256
+      - 256
+      - 1024
+    - - 1
+      - 793.305
+  - - - 1408
+      - 1024
+      - 1
+      - 1792
+      - 1408
+      - 1408
+      - 1408
+      - 1024
+    - - 3
+      - 0.0
+  - - - 6784
+      - 1408
+      - 1
+      - 3328
+      - 6784
+      - 6784
+      - 6784
+      - 1408
+    - - 3
+      - 0.0
+  - - - 64
+      - 1856
+      - 1
+      - 3328
+      - 64
+      - 64
+      - 64
+      - 1856
+    - - 3
+      - 0.0
+  - - - 256
+      - 5888
+      - 1
+      - 768
+      - 256
+      - 256
+      - 256
+      - 5888
+    - - 3
+      - 0.0
+  - - - 1024
+      - 1856
+      - 1
+      - 128
+      - 1024
+      - 1024
+      - 1024
+      - 1856
+    - - 2
+      - 2405.92
+  - - - 64
+      - 3584
+      - 1
+      - 768
+      - 64
+      - 64
+      - 64
+      - 3584
+    - - 3
+      - 0.0
+  - - - 4288
+      - 256
+      - 1
+      - 768
+      - 4288
+      - 4288
+      - 4288
+      - 256
+    - - 3
+      - 0.0
+  - - - 704
+      - 2944
+      - 1
+      - 128
+      - 704
+      - 704
+      - 704
+      - 2944
+    - - 0
+      - 2862.8
+  - - - 6784
+      - 128
+      - 1
+      - 256
+      - 6784
+      - 6784
+      - 6784
+      - 128
+    - - 3
+      - 0.0
+  - - - 448
+      - 4
+      - 1
+      - 768
+      - 448
+      - 448
+      - 448
+      - 4
+    - - 6
+      - 0.0
+  - - - 448
+      - 1856
+      - 1
+      - 1792
+      - 448
+      - 448
+      - 448
+      - 1856
+    - - 3
+      - 0.0
+  - - - 3584
+      - 1024
+      - 1
+      - 128
+      - 3584
+      - 3584
+      - 3584
+      - 1024
+    - - 2
+      - 3025.61
+  - - - 128
+      - 4
+      - 1
+      - 256
+      - 128
+      - 128
+      - 128
+      - 4
+    - - 6
+      - 0.0
+  - - - 64
+      - 2368
+      - 1
+      - 1792
+      - 64
+      - 64
+      - 64
+      - 2368
+    - - 3
+      - 0.0
+  - - - 704
+      - 64
+      - 1
+      - 128
+      - 704
+      - 704
+      - 704
+      - 64
+    - - 0
+      - 193.672
+  - - - 128
+      - 3584
+      - 1
+      - 3328
+      - 128
+      - 128
+      - 128
+      - 3584
+    - - 3
+      - 0.0
+  - - - 6784
+      - 1856
+      - 1
+      - 256
+      - 6784
+      - 6784
+      - 6784
+      - 1856
+    - - 3
+      - 0.0
+  - - - 1024
+      - 4288
+      - 1
+      - 256
+      - 1024
+      - 1024
+      - 1024
+      - 4288
+    - - 3
+      - 0.0
+  - - - 704
+      - 5056
+      - 1
+      - 1792
+      - 704
+      - 704
+      - 704
+      - 5056
+    - - 3
+      - 0.0
+  - - - 448
+      - 256
+      - 1
+      - 1792
+      - 448
+      - 448
+      - 448
+      - 256
+    - - 3
+      - 0.0
+  - - - 2368
+      - 448
+      - 1
+      - 128
+      - 2368
+      - 2368
+      - 2368
+      - 448
+    - - 0
+      - 2124.15
+  - - - 4288
+      - 5888
+      - 1
+      - 128
+      - 4288
+      - 4288
+      - 4288
+      - 5888
+    - - 0
+      - 3785.12
+  - - - 704
+      - 3584
+      - 1
+      - 1792
+      - 704
+      - 704
+      - 704
+      - 3584
+    - - 3
+      - 0.0
+  - - - 6784
+      - 448
+      - 1
+      - 768
+      - 6784
+      - 6784
+      - 6784
+      - 448
+    - - 3
+      - 0.0
+  - - - 64
+      - 2944
+      - 1
+      - 3328
+      - 64
+      - 64
+      - 64
+      - 2944
+    - - 3
+      - 0.0
+  - - - 256
+      - 5056
+      - 1
+      - 128
+      - 256
+      - 256
+      - 256
+      - 5056
+    - - 2
+      - 2107.99
+  - - - 4
+      - 64
+      - 1
+      - 256
+      - 4
+      - 4
+      - 4
+      - 64
+    - - 6
+      - 0.0
+  - - - 256
+      - 64
+      - 1
+      - 768
+      - 256
+      - 256
+      - 256
+      - 64
+    - - 3
+      - 0.0
+  - - - 1024
+      - 5056
+      - 1
+      - 256
+      - 1024
+      - 1024
+      - 1024
+      - 5056
+    - - 3
+      - 0.0
+  - - - 4288
+      - 2944
+      - 1
+      - 128
+      - 4288
+      - 4288
+      - 4288
+      - 2944
+    - - 0
+      - 3730.74
+  - - - 448
+      - 2944
+      - 1
+      - 3328
+      - 448
+      - 448
+      - 448
+      - 2944
+    - - 3
+      - 0.0
+  - - - 2368
+      - 1024
+      - 1
+      - 3328
+      - 2368
+      - 2368
+      - 2368
+      - 1024
+    - - 3
+      - 0.0
+  - - - 6784
+      - 256
+      - 1
+      - 1792
+      - 6784
+      - 6784
+      - 6784
+      - 256
+    - - 3
+      - 0.0
+  - - - 4288
+      - 448
+      - 1
+      - 128
+      - 4288
+      - 4288
+      - 4288
+      - 448
+    - - 0
+      - 2705.36
+  - - - 2944
+      - 6784
+      - 1
+      - 256
+      - 2944
+      - 2944
+      - 2944
+      - 6784
+    - - 3
+      - 0.0
+  - - - 256
+      - 256
+      - 1
+      - 3328
+      - 256
+      - 256
+      - 256
+      - 256
+    - - 3
+      - 0.0
+  - - - 5056
+      - 2944
+      - 1
+      - 768
+      - 5056
+      - 5056
+      - 5056
+      - 2944
+    - - 3
+      - 0.0
+  - - - 3584
+      - 3584
+      - 1
+      - 128
+      - 3584
+      - 3584
+      - 3584
+      - 3584
+    - - 2
+      - 3571.91
+  - - - 4
+      - 2944
+      - 1
+      - 1792
+      - 4
+      - 4
+      - 4
+      - 2944
+    - - 6
+      - 0.0
+  - - - 5056
+      - 2944
+      - 1
+      - 128
+      - 5056
+      - 5056
+      - 5056
+      - 2944
+    - - 0
+      - 3747.17
+  - - - 2368
+      - 128
+      - 1
+      - 3328
+      - 2368
+      - 2368
+      - 2368
+      - 128
+    - - 3
+      - 0.0
+  - - - 704
+      - 448
+      - 1
+      - 1792
+      - 704
+      - 704
+      - 704
+      - 448
+    - - 3
+      - 0.0
+  - - - 448
+      - 4288
+      - 1
+      - 256
+      - 448
+      - 448
+      - 448
+      - 4288
+    - - 3
+      - 0.0
+  - - - 5888
+      - 2944
+      - 1
+      - 1792
+      - 5888
+      - 5888
+      - 5888
+      - 2944
+    - - 3
+      - 0.0
+  - - - 4
+      - 5888
+      - 1
+      - 256
+      - 4
+      - 4
+      - 4
+      - 5888
+    - - 6
+      - 0.0
+  - - - 128
+      - 2944
+      - 1
+      - 768
+      - 128
+      - 128
+      - 128
+      - 2944
+    - - 3
+      - 0.0
+  - - - 5888
+      - 5888
+      - 1
+      - 1792
+      - 5888
+      - 5888
+      - 5888
+      - 5888
+    - - 3
+      - 0.0
+  - - - 6784
+      - 4
+      - 1
+      - 128
+      - 6784
+      - 6784
+      - 6784
+      - 4
+    - - 5
+      - 137.105
+  - - - 5888
+      - 3584
+      - 1
+      - 128
+      - 5888
+      - 5888
+      - 5888
+      - 3584
+    - - 2
+      - 3688.14
+  - - - 4
+      - 4288
+      - 1
+      - 1792
+      - 4
+      - 4
+      - 4
+      - 4288
+    - - 6
+      - 0.0
+  - - - 4288
+      - 128
+      - 1
+      - 128
+      - 4288
+      - 4288
+      - 4288
+      - 128
+    - - 0
+      - 1498.3
+  - - - 1024
+      - 1024
+      - 1
+      - 3328
+      - 1024
+      - 1024
+      - 1024
+      - 1024
+    - - 3
+      - 0.0
+  - - - 5056
+      - 3584
+      - 1
+      - 768
+      - 5056
+      - 5056
+      - 5056
+      - 3584
+    - - 3
+      - 0.0
+  - - - 1856
+      - 3584
+      - 1
+      - 256
+      - 1856
+      - 1856
+      - 1856
+      - 3584
+    - - 3
+      - 0.0
+  - - - 5888
+      - 6784
+      - 1
+      - 128
+      - 5888
+      - 5888
+      - 5888
+      - 6784
+    - - 2
+      - 3788.48
+  - - - 1408
+      - 128
+      - 1
+      - 256
+      - 1408
+      - 1408
+      - 1408
+      - 128
+    - - 3
+      - 0.0
+  - - - 3584
+      - 5888
+      - 1
+      - 256
+      - 3584
+      - 3584
+      - 3584
+      - 5888
+    - - 3
+      - 0.0
+  - - - 256
+      - 6784
+      - 1
+      - 1792
+      - 256
+      - 256
+      - 256
+      - 6784
+    - - 3
+      - 0.0
+  - - - 128
+      - 4288
+      - 1
+      - 128
+      - 128
+      - 128
+      - 128
+      - 4288
+    - - 1
+      - 1347.19
+  - - - 3584
+      - 2368
+      - 1
+      - 1792
+      - 3584
+      - 3584
+      - 3584
+      - 2368
+    - - 3
+      - 0.0
+  - - - 3584
+      - 4288
+      - 1
+      - 128
+      - 3584
+      - 3584
+      - 3584
+      - 4288
+    - - 2
+      - 3586.68
+  - - - 4288
+      - 448
+      - 1
+      - 768
+      - 4288
+      - 4288
+      - 4288
+      - 448
+    - - 3
+      - 0.0
+  - - - 1024
+      - 64
+      - 1
+      - 1792
+      - 1024
+      - 1024
+      - 1024
+      - 64
+    - - 3
+      - 0.0
+  - - - 4288
+      - 1408
+      - 1
+      - 1792
+      - 4288
+      - 4288
+      - 4288
+      - 1408
+    - - 3
+      - 0.0
+  - - - 704
+      - 1408
+      - 1
+      - 256
+      - 704
+      - 704
+      - 704
+      - 1408
+    - - 3
+      - 0.0
+  - - - 1024
+      - 5888
+      - 1
+      - 768
+      - 1024
+      - 1024
+      - 1024
+      - 5888
+    - - 3
+      - 0.0
+  - - - 64
+      - 128
+      - 1
+      - 128
+      - 64
+      - 64
+      - 64
+      - 128
+    - - 0
+      - 36.1111
+  - - - 2944
+      - 3584
+      - 1
+      - 256
+      - 2944
+      - 2944
+      - 2944
+      - 3584
+    - - 3
+      - 0.0
+  - - - 3584
+      - 1408
+      - 1
+      - 768
+      - 3584
+      - 3584
+      - 3584
+      - 1408
+    - - 3
+      - 0.0
+  - - - 1408
+      - 5056
+      - 1
+      - 768
+      - 1408
+      - 1408
+      - 1408
+      - 5056
+    - - 3
+      - 0.0
+  - - - 64
+      - 4
+      - 1
+      - 256
+      - 64
+      - 64
+      - 64
+      - 4
+    - - 6
+      - 0.0
+  - - - 5888
+      - 1024
+      - 1
+      - 1792
+      - 5888
+      - 5888
+      - 5888
+      - 1024
+    - - 3
+      - 0.0
+  - - - 1408
+      - 5888
+      - 1
+      - 1792
+      - 1408
+      - 1408
+      - 1408
+      - 5888
+    - - 3
+      - 0.0
+  - - - 256
+      - 448
+      - 1
+      - 768
+      - 256
+      - 256
+      - 256
+      - 448
+    - - 3
+      - 0.0
+  - - - 1856
+      - 3584
+      - 1
+      - 1792
+      - 1856
+      - 1856
+      - 1856
+      - 3584
+    - - 3
+      - 0.0
+  - - - 1856
+      - 256
+      - 1
+      - 1792
+      - 1856
+      - 1856
+      - 1856
+      - 256
+    - - 3
+      - 0.0
+  - - - 2944
+      - 64
+      - 1
+      - 768
+      - 2944
+      - 2944
+      - 2944
+      - 64
+    - - 3
+      - 0.0
+  - - - 5888
+      - 4288
+      - 1
+      - 1792
+      - 5888
+      - 5888
+      - 5888
+      - 4288
+    - - 3
+      - 0.0
+  - - - 1408
+      - 448
+      - 1
+      - 128
+      - 1408
+      - 1408
+      - 1408
+      - 448
+    - - 0
+      - 1721.91
+  - - - 2368
+      - 256
+      - 1
+      - 3328
+      - 2368
+      - 2368
+      - 2368
+      - 256
+    - - 3
+      - 0.0
+  - - - 1408
+      - 256
+      - 1
+      - 256
+      - 1408
+      - 1408
+      - 1408
+      - 256
+    - - 3
+      - 0.0
+  - - - 1024
+      - 1024
+      - 1
+      - 1792
+      - 1024
+      - 1024
+      - 1024
+      - 1024
+    - - 3
+      - 0.0
+  - - - 2368
+      - 5888
+      - 1
+      - 3328
+      - 2368
+      - 2368
+      - 2368
+      - 5888
+    - - 3
+      - 0.0
+  - - - 5056
+      - 4288
+      - 1
+      - 128
+      - 5056
+      - 5056
+      - 5056
+      - 4288
+    - - 0
+      - 3837.98
+  - - - 1408
+      - 1408
+      - 1
+      - 1792
+      - 1408
+      - 1408
+      - 1408
+      - 1408
+    - - 3
+      - 0.0
+  - - - 5888
+      - 64
+      - 1
+      - 128
+      - 5888
+      - 5888
+      - 5888
+      - 64
+    - - 0
+      - 1214.84
+  - - - 5056
+      - 5888
+      - 1
+      - 1792
+      - 5056
+      - 5056
+      - 5056
+      - 5888
+    - - 3
+      - 0.0
+  - - - 1408
+      - 4288
+      - 1
+      - 768
+      - 1408
+      - 1408
+      - 1408
+      - 4288
+    - - 3
+      - 0.0
+  - - - 1024
+      - 128
+      - 1
+      - 768
+      - 1024
+      - 1024
+      - 1024
+      - 128
+    - - 3
+      - 0.0
+  - - - 5056
+      - 4
+      - 1
+      - 256
+      - 5056
+      - 5056
+      - 5056
+      - 4
+    - - 6
+      - 0.0
+  - - - 4288
+      - 64
+      - 1
+      - 768
+      - 4288
+      - 4288
+      - 4288
+      - 64
+    - - 3
+      - 0.0
+  - - - 256
+      - 5056
+      - 1
+      - 256
+      - 256
+      - 256
+      - 256
+      - 5056
+    - - 3
+      - 0.0
+  - - - 4
+      - 704
+      - 1
+      - 3328
+      - 4
+      - 4
+      - 4
+      - 704
+    - - 6
+      - 0.0
+  - - - 4288
+      - 1024
+      - 1
+      - 768
+      - 4288
+      - 4288
+      - 4288
+      - 1024
+    - - 3
+      - 0.0
+  - - - 5056
+      - 2368
+      - 1
+      - 128
+      - 5056
+      - 5056
+      - 5056
+      - 2368
+    - - 0
+      - 3695.65
+  - - - 6784
+      - 3584
+      - 1
+      - 768
+      - 6784
+      - 6784
+      - 6784
+      - 3584
+    - - 3
+      - 0.0
+  - - - 704
+      - 5056
+      - 1
+      - 256
+      - 704
+      - 704
+      - 704
+      - 5056
+    - - 3
+      - 0.0
+  - - - 2368
+      - 6784
+      - 1
+      - 3328
+      - 2368
+      - 2368
+      - 2368
+      - 6784
+    - - 3
+      - 0.0
+  - - - 2944
+      - 1408
+      - 1
+      - 256
+      - 2944
+      - 2944
+      - 2944
+      - 1408
+    - - 3
+      - 0.0
+  - - - 128
+      - 1408
+      - 1
+      - 256
+      - 128
+      - 128
+      - 128
+      - 1408
+    - - 3
+      - 0.0
+  - - - 6784
+      - 1024
+      - 1
+      - 256
+      - 6784
+      - 6784
+      - 6784
+      - 1024
+    - - 3
+      - 0.0
+  - - - 6784
+      - 256
+      - 1
+      - 128
+      - 6784
+      - 6784
+      - 6784
+      - 256
+    - - 0
+      - 2424.04
+  - - - 1024
+      - 2368
+      - 1
+      - 768
+      - 1024
+      - 1024
+      - 1024
+      - 2368
+    - - 3
+      - 0.0
+  - - - 256
+      - 1856
+      - 1
+      - 3328
+      - 256
+      - 256
+      - 256
+      - 1856
+    - - 3
+      - 0.0
+  - - - 1024
+      - 2944
+      - 1
+      - 128
+      - 1024
+      - 1024
+      - 1024
+      - 2944
+    - - 2
+      - 2868.52
+  - - - 704
+      - 64
+      - 1
+      - 1792
+      - 704
+      - 704
+      - 704
+      - 64
+    - - 3
+      - 0.0
+  - - - 1408
+      - 256
+      - 1
+      - 128
+      - 1408
+      - 1408
+      - 1408
+      - 256
+    - - 0
+      - 1248.19
+  - - - 4
+      - 256
+      - 1
+      - 256
+      - 4
+      - 4
+      - 4
+      - 256
+    - - 6
+      - 0.0
+  - - - 6784
+      - 4
+      - 1
+      - 3328
+      - 6784
+      - 6784
+      - 6784
+      - 4
+    - - 6
+      - 0.0
+  - - - 2944
+      - 4
+      - 1
+      - 1792
+      - 2944
+      - 2944
+      - 2944
+      - 4
+    - - 6
+      - 0.0
+  - - - 2368
+      - 1408
+      - 1
+      - 3328
+      - 2368
+      - 2368
+      - 2368
+      - 1408
+    - - 3
+      - 0.0
+  - - - 1024
+      - 5056
+      - 1
+      - 1792
+      - 1024
+      - 1024
+      - 1024
+      - 5056
+    - - 3
+      - 0.0
+  - - - 4288
+      - 6784
+      - 1
+      - 256
+      - 4288
+      - 4288
+      - 4288
+      - 6784
+    - - 3
+      - 0.0
+  - - - 128
+      - 64
+      - 1
+      - 3328
+      - 128
+      - 128
+      - 128
+      - 64
+    - - 3
+      - 0.0
+  - - - 64
+      - 5888
+      - 1
+      - 3328
+      - 64
+      - 64
+      - 64
+      - 5888
+    - - 3
+      - 0.0
+  - - - 5056
+      - 4
+      - 1
+      - 3328
+      - 5056
+      - 5056
+      - 5056
+      - 4
+    - - 6
+      - 0.0
+  - - - 2944
+      - 4288
+      - 1
+      - 3328
+      - 2944
+      - 2944
+      - 2944
+      - 4288
+    - - 3
+      - 0.0
+  - - - 6784
+      - 3584
+      - 1
+      - 256
+      - 6784
+      - 6784
+      - 6784
+      - 3584
+    - - 3
+      - 0.0
+  - - - 4288
+      - 256
+      - 1
+      - 3328
+      - 4288
+      - 4288
+      - 4288
+      - 256
+    - - 3
+      - 0.0
+  - - - 256
+      - 3584
+      - 1
+      - 1792
+      - 256
+      - 256
+      - 256
+      - 3584
+    - - 3
+      - 0.0
+  - - - 1408
+      - 2368
+      - 1
+      - 768
+      - 1408
+      - 1408
+      - 1408
+      - 2368
+    - - 3
+      - 0.0
+  - - - 1408
+      - 2944
+      - 1
+      - 256
+      - 1408
+      - 1408
+      - 1408
+      - 2944
+    - - 3
+      - 0.0
+  - - - 256
+      - 2368
+      - 1
+      - 1792
+      - 256
+      - 256
+      - 256
+      - 2368
+    - - 3
+      - 0.0
+  - - - 6784
+      - 2368
+      - 1
+      - 3328
+      - 6784
+      - 6784
+      - 6784
+      - 2368
+    - - 3
+      - 0.0
+  - - - 2368
+      - 1024
+      - 1
+      - 1792
+      - 2368
+      - 2368
+      - 2368
+      - 1024
+    - - 3
+      - 0.0
+  - - - 2368
+      - 4288
+      - 1
+      - 256
+      - 2368
+      - 2368
+      - 2368
+      - 4288
+    - - 3
+      - 0.0
+  - - - 5056
+      - 3584
+      - 1
+      - 128
+      - 5056
+      - 5056
+      - 5056
+      - 3584
+    - - 2
+      - 3657.94
+  - - - 128
+      - 448
+      - 1
+      - 128
+      - 128
+      - 128
+      - 128
+      - 448
+    - - 0
+      - 245.269
+  - - - 5056
+      - 4288
+      - 1
+      - 3328
+      - 5056
+      - 5056
+      - 5056
+      - 4288
+    - - 3
+      - 0.0
+  - - - 2944
+      - 64
+      - 1
+      - 128
+      - 2944
+      - 2944
+      - 2944
+      - 64
+    - - 0
+      - 717.135
+  - - - 5056
+      - 64
+      - 1
+      - 256
+      - 5056
+      - 5056
+      - 5056
+      - 64
+    - - 3
+      - 0.0
+  - - - 1408
+      - 256
+      - 1
+      - 768
+      - 1408
+      - 1408
+      - 1408
+      - 256
+    - - 3
+      - 0.0
+  - - - 6784
+      - 128
+      - 1
+      - 128
+      - 6784
+      - 6784
+      - 6784
+      - 128
+    - - 0
+      - 1887.4
+  - - - 5056
+      - 2944
+      - 1
+      - 256
+      - 5056
+      - 5056
+      - 5056
+      - 2944
+    - - 3
+      - 0.0
+  - - - 1408
+      - 1408
+      - 1
+      - 256
+      - 1408
+      - 1408
+      - 1408
+      - 1408
+    - - 3
+      - 0.0
+  - - - 256
+      - 256
+      - 1
+      - 256
+      - 256
+      - 256
+      - 256
+      - 256
+    - - 3
+      - 0.0
+  - - - 64
+      - 704
+      - 1
+      - 768
+      - 64
+      - 64
+      - 64
+      - 704
+    - - 3
+      - 0.0
+  - - - 5056
+      - 1856
+      - 1
+      - 256
+      - 5056
+      - 5056
+      - 5056
+      - 1856
+    - - 3
+      - 0.0
+  - - - 64
+      - 448
+      - 1
+      - 128
+      - 64
+      - 64
+      - 64
+      - 448
+    - - 0
+      - 130.036
+  - - - 448
+      - 2944
+      - 1
+      - 256
+      - 448
+      - 448
+      - 448
+      - 2944
+    - - 3
+      - 0.0
+  - - - 64
+      - 64
+      - 1
+      - 1792
+      - 64
+      - 64
+      - 64
+      - 64
+    - - 3
+      - 0.0
+  - - - 4
+      - 448
+      - 1
+      - 3328
+      - 4
+      - 4
+      - 4
+      - 448
+    - - 6
+      - 0.0
+  - - - 3584
+      - 5888
+      - 1
+      - 3328
+      - 3584
+      - 3584
+      - 3584
+      - 5888
+    - - 3
+      - 0.0
+  - - - 704
+      - 2944
+      - 1
+      - 256
+      - 704
+      - 704
+      - 704
+      - 2944
+    - - 3
+      - 0.0
+  - - - 6784
+      - 5056
+      - 1
+      - 768
+      - 6784
+      - 6784
+      - 6784
+      - 5056
+    - - 3
+      - 0.0
+  - - - 448
+      - 64
+      - 1
+      - 768
+      - 448
+      - 448
+      - 448
+      - 64
+    - - 3
+      - 0.0
+  - - - 5056
+      - 128
+      - 1
+      - 3328
+      - 5056
+      - 5056
+      - 5056
+      - 128
+    - - 3
+      - 0.0
+  - - - 1408
+      - 2944
+      - 1
+      - 768
+      - 1408
+      - 1408
+      - 1408
+      - 2944
+    - - 3
+      - 0.0
+  - - - 4288
+      - 1856
+      - 1
+      - 128
+      - 4288
+      - 4288
+      - 4288
+      - 1856
+    - - 0
+      - 3570.12
+  - - - 6784
+      - 2944
+      - 1
+      - 1792
+      - 6784
+      - 6784
+      - 6784
+      - 2944
+    - - 3
+      - 0.0
+  - - - 2368
+      - 1024
+      - 1
+      - 256
+      - 2368
+      - 2368
+      - 2368
+      - 1024
+    - - 3
+      - 0.0
+  - - - 448
+      - 128
+      - 1
+      - 768
+      - 448
+      - 448
+      - 448
+      - 128
+    - - 3
+      - 0.0
+  - - - 2368
+      - 704
+      - 1
+      - 1792
+      - 2368
+      - 2368
+      - 2368
+      - 704
+    - - 3
+      - 0.0
+  - - - 5056
+      - 1024
+      - 1
+      - 1792
+      - 5056
+      - 5056
+      - 5056
+      - 1024
+    - - 3
+      - 0.0
+  - - - 2944
+      - 3584
+      - 1
+      - 768
+      - 2944
+      - 2944
+      - 2944
+      - 3584
+    - - 3
+      - 0.0
+  - - - 128
+      - 448
+      - 1
+      - 3328
+      - 128
+      - 128
+      - 128
+      - 448
+    - - 3
+      - 0.0
+  - - - 64
+      - 64
+      - 1
+      - 128
+      - 64
+      - 64
+      - 64
+      - 64
+    - - 1
+      - 15.9051
+  - - - 5888
+      - 2944
+      - 1
+      - 768
+      - 5888
+      - 5888
+      - 5888
+      - 2944
+    - - 3
+      - 0.0
+  - - - 2368
+      - 2944
+      - 1
+      - 1792
+      - 2368
+      - 2368
+      - 2368
+      - 2944
+    - - 3
+      - 0.0
+  - - - 704
+      - 256
+      - 1
+      - 768
+      - 704
+      - 704
+      - 704
+      - 256
+    - - 3
+      - 0.0
+  - - - 704
+      - 256
+      - 1
+      - 1792
+      - 704
+      - 704
+      - 704
+      - 256
+    - - 3
+      - 0.0
+  - - - 1024
+      - 448
+      - 1
+      - 256
+      - 1024
+      - 1024
+      - 1024
+      - 448
+    - - 3
+      - 0.0
+  - - - 448
+      - 704
+      - 1
+      - 1792
+      - 448
+      - 448
+      - 448
+      - 704
+    - - 3
+      - 0.0
+  - - - 6784
+      - 256
+      - 1
+      - 3328
+      - 6784
+      - 6784
+      - 6784
+      - 256
+    - - 3
+      - 0.0
+  - - - 1408
+      - 448
+      - 1
+      - 256
+      - 1408
+      - 1408
+      - 1408
+      - 448
+    - - 3
+      - 0.0
+  - - - 448
+      - 3584
+      - 1
+      - 128
+      - 448
+      - 448
+      - 448
+      - 3584
+    - - 0
+      - 2522.25
+  - - - 1024
+      - 4
+      - 1
+      - 256
+      - 1024
+      - 1024
+      - 1024
+      - 4
+    - - 6
+      - 0.0
+  - - - 64
+      - 2368
+      - 1
+      - 256
+      - 64
+      - 64
+      - 64
+      - 2368
+    - - 3
+      - 0.0
+  - - - 64
+      - 1408
+      - 1
+      - 256
+      - 64
+      - 64
+      - 64
+      - 1408
+    - - 3
+      - 0.0
+  - - - 2944
+      - 4
+      - 1
+      - 3328
+      - 2944
+      - 2944
+      - 2944
+      - 4
+    - - 6
+      - 0.0
+  - - - 4288
+      - 5056
+      - 1
+      - 3328
+      - 4288
+      - 4288
+      - 4288
+      - 5056
+    - - 3
+      - 0.0
+  - - - 256
+      - 1024
+      - 1
+      - 1792
+      - 256
+      - 256
+      - 256
+      - 1024
+    - - 3
+      - 0.0
+  - - - 4288
+      - 4288
+      - 1
+      - 768
+      - 4288
+      - 4288
+      - 4288
+      - 4288
+    - - 3
+      - 0.0
+  - - - 3584
+      - 6784
+      - 1
+      - 128
+      - 3584
+      - 3584
+      - 3584
+      - 6784
+    - - 2
+      - 3709.15
+  - - - 4
+      - 704
+      - 1
+      - 768
+      - 4
+      - 4
+      - 4
+      - 704
+    - - 6
+      - 0.0
+  - - - 256
+      - 6784
+      - 1
+      - 3328
+      - 256
+      - 256
+      - 256
+      - 6784
+    - - 3
+      - 0.0
+  - - - 2368
+      - 64
+      - 1
+      - 128
+      - 2368
+      - 2368
+      - 2368
+      - 64
+    - - 0
+      - 597.894
+  - - - 1856
+      - 5056
+      - 1
+      - 768
+      - 1856
+      - 1856
+      - 1856
+      - 5056
+    - - 3
+      - 0.0
+  - - - 2944
+      - 704
+      - 1
+      - 1792
+      - 2944
+      - 2944
+      - 2944
+      - 704
+    - - 3
+      - 0.0
+  - - - 4
+      - 5888
+      - 1
+      - 1792
+      - 4
+      - 4
+      - 4
+      - 5888
+    - - 6
+      - 0.0
+  - - - 4288
+      - 5888
+      - 1
+      - 1792
+      - 4288
+      - 4288
+      - 4288
+      - 5888
+    - - 3
+      - 0.0
+  - - - 1408
+      - 2368
+      - 1
+      - 1792
+      - 1408
+      - 1408
+      - 1408
+      - 2368
+    - - 3
+      - 0.0
+  - - - 4288
+      - 4288
+      - 1
+      - 3328
+      - 4288
+      - 4288
+      - 4288
+      - 4288
+    - - 3
+      - 0.0
+  - - - 1856
+      - 1856
+      - 1
+      - 256
+      - 1856
+      - 1856
+      - 1856
+      - 1856
+    - - 3
+      - 0.0
+  - - - 704
+      - 1024
+      - 1
+      - 256
+      - 704
+      - 704
+      - 704
+      - 1024
+    - - 3
+      - 0.0
+  - - - 3584
+      - 5056
+      - 1
+      - 3328
+      - 3584
+      - 3584
+      - 3584
+      - 5056
+    - - 3
+      - 0.0
+  - - - 448
+      - 448
+      - 1
+      - 128
+      - 448
+      - 448
+      - 448
+      - 448
+    - - 0
+      - 860.568
+  - - - 1024
+      - 4288
+      - 1
+      - 3328
+      - 1024
+      - 1024
+      - 1024
+      - 4288
+    - - 3
+      - 0.0
+  - - - 4
+      - 6784
+      - 1
+      - 128
+      - 4
+      - 4
+      - 4
+      - 6784
+    - - 4
+      - 134.743
+  - - - 2368
+      - 5056
+      - 1
+      - 3328
+      - 2368
+      - 2368
+      - 2368
+      - 5056
+    - - 3
+      - 0.0
+  - - - 5056
+      - 5056
+      - 1
+      - 128
+      - 5056
+      - 5056
+      - 5056
+      - 5056
+    - - 0
+      - 3844.74
+  - - - 2944
+      - 256
+      - 1
+      - 1792
+      - 2944
+      - 2944
+      - 2944
+      - 256
+    - - 3
+      - 0.0
+  - - - 704
+      - 704
+      - 1
+      - 1792
+      - 704
+      - 704
+      - 704
+      - 704
+    - - 3
+      - 0.0
+  - - - 5888
+      - 448
+      - 1
+      - 3328
+      - 5888
+      - 5888
+      - 5888
+      - 448
+    - - 3
+      - 0.0
+  - - - 64
+      - 6784
+      - 1
+      - 768
+      - 64
+      - 64
+      - 64
+      - 6784
+    - - 3
+      - 0.0
+  - - - 4288
+      - 1024
+      - 1
+      - 128
+      - 4288
+      - 4288
+      - 4288
+      - 1024
+    - - 2
+      - 3065.59
+  - - - 6784
+      - 448
+      - 1
+      - 3328
+      - 6784
+      - 6784
+      - 6784
+      - 448
+    - - 3
+      - 0.0
+  - - - 128
+      - 5888
+      - 1
+      - 128
+      - 128
+      - 128
+      - 128
+      - 5888
+    - - 1
+      - 1678.23
+  - - - 5056
+      - 1856
+      - 1
+      - 3328
+      - 5056
+      - 5056
+      - 5056
+      - 1856
+    - - 3
+      - 0.0
+  - - - 6784
+      - 704
+      - 1
+      - 1792
+      - 6784
+      - 6784
+      - 6784
+      - 704
+    - - 3
+      - 0.0
+  - - - 4288
+      - 4
+      - 1
+      - 1792
+      - 4288
+      - 4288
+      - 4288
+      - 4
+    - - 6
+      - 0.0
+  - - - 128
+      - 2368
+      - 1
+      - 3328
+      - 128
+      - 128
+      - 128
+      - 2368
+    - - 3
+      - 0.0
+  - - - 3584
+      - 2368
+      - 1
+      - 768
+      - 3584
+      - 3584
+      - 3584
+      - 2368
+    - - 3
+      - 0.0
+  - - - 4288
+      - 3584
+      - 1
+      - 128
+      - 4288
+      - 4288
+      - 4288
+      - 3584
+    - - 1
+      - 3626.35
+  - - - 704
+      - 4288
+      - 1
+      - 3328
+      - 704
+      - 704
+      - 704
+      - 4288
+    - - 3
+      - 0.0
+  - - - 1024
+      - 4288
+      - 1
+      - 128
+      - 1024
+      - 1024
+      - 1024
+      - 4288
+    - - 2
+      - 3001.32
+  - - - 128
+      - 704
+      - 1
+      - 1792
+      - 128
+      - 128
+      - 128
+      - 704
+    - - 3
+      - 0.0
+  - - - 4
+      - 6784
+      - 1
+      - 1792
+      - 4
+      - 4
+      - 4
+      - 6784
+    - - 6
+      - 0.0
+  - - - 448
+      - 5888
+      - 1
+      - 768
+      - 448
+      - 448
+      - 448
+      - 5888
+    - - 3
+      - 0.0
+  - - - 5888
+      - 2944
+      - 1
+      - 256
+      - 5888
+      - 5888
+      - 5888
+      - 2944
+    - - 3
+      - 0.0
+  - - - 128
+      - 4288
+      - 1
+      - 1792
+      - 128
+      - 128
+      - 128
+      - 4288
+    - - 3
+      - 0.0
+  - - - 2368
+      - 3584
+      - 1
+      - 128
+      - 2368
+      - 2368
+      - 2368
+      - 3584
+    - - 1
+      - 3436.87
+  - - - 256
+      - 1856
+      - 1
+      - 128
+      - 256
+      - 256
+      - 256
+      - 1856
+    - - 1
+      - 1290.92
+  - - - 704
+      - 1024
+      - 1
+      - 768
+      - 704
+      - 704
+      - 704
+      - 1024
+    - - 3
+      - 0.0
+  - - - 5888
+      - 256
+      - 1
+      - 3328
+      - 5888
+      - 5888
+      - 5888
+      - 256
+    - - 3
+      - 0.0
+  - - - 704
+      - 1024
+      - 1
+      - 128
+      - 704
+      - 704
+      - 704
+      - 1024
+    - - 0
+      - 1884.54
+  - - - 1024
+      - 3584
+      - 1
+      - 128
+      - 1024
+      - 1024
+      - 1024
+      - 3584
+    - - 2
+      - 2999.84
+  - - - 6784
+      - 1408
+      - 1
+      - 256
+      - 6784
+      - 6784
+      - 6784
+      - 1408
+    - - 3
+      - 0.0
+  - - - 6784
+      - 1024
+      - 1
+      - 128
+      - 6784
+      - 6784
+      - 6784
+      - 1024
+    - - 2
+      - 3317.82
+  - - - 256
+      - 4288
+      - 1
+      - 1792
+      - 256
+      - 256
+      - 256
+      - 4288
+    - - 3
+      - 0.0
+  - - - 448
+      - 5888
+      - 1
+      - 256
+      - 448
+      - 448
+      - 448
+      - 5888
+    - - 3
+      - 0.0
+  - - - 4
+      - 2368
+      - 1
+      - 128
+      - 4
+      - 4
+      - 4
+      - 2368
+    - - 5
+      - 50.6725
+  - - - 448
+      - 6784
+      - 1
+      - 256
+      - 448
+      - 448
+      - 448
+      - 6784
+    - - 3
+      - 0.0
+  - - - 448
+      - 1408
+      - 1
+      - 3328
+      - 448
+      - 448
+      - 448
+      - 1408
+    - - 3
+      - 0.0
+  - - - 1024
+      - 704
+      - 1
+      - 1792
+      - 1024
+      - 1024
+      - 1024
+      - 704
+    - - 3
+      - 0.0
+  - - - 128
+      - 128
+      - 1
+      - 768
+      - 128
+      - 128
+      - 128
+      - 128
+    - - 3
+      - 0.0
+  - - - 448
+      - 1024
+      - 1
+      - 768
+      - 448
+      - 448
+      - 448
+      - 1024
+    - - 3
+      - 0.0
+  - - - 3584
+      - 704
+      - 1
+      - 3328
+      - 3584
+      - 3584
+      - 3584
+      - 704
+    - - 3
+      - 0.0
+  - - - 2944
+      - 5888
+      - 1
+      - 128
+      - 2944
+      - 2944
+      - 2944
+      - 5888
+    - - 0
+      - 3690.62
+  - - - 1408
+      - 4
+      - 1
+      - 256
+      - 1408
+      - 1408
+      - 1408
+      - 4
+    - - 6
+      - 0.0
+  - - - 4
+      - 1856
+      - 1
+      - 3328
+      - 4
+      - 4
+      - 4
+      - 1856
+    - - 6
+      - 0.0
+  - - - 2944
+      - 64
+      - 1
+      - 1792
+      - 2944
+      - 2944
+      - 2944
+      - 64
+    - - 3
+      - 0.0
+  - - - 2368
+      - 4
+      - 1
+      - 256
+      - 2368
+      - 2368
+      - 2368
+      - 4
+    - - 6
+      - 0.0
+  - - - 1856
+      - 2368
+      - 1
+      - 256
+      - 1856
+      - 1856
+      - 1856
+      - 2368
+    - - 3
+      - 0.0
+  - - - 6784
+      - 704
+      - 1
+      - 256
+      - 6784
+      - 6784
+      - 6784
+      - 704
+    - - 3
+      - 0.0
+  - - - 448
+      - 1856
+      - 1
+      - 256
+      - 448
+      - 448
+      - 448
+      - 1856
+    - - 3
+      - 0.0
+  - - - 128
+      - 2944
+      - 1
+      - 1792
+      - 128
+      - 128
+      - 128
+      - 2944
+    - - 3
+      - 0.0
+  - - - 1024
+      - 3584
+      - 1
+      - 256
+      - 1024
+      - 1024
+      - 1024
+      - 3584
+    - - 3
+      - 0.0
+  - - - 448
+      - 3584
+      - 1
+      - 3328
+      - 448
+      - 448
+      - 448
+      - 3584
+    - - 3
+      - 0.0
+  - - - 2944
+      - 2368
+      - 1
+      - 1792
+      - 2944
+      - 2944
+      - 2944
+      - 2368
+    - - 3
+      - 0.0
+  - - - 64
+      - 1024
+      - 1
+      - 256
+      - 64
+      - 64
+      - 64
+      - 1024
+    - - 3
+      - 0.0
+  - - - 4288
+      - 1856
+      - 1
+      - 256
+      - 4288
+      - 4288
+      - 4288
+      - 1856
+    - - 3
+      - 0.0
+  - - - 704
+      - 2368
+      - 1
+      - 128
+      - 704
+      - 704
+      - 704
+      - 2368
+    - - 0
+      - 2599.86
+  - - - 1856
+      - 1408
+      - 1
+      - 768
+      - 1856
+      - 1856
+      - 1856
+      - 1408
+    - - 3
+      - 0.0
+  - - - 2944
+      - 704
+      - 1
+      - 128
+      - 2944
+      - 2944
+      - 2944
+      - 704
+    - - 0
+      - 2808.89
+  - - - 5888
+      - 6784
+      - 1
+      - 256
+      - 5888
+      - 5888
+      - 5888
+      - 6784
+    - - 3
+      - 0.0
+  - - - 128
+      - 256
+      - 1
+      - 3328
+      - 128
+      - 128
+      - 128
+      - 256
+    - - 3
+      - 0.0
+  - - - 5888
+      - 2368
+      - 1
+      - 128
+      - 5888
+      - 5888
+      - 5888
+      - 2368
+    - - 2
+      - 3518.21
+  - - - 4
+      - 704
+      - 1
+      - 1792
+      - 4
+      - 4
+      - 4
+      - 704
+    - - 6
+      - 0.0
+  - - - 1408
+      - 1856
+      - 1
+      - 3328
+      - 1408
+      - 1408
+      - 1408
+      - 1856
+    - - 3
+      - 0.0
+  - - - 128
+      - 4288
+      - 1
+      - 256
+      - 128
+      - 128
+      - 128
+      - 4288
+    - - 3
+      - 0.0
+  - - - 704
+      - 5056
+      - 1
+      - 768
+      - 704
+      - 704
+      - 704
+      - 5056
+    - - 3
+      - 0.0
+  - - - 448
+      - 5888
+      - 1
+      - 3328
+      - 448
+      - 448
+      - 448
+      - 5888
+    - - 3
+      - 0.0
+  - - - 4288
+      - 3584
+      - 1
+      - 768
+      - 4288
+      - 4288
+      - 4288
+      - 3584
+    - - 3
+      - 0.0
+  - - - 1856
+      - 4
+      - 1
+      - 1792
+      - 1856
+      - 1856
+      - 1856
+      - 4
+    - - 6
+      - 0.0
+  - - - 1408
+      - 704
+      - 1
+      - 1792
+      - 1408
+      - 1408
+      - 1408
+      - 704
+    - - 3
+      - 0.0
+  - - - 704
+      - 128
+      - 1
+      - 256
+      - 704
+      - 704
+      - 704
+      - 128
+    - - 3
+      - 0.0
+  - - - 64
+      - 2368
+      - 1
+      - 3328
+      - 64
+      - 64
+      - 64
+      - 2368
+    - - 3
+      - 0.0
+  - - - 5056
+      - 5888
+      - 1
+      - 128
+      - 5056
+      - 5056
+      - 5056
+      - 5888
+    - - 2
+      - 3767.2
+  - - - 4
+      - 1024
+      - 1
+      - 128
+      - 4
+      - 4
+      - 4
+      - 1024
+    - - 5
+      - 21.6447
+  - - - 5056
+      - 1024
+      - 1
+      - 128
+      - 5056
+      - 5056
+      - 5056
+      - 1024
+    - - 2
+      - 3235.55
+  - - - 5888
+      - 256
+      - 1
+      - 1792
+      - 5888
+      - 5888
+      - 5888
+      - 256
+    - - 3
+      - 0.0
+  - - - 4
+      - 128
+      - 1
+      - 256
+      - 4
+      - 4
+      - 4
+      - 128
+    - - 6
+      - 0.0
+  - - - 2944
+      - 256
+      - 1
+      - 128
+      - 2944
+      - 2944
+      - 2944
+      - 256
+    - - 0
+      - 1940.85
+  - - - 1856
+      - 128
+      - 1
+      - 1792
+      - 1856
+      - 1856
+      - 1856
+      - 128
+    - - 3
+      - 0.0
+  - - - 2368
+      - 5888
+      - 1
+      - 768
+      - 2368
+      - 2368
+      - 2368
+      - 5888
+    - - 3
+      - 0.0
+  - - - 64
+      - 3584
+      - 1
+      - 128
+      - 64
+      - 64
+      - 64
+      - 3584
+    - - 0
+      - 874.959
+  - - - 6784
+      - 1408
+      - 1
+      - 1792
+      - 6784
+      - 6784
+      - 6784
+      - 1408
+    - - 3
+      - 0.0
+  - - - 6784
+      - 4288
+      - 1
+      - 768
+      - 6784
+      - 6784
+      - 6784
+      - 4288
+    - - 3
+      - 0.0
+  - - - 3584
+      - 4
+      - 1
+      - 3328
+      - 3584
+      - 3584
+      - 3584
+      - 4
+    - - 6
+      - 0.0
+  - - - 5056
+      - 5056
+      - 1
+      - 1792
+      - 5056
+      - 5056
+      - 5056
+      - 5056
+    - - 3
+      - 0.0
+  - - - 64
+      - 6784
+      - 1
+      - 128
+      - 64
+      - 64
+      - 64
+      - 6784
+    - - 0
+      - 1280.27
+  - - - 448
+      - 704
+      - 1
+      - 128
+      - 448
+      - 448
+      - 448
+      - 704
+    - - 0
+      - 1152.2
+  - - - 5056
+      - 3584
+      - 1
+      - 3328
+      - 5056
+      - 5056
+      - 5056
+      - 3584
+    - - 3
+      - 0.0
+  - - - 2368
+      - 1408
+      - 1
+      - 768
+      - 2368
+      - 2368
+      - 2368
+      - 1408
+    - - 3
+      - 0.0
+  - - - 1408
+      - 3584
+      - 1
+      - 3328
+      - 1408
+      - 1408
+      - 1408
+      - 3584
+    - - 3
+      - 0.0
+  - - - 128
+      - 704
+      - 1
+      - 128
+      - 128
+      - 128
+      - 128
+      - 704
+    - - 0
+      - 397.222
+  - - - 5888
+      - 2368
+      - 1
+      - 3328
+      - 5888
+      - 5888
+      - 5888
+      - 2368
+    - - 3
+      - 0.0
+  - - - 2368
+      - 5888
+      - 1
+      - 256
+      - 2368
+      - 2368
+      - 2368
+      - 5888
+    - - 3
+      - 0.0
+  - - - 1408
+      - 1024
+      - 1
+      - 768
+      - 1408
+      - 1408
+      - 1408
+      - 1024
+    - - 3
+      - 0.0
+  - - - 6784
+      - 128
+      - 1
+      - 1792
+      - 6784
+      - 6784
+      - 6784
+      - 128
+    - - 3
+      - 0.0
+  - - - 2944
+      - 2368
+      - 1
+      - 256
+      - 2944
+      - 2944
+      - 2944
+      - 2368
+    - - 3
+      - 0.0
+  - - - 1856
+      - 256
+      - 1
+      - 256
+      - 1856
+      - 1856
+      - 1856
+      - 256
+    - - 3
+      - 0.0
+  - - - 6784
+      - 5888
+      - 1
+      - 768
+      - 6784
+      - 6784
+      - 6784
+      - 5888
+    - - 3
+      - 0.0
+  - - - 448
+      - 256
+      - 1
+      - 3328
+      - 448
+      - 448
+      - 448
+      - 256
+    - - 3
+      - 0.0
+  - - - 1856
+      - 5888
+      - 1
+      - 768
+      - 1856
+      - 1856
+      - 1856
+      - 5888
+    - - 3
+      - 0.0
+  - - - 2944
+      - 5888
+      - 1
+      - 1792
+      - 2944
+      - 2944
+      - 2944
+      - 5888
+    - - 3
+      - 0.0
+  - - - 1408
+      - 4
+      - 1
+      - 768
+      - 1408
+      - 1408
+      - 1408
+      - 4
+    - - 6
+      - 0.0
+  - - - 704
+      - 5888
+      - 1
+      - 768
+      - 704
+      - 704
+      - 704
+      - 5888
+    - - 3
+      - 0.0
+  - - - 128
+      - 3584
+      - 1
+      - 128
+      - 128
+      - 128
+      - 128
+      - 3584
+    - - 0
+      - 1321.17
+  - - - 4
+      - 1856
+      - 1
+      - 768
+      - 4
+      - 4
+      - 4
+      - 1856
+    - - 6
+      - 0.0
+  - - - 6784
+      - 64
+      - 1
+      - 256
+      - 6784
+      - 6784
+      - 6784
+      - 64
+    - - 3
+      - 0.0
+  - - - 5888
+      - 256
+      - 1
+      - 128
+      - 5888
+      - 5888
+      - 5888
+      - 256
+    - - 0
+      - 2466.48
+  - - - 64
+      - 256
+      - 1
+      - 256
+      - 64
+      - 64
+      - 64
+      - 256
+    - - 3
+      - 0.0
+  - - - 3584
+      - 2944
+      - 1
+      - 768
+      - 3584
+      - 3584
+      - 3584
+      - 2944
+    - - 3
+      - 0.0
+  - - - 3584
+      - 3584
+      - 1
+      - 3328
+      - 3584
+      - 3584
+      - 3584
+      - 3584
+    - - 3
+      - 0.0
+  - - - 4288
+      - 704
+      - 1
+      - 256
+      - 4288
+      - 4288
+      - 4288
+      - 704
+    - - 3
+      - 0.0
+  - - - 3584
+      - 704
+      - 1
+      - 768
+      - 3584
+      - 3584
+      - 3584
+      - 704
+    - - 3
+      - 0.0
+  - - - 6784
+      - 5056
+      - 1
+      - 1792
+      - 6784
+      - 6784
+      - 6784
+      - 5056
+    - - 3
+      - 0.0
+  - - - 2368
+      - 1024
+      - 1
+      - 768
+      - 2368
+      - 2368
+      - 2368
+      - 1024
+    - - 3
+      - 0.0
+  - - - 64
+      - 128
+      - 1
+      - 768
+      - 64
+      - 64
+      - 64
+      - 128
+    - - 3
+      - 0.0
+  - - - 5056
+      - 5888
+      - 1
+      - 768
+      - 5056
+      - 5056
+      - 5056
+      - 5888
+    - - 3
+      - 0.0
+  - - - 5888
+      - 448
+      - 1
+      - 1792
+      - 5888
+      - 5888
+      - 5888
+      - 448
+    - - 3
+      - 0.0
+  - - - 128
+      - 5888
+      - 1
+      - 768
+      - 128
+      - 128
+      - 128
+      - 5888
+    - - 3
+      - 0.0
+  - - - 256
+      - 5056
+      - 1
+      - 3328
+      - 256
+      - 256
+      - 256
+      - 5056
+    - - 3
+      - 0.0
+  - - - 2944
+      - 5056
+      - 1
+      - 3328
+      - 2944
+      - 2944
+      - 2944
+      - 5056
+    - - 3
+      - 0.0
+  - - - 448
+      - 1024
+      - 1
+      - 128
+      - 448
+      - 448
+      - 448
+      - 1024
+    - - 0
+      - 1501.34
+  - - - 64
+      - 1856
+      - 1
+      - 1792
+      - 64
+      - 64
+      - 64
+      - 1856
+    - - 3
+      - 0.0
+  - - - 1408
+      - 64
+      - 1
+      - 768
+      - 1408
+      - 1408
+      - 1408
+      - 64
+    - - 3
+      - 0.0
+  - - - 256
+      - 256
+      - 1
+      - 128
+      - 256
+      - 256
+      - 256
+      - 256
+    - - 0
+      - 291.864
+  - - - 256
+      - 4
+      - 1
+      - 128
+      - 256
+      - 256
+      - 256
+      - 4
+    - - 5
+      - 5.82051
+  - - - 5056
+      - 64
+      - 1
+      - 1792
+      - 5056
+      - 5056
+      - 5056
+      - 64
+    - - 3
+      - 0.0
+  - - - 4
+      - 5056
+      - 1
+      - 256
+      - 4
+      - 4
+      - 4
+      - 5056
+    - - 6
+      - 0.0
+  - - - 4
+      - 1856
+      - 1
+      - 1792
+      - 4
+      - 4
+      - 4
+      - 1856
+    - - 6
+      - 0.0
+  - - - 2368
+      - 2944
+      - 1
+      - 256
+      - 2368
+      - 2368
+      - 2368
+      - 2944
+    - - 3
+      - 0.0
+  - - - 256
+      - 5056
+      - 1
+      - 1792
+      - 256
+      - 256
+      - 256
+      - 5056
+    - - 3
+      - 0.0
+  - - - 256
+      - 128
+      - 1
+      - 128
+      - 256
+      - 256
+      - 256
+      - 128
+    - - 0
+      - 142.625
+  - - - 1856
+      - 6784
+      - 1
+      - 768
+      - 1856
+      - 1856
+      - 1856
+      - 6784
+    - - 3
+      - 0.0
+  - - - 6784
+      - 2944
+      - 1
+      - 256
+      - 6784
+      - 6784
+      - 6784
+      - 2944
+    - - 3
+      - 0.0
+  - - - 64
+      - 2944
+      - 1
+      - 128
+      - 64
+      - 64
+      - 64
+      - 2944
+    - - 0
+      - 729.996
+  - - - 4288
+      - 128
+      - 1
+      - 3328
+      - 4288
+      - 4288
+      - 4288
+      - 128
+    - - 3
+      - 0.0
+  - - - 6784
+      - 704
+      - 1
+      - 128
+      - 6784
+      - 6784
+      - 6784
+      - 704
+    - - 0
+      - 3260.63
+  - - - 3584
+      - 6784
+      - 1
+      - 256
+      - 3584
+      - 3584
+      - 3584
+      - 6784
+    - - 3
+      - 0.0
+  - - - 1856
+      - 5056
+      - 1
+      - 128
+      - 1856
+      - 1856
+      - 1856
+      - 5056
+    - - 0
+      - 3641.4
+  - - - 704
+      - 1408
+      - 1
+      - 1792
+      - 704
+      - 704
+      - 704
+      - 1408
+    - - 3
+      - 0.0
+  - - - 128
+      - 1024
+      - 1
+      - 3328
+      - 128
+      - 128
+      - 128
+      - 1024
+    - - 3
+      - 0.0
+  - - - 2944
+      - 2944
+      - 1
+      - 1792
+      - 2944
+      - 2944
+      - 2944
+      - 2944
+    - - 3
+      - 0.0
+  - - - 1024
+      - 5056
+      - 1
+      - 768
+      - 1024
+      - 1024
+      - 1024
+      - 5056
+    - - 3
+      - 0.0
+  - - - 5888
+      - 5056
+      - 1
+      - 3328
+      - 5888
+      - 5888
+      - 5888
+      - 5056
+    - - 3
+      - 0.0
+  - - - 5888
+      - 2368
+      - 1
+      - 768
+      - 5888
+      - 5888
+      - 5888
+      - 2368
+    - - 3
+      - 0.0
+  - - - 5056
+      - 5888
+      - 1
+      - 3328
+      - 5056
+      - 5056
+      - 5056
+      - 5888
+    - - 3
+      - 0.0
+  - - - 1856
+      - 256
+      - 1
+      - 128
+      - 1856
+      - 1856
+      - 1856
+      - 256
+    - - 0
+      - 1549.09
+  - - - 704
+      - 1856
+      - 1
+      - 768
+      - 704
+      - 704
+      - 704
+      - 1856
+    - - 3
+      - 0.0
+  - - - 2944
+      - 64
+      - 1
+      - 3328
+      - 2944
+      - 2944
+      - 2944
+      - 64
+    - - 3
+      - 0.0
+  - - - 3584
+      - 128
+      - 1
+      - 128
+      - 3584
+      - 3584
+      - 3584
+      - 128
+    - - 2
+      - 1147.18
+  - - - 256
+      - 448
+      - 1
+      - 3328
+      - 256
+      - 256
+      - 256
+      - 448
+    - - 3
+      - 0.0
+  - - - 448
+      - 2368
+      - 1
+      - 256
+      - 448
+      - 448
+      - 448
+      - 2368
+    - - 3
+      - 0.0
+  - - - 6784
+      - 4
+      - 1
+      - 1792
+      - 6784
+      - 6784
+      - 6784
+      - 4
+    - - 6
+      - 0.0
+  - - - 1856
+      - 6784
+      - 1
+      - 256
+      - 1856
+      - 1856
+      - 1856
+      - 6784
+    - - 3
+      - 0.0
+  - - - 448
+      - 1024
+      - 1
+      - 3328
+      - 448
+      - 448
+      - 448
+      - 1024
+    - - 3
+      - 0.0
+  - - - 1856
+      - 64
+      - 1
+      - 1792
+      - 1856
+      - 1856
+      - 1856
+      - 64
+    - - 3
+      - 0.0
+  - - - 256
+      - 64
+      - 1
+      - 256
+      - 256
+      - 256
+      - 256
+      - 64
+    - - 3
+      - 0.0
+  - - - 1024
+      - 4
+      - 1
+      - 3328
+      - 1024
+      - 1024
+      - 1024
+      - 4
+    - - 6
+      - 0.0
+  - - - 448
+      - 5888
+      - 1
+      - 1792
+      - 448
+      - 448
+      - 448
+      - 5888
+    - - 3
+      - 0.0
+  - - - 2368
+      - 5056
+      - 1
+      - 256
+      - 2368
+      - 2368
+      - 2368
+      - 5056
+    - - 3
+      - 0.0
+  - - - 6784
+      - 64
+      - 1
+      - 128
+      - 6784
+      - 6784
+      - 6784
+      - 64
+    - - 0
+      - 1330.22
+  - - - 3584
+      - 448
+      - 1
+      - 128
+      - 3584
+      - 3584
+      - 3584
+      - 448
+    - - 1
+      - 2181.19
+  - - - 4
+      - 64
+      - 1
+      - 768
+      - 4
+      - 4
+      - 4
+      - 64
+    - - 6
+      - 0.0
+  - - - 1856
+      - 4288
+      - 1
+      - 3328
+      - 1856
+      - 1856
+      - 1856
+      - 4288
+    - - 3
+      - 0.0
+  - - - 2944
+      - 128
+      - 1
+      - 768
+      - 2944
+      - 2944
+      - 2944
+      - 128
+    - - 3
+      - 0.0
+  - - - 5888
+      - 6784
+      - 1
+      - 1792
+      - 5888
+      - 5888
+      - 5888
+      - 6784
+    - - 3
+      - 0.0
+  - - - 704
+      - 5888
+      - 1
+      - 1792
+      - 704
+      - 704
+      - 704
+      - 5888
+    - - 3
+      - 0.0
+  - - - 6784
+      - 6784
+      - 1
+      - 128
+      - 6784
+      - 6784
+      - 6784
+      - 6784
+    - - 2
+      - 3807.24
+  - - - 5056
+      - 64
+      - 1
+      - 3328
+      - 5056
+      - 5056
+      - 5056
+      - 64
+    - - 3
+      - 0.0
+  - - - 448
+      - 64
+      - 1
+      - 1792
+      - 448
+      - 448
+      - 448
+      - 64
+    - - 3
+      - 0.0
+  - - - 1024
+      - 5888
+      - 1
+      - 256
+      - 1024
+      - 1024
+      - 1024
+      - 5888
+    - - 3
+      - 0.0
+  - - - 64
+      - 2944
+      - 1
+      - 256
+      - 64
+      - 64
+      - 64
+      - 2944
+    - - 3
+      - 0.0
+  - - - 256
+      - 1024
+      - 1
+      - 768
+      - 256
+      - 256
+      - 256
+      - 1024
+    - - 3
+      - 0.0
+  - - - 128
+      - 128
+      - 1
+      - 128
+      - 128
+      - 128
+      - 128
+      - 128
+    - - 0
+      - 72.4067
+  - - - 5056
+      - 4288
+      - 1
+      - 256
+      - 5056
+      - 5056
+      - 5056
+      - 4288
+    - - 3
+      - 0.0
+  - - - 5056
+      - 6784
+      - 1
+      - 3328
+      - 5056
+      - 5056
+      - 5056
+      - 6784
+    - - 3
+      - 0.0
+  - - - 5888
+      - 1408
+      - 1
+      - 768
+      - 5888
+      - 5888
+      - 5888
+      - 1408
+    - - 3
+      - 0.0
+  - - - 448
+      - 4288
+      - 1
+      - 128
+      - 448
+      - 448
+      - 448
+      - 4288
+    - - 0
+      - 2707.56
+  - - - 704
+      - 448
+      - 1
+      - 3328
+      - 704
+      - 704
+      - 704
+      - 448
+    - - 3
+      - 0.0
+  - - - 5056
+      - 1024
+      - 1
+      - 768
+      - 5056
+      - 5056
+      - 5056
+      - 1024
+    - - 3
+      - 0.0
+  - - - 2368
+      - 128
+      - 1
+      - 1792
+      - 2368
+      - 2368
+      - 2368
+      - 128
+    - - 3
+      - 0.0
+  - - - 2944
+      - 5056
+      - 1
+      - 1792
+      - 2944
+      - 2944
+      - 2944
+      - 5056
+    - - 3
+      - 0.0
+  - - - 128
+      - 4
+      - 1
+      - 768
+      - 128
+      - 128
+      - 128
+      - 4
+    - - 6
+      - 0.0
+  - - - 5888
+      - 5888
+      - 1
+      - 256
+      - 5888
+      - 5888
+      - 5888
+      - 5888
+    - - 3
+      - 0.0
+  - - - 2944
+      - 1408
+      - 1
+      - 3328
+      - 2944
+      - 2944
+      - 2944
+      - 1408
+    - - 3
+      - 0.0
+  - - - 1408
+      - 4288
+      - 1
+      - 256
+      - 1408
+      - 1408
+      - 1408
+      - 4288
+    - - 3
+      - 0.0
+  - - - 64
+      - 3584
+      - 1
+      - 3328
+      - 64
+      - 64
+      - 64
+      - 3584
+    - - 3
+      - 0.0
+  - - - 6784
+      - 2368
+      - 1
+      - 128
+      - 6784
+      - 6784
+      - 6784
+      - 2368
+    - - 0
+      - 3671.34
+  - - - 2944
+      - 2368
+      - 1
+      - 3328
+      - 2944
+      - 2944
+      - 2944
+      - 2368
+    - - 3
+      - 0.0
+  - - - 2368
+      - 2944
+      - 1
+      - 128
+      - 2368
+      - 2368
+      - 2368
+      - 2944
+    - - 0
+      - 3526.44
+  - - - 5056
+      - 1408
+      - 1
+      - 1792
+      - 5056
+      - 5056
+      - 5056
+      - 1408
+    - - 3
+      - 0.0
+  - - - 6784
+      - 5888
+      - 1
+      - 256
+      - 6784
+      - 6784
+      - 6784
+      - 5888
+    - - 3
+      - 0.0
+  - - - 128
+      - 1024
+      - 1
+      - 128
+      - 128
+      - 128
+      - 128
+      - 1024
+    - - 0
+      - 569.066
+  - - - 128
+      - 4
+      - 1
+      - 1792
+      - 128
+      - 128
+      - 128
+      - 4
+    - - 6
+      - 0.0
+  - - - 128
+      - 256
+      - 1
+      - 256
+      - 128
+      - 128
+      - 128
+      - 256
+    - - 3
+      - 0.0
+  - - - 128
+      - 1856
+      - 1
+      - 768
+      - 128
+      - 128
+      - 128
+      - 1856
+    - - 3
+      - 0.0
+  - - - 2368
+      - 448
+      - 1
+      - 3328
+      - 2368
+      - 2368
+      - 2368
+      - 448
+    - - 3
+      - 0.0
+  - - - 1408
+      - 256
+      - 1
+      - 3328
+      - 1408
+      - 1408
+      - 1408
+      - 256
+    - - 3
+      - 0.0
+  - - - 256
+      - 704
+      - 1
+      - 256
+      - 256
+      - 256
+      - 256
+      - 704
+    - - 3
+      - 0.0
+  - - - 1856
+      - 1856
+      - 1
+      - 128
+      - 1856
+      - 1856
+      - 1856
+      - 1856
+    - - 0
+      - 3156.1
+  - - - 128
+      - 5056
+      - 1
+      - 3328
+      - 128
+      - 128
+      - 128
+      - 5056
+    - - 3
+      - 0.0
+  - - - 3584
+      - 4
+      - 1
+      - 768
+      - 3584
+      - 3584
+      - 3584
+      - 4
+    - - 6
+      - 0.0
+  - - - 4
+      - 4288
+      - 1
+      - 3328
+      - 4
+      - 4
+      - 4
+      - 4288
+    - - 6
+      - 0.0
+  - - - 6784
+      - 5888
+      - 1
+      - 128
+      - 6784
+      - 6784
+      - 6784
+      - 5888
+    - - 2
+      - 3782.46
+  - - - 5888
+      - 448
+      - 1
+      - 768
+      - 5888
+      - 5888
+      - 5888
+      - 448
+    - - 3
+      - 0.0
+  - - - 5056
+      - 2368
+      - 1
+      - 3328
+      - 5056
+      - 5056
+      - 5056
+      - 2368
+    - - 3
+      - 0.0
+  - - - 704
+      - 1408
+      - 1
+      - 128
+      - 704
+      - 704
+      - 704
+      - 1408
+    - - 0
+      - 2241.91
+  - - - 4288
+      - 704
+      - 1
+      - 3328
+      - 4288
+      - 4288
+      - 4288
+      - 704
+    - - 3
+      - 0.0
+  - - - 5888
+      - 2944
+      - 1
+      - 128
+      - 5888
+      - 5888
+      - 5888
+      - 2944
+    - - 2
+      - 3638.61
+  - - - 5888
+      - 5056
+      - 1
+      - 256
+      - 5888
+      - 5888
+      - 5888
+      - 5056
+    - - 3
+      - 0.0
+  - - - 704
+      - 704
+      - 1
+      - 128
+      - 704
+      - 704
+      - 704
+      - 704
+    - - 0
+      - 1628.16
+  - - - 1856
+      - 2944
+      - 1
+      - 3328
+      - 1856
+      - 1856
+      - 1856
+      - 2944
+    - - 3
+      - 0.0
+  - - - 5888
+      - 4
+      - 1
+      - 1792
+      - 5888
+      - 5888
+      - 5888
+      - 4
+    - - 6
+      - 0.0
+  - - - 64
+      - 4
+      - 1
+      - 768
+      - 64
+      - 64
+      - 64
+      - 4
+    - - 6
+      - 0.0
+  - - - 4
+      - 4
+      - 1
+      - 256
+      - 4
+      - 4
+      - 4
+      - 4
+    - - 6
+      - 0.0
+  - - - 704
+      - 5888
+      - 1
+      - 256
+      - 704
+      - 704
+      - 704
+      - 5888
+    - - 3
+      - 0.0
+  - - - 5888
+      - 6784
+      - 1
+      - 3328
+      - 5888
+      - 5888
+      - 5888
+      - 6784
+    - - 3
+      - 0.0
+  - - - 256
+      - 128
+      - 1
+      - 1792
+      - 256
+      - 256
+      - 256
+      - 128
+    - - 3
+      - 0.0
+  - - - 6784
+      - 1856
+      - 1
+      - 768
+      - 6784
+      - 6784
+      - 6784
+      - 1856
+    - - 3
+      - 0.0
+  - - - 1408
+      - 128
+      - 1
+      - 3328
+      - 1408
+      - 1408
+      - 1408
+      - 128
+    - - 3
+      - 0.0
+  - - - 2944
+      - 2944
+      - 1
+      - 3328
+      - 2944
+      - 2944
+      - 2944
+      - 2944
+    - - 3
+      - 0.0
+  - - - 2368
+      - 4288
+      - 1
+      - 1792
+      - 2368
+      - 2368
+      - 2368
+      - 4288
+    - - 3
+      - 0.0
+  - - - 3584
+      - 1408
+      - 1
+      - 3328
+      - 3584
+      - 3584
+      - 3584
+      - 1408
+    - - 3
+      - 0.0
+  - - - 4288
+      - 5888
+      - 1
+      - 3328
+      - 4288
+      - 4288
+      - 4288
+      - 5888
+    - - 3
+      - 0.0
+  - - - 704
+      - 256
+      - 1
+      - 3328
+      - 704
+      - 704
+      - 704
+      - 256
+    - - 3
+      - 0.0
+  - - - 448
+      - 1408
+      - 1
+      - 128
+      - 448
+      - 448
+      - 448
+      - 1408
+    - - 0
+      - 1695.14
+  - - - 5056
+      - 1856
+      - 1
+      - 1792
+      - 5056
+      - 5056
+      - 5056
+      - 1856
+    - - 3
+      - 0.0
+  - - - 4
+      - 704
+      - 1
+      - 128
+      - 4
+      - 4
+      - 4
+      - 704
+    - - 5
+      - 14.8354
+  - - - 128
+      - 2368
+      - 1
+      - 128
+      - 128
+      - 128
+      - 128
+      - 2368
+    - - 0
+      - 933.615
+  - - - 2368
+      - 1408
+      - 1
+      - 1792
+      - 2368
+      - 2368
+      - 2368
+      - 1408
+    - - 3
+      - 0.0
+  - - - 1408
+      - 448
+      - 1
+      - 768
+      - 1408
+      - 1408
+      - 1408
+      - 448
+    - - 3
+      - 0.0
+  - - - 1024
+      - 2368
+      - 1
+      - 3328
+      - 1024
+      - 1024
+      - 1024
+      - 2368
+    - - 3
+      - 0.0
+  - - - 256
+      - 4288
+      - 1
+      - 256
+      - 256
+      - 256
+      - 256
+      - 4288
+    - - 3
+      - 0.0
+  - - - 448
+      - 4
+      - 1
+      - 3328
+      - 448
+      - 448
+      - 448
+      - 4
+    - - 6
+      - 0.0
+  - - - 64
+      - 704
+      - 1
+      - 256
+      - 64
+      - 64
+      - 64
+      - 704
+    - - 3
+      - 0.0
+  - - - 448
+      - 5056
+      - 1
+      - 768
+      - 448
+      - 448
+      - 448
+      - 5056
+    - - 3
+      - 0.0
+  - - - 1024
+      - 1856
+      - 1
+      - 256
+      - 1024
+      - 1024
+      - 1024
+      - 1856
+    - - 3
+      - 0.0
+  - - - 4
+      - 1408
+      - 1
+      - 1792
+      - 4
+      - 4
+      - 4
+      - 1408
+    - - 6
+      - 0.0
+  - - - 256
+      - 2368
+      - 1
+      - 128
+      - 256
+      - 256
+      - 256
+      - 2368
+    - - 1
+      - 1383.77
+  - - - 2944
+      - 2944
+      - 1
+      - 768
+      - 2944
+      - 2944
+      - 2944
+      - 2944
+    - - 3
+      - 0.0
+  - - - 4288
+      - 6784
+      - 1
+      - 1792
+      - 4288
+      - 4288
+      - 4288
+      - 6784
+    - - 3
+      - 0.0
+  - - - 128
+      - 6784
+      - 1
+      - 256
+      - 128
+      - 128
+      - 128
+      - 6784
+    - - 3
+      - 0.0
+  - - - 1856
+      - 5056
+      - 1
+      - 1792
+      - 1856
+      - 1856
+      - 1856
+      - 5056
+    - - 3
+      - 0.0
+  - - - 1856
+      - 704
+      - 1
+      - 768
+      - 1856
+      - 1856
+      - 1856
+      - 704
+    - - 3
+      - 0.0
+  - - - 2368
+      - 4288
+      - 1
+      - 128
+      - 2368
+      - 2368
+      - 2368
+      - 4288
+    - - 0
+      - 3663.76
+  - - - 4
+      - 6784
+      - 1
+      - 256
+      - 4
+      - 4
+      - 4
+      - 6784
+    - - 6
+      - 0.0
+  - - - 256
+      - 5888
+      - 1
+      - 256
+      - 256
+      - 256
+      - 256
+      - 5888
+    - - 3
+      - 0.0
+  - - - 3584
+      - 448
+      - 1
+      - 1792
+      - 3584
+      - 3584
+      - 3584
+      - 448
+    - - 3
+      - 0.0
+  - - - 1856
+      - 1024
+      - 1
+      - 256
+      - 1856
+      - 1856
+      - 1856
+      - 1024
+    - - 3
+      - 0.0
+  - - - 1408
+      - 6784
+      - 1
+      - 1792
+      - 1408
+      - 1408
+      - 1408
+      - 6784
+    - - 3
+      - 0.0
+  - - - 1024
+      - 2944
+      - 1
+      - 3328
+      - 1024
+      - 1024
+      - 1024
+      - 2944
+    - - 3
+      - 0.0
+  - - - 6784
+      - 1408
+      - 1
+      - 768
+      - 6784
+      - 6784
+      - 6784
+      - 1408
+    - - 3
+      - 0.0
+  - - - 1856
+      - 1408
+      - 1
+      - 256
+      - 1856
+      - 1856
+      - 1856
+      - 1408
+    - - 3
+      - 0.0
+  - - - 4288
+      - 1024
+      - 1
+      - 3328
+      - 4288
+      - 4288
+      - 4288
+      - 1024
+    - - 3
+      - 0.0
+  - - - 5888
+      - 4
+      - 1
+      - 128
+      - 5888
+      - 5888
+      - 5888
+      - 4
+    - - 5
+      - 119.698
+  - - - 1024
+      - 1024
+      - 1
+      - 256
+      - 1024
+      - 1024
+      - 1024
+      - 1024
+    - - 3
+      - 0.0
+  - - - 704
+      - 64
+      - 1
+      - 3328
+      - 704
+      - 704
+      - 704
+      - 64
+    - - 3
+      - 0.0
+  - - - 2368
+      - 3584
+      - 1
+      - 3328
+      - 2368
+      - 2368
+      - 2368
+      - 3584
+    - - 3
+      - 0.0
+  - - - 5888
+      - 2368
+      - 1
+      - 1792
+      - 5888
+      - 5888
+      - 5888
+      - 2368
+    - - 3
+      - 0.0
+  - - - 128
+      - 704
+      - 1
+      - 256
+      - 128
+      - 128
+      - 128
+      - 704
+    - - 3
+      - 0.0
+  - - - 1024
+      - 256
+      - 1
+      - 128
+      - 1024
+      - 1024
+      - 1024
+      - 256
+    - - 0
+      - 915.113
+  - - - 448
+      - 2368
+      - 1
+      - 3328
+      - 448
+      - 448
+      - 448
+      - 2368
+    - - 3
+      - 0.0
+  - - - 4
+      - 4288
+      - 1
+      - 768
+      - 4
+      - 4
+      - 4
+      - 4288
+    - - 6
+      - 0.0
+  - - - 5056
+      - 1408
+      - 1
+      - 128
+      - 5056
+      - 5056
+      - 5056
+      - 1408
+    - - 0
+      - 3529.74
+  - - - 1024
+      - 1408
+      - 1
+      - 3328
+      - 1024
+      - 1024
+      - 1024
+      - 1408
+    - - 3
+      - 0.0
+  - - - 6784
+      - 1856
+      - 1
+      - 128
+      - 6784
+      - 6784
+      - 6784
+      - 1856
+    - - 0
+      - 3629.8
+  - - - 3584
+      - 6784
+      - 1
+      - 768
+      - 3584
+      - 3584
+      - 3584
+      - 6784
+    - - 3
+      - 0.0
+  - - - 4
+      - 4
+      - 1
+      - 3328
+      - 4
+      - 4
+      - 4
+      - 4
+    - - 6
+      - 0.0
+  - - - 128
+      - 1408
+      - 1
+      - 1792
+      - 128
+      - 128
+      - 128
+      - 1408
+    - - 3
+      - 0.0
+  - - - 4288
+      - 1408
+      - 1
+      - 768
+      - 4288
+      - 4288
+      - 4288
+      - 1408
+    - - 3
+      - 0.0
+  - - - 5056
+      - 2944
+      - 1
+      - 3328
+      - 5056
+      - 5056
+      - 5056
+      - 2944
+    - - 3
+      - 0.0
+  - - - 704
+      - 1024
+      - 1
+      - 1792
+      - 704
+      - 704
+      - 704
+      - 1024
+    - - 3
+      - 0.0
+  - - - 5888
+      - 128
+      - 1
+      - 128
+      - 5888
+      - 5888
+      - 5888
+      - 128
+    - - 0
+      - 1689.12
+  - - - 128
+      - 3584
+      - 1
+      - 1792
+      - 128
+      - 128
+      - 128
+      - 3584
+    - - 3
+      - 0.0
+  - - - 2368
+      - 704
+      - 1
+      - 256
+      - 2368
+      - 2368
+      - 2368
+      - 704
+    - - 3
+      - 0.0
+  - - - 1024
+      - 128
+      - 1
+      - 128
+      - 1024
+      - 1024
+      - 1024
+      - 128
+    - - 0
+      - 544.441
+  - - - 704
+      - 448
+      - 1
+      - 768
+      - 704
+      - 704
+      - 704
+      - 448
+    - - 3
+      - 0.0
+  - - - 1856
+      - 256
+      - 1
+      - 3328
+      - 1856
+      - 1856
+      - 1856
+      - 256
+    - - 3
+      - 0.0
+  - - - 1024
+      - 128
+      - 1
+      - 3328
+      - 1024
+      - 1024
+      - 1024
+      - 128
+    - - 3
+      - 0.0
+  - - - 448
+      - 64
+      - 1
+      - 3328
+      - 448
+      - 448
+      - 448
+      - 64
+    - - 3
+      - 0.0
+  - - - 2944
+      - 256
+      - 1
+      - 768
+      - 2944
+      - 2944
+      - 2944
+      - 256
+    - - 3
+      - 0.0
+  - - - 4
+      - 1024
+      - 1
+      - 3328
+      - 4
+      - 4
+      - 4
+      - 1024
+    - - 6
+      - 0.0
+  - - - 5888
+      - 2944
+      - 1
+      - 3328
+      - 5888
+      - 5888
+      - 5888
+      - 2944
+    - - 3
+      - 0.0
+  - - - 1024
+      - 1856
+      - 1
+      - 3328
+      - 1024
+      - 1024
+      - 1024
+      - 1856
+    - - 3
+      - 0.0
+  - - - 4
+      - 3584
+      - 1
+      - 768
+      - 4
+      - 4
+      - 4
+      - 3584
+    - - 6
+      - 0.0
+  - - - 448
+      - 2944
+      - 1
+      - 1792
+      - 448
+      - 448
+      - 448
+      - 2944
+    - - 3
+      - 0.0
+  - - - 704
+      - 4288
+      - 1
+      - 128
+      - 704
+      - 704
+      - 704
+      - 4288
+    - - 0
+      - 3079.29
+  - - - 4
+      - 5056
+      - 1
+      - 3328
+      - 4
+      - 4
+      - 4
+      - 5056
+    - - 6
+      - 0.0
+  - - - 2944
+      - 128
+      - 1
+      - 256
+      - 2944
+      - 2944
+      - 2944
+      - 128
+    - - 3
+      - 0.0
+  - - - 64
+      - 5888
+      - 1
+      - 128
+      - 64
+      - 64
+      - 64
+      - 5888
+    - - 0
+      - 1142.37
+  - - - 1856
+      - 5056
+      - 1
+      - 3328
+      - 1856
+      - 1856
+      - 1856
+      - 5056
+    - - 3
+      - 0.0
+  - - - 4288
+      - 448
+      - 1
+      - 256
+      - 4288
+      - 4288
+      - 4288
+      - 448
+    - - 3
+      - 0.0
+  - - - 448
+      - 704
+      - 1
+      - 3328
+      - 448
+      - 448
+      - 448
+      - 704
+    - - 3
+      - 0.0
+  - - - 5888
+      - 1024
+      - 1
+      - 3328
+      - 5888
+      - 5888
+      - 5888
+      - 1024
+    - - 3
+      - 0.0
+  - - - 4288
+      - 1856
+      - 1
+      - 1792
+      - 4288
+      - 4288
+      - 4288
+      - 1856
+    - - 3
+      - 0.0
+  - - - 1408
+      - 5056
+      - 1
+      - 3328
+      - 1408
+      - 1408
+      - 1408
+      - 5056
+    - - 3
+      - 0.0
+  - - - 256
+      - 256
+      - 1
+      - 768
+      - 256
+      - 256
+      - 256
+      - 256
+    - - 3
+      - 0.0
+  - - - 2368
+      - 1856
+      - 1
+      - 768
+      - 2368
+      - 2368
+      - 2368
+      - 1856
+    - - 3
+      - 0.0
+  - - - 64
+      - 1024
+      - 1
+      - 1792
+      - 64
+      - 64
+      - 64
+      - 1024
+    - - 3
+      - 0.0
+  - - - 6784
+      - 4288
+      - 1
+      - 128
+      - 6784
+      - 6784
+      - 6784
+      - 4288
+    - - 0
+      - 3765.83
+  - - - 3584
+      - 4
+      - 1
+      - 1792
+      - 3584
+      - 3584
+      - 3584
+      - 4
+    - - 6
+      - 0.0
+  - - - 2368
+      - 256
+      - 1
+      - 256
+      - 2368
+      - 2368
+      - 2368
+      - 256
+    - - 3
+      - 0.0
+  - - - 1408
+      - 5888
+      - 1
+      - 256
+      - 1408
+      - 1408
+      - 1408
+      - 5888
+    - - 3
+      - 0.0
+  - - - 3584
+      - 128
+      - 1
+      - 1792
+      - 3584
+      - 3584
+      - 3584
+      - 128
+    - - 3
+      - 0.0
+  - - - 4288
+      - 64
+      - 1
+      - 3328
+      - 4288
+      - 4288
+      - 4288
+      - 64
+    - - 3
+      - 0.0
+  - - - 4288
+      - 2944
+      - 1
+      - 3328
+      - 4288
+      - 4288
+      - 4288
+      - 2944
+    - - 3
+      - 0.0
+  - - - 1856
+      - 2368
+      - 1
+      - 3328
+      - 1856
+      - 1856
+      - 1856
+      - 2368
+    - - 3
+      - 0.0
+  - - - 448
+      - 1408
+      - 1
+      - 1792
+      - 448
+      - 448
+      - 448
+      - 1408
+    - - 3
+      - 0.0
+  - - - 5056
+      - 256
+      - 1
+      - 256
+      - 5056
+      - 5056
+      - 5056
+      - 256
+    - - 3
+      - 0.0
+  - - - 64
+      - 4288
+      - 1
+      - 256
+      - 64
+      - 64
+      - 64
+      - 4288
+    - - 3
+      - 0.0
+  - - - 256
+      - 1856
+      - 1
+      - 768
+      - 256
+      - 256
+      - 256
+      - 1856
+    - - 3
+      - 0.0
+  - - - 5056
+      - 1408
+      - 1
+      - 3328
+      - 5056
+      - 5056
+      - 5056
+      - 1408
+    - - 3
+      - 0.0
+  - - - 2368
+      - 2368
+      - 1
+      - 3328
+      - 2368
+      - 2368
+      - 2368
+      - 2368
+    - - 3
+      - 0.0
+  - - - 2944
+      - 6784
+      - 1
+      - 128
+      - 2944
+      - 2944
+      - 2944
+      - 6784
+    - - 0
+      - 3794.94
+  - - - 5056
+      - 1024
+      - 1
+      - 3328
+      - 5056
+      - 5056
+      - 5056
+      - 1024
+    - - 3
+      - 0.0
+  - - - 2368
+      - 3584
+      - 1
+      - 768
+      - 2368
+      - 2368
+      - 2368
+      - 3584
+    - - 3
+      - 0.0
+  - - - 448
+      - 5888
+      - 1
+      - 128
+      - 448
+      - 448
+      - 448
+      - 5888
+    - - 0
+      - 2933.13
+  - - - 5888
+      - 1408
+      - 1
+      - 3328
+      - 5888
+      - 5888
+      - 5888
+      - 1408
+    - - 3
+      - 0.0
+  - - - 704
+      - 2368
+      - 1
+      - 3328
+      - 704
+      - 704
+      - 704
+      - 2368
+    - - 3
+      - 0.0
+  - - - 5888
+      - 4288
+      - 1
+      - 3328
+      - 5888
+      - 5888
+      - 5888
+      - 4288
+    - - 3
+      - 0.0
+  - - - 1408
+      - 2368
+      - 1
+      - 3328
+      - 1408
+      - 1408
+      - 1408
+      - 2368
+    - - 3
+      - 0.0
+  - - - 704
+      - 4288
+      - 1
+      - 768
+      - 704
+      - 704
+      - 704
+      - 4288
+    - - 3
+      - 0.0
+  - - - 5056
+      - 5056
+      - 1
+      - 256
+      - 5056
+      - 5056
+      - 5056
+      - 5056
+    - - 3
+      - 0.0
+  - - - 448
+      - 128
+      - 1
+      - 3328
+      - 448
+      - 448
+      - 448
+      - 128
+    - - 3
+      - 0.0
+  - - - 128
+      - 448
+      - 1
+      - 1792
+      - 128
+      - 128
+      - 128
+      - 448
+    - - 3
+      - 0.0
+  - - - 1408
+      - 4
+      - 1
+      - 3328
+      - 1408
+      - 1408
+      - 1408
+      - 4
+    - - 6
+      - 0.0
+  - - - 128
+      - 64
+      - 1
+      - 768
+      - 128
+      - 128
+      - 128
+      - 64
+    - - 3
+      - 0.0
+  - - - 4
+      - 448
+      - 1
+      - 256
+      - 4
+      - 4
+      - 4
+      - 448
+    - - 6
+      - 0.0
+  - - - 1024
+      - 3584
+      - 1
+      - 3328
+      - 1024
+      - 1024
+      - 1024
+      - 3584
+    - - 3
+      - 0.0
+  - - - 1856
+      - 4288
+      - 1
+      - 768
+      - 1856
+      - 1856
+      - 1856
+      - 4288
+    - - 3
+      - 0.0
+  - - - 1024
+      - 4
+      - 1
+      - 768
+      - 1024
+      - 1024
+      - 1024
+      - 4
+    - - 6
+      - 0.0
+  - - - 5056
+      - 704
+      - 1
+      - 256
+      - 5056
+      - 5056
+      - 5056
+      - 704
+    - - 3
+      - 0.0
+  - - - 4
+      - 448
+      - 1
+      - 768
+      - 4
+      - 4
+      - 4
+      - 448
+    - - 6
+      - 0.0
+  - - - 256
+      - 128
+      - 1
+      - 256
+      - 256
+      - 256
+      - 256
+      - 128
+    - - 3
+      - 0.0
+  - - - 1856
+      - 448
+      - 1
+      - 256
+      - 1856
+      - 1856
+      - 1856
+      - 448
+    - - 3
+      - 0.0
+  - - - 64
+      - 1408
+      - 1
+      - 1792
+      - 64
+      - 64
+      - 64
+      - 1408
+    - - 3
+      - 0.0
+  - - - 4
+      - 2944
+      - 1
+      - 128
+      - 4
+      - 4
+      - 4
+      - 2944
+    - - 5
+      - 62.4191
+  - - - 64
+      - 704
+      - 1
+      - 1792
+      - 64
+      - 64
+      - 64
+      - 704
+    - - 3
+      - 0.0
+  - - - 4288
+      - 6784
+      - 1
+      - 768
+      - 4288
+      - 4288
+      - 4288
+      - 6784
+    - - 3
+      - 0.0
+  - - - 5888
+      - 256
+      - 1
+      - 256
+      - 5888
+      - 5888
+      - 5888
+      - 256
+    - - 3
+      - 0.0
+  - - - 1856
+      - 4
+      - 1
+      - 768
+      - 1856
+      - 1856
+      - 1856
+      - 4
+    - - 6
+      - 0.0
+  - - - 448
+      - 4288
+      - 1
+      - 768
+      - 448
+      - 448
+      - 448
+      - 4288
+    - - 3
+      - 0.0
+  - - - 5056
+      - 5056
+      - 1
+      - 768
+      - 5056
+      - 5056
+      - 5056
+      - 5056
+    - - 3
+      - 0.0
+  - - - 3584
+      - 64
+      - 1
+      - 256
+      - 3584
+      - 3584
+      - 3584
+      - 64
+    - - 3
+      - 0.0
+  - - - 704
+      - 256
+      - 1
+      - 128
+      - 704
+      - 704
+      - 704
+      - 256
+    - - 0
+      - 802.64
+  - - - 256
+      - 4
+      - 1
+      - 1792
+      - 256
+      - 256
+      - 256
+      - 4
+    - - 6
+      - 0.0
+  - - - 128
+      - 2944
+      - 1
+      - 256
+      - 128
+      - 128
+      - 128
+      - 2944
+    - - 3
+      - 0.0
+  - - - 6784
+      - 704
+      - 1
+      - 768
+      - 6784
+      - 6784
+      - 6784
+      - 704
+    - - 3
+      - 0.0
+  - - - 1408
+      - 64
+      - 1
+      - 1792
+      - 1408
+      - 1408
+      - 1408
+      - 64
+    - - 3
+      - 0.0
+  - - - 2368
+      - 4
+      - 1
+      - 3328
+      - 2368
+      - 2368
+      - 2368
+      - 4
+    - - 6
+      - 0.0
+  - - - 64
+      - 704
+      - 1
+      - 128
+      - 64
+      - 64
+      - 64
+      - 704
+    - - 0
+      - 201.178
+  - - - 704
+      - 2368
+      - 1
+      - 256
+      - 704
+      - 704
+      - 704
+      - 2368
+    - - 3
+      - 0.0
+  - - - 1024
+      - 704
+      - 1
+      - 256
+      - 1024
+      - 1024
+      - 1024
+      - 704
+    - - 3
+      - 0.0
+  - - - 128
+      - 128
+      - 1
+      - 3328
+      - 128
+      - 128
+      - 128
+      - 128
+    - - 3
+      - 0.0
+  - - - 704
+      - 1856
+      - 1
+      - 3328
+      - 704
+      - 704
+      - 704
+      - 1856
+    - - 3
+      - 0.0
+  - - - 2944
+      - 3584
+      - 1
+      - 128
+      - 2944
+      - 2944
+      - 2944
+      - 3584
+    - - 2
+      - 3474.14
+  - - - 64
+      - 5056
+      - 1
+      - 128
+      - 64
+      - 64
+      - 64
+      - 5056
+    - - 0
+      - 986.137
+  - - - 2944
+      - 2368
+      - 1
+      - 128
+      - 2944
+      - 2944
+      - 2944
+      - 2368
+    - - 0
+      - 3510.01
+  - - - 1408
+      - 1408
+      - 1
+      - 768
+      - 1408
+      - 1408
+      - 1408
+      - 1408
+    - - 3
+      - 0.0
+  - - - 1024
+      - 128
+      - 1
+      - 256
+      - 1024
+      - 1024
+      - 1024
+      - 128
+    - - 3
+      - 0.0
+  - - - 3584
+      - 1024
+      - 1
+      - 3328
+      - 3584
+      - 3584
+      - 3584
+      - 1024
+    - - 3
+      - 0.0
+  - - - 6784
+      - 448
+      - 1
+      - 128
+      - 6784
+      - 6784
+      - 6784
+      - 448
+    - - 0
+      - 2927.36
+  - - - 1024
+      - 4
+      - 1
+      - 128
+      - 1024
+      - 1024
+      - 1024
+      - 4
+    - - 4
+      - 21.3829
+  - - - 128
+      - 2368
+      - 1
+      - 768
+      - 128
+      - 128
+      - 128
+      - 2368
+    - - 3
+      - 0.0
+  - - - 6784
+      - 1024
+      - 1
+      - 1792
+      - 6784
+      - 6784
+      - 6784
+      - 1024
+    - - 3
+      - 0.0
+  - - - 256
+      - 6784
+      - 1
+      - 128
+      - 256
+      - 256
+      - 256
+      - 6784
+    - - 2
+      - 2246.24
+  - - - 4
+      - 4288
+      - 1
+      - 128
+      - 4
+      - 4
+      - 4
+      - 4288
+    - - 5
+      - 89.8121
+  - - - 1024
+      - 704
+      - 1
+      - 768
+      - 1024
+      - 1024
+      - 1024
+      - 704
+    - - 3
+      - 0.0
+  - - - 2368
+      - 128
+      - 1
+      - 128
+      - 2368
+      - 2368
+      - 2368
+      - 128
+    - - 0
+      - 1098.02
+  - - - 1856
+      - 4
+      - 1
+      - 3328
+      - 1856
+      - 1856
+      - 1856
+      - 4
+    - - 6
+      - 0.0
+  - - - 5056
+      - 3584
+      - 1
+      - 256
+      - 5056
+      - 5056
+      - 5056
+      - 3584
+    - - 3
+      - 0.0
+  - - - 1408
+      - 4
+      - 1
+      - 1792
+      - 1408
+      - 1408
+      - 1408
+      - 4
+    - - 6
+      - 0.0
+  - - - 4
+      - 256
+      - 1
+      - 1792
+      - 4
+      - 4
+      - 4
+      - 256
+    - - 6
+      - 0.0
+  - - - 5056
+      - 5888
+      - 1
+      - 256
+      - 5056
+      - 5056
+      - 5056
+      - 5888
+    - - 3
+      - 0.0
+  - - - 1408
+      - 1856
+      - 1
+      - 1792
+      - 1408
+      - 1408
+      - 1408
+      - 1856
+    - - 3
+      - 0.0
+  - - - 4288
+      - 64
+      - 1
+      - 1792
+      - 4288
+      - 4288
+      - 4288
+      - 64
+    - - 3
+      - 0.0
+  - - - 2944
+      - 448
+      - 1
+      - 1792
+      - 2944
+      - 2944
+      - 2944
+      - 448
+    - - 3
+      - 0.0
+  - - - 128
+      - 4288
+      - 1
+      - 768
+      - 128
+      - 128
+      - 128
+      - 4288
+    - - 3
+      - 0.0
+  - - - 5888
+      - 5888
+      - 1
+      - 128
+      - 5888
+      - 5888
+      - 5888
+      - 5888
+    - - 2
+      - 3755.87
+  - - - 3584
+      - 256
+      - 1
+      - 768
+      - 3584
+      - 3584
+      - 3584
+      - 256
+    - - 3
+      - 0.0
+  - - - 6784
+      - 1024
+      - 1
+      - 3328
+      - 6784
+      - 6784
+      - 6784
+      - 1024
+    - - 3
+      - 0.0
+  - - - 1856
+      - 3584
+      - 1
+      - 128
+      - 1856
+      - 1856
+      - 1856
+      - 3584
+    - - 0
+      - 3396.65
+  - - - 2944
+      - 4
+      - 1
+      - 768
+      - 2944
+      - 2944
+      - 2944
+      - 4
+    - - 6
+      - 0.0
+  - - - 4
+      - 128
+      - 1
+      - 3328
+      - 4
+      - 4
+      - 4
+      - 128
+    - - 6
+      - 0.0
+  - - - 5056
+      - 704
+      - 1
+      - 768
+      - 5056
+      - 5056
+      - 5056
+      - 704
+    - - 3
+      - 0.0
+  - - - 1024
+      - 4288
+      - 1
+      - 768
+      - 1024
+      - 1024
+      - 1024
+      - 4288
+    - - 3
+      - 0.0
+  - - - 2368
+      - 5056
+      - 1
+      - 1792
+      - 2368
+      - 2368
+      - 2368
+      - 5056
+    - - 3
+      - 0.0
+  - - - 3584
+      - 5888
+      - 1
+      - 768
+      - 3584
+      - 3584
+      - 3584
+      - 5888
+    - - 3
+      - 0.0
+  - - - 5888
+      - 4
+      - 1
+      - 256
+      - 5888
+      - 5888
+      - 5888
+      - 4
+    - - 6
+      - 0.0
+  - - - 64
+      - 2944
+      - 1
+      - 768
+      - 64
+      - 64
+      - 64
+      - 2944
+    - - 3
+      - 0.0
+  - - - 5888
+      - 3584
+      - 1
+      - 256
+      - 5888
+      - 5888
+      - 5888
+      - 3584
+    - - 3
+      - 0.0
+  - - - 1408
+      - 1024
+      - 1
+      - 256
+      - 1408
+      - 1408
+      - 1408
+      - 1024
+    - - 3
+      - 0.0
+  - - - 5888
+      - 5888
+      - 1
+      - 3328
+      - 5888
+      - 5888
+      - 5888
+      - 5888
+    - - 3
+      - 0.0
+  - - - 2368
+      - 4
+      - 1
+      - 1792
+      - 2368
+      - 2368
+      - 2368
+      - 4
+    - - 6
+      - 0.0
+  - - - 5056
+      - 128
+      - 1
+      - 256
+      - 5056
+      - 5056
+      - 5056
+      - 128
+    - - 3
+      - 0.0
+  - - - 5056
+      - 5056
+      - 1
+      - 3328
+      - 5056
+      - 5056
+      - 5056
+      - 5056
+    - - 3
+      - 0.0
+  - - - 2944
+      - 4288
+      - 1
+      - 256
+      - 2944
+      - 2944
+      - 2944
+      - 4288
+    - - 3
+      - 0.0
+  - - - 4288
+      - 256
+      - 1
+      - 128
+      - 4288
+      - 4288
+      - 4288
+      - 256
+    - - 0
+      - 2162.88
+  - - - 4288
+      - 6784
+      - 1
+      - 3328
+      - 4288
+      - 4288
+      - 4288
+      - 6784
+    - - 3
+      - 0.0
+  - - - 1856
+      - 1408
+      - 1
+      - 3328
+      - 1856
+      - 1856
+      - 1856
+      - 1408
+    - - 3
+      - 0.0
+  - - - 1408
+      - 1408
+      - 1
+      - 128
+      - 1408
+      - 1408
+      - 1408
+      - 1408
+    - - 0
+      - 2749.31
+  - - - 704
+      - 128
+      - 1
+      - 1792
+      - 704
+      - 704
+      - 704
+      - 128
+    - - 3
+      - 0.0
+  - - - 1024
+      - 256
+      - 1
+      - 3328
+      - 1024
+      - 1024
+      - 1024
+      - 256
+    - - 3
+      - 0.0
+  - - - 1024
+      - 5056
+      - 1
+      - 128
+      - 1024
+      - 1024
+      - 1024
+      - 5056
+    - - 2
+      - 3106.35
+  - - - 1024
+      - 64
+      - 1
+      - 256
+      - 1024
+      - 1024
+      - 1024
+      - 64
+    - - 3
+      - 0.0
+  - - - 3584
+      - 2368
+      - 1
+      - 128
+      - 3584
+      - 3584
+      - 3584
+      - 2368
+    - - 2
+      - 3364.33
+  - - - 2368
+      - 6784
+      - 1
+      - 256
+      - 2368
+      - 2368
+      - 2368
+      - 6784
+    - - 3
+      - 0.0
+  - - - 1856
+      - 5888
+      - 1
+      - 3328
+      - 1856
+      - 1856
+      - 1856
+      - 5888
+    - - 3
+      - 0.0
+  - - - 5888
+      - 128
+      - 1
+      - 256
+      - 5888
+      - 5888
+      - 5888
+      - 128
+    - - 3
+      - 0.0
+  - - - 1024
+      - 5888
+      - 1
+      - 1792
+      - 1024
+      - 1024
+      - 1024
+      - 5888
+    - - 3
+      - 0.0
+  - - - 256
+      - 704
+      - 1
+      - 128
+      - 256
+      - 256
+      - 256
+      - 704
+    - - 0
+      - 661.192
+  - - - 4
+      - 5888
+      - 1
+      - 768
+      - 4
+      - 4
+      - 4
+      - 5888
+    - - 6
+      - 0.0
+  - - - 128
+      - 5888
+      - 1
+      - 1792
+      - 128
+      - 128
+      - 128
+      - 5888
+    - - 3
+      - 0.0
+  - - - 1024
+      - 2944
+      - 1
+      - 768
+      - 1024
+      - 1024
+      - 1024
+      - 2944
+    - - 3
+      - 0.0
+  - - - 1024
+      - 1408
+      - 1
+      - 1792
+      - 1024
+      - 1024
+      - 1024
+      - 1408
+    - - 3
+      - 0.0
+  - - - 64
+      - 256
+      - 1
+      - 768
+      - 64
+      - 64
+      - 64
+      - 256
+    - - 3
+      - 0.0
+  - - - 1856
+      - 1024
+      - 1
+      - 3328
+      - 1856
+      - 1856
+      - 1856
+      - 1024
+    - - 3
+      - 0.0
+  - - - 4288
+      - 4288
+      - 1
+      - 128
+      - 4288
+      - 4288
+      - 4288
+      - 4288
+    - - 0
+      - 3804.58
+  - - - 3584
+      - 2944
+      - 1
+      - 3328
+      - 3584
+      - 3584
+      - 3584
+      - 2944
+    - - 3
+      - 0.0
+  - - - 2368
+      - 64
+      - 1
+      - 3328
+      - 2368
+      - 2368
+      - 2368
+      - 64
+    - - 3
+      - 0.0
+  - - - 3584
+      - 6784
+      - 1
+      - 3328
+      - 3584
+      - 3584
+      - 3584
+      - 6784
+    - - 3
+      - 0.0
+  - - - 64
+      - 128
+      - 1
+      - 256
+      - 64
+      - 64
+      - 64
+      - 128
+    - - 3
+      - 0.0
+  - - - 3584
+      - 1856
+      - 1
+      - 1792
+      - 3584
+      - 3584
+      - 3584
+      - 1856
+    - - 3
+      - 0.0
+  - - - 5888
+      - 5056
+      - 1
+      - 128
+      - 5888
+      - 5888
+      - 5888
+      - 5056
+    - - 2
+      - 3717.11
+  - - - 5888
+      - 64
+      - 1
+      - 1792
+      - 5888
+      - 5888
+      - 5888
+      - 64
+    - - 3
+      - 0.0
+  - - - 6784
+      - 256
+      - 1
+      - 256
+      - 6784
+      - 6784
+      - 6784
+      - 256
+    - - 3
+      - 0.0
+  - - - 2944
+      - 5056
+      - 1
+      - 768
+      - 2944
+      - 2944
+      - 2944
+      - 5056
+    - - 3
+      - 0.0
+  - - - 128
+      - 6784
+      - 1
+      - 128
+      - 128
+      - 128
+      - 128
+      - 6784
+    - - 1
+      - 1812.18
+  - - - 5056
+      - 256
+      - 1
+      - 128
+      - 5056
+      - 5056
+      - 5056
+      - 256
+    - - 0
+      - 2433.71
+  - - - 1856
+      - 6784
+      - 1
+      - 1792
+      - 1856
+      - 1856
+      - 1856
+      - 6784
+    - - 3
+      - 0.0
+  - - - 4288
+      - 256
+      - 1
+      - 1792
+      - 4288
+      - 4288
+      - 4288
+      - 256
+    - - 3
+      - 0.0
+  - - - 1408
+      - 3584
+      - 1
+      - 768
+      - 1408
+      - 1408
+      - 1408
+      - 3584
+    - - 3
+      - 0.0
+  - - - 3584
+      - 1408
+      - 1
+      - 256
+      - 3584
+      - 3584
+      - 3584
+      - 1408
+    - - 3
+      - 0.0
+  - - - 6784
+      - 448
+      - 1
+      - 256
+      - 6784
+      - 6784
+      - 6784
+      - 448
+    - - 3
+      - 0.0
+  - - - 1024
+      - 1408
+      - 1
+      - 256
+      - 1024
+      - 1024
+      - 1024
+      - 1408
+    - - 3
+      - 0.0
+  - - - 256
+      - 4
+      - 1
+      - 256
+      - 256
+      - 256
+      - 256
+      - 4
+    - - 6
+      - 0.0
+  - - - 1024
+      - 704
+      - 1
+      - 3328
+      - 1024
+      - 1024
+      - 1024
+      - 704
+    - - 3
+      - 0.0
+  - - - 5888
+      - 4288
+      - 1
+      - 768
+      - 5888
+      - 5888
+      - 5888
+      - 4288
+    - - 3
+      - 0.0
+  - - - 4288
+      - 64
+      - 1
+      - 256
+      - 4288
+      - 4288
+      - 4288
+      - 64
+    - - 3
+      - 0.0
+  - - - 704
+      - 1856
+      - 1
+      - 1792
+      - 704
+      - 704
+      - 704
+      - 1856
+    - - 3
+      - 0.0
+  - - - 64
+      - 4
+      - 1
+      - 3328
+      - 64
+      - 64
+      - 64
+      - 4
+    - - 6
+      - 0.0
+  - - - 2944
+      - 3584
+      - 1
+      - 1792
+      - 2944
+      - 2944
+      - 2944
+      - 3584
+    - - 3
+      - 0.0
+  - - - 2368
+      - 256
+      - 1
+      - 128
+      - 2368
+      - 2368
+      - 2368
+      - 256
+    - - 0
+      - 1670.66
+  - - - 2944
+      - 6784
+      - 1
+      - 3328
+      - 2944
+      - 2944
+      - 2944
+      - 6784
+    - - 3
+      - 0.0
+  - - - 1408
+      - 128
+      - 1
+      - 128
+      - 1408
+      - 1408
+      - 1408
+      - 128
+    - - 0
+      - 796.474
+  - - - 448
+      - 2368
+      - 1
+      - 128
+      - 448
+      - 448
+      - 448
+      - 2368
+    - - 0
+      - 2126.61
+  - - - 64
+      - 5056
+      - 1
+      - 256
+      - 64
+      - 64
+      - 64
+      - 5056
+    - - 3
+      - 0.0
+  - - - 3584
+      - 704
+      - 1
+      - 1792
+      - 3584
+      - 3584
+      - 3584
+      - 704
+    - - 3
+      - 0.0
+  - - - 704
+      - 4
+      - 1
+      - 1792
+      - 704
+      - 704
+      - 704
+      - 4
+    - - 6
+      - 0.0
+  - - - 1024
+      - 1024
+      - 1
+      - 128
+      - 1024
+      - 1024
+      - 1024
+      - 1024
+    - - 2
+      - 2051.98
+  - - - 2944
+      - 5888
+      - 1
+      - 256
+      - 2944
+      - 2944
+      - 2944
+      - 5888
+    - - 3
+      - 0.0
+  - - - 2368
+      - 5056
+      - 1
+      - 128
+      - 2368
+      - 2368
+      - 2368
+      - 5056
+    - - 0
+      - 3720.91
+  - - - 256
+      - 1024
+      - 1
+      - 3328
+      - 256
+      - 256
+      - 256
+      - 1024
+    - - 3
+      - 0.0
+  - - - 3584
+      - 2944
+      - 1
+      - 128
+      - 3584
+      - 3584
+      - 3584
+      - 2944
+    - - 2
+      - 3476.79
+  - - - 4288
+      - 1024
+      - 1
+      - 1792
+      - 4288
+      - 4288
+      - 4288
+      - 1024
+    - - 3
+      - 0.0
+  - - - 1856
+      - 2944
+      - 1
+      - 768
+      - 1856
+      - 1856
+      - 1856
+      - 2944
+    - - 3
+      - 0.0
+  - - - 3584
+      - 128
+      - 1
+      - 768
+      - 3584
+      - 3584
+      - 3584
+      - 128
+    - - 3
+      - 0.0
+  - - - 2368
+      - 6784
+      - 1
+      - 768
+      - 2368
+      - 2368
+      - 2368
+      - 6784
+    - - 3
+      - 0.0
+  - - - 5056
+      - 128
+      - 1
+      - 768
+      - 5056
+      - 5056
+      - 5056
+      - 128
+    - - 3
+      - 0.0
+  - - - 1024
+      - 2368
+      - 1
+      - 256
+      - 1024
+      - 1024
+      - 1024
+      - 2368
+    - - 3
+      - 0.0
+  - - - 1408
+      - 4288
+      - 1
+      - 128
+      - 1408
+      - 1408
+      - 1408
+      - 4288
+    - - 0
+      - 3435.17
+  - - - 2944
+      - 1408
+      - 1
+      - 1792
+      - 2944
+      - 2944
+      - 2944
+      - 1408
+    - - 3
+      - 0.0
+  - - - 64
+      - 1024
+      - 1
+      - 128
+      - 64
+      - 64
+      - 64
+      - 1024
+    - - 0
+      - 284.533
+  - - - 5888
+      - 448
+      - 1
+      - 256
+      - 5888
+      - 5888
+      - 5888
+      - 448
+    - - 3
+      - 0.0
+  - - - 5056
+      - 2368
+      - 1
+      - 1792
+      - 5056
+      - 5056
+      - 5056
+      - 2368
+    - - 3
+      - 0.0
+  - - - 64
+      - 2368
+      - 1
+      - 768
+      - 64
+      - 64
+      - 64
+      - 2368
+    - - 3
+      - 0.0
+  - - - 256
+      - 128
+      - 1
+      - 3328
+      - 256
+      - 256
+      - 256
+      - 128
+    - - 3
+      - 0.0
+  - - - 1408
+      - 6784
+      - 1
+      - 3328
+      - 1408
+      - 1408
+      - 1408
+      - 6784
+    - - 3
+      - 0.0
+  - - - 6784
+      - 1856
+      - 1
+      - 3328
+      - 6784
+      - 6784
+      - 6784
+      - 1856
+    - - 3
+      - 0.0
+  - - - 704
+      - 704
+      - 1
+      - 256
+      - 704
+      - 704
+      - 704
+      - 704
+    - - 3
+      - 0.0
+  - - - 5888
+      - 4288
+      - 1
+      - 128
+      - 5888
+      - 5888
+      - 5888
+      - 4288
+    - - 2
+      - 3695.04
+  - - - 2368
+      - 256
+      - 1
+      - 1792
+      - 2368
+      - 2368
+      - 2368
+      - 256
+    - - 3
+      - 0.0
+  - - - 1856
+      - 2368
+      - 1
+      - 1792
+      - 1856
+      - 1856
+      - 1856
+      - 2368
+    - - 3
+      - 0.0
+  - - - 1024
+      - 1408
+      - 1
+      - 128
+      - 1024
+      - 1024
+      - 1024
+      - 1408
+    - - 2
+      - 2332.75
+  - - - 4
+      - 64
+      - 1
+      - 3328
+      - 4
+      - 4
+      - 4
+      - 64
+    - - 6
+      - 0.0
+  - - - 1408
+      - 4288
+      - 1
+      - 1792
+      - 1408
+      - 1408
+      - 1408
+      - 4288
+    - - 3
+      - 0.0
+  - - - 64
+      - 4288
+      - 1
+      - 3328
+      - 64
+      - 64
+      - 64
+      - 4288
+    - - 3
+      - 0.0
+  - - - 64
+      - 448
+      - 1
+      - 3328
+      - 64
+      - 64
+      - 64
+      - 448
+    - - 3
+      - 0.0
+  - - - 128
+      - 1024
+      - 1
+      - 1792
+      - 128
+      - 128
+      - 128
+      - 1024
+    - - 3
+      - 0.0
+  - - - 1856
+      - 64
+      - 1
+      - 256
+      - 1856
+      - 1856
+      - 1856
+      - 64
+    - - 3
+      - 0.0
+  - - - 3584
+      - 64
+      - 1
+      - 1792
+      - 3584
+      - 3584
+      - 3584
+      - 64
+    - - 3
+      - 0.0
+  - - - 64
+      - 1024
+      - 1
+      - 768
+      - 64
+      - 64
+      - 64
+      - 1024
+    - - 3
+      - 0.0
+  - - - 448
+      - 704
+      - 1
+      - 256
+      - 448
+      - 448
+      - 448
+      - 704
+    - - 3
+      - 0.0
+  - - - 448
+      - 3584
+      - 1
+      - 768
+      - 448
+      - 448
+      - 448
+      - 3584
+    - - 3
+      - 0.0
+  - - - 3584
+      - 5056
+      - 1
+      - 256
+      - 3584
+      - 3584
+      - 3584
+      - 5056
+    - - 3
+      - 0.0
+  - - - 128
+      - 1408
+      - 1
+      - 3328
+      - 128
+      - 128
+      - 128
+      - 1408
+    - - 3
+      - 0.0
+  - - - 448
+      - 4
+      - 1
+      - 1792
+      - 448
+      - 448
+      - 448
+      - 4
+    - - 6
+      - 0.0
+  - - - 4
+      - 5888
+      - 1
+      - 128
+      - 4
+      - 4
+      - 4
+      - 5888
+    - - 5
+      - 118.996
+  - - - 6784
+      - 704
+      - 1
+      - 3328
+      - 6784
+      - 6784
+      - 6784
+      - 704
+    - - 3
+      - 0.0
+  - - - 1024
+      - 448
+      - 1
+      - 768
+      - 1024
+      - 1024
+      - 1024
+      - 448
+    - - 3
+      - 0.0
+  - - - 5056
+      - 6784
+      - 1
+      - 128
+      - 5056
+      - 5056
+      - 5056
+      - 6784
+    - - 0
+      - 3878.87
+  - - - 5056
+      - 1408
+      - 1
+      - 768
+      - 5056
+      - 5056
+      - 5056
+      - 1408
+    - - 3
+      - 0.0
+  - - - 256
+      - 64
+      - 1
+      - 1792
+      - 256
+      - 256
+      - 256
+      - 64
+    - - 3
+      - 0.0
+  - - - 448
+      - 5056
+      - 1
+      - 256
+      - 448
+      - 448
+      - 448
+      - 5056
+    - - 3
+      - 0.0
+  - - - 2368
+      - 448
+      - 1
+      - 1792
+      - 2368
+      - 2368
+      - 2368
+      - 448
+    - - 3
+      - 0.0
+  - - - 64
+      - 1856
+      - 1
+      - 128
+      - 64
+      - 64
+      - 64
+      - 1856
+    - - 0
+      - 524.949
+  - - - 1024
+      - 704
+      - 1
+      - 128
+      - 1024
+      - 1024
+      - 1024
+      - 704
+    - - 2
+      - 1458.65
+  - - - 704
+      - 128
+      - 1
+      - 128
+      - 704
+      - 704
+      - 704
+      - 128
+    - - 0
+      - 386.378
+  - - - 5056
+      - 448
+      - 1
+      - 3328
+      - 5056
+      - 5056
+      - 5056
+      - 448
+    - - 3
+      - 0.0
+  - - - 3584
+      - 256
+      - 1
+      - 256
+      - 3584
+      - 3584
+      - 3584
+      - 256
+    - - 3
+      - 0.0
+  - - - 4288
+      - 1024
+      - 1
+      - 256
+      - 4288
+      - 4288
+      - 4288
+      - 1024
+    - - 3
+      - 0.0
+  - - - 4288
+      - 256
+      - 1
+      - 256
+      - 4288
+      - 4288
+      - 4288
+      - 256
+    - - 3
+      - 0.0
+  - - - 64
+      - 5888
+      - 1
+      - 256
+      - 64
+      - 64
+      - 64
+      - 5888
+    - - 3
+      - 0.0
+  - - - 6784
+      - 64
+      - 1
+      - 768
+      - 6784
+      - 6784
+      - 6784
+      - 64
+    - - 3
+      - 0.0
+  - - - 6784
+      - 6784
+      - 1
+      - 3328
+      - 6784
+      - 6784
+      - 6784
+      - 6784
+    - - 3
+      - 0.0
+  - - - 1408
+      - 2944
+      - 1
+      - 1792
+      - 1408
+      - 1408
+      - 1408
+      - 2944
+    - - 3
+      - 0.0
+  - - - 5888
+      - 448
+      - 1
+      - 128
+      - 5888
+      - 5888
+      - 5888
+      - 448
+    - - 0
+      - 2612.08
+  - - - 1408
+      - 5888
+      - 1
+      - 3328
+      - 1408
+      - 1408
+      - 1408
+      - 5888
+    - - 3
+      - 0.0
+  - - - 4
+      - 3584
+      - 1
+      - 1792
+      - 4
+      - 4
+      - 4
+      - 3584
+    - - 6
+      - 0.0
+  - - - 448
+      - 2368
+      - 1
+      - 768
+      - 448
+      - 448
+      - 448
+      - 2368
+    - - 3
+      - 0.0
+  - - - 448
+      - 128
+      - 1
+      - 128
+      - 448
+      - 448
+      - 448
+      - 128
+    - - 0
+      - 250.86
+  - - - 2944
+      - 704
+      - 1
+      - 256
+      - 2944
+      - 2944
+      - 2944
+      - 704
+    - - 3
+      - 0.0
+  - - - 4
+      - 5056
+      - 1
+      - 1792
+      - 4
+      - 4
+      - 4
+      - 5056
+    - - 6
+      - 0.0
+  - - - 5056
+      - 2944
+      - 1
+      - 1792
+      - 5056
+      - 5056
+      - 5056
+      - 2944
+    - - 3
+      - 0.0
+  - - - 1024
+      - 3584
+      - 1
+      - 768
+      - 1024
+      - 1024
+      - 1024
+      - 3584
+    - - 3
+      - 0.0
+  - - - 4
+      - 256
+      - 1
+      - 3328
+      - 4
+      - 4
+      - 4
+      - 256
+    - - 6
+      - 0.0
+  - - - 448
+      - 5056
+      - 1
+      - 1792
+      - 448
+      - 448
+      - 448
+      - 5056
+    - - 3
+      - 0.0
+  - - - 5056
+      - 448
+      - 1
+      - 128
+      - 5056
+      - 5056
+      - 5056
+      - 448
+    - - 0
+      - 2884.3
+  - - - 2368
+      - 4288
+      - 1
+      - 768
+      - 2368
+      - 2368
+      - 2368
+      - 4288
+    - - 3
+      - 0.0
+  - - - 3584
+      - 704
+      - 1
+      - 128
+      - 3584
+      - 3584
+      - 3584
+      - 704
+    - - 1
+      - 2461.82
+  - - - 4
+      - 1408
+      - 1
+      - 768
+      - 4
+      - 4
+      - 4
+      - 1408
+    - - 6
+      - 0.0
+  - - - 1856
+      - 1024
+      - 1
+      - 768
+      - 1856
+      - 1856
+      - 1856
+      - 1024
+    - - 3
+      - 0.0
+  - - - 6784
+      - 5888
+      - 1
+      - 1792
+      - 6784
+      - 6784
+      - 6784
+      - 5888
+    - - 3
+      - 0.0
+  - - - 5056
+      - 1856
+      - 1
+      - 128
+      - 5056
+      - 5056
+      - 5056
+      - 1856
+    - - 0
+      - 3640.58
+  - - - 3584
+      - 5056
+      - 1
+      - 768
+      - 3584
+      - 3584
+      - 3584
+      - 5056
+    - - 3
+      - 0.0
+  - - - 3584
+      - 2368
+      - 1
+      - 3328
+      - 3584
+      - 3584
+      - 3584
+      - 2368
+    - - 3
+      - 0.0
+  - - - 6784
+      - 2368
+      - 1
+      - 768
+      - 6784
+      - 6784
+      - 6784
+      - 2368
+    - - 3
+      - 0.0
+  - - - 5056
+      - 704
+      - 1
+      - 128
+      - 5056
+      - 5056
+      - 5056
+      - 704
+    - - 0
+      - 3191.78
+  - - - 3584
+      - 3584
+      - 1
+      - 256
+      - 3584
+      - 3584
+      - 3584
+      - 3584
+    - - 3
+      - 0.0
+  - - - 704
+      - 5888
+      - 1
+      - 3328
+      - 704
+      - 704
+      - 704
+      - 5888
+    - - 3
+      - 0.0
+  - - - 128
+      - 4
+      - 1
+      - 3328
+      - 128
+      - 128
+      - 128
+      - 4
+    - - 6
+      - 0.0
+  - - - 5888
+      - 128
+      - 1
+      - 3328
+      - 5888
+      - 5888
+      - 5888
+      - 128
+    - - 3
+      - 0.0
+  - - - 5056
+      - 128
+      - 1
+      - 128
+      - 5056
+      - 5056
+      - 5056
+      - 128
+    - - 0
+      - 1736.47
+  - - - 2368
+      - 4
+      - 1
+      - 768
+      - 2368
+      - 2368
+      - 2368
+      - 4
+    - - 6
+      - 0.0
+  - - - 5888
+      - 1856
+      - 1
+      - 1792
+      - 5888
+      - 5888
+      - 5888
+      - 1856
+    - - 3
+      - 0.0
+  - - - 2368
+      - 2368
+      - 1
+      - 768
+      - 2368
+      - 2368
+      - 2368
+      - 2368
+    - - 3
+      - 0.0
+  - - - 1856
+      - 2368
+      - 1
+      - 768
+      - 1856
+      - 1856
+      - 1856
+      - 2368
+    - - 3
+      - 0.0
+  - - - 2944
+      - 1408
+      - 1
+      - 128
+      - 2944
+      - 2944
+      - 2944
+      - 1408
+    - - 0
+      - 3260.22
+- null

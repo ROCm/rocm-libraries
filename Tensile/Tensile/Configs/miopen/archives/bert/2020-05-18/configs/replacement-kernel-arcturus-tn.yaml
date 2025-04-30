@@ -1,0 +1,141 @@
+GlobalParameters:
+  MinimumRequiredVersion: 4.4.0
+  PrintLevel: 1
+  ForceRedoBenchmarkProblems: True
+  ForceRedoLibraryLogic: True
+  ForceRedoLibraryClient: True
+  CMakeBuildType: Release
+  EnqueuesPerSync: 10
+  NumBenchmarks: 10
+  SyncsPerBenchmark: 1
+  LibraryPrintDebug: False
+  NumElementsToValidate: 0
+  ValidationMaxToPrint: 0
+  ValidationPrintValids: False
+  ShortNames: False
+  MergeFiles: True
+  Platform: 0
+  Device: 0
+  KernelTime: True
+  PinClocks: False
+  SleepPercent: 0
+  DataInitTypeBeta : 0
+  DataInitTypeAlpha: 1
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeC: 6
+  DataInitTypeD: 6
+  PrintTensorA: 0
+  PrintTensorB: 0
+  PrintTensorC: 0
+  PrintTensorD: 0
+
+BenchmarkProblems:
+
+  ########################################
+  # TN - standard
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      DestDataType: s
+      ComputeDataType: s
+      #HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - EdgeType: ["ShiftPtr"]
+        - LoopTail: [True]
+        - PrefetchLocalRead: [True]
+      ForkParameters:
+        - PrefetchGlobalRead: [True]
+        - ThreadTile:
+          - [ 4, 4 ]
+        - WorkGroup:
+          - [ 16, 32, 1 ]
+        - WorkGroupMapping: [8]
+        - GlobalSplitU: [1]
+        - DepthU: [64]
+        - VectorWidth: [-1]
+        - AssertSummationElementMultiple: [8]
+        - AssertFree0ElementMultiple: [8]
+        - ReplacementKernel: [True]
+      BenchmarkForkParameters:
+      JoinParameters:
+        - MacroTile
+        - GlobalSplitU
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          #- Exact: [ 960,1024,1,1024,992,992,1056,1088 ]
+          - Exact: [ 768,1280,1,768,768,768,800,832 ]
+          - Exact: [ 3072,512,1,1024,3072,3072,1024,1024 ]
+          - Exact: [ 1024,3072,1,1024,1088,1088,1056,1088 ]
+          - Exact: [ 1024,2048,1,4096,1088,1088,4128,4160 ]
+         # - Exact: [ 1920,2048,1,2048,1984,1984,2112,2112 ]
+         # - Exact: [ 2880,3072,1,3072,2944,2944,3136,3136 ]
+         # - Exact: [ 3840,4096,1,4096,3904,3904,4160,4160 ]
+         # - Exact: [ 7680,8192,1,8192,7744,7744,8256,8256 ]
+          #- Exact: [ 512,1024,1,1024,576,576,1088,1088 ]
+         # - Exact: [ 512,2048,1,2048,576,576,2112,2112 ]
+         # - Exact: [ 512,3072,1,3072,576,576,3136,3136 ]
+         # - Exact: [ 512,4096,1,4096,576,576,4160,4160 ]
+         # - Exact: [ 512,8192,1,8192,576,576,8256,8256 ]
+          #- Exact: [ 1024,512,1,1024,1088,1088,1088,1088 ]
+         # - Exact: [ 2048,512,1,2048,2112,2112,2112,2112 ]
+         # - Exact: [ 3072,512,1,3072,3136,3136,3136,3136 ]
+         ## - Exact: [ 4096,512,1,4096,4160,4160,4160,4160 ]
+         # - Exact: [ 8192,512,1,8192,8256,8256,8256,8256 ]
+         # - Exact: [ 512,512,1,512,576,576,576,576 ]
+         # - Exact: [ 1024,1024,1,1024,1088,1088,1088,1088 ]
+         # - Exact: [ 2048,2048,1,2048,2112,2112,2112,2112 ]
+         # - Exact: [ 3072,3072,1,3072,3136,3136,3136,3136 ]
+         # - Exact: [ 4096,4096,1,4096,4160,4160,4160,4160 ]
+         # - Exact: [ 8192,8192,1,8192,8256,8256,8256,8256 ]
+
+LibraryLogic:
+  ArchitectureName: gfx908
+  DeviceNames: [Device 7380, Device 7388, Device 738c, Device 7390, Device 731f]
+  ScheduleName: arcturus
+
+#  ########################################
+#LibraryLogic:
+#  ########################################
+#LibraryLogic:
+#    ScheduleName: "vega20"
+#    DeviceNames: ["Device 66a0", "Device 66a1", "Device 66a7", "Vega 20"]
+#    ArchitectureName: "gfx906"
+
+#  ########################################
+#LibraryLogic:
+#  ########################################
+#LibraryLogic:
+#    ScheduleName: "vega20"
+#    DeviceNames: ["Device 66a0", "Device 66a1", "Device 66a7", "Vega 20"]
+#    ArchitectureName: "gfx906"
+#
+##   ScheduleName: "vega10"
+##   DeviceNames: ["Device 6863", "Device 6862", "Device 687f", "Device 6860", "Device 6861", "Vega 10 XTX [Radeon Vega Frontier Edition]", "Vega [Radeon RX Vega]"]
+##   ArchitectureName: "gfx900"
+#
+##   ScheduleName: "mi25"
+##   DeviceNames: ["Device 6860"]
+##   ArchitectureName: "gfx900"
+#
+##   ScheduleName: "r9nano"
+##   DeviceNames: ["Device 7300"]
+##   ArchitectureName: "gfx803"
+#
+##   ScheduleName: "hip"
+##   DeviceNames: ["Device 0000"]
+##   ArchitectureName: "fallback"
+#
+#LibraryClient:
+

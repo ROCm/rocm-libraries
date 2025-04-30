@@ -1,0 +1,201 @@
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1151] # not supported by arch
+
+GlobalParameters:
+  NumElementsToValidate: -1
+  BoundsCheck: True
+  KernelTime: True
+
+BenchmarkProblems:
+  ########################################
+  # NT - standard
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: z
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - EdgeType: ["ShiftPtr"]
+      ForkParameters:
+        - TransposeLDS: [0, 1]
+        - MatrixInstruction:
+          - [16, 16, 4, 1]
+          - [16, 16, 4, 1,  1,  4,1,  1,4]  # 64x64
+          - [16, 16, 4, 1,  1,  2,2,  2,2]  # 64x64
+          - [16, 16, 4, 1,  1,  1,4,  4,1]  # 64x64
+          - [4, 4, 4, 4,  1,  1,1,  4,1]  # 16x16
+          - [4, 4, 4, 4,  2,  1,1,  2,2]  # 16x16
+          - [4, 4, 4, 4,  4,  1,1,  1,4]  # 16x16
+        - ThreadTile:
+          - [ 1, 32 ]
+        - WorkGroup:
+          - [ 64, 4, 1 ]
+        - PrefetchLocalRead: [0, 1, 3]
+        - PrefetchGlobalRead: [True]
+        - SourceSwap: [0,1]
+        - WorkGroupMapping: [8]
+        - DepthU: [8, 16]
+        - VectorWidth: [1]
+        - AssertSummationElementMultiple: [1, 32]
+        - StoreCInUnroll: [0, 1]
+        - PersistentKernel: [0, 1]
+        - PrefetchAcrossPersistent: [1]
+        - PrefetchAcrossPersistentMode: [1]
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [1024, 1031], [1024, 1031], [1], [1024, 1031] ]
+
+  ########################################
+  # TN - standard
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: z
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - EdgeType: ["ShiftPtr"]
+      ForkParameters:
+        - TransposeLDS: [0, 1]
+        - MatrixInstruction:
+          - [16, 16, 4, 1]
+          - [16, 16, 4, 1,  1,  4,1,  1,4]  # 64x64
+          - [16, 16, 4, 1,  1,  2,2,  2,2]  # 64x64
+          - [16, 16, 4, 1,  1,  1,4,  4,1]  # 64x64
+          - [4, 4, 4, 4,  1,  1,1,  4,1]  # 16x16
+          - [4, 4, 4, 4,  2,  1,1,  2,2]  # 16x16
+          - [4, 4, 4, 4,  4,  1,1,  1,4]  # 16x16
+        - ThreadTile:
+          - [ 1, 32 ]
+        - WorkGroup:
+          - [ 64, 4, 1 ]
+        - PrefetchLocalRead: [0, 1, 3]
+        - PrefetchGlobalRead: [True]
+        - SourceSwap: [0,1]
+        - WorkGroupMapping: [8]
+        - DepthU: [8, 16]
+        - VectorWidth: [1]
+        - AssertSummationElementMultiple: [1, 32]
+        - StoreCInUnroll: [0, 1]
+        - PersistentKernel: [0, 1]
+        - PrefetchAcrossPersistent: [1]
+        - PrefetchAcrossPersistentMode: [1]
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [1024, 1031], [1024, 1031], [1], [1024, 1031] ]
+
+  ########################################
+  # NN - standard
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: z
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - EdgeType: ["ShiftPtr"]
+      ForkParameters:
+        - TransposeLDS: [0, 1]
+        - MatrixInstruction:
+          - [16, 16, 4, 1]
+          - [16, 16, 4, 1,  1,  4,1,  1,4]  # 64x64
+          - [16, 16, 4, 1,  1,  2,2,  2,2]  # 64x64
+          - [16, 16, 4, 1,  1,  1,4,  4,1]  # 64x64
+          - [4, 4, 4, 4,  1,  1,1,  4,1]  # 16x16
+          - [4, 4, 4, 4,  2,  1,1,  2,2]  # 16x16
+          - [4, 4, 4, 4,  4,  1,1,  1,4]  # 16x16
+        - ThreadTile:
+          - [ 1, 32 ]
+        - WorkGroup:
+          - [ 64, 4, 1 ]
+        - PrefetchLocalRead: [0, 1, 3]
+        - PrefetchGlobalRead: [True]
+        - SourceSwap: [0,1]
+        - WorkGroupMapping: [8]
+        - DepthU: [8, 16]
+        - VectorWidth: [1]
+        - AssertSummationElementMultiple: [1, 32]
+        - StoreCInUnroll: [0, 1]
+        - PersistentKernel: [0, 1]
+        - PrefetchAcrossPersistent: [1]
+        - PrefetchAcrossPersistentMode: [1]
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [1024, 1031], [1024, 1031], [1], [1024, 1031] ]
+
+  ########################################
+  # TT - standard
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: z
+      TransposeA: True
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - EdgeType: ["ShiftPtr"]
+      ForkParameters:
+        - TransposeLDS: [0, 1]
+        - MatrixInstruction:
+          - [16, 16, 4, 1]
+          - [16, 16, 4, 1,  1,  4,1,  1,4]  # 64x64
+          - [16, 16, 4, 1,  1,  2,2,  2,2]  # 64x64
+          - [16, 16, 4, 1,  1,  1,4,  4,1]  # 64x64
+          - [4, 4, 4, 4,  1,  1,1,  4,1]  # 16x16
+          - [4, 4, 4, 4,  2,  1,1,  2,2]  # 16x16
+          - [4, 4, 4, 4,  4,  1,1,  1,4]  # 16x16
+        - ThreadTile:
+          - [ 1, 32 ]
+        - WorkGroup:
+          - [ 64, 4, 1 ]
+        - PrefetchLocalRead: [0, 1, 3]
+        - PrefetchGlobalRead: [True]
+        - SourceSwap: [0,1]
+        - WorkGroupMapping: [8]
+        - DepthU: [8, 16]
+        - VectorWidth: [1]
+        - AssertSummationElementMultiple: [1, 32]
+        - StoreCInUnroll: [0, 1]
+        - PersistentKernel: [0, 1]
+        - PrefetchAcrossPersistent: [1]
+        - PrefetchAcrossPersistentMode: [1]
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [1024, 1031], [1024, 1031], [1], [1024, 1031] ]
+

@@ -1,0 +1,65 @@
+GlobalParameters:
+  EnqueuesPerSync: 1
+  LibraryPrintDebug: 1
+  NumElementsToValidate: 1000
+  KernelTime: True
+  #PinClocks: True
+  SleepPercent: 0
+  DataInitTypeBeta : 0
+  DataInitTypeA: 1
+  DataInitTypeB: 1
+  DataInitTypeC: 0
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 0
+  PrintSolutionRejectionReason: 0
+  PrintWinnersOnly: 1
+  PrintTensorA: 0
+  PrintTensorB: 0
+  PrintTensorD: 0
+  MergeFiles: 0
+
+BenchmarkProblems:
+  -
+    - # ProblemType
+      OperationType: TensorContraction
+      DataType: s
+      DestDataType: s
+      UseBeta: False
+      NumIndicesC: 2
+      IndexAssignmentsA: [ 0, 2, 3]
+      IndexAssignmentsB: [ 1, 2, 3]
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - EdgeType: ["ShiftPtr"]
+        - LoopTail: [0]  # minimize differences
+      ForkParameters:
+        - PackSummationDims: [1]
+        - UnrollIncIsDepthU: [1]
+        - KernelLanguage: [Source,Assembly]
+          #- KernelLanguage: [Assembly]
+        - PrefetchLocalRead: [False]
+        - PrefetchGlobalRead: [False]
+        - ThreadTile:
+          - [ 2, 2 ]
+        - WorkGroup:
+          - [ 8, 8, 1 ]
+        - StaggerU: [0]
+        - StaggerUMapping: [0]
+        - GlobalSplitU: [1,2]
+        - DepthU: [ 4]
+        - VectorWidth: [1]
+        - FractionalLoad: [0]
+        - ExpandPointerSwap: [0]
+      BenchmarkForkParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          #- Exact: [ 16, 16, 2, 24]
+          #- Exact: [ 16, 16, 2, 8]
+          - Range: [ [16], [16], [1,2], [20]]
+          #- Range: [ [16], [16], [2], [3], [4]] # fail
+          #- Range: [ [16], [16], [2], [2], [4]] # fail
+            #- Range: [ [16], [16], [2], [1,1,30], [4]] # fail
+          #- Range: [ [16], [16], [1], [2,1,30], [4]] # pass

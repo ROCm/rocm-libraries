@@ -1,0 +1,64 @@
+GlobalParameters:
+  MinimumRequiredVersion: 4.2.0
+  EnqueuesPerSync: 1
+  SyncsPerBenchmark: 1
+  NumElementsToValidate: -1
+  #ValidationMaxToPrint: -1
+  DataInitTypeA : 1
+  DataInitTypeB : 1
+  DataInitTypeC : 4
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 0
+  LibraryPrintDebug: 0
+  CEqualD: True
+  PrintSolutionRejectionReason: 1
+
+BenchmarkProblems:
+  - #  1D activation with 2D filter, 2 summations
+    - # ProblemType
+      OperationType: TensorContraction
+      DataType: s
+      DestDataType: s
+      UseBeta: False
+      NumIndicesC: 2
+      IndexAssignmentsA: [ 0, 3, 2 ]
+      IndexAssignmentsB: [ 3, 2, 1 ]
+      #  Mapping to conv tensor: W*H=0='I', Cout=1='J', S=2='K', R=3='L"
+      #SetConstStrideA: [ [3, 1] ] # set strideA1K == 1, strideA2L= "W" (can't specify this)
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - EdgeType: ["ShiftPtr"]
+        - LoopTail: [False]
+      ForkParameters:
+        #- KernelLanguage: ["Source"]
+        - KernelLanguage: ["Source", "Assembly"]
+        - PrefetchGlobalRead: [1]
+        - ExpandPointerSwap: [0]
+        - PrefetchLocalRead: [1]
+        - ThreadTile:
+          - [ 4, 4 ]
+        - WorkGroup:
+          - [  8, 8, 1 ]
+        - DepthU: [4]
+        - VectorWidth: [1]
+        - GlobalReadVectorWidth: [1] # Set GuaranteeNoPartialA
+        - StaggerU: [0]
+        - UseSgprForGRO: [0]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          #- Exact : [32, 32, 1, 4] # one unroll iter
+          #- Exact : [32, 32, 2, 6] # simplest tail lo9op case
+          # - Exact : [32, 32, 1, 8] # 2 unroll iters
+            #- Exact : [32, 32, 1, 12]  # 3 unroll iters
+            #- Exact : [32, 32, 2, 4]
+            - Exact : [32, 32, 1, 8]
+            - Exact : [32, 32, 2, 8]
+            - Exact : [32, 32, 3, 8]
+            - Exact : [32, 32, 4, 8]
+            #- Range: [ [32], [32], [1,1,8], [64] ] # vary higher sum dimension
+            #- Range: [ [32], [32], [8], [1,1,12] ] # vary unroll including hit tail loop in some cases.

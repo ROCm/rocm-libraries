@@ -1,0 +1,5 @@
+ASEM = AssertSummationElementMultiple
+If input sum dim is 2X or 4X, then some important optimizations can be used.
+Set the ASEM here and test those optimizations.
+
+Also test other assertions include AssertFree0ElementMultiple.  (AF0EM)

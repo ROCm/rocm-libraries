@@ -1,0 +1,249 @@
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1151] # not supported by arch
+
+GlobalParameters:
+  NumElementsToValidate: -1
+  BoundsCheck: True
+  KernelTime: True
+  #PrintSolutionRejectionReason: True
+  #MaxFileName: 256
+
+BenchmarkProblems:
+  ########################################
+  # BBS NT - standard
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: B
+      DestDataType: B
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+  ########################################
+  # BBS NT - LSU + GSU + VAW + BS[0,1]
+  ########################################
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - EdgeType: ["ShiftPtr"]
+        - LoopTail: [True]
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+            - [16, 16, 16, 1, 1, 2, 2, 1,2]  # 32x64
+            - [16, 16, 16, 1, 1, 2, 2, 2,1]  # 64x32
+            - [16, 16, 16, 1, 1, 2, 2, 4,1]  # 128x32
+            - [16, 16, 16, 1, 1, 4, 2, 2,2]  # 128x64
+        #- ThreadTile:
+        #  - [ 2, 2 ]
+        - WorkGroup:
+          - [ 64, 1, 1 ] # only WG2 is effective for 9 parameter MI
+          - [ 64, 1, 2 ] # only WG2 is effective for 9 parameter MI
+          - [ 64, 1, 4 ] # only WG2 is effective for 9 parameter MI
+        - AssertFree0ElementMultiple : [2,4]
+        - AssertFree1ElementMultiple : [2]
+        - AssertSummationElementMultiple: [2]
+        - DepthU: [32]#[8,16,32]
+        - GlobalSplitU: [1,4]
+        - GlobalSplitUAlgorithm: ["SingleBuffer","MultipleBuffer"]
+        - 1LDSBuffer: [0]
+        - LoopTail: [True]
+        - OptNoLoadLoop: [1]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - StaggerU: [0]
+        - SourceSwap: [0,1]
+        #- TransposeLDS: [0,1]
+        - GlobalReadVectorWidth: [4]
+        - VectorWidth: [2,4]
+        - VectorAtomicWidth: [-1,1,2]
+        #- WaveSeparateGlobalReadB: [1]
+        #- MIArchVgpr: [True, False]
+        - NumElementsPerBatchStore: [4]
+        - UseSgprForGRO: [0]
+        - BufferLoad: [0,1]
+        - BufferStore: [0,1]
+        - GlobalSplitUAtomicAdd: [0,1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [ 252, 254, 1, 2050]
+
+  ########################################
+  # BBS NT - LSU
+  ########################################
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - EdgeType: ["ShiftPtr"]
+        - LoopTail: [True]
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+            - [16, 16, 16, 1, 1, 2, 2, 1,2]  # 32x64
+            - [16, 16, 16, 1, 1, 2, 2, 2,1]  # 64x32
+            - [16, 16, 16, 1, 1, 2, 2, 4,1]  # 128x32
+            - [16, 16, 16, 1, 1, 4, 2, 2,2]  # 128x64
+        #- ThreadTile:
+        #  - [ 2, 2 ]
+        - WorkGroup:
+          - [ 64, 1, 1 ] # only WG2 is effective for 9 parameter MI
+          - [ 64, 1, 2 ] # only WG2 is effective for 9 parameter MI
+          #- [ 64, 1, 4 ] # only WG2 is effective for 9 parameter MI
+        - AssertFree0ElementMultiple : [2,4]
+        - AssertFree1ElementMultiple : [2]
+        - AssertSummationElementMultiple: [2]
+        - DepthU: [32]#[8,16,32]
+        #- GlobalSplitU: [1,4]
+        #- GlobalSplitUAlgorithm: ["SingleBuffer","MultipleBuffer"]
+        - 1LDSBuffer: [0]
+        - LoopTail: [True]
+        - OptNoLoadLoop: [1]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - StaggerU: [0]
+        - SourceSwap: [0,1]
+        #- TransposeLDS: [0,1]
+        - GlobalReadVectorWidth: [4]
+        - VectorWidth: [2,4]
+        - VectorAtomicWidth: [-1,1,2]
+        #- WaveSeparateGlobalReadB: [1]
+        #- MIArchVgpr: [True, False]
+        - NumElementsPerBatchStore: [4]
+        - UseSgprForGRO: [0]
+        #- BufferLoad: [0,1]
+        #- BufferStore: [0,1]
+        #- GlobalSplitUAtomicAdd: [0,1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [ 252, 254, 1, 2050]
+
+  ########################################
+  # BSS NT - standard
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: B
+      DestDataType: S
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+  ########################################
+  # BSS NT - LSU + GSU + VAW + BS[0,1]
+  ########################################
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - EdgeType: ["ShiftPtr"]
+        - LoopTail: [True]
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+            - [16, 16, 16, 1, 1, 2, 2, 1,2]  # 32x64
+            - [16, 16, 16, 1, 1, 2, 2, 2,1]  # 64x32
+            - [16, 16, 16, 1, 1, 2, 2, 4,1]  # 128x32
+            - [16, 16, 16, 1, 1, 4, 2, 2,2]  # 128x64
+        #- ThreadTile:
+        #  - [ 2, 2 ]
+        - WorkGroup:
+          - [ 64, 1, 1 ] # only WG2 is effective for 9 parameter MI
+          - [ 64, 1, 2 ] # only WG2 is effective for 9 parameter MI
+          - [ 64, 1, 4 ] # only WG2 is effective for 9 parameter MI
+        - AssertFree0ElementMultiple : [2,4]
+        - AssertFree1ElementMultiple : [2]
+        - AssertSummationElementMultiple: [2]
+        - DepthU: [32]#[8,16,32]
+        - GlobalSplitU: [1,4]
+        - GlobalSplitUAlgorithm: ["SingleBuffer","MultipleBuffer"]
+        - 1LDSBuffer: [0]
+        - LoopTail: [True]
+        - OptNoLoadLoop: [1]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - StaggerU: [0]
+        - SourceSwap: [0,1]
+        #- TransposeLDS: [0,1]
+        - GlobalReadVectorWidth: [4]
+        - VectorWidth: [2,4]
+        - VectorAtomicWidth: [-1,1,2]
+        #- WaveSeparateGlobalReadB: [1]
+        #- MIArchVgpr: [True, False]
+        - NumElementsPerBatchStore: [0]
+        - UseSgprForGRO: [0]
+        - BufferLoad: [0,1]
+        - BufferStore: [0,1]
+        - GlobalSplitUAtomicAdd: [0,1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [ 252, 254, 1, 2050]
+
+  ########################################
+  # BSS NT - LSU + GSU + MIB>1
+  ########################################
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - EdgeType: ["ShiftPtr"]
+        - LoopTail: [True]
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+            # MIB>1
+            - [16, 16, 4, 4, 1, 2, 2, 2,1]  # 64x128
+            - [16, 16, 4, 4, 2, 2, 2, 2,1]  # 128x64
+            - [16, 16, 4, 4, 4, 2, 2, 1,2]  # 128x64
+            - [32, 32, 4, 2, 1, 2, 2, 2,1]  # 128x128
+            - [32, 32, 4, 2, 2, 2, 2, 1,2]  # 128x128
+        #- ThreadTile:
+        #  - [ 2, 2 ]
+        - WorkGroup:
+          - [ 64, 1, 1 ] # only WG2 is effective for 9 parameter MI
+          - [ 64, 1, 2 ] # only WG2 is effective for 9 parameter MI
+          - [ 64, 1, 4 ] # only WG2 is effective for 9 parameter MI
+        - AssertFree0ElementMultiple : [1,2,4]
+        - AssertFree1ElementMultiple : [1,2,4]
+        - AssertSummationElementMultiple: [2]
+        - DepthU: [32]#[8,16,32]
+        - GlobalSplitU: [1,4]
+        #- GlobalSplitUAlgorithm: ["SingleBuffer","MultipleBuffer"]
+        - 1LDSBuffer: [0]
+        - LoopTail: [True]
+        - OptNoLoadLoop: [1]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - StaggerU: [0]
+        - SourceSwap: [0,1]
+        #- TransposeLDS: [0,1]
+        - GlobalReadVectorWidth: [4]
+        - VectorWidth: [2,4]
+        - VectorAtomicWidth: [-1,1,2]
+        #- WaveSeparateGlobalReadB: [1]
+        #- MIArchVgpr: [True, False]
+        - NumElementsPerBatchStore: [0]
+        #- UseSgprForGRO: [0]
+        #- BufferLoad: [0,1]
+        #- BufferStore: [0,1]
+        #- GlobalSplitUAtomicAdd: [0,1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [ 252, 252, 1, 2050]
+
+
+

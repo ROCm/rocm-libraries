@@ -1,0 +1,76 @@
+# A config to generate a fast kernel for large DGEMMs
+GlobalParameters:
+  MinimumRequiredVersion: 4.0.2
+  PrintLevel: 1
+  ForceRedoBenchmarkProblems: True
+  ForceRedoLibraryLogic: True
+  ForceRedoLibraryClient: True
+  CMakeBuildType: Release
+  EnqueuesPerSync: 30
+  SyncsPerBenchmark: 1
+  LibraryPrintDebug: False
+  NumElementsToValidate: 1000
+  ValidationMaxToPrint: 4
+  ValidationPrintValids: False
+  ShortNames: False
+  MergeFiles: True
+  Platform: 0
+  Device: 0
+  KernelTime: True
+  PinClocks: True
+  SleepPercent: 000
+  DataInitTypeBeta : 1 # Should be 1 for HPL
+  PrintSolutionRejectionReason: 1
+
+BenchmarkProblems:
+  ########################################
+  # NT - standard
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: d
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - EdgeType: ["ShiftPtr"]
+      ForkParameters:
+        #- PersistentKernel: [0,2,4]
+        - PersistentKernel: [0,2,4]
+        - PrefetchGlobalRead: [True]
+        - PrefetchLocalRead: [True,False]
+        - SuppressNoLoadLoop: [0] # suppress=0 puts less code in core loop
+        - ThreadTile:
+          - [ 6, 4 ]
+          - [ 6, 6 ]
+          - [ 4, 4 ]
+        - WorkGroup:
+          #- [ 16, 32, 1 ]
+          - [ 32, 16, 1 ]
+          - [ 16, 16, 1 ]
+        - WorkGroupMapping: [8]
+        - DepthU: [ 8 ]
+        - VectorWidth: [2]
+        - FractionalLoad: [1]
+        - AssertSummationElementMultiple: [2]
+        - AssertFree0ElementMultiple: [2]
+        - AssertFree1ElementMultiple: [2]
+          #- DisableKernelPieces: [0,1,2,3,4,5,6,7,9,-2]
+      BenchmarkForkParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # A few classic large matrix problems:
+          #- Range: [ [44928], 0, [1], [256,128,384] ]
+          - Range: [ [4608], [4608], [1], [256,128,512] ] #
+          #- Range: [ [4608], [4608], [1], [4608] ] # reference for ~large K to show peak
+          # - Range: [ [4608], [4608], [1], [50000] ] # very large K, this shows limits
+
+  ########################################
+

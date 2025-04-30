@@ -1,0 +1,58 @@
+GlobalParameters:
+  EnqueuesPerSync: 1
+  NumElementsToValidate: -1
+  KernelTime: True
+  SleepPercent: 0
+  DataInitTypeBeta : 1
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  PrintTensorA: 0
+  PrintTensorC: 0
+  PrintTensorD: 0
+  PrintTensorRef: 0
+  CEqualD: 0
+
+BenchmarkProblems:
+  -
+    - # ProblemType
+      OperationType: TensorContraction
+      DataType: s
+      DestDataType: s
+      UseBeta: False
+      NumIndicesC: 3
+      IndexAssignmentsA: [ 0, 2, 3 ]
+      IndexAssignmentsB: [ 3, 2, 1 ]
+      UseInitialStridesAB: True
+      UseInitialStridesCD: True
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - EdgeType: ["ShiftPtr"]
+      ForkParameters:
+        - LdcEqualsLdd: [1]
+        - PackSummationDims: [1]
+        - KernelLanguage: [Assembly]
+        - UseSgprForGRO: [0]
+        - PrefetchLocalRead: [True]
+        - PrefetchGlobalRead: [False]
+        - ThreadTile:
+          - [ 2, 2 ]
+        - WorkGroup:
+          - [ 8, 8, 1 ]
+        - StaggerU: [0]
+        - StaggerUMapping: [0]
+        - DepthU: [ 4]
+        - VectorWidth: [-1]
+        - GlobalReadVectorWidth: [1]
+          #- VectorStore: [1]
+      BenchmarkForkParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          #- Exact: {sizes: [16,16,2,8], stridesC: [1]}
+          #- Exact: {sizes: [16,16,2,8], stridesC: [2], stridesD: [2]}
+          - Exact: {sizes: [16,16,2,8], stridesC: [2], stridesD: [2] }
+            #- Exact: {sizes: [16,16,2,8], stridesC: [2]}
+            #- Exact: {sizes: [16,16,2,8], stridesC: [2], stridesD: [3]}
+            #- Exact: {sizes: [129,129,2,64], stridesC: [0], stridesD: [3]}

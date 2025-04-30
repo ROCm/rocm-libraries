@@ -1,0 +1,5 @@
+          # DeepBench GEMM NT Skinny N<700 cases)
+          - Exact: [ 512 , 16 , 1, 512 ]
+          - Exact: [ 1024 , 16 , 1, 512 ]
+          - Exact: [ 512 , 32 , 1, 512 ]
+          - Exact: [ 1024 , 32 , 1, 512 ]

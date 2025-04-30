@@ -1,0 +1,153 @@
+# A config to generate a fast kernel(s) for  BDAS workload problem sizes
+#  kmeans workload
+
+GlobalParameters:
+  MinimumRequiredVersion: 4.14.0
+  PrintLevel: 1
+  ForceRedoBenchmarkProblems: True
+  ForceRedoLibraryLogic: True
+  ForceRedoLibraryClient: True
+  CMakeBuildType: Release
+  EnqueuesPerSync: 1
+  NumBenchmarks: 1
+  SyncsPerBenchmark: 1
+  LibraryPrintDebug: False
+  NumElementsToValidate: 100
+  ValidationMaxToPrint: 4
+  ValidationPrintValids: False
+  ShortNames: False
+  MergeFiles: True
+  Platform: 0
+  Device: 0
+  KernelTime: True
+  PinClocks: True
+  SleepPercent: 0
+  PrintSolutionRejectionReason: True
+  DataInitTypeBeta : 0
+  DataInitTypeAlpha : 1
+  NewKernel: 2
+
+BenchmarkProblems:
+  ########################################
+  # TN - standard
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: d
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - EdgeType: ["ShiftPtr"]
+        - LoopTail: [True]
+      ForkParameters:
+        - PrefetchLocalRead: [True]
+        - PrefetchGlobalRead: [True]
+        - ThreadTile:
+          - [ 1, 3 ]
+          - [ 4, 1 ]
+          - [ 8, 1 ]
+        - WorkGroup:
+          - [ 64, 4, 1 ]
+          - [ 32, 8, 1 ]
+        - WorkGroupMapping: [1,4,8]
+        - GlobalSplitU: [32]
+        - DepthU: [ 16 ]
+        - VectorWidth: [1,2]
+        - FractionalLoad: [1]
+        - GlobalSplitUWorkGroupMappingRoundRobin: [True,False]
+        - GlobalSplitUSummationAssignmentRoundRobin: [True,False]
+        #- VectorAtomicWidth: [1]
+        - GlobalReadVectorWidth: [2,4]
+        - OptNoLoadLoop: [2]
+        - StaggerUStride: [256]
+        - StaggerUMapping: [0]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [ 250, 9, 1, 500000,266,266,500016,500032 ]
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - EdgeType: ["ShiftPtr"]
+        - LoopTail: [True]
+      ForkParameters:
+        - PrefetchLocalRead: [True]
+        - PrefetchGlobalRead: [True]
+        - ThreadTile:
+          - [ 1, 3 ]
+          - [ 1, 3 ]
+          - [ 4, 1 ]
+          - [ 8, 1 ]
+        - WorkGroup:
+          - [ 64, 4, 1 ]
+          - [ 32, 8, 1 ]
+        - WorkGroupMapping: [1,4,8]
+        - GlobalSplitUWorkGroupMappingRoundRobin: [True,False]
+        - GlobalSplitUSummationAssignmentRoundRobin: [True,False]
+        - GlobalSplitU: [16]
+        - DepthU: [ 16 ]
+        - VectorWidth: [1,2]
+        - FractionalLoad: [1]
+        #- VectorAtomicWidth: [1]
+        - GlobalReadVectorWidth: [2,4]
+        - OptNoLoadLoop: [2]
+        - StaggerUStride: [256]
+        - StaggerUMapping: [0]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [ 250, 9, 1, 500000,266,266,500016,500032 ]
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - EdgeType: ["ShiftPtr"]
+        - LoopTail: [True]
+      ForkParameters:
+        - PrefetchLocalRead: [True]
+        - PrefetchGlobalRead: [True]
+        - ThreadTile:
+          - [ 1, 3 ]
+          - [ 1, 3 ]
+          - [ 4, 1 ]
+          - [ 8, 1 ]
+        - WorkGroup:
+          - [ 64, 4, 1 ]
+          - [ 32, 8, 1 ]
+        - WorkGroupMapping: [1,4,8]
+        - FractionalLoad: [1]
+        - GlobalSplitUWorkGroupMappingRoundRobin: [True,False]
+        - GlobalSplitUSummationAssignmentRoundRobin: [True,False]
+        - GlobalSplitU: [16]
+        - DepthU: [ 16 ]
+        - VectorWidth: [1,2]
+        - FractionalLoad: [1]
+        #- VectorAtomicWidth: [1]
+        - GlobalReadVectorWidth: [2,4]
+        - OptNoLoadLoop: [2]
+        - StaggerUStride: [512]
+        - StaggerUMapping: [0]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [ 250, 9, 1, 500000,266,266,500016,500032 ]
+
+########################################
+LibraryLogic:
+

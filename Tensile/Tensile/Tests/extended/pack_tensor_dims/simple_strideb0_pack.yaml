@@ -1,0 +1,63 @@
+# benchmark assembly and source kernels
+GlobalParameters:
+  MinimumRequiredVersion: 4.2.0
+  CMakeBuildType: Release
+  PrintLevel: 1
+  ForceRedoBenchmarkProblems: True
+  ForceRedoLibraryLogic: True
+  ForceRedoLibraryClient: True
+  EnqueuesPerSync: 1
+  SyncsPerBenchmark: 1
+  NumElementsToValidate: -1
+  ValidationMaxToPrint: 4
+  ValidationPrintValids: False
+  ShortNames: False
+  MergeFiles: True
+  DataInitTypeA: 1
+  DataInitTypeB: 3
+  DataInitTypeC: 2
+  DataInitTypeBeta: 0
+  KernelTime: True
+  LibraryPrintDebug: 1
+  PrintSolutionRejectionReason: 1
+
+BenchmarkProblems:
+
+  - # sgemm NT
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      DestDataType: s
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+      SetConstStrideB: [[2,0]]
+
+    - # BenchmarkProblemSizeGroup - Assembly
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - EdgeType: ["ShiftPtr"]
+      ForkParameters:
+        - PrefetchLocalRead: [True]
+        - PrefetchGlobalRead: [True]
+        - ThreadTile:
+          - [ 8, 8 ]
+        - WorkGroup:
+          - [  8, 8,  1 ]
+        - DepthU: [4]
+        - GlobalReadVectorWidth: [1]
+        - VectorWidth: [4]
+        - WorkGroupMapping: [0]
+
+        - PackBatchDims: [1]
+        - PackGranularity: [2]
+        - AssertFree0ElementMultiple: [4]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [32], [32], [32], [48] ]
+            #- Range: [ [16,4,64], 0, [1,1,16], [7,1,9] ]
+

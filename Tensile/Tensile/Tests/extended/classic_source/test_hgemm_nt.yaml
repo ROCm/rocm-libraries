@@ -1,0 +1,89 @@
+GlobalParameters:
+  PrintLevel: 1
+  ForceRedoBenchmarkProblems: True
+  PrintSolutionRejectionReason: False
+  MinimumRequiredVersion: 4.2.0
+  NumElementsToValidate: -1
+  ValidationMaxToPrint: 4
+  DataInitTypeAB: 1
+  DataInitTypeC: 1
+  ExitOnFails: 0  # Some solutions fail so just ensure we find one good solution
+  MergeFiles: False
+
+BenchmarkProblems:
+
+    ############################################################################
+    # NT
+    ############################################################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      TransposeA: False
+      TransposeB: True
+      UseBeta: False
+
+##   disabled for now due to hanging
+##
+##    - # Tile Sizes
+##      BenchmarkCommonParameters:
+##        - EdgeType: ["ShiftPtr"]
+##        - LoopTail: [True]
+##        - MacroTileShapeMax: [64]
+##      ForkParameters:
+##        - ThreadTile:
+##          - [8, 8]
+##          - [7, 4]
+##          - [3, 5]
+##          - [2, 6]
+##          - [1, 1]
+##        - WorkGroup:
+##          - [ 16, 16,  1 ]
+##          - [  8,  2, 16 ]
+##          - [ 16, 12,  1 ]
+##        - DepthU: [ 2, 16, 64 ]
+##        - GlobalSplitU: [1, 4]
+##        - VectorWidth: [1]
+##      BenchmarkFinalParameters:
+##        - ProblemSizes:
+##          - Exact: [   1,   1,   1 ]
+##          - Range: [ [127, 1, 129], [127, 1, 129], [63, 1, 65] ]
+
+
+    - # Non-Tile Sizes
+      BenchmarkCommonParameters:
+        - EdgeType: ["ShiftPtr"]
+        - LoopTail: [True]
+        - WorkGroup: [ [8, 8, 2 ] ]
+        - ThreadTile: [ [4, 8] ]
+        - DepthU: [ 16 ]
+      ForkParameters:
+        - GlobalReadCoalesceGroupA: [False, True]
+        - GlobalReadCoalesceGroupB: [False, True]
+        - PrefetchGlobalRead: [False, True]
+        - PrefetchLocalRead: [False, True]
+        - VectorWidth: [1]
+        - GlobalSplitU: [1, 4]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [127, 1, 129], [127, 1, 129], [63, 1, 65] ]
+
+    - # Branches
+      BenchmarkCommonParameters:
+        - LoopTail: [True]
+        - EdgeType: ["Branch"]
+        - DepthU: [ 16 ]
+      ForkParameters:
+        - ThreadTile:
+          - [8, 8]
+          - [2, 8]
+        - WorkGroup:
+          - [  8,  4, 4 ]
+          - [ 16, 16, 1 ]
+        - VectorWidth: [1]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [8, 32, 0, 75], [8, 32, 0, 75], [63, 1, 64] ]
+
+

@@ -1,0 +1,7 @@
+rocBLAS-internal PR#410 dated 11/05/2020
+
+For each gfx, raw/nn/ and raw/tn/ logic files must be joined manually
+because they are both of transpose type NN.  The resulting logic files
+are in joined/.
+
+TN test code is clients/samples/example_gemm_ext2-tn.cpp.

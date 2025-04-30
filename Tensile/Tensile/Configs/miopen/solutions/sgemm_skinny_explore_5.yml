@@ -1,0 +1,34 @@
+  ########################################
+  # Explore large number of ~10K solutions
+  ########################################
+    - # Benchmark Group
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - EdgeType: ["ShiftPtr"]
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - StaggerU: [0,32]
+        - FractionalLoad: [1]
+        - PrefetchGlobalRead: [ 0,1 ]
+        - PrefetchLocalRead: [ 0,1]
+        - ThreadTile:
+          - [ 4, 4 ]
+          - [ 4, 8 ]
+          - [ 8, 4 ]
+          - [ 8, 8 ]
+        - WorkGroup:
+          - [ 8, 32, 1 ]
+          - [ 16, 16, 1 ]
+          - [ 32,  8, 1 ]
+          #- GlobalSplitU: [1,3,5] # might want GSU for small batch but not here
+        - WorkGroupMapping: [1,8,64]
+        - DepthU: [ 8,16,32 ]
+        - VectorWidth: [-1]
+        - GlobalReadVectorWidth: [1,-1]
+        - LdsPadA: [0, -1 ]
+        - LdsPadB: [0, -1 ]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
