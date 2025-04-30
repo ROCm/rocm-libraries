@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+# Downloads and extracts clang-format
+
+set -euo pipefail
+
+# Check arguments
+if [[ $# -ne 1 ]]; then
+  >&2 echo "usage: $0 <output directory>"
+fi
+
+# Get absolute path
+output_dir=$(cd -- "$1" && pwd)
+
+# Setup temporary workspace
+workspace=$(mktemp -d)
+on_exit() {
+  rm -r -- "$workspace"
+}
+trap on_exit EXIT
+cd -- "$workspace"
+
+# Check OS
+if [[ -e /etc/os-release ]]; then
+  source /etc/os-release
+else
+  >&2 echo '/etc/os-release is required to choose a version'
+  exit 1
+fi
+
+if [[ -z ${ID+x} ]]; then
+  >&2 echo '$ID must be set'
+  exit 1
+fi
+
+# Download and extract clang-format to the output directory
+case "$ID" in
+  ubuntu)
+    wget -q --show-progress https://repo.radeon.com/rocm/apt/4.3.1/pool/main/l/llvm-amdgpu4.3.1/llvm-amdgpu4.3.1_13.0.0.21313.40301_amd64.deb
+    echo '5c96fbc11558296422b17a29388ed91d6e436abc7c460d17510e6a5300e1dc8f *llvm-amdgpu4.3.1_13.0.0.21313.40301_amd64.deb' | sha256sum -c || exit
+    ar x llvm-amdgpu4.3.1_13.0.0.21313.40301_amd64.deb data.tar.xz
+    tar xJf data.tar.xz --strip-components=5 ./opt/rocm-4.3.1/llvm/bin/clang-format
+    install --backup --verbose clang-format "$output_dir"
+    ;;
+  centos)
+    if [[ -z ${VERSION_ID+x} ]]; then
+      >&2 echo '$VERSION_ID must be set'
+      exit 1
+    fi
+    case "$VERSION_ID" in
+      7)
+        wget https://repo.radeon.com/rocm/yum/rpm/llvm-amdgpu-13.0.0.21295.40300-52.el7.x86_64.rpm
+        echo '13984360c38f5a6cb52d79f576902f8f36cfd95aaf8d004223d5c3f5f07e2116 *llvm-amdgpu-13.0.0.21295.40300-52.el7.x86_64.rpm' | sha256sum -c || exit
+        rpm2cpio llvm-amdgpu-13.0.0.21295.40300-52.el7.x86_64.rpm | cpio -idm --quiet ./opt/rocm-4.3.0/llvm/bin/clang-format
+        install --backup --verbose ./opt/rocm-4.3.0/llvm/bin/clang-format "$output_dir"
+        ;;
+      8)
+        wget -q --show-progress https://repo.radeon.com/rocm/centos8/rpm/llvm-amdgpu4.3.0-13.0.0.21295.40300-52.el8.x86_64.rpm
+        echo '4c2a6665431e6a37edbc7b5ed4daa5e4289f274af12eb07442b8c32cc63bf849 *llvm-amdgpu4.3.0-13.0.0.21295.40300-52.el8.x86_64.rpm' | sha256sum -c || exit
+        rpm2cpio llvm-amdgpu4.3.0-13.0.0.21295.40300-52.el8.x86_64.rpm | cpio -idm --quiet ./opt/rocm-4.3.0/llvm/bin/clang-format
+        install --backup --verbose ./opt/rocm-4.3.0/llvm/bin/clang-format "$output_dir"
+        ;;
+      *)
+        >&2 echo "centos $VERSION_ID is not a supported OS"
+        exit 1 ;;
+    esac
+    ;;
+  sles)
+    wget -q --show-progress https://repo.radeon.com/rocm/zyp/4.3.1/llvm-amdgpu4.3.1-13.0.0.21313.40301-sles152.59.x86_64.rpm
+    echo '992e52d3c9274d266f30efd25b270cd8b3660f3d9fb2d0eca6e801c0e4a2d359 *llvm-amdgpu4.3.1-13.0.0.21313.40301-sles152.59.x86_64.rpm' | sha256sum -c || exit
+    rpm2cpio llvm-amdgpu4.3.1-13.0.0.21313.40301-sles152.59.x86_64.rpm | cpio -idm --quiet ./opt/rocm-4.3.1/llvm/bin/clang-format
+    install --backup --verbose ./opt/rocm-4.3.1/llvm/bin/clang-format "$output_dir"
+    ;;
+  *)
+    >&2 echo "$ID is not a supported OS"
+    exit 1 ;;
+esac
