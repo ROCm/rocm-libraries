@@ -1,0 +1,123 @@
+---
+include: rocblas_common.yaml
+include: known_bugs.yaml
+
+Definitions:
+  - &M_N_range
+    - { M:  3, N:  3 }
+    - { M: 30, N:  5 }
+
+# lda and ldb for set and get host side, ldd is device leading dim
+
+  - &lda_ldb_ldd_range
+    - { lda:  3, ldb:    3, ldd:   3  }
+    - { lda: 30, ldb:   45, ldd:   30 }
+    - { lda: 45, ldb:   30, ldd:   30 }
+    - { lda: 31, ldb:   32, ldd:   33 }
+
+  - &small_gemm_values
+    - { M:    48, N:    48, lda:    48, ldb:    48, ldd:    64 }
+    - { M:    56, N:    56, lda:    56, ldb:    64, ldd:    56 }
+    - { M:    64, N:    64, lda:    64, ldb:    64, ldd:    64 }
+    - { M:    72, N:    72, lda:    72, ldb:    72, ldd:    72 }
+
+  - &large_gemm_values
+    - { M: 52441, N:     1, lda: 52441, ldb: 52441, ldd: 52441 }
+    - { M:  4011, N:  4012, lda:  4014, ldb:  4015, ldd:  4016 }
+
+  - &small_N_size_t_ld
+    - { M: 1, N: 3, lda: *c_pos_x2_overflow_int32, ldb: 1, ldd: 1 }
+    - { M: 1, N: 3, lda: *c_pos_x2_overflow_int32, ldb: 1, ldd: 1 }
+    - { M: 1, N: 3, lda: 1, ldb: *c_pos_x2_overflow_int32, ldd: 1 }
+    - { M: 1, N: 3, lda: 1, ldb: *c_pos_x2_overflow_int32, ldd: 1 }
+    - { M: 1, N: 3, lda: 1, ldb: 1, ldd: *c_pos_x2_overflow_int32 }
+    - { M: 1, N: 3, lda: 1, ldb: 1, ldd: *c_pos_x2_overflow_int32 }
+
+  - &size_t_N_ld
+    - { M: 1, N: *c_pos_x32_overflow_int32, lda: 32, ldb: 1,  ldd: 1 }
+    - { M: 1, N: *c_pos_x32_overflow_int32, lda: 1,  ldb: 32, ldd: 1 }
+    - { M: 1, N: *c_pos_x32_overflow_int32, lda: 1,  ldb: 1,  ldd: 32 }
+
+Tests:
+- name: set_get_matrix_bad_dev_ptr
+  category: quick
+  precision: *single_precision
+  algo: 1
+  arguments:
+    - { M:  1, N:  1, lda: 1, ldb: 1, ldd: 1}
+  function:
+  - set_get_matrix
+  - set_get_matrix_async
+
+- name: set_get_matrix_bad_args
+  category: quick
+  precision: *single_precision
+  arguments:
+    - { M:  0, N:  0, lda: 1, ldb: 1, ldd: 1}
+    - { M: -1, N:  1, lda: 1, ldb: 1, ldd: 1}
+    - { M:  1, N: -1, lda: 1, ldb: 1, ldd: 1}
+    - { M: -1, N:  0, lda: 1, ldb: 1, ldd: 1}
+    - { M:  0, N: -1, lda: 1, ldb: 1, ldd: 1}
+    - { M:  0, N:  1, lda: 1, ldb: 1, ldd: 1}
+    - { M:  1, N:  0, lda: 1, ldb: 1, ldd: 1}
+    - { M:  1, N:  1, lda: 0, ldb: 1, ldd: 1}
+    - { M:  1, N:  1, lda: 1, ldb: 0, ldd: 1}
+    - { M:  1, N:  1, lda: 1, ldb: 1, ldd: 0}
+  function:
+  - set_get_matrix
+  - set_get_matrix_async
+
+- name: set_get_matrix_small
+  category: quick
+  precision: *single_double_precisions
+  matrix_size: *M_N_range
+  arguments: *lda_ldb_ldd_range
+  function:
+  - set_get_matrix
+  - set_get_matrix_async
+
+- name: set_get_matrix_medium
+  category: pre_checkin
+  precision: *single_double_precisions
+  matrix_size: *small_gemm_values
+  function:
+  - set_get_matrix
+  - set_get_matrix_async
+
+- name: set_get_matrix_large
+  category: nightly
+  precision: *single_double_precisions
+  matrix_size: *large_gemm_values
+  function:
+  - set_get_matrix
+  - set_get_matrix_async
+
+- name: set_get_matrix_size_t
+  category: stress
+  precision: *single_precision
+  arguments: *small_N_size_t_ld
+  function:
+  - set_get_matrix
+  - set_get_matrix_async
+  os_flags: LINUX
+
+- name: set_get_matrix_size_t
+  category: stress
+  precision: *single_precision
+  arguments: *size_t_N_ld
+  function:
+  - set_get_matrix
+  - set_get_matrix_async
+  os_flags: LINUX
+
+- name: auxiliary_64
+  category: stress
+  precision: *half_precision
+  arguments:
+    - { M: 2147483649, N: 1, lda: 2147483649,  ldb: 2147483649,  ldd: 2147483649 }
+  function:
+    - set_get_matrix
+    - set_get_matrix_async
+  api: [ C_64 ]
+  os_flags: [ LINUX ]
+...

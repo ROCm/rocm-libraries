@@ -1,0 +1,60 @@
+---
+include: ../../../../clients/include/rocblas_common.yaml
+
+Definitions:
+  - &multiples_of_32_sizes
+    - { scan: [2048..8192..2048], N: *c_scan_value, lda: *c_scan_value }
+
+  - &generic_sizes
+    - {N:  100, lda:  100 }
+    - {N:  233, lda:  233 }
+    - {N:  573, lda:  573 }
+    - {N:  1023, lda:  1023 }
+    - {N:  3057, lda:  3057 }
+    - {N:  5143, lda:  5143 }
+
+Tests:
+  - name: symv_upper_multiples_of_32_sizes
+    category: bench
+    function: symv
+    precision: *single_double_precisions
+    uplo: U
+    alpha: 1
+    beta: 1
+    incx: 1
+    incy: 1
+    matrix_size: *multiples_of_32_sizes
+
+  - name: symv_upper_generic_sizes
+    category: bench
+    function: symv
+    precision: *single_double_precisions
+    uplo: U
+    alpha: 1
+    beta: 1
+    incx: 1
+    incy: 1
+    matrix_size: *generic_sizes
+
+  - name: symv_lower_multiples_of_32_sizes
+    category: bench
+    function: symv
+    precision: *single_double_precisions
+    uplo: L
+    alpha: 1
+    beta: 1
+    incx: 1
+    incy: 1
+    matrix_size: *multiples_of_32_sizes
+
+  - name: symv_lower_generic_sizes
+    category: bench
+    function: symv
+    precision: *single_double_precisions
+    uplo: L
+    alpha: 1
+    beta: 1
+    incx: 1
+    incy: 1
+    matrix_size: *generic_sizes
+...

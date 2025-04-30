@@ -1,0 +1,11 @@
+---
+include: rocblas_common.yaml
+include: known_bugs.yaml
+
+Tests:
+- name: multiheaded
+  category: pre_checkin
+  function: multiheaded
+  precision: *single_precision
+  devices: 4
+...

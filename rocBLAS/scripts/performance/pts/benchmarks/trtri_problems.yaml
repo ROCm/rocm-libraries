@@ -1,0 +1,29 @@
+---
+include: ../../../../clients/include/rocblas_common.yaml
+
+Definitions:
+  - &trtri_128_range
+    - { scan: [128..1024..128], N: *c_scan_value, lda: *c_scan_value }
+
+  - &trtri_rem_range
+    - { scan: [101, 233, 375, 535, 670, 799, 951, 1025], N: *c_scan_value, lda: *c_scan_value }
+
+Tests:
+  - name: trtri_bench_n128
+    category: bench
+    function: trtri
+    precision: *single_double_precisions_complex_real
+    uplo: [ L, U ]
+    diag: [ N ]
+    matrix_size: *trtri_128_range
+    iters: 10
+
+  - name: trtri_bench_rem
+    category: bench
+    function: trtri
+    precision: *single_double_precisions_complex_real
+    uplo: [ L, U ]
+    diag: [ N ]
+    matrix_size: *trtri_128_range
+    iters: 10
+...

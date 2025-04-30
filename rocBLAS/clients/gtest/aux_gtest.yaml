@@ -1,0 +1,10 @@
+
+include: set_get_matrix_gtest.yaml
+include: set_get_vector_gtest.yaml
+include: logging_mode_gtest.yaml
+include: set_get_pointer_mode_gtest.yaml
+include: set_get_atomics_mode_gtest.yaml
+include: ostream_threadsafety_gtest.yaml
+include: multiheaded_gtest.yaml
+include: atomics_mode_gtest.yaml
+include: general_gtest.yaml

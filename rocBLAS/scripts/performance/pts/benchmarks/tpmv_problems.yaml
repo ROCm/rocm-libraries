@@ -1,0 +1,18 @@
+---
+include: ../../../../clients/include/rocblas_common.yaml
+
+Definitions:
+  - &multiples_of_32_sizes
+    - { scan: [2048..12288..2048], N: *c_scan_value, lda: *c_scan_value }
+
+Tests:
+  - name: tpmv_upper_multiples_of_32_sizes
+    category: bench
+    function: tpmv
+    precision: *single_double_precisions_complex_real
+    uplo: U
+    transA: [ N, T ]
+    diag: U
+    incx: 1
+    matrix_size: *multiples_of_32_sizes
+...

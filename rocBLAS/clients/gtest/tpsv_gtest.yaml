@@ -1,0 +1,248 @@
+---
+include: rocblas_common.yaml
+include: known_bugs.yaml
+
+Definitions:
+  - &small_matrix_size_range
+    - { N:     4 }
+    - { N:    10 }
+    - { N:    32 }
+    - { N:    50 }
+    - { N:    64 }
+    - { N:   100 }
+    - { N:   128 }
+
+  - &special_case_range
+    - { N: 0, incx: 1, batch_count: 1 }
+    - { N: 1, incx: 1, batch_count: 0 }
+
+    - { N: -1, incx: 1, batch_count:  0 }
+    - { N:  0, incx: 0, batch_count:  0 }
+    - { N:  0, incx: 1, batch_count: -1 }
+
+  - &medium_matrix_size_range
+    - { N:   192 }
+    - { N:   255 }
+    - { N:   256 }
+    - { N:   257 }
+
+  - &large_matrix_size_range
+    - { N:  1024 }
+    - { N:  2000 }
+
+  - &size_t_index
+    - { N: 65536, incx: 1 }
+    - { N: 3, incx: *c_pos_x2_overflow_int32 }
+    - { N: 3, incx: *c_neg_x2_overflow_int32 }
+
+  - &common_args
+    precision: *single_double_precisions_complex_real
+    uplo: [L, U]
+    transA: [N, T, C]
+    diag: [N, U]
+
+Tests:
+- name: tpsv_arg_check
+  category: quick
+  function:
+  - tpsv: *single_double_precisions
+  - tpsv_batched: *single_double_precisions
+  - tpsv_strided_batched: *single_double_precisions
+  uplo: L
+  transA: N
+  diag: N
+  matrix_size: *special_case_range
+
+- name: tpsv_size_t
+  category: stress
+  function: tpsv
+  precision: *single_precision
+  uplo: [ U, L ]
+  transA: [ N, T ]
+  diag: [ N ]
+  matrix_size: *size_t_index
+  os_flags: LINUX
+  gpu_arch: ['90a','942']
+
+# Regular tpsv
+- name: tpsv_bad_arg
+  category: quick
+  function: tpsv_bad_arg
+  precision: *single_double_precisions_complex_real
+  uplo: [ L ]
+  transA: [ N ]
+  diag: [ N ]
+  api: [ C, FORTRAN, FORTRAN_64 ]
+
+- name: tpsv_fortran
+  category: quick
+  function: tpsv
+  arguments: *common_args
+  matrix_size: *small_matrix_size_range
+  incx: [ 2 ]
+  api: FORTRAN
+
+- name: tpsv_small
+  category: quick
+  function: tpsv
+  arguments: *common_args
+  matrix_size: *small_matrix_size_range
+  incx: [ -2, 1, 2, 100 ]
+
+- name: tpsv_medium
+  category: pre_checkin
+  function: tpsv
+  arguments: *common_args
+  matrix_size: *medium_matrix_size_range
+  incx: [ 1 ]
+
+- name: tpsv_large
+  category: nightly
+  function: tpsv
+  arguments: *common_args
+  matrix_size: *large_matrix_size_range
+  incx: [ 1 ]
+
+- name: tpsv_64
+  category: stress
+  arguments:
+    - { N: 2, incx: 2147483649, batch_count: 1 }
+    - { N: 2, incx: -2147483649, batch_count: 1 }
+    - { N: 2, stride_a: 4, stride_x: 2, incx: 1, batch_count: *c_grid_yz_require_passes }
+  uplo: [ L ]
+  transA: [  N, T ]
+  diag: [ N ]
+  api: [ C_64 ]
+  os_flags: [ LINUX ]
+  function:
+    - tpsv: *single_precision
+    - tpsv_batched: *single_precision
+    - tpsv_strided_batched: *single_precision
+
+# tpsv_batched
+- name: tpsv_batched_bad_arg
+  category: quick
+  function: tpsv_batched_bad_arg
+  precision: *single_double_precisions_complex_real
+  uplo: [ L ]
+  transA: [ N ]
+  diag: [ N ]
+  api: [ C, FORTRAN, FORTRAN_64 ]
+
+- name: tpsv_batched_fortran
+  category: quick
+  function: tpsv_batched
+  arguments: *common_args
+  matrix_size: *small_matrix_size_range
+  incx: [ 2 ]
+  batch_count: [ -1, 0, 3 ]
+  api: FORTRAN
+
+- name: tpsv_batched_small
+  category: quick
+  function: tpsv_batched
+  arguments: *common_args
+  matrix_size: *small_matrix_size_range
+  incx: [ -2, 1, 2, 100 ]
+  stride_scale: [ 1, 10 ]
+  batch_count: [ 1, 5 ]
+
+- name: tpsv_batched_medium
+  category: pre_checkin
+  function: tpsv_batched
+  arguments: *common_args
+  matrix_size: *medium_matrix_size_range
+  incx: [ 1 ]
+  batch_count: [ 3 ]
+
+- name: tpsv_batched_large
+  category: nightly
+  function: tpsv_batched
+  arguments: *common_args
+  matrix_size: *large_matrix_size_range
+  incx: [ 1 ]
+  batch_count: [ 2 ]
+
+# tpsv_strided_batched
+- name: tpsv_strided_batched_bad_arg
+  category: quick
+  function: tpsv_strided_batched_bad_arg
+  precision: *single_double_precisions_complex_real
+  uplo: [ L ]
+  transA: [ N ]
+  diag: [ N ]
+  api: [ C, FORTRAN, FORTRAN_64 ]
+
+- name: tpsv_strided_batched_fortran
+  category: quick
+  function: tpsv_strided_batched
+  arguments: *common_args
+  matrix_size: *small_matrix_size_range
+  incx: [ 2 ]
+  batch_count: [ -1, 0, 3 ]
+  stride_scale: [ 2 ]
+  api: FORTRAN
+
+- name: tpsv_strided_batched_small
+  category: quick
+  function: tpsv_strided_batched
+  arguments: *common_args
+  matrix_size: *small_matrix_size_range
+  incx: [ -2, 1, 2, 100 ]
+  stride_scale: [ 1, 10 ]
+  batch_count: [ 1, 5 ]
+
+- name: tpsv_strided_batched_medium
+  category: pre_checkin
+  function: tpsv_strided_batched
+  arguments: *common_args
+  matrix_size: *medium_matrix_size_range
+  incx: [ 1 ]
+  incx: [ 1 ]
+  stride_scale: [ 2.5 ]
+  batch_count: [ 3 ]
+
+- name: tpsv_strided_batched_large
+  category: nightly
+  function: tpsv_strided_batched
+  arguments: *common_args
+  matrix_size: *large_matrix_size_range
+  incx: [ 1 ]
+  stride_scale: [ 1 ]
+  batch_count: [ 2 ]
+
+- name: tpsv_graph_test
+  category: pre_checkin
+  function:
+        - tpsv
+        - tpsv_batched
+        - tpsv_strided_batched
+  arguments: *common_args
+  matrix_size:
+    - { N:    32 }
+  incx: [ 1 ]
+  incx: [ 1 ]
+  stride_scale: [ 2 ]
+  batch_count: [ 3 ]
+  graph_test: true
+
+- name: tpsv_repeatability_check
+  category: stress
+  function:
+        - tpsv
+        - tpsv_batched
+        - tpsv_strided_batched
+  arguments: *common_args
+  matrix_size:
+    - { N:    32 }
+  incx: [ 1 ]
+  incx: [ 1 ]
+  stride_scale: [ 1 ]
+  batch_count: [ 2 ]
+  initialization: hpl
+  pointer_mode_host: false
+  atomics_mode: 0
+  iters: 5
+  devices: 4
+  repeatability_check: true
+...

@@ -1,0 +1,117 @@
+Query device success: there are 8 devices
+-------------------------------------------------------------------------------
+Device ID 0 :  gfx90a:sramecc+:xnack-
+with 68.7 GB memory, max. SCLK 1700 MHz, max. MCLK 1600 MHz, compute capability 9.0
+maxGridDimX 2147483647, sharedMemPerBlock 65.5 KB, maxThreadsPerBlock 1024, warpSize 64
+-------------------------------------------------------------------------------
+Device ID 1 :  gfx90a:sramecc+:xnack-
+with 68.7 GB memory, max. SCLK 1700 MHz, max. MCLK 1600 MHz, compute capability 9.0
+maxGridDimX 2147483647, sharedMemPerBlock 65.5 KB, maxThreadsPerBlock 1024, warpSize 64
+-------------------------------------------------------------------------------
+Device ID 2 :  gfx90a:sramecc+:xnack-
+with 68.7 GB memory, max. SCLK 1700 MHz, max. MCLK 1600 MHz, compute capability 9.0
+maxGridDimX 2147483647, sharedMemPerBlock 65.5 KB, maxThreadsPerBlock 1024, warpSize 64
+-------------------------------------------------------------------------------
+Device ID 3 :  gfx90a:sramecc+:xnack-
+with 68.7 GB memory, max. SCLK 1700 MHz, max. MCLK 1600 MHz, compute capability 9.0
+maxGridDimX 2147483647, sharedMemPerBlock 65.5 KB, maxThreadsPerBlock 1024, warpSize 64
+-------------------------------------------------------------------------------
+Device ID 4 :  gfx90a:sramecc+:xnack-
+with 68.7 GB memory, max. SCLK 1700 MHz, max. MCLK 1600 MHz, compute capability 9.0
+maxGridDimX 2147483647, sharedMemPerBlock 65.5 KB, maxThreadsPerBlock 1024, warpSize 64
+-------------------------------------------------------------------------------
+Device ID 5 :  gfx90a:sramecc+:xnack-
+with 68.7 GB memory, max. SCLK 1700 MHz, max. MCLK 1600 MHz, compute capability 9.0
+maxGridDimX 2147483647, sharedMemPerBlock 65.5 KB, maxThreadsPerBlock 1024, warpSize 64
+-------------------------------------------------------------------------------
+Device ID 6 :  gfx90a:sramecc+:xnack-
+with 68.7 GB memory, max. SCLK 1700 MHz, max. MCLK 1600 MHz, compute capability 9.0
+maxGridDimX 2147483647, sharedMemPerBlock 65.5 KB, maxThreadsPerBlock 1024, warpSize 64
+-------------------------------------------------------------------------------
+Device ID 7 :  gfx90a:sramecc+:xnack-
+with 68.7 GB memory, max. SCLK 1700 MHz, max. MCLK 1600 MHz, compute capability 9.0
+maxGridDimX 2147483647, sharedMemPerBlock 65.5 KB, maxThreadsPerBlock 1024, warpSize 64
+-------------------------------------------------------------------------------
+
+
+rocBLAS info: Time taken to complete rocBLAS library initialization is 2928 milliseconds.
+function,a_type,b_type,c_type,d_type,compute_type,N,alpha,incx,rocblas-Gflops,rocblas-GB/s,us
+scal,f32_r,f32_r,f32_r,f32_r,f32_r,2048000,2,1, 149.489, 1195.91, 13.7
+function,a_type,b_type,c_type,d_type,compute_type,N,alpha,incx,rocblas-Gflops,rocblas-GB/s,us
+scal,f64_r,f64_r,f64_r,f64_r,f64_r,2048000,2,1, 72.8826, 1166.12, 28.1
+function,a_type,b_type,c_type,d_type,compute_type,N,alpha,incx,rocblas-Gflops,rocblas-GB/s,us
+scal,f32_c,f32_c,f32_c,f32_c,f32_c,2048000,(2: 0),1, 436.519, 1164.05, 28.15
+function,a_type,b_type,c_type,d_type,compute_type,N,alpha,incx,rocblas-Gflops,rocblas-GB/s,us
+scal,f64_c,f64_c,f64_c,f64_c,f64_c,2048000,(2: 0),1, 236.763, 1262.74, 51.9
+function,a_type,b_type,c_type,d_type,compute_type,N,alpha,incx,rocblas-Gflops,rocblas-GB/s,us
+scal,f32_r,f32_r,f32_r,f32_r,f32_r,4096000,2,1, 146.025, 1168.2, 28.05
+function,a_type,b_type,c_type,d_type,compute_type,N,alpha,incx,rocblas-Gflops,rocblas-GB/s,us
+scal,f64_r,f64_r,f64_r,f64_r,f64_r,4096000,2,1, 78.7692, 1260.31, 52
+function,a_type,b_type,c_type,d_type,compute_type,N,alpha,incx,rocblas-Gflops,rocblas-GB/s,us
+scal,f32_c,f32_c,f32_c,f32_c,f32_c,4096000,(2: 0),1, 473.983, 1263.95, 51.85
+function,a_type,b_type,c_type,d_type,compute_type,N,alpha,incx,rocblas-Gflops,rocblas-GB/s,us
+scal,f64_c,f64_c,f64_c,f64_c,f64_c,4096000,(2: 0),1, 246.253, 1313.35, 99.8
+function,a_type,b_type,c_type,d_type,compute_type,N,alpha,incx,rocblas-Gflops,rocblas-GB/s,us
+scal,f32_r,f32_r,f32_r,f32_r,f32_r,6144000,2,1, 152.646, 1221.17, 40.25
+function,a_type,b_type,c_type,d_type,compute_type,N,alpha,incx,rocblas-Gflops,rocblas-GB/s,us
+scal,f64_r,f64_r,f64_r,f64_r,f64_r,6144000,2,1, 80.6299, 1290.08, 76.2
+function,a_type,b_type,c_type,d_type,compute_type,N,alpha,incx,rocblas-Gflops,rocblas-GB/s,us
+scal,f32_c,f32_c,f32_c,f32_c,f32_c,6144000,(2: 0),1, 482.829, 1287.54, 76.35
+function,a_type,b_type,c_type,d_type,compute_type,N,alpha,incx,rocblas-Gflops,rocblas-GB/s,us
+scal,f64_c,f64_c,f64_c,f64_c,f64_c,6144000,(2: 0),1, 248.913, 1327.54, 148.1
+function,a_type,b_type,c_type,d_type,compute_type,N,alpha,incx,rocblas-Gflops,rocblas-GB/s,us
+scal,f32_r,f32_r,f32_r,f32_r,f32_r,8192000,2,1, 157.842, 1262.74, 51.9
+function,a_type,b_type,c_type,d_type,compute_type,N,alpha,incx,rocblas-Gflops,rocblas-GB/s,us
+scal,f64_r,f64_r,f64_r,f64_r,f64_r,8192000,2,1, 81.7973, 1308.76, 100.15
+function,a_type,b_type,c_type,d_type,compute_type,N,alpha,incx,rocblas-Gflops,rocblas-GB/s,us
+scal,f32_c,f32_c,f32_c,f32_c,f32_c,8192000,(2: 0),1, 491.274, 1310.06, 100.05
+function,a_type,b_type,c_type,d_type,compute_type,N,alpha,incx,rocblas-Gflops,rocblas-GB/s,us
+scal,f64_c,f64_c,f64_c,f64_c,f64_c,8192000,(2: 0),1, 249.06, 1328.32, 197.35
+function,a_type,b_type,c_type,d_type,compute_type,N,alpha,incx,rocblas-Gflops,rocblas-GB/s,us
+scal,f32_r,f32_r,f32_r,f32_r,f32_r,10240000,2,1, 160.25, 1282, 63.9
+function,a_type,b_type,c_type,d_type,compute_type,N,alpha,incx,rocblas-Gflops,rocblas-GB/s,us
+scal,f64_r,f64_r,f64_r,f64_r,f64_r,10240000,2,1, 81.92, 1310.72, 125
+function,a_type,b_type,c_type,d_type,compute_type,N,alpha,incx,rocblas-Gflops,rocblas-GB/s,us
+scal,f32_c,f32_c,f32_c,f32_c,f32_c,10240000,(2: 0),1, 485.5, 1294.67, 126.55
+function,a_type,b_type,c_type,d_type,compute_type,N,alpha,incx,rocblas-Gflops,rocblas-GB/s,us
+scal,f64_c,f64_c,f64_c,f64_c,f64_c,10240000,(2: 0),1, 252.735, 1347.92, 243.1
+function,a_type,b_type,c_type,d_type,compute_type,N,alpha,incx,rocblas-Gflops,rocblas-GB/s,us
+scal,f32_r,f32_r,f32_r,f32_r,f32_r,12288000,2,1, 156.635, 1253.08, 78.45
+function,a_type,b_type,c_type,d_type,compute_type,N,alpha,incx,rocblas-Gflops,rocblas-GB/s,us
+scal,f64_r,f64_r,f64_r,f64_r,f64_r,12288000,2,1, 80.2875, 1284.6, 153.05
+function,a_type,b_type,c_type,d_type,compute_type,N,alpha,incx,rocblas-Gflops,rocblas-GB/s,us
+scal,f32_c,f32_c,f32_c,f32_c,f32_c,12288000,(2: 0),1, 494.985, 1319.96, 148.95
+function,a_type,b_type,c_type,d_type,compute_type,N,alpha,incx,rocblas-Gflops,rocblas-GB/s,us
+scal,f64_c,f64_c,f64_c,f64_c,f64_c,12288000,(2: 0),1, 252.97, 1349.17, 291.45
+function,a_type,b_type,c_type,d_type,compute_type,N,alpha,incx,rocblas-Gflops,rocblas-GB/s,us
+scal,f32_r,f32_r,f32_r,f32_r,f32_r,14336000,2,1, 163.934, 1311.47, 87.45
+function,a_type,b_type,c_type,d_type,compute_type,N,alpha,incx,rocblas-Gflops,rocblas-GB/s,us
+scal,f64_r,f64_r,f64_r,f64_r,f64_r,14336000,2,1, 81.8265, 1309.22, 175.2
+function,a_type,b_type,c_type,d_type,compute_type,N,alpha,incx,rocblas-Gflops,rocblas-GB/s,us
+scal,f32_c,f32_c,f32_c,f32_c,f32_c,14336000,(2: 0),1, 492.646, 1313.72, 174.6
+function,a_type,b_type,c_type,d_type,compute_type,N,alpha,incx,rocblas-Gflops,rocblas-GB/s,us
+scal,f64_c,f64_c,f64_c,f64_c,f64_c,14336000,(2: 0),1, 253.137, 1350.06, 339.8
+function,a_type,b_type,c_type,d_type,compute_type,N,alpha,incx,rocblas-Gflops,rocblas-GB/s,us
+scal,f32_r,f32_r,f32_r,f32_r,f32_r,16384000,2,1, 160.549, 1284.39, 102.05
+function,a_type,b_type,c_type,d_type,compute_type,N,alpha,incx,rocblas-Gflops,rocblas-GB/s,us
+scal,f64_r,f64_r,f64_r,f64_r,f64_r,16384000,2,1, 82.5598, 1320.96, 198.45
+function,a_type,b_type,c_type,d_type,compute_type,N,alpha,incx,rocblas-Gflops,rocblas-GB/s,us
+scal,f32_c,f32_c,f32_c,f32_c,f32_c,16384000,(2: 0),1, 493.99, 1317.31, 199
+function,a_type,b_type,c_type,d_type,compute_type,N,alpha,incx,rocblas-Gflops,rocblas-GB/s,us
+scal,f64_c,f64_c,f64_c,f64_c,f64_c,16384000,(2: 0),1, 253.95, 1354.4, 387.1
+function,a_type,b_type,c_type,d_type,compute_type,N,alpha,incx,rocblas-Gflops,rocblas-GB/s,us
+scal,f32_r,f32_r,f32_r,f32_r,f32_r,18432000,2,1, 164.351, 1314.81, 112.15
+function,a_type,b_type,c_type,d_type,compute_type,N,alpha,incx,rocblas-Gflops,rocblas-GB/s,us
+scal,f64_r,f64_r,f64_r,f64_r,f64_r,18432000,2,1, 83.0083, 1328.13, 222.05
+function,a_type,b_type,c_type,d_type,compute_type,N,alpha,incx,rocblas-Gflops,rocblas-GB/s,us
+scal,f32_c,f32_c,f32_c,f32_c,f32_c,18432000,(2: 0),1, 498.611, 1329.63, 221.8
+function,a_type,b_type,c_type,d_type,compute_type,N,alpha,incx,rocblas-Gflops,rocblas-GB/s,us
+scal,f64_c,f64_c,f64_c,f64_c,f64_c,18432000,(2: 0),1, 251.546, 1341.58, 439.65
+function,a_type,b_type,c_type,d_type,compute_type,N,alpha,incx,rocblas-Gflops,rocblas-GB/s,us
+scal,f32_r,f32_r,f32_r,f32_r,f32_r,20480000,2,1, 159.502, 1276.01, 128.4
+function,a_type,b_type,c_type,d_type,compute_type,N,alpha,incx,rocblas-Gflops,rocblas-GB/s,us
+scal,f64_r,f64_r,f64_r,f64_r,f64_r,20480000,2,1, 83.3537, 1333.66, 245.7
+function,a_type,b_type,c_type,d_type,compute_type,N,alpha,incx,rocblas-Gflops,rocblas-GB/s,us
+scal,f32_c,f32_c,f32_c,f32_c,f32_c,20480000,(2: 0),1, 498.297, 1328.79, 246.6
+function,a_type,b_type,c_type,d_type,compute_type,N,alpha,incx,rocblas-Gflops,rocblas-GB/s,us
+scal,f64_c,f64_c,f64_c,f64_c,f64_c,20480000,(2: 0),1, 252.062, 1344.33, 487.5

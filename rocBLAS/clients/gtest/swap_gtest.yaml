@@ -1,0 +1,276 @@
+---
+include: rocblas_common.yaml
+include: known_bugs.yaml
+
+Definitions:
+  - &size_t_x_range
+#   - { N: 1073741900, incx: 4 } # high op count: N * incx overflows uint32_t and int32_t
+    - { N: 1048600, incx: 4096 } #  low op count: N * incx overflows uint32_t and int32_t
+
+  - &size_t_xy_range
+    - { N: 1048600, incx:  4096, incy:     1 }
+    - { N: 1048600, incx:     1, incy:  4096 }
+    # TODO add back when workaround for OpenBLAS on windows negative overflow failures
+    #- { N: 1048600, incx: -4096, incy:     1 }
+    #- { N: 1048600, incx:     1, incy: -4096 }
+
+  - &N_range
+    - [ -1, 0, 5, 10, 500, 1000, 1024, 1025, 7111, 10000, 33792 ]
+
+  - &incx_range_small
+    - [1, 2]
+
+  - &incx_range
+    - [-1, 0, 1, 2]
+
+  - &incx_incy_range
+    - { incx:  1, incy:  1 }
+    - { incx:  1, incy:  2 }
+    - { incx:  2, incy:  1 }
+    - { incx:  1, incy: -1 }
+    - { incx: -1, incy:  1 }
+    - { incx: -3, incy: -3 }
+    - { incx:  0, incy:  1 }
+    - { incx:  0, incy:  0 }
+    # - { incx:  1, incy:  0 } # Indeterminate when y is output
+
+
+
+  - &size_t_pos_x_range
+    - { N: 4,          incx: *c_pos_x2_overflow_int32 } # small operation count, should overflow x
+
+  - &size_t_pos_neg_x_range
+    - { N: 4,          incx: *c_pos_x2_overflow_int32 } # small operation count, should overflow x
+    - { N: 4,          incx: *c_neg_x2_overflow_int32 }
+
+  - &size_t_pos_neg_xy_range
+    - { N: 4,          incx: *c_pos_x2_overflow_int32, incy: 1 } # small operation count, should overflow x
+    - { N: 4,          incx: *c_neg_x2_overflow_int32, incy: 1 } # small operation count, should overflow x
+    - { N: 4,          incx: 1, incy: *c_pos_x2_overflow_int32 } # small operation count, should overflow y
+    - { N: 4,          incx: 1, incy: *c_neg_x2_overflow_int32 } # small operation count, should overflow y
+
+  - &incx_incy_range_x_y_output
+    - { incx:  1, incy:  1 }
+    - { incx:  1, incy:  2 }
+    - { incx:  2, incy:  1 }
+    - { incx:  1, incy: -1 }
+    - { incx: -3, incy:  1 }
+    - { incx: -3, incy: -3 }
+    # - { incx:  0, incy:  0 } # Indeterminate for swap
+    # - { incx:  0, incy:  1 } # Indeterminate when x is output (swap)
+    # - { incx:  1, incy:  0 } # Indeterminate when y is output
+
+  - &incx_incy_range_y_output
+    - { incx:  1, incy:  1 }
+    - { incx:  1, incy:  2 }
+    - { incx:  2, incy:  1 }
+    - { incx:  1, incy: -3 }
+    - { incx: -1, incy:  1 }
+    - { incx: -3, incy: -3 }
+    - { incx:  0, incy:  1 }
+    # - { incx:  0, incy:  0 } # Indeterminate for axpy
+    # - { incx:  1, incy:  0 } # Indeterminate when y is output
+
+  - &incx_incy_range_small
+    - { incx: 1, incy: 1 }
+    - { incx: -3, incy: -3 }
+
+  - &alpha_beta_range
+    - { alpha:  1.0, beta:  0.0 }
+    - { alpha:  2.0, beta: -1.0 }
+    - { alpha:  0.0, beta:  0.0 }
+
+  - &alphai_betai_range
+    - { alphai: 0.0 }
+    - { alphai: 1.0}
+    - { alphai: 2.0 }
+
+  - &alpha_beta_range_small
+    - { alpha:  0.5, beta:  0.5 }
+
+  - &complex_alpha_range_small
+    - { alpha: 4.0, alphai:  0.0 }
+    - { alpha: 0.0, alphai:  4.0 }
+    - { alpha: 3.0, alphai: -2.0 }
+
+Tests:
+
+# for bad_arg no arguments should be used by test code
+  - name: blas1_bad_arg
+    category: quick
+    api: [ C, FORTRAN, FORTRAN_64 ]
+    function:
+      - swap_bad_arg:  *single_double_precisions_complex_real
+      - swap_batched_bad_arg:  *single_double_precisions_complex_real
+      - swap_strided_batched_bad_arg:  *single_double_precisions_complex_real
+
+  # quick tests will fallback to original kernels at launcher level
+  - name: swap_64
+    category: nightly
+    N: [ 64 ]
+    incx_incy: *incx_incy_range_small
+    api: [ C_64, FORTRAN_64 ]
+    function:
+      - swap:  *single_double_precisions_complex_real
+      - swap_batched:  *single_double_precisions_complex_real
+      - swap_strided_batched:  *single_double_precisions_complex_real
+
+  - name: swap_64
+    category: stress
+    arguments:
+      - { N: 2147483649, incx: 1, incy: 1,  batch_count: 1 }
+      - { N: 2, incx: 2147483649, incy: 1, batch_count: 1 }
+      - { N: 2, incx: 1, incy: 2147483649, batch_count: 1 }
+      - { N: 2, incx: -2147483649, incy: 1, batch_count: 1 }
+      - { N: 2, incx: 1, incy: -2147483649, batch_count: 1 }
+      - { N: 2, incx: 1, incy: 1, stride_x: 2, stride_y: 2, batch_count: *c_grid_yz_require_passes }
+    api: [ C_64 ]
+    os_flags: [ LINUX ]
+    function:
+      - swap:  *single_precision
+      - swap_batched:  *single_precision
+      - swap_strided_batched:  *single_precision
+
+  - name: blas1_size_t
+    category: stress
+    matrix_size: *size_t_xy_range
+    pointer_mode_device: false
+    function:
+      - swap: *single_precision
+    gpu_arch: ['90a','942']
+    os_flags: LINUX
+
+# All functions with incx, incy, no alpha
+
+# fortran
+  - name: blas1
+    category: quick
+    N: [ -1, 0, 1025]
+    incx_incy: *incx_incy_range_small
+    api: [FORTRAN, C_64]
+    function:
+      - swap: *single_double_precisions_complex_real
+
+  - name: blas1_large_batch
+    category: stress
+    N: [ 5 ]
+    incx: 1
+    incy: 1
+    batch_count: [ *c_grid_yz_require_passes ]
+    stride_scale: [ 1 ]
+    function:
+      - swap_batched:  *single_double_precisions_complex_real
+      - swap_strided_batched:  *single_double_precisions_complex_real
+
+  - name: blas1_batched
+    category: quick
+    N: [ -1, 0, 1025]
+    incx_incy: *incx_incy_range_small
+    batch_count: [-1, 0, 5]
+    api: FORTRAN
+    function:
+      - swap_batched: *single_double_precisions_complex_real
+
+  - name: blas1_strided_batched
+    category: quick
+    N: [ -1, 0, 1025]
+    incx_incy: *incx_incy_range_small
+    batch_count: [-1, 0, 5]
+    stride_scale: [1, 2]
+    api: FORTRAN
+    function:
+      - swap_strided_batched: *single_double_precisions_complex_real
+
+  - name: blas1
+    category: pre_checkin
+    N: [ 5000, 800000 ]
+    pointer_mode_host: false
+    incx_incy: *incx_incy_range_small
+    function:
+      # dot_ex uses dot code, so only testing superset code of dot_ex for pre-checkin and nightly.
+      # we should be sure to keep testing the dot API in quick tests as done above.
+      # similarly with rot
+      - swap: *single_double_precisions_complex_real
+
+  - name: blas1_batched
+    category: pre_checkin
+    N: [ 5000, 800000 ]
+    pointer_mode_device: false
+    incx_incy: *incx_incy_range_small
+    batch_count: [1, 7]
+    function:
+      - swap_batched: *single_double_precisions_complex_real
+
+  - name: blas1_strided_batched
+    category: pre_checkin
+    N: [ 5000, 800000 ]
+    pointer_mode_host: false
+    incx_incy: *incx_incy_range_small
+    batch_count: [1, 7]
+    stride_scale: [ 1 ]
+    function:
+      - swap_strided_batched: *single_double_precisions_complex_real
+
+# nightly
+  - name: blas1
+    category: nightly
+    N: [ 1000000 ]
+    pointer_mode_device: false
+    incx_incy: *incx_incy_range_small
+    function:
+      - swap: *single_double_precisions_complex_real
+
+  - name: blas1_batched
+    category: nightly
+    N: [ 1000000 ]
+    pointer_mode_host: false
+    incx_incy: *incx_incy_range_small
+    batch_count: [1, 7]
+    function:
+      - swap_batched: *single_double_precisions_complex_real
+
+  - name: blas1_strided_batched
+    category: nightly
+    N: [ 1000000 ]
+    pointer_mode_device: false
+    incx_incy: *incx_incy_range_small
+    batch_count: [1, 7]
+    stride_scale: [ 1 ]
+    function:
+      - swap_strided_batched: *single_double_precisions_complex_real
+
+# Swap, rot, and rotm get their own for quick tests as they write to x and y
+
+# quick
+  - name: blas1
+    category: quick
+    N: [ -1, 0, 32, 1025]
+    incx_incy: *incx_incy_range_x_y_output
+    batch_count: [1, 7]
+    stride_scale: [ 1 ]
+    function:
+      - swap: *single_double_precisions_complex_real
+      - swap_batched: *single_double_precisions_complex_real
+      - swap_strided_batched: *single_double_precisions_complex_real
+
+  - name: blas1_nan_check
+    category: pre_checkin
+    arguments: *blas1_nan_common_args
+    function:
+      - swap:  *single_double_precisions_complex_real
+      - swap_batched:  *single_double_precisions_complex_real
+      - swap_strided_batched:  *single_double_precisions_complex_real
+
+  - name: blas1_graph_check
+    category: pre_checkin
+    arguments: *blas1_graph_test_common_args
+    function:
+      - swap:  *single_double_precisions_complex_real
+      - swap_batched:  *single_double_precisions_complex_real
+      - swap_strided_batched:  *single_double_precisions_complex_real
+
+  # not applicable
+  # - name: blas1_repeatability_check
+
+
+...

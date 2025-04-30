@@ -1,0 +1,206 @@
+---
+include: ../../../../clients/include/rocblas_common.yaml
+
+Definitions:
+  - &m_equals_n_range
+    - { scan: [32..124..4], M: *c_scan_value, N: *c_scan_value, lda: *c_scan_value, ldb: *c_scan_value }
+
+  - &testset1_small_matrix_size_range
+    - { M:      256,    N:      256,    lda:    256,    ldb:    256     }
+    - { M:      512,    N:      256,    lda:    256,    ldb:    512     }
+    - { M:      512,    N:      512,    lda:    512,    ldb:    512     }
+    - { M:      768,    N:      256,    lda:    256,    ldb:    768     }
+    - { M:      1024,   N:      256,    lda:    256,    ldb:    1024    }
+    - { M:      1280,   N:      256,    lda:    256,    ldb:    1280    }
+    - { M:      1536,   N:      256,    lda:    256,    ldb:    1536    }
+    - { M:      1792,   N:      256,    lda:    256,    ldb:    1792    }
+    - { M:      2048,   N:      256,    lda:    256,    ldb:    2048    }
+    - { M:      384,    N:      384,    lda:    384,    ldb:    384     }
+    - { M:      768,    N:      384,    lda:    384,    ldb:    768     }
+    - { M:      1152,   N:      384,    lda:    384,    ldb:    1152    }
+    - { M:      1536,   N:      384,    lda:    384,    ldb:    1536    }
+    - { M:      1920,   N:      384,    lda:    384,    ldb:    1920    }
+    - { M:      2304,   N:      384,    lda:    384,    ldb:    2304    }
+    - { M:      2688,   N:      384,    lda:    384,    ldb:    2688    }
+    - { M:      3072,   N:      384,    lda:    384,    ldb:    3072    }
+
+  - &testset2_small_matrix_size_range
+    - { M:      256,    N:      256,    lda:    256,    ldb:    256     }
+    - { M:      256,    N:      512,    lda:    512,    ldb:    256     }
+    - { M:      256,    N:      768,    lda:    768,    ldb:    256     }
+    - { M:      256,    N:      1024,   lda:    1024,   ldb:    256     }
+    - { M:      256,    N:      1280,   lda:    1280,   ldb:    256     }
+    - { M:      256,    N:      1536,   lda:    1536,   ldb:    256     }
+    - { M:      256,    N:      1792,   lda:    1792,   ldb:    256     }
+    - { M:      256,    N:      2048,   lda:    2048,   ldb:    256     }
+    - { M:      384,    N:      384,    lda:    384,    ldb:    384     }
+    - { M:      384,    N:      768,    lda:    768,    ldb:    384     }
+    - { M:      384,    N:      1152,   lda:    1152,   ldb:    384     }
+    - { M:      384,    N:      1536,   lda:    1536,   ldb:    384     }
+    - { M:      384,    N:      1920,   lda:    1920,   ldb:    384     }
+    - { M:      384,    N:      2304,   lda:    2304,   ldb:    384     }
+    - { M:      384,    N:      2688,   lda:    2688,   ldb:    384     }
+    - { M:      384,    N:      3072,   lda:    3072,   ldb:    384     }
+
+  - &testset1_matrix_size_range
+    - { M:   128, N:    2048, lda:   128, ldb:   128 }
+    - { M:   128, N:   16848, lda:   128, ldb:   128 }
+    - { M:   128, N:   29696, lda:   128, ldb:   128 }
+#   - { M:   128, N:   44544, lda:   128, ldb:   128 }
+#   - { M:   128, N:   53632, lda:   128, ldb:   128 }
+    - { M:   256, N:    2048, lda:   256, ldb:   256 }
+    - { M:   256, N:   29696, lda:   256, ldb:   256 }
+#   - { M:   256, N:   44544, lda:   256, ldb:   256 }
+#   - { M:   256, N:   53504, lda:   256, ldb:   256 }
+    - { M:   384, N:    2048, lda:   384, ldb:   384 }
+    - { M:   384, N:   14976, lda:   384, ldb:   384 }
+    - { M:   384, N:   29952, lda:   384, ldb:   384 }
+#   - { M:   384, N:   44928, lda:   384, ldb:   384 }
+#   - { M:   384, N:   53376, lda:   384, ldb:   384 }
+
+  - &testset2_matrix_size_range
+    - { M:   2048,  N: 128,  lda:  2048, ldb:    2048 }
+    - { M:  16848,  N: 128,  lda: 16848, ldb:   16848 }
+    - { M:  29696,  N: 128,  lda: 29696, ldb:   29696 }
+#   - { M:  44544,  N: 128,  lda: 44544, ldb:   44544 }
+#   - { M:  53632,  N: 128,  lda: 53632, ldb:   53632 }
+    - { M:   2048,  N: 256,  lda:  2048, ldb:    2048 }
+    - { M:  14848,  N: 256,  lda: 14848, ldb:   14848 }
+    - { M:  29696,  N: 256,  lda: 29696, ldb:   29696 }
+#   - { M:  44544,  N: 256,  lda: 44544, ldb:   44544 }
+#   - { M:  53504,  N: 256,  lda: 53504, ldb:   53504 }
+    - { M:   2048,  N: 384,  lda:  2048, ldb:    2048 }
+    - { M:  14976,  N: 384,  lda: 14976, ldb:   14976 }
+    - { M:  29952,  N: 384,  lda: 29952, ldb:   29952 }
+#   - { M:  44928,  N: 384,  lda: 44928, ldb:   44928 }
+#   - { M:  53376,  N: 384,  lda: 53376, ldb:   53376 }
+
+  - &left_substitution_range
+    - { scan: [ 128..2048..128 ], M: 16, N: *c_scan_value, lda: 16, ldb: 16 }
+
+  - &right_substitution_range
+    - { scan: [ 128..2048..128 ], M: *c_scan_value, N: 16, lda: 16, ldb: *c_scan_value }
+
+  - &small_sub_sizes
+    - { scan: [1..32..4], M: *c_scan_value, N: [64..512..64], lda: *c_scan_value, ldb: *c_scan_value, side: L }
+    - { scan: [1..32..4], M: *c_scan_value, N: [1024..8192..1024], lda: *c_scan_value, ldb: *c_scan_value, side: L }
+
+    - { scan: [1..32..4], M: [64..512..64], N: *c_scan_value, lda: *c_scan_value, ldb: 512, side: R }
+    - { scan: [1..32..4], M: [1024..8192..1024], N: *c_scan_value, lda: *c_scan_value, ldb: 8192, side: R }
+
+    - { scan: [32..64..4], M: *c_scan_value, N: [32..64..4], lda: 64, ldb: *c_scan_value, side: [ L, R ] }
+
+  - &large_sub_sizes
+    - { scan: [340..1024..256], M: *c_scan_value, N: [36..128..8], lda: *c_scan_value, ldb: *c_scan_value, side: L }
+    - { scan: [1024..8192..1024], M: *c_scan_value, N: [36..128..8], lda: *c_scan_value, ldb: *c_scan_value, side: L }
+
+
+Tests:
+  - name: trsm_bench_1_small_matrix_size
+    category: bench
+    function: trsm
+    precision: *double_precision
+    transA: [ N, T ]
+    side: [ L, R ]
+    uplo: L
+    diag: U
+    alpha: 1
+    incx: 1
+    incy: 1
+    matrix_size: *testset1_small_matrix_size_range
+    iters: 10
+
+  - name: trsm_bench_2_small_matrix_size
+    category: bench
+    function: trsm
+    precision: *double_precision
+    transA: [ N, T ]
+    side: [ L, R ]
+    uplo: L
+    diag: U
+    alpha: 1
+    incx: 1
+    incy: 1
+    matrix_size: *testset2_small_matrix_size_range
+    iters: 10
+
+  - name: trsm_bench_substitution_left_size
+    category: bench
+    function: trsm
+    precision: *single_precision
+    transA: [ N ]
+    side: [ L ]
+    uplo: [ U, L ]
+    diag: U
+    alpha: 1
+    incx: 1
+    incy: 1
+    matrix_size: *left_substitution_range
+    iters: 10
+
+  - name: trsm_bench_substitution_right_size
+    category: bench
+    function: trsm
+    precision: *single_precision
+    transA: [ N ]
+    side: [ R ]
+    uplo: [ U, L ]
+    diag: U
+    alpha: 1
+    incx: 1
+    incy: 1
+    matrix_size: *right_substitution_range
+    iters: 10
+
+  - name: trsm_bench_1_matrix_size
+    category: bench
+    function: trsm
+    precision: *double_precision
+    transA: [ N, T ]
+    side: [ L, R ]
+    uplo: L
+    diag: U
+    alpha: 1
+    incx: 1
+    incy: 1
+    matrix_size: *testset1_matrix_size_range
+    iters: 5
+
+  - name: trsm_bench_2_matrix_size
+    category: bench
+    function: trsm
+    precision: *double_precision
+    transA: [ N, T ]
+    side: [ L, R ]
+    uplo: L
+    diag: U
+    alpha: 1
+    incx: 1
+    incy: 1
+    matrix_size: *testset2_matrix_size_range
+    iters: 5
+
+  - name: trsm_substitution_small
+    category: bench
+    function: trsm
+    precision: *single_double_precisions
+    uplo: [L]
+    transA: [N, C]
+    diag: [N]
+    matrix_size: *small_sub_sizes
+    alpha: 1
+    iters: 50
+    cold_iters: 20
+
+  - name: trsm_substitution_large
+    category: bench
+    function: trsm
+    precision: *single_double_precisions
+    uplo: [L]
+    transA: [N, C]
+    diag: [N]
+    matrix_size: *large_sub_sizes
+    alpha: 1
+    iters: 50
+    cold_iters: 20
+...

@@ -1,0 +1,310 @@
+---
+include: rocblas_common.yaml
+include: known_bugs.yaml
+
+Definitions:
+  - &invalid_matrix_size_range
+    - { N:  -1,  K:  1,  lda:  1,  ldb: 1,  ldc:  1 } # bad n
+    - { N:   2,  K: -1,  lda:  2,  ldb: 2,  ldc:  1 } # bad k
+    - { N:   0,  K:  3,  lda:  3,  ldb: 3,  ldc:  3 } # n==0
+    - { N:   3,  K:  0,  lda:  3,  ldb: 3,  ldc:  3 } # k==0
+    - { N:   3,  K:  1,  lda:  1,  ldb: 3,  ldc:  3 } # bad lda if not transpose
+    - { N:   1,  K:  3,  lda:  1,  ldb: 3,  ldc:  3 } # bad lda if transpose
+    - { N:   1,  K:  3,  lda:  3,  ldb: 1,  ldc:  3 } # bad ldb if not transpose
+    - { N:   3,  K:  1,  lda:  3,  ldb: 1,  ldc:  3 } # bad ldb if transpose
+    - { N:   3,  K:  3,  lda:  3,  ldb: 3,  ldc:  1 } # bad ldc
+
+  - &tiny_matrix_size
+    - { N:   199, K:  32,  lda:  199, ldb: 199, ldc: 199 }
+
+  - &medium_matrix_size_range
+    - { N:    88, K:  200,  lda:  200,  ldb: 200,  ldc: 88 }
+    - { N:    64, K:   70,  lda:  128,  ldb: 128,  ldc: 64 }
+    - { N:   199, K:  290,  lda:  290,  ldb: 290,  ldc: 200 }
+
+  - &large_matrix_size_range
+    - { N:  2011, K:  1233,  lda:  2011, ldb: 2011, ldc: 2048 }
+    - { N:  3024, K:  3200, lda:  3300, ldb: 3300, ldc: 3300 }
+
+  - &alpha_beta_range
+    - { alpha:  1.5, alphai:  1.5, beta:  0.0, betai: 0.0 }
+    - { alpha: -2.0, alphai:  1.0, beta: -1.0, betai: 0.5 }
+    - { alpha:  0.0, alphai:  0.0, beta:  1.0, betai: 0.0 } # quick success
+    - { alpha:  0.0, alphai:  0.0, beta:  2.0, betai: 0.5 } # scale step only
+
+  - &alpha_beta
+    - { alpha: -2.0, alphai:  1.5, beta: -0.5, betai: 0.5 }
+
+Tests:
+
+- name: gemmt_bad
+  category: quick
+  function: gemmt_bad_arg
+  precision: *single_double_precisions_complex_real
+  api: [ C, FORTRAN ]
+
+- name: gemmt_NaN
+  category: pre_checkin
+  function: gemmt
+  precision: *single_double_precisions_complex_real
+  uplo: [ U ]
+  transA: [ N ]
+  transB: [ T ]
+  matrix_size: *tiny_matrix_size
+  alpha: [ 2.0, .NaN ]  # NaN is converted to 0.0 in test code
+  beta: [ 1.0, .NaN ]
+
+- name: gemmt_invalid_size
+  category: quick
+  function: gemmt
+  precision: *single_double_precisions_complex_real
+  uplo: [ L ]
+  transA: [ C ]
+  transB: [ C ]
+  matrix_size: *invalid_matrix_size_range
+  alpha_beta: *alpha_beta
+  batch_count: [ 1 ]
+  api: [ C, FORTRAN ]
+
+- name: gemmt_medium_matrix
+  category: pre_checkin
+  function: gemmt
+  precision: *single_double_precisions_complex_real
+  uplo: [ U, L ]
+  transA: [ T, C ]
+  transB: [ N, C ]
+  matrix_size: *medium_matrix_size_range
+  alpha_beta: *alpha_beta
+  batch_count: [ 1 ]
+
+- name: gemmt_large
+  category: nightly
+  function: gemmt
+  precision: *single_double_precisions_complex_real
+  uplo: [ U ]
+  transA: [ N, T ]
+  transB: [ N, C ]
+  matrix_size: *large_matrix_size_range
+  alpha_beta: *alpha_beta
+
+- name: gemmt_size_t
+  category: stress
+  function: gemmt
+  precision: *single_precision
+  uplo: [ U, L ] # op(A) and op(B) are NxK
+  matrix_size:
+    - { transA: N, transB: N,  N:     3, K:  46975,  lda:     3,  ldb:     46975,  ldc: 3 }
+    - { transA: N, transB: T,  N:     3, K:  46975,  lda:     3,  ldb:     46975,  ldc: 3 }
+    - { transA: T, transB: N,  N: 46975, K:      4,  lda:     4,  ldb:         4,  ldc: 46975}
+  alpha_beta:
+    - { alpha:  0.5, beta:  0.5 }
+  batch_count: [ 1 ]
+  pointer_mode_host: false
+  gpu_arch: ['90a','942']
+  os_flags: LINUX
+
+- name: gemmt_64
+  category: stress
+  uplo: [ U , L ] # op(A) and op(B) are NxK
+  matrix_size:
+    - { N:  35, K:  2,  lda:  2147483649, ldb: 36, ldc: 36, batch_count: 1, transA: N, transB: N, uplo: U }
+    - { N:  35, K:  2,  lda: 36, ldb: 2147483649, ldc: 36, batch_count: 1, transA: T, transB: T, uplo: L }
+    - { N:  2, K:  35,  lda: 36, ldb: 36, ldc: 2147483649, batch_count: 1, transA: T, transB: T, uplo: U }
+    - { N:  2, K:   2,  lda: 2, ldb: 2, ldc: 2, batch_count: *c_grid_yz_require_passes, transA: N, transB: T, uplo: L}
+    - { N:  3, K:   469, lda: 3, ldb: 469, ldc: 3, transA: N, transB: N, uplo: U }
+  api: [ C_64 ]
+  alpha_beta:
+    - { alpha:  1.0, beta:  1.0 }
+  os_flags: [ LINUX ]
+  function:
+    - gemmt_strided_batched: *single_precision
+  stride_scale: 1
+  gpu_arch: '9??'
+
+# batched
+- name: gemmt_batched_bad
+  category: quick
+  function: gemmt_batched_bad_arg
+  precision: *single_double_precisions_complex_real
+  api: [ C, FORTRAN ]
+
+- name: gemmt_batched_quick
+  category: quick
+  function: gemmt_batched
+  precision: *single_double_precisions_complex_real
+  uplo: [ U ]
+  transA: [ T, C ]
+  transB: [ N, C ]
+  matrix_size: *tiny_matrix_size
+  alpha: [ 0, 1 ]
+  beta: [ 0, 1 ]
+  batch_count: [ 0, 1 ]
+
+- name: gemmt_batched_NaN
+  category: pre_checkin
+  function: gemmt_batched
+  precision: *single_double_precisions_complex_real
+  uplo: [ L ]
+  transA: [ N, T ]
+  transB: [ N, C ]
+  matrix_size: *tiny_matrix_size
+  alpha: [ 2.0, .NaN ]  # NaN is converted to 0.0 in test code
+  beta: [ 1.0, .NaN ]
+  batch_count: [ 2 ]
+
+- name: gemmt_batched_medium
+  category: pre_checkin
+  function: gemmt_batched
+  precision: *single_double_precisions_complex_real
+  uplo: [ U, L ]
+  transA: [ T ]
+  transB: [ N ]
+  matrix_size: *medium_matrix_size_range
+  alpha_beta: *alpha_beta_range
+  batch_count: [ 1, 4 ]
+  api: [ C, FORTRAN ]
+
+- name: gemmt_batched_large
+  category: nightly
+  function: gemmt_batched
+  precision: *single_double_precisions_complex_real
+  uplo: [ U ]
+  transA: [ N ]
+  transB: [ T ]
+  matrix_size: *large_matrix_size_range
+  alpha_beta: *alpha_beta
+  batch_count: [ 2 ]
+
+- name: gemmt_batched_64 # TODO: add tests for K, lda, ldb, ldc > int32_t_max
+  category: stress
+  api: [C_64]
+  function: gemmt_batched
+  precision: *single_precision
+  uplo: [ U    ] # op(A) and op(B) are NxK
+  matrix_size:
+    - { transA: N, transB: N,  N:     3, K:  469  ,  lda:     3,  ldb:     469  ,  ldc: 3 }
+  alpha_beta:
+    - { alpha:  0.5, beta:  0.5 }
+  batch_count: [ 65536 ]
+  pointer_mode_host: false
+  os_flags: LINUX
+
+# strided batched
+- name: gemmt_strided_batched_bad
+  category: quick
+  function: gemmt_strided_batched_bad_arg
+  precision: *single_double_precisions_complex_real
+  api: [ C, FORTRAN ]
+
+- name: gemmt_strided_batched_quick
+  category: quick
+  function: gemmt_strided_batched
+  precision: *single_precision
+  uplo: [ U ]
+  transA: [ N, T, C ]
+  transB: [ N, T, C ]
+  matrix_size: *tiny_matrix_size
+  alpha: [ 0, 1 ]
+  beta: [ 0, 1 ]
+  batch_count: [ 0, 1 ]
+
+- name: gemmt_strided_batched_NaN
+  category: pre_checkin
+  function: gemmt_strided_batched
+  precision: *double_precision
+  uplo: [ U ]
+  transA: [ T ]
+  transB: [ N ]
+  matrix_size: *tiny_matrix_size
+  alpha: [ 2.0, .NaN ]  # NaN is converted to 0.0 in test code
+  beta: [ 1.0, .NaN ]
+  batch_count: [ 3 ]
+
+- name: gemmt_strided_batched_medium
+  category: pre_checkin
+  function: gemmt_strided_batched
+  precision: *single_double_precisions_complex_real
+  uplo: [ U, L ]
+  transA: [ N, T, C ]
+  transB: [ N, T, C ]
+  matrix_size: *medium_matrix_size_range
+  alpha_beta: *alpha_beta_range
+  batch_count: [ 3 ]
+  api: [ C, FORTRAN ]
+
+- name: gemmt_strided_batched_large
+  category: nightly
+  function: gemmt_strided_batched
+  precision: *single_double_precisions_complex_real
+  uplo: [ L ]
+  transA: [ T ]
+  transB: [ N ]
+  matrix_size: *large_matrix_size_range
+  alpha_beta: *alpha_beta
+  batch_count: [ 2 ]
+
+- name: gemmt_large_batch
+  category: stress
+  function:
+    - gemmt_batched
+    - gemmt_strided_batched
+  precision: *single_precision
+  uplo: [ L ]
+  transA: [ T ]
+  transB: [ N ]
+  matrix_size:
+    - { N: 3, K: 3, lda: 3, ldb: 3, ldc: 3, batch_count: *c_grid_yz_require_passes }
+  alpha_beta:
+    - { alpha:  0.5, beta:  0.5 }
+
+- name: gemmt_strided_batched_64 # TODO: add tests for K, lda, ldb, ldc > int32_t_max
+  category: stress
+  api: [C_64]
+  function: gemmt_strided_batched
+  precision: *single_precision
+  uplo: [ U    ] # op(A) and op(B) are NxK
+  matrix_size:
+    - { transA: N, transB: N,  N:     3, K:  469  ,  lda:     3,  ldb:     469  ,  ldc: 3 }
+  alpha_beta:
+    - { alpha:  0.5, beta:  0.5 }
+  batch_count: [ 65536 ]
+  pointer_mode_host: false
+  os_flags: LINUX
+
+- name: gemmt_graph_test
+  category: pre_checkin
+  function:
+    - gemmt
+    - gemmt_batched
+    - gemmt_strided_batched
+  precision: *single_double_precisions_complex_real
+  uplo: [ L ]
+  transA: [ T ]
+  transB: [ N ]
+  matrix_size:
+    - { N:   199, K:  290,  lda:  290,  ldb: 290,  ldc: 200 }
+  batch_count: [ 2 ]
+  alpha_beta: *alpha_beta_range
+  graph_test: true
+
+
+- name: gemmt_repeatability_check
+  category: stress
+  function:
+    - gemmt
+    - gemmt_batched
+    - gemmt_strided_batched
+  precision: *single_double_precisions_complex_real
+  uplo: [ L ]
+  transA: [ T ]
+  transB: [ N ]
+  matrix_size:
+    - { N:   199, K:  290,  lda:  290,  ldb: 290,  ldc: 200 }
+  batch_count: [ 2 ]
+  alpha_beta: *alpha_beta_range
+  atomics_mode: 0
+  iters: 5
+  initialization: hpl
+  devices: 4
+  repeatability_check: true
+...
