@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2022-2024 Advanced Micro Devices, Inc.
+ * Copyright (c) 2022-2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -82,7 +82,7 @@ public:
     ~SMART_DESTROYER()
     {
         if(_ptr != nullptr)
-            _func(_ptr);
+            static_cast<void>(_func(_ptr));
     }
 
     T*           _ptr = nullptr;
@@ -103,7 +103,7 @@ public:
     ~SMART_DESTROYER_NON_PTR()
     {
         if(_ptr != nullptr)
-            _func(*_ptr);
+            static_cast<void>(_func(*_ptr));
     }
 
     T*           _ptr = nullptr;
@@ -225,7 +225,7 @@ void test_prune_check(hipsparseLtHandle_t*           handle,
     CHECK_HIP_ERROR(hipMalloc(&d_valid, sizeof(int)));
     CHECK_HIPSPARSELT_ERROR(hipsparseLtSpMMAPruneCheck(handle, matmul, d, d_valid, stream));
     CHECK_HIP_ERROR(hipMemcpyAsync(&h_valid, d_valid, sizeof(int), hipMemcpyDeviceToHost, stream));
-    hipStreamSynchronize(stream);
+    CHECK_HIP_ERROR(hipStreamSynchronize(stream));
     auto s = expected ? "passed" : "falied";
     if((h_valid == 0) == expected)
         std::printf("expected %s, prune check PASSED\n", s);
@@ -507,7 +507,7 @@ void run(int64_t              m,
     void*       d_wworkspace;
     int         num_streams = 0;
     hipStream_t stream      = nullptr;
-    hipStreamCreate(&stream);
+    CHECK_HIP_ERROR(hipStreamCreate(&stream));
     SMART_DESTROYER_NON_PTR<hipStream_t, hipError_t> sS(&stream, hipStreamDestroy);
 
     CHECK_HIP_ERROR(hipMalloc(&d, size * sizeof(T)));
@@ -610,7 +610,7 @@ void run(int64_t              m,
 
     CHECK_HIPSPARSELT_ERROR(
         hipsparseLtSpMMAPrune(&handle, &matmul, d, d_test, HIPSPARSELT_PRUNE_SPMMA_STRIP, stream));
-    hipStreamSynchronize(stream);
+    CHECK_HIP_ERROR(hipStreamSynchronize(stream));
 
     CHECK_HIP_ERROR(hipMemcpy(hp_test.data(), d_test, sizeof(T) * size, hipMemcpyDeviceToHost));
 

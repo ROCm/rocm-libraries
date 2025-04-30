@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2022-2023 Advanced Micro Devices, Inc.
+ * Copyright (c) 2022-2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -120,8 +120,7 @@ public:
 #ifdef GOOGLE_TEST
         if(m_guard_len > 0)
         {
-            T host[m_pad];
-
+            T* host = (T*)malloc(sizeof(T)*m_pad);
             // Copy device memory after allocated memory to host
             EXPECT_EQ(hipMemcpy(host, d + this->m_size, m_guard_len, hipMemcpyDeviceToHost),
                       hipSuccess);
@@ -137,6 +136,7 @@ public:
 
             // Make sure no corruption has occurred
             EXPECT_EQ(memcmp(host, m_guard, m_guard_len), 0);
+            free(host);
         }
 #endif
     }
@@ -148,7 +148,7 @@ public:
 #ifdef GOOGLE_TEST
             if(m_pad > 0)
             {
-                T host[m_pad];
+                T* host = (T*)malloc(sizeof(T)*m_pad);
 
                 // Copy device memory after allocated memory to host
                 EXPECT_EQ(hipMemcpy(host, d + this->m_size, m_guard_len, hipMemcpyDeviceToHost),
@@ -165,6 +165,8 @@ public:
 
                 // Make sure no corruption has occurred
                 EXPECT_EQ(memcmp(host, m_guard, m_guard_len), 0);
+
+                free(host);
             }
 #endif
             // Free device memory
