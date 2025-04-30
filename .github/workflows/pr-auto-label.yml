@@ -58,10 +58,16 @@ jobs:
             category_repo="${entry}"                      # e.g., "projects/hipsparse"
             category="${category_repo%%/*}"                # e.g., "projects"
             name="${category_repo##*/}"                    # e.g., "hipsparse"
-            label="${category}: ${name}"                   # e.g., "projects: hipsparse"
+
+            # Check if the category is 'projects' and set the label format accordingly
+            if [ "$category" == "projects" ]; then
+              label="project: ${name}"                     # e.g., "project: hipsparse"
+            else
+              label="${category}: ${name}"                 # e.g., "shared: rocroller"
+            fi
 
             # Use full path with leading slash for exact match
-            if echo "$changed_files" | grep -qE "\^${category_repo}/"; then
+            if echo "$changed_files" | grep -qE "^${category_repo}/"; then
               labels_to_add+=("$label")
             else
               if echo "$current_labels" | grep -q "$label"; then
