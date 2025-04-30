@@ -1,0 +1,5 @@
+[submodule "Tensile/HostLibraryTests/googletest"]
+	path = Tensile/HostLibraryTests/googletest
+	url = https://github.com/google/googletest.git
+branch = master
+
