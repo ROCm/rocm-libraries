@@ -2,140 +2,140 @@
   "repositories": [
     {
       "name": "miopen",
-      "repo-name": "MIOpen",
+      "reponame": "MIOpen",
       "url": "ROCm/MIOpen",
       "branch": "develop",
       "category": "projects"
     },
     {
       "name": "tensile",
-      "repo-name": "Tensile",
+      "reponame": "Tensile",
       "url": "ROCm/Tensile",
       "branch": "develop",
       "category": "shared"
     },
     {
       "name": "composablekernel",
-      "repo-name": "composable_kernel",
+      "reponame": "composable_kernel",
       "url": "ROCm/composable_kernel",
       "branch": "develop",
       "category": "projects"
     },
     {
       "name": "hipblas",
-      "repo-name": "hipBLAS",
+      "reponame": "hipBLAS",
       "url": "ROCm/hipBLAS",
       "branch": "develop",
       "category": "projects"
     },
     {
       "name": "hipblas-common",
-      "repo-name": "hipBLAS-common",
+      "reponame": "hipBLAS-common",
       "url": "ROCm/hipBLAS-common",
       "branch": "develop",
       "category": "projects"
     },
     {
       "name": "hipblaslt",
-      "repo-name": "hipBLASLt",
+      "reponame": "hipBLASLt",
       "url": "ROCm/hipBLASLt",
       "branch": "develop",
       "category": "projects"
     },
     {
       "name": "hipcub",
-      "repo-name": "hipCUB",
+      "reponame": "hipCUB",
       "url": "ROCm/hipCUB",
       "branch": "develop",
       "category": "projects"
     },
     {
       "name": "hipfft",
-      "repo-name": "hipFFT",
+      "reponame": "hipFFT",
       "url": "ROCm/hipFFT",
       "branch": "develop",
       "category": "projects"
     },
     {
       "name": "hiprand",
-      "repo-name": "hipRAND",
+      "reponame": "hipRAND",
       "url": "ROCm/hipRAND",
       "branch": "develop",
       "category": "projects"
     },
     {
       "name": "hipsolver",
-      "repo-name": "hipSOLVER",
+      "reponame": "hipSOLVER",
       "url": "ROCm/hipSOLVER",
       "branch": "develop",
       "category": "projects"
     },
     {
       "name": "hipsparse",
-      "repo-name": "hipSPARSE",
+      "reponame": "hipSPARSE",
       "url": "ROCm/hipSPARSE",
       "branch": "develop",
       "category": "projects"
     },
     {
       "name": "hipsparselt",
-      "repo-name": "hipSPARSELt",
+      "reponame": "hipSPARSELt",
       "url": "ROCm/hipSPARSELt",
       "branch": "develop",
       "category": "projects"
     },
     {
       "name": "rocblas",
-      "repo-name": "rocBLAS",
+      "reponame": "rocBLAS",
       "url": "ROCm/rocBLAS",
       "branch": "develop",
       "category": "projects"
     },
     {
       "name": "rocfft",
-      "repo-name": "rocFFT",
+      "reponame": "rocFFT",
       "url": "ROCm/rocFFT",
       "branch": "develop",
       "category": "projects"
     },
     {
       "name": "rocprim",
-      "repo-name": "rocPRIM",
+      "reponame": "rocPRIM",
       "url": "ROCm/rocPRIM",
       "branch": "develop",
       "category": "projects"
     },
     {
       "name": "rocrand",
-      "repo-name": "rocRAND",
+      "reponame": "rocRAND",
       "url": "ROCm/rocRAND",
       "branch": "develop",
       "category": "projects"
     },
     {
       "name": "rocroller",
-      "repo-name": "rocRoller",
+      "reponame": "rocRoller",
       "url": "ROCm/rocRoller",
       "branch": "main",
       "category": "shared"
     },
     {
       "name": "rocsolver",
-      "repo-name": "rocSOLVER",
+      "reponame": "rocSOLVER",
       "url": "ROCm/rocSOLVER",
       "branch": "develop",
       "category": "projects"
     },
     {
       "name": "rocsparse",
-      "repo-name": "rocSPARSE",
+      "reponame": "rocSPARSE",
       "url": "ROCm/rocSPARSE",
       "branch": "develop",
       "category": "projects"
     },
     {
       "name": "rocthrust",
-      "repo-name": "rocThrust",
+      "reponame": "rocThrust",
       "url": "ROCm/rocThrust",
       "branch": "develop",
       "category": "projects"

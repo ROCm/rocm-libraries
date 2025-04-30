@@ -24,7 +24,7 @@ jobs:
       - name: Add Repositories to the Monorepo
         run: |
           for repo in $(cat .github/repos-config.json | jq -r '.repositories[].name'); do
-            repo_name=$(cat .github/repos-config.json | jq -r ".repositories[] | select(.name == \"$repo\") | .repo-name")
+            repo_name=$(cat .github/repos-config.json | jq -r ".repositories[] | select(.name == \"$repo\") | .reponame")
             url=$(cat .github/repos-config.json | jq -r ".repositories[] | select(.name == \"$repo\") | .url")
             branch=$(cat .github/repos-config.json | jq -r ".repositories[] | select(.name == \"$repo\") | .branch")
             category=$(cat .github/repos-config.json | jq -r ".repositories[] | select(.name == \"$repo\") | .category")
