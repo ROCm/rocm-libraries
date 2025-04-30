@@ -1,6 +1,11 @@
 {
   "repositories": [
     {
+      "name": "MIOpen",
+      "url": "ROCm/MIOpen",
+      "branch": "develop"
+    },
+    {
       "name": "Tensile",
       "url": "ROCm/Tensile",
       "branch": "develop"
