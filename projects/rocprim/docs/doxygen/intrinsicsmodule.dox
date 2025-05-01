@@ -1,0 +1,19 @@
+/**
+@brief rocPRIM intrinsic functions.
+@author
+@file
+*/
+
+/**
+ * \defgroup intrinsicsmodule Intrinsic functions
+ */
+
+/**
+ * \defgroup intrinsicsmodule_flat_id Flat ID
+ * \ingroup intrinsicsmodule
+ */
+
+/**
+ * \defgroup intrinsicsmodule_warp_id Warp ID
+ * \ingroup intrinsicsmodule
+ */
