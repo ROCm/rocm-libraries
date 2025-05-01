@@ -126,9 +126,3 @@ else:
 # If dry-run is enabled, prevent actual changes to labels
 if args.dry_run:
     print("Dry run enabled. Labels will not be applied.")
-else:
-    # Here you can add code to apply the labels (e.g., using `gh` CLI) if not in dry-run mode
-    if to_add:
-        print(f"Would add labels: {', '.join(to_add)}")
-    if to_remove:
-        print(f"Would remove labels: {', '.join(to_remove)}")
