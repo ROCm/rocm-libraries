@@ -1,0 +1,29 @@
+defaults:
+  numbered: False
+root: index
+subtrees:
+- entries:
+  - file: installation/installlinux.rst
+  - file: howto/index.rst
+    title: How to
+    subtrees:
+    - entries:
+      - file: howto/using.rst
+      - file: howto/memory.rst
+      - file: howto/logging.rst
+      - file: howto/clients.rst
+      - file: howto/contribute.rst
+  - file: reference/index.rst
+    title: Reference
+    subtrees:
+    - entries:
+      - file: reference/intro.rst
+      - file: reference/types.rst
+      - file: reference/auxiliary.rst
+      - file: reference/lapack.rst
+      - file: reference/lapacklike.rst
+      - file: reference/refact.rst
+      - file: reference/helpers.rst
+      - file: reference/tuning.rst
+      - file: reference/deprecated.rst
+  - file: license.rst

@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+#
+# Reformats a given list of files to match the rocSOLVER style guidelines.
+
+display_help() {
+    cat <<EOF
+rocSOLVER auto-format script
+
+This script changes the given source files to comply with rocSOLVER formatting
+guidelines. It updates the copyright date, ensures files are ASCII-encoded
+fixes minor whitespace issues, and applies clang-format.
+
+Usage:
+  $0 [--no-clang-format] [--help] [--] files...
+
+Options:
+  --help                      Print this help message.
+
+  --no-clang-format           Skip the clang-format step.
+EOF
+}
+
+PATH="$(git rev-parse --git-path hooks):/opt/rocm-4.3.1/llvm/bin:/opt/rocm-4.3.0/llvm/bin:$PATH"
+export PATH
+
+# Redirect stdout to stderr.
+exec >&2
+
+# Set defaults
+apply_clang_format=true
+
+# Check getopt version
+getopt -T
+if [[ $? -ne 4 ]]; then
+    echo 'getopt version check failed'
+    exit 1
+fi
+
+# Parse options
+GETOPT_PARSE=$(getopt --name "$0" --longoptions help,no-clang-format --options '' -- "$@")
+if [[ $? -ne 0 ]]; then
+    exit 1
+fi
+eval set -- "$GETOPT_PARSE"
+while true; do
+    case "$1" in
+        --help)
+            display_help
+            exit ;;
+        --no-clang-format)
+            apply_clang_format=false
+            shift ;;
+        --) shift ; break ;;
+    esac
+done
+
+# Change the copyright date at the top of any text files
+for file in "$@"; do
+    perl -pi -e 'INIT { exit 1 if !-f $ARGV[0] || -B $ARGV[0]; $year = (localtime)[5] + 1900 }
+        s/^([*\/#[:space:]]*)Copyright\s+(?:\(C\)\s*)?(\d+)(?:\s*-\s*\d+)?/qq($1Copyright (C) $2@{[$year != $2 ? "-$year" : ""]})/ie
+        if $. < 10' -- "$file"
+done
+
+# Do the formatting
+for file in "$@"; do
+    if echo "$file" | grep -Eq '\.c$|\.h$|\.hpp$|\.cpp$|\.cl$|\.in$|\.txt$|\.yaml$|\.sh$|\.py$|\.pl$|\.cmake$|\.md$|\.rst$|\.groovy$|\.m$'; then
+        sed -i -e 's/[[:space:]]*$//' -- "$file" # Remove whitespace at end of lines
+        sed -i -e '$a\' -- "$file" # Add missing newline to end of file
+
+        # Convert UTF8 non-ASCII to ASCII
+        temp=$(mktemp)
+        [[ -w $temp ]] || exit
+        iconv -s -f utf-8 -t ascii//TRANSLIT -- "$file" > "$temp" || exit
+        chmod --reference="$file" -- "$temp" || exit
+        mv -f -- "$temp" "$file" || exit
+    fi
+done
+
+# Run clang-format on C/C++ files
+if [[ "$apply_clang_format" == true ]]; then
+    for file in "$@"; do
+        if echo "$file" | grep -Eq '\.c$|\.h$|\.hpp$|\.cpp$|\.cl$|\.h\.in$|\.hpp\.in$|\.cpp\.in$'; then
+            clang-format -i -style=file -- "$file"
+        fi
+    done
+fi

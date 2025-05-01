@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testset failure-regex="$.^">
+    <var name="COMMAND">rocsolver-test --gtest_color=yes </var>
+    <test sets="psdb">
+        <run name="all-psdb">{COMMAND} --gtest_filter=checkin*-*known_bug* --gtest_output=xml </run>
+    </test>
+    <test sets="osdb">
+        <run name="all-osdb">{COMMAND} --gtest_filter=daily*-*known_bug* --gtest_output=xml </run>
+    </test>
+    <test sets="hmm">
+        <!-- * These tests should only be run on devices supporting HMM -->
+        <run name="hmm-adhoc">{COMMAND} --gtest_filter=*MANAGED_MALLOC*-*known_bug* --gtest_output=xml </run>
+    </test>
+    <emulation sets="smoke">
+        <run name="all-smoke">{COMMAND} --gtest_filter="checkin*BDSQR*:checkin*STEBZ*:checkin*STEIN*:
+        :checkin*STERF*:checkin*STEQR*:checkin*SYEVJ*:checkin*HEEVJ*:checkin*LARFG*:checkin*LARF*:
+        :checkin*LARFT*:checkin*GETF2*:checkin*POTF2*:checkin*GEQR2*:checkin*GELQ2*:checkin*SPLITLU*:
+        :checkin*REFACTLU*:checkin*REFACTCHOL*-*LARFB*:*known_bug*" --gtest_output=xml </run>
+    </emulation>
+    <emulation sets="regression">
+        <run name="all-regression">{COMMAND} --gtest_filter="daily*GETRF*:daily*GETRS*:daily*GEQRF*:
+        :daily*GESVDJ*-*NOTRANSV*:*known_bug*" --gtest_output=xml </run>
+    </emulation>
+    <emulation sets="extended">
+        <run name="all-extended">{COMMAND} --gtest_filter=checkin*-*known_bug* --gtest_output=xml </run>
+    </emulation>
+</testset>
