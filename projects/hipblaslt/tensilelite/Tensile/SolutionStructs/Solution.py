@@ -940,14 +940,16 @@ class Solution(collections.abc.Mapping):
       state["SynchronizerSizeCheck"] = 1
     #   state["BatchSizeEqual"] = 1
 
+    if state["StreamK"] == 0 and state["GlobalSplitU"] == 0:
+      reject(state, printRejectionReason, "Either GSU or StreamK must be enabled")
+      return
+
     if state["StreamK"] != 0:
       state["GlobalSplitU"] = 0 # Cannot enable both Stream-K and GSU
       state["InternalSupportParams"]["SupportUserGSU"] = False # Disable UserGSU for Stream-K
       state["GlobalSplitUAlgorithm"] = "MultipleBuffer" # Set default Algorithm
       if state["ProblemType"]["DataType"].isDouble():
         reject(state, printRejectionReason, "Type {} for DataType not yet supported with StreamK".format(state["ProblemType"]["DataType"].toChar()))
-      if state["MIWaveGroup"][0] * state["MIWaveGroup"][1] != 4:
-        reject(state, printRejectionReason, "Stream-K requries MIWaveGroup0*MIWaveGroup1=4")
       if not state["EnableMatrixInstruction"]:
         reject(state, printRejectionReason, "Stream-K requires MatrixInstruction")
       if isaInfoMap[isa].asmCaps["HasWMMA"]:
@@ -972,6 +974,7 @@ class Solution(collections.abc.Mapping):
         if state["LocalSplitU"] > 1:
           reject(state, printRejectionReason, "Atomic Stream-K not working with LocalSplitU")
       if not state["Valid"]:
+        print2("in assignDerivedParameters, state['Valid'] = False")
         return
     else:
       # If not using StreamK, clear other stream-k settings to avoid duplicate kernels
