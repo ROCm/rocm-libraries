@@ -108,12 +108,14 @@ def _posixSearchPaths() -> List[Path]:
 
 
 class ToolchainDefaults(NamedTuple):
-    CXX_COMPILER = osSelect(linux="amdclang++", windows="clang++.exe")
-    C_COMPILER = osSelect(linux="amdclang", windows="clang.exe")
-    OFFLOAD_BUNDLER = osSelect(linux="clang-offload-bundler", windows="clang-offload-bundler.exe")
+    CXX_COMPILER= osSelect(linux="amdclang++", windows="clang++.exe")
+    C_COMPILER= osSelect(linux="amdclang", windows="clang.exe")
+    OFFLOAD_BUNDLER= osSelect(linux="clang-offload-bundler", windows="clang-offload-bundler.exe")
+    ROC_OBJ_EXTRACT= osSelect(linux="roc-obj-extract", windows="roc-obj-extract.exe")
+    ROC_OBJ_LS= osSelect(linux="roc-obj-ls", windows="roc-obj-ls.exe")
     DEVICE_ENUMERATOR = osSelect(linux="rocm_agent_enumerator" if isRhel8() else "amdgpu-arch", windows="hipinfo")
     ASSEMBLER = osSelect(linux="amdclang++", windows="clang++.exe")
-    HIP_CONFIG = osSelect(linux="hipconfig", windows="hipconfig.exe")
+    HIP_CONFIG = osSelect(linux="hipconfig", windows="hipconfig")
 
 
 def _supportedComponent(component: str, targets: List[str]) -> bool:
@@ -147,6 +149,16 @@ def supportedCxxCompiler(compiler: str) -> bool:
         If supported True; otherwise, False.
     """
     return _supportedComponent(compiler, ["amdclang++", "clang++"])
+
+
+def supportedBundler(bundler: str) -> bool:
+    """Determine if an offload bundler is supported by Tensile.
+    Args:
+        bundler: The name of an roc-obj-extract to test for support.
+    Return:
+        If supported True; otherwise, False.
+    """
+    return _supportedComponent(bundler, ["clang-offload-bundler"])
 
 
 def supportedOffloadBundler(bundler: str) -> bool:
@@ -190,6 +202,26 @@ def supportedDeviceEnumerator(enumerator: str) -> bool:
     return _supportedComponent(enumerator, ["rocm_agent_enumerator", "amdgpu-arch"])
 
 
+def supportedExtract(extract: str) -> bool:
+    """Determine if an object extracter is supported by Tensile.
+    Args:
+        extract: The name of an roc-obj-extract to test for support.
+    Return:
+        If supported True; otherwise, False.
+    """
+    return _supportedComponent(extract, [ToolchainDefaults.ROC_OBJ_EXTRACT])
+
+
+def supportedLs(ls: str) -> bool:
+    """Determine if an object lister is supported by Tensile.
+    Args:
+        ls: The name of an roc-obj-ls to test for support.
+    Return:
+        If supported True; otherwise, False.
+    """
+    return _supportedComponent(ls, [ToolchainDefaults.ROC_OBJ_LS])
+
+
 def _exeExists(file: Path) -> bool:
     """
     Check if a file exists and is executable.
@@ -215,11 +247,13 @@ def _validateExecutable(file: str, searchPaths: List[Path]) -> str:
         The validated executable with an absolute path.
     """
     if not any((
-        supportedCxxCompiler(file),
-        supportedCCompiler(file),
-        supportedOffloadBundler(file),
-        supportedHip(file),
-        supportedDeviceEnumerator(file)
+        supportedCxxCompiler(file), 
+        supportedCCompiler(file), 
+        supportedBundler(file), 
+        supportedDeviceEnumerator(file),
+        supportedExtract(file), 
+        supportedLs(file), 
+        supportedHip(file)
     )):
         raise ValueError(f"`{file}` is not a supported toolchain component on {'Windows' if os.name == 'nt' else 'Linux'}")
 
