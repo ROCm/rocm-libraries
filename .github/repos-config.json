@@ -1,0 +1,137 @@
+{
+  "repositories": [
+    {
+      "name": "composablekernel",
+      "reponame": "composable_kernel",
+      "url": "ROCm/composable_kernel",
+      "branch": "amd-master",
+      "category": "projects"
+    },
+    {
+      "name": "hipblas",
+      "reponame": "hipBLAS",
+      "url": "ROCm/hipBLAS",
+      "branch": "9f2781f5d4c002a2a4d249289b717c5d93ed4628",
+      "category": "projects"
+    },
+    {
+      "name": "hipblas-common",
+      "reponame": "hipBLAS-common",
+      "url": "ROCm/hipBLAS-common",
+      "branch": "53768e8a8c1694330c6665f775cbb2c0d4e95ff1",
+      "category": "projects"
+    },
+    {
+      "name": "hipblaslt",
+      "reponame": "hipBLASLt",
+      "url": "ROCm/hipBLASLt",
+      "branch": "7f76af35eef539ebe31c46b3097fc5d219b62e8e",
+      "category": "projects"
+    },
+    {
+      "name": "hipcub",
+      "reponame": "hipCUB",
+      "url": "ROCm/hipCUB",
+      "branch": "f21c3ab7e3bb6ca5daeb90fc6a6b9c6b95db5a90",
+      "category": "projects"
+    },
+    {
+      "name": "hipfft",
+      "reponame": "hipFFT",
+      "url": "ROCm/hipFFT",
+      "branch": "7eaa1d5a99b1b137df77d867861c37f7d1db51b3",
+      "category": "projects"
+    },
+    {
+      "name": "hiprand",
+      "reponame": "hipRAND",
+      "url": "ROCm/hipRAND",
+      "branch": "82f4c96e5c28c7081675a60048410a1087ffafaf",
+      "category": "projects"
+    },
+    {
+      "name": "hipsolver",
+      "reponame": "hipSOLVER",
+      "url": "ROCm/hipSOLVER",
+      "branch": "2fd39234d29895561470259c25619848e5da494c",
+      "category": "projects"
+    },
+    {
+      "name": "hipsparse",
+      "reponame": "hipSPARSE",
+      "url": "ROCm/hipSPARSE",
+      "branch": "devc9ffd19d75a7e07d5f5ab753489ca936f91eb52delop",
+      "category": "projects"
+    },
+    {
+      "name": "hipsparselt",
+      "reponame": "hipSPARSELt",
+      "url": "ROCm/hipSPARSELt",
+      "branch": "d8d914a2e1e60b6474fe67c09ed7d36fb49006a4",
+      "category": "projects"
+    },
+    {
+      "name": "rocblas",
+      "reponame": "rocBLAS",
+      "url": "ROCm/rocBLAS",
+      "branch": "d4bc04f98341a713685c9cbb702bc4709486942c",
+      "category": "projects"
+    },
+    {
+      "name": "rocfft",
+      "reponame": "rocFFT",
+      "url": "ROCm/rocFFT",
+      "branch": "1ada1e5b49c9fc0c4e452fba9dcb019269073982",
+      "category": "projects"
+    },
+    {
+      "name": "rocprim",
+      "reponame": "rocPRIM",
+      "url": "ROCm/rocPRIM",
+      "branch": "d5266c1f3cfee96fdf6197f5ad7041f3a918503f",
+      "category": "projects"
+    },
+    {
+      "name": "rocrand",
+      "reponame": "rocRAND",
+      "url": "ROCm/rocRAND",
+      "branch": "bd4f04686ca333e28fd52b3dd801c4bd6f29d0af",
+      "category": "projects"
+    },
+    {
+      "name": "rocroller",
+      "reponame": "rocRoller",
+      "url": "ROCm/rocRoller",
+      "branch": "main",
+      "category": "shared"
+    },
+    {
+      "name": "rocsolver",
+      "reponame": "rocSOLVER",
+      "url": "ROCm/rocSOLVER",
+      "branch": "0c7e86d477a38f8138f17e40aa50b12d883d6e68",
+      "category": "projects"
+    },
+    {
+      "name": "rocsparse",
+      "reponame": "rocSPARSE",
+      "url": "ROCm/rocSPARSE",
+      "branch": "2ad3a1840ff012fc922104dbbc709d14ba16ac50",
+      "category": "projects"
+    },
+    {
+      "name": "rocthrust",
+      "reponame": "rocThrust",
+      "url": "ROCm/rocThrust",
+      "branch": "96d1519a2b76c601bf38e40d04092734acff9cd2",
+      "category": "projects"
+    },
+    {
+      "name": "tensile",
+      "reponame": "Tensile",
+      "url": "ROCm/Tensile",
+      "branch": "be49885fce2a61b600ae4593f1c2d00c8b4fa11e",
+      "category": "shared"
+    }
+  ]
+}
