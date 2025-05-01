@@ -1,0 +1,141 @@
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
+
+GlobalParameters:
+  NumElementsToValidate: -1
+  Device: 0
+  CSVExportWinner: 1
+  CSVMergeSameProblemID: 1
+  SleepPercent: 50
+
+BenchmarkProblems:
+  ########################################
+  # TT - standard
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 1
+      UseBeta: True
+      Batched: True
+      UseBias: 1
+      Activation: True
+      UseScaleAlphaVec: 1
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - ThreadTile:
+          - [1, 1]
+          - [2, 2]
+        - WorkGroup:
+          - [64, 1, 1]
+          - [1, 64, 1]
+          - [8, 8, 8]
+          - [2, 2, 32]
+          - [2, 2, 64]
+        - WaveSplitK: [1]
+        - InnerUnroll: [1,2,4]
+        - AssertFree0ElementMultiple: [1]
+        - AssertFree1ElementMultiple: [1]
+        - AssertSummationElementMultiple: [1]
+        - PrefetchGlobalRead: [0,2]
+        - PrefetchLocalRead: [0,1,2]
+        - DepthU: [64,512]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - GlobalReadVectorWidthA: [-1,1]
+        - GlobalReadVectorWidthB: [-1,1]
+        - LocalReadVectorWidth: [-1]
+        - StoreVectorWidth: [1]
+        - TransposeLDS: [2]
+        - StaggerUMapping: [0]
+        - StaggerU: [32]
+        - StaggerUStride: [-1]
+        - GlobalSplitU: [1,2]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
+        - ScheduleIterAlg: [1]
+        - ScheduleLocalWrite: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [1, 1, 1, 1]
+          - Exact: [111, 111, 1, 1111]
+          - Exact: [128, 128, 1, 640]
+
+        - BiasTypeArgs: ['h']
+        - ActivationArgs:
+          - [Enum: Relu]
+  ########################################
+  # NN - standard
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 0
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+      UseBias: 1
+      Activation: True
+      UseScaleAlphaVec: 1
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - ThreadTile:
+          - [1, 1]
+          - [2, 2]
+        - WorkGroup:
+          - [64, 1, 1]
+          - [1, 64, 1]
+          - [8, 8, 8]
+          - [2, 2, 32]
+          - [2, 2, 64]
+        - WaveSplitK: [1]
+        - InnerUnroll: [1,2,4]
+        - AssertFree0ElementMultiple: [1]
+        - AssertFree1ElementMultiple: [1]
+        - AssertSummationElementMultiple: [1]
+        - PrefetchGlobalRead: [0,2]
+        - PrefetchLocalRead: [0,1,2]
+        - DepthU: [64,512]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - GlobalReadVectorWidthA: [-1,1]
+        - GlobalReadVectorWidthB: [-1,1]
+        - LocalReadVectorWidth: [-1]
+        - StoreVectorWidth: [1]
+        - TransposeLDS: [2]
+        - StaggerUMapping: [0]
+        - StaggerU: [32]
+        - StaggerUStride: [-1]
+        - GlobalSplitU: [1,2]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
+        - ScheduleIterAlg: [1]
+        - ScheduleLocalWrite: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [1, 1, 1, 1]
+          - Exact: [111, 111, 1, 1111]
+          - Exact: [128, 128, 1, 640]
+
+        - BiasTypeArgs: ['h']
+        - ActivationArgs:
+          - [Enum: Relu]

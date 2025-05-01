@@ -1,0 +1,119 @@
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
+
+GlobalParameters:
+  NumElementsToValidate: -1
+  BoundsCheck: False
+  KernelTime: False
+  DataInitTypeAlpha: 0
+  DataInitTypeBeta: 2
+  DataInitTypeA: 12
+  DataInitTypeB: 13
+  DataInitTypeC: 12
+  # ValidationPrintValids: True
+  MaxWorkspaceSize: 134217728
+  # PrintSolutionRejectionReason: True
+  # ForceGenerateKernel: True
+  # GenerateSourcesAndExit: True
+  NumWarmups: 1
+  EnqueuesPerSync: 1
+  # NumBenchmarks: 10
+  KeepBuildTmp: True
+
+BenchmarkProblems:
+  - # sgemm NT
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        # - EdgeType: ["ShiftPtr"]
+        - PrefetchLocalRead: [True]
+      ForkParameters:
+        - MatrixInstruction:
+          # - [32, 32, 2, 1, 1, 2,2, 2,2]
+          # - [32, 32, 2, 1, 1, 3,3, 2,2]
+          # - [32, 32, 2, 1, 1, 4,4, 2,2]
+          # - [32, 32, 2, 1, 1, 5,5, 2,2] # MT too big
+          # - [32, 32, 2, 1, 1, 2,1, 2,2]
+          # - [32, 32, 2, 1, 1, 1,1, 2,2]
+          # - [16, 16, 4, 1, 1, 3,3, 2,2]
+          # - [16, 16, 4, 1, 1, 4,1, 2,2]
+          # - [16, 16, 4, 1, 1, 4,2, 2,2]
+          - [16, 16, 4, 1, 1, 4,4, 2,2]
+          # - [16, 16, 4, 1, 1, 4,8, 2,2]
+          # - [16, 16, 4, 1, 1, 8,8, 2,2]
+          # - [16, 16, 4, 1, 1, 8,8, 2,2]
+          # - [16, 16, 4, 1, 1, 2,2, 2,2]
+          # - [16, 16, 4, 1, 1, 2,1, 2,2]
+          # - [16, 16, 4, 1, 1, 1,1, 2,2]
+        #- WorkGroupMapping: [0, 1, 2, 4, 8, 16, 32, 64] # works
+        - WorkGroupMapping: [1]
+        #- GlobalSplitU: [1]
+        - DepthU: [ 64 ]
+        # - DepthU: [ 8, 12, 16, 32 ]
+        # - DepthU: [ 2, 4, 8, 16, 32, 64 ]
+        # - DepthU: [ 8, 9, 10, 11, 12, 13, 14, 15, 16 ] # depthu 14 failed a test
+        # - VectorWidth: [1, 4] # 2?
+        - VectorWidthA: [4]
+        - VectorWidthB: [4]
+        - StreamK: [3]
+        # - StreamKXCCMapping: [0, 8]
+        # - StaggerU: [0, 32]
+        # - StaggerU: [0]
+        - ScheduleIterAlg: [3]
+        - SourceSwap: [True]
+        # - SourceSwap: [False]
+        # - ExpandPointerSwap: [False, True]
+        - ExpandPointerSwap: [False]
+        - PrefetchLocalRead: [1]
+        # - PrefetchLocalRead: [1, 3, 5, 9, 13, 17]
+        # - PrefetchLocalRead: [1, 9, 10, 11, 12, 13, 14, 15, 16, 17]
+        #- PrefetchGlobalRead: [1, 2]
+        - PrefetchGlobalRead: [2]
+        # - 1LDSBuffer: [0, 1]
+        - 1LDSBuffer: [1]
+        # - EdgeType: ["Branch", "ShiftPtr"]
+        # - EdgeType: ["ShiftPtr"]
+        # - MIArchVgpr: [0, 1]
+        - MIArchVgpr: [0]
+        - StoreVectorWidth: [4]
+        # - StoreVectorWidth: [1]
+        # - NumElementsPerBatchStore: [0, 2, 4, 8]
+        # - NumElementsPerBatchStore: [0, 2, 8] # 4?
+        # - NumElementsPerBatchStore: [0]
+        # - AssertAlphaValue: [1]
+        #- GlobalReadVectorWidth: [2, 4, 8]
+        - GlobalReadVectorWidthA: [4]
+        - GlobalReadVectorWidthB: [4]
+        # - LocalReadVectorWidth: [1, 2, 4]
+        #- StoreRemapVectorWidth: [0, 4]
+        - StoreRemapVectorWidth: [0]
+        # - StoreVectorWidth: [2, 4]
+        # - NonTemporalC: [0, 3]
+        # - NonTemporalD: [0, 3]
+        # - TransposeLDS: [0, 1]
+        # - VgprForLocalReadPacking: [False, True] # Diff from Tensile
+        # - ClusterLocalRead: [False, True]
+        # - VectorAtomicWidth: [2]
+        #- OptPreLoopVmcnt: [False, True]
+        #- WaveSeparateGlobalReadA: [0, 1]
+        #- WaveSeparateGlobalReadB: [0, 1]
+
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [512, 512, 1, 512]
+          - Exact: [1024, 1024, 1, 1024]
+          - Exact: [1031, 1031, 1, 1031]
+          - Exact: [4096, 4096, 1, 4096]
+          - Exact: [4103, 4103, 1, 4103]

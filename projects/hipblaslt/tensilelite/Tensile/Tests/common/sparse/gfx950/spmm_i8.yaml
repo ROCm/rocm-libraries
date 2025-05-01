@@ -1,0 +1,672 @@
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported yet
+GlobalParameters:
+  MinimumRequiredVersion: 4.14.0
+  SleepPercent: 50
+  NumElementsToValidate: -1
+  #DataInitTypeBeta: 0
+  #DataInitTypeAlpha: 1
+  #DataInitTypeA: 8
+  #DataInitTypeB: 8
+  #DataInitTypeBias: 0
+  NewClient: 2
+  CSVExportWinner: 1
+  CSVMergeSameProblemID: 1
+  #Device: 0
+  PruneSparseMode: 0
+BenchmarkProblems:
+  #######################################
+  # NN - standard
+  #######################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: i8
+      DestDataType: i8
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 0
+      TransposeB: 0
+      UseBeta: True
+      UseBias: 3
+      Batched: True
+      Activation: True
+      ActivationType: all
+      UseScaleAlphaVec: 3
+      #ActivationHPA: True
+      Sparse: 1
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        #- EdgeType: ["ShiftPtr"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1, 1, 1, 1, 1, 1 ]
+          - [16, 16, 128, 1, 1, 1, 1, 2, 2 ]
+          - [16, 16, 128, 1, 1, 1, 3, 2, 2 ]
+          - [16, 16, 128, 1, 1, 2, 2, 2, 2 ]
+          - [16, 16, 128, 1, 1, 2, 1, 1, 4 ]
+          - [16, 16, 128, 1, 1, 4, 4, 2, 2 ]
+          - [16, 16, 128, 1, 1, 8, 8, 2, 2 ]
+          - [16, 16, 128, 1, 1, 7, 2, 2, 2 ]
+
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [0,1,2]
+        - ClusterLocalRead: [1]
+        - DepthU: [128,256]
+        #- LocalReadVectorWidth: [8] #
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [0,1]       #
+        - TransposeLDS: [1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsPadMetadata: [-1]
+        - 1LDSBuffer: [-1]
+        - GlobalSplitU: [1,2]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
+        - SourceSwap: [0]
+        - StoreRemapVectorWidth: [-1]
+        #- GlobalReadVectorWidthA: [4]
+        #- VectorWidthA: [1]
+        #- VectorWidthB: [1]
+        #- StaggerU: [0]
+        #- DirectToVgprSparseMetadata: [0]
+        #- WorkGroupMapping: [0]
+        #- StoreVectorWidth: [-1]
+        #- AssertFree0ElementMultiple: [1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [16, 16, 1, 64] # classic format
+          - Exact: [16, 16, 1, 128] # classic format
+          - Exact: [16, 16, 1, 256] # classic format
+          - Exact: [16, 16, 1, 384] # classic format
+          - Exact: [16, 16, 1, 512] # classic format
+          - Exact: [256, 256, 1, 64] # classic format
+          - Exact: [256, 256, 1, 128] # classic format
+          - Exact: [256, 256, 1, 256] # classic format
+          - Exact: [256, 256, 1, 384] # classic format
+          - Exact: [256, 256, 1, 512] # classic format
+        - BiasTypeArgs: ['s']
+        - FactorDimArgs: [0,1]
+        - ActivationArgs:
+          - [Enum: none]
+          - [Enum: relu]
+
+  #######################################
+  # NT - standard
+  #######################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: i8
+      DestDataType: i8
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 0
+      TransposeB: 1
+      UseBeta: True
+      UseBias: 3
+      Batched: True
+      Activation: True
+      ActivationType: all
+      UseScaleAlphaVec: 3
+      #ActivationHPA: True
+      Sparse: 1
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        #- EdgeType: ["ShiftPtr"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1, 1, 1, 1, 1, 1 ]
+          - [16, 16, 128, 1, 1, 1, 1, 2, 2 ]
+          - [16, 16, 128, 1, 1, 1, 3, 2, 2 ]
+          - [16, 16, 128, 1, 1, 2, 2, 2, 2 ]
+          - [16, 16, 128, 1, 1, 2, 1, 1, 4 ]
+          - [16, 16, 128, 1, 1, 4, 4, 2, 2 ]
+          - [16, 16, 128, 1, 1, 8, 8, 2, 2 ]
+          - [16, 16, 128, 1, 1, 7, 2, 2, 2 ]
+
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [0,1,2]
+        - ClusterLocalRead: [1]
+        - DepthU: [128,256]
+        #- LocalReadVectorWidth: [8] #
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [0,1]       #
+        - TransposeLDS: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsPadMetadata: [-1]
+        - 1LDSBuffer: [-1]
+        - GlobalSplitU: [1,2]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
+        - SourceSwap: [0]
+        - StoreRemapVectorWidth: [-1]
+        #- GlobalReadVectorWidthA: [4]
+        #- VectorWidthA: [1]
+        #- VectorWidthB: [1]
+        #- StaggerU: [0]
+        #- DirectToVgprSparseMetadata: [0]
+        #- WorkGroupMapping: [0]
+        #- StoreVectorWidth: [-1]
+        #- AssertFree0ElementMultiple: [1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [16, 16, 1, 64] # classic format
+          - Exact: [16, 16, 1, 128] # classic format
+          - Exact: [16, 16, 1, 256] # classic format
+          - Exact: [16, 16, 1, 384] # classic format
+          - Exact: [16, 16, 1, 512] # classic format
+          - Exact: [256, 256, 1, 64] # classic format
+          - Exact: [256, 256, 1, 128] # classic format
+          - Exact: [256, 256, 1, 256] # classic format
+          - Exact: [256, 256, 1, 384] # classic format
+          - Exact: [256, 256, 1, 512] # classic format
+        - BiasTypeArgs: ['s']
+        - FactorDimArgs: [0,1]
+        - ActivationArgs:
+          - [Enum: none]
+          #- [Enum: relu]
+
+  #######################################
+  # TN - standard
+  #######################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: i8
+      DestDataType: i8
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      UseBias: 3
+      Batched: True
+      Activation: True
+      ActivationType: all
+      UseScaleAlphaVec: 3
+      #ActivationHPA: True
+      Sparse: 1
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        #- EdgeType: ["ShiftPtr"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1, 1, 1, 1, 1, 1 ]
+          - [16, 16, 128, 1, 1, 1, 1, 2, 2 ]
+          - [16, 16, 128, 1, 1, 1, 3, 2, 2 ]
+          - [16, 16, 128, 1, 1, 2, 2, 2, 2 ]
+          - [16, 16, 128, 1, 1, 2, 1, 1, 4 ]
+          - [16, 16, 128, 1, 1, 4, 4, 2, 2 ]
+          - [16, 16, 128, 1, 1, 8, 8, 2, 2 ]
+          - [16, 16, 128, 1, 1, 7, 2, 2, 2 ]
+
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [0,1,2]
+        - ClusterLocalRead: [1]
+        - DepthU: [128,256]
+        #- LocalReadVectorWidth: [8] #
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [0,1]       #
+        - TransposeLDS: [1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsPadMetadata: [-1]
+        - 1LDSBuffer: [-1]
+        - GlobalSplitU: [1,2]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
+        - SourceSwap: [0]
+        - StoreRemapVectorWidth: [-1]
+        #- GlobalReadVectorWidthA: [4]
+        #- VectorWidthA: [1]
+        #- VectorWidthB: [1]
+        #- StaggerU: [0]
+        #- DirectToVgprSparseMetadata: [0]
+        #- WorkGroupMapping: [0]
+        #- StoreVectorWidth: [-1]
+        #- AssertFree0ElementMultiple: [1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [16, 16, 1, 64] # classic format
+          - Exact: [16, 16, 1, 128] # classic format
+          - Exact: [16, 16, 1, 256] # classic format
+          - Exact: [16, 16, 1, 384] # classic format
+          - Exact: [16, 16, 1, 512] # classic format
+          - Exact: [256, 256, 1, 64] # classic format
+          - Exact: [256, 256, 1, 128] # classic format
+          - Exact: [256, 256, 1, 256] # classic format
+          - Exact: [256, 256, 1, 384] # classic format
+          - Exact: [256, 256, 1, 512] # classic format
+        - BiasTypeArgs: ['s']
+        - FactorDimArgs: [0,1]
+        - ActivationArgs:
+          - [Enum: none]
+          #- [Enum: relu]
+
+  #######################################
+  # TT - standard
+  #######################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: i8
+      DestDataType: i8
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 1
+      UseBeta: True
+      UseBias: 3
+      Batched: True
+      Activation: True
+      ActivationType: all
+      UseScaleAlphaVec: 3
+      #ActivationHPA: True
+      Sparse: 1
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        #- EdgeType: ["ShiftPtr"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1, 1, 1, 1, 1, 1 ]
+          - [16, 16, 128, 1, 1, 1, 1, 2, 2 ]
+          - [16, 16, 128, 1, 1, 1, 3, 2, 2 ]
+          - [16, 16, 128, 1, 1, 2, 2, 2, 2 ]
+          - [16, 16, 128, 1, 1, 2, 1, 1, 4 ]
+          - [16, 16, 128, 1, 1, 4, 4, 2, 2 ]
+          - [16, 16, 128, 1, 1, 8, 8, 2, 2 ]
+          - [16, 16, 128, 1, 1, 7, 2, 2, 2 ]
+
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [0,1,2]
+        - ClusterLocalRead: [1]
+        - DepthU: [128,256]
+        #- LocalReadVectorWidth: [8] #
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [0,1]       #
+        - TransposeLDS: [1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsPadMetadata: [-1]
+        - 1LDSBuffer: [-1]
+        - GlobalSplitU: [1,2]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
+        - SourceSwap: [0]
+        - StoreRemapVectorWidth: [-1]
+        #- GlobalReadVectorWidthA: [4]
+        #- VectorWidthA: [1]
+        #- VectorWidthB: [1]
+        #- StaggerU: [0]
+        #- DirectToVgprSparseMetadata: [0]
+        #- WorkGroupMapping: [0]
+        #- StoreVectorWidth: [-1]
+        #- AssertFree0ElementMultiple: [1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [16, 16, 1, 64] # classic format
+          - Exact: [16, 16, 1, 128] # classic format
+          - Exact: [16, 16, 1, 256] # classic format
+          - Exact: [16, 16, 1, 384] # classic format
+          - Exact: [16, 16, 1, 512] # classic format
+          - Exact: [256, 256, 1, 64] # classic format
+          - Exact: [256, 256, 1, 128] # classic format
+          - Exact: [256, 256, 1, 256] # classic format
+          - Exact: [256, 256, 1, 384] # classic format
+          - Exact: [256, 256, 1, 512] # classic format
+        - BiasTypeArgs: ['s']
+        - FactorDimArgs: [0,1]
+        - ActivationArgs:
+          - [Enum: none]
+          #- [Enum: relu]
+
+  #######################################
+  # NN - standard
+  #######################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: i8
+      DestDataType: i8
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 0
+      TransposeB: 0
+      UseBeta: True
+      UseBias: 3
+      Batched: True
+      Activation: True
+      ActivationType: all
+      UseScaleAlphaVec: 3
+      #ActivationHPA: True
+      Sparse: 1
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        #- EdgeType: ["ShiftPtr"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [32, 32, 64, 1, 1, 1, 1, 1, 1 ]
+          - [32, 32, 64, 1, 1, 2, 2, 1, 1 ]
+          - [32, 32, 64, 1, 1, 1, 1, 2, 2 ]
+          - [32, 32, 64, 1, 1, 2, 1, 1, 2 ]
+          - [32, 32, 64, 1, 1, 2, 2, 2, 2 ]
+          - [32, 32, 64, 1, 1, 4, 2, 2, 2 ]
+          - [32, 32, 64, 1, 1, 4, 4, 2, 2 ]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [0,1,2]
+        - ClusterLocalRead: [1]
+        - DepthU: [64,128]
+        #- LocalReadVectorWidth: [8] #
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [0,1]       #
+        - TransposeLDS: [1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsPadMetadata: [-1]
+        - 1LDSBuffer: [-1]
+        - GlobalSplitU: [1,2]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
+        - SourceSwap: [0]
+        - StoreRemapVectorWidth: [-1]
+        #- GlobalReadVectorWidthA: [4]
+        #- VectorWidthA: [1]
+        #- VectorWidthB: [1]
+        #- StaggerU: [0]
+        #- DirectToVgprSparseMetadata: [0]
+        #- WorkGroupMapping: [0]
+        #- StoreVectorWidth: [-1]
+        #- AssertFree0ElementMultiple: [1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [16, 16, 1, 32] # classic format
+          - Exact: [16, 16, 1, 64] # classic format
+          - Exact: [16, 16, 1, 128] # classic format
+          - Exact: [16, 16, 1, 256] # classic format
+          - Exact: [16, 16, 1, 384] # classic format
+          - Exact: [16, 16, 1, 512] # classic format
+          - Exact: [128, 128, 1, 32] # classic format
+          - Exact: [128, 128, 1, 64] # classic format
+          - Exact: [128, 128, 1, 128] # classic format
+          - Exact: [128, 128, 1, 256] # classic format
+          - Exact: [128, 128, 1, 384] # classic format
+          - Exact: [128, 128, 1, 512] # classic format
+        - BiasTypeArgs: ['s']
+        - FactorDimArgs: [0,1]
+        - ActivationArgs:
+          - [Enum: none]
+          #- [Enum: relu]
+
+  #######################################
+  # NT - standard
+  #######################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: i8
+      DestDataType: i8
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 0
+      TransposeB: 1
+      UseBeta: True
+      UseBias: 3
+      Batched: True
+      Activation: True
+      ActivationType: all
+      UseScaleAlphaVec: 3
+      #ActivationHPA: True
+      Sparse: 1
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        #- EdgeType: ["ShiftPtr"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [32, 32, 64, 1, 1, 1, 1, 1, 1 ]
+          - [32, 32, 64, 1, 1, 2, 2, 1, 1 ]
+          - [32, 32, 64, 1, 1, 1, 1, 2, 2 ]
+          - [32, 32, 64, 1, 1, 2, 1, 1, 2 ]
+          - [32, 32, 64, 1, 1, 2, 2, 2, 2 ]
+          - [32, 32, 64, 1, 1, 4, 2, 2, 2 ]
+          - [32, 32, 64, 1, 1, 4, 4, 2, 2 ]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [0,1,2]
+        - ClusterLocalRead: [1]
+        - DepthU: [64,128]
+        #- LocalReadVectorWidth: [8] #
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [0,1]       #
+        - TransposeLDS: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsPadMetadata: [-1]
+        - 1LDSBuffer: [-1]
+        - GlobalSplitU: [1,2]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
+        - SourceSwap: [0]
+        - StoreRemapVectorWidth: [-1]
+        #- GlobalReadVectorWidthA: [4]
+        #- VectorWidthA: [1]
+        #- VectorWidthB: [1]
+        #- StaggerU: [0]
+        #- DirectToVgprSparseMetadata: [0]
+        #- WorkGroupMapping: [0]
+        #- StoreVectorWidth: [-1]
+        #- AssertFree0ElementMultiple: [1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [16, 16, 1, 32] # classic format
+          - Exact: [16, 16, 1, 64] # classic format
+          - Exact: [16, 16, 1, 128] # classic format
+          - Exact: [16, 16, 1, 256] # classic format
+          - Exact: [16, 16, 1, 384] # classic format
+          - Exact: [16, 16, 1, 512] # classic format
+          - Exact: [128, 128, 1, 32] # classic format
+          - Exact: [128, 128, 1, 64] # classic format
+          - Exact: [128, 128, 1, 128] # classic format
+          - Exact: [128, 128, 1, 256] # classic format
+          - Exact: [128, 128, 1, 384] # classic format
+          - Exact: [128, 128, 1, 512] # classic format
+        - BiasTypeArgs: ['s']
+        - FactorDimArgs: [0,1]
+        - ActivationArgs:
+          - [Enum: none]
+          #- [Enum: relu]
+
+  #######################################
+  # TN - standard
+  #######################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: i8
+      DestDataType: i8
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      UseBias: 3
+      Batched: True
+      Activation: True
+      ActivationType: all
+      UseScaleAlphaVec: 3
+      #ActivationHPA: True
+      Sparse: 1
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        #- EdgeType: ["ShiftPtr"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [32, 32, 64, 1, 1, 1, 1, 1, 1 ]
+          - [32, 32, 64, 1, 1, 2, 2, 1, 1 ]
+          - [32, 32, 64, 1, 1, 1, 1, 2, 2 ]
+          - [32, 32, 64, 1, 1, 2, 1, 1, 2 ]
+          - [32, 32, 64, 1, 1, 2, 2, 2, 2 ]
+          - [32, 32, 64, 1, 1, 4, 2, 2, 2 ]
+          - [32, 32, 64, 1, 1, 4, 4, 2, 2 ]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [0,1,2]
+        - ClusterLocalRead: [1]
+        - DepthU: [64,128]
+        #- LocalReadVectorWidth: [8] #
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [0,1]       #
+        - TransposeLDS: [1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsPadMetadata: [-1]
+        - 1LDSBuffer: [-1]
+        - GlobalSplitU: [1,2]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
+        - SourceSwap: [0]
+        - StoreRemapVectorWidth: [-1]
+        #- GlobalReadVectorWidthA: [4]
+        #- VectorWidthA: [1]
+        #- VectorWidthB: [1]
+        #- StaggerU: [0]
+        #- DirectToVgprSparseMetadata: [0]
+        #- WorkGroupMapping: [0]
+        #- StoreVectorWidth: [-1]
+        #- AssertFree0ElementMultiple: [1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [16, 16, 1, 32] # classic format
+          - Exact: [16, 16, 1, 64] # classic format
+          - Exact: [16, 16, 1, 128] # classic format
+          - Exact: [16, 16, 1, 256] # classic format
+          - Exact: [16, 16, 1, 384] # classic format
+          - Exact: [16, 16, 1, 512] # classic format
+          - Exact: [128, 128, 1, 32] # classic format
+          - Exact: [128, 128, 1, 64] # classic format
+          - Exact: [128, 128, 1, 128] # classic format
+          - Exact: [128, 128, 1, 256] # classic format
+          - Exact: [128, 128, 1, 384] # classic format
+          - Exact: [128, 128, 1, 512] # classic format
+        - BiasTypeArgs: ['s']
+        - FactorDimArgs: [0,1]
+        - ActivationArgs:
+          - [Enum: none]
+          #- [Enum: relu]
+
+  #######################################
+  # TT - standard
+  #######################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: i8
+      DestDataType: i8
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 1
+      UseBeta: True
+      UseBias: 3
+      Batched: True
+      Activation: True
+      ActivationType: all
+      UseScaleAlphaVec: 3
+      #ActivationHPA: True
+      Sparse: 1
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        #- EdgeType: ["ShiftPtr"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [32, 32, 64, 1, 1, 1, 1, 1, 1 ]
+          - [32, 32, 64, 1, 1, 2, 2, 1, 1 ]
+          - [32, 32, 64, 1, 1, 1, 1, 2, 2 ]
+          - [32, 32, 64, 1, 1, 2, 1, 1, 2 ]
+          - [32, 32, 64, 1, 1, 2, 2, 2, 2 ]
+          - [32, 32, 64, 1, 1, 4, 2, 2, 2 ]
+          - [32, 32, 64, 1, 1, 4, 4, 2, 2 ]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [0,1,2]
+        - ClusterLocalRead: [1]
+        - DepthU: [64,128]
+        #- LocalReadVectorWidth: [8] #
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [0,1]       #
+        - TransposeLDS: [1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsPadMetadata: [-1]
+        - 1LDSBuffer: [-1]
+        - GlobalSplitU: [1,2]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
+        - SourceSwap: [0]
+        - StoreRemapVectorWidth: [-1]
+        #- GlobalReadVectorWidthA: [4]
+        #- VectorWidthA: [1]
+        #- VectorWidthB: [1]
+        #- StaggerU: [0]
+        #- DirectToVgprSparseMetadata: [0]
+        #- WorkGroupMapping: [0]
+        #- StoreVectorWidth: [-1]
+        #- AssertFree0ElementMultiple: [1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [16, 16, 1, 32] # classic format
+          - Exact: [16, 16, 1, 64] # classic format
+          - Exact: [16, 16, 1, 128] # classic format
+          - Exact: [16, 16, 1, 256] # classic format
+          - Exact: [16, 16, 1, 384] # classic format
+          - Exact: [16, 16, 1, 512] # classic format
+          - Exact: [128, 128, 1, 32] # classic format
+          - Exact: [128, 128, 1, 64] # classic format
+          - Exact: [128, 128, 1, 128] # classic format
+          - Exact: [128, 128, 1, 256] # classic format
+          - Exact: [128, 128, 1, 384] # classic format
+          - Exact: [128, 128, 1, 512] # classic format
+        - BiasTypeArgs: ['s']
+        - FactorDimArgs: [0,1]
+        - ActivationArgs:
+          - [Enum: none]
+          #- [Enum: relu]

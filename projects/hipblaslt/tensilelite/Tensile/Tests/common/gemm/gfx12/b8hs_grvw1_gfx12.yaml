@@ -1,0 +1,338 @@
+################################################################################
+#
+# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+#
+# SPDX-License-Identifier: MIT
+################################################################################
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102] # not supported by arch
+
+GlobalParameters:
+  NumElementsToValidate: -1
+  MinimumRequiredVersion: 4.14.0
+  PrintLevel: 1
+  PrintSolutionRejectionReason: True
+  Device: 0
+  CMakeBuildType: Release
+  KernelTime: True
+  MaxWorkspaceSize: 13421772800
+  DataInitTypeA: 21
+  DataInitTypeB: 21
+  DataInitTypeC: 21
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 1
+  DataInitTypeBias: 21
+  DataInitTypeScaleAlphaVec: 21
+  NumElementsToValidate: -1
+  BoundsCheck: 2
+
+BenchmarkProblems:
+  ########################################
+  # NN - standard
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: B8
+      DestDataType: H
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: True
+      UseScaleAlphaVec: 1
+      ActivationType: hipblaslt_all
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 16, 1, 1, 1, 1, 4, 1]
+        - DepthU: [32]
+        - WavefrontSize: [32]
+        - LocalReadVectorWidth: [8]
+        - GlobalReadVectorWidthA: [1]
+        - GlobalReadVectorWidthB: [1]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - TransposeLDS: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsPadMetadata: [0]
+        - StaggerU: [0]
+        - ScheduleIterAlg: [3]
+        - PrefetchLocalRead: [3]
+        - PrefetchGlobalRead: [2]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [1, 1, 1, 1]
+          - Exact: [63, 1, 1, 1]
+          - Exact: [64, 1, 1, 1]
+          - Exact: [65, 1, 1, 1]
+          - Exact: [127, 1, 1, 1]
+          - Exact: [128, 1, 1, 1]
+          - Exact: [129, 1, 1, 1]
+          - Exact: [255, 1, 1, 1]
+          - Exact: [256, 1, 1, 1]
+          - Exact: [257, 1, 1, 1]
+          - Exact: [1, 63, 1, 1]
+          - Exact: [1, 64, 1, 1]
+          - Exact: [1, 65, 1, 1]
+          - Exact: [1, 127, 1, 1]
+          - Exact: [1, 128, 1, 1]
+          - Exact: [1, 129, 1, 1]
+          - Exact: [1, 255, 1, 1]
+          - Exact: [1, 256, 1, 1]
+          - Exact: [1, 257, 1, 1]
+          - Exact: [1, 1, 1, 63]
+          - Exact: [1, 1, 1, 64]
+          - Exact: [1, 1, 1, 65]
+          - Exact: [1, 1, 1, 127]
+          - Exact: [1, 1, 1, 128]
+          - Exact: [1, 1, 1, 129]
+          - Exact: [1, 1, 1, 255]
+          - Exact: [1, 1, 1, 256]
+          - Exact: [1, 1, 1, 257]
+        - ActivationArgs:
+          - [Enum: none]
+
+  ########################################
+  # NT - standard
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: B8
+      DestDataType: H
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+      Activation: True
+      UseScaleAlphaVec: 1
+      ActivationType: hipblaslt_all
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 16, 1, 1, 1, 1, 4, 1]
+        - DepthU: [32]
+        - WavefrontSize: [32]
+        - LocalReadVectorWidth: [8]
+        - GlobalReadVectorWidthA: [1]
+        - GlobalReadVectorWidthB: [1]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - TransposeLDS: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsPadMetadata: [0]
+        - StaggerU: [0]
+        - ScheduleIterAlg: [3]
+        - PrefetchLocalRead: [3]
+        - PrefetchGlobalRead: [2]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [1, 1, 1, 1]
+          - Exact: [63, 1, 1, 1]
+          - Exact: [64, 1, 1, 1]
+          - Exact: [65, 1, 1, 1]
+          - Exact: [127, 1, 1, 1]
+          - Exact: [128, 1, 1, 1]
+          - Exact: [129, 1, 1, 1]
+          - Exact: [255, 1, 1, 1]
+          - Exact: [256, 1, 1, 1]
+          - Exact: [257, 1, 1, 1]
+          - Exact: [1, 63, 1, 1]
+          - Exact: [1, 64, 1, 1]
+          - Exact: [1, 65, 1, 1]
+          - Exact: [1, 127, 1, 1]
+          - Exact: [1, 128, 1, 1]
+          - Exact: [1, 129, 1, 1]
+          - Exact: [1, 255, 1, 1]
+          - Exact: [1, 256, 1, 1]
+          - Exact: [1, 257, 1, 1]
+          - Exact: [1, 1, 1, 63]
+          - Exact: [1, 1, 1, 64]
+          - Exact: [1, 1, 1, 65]
+          - Exact: [1, 1, 1, 127]
+          - Exact: [1, 1, 1, 128]
+          - Exact: [1, 1, 1, 129]
+          - Exact: [1, 1, 1, 255]
+          - Exact: [1, 1, 1, 256]
+          - Exact: [1, 1, 1, 257]
+        - ActivationArgs:
+          - [Enum: none]
+
+  ########################################
+  # TN - standard
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: B8
+      DestDataType: H
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: True
+      UseScaleAlphaVec: 1
+      ActivationType: hipblaslt_all
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 16, 1, 1, 1, 1, 4, 1]
+        - DepthU: [32]
+        - WavefrontSize: [32]
+        - LocalReadVectorWidth: [8]
+        - GlobalReadVectorWidthA: [1]
+        - GlobalReadVectorWidthB: [1]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - TransposeLDS: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsPadMetadata: [0]
+        - StaggerU: [0]
+        - ScheduleIterAlg: [3]
+        - PrefetchLocalRead: [3]
+        - PrefetchGlobalRead: [2]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [1, 1, 1, 1]
+          - Exact: [63, 1, 1, 1]
+          - Exact: [64, 1, 1, 1]
+          - Exact: [65, 1, 1, 1]
+          - Exact: [127, 1, 1, 1]
+          - Exact: [128, 1, 1, 1]
+          - Exact: [129, 1, 1, 1]
+          - Exact: [255, 1, 1, 1]
+          - Exact: [256, 1, 1, 1]
+          - Exact: [257, 1, 1, 1]
+          - Exact: [1, 63, 1, 1]
+          - Exact: [1, 64, 1, 1]
+          - Exact: [1, 65, 1, 1]
+          - Exact: [1, 127, 1, 1]
+          - Exact: [1, 128, 1, 1]
+          - Exact: [1, 129, 1, 1]
+          - Exact: [1, 255, 1, 1]
+          - Exact: [1, 256, 1, 1]
+          - Exact: [1, 257, 1, 1]
+          - Exact: [1, 1, 1, 63]
+          - Exact: [1, 1, 1, 64]
+          - Exact: [1, 1, 1, 65]
+          - Exact: [1, 1, 1, 127]
+          - Exact: [1, 1, 1, 128]
+          - Exact: [1, 1, 1, 129]
+          - Exact: [1, 1, 1, 255]
+          - Exact: [1, 1, 1, 256]
+          - Exact: [1, 1, 1, 257]
+        - ActivationArgs:
+          - [Enum: none]
+
+  ########################################
+  # TT - standard
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: B8
+      DestDataType: H
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+      Activation: True
+      UseScaleAlphaVec: 1
+      ActivationType: hipblaslt_all
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 16, 1, 1, 1, 1, 4, 1]
+        - DepthU: [32]
+        - WavefrontSize: [32]
+        - LocalReadVectorWidth: [8]
+        - GlobalReadVectorWidthA: [1]
+        - GlobalReadVectorWidthB: [1]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - TransposeLDS: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsPadMetadata: [0]
+        - StaggerU: [0]
+        - ScheduleIterAlg: [3]
+        - PrefetchLocalRead: [3]
+        - PrefetchGlobalRead: [2]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [1, 1, 1, 1]
+          - Exact: [63, 1, 1, 1]
+          - Exact: [64, 1, 1, 1]
+          - Exact: [65, 1, 1, 1]
+          - Exact: [127, 1, 1, 1]
+          - Exact: [128, 1, 1, 1]
+          - Exact: [129, 1, 1, 1]
+          - Exact: [255, 1, 1, 1]
+          - Exact: [256, 1, 1, 1]
+          - Exact: [257, 1, 1, 1]
+          - Exact: [1, 63, 1, 1]
+          - Exact: [1, 64, 1, 1]
+          - Exact: [1, 65, 1, 1]
+          - Exact: [1, 127, 1, 1]
+          - Exact: [1, 128, 1, 1]
+          - Exact: [1, 129, 1, 1]
+          - Exact: [1, 255, 1, 1]
+          - Exact: [1, 256, 1, 1]
+          - Exact: [1, 257, 1, 1]
+          - Exact: [1, 1, 1, 63]
+          - Exact: [1, 1, 1, 64]
+          - Exact: [1, 1, 1, 65]
+          - Exact: [1, 1, 1, 127]
+          - Exact: [1, 1, 1, 128]
+          - Exact: [1, 1, 1, 129]
+          - Exact: [1, 1, 1, 255]
+          - Exact: [1, 1, 1, 256]
+          - Exact: [1, 1, 1, 257]
+        - ActivationArgs:
+          - [Enum: none]
