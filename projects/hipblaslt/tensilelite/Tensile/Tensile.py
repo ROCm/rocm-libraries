@@ -202,6 +202,8 @@ def addCommonArguments(argParser):
         action="store", default=ToolchainDefaults.OFFLOAD_BUNDLER, help="select which offload bundler to use")
     argParser.add_argument("--device-enumerator", dest="DeviceEnumerator", \
         action="store", default=ToolchainDefaults.DEVICE_ENUMERATOR, help="select which device enumerator to use")
+    argParser.add_argument("--roc-obj-extract", dest="RocObjExtract", action="store", default=ToolchainDefaults.ROC_OBJ_EXTRACT)
+    argParser.add_argument("--roc-obj-ls", dest="RocObjLs", action="store", default=ToolchainDefaults.ROC_OBJ_LS)
     argParser.add_argument("--logic-format", dest="LogicFormat", choices=["yaml", "json"], \
         action="store", default="yaml", help="select which logic format to use")
     argParser.add_argument("--library-format", dest="LibraryFormat", choices=["yaml", "msgpack"], \
@@ -456,9 +458,13 @@ def Tensile(userArgs):
     cxxCompiler, \
     cCompiler, \
     offloadBundler, \
+    rocObjLs, \
+    rocObjExtract, \
     enumerator = validateToolchain(args.CxxCompiler,
                                    args.CCompiler,
                                    args.OffloadBundler,
+                                   args.RocObjLs,
+                                   args.RocObjExtract,
                                    ToolchainDefaults.DEVICE_ENUMERATOR)
     asmToolchain = makeAssemblyToolchain(
         cxxCompiler,
@@ -468,11 +474,14 @@ def Tensile(userArgs):
     srcToolchain = makeSourceToolchain(
         cxxCompiler,
         offloadBundler,
+        rocObjLs,
+        rocObjExtract,
+        64,  # TODO: make this configurable
     )
 
     if "ISA" in args.global_parameters:
         isaList = [IsaVersion(isa[0], isa[1], isa[2]) for isa in args.global_parameters["ISA"]]
-        
+
     else:
         isaList = [detectGlobalCurrentISA(device_id, enumerator)]
 

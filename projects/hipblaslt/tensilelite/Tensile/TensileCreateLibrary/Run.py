@@ -63,6 +63,7 @@ from Tensile.KernelWriterAssembly import KernelWriterAssembly
 from Tensile.KernelWriterBase import (
     KERNEL_HELPER_FILENAME_CPP,
     KERNEL_HELPER_FILENAME_H,
+    KernelWriterBase,
 )
 from Tensile.SolutionLibrary import MasterSolutionLibrary
 from Tensile.SolutionStructs import Solution
@@ -186,33 +187,92 @@ def writeAssembly(asmPath: Union[Path, str], result: KernelCodeGenResult):
 
     return path, isa, wfsize
 
+def writeHelper(outputPath: Path, kernelHelperObj: KernelWriterBase, khoNames: List[str]) -> str:
+    """
+    Write kernel helper source and header files.
 
-def writeHelpers(
-    outputPath, kernelHelperObjs, KERNEL_HELPER_FILENAME_CPP, KERNEL_HELPER_FILENAME_H
-):
-    kernelSourceFilename = os.path.join(os.path.normcase(outputPath), KERNEL_HELPER_FILENAME_CPP)
-    kernelHeaderFilename = os.path.join(os.path.normcase(outputPath), KERNEL_HELPER_FILENAME_H)
+    Args:
+        outputPath: Base path where files will be written
+        kernelHelperObj: Kernel helper object with source and header content
+        khoNames: List of all kernel helper object names for dependency resolution
 
-    with open(kernelHeaderFilename, "w", encoding="utf-8") as kernelHeaderFile, open(
-        kernelSourceFilename, "w", encoding="utf-8"
-    ) as kernelSourceFile:
-        kernelSourceFile.write(CHeader)
-        kernelHeaderFile.write(CHeader)
-        kernelSourceFile.write('#include "Kernels.h"\n')
+    Returns:
+        The path to the generated source file
+    """
+    name = kernelHelperObj.getKernelName()
+    sourceFilename = f"{name}.cpp"
+    headerFilename = f"{name}.h"
+    kernelsDir = Path(outputPath) / "Kernels"
+
+    if not kernelsDir.exists():
+        kernelsDir.mkdir(parents=True, exist_ok=True)
+
+    kernelSourcePath = str(kernelsDir / sourceFilename)
+    kernelHeaderPath = str(kernelsDir / headerFilename)
+
+    includes = _getRequiredIncludes(name, kernelHelperObj, khoNames)
+
+    with open(kernelHeaderPath, "w", encoding="utf-8") as kernelHeaderFile, \
+         open(kernelSourcePath, "w", encoding="utf-8") as kernelSourceFile:
+
+        for file in (kernelSourceFile, kernelHeaderFile):
+            file.write(CHeader)
+
+        kernelSourceFile.write(f"#include \"{name}.h\"\n")
+
         kernelHeaderFile.write("#pragma once\n")
         kernelHeaderFile.write("#include <hip/hip_runtime.h>\n")
         kernelHeaderFile.write("#include <hip/hip_ext.h>\n\n")
-        kernelHeaderFile.write('#include "KernelHeader.h"\n\n')
-        HeaderText = ""
-        for ko in kernelHelperObjs:
-            kernelName = ko.getKernelName()
-            (err, src) = ko.getSourceFileString()
+        kernelHeaderFile.write("#include \"KernelHeader.h\"\n\n")
 
-            kernelSourceFile.write(src)
-            if err:
-                print("*** warning: invalid kernel#%u" % kernelName)
-            HeaderText += ko.getHeaderFileString()
-        kernelHeaderFile.write(HeaderText)
+        for include in includes:
+            kernelHeaderFile.write(f"#include \"Kernels/{include}.h\"\n")
+
+        err, src = kernelHelperObj.getSourceFileString()
+        if err:
+            printWarning(f"Invalid kernel: {name} (error code {err})")
+
+        kernelSourceFile.write(src)
+        kernelHeaderFile.write(kernelHelperObj.getHeaderFileString())
+
+    return kernelSourcePath
+
+
+def _getRequiredIncludes(name: str, kernelHelperObj: KernelWriterBase, khoNames: List[str]) -> set:
+    """
+    Determine the required includes for a kernel helper.
+
+    Args:
+        name: Kernel helper name
+        khoNames: List of all kernel helper object names
+        kernelHelperObj: The kernel helper object to analyze
+
+    Returns:
+        List of kernel helper names to include
+    """
+    includes = set()
+
+    # Add enum includes for non-enum helpers
+    if "Enum" not in name:
+        includes.update(n for n in khoNames if "Enum" in n)
+
+        # Include gradient activation enums for gradient helpers
+        hasGradient = hasattr(kernelHelperObj, "actGradientPrefix") and kernelHelperObj.actGradientPrefix == "Gradient"
+        if hasGradient:
+            includes.update(n for n in khoNames if "TensileGradientActivation_" in n)
+
+    # Include activation helpers
+    hasActivation = ("TensileActivation_S" in name or "TensileActivation_I" in name)
+    if not hasActivation and "Enum" not in name:
+        includes.update(n for n in khoNames if "TensileActivation_" in n)
+
+    # Include gradient activation helpers
+    hasGradientActivation = "TensileGradientActivation_S" in name
+    if not hasGradientActivation and "Enum" not in name:
+        if hasattr(kernelHelperObj, "actGradientPrefix") and kernelHelperObj.actGradientPrefix == "Gradient":
+            includes.update(n for n in khoNames if "TensileGradientActivation_" in n)
+
+    return includes
 
 
 def writeSolutionsAndKernels(
@@ -244,6 +304,8 @@ def writeSolutionsAndKernels(
     objectTmpPath = ensurePath(
         buildTmpPath / "code_object_tmp"
     )  # Temp path for HSA code object files (.hsaco)
+    kernelsIncludePath = outputPath / "Kernels"
+    kernelsIncludePath.mkdir(parents=True, exist_ok=True)
 
     asmKernels = [k for k in kernels if k["KernelLanguage"] == "Assembly"]
 
@@ -292,9 +354,6 @@ def writeSolutionsAndKernels(
         multiArg=False,
     )
 
-    writeHelpers(outputPath, kernelHelperObjs, KERNEL_HELPER_FILENAME_CPP, KERNEL_HELPER_FILENAME_H)
-    srcKernelFile = Path(outputPath) / "Kernels.cpp"
-
     if not generateSourcesAndExit:
         codeObjectFiles += buildAssemblyCodeObjectFiles(
             asmToolchain.linker,
@@ -305,15 +364,11 @@ def writeSolutionsAndKernels(
             assemblyTmpPath,
             compress,
         )
-        buildSourceCodeObjectFiles(
-            srcToolchain.compiler,
-            srcToolchain.bundler,
-            destLibPath,
-            objectTmpPath,
-            outputPath,
-            srcKernelFile,
-            cmdlineArchs,
-        )
+        khoNames = [kho.getKernelName() for kho in kernelHelperObjs]
+        srcFiles = [writeHelper(outputPath, helper, khoNames) for helper in kernelHelperObjs]
+        kernelsLib = str(objectTmpPath / "Kernels.so")
+        srcToolchain.compiler(srcFiles, kernelsLib, str(outputPath), cmdlineArchs)
+        buildSourceCodeObjectFiles(srcToolchain, outputPath / "library", kernelsLib)
 
     return codeObjectFiles, numKernels
 
@@ -390,17 +445,12 @@ def writeSolutionsAndKernelsTCL(
         compress,
     )
 
-    writeHelpers(outputPath, kernelHelperObjs, KERNEL_HELPER_FILENAME_CPP, KERNEL_HELPER_FILENAME_H)
-    srcKernelFile = Path(outputPath) / "Kernels.cpp"
-    buildSourceCodeObjectFiles(
-        srcToolchain.compiler,
-        srcToolchain.bundler,
-        destLibPath,
-        objectTmpPath,
-        outputPath,
-        srcKernelFile,
-        cmdlineArchs,
-    )
+    khoNames = [kho.getKernelName() for kho in kernelHelperObjs]
+    srcFiles = [writeHelper(outputPath, helper, khoNames) for helper in kernelHelperObjs]
+    kernelsLib = str(objectTmpPath / "Kernels.so")
+
+    srcToolchain.compiler(srcFiles, kernelsLib, str(outputPath), cmdlineArchs)
+    buildSourceCodeObjectFiles(srcToolchain, outputPath / "library", kernelsLib)
 
     return len(uniqueAsmKernels)
 
@@ -591,12 +641,15 @@ def run():
     arguments = parseArguments()
     setVerbosity(arguments["PrintLevel"])
     outputPath = Path(ensurePath(os.path.abspath(arguments["OutputPath"])))
-    cxxCompiler, _, offloadBundler, _, _ = validateToolchain(
+
+    kernelsIncludePath = outputPath / "Kernels"
+    kernelsIncludePath.mkdir(parents=True, exist_ok=True)
+
+    cxxCompiler, offloadBundler, ls, extract = validateToolchain(
         arguments["CxxCompiler"],
-        arguments["CCompiler"],
         arguments["OffloadBundler"],
-        arguments["Assembler"],
-        ToolchainDefaults.HIP_CONFIG,
+        arguments["RocObjLs"],
+        arguments["RocObjExtract"]
     )
 
     if ";" in arguments["Architecture"]:
@@ -618,6 +671,9 @@ def run():
     srcToolchain = makeSourceToolchain(
         cxxCompiler,
         offloadBundler,
+        ls,
+        extract,
+        arguments["CpuThreads"],
         arguments["AsanBuild"],
         arguments["BuildIdKind"],
         save_temps=False
