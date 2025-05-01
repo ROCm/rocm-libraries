@@ -1,0 +1,68 @@
+GlobalParameters:
+  EnqueuesPerSync: 30
+  LibraryPrintDebug: False
+  NumElementsToValidate: 100
+  KernelTime: True
+  #PinClocks: True
+  SleepPercent: 0
+  DataInitTypeBeta : 0
+  PrintSolutionRejectionReason: 0
+  PrintWinnersOnly: 1
+
+BenchmarkProblems:
+  ########################################
+  # NT - standard
+  ########################################
+  -
+    - # ProblemType
+      OperationType: TensorContraction
+      IndexAssignmentsA: [ 3, 0, 2]
+      IndexAssignmentsB: [ 3, 1, 2]
+      DataType: s
+      UseBeta: False
+      NumIndicesC: 2
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Source"]
+        - EdgeType: ["ShiftPtr"]
+      ForkParameters:
+        #- BufferLoad: [0]
+        - PrefetchLocalRead: [False]
+        - PrefetchGlobalRead: [True]
+        - ThreadTile:
+          - [ 2, 2 ]
+        - WorkGroup:
+          #- [ 4, 16, 1 ]
+          - [ 8, 8, 1 ]
+            #- [ 16, 32, 1 ]
+            #- [ 32, 16, 1 ]
+            #- [ 16, 16, 1 ]
+        - WorkGroupMapping: [1 ]
+          #- StaggerU: [0,32]
+        - StaggerU: [0]
+        - DepthU: [ 8 ]
+        - VectorWidth: [1]
+        - FractionalLoad: [0]
+        - AssertSummationElementMultiple: [4]
+        - AssertFree0ElementMultiple: [4]
+        - AssertFree1ElementMultiple: [4]
+        - GlobalSplitU: [1]
+          #- DisableKernelPieces: [1]
+      BenchmarkForkParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [ 16, 16, 2, 4]    # this case shows bug
+          - Exact: [ 16, 16, 2, 8]
+          - Exact: [ 16, 16, 2, 12]
+          - Exact: [ 16, 16, 2, 16]
+          - Exact: [ 16, 16, 2, 20]
+
+# Bug if PGR=1 and DEPTHU<sizeL - then we skip unroll loop completely.
+# Only occurs with source kernels
+# Seems globalReadInc calc is correct - the K loop executes entirely in
+# tail loop (which does not change the global read offset) so
+# globalReadInc should just be strideK - 0.  But doesn't work here.
+# A config to generate a fast kernel for large DGEMMs

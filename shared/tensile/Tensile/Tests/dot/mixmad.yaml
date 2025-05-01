@@ -1,0 +1,79 @@
+GlobalParameters:
+  MinimumRequiredVersion: 4.0.1
+  PrintLevel: 1
+  ForceRedoBenchmarkProblems: True
+  ForceRedoLibraryLogic: True
+  ForceRedoLibraryClient: True
+  CMakeBuildType: Release
+  EnqueuesPerSync: 1
+  SyncsPerBenchmark: 1
+  LibraryPrintDebug: False
+  DebugKernel: False
+  NumElementsToValidate: 1000
+  ValidationMaxToPrint: 100
+  ValidationPrintValids: False
+  ShortNames: False
+  MergeFiles: True
+  Platform: 0
+  Device: 0
+  KernelTime: True
+  PinClocks: True
+  SleepPercent: 200
+  PrintSolutionRejectionReason: True
+  DataInitTypeA: 5           # 0=0, 1=1, 2=serial, 3=rand, 4=NaN
+  DataInitTypeB: 5           # 0=0, 1=1, 2=serial, 3=rand, 4=NaN
+  DataInitTypeBeta: 0        # 0=0, 1=1, 2=serial, 3=rand, 4=NaN
+  DataInitTypeC : 0          # 0=0, 1=1, 2=serial, 3=rand, 4=NaN
+  PrintTensorA : 0
+  PrintTensorB : 0
+  CodeFromFiles: 1
+
+BenchmarkProblems:
+  ########################################
+  # NT - standard
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: 1
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - LoopTail: [True]
+        - PrefetchLocalRead: [False]
+      ForkParameters:
+        - FractionalLoad: [1]
+        - PrefetchGlobalRead: [False]
+        - ThreadTile:
+          - [ 4, 4 ]
+        - WorkGroup:
+          - [ 8, 8, 1 ]
+        - WorkGroupMapping: [8]
+        - LocalDotLayout: [2]
+        - InnerUnroll: [2]
+        - GlobalSplitU: [1]
+        - DepthU: [ 4 ]
+        - GlobalReadVectorWidth: [-1]
+        - VectorWidth: [4]
+        - AssertSummationElementMultiple: [2]
+      BenchmarkForkParameters:
+      JoinParameters:
+        - MacroTile
+        - GlobalSplitU
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          #- Range: [ [16], [16], [1], [16] ]
+          #- Range: [ [32], [32], [1], [16] ]
+          - Range: [ [64], [64], [1], [64] ]
+
+  ########################################
+

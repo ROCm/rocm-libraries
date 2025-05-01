@@ -1,0 +1,133 @@
+#    solution.kernelName = "Cijk_Ailk_Bljk_SB_MT128x128x08_K1";
+#
+#    solution.workGroupSize = Tensile::dim3{256,1,1};
+#    solution.macroTile = Tensile::dim3{128,128,1};
+#    solution.debugKernel = false;
+#
+---
+solutions:
+  - name:            'Cijk_Ailk_Bljk_SB_MT128x128x08_K1'
+    sizeMapping:
+      globalAccumulation: 0
+      workspaceSizePerElemC: 0
+      workGroup:       [ 256,   1, 1 ]
+      threadTile:      [   8,   8, 1 ]
+      macroTile:       [ 128, 128, 1 ]
+      depthU: 8
+      globalSplitU: 1
+      staggerStrideShift: 3
+      staggerU: 32
+      workGroupMapping: 8
+      persistentKernel: 0
+      persistentKernelAlongBatch: false
+
+    hardwarePredicate: { type: TruePred }
+    problemPredicate:  { type: TruePred }
+    taskPredicate:  { type: TruePred }
+    info: {}
+    debugKernel: false
+    index:           0
+    problemType:
+        operationIdentifier: foo
+        highPrecisionAccumulate: false
+        useBeta: true
+        aType:           Float
+        bType:           Float
+        cType:           Float
+        dType:           Float
+  - name:            'Cijk_Ailk_Bjlk_SB_MT128x128x08_K1'
+    sizeMapping:
+      globalAccumulation: 0
+      workspaceSizePerElemC: 0
+      workGroup:       [ 256,   1, 1 ]
+      threadTile:      [   8,   8, 1 ]
+      macroTile:       [ 128, 128, 1 ]
+      depthU: 8
+      globalSplitU: 1
+      staggerStrideShift: 3
+      staggerU: 32
+      workGroupMapping: 8
+      persistentKernel: 0
+      persistentKernelAlongBatch: false
+
+    hardwarePredicate: { type: TruePred }
+    problemPredicate:  { type: TruePred }
+    taskPredicate:  { type: TruePred }
+    info: {}
+    debugKernel: false
+    index:           1
+    problemType:
+        operationIdentifier: foo
+        highPrecisionAccumulate: false
+        useBeta: true
+        aType:           Float
+        bType:           Float
+        cType:           Float
+        dType:           Float
+  - name:            'Cijk_Alik_Bljk_SB_MT128x128x08_K1'
+    sizeMapping:
+      globalAccumulation: 0
+      workspaceSizePerElemC: 0
+      workGroup:       [ 256,   1, 1 ]
+      threadTile:      [   8,   8, 1 ]
+      macroTile:       [ 128, 128, 1 ]
+      depthU: 8
+      globalSplitU: 1
+      staggerStrideShift: 3
+      staggerU: 32
+      workGroupMapping: 8
+      persistentKernel: 0
+      persistentKernelAlongBatch: false
+
+    hardwarePredicate: { type: TruePred }
+    problemPredicate:  { type: TruePred }
+    taskPredicate:  { type: TruePred }
+    info: {}
+    debugKernel: false
+    index:           2
+    problemType:
+        operationIdentifier: foo
+        highPrecisionAccumulate: false
+        useBeta: true
+        aType:           Float
+        bType:           Float
+        cType:           Float
+        dType:           Float
+  - name:            'Cijk_Alik_Bjlk_SB_MT128x128x08_K1'
+    sizeMapping:
+      globalAccumulation: 0
+      workspaceSizePerElemC: 0
+      workGroup:       [ 256,   1, 1 ]
+      threadTile:      [   8,   8, 1 ]
+      macroTile:       [ 128, 128, 1 ]
+      depthU: 8
+      globalSplitU: 1
+      staggerStrideShift: 3
+      staggerU: 32
+      workGroupMapping: 8
+      persistentKernel: 0
+      persistentKernelAlongBatch: false
+
+    hardwarePredicate: { type: TruePred }
+    problemPredicate:  { type: TruePred }
+    taskPredicate:  { type: TruePred }
+    info: {}
+    debugKernel: false
+    index:           3
+    problemType:
+        operationIdentifier: foo
+        highPrecisionAccumulate: false
+        useBeta: true
+        aType:           Float
+        bType:           Float
+        cType:           Float
+        dType:           Float
+library:
+  type:     ProblemMap
+  property: { type: OperationIdentifier }
+  map:
+    Contraction_l_Ailk_Bljk_Cijk_Dijk: { type: Single, index: 0 }
+    Contraction_l_Ailk_Bjlk_Cijk_Dijk: { type: Single, index: 1 }
+    Contraction_l_Alik_Bljk_Cijk_Dijk: { type: Single, index: 2 }
+    Contraction_l_Alik_Bjlk_Cijk_Dijk: { type: Single, index: 3 }
+...

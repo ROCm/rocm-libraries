@@ -1,0 +1,68 @@
+GlobalParameters:
+  MinimumRequiredVersion: 4.0.0
+  PrintLevel: 1
+  ForceRedoBenchmarkProblems: True
+  ForceRedoLibraryLogic: True
+  ForceRedoLibraryClient: True
+  CMakeBuildType: Release
+  EnqueuesPerSync: 4
+  SyncsPerBenchmark: 1
+  LibraryPrintDebug: False
+  NumElementsToValidate: 1000
+  ValidationMaxToPrint: 2
+  ValidationPrintValids: False
+  ShortNames: False
+  MergeFiles: True
+  Platform: 0
+  Device: 0
+  KernelTime: True
+  PinClocks: False
+  SleepPercent: 200
+  DataInitTypeAlpha : 1
+  PrintSolutionRejectionReason : 1
+
+BenchmarkProblems:
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+  ########################################
+  # These are configs we want to benefit from the optimized settings:
+  ########################################
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - EdgeType: ["ShiftPtr"]
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - PrefetchGlobalRead: [ True]
+        - PrefetchLocalRead: [ True]
+        - ThreadTile:
+          - [ 8, 8 ]
+        - WorkGroup:
+          - [ 16, 8, 1 ]
+        - WorkGroupMapping: [8]
+        - DepthU: [16]
+        - VectorWidth: [8]
+        - GlobalReadVectorWidth: [2]
+        - AssertSummationElementMultiple: [1,2] # ASEM=1 should work for many sizes, ASEM=2 a little faster
+        # This would not be used in a production file, it adds dynamic check code into the asm kernel
+        # to make sure we don't violate any of the restrictions above:
+        - CheckTensorDimAsserts: [True]
+      BenchmarkFinalParameters:
+        - ProblemSizes:  #  Must meet the Assert* resrictions above
+          - Exact: [  1024,  1024, 1, 1022 ] # Tail loop but can use ASEM=2
+          - Exact: [  1024,  1024, 1, 1023 ] # Tail loop and can't use ASEM=2, should result in INVALID_KERNEL failure
+
+
+LibraryLogic:
+    ScheduleName: "vega10"
+    DeviceNames: ["Device 6863", "Device 6862", "Device 687f", "Device 6860", "Device 6861"]
+    ArchitectureName: "gfx900"
+
+LibraryClient:

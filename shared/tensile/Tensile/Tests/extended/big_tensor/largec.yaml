@@ -1,0 +1,68 @@
+GlobalParameters:
+  MinimumRequiredVersion: 4.3.0
+  PrintLevel: 1
+  ForceRedoBenchmarkProblems: True
+  ForceRedoLibraryLogic: True
+  ForceRedoLibraryClient: True
+  CMakeBuildType: Release
+  EnqueuesPerSync: 1
+  SyncsPerBenchmark: 2
+  LibraryPrintDebug: False
+  NumElementsToValidate: 256
+  ValidationMaxToPrint: 4
+  ValidationPrintValids: False
+  ShortNames: False
+  MergeFiles: True
+  Platform: 0
+  Device: 0
+  KernelTime: True
+  PinClocks: False
+  SleepPercent: 200
+  DataInitTypeBeta : 0
+  SolutionSelectionAlg: 1
+  PrintWinnersOnly: 1
+# ExitOnFails: 0
+
+BenchmarkProblems:
+
+  ########################################
+  # NN
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: d
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup - M*384 384*N
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - BufferLoad: [True]
+        - BufferStore: [True]
+        - KernelLanguage: ["Assembly"]
+        - EdgeType: ["ShiftPtr"]
+        - LoopTail: [True]
+        - WorkGroupMapping: [8]
+        - PrefetchLocalRead: [True]
+        - PrefetchGlobalRead: [True]
+        - VectorWidth: [-1]
+      ForkParameters:
+        - ThreadTile:
+          - [ 4, 4 ]
+        - WorkGroup:
+          - [ 8,  8,  1 ]
+        - DepthU: [ 4]
+        - AssertSummationElementMultiple: [2]
+        - AssertFree0ElementMultiple: [2]
+        - AssertFree1ElementMultiple: [2]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [ 16968, 16968, 1, 384 ]
+          - Exact: [ 16584, 16584, 1, 384 ]
+          - Exact: [ 16200, 16200, 1, 384 ]

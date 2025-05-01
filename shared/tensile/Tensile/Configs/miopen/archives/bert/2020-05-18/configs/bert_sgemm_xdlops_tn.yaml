@@ -1,0 +1,497 @@
+# A config to generate a fast kernel for BERT model GEMMs
+# update parameters to produce best kernel(S)
+# to keep number of kernel produced minimum
+#   1) add new sections if certain paramters are more conducive to certain problem sizes
+#   2) create separate sections for replacement kernel(s)
+#   3) create separate sections for problem sizes belongs to specific model parameter sizes
+GlobalParameters:
+  MinimumRequiredVersion: 4.14.0
+  PrintLevel: 1
+  ForceRedoBenchmarkProblems: True
+  ForceRedoLibraryLogic: True
+  ForceRedoLibraryClient: True
+  CMakeBuildType: Release
+  EnqueuesPerSync: 1
+  SyncsPerBenchmark: 1
+  LibraryPrintDebug: False
+  NumElementsToValidate: 0
+  ValidationMaxToPrint: 4
+  ValidationPrintValids: False
+  ShortNames: False
+  MergeFiles: True
+  Platform: 0
+  Device: 0
+  KernelTime: True
+  PinClocks: False
+  SleepPercent: 0
+  PrintSolutionRejectionReason: True
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  PrintTensorA: 0
+  PrintTensorB: 0
+  PrintTensorD: 0
+  NewClient: 1
+BenchmarkProblems:
+
+  ########################################
+  # TN -
+  # max_sequenth_lenth = 128
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+  ########################################
+  # TN - standard 2Blocks/Inst
+  ########################################
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - EdgeType: ["ShiftPtr"]
+        - PrefetchLocalRead: [True]
+        - PrefetchGlobalRead: [True]
+      ForkParameters:
+        - MatrixInstruction:
+          - [32, 32, 1, 2]
+        - ThreadTile:
+          - [ 1, 32 ]
+          - [ 2, 32 ]
+          - [ 4, 32 ]
+        - WorkGroup:
+          - [ 64, 4, 1 ]
+          - [ 32, 8, 1 ]
+        - WorkGroupMapping: [1,2,4]
+        - DirectToLdsA: [1,0]
+        - DirectToLdsB: [1,0]
+        - DepthU: [ 8,16 ]
+        - VectorWidth: [1]
+        - GlobalReadVectorWidth: [4]
+        - InnerUnroll: [1,2,4]
+        - OptNoLoadLoop: [0,1,2]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [ 1024,3072,1,1024,1056,1056,1088,1056 ]
+          - Exact: [ 1024,3072,1,1024,1056,1056,1088,1056 ]
+          - Exact: [ 1024,2048,1,3072,1056,1056,3136,3104 ]
+          - Exact: [ 1024,2048,1,1024,1056,1056,1088,1056 ]
+          - Exact: [ 1024,2048,1,4096,1056,1056,4128,4160 ]
+          - Exact: [ 1024,4096,1,1024,1056,1056,1088,1056 ]
+          - Exact: [ 1024,4096,1,4096,1056,1056,4128,4160 ]
+          - Exact: [ 4096,4096,1,1024,4128,4128,1088,1056 ]
+          - Exact: [ 4096,2048,1,1024,4128,4128,1088,1056 ]
+          - Exact: [ 1024,3072,1,3072,1056,1056,3136,3104 ]
+          - Exact: [ 3072,3072,1,1024,3104,3104,1088,1056 ]
+          - Exact: [ 3072,2048,1,1024,3104,3104,1088,1056 ]
+          - Exact: [ 1024,512,1,1024,1056,1056,1088,1056 ]
+          - Exact: [ 1024,512,1,3072,1056,1056,3136,3104 ]
+          - Exact: [ 512,512,1,64,544,544,128,96 ]
+          - Exact: [ 512,512,64,64,544,544,128,96 ]
+          - Exact: [ 64,512,1,512,92,96,576,544 ]
+          - Exact: [ 64,512,64,512,92,96,576,544 ]
+          - Exact: [ 128,128,512,64,160,160,96,64 ]
+          - Exact: [ 3072,512,1,1024,3104,3104,1088,1056 ]
+          - Exact: [ 30528,4096,1,1024,30554,30554,1088,1056 ]
+          - Exact: [ 30528,2048,1,1024,30554,30554,1088,1056 ]
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - EdgeType: ["ShiftPtr"]
+        - PrefetchLocalRead: [True]
+        - PrefetchGlobalRead: [True]
+      ForkParameters:
+        - MatrixInstruction:
+          - [32, 32, 1, 2]
+        - ThreadTile:
+          - [ 1, 32 ]
+          - [ 2, 32 ]
+          - [ 4, 32 ]
+        - WorkGroup:
+          - [ 64, 4, 1 ]
+          - [ 32, 8, 1 ]
+        #- DirectToLds: [0]
+        - DepthU: [ 8,16 ]
+        - VectorWidth: [1]
+        - GlobalReadVectorWidth: [4]
+        - InnerUnroll: [1,2,4]
+        - OptNoLoadLoop: [0,1,2]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [ 1024,3072,1,1024,1056,1056,1088,1056 ]
+          - Exact: [ 1024,3072,1,1024,1056,1056,1088,1056 ]
+          - Exact: [ 1024,2048,1,3072,1056,1056,3136,3104 ]
+          - Exact: [ 1024,2048,1,1024,1056,1056,1088,1056 ]
+          - Exact: [ 1024,2048,1,4096,1056,1056,4128,4160 ]
+          - Exact: [ 1024,4096,1,1024,1056,1056,1088,1056 ]
+          - Exact: [ 1024,4096,1,4096,1056,1056,4128,4160 ]
+          - Exact: [ 4096,4096,1,1024,4128,4128,1088,1056 ]
+          - Exact: [ 4096,2048,1,1024,4128,4128,1088,1056 ]
+          - Exact: [ 1024,3072,1,3072,1056,1056,3136,3104 ]
+          - Exact: [ 3072,3072,1,1024,3104,3104,1088,1056 ]
+          - Exact: [ 3072,2048,1,1024,3104,3104,1088,1056 ]
+          - Exact: [ 1024,512,1,1024,1056,1056,1088,1056 ]
+          - Exact: [ 1024,512,1,3072,1056,1056,3136,3104 ]
+          - Exact: [ 512,512,1,64,544,544,128,96 ]
+          - Exact: [ 512,512,64,64,544,544,128,96 ]
+          - Exact: [ 64,512,1,512,92,96,576,544 ]
+          - Exact: [ 64,512,64,512,92,96,576,544 ]
+          - Exact: [ 128,128,512,64,160,160,96,64 ]
+          - Exact: [ 3072,512,1,1024,3104,3104,1088,1056 ]
+          - Exact: [ 30528,4096,1,1024,30554,30554,1088,1056 ]
+          - Exact: [ 30528,2048,1,1024,30554,30554,1088,1056 ]
+
+  ########################################
+  # TN - standard 1Blocks/Inst
+  ########################################
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - EdgeType: ["ShiftPtr"]
+        - PrefetchLocalRead: [True]
+        - PrefetchGlobalRead: [True]
+      ForkParameters:
+        - MatrixInstruction:
+          - [32, 32, 2, 1]
+        - ThreadTile:
+          - [ 2, 32 ]
+          - [ 1, 64 ]
+          - [ 1, 32 ]
+          - [ 4, 32 ]
+        - WorkGroup:
+          - [ 32, 8, 1 ]
+        - WorkGroupMapping: [1]
+        - DirectToLdsA: [1,0]
+        - DirectToLdsB: [1,0]
+        - DepthU: [ 8,16 ]
+        - VectorWidth: [1]
+        - GlobalReadVectorWidth: [4]
+        - InnerUnroll: [1,2,4]
+        - OptNoLoadLoop: [1,2]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [ 1024,3072,1,1024,1056,1056,1088,1056 ]
+          - Exact: [ 1024,3072,1,1024,1056,1056,1088,1056 ]
+          - Exact: [ 1024,2048,1,3072,1056,1056,3136,3104 ]
+          - Exact: [ 1024,2048,1,1024,1056,1056,1088,1056 ]
+          - Exact: [ 1024,2048,1,4096,1056,1056,4128,4160 ]
+          - Exact: [ 1024,4096,1,1024,1056,1056,1088,1056 ]
+          - Exact: [ 1024,4096,1,4096,1056,1056,4128,4160 ]
+          - Exact: [ 4096,4096,1,1024,4128,4128,1088,1056 ]
+          - Exact: [ 4096,2048,1,1024,4128,4128,1088,1056 ]
+          - Exact: [ 1024,3072,1,3072,1056,1056,3136,3104 ]
+          - Exact: [ 3072,3072,1,1024,3104,3104,1088,1056 ]
+          - Exact: [ 3072,2048,1,1024,3104,3104,1088,1056 ]
+          - Exact: [ 1024,512,1,1024,1056,1056,1088,1056 ]
+          - Exact: [ 1024,512,1,3072,1056,1056,3136,3104 ]
+          - Exact: [ 512,512,1,64,544,544,128,96 ]
+          - Exact: [ 512,512,64,64,544,544,128,96 ]
+          - Exact: [ 64,512,1,512,92,96,576,544 ]
+          - Exact: [ 64,512,64,512,92,96,576,544 ]
+          - Exact: [ 128,128,512,64,160,160,96,64 ]
+          - Exact: [ 3072,512,1,1024,3104,3104,1088,1056 ]
+          - Exact: [ 30528,4096,1,1024,30554,30554,1088,1056 ]
+          - Exact: [ 30528,2048,1,1024,30554,30554,1088,1056 ]
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - EdgeType: ["ShiftPtr"]
+        - PrefetchLocalRead: [True]
+        - PrefetchGlobalRead: [True]
+      ForkParameters:
+        - MatrixInstruction:
+          - [32, 32, 2, 1]
+        - ThreadTile:
+          - [ 2, 32 ]
+          - [ 1, 64 ]
+          - [ 1, 32 ]
+          - [ 4, 32 ]
+        - WorkGroup:
+          - [ 32, 8, 1 ]
+        - WorkGroupMapping: [1]
+        #- DirectToLds: [0]
+        - DepthU: [ 8,16 ]
+        - VectorWidth: [1]
+        - GlobalReadVectorWidth: [4]
+        - InnerUnroll: [1,2,4]
+        - OptNoLoadLoop: [1,2]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [ 1024,3072,1,1024,1056,1056,1088,1056 ]
+          - Exact: [ 1024,3072,1,1024,1056,1056,1088,1056 ]
+          - Exact: [ 1024,2048,1,3072,1056,1056,3136,3104 ]
+          - Exact: [ 1024,2048,1,1024,1056,1056,1088,1056 ]
+          - Exact: [ 1024,2048,1,4096,1056,1056,4128,4160 ]
+          - Exact: [ 1024,4096,1,1024,1056,1056,1088,1056 ]
+          - Exact: [ 1024,4096,1,4096,1056,1056,4128,4160 ]
+          - Exact: [ 4096,4096,1,1024,4128,4128,1088,1056 ]
+          - Exact: [ 4096,2048,1,1024,4128,4128,1088,1056 ]
+          - Exact: [ 1024,3072,1,3072,1056,1056,3136,3104 ]
+          - Exact: [ 3072,3072,1,1024,3104,3104,1088,1056 ]
+          - Exact: [ 3072,2048,1,1024,3104,3104,1088,1056 ]
+          - Exact: [ 1024,512,1,1024,1056,1056,1088,1056 ]
+          - Exact: [ 1024,512,1,3072,1056,1056,3136,3104 ]
+          - Exact: [ 512,512,1,64,544,544,128,96 ]
+          - Exact: [ 512,512,64,64,544,544,128,96 ]
+          - Exact: [ 64,512,1,512,92,96,576,544 ]
+          - Exact: [ 64,512,64,512,92,96,576,544 ]
+          - Exact: [ 128,128,512,64,160,160,96,64 ]
+          - Exact: [ 3072,512,1,1024,3104,3104,1088,1056 ]
+          - Exact: [ 30528,4096,1,1024,30554,30554,1088,1056 ]
+          - Exact: [ 30528,2048,1,1024,30554,30554,1088,1056 ]
+
+  ########################################
+  # TN - standard 4Blocks/Inst
+  # MFMA = 16x16x1x4 , 16x16x4x1
+  ########################################
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - EdgeType: ["ShiftPtr"]
+        - PrefetchLocalRead: [True]
+        - PrefetchGlobalRead: [True]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 1, 4]
+        - ThreadTile:
+          - [ 1, 32 ]
+          - [ 2, 16 ]
+          - [ 1, 16 ]
+          - [ 4, 32 ]
+          - [ 8, 32 ]
+          - [ 16, 32 ]
+        - WorkGroup:
+          - [ 64, 4, 1 ]
+          - [ 16, 16, 1 ]
+        - WorkGroupMapping: [4,8]
+        - DirectToLdsA: [1,0]
+        - DirectToLdsB: [1,0]
+        - DepthU: [ 8,16 ]
+        - VectorWidth: [1]
+        - GlobalReadVectorWidth: [4]
+        - InnerUnroll: [1,2,4]
+        - OptNoLoadLoop: [0,1,2]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [ 1024,3072,1,1024,1056,1056,1088,1056 ]
+          - Exact: [ 1024,3072,1,1024,1056,1056,1088,1056 ]
+          - Exact: [ 1024,2048,1,3072,1056,1056,3136,3104 ]
+          - Exact: [ 1024,2048,1,1024,1056,1056,1088,1056 ]
+          - Exact: [ 1024,2048,1,4096,1056,1056,4128,4160 ]
+          - Exact: [ 1024,4096,1,1024,1056,1056,1088,1056 ]
+          - Exact: [ 1024,4096,1,4096,1056,1056,4128,4160 ]
+          - Exact: [ 4096,4096,1,1024,4128,4128,1088,1056 ]
+          - Exact: [ 4096,2048,1,1024,4128,4128,1088,1056 ]
+          - Exact: [ 1024,3072,1,3072,1056,1056,3136,3104 ]
+          - Exact: [ 3072,3072,1,1024,3104,3104,1088,1056 ]
+          - Exact: [ 3072,2048,1,1024,3104,3104,1088,1056 ]
+          - Exact: [ 1024,512,1,1024,1056,1056,1088,1056 ]
+          - Exact: [ 1024,512,1,3072,1056,1056,3136,3104 ]
+          - Exact: [ 512,512,1,64,544,544,128,96 ]
+          - Exact: [ 512,512,64,64,544,544,128,96 ]
+          - Exact: [ 64,512,1,512,92,96,576,544 ]
+          - Exact: [ 64,512,64,512,92,96,576,544 ]
+          - Exact: [ 128,128,512,64,160,160,96,64 ]
+          - Exact: [ 3072,512,1,1024,3104,3104,1088,1056 ]
+          - Exact: [ 30528,4096,1,1024,30554,30554,1088,1056 ]
+          - Exact: [ 30528,2048,1,1024,30554,30554,1088,1056 ]
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - EdgeType: ["ShiftPtr"]
+        - PrefetchLocalRead: [True]
+        - PrefetchGlobalRead: [True]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 1, 4]
+        - ThreadTile:
+          - [ 1, 32 ]
+          - [ 2, 16 ]
+          - [ 1, 16 ]
+          - [ 4, 32 ]
+          - [ 8, 32 ]
+          - [ 16, 32 ]
+        - WorkGroup:
+          - [ 64, 4, 1 ]
+          - [ 16,16, 1 ]
+        - WorkGroupMapping: [1,2]
+        #- DirectToLds: [0]
+        - DepthU: [ 8,16 ]
+        - VectorWidth: [1]
+        - GlobalReadVectorWidth: [4]
+        - InnerUnroll: [1,2,4]
+        - OptNoLoadLoop: [0,1,2]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [ 1024,3072,1,1024,1056,1056,1088,1056 ]
+          - Exact: [ 1024,3072,1,1024,1056,1056,1088,1056 ]
+          - Exact: [ 1024,2048,1,3072,1056,1056,3136,3104 ]
+          - Exact: [ 1024,2048,1,1024,1056,1056,1088,1056 ]
+          - Exact: [ 1024,2048,1,4096,1056,1056,4128,4160 ]
+          - Exact: [ 1024,4096,1,1024,1056,1056,1088,1056 ]
+          - Exact: [ 1024,4096,1,4096,1056,1056,4128,4160 ]
+          - Exact: [ 4096,4096,1,1024,4128,4128,1088,1056 ]
+          - Exact: [ 4096,2048,1,1024,4128,4128,1088,1056 ]
+          - Exact: [ 1024,3072,1,3072,1056,1056,3136,3104 ]
+          - Exact: [ 3072,3072,1,1024,3104,3104,1088,1056 ]
+          - Exact: [ 3072,2048,1,1024,3104,3104,1088,1056 ]
+          - Exact: [ 1024,512,1,1024,1056,1056,1088,1056 ]
+          - Exact: [ 1024,512,1,3072,1056,1056,3136,3104 ]
+          - Exact: [ 512,512,1,64,544,544,128,96 ]
+          - Exact: [ 512,512,64,64,544,544,128,96 ]
+          - Exact: [ 64,512,1,512,92,96,576,544 ]
+          - Exact: [ 64,512,64,512,92,96,576,544 ]
+          - Exact: [ 128,128,512,64,160,160,96,64 ]
+          - Exact: [ 3072,512,1,1024,3104,3104,1088,1056 ]
+          - Exact: [ 30528,4096,1,1024,30554,30554,1088,1056 ]
+          - Exact: [ 30528,2048,1,1024,30554,30554,1088,1056 ]
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - EdgeType: ["ShiftPtr"]
+        - PrefetchLocalRead: [True]
+        - PrefetchGlobalRead: [True]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 4, 1]
+        - ThreadTile:
+          - [ 1, 32 ]
+          - [ 2, 16 ]
+          - [ 1, 16 ]
+          - [ 4, 32 ]
+          - [ 8, 32 ]
+          - [ 16, 32 ]
+        - WorkGroup:
+          - [ 16,16,1 ]
+        - WorkGroupMapping: [4,8]
+        #- DirectToLds: [0]
+        - DepthU: [ 8,16 ]
+        - VectorWidth: [1]
+        - GlobalReadVectorWidth: [4]
+        - InnerUnroll: [1,2,4]
+        - OptNoLoadLoop: [0,1,2]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [ 1024,3072,1,1024,1056,1056,1088,1056 ]
+          - Exact: [ 1024,3072,1,1024,1056,1056,1088,1056 ]
+          - Exact: [ 1024,2048,1,3072,1056,1056,3136,3104 ]
+          - Exact: [ 1024,2048,1,1024,1056,1056,1088,1056 ]
+          - Exact: [ 1024,2048,1,4096,1056,1056,4128,4160 ]
+          - Exact: [ 1024,4096,1,1024,1056,1056,1088,1056 ]
+          - Exact: [ 1024,4096,1,4096,1056,1056,4128,4160 ]
+          - Exact: [ 4096,4096,1,1024,4128,4128,1088,1056 ]
+          - Exact: [ 4096,2048,1,1024,4128,4128,1088,1056 ]
+          - Exact: [ 1024,3072,1,3072,1056,1056,3136,3104 ]
+          - Exact: [ 3072,3072,1,1024,3104,3104,1088,1056 ]
+          - Exact: [ 3072,2048,1,1024,3104,3104,1088,1056 ]
+          - Exact: [ 1024,512,1,1024,1056,1056,1088,1056 ]
+          - Exact: [ 1024,512,1,3072,1056,1056,3136,3104 ]
+          - Exact: [ 512,512,1,64,544,544,128,96 ]
+          - Exact: [ 512,512,64,64,544,544,128,96 ]
+          - Exact: [ 64,512,1,512,92,96,576,544 ]
+          - Exact: [ 64,512,64,512,92,96,576,544 ]
+          - Exact: [ 128,128,512,64,160,160,96,64 ]
+          - Exact: [ 3072,512,1,1024,3104,3104,1088,1056 ]
+          - Exact: [ 30528,4096,1,1024,30554,30554,1088,1056 ]
+          - Exact: [ 30528,2048,1,1024,30554,30554,1088,1056 ]
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - EdgeType: ["ShiftPtr"]
+        - PrefetchLocalRead: [True]
+        - PrefetchGlobalRead: [True]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 4, 1]
+        - ThreadTile:
+          - [ 1, 32 ]
+          - [ 2, 16 ]
+          - [ 1, 16 ]
+          - [ 4, 32 ]
+          - [ 8, 32 ]
+          - [ 16, 32 ]
+        - WorkGroup:
+          - [ 16, 16, 1 ]
+        - WorkGroupMapping: [1,2]
+        - DirectToLdsA: [1,0]
+        - DirectToLdsB: [1,0]
+        - DepthU: [ 8,16 ]
+        - VectorWidth: [1]
+        - GlobalReadVectorWidth: [4]
+        - InnerUnroll: [1,2,4]
+        - OptNoLoadLoop: [0,1,2]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [ 1024,3072,1,1024,1056,1056,1088,1056 ]
+          - Exact: [ 1024,3072,1,1024,1056,1056,1088,1056 ]
+          - Exact: [ 1024,2048,1,3072,1056,1056,3136,3104 ]
+          - Exact: [ 1024,2048,1,1024,1056,1056,1088,1056 ]
+          - Exact: [ 1024,2048,1,4096,1056,1056,4128,4160 ]
+          - Exact: [ 1024,4096,1,1024,1056,1056,1088,1056 ]
+          - Exact: [ 1024,4096,1,4096,1056,1056,4128,4160 ]
+          - Exact: [ 4096,4096,1,1024,4128,4128,1088,1056 ]
+          - Exact: [ 4096,2048,1,1024,4128,4128,1088,1056 ]
+          - Exact: [ 1024,3072,1,3072,1056,1056,3136,3104 ]
+          - Exact: [ 3072,3072,1,1024,3104,3104,1088,1056 ]
+          - Exact: [ 3072,2048,1,1024,3104,3104,1088,1056 ]
+          - Exact: [ 1024,512,1,1024,1056,1056,1088,1056 ]
+          - Exact: [ 1024,512,1,3072,1056,1056,3136,3104 ]
+          - Exact: [ 512,512,1,64,544,544,128,96 ]
+          - Exact: [ 512,512,64,64,544,544,128,96 ]
+          - Exact: [ 64,512,1,512,92,96,576,544 ]
+          - Exact: [ 64,512,64,512,92,96,576,544 ]
+          - Exact: [ 128,128,512,64,160,160,96,64 ]
+          - Exact: [ 3072,512,1,1024,3104,3104,1088,1056 ]
+          - Exact: [ 30528,4096,1,1024,30554,30554,1088,1056 ]
+          - Exact: [ 30528,2048,1,1024,30554,30554,1088,1056 ]
+
+#######################################
+LibraryLogic:
+    ScheduleName: "arcturus"
+    DeviceNames: ["Device 7380", "Device 7388", "Device 738c", "Device 7390"]
+    ArchitectureName: "gfx908"

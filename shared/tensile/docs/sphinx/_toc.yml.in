@@ -1,0 +1,38 @@
+defaults:
+  numbered: False
+root: src/index
+subtrees:
+- caption: Install
+  entries:
+  - file: src/install/installation
+    title: Installation
+
+- caption: Concepts
+  entries:
+  - file: src/conceptual/supported-problems
+
+- caption: Reference
+  entries:
+  - file: src/cli-reference/cli-reference
+    title: CLI reference
+    entries:
+    - file: src/cli-reference/tensile-create-library-cli
+  - file: src/api-reference/api-reference
+    title: API reference
+    entries:
+    - file: src/api-reference/common
+    - file: src/api-reference/embedded-data
+    - file: src/api-reference/tensile-create-library-api
+    - file: src/api-reference/utilities
+  - file: src/reference/environment-variables
+
+- caption: Contribution
+  entries:
+  - file: src/how-to/programmers-guide
+    title: Programmer's guide
+  - file: src/how-to/contribution-guidelines
+    title: Contribution guidelines
+
+- caption: About
+  entries:
+  - file: license.rst

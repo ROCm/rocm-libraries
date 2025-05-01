@@ -1,0 +1,266 @@
+# A config to generate a fast kernel(s) for  DLRM model GEMM problem sizes
+# problem sizes comes from Kaggle and Medium_4 data sets
+# update parameters to produce best kernel(S)
+# to keep number of kernel produced minimum
+#   1) add new sections if certain paramters are more conducive to certain problem sizes
+#   2) create separate sections for replacement kernel(s)
+
+GlobalParameters:
+  MinimumRequiredVersion: 4.14.0
+  PrintLevel: 1
+  ForceRedoBenchmarkProblems: True
+  ForceRedoLibraryLogic: True
+  ForceRedoLibraryClient: True
+  CMakeBuildType: Release
+  EnqueuesPerSync: 1
+  SyncsPerBenchmark: 1
+  LibraryPrintDebug: False
+  NumElementsToValidate: 0
+  ValidationMaxToPrint: 0
+  ValidationPrintValids: False
+  ShortNames: False
+  MergeFiles: True
+  Platform: 0
+  Device: 0
+  KernelTime: True
+  PinClocks: False
+  SleepPercent: 0
+  PrintSolutionRejectionReason: True
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  PrintTensorA: 0
+  PrintTensorB: 0
+  PrintTensorD: 0
+  NewClient: 1
+
+
+BenchmarkProblems:
+
+  ########################################
+  # TN -
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+  ########################################
+  # TN - standard 2Blocks/Inst
+  #    - medium_4 dataset
+  ########################################
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - EdgeType: ["ShiftPtr"]
+        - PrefetchLocalRead: [True]
+        - PrefetchGlobalRead: [True]
+      ForkParameters:
+        - MatrixInstruction:
+          - [32, 32, 1, 2]
+        - ThreadTile:
+          - [ 1, 32 ]
+          - [ 2, 32 ]
+          - [ 4, 32 ]
+        - WorkGroup:
+          - [ 64, 4, 1 ]
+        - WorkGroupMapping: [8]
+        - DirectToLdsA: [0,1]
+        - DirectToLdsB: [0,1]
+        - DepthU: [ 16 ]
+        - VectorWidth: [1]
+        - GlobalReadVectorWidth: [4]
+        - InnerUnroll: [1,2]
+        - OptNoLoadLoop: [0,1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [ 2048,512,1,2048,2070,2070,2070, 2102]
+          - Exact: [ 1024,512,1,2048,1056,1056,2070, 2102]
+          - Exact: [ 1024,512,1,1600,1056,1056,1632, 1664]
+          - Exact: [ 1024,200,1,560,1056,1056,592,624]
+          - Exact: [ 64,512,1,1024,96,96,1056, 1088]
+          - Exact: [ 2048,512,1,74,2070,2070,106,138]
+          - Exact: [ 2048,512,1,100,2070,2070,106,138]
+          - Exact: [ 1024,960,1,1024,1056,1056,1088, 1056]
+          - Exact: [ 1024,960,1,1024,1056,1056,1088, 1088]
+          - Exact: [ 1024,960,1,1600,1056,1056,1088, 1632]
+          - Exact: [ 64,960,1,1024,96,96,1088, 1056]
+          - Exact: [ 2048,960,1,2048,2080,2080,2080, 2112]
+          - Exact: [ 2048,960,1,74,2080,2080,106,138]
+          - Exact: [ 1024,1024,1,960,1056,1056,992, 1088]
+          - Exact: [ 1600,1024,1,960,1632,1632,992,1024]
+          - Exact: [ 2048,2048,1,960,2080,2080,992,1088]
+          - Exact: [ 4096,1024,1,257,4128,4128,289,321]
+
+  ########################################
+  # TN - standard 1Blocks/Inst
+  #    - medium_4 dataset
+  ########################################
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - EdgeType: ["ShiftPtr"]
+        - PrefetchLocalRead: [True]
+        - PrefetchGlobalRead: [True]
+      ForkParameters:
+        - MatrixInstruction:
+          - [32, 32, 2, 1]
+        - ThreadTile:
+          - [ 1, 32 ]
+          - [ 2, 32 ]
+          - [ 4, 32 ]
+        - WorkGroup:
+          - [ 16, 16, 1 ]
+        - WorkGroupMapping: [8]
+        - DirectToLdsA: [0,1]
+        - DirectToLdsB: [0,1]
+        - GlobalSplitU: [1]
+        - DepthU: [ 16 ]
+        - VectorWidth: [1]
+        - GlobalReadVectorWidth: [4]
+        - InnerUnroll: [1,2,4]
+        - OptNoLoadLoop: [0,1,2]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [ 2048,512,1,2048,2070,2070,2070, 2102]
+          - Exact: [ 1024,512,1,2048,1056,1056,2070, 2102]
+          - Exact: [ 1024,512,1,1600,1056,1056,1632, 1664]
+          - Exact: [ 1024,200,1,560,1056,1056,592,624]
+          - Exact: [ 64,512,1,1024,96,96,1056, 1088]
+          - Exact: [ 2048,512,1,74,2070,2070,106,138]
+          - Exact: [ 2048,512,1,100,2070,2070,106,138]
+          - Exact: [ 1024,960,1,1024,1056,1056,1088, 1056]
+          - Exact: [ 1024,960,1,1024,1056,1056,1088, 1088]
+          - Exact: [ 1024,960,1,1600,1056,1056,1088, 1632]
+          - Exact: [ 64,960,1,1024,96,96,1088, 1056]
+          - Exact: [ 2048,960,1,2048,2080,2080,2080, 2112]
+          - Exact: [ 2048,960,1,74,2080,2080,106,138]
+          - Exact: [ 1024,1024,1,960,1056,1056,992, 1088]
+          - Exact: [ 1600,1024,1,960,1632,1632,992,1024]
+          - Exact: [ 2048,2048,1,960,2080,2080,992,1088]
+          - Exact: [ 4096,1024,1,257,4128,4128,289,321]
+
+
+  ########################################
+  # TN - standard 2Blocks/Inst
+  #    - medium_4 dataset
+  ########################################
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - EdgeType: ["ShiftPtr"]
+        - PrefetchLocalRead: [True]
+        - PrefetchGlobalRead: [True]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 1, 4]
+        - ThreadTile:
+          - [ 1, 16 ]
+          - [ 1, 32 ]
+          - [ 2, 32 ]
+          - [ 2, 16 ]
+        - WorkGroup:
+          - [ 64, 4, 1 ]
+        - WorkGroupMapping: [8]
+        - DirectToLdsA: [0,1]
+        - DirectToLdsB: [0,1]
+        - GlobalSplitU: [1]
+        - DepthU: [ 8,16 ]
+        - VectorWidth: [1]
+        - GlobalReadVectorWidth: [4]
+        - InnerUnroll: [1,2,4]
+        - OptNoLoadLoop: [0,1,2]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [ 2048,512,1,2048,2070,2070,2070, 2102]
+          - Exact: [ 1024,512,1,2048,1056,1056,2070, 2102]
+          - Exact: [ 1024,512,1,1600,1056,1056,1632, 1664]
+          - Exact: [ 1024,200,1,560,1056,1056,592,624]
+          - Exact: [ 64,512,1,1024,96,96,1056, 1088]
+          - Exact: [ 2048,512,1,74,2070,2070,106,138]
+          - Exact: [ 2048,512,1,100,2070,2070,106,138]
+          - Exact: [ 1024,960,1,1024,1056,1056,1088, 1056]
+          - Exact: [ 1024,960,1,1024,1056,1056,1088, 1088]
+          - Exact: [ 1024,960,1,1600,1056,1056,1088, 1632]
+          - Exact: [ 64,960,1,1024,96,96,1088, 1056]
+          - Exact: [ 2048,960,1,2048,2080,2080,2080, 2112]
+          - Exact: [ 2048,960,1,74,2080,2080,106,138]
+          - Exact: [ 1024,1024,1,960,1056,1056,992, 1088]
+          - Exact: [ 1600,1024,1,960,1632,1632,992,1024]
+          - Exact: [ 2048,2048,1,960,2080,2080,992,1088]
+          - Exact: [ 4096,1024,1,257,4128,4128,289,321]
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - EdgeType: ["ShiftPtr"]
+        - PrefetchLocalRead: [True]
+        - PrefetchGlobalRead: [True]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 4, 1]
+        - ThreadTile:
+          - [ 4, 16 ]
+          - [ 4, 32 ]
+          - [ 8, 32 ]
+          - [ 8, 16 ]
+        - WorkGroup:
+          - [ 16, 16, 1 ]
+        - WorkGroupMapping: [8]
+        - DirectToLdsA: [0,1]
+        - DirectToLdsB: [0,1]
+        - GlobalSplitU: [1]
+        - DepthU: [ 16 ]
+        - VectorWidth: [1]
+        - GlobalReadVectorWidth: [4]
+        - InnerUnroll: [1,2,4]
+        - OptNoLoadLoop: [0,1,2]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [ 2048,512,1,2048,2070,2070,2070, 2102]
+          - Exact: [ 1024,512,1,2048,1056,1056,2070, 2102]
+          - Exact: [ 1024,512,1,1600,1056,1056,1632, 1664]
+          - Exact: [ 1024,200,1,560,1056,1056,592,624]
+          - Exact: [ 64,512,1,1024,96,96,1056, 1088]
+          - Exact: [ 2048,512,1,74,2070,2070,106,138]
+          - Exact: [ 2048,512,1,100,2070,2070,106,138]
+          - Exact: [ 1024,960,1,1024,1056,1056,1088, 1056]
+          - Exact: [ 1024,960,1,1024,1056,1056,1088, 1088]
+          - Exact: [ 1024,960,1,1600,1056,1056,1088, 1632]
+          - Exact: [ 64,960,1,1024,96,96,1088, 1056]
+          - Exact: [ 2048,960,1,2048,2080,2080,2080, 2112]
+          - Exact: [ 2048,960,1,74,2080,2080,106,138]
+          - Exact: [ 1024,1024,1,960,1056,1056,992, 1088]
+          - Exact: [ 1600,1024,1,960,1632,1632,992,1024]
+          - Exact: [ 2048,2048,1,960,2080,2080,992,1088]
+          - Exact: [ 4096,1024,1,257,4128,4128,289,321]
+
+########################################
+LibraryLogic:
+    ScheduleName: "arcturus"
+    DeviceNames: ["Device 7380", "Device 7388", "Device 738c", "Device 7390"]
+    ArchitectureName: "gfx908"

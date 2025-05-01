@@ -1,0 +1,69 @@
+# A config to generate a fast kernel for large DGEMMs
+GlobalParameters:
+  EnqueuesPerSync: 1
+  LibraryPrintDebug: False
+  NumElementsToValidate: 0
+  ValidationMaxToPrint: 4
+  ValidationPrintValids: False
+  KernelTime: True
+  #PinClocks: True
+  SleepPercent: 0
+  DataInitTypeBeta : 0
+  PrintSolutionRejectionReason: 1
+  ClientArgs: "--stride_b 0"
+
+BenchmarkProblems:
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - EdgeType: ["ShiftPtr"]
+      ForkParameters:
+        - FractionalLoad: [1]
+        - PrefetchGlobalRead: [ False, True ]
+        - PrefetchLocalRead: [ True]
+        - ThreadTile:
+          - [ 4, 4 ]
+          - [ 7, 8 ]
+          - [ 9, 8 ]
+          - [ 5, 8 ]
+          - [ 8, 4 ]
+          - [ 8, 8 ]
+          - [ 10, 6 ]
+          - [ 6, 10 ]
+        - WorkGroup:
+          #- [ 16, 8, 2 ]
+          #- [ 16, 4, 4 ]
+          - [ 16,  8, 1 ]
+          - [ 8, 32, 1 ]
+          - [ 16, 16, 1 ]
+          - [ 32,  8, 1 ]
+        - WorkGroupMapping: [1,8,64]
+        - DepthU: [ 8,16,32 ]
+        - VectorWidth: [-1] # use biggest available
+        - GlobalReadVectorWidth: [1,-1] # 1 allows D2LDS
+        - LdsPadA: [0, -1 ]
+        - LdsPadB: [0, -1 ]
+        - AssertSummationElementMultiple: [4]
+        - AssertFree0ElementMultiple: [4]
+        - AssertFree1ElementMultiple: [4]
+      BenchmarkForkParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # This example is from ResNet50 1x1 conv layer batch64, suffers from granularity loss:
+          - Exact: [192, 1024, 64, 256 ]  # much higher perf with smaller size
+          - Exact: [196, 1024, 64, 256 ]  # granularity loss
+
+
+  ########################################
+

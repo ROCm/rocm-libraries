@@ -1,0 +1,191 @@
+GlobalParameters:
+  MinimumRequiredVersion: 4.14.0
+  PrintLevel: 1
+  ForceRedoBenchmarkProblems: True
+  ForceRedoLibraryLogic: True
+  ForceRedoLibraryClient: True
+  CMakeBuildType: Release
+  EnqueuesPerSync: 1 # 100
+  SyncsPerBenchmark: 1
+  LibraryPrintDebug: False
+  NumElementsToValidate: 0
+  ValidationMaxToPrint: 4
+  ValidationPrintValids: False
+  ShortNames: False
+  MergeFiles: True
+  Platform: 0
+  Device: 0
+  KernelTime: True
+  PinClocks: False
+  SleepPercent: 200
+  DataInitTypeBeta : 0
+  DataInitTypeAlpha: 1
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeC: 3
+  DataInitTypeD: 3
+  PrintTensorA: 0
+  PrintTensorB: 0
+  PrintTensorC: 0
+  PrintTensorD: 0
+
+BenchmarkProblems:
+  ########################################
+  # TN - standard
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup - Source
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - LoopTail: [True]
+        - EdgeType: ["ShiftPtr"]
+      ForkParameters:
+        - KernelLanguage: ["Source"]
+        - GlobalSplitU: [1, 3]
+        - PrefetchLocalRead: [True]
+        - PrefetchGlobalRead: [False]
+        - ThreadTile:
+          - [ 8, 2 ]
+          - [ 8, 4 ]
+          - [ 2, 8 ]
+          - [ 4, 8 ]
+          - [ 16, 2 ]
+          - [ 16, 4 ]
+          - [ 16, 8 ]
+          - [ 2, 16 ]
+          - [ 4, 16 ]
+          - [ 8, 16 ]
+        - WorkGroup:
+          - [ 16, 16,  1 ]
+          - [  8,  8,  1 ]
+        - DepthU: [16]
+        - VectorWidth: [1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [959,2,961],[1024],[1],[1024] ]
+          - Range: [ [960],[1023,2,1025],[1],[1024] ]
+          - Range: [ [960],[1024],[1],[1023,2,1025] ]
+          - Range: [ [1919,2,1921],[2048],[1],[2048] ]
+          - Range: [ [1920],[2047,2,2049],[1],[2048] ]
+          - Range: [ [1920],[2048],[1],[2047,2,2049] ]
+          - Range: [ [2879,2,2881],[3072],[1],[3072] ]
+          - Range: [ [2880],[3071,2,3073],[1],[3072] ]
+          - Range: [ [2880],[3072],[1],[3071,2,3073] ]
+          - Range: [ [3839,2,3841],[4096],[1],[4096] ]
+          - Range: [ [3840],[4095,2,4097],[1],[4096] ]
+          - Range: [ [3840],[4096],[1],[4095,2,4097] ]
+          - Range: [ [7679,2,7681],[8192],[1],[8192] ]
+          - Range: [ [7680],[8191,2,8193],[1],[8192] ]
+          - Range: [ [7680],[8192],[1],[8191,2,8193] ]
+          - Range: [ [511,2,513],[512],[1],[512] ]
+          - Range: [ [512],[511,2,513],[1],[512] ]
+          - Range: [ [512],[512],[1],[511,2,513] ]
+          - Range: [ [1023,2,1025],[1024],[1],[1024] ]
+          - Range: [ [1024],[1023,2,1025],[1],[1024] ]
+          - Range: [ [1024],[1024],[1],[1023,2,1025] ]
+          - Range: [ [2047,2,2049],[2048],[1],[2048] ]
+          - Range: [ [2048],[2047,2,2049],[1],[2048] ]
+          - Range: [ [2048],[2048],[1],[2047,2,2049] ]
+          - Range: [ [3071,2,3073],[3072],[1],[3072] ]
+          - Range: [ [3072],[3071,2,3073],[1],[3072] ]
+          - Range: [ [3072],[3072],[1],[3071,2,3073] ]
+          - Range: [ [4095,2,4097],[4096],[1],[4096] ]
+          - Range: [ [4096],[4095,2,4097],[1],[4096] ]
+          - Range: [ [4096],[4096],[1],[4095,2,4097] ]
+          - Range: [ [8191,2,8193],[8192],[1],[8192] ]
+          - Range: [ [8192],[8191,2,8193],[1],[8192] ]
+          - Range: [ [8192],[8192],[1],[8191,2,8193] ]
+          - Range: [ [511,2,513],[1024],[1],[1024] ]
+          - Range: [ [512],[1023,2,1025],[1],[1024] ]
+          - Range: [ [512],[1024],[1],[1023,2,1025] ]
+          - Range: [ [511,2,513],[2048],[1],[2048] ]
+          - Range: [ [512],[2047,2,2049],[1],[2048] ]
+          - Range: [ [512],[2048],[1],[2047,2,2049] ]
+          - Range: [ [511,2,513],[3072],[1],[3072] ]
+          - Range: [ [512],[3071,2,3073],[1],[3072] ]
+          - Range: [ [512],[3072],[1],[3071,2,3073] ]
+          - Range: [ [511,2,513],[4096],[1],[4096] ]
+          - Range: [ [512],[4095,2,4097],[1],[4096] ]
+          - Range: [ [512],[4096],[1],[4095,2,4097] ]
+          - Range: [ [511,2,513],[8192],[1],[8192] ]
+          - Range: [ [512],[8191,2,8193],[1],[8192] ]
+          - Range: [ [512],[8192],[1],[8191,2,8193] ]
+          - Range: [ [1023,2,1025],[512],[1],[1024] ]
+          - Range: [ [1024],[511,2,513],[1],[1024] ]
+          - Range: [ [1024],[512],[1],[1023,2,1025] ]
+          - Range: [ [2047,2,2049],[512],[1],[2048] ]
+          - Range: [ [2048],[511,2,513],[1],[2048] ]
+          - Range: [ [2048],[512],[1],[2047,2,2049] ]
+          - Range: [ [3071,2,3073],[512],[1],[3072] ]
+          - Range: [ [3072],[511,2,513],[1],[3072] ]
+          - Range: [ [3072],[512],[1],[3071,2,3073] ]
+          - Range: [ [4095,2,4097],[512],[1],[4096] ]
+          - Range: [ [4096],[511,2,513],[1],[4096] ]
+          - Range: [ [4096],[512],[1],[4095,2,4097] ]
+          - Range: [ [8191,2,8193],[512],[1],[8192] ]
+          - Range: [ [8192],[511,2,513],[1],[8192] ]
+          - Range: [ [8192],[512],[1],[8191,2,8193] ]
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - EdgeType: ["ShiftPtr"]
+        - LoopTail: [True]
+        - PrefetchLocalRead: [True]
+      ForkParameters:
+        - PrefetchGlobalRead: [True]
+        - ThreadTile:
+          - [ 4, 4 ]
+        - WorkGroup:
+          - [ 16, 32, 1 ]
+        - WorkGroupMapping: [8]
+        - GlobalSplitU: [1]
+        - DepthU: [32]
+        - VectorWidth: [-1]
+        - AssertSummationElementMultiple: [8]
+        - AssertFree0ElementMultiple: [8]
+        - ReplacementKernel: [True]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [ 960,1024,1,1024,992,992,1056,1056 ]
+          - Exact: [ 1920,2048,1,2048,1952,1952,2080,2080 ]
+          - Exact: [ 2880,3072,1,3072,2912,2912,3104,3104 ]
+          - Exact: [ 3840,4096,1,4096,3872,3872,4128,4128 ]
+          - Exact: [ 7680,8192,1,8192,7712,7712,8224,8224 ]
+          - Exact: [ 512,512,1,512,544,544,544,544 ]
+          - Exact: [ 1024,1024,1,1024,1056,1056,1056,1056 ]
+          - Exact: [ 2048,2048,1,2048,2080,2080,2080,2080 ]
+          - Exact: [ 3072,3072,1,3072,3104,3104,3104,3104 ]
+          - Exact: [ 4096,4096,1,4096,4128,4128,4128,4128 ]
+          - Exact: [ 8192,8192,1,8192,8224,8224,8224,8224 ]
+          - Exact: [ 512,1024,1,1024,576,576,1088,1088 ]
+          - Exact: [ 512,2048,1,2048,576,576,2112,2112 ]
+          - Exact: [ 512,3072,1,3072,576,576,3136,3136 ]
+          - Exact: [ 512,4096,1,4096,576,576,4160,4160 ]
+          - Exact: [ 512,8192,1,8192,576,576,8256,8256 ]
+          - Exact: [ 1024,512,1,1024,1088,1088,1088,1088 ]
+          - Exact: [ 2048,512,1,2048,2112,2112,2112,2112 ]
+          - Exact: [ 3072,512,1,3072,3136,3136,3136,3136 ]
+          - Exact: [ 4096,512,1,4096,4160,4160,4160,4160 ]
+          - Exact: [ 8192,512,1,8192,8256,8256,8256,8256 ]
+
+#########################################
+LibraryLogic:
+    ScheduleName: "arcturus"
+    DeviceNames: ["Device 7380", "Device 7388", "Device 738c", "Device 7390"]
+    ArchitectureName: "gfx908"

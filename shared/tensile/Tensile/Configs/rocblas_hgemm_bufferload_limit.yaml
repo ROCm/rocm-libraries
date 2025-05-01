@@ -1,0 +1,193 @@
+GlobalParameters:
+  BoundsCheck: False
+  KernelTime: True
+  PrintSolutionRejectionReason: True
+  # NumElementsToValidate: 65535
+  # CMakeBuildType: Debug
+
+BenchmarkProblems:
+
+  ########################################
+  # NN / TLUA = 1, TLUB = 0
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - BufferLoad: [True]
+        - BufferStore: [True]
+        - KernelLanguage: ["Assembly"]
+        - EdgeType: ["ShiftPtr"]
+        - LoopTail: [True]
+        - WorkGroupMapping: [8]
+        - AssertFree0ElementMultiple: [2]
+        - AssertFree1ElementMultiple: [2]
+      ForkParameters:
+        - VectorWidth: [2]
+        - ThreadTile:
+          - [ 2, 8 ]
+        - WorkGroup:
+          - [ 32, 2, 1 ]  # 64x16
+          - [ 16, 4, 1 ]  # 32x32
+          - [ 16, 8, 1 ]  # 32x64
+        - DepthU: [32,64]
+        - StaggerU: [0]
+        - StaggerUStride: [256]
+        - StaggerUMapping: [0]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        # - ProblemSizes:
+        #   - Range: [ [67108864], [32], [1], [32] ]  # strideA = 67108864, should fail on DU >= 32 (For tensorA-N)
+        #   - Range: [ [33554432], [64], [1], [64] ]  # strideA = 33554432, should fail on DU >= 64 (For tensorA-N)
+        #   - Range: [ [32], [32], [1], [67108864] ]  # strideB = 33554432, should fail on MT1 >= 32 (For tensorB-N)  # TODO - check MT32x32x32/MT32x64x32/MT32x32x64/MT32x64x64: FailAssert but PassValidate
+        #   - Range: [ [64], [64], [1], [33554432] ]  # strideB = 33554432, should fail on MT1 >= 64 (For tensorB-N)  # TODO - check            MT32x64x32/           MT32x64x64: FailAssert but PassValidate
+
+  # ########################################
+  # # NT / TLUA = 1, TLUB = 1 # Pass
+  # ########################################
+  # -
+  #   - # ProblemType
+  #     OperationType: GEMM
+  #     DataType: h
+  #     TransposeA: False
+  #     TransposeB: True
+  #     UseBeta: True
+  #     Batched: True
+
+  #   - # BenchmarkProblemSizeGroup
+  #     InitialSolutionParameters:
+  #     BenchmarkCommonParameters:
+  #       - BufferLoad: [True]
+  #       - BufferStore: [True]
+  #       - KernelLanguage: ["Assembly"]
+  #       - EdgeType: ["ShiftPtr"]
+  #       - LoopTail: [True]
+  #       - WorkGroupMapping: [8]
+  #       - AssertFree0ElementMultiple: [2]
+  #       - AssertFree1ElementMultiple: [2]
+  #     ForkParameters:
+  #       - VectorWidth: [2]
+  #       - ThreadTile:
+  #         - [ 2, 2 ]
+  #       - WorkGroup:
+  #         - [ 16, 16, 1 ]  # 32x32
+  #         - [ 16, 32, 1 ]  # 32x64
+  #         - [ 32, 16, 1 ]  # 64x32
+  #       - DepthU: [16,32,64]
+  #       - StaggerU: [0]
+  #       - StaggerUStride: [256]
+  #       - StaggerUMapping: [0]
+  #     BenchmarkForkParameters:
+  #     JoinParameters:
+  #     BenchmarkJoinParameters:
+  #     BenchmarkFinalParameters:
+  #       - ProblemSizes:
+  #         - Range: [ [67108864], [32], [1], [32] ]  # strideA = 67108864, should fail on DU >= 32 (For tensorA-N)
+  #         - Range: [ [33554432], [64], [1], [64] ]  # strideA = 33554432, should fail on DU >= 64 (For tensorA-N)
+  #         - Range: [ [32], [67108864], [1], [32] ]  # strideB = 67108864, should fail on DU >= 32 (For tensorB-T)
+  #         - Range: [ [64], [33554432], [1], [64] ]  # strideB = 33554432, should fail on DU >= 64 (For tensorB-T)
+
+  # ########################################
+  # # TN / TLUA = 0, TLUB = 0 TODO - seems all incorrect
+  # ########################################
+  # -
+  #   - # ProblemType
+  #     OperationType: GEMM
+  #     DataType: h
+  #     TransposeA: True
+  #     TransposeB: False
+  #     UseBeta: True
+  #     Batched: True
+
+  #   - # BenchmarkProblemSizeGroup
+  #     InitialSolutionParameters:
+  #     BenchmarkCommonParameters:
+  #       - BufferLoad: [True]
+  #       - BufferStore: [True]
+  #       - KernelLanguage: ["Assembly"]
+  #       - EdgeType: ["ShiftPtr"]
+  #       - LoopTail: [True]
+  #       - WorkGroupMapping: [8]
+  #       - AssertFree0ElementMultiple: [2]
+  #       - AssertFree1ElementMultiple: [2]
+  #     ForkParameters:
+  #       - VectorWidth: [2]
+  #       - ThreadTile:
+  #         - [ 2, 2 ]
+  #       - WorkGroup:
+  #         - [ 8, 8, 1 ]   # 16x16
+  #         - [ 8, 16, 1 ]  # 16x32
+  #         - [ 16, 8, 1 ]  # 32x16
+  #         - [ 16, 16, 1 ] # 32x32
+  #         - [ 16, 32, 1 ] # 32x64
+  #         - [ 32, 16, 1 ] # 64x32
+  #       - DepthU: [16]      # DU doesn't affect bufferload limit in TN
+  #     BenchmarkForkParameters:
+  #     JoinParameters:
+  #     BenchmarkJoinParameters:
+  #     BenchmarkFinalParameters:
+  #       - ProblemSizes:
+  #         - Range: [ [32], [32], [1], [67108864] ]  # strideA = 67108864, should fail on MT0 >= 32 (For tensorA-T)  # strideB = 67108864, should fail on MT1 >= 32 (For tensorB-N)
+  #         - Range: [ [64], [64], [1], [33554432] ]  # strideA = 33554432, should fail on MT0 >= 64 (For tensorA-T)  # strideB = 33554432, should fail on MT1 >= 64 (For tensorB-N)
+
+  # ########################################
+  # # TT / TLUA = 0, TLUB = 1
+  # ########################################
+  # -
+  #   - # ProblemType
+  #     OperationType: GEMM
+  #     DataType: h
+  #     TransposeA: True
+  #     TransposeB: True
+  #     UseBeta: True
+  #     Batched: True
+
+  #   - # BenchmarkProblemSizeGroup
+  #     InitialSolutionParameters:
+  #     BenchmarkCommonParameters:
+  #       - BufferLoad: [True]
+  #       - BufferStore: [True]
+  #       - KernelLanguage: ["Assembly"]
+  #       - EdgeType: ["ShiftPtr"]
+  #       - LoopTail: [True]
+  #       - WorkGroupMapping: [8]
+  #       - AssertFree0ElementMultiple: [2]
+  #     ForkParameters:
+  #       - VectorWidth: [2]
+  #       - ThreadTile:
+  #         - [ 2, 2 ]
+  #       - WorkGroup:
+  #         - [ 8, 8, 1 ]   # 16x16
+  #         - [ 16, 8, 1 ]  # 32x16
+  #         - [ 32, 8, 1 ]  # 64x16
+  #       - DepthU: [16,32,64]
+  #     BenchmarkForkParameters:
+  #     JoinParameters:
+  #     BenchmarkJoinParameters:
+  #     BenchmarkFinalParameters:
+  #       - ProblemSizes:
+  #         - Range: [ [32], [32], [1], [67108864] ]  # strideA = 67108864, should fail on MT0 >= 32 (For tensorA-T)
+  #         - Range: [ [64], [64], [1], [33554432] ]  # strideA = 33554432, should fail on MT0 >= 64 (For tensorA-T)  # TODO - check MT64x16x32: FailAssert but PassValidate
+  #         - Range: [ [32], [67108864], [1], [32] ]  # strideB = 67108864, should fail on DU >= 32 (For tensorB-T)
+  #         - Range: [ [64], [33554432], [1], [64] ]  # strideB = 33554432, should fail on DU >= 64 (For tensorB-T)
+
+LibraryLogic:
+    ScheduleName: "vega20"
+    DeviceNames: ["Device 66a0", "Device 66a1", "Device 66a7", "Device 66af", "Vega 20"]
+    ArchitectureName: "gfx906"
+
+    ScheduleName: "arcturus"
+    DeviceNames: ["Device 7380", "Device 7388", "Device 738c", "Device 7390"]
+    ArchitectureName: "gfx908"
+
+LibraryClient:

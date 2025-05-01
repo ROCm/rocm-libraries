@@ -1,0 +1,82 @@
+GlobalParameters:
+  MinimumRequiredVersion: 4.14.0
+  PrintLevel: 1
+  ForceRedoBenchmarkProblems: True
+  ForceRedoLibraryLogic: True
+  ForceRedoLibraryClient: True
+  CMakeBuildType: Release
+  EnqueuesPerSync: 1
+  SyncsPerBenchmark: 1
+  LibraryPrintDebug: False
+  NumElementsToValidate: 100
+  ValidationMaxToPrint: 0
+  ValidationPrintValids: False
+  ShortNames: False
+  MergeFiles: True
+  Platform: 0
+  Device: 0
+  KernelTime: True
+  PinClocks: False
+  SleepPercent: 0
+  PrintSolutionRejectionReason: True
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  PrintTensorA: 0
+  PrintTensorB: 0
+  PrintTensorD: 0
+  NewClient: 2
+
+
+BenchmarkProblems:
+
+  ########################################
+  # NT -
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - EdgeType: ["ShiftPtr"]
+        - PrefetchLocalRead: [True]
+        - PrefetchGlobalRead: [True]
+      ForkParameters:
+        - ThreadTile:
+          - [ 1, 1 ]
+        - WorkGroup:
+          - [ 256, 1, 1 ]
+          - [ 128, 2, 1 ]
+          - [ 64, 4, 1 ]
+        - WorkGroupMapping: [1]
+        - DepthU: [ 16,32,64 ]
+        - FractionalLoad: [1]
+        - VectorWidth: [-1]
+        - MacroTileShapeMin: [1,4]
+        - MacroTileShapeMax: [64,256]
+        - GlobalReadVectorWidth: [-1]
+        - GlobalSplitU: [32,64]
+        - InnerUnroll: [1]
+        - ScheduleIterAlg: [1]
+        - OptNoLoadLoop: [1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [ 256,1,1,32768,256,256,256,1]
+
+########################################
+LibraryLogic:
+    ScheduleName: "arcturus"
+    DeviceNames: ["Device 7380", "Device 7388", "Device 738c", "Device 7390"]
+    ArchitectureName: "gfx908"
+

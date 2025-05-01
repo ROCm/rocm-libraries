@@ -1,0 +1,73 @@
+# A config to generate a fast kernel(s) for  BDAS workload problem sizes
+# BDAS workloads are kmeans , pca SVD algorithm solvers. usually consists of 2 DGEMM problem sizes
+# Here problem size K=500000 represents DGEMM2
+
+GlobalParameters:
+  MinimumRequiredVersion: 4.4.0
+  PrintLevel: 1
+  ForceRedoBenchmarkProblems: True
+  ForceRedoLibraryLogic: True
+  ForceRedoLibraryClient: True
+  CMakeBuildType: Release
+  EnqueuesPerSync: 1
+  NumBenchmarks: 1
+  SyncsPerBenchmark: 1
+  LibraryPrintDebug: False
+  NumElementsToValidate: 100
+  ValidationMaxToPrint: 4
+  ValidationPrintValids: False
+  ShortNames: False
+  MergeFiles: True
+  Platform: 0
+  Device: 0
+  KernelTime: True
+  PinClocks: True
+  SleepPercent: 0
+  PrintSolutionRejectionReason: True
+  DataInitTypeBeta : 0
+  DataInitTypeAlpha : 1
+  NewKernel: 2
+
+BenchmarkProblems:
+  ########################################
+  # TN - standard
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: d
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - EdgeType: ["ShiftPtr"]
+        - LoopTail: [True]
+      ForkParameters:
+        - PrefetchLocalRead: [True]
+        - PrefetchGlobalRead: [True]
+        - ThreadTile:
+          - [ 4, 8 ]
+          - [ 4, 4 ]
+        - WorkGroup:
+          - [ 32, 16, 1 ]
+        - WorkGroupMapping: [1]
+        #- AssertFree0ElementMultiple: [2]
+        - GlobalSplitU: [16,32]
+        - DepthU: [ 8,16,32 ]
+        - VectorWidth: [2]
+        - FractionalLoad: [1]
+        - GlobalReadVectorWidth: [2,4]
+        - OptNoLoadLoop: [2]
+        - StaggerUStride: [256,512]
+        - StaggerUMapping: [0]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [ 250, 250, 1, 500000,266,266,500016,500032 ]

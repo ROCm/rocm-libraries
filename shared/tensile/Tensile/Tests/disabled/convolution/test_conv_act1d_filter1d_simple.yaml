@@ -1,0 +1,58 @@
+GlobalParameters:
+  MinimumRequiredVersion: 4.2.0
+  EnqueuesPerSync: 1
+  SyncsPerBenchmark: 1
+  NumElementsToValidate: -1
+  ValidationMaxToPrint: 4
+  DataInitTypeA : 3
+  DataInitTypeB : 3
+  DataInitTypeC : 0
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 0
+  #PrintTensorA: 1
+  #PrintTensorB: 1
+  #PrintTensorC: 2
+  PrintTensorD: 0
+  #LibraryPrintDebug: True
+  CEqualD: True
+  PrintSolutionRejectionReason: 1
+
+BenchmarkProblems:
+  - #  1D activation with 2D filter, 2 summations
+    - # ProblemType
+      OperationType: TensorContraction
+      DataType: s
+      DestDataType: s
+      UseBeta: False
+      NumIndicesC: 2
+      IndexAssignmentsA: [0, 2 ]
+      IndexAssignmentsB: [2, 1 ]
+      #  Mapping to conv tensor: W=0='I', Cout=1='J', S=2='K'
+      #SetConstStrideA: [ [2, 1] ] # set strideA1K == 1
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - EdgeType: ["ShiftPtr"]
+        - LoopTail: [True]
+      ForkParameters:
+        - KernelLanguage: ["Source"]
+        - PrefetchGlobalRead: [0]
+        - PrefetchLocalRead: [0]
+        - ThreadTile:
+          - [ 4, 4 ]
+        - WorkGroup:
+          - [  8, 8,  1 ]
+        - DepthU: [4]
+        - VectorWidth: [1]
+        - GlobalReadVectorWidth: [1] # Set GuaranteeNoPartialA
+        - StaggerU: [0]
+        - UseSgprForGRO: [0]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact : [6, 10, 3]
+          - Exact : [6, 10, 4]
+          - Exact : [6, 10, 8]

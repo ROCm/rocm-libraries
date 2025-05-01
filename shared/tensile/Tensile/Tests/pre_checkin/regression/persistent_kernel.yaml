@@ -1,0 +1,46 @@
+TestParameters:
+  marks: [emulation, emulation4]
+
+GlobalParameters:
+  NumElementsToValidate: 16384
+  DataInitTypeBeta: 2 # the bug is in the non-OptNLL code path of persitent kernel
+# disable BoundsCheck for now to avoid crash
+  BoundsCheck: False
+  KernelTime: True
+
+BenchmarkProblems:
+  - # sgemm NN
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup - Assembly
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - LoopTail: [True]
+        - EdgeType: ["ShiftPtr"]
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - GlobalSplitU: [1]
+        - ThreadTile:
+          - [ 4, 4 ]
+        - WorkGroup:
+          - [ 8, 8, 1 ]
+          - [ 32, 32, 1 ]
+        - DepthU: [8]
+        - StaggerU: [0,32]
+        - PersistentKernel: [1,2]
+        - PersistentKernelAlongBatch: [False,True]
+        - PrefetchAcrossPersistent: [False,True]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [ 1872, 2000, 1, 128, 2000, 2000, 2000, 2000] # make sure each WG can run at least 2 MTs
+          - Exact: [ 256, 15488, 1, 128] # make sure each WG can run at least 2 MTs
+          - Exact: [ 6144, 24000, 1, 2560] # Really big problem with #Tiles = 192*750=144000 for MT32x32

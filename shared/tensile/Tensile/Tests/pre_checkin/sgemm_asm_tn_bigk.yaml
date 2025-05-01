@@ -1,0 +1,49 @@
+TestParameters:
+  marks: [emulation, emulation2]
+
+# benchmark assembly and source kernels
+GlobalParameters:
+  MinimumRequiredVersion: 4.2.0
+  NumElementsToValidate: 1000
+  KernelTime: True
+
+BenchmarkProblems:
+
+  - # hgemm TN
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup - Assembly
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - LoopTail: [True]
+        - EdgeType: ["ShiftPtr"]
+        - KernelLanguage: ["Assembly"]
+        - PrefetchLocalRead: [True]
+        - WorkGroupMapping: [1]
+      ForkParameters:
+        - PrefetchGlobalRead: [False]
+        - StaggerU: [0,2,4,8,32]
+        - ThreadTile:
+          - [4, 2]
+        - WorkGroup:
+          - [8, 16, 1]
+        - GlobalSplitU: [1]
+        - DepthU: [8]
+        - VectorWidth: [2]
+        - AssertSummationElementMultiple: [1,2]
+        - AssertFree0ElementMultiple: [2]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          #- Exact: [ 512, 8, 1, 200000 ]
+          - Exact: [ 512, 8, 1, 500000 ]
+            #- Range: [ [512], [8], [1], [100000, 1000, 200000]]
+

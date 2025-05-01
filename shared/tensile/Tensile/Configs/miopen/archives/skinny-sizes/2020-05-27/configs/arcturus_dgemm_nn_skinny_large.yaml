@@ -1,0 +1,73 @@
+GlobalParameters:
+  BoundsCheck: False
+  KernelTime: True
+  NewClient: 2
+  NumBenchmarks: 10
+  # PrintSolutionRejectionReason: True
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  NumElementsToValidate: 0
+
+BenchmarkProblems:
+
+  ########################################
+  # NN
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: d
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - BufferLoad: [True]
+        - BufferStore: [True]
+        - KernelLanguage: ["Assembly"]
+        - EdgeType: ["ShiftPtr"]
+        - LoopTail: [True]
+        - WorkGroupMapping: [8]
+      ForkParameters:
+        - VectorWidth: [2]
+        - PrefetchLocalRead: [0,1]
+        - PersistentKernel: [0,3,4,6]
+        - ThreadTile:
+          - [ 4, 8 ]
+          - [ 8, 4 ]
+          - [ 8, 8 ]
+          # - [ 16,16]        # no valid solution
+        - WorkGroup:
+          - [ 8, 16, 1 ]
+          - [ 8, 32, 1 ]
+          - [ 8, 64, 1 ]
+          - [ 16, 8, 1 ]
+          - [ 16, 16, 1 ]
+          - [ 16, 32, 1 ]
+          - [ 16, 64, 1 ]
+          - [ 32, 8, 1 ]
+          - [ 32, 16, 1 ]
+          - [ 32, 32, 1 ]
+          - [ 64, 8, 1 ]
+          - [ 64, 16, 1 ]
+        - DepthU: [8]        # 16 never wins, and 32 not valid, cost too much LDS
+        - StaggerU: [8,16,32]
+        - StaggerUStride: [64,128,256]
+        - StaggerUMapping: [0]
+        - InnerUnroll: [1]      # 1 is always best
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [1000000], [250], [1], [250] ]
+
+LibraryLogic:
+    ScheduleName: "arcturus"
+    DeviceNames: ["Device 7380", "Device 7388", "Device 738c", "Device 7390"]
+    ArchitectureName: "gfx908"
+
+LibraryClient:

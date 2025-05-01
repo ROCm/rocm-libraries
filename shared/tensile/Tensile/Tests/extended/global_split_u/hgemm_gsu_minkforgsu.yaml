@@ -1,0 +1,61 @@
+GlobalParameters:
+  PrintLevel: 1
+  ForceRedoBenchmarkProblems: True
+  ForceRedoLibraryLogic: True
+  ForceRedoLibraryClient: True
+  CMakeBuildType: Release
+  EnqueuesPerSync: 1
+  SyncsPerBenchmark: 1
+  LibraryPrintDebug: False
+  NumElementsToValidate: 128
+  ValidationMaxToPrint: 16
+  ValidationPrintValids: False
+  ShortNames: False
+  MergeFiles: True
+  #  DataInitTypeAB: 0
+  PrintSolutionRejectionReason: True
+
+BenchmarkProblems:
+  - # hgemm NN
+    - # ProblemType
+      OperationType: GEMM
+      DataType: H
+      DestDataType: H
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - PackSummationDims: [0]
+        - NumLoadsCoalescedA: [1]
+        - NumLoadsCoalescedB: [1]
+        - WorkGroupMapping: [1]
+        - AssertFree1ElementMultiple : [4]
+        - AssertSizeLessThan: [{0: 5}]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
+        - GlobalSplitUWorkGroupMappingRoundRobin: [False]
+        - GlobalSplitUSummationAssignmentRoundRobin:  [True]
+        - EdgeType: ["ShiftPtr"]
+        - VectorWidth: [1]
+        - PrefetchGlobalRead: [false]
+        - StaggerU: [0]
+        - StaggerUStride: [0]
+        - StaggerUMapping: [0]
+        - GlobalSplitU: [8,16,20,64]
+        - DepthU: [ 32 ]
+        - LdsPadA: [2]
+        - LdsPadB: [2]
+        - ThreadTile:
+          - [ 2, 8 ]
+        - WorkGroup:
+          - [  1, 4, 16]
+      #BenchmarkForkParameters: # obsolete
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+            - Exact: [ 1, 256, 1, 1024 ]

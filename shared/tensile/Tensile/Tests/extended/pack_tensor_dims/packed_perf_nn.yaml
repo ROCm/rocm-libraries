@@ -1,0 +1,77 @@
+# benchmark assembly and source kernels
+GlobalParameters:
+  MinimumRequiredVersion: 4.2.0
+  CMakeBuildType: Release
+  PrintLevel: 1
+  ForceRedoBenchmarkProblems: True
+  ForceRedoLibraryLogic: True
+  ForceRedoLibraryClient: True
+  EnqueuesPerSync: 1
+  SyncsPerBenchmark: 1
+  NumElementsToValidate: 1000
+  ValidationMaxToPrint: 4
+  ValidationPrintValids: False
+  ShortNames: False
+  MergeFiles: True
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeC: 2
+  DataInitTypeBeta: 0
+  KernelTime: True
+  LibraryPrintDebug: 0
+
+BenchmarkProblems:
+
+  - # sgemm NT
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      DestDataType: s
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      SetConstStrideB: [[2,0]]
+
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - LoopTail: [True]
+        - EdgeType: ["ShiftPtr"]
+      ForkParameters:
+        - KernelLanguage: ["Source","Assembly"]
+        - ThreadTile:
+          - [ 4, 4 ]
+          - [ 8, 4 ]
+          - [ 4, 8 ]
+          - [ 8, 8 ]
+        - WorkGroup:
+          #- [  8, 32,  1 ]
+          - [  16, 16,  1 ]
+        - DepthU: [8]
+        - GlobalReadVectorWidth: [1]
+          #- GlobalReadVectorWidth: [1,4]
+        - VectorWidth: [4]
+        - WorkGroupMapping: [8]
+
+        - FractionalLoad: [1]
+        - PackBatchDims: [1]  # pack into A
+        - AssertFree0ElementMultiple: [4]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [196, 1024, 64, 256 ]
+  #./rocblas-bench -f gemm_strided_batched_ex --transposeA N --transposeB N -m 196 -n 1024 -k 256 --alpha 1 --a_type s --lda 196 --stride_a 50176 --b_type s --ldb 256 --stride_b 0 --beta 0 --c_type s --ldc 196 --stride_c 200704 --d_type s --ldd 196 --stride_d 200704 --batch 64 --compute_type s --algo 0 --solution_index 0 --flags 0 --workspace_size 0x7ffcfa30e218
+  #Cijk_Ailk_Bljk_SB_MT032x128x16_APM01_AF0EM01_AF1EM01_ASEM01_BL1_DTL0_EPS0_FL00_GRVW01_GSU01_ISA906_K1_KLA_LPA00_LPB04_MGWVW01_NLCA01_NLCB01_PGR0_PLR0_SNLL0_TT04_04_USFGRO01_VAW01_VW04_WG08_32_01_WGM08
+
+          # Another case, similar to above:
+          #- Exact: [196, 256, 64, 1024 ]
+  #./rocblas-bench -f gemm_strided_batched_ex --transposeA N --transposeB N -m 196 -n 256 -k 1024 --alpha 1 --a_type s --lda 196 --stride_a 200704 --b_type s --ldb 1024 --stride_b 0 --beta 0 --c_type s --ldc 196 --stride_c 50176 --d_type s --ldd 196 --stride_d 50176 --batch 64 --compute_type s --algo 0 --solution_index 0 --flags 0 --workspace_size 0x7ffe7b4a2748
+  # Cijk_Ailk_Bljk_SB_MT128x032x16_APM01_AF0EM01_AF1EM01_ASEM01_BL1_DTL0_EPS0_FL00_GRVW01_GSU01_ISA906_K1_KLA_LPA00_LPB04_MGWVW01_NLCA01_NLCB01_PGR0_PLR0_SNLL0_TT04_04_USFGRO01_VAW01_VW02_WG32_08_01_WGM08
+
+          # Another case - requires flexible vector support since Free0 is odd
+          #- Exact: [49, 512, 64, 2048 ]
+  # ./rocblas-bench -f gemm_strided_batched_ex --transposeA N --transposeB N -m 49 -n 512 -k 2048 --alpha 1 --a_type s --lda 49 --stride_a 100352 --b_type s --ldb 2048 --stride_b 0 --beta 0 --c_type s --ldc 49 --stride_c 25088 --d_type s --ldd 49 --stride_d 25088 --batch 64 --compute_type s --algo 0 --solution_index 0 --flags 0 --workspace_size 0x7ffc73a499a8
+  # Cijk_Ailk_Bljk_SB_MT032x128x16_APM01_AF0EM01_AF1EM01_ASEM01_BL1_DTL0_EPS0_FL00_GRVW01_GSU01_ISA906_K1_KLA_LPA00_LPB04_MGWVW01_NLCA01_NLCB01_PGR0_PLR0_SNLL0_TT04_04_USFGRO01_VAW01_VW04_WG08_32_01_WGM08;

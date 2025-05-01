@@ -1,0 +1,55 @@
+GlobalParameters:
+  MinimumRequiredVersion: 4.2.0
+  EnqueuesPerSync: 1
+  SyncsPerBenchmark: 1
+  NumElementsToValidate: -1
+  ValidationMaxToPrint: 4
+  DataInitTypeA : 3
+  DataInitTypeB : 3
+  DataInitTypeC : 0
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 0
+  PrintTensorD: 0
+  #LibraryPrintDebug: True
+  CEqualD: True
+  PrintSolutionRejectionReason: 1
+
+BenchmarkProblems:
+  - #  2D activation with 1D weights, 1 summation
+    - # ProblemType
+      OperationType: TensorContraction
+      DataType: s
+      DestDataType: s
+      UseBeta: False
+      NumIndicesC: 3
+      IndexAssignmentsA: [ 0, 1, 3 ]
+      IndexAssignmentsB: [ 3, 2 ]
+      #  Mapping to conv tensor: W=0='I', H=1='J', Cout=2='K', S=3='L'
+      #SetConstStrideA: [ [3, 1] ] # set strideA1L == 1
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - EdgeType: ["ShiftPtr"]
+        - LoopTail: [True]
+      ForkParameters:
+        - KernelLanguage: ["Source"]
+          # TODO - asm requires flex dims
+        - ThreadTile:
+          - [ 4, 4 ]
+          - [ 4, 8 ]
+          - [ 8, 8 ]
+        - WorkGroup:
+          - [  8, 8,  1 ]
+          - [  8, 16,  1 ]
+        - DepthU: [4,8]
+        - VectorWidth: [1]
+        - GlobalReadVectorWidth: [1] # Set GuaranteeNoPartialA
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact : [6, 10, 4, 3]
+            #- Range: [ [127,1,129], [127,1,129], [127,1,129], [63,1,65] ]
+          - Range: [ [127,1,129], 0,0, [63,1,65] ]

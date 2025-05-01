@@ -1,0 +1,76 @@
+BenchmarkProblems:
+- - DataType: s
+    IndexAssignmentsA: [0, 3, 2]
+    IndexAssignmentsB: [3, 1, 2]
+    NumIndicesC: 3
+    OperationType: TensorContraction
+    SetConstStrideA:
+    - [0, 1]
+    SetConstStrideB:
+    - [2, 0]
+    - [3, 1]
+    UseBeta: false
+    UseInitialStridesAB: false
+  - BenchmarkCommonParameters:
+    - EdgeType: [ShiftPtr]
+    BenchmarkFinalParameters:
+    - ProblemSizes:
+        - Range: [[89400,1,89500], [16], [2], [8]]
+
+        - Range: [[1,1,500], [16], [2], [8]]
+        - Range: [[500,7,1000], [16], [2], [8]]
+        - Range: [[1000,15,5000], [16], [2], [8]]
+        - Range: [[5000,257,100000], [16], [2], [8]]
+        - Range: [[100000,521,500000], [16], [2], [8]]
+        - Range: [[500000,2027,1000000], [16], [2], [8]]
+    BenchmarkForkParameters: null
+    BenchmarkJoinParameters: null
+    ForkParameters:
+    - PrefetchGlobalRead: [1]
+      #- CheckDimOverflow: [2]
+    - KernelLanguage: [Source,Assembly]
+    - ThreadTile:
+      - [2, 2]
+    - WorkGroup:
+      - [8, 8, 1]
+    - DepthU: [8]
+    - GlobalReadVectorWidth: [-1]
+    - VectorWidth: [1]
+    - FractionalLoad: [0]
+    - PackBatchDims: [1]
+    - MagicDivAlg: [2]
+    - WorkGroupMapping: [1]
+      #- AssertStrideAEqual:
+      #- {0: 1}
+      #- AssertStrideBEqual:
+      #- {0: 1, 2: 0}
+      #- AssertSizeEqual:
+      #- {}
+    InitialSolutionParameters: null
+    JoinParameters: null
+    OptNoLoadLoop: 0
+GlobalParameters: {CMakeBuildType: Release, EnqueuesPerSync: 1, ForceRedoBenchmarkProblems: true,
+  ForceRedoLibraryClient: true, ForceRedoLibraryLogic: true, KernelTime: true, LibraryPrintDebug: false,
+  MergeFiles: true, MinimumRequiredVersion: 4.2.0, NumElementsToValidate: 1000,
+  ShortNames: false, SolutionSelectionAlg: 1, SyncsPerBenchmark: 1,
+  ValidationMaxToPrint: 4, ValidationPrintValids: false}
+
+
+
+# Cijk_Ailk_Bljk_S_MT16x16x8_SE_AMAS0_FL0_GRVW1_K1_PBD1_TT2_2_USFGRO0_VW1_WG8_8_1
+#
+#0000000000003268 GW_B0_E1_20:
+#llvm-objdump: warning: failed to parse debug information for /tmp/ROCm_Tmp_PID_34733/ROCm_CodeObject_1
+#        v_add_lshl_u32 v13, v6, v13, 2                             // 0000000033EC: D1FE000D 020A1B06
+#        v_cndmask_b32_e64 v13, -1, v13, s[66:67]                   // 0000000033F4: D100000D 010A1AC1
+#        v_mul_f32_e32 v0, s36, v0                                  // 0000000033FC: 0A000024
+#        v_mul_f32_e32 v1, s36, v1                                  // 000000003400: 0A020224
+#        v_mul_f32_e32 v2, s36, v2                                  // 000000003404: 0A040424
+#        v_mul_f32_e32 v3, s36, v3                                  // 000000003408: 0A060624
+#        buffer_store_dword v0, v10, s[16:19], 0 offen              // 00000000340C: E0701000 8004000A
+#        buffer_store_dword v1, v11, s[16:19], 0 offen              // 000000003414: E0701000 8004010B
+#        buffer_store_dword v2, v12, s[16:19], 0 offen              // 00000000341C: E0701000 8004020C
+#        buffer_store_dword v3, v13, s[16:19], 0 offen              // 000000003424: E0701000 8004030D
+#
+#PC offset: 340C
+#

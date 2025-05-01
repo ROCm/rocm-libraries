@@ -1,0 +1,66 @@
+GlobalParameters:
+  MinimumRequiredVersion: 4.1.0
+  CMakeBuildType: Release
+  NumElementsToValidate: 0
+  ValidationMaxToPrint: 16
+  PinClocks: False
+  SleepPercent: 0
+  DataInitTypeA: 0
+  DataInitTypeB: 0
+  DataInitTypeAlpha: 1
+  EnqueuesPerSync: 100
+  KernelTime: True
+  PrintConvolutionUsage: 1
+  PrintSolutionRejectionReason: 1
+
+BenchmarkProblems:
+  -
+    - # ProblemType
+      OperationType: ConvolutionForward
+      DataType: s
+      ConvolutionConfig:
+      - Dilation: 1x1
+      - Filter: 7x1
+      - Stride: 1x1
+      - TensorAFormat: NCHW
+      - UnrollOnChannel: 1
+      SetConstStrideB: [[2, 0]]
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: [Assembly]
+        - EdgeType: ["ShiftPtr"]
+      ForkParameters:
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [0,1]
+        - ThreadTile:
+          - [ 4, 4 ]
+          - [ 8, 4 ]
+          - [ 4, 8 ]
+          - [ 8, 8 ]
+        - WorkGroup:
+          - [ 8, 16, 1 ]
+          - [ 32, 8, 1 ]
+          - [ 16, 16, 1 ]
+          - [ 32, 16, 1 ]
+          - [ 16, 32, 1 ]
+        - GlobalSplitU: [1]
+        - DepthU: [8,16]
+        - GlobalReadVectorWidth: [-1]
+        #- StaggerU: [0,32]
+        #- StaggerUMapping: [0,1]
+        - WorkGroupMapping: [1,8,64]
+        - VectorWidth: [4]
+        - AssertFree0ElementMultiple: [4]
+        - FractionalLoad: [0,1]
+        - PackBatchDims: [1]
+      BenchmarkForkParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [ 292, 768, 64, 7, 192] # make HW a multiple of 4
+# inception:
+# 4 ./bin/MIOpenDriver conv -n 32 -c 192 -H 17 -W 17 -k 192 -y 7 -x 1 -p 3 -q 0 -u 1 -v 1 -l 1 -j 1 -t 1
+
+

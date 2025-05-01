@@ -1,0 +1,61 @@
+GlobalParameters:
+  NumElementsToValidate: 0
+  KernelTime: True
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 0
+  MaxWorkspaceSize: 33554432
+
+BenchmarkProblems:
+  ########################################
+  # NT - standard
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: B
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup - Source
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - LoopTail: [True]
+        - EdgeType: ["ShiftPtr"]
+        - KernelLanguage: ["Source"]
+      ForkParameters:
+        - GlobalSplitU: [1,3,5,7,15,30,60]
+        - PrefetchLocalRead: [0,1]
+        - PrefetchGlobalRead: [0,1]
+        - ThreadTile:
+          - [ 1, 1 ]
+        - WorkGroup:
+          - [ 64, 1,  1 ]
+        - DepthU: [64]
+        - VectorWidth: [1]
+        - GlobalReadVectorWidth: [1]
+        - WorkGroupMapping: [1,2]
+        - StaggerU: [0,32]
+        - StaggerUStride: [128,256]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [ 256, 1, 1, 32768, 256, 256, 256, 1 ] #gemm
+          - Exact: [ 2048, 1, 1, 512, 2048, 2048, 2048, 1 ] #gemm
+          - Exact: [ 1024, 1, 1, 1600, 1024, 1024, 1024, 1 ] #gemm
+          - Exact: [ 1024, 1, 1, 200, 1024, 1024, 1024, 1 ] #gemm
+          - Exact: [ 2048, 1, 1, 960, 2048, 2048, 2048, 1 ] #gemm
+          - Exact: [ 256, 1, 1, 3456, 256, 256, 256, 1 ] #gemm
+          - Exact: [ 256, 1, 1, 4096, 256, 256, 256, 1 ] #gemm
+          - Exact: [ 256, 1, 1, 6912, 256, 256, 256, 1 ] #gemm
+          - Exact: [ 256, 1, 1, 864, 256, 256, 256, 1 ] #gemm
+
+LibraryLogic:
+    ScheduleName: "hip"
+    DeviceNames: ["Device 0000"]
+    ArchitectureName: "fallback"

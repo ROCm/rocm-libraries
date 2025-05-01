@@ -1,0 +1,27 @@
+    # Explore set of parms appropriate for large matrixes with large tiles:
+    # explore0 is slightly dialed-down version
+    - # Benchmark Group
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - EdgeType: ["ShiftPtr"]
+        - LoopTail: [True]
+        - KernelLanguage: ["Assembly"]
+        - PrefetchLocalRead: [True]
+        - GlobalSplitU: [1]
+      ForkParameters:
+        - PrefetchGlobalRead: [False, True]
+        - ThreadTile:
+          - [ 4, 8 ]
+          - [ 8, 4 ]
+          - [ 8, 8 ]
+        - WorkGroup:
+          - [ 16, 16, 1 ]
+        - WorkGroupMapping: [1, 8]
+        - DepthU: [ 16, 24, 32 ]
+        - VectorWidth: [4]
+        - GlobalReadVectorWidth: [4]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:

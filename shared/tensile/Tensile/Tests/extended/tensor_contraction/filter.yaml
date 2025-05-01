@@ -1,0 +1,57 @@
+GlobalParameters:
+  MinimumRequiredVersion: 4.2.0
+  ForceRedoBenchmarkProblems: True
+  ForceRedoLibraryLogic: True
+  ForceRedoLibraryClient: True
+  #CMakeBuildType: Debug
+  EnqueuesPerSync: 1
+  SyncsPerBenchmark: 1
+  LibraryPrintDebug: False
+  NumElementsToValidate: 1000
+  ValidationMaxToPrint: 4
+  ValidationPrintValids: False
+  ShortNames: False
+  MergeFiles: True
+  KernelTime: True
+  SolutionSelectionAlg: 1
+  DataInitTypeAB: 1
+  DataInitTypeAlpha: 1
+BenchmarkProblems:
+  -
+    -
+      OperationType: TensorContraction
+      DataType: s
+      IndexAssignmentsA: [5, 4, 3, 0, 2]
+      IndexAssignmentsB: [5, 4, 3, 1, 2]
+      NumIndicesC: 3
+      SetConstStrideA: [[0, 1], [5, 1]]
+      SetConstStrideB: [[2, 0]]
+      UseBeta: False
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - EdgeType: ["ShiftPtr"]
+      ForkParameters:
+        - PrefetchGlobalRead: [0]
+        - KernelLanguage: ["Source","Assembly"]
+          #- KernelLanguage: ["Assembly"]
+          #- PackBatchDims: [1]
+        - ThreadTile:
+          - [ 2, 2 ]
+        - WorkGroup:
+          - [  8, 8, 1 ]
+            #- [  16, 8, 1 ]
+        - DepthU: [8]
+        - GlobalReadVectorWidth: [1]
+        - VectorWidth: [1]
+
+        - FractionalLoad: [0]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+         - ProblemSizes:
+           #- Exact: [169, 16, 8, 32, 2, 2]
+           ##        I,  J,  K     L, M, N
+           - Exact: [16, 16, 1,    2, 1, 8]
+             #- Exact: [16, 16, 1,    1, 2, 8]
