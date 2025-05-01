@@ -226,7 +226,9 @@ namespace rocRoller
             uint const simdsPerWave = wavefrontSize / lanesPerSIMD;
 
             uint const simdsPerSGroup = M / lanesPerSIMD;
-            uint const numVBlocks     = wavefrontSize == 64 ? 2 : (bitsPerElement == 8 ? 4 : 2);
+            // We should find a name for this 2x factor between wave32 & wave64.
+            uint const numVBlocks = wavefrontSize == 64 ? (bitsPerElement == 8 ? 2 : 1)
+                                                        : (bitsPerElement == 8 ? 4 : 2);
 
             uint const elementsPerVGPRBlock = ((M * K) / wavefrontSize) / numVBlocks;
 
@@ -245,16 +247,8 @@ namespace rocRoller
 
             graph.coordinates.addElement(Tile(), {iWaveX}, {simdBlockIndex, laneInSIMD});
 
-            if(bitsPerElement == 8)
-            {
-                graph.coordinates.addElement(
-                    Tile(), {iWaveY}, {elementBlockNumber, simdBlockNumber, elementBlockIndex});
-            }
-            else
-            {
-                graph.coordinates.addElement(
-                    Tile(), {iWaveY}, {simdBlockNumber, elementBlockNumber, elementBlockIndex});
-            }
+            graph.coordinates.addElement(
+                Tile(), {iWaveY}, {elementBlockNumber, simdBlockNumber, elementBlockIndex});
 
             graph.coordinates.addElement(Flatten(), {simdBlockNumber, simdBlockIndex}, {SIMD});
             graph.coordinates.addElement(Flatten(), {SIMD, laneInSIMD}, {lane});
