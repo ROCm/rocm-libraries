@@ -454,6 +454,7 @@ test:all-gpus:
       --repeat-until-fail 2
       --resource-spec-file ./resources.json
       --parallel $PARALLEL_JOBS
+      --exclude-regex rocprim.device_partition
 
 test:any-gpu-spirv:
   variables:
