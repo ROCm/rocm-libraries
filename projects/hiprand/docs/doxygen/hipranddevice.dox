@@ -1,0 +1,20 @@
+/**
+@brief hipRAND device functions.
+@author
+@file
+*/
+
+/**
+ * \defgroup hipranddevice hipRAND device functions
+ * @{
+ *     @page hipranddevice_page hipRAND RNG's state types
+ *     * \p hiprandStateXORWOW_t - XORWOW PRNG state type
+ *     * \p hiprandStatePhilox4_32_10_t - PHILOX PRNG state type
+ *     * \p hiprandStateMRG32k3a_t - MRG32k3a PRNG state type
+ *     * \p hiprandStateMtgp32_t - MTGP32 PRNG state type
+ *     * \p hiprandStateScrambledSobol32_t - Scrambled SOBOL32 QRNG state type
+ *     * \p hiprandStateScrambledSobol64_t - Scrambled SOBOL64 QRNG state type
+ *     * \p hiprandStateSobol32_t - SOBOL32 QRNG state type
+ *     * \p hiprandStateSobol64_t - SOBOL64 QRNG state type
+ * @}
+ */
