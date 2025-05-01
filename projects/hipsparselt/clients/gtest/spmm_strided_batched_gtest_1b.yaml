@@ -1,0 +1,225 @@
+---
+include: hipsparselt_common.yaml
+include: known_bugs.yaml
+include: spmm_strided_batched_common_16.yaml
+
+Definitions:
+  - &transA_transB_range
+    - { transA: N, transB: N }
+    - { transA: N, transB: T }
+    - { transA: T, transB: N }
+    - { transA: T, transB: T }
+
+  - &alpha_beta_range
+    - { alpha:  1.0, beta:  0.0 }
+    - { alpha: -2.0, beta: -3.0 }
+    - { alpha:  0.0, beta:  1.0 }
+
+  - &alpha_beta_range_small
+    - { alpha: 2, alphai: 2, beta: -1.0, betai: 2.0 }
+
+Tests:
+- name: spmm_strided_batched_small
+  category: quick
+  function:
+    spmm_strided_batched: *real_precisions_1b
+  matrix_size: *strided_batched_small_matrix_size_range
+  alpha_beta: *alpha_beta_range
+  transA_transB: *transA_transB_range
+  batch_count: [ 3 ]
+  sparse_b: [true, false]
+
+- name: spmm_strided_batched_small_stride_zero
+  category: quick
+  function:
+    spmm_strided_batched: *real_precisions_1b
+  matrix_size: *strided_batched_small_matrix_size_stride_a_range
+  alpha: 2.0
+  alphai: 1.0
+  beta: 3.0
+  betai: -1.0
+  transA: N
+  transB: N
+  batch_count: [ 1, 3 ]
+  sparse_b: [true, false]
+  alpha_vector_scaling: [true, false]
+
+- name: spmm_strided_batched_small
+  category: quick
+  function:
+    spmm_strided_batched: *real_precisions_1b
+  matrix_size: *strided_batched_small_matrix_size_range
+  alpha_beta: *alpha_beta_range
+  transA_transB: *transA_transB_range
+  batch_count: [ 3 ]
+  bias_vector: [true]
+  bias_stride: [0, -1, 256]
+  sparse_b: [true, false]
+  alpha_vector_scaling: [true, false]
+
+- name: spmm_strided_batched_small_stride_zero
+  category: quick
+  function:
+    spmm_strided_batched: *real_precisions_1b
+  matrix_size: *strided_batched_small_matrix_size_stride_a_range
+  alpha: 2.0
+  alphai: 1.0
+  beta: 3.0
+  betai: -1.0
+  transA: N
+  transB: N
+  batch_count: [ 1, 3 ]
+  bias_vector: [true]
+  bias_stride: [0, -1, 256]
+  sparse_b: [true, false]
+  alpha_vector_scaling: [true, false]
+
+- name: spmm_strided_batched_medium
+  category: pre_checkin
+  function:
+    spmm_strided_batched: *real_precisions_1b
+  matrix_size: *strided_batched_medium_matrix_size_range
+  transA_transB: *transA_transB_range
+  alpha_beta: *alpha_beta_range
+  batch_count: [ 3 ]
+  sparse_b: [true, false]
+
+- name: spmm_strided_batched_medium_stride_zero
+  category: nightly
+  function:
+    spmm_strided_batched: *real_precisions_1b
+  matrix_size: *strided_batched_medium_matrix_size_stride_a_range
+  alpha: 2.0
+  alphai: 1.0
+  beta: 3.0
+  betai: -1.0
+  transA: N
+  transB: N
+  batch_count: 3
+  sparse_b: [true, false]
+
+- name: spmm_strided_batched_large
+  category: pre_checkin
+  function:
+    spmm_strided_batched: *real_precisions_1b
+  matrix_size: *strided_batched_large_matrix_size_range
+  transA_transB: *transA_transB_range
+  alpha_beta: *alpha_beta_range
+  batch_count: [ 3 ]
+  sparse_b: [true, false]
+
+- name: spmm_strided_batched_large_stride_zero
+  category: pre_checkin
+  function:
+    spmm_strided_batched: *real_precisions_1b
+  matrix_size: *strided_batched_large_matrix_size_stride_a_range
+  alpha: 2.0
+  alphai: 1.0
+  beta: 3.0
+  betai: -1.0
+  transA: N
+  transB: N
+  batch_count: [ 3 ]
+  sparse_b: [true, false]
+
+- name: spmm_strided_batched_deepbench
+  category: nightly
+  function:
+    spmm_strided_batched: *real_precisions_1b
+  matrix_size: *strided_batched_deepbench_vec
+  alpha: 1.0
+  beta: 0.0
+  transA: N
+  transB: T
+  batch_count: [ 2 ]
+  sparse_b: [true, false]
+
+- name: spmm_strided_batched_conv_resnet50_fwd
+  category: nightly
+  function:
+    spmm_strided_batched: *real_precisions_1b
+  matrix_size: *strided_batched_conv_resnet50_fwd
+  alpha: 1.0
+  beta: 0.0
+  transA: N
+  transB: N
+  batch_count: 4
+  sparse_b: [true, false]
+  orderA: [C, R]
+  orderB: [C, R]
+
+- name: spmm_strided_batched_conv_resnet50_bwddata
+  category: nightly
+  function:
+    spmm_strided_batched: *real_precisions_1b
+  matrix_size: *strided_batched_conv_resnet50_bwddata
+  alpha: 1.0
+  beta: 0.0
+  transA: N
+  transB: T
+  batch_count: 4
+  sparse_b: [true, false]
+
+- name: spmm_strided_batched_conv_inception4_bwddata
+  category: nightly
+  function:
+    spmm_strided_batched: *real_precisions_1b
+  matrix_size: *strided_batched_conv_inception4_bwddata
+  alpha: 1.0
+  beta: 0.0
+  transA: N
+  transB: T
+  batch_count: 4
+  sparse_b: [true, false]
+
+- name: spmm_strided_batched_conv_ctest_fwd
+  category: nightly
+  function:
+    spmm_strided_batched: *real_precisions_1b
+  matrix_size: *strided_batched_conv_ctest_fwd
+  alpha: 1.0
+  beta: 0.0
+  transA: N
+  transB: N
+  batch_count: 1
+  sparse_b: [true, false]
+
+- name: spmm_strided_batched_smoke
+  category: smoke
+  transA_transB: *transA_transB_range
+  function:
+    spmm_strided_batched: *real_precisions_1b
+  matrix_size:
+    - { M: 16, N: 16, K: 32 }
+    - { M: 16, N: 16, K: 64 }
+    - { M: 16, N: 16, K: 128 }
+    - { M: 16, N: 16, K: 256 }
+    - { M: 16, N: 16, K: 384 }
+    - { M: 16, N: 16, K: 512 }
+    - { M: 128, N: 128, K: 32 }
+    - { M: 128, N: 128, K: 64 }
+    - { M: 128, N: 128, K: 128 }
+    - { M: 128, N: 128, K: 256 }
+    - { M: 128, N: 128, K: 384 }
+    - { M: 128, N: 128, K: 512 }
+  alpha_beta: *alpha_beta_range
+  sparse_b: [ true, false]
+  batch_count: [1, 3]
+  alpha_vector_scaling: [true, false]
+
+- name: spmm_strided_batched_activation_smoke
+  category: smoke
+  transA_transB: *transA_transB_range
+  function:
+    spmm_strided_batched: *real_precisions_1b
+  matrix_size:
+    - { M: 16, N: 16, K: 256 }
+    - { M: 128, N: 128, K: 256 }
+  alpha: 1.0
+  beta: 0.0
+  sparse_b: [ true, false]
+  batch_count: [1, 3]
+  activation_type: clippedrelu
+  activation_arg1 : [-1.0, 0.0, 0.5]
+  activation_arg2 : [-1.0, 0.0, 0.5, 1.0, 3.0]
+...

@@ -1,0 +1,39 @@
+# Anywhere {branch} is used, the branch name will be substituted.
+# These comments will also be removed.
+defaults:
+  numbered: False
+  maxdepth: 7
+root: index
+subtrees:
+- entries:
+  - file: what-is-hipsparselt.rst
+    title: What is hipSPARSELt?
+  - file: tutorials/quick-start/linux.rst
+    title: Quick-start
+
+- caption: Reference
+  entries:
+    - file: reference/supported-functions.rst
+      title: Supported functions
+    - file: reference/data-type-support.rst
+      title: Data type support
+    - file: reference/device-stream-manage.rst
+      title: Device & stream management
+    - file: reference/storage-format.rst
+      title: Storage formats
+    - file: reference/mi300-features.rst
+      title: MI300 features
+    - file: reference/porting.rst
+      title: Porting from CUDA
+    - file: doxygen/html/index
+      title: API library
+
+- caption: Tutorials
+  entries:
+    - file: tutorials/install/linux.rst
+      title: Installing and building hipSPARSELt for Linux
+
+- caption: About
+  entries:
+    - file: license.md
+      title: License

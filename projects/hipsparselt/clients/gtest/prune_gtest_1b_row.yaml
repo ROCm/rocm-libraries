@@ -1,0 +1,445 @@
+---
+include: hipsparselt_common.yaml
+include: known_bugs.yaml
+include: spmm_common_row.yaml
+
+Definitions:
+  - &alpha_beta_range
+    - { alpha:  1, beta:  0 }
+
+  - &transA_transB_range
+    - { transA: N, transB: N }
+    - { transA: T, transB: T }
+
+Tests:
+
+# Split *real_precisions_1b_input into *int8 and *nonint8_real_precisions. Since int8 has flags 0,1
+
+- name: prune_small
+  category: quick
+  function:
+    prune: *real_precisions_1b_input
+  matrix_size: *small_matrix_size_range
+  transA_transB: *transA_transB_range
+  alpha_beta: *alpha_beta_range
+  prune_algo: [ 0, 1 ]
+  sparse_b: [ true, false]
+  orderA: [R]
+  orderB: [R]
+  orderC: [R]
+  orderD: [R]
+
+- name: prune_medium
+  category: pre_checkin
+  function:
+    prune: *real_precisions_1b_input
+  matrix_size: *medium_matrix_size_range
+  transA_transB: *transA_transB_range
+  alpha_beta: *alpha_beta_range
+  prune_algo: [ 0, 1 ]
+  sparse_b: [ true, false]
+  orderA: [R]
+  orderB: [R]
+  orderC: [R]
+  orderD: [R]
+
+- name: prune_medium_HMM
+  category: HMM
+  function:
+    prune: *real_precisions_1b_input
+  matrix_size: *medium_matrix_size_range
+  transA: [ N ]
+  transB: [ N ]
+  alpha: 1
+  beta: 1
+  HMM: true
+  prune_algo: [ 0, 1 ]
+  sparse_b: [ true, false]
+  orderA: [R]
+  orderB: [R]
+  orderC: [R]
+  orderD: [R]
+
+- name: prune_chunk
+  category: pre_checkin
+  function:
+    prune: *real_precisions_1b_input
+  matrix_size: *chunk_matrix_size_range
+  transA_transB: *transA_transB_range
+  alpha: 2
+  beta: 3
+  prune_algo: [ 0, 1 ]
+  sparse_b: [ true, false]
+  orderA: [R]
+  orderB: [R]
+  orderC: [R]
+  orderD: [R]
+
+- name: prune_deepbench
+  category: nightly
+  function:
+    prune: *real_precisions_1b_input
+  matrix_size: *deepbench_sizes
+  alpha_beta: *alpha_beta_range
+  transA_transB: *transA_transB_range
+  prune_algo: [ 0, 1 ]
+  sparse_b: [ true, false]
+  orderA: [R]
+  orderB: [R]
+  orderC: [R]
+  orderD: [R]
+
+- name: resnet50_fwd
+  category: nightly
+  function:
+    prune: *real_precisions_1b_input
+  transA: N
+  transB: N
+  matrix_size: *resnet50_fwd_sizes
+  alpha: 1
+  beta: 0
+  prune_algo: [ 0, 1 ]
+  sparse_b: [ true, false]
+  orderA: [R]
+  orderB: [R]
+  orderC: [R]
+  orderD: [R]
+
+- name: resnet50_bwdwrw
+  category: nightly
+  function:
+    prune: *real_precisions_1b_input
+  transA: T
+  transB: N
+  matrix_size: *resnet50_bwdwrw_sizes
+  alpha: 1
+  beta: 1
+  prune_algo: [ 0, 1 ]
+  sparse_b: [ true, false]
+  orderA: [R]
+  orderB: [R]
+  orderC: [R]
+  orderD: [R]
+
+- name: resnet50_bwddata
+  category: nightly
+  function:
+    prune: *real_precisions_1b_input
+  transA: N
+  transB: T
+  matrix_size: *resnet50_bwddata_sizes
+  alpha: 1
+  beta: 0
+  prune_algo: [ 0, 1 ]
+  sparse_b: [ true, false]
+  orderA: [R]
+  orderB: [R]
+  orderC: [R]
+  orderD: [R]
+
+- name: inception4_fwd
+  category: nightly
+  function:
+    prune: *real_precisions_1b_input
+  transA: N
+  transB: N
+  matrix_size: *inception4_fwd_sizes
+  alpha: 1
+  beta: 0
+  prune_algo: [ 0, 1 ]
+  sparse_b: [ true, false]
+  orderA: [R]
+  orderB: [R]
+  orderC: [R]
+  orderD: [R]
+
+- name: inception4_bwdwrw
+  category: nightly
+  function:
+    prune: *real_precisions_1b_input
+  transA: T
+  transB: N
+  matrix_size: *inception4_bwdwrw_sizes
+  alpha: 1
+  beta: 1
+  prune_algo: [ 0, 1 ]
+  sparse_b: [ true, false]
+  orderA: [R]
+  orderB: [R]
+  orderC: [R]
+  orderD: [R]
+
+- name: inception4_bwddata
+  category: nightly
+  function:
+    prune: *real_precisions_1b_input
+  transA: N
+  transB: T
+  matrix_size: *inception4_bwddata_sizes
+  alpha: 1
+  beta: 0
+  prune_algo: [ 0, 1 ]
+  sparse_b: [ true, false]
+  orderA: [R]
+  orderB: [R]
+  orderC: [R]
+  orderD: [R]
+
+- name: ctest_bwdwrw
+  category: nightly
+  function:
+    prune: *real_precisions_1b_input
+  transA: T
+  transB: N
+  alpha: 1
+  beta: 1
+  matrix_size: *ctest_bwdwrw_sizes
+  prune_algo: [ 0, 1 ]
+  sparse_b: [ true, false]
+  orderA: [R]
+  orderB: [R]
+  orderC: [R]
+  orderD: [R]
+
+- name: ctest_fwd
+  category: nightly
+  function:
+    prune: *real_precisions_1b_input
+  transA: N
+  transB: N
+  alpha: 1
+  beta: 0
+  matrix_size: *ctest_fwd_sizes
+  prune_algo: [ 0, 1 ]
+  sparse_b: [ true, false]
+  orderA: [R]
+  orderB: [R]
+  orderC: [R]
+  orderD: [R]
+
+- name: prune_16
+  category: pre_checkin
+  function:
+    prune: *real_precisions_1b_input
+  M: 16
+  N: 16
+  K: 16
+  alpha_beta: *alpha_beta_range
+  transA_transB: *transA_transB_range
+  prune_algo: [ 0, 1 ]
+  sparse_b: [ true, false]
+  orderA: [R]
+  orderB: [R]
+  orderC: [R]
+  orderD: [R]
+
+- name: prune_32_16_128
+  category: nightly
+  function:
+    prune: *real_precisions_1b_input
+  M: [16, 32, 48, 64, 80, 96, 112, 128]
+  N: 32
+  K: 32
+  alpha_beta: *alpha_beta_range
+  transA_transB: *transA_transB_range
+  prune_algo: [ 0, 1 ]
+  sparse_b: [ true, false]
+  orderA: [R]
+  orderB: [R]
+  orderC: [R]
+  orderD: [R]
+
+- name: prune_48_16_128
+  category: nightly
+  function:
+    prune: *real_precisions_1b_input
+  M: 48
+  N: [16, 32, 48, 64, 80, 96, 112, 128]
+  K: 48
+  alpha_beta: *alpha_beta_range
+  transA_transB: *transA_transB_range
+  prune_algo: [ 0, 1 ]
+  sparse_b: [ true, false]
+  orderA: [R]
+  orderB: [R]
+  orderC: [R]
+  orderD: [R]
+
+- name: prune_64_16_128
+  category: nightly
+  function:
+    prune: *real_precisions_1b_input
+  M: 64
+  N: 64
+  K: [16, 32, 48, 64, 80, 96, 112, 128]
+  alpha_beta: *alpha_beta_range
+  transA_transB: *transA_transB_range
+  prune_algo: [ 0, 1 ]
+  sparse_b: [ true, false]
+  orderA: [R]
+  orderB: [R]
+  orderC: [R]
+  orderD: [R]
+
+- name: prune_64_16_16
+  category: quick
+  function:
+    prune: *real_precisions_1b_input
+  M: 64
+  N: 16
+  K: 16
+  alpha_beta: *alpha_beta_range
+  transA_transB: *transA_transB_range
+  prune_algo: [ 0, 1 ]
+  sparse_b: [ true, false]
+  orderA: [R]
+  orderB: [R]
+  orderC: [R]
+  orderD: [R]
+
+- name: prune_16_64
+  category: quick
+  function:
+    prune: *real_precisions_1b_input
+  M: 16
+  N: 16
+  K: 64
+  alpha_beta: *alpha_beta_range
+  transA_transB: *transA_transB_range
+  prune_algo: [ 0, 1 ]
+  sparse_b: [ true, false]
+  orderA: [R]
+  orderB: [R]
+  orderC: [R]
+  orderD: [R]
+
+- name: prune_96
+  category: pre_checkin
+  function:
+    prune: *real_precisions_1b_input
+  M: 96
+  N: 96
+  K: 96
+  alpha_beta: *alpha_beta_range
+  transA_transB: *transA_transB_range
+  prune_algo: [ 0, 1 ]
+  sparse_b: [ true, false]
+  orderA: [R]
+  orderB: [R]
+  orderC: [R]
+  orderD: [R]
+
+- name: prune_128
+  category: pre_checkin
+  function:
+    prune: *real_precisions_1b_input
+  M: 128
+  N: 128
+  K: 128
+  alpha_beta: *alpha_beta_range
+  transA_transB: *transA_transB_range
+  prune_algo: [ 0, 1 ]
+  sparse_b: [ true, false]
+  orderA: [R]
+  orderB: [R]
+  orderC: [R]
+  orderD: [R]
+
+- name: prune_256
+  category: pre_checkin
+  function:
+    prune: *real_precisions_1b_input
+  M: 256
+  N: 256
+  K: 256
+  alpha_beta: *alpha_beta_range
+  transA_transB: *transA_transB_range
+  prune_algo: [ 0, 1 ]
+  sparse_b: [ true, false]
+  orderA: [R]
+  orderB: [R]
+  orderC: [R]
+  orderD: [R]
+
+- name: prune_256_16_16
+  category: pre_checkin
+  function:
+    prune: *real_precisions_1b_input
+  M: 256
+  N: 16
+  K: 16
+  alpha_beta: *alpha_beta_range
+  transA_transB: *transA_transB_range
+  prune_algo: [ 0, 1 ]
+  sparse_b: [ true, false]
+  orderA: [R]
+  orderB: [R]
+  orderC: [R]
+  orderD: [R]
+
+- name: prune_16_256_16
+  category: pre_checkin
+  function:
+    prune: *real_precisions_1b_input
+  M: 16
+  N: 256
+  K: 16
+  alpha_beta: *alpha_beta_range
+  transA_transB: *transA_transB_range
+  prune_algo: [ 0, 1 ]
+  sparse_b: [ true, false]
+  orderA: [R]
+  orderB: [R]
+  orderC: [R]
+  orderD: [R]
+
+- name: prune_16_16_256
+  category: pre_checkin
+  function:
+    prune: *real_precisions_1b_input
+
+  M: 16
+  N: 16
+  K: 256
+  alpha_beta: *alpha_beta_range
+  transA_transB: *transA_transB_range
+  prune_algo: [ 0, 1 ]
+  sparse_b: [ true, false]
+  orderA: [R]
+  orderB: [R]
+  orderC: [R]
+  orderD: [R]
+
+- name: prune_512
+  category: pre_checkin
+  function:
+    prune: *real_precisions_1b_input
+  M: 512
+  N: 512
+  K: 512
+  alpha_beta: *alpha_beta_range
+  transA_transB: *transA_transB_range
+  prune_algo: [ 0, 1 ]
+  sparse_b: [ true, false]
+  orderA: [R]
+  orderB: [R]
+  orderC: [R]
+  orderD: [R]
+
+- name: prune_1024
+  category: nightly
+  function:
+    prune: *real_precisions_1b_input
+  M: 1024
+  N: 1024
+  K: 1024
+  alpha_beta: *alpha_beta_range
+  transA_transB: *transA_transB_range
+  prune_algo: [ 0, 1 ]
+  sparse_b: [ true, false]
+  orderA: [R]
+  orderB: [R]
+  orderC: [R]
+  orderD: [R]
+
+...
