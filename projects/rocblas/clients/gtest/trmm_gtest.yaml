@@ -1,0 +1,851 @@
+---
+include: rocblas_common.yaml
+include: known_bugs.yaml
+
+Definitions:
+  - &uint32_t_m_n_lda_ldb_inplace
+    - { M: 4097,  N: 4097, lda: 1048600, ldb:    4097, ldc:    4097  }
+    - { M: 4097,  N: 4097, lda:    4097, ldb: 1048600, ldc: 1048600  }
+
+  - &uint32_t_m_n_lda_ldb_ldc_outofplace
+    - { M: 4097,  N: 4097, lda: 1048600, ldb:    4097, ldc:    4097  }
+    - { M: 4097,  N: 4097, lda:    4097, ldb: 1048600, ldc:    4097  }
+    - { M: 4097,  N: 4097, lda:    4097, ldb:    4097, ldc: 1048600  }
+
+  - &int32_t_m_n_lda_ldb_inplace
+    - { M: 2049,  N: 2049, lda: 1048600, ldb:    2049, ldc:    2049  }
+    - { M: 2049,  N: 2049, lda:    2049, ldb: 1048600, ldc: 1048600  }
+
+  - &int32_t_m_n_lda_ldb_ldc_outofplace
+    - { M: 2049,  N: 2049, lda: 1048600, ldb:    2049, ldc:    2049  }
+    - { M: 2049,  N: 2049, lda:    2049, ldb: 1048600, ldc:    2049  }
+    - { M: 2049,  N: 2049, lda:    2049, ldb:    2049, ldc: 1048600  }
+
+  - &small_matrix_size_inplace
+    - { M:    20, N:    30, lda:    40, ldb:   100 , ldc:  100}
+
+  - &small_matrix_size_outofplace
+    - { M:    20, N:    30, lda:    40, ldb:   100, ldc: 60 }
+
+  - &small_matrix_size_range_inplace
+    - { M:    -1, N:    -1, lda:     1, ldb:     1, ldc: 1   }
+    - { M:    10, N:    10, lda:    20, ldb:   100, ldc: 100 }
+    - { M:     5, N:     5, lda:     5, ldb:     5, ldc:   5 }
+    - { M:    10, N:    10, lda:    20, ldb:   100, ldc: 100  }
+
+  - &small_matrix_size_range_outofplace
+    - { M:    -1, N:    -1, lda:     1, ldb:     1, ldc: 1   }
+    - { M:    10, N:    10, lda:    20, ldb:   100, ldc: 200 }
+    - { M:     5, N:     5, lda:     5, ldb:     5, ldc:   5 }
+    - { M:    10, N:    10, lda:    20, ldb:   100, ldc: 50  }
+
+  - &medium_matrix_size_range_inplace
+    - { M:   192, N:   192, lda:   192, ldb:   192, ldc:  192 }
+    - { M:   600, N:   500, lda:   600, ldb:   601, ldc:  601 }
+    - { M:   800, N:   900, lda:   801, ldb:   901, ldc:  901 }
+    - { M:   700, N:     2, lda:  1000, ldb:   700, ldc:  700 }
+    - { M:    10, M:   700, lda:   700, ldb:  1000, ldc: 1000 }
+
+  - &medium_matrix_size_range_outofplace
+    - { M:   192, N:   192, lda:   192, ldb:   192, ldc: 192 }
+    - { M:   600, N:   500, lda:   600, ldb:   601, ldc: 700 }
+    - { M:   800, N:   900, lda:   801, ldb:   901, ldc: 902 }
+    - { M:   700, N:     2, lda:  1000, ldb:   700, ldc: 800 }
+    - { M:    10, M:   700, lda:   700, ldb:  1000, ldc: 800 }
+
+  - &large_matrix_size_range_inplace
+    - { M:   641, N:   640, lda:   961, ldb:   960, ldc: 960  }
+    - { M:  1000, N:  1001, lda:  1002, ldb:  1003, ldc: 1003 }
+#   - { M:  8000, N:  6000, lda: 10000, ldb:  9000, ldc: 9000 }
+#   - { M:  1024, N:  1024, lda:  1024, ldb:  1024, ldc: 1024 }
+#   - { M:  2000, N:  2000, lda:  2000, ldb:  2000, ldc: 2000 }
+
+  - &large_matrix_size_range_outofplace
+    - { M:   641, N:   640, lda:   961, ldb:   960, ldc: 960  }
+    - { M:  1000, N:  1001, lda:  1002, ldb:  1003, ldc: 1004 }
+#   - { M:  8000, N:  6000, lda: 10000, ldb:  9000, ldc: 8000 }
+#   - { M:  1024, N:  1024, lda:  1024, ldb:  1024, ldc: 1024 }
+#   - { M:  2000, N:  2000, lda:  2000, ldb:  2000, ldc: 2000 }
+
+  - &alpha_range [ 1.0, -3.0 ]
+
+  - &complex_alpha
+    - { alpha:  2, alphai:  3 }
+
+  - &complex_alpha_range
+    - { alpha:  2, alphai:  0 }
+    - { alpha:  0, alphai:  2 }
+    - { alpha:  1, alphai:  2 }
+
+  - &testset1_small_matrix_size_range
+    - { M:      256,  N:        256,    lda:    256,    ldb:    256,  ldc: 256  }
+    - { M:      512,  N:        256,    lda:    256,    ldb:    512,  ldc: 512  }
+    - { M:      768,  N:        256,    lda:    256,    ldb:    768,  ldc: 768  }
+    - { M:      1024,   N:      256,    lda:    256,    ldb:    1024, ldc: 1024 }
+    - { M:      1280,   N:      256,    lda:    256,    ldb:    1280, ldc: 1280 }
+    - { M:      1536,   N:      256,    lda:    256,    ldb:    1536, ldc: 1536 }
+    - { M:      1792,   N:      256,    lda:    256,    ldb:    1792, ldc: 1792 }
+    - { M:      2048,   N:      256,    lda:    256,    ldb:    2048, ldc: 2048 }
+    - { M:      384,    N:      384,    lda:    384,    ldb:    384,  ldc: 384  }
+    - { M:      768,    N:      384,    lda:    384,    ldb:    768,  ldc: 768  }
+    - { M:      1152,   N:      384,    lda:    384,    ldb:    1152, ldc: 1152 }
+    - { M:      1536,   N:      384,    lda:    384,    ldb:    1536, ldc: 1536 }
+    - { M:      1920,   N:      384,    lda:    384,    ldb:    1920, ldc: 1920 }
+    - { M:      2304,   N:      384,    lda:    384,    ldb:    2304, ldc: 2304 }
+    - { M:      2688,   N:      384,    lda:    384,    ldb:    2688, ldc: 2688 }
+    - { M:      3072,   N:      384,    lda:    384,    ldb:    3072, ldc: 3072 }
+
+
+  - &testset2_small_matrix_size_range
+    - { M:      256,    N:      256,    lda:    256,    ldb:    256, ldc: 256 }
+    - { M:      256,    N:      512,    lda:    512,    ldb:    256, ldc: 256 }
+    - { M:      256,    N:      768,    lda:    768,    ldb:    256, ldc: 256 }
+    - { M:      256,    N:      1024,   lda:    1024,   ldb:    256, ldc: 256 }
+    - { M:      256,    N:      1280,   lda:    1280,   ldb:    256, ldc: 256 }
+    - { M:      256,    N:      1536,   lda:    1536,   ldb:    256, ldc: 256 }
+    - { M:      256,    N:      1792,   lda:    1792,   ldb:    256, ldc: 256 }
+    - { M:      256,    N:      2048,   lda:    2048,   ldb:    256, ldc: 256 }
+    - { M:      384,    N:      384,    lda:    384,    ldb:    384, ldc: 384 }
+    - { M:      384,    N:      768,    lda:    768,    ldb:    384, ldc: 384 }
+    - { M:      384,    N:      1152,   lda:    1152,   ldb:    384, ldc: 384 }
+    - { M:      384,    N:      1536,   lda:    1536,   ldb:    384, ldc: 384 }
+    - { M:      384,    N:      1920,   lda:    1920,   ldb:    384, ldc: 384 }
+    - { M:      384,    N:      2304,   lda:    2304,   ldb:    384, ldc: 384 }
+    - { M:      384,    N:      2688,   lda:    2688,   ldb:    384, ldc: 384 }
+    - { M:      384,    N:      3072,   lda:    3072,   ldb:    384, ldc: 384 }
+
+
+  - &testset1_matrix_size_range
+    - { M:   128, N:    2048, lda:   128, ldb:   128, ldc: 128 }
+    - { M:   128, N:   16848, lda:   128, ldb:   128, ldc: 128 }
+    - { M:   128, N:   29696, lda:   128, ldb:   128, ldc: 128 }
+#   - { M:   128, N:   44544, lda:   128, ldb:   128, ldc: 128 }
+#   - { M:   128, N:   53632, lda:   128, ldb:   128, ldc: 128 }
+    - { M:   256, N:    2048, lda:   256, ldb:   256, ldc: 256 }
+    - { M:   256, N:   14848, lda:   256, ldb:   256, ldc: 256 }
+    - { M:   256, N:   29696, lda:   256, ldb:   256, ldc: 256 }
+#   - { M:   256, N:   44544, lda:   256, ldb:   256, ldc: 256 }
+#   - { M:   256, N:   53504, lda:   256, ldb:   256, ldc: 256 }
+    - { M:   384, N:    2048, lda:   384, ldb:   384, ldc: 384 }
+    - { M:   384, N:   14976, lda:   384, ldb:   384, ldc: 384 }
+    - { M:   384, N:   29952, lda:   384, ldb:   384, ldc: 384 }
+#   - { M:   384, N:   44928, lda:   384, ldb:   384, ldc: 384 }
+#   - { M:   384, N:   53376, lda:   384, ldb:   384, ldc: 384 }
+
+  - &testset2_matrix_size_range
+    - { M:   2048,  N: 128,  lda:  2048, ldb:    2048, ldc: 2048  }
+    - { M:  16848,  N: 128,  lda: 16848, ldb:   16848, ldc: 16848 }
+    - { M:  29696,  N: 128,  lda: 29696, ldb:   29696, ldc: 29696 }
+#   - { M:  44544,  N: 128,  lda: 44544, ldb:   44544, ldc: 44544 }
+#   - { M:  53632,  N: 128,  lda: 53632, ldb:   53632, ldc: 53632 }
+    - { M:   2048,  N: 256,  lda:  2048, ldb:    2048, ldc: 2048  }
+    - { M:  14848,  N: 256,  lda: 14848, ldb:   14848, ldc: 14848 }
+    - { M:  29696,  N: 256,  lda: 29696, ldb:   29696, ldc: 29696 }
+#   - { M:  44544,  N: 256,  lda: 44544, ldb:   44544, ldc: 44544 }
+#   - { M:  53504,  N: 256,  lda: 53504, ldb:   53504, ldc: 53504 }
+    - { M:   2048,  N: 384,  lda:  2048, ldb:    2048, ldc: 2048  }
+    - { M:  14976,  N: 384,  lda: 14976, ldb:   14976, ldc: 14976 }
+    - { M:  29952,  N: 384,  lda: 29952, ldb:   29952, ldc: 29952 }
+#   - { M:  44928,  N: 384,  lda: 44928, ldb:   44928, ldc: 44928 }
+#   - { M:  53376,  N: 384,  lda: 53376, ldb:   53376, ldc: 53376 }
+
+Tests:
+- name: trmm_bad_arg
+  category: quick
+  function:
+    - trmm_bad_arg
+  precision: *single_double_precisions_complex_real
+  side: [L]
+  uplo: [L]
+  transA: [N]
+  diag: [N]
+  api: [ C, FORTRAN, C_64, FORTRAN_64 ]
+  outofplace: [ false, true ] # test both inplace and outofplace
+
+- name: trmm_batched_bad_arg
+  category: quick
+  function:
+    - trmm_batched_bad_arg
+  precision: *single_double_precisions_complex_real
+  side: [L]
+  uplo: [U]
+  transA: [N]
+  diag: [N]
+  api: [ C, FORTRAN, C, FORTRAN_64 ]
+  outofplace: [false, true] # test both inplace and outofplace
+
+- name: trmm_strided_batched_bad_arg
+  category: quick
+  function:
+    - trmm_strided_batched_bad_arg
+  precision: *single_double_precisions_complex_real
+  side: [L]
+  uplo: [L]
+  transA: [N]
+  diag: [N]
+  api: [ C, FORTRAN, C, FORTRAN_64 ]
+  outofplace: [false, true] # test both inplace and outofplace
+
+- name: trmm_size_t_noalias
+  category: stress
+  function:
+    - trmm
+  precision: *single_precision
+  side: [R]
+  uplo: [L]
+  transA: [T]
+  diag: [U]
+  matrix_size:
+     - { M:  51200,  N:     4,  lda:     4, ldb:   51200, ldc: 51200 }
+     - { M:      1,  N: 51200,  lda: 51200, ldb:       1, ldc:     1 }
+  pointer_mode_device: false
+  alpha: [ 1 ]
+  outofplace: [false, true] # test both inplace and outofplace
+
+# to prevent excessively long runtime only run one combination of side,uplo,transA,diag for uint32_t overflow
+- name: trmm_size_t_inplace_uint32
+  category: stress
+  function:
+    - trmm
+    - trmm_batched
+  precision: *single_precision
+  side: [   R]
+  uplo: [   U]
+  transA: [   T   ]
+  diag: [   U]
+  matrix_size: *uint32_t_m_n_lda_ldb_inplace
+  pointer_mode_device: false
+  alpha: [ 2 ]
+  stride_scale: [ 1         ]
+  batch_count: [           1 ]
+  gpu_arch: ['90a','942']
+  os_flags: LINUX
+  outofplace: [false      ] # test inplace
+
+# to prevent excessively long runtime only run one combination of side,uplo,transA,diag for uint32_t overflow
+- name: trmm_size_t_outofplace_uint32
+  category: stress
+  function:
+    - trmm
+    - trmm_batched
+  precision: *single_precision
+  side: [L   ]
+  uplo: [L   ]
+  transA: [N      ]
+  diag: [N   ]
+  matrix_size: *uint32_t_m_n_lda_ldb_ldc_outofplace
+  pointer_mode_device: false
+  alpha: [ 2 ]
+  stride_scale: [ 1         ]
+  batch_count: [           1 ]
+  gpu_arch: ['90a','942']
+  os_flags: LINUX
+  outofplace: [       true] # test outofplace
+
+# to prevent excessively long runtime only run one value of diag and batch_count=1
+- name: trmm_size_t_inplace_int32
+  category: stress
+  function:
+    - trmm
+    - trmm_batched
+  precision: *single_precision
+  side: [L, R]
+  uplo: [L, U]
+  transA: [N, T   ]
+  diag: [N   ]
+  matrix_size: *int32_t_m_n_lda_ldb_inplace
+  pointer_mode_device: false
+  alpha: [ 2 ]
+  stride_scale: [ 1         ]
+  batch_count: [           1 ]
+  gpu_arch: ['90a','942']
+  os_flags: LINUX
+  outofplace: [false      ] # test inplace
+
+# to prevent excessively long runtime only run one value of diag and batch_count=1
+- name: trmm_size_t_outofplace_int32
+  category: stress
+  function:
+    - trmm
+    - trmm_batched
+  precision: *single_precision
+  side: [L, R]
+  uplo: [L, U]
+  transA: [N, T   ]
+  diag: [U   ]
+  matrix_size: *int32_t_m_n_lda_ldb_ldc_outofplace
+  pointer_mode_device: false
+  alpha: [ 2 ]
+  stride_scale: [ 1         ]
+  batch_count: [           1 ]
+  gpu_arch: ['90a','942']
+  os_flags: LINUX
+  outofplace: [       true] # test outofplace
+
+- name: trmm_batched_small_inplace
+  category: quick
+  function:
+    - trmm_batched
+  precision: *single_double_precisions
+  side: [L   ]
+  uplo: [   U]
+  transA: [N      ]
+  diag: [   U]
+  matrix_size: *small_matrix_size_range_inplace
+  alpha_beta: *complex_alpha_range
+  stride_scale: [ 1, 2       ]
+  batch_count: [        1, 2  ]
+  outofplace: [false      ] # test inplace
+
+- name: trmm_batched_small_outofplace
+  category: quick
+  function:
+    - trmm_batched
+  precision: *single_double_precisions
+  side: [L   ]
+  uplo: [   U]
+  transA: [N      ]
+  diag: [   U]
+  matrix_size: *small_matrix_size_range_outofplace
+  alpha_beta: *complex_alpha_range
+  stride_scale: [ 1, 2       ]
+  batch_count: [        1, 2  ]
+  outofplace: [       true] # test outofplace
+
+
+- name: trmm_fortran_inplace
+  category: quick
+  function:
+    - trmm
+  precision: *single_double_precisions
+  side: [L   ]
+  uplo: [   U]
+  transA: [   T   ]
+  diag: [N   ]
+  matrix_size: *small_matrix_size_range_inplace
+  alpha: *alpha_range
+  api: [ C, FORTRAN, C, FORTRAN_64 ]
+  outofplace: [false      ] # test inplace
+
+- name: trmm_fortran_outofplace
+  category: quick
+  function:
+    - trmm
+  precision: *single_double_precisions
+  side: [L   ]
+  uplo: [   U]
+  transA: [   T   ]
+  diag: [N   ]
+  matrix_size: *small_matrix_size_range_outofplace
+  alpha: *alpha_range
+  api: [ C, FORTRAN, C, FORTRAN_64 ]
+  outofplace: [       true] # test outofplace
+
+
+- name: trmm_batched_fortran_inplace
+  category: quick
+  function:
+    - trmm_batched
+  precision: *single_double_precisions_complex
+  side: [   R]
+  uplo: [   U]
+  transA: [   T, C]
+  diag: [   U]
+  matrix_size: *small_matrix_size_range_inplace
+  alpha_beta: *complex_alpha
+  stride_scale: [    2       ]
+  batch_count: [           3  ]
+  api: [ C, FORTRAN, C, FORTRAN_64 ]
+  outofplace: [false      ] # test inplace
+
+- name: trmm_batched_fortran_outofplace
+  category: quick
+  function:
+    - trmm_batched
+  precision: *single_double_precisions_complex
+  side: [   R]
+  uplo: [   U]
+  transA: [   T, C]
+  diag: [   U]
+  matrix_size: *small_matrix_size_range_outofplace
+  alpha_beta: *complex_alpha
+  stride_scale: [    2       ]
+  batch_count: [           3  ]
+  api: [ C, FORTRAN, C, FORTRAN_64 ]
+  outofplace: [       true] # test outofplace
+
+
+- name: trmm_strided_batched_fortran_inplace
+  category: quick
+  function:
+    - trmm_strided_batched
+  precision: *single_double_precisions_complex
+  side: [L]
+  uplo: [L]
+  transA: [N]
+  diag: [N]
+  matrix_size: *small_matrix_size_range_inplace
+  alpha_beta: *complex_alpha
+  stride_scale: [ 1         ]
+  batch_count: [         2 ]
+  api: [ C, FORTRAN, C, FORTRAN_64 ]
+  outofplace: [false      ] # test inplace
+
+- name: trmm_strided_batched_fortran_outofplace
+  category: quick
+  function:
+    - trmm_strided_batched
+  precision: *single_double_precisions_complex
+  side: [L]
+  uplo: [L]
+  transA: [N]
+  diag: [N]
+  matrix_size: *small_matrix_size_range_outofplace
+  alpha_beta: *complex_alpha
+  stride_scale: [ 1         ]
+  batch_count: [         2 ]
+  api: [ C, FORTRAN, C, FORTRAN_64 ]
+  outofplace: [       true] # test outofplace
+
+
+- name: trmm_strided_batched_small_inplace
+  category: quick
+  function:
+    - trmm_strided_batched
+  precision: *single_double_precisions_complex
+  side: [L   ]
+  uplo: [L   ]
+  transA: [   T, C]
+  diag: [N   ]
+  matrix_size: *small_matrix_size_range_inplace
+  alpha_beta: *complex_alpha
+  stride_scale: [ 1, 2      ]
+  batch_count: [        1, 2 ]
+  outofplace: [false      ] # test inplace
+
+- name: trmm_strided_batched_small_outofplace
+  category: quick
+  function:
+    - trmm_strided_batched
+  precision: *single_double_precisions_complex
+  side: [L   ]
+  uplo: [L   ]
+  transA: [   T, C]
+  diag: [N   ]
+  matrix_size: *small_matrix_size_range_outofplace
+  alpha_beta: *complex_alpha
+  stride_scale: [ 1, 2      ]
+  batch_count: [        1, 2 ]
+  outofplace: [       true] # test outofplace
+
+
+- name: trmm_batched_medium_inplace
+  category: pre_checkin
+  function:
+    - trmm_batched
+  precision: *single_double_precisions_complex
+  side: [L, R]
+  uplo: [L, U]
+  transA: [N, T, C]
+  diag: [N, U]
+  matrix_size: *medium_matrix_size_range_inplace
+  alpha_beta: *complex_alpha
+  stride_scale: [ 2         ]
+  batch_count: [           3 ]
+  outofplace: [false      ] # test inplace
+
+- name: trmm_batched_medium_outofplace
+  category: pre_checkin
+  function:
+    - trmm_batched
+  precision: *single_double_precisions_complex
+  side: [L, R]
+  uplo: [L, U]
+  transA: [N, T, C]
+  diag: [N, U]
+  matrix_size: *medium_matrix_size_range_outofplace
+  alpha_beta: *complex_alpha
+  stride_scale: [ 2         ]
+  batch_count: [           3 ]
+  outofplace: [false, true] # test both inplace and outofplace
+
+- name: trmm_strided_batched_medium_inplace
+  category: pre_checkin
+  function:
+    - trmm_strided_batched
+  precision: *single_double_precisions_complex
+  side: [L, R]
+  uplo: [L, U]
+  transA: [N, T, C]
+  diag: [N, U]
+  matrix_size: *medium_matrix_size_range_inplace
+  alpha_beta: *complex_alpha
+  stride_scale: [ 1         ]
+  batch_count: [           2 ]
+  outofplace: [false      ] # test inplace
+
+- name: trmm_strided_batched_medium_outofplace
+  category: pre_checkin
+  function:
+    - trmm_strided_batched
+  precision: *single_double_precisions_complex
+  side: [L, R]
+  uplo: [L, U]
+  transA: [N, T, C]
+  diag: [N, U]
+  matrix_size: *medium_matrix_size_range_outofplace
+  alpha_beta: *complex_alpha
+  stride_scale: [ 1         ]
+  batch_count: [           2 ]
+  outofplace: [false, true] # test both inplace and outofplace
+
+
+- name: trmm_small_inplace
+  category: quick
+  function:
+    - trmm
+  precision: *single_double_precisions_complex
+  side: [L, R]
+  uplo: [L, U]
+  transA: [N, T, C]
+  diag: [N, U]
+  matrix_size: *small_matrix_size_inplace
+  alpha_beta: *complex_alpha_range
+  outofplace: [false      ] # test inplace
+
+- name: trmm_small_outofplace
+  category: quick
+  function:
+    - trmm
+  precision: *single_double_precisions_complex
+  side: [L, R]
+  uplo: [L, U]
+  transA: [N, T, C]
+  diag: [N, U]
+  matrix_size: *small_matrix_size_outofplace
+  alpha_beta: *complex_alpha_range
+  outofplace: [       true] # test outofplace
+
+- name: trmm_small_inplace
+  category: quick
+  function:
+    - trmm
+  precision: *single_double_precisions
+  side: [L, R]
+  uplo: [L, U]
+  transA: [N, T, C]
+  diag: [N, U]
+  matrix_size: *small_matrix_size_range_inplace
+  alpha: *alpha_range
+  outofplace: [false      ] # test inplace
+
+- name: trmm_small_outofplace
+  category: quick
+  function:
+    - trmm
+  precision: *single_double_precisions
+  side: [L, R]
+  uplo: [L, U]
+  transA: [N, T, C]
+  diag: [N, U]
+  matrix_size: *small_matrix_size_range_outofplace
+  alpha: *alpha_range
+  outofplace: [       true] # test outofplace
+
+
+- name: trmm_medium_inplace
+  category: pre_checkin
+  function:
+    - trmm
+  precision: *single_double_precisions
+  side: [L, R]
+  uplo: [L, U]
+  transA: [N, C]
+  diag: [N, U]
+  matrix_size: *medium_matrix_size_range_inplace
+  alpha: *alpha_range
+  outofplace: [false      ] # test inplace
+
+- name: trmm_medium_outofplace
+  category: pre_checkin
+  function:
+    - trmm
+  precision: *single_double_precisions
+  side: [L, R]
+  uplo: [L, U]
+  transA: [N, C]
+  diag: [N, U]
+  matrix_size: *medium_matrix_size_range_outofplace
+  alpha: *alpha_range
+  outofplace: [       true] # test outofplace
+
+
+- name: trmm_medium_inplace
+  category: pre_checkin
+  function:
+    - trmm
+  precision: *single_double_precisions_complex
+  side: [L, R]
+  uplo: [L, U]
+  transA: [N, T, C]
+  diag: [N, U]
+  matrix_size: *medium_matrix_size_range_inplace
+  alpha_beta: *complex_alpha
+  outofplace: [false      ] # test inplace
+
+- name: trmm_medium_outofplace
+  category: pre_checkin
+  function:
+    - trmm
+  precision: *single_double_precisions_complex
+  side: [L, R]
+  uplo: [L, U]
+  transA: [N, T, C]
+  diag: [N, U]
+  matrix_size: *medium_matrix_size_range_outofplace
+  alpha_beta: *complex_alpha
+  outofplace: [       true] # test outofplace
+
+
+- name: trmm_NaN
+  category: pre_checkin
+  function:
+    - trmm
+  precision: *single_double_precisions
+  side: [L, R]
+  uplo: [L, U]
+  transA: [N, C]
+  diag: [N, U]
+  matrix_size: *small_matrix_size_inplace
+  alpha: [ 1.0, 2.0, .NaN ] # NaN is converted to 0.0 in test code
+  outofplace: [false, true] # test both inplace and outofplace
+
+- name: trmm_strided_batched_NaN
+  category: pre_checkin
+  function:
+    - trmm_strided_batched
+  precision: *single_double_precisions
+  side: [L,  ]
+  uplo: [L,  ]
+  transA: [N,  ]
+  diag: [N,  ]
+  matrix_size: *small_matrix_size_inplace
+  stride_scale: [ 1, 2      ]
+  alpha: [ .NaN ] # NaN is converted to 0.0 in test code
+  batch_count: [ 2  ]
+  outofplace: [false, true] # test both inplace and outofplace
+
+- name: trmm_testset1
+  category: nightly
+  function:
+    - trmm
+  precision: *single_double_precisions
+  side: [L]
+  uplo: [L]
+  transA: [N]
+  diag: [U]
+  matrix_size: *testset1_matrix_size_range
+  alpha: [ 1 ]
+  outofplace: [false, true] # test both inplace and outofplace
+
+- name: trmm_testset2
+  category: nightly
+  function:
+    - trmm
+  precision: *single_double_precisions
+  side: [R]
+  uplo: [L]
+  transA: [T]
+  diag: [U]
+  matrix_size: *testset2_matrix_size_range
+  pointer_mode_host: false
+  alpha: [ 1 ]
+  outofplace: [false, true] # test both inplace and outofplace
+
+
+- name: trmm_large_inplace
+  category: nightly
+  function:
+    - trmm
+  precision: *single_double_precisions
+  arguments:
+    - { side: L, uplo: L, transA: N, diag: N }
+    - { side: R, uplo: L, transA: N, diag: N }
+    - { side: L, uplo: U, transA: C, diag: N }
+  matrix_size: *large_matrix_size_range_inplace
+  pointer_mode_host: false
+  alpha: *alpha_range
+  outofplace: [false      ] # test inplace
+
+- name: trmm_large_outofplace
+  category: nightly
+  function:
+    - trmm
+  precision: *single_double_precisions
+  arguments:
+    - { side: L, uplo: L, transA: N, diag: N }
+    - { side: R, uplo: L, transA: N, diag: N }
+    - { side: L, uplo: U, transA: C, diag: N }
+  matrix_size: *large_matrix_size_range_outofplace
+  pointer_mode_host: false
+  alpha: *alpha_range
+  outofplace: [       true] # test outofplace
+
+- name: trmm_grid_y_outofplace
+  category: nightly
+  function: trmm
+  precision: *single_precision
+  arguments:
+    - { side: L, uplo: L, transA: N, diag: N }
+  matrix_size:
+#   - { M: 3, N: 1000000, lda: 3, ldb: 3, ldc: 3} # < scal limit, < trmm limit
+    - { M: 3, N: 2200000, lda: 3, ldb: 3, ldc: 3} # > scal limit, > trmm limit
+  pointer_mode_host: true
+  alpha: [ 0, 1 ]
+  outofplace: [       true] # test outofplace
+
+- name: trmm_large_inplace
+  category: nightly
+  function:
+    - trmm
+  precision: *single_double_precisions_complex
+  arguments:
+    - { side: L, uplo: L, transA: N, diag: N }
+    - { side: R, uplo: L, transA: T, diag: N }
+    - { side: L, uplo: U, transA: C, diag: N }
+  matrix_size: *large_matrix_size_range_inplace
+  pointer_mode_device: false
+  alpha_beta: *complex_alpha
+  outofplace: [false      ] # test inplace
+
+- name: trmm_large_outofplace
+  category: nightly
+  function:
+    - trmm
+  precision: *single_double_precisions_complex
+  arguments:
+    - { side: L, uplo: L, transA: N, diag: N }
+    - { side: R, uplo: L, transA: T, diag: N }
+    - { side: L, uplo: U, transA: C, diag: N }
+  matrix_size: *large_matrix_size_range_outofplace
+  pointer_mode_device: false
+  alpha_beta: *complex_alpha
+  outofplace: [       true] # test outofplace
+
+- name: trmm_left_64
+  category: stress
+  arguments:
+    - { M: 2, N: 8000, lda: 2147483649, ldb: 10, ldc: 10, batch_count: 1 }
+    - { M: 2, N: 2147483649, lda: 2, ldb: 2, ldc: 2, batch_count: 1 }
+    - { M: 2, N: 10000, lda: 2147483649, ldb: 10, ldc: 10, batch_count: 1 }
+    - { M: 8000, N: 2, lda: 8001, ldb: 2147483649, ldc: 2147483649, batch_count: 1 }
+  side: [ L ]
+  uplo: [ L, U ]
+  transA: [ N, T ]
+  diag: [ N ]
+  api: [ C_64 ]
+  os_flags: [ LINUX ]
+  stride_scale: [ 1 ]
+  function: trmm
+  precision: *single_precision
+  pointer_mode_host: false
+  outofplace: [ true, false ]
+
+- name: trmm_right_64
+  category: stress
+  arguments:
+    - { M: 2147483649, N: 2, lda: 10, ldb: 2147483650, ldc: 2147483650, batch_count: 1 }
+    - { M: 512, N: 2, lda: 2147483649, ldb: 10, ldc: 10, batch_count: 1 }
+    - { M: 2147483646, N: 2, lda: 2, ldb: 2147483646, ldc: 2147483646, batch_count: 1 } # non-64-bit-size
+  side: [ R ]
+  uplo: [ L, U ]
+  transA: [ N, T ]
+  diag: [ U ]
+  api: [ C_64 ]
+  os_flags: [ LINUX ]
+  stride_scale: [ 1 ]
+  function: trmm
+  precision: *single_precision
+  pointer_mode_host: false
+  outofplace: [ true, false ]
+
+- name: trmm_large_batch
+  category: stress
+  arguments:
+    - { M: 3, N: 3, lda: 3, ldb: 3, ldc: 3, batch_count: *c_grid_yz_require_passes }
+  side: [ L, R ]
+  uplo: [ U, L ]
+  transA: [ N, T ]
+  diag: [ U ]
+  stride_scale: [ 1 ]
+  function:
+    - trmm_batched: *single_precision
+    - trmm_strided_batched: *single_precision
+  outofplace: [ true, false ]
+
+- name: trmm_batched_64
+  category: stress
+  arguments:
+    - { M: 4, N: 4, lda: 4, ldb: 4, batch_count: *c_grid_yz_require_passes }
+  side: [ L ]
+  uplo: [ L ]
+  transA: [ N ]
+  diag: [ U ]
+  api: [ C_64 ]
+  os_flags: [ LINUX ]
+  stride_scale: [ 1 ]
+  function:
+    - trmm_batched: *single_precision
+    - trmm_strided_batched: *single_precision
+  pointer_mode_host: false
+
+- name: trmm_graph_test
+  category: pre_checkin
+  function:
+    - trmm
+    - trmm_batched
+    - trmm_strided_batched
+  precision: *single_double_precisions
+  arguments:
+    - { side: L, uplo: L, transA: N, diag: N }
+    - { side: R, uplo: L, transA: T, diag: N }
+    - { side: L, uplo: U, transA: C, diag: N }
+  uplo: [ U ]
+  transA: [ N ]
+  diag: [ U ]
+  matrix_size:
+    - { M:    10, N:    10, lda:    20, ldb:   100, ldc: 50  }
+  alpha_beta: *complex_alpha_range
+  stride_scale: [ 1  ]
+  batch_count: [ 2  ]
+  graph_test: true
+  outofplace: [false, true] # test both inplace and outofplace
+
+- name: trmm_repeatability_check
+  category: stress
+  function:
+    - trmm
+    - trmm_batched
+    - trmm_strided_batched
+  precision: *single_double_precisions
+  arguments:
+    - { side: L, uplo: L, transA: N, diag: N }
+    - { side: R, uplo: L, transA: T, diag: N }
+    - { side: L, uplo: U, transA: C, diag: N }
+  uplo: [ U ]
+  transA: [ N ]
+  diag: [ U ]
+  matrix_size:
+    - { M:   600, N:   500, lda:   600, ldb:   601, ldc: 700 }
+    - { M:   800, N:   900, lda:   801, ldb:   901, ldc:  901 }
+  alpha_beta: *complex_alpha_range
+  stride_scale: [ 1  ]
+  batch_count: [ 2  ]
+  outofplace: [ false, true ] # test both inplace and outofplace
+  initialization: hpl
+  atomics_mode: 0
+  iters: 5
+  pointer_mode_host: false
+  devices: 4
+  repeatability_check: true
+...

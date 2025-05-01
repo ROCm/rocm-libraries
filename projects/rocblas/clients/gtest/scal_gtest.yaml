@@ -1,0 +1,332 @@
+---
+include: rocblas_common.yaml
+include: known_bugs.yaml
+
+Definitions:
+  - &size_t_x_range
+#   - { N: 1073741900, incx: 4 } # high op count: N * incx overflows uint32_t and int32_t
+    - { N: 1048600, incx: 4096 } #  low op count: N * incx overflows uint32_t and int32_t
+
+  - &N_range
+    - [ -1, 0, 5, 10, 500, 1000, 1024, 1025, 7111, 10000, 33792 ]
+
+  - &incx_range_small
+    - [1, 2]
+
+  - &incx_range
+    - [-1, 0, 1, 2]
+
+  - &alpha_beta_range
+    - { alpha:  1.0, beta:  0.0, alphai: 0.5, betai: 1.0 }
+    - { alpha:  2.0, beta: -1.0, alphai: 1.0, betai: 1.0 }
+    - { alpha:  0.0, beta:  0.0, alphai: 0.0, betai: 0.0 }
+
+  - &alpha_beta_range_small
+    - { alpha:  0.5, beta:  0.5, alphai: 0.5, betai: 1.0 }
+
+Tests:
+
+# for bad_arg no arguments should be used by test code
+  - name: blas1_bad_arg
+    category: quick
+    api: [ C, FORTRAN, FORTRAN_64 ]
+    function:
+      - scal_bad_arg:  *single_double_precisions_complex_real
+      - scal_bad_arg:  *scal_single_double_complex_real_alpha_complex_out
+      - scal_ex_bad_arg: *scal_ex_bfloat_half_single_double_complex_real_precisions
+      - scal_ex_bad_arg: *scal_ex_single_double_complex_real_alpha_complex_out
+      - scal_batched_bad_arg:  *single_double_precisions_complex_real
+      - scal_batched_bad_arg:  *scal_single_double_complex_real_alpha_complex_out
+      - scal_batched_ex_bad_arg: *scal_ex_bfloat_half_single_double_complex_real_precisions
+      - scal_batched_ex_bad_arg: *scal_ex_single_double_complex_real_alpha_complex_out
+      - scal_strided_batched_bad_arg:  *single_double_precisions_complex_real
+      - scal_strided_batched_bad_arg:  *scal_single_double_complex_real_alpha_complex_out
+      - scal_strided_batched_ex_bad_arg: *scal_ex_bfloat_half_single_double_complex_real_precisions
+      - scal_strided_batched_ex_bad_arg: *scal_ex_single_double_complex_real_alpha_complex_out
+
+# 64
+
+  # quick tests will fallback to original kernels at launcher level
+  - name: scal_64
+    category: nightly
+    N: [ 64 ]
+    incx: *incx_range_small
+    alpha_beta: *alpha_beta_range
+
+    api: [ C_64, FORTRAN_64 ]
+    function:
+      - scal:  *single_precision
+      - scal_batched:  *single_precision
+      - scal_strided_batched:  *single_precision
+
+  # quick tests will fallback to original kernels at launcher level
+  - name: scal_ex_64
+    category: nightly
+    N: [ 64 ]
+    incx: *incx_range_small
+    alpha_beta: *alpha_beta_range
+
+    api: [ FORTRAN_64 ]
+    function:
+      - scal_ex:  *scal_ex_bfloat_half_single_double_complex_real_precisions
+      - scal_ex:  *scal_ex_bfloat_half_single_double_complex_real_precisions
+      - scal_batched_ex:  *half_precision
+      - scal_batched_ex:  *half_precision
+      - scal_strided_batched_ex:  *half_precision
+      - scal_strided_batched_ex:  *half_precision
+
+  - name: scal_64
+    category: stress
+    arguments:
+      - { N: 2147483649, incx: 1, batch_count: 1 }
+      - { N: 2, incx: 2147483649, batch_count: 1 }
+      - { N: 2, incx: 1, stride_x: 2, batch_count: *c_grid_yz_require_passes }
+    alpha_beta: *alpha_beta_range_small
+    api: [ C_64 ]
+    os_flags: [ LINUX ]
+    function:
+      - scal:  *single_precision
+      - scal_batched:  *single_precision
+      - scal_strided_batched:  *single_precision
+      - scal_ex:  *half_precision
+      - scal_batched_ex:  *half_precision
+      - scal_strided_batched_ex:  *half_precision
+
+# fortran
+  - name: scal_blas1_with_alpha
+    category: quick
+    N: [ -1, 0, 2, 66 ]
+    incx: *incx_range_small
+    alpha_beta: *alpha_beta_range
+    api: FORTRAN
+    function:
+      - scal:  *single_double_precisions_complex_real
+      - scal:  *scal_single_double_complex_real_alpha_complex_out
+      - scal_ex: *scal_ex_bfloat_half_single_double_complex_real_precisions
+      - scal_ex: *scal_ex_single_double_complex_real_alpha_complex_out
+
+  - name: blas1_batched_with_alpha
+    category: quick
+    N: [ -1, 0, 65 ]
+    incx: *incx_range_small
+    alpha_beta: *alpha_beta_range
+    batch_count: [-1, 0, 5]
+    api: FORTRAN
+    function:
+      - scal_batched:  *single_double_precisions_complex_real
+      - scal_batched:  *scal_single_double_complex_real_alpha_complex_out
+      - scal_batched_ex: *scal_ex_bfloat_half_single_double_complex_real_precisions
+      - scal_batched_ex: *scal_ex_single_double_complex_real_alpha_complex_out
+
+  - name: blas1_strided_batched_with_alpha
+    category: quick
+    N: [ -1, 0, 69 ]
+    incx: *incx_range_small
+    alpha_beta: *alpha_beta_range
+    batch_count: [-1, 0, 4]
+    stride_scale: [2]
+    api: FORTRAN
+    function:
+      - scal_strided_batched:  *single_double_precisions_complex_real
+      - scal_strided_batched:  *scal_single_double_complex_real_alpha_complex_out
+      - scal_strided_batched_ex: *scal_ex_bfloat_half_single_double_complex_real_precisions
+      - scal_strided_batched_ex: *scal_ex_single_double_complex_real_alpha_complex_out
+
+# quick
+  - name: blas1_with_alpha
+    category: quick
+    N: *N_range
+    incx: *incx_range
+    alpha_beta: *alpha_beta_range
+    function:
+      - scal:  *single_double_precisions_complex_real
+      - scal:  *scal_single_double_complex_real_alpha_complex_out
+      - scal_ex: *scal_ex_bfloat_half_single_double_complex_real_precisions
+      - scal_ex: *scal_ex_single_double_complex_real_alpha_complex_out
+
+  - name: blas1_batched
+    category: quick
+    N: [ 5, 33792 ]
+    incx: *incx_range
+    alpha_beta: *alpha_beta_range
+    batch_count: [-1, 0, 5]
+    function:
+      - scal_batched: *single_double_precisions_complex_real
+      - scal_batched: *scal_single_double_complex_real_alpha_complex_out
+      - scal_batched_ex: *scal_ex_bfloat_half_single_double_complex_real_precisions
+      - scal_batched_ex: *scal_ex_single_double_complex_real_alpha_complex_out
+
+  - name: blas1_strided_batched
+    category: quick
+    N: [ 5, 33792 ]
+    incx: *incx_range
+    alpha_beta: *alpha_beta_range
+    batch_count: [-1, 0, 5]
+    stride_scale: [ 1.5 ]
+    function:
+      - scal_strided_batched: *single_double_precisions_complex_real
+      - scal_strided_batched: *scal_single_double_complex_real_alpha_complex_out
+      - scal_strided_batched_ex: *scal_ex_bfloat_half_single_double_complex_real_precisions
+      - scal_strided_batched_ex: *scal_ex_single_double_complex_real_alpha_complex_out
+
+# pre_checkin
+
+  - name: blas1_scal_internal_api
+    category: pre_checkin
+    function:
+      - scal: *single_precision
+    N: [ 1000 ]
+    incx: 1
+    alpha: 1.0
+    stride_scale: [ 1 ]
+    lda: *c_pos_overflow_int32 # lda, ... used for internal api offset args
+    pointer_mode_device: false
+    api: INTERNAL
+
+  - name: blas1
+    category: pre_checkin
+    N: [ 50000, 1049600 ]
+    incx: *incx_range_small
+    alpha_beta: *alpha_beta_range
+    pointer_mode_device: false
+    function:
+      - scal_ex: *scal_ex_bfloat_half_single_double_complex_real_precisions
+      - scal_ex: *scal_ex_single_double_complex_real_alpha_complex_out
+
+  - name: blas1_batched
+    category: pre_checkin
+    N: [ 1048576 ]
+    incx: *incx_range_small
+    alpha_beta: *alpha_beta_range
+    batch_count: [2]
+    pointer_mode_device: true
+    function:
+      - scal_batched_ex: *scal_ex_bfloat_half_single_double_complex_real_precisions
+      - scal_batched_ex: *scal_ex_single_double_complex_real_alpha_complex_out
+
+  - name: blas1_strided_batched
+    category: pre_checkin
+    N: [ 1048576 ]
+    incx: *incx_range_small
+    alpha_beta: *alpha_beta_range
+    batch_count: [2]
+    stride_scale: [ 1.5 ]
+    pointer_mode_device: false
+    function:
+      - scal_strided_batched_ex: *scal_ex_bfloat_half_single_double_complex_real_precisions
+      - scal_strided_batched_ex: *scal_ex_single_double_complex_real_alpha_complex_out
+
+# nightly
+  - name: blas1_batched
+    category: nightly
+    N: [ 1000000 ]
+    incx: *incx_range_small
+    alpha_beta: *alpha_beta_range
+    batch_count: [ 2 ]
+    pointer_mode_device: true
+    function:
+      - scal_ex: *scal_ex_bfloat_half_single_double_complex_real_precisions
+      - scal_ex: *scal_ex_single_double_complex_real_alpha_complex_out
+
+  - name: blas1_batched
+    category: nightly
+    N: [ 10 ]
+    incx: *incx_range_small
+    alpha_beta: *alpha_beta_range
+    batch_count: [ 4000 ]
+    function:
+      - scal_batched_ex: *scal_ex_bfloat_half_single_double_complex_real_precisions
+      - scal_batched_ex: *scal_ex_single_double_complex_real_alpha_complex_out
+
+  - name: blas1_strided_batched
+    category: nightly
+    N: [ 1000000 ]
+    incx: *incx_range_small
+    alpha_beta: *alpha_beta_range
+    batch_count: [ 2 ]
+    stride_scale: [ 1.2 ]
+    pointer_mode_device: false
+    function:
+      - scal_strided_batched_ex: *scal_ex_bfloat_half_single_double_complex_real_precisions
+      - scal_strided_batched_ex: *scal_ex_single_double_complex_real_alpha_complex_out
+
+  - name: blas1_strided_batched
+    category: nightly
+    N: [ 10 ]
+    incx: *incx_range_small
+    alpha_beta: *alpha_beta_range
+    batch_count: [ 4000 ]
+    stride_scale: [ 2 ]
+    function:
+      - scal_strided_batched_ex: *scal_ex_bfloat_half_single_double_complex_real_precisions
+      - scal_strided_batched_ex: *scal_ex_single_double_complex_real_alpha_complex_out
+
+  - name: blas1_size_t
+    category: stress
+    matrix_size: *size_t_x_range
+    pointer_mode_device: false
+    alpha: [ 2 ]
+    function:
+      - scal_ex:  *hpa_half_precision
+    gpu_arch: ['90a','942']
+    os_flags: LINUX
+
+  - name: blas1_large_batch
+    category: stress
+    N: [ 5 ]
+    incx: 1
+    incy: 1
+    batch_count: [ *c_grid_yz_require_passes ]
+    stride_scale: [ 1 ]
+    function:
+      - scal_batched:  *single_double_precisions_complex_real
+      - scal_strided_batched:  *single_double_precisions_complex_real
+      - scal_batched_ex: *scal_ex_bfloat_half_single_double_complex_real_precisions
+      - scal_strided_batched_ex: *scal_ex_bfloat_half_single_double_complex_real_precisions
+
+  - name: blas1_nan_check
+    category: pre_checkin
+    arguments: *blas1_nan_common_args
+    function:
+      - scal:  *single_double_precisions_complex_real
+      - scal:  *scal_single_double_complex_real_alpha_complex_out
+      - scal_ex: *scal_ex_bfloat_half_single_double_complex_real_precisions
+      - scal_ex: *scal_ex_single_double_complex_real_alpha_complex_out
+      - scal_batched:  *single_double_precisions_complex_real
+      - scal_batched:  *scal_single_double_complex_real_alpha_complex_out
+      - scal_batched_ex: *scal_ex_bfloat_half_single_double_complex_real_precisions
+      - scal_batched_ex: *scal_ex_single_double_complex_real_alpha_complex_out
+      - scal_strided_batched:  *single_double_precisions_complex_real
+      - scal_strided_batched:  *scal_single_double_complex_real_alpha_complex_out
+      - scal_strided_batched_ex: *scal_ex_bfloat_half_single_double_complex_real_precisions
+      - scal_strided_batched_ex: *scal_ex_single_double_complex_real_alpha_complex_out
+
+  - name: blas1_graph_check
+    category: pre_checkin
+    arguments: *blas1_graph_test_common_args
+    function:
+      - scal:  *single_double_precisions_complex_real
+      - scal:  *scal_single_double_complex_real_alpha_complex_out
+      - scal_batched:  *single_double_precisions_complex_real
+      - scal_batched:  *scal_single_double_complex_real_alpha_complex_out
+      - scal_strided_batched:  *single_double_precisions_complex_real
+      - scal_strided_batched:  *scal_single_double_complex_real_alpha_complex_out
+      - scal_ex: *single_double_precisions_complex_real
+      - scal_batched_ex: *single_double_precisions_complex_real
+      - scal_strided_batched_ex: *single_double_precisions_complex_real
+
+  - name: blas1_repeatability_check
+    category: stress
+    arguments: *blas1_repeatability_common_args
+    function:
+       - scal:  *single_double_precisions_complex_real
+       - scal:  *scal_single_double_complex_real_alpha_complex_out
+       - scal_batched:  *single_double_precisions_complex_real
+       - scal_batched:  *scal_single_double_complex_real_alpha_complex_out
+       - scal_strided_batched:  *single_double_precisions_complex_real
+       - scal_strided_batched:  *scal_single_double_complex_real_alpha_complex_out
+       - scal_ex: *single_double_precisions_complex_real
+       - scal_batched_ex: *single_double_precisions_complex_real
+       - scal_strided_batched_ex: *single_double_precisions_complex_real
+
+...

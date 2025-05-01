@@ -1,0 +1,51 @@
+---
+include: ../../../../clients/include/rocblas_common.yaml
+
+Definitions:
+  - &square_range
+    - { scan: [ 1024..4096..1024 ], N: *c_scan_value, K: *c_scan_value, lda: *c_scan_value, ldb: *c_scan_value, ldc: *c_scan_value}
+
+
+  - &tall_range
+    - { N:  128, K: 128, lda:  128, ldb:  128, ldc:  128 }
+    - { N: 1024, K: 128, lda: 1024, ldb: 1024, ldc: 1024 }
+    - { N: 2048, K: 128, lda: 2048, ldb: 2048, ldc: 2048 }
+
+  - &wide_range
+    - { N: 128, K: 1024, lda: 1024, ldb: 1024, ldc: 128 }
+    - { N: 128, K: 2048, lda: 2048, ldb: 2048, ldc: 128 }
+    - { N: 128, K: 8192, lda: 8192, ldb: 8192, ldc: 128 }
+    - { N: 256, K: 8192, lda: 8192, ldb: 8192, ldc: 128 }
+
+
+Tests:
+        - name: syrkx_square
+          function: syrkx
+          precision: *single_double_precisions_complex_real
+          matrix_size: *square_range
+          uplo: [ L, U ]
+          transA: [ N, T ]
+          alpha: 1
+          beta: 1
+          iters: 10
+
+        - name: syrkx_tall
+          function: syrkx
+          precision: *single_double_precisions_complex_real
+          matrix_size: *tall_range
+          uplo: [ L, U ]
+          transA: [ N, T ]
+          alpha: 1
+          beta: 1
+          iters: 10
+
+        - name: syrkx_wide
+          function: syrkx
+          precision: *single_double_precisions_complex_real
+          matrix_size: *wide_range
+          uplo: [ L, U ]
+          transA: [ N, T ]
+          alpha: 1
+          beta: 1
+          iters: 10
+...

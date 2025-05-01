@@ -1,0 +1,478 @@
+---
+include: rocblas_common.yaml
+include: known_bugs.yaml
+
+Definitions:
+  - &size_t_x_range
+#   - { N: 1073741900, incx: 4 } # high op count: N * incx overflows uint32_t and int32_t
+    - { N: 1048600, incx: 4096 } #  low op count: N * incx overflows uint32_t and int32_t
+
+  - &size_t_xy_range
+    - { N: 1048600, incx:  4096, incy:     1 }
+    - { N: 1048600, incx:     1, incy:  4096 }
+    # TODO add back when workaround for OpenBLAS on windows negative overflow failures
+    #- { N: 1048600, incx: -4096, incy:     1 }
+    #- { N: 1048600, incx:     1, incy: -4096 }
+
+  - &N_range
+    - [ -1, 0, 5, 10, 500, 1000, 1024, 1025, 7111, 10000, 33792 ]
+
+  - &incx_range_small
+    - [1, 2]
+
+  - &incx_range
+    - [-1, 0, 1, 2]
+
+  - &incx_incy_range
+    - { incx:  1, incy:  1 }
+    - { incx:  1, incy:  2 }
+    - { incx:  2, incy:  1 }
+    - { incx:  1, incy: -1 }
+    - { incx: -1, incy:  1 }
+    - { incx: -3, incy: -3 }
+    - { incx:  0, incy:  1 }
+    - { incx:  0, incy:  0 }
+    # - { incx:  1, incy:  0 } # Indeterminate when y is output
+
+
+
+  - &size_t_pos_x_range
+    - { N: 4,          incx: *c_pos_x2_overflow_int32 } # small operation count, should overflow x
+
+  - &size_t_pos_neg_x_range
+    - { N: 4,          incx: *c_pos_x2_overflow_int32 } # small operation count, should overflow x
+    - { N: 4,          incx: *c_neg_x2_overflow_int32 }
+
+  - &size_t_pos_neg_xy_range
+    - { N: 4,          incx: *c_pos_x2_overflow_int32, incy: 1 } # small operation count, should overflow x
+    - { N: 4,          incx: *c_neg_x2_overflow_int32, incy: 1 } # small operation count, should overflow x
+    - { N: 4,          incx: 1, incy: *c_pos_x2_overflow_int32 } # small operation count, should overflow y
+    - { N: 4,          incx: 1, incy: *c_neg_x2_overflow_int32 } # small operation count, should overflow y
+
+  - &incx_incy_range_x_y_output
+    - { incx:  1, incy:  1 }
+    - { incx:  1, incy:  2 }
+    - { incx:  2, incy:  1 }
+    - { incx:  1, incy: -1 }
+    - { incx: -3, incy:  1 }
+    - { incx: -3, incy: -3 }
+    # - { incx:  0, incy:  0 } # Indeterminate for swap
+    # - { incx:  0, incy:  1 } # Indeterminate when x is output (swap)
+    # - { incx:  1, incy:  0 } # Indeterminate when y is output
+
+  - &incx_incy_range_y_output
+    - { incx:  1, incy:  1 }
+    - { incx:  1, incy:  2 }
+    - { incx:  2, incy:  1 }
+    - { incx:  1, incy: -3 }
+    - { incx: -1, incy:  1 }
+    - { incx: -3, incy: -3 }
+    - { incx:  0, incy:  1 }
+    # - { incx:  0, incy:  0 } # Indeterminate for axpy
+    # - { incx:  1, incy:  0 } # Indeterminate when y is output
+
+  - &incx_incy_range_small
+    - { incx: 1, incy: 1 }
+    - { incx: -3, incy: -3 }
+
+  - &alpha_beta_range
+    - { alpha:  1.0, beta:  0.0 }
+    - { alpha:  2.0, beta: -1.0 }
+    - { alpha:  0.0, beta:  0.0 }
+
+  - &alphai_betai_range
+    - { alphai: 0.0 }
+    - { alphai: 1.0}
+    - { alphai: 2.0 }
+
+  - &alpha_beta_range_small
+    - { alpha:  0.5, beta:  0.5 }
+
+  - &complex_alpha_range_small
+    - { alpha: 4.0, alphai:  0.0 }
+    - { alpha: 0.0, alphai:  4.0 }
+    - { alpha: 3.0, alphai: -2.0 }
+
+Tests:
+
+# All functions with no parameters to scan over
+
+# for bad_arg no arguments should be used by test code
+  - name: blas1_bad_arg
+    category: quick
+    api: [ C, FORTRAN, FORTRAN_64 ]
+    function:
+      - rotg_bad_arg:  *rotg_precisions
+      - rotm_bad_arg:  *single_double_precisions
+      - rotmg_bad_arg: *single_double_precisions
+      - rotg_batched_bad_arg:  *rotg_precisions
+      - rotm_batched_bad_arg:  *single_double_precisions
+      - rotmg_batched_bad_arg: *single_double_precisions
+      - rotg_strided_batched_bad_arg:  *rotg_precisions
+      - rotm_strided_batched_bad_arg:  *single_double_precisions
+      - rotmg_strided_batched_bad_arg: *single_double_precisions
+      - rot_bad_arg:  *rot_precisions
+      - rot_ex_bad_arg:  *rot_ex_precisions
+      - rot_batched_bad_arg:  *rot_precisions
+      - rot_batched_ex_bad_arg:  *rot_ex_precisions
+      - rot_strided_batched_bad_arg:  *rot_precisions
+      - rot_strided_batched_ex_bad_arg:  *rot_ex_precisions
+
+  - name: blas1
+    category: quick
+    api: [ C, FORTRAN ]
+    function:
+      - rotg: *rotg_precisions
+      - rotg_batched: *rotg_precisions
+      - rotg_strided_batched: *rotg_precisions
+    alpha_beta:                                                # using alpha and beta in place of a and b
+      - { alpha:  0.0, beta:  0.0 , alphai:  0.0, betai:  0.0} # using alpha and beta in place of a and b
+      - { alpha:  1.0, beta:  2.0 , alphai:  0.0, betai:  0.0}
+      - { alpha:  1.1, beta:  0.0 , alphai:  0.1, betai:  0.0}
+      - { alpha:  0.0, beta:  1.2 , alphai:  0.0, betai:  0.2}
+      - { alpha: -1.3, beta:  1.4 , alphai:  0.3, betai: -0.4}
+      - { alpha:  1.6, beta: -1.5 , alphai: -0.6, betai:  0.5}
+
+  - name: blas1
+    category: quick
+    api: [ C, FORTRAN ]
+    function:
+      - rotg:  *rotg_precisions
+      - rotmg: *single_double_precisions
+
+  - name: blas1_batched
+    category: quick
+    batch_count: [-1, 0, 5]
+    api: [ C, FORTRAN ]
+    function:
+      - rotg_batched: *rotg_precisions
+      - rotmg_batched: *single_double_precisions
+
+  - name: blas1_strided_batched
+    category: quick
+    batch_count: [-1, 0, 5]
+    stride_scale: [ 1.5 ]
+    api: [ C, FORTRAN ]
+    function:
+      - rotg_strided_batched: *rotg_precisions
+      - rotmg_strided_batched: *single_double_precisions
+
+  - name: rot_64
+    category: nightly
+    N: [ 64 ]
+    arguments:
+      - { incx: 1, incy: 1, batch_count: 1 }
+    api: [ FORTRAN_64 ]
+    function:
+      - rot:  *rot_precisions
+      - rot_ex:  *rot_ex_precisions
+      - rot_batched:  *rot_precisions
+      - rot_batched_ex:  *rot_ex_precisions
+      - rot_strided_batched:  *rot_precisions
+      - rot_strided_batched_ex:  *rot_ex_precisions
+
+  - name: rot_64
+    category: stress
+    arguments:
+      - { N: 2147483649, incx: 1, incy: 1, batch_count: 1 }
+      - { N: 2, incx: 2147483649, incy: 1, batch_count: 1 }
+      - { N: 2, incx: 1, incy: 2147483649, batch_count: 1 }
+      - { N: 3, incx: 1, incy: 1, stride_x: 3, stride_y: 3, batch_count: *c_grid_yz_require_passes }
+      - { N: 2, incx: -2147483649, incy:  1, batch_count: 1 }
+      - { N: 2, incx:  1, incy: -2147483649, batch_count: 1 }
+    api: [ C_64 ]
+    os_flags: [ LINUX ]
+    function:
+      - rot:  *single_precision
+      - rot_ex:  *single_precision
+      - rot_batched:  *single_precision
+      - rot_batched_ex:  *single_precision
+      - rot_strided_batched:  *single_precision
+      - rot_strided_batched_ex:  *single_precision
+
+  - name: blas1_size_t
+    category: stress
+    matrix_size: *size_t_xy_range
+    pointer_mode_device: false
+    function:
+      - rot_ex:  *hpa_half_precision
+      # real rot shared kernels with rot_ex so only testing size_t with rot_ex and half.
+    gpu_arch: ['90a','942']
+    os_flags: LINUX
+
+  - name: blas1_size_t
+    category: stress
+    matrix_size: *size_t_xy_range
+    pointer_mode_device: false
+    function:
+      - rot_ex:  *single_precision_complex
+      # complex rot shared kernels with rot_ex so only testing size_t with rot_ex and single_precision_complex.
+    gpu_arch: ['90a','942']
+    os_flags: LINUX
+
+  - name: blas1_size_t
+    category: stress
+    matrix_size: *size_t_xy_range
+    function:
+      - rotm:  *single_precision
+      #all rotm functions use same templated source so it is only necessary to test single_precision.
+    gpu_arch: ['90a','942']
+    os_flags: LINUX
+
+# All functions with incx, incy, no alpha
+
+# fortran
+  - name: blas1
+    category: quick
+    N: [ -1, 0, 1025]
+    incx_incy: *incx_incy_range_small
+    api: [FORTRAN, C_64]
+    function:
+      - rot:   *rot_precisions
+      - rot_ex: *rot_ex_precisions
+      - rotm:  *single_double_precisions
+
+  - name: blas1_large_batch
+    category: stress
+    N: [ 5 ]
+    incx: 1
+    incy: 1
+    batch_count: [ *c_grid_yz_require_passes ]
+    stride_scale: [ 1 ]
+    function:
+      - rot_batched:   *rot_precisions
+      - rot_batched_ex: *rot_ex_precisions
+      - rot_strided_batched:   *rot_precisions
+      - rot_strided_batched_ex: *rot_ex_precisions
+      - rotm_batched:  *single_double_precisions
+      - rotm_strided_batched:  *single_double_precisions
+
+  - name: blas1_batched
+    category: quick
+    N: [ -1, 0, 1025]
+    incx_incy: *incx_incy_range_small
+    batch_count: [-1, 0, 5]
+    api: FORTRAN
+    function:
+      - rot_batched:   *rot_precisions
+      - rot_batched_ex: *rot_ex_precisions
+      - rotm_batched:  *single_double_precisions
+
+  - name: blas1_strided_batched
+    category: quick
+    N: [ -1, 0, 1025]
+    incx_incy: *incx_incy_range_small
+    batch_count: [-1, 0, 5]
+    stride_scale: [1, 2]
+    api: FORTRAN
+    function:
+      - rot_strided_batched:   *rot_precisions
+      - rot_strided_batched_ex: *rot_ex_precisions
+      - rotm_strided_batched:  *single_double_precisions
+
+  - name: blas1
+    category: pre_checkin
+    N: [ 5000, 800000 ]
+    pointer_mode_host: false
+    incx_incy: *incx_incy_range_small
+    function:
+      # dot_ex uses dot code, so only testing superset code of dot_ex for pre-checkin and nightly.
+      # we should be sure to keep testing the dot API in quick tests as done above.
+      # similarly with rot
+      - rot_ex: *rot_ex_precisions
+      - rotm:  *single_double_precisions
+
+  - name: blas1_batched
+    category: pre_checkin
+    N: [ 5000, 800000 ]
+    pointer_mode_device: false
+    incx_incy: *incx_incy_range_small
+    batch_count: [1, 7]
+    function:
+      - rot_batched_ex: *rot_ex_precisions
+      - rotm_batched:  *single_double_precisions
+
+  - name: blas1_strided_batched
+    category: pre_checkin
+    N: [ 5000, 800000 ]
+    pointer_mode_host: false
+    incx_incy: *incx_incy_range_small
+    batch_count: [1, 7]
+    stride_scale: [ 1 ]
+    function:
+      - rot_strided_batched_ex: *rot_ex_precisions
+      - rotm_strided_batched:  *single_double_precisions
+
+# nightly
+  - name: blas1
+    category: nightly
+    N: [ 1000000 ]
+    pointer_mode_device: false
+    incx_incy: *incx_incy_range_small
+    function:
+      - rot_ex: *rot_ex_precisions
+      - rotm:  *single_double_precisions
+
+  - name: blas1_batched
+    category: nightly
+    N: [ 1000000 ]
+    pointer_mode_host: false
+    incx_incy: *incx_incy_range_small
+    batch_count: [1, 7]
+    function:
+      - rot_batched_ex: *rot_ex_precisions
+      - rotm_batched:  *single_double_precisions
+
+  - name: blas1_strided_batched
+    category: nightly
+    N: [ 1000000 ]
+    pointer_mode_device: false
+    incx_incy: *incx_incy_range_small
+    batch_count: [1, 7]
+    stride_scale: [ 1 ]
+    function:
+      - rot_strided_batched_ex: *rot_ex_precisions
+      - rotm_strided_batched:  *single_double_precisions
+
+# Swap, rot, and rotm get their own for quick tests as they write to x and y
+
+# quick
+  - name: blas1
+    category: quick
+    N: [ -1, 0, 32, 1025]
+    incx_incy: *incx_incy_range_x_y_output
+    batch_count: [1, 7]
+    stride_scale: [ 1 ]
+    function:
+      - rot:   *rot_precisions
+      - rot_batched:   *rot_precisions
+      - rot_strided_batched:   *rot_precisions
+      - rot_ex: *rot_ex_precisions
+      - rot_batched_ex: *rot_ex_precisions
+      - rot_strided_batched_ex: *rot_ex_precisions
+      - rotm:  *single_double_precisions
+      - rotm_batched:  *single_double_precisions
+      - rotm_strided_batched:  *single_double_precisions
+
+  # quick tests will fallback to original kernels at launcher level
+  - name: rotm_64
+    category: nightly
+    N: [ 64 ]
+    incx_incy: *incx_incy_range_small
+    api: [ FORTRAN_64 ]
+    function:
+      - rotm:  *single_double_precisions_complex_real
+      - rotm_batched:  *single_double_precisions_complex_real
+      - rotm_strided_batched:  *single_double_precisions_complex_real
+
+  - name: rotmg_64
+    category: nightly
+    api: [ FORTRAN_64 ]
+    function:
+      - rotmg:  *single_double_precisions_complex_real
+      - rotmg_batched:  *single_double_precisions_complex_real
+      - rotmg_strided_batched:  *single_double_precisions_complex_real
+
+  - name: rotg_64
+    category: nightly
+    api: [ FORTRAN_64 ]
+    function:
+      - rotg:  *single_double_precisions_complex_real
+      - rotg_batched:  *single_double_precisions_complex_real
+      - rotg_strided_batched:  *single_double_precisions_complex_real
+
+  - name: rotm_64
+    category: stress
+    arguments: # stride_c is param stride so must be >= 5
+      - { N: 2147483649, incx: 1, incy: -1, stride_x: 2, stride_y: 2, stride_c: 5, batch_count: 1 }
+      - { N: 2, incx: -2147483649, incy: 1, stride_x: 2, stride_y: 2, stride_c: 5, batch_count: 1 }
+      - { N: 2, incx: -1, incy: 1, stride_x: 2, stride_y: 2, stride_c: 5, batch_count: *c_grid_yz_require_passes }
+    api: [ C_64 ]
+    os_flags: [ LINUX ]
+    pointer_mode_host: false
+    function:
+      - rotm:  *single_precision
+      - rotm_batched:  *single_precision
+      - rotm_strided_batched:  *single_precision
+
+  - name: rotmg_64
+    category: stress
+    arguments: # stride_c is param stride so must be >= 5
+      - { stride_a: 1, stride_b: 1, stride_x: 1, stride_y: 1, stride_c: 5, batch_count: *c_grid_yz_require_passes }
+    api: [ C_64 ]
+    os_flags: [ LINUX ]
+    pointer_mode_host: false
+    function:
+      - rotmg:  *double_precision
+      - rotmg_batched:  *single_precision
+      - rotmg_strided_batched:  *single_precision
+
+  - name: rotg_64
+    category: stress
+    arguments:
+      - { stride_a: 1, stride_b: 1, stride_c: 1, stride_d: 1, batch_count: *c_grid_yz_require_passes }
+    api: [ C_64 ]
+    os_flags: [ LINUX ]
+    pointer_mode_host: false
+    function:
+      - rotg:  *double_precision
+      - rotg_batched:  *single_precision
+      - rotg_strided_batched:  *single_precision
+
+  - name: blas1_nan_check
+    category: pre_checkin
+    arguments: *blas1_nan_common_args
+    function:
+      #TODO: - Tests bypass the unit_check_general in ROTG,ROTMG,ROTM when NaN is input for alpha as this is not expected
+      - rot:   *rot_precisions
+      - rot_ex: *rot_ex_precisions
+      - rotm:  *single_double_precisions
+      - rotmg: *single_double_precisions
+      - rot_batched:   *rot_precisions
+      - rot_batched_ex: *rot_ex_precisions
+      - rotm_batched:  *single_double_precisions
+      - rotmg_batched: *single_double_precisions
+      - rot_strided_batched:   *rot_precisions
+      - rot_strided_batched_ex: *rot_ex_precisions
+      - rotm_strided_batched:  *single_double_precisions
+      - rotmg_strided_batched: *single_double_precisions
+
+  - name: blas1_graph_check
+    category: pre_checkin
+    arguments: *blas1_graph_test_common_args
+    function:
+      - rot:   *rot_precisions
+      - rot_ex: *rot_ex_precisions
+      - rotg:  *rotg_precisions
+      - rotm:  *single_double_precisions
+      - rotmg: *single_double_precisions
+      - rot_batched:   *rot_precisions
+      - rot_batched_ex: *rot_ex_precisions
+      - rotg_batched:  *rotg_precisions
+      - rotm_batched:  *single_double_precisions
+      - rotmg_batched: *single_double_precisions
+      - rot_strided_batched:   *rot_precisions
+      - rotg_strided_batched:  *rotg_precisions
+      - rotm_strided_batched:  *single_double_precisions
+      - rotmg_strided_batched: *single_double_precisions
+
+  - name: blas1_repeatability_check
+    category: stress
+    arguments: *blas1_repeatability_common_args
+    function:
+       - rot:   *rot_precisions
+       - rot_ex: *rot_ex_precisions
+       - rotg:  *rotg_precisions
+       - rotm:  *single_double_precisions
+       - rotmg: *single_double_precisions
+       - rot_batched:   *rot_precisions
+       - rot_batched_ex: *rot_ex_precisions
+       - rotg_batched:  *rotg_precisions
+       - rotm_batched:  *single_double_precisions
+       - rotmg_batched: *single_double_precisions
+       - rot_strided_batched:   *rot_precisions
+       - rotg_strided_batched:  *rotg_precisions
+       - rotm_strided_batched:  *single_double_precisions
+       - rotmg_strided_batched: *single_double_precisions
+
+...

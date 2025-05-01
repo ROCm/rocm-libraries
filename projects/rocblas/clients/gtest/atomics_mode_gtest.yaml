@@ -1,0 +1,28 @@
+---
+include: rocblas_common.yaml
+include: known_bugs.yaml
+
+# on gfx906 when atomics are allowed the size below calls a Tensile kernel with GlobalSplitU=32.
+# When atomics are not allowed it will call an alternative kernel with GlobalSplitU=1.
+# This will test if rocblas_set_atomics_mode is working.
+
+Definitions:
+  - &small_matrix_size_range
+    - { M:  1024, N:    16, K: 500000, lda:  1024, ldb: 500000, ldc:  1024, ldd:  1024 }
+
+  - &transA_transB_range
+    - { transA: N, transB: N }
+
+  - &alpha_beta_range
+    - { alpha:  1, beta:  3 }
+
+Tests:
+- name: gemm_small
+  category: nightly
+  function:
+    atomics_mode: *single_precision
+  matrix_size: *small_matrix_size_range
+  transA_transB: *transA_transB_range
+  alpha_beta: *alpha_beta_range
+  initialization: hpl
+...

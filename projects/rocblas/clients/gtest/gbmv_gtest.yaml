@@ -1,0 +1,374 @@
+---
+include: rocblas_common.yaml
+include: known_bugs.yaml
+
+Definitions:
+  - &size_t_matrix_size_range
+    - { M:  4097, N:  4097, KL: 6, KU: 6, lda:   1048600, incx:       1, incy:      1 }
+    - { M:  4097, N:  4097, KL: 6, KU: 6, lda:        13, incx: 1048600, incy:      1 }
+    - { M:  4097, N:  4097, KL: 6, KU: 6, lda:        13, incx:       1, incy: 104860 }
+
+  - &tiny_matrix_size
+    - { M:    10, N:    20, lda:   20, KL:  6, KU:  3 }
+
+  - &small_matrix_size_range
+    # lda > KL + KU + 1 && lda < M
+    - { M:     2, N:     2, lda:    1, KL:  0, KU:  0 }
+    - { M:    10, N:    10, lda:    9, KL:  3, KU:  2 }
+    - { M:    10, N:     5, lda:    4, KL:  1, KU:  1 }
+
+    # Regular Cases
+    - { M:   100, N:   200, lda:  200, KL: 20, KU:  8 }
+    - { M:   100, N:   200, lda:  200, KL: 20, KU: 30 }
+    - { M:     5, N:     5, lda:    5, KL:  1, KU:  2 }
+    - { M:     5, N:     5, lda:    5, KL:  2, KU:  2 }
+    - { M:     4, N:     6, lda:    6, KL:  1, KU:  2 }
+    - { M:    10, N:    20, lda:   20, KL:  2, KU:  1 }
+    - { M:    10, N:    20, lda:   20, KL:  6, KU:  3 }
+    - { M:    20, N:    30, lda:   50, KL: 14, KU: 14 }
+    - { M:    20, N:    30, lda:   50, KL: 24, KU: 24 }
+    - { M:    20, N:    20, lda:  100, KL: 40, KU: 40 }
+
+    # Special Cases
+  - &special_case_range
+    # Quick return
+    - { M: 0, N: 1, lda: 10, KL: 2, KU: 2, incx: 1, incy: 1, batch_count: 1 }
+    - { M: 1, N: 0, lda: 10, KL: 2, KU: 2, incx: 1, incy: 1, batch_count: 1 }
+    - { M: 0, N: 1, lda: 11, KL: 5, KU: 5, incx: 1, incy: 1, batch_count: 1 }
+    - { M: 1, N: 1, lda: 10, KL: 2, KU: 2, incx: 1, incy: 1, batch_count: 0 }
+
+    # invalid_arg checks
+    - { M: -1, N:  0, lda: 10, KL:  1, KU:  1, incx: 1, incy: 1, batch_count:  0 }
+    - { M:  0, N: -1, lda: 10, KL:  1, KU:  1, incx: 1, incy: 1, batch_count:  0 }
+    - { M:  0, N:  0, lda: 10, KL: -1, KU:  1, incx: 1, incy: 1, batch_count:  0 }
+    - { M:  0, N:  0, lda: 10, KL:  1, KU: -1, incx: 1, incy: 1, batch_count:  0 }
+    - { M:  0, N:  0, lda: 10, KL:  5, KU:  5, incx: 1, incy: 1, batch_count:  0 }
+    - { M:  0, N:  0, lda:  0, KL:  0, KU:  0, incx: 1, incy: 1, batch_count:  0 }
+    - { M:  0, N:  0, lda:  1, KL:  0, KU:  0, incx: 0, incy: 1, batch_count:  0 }
+    - { M:  0, N:  0, lda:  1, KL:  0, KU:  0, incx: 1, incy: 0, batch_count:  0 }
+    - { M:  0, N:  0, lda:  1, KL:  0, KU:  0, incx: 1, incy: 1, batch_count: -1 }
+
+
+  - &medium_matrix_size_range
+    - { M:   300, N:   400, lda:  400, KL: 32, KU: 16 }
+    - { M:   600, N:   500, lda:  601, KL: 64, KU: 64 }
+
+  - &large_matrix_size_range
+    - { M:  1000, N:  1000, lda: 1000, KL:   5, KU:   4 }
+    - { M:  2000, N:  2000, lda: 2000, KL: 128, KU: 256 }
+    - { M:  4011, N:  4011, lda: 4011, KL:  54, KU:  79 }
+
+  - &incx_incy_range
+    - { incx:   2, incy:   1, stride_scale: 1   }
+    - { incx:  -1, incy:   2, stride_scale: 1   }
+    - { incx:   1, incy:   1, stride_scale: 1   }
+    - { incx:  -1, incy:   3, stride_scale: 1.5 }
+    - { incx:   3, incy:  -1, stride_scale: 1   }
+    - { incx:   0, incy:   1, stride_scale: 1   }
+    - { incx:   1, incy:   0, stride_scale: 1   }
+    - { incx:   0, incy:  -1, stride_scale: 2   }
+    - { incx:  10, incy: 100, stride_scale: 1   }
+
+  - &incx_incy_range_tiny
+    - { incx:   1, incy:   1, stride_scale: 1   }
+
+  - &incx_incy_range_small
+    - { incx:  2, incy:  2 }
+    - { incx: -1, incy: -2}
+
+  - &alpha_beta_range
+    - { alpha:  2.0, beta:  0.0, alphai: 1.5, betai: 0.5 }
+    - { alpha: -1.0, beta: -1.0, alphai: 0.5, betai: 1.5 }
+    - { alpha:  2.0, beta:  1.0, alphai: -1.5, betai: 0.5 }
+    - { alpha:  0.0, beta:  1.0, alphai: -0.5, betai: 0 }
+
+  - &alpha_beta_range_small
+    - { alpha: 2.0, beta: 2.5, alphai: -2.0, betai: 1.0 }
+
+Tests:
+- name: gbmv_arg_check
+  category: quick
+  function:
+  - gbmv
+  - gbmv_batched
+  - gbmv_strided_batched
+  precision: *single_double_precisions
+  transA: N
+  matrix_size: *special_case_range
+
+- name: gbmv_bad_arg
+  category: quick
+  function:
+  - gbmv_bad_arg
+  - gbmv_batched_bad_arg
+  - gbmv_strided_batched_bad_arg
+  precision: *single_double_precisions
+  transA: N
+  api: [ C, FORTRAN, FORTRAN_64 ]
+
+# Regular gbmv
+- name: gbmv_NaN
+  category: pre_checkin
+  function: gbmv
+  precision: *single_double_precisions
+  transA: [ N, T ]
+  matrix_size: *tiny_matrix_size
+  incx_incy: *incx_incy_range_tiny
+  alpha: [ 1.0, .NaN ] # NaN is converted to 0.0 in test code
+  beta: [ 0.5, 1.0, .NaN ]
+
+- name: gbmv_small
+  category: quick
+  function: gbmv
+  precision: *single_double_precisions_complex_real
+  transA: [ N, T, C ]
+  matrix_size: *small_matrix_size_range
+  incx_incy: *incx_incy_range_small
+  alpha_beta: *alpha_beta_range_small
+  api: FORTRAN
+
+- name: gbmv_small
+  category: quick
+  function: gbmv
+  precision: *single_double_precisions_complex_real
+  transA: [ N, T, C ]
+  matrix_size: *small_matrix_size_range
+  incx_incy: *incx_incy_range
+  alpha_beta: *alpha_beta_range
+
+- name: gbmv_medium
+  category: pre_checkin
+  function: gbmv
+  precision: *single_double_precisions_complex_real
+  transA: [ N, T, C ]
+  matrix_size: *medium_matrix_size_range
+  pointer_mode_host: false
+  incx_incy: *incx_incy_range
+  alpha_beta: *alpha_beta_range
+
+- name: gbmv_large
+  category: nightly
+  function: gbmv
+  precision: *single_double_precisions_complex_real
+  transA: [  N, T, C ]
+  matrix_size: *large_matrix_size_range
+  pointer_mode_device: false
+  incx_incy: *incx_incy_range
+  alpha_beta: *alpha_beta_range
+
+# gbmv_batched
+- name: gbmv_batched_NaN
+  category: pre_checkin
+  function: gbmv_batched
+  precision: *single_double_precisions
+  transA: [ N, C ]
+  matrix_size: *tiny_matrix_size
+  incx_incy: *incx_incy_range_tiny
+  alpha: [ 1.0, .NaN ] # NaN is converted to 0.0 in test code
+  beta: [ 0.5, 1.0, .NaN ]
+  batch_count: [ 2 ]
+
+- name: gbmv_batched_small
+  category: quick
+  function: gbmv_batched
+  precision: *single_double_precisions_complex_real
+  transA: [ N, T, C ]
+  matrix_size: *small_matrix_size_range
+  incx_incy: *incx_incy_range_small
+  alpha_beta: *alpha_beta_range_small
+  api: FORTRAN
+  batch_count: [ -1, 0, 4 ]
+
+- name: gbmv_batched_small
+  category: quick
+  function: gbmv_batched
+  precision: *single_double_precisions
+  transA: [ N, T, C ]
+  matrix_size: *small_matrix_size_range
+  incx_incy: *incx_incy_range
+  alpha_beta: *alpha_beta_range
+  batch_count: [ -1, 0, 1, 3 ]
+
+- name: gbmv_batched_medium
+  category: pre_checkin
+  function: gbmv_batched
+  precision: *single_double_precisions_complex_real
+  transA: [ N, T, C ]
+  matrix_size: *medium_matrix_size_range
+  pointer_mode_host: false
+  incx_incy: *incx_incy_range
+  alpha_beta: *alpha_beta_range
+  batch_count: [ 3 ]
+
+- name: gbmv_batched_large
+  category: nightly
+  function: gbmv_batched
+  precision: *single_double_precisions
+  transA: [ N, T, C ]
+  matrix_size: *large_matrix_size_range
+  pointer_mode_device: false
+  incx_incy: *incx_incy_range
+  alpha_beta: *alpha_beta_range
+  batch_count: [ 3 ]
+
+- name: gbmv_batched_grid_z_16bit
+  category: stress
+  arguments:
+    - { M: 3, N: 3, lda: 3, incx: 1, incy: 1, batch_count: *c_grid_yz_require_passes }
+  KL: 1
+  KU: 1
+  transA: [ N, T ]
+  alpha_beta: *alpha_beta_range_small
+  pointer_mode_host: false
+  function:
+    - gbmv_batched: *single_precision
+    - gbmv_strided_batched: *single_precision
+  stride_scale: 1
+
+# gbmv_strided_batched
+- name: gbmv_strided_batched_NaN
+  category: pre_checkin
+  function: gbmv_strided_batched
+  precision: *single_double_precisions
+  transA: [ N, T, C ]
+  matrix_size: *tiny_matrix_size
+  incx_incy: *incx_incy_range_tiny
+  alpha: [ 1.0, .NaN ] # NaN is converted to 0.0 in test code
+  beta: [ 0.5, 1.0, .NaN ]
+  batch_count: [ 2 ]
+
+- name: gbmv_strided_batched_small
+  category: quick
+  function: gbmv_strided_batched
+  precision: *single_double_precisions_complex_real
+  transA: [ N, T, C ]
+  matrix_size: *small_matrix_size_range
+  incx_incy: *incx_incy_range_small
+  alpha_beta: *alpha_beta_range_small
+  api: FORTRAN
+  batch_count: [ -1, 0, 4 ]
+  stride_scale: 1.5
+
+- name: gbmv_strided_batched_small
+  category: quick
+  function: gbmv_strided_batched
+  precision: *single_double_precisions
+  transA: [ N, T, C ]
+  matrix_size: *small_matrix_size_range
+  incx_incy: *incx_incy_range
+  alpha_beta: *alpha_beta_range
+  batch_count: [ -1, 0, 1, 3 ]
+
+- name: gbmv_strided_batched_medium
+  category: pre_checkin
+  function: gbmv_strided_batched
+  precision: *single_double_precisions_complex_real
+  transA: [ N, T, C ]
+  matrix_size: *medium_matrix_size_range
+  pointer_mode_device: false
+  incx_incy: *incx_incy_range
+  alpha_beta: *alpha_beta_range
+  batch_count: [ 3 ]
+
+- name: gbmv_strided_batched_large
+  category: nightly
+  function: gbmv_strided_batched
+  precision: *single_double_precisions
+  transA: [ N, T, C ]
+  matrix_size: *large_matrix_size_range
+  pointer_mode_host: false
+  incx_incy: *incx_incy_range
+  alpha_beta: *alpha_beta_range
+  batch_count: [ 3 ]
+
+- name: gbmv_graph_test
+  category: pre_checkin
+  function:
+        - gbmv
+        - gbmv_batched
+        - gbmv_strided_batched
+  precision: *single_double_precisions_complex_real
+  transA: N
+  matrix_size:
+        - { M: 100, N: 200, lda: 200, KL: 20, KU: 8}
+  incx_incy: *incx_incy_range_tiny
+  alpha_beta: *alpha_beta_range_small
+  batch_count: [ 5 ]
+  graph_test: true
+
+- name: gbmv_size_t
+  category: stress
+  function: gbmv
+  precision: *single_precision
+  transA: [ N, T ]
+  matrix_size: *size_t_matrix_size_range
+  pointer_mode_device: false
+  alpha: [ 2.0 ]
+  beta: [ 3.0 ]
+  gpu_arch: ['90a','942']
+  os_flags: LINUX
+
+- name: gbmv_64
+  category: stress
+  arguments:
+    - { M: 3, N: 3, lda: 1024, incx: 1, incy: 1, batch_count: 1 } # TODO use I64 with less memory
+    - { M: 3, N: 3, lda: 5, incx: 2147483649, incy: 1, batch_count: 1 }
+    - { M: 3, N: 3, lda: 5, incx: 1, incy: 2147483649, batch_count: 1 }
+    - { M: 3, N: 3, lda: 3, incx: 1, incy: 1, batch_count: *c_grid_yz_require_passes }
+  KL: 1
+  KU: 1
+  transA: [ N, T, C ]
+  alpha_beta: *alpha_beta_range_small
+  pointer_mode_host: false
+  api: [ C_64 ]
+  os_flags: [ LINUX ]
+  function:
+    - gbmv: *single_precision
+    - gbmv_batched: *single_precision
+    - gbmv_strided_batched: *single_precision
+  stride_scale: 1
+  gpu_arch: '9??'
+
+- name: gbmv_repeatability_check
+  category: stress
+  function:
+        - gbmv
+        - gbmv_batched
+        - gbmv_strided_batched
+  precision: *single_double_precisions_complex_real
+  transA: N
+  matrix_size:
+        - { M: 100, N: 200, lda: 200, KL: 20, KU: 8}
+  incx_incy: *incx_incy_range_tiny
+  alpha_beta: *alpha_beta_range_small
+  batch_count: [ 2 ]
+  stride_scale: 1
+  initialization: hpl
+  pointer_mode_host: false
+  atomics_mode: 0
+  iters: 5
+  devices: 4
+  repeatability_check: true
+
+# - name: gbmv_64
+#   category: stress # TODO decide on full problem support
+#   arguments:
+#     - { transA: N, M: 2147483649, N: 1, lda: 2147483649, incx: 1, incy: 1, batch_count: 1 }
+#     - { transA: N, M: 3, N: 2147483649, lda: 3, incx: 1, incy: 1, batch_count: 1 }
+#     - { transA: T, M: 2147483649, N: 1, lda: 2147483649, incx: 1, incy: 1, batch_count: 1 }
+#     - { transA: T, M: 3, N: 2147483649, lda: 3, incx: 1, incy: 1, batch_count: 1 }
+#   KL: 1
+#   KU: 1
+#   alpha_beta: *alpha_beta_range_small
+#   pointer_mode_host: false
+#   initialization: hpl # large reductions so ints can overflow
+#   api: [ C_64 ]
+#   os_flags: [ LINUX ]
+#   function:
+#     - gbmv: *single_precision
+#     - gbmv_batched: *single_precision
+#     - gbmv_strided_batched: *single_precision
+#   stride_scale: 1
+#   gpu_arch: '9??'
+
+...

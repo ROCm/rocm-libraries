@@ -1,0 +1,19 @@
+---
+include: ../../../../clients/include/rocblas_common.yaml
+
+Definitions:
+  - &scan_power_2
+    - { N: [1024..8192..1024] }
+
+Tests:
+  - name: spr2_scan_power_2
+    category: bench
+    function: spr2
+    precision: *single_double_precisions
+    alpha: 1
+    uplo: [ U ]
+    incx: 1
+    incy: 1
+    matrix_size: *scan_power_2
+    iters: 20
+...
