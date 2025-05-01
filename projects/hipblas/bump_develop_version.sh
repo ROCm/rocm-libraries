@@ -1,0 +1,20 @@
+#!/bin/bash
+
+# For the develop branch, bump hipblas version and rocblas/rocsolver dependency versions
+
+OLD_HIPBLAS_VERSION="2.4.0"
+NEW_HIPBLAS_VERSION="2.5.0"
+
+OLD_MINIMUM_ROCBLAS_VERSION="4.4.0"
+NEW_MINIMUM_ROCBLAS_VERSION="4.5.0"
+
+OLD_MINIMUM_ROCSOLVER_VERSION="3.28.0"
+NEW_MINIMUM_ROCSOLVER_VERSION="3.29.0"
+
+OLD_SO_VERSION="hipblas_SOVERSION 2.4"
+NEW_SO_VERSION="hipblas_SOVERSION 2.5"
+
+sed -i "s/${OLD_HIPBLAS_VERSION}/${NEW_HIPBLAS_VERSION}/g" CMakeLists.txt
+sed -i "s/${OLD_MINIMUM_ROCBLAS_VERSION}/${NEW_MINIMUM_ROCBLAS_VERSION}/g" CMakeLists.txt
+sed -i "s/${OLD_MINIMUM_ROCSOLVER_VERSION}/${NEW_MINIMUM_ROCSOLVER_VERSION}/g" CMakeLists.txt
+sed -i "s/${OLD_SO_VERSION}/${NEW_SO_VERSION}/g" library/CMakeLists.txt
