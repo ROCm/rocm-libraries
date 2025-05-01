@@ -1,0 +1,180 @@
+# ########################################################################
+# Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights Reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+#
+# ########################################################################
+
+---
+include: rocsparse_common.yaml
+
+
+Definitions:
+  - &alpha_beta_range_quick
+    - { alpha:   1.0, beta: -1.0, alphai:  1.0, betai: -0.5 }
+    - { alpha:  -0.5, beta:  0.5, alphai: -0.5, betai:  1.0 }
+
+  - &alpha_beta_range_checkin
+    - { alpha:   0.0, beta:  1.0,  alphai:  1.5, betai:  0.5 }
+    - { alpha:   3.0, beta:  1.0,  alphai:  2.0, betai: -0.5 }
+
+  - &alpha_beta_range_nightly
+    - { alpha:  -0.5, beta:  0.5,  alphai:  1.0, betai: -0.5 }
+    - { alpha:  -1.0, beta: -0.5,  alphai:  0.0, betai:  0.0 }
+
+Tests:
+- name: spmm_bell_bad_arg
+  category: pre_checkin
+  function: spmm_bell_bad_arg
+  indextype: *i32_i64
+  precision: *single_double_precisions_complex_real
+
+- name: spmm_bell
+  category: quick
+  function: spmm_bell
+  indextype: *i32_i64
+  precision: *single_double_precisions_complex_real
+  M: [2]
+  N: [2]
+  K: [4]
+  block_dim: [2]
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none, rocsparse_operation_transpose, rocsparse_operation_conjugate_transpose]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+  spmm_alg: [rocsparse_spmm_alg_bell]
+  orderB: [rocsparse_order_row, rocsparse_order_column]
+  orderC: [rocsparse_order_row]
+
+- name: spmm_bell
+  category: quick
+  function: spmm_bell
+  indextype: *i32_i64
+  precision: *single_double_precisions_complex_real
+  M: [48]
+  N: [64]
+  K: [22]
+  block_dim: [5, 16]
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none, rocsparse_operation_transpose, rocsparse_operation_conjugate_transpose]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+  spmm_alg: [rocsparse_spmm_alg_bell]
+  orderB: [rocsparse_order_row, rocsparse_order_column]
+  orderC: [rocsparse_order_column]
+
+- name: spmm_bell_file
+  category: quick
+  function: spmm_bell
+  indextype: *i32_i64
+  precision: *single_double_precisions
+  M: 1
+  N: 7
+  K: 1
+  block_dim: [3, 4]
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none, rocsparse_operation_transpose]
+  baseA: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  spmm_alg: [rocsparse_spmm_alg_bell]
+  orderB: [rocsparse_order_row]
+  orderC: [rocsparse_order_row]
+  filename: [nos4,
+             nos6]
+
+
+- name: spmm_bell
+  category: pre_checkin
+  function: spmm_bell
+  indextype: *i32_i64
+  precision: *single_double_precisions
+  M: [0, 51]
+  N: [0, 44]
+  K: [0, 8]
+  block_dim: [1, 2, 4, 8, 16, 32, 64]
+  alpha_beta: *alpha_beta_range_checkin
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_random]
+  spmm_alg: [rocsparse_spmm_alg_bell]
+  orderB: [rocsparse_order_row]
+  orderC: [rocsparse_order_column]
+
+- name: spmm_bell_file
+  category: pre_checkin
+  function: spmm_bell
+  indextype: *i32_i64
+  precision: *single_double_precisions
+  M: 1
+  N: 3
+  K: 1
+  block_dim: [2, 7]
+  alpha_beta: *alpha_beta_range_checkin
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_transpose]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_file_rocalution]
+  spmm_alg: [rocsparse_spmm_alg_bell]
+  orderB: [rocsparse_order_row]
+  orderC: [rocsparse_order_row]
+  filename: [nos1,
+             nos5]
+
+
+- name: spmm_bell
+  category: nightly
+  function: spmm_bell
+  indextype: *i32_i64
+  precision: *single_double_precisions_complex_real
+  M: [43]
+  N: [29]
+  K: [9]
+  block_dim: [2, 9]
+  alpha_beta: *alpha_beta_range_nightly
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_transpose]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+  spmm_alg: [rocsparse_spmm_alg_bell]
+  orderB: [rocsparse_order_column]
+  orderC: [rocsparse_order_column]
+
+- name: spmm_bell_graph_test
+  category: pre_checkin
+  function: spmm_bell
+  indextype: *i32_i64
+  precision: *single_double_precisions_complex_real
+  M: [48]
+  N: [64]
+  K: [22]
+  block_dim: [5, 16]
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none, rocsparse_operation_transpose, rocsparse_operation_conjugate_transpose]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+  spmm_alg: [rocsparse_spmm_alg_bell]
+  orderB: [rocsparse_order_row, rocsparse_order_column]
+  orderC: [rocsparse_order_row]
+  graph_test: true
+

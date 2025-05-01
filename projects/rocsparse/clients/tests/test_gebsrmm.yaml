@@ -1,0 +1,285 @@
+# ########################################################################
+# Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+#
+# ########################################################################
+
+---
+include: rocsparse_common.yaml
+
+
+Definitions:
+
+  - &alpha_beta_range_quick
+    - { alpha:   1.0, beta: -1.0, alphai:  1.0, betai: -0.5 }
+    - { alpha:  -0.5, beta:  0.5, alphai: -0.5, betai:  1.0 }
+
+  - &alpha_beta_range_checkin
+    - { alpha:   2.0, beta:  0.0,  alphai:  0.5, betai:  0.5 }
+    - { alpha:   3.0, beta:  1.0,  alphai:  0.0, betai: -0.5 }
+
+  - &alpha_beta_range_nightly
+    - { alpha:   2.0, beta:  0.67, alphai:  0.0, betai:  1.5 }
+    - { alpha:   3.0, beta:  1.0,  alphai:  1.5, betai:  0.0 }
+    - { alpha:  -0.5, beta:  0.5,  alphai:  1.0, betai: -0.5 }
+
+  - &alpha_beta_range_one
+    - { alpha:   1.0, beta:  1.0, alphai:  0.0, betai:  0.0 }
+
+Tests:
+# ##############################
+# # PRE CHECKIN
+# ##############################
+
+- name: gebsrmm_bad_arg
+  category: pre_checkin
+  function: gebsrmm_bad_arg
+  precision: *single_double_precisions_complex_real
+
+- name: gebsrmm
+  category: pre_checkin
+  function: gebsrmm
+  precision: *single_double_precisions
+  M: [511, 2059]
+  N: [7, 33]
+  K: [391]
+  row_block_dimA: [8, 16, 32, 64]
+  col_block_dimA: [8, 16, 32, 64]
+  alpha_beta: *alpha_beta_range_checkin
+  transA: rocsparse_operation_none
+  transB: [rocsparse_operation_none, rocsparse_operation_transpose]
+  baseA: rocsparse_index_base_one
+  direction: rocsparse_direction_column
+  matrix: rocsparse_matrix_random
+
+- name: gebsrmm
+  category: pre_checkin
+  function: gebsrmm
+  precision: *single_double_precisions_complex_real
+  M: [0, 1, 2, 4]
+  N: [0, 1, 2, 4]
+  K: [0, 1, 2, 4]
+  row_block_dimA: [3, 4, 8]
+  col_block_dimA: [3, 4, 8]
+  alpha_beta: *alpha_beta_range_checkin
+  transA: rocsparse_operation_none
+  transB: [rocsparse_operation_none, rocsparse_operation_transpose]
+  baseA: rocsparse_index_base_one
+  direction: rocsparse_direction_column
+  matrix: rocsparse_matrix_random
+
+- name: gebsrmm
+  category: pre_checkin
+  function: gebsrmm
+  precision: *single_double_precisions
+  M: [2, 4]
+  N: [2, 4]
+  K: [2, 4]
+  row_block_dimA: [1, 2, 3, 4]
+  col_block_dimA: [1, 2, 3, 4]
+  alpha_beta: *alpha_beta_range_checkin
+  transA: rocsparse_operation_none
+  transB: rocsparse_operation_none
+  baseA: rocsparse_index_base_one
+  direction: rocsparse_direction_column
+  matrix: rocsparse_matrix_random
+
+- name: gebsrmm_file
+  category: pre_checkin
+  function: gebsrmm
+  precision: *single_double_precisions
+  M: 1
+  N: 8
+  K: 1
+  row_block_dimA: 6
+  col_block_dimA: 3
+  alpha_beta: *alpha_beta_range_one
+  transA: rocsparse_operation_none
+  transB: rocsparse_operation_none
+  baseA: rocsparse_index_base_zero
+  direction: rocsparse_direction_row
+  matrix: rocsparse_matrix_file_rocalution
+  filename: [nos3,
+             nos5]
+
+- name: gebsrmm_file
+  category: pre_checkin
+  function: gebsrmm
+  precision: *single_double_precisions_complex_real
+  M: 1
+  N: 3
+  K: 1
+  row_block_dimA: 6
+  col_block_dimA: 10
+  alpha_beta: *alpha_beta_range_one
+  transA: rocsparse_operation_none
+  transB: rocsparse_operation_none
+  baseA: rocsparse_index_base_one
+  direction: rocsparse_direction_column
+  matrix: rocsparse_matrix_file_rocalution
+  filename: [nos1,
+             nos2,
+             nos3]
+
+- name: gebsrmm_graph_test
+  category: pre_checkin
+  function: gebsrmm
+  precision: *single_double_precisions_complex_real
+  M: [275, 708]
+  N: [8 ,14]
+  K: [173, 747]
+  row_block_dimA: [8, 32]
+  col_block_dimA: [16, 64]
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_row]
+  matrix: [rocsparse_matrix_random]
+  graph_test: true
+
+# ##############################
+# # QUICK
+# ##############################
+
+- name: gebsrmm
+  category: quick
+  function: gebsrmm
+  precision: *single_double_precisions_complex_real
+  M: [275]
+  N: [8]
+  K: [173]
+  row_block_dimA: [8]
+  col_block_dimA: [16]
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_row]
+  matrix: [rocsparse_matrix_zero]
+
+- name: gebsrmm
+  category: quick
+  function: gebsrmm
+  precision: *single_double_precisions_complex_real
+  M: [275, 708]
+  N: [8 ,14]
+  K: [173, 747]
+  row_block_dimA: [8, 32]
+  col_block_dimA: [16, 64]
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_row]
+  matrix: [rocsparse_matrix_random]
+
+- name: gebsrmm_file
+  category: quick
+  function: gebsrmm
+  precision: *single_double_precisions
+  M: 1
+  N: [4, 19]
+  K: 1
+  row_block_dimA: [1,3,4]
+  col_block_dimA: [2,3,5]
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_transpose]
+  baseA: [rocsparse_index_base_one]
+  direction: [rocsparse_direction_column]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [nos2,
+             nos4,
+             nos6]
+
+- name: gebsrmm_file
+  category: quick
+  function: gebsrmm
+  precision: *single_double_precisions_complex
+  M: 1
+  N: [3, 21]
+  K: 1
+  row_block_dimA: [6]
+  col_block_dimA: [15]
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_one]
+  direction: [rocsparse_direction_column]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [qc2534, mplate]
+
+# ##############################
+# # NIGHTLY
+# ##############################
+
+- name: gebsrmm
+  category: nightly
+  function: gebsrmm
+  precision: *single_double_precisions
+  M: [3943, 14912]
+  N: [27]
+  K: [4134, 13291]
+  row_block_dimA: [2, 4]
+  col_block_dimA: [2, 4]
+  alpha_beta: *alpha_beta_range_nightly
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_row]
+  matrix: [rocsparse_matrix_random]
+
+- name: gebsrmm_file
+  category: nightly
+  function: gebsrmm
+  precision: *single_double_precisions_complex
+  M: 1
+  N: [38]
+  K: 1
+  row_block_dimA: [3]
+  col_block_dimA: [6]
+  alpha_beta: *alpha_beta_range_nightly
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_transpose]
+  baseA: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_row]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [sme3Dc,
+             shipsec1]
+
+- name: gebsrmm_file
+  category: nightly
+  function: gebsrmm
+  precision: *single_double_precisions
+  M: 1
+  N: [10]
+  K: 1
+  row_block_dimA: [10]
+  col_block_dimA: [6]
+  alpha_beta: *alpha_beta_range_one
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_one]
+  direction: [rocsparse_direction_column]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [amazon0312,
+             Chebyshev4,
+             Chevron2]

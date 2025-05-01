@@ -1,0 +1,473 @@
+# ########################################################################
+# Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+#
+# ########################################################################
+
+# Template used to process YAML from log files
+---
+include: rocsparse_common.yaml
+
+Functions:
+  rocsparse_saxpyi: { function: axpyi, <<: *single_precision }
+  rocsparse_daxpyi: { function: axpyi, <<: *double_precision }
+  rocsparse_caxpyi: { function: axpyi, <<: *single_precision_complex }
+  rocsparse_zaxpyi: { function: axpyi, <<: *double_precision_complex }
+  rocsparse_sdoti: { function: doti, <<: *single_precision }
+  rocsparse_ddoti: { function: doti, <<: *double_precision }
+  rocsparse_cdoti: { function: doti, <<: *single_precision_complex }
+  rocsparse_zdoti: { function: doti, <<: *double_precision_complex }
+  rocsparse_cdotci: { function: dotci, <<: *single_precision_complex }
+  rocsparse_zdotci: { function: dotci, <<: *double_precision_complex }
+  rocsparse_sgthr: { function: gthr, <<: *single_precision }
+  rocsparse_dgthr: { function: gthr, <<: *double_precision }
+  rocsparse_cgthr: { function: gthr, <<: *single_precision_complex }
+  rocsparse_zgthr: { function: gthr, <<: *double_precision_complex }
+  rocsparse_sgthrz: { function: gthrz, <<: *single_precision }
+  rocsparse_dgthrz: { function: gthrz, <<: *double_precision }
+  rocsparse_cgthrz: { function: gthrz, <<: *single_precision_complex }
+  rocsparse_zgthrz: { function: gthrz, <<: *double_precision_complex }
+  rocsparse_sroti: { function: roti, <<: *single_precision }
+  rocsparse_droti: { function: roti, <<: *double_precision }
+  rocsparse_ssctr: { function: sctr, <<: *single_precision }
+  rocsparse_dsctr: { function: sctr, <<: *double_precision }
+  rocsparse_csctr: { function: sctr, <<: *single_precision_complex }
+  rocsparse_zsctr: { function: sctr, <<: *double_precision_complex }
+
+  rocsparse_sbsrmv_ex_analysis: { function: bsrmv, <<: *single_precision }
+  rocsparse_dbsrmv_ex_analysis: { function: bsrmv, <<: *double_precision }
+  rocsparse_cbsrmv_ex_analysis: { function: bsrmv, <<: *single_precision_complex }
+  rocsparse_zbsrmv_ex_analysis: { function: bsrmv, <<: *double_precision_complex }
+  rocsparse_sbsrmv_ex: { function: bsrmv, <<: *single_precision }
+  rocsparse_dbsrmv_ex: { function: bsrmv, <<: *double_precision }
+  rocsparse_cbsrmv_ex: { function: bsrmv, <<: *single_precision_complex }
+  rocsparse_zbsrmv_ex: { function: bsrmv, <<: *double_precision_complex }
+  rocsparse_sbsrmv_analysis: { function: bsrmv, <<: *single_precision }
+  rocsparse_dbsrmv_analysis: { function: bsrmv, <<: *double_precision }
+  rocsparse_cbsrmv_analysis: { function: bsrmv, <<: *single_precision_complex }
+  rocsparse_zbsrmv_analysis: { function: bsrmv, <<: *double_precision_complex }
+  rocsparse_sbsrmv: { function: bsrmv, <<: *single_precision }
+  rocsparse_dbsrmv: { function: bsrmv, <<: *double_precision }
+  rocsparse_cbsrmv: { function: bsrmv, <<: *single_precision_complex }
+  rocsparse_zbsrmv: { function: bsrmv, <<: *double_precision_complex }
+  rocsparse_bsrmv_ex_clear: { function: bsrmv }
+  rocsparse_bsrmv_clear: { function: bsrmv }
+  rocsparse_sbsrsv_buffer_size: { function: bsrsv, <<: *single_precision }
+  rocsparse_dbsrsv_buffer_size: { function: bsrsv, <<: *double_precision }
+  rocsparse_cbsrsv_buffer_size: { function: bsrsv, <<: *single_precision_complex }
+  rocsparse_zbsrsv_buffer_size: { function: bsrsv, <<: *double_precision_complex }
+  rocsparse_sbsrsv_analysis: { function: bsrsv, <<: *single_precision }
+  rocsparse_dbsrsv_analysis: { function: bsrsv, <<: *double_precision }
+  rocsparse_cbsrsv_analysis: { function: bsrsv, <<: *single_precision_complex }
+  rocsparse_zbsrsv_analysis: { function: bsrsv, <<: *double_precision_complex }
+  rocsparse_sbsrsv_solve: { function: bsrsv, <<: *single_precision }
+  rocsparse_dbsrsv_solve: { function: bsrsv, <<: *double_precision }
+  rocsparse_cbsrsv_solve: { function: bsrsv, <<: *single_precision_complex }
+  rocsparse_zbsrsv_solve: { function: bsrsv, <<: *double_precision_complex }
+  rocsparse_bsrsv_zero_pivot: {function: bsrsv }
+  rocsparse_bsrsv_clear: {function: bsrsv }
+  rocsparse_scoomv: { function: coomv, <<: *single_precision }
+  rocsparse_dcoomv: { function: coomv, <<: *double_precision }
+  rocsparse_ccoomv: { function: coomv, <<: *single_precision_complex }
+  rocsparse_zcoomv: { function: coomv, <<: *double_precision_complex }
+  rocsparse_scsrmv_analysis: { function: csrmv, <<: *single_precision }
+  rocsparse_dcsrmv_analysis: { function: csrmv, <<: *double_precision }
+  rocsparse_ccsrmv_analysis: { function: csrmv, <<: *single_precision_complex }
+  rocsparse_zcsrmv_analysis: { function: csrmv, <<: *double_precision_complex }
+  rocsparse_scsrmv: { function: csrmv, <<: *single_precision }
+  rocsparse_dcsrmv: { function: csrmv, <<: *double_precision }
+  rocsparse_ccsrmv: { function: csrmv, <<: *single_precision_complex }
+  rocsparse_zcsrmv: { function: csrmv, <<: *double_precision_complex }
+  rocsparse_csrmv_clear: { function: csrmv }
+  rocsparse_scsrsv_buffer_size: { function: csrsv, <<: *single_precision }
+  rocsparse_dcsrsv_buffer_size: { function: csrsv, <<: *double_precision }
+  rocsparse_ccsrsv_buffer_size: { function: csrsv, <<: *single_precision_complex }
+  rocsparse_zcsrsv_buffer_size: { function: csrsv, <<: *double_precision_complex }
+  rocsparse_scsrsv_analysis: { function: csrsv, <<: *single_precision }
+  rocsparse_dcsrsv_analysis: { function: csrsv, <<: *double_precision }
+  rocsparse_ccsrsv_analysis: { function: csrsv, <<: *single_precision_complex }
+  rocsparse_zcsrsv_analysis: { function: csrsv, <<: *double_precision_complex }
+  rocsparse_scsrsv_solve: { function: csrsv, <<: *single_precision }
+  rocsparse_dcsrsv_solve: { function: csrsv, <<: *double_precision }
+  rocsparse_ccsrsv_solve: { function: csrsv, <<: *single_precision_complex }
+  rocsparse_zcsrsv_solve: { function: csrsv, <<: *double_precision_complex }
+  rocsparse_csrsv_zero_pivot: {function: csrsv }
+  rocsparse_csrsv_clear: {function: csrsv }
+  rocsparse_sellmv: { function: ellmv, <<: *single_precision }
+  rocsparse_dellmv: { function: ellmv, <<: *double_precision }
+  rocsparse_cellmv: { function: ellmv, <<: *single_precision_complex }
+  rocsparse_zellmv: { function: ellmv, <<: *double_precision_complex }
+  rocsparse_shybmv: { function: hybmv, <<: *single_precision }
+  rocsparse_dhybmv: { function: hybmv, <<: *double_precision }
+  rocsparse_chybmv: { function: hybmv, <<: *single_precision_complex }
+  rocsparse_zhybmv: { function: hybmv, <<: *double_precision_complex }
+  rocsparse_sgebsrmv: { function: gebsrmv, <<: *single_precision }
+  rocsparse_dgebsrmv: { function: gebsrmv, <<: *double_precision }
+  rocsparse_cgebsrmv: { function: gebsrmv, <<: *single_precision_complex }
+  rocsparse_zgebsrmv: { function: gebsrmv, <<: *double_precision_complex }
+  rocsparse_sgemvi_buffer_size: {function: gemvi, <<: *single_precision }
+  rocsparse_dgemvi_buffer_size: {function: gemvi, <<: *double_precision }
+  rocsparse_cgemvi_buffer_size: {function: gemvi, <<: *single_precision_complex }
+  rocsparse_zgemvi_buffer_size: {function: gemvi, <<: *double_precision_complex }
+  rocsparse_sgemvi: {function: gemvi, <<: *single_precision }
+  rocsparse_dgemvi: {function: gemvi, <<: *double_precision }
+  rocsparse_cgemvi: {function: gemvi, <<: *single_precision_complex }
+  rocsparse_zgemvi: {function: gemvi, <<: *double_precision_complex }
+
+  rocsparse_sbsrmm: { function: bsrmm, <<: *single_precision }
+  rocsparse_dbsrmm: { function: bsrmm, <<: *double_precision }
+  rocsparse_cbsrmm: { function: bsrmm, <<: *single_precision_complex }
+  rocsparse_zbsrmm: { function: bsrmm, <<: *double_precision_complex }
+  rocsparse_scsrmm: { function: csrmm, <<: *single_precision }
+  rocsparse_dcsrmm: { function: csrmm, <<: *double_precision }
+  rocsparse_ccsrmm: { function: csrmm, <<: *single_precision_complex }
+  rocsparse_zcsrmm: { function: csrmm, <<: *double_precision_complex }
+  rocsparse_scsrsm_buffer_size: { function: csrsm, <<: *single_precision }
+  rocsparse_dcsrsm_buffer_size: { function: csrsm, <<: *double_precision }
+  rocsparse_ccsrsm_buffer_size: { function: csrsm, <<: *single_precision_complex }
+  rocsparse_zcsrsm_buffer_size: { function: csrsm, <<: *double_precision_complex }
+  rocsparse_scsrsm_analysis: { function: csrsm, <<: *single_precision }
+  rocsparse_dcsrsm_analysis: { function: csrsm, <<: *double_precision }
+  rocsparse_ccsrsm_analysis: { function: csrsm, <<: *single_precision_complex }
+  rocsparse_zcsrsm_analysis: { function: csrsm, <<: *double_precision_complex }
+  rocsparse_scsrsm_solve: { function: csrsm, <<: *single_precision }
+  rocsparse_dcsrsm_solve: { function: csrsm, <<: *double_precision }
+  rocsparse_ccsrsm_solve: { function: csrsm, <<: *single_precision_complex }
+  rocsparse_zcsrsm_solve: { function: csrsm, <<: *double_precision_complex }
+  rocsparse_csrsm_zero_pivot: {function: csrsm }
+  rocsparse_csrsm_clear: {function: csrsm }
+  rocsparse_sbsrsm_buffer_size: { function: bsrsm, <<: *single_precision }
+  rocsparse_dbsrsm_buffer_size: { function: bsrsm, <<: *double_precision }
+  rocsparse_cbsrsm_buffer_size: { function: bsrsm, <<: *single_precision_complex }
+  rocsparse_zbsrsm_buffer_size: { function: bsrsm, <<: *double_precision_complex }
+  rocsparse_sbsrsm_analysis: { function: bsrsm, <<: *single_precision }
+  rocsparse_dbsrsm_analysis: { function: bsrsm, <<: *double_precision }
+  rocsparse_cbsrsm_analysis: { function: bsrsm, <<: *single_precision_complex }
+  rocsparse_zbsrsm_analysis: { function: bsrsm, <<: *double_precision_complex }
+  rocsparse_sbsrsm_solve: { function: bsrsm, <<: *single_precision }
+  rocsparse_dbsrsm_solve: { function: bsrsm, <<: *double_precision }
+  rocsparse_cbsrsm_solve: { function: bsrsm, <<: *single_precision_complex }
+  rocsparse_zbsrsm_solve: { function: bsrsm, <<: *double_precision_complex }
+  rocsparse_bsrsm_zero_pivot: {function: bsrsm }
+  rocsparse_bsrsm_clear: {function: bsrsm }
+  rocsparse_sgemmi: { function: gemmi, <<: *single_precision }
+  rocsparse_dgemmi: { function: gemmi, <<: *double_precision }
+  rocsparse_cgemmi: { function: gemmi, <<: *single_precision_complex }
+  rocsparse_zgemmi: { function: gemmi, <<: *double_precision_complex }
+
+  rocsparse_bsrgeam_nnzb: { function: bsrgeam }
+  rocsparse_sbsrgeam: { function: bsrgeam, <<: *single_precision }
+  rocsparse_dbsrgeam: { function: bsrgeam, <<: *double_precision }
+  rocsparse_cbsrgeam: { function: bsrgeam, <<: *single_precision_complex }
+  rocsparse_zbsrgeam: { function: bsrgeam, <<: *double_precision_complex }
+  rocsparse_sbsrgemm_buffer_size: { function: bsrgemm, <<: *single_precision }
+  rocsparse_dbsrgemm_buffer_size: { function: bsrgemm, <<: *double_precision }
+  rocsparse_cbsrgemm_buffer_size: { function: bsrgemm, <<: *single_precision_complex }
+  rocsparse_zbsrgemm_buffer_size: { function: bsrgemm, <<: *double_precision_complex }
+  rocsparse_bsrgemm_nnzb: { function: bsrgemm }
+  rocsparse_sbsrgemm: { function: bsrgemm, <<: *single_precision }
+  rocsparse_dbsrgemm: { function: bsrgemm, <<: *double_precision }
+  rocsparse_cbsrgemm: { function: bsrgemm, <<: *single_precision_complex }
+  rocsparse_zbsrgemm: { function: bsrgemm, <<: *double_precision_complex }
+  rocsparse_csrgeam_nnz: { function: csrgeam }
+  rocsparse_scsrgeam: { function: csrgeam, <<: *single_precision }
+  rocsparse_dcsrgeam: { function: csrgeam, <<: *double_precision }
+  rocsparse_ccsrgeam: { function: csrgeam, <<: *single_precision_complex }
+  rocsparse_zcsrgeam: { function: csrgeam, <<: *double_precision_complex }
+  rocsparse_scsrgemm_buffer_size: { function: csrgemm, <<: *single_precision }
+  rocsparse_dcsrgemm_buffer_size: { function: csrgemm, <<: *double_precision }
+  rocsparse_ccsrgemm_buffer_size: { function: csrgemm, <<: *single_precision_complex }
+  rocsparse_zcsrgemm_buffer_size: { function: csrgemm, <<: *double_precision_complex }
+  rocsparse_csrgemm_nnz: { function: csrgemm }
+  rocsparse_scsrgemm: { function: csrgemm, <<: *single_precision }
+  rocsparse_dcsrgemm: { function: csrgemm, <<: *double_precision }
+  rocsparse_ccsrgemm: { function: csrgemm, <<: *single_precision_complex }
+  rocsparse_zcsrgemm: { function: csrgemm, <<: *double_precision_complex }
+
+  rocsparse_sbsric0_buffer_size: { function: bsric0, <<: *single_precision }
+  rocsparse_dbsric0_buffer_size: { function: bsric0, <<: *double_precision }
+  rocsparse_cbsric0_buffer_size: { function: bsric0, <<: *single_precision_complex }
+  rocsparse_zbsric0_buffer_size: { function: bsric0, <<: *double_precision_complex }
+  rocsparse_sbsric0_analysis: { function: bsric0, <<: *single_precision }
+  rocsparse_dbsric0_analysis: { function: bsric0, <<: *double_precision }
+  rocsparse_cbsric0_analysis: { function: bsric0, <<: *single_precision_complex }
+  rocsparse_zbsric0_analysis: { function: bsric0, <<: *double_precision_complex }
+  rocsparse_sbsric0: { function: bsric0, <<: *single_precision }
+  rocsparse_dbsric0: { function: bsric0, <<: *double_precision }
+  rocsparse_cbsric0: { function: bsric0, <<: *single_precision_complex }
+  rocsparse_zbsric0: { function: bsric0, <<: *double_precision_complex }
+  rocsparse_bsric0_zero_pivot: { function: bsric0 }
+  rocsparse_bsric0_clear: { function: bsric0 }
+  rocsparse_sbsrilu0_numeric_boost: { function: bsrilu0, <<: *single_precision }
+  rocsparse_dbsrilu0_numeric_boost: { function: bsrilu0, <<: *double_precision }
+  rocsparse_cbsrilu0_numeric_boost: { function: bsrilu0, <<: *single_precision_complex }
+  rocsparse_zbsrilu0_numeric_boost: { function: bsrilu0, <<: *double_precision_complex }
+  rocsparse_dsbsrilu0_numeric_boost: { function: bsrilu0, <<: *single_precision }
+  rocsparse_dcbsrilu0_numeric_boost: { function: bsrilu0, <<: *single_precision_complex }
+  rocsparse_sbsrilu0_buffer_size: { function: bsrilu0, <<: *single_precision }
+  rocsparse_dbsrilu0_buffer_size: { function: bsrilu0, <<: *double_precision }
+  rocsparse_cbsrilu0_buffer_size: { function: bsrilu0, <<: *single_precision_complex }
+  rocsparse_zbsrilu0_buffer_size: { function: bsrilu0, <<: *double_precision_complex }
+  rocsparse_sbsrilu0_analysis: { function: bsrilu0, <<: *single_precision }
+  rocsparse_dbsrilu0_analysis: { function: bsrilu0, <<: *double_precision }
+  rocsparse_cbsrilu0_analysis: { function: bsrilu0, <<: *single_precision_complex }
+  rocsparse_zbsrilu0_analysis: { function: bsrilu0, <<: *double_precision_complex }
+  rocsparse_sbsrilu0: { function: bsrilu0, <<: *single_precision }
+  rocsparse_dbsrilu0: { function: bsrilu0, <<: *double_precision }
+  rocsparse_cbsrilu0: { function: bsrilu0, <<: *single_precision_complex }
+  rocsparse_zbsrilu0: { function: bsrilu0, <<: *double_precision_complex }
+  rocsparse_bsrilu0_zero_pivot: { function: bsrilu0 }
+  rocsparse_bsrilu0_clear: { function: bsrilu0 }
+  rocsparse_scsric0_buffer_size: { function: csric0, <<: *single_precision }
+  rocsparse_dcsric0_buffer_size: { function: csric0, <<: *double_precision }
+  rocsparse_ccsric0_buffer_size: { function: csric0, <<: *single_precision_complex }
+  rocsparse_zcsric0_buffer_size: { function: csric0, <<: *double_precision_complex }
+  rocsparse_scsric0_analysis: { function: csric0, <<: *single_precision }
+  rocsparse_dcsric0_analysis: { function: csric0, <<: *double_precision }
+  rocsparse_ccsric0_analysis: { function: csric0, <<: *single_precision_complex }
+  rocsparse_zcsric0_analysis: { function: csric0, <<: *double_precision_complex }
+  rocsparse_scsric0: { function: csric0, <<: *single_precision }
+  rocsparse_dcsric0: { function: csric0, <<: *double_precision }
+  rocsparse_ccsric0: { function: csric0, <<: *single_precision_complex }
+  rocsparse_zcsric0: { function: csric0, <<: *double_precision_complex }
+  rocsparse_csric0_zero_pivot: { function: csric0 }
+  rocsparse_csric0_clear: { function: csric0 }
+  rocsparse_scsrilu0_buffer_size: { function: csrilu0, <<: *single_precision }
+  rocsparse_dcsrilu0_buffer_size: { function: csrilu0, <<: *double_precision }
+  rocsparse_ccsrilu0_buffer_size: { function: csrilu0, <<: *single_precision_complex }
+  rocsparse_zcsrilu0_buffer_size: { function: csrilu0, <<: *double_precision_complex }
+  rocsparse_scsrilu0_numeric_boost: { function: csrilu0, <<: *single_precision }
+  rocsparse_dcsrilu0_numeric_boost: { function: csrilu0, <<: *double_precision }
+  rocsparse_ccsrilu0_numeric_boost: { function: csrilu0, <<: *single_precision_complex }
+  rocsparse_zcsrilu0_numeric_boost: { function: csrilu0, <<: *double_precision_complex }
+  rocsparse_dscsrilu0_numeric_boost: { function: csrilu0, <<: *single_precision }
+  rocsparse_dccsrilu0_numeric_boost: { function: csrilu0, <<: *single_precision_complex }
+  rocsparse_scsrilu0_analysis: { function: csrilu0, <<: *single_precision }
+  rocsparse_dcsrilu0_analysis: { function: csrilu0, <<: *double_precision }
+  rocsparse_ccsrilu0_analysis: { function: csrilu0, <<: *single_precision_complex }
+  rocsparse_zcsrilu0_analysis: { function: csrilu0, <<: *double_precision_complex }
+  rocsparse_scsrilu0: { function: csrilu0, <<: *single_precision }
+  rocsparse_dcsrilu0: { function: csrilu0, <<: *double_precision }
+  rocsparse_ccsrilu0: { function: csrilu0, <<: *single_precision_complex }
+  rocsparse_zcsrilu0: { function: csrilu0, <<: *double_precision_complex }
+  rocsparse_scsritilu0: { function: csritilu0, <<: *single_precision }
+  rocsparse_dcsritilu0: { function: csritilu0, <<: *double_precision }
+  rocsparse_ccsritilu0: { function: csritilu0, <<: *single_precision_complex }
+  rocsparse_zcsritilu0: { function: csritilu0, <<: *double_precision_complex }
+  rocsparse_scsritilu0_ex: { function: csritilu0_ex, <<: *single_precision }
+  rocsparse_dcsritilu0_ex: { function: csritilu0_ex, <<: *double_precision }
+  rocsparse_ccsritilu0_ex: { function: csritilu0_ex, <<: *single_precision_complex }
+  rocsparse_zcsritilu0_ex: { function: csritilu0_ex, <<: *double_precision_complex }
+  rocsparse_scsrsldu: { function: csrsldu, <<: *single_precision }
+  rocsparse_dcsrsldu: { function: csrsldu, <<: *double_precision }
+  rocsparse_ccsrsldu: { function: csrsldu, <<: *single_precision_complex }
+  rocsparse_zcsrsldu: { function: csrsldu, <<: *double_precision_complex }
+  rocsparse_csrilu0_zero_pivot: { function: csrilu0 }
+  rocsparse_csrilu0_clear: { function: csrilu0 }
+  rocsparse_sgtsv_buffer_size: { function: gtsv, <<: *single_precision }
+  rocsparse_dgtsv_buffer_size: { function: gtsv, <<: *double_precision }
+  rocsparse_cgtsv_buffer_size: { function: gtsv, <<: *single_precision_complex }
+  rocsparse_zgtsv_buffer_size: { function: gtsv, <<: *double_precision_complex }
+  rocsparse_sgtsv: { function: gtsv, <<: *single_precision }
+  rocsparse_dgtsv: { function: gtsv, <<: *double_precision }
+  rocsparse_cgtsv: { function: gtsv, <<: *single_precision_complex }
+  rocsparse_zgtsv: { function: gtsv, <<: *double_precision_complex }
+  rocsparse_sgtsv_no_pivot_buffer_size: { function: gtsv, <<: *single_precision }
+  rocsparse_dgtsv_no_pivot_buffer_size: { function: gtsv, <<: *double_precision }
+  rocsparse_cgtsv_no_pivot_buffer_size: { function: gtsv, <<: *single_precision_complex }
+  rocsparse_zgtsv_no_pivot_buffer_size: { function: gtsv, <<: *double_precision_complex }
+  rocsparse_sgtsv_no_pivot: { function: gtsv, <<: *single_precision }
+  rocsparse_dgtsv_no_pivot: { function: gtsv, <<: *double_precision }
+  rocsparse_cgtsv_no_pivot: { function: gtsv, <<: *single_precision_complex }
+  rocsparse_zgtsv_no_pivot: { function: gtsv, <<: *double_precision_complex }
+  rocsparse_sgtsv_no_pivot_strided_batch_buffer_size: { function: gtsv, <<: *single_precision }
+  rocsparse_dgtsv_no_pivot_strided_batch_buffer_size: { function: gtsv, <<: *double_precision }
+  rocsparse_cgtsv_no_pivot_strided_batch_buffer_size: { function: gtsv, <<: *single_precision_complex }
+  rocsparse_zgtsv_no_pivot_strided_batch_buffer_size: { function: gtsv, <<: *double_precision_complex }
+  rocsparse_sgtsv_no_pivot_strided_batch: { function: gtsv, <<: *single_precision }
+  rocsparse_dgtsv_no_pivot_strided_batch: { function: gtsv, <<: *double_precision }
+  rocsparse_cgtsv_no_pivot_strided_batch: { function: gtsv, <<: *single_precision_complex }
+  rocsparse_zgtsv_no_pivot_strided_batch: { function: gtsv, <<: *double_precision_complex }
+  rocsparse_sgtsv_interleaved_batch_buffer_size: { function: gtsv, <<: *single_precision }
+  rocsparse_dgtsv_interleaved_batch_buffer_size: { function: gtsv, <<: *double_precision }
+  rocsparse_cgtsv_interleaved_batch_buffer_size: { function: gtsv, <<: *single_precision_complex }
+  rocsparse_zgtsv_interleaved_batch_buffer_size: { function: gtsv, <<: *double_precision_complex }
+  rocsparse_sgtsv_interleaved_batch: { function: gtsv, <<: *single_precision }
+  rocsparse_dgtsv_interleaved_batch: { function: gtsv, <<: *double_precision }
+  rocsparse_cgtsv_interleaved_batch: { function: gtsv, <<: *single_precision_complex }
+  rocsparse_zgtsv_interleaved_batch: { function: gtsv, <<: *double_precision_complex }
+  rocsparse_sgpsv_interleaved_batch_buffer_size: { function: gpsv, <<: *single_precision }
+  rocsparse_dgpsv_interleaved_batch_buffer_size: { function: gpsv, <<: *double_precision }
+  rocsparse_cgpsv_interleaved_batch_buffer_size: { function: gpsv, <<: *single_precision_complex }
+  rocsparse_zgpsv_interleaved_batch_buffer_size: { function: gpsv, <<: *double_precision_complex }
+  rocsparse_sgpsv_interleaved_batch: { function: gpsv, <<: *single_precision }
+  rocsparse_dgpsv_interleaved_batch: { function: gpsv, <<: *double_precision }
+  rocsparse_cgpsv_interleaved_batch: { function: gpsv, <<: *single_precision_complex }
+  rocsparse_zgpsv_interleaved_batch: { function: gpsv, <<: *double_precision_complex }
+
+  rocsparse_snnz: { function: nnz, <<: *single_precision }
+  rocsparse_dnnz: { function: nnz, <<: *double_precision }
+  rocsparse_cnnz: { function: nnz, <<: *single_precision_complex }
+  rocsparse_znnz: { function: nnz, <<: *double_precision_complex }
+  rocsparse_sdense2csr: { function: dense2csr, <<: *single_precision }
+  rocsparse_ddense2csr: { function: dense2csr, <<: *double_precision }
+  rocsparse_cdense2csr: { function: dense2csr, <<: *single_precision_complex }
+  rocsparse_zdense2csr: { function: dense2csr, <<: *double_precision_complex }
+  rocsparse_sdense2coo: { function: dense2coo, <<: *single_precision }
+  rocsparse_ddense2coo: { function: dense2coo, <<: *double_precision }
+  rocsparse_cdense2coo: { function: dense2coo, <<: *single_precision_complex }
+  rocsparse_zdense2coo: { function: dense2coo, <<: *double_precision_complex }
+  rocsparse_sprune_dense2csr: { function: prune_dense2csr, <<: *single_precision }
+  rocsparse_dprune_dense2csr: { function: prune_dense2csr, <<: *double_precision }
+  rocsparse_sprune_dense2csr_by_percentage: { function: prune_dense2csr_by_percentage, <<: *single_precision }
+  rocsparse_dprune_dense2csr_by_percentage: { function: prune_dense2csr_by_percentage, <<: *double_precision }
+  rocsparse_sdense2csc: { function: dense2csc, <<: *single_precision }
+  rocsparse_ddense2csc: { function: dense2csc, <<: *double_precision }
+  rocsparse_cdense2csc: { function: dense2csc, <<: *single_precision_complex }
+  rocsparse_zdense2csc: { function: dense2csc, <<: *double_precision_complex }
+  rocsparse_scsr2dense: { function: csr2dense, <<: *single_precision }
+  rocsparse_dcsr2dense: { function: csr2dense, <<: *double_precision }
+  rocsparse_ccsr2dense: { function: csr2dense, <<: *single_precision_complex }
+  rocsparse_zcsr2dense: { function: csr2dense, <<: *double_precision_complex }
+  rocsparse_scsc2dense: { function: csc2dense, <<: *single_precision }
+  rocsparse_dcsc2dense: { function: csc2dense, <<: *double_precision }
+  rocsparse_ccsc2dense: { function: csc2dense, <<: *single_precision_complex }
+  rocsparse_zcsc2dense: { function: csc2dense, <<: *double_precision_complex }
+  rocsparse_scoo2dense: { function: coo2dense, <<: *single_precision }
+  rocsparse_dcoo2dense: { function: coo2dense, <<: *double_precision }
+  rocsparse_ccoo2dense: { function: coo2dense, <<: *single_precision_complex }
+  rocsparse_zcoo2dense: { function: coo2dense, <<: *double_precision_complex }
+  rocsparse_snnz_compress: { function: nnz_compress, <<: *single_precision }
+  rocsparse_dnnz_compress: { function: nnz_compress, <<: *double_precision }
+  rocsparse_cnnz_compress: { function: nnz_compress, <<: *single_precision_complex }
+  rocsparse_znnz_compress: { function: nnz_compress, <<: *double_precision_complex }
+  rocsparse_csr2coo: { function: csr2coo }
+  rocsparse_coo2csr: { function: coo2csr }
+  rocsparse_scsr2csc: { function: csr2csc, <<: *single_precision }
+  rocsparse_dcsr2csc: { function: csr2csc, <<: *double_precision }
+  rocsparse_ccsr2csc: { function: csr2csc, <<: *single_precision_complex }
+  rocsparse_zcsr2csc: { function: csr2csc, <<: *double_precision_complex }
+  rocsparse_sgebsr2gebsc: { function: gebsr2gebsc, <<: *single_precision }
+  rocsparse_dgebsr2gebsc: { function: gebsr2gebsc, <<: *double_precision }
+  rocsparse_cgebsr2gebsc: { function: gebsr2gebsc, <<: *single_precision_complex }
+  rocsparse_zgebsr2gebsc: { function: gebsr2gebsc, <<: *double_precision_complex }
+  rocsparse_scsr2ell: { function: csr2ell, <<: *single_precision }
+  rocsparse_dcsr2ell: { function: csr2ell, <<: *double_precision }
+  rocsparse_ccsr2ell: { function: csr2ell, <<: *single_precision_complex }
+  rocsparse_zcsr2ell: { function: csr2ell, <<: *double_precision_complex }
+  rocsparse_sell2csr: { function: ell2csr, <<: *single_precision }
+  rocsparse_dell2csr: { function: ell2csr, <<: *double_precision }
+  rocsparse_cell2csr: { function: ell2csr, <<: *single_precision_complex }
+  rocsparse_zell2csr: { function: ell2csr, <<: *double_precision_complex }
+  rocsparse_scsr2hyb: { function: csr2hyb, <<: *single_precision }
+  rocsparse_dcsr2hyb: { function: csr2hyb, <<: *double_precision }
+  rocsparse_ccsr2hyb: { function: csr2hyb, <<: *single_precision_complex }
+  rocsparse_zcsr2hyb: { function: csr2hyb, <<: *double_precision_complex }
+  rocsparse_scsr2bsr: { function: csr2bsr, <<: *single_precision }
+  rocsparse_dcsr2bsr: { function: csr2bsr, <<: *double_precision }
+  rocsparse_ccsr2bsr: { function: csr2bsr, <<: *single_precision_complex }
+  rocsparse_zcsr2bsr: { function: csr2bsr, <<: *double_precision_complex }
+  rocsparse_hyb2csr_buffer_size: { function: hyb2csr }
+  rocsparse_shyb2csr: { function: hyb2csr, <<: *single_precision }
+  rocsparse_dhyb2csr: { function: hyb2csr, <<: *double_precision }
+  rocsparse_chyb2csr: { function: hyb2csr, <<: *single_precision_complex }
+  rocsparse_zhyb2csr: { function: hyb2csr, <<: *double_precision_complex }
+  rocsparse_sbsr2csr: { function: bsr2csr, <<: *single_precision }
+  rocsparse_dbsr2csr: { function: bsr2csr, <<: *double_precision }
+  rocsparse_cbsr2csr: { function: bsr2csr, <<: *single_precision_complex }
+  rocsparse_zbsr2csr: { function: bsr2csr, <<: *double_precision_complex }
+  rocsparse_sgebsr2csr: { function: gebsr2csr, <<: *single_precision }
+  rocsparse_dgebsr2csr: { function: gebsr2csr, <<: *double_precision }
+  rocsparse_cgebsr2csr: { function: gebsr2csr, <<: *single_precision_complex }
+  rocsparse_zgebsr2csr: { function: gebsr2csr, <<: *double_precision_complex }
+  rocsparse_sgebsr2gebsr: { function: gebsr2gebsr, <<: *single_precision }
+  rocsparse_dgebsr2gebsr: { function: gebsr2gebsr, <<: *double_precision }
+  rocsparse_cgebsr2gebsr: { function: gebsr2gebsr, <<: *single_precision_complex }
+  rocsparse_zgebsr2gebsr: { function: gebsr2gebsr, <<: *double_precision_complex }
+  rocsparse_scsr2csr_compress: { function: csr2csr_compress, <<: *single_precision }
+  rocsparse_dcsr2csr_compress: { function: csr2csr_compress, <<: *double_precision }
+  rocsparse_ccsr2csr_compress: { function: csr2csr_compress, <<: *single_precision_complex }
+  rocsparse_zcsr2csr_compress: { function: csr2csr_compress, <<: *double_precision_complex }
+  rocsparse_sprune_csr2csr: { function: prune_csr2csr, <<: *single_precision }
+  rocsparse_dprune_csr2csr: { function: prune_csr2csr, <<: *double_precision }
+  rocsparse_sprune_csr2csr_by_percentage: { function: prune_csr2csr_by_percentage, <<: *single_precision }
+  rocsparse_dprune_csr2csr_by_percentage: { function: prune_csr2csr_by_percentage, <<: *double_precision }
+  rocsparse_create_identity_permutation: { function: rocsparse_create_identity_permutation }
+  rocsparse_inverse_permutation: { function: rocsparse_inverse_permutation }
+  rocsparse_csrsort: { function: csrsort }
+  rocsparse_cscsort: { function: cscsort }
+  rocsparse_coosort_by_row: { function: coosort }
+  rocsparse_coosort_by_column: { function: coosort }
+  rocsparse_sbsrpad_value: { function: bsrpad_value, <<: *single_precision }
+  rocsparse_dbsrpad_value: { function: bsrpad_value, <<: *double_precision }
+  rocsparse_cbsrpad_value: { function: bsrpad_value, <<: *single_precision_complex }
+  rocsparse_zbsrpad_value: { function: bsrpad_value, <<: *double_precision_complex }
+
+  rocsparse_scheck_matrix_csr_buffer_size: { function: check_matrix_csr, <<: *single_precision }
+  rocsparse_dcheck_matrix_csr_buffer_size: { function: check_matrix_csr, <<: *double_precision }
+  rocsparse_ccheck_matrix_csr_buffer_size: { function: check_matrix_csr, <<: *single_precision_complex }
+  rocsparse_zcheck_matrix_csr_buffer_size: { function: check_matrix_csr, <<: *double_precision_complex }
+  rocsparse_scheck_matrix_csr: { function: check_matrix_csr, <<: *single_precision }
+  rocsparse_dcheck_matrix_csr: { function: check_matrix_csr, <<: *double_precision }
+  rocsparse_ccheck_matrix_csr: { function: check_matrix_csr, <<: *single_precision_complex }
+  rocsparse_zcheck_matrix_csr: { function: check_matrix_csr, <<: *double_precision_complex }
+  rocsparse_scheck_matrix_csc_buffer_size: { function: check_matrix_csc, <<: *single_precision }
+  rocsparse_dcheck_matrix_csc_buffer_size: { function: check_matrix_csc, <<: *double_precision }
+  rocsparse_ccheck_matrix_csc_buffer_size: { function: check_matrix_csc, <<: *single_precision_complex }
+  rocsparse_zcheck_matrix_csc_buffer_size: { function: check_matrix_csc, <<: *double_precision_complex }
+  rocsparse_scheck_matrix_csc: { function: check_matrix_csc, <<: *single_precision }
+  rocsparse_dcheck_matrix_csc: { function: check_matrix_csc, <<: *double_precision }
+  rocsparse_ccheck_matrix_csc: { function: check_matrix_csc, <<: *single_precision_complex }
+  rocsparse_zcheck_matrix_csc: { function: check_matrix_csc, <<: *double_precision_complex }
+  rocsparse_scheck_matrix_coo_buffer_size: { function: check_matrix_coo, <<: *single_precision }
+  rocsparse_dcheck_matrix_coo_buffer_size: { function: check_matrix_coo, <<: *double_precision }
+  rocsparse_ccheck_matrix_coo_buffer_size: { function: check_matrix_coo, <<: *single_precision_complex }
+  rocsparse_zcheck_matrix_coo_buffer_size: { function: check_matrix_coo, <<: *double_precision_complex }
+  rocsparse_scheck_matrix_coo: { function: check_matrix_coo, <<: *single_precision }
+  rocsparse_dcheck_matrix_coo: { function: check_matrix_coo, <<: *double_precision }
+  rocsparse_ccheck_matrix_coo: { function: check_matrix_coo, <<: *single_precision_complex }
+  rocsparse_zcheck_matrix_coo: { function: check_matrix_coo, <<: *double_precision_complex }
+  rocsparse_scheck_matrix_gebsr_buffer_size: { function: check_matrix_gebsr, <<: *single_precision }
+  rocsparse_dcheck_matrix_gebsr_buffer_size: { function: check_matrix_gebsr, <<: *double_precision }
+  rocsparse_ccheck_matrix_gebsr_buffer_size: { function: check_matrix_gebsr, <<: *single_precision_complex }
+  rocsparse_zcheck_matrix_gebsr_buffer_size: { function: check_matrix_gebsr, <<: *double_precision_complex }
+  rocsparse_scheck_matrix_gebsr: { function: check_matrix_gebsr, <<: *single_precision }
+  rocsparse_dcheck_matrix_gebsr: { function: check_matrix_gebsr, <<: *double_precision }
+  rocsparse_ccheck_matrix_gebsr: { function: check_matrix_gebsr, <<: *single_precision_complex }
+  rocsparse_zcheck_matrix_gebsr: { function: check_matrix_gebsr, <<: *double_precision_complex }
+  rocsparse_scheck_matrix_gebsc_buffer_size: { function: check_matrix_gebsc, <<: *single_precision }
+  rocsparse_dcheck_matrix_gebsc_buffer_size: { function: check_matrix_gebsc, <<: *double_precision }
+  rocsparse_ccheck_matrix_gebsc_buffer_size: { function: check_matrix_gebsc, <<: *single_precision_complex }
+  rocsparse_zcheck_matrix_gebsc_buffer_size: { function: check_matrix_gebsc, <<: *double_precision_complex }
+  rocsparse_scheck_matrix_gebsc: { function: check_matrix_gebsc, <<: *single_precision }
+  rocsparse_dcheck_matrix_gebsc: { function: check_matrix_gebsc, <<: *double_precision }
+  rocsparse_ccheck_matrix_gebsc: { function: check_matrix_gebsc, <<: *single_precision_complex }
+  rocsparse_zcheck_matrix_gebsc: { function: check_matrix_gebsc, <<: *double_precision_complex }
+  rocsparse_scheck_matrix_ell_buffer_size: { function: check_matrix_ell, <<: *single_precision }
+  rocsparse_dcheck_matrix_ell_buffer_size: { function: check_matrix_ell, <<: *double_precision }
+  rocsparse_ccheck_matrix_ell_buffer_size: { function: check_matrix_ell, <<: *single_precision_complex }
+  rocsparse_zcheck_matrix_ell_buffer_size: { function: check_matrix_ell, <<: *double_precision_complex }
+  rocsparse_scheck_matrix_ell: { function: check_matrix_ell, <<: *single_precision }
+  rocsparse_dcheck_matrix_ell: { function: check_matrix_ell, <<: *double_precision }
+  rocsparse_ccheck_matrix_ell: { function: check_matrix_ell, <<: *single_precision_complex }
+  rocsparse_zcheck_matrix_ell: { function: check_matrix_ell, <<: *double_precision_complex }
+  rocsparse_check_matrix_hyb_buffer_size: { function: check_matrix_hyb, <<: *single_precision }
+  rocsparse_check_matrix_hyb: { function: check_matrix_hyb, <<: *single_precision }
+Tests:
