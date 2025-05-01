@@ -88,7 +88,7 @@ class ClientLogLevel(Enum):
 ################################################################################
 # Main
 ################################################################################
-def main(config, assembler: Assembler, cCompiler: str, isaInfoMap, outputPath: Path, deviceId: int, gfxName: str, useShortNames: bool=False):
+def main(config, assembler: Assembler, cCompiler: str, isaInfoMap, outputPath: Path, deviceId: int, gfxName: str):
 
   libraryLogicPath = ensurePath(outputPath / LIBRARY_LOGIC_DIR)
   clientLibraryPath = ensurePath(outputPath / LIBRARY_CLIENT_DIR)
@@ -115,7 +115,7 @@ def main(config, assembler: Assembler, cCompiler: str, isaInfoMap, outputPath: P
   else:
     env["PYTHONPATH"] = module_path
 
-  createLibraryScript = getBuildClientLibraryScript(clientLibraryPath, libraryLogicPath, str(assembler.path), isaToGfx(list(isaInfoMap.keys())[0]), useShortNames)
+  createLibraryScript = getBuildClientLibraryScript(clientLibraryPath, libraryLogicPath, str(assembler.path), isaToGfx(list(isaInfoMap.keys())[0]))
   subprocess.run(shlex.split(createLibraryScript), env=env, cwd=clientLibraryPath)
   coList = glob(os.path.join(clientLibraryPath, "library/*.co"))
   yamlList = glob(os.path.join(clientLibraryPath, "library/*.yaml"))
@@ -230,7 +230,7 @@ def runClient(libraryLogicPath, forBenchmark, enableTileSelection, cxxCompiler: 
 
   return process.returncode
 
-def getBuildClientLibraryScript(buildPath, libraryLogicPath, cxxCompiler, targetGfx, useShortNames: bool=False):
+def getBuildClientLibraryScript(buildPath, libraryLogicPath, cxxCompiler, targetGfx):
   import io
   runScriptFile = io.StringIO()
 
@@ -238,9 +238,6 @@ def getBuildClientLibraryScript(buildPath, libraryLogicPath, cxxCompiler, target
 
   if not globalParameters["LazyLibraryLoading"]:
     callCreateLibraryCmd += " --no-lazy-library-loading"
-
-  if useShortNames:
-    callCreateLibraryCmd += " --short-file-names"
 
   if globalParameters.get("AsmDebug", False):
     callCreateLibraryCmd += " --asm-debug"

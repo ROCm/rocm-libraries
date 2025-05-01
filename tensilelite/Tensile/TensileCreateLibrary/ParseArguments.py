@@ -94,9 +94,6 @@ def parseArguments(input: Optional[List[str]] = None) -> Dict[str, Any]:
         help="Supported archs: " + " ".join(architectureMap.keys()),
     )
     argParser.add_argument(
-        "--short-file-names", dest="ShortNames", action="store_true", default=False
-    )
-    argParser.add_argument(
         "--no-compress",
         dest="NoCompress",
         action="store_true",
@@ -207,7 +204,6 @@ def parseArguments(input: Optional[List[str]] = None) -> Dict[str, Any]:
     arguments["EnableMarker"] = args.EnableMarker
     if args.CmakeCxxCompiler:
         os.environ["CMAKE_CXX_COMPILER"] = args.CmakeCxxCompiler
-    arguments["ShortNames"] = args.ShortNames
     arguments["LogicFormat"] = args.LogicFormat
     arguments["LibraryFormat"] = args.LibraryFormat
     arguments["CpuThreads"] = args.CpuThreads
