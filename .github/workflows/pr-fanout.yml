@@ -1,0 +1,57 @@
+# Fanout Subtree PRs
+# ------------------
+# This GitHub Actions workflow detects which subtrees (from a monorepo structure)
+# were changed in a pull request, and automatically creates or updates corresponding
+# pull requests in their respective original repositories using `git subtree split`.
+#
+# Steps:
+# 1. Checkout the monorepo.
+# 2. Set up Python to run detection and fanout scripts.
+# 3. Run a Python script to detect which subtrees were changed (based on repos-config.json).
+# 4. For each changed subtree, create or update a PR in the corresponding sub-repo.
+# 5. (Placeholder) Track or report the child PR status to the monorepo PR.
+
+name: Fanout Subtree PRs
+
+on:
+    pull_request:
+      types:
+        - opened
+        - synchronize
+        - reopened
+
+jobs:
+  fanout:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Detect changed subtrees
+        id: detect
+        run: |
+          python .github/scripts/pr-detect-changed-subtrees.py \
+            --token "${{ github.token }}" \
+            --repo "${{ github.repository }}" \
+            --pr "${{ github.event.pull_request.number }}" \
+            --config ".github/repos-config.json"
+
+      - name: Fan out child PRs
+        if: steps.detect.outputs.subtrees
+        run: |
+          python .github/scripts/pr-fanout.py \
+            --token "${{ secrets.GITHUB_TOKEN }}" \
+            --repo "${{ github.repository }}" \
+            --pr "${{ github.event.pull_request.number }}" \
+            --subtrees "${{ steps.detect.outputs.subtrees }}"
+
+      - name: Track fanout PRs (placeholder)
+        run: echo "Child PRs tracked or linked"
+
+      - name: Post status to monorepo PR (placeholder)
+        run: echo "Success or failure posted back to monorepo PR"
