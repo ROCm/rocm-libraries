@@ -55,7 +55,7 @@ from Tensile.Common import (
 from Tensile.Common.Architectures import gfxToIsa, isaToGfx, SUPPORTED_GFX
 from Tensile.Common.Capabilities import makeIsaInfoMap
 from Tensile.Common.GlobalParameters import assignGlobalParameters, globalParameters
-from Tensile.SolutionStructs.Naming import getKernelFileBase, getKeyNoInternalArgs, getSerialNaming, getKernelNameMin
+from Tensile.SolutionStructs.Naming import getKernelFileBase, getKeyNoInternalArgs
 
 from Tensile.CustomYamlLoader import load_logic_gfx_arch
 from Tensile.KernelHelperNaming import kernelObjectNameCallables, initHelperKernelObjects
@@ -93,15 +93,15 @@ class KernelCodeGenResult(NamedTuple):
     mathclk: int
 
 
-def processKernelSource(kernelWriterAssembly, data, useShortNames, splitGSU, kernelSerialNaming, kernel) -> KernelCodeGenResult:
+def processKernelSource(kernelWriterAssembly, data, splitGSU, kernel) -> KernelCodeGenResult:
     """
     Generate source for a single kernel.
     Returns (error, source, header, kernelName).
     """
     kernelWriter = kernelWriterAssembly
     kernelWriter.setTensileInstructions(data)
-    asmFilename = getKernelFileBase(useShortNames, splitGSU, kernelSerialNaming, kernel)
-    err, src = kernelWriter.getSourceFileString(kernel, useShortNames)
+    asmFilename = getKernelFileBase(splitGSU, kernel)
+    err, src = kernelWriter.getSourceFileString(kernel)
     header = kernelWriter.getHeaderFileString(kernel)
     objFilename = kernel._state.get("codeObjectFile", None)
     pgr = int(kernel["PrefetchGlobalRead"])
@@ -285,11 +285,9 @@ def writeSolutionsAndKernels(
     kernelWriterAssembly,
     splitGSU: bool,
     cmdlineArchs: List[str],
-    kernelSerialNaming,
     errorTolerant=False,
     generateSourcesAndExit=False,
     compress=True,
-    useShortNames=False,
 ):
     codeObjectFiles = []
 
@@ -312,7 +310,7 @@ def writeSolutionsAndKernels(
     visited = set()
     duplicates = 0
     for k in asmKernels:
-        base = getKernelFileBase(useShortNames, splitGSU, kernelSerialNaming, k)
+        base = getKernelFileBase(splitGSU, k)
         k.duplicate = True if base in visited else False
         if not k.duplicate:
             k["BaseName"] = base
@@ -327,9 +325,7 @@ def writeSolutionsAndKernels(
     asmIter = zip(
         itertools.repeat(kernelWriterAssembly),
         itertools.repeat(rocisa.rocIsa.getInstance().getData()),
-        itertools.repeat(useShortNames),
         itertools.repeat(splitGSU),
-        itertools.repeat(kernelSerialNaming),
         asmKernels
     )
     asmResults = ParallelMap2(processKernelSource, asmIter, "Generating assembly kernels", return_as="list")
@@ -381,9 +377,7 @@ def writeSolutionsAndKernelsTCL(
     kernelHelperObjs,
     kernelWriterAssembly,
     cmdlineArchs: List[str],
-    kernelSerialNaming,
     compress=True,
-    useShortNames=False,
 ):
     outputPath = Path(outputPath)
     destLibPath = ensurePath(
@@ -403,7 +397,7 @@ def writeSolutionsAndKernelsTCL(
     duplicates = 0
     splitGSU = False
     for k in asmKernels:
-        base = getKernelFileBase(useShortNames, splitGSU, kernelSerialNaming, k)
+        base = getKernelFileBase(splitGSU, k)
         k["BaseName"] = base
         k.duplicate = True if base in visited else False
         duplicates += k.duplicate
@@ -421,9 +415,7 @@ def writeSolutionsAndKernelsTCL(
         processKernelSource,
         kernelWriterAssembly,
         rocisa.rocIsa.getInstance().getData(),
-        useShortNames,
         splitGSU,
-        kernelSerialNaming
     )
 
     unaryWriteAssembly = functools.partial(writeAssembly, assemblyTmpPath)
@@ -732,12 +724,7 @@ def run():
 
     kernels = generateKernelObjectsFromSolutions(solutions)
     kernelHelperObjs = generateKernelHelperObjects(kernels, str(asmToolchain.assembler.path), isaInfoMap)
-    kernelSerialNaming = getSerialNaming(kernels)
-    kernelWriterAssembly = KernelWriterAssembly(
-        kernelSerialNaming,
-        asmToolchain.assembler,
-        DebugConfig(),
-    )
+    kernelWriterAssembly = KernelWriterAssembly(asmToolchain.assembler, DebugConfig())
 
     copyStaticFiles(outputPath)
 
@@ -750,8 +737,6 @@ def run():
         kernelHelperObjs,
         kernelWriterAssembly,
         archs,
-        kernelSerialNaming,
-        useShortNames=arguments["ShortNames"],
         compress=arguments["UseCompression"],
     )
     stop_wsk = timer()

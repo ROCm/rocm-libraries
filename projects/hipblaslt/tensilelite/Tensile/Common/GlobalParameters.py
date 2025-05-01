@@ -600,7 +600,6 @@ def assignGlobalParameters(config, isaInfoMap: Dict[IsaVersion, IsaInfo]):
     # The following keys may be present in the config, but are not (or no longer) global parameters.
     ignoreKeys = [
         "Architecture",
-        "ShortNames",
         "PrintLevel",
         "Device",
         "UseCompression",

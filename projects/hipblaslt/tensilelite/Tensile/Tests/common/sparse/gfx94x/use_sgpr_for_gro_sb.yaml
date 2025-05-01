@@ -17,7 +17,6 @@ GlobalParameters:
   # DataInitTypeBias: 0
   # DataInitTypeScaleD: 0
   # NumMergedFiles: 4
-  # ShortNames: True
   PrintSolutionRejectionReason: True
   # PrintWinnersOnly: True
   NumElementsToValidate: -1

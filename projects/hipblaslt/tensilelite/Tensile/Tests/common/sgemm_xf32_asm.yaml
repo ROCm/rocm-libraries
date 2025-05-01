@@ -15,7 +15,6 @@ GlobalParameters:
   BoundsCheck: False
   ValidationMaxToPrint: 4
   ValidationPrintValids: False
-  ShortNames: False
   KernelTime: True
   NewClient: 2
   PrintIndexAssignments: 1

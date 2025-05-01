@@ -116,15 +116,14 @@ class KernelWriterAssembly(KernelWriter):
   ##############################################################################
   def __init__(
       self,
-      kernelSerialNaming,
       assembler: Assembler,
       debugConfig: DebugConfig,
     ):
-    super(KernelWriterAssembly, self).__init__(kernelSerialNaming, assembler, debugConfig)
+    super(KernelWriterAssembly, self).__init__(assembler, debugConfig)
 
 
-  def _getCustomKernelSource(self, useShortNames, kernel, CustomKernelDirectory):
-    kernelName = getKernelFileBase(useShortNames, self.debugConfig.splitGSU, self.kernelSerialNaming, kernel)
+  def _getCustomKernelSource(self, kernel, CustomKernelDirectory):
+    kernelName = getKernelFileBase(self.debugConfig.splitGSU, kernel)
     with open(os.path.join(CustomKernelDirectory, (kernelName + ".s"))) as f:
       rocmVersion = self.assembler.rocm_version
       if not (rocmVersion.major >= 6 and rocmVersion.patch >= 32650):
@@ -145,9 +144,7 @@ class KernelWriterAssembly(KernelWriter):
     return code
 
 
-  def getSourceFileString(self,
-                          kernel,
-                          useShortNames: bool=False) -> Tuple[int, str]:
+  def getSourceFileString(self, kernel) -> Tuple[int, str]:
     assert kernel["KernelLanguage"] == "Assembly"
     # Skip if .o files will have already been built for this file
     if kernel.duplicate:
@@ -155,7 +152,7 @@ class KernelWriterAssembly(KernelWriter):
       return (0, "") # should this be an non zero number
 
     try:
-      code = self._getCustomKernelSource(useShortNames, kernel, CUSTOM_KERNEL_PATH) if isCustomKernelConfig(kernel) else self._getKernelSource(kernel)
+      code = self._getCustomKernelSource(kernel, CUSTOM_KERNEL_PATH) if isCustomKernelConfig(kernel) else self._getKernelSource(kernel)
       errcode = 0
     except RuntimeError as e:
       printWarning(f"Failed to generate assembly source code for {kernel}: {e}")
