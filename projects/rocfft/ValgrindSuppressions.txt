@@ -1,0 +1,14 @@
+{
+   <hipMalloc>
+   Memcheck:Param
+   sched_setaffinity(mask)
+   ...
+   fun:hipMalloc
+}
+{
+   <hipMemGetInfo>
+   Memcheck:Param
+   sched_setaffinity(mask)
+   ...
+   fun:hipMemGetInfo
+}

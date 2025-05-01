@@ -1,0 +1,5 @@
+// generator uses implicit constructors for convenience
+noExplicitConstructor:library/src/device/generator/generator.h
+// has some false positives and isn't hard to run manually for periodic
+// dead code sweeps
+unusedFunction
