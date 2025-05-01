@@ -86,9 +86,8 @@ if args.debug:
     for path in file_paths:
         print(f"  {path}")
 
-# Load config
 with open(args.config) as f:
-    config = json.load(f)
+    config = json.load(f)["repositories"]
 
 valid_prefixes = {f"{entry['category']}/{entry['name']}" for entry in config}
 if args.debug:

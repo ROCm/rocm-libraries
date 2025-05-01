@@ -10,12 +10,10 @@ Arguments:
     --token     : GitHub token for API and git authentication
     --repo      : Full name of the monorepo
     --pr        : The monorepo pull request number
+    --config  : Path to the repos-config.json file
     --subtrees  : A comma-separated list of subtree folder names (from detect_changed_subtrees)
     --dry-run   : Print actions instead of executing them
     --debug     : Enable debug logging
-
-This script assumes the presence of a .github/repos-config.json file describing
-each subtree's category, name, repo-name, and default target branch.
 
 Usage Examples:
     # Normal usage in GitHub Actions
@@ -34,6 +32,7 @@ parser.add_argument("--token", required=True)
 parser.add_argument("--repo", required=True)
 parser.add_argument("--pr", required=True)
 parser.add_argument("--subtrees", required=True)
+parser.add_argument("--config", default=".github/repos-config.json")
 parser.add_argument("--dry-run", action="store_true", help="Print actions instead of executing them")
 parser.add_argument("--debug", action="store_true", help="Enable debug logging")
 args = parser.parse_args()
