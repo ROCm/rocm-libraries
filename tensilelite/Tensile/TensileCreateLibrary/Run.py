@@ -722,9 +722,13 @@ def run():
     for logicFile in logicFiles:
         print2("#   %s" % logicFile)
 
+    start_glds = timer()
     solutions, masterLibraries = generateLogicDataAndSolutions(
         logicFiles, arguments, asmToolchain.assembler, isaInfoMap
     )
+    stop_glds = timer()
+    print(f"Time to load yaml files (s): {(stop_glds-start_glds):3.2f}")
+
 
     kernels = generateKernelObjectsFromSolutions(solutions)
     kernelHelperObjs = generateKernelHelperObjects(kernels, str(asmToolchain.assembler.path), isaInfoMap)
@@ -737,6 +741,7 @@ def run():
 
     copyStaticFiles(outputPath)
 
+    start_wsk = timer()
     numKernels = writeSolutionsAndKernelsTCL(
         outputPath,
         asmToolchain,
@@ -749,6 +754,8 @@ def run():
         useShortNames=arguments["ShortNames"],
         compress=arguments["UseCompression"],
     )
+    stop_wsk = timer()
+    print(f"Time to generate kernels (s): {(stop_wsk-start_wsk):3.2f}")
 
     archs = [ # is this really different than the other archs above?
         isaToGfx(arch)
@@ -757,6 +764,13 @@ def run():
     ]
     newLibraryDir = ensurePath(os.path.join(outputPath, "library"))
     splitGSU = False
+
+    def writeMsl(name, lib):
+        filename = os.path.join(newLibraryDir, name)
+        lib.applyNaming(splitGSU)
+        LibraryIO.write(filename, state(lib), arguments["LibraryFormat"])
+
+    start_msl = timer()
     for archName, newMasterLibrary in masterLibraries.items():
         if archName in archs:
             if arguments["LazyLibraryLoading"]:
@@ -765,10 +779,12 @@ def run():
                 masterFile = os.path.join(newLibraryDir, "TensileLibrary_" + archName)
             newMasterLibrary.applyNaming(splitGSU)
             LibraryIO.write(masterFile, state(newMasterLibrary), arguments["LibraryFormat"])
-            for name, lib in newMasterLibrary.lazyLibraries.items():
-                filename = os.path.join(newLibraryDir, name)
-                lib.applyNaming(splitGSU)
-                LibraryIO.write(filename, state(lib), arguments["LibraryFormat"])
+            ParallelMap2(writeMsl,
+                         newMasterLibrary.lazyLibraries.items(),
+                         "Writing master solution libraries",
+                         return_as="list")
+    stop_msl = timer()
+    print(f"Time to write master solution libraries (s): {(stop_msl-start_msl):3.2f}")
 
     if not arguments["KeepBuildTmp"]:
         buildTmp = Path(arguments["OutputPath"]).parent / "library" / "build_tmp"
