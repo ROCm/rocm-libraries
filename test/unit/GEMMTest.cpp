@@ -425,6 +425,17 @@ namespace GEMMDriverTest
                                                            rocRoller::NUMWGS);
             }
 
+            Operations::OperationTag tagWGM;
+            if(gemm.workgroupMapping.first != -1)
+            {
+                tagWGM      = command->allocateTag();
+                auto wgmArg = command->allocateArgument(DataType::UInt32,
+                                                        tagWGM,
+                                                        ArgumentType::Value,
+                                                        DataDirection::ReadOnly,
+                                                        rocRoller::WGM);
+            }
+
             auto params = std::make_shared<CommandParameters>();
             params->setManualKernelDimension(2);
             params->setManualWorkgroupSize({workgroupSizeX, workgroupSizeY, 1});
@@ -450,6 +461,17 @@ namespace GEMMDriverTest
             params->prefetchMixMemOps             = gemm.prefetchMixMemOps;
             params->transposeMemoryAccess[LayoutType::MATRIX_A] = gemm.transA == "T";
             params->transposeMemoryAccess[LayoutType::MATRIX_B] = gemm.transB == "T";
+
+            if(gemm.workgroupMapping.first != -1)
+            {
+                params->workgroupMapping = {gemm.workgroupMapping.first, nullptr};
+            }
+
+            if(gemm.workgroupRemapXCC)
+            {
+                // Can we query this?
+                params->workgroupRemapXCC = 8;
+            }
 
             if(gemm.loopOverTiles > 0)
             {
@@ -618,6 +640,11 @@ namespace GEMMDriverTest
                 = commandKernel.scratchSpaceRequired(commandArgs.runtimeArguments());
             auto deviceScratch = make_shared_device<uint8_t>(scratchSpaceRequired, 0);
             commandArgs.setArgument(tagScratch, ArgumentType::Value, deviceScratch.get());
+
+            if(gemm.workgroupMapping.first != -1)
+            {
+                commandArgs.setArgument(tagWGM, ArgumentType::Value, gemm.workgroupMapping.second);
+            }
 
             // Host result
             std::vector<TD> h_result(M * N, TD{});
@@ -936,6 +963,23 @@ namespace GEMMDriverTest
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
+        basicGEMM<float>(gemm);
+    }
+
+    TEST_P(GEMMTestGPU, GPU_BasicGEMMWorkgroupMapping)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
+        GEMMProblem gemm;
+        gemm.workgroupMapping = {0, 6};
+        basicGEMM<float>(gemm);
+    }
+
+    TEST_P(GEMMTestGPU, GPU_BasicGEMMWorkgroupMappingXCC)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
+        GEMMProblem gemm;
+        gemm.workgroupMapping  = {0, 6};
+        gemm.workgroupRemapXCC = true;
         basicGEMM<float>(gemm);
     }
 
