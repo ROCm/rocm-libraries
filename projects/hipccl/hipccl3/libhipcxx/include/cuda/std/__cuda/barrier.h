@@ -8,6 +8,23 @@
 //
 //===----------------------------------------------------------------------===//
 
+// Modifications Copyright (c) 2025 Advanced Micro Devices, Inc.
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+// THE SOFTWARE.
+
 #ifndef _LIBCUDACXX___CUDA_BARRIER_H
 #define _LIBCUDACXX___CUDA_BARRIER_H
 
@@ -159,7 +176,7 @@ public:
           asm volatile("mbarrier.inval.shared.b64 [%0];" ::"r"(static_cast<_CUDA_VSTD::uint32_t>(
             __cvta_generic_to_shared(&__barrier)))
                        : "memory");
-        } else if (__isClusterShared(&__barrier)) { __trap(); }),
+        } else if (__isClusterShared(&__barrier)) { libhipcxx::__trap(); }),
       NV_PROVIDES_SM_80,
       (if (__isShared(&__barrier)) {
         asm volatile("mbarrier.inval.shared.b64 [%0];" ::"r"(static_cast<_CUDA_VSTD::uint32_t>(
@@ -179,7 +196,7 @@ public:
                          static_cast<_CUDA_VSTD::uint32_t>(__cvta_generic_to_shared(&__b->__barrier))),
                        "r"(static_cast<_CUDA_VSTD::uint32_t>(__expected))
                        : "memory");
-        } else if (__isClusterShared(&__b->__barrier)) { __trap(); } else {
+        } else if (__isClusterShared(&__b->__barrier)) { libhipcxx::__trap(); } else {
           new (&__b->__barrier) __barrier_base(__expected);
         }),
       NV_PROVIDES_SM_80,
@@ -202,7 +219,7 @@ public:
       NV_PROVIDES_SM_90,
       (
         if (!__isClusterShared(&__barrier)) { return __barrier.arrive(__update); } else if (!__isShared(&__barrier)) {
-          __trap();
+          libhipcxx::__trap();
         }
         // Cannot use cuda::device::barrier_native_handle here, as it is
         // only defined for block-scope barriers. This barrier may be a
@@ -269,7 +286,7 @@ private:
         int32_t __ready = 0; if (!__isClusterShared(&__barrier)) {
           return _CUDA_VSTD::__call_try_wait(__barrier, _CUDA_VSTD::move(__token));
         } else if (!__isShared(&__barrier)) {
-          __trap();
+          libhipcxx::__trap();
         } asm volatile("{\n\t"
                        ".reg .pred p;\n\t"
                        "mbarrier.try_wait.shared.b64 p, [%1], %2;\n\t"
@@ -302,7 +319,7 @@ private:
         if (!__isClusterShared(&__barrier)) {
           return _CUDA_VSTD::__libcpp_thread_poll_with_backoff(
             _CUDA_VSTD::__barrier_poll_tester_phase<barrier>(this, _CUDA_VSTD::move(__token)), __nanosec);
-        } else if (!__isShared(&__barrier)) { __trap(); }
+        } else if (!__isShared(&__barrier)) { libhipcxx::__trap(); }
 
         _CUDA_VSTD::chrono::high_resolution_clock::time_point const __start =
           _CUDA_VSTD::chrono::high_resolution_clock::now();
@@ -368,7 +385,7 @@ private:
       (
         if (!__isClusterShared(&__barrier)) {
           return _CUDA_VSTD::__call_try_wait_parity(__barrier, __phase_parity);
-        } else if (!__isShared(&__barrier)) { __trap(); } int32_t __ready = 0;
+        } else if (!__isShared(&__barrier)) { libhipcxx::__trap(); } int32_t __ready = 0;
 
         asm volatile(
           "{\n\t"
@@ -404,7 +421,7 @@ private:
         if (!__isClusterShared(&__barrier)) {
           return _CUDA_VSTD::__libcpp_thread_poll_with_backoff(
             _CUDA_VSTD::__barrier_poll_tester_parity<barrier>(this, __phase_parity), __nanosec);
-        } else if (!__isShared(&__barrier)) { __trap(); }
+        } else if (!__isShared(&__barrier)) { libhipcxx::__trap(); }
 
         _CUDA_VSTD::chrono::high_resolution_clock::time_point const __start =
           _CUDA_VSTD::chrono::high_resolution_clock::now();
@@ -470,7 +487,7 @@ public:
       NV_PROVIDES_SM_90,
       (
         if (!__isClusterShared(&__barrier)) { return __barrier.arrive_and_drop(); } else if (!__isShared(&__barrier)) {
-          __trap();
+          libhipcxx::__trap();
         }
 
         asm volatile("mbarrier.arrive_drop.shared.b64 _, [%0];" ::"r"(static_cast<_CUDA_VSTD::uint32_t>(
@@ -563,7 +580,7 @@ _CCCL_NODISCARD _CCCL_DEVICE inline barrier<thread_scope_block>::arrival_token b
   // on purpose. This allows debugging tools like memcheck/racecheck
   // to detect that we are passing a pointer with the wrong state
   // space to mbarrier.arrive. If we checked for the state space here,
-  // and __trap() if wrong, then those tools would not be able to help
+  // and libhipcxx::__trap() if wrong, then those tools would not be able to help
   // us in release builds. In debug builds, the error would be caught
   // by the asserts at the top of this function.
   NV_IF_ELSE_TARGET(
@@ -609,7 +626,7 @@ barrier_expect_tx(barrier<thread_scope_block>& __b, _CUDA_VSTD::ptrdiff_t __tran
   // on purpose. This allows debugging tools like memcheck/racecheck
   // to detect that we are passing a pointer with the wrong state
   // space to mbarrier.arrive. If we checked for the state space here,
-  // and __trap() if wrong, then those tools would not be able to help
+  // and libhipcxx::__trap() if wrong, then those tools would not be able to help
   // us in release builds. In debug builds, the error would be caught
   // by the asserts at the top of this function.
   // On architectures pre-sm90, arrive_tx is not supported.

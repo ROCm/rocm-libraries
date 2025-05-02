@@ -118,7 +118,7 @@ _CCCL_PUSH_MACROS
 #  define _LIBCUDACXX_UNREACHABLE() __builtin_unreachable()
 #elif defined(__CUDA_ARCH__)
 #  if defined(_CCCL_CUDACC_BELOW_11_2)
-#    define _LIBCUDACXX_UNREACHABLE() __trap()
+#    define _LIBCUDACXX_UNREACHABLE() libhipcxx::__trap()
 #  elif defined(_CCCL_CUDACC_BELOW_11_3)
 #    define _LIBCUDACXX_UNREACHABLE() __builtin_assume(false)
 #  else

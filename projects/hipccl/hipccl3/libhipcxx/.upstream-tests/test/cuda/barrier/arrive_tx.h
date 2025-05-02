@@ -7,6 +7,24 @@
 // SPDX-FileCopyrightText: Copyright (c) 2023 NVIDIA CORPORATION & AFFILIATES.
 //
 //===----------------------------------------------------------------------===//
+
+// Modifications Copyright (c) 2025 Advanced Micro Devices, Inc.
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+// THE SOFTWARE.
+
 #ifndef TEST_ARRIVE_TX_H_
 #define TEST_ARRIVE_TX_H_
 
@@ -32,12 +50,12 @@ inline __device__ void mbarrier_complete_tx(Barrier& b, int transaction_count)
           :
           : "r"((unsigned int) __cvta_generic_to_shared(cuda::device::barrier_native_handle(b))), "r"(transaction_count)
           : "memory");
-      } else { __trap(); }),
+      } else { libhipcxx::__trap(); }),
     NV_ANY_TARGET,
     (
       // On architectures pre-SM90 (and on host), we drop the transaction count
       // update. The barriers do not keep track of transaction counts.
-      __trap();));
+      libhipcxx::__trap();));
 }
 
 template <bool split_arrive_and_expect>
