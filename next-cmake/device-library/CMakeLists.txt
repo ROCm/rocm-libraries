@@ -42,17 +42,21 @@ set(TENSILE_CREATE_LIBRARY_COMMAND
     HIP
 )
 
-add_custom_target(tensilelite-device-libraries ALL
+add_custom_command(
+    OUTPUT "${output_stamp}"
     COMMENT "Building device libraries to ${output_dir} ..."
     COMMAND ${TENSILE_CREATE_LIBRARY_COMMAND}
     COMMAND ${CMAKE_COMMAND} -E touch "${output_stamp}"
-    BYPRODUCTS "${output_stamp}"
-    DEPENDS ${HIPBLASLT_PYTHON_DEPS}
+    DEPENDS  ${HIPBLASLT_PYTHON_DEPS}
     # Because the command can contain special characters
     VERBATIM
     # Because this can be very long running and difficult to debug deadlocks
     # without streaming.
     USES_TERMINAL
+)
+
+add_custom_target(tensilelite-device-libraries ALL
+    DEPENDS "${output_stamp}"
 )
 
 add_subdirectory(extops) # can't add this given current architecture of Tensile
