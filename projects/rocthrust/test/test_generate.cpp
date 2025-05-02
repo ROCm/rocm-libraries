@@ -19,12 +19,9 @@
 #include <thrust/iterator/discard_iterator.h>
 #include <thrust/iterator/retag.h>
 
-#include "test_real_assertions.hpp"
 #include "test_param_fixtures.hpp"
+#include "test_real_assertions.hpp"
 #include "test_utils.hpp"
-
-THRUST_DIAG_PUSH
-THRUST_DIAG_SUPPRESS_MSVC(4244 4267) // possible loss of data
 
 using VectorParams = ::testing::Types<Params<thrust::host_vector<short>>, Params<thrust::host_vector<int>>>;
 
@@ -38,6 +35,9 @@ TEST(ReplaceTests, UsingHip)
 
   ASSERT_EQ(THRUST_DEVICE_SYSTEM, THRUST_DEVICE_SYSTEM_HIP);
 }
+
+THRUST_DIAG_PUSH
+THRUST_DIAG_SUPPRESS_MSVC(4244 4267) // possible loss of data
 
 template <typename T>
 struct return_value
@@ -70,11 +70,8 @@ TYPED_TEST(GenerateVectorTests, TestGenerateSimple)
 
   thrust::generate(result.begin(), result.end(), f);
 
-  ASSERT_EQ(result[0], value);
-  ASSERT_EQ(result[1], value);
-  ASSERT_EQ(result[2], value);
-  ASSERT_EQ(result[3], value);
-  ASSERT_EQ(result[4], value);
+  Vector ref(result.size(), value);
+  ASSERT_EQ(result, ref);
 }
 
 template <typename ForwardIterator, typename Generator>
@@ -120,6 +117,8 @@ TYPED_TEST(GenerateVariablesTests, TestGenerate)
 
   for (auto size : get_sizes())
   {
+    SCOPED_TRACE(testing::Message() << "with size= " << size);
+
     thrust::host_vector<T> h_result(size);
     thrust::device_vector<T> d_result(size);
 
@@ -166,11 +165,8 @@ TYPED_TEST(GenerateVectorTests, TestGenerateNSimple)
 
   thrust::generate_n(result.begin(), result.size(), f);
 
-  ASSERT_EQ(result[0], value);
-  ASSERT_EQ(result[1], value);
-  ASSERT_EQ(result[2], value);
-  ASSERT_EQ(result[3], value);
-  ASSERT_EQ(result[4], value);
+  Vector ref(result.size(), value);
+  ASSERT_EQ(result, ref);
 }
 
 template <typename ForwardIterator, typename Size, typename Generator>
@@ -218,6 +214,8 @@ TYPED_TEST(GenerateVariablesTests, TestGenerateNToDiscardIterator)
 
   for (auto size : get_sizes())
   {
+    SCOPED_TRACE(testing::Message() << "with size= " << size);
+
     T value = 13;
     return_value<T> f(value);
 
@@ -248,12 +246,10 @@ TYPED_TEST(GenerateVectorTests, TestGenerateZipIterator)
                    thrust::make_zip_iterator(thrust::make_tuple(v1.end(), v2.end())),
                    return_value<thrust::tuple<T, T>>(thrust::tuple<T, T>(4, 7)));
 
-  ASSERT_EQ(v1[0], 4);
-  ASSERT_EQ(v1[1], 4);
-  ASSERT_EQ(v1[2], 4);
-  ASSERT_EQ(v2[0], 7);
-  ASSERT_EQ(v2[1], 7);
-  ASSERT_EQ(v2[2], 7);
+  Vector ref1(3, 4);
+  Vector ref2(3, 7);
+  ASSERT_EQ(v1, ref1);
+  ASSERT_EQ(v2, ref2);
 }
 
 TEST(GenerateTests, TestGenerateTuple)

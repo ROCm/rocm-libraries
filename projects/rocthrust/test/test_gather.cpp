@@ -47,23 +47,14 @@ TYPED_TEST(GatherTests, TestGatherSimple)
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  Vector map(5); // gather indices
-  Vector src(8); // source vector
-  Vector dst(5); // destination vector
-
-  // clang-format off
-  map[0] = 6; map[1] = 2; map[2] = 1; map[3] = 7; map[4] = 2;
-  src[0] = 0; src[1] = 1; src[2] = 2; src[3] = 3; src[4] = 4; src[5] = 5; src[6] = 6; src[7] = 7;
-  dst[0] = 0; dst[1] = 0; dst[2] = 0; dst[3] = 0; dst[4] = 0;
-  // clang-format on
+  Vector map{6, 2, 1, 7, 2}; // gather indices
+  Vector src{0, 1, 2, 3, 4, 5, 6, 7}; // source vector
+  Vector dst(5, 0); // destination vector
 
   thrust::gather(map.begin(), map.end(), src.begin(), dst.begin());
 
-  ASSERT_EQ(dst[0], 6);
-  ASSERT_EQ(dst[1], 2);
-  ASSERT_EQ(dst[2], 1);
-  ASSERT_EQ(dst[3], 7);
-  ASSERT_EQ(dst[4], 2);
+  Vector ref{6, 2, 1, 7, 2};
+  ASSERT_EQ(dst, ref);
 }
 
 template <typename InputIterator, typename RandomAccessIterator, typename OutputIterator>
@@ -207,25 +198,15 @@ TYPED_TEST(GatherTests, TestGatherIfSimple)
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  Vector flg(5); // predicate array
-  Vector map(5); // gather indices
-  Vector src(8); // source vector
-  Vector dst(5); // destination vector
-
-  // clang-format off
-  flg[0] = 0; flg[1] = 1; flg[2] = 0; flg[3] = 1; flg[4] = 0;
-  map[0] = 6; map[1] = 2; map[2] = 1; map[3] = 7; map[4] = 2;
-  src[0] = 0; src[1] = 1; src[2] = 2; src[3] = 3; src[4] = 4; src[5] = 5; src[6] = 6; src[7] = 7;
-  dst[0] = 0; dst[1] = 0; dst[2] = 0; dst[3] = 0; dst[4] = 0;
-  // clang-format on
+  Vector flg{0, 1, 0, 1, 0}; // predicate array
+  Vector map{6, 2, 1, 7, 2}; // gather indices
+  Vector src{0, 1, 2, 3, 4, 5, 6, 7}; // source vector
+  Vector dst(5, 0); // destination vector
 
   thrust::gather_if(map.begin(), map.end(), flg.begin(), src.begin(), dst.begin());
 
-  ASSERT_EQ(dst[0], 0);
-  ASSERT_EQ(dst[1], 2);
-  ASSERT_EQ(dst[2], 0);
-  ASSERT_EQ(dst[3], 7);
-  ASSERT_EQ(dst[4], 0);
+  Vector ref{0, 2, 0, 7, 0};
+  ASSERT_EQ(dst, ref);
 }
 
 template <typename T>
