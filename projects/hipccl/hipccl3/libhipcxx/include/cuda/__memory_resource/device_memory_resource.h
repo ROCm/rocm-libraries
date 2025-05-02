@@ -57,7 +57,7 @@
 
 _LIBCUDACXX_BEGIN_NAMESPACE_CUDA_MR
 
-//! @brief device_memory_resource uses `cudaMalloc` / `cudaFree` for allocation / deallocation.
+//! @brief device_memory_resource uses `hipMalloc` / `hipFree` for allocation / deallocation.
 //! By default uses device 0 to allocate memory
 class device_memory_resource
 {
@@ -87,11 +87,11 @@ public:
       _CUDA_VSTD::__throw_invalid_argument("Invalid alignment passed to device_memory_resource::allocate.");
     }
 
-    // We need to ensure that we allocate on the right device as `cudaMalloc` always uses the current device
+    // We need to ensure that we allocate on the right device as `hipMalloc` always uses the current device
     __ensure_current_device __device_wrapper{__device_id_};
 
     void* __ptr{nullptr};
-    _CCCL_TRY_CUDA_API(::cudaMalloc, "Failed to allocate memory with cudaMalloc.", &__ptr, __bytes);
+    _CCCL_TRY_CUDA_API(::hipMalloc, "Failed to allocate memory with hipMalloc.", &__ptr, __bytes);
     return __ptr;
   }
 
@@ -104,7 +104,7 @@ public:
     // We need to ensure that the provided alignment matches the minimal provided alignment
     _LIBCUDACXX_ASSERT(__is_valid_alignment(__alignment),
                        "Invalid alignment passed to device_memory_resource::deallocate.");
-    _CCCL_ASSERT_CUDA_API(::cudaFree, "device_memory_resource::deallocate failed", __ptr);
+    _CCCL_ASSERT_CUDA_API(::hipFree, "device_memory_resource::deallocate failed", __ptr);
     (void) __alignment;
   }
 

@@ -59,10 +59,10 @@ struct __ensure_current_device
   __ensure_current_device(const int __target_device)
       : __target_device_(__target_device)
   {
-    _CCCL_TRY_CUDA_API(::cudaGetDevice, "Failed to query current device", &__original_device_);
+    _CCCL_TRY_CUDA_API(::hipGetDevice, "Failed to query current device", &__original_device_);
     if (__original_device_ != __target_device_)
     {
-      _CCCL_TRY_CUDA_API(::cudaSetDevice, "Failed to set device", __target_device_);
+      _CCCL_TRY_CUDA_API(::hipSetDevice, "Failed to set device", __target_device_);
     }
   }
 
@@ -72,7 +72,7 @@ struct __ensure_current_device
   {
     if (__original_device_ != __target_device_)
     {
-      _CCCL_TRY_CUDA_API(::cudaSetDevice, "Failed to set device", __original_device_);
+      _CCCL_TRY_CUDA_API(::hipSetDevice, "Failed to set device", __original_device_);
     }
   }
 };

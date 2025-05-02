@@ -56,7 +56,7 @@
 
 _LIBCUDACXX_BEGIN_NAMESPACE_CUDA_MR
 
-//! @brief \c managed_memory_resource uses `cudaMallocManaged` / `cudaFree` for allocation / deallocation.
+//! @brief \c managed_memory_resource uses `hipMallocManaged` / `hipFree` for allocation / deallocation.
 class managed_memory_resource
 {
 private:
@@ -86,7 +86,7 @@ public:
 
     void* __ptr{nullptr};
     _CCCL_TRY_CUDA_API(
-      ::cudaMallocManaged, "Failed to allocate memory with cudaMallocManaged.", &__ptr, __bytes, __flags_);
+      ::hipMallocManaged, "Failed to allocate memory with hipMallocManaged.", &__ptr, __bytes, __flags_);
     return __ptr;
   }
 
@@ -99,7 +99,7 @@ public:
     // We need to ensure that the provided alignment matches the minimal provided alignment
     _LIBCUDACXX_ASSERT(__is_valid_alignment(__alignment),
                        "Invalid alignment passed to managed_memory_resource::deallocate.");
-    _CCCL_ASSERT_CUDA_API(::cudaFree, "managed_memory_resource::deallocate failed", __ptr);
+    _CCCL_ASSERT_CUDA_API(::hipFree, "managed_memory_resource::deallocate failed", __ptr);
     (void) __alignment;
   }
 

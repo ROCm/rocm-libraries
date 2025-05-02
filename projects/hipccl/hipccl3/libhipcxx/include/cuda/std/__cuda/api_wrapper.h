@@ -46,21 +46,21 @@
 
 #define _CCCL_TRY_CUDA_API(_NAME, _MSG, ...)           \
   {                                                    \
-    const ::cudaError_t __status = _NAME(__VA_ARGS__); \
+    const ::hipError_t __status = _NAME(__VA_ARGS__); \
     switch (__status)                                  \
     {                                                  \
-      case ::cudaSuccess:                              \
+      case ::hipSuccess:                              \
         break;                                         \
       default:                                         \
-        ::cudaGetLastError();                          \
-        ::cuda::__throw_cuda_error(__status, _MSG);    \
+        ::hipGetLastError();                          \
+        ::hip::__throw_cuda_error(__status, _MSG);    \
     }                                                  \
   }
 
 #define _CCCL_ASSERT_CUDA_API(_NAME, _MSG, ...)        \
   {                                                    \
-    const ::cudaError_t __status = _NAME(__VA_ARGS__); \
-    _LIBCUDACXX_ASSERT(__status == cudaSuccess, _MSG); \
+    const ::hipError_t __status = _NAME(__VA_ARGS__); \
+    _LIBCUDACXX_ASSERT(__status == hipSuccess, _MSG); \
     (void) __status;                                   \
   }
 

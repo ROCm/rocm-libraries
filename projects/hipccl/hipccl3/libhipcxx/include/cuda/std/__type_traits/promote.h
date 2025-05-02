@@ -71,7 +71,7 @@ struct __numeric_type
   _LIBCUDACXX_HIDE_FROM_ABI static __half __test(__half);
 #endif // _LIBCUDACXX_HAS_NVBF16
 #ifdef _LIBCUDACXX_HAS_NVBF16
-  _LIBCUDACXX_HIDE_FROM_ABI static __nv_bfloat16 __test(__nv_bfloat16);
+  _LIBCUDACXX_HIDE_FROM_ABI static __hip_bfloat16 __test(__hip_bfloat16);
 #endif // _LIBCUDACXX_HAS_NVFP16
   _LIBCUDACXX_HIDE_FROM_ABI static float __test(float);
   _LIBCUDACXX_HIDE_FROM_ABI static double __test(char);

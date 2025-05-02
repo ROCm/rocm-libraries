@@ -57,7 +57,7 @@
 
 _LIBCUDACXX_BEGIN_NAMESPACE_CUDA_MR
 
-//! @brief pinned_memory_resource uses `cudaMallocHost` / `cudaFreeHost` for allocation / deallocation.
+//! @brief pinned_memory_resource uses `hipHostMalloc` / `hipFreeHost` for allocation / deallocation.
 class pinned_memory_resource
 {
 private:
@@ -88,7 +88,7 @@ public:
     }
 
     void* __ptr{nullptr};
-    _CCCL_TRY_CUDA_API(::cudaMallocHost, "Failed to allocate memory with cudaMallocHost.", &__ptr, __bytes, __flags_);
+    _CCCL_TRY_CUDA_API(::hipHostMalloc, "Failed to allocate memory with hipHostMalloc.", &__ptr, __bytes, __flags_);
     return __ptr;
   }
 
@@ -102,7 +102,7 @@ public:
     // We need to ensure that the provided alignment matches the minimal provided alignment
     _LIBCUDACXX_ASSERT(__is_valid_alignment(__alignment),
                        "Invalid alignment passed to pinned_memory_resource::deallocate.");
-    _CCCL_ASSERT_CUDA_API(::cudaFreeHost, "pinned_memory_resource::deallocate failed", __ptr);
+    _CCCL_ASSERT_CUDA_API(::hipFreeHost, "pinned_memory_resource::deallocate failed", __ptr);
     (void) __alignment;
   }
 

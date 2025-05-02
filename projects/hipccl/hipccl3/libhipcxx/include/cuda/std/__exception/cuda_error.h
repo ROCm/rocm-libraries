@@ -67,19 +67,19 @@ private:
     char __buffer[256];
   };
 
-  static char* __format_cuda_error(::cudaError_t __status, const char* __msg, char* __msg_buffer) noexcept
+  static char* __format_cuda_error(::hipError_t __status, const char* __msg, char* __msg_buffer) noexcept
   {
     ::snprintf(__msg_buffer, 256, "cudaError %d: %s", __status, __msg);
     return __msg_buffer;
   }
 
 public:
-  cuda_error(::cudaError_t __status, const char* __msg, __msg_storage __msg_buffer = {0}) noexcept
+  cuda_error(::hipError_t __status, const char* __msg, __msg_storage __msg_buffer = {0}) noexcept
       : ::std::runtime_error(__format_cuda_error(__status, __msg, __msg_buffer.__buffer))
   {}
 };
 
-_CCCL_NORETURN _LIBCUDACXX_HIDE_FROM_ABI void __throw_cuda_error(::cudaError_t __status, const char* __msg)
+_CCCL_NORETURN _LIBCUDACXX_HIDE_FROM_ABI void __throw_cuda_error(::hipError_t __status, const char* __msg)
 {
   NV_IF_ELSE_TARGET(NV_IS_HOST,
                     (throw ::cuda::cuda_error(__status, __msg);),
@@ -89,10 +89,10 @@ _CCCL_NORETURN _LIBCUDACXX_HIDE_FROM_ABI void __throw_cuda_error(::cudaError_t _
 class cuda_error
 {
 public:
-  cuda_error(::cudaError_t, const char*) noexcept {}
+  cuda_error(::hipError_t, const char*) noexcept {}
 };
 
-_CCCL_NORETURN _LIBCUDACXX_HIDE_FROM_ABI void __throw_cuda_error(::cudaError_t, const char*)
+_CCCL_NORETURN _LIBCUDACXX_HIDE_FROM_ABI void __throw_cuda_error(::hipError_t, const char*)
 {
   _CUDA_VSTD_NOVERSION::terminate();
 }

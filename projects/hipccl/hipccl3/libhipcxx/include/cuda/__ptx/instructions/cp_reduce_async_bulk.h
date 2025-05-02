@@ -1627,8 +1627,8 @@ __device__ static inline void cp_reduce_async_bulk(
   cuda::ptx::space_global_t,
   cuda::ptx::space_shared_t,
   cuda::ptx::op_min_t,
-  __nv_bfloat16* dstMem,
-  const __nv_bfloat16* srcMem,
+  __hip_bfloat16* dstMem,
+  const __hip_bfloat16* srcMem,
   uint32_t size);
 */
 #  if __cccl_ptx_isa >= 800
@@ -1638,8 +1638,8 @@ _CCCL_DEVICE static inline void cp_reduce_async_bulk(
   space_global_t,
   space_shared_t,
   op_min_t,
-  __nv_bfloat16* __dstMem,
-  const __nv_bfloat16* __srcMem,
+  __hip_bfloat16* __dstMem,
+  const __hip_bfloat16* __srcMem,
   _CUDA_VSTD::uint32_t __size)
 {
   // __space == space_global (due to parameter type constraint)
@@ -1669,8 +1669,8 @@ __device__ static inline void cp_reduce_async_bulk(
   cuda::ptx::space_global_t,
   cuda::ptx::space_shared_t,
   cuda::ptx::op_max_t,
-  __nv_bfloat16* dstMem,
-  const __nv_bfloat16* srcMem,
+  __hip_bfloat16* dstMem,
+  const __hip_bfloat16* srcMem,
   uint32_t size);
 */
 #  if __cccl_ptx_isa >= 800
@@ -1680,8 +1680,8 @@ _CCCL_DEVICE static inline void cp_reduce_async_bulk(
   space_global_t,
   space_shared_t,
   op_max_t,
-  __nv_bfloat16* __dstMem,
-  const __nv_bfloat16* __srcMem,
+  __hip_bfloat16* __dstMem,
+  const __hip_bfloat16* __srcMem,
   _CUDA_VSTD::uint32_t __size)
 {
   // __space == space_global (due to parameter type constraint)
@@ -1711,8 +1711,8 @@ __device__ static inline void cp_reduce_async_bulk(
   cuda::ptx::space_global_t,
   cuda::ptx::space_shared_t,
   cuda::ptx::op_add_t,
-  __nv_bfloat16* dstMem,
-  const __nv_bfloat16* srcMem,
+  __hip_bfloat16* dstMem,
+  const __hip_bfloat16* srcMem,
   uint32_t size);
 */
 #  if __cccl_ptx_isa >= 800
@@ -1722,8 +1722,8 @@ _CCCL_DEVICE static inline void cp_reduce_async_bulk(
   space_global_t,
   space_shared_t,
   op_add_t,
-  __nv_bfloat16* __dstMem,
-  const __nv_bfloat16* __srcMem,
+  __hip_bfloat16* __dstMem,
+  const __hip_bfloat16* __srcMem,
   _CUDA_VSTD::uint32_t __size)
 {
   // __space == space_global (due to parameter type constraint)

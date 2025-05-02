@@ -80,12 +80,12 @@ _CCCL_DIAG_SUPPRESS_CLANG("-Wunused-function")
 _CCCL_DIAG_POP
 
 template <>
-struct __is_extended_floating_point<__nv_bfloat16> : true_type
+struct __is_extended_floating_point<__hip_bfloat16> : true_type
 {};
 
 #  if _CCCL_STD_VER >= 2017 && defined(__cpp_inline_variables) && (__cpp_inline_variables >= 201606L)
 template <>
-_LIBCUDACXX_INLINE_VAR constexpr bool __is_extended_floating_point_v<__nv_bfloat16> = true;
+_LIBCUDACXX_INLINE_VAR constexpr bool __is_extended_floating_point_v<__hip_bfloat16> = true;
 #  endif // _CCCL_STD_VER >= 2014
 #endif // _LIBCUDACXX_HAS_NVBF16
 
