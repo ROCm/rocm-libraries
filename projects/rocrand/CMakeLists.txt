@@ -191,7 +191,7 @@ if(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY AND NOT WIN32)
 endif()
 
 # Set version variables
-rocm_setup_version( VERSION "3.3.0" )
+rocm_setup_version( VERSION "3.4.0" )
 set ( rocrand_VERSION ${rocRAND_VERSION} )
 # Old-style version number used within the library's API. rocrand_get_version should be modified.
 math(EXPR rocrand_VERSION_NUMBER "${rocRAND_VERSION_MAJOR} * 100000 + ${rocRAND_VERSION_MINOR} * 100 + ${rocRAND_VERSION_PATCH}")
