@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2022-2024 Advanced Micro Devices, Inc.
+ * Copyright (c) 2022-2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -82,7 +82,7 @@ public:
     ~SMART_DESTROYER()
     {
         if(_ptr != nullptr)
-            _func(_ptr);
+            static_cast<void>(_func(_ptr));
     }
 
     T*           _ptr = nullptr;
@@ -917,7 +917,7 @@ int main(int argc, char* argv[])
                                                   d_workspace,
                                                   &streams[0],
                                                   num_streams));
-        hipStreamSynchronize(stream);
+        CHECK_HIP_ERROR(hipStreamSynchronize(stream));
         // copy output from device to CPU
         CHECK_HIP_ERROR(hipMemcpy(hd.data(), dd, sizeof(__half) * size_c, hipMemcpyDeviceToHost));
         CHECK_HIP_ERROR(hipMemcpy(h_prune.data(),

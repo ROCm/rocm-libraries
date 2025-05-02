@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2022-2024 Advanced Micro Devices, Inc.
+ * Copyright (c) 2022-2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -167,8 +167,9 @@ constexpr const char* hipsparselt_computetype_to_string(hipsparseLtComputetype_t
         return "i32_r";
     case HIPSPARSELT_COMPUTE_32F:
         return "f32_r";
+    default:
+        return "invalid";
     }
-    return "invalid";
 }
 
 // clang-format off
