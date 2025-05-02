@@ -126,8 +126,6 @@ Open a PR in GitHub. The labels and reviewer routing will be handled automatical
 
 ---
 
-## Questions or Feedback?
-
 - 💬 [Start a discussion](https://github.com/ROCm/rocm-libraries/discussions)
 - 🐞 [Open an issue](https://github.com/ROCm/rocm-libraries/issues)
 
