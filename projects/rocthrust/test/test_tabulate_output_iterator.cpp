@@ -26,10 +26,29 @@
 #include <thrust/iterator/zip_iterator.h>
 #include <thrust/reduce.h>
 #include <thrust/sequence.h>
+#include <thrust/universal_vector.h>
 
-#include <unittest/unittest.h>
+#include "test_param_fixtures.hpp"
+#include "test_utils.hpp"
 
 #include _THRUST_STD_INCLUDE(type_traits)
+
+using VectorTestsParams = ::testing::Types<
+  Params<thrust::host_vector<signed char>>,
+  Params<thrust::host_vector<short>>,
+  Params<thrust::host_vector<int>>,
+  Params<thrust::host_vector<float>>,
+  Params<thrust::host_vector<int, thrust::mr::stateless_resource_allocator<int, thrust::host_memory_resource>>>,
+  Params<thrust::device_vector<signed char>>,
+  Params<thrust::device_vector<short>>,
+  Params<thrust::device_vector<int>>,
+  Params<thrust::device_vector<float>>,
+  Params<thrust::device_vector<int, thrust::mr::stateless_resource_allocator<int, thrust::device_memory_resource>>>,
+  Params<thrust::universal_vector<int>>,
+  Params<thrust::universal_host_pinned_vector<int>>>;
+
+TESTS_DEFINE(TabulateOutputIteratorTests, FullTestsParams);
+TESTS_DEFINE(TabulateOutputIteratorVectorTests, VectorTestsParams);
 
 template <typename OutItT>
 struct host_write_op
@@ -93,12 +112,14 @@ struct index_to_gather_index_op
   }
 };
 
-template <class Vector>
-void TestTabulateOutputIterator()
+TYPED_TEST(TabulateOutputIteratorVectorTests, TestTabulateOutputIterator)
 {
-  using T     = typename Vector::value_type;
-  using it_t  = typename Vector::iterator;
-  using space = typename thrust::iterator_system<typename Vector::iterator>::type;
+  using Vector = typename TestFixture::input_type;
+  using T      = typename Vector::value_type;
+  using it_t   = typename Vector::iterator;
+  using space  = typename thrust::iterator_system<typename Vector::iterator>::type;
+
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
   static constexpr std::size_t num_items = 240;
   Vector input(num_items);
@@ -131,31 +152,30 @@ void TestTabulateOutputIterator()
     thrust::make_transform_iterator(thrust::make_counting_iterator(0), index_to_gather_index_op{select_every_nth});
   thrust::gather(gather_index_it, gather_index_it + expected_num_selected, input.cbegin(), expected_output.begin());
 
-  ASSERT_EQUAL(expected_num_selected, num_selected);
-  ASSERT_EQUAL(output, expected_output);
+  ASSERT_EQ(expected_num_selected, num_selected);
+  ASSERT_EQ(output, expected_output);
 }
-DECLARE_VECTOR_UNITTEST(TestTabulateOutputIterator);
 
-void TestTabulateOutputIterator()
+TEST(TabulateOutputIteratorTests, TestTabulateOutputIterator)
 {
   using vector_t = thrust::host_vector<int>;
   using vec_it_t = typename vector_t::iterator;
   using op_t     = host_write_op<vec_it_t>;
+
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
   vector_t out(4, 42);
   thrust::tabulate_output_iterator<op_t> tabulate_out_it{op_t{out.begin()}};
 
   tabulate_out_it[1] = 2;
   vector_t ref{42, 2, 42, 42};
-  ASSERT_EQUAL(out, ref);
+  ASSERT_EQ(out, ref);
 
   tabulate_out_it[3] = 0;
   ref                = {42, 2, 42, 0};
-  ASSERT_EQUAL(out, ref);
+  ASSERT_EQ(out, ref);
 
   tabulate_out_it[1] = 4;
   ref                = {42, 4, 42, 0};
-  ASSERT_EQUAL(out, ref);
+  ASSERT_EQ(out, ref);
 }
-
-DECLARE_UNITTEST(TestTabulateOutputIterator);
