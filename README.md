@@ -46,7 +46,7 @@ shared/
 
 ## Getting Started
 
-To begin contributing or building, see the [CONTRIBUTING.md](CONTRIBUTING.md) guide. It includes setup instructions, sparse-checkout configuration, development workflow, and pull request guidelines.
+To begin contributing or building, see the [CONTRIBUTING.md](https://github.com/ROCm/rocm-libraries/docs/CONTRIBUTING.md) guide. It includes setup instructions, sparse-checkout configuration, development workflow, and pull request guidelines.
 
 ## License
 
