@@ -349,18 +349,18 @@ void block_load_direct_striped(unsigned int flat_id,
 /// across the thread block.
 ///
 /// \ingroup blockmodule_warp_load_functions
-/// The warp-striped arrangement is assumed to be (\p WarpSize * \p ItemsPerThread) items
+/// The warp-striped arrangement is assumed to be (\p VirtualWaveSize * \p ItemsPerThread) items
 /// across a thread block. Each thread uses a \p flat_id to load a range of
 /// \p ItemsPerThread into \p items.
 ///
-/// * The number of threads in the block must be a multiple of \p WarpSize.
-/// * The default \p WarpSize is a hardware warpsize and is an optimal value.
-/// * \p WarpSize must be a power of two and equal or less than the size of
+/// * The number of threads in the block must be a multiple of \p VirtualWaveSize.
+/// * The default \p VirtualWaveSize is a hardware warpsize and is an optimal value.
+/// * \p VirtualWaveSize must be a power of two and equal or less than the size of
 ///   hardware warp.
-/// * Using \p WarpSize smaller than hardware warpsize could result in lower
+/// * Using \p VirtualWaveSize smaller than hardware warpsize could result in lower
 ///   performance.
 ///
-/// \tparam WarpSize [optional] the number of threads in a warp
+/// \tparam VirtualWaveSize [optional] the number of threads in a warp
 /// \tparam InputIterator [inferred] an iterator type for input (can be a simple
 /// pointer
 /// \tparam T [inferred] the data type
@@ -370,7 +370,7 @@ void block_load_direct_striped(unsigned int flat_id,
 /// \param flat_id a local flat 1D thread id in a block (tile) for the calling thread
 /// \param block_input the input iterator from the thread block to load from
 /// \param items array that data is loaded to
-template<unsigned int WarpSize = arch::wavefront::min_size(),
+template<unsigned int VirtualWaveSize = arch::wavefront::min_size(),
          class InputIterator,
          class T,
          unsigned int ItemsPerThread>
@@ -379,20 +379,21 @@ void block_load_direct_warp_striped(unsigned int  flat_id,
                                     InputIterator block_input,
                                     T (&items)[ItemsPerThread])
 {
-    static_assert(detail::is_power_of_two(WarpSize) && WarpSize <= arch::wavefront::max_size(),
-                  "WarpSize must be a power of two and equal or less"
+    static_assert(detail::is_power_of_two(VirtualWaveSize)
+                      && VirtualWaveSize <= arch::wavefront::max_size(),
+                  "VirtualWaveSize must be a power of two and equal or less"
                   "than the size of hardware warp.");
-    assert(WarpSize <= arch::wavefront::size());
+    assert(VirtualWaveSize <= arch::wavefront::size());
 
-    unsigned int thread_id = detail::logical_lane_id<WarpSize>();
-    unsigned int warp_id = flat_id / WarpSize;
-    unsigned int warp_offset = warp_id * WarpSize * ItemsPerThread;
+    unsigned int thread_id   = detail::logical_lane_id<VirtualWaveSize>();
+    unsigned int warp_id     = flat_id / VirtualWaveSize;
+    unsigned int warp_offset = warp_id * VirtualWaveSize * ItemsPerThread;
 
     InputIterator thread_iter = block_input + thread_id + warp_offset;
     ROCPRIM_UNROLL
     for (unsigned int item = 0; item < ItemsPerThread; item++)
     {
-        items[item] = thread_iter[item * WarpSize];
+        items[item] = thread_iter[item * VirtualWaveSize];
     }
 }
 
@@ -400,18 +401,18 @@ void block_load_direct_warp_striped(unsigned int  flat_id,
 /// across the thread block, which is guarded by range \p valid.
 ///
 /// \ingroup blockmodule_warp_load_functions
-/// The warp-striped arrangement is assumed to be (\p WarpSize * \p ItemsPerThread) items
+/// The warp-striped arrangement is assumed to be (\p VirtualWaveSize * \p ItemsPerThread) items
 /// across a thread block. Each thread uses a \p flat_id to load a range of
 /// \p ItemsPerThread into \p items.
 ///
-/// * The number of threads in the block must be a multiple of \p WarpSize.
-/// * The default \p WarpSize is a hardware warpsize and is an optimal value.
-/// * \p WarpSize must be a power of two and equal or less than the size of
+/// * The number of threads in the block must be a multiple of \p VirtualWaveSize.
+/// * The default \p VirtualWaveSize is a hardware warpsize and is an optimal value.
+/// * \p VirtualWaveSize must be a power of two and equal or less than the size of
 ///   hardware warp.
-/// * Using \p WarpSize smaller than hardware warpsize could result in lower
+/// * Using \p VirtualWaveSize smaller than hardware warpsize could result in lower
 ///   performance.
 ///
-/// \tparam WarpSize [optional] the number of threads in a warp
+/// \tparam VirtualWaveSize [optional] the number of threads in a warp
 /// \tparam InputIterator [inferred] an iterator type for input (can be a simple
 /// pointer
 /// \tparam T [inferred] the data type
@@ -422,7 +423,7 @@ void block_load_direct_warp_striped(unsigned int  flat_id,
 /// \param block_input the input iterator from the thread block to load from
 /// \param items array that data is loaded to
 /// \param valid maximum range of valid numbers to load
-template<unsigned int WarpSize = arch::wavefront::min_size(),
+template<unsigned int VirtualWaveSize = arch::wavefront::min_size(),
          class InputIterator,
          class T,
          unsigned int ItemsPerThread>
@@ -432,20 +433,21 @@ void block_load_direct_warp_striped(unsigned int  flat_id,
                                     T (&items)[ItemsPerThread],
                                     unsigned int valid)
 {
-    static_assert(detail::is_power_of_two(WarpSize) && WarpSize <= arch::wavefront::max_size(),
-                  "WarpSize must be a power of two and equal or less"
+    static_assert(detail::is_power_of_two(VirtualWaveSize)
+                      && VirtualWaveSize <= arch::wavefront::max_size(),
+                  "VirtualWaveSize must be a power of two and equal or less"
                   "than the size of hardware warp.");
-    assert(WarpSize <= arch::wavefront::size());
+    assert(VirtualWaveSize <= arch::wavefront::size());
 
-    unsigned int thread_id = detail::logical_lane_id<WarpSize>();
-    unsigned int warp_id = flat_id / WarpSize;
-    unsigned int warp_offset = warp_id * WarpSize * ItemsPerThread;
+    unsigned int thread_id   = detail::logical_lane_id<VirtualWaveSize>();
+    unsigned int warp_id     = flat_id / VirtualWaveSize;
+    unsigned int warp_offset = warp_id * VirtualWaveSize * ItemsPerThread;
 
     InputIterator thread_iter = block_input + thread_id + warp_offset;
     ROCPRIM_UNROLL
     for (unsigned int item = 0; item < ItemsPerThread; item++)
     {
-        unsigned int offset = item * WarpSize;
+        unsigned int offset = item * VirtualWaveSize;
         if (warp_offset + thread_id + offset < valid)
         {
             items[item] = thread_iter[offset];
@@ -458,18 +460,18 @@ void block_load_direct_warp_striped(unsigned int  flat_id,
 /// for out-of-bound elements.
 ///
 /// \ingroup blockmodule_warp_load_functions
-/// The warp-striped arrangement is assumed to be (\p WarpSize * \p ItemsPerThread) items
+/// The warp-striped arrangement is assumed to be (\p VirtualWaveSize * \p ItemsPerThread) items
 /// across a thread block. Each thread uses a \p flat_id to load a range of
 /// \p ItemsPerThread into \p items.
 ///
-/// * The number of threads in the block must be a multiple of \p WarpSize.
-/// * The default \p WarpSize is a hardware warpsize and is an optimal value.
-/// * \p WarpSize must be a power of two and equal or less than the size of
+/// * The number of threads in the block must be a multiple of \p VirtualWaveSize.
+/// * The default \p VirtualWaveSize is a hardware warpsize and is an optimal value.
+/// * \p VirtualWaveSize must be a power of two and equal or less than the size of
 ///   hardware warp.
-/// * Using \p WarpSize smaller than hardware warpsize could result in lower
+/// * Using \p VirtualWaveSize smaller than hardware warpsize could result in lower
 ///   performance.
 ///
-/// \tparam WarpSize [optional] the number of threads in a warp
+/// \tparam VirtualWaveSize [optional] the number of threads in a warp
 /// \tparam InputIterator [inferred] an iterator type for input (can be a simple
 /// pointer
 /// \tparam T [inferred] the data type
@@ -482,7 +484,7 @@ void block_load_direct_warp_striped(unsigned int  flat_id,
 /// \param items array that data is loaded to
 /// \param valid maximum range of valid numbers to load
 /// \param out_of_bounds default value assigned to out-of-bound items
-template<unsigned int WarpSize = arch::wavefront::min_size(),
+template<unsigned int VirtualWaveSize = arch::wavefront::min_size(),
          class InputIterator,
          class T,
          unsigned int ItemsPerThread,
@@ -494,10 +496,11 @@ void block_load_direct_warp_striped(unsigned int  flat_id,
                                     unsigned int valid,
                                     Default      out_of_bounds)
 {
-    static_assert(detail::is_power_of_two(WarpSize) && WarpSize <= arch::wavefront::max_size(),
-                  "WarpSize must be a power of two and equal or less"
+    static_assert(detail::is_power_of_two(VirtualWaveSize)
+                      && VirtualWaveSize <= arch::wavefront::max_size(),
+                  "VirtualWaveSize must be a power of two and equal or less"
                   "than the size of hardware warp.");
-    assert(WarpSize <= arch::wavefront::size());
+    assert(VirtualWaveSize <= arch::wavefront::size());
 
     ROCPRIM_UNROLL
     for (unsigned int item = 0; item < ItemsPerThread; item++)
@@ -505,12 +508,12 @@ void block_load_direct_warp_striped(unsigned int  flat_id,
         items[item] = out_of_bounds;
     }
 
-    block_load_direct_warp_striped<WarpSize>(flat_id, block_input, items, valid);
+    block_load_direct_warp_striped<VirtualWaveSize>(flat_id, block_input, items, valid);
 }
 
-template<class V                      = rocprim::uint128_t,
-         cache_load_modifier LoadType = load_default,
-         unsigned int        WarpSize = arch::wavefront::min_size(),
+template<class V                             = rocprim::uint128_t,
+         cache_load_modifier LoadType        = load_default,
+         unsigned int        VirtualWaveSize = arch::wavefront::min_size(),
          class T,
          class U,
          unsigned int ItemsPerThread>
@@ -521,10 +524,11 @@ auto block_load_direct_blocked_cast(unsigned int flat_id,
     typename std::enable_if<detail::is_vectorizable<T, ItemsPerThread>::value
                             && (ItemsPerThread * sizeof(T)) % sizeof(V) == 0>::type
 {
-    static_assert(detail::is_power_of_two(WarpSize) && WarpSize <= arch::wavefront::max_size(),
-                  "WarpSize must be a power of two and equal or less"
+    static_assert(detail::is_power_of_two(VirtualWaveSize)
+                      && VirtualWaveSize <= arch::wavefront::max_size(),
+                  "VirtualWaveSize must be a power of two and equal or less"
                   "than the size of hardware warp.");
-    assert(WarpSize <= arch::wavefront::size());
+    assert(VirtualWaveSize <= arch::wavefront::size());
 
     constexpr unsigned int vectors_per_thread = (sizeof(T) * ItemsPerThread) / sizeof(V);
 
@@ -538,9 +542,9 @@ auto block_load_direct_blocked_cast(unsigned int flat_id,
     }
 }
 
-template<class V                      = rocprim::uint128_t,
-         cache_load_modifier LoadType = load_default,
-         unsigned int        WarpSize = arch::wavefront::min_size(),
+template<class V                             = rocprim::uint128_t,
+         cache_load_modifier LoadType        = load_default,
+         unsigned int        VirtualWaveSize = arch::wavefront::min_size(),
          class T,
          class U,
          unsigned int ItemsPerThread>
