@@ -41,17 +41,15 @@
 #include <type_traits>
 #include <vector>
 
-template<
-    class T,
-    unsigned int ItemsPerThread,
-    unsigned int WarpSize,
-    ::rocprim::warp_load_method Method
->
+template<class T,
+         unsigned int                ItemsPerThread,
+         unsigned int                VirtualWaveSize,
+         ::rocprim::warp_load_method Method>
 struct Params
 {
     using type = T;
     static constexpr unsigned int items_per_thread = ItemsPerThread;
-    static constexpr unsigned int warp_size = WarpSize;
+    static constexpr unsigned int                warp_size        = VirtualWaveSize;
     static constexpr ::rocprim::warp_load_method method = Method;
 };
 

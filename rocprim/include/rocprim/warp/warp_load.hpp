@@ -116,26 +116,25 @@ enum class warp_load_method
 /// \endcode
 /// \endparblock
 template<class T,
-         unsigned int            ItemsPerThread,
-         unsigned int            VirtualWaveSize = ::rocprim::arch::wavefront::min_size(),
-         warp_load_method        Method          = warp_load_method::warp_load_direct,
-         arch::wavefront::target TargetWaveSize  = arch::wavefront::get_target(),
-         typename Enabled                        = void>
+         unsigned int     ItemsPerThread,
+         unsigned int     VirtualWaveSize = ::rocprim::arch::wavefront::min_size(),
+         warp_load_method Method          = warp_load_method::warp_load_direct,
+         ::rocprim::arch::wavefront::target TargetWaveSize
+         = ::rocprim::arch::wavefront::get_target(),
+         typename Enabled = void>
 class warp_load
 {
     static_assert(::rocprim::detail::is_power_of_two(VirtualWaveSize),
                   "Logical warp size must be a power of two.");
+
+private:
+    using storage_type_ = typename ::rocprim::detail::empty_storage_type;
 
 public:
     ROCPRIM_INLINE ROCPRIM_HOST_DEVICE warp_load()
     {
         detail::check_virtual_wave_size<VirtualWaveSize>();
     }
-
-private:
-    using storage_type_ = typename ::rocprim::detail::empty_storage_type;
-
-public:
     /// \brief Struct used to allocate a temporary memory that is required for thread
     /// communication during operations provided by related parallel primitive.
     ///
@@ -243,14 +242,27 @@ public:
 };
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
-template<class T, unsigned int ItemsPerThread, unsigned int VirtalWaveSize, warp_load_method Method>
-class warp_load<T, ItemsPerThread, VirtalWaveSize, Method, arch::wavefront::target::dynamic>
+template<class T,
+         unsigned int     ItemsPerThread,
+         unsigned int     VirtualWaveSize,
+         warp_load_method Method>
+class warp_load<T,
+                ItemsPerThread,
+                VirtualWaveSize,
+                Method,
+                ::rocprim::arch::wavefront::target::dynamic>
 {
 private:
-    using warp_load_wave64
-        = warp_load<T, ItemsPerThread, VirtalWaveSize, Method, arch::wavefront::target::size64>;
-    using warp_load_wave32
-        = warp_load<T, ItemsPerThread, VirtalWaveSize, Method, arch::wavefront::target::size32>;
+    using warp_load_wave32 = warp_load<T,
+                                       ItemsPerThread,
+                                       VirtualWaveSize,
+                                       Method,
+                                       ::rocprim::arch::wavefront::target::size32>;
+    using warp_load_wave64 = warp_load<T,
+                                       ItemsPerThread,
+                                       VirtualWaveSize,
+                                       Method,
+                                       ::rocprim::arch::wavefront::target::size64>;
     using dispatch = detail::dispatch_wave_size<warp_load_wave32, warp_load_wave64>;
 
 public:
@@ -265,15 +277,15 @@ public:
 };
 
 template<class T,
-         unsigned int            ItemsPerThread,
-         unsigned int            VirtualWaveSize,
-         arch::wavefront::target TargetWaveSize>
+         unsigned int                       ItemsPerThread,
+         unsigned int                       VirtualWaveSize,
+         ::rocprim::arch::wavefront::target TargetWaveSize>
 class warp_load<T,
                 ItemsPerThread,
                 VirtualWaveSize,
                 warp_load_method::warp_load_striped,
                 TargetWaveSize,
-                detail::wave_target_guard_t<TargetWaveSize>>
+                ::rocprim::detail::wave_target_guard_t<TargetWaveSize>>
 {
     static_assert(::rocprim::detail::is_power_of_two(VirtualWaveSize),
                   "Logical warp size must be a power of two.");
@@ -340,15 +352,15 @@ public:
 };
 
 template<class T,
-         unsigned int            ItemsPerThread,
-         unsigned int            VirtualWaveSize,
-         arch::wavefront::target TargetWaveSize>
+         unsigned int                       ItemsPerThread,
+         unsigned int                       VirtualWaveSize,
+         ::rocprim::arch::wavefront::target TargetWaveSize>
 class warp_load<T,
                 ItemsPerThread,
                 VirtualWaveSize,
                 warp_load_method::warp_load_vectorize,
                 TargetWaveSize,
-                detail::wave_target_guard_t<TargetWaveSize>>
+                ::rocprim::detail::wave_target_guard_t<TargetWaveSize>>
 {
     static_assert(::rocprim::detail::is_power_of_two(VirtualWaveSize),
                   "Logical warp size must be a power of two.");
@@ -421,15 +433,15 @@ public:
 };
 
 template<class T,
-         unsigned int            ItemsPerThread,
-         unsigned int            VirtualWaveSize,
-         arch::wavefront::target TargetWaveSize>
+         unsigned int                       ItemsPerThread,
+         unsigned int                       VirtualWaveSize,
+         ::rocprim::arch::wavefront::target TargetWaveSize>
 class warp_load<T,
                 ItemsPerThread,
                 VirtualWaveSize,
                 warp_load_method::warp_load_transpose,
                 TargetWaveSize,
-                detail::wave_target_guard_t<TargetWaveSize>>
+                ::rocprim::detail::wave_target_guard_t<TargetWaveSize>>
 {
     static_assert(::rocprim::detail::is_power_of_two(VirtualWaveSize),
                   "Logical warp size must be a power of two.");

@@ -45,7 +45,7 @@ BEGIN_ROCPRIM_NAMESPACE
 ///
 /// \tparam T the input type.
 /// \tparam ItemsPerThread the number of items contributed by each thread.
-/// \tparam WarpSize the number of threads in a warp.
+/// \tparam VirtualWaveSize the number of threads in a warp.
 ///
 /// \par Overview
 /// * The \p warp_exchange class supports the following rearrangement methods:
@@ -80,18 +80,24 @@ BEGIN_ROCPRIM_NAMESPACE
 /// \endparblock
 template<class T,
          unsigned int ItemsPerThread,
-         unsigned int WarpSize = ::rocprim::arch::wavefront::min_size()>
+         unsigned int VirtualWaveSize = ::rocprim::arch::wavefront::min_size(),
+         ::rocprim::arch::wavefront::target TargetWaveSize
+         = ::rocprim::arch::wavefront::get_target()>
 class warp_exchange
 {
-    static_assert(::rocprim::detail::is_power_of_two(WarpSize),
+    static_assert(::rocprim::detail::is_power_of_two(VirtualWaveSize),
                   "Logical warp size must be a power of two.");
-    ROCPRIM_DETAIL_DEVICE_STATIC_ASSERT(
-        WarpSize <= ::rocprim::arch::wavefront::min_size(),
-        "Logical warp size cannot be larger than physical warp size.");
 
+public:
+    ROCPRIM_INLINE ROCPRIM_HOST_DEVICE warp_exchange()
+    {
+        detail::check_virtual_wave_size<VirtualWaveSize>();
+    }
+
+private:
     struct storage_type_
     {
-        uninitialized_array<T, WarpSize * ItemsPerThread> buffer;
+        uninitialized_array<T, VirtualWaveSize * ItemsPerThread> buffer;
     };
 
     template<int NumEntries, int IdX, class U>
@@ -105,7 +111,7 @@ class warp_exchange
         {
             const T send_val = (xor_bit_set ? input[IdX] : input[IdX + NumEntries]);
             const T recv_val
-                = ::rocprim::detail::warp_swizzle_shuffle(send_val, NumEntries, WarpSize);
+                = ::rocprim::detail::warp_swizzle_shuffle(send_val, NumEntries, VirtualWaveSize);
             (xor_bit_set ? output[IdX] : output[IdX + NumEntries]) = recv_val;
         }
     }
@@ -187,21 +193,21 @@ class warp_exchange
     // Conditions for blocked to striped and striped to blocked
     struct conditions
     {
-        static constexpr bool is_equal_size = WarpSize == ItemsPerThread;
+        static constexpr bool is_equal_size = VirtualWaveSize == ItemsPerThread;
 
         static constexpr bool is_quad_compatible_bs
             = ItemsPerThread % ROCPRIM_QUAD_SIZE == 0
-              && ItemsPerThread % (WarpSize / ROCPRIM_QUAD_SIZE) == 0;
+              && ItemsPerThread % (VirtualWaveSize / ROCPRIM_QUAD_SIZE) == 0;
 
         static constexpr bool is_quad_compatible_sb
             = ItemsPerThread % ROCPRIM_QUAD_SIZE == 0
-              && ItemsPerThread % (WarpSize / ROCPRIM_QUAD_SIZE) == 0
+              && ItemsPerThread % (VirtualWaveSize / ROCPRIM_QUAD_SIZE) == 0
               // this config is not performant for the DPP quad_perm implementation
-              && !(WarpSize == 64 && ItemsPerThread == 32);
+              && !(VirtualWaveSize == 64 && ItemsPerThread == 32);
 
-        static constexpr bool warp_divide_items = ItemsPerThread % WarpSize == 0;
+        static constexpr bool warp_divide_items = ItemsPerThread % VirtualWaveSize == 0;
 
-        static constexpr bool items_divide_warp = WarpSize % ItemsPerThread == 0;
+        static constexpr bool items_divide_warp = VirtualWaveSize % ItemsPerThread == 0;
     };
 
     enum class ImplementationType
@@ -272,9 +278,7 @@ class warp_exchange
         blocked_to_striped_shuffle_impl(const T (&input)[ItemsPerThread],
                                         U (&output)[ItemsPerThread])
     {
-        static constexpr bool IS_ARCH_WARP = WarpSize == ::rocprim::arch::wavefront::min_size();
-        const unsigned int    flat_lane_id = ::rocprim::detail::logical_lane_id<WarpSize>();
-        const unsigned int    lane_id = IS_ARCH_WARP ? flat_lane_id : (flat_lane_id % WarpSize);
+        const unsigned int    lane_id = ::rocprim::detail::logical_lane_id<VirtualWaveSize>();
         T                     temp[ItemsPerThread];
         ROCPRIM_UNROLL
         for(unsigned int i = 0; i < ItemsPerThread; i++)
@@ -291,7 +295,7 @@ class warp_exchange
 
     // Case 2: Quad compatible
     // Works only when ItemsPerThread % ROCPRIM_QUAD_SIZE == 0 &&
-    //                 ItemsPerThread % (WarpSize / ROCPRIM_QUAD_SIZE) == 0
+    //                 ItemsPerThread % (VirtualWaveSize / ROCPRIM_QUAD_SIZE) == 0
     //
     // FIRST PART: Going from blocked to striped at the quad level using DPP quad_perm and
     //             item rearrangements
@@ -333,10 +337,10 @@ class warp_exchange
         blocked_to_striped_shuffle_impl(const T (&input)[ItemsPerThread],
                                         U (&output)[ItemsPerThread])
     {
-        constexpr unsigned int NUM_QUADS         = WarpSize / ROCPRIM_QUAD_SIZE;
+        constexpr unsigned int NUM_QUADS         = VirtualWaveSize / ROCPRIM_QUAD_SIZE;
         constexpr unsigned int IPT_DIV_QUAD_SIZE = ItemsPerThread / ROCPRIM_QUAD_SIZE;
 
-        const unsigned int flat_id = ::rocprim::detail::logical_lane_id<WarpSize>();
+        const unsigned int flat_id = ::rocprim::detail::logical_lane_id<VirtualWaveSize>();
 
         U values1[ItemsPerThread];
         U values2[ItemsPerThread];
@@ -394,7 +398,7 @@ class warp_exchange
             quad_perm_index--;
         }
 
-        if constexpr(WarpSize > ROCPRIM_QUAD_SIZE)
+        if constexpr(VirtualWaveSize > ROCPRIM_QUAD_SIZE)
         {
             // First warp rotation
             ROCPRIM_UNROLL
@@ -404,7 +408,7 @@ class warp_exchange
                 if(i_mod_quad_warp != 0)
                 {
                     const unsigned int total_rotation = i_mod_quad_warp * ROCPRIM_QUAD_SIZE;
-                    values2[i] = warp_rotate_right<WarpSize>(values2[i], total_rotation);
+                    values2[i] = warp_rotate_right<VirtualWaveSize>(values2[i], total_rotation);
                 }
             }
 
@@ -420,7 +424,7 @@ class warp_exchange
                 for(unsigned int j = 0; j < items_per_quad_warp && (i + j) < ItemsPerThread; j++)
                 {
                     const unsigned int rotation = remaining_rotations * ROCPRIM_QUAD_SIZE;
-                    values3[i + j] = warp_rotate_right<WarpSize>(values3[i + j], rotation);
+                    values3[i + j] = warp_rotate_right<VirtualWaveSize>(values3[i + j], rotation);
                 }
                 remaining_rotations--;
             }
@@ -442,8 +446,8 @@ class warp_exchange
         blocked_to_striped_shuffle_impl(const T (&input)[ItemsPerThread],
                                         U (&output)[ItemsPerThread])
     {
-        const unsigned int     flat_id      = ::rocprim::detail::logical_lane_id<WarpSize>();
-        constexpr unsigned int ipt_div_warp = ItemsPerThread / WarpSize;
+        const unsigned int     flat_id      = ::rocprim::detail::logical_lane_id<VirtualWaveSize>();
+        constexpr unsigned int ipt_div_warp = ItemsPerThread / VirtualWaveSize;
         U                      values1[ItemsPerThread];
         U                      values2[ItemsPerThread];
 
@@ -457,24 +461,24 @@ class warp_exchange
         ROCPRIM_UNROLL
         for(unsigned int i = 1; i < ItemsPerThread; i++)
         {
-            const unsigned int rotations = i % WarpSize;
+            const unsigned int rotations = i % VirtualWaveSize;
             if(rotations != 0)
             {
-                values1[i] = warp_rotate_right<WarpSize>(values1[i], rotations);
+                values1[i] = warp_rotate_right<VirtualWaveSize>(values1[i], rotations);
             }
         }
 
-        rearrange_items<WarpSize, true>(flat_id, values1, values2);
+        rearrange_items<VirtualWaveSize, true>(flat_id, values1, values2);
 
         // Second warp rotation
-        unsigned int rotations = WarpSize - 1;
+        unsigned int rotations = VirtualWaveSize - 1;
         ROCPRIM_UNROLL
         for(unsigned int i = 0; i < ItemsPerThread; i += ipt_div_warp)
         {
             ROCPRIM_UNROLL
             for(unsigned int j = 0; j < ipt_div_warp; j++)
             {
-                values2[i] = warp_rotate_right<WarpSize>(values2[i], rotations);
+                values2[i] = warp_rotate_right<VirtualWaveSize>(values2[i], rotations);
                 rotations--;
             }
         }
@@ -494,7 +498,7 @@ class warp_exchange
         blocked_to_striped_shuffle_impl(const T (&input)[ItemsPerThread],
                                         U (&output)[ItemsPerThread])
     {
-        const unsigned int flat_id = ::rocprim::detail::logical_lane_id<WarpSize>();
+        const unsigned int flat_id = ::rocprim::detail::logical_lane_id<VirtualWaveSize>();
         U                  work_array[ItemsPerThread];
 
         ROCPRIM_UNROLL
@@ -505,8 +509,8 @@ class warp_exchange
             {
                 const auto value = ::rocprim::warp_shuffle(
                     input[src_idx],
-                    flat_id / ItemsPerThread + dst_idx * (WarpSize / ItemsPerThread),
-                    WarpSize);
+                    flat_id / ItemsPerThread + dst_idx * (VirtualWaveSize / ItemsPerThread),
+                    VirtualWaveSize);
                 if(src_idx == flat_id % ItemsPerThread)
                 {
                     work_array[dst_idx] = value;
@@ -534,7 +538,7 @@ class warp_exchange
 
     // Case 2: Quad compatible
     // Works only when ItemsPerThread % ROCPRIM_QUAD_SIZE == 0 &&
-    //                 ItemsPerThread % (WarpSize / ROCPRIM_QUAD_SIZE) == 0
+    //                 ItemsPerThread % (VirtualWaveSize / ROCPRIM_QUAD_SIZE) == 0
     //
     // The logic of this implementation is the inverse of blocked to striped.
     // Check comments of blocked to striped case 2 for more details.
@@ -545,10 +549,10 @@ class warp_exchange
         striped_to_blocked_shuffle_impl(const T (&input)[ItemsPerThread],
                                         U (&output)[ItemsPerThread])
     {
-        constexpr unsigned int NUM_QUADS         = WarpSize / ROCPRIM_QUAD_SIZE;
+        constexpr unsigned int NUM_QUADS         = VirtualWaveSize / ROCPRIM_QUAD_SIZE;
         constexpr unsigned int IPT_DIV_QUAD_SIZE = ItemsPerThread / ROCPRIM_QUAD_SIZE;
 
-        const unsigned int flat_id = ::rocprim::detail::logical_lane_id<WarpSize>();
+        const unsigned int flat_id = ::rocprim::detail::logical_lane_id<VirtualWaveSize>();
 
         U values1[ItemsPerThread];
         U values2[ItemsPerThread];
@@ -561,7 +565,7 @@ class warp_exchange
             values2[i] = input[i];
         }
 
-        if constexpr(WarpSize > ROCPRIM_QUAD_SIZE)
+        if constexpr(VirtualWaveSize > ROCPRIM_QUAD_SIZE)
         {
             // First warp rotation
             constexpr unsigned int items_per_quad_warp = ItemsPerThread / NUM_QUADS;
@@ -573,7 +577,7 @@ class warp_exchange
                 for(unsigned int j = 0; j < items_per_quad_warp && (i + j) < ItemsPerThread; j++)
                 {
                     const unsigned int rotation = remaining_rotations * ROCPRIM_QUAD_SIZE;
-                    values1[i + j] = warp_rotate_left<WarpSize>(values1[i + j], rotation);
+                    values1[i + j] = warp_rotate_left<VirtualWaveSize>(values1[i + j], rotation);
                 }
                 remaining_rotations--;
             }
@@ -588,7 +592,7 @@ class warp_exchange
                 if(i_mod_quad_warp != 0)
                 {
                     const unsigned int total_rotation = i_mod_quad_warp * ROCPRIM_QUAD_SIZE;
-                    values2[i] = warp_rotate_left<WarpSize>(values2[i], total_rotation);
+                    values2[i] = warp_rotate_left<VirtualWaveSize>(values2[i], total_rotation);
                 }
             }
         }
@@ -655,8 +659,8 @@ class warp_exchange
         striped_to_blocked_shuffle_impl(const T (&input)[ItemsPerThread],
                                         U (&output)[ItemsPerThread])
     {
-        const unsigned int     flat_id      = ::rocprim::detail::logical_lane_id<WarpSize>();
-        constexpr unsigned int ipt_div_warp = ItemsPerThread / WarpSize;
+        const unsigned int     flat_id      = ::rocprim::detail::logical_lane_id<VirtualWaveSize>();
+        constexpr unsigned int ipt_div_warp = ItemsPerThread / VirtualWaveSize;
         U                      values1[ItemsPerThread];
         U                      values2[ItemsPerThread];
 
@@ -667,28 +671,28 @@ class warp_exchange
         }
 
         // First warp rotation
-        unsigned int rotations = WarpSize - 1;
+        unsigned int rotations = VirtualWaveSize - 1;
         ROCPRIM_UNROLL
         for(unsigned int i = 0; i < ItemsPerThread; i += ipt_div_warp)
         {
             ROCPRIM_UNROLL
             for(unsigned int j = 0; j < ipt_div_warp; j++)
             {
-                values1[i] = warp_rotate_left<WarpSize>(values1[i], rotations);
+                values1[i] = warp_rotate_left<VirtualWaveSize>(values1[i], rotations);
                 rotations--;
             }
         }
 
-        rearrange_items<WarpSize, false>(flat_id, values1, values2);
+        rearrange_items<VirtualWaveSize, false>(flat_id, values1, values2);
 
         // Second warp rotation
         ROCPRIM_UNROLL
         for(unsigned int i = 1; i < ItemsPerThread; i++)
         {
-            const unsigned int rotations = i % WarpSize;
+            const unsigned int rotations = i % VirtualWaveSize;
             if(rotations != 0)
             {
-                values2[i] = warp_rotate_left<WarpSize>(values2[i], rotations);
+                values2[i] = warp_rotate_left<VirtualWaveSize>(values2[i], rotations);
             }
         }
 
@@ -707,7 +711,7 @@ class warp_exchange
         striped_to_blocked_shuffle_impl(const T (&input)[ItemsPerThread],
                                         U (&output)[ItemsPerThread])
     {
-        const unsigned int flat_id = ::rocprim::detail::logical_lane_id<WarpSize>();
+        const unsigned int flat_id = ::rocprim::detail::logical_lane_id<VirtualWaveSize>();
         U                  work_array[ItemsPerThread];
 
         ROCPRIM_UNROLL
@@ -716,11 +720,11 @@ class warp_exchange
             ROCPRIM_UNROLL
             for(unsigned int src_idx = 0; src_idx < ItemsPerThread; src_idx++)
             {
-                const auto value
-                    = ::rocprim::warp_shuffle(input[src_idx],
-                                              (ItemsPerThread * flat_id + dst_idx) % WarpSize,
-                                              WarpSize);
-                if(flat_id / (WarpSize / ItemsPerThread) == src_idx)
+                const auto value = ::rocprim::warp_shuffle(input[src_idx],
+                                                           (ItemsPerThread * flat_id + dst_idx)
+                                                               % VirtualWaveSize,
+                                                           VirtualWaveSize);
+                if(flat_id / (VirtualWaveSize / ItemsPerThread) == src_idx)
                 {
                     work_array[dst_idx] = value;
                 }
@@ -785,7 +789,7 @@ public:
                             U (&output)[ItemsPerThread],
                             storage_type& storage)
     {
-        const unsigned int flat_id = ::rocprim::detail::logical_lane_id<WarpSize>();
+        const unsigned int flat_id = ::rocprim::detail::logical_lane_id<VirtualWaveSize>();
         ROCPRIM_UNROLL
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
@@ -797,19 +801,19 @@ public:
         ROCPRIM_UNROLL
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
-            output[i] = storage_buffer[i * WarpSize + flat_id];
+            output[i] = storage_buffer[i * VirtualWaveSize + flat_id];
         }
     }
 
     /// \brief Transposes a blocked arrangement of items to a striped arrangement
     /// across the warp, using warp shuffle operations.
-    /// Uses an optimized implementation for when WarpSize is equal to ItemsPerThread.
+    /// Uses an optimized implementation for when VirtualWaveSize is equal to ItemsPerThread.
     /// Caution: this API is experimental. Performance might not be consistent.
     /// One of these following conditions must be satisfied:
-    ///     1. WarpSize is equal to ItemsPerThread
-    ///     2. ItemsPerThread % ROCPRIM_QUAD_SIZE == 0 && ItemsPerThread % (WarpSize / ROCPRIM_QUAD_SIZE) == 0
-    ///     3. ItemsPerThread is divisible by WarpSize
-    ///     4. WarpSize is divisible by ItemsPerThread
+    ///     1. VirtualWaveSize is equal to ItemsPerThread
+    ///     2. ItemsPerThread % ROCPRIM_QUAD_SIZE == 0 && ItemsPerThread % (VirtualWaveSize / ROCPRIM_QUAD_SIZE) == 0
+    ///     3. ItemsPerThread is divisible by VirtualWaveSize
+    ///     4. VirtualWaveSize is divisible by ItemsPerThread
     ///
     /// \tparam U [inferred] the output type.
     ///
@@ -887,12 +891,12 @@ public:
                             U (&output)[ItemsPerThread],
                             storage_type& storage)
     {
-        const unsigned int flat_id = ::rocprim::detail::logical_lane_id<WarpSize>();
+        const unsigned int flat_id = ::rocprim::detail::logical_lane_id<VirtualWaveSize>();
 
         ROCPRIM_UNROLL
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
-            storage.buffer.emplace(i * WarpSize + flat_id, input[i]);
+            storage.buffer.emplace(i * VirtualWaveSize + flat_id, input[i]);
         }
         ::rocprim::wave_barrier();
         const auto& storage_buffer = storage.buffer.get_unsafe_array();
@@ -906,13 +910,13 @@ public:
 
     /// \brief Transposes a striped arrangement of items to a blocked arrangement
     /// across the warp, using warp shuffle operations.
-    /// Uses an optimized implementation for when WarpSize is equal to ItemsPerThread.
+    /// Uses an optimized implementation for when VirtualWaveSize is equal to ItemsPerThread.
     /// Caution: this API is experimental. Performance might not be consistent.
     /// One of these following conditions must be satisfied:
-    ///     1. WarpSize is equal to ItemsPerThread
-    ///     2. ItemsPerThread % ROCPRIM_QUAD_SIZE == 0 && ItemsPerThread % (WarpSize / ROCPRIM_QUAD_SIZE) == 0
-    ///     3. ItemsPerThread is divisible by WarpSize
-    ///     4. WarpSize is divisible by ItemsPerThread
+    ///     1. VirtualWaveSize is equal to ItemsPerThread
+    ///     2. ItemsPerThread % ROCPRIM_QUAD_SIZE == 0 && ItemsPerThread % (VirtualWaveSize / ROCPRIM_QUAD_SIZE) == 0
+    ///     3. ItemsPerThread is divisible by VirtualWaveSize
+    ///     4. VirtualWaveSize is divisible by ItemsPerThread
     ///
     /// \tparam U [inferred] the output type.
     ///
@@ -952,7 +956,7 @@ public:
 
     /// \brief Orders \p input values according to ranks using temporary storage,
     /// then writes the values to \p output in a striped manner.
-    /// No values in \p ranks should exists that exceed \p WarpSize*ItemsPerThread-1 .
+    /// No values in \p ranks should exists that exceed \p VirtualWaveSize*ItemsPerThread-1 .
     /// \tparam U [inferred] the output type.
     ///
     /// \param [in] input array that data is loaded from.
@@ -996,7 +1000,7 @@ public:
                             const OffsetT (&ranks)[ItemsPerThread],
                             storage_type& storage)
     {
-        const unsigned int flat_id = ::rocprim::detail::logical_lane_id<WarpSize>();
+        const unsigned int flat_id = ::rocprim::detail::logical_lane_id<VirtualWaveSize>();
 
         ROCPRIM_UNROLL
         for(unsigned int i = 0; i < ItemsPerThread; i++)
@@ -1009,11 +1013,71 @@ public:
         ROCPRIM_UNROLL
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
-            unsigned int item_offset = (i * WarpSize) + flat_id;
+            unsigned int item_offset = (i * VirtualWaveSize) + flat_id;
             output[i]                = storage_buffer[item_offset];
         }
     }
 };
+
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
+
+template<typename T, unsigned int ItemsPerThread, unsigned int VirtualWaveSize>
+class warp_exchange<T, ItemsPerThread, VirtualWaveSize, ::rocprim::arch::wavefront::target::dynamic>
+{
+private:
+    using warp_exchange_wave32 = warp_exchange<T,
+                                               ItemsPerThread,
+                                               VirtualWaveSize,
+                                               ::rocprim::arch::wavefront::target::size32>;
+    using warp_exchange_wave64 = warp_exchange<T,
+                                               ItemsPerThread,
+                                               VirtualWaveSize,
+                                               ::rocprim::arch::wavefront::target::size64>;
+    using dispatch
+        = ::rocprim::detail::dispatch_wave_size<warp_exchange_wave32, warp_exchange_wave64>;
+
+public:
+    using storage_type = typename dispatch::storage_type;
+
+    template<typename... Args>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    auto blocked_to_striped(Args&&... args)
+    {
+        dispatch{}([](auto impl, auto&&... args) { impl.blocked_to_striped(args...); }, args...);
+    }
+
+    template<typename... Args>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    auto blocked_to_striped_shuffle(Args&&... args)
+    {
+        dispatch{}([](auto impl, auto&&... args) { impl.blocked_to_striped_shuffle(args...); },
+                   args...);
+    }
+
+    template<typename... Args>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    auto striped_to_blocked(Args&&... args)
+    {
+        dispatch{}([](auto impl, auto&&... args) { impl.striped_to_blocked(args...); }, args...);
+    }
+
+    template<typename... Args>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    auto striped_to_blocked_shuffle(Args&&... args)
+    {
+        dispatch{}([](auto impl, auto&&... args) { impl.striped_to_blocked_shuffle(args...); },
+                   args...);
+    }
+
+    template<typename... Args>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    auto scatter_to_striped(Args&&... args)
+    {
+        dispatch{}([](auto impl, auto&&... args) { impl.scatter_to_striped(args...); }, args...);
+    }
+};
+
+#endif // DOXYGEN_SHOULD_SKIP_THIS
 
 END_ROCPRIM_NAMESPACE
 
