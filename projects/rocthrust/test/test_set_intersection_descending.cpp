@@ -29,32 +29,19 @@ TESTS_DEFINE(SetIntersectionDescendingPrimitiveTests, NumericalTestsParams);
 TYPED_TEST(SetIntersectionDescendingTests, TestSetIntersectionDescendingSimple)
 {
   using Vector   = typename TestFixture::input_type;
-  using Policy   = typename TestFixture::execution_policy;
   using T        = typename Vector::value_type;
   using Iterator = typename Vector::iterator;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  Vector a(3), b(4);
-
-  a[0] = 4;
-  a[1] = 2;
-  a[2] = 0;
-  b[0] = 4;
-  b[1] = 3;
-  b[2] = 3;
-  b[3] = 0;
-
-  Vector ref(2);
-  ref[0] = 4;
-  ref[1] = 0;
+  Vector a{4, 2, 0}, b{4, 3, 3, 0};
+  Vector ref{4, 0};
 
   Vector result(2);
 
-  Iterator end =
-    thrust::set_intersection(Policy{}, a.begin(), a.end(), b.begin(), b.end(), result.begin(), thrust::greater<T>());
+  Iterator end = thrust::set_intersection(a.begin(), a.end(), b.begin(), b.end(), result.begin(), thrust::greater<T>());
 
-  EXPECT_EQ(result.end(), end);
+  ASSERT_EQ_QUIET(result.end(), end);
   ASSERT_EQ(ref, result);
 }
 
@@ -74,7 +61,6 @@ TYPED_TEST(SetIntersectionDescendingPrimitiveTests, TestSetIntersectionDescendin
 
       thrust::host_vector<T> temp =
         get_random_data<T>(2 * size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
-
       thrust::host_vector<T> h_a(temp.begin(), temp.begin() + size);
       thrust::host_vector<T> h_b(temp.begin() + size, temp.end());
 
