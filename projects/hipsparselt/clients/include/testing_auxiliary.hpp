@@ -900,7 +900,7 @@ void testing_aux_matmul_get_attr_bad_arg(const Arguments& arg)
 
     size_t bad_ptr_size = sizeof(void*) - 1;
     void* dBias;
-    hipMalloc((void**)&dBias, (M) * sizeof(float));
+    CHECK_HIP_ERROR(hipMalloc((void**)&dBias, (M) * sizeof(float)));
     EXPECT_HIPSPARSE_STATUS(hipsparseLtMatmulDescGetAttribute(
                                 handle, matmul, HIPSPARSELT_MATMUL_BIAS_POINTER, &dBias, bad_ptr_size),
                             HIPSPARSE_STATUS_INVALID_VALUE);

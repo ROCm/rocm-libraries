@@ -32,54 +32,28 @@ from typing import List, Union, NamedTuple
 
 from ..Common import print1, ensurePath
 
-from .Component import Compiler, Bundler
+from .Component import Compiler, Bundler, RocObjLs, RocObjExtract
 
 class SourceToolchain(NamedTuple):
    compiler: Compiler
    bundler: Bundler
+   rocObjLs: RocObjLs
+   rocObjExtract: RocObjExtract
 
 
-def makeSourceToolchain(compiler_path, bundler_path, asan_build=False, build_id_kind="sha1", save_temps=False):
-   compiler = Compiler(compiler_path, build_id_kind, asan_build, save_temps)
+def makeSourceToolchain(compiler_path, bundler_path, ls_path, extract_path, cpu_threads, asan_build=False, build_id_kind="sha1", save_temps=False):
+   compiler = Compiler(compiler_path, build_id_kind, cpu_threads, asan_build, save_temps)
    bundler = Bundler(bundler_path)
-   return SourceToolchain(compiler, bundler)
-
-
-def _computeSourceCodeObjectFilename(target: str, base: str, buildPath: Union[Path, str], arch: str) -> Union[Path, None]:
-    """Generates a code object file path using the target, base, and build path.
-
-    Args:
-        target: The target triple.
-        base: The base name for the output file (name without extension).
-        buildPath: The build directory path.
-
-    Returns:
-        Path to the code object file.
-    """
-    coPath = None
-    buildPath = Path(buildPath)
-    if "TensileLibrary" in base and "fallback" in base:
-        coPath = buildPath / "{0}_{1}.hsaco.raw".format(base, arch)
-    elif "TensileLibrary" in base:
-        variant = [t for t in ["", "xnack-", "xnack+"] if t in target][-1]
-        baseVariant = base + "-" + variant if variant else base
-        if arch in baseVariant:
-            coPath = buildPath / (baseVariant + ".hsaco.raw")
-    else:
-        coPath= buildPath / "{0}.so-000-{1}.hsaco.raw".format(base, arch)
-
-    return coPath
+   ls = RocObjLs(ls_path)
+   extract = RocObjExtract(extract_path)
+   return SourceToolchain(compiler, bundler, ls, extract)
 
 
 def buildSourceCodeObjectFiles(
-        compiler: Compiler,
-        bundler: Bundler,
-        destDir: Union[Path, str],
-        tmpObjDir: Union[Path, str],
-        includeDir: Union[Path, str],
-        kernelPath: Union[Path, str],
-        cmdlineArchs: List[str]
-    ) -> List[str]:
+        toolchain: SourceToolchain,
+        destPath: Path,
+        sharedObjPath: Union[Path, str]
+    ):
     """Compiles a HIP source code file into a code object file.
 
     Args:
@@ -92,35 +66,13 @@ def buildSourceCodeObjectFiles(
     Returns:
         List of paths to the created code objects.
     """
-    start = timer()
 
-    tmpObjDir = Path(ensurePath(tmpObjDir))
-    destDir = Path(ensurePath(destDir))
-    kernelPath = Path(kernelPath)
-
-    objFilename = kernelPath.stem + '.o'
-    coPathsRaw = []
-    coPaths= []
-
-    objPath = str(tmpObjDir / objFilename)
-    compiler(str(includeDir), cmdlineArchs, str(kernelPath), objPath)
-
-    for target in bundler.targets(objPath):
+    for target, filename in toolchain.rocObjLs(sharedObjPath):
       match = re.search("gfx.*$", target)
       if match:
+        print(f"Generating Kernels.so for {target.split('-')[-1]}")
         arch = re.sub(":", "-", match.group())
-        coPathRaw = _computeSourceCodeObjectFilename(target, kernelPath.stem, tmpObjDir, arch)
-        if not coPathRaw: continue
-        bundler(target, objPath, str(coPathRaw))
-
-        coPath = str(destDir / coPathRaw.stem)
-        coPathsRaw.append(coPathRaw)
-        coPaths.append(coPath)
-
-    for src, dst in zip(coPathsRaw, coPaths):
+        toolchain.rocObjExtract(filename)
+        src = str(Path(sharedObjPath).parent / (str(Path(filename).name).replace("#","-").replace("=","").replace("&","-") + ".co"))
+        dst = str(destPath / f"Kernels.so-000-{arch}.hsaco")
         shutil.move(src, dst)
-
-    stop = timer()
-    print1(f"buildSourceCodeObjectFile time (s): {(stop-start):3.2f}")
-
-    return coPaths

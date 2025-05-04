@@ -55,7 +55,7 @@ from Tensile.Common import (
 from Tensile.Common.Architectures import gfxToIsa, isaToGfx, SUPPORTED_GFX
 from Tensile.Common.Capabilities import makeIsaInfoMap
 from Tensile.Common.GlobalParameters import assignGlobalParameters, globalParameters
-from Tensile.SolutionStructs.Naming import getKernelFileBase, getKeyNoInternalArgs, getSerialNaming, getKernelNameMin
+from Tensile.SolutionStructs.Naming import getKernelFileBase, getKeyNoInternalArgs
 
 from Tensile.CustomYamlLoader import load_logic_gfx_arch
 from Tensile.KernelHelperNaming import kernelObjectNameCallables, initHelperKernelObjects
@@ -63,6 +63,7 @@ from Tensile.KernelWriterAssembly import KernelWriterAssembly
 from Tensile.KernelWriterBase import (
     KERNEL_HELPER_FILENAME_CPP,
     KERNEL_HELPER_FILENAME_H,
+    KernelWriterBase,
 )
 from Tensile.SolutionLibrary import MasterSolutionLibrary
 from Tensile.SolutionStructs import Solution
@@ -92,15 +93,15 @@ class KernelCodeGenResult(NamedTuple):
     mathclk: int
 
 
-def processKernelSource(kernelWriterAssembly, data, useShortNames, splitGSU, kernelSerialNaming, kernel) -> KernelCodeGenResult:
+def processKernelSource(kernelWriterAssembly, data, splitGSU, kernel) -> KernelCodeGenResult:
     """
     Generate source for a single kernel.
     Returns (error, source, header, kernelName).
     """
     kernelWriter = kernelWriterAssembly
     kernelWriter.setTensileInstructions(data)
-    asmFilename = getKernelFileBase(useShortNames, splitGSU, kernelSerialNaming, kernel)
-    err, src = kernelWriter.getSourceFileString(kernel, useShortNames)
+    asmFilename = getKernelFileBase(splitGSU, kernel)
+    err, src = kernelWriter.getSourceFileString(kernel)
     header = kernelWriter.getHeaderFileString(kernel)
     objFilename = kernel._state.get("codeObjectFile", None)
     pgr = int(kernel["PrefetchGlobalRead"])
@@ -186,33 +187,92 @@ def writeAssembly(asmPath: Union[Path, str], result: KernelCodeGenResult):
 
     return path, isa, wfsize
 
+def writeHelper(outputPath: Path, kernelHelperObj: KernelWriterBase, khoNames: List[str]) -> str:
+    """
+    Write kernel helper source and header files.
 
-def writeHelpers(
-    outputPath, kernelHelperObjs, KERNEL_HELPER_FILENAME_CPP, KERNEL_HELPER_FILENAME_H
-):
-    kernelSourceFilename = os.path.join(os.path.normcase(outputPath), KERNEL_HELPER_FILENAME_CPP)
-    kernelHeaderFilename = os.path.join(os.path.normcase(outputPath), KERNEL_HELPER_FILENAME_H)
+    Args:
+        outputPath: Base path where files will be written
+        kernelHelperObj: Kernel helper object with source and header content
+        khoNames: List of all kernel helper object names for dependency resolution
 
-    with open(kernelHeaderFilename, "w", encoding="utf-8") as kernelHeaderFile, open(
-        kernelSourceFilename, "w", encoding="utf-8"
-    ) as kernelSourceFile:
-        kernelSourceFile.write(CHeader)
-        kernelHeaderFile.write(CHeader)
-        kernelSourceFile.write('#include "Kernels.h"\n')
+    Returns:
+        The path to the generated source file
+    """
+    name = kernelHelperObj.getKernelName()
+    sourceFilename = f"{name}.cpp"
+    headerFilename = f"{name}.h"
+    kernelsDir = Path(outputPath) / "Kernels"
+
+    if not kernelsDir.exists():
+        kernelsDir.mkdir(parents=True, exist_ok=True)
+
+    kernelSourcePath = str(kernelsDir / sourceFilename)
+    kernelHeaderPath = str(kernelsDir / headerFilename)
+
+    includes = _getRequiredIncludes(name, kernelHelperObj, khoNames)
+
+    with open(kernelHeaderPath, "w", encoding="utf-8") as kernelHeaderFile, \
+         open(kernelSourcePath, "w", encoding="utf-8") as kernelSourceFile:
+
+        for file in (kernelSourceFile, kernelHeaderFile):
+            file.write(CHeader)
+
+        kernelSourceFile.write(f"#include \"{name}.h\"\n")
+
         kernelHeaderFile.write("#pragma once\n")
         kernelHeaderFile.write("#include <hip/hip_runtime.h>\n")
         kernelHeaderFile.write("#include <hip/hip_ext.h>\n\n")
-        kernelHeaderFile.write('#include "KernelHeader.h"\n\n')
-        HeaderText = ""
-        for ko in kernelHelperObjs:
-            kernelName = ko.getKernelName()
-            (err, src) = ko.getSourceFileString()
+        kernelHeaderFile.write("#include \"KernelHeader.h\"\n\n")
 
-            kernelSourceFile.write(src)
-            if err:
-                print("*** warning: invalid kernel#%u" % kernelName)
-            HeaderText += ko.getHeaderFileString()
-        kernelHeaderFile.write(HeaderText)
+        for include in includes:
+            kernelHeaderFile.write(f"#include \"Kernels/{include}.h\"\n")
+
+        err, src = kernelHelperObj.getSourceFileString()
+        if err:
+            printWarning(f"Invalid kernel: {name} (error code {err})")
+
+        kernelSourceFile.write(src)
+        kernelHeaderFile.write(kernelHelperObj.getHeaderFileString())
+
+    return kernelSourcePath
+
+
+def _getRequiredIncludes(name: str, kernelHelperObj: KernelWriterBase, khoNames: List[str]) -> set:
+    """
+    Determine the required includes for a kernel helper.
+
+    Args:
+        name: Kernel helper name
+        khoNames: List of all kernel helper object names
+        kernelHelperObj: The kernel helper object to analyze
+
+    Returns:
+        List of kernel helper names to include
+    """
+    includes = set()
+
+    # Add enum includes for non-enum helpers
+    if "Enum" not in name:
+        includes.update(n for n in khoNames if "Enum" in n)
+
+        # Include gradient activation enums for gradient helpers
+        hasGradient = hasattr(kernelHelperObj, "actGradientPrefix") and kernelHelperObj.actGradientPrefix == "Gradient"
+        if hasGradient:
+            includes.update(n for n in khoNames if "TensileGradientActivation_" in n)
+
+    # Include activation helpers
+    hasActivation = ("TensileActivation_S" in name or "TensileActivation_I" in name)
+    if not hasActivation and "Enum" not in name:
+        includes.update(n for n in khoNames if "TensileActivation_" in n)
+
+    # Include gradient activation helpers
+    hasGradientActivation = "TensileGradientActivation_S" in name
+    if not hasGradientActivation and "Enum" not in name:
+        if hasattr(kernelHelperObj, "actGradientPrefix") and kernelHelperObj.actGradientPrefix == "Gradient":
+            includes.update(n for n in khoNames if "TensileGradientActivation_" in n)
+
+    return includes
 
 
 def writeSolutionsAndKernels(
@@ -225,11 +285,9 @@ def writeSolutionsAndKernels(
     kernelWriterAssembly,
     splitGSU: bool,
     cmdlineArchs: List[str],
-    kernelSerialNaming,
     errorTolerant=False,
     generateSourcesAndExit=False,
     compress=True,
-    useShortNames=False,
 ):
     codeObjectFiles = []
 
@@ -244,13 +302,15 @@ def writeSolutionsAndKernels(
     objectTmpPath = ensurePath(
         buildTmpPath / "code_object_tmp"
     )  # Temp path for HSA code object files (.hsaco)
+    kernelsIncludePath = outputPath / "Kernels"
+    kernelsIncludePath.mkdir(parents=True, exist_ok=True)
 
     asmKernels = [k for k in kernels if k["KernelLanguage"] == "Assembly"]
 
     visited = set()
     duplicates = 0
     for k in asmKernels:
-        base = getKernelFileBase(useShortNames, splitGSU, kernelSerialNaming, k)
+        base = getKernelFileBase(splitGSU, k)
         k.duplicate = True if base in visited else False
         if not k.duplicate:
             k["BaseName"] = base
@@ -265,9 +325,7 @@ def writeSolutionsAndKernels(
     asmIter = zip(
         itertools.repeat(kernelWriterAssembly),
         itertools.repeat(rocisa.rocIsa.getInstance().getData()),
-        itertools.repeat(useShortNames),
         itertools.repeat(splitGSU),
-        itertools.repeat(kernelSerialNaming),
         asmKernels
     )
     asmResults = ParallelMap2(processKernelSource, asmIter, "Generating assembly kernels", return_as="list")
@@ -292,9 +350,6 @@ def writeSolutionsAndKernels(
         multiArg=False,
     )
 
-    writeHelpers(outputPath, kernelHelperObjs, KERNEL_HELPER_FILENAME_CPP, KERNEL_HELPER_FILENAME_H)
-    srcKernelFile = Path(outputPath) / "Kernels.cpp"
-
     if not generateSourcesAndExit:
         codeObjectFiles += buildAssemblyCodeObjectFiles(
             asmToolchain.linker,
@@ -305,15 +360,11 @@ def writeSolutionsAndKernels(
             assemblyTmpPath,
             compress,
         )
-        buildSourceCodeObjectFiles(
-            srcToolchain.compiler,
-            srcToolchain.bundler,
-            destLibPath,
-            objectTmpPath,
-            outputPath,
-            srcKernelFile,
-            cmdlineArchs,
-        )
+        khoNames = [kho.getKernelName() for kho in kernelHelperObjs]
+        srcFiles = [writeHelper(outputPath, helper, khoNames) for helper in kernelHelperObjs]
+        kernelsLib = str(objectTmpPath / "Kernels.so")
+        srcToolchain.compiler(srcFiles, kernelsLib, str(outputPath), cmdlineArchs)
+        buildSourceCodeObjectFiles(srcToolchain, outputPath / "library", kernelsLib)
 
     return codeObjectFiles, numKernels
 
@@ -326,9 +377,7 @@ def writeSolutionsAndKernelsTCL(
     kernelHelperObjs,
     kernelWriterAssembly,
     cmdlineArchs: List[str],
-    kernelSerialNaming,
     compress=True,
-    useShortNames=False,
 ):
     outputPath = Path(outputPath)
     destLibPath = ensurePath(
@@ -348,7 +397,7 @@ def writeSolutionsAndKernelsTCL(
     duplicates = 0
     splitGSU = False
     for k in asmKernels:
-        base = getKernelFileBase(useShortNames, splitGSU, kernelSerialNaming, k)
+        base = getKernelFileBase(splitGSU, k)
         k["BaseName"] = base
         k.duplicate = True if base in visited else False
         duplicates += k.duplicate
@@ -366,9 +415,7 @@ def writeSolutionsAndKernelsTCL(
         processKernelSource,
         kernelWriterAssembly,
         rocisa.rocIsa.getInstance().getData(),
-        useShortNames,
         splitGSU,
-        kernelSerialNaming
     )
 
     unaryWriteAssembly = functools.partial(writeAssembly, assemblyTmpPath)
@@ -390,17 +437,12 @@ def writeSolutionsAndKernelsTCL(
         compress,
     )
 
-    writeHelpers(outputPath, kernelHelperObjs, KERNEL_HELPER_FILENAME_CPP, KERNEL_HELPER_FILENAME_H)
-    srcKernelFile = Path(outputPath) / "Kernels.cpp"
-    buildSourceCodeObjectFiles(
-        srcToolchain.compiler,
-        srcToolchain.bundler,
-        destLibPath,
-        objectTmpPath,
-        outputPath,
-        srcKernelFile,
-        cmdlineArchs,
-    )
+    khoNames = [kho.getKernelName() for kho in kernelHelperObjs]
+    srcFiles = [writeHelper(outputPath, helper, khoNames) for helper in kernelHelperObjs]
+    kernelsLib = str(objectTmpPath / "Kernels.so")
+
+    srcToolchain.compiler(srcFiles, kernelsLib, str(outputPath), cmdlineArchs)
+    buildSourceCodeObjectFiles(srcToolchain, outputPath / "library", kernelsLib)
 
     return len(uniqueAsmKernels)
 
@@ -591,12 +633,15 @@ def run():
     arguments = parseArguments()
     setVerbosity(arguments["PrintLevel"])
     outputPath = Path(ensurePath(os.path.abspath(arguments["OutputPath"])))
-    cxxCompiler, _, offloadBundler, _, _ = validateToolchain(
+
+    kernelsIncludePath = outputPath / "Kernels"
+    kernelsIncludePath.mkdir(parents=True, exist_ok=True)
+
+    cxxCompiler, offloadBundler, ls, extract = validateToolchain(
         arguments["CxxCompiler"],
-        arguments["CCompiler"],
         arguments["OffloadBundler"],
-        arguments["Assembler"],
-        ToolchainDefaults.HIP_CONFIG,
+        arguments["RocObjLs"],
+        arguments["RocObjExtract"]
     )
 
     if ";" in arguments["Architecture"]:
@@ -618,6 +663,9 @@ def run():
     srcToolchain = makeSourceToolchain(
         cxxCompiler,
         offloadBundler,
+        ls,
+        extract,
+        arguments["CpuThreads"],
         arguments["AsanBuild"],
         arguments["BuildIdKind"],
         save_temps=False
@@ -666,21 +714,21 @@ def run():
     for logicFile in logicFiles:
         print2("#   %s" % logicFile)
 
+    start_glds = timer()
     solutions, masterLibraries = generateLogicDataAndSolutions(
         logicFiles, arguments, asmToolchain.assembler, isaInfoMap
     )
+    stop_glds = timer()
+    print(f"Time to load yaml files (s): {(stop_glds-start_glds):3.2f}")
+
 
     kernels = generateKernelObjectsFromSolutions(solutions)
     kernelHelperObjs = generateKernelHelperObjects(kernels, str(asmToolchain.assembler.path), isaInfoMap)
-    kernelSerialNaming = getSerialNaming(kernels)
-    kernelWriterAssembly = KernelWriterAssembly(
-        kernelSerialNaming,
-        asmToolchain.assembler,
-        DebugConfig(),
-    )
+    kernelWriterAssembly = KernelWriterAssembly(asmToolchain.assembler, DebugConfig())
 
     copyStaticFiles(outputPath)
 
+    start_wsk = timer()
     numKernels = writeSolutionsAndKernelsTCL(
         outputPath,
         asmToolchain,
@@ -689,10 +737,10 @@ def run():
         kernelHelperObjs,
         kernelWriterAssembly,
         archs,
-        kernelSerialNaming,
-        useShortNames=arguments["ShortNames"],
         compress=arguments["UseCompression"],
     )
+    stop_wsk = timer()
+    print(f"Time to generate kernels (s): {(stop_wsk-start_wsk):3.2f}")
 
     archs = [ # is this really different than the other archs above?
         isaToGfx(arch)
@@ -701,6 +749,13 @@ def run():
     ]
     newLibraryDir = ensurePath(os.path.join(outputPath, "library"))
     splitGSU = False
+
+    def writeMsl(name, lib):
+        filename = os.path.join(newLibraryDir, name)
+        lib.applyNaming(splitGSU)
+        LibraryIO.write(filename, state(lib), arguments["LibraryFormat"])
+
+    start_msl = timer()
     for archName, newMasterLibrary in masterLibraries.items():
         if archName in archs:
             if arguments["LazyLibraryLoading"]:
@@ -709,10 +764,12 @@ def run():
                 masterFile = os.path.join(newLibraryDir, "TensileLibrary_" + archName)
             newMasterLibrary.applyNaming(splitGSU)
             LibraryIO.write(masterFile, state(newMasterLibrary), arguments["LibraryFormat"])
-            for name, lib in newMasterLibrary.lazyLibraries.items():
-                filename = os.path.join(newLibraryDir, name)
-                lib.applyNaming(splitGSU)
-                LibraryIO.write(filename, state(lib), arguments["LibraryFormat"])
+            ParallelMap2(writeMsl,
+                         newMasterLibrary.lazyLibraries.items(),
+                         "Writing master solution libraries",
+                         return_as="list")
+    stop_msl = timer()
+    print(f"Time to write master solution libraries (s): {(stop_msl-start_msl):3.2f}")
 
     if not arguments["KeepBuildTmp"]:
         buildTmp = Path(arguments["OutputPath"]).parent / "library" / "build_tmp"

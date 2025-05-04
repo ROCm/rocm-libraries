@@ -147,7 +147,7 @@ hipBLAS types
 *************
 
 For information about the ``hipblasStatus_t``, ``hipblasComputeType_t``, and ``hipblasOperation_t`` enumerations,
-see the `hipblas-common <https://github.com/ROCm/hipBLAS-common/blob/develop/library/include/hipblas-common/hipblas-common.h>`_ GitHub repository.
+see ``hipblas-common.h`` in the `hipBLAS-common GitHub <https://github.com/ROCm/hipBLAS-common>`_ repository.
 
 Definitions
 ===========
@@ -189,13 +189,13 @@ hipblasStatus_t
 -----------------
 
 For information about ``hipblasStatus_t``,
-see the `hipblas-common <https://github.com/ROCm/hipBLAS-common/blob/develop/library/include/hipblas-common/hipblas-common.h>`_ GitHub repository.
+see ``hipblas-common.h`` in the `hipBLAS-common GitHub <https://github.com/ROCm/hipBLAS-common>`_ repository.
 
 hipblasOperation_t
 ------------------
 
 For information about ``hipblasOperation_t``,
-see the `hipblas-common <https://github.com/ROCm/hipBLAS-common/blob/develop/library/include/hipblas-common/hipblas-common.h>`_ GitHub repository.
+see ``hipblas-common.h`` in the `hipBLAS-common GitHub <https://github.com/ROCm/hipBLAS-common>`_ repository.
 
 
 hipblasPointerMode_t
@@ -218,7 +218,7 @@ hipblasComputeType_t
 --------------------
 
 For information about ``hipblasComputeType_t``,
-see the `hipblas-common <https://github.com/ROCm/hipBLAS-common/blob/develop/library/include/hipblas-common/hipblas-common.h>`_ GitHub repository.
+see ``hipblas-common.h`` in the `hipBLAS-common GitHub <https://github.com/ROCm/hipBLAS-common>`_ repository.
 
 
 hipblasGemmAlgo_t

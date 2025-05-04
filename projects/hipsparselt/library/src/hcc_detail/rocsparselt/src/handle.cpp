@@ -215,3 +215,13 @@ bool check_is_init_plan(const _rocsparselt_matmul_plan* plan)
         return (plan->matmul_descr == nullptr || plan->alg_selection == nullptr) ? false : true;
     return false;
 }
+
+_rocsparselt_matmul_datatype is_matmul_datatype_valid(hipDataType a, hipDataType b, hipDataType c, hipDataType d, rocsparselt_compute_type compute)
+{
+    for(auto valid : valid_matmul_datatypes)
+    {
+        if(a == valid.a && b == valid.b && c == valid.c && d == valid.d && compute == valid.compute)
+          return valid.type;
+    }
+    return MATMUL_DATATYPE_UNKNOWN;
+};
