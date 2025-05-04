@@ -24,7 +24,8 @@
 
 from rocisa.code import Module
 from rocisa.container import vgpr, ContinuousRegister
-from rocisa.instruction import VAddU32, vectorStaticRemainder, \
+from rocisa.instruction import VAddU32
+from rocisa.functions import vectorStaticRemainder, \
     vectorStaticDivideAndRemainder, vectorStaticDivide, vectorStaticMultiply, \
     vectorStaticMultiplyAdd
 

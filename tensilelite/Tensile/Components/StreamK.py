@@ -28,8 +28,8 @@ from rocisa.instruction import SAddCU32, SAddI32, SAddU32, SAndB32, SBarrier, \
     SCmpGtU32, SCmpLeU32, SCmpLtU32, SLShiftLeftB32, SLShiftRightB32, SLoadB32, \
     SMinU32, SMovB32, SMovB64, SMulI32, SNop, SSleep, SStoreB32, SSubU32, \
     SWaitCnt, VAddF32, VAddF64, VAddPKF16, VAddU32, VLShiftRightB32, VMovB32, \
-    VReadfirstlaneB32, scalarStaticDivideAndRemainder, sMagicDiv2, vectorStaticMultiply, \
-    VCvtBF16toFP32
+    VReadfirstlaneB32, VCvtBF16toFP32
+from rocisa.functions import scalarStaticDivideAndRemainder, sMagicDiv2, vectorStaticMultiply
 
 from ..TensileInstructions import ContinuousRegister, SBranchIfNotZero, \
     ceilDivide, log2

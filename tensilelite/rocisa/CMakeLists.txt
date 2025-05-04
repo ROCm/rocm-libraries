@@ -53,8 +53,10 @@ set(ROCISAINST_SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/instruction/instruc
                       ${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/instruction/cvt.cpp
                       ${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/instruction/mem.cpp
                       ${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/instruction/mfma.cpp
-                      ${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/instruction/extension.cpp
-                      ${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/instruction/math.cpp)
+                      ${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/instruction/extension.cpp)
+
+set(ROCISAFUNC_SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/functions/functions.cpp
+                      ${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/functions/f_math.cpp)
 
 set(ROCISAPASS_SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/pass/pass.cpp
                       ${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/pass/graph.cpp
@@ -73,6 +75,7 @@ nanobind_add_module(rocisa NOMINSIZE NB_SUPPRESS_WARNINGS
                         ${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/label.cpp
                         ${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/macro.cpp
                         ${ROCISAINST_SOURCE}
-                        ${ROCISAPASS_SOURCE})
+                        ${ROCISAPASS_SOURCE}
+                        ${ROCISAFUNC_SOURCE})
 target_include_directories(rocisa PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/rocisa/include)
 set_target_properties(rocisa PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)

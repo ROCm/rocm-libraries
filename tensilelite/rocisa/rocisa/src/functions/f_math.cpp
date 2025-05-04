@@ -20,7 +20,7 @@
  * THE SOFTWARE.
  *
  * ************************************************************************ */
-#include "instruction/math.hpp"
+#include "functions/f_math.hpp"
 
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/optional.h>
@@ -284,7 +284,7 @@ namespace rocisa
     }
 } // namespace rocisa
 
-void math_inst(nb::module_ m)
+void math_func(nb::module_ m)
 {
     m.def("vectorStaticDivideAndRemainder",
           nb::overload_cast<int,
