@@ -27,10 +27,10 @@ Outputs:
 Example Usage:
 
     To run in debug mode and perform a dry-run (no changes made):
-    python pr_detect_changed_subtrees.py --token <your-token> --repo ROCm/rocm-libraries --pr 123 --dry-run
+    python pr_detect_changed_subtrees.py --repo ROCm/rocm-libraries --pr 123 --dry-run
 
     To run in debug mode and get the changed subtrees output:
-    python pr_detect_changed_subtrees.py --token <your-token> --repo ROCm/rocm-libraries --pr 123 --debug
+    python pr_detect_changed_subtrees.py --repo ROCm/rocm-libraries --pr 123 --debug
 """
 
 import argparse

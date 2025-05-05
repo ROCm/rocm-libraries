@@ -23,10 +23,10 @@ Outputs:
 Example Usage:
 
     To run in debug mode and perform a dry-run (no changes made):
-        python pr_auto_label.py --token <your-token> --repo <your-repo> --pr <pr-number> --dry-run --debug
+        python pr_auto_label.py --repo ROCm/rocm-libraries --pr <pr-number> --dry-run --debug
 
     To run in debug mode and apply label changes:
-        python pr_auto_label.py --token <your-token> --repo <your-repo> --pr <pr-number> --debug
+        python pr_auto_label.py --repo ROCm/rocm-libraries --pr <pr-number> --debug
 """
 
 import argparse

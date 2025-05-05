@@ -19,7 +19,7 @@ Arguments:
 Example Usage:
 
     To run in debug mode and perform a dry-run (no changes made):
-    python pr-fanout.py --token fake --repo ROCm/rocm-libraries --pr 123 --subtrees "$(printf 'rocBLAS\nhipBLASLt\nrocSPARSE')" --dry-run --debug
+    python pr-fanout.py --repo ROCm/rocm-libraries --pr 123 --subtrees "$(printf 'rocBLAS\nhipBLASLt\nrocSPARSE')" --dry-run --debug
 """
 
 import argparse
