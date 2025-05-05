@@ -403,8 +403,8 @@ inline auto scan_impl(void*               temporary_storage,
 /// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
 /// \tparam BinaryFunction type of binary function used for scan. Default type
 /// is \p rocprim::plus<T>, where \p T is a \p value_type of \p InputIterator.
-/// \tparam AccType accumulator type used to propagate the scanned values. Default type
-/// is value type of the input iterator.
+/// \tparam AccType accumulator type used to propagate the scanned values. The default is the type that
+/// is returned by a function of type BinaryFunction when it's is passed an InputIterator value.
 ///
 /// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
@@ -495,7 +495,7 @@ template<class Config = default_config,
          class OutputIterator,
          class BinaryFunction
          = ::rocprim::plus<typename std::iterator_traits<InputIterator>::value_type>,
-         class AccType = typename std::iterator_traits<InputIterator>::value_type>
+         class AccType = rocprim::invoke_result_binary_op_t<typename std::iterator_traits<InputIterator>::value_type, BinaryFunction>>
 inline hipError_t inclusive_scan(void*             temporary_storage,
                                  size_t&           storage_size,
                                  InputIterator     input,
@@ -536,7 +536,7 @@ template<class Config = default_config,
          class OutputIterator,
          class BinaryFunction
          = ::rocprim::plus<typename std::iterator_traits<InputIterator>::value_type>,
-         class AccType = typename std::iterator_traits<InputIterator>::value_type>
+         class AccType = rocprim::invoke_result_binary_op_t<typename std::iterator_traits<InputIterator>::value_type, BinaryFunction>>
 inline hipError_t deterministic_inclusive_scan(void*             temporary_storage,
                                                size_t&           storage_size,
                                                InputIterator     input,
@@ -590,8 +590,8 @@ inline hipError_t deterministic_inclusive_scan(void*             temporary_stora
 /// \tparam InitValueType type of the initial value.
 /// \tparam BinaryFunction type of binary function used for scan. Default type
 /// is \p rocprim::plus<T>, where \p T is a \p value_type of \p InputIterator.
-/// \tparam AccType accumulator type used to propagate the scanned values. Default type
-/// is 'InitValueType', unless it's 'rocprim::future_value'. Then it will be the wrapped input type.
+/// \tparam AccType accumulator type used to propagate the scanned values. The default is the type that
+/// is returned by a function of type BinaryFunction when it's is passed a value of type InitValueType.
 ///
 /// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
@@ -661,7 +661,7 @@ template<class Config = default_config,
          class InitValueType,
          class BinaryFunction
          = ::rocprim::plus<typename std::iterator_traits<InputIterator>::value_type>,
-         class AccType = detail::input_type_t<InitValueType>>
+         class AccType = rocprim::invoke_result_binary_op_t<rocprim::detail::input_type_t<InitValueType>, BinaryFunction>>
 inline hipError_t exclusive_scan(void*               temporary_storage,
                                  size_t&             storage_size,
                                  InputIterator       input,
@@ -703,7 +703,7 @@ template<class Config = default_config,
          class InitValueType,
          class BinaryFunction
          = ::rocprim::plus<typename std::iterator_traits<InputIterator>::value_type>,
-         class AccType = detail::input_type_t<InitValueType>>
+         class AccType = rocprim::invoke_result_binary_op_t<rocprim::detail::input_type_t<InitValueType>, BinaryFunction>>
 inline hipError_t deterministic_exclusive_scan(void*               temporary_storage,
                                                size_t&             storage_size,
                                                InputIterator       input,
