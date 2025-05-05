@@ -2937,8 +2937,6 @@ class KernelWriterAssembly(KernelWriter):
       tP["vgprPackedOffsets"] = None
 
     self.vgprPool.checkIn(tmp)
-    #if tP["isB"]:
-    #  module.add(self.getBomb(0x100))
 
     return Module("Global Read Addresses: Final Offsets A/B (Empty)") if self.dontAppendCode else module
 
@@ -3126,13 +3124,6 @@ class KernelWriterAssembly(KernelWriter):
           scalarGro = tmpSgprInfo.idx
           computeScalarGroImpl(scalarGro)
 
-    # dump final offsets
-    # BufferLoad flavor:
-    #if tP["isA"]:
-    #  module.add(self.dump(vgpr("GlobalReadOffset%s+%u+0"%(tP["tensorChar"], graIdx))))
-    # Flat load flavor:
-    #module.add(dump(vgpr("GlobalReadAddr%s+%u+0"%(tP["tensorChar"], graIdx))))
-    #module.add(dump(vgpr("GlobalReadAddr%s+%u+1"%(tP["tensorChar"], graIdx))))
     graIdx += self.states.rpgo if kernel["BufferLoad"] else self.states.rpga
 
     return module, graIdx
@@ -3436,7 +3427,6 @@ class KernelWriterAssembly(KernelWriter):
         if (kernel["ProblemType"]["Sparse"] == 2 and tP["isB"]) or (kernel["ProblemType"]["Sparse"] == 1 and tP["isA"]):
           module.add(self.computeMetaDataSrd(kernel, tP, tc, kernel["ProblemType"]["IndexAssignments%s"%tc]))
 
-      #module.add(self.getBomb(0x13)) # after addresses and SRD set
     else:
       tmp = self.vgprPool.checkOut(2, "tmp", self.states.preventVgprOverflowDuringNewTile)
 
@@ -3465,10 +3455,7 @@ class KernelWriterAssembly(KernelWriter):
                   src1=vgpr(tmp+1), \
                   src2=VCC(), \
                   comment=comment+" (upper)"))
-              #module.add(dump(vgpr("GlobalReadAddr%s+%u+0"%(tP["tensorChar"], graIdx))))
-              #module.add(dump(vgpr("GlobalReadAddr%s+%u+1"%(tP["tensorChar"], graIdx))))
               graIdx += self.states.rpga
-      #module.add(SEndpgm())
       self.vgprPool.checkIn(tmp)
 
     return module
@@ -3573,15 +3560,6 @@ class KernelWriterAssembly(KernelWriter):
             shiftHex="BpeGR%sLog2"%tc,
             comment="<- scale by bpeDS"))
 
-        if 0 and tP["isB"] and loopIdx==0:
-          module.add(self.getBomb())
-          #module.add(self.getCmpAssert(self.asmAssert.ne, sgpr("WorkGroup1"),0))
-
-    #module.add(dump(vgpr("GlobalReadIncs%s"%tP["tensorChar"])))
-    #module.add(SEndpgm())
-    #if tP["isB"]:
-    #  module.add(self.getBomb(0x100))
-    #return Module("graIncrements (Empty)") if self.dontAppendCode else module
     return Module("graIncrements (Empty)") if self.dontAppendCode else module
 
   ##############################################################################
@@ -3897,11 +3875,6 @@ class KernelWriterAssembly(KernelWriter):
                           src1=vgpr("LocalWriteAddr%s"%tc), \
                           comment="xor both lds offsets to enable swapping"))
 
-    # dump lds write offsets
-    #if tP["isA"]:
-      #module.add(self.dump(vgpr("LocalWriteAddr%s"%tP["tensorChar"])))
-      #module.add(self.getBomb(-40))
-    # do not generate local write address code if DirectToVgpr is enabled
     isDTVAB = ((tP["isA"] or tP["isB"]) and kernel["DirectToVgpr%s"%tc])
     return Module("lwaUnrollAssignment (Empty)") if self.dontAppendCode or isDTVAB else module
 
@@ -5230,7 +5203,6 @@ class KernelWriterAssembly(KernelWriter):
             tP = tPB if kernel["ProblemType"]["Sparse"] == 2 else tPA
             module.add(self.setTailSrd(tP, sgpr(tmpSgpr+0)))
             module.addSpaceLine()
-          #module.add(self.getBomb())
         # LOCAL_SPLITU * min(sizeL % LOCAL_DEPTHU, DEPTHU / LOCAL_SPLITU)
         module.addComment("numIter%s = LOCAL_SPLITU * min(size%s %% LOCAL_DEPTHU, DEPTHU / LOCAL_SPLITU)" \
             % (self.states.unrollChar, self.states.unrollChar))
@@ -6979,7 +6951,6 @@ class KernelWriterAssembly(KernelWriter):
               module.add(skipOptNLLModule)
 
         # save the vgprPool for generating the normal path.
-        # dump the 'dirty' pool upon s_endpgm and swap back the 'clean' pool
         # so we can avoid explicit vgpr check-in/out
         self.savedVgprPool = deepcopy(self.vgprPool)
         self.savedSgprPool = deepcopy(self.sgprPool)
@@ -7347,9 +7318,6 @@ class KernelWriterAssembly(KernelWriter):
                     src2=VCC(), \
                     comment="gra += inc%s%s (upper)"%(tP["tensorChar"], loopChar)))
               graIdx += self.states.rpga
-      #module.add(dump(vgpr("GlobalReadAddrA+0")))
-      #module.add(dump(vgpr("GlobalReadAddrA+1")))
-      #module.add(SEndpgm())
 
   def globalReadIncrementAB(self, kernel, tPA, tPB, loopIdx, prefetchIndex):
     imod = Module("globalReadIncrementAB")
@@ -8844,19 +8812,6 @@ class KernelWriterAssembly(KernelWriter):
       blockWidth = instruction.blockWidth
       #offsetMultiplier = instruction.offsetMultiplier
       g2lIdx = 0
-      #module.add(dump(vgpr("LocalWriteAddr%s"%tP["tensorChar"])))
-      if 0:
-        print("\nLocalWrite", tP["tensorChar"])
-        print("tlu", tP["tlu"])
-        print("lsc", kernel[tP["lsc"]])
-        print("lsp", kernel[tP["lsp"]])
-        print("wtc", tP["wtc"])
-        print("nrc", tP["nrc"])
-        print("nrp", tP["nrp"])
-        print("nwcv", tP["nwcv"])
-        print("nwpv", tP["nwpv"])
-        print("nrcvpi", tP["nrcvpi"])
-        print("nwcvpi", tP["nwcvpi"])
 
       tmpLocalWriteAddr = -1
 
@@ -9350,7 +9305,6 @@ class KernelWriterAssembly(KernelWriter):
         localWriteCode.add(SWaitCnt(lgkmcnt=0, vmcnt=0, vscnt=0, comment=""))
         localWriteCode.add(SBarrier(comment="dump LDS"))
         localWriteCode.add(self.getCmpAssert(self.asmAssert.ne, sgpr("WorkGroup0"),1))
-        #localWriteCode.add(self.getBomb())
 
     if (not kernel["DirectToLds%s"%tc]):
       if not ((tP["isA"] or tP["isB"]) and kernel["DirectToVgpr%s"%tc]):
@@ -13573,12 +13527,6 @@ class KernelWriterAssembly(KernelWriter):
     self.vgprPool.checkIn(vtmp0)
     return module
 
-  def getBomb(self, cookie=None) -> Module:
-    scratchVgpr = self.vgprPool.checkOut(2)
-    bombCode = bomb(scratchVgpr, cookie)
-    self.vgprPool.checkIn(scratchVgpr)
-    return bombCode
-
   def getCmpAssert(self, function, val0, val1, cookie=-1):
     scratchVgpr = self.vgprPool.checkOut(2)
     function(val0, val1, scratchVgpr, cookie)
@@ -13623,22 +13571,6 @@ class KernelWriterAssembly(KernelWriter):
       imodscmpk.add(Inst1(src0=sgpr(s0), src1=sgpr(tmpScmp), comment=comment))
       self.sgprPool.checkIn(tmpScmp)
     return imodscmpk
-
-  def dump(self, vgprStore):
-    return self.dumpData.dumpVgpr(vgprStore, self.labels.getUniqueName())
-
-  def dumpSgpr(self, sgprStore):
-    tmp = ContinuousRegister(idx=self.vgprPool.checkOut(1,"tmp"), size=1)
-    module = self.dumpData.dumpSgpr(sgprStore, tmp, self.labels.getUniqueName())
-    self.vgprPool.checkIn(tmp.idx)
-    return module
-
-  def dumpLDS(self, kernel, startU, numU):
-    tmp = ContinuousRegister(idx=self.vgprPool.checkOut(2), size=2)
-    module = self.dumpData.dumpLds(startU, numU, tmp, self.states.bpeAB, kernel["NumThreads"], \
-      self.labels.getUniqueName())
-    self.vgprPool.checkIn(tmp.idx)
-    return module
 
 def _getEccOffset(totalWidth, bpr, bpe, glvw, idx, numVgprG2L):
   if totalWidth < 1: # Need extra offset if global read < 1

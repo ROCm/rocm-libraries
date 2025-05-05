@@ -734,7 +734,6 @@ class StreamK(Component):
                         module.add(writer.getCmpAssert(writer.asmAssert.eq, vgpr("ValuC+%u"%sumIdxV), sgpr(tmpS01)))
 
         module.addComment1("apply mask, calc new C and issue writes")
-        #kStr += self.bomb() # can see store addresses just before the store inst
 
         # if kernel["ProblemType"]["DestDataType"].isBFloat16() and kernel["ProblemType"]["HighPrecisionAccumulate"]:
         #     vgprBf16Temp = tmpCVTVgpr
@@ -1223,7 +1222,6 @@ class StreamK(Component):
             #     "PreLoopVmcntCase 2 or 3 shouldn't enter the beta true case"
 
         module.addComment1("apply mask, calc new C and issue writes")
-        #kStr += self.bomb() # can see store addresses just before the store inst
 
         # if kernel["ProblemType"]["DestDataType"].isBFloat16() and kernel["ProblemType"]["HighPrecisionAccumulate"]:
         #     vgprBf16Temp = tmpCVTVgpr
@@ -1410,7 +1408,6 @@ class StreamK(Component):
             if not kernel["MIArchVgpr"]:
                 module.add(SNop(1, "2 wait states required before reading vgpr"))
 
-        #kStr += self.bomb(5)
         # if self.db["CheckStoreC"]>=0:
         #     useBuffer = kernel["BufferStore"]
         #     # Note - CheckStoreC won't work for EDGE store cases since they load 0 for OOB, would need more sophisticated check

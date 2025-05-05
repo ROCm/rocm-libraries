@@ -38,7 +38,7 @@ from rocisa.instruction import BufferLoadB128, BufferLoadB32, BufferLoadB64, \
   SMFMAInstruction, SNop, SSetPrior, SSetRegIMM32B32, SSubU32, SWaitCnt, SWaitAlu, \
   SLongBranchPositive, VFmaMixF32, VMadMixF32, VMovB32
 
-from .TensileInstructions import Dump, RegisterPool, Assert
+from .TensileInstructions import RegisterPool, Assert
 from .KernelWriterModules import *
 from .Component import Component, LraTileProperties
 from .Components.Signature import UserArgumentsInfo
@@ -484,8 +484,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
     self.db["AssertOnSgprOverflow"] = False
     self.db["PrintStoreRegisterDb"] = False
 
-    self.dumpData = Dump("DebugKernelItems", "AddressDbg", self.db["DebugKernelMaxItems"], \
-      self.debugConfig.debugKernel)
     self.labels = LabelManager()
 
     # KernelWriter values
