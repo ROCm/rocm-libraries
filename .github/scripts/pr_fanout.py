@@ -28,6 +28,7 @@ import json
 import sys
 import os
 import logging
+from typing import List
 from github_cli_client import GitHubCLIClient
 
 logging.basicConfig(level=logging.INFO)
@@ -40,7 +41,6 @@ def parse_arguments(argv=None) -> argparse.Namespace:
     parser.add_argument("--pr", required=True, help="Pull request number")
     parser.add_argument("--subtrees", required=True)
     parser.add_argument("--config", required=False, default=".github/repos-config.json")
-    parser.add_argument("--token", required=False, help="GitHub token for authentication (optional for manual runs)")
     parser.add_argument("--dry-run", action="store_true", help="If set, only logs actions without making changes.")
     parser.add_argument("--debug", action="store_true", help="If set, enables detailed debug logging.")
     return parser.parse_args(argv)
@@ -79,8 +79,7 @@ def create_or_update_pr(entry, branch, pr_title, pr_body, args) -> None:
         "--repo", entry["url"],
         "--head", branch
     ]
-    if args.dry_run or args.debug:
-        logger.debug(f"Checking for existing PR with: {' '.join(view_cmd)}")
+    logger.debug(f"Checking for existing PR with: {' '.join(view_cmd)}")
 
     result = subprocess.run(view_cmd, capture_output=True, text=True)
     pr_exists = result.returncode == 0
@@ -95,8 +94,7 @@ def create_or_update_pr(entry, branch, pr_title, pr_body, args) -> None:
             "--body", pr_body,
             "--label", "auto-fanout"
         ]
-        if args.dry_run or args.debug:
-            logger.debug(f"Creating PR with: {' '.join(create_cmd)}")
+        logger.debug(f"Creating PR with: {' '.join(create_cmd)}")
         if not args.dry_run:
             subprocess.run(create_cmd, check=True)
     else:
@@ -124,19 +122,18 @@ def main(argv=None) -> None:
     for entry in relevant_subtrees:
         branch = f"monorepo-pr-{args.pr}-{entry['name']}"
         prefix = f"{entry['category']}/{entry['name']}"
-        remote = f"https://x-access-token:{token}@github.com/{entry['url']}.git"
+        remote = f"https://github.com/{entry['url']}.git"
 
         pr_title = f"[Fanout] Sync monorepo PR #{args.pr} to {entry['name']}"
         pr_body = f"This is an automated PR for subtree `{entry['name']}` from monorepo PR #{args.pr}."
 
-        if args.debug:
-            logger.debug(f"\nProcessing subtree: {entry['name']}")
-            logger.debug(f"\tPrefix: {prefix}")
-            logger.debug(f"\tBranch: {branch}")
-            logger.debug(f"\tRemote: {remote}")
-            logger.debug(f"\tPR title: {pr_title}")
+        logger.debug(f"\nProcessing subtree: {entry['name']}")
+        logger.debug(f"\tPrefix: {prefix}")
+        logger.debug(f"\tBranch: {branch}")
+        logger.debug(f"\tRemote: {remote}")
+        logger.debug(f"\tPR title: {pr_title}")
 
-        split_and_push_subtree(entry, branch, prefix, remote, token, pr_title, pr_body, args)
+        split_and_push_subtree(entry, branch, prefix, remote, pr_title, pr_body, args)
         create_or_update_pr(entry, branch, pr_title, pr_body, args)
 
 if __name__ == "__main__":

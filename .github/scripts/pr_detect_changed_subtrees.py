@@ -64,16 +64,13 @@ def load_repo_config(config_path: str) -> List[dict]:
         logger.error(f"Failed to load config file '{config_path}': {e}")
         sys.exit(1)
 
-def get_valid_prefixes(config: List[dict], debug: bool) -> Set[str]:
+def get_valid_prefixes(config: List[dict]) -> Set[str]:
     """Extract valid subtree prefixes from the configuration."""
     valid_prefixes = {f"{entry['category']}/{entry['name']}" for entry in config}
-    if debug:
-        logger.debug("Valid subtrees:")
-        for prefix in sorted(valid_prefixes):
-            logger.debug(f"\t{prefix}")
+    logger.debug("Valid subtrees:\n" + "\n".join(sorted(valid_prefixes)))
     return valid_prefixes
 
-def find_matched_subtrees(changed_files: List[str], valid_prefixes: Set[str], debug: bool) -> List[str]:
+def find_matched_subtrees(changed_files: List[str], valid_prefixes: Set[str]) -> List[str]:
     """Find subtrees that match the changed files."""
     changed_subtrees = {
         "/".join(path.split("/", 2)[:2])
@@ -81,15 +78,14 @@ def find_matched_subtrees(changed_files: List[str], valid_prefixes: Set[str], de
         if len(path.split("/")) >= 2
     }
     matched = sorted(prefix.split("/", 1)[1] for prefix in (changed_subtrees & valid_prefixes))
-    if debug:
-        logger.debug(f"Matched subtrees: {matched}")
+    logger.debug(f"Matched subtrees: {matched}")
     return matched
 
 def output_subtrees(matched_subtrees: List[str], dry_run: bool) -> None:
     """Output the matched subtrees to GITHUB_OUTPUT or log them in dry-run mode."""
     newline_separated = "\n".join(matched_subtrees)
     if dry_run:
-        logger.info(f"[Dry-run] Would output:\n{subtrees}")
+        logger.info(f"[Dry-run] Would output:\n{newline_separated}")
     else:
         output_file = os.environ.get('GITHUB_OUTPUT')
         if output_file:
@@ -107,9 +103,9 @@ def main(argv=None) -> None:
         logger.setLevel(logging.DEBUG)
     client = GitHubCLIClient()
     config = load_repo_config(args.config)
-    changed_files = [file["filename"] for file in client.get_changed_files(args.repo, int(args.pr), args.debug)]
-    valid_prefixes = get_valid_prefixes(config, args.debug)
-    matched_subtrees = find_matched_subtrees(changed_files, valid_prefixes, args.ebug)
+    changed_files = [file["filename"] for file in client.get_changed_files(args.repo, int(args.pr))]
+    valid_prefixes = get_valid_prefixes(config)
+    matched_subtrees = find_matched_subtrees(changed_files, valid_prefixes)
     output_subtrees(matched_subtrees, args.dry_run)
 
 if __name__ == "__main__":

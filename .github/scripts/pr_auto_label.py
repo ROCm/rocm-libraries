@@ -92,7 +92,7 @@ def main(argv=None) -> None:
     if args.debug:
         logger.setLevel(logging.DEBUG)
     client = GitHubCLIClient()
-    changed_files = [file["filename"] for file in client.get_changed_files(args.repo, int(args.pr), args.debug)]
+    changed_files = [file["filename"] for file in client.get_changed_files(args.repo, int(args.pr))]
     existing_labels = client.get_existing_labels(args.repo, int(args.pr))
     desired_labels = compute_desired_labels(changed_files)
     output_labels(existing_labels, desired_labels, args.dry_run)
