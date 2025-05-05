@@ -26,7 +26,6 @@ import argparse
 import subprocess
 import json
 import sys
-import os
 import logging
 from typing import List
 from github_cli_client import GitHubCLIClient
@@ -58,57 +57,16 @@ def get_subtree_info(config: list, subtrees: list) -> list:
     """Filter and return relevant subtree info from the config."""
     return [entry for entry in config if entry["name"] in subtrees]
 
-def split_and_push_subtree(entry, branch, prefix, remote, token, pr_title, pr_body, args) -> None:
+def split_and_push_subtree(entry, branch, prefix, remote, token, pr_title, pr_body, dry_run) -> None:
     """Split the subtree and push it to the corresponding sub-repo."""
     split_cmd = ["git", "subtree", "split", "--prefix", prefix, "-b", branch]
     logger.debug(f"Running: {' '.join(split_cmd)}")
-    if not args.dry_run:
+    if not dry_run:
         subprocess.run(split_cmd, check=True)
     push_cmd = ["git", "push", remote, f"{branch}:refs/heads/{branch}", "--force"]
-    if args.dry_run or args.debug:
-        logger.debug(f"Running: {' '.join(push_cmd)}")
-    if not args.dry_run:
+    logger.debug(f"Running: {' '.join(push_cmd)}")
+    if not dry_run:
         subprocess.run(push_cmd, check=True)
-
-def create_or_update_pr(entry, branch, pr_title, pr_body, args) -> None:
-    """Create or update a PR in the sub-repo."""
-    # Check if PR already exists
-    view_cmd = [
-        "gh", "pr", "view",
-        "--json", "number",
-        "--repo", entry["url"],
-        "--head", branch
-    ]
-    logger.debug(f"Checking for existing PR with: {' '.join(view_cmd)}")
-
-    result = subprocess.run(view_cmd, capture_output=True, text=True)
-    pr_exists = result.returncode == 0
-
-    if not pr_exists:
-        create_cmd = [
-            "gh", "pr", "create",
-            "--repo", entry["url"],
-            "--base", entry["branch"],
-            "--head", branch,
-            "--title", pr_title,
-            "--body", pr_body,
-            "--label", "auto-fanout"
-        ]
-        logger.debug(f"Creating PR with: {' '.join(create_cmd)}")
-        if not args.dry_run:
-            subprocess.run(create_cmd, check=True)
-    else:
-        edit_cmd = [
-            "gh", "pr", "edit",
-            "--repo", entry["url"],
-            "--head", branch,
-            "--title", pr_title,
-            "--body", pr_body
-        ]
-        if args.dry_run or args.debug:
-            logger.debug(f"Updating existing PR with: {' '.join(edit_cmd)}")
-        if not args.dry_run:
-            subprocess.run(edit_cmd, check=True)
 
 def main(argv=None) -> None:
     """Main function to execute the PR fanout logic."""
@@ -124,7 +82,7 @@ def main(argv=None) -> None:
         prefix = f"{entry['category']}/{entry['name']}"
         remote = f"https://github.com/{entry['url']}.git"
 
-        pr_title = f"[Fanout] Sync monorepo PR #{args.pr} to {entry['name']}"
+        pr_title = f"[Fanout] Sync rocm-libraries PR #{args.pr} to {entry['name']}"
         pr_body = f"This is an automated PR for subtree `{entry['name']}` from monorepo PR #{args.pr}."
 
         logger.debug(f"\nProcessing subtree: {entry['name']}")
@@ -133,8 +91,14 @@ def main(argv=None) -> None:
         logger.debug(f"\tRemote: {remote}")
         logger.debug(f"\tPR title: {pr_title}")
 
-        split_and_push_subtree(entry, branch, prefix, remote, pr_title, pr_body, args)
-        create_or_update_pr(entry, branch, pr_title, pr_body, args)
+        split_and_push_subtree(entry, branch, prefix, remote, pr_title, pr_body, args.dry_run)
+        pr_exists = client.pr_view(entry["url"], branch)
+        if not pr_exists:
+            if not args.dry_run:
+                client.pr_create(entry["url"], entry["branch"], branch, pr_title, pr_body)
+        else:
+            if not args.dry_run:
+                client.pr_edit(entry["url"], branch, pr_title, pr_body)
 
 if __name__ == "__main__":
     main()
