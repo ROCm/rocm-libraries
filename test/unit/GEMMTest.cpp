@@ -114,6 +114,12 @@ namespace GEMMDriverTest
                 REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
             }
 
+            if(gemm.scaleAMode != Operations::ScaleMode::None
+               || gemm.scaleBMode != Operations::ScaleMode::None)
+            {
+                REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_scale_f8f6f4);
+            }
+
             AssertFatal(gemm.scaleAMode == Operations::ScaleMode::None
                             || gemm.scaleAMode == Operations::ScaleMode::SingleScale
                             || gemm.scaleAMode == Operations::ScaleMode::Separate,
@@ -1850,7 +1856,7 @@ namespace GEMMDriverTest
 
     TEST_P(GEMMTestGPU, GPU_ScaledPrefetchGEMMMXF8TN)
     {
-        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_scale_f8f6f4);
         REQUIRE_ARCH_CAP(GPUCapability::HasBlockScaling32);
         auto gemm = setup_GEMMF8F6F4(32, 32, 64);
 
@@ -2120,7 +2126,7 @@ namespace GEMMDriverTest
 
     TEST_P(GEMMTestGPU, GPU_SwizzleScaledGEMMMXF4TN)
     {
-        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_scale_f8f6f4);
         REQUIRE_ARCH_CAP(GPUCapability::HasBlockScaling32);
 
         for(auto waveK : {64, 128})
@@ -2177,7 +2183,7 @@ namespace GEMMDriverTest
 
     TEST_P(GEMMTestGPU, GPU_SwizzleScaledUnrollGEMMMXF4TN)
     {
-        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_scale_f8f6f4);
         REQUIRE_ARCH_CAP(GPUCapability::HasBlockScaling32);
 
         for(auto waveK : {64, 128})
@@ -2241,7 +2247,7 @@ namespace GEMMDriverTest
 
     TEST_P(GEMMTestGPU, GPU_SwizzleScaledPrefetchGEMMMXF4TN)
     {
-        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_scale_f8f6f4);
         REQUIRE_ARCH_CAP(GPUCapability::HasBlockScaling32);
 
         for(auto waveK : {64, 128})
@@ -2292,7 +2298,7 @@ namespace GEMMDriverTest
 
     TEST_P(GEMMTestGPU, GPU_SwizzleScaledPrefetchLDSGEMMMXF4TN)
     {
-        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_scale_f8f6f4);
         REQUIRE_ARCH_CAP(GPUCapability::HasBlockScaling32);
 
         auto gemm = setup_GEMMF8F6F4(32, 32, 64);
@@ -2334,7 +2340,7 @@ namespace GEMMDriverTest
 
     TEST_P(GEMMF8F6F4TestGPU, GPU_SwizzleScaled_Prefetch_GEMMF8F6F4)
     {
-        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_scale_f8f6f4);
         REQUIRE_ARCH_CAP(GPUCapability::HasBlockScaling32);
 
         auto [typeAB, MFMAK, transOp] = std::get<1>(GetParam());
@@ -2413,7 +2419,7 @@ namespace GEMMDriverTest
 
     TEST_P(GEMMTestGPU, GPU_StoreHazardScaledGEMMMXF8TN)
     {
-        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_scale_f8f6f4);
         REQUIRE_ARCH_CAP(GPUCapability::HasBlockScaling32);
         auto gemm = setup_GEMMF8F6F4(16, 16, 128);
 
@@ -2443,7 +2449,7 @@ namespace GEMMDriverTest
 
     TEST_P(GEMMF8F6F4TestGPU, GPU_DwordScaledGEMMMXF8F6F4)
     {
-        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_scale_f8f6f4);
         REQUIRE_ARCH_CAP(GPUCapability::HasBlockScaling32);
 
         auto [typeAB, MFMAK, transOp] = std::get<1>(GetParam());
@@ -2533,7 +2539,7 @@ namespace GEMMDriverTest
 
     TEST_P(GEMMF8F6F4TestGPU, GPU_ScaledBasicGEMMF8F6F4)
     {
-        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_scale_f8f6f4);
         REQUIRE_ARCH_CAP(GPUCapability::HasBlockScaling32);
 
         auto [typeAB, MFMAK, transOp] = std::get<1>(GetParam());
@@ -2687,7 +2693,7 @@ namespace GEMMDriverTest
 
     TEST_P(GEMMF8F6F4TestGPU, GPU_ScaledBasicGEMMF8F6F4_Direct2LDS)
     {
-        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_scale_f8f6f4);
         REQUIRE_ARCH_CAP(GPUCapability::HasBlockScaling32);
 
         auto [typeAB, MFMAK, transOp] = std::get<1>(GetParam());
@@ -2894,7 +2900,7 @@ namespace GEMMDriverTest
 
     TEST_P(GEMMF8F6F4TestGPU, GPU_ScaledBasicGEMMF8F6F4_Direct2LDS_Prefetch2)
     {
-        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_scale_f8f6f4);
 
         auto [typeAB, MFMAK, transOp] = std::get<1>(GetParam());
 
@@ -3421,7 +3427,7 @@ namespace GEMMDriverTest
 
     TEST_P(GEMMTestGPU, GPU_ScaledLDSGEMMMXF8TN)
     {
-        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_scale_f8f6f4);
         REQUIRE_ARCH_CAP(GPUCapability::HasBlockScaling32);
         auto gemm = setup_GEMMF8F6F4(32, 32, 64);
 
@@ -3504,7 +3510,7 @@ namespace GEMMDriverTest
 
     TEST_P(ScaledMixedGEMMF8F6F4TestGPU, GPU_ScaledMixedBasicGEMMF8F6F4)
     {
-        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_scale_f8f6f4);
 
         auto [typeA, typeB, MFMAK, scaleAMode, scaleBMode, loadLDSScaleA, loadLDSScaleB, transOp]
             = std::get<1>(GetParam());

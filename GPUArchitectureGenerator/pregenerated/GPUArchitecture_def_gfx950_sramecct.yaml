@@ -32,6 +32,7 @@ Architectures:
       HasMFMA_f64: 0
       HasMFMA_f8f6f4: 0
       HasMFMA_fp8: 0
+      HasMFMA_scale_f8f6f4: 0
       HasPRNG: 0
       HasPermLanes16: 0
       HasPermLanes32: 0

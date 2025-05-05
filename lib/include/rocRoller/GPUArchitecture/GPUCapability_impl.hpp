@@ -86,6 +86,7 @@ namespace rocRoller
             {"HasMFMA", Value::HasMFMA},
             {"HasMFMA_fp8", Value::HasMFMA_fp8},
             {"HasMFMA_f8f6f4", Value::HasMFMA_f8f6f4},
+            {"HasMFMA_scale_f8f6f4", Value::HasMFMA_scale_f8f6f4},
             {"HasMFMA_f64", Value::HasMFMA_f64},
             {"HasMFMA_bf16_32x32x4", Value::HasMFMA_bf16_32x32x4},
             {"HasMFMA_bf16_32x32x4_1k", Value::HasMFMA_bf16_32x32x4_1k},

@@ -138,6 +138,11 @@ namespace MatrixMultiplyTest
                 REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
             }
 
+            if(scaleA || scaleB)
+            {
+                REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_scale_f8f6f4);
+            }
+
             auto dataTypeA   = TypeInfo<TA>::Var.dataType;
             auto dataTypeB   = TypeInfo<TB>::Var.dataType;
             auto dataTypeD   = TypeInfo<TD>::Var.dataType;
@@ -1386,7 +1391,7 @@ namespace MatrixMultiplyTest
 
     TEST_P(MatrixMultiplyF8F6F4TestGPU, GPU_ScaledMatrixMultiplyMacroTileF8F6F4)
     {
-        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_scale_f8f6f4);
 
         auto [typeAB, MFMAK, transOp] = std::get<1>(GetParam());
 
@@ -1683,6 +1688,8 @@ namespace MatrixMultiplyTest
 
     TEST_P(ScaledMatrixMultiplyMixedTestGPU, GPU_ScaledMatrixMultiplyMacroTileMixed)
     {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_scale_f8f6f4);
+
         auto [typeA, typeB, MFMAK, transOp] = std::get<1>(GetParam());
 
         int waveM = (MFMAK == 128) ? 16 : 32;
