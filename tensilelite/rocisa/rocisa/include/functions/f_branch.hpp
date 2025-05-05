@@ -20,19 +20,26 @@
  * THE SOFTWARE.
  *
  * ************************************************************************ */
-#include "functions/f_math.hpp"
+#pragma once
+#include "code.hpp"
+#include "enum.hpp"
 
-#include <nanobind/nanobind.h>
+#include <memory>
 
-namespace nb = nanobind;
-
-void math_func(nb::module_ m);
-void branch_func(nb::module_ m);
-
-void init_func(nb::module_ m)
+namespace rocisa
 {
-    auto m_func = m.def_submodule("functions", "rocIsa functions submodule.");
+    ////////////////////////////////////////
+    // If else
+    ////////////////////////////////////////
 
-    math_func(m_func);
-    branch_func(m_func);
-}
+    std::shared_ptr<Module> BranchIfZero(const std::string& sgprName,
+                                         const DataType     computeDataType,
+                                         const int          tmpSgprIdx,
+                                         const int          laneSC,
+                                         const Label&       label,
+                                         const int          waveFrontSize);
+
+    std::shared_ptr<Module> BranchIfNotZero(const std::string& sgprName,
+                                            const DataType     computeDataType,
+                                            const Label&       label);
+} // namespace rocisa
