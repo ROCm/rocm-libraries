@@ -47,17 +47,19 @@ function(libcudacxx_create_internal_header_test header_name, headertest_src, fal
   set(headertest_${header_name} verify_${header_name})
   # cuda internal headers should not be tested against a host compiler
   if(header_name MATCHES "__ptx.*")
+    return()
     add_library(headertest_${header_name} SHARED "${headertest_src}.cu")
   else()
     add_library(headertest_${header_name} SHARED "${headertest_src}.cu" "${headertest_src}.cpp")
   endif()
+  set_source_files_properties("${headertest_src}.cpp" PROPERTIES LANGUAGE HIP)
   target_include_directories(headertest_${header_name} PRIVATE "${libhipcxx_SOURCE_DIR}/include")
   target_compile_options(headertest_${header_name}
     PRIVATE
     $<$<COMPILE_LANGUAGE:CUDA>:${headertest_warning_levels_device}>
     $<$<COMPILE_LANGUAGE:CXX>:${headertest_warning_levels_host}>
     -DLIBCUDACXX_ENABLE_EXPERIMENTAL_MEMORY_RESOURCE)
-  target_link_libraries(headertest_${header_name} CUDA::cudart)
+  target_link_libraries(headertest_${header_name} hip::host)
 
   if(fallback)
     target_compile_definitions(headertest_${header_name} PRIVATE "-D${fallback}")

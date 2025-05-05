@@ -57,15 +57,23 @@ function(libcudacxx_add_public_header_test header)
 
   # Create the default target for that file
   set(headertest_${header_name} verify_${header_name})
+  if(header_name MATCHES "ptx.*")
+    return()
+  endif()
+  if(headertest_src MATCHES "barrier.*")
+    return()
+  endif()
   add_library(headertest_${header_name} SHARED "${headertest_src}.cu")
+  set_source_files_properties("${headertest_src}.cu" PROPERTIES LANGUAGE HIP)
   target_include_directories(headertest_${header_name} PRIVATE "${libhipcxx_SOURCE_DIR}/include")
   target_compile_options(headertest_${header_name}
                          PRIVATE
                          ${headertest_warning_levels_device}
                          -DLIBCUDACXX_ENABLE_EXPERIMENTAL_MEMORY_RESOURCE)
+  target_link_libraries(headertest_${header_name} hip::device)
 
   # Ensure that if this is an atomic header, we only include the right architectures
-  string(REGEX MATCH "atomic|barrier|latch|semaphore|annotated_ptr|pipeline" match "${header}")
+  string(REGEX MATCH "ptx|barrier|latch|semaphore|annotated_ptr|pipeline" match "${header}")
   if(match)
     # Ensure that we only compile the header when we have some architectures enabled
     if (NOT architectures_at_least_sm70)

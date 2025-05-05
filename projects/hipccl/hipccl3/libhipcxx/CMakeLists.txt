@@ -82,6 +82,7 @@ if (LIBCUDACXX_ENABLE_CUDA)
   enable_language(CUDA)
 elseif (LIBCUDACXX_ENABLE_HIP)
   find_package(hip REQUIRED)
+  enable_language(HIP)
 endif ()
 
 option(LIBCUDACXX_ENABLE_LIBCUDACXX_TESTS "Enable libhip++ tests." ON)
