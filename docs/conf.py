@@ -28,7 +28,7 @@ shutil.copy2('../library/src/fortran/README.md', './fortran-api-reference.md')
 # for PDF output on Read the Docs
 project = "rocRAND Documentation"
 author = "Advanced Micro Devices, Inc."
-copyright = "Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved."
+copyright = "Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved."
 version = version_number
 release = version_number
 
