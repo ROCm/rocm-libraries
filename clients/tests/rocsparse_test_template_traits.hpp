@@ -46,16 +46,47 @@ struct rocsparse_test_template_traits<ROUTINE, rocsparse_test_dispatch_enum::it>
 };
 
 template <rocsparse_test_enum::value_type ROUTINE>
+struct rocsparse_test_template_traits<ROUTINE, rocsparse_test_dispatch_enum::it_sparse_to_dense>
+{
+    using filter = typename rocsparse_test_it_template<ROUTINE>::test;
+    template <typename... P>
+    using caller = typename rocsparse_test_it_template<ROUTINE>::template test_call<P...>;
+};
+
+template <rocsparse_test_enum::value_type ROUTINE>
+struct rocsparse_test_template_traits<ROUTINE, rocsparse_test_dispatch_enum::it_dense_to_sparse>
+{
+    using filter = typename rocsparse_test_it_template<ROUTINE>::test;
+    template <typename... P>
+    using caller = typename rocsparse_test_it_template<ROUTINE>::template test_call<P...>;
+};
+
+template <rocsparse_test_enum::value_type ROUTINE>
 struct rocsparse_test_template_traits<ROUTINE, rocsparse_test_dispatch_enum::it_plus_int8_float16>
 {
-    using filter = typename rocsparse_test_it_plus_int8_float16_template<ROUTINE>::test;
+    using filter = typename rocsparse_test_it_template<ROUTINE>::test;
     template <typename... P>
-    using caller =
-        typename rocsparse_test_it_plus_int8_float16_template<ROUTINE>::template test_call<P...>;
+    using caller = typename rocsparse_test_it_template<ROUTINE>::template test_call<P...>;
 };
 
 template <rocsparse_test_enum::value_type ROUTINE>
 struct rocsparse_test_template_traits<ROUTINE, rocsparse_test_dispatch_enum::ijt>
+{
+    using filter = typename rocsparse_test_ijt_template<ROUTINE>::test;
+    template <typename... P>
+    using caller = typename rocsparse_test_ijt_template<ROUTINE>::template test_call<P...>;
+};
+
+template <rocsparse_test_enum::value_type ROUTINE>
+struct rocsparse_test_template_traits<ROUTINE, rocsparse_test_dispatch_enum::ijt_sparse_to_dense>
+{
+    using filter = typename rocsparse_test_ijt_template<ROUTINE>::test;
+    template <typename... P>
+    using caller = typename rocsparse_test_ijt_template<ROUTINE>::template test_call<P...>;
+};
+
+template <rocsparse_test_enum::value_type ROUTINE>
+struct rocsparse_test_template_traits<ROUTINE, rocsparse_test_dispatch_enum::ijt_dense_to_sparse>
 {
     using filter = typename rocsparse_test_ijt_template<ROUTINE>::test;
     template <typename... P>
@@ -105,7 +136,7 @@ struct rocsparse_test_template_traits<ROUTINE, rocsparse_test_dispatch_enum::ija
 template <rocsparse_test_enum::value_type ROUTINE>
 struct rocsparse_test_template_traits<ROUTINE, rocsparse_test_dispatch_enum::ijabct_sddmm>
 {
-    using filter = typename rocsparse_test_ijabct_sddmm_template<ROUTINE>::test;
+    using filter = typename rocsparse_test_ijabct_template<ROUTINE>::test;
     template <typename... P>
-    using caller = typename rocsparse_test_ijabct_sddmm_template<ROUTINE>::template test_call<P...>;
+    using caller = typename rocsparse_test_ijabct_template<ROUTINE>::template test_call<P...>;
 };

@@ -851,4 +851,139 @@ auto rocsparse_ijabct_sddmm_dispatch(const Arguments& arg)
     return TEST<void, void, void, void, void, void>{}(arg);
 }
 
+template <template <typename...> class TEST>
+auto rocsparse_it_sparse_to_dense_dispatch(const Arguments& arg)
+{
+    const auto I = arg.index_type_I;
+    if(I == rocsparse_indextype_i32)
+    {
+        switch(arg.compute_type)
+        {
+        case rocsparse_datatype_f16_r:
+            return TEST<int32_t, _Float16>{}(arg);
+        case rocsparse_datatype_f32_r:
+            return TEST<int32_t, float>{}(arg);
+        case rocsparse_datatype_f64_r:
+            return TEST<int32_t, double>{}(arg);
+        case rocsparse_datatype_f32_c:
+            return TEST<int32_t, rocsparse_float_complex>{}(arg);
+        case rocsparse_datatype_f64_c:
+            return TEST<int32_t, rocsparse_double_complex>{}(arg);
+        case rocsparse_datatype_i8_r:
+        case rocsparse_datatype_u8_r:
+        case rocsparse_datatype_i32_r:
+        case rocsparse_datatype_u32_r:
+            return TEST<void>{}(arg);
+        }
+    }
+    else if(I == rocsparse_indextype_i64)
+    {
+        switch(arg.compute_type)
+        {
+        case rocsparse_datatype_f16_r:
+            return TEST<int64_t, _Float16>{}(arg);
+        case rocsparse_datatype_f32_r:
+            return TEST<int64_t, float>{}(arg);
+        case rocsparse_datatype_f64_r:
+            return TEST<int64_t, double>{}(arg);
+        case rocsparse_datatype_f32_c:
+            return TEST<int64_t, rocsparse_float_complex>{}(arg);
+        case rocsparse_datatype_f64_c:
+            return TEST<int64_t, rocsparse_double_complex>{}(arg);
+        case rocsparse_datatype_i8_r:
+        case rocsparse_datatype_u8_r:
+        case rocsparse_datatype_i32_r:
+        case rocsparse_datatype_u32_r:
+            return TEST<void>{}(arg);
+        }
+    }
+
+    return TEST<void>{}(arg);
+}
+
+template <template <typename...> class TEST>
+auto rocsparse_it_dense_to_sparse_dispatch(const Arguments& arg)
+{
+    return rocsparse_it_sparse_to_dense_dispatch<TEST>(arg);
+}
+
+template <template <typename...> class TEST>
+auto rocsparse_ijt_sparse_to_dense_dispatch(const Arguments& arg)
+{
+    const auto I = arg.index_type_I;
+    const auto J = arg.index_type_J;
+
+    if(I == rocsparse_indextype_i32 && J == rocsparse_indextype_i32)
+    {
+        switch(arg.compute_type)
+        {
+        case rocsparse_datatype_f16_r:
+            return TEST<int32_t, int32_t, _Float16>{}(arg);
+        case rocsparse_datatype_f32_r:
+            return TEST<int32_t, int32_t, float>{}(arg);
+        case rocsparse_datatype_f64_r:
+            return TEST<int32_t, int32_t, double>{}(arg);
+        case rocsparse_datatype_f32_c:
+            return TEST<int32_t, int32_t, rocsparse_float_complex>{}(arg);
+        case rocsparse_datatype_f64_c:
+            return TEST<int32_t, int32_t, rocsparse_double_complex>{}(arg);
+        case rocsparse_datatype_i8_r:
+        case rocsparse_datatype_u8_r:
+        case rocsparse_datatype_i32_r:
+        case rocsparse_datatype_u32_r:
+            return TEST<void>{}(arg);
+        }
+    }
+    else if(I == rocsparse_indextype_i64 && J == rocsparse_indextype_i32)
+    {
+        switch(arg.compute_type)
+        {
+        case rocsparse_datatype_f16_r:
+            return TEST<int64_t, int32_t, _Float16>{}(arg);
+        case rocsparse_datatype_f32_r:
+            return TEST<int64_t, int32_t, float>{}(arg);
+        case rocsparse_datatype_f64_r:
+            return TEST<int64_t, int32_t, double>{}(arg);
+        case rocsparse_datatype_f32_c:
+            return TEST<int64_t, int32_t, rocsparse_float_complex>{}(arg);
+        case rocsparse_datatype_f64_c:
+            return TEST<int64_t, int32_t, rocsparse_double_complex>{}(arg);
+        case rocsparse_datatype_i8_r:
+        case rocsparse_datatype_u8_r:
+        case rocsparse_datatype_i32_r:
+        case rocsparse_datatype_u32_r:
+            return TEST<void>{}(arg);
+        }
+    }
+    else if(I == rocsparse_indextype_i64 && J == rocsparse_indextype_i64)
+    {
+        switch(arg.compute_type)
+        {
+        case rocsparse_datatype_f16_r:
+            return TEST<int64_t, int64_t, _Float16>{}(arg);
+        case rocsparse_datatype_f32_r:
+            return TEST<int64_t, int64_t, float>{}(arg);
+        case rocsparse_datatype_f64_r:
+            return TEST<int64_t, int64_t, double>{}(arg);
+        case rocsparse_datatype_f32_c:
+            return TEST<int64_t, int64_t, rocsparse_float_complex>{}(arg);
+        case rocsparse_datatype_f64_c:
+            return TEST<int64_t, int64_t, rocsparse_double_complex>{}(arg);
+        case rocsparse_datatype_i8_r:
+        case rocsparse_datatype_u8_r:
+        case rocsparse_datatype_i32_r:
+        case rocsparse_datatype_u32_r:
+            return TEST<void>{}(arg);
+        }
+    }
+
+    return TEST<void>{}(arg);
+}
+
+template <template <typename...> class TEST>
+auto rocsparse_ijt_dense_to_sparse_dispatch(const Arguments& arg)
+{
+    return rocsparse_ijt_sparse_to_dense_dispatch<TEST>(arg);
+}
+
 #endif // TYPE_DISPATCH_HPP
