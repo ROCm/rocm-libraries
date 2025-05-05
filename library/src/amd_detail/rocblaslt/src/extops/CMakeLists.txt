@@ -33,7 +33,7 @@ list(REMOVE_DUPLICATES archs)
 
 set(python_venv_executable "${VIRTUALENV_BIN_DIR}/${VIRTUALENV_PYTHON_EXENAME}")
 set(python_launch_prefix "PYTHONPATH=${PROJECT_BINARY_DIR}/lib" "${python_venv_executable}")
-
+set(dat_deps "")
 foreach(arch IN LISTS archs)
     add_library(ExtOpObj_${arch} OBJECT)
     add_dependencies(ExtOpObj_${arch} rocisa)
@@ -134,11 +134,12 @@ foreach(arch IN LISTS archs)
         COMMAND_EXPAND_LISTS
     )
     add_custom_target(ExtOpLibrary_${arch} ALL
-        DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/extop_${arch}.co
+        DEPENDS ${dat_deps} ${CMAKE_CURRENT_BINARY_DIR}/extop_${arch}.co
         COMMAND ${python_launch_prefix} ExtOpCreateLibrary.py --src=${CMAKE_CURRENT_BINARY_DIR} --co=${CMAKE_CURRENT_BINARY_DIR}/extop_${arch}.co --output=${CMAKE_CURRENT_BINARY_DIR} --arch=${arch}
-        COMMENT "Creating hipblasltExtOpLibrary.dat for ${arch}"
+        COMMENT "Creating hipblasltExtOpLibrary.dat"
         WORKING_DIRECTORY ${ops_path}
     )
+    list(APPEND dat_deps "ExtOpLibrary_${arch}")
 endforeach()
 
 add_custom_target(ExtOpCp ALL
