@@ -25,6 +25,7 @@
 #include <memory>
 #include <numeric>
 #include <optional>
+#include <regex>
 #include <string.h>
 #include <string>
 #include <variant>
@@ -599,6 +600,7 @@ class StatementList;
 class Butterfly;
 class IntrinsicStore;
 class IntrinsicStorePlanar;
+class Printf;
 
 struct LineBreak
 {
@@ -674,7 +676,8 @@ using Statement = std::variant<Assign,
                                SyncThreads,
                                Butterfly,
                                IntrinsicStore,
-                               IntrinsicStorePlanar>;
+                               IntrinsicStorePlanar,
+                               Printf>;
 
 class Assign
 {
@@ -1034,6 +1037,28 @@ public:
     Expression rw_flag;
 };
 
+class Printf
+{
+public:
+    const char*             fmt;
+    std::vector<Expression> args;
+
+    Printf(const char* format, const std::vector<Expression>& arguments)
+        : fmt(format)
+        , args(arguments){};
+
+    std::string render() const
+    {
+        auto fmt_render = std::string(fmt);
+        fmt_render      = "\"" + std::regex_replace(fmt_render, std::regex(R"(\n)"), "\\n") + "\"";
+
+        auto args_render = args;
+        args_render.insert(args_render.begin(), Literal(fmt_render));
+
+        return Call{"printf", args_render}.render();
+    }
+};
+
 // end of Statement class declarations
 
 static void operator+=(StatementList& stmts, const Statement& s)
@@ -1161,6 +1186,7 @@ struct BaseVisitor
     MAKE_VISITOR_OPERATOR(StatementList, Butterfly);
     MAKE_VISITOR_OPERATOR(StatementList, IntrinsicStore);
     MAKE_VISITOR_OPERATOR(StatementList, IntrinsicStorePlanar);
+    MAKE_VISITOR_OPERATOR(StatementList, Printf);
 
     MAKE_VISITOR_OPERATOR(ArgumentList, ArgumentList);
 
@@ -1261,6 +1287,7 @@ struct BaseVisitor
     MAKE_TRIVIAL_STATEMENT_VISIT(Break)
     MAKE_TRIVIAL_STATEMENT_VISIT(SyncThreads)
     MAKE_TRIVIAL_STATEMENT_VISIT(Butterfly);
+    MAKE_TRIVIAL_STATEMENT_VISIT(Printf);
 
     MAKE_TRIVIAL_VISIT(Expression, Variable)
 
