@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 """
 PR Detect Changed Subtrees Script
 ------------------
@@ -11,112 +13,104 @@ Steps:
     4. Emit a comma-separated list of changed subtrees to GITHUB_OUTPUT as 'subtrees'.
 
 Arguments:
-    --token   : GitHub token for authentication
-    --repo    : Full repository name (e.g., org/repo)
-    --pr      : Pull request number
-    --config  : Path to the repos-config.json file
-    --dry-run : Print outputs instead of writing to GITHUB_OUTPUT
-    --debug   : Enable debug logging
+    --repo      : Full repository name (e.g., org/repo)
+    --pr        : Pull request number
+    --config    : OPTIONAL, path to the repos-config.json file
+    --dry-run   : If set, only logs actions without making changes.
+    --debug     : If set, enables detailed debug logging.
 
 Outputs:
     Writes 'subtrees' key to the GitHub Actions $GITHUB_OUTPUT file, which
     the workflow reads to call the subsequent python script to create/update PRs.
+    The output is a new-line separated list of subtrees.
 
-Usage Examples:
-    # Normal run inside GitHub Actions
-    python pr-detect-changed-subtrees.py --token ${{ secrets.GITHUB_TOKEN }} --repo ROCm/rocm-libraries --pr 123
+Example Usage:
 
-    # Dry run locally to see what subtrees would be reported
-    python pr-detect-changed-subtrees.py --token fake --repo ROCm/rocm-libraries --pr 123 --dry-run
+    To run in debug mode and perform a dry-run (no changes made):
+    python pr_detect_changed_subtrees.py --token <your-token> --repo ROCm/rocm-libraries --pr 123 --dry-run
 
-    # Dry run with verbose logging
-    python pr-detect-changed-subtrees.py --token fake --repo ROCm/rocm-libraries --pr 123 --dry-run --debug
+    To run in debug mode and get the changed subtrees output:
+    python pr_detect_changed_subtrees.py --token <your-token> --repo ROCm/rocm-libraries --pr 123 --debug
 """
 
 import argparse
-import requests
 import sys
 import os
 import json
+import logging
 from pathlib import Path
+from typing import List, Set
+from github_cli_client import GitHubCLIClient
 
-def get_paginated_results(url, headers, debug=False):
-    results = []
-    while url:
-        try:
-            if debug:
-                print(f"Fetching: {url}")
-            r = requests.get(url, headers=headers)
-            r.raise_for_status()
-            results.extend(r.json())
-            url = None
-            if 'link' in r.headers:
-                for part in r.headers['link'].split(','):
-                    if 'rel="next"' in part:
-                        url = part.split(';')[0].strip()[1:-1]
-                        break
-        except requests.exceptions.RequestException as e:
-            print(f"Error while fetching data: {e}", file=sys.stderr)
-            sys.exit(1)
-    return results
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-parser = argparse.ArgumentParser(description="Detect changed subtrees in a PR.")
-parser.add_argument("--token", required=True)
-parser.add_argument("--repo", required=True)
-parser.add_argument("--pr", required=True)
-parser.add_argument("--config", default=".github/repos-config.json")
-parser.add_argument("--dry-run", action="store_true", help="Print outputs instead of writing to GITHUB_OUTPUT")
-parser.add_argument("--debug", action="store_true", help="Enable debug logging")
-args = parser.parse_args()
+def parse_arguments(argv=None) -> argparse.Namespace:
+    """Parse command-line arguments."""
+    parser = argparse.ArgumentParser(description="Detect changed subtrees in a PR.")
+    parser.add_argument("--repo", required=True, help="Full repository name (e.g., org/repo)")
+    parser.add_argument("--pr", required=True, type=int, help="Pull request number")
+    parser.add_argument("--config", required=False, default=".github/repos-config.json", help="Path to the repos-config.json file")
+    parser.add_argument("--dry-run", action="store_true", help="Print results without writing to GITHUB_OUTPUT.")
+    parser.add_argument("--debug", action="store_true", help="Enable debug logging")
+    return parser.parse_args(argv)
 
-headers = {
-    "Authorization": f"token {args.token}",
-    "Accept": "application/vnd.github.v3+json"
-}
-
-if args.debug:
-    print(f"Fetching changed files from PR #{args.pr} in {args.repo}...")
-
-files_url = f"https://api.github.com/repos/{args.repo}/pulls/{args.pr}/files"
-changed_files = get_paginated_results(files_url, headers, debug=args.debug)
-file_paths = [file["filename"] for file in changed_files]
-
-if args.debug:
-    print("Changed files:")
-    for path in file_paths:
-        print(f"  {path}")
-
-with open(args.config) as f:
-    config = json.load(f)["repositories"]
-
-valid_prefixes = {f"{entry['category']}/{entry['name']}" for entry in config}
-if args.debug:
-    print("Valid subtrees from config:")
-    for prefix in sorted(valid_prefixes):
-        print(f"  {prefix}")
-
-# Identify changed subtrees
-subtrees = {
-    "/".join(path.split("/", 2)[:2])
-    for path in file_paths
-    if len(path.split("/")) >= 2
-}
-
-matched = sorted(prefix.split("/", 1)[1] for prefix in (subtrees & valid_prefixes))
-
-if args.debug:
-    print(f"Matched subtrees: {matched}")
-
-# Output results
-if args.dry_run:
-    print(f"[Dry-run] Would output: subtrees={','.join(matched)}")
-else:
-    output_file = os.environ.get('GITHUB_OUTPUT')
-    if output_file:
-        with open(output_file, 'a') as f:
-            print(f"subtrees={','.join(matched)}", file=f)
-        if args.debug:
-            print(f"Wrote to GITHUB_OUTPUT: subtrees={','.join(matched)}")
-    else:
-        print("GITHUB_OUTPUT environment variable not set. Outputs cannot be written.", file=sys.stderr)
+def load_repo_config(config_path: str) -> List[dict]:
+    """Load repository config from JSON."""
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            return json.load(f)["repositories"]
+    except Exception as e:
+        logger.error(f"Failed to load config file '{config_path}': {e}")
         sys.exit(1)
+
+def get_valid_prefixes(config: List[dict], debug: bool) -> Set[str]:
+    """Extract valid subtree prefixes from the configuration."""
+    valid_prefixes = {f"{entry['category']}/{entry['name']}" for entry in config}
+    if debug:
+        logger.debug("Valid subtrees:")
+        for prefix in sorted(valid_prefixes):
+            logger.debug(f"\t{prefix}")
+    return valid_prefixes
+
+def find_matched_subtrees(changed_files: List[str], valid_prefixes: Set[str], debug: bool) -> List[str]:
+    """Find subtrees that match the changed files."""
+    changed_subtrees = {
+        "/".join(path.split("/", 2)[:2])
+        for path in changed_files
+        if len(path.split("/")) >= 2
+    }
+    matched = sorted(prefix.split("/", 1)[1] for prefix in (changed_subtrees & valid_prefixes))
+    if debug:
+        logger.debug(f"Matched subtrees: {matched}")
+    return matched
+
+def output_subtrees(matched_subtrees: List[str], dry_run: bool) -> None:
+    """Output the matched subtrees to GITHUB_OUTPUT or log them in dry-run mode."""
+    newline_separated = "\n".join(matched_subtrees)
+    if dry_run:
+        logger.info(f"[Dry-run] Would output:\n{subtrees}")
+    else:
+        output_file = os.environ.get('GITHUB_OUTPUT')
+        if output_file:
+            with open(output_file, 'a') as f:
+                print(f"subtrees<<EOF\n{newline_separated}\nEOF", file=f)
+            logger.info(f"Wrote to GITHUB_OUTPUT: subtrees=<newline-separated values>")
+        else:
+            logger.error("GITHUB_OUTPUT environment variable not set. Outputs cannot be written.")
+            sys.exit(1)
+
+def main(argv=None) -> None:
+    """Main function to determine changed subtrees in PR."""
+    args = parse_arguments(argv)
+    if args.debug:
+        logger.setLevel(logging.DEBUG)
+    client = GitHubCLIClient()
+    config = load_repo_config(args.config)
+    changed_files = [file["filename"] for file in client.get_changed_files(args.repo, int(args.pr), args.debug)]
+    valid_prefixes = get_valid_prefixes(config, args.debug)
+    matched_subtrees = find_matched_subtrees(changed_files, valid_prefixes, args.ebug)
+    output_subtrees(matched_subtrees, args.dry_run)
+
+if __name__ == "__main__":
+    main()

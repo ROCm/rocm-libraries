@@ -1,11 +1,16 @@
+#!/usr/bin/env python3
+
 """
 PR Auto Label Script
-------------------
+--------------------
 This script analyzes the file paths changed in a pull request and determines which
-labels should be added or removed.
+labels should be added or removed based on the modified files.
+
+It uses GitHub's API to fetch the changed files and the existing labels on the pull request.
+Then, it computes the desired labels based on file paths, compares them to the existing labels,
+and applies the necessary additions and removals unless in dry-run mode.
 
 Arguments:
-    --token     : GitHub token for authentication
     --repo      : Full repository name (e.g., org/repo)
     --pr        : Pull request number
     --dry-run   : If set, will only log actions without making changes.
@@ -25,104 +30,72 @@ Example Usage:
 """
 
 import argparse
-import requests
 import sys
 import os
+import logging
 from pathlib import Path
+from typing import List
+from github_cli_client import GitHubCLIClient
 
-def get_paginated_results(url, headers, debug=False):
-    results = []
-    while url:
-        try:
-            r = requests.get(url, headers=headers)
-            r.raise_for_status()
-            results.extend(r.json())
-            url = None
-            if 'link' in r.headers:
-                for part in r.headers['link'].split(','):
-                    if 'rel="next"' in part:
-                        url = part.split(';')[0].strip()[1:-1]
-                        break
-            if debug:
-                print(f"Fetched {len(r.json())} items from {url}")
-        except requests.exceptions.RequestException as e:
-            print(f"Error while fetching data: {e}", file=sys.stderr)
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+def parse_arguments(argv=None) -> argparse.Namespace:
+    """Parse command-line arguments."""
+    parser = argparse.ArgumentParser(description="Apply labels based on PR's changed files.")
+    parser.add_argument("--repo", required=True, help="Full repository name (e.g., org/repo)")
+    parser.add_argument("--pr", required=True, help="Pull request number")
+    parser.add_argument("--dry-run", action="store_true", help="Print results without writing to GITHUB_OUTPUT.")
+    parser.add_argument("--debug", action="store_true", help="Enable debug logging")
+    return parser.parse_args(argv)
+
+def compute_desired_labels(file_paths: list) -> set:
+    """Determine the desired labels based on the changed files."""
+    desired_labels = set()
+    for path in file_paths:
+        parts = Path(path).parts
+        if len(parts) >= 2:
+            if parts[0] == "projects":
+                desired_labels.add(f"project: {parts[1]}")
+            elif parts[0] == "shared":
+                desired_labels.add(f"shared: {parts[1]}")
+    logger.debug(f"Desired labels based on changes: {desired_labels}")
+    return desired_labels
+
+def output_labels(existing_labels: List[str], desired_labels: List[str], dry_run: bool) -> None:
+    """Output the labels to add/remove to GITHUB_OUTPUT or log them in dry-run mode."""
+    existing_auto_labels = {
+        label for label in existing_labels
+        if label.startswith("project: ") or label.startswith("shared: ")
+    }
+    to_add = sorted(desired_labels - existing_labels)
+    to_remove = sorted(existing_auto_labels - desired_labels)
+    logger.debug(f"Labels to add: {to_add}")
+    logger.debug(f"Labels to remove: {to_remove}")
+    if dry_run:
+        logger.info("Dry run enabled. Labels will not be applied.")
+    else:
+        output_file = os.environ.get("GITHUB_OUTPUT")
+        if output_file:
+            with open(output_file, 'a') as f:
+                print(f"add={','.join(to_add)}", file=f)
+                print(f"remove={','.join(to_remove)}", file=f)
+            logger.info(f"Wrote to GITHUB_OUTPUT: add={','.join(to_add)}")
+            logger.info(f"Wrote to GITHUB_OUTPUT: remove={','.join(to_remove)}")
+        else:
+            print("GITHUB_OUTPUT environment variable not set. Outputs cannot be written.")
             sys.exit(1)
-    return results
 
-parser = argparse.ArgumentParser()
-parser.add_argument("--token", required=True)
-parser.add_argument("--repo", required=True)
-parser.add_argument("--pr", required=True)
-parser.add_argument("--dry-run", action="store_true", help="If set, only logs actions without making changes.")
-parser.add_argument("--debug", action="store_true", help="If set, enables detailed debug logging.")
-args = parser.parse_args()
-
-headers = {
-    "Authorization": f"token {args.token}",
-    "Accept": "application/vnd.github.v3+json"
-}
-
-# Debug log start
-if args.debug:
-    print(f"Debug mode enabled. Fetching changed files for PR {args.pr}...")
-
-# Get changed files
-files_url = f"https://api.github.com/repos/{args.repo}/pulls/{args.pr}/files"
-changed_files = get_paginated_results(files_url, headers, debug=args.debug)
-file_paths = [file["filename"] for file in changed_files]
-
-if args.debug:
-    print(f"Changed files: {file_paths}")
-
-# Get existing labels on the PR
-pr_url = f"https://api.github.com/repos/{args.repo}/pulls/{args.pr}"
-try:
-    pr_data = requests.get(pr_url, headers=headers).json()
-    existing_labels = set(label["name"] for label in pr_data["labels"])
+def main(argv=None) -> None:
+    """Main function to execute the PR auto label logic."""
+    args = parse_arguments(argv)
     if args.debug:
-        print(f"Existing labels on PR: {existing_labels}")
-except requests.exceptions.RequestException as e:
-    print(f"Error while fetching PR data: {e}", file=sys.stderr)
-    sys.exit(1)
+        logger.setLevel(logging.DEBUG)
+    client = GitHubCLIClient()
+    changed_files = [file["filename"] for file in client.get_changed_files(args.repo, int(args.pr), args.debug)]
+    existing_labels = client.get_existing_labels(args.repo, int(args.pr))
+    desired_labels = compute_desired_labels(changed_files)
+    output_labels(existing_labels, desired_labels, args.dry_run)
 
-# Determine the desired labels based on changed files
-desired_labels = set()
-for path in file_paths:
-    parts = Path(path).parts
-    if len(parts) >= 2:
-        if parts[0] == "projects":
-            desired_labels.add(f"project: {parts[1]}")
-        elif parts[0] == "shared":
-            desired_labels.add(f"shared: {parts[1]}")
-
-if args.debug:
-    print(f"Desired labels based on changes: {desired_labels}")
-
-# Filter out the existing auto labels (project and shared)
-existing_auto_labels = {
-    label for label in existing_labels
-    if label.startswith("project: ") or label.startswith("shared: ")
-}
-
-# Determine which labels need to be added or removed
-to_add = sorted(desired_labels - existing_labels)
-to_remove = sorted(existing_auto_labels - desired_labels)
-
-if args.debug:
-    print(f"Labels to add: {to_add}")
-    print(f"Labels to remove: {to_remove}")
-
-# Output the results to GitHub Actions via GITHUB_OUTPUT
-output_file = os.environ.get('GITHUB_OUTPUT')
-if output_file:
-    with open(output_file, 'a') as f:
-        print(f"add={','.join(to_add)}", file=f)
-        print(f"remove={','.join(to_remove)}", file=f)
-else:
-    print("GITHUB_OUTPUT environment variable not set. Outputs cannot be written.")
-    sys.exit(1)
-
-# If dry-run is enabled, prevent actual changes to labels
-if args.dry_run:
-    print("Dry run enabled. Labels will not be applied.")
+if __name__ == "__main__":
+    main()
