@@ -59,6 +59,6 @@ function(hipblaslt_configure_bundled_python_command python_binary_dir)
         --
         "${Python3_EXECUTABLE}"
     )
-    message(STATUS "Python build command: ${_python_command}")
+    message(VERBOSE "Python command: ${_python_command}")
     set(HIPBLASLT_PYTHON_COMMAND "${_python_command}" PARENT_SCOPE)
 endfunction()
