@@ -75,7 +75,7 @@ __global__
 void generate_random_kernel(
     T* output, U min, V max, const unsigned long long seed = 0, const unsigned long long offset = 0)
 {
-    const unsigned int flat_id = ::rocprim::detail::block_thread_id<0>();
+    const unsigned int flat_id = blockIdx.x * blockDim.x + threadIdx.x;
 
     StateT             state;
     const unsigned int subsequence = flat_id;
@@ -85,7 +85,7 @@ void generate_random_kernel(
 
 template<class OutputIter, class U, class V>
 inline auto
-    generate_random_data_n(OutputIter it, size_t size, U min, V max, unsigned long long seed_value)
+    generate_random_data_n(OutputIter& it, size_t size, U min, V max, unsigned long long seed_value)
 {
     if(size == 0)
         return it.begin() + size;
