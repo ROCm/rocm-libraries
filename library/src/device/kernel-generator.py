@@ -700,11 +700,16 @@ def list_small_kernels():
         NS(length=4000, workgroup_size=256, threads_per_transform=200, factors=(10, 10, 10, 4), runtime_compile=True),
         NS(length=4050, workgroup_size=256, threads_per_transform=135, factors=(10, 5, 3, 3, 3, 3), runtime_compile=True),
         NS(length=4096, workgroup_size=256, threads_per_transform=256, factors=(16, 16, 16), runtime_compile=True),
+        NS(length=4704, workgroup_size=256, threads_per_transform=224, factors=(8, 4, 7, 7, 3), double_precision=False, runtime_compile=True),
+        NS(length=5488, workgroup_size=256, threads_per_transform=196, factors=(7, 4, 7, 4, 7), double_precision=False, runtime_compile=True),
+        NS(length=6144, workgroup_size=512, threads_per_transform=512, factors=(16, 4, 8, 3, 4), double_precision=False, runtime_compile=True),
+        NS(length=6561, workgroup_size=256, threads_per_transform=243, factors=(3, 3, 3, 3, 3, 3, 3, 3), double_precision=False, runtime_compile=True),
+        NS(length=8192, workgroup_size=512, threads_per_transform=512, factors=(16, 4, 4, 4, 8), double_precision=False, runtime_compile=True),
     ]
 
     kernels = [NS(**kernel.__dict__,
                   scheme='CS_KERNEL_STOCKHAM',
-                  precision=['sp', 'dp']) for kernel in kernels1d]
+                  precision=['sp','dp'] if not hasattr(kernel, 'double_precision') or kernel.double_precision else ['sp']) for kernel in kernels1d]
 
     return kernels
 
@@ -1119,6 +1124,10 @@ def generate_kernels(kernels, precisions, stockham_gen):
         # Send input if any remaining
         if kernel_idx < num_kernels:
             k = kernels[kernel_idx]
+
+            kernel_precisions = k.precision if hasattr(
+                k, 'precision') else precisions
+
             # 2D single kernels always specify threads per transform
             if isinstance(k.length, list):
                 proc.stdin.write(','.join([str(f)
@@ -1126,13 +1135,14 @@ def generate_kernels(kernels, precisions, stockham_gen):
                 proc.stdin.write(','.join([str(f)
                                            for f in k.factors[1]]) + " ")
                 proc.stdin.write(
-                    ','.join([str(pre_enum[pre]) for pre in precisions]) + " ")
+                    ','.join([str(pre_enum[pre])
+                              for pre in kernel_precisions]) + " ")
                 proc.stdin.write(','.join(
                     [str(f) for f in k.threads_per_transform]))
             else:
                 proc.stdin.write(','.join([str(f) for f in k.factors]) + " ")
                 proc.stdin.write(','.join(
-                    [str(pre_enum[pre]) for pre in precisions]))
+                    [str(pre_enum[pre]) for pre in kernel_precisions]))
                 # 1D kernels might not, and need to default to 'uwide'
                 threads_per_transform = getattr(
                     k, 'threads_per_transform', {

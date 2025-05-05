@@ -206,6 +206,12 @@ NodeFactory::Map1DLength const NodeFactory::map1DLengthDouble = {
     {114688, 224}, //           CC (224cc + 512rc)
 };
 
+NodeFactory::Map1DLength const NodeFactory::map1DLengthTRTRT = {
+    // 3^18 performs better when decomposing with 3^7 kernel even when
+    // 3^8 is available
+    {387420489, 177147},
+};
+
 //
 // Factorisation helpers
 //
@@ -563,7 +569,7 @@ ComputeScheme NodeFactory::DecideNodeScheme(const function_pool& pool,
     switch(nodeData.dimension)
     {
     case 1:
-        return Decide1DScheme(pool, nodeData);
+        return Decide1DScheme(pool, nodeData, parent);
     case 2:
         return Decide2DScheme(pool, nodeData);
     case 3:
@@ -598,7 +604,8 @@ ComputeScheme NodeFactory::DecideRealScheme(const function_pool& pool, NodeMetaD
     return CS_REAL_TRANSFORM_USING_CMPLX;
 }
 
-ComputeScheme NodeFactory::Decide1DScheme(const function_pool& pool, NodeMetaData& nodeData)
+ComputeScheme
+    NodeFactory::Decide1DScheme(const function_pool& pool, NodeMetaData& nodeData, TreeNode* parent)
 {
     ComputeScheme scheme = CS_NONE;
 
@@ -608,7 +615,32 @@ ComputeScheme NodeFactory::Decide1DScheme(const function_pool& pool, NodeMetaDat
 
     if(pool.has_function(FMKey(nodeData.length[0], nodeData.precision)))
     {
-        return CS_KERNEL_STOCKHAM;
+        // 2-kernel plans for lengths > 4k can still do better at
+        // smaller batch size due to using more CUs.  So prefer
+        // single-kernel only if we launch enough workgroups for all
+        // CUs
+        if(nodeData.length[0] > 4096)
+        {
+            auto kernel = pool.get_kernel(FMKey(nodeData.length[0], nodeData.precision));
+
+            // higher dimensions and batch is the effective batch for
+            // the kernel
+            const auto totalBatch
+                = product(nodeData.length.begin() + 1, nodeData.length.end()) * nodeData.batch;
+
+            // Bluestein would have chosen this kernel for
+            // single-kernel Bluestein, so continue using it for
+            // chirp setup
+            if((parent && parent->scheme == CS_BLUESTEIN)
+               || totalBatch / kernel.transforms_per_block
+                      >= static_cast<size_t>(pool.deviceProp->multiProcessorCount))
+                return CS_KERNEL_STOCKHAM;
+            // otherwise, fall through to multi-kernel plan
+        }
+        else
+        {
+            return CS_KERNEL_STOCKHAM;
+        }
     }
 
     size_t divLength1 = 1;
@@ -721,20 +753,30 @@ ComputeScheme NodeFactory::Decide1DScheme(const function_pool& pool, NodeMetaDat
         if(failed)
         {
             scheme = CS_L1D_TRTRT;
-            divLength1
-                = get_explicitly_supported_factor(pool, nodeData.precision, nodeData.length[0]);
-            if(divLength1 == 0)
-            {
-                // We need to recurse.  Note, for CS_L1D_TRTRT,
-                // divLength0 has to be explictly supported
-                auto divLength0
-                    = get_largest_supported_factor(pool, nodeData.precision, nodeData.length[0]);
 
-                // should ignore factor 1 or we're going into a infinity decompostion loop,
-                // (an example is to run len-81 when we build only pow2 kernels, we'll be here)
-                divLength1 = (divLength0 <= 1) ? 0 : nodeData.length[0] / divLength0;
+            auto it = map1DLengthTRTRT.find(nodeData.length[0]);
+            if(it != map1DLengthTRTRT.end())
+            {
+                divLength1 = it->second;
+                failed     = false;
             }
-            failed = divLength1 == 0;
+            else
+            {
+                divLength1
+                    = get_explicitly_supported_factor(pool, nodeData.precision, nodeData.length[0]);
+                if(divLength1 == 0)
+                {
+                    // We need to recurse.  Note, for CS_L1D_TRTRT,
+                    // divLength0 has to be explictly supported
+                    auto divLength0 = get_largest_supported_factor(
+                        pool, nodeData.precision, nodeData.length[0]);
+
+                    // should ignore factor 1 or we're going into a infinity decompostion loop,
+                    // (an example is to run len-81 when we build only pow2 kernels, we'll be here)
+                    divLength1 = (divLength0 <= 1) ? 0 : nodeData.length[0] / divLength0;
+                }
+                failed = divLength1 == 0;
+            }
         }
     }
 

@@ -21,6 +21,7 @@
 #include <functional>
 using namespace std::placeholders;
 
+#include "../../../../shared/precision_type.h"
 #include "generator.h"
 #include "stockham_gen.h"
 #include <array>
@@ -262,6 +263,18 @@ void stockham_variants(const std::string&            kernel_name,
     output << "]";
 }
 
+static size_t max_bytes_per_element(const std::vector<unsigned int>& precisions)
+{
+    // generate for the maximum element size in the available
+    // precisions
+    size_t element_size = 0;
+    for(auto p : precisions)
+    {
+        element_size = std::max(element_size, complex_type_size(static_cast<rocfft_precision>(p)));
+    }
+    return element_size;
+}
+
 int main()
 {
     std::string line;
@@ -326,6 +339,8 @@ int main()
         StockhamGeneratorSpecs specs(factors, factors2d, precisions, workgroup_size, scheme);
         specs.half_lds           = half_lds;
         specs.direct_to_from_reg = direct_to_from_reg;
+
+        specs.bytes_per_element = max_bytes_per_element(precisions);
 
         specs.threads_per_transform = threads_per_transform.front();
 
