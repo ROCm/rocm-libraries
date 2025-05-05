@@ -68,7 +68,7 @@ def output_labels(existing_labels: List[str], desired_labels: List[str], dry_run
         label for label in existing_labels
         if label.startswith("project: ") or label.startswith("shared: ")
     }
-    to_add = sorted(desired_labels - existing_labels)
+    to_add = sorted(desired_labels - set(existing_labels))
     to_remove = sorted(existing_auto_labels - desired_labels)
     logger.debug(f"Labels to add: {to_add}")
     logger.debug(f"Labels to remove: {to_remove}")
