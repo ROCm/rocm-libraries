@@ -103,7 +103,7 @@ def main(argv=None) -> None:
         logger.setLevel(logging.DEBUG)
     client = GitHubCLIClient()
     config = load_repo_config(args.config)
-    changed_files = [file["filename"] for file in client.get_changed_files(args.repo, int(args.pr))]
+    changed_files = [file for file in client.get_changed_files(args.repo, int(args.pr))]
     valid_prefixes = get_valid_prefixes(config)
     matched_subtrees = find_matched_subtrees(changed_files, valid_prefixes)
     output_subtrees(matched_subtrees, args.dry_run)
