@@ -475,69 +475,13 @@ namespace
         std::string deviceFullString(deviceProperties.gcnArchName);
         std::string deviceString = deviceFullString.substr(0, deviceFullString.find(":"));
 
-        if(deviceString.find("gfx803") != std::string::npos)
-        {
-            return TensileLite::LazyLoadingInit::gfx803;
-        }
-        else if(deviceString.find("gfx900") != std::string::npos)
-        {
-            return TensileLite::LazyLoadingInit::gfx900;
-        }
-        else if(deviceString.find("gfx906") != std::string::npos)
-        {
-            return TensileLite::LazyLoadingInit::gfx906;
-        }
-        else if(deviceString.find("gfx908") != std::string::npos)
-        {
-            return TensileLite::LazyLoadingInit::gfx908;
-        }
-        else if(deviceString.find("gfx90a") != std::string::npos)
-        {
-            return TensileLite::LazyLoadingInit::gfx90a;
-        }
-        else if(deviceString.find("gfx942") != std::string::npos)
+        if(deviceString.find("gfx942") != std::string::npos)
         {
             return TensileLite::LazyLoadingInit::gfx942;
         }
         else if(deviceString.find("gfx950") != std::string::npos)
         {
             return TensileLite::LazyLoadingInit::gfx950;
-        }
-        else if(deviceString.find("gfx1010") != std::string::npos)
-        {
-            return TensileLite::LazyLoadingInit::gfx1010;
-        }
-        else if(deviceString.find("gfx1011") != std::string::npos)
-        {
-            return TensileLite::LazyLoadingInit::gfx1011;
-        }
-        else if(deviceString.find("gfx1012") != std::string::npos)
-        {
-            return TensileLite::LazyLoadingInit::gfx1012;
-        }
-        else if(deviceString.find("gfx1030") != std::string::npos)
-        {
-            return TensileLite::LazyLoadingInit::gfx1030;
-        }
-        else if(deviceString.find("gfx1100") != std::string::npos)
-        {
-            return TensileLite::LazyLoadingInit::gfx1100;
-        }
-        else if(deviceString.find("gfx1101") != std::string::npos)
-        {
-            return TensileLite::LazyLoadingInit::gfx1101;
-        }
-        else if(deviceString.find("gfx1102") != std::string::npos)
-        {
-            return TensileLite::LazyLoadingInit::gfx1102;
-        }
-        else if(deviceString.find("gfx1200") != std::string::npos)
-        {
-            return TensileLite::LazyLoadingInit::gfx1200;
-        }
-        else if(deviceString.find("gfx1201") != std::string::npos)
-        {
-            return TensileLite::LazyLoadingInit::gfx1201;
         }
         return TensileLite::LazyLoadingInit::None;
     }
