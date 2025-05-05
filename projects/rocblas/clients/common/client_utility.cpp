@@ -474,8 +474,6 @@ void rocblas_local_handle::rocblas_stream_begin_capture()
     CHECK_ROCBLAS_ERROR(rocblas_get_stream(m_handle, &m_old_stream));
     CHECK_HIP_ERROR(hipStreamSynchronize(m_old_stream));
 
-    m_handle->set_stream_order_memory_allocation(true);
-
     CHECK_HIP_ERROR(hipStreamCreate(&m_graph_stream));
     CHECK_ROCBLAS_ERROR(rocblas_set_stream(m_handle, m_graph_stream));
 
@@ -500,8 +498,6 @@ void rocblas_local_handle::rocblas_stream_end_capture()
     CHECK_ROCBLAS_ERROR(rocblas_set_stream(m_handle, m_old_stream));
     CHECK_HIP_ERROR(hipStreamDestroy(m_graph_stream));
     m_graph_stream = nullptr;
-
-    m_handle->set_stream_order_memory_allocation(false);
 }
 
 void rocblas_parallel_initialize_thread(int id, size_t& memory_used)
