@@ -21,10 +21,50 @@
  *
  * ************************************************************************ */
 #include "functions/f_math.hpp"
+#include "instruction/common.hpp"
+#include "instruction/mem.hpp"
 
 #include <nanobind/nanobind.h>
 
 namespace nb = nanobind;
+
+namespace rocisa
+{
+    ////////////////////////////////////////
+    // init lds state
+    ////////////////////////////////////////
+    std::shared_ptr<Module> DSInit(const ContinuousRegister& tmpVgprRes,
+                                   int                       numThreads,
+                                   int                       ldsNumElements,
+                                   int                       initValue)
+    {
+        if(tmpVgprRes.size <= 1)
+        {
+            throw std::runtime_error("tmpVgprRes.size must be greater than 1");
+        }
+        int tmp     = tmpVgprRes.idx;
+        int tmpAddr = tmp + 1;
+
+        auto module = std::make_shared<Module>("initLds");
+        module->addT<SWaitCnt>(0, 0, 0, -1, -1, -1, -1, "init lds state");
+        module->addT<SBarrier>("init LDS");
+        module->addT<VMovB32>(vgpr(tmp), initValue, std::nullopt, "Init value");
+        module->addT<VLShiftLeftB32>(
+            vgpr(tmpAddr), 2, vgpr("Serial"), "set per-thread address to init LDS");
+
+        int writesPerThread = ((ldsNumElements - 1) / numThreads / 4) + 1;
+        for(int i = 0; i < writesPerThread; ++i)
+        {
+            module->addT<DSStoreB32>(
+                vgpr(tmpAddr), vgpr(tmp), DSModifiers(i * numThreads * 4), "init lds");
+        }
+
+        module->addT<SWaitCnt>(0, 0, 0, -1, -1, -1, -1, "wait for LDS init to complete");
+        module->addT<SBarrier>("init LDS exit");
+
+        return module;
+    }
+} // namespace rocisa
 
 void math_func(nb::module_ m);
 void branch_func(nb::module_ m);
@@ -33,6 +73,13 @@ void cast_func(nb::module_ m);
 void init_func(nb::module_ m)
 {
     auto m_func = m.def_submodule("functions", "rocIsa functions submodule.");
+    m_func.def("DSInit",
+               &rocisa::DSInit,
+               nb::arg("tmpVgprRes"),
+               nb::arg("numThreads"),
+               nb::arg("ldsNumElements"),
+               nb::arg("initValue") = 0,
+               "Initialize LDS state.");
 
     math_func(m_func);
     branch_func(m_func);

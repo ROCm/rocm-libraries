@@ -244,7 +244,7 @@ namespace rocisa
                 Item MUST be a Item (not a string) - can use
                 addText(...)) to add a string.
                 All additions to itemList should use this function.
-        
+
                 Returns item to facilitate one-line create/add patterns
             */
             if(item)
@@ -267,13 +267,6 @@ namespace rocisa
         {
             auto item = std::make_shared<T>(std::forward<Args>(args)...);
             return add(item);
-        }
-
-        template <typename T, typename... Args>
-        const std::shared_ptr<Item> addT(int pos, Args&&... args)
-        {
-            auto item = std::make_shared<T>(std::forward<Args>(args)...);
-            return add(item, pos);
         }
 
         const void addItems(const std::vector<std::shared_ptr<Item>>& items)
@@ -300,7 +293,7 @@ namespace rocisa
         {
             /*
                 Add items to module.
-    
+
                 Returns items to facilitate one-line create/add patterns
             */
             for(const auto& i : module->flatitems())
@@ -403,7 +396,7 @@ namespace rocisa
           | | | |--bogusTextBlock
           | | | |--bogusTextBlock2
           | | | |--bogusTextBlock3
-          | | |--GlobalReadInst bogusGlobalReadInst  
+          | | |--GlobalReadInst bogusGlobalReadInst
         */
         std::string prettyPrint(const std::string& indent = "") const override
         {

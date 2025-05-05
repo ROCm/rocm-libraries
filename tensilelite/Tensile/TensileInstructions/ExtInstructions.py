@@ -52,29 +52,6 @@ import sys
 ################################################################################
 ################################################################################
 
-########################################
-# init lds state
-########################################
-def DSInit(tmpVgprRes: ContinuousRegister, numThreads: int, \
-            ldsNumElements: int, initValue):
-    assert tmpVgprRes.size > 1
-    tmp = tmpVgprRes.idx
-    tmpAddr = tmp + 1
-    module = Module("initLds")
-    module.addComment1("init lds state")
-    module.add(SWaitCnt(lgkmcnt=0, vmcnt=0, vscnt=0, comment=""))
-    module.add(SBarrier(comment="init LDS"))
-    module.add(VMovB32(dst=vgpr(tmp), src=hex(initValue), comment="Init value"))
-    module.add(VLShiftLeftB32(dst=vgpr(tmpAddr), shiftHex=2, src=vgpr("Serial"), \
-                comment="set per-thread address to init LDS"))
-    writesPerThread = ((ldsNumElements-1)//numThreads//4) + 1
-    for i in range(0, writesPerThread):
-        module.add(DSStoreB32(dstAddr=vgpr(tmpAddr), src=vgpr(tmp),
-                    ds=DSModifiers(offset=(i*numThreads*4)), comment="init lds"))
-    module.add(SWaitCnt(lgkmcnt=0, vmcnt=0, vscnt=0, comment="wait for LDS init to complete"))
-    module.add(SBarrier(comment="init LDS exit"))
-    return module
-
 ################################################################################
 ################################################################################
 ###
