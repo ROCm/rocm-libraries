@@ -26,6 +26,7 @@
 #include "../../../shared/rocfft_complex.h"
 #include "../device/kernels/common.h"
 #include "function_map_key.h"
+#include <optional>
 #include <sstream>
 #include <unordered_map>
 
@@ -160,8 +161,16 @@ public:
     }
 
     function_pool(const hipDeviceProp_t& prop)
-        : function_pool(prop.sharedMemPerBlock)
+        : max_lds_bytes(prop.sharedMemPerBlock)
+        , def_key_pool(function_pool_data::get_function_pool_data().def_key_pool)
+        , function_map(function_pool_data::get_function_pool_data().function_map)
+        , deviceProp(prop)
     {
+        // We would only see zero if we received a
+        // default-constructed device prop struct, which means
+        // someone forgot to initialize the struct somewhere.
+        if(max_lds_bytes == 0)
+            throw std::runtime_error("function_pool: max_lds_bytes not initialized");
     }
 
     function_pool(function_pool& p) = delete;
@@ -243,6 +252,11 @@ public:
     {
         return function_map;
     }
+
+    // Device properties that the pool was initialized with.  This can
+    // be nullopt_t if the pool was only initialized with an LDS size
+    // and no actual device is known.
+    const std::optional<hipDeviceProp_t> deviceProp;
 };
 
 // Insert a key-kernel pair for AOT generator. This function is called in
