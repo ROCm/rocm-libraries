@@ -88,6 +88,8 @@
 _CCCL_DIAG_PUSH
 _CCCL_DIAG_SUPPRESS_CLANG("-Wunused-function")
 #if defined(__HIP_PLATFORM_AMD__)
+#include <cstdint>
+#include <hip/hip_runtime.h>
 #  include <hip/hip_bf16.h>
 #else
 #  include <cuda_bf16.h>
