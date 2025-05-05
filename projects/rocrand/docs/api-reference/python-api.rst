@@ -1,6 +1,6 @@
 .. meta::
-  :description: rocRAND documentation and API reference library
-  :keywords: rocRAND, ROCm, API, documentation
+  :description: rocRAND Python API reference
+  :keywords: rocRAND, ROCm, API, documentation, Python
   
 .. _python-api:
 
@@ -13,7 +13,7 @@ This chapter describes the rocRAND Python module API.
 API index
 ------------
 
-To search an API, refer to the API :ref:`genindex`.
+To search the API, see the API :ref:`genindex`.
 
 .. default-domain:: py
 .. py:currentmodule:: rocrand
@@ -51,4 +51,4 @@ Utilities
 
 .. autofunction:: rocrand.get_version
 
-To search an API, refer to the :ref:`genindex` for all rocRAND APIs.
+To search the API, see the :ref:`genindex` for all rocRAND APIs.
