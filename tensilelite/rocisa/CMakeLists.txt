@@ -57,7 +57,8 @@ set(ROCISAINST_SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/instruction/instruc
 
 set(ROCISAFUNC_SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/functions/functions.cpp
                       ${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/functions/f_math.cpp
-                      ${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/functions/f_branch.cpp)
+                      ${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/functions/f_branch.cpp
+                      ${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/functions/f_cast.cpp)
 
 set(ROCISAPASS_SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/pass/pass.cpp
                       ${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/pass/graph.cpp

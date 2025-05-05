@@ -20,21 +20,20 @@
  * THE SOFTWARE.
  *
  * ************************************************************************ */
-#include "functions/f_math.hpp"
+#pragma once
+#include "code.hpp"
+#include "container.hpp"
+#include "enum.hpp"
 
-#include <nanobind/nanobind.h>
+#include <memory>
 
-namespace nb = nanobind;
-
-void math_func(nb::module_ m);
-void branch_func(nb::module_ m);
-void cast_func(nb::module_ m);
-
-void init_func(nb::module_ m)
+namespace rocisa
 {
-    auto m_func = m.def_submodule("functions", "rocIsa functions submodule.");
-
-    math_func(m_func);
-    branch_func(m_func);
-    cast_func(m_func);
-}
+    std::shared_ptr<Module> VSaturateCastInt(const std::shared_ptr<RegisterContainer>& SumIdxVgpr,
+                                             const int                                 tmpVgprIdx,
+                                             const int                                 tmpSgprIdx,
+                                             const int                                 lowerBound,
+                                             const int                                 upperBound,
+                                             const SaturateCastType type = SaturateCastType::NORMAL,
+                                             const bool             initGpr = true);
+} // namespace rocisa

@@ -142,4 +142,11 @@ void init_enum(nb::module_ m)
         .value("ROUND_UP", rocisa::RoundType::ROUND_UP)
         .value("ROUND_TO_NEAREST_EVEN", rocisa::RoundType::ROUND_TO_NEAREST_EVEN)
         .export_values();
+
+    nb::enum_<rocisa::SaturateCastType>(m_enum, "SaturateCastType")
+        .value("NORMAL", rocisa::SaturateCastType::NORMAL)
+        .value("DO_NOTHING", rocisa::SaturateCastType::DO_NOTHING)
+        .value("UPPER", rocisa::SaturateCastType::UPPER)
+        .value("LOWER", rocisa::SaturateCastType::LOWER)
+        .export_values();
 }

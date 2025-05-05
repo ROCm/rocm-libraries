@@ -22,7 +22,7 @@
 
 from rocisa.container import SMEMModifiers, VOP3PModifiers, MUBUFModifiers, \
   replaceHolder, EXEC
-from rocisa.enum import CvtType, RoundType
+from rocisa.enum import CvtType, RoundType, SaturateCastType
 from rocisa.instruction import BufferAtomicAddF32, BufferAtomicCmpswapB32, \
   BufferAtomicCmpswapB64, FlatAtomicCmpswapB32, SAddCU32, SAddU32, SAndB32, \
   SAndB64, SAtomicDec, SBarrier, SBranch, SCBranchExecNZ, SCBranchExecZ, \
@@ -43,8 +43,7 @@ from ..SolutionStructs import Solution
 from ..Activation import ActivationModule
 from ..AsmStoreState import StoreState
 from ..TensileInstructions import Label, Module, SDWAModifiers, VCC, SelectBit, \
-                            vgpr, sgpr, SaturateCastType, \
-                            DataType
+                            vgpr, sgpr, DataType
 
 from ..AsmAddressCalculation import AddrCalculation
 from ..Components.PackData import formatting, PackData_F16, PackData_BF16, PackData_FLOAT8, PackData_FLOAT8_fnuz
