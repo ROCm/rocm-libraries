@@ -56,7 +56,7 @@ private:
 */
 
 // cuda_runtime_api needs to come first
-
+#include <hip/hip_runtime.h>
 #include <cuda/std/detail/__config>
 
 #if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
