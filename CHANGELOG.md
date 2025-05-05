@@ -2,6 +2,28 @@
 
 Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projects/rocPRIM/en/latest/](https://rocm.docs.amd.com/projects/rocPRIM/en/latest/).
 
+## rocPRIM 3.6.0 for ROCm 7.0
+
+### Changed
+
+* The default scan accumulator types for device-level scan algorithms have changed. This is a breaking change.
+The previous default accumulator types could lead to situations in which unexpected overflow occured, such as
+when the input or inital type was smaller than the output type.
+
+This is a complete list of affected functions and how their default accumulator types are changing:
+  * `rocprim::inclusive_scan`
+    * past default: `class AccType = typename std::iterator_traits<InputIterator>::value_type>`
+    * new default: `class AccType = rocprim::invoke_result_binary_op_t<typename std::iterator_traits<InputIterator>::value_type, BinaryFunction>`
+  * `rocprim::deterministic_inclusive_scan`
+    * past default: `class AccType = typename std::iterator_traits<InputIterator>::value_type>`
+    * new default: `class AccType = rocprim::invoke_result_binary_op_t<typename std::iterator_traits<InputIterator>::value_type, BinaryFunction>`
+  * `rocprim::exclusive_scan`
+    * past default: `class AccType = detail::input_type_t<InitValueType>>`
+    * new default: `class AccType = rocprim::invoke_result_binary_op_t<rocprim::detail::input_type_t<InitValueType>, BinaryFunction>`
+  * `rocprim::deterministic_exclusive_scan`
+    * past default: `class AccType = detail::input_type_t<InitValueType>>`
+    * new default: `class AccType = rocprim::invoke_result_binary_op_t<rocprim::detail::input_type_t<InitValueType>, BinaryFunction>`
+
 ## rocPRIM 3.5.0 for ROCm 6.5.0
 
 ### Removed
