@@ -144,8 +144,9 @@ rocsparse_arguments_config::rocsparse_arguments_config()
 
 void rocsparse_arguments_config::set_description(options_description& desc)
 {
+    // clang-format off
     desc.add_options()("help,h", "produces this help message")
-        // clang-format off
+
     ("sizem,m",
      value<rocsparse_int>(&this->M)->default_value(128),
      "Specific matrix size testing: sizem is only applicable to SPARSE-2 "
@@ -442,84 +443,82 @@ void rocsparse_arguments_config::set_description(options_description& desc)
       ("sparsity-pattern-statistics",
        "enable sparsity pattern statistics: min,max and median of the number of non-zeros per row and per column of the sparsity pattern of the matrix A will be part of benchmarking results.");
 
+    // clang-format on
 }
 
-int rocsparse_arguments_config::parse(int&argc,char**&argv, options_description&desc)
+int rocsparse_arguments_config::parse(int& argc, char**& argv, options_description& desc)
 {
-  variables_map vm;
-  store(parse_command_line(argc, argv, desc,  sizeof(rocsparse_arguments_config)), vm);
-  notify(vm);
+    variables_map vm;
+    store(parse_command_line(argc, argv, desc, sizeof(rocsparse_arguments_config)), vm);
+    notify(vm);
 
-  if(vm.count("help"))
-  {
-    std::cout << desc << std::endl;
-    return -2;
-  }
-
-  if(this->b_dir != rocsparse_direction_row && this->b_dir != rocsparse_direction_column)
-  {
-    std::cerr << "Invalid value for --direction" << std::endl;
-    return -1;
-  }
-
-  if(rocsparse_order_t::is_invalid(this->b_order))
-  {
-    std::cerr << "Invalid value for --order" << std::endl;
-  }
-
-  if(rocsparse_order_t::is_invalid(this->b_orderB))
-  {
-    std::cerr << "Invalid value for --orderB" << std::endl;
-  }
-
-  if(rocsparse_order_t::is_invalid(this->b_orderC))
-  {
-    std::cerr << "Invalid value for --orderC" << std::endl;
-  }
-
-  if(rocsparse_format_t::is_invalid(this->b_formatA))
-  {
-    std::cerr << "Invalid value for --formatA" << std::endl;
-    return -1;
-  }
-
-  if(rocsparse_format_t::is_invalid(this->b_formatB))
-  {
-    std::cerr << "Invalid value for --formatB" << std::endl;
-    return -1;
-  }
-
-  if(rocsparse_format_t::is_invalid(this->b_formatC))
-  {
-    std::cerr << "Invalid value for --formatC" << std::endl;
-    return -1;
-  }
-
-  if (rocsparse_itilu0_alg_t::is_invalid(this->b_itilu0_alg))
+    if(vm.count("help"))
     {
-      std::cerr << "Invalid value '"
-		<< this->b_itilu0_alg
-		<< "' for --itilu0_alg, valid values are : (";
-      rocsparse_itilu0_alg_t::info(std::cerr);
-      std::cerr << ")" << std::endl;
-      return -1;
+        std::cout << desc << std::endl;
+        return -2;
     }
 
-  if(this->b_spmv_alg != rocsparse_spmv_alg_default
-       && this->b_spmv_alg != rocsparse_spmv_alg_coo
+    if(this->b_dir != rocsparse_direction_row && this->b_dir != rocsparse_direction_column)
+    {
+        std::cerr << "Invalid value for --direction" << std::endl;
+        return -1;
+    }
+
+    if(rocsparse_order_t::is_invalid(this->b_order))
+    {
+        std::cerr << "Invalid value for --order" << std::endl;
+    }
+
+    if(rocsparse_order_t::is_invalid(this->b_orderB))
+    {
+        std::cerr << "Invalid value for --orderB" << std::endl;
+    }
+
+    if(rocsparse_order_t::is_invalid(this->b_orderC))
+    {
+        std::cerr << "Invalid value for --orderC" << std::endl;
+    }
+
+    if(rocsparse_format_t::is_invalid(this->b_formatA))
+    {
+        std::cerr << "Invalid value for --formatA" << std::endl;
+        return -1;
+    }
+
+    if(rocsparse_format_t::is_invalid(this->b_formatB))
+    {
+        std::cerr << "Invalid value for --formatB" << std::endl;
+        return -1;
+    }
+
+    if(rocsparse_format_t::is_invalid(this->b_formatC))
+    {
+        std::cerr << "Invalid value for --formatC" << std::endl;
+        return -1;
+    }
+
+    if(rocsparse_itilu0_alg_t::is_invalid(this->b_itilu0_alg))
+    {
+        std::cerr << "Invalid value '" << this->b_itilu0_alg
+                  << "' for --itilu0_alg, valid values are : (";
+        rocsparse_itilu0_alg_t::info(std::cerr);
+        std::cerr << ")" << std::endl;
+        return -1;
+    }
+
+    if(this->b_spmv_alg != rocsparse_spmv_alg_default && this->b_spmv_alg != rocsparse_spmv_alg_coo
        && this->b_spmv_alg != rocsparse_spmv_alg_csr_adaptive
        && this->b_spmv_alg != rocsparse_spmv_alg_csr_rowsplit
        && this->b_spmv_alg != rocsparse_spmv_alg_ell
        && this->b_spmv_alg != rocsparse_spmv_alg_coo_atomic
        && this->b_spmv_alg != rocsparse_spmv_alg_bsr
        && this->b_spmv_alg != rocsparse_spmv_alg_csr_lrb)
-  {
-      std::cerr << "Invalid value for --spmv_alg" << std::endl;
-      return -1;
-  }
+    {
+        std::cerr << "Invalid value for --spmv_alg" << std::endl;
+        return -1;
+    }
 
-  if(this->b_spmm_alg != rocsparse_spmm_alg_default
-       && this->b_spmm_alg != rocsparse_spmm_alg_csr
+    if(this->b_spmm_alg != rocsparse_spmm_alg_default && this->b_spmm_alg != rocsparse_spmm_alg_csr
        && this->b_spmm_alg != rocsparse_spmm_alg_bsr
        && this->b_spmm_alg != rocsparse_spmm_alg_coo_segmented
        && this->b_spmm_alg != rocsparse_spmm_alg_coo_atomic
@@ -528,299 +527,304 @@ int rocsparse_arguments_config::parse(int&argc,char**&argv, options_description&
        && this->b_spmm_alg != rocsparse_spmm_alg_csr_merge_path
        && this->b_spmm_alg != rocsparse_spmm_alg_coo_segmented_atomic
        && this->b_spmm_alg != rocsparse_spmm_alg_bell)
-  {
-      std::cerr << "Invalid value for --spmm_alg" << std::endl;
-      return -1;
-  }
+    {
+        std::cerr << "Invalid value for --spmm_alg" << std::endl;
+        return -1;
+    }
 
-  if(this->b_sddmm_alg != rocsparse_sddmm_alg_default
+    if(this->b_sddmm_alg != rocsparse_sddmm_alg_default
        && this->b_sddmm_alg != rocsparse_sddmm_alg_dense)
-  {
-      std::cerr << "Invalid value for --sddmm_alg" << std::endl;
-      return -1;
-  }
+    {
+        std::cerr << "Invalid value for --sddmm_alg" << std::endl;
+        return -1;
+    }
 
-  if(this->b_gtsv_interleaved_alg != rocsparse_gtsv_interleaved_alg_default
+    if(this->b_gtsv_interleaved_alg != rocsparse_gtsv_interleaved_alg_default
        && this->b_gtsv_interleaved_alg != rocsparse_gtsv_interleaved_alg_thomas
        && this->b_gtsv_interleaved_alg != rocsparse_gtsv_interleaved_alg_lu
        && this->b_gtsv_interleaved_alg != rocsparse_gtsv_interleaved_alg_qr)
-  {
-      std::cerr << "Invalid value for --gtsv_interleaved_alg" << std::endl;
-      return -1;
-  }
+    {
+        std::cerr << "Invalid value for --gtsv_interleaved_alg" << std::endl;
+        return -1;
+    }
 
-  if(vm.count("sparsity-pattern-statistics"))
-  {
-    this->sparsity_pattern_statistics = true;
-  }
+    if(vm.count("sparsity-pattern-statistics"))
+    {
+        this->sparsity_pattern_statistics = true;
+    }
 
-  if(this->b_transA == 'N')
-  {
-    this->transA = rocsparse_operation_none;
-  }
-  else if(this->b_transA == 'T')
-  {
-    this->transA = rocsparse_operation_transpose;
-  }
-  else if(this->b_transA == 'C')
-  {
-    this->transA = rocsparse_operation_conjugate_transpose;
-  }
+    if(this->b_transA == 'N')
+    {
+        this->transA = rocsparse_operation_none;
+    }
+    else if(this->b_transA == 'T')
+    {
+        this->transA = rocsparse_operation_transpose;
+    }
+    else if(this->b_transA == 'C')
+    {
+        this->transA = rocsparse_operation_conjugate_transpose;
+    }
 
-  if(this->b_transB == 'N')
-  {
-    this->transB = rocsparse_operation_none;
-  }
-  else if(this->b_transB == 'T')
-  {
-    this->transB = rocsparse_operation_transpose;
-  }
-  else if(this->b_transB == 'C')
-  {
-    this->transB = rocsparse_operation_conjugate_transpose;
-  }
-  sprintf(this->function,"%s",this->function_name.c_str());
-  this->baseA = (this->b_baseA == 0) ? rocsparse_index_base_zero : rocsparse_index_base_one;
-  this->baseB = (this->b_baseB == 0) ? rocsparse_index_base_zero : rocsparse_index_base_one;
-  this->baseC = (this->b_baseC == 0) ? rocsparse_index_base_zero : rocsparse_index_base_one;
-  this->baseD = (this->b_baseD == 0) ? rocsparse_index_base_zero : rocsparse_index_base_one;
+    if(this->b_transB == 'N')
+    {
+        this->transB = rocsparse_operation_none;
+    }
+    else if(this->b_transB == 'T')
+    {
+        this->transB = rocsparse_operation_transpose;
+    }
+    else if(this->b_transB == 'C')
+    {
+        this->transB = rocsparse_operation_conjugate_transpose;
+    }
+    sprintf(this->function, "%s", this->function_name.c_str());
+    this->baseA = (this->b_baseA == 0) ? rocsparse_index_base_zero : rocsparse_index_base_one;
+    this->baseB = (this->b_baseB == 0) ? rocsparse_index_base_zero : rocsparse_index_base_one;
+    this->baseC = (this->b_baseC == 0) ? rocsparse_index_base_zero : rocsparse_index_base_one;
+    this->baseD = (this->b_baseD == 0) ? rocsparse_index_base_zero : rocsparse_index_base_one;
 
-  this->action      = (this->b_action == 0) ? rocsparse_action_numeric : rocsparse_action_symbolic;
-  this->part        = (this->b_part == 0)   ? rocsparse_hyb_partition_auto
-    : (this->b_part == 1) ? rocsparse_hyb_partition_user
-    : rocsparse_hyb_partition_max;
-  this->matrix_type = (this->b_matrix_type == 0)   ? rocsparse_matrix_type_general
-    : (this->b_matrix_type == 1) ? rocsparse_matrix_type_symmetric
-    : (this->b_matrix_type == 2) ? rocsparse_matrix_type_hermitian
-    : rocsparse_matrix_type_triangular;
-  this->diag        = (this->b_diag == 'N') ? rocsparse_diag_type_non_unit : rocsparse_diag_type_unit;
-  this->uplo        = (this->b_uplo == 'L') ? rocsparse_fill_mode_lower : rocsparse_fill_mode_upper;
-  this->storage     = (this->b_storage == 0) ? rocsparse_storage_mode_sorted : rocsparse_storage_mode_unsorted;
-  this->apol = (this->b_apol == 'R') ? rocsparse_analysis_policy_reuse : rocsparse_analysis_policy_force;
-  this->spol = rocsparse_solve_policy_auto;
-  this->direction
-    = (this->b_dir == rocsparse_direction_row) ? rocsparse_direction_row : rocsparse_direction_column;
-  this->order  = (this->b_order == rocsparse_order_row) ? rocsparse_order_row : rocsparse_order_column;
-  this->orderB  = (this->b_orderB == rocsparse_order_row) ? rocsparse_order_row : rocsparse_order_column;
-  this->orderC  = (this->b_orderC == rocsparse_order_row) ? rocsparse_order_row : rocsparse_order_column;
-  this->formatA = (rocsparse_format)this->b_formatA;
-  this->formatB = (rocsparse_format)this->b_formatB;
-  this->formatC = (rocsparse_format)this->b_formatC;
-  this->spmv_alg = (rocsparse_spmv_alg)this->b_spmv_alg;
-  this->itilu0_alg = (rocsparse_itilu0_alg)this->b_itilu0_alg;
-  this->spmm_alg = (rocsparse_spmm_alg)this->b_spmm_alg;
-  this->sddmm_alg = (rocsparse_sddmm_alg)this->b_sddmm_alg;
-  this->gtsv_interleaved_alg = (rocsparse_gtsv_interleaved_alg)this->b_gtsv_interleaved_alg;
+    this->action = (this->b_action == 0) ? rocsparse_action_numeric : rocsparse_action_symbolic;
+    this->part   = (this->b_part == 0)   ? rocsparse_hyb_partition_auto
+                   : (this->b_part == 1) ? rocsparse_hyb_partition_user
+                                         : rocsparse_hyb_partition_max;
+    this->matrix_type = (this->b_matrix_type == 0)   ? rocsparse_matrix_type_general
+                        : (this->b_matrix_type == 1) ? rocsparse_matrix_type_symmetric
+                        : (this->b_matrix_type == 2) ? rocsparse_matrix_type_hermitian
+                                                     : rocsparse_matrix_type_triangular;
+    this->diag = (this->b_diag == 'N') ? rocsparse_diag_type_non_unit : rocsparse_diag_type_unit;
+    this->uplo = (this->b_uplo == 'L') ? rocsparse_fill_mode_lower : rocsparse_fill_mode_upper;
+    this->storage
+        = (this->b_storage == 0) ? rocsparse_storage_mode_sorted : rocsparse_storage_mode_unsorted;
+    this->apol
+        = (this->b_apol == 'R') ? rocsparse_analysis_policy_reuse : rocsparse_analysis_policy_force;
+    this->spol      = rocsparse_solve_policy_auto;
+    this->direction = (this->b_dir == rocsparse_direction_row) ? rocsparse_direction_row
+                                                               : rocsparse_direction_column;
+    this->order
+        = (this->b_order == rocsparse_order_row) ? rocsparse_order_row : rocsparse_order_column;
+    this->orderB
+        = (this->b_orderB == rocsparse_order_row) ? rocsparse_order_row : rocsparse_order_column;
+    this->orderC
+        = (this->b_orderC == rocsparse_order_row) ? rocsparse_order_row : rocsparse_order_column;
+    this->formatA              = (rocsparse_format)this->b_formatA;
+    this->formatB              = (rocsparse_format)this->b_formatB;
+    this->formatC              = (rocsparse_format)this->b_formatC;
+    this->spmv_alg             = (rocsparse_spmv_alg)this->b_spmv_alg;
+    this->itilu0_alg           = (rocsparse_itilu0_alg)this->b_itilu0_alg;
+    this->spmm_alg             = (rocsparse_spmm_alg)this->b_spmm_alg;
+    this->sddmm_alg            = (rocsparse_sddmm_alg)this->b_sddmm_alg;
+    this->gtsv_interleaved_alg = (rocsparse_gtsv_interleaved_alg)this->b_gtsv_interleaved_alg;
 
 #ifdef ROCSPARSE_WITH_MEMSTAT
-  rocsparse_status status = rocsparse_memstat_report(this->b_memory_report_filename.c_str());
-  if (status != rocsparse_status_success)
+    rocsparse_status status = rocsparse_memstat_report(this->b_memory_report_filename.c_str());
+    if(status != rocsparse_status_success)
     {
-      std::cerr << "rocsparse_memstat_report failed " << std::endl;
-      return -1;
+        std::cerr << "rocsparse_memstat_report failed " << std::endl;
+        return -1;
     }
 #endif
 
-  if(this->b_matrices_dir != "")
-  {
-    rocsparse_clients_matrices_dir_set(this->b_matrices_dir.c_str());
-  }
+    if(this->b_matrices_dir != "")
+    {
+        rocsparse_clients_matrices_dir_set(this->b_matrices_dir.c_str());
+    }
 
-  if(this->b_file != "")
-  {
-    strcpy(this->filename, this->b_file.c_str());
+    if(this->b_file != "")
+    {
+        strcpy(this->filename, this->b_file.c_str());
 
-    rocsparse_importer_format_t importer_format;
-    importer_format(this->filename);
-    switch(importer_format.value)
-      {
-      case rocsparse_importer_format_t::matrixmarket:
-	{
-	  this->matrix = rocsparse_matrix_file_mtx;
-	  break;
-	}
-      case rocsparse_importer_format_t::mlcsr:
-	{
-	  this->matrix = rocsparse_matrix_file_smtx;
-	  break;
-	}
-      case rocsparse_importer_format_t::mlbsr:
-	{
-	  this->matrix = rocsparse_matrix_file_bsmtx;
-	  break;
-	}
-      case rocsparse_importer_format_t::rocalution:
-	{
-	  this->matrix = rocsparse_matrix_file_rocalution;
-	  break;
-	}
-      case rocsparse_importer_format_t::rocsparseio:
-	{
-	  this->matrix = rocsparse_matrix_file_rocsparseio;
-	  break;
-	}
-      case rocsparse_importer_format_t::unknown:
-	{
-	  std::cerr << "No extension is detected in the filename '"<< b_file <<"' " << std::endl;
-	  std::cerr << "The list of detectable extensions is : " << std::endl;
-	  for (auto format : rocsparse_importer_format_t::all_formats)
-	    {
-	      if (rocsparse_importer_format_t::unknown != format)
-		{
-		  std::cerr << " - '" << rocsparse_importer_format_t::extension(format) << "'" << std::endl;
-		}
-	    }
-	  return -1;
-	}
-      }
-  }
-  else if(this->b_rocsparseio != "")
-  {
-    strcpy(this->filename, this->b_rocsparseio.c_str());
-    this->matrix = rocsparse_matrix_file_rocsparseio;
-  }
-  else if(this->b_rocalution != "")
-  {
-    strcpy(this->filename, this->b_rocalution.c_str());
-    this->matrix = rocsparse_matrix_file_rocalution;
-  }
-  else if(this->b_matrixmarket != "")
-  {
-    strcpy(this->filename, this->b_matrixmarket.c_str());
-    this->matrix = rocsparse_matrix_file_mtx;
-  }
-  else if(this->b_mlcsr != "")
-  {
-    strcpy(this->filename, this->b_mlcsr.c_str());
-    this->matrix = rocsparse_matrix_file_smtx;
-  }
-  else if(this->b_mlbsr != "")
-  {
-    strcpy(this->filename, this->b_mlbsr.c_str());
-    this->matrix = rocsparse_matrix_file_bsmtx;
-  }
-  else if(this->dimx != 0 && this->dimy != 0 && this->dimz != 0)
-  {
-    this->matrix = rocsparse_matrix_laplace_3d;
-  }
-  else if(this->dimx != 0 && this->dimy != 0)
-  {
-    this->matrix = rocsparse_matrix_laplace_2d;
-  }
-  else if(this->ll == 0 && this->l != 0 && this->u != 0 && this->uu == 0)
-  {
-    this->matrix = rocsparse_matrix_tridiagonal;
-  }
-  else if(this->ll != 0 && this->l != 0 && this->u != 0 && this->uu != 0)
-  {
-    this->matrix = rocsparse_matrix_pentadiagonal;
-  }
-  else
-  {
-    this->matrix = rocsparse_matrix_random;
-  }
+        rocsparse_importer_format_t importer_format;
+        importer_format(this->filename);
+        switch(importer_format.value)
+        {
+        case rocsparse_importer_format_t::matrixmarket:
+        {
+            this->matrix = rocsparse_matrix_file_mtx;
+            break;
+        }
+        case rocsparse_importer_format_t::mlcsr:
+        {
+            this->matrix = rocsparse_matrix_file_smtx;
+            break;
+        }
+        case rocsparse_importer_format_t::mlbsr:
+        {
+            this->matrix = rocsparse_matrix_file_bsmtx;
+            break;
+        }
+        case rocsparse_importer_format_t::rocalution:
+        {
+            this->matrix = rocsparse_matrix_file_rocalution;
+            break;
+        }
+        case rocsparse_importer_format_t::rocsparseio:
+        {
+            this->matrix = rocsparse_matrix_file_rocsparseio;
+            break;
+        }
+        case rocsparse_importer_format_t::unknown:
+        {
+            std::cerr << "No extension is detected in the filename '" << b_file << "' "
+                      << std::endl;
+            std::cerr << "The list of detectable extensions is : " << std::endl;
+            for(auto format : rocsparse_importer_format_t::all_formats)
+            {
+                if(rocsparse_importer_format_t::unknown != format)
+                {
+                    std::cerr << " - '" << rocsparse_importer_format_t::extension(format) << "'"
+                              << std::endl;
+                }
+            }
+            return -1;
+        }
+        }
+    }
+    else if(this->b_rocsparseio != "")
+    {
+        strcpy(this->filename, this->b_rocsparseio.c_str());
+        this->matrix = rocsparse_matrix_file_rocsparseio;
+    }
+    else if(this->b_rocalution != "")
+    {
+        strcpy(this->filename, this->b_rocalution.c_str());
+        this->matrix = rocsparse_matrix_file_rocalution;
+    }
+    else if(this->b_matrixmarket != "")
+    {
+        strcpy(this->filename, this->b_matrixmarket.c_str());
+        this->matrix = rocsparse_matrix_file_mtx;
+    }
+    else if(this->b_mlcsr != "")
+    {
+        strcpy(this->filename, this->b_mlcsr.c_str());
+        this->matrix = rocsparse_matrix_file_smtx;
+    }
+    else if(this->b_mlbsr != "")
+    {
+        strcpy(this->filename, this->b_mlbsr.c_str());
+        this->matrix = rocsparse_matrix_file_bsmtx;
+    }
+    else if(this->dimx != 0 && this->dimy != 0 && this->dimz != 0)
+    {
+        this->matrix = rocsparse_matrix_laplace_3d;
+    }
+    else if(this->dimx != 0 && this->dimy != 0)
+    {
+        this->matrix = rocsparse_matrix_laplace_2d;
+    }
+    else if(this->ll == 0 && this->l != 0 && this->u != 0 && this->uu == 0)
+    {
+        this->matrix = rocsparse_matrix_tridiagonal;
+    }
+    else if(this->ll != 0 && this->l != 0 && this->u != 0 && this->uu != 0)
+    {
+        this->matrix = rocsparse_matrix_pentadiagonal;
+    }
+    else
+    {
+        this->matrix = rocsparse_matrix_random;
+    }
 
-  this->matrix_init_kind = rocsparse_matrix_init_kind_default;
-  /* ============================================================================================
+    this->matrix_init_kind = rocsparse_matrix_init_kind_default;
+    /* ============================================================================================
    */
-  if(this->M < 0 || this->N < 0)
-  {
-    std::cerr << "Invalid dimension" << std::endl;
-    return -1;
-  }
+    if(this->M < 0 || this->N < 0)
+    {
+        std::cerr << "Invalid dimension" << std::endl;
+        return -1;
+    }
 
-  if(this->block_dim < 1)
-  {
-    std::cerr << "Invalid value for --blockdim" << std::endl;
-    return -1;
-  }
+    if(this->block_dim < 1)
+    {
+        std::cerr << "Invalid value for --blockdim" << std::endl;
+        return -1;
+    }
 
-  if(this->row_block_dimA < 1)
-  {
-    std::cerr << "Invalid value for --row-blockdimA" << std::endl;
-    return -1;
-  }
+    if(this->row_block_dimA < 1)
+    {
+        std::cerr << "Invalid value for --row-blockdimA" << std::endl;
+        return -1;
+    }
 
-  if(this->col_block_dimA < 1)
-  {
-    std::cerr << "Invalid value for --col-blockdimA" << std::endl;
-    return -1;
-  }
+    if(this->col_block_dimA < 1)
+    {
+        std::cerr << "Invalid value for --col-blockdimA" << std::endl;
+        return -1;
+    }
 
-  if(this->row_block_dimB < 1)
-  {
-    std::cerr << "Invalid value for --row-blockdimB" << std::endl;
-    return -1;
-  }
+    if(this->row_block_dimB < 1)
+    {
+        std::cerr << "Invalid value for --row-blockdimB" << std::endl;
+        return -1;
+    }
 
-  if(this->col_block_dimB < 1)
-  {
-    std::cerr << "Invalid value for --col-blockdimB" << std::endl;
-    return -1;
-  }
+    if(this->col_block_dimB < 1)
+    {
+        std::cerr << "Invalid value for --col-blockdimB" << std::endl;
+        return -1;
+    }
 
-
-  switch(this->indextype)
+    switch(this->indextype)
     {
     case 's':
-      {
-	this->index_type_I   = rocsparse_indextype_i32;
-	this->index_type_J   = rocsparse_indextype_i32;
-	break;
-      }
+    {
+        this->index_type_I = rocsparse_indextype_i32;
+        this->index_type_J = rocsparse_indextype_i32;
+        break;
+    }
     case 'd':
-      {
-	this->index_type_I   = rocsparse_indextype_i64;
-	this->index_type_J   = rocsparse_indextype_i64;
-	break;
-      }
+    {
+        this->index_type_I = rocsparse_indextype_i64;
+        this->index_type_J = rocsparse_indextype_i64;
+        break;
+    }
 
     case 'm':
-      {
-	this->index_type_I   = rocsparse_indextype_i64;
-	this->index_type_J   = rocsparse_indextype_i32;
-	break;
-      }
+    {
+        this->index_type_I = rocsparse_indextype_i64;
+        this->index_type_J = rocsparse_indextype_i32;
+        break;
+    }
     default:
-      {
-	std::cerr << "Invalid value for --indextype" << std::endl;
-	return -1;
-      }
+    {
+        std::cerr << "Invalid value for --indextype" << std::endl;
+        return -1;
+    }
     }
 
-  switch(this->precision)
+    switch(this->precision)
     {
     case 's':
-      {
-	this->compute_type = rocsparse_datatype_f32_r;
-  break;
-      }
+    {
+        this->compute_type = rocsparse_datatype_f32_r;
+        break;
+    }
     case 'd':
-      {
-	this->compute_type = rocsparse_datatype_f64_r;
-	break;
-      }
-
-    case 'c':
-      {
-	this->compute_type = rocsparse_datatype_f32_c;
-	break;
-      }
-    case 'z':
-      {
-	this->compute_type = rocsparse_datatype_f64_c;
-	break;
-      }
-    default:
-      {
-	std::cerr << "Invalid value for --precision" << std::endl;
-	return -1;
-      }
+    {
+        this->compute_type = rocsparse_datatype_f64_r;
+        break;
     }
 
-  this->A_row_indextype = this->index_type_I;
-  this->A_col_indextype = this->index_type_J;
+    case 'c':
+    {
+        this->compute_type = rocsparse_datatype_f32_c;
+        break;
+    }
+    case 'z':
+    {
+        this->compute_type = rocsparse_datatype_f64_c;
+        break;
+    }
+    default:
+    {
+        std::cerr << "Invalid value for --precision" << std::endl;
+        return -1;
+    }
+    }
 
-  return 0;
+    this->A_row_indextype = this->index_type_I;
+    this->A_col_indextype = this->index_type_J;
+
+    return 0;
 }
-

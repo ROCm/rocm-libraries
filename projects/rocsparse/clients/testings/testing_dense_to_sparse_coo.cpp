@@ -305,8 +305,6 @@ void testing_dense_to_sparse_coo(const Arguments& arg)
                             gpu_gbyte,
                             display_key_t::time_ms,
                             get_gpu_time_msec(gpu_time_used));
-
-        // clang-format on
     }
 }
 
