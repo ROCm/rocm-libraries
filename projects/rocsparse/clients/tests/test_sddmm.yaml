@@ -114,6 +114,24 @@ Tests:
   matrix: [rocsparse_matrix_random]
   formatC: [rocsparse_format_coo,rocsparse_format_coo_aos,rocsparse_format_csr,rocsparse_format_csc,rocsparse_format_ell]
 
+- name: sddmm
+  category: pre_checkin
+  function: sddmm
+  indextype: *i32i32_i64i32_i64i64
+  precision: *float16_float16_float16_float16_abct_precision
+  M: [386, 912]
+  N: [512, 687]
+  K: [439, 1034]
+  alpha_beta: *alpha_beta_range_pre_checkin
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseC: [rocsparse_index_base_zero]
+  order: [rocsparse_order_column]
+  sddmm_alg: [rocsparse_sddmm_alg_default, rocsparse_sddmm_alg_dense]
+  matrix: [rocsparse_matrix_random]
+  formatC: [rocsparse_format_coo,rocsparse_format_coo_aos,rocsparse_format_csr,rocsparse_format_csc,rocsparse_format_ell]
+
+
 - name: sddmm_graph_test
   category: pre_checkin
   function: sddmm
@@ -184,6 +202,23 @@ Tests:
   transB: [rocsparse_operation_none]
   baseC: [rocsparse_index_base_zero]
   order: [rocsparse_order_column]
+  sddmm_alg: [rocsparse_sddmm_alg_default, rocsparse_sddmm_alg_dense]
+  matrix: [rocsparse_matrix_random]
+  formatC: [rocsparse_format_coo,rocsparse_format_coo_aos,rocsparse_format_csr,rocsparse_format_csc,rocsparse_format_ell]
+
+- name: sddmm
+  category: quick
+  function: sddmm
+  indextype: *i32i32_i64i32_i64i64
+  precision: *float16_float16_float16_float16_abct_precision
+  M: [144, 188]
+  N: [203, 357]
+  K: [72, 528]
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseC: [rocsparse_index_base_zero]
+  order: [rocsparse_order_row]
   sddmm_alg: [rocsparse_sddmm_alg_default, rocsparse_sddmm_alg_dense]
   matrix: [rocsparse_matrix_random]
   formatC: [rocsparse_format_coo,rocsparse_format_coo_aos,rocsparse_format_csr,rocsparse_format_csc,rocsparse_format_ell]

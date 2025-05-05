@@ -349,12 +349,6 @@ struct testing_sddmm_dispatch_traits<rocsparse_format_ell, I, I, A, B, C, T>
     }
 };
 
-inline std::ostream& operator<<(std::ostream& os_, const _Float16& that_)
-{
-    os_ << (float)that_;
-    return os_;
-}
-
 template <rocsparse_format FORMAT,
           typename I,
           typename J,

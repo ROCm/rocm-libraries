@@ -138,16 +138,19 @@ void testing_sddmm(const Arguments& arg)
         const Arguments& arg);                                                     \
     template void testing_sddmm<ITYPE, JTYPE, ATYPE, BTYPE, CTYPE, TTYPE>(const Arguments& arg)
 
+INSTANTIATE(int32_t, int32_t, _Float16);
 INSTANTIATE(int32_t, int32_t, float);
 INSTANTIATE(int32_t, int32_t, double);
 INSTANTIATE(int32_t, int32_t, rocsparse_float_complex);
 INSTANTIATE(int32_t, int32_t, rocsparse_double_complex);
 
+INSTANTIATE(int64_t, int32_t, _Float16);
 INSTANTIATE(int64_t, int32_t, float);
 INSTANTIATE(int64_t, int32_t, double);
 INSTANTIATE(int64_t, int32_t, rocsparse_float_complex);
 INSTANTIATE(int64_t, int32_t, rocsparse_double_complex);
 
+INSTANTIATE(int64_t, int64_t, _Float16);
 INSTANTIATE(int64_t, int64_t, float);
 INSTANTIATE(int64_t, int64_t, double);
 INSTANTIATE(int64_t, int64_t, rocsparse_float_complex);

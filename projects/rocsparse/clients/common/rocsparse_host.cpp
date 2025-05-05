@@ -8410,6 +8410,7 @@ void host_bsrpad_value(rocsparse_int m,
 // INSTANTIATE
 
 template struct rocsparse_host<float, int32_t, int32_t, _Float16, _Float16, float>;
+template struct rocsparse_host<_Float16, int32_t, int32_t, _Float16, _Float16, _Float16>;
 template struct rocsparse_host<float, int32_t, int32_t, float, float, float>;
 template struct rocsparse_host<double, int32_t, int32_t, double, double, double>;
 template struct rocsparse_host<rocsparse_float_complex,
@@ -8426,6 +8427,7 @@ template struct rocsparse_host<rocsparse_double_complex,
                                rocsparse_double_complex>;
 
 template struct rocsparse_host<float, int64_t, int32_t, _Float16, _Float16, float>;
+template struct rocsparse_host<_Float16, int64_t, int32_t, _Float16, _Float16, _Float16>;
 template struct rocsparse_host<float, int64_t, int32_t, float, float, float>;
 template struct rocsparse_host<double, int64_t, int32_t, double, double, double>;
 template struct rocsparse_host<rocsparse_float_complex,
@@ -8442,6 +8444,7 @@ template struct rocsparse_host<rocsparse_double_complex,
                                rocsparse_double_complex>;
 
 template struct rocsparse_host<float, int64_t, int64_t, _Float16, _Float16, float>;
+template struct rocsparse_host<_Float16, int64_t, int64_t, _Float16, _Float16, _Float16>;
 template struct rocsparse_host<float, int64_t, int64_t, float, float, float>;
 template struct rocsparse_host<double, int64_t, int64_t, double, double, double>;
 template struct rocsparse_host<rocsparse_float_complex,
@@ -8899,18 +8902,7 @@ template struct rocsparse_host<rocsparse_double_complex,
         std::vector<rocsparse_int>& csr_row_ptr,                                               \
         std::vector<rocsparse_int>& csr_col_ind);
 
-#define INSTANTIATE_IT(ITYPE, TTYPE)                                                     \
-    template void host_gemvi<ITYPE, TTYPE>(ITYPE                M,                       \
-                                           ITYPE                N,                       \
-                                           TTYPE                alpha,                   \
-                                           const TTYPE*         A,                       \
-                                           int64_t              lda,                     \
-                                           ITYPE                nnz,                     \
-                                           const TTYPE*         x_val,                   \
-                                           const ITYPE*         x_ind,                   \
-                                           TTYPE                beta,                    \
-                                           TTYPE*               y,                       \
-                                           rocsparse_index_base base);                   \
+#define INSTANTIATE_COO2DENSE(ITYPE, TTYPE)                                              \
     template void host_coo_to_dense<ITYPE, TTYPE>(ITYPE                     m,           \
                                                   ITYPE                     n,           \
                                                   int64_t                   nnz,         \
@@ -8920,7 +8912,8 @@ template struct rocsparse_host<rocsparse_double_complex,
                                                   const std::vector<ITYPE>& coo_col_ind, \
                                                   std::vector<TTYPE>&       A,           \
                                                   int64_t                   ld,          \
-                                                  rocsparse_order           order);                \
+                                                  rocsparse_order           order);
+#define INSTANTIATE_DENSE2COO(ITYPE, TTYPE)                                              \
     template void host_dense_to_coo<ITYPE, TTYPE>(ITYPE                     m,           \
                                                   ITYPE                     n,           \
                                                   rocsparse_index_base      base,        \
@@ -8930,52 +8923,65 @@ template struct rocsparse_host<rocsparse_double_complex,
                                                   const std::vector<ITYPE>& nnz_per_row, \
                                                   std::vector<TTYPE>&       coo_val,     \
                                                   std::vector<ITYPE>&       coo_row_ind, \
-                                                  std::vector<ITYPE>&       coo_col_ind);      \
-    template void host_coosv<ITYPE, TTYPE>(rocsparse_operation  trans,                   \
-                                           ITYPE                M,                       \
-                                           int64_t              nnz,                     \
-                                           TTYPE                alpha,                   \
-                                           const ITYPE*         coo_row_ind,             \
-                                           const ITYPE*         coo_col_ind,             \
-                                           const TTYPE*         coo_val,                 \
-                                           const TTYPE*         x,                       \
-                                           TTYPE*               y,                       \
-                                           rocsparse_diag_type  diag_type,               \
-                                           rocsparse_fill_mode  fill_mode,               \
-                                           rocsparse_index_base base,                    \
-                                           ITYPE*               struct_pivot,            \
-                                           ITYPE*               numeric_pivot);                        \
-    template void host_coosm<ITYPE, TTYPE>(ITYPE                M,                       \
-                                           ITYPE                nrhs,                    \
-                                           int64_t              nnz,                     \
-                                           rocsparse_operation  transA,                  \
-                                           rocsparse_operation  transB,                  \
-                                           TTYPE                alpha,                   \
-                                           const ITYPE*         coo_row_ind,             \
-                                           const ITYPE*         coo_col_ind,             \
-                                           const TTYPE*         coo_val,                 \
-                                           TTYPE*               B,                       \
-                                           int64_t              ldb,                     \
-                                           rocsparse_order      order_B,                 \
-                                           rocsparse_diag_type  diag_type,               \
-                                           rocsparse_fill_mode  fill_mode,               \
-                                           rocsparse_index_base base,                    \
-                                           ITYPE*               struct_pivot,            \
-                                           ITYPE*               numeric_pivot);                        \
-    template void host_axpby<ITYPE, TTYPE>(ITYPE                size,                    \
-                                           ITYPE                nnz,                     \
-                                           TTYPE                alpha,                   \
-                                           const TTYPE*         x_val,                   \
-                                           const ITYPE*         x_ind,                   \
-                                           TTYPE                beta,                    \
-                                           TTYPE*               y,                       \
-                                           rocsparse_index_base base);                   \
-    template void host_roti<ITYPE, TTYPE>(ITYPE nnz,                                     \
-                                          TTYPE * x_val,                                 \
-                                          const ITYPE*         x_ind,                    \
-                                          TTYPE*               y,                        \
-                                          const TTYPE*         c,                        \
-                                          const TTYPE*         s,                        \
+                                                  std::vector<ITYPE>&       coo_col_ind);
+
+#define INSTANTIATE_IT(ITYPE, TTYPE)                                          \
+    template void host_gemvi<ITYPE, TTYPE>(ITYPE                M,            \
+                                           ITYPE                N,            \
+                                           TTYPE                alpha,        \
+                                           const TTYPE*         A,            \
+                                           int64_t              lda,          \
+                                           ITYPE                nnz,          \
+                                           const TTYPE*         x_val,        \
+                                           const ITYPE*         x_ind,        \
+                                           TTYPE                beta,         \
+                                           TTYPE*               y,            \
+                                           rocsparse_index_base base);        \
+    template void host_coosv<ITYPE, TTYPE>(rocsparse_operation  trans,        \
+                                           ITYPE                M,            \
+                                           int64_t              nnz,          \
+                                           TTYPE                alpha,        \
+                                           const ITYPE*         coo_row_ind,  \
+                                           const ITYPE*         coo_col_ind,  \
+                                           const TTYPE*         coo_val,      \
+                                           const TTYPE*         x,            \
+                                           TTYPE*               y,            \
+                                           rocsparse_diag_type  diag_type,    \
+                                           rocsparse_fill_mode  fill_mode,    \
+                                           rocsparse_index_base base,         \
+                                           ITYPE*               struct_pivot, \
+                                           ITYPE*               numeric_pivot);             \
+    template void host_coosm<ITYPE, TTYPE>(ITYPE                M,            \
+                                           ITYPE                nrhs,         \
+                                           int64_t              nnz,          \
+                                           rocsparse_operation  transA,       \
+                                           rocsparse_operation  transB,       \
+                                           TTYPE                alpha,        \
+                                           const ITYPE*         coo_row_ind,  \
+                                           const ITYPE*         coo_col_ind,  \
+                                           const TTYPE*         coo_val,      \
+                                           TTYPE*               B,            \
+                                           int64_t              ldb,          \
+                                           rocsparse_order      order_B,      \
+                                           rocsparse_diag_type  diag_type,    \
+                                           rocsparse_fill_mode  fill_mode,    \
+                                           rocsparse_index_base base,         \
+                                           ITYPE*               struct_pivot, \
+                                           ITYPE*               numeric_pivot);             \
+    template void host_axpby<ITYPE, TTYPE>(ITYPE                size,         \
+                                           ITYPE                nnz,          \
+                                           TTYPE                alpha,        \
+                                           const TTYPE*         x_val,        \
+                                           const ITYPE*         x_ind,        \
+                                           TTYPE                beta,         \
+                                           TTYPE*               y,            \
+                                           rocsparse_index_base base);        \
+    template void host_roti<ITYPE, TTYPE>(ITYPE nnz,                          \
+                                          TTYPE * x_val,                      \
+                                          const ITYPE*         x_ind,         \
+                                          TTYPE*               y,             \
+                                          const TTYPE*         c,             \
+                                          const TTYPE*         s,             \
                                           rocsparse_index_base base);
 
 #define INSTANTIATE_IJT(ITYPE, JTYPE, TTYPE)                                                 \
@@ -9145,7 +9151,18 @@ template struct rocsparse_host<rocsparse_double_complex,
                                                          TTYPE*               result, \
                                                          rocsparse_index_base base);
 
-#define INSTANTIATE_DIR_IJT(DIR, ITYPE, JTYPE, TTYPE)                                                \
+#define INSTANTIATE_CSX2DENSE(DIR, ITYPE, JTYPE, TTYPE)                                          \
+    template void host_csx2dense<DIR, TTYPE, ITYPE, JTYPE>(JTYPE                m,               \
+                                                           JTYPE                n,               \
+                                                           rocsparse_index_base base,            \
+                                                           rocsparse_order      order,           \
+                                                           const TTYPE*         csx_val,         \
+                                                           const ITYPE*         csx_row_col_ptr, \
+                                                           const JTYPE*         csx_col_row_ind, \
+                                                           TTYPE*               A,               \
+                                                           int64_t              ld);
+
+#define INSTANTIATE_DENSE2CSX(DIR, ITYPE, JTYPE, TTYPE)                                              \
     template void host_dense2csx<DIR, TTYPE, ITYPE, JTYPE>(JTYPE                m,                   \
                                                            JTYPE                n,                   \
                                                            rocsparse_index_base base,                \
@@ -9155,16 +9172,7 @@ template struct rocsparse_host<rocsparse_double_complex,
                                                            const ITYPE*         nnz_per_row_columns, \
                                                            TTYPE*               csx_val,             \
                                                            ITYPE*               csx_row_col_ptr,     \
-                                                           JTYPE*               csx_col_row_ind);                  \
-    template void host_csx2dense<DIR, TTYPE, ITYPE, JTYPE>(JTYPE                m,                   \
-                                                           JTYPE                n,                   \
-                                                           rocsparse_index_base base,                \
-                                                           rocsparse_order      order,               \
-                                                           const TTYPE*         csx_val,             \
-                                                           const ITYPE*         csx_row_col_ptr,     \
-                                                           const JTYPE*         csx_col_row_ind,     \
-                                                           TTYPE*               A,                   \
-                                                           int64_t              ld);
+                                                           JTYPE*               csx_col_row_ind);
 
 #define INSTANTIATE_IJAXYT(ITYPE, JTYPE, ATYPE, XTYPE, YTYPE, TTYPE) \
     template void host_bsrmv(rocsparse_direction  dir,               \
@@ -9434,6 +9442,28 @@ INSTANTIATE_T(rocsparse_double_complex);
 INSTANTIATE_T_REAL_ONLY(float);
 INSTANTIATE_T_REAL_ONLY(double);
 
+INSTANTIATE_COO2DENSE(int32_t, _Float16);
+INSTANTIATE_COO2DENSE(int32_t, float);
+INSTANTIATE_COO2DENSE(int32_t, double);
+INSTANTIATE_COO2DENSE(int32_t, rocsparse_float_complex);
+INSTANTIATE_COO2DENSE(int32_t, rocsparse_double_complex);
+INSTANTIATE_COO2DENSE(int64_t, _Float16);
+INSTANTIATE_COO2DENSE(int64_t, float);
+INSTANTIATE_COO2DENSE(int64_t, double);
+INSTANTIATE_COO2DENSE(int64_t, rocsparse_float_complex);
+INSTANTIATE_COO2DENSE(int64_t, rocsparse_double_complex);
+
+INSTANTIATE_DENSE2COO(int32_t, _Float16);
+INSTANTIATE_DENSE2COO(int32_t, float);
+INSTANTIATE_DENSE2COO(int32_t, double);
+INSTANTIATE_DENSE2COO(int32_t, rocsparse_float_complex);
+INSTANTIATE_DENSE2COO(int32_t, rocsparse_double_complex);
+INSTANTIATE_DENSE2COO(int64_t, _Float16);
+INSTANTIATE_DENSE2COO(int64_t, float);
+INSTANTIATE_DENSE2COO(int64_t, double);
+INSTANTIATE_DENSE2COO(int64_t, rocsparse_float_complex);
+INSTANTIATE_DENSE2COO(int64_t, rocsparse_double_complex);
+
 INSTANTIATE_IT(int32_t, float);
 INSTANTIATE_IT(int32_t, double);
 INSTANTIATE_IT(int32_t, rocsparse_float_complex);
@@ -9456,30 +9486,67 @@ INSTANTIATE_IJT(int64_t, int64_t, double);
 INSTANTIATE_IJT(int64_t, int64_t, rocsparse_float_complex);
 INSTANTIATE_IJT(int64_t, int64_t, rocsparse_double_complex);
 
-INSTANTIATE_DIR_IJT(rocsparse_direction_row, int32_t, int32_t, float);
-INSTANTIATE_DIR_IJT(rocsparse_direction_row, int32_t, int32_t, double);
-INSTANTIATE_DIR_IJT(rocsparse_direction_row, int32_t, int32_t, rocsparse_float_complex);
-INSTANTIATE_DIR_IJT(rocsparse_direction_row, int32_t, int32_t, rocsparse_double_complex);
-INSTANTIATE_DIR_IJT(rocsparse_direction_row, int64_t, int32_t, float);
-INSTANTIATE_DIR_IJT(rocsparse_direction_row, int64_t, int32_t, double);
-INSTANTIATE_DIR_IJT(rocsparse_direction_row, int64_t, int32_t, rocsparse_float_complex);
-INSTANTIATE_DIR_IJT(rocsparse_direction_row, int64_t, int32_t, rocsparse_double_complex);
-INSTANTIATE_DIR_IJT(rocsparse_direction_row, int64_t, int64_t, float);
-INSTANTIATE_DIR_IJT(rocsparse_direction_row, int64_t, int64_t, double);
-INSTANTIATE_DIR_IJT(rocsparse_direction_row, int64_t, int64_t, rocsparse_float_complex);
-INSTANTIATE_DIR_IJT(rocsparse_direction_row, int64_t, int64_t, rocsparse_double_complex);
-INSTANTIATE_DIR_IJT(rocsparse_direction_column, int32_t, int32_t, float);
-INSTANTIATE_DIR_IJT(rocsparse_direction_column, int32_t, int32_t, double);
-INSTANTIATE_DIR_IJT(rocsparse_direction_column, int32_t, int32_t, rocsparse_float_complex);
-INSTANTIATE_DIR_IJT(rocsparse_direction_column, int32_t, int32_t, rocsparse_double_complex);
-INSTANTIATE_DIR_IJT(rocsparse_direction_column, int64_t, int32_t, float);
-INSTANTIATE_DIR_IJT(rocsparse_direction_column, int64_t, int32_t, double);
-INSTANTIATE_DIR_IJT(rocsparse_direction_column, int64_t, int32_t, rocsparse_float_complex);
-INSTANTIATE_DIR_IJT(rocsparse_direction_column, int64_t, int32_t, rocsparse_double_complex);
-INSTANTIATE_DIR_IJT(rocsparse_direction_column, int64_t, int64_t, float);
-INSTANTIATE_DIR_IJT(rocsparse_direction_column, int64_t, int64_t, double);
-INSTANTIATE_DIR_IJT(rocsparse_direction_column, int64_t, int64_t, rocsparse_float_complex);
-INSTANTIATE_DIR_IJT(rocsparse_direction_column, int64_t, int64_t, rocsparse_double_complex);
+INSTANTIATE_CSX2DENSE(rocsparse_direction_row, int32_t, int32_t, _Float16);
+INSTANTIATE_CSX2DENSE(rocsparse_direction_row, int32_t, int32_t, float);
+INSTANTIATE_CSX2DENSE(rocsparse_direction_row, int32_t, int32_t, double);
+INSTANTIATE_CSX2DENSE(rocsparse_direction_row, int32_t, int32_t, rocsparse_float_complex);
+INSTANTIATE_CSX2DENSE(rocsparse_direction_row, int32_t, int32_t, rocsparse_double_complex);
+INSTANTIATE_CSX2DENSE(rocsparse_direction_row, int64_t, int32_t, _Float16);
+INSTANTIATE_CSX2DENSE(rocsparse_direction_row, int64_t, int32_t, float);
+INSTANTIATE_CSX2DENSE(rocsparse_direction_row, int64_t, int32_t, double);
+INSTANTIATE_CSX2DENSE(rocsparse_direction_row, int64_t, int32_t, rocsparse_float_complex);
+INSTANTIATE_CSX2DENSE(rocsparse_direction_row, int64_t, int32_t, rocsparse_double_complex);
+INSTANTIATE_CSX2DENSE(rocsparse_direction_row, int64_t, int64_t, _Float16);
+INSTANTIATE_CSX2DENSE(rocsparse_direction_row, int64_t, int64_t, float);
+INSTANTIATE_CSX2DENSE(rocsparse_direction_row, int64_t, int64_t, double);
+INSTANTIATE_CSX2DENSE(rocsparse_direction_row, int64_t, int64_t, rocsparse_float_complex);
+INSTANTIATE_CSX2DENSE(rocsparse_direction_row, int64_t, int64_t, rocsparse_double_complex);
+INSTANTIATE_CSX2DENSE(rocsparse_direction_column, int32_t, int32_t, _Float16);
+INSTANTIATE_CSX2DENSE(rocsparse_direction_column, int32_t, int32_t, float);
+INSTANTIATE_CSX2DENSE(rocsparse_direction_column, int32_t, int32_t, double);
+INSTANTIATE_CSX2DENSE(rocsparse_direction_column, int32_t, int32_t, rocsparse_float_complex);
+INSTANTIATE_CSX2DENSE(rocsparse_direction_column, int32_t, int32_t, rocsparse_double_complex);
+INSTANTIATE_CSX2DENSE(rocsparse_direction_column, int64_t, int32_t, _Float16);
+INSTANTIATE_CSX2DENSE(rocsparse_direction_column, int64_t, int32_t, float);
+INSTANTIATE_CSX2DENSE(rocsparse_direction_column, int64_t, int32_t, double);
+INSTANTIATE_CSX2DENSE(rocsparse_direction_column, int64_t, int32_t, rocsparse_float_complex);
+INSTANTIATE_CSX2DENSE(rocsparse_direction_column, int64_t, int32_t, rocsparse_double_complex);
+INSTANTIATE_CSX2DENSE(rocsparse_direction_column, int64_t, int64_t, _Float16);
+INSTANTIATE_CSX2DENSE(rocsparse_direction_column, int64_t, int64_t, float);
+INSTANTIATE_CSX2DENSE(rocsparse_direction_column, int64_t, int64_t, double);
+INSTANTIATE_CSX2DENSE(rocsparse_direction_column, int64_t, int64_t, rocsparse_float_complex);
+INSTANTIATE_CSX2DENSE(rocsparse_direction_column, int64_t, int64_t, rocsparse_double_complex);
+
+INSTANTIATE_DENSE2CSX(rocsparse_direction_row, int32_t, int32_t, _Float16);
+INSTANTIATE_DENSE2CSX(rocsparse_direction_row, int32_t, int32_t, float);
+INSTANTIATE_DENSE2CSX(rocsparse_direction_row, int32_t, int32_t, double);
+INSTANTIATE_DENSE2CSX(rocsparse_direction_row, int32_t, int32_t, rocsparse_float_complex);
+INSTANTIATE_DENSE2CSX(rocsparse_direction_row, int32_t, int32_t, rocsparse_double_complex);
+INSTANTIATE_DENSE2CSX(rocsparse_direction_row, int64_t, int32_t, _Float16);
+INSTANTIATE_DENSE2CSX(rocsparse_direction_row, int64_t, int32_t, float);
+INSTANTIATE_DENSE2CSX(rocsparse_direction_row, int64_t, int32_t, double);
+INSTANTIATE_DENSE2CSX(rocsparse_direction_row, int64_t, int32_t, rocsparse_float_complex);
+INSTANTIATE_DENSE2CSX(rocsparse_direction_row, int64_t, int32_t, rocsparse_double_complex);
+INSTANTIATE_DENSE2CSX(rocsparse_direction_row, int64_t, int64_t, _Float16);
+INSTANTIATE_DENSE2CSX(rocsparse_direction_row, int64_t, int64_t, float);
+INSTANTIATE_DENSE2CSX(rocsparse_direction_row, int64_t, int64_t, double);
+INSTANTIATE_DENSE2CSX(rocsparse_direction_row, int64_t, int64_t, rocsparse_float_complex);
+INSTANTIATE_DENSE2CSX(rocsparse_direction_row, int64_t, int64_t, rocsparse_double_complex);
+INSTANTIATE_DENSE2CSX(rocsparse_direction_column, int32_t, int32_t, _Float16);
+INSTANTIATE_DENSE2CSX(rocsparse_direction_column, int32_t, int32_t, float);
+INSTANTIATE_DENSE2CSX(rocsparse_direction_column, int32_t, int32_t, double);
+INSTANTIATE_DENSE2CSX(rocsparse_direction_column, int32_t, int32_t, rocsparse_float_complex);
+INSTANTIATE_DENSE2CSX(rocsparse_direction_column, int32_t, int32_t, rocsparse_double_complex);
+INSTANTIATE_DENSE2CSX(rocsparse_direction_column, int64_t, int32_t, _Float16);
+INSTANTIATE_DENSE2CSX(rocsparse_direction_column, int64_t, int32_t, float);
+INSTANTIATE_DENSE2CSX(rocsparse_direction_column, int64_t, int32_t, double);
+INSTANTIATE_DENSE2CSX(rocsparse_direction_column, int64_t, int32_t, rocsparse_float_complex);
+INSTANTIATE_DENSE2CSX(rocsparse_direction_column, int64_t, int32_t, rocsparse_double_complex);
+INSTANTIATE_DENSE2CSX(rocsparse_direction_column, int64_t, int64_t, _Float16);
+INSTANTIATE_DENSE2CSX(rocsparse_direction_column, int64_t, int64_t, float);
+INSTANTIATE_DENSE2CSX(rocsparse_direction_column, int64_t, int64_t, double);
+INSTANTIATE_DENSE2CSX(rocsparse_direction_column, int64_t, int64_t, rocsparse_float_complex);
+INSTANTIATE_DENSE2CSX(rocsparse_direction_column, int64_t, int64_t, rocsparse_double_complex);
 
 INSTANTIATE_IXYT(int32_t, float, float, float);
 INSTANTIATE_IXYT(int64_t, float, float, float);

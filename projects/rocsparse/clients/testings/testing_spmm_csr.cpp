@@ -102,12 +102,6 @@ void testing_spmm_csr_bad_arg(const Arguments& arg)
 #undef PARAMS
 }
 
-inline std::ostream& operator<<(std::ostream& os_, const _Float16& that_)
-{
-    os_ << (float)that_;
-    return os_;
-}
-
 template <typename I, typename J, typename A, typename B, typename C, typename T>
 void testing_spmm_csr(const Arguments& arg)
 {

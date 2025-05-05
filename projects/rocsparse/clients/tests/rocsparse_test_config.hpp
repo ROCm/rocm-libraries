@@ -58,6 +58,18 @@ struct rocsparse_test_config_it
 {
 };
 
+struct rocsparse_test_config_it_sparse_to_dense
+    : rocsparse_test_config_template<rocsparse_test_dispatch_enum::it_sparse_to_dense,
+                                     rocsparse_test_numeric_types_enum::all>
+{
+};
+
+struct rocsparse_test_config_it_dense_to_sparse
+    : rocsparse_test_config_template<rocsparse_test_dispatch_enum::it_dense_to_sparse,
+                                     rocsparse_test_numeric_types_enum::all>
+{
+};
+
 struct rocsparse_test_config_it_real_only
     : rocsparse_test_config_template<rocsparse_test_dispatch_enum::it,
                                      rocsparse_test_numeric_types_enum::real_only>
@@ -78,6 +90,18 @@ struct rocsparse_test_config_it_plus_int8_float16
 
 struct rocsparse_test_config_ijt
     : rocsparse_test_config_template<rocsparse_test_dispatch_enum::ijt,
+                                     rocsparse_test_numeric_types_enum::all>
+{
+};
+
+struct rocsparse_test_config_ijt_sparse_to_dense
+    : rocsparse_test_config_template<rocsparse_test_dispatch_enum::ijt_sparse_to_dense,
+                                     rocsparse_test_numeric_types_enum::all>
+{
+};
+
+struct rocsparse_test_config_ijt_dense_to_sparse
+    : rocsparse_test_config_template<rocsparse_test_dispatch_enum::ijt_dense_to_sparse,
                                      rocsparse_test_numeric_types_enum::all>
 {
 };

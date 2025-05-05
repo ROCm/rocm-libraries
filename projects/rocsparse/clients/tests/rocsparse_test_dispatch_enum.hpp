@@ -29,8 +29,12 @@ struct rocsparse_test_dispatch_enum
     {
         t,
         it,
+        it_sparse_to_dense,
+        it_dense_to_sparse,
         it_plus_int8_float16,
         ijt,
+        ijt_sparse_to_dense,
+        ijt_dense_to_sparse,
         ixyt,
         iaxyt,
         ijaxyt,
