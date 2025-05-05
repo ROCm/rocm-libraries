@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -28,9 +28,6 @@ int main()
     rocblas_handle handle;
     CHECK_ROCBLAS_ERROR(rocblas_create_handle(&handle));
 
-    // Free all memory in the handle
-    CHECK_ROCBLAS_ERROR(rocblas_set_device_memory_size(handle, 0));
-
     size_t sizes[] = {512, 1025, 10 * 1024 * 1024};
 
     if(rocblas_is_device_memory_size_query(handle))
@@ -50,11 +47,6 @@ int main()
     }
 
     CHECK_ALLOC_QUERY(rocblas_set_optimal_device_memory_size(handle, sizes[0], sizes[1], sizes[2]));
-
-    size_t max;
-    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query(handle, &max));
-
-    CHECK_ROCBLAS_ERROR(rocblas_set_device_memory_size(handle, max));
 
     for(size_t size : sizes)
     {
