@@ -1,3 +1,20 @@
+# Modifications Copyright (c) 2025 Advanced Micro Devices, Inc.
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
 # For every private internal header build a TU that directly includes it
 # without anything else to verify whether its properly modular.
 # We also want to check whether all potential fallbacks are actually valid,
@@ -8,10 +25,10 @@ find_package(CUDAToolkit)
 
 # Grep all internal headers
 file(GLOB_RECURSE internal_headers
-  RELATIVE "${libcudacxx_SOURCE_DIR}/include/cuda/"
+  RELATIVE "${libhipcxx_SOURCE_DIR}/include/cuda/"
   CONFIGURE_DEPENDS
-  ${libcudacxx_SOURCE_DIR}/include/cuda/__*/*.h
-  ${libcudacxx_SOURCE_DIR}/include/cuda/std/__*/*.h
+  ${libhipcxx_SOURCE_DIR}/include/cuda/__*/*.h
+  ${libhipcxx_SOURCE_DIR}/include/cuda/std/__*/*.h
 )
 
 # headers in `__cuda` are meant to come after the related "cuda" headers so they do not compile on their own
@@ -34,8 +51,7 @@ function(libcudacxx_create_internal_header_test header_name, headertest_src, fal
   else()
     add_library(headertest_${header_name} SHARED "${headertest_src}.cu" "${headertest_src}.cpp")
   endif()
-
-  target_include_directories(headertest_${header_name} PRIVATE "${libcudacxx_SOURCE_DIR}/include")
+  target_include_directories(headertest_${header_name} PRIVATE "${libhipcxx_SOURCE_DIR}/include")
   target_compile_options(headertest_${header_name}
     PRIVATE
     $<$<COMPILE_LANGUAGE:CUDA>:${headertest_warning_levels_device}>
@@ -71,7 +87,7 @@ function(libcudacxx_add_internal_header_test header)
   endif()
 
   # Seach the file for a fallback definition
-  file(READ ${libcudacxx_SOURCE_DIR}/include/cuda/${header} header_file)
+  file(READ ${libhipcxx_SOURCE_DIR}/include/cuda/${header} header_file)
   string(REGEX MATCH "_LIBCUDACXX_[A-Z_]*_FALLBACK" fallback "${header_file}")
   if(fallback)
     libcudacxx_create_internal_header_test(${header_name}, ${headertest_src}, ${fallback})

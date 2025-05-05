@@ -114,7 +114,7 @@ if (LIBCUDACXX_ENABLE_LIBCUDACXX_TESTS)
   find_program(LLVM_DEFAULT_EXTERNAL_LIT lit)
   set(LLVM_LIT_ARGS "-sv ${LIT_EXTRA_ARGS}")
 
-  set(LIBCUDACXX_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR})
+  set(libhipcxx_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR})
   add_subdirectory(test)
 
   include(AddLLVM)

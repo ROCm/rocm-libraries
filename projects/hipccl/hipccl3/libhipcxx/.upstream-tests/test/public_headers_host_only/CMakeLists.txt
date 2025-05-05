@@ -1,3 +1,20 @@
+# Modifications Copyright (c) 2025 Advanced Micro Devices, Inc.
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
 # For every public header build a TU that directly includes it
 # without anything else but also pretents to be a std header
 add_custom_target(libcudacxx.test.public_headers_host_only)
@@ -5,9 +22,9 @@ add_custom_target(libcudacxx.test.public_headers_host_only)
 # Grep all public headers
 file(GLOB public_headers_host_only
   LIST_DIRECTORIES false
-  RELATIVE "${libcudacxx_SOURCE_DIR}/include/"
+  RELATIVE "${libhipcxx_SOURCE_DIR}/include/"
   CONFIGURE_DEPENDS
-  "${libcudacxx_SOURCE_DIR}/include/cuda/std/*"
+  "${libhipcxx_SOURCE_DIR}/include/cuda/std/*"
 )
 
 # mdspan is currently not supported on msvc outside of C++20
@@ -26,7 +43,7 @@ function(libcudacxx_add_std_header_test header)
   # Create the default target for that file
   set(headertest_std_${header_name} verify_${header_name})
   add_library(headertest_std_${header_name} SHARED "${headertest_src}.cpp")
-  target_include_directories(headertest_std_${header_name} PRIVATE "${libcudacxx_SOURCE_DIR}/include")
+  target_include_directories(headertest_std_${header_name} PRIVATE "${libhipcxx_SOURCE_DIR}/include")
   target_compile_options(headertest_std_${header_name} PRIVATE ${headertest_warning_levels_host})
 
   add_dependencies(libcudacxx.test.public_headers_host_only headertest_std_${header_name})
