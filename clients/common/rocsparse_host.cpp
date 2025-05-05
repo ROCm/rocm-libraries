@@ -8410,6 +8410,7 @@ void host_bsrpad_value(rocsparse_int m,
 // INSTANTIATE
 
 template struct rocsparse_host<float, int32_t, int32_t, _Float16, _Float16, float>;
+template struct rocsparse_host<_Float16, int32_t, int32_t, _Float16, _Float16, _Float16>;
 template struct rocsparse_host<float, int32_t, int32_t, float, float, float>;
 template struct rocsparse_host<double, int32_t, int32_t, double, double, double>;
 template struct rocsparse_host<rocsparse_float_complex,
@@ -8426,6 +8427,7 @@ template struct rocsparse_host<rocsparse_double_complex,
                                rocsparse_double_complex>;
 
 template struct rocsparse_host<float, int64_t, int32_t, _Float16, _Float16, float>;
+template struct rocsparse_host<_Float16, int64_t, int32_t, _Float16, _Float16, _Float16>;
 template struct rocsparse_host<float, int64_t, int32_t, float, float, float>;
 template struct rocsparse_host<double, int64_t, int32_t, double, double, double>;
 template struct rocsparse_host<rocsparse_float_complex,
@@ -8442,6 +8444,7 @@ template struct rocsparse_host<rocsparse_double_complex,
                                rocsparse_double_complex>;
 
 template struct rocsparse_host<float, int64_t, int64_t, _Float16, _Float16, float>;
+template struct rocsparse_host<_Float16, int64_t, int64_t, _Float16, _Float16, _Float16>;
 template struct rocsparse_host<float, int64_t, int64_t, float, float, float>;
 template struct rocsparse_host<double, int64_t, int64_t, double, double, double>;
 template struct rocsparse_host<rocsparse_float_complex,

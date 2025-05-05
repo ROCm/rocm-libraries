@@ -29,6 +29,8 @@
 #include "rocsparse.h"
 #include <cmath>
 
+#include "rocsparse_traits.hpp"
+
 /* =================================================================================== */
 /*! \brief  returns true if value is NaN */
 template <typename T>
@@ -129,6 +131,17 @@ inline bool rocsparse_isinf(uint64_t arg)
 }
 
 template <>
+inline bool rocsparse_isinf(_Float16 arg)
+{
+    union
+    {
+        _Float16 fp;
+        uint16_t data;
+    } x = {arg};
+    return (~x.data & 0x7c00) == 0 && (x.data & 0x3ff) == 0;
+}
+
+template <>
 inline bool rocsparse_isinf(float arg)
 {
     return std::isinf(arg);
@@ -170,6 +183,20 @@ template <>
 inline rocsparse_double_complex rocsparse_conj(rocsparse_double_complex arg)
 {
     return std::conj(arg);
+}
+
+/* =================================================================================== */
+/*! \brief  absolute value */
+template <typename T>
+inline floating_data_t<T> rocsparse_abs(T arg)
+{
+    return std::abs(arg);
+}
+
+template <>
+inline _Float16 rocsparse_abs(_Float16 arg)
+{
+    return (arg < 0.0) ? -arg : arg;
 }
 
 #endif // ROCSPARSE_MATH_HPP

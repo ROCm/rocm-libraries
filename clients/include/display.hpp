@@ -36,6 +36,8 @@
 #include <sstream>
 #include <vector>
 
+#include "utility.hpp"
+
 static constexpr const char* s_timing_info_perf      = "GFlop/s";
 static constexpr const char* s_timing_info_bandwidth = "GB/s";
 static constexpr const char* s_timing_info_time      = "msec";

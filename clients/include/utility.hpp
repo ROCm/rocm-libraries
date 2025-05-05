@@ -182,6 +182,12 @@ inline constexpr size_t rocsparse_datatype_sizeof(rocsparse_datatype datatype_)
     return static_cast<size_t>(0);
 }
 
+inline std::ostream& operator<<(std::ostream& os_, const _Float16& that_)
+{
+    os_ << (float)that_;
+    return os_;
+}
+
 /*! \brief  local handle which is automatically created and destroyed  */
 class rocsparse_local_handle
 {

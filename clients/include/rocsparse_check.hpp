@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -36,6 +36,12 @@ template <>
 struct default_tolerance<int32_t>
 {
     static constexpr int32_t value = 0;
+};
+
+template <>
+struct default_tolerance<_Float16>
+{
+    static constexpr _Float16 value = 1.0e-2f;
 };
 
 template <>
