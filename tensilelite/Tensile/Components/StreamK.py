@@ -22,7 +22,7 @@
 
 from rocisa.code import Module, Label
 from rocisa.container import vgpr, sgpr, SMEMModifiers, replaceHolder, EXEC,\
-    VOP3PModifiers
+    VOP3PModifiers, ContinuousRegister
 from rocisa.instruction import SAddCU32, SAddI32, SAddU32, SAndB32, SBarrier, \
     SBranch, SCBranchSCC0, SCBranchSCC1, SCMovB32, SCSelectB32, SCmpEQU32, \
     SCmpGtU32, SCmpLeU32, SCmpLtU32, SLShiftLeftB32, SLShiftRightB32, SLoadB32, \
@@ -31,9 +31,7 @@ from rocisa.instruction import SAddCU32, SAddI32, SAddU32, SAndB32, SBarrier, \
     VReadfirstlaneB32, VCvtBF16toFP32
 from rocisa.functions import scalarStaticDivideAndRemainder, sMagicDiv2, vectorStaticMultiply, BranchIfNotZero
 
-from ..TensileInstructions import ContinuousRegister, ceilDivide, log2
-from ..Common import print2
-# from ..TensileInstructions.Containers import SMEMModifiers
+from ..Common import print2, ceilDivide, log2
 from ..Component import Component
 from ..AsmStoreState import StoreState, VectorDataTypes
 from ..AsmAddressCalculation import AddrCalculation

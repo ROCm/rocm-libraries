@@ -22,9 +22,11 @@
 #
 ################################################################################
 
+from rocisa.code import Module
+from rocisa.container import vgpr
 from rocisa.enum import DataTypeEnum
 from rocisa.instruction import VMacF32, SSetPrior
-from ..TensileInstructions import DataType, Module, vgpr
+from ..Common.DataType import DataType
 from ..Component import MAC
 
 class MAC_F32_Plain(MAC):

@@ -41,10 +41,6 @@ from rocisa.functions import vectorStaticDivide, vectorStaticRemainder, vectorUI
 from rocisa.enum import InstType, SelectBit
 from rocisa.macro import MacroVMagicDiv, PseudoRandomGenerator
 from . import CUSTOM_KERNEL_PATH
-from .TensileInstructions import RegisterPool, \
-                          allocTmpGpr, allocTmpGprList, log2, \
-                          ceilDivide, DataType, dataTypeToMfmaInstTypePair, \
-                          dataTypeNameAbbrevToInstType
 from rocisa.instruction import BranchInstruction, BufferLoadB128, BufferLoadB32, \
   BufferLoadB64, BufferLoadD16B16, BufferLoadD16HIB16, BufferLoadD16HIU8, \
   BufferLoadD16U8, BufferStoreB128, BufferStoreB16, BufferStoreB32, BufferStoreB64, \
@@ -79,8 +75,11 @@ from .SolutionStructs import isPackedIndex
 from .AsmStoreState import StoreState, VectorDataTypes
 from .Activation import ActivationType
 from .CustomKernels import isCustomKernelConfig
-from .Common import roundUp
+from .Common import roundUp, log2, ceilDivide
 from Tensile.Common import print2, printExit, printWarning, INDEX_CHARS, DebugConfig, DataDirection
+from Tensile.Common.DataType import DataType
+from Tensile.Common.RegisterPool import RegisterPool, allocTmpGpr, allocTmpGprList
+
 from Tensile.KernelWriter import KernelWriter
 from Tensile.SolutionStructs.Naming import getKernelFileBase
 from Tensile.Toolchain.Component import Assembler
@@ -6197,6 +6196,41 @@ class KernelWriterAssembly(KernelWriter):
     imod = Module("mi")
     shiftK = Module("shiftK")
     m = (u) % (self.states.numVgprBuffer) # local to use for MACs
+
+    def dataTypeToMfmaInstTypePair(dataType: DataType, sourceSwap: bool) -> Tuple[InstType, InstType]:
+      miInTypeStr  = dataType.toNameAbbrev()
+      miInInstType = dataTypeNameAbbrevToInstType(miInTypeStr, sourceSwap) # v_mfma_[...xK]<InType>
+      miOutInstType = dataTypeNameAbbrevToInstType(dataType.MIOutputTypeNameAbbrev()) # v_mfma_<OutType>..
+      return miInInstType, miOutInstType
+
+    def dataTypeNameAbbrevToInstType(abbrev: str, sourceSwap: bool = False) -> InstType:
+      if abbrev == 'f64':
+          return InstType.INST_F64
+      elif abbrev == 'f32':
+          return InstType.INST_F32
+      elif abbrev == 'f16':
+          return InstType.INST_F16
+      elif abbrev == 'i32':
+          return InstType.INST_I32
+      elif abbrev == 'i8':
+          return InstType.INST_I8
+      elif abbrev == 'bf16':
+          return InstType.INST_BF16
+      elif abbrev == 'xf32':
+          return InstType.INST_XF32
+      elif abbrev == 'fp8_fp8':
+          return InstType.INST_F8
+      elif abbrev == 'bf8_bf8':
+          return InstType.INST_BF8
+      elif (abbrev == 'fp8_bf8' and sourceSwap == False) or \
+          (abbrev == 'bf8_fp8' and sourceSwap == True):
+          return InstType.INST_F8_BF8
+      elif (abbrev == 'bf8_fp8' and sourceSwap == False) or \
+          (abbrev == 'fp8_bf8' and sourceSwap == True):
+          return InstType.INST_BF8_F8
+      else:
+          assert("Unsupported data type.")
+      return InstType.INST_NOTYPE
 
     miInputType      = kernel["ProblemType"]["F32XdlMathOp"] if kernel["EnableF32XdlMathOp"] else kernel["ProblemType"]["DataType"]
     # calculate constant

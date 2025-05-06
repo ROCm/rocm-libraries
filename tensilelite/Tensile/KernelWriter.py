@@ -38,7 +38,6 @@ from rocisa.instruction import BufferLoadB128, BufferLoadB32, BufferLoadB64, \
   SMFMAInstruction, SNop, SSetPrior, SSetRegIMM32B32, SSubU32, SWaitCnt, SWaitAlu, \
   SLongBranchPositive, VFmaMixF32, VMadMixF32, VMovB32
 
-from .TensileInstructions import RegisterPool
 from .KernelWriterModules import *
 from .Component import Component, LraTileProperties
 from .Components.Signature import UserArgumentsInfo
@@ -47,6 +46,7 @@ from .AsmMemoryInstruction import MemoryInstruction
 from .Activation import ActivationModule
 from .Common import printWarning, roundUp, print2, DebugConfig, DataDirection, \
   INDEX_CHARS, IsaVersion
+from .Common.RegisterPool import RegisterPool
 from Tensile.SolutionStructs.Naming import getKernelNameMin
 from Tensile.Toolchain.Component import Assembler
 
@@ -5522,7 +5522,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     return fileString
 
 
-  def setTensileInstructions(self, data):
+  def setRocIsa(self, data):
     ti = rocIsa.getInstance()
     ti.setData(data)
 

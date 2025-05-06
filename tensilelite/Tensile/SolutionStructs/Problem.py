@@ -28,10 +28,10 @@ from collections.abc import Mapping
 
 from typing import List
 
-from Tensile.TensileInstructions.Base import fastdeepcopy as deepcopy
 from Tensile.Activation import ActivationType
-from Tensile.TensileInstructions.DataType import DataType
+from Tensile.Common import fastdeepcopy as deepcopy
 from Tensile.Common.Constants import INDEX_CHARS
+from Tensile.Common.DataType import DataType
 from Tensile.Common.Utilities import assignParameterWithDefault, printWarning, print2, print1, printExit
 
 
@@ -967,12 +967,12 @@ class ProblemType(Mapping):
     indexChars = INDEX_CHARS
     # C dimensions
     name = ["C" + "".join(indexChars[i].lower() for i in range(0, self["NumIndicesC"]))]
-      
+
     # A dimensions
     name.append("A" + "".join(indexChars[i] if i in self["MirrorDimsA"] else indexChars[i].lower() for i in self["IndexAssignmentsA"]))
     if self["ComplexConjugateA"]:
       name.append("C")
-    
+
     # B dimensions
     name.append("B" + "".join(indexChars[i] if i in self["MirrorDimsB"] else indexChars[i].lower() for i in self["IndexAssignmentsB"]))
     if self["ComplexConjugateB"]:
@@ -1006,7 +1006,7 @@ class ProblemType(Mapping):
     if self["UseInitialStridesAB"]: other += "I"
     if self["UseInitialStridesCD"]: other += "Ic"
     if other: name.append(other)
-    
+
     if self["UseBias"]:
       name.append("Bias")
       if self["BiasDataTypeList"] != getBiasDataTypeListDefault(self):
@@ -1051,9 +1051,9 @@ class ProblemType(Mapping):
       name.append(self["ActivationComputeDataType"].toChar())
     if self["ActivationNoGuard"]: name[-1] += "NG"
 
-    if self["UseScaleAB"] == "Scalar": 
+    if self["UseScaleAB"] == "Scalar":
       name.append("SAB")
-    elif self["UseScaleAB"] == "Vector": 
+    elif self["UseScaleAB"] == "Vector":
       name.append("SABV")
     if self["UseScaleCD"]: name.append("SCD")
     if self["UseScaleAlphaVec"]: name.append("SAV")

@@ -23,7 +23,7 @@
 ################################################################################
 
 from rocisa.code import Label, Module
-from rocisa.container import VCC, DSModifiers, vgpr, sgpr, accvgpr
+from rocisa.container import VCC, DSModifiers, vgpr, sgpr, ContinuousRegister
 from rocisa.instruction import DSBPermuteB32, SBranch, SCBranchVCCNZ, \
                                 SMovB32, SMovB64, SNop, \
                                 SOrSaveExecB32, SOrSaveExecB64, SWaitCnt, \
@@ -32,7 +32,7 @@ from rocisa.instruction import DSBPermuteB32, SBranch, SCBranchVCCNZ, \
                                 VCndMaskB32, VMovB32, VMulI32I24, VLShiftLeftB32, \
                                 VLShiftRightB32, VSubU32
 from rocisa.functions import vectorStaticRemainder, vectorStaticDivide, vectorStaticMultiply
-from ..TensileInstructions import ContinuousRegister, log2
+from ..Common import log2
 from ..Component import ShiftVectorComponents
 from ..KernelWriterModules import *
 

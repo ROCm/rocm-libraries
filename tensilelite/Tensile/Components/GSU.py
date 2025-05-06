@@ -29,7 +29,7 @@ from rocisa.instruction import SAddCU32, SAddU32, SAndB32, SAtomicDec, SBranch, 
     SWaitCnt, VAddF32, VAddPKF32, VCmpGEI32, VCndMaskB32, VMovB32
 from rocisa.functions import scalarStaticMultiply64, scalarUInt32DivideAndRemainder
 
-from ..TensileInstructions import log2
+from ..Common import log2
 from ..Component import Component
 from ..AsmAddressCalculation import AddrCalculation
 import abc

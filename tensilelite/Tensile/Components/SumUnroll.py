@@ -30,8 +30,7 @@ from rocisa.instruction import DSStoreB16, DSStoreB32, DSStoreB64, SBarrier, \
     VDot2F32BF16, VDot2F32F16, VLShiftLeftB32, VMovB32, VCvtBF16toFP32
 from rocisa.functions import vectorStaticDivide, vectorStaticRemainder, vectorStaticMultiply
 from ..Component import SumUnroll
-from ..Common import printExit
-from ..TensileInstructions import log2
+from ..Common import printExit, log2
 
 class SumUnrollMfma(SumUnroll):
     kernel = {"EnableMatrixInstruction": True}

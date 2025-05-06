@@ -32,8 +32,7 @@ from rocisa.instruction import VAdd3U32, VCvtF32toF16, VLShiftRightB32, \
                             VMovB32, VLShiftLeftB32
 from rocisa.functions import VSaturateCastInt
 
-from ..TensileInstructions import DataType
-
+from ..Common.DataType import DataType
 from ..Component import PackData
 
 def formatting(idx, inputPrefix, prefixOffset):

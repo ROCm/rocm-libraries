@@ -25,11 +25,11 @@
 from typing import Dict
 
 from .Activation import ActivationType
-from .TensileInstructions import DataType
 from . import Hardware
 from . import Properties
 from Tensile.Common import state, state_key_ordering, IsaInfo, DepthUConfig
 from Tensile.Common.Architectures import gfxToIsa
+from Tensile.Common.DataType import DataType
 from Tensile.Common.GlobalParameters import internalParameters
 from Tensile.SolutionStructs import Solution as OriginalSolution
 from Tensile.SolutionStructs.Problem import getBiasDataTypeListDefault

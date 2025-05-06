@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2022 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -27,7 +27,7 @@ from rocisa.container import vgpr
 from rocisa.enum import DataTypeEnum
 from rocisa.instruction import SSetPrior, VDot2F32F16, VDot2CF32F16
 
-from ..TensileInstructions import DataType
+from ..Common.DataType import DataType
 from ..Component import Component, MAC
 
 # dot2
@@ -85,7 +85,7 @@ class FMA_F16_HPA_DOT2(MAC):
         module.add(SSetPrior(prior=0, comment="Reset priority after macs"))
 
         return module
-    
+
 class FMA_F16_HPA_MAD_MIX(MAC):
     asmCaps = lambda caps: caps['v_mad_mix_f32'] or caps['v_fma_mix_f32']
     #archCaps = {}

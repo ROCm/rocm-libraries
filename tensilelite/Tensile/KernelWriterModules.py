@@ -27,7 +27,7 @@ from rocisa.instruction import SBarrier, SBranch, SMovB32, SMovB64, SWaitCnt, \
   VMulF32, VMulF64, VMulLOU32, VMulPKF16
 from rocisa.functions import BranchIfNotZero
 
-from .TensileInstructions import DataType
+from Tensile.Common.DataType import DataType
 
 def allocPostLoopSrdSuppressRaw(ch: str, chAddress: str, labelStr: str, sgprLength) -> Module:
     module = Module("allocPostLoopSrdSuppress")

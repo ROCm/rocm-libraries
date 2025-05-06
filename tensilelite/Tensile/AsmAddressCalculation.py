@@ -28,8 +28,7 @@ from rocisa.instruction import MacroInstruction, SAddCU32, SAddU32, SAndB32, \
     VCmpEQU32, VCmpGtU32, VCmpLtU32, VCmpXNeU32, VCndMaskB32, VLShiftLeftB32, \
     VMadI32I24, VMovB32, VMulLOU32, VSubI32, VSubU32
 
-from .TensileInstructions import log2
-from .Common import INDEX_CHARS, DataDirection
+from .Common import INDEX_CHARS, DataDirection, log2
 
 ##############################################################################
 # Fields associated with computing address

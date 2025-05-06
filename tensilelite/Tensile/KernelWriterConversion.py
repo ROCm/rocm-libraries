@@ -27,10 +27,10 @@ from copy import deepcopy
 from typing import List
 
 from .KernelWriterBase import KernelWriterBase
-from .TensileInstructions import DataType
 
 from Tensile.Common.Architectures import isaToGfx
 from Tensile.Common import INDEX_CHARS, IsaInfo
+from Tensile.Common.DataType import DataType
 
 class KernelWriterConversion(KernelWriterBase):
 
@@ -526,7 +526,7 @@ class KernelWriterConversion(KernelWriterBase):
             kStr += "  float2 accumVec2(accum[2], accum[3]);" + self.endLine
       canPKF32Arch = []
       for isa in self.isaInfoMap.keys():
-        if self.isaInfoMap[isa].asmCaps['v_pk_add_f32']: 
+        if self.isaInfoMap[isa].asmCaps['v_pk_add_f32']:
           canPKF32Arch.append(isa)
       defineStr = []
       if len(canPKF32Arch) > 0:
