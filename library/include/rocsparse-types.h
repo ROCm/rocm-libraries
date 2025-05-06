@@ -234,6 +234,14 @@ typedef struct _rocsparse_extract_descr* rocsparse_extract_descr;
  */
 typedef struct _rocsparse_spgeam_descr* rocsparse_spgeam_descr;
 
+/*! \ingroup types_module
+ * \brief rocsparse_spmv_descr is a structure holding the rocsparse spmv
+ * descr data. It must be initialized using
+ * the rocsparse_create_spmv_descr() routine. It should be destroyed at the
+ * end using rocsparse_destroy_spmv_descr().
+ */
+typedef struct _rocsparse_spmv_descr* rocsparse_spmv_descr;
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -679,6 +687,32 @@ typedef enum rocsparse_check_spmat_stage_
     rocsparse_check_spmat_stage_buffer_size = 0, /**< Returns the required buffer size. */
     rocsparse_check_spmat_stage_compute     = 1, /**< Performs check. */
 } rocsparse_check_spmat_stage;
+
+/*! \ingroup types_module
+ *  \brief List of inputs to SpMV descriptor.
+ *
+ *  \details
+ *  This is a list of possible inputs to the SpMV descriptor.
+ */
+typedef enum rocsparse_spmv_input_
+{
+    rocsparse_spmv_input_alg, /**< Select algorithm for input on SpMV descriptor. */
+    rocsparse_spmv_input_operation, /**< Select matrix transpose operation for input on SpMV descriptor. */
+    rocsparse_spmv_input_scalar_datatype, /**< Select scalar  datatype for input on SpMV descriptor. */
+    rocsparse_spmv_input_compute_datatype /**< Select compute datatype for input on SpMV descriptor. */
+} rocsparse_spmv_input;
+
+/*! \ingroup types_module
+ *  \brief List of SpMV-Version2 stages.
+ *
+ *  \details
+ *  This is a list of possible stages during SpMV-Version2 computation.
+ */
+typedef enum rocsparse_v2_spmv_stage_
+{
+    rocsparse_v2_spmv_stage_analysis, /**< Analysis of the data. */
+    rocsparse_v2_spmv_stage_compute /**< Performs the actual SpMV computation. */
+} rocsparse_v2_spmv_stage;
 
 /*! \ingroup types_module
  *  \brief List of SpMV stages.

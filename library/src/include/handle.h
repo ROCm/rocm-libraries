@@ -79,12 +79,14 @@ struct _rocsparse_handle
     // device buffer
     size_t buffer_size{};
     void*  buffer{};
+
+    void* alpha{};
+    void* beta{};
+
     // device one
-    float*  sone{};
-    double* done{};
-    // device complex one
-    rocsparse_float_complex*  cone{};
-    rocsparse_double_complex* zone{};
+    void* sone{};
+    void* done{};
+
     // blas handle
     rocsparse::blas_handle blas_handle;
 

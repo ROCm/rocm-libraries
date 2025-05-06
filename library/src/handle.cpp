@@ -76,11 +76,13 @@ _rocsparse_handle::_rocsparse_handle()
     buffer_size = (coomv_size > 1024 * 1024) ? coomv_size : 1024 * 1024;
     THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&buffer, buffer_size));
 
+    // Device alpha and beta
+    THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&alpha, sizeof(double) * 2));
+    THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&beta, sizeof(double) * 2));
+
     // Device one
-    THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&sone, sizeof(float)));
-    THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&done, sizeof(double)));
-    THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&cone, sizeof(rocsparse_float_complex)));
-    THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&zone, sizeof(rocsparse_double_complex)));
+    THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&sone, sizeof(float) * 2));
+    THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&done, sizeof(double) * 2));
 
     // Execute empty kernel for initialization
 
@@ -89,23 +91,15 @@ _rocsparse_handle::_rocsparse_handle()
     THROW_WITH_MESSAGE_IF_HIP_ERROR(hipGetLastError(), "'empty kernel scheduling failed'");
 
     // Execute memset for initialization
-    THROW_IF_HIP_ERROR(hipMemsetAsync(sone, 0, sizeof(float), stream));
-    THROW_IF_HIP_ERROR(hipMemsetAsync(done, 0, sizeof(double), stream));
-    THROW_IF_HIP_ERROR(hipMemsetAsync(cone, 0, sizeof(rocsparse_float_complex), stream));
-    THROW_IF_HIP_ERROR(hipMemsetAsync(zone, 0, sizeof(rocsparse_double_complex), stream));
+    THROW_IF_HIP_ERROR(hipMemsetAsync(sone, 0, sizeof(float) * 2, stream));
+    THROW_IF_HIP_ERROR(hipMemsetAsync(done, 0, sizeof(double) * 2, stream));
 
-    float  hsone = 1.0f;
-    double hdone = 1.0;
-
-    rocsparse_float_complex  hcone = rocsparse_float_complex(1.0f, 0.0f);
-    rocsparse_double_complex hzone = rocsparse_double_complex(1.0, 0.0);
-
-    THROW_IF_HIP_ERROR(hipMemcpyAsync(sone, &hsone, sizeof(float), hipMemcpyHostToDevice, stream));
-    THROW_IF_HIP_ERROR(hipMemcpyAsync(done, &hdone, sizeof(double), hipMemcpyHostToDevice, stream));
-    THROW_IF_HIP_ERROR(hipMemcpyAsync(
-        cone, &hcone, sizeof(rocsparse_float_complex), hipMemcpyHostToDevice, stream));
-    THROW_IF_HIP_ERROR(hipMemcpyAsync(
-        zone, &hzone, sizeof(rocsparse_double_complex), hipMemcpyHostToDevice, stream));
+    const float  s_value = 1.0f;
+    const double d_value = 1.0;
+    THROW_IF_HIP_ERROR(
+        hipMemcpyAsync(sone, &s_value, sizeof(float), hipMemcpyHostToDevice, stream));
+    THROW_IF_HIP_ERROR(
+        hipMemcpyAsync(done, &d_value, sizeof(double), hipMemcpyHostToDevice, stream));
 
     // Wait for device transfer to finish
     THROW_IF_HIP_ERROR(hipStreamSynchronize(stream));
@@ -159,8 +153,8 @@ _rocsparse_handle::~_rocsparse_handle()
     PRINT_IF_HIP_ERROR(rocsparse_hipFree(buffer));
     PRINT_IF_HIP_ERROR(rocsparse_hipFree(sone));
     PRINT_IF_HIP_ERROR(rocsparse_hipFree(done));
-    PRINT_IF_HIP_ERROR(rocsparse_hipFree(cone));
-    PRINT_IF_HIP_ERROR(rocsparse_hipFree(zone));
+    PRINT_IF_HIP_ERROR(rocsparse_hipFree(alpha));
+    PRINT_IF_HIP_ERROR(rocsparse_hipFree(beta));
 
     // destroy blas handle
     rocsparse_status status = rocsparse::blas_destroy_handle(this->blas_handle);

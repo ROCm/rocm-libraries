@@ -125,7 +125,13 @@ ROCSPARSE_DO_ROUTINE(sparse_to_dense_coo)			\
 ROCSPARSE_DO_ROUTINE(sparse_to_dense_csc)			\
 ROCSPARSE_DO_ROUTINE(sparse_to_dense_csr)			\
 ROCSPARSE_DO_ROUTINE(sparse_to_sparse)				\
-ROCSPARSE_DO_ROUTINE(extract)
+ROCSPARSE_DO_ROUTINE(extract)					\
+ROCSPARSE_DO_ROUTINE(v2_spmv_bsr)				\
+ROCSPARSE_DO_ROUTINE(v2_spmv_csr)				\
+ROCSPARSE_DO_ROUTINE(v2_spmv_csc)				\
+ROCSPARSE_DO_ROUTINE(v2_spmv_coo)				\
+ROCSPARSE_DO_ROUTINE(v2_spmv_coo_aos)				\
+ROCSPARSE_DO_ROUTINE(v2_spmv_ell)
 // clang-format on
 
 template <std::size_t N, typename T>

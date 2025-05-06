@@ -57,8 +57,7 @@ extern "C" {
 *
 *  \retval rocsparse_status_success the operation completed successfully.
 *  \retval rocsparse_status_invalid_handle the library context was not initialized.
-*  \retval rocsparse_status_invalid_pointer \p alpha and \p beta are invalid,
-*          \p mat_A, \p mat_B, \p descr or \p buffer_size pointer is invalid.
+*  \retval rocsparse_status_invalid_pointer \p mat_A, \p mat_B, \p descr or \p buffer_size pointer is invalid.
 */
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_spgeam_buffer_size(rocsparse_handle            handle,

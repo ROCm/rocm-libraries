@@ -146,6 +146,15 @@ rocsparse_spmv_stage
 
 .. doxygenenum:: rocsparse_spmv_stage
 
+rocsparse_spmv_input
+--------------------
+
+.. doxygenenum:: rocsparse_spmv_input
+
+rocsparse_v2_spmv_stage
+-----------------------
+
+.. doxygenenum:: rocsparse_v2_spmv_stage
 
 rocsparse_spsv_alg
 ------------------

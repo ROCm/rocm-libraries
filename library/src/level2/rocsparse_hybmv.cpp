@@ -132,18 +132,19 @@ rocsparse_status rocsparse::hybmv_template(rocsparse_handle          handle,
     // ELL part
     if(hyb->ell_nnz > 0)
     {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::ellmv_template(handle,
-                                                            trans,
-                                                            hyb->m,
-                                                            hyb->n,
-                                                            alpha_device_host,
-                                                            descr,
-                                                            (T*)hyb->ell_val,
-                                                            hyb->ell_col_ind,
-                                                            hyb->ell_width,
-                                                            x,
-                                                            beta_device_host,
-                                                            y));
+        RETURN_IF_ROCSPARSE_ERROR(
+            (rocsparse::ellmv_template<T, rocsparse_int, T, T, T>(handle,
+                                                                  trans,
+                                                                  hyb->m,
+                                                                  hyb->n,
+                                                                  alpha_device_host,
+                                                                  descr,
+                                                                  (T*)hyb->ell_val,
+                                                                  hyb->ell_col_ind,
+                                                                  hyb->ell_width,
+                                                                  x,
+                                                                  beta_device_host,
+                                                                  y)));
     }
 
     // COO part
@@ -157,37 +158,39 @@ rocsparse_status rocsparse::hybmv_template(rocsparse_handle          handle,
                 T* coo_beta = nullptr;
                 rocsparse::one(handle, &coo_beta);
 
-                RETURN_IF_ROCSPARSE_ERROR(rocsparse::coomv_template(handle,
-                                                                    trans,
-                                                                    rocsparse_coomv_alg_segmented,
-                                                                    hyb->m,
-                                                                    hyb->n,
-                                                                    hyb->coo_nnz,
-                                                                    alpha_device_host,
-                                                                    descr,
-                                                                    (T*)hyb->coo_val,
-                                                                    hyb->coo_row_ind,
-                                                                    hyb->coo_col_ind,
-                                                                    x,
-                                                                    coo_beta,
-                                                                    y));
+                RETURN_IF_ROCSPARSE_ERROR((rocsparse::coomv_template<T, rocsparse_int, T, T, T>(
+                    handle,
+                    trans,
+                    rocsparse_coomv_alg_segmented,
+                    hyb->m,
+                    hyb->n,
+                    hyb->coo_nnz,
+                    alpha_device_host,
+                    descr,
+                    (T*)hyb->coo_val,
+                    hyb->coo_row_ind,
+                    hyb->coo_col_ind,
+                    x,
+                    coo_beta,
+                    y)));
             }
             else
             {
-                RETURN_IF_ROCSPARSE_ERROR(rocsparse::coomv_template(handle,
-                                                                    trans,
-                                                                    rocsparse_coomv_alg_segmented,
-                                                                    hyb->m,
-                                                                    hyb->n,
-                                                                    hyb->coo_nnz,
-                                                                    alpha_device_host,
-                                                                    descr,
-                                                                    (T*)hyb->coo_val,
-                                                                    hyb->coo_row_ind,
-                                                                    hyb->coo_col_ind,
-                                                                    x,
-                                                                    beta_device_host,
-                                                                    y));
+                RETURN_IF_ROCSPARSE_ERROR((rocsparse::coomv_template<T, rocsparse_int, T, T, T>(
+                    handle,
+                    trans,
+                    rocsparse_coomv_alg_segmented,
+                    hyb->m,
+                    hyb->n,
+                    hyb->coo_nnz,
+                    alpha_device_host,
+                    descr,
+                    (T*)hyb->coo_val,
+                    hyb->coo_row_ind,
+                    hyb->coo_col_ind,
+                    x,
+                    beta_device_host,
+                    y)));
             }
         }
         else
@@ -195,20 +198,21 @@ rocsparse_status rocsparse::hybmv_template(rocsparse_handle          handle,
             // Beta is applied by ELL part, IF ell_nnz > 0
             T coo_beta = (hyb->ell_nnz > 0) ? static_cast<T>(1) : *beta_device_host;
 
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse::coomv_template(handle,
-                                                                trans,
-                                                                rocsparse_coomv_alg_segmented,
-                                                                hyb->m,
-                                                                hyb->n,
-                                                                hyb->coo_nnz,
-                                                                alpha_device_host,
-                                                                descr,
-                                                                (T*)hyb->coo_val,
-                                                                hyb->coo_row_ind,
-                                                                hyb->coo_col_ind,
-                                                                x,
-                                                                &coo_beta,
-                                                                y));
+            RETURN_IF_ROCSPARSE_ERROR(
+                (rocsparse::coomv_template<T, rocsparse_int, T, T, T>(handle,
+                                                                      trans,
+                                                                      rocsparse_coomv_alg_segmented,
+                                                                      hyb->m,
+                                                                      hyb->n,
+                                                                      hyb->coo_nnz,
+                                                                      alpha_device_host,
+                                                                      descr,
+                                                                      (T*)hyb->coo_val,
+                                                                      hyb->coo_row_ind,
+                                                                      hyb->coo_col_ind,
+                                                                      x,
+                                                                      &coo_beta,
+                                                                      y)));
         }
     }
 

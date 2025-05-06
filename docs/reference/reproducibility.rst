@@ -303,6 +303,7 @@ Function name                                        yes no
 :cpp:func:`rocsparse_spsv()`                             x
 :cpp:func:`rocsparse_spsm()`                             x
 :cpp:func:`rocsparse_spgemm()`                           x
+:cpp:func:`rocsparse_v2_spmv_buffer_size()`          x
 :cpp:func:`rocsparse_spgeam_buffer_size()`           x
 :cpp:func:`rocsparse_spgeam()`                       x
 :cpp:func:`rocsparse_sddmm_buffer_size()`            x
@@ -314,12 +315,12 @@ Function name                                        yes no
 :cpp:func:`rocsparse_extract()`                      x
 ==================================================== === ==
 
-The reproducibility of :cpp:func:`rocsparse_spmv()` is more complicated because this generic routine
-supports multiple sparse matrix formats and algorithms. See the below chart to determine whether
+The reproducibility of :cpp:func:`rocsparse_spmv()` and :cpp:func:`rocsparse_v2_spmv()` is more complicated because these generic routines
+support multiple sparse matrix formats and algorithms. See the below chart to determine whether
 a given algorithm is deterministic.
 
 +-----------------------------------------------------------------------------------+
-|                        Bit-wise reproducibility of SpMV                           |
+|                        Bit-wise reproducibility of SpMV/v2_SpMV                   |
 +-----------------------------------------------+-----------------+-----------------+
 |                                               | A non-transpose | A transpose     |
 |            Algorithm                          +--------+--------+--------+--------+

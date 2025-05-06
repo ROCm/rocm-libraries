@@ -56,22 +56,22 @@ namespace rocsparse
     // Return one on the device
     static inline void one(const rocsparse_handle handle, float** one)
     {
-        *one = handle->sone;
+        *one = (float*)handle->sone;
     }
 
     static inline void one(const rocsparse_handle handle, double** one)
     {
-        *one = handle->done;
+        *one = (double*)handle->done;
     }
 
     static inline void one(const rocsparse_handle handle, rocsparse_float_complex** one)
     {
-        *one = handle->cone;
+        *one = (rocsparse_float_complex*)handle->sone;
     }
 
     static inline void one(const rocsparse_handle handle, rocsparse_double_complex** one)
     {
-        *one = handle->zone;
+        *one = (rocsparse_double_complex*)handle->done;
     }
 
     template <typename T>
