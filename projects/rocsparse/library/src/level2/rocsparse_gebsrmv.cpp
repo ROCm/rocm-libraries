@@ -397,23 +397,25 @@ rocsparse_status rocsparse::gebsrmv_template(rocsparse_handle          handle, /
     // row_block_dim == 1 and col_block_dim == 1 is the CSR case
     if(row_block_dim == 1 && col_block_dim == 1)
     {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmv_template(handle,
-                                                            trans,
-                                                            rocsparse::csrmv_alg_rowsplit,
-                                                            mb,
-                                                            nb,
-                                                            nnzb,
-                                                            alpha,
-                                                            descr,
-                                                            bsr_val,
-                                                            bsr_row_ptr,
-                                                            bsr_row_ptr + 1,
-                                                            bsr_col_ind,
-                                                            nullptr,
-                                                            x,
-                                                            beta,
-                                                            y,
-                                                            false));
+        RETURN_IF_ROCSPARSE_ERROR(
+            (rocsparse::csrmv_template<T, rocsparse_int, rocsparse_int, T, T, T>(
+                handle,
+                trans,
+                rocsparse::csrmv_alg_rowsplit,
+                mb,
+                nb,
+                nnzb,
+                alpha,
+                descr,
+                bsr_val,
+                bsr_row_ptr,
+                bsr_row_ptr + 1,
+                bsr_col_ind,
+                nullptr,
+                x,
+                beta,
+                y,
+                false)));
         return rocsparse_status_success;
     }
 

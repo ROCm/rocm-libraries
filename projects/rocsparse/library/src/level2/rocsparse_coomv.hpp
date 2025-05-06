@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -39,27 +39,64 @@ namespace rocsparse
     rocsparse_status coomv_analysis_template(rocsparse_handle          handle,
                                              rocsparse_operation       trans,
                                              rocsparse_coomv_alg       alg,
-                                             I                         m,
-                                             I                         n,
+                                             int64_t                   m,
+                                             int64_t                   n,
                                              int64_t                   nnz,
                                              const rocsparse_mat_descr descr,
-                                             const A*                  coo_val,
-                                             const I*                  coo_row_ind,
-                                             const I*                  coo_col_ind);
+                                             const void*               coo_val,
+                                             const void*               coo_row_ind,
+                                             const void*               coo_col_ind);
 
     template <typename T, typename I, typename A, typename X, typename Y>
     rocsparse_status coomv_template(rocsparse_handle          handle,
                                     rocsparse_operation       trans,
                                     rocsparse_coomv_alg       alg,
-                                    I                         m,
-                                    I                         n,
+                                    int64_t                   m,
+                                    int64_t                   n,
                                     int64_t                   nnz,
-                                    const T*                  alpha_device_host,
+                                    const void*               alpha_device_host,
                                     const rocsparse_mat_descr descr,
-                                    const A*                  coo_val,
-                                    const I*                  coo_row_ind,
-                                    const I*                  coo_col_ind,
-                                    const X*                  x,
-                                    const T*                  beta_device_host,
-                                    Y*                        y);
+                                    const void*               coo_val,
+                                    const void*               coo_row_ind,
+                                    const void*               coo_col_ind,
+                                    const void*               x,
+                                    const void*               beta_device_host,
+                                    void*                     y);
+
+    rocsparse_status coomv_analysis(rocsparse_handle          handle,
+                                    rocsparse_operation       trans,
+                                    rocsparse_coomv_alg       alg,
+                                    int64_t                   m,
+                                    int64_t                   n,
+                                    int64_t                   nnz,
+                                    const rocsparse_mat_descr descr,
+                                    rocsparse_datatype        coo_val_datatype,
+                                    const void*               coo_val,
+                                    rocsparse_indextype       coo_row_indextype,
+                                    const void*               coo_row_ind,
+                                    rocsparse_indextype       coo_col_indextype,
+                                    const void*               coo_col_ind);
+
+    rocsparse_status coomv(rocsparse_handle          handle,
+                           rocsparse_operation       trans,
+                           rocsparse_coomv_alg       alg,
+                           int64_t                   m,
+                           int64_t                   n,
+                           int64_t                   nnz,
+                           rocsparse_datatype        alpha_device_host_datatype,
+                           const void*               alpha_device_host,
+                           const rocsparse_mat_descr descr,
+                           rocsparse_datatype        coo_val_datatype,
+                           const void*               coo_val,
+                           rocsparse_indextype       coo_row_indextype,
+                           const void*               coo_row_ind,
+                           rocsparse_indextype       coo_col_indextype,
+                           const void*               coo_col_ind,
+                           rocsparse_datatype        x_datatype,
+                           const void*               x,
+                           rocsparse_datatype        beta_device_host_datatype,
+                           const void*               beta_device_host,
+                           rocsparse_datatype        y_datatype,
+                           void*                     y);
+
 }

@@ -299,6 +299,7 @@ namespace testing
     TESTING_TEMPLATE(dense_to_sparse)
     TESTING_TEMPLATE(spvv)
     TESTING_TEMPLATE(spmv)
+    TESTING_TEMPLATE(v2_spmv)
     TESTING_TEMPLATE(spsv)
     TESTING_TEMPLATE(spsm)
     TESTING_TEMPLATE(spmm)

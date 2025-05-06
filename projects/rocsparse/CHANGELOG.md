@@ -9,7 +9,16 @@ Documentation for rocSPARSE is available at
 * Fixed an issue in the public headers where `extern "C"` was not wrapped by `#ifdef __cplusplus`, which caused failures when building C programs with rocSPARSE.
 
 ### Added
-* Adds SpGEAM generic routine for computing sparse matrix addition in CSR format
+* Adds `SpGEAM` generic routine for computing sparse matrix addition in CSR format
+* Adds `v2_SpMV` generic routine for computing sparse matrix vector multiplication
+
+### Removed
+
+* The deprecated `rocsparse_spmv_ex` routine
+
+### Upcoming changes
+* Deprecated the `rocsparse_spmv` routine. Users should use the `rocsparse_v2_spmv` routine going forward.
+
 
 ## rocSPARSE 3.5.0 for ROCm 6.5.0
 

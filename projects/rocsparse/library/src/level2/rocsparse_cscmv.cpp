@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -23,299 +23,380 @@
  * ************************************************************************ */
 
 #include "rocsparse_cscmv.hpp"
-#include "rocsparse_csrmv.hpp"
-
-#include "control.h"
+#include "to_string.hpp"
 #include "utility.h"
 
-template <typename I, typename J, typename A>
-rocsparse_status rocsparse::cscmv_analysis_template(rocsparse_handle          handle,
-                                                    rocsparse_operation       trans,
-                                                    rocsparse::csrmv_alg      alg,
-                                                    J                         m,
-                                                    J                         n,
-                                                    I                         nnz,
-                                                    const rocsparse_mat_descr descr,
-                                                    const A*                  csc_val,
-                                                    const I*                  csc_col_ptr,
-                                                    const J*                  csc_row_ind,
-                                                    rocsparse_mat_info        info)
+#include <map>
+#include <sstream>
+
+namespace rocsparse
+
 {
-    ROCSPARSE_ROUTINE_TRACE;
 
-    switch(trans)
-    {
-    case rocsparse_operation_none:
-    {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmv_analysis_template(handle,
-                                                                     rocsparse_operation_transpose,
-                                                                     alg,
-                                                                     n,
-                                                                     m,
-                                                                     nnz,
-                                                                     descr,
-                                                                     csc_val,
-                                                                     csc_col_ptr,
-                                                                     csc_row_ind,
-                                                                     info));
-        return rocsparse_status_success;
-    }
-    case rocsparse_operation_transpose:
-    case rocsparse_operation_conjugate_transpose:
-    {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmv_analysis_template(handle,
-                                                                     rocsparse_operation_none,
-                                                                     alg,
-                                                                     n,
-                                                                     m,
-                                                                     nnz,
-                                                                     descr,
-                                                                     csc_val,
-                                                                     csc_col_ptr,
-                                                                     csc_row_ind,
-                                                                     info));
-        return rocsparse_status_success;
-    }
+    typedef rocsparse_status (*cscmv_t)(rocsparse_handle,
+                                        rocsparse_operation,
+                                        rocsparse::csrmv_alg,
+                                        int64_t,
+                                        int64_t,
+                                        int64_t,
+                                        const void*,
+                                        const rocsparse_mat_descr,
+                                        const void*,
+                                        const void*,
+                                        const void*,
+                                        rocsparse_mat_info,
+                                        const void*,
+                                        const void*,
+                                        void*);
+
+    using cscmv_tuple = std::tuple<rocsparse_datatype,
+                                   rocsparse_indextype,
+                                   rocsparse_indextype,
+                                   rocsparse_datatype,
+                                   rocsparse_datatype,
+                                   rocsparse_datatype>;
+
+#define CSCMV_CONFIG(T, I, J, A, X, Y)                                      \
+    {                                                                       \
+        cscmv_tuple(T, I, J, A, X, Y),                                      \
+            cscmv_template<typename rocsparse::datatype_traits<T>::type_t,  \
+                           typename rocsparse::indextype_traits<I>::type_t, \
+                           typename rocsparse::indextype_traits<J>::type_t, \
+                           typename rocsparse::datatype_traits<A>::type_t,  \
+                           typename rocsparse::datatype_traits<X>::type_t,  \
+                           typename rocsparse::datatype_traits<Y>::type_t>  \
     }
 
-    // LCOV_EXCL_START
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-    // LCOV_EXCL_STOP
+    static const std::map<cscmv_tuple, cscmv_t> s_cscmv_dispatch{
+        {CSCMV_CONFIG(rocsparse_datatype_f32_r,
+                      rocsparse_indextype_i32,
+                      rocsparse_indextype_i32,
+                      rocsparse_datatype_f32_r,
+                      rocsparse_datatype_f32_r,
+                      rocsparse_datatype_f32_r),
+
+         CSCMV_CONFIG(rocsparse_datatype_f64_r,
+                      rocsparse_indextype_i32,
+                      rocsparse_indextype_i32,
+                      rocsparse_datatype_f64_r,
+                      rocsparse_datatype_f64_r,
+                      rocsparse_datatype_f64_r),
+
+         CSCMV_CONFIG(rocsparse_datatype_f32_c,
+                      rocsparse_indextype_i32,
+                      rocsparse_indextype_i32,
+                      rocsparse_datatype_f32_c,
+                      rocsparse_datatype_f32_c,
+                      rocsparse_datatype_f32_c),
+
+         CSCMV_CONFIG(rocsparse_datatype_f64_c,
+                      rocsparse_indextype_i32,
+                      rocsparse_indextype_i32,
+                      rocsparse_datatype_f64_c,
+                      rocsparse_datatype_f64_c,
+                      rocsparse_datatype_f64_c),
+
+         CSCMV_CONFIG(rocsparse_datatype_f32_r,
+                      rocsparse_indextype_i64,
+                      rocsparse_indextype_i32,
+                      rocsparse_datatype_f32_r,
+                      rocsparse_datatype_f32_r,
+                      rocsparse_datatype_f32_r),
+
+         CSCMV_CONFIG(rocsparse_datatype_f64_r,
+                      rocsparse_indextype_i64,
+                      rocsparse_indextype_i32,
+                      rocsparse_datatype_f64_r,
+                      rocsparse_datatype_f64_r,
+                      rocsparse_datatype_f64_r),
+
+         CSCMV_CONFIG(rocsparse_datatype_f32_c,
+                      rocsparse_indextype_i64,
+                      rocsparse_indextype_i32,
+                      rocsparse_datatype_f32_c,
+                      rocsparse_datatype_f32_c,
+                      rocsparse_datatype_f32_c),
+
+         CSCMV_CONFIG(rocsparse_datatype_f64_c,
+                      rocsparse_indextype_i64,
+                      rocsparse_indextype_i32,
+                      rocsparse_datatype_f64_c,
+                      rocsparse_datatype_f64_c,
+                      rocsparse_datatype_f64_c),
+
+         CSCMV_CONFIG(rocsparse_datatype_f32_r,
+                      rocsparse_indextype_i64,
+                      rocsparse_indextype_i64,
+                      rocsparse_datatype_f32_r,
+                      rocsparse_datatype_f32_r,
+                      rocsparse_datatype_f32_r),
+
+         CSCMV_CONFIG(rocsparse_datatype_f64_r,
+                      rocsparse_indextype_i64,
+                      rocsparse_indextype_i64,
+                      rocsparse_datatype_f64_r,
+                      rocsparse_datatype_f64_r,
+                      rocsparse_datatype_f64_r),
+
+         CSCMV_CONFIG(rocsparse_datatype_f32_c,
+                      rocsparse_indextype_i64,
+                      rocsparse_indextype_i64,
+                      rocsparse_datatype_f32_c,
+                      rocsparse_datatype_f32_c,
+                      rocsparse_datatype_f32_c),
+
+         CSCMV_CONFIG(rocsparse_datatype_f64_c,
+                      rocsparse_indextype_i64,
+                      rocsparse_indextype_i64,
+                      rocsparse_datatype_f64_c,
+                      rocsparse_datatype_f64_c,
+                      rocsparse_datatype_f64_c),
+
+         CSCMV_CONFIG(rocsparse_datatype_i32_r,
+                      rocsparse_indextype_i32,
+                      rocsparse_indextype_i32,
+                      rocsparse_datatype_i8_r,
+                      rocsparse_datatype_i8_r,
+                      rocsparse_datatype_i32_r),
+
+         CSCMV_CONFIG(rocsparse_datatype_i32_r,
+                      rocsparse_indextype_i64,
+                      rocsparse_indextype_i32,
+                      rocsparse_datatype_i8_r,
+                      rocsparse_datatype_i8_r,
+                      rocsparse_datatype_i32_r),
+
+         CSCMV_CONFIG(rocsparse_datatype_i32_r,
+                      rocsparse_indextype_i64,
+                      rocsparse_indextype_i64,
+                      rocsparse_datatype_i8_r,
+                      rocsparse_datatype_i8_r,
+                      rocsparse_datatype_i32_r),
+
+         CSCMV_CONFIG(rocsparse_datatype_f32_r,
+                      rocsparse_indextype_i32,
+                      rocsparse_indextype_i32,
+                      rocsparse_datatype_i8_r,
+                      rocsparse_datatype_i8_r,
+                      rocsparse_datatype_f32_r),
+
+         CSCMV_CONFIG(rocsparse_datatype_f32_r,
+                      rocsparse_indextype_i64,
+                      rocsparse_indextype_i32,
+                      rocsparse_datatype_i8_r,
+                      rocsparse_datatype_i8_r,
+                      rocsparse_datatype_f32_r),
+
+         CSCMV_CONFIG(rocsparse_datatype_f32_r,
+                      rocsparse_indextype_i64,
+                      rocsparse_indextype_i64,
+                      rocsparse_datatype_i8_r,
+                      rocsparse_datatype_i8_r,
+                      rocsparse_datatype_f32_r),
+
+         CSCMV_CONFIG(rocsparse_datatype_f32_c,
+                      rocsparse_indextype_i32,
+                      rocsparse_indextype_i32,
+                      rocsparse_datatype_f32_r,
+                      rocsparse_datatype_f32_c,
+                      rocsparse_datatype_f32_c),
+
+         CSCMV_CONFIG(rocsparse_datatype_f32_c,
+                      rocsparse_indextype_i64,
+                      rocsparse_indextype_i32,
+                      rocsparse_datatype_f32_r,
+                      rocsparse_datatype_f32_c,
+                      rocsparse_datatype_f32_c),
+
+         CSCMV_CONFIG(rocsparse_datatype_f32_c,
+                      rocsparse_indextype_i64,
+                      rocsparse_indextype_i64,
+                      rocsparse_datatype_f32_r,
+                      rocsparse_datatype_f32_c,
+                      rocsparse_datatype_f32_c),
+
+         CSCMV_CONFIG(rocsparse_datatype_f64_r,
+                      rocsparse_indextype_i32,
+                      rocsparse_indextype_i32,
+                      rocsparse_datatype_f32_r,
+                      rocsparse_datatype_f64_r,
+                      rocsparse_datatype_f64_r),
+
+         CSCMV_CONFIG(rocsparse_datatype_f64_r,
+                      rocsparse_indextype_i64,
+                      rocsparse_indextype_i32,
+                      rocsparse_datatype_f32_r,
+                      rocsparse_datatype_f64_r,
+                      rocsparse_datatype_f64_r),
+
+         CSCMV_CONFIG(rocsparse_datatype_f64_r,
+                      rocsparse_indextype_i64,
+                      rocsparse_indextype_i64,
+                      rocsparse_datatype_f32_r,
+                      rocsparse_datatype_f64_r,
+                      rocsparse_datatype_f64_r),
+
+         CSCMV_CONFIG(rocsparse_datatype_f64_c,
+                      rocsparse_indextype_i32,
+                      rocsparse_indextype_i32,
+                      rocsparse_datatype_f64_r,
+                      rocsparse_datatype_f64_c,
+                      rocsparse_datatype_f64_c),
+
+         CSCMV_CONFIG(rocsparse_datatype_f64_c,
+                      rocsparse_indextype_i64,
+                      rocsparse_indextype_i32,
+                      rocsparse_datatype_f64_r,
+                      rocsparse_datatype_f64_c,
+                      rocsparse_datatype_f64_c),
+
+         CSCMV_CONFIG(rocsparse_datatype_f64_c,
+                      rocsparse_indextype_i64,
+                      rocsparse_indextype_i64,
+                      rocsparse_datatype_f64_r,
+                      rocsparse_datatype_f64_c,
+                      rocsparse_datatype_f64_c),
+
+         CSCMV_CONFIG(rocsparse_datatype_f64_c,
+                      rocsparse_indextype_i32,
+                      rocsparse_indextype_i32,
+                      rocsparse_datatype_f32_c,
+                      rocsparse_datatype_f64_c,
+                      rocsparse_datatype_f64_c),
+
+         CSCMV_CONFIG(rocsparse_datatype_f64_c,
+                      rocsparse_indextype_i64,
+                      rocsparse_indextype_i32,
+                      rocsparse_datatype_f32_c,
+                      rocsparse_datatype_f64_c,
+                      rocsparse_datatype_f64_c),
+
+         CSCMV_CONFIG(rocsparse_datatype_f64_c,
+                      rocsparse_indextype_i64,
+                      rocsparse_indextype_i64,
+                      rocsparse_datatype_f32_c,
+                      rocsparse_datatype_f64_c,
+                      rocsparse_datatype_f64_c)
+
+        }};
+
+    static rocsparse_status cscmv_find(cscmv_t*            function_,
+                                       rocsparse_datatype  t_type_,
+                                       rocsparse_indextype i_type_,
+                                       rocsparse_indextype j_type_,
+                                       rocsparse_datatype  a_type_,
+                                       rocsparse_datatype  x_type_,
+                                       rocsparse_datatype  y_type_)
+    {
+
+        const auto& it = rocsparse::s_cscmv_dispatch.find(
+            rocsparse::cscmv_tuple(t_type_, i_type_, j_type_, a_type_, x_type_, y_type_));
+
+        if(it != rocsparse::s_cscmv_dispatch.end())
+        {
+            function_[0] = it->second;
+        }
+        // LCOV_EXCL_START
+        else
+        {
+
+#ifndef NDEBUG
+            std::cout << "invalid precision configuration: "
+                      << "t_type: " << rocsparse::to_string(t_type_) << std::endl
+                      << ", i_type: " << rocsparse::to_string(i_type_) << std::endl
+                      << ", j_type: " << rocsparse::to_string(j_type_) << std::endl
+                      << ", a_type: " << rocsparse::to_string(a_type_) << std::endl
+                      << ", x_type: " << rocsparse::to_string(x_type_) << std::endl
+                      << ", y_type: " << rocsparse::to_string(y_type_) << std::endl;
+
+            std::cout << "available configuration are: " << std::endl;
+            for(const auto& p : rocsparse::s_cscmv_dispatch)
+            {
+                const auto& t      = p.first;
+                const auto  t_type = std::get<0>(t);
+                const auto  i_type = std::get<1>(t);
+                const auto  j_type = std::get<2>(t);
+                const auto  a_type = std::get<3>(t);
+                const auto  x_type = std::get<4>(t);
+                const auto  y_type = std::get<5>(t);
+                std::cout << std::endl
+                          << std::endl
+                          << "t_type: " << rocsparse::to_string(t_type) << std::endl
+                          << ", i_type: " << rocsparse::to_string(i_type) << std::endl
+                          << ", j_type: " << rocsparse::to_string(j_type) << std::endl
+                          << ", a_type: " << rocsparse::to_string(a_type) << std::endl
+                          << ", x_type: " << rocsparse::to_string(x_type) << std::endl
+                          << ", y_type: " << rocsparse::to_string(y_type) << std::endl;
+            }
+#endif
+
+            std::stringstream sstr;
+            sstr << "invalid precision configuration: "
+                 << "t_type: " << rocsparse::to_string(t_type_)
+                 << ", i_type: " << rocsparse::to_string(i_type_)
+                 << ", j_type: " << rocsparse::to_string(j_type_)
+                 << ", a_type: " << rocsparse::to_string(a_type_)
+                 << ", x_type: " << rocsparse::to_string(x_type_)
+                 << ", y_type: " << rocsparse::to_string(y_type_);
+
+            RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value,
+                                                   sstr.str().c_str());
+        }
+        // LCOV_EXCL_STOP
+
+        return rocsparse_status_success;
+    }
+
 }
 
-template <typename T, typename I, typename J, typename A, typename X, typename Y>
-rocsparse_status rocsparse::cscmv_template(rocsparse_handle          handle,
-                                           rocsparse_operation       trans,
-                                           rocsparse::csrmv_alg      alg,
-                                           J                         m,
-                                           J                         n,
-                                           I                         nnz,
-                                           const T*                  alpha,
-                                           const rocsparse_mat_descr descr,
-                                           const A*                  csc_val,
-                                           const I*                  csc_col_ptr,
-                                           const J*                  csc_row_ind,
-                                           rocsparse_mat_info        info,
-                                           const X*                  x,
-                                           const T*                  beta,
-                                           Y*                        y)
+rocsparse_status rocsparse::cscmv(rocsparse_handle          handle,
+                                  rocsparse_operation       trans,
+                                  rocsparse::csrmv_alg      alg,
+                                  int64_t                   m,
+                                  int64_t                   n,
+                                  int64_t                   nnz,
+                                  rocsparse_datatype        alpha_device_host_datatype,
+                                  const void*               alpha_device_host,
+                                  const rocsparse_mat_descr descr,
+                                  rocsparse_datatype        csc_val_datatype,
+                                  const void*               csc_val,
+                                  rocsparse_indextype       csc_col_ptr_indextype,
+                                  const void*               csc_col_ptr,
+                                  rocsparse_indextype       csc_row_ind_indextype,
+                                  const void*               csc_row_ind,
+                                  rocsparse_mat_info        info,
+                                  rocsparse_datatype        x_datatype,
+                                  const void*               x,
+                                  rocsparse_datatype        beta_device_host_datatype,
+                                  const void*               beta_device_host,
+                                  rocsparse_datatype        y_datatype,
+                                  void*                     y)
 {
     ROCSPARSE_ROUTINE_TRACE;
+    rocsparse::cscmv_t f;
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscmv_find(&f,
+                                                    alpha_device_host_datatype,
+                                                    csc_col_ptr_indextype,
+                                                    csc_row_ind_indextype,
+                                                    csc_val_datatype,
+                                                    x_datatype,
+                                                    y_datatype));
 
-    switch(trans)
-    {
-    case rocsparse_operation_none:
-    {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmv_template(handle,
-                                                            rocsparse_operation_transpose,
-                                                            alg,
-                                                            n,
-                                                            m,
-                                                            nnz,
-                                                            alpha,
-                                                            descr,
-                                                            csc_val,
-                                                            csc_col_ptr,
-                                                            csc_col_ptr + 1,
-                                                            csc_row_ind,
-                                                            info,
-                                                            x,
-                                                            beta,
-                                                            y,
-                                                            false));
-        return rocsparse_status_success;
-    }
-    case rocsparse_operation_transpose:
-    {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmv_template(handle,
-                                                            rocsparse_operation_none,
-                                                            alg,
-                                                            n,
-                                                            m,
-                                                            nnz,
-                                                            alpha,
-                                                            descr,
-                                                            csc_val,
-                                                            csc_col_ptr,
-                                                            csc_col_ptr + 1,
-                                                            csc_row_ind,
-                                                            info,
-                                                            x,
-                                                            beta,
-                                                            y,
-                                                            false));
-        return rocsparse_status_success;
-    }
-    case rocsparse_operation_conjugate_transpose:
-    {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmv_template(handle,
-                                                            rocsparse_operation_none,
-                                                            alg,
-                                                            n,
-                                                            m,
-                                                            nnz,
-                                                            alpha,
-                                                            descr,
-                                                            csc_val,
-                                                            csc_col_ptr,
-                                                            csc_col_ptr + 1,
-                                                            csc_row_ind,
-                                                            info,
-                                                            x,
-                                                            beta,
-                                                            y,
-                                                            true));
-        return rocsparse_status_success;
-    }
-    }
+    RETURN_IF_ROCSPARSE_ERROR(f(handle,
+                                trans,
+                                alg,
+                                m,
+                                n,
+                                nnz,
+                                alpha_device_host,
+                                descr,
+                                csc_val,
+                                csc_col_ptr,
+                                csc_row_ind,
+                                info,
+                                x,
+                                beta_device_host,
+                                y));
 
-    // LCOV_EXCL_START
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-    // LCOV_EXCL_STOP
+    return rocsparse_status_success;
 }
-
-#define INSTANTIATE(TTYPE, ITYPE, JTYPE)                                                            \
-    template rocsparse_status rocsparse::cscmv_analysis_template(rocsparse_handle          handle,  \
-                                                                 rocsparse_operation       trans,   \
-                                                                 rocsparse::csrmv_alg      alg,     \
-                                                                 JTYPE                     m,       \
-                                                                 JTYPE                     n,       \
-                                                                 ITYPE                     nnz,     \
-                                                                 const rocsparse_mat_descr descr,   \
-                                                                 const TTYPE*              csc_val, \
-                                                                 const ITYPE*       csc_col_ptr,    \
-                                                                 const JTYPE*       csc_row_ind,    \
-                                                                 rocsparse_mat_info info);          \
-    template rocsparse_status rocsparse::cscmv_template(rocsparse_handle          handle,           \
-                                                        rocsparse_operation       trans,            \
-                                                        rocsparse::csrmv_alg      alg,              \
-                                                        JTYPE                     m,                \
-                                                        JTYPE                     n,                \
-                                                        ITYPE                     nnz,              \
-                                                        const TTYPE*              alpha,            \
-                                                        const rocsparse_mat_descr descr,            \
-                                                        const TTYPE*              csc_val,          \
-                                                        const ITYPE*              csc_col_ptr,      \
-                                                        const JTYPE*              csc_row_ind,      \
-                                                        rocsparse_mat_info        info,             \
-                                                        const TTYPE*              x,                \
-                                                        const TTYPE*              beta,             \
-                                                        TTYPE*                    y);
-
-INSTANTIATE(float, int32_t, int32_t);
-INSTANTIATE(float, int64_t, int32_t);
-INSTANTIATE(float, int64_t, int64_t);
-INSTANTIATE(double, int32_t, int32_t);
-INSTANTIATE(double, int64_t, int32_t);
-INSTANTIATE(double, int64_t, int64_t);
-INSTANTIATE(rocsparse_float_complex, int32_t, int32_t);
-INSTANTIATE(rocsparse_float_complex, int64_t, int32_t);
-INSTANTIATE(rocsparse_float_complex, int64_t, int64_t);
-INSTANTIATE(rocsparse_double_complex, int32_t, int32_t);
-INSTANTIATE(rocsparse_double_complex, int64_t, int32_t);
-INSTANTIATE(rocsparse_double_complex, int64_t, int64_t);
-#undef INSTANTIATE
-
-#define INSTANTIATE_MIXED_ANALYSIS(ITYPE, JTYPE, ATYPE)                                             \
-    template rocsparse_status rocsparse::cscmv_analysis_template(rocsparse_handle          handle,  \
-                                                                 rocsparse_operation       trans,   \
-                                                                 rocsparse::csrmv_alg      alg,     \
-                                                                 JTYPE                     m,       \
-                                                                 JTYPE                     n,       \
-                                                                 ITYPE                     nnz,     \
-                                                                 const rocsparse_mat_descr descr,   \
-                                                                 const ATYPE*              csc_val, \
-                                                                 const ITYPE*       csc_col_ptr,    \
-                                                                 const JTYPE*       csc_row_ind,    \
-                                                                 rocsparse_mat_info info);
-
-INSTANTIATE_MIXED_ANALYSIS(int32_t, int32_t, int8_t);
-INSTANTIATE_MIXED_ANALYSIS(int64_t, int32_t, int8_t);
-INSTANTIATE_MIXED_ANALYSIS(int64_t, int64_t, int8_t);
-#undef INSTANTIATE_MIXED_ANALYSIS
-
-#define INSTANTIATE_MIXED(TTYPE, ITYPE, JTYPE, ATYPE, XTYPE, YTYPE)                            \
-    template rocsparse_status rocsparse::cscmv_template(rocsparse_handle          handle,      \
-                                                        rocsparse_operation       trans,       \
-                                                        rocsparse::csrmv_alg      alg,         \
-                                                        JTYPE                     m,           \
-                                                        JTYPE                     n,           \
-                                                        ITYPE                     nnz,         \
-                                                        const TTYPE*              alpha,       \
-                                                        const rocsparse_mat_descr descr,       \
-                                                        const ATYPE*              csc_val,     \
-                                                        const ITYPE*              csc_col_ptr, \
-                                                        const JTYPE*              csc_row_ind, \
-                                                        rocsparse_mat_info        info,        \
-                                                        const XTYPE*              x,           \
-                                                        const TTYPE*              beta,        \
-                                                        YTYPE*                    y);
-
-INSTANTIATE_MIXED(int32_t, int32_t, int32_t, int8_t, int8_t, int32_t);
-INSTANTIATE_MIXED(int32_t, int64_t, int32_t, int8_t, int8_t, int32_t);
-INSTANTIATE_MIXED(int32_t, int64_t, int64_t, int8_t, int8_t, int32_t);
-INSTANTIATE_MIXED(float, int32_t, int32_t, int8_t, int8_t, float);
-INSTANTIATE_MIXED(float, int64_t, int32_t, int8_t, int8_t, float);
-INSTANTIATE_MIXED(float, int64_t, int64_t, int8_t, int8_t, float);
-INSTANTIATE_MIXED(rocsparse_float_complex,
-                  int32_t,
-                  int32_t,
-                  float,
-                  rocsparse_float_complex,
-                  rocsparse_float_complex);
-INSTANTIATE_MIXED(rocsparse_float_complex,
-                  int64_t,
-                  int32_t,
-                  float,
-                  rocsparse_float_complex,
-                  rocsparse_float_complex);
-INSTANTIATE_MIXED(rocsparse_float_complex,
-                  int64_t,
-                  int64_t,
-                  float,
-                  rocsparse_float_complex,
-                  rocsparse_float_complex);
-
-INSTANTIATE_MIXED(rocsparse_double_complex,
-                  int32_t,
-                  int32_t,
-                  double,
-                  rocsparse_double_complex,
-                  rocsparse_double_complex);
-INSTANTIATE_MIXED(rocsparse_double_complex,
-                  int64_t,
-                  int32_t,
-                  double,
-                  rocsparse_double_complex,
-                  rocsparse_double_complex);
-INSTANTIATE_MIXED(rocsparse_double_complex,
-                  int64_t,
-                  int64_t,
-                  double,
-                  rocsparse_double_complex,
-                  rocsparse_double_complex);
-
-INSTANTIATE_MIXED(double, int32_t, int32_t, float, double, double);
-INSTANTIATE_MIXED(double, int64_t, int32_t, float, double, double);
-INSTANTIATE_MIXED(double, int64_t, int64_t, float, double, double);
-
-INSTANTIATE_MIXED(rocsparse_double_complex,
-                  int32_t,
-                  int32_t,
-                  rocsparse_float_complex,
-                  rocsparse_double_complex,
-                  rocsparse_double_complex);
-INSTANTIATE_MIXED(rocsparse_double_complex,
-                  int64_t,
-                  int32_t,
-                  rocsparse_float_complex,
-                  rocsparse_double_complex,
-                  rocsparse_double_complex);
-INSTANTIATE_MIXED(rocsparse_double_complex,
-                  int64_t,
-                  int64_t,
-                  rocsparse_float_complex,
-                  rocsparse_double_complex,
-                  rocsparse_double_complex);
-
-#undef INSTANTIATE_MIXED

@@ -127,6 +127,12 @@ Auxiliary Functions
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_spgeam_get_output`              |
 +-----------------------------------------------------+
+|:cpp:func:`rocsparse_create_spmv_descr`              |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_destroy_spmv_descr`             |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_spmv_set_input`                 |
++-----------------------------------------------------+
 |:cpp:func:`rocsparse_coo_get`                        |
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_coo_aos_get`                    |
@@ -464,7 +470,9 @@ documentation for details on what data types and compute types are supported.
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_spmv()`                         |
 +-----------------------------------------------------+
-|:cpp:func:`rocsparse_spmv_ex()`                      |
+|:cpp:func:`rocsparse_v2_spmv_buffer_size()`          |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_v2_spmv()`                      |
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_spsv()`                         |
 +-----------------------------------------------------+

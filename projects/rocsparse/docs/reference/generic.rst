@@ -46,10 +46,15 @@ rocsparse_spmv()
 
 .. doxygenfunction:: rocsparse_spmv
 
-rocsparse_spmv_ex()
+rocsparse_v2_spmv_buffer_size()
+-------------------------------
+
+.. doxygenfunction:: rocsparse_v2_spmv_buffer_size
+
+rocsparse_v2_spmv()
 -------------------
 
-.. doxygenfunction:: rocsparse_spmv_ex
+.. doxygenfunction:: rocsparse_v2_spmv
 
 rocsparse_spsv()
 ----------------
