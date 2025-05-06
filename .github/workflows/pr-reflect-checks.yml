@@ -58,7 +58,7 @@ jobs:
             echo "Running reflect-checks for PR #$pr"
             python .github/scripts/pr_reflect_checks.py \
                 --repo ${{ github.repository }} \
-                --pr "$pr"
+                --pr "$pr" \
                 --config ".github/repos-config.json"
           done
         env:

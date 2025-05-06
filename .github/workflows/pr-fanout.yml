@@ -75,5 +75,5 @@ jobs:
         run: |
           python .github/scripts/pr_reflect_checks.py \
             --repo ${{ github.repository }} \
-            --pr ${{ github.event.pull_request.number }}
+            --pr "${{ github.event.pull_request.number }}" \
             --config ".github/repos-config.json"
