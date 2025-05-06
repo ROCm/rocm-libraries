@@ -46,7 +46,7 @@ def reflect_checks(client: GitHubAPIClient, monorepo: str, pr_number: int, confi
     """Reflect checks from fanned-out PRs to the monorepo PR."""
     for entry in config:
         repo = entry.url
-        branch = f"monorepo-pr-{pr_number}-{entry.folder}"
+        branch = f"monorepo-pr-{pr_number}-{entry.name}"
         logger.debug(f"Looking up PR in {repo} with branch {branch}")
         pr = client.get_pr_by_head_branch(repo, branch)
         if not pr:
