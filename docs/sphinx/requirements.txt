@@ -91,7 +91,7 @@ jinja2==3.1.4
     # via
     #   myst-parser
     #   sphinx
-joblib==1.4.2
+joblib==1.5.0
     # via -r requirements.in
 jsonschema==4.23.0
     # via nbformat
