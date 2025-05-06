@@ -35,13 +35,16 @@ endif()
 if(HIPBLASLT_DEVICE_KEEP_TMP)
     set(TENSILE_BUILD_OPTS ${TENSILE_BUILD_OPTS} "--keep-build-tmp")
 endif()
+if(NOT HIPBLASLT_DEVICE_LIBLOGIC_PATH)
+    set(HIPBLASLT_DEVICE_LIBLOGIC_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../library")
+endif()
 
 set(output_dir "${hipblaslt_BINARY_DIR}/Tensile")
 set(output_stamp "${CMAKE_CURRENT_BINARY_DIR}/Tensile.stamp")
 set(TENSILE_CREATE_LIBRARY_COMMAND
     ${HIPBLASLT_PYTHON_COMMAND} -m Tensile.TensileCreateLibrary
     ${TENSILE_BUILD_OPTS}
-    "${CMAKE_CURRENT_SOURCE_DIR}/../../library"
+    ${HIPBLASLT_DEVICE_LIBLOGIC_PATH}
     "${output_dir}"
     HIP
 )
