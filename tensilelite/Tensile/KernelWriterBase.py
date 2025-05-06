@@ -55,17 +55,17 @@ class KernelWriterBase(ABC):
 
 
   @abstractmethod
-  def getKernelName(self) -> str:
+  def getKernelName(self):
     pass
 
 
   @abstractmethod
-  def getHeaderFileString(self) -> str:
+  def getHeaderFileString(self):
     pass
 
 
   @abstractmethod
-  def getSourceFileString(self) -> str:
+  def getSourceFileString(self):
     pass
 
 
