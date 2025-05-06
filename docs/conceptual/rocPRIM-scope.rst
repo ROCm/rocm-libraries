@@ -6,7 +6,7 @@
 rocPRIM operation scope
 ********************************************************************
 
-The scope of a rocPRIM operation determines the parts of the GPU cooperate to compute the result. 
+The scope of a rocPRIM operation determines the parts of the GPU that will cooperate to compute the result. 
 
 The scope has a direct influence on how the data will be subdivided and processed by the computing units (CUs) and vector arithmetic logic units (VALUs). 
 

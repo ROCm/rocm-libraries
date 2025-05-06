@@ -12,7 +12,7 @@ The elements of the sequence can be of any type and belong to any class. Templat
 
 The :doc:`scope <./rocPRIM-scope>` of an operation determines whether an operation is running at the thread, warp, block, or grid level. 
 
-There are different types of operations. The following tables provide a summary of the different types of operations and what they do.
+The following tables provide a summary of the different types of operations and what they do.
 
 
 
@@ -21,7 +21,7 @@ There are different types of operations. The following tables provide a summary 
 +========================+===========================+===============================================+
 | Basic                  |Transform                  |Transform operations are device-level          |
 |                        |                           |operations that apply a function to each       |
-|                        |                           |element in the sequence. It's equivalent to    |
+|                        |                           |element in the sequence. They're equivalent to |
 |                        |                           |the ``map`` functional operation.              |
 |                        +---------------------------+-----------------------------------------------+
 |                        |Select                     |Select operations are device-level operations  |
@@ -51,12 +51,12 @@ There are different types of operations. The following tables provide a summary 
 |                        |                           |device-level and block-level operations that   |
 |                        |                           |compute the difference between either the      |
 |                        |                           |current element and the next one in the        |
-|                        |                           |or between the current element and the previous|
-|                        |                           |one in the sequence.                           |
+|                        |                           |sequence, or between the current element and   |
+|                        |                           |the previous one in the sequence.              |
 |                        +---------------------------+-----------------------------------------------+
 |                        |Discontinuity              |Discontinuity operations are block-level       |
-|                        |                           |that find items in an ordered sequence that    |
-|                        |                           |are discontinuous and don't follow the order   |
+|                        |                           |operations that find items in a                |
+|                        |                           |sequence that don't follow the sequence order. |
 +------------------------+---------------------------+-----------------------------------------------+
 |Reordering              |Sort                       |Sort operations are block-level and warp-level |
 |                        |                           |operations that reorder a sequence based on    |
@@ -67,9 +67,8 @@ There are different types of operations. The following tables provide a summary 
 |                        |                           |including a given index.                       |
 |                        +---------------------------+-----------------------------------------------+
 |                        |Nth element                |Nth element is a device-level operation that   |
-|                        |                           |inserts in its sorted position in the sequence |
-|                        |                           |after items that are less than it and before   |
-|                        |                           |items that are greater than it.                |
+|                        |                           |inserts a value in its sorted position in the  |
+|                        |                           |sequence.                                      |
 |                        +---------------------------+-----------------------------------------------+
 |                        |Exchange                   |The exchange operations are block-level and    |
 |                        |                           |warp-level operations that transpose stripe    |
@@ -80,47 +79,63 @@ There are different types of operations. The following tables provide a summary 
 |                        |                           |warp-level operations that move items between  |
 |                        |                           |warps or threads in order to share memory.     |
 +------------------------+---------------------------+-----------------------------------------------+
-|Partitioning            |Partition                  |Partition operations separate the sequence     |
+|Partitioning            |Partition                  |Partition operations are device-level          |
+|                        |                           |operations that separate the sequence          |
 |                        |                           |based on a selection predicate. The order of   |
 |                        |                           |the items in the sequence that return ``true`` |
 |                        |                           |is retained.                                   |
-|------------------------+---------------------------+-----------------------------------------------+
-|Merging                 |Merge                      |Merges two ordered sequence into one while     |
++------------------------+---------------------------+-----------------------------------------------+
+|Merging                 |Merge                      |Merge operations are device-level operations   |
+|                        |                           |that merge two ordered sequence into one while |
 |                        |                           |preserving the order.                          |
 +------------------------+---------------------------+-----------------------------------------------+
-|Data movement           |Store                      |Store provides methods for storing either      |
-|                        |                           |block or stripe arrangement of items in        |
-|                        |                           |contiguous memory.                             |
+|Data movement           |Store                      |Store operations are block, warp, and thread   |
+|                        |                           |level operations that store items in block or  |
+|                        |                           |stripe arrangements in contiguous memory.      |
 |                        +---------------------------+-----------------------------------------------+
-|                        |Load                       |Load provides methods for loading data stored  |
+|                        |Load                       |Load operations are block, warp, and thread    |
+|                        |                           |level operations that load data stored         |
 |                        |                           |in contiguous memory into a block arrangement. |
 |                        +---------------------------+-----------------------------------------------+
-|                        |memcpy                     |Runs multiple                                  |
-|                        |                           |device-to-device memory copy operations as a   |
-|                        |                           |single batched operation.                      |
+|                        |Memcpy                     |Memcopy operations are device-level operations |
+|                        |                           |that run multiple device-to-device memory copy |
+|                        |                           |operations as single batch operations.         |
 +------------------------+---------------------------+-----------------------------------------------+
-|Search                  |Find first of              |Searches the sequence for the first occurrence |
-|                        |                           |of any of the items in a range of items.       |
+|Search                  |Find first of              |Find first of is a device-level operation that |
+|                        |                           |searches the sequence for the first occurrence |
+|                        |                           |of any of the items in a given range of items. |
 |                        +---------------------------+-----------------------------------------------+
-|                        |Adjacent find              |Searches the sequence for the first occurrence |
-|                        |                           |of two consecutive equal items   .             |
-|                        +---------------------------+-----------------------------------------------+
-|                        |Search                     |Searches the sequence for the first occurrence |
-|                        |                           |of a series of items.                          |
-|                        +---------------------------+-----------------------------------------------+
-|                        |Search N                   |Searches the sequence for the first occurrence |
-|                        |                           |of a series of N items that are all equal to   |
-|                        |                           |the a given value.                             |
-|                        +---------------------------+-----------------------------------------------+
-|                        |Find end                   |Finds the last occurrence of a series of items |
+|                        |Find end                   |Find end is a device-level operation that      |
+|                        |                           |finds the last occurrence of a series of items |
 |                        |                           |in the sequence.                               |
 |                        +---------------------------+-----------------------------------------------+
-|                        |Binary search              |Does a binary search on a sorted range of      |
+|                        |Adjacent find              |Adjacent find is a device-level operation that |
+|                        |                           |searches for the first occurrence of two       |
+|                        |                           |consecutive equal items.                       |
+|                        +---------------------------+-----------------------------------------------+
+|                        |Search                     |Search is a device-level operation that        |
+|                        |                           |searches the sequence for the first occurrence |
+|                        |                           |of a series of items.                          |
+|                        +---------------------------+-----------------------------------------------+
+|                        |Search N                   |Search N is a device-level operation that      |
+|                        |                           |searches the sequence for the first occurrence |
+|                        |                           |of a series of N items that are all equal to   |
+|                        |                           |a given value.                                 |
+|                        +---------------------------+-----------------------------------------------+
+|                        |Binary search              |Binary search is a device-level operation that |
+|                        |                           |does a binary search on a sorted range of      |
 |                        |                           |inputs.                                        |
 +------------------------+---------------------------+-----------------------------------------------+
-|Miscellaneous           |Run length encode          |Does a device-wide encoding of runs of         |
-|                        |                           |consecutive equal values.                      |
+|Miscellaneous           |Run length encode          |Run length encode operations are device-level  |
+|                        |                           |operations that do device-wide encodings of    |
+|                        |                           |runs of consecutive equal values.              |
 |                        +---------------------------+-----------------------------------------------+
-|                        |Configuring the kernel     |Sets the grid and block dimensions, and the    |
-|                        |                           |algorithms to use for store and load.          |
+|                        |Run length decode          |Run length decode operations are block-level   |
+|                        |                           |operations that decode run length encoded      |
+|                        |                           |arrays of items.                               | 
+|                        +---------------------------+-----------------------------------------------+
+|                        |Kernel config              |Kernel config operations are device-level      |
+|                        |                           |operations that set the grid and block         |
+|                        |                           |dimensions as well as the algorithms to use for|
+|                        |                           |the store and load operations.                 |
 +------------------------+---------------------------+-----------------------------------------------+

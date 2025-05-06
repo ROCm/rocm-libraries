@@ -38,6 +38,7 @@ To build examples, tests, or benchmarks, use the appropriate CMake directive:
 * ``BUILD_TEST``: Set to ``ON`` to build the CTests. ``OFF`` by default.
 * ``BUILD_EXAMPLE``: Set to ``ON`` to build examples. ``OFF`` by default.
 * ``BUILD_BENCHMARK``: Set to ``ON`` to build benchmarking tests. ``OFF`` by default.
+* ``BUILD_DOCS``: Set to ``ON`` to build a local copy of the rocPRIM documentation. ``OFF`` by default.
 * ``AMDGPU_TARGETS``: Set this to a specific architecture target or set of architecture targets. When not set, examples, tests, and benchmarks are built for gfx803, gfx900, gfx906, and gfx908 architectures. The list of targets must be separated by a semicolon (``;``).
 * ``ONLY_INSTALL``: Set to ``ON`` to ignore any example, test, or benchmark build instructions. ``OFF`` by default.
 
