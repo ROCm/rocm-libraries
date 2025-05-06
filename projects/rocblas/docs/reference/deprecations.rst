@@ -23,11 +23,6 @@ rocblas_Xgemm_kernel_name removed
 
 ``rocblas_Xgemm_kernel_name`` API functions were removed in 5.0.
 
-
-rocblas_is_user_managing_device_memory and rocblas_set_device_memory_size removed
-''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
-``rocblas_is_user_managing_device_memory`` and ``rocblas_set_device_memory_size`` API functions are removed in 5.0
-
 Announced in rocBLAS 4.3
 ==========================
 
