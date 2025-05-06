@@ -146,14 +146,14 @@ struct rocsparse_host
  *    level 1 SPARSE
  * ===========================================================================
  */
-template <typename I, typename T>
+template <typename T, typename I, typename X, typename Y>
 void host_axpby(I                    size,
                 I                    nnz,
                 T                    alpha,
-                const T*             x_val,
+                const X*             x_val,
                 const I*             x_ind,
                 T                    beta,
-                T*                   y,
+                Y*                   y,
                 rocsparse_index_base base);
 
 template <typename I, typename X, typename Y, typename T>

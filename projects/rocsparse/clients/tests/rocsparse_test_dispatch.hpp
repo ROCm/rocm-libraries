@@ -121,6 +121,16 @@ struct rocsparse_test_dispatch<rocsparse_test_dispatch_enum::ixyt>
 };
 
 template <>
+struct rocsparse_test_dispatch<rocsparse_test_dispatch_enum::ixyt_axpby>
+{
+    template <template <typename...> class TEST>
+    static auto dispatch(const Arguments& arg)
+    {
+        return rocsparse_ixyt_axpby_dispatch<TEST>(arg);
+    }
+};
+
+template <>
 struct rocsparse_test_dispatch<rocsparse_test_dispatch_enum::iaxyt>
 {
     template <template <typename...> class TEST>

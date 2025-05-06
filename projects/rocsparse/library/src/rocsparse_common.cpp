@@ -290,11 +290,11 @@ namespace rocsparse
         rocsparse::valset_2d_device<BLOCKSIZE>(m, n, ld, value, array, order);
     }
 
-    template <uint32_t BLOCKSIZE, typename I, typename T>
+    template <uint32_t BLOCKSIZE, typename I, typename A, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void scale_kernel(I length,
                       ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, scalar),
-                      T* __restrict__ array,
+                      A* __restrict__ array,
                       bool is_host_mode)
     {
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(scalar);
@@ -441,16 +441,16 @@ rocsparse_status rocsparse::valset_2d(
     return rocsparse_status_success;
 }
 
-template <typename I, typename T>
+template <typename I, typename A, typename T>
 rocsparse_status
-    rocsparse::scale_array(rocsparse_handle handle, I length, const T* scalar_device_host, T* array)
+    rocsparse::scale_array(rocsparse_handle handle, I length, const T* scalar_device_host, A* array)
 {
     if(length > 0)
     {
         const bool on_host = handle->pointer_mode == rocsparse_pointer_mode_host;
         if(on_host && *scalar_device_host == 0)
         {
-            RETURN_IF_HIP_ERROR(hipMemsetAsync(array, 0, sizeof(T) * length, handle->stream));
+            RETURN_IF_HIP_ERROR(hipMemsetAsync(array, 0, sizeof(A) * length, handle->stream));
         }
         else if((on_host && *scalar_device_host != 1) || on_host == false)
         {
@@ -656,21 +656,23 @@ INSTANTIATE(int64_t, rocsparse_float_complex);
 INSTANTIATE(int64_t, rocsparse_double_complex);
 #undef INSTANTIATE
 
-#define INSTANTIATE(ITYPE, TTYPE)                     \
+#define INSTANTIATE(ITYPE, ATYPE, TTYPE)              \
     template rocsparse_status rocsparse::scale_array( \
-        rocsparse_handle handle, ITYPE length, const TTYPE* scalar_device_host, TTYPE* array);
+        rocsparse_handle handle, ITYPE length, const TTYPE* scalar_device_host, ATYPE* array);
 
-INSTANTIATE(int32_t, int32_t);
-INSTANTIATE(int32_t, float);
-INSTANTIATE(int32_t, double);
-INSTANTIATE(int32_t, rocsparse_float_complex);
-INSTANTIATE(int32_t, rocsparse_double_complex);
+INSTANTIATE(int32_t, _Float16, float);
+INSTANTIATE(int32_t, int32_t, int32_t);
+INSTANTIATE(int32_t, float, float);
+INSTANTIATE(int32_t, double, double);
+INSTANTIATE(int32_t, rocsparse_float_complex, rocsparse_float_complex);
+INSTANTIATE(int32_t, rocsparse_double_complex, rocsparse_double_complex);
 
-INSTANTIATE(int64_t, int32_t);
-INSTANTIATE(int64_t, float);
-INSTANTIATE(int64_t, double);
-INSTANTIATE(int64_t, rocsparse_float_complex);
-INSTANTIATE(int64_t, rocsparse_double_complex);
+INSTANTIATE(int64_t, _Float16, float);
+INSTANTIATE(int64_t, int32_t, int32_t);
+INSTANTIATE(int64_t, float, float);
+INSTANTIATE(int64_t, double, double);
+INSTANTIATE(int64_t, rocsparse_float_complex, rocsparse_float_complex);
+INSTANTIATE(int64_t, rocsparse_double_complex, rocsparse_double_complex);
 #undef INSTANTIATE
 
 #define INSTANTIATE(ITYPE, TTYPE)                                                            \

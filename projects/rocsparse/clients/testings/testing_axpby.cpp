@@ -23,7 +23,7 @@
 
 #include "testing.hpp"
 
-template <typename I, typename T>
+template <typename I, typename X, typename Y, typename T>
 void testing_axpby_bad_arg(const Arguments& arg)
 {
     rocsparse_local_handle      local_handle;
@@ -35,7 +35,7 @@ void testing_axpby_bad_arg(const Arguments& arg)
     bad_arg_analysis(rocsparse_axpby, handle, alpha, x, beta, y);
 }
 
-template <typename I, typename T>
+template <typename I, typename X, typename Y, typename T>
 void testing_axpby(const Arguments& arg)
 {
     I size = arg.M;
@@ -48,46 +48,47 @@ void testing_axpby(const Arguments& arg)
 
     // Index and data type
     rocsparse_indextype itype = get_indextype<I>();
-    rocsparse_datatype  ttype = get_datatype<T>();
+    rocsparse_datatype  xtype = get_datatype<X>();
+    rocsparse_datatype  ytype = get_datatype<Y>();
 
     // Create rocsparse handle
     rocsparse_local_handle handle(arg);
 
     // Allocate host memory for matrix
     host_vector<I> hx_ind(nnz);
-    host_vector<T> hx_val(nnz);
-    host_vector<T> hy_1(size);
-    host_vector<T> hy_2(size);
-    host_vector<T> hy_gold(size);
+    host_vector<X> hx_val(nnz);
+    host_vector<Y> hy_1(size);
+    host_vector<Y> hy_2(size);
+    host_vector<Y> hy_gold(size);
 
     // Initialize data on CPU
     rocsparse_seedrand();
     rocsparse_init_index(hx_ind, nnz, base, size + base);
-    rocsparse_init<T>(hx_val, 1, nnz, 1);
-    rocsparse_init<T>(hy_1, 1, size, 1);
+    rocsparse_init<X>(hx_val, 1, nnz, 1);
+    rocsparse_init<Y>(hy_1, 1, size, 1);
     hy_2    = hy_1;
     hy_gold = hy_1;
 
     // Allocate device memory
     device_vector<I> dx_ind(nnz);
-    device_vector<T> dx_val(nnz);
-    device_vector<T> dy_1(size);
-    device_vector<T> dy_2(size);
+    device_vector<X> dx_val(nnz);
+    device_vector<Y> dy_1(size);
+    device_vector<Y> dy_2(size);
     device_vector<T> d_alpha(1);
     device_vector<T> d_beta(1);
 
     // Copy data from CPU to device
     CHECK_HIP_ERROR(hipMemcpy(dx_ind, hx_ind, sizeof(I) * nnz, hipMemcpyHostToDevice));
-    CHECK_HIP_ERROR(hipMemcpy(dx_val, hx_val, sizeof(T) * nnz, hipMemcpyHostToDevice));
-    CHECK_HIP_ERROR(hipMemcpy(dy_1, hy_1, sizeof(T) * size, hipMemcpyHostToDevice));
-    CHECK_HIP_ERROR(hipMemcpy(dy_2, dy_1, sizeof(T) * size, hipMemcpyDeviceToDevice));
+    CHECK_HIP_ERROR(hipMemcpy(dx_val, hx_val, sizeof(X) * nnz, hipMemcpyHostToDevice));
+    CHECK_HIP_ERROR(hipMemcpy(dy_1, hy_1, sizeof(Y) * size, hipMemcpyHostToDevice));
+    CHECK_HIP_ERROR(hipMemcpy(dy_2, dy_1, sizeof(Y) * size, hipMemcpyDeviceToDevice));
     CHECK_HIP_ERROR(hipMemcpy(d_alpha, &h_alpha, sizeof(T), hipMemcpyHostToDevice));
     CHECK_HIP_ERROR(hipMemcpy(d_beta, &h_beta, sizeof(T), hipMemcpyHostToDevice));
 
     // Create descriptors
-    rocsparse_local_spvec x(size, nnz, dx_ind, dx_val, itype, base, ttype);
-    rocsparse_local_dnvec y1(size, dy_1, ttype);
-    rocsparse_local_dnvec y2(size, dy_2, ttype);
+    rocsparse_local_spvec x(size, nnz, dx_ind, dx_val, itype, base, xtype);
+    rocsparse_local_dnvec y1(size, dy_1, ytype);
+    rocsparse_local_dnvec y2(size, dy_2, ytype);
 
     if(arg.unit_check)
     {
@@ -100,12 +101,13 @@ void testing_axpby(const Arguments& arg)
         CHECK_ROCSPARSE_ERROR(testing::rocsparse_axpby(handle, d_alpha, x, d_beta, y2));
 
         // Copy output to host
-        CHECK_HIP_ERROR(hipMemcpy(hy_1, dy_1, sizeof(T) * size, hipMemcpyDeviceToHost));
-        CHECK_HIP_ERROR(hipMemcpy(hy_2, dy_2, sizeof(T) * size, hipMemcpyDeviceToHost));
+        CHECK_HIP_ERROR(hipMemcpy(hy_1, dy_1, sizeof(Y) * size, hipMemcpyDeviceToHost));
+        CHECK_HIP_ERROR(hipMemcpy(hy_2, dy_2, sizeof(Y) * size, hipMemcpyDeviceToHost));
 
         // CPU axpby
-        host_axpby<I, T>(size, nnz, h_alpha, hx_val, hx_ind, h_beta, hy_gold, base);
+        host_axpby<T, I, X, Y>(size, nnz, h_alpha, hx_val, hx_ind, h_beta, hy_gold, base);
 
+        hy_gold.unit_check(hy_1);
         hy_gold.unit_check(hy_2);
 
         if(ROCSPARSE_REPRODUCIBILITY)
@@ -117,7 +119,6 @@ void testing_axpby(const Arguments& arg)
 
     if(arg.timing)
     {
-
         CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
 
         const double gpu_time_used = rocsparse_clients::run_benchmark(
@@ -146,16 +147,18 @@ void testing_axpby(const Arguments& arg)
     }
 }
 
-#define INSTANTIATE(ITYPE, TTYPE)                                            \
-    template void testing_axpby_bad_arg<ITYPE, TTYPE>(const Arguments& arg); \
-    template void testing_axpby<ITYPE, TTYPE>(const Arguments& arg)
+#define INSTANTIATE(ITYPE, XTYPE, YTYPE, TTYPE)                                            \
+    template void testing_axpby_bad_arg<ITYPE, XTYPE, YTYPE, TTYPE>(const Arguments& arg); \
+    template void testing_axpby<ITYPE, XTYPE, YTYPE, TTYPE>(const Arguments& arg)
 
-INSTANTIATE(int32_t, float);
-INSTANTIATE(int32_t, double);
-INSTANTIATE(int32_t, rocsparse_float_complex);
-INSTANTIATE(int32_t, rocsparse_double_complex);
-INSTANTIATE(int64_t, float);
-INSTANTIATE(int64_t, double);
-INSTANTIATE(int64_t, rocsparse_float_complex);
-INSTANTIATE(int64_t, rocsparse_double_complex);
+INSTANTIATE(int32_t, _Float16, _Float16, float);
+INSTANTIATE(int32_t, float, float, float);
+INSTANTIATE(int32_t, double, double, double);
+INSTANTIATE(int32_t, rocsparse_float_complex, rocsparse_float_complex, rocsparse_float_complex);
+INSTANTIATE(int32_t, rocsparse_double_complex, rocsparse_double_complex, rocsparse_double_complex);
+INSTANTIATE(int64_t, _Float16, _Float16, float);
+INSTANTIATE(int64_t, float, float, float);
+INSTANTIATE(int64_t, double, double, double);
+INSTANTIATE(int64_t, rocsparse_float_complex, rocsparse_float_complex, rocsparse_float_complex);
+INSTANTIATE(int64_t, rocsparse_double_complex, rocsparse_double_complex, rocsparse_double_complex);
 void testing_axpby_extra(const Arguments& arg) {}

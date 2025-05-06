@@ -224,6 +224,13 @@ if (NOT WIN32)
   endif()
 endif()
 
+if (NOT WIN32)
+  if (BUILD_WITH_ROCTX)
+    target_link_libraries(rocsparse-bench PRIVATE -lroctx64)
+    target_compile_definitions( rocsparse-bench PRIVATE ROCSPARSE_CLIENTS_WITH_ROCTX )
+  endif()
+endif()
+
 # Set benchmark output directory
 set_target_properties(rocsparse-bench PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging")
 

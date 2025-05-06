@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2021-2022 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -25,6 +25,8 @@
 
 #include "rocsparse_importer.hpp"
 
+#include "rocsparse_clients_routine_trace.hpp"
+
 template <typename I,
           typename J,
           typename T,
@@ -47,6 +49,8 @@ rocsparse_status rocsparse_import_sparse_gebsr(rocsparse_importer<IMPORTER>& imp
                                                J&                            col_block_dim,
                                                rocsparse_index_base          base)
 {
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
     rocsparse_direction  import_dir;
     rocsparse_index_base import_base;
     rocsparse_status     status = importer.import_sparse_gebsx(
@@ -105,6 +109,8 @@ rocsparse_status rocsparse_import_sparse_csr(rocsparse_importer<IMPORTER>& impor
                                              I&                            nnz,
                                              rocsparse_index_base          base)
 {
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
     rocsparse_direction  dir;
     rocsparse_index_base import_base;
     rocsparse_status     status = importer.import_sparse_csx(&dir, &M, &N, &nnz, &import_base);
@@ -161,6 +167,7 @@ rocsparse_status rocsparse_import_sparse_coo(rocsparse_importer<IMPORTER>& impor
                                              int64_t&                      nnz,
                                              rocsparse_index_base          base)
 {
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE
 
     rocsparse_index_base import_base;
     rocsparse_status     status = importer.import_sparse_coo(&M, &N, &nnz, &import_base);

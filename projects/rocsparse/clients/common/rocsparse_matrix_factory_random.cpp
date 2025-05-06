@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -27,6 +27,8 @@
 
 #include "rocsparse_matrix_factory_random.hpp"
 
+#include "rocsparse_clients_routine_trace.hpp"
+
 template <typename T, typename I, typename J>
 rocsparse_matrix_factory_random<T, I, J>::rocsparse_matrix_factory_random(
     bool fullrank, bool to_int, rocsparse_matrix_init_kind matrix_init_kind)
@@ -46,6 +48,8 @@ void rocsparse_matrix_factory_random<T, I, J>::init_csr(std::vector<I>&        c
                                                         rocsparse_fill_mode    uplo,
                                                         rocsparse_storage_mode storage)
 {
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
     switch(matrix_type)
     {
     case rocsparse_matrix_type_symmetric:
@@ -126,6 +130,8 @@ void rocsparse_matrix_factory_random<T, I, J>::init_gebsr(std::vector<I>&       
                                                           rocsparse_fill_mode    uplo,
                                                           rocsparse_storage_mode storage)
 {
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
     rocsparse_init_gebsr_random(bsr_row_ptr,
                                 bsr_col_ind,
                                 bsr_val,
@@ -166,6 +172,8 @@ void rocsparse_matrix_factory_random<T, I, J>::init_coo(std::vector<I>&        c
                                                         rocsparse_fill_mode    uplo,
                                                         rocsparse_storage_mode storage)
 {
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
     switch(matrix_type)
     {
     case rocsparse_matrix_type_symmetric:

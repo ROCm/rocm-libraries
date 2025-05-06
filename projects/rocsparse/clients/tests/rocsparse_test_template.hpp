@@ -247,6 +247,7 @@ namespace
                     break;
                 }
                 case rocsparse_test_dispatch_enum::ixyt:
+                case rocsparse_test_dispatch_enum::ixyt_axpby:
                 {
                     s << rocsparse_indextype2string(arg.index_type_I) << '_'
                       << rocsparse_datatype2string(arg.x_type) << '_'

@@ -315,6 +315,72 @@ auto rocsparse_ixyt_dispatch(const Arguments& arg)
 }
 
 template <template <typename...> class TEST>
+auto rocsparse_ixyt_axpby_dispatch(const Arguments& arg)
+{
+    const auto I = arg.index_type_I;
+
+    const auto X = arg.x_type;
+    const auto Y = arg.y_type;
+
+    const auto T = arg.compute_type;
+
+    const bool f32r_case = (X == rocsparse_datatype_f32_r && X == Y && X == T);
+    const bool f64r_case = (X == rocsparse_datatype_f64_r && X == Y && X == T);
+    const bool f32c_case = (X == rocsparse_datatype_f32_c && X == Y && X == T);
+    const bool f64c_case = (X == rocsparse_datatype_f64_c && X == Y && X == T);
+
+    const bool f16r_f16r_f32r_case = (X == rocsparse_datatype_f16_r && Y == rocsparse_datatype_f16_r
+                                      && T == rocsparse_datatype_f32_r);
+
+#define DISPATCH_TEST(ITYPE)                                  \
+    if(f32r_case)                                             \
+    {                                                         \
+        return TEST<ITYPE, float, float, float>{}(arg);       \
+    }                                                         \
+    else if(f64r_case)                                        \
+    {                                                         \
+        return TEST<ITYPE, double, double, double>{}(arg);    \
+    }                                                         \
+    else if(f32c_case)                                        \
+    {                                                         \
+        return TEST<ITYPE,                                    \
+                    rocsparse_float_complex,                  \
+                    rocsparse_float_complex,                  \
+                    rocsparse_float_complex>{}(arg);          \
+    }                                                         \
+    else if(f64c_case)                                        \
+    {                                                         \
+        return TEST<ITYPE,                                    \
+                    rocsparse_double_complex,                 \
+                    rocsparse_double_complex,                 \
+                    rocsparse_double_complex>{}(arg);         \
+    }                                                         \
+    else if(f16r_f16r_f32r_case)                              \
+    {                                                         \
+        return TEST<ITYPE, _Float16, _Float16, float>{}(arg); \
+    }
+
+    switch(I)
+    {
+    case rocsparse_indextype_u16:
+    {
+        return TEST<void, void, void, void>{}(arg);
+    }
+    case rocsparse_indextype_i32:
+    {
+        DISPATCH_TEST(int32_t);
+    }
+    case rocsparse_indextype_i64:
+    {
+        DISPATCH_TEST(int64_t);
+    }
+    }
+#undef DISPATCH_TEST
+
+    return TEST<void, void, void, void>{}(arg);
+}
+
+template <template <typename...> class TEST>
 auto rocsparse_iaxyt_dispatch(const Arguments& arg)
 {
     const auto I = arg.index_type_I;

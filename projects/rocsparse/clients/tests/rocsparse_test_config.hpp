@@ -124,6 +124,12 @@ struct rocsparse_test_config_ixyt
 {
 };
 
+struct rocsparse_test_config_ixyt_axpby
+    : rocsparse_test_config_template<rocsparse_test_dispatch_enum::ixyt_axpby,
+                                     rocsparse_test_numeric_types_enum::all>
+{
+};
+
 struct rocsparse_test_config_iaxyt
     : rocsparse_test_config_template<rocsparse_test_dispatch_enum::iaxyt,
                                      rocsparse_test_numeric_types_enum::all>

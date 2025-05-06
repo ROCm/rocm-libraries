@@ -36,6 +36,7 @@ struct rocsparse_test_dispatch_enum
         ijt_sparse_to_dense,
         ijt_dense_to_sparse,
         ixyt,
+        ixyt_axpby,
         iaxyt,
         ijaxyt,
         iabct,
