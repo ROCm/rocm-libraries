@@ -2901,6 +2901,7 @@ namespace GEMMDriverTest
     TEST_P(GEMMF8F6F4TestGPU, GPU_ScaledBasicGEMMF8F6F4_Direct2LDS_Prefetch2)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_scale_f8f6f4);
+        REQUIRE_ARCH_CAP(GPUCapability::HasBlockScaling32);
 
         auto [typeAB, MFMAK, transOp] = std::get<1>(GetParam());
 
@@ -2918,6 +2919,9 @@ namespace GEMMDriverTest
         problem.direct2LDSA = true;
         problem.direct2LDSB = true;
         problem.storeLDSD   = false;
+
+        problem.scaleBlockSize
+            = m_context->targetArchitecture().GetCapability(GPUCapability::DefaultScaleBlockSize);
 
         problem.prefetch         = true;
         problem.prefetchInFlight = 2;

@@ -762,6 +762,9 @@ namespace rocRoller
                               ldsPrefetchU,
                               globalStores[0].user);
 
+                auto ldsTileTag = graph.mapper.get<LDS>(globalStores[0].ldsChain);
+                graph.mapper.connect<LDS>(barrier, ldsTileTag, 0);
+
                 for(int i = 1; i < globalStores.size(); i++)
                 {
                     trackStores(graph, globalStores[i].ldsChain);
