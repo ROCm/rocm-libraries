@@ -25,7 +25,7 @@ Example Usage:
 import argparse
 import logging
 from typing import List, Optional
-from github_checks_api_client import GitHubChecksAPIClient
+from github_api_client import GitHubAPIClient
 from repo_config_model import RepoEntry
 from config_loader import load_repo_config
 
@@ -42,17 +42,22 @@ def parse_arguments(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser.add_argument("--debug", action="store_true", help="If set, enables detailed debug logging.")
     return parser.parse_args(argv)
 
-def reflect_checks(client: GitHubChecksAPIClient, monorepo: str, pr_number: str, config: List[RepoEntry], dry_run: bool) -> None:
+def reflect_checks(client: GitHubAPIClient, monorepo: str, pr_number: int, config: List[RepoEntry], dry_run: bool) -> None:
     """Reflect checks from fanned-out PRs to the monorepo PR."""
     for entry in config:
-        subrepo = entry.url
-        logger.debug(f"Fetching checks for {subrepo} PR {pr_number}")
-        checks = client.get_pr_checks(subrepo, pr_number)
+        repo = entry.url
+        branch = f"monorepo-pr-{pr_number}-{entry.folder}"
+        logger.debug(f"Looking up PR in {repo} with branch {branch}")
+        pr = client.get_pr_by_head_branch(repo, branch)
+        if not pr:
+            logger.info(f"No open PR found in {repo} for branch {branch}")
+            continue
+        checks = client.get_pr_checks(repo, pr["number"])
         for check in checks:
-            check_name = f"{entry['name']}: {check['name']}"
-            conclusion = check['conclusion'] or "neutral"
-            status = check['status']
-            summary = check.get('output', {}).get('summary', "")
+            check_name = f"{entry.name}: {check['name']}"
+            status = check["status"]
+            conclusion = check["conclusion"] or "neutral"
+            summary = check.get("output", {}).get("summary", "")
             logger.info(f"[{check_name}] Status: {status} | Conclusion: {conclusion}")
             if not dry_run:
                 client.upsert_check_run(monorepo, check_name, pr_number, status, conclusion, summary)
@@ -63,9 +68,9 @@ def main(argv: Optional[List[str]] = None) -> None:
     if args.debug:
         logger.setLevel(logging.DEBUG)
 
-    client = GitHubChecksAPIClient()
+    client = GitHubAPIClient()
     config = load_repo_config(args.config)
-    reflect_checks(client, args.repo, args.pr, config, args.dry_run)
+    reflect_checks(client, args.repo, int(args.pr), config, args.dry_run)
 
 if __name__ == "__main__":
     main()
