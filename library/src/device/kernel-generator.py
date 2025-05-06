@@ -83,9 +83,9 @@ def unique(kernels):
     r, s = list(), set()
     for kernel in kernels:
         if isinstance(kernel.length, list):
-            key = tuple(kernel.length) + (kernel.scheme, )
+            key = tuple(kernel.length) + (kernel.scheme, kernel.lds_size_bytes)
         else:
-            key = (kernel.length, kernel.scheme)
+            key = (kernel.length, kernel.scheme, kernel.lds_size_bytes)
         if key not in s:
             s.add(key)
             r.append(kernel)
@@ -152,7 +152,7 @@ def generate_cpu_function_pool_main(num_files):
             type='void',
             name=f'function_pool_init_{i}',
             value=
-            'std::unordered_map<FMKey, FMKey, SimpleHash>& def_key_pool, std::unordered_map<FMKey, FFTKernel, SimpleHash>& function_map'
+            'std::unordered_multimap<FMKey, FMKey, SimpleHash>& def_key_pool, std::unordered_multimap<FMKey, FFTKernel, SimpleHash>& function_map'
         )
 
     call_list = StatementList()
@@ -198,14 +198,15 @@ def generate_cpu_function_pool_pieces(functions, num_files):
                                    scheme, transpose or 'NONE',
                                    'kernel.get_kernel_config()')).inline()
         piece_contents[curr_file] += function_map.assert_insert(
-            key, var_kernel, 'def_key_pool', 'function_map')
+            key, var_kernel, 'def_key_pool', 'function_map',
+            f.meta.lds_size_bytes)
         curr_file = (curr_file + 1) % num_files
 
     # Assemble contents of each file to return in a list
     pieces = [None] * num_files
     piece_args = ArgumentList(
-        'std::unordered_map<FMKey, FMKey, SimpleHash>& def_key_pool',
-        'std::unordered_map<FMKey, FFTKernel, SimpleHash>& function_map')
+        'std::unordered_multimap<FMKey, FMKey, SimpleHash>& def_key_pool',
+        'std::unordered_multimap<FMKey, FFTKernel, SimpleHash>& function_map')
     for i in range(num_files):
         pieces[i] = StatementList(
             Include('"../include/function_pool.h"'),
@@ -233,6 +234,9 @@ def kernel_name(ns):
         postfix = '_sbrc'
     elif ns.scheme == 'CS_KERNEL_STOCKHAM_BLOCK_CR':
         postfix = '_sbcr'
+
+    if hasattr(ns, 'lds_size_bytes'):
+        postfix += f'_lds{ns.lds_size_bytes}'
 
     return f'rocfft_len{length}{postfix}'
 
@@ -1078,6 +1082,7 @@ def generate_kernel_functions(kernels, precisions, launchers_json):
                                  threads_per_transform=tpt_list,
                                  transpose=sbrc_transpose_type,
                                  use_3steps_large_twd=use_3steps_large_twd,
+                                 lds_size_bytes=kernel.lds_size_bytes,
                              ))
 
                 cpu_functions.append(f)
@@ -1167,7 +1172,9 @@ def generate_kernels(kernels, precisions, stockham_gen):
             proc.stdin.write(' 1' if half_lds else ' 0')
             proc.stdin.write(' 1' if direct_to_from_reg else ' 0')
             proc.stdin.write(f' {k.scheme}')
-            proc.stdin.write(f' {kernel_name(k)}\n')
+            proc.stdin.write(f' {kernel_name(k)}')
+            proc.stdin.write(f' {k.lds_size_bytes}')
+            proc.stdin.write('\n')
 
             kernel_idx += 1
             proc.stdin.flush()
@@ -1226,6 +1233,11 @@ def cli():
     all_kernels = list_small_kernels() + list_large_kernels()
 
     kernels += all_kernels + kernels_2d
+
+    # set default lds size (64k) on kernels if not specified
+    for k in kernels:
+        if not hasattr(k, 'lds_size_bytes'):
+            k.lds_size_bytes = 65536
 
     kernels = unique(kernels)
 
