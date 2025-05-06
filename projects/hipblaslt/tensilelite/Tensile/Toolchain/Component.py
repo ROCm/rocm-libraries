@@ -33,7 +33,7 @@ from typing import List
 from Tensile.Common import SemanticVersion, print1
 from .Validators import ToolchainDefaults, validateToolchain
 
-def _invoke(args: List[str], desc: str="", working_dir=None):
+def _invoke(args: List[str], desc: str=""):
   """Invokes a command with the provided arguments in a subprocess.
   Args:
       args: A list of arguments to pass to the subprocess.
@@ -45,9 +45,10 @@ def _invoke(args: List[str], desc: str="", working_dir=None):
   """
   #print1(f"{desc}: {' '.join(args)}")
   try:
-      out = check_output(args, stderr=STDOUT, cwd=working_dir)
-  except:
+      out = check_output(args, stderr=STDOUT)
+  except CalledProcessError as err:
       raise RuntimeError(
+          f"Error with {desc}: {err.output}\n"
           f"Failed command: {' '.join(args)}"
       )
   return out
@@ -73,7 +74,6 @@ def _getVersion(executable: str, versionFlag: str, regex: str) -> str:
         if match:
             result = match.group(1)
             return SemanticVersion(*[int(c.split("-")[0]) for c in result.split(".")[:3]])
-        return None
         raise Exception(f"No version from {output} matches regex {regex}")
     except Exception as e:
         raise RuntimeError(f"Failed to get version when calling {args}: {e}")
@@ -87,10 +87,7 @@ def get_rocm_version() -> str:
     Return:
         ROCm version string
     """
-    try:
-        return _getVersion(ToolchainDefaults.HIP_CONFIG, "--version", r'(.+)')
-    except:
-        return None
+    return _getVersion(ToolchainDefaults.HIP_CONFIG, "--version", r'(.+)')
 
 
 class Component:
@@ -207,22 +204,18 @@ class Compiler(Component):
         Invokes the compiler on the provided arguments
     """
 
-    def __init__(self, compiler_path: Path, build_id_kind: str, cpu_threads: int, asan_build: bool=False, save_temps: bool=False):
+    def __init__(self, compiler_path: Path, build_id_kind: str, asan_build: bool=False, save_temps: bool=False):
         """Constructs and instance of a Compiler."""
         super(Compiler, self).__init__(compiler_path)
 
         self.default_args = [
             *split(environ.get("Tensile_CXX_COMPILER_LAUNCHER", "")),
              compiler_path,
-            "-shared",
-            "-fPIC",
-            "-fgpu-rdc",
-            "-Xoffload-linker",
-            f"--build-id={build_id_kind}",
             "-D__HIP_HCC_COMPAT_MODE__=1",
+            "--offload-device-only",
             "-x", "hip", "-O3",
+            "-Xoffload-linker", f"--build-id={build_id_kind}",
             "-std=c++17",
-            f"-parallel-jobs={cpu_threads}"
         ]
 
         if asan_build:
@@ -232,7 +225,8 @@ class Compiler(Component):
         if os_name == "nt":                                                    # should we use fPIIC on all arches?
             self.default_args.extend(["-fms-extensions", "-fms-compatibility", "-fPIC", "-Wno-deprecated-declarations"])
 
-    def __call__(self, src_paths: List[str], dest_path: str, include_path: str, gfxs: List[str]):
+
+    def __call__(self, include_path: str, target_list: List[str], srcPath: str, destPath: str):
         """Compiles a source file into an object file.
 
         Args:
@@ -243,12 +237,10 @@ class Compiler(Component):
         Raises:
             RuntimeError: If the compilation command fails.
         """
-
-        args = list(self.default_args)
-        args += [f"--offload-arch={gfx}" for gfx in gfxs]
-        args += ["-I", include_path]
-        args += src_paths
-        args +=["-o", dest_path]
+        archFlags = [f"--offload-arch={gfx}" for gfx in target_list]
+        args = [
+            *(self.default_args), "-I", include_path, *archFlags, srcPath, "-c", "-o", destPath
+        ]
         return _invoke(args, f"Compiling HIP source kernels into objects (.cpp -> .o)")
 
 
@@ -375,74 +367,36 @@ class Linker(Component):
         return _invoke(args, "Linking assembly object files into code object (*.o -> .co)")
 
 
-class RocObjLs(Component):
-    """
-    ROCm roc-obj-ls class used to list code objects.
+# class DeviceEnumerator(Component):
+#     """
+#     ROCm amdgpu-arch or rocm_agent_enumerator class used to inspect system for current architecture.
 
-    ...
+#     ...
 
-    Attributes
-    ----------
-    version : str
-        the version of the component
-    rocm_version : str
-        the ROCm version
-    Methods
-    -------
-    __call__(self, srcPaths: List[str], destPath: str):
-        Invokes roc-obj-ls on the provided arguments
-    """
+#     Attributes
+#     ----------
+#     version : str
+#         the version of the component
+#     rocm_version : str
+#         the ROCm version
+#     path : str
+#         path to component
 
-    def __init__(self, ls_path: Path):
-        """Constructs and instance of roc-obj-ls."""
-        # Use `-h` because roc-obj-ls doesn't have a version flag
-        super(RocObjLs, self).__init__(ls_path, "-h")
+#     Methods
+#     -------
+#     __call__(self)
+#         Invokes component.
+#     """
+#     def __init__(self, component_path: Path):
+#         """Constructs instance of SystemInterogator.
 
-    def __call__(self, sharedObjFile):
-        """Lists the code objects in shared object.
+#         Args:
+#             component_path: The path to amdgpu-arch or rocm_agent_enumeraor.
+#         """
+#         super(Assembler, self).__init__(component_path)
+#         self._default_args = [str(component_path)]
 
-        Args:
-            sharedObjFile: Name of object file to list.
+#     def __call__(self):
+#         """Run component without args to detect system settings."""
 
-        Returns:
-            List of objects embedded in shared object file.
-        """
-        args = [self._component_path, sharedObjFile]
-        return [e.strip().split()[1:] for e in _invoke(args, f"Listing code objects in shared object", Path(sharedObjFile).parent).decode().split("\n") if e.strip().split()[1:]]
-
-
-class RocObjExtract(Component):
-    """
-    ROCm roc-obj-extract class used to get code objects bundle from shared library.
-
-    ...
-
-    Attributes
-    ----------
-    version : str
-        the version of the component
-    rocm_version : str
-        the ROCm version
-    Methods
-    -------
-    __call__(self, srcPaths: List[str], destPath: str):
-        Invokes roc-obj-extract on the provided arguments
-    """
-
-    def __init__(self, extract_path: Path):
-        """Constructs and instance of roc-obj-extract."""
-        # Use `-h` because roc-obj-extract doesn't have a version flag
-        # and will print  to stdout "Error: No arguments."
-        super(RocObjExtract, self).__init__(extract_path, "-h")
-
-    def __call__(self, filename: str):
-        """Extracts code objects from a shared object.
-
-        Args:
-            objFile: Name pf object file to extract.
-
-        Returns:
-            Code object file.
-        """
-        args = [self._component_path, filename]
-        return _invoke(args, f"Extracting code object.", Path(filename.replace("file:","")).parent)
+#         return _invoke(self._default_args, "running system inspection")

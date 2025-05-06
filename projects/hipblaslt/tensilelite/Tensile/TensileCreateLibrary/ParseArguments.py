@@ -73,12 +73,6 @@ def parseArguments(input: Optional[List[str]] = None) -> Dict[str, Any]:
         "--assembler", dest="Assembler", action="store", default=ToolchainDefaults.ASSEMBLER
     )
     argParser.add_argument(
-        "--roc-obj-extract", dest="RocObjExtract", action="store", default=ToolchainDefaults.ROC_OBJ_EXTRACT
-    )
-    argParser.add_argument(
-        "--roc-obj-ls", dest="RocObjLs", action="store", default=ToolchainDefaults.ROC_OBJ_LS
-    )
-    argParser.add_argument(
         "--code-object-version",
         dest="CodeObjectVersion",
         choices=["4", "5", "V4", "V5", "default"],
@@ -216,8 +210,6 @@ def parseArguments(input: Optional[List[str]] = None) -> Dict[str, Any]:
     arguments["CxxCompiler"] = args.CxxCompiler
     arguments["CCompiler"] = args.CCompiler
     arguments["OffloadBundler"] = args.OffloadBundler
-    arguments["RocObjExtract"] = args.RocObjExtract
-    arguments["RocObjLs"] = args.RocObjLs
     arguments["Assembler"] = args.Assembler
     arguments["LogicPath"] = args.LogicPath
     arguments["LogicFilter"] = args.LogicFilter
