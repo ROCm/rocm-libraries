@@ -22,16 +22,16 @@
 #
 ################################################################################
 
-from rocisa.code import RegSet
-from rocisa.container import EXEC, vgpr, sgpr
+from rocisa.code import RegSet, Module
+from rocisa.container import EXEC, vgpr, sgpr, SDWAModifiers, DSModifiers, ContinuousRegister
+from rocisa.enum import SelectBit
 from rocisa.instruction import DSStoreB16, DSStoreB32, DSStoreB64, SBarrier, \
     SMovB32, SSetMask, VAddF32, VAddU32, VCmpXEqU32, VCvtPkBF8toF32, VCvtPkFP8toF32, \
     VDot2F32BF16, VDot2F32F16, VLShiftLeftB32, VMovB32, VCvtBF16toFP32
 from rocisa.functions import vectorStaticDivide, vectorStaticRemainder, vectorStaticMultiply
 from ..Component import SumUnroll
 from ..Common import printExit
-from ..TensileInstructions import Module, SDWAModifiers, SelectBit, \
-    DSModifiers, ContinuousRegister, log2
+from ..TensileInstructions import log2
 
 class SumUnrollMfma(SumUnroll):
     kernel = {"EnableMatrixInstruction": True}

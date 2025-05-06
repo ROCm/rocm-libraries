@@ -29,7 +29,6 @@ if not (sys.version_info[0] >= 3 and sys.version_info[1] >= 6):
 
 from .Base import *
 from .DataType import *
-from .ExtInstructions import *
 from .Formatting import *
 from .RegisterPool import *
 from .Utils import *

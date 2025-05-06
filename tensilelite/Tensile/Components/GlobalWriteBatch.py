@@ -20,9 +20,10 @@
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ################################################################################
 
+from rocisa.code import Label, Module
 from rocisa.container import SMEMModifiers, VOP3PModifiers, MUBUFModifiers, \
-  replaceHolder, EXEC
-from rocisa.enum import CvtType, RoundType, SaturateCastType
+  replaceHolder, EXEC, VCC, SDWAModifiers, vgpr, sgpr
+from rocisa.enum import CvtType, RoundType, SaturateCastType, SelectBit
 from rocisa.instruction import BufferAtomicAddF32, BufferAtomicCmpswapB32, \
   BufferAtomicCmpswapB64, FlatAtomicCmpswapB32, SAddCU32, SAddU32, SAndB32, \
   SAndB64, SAtomicDec, SBarrier, SBranch, SCBranchExecNZ, SCBranchExecZ, \
@@ -42,8 +43,7 @@ from ..Component import Component
 from ..SolutionStructs import Solution
 from ..Activation import ActivationModule
 from ..AsmStoreState import StoreState
-from ..TensileInstructions import Label, Module, SDWAModifiers, VCC, SelectBit, \
-                            vgpr, sgpr, DataType
+from ..TensileInstructions import DataType
 
 from ..AsmAddressCalculation import AddrCalculation
 from ..Components.PackData import formatting, PackData_F16, PackData_BF16, PackData_FLOAT8, PackData_FLOAT8_fnuz
