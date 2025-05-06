@@ -1,3 +1,20 @@
+/*
+ *  Copyright 2008-2013 NVIDIA Corporation
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+
 #include <thrust/detail/config.h>
 
 #if THRUST_CPP_DIALECT >= 2014
@@ -33,8 +50,7 @@ using future_value_types = unittest::type_list<
 template <typename T>
 struct test_future_default_constructed
 {
-  __host__
-  void operator()()
+  THRUST_HOST void operator()()
   {
     THRUST_STATIC_ASSERT(
       (std::is_same<
@@ -97,8 +113,7 @@ DECLARE_GENERIC_UNITTEST_WITH_TYPES(
 template <typename T>
 struct test_future_new_stream
 {
-  __host__
-  void operator()()
+  THRUST_HOST void operator()()
   {
     auto f0 = thrust::device_future<T>(thrust::new_stream);
 
@@ -134,8 +149,7 @@ DECLARE_GENERIC_UNITTEST_WITH_TYPES(
 template <typename T>
 struct test_future_convert_to_event
 {
-  __host__
-  void operator()()
+  THRUST_HOST void operator()()
   {
     auto f0 = thrust::device_future<T>(thrust::new_stream);
 
@@ -164,8 +178,7 @@ DECLARE_GENERIC_UNITTEST_WITH_TYPES(
 template <typename T>
 struct test_future_when_all
 {
-  __host__
-  void operator()()
+  THRUST_HOST void operator()()
   {
     // Create futures with new streams.
     auto f0 = thrust::device_future<T>(thrust::new_stream);

@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -30,14 +30,14 @@ struct return_value
     return_value(void){}
     return_value(T v):val(v){}
 
-    __host__ __device__
+    THRUST_HOST_DEVICE
     T operator()(void){ return val; }
 };
 
 template<class Vector>
 void TestGenerateSimple(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     Vector result(5);
 
@@ -57,7 +57,7 @@ DECLARE_VECTOR_UNITTEST(TestGenerateSimple);
 
 
 template<typename ForwardIterator, typename Generator>
-__host__ __device__
+THRUST_HOST_DEVICE
 void generate(my_system &system, ForwardIterator /*first*/, ForwardIterator, Generator)
 {
     system.validate_dispatch();
@@ -76,7 +76,7 @@ DECLARE_UNITTEST(TestGenerateDispatchExplicit);
 
 
 template<typename ForwardIterator, typename Generator>
-__host__ __device__
+THRUST_HOST_DEVICE
 void generate(my_tag, ForwardIterator first, ForwardIterator, Generator)
 {
     *first = 13;
@@ -129,7 +129,7 @@ DECLARE_VARIABLE_UNITTEST(TestGenerateToDiscardIterator);
 template<class Vector>
 void TestGenerateNSimple(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     Vector result(5);
 
@@ -149,7 +149,7 @@ DECLARE_VECTOR_UNITTEST(TestGenerateNSimple);
 
 
 template<typename ForwardIterator, typename Size, typename Generator>
-__host__ __device__
+THRUST_HOST_DEVICE
 ForwardIterator generate_n(my_system &system, ForwardIterator first, Size, Generator)
 {
     system.validate_dispatch();
@@ -169,7 +169,7 @@ DECLARE_UNITTEST(TestGenerateNDispatchExplicit);
 
 
 template<typename ForwardIterator, typename Size, typename Generator>
-__host__ __device__
+THRUST_HOST_DEVICE
 ForwardIterator generate_n(my_tag, ForwardIterator first, Size, Generator)
 {
     *first = 13;
@@ -194,10 +194,10 @@ void TestGenerateNToDiscardIterator(const size_t n)
     T value = 13;
     return_value<T> f(value);
 
-    thrust::discard_iterator<thrust::host_system_tag> h_result =
+    thrust::discard_iterator<thrust::host_system_tag> h_result = 
       thrust::generate_n(thrust::discard_iterator<thrust::host_system_tag>(), n, f);
 
-    thrust::discard_iterator<thrust::device_system_tag> d_result =
+    thrust::discard_iterator<thrust::device_system_tag> d_result = 
       thrust::generate_n(thrust::discard_iterator<thrust::device_system_tag>(), n, f);
 
     thrust::discard_iterator<> reference(n);
@@ -211,7 +211,7 @@ DECLARE_VARIABLE_UNITTEST(TestGenerateNToDiscardIterator);
 template <typename Vector>
 void TestGenerateZipIterator(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     Vector v1(3,T(0));
     Vector v2(3,T(0));
@@ -232,8 +232,8 @@ DECLARE_VECTOR_UNITTEST(TestGenerateZipIterator);
 
 void TestGenerateTuple(void)
 {
-    typedef int T;
-    typedef thrust::tuple<T,T> Tuple;
+    using T     = int;
+    using Tuple = thrust::tuple<T, T>;
 
     thrust::host_vector<Tuple>   h(3, Tuple(0,0));
     thrust::device_vector<Tuple> d(3, Tuple(0,0));

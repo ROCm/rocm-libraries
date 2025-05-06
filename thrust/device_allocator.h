@@ -47,13 +47,13 @@ class device_ptr_memory_resource final
         device_ptr<void>
     >
 {
-    typedef typename Upstream::pointer upstream_ptr;
+    using upstream_ptr = typename Upstream::pointer;
 
 public:
     /*! Initialize the adaptor with the global instance of the upstream resource. Obtains
      *      the global instance by calling \p get_global_resource.
      */
-    __host__
+    THRUST_HOST
     device_ptr_memory_resource() : m_upstream(mr::get_global_resource<Upstream>())
     {
     }
@@ -62,29 +62,29 @@ public:
      *
      *  \param upstream the upstream memory resource to adapt.
      */
-    __host__
+    THRUST_HOST
     device_ptr_memory_resource(Upstream * upstream) : m_upstream(upstream)
     {
     }
 
     /*! Allocates space using the upstream resource.
      *
-     *  \param bytes - the size of the requested allocation, in bytes
-     *  \param alignment - alignment size, in bytes
+     *  \param bytes the size of the requested allocation, in bytes
+     *  \param alignment alignment size, in bytes
      *  \return a pointer to the newly allocated storage.
      */
-    THRUST_NODISCARD __host__
+    THRUST_NODISCARD THRUST_HOST
     virtual pointer do_allocate(std::size_t bytes, std::size_t alignment = THRUST_MR_DEFAULT_ALIGNMENT) override
     {
         return pointer(m_upstream->do_allocate(bytes, alignment).get());
     }
 
     /*! Deallocates space that was previously allocated using this allocator.
-     * \param p - the pointer that was previously returned by \p do_allocate
-    *  \param bytes - size of the allocation, in bytes
-    *  \param alignment - alignment size, in bytes
+     * \param p the pointer that was previously returned by \p do_allocate
+    *  \param bytes size of the allocation, in bytes
+    *  \param alignment alignment size, in bytes
      */
-    __host__
+    THRUST_HOST
     virtual void do_deallocate(pointer p, std::size_t bytes, std::size_t alignment) override
     {
         m_upstream->do_deallocate(upstream_ptr(p.get()), bytes, alignment);
@@ -106,10 +106,9 @@ class device_allocator
         device_ptr_memory_resource<device_memory_resource>
     >
 {
-    typedef thrust::mr::stateless_resource_allocator<
+    using base = thrust::mr::stateless_resource_allocator<
         T,
-        device_ptr_memory_resource<device_memory_resource>
-    > base;
+        device_ptr_memory_resource<device_memory_resource> >;
 
 public:
     /*! The \p rebind metafunction provides the type of a \p device_allocator
@@ -122,27 +121,27 @@ public:
     {
         /*! The typedef \p other gives the type of the rebound \p device_allocator.
          */
-        typedef device_allocator<U> other;
+        using other = device_allocator<U>;
     };
 
     /*! Default constructor has no effect. */
-    __host__ __device__
+    THRUST_HOST_DEVICE
     device_allocator() {}
 
     /*! Copy constructor has no effect. */
-    __host__ __device__
+    THRUST_HOST_DEVICE
     device_allocator(const device_allocator& other) : base(other) {}
 
     /*! Constructor from other \p device_allocator has no effect. */
     template<typename U>
-    __host__ __device__
+    THRUST_HOST_DEVICE
     device_allocator(const device_allocator<U>& other) : base(other) {}
 
     /*! Use the default equality comparator. */
     device_allocator & operator=(const device_allocator &) = default;
 
     /*! Destructor has no effect. */
-    __host__ __device__
+    THRUST_HOST_DEVICE
     ~device_allocator() {}
 };
 

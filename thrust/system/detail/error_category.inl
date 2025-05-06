@@ -217,14 +217,14 @@ class system_error_category
 } // end detail
 
 
-const error_category &generic_category(void)
+inline const error_category &generic_category(void)
 {
   static const detail::generic_error_category result;
   return result;
 }
 
 
-const error_category &system_category(void)
+inline const error_category &system_category(void)
 {
   static const detail::system_error_category result;
   return result;

@@ -26,6 +26,7 @@
 #include <thrust/detail/vector_base.h>
 #include <thrust/device_allocator.h>
 
+#include <initializer_list>
 #include <vector>
 #include <utility>
 
@@ -52,13 +53,13 @@ template<typename T, typename Alloc = thrust::device_allocator<T> >
     : public detail::vector_base<T,Alloc>
 {
   private:
-    typedef detail::vector_base<T,Alloc> Parent;
+    using Parent = detail::vector_base<T,Alloc>;
 
   public:
     /*! \cond
      */
-    typedef typename Parent::size_type  size_type;
-    typedef typename Parent::value_type value_type;
+    using size_type  = typename Parent::size_type;
+    using value_type = typename Parent::value_type;
     /*! \endcond
      */
 
@@ -124,7 +125,6 @@ template<typename T, typename Alloc = thrust::device_allocator<T> >
     device_vector(const device_vector &v, const Alloc &alloc)
       :Parent(v,alloc) {}
 
-  #if THRUST_CPP_DIALECT >= 2011
     /*! Move constructor moves from another \p device_vector.
      *  \param v The device_vector to move.
      */
@@ -137,7 +137,6 @@ template<typename T, typename Alloc = thrust::device_allocator<T> >
      */
     device_vector(device_vector &&v, const Alloc &alloc)
       :Parent(std::move(v), alloc) {}
-  #endif // THRUST_CPP_DIALECT >= 2011
 
     /*! Copy assign operator copies another \p device_vector with the same type.
      *  \param v The \p device_vector to copy.
@@ -145,13 +144,11 @@ template<typename T, typename Alloc = thrust::device_allocator<T> >
     device_vector &operator=(const device_vector &v)
     { Parent::operator=(v); return *this; }
 
-  #if THRUST_CPP_DIALECT >= 2011
     /*! Move assign operator moves from another \p device_vector.
      *  \param v The device_vector to move.
      */
      device_vector &operator=(device_vector &&v)
      { Parent::operator=(std::move(v)); return *this; }
-  #endif // THRUST_CPP_DIALECT >= 2011
 
     /*! Copy constructor copies from an exemplar \p device_vector with different type.
      *  \param v The \p device_vector to copy.
@@ -196,6 +193,25 @@ template<typename T, typename Alloc = thrust::device_allocator<T> >
     template<typename OtherT, typename OtherAlloc>
     device_vector &operator=(const detail::vector_base<OtherT,OtherAlloc> &v)
     { Parent::operator=(v); return *this; }
+
+    /*! This constructor builds a \p device_vector from an intializer_list.
+     *  \param il The intializer_list.
+     */
+    device_vector(std::initializer_list<T> il)
+      :Parent(il) {}
+      
+    /*! This constructor builds a \p device_vector from an intializer_list.
+     *  \param il The intializer_list.
+     *  \param alloc The allocator to use by this device_vector.
+     */
+    device_vector(std::initializer_list<T> il, const Alloc &alloc)
+      :Parent(il, alloc) {}
+      
+    /*! Assign an \p intializer_list with a matching element type
+     *  \param il The intializer_list.
+     */
+    device_vector &operator=(std::initializer_list<T> il)
+    { Parent::operator=(il); return *this; }
 
     /*! This constructor builds a \p device_vector from a range.
      *  \param first The beginning of the range.

@@ -1,7 +1,7 @@
 
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ * Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
  *     * Redistributions of source code must retain the above copyright
@@ -31,9 +31,6 @@
 #pragma once
 
 #include <thrust/detail/config.h>
-#include <thrust/detail/cpp14_required.h>
-
-#if THRUST_CPP_DIALECT >= 2014
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 
@@ -58,13 +55,13 @@ struct async_for_each_fn
   ForwardIt first;
   UnaryFunction f;
 
-  __host__ __device__
+  THRUST_HOST_DEVICE
   async_for_each_fn(ForwardIt&& first_, UnaryFunction&& f_)
     : first(std::move(first_)), f(std::move(f_))
   {}
 
   template <typename Index>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   void operator()(Index idx)
   {
     f(thrust::raw_reference_cast(first[idx]));
@@ -159,5 +156,3 @@ THRUST_RETURNS(
 THRUST_NAMESPACE_END
 
 #endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
-
-#endif

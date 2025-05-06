@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -54,10 +54,12 @@ struct maximum_pairs
     } // end operator()
 }; // end maximum_pairs
 
+
+
 TYPED_TEST(PairScanVariablesTests, TestPairScan)
 {
     using T = typename TestFixture::input_type;
-    typedef thrust::pair<T, T> P;
+    using P = thrust::pair<T, T>;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -70,11 +72,11 @@ TYPED_TEST(PairScanVariablesTests, TestPairScan)
             SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> h_p1 = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
+                size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
             thrust::host_vector<T> h_p2 = get_random_data<T>(
                 size,
-                std::numeric_limits<T>::min(),
-                std::numeric_limits<T>::max(),
+                get_default_limits<T>::min(),
+                get_default_limits<T>::max(),
                 seed + seed_value_addition
             );
             thrust::host_vector<P> h_pairs(size);
@@ -94,7 +96,7 @@ TYPED_TEST(PairScanVariablesTests, TestPairScan)
             // scan with plus
             thrust::inclusive_scan(h_pairs.begin(), h_pairs.end(), h_output.begin(), add_pairs());
             thrust::inclusive_scan(d_pairs.begin(), d_pairs.end(), d_output.begin(), add_pairs());
-            ASSERT_EQ_QUIET(h_output, d_output);
+            test_equality(h_output, d_output);
 
             // scan with maximum
             // TODO: Workaround
@@ -106,14 +108,14 @@ TYPED_TEST(PairScanVariablesTests, TestPairScan)
                                    d_pairs.end(),
                                    d_output.begin(),
                                    maximum_pairs() /*thrust::maximum<P>()*/);
-            ASSERT_EQ_QUIET(h_output, d_output);
+            test_equality(h_output, d_output);
 
             // scan with plus
             thrust::exclusive_scan(
                 h_pairs.begin(), h_pairs.end(), h_output.begin(), init, add_pairs());
             thrust::exclusive_scan(
                 d_pairs.begin(), d_pairs.end(), d_output.begin(), init, add_pairs());
-            ASSERT_EQ_QUIET(h_output, d_output);
+            test_equality(h_output, d_output);
 
             // scan with maximum
             // TODO: Workaround
@@ -127,7 +129,7 @@ TYPED_TEST(PairScanVariablesTests, TestPairScan)
                                    d_output.begin(),
                                    init,
                                    maximum_pairs() /*thrust::maximum<P>()*/);
-            ASSERT_EQ_QUIET(h_output, d_output);
+            test_equality(h_output, d_output);
         }
     }
 }

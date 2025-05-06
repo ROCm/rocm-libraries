@@ -1,9 +1,27 @@
+/*
+ *  Copyright 2008-2013 NVIDIA Corporation
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+
 #include <unittest/unittest.h>
 #include <thrust/logical.h>
 #include <thrust/functional.h>
 #include <thrust/execution_policy.h>
 
 
+#ifdef THRUST_TEST_DEVICE_SIDE
 template<typename ExecutionPolicy, typename Iterator, typename Function, typename Iterator2>
 __global__
 void all_of_kernel(ExecutionPolicy exec, Iterator first, Iterator last, Function f, Iterator2 result)
@@ -15,7 +33,7 @@ void all_of_kernel(ExecutionPolicy exec, Iterator first, Iterator last, Function
 template<typename ExecutionPolicy>
 void TestAllOfDevice(ExecutionPolicy exec)
 {
-  typedef int T;
+  using T = int;
   thrust::device_vector<T> v(3, 1);
   thrust::device_vector<bool> result(1);
   
@@ -83,13 +101,14 @@ void TestAllOfDeviceDevice()
   TestAllOfDevice(thrust::device);
 }
 DECLARE_UNITTEST(TestAllOfDeviceDevice);
+#endif
 
 
 void TestAllOfCudaStreams()
 {
-  typedef thrust::device_vector<int> Vector;
-  typedef Vector::value_type T;
-  
+  using Vector = thrust::device_vector<int>;
+  using T      = Vector::value_type;
+
   Vector v(3, 1);
 
   cudaStream_t s;
@@ -111,6 +130,7 @@ void TestAllOfCudaStreams()
 DECLARE_UNITTEST(TestAllOfCudaStreams);
 
 
+#ifdef THRUST_TEST_DEVICE_SIDE
 template<typename ExecutionPolicy, typename Iterator, typename Function, typename Iterator2>
 __global__
 void any_of_kernel(ExecutionPolicy exec, Iterator first, Iterator last, Function f, Iterator2 result)
@@ -122,8 +142,8 @@ void any_of_kernel(ExecutionPolicy exec, Iterator first, Iterator last, Function
 template<typename ExecutionPolicy>
 void TestAnyOfDevice(ExecutionPolicy exec)
 {
-  typedef int T;
-  
+  using T = int;
+
   thrust::device_vector<T> v(3, 1);
   thrust::device_vector<bool> result(1);
   
@@ -191,12 +211,13 @@ void TestAnyOfDeviceDevice()
   TestAnyOfDevice(thrust::device);
 }
 DECLARE_UNITTEST(TestAnyOfDeviceDevice);
+#endif
 
 
 void TestAnyOfCudaStreams()
 {
-  typedef thrust::device_vector<int> Vector;
-  typedef Vector::value_type T;
+  using Vector = thrust::device_vector<int>;
+  using T      = Vector::value_type;
 
   Vector v(3, 1);
 
@@ -219,6 +240,7 @@ void TestAnyOfCudaStreams()
 DECLARE_UNITTEST(TestAnyOfCudaStreams);
 
 
+#ifdef THRUST_TEST_DEVICE_SIDE
 template<typename ExecutionPolicy, typename Iterator, typename Function, typename Iterator2>
 __global__
 void none_of_kernel(ExecutionPolicy exec, Iterator first, Iterator last, Function f, Iterator2 result)
@@ -230,8 +252,8 @@ void none_of_kernel(ExecutionPolicy exec, Iterator first, Iterator last, Functio
 template<typename ExecutionPolicy>
 void TestNoneOfDevice(ExecutionPolicy exec)
 {
-  typedef int T;
-  
+  using T = int;
+
   thrust::device_vector<T> v(3, 1);
   thrust::device_vector<bool> result(1);
   
@@ -299,12 +321,13 @@ void TestNoneOfDeviceDevice()
   TestNoneOfDevice(thrust::device);
 }
 DECLARE_UNITTEST(TestNoneOfDeviceDevice);
+#endif
 
 
 void TestNoneOfCudaStreams()
 {
-  typedef thrust::device_vector<int> Vector;
-  typedef Vector::value_type T;
+  using Vector = thrust::device_vector<int>;
+  using T      = Vector::value_type;
 
   Vector v(3, 1);
 

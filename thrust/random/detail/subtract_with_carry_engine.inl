@@ -30,7 +30,7 @@ namespace random
 
 
 template<typename UIntType, size_t w, size_t s, size_t r>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   subtract_with_carry_engine<UIntType,w,s,r>
     ::subtract_with_carry_engine(result_type value)
 {
@@ -39,7 +39,7 @@ template<typename UIntType, size_t w, size_t s, size_t r>
 
 
 template<typename UIntType, size_t w, size_t s, size_t r>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   void subtract_with_carry_engine<UIntType,w,s,r>
     ::seed(result_type value)
 {
@@ -58,7 +58,7 @@ template<typename UIntType, size_t w, size_t s, size_t r>
 
 
 template<typename UIntType, size_t w, size_t s, size_t r>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   typename subtract_with_carry_engine<UIntType,w,s,r>::result_type
     subtract_with_carry_engine<UIntType,w,s,r>
       ::operator()(void)
@@ -90,7 +90,7 @@ template<typename UIntType, size_t w, size_t s, size_t r>
 
 
 template<typename UIntType, size_t w, size_t s, size_t r>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   void subtract_with_carry_engine<UIntType,w,s,r>
     ::discard(unsigned long long z)
 {
@@ -106,8 +106,8 @@ template<typename UIntType, size_t w, size_t s, size_t r>
     std::basic_ostream<CharT,Traits>& subtract_with_carry_engine<UIntType,w,s,r>
       ::stream_out(std::basic_ostream<CharT,Traits> &os) const
 {
-  typedef std::basic_ostream<CharT,Traits> ostream_type;
-  typedef typename ostream_type::ios_base     ios_base;
+  using ostream_type = std::basic_ostream<CharT, Traits>;
+  using ios_base     = typename ostream_type::ios_base;
 
   const typename ios_base::fmtflags flags = os.flags();
   const CharT fill  = os.fill();
@@ -132,8 +132,8 @@ template<typename UIntType, size_t w, size_t s, size_t r>
     std::basic_istream<CharType,Traits>& subtract_with_carry_engine<UIntType,w,s,r>
       ::stream_in(std::basic_istream<CharType,Traits> &is)
 {
-  typedef std::basic_istream<CharType,Traits> istream_type;
-  typedef typename istream_type::ios_base     ios_base;
+  using istream_type = std::basic_istream<CharType, Traits>;
+  using ios_base     = typename istream_type::ios_base;
 
   const typename ios_base::fmtflags flags = is.flags();
   is.flags(ios_base::dec | ios_base::skipws);
@@ -150,7 +150,7 @@ template<typename UIntType, size_t w, size_t s, size_t r>
 
 
 template<typename UIntType, size_t w, size_t s, size_t r>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   bool subtract_with_carry_engine<UIntType,w,s,r>
     ::equal(const subtract_with_carry_engine<UIntType,w,s,r> &rhs) const
 {
@@ -190,7 +190,7 @@ template<typename UIntType, size_t w, size_t s, size_t r,
 
 
 template<typename UIntType, size_t w, size_t s, size_t r>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   bool operator==(const subtract_with_carry_engine<UIntType,w,s,r> &lhs,
                   const subtract_with_carry_engine<UIntType,w,s,r> &rhs)
 {
@@ -199,7 +199,7 @@ template<typename UIntType, size_t w, size_t s, size_t r>
 
 
 template<typename UIntType, size_t w, size_t s, size_t r>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   bool operator!=(const subtract_with_carry_engine<UIntType,w,s,r> &lhs,
                   const subtract_with_carry_engine<UIntType,w,s,r> &rhs)
 {

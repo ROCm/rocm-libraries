@@ -1,9 +1,42 @@
+/*
+ *  Copyright 2008-2013 NVIDIA Corporation
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+
 #include <unittest/unittest.h>
 #include <thrust/unique.h>
 #include <thrust/functional.h>
 #include <thrust/iterator/discard_iterator.h>
 #include <thrust/iterator/retag.h>
 
+template <typename ValueT>
+struct index_to_value_t
+{
+  template <typename IndexT>
+  THRUST_HOST_DEVICE __forceinline__ ValueT operator()(IndexT index)
+  {
+    if (static_cast<std::uint64_t>(index) == 4300000000ULL)
+    {
+      return static_cast<ValueT>(1);
+    }
+    else
+    {
+      return static_cast<ValueT>(0);
+    }
+  }
+};
 
 template <typename ForwardIterator1,
           typename ForwardIterator2>
@@ -121,7 +154,7 @@ DECLARE_UNITTEST(TestUniqueByKeyCopyDispatchImplicit);
 template<typename T>
 struct is_equal_div_10_unique
 {
-    __host__ __device__
+    THRUST_HOST_DEVICE
     bool operator()(const T x, const T& y) const { return ((int) x / 10) == ((int) y / 10); }
 };
 
@@ -159,7 +192,7 @@ void initialize_values(Vector& values)
 template<typename Vector>
 void TestUniqueByKeySimple(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     Vector keys;
     Vector values;
@@ -206,7 +239,7 @@ DECLARE_INTEGRAL_VECTOR_UNITTEST(TestUniqueByKeySimple);
 template<typename Vector>
 void TestUniqueCopyByKeySimple(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     Vector keys;
     Vector values;
@@ -258,20 +291,20 @@ struct TestUniqueByKey
 {
     void operator()(const size_t n)
     {
-        typedef unsigned int V; // ValueType
+        using V = unsigned int; // ValueType
 
         thrust::host_vector<K>   h_keys = unittest::random_integers<bool>(n);
         thrust::host_vector<V>   h_vals = unittest::random_integers<V>(n);
         thrust::device_vector<K> d_keys = h_keys;
         thrust::device_vector<V> d_vals = h_vals;
 
-        typedef typename thrust::host_vector<K>::iterator   HostKeyIterator;
-        typedef typename thrust::host_vector<V>::iterator   HostValIterator;
-        typedef typename thrust::device_vector<K>::iterator DeviceKeyIterator;
-        typedef typename thrust::device_vector<V>::iterator DeviceValIterator;
+        using HostKeyIterator   = typename thrust::host_vector<K>::iterator;
+        using HostValIterator   = typename thrust::host_vector<V>::iterator;
+        using DeviceKeyIterator = typename thrust::device_vector<K>::iterator;
+        using DeviceValIterator = typename thrust::device_vector<V>::iterator;
 
-        typedef typename thrust::pair<HostKeyIterator,  HostValIterator>   HostIteratorPair;
-        typedef typename thrust::pair<DeviceKeyIterator,DeviceValIterator> DeviceIteratorPair;
+        using HostIteratorPair   = typename thrust::pair<HostKeyIterator, HostValIterator>;
+        using DeviceIteratorPair = typename thrust::pair<DeviceKeyIterator, DeviceValIterator>;
 
         HostIteratorPair   h_last = thrust::unique_by_key(h_keys.begin(), h_keys.end(), h_vals.begin());
         DeviceIteratorPair d_last = thrust::unique_by_key(d_keys.begin(), d_keys.end(), d_vals.begin());
@@ -298,7 +331,7 @@ struct TestUniqueCopyByKey
 {
     void operator()(const size_t n)
     {
-        typedef unsigned int V; // ValueType
+        using V = unsigned int; // ValueType
 
         thrust::host_vector<K>   h_keys = unittest::random_integers<bool>(n);
         thrust::host_vector<V>   h_vals = unittest::random_integers<V>(n);
@@ -310,13 +343,13 @@ struct TestUniqueCopyByKey
         thrust::device_vector<K> d_keys_output(n);
         thrust::device_vector<V> d_vals_output(n);
 
-        typedef typename thrust::host_vector<K>::iterator   HostKeyIterator;
-        typedef typename thrust::host_vector<V>::iterator   HostValIterator;
-        typedef typename thrust::device_vector<K>::iterator DeviceKeyIterator;
-        typedef typename thrust::device_vector<V>::iterator DeviceValIterator;
+        using HostKeyIterator   = typename thrust::host_vector<K>::iterator;
+        using HostValIterator   = typename thrust::host_vector<V>::iterator;
+        using DeviceKeyIterator = typename thrust::device_vector<K>::iterator;
+        using DeviceValIterator = typename thrust::device_vector<V>::iterator;
 
-        typedef typename thrust::pair<HostKeyIterator,  HostValIterator>   HostIteratorPair;
-        typedef typename thrust::pair<DeviceKeyIterator,DeviceValIterator> DeviceIteratorPair;
+        using HostIteratorPair   = typename thrust::pair<HostKeyIterator, HostValIterator>;
+        using DeviceIteratorPair = typename thrust::pair<DeviceKeyIterator, DeviceValIterator>;
 
         HostIteratorPair   h_last = thrust::unique_by_key_copy(h_keys.begin(), h_keys.end(), h_vals.begin(), h_keys_output.begin(), h_vals_output.begin());
         DeviceIteratorPair d_last = thrust::unique_by_key_copy(d_keys.begin(), d_keys.end(), d_vals.begin(), d_keys_output.begin(), d_vals_output.begin());
@@ -337,12 +370,14 @@ struct TestUniqueCopyByKey
 };
 VariableUnitTest<TestUniqueCopyByKey, IntegralTypes> TestUniqueCopyByKeyInstance;
 
+
+
 template<typename K>
 struct TestUniqueCopyByKeyToDiscardIterator
 {
     void operator()(const size_t n)
     {
-        typedef unsigned int V; // ValueType
+        using V = unsigned int; // ValueType
 
         thrust::host_vector<K>   h_keys = unittest::random_integers<bool>(n);
         thrust::host_vector<V>   h_vals = unittest::random_integers<V>(n);
@@ -436,3 +471,116 @@ struct TestUniqueCopyByKeyToDiscardIterator
 };
 VariableUnitTest<TestUniqueCopyByKeyToDiscardIterator, IntegralTypes> TestUniqueCopyByKeyToDiscardIteratorInstance;
 
+template <typename K>
+struct TestUniqueCopyByKeyLargeInput
+{
+    void operator()()
+    {
+        using type       = K;
+        using index_type = std::int64_t;
+
+        const std::size_t num_items = 4400000000ULL;
+        thrust::host_vector<type> reference_keys{static_cast<type>(0), static_cast<type>(1), static_cast<type>(0)};
+        thrust::host_vector<index_type> reference_values{0, 4300000000ULL, 4300000001ULL};
+
+        auto keys_in = thrust::make_transform_iterator(thrust::make_counting_iterator(0ULL), index_to_value_t<type>{});
+        auto values_in = thrust::make_counting_iterator(0ULL);
+        thrust::device_vector<type> keys_out(reference_keys.size());
+        thrust::device_vector<index_type> values_out(reference_values.size());
+
+        // Run test
+        const auto selected_aut_end = thrust::unique_by_key_copy(
+          keys_in, keys_in + num_items, values_in, keys_out.begin(), values_out.begin());
+
+        // Ensure that we created the correct output
+        auto const num_selected_out = thrust::distance(keys_out.begin(), selected_aut_end.first);
+        ASSERT_EQUAL(reference_keys.size(), static_cast<std::size_t>(num_selected_out));
+        ASSERT_EQUAL(num_selected_out, thrust::distance(values_out.begin(), selected_aut_end.second));
+        keys_out.resize(num_selected_out);
+        values_out.resize(num_selected_out);
+        ASSERT_EQUAL(reference_keys, keys_out);
+        ASSERT_EQUAL(reference_values, values_out);
+    }
+};
+SimpleUnitTest<TestUniqueCopyByKeyLargeInput, IntegralTypes> TestUniqueCopyByKeyLargeInputInstance;
+
+template <typename K>
+struct TestUniqueCopyByKeyLargeOutCount
+{
+    void operator()()
+    {
+        constexpr std::size_t num_items = 4400000000ULL;
+
+        auto keys_in   = thrust::make_counting_iterator(0ULL);
+        auto values_in = thrust::make_counting_iterator(0ULL);
+
+        // Run test
+        auto keys_out = thrust::make_discard_iterator();
+        auto values_out = thrust::make_discard_iterator();
+        const auto selected_aut_end = thrust::unique_by_key_copy(thrust::device, 
+          keys_in, keys_in + num_items, values_in, keys_out, values_out);
+
+        // Ensure that we created the correct output
+        auto const num_selected_out = thrust::distance(keys_out, selected_aut_end.first);
+        ASSERT_EQUAL(num_items, static_cast<std::size_t>(num_selected_out));
+        ASSERT_EQUAL(num_selected_out, thrust::distance(values_out, selected_aut_end.second));
+    }
+};
+SimpleUnitTest<TestUniqueCopyByKeyLargeOutCount, IntegralTypes> TestUniqueCopyByKeyLargeOutCountInstance;
+
+// This test fails only on GCC 6
+#if !defined(__GNUC__) || __GNUC__ != 6
+
+// Based on GitHub issue: https://github.com/NVIDIA/cccl/issues/1956
+namespace
+{
+struct CompareFirst
+{
+  template <typename T>
+  THRUST_HOST_DEVICE bool operator()(T const& lhs, T const& rhs) const
+  {
+    return lhs.first == rhs.first;
+  }
+};
+struct Entry
+{
+  std::int32_t a;
+  float b;
+};
+} // namespace
+
+void TestKeysWithoutEqualityOperator()
+{
+  using Key = thrust::pair<std::int32_t, Entry>;
+
+  const auto k1 = Key{1, {}};
+  const auto k2 = Key{2, {}};
+  const thrust::device_vector<Key> keys{k1, k1, k1, k2, k2};
+  thrust::device_vector<Entry> data{{0, 0}, {1, 1}, {2, 2}, {3, 3}, {4, 4}};
+
+  thrust::device_vector<Key> unique_keys(5);
+  thrust::device_vector<Entry> unique_data(5);
+
+  const auto result = thrust::unique_by_key_copy(
+    thrust::device, keys.cbegin(), keys.cend(), data.begin(), unique_keys.begin(), unique_data.begin(), CompareFirst{});
+
+  unique_keys.erase(result.first, unique_keys.end());
+  unique_data.erase(result.second, unique_data.end());
+
+  auto unique_keys_h = thrust::host_vector<Key>(unique_keys);
+  auto unique_data_h = thrust::host_vector<Entry>(unique_data);
+
+  ASSERT_EQUAL(unique_keys_h[0].first, k1.first);
+  ASSERT_EQUAL(unique_keys_h[0].second.a, k1.second.a);
+  ASSERT_EQUAL(unique_keys_h[0].second.b, k1.second.b);
+  ASSERT_EQUAL(unique_keys_h[1].first, k2.first);
+  ASSERT_EQUAL(unique_keys_h[1].second.a, k2.second.a);
+  ASSERT_EQUAL(unique_keys_h[1].second.b, k2.second.b);
+
+  ASSERT_EQUAL(unique_data_h[0].a, 0);
+  ASSERT_EQUAL(unique_data_h[0].b, 0);
+  ASSERT_EQUAL(unique_data_h[1].a, 3);
+  ASSERT_EQUAL(unique_data_h[1].b, 3);
+}
+DECLARE_UNITTEST(TestKeysWithoutEqualityOperator);
+#endif // !defined(__GNUC__) || __GNUC__ != 6

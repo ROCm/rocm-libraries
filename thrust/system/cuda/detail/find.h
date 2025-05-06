@@ -42,7 +42,7 @@ namespace cuda_cub {
 template <class Derived,
           class InputIt,
           class Predicate>
-InputIt __host__ __device__
+InputIt _CCCL_HOST_DEVICE
 find_if(execution_policy<Derived>& policy,
         InputIt                    first,
         InputIt                    last,
@@ -51,7 +51,7 @@ find_if(execution_policy<Derived>& policy,
 template <class Derived,
           class InputIt,
           class Predicate>
-InputIt __host__ __device__
+InputIt _CCCL_HOST_DEVICE
 find_if_not(execution_policy<Derived>& policy,
             InputIt                    first,
             InputIt                    last,
@@ -60,7 +60,7 @@ find_if_not(execution_policy<Derived>& policy,
 template <class Derived,
           class InputIt,
           class T>
-InputIt __host__ __device__
+InputIt _CCCL_HOST_DEVICE
 find(execution_policy<Derived> &policy,
      InputIt                    first,
      InputIt                    last,
@@ -104,14 +104,14 @@ template <class Derived,
           class InputIt,
           class Size,
           class Predicate>
-InputIt __host__ __device__
+InputIt _CCCL_HOST_DEVICE
 find_if_n(execution_policy<Derived>& policy,
           InputIt                    first,
           Size                       num_items,
           Predicate                  predicate)
 {
-  typedef typename thrust::tuple<bool,Size> result_type;
-  
+  using result_type = typename thrust::tuple<bool, Size>;
+
   // empty sequence
   if(num_items == 0) return first;
   
@@ -127,14 +127,9 @@ find_if_n(execution_policy<Derived>& policy,
   const Size interval_size = (thrust::min)(interval_threshold, num_items);
   
   // force transform_iterator output to bool
-  typedef transform_input_iterator_t<bool,
-                                     InputIt,
-                                     Predicate>
-      XfrmIterator;
-  typedef thrust::tuple<XfrmIterator,
-                        counting_iterator_t<Size> >
-      IteratorTuple;
-  typedef thrust::zip_iterator<IteratorTuple> ZipIterator;
+  using XfrmIterator  = transform_input_iterator_t<bool, InputIt, Predicate>;
+  using IteratorTuple = thrust::tuple<XfrmIterator, counting_iterator_t<Size>>;
+  using ZipIterator   = thrust::zip_iterator<IteratorTuple>;
 
   IteratorTuple iter_tuple =
       thrust::make_tuple(XfrmIterator(first, predicate),
@@ -173,7 +168,7 @@ find_if_n(execution_policy<Derived>& policy,
 template <class Derived,
           class InputIt,
           class Predicate>
-InputIt __host__ __device__
+InputIt _CCCL_HOST_DEVICE
 find_if(execution_policy<Derived>& policy,
         InputIt                    first,
         InputIt                    last,
@@ -185,20 +180,20 @@ find_if(execution_policy<Derived>& policy,
 template <class Derived,
           class InputIt,
           class Predicate>
-InputIt __host__ __device__
+InputIt _CCCL_HOST_DEVICE
 find_if_not(execution_policy<Derived>& policy,
             InputIt                    first,
             InputIt                    last,
             Predicate                  predicate)
 {
-  return cuda_cub::find_if(policy, first, last, thrust::detail::not1(predicate));
+  return cuda_cub::find_if(policy, first, last, thrust::not_fn(predicate));
 }
 
 
 template <class Derived,
           class InputIt,
           class T>
-InputIt __host__ __device__
+InputIt _CCCL_HOST_DEVICE
 find(execution_policy<Derived> &policy,
      InputIt                    first,
      InputIt                    last,

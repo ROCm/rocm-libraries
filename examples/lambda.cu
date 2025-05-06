@@ -3,6 +3,8 @@
 #include <thrust/transform.h>
 #include <iostream>
 
+#include "include/host_device.h"
+
 // This example demonstrates the use of placeholders to implement
 // the SAXPY operation (i.e. Y[i] = a * X[i] + Y[i]).
 //
@@ -24,7 +26,6 @@ using namespace thrust::placeholders;
 
 // implementing SAXPY with a functor is cumbersome and verbose
 struct saxpy_functor
-  : public thrust::binary_function<float, float, float>
 {
   float a;
   

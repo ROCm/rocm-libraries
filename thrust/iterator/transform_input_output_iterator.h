@@ -94,13 +94,14 @@ template <typename InputFunction, typename OutputFunction, typename Iterator>
 
   public:
 
-    typedef typename
-    detail::transform_input_output_iterator_base<InputFunction, OutputFunction, Iterator>::type
-    super_t;
+    using super_t = typename
+      detail::transform_input_output_iterator_base<InputFunction, OutputFunction, Iterator>::type;
 
     friend class thrust::iterator_core_access;
   /*! \endcond
    */
+
+    transform_input_output_iterator() = default;
 
   /*! This constructor takes as argument a \c Iterator an \c InputFunction and an
    * \c OutputFunction and copies them to a new \p transform_input_output_iterator
@@ -110,7 +111,7 @@ template <typename InputFunction, typename OutputFunction, typename Iterator>
    * \param input_function An \c InputFunction to be executed on values read from the iterator
    * \param output_function An \c OutputFunction to be executed on values written to the iterator
    */
-    __host__ __device__
+    THRUST_HOST_DEVICE
     transform_input_output_iterator(Iterator const& io, InputFunction input_function, OutputFunction output_function)
       : super_t(io), input_function(input_function), output_function(output_function)
     {
@@ -120,7 +121,7 @@ template <typename InputFunction, typename OutputFunction, typename Iterator>
      */
   private:
 
-    __host__ __device__
+    THRUST_HOST_DEVICE
     typename super_t::reference dereference() const
     {
       return detail::transform_input_output_iterator_proxy<
@@ -146,7 +147,7 @@ template <typename InputFunction, typename OutputFunction, typename Iterator>
  */
 template <typename InputFunction, typename OutputFunction, typename Iterator>
 transform_input_output_iterator<InputFunction, OutputFunction, Iterator>
-__host__ __device__
+THRUST_HOST_DEVICE
 make_transform_input_output_iterator(Iterator io, InputFunction input_function, OutputFunction output_function)
 {
     return transform_input_output_iterator<InputFunction, OutputFunction, Iterator>(io, input_function, output_function);

@@ -51,6 +51,8 @@ THRUST_NAMESPACE_BEGIN
  *  assigned to <tt>\*(result + 1)</tt>, and so on.  The transform scan
  *  operation is permitted to be in-place.
  *
+ *  Results from this function may vary from run to run depending on the inputs provided.
+ *
  *  The algorithm's execution is parallelized as determined by \p exec.
  *
  *  \param exec The execution policy to use for parallelization.
@@ -101,7 +103,7 @@ template<typename DerivedPolicy,
          typename OutputIterator,
          typename UnaryFunction,
          typename AssociativeOperator>
-__host__ __device__
+THRUST_HOST_DEVICE
   OutputIterator transform_inclusive_scan(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
                                           InputIterator first,
                                           InputIterator last,
@@ -120,6 +122,8 @@ __host__ __device__
  *  of <tt>binary_op(unary_op(\*first), unary_op(\*(first + 1)))</tt> is
  *  assigned to <tt>\*(result + 1)</tt>, and so on.  The transform scan
  *  operation is permitted to be in-place.
+ *
+ *  Results from this function may vary from run to run depending on the inputs provided.
  *
  *  \param first The beginning of the input sequence.
  *  \param last The end of the input sequence.
@@ -181,6 +185,8 @@ template<typename InputIterator,
  *  to <tt>\*(result + 1)</tt>, and so on.  The transform scan operation is 
  *  permitted to be in-place.
  *
+ *  Results from this function may vary from run to run depending on the inputs provided.
+ *
  *  The algorithm's execution is parallelized as determined by \p exec.
  *
  *  \param exec The execution policy to use for parallelization.
@@ -234,7 +240,7 @@ template<typename DerivedPolicy,
          typename UnaryFunction,
          typename T,
          typename AssociativeOperator>
-__host__ __device__
+THRUST_HOST_DEVICE
   OutputIterator transform_exclusive_scan(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
                                           InputIterator first,
                                           InputIterator last,
@@ -254,6 +260,8 @@ __host__ __device__
  *  and the result of <tt>binary_op(init, unary_op(\*first))</tt> is assigned
  *  to <tt>\*(result + 1)</tt>, and so on.  The transform scan operation is 
  *  permitted to be in-place.
+ *
+ *  Results from this function may vary from run to run depending on the inputs provided.
  *
  *  \param first The beginning of the input sequence.
  *  \param last The end of the input sequence.

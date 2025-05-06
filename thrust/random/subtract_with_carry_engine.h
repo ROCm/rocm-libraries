@@ -24,8 +24,8 @@
 #include <thrust/detail/config.h>
 #include <thrust/random/detail/random_core_access.h>
 
-#include <thrust/detail/cstdint.h>
 #include <cstddef> // for size_t
+#include <cstdint>
 #include <iostream>
 
 THRUST_NAMESPACE_BEGIN
@@ -78,7 +78,7 @@ template<typename UIntType, size_t w, size_t s, size_t r>
     /*! \typedef result_type
      *  \brief The type of the unsigned integer produced by this \p subtract_with_carry_engine.
      */
-    typedef UIntType result_type;
+    using result_type = UIntType;
 
     // engine characteristics
 
@@ -113,7 +113,7 @@ template<typename UIntType, size_t w, size_t s, size_t r>
      *  
      *  \param value The seed used to intialize this \p subtract_with_carry_engine's state.
      */
-    __host__ __device__
+    THRUST_HOST_DEVICE
     explicit subtract_with_carry_engine(result_type value = default_seed);
 
     /*! This method initializes this \p subtract_with_carry_engine's state, and optionally accepts
@@ -121,7 +121,7 @@ template<typename UIntType, size_t w, size_t s, size_t r>
      *
      *  \param value The seed used to initializes this \p subtract_with_carry_engine's state.
      */
-    __host__ __device__
+    THRUST_HOST_DEVICE
     void seed(result_type value = default_seed);
 
     // generating functions
@@ -129,7 +129,7 @@ template<typename UIntType, size_t w, size_t s, size_t r>
     /*! This member function produces a new random value and updates this \p subtract_with_carry_engine's state.
      *  \return A new random number.
      */
-    __host__ __device__
+    THRUST_HOST_DEVICE
     result_type operator()(void);
 
     /*! This member function advances this \p subtract_with_carry_engine's state a given number of times
@@ -138,7 +138,7 @@ template<typename UIntType, size_t w, size_t s, size_t r>
      *  \param z The number of random values to discard.
      *  \note This function is provided because an implementation may be able to accelerate it.
      */
-    __host__ __device__
+    THRUST_HOST_DEVICE
     void discard(unsigned long long z);
 
     /*! \cond
@@ -150,7 +150,7 @@ template<typename UIntType, size_t w, size_t s, size_t r>
 
     friend struct thrust::random::detail::random_core_access;
 
-    __host__ __device__
+    THRUST_HOST_DEVICE
     bool equal(const subtract_with_carry_engine &rhs) const;
 
     template<typename CharT, typename Traits>
@@ -170,7 +170,7 @@ template<typename UIntType, size_t w, size_t s, size_t r>
  *  \return \c true if \p lhs is equal to \p rhs; \c false, otherwise.
  */
 template<typename UIntType_, size_t w_, size_t s_, size_t r_>
-__host__ __device__
+THRUST_HOST_DEVICE
 bool operator==(const subtract_with_carry_engine<UIntType_,w_,s_,r_> &lhs,
                 const subtract_with_carry_engine<UIntType_,w_,s_,r_> &rhs);
 
@@ -181,7 +181,7 @@ bool operator==(const subtract_with_carry_engine<UIntType_,w_,s_,r_> &lhs,
  *  \return \c true if \p lhs is not equal to \p rhs; \c false, otherwise.
  */
 template<typename UIntType_, size_t w_, size_t s_, size_t r_>
-__host__ __device__
+THRUST_HOST_DEVICE
 bool operator!=(const subtract_with_carry_engine<UIntType_,w_,s_,r_>&lhs,
                 const subtract_with_carry_engine<UIntType_,w_,s_,r_>&rhs);
 
@@ -226,7 +226,7 @@ operator>>(std::basic_istream<CharT,Traits> &is,
  *  \note The 10000th consecutive invocation of a default-constructed object of type \p ranlux24_base
  *        shall produce the value \c 7937952 .
  */
-typedef subtract_with_carry_engine<thrust::detail::uint32_t, 24, 10, 24> ranlux24_base;
+using ranlux24_base = subtract_with_carry_engine<std::uint32_t, 24, 10, 24>;
 
 
 // XXX N2111 uses uint_fast64_t here
@@ -237,7 +237,7 @@ typedef subtract_with_carry_engine<thrust::detail::uint32_t, 24, 10, 24> ranlux2
  *  \note The 10000th consecutive invocation of a default-constructed object of type \p ranlux48_base
  *        shall produce the value \c 192113843633948 .
  */
-typedef subtract_with_carry_engine<thrust::detail::uint64_t, 48,  5, 12> ranlux48_base;
+using ranlux48_base = subtract_with_carry_engine<std::uint64_t, 48, 5, 12>;
 
 /*! \} // end predefined_random
  */

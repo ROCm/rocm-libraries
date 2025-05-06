@@ -30,7 +30,6 @@
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
 
-#include <thrust/detail/cstdint.h>
 #include <thrust/detail/minmax.h>
 #include <thrust/detail/temporary_array.h>
 #include <thrust/detail/type_traits.h>
@@ -44,13 +43,14 @@
 #include <thrust/type_traits/remove_cvref.h>
 
 #include <cub/device/device_adjacent_difference.cuh>
-#include <cub/device/device_select.cuh>
 #include <cub/util_math.cuh>
+
+#include <cstdint>
 
 THRUST_NAMESPACE_BEGIN
 
 template <typename DerivedPolicy, typename InputIterator, typename OutputIterator, typename BinaryFunction>
-__host__ __device__ OutputIterator
+_CCCL_HOST_DEVICE OutputIterator
 adjacent_difference(
     const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
     InputIterator                                               first,
@@ -86,13 +86,13 @@ namespace __adjacent_difference {
     using Dispatch32 = cub::DispatchAdjacentDifference<InputIt,
                                                        OutputIt,
                                                        BinaryOp,
-                                                       thrust::detail::int32_t,
+                                                       std::int32_t,
                                                        may_alias,
                                                        read_left>;
     using Dispatch64 = cub::DispatchAdjacentDifference<InputIt,
                                                        OutputIt,
                                                        BinaryOp,
-                                                       thrust::detail::int64_t,
+                                                       std::int64_t,
                                                        may_alias,
                                                        read_left>;
 
@@ -188,8 +188,8 @@ namespace __adjacent_difference {
     std::size_t storage_size = 0;
     cudaStream_t stream = cuda_cub::stream(policy);
 
-    using UnwrapInputIt = thrust::detail::try_unwrap_contiguous_iterator_return_t<InputIt>;
-    using UnwrapOutputIt = thrust::detail::try_unwrap_contiguous_iterator_return_t<OutputIt>;
+    using UnwrapInputIt  = thrust::try_unwrap_contiguous_iterator_t<InputIt>;
+    using UnwrapOutputIt = thrust::try_unwrap_contiguous_iterator_t<OutputIt>;
 
     using InputValueT = thrust::iterator_value_t<UnwrapInputIt>;
     using OutputValueT = thrust::iterator_value_t<UnwrapOutputIt>;
@@ -199,8 +199,8 @@ namespace __adjacent_difference {
       std::is_pointer<UnwrapOutputIt>::value &&
       std::is_same<InputValueT, OutputValueT>::value;
 
-    auto first_unwrap = thrust::detail::try_unwrap_contiguous_iterator(first);
-    auto result_unwrap = thrust::detail::try_unwrap_contiguous_iterator(result);
+    auto first_unwrap  = thrust::try_unwrap_contiguous_iterator(first);
+    auto result_unwrap = thrust::try_unwrap_contiguous_iterator(result);
 
     thrust::detail::integral_constant<bool, can_compare_iterators> comparable;
 
@@ -215,7 +215,7 @@ namespace __adjacent_difference {
     cuda_cub::throw_on_error(status, "adjacent_difference failed on 1st step");
 
     // Allocate temporary storage.
-    thrust::detail::temporary_array<thrust::detail::uint8_t, Derived>
+    thrust::detail::temporary_array<std::uint8_t, Derived>
       tmp(policy, storage_size);
 
     status = doit_step(static_cast<void *>(tmp.data().get()),
@@ -240,12 +240,12 @@ namespace __adjacent_difference {
 // Thrust API entry points
 //-------------------------
 
-__thrust_exec_check_disable__
+_CCCL_EXEC_CHECK_DISABLE
 template <class Derived,
           class InputIt,
           class OutputIt,
           class BinaryOp>
-OutputIt __host__ __device__
+OutputIt _CCCL_HOST_DEVICE
 adjacent_difference(execution_policy<Derived> &policy,
                     InputIt                    first,
                     InputIt                    last,
@@ -269,13 +269,13 @@ adjacent_difference(execution_policy<Derived> &policy,
 template <class Derived,
           class InputIt,
           class OutputIt>
-OutputIt __host__ __device__
+OutputIt _CCCL_HOST_DEVICE
 adjacent_difference(execution_policy<Derived> &policy,
                     InputIt                    first,
                     InputIt                    last,
                     OutputIt                   result)
 {
-  typedef typename iterator_traits<InputIt>::value_type input_type;
+  using input_type = typename iterator_traits<InputIt>::value_type;
   return cuda_cub::adjacent_difference(policy,
                                        first,
                                        last,

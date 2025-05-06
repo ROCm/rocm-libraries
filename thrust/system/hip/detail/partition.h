@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019-2023, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2025, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -31,17 +31,18 @@
 
 #include <thrust/detail/alignment.h>
 #include <thrust/detail/config.h>
-#include <thrust/detail/cstdint.h>
 #include <thrust/detail/temporary_array.h>
 #include <thrust/distance.h>
 #include <thrust/pair.h>
 #include <thrust/partition.h>
 #include <thrust/system/hip/detail/find.h>
+#include <thrust/system/hip/detail/general/temp_storage.h>
 #include <thrust/system/hip/detail/par_to_seq.h>
 #include <thrust/system/hip/detail/reverse.h>
 #include <thrust/system/hip/detail/uninitialized_copy.h>
 #include <thrust/system/hip/detail/util.h>
 
+#include <cstdint>
 
 // rocprim include
 #include <rocprim/rocprim.hpp>
@@ -67,9 +68,12 @@ namespace __partition
     {
         using size_type  = typename iterator_traits<InputIt>::difference_type;
         using value_type = typename iterator_traits<InputIt>::value_type;
+        using namespace thrust::system::hip_rocprim::temp_storage;
 
-        size_type   num_items          = static_cast<size_type>(thrust::distance(first, last));
         size_t      temp_storage_bytes = 0;
+        value_type* d_partition_out    = nullptr;
+        size_type*  d_num_selected_out = nullptr;
+        size_type   num_items          = static_cast<size_type>(thrust::distance(first, last));
         hipStream_t stream             = hip_rocprim::stream(policy);
         bool        debug_sync         = THRUST_HIP_DEBUG_SYNC_FLAG;
 
@@ -80,26 +84,31 @@ namespace __partition
         hip_rocprim::throw_on_error(rocprim::partition(nullptr,
                                                        temp_storage_bytes,
                                                        first,
-                                                       (value_type*){nullptr},
-                                                       (size_type*){nullptr},
+                                                       d_partition_out,
+                                                       d_num_selected_out,
                                                        num_items,
                                                        predicate,
                                                        stream,
                                                        debug_sync),
                                     "partition failed on 1st step");
 
-        size_t storage_size = sizeof(size_type) + temp_storage_bytes + sizeof(value_type) * num_items;
+        size_t storage_size;
+        void*  ptr       = nullptr;
+        void*  temp_stor = nullptr;
+
+        auto l_part = make_linear_partition(make_partition(&temp_stor, temp_storage_bytes),
+                                            ptr_aligned_array(&d_num_selected_out, 1),
+                                            ptr_aligned_array(&d_partition_out, num_items));
+
+        // Calculate storage_size including alignment
+        hip_rocprim::throw_on_error(partition(ptr, storage_size, l_part));
 
         // Allocate temporary storage.
-        thrust::detail::temporary_array<thrust::detail::uint8_t, Derived>
-            tmp(policy, storage_size);
-        void *ptr = static_cast<void*>(tmp.data().get());
+        thrust::detail::temporary_array<std::uint8_t, Derived> tmp(policy, storage_size);
+        ptr = static_cast<void*>(tmp.data().get());
 
-        size_type* d_num_selected_out = reinterpret_cast<size_type*>(
-            static_cast<char*>(ptr) + temp_storage_bytes);
-
-        value_type* d_partition_out = reinterpret_cast<value_type*>(
-            reinterpret_cast<char*>(d_num_selected_out) + sizeof(size_type));
+        // Create pointers with alignment
+        hip_rocprim::throw_on_error(partition(ptr, storage_size, l_part));
 
         hip_rocprim::throw_on_error(rocprim::partition(ptr,
                                                        temp_storage_bytes,
@@ -136,11 +145,15 @@ namespace __partition
     {
         using size_type  = typename iterator_traits<InputIt>::difference_type;
         using value_type = typename iterator_traits<InputIt>::value_type;
+        using namespace thrust::system::hip_rocprim::temp_storage;
 
-        size_type   num_items          = static_cast<size_type>(thrust::distance(first, last));
-        size_t      temp_storage_bytes = 0;
-        hipStream_t stream             = hip_rocprim::stream(policy);
-        bool        debug_sync         = THRUST_HIP_DEBUG_SYNC_FLAG;
+        size_t                                           temp_storage_bytes = 0;
+        thrust::transform_iterator<Predicate, StencilIt> flags {stencil, predicate};
+        value_type*                                      d_partition_out    = nullptr;
+        size_type*                                       d_num_selected_out = nullptr;
+        size_type   num_items  = static_cast<size_type>(thrust::distance(first, last));
+        hipStream_t stream     = hip_rocprim::stream(policy);
+        bool        debug_sync = THRUST_HIP_DEBUG_SYNC_FLAG;
 
         if(num_items <= 0)
             return thrust::make_pair(selected_result, rejected_result);
@@ -149,36 +162,36 @@ namespace __partition
         hip_rocprim::throw_on_error(rocprim::partition(nullptr,
                                                        temp_storage_bytes,
                                                        first,
-                                                       (bool*){nullptr},
-                                                       (value_type*){nullptr},
-                                                       (size_type*){nullptr},
+                                                       flags,
+                                                       d_partition_out,
+                                                       d_num_selected_out,
                                                        num_items,
                                                        stream,
                                                        debug_sync),
                                     "partition failed on 1st step");
 
-        size_t storage_size = sizeof(size_type) + temp_storage_bytes + sizeof(value_type) * num_items + sizeof(bool) * num_items;
+        size_t storage_size;
+        void*  ptr       = nullptr;
+        void*  temp_stor = nullptr;
+
+        auto l_part = make_linear_partition(make_partition(&temp_stor, temp_storage_bytes),
+                                            ptr_aligned_array(&d_num_selected_out, 1),
+                                            ptr_aligned_array(&d_partition_out, num_items));
+
+        // Calculate storage_size including alignment
+        hip_rocprim::throw_on_error(partition(ptr, storage_size, l_part));
 
         // Allocate temporary storage.
-        thrust::detail::temporary_array<thrust::detail::uint8_t, Derived>
-            tmp(policy, storage_size);
-        void *ptr = static_cast<void*>(tmp.data().get());
+        thrust::detail::temporary_array<std::uint8_t, Derived> tmp(policy, storage_size);
+        ptr = static_cast<void*>(tmp.data().get());
 
-        size_type* d_num_selected_out = reinterpret_cast<size_type*>(
-            static_cast<char*>(ptr) + temp_storage_bytes);
-
-        value_type* d_partition_out = reinterpret_cast<value_type*>(
-            reinterpret_cast<char*>(d_num_selected_out) + sizeof(size_type));
-
-        bool* d_flags = reinterpret_cast<bool*>(reinterpret_cast<char*>(d_partition_out)
-                                          + sizeof(value_type) * num_items);
-
-        hip_rocprim::transform(policy, stencil, stencil + num_items, d_flags, predicate);
+        // Create pointers with alignment
+        hip_rocprim::throw_on_error(partition(ptr, storage_size, l_part));
 
         hip_rocprim::throw_on_error(rocprim::partition(ptr,
                                                        temp_storage_bytes,
                                                        first,
-                                                       d_flags,
+                                                       flags,
                                                        d_partition_out,
                                                        d_num_selected_out,
                                                        num_items,
@@ -256,11 +269,12 @@ namespace __partition
                                                RejectedOutIt              rejected_result,
                                                Predicate                  predicate)
     {
-        using size_type  = typename iterator_traits<InputIt>::difference_type;
-        using value_type = typename iterator_traits<InputIt>::value_type;
+        using size_type = typename iterator_traits<InputIt>::difference_type;
+        using namespace thrust::system::hip_rocprim::temp_storage;
 
-        size_type   num_items          = static_cast<size_type>(thrust::distance(first, last));
         size_t      temp_storage_bytes = 0;
+        size_type*  d_num_selected_out = nullptr;
+        size_type   num_items          = static_cast<size_type>(thrust::distance(first, last));
         hipStream_t stream             = hip_rocprim::stream(policy);
         bool        debug_sync         = THRUST_HIP_DEBUG_SYNC_FLAG;
 
@@ -270,23 +284,31 @@ namespace __partition
         hip_rocprim::throw_on_error(rocprim::partition_two_way(nullptr,
                                                                temp_storage_bytes,
                                                                first,
-                                                               (value_type*){nullptr},
-                                                               (value_type*){nullptr},
-                                                               (size_type*){nullptr},
+                                                               selected_result,
+                                                               rejected_result,
+                                                               d_num_selected_out,
                                                                num_items,
                                                                predicate,
                                                                stream,
                                                                debug_sync),
                                     "partition failed on 1st step");
 
-        size_t storage_size = sizeof(size_type) + temp_storage_bytes;
+        size_t storage_size;
+        void*  ptr       = nullptr;
+        void*  temp_stor = nullptr;
+
+        auto l_part = make_linear_partition(make_partition(&temp_stor, temp_storage_bytes),
+                                            ptr_aligned_array(&d_num_selected_out, 1));
+
+        // Calculate storage_size including alignment
+        hip_rocprim::throw_on_error(partition(ptr, storage_size, l_part));
 
         // Allocate temporary storage.
-        thrust::detail::temporary_array<thrust::detail::uint8_t, Derived> tmp(policy, storage_size);
-        void* ptr = static_cast<void*>(tmp.data().get());
+        thrust::detail::temporary_array<std::uint8_t, Derived> tmp(policy, storage_size);
+        ptr = static_cast<void*>(tmp.data().get());
 
-        size_type* d_num_selected_out
-            = reinterpret_cast<size_type*>(static_cast<char*>(ptr) + temp_storage_bytes);
+        // Create pointers with alignment
+        hip_rocprim::throw_on_error(partition(ptr, storage_size, l_part));
 
         hip_rocprim::throw_on_error(rocprim::partition_two_way(ptr,
                                                                temp_storage_bytes,
@@ -321,13 +343,15 @@ namespace __partition
                                                RejectedOutIt              rejected_result,
                                                Predicate                  predicate)
     {
-        using size_type  = typename iterator_traits<InputIt>::difference_type;
-        using value_type = typename iterator_traits<InputIt>::value_type;
+        using size_type = typename iterator_traits<InputIt>::difference_type;
+        using namespace thrust::system::hip_rocprim::temp_storage;
 
-        size_type   num_items          = static_cast<size_type>(thrust::distance(first, last));
-        size_t      temp_storage_bytes = 0;
-        hipStream_t stream             = hip_rocprim::stream(policy);
-        bool        debug_sync         = THRUST_HIP_DEBUG_SYNC_FLAG;
+        size_t                                           temp_storage_bytes = 0;
+        thrust::transform_iterator<Predicate, StencilIt> flags {stencil, predicate};
+        size_type*                                       d_num_selected_out = nullptr;
+        size_type   num_items  = static_cast<size_type>(thrust::distance(first, last));
+        hipStream_t stream     = hip_rocprim::stream(policy);
+        bool        debug_sync = THRUST_HIP_DEBUG_SYNC_FLAG;
 
         if(num_items <= 0)
             return thrust::make_pair(selected_result, rejected_result);
@@ -335,33 +359,36 @@ namespace __partition
         hip_rocprim::throw_on_error(rocprim::partition_two_way(nullptr,
                                                                temp_storage_bytes,
                                                                first,
-                                                               (value_type*){nullptr},
-                                                               (value_type*){nullptr},
-                                                               (size_type*){nullptr},
+                                                               flags,
+                                                               selected_result,
+                                                               rejected_result,
+                                                               d_num_selected_out,
                                                                num_items,
-                                                               predicate,
                                                                stream,
                                                                debug_sync),
                                     "partition failed on 1st step");
 
-        size_t storage_size = sizeof(size_type) + temp_storage_bytes + sizeof(bool) * num_items;
+        size_t     storage_size;
+        void*      ptr       = nullptr;
+        void*      temp_stor = nullptr;
+
+        auto l_part = make_linear_partition(make_partition(&temp_stor, temp_storage_bytes),
+                                            ptr_aligned_array(&d_num_selected_out, 1));
+
+        // Calculate storage_size including alignment
+        hip_rocprim::throw_on_error(partition(ptr, storage_size, l_part));
 
         // Allocate temporary storage.
-        thrust::detail::temporary_array<thrust::detail::uint8_t, Derived> tmp(policy, storage_size);
-        void* ptr = static_cast<void*>(tmp.data().get());
+        thrust::detail::temporary_array<std::uint8_t, Derived> tmp(policy, storage_size);
+        ptr = static_cast<void*>(tmp.data().get());
 
-        size_type* d_num_selected_out
-            = reinterpret_cast<size_type*>(static_cast<char*>(ptr) + temp_storage_bytes);
-
-        bool* d_flags = reinterpret_cast<bool*>(reinterpret_cast<char*>(d_num_selected_out)
-                                                + sizeof(size_type));
-
-        hip_rocprim::transform(policy, stencil, stencil + num_items, d_flags, predicate);
+        // Create pointers with alignment
+        hip_rocprim::throw_on_error(partition(ptr, storage_size, l_part));
 
         hip_rocprim::throw_on_error(rocprim::partition_two_way(ptr,
                                                                temp_storage_bytes,
                                                                first,
-                                                               d_flags,
+                                                               flags,
                                                                selected_result,
                                                                rejected_result,
                                                                d_num_selected_out,
@@ -381,7 +408,7 @@ namespace __partition
 // Thrust API entry points
 //-------------------------
 
-__thrust_exec_check_disable__ template <class Derived,
+THRUST_EXEC_CHECK_DISABLE template <class Derived,
                                         class InputIt,
                                         class StencilIt,
                                         class SelectedOutIt,
@@ -399,7 +426,7 @@ partition_copy(execution_policy<Derived>& policy,
     // struct workaround is required for HIP-clang
     struct workaround
     {
-        __host__ static pair<SelectedOutIt, RejectedOutIt> par(execution_policy<Derived>& policy,
+        THRUST_HOST static pair<SelectedOutIt, RejectedOutIt> par(execution_policy<Derived>& policy,
                                                                InputIt                    first,
                                                                InputIt                    last,
                                                                StencilIt                  stencil,
@@ -411,7 +438,7 @@ partition_copy(execution_policy<Derived>& policy,
                 policy, first, last, stencil, selected_result, rejected_result, predicate);
         }
 
-        __device__ static pair<SelectedOutIt, RejectedOutIt> seq(execution_policy<Derived>& policy,
+        THRUST_DEVICE static pair<SelectedOutIt, RejectedOutIt> seq(execution_policy<Derived>& policy,
                                                                  InputIt                    first,
                                                                  InputIt                    last,
                                                                  StencilIt                  stencil,
@@ -435,7 +462,7 @@ partition_copy(execution_policy<Derived>& policy,
   #endif
 }
 
-__thrust_exec_check_disable__ template <class Derived,
+THRUST_EXEC_CHECK_DISABLE template <class Derived,
                                         class InputIt,
                                         class SelectedOutIt,
                                         class RejectedOutIt,
@@ -451,7 +478,7 @@ partition_copy(execution_policy<Derived>& policy,
   // struct workaround is required for HIP-clang
   struct workaround
   {
-        __host__
+        THRUST_HOST
         static pair<SelectedOutIt, RejectedOutIt> par(
           execution_policy<Derived>& policy,
           InputIt                    first,
@@ -464,7 +491,7 @@ partition_copy(execution_policy<Derived>& policy,
                 policy, first, last, selected_result, rejected_result, predicate);
         }
 
-        __device__
+        THRUST_DEVICE
         static pair<SelectedOutIt, RejectedOutIt> seq(
           execution_policy<Derived>& policy,
           InputIt                    first,
@@ -488,7 +515,7 @@ partition_copy(execution_policy<Derived>& policy,
     #endif
 }
 
-__thrust_exec_check_disable__ template <class Derived,
+THRUST_EXEC_CHECK_DISABLE template <class Derived,
                                         class InputIt,
                                         class SelectedOutIt,
                                         class RejectedOutIt,
@@ -504,7 +531,7 @@ stable_partition_copy(execution_policy<Derived>& policy,
     // struct workaround is required for HIP-clang
     struct workaround
     {
-        __host__ static pair<SelectedOutIt, RejectedOutIt> par(execution_policy<Derived>& policy,
+        THRUST_HOST static pair<SelectedOutIt, RejectedOutIt> par(execution_policy<Derived>& policy,
                                                                InputIt                    first,
                                                                InputIt                    last,
                                                                SelectedOutIt selected_result,
@@ -515,7 +542,7 @@ stable_partition_copy(execution_policy<Derived>& policy,
                 policy, first, last, selected_result, rejected_result, predicate);
         }
 
-        __device__ static pair<SelectedOutIt, RejectedOutIt> seq(execution_policy<Derived>& policy,
+        THRUST_DEVICE static pair<SelectedOutIt, RejectedOutIt> seq(execution_policy<Derived>& policy,
                                                                  InputIt                    first,
                                                                  InputIt                    last,
                                                                  SelectedOutIt selected_result,
@@ -537,7 +564,7 @@ stable_partition_copy(execution_policy<Derived>& policy,
   #endif
 }
 
-__thrust_exec_check_disable__ template <class Derived,
+THRUST_EXEC_CHECK_DISABLE template <class Derived,
                                         class InputIt,
                                         class StencilIt,
                                         class SelectedOutIt,
@@ -555,7 +582,7 @@ stable_partition_copy(execution_policy<Derived>& policy,
   // struct workaround is required for HIP-clang
   struct workaround
   {
-      __host__
+      THRUST_HOST
       static pair<SelectedOutIt, RejectedOutIt> par(
         execution_policy<Derived>& policy,
         InputIt                    first,
@@ -568,7 +595,7 @@ stable_partition_copy(execution_policy<Derived>& policy,
           return __partition::partition_copy(
               policy, first, last, stencil, selected_result, rejected_result, predicate);
       }
-      __device__
+      THRUST_DEVICE
       static pair<SelectedOutIt, RejectedOutIt> seq(
         execution_policy<Derived>& policy,
         InputIt                    first,
@@ -597,7 +624,7 @@ stable_partition_copy(execution_policy<Derived>& policy,
 }
 
 /// inplace
-__thrust_exec_check_disable__ template <class Derived,
+THRUST_EXEC_CHECK_DISABLE template <class Derived,
                                         class Iterator,
                                         class StencilIt,
                                         class Predicate>
@@ -611,7 +638,7 @@ partition(execution_policy<Derived>& policy,
   // struct workaround is required for HIP-clang
   struct workaround
   {
-      __host__
+      THRUST_HOST
       static Iterator par(execution_policy<Derived>& policy,
                           Iterator                   first,
                           Iterator                   last,
@@ -628,7 +655,7 @@ partition(execution_policy<Derived>& policy,
         hip_rocprim::reverse<Derived,Iterator>(policy, result, last);
         return result;
       }
-      __device__
+      THRUST_DEVICE
       static Iterator seq(execution_policy<Derived>& policy,
                           Iterator                   first,
                           Iterator                   last,
@@ -651,7 +678,7 @@ partition(execution_policy<Derived>& policy,
   #endif
 }
 
-__thrust_exec_check_disable__ template <class Derived, class Iterator, class Predicate>
+THRUST_EXEC_CHECK_DISABLE template <class Derived, class Iterator, class Predicate>
 Iterator THRUST_HIP_FUNCTION
 partition(execution_policy<Derived>& policy,
           Iterator                   first,
@@ -661,7 +688,7 @@ partition(execution_policy<Derived>& policy,
   // struct workaround is required for HIP-clang
   struct workaround
   {
-      __host__
+      THRUST_HOST
       static Iterator par(execution_policy<Derived>& policy,
                           Iterator                   first,
                           Iterator                   last,
@@ -669,7 +696,7 @@ partition(execution_policy<Derived>& policy,
       {
           return __partition::partition_inplace(policy, first, last, predicate);
       }
-      __device__
+      THRUST_DEVICE
       static Iterator seq(execution_policy<Derived>& policy,
                           Iterator                   first,
                           Iterator                   last,
@@ -691,7 +718,7 @@ partition(execution_policy<Derived>& policy,
 
 }
 
-__thrust_exec_check_disable__ template <class Derived,
+THRUST_EXEC_CHECK_DISABLE template <class Derived,
                                         class Iterator,
                                         class StencilIt,
                                         class Predicate>
@@ -705,7 +732,7 @@ stable_partition(execution_policy<Derived>& policy,
   // struct workaround is required for HIP-clang
   struct workaround
   {
-      __host__
+      THRUST_HOST
       static Iterator par(execution_policy<Derived>& policy,
                           Iterator                   first,
                           Iterator                   last,
@@ -717,7 +744,7 @@ stable_partition(execution_policy<Derived>& policy,
           return result;
       }
 
-      __device__
+      THRUST_DEVICE
       static Iterator seq(execution_policy<Derived>& policy,
                           Iterator                   first,
                           Iterator                   last,
@@ -740,7 +767,7 @@ stable_partition(execution_policy<Derived>& policy,
   #endif
 }
 
-__thrust_exec_check_disable__ template <class Derived, class Iterator, class Predicate>
+THRUST_EXEC_CHECK_DISABLE template <class Derived, class Iterator, class Predicate>
 Iterator THRUST_HIP_FUNCTION
 stable_partition(execution_policy<Derived>& policy,
                  Iterator                   first,
@@ -750,7 +777,7 @@ stable_partition(execution_policy<Derived>& policy,
   // struct workaround is required for HIP-clang
   struct workaround
   {
-      __host__
+      THRUST_HOST
       static Iterator par(execution_policy<Derived>& policy,
                           Iterator                   first,
                           Iterator                   last,
@@ -761,7 +788,7 @@ stable_partition(execution_policy<Derived>& policy,
           return result;
       }
 
-      __device__
+      THRUST_DEVICE
       static Iterator seq(execution_policy<Derived>& policy,
                           Iterator                   first,
                           Iterator                   last,

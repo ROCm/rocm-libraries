@@ -76,16 +76,8 @@ struct is_contiguous_iterator_impl;
  * \see THRUST_PROCLAIM_CONTIGUOUS_ITERATOR
  */
 template <typename Iterator>
-#if THRUST_CPP_DIALECT >= 2011
 using is_contiguous_iterator =
-#else
-struct is_contiguous_iterator :
-#endif
-  detail::is_contiguous_iterator_impl<Iterator>
-#if THRUST_CPP_DIALECT < 2011
-{}
-#endif
-;
+  detail::is_contiguous_iterator_impl<Iterator>;
 
 #if THRUST_CPP_DIALECT >= 2014
 /*! \brief <tt>constexpr bool</tt> that is \c true if \c Iterator satisfies
@@ -139,7 +131,11 @@ struct is_libcxx_wrap_iter : false_type {};
 #if defined(_LIBCPP_VERSION)
 template <typename Iterator>
 struct is_libcxx_wrap_iter<
+#  if _LIBCPP_VERSION < 14000 || THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
   _VSTD::__wrap_iter<Iterator>
+#  else
+  std::__wrap_iter<Iterator>
+#  endif
 > : true_type {};
 #endif
 
@@ -225,23 +221,24 @@ struct contiguous_iterator_traits
   using raw_pointer = typename thrust::detail::pointer_traits<
     decltype(&*std::declval<Iterator>())>::raw_pointer;
 };
+} // namespace detail
 
-template <typename Iterator>
-using contiguous_iterator_raw_pointer_t =
-  typename contiguous_iterator_traits<Iterator>::raw_pointer;
+//! Converts a contiguous iterator type to its underlying raw pointer type.
+template <typename ContiguousIterator>
+using unwrap_contiguous_iterator_t = typename detail::contiguous_iterator_traits<ContiguousIterator>::raw_pointer;
 
-// Converts a contiguous iterator to a raw pointer:
-template <typename Iterator>
-__host__ __device__
-contiguous_iterator_raw_pointer_t<Iterator>
-contiguous_iterator_raw_pointer_cast(Iterator it)
+//! Converts a contiguous iterator to its underlying raw pointer.
+template <typename ContiguousIterator>
+THRUST_HOST_DEVICE auto unwrap_contiguous_iterator(ContiguousIterator it)
+  -> unwrap_contiguous_iterator_t<ContiguousIterator>
 {
-  static_assert(thrust::is_contiguous_iterator<Iterator>::value,
-                "contiguous_iterator_raw_pointer_cast called with "
-                "non-contiguous iterator.");
+  static_assert(thrust::is_contiguous_iterator<ContiguousIterator>::value,
+                "unwrap_contiguous_iterator called with non-contiguous iterator.");
   return thrust::raw_pointer_cast(&*it);
 }
 
+namespace detail
+{
 // Implementation for non-contiguous iterators -- passthrough.
 template <typename Iterator,
           bool IsContiguous = thrust::is_contiguous_iterator<Iterator>::value>
@@ -249,36 +246,34 @@ struct try_unwrap_contiguous_iterator_impl
 {
   using type = Iterator;
 
-  static __host__ __device__ type get(Iterator it) { return it; }
+  static THRUST_HOST_DEVICE type get(Iterator it) { return it; }
 };
 
 // Implementation for contiguous iterators -- unwraps to raw pointer.
 template <typename Iterator>
 struct try_unwrap_contiguous_iterator_impl<Iterator, true /*is_contiguous*/>
 {
-  using type = contiguous_iterator_raw_pointer_t<Iterator>;
+  using type = unwrap_contiguous_iterator_t<Iterator>;
 
-  static __host__ __device__ type get(Iterator it)
+  static THRUST_HOST_DEVICE type get(Iterator it)
   {
-    return contiguous_iterator_raw_pointer_cast(it);
+    return unwrap_contiguous_iterator(it);
   }
 };
-
-template <typename Iterator>
-using try_unwrap_contiguous_iterator_return_t =
-  typename try_unwrap_contiguous_iterator_impl<Iterator>::type;
-
-// Casts to a raw pointer if iterator is marked as contiguous, otherwise returns
-// the input iterator.
-template <typename Iterator>
-__host__ __device__
-try_unwrap_contiguous_iterator_return_t<Iterator>
-try_unwrap_contiguous_iterator(Iterator it)
-{
-  return try_unwrap_contiguous_iterator_impl<Iterator>::get(it);
-}
-
 } // namespace detail
+
+//! Takes an iterator type and, if it is contiguous, yields the raw pointer type it represents. Otherwise returns the
+//! iterator type unmodified.
+template <typename Iterator>
+using try_unwrap_contiguous_iterator_t = typename detail::try_unwrap_contiguous_iterator_impl<Iterator>::type;
+
+//! Takes an iterator and, if it is contiguous, unwraps it to the raw pointer it represents. Otherwise returns the
+//! iterator unmodified.
+template <typename Iterator>
+THRUST_HOST_DEVICE auto try_unwrap_contiguous_iterator(Iterator it) -> try_unwrap_contiguous_iterator_t<Iterator>
+{
+  return detail::try_unwrap_contiguous_iterator_impl<Iterator>::get(it);
+}
 
 /*! \endcond
  */

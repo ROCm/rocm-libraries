@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -24,7 +24,7 @@
 namespace unittest
 {
 
-class UnitTestException
+class UnitTestException 
 {
     public:
     std::string message;
@@ -33,12 +33,12 @@ class UnitTestException
     UnitTestException(const std::string& msg) : message(msg) {}
 
     friend std::ostream& operator<<(std::ostream& os, const UnitTestException& e)
-    {
-        return os << e.message;
+    { 
+        return os << e.message;  
     }
 
     template <typename T>
-    UnitTestException& operator<<(const T& t)
+    UnitTestException& operator<<(const T& t) 
     {
         std::ostringstream oss;
         oss << t;
@@ -48,7 +48,7 @@ class UnitTestException
 };
 
 
-class UnitTestError   : public UnitTestException
+class UnitTestError   : public UnitTestException 
 {
     public:
     UnitTestError() {}

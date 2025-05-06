@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -108,7 +108,7 @@ TYPED_TEST(TransformReduceIntegerPrimitiveTests, TestTransformReduce)
             SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> h_data = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
+                size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
 
             thrust::device_vector<T> d_data = h_data;
 
@@ -139,7 +139,7 @@ TYPED_TEST(TransformReduceIntegerPrimitiveTests, TestTransformReduceFromConst)
             SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> h_data = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
+                size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
 
             thrust::device_vector<T> d_data = h_data;
 

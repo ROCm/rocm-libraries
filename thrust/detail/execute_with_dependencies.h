@@ -17,9 +17,6 @@
 #pragma once
 
 #include <thrust/detail/config.h>
-#include <thrust/detail/cpp11_required.h>
-
-#if THRUST_CPP_DIALECT >= 2011
 
 #include <thrust/detail/type_deduction.h>
 #include <thrust/type_traits/remove_cvref.h>
@@ -60,42 +57,42 @@ private:
     std::tuple<remove_cvref_t<Dependencies>...> dependencies;
 
 public:
-    __host__
-    execute_with_dependencies(super_t const &super, Dependencies && ...dependencies)
-        : super_t(super), dependencies(std::forward<Dependencies>(dependencies)...)
+    THRUST_HOST
+    execute_with_dependencies(super_t const &super, Dependencies && ...deps)
+        : super_t(super), dependencies(std::forward<Dependencies>(deps)...)
     {
     }
 
     template <typename... UDependencies>
-    __host__
+    THRUST_HOST
     execute_with_dependencies(super_t const &super, UDependencies && ...deps)
         : super_t(super), dependencies(THRUST_FWD(deps)...)
     {
     }
 
     template <typename... UDependencies>
-    __host__
+    THRUST_HOST
     execute_with_dependencies(UDependencies && ...deps)
         : dependencies(THRUST_FWD(deps)...)
     {
     }
 
     template <typename... UDependencies>
-    __host__
+    THRUST_HOST
     execute_with_dependencies(super_t const &super, std::tuple<UDependencies...>&& deps)
         : super_t(super), dependencies(std::move(deps))
     {
     }
 
     template <typename... UDependencies>
-    __host__
+    THRUST_HOST
     execute_with_dependencies(std::tuple<UDependencies...>&& deps)
         : dependencies(std::move(deps))
     {
     }
 
     std::tuple<remove_cvref_t<Dependencies>...>
-    __host__
+    THRUST_HOST
     extract_dependencies()
     {
         return std::move(dependencies);
@@ -103,7 +100,7 @@ public:
 
     // Rebinding.
     template<typename ...UDependencies>
-    __host__
+    THRUST_HOST
     execute_with_dependencies<BaseSystem, UDependencies...>
     rebind_after(UDependencies&& ...udependencies) const
     {
@@ -112,14 +109,14 @@ public:
 
     // Rebinding.
     template<typename ...UDependencies>
-    __host__
+    THRUST_HOST
     execute_with_dependencies<BaseSystem, UDependencies...>
     rebind_after(std::tuple<UDependencies...>& udependencies) const
     {
         return { capture_as_dependency(udependencies) };
     }
     template<typename ...UDependencies>
-    __host__
+    THRUST_HOST
     execute_with_dependencies<BaseSystem, UDependencies...>
     rebind_after(std::tuple<UDependencies...>&& udependencies) const
     {
@@ -155,41 +152,41 @@ private:
 
 public:
     template <typename... UDependencies>
-    __host__
+    THRUST_HOST
     execute_with_allocator_and_dependencies(super_t const &super, Allocator a, UDependencies && ...deps)
         : super_t(super), dependencies(THRUST_FWD(deps)...), alloc(a)
     {
     }
 
     template <typename... UDependencies>
-    __host__
+    THRUST_HOST
     execute_with_allocator_and_dependencies(Allocator a, UDependencies && ...deps)
         : dependencies(THRUST_FWD(deps)...), alloc(a)
     {
     }
 
     template <typename... UDependencies>
-    __host__
+    THRUST_HOST
     execute_with_allocator_and_dependencies(super_t const &super, Allocator a, std::tuple<UDependencies...>&& deps)
         : super_t(super), dependencies(std::move(deps)), alloc(a)
     {
     }
 
     template <typename... UDependencies>
-    __host__
+    THRUST_HOST
     execute_with_allocator_and_dependencies(Allocator a, std::tuple<UDependencies...>&& deps)
         : dependencies(std::move(deps)), alloc(a)
     {
     }
 
     std::tuple<remove_cvref_t<Dependencies>...>
-    __host__
+    THRUST_HOST
     extract_dependencies()
     {
         return std::move(dependencies);
     }
 
-    __host__
+    THRUST_HOST
     typename std::add_lvalue_reference<Allocator>::type
     get_allocator()
     {
@@ -198,7 +195,7 @@ public:
 
     // Rebinding.
     template<typename ...UDependencies>
-    __host__
+    THRUST_HOST
     execute_with_allocator_and_dependencies<Allocator, BaseSystem, UDependencies...>
     rebind_after(UDependencies&& ...udependencies) const
     {
@@ -207,14 +204,14 @@ public:
 
     // Rebinding.
     template<typename ...UDependencies>
-    __host__
+    THRUST_HOST
     execute_with_allocator_and_dependencies<Allocator, BaseSystem, UDependencies...>
     rebind_after(std::tuple<UDependencies...>& udependencies) const
     {
         return { alloc, capture_as_dependency(udependencies) };
     }
     template<typename ...UDependencies>
-    __host__
+    THRUST_HOST
     execute_with_allocator_and_dependencies<Allocator, BaseSystem, UDependencies...>
     rebind_after(std::tuple<UDependencies...>&& udependencies) const
     {
@@ -223,14 +220,14 @@ public:
 };
 
 template<template<typename> class BaseSystem, typename ...Dependencies>
-__host__
+THRUST_HOST
 std::tuple<remove_cvref_t<Dependencies>...>
 extract_dependencies(thrust::detail::execute_with_dependencies<BaseSystem, Dependencies...>&& system)
 {
     return std::move(system).extract_dependencies();
 }
 template<template<typename> class BaseSystem, typename ...Dependencies>
-__host__
+THRUST_HOST
 std::tuple<remove_cvref_t<Dependencies>...>
 extract_dependencies(thrust::detail::execute_with_dependencies<BaseSystem, Dependencies...>& system)
 {
@@ -238,14 +235,14 @@ extract_dependencies(thrust::detail::execute_with_dependencies<BaseSystem, Depen
 }
 
 template<typename Allocator, template<typename> class BaseSystem, typename ...Dependencies>
-__host__
+THRUST_HOST
 std::tuple<remove_cvref_t<Dependencies>...>
 extract_dependencies(thrust::detail::execute_with_allocator_and_dependencies<Allocator, BaseSystem, Dependencies...>&& system)
 {
     return std::move(system).extract_dependencies();
 }
 template<typename Allocator, template<typename> class BaseSystem, typename ...Dependencies>
-__host__
+THRUST_HOST
 std::tuple<remove_cvref_t<Dependencies>...>
 extract_dependencies(thrust::detail::execute_with_allocator_and_dependencies<Allocator, BaseSystem, Dependencies...>& system)
 {
@@ -253,7 +250,7 @@ extract_dependencies(thrust::detail::execute_with_allocator_and_dependencies<All
 }
 
 template<typename System>
-__host__
+THRUST_HOST
 std::tuple<>
 extract_dependencies(System &&)
 {
@@ -264,4 +261,3 @@ extract_dependencies(System &&)
 
 THRUST_NAMESPACE_END
 
-#endif // THRUST_CPP_DIALECT >= 2011

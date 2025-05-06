@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -25,26 +25,24 @@
 #include <thrust/iterator/retag.h>
 
 
-template<typename T>
+template <typename T>
 struct is_even
-  : thrust::unary_function<T,bool>
 {
-    __host__ __device__
+    THRUST_HOST_DEVICE
     bool operator()(T x) { return (static_cast<unsigned int>(x) & 1) == 0; }
 };
 
-template<typename T>
+template <typename T>
 struct is_true
-  : thrust::unary_function<T,bool>
 {
-    __host__ __device__
+    THRUST_HOST_DEVICE
     bool operator()(T x) { return x ? true : false; }
 };
 
 template<typename Vector>
 void TestRemoveSimple(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     Vector data(5);
     data[0] =  1;
@@ -68,7 +66,7 @@ DECLARE_VECTOR_UNITTEST(TestRemoveSimple);
 
 template<typename ForwardIterator,
          typename T>
-__host__ __device__
+THRUST_HOST_DEVICE
 ForwardIterator remove(my_system &system,
                        ForwardIterator first,
                        ForwardIterator,
@@ -92,7 +90,7 @@ DECLARE_UNITTEST(TestRemoveDispatchExplicit);
 
 template<typename ForwardIterator,
          typename T>
-__host__ __device__
+THRUST_HOST_DEVICE
 ForwardIterator remove(my_tag,
                        ForwardIterator first,
                        ForwardIterator,
@@ -118,7 +116,7 @@ DECLARE_UNITTEST(TestRemoveDispatchImplicit);
 template<typename Vector>
 void TestRemoveCopySimple(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     Vector data(5);
     data[0] =  1;
@@ -146,7 +144,7 @@ DECLARE_VECTOR_UNITTEST(TestRemoveCopySimple);
 template<typename InputIterator,
          typename OutputIterator,
          typename T>
-__host__ __device__
+THRUST_HOST_DEVICE
 OutputIterator remove_copy(my_system &system,
                            InputIterator,
                            InputIterator,
@@ -176,7 +174,7 @@ DECLARE_UNITTEST(TestRemoveCopyDispatchExplicit);
 template<typename InputIterator,
          typename OutputIterator,
          typename T>
-__host__ __device__
+THRUST_HOST_DEVICE
 OutputIterator remove_copy(my_tag,
                            InputIterator,
                            InputIterator,
@@ -204,7 +202,7 @@ DECLARE_UNITTEST(TestRemoveCopyDispatchImplicit);
 template<typename Vector>
 void TestRemoveIfSimple(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     Vector data(5);
     data[0] =  1;
@@ -228,7 +226,7 @@ DECLARE_INTEGRAL_VECTOR_UNITTEST(TestRemoveIfSimple);
 
 template<typename ForwardIterator,
          typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 ForwardIterator remove_if(my_system &system,
                           ForwardIterator first,
                           ForwardIterator,
@@ -252,7 +250,7 @@ DECLARE_UNITTEST(TestRemoveIfDispatchExplicit);
 
 template<typename ForwardIterator,
          typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 ForwardIterator remove_if(my_tag,
                           ForwardIterator first,
                           ForwardIterator,
@@ -278,7 +276,7 @@ DECLARE_UNITTEST(TestRemoveIfDispatchImplicit);
 template<typename Vector>
 void TestRemoveIfStencilSimple(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     Vector data(5);
     data[0] =  1;
@@ -311,7 +309,7 @@ DECLARE_VECTOR_UNITTEST(TestRemoveIfStencilSimple);
 template<typename ForwardIterator,
          typename InputIterator,
          typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 ForwardIterator remove_if(my_system &system,
                           ForwardIterator first,
                           ForwardIterator,
@@ -341,7 +339,7 @@ DECLARE_UNITTEST(TestRemoveIfStencilDispatchExplicit);
 template<typename ForwardIterator,
          typename InputIterator,
          typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 ForwardIterator remove_if(my_tag,
                           ForwardIterator first,
                           ForwardIterator,
@@ -369,7 +367,7 @@ DECLARE_UNITTEST(TestRemoveIfStencilDispatchImplicit);
 template<typename Vector>
 void TestRemoveCopyIfSimple(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     Vector data(5);
     data[0] =  1;
@@ -397,7 +395,7 @@ DECLARE_INTEGRAL_VECTOR_UNITTEST(TestRemoveCopyIfSimple);
 template<typename InputIterator,
          typename OutputIterator,
          typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 InputIterator remove_copy_if(my_system &system,
                              InputIterator first,
                              InputIterator,
@@ -427,7 +425,7 @@ DECLARE_UNITTEST(TestRemoveCopyIfDispatchExplicit);
 template<typename InputIterator,
          typename OutputIterator,
          typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 InputIterator remove_copy_if(my_tag,
                              InputIterator first,
                              InputIterator,
@@ -455,7 +453,7 @@ DECLARE_UNITTEST(TestRemoveCopyIfDispatchImplicit);
 template<typename Vector>
 void TestRemoveCopyIfStencilSimple(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     Vector data(5);
     data[0] =  1;
@@ -492,7 +490,7 @@ template<typename InputIterator1,
          typename InputIterator2,
          typename OutputIterator,
          typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 OutputIterator remove_copy_if(my_system &system,
                               InputIterator1,
                               InputIterator1,
@@ -525,7 +523,7 @@ template<typename InputIterator1,
          typename InputIterator2,
          typename OutputIterator,
          typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 OutputIterator remove_copy_if(my_tag,
                               InputIterator1,
                               InputIterator1,
@@ -669,11 +667,11 @@ void TestRemoveCopyToDiscardIteratorZipped(const size_t n)
     size_t num_zeros = thrust::count(h_data.begin(), h_data.end(), T(0));
     size_t num_nonzeros = h_data.size() - num_zeros;
 
-    typedef thrust::tuple<typename thrust::host_vector<T>::iterator, thrust::discard_iterator<> >   Tuple1;
-    typedef thrust::tuple<typename thrust::device_vector<T>::iterator, thrust::discard_iterator<> > Tuple2;
+    using Tuple1 = thrust::tuple<typename thrust::host_vector<T>::iterator, thrust::discard_iterator<>>;
+    using Tuple2 = thrust::tuple<typename thrust::device_vector<T>::iterator, thrust::discard_iterator<>>;
 
-    typedef thrust::zip_iterator<Tuple1> ZipIterator1;
-    typedef thrust::zip_iterator<Tuple2> ZipIterator2;
+    using ZipIterator1 = thrust::zip_iterator<Tuple1>;
+    using ZipIterator2 = thrust::zip_iterator<Tuple2>;
 
     ZipIterator1 h_result =
       thrust::remove_copy(thrust::make_zip_iterator(thrust::make_tuple(h_data.begin(), h_data.begin())),
@@ -724,7 +722,7 @@ void TestRemoveCopyIfToDiscardIterator(const size_t n)
     thrust::host_vector<T>   h_data = unittest::random_samples<T>(n);
     thrust::device_vector<T> d_data = h_data;
 
-    size_t num_false = thrust::count_if(h_data.begin(), h_data.end(), thrust::not1(is_true<T>()));
+    size_t num_false = thrust::count_if(h_data.begin(), h_data.end(), thrust::not_fn(is_true<T>()));
 
     thrust::discard_iterator<> h_result =
       thrust::remove_copy_if(h_data.begin(), h_data.end(), thrust::make_discard_iterator(), is_true<T>());
@@ -774,7 +772,7 @@ void TestRemoveCopyIfStencilToDiscardIterator(const size_t n)
     thrust::host_vector<bool>   h_stencil = unittest::random_integers<bool>(n);
     thrust::device_vector<bool> d_stencil = h_stencil;
 
-    size_t num_false = thrust::count_if(h_stencil.begin(), h_stencil.end(), thrust::not1(is_true<T>()));
+    size_t num_false = thrust::count_if(h_stencil.begin(), h_stencil.end(), thrust::not_fn(is_true<T>()));
 
     thrust::discard_iterator<> h_result =
       thrust::remove_copy_if(h_data.begin(), h_data.end(), h_stencil.begin(), thrust::make_discard_iterator(), is_true<T>());

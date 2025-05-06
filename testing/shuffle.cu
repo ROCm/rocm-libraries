@@ -1,8 +1,26 @@
+/*
+ *  Copyright 2008-2013 NVIDIA Corporation
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+
 #include <thrust/detail/config.h>
 
-#include <map>
 #include <limits>
+#include <map>
 #include <thrust/random.h>
+#include <thrust/scatter.h>
 #include <thrust/sequence.h>
 #include <thrust/shuffle.h>
 #include <thrust/sort.h>
@@ -360,7 +378,7 @@ DECLARE_VECTOR_UNITTEST(TestShuffleCopySimple);
 template <typename T>
 void TestHostDeviceIdentical(size_t m) {
   thrust::host_vector<T> host_result(m);
-  thrust::host_vector<T> device_result(m);
+  thrust::device_vector<T> device_result(m);
   thrust::sequence(host_result.begin(), host_result.end(), T{});
   thrust::sequence(device_result.begin(), device_result.end(), T{});
 
@@ -382,30 +400,34 @@ void TestFunctionIsBijection(size_t m) {
   thrust::system::detail::generic::feistel_bijection host_f(m, host_g);
   thrust::system::detail::generic::feistel_bijection device_f(m, device_g);
 
-  if (static_cast<double>(host_f.nearest_power_of_two()) >= static_cast<double>(std::numeric_limits<T>::max()) || m == 0) {
-    return;
+  const size_t total_length = device_f.nearest_power_of_two();
+  if(static_cast<double>(total_length) >= static_cast<double>(std::numeric_limits<T>::max())
+     || m == 0)
+  {
+      return;
   }
+  ASSERT_LEQUAL(
+      total_length,
+      std::max(m * 2, size_t(16))); // Check the rounded up size is at most double the input
 
-  thrust::host_vector<T> host_result(host_f.nearest_power_of_two());
-  thrust::host_vector<T> device_result(device_f.nearest_power_of_two());
-  thrust::sequence(host_result.begin(), host_result.end(), T{});
-  thrust::sequence(device_result.begin(), device_result.end(), T{});
+  auto device_result_it
+      = thrust::make_transform_iterator(thrust::make_counting_iterator(T(0)), device_f);
 
-  thrust::transform(host_result.begin(), host_result.end(), host_result.begin(),
-                    host_f);
-  thrust::transform(device_result.begin(), device_result.end(),
-                    device_result.begin(), device_f);
+  thrust::device_vector<T> unpermuted(total_length, T(0));
 
-  ASSERT_EQUAL(host_result, device_result);
+  // Run a scatter, this should copy each value to the index matching is value, the result should be in ascending order
+  thrust::scatter(device_result_it,
+                  device_result_it
+                      + static_cast<T>(total_length), // total_length is guaranteed to fit T
+                  device_result_it,
+                  unpermuted.begin());
 
-  thrust::sort(host_result.begin(), host_result.end());
-  // Assert all values were generated exactly once
-  for (uint64_t i = 0; i < m; i++) {
-    ASSERT_EQUAL((uint64_t)host_result[i], i);
-  }
+  // Check every index is in the result, if any are missing then the function was not a bijection over [0,m)
+  ASSERT_EQUAL(
+      true,
+      thrust::equal(unpermuted.begin(), unpermuted.end(), thrust::make_counting_iterator(T(0))));
 }
-DECLARE_VARIABLE_UNITTEST(TestFunctionIsBijection);
-
+DECLARE_INTEGRAL_VARIABLE_UNITTEST(TestFunctionIsBijection);
 void TestBijectionLength() {
   thrust::default_random_engine g(0xD5);
 
@@ -427,7 +449,7 @@ DECLARE_UNITTEST(TestBijectionLength);
 // probability. Perform chi-squared test with confidence 99.9%.
 template <typename Vector>
 void TestShuffleKeyPosition() {
-  typedef typename Vector::value_type T;
+  using T = typename Vector::value_type;
   size_t m = 20;
   size_t num_samples = 100;
   thrust::host_vector<size_t> index_sum(m, 0);
@@ -477,7 +499,7 @@ struct vector_compare {
 // random
 template <typename Vector>
 void TestShuffleUniformPermutation() {
-  typedef typename Vector::value_type T;
+  using T = typename Vector::value_type;
 
   size_t m = 5;
   size_t num_samples = 1000;
@@ -507,7 +529,7 @@ DECLARE_VECTOR_UNITTEST(TestShuffleUniformPermutation);
 
 template <typename Vector>
 void TestShuffleEvenSpacingBetweenOccurances() {
-  typedef typename Vector::value_type T;
+  using T = typename Vector::value_type;
   const uint64_t shuffle_size = 10;
   const uint64_t num_samples = 1000;
 
@@ -556,7 +578,7 @@ DECLARE_INTEGRAL_VECTOR_UNITTEST(TestShuffleEvenSpacingBetweenOccurances);
 
 template <typename Vector>
 void TestShuffleEvenDistribution() {
-  typedef typename Vector::value_type T;
+  using T = typename Vector::value_type;
   const uint64_t shuffle_sizes[] = {10, 100, 500};
   thrust::default_random_engine g(0xD5);
   for (auto shuffle_size : shuffle_sizes) {
@@ -583,10 +605,8 @@ void TestShuffleEvenDistribution() {
       for (uint64_t j = 0; j < shuffle_size; j++) {
         auto count_pos = counts.at(i * shuffle_size + j);
         auto count_num = counts.at(j * shuffle_size + i);
-        chi_squared_pos +=
-            pow((double)count_pos - expected_occurances, 2) / expected_occurances;
-        chi_squared_num +=
-            pow((double)count_num - expected_occurances, 2) / expected_occurances;
+        chi_squared_pos += std::pow((double) count_pos - expected_occurances, 2) / expected_occurances;
+        chi_squared_num += std::pow((double) count_num - expected_occurances, 2) / expected_occurances;
       }
 
       double p_score_pos = CephesFunctions::cephes_igamc(

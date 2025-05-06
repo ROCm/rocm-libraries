@@ -32,19 +32,24 @@ foreach(gpu_target ${GPU_TARGETS})
     )
 endforeach()
 
-if(NOT CMAKE_VERSION VERSION_LESS 3.13)
+if(USE_HIPCXX)
     set_source_files_properties(unittest/testframework.cu
         PROPERTIES
-            LANGUAGE CXX
+        LANGUAGE HIP
     )
+else()
+    set_source_files_properties(unittest/testframework.cu
+        PROPERTIES
+        LANGUAGE CXX
+    )
+endif()
+
+if(NOT CMAKE_VERSION VERSION_LESS 3.13)
     add_library(testframework OBJECT unittest/testframework.cu)
 else() # Workaround
-    set_source_files_properties(unittest/testframework.cu
-        PROPERTIES
-            LANGUAGE CXX
-    )
     add_library(testframework STATIC unittest/testframework.cu)
 endif()
+target_compile_options(testframework PRIVATE ${COMPILE_OPTIONS})
 
 if(HIP_COMPILER STREQUAL "nvcc")
     set_source_files_properties(unittest/cuda/testframework.cu
@@ -53,10 +58,17 @@ if(HIP_COMPILER STREQUAL "nvcc")
     )
     target_sources(testframework PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/unittest/cuda/testframework.cu)
 elseif(HIP_COMPILER STREQUAL "clang")
-    set_source_files_properties(unittest/hip/testframework.cu
-    PROPERTIES
-        LANGUAGE CXX
-    )
+    if(USE_HIPCXX)
+        set_source_files_properties(unittest/hip/testframework.cu
+        PROPERTIES
+            LANGUAGE HIP
+        )
+    else()
+        set_source_files_properties(unittest/hip/testframework.cu
+        PROPERTIES
+            LANGUAGE CXX
+        )
+    endif()
     target_sources(testframework PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/unittest/hip/testframework.cu)
 endif()
 
@@ -76,10 +88,17 @@ function(add_thrust_test TEST)
     # This code path used to add "-x c++" to the compiler flags too, but that was
     # superfluous as "-x hip" was already present on the command-line due to linking to
     # hip::device transitively from roc::rocprim_hip.
-    set_source_files_properties(${TEST_SOURCE}
-        PROPERTIES
-            LANGUAGE CXX
-    )
+    if(USE_HIPCXX)
+        set_source_files_properties(${TEST_SOURCE}
+            PROPERTIES
+                LANGUAGE HIP
+        )
+    else()
+        set_source_files_properties(${TEST_SOURCE}
+            PROPERTIES
+                LANGUAGE CXX
+        )
+    endif()
     if(NOT CMAKE_VERSION VERSION_LESS 3.13)
         add_executable(${TEST_TARGET} ${TEST_SOURCE} $<TARGET_OBJECTS:testframework>)
         target_link_libraries(${TEST_TARGET}
@@ -94,6 +113,7 @@ function(add_thrust_test TEST)
                 testframework
         )
     endif()
+    target_compile_options(${TEST_TARGET} PRIVATE ${COMPILE_OPTIONS})
     set_target_properties(${TEST_TARGET}
         PROPERTIES
             RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/testing/"
@@ -144,7 +164,6 @@ add_thrust_test("copy")
 add_thrust_test("copy_n")
 add_thrust_test("count")
 add_thrust_test("counting_iterator")
-add_thrust_test("cstdint")
 add_thrust_test("decompose")
 add_thrust_test("dependencies_aware_policies")
 add_thrust_test("dereference")
@@ -156,8 +175,8 @@ add_thrust_test("distance")
 add_thrust_test("equal")
 add_thrust_test("event")
 add_thrust_test("fill")
-add_thrust_test("find")
-add_thrust_test("for_each")
+# add_thrust_test("find") # Disabeld due to issue #516
+# add_thrust_test("for_each") # Disabled due to issze #516
 add_thrust_test("functional")
 add_thrust_test("functional_arithmetic")
 add_thrust_test("functional_bitwise")
@@ -245,13 +264,16 @@ add_thrust_test("sort_permutation_iterator")
 add_thrust_test("sort_variable_bits")
 add_thrust_test("stable_sort")
 add_thrust_test("stable_sort_by_key")
-add_thrust_test("stable_sort_by_key_large")
+add_thrust_test("stable_sort_by_key_large_keys")
+add_thrust_test("stable_sort_by_key_large_keys_and_values")
+add_thrust_test("stable_sort_by_key_large_values")
 add_thrust_test("stable_sort_large")
 add_thrust_test("swap_ranges")
 add_thrust_test("tabulate")
 add_thrust_test("transform")
 add_thrust_test("transform_iterator")
 add_thrust_test("transform_input_output_iterator")
+add_thrust_test("transform_output_iterator_reduce_by_key")
 add_thrust_test("transform_output_iterator")
 add_thrust_test("transform_reduce")
 add_thrust_test("transform_scan")

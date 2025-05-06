@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -60,40 +60,40 @@ DECLARE_UNITTEST(TestStableSortDispatchImplicit);
 template <typename T>
 struct less_div_10
 {
-  __host__ __device__ bool operator()(const T &lhs, const T &rhs) const {return ((int) lhs) / 10 < ((int) rhs) / 10;}
+  THRUST_HOST_DEVICE bool operator()(const T &lhs, const T &rhs) const {return ((int) lhs) / 10 < ((int) rhs) / 10;}
 };
 
 template <class Vector>
 void InitializeSimpleStableKeySortTest(Vector& unsorted_keys, Vector& sorted_keys)
 {
-    unsorted_keys.resize(9);
-    unsorted_keys[0] = 25;
-    unsorted_keys[1] = 14;
-    unsorted_keys[2] = 35;
-    unsorted_keys[3] = 16;
-    unsorted_keys[4] = 26;
-    unsorted_keys[5] = 34;
-    unsorted_keys[6] = 36;
-    unsorted_keys[7] = 24;
-    unsorted_keys[8] = 15;
-
+    unsorted_keys.resize(9);   
+    unsorted_keys[0] = 25; 
+    unsorted_keys[1] = 14; 
+    unsorted_keys[2] = 35; 
+    unsorted_keys[3] = 16; 
+    unsorted_keys[4] = 26; 
+    unsorted_keys[5] = 34; 
+    unsorted_keys[6] = 36; 
+    unsorted_keys[7] = 24; 
+    unsorted_keys[8] = 15; 
+    
     sorted_keys.resize(9);
-    sorted_keys[0] = 14;
-    sorted_keys[1] = 16;
-    sorted_keys[2] = 15;
-    sorted_keys[3] = 25;
-    sorted_keys[4] = 26;
-    sorted_keys[5] = 24;
-    sorted_keys[6] = 35;
-    sorted_keys[7] = 34;
-    sorted_keys[8] = 36;
+    sorted_keys[0] = 14; 
+    sorted_keys[1] = 16; 
+    sorted_keys[2] = 15; 
+    sorted_keys[3] = 25; 
+    sorted_keys[4] = 26; 
+    sorted_keys[5] = 24; 
+    sorted_keys[6] = 35; 
+    sorted_keys[7] = 34; 
+    sorted_keys[8] = 36; 
 }
 
 
 template <class Vector>
 void TestStableSortSimple(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     Vector unsorted_keys;
     Vector   sorted_keys;
@@ -148,7 +148,7 @@ struct comp_mod3
 
     comp_mod3(T * table) : table(table) {}
 
-    __host__ __device__
+    THRUST_HOST_DEVICE
     bool operator()(T a, T b)
     {
         return table[(int) a] < table[(int) b];
@@ -159,7 +159,7 @@ template <typename Vector>
 void TestStableSortWithIndirection(void)
 {
     // add numbers modulo 3 with external lookup table
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     Vector data(7);
     data[0] = 1;
@@ -179,7 +179,7 @@ void TestStableSortWithIndirection(void)
     table[5] = 2;
 
     thrust::stable_sort(data.begin(), data.end(), comp_mod3<T>(thrust::raw_pointer_cast(&table[0])));
-
+    
     ASSERT_EQUAL(data[0], T(3));
     ASSERT_EQUAL(data[1], T(3));
     ASSERT_EQUAL(data[2], T(0));

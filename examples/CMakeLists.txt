@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright 2020-2023 Advanced Micro Devices, Inc.
+# Copyright 2020-2025 Advanced Micro Devices, Inc.
 # ########################################################################
 
 if (WIN32)
@@ -9,12 +9,20 @@ endif()
 function(add_thrust_example EXAMPLE)
     set(EXAMPLE_SOURCE "${EXAMPLE}.cu")
     set(EXAMPLE_TARGET "example_thrust_${EXAMPLE}")
-    set_source_files_properties(${EXAMPLE_SOURCE}
+    if(USE_HIPCXX)
+      set_source_files_properties(${EXAMPLE_SOURCE}
         PROPERTIES
-            LANGUAGE CXX
-    )
+          LANGUAGE HIP
+      )
+    else()
+      set_source_files_properties(${EXAMPLE_SOURCE}
+          PROPERTIES
+              LANGUAGE CXX
+      )
+    endif()
     add_executable(${EXAMPLE_TARGET} ${EXAMPLE_SOURCE})
 
+    target_compile_options(${EXAMPLE_TARGET} PRIVATE ${COMPILE_OPTIONS})
     target_link_libraries(${EXAMPLE_TARGET}
         PRIVATE
             rocthrust
@@ -45,7 +53,7 @@ function(add_thrust_example EXAMPLE)
       foreach( file_i ${third_party_dlls})
         add_custom_command( TARGET ${EXAMPLE_TARGET} POST_BUILD COMMAND ${CMAKE_COMMAND} ARGS -E copy_if_different ${file_i} ${PROJECT_BINARY_DIR}/examples )
       endforeach( file_i )
-    endif()         
+    endif()
 endfunction()
 
 

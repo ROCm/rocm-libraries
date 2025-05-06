@@ -22,7 +22,7 @@
  * (C) Copyright Toon Knapen    2001.
  * (C) Copyright David Abrahams 2003.
  * (C) Copyright Roland Richter 2003.
- * 
+ *
  * Distributed under the Boost Software License, Version 1.0.
  * (See accompanying NOTICE file for the complete license)
  *
@@ -90,8 +90,8 @@ THRUST_NAMESPACE_BEGIN
  *  indices[2] = 1;
  *  indices[3] = 3;
  *
- *  typedef thrust::device_vector<float>::iterator ElementIterator;
- *  typedef thrust::device_vector<int>::iterator   IndexIterator;
+ *  using ElementIterator = thrust::device_vector<float>::iterator;
+ *  using IndexIterator = thrust::device_vector<int>::iterator;
  *
  *  thrust::permutation_iterator<ElementIterator,IndexIterator> iter(values.begin(), indices.begin());
  *
@@ -125,7 +125,8 @@ template <typename ElementIterator,
   /*! \cond
    */
   private:
-    typedef typename detail::permutation_iterator_base<ElementIterator,IndexIterator>::type super_t;
+    using super_t =
+      typename detail::permutation_iterator_base<ElementIterator, IndexIterator>::type;
 
     friend class thrust::iterator_core_access;
   /*! \endcond
@@ -135,9 +136,7 @@ template <typename ElementIterator,
     /*! Null constructor calls the null constructor of this \p permutation_iterator's
      *  element iterator.
      */
-    __host__ __device__
-    permutation_iterator()
-      : m_element_iterator() {}
+    permutation_iterator() = default;
 
     /*! Constructor accepts an \c ElementIterator into a range of values and an
      *  \c IndexIterator into a range of indices defining the indexing scheme on the
@@ -146,33 +145,32 @@ template <typename ElementIterator,
      *  \param x An \c ElementIterator pointing this \p permutation_iterator's range of values.
      *  \param y An \c IndexIterator pointing to an indexing scheme to use on \p x.
      */
-    __host__ __device__
+    THRUST_HOST_DEVICE
     explicit permutation_iterator(ElementIterator x, IndexIterator y)
       : super_t(y), m_element_iterator(x) {}
 
     /*! Copy constructor accepts a related \p permutation_iterator.
-     *  \param r A compatible \p permutation_iterator to copy from.
+     *  \param rhs A compatible \p permutation_iterator to copy from.
      */
-    template<typename OtherElementIterator, typename OtherIndexIterator>
-    __host__ __device__
-    permutation_iterator(permutation_iterator<OtherElementIterator,OtherIndexIterator> const &r
-    // XXX remove these guards when we have static_assert
-    , typename detail::enable_if_convertible<OtherElementIterator, ElementIterator>::type* = 0
-    , typename detail::enable_if_convertible<OtherIndexIterator, IndexIterator>::type* = 0
-    )
-      : super_t(r.base()), m_element_iterator(r.m_element_iterator)
+    template <typename OtherElementIterator,
+              typename OtherIndexIterator,
+              detail::enable_if_convertible_t<OtherElementIterator, ElementIterator, int> = 0,
+              detail::enable_if_convertible_t<OtherIndexIterator, IndexIterator, int>     = 0>
+    THRUST_HOST_DEVICE permutation_iterator(permutation_iterator<OtherElementIterator, OtherIndexIterator> const& rhs)
+        : super_t(rhs.base())
+        , m_element_iterator(rhs.m_element_iterator)
     {}
 
-  /*! \cond
-   */
+    /*! \cond
+     */
   private:
     // MSVC 2013 and 2015 incorrectly warning about returning a reference to
     // a local/temporary here.
     // See goo.gl/LELTNp
     THRUST_DISABLE_MSVC_WARNING_BEGIN(4172)
 
-    __thrust_exec_check_disable__
-    __host__ __device__
+    THRUST_EXEC_CHECK_DISABLE
+    THRUST_HOST_DEVICE
     typename super_t::reference dereference() const
     {
       return *(m_element_iterator + *this->base());
@@ -200,7 +198,7 @@ template <typename ElementIterator,
  *  \see permutation_iterator
  */
 template<typename ElementIterator, typename IndexIterator>
-__host__ __device__
+THRUST_HOST_DEVICE
 permutation_iterator<ElementIterator,IndexIterator> make_permutation_iterator(ElementIterator e, IndexIterator i)
 {
   return permutation_iterator<ElementIterator,IndexIterator>(e,i);

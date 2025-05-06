@@ -114,7 +114,7 @@ template<typename result_type, result_type, result_type, int> struct xor_combine
 template<typename result_type, result_type a, result_type b, int d>
   struct xor_combine_engine_max_aux_case4
 {
-  typedef xor_combine_engine_max_aux_constants<result_type,a,b,d> constants;
+  using constants = xor_combine_engine_max_aux_constants<result_type, a, b, d>;
 
   static const result_type k_plus_1_times_two_to_the_p =
     lshift<
@@ -150,7 +150,7 @@ template<typename result_type, result_type a, result_type b, int d>
 template<typename result_type, result_type a, result_type b, int d>
   struct xor_combine_engine_max_aux_case3
 {
-  typedef xor_combine_engine_max_aux_constants<result_type,a,b,d> constants;
+  using constants = xor_combine_engine_max_aux_constants<result_type, a, b, d>;
 
   static const result_type k_plus_1_times_two_to_the_p =
     lshift<
@@ -187,7 +187,7 @@ template<typename result_type, result_type a, result_type b, int d>
 template<typename result_type, result_type a, result_type b, int d>
   struct xor_combine_engine_max_aux_case2
 {
-  typedef xor_combine_engine_max_aux_constants<result_type,a,b,d> constants;
+  using constants = xor_combine_engine_max_aux_constants<result_type, a, b, d>;
 
   static const result_type k_plus_1_times_two_to_the_p =
     lshift<
@@ -217,7 +217,7 @@ template<typename result_type, result_type a, result_type b, int d>
 template<typename result_type, result_type a, result_type b, int d>
   struct xor_combine_engine_max_aux_2
 {
-  typedef xor_combine_engine_max_aux_constants<result_type,a,b,d> constants;
+  using constants = xor_combine_engine_max_aux_constants<result_type, a, b, d>;
 
   static const result_type value = 
     thrust::detail::eval_if<

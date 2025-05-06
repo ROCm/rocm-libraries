@@ -55,7 +55,7 @@ THRUST_NAMESPACE_BEGIN
  *  // note: functor inherits from unary_function
  *  struct square_root : public thrust::unary_function<float,float>
  *  {
- *    __host__ __device__
+ *    THRUST_HOST_DEVICE
  *    float operator()(float x) const
  *    {
  *      return sqrtf(x);
@@ -66,7 +66,7 @@ THRUST_NAMESPACE_BEGIN
  *  {
  *    thrust::device_vector<float> v(4);
  *
- *    typedef thrust::device_vector<float>::iterator FloatIterator;
+ *    using FloatIterator = thrust::device_vector<float>::iterator;
  *    thrust::transform_output_iterator<square_root, FloatIterator> iter(v.begin(), square_root());
  *
  *    iter[0] =  1.0f;    // stores sqrtf( 1.0f)
@@ -96,13 +96,13 @@ template <typename UnaryFunction, typename OutputIterator>
 
   public:
 
-    typedef typename
-    detail::transform_output_iterator_base<UnaryFunction, OutputIterator>::type
-    super_t;
+    using super_t = typename detail::transform_output_iterator_base<UnaryFunction, OutputIterator>::type;
 
     friend class thrust::iterator_core_access;
   /*! \endcond
    */
+
+    transform_output_iterator() = default;
 
   /*! This constructor takes as argument an \c OutputIterator and an \c
    * UnaryFunction and copies them to a new \p transform_output_iterator
@@ -112,7 +112,7 @@ template <typename UnaryFunction, typename OutputIterator>
    * \param fun An \c UnaryFunction used to transform the objects assigned to
    *            this \p transform_output_iterator.
    */
-    __host__ __device__
+    THRUST_HOST_DEVICE
     transform_output_iterator(OutputIterator const& out, UnaryFunction fun) : super_t(out), fun(fun)
     {
     }
@@ -121,7 +121,7 @@ template <typename UnaryFunction, typename OutputIterator>
      */
   private:
 
-    __host__ __device__
+    THRUST_HOST_DEVICE
     typename super_t::reference dereference() const
     {
       return detail::transform_output_iterator_proxy<
@@ -146,7 +146,7 @@ template <typename UnaryFunction, typename OutputIterator>
  */
 template <typename UnaryFunction, typename OutputIterator>
 transform_output_iterator<UnaryFunction, OutputIterator>
-__host__ __device__
+THRUST_HOST_DEVICE
 make_transform_output_iterator(OutputIterator out, UnaryFunction fun)
 {
     return transform_output_iterator<UnaryFunction, OutputIterator>(out, fun);

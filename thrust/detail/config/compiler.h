@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2020 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -35,6 +35,7 @@
 #define THRUST_HOST_COMPILER_GCC     2
 #define THRUST_HOST_COMPILER_CLANG   3
 #define THRUST_HOST_COMPILER_INTEL   4
+#define THRUST_HOST_COMPILER_NVHPC   5
 
 // enumerate device compilers we know about
 #define THRUST_DEVICE_COMPILER_UNKNOWN 0
@@ -45,7 +46,6 @@
 #define THRUST_DEVICE_COMPILER_HIP     5
 
 // figure out which host compiler we're using
-// XXX we should move the definition of THRUST_DEPRECATED out of this logic
 #if defined(_MSC_VER)
   #if defined(__clang__)
     #define THRUST_HOST_COMPILER THRUST_HOST_COMPILER_CLANG
@@ -68,6 +68,8 @@
     #else
         #define THRUST_LEGACY_GCC
     #endif
+#elif defined(__NVCOMPILER)
+    #define THRUST_HOST_COMPILER THRUST_HOST_COMPILER_NVHPC
 #else
     #define THRUST_HOST_COMPILER THRUST_HOST_COMPILER_UNKNOWN
 #endif // THRUST_HOST_COMPILER

@@ -1,3 +1,20 @@
+/*
+ *  Copyright 2008-2013 NVIDIA Corporation
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+
 #include <unittest/unittest.h>
 #include <thrust/extrema.h>
 #include <thrust/iterator/retag.h>
@@ -23,7 +40,7 @@ DECLARE_VECTOR_UNITTEST(TestMinMaxElementSimple);
 template <class Vector>
 void TestMinMaxElementWithTransform(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     Vector data(6);
     data[0] = 3;
@@ -112,7 +129,7 @@ DECLARE_UNITTEST(TestMinMaxElementDispatchImplicit);
 
 void TestMinMaxElementWithBigIndexesHelper(int magnitude)
 {
-    typedef thrust::counting_iterator<long long> Iter;
+    using Iter = thrust::counting_iterator<long long>;
     Iter begin(1);
     Iter end = begin + (1ll << magnitude);
     ASSERT_EQUAL(thrust::distance(begin, end), 1ll << magnitude);

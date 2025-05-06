@@ -40,13 +40,13 @@ template<typename Allocator, typename InputType, typename OutputType>
 {
   Allocator &a;
 
-  __host__ __device__
+  THRUST_HOST_DEVICE
   copy_construct_with_allocator(Allocator &a)
     : a(a)
   {}
 
   template<typename Tuple>
-  inline __host__ __device__
+  inline THRUST_HOST_DEVICE
   void operator()(Tuple t)
   {
     const InputType &in = thrust::get<0>(t);
@@ -86,7 +86,7 @@ template<typename U, typename T>
 //     perhaps generic::uninitialized_copy could call this routine
 //     with a default allocator
 template<typename Allocator, typename FromSystem, typename ToSystem, typename InputIterator, typename Pointer>
-__host__ __device__
+THRUST_HOST_DEVICE
   typename enable_if_convertible<
     FromSystem,
     ToSystem,
@@ -100,8 +100,8 @@ __host__ __device__
                                       Pointer result)
 {
   // zip up the iterators
-  typedef thrust::tuple<InputIterator,Pointer> IteratorTuple;
-  typedef thrust::zip_iterator<IteratorTuple>  ZipIterator;
+  using IteratorTuple = thrust::tuple<InputIterator, Pointer>;
+  using ZipIterator   = thrust::zip_iterator<IteratorTuple>;
 
   ZipIterator begin = thrust::make_zip_iterator(thrust::make_tuple(first,result));
   ZipIterator end = begin;
@@ -111,8 +111,8 @@ __host__ __device__
   thrust::advance(end,n);
 
   // create a functor
-  typedef typename iterator_traits<InputIterator>::value_type InputType;
-  typedef typename iterator_traits<Pointer>::value_type       OutputType;
+  using InputType  = typename iterator_traits<InputIterator>::value_type;
+  using OutputType = typename iterator_traits<Pointer>::value_type;
 
   // do the for_each
   // note we use to_system to dispatch the for_each
@@ -128,7 +128,7 @@ __host__ __device__
 //     perhaps generic::uninitialized_copy_n could call this routine
 //     with a default allocator
 template<typename Allocator, typename FromSystem, typename ToSystem, typename InputIterator, typename Size, typename Pointer>
-__host__ __device__
+THRUST_HOST_DEVICE
   typename enable_if_convertible<
     FromSystem,
     ToSystem,
@@ -142,14 +142,14 @@ __host__ __device__
                                         Pointer result)
 {
   // zip up the iterators
-  typedef thrust::tuple<InputIterator,Pointer> IteratorTuple;
-  typedef thrust::zip_iterator<IteratorTuple>  ZipIterator;
+  using IteratorTuple = thrust::tuple<InputIterator, Pointer>;
+  using ZipIterator   = thrust::zip_iterator<IteratorTuple>;
 
   ZipIterator begin = thrust::make_zip_iterator(thrust::make_tuple(first,result));
 
   // create a functor
-  typedef typename iterator_traits<InputIterator>::value_type InputType;
-  typedef typename iterator_traits<Pointer>::value_type       OutputType;
+  using InputType  = typename iterator_traits<InputIterator>::value_type;
+  using OutputType = typename iterator_traits<Pointer>::value_type;
 
   // do the for_each_n
   // note we use to_system to dispatch the for_each_n
@@ -161,7 +161,7 @@ __host__ __device__
 
 
 template<typename Allocator, typename FromSystem, typename ToSystem, typename InputIterator, typename Pointer>
-__host__ __device__
+THRUST_HOST_DEVICE
   typename disable_if_convertible<
     FromSystem,
     ToSystem,
@@ -181,7 +181,7 @@ __host__ __device__
 
 
 template<typename Allocator, typename FromSystem, typename ToSystem, typename InputIterator, typename Size, typename Pointer>
-__host__ __device__
+THRUST_HOST_DEVICE
   typename disable_if_convertible<
     FromSystem,
     ToSystem,
@@ -201,7 +201,7 @@ __host__ __device__
 
 
 template<typename FromSystem, typename Allocator, typename InputIterator, typename Pointer>
-__host__ __device__
+THRUST_HOST_DEVICE
   typename disable_if<
     needs_copy_construct_via_allocator<
       Allocator,
@@ -221,7 +221,7 @@ __host__ __device__
 
 
 template<typename FromSystem, typename Allocator, typename InputIterator, typename Size, typename Pointer>
-__host__ __device__
+THRUST_HOST_DEVICE
   typename disable_if<
     needs_copy_construct_via_allocator<
       Allocator,
@@ -241,7 +241,7 @@ __host__ __device__
 
 
 template<typename FromSystem, typename Allocator, typename InputIterator, typename Pointer>
-__host__ __device__
+THRUST_HOST_DEVICE
   typename enable_if<
     needs_copy_construct_via_allocator<
       Allocator,
@@ -260,7 +260,7 @@ __host__ __device__
 
 
 template<typename FromSystem, typename Allocator, typename InputIterator, typename Size, typename Pointer>
-__host__ __device__
+THRUST_HOST_DEVICE
   typename enable_if<
     needs_copy_construct_via_allocator<
       Allocator,
@@ -282,7 +282,7 @@ __host__ __device__
 
 
 template<typename System, typename Allocator, typename InputIterator, typename Pointer>
-__host__ __device__
+THRUST_HOST_DEVICE
   Pointer copy_construct_range(thrust::execution_policy<System> &from_system,
                                Allocator &a,
                                InputIterator first,
@@ -294,7 +294,7 @@ __host__ __device__
 
 
 template<typename System, typename Allocator, typename InputIterator, typename Size, typename Pointer>
-__host__ __device__
+THRUST_HOST_DEVICE
   Pointer copy_construct_range_n(thrust::execution_policy<System> &from_system,
                                  Allocator &a,
                                  InputIterator first,

@@ -1,5 +1,6 @@
 /*
  *  Copyright 2020 NVIDIA Corporation
+ *  Modifications Copyright (c) 2024, Advanced Micro Devices, Inc.  All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -57,7 +58,7 @@
 
 // MSVC does not define __cplusplus correctly. _MSVC_LANG is used instead.
 // This macro is only defined in MSVC 2015U3+.
-#if defined(_MSVC_LANG) && !defined(__HIP__) // Do not replace with THRUST_HOST_COMPILER test (see above)
+#  if defined(_MSVC_LANG) && !defined(__HIP__) // Do not replace with THRUST_HOST_COMPILER test (see above)
 // MSVC2015 reports C++14 but lacks extended constexpr support. Treat as C++11.
 #    if THRUST_MSVC_VERSION < 1910 && _MSVC_LANG > 201103L /* MSVC < 2017 && CPP > 2011 */
 #      define THRUST_CPLUSPLUS 201103L /* Fix to 2011 */
@@ -98,7 +99,7 @@
 #endif
 
 #define THRUST_COMPILER_DEPRECATION(REQ) \
-  THRUST_COMP_DEPR_IMPL(Thrust requires at least REQ. Define THRUST_IGNORE_DEPRECATED_CPP_DIALECT to suppress this message.)
+  THRUST_COMP_DEPR_IMPL(Thrust requires at least REQ. Define THRUST_IGNORE_DEPRECATED_COMPILER to suppress this message.)
 
 #define THRUST_COMPILER_DEPRECATION_SOFT(REQ, CUR) \
   THRUST_COMP_DEPR_IMPL(Thrust requires at least REQ. CUR is deprecated but still supported. CUR support will be removed in a future release. Define THRUST_IGNORE_DEPRECATED_CPP_DIALECT to suppress this message.)

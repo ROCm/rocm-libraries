@@ -21,9 +21,6 @@
 #pragma once
 
 #include <thrust/detail/config.h>
-#include <thrust/detail/cpp11_required.h>
-
-#if THRUST_CPP_DIALECT >= 2011
 
 #include <thrust/mr/pool.h>
 
@@ -33,7 +30,7 @@ namespace mr
 
 /*! \addtogroup memory_management Memory Management
  *  \addtogroup memory_resources Memory Resources
- *  \ingroup memory_resources
+ *  \ingroup memory_management
  *  \{
  */
 
@@ -43,8 +40,8 @@ namespace mr
  *  \param upstream the argument to the constructor, if invoked
  */
 template<typename Upstream, typename Bookkeeper>
-__host__
-thrust::mr::unsynchronized_pool_resource<Upstream> & tls_pool(Upstream * upstream = NULL)
+THRUST_HOST
+thrust::mr::unsynchronized_pool_resource<Upstream> & tls_pool(Upstream * upstream = nullptr)
 {
     static thread_local auto adaptor = [&]{
         assert(upstream);
@@ -60,4 +57,3 @@ thrust::mr::unsynchronized_pool_resource<Upstream> & tls_pool(Upstream * upstrea
 } // end mr
 THRUST_NAMESPACE_END
 
-#endif // THRUST_CPP_DIALECT >= 2011

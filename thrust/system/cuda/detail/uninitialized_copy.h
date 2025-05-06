@@ -47,8 +47,8 @@ namespace __uninitialized_copy {
     InputIt  input;
     OutputIt output;
 
-    typedef typename iterator_traits<InputIt>::value_type  InputType;
-    typedef typename iterator_traits<OutputIt>::value_type OutputType;
+    using InputType  = typename iterator_traits<InputIt>::value_type;
+    using OutputType = typename iterator_traits<OutputIt>::value_type;
 
     THRUST_FUNCTION
     functor(InputIt input_, OutputIt output_)
@@ -75,13 +75,13 @@ template <class Derived,
           class InputIt,
           class Size,
           class OutputIt>
-OutputIt __host__ __device__
+OutputIt _CCCL_HOST_DEVICE
 uninitialized_copy_n(execution_policy<Derived> &policy,
                      InputIt                    first,
                      Size                       count,
                      OutputIt                   result)
 {
-  typedef __uninitialized_copy::functor<InputIt,OutputIt> functor_t;
+  using functor_t = __uninitialized_copy::functor<InputIt, OutputIt>;
 
   cuda_cub::parallel_for(policy,
                          functor_t(first, result),
@@ -93,7 +93,7 @@ uninitialized_copy_n(execution_policy<Derived> &policy,
 template <class Derived,
           class InputIt,
           class OutputIt>
-OutputIt __host__ __device__
+OutputIt _CCCL_HOST_DEVICE
 uninitialized_copy(execution_policy<Derived>& policy,
                    InputIt                    first,
                    InputIt                    last,

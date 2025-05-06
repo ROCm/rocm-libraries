@@ -49,7 +49,7 @@ template <
   typename DerivedPolicy
 , typename ForwardIt, typename Sentinel, typename StrictWeakOrdering
 >
-__host__
+THRUST_HOST
 event<DerivedPolicy>
 async_stable_sort(
   thrust::execution_policy<DerivedPolicy>&
@@ -76,7 +76,7 @@ struct stable_sort_fn final
     typename DerivedPolicy
   , typename ForwardIt, typename Sentinel, typename StrictWeakOrdering
   >
-  __host__
+  THRUST_HOST
   static auto call(
     thrust::detail::execution_policy_base<DerivedPolicy> const& exec
   , ForwardIt&& first, Sentinel&& last
@@ -95,7 +95,7 @@ struct stable_sort_fn final
     typename DerivedPolicy
   , typename ForwardIt, typename Sentinel
   >
-  __host__
+  THRUST_HOST
   static auto call(
     thrust::detail::execution_policy_base<DerivedPolicy> const& exec
   , ForwardIt&& first, Sentinel&& last
@@ -112,7 +112,7 @@ struct stable_sort_fn final
   )
 
   template <typename ForwardIt, typename Sentinel, typename StrictWeakOrdering>
-  __host__
+  THRUST_HOST
   static auto call(ForwardIt&& first, Sentinel&& last, StrictWeakOrdering&& comp)
   THRUST_RETURNS(
     stable_sort_fn::call(
@@ -125,7 +125,7 @@ struct stable_sort_fn final
   )
 
   template <typename ForwardIt, typename Sentinel>
-  __host__
+  THRUST_HOST
   static auto call(ForwardIt&& first, Sentinel&& last)
   THRUST_RETURNS(
     stable_sort_fn::call(
@@ -137,7 +137,7 @@ struct stable_sort_fn final
   )
 
   template <typename... Args>
-  THRUST_NODISCARD __host__
+  THRUST_NODISCARD THRUST_HOST
   auto operator()(Args&&... args) const
   THRUST_RETURNS(
     call(THRUST_FWD(args)...)
@@ -155,7 +155,7 @@ template <
   typename DerivedPolicy
 , typename ForwardIt, typename Sentinel, typename StrictWeakOrdering
 >
-__host__
+THRUST_HOST
 event<DerivedPolicy>
 async_sort(
   thrust::execution_policy<DerivedPolicy>& exec
@@ -181,7 +181,7 @@ struct sort_fn final
     typename DerivedPolicy
   , typename ForwardIt, typename Sentinel, typename StrictWeakOrdering
   >
-  __host__
+  THRUST_HOST
   static auto call(
     thrust::detail::execution_policy_base<DerivedPolicy> const& exec
   , ForwardIt&& first, Sentinel&& last
@@ -200,7 +200,7 @@ struct sort_fn final
     typename DerivedPolicy
   , typename ForwardIt, typename Sentinel
   >
-  __host__
+  THRUST_HOST
   static auto call3(
     thrust::detail::execution_policy_base<DerivedPolicy> const& exec
   , ForwardIt&& first, Sentinel&& last
@@ -217,7 +217,7 @@ struct sort_fn final
   )
 
   template <typename ForwardIt, typename Sentinel, typename StrictWeakOrdering>
-  __host__
+  THRUST_HOST
   static auto call3(ForwardIt&& first, Sentinel&& last,
                     StrictWeakOrdering&& comp,
                     thrust::false_type)
@@ -235,7 +235,7 @@ struct sort_fn final
   // if T1 is an execution_policy by using SFINAE. Switching to a static
   // dispatch pattern to prevent this.
   template <typename T1, typename T2, typename T3>
-  __host__
+  THRUST_HOST
   static auto call(T1&& t1, T2&& t2, T3&& t3)
   THRUST_RETURNS(
     sort_fn::call3(THRUST_FWD(t1), THRUST_FWD(t2), THRUST_FWD(t3),
@@ -243,7 +243,7 @@ struct sort_fn final
   )
 
   template <typename ForwardIt, typename Sentinel>
-  __host__
+  THRUST_HOST
   static auto call(ForwardIt&& first, Sentinel&& last)
   THRUST_RETURNS(
     sort_fn::call(
@@ -258,7 +258,7 @@ struct sort_fn final
   )
 
   template <typename... Args>
-  THRUST_NODISCARD __host__
+  THRUST_NODISCARD THRUST_HOST
   auto operator()(Args&&... args) const
   THRUST_RETURNS(
     call(THRUST_FWD(args)...)

@@ -1,3 +1,20 @@
+/*
+ *  Copyright 2008-2013 NVIDIA Corporation
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+
 #include <unittest/unittest.h>
 #include <thrust/iterator/constant_iterator.h>
 #include <thrust/copy.h>
@@ -30,21 +47,23 @@ void TestConstantIteratorIncrement(void)
     lhs++;
 
     ASSERT_EQUAL(1, lhs - rhs);
-    
+
     lhs++;
     lhs++;
-    
+
     ASSERT_EQUAL(3, lhs - rhs);
 
     lhs += 5;
-    
+
     ASSERT_EQUAL(8, lhs - rhs);
 
     lhs -= 10;
-    
+
     ASSERT_EQUAL(-2, lhs - rhs);
 }
 DECLARE_UNITTEST(TestConstantIteratorIncrement);
+static_assert(std::is_trivially_copy_constructible<thrust::constant_iterator<int>>::value, "");
+static_assert(std::is_trivially_copyable<thrust::constant_iterator<int>>::value, "");
 
 void TestConstantIteratorIncrementBig(void)
 {
@@ -68,15 +87,15 @@ void TestConstantIteratorComparison(void)
     ASSERT_EQUAL(true, iter1 == iter2);
 
     iter1++;
-    
+
     ASSERT_EQUAL(1, iter1 - iter2);
     ASSERT_EQUAL(false, iter1 == iter2);
-   
+
     iter2++;
 
     ASSERT_EQUAL(0, iter1 - iter2);
     ASSERT_EQUAL(true, iter1 == iter2);
-  
+
     iter1 += 100;
     iter2 += 100;
 
@@ -131,8 +150,8 @@ void TestConstantIteratorTransform(void)
 {
   using namespace thrust;
 
-  typedef typename Vector::value_type T;
-  typedef constant_iterator<T> ConstIter;
+  using T         = typename Vector::value_type;
+  using ConstIter = constant_iterator<T>;
 
   Vector result(4);
 
@@ -146,7 +165,7 @@ void TestConstantIteratorTransform(void)
   ASSERT_EQUAL(-7, result[1]);
   ASSERT_EQUAL(-7, result[2]);
   ASSERT_EQUAL(-7, result[3]);
-  
+
   thrust::transform(first1, last1, first2, result.begin(), thrust::plus<T>());
 
   ASSERT_EQUAL(10, result[0]);
@@ -161,8 +180,8 @@ void TestConstantIteratorReduce(void)
 {
   using namespace thrust;
 
-  typedef int T;
-  typedef constant_iterator<T> ConstIter;
+  using T         = int;
+  using ConstIter = constant_iterator<T>;
 
   ConstIter first = make_constant_iterator<T>(7);
   ConstIter last  = first + 4;

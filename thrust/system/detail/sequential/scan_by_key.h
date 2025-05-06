@@ -35,14 +35,14 @@ namespace sequential
 {
 
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template<typename DerivedPolicy,
          typename InputIterator1,
          typename InputIterator2,
          typename OutputIterator,
          typename BinaryPredicate,
          typename BinaryFunction>
-__host__ __device__
+THRUST_HOST_DEVICE
   OutputIterator inclusive_scan_by_key(sequential::execution_policy<DerivedPolicy> &,
                                        InputIterator1 first1,
                                        InputIterator1 last1,
@@ -86,7 +86,7 @@ __host__ __device__
 }
 
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template<typename DerivedPolicy,
          typename InputIterator1,
          typename InputIterator2,
@@ -94,7 +94,7 @@ template<typename DerivedPolicy,
          typename T,
          typename BinaryPredicate,
          typename BinaryFunction>
-__host__ __device__
+THRUST_HOST_DEVICE
   OutputIterator exclusive_scan_by_key(sequential::execution_policy<DerivedPolicy> &,
                                        InputIterator1 first1,
                                        InputIterator1 last1,

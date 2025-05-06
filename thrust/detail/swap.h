@@ -21,9 +21,9 @@
 
 THRUST_NAMESPACE_BEGIN
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template<typename Assignable1, typename Assignable2>
-__host__ __device__
+THRUST_HOST_DEVICE
 inline void swap(Assignable1 &a, Assignable2 &b)
 {
   Assignable1 temp = a;

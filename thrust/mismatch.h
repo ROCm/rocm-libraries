@@ -72,7 +72,7 @@ THRUST_NAMESPACE_BEGIN
  *  vec1[2] = 3;  vec2[2] = 8;
  *  vec1[3] = 7;  vec2[3] = 7;
  *
- *  typedef thrust::device_vector<int>::iterator Iterator;
+ *  using Iterator = thrust::device_vector<int>::iterator;
  *  thrust::pair<Iterator,Iterator> result;
  *
  *  result = thrust::mismatch(thrust::device, vec1.begin(), vec1.end(), vec2.begin());
@@ -85,7 +85,7 @@ THRUST_NAMESPACE_BEGIN
  *  \see find_if
  */
 template<typename DerivedPolicy, typename InputIterator1, typename InputIterator2>
-__host__ __device__
+THRUST_HOST_DEVICE
 thrust::pair<InputIterator1, InputIterator2> mismatch(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
                                                       InputIterator1 first1,
                                                       InputIterator1 last1,
@@ -123,7 +123,7 @@ thrust::pair<InputIterator1, InputIterator2> mismatch(const thrust::detail::exec
  *  vec1[2] = 3;  vec2[2] = 8;
  *  vec1[3] = 7;  vec2[3] = 7;
  *
- *  typedef thrust::device_vector<int>::iterator Iterator;
+ *  using Iterator = thrust::device_vector<int>::iterator;
  *  thrust::pair<Iterator,Iterator> result;
  *
  *  result = thrust::mismatch(vec1.begin(), vec1.end(), vec2.begin());
@@ -178,7 +178,7 @@ thrust::pair<InputIterator1, InputIterator2> mismatch(InputIterator1 first1,
  *  vec1[2] = 3;  vec2[2] = 8;
  *  vec1[3] = 7;  vec2[3] = 7;
  *
- *  typedef thrust::device_vector<int>::iterator Iterator;
+ *  using Iterator = thrust::device_vector<int>::iterator;
  *  thrust::pair<Iterator,Iterator> result;
  *
  *  result = thrust::mismatch(thrust::device, vec1.begin(), vec1.end(), vec2.begin(), thrust::equal_to<int>());
@@ -191,7 +191,7 @@ thrust::pair<InputIterator1, InputIterator2> mismatch(InputIterator1 first1,
  *  \see find_if
  */
 template<typename DerivedPolicy, typename InputIterator1, typename InputIterator2, typename BinaryPredicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 thrust::pair<InputIterator1, InputIterator2> mismatch(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
                                                       InputIterator1 first1,
                                                       InputIterator1 last1,
@@ -231,7 +231,7 @@ thrust::pair<InputIterator1, InputIterator2> mismatch(const thrust::detail::exec
  *  vec1[2] = 3;  vec2[2] = 8;
  *  vec1[3] = 7;  vec2[3] = 7;
  *
- *  typedef thrust::device_vector<int>::iterator Iterator;
+ *  using Iterator = thrust::device_vector<int>::iterator;
  *  thrust::pair<Iterator,Iterator> result;
  *
  *  result = thrust::mismatch(vec1.begin(), vec1.end(), vec2.begin(), thrust::equal_to<int>());

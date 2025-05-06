@@ -10,6 +10,8 @@
 #include <thrust/functional.h>
 #include <cassert>
 
+#include "include/host_device.h"
+
 // uninitialized_allocator is an allocator which
 // derives from device_allocator and which has a
 // no-op construct member function
@@ -29,9 +31,7 @@ template<typename T>
   __host__
   ~uninitialized_allocator() {}
 
-#if THRUST_CPP_DIALECT >= 2011
-  uninitialized_allocator & operator=(const uninitialized_allocator &) = default;
-#endif
+uninitialized_allocator & operator=(const uninitialized_allocator &) = default;
 
   // for correctness, you should also redefine rebind when you inherit
   // from an allocator type; this way, if the allocator is rebound somewhere,
@@ -40,7 +40,7 @@ template<typename T>
   template<typename U>
   struct rebind
   {
-    typedef uninitialized_allocator<U> other;
+    using other = uninitialized_allocator<U>;
   };
 
   // note that construct is annotated as
@@ -54,7 +54,7 @@ template<typename T>
 
 // to make a device_vector which does not initialize its elements,
 // use uninitialized_allocator as the 2nd template parameter
-typedef thrust::device_vector<float, uninitialized_allocator<float> > uninitialized_vector;
+using uninitialized_vector = thrust::device_vector<float, uninitialized_allocator<float> >;
 
 int main()
 {

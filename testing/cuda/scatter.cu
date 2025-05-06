@@ -1,8 +1,26 @@
+/*
+ *  Copyright 2008-2013 NVIDIA Corporation
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+
 #include <unittest/unittest.h>
 #include <thrust/scatter.h>
 #include <thrust/execution_policy.h>
 #include <algorithm>
 
+#ifdef THRUST_TEST_DEVICE_SIDE
 template<typename ExecutionPolicy, typename Iterator1, typename Iterator2, typename Iterator3>
 __global__
 void scatter_kernel(ExecutionPolicy exec, Iterator1 first, Iterator1 last, Iterator2 map_first, Iterator3 result)
@@ -65,7 +83,10 @@ void scatter_if_kernel(ExecutionPolicy exec, Iterator1 first, Iterator1 last, It
 template<typename T>
 struct is_even_scatter_if
 {
-  __host__ __device__ bool operator()(const T i) const { return (i % 2) == 0; }
+  THRUST_HOST_DEVICE bool operator()(const T i) const
+  {
+    return (i % 2) == 0;
+  }
 };
 
 
@@ -112,11 +133,12 @@ void TestScatterIfDeviceDevice()
   TestScatterIfDevice(thrust::device);
 }
 DECLARE_UNITTEST(TestScatterIfDeviceDevice);
+#endif
 
 
 void TestScatterCudaStreams()
 {
-  typedef thrust::device_vector<int> Vector;
+  using Vector = thrust::device_vector<int>;
 
   Vector map(5);  // scatter indices
   Vector src(5);  // source vector
@@ -149,7 +171,7 @@ DECLARE_UNITTEST(TestScatterCudaStreams);
 
 void TestScatterIfCudaStreams()
 {
-  typedef thrust::device_vector<int> Vector;
+  using Vector = thrust::device_vector<int>;
   
   Vector flg(5);  // predicate array
   Vector map(5);  // scatter indices

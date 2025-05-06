@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -24,7 +24,7 @@ struct TestVectorRangeInsertSimple
 {
     void operator()(size_t)
     {
-        typedef typename Vector::value_type T;
+        using T = typename Vector::value_type;
 
         Vector v1(5);
         thrust::sequence(v1.begin(), v1.end());
@@ -56,7 +56,7 @@ struct TestVectorRangeInsertSimple
 
         ASSERT_EQUAL(T(1), v2[6]);
         ASSERT_EQUAL(T(2), v2[7]);
-
+        
         ASSERT_EQUAL(8lu,  v2.size());
         ASSERT_EQUAL(10lu, v2.capacity());
 
@@ -192,7 +192,7 @@ struct TestVectorFillInsertSimple
 {
     void operator()(size_t)
     {
-        typedef typename Vector::value_type T;
+        using T = typename Vector::value_type;
 
         // test when insertion range fits inside capacity
         // and the size of the insertion is greater than the number
@@ -220,7 +220,7 @@ struct TestVectorFillInsertSimple
 
         ASSERT_EQUAL(T(1), v1[6]);
         ASSERT_EQUAL(T(2), v1[7]);
-
+        
         ASSERT_EQUAL(8lu,  v1.size());
         ASSERT_EQUAL(10lu, v1.capacity());
 
@@ -344,3 +344,4 @@ struct TestVectorFillInsert
     }
 }; // end TestVectorFillInsert
 VariableUnitTest<TestVectorFillInsert, IntegralTypes> TestVectorFillInsertInstance;
+

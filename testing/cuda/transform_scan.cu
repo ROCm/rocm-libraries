@@ -1,8 +1,26 @@
+/*
+ *  Copyright 2008-2013 NVIDIA Corporation
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+
 #include <unittest/unittest.h>
 #include <thrust/transform_scan.h>
 #include <thrust/execution_policy.h>
 
 
+#ifdef THRUST_TEST_DEVICE_SIDE
 template<typename ExecutionPolicy, typename Iterator1, typename Iterator2, typename Function1, typename Function2, typename Iterator3>
 __global__
 void transform_inclusive_scan_kernel(ExecutionPolicy exec, Iterator1 first, Iterator1 last, Iterator2 result1, Function1 f1, Function2 f2, Iterator3 result2)
@@ -22,9 +40,9 @@ void transform_exclusive_scan_kernel(ExecutionPolicy exec, Iterator1 first, Iter
 template<typename ExecutionPolicy>
 void TestTransformScanDevice(ExecutionPolicy exec)
 {
-  typedef thrust::device_vector<int> Vector;
-  typedef typename Vector::value_type T;
-  
+  using Vector = thrust::device_vector<int>;
+  using T      = typename Vector::value_type;
+
   typename Vector::iterator iter;
   
   Vector input(5);
@@ -115,12 +133,13 @@ void TestTransformScanDeviceDevice()
   TestTransformScanDevice(thrust::device);
 }
 DECLARE_UNITTEST(TestTransformScanDeviceDevice);
+#endif
 
 
 void TestTransformScanCudaStreams()
 {
-  typedef thrust::device_vector<int> Vector;
-  typedef Vector::value_type T;
+  using Vector = thrust::device_vector<int>;
+  using T      = Vector::value_type;
 
   Vector::iterator iter;
 
@@ -184,3 +203,30 @@ void TestTransformScanCudaStreams()
 }
 DECLARE_UNITTEST(TestTransformScanCudaStreams);
 
+void TestTransformScanConstAccumulator()
+{
+  using Vector = thrust::device_vector<int>;
+  using T      = Vector::value_type;
+
+  Vector::iterator iter;
+
+  Vector input(5);
+  Vector reference(5);
+  Vector output(5);
+
+  input[0] = 1;
+  input[1] = 3;
+  input[2] = -2;
+  input[3] = 4;
+  input[4] = -5;
+
+  thrust::transform_inclusive_scan(input.begin(),
+                                   input.end(),
+                                   output.begin(),
+                                   thrust::identity<T>(),
+                                   thrust::plus<T>());
+  thrust::inclusive_scan(input.begin(), input.end(), reference.begin(), thrust::plus<T>());
+
+  ASSERT_EQUAL(output, reference);
+}
+DECLARE_UNITTEST(TestTransformScanConstAccumulator);

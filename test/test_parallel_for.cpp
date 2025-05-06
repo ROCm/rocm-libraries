@@ -29,7 +29,7 @@
 
 #ifdef PARALLEL_FOR
 
-typedef ::testing::Types<Params<unsigned int>, Params<unsigned long long>> TestsParams;
+using TestsParams = ::testing::Types<Params<unsigned int>, Params<unsigned long long>>;
 
 TESTS_DEFINE(ParallelForTests, TestsParams)
 

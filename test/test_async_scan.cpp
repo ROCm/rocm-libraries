@@ -1,3 +1,19 @@
+/*
+ *  Copyright© 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+
 #include <thrust/detail/config.h>
 
 #include <thrust/async/scan.h>
@@ -103,7 +119,7 @@ void TestAsyncScan()
             SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> h0_data = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
+                size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
             thrust::device_vector<T> d0_data(h0_data);
             thrust::host_vector<T>   h0_output(h0_data);
             thrust::device_vector<T> d0_output(d0_data);
@@ -115,7 +131,7 @@ void TestAsyncScan()
             THRUST_IF_CONSTEXPR(wait_for_futures == WaitPolicy)
             {
                 f0.wait();
-                ASSERT_EQ(h0_output, d0_output);
+                test_equality(h0_output, d0_output);
             }
         }
     }

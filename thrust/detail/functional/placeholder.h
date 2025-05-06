@@ -29,7 +29,7 @@ namespace functional
 template<unsigned int i>
   struct placeholder
 {
-  typedef actor<argument<i> > type;
+  using type = actor<argument<i>>;
 };
 
 } // end functional

@@ -1,3 +1,20 @@
+/*
+ *  Copyright 2008-2013 NVIDIA Corporation
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+
 #include <unittest/unittest.h>
 #include <thrust/tuple.h>
 #include <thrust/scan.h>
@@ -12,11 +29,11 @@ using namespace unittest;
 struct SumTupleFunctor
 {
   template <typename Tuple>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   Tuple operator()(const Tuple &lhs, const Tuple &rhs)
   {
     using thrust::get;
-
+  
     return thrust::make_tuple(get<0>(lhs) + get<0>(rhs),
                               get<1>(lhs) + get<1>(rhs));
   }
@@ -25,7 +42,7 @@ struct SumTupleFunctor
 struct MakeTupleFunctor
 {
   template<typename T1, typename T2>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   thrust::tuple<T1,T2> operator()(T1 &lhs, T2 &rhs)
   {
     return thrust::make_tuple(lhs, rhs);
@@ -47,7 +64,7 @@ struct TestTupleScan
      host_vector< tuple<T,T> > h_input(n);
      transform(h_t1.begin(), h_t1.end(), h_t2.begin(), h_input.begin(), MakeTupleFunctor());
      device_vector< tuple<T,T> > d_input = h_input;
-
+     
      // allocate output
      tuple<T,T> zero(0,0);
      host_vector  < tuple<T,T> > h_output(n, zero);

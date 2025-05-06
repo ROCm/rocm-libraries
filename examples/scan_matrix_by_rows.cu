@@ -4,6 +4,7 @@
 #include <thrust/iterator/transform_iterator.h>
 #include <thrust/iterator/counting_iterator.h>
 
+#include "include/host_device.h"
 #include <assert.h>
 
 // We have a matrix stored in a `thrust::device_vector`. We want to perform a
@@ -27,7 +28,8 @@ void scan_matrix_by_rows0(thrust::device_vector<int>& u, int n, int m) {
 // So first, we define an unary function object which takes the index of an
 // element and returns the row that it belongs to.
 
-struct which_row : thrust::unary_function<int, int> {
+struct which_row
+{
   int row_length;
 
   __host__ __device__

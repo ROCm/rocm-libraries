@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2023 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -156,13 +156,13 @@ DECLARE_VECTOR_UNITTEST(TestUninitializedCopyNSimplePOD);
 
 struct CopyConstructTest
 {
-  __host__ __device__
+  THRUST_HOST_DEVICE
   CopyConstructTest(void)
     :copy_constructed_on_host(false),
      copy_constructed_on_device(false)
   {}
 
-  __host__ __device__
+  THRUST_HOST_DEVICE
   CopyConstructTest(const CopyConstructTest &)
   {
     NV_IF_TARGET(NV_IS_DEVICE, (
@@ -170,11 +170,11 @@ struct CopyConstructTest
       copy_constructed_on_host   = false;
     ), (
       copy_constructed_on_device = false;
-      copy_constructed_on_host   = true;
+      copy_constructed_on_host = true;
     ));
   }
 
-  __host__ __device__
+  THRUST_HOST_DEVICE
   CopyConstructTest &operator=(const CopyConstructTest &x)
   {
     copy_constructed_on_host   = x.copy_constructed_on_host;
@@ -191,7 +191,7 @@ struct TestUninitializedCopyNonPODDevice
 {
   void operator()(const size_t)
   {
-    typedef CopyConstructTest T;
+    using T = CopyConstructTest;
 
     thrust::device_vector<T> v1(5), v2(5);
 
@@ -217,7 +217,7 @@ struct TestUninitializedCopyNNonPODDevice
 {
   void operator()(const size_t)
   {
-    typedef CopyConstructTest T;
+    using T = CopyConstructTest;
 
     thrust::device_vector<T> v1(5), v2(5);
 
@@ -243,7 +243,7 @@ struct TestUninitializedCopyNonPODHost
 {
   void operator()(const size_t)
   {
-    typedef CopyConstructTest T;
+    using T = CopyConstructTest;
 
     thrust::host_vector<T> v1(5), v2(5);
 
@@ -269,7 +269,7 @@ struct TestUninitializedCopyNNonPODHost
 {
   void operator()(const size_t)
   {
-    typedef CopyConstructTest T;
+    using T = CopyConstructTest;
 
     thrust::host_vector<T> v1(5), v2(5);
 
@@ -289,3 +289,4 @@ struct TestUninitializedCopyNNonPODHost
   }
 };
 DECLARE_UNITTEST(TestUninitializedCopyNNonPODHost);
+

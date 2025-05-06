@@ -27,12 +27,12 @@
 THRUST_NAMESPACE_BEGIN
 
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template<typename DerivedPolicy,
          typename InputIterator,
          typename OutputIterator,
          typename UnaryFunction>
-__host__ __device__
+THRUST_HOST_DEVICE
   OutputIterator transform(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
                            InputIterator first, InputIterator last,
                            OutputIterator result,
@@ -43,13 +43,13 @@ __host__ __device__
 } // end transform()
 
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template<typename DerivedPolicy,
          typename InputIterator1,
          typename InputIterator2,
          typename OutputIterator,
          typename BinaryFunction>
-__host__ __device__
+THRUST_HOST_DEVICE
   OutputIterator transform(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
                            InputIterator1 first1, InputIterator1 last1,
                            InputIterator2 first2,
@@ -61,13 +61,13 @@ __host__ __device__
 } // end transform()
 
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template<typename DerivedPolicy,
          typename InputIterator,
          typename ForwardIterator,
          typename UnaryFunction,
          typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
   ForwardIterator transform_if(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
                                InputIterator first, InputIterator last,
                                ForwardIterator result,
@@ -79,14 +79,14 @@ __host__ __device__
 } // end transform_if()
 
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template<typename DerivedPolicy,
          typename InputIterator1,
          typename InputIterator2,
          typename ForwardIterator,
          typename UnaryFunction,
          typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
   ForwardIterator transform_if(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
                                InputIterator1 first, InputIterator1 last,
                                InputIterator2 stencil,
@@ -99,7 +99,7 @@ __host__ __device__
 } // end transform_if()
 
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template<typename DerivedPolicy,
          typename InputIterator1,
          typename InputIterator2,
@@ -107,7 +107,7 @@ template<typename DerivedPolicy,
          typename ForwardIterator,
          typename BinaryFunction,
          typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
   ForwardIterator transform_if(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
                                InputIterator1 first1, InputIterator1 last1,
                                InputIterator2 first2,
@@ -131,8 +131,8 @@ template<typename InputIterator,
 {
   using thrust::system::detail::generic::select_system;
 
-  typedef typename thrust::iterator_system<InputIterator>::type  System1;
-  typedef typename thrust::iterator_system<OutputIterator>::type System2;
+  using System1 = typename thrust::iterator_system<InputIterator>::type;
+  using System2 = typename thrust::iterator_system<OutputIterator>::type;
 
   System1 system1;
   System2 system2;
@@ -153,9 +153,9 @@ template<typename InputIterator1,
 {
   using thrust::system::detail::generic::select_system;
 
-  typedef typename thrust::iterator_system<InputIterator1>::type System1;
-  typedef typename thrust::iterator_system<InputIterator2>::type System2;
-  typedef typename thrust::iterator_system<OutputIterator>::type System3;
+  using System1 = typename thrust::iterator_system<InputIterator1>::type;
+  using System2 = typename thrust::iterator_system<InputIterator2>::type;
+  using System3 = typename thrust::iterator_system<OutputIterator>::type;
 
   System1 system1;
   System2 system2;
@@ -177,8 +177,8 @@ template<typename InputIterator,
 {
   using thrust::system::detail::generic::select_system;
 
-  typedef typename thrust::iterator_system<InputIterator>::type   System1;
-  typedef typename thrust::iterator_system<ForwardIterator>::type System2;
+  using System1 = typename thrust::iterator_system<InputIterator>::type;
+  using System2 = typename thrust::iterator_system<ForwardIterator>::type;
 
   System1 system1;
   System2 system2;
@@ -201,9 +201,9 @@ template<typename InputIterator1,
 {
   using thrust::system::detail::generic::select_system;
 
-  typedef typename thrust::iterator_system<InputIterator1>::type  System1;
-  typedef typename thrust::iterator_system<InputIterator2>::type  System2;
-  typedef typename thrust::iterator_system<ForwardIterator>::type System3;
+  using System1 = typename thrust::iterator_system<InputIterator1>::type;
+  using System2 = typename thrust::iterator_system<InputIterator2>::type;
+  using System3 = typename thrust::iterator_system<ForwardIterator>::type;
 
   System1 system1;
   System2 system2;
@@ -229,10 +229,10 @@ template<typename InputIterator1,
 {
   using thrust::system::detail::generic::select_system;
 
-  typedef typename thrust::iterator_system<InputIterator1>::type  System1;
-  typedef typename thrust::iterator_system<InputIterator2>::type  System2;
-  typedef typename thrust::iterator_system<InputIterator3>::type  System3;
-  typedef typename thrust::iterator_system<ForwardIterator>::type System4;
+  using System1 = typename thrust::iterator_system<InputIterator1>::type;
+  using System2 = typename thrust::iterator_system<InputIterator2>::type;
+  using System3 = typename thrust::iterator_system<InputIterator3>::type;
+  using System4 = typename thrust::iterator_system<ForwardIterator>::type;
 
   System1 system1;
   System2 system2;

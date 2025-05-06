@@ -47,7 +47,7 @@ namespace __uninitialized_fill {
     Iterator  items;
     T         value;
 
-    typedef typename iterator_traits<Iterator>::value_type value_type;
+    using value_type = typename iterator_traits<Iterator>::value_type;
 
     THRUST_FUNCTION
     functor(Iterator items_, T const& value_)
@@ -73,13 +73,13 @@ template <class Derived,
           class Iterator,
           class Size,
           class T>
-Iterator __host__ __device__
+Iterator _CCCL_HOST_DEVICE
 uninitialized_fill_n(execution_policy<Derived>& policy,
                      Iterator                   first,
                      Size                       count,
                      T const&                   x)
 {
-  typedef __uninitialized_fill::functor<Iterator,T> functor_t;
+  using functor_t = __uninitialized_fill::functor<Iterator, T>;
 
   cuda_cub::parallel_for(policy,
                          functor_t(first, x),
@@ -91,7 +91,7 @@ uninitialized_fill_n(execution_policy<Derived>& policy,
 template <class Derived,
           class Iterator,
           class T>
-void __host__ __device__
+void _CCCL_HOST_DEVICE
 uninitialized_fill(execution_policy<Derived>& policy,
                    Iterator                   first,
                    Iterator                   last,

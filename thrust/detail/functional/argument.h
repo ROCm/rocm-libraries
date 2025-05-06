@@ -37,13 +37,13 @@ namespace functional
 template<unsigned int i, typename Env>
   struct argument_helper
 {
-  typedef typename thrust::tuple_element<i,Env>::type type;
+  using type = typename thrust::tuple_element<i, Env>::type;
 };
 
 template<unsigned int i>
-  struct argument_helper<i,thrust::null_type>
+  struct argument_helper<i,thrust::tuple<>>
 {
-  typedef thrust::null_type type;
+  using type = thrust::tuple<>;
 };
 
 
@@ -52,16 +52,16 @@ template<unsigned int i>
 {
   public:
     template<typename Env>
-      struct result
+    struct result
         : argument_helper<i,Env>
     {
     };
 
-    __host__ __device__
+    THRUST_HOST_DEVICE
     constexpr argument(){}
 
     template<typename Env>
-    __host__ __device__
+    THRUST_HOST_DEVICE
     typename result<Env>::type eval(const Env &e) const
     {
       return thrust::get<i>(e);

@@ -30,8 +30,6 @@
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
 
-#include <thrust/detail/config/exec_check_disable.h>
-#include <thrust/detail/cstdint.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/distance.h>
 #include <thrust/iterator/iterator_traits.h>
@@ -41,19 +39,21 @@
 
 #include <cub/device/device_scan.cuh>
 
+#include <cstdint>
+
 THRUST_NAMESPACE_BEGIN
 namespace cuda_cub
 {
 namespace detail
 {
 
-__thrust_exec_check_disable__
+_CCCL_EXEC_CHECK_DISABLE
 template <typename Derived,
           typename InputIt,
           typename Size,
           typename OutputIt,
           typename ScanOp>
-__host__ __device__
+_CCCL_HOST_DEVICE
 OutputIt inclusive_scan_n_impl(thrust::cuda_cub::execution_policy<Derived> &policy,
                                InputIt first,
                                Size num_items,
@@ -65,13 +65,13 @@ OutputIt inclusive_scan_n_impl(thrust::cuda_cub::execution_policy<Derived> &poli
                                        OutputIt,
                                        ScanOp,
                                        cub::NullType,
-                                       thrust::detail::int32_t,
+                                       std::int32_t,
                                        AccumT>;
   using Dispatch64 = cub::DispatchScan<InputIt,
                                        OutputIt,
                                        ScanOp,
                                        cub::NullType,
-                                       thrust::detail::int64_t,
+                                       std::int64_t,
                                        AccumT>;
 
   cudaStream_t stream = thrust::cuda_cub::stream(policy);
@@ -100,7 +100,7 @@ OutputIt inclusive_scan_n_impl(thrust::cuda_cub::execution_policy<Derived> &poli
   // Run scan:
   {
     // Allocate temporary storage:
-    thrust::detail::temporary_array<thrust::detail::uint8_t, Derived> tmp{
+    thrust::detail::temporary_array<std::uint8_t, Derived> tmp{
       policy,
       tmp_size};
     THRUST_INDEX_TYPE_DISPATCH2(status,
@@ -124,14 +124,14 @@ OutputIt inclusive_scan_n_impl(thrust::cuda_cub::execution_policy<Derived> &poli
   return result + num_items;
 }
 
-__thrust_exec_check_disable__
+_CCCL_EXEC_CHECK_DISABLE
 template <typename Derived,
           typename InputIt,
           typename Size,
           typename OutputIt,
           typename InitValueT,
           typename ScanOp>
-__host__ __device__
+_CCCL_HOST_DEVICE
 OutputIt exclusive_scan_n_impl(thrust::cuda_cub::execution_policy<Derived> &policy,
                                InputIt first,
                                Size num_items,
@@ -144,13 +144,13 @@ OutputIt exclusive_scan_n_impl(thrust::cuda_cub::execution_policy<Derived> &poli
                                        OutputIt,
                                        ScanOp,
                                        InputValueT,
-                                       thrust::detail::int32_t,
+                                       std::int32_t,
                                        InitValueT>;
   using Dispatch64 = cub::DispatchScan<InputIt,
                                        OutputIt,
                                        ScanOp,
                                        InputValueT,
-                                       thrust::detail::int64_t,
+                                       std::int64_t,
                                        InitValueT>;
 
   cudaStream_t stream = thrust::cuda_cub::stream(policy);
@@ -179,7 +179,7 @@ OutputIt exclusive_scan_n_impl(thrust::cuda_cub::execution_policy<Derived> &poli
   // Run scan:
   {
     // Allocate temporary storage:
-    thrust::detail::temporary_array<thrust::detail::uint8_t, Derived> tmp{
+    thrust::detail::temporary_array<std::uint8_t, Derived> tmp{
       policy,
       tmp_size};
     THRUST_INDEX_TYPE_DISPATCH2(status,
@@ -209,13 +209,13 @@ OutputIt exclusive_scan_n_impl(thrust::cuda_cub::execution_policy<Derived> &poli
 // Thrust API entry points
 //-------------------------
 
-__thrust_exec_check_disable__
+_CCCL_EXEC_CHECK_DISABLE
 template <typename Derived,
           typename InputIt,
           typename Size,
           typename OutputIt,
           typename ScanOp>
-__host__ __device__
+_CCCL_HOST_DEVICE
 OutputIt inclusive_scan_n(thrust::cuda_cub::execution_policy<Derived> &policy,
                           InputIt first,
                           Size num_items,
@@ -237,7 +237,7 @@ OutputIt inclusive_scan_n(thrust::cuda_cub::execution_policy<Derived> &policy,
 }
 
 template <typename Derived, typename InputIt, typename OutputIt, typename ScanOp>
-__host__ __device__
+_CCCL_HOST_DEVICE
 OutputIt inclusive_scan(thrust::cuda_cub::execution_policy<Derived> &policy,
                         InputIt first,
                         InputIt last,
@@ -254,7 +254,7 @@ OutputIt inclusive_scan(thrust::cuda_cub::execution_policy<Derived> &policy,
 }
 
 template <typename Derived, typename InputIt, typename OutputIt>
-__host__ __device__
+_CCCL_HOST_DEVICE
 OutputIt inclusive_scan(thrust::cuda_cub::execution_policy<Derived> &policy,
                         InputIt first,
                         InputIt last,
@@ -267,14 +267,14 @@ OutputIt inclusive_scan(thrust::cuda_cub::execution_policy<Derived> &policy,
                                           thrust::plus<>{});
 }
 
-__thrust_exec_check_disable__
+_CCCL_EXEC_CHECK_DISABLE
 template <typename Derived,
           typename InputIt,
           typename Size,
           typename OutputIt,
           typename T,
           typename ScanOp>
-__host__ __device__
+_CCCL_HOST_DEVICE
 OutputIt exclusive_scan_n(thrust::cuda_cub::execution_policy<Derived> &policy,
                           InputIt first,
                           Size num_items,
@@ -303,7 +303,7 @@ template <typename Derived,
           typename OutputIt,
           typename T,
           typename ScanOp>
-__host__ __device__
+_CCCL_HOST_DEVICE
 OutputIt exclusive_scan(thrust::cuda_cub::execution_policy<Derived> &policy,
                         InputIt first,
                         InputIt last,
@@ -322,7 +322,7 @@ OutputIt exclusive_scan(thrust::cuda_cub::execution_policy<Derived> &policy,
 }
 
 template <typename Derived, typename InputIt, typename OutputIt, typename T>
-__host__ __device__
+_CCCL_HOST_DEVICE
 OutputIt exclusive_scan(thrust::cuda_cub::execution_policy<Derived> &policy,
                         InputIt first,
                         InputIt last,
@@ -338,7 +338,7 @@ OutputIt exclusive_scan(thrust::cuda_cub::execution_policy<Derived> &policy,
 }
 
 template <typename Derived, typename InputIt, typename OutputIt>
-__host__ __device__
+_CCCL_HOST_DEVICE
 OutputIt exclusive_scan(thrust::cuda_cub::execution_policy<Derived> &policy,
                         InputIt first,
                         InputIt last,

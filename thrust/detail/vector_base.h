@@ -28,6 +28,9 @@
 #include <thrust/detail/type_traits.h>
 #include <thrust/detail/config.h>
 #include <thrust/detail/contiguous_storage.h>
+#include <thrust/sequence_access.h>
+
+#include <initializer_list>
 #include <vector>
 
 THRUST_NAMESPACE_BEGIN
@@ -39,24 +42,24 @@ template<typename T, typename Alloc>
   class vector_base
 {
   private:
-    typedef thrust::detail::contiguous_storage<T,Alloc> storage_type;
+    using storage_type = thrust::detail::contiguous_storage<T,Alloc>;
 
   public:
     // typedefs
-    typedef typename storage_type::value_type      value_type;
-    typedef typename storage_type::pointer         pointer;
-    typedef typename storage_type::const_pointer   const_pointer;
-    typedef typename storage_type::reference       reference;
-    typedef typename storage_type::const_reference const_reference;
-    typedef typename storage_type::size_type       size_type;
-    typedef typename storage_type::difference_type difference_type;
-    typedef typename storage_type::allocator_type  allocator_type;
+    using value_type      = typename storage_type::value_type;
+    using pointer         = typename storage_type::pointer;
+    using const_pointer   = typename storage_type::const_pointer;
+    using reference       = typename storage_type::reference;
+    using const_reference = typename storage_type::const_reference;
+    using size_type       = typename storage_type::size_type;
+    using difference_type = typename storage_type::difference_type;
+    using allocator_type  = typename storage_type::allocator_type;
 
-    typedef typename storage_type::iterator        iterator;
-    typedef typename storage_type::const_iterator  const_iterator;
+    using iterator       = typename storage_type::iterator;
+    using const_iterator = typename storage_type::const_iterator;
 
-    typedef thrust::reverse_iterator<iterator>       reverse_iterator;
-    typedef thrust::reverse_iterator<const_iterator> const_reverse_iterator;
+    using reverse_iterator       = thrust::reverse_iterator<iterator>;
+    using const_reverse_iterator = thrust::reverse_iterator<const_iterator>;
 
     /*! This constructor creates an empty vector_base.
      */
@@ -106,7 +109,6 @@ template<typename T, typename Alloc>
      */
     vector_base(const vector_base &v, const Alloc &alloc);
 
-  #if THRUST_CPP_DIALECT >= 2011
     /*! Move constructor moves from another vector_base.
      *  \param v The vector_base to move.
      */
@@ -116,19 +118,32 @@ template<typename T, typename Alloc>
     // iterators, which is necessary for the following constructor to be implemented
     // correctly
     // vector_base(vector_base &&v, const Alloc &alloc);
-  #endif
 
     /*! Copy assign operator copies from another vector_base.
      *  \param v The vector_base to copy.
      */
     vector_base &operator=(const vector_base &v);
 
-  #if THRUST_CPP_DIALECT >= 2011
     /*! Move assign operator moves from another vector_base.
      *  \param v The vector_base to move.
      */
     vector_base &operator=(vector_base &&v);
-  #endif
+
+    /*! This constructor builds a \p vector_base from an intializer_list.
+     *  \param il The intializer_list.
+     */
+    vector_base(std::initializer_list<T> il);
+      
+    /*! This constructor builds a \p vector_base from an intializer_list.
+     *  \param il The intializer_list.
+     *  \param alloc The allocator to use by this device_vector.
+     */
+    vector_base(std::initializer_list<T> il, const Alloc &alloc);
+    
+    /*! Assign operator copies from an initializer_list
+     *  \param il The initializer_list.
+     */
+    vector_base &operator=(std::initializer_list<T> il);
 
     /*! Copy constructor copies from an exemplar vector_base with different
      *  type.
@@ -206,11 +221,13 @@ template<typename T, typename Alloc>
 
     /*! Returns the number of elements in this vector_base.
      */
+    THRUST_HOST_DEVICE
     size_type size(void) const;
 
     /*! Returns the size() of the largest possible vector_base.
      *  \return The largest possible return value of size().
      */
+    THRUST_HOST_DEVICE
     size_type max_size(void) const;
 
     /*! \brief If n is less than or equal to capacity(), this call has no effect.
@@ -224,6 +241,7 @@ template<typename T, typename Alloc>
     /*! Returns the number of elements which have been reserved in this
      *  vector_base.
      */
+    THRUST_HOST_DEVICE
     size_type capacity(void) const;
 
     /*! This method shrinks the capacity of this vector_base to exactly
@@ -239,6 +257,7 @@ template<typename T, typename Alloc>
      *  Note that data access with this operator is unchecked and
      *  out_of_range lookups are not defined.
      */
+    THRUST_HOST_DEVICE
     reference operator[](size_type n);
 
     /*! \brief Subscript read access to the data contained in this vector_dev.
@@ -249,24 +268,28 @@ template<typename T, typename Alloc>
      *  Note that data access with this operator is unchecked and
      *  out_of_range lookups are not defined.
      */
+    THRUST_HOST_DEVICE
     const_reference operator[](size_type n) const;
 
     /*! This method returns an iterator pointing to the beginning of
      *  this vector_base.
      *  \return mStart
      */
+    THRUST_HOST_DEVICE
     iterator begin(void);
 
     /*! This method returns a const_iterator pointing to the beginning
      *  of this vector_base.
      *  \return mStart
      */
+    THRUST_HOST_DEVICE
     const_iterator begin(void) const;
 
     /*! This method returns a const_iterator pointing to the beginning
      *  of this vector_base.
      *  \return mStart
      */
+    THRUST_HOST_DEVICE
     const_iterator cbegin(void) const;
 
     /*! This method returns a reverse_iterator pointing to the beginning of
@@ -274,6 +297,7 @@ template<typename T, typename Alloc>
      *  \return A reverse_iterator pointing to the beginning of this
      *          vector_base's reversed sequence.
      */
+    THRUST_HOST_DEVICE
     reverse_iterator rbegin(void);
 
     /*! This method returns a const_reverse_iterator pointing to the beginning of
@@ -281,6 +305,7 @@ template<typename T, typename Alloc>
      *  \return A const_reverse_iterator pointing to the beginning of this
      *          vector_base's reversed sequence.
      */
+    THRUST_HOST_DEVICE
     const_reverse_iterator rbegin(void) const;
 
     /*! This method returns a const_reverse_iterator pointing to the beginning of
@@ -288,76 +313,89 @@ template<typename T, typename Alloc>
      *  \return A const_reverse_iterator pointing to the beginning of this
      *          vector_base's reversed sequence.
      */
+    THRUST_HOST_DEVICE
     const_reverse_iterator crbegin(void) const;
 
     /*! This method returns an iterator pointing to one element past the
      *  last of this vector_base.
      *  \return begin() + size().
      */
+    THRUST_HOST_DEVICE
     iterator end(void);
 
     /*! This method returns a const_iterator pointing to one element past the
      *  last of this vector_base.
      *  \return begin() + size().
      */
+    THRUST_HOST_DEVICE
     const_iterator end(void) const;
 
     /*! This method returns a const_iterator pointing to one element past the
      *  last of this vector_base.
      *  \return begin() + size().
      */
+    THRUST_HOST_DEVICE
     const_iterator cend(void) const;
 
     /*! This method returns a reverse_iterator pointing to one element past the
      *  last of this vector_base's reversed sequence.
      *  \return rbegin() + size().
      */
+    THRUST_HOST_DEVICE
     reverse_iterator rend(void);
 
     /*! This method returns a const_reverse_iterator pointing to one element past the
      *  last of this vector_base's reversed sequence.
      *  \return rbegin() + size().
      */
+    THRUST_HOST_DEVICE
     const_reverse_iterator rend(void) const;
 
     /*! This method returns a const_reverse_iterator pointing to one element past the
      *  last of this vector_base's reversed sequence.
      *  \return rbegin() + size().
      */
+    THRUST_HOST_DEVICE
     const_reverse_iterator crend(void) const;
 
     /*! This method returns a const_reference referring to the first element of this
      *  vector_base.
      *  \return The first element of this vector_base.
      */
+    THRUST_HOST_DEVICE
     const_reference front(void) const;
 
     /*! This method returns a reference pointing to the first element of this
      *  vector_base.
      *  \return The first element of this vector_base.
      */
+    THRUST_HOST_DEVICE
     reference front(void);
 
     /*! This method returns a const reference pointing to the last element of
      *  this vector_base.
      *  \return The last element of this vector_base.
      */
+    THRUST_HOST_DEVICE
     const_reference back(void) const;
 
     /*! This method returns a reference referring to the last element of
      *  this vector_dev.
      *  \return The last element of this vector_base.
      */
+    THRUST_HOST_DEVICE
     reference back(void);
 
     /*! This method returns a pointer to this vector_base's first element.
      *  \return A pointer to the first element of this vector_base.
      */
+    THRUST_HOST_DEVICE
     pointer data(void);
 
     /*! This method returns a const_pointer to this vector_base's first element.
      *  \return a const_pointer to the first element of this vector_base.
      */
+    THRUST_HOST_DEVICE
     const_pointer data(void) const;
 
     /*! This method resizes this vector_base to 0.
@@ -367,6 +405,7 @@ template<typename T, typename Alloc>
     /*! This method returns true iff size() == 0.
      *  \return true if size() == 0; false, otherwise.
      */
+    THRUST_HOST_DEVICE
     bool empty(void) const;
 
     /*! This method appends the given element to the end of this vector_base.
@@ -448,6 +487,9 @@ template<typename T, typename Alloc>
      */
     allocator_type get_allocator(void) const;
 
+    THRUST_SYNTHESIZE_SEQUENCE_ACCESS(vector_base, const_iterator);
+    THRUST_SYNTHESIZE_SEQUENCE_REVERSE_ACCESS(vector_base, const_reverse_iterator);
+
   protected:
     // Our storage
     storage_type m_storage;
@@ -524,8 +566,6 @@ template<typename T, typename Alloc>
                            storage_type &new_storage);
 }; // end vector_base
 
-} // end detail
-
 /*! This function assigns the contents of vector a to vector b and the
  *  contents of vector b to vector a.
  *
@@ -535,8 +575,8 @@ template<typename T, typename Alloc>
  *           of a will be returned here.
  */
 template<typename T, typename Alloc>
-  void swap(detail::vector_base<T,Alloc> &a,
-            detail::vector_base<T,Alloc> &b);
+  void swap(vector_base<T,Alloc> &a,
+            vector_base<T,Alloc> &b);
 
 
 /*! This operator allows comparison between two vectors.
@@ -547,18 +587,18 @@ template<typename T, typename Alloc>
  */
 template<typename T1, typename Alloc1,
          typename T2, typename Alloc2>
-bool operator==(const detail::vector_base<T1,Alloc1>& lhs,
-                const detail::vector_base<T2,Alloc2>& rhs);
+bool operator==(const vector_base<T1,Alloc1>& lhs,
+                const vector_base<T2,Alloc2>& rhs);
 
 template<typename T1, typename Alloc1,
          typename T2, typename Alloc2>
-bool operator==(const detail::vector_base<T1,Alloc1>& lhs,
+bool operator==(const vector_base<T1,Alloc1>& lhs,
                 const std::vector<T2,Alloc2>&         rhs);
 
 template<typename T1, typename Alloc1,
          typename T2, typename Alloc2>
 bool operator==(const std::vector<T1,Alloc1>&         lhs,
-                const detail::vector_base<T2,Alloc2>& rhs);
+                const vector_base<T2,Alloc2>& rhs);
 
 /*! This operator allows comparison between two vectors.
  *  \param lhs The first \p vector to compare.
@@ -568,18 +608,20 @@ bool operator==(const std::vector<T1,Alloc1>&         lhs,
  */
 template<typename T1, typename Alloc1,
          typename T2, typename Alloc2>
-bool operator!=(const detail::vector_base<T1,Alloc1>& lhs,
-                const detail::vector_base<T2,Alloc2>& rhs);
+bool operator!=(const vector_base<T1,Alloc1>& lhs,
+                const vector_base<T2,Alloc2>& rhs);
 
 template<typename T1, typename Alloc1,
          typename T2, typename Alloc2>
-bool operator!=(const detail::vector_base<T1,Alloc1>& lhs,
+bool operator!=(const vector_base<T1,Alloc1>& lhs,
                 const std::vector<T2,Alloc2>&         rhs);
 
 template<typename T1, typename Alloc1,
          typename T2, typename Alloc2>
 bool operator!=(const std::vector<T1,Alloc1>&         lhs,
-                const detail::vector_base<T2,Alloc2>& rhs);
+                const vector_base<T2,Alloc2>& rhs);
+
+} // end detail
 
 THRUST_NAMESPACE_END
 

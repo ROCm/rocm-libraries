@@ -124,11 +124,8 @@ fi
 # Configure rocThrust, setup options for your system.
 # See README.md under "Build And Install" for options and defaults.
 
-# Set compiler
-compiler="hipcc"
-
 cmake_executable="cmake"
-cmake_common_options=""
+cmake_common_options="--toolchain=toolchain-linux.cmake"
 
 if [[ "${build_clients}" == true ]]; then
     build_test="-DBUILD_TEST=ON"
@@ -146,14 +143,14 @@ else
 fi
 
 if [[ "${build_relocatable}" == true ]]; then
-    CXX=$rocm_path/bin/${compiler} ${cmake_executable} ${cmake_common_options} \
+    ${cmake_executable} ${cmake_common_options} \
         -DCMAKE_INSTALL_PREFIX=${rocm_path} \
         -DCMAKE_PREFIX_PATH="${rocm_path} ${rocm_path}/hip" \
         -DCMAKE_MODULE_PATH="${rocm_path}/lib/cmake/hip ${rocm_path}/hip/cmake" \
         -DROCPRIM_ROOT=${rocm_path}/rocprim ${build_test}\
          ../../. # or cmake-gui ../.
 else
-    CXX=$rocm_path/bin/${compiler} ${cmake_executable} ${build_test} ${cmake_common_options} \
+    ${cmake_executable} ${build_test} ${cmake_common_options} \
         -DCMAKE_BUILD_TYPE=${build_type} ../../. # or cmake-gui ../.
 fi
 check_exit_code "$?"

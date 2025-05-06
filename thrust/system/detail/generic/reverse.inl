@@ -35,12 +35,12 @@ namespace generic
 
 
 template<typename ExecutionPolicy, typename BidirectionalIterator>
-__host__ __device__
+THRUST_HOST_DEVICE
   void reverse(thrust::execution_policy<ExecutionPolicy> &exec,
                BidirectionalIterator first,
                BidirectionalIterator last)
 {
-  typedef typename thrust::iterator_difference<BidirectionalIterator>::type difference_type;
+  using difference_type = typename thrust::iterator_difference<BidirectionalIterator>::type;
 
   // find the midpoint of [first,last)
   difference_type N = thrust::distance(first, last);
@@ -55,7 +55,7 @@ __host__ __device__
 template<typename ExecutionPolicy,
          typename BidirectionalIterator,
          typename OutputIterator>
-__host__ __device__
+THRUST_HOST_DEVICE
   OutputIterator reverse_copy(thrust::execution_policy<ExecutionPolicy> &exec,
                               BidirectionalIterator first,
                               BidirectionalIterator last,

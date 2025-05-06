@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2021 NVIDIA Corporation
- *  Modifications Copyright© 2019-2021 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -79,22 +79,22 @@ template<typename Element, typename Tag, typename Reference, typename Derived>
 {
   // void pointers should have no element type
   // note that we remove_cv from the Element type to get the value_type
-  typedef typename thrust::detail::eval_if<
+  using value_type = typename thrust::detail::eval_if<
     thrust::detail::is_void<typename thrust::remove_cvref<Element>::type>::value,
     thrust::detail::identity_<void>,
     thrust::detail::remove_cv<Element>
-  >::type value_type;
+  >::type;
 
   // if no Derived type is given, just use pointer
-  typedef typename thrust::detail::eval_if<
+  using derived_type = typename thrust::detail::eval_if<
     thrust::detail::is_same<Derived,use_default>::value,
     thrust::detail::identity_<pointer<Element,Tag,Reference,Derived> >,
     thrust::detail::identity_<Derived>
-  >::type derived_type;
+  >::type;
 
   // void pointers should have no reference type
   // if no Reference type is given, just use reference
-  typedef typename thrust::detail::eval_if<
+  using reference_type = typename thrust::detail::eval_if<
     thrust::detail::is_void<typename thrust::remove_cvref<Element>::type>::value,
     thrust::detail::identity_<void>,
     thrust::detail::eval_if<
@@ -102,9 +102,9 @@ template<typename Element, typename Tag, typename Reference, typename Derived>
       thrust::detail::identity_<reference<Element,derived_type> >,
       thrust::detail::identity_<Reference>
     >
-  >::type reference_type;
+  >::type;
 
-  typedef thrust::iterator_adaptor<
+  using type = thrust::iterator_adaptor<
     derived_type,                        // pass along the type of our Derived class to iterator_adaptor
     Element *,                           // we adapt a raw pointer
     value_type,                          // the value type
@@ -112,7 +112,7 @@ template<typename Element, typename Tag, typename Reference, typename Derived>
     thrust::random_access_traversal_tag, // pointers have random access traversal
     reference_type,                      // pass along our Reference type
     std::ptrdiff_t
-  > type;
+  >;
 }; // end pointer_base
 
 
@@ -132,14 +132,14 @@ template<typename Element, typename Tag, typename Reference, typename Derived>
     : public thrust::detail::pointer_base<Element,Tag,Reference,Derived>::type
 {
   private:
-    typedef typename thrust::detail::pointer_base<Element,Tag,Reference,Derived>::type         super_t;
+    using super_t = typename thrust::detail::pointer_base<Element,Tag,Reference,Derived>::type;
 
-    typedef typename thrust::detail::pointer_base<Element,Tag,Reference,Derived>::derived_type derived_type;
+    using derived_type = typename thrust::detail::pointer_base<Element,Tag,Reference,Derived>::derived_type;
 
     // friend iterator_core_access to give it access to dereference
     friend class thrust::iterator_core_access;
 
-    __host__ __device__
+    THRUST_HOST_DEVICE
     typename super_t::reference dereference() const;
 
     // don't provide access to this part of super_t's interface
@@ -147,32 +147,32 @@ template<typename Element, typename Tag, typename Reference, typename Derived>
     using typename super_t::base_type;
 
   public:
-    typedef typename super_t::base_type raw_pointer;
+    using raw_pointer = typename super_t::base_type;
 
     // constructors
 
-    __host__ __device__
+    THRUST_HOST_DEVICE
     pointer();
 
     // NOTE: This is needed so that Thrust smart pointers can be used in
     // `std::unique_ptr`.
-    __host__ __device__
+    THRUST_HOST_DEVICE
     pointer(std::nullptr_t);
 
     // OtherValue shall be convertible to Value
     // XXX consider making the pointer implementation a template parameter which defaults to Element *
     template<typename OtherElement>
-    __host__ __device__
+    THRUST_HOST_DEVICE
     explicit pointer(OtherElement *ptr);
 
     // Fixes hipcc linkage error
-    __host__ __device__
+    THRUST_HOST_DEVICE
     explicit pointer(Element *ptr);
 
     // OtherPointer's element_type shall be convertible to Element
     // OtherPointer's system shall be convertible to Tag
     template<typename OtherPointer>
-    __host__ __device__
+    THRUST_HOST_DEVICE
     pointer(const OtherPointer &other,
             typename thrust::detail::enable_if_pointer_is_convertible<
               OtherPointer,
@@ -182,7 +182,7 @@ template<typename Element, typename Tag, typename Reference, typename Derived>
     // OtherPointer's element_type shall be void
     // OtherPointer's system shall be convertible to Tag
     template<typename OtherPointer>
-    __host__ __device__
+    THRUST_HOST_DEVICE
     explicit
     pointer(const OtherPointer &other,
             typename thrust::detail::enable_if_void_pointer_is_system_convertible<
@@ -194,13 +194,13 @@ template<typename Element, typename Tag, typename Reference, typename Derived>
 
     // NOTE: This is needed so that Thrust smart pointers can be used in
     // `std::unique_ptr`.
-    __host__ __device__
+    THRUST_HOST_DEVICE
     derived_type& operator=(std::nullptr_t);
 
     // OtherPointer's element_type shall be convertible to Element
     // OtherPointer's system shall be convertible to Tag
     template<typename OtherPointer>
-    __host__ __device__
+    THRUST_HOST_DEVICE
     typename thrust::detail::enable_if_pointer_is_convertible<
       OtherPointer,
       pointer,
@@ -210,18 +210,18 @@ template<typename Element, typename Tag, typename Reference, typename Derived>
 
     // observers
 
-    __host__ __device__
+    THRUST_HOST_DEVICE
     Element *get() const;
 
-    __host__ __device__
+    THRUST_HOST_DEVICE
     Element *operator->() const;
 
     // NOTE: This is needed so that Thrust smart pointers can be used in
     // `std::unique_ptr`.
-    __host__ __device__
+    THRUST_HOST_DEVICE
     explicit operator bool() const;
 
-    __host__ __device__
+    THRUST_HOST_DEVICE
     static derived_type pointer_to(typename thrust::detail::pointer_traits_detail::pointer_to_param<Element>::type r)
     {
       return thrust::detail::pointer_traits<derived_type>::pointer_to(r);
@@ -232,7 +232,7 @@ template<typename Element, typename Tag, typename Reference, typename Derived>
 // Output stream operator
 template<typename Element, typename Tag, typename Reference, typename Derived,
          typename charT, typename traits>
-__host__
+THRUST_HOST
 std::basic_ostream<charT, traits> &
 operator<<(std::basic_ostream<charT, traits> &os,
            const pointer<Element, Tag, Reference, Derived> &p);
@@ -240,19 +240,19 @@ operator<<(std::basic_ostream<charT, traits> &os,
 // NOTE: This is needed so that Thrust smart pointers can be used in
 // `std::unique_ptr`.
 template <typename Element, typename Tag, typename Reference, typename Derived>
-__host__ __device__
+THRUST_HOST_DEVICE
 bool operator==(std::nullptr_t, pointer<Element, Tag, Reference, Derived> p);
 
 template <typename Element, typename Tag, typename Reference, typename Derived>
-__host__ __device__
+THRUST_HOST_DEVICE
 bool operator==(pointer<Element, Tag, Reference, Derived> p, std::nullptr_t);
 
 template <typename Element, typename Tag, typename Reference, typename Derived>
-__host__ __device__
+THRUST_HOST_DEVICE
 bool operator!=(std::nullptr_t, pointer<Element, Tag, Reference, Derived> p);
 
 template <typename Element, typename Tag, typename Reference, typename Derived>
-__host__ __device__
+THRUST_HOST_DEVICE
 bool operator!=(pointer<Element, Tag, Reference, Derived> p, std::nullptr_t);
 
 THRUST_NAMESPACE_END

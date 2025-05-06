@@ -32,7 +32,7 @@ namespace generic
 
 
 template<typename DerivedPolicy, typename InputIterator1, typename InputIterator2, typename OutputType>
-__host__ __device__
+THRUST_HOST_DEVICE
 OutputType inner_product(thrust::execution_policy<DerivedPolicy> &exec,
                          InputIterator1 first1,
                          InputIterator1 last1,
@@ -46,7 +46,7 @@ OutputType inner_product(thrust::execution_policy<DerivedPolicy> &exec,
 
 
 template<typename DerivedPolicy, typename InputIterator1, typename InputIterator2, typename OutputType, typename BinaryFunction1, typename BinaryFunction2>
-__host__ __device__
+THRUST_HOST_DEVICE
 OutputType inner_product(thrust::execution_policy<DerivedPolicy> &exec,
                          InputIterator1 first1,
                          InputIterator1 last1,
@@ -55,7 +55,7 @@ OutputType inner_product(thrust::execution_policy<DerivedPolicy> &exec,
                          BinaryFunction1 binary_op1,
                          BinaryFunction2 binary_op2)
 {
-  typedef thrust::zip_iterator<thrust::tuple<InputIterator1,InputIterator2> > ZipIter;
+  using ZipIter = thrust::zip_iterator<thrust::tuple<InputIterator1, InputIterator2>>;
 
   ZipIter first = thrust::make_zip_iterator(thrust::make_tuple(first1,first2));
 

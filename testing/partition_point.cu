@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -23,15 +23,15 @@
 template<typename T>
 struct is_even
 {
-  __host__ __device__
+  THRUST_HOST_DEVICE
   bool operator()(T x) const { return ((int) x % 2) == 0; }
 };
 
 template<typename Vector>
 void TestPartitionPointSimple(void)
 {
-  typedef typename Vector::value_type T;
-  typedef typename Vector::iterator Iterator;
+  using T        = typename Vector::value_type;
+  using Iterator = typename Vector::iterator;
 
   Vector v(4);
   v[0] = 1; v[1] = 1; v[2] = 1; v[3] = 0;
@@ -51,8 +51,8 @@ DECLARE_VECTOR_UNITTEST(TestPartitionPointSimple);
 template <class Vector>
 void TestPartitionPoint(void)
 {
-  typedef typename Vector::value_type T;
-  typedef typename Vector::iterator Iterator;
+  using T        = typename Vector::value_type;
+  using Iterator = typename Vector::iterator;
 
   const size_t n = (1 << 16) + 13;
 
@@ -66,7 +66,7 @@ DECLARE_INTEGRAL_VECTOR_UNITTEST(TestPartitionPoint);
 
 
 template<typename ForwardIterator, typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 ForwardIterator partition_point(my_system &system,
                                 ForwardIterator first,
                                 ForwardIterator,
@@ -92,7 +92,7 @@ DECLARE_UNITTEST(TestPartitionPointDispatchExplicit);
 
 
 template<typename ForwardIterator, typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 ForwardIterator partition_point(my_tag,
                                 ForwardIterator first,
                                 ForwardIterator,
@@ -118,7 +118,7 @@ struct test_less_than
 {
     long long expected;
 
-    __device__
+    THRUST_DEVICE
     bool operator()(long long y)
     {
         return y < expected;

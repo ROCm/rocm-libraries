@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -21,7 +21,7 @@
 #include <thrust/iterator/retag.h>
 
 
-typedef unittest::type_list<unittest::int8_t,unittest::int16_t,unittest::int32_t> ReverseTypes;
+using ReverseTypes = unittest::type_list<unittest::int8_t, unittest::int16_t, unittest::int32_t>;
 
 template<typename Vector>
 void TestReverseSimple(void)
@@ -100,7 +100,7 @@ void TestReverseCopySimple(void)
 
 #endif
 
-  typedef typename Vector::iterator   Iterator;
+  using Iterator = typename Vector::iterator;
 
   Vector input(5);
   input[0] = 1;

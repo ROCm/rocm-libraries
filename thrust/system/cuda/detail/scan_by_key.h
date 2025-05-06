@@ -37,7 +37,6 @@
 
 #include <thrust/iterator/iterator_traits.h>
 
-#include <thrust/detail/cstdint.h>
 #include <thrust/detail/minmax.h>
 #include <thrust/detail/mpl/math.h>
 #include <thrust/detail/temporary_array.h>
@@ -51,13 +50,15 @@
 #include <cub/device/dispatch/dispatch_scan_by_key.cuh>
 #include <cub/util_type.cuh>
 
+#include <cstdint>
+
 THRUST_NAMESPACE_BEGIN
 namespace cuda_cub
 {
 namespace detail
 {
 
-__thrust_exec_check_disable__
+_CCCL_EXEC_CHECK_DISABLE
 template <typename Derived,
           typename KeysInIt,
           typename ValuesInIt,
@@ -65,7 +66,7 @@ template <typename Derived,
           typename EqualityOpT,
           typename ScanOpT,
           typename SizeT>
-__host__ __device__
+_CCCL_HOST_DEVICE
 ValuesOutIt inclusive_scan_by_key_n(
   thrust::cuda_cub::execution_policy<Derived>& policy,
   KeysInIt keys,
@@ -81,17 +82,14 @@ ValuesOutIt inclusive_scan_by_key_n(
   }
 
   // Convert to raw pointers if possible:
-  using KeysInUnwrapIt =
-    thrust::detail::try_unwrap_contiguous_iterator_return_t<KeysInIt>;
-  using ValuesInUnwrapIt =
-    thrust::detail::try_unwrap_contiguous_iterator_return_t<ValuesInIt>;
-  using ValuesOutUnwrapIt =
-    thrust::detail::try_unwrap_contiguous_iterator_return_t<ValuesOutIt>;
-  using AccumT = typename thrust::iterator_traits<ValuesInUnwrapIt>::value_type;
+  using KeysInUnwrapIt    = thrust::try_unwrap_contiguous_iterator_t<KeysInIt>;
+  using ValuesInUnwrapIt  = thrust::try_unwrap_contiguous_iterator_t<ValuesInIt>;
+  using ValuesOutUnwrapIt = thrust::try_unwrap_contiguous_iterator_t<ValuesOutIt>;
+  using AccumT            = typename thrust::iterator_traits<ValuesInUnwrapIt>::value_type;
 
-  auto keys_unwrap = thrust::detail::try_unwrap_contiguous_iterator(keys);
-  auto values_unwrap = thrust::detail::try_unwrap_contiguous_iterator(values);
-  auto result_unwrap = thrust::detail::try_unwrap_contiguous_iterator(result);
+  auto keys_unwrap   = thrust::try_unwrap_contiguous_iterator(keys);
+  auto values_unwrap = thrust::try_unwrap_contiguous_iterator(values);
+  auto result_unwrap = thrust::try_unwrap_contiguous_iterator(result);
 
   using Dispatch32 = cub::DispatchScanByKey<KeysInUnwrapIt,
                                             ValuesInUnwrapIt,
@@ -99,7 +97,7 @@ ValuesOutIt inclusive_scan_by_key_n(
                                             EqualityOpT,
                                             ScanOpT,
                                             cub::NullType,
-                                            thrust::detail::int32_t,
+                                            std::int32_t,
                                             AccumT>;
   using Dispatch64 = cub::DispatchScanByKey<KeysInUnwrapIt,
                                             ValuesInUnwrapIt,
@@ -107,7 +105,7 @@ ValuesOutIt inclusive_scan_by_key_n(
                                             EqualityOpT,
                                             ScanOpT,
                                             cub::NullType,
-                                            thrust::detail::int64_t,
+                                            std::int64_t,
                                             AccumT>;
 
   cudaStream_t stream = thrust::cuda_cub::stream(policy);
@@ -138,7 +136,7 @@ ValuesOutIt inclusive_scan_by_key_n(
   // Run scan:
   {
     // Allocate temporary storage:
-    thrust::detail::temporary_array<thrust::detail::uint8_t, Derived> tmp{
+    thrust::detail::temporary_array<std::uint8_t, Derived> tmp{
       policy,
       tmp_size};
 
@@ -168,7 +166,7 @@ ValuesOutIt inclusive_scan_by_key_n(
   return result + num_items;
 }
 
-__thrust_exec_check_disable__
+_CCCL_EXEC_CHECK_DISABLE
 template <typename Derived,
           typename KeysInIt,
           typename ValuesInIt,
@@ -177,7 +175,7 @@ template <typename Derived,
           typename EqualityOpT,
           typename ScanOpT,
           typename SizeT>
-__host__ __device__
+_CCCL_HOST_DEVICE
 ValuesOutIt exclusive_scan_by_key_n(
   thrust::cuda_cub::execution_policy<Derived>& policy,
   KeysInIt keys,
@@ -195,16 +193,13 @@ ValuesOutIt exclusive_scan_by_key_n(
   }
 
   // Convert to raw pointers if possible:
-  using KeysInUnwrapIt =
-    thrust::detail::try_unwrap_contiguous_iterator_return_t<KeysInIt>;
-  using ValuesInUnwrapIt =
-    thrust::detail::try_unwrap_contiguous_iterator_return_t<ValuesInIt>;
-  using ValuesOutUnwrapIt =
-    thrust::detail::try_unwrap_contiguous_iterator_return_t<ValuesOutIt>;
+  using KeysInUnwrapIt    = thrust::try_unwrap_contiguous_iterator_t<KeysInIt>;
+  using ValuesInUnwrapIt  = thrust::try_unwrap_contiguous_iterator_t<ValuesInIt>;
+  using ValuesOutUnwrapIt = thrust::try_unwrap_contiguous_iterator_t<ValuesOutIt>;
 
-  auto keys_unwrap = thrust::detail::try_unwrap_contiguous_iterator(keys);
-  auto values_unwrap = thrust::detail::try_unwrap_contiguous_iterator(values);
-  auto result_unwrap = thrust::detail::try_unwrap_contiguous_iterator(result);
+  auto keys_unwrap   = thrust::try_unwrap_contiguous_iterator(keys);
+  auto values_unwrap = thrust::try_unwrap_contiguous_iterator(values);
+  auto result_unwrap = thrust::try_unwrap_contiguous_iterator(result);
 
   using Dispatch32 = cub::DispatchScanByKey<KeysInUnwrapIt,
                                             ValuesInUnwrapIt,
@@ -212,7 +207,7 @@ ValuesOutIt exclusive_scan_by_key_n(
                                             EqualityOpT,
                                             ScanOpT,
                                             InitValueT,
-                                            thrust::detail::int32_t,
+                                            std::int32_t,
                                             InitValueT>;
   using Dispatch64 = cub::DispatchScanByKey<KeysInUnwrapIt,
                                             ValuesInUnwrapIt,
@@ -220,7 +215,7 @@ ValuesOutIt exclusive_scan_by_key_n(
                                             EqualityOpT,
                                             ScanOpT,
                                             InitValueT,
-                                            thrust::detail::int64_t,
+                                            std::int64_t,
                                             InitValueT>;
 
   cudaStream_t stream = thrust::cuda_cub::stream(policy);
@@ -251,7 +246,7 @@ ValuesOutIt exclusive_scan_by_key_n(
   // Run scan:
   {
     // Allocate temporary storage:
-    thrust::detail::temporary_array<thrust::detail::uint8_t, Derived> tmp{
+    thrust::detail::temporary_array<std::uint8_t, Derived> tmp{
       policy,
       tmp_size};
 
@@ -292,14 +287,14 @@ ValuesOutIt exclusive_scan_by_key_n(
 //   Inclusive scan
 //---------------------------
 
-__thrust_exec_check_disable__
+_CCCL_EXEC_CHECK_DISABLE
 template <class Derived,
           class KeyInputIt,
           class ValInputIt,
           class ValOutputIt,
           class BinaryPred,
           class ScanOp>
-ValOutputIt __host__ __device__
+ValOutputIt _CCCL_HOST_DEVICE
 inclusive_scan_by_key(execution_policy<Derived> &policy,
                       KeyInputIt                 key_first,
                       KeyInputIt                 key_last,
@@ -334,7 +329,7 @@ template <class Derived,
           class ValInputIt,
           class ValOutputIt,
           class BinaryPred>
-ValOutputIt __host__ __device__
+ValOutputIt _CCCL_HOST_DEVICE
 inclusive_scan_by_key(execution_policy<Derived> &policy,
                       KeyInputIt                 key_first,
                       KeyInputIt                 key_last,
@@ -355,7 +350,7 @@ template <class Derived,
           class KeyInputIt,
           class ValInputIt,
           class ValOutputIt>
-ValOutputIt __host__ __device__
+ValOutputIt _CCCL_HOST_DEVICE
 inclusive_scan_by_key(execution_policy<Derived> &policy,
                       KeyInputIt                 key_first,
                       KeyInputIt                 key_last,
@@ -375,7 +370,7 @@ inclusive_scan_by_key(execution_policy<Derived> &policy,
 //   Exclusive scan
 //---------------------------
 
-__thrust_exec_check_disable__
+_CCCL_EXEC_CHECK_DISABLE
 template <class Derived,
           class KeyInputIt,
           class ValInputIt,
@@ -383,7 +378,7 @@ template <class Derived,
           class Init,
           class BinaryPred,
           class ScanOp>
-ValOutputIt __host__ __device__
+ValOutputIt _CCCL_HOST_DEVICE
 exclusive_scan_by_key(execution_policy<Derived> &policy,
                       KeyInputIt                 key_first,
                       KeyInputIt                 key_last,
@@ -421,7 +416,7 @@ template <class Derived,
           class ValOutputIt,
           class Init,
           class BinaryPred>
-ValOutputIt __host__ __device__
+ValOutputIt _CCCL_HOST_DEVICE
 exclusive_scan_by_key(execution_policy<Derived> &policy,
                       KeyInputIt                 key_first,
                       KeyInputIt                 key_last,
@@ -445,7 +440,7 @@ template <class Derived,
           class ValInputIt,
           class ValOutputIt,
           class Init>
-ValOutputIt __host__ __device__
+ValOutputIt _CCCL_HOST_DEVICE
 exclusive_scan_by_key(execution_policy<Derived> &policy,
                       KeyInputIt                 key_first,
                       KeyInputIt                 key_last,
@@ -467,7 +462,7 @@ template <class Derived,
           class KeyInputIt,
           class ValInputIt,
           class ValOutputIt>
-ValOutputIt __host__ __device__
+ValOutputIt _CCCL_HOST_DEVICE
 exclusive_scan_by_key(execution_policy<Derived> &policy,
                       KeyInputIt                 key_first,
                       KeyInputIt                 key_last,

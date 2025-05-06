@@ -4,7 +4,8 @@
 #include <thrust/iterator/transform_output_iterator.h>
 #include <iostream>
 
-struct Functor 
+#include "include/host_device.h"
+struct Functor
 {
   template<class Tuple>
   __host__ __device__

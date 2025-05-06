@@ -47,25 +47,25 @@ template<typename T>
 {
   public:
     /*! Type of element allocated, \c T. */
-    typedef T                                 value_type;
+    using value_type = T;
 
     /*! Pointer to allocation, \c device_ptr<T>. */
-    typedef device_ptr<T>                     pointer;
+    using pointer = device_ptr<T>;
 
     /*! \c const pointer to allocation, \c device_ptr<const T>. */
-    typedef device_ptr<const T>               const_pointer;
+    using const_pointer = device_ptr<const T>;
 
     /*! Reference to allocated element, \c device_reference<T>. */
-    typedef device_reference<T>               reference;
+    using reference = device_reference<T>;
 
     /*! \c const reference to allocated element, \c device_reference<const T>. */
-    typedef device_reference<const T>         const_reference;
+    using const_reference = device_reference<const T>;
 
     /*! Type of allocation size, \c std::size_t. */
-    typedef std::size_t                       size_type;
+    using size_type = std::size_t;
 
     /*! Type of allocation difference, \c pointer::difference_type. */
-    typedef typename pointer::difference_type difference_type;
+    using difference_type = typename pointer::difference_type;
 
     /*! The \p rebind metafunction provides the type of a \p device_new_allocator
      *  instantiated with another type.
@@ -77,36 +77,36 @@ template<typename T>
     {
       /*! The typedef \p other gives the type of the rebound \p device_new_allocator.
        */
-      typedef device_new_allocator<U> other;
+      using other = device_new_allocator<U>;
     }; // end rebind
 
     /*! No-argument constructor has no effect. */
-    __host__ __device__
+    THRUST_HOST_DEVICE
     inline device_new_allocator() {}
 
     /*! No-argument destructor has no effect. */
-    __host__ __device__
+    THRUST_HOST_DEVICE
     inline ~device_new_allocator() {}
 
     /*! Copy constructor has no effect. */
-    __host__ __device__
+    THRUST_HOST_DEVICE
     inline device_new_allocator(device_new_allocator const&) {}
 
     /*! Constructor from other \p device_malloc_allocator has no effect. */
     template<typename U>
-    __host__ __device__
+    THRUST_HOST_DEVICE
     inline device_new_allocator(device_new_allocator<U> const&) {}
 
     /*! Returns the address of an allocated object.
      *  \return <tt>&r</tt>.
      */
-    __host__ __device__
+    THRUST_HOST_DEVICE
     inline pointer address(reference r) { return &r; }
     
     /*! Returns the address an allocated object.
      *  \return <tt>&r</tt>.
      */
-    __host__ __device__
+    THRUST_HOST_DEVICE
     inline const_pointer address(const_reference r) { return &r; }
 
     /*! Allocates storage for \p cnt objects.
@@ -114,7 +114,7 @@ template<typename T>
      *  \return A \p pointer to uninitialized storage for \p cnt objects.
      *  \note Memory allocated by this function must be deallocated with \p deallocate.
      */
-    __host__
+    THRUST_HOST
     inline pointer allocate(size_type cnt,
                             const_pointer = const_pointer(static_cast<T*>(0)))
     {
@@ -133,7 +133,7 @@ template<typename T>
      *  \note Memory deallocated by this function must previously have been
      *        allocated with \p allocate.
      */
-    __host__
+    THRUST_HOST
     inline void deallocate(pointer p, size_type cnt)
     {
       // use "::operator delete" rather than keyword delete
@@ -144,7 +144,7 @@ template<typename T>
     /*! Returns the largest value \c n for which <tt>allocate(n)</tt> might succeed.
      *  \return The largest value \c n for which <tt>allocate(n)</tt> might succeed.
      */
-    __host__ __device__
+    THRUST_HOST_DEVICE
     inline size_type max_size() const
     {
       return std::numeric_limits<size_type>::max THRUST_PREVENT_MACRO_SUBSTITUTION () / sizeof(T);
@@ -153,13 +153,13 @@ template<typename T>
     /*! Compares against another \p device_malloc_allocator for equality.
      *  \return \c true
      */
-    __host__ __device__
+    THRUST_HOST_DEVICE
     inline bool operator==(device_new_allocator const&) { return true; }
 
     /*! Compares against another \p device_malloc_allocator for inequality.
      *  \return \c false
      */
-    __host__ __device__
+    THRUST_HOST_DEVICE
     inline bool operator!=(device_new_allocator const &a) {return !operator==(a); }
 }; // end device_new_allocator
 

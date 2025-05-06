@@ -25,11 +25,11 @@
 
 THRUST_NAMESPACE_BEGIN
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template<typename DerivedPolicy,
          typename InputIterator,
          typename UnaryFunction>
-__host__ __device__
+THRUST_HOST_DEVICE
   InputIterator for_each(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
                          InputIterator first,
                          InputIterator last,
@@ -48,15 +48,15 @@ InputIterator for_each(InputIterator first,
                        UnaryFunction f)
 {
   using thrust::system::detail::generic::select_system;
-  typedef typename thrust::iterator_system<InputIterator>::type System;
+  using System = typename thrust::iterator_system<InputIterator>::type;
 
   System system;
   return thrust::for_each(select_system(system), first, last, f);
 } // end for_each()
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template<typename DerivedPolicy, typename InputIterator, typename Size, typename UnaryFunction>
-__host__ __device__
+THRUST_HOST_DEVICE
   InputIterator for_each_n(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
                            InputIterator first,
                            Size n,
@@ -77,7 +77,7 @@ InputIterator for_each_n(InputIterator first,
 {
   using thrust::system::detail::generic::select_system;
 
-  typedef typename thrust::iterator_system<InputIterator>::type System;
+  using System = typename thrust::iterator_system<InputIterator>::type;
 
   System system;
   return thrust::for_each_n(select_system(system), first, n, f);

@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright© 2019-2023 Advanced Micro Devices, Inc. All rights reserved.
+ * Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -31,9 +31,9 @@
 // this file must not be included on its own, ever,
 // but must be part of include in thrust/system/hip/detail/copy.h
 
+#include <thrust/detail/config.h>
+
 #include <thrust/system/hip/config.h>
-
-
 #include <thrust/distance.h>
 #include <thrust/advance.h>
 #include <thrust/detail/raw_pointer_cast.h>
@@ -78,7 +78,7 @@ namespace __copy
     }
 
     template <class System1, class System2, class InputIt, class Size, class OutputIt>
-    OutputIt __host__ /* WORKAROUND */ __device__
+    OutputIt THRUST_HOST /* WORKAROUND */ THRUST_DEVICE
     cross_system_copy_n(thrust::execution_policy<System1>& sys1,
                         thrust::execution_policy<System2>& sys2,
                         InputIt                            begin,
@@ -91,13 +91,13 @@ namespace __copy
                      (THRUST_UNUSED_VAR(sys1); THRUST_UNUSED_VAR(sys2); THRUST_UNUSED_VAR(n);
                       THRUST_UNUSED_VAR(begin);
                       return result;),
-                     (typedef typename iterator_traits<InputIt>::value_type InputTy; if(n > 0) {
+                     (using InputTy = typename iterator_traits<InputIt>::value_type; if(n > 0) {
                          trivial_device_copy(
                              derived_cast(sys1),
                              derived_cast(sys2),
                              reinterpret_cast<InputTy*>(thrust::raw_pointer_cast(&*result)),
                              reinterpret_cast<InputTy const*>(thrust::raw_pointer_cast(&*begin)),
-                             n);
+                             static_cast<size_t>(n));
                      } return result + n;));
     }
 
@@ -111,7 +111,7 @@ namespace __copy
                               OutputIt                                  result)
     {
         // get type of the input data
-        typedef typename thrust::iterator_value<InputIt>::type InputTy;
+        using InputTy = typename thrust::iterator_value<InputIt>::type;
 
         // copy input data into host temp storage
         InputIt last = first;
@@ -151,7 +151,7 @@ namespace __copy
         // struct workaround is required for HIP-clang
         struct workaround
         {
-            __host__ static OutputIt par(thrust::cpp::execution_policy<H>&         host_s,
+            THRUST_HOST static OutputIt par(thrust::cpp::execution_policy<H>&         host_s,
                                          thrust::hip_rocprim::execution_policy<D>& device_s,
                                          InputIt                                   first,
                                          Size                                      num_items,
@@ -160,7 +160,7 @@ namespace __copy
                 return cross_system_copy_n_hd_nt(host_s, device_s, first, num_items, result);
             }
 
-            __device__ static OutputIt seq(thrust::cpp::execution_policy<H>&         host_s,
+            THRUST_DEVICE static OutputIt seq(thrust::cpp::execution_policy<H>&         host_s,
                                            thrust::hip_rocprim::execution_policy<D>& device_s,
                                            InputIt                                   first,
                                            Size                                      num_items,
@@ -194,7 +194,7 @@ cross_system_copy_n_dh_nt(thrust::hip_rocprim::execution_policy<D>& device_s,
                           OutputIt                                  result)
 {
     // get type of the input data
-    typedef typename thrust::iterator_value<InputIt>::type InputTy;
+    using InputTy = typename thrust::iterator_value<InputIt>::type;
 
     // allocate device temp storage
     thrust::detail::temporary_array<InputTy, D> d_in_ptr(device_s, num_items);
@@ -230,7 +230,7 @@ cross_system_copy_n(thrust::hip_rocprim::execution_policy<D>& device_s,
     // struct workaround is required for HIP-clang
     struct workaround
     {
-            __host__ static void par(thrust::hip_rocprim::execution_policy<D>& device_s,
+            THRUST_HOST static void par(thrust::hip_rocprim::execution_policy<D>& device_s,
                                      thrust::cpp::execution_policy<H>&         host_s,
                                      InputIt                                   first,
                                      Size                                      num_items,
@@ -239,7 +239,7 @@ cross_system_copy_n(thrust::hip_rocprim::execution_policy<D>& device_s,
                 result = cross_system_copy_n_dh_nt(device_s, host_s, first, num_items, result);
             }
 
-            __device__ static void seq(thrust::hip_rocprim::execution_policy<D>& device_s,
+            THRUST_DEVICE static void seq(thrust::hip_rocprim::execution_policy<D>& device_s,
                                        thrust::cpp::execution_policy<H>&         host_s,
                                        InputIt                                   first,
                                        Size                                      num_items,
@@ -283,7 +283,7 @@ cross_system_copy_n(thrust::hip_rocprim::execution_policy<D>& device_s,
                       InputIterator                  end,
                       OutputIterator                 result)
     {
-        return cross_system_copy_n(systems, begin, thrust::distance(begin, end), result);
+        return cross_system_copy_n(systems, begin, static_cast<size_t>(thrust::distance(begin, end)), result);
     }
 } // namespace __copy
 } // namespace hip_rocprim

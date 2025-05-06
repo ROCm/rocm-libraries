@@ -47,7 +47,7 @@ template <
   typename FromPolicy, typename ToPolicy
 , typename ForwardIt, typename Sentinel, typename OutputIt
 >
-__host__
+THRUST_HOST
 event<FromPolicy>
 async_copy(
   thrust::execution_policy<FromPolicy>&
@@ -75,7 +75,7 @@ struct copy_fn final
     typename FromPolicy, typename ToPolicy
   , typename ForwardIt, typename Sentinel, typename OutputIt
   >
-  __host__
+  THRUST_HOST
   static auto call(
     thrust::detail::execution_policy_base<FromPolicy> const& from_exec
   , thrust::detail::execution_policy_base<ToPolicy> const&   to_exec
@@ -96,7 +96,7 @@ struct copy_fn final
     typename DerivedPolicy
   , typename ForwardIt, typename Sentinel, typename OutputIt
   >
-  __host__
+  THRUST_HOST
   static auto call(
     thrust::detail::execution_policy_base<DerivedPolicy> const& exec
   , ForwardIt&& first, Sentinel&& last
@@ -116,7 +116,7 @@ struct copy_fn final
   )
 
   template <typename ForwardIt, typename Sentinel, typename OutputIt>
-  __host__
+  THRUST_HOST
   static auto call(ForwardIt&& first, Sentinel&& last, OutputIt&& output)
   THRUST_RETURNS(
     copy_fn::call(
@@ -132,7 +132,7 @@ struct copy_fn final
   )
 
   template <typename... Args>
-  THRUST_NODISCARD __host__
+  THRUST_NODISCARD THRUST_HOST
   auto operator()(Args&&... args) const
   THRUST_RETURNS(
     call(THRUST_FWD(args)...)

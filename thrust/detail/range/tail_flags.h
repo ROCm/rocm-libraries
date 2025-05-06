@@ -22,6 +22,7 @@
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/tuple.h>
 #include <thrust/functional.h>
+#include <thrust/sequence_access.h>
 
 THRUST_NAMESPACE_BEGIN
 namespace detail
@@ -43,67 +44,69 @@ template<typename RandomAccessIterator,
       RandomAccessIterator iter;
       IndexType n;
 
-      typedef ValueType result_type;
+      using result_type = ValueType;
 
-      __host__ __device__
+      THRUST_HOST_DEVICE
       tail_flag_functor(RandomAccessIterator first, RandomAccessIterator last)
         : binary_pred(), iter(first), n(last - first)
       {}
 
-      __host__ __device__
+      THRUST_HOST_DEVICE
       tail_flag_functor(RandomAccessIterator first, RandomAccessIterator last, BinaryPredicate binary_pred)
         : binary_pred(binary_pred), iter(first), n(last - first)
       {}
 
-      __host__ __device__ __thrust_forceinline__
+      THRUST_HOST_DEVICE THRUST_FORCEINLINE
       result_type operator()(const IndexType &i)
       {
         return (i == (n - 1) || !binary_pred(iter[i], iter[i+1]));
       }
     };
 
-    typedef thrust::counting_iterator<IndexType> counting_iterator;
+    using counting_iterator = thrust::counting_iterator<IndexType>;
 
   public:
-    typedef thrust::transform_iterator<
-      tail_flag_functor,
-      counting_iterator
-    > iterator;
+    using iterator = thrust::transform_iterator<
+                      tail_flag_functor,
+                      counting_iterator
+                      >;
 
-    __thrust_exec_check_disable__
-    __host__ __device__
+    THRUST_EXEC_CHECK_DISABLE
+    THRUST_HOST_DEVICE
     tail_flags(RandomAccessIterator first, RandomAccessIterator last)
       : m_begin(thrust::make_transform_iterator(thrust::counting_iterator<IndexType>(0),
                                                 tail_flag_functor(first, last))),
         m_end(m_begin + (last - first))
     {}
 
-    __thrust_exec_check_disable__
-    __host__ __device__
+    THRUST_EXEC_CHECK_DISABLE
+    THRUST_HOST_DEVICE
     tail_flags(RandomAccessIterator first, RandomAccessIterator last, BinaryPredicate binary_pred)
       : m_begin(thrust::make_transform_iterator(thrust::counting_iterator<IndexType>(0),
                                                 tail_flag_functor(first, last, binary_pred))),
         m_end(m_begin + (last - first))
     {}
 
-    __host__ __device__
+    THRUST_HOST_DEVICE
     iterator begin() const
     {
       return m_begin;
     }
 
-    __host__ __device__
+    THRUST_HOST_DEVICE
     iterator end() const
     {
       return m_end;
     }
 
     template<typename OtherIndex>
-    __host__ __device__
+    THRUST_HOST_DEVICE
     typename iterator::reference operator[](OtherIndex i)
     {
       return *(begin() + i);
     }
+
+    THRUST_SYNTHESIZE_SEQUENCE_ACCESS(tail_flags, iterator);
 
   private:
     iterator m_begin, m_end;
@@ -111,7 +114,7 @@ template<typename RandomAccessIterator,
 
 
 template<typename RandomAccessIterator, typename BinaryPredicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 tail_flags<RandomAccessIterator, BinaryPredicate>
   make_tail_flags(RandomAccessIterator first, RandomAccessIterator last, BinaryPredicate binary_pred)
 {
@@ -120,7 +123,7 @@ tail_flags<RandomAccessIterator, BinaryPredicate>
 
 
 template<typename RandomAccessIterator>
-__host__ __device__
+THRUST_HOST_DEVICE
 tail_flags<RandomAccessIterator>
   make_tail_flags(RandomAccessIterator first, RandomAccessIterator last)
 {

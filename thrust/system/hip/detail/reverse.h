@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019-2021, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2025, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -27,6 +27,8 @@
  ******************************************************************************/
 #pragma once
 
+#include <thrust/detail/config.h>
+
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 #include <thrust/system/hip/detail/execution_policy.h>
 
@@ -34,14 +36,14 @@ THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
 {
     template <class Derived, class ItemsIt, class ResultIt>
-    ResultIt __host__ __device__
+    ResultIt THRUST_HOST_DEVICE
     reverse_copy(execution_policy<Derived>& policy,
                  ItemsIt                    first,
                  ItemsIt                    last,
                  ResultIt                   result);
 
     template <class Derived, class ItemsIt>
-    void __host__ __device__
+    void THRUST_HOST_DEVICE
     reverse(execution_policy<Derived>& policy,
             ItemsIt                    first,
             ItemsIt                    last);
@@ -73,7 +75,7 @@ namespace hip_rocprim
     void THRUST_HIP_FUNCTION
     reverse(execution_policy<Derived>& policy, ItemsIt first, ItemsIt last)
     {
-        typedef typename thrust::iterator_difference<ItemsIt>::type difference_type;
+        using difference_type = typename thrust::iterator_difference<ItemsIt>::type;
 
         // find the midpoint of [first,last)
         difference_type N = thrust::distance(first, last);

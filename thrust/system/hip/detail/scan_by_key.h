@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019-2023, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2025, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -27,8 +27,9 @@
  ******************************************************************************/
 #pragma once
 
+#include <thrust/detail/config.h>
+
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
-#include <thrust/detail/cstdint.h>
 #include <thrust/detail/temporary_array.h>
 #include <thrust/system/hip/detail/util.h>
 
@@ -38,6 +39,7 @@
 #include <thrust/detail/minmax.h>
 #include <thrust/distance.h>
 
+#include <cstdint>
 
 // rocprim include
 #include <rocprim/rocprim.hpp>
@@ -47,6 +49,68 @@ namespace hip_rocprim
 {
 namespace __scan_by_key
 {
+    template <typename Derived,
+              typename KeysInputIt,
+              typename ValuesInputIt,
+              typename ValuesOutputIt,
+              typename BinaryFunction,
+              typename KeyCompareFunction>
+    THRUST_HIP_RUNTIME_FUNCTION auto invoke_inclusive_scan_by_key(
+        execution_policy<Derived>& policy,
+        void*                      temporary_storage,
+        size_t&                    storage_size,
+        const KeysInputIt          keys_input,
+        const ValuesInputIt        values_input,
+        const ValuesOutputIt       values_output,
+        const size_t               size,
+        const BinaryFunction       scan_op,
+        const KeyCompareFunction   key_compare_op,
+        const hipStream_t          stream,
+        bool debug_sync) -> std::enable_if_t<decltype(nondeterministic(policy))::value, hipError_t>
+    {
+        return rocprim::inclusive_scan_by_key(temporary_storage,
+                                              storage_size,
+                                              keys_input,
+                                              values_input,
+                                              values_output,
+                                              size,
+                                              scan_op,
+                                              key_compare_op,
+                                              stream,
+                                              debug_sync);
+    }
+
+    template <typename Derived,
+              typename KeysInputIt,
+              typename ValuesInputIt,
+              typename ValuesOutputIt,
+              typename BinaryFunction,
+              typename KeyCompareFunction>
+    THRUST_HIP_RUNTIME_FUNCTION auto invoke_inclusive_scan_by_key(
+        execution_policy<Derived>& policy,
+        void*                      temporary_storage,
+        size_t&                    storage_size,
+        const KeysInputIt          keys_input,
+        const ValuesInputIt        values_input,
+        const ValuesOutputIt       values_output,
+        const size_t               size,
+        const BinaryFunction       scan_op,
+        const KeyCompareFunction   key_compare_op,
+        const hipStream_t          stream,
+        bool debug_sync) -> std::enable_if_t<!decltype(nondeterministic(policy))::value, hipError_t>
+    {
+        return rocprim::deterministic_inclusive_scan_by_key(temporary_storage,
+                                                            storage_size,
+                                                            keys_input,
+                                                            values_input,
+                                                            values_output,
+                                                            size,
+                                                            scan_op,
+                                                            key_compare_op,
+                                                            stream,
+                                                            debug_sync);
+    }
+
     template <typename Derived,
               typename KeysInputIterator,
               typename ValuesInputIterator,
@@ -73,34 +137,36 @@ namespace __scan_by_key
             return value_result;
 
         // Determine temporary device storage requirements.
-        hip_rocprim::throw_on_error(rocprim::inclusive_scan_by_key(NULL,
-                                                                   storage_size,
-                                                                   key_first,
-                                                                   value_first,
-                                                                   value_result,
-                                                                   num_items,
-                                                                   scan_op,
-                                                                   key_compare_op,
-                                                                   stream,
-                                                                   debug_sync),
+        hip_rocprim::throw_on_error(invoke_inclusive_scan_by_key(policy,
+                                                                 nullptr,
+                                                                 storage_size,
+                                                                 key_first,
+                                                                 value_first,
+                                                                 value_result,
+                                                                 num_items,
+                                                                 scan_op,
+                                                                 key_compare_op,
+                                                                 stream,
+                                                                 debug_sync),
                                     "scan_by_key failed on 1st step");
 
         // Allocate temporary storage.
-        thrust::detail::temporary_array<thrust::detail::uint8_t, Derived>
+        thrust::detail::temporary_array<std::uint8_t, Derived>
             tmp(policy, storage_size);
         void *ptr = static_cast<void*>(tmp.data().get());
 
         // Run scan.
-        hip_rocprim::throw_on_error(rocprim::inclusive_scan_by_key(ptr,
-                                                                   storage_size,
-                                                                   key_first,
-                                                                   value_first,
-                                                                   value_result,
-                                                                   num_items,
-                                                                   scan_op,
-                                                                   key_compare_op,
-                                                                   stream,
-                                                                   debug_sync),
+        hip_rocprim::throw_on_error(invoke_inclusive_scan_by_key(policy,
+                                                                 ptr,
+                                                                 storage_size,
+                                                                 key_first,
+                                                                 value_first,
+                                                                 value_result,
+                                                                 num_items,
+                                                                 scan_op,
+                                                                 key_compare_op,
+                                                                 stream,
+                                                                 debug_sync),
                                     "scan_by_key failed on 2nd step");
 
         hip_rocprim::throw_on_error(
@@ -108,6 +174,74 @@ namespace __scan_by_key
             "inclusive_scan_by_key: failed to synchronize"
         );
         return value_result + num_items;
+    }
+
+    template <typename Derived,
+              typename KeysInputIt,
+              typename ValuesInputIt,
+              typename ValuesOutputIt,
+              typename InitialValueType,
+              typename BinaryFunction,
+              typename KeyCompareFunction>
+    THRUST_HIP_RUNTIME_FUNCTION auto invoke_exclusive_scan_by_key(
+        execution_policy<Derived>& policy,
+        void*                      temporary_storage,
+        size_t&                    storage_size,
+        const KeysInputIt          keys_input,
+        const ValuesInputIt        values_input,
+        const ValuesOutputIt       values_output,
+        const InitialValueType     initial_value,
+        const size_t               size,
+        const BinaryFunction       scan_op,
+        const KeyCompareFunction   key_compare_op,
+        const hipStream_t          stream,
+        bool debug_sync) -> std::enable_if_t<decltype(nondeterministic(policy))::value, hipError_t>
+    {
+        return rocprim::exclusive_scan_by_key(temporary_storage,
+                                              storage_size,
+                                              keys_input,
+                                              values_input,
+                                              values_output,
+                                              initial_value,
+                                              size,
+                                              scan_op,
+                                              key_compare_op,
+                                              stream,
+                                              debug_sync);
+    }
+
+    template <typename Derived,
+              typename KeysInputIt,
+              typename ValuesInputIt,
+              typename ValuesOutputIt,
+              typename InitialValueType,
+              typename BinaryFunction,
+              typename KeyCompareFunction>
+    THRUST_HIP_RUNTIME_FUNCTION auto invoke_exclusive_scan_by_key(
+        execution_policy<Derived>& policy,
+        void*                      temporary_storage,
+        size_t&                    storage_size,
+        const KeysInputIt          keys_input,
+        const ValuesInputIt        values_input,
+        const ValuesOutputIt       values_output,
+        const InitialValueType     initial_value,
+        const size_t               size,
+        const BinaryFunction       scan_op,
+        const KeyCompareFunction   key_compare_op,
+        const hipStream_t          stream,
+        bool debug_sync) -> std::enable_if_t<!decltype(nondeterministic(policy))::value, hipError_t>
+    {
+        return rocprim::deterministic_exclusive_scan_by_key(temporary_storage,
+                                                            storage_size,
+                                                            keys_input,
+                                                            values_input,
+                                                            values_output,
+                                                            initial_value,
+                                                            size,
+                                                            scan_op,
+                                                            key_compare_op,
+                                                            stream,
+                                                            debug_sync);
     }
 
     template <typename Derived,
@@ -138,37 +272,38 @@ namespace __scan_by_key
             return value_result;
 
         // Determine temporary device storage requirements.
-        hip_rocprim::throw_on_error(rocprim::exclusive_scan_by_key(NULL,
-                                                                   storage_size,
-                                                                   key_first,
-                                                                   value_first,
-                                                                   value_result,
-                                                                   init,
-                                                                   num_items,
-                                                                   scan_op,
-                                                                   key_compare_op,
-                                                                   stream,
-                                                                   debug_sync),
+        hip_rocprim::throw_on_error(invoke_exclusive_scan_by_key(policy,
+                                                                 nullptr,
+                                                                 storage_size,
+                                                                 key_first,
+                                                                 value_first,
+                                                                 value_result,
+                                                                 init,
+                                                                 num_items,
+                                                                 scan_op,
+                                                                 key_compare_op,
+                                                                 stream,
+                                                                 debug_sync),
                                     "scan_by_key failed on 1st step");
 
-
         // Allocate temporary storage.
-        thrust::detail::temporary_array<thrust::detail::uint8_t, Derived>
+        thrust::detail::temporary_array<std::uint8_t, Derived>
             tmp(policy, storage_size);
         void *ptr = static_cast<void*>(tmp.data().get());
 
         // Run scan.
-        hip_rocprim::throw_on_error(rocprim::exclusive_scan_by_key(ptr,
-                                                                   storage_size,
-                                                                   key_first,
-                                                                   value_first,
-                                                                   value_result,
-                                                                   init,
-                                                                   num_items,
-                                                                   scan_op,
-                                                                   key_compare_op,
-                                                                   stream,
-                                                                   debug_sync),
+        hip_rocprim::throw_on_error(invoke_exclusive_scan_by_key(policy,
+                                                                 ptr,
+                                                                 storage_size,
+                                                                 key_first,
+                                                                 value_first,
+                                                                 value_result,
+                                                                 init,
+                                                                 num_items,
+                                                                 scan_op,
+                                                                 key_compare_op,
+                                                                 stream,
+                                                                 debug_sync),
                                     "scan_by_key failed on 2nd step");
 
         hip_rocprim::throw_on_error(
@@ -187,7 +322,7 @@ namespace __scan_by_key
 //   Inclusive scan
 //---------------------------
 
-__thrust_exec_check_disable__ template <class Derived,
+THRUST_EXEC_CHECK_DISABLE template <class Derived,
                                         class KeyInputIt,
                                         class ValInputIt,
                                         class ValOutputIt,
@@ -205,7 +340,7 @@ inclusive_scan_by_key(execution_policy<Derived>& policy,
     // struct workaround is required for HIP-clang
     struct workaround
     {
-        __host__ static ValOutputIt par(execution_policy<Derived>& policy,
+        THRUST_HOST static ValOutputIt par(execution_policy<Derived>& policy,
                                         KeyInputIt                 key_first,
                                         KeyInputIt                 key_last,
                                         ValInputIt                 value_first,
@@ -217,7 +352,7 @@ inclusive_scan_by_key(execution_policy<Derived>& policy,
                 policy, key_first, key_last, value_first, value_result, binary_pred, scan_op);
         }
 
-        __device__ static ValOutputIt seq(execution_policy<Derived>& policy,
+        THRUST_DEVICE static ValOutputIt seq(execution_policy<Derived>& policy,
                                           KeyInputIt                 key_first,
                                           KeyInputIt                 key_last,
                                           ValInputIt                 value_first,
@@ -287,7 +422,7 @@ inclusive_scan_by_key(execution_policy<Derived>& policy,
 //   Exclusive scan
 //---------------------------
 
-__thrust_exec_check_disable__ template <class Derived,
+THRUST_EXEC_CHECK_DISABLE template <class Derived,
                                         class KeyInputIt,
                                         class ValInputIt,
                                         class ValOutputIt,
@@ -308,7 +443,7 @@ exclusive_scan_by_key(execution_policy<Derived>& policy,
     // struct workaround is required for HIP-clang
     struct workaround
     {
-        __host__ static ValOutputIt par(execution_policy<Derived>& policy,
+        THRUST_HOST static ValOutputIt par(execution_policy<Derived>& policy,
                                         KeyInputIt                 key_first,
                                         KeyInputIt                 key_last,
                                         ValInputIt                 value_first,
@@ -321,7 +456,7 @@ exclusive_scan_by_key(execution_policy<Derived>& policy,
                 policy, key_first, key_last, value_first, value_result, init, binary_pred, scan_op);
         }
 
-        __device__ static ValOutputIt seq(execution_policy<Derived>& policy,
+        THRUST_DEVICE static ValOutputIt seq(execution_policy<Derived>& policy,
                                           KeyInputIt                 key_first,
                                           KeyInputIt                 key_last,
                                           ValInputIt                 value_first,
@@ -403,7 +538,7 @@ exclusive_scan_by_key(execution_policy<Derived>& policy,
                       ValInputIt                 value_first,
                       ValOutputIt                value_result)
 {
-    typedef typename iterator_traits<ValInputIt>::value_type value_type;
+    using value_type = typename iterator_traits<ValInputIt>::value_type;
     return hip_rocprim::exclusive_scan_by_key(policy,
                                               key_first,
                                               key_last,

@@ -1,3 +1,20 @@
+/*
+ *  Copyright 2008-2013 NVIDIA Corporation
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+
 #include <unittest/unittest.h>
 #include <thrust/sort.h>
 #include <thrust/functional.h>
@@ -133,4 +150,33 @@ void TestSortBoolDescending(void)
 }
 DECLARE_UNITTEST(TestSortBoolDescending);
 
+template <typename T>
+struct TestRadixSortDispatch
+{
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+  static_assert(thrust::cuda_cub::__smart_sort::can_use_primitive_sort<T, thrust::less<T>>::value, "");
+  static_assert(thrust::cuda_cub::__smart_sort::can_use_primitive_sort<T, thrust::greater<T>>::value, "");
+  static_assert(thrust::cuda_cub::__smart_sort::can_use_primitive_sort<T, ::cuda::std::less<T>>::value, "");
+  static_assert(thrust::cuda_cub::__smart_sort::can_use_primitive_sort<T, ::cuda::std::greater<T>>::value, "");
 
+  static_assert(thrust::cuda_cub::__smart_sort::can_use_primitive_sort<T, thrust::less<>>::value, "");
+  static_assert(thrust::cuda_cub::__smart_sort::can_use_primitive_sort<T, thrust::greater<>>::value, "");
+  static_assert(thrust::cuda_cub::__smart_sort::can_use_primitive_sort<T, ::cuda::std::less<>>::value, "");
+  static_assert(thrust::cuda_cub::__smart_sort::can_use_primitive_sort<T, ::cuda::std::greater<>>::value, "");
+#endif
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
+  static_assert(thrust::hip_rocprim::__smart_sort::can_use_primitive_sort<T, thrust::less<T>>::value, "");
+  static_assert(thrust::hip_rocprim::__smart_sort::can_use_primitive_sort<T, thrust::greater<T>>::value, "");
+  static_assert(thrust::hip_rocprim::__smart_sort::can_use_primitive_sort<T, std::less<T>>::value, "");
+  static_assert(thrust::hip_rocprim::__smart_sort::can_use_primitive_sort<T, std::greater<T>>::value, "");
+
+  static_assert(thrust::hip_rocprim::__smart_sort::can_use_primitive_sort<T, thrust::less<>>::value, "");
+  static_assert(thrust::hip_rocprim::__smart_sort::can_use_primitive_sort<T, thrust::greater<>>::value, "");
+  static_assert(thrust::hip_rocprim::__smart_sort::can_use_primitive_sort<T, std::less<>>::value, "");
+  static_assert(thrust::hip_rocprim::__smart_sort::can_use_primitive_sort<T, std::greater<>>::value, "");
+#endif
+  void operator()() const {}
+};
+
+SimpleUnitTest<TestRadixSortDispatch, IntegralTypes> TestRadixSortDispatchIntegralInstance;
+SimpleUnitTest<TestRadixSortDispatch, FloatingPointTypes> TestRadixSortDispatchFPInstance;

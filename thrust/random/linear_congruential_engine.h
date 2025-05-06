@@ -23,9 +23,10 @@
 
 #include <thrust/detail/config.h>
 #include <iostream>
-#include <thrust/detail/cstdint.h>
 #include <thrust/random/detail/random_core_access.h>
 #include <thrust/random/detail/linear_congruential_engine_discard.h>
+
+#include <cstdint>
 
 THRUST_NAMESPACE_BEGIN
 
@@ -117,7 +118,7 @@ template<typename UIntType, UIntType a, UIntType c, UIntType m>
     /*! \typedef result_type
      *  \brief The type of the unsigned integer produced by this \p linear_congruential_engine.
      */
-    typedef UIntType result_type;
+    using result_type = UIntType;
 
     // engine characteristics
 
@@ -152,7 +153,7 @@ template<typename UIntType, UIntType a, UIntType c, UIntType m>
      *  
      *  \param s The seed used to intialize this \p linear_congruential_engine's state.
      */
-    __host__ __device__
+    THRUST_HOST_DEVICE
     explicit linear_congruential_engine(result_type s = default_seed);
 
     /*! This method initializes this \p linear_congruential_engine's state, and optionally accepts
@@ -160,7 +161,7 @@ template<typename UIntType, UIntType a, UIntType c, UIntType m>
      *
      *  \param s The seed used to initializes this \p linear_congruential_engine's state.
      */
-    __host__ __device__
+    THRUST_HOST_DEVICE
     void seed(result_type s = default_seed);
 
     // generating functions
@@ -168,7 +169,7 @@ template<typename UIntType, UIntType a, UIntType c, UIntType m>
     /*! This member function produces a new random value and updates this \p linear_congruential_engine's state.
      *  \return A new random number.
      */
-    __host__ __device__
+    THRUST_HOST_DEVICE
     result_type operator()(void);
 
     /*! This member function advances this \p linear_congruential_engine's state a given number of times
@@ -177,7 +178,7 @@ template<typename UIntType, UIntType a, UIntType c, UIntType m>
      *  \param z The number of random values to discard.
      *  \note This function is provided because an implementation may be able to accelerate it.
      */
-    __host__ __device__
+    THRUST_HOST_DEVICE
     void discard(unsigned long long z);
 
     /*! \cond
@@ -191,7 +192,7 @@ template<typename UIntType, UIntType a, UIntType c, UIntType m>
 
     friend struct thrust::random::detail::linear_congruential_engine_discard;
 
-    __host__ __device__
+    THRUST_HOST_DEVICE
     bool equal(const linear_congruential_engine &rhs) const;
 
     template<typename CharT, typename Traits>
@@ -211,7 +212,7 @@ template<typename UIntType, UIntType a, UIntType c, UIntType m>
  *  \return \c true if \p lhs is equal to \p rhs; \c false, otherwise.
  */
 template<typename UIntType_, UIntType_ a_, UIntType_ c_, UIntType_ m_>
-__host__ __device__
+THRUST_HOST_DEVICE
 bool operator==(const linear_congruential_engine<UIntType_,a_,c_,m_> &lhs,
                 const linear_congruential_engine<UIntType_,a_,c_,m_> &rhs);
 
@@ -222,7 +223,7 @@ bool operator==(const linear_congruential_engine<UIntType_,a_,c_,m_> &lhs,
  *  \return \c true if \p lhs is not equal to \p rhs; \c false, otherwise.
  */
 template<typename UIntType_, UIntType_ a_, UIntType_ c_, UIntType_ m_>
-__host__ __device__
+THRUST_HOST_DEVICE
 bool operator!=(const linear_congruential_engine<UIntType_,a_,c_,m_> &lhs,
                 const linear_congruential_engine<UIntType_,a_,c_,m_> &rhs);
 
@@ -267,7 +268,7 @@ operator>>(std::basic_istream<CharT,Traits> &is,
  *  \note The 10000th consecutive invocation of a default-constructed object of type \p minstd_rand0
  *        shall produce the value \c 1043618065 .
  */
-typedef linear_congruential_engine<thrust::detail::uint32_t, 16807, 0, 2147483647> minstd_rand0;
+using minstd_rand0 = linear_congruential_engine<std::uint32_t, 16807, 0, 2147483647>;
 
 
 /*! \typedef minstd_rand
@@ -276,7 +277,7 @@ typedef linear_congruential_engine<thrust::detail::uint32_t, 16807, 0, 214748364
  *  \note The 10000th consecutive invocation of a default-constructed object of type \p minstd_rand
  *        shall produce the value \c 399268537 .
  */
-typedef linear_congruential_engine<thrust::detail::uint32_t, 48271, 0, 2147483647> minstd_rand;
+using minstd_rand = linear_congruential_engine<std::uint32_t, 48271, 0, 2147483647>;
 
 /*! \} // predefined_random
  */

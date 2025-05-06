@@ -1,3 +1,20 @@
+/*
+ *  Copyright 2008-2013 NVIDIA Corporation
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+
 #include <thrust/mr/pool.h>
 #include <thrust/mr/sync_pool.h>
 #include <thrust/mr/new.h>
@@ -8,13 +25,13 @@
 template<typename T>
 struct reference
 {
-    typedef T & type;
+    using type = T &;
 };
 
 template<>
 struct reference<void>
 {
-    typedef void type;
+    using type = void;
 };
 
 struct unit {};
@@ -29,7 +46,7 @@ struct tracked_pointer : thrust::iterator_facade<
                             std::ptrdiff_t
                          >
 {
-    typedef T * raw_pointer;
+    using raw_pointer = T *;
 
     std::size_t id;
     std::size_t size;
@@ -38,7 +55,7 @@ struct tracked_pointer : thrust::iterator_facade<
     void * ptr;
 
     __host__ __device__
-    explicit tracked_pointer(T * ptr = NULL) : id(), size(), alignment(), offset(), ptr(ptr)
+    explicit tracked_pointer(T * ptr = nullptr) : id(), size(), alignment(), offset(), ptr(ptr)
     {
     }
 
@@ -161,9 +178,7 @@ void TestPool()
 
     upstream.id_to_allocate = -1u;
 
-    typedef PoolTemplate<
-        tracked_resource
-    > Pool;
+    using Pool = PoolTemplate<tracked_resource>;
 
     thrust::mr::pool_options opts = Pool::get_default_options();
     opts.cache_oversized = false;
@@ -255,9 +270,7 @@ void TestPoolCachingOversized()
 
     upstream.id_to_allocate = -1u;
 
-    typedef PoolTemplate<
-        tracked_resource
-    > Pool;
+    using Pool = PoolTemplate<tracked_resource>;
 
     thrust::mr::pool_options opts = Pool::get_default_options();
     opts.cache_oversized = true;
@@ -334,11 +347,9 @@ TEST(MrPoolTests, TestSynchronizedPoolCachingOversized)
 template<template<typename> class PoolTemplate>
 void TestGlobalPool()
 {
-    typedef PoolTemplate<
-        thrust::mr::new_delete_resource
-    > Pool;
+    using Pool = PoolTemplate<thrust::mr::new_delete_resource>;
 
-    ASSERT_EQ(thrust::mr::get_global_resource<Pool>() != NULL, true);
+    ASSERT_EQ(thrust::mr::get_global_resource<Pool>() != nullptr, true);
 }
 
 TEST(MrPoolTests, TestUnsynchronizedGlobalPool)

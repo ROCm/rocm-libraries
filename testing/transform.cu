@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -24,11 +24,19 @@
 #include <thrust/iterator/zip_iterator.h>
 #include <thrust/iterator/retag.h>
 
+// There is a unfortunate miscompilation of the gcc-12 vectorizer leading to OOB writes
+// Adding this attribute suffices that this miscompilation does not appear anymore
+#if (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_GCC) && __GNUC__ >= 12
+#define THRUST_DISABLE_BROKEN_GCC_VECTORIZER __attribute__((optimize("no-tree-vectorize")))
+#else
+#define THRUST_DISABLE_BROKEN_GCC_VECTORIZER
+#endif
 
 template <class Vector>
+THRUST_DISABLE_BROKEN_GCC_VECTORIZER
 void TestTransformUnarySimple(void)
 {
-    typedef typename Vector::value_type T;
+     using T = typename Vector::value_type;
 
     typename Vector::iterator iter;
 
@@ -49,7 +57,7 @@ DECLARE_VECTOR_UNITTEST(TestTransformUnarySimple);
 template<typename InputIterator,
          typename OutputIterator,
          typename UnaryFunction>
-__host__ __device__
+THRUST_HOST_DEVICE
 OutputIterator transform(my_system &system, InputIterator, InputIterator, OutputIterator result, UnaryFunction)
 {
     system.validate_dispatch();
@@ -75,7 +83,7 @@ DECLARE_UNITTEST(TestTransformUnaryDispatchExplicit);
 template<typename InputIterator,
          typename OutputIterator,
          typename UnaryFunction>
-__host__ __device__
+THRUST_HOST_DEVICE
 OutputIterator transform(my_tag, InputIterator, InputIterator, OutputIterator result, UnaryFunction)
 {
     *result = 13;
@@ -97,9 +105,10 @@ DECLARE_UNITTEST(TestTransformUnaryDispatchImplicit);
 
 
 template <class Vector>
+THRUST_DISABLE_BROKEN_GCC_VECTORIZER
 void TestTransformIfUnaryNoStencilSimple(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     typename Vector::iterator iter;
 
@@ -126,7 +135,7 @@ template<typename InputIterator,
          typename ForwardIterator,
          typename UnaryFunction,
          typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 ForwardIterator transform_if(my_system &system,
                              InputIterator,
                              InputIterator,
@@ -159,7 +168,7 @@ template<typename InputIterator,
          typename ForwardIterator,
          typename UnaryFunction,
          typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 ForwardIterator transform_if(my_tag,
                              InputIterator,
                              InputIterator,
@@ -187,9 +196,10 @@ DECLARE_UNITTEST(TestTransformIfUnaryNoStencilDispatchImplicit);
 
 
 template <class Vector>
+THRUST_DISABLE_BROKEN_GCC_VECTORIZER
 void TestTransformIfUnarySimple(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     typename Vector::iterator iter;
 
@@ -220,7 +230,7 @@ template<typename InputIterator1,
          typename ForwardIterator,
          typename UnaryFunction,
          typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 ForwardIterator transform_if(my_system &system,
                              InputIterator1,
                              InputIterator1,
@@ -254,7 +264,7 @@ template<typename InputIterator1,
          typename ForwardIterator,
          typename UnaryFunction,
          typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 ForwardIterator transform_if(my_tag,
                              InputIterator1,
                              InputIterator1,
@@ -282,16 +292,20 @@ DECLARE_UNITTEST(TestTransformIfUnaryDispatchImplicit);
 
 
 template <class Vector>
+THRUST_DISABLE_BROKEN_GCC_VECTORIZER
 void TestTransformBinarySimple(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     typename Vector::iterator iter;
 
-    Vector input1(3);
-    Vector input2(3);
-    Vector output(3);
-    Vector result(3);
+    // There is a strange gcc bug here where it belives we would write out of bounds.
+    // It seems to go away if we add one more element that we leave untouched. Luckily 0 - 0 = 0 so all is fine.
+    // Note that we still write the element, so it does not hide a functional thrust bug
+    Vector input1(4);
+    Vector input2(4);
+    Vector output(4);
+    Vector result(4);
     input1[0] =  1; input1[1] = -2; input1[2] =  3;
     input2[0] = -4; input2[1] =  5; input2[2] =  6;
     result[0] =  5; result[1] = -7; result[2] = -3;
@@ -308,7 +322,7 @@ template<typename InputIterator1,
          typename InputIterator2,
          typename OutputIterator,
          typename UnaryFunction>
-__host__ __device__
+THRUST_HOST_DEVICE
 OutputIterator transform(my_system &system, InputIterator1, InputIterator1, InputIterator2, OutputIterator result, UnaryFunction)
 {
     system.validate_dispatch();
@@ -336,7 +350,7 @@ template<typename InputIterator1,
          typename InputIterator2,
          typename OutputIterator,
          typename UnaryFunction>
-__host__ __device__
+THRUST_HOST_DEVICE
 OutputIterator transform(my_tag, InputIterator1, InputIterator1, InputIterator2, OutputIterator result, UnaryFunction)
 {
     *result = 13;
@@ -361,9 +375,10 @@ DECLARE_UNITTEST(TestTransformBinaryDispatchImplicit);
 
 
 template <class Vector>
+THRUST_DISABLE_BROKEN_GCC_VECTORIZER
 void TestTransformIfBinarySimple(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     typename Vector::iterator iter;
 
@@ -381,12 +396,14 @@ void TestTransformIfBinarySimple(void)
 
     thrust::identity<T> identity;
 
-    iter = thrust::transform_if(input1.begin(), input1.end(),
-                                input2.begin(),
-                                stencil.begin(),
-                                output.begin(),
-                                thrust::minus<T>(),
-                                thrust::not1(identity));
+    iter = thrust::transform_if(
+        input1.begin(),
+        input1.end(),
+        input2.begin(),
+        stencil.begin(),
+        output.begin(),
+        thrust::minus<T>(),
+        thrust::not_fn(identity));
 
     ASSERT_EQUAL(std::size_t(iter - output.begin()), input1.size());
     ASSERT_EQUAL(output, result);
@@ -400,7 +417,7 @@ template<typename InputIterator1,
          typename ForwardIterator,
          typename BinaryFunction,
          typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 ForwardIterator transform_if(my_system &system,
                              InputIterator1,
                              InputIterator1,
@@ -439,7 +456,7 @@ template<typename InputIterator1,
          typename ForwardIterator,
          typename BinaryFunction,
          typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 ForwardIterator transform_if(my_tag,
                              InputIterator1,
                              InputIterator1,
@@ -471,6 +488,7 @@ DECLARE_UNITTEST(TestTransformIfBinaryDispatchImplicit);
 
 
 template <typename T>
+THRUST_DISABLE_BROKEN_GCC_VECTORIZER
 void TestTransformUnary(const size_t n)
 {
     thrust::host_vector<T>   h_input = unittest::random_integers<T>(n);
@@ -488,6 +506,7 @@ DECLARE_VARIABLE_UNITTEST(TestTransformUnary);
 
 
 template <typename T>
+THRUST_DISABLE_BROKEN_GCC_VECTORIZER
 void TestTransformUnaryToDiscardIterator(const size_t n)
 {
     thrust::host_vector<T>   h_input = unittest::random_integers<T>(n);
@@ -510,7 +529,7 @@ DECLARE_VARIABLE_UNITTEST(TestTransformUnaryToDiscardIterator);
 struct repeat2
 {
   template<typename T>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   thrust::pair<T,T> operator()(T x)
   {
     return thrust::make_pair(x,x);
@@ -519,6 +538,7 @@ struct repeat2
 
 
 template<typename T>
+THRUST_DISABLE_BROKEN_GCC_VECTORIZER
 void TestTransformUnaryToDiscardIteratorZipped(const size_t n)
 {
     thrust::host_vector<T>   h_input = unittest::random_integers<T>(n);
@@ -527,14 +547,14 @@ void TestTransformUnaryToDiscardIteratorZipped(const size_t n)
     thrust::host_vector<T>   h_output(n);
     thrust::device_vector<T> d_output(n);
 
-    typedef typename thrust::host_vector<T>::iterator Iterator1;
-    typedef typename thrust::device_vector<T>::iterator Iterator2;
+    using Iterator1 = typename thrust::host_vector<T>::iterator;
+    using Iterator2 = typename thrust::device_vector<T>::iterator;
 
-    typedef thrust::tuple<Iterator1,thrust::discard_iterator<> > Tuple1;
-    typedef thrust::tuple<Iterator2,thrust::discard_iterator<> > Tuple2;
+    using Tuple1 = thrust::tuple<Iterator1, thrust::discard_iterator<>>;
+    using Tuple2 = thrust::tuple<Iterator2, thrust::discard_iterator<>>;
 
-    typedef thrust::zip_iterator<Tuple1> ZipIterator1;
-    typedef thrust::zip_iterator<Tuple2> ZipIterator2;
+    using ZipIterator1 = thrust::zip_iterator<Tuple1>;
+    using ZipIterator2 = thrust::zip_iterator<Tuple2>;
 
     ZipIterator1 z1(thrust::make_tuple(h_output.begin(), thrust::make_discard_iterator()));
     ZipIterator2 z2(thrust::make_tuple(d_output.begin(), thrust::make_discard_iterator()));
@@ -557,7 +577,7 @@ DECLARE_VARIABLE_UNITTEST(TestTransformUnaryToDiscardIteratorZipped);
 struct is_positive
 {
   template<typename T>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   bool operator()(T &x)
   {
     return x > 0;
@@ -566,6 +586,7 @@ struct is_positive
 
 
 template <typename T>
+THRUST_DISABLE_BROKEN_GCC_VECTORIZER
 void TestTransformIfUnaryNoStencil(const size_t n)
 {
     thrust::host_vector<T>   h_input   = unittest::random_integers<T>(n);
@@ -588,6 +609,7 @@ DECLARE_VARIABLE_UNITTEST(TestTransformIfUnaryNoStencil);
 
 
 template <typename T>
+THRUST_DISABLE_BROKEN_GCC_VECTORIZER
 void TestTransformIfUnary(const size_t n)
 {
     thrust::host_vector<T>   h_input   = unittest::random_integers<T>(n);
@@ -614,6 +636,7 @@ DECLARE_VARIABLE_UNITTEST(TestTransformIfUnary);
 
 
 template <typename T>
+THRUST_DISABLE_BROKEN_GCC_VECTORIZER
 void TestTransformIfUnaryToDiscardIterator(const size_t n)
 {
     thrust::host_vector<T>   h_input   = unittest::random_integers<T>(n);
@@ -643,6 +666,7 @@ DECLARE_VARIABLE_UNITTEST(TestTransformIfUnaryToDiscardIterator);
 
 
 template <typename T>
+THRUST_DISABLE_BROKEN_GCC_VECTORIZER
 void TestTransformBinary(const size_t n)
 {
     thrust::host_vector<T>   h_input1 = unittest::random_integers<T>(n);
@@ -667,6 +691,7 @@ DECLARE_VARIABLE_UNITTEST(TestTransformBinary);
 
 
 template <typename T>
+THRUST_DISABLE_BROKEN_GCC_VECTORIZER
 void TestTransformBinaryToDiscardIterator(const size_t n)
 {
     thrust::host_vector<T>   h_input1 = unittest::random_integers<T>(n);
@@ -688,6 +713,7 @@ DECLARE_VARIABLE_UNITTEST(TestTransformBinaryToDiscardIterator);
 
 
 template <typename T>
+THRUST_DISABLE_BROKEN_GCC_VECTORIZER
 void TestTransformIfBinary(const size_t n)
 {
     thrust::host_vector<T>   h_input1  = unittest::random_integers<T>(n);
@@ -735,6 +761,7 @@ DECLARE_VARIABLE_UNITTEST(TestTransformIfBinary);
 
 
 template <typename T>
+THRUST_DISABLE_BROKEN_GCC_VECTORIZER
 void TestTransformIfBinaryToDiscardIterator(const size_t n)
 {
     thrust::host_vector<T>   h_input1  = unittest::random_integers<T>(n);
@@ -769,6 +796,7 @@ DECLARE_VARIABLE_UNITTEST(TestTransformIfBinaryToDiscardIterator);
 
 #if ((__GNUC__ * 10000 + __GNUC_MINOR__ * 100) == 40400) || defined(__INTEL_COMPILER)
 template <typename T>
+THRUST_DISABLE_BROKEN_GCC_VECTORIZER
 void TestTransformUnaryCountingIterator()
 {
     // G++ 4.4.x has a known failure with auto-vectorization (due to -O3 or
@@ -782,6 +810,7 @@ void TestTransformUnaryCountingIterator()
 }
 #else
 template <typename T>
+THRUST_DISABLE_BROKEN_GCC_VECTORIZER
 void TestTransformUnaryCountingIterator()
 {
     size_t const n = 15 * sizeof(T);
@@ -804,6 +833,7 @@ DECLARE_GENERIC_UNITTEST(TestTransformUnaryCountingIterator);
 
 #if (__GNUC__ * 10000 + __GNUC_MINOR__ * 100) == 40400
 template <typename T>
+THRUST_DISABLE_BROKEN_GCC_VECTORIZER
 void TestTransformBinaryCountingIterator()
 {
     // GCC 4.4.x has a known failure with auto-vectorization (due to -O3 or -ftree-vectorize) of this test
@@ -813,6 +843,7 @@ void TestTransformBinaryCountingIterator()
 }
 #else
 template <typename T>
+THRUST_DISABLE_BROKEN_GCC_VECTORIZER
 void TestTransformBinaryCountingIterator()
 {
     size_t const n = 15 * sizeof(T);
@@ -841,7 +872,7 @@ struct plus_mod3
 
     plus_mod3(T * table) : table(table) {}
 
-    __host__ __device__
+    THRUST_HOST_DEVICE
     T operator()(T a, T b)
     {
         return table[(int) (a + b)];
@@ -849,10 +880,11 @@ struct plus_mod3
 };
 
 template <typename Vector>
+THRUST_DISABLE_BROKEN_GCC_VECTORIZER
 void TestTransformWithIndirection(void)
 {
     // add numbers modulo 3 with external lookup table
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     Vector input1(7);
     Vector input2(7);

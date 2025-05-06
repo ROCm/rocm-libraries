@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -23,14 +23,16 @@
 template<typename T>
 struct is_even
 {
-  __host__ __device__
-  bool operator()(T x) const { return ((int) x % 2) == 0; }
+  THRUST_HOST_DEVICE bool operator()(T x) const
+  {
+    return ((int) x % 2) == 0;
+  }
 };
 
 template<typename Vector>
 void TestIsPartitionedSimple(void)
 {
-  typedef typename Vector::value_type T;
+  using T = typename Vector::value_type;
 
   Vector v(4);
   v[0] = 1; v[1] = 1; v[2] = 1; v[3] = 0;
@@ -60,7 +62,7 @@ DECLARE_VECTOR_UNITTEST(TestIsPartitionedSimple);
 template <class Vector>
 void TestIsPartitioned(void)
 {
-  typedef typename Vector::value_type T;
+  using T = typename Vector::value_type;
 
   const size_t n = (1 << 16) + 13;
 
@@ -79,7 +81,7 @@ DECLARE_INTEGRAL_VECTOR_UNITTEST(TestIsPartitioned);
 
 
 template<typename InputIterator, typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 bool is_partitioned(my_system &system, InputIterator /*first*/, InputIterator, Predicate)
 {
   system.validate_dispatch();
@@ -99,7 +101,7 @@ DECLARE_UNITTEST(TestIsPartitionedDispatchExplicit);
 
 
 template<typename InputIterator, typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 bool is_partitioned(my_tag, InputIterator first, InputIterator, Predicate)
 {
   *first = 13;
@@ -117,3 +119,4 @@ void TestIsPartitionedDispatchImplicit()
   ASSERT_EQUAL(13, vec.front());
 }
 DECLARE_UNITTEST(TestIsPartitionedDispatchImplicit);
+

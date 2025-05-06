@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ * Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -27,8 +27,11 @@
  ******************************************************************************/
 #pragma once
 
+#include <thrust/detail/config.h>
+
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 #include <iterator>
+#include <thrust/detail/memory_wrapper.h>
 #include <thrust/distance.h>
 #include <thrust/system/hip/detail/execution_policy.h>
 #include <thrust/system/hip/detail/util.h>
@@ -46,8 +49,8 @@ namespace __uninitialized_copy
         InputIt  input;
         OutputIt output;
 
-        typedef typename iterator_traits<InputIt>::value_type  InputType;
-        typedef typename iterator_traits<OutputIt>::value_type OutputType;
+        using InputType  = typename iterator_traits<InputIt>::value_type;
+        using OutputType = typename iterator_traits<OutputIt>::value_type;
 
         THRUST_HIP_FUNCTION
         functor(InputIt input_, OutputIt output_)
@@ -60,7 +63,7 @@ namespace __uninitialized_copy
         void THRUST_HIP_DEVICE_FUNCTION operator()(Size idx)
         {
             InputType const& in  = raw_reference_cast(input[idx]);
-            OutputType&      out = raw_reference_cast(output[idx]);
+            OutputType&      out = raw_reference_cast(output[static_cast<typename std::pointer_traits<OutputIt>::difference_type>(idx)]);
 
             ::new(static_cast<void*>(&out)) OutputType(in);
         }
@@ -75,10 +78,10 @@ uninitialized_copy_n(execution_policy<Derived>& policy,
                      Size                       count,
                      OutputIt                   result)
 {
-    typedef __uninitialized_copy::functor<InputIt, OutputIt> functor_t;
+    using functor_t = __uninitialized_copy::functor<InputIt, OutputIt>;
 
     hip_rocprim::parallel_for(policy, functor_t(first, result), count);
-    return result + count;
+    return result + static_cast<typename std::pointer_traits<OutputIt>::difference_type>(count);
 }
 
 template <class Derived, class InputIt, class OutputIt>

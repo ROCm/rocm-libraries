@@ -1,3 +1,20 @@
+/*
+ *  Copyright 2008-2013 NVIDIA Corporation
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+
 #include <unittest/unittest.h>
 
 #include <thrust/detail/type_traits.h>
@@ -67,8 +84,8 @@ DECLARE_UNITTEST(TestIsPlainOldData);
 
 void TestIsContiguousIterator(void)
 {
-    typedef thrust::host_vector<int>   HostVector;
-    typedef thrust::device_vector<int> DeviceVector;
+    using HostVector  = thrust::host_vector<int>;
+    using DeviceVector = thrust::device_vector<int>;
     
     ASSERT_EQUAL((bool) thrust::is_contiguous_iterator< int * >::value, true);
     ASSERT_EQUAL((bool) thrust::is_contiguous_iterator< thrust::device_ptr<int> >::value, true);
@@ -82,12 +99,12 @@ void TestIsContiguousIterator(void)
 
     ASSERT_EQUAL((bool) thrust::is_contiguous_iterator< thrust::device_ptr<int> >::value, true);
 
-    typedef thrust::tuple< HostVector::iterator,   HostVector::iterator   > HostIteratorTuple;
+    using HostIteratorTuple = thrust::tuple<HostVector::iterator, HostVector::iterator>;
 
-    typedef thrust::constant_iterator<int> ConstantIterator;
-    typedef thrust::counting_iterator<int> CountingIterator;
-    typedef thrust::transform_iterator<thrust::identity<int>, HostVector::iterator > TransformIterator;
-    typedef thrust::zip_iterator< HostIteratorTuple >  ZipIterator;
+    using ConstantIterator  = thrust::constant_iterator<int>;
+    using CountingIterator  = thrust::counting_iterator<int>;
+    using TransformIterator = thrust::transform_iterator<thrust::identity<int>, HostVector::iterator>;
+    using ZipIterator       = thrust::zip_iterator<HostIteratorTuple>;
 
     ASSERT_EQUAL((bool) thrust::is_contiguous_iterator<ConstantIterator>::value,  false);
     ASSERT_EQUAL((bool) thrust::is_contiguous_iterator<CountingIterator>::value,  false);
@@ -99,29 +116,29 @@ DECLARE_UNITTEST(TestIsContiguousIterator);
 
 void TestIsCommutative(void)
 {
-  { typedef int T; typedef thrust::plus<T>        Op; ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, true); }
-  { typedef int T; typedef thrust::multiplies<T>  Op; ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, true); }
-  { typedef int T; typedef thrust::minimum<T>     Op; ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, true); }
-  { typedef int T; typedef thrust::maximum<T>     Op; ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, true); }
-  { typedef int T; typedef thrust::logical_or<T>  Op; ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, true); }
-  { typedef int T; typedef thrust::logical_and<T> Op; ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, true); }
-  { typedef int T; typedef thrust::bit_or<T>      Op; ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, true); }
-  { typedef int T; typedef thrust::bit_and<T>     Op; ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, true); }
-  { typedef int T; typedef thrust::bit_xor<T>     Op; ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, true); }
+  { using T = int; using Op = thrust::plus<T>       ; ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, true); }
+  { using T = int; using Op = thrust::multiplies<T> ; ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, true); }
+  { using T = int; using Op = thrust::minimum<T>    ; ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, true); }
+  { using T = int; using Op = thrust::maximum<T>    ; ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, true); }
+  { using T = int; using Op = thrust::logical_or<T> ; ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, true); }
+  { using T = int; using Op = thrust::logical_and<T>; ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, true); }
+  { using T = int; using Op = thrust::bit_or<T>     ; ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, true); }
+  { using T = int; using Op = thrust::bit_and<T>    ; ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, true); }
+  { using T = int; using Op = thrust::bit_xor<T>    ; ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, true); }
   
-  { typedef char      T; typedef thrust::plus<T>  Op; ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, true); }
-  { typedef short     T; typedef thrust::plus<T>  Op; ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, true); }
-  { typedef long      T; typedef thrust::plus<T>  Op; ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, true); }
-  { typedef long long T; typedef thrust::plus<T>  Op; ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, true); }
-  { typedef float     T; typedef thrust::plus<T>  Op; ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, true); }
-  { typedef double    T; typedef thrust::plus<T>  Op; ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, true); }
+  { using T = char     ; using Op = thrust::plus<T> ; ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, true); }
+  { using T = short    ; using Op = thrust::plus<T> ; ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, true); }
+  { using T = long     ; using Op = thrust::plus<T> ; ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, true); }
+  { using T = long long; using Op = thrust::plus<T> ; ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, true); }
+  { using T = float    ; using Op = thrust::plus<T> ; ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, true); }
+  { using T = double   ; using Op = thrust::plus<T> ; ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, true); }
   
-  { typedef int   T; typedef thrust::minus<T>   Op; ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, false); }
-  { typedef int   T; typedef thrust::divides<T> Op; ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, false); }
-  { typedef float T; typedef thrust::divides<T> Op; ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, false); }
-  { typedef float T; typedef thrust::minus<T>   Op; ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, false); }
+  { using T = int  ; using Op = thrust::minus<T>  ; ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, false); }
+  { using T = int  ; using Op = thrust::divides<T>; ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, false); }
+  { using T = float; using Op = thrust::divides<T>; ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, false); }
+  { using T = float; using Op = thrust::minus<T>  ; ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, false); }
   
-  { typedef thrust::tuple<int,int> T; typedef thrust::plus<T>  Op; ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, false); }
+  { using T = thrust::tuple<int,int>; using Op = thrust::plus<T> ; ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, false); }
 }
 DECLARE_UNITTEST(TestIsCommutative);
 

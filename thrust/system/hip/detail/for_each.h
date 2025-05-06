@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019-2023, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2025, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -26,6 +26,8 @@
  *
  ******************************************************************************/
 #pragma once
+
+#include <thrust/detail/config.h>
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 #include <iterator>
@@ -58,7 +60,7 @@ struct for_each_f
     template <class Size>
     THRUST_HIP_FUNCTION void operator()(Size idx)
     {
-        op(raw_reference_cast(input[idx]));
+        op(raw_reference_cast(*(input + static_cast<typename std::iterator_traits<Input>::difference_type>(idx))));
     }
 };
 
@@ -71,14 +73,14 @@ template <class Derived, class Input, class Size, class UnaryOp>
 Input THRUST_HIP_FUNCTION
 for_each_n(execution_policy<Derived>& policy, Input first, Size count, UnaryOp op)
 {
-    typedef thrust::detail::wrapped_function<UnaryOp, void> wrapped_t;
+    using wrapped_t = thrust::detail::wrapped_function<UnaryOp, void>;
     wrapped_t wrapped_op(op);
 
     hip_rocprim::parallel_for(policy,
                               for_each_f<Input, wrapped_t>(first, wrapped_op),
                               count);
 
-    return first + count;
+    return first + static_cast<typename std::iterator_traits<Input>::difference_type>(count);
 }
 
 // for_each
@@ -86,7 +88,7 @@ template <class Derived, class Input, class UnaryOp>
 Input THRUST_HIP_FUNCTION
 for_each(execution_policy<Derived>& policy, Input first, Input last, UnaryOp op)
 {
-    typedef typename iterator_traits<Input>::difference_type size_type;
+    using size_type = typename iterator_traits<Input>::difference_type;
     size_type count = static_cast<size_type>(thrust::distance(first, last));
     return hip_rocprim::for_each_n(policy, first, count, op);
 }

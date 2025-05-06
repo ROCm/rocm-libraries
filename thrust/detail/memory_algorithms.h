@@ -1,5 +1,5 @@
 // Copyright (c) 2018 NVIDIA Corporation
-// Modifications Copyright© 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Modifications Copyright© 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
 // Author: Bryce Adelstein Lelbach <brycelelbach@gmail.com>
 //
 // Distributed under the Boost Software License v1.0 (boost.org/LICENSE_1_0.txt)
@@ -27,21 +27,21 @@ THRUST_NAMESPACE_BEGIN
 ///////////////////////////////////////////////////////////////////////////////
 
 template <typename T>
-__host__ __device__
+THRUST_HOST_DEVICE
 void destroy_at(T* location)
 {
   location->~T();
 }
 
 template <typename Allocator, typename T>
-__host__ __device__
+THRUST_HOST_DEVICE
 void destroy_at(Allocator const& alloc, T* location)
 {
-  typedef typename detail::allocator_traits<
+  using traits = typename detail::allocator_traits<
     typename detail::remove_cv<
       typename detail::remove_reference<Allocator>::type
     >::type
-  >::template rebind_traits<T>::other traits;
+  >::template rebind_traits<T>::other;
 
   typename traits::allocator_type alloc_T(alloc);
 
@@ -49,7 +49,7 @@ void destroy_at(Allocator const& alloc, T* location)
 }
 
 template <typename ForwardIt>
-__host__ __device__
+THRUST_HOST_DEVICE
 ForwardIt destroy(ForwardIt first, ForwardIt last)
 {
   for (; first != last; ++first)
@@ -59,15 +59,15 @@ ForwardIt destroy(ForwardIt first, ForwardIt last)
 }
 
 template <typename Allocator, typename ForwardIt>
-__host__ __device__
+THRUST_HOST_DEVICE
 ForwardIt destroy(Allocator const& alloc, ForwardIt first, ForwardIt last)
 {
-  typedef typename iterator_traits<ForwardIt>::value_type T;
-  typedef typename detail::allocator_traits<
+  using T = typename iterator_traits<ForwardIt>::value_type;
+  using traits = typename detail::allocator_traits<
     typename detail::remove_cv<
       typename detail::remove_reference<Allocator>::type
     >::type
-  >::template rebind_traits<T>::other traits;
+  >::template rebind_traits<T>::other;
 
   typename traits::allocator_type alloc_T(alloc);
 
@@ -78,7 +78,7 @@ ForwardIt destroy(Allocator const& alloc, ForwardIt first, ForwardIt last)
 }
 
 template <typename ForwardIt, typename Size>
-__host__ __device__
+THRUST_HOST_DEVICE
 ForwardIt destroy_n(ForwardIt first, Size n)
 {
   for (; n > 0; (void) ++first, --n)
@@ -88,15 +88,15 @@ ForwardIt destroy_n(ForwardIt first, Size n)
 }
 
 template <typename Allocator, typename ForwardIt, typename Size>
-__host__ __device__
+THRUST_HOST_DEVICE
 ForwardIt destroy_n(Allocator const& alloc, ForwardIt first, Size n)
 {
-  typedef typename iterator_traits<ForwardIt>::value_type T;
-  typedef typename detail::allocator_traits<
+  using T = typename iterator_traits<ForwardIt>::value_type;
+  using traits = typename detail::allocator_traits<
     typename detail::remove_cv<
       typename detail::remove_reference<Allocator>::type
     >::type
-  >::template rebind_traits<T>::other traits;
+  >::template rebind_traits<T>::other;
 
   typename traits::allocator_type alloc_T(alloc);
 
@@ -107,7 +107,7 @@ ForwardIt destroy_n(Allocator const& alloc, ForwardIt first, Size n)
 }
 
 template <typename ForwardIt, typename... Args>
-__host__ __device__
+THRUST_HOST_DEVICE
 void uninitialized_construct(
   ForwardIt first, ForwardIt last, Args const&... args
 )

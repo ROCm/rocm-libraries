@@ -78,7 +78,7 @@ THRUST_NAMESPACE_BEGIN
  *  \see https://en.cppreference.com/w/cpp/algorithm/accumulate
  */
 template<typename DerivedPolicy, typename InputIterator>
-__host__ __device__
+THRUST_HOST_DEVICE
   typename thrust::iterator_traits<InputIterator>::value_type
     reduce(const thrust::detail::execution_policy_base<DerivedPolicy> &exec, InputIterator first, InputIterator last);
 
@@ -172,7 +172,7 @@ template<typename InputIterator> typename
  *  \see https://en.cppreference.com/w/cpp/algorithm/accumulate
  */
 template<typename DerivedPolicy, typename InputIterator, typename T>
-__host__ __device__
+THRUST_HOST_DEVICE
   T reduce(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
            InputIterator first,
            InputIterator last,
@@ -280,7 +280,7 @@ template<typename DerivedPolicy,
          typename InputIterator,
          typename T,
          typename BinaryFunction>
-__host__ __device__
+THRUST_HOST_DEVICE
   T reduce(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
            InputIterator first,
            InputIterator last,
@@ -351,6 +351,8 @@ template<typename InputIterator,
  *  This version of \p reduce_by_key uses the function object \c equal_to
  *  to test for equality and \c plus to reduce values with equal keys.
  *
+ *  Results from this function may vary from run to run depending on the inputs provided.
+ *
  *  The algorithm's execution is parallelized as determined by \p exec.
  *
  *  \param exec The execution policy to use for parallelization.
@@ -402,7 +404,7 @@ template<typename DerivedPolicy,
          typename InputIterator2,
          typename OutputIterator1,
          typename OutputIterator2>
-__host__ __device__
+THRUST_HOST_DEVICE
   thrust::pair<OutputIterator1,OutputIterator2>
   reduce_by_key(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
                 InputIterator1 keys_first, 
@@ -420,6 +422,8 @@ __host__ __device__
  *
  *  This version of \p reduce_by_key uses the function object \c equal_to
  *  to test for equality and \c plus to reduce values with equal keys.
+ *
+ *  Results from this function may vary from run to run depending on the inputs provided.
  *
  *  \param keys_first The beginning of the input key range.
  *  \param keys_last  The end of the input key range.
@@ -482,6 +486,8 @@ template<typename InputIterator1,
  *  This version of \p reduce_by_key uses the function object \c binary_pred
  *  to test for equality and \c plus to reduce values with equal keys.
  *
+ *  Results from this function may vary from run to run depending on the inputs provided.
+ *
  *  The algorithm's execution is parallelized as determined by \p exec.
  *
  *  \param exec The execution policy to use for parallelization.
@@ -537,7 +543,7 @@ template<typename DerivedPolicy,
          typename OutputIterator1,
          typename OutputIterator2,
          typename BinaryPredicate>
-__host__ __device__
+THRUST_HOST_DEVICE
   thrust::pair<OutputIterator1,OutputIterator2>
   reduce_by_key(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
                 InputIterator1 keys_first, 
@@ -556,6 +562,8 @@ __host__ __device__
  *
  *  This version of \p reduce_by_key uses the function object \c binary_pred
  *  to test for equality and \c plus to reduce values with equal keys.
+ *
+ *  Results from this function may vary from run to run depending on the inputs provided.
  *
  *  \param keys_first The beginning of the input key range.
  *  \param keys_last  The end of the input key range.
@@ -626,6 +634,8 @@ template<typename InputIterator1,
  *  This version of \p reduce_by_key uses the function object \c binary_pred
  *  to test for equality and \c binary_op to reduce values with equal keys.
  *
+ *  Results from this function may vary from run to run depending on the inputs provided.
+ *
  *  The algorithm's execution is parallelized as determined by \p exec.
  *
  *  \param exec The execution policy to use for parallelization.
@@ -686,7 +696,7 @@ template<typename DerivedPolicy,
          typename OutputIterator2,
          typename BinaryPredicate,
          typename BinaryFunction>
-__host__ __device__
+THRUST_HOST_DEVICE
   thrust::pair<OutputIterator1,OutputIterator2>
   reduce_by_key(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
                 InputIterator1 keys_first, 
@@ -709,6 +719,8 @@ __host__ __device__
  *
  *  This version of \p reduce_by_key uses the function object \c binary_pred
  *  to test for equality and \c binary_op to reduce values with equal keys.
+ *
+ *  Results from this function may vary from run to run depending on the inputs provided.
  *
  *  \param keys_first The beginning of the input key range.
  *  \param keys_last  The end of the input key range.

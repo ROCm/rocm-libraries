@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright© 2019-2021 Advanced Micro Devices, Inc. All rights reserved.
+ * Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -27,6 +27,8 @@
  ******************************************************************************/
 #pragma once
 
+#include <thrust/detail/config.h>
+
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 #include <thrust/distance.h>
 #include <thrust/iterator/counting_iterator.h>
@@ -46,11 +48,11 @@ namespace __tabulate {
     Iterator items;
     TabulateOp op;
 
-    __host__ __device__
+    THRUST_HOST_DEVICE
     functor(Iterator items_, TabulateOp op_)
         : items(items_), op(op_) {}
 
-    void __device__ operator()(Size idx)
+    void THRUST_DEVICE operator()(Size idx)
     {
       items[idx] = op(idx);
     }
@@ -67,11 +69,11 @@ tabulate(execution_policy<Derived>& policy,
          Iterator                   last,
          TabulateOp                 tabulate_op)
 {
-    typedef typename iterator_traits<Iterator>::difference_type size_type;
+    using size_type = typename iterator_traits<Iterator>::difference_type;
 
     size_type count = thrust::distance(first, last);
 
-    typedef __tabulate::functor<Iterator, TabulateOp, size_type> functor_t;
+    using functor_t = __tabulate::functor<Iterator, TabulateOp, size_type>;
 
     hip_rocprim::parallel_for(policy,
                               functor_t(first, tabulate_op),

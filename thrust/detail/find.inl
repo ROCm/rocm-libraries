@@ -24,9 +24,9 @@
 
 THRUST_NAMESPACE_BEGIN
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template<typename DerivedPolicy, typename InputIterator, typename T>
-__host__ __device__
+THRUST_HOST_DEVICE
 InputIterator find(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
                    InputIterator first,
                    InputIterator last,
@@ -37,9 +37,9 @@ InputIterator find(const thrust::detail::execution_policy_base<DerivedPolicy> &e
 } // end find()
 
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template<typename DerivedPolicy, typename InputIterator, typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 InputIterator find_if(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
                       InputIterator first,
                       InputIterator last,
@@ -50,9 +50,9 @@ InputIterator find_if(const thrust::detail::execution_policy_base<DerivedPolicy>
 } // end find_if()
 
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template<typename DerivedPolicy, typename InputIterator, typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 InputIterator find_if_not(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
                           InputIterator first,
                           InputIterator last,
@@ -70,7 +70,7 @@ InputIterator find(InputIterator first,
 {
   using thrust::system::detail::generic::select_system;
 
-  typedef typename thrust::iterator_system<InputIterator>::type System;
+  using System = typename thrust::iterator_system<InputIterator>::type;
 
   System system;
 
@@ -84,7 +84,7 @@ InputIterator find_if(InputIterator first,
 {
   using thrust::system::detail::generic::select_system;
 
-  typedef typename thrust::iterator_system<InputIterator>::type System;
+  using System = typename thrust::iterator_system<InputIterator>::type;
 
   System system;
 
@@ -98,7 +98,7 @@ InputIterator find_if_not(InputIterator first,
 {
   using thrust::system::detail::generic::select_system;
 
-  typedef typename thrust::iterator_system<InputIterator>::type System;
+  using System = typename thrust::iterator_system<InputIterator>::type;
 
   System system;
 

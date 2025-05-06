@@ -1,3 +1,20 @@
+/*
+ *  Copyright 2008-2013 NVIDIA Corporation
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+
 #include <unittest/unittest.h>
 #include <thrust/reduce.h>
 #include <thrust/iterator/counting_iterator.h>
@@ -8,7 +25,7 @@
 template<typename T>
   struct plus_mod_10
 {
-  __host__ __device__
+  THRUST_HOST_DEVICE
   T operator()(T lhs, T rhs) const
   {
     return ((lhs % 10) + (rhs % 10)) % 10;
@@ -18,14 +35,14 @@ template<typename T>
 template<typename T>
 struct is_equal_div_10_reduce
 {
-    __host__ __device__
+    THRUST_HOST_DEVICE
     bool operator()(const T x, const T& y) const { return ((int) x / 10) == ((int) y / 10); }
 };
 
 template <class Vector>
 void TestReduceSimple(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     Vector v(3);
     v[0] = 1; v[1] = -2; v[2] = 3;
@@ -155,7 +172,7 @@ struct plus_mod3
 
     plus_mod3(T * table) : table(table) {}
 
-    __host__ __device__
+    THRUST_HOST_DEVICE
     T operator()(T a, T b)
     {
         return table[(int) (a + b)];
@@ -166,7 +183,7 @@ template <typename Vector>
 void TestReduceWithIndirection(void)
 {
     // add numbers modulo 3 with external lookup table
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     Vector data(7);
     data[0] = 0;

@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights meserved.
- *  Modifications Copyright© 2019-2023 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -28,6 +28,7 @@
 #pragma once
 
 #include <cstdio>
+#include <exception>
 #include <thrust/detail/config.h>
 #include <thrust/iterator/iterator_traits.h>
 // Not present in rocPRIM
@@ -53,7 +54,7 @@ THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
 {
 
-inline __host__ __device__ hipStream_t default_stream()
+inline THRUST_HOST_DEVICE hipStream_t default_stream()
 {
   #ifdef HIP_API_PER_THREAD_DEFAULT_STREAM
     return hipStreamPerThread;
@@ -63,28 +64,41 @@ inline __host__ __device__ hipStream_t default_stream()
 }
 
 template <class Derived>
-hipStream_t __host__ __device__
+hipStream_t THRUST_HOST_DEVICE
 get_stream(execution_policy<Derived>&)
 {
     return default_stream();
 }
 
 // Fallback implementation of the customization point.
-template <class Derived> __host__ __device__
+template <class Derived> THRUST_HOST_DEVICE
 bool must_perform_optional_stream_synchronization(execution_policy<Derived> &)
 {
   return true;
 }
 
 // Entry point/interface.
-template <class Derived> __host__ __device__
+template <class Derived> THRUST_HOST_DEVICE
 bool must_perform_optional_synchronization(execution_policy<Derived> &policy)
 {
   return must_perform_optional_stream_synchronization(derived_cast(policy));
 }
 
 template <class Derived>
-__host__ __device__ hipError_t synchronize_stream(execution_policy<Derived>& policy)
+THRUST_HOST_DEVICE integral_constant<bool, true> allows_nondeterminism(execution_policy<Derived>&)
+{
+    return {};
+}
+
+template <class Derived>
+THRUST_HOST_DEVICE auto nondeterministic(execution_policy<Derived>& policy)
+    -> decltype(allows_nondeterminism(derived_cast(policy)))
+{
+    return {};
+}
+
+template <class Derived>
+THRUST_HOST_DEVICE hipError_t synchronize_stream(execution_policy<Derived>& policy)
 {
   hipError_t result;
   // Can't use #if inside NV_IF_TARGET, use a temp macro to hoist the device
@@ -109,7 +123,7 @@ __host__ __device__ hipError_t synchronize_stream(execution_policy<Derived>& pol
 }
 
 // Fallback implementation of the customization point.
-template <class Derived> __host__ __device__
+template <class Derived> THRUST_HOST_DEVICE
 hipError_t synchronize_stream_optional(execution_policy<Derived> &policy)
 {
   hipError_t result;
@@ -127,14 +141,14 @@ hipError_t synchronize_stream_optional(execution_policy<Derived> &policy)
 }
 
 // Entry point/interface.
-template <class Policy> __host__ __device__
+template <class Policy> THRUST_HOST_DEVICE
 hipError_t synchronize_optional(Policy &policy)
 {
   return synchronize_stream_optional(derived_cast(policy));
 }
 
-__thrust_exec_check_disable__ template <class Policy>
-__host__ __device__ hipError_t synchronize(Policy& policy)
+THRUST_EXEC_CHECK_DISABLE template <class Policy>
+THRUST_HOST_DEVICE hipError_t synchronize(Policy& policy)
 {
 #if __THRUST_HAS_HIPRT__
     return synchronize_stream(derived_cast(policy));
@@ -145,7 +159,7 @@ __host__ __device__ hipError_t synchronize(Policy& policy)
 }
 
 template <class Derived>
-__host__ __device__ hipStream_t stream(execution_policy<Derived>& policy)
+THRUST_HOST_DEVICE hipStream_t stream(execution_policy<Derived>& policy)
 {
     return get_stream(derived_cast(policy));
 }
@@ -195,7 +209,7 @@ trivial_copy_to_device(Type* dst, Type const* src, size_t count, hipStream_t str
 }
 
 template <class Policy, class Type>
-__host__ __device__ hipError_t
+THRUST_HOST_DEVICE hipError_t
 trivial_copy_device_to_device(Policy& policy, Type* dst, Type const* src, size_t count)
 {
     hipError_t status = hipSuccess;
@@ -205,16 +219,18 @@ trivial_copy_device_to_device(Policy& policy, Type* dst, Type const* src, size_t
     hipStream_t stream = hip_rocprim::stream(policy);
     //
     status = ::hipMemcpyAsync(dst, src, sizeof(Type) * count, hipMemcpyDeviceToDevice, stream);
-    hip_rocprim::synchronize(policy);
+    if(status != hipSuccess)
+        return status;
+    status = hip_rocprim::synchronize(policy);
     return status;
 }
 
-inline void __host__ __device__ terminate()
+inline void THRUST_HOST_DEVICE terminate()
 {
     NV_IF_TARGET(NV_IS_HOST, (std::terminate();), (abort();));
 }
 
-inline void __host__ __device__ throw_on_error(hipError_t status, char const* msg)
+inline void THRUST_HOST_DEVICE throw_on_error(hipError_t status, char const* msg)
 {
     // Clear the global HIP error state which may have been set by the last
     // call. Otherwise, errors may "leak" to unrelated kernel launches.
@@ -243,7 +259,7 @@ inline void __host__ __device__ throw_on_error(hipError_t status, char const* ms
 }
 
 // TODO this overload should be removed and messages should be passed.
-inline void __host__ __device__ throw_on_error(hipError_t status)
+inline void THRUST_HOST_DEVICE throw_on_error(hipError_t status)
 {
     // Clear the global HIP error state which may have been set by the last
     // call. Otherwise, errors may "leak" to unrelated kernel launches.
@@ -273,12 +289,12 @@ inline void __host__ __device__ throw_on_error(hipError_t status)
 template <class ValueType, class InputIt, class UnaryOp>
 struct transform_input_iterator_t
 {
-    typedef transform_input_iterator_t                         self_t;
-    typedef typename iterator_traits<InputIt>::difference_type difference_type;
-    typedef ValueType                                          value_type;
-    typedef void                                               pointer;
-    typedef value_type                                         reference;
-    typedef std::random_access_iterator_tag                    iterator_category;
+    using self_t            = transform_input_iterator_t;
+    using difference_type   = typename iterator_traits<InputIt>::difference_type;
+    using value_type        = ValueType;
+    using pointer           = void;
+    using reference         = value_type;
+    using iterator_category = std::random_access_iterator_tag;
 
     InputIt         input;
     mutable UnaryOp op;
@@ -289,9 +305,7 @@ struct transform_input_iterator_t
     {
     }
 
-#if THRUST_CPP_DIALECT >= 2011
   transform_input_iterator_t(const self_t &) = default;
-#endif
 
   // UnaryOp might not be copy assignable, such as when it is a lambda.  Define
   // an explicit copy assignment operator that doesn't try to assign it.
@@ -384,12 +398,12 @@ struct transform_input_iterator_t
 template <class ValueType, class InputIt1, class InputIt2, class BinaryOp>
 struct transform_pair_of_input_iterators_t
 {
-    typedef transform_pair_of_input_iterators_t                 self_t;
-    typedef typename iterator_traits<InputIt1>::difference_type difference_type;
-    typedef ValueType                                           value_type;
-    typedef void                                                pointer;
-    typedef value_type                                          reference;
-    typedef std::random_access_iterator_tag                     iterator_category;
+    using self_t            = transform_pair_of_input_iterators_t;
+    using difference_type   = typename iterator_traits<InputIt1>::difference_type;
+    using value_type        = ValueType;
+    using pointer           = void;
+    using reference         = value_type;
+    using iterator_category = std::random_access_iterator_tag;
 
     InputIt1         input1;
     InputIt2         input2;
@@ -408,7 +422,7 @@ struct transform_pair_of_input_iterators_t
 
     // BinaryOp might not be copy assignable, such as when it is a lambda.
     // Define an explicit copy assignment operator that doesn't try to assign it.
-    self_t& operator=(const self_t& o)
+    THRUST_HIP_FUNCTION self_t& operator=(const self_t& o)
     {
         input1 = o.input1;
         input2 = o.input2;
@@ -500,13 +514,13 @@ struct transform_pair_of_input_iterators_t
 struct identity
 {
     template <class T>
-    __host__ __device__ T const& operator()(T const& t) const
+    THRUST_HOST_DEVICE T const& operator()(T const& t) const
     {
         return t;
     }
 
     template <class T>
-    __host__ __device__ T& operator()(T& t) const
+    THRUST_HOST_DEVICE T& operator()(T& t) const
     {
         return t;
     }
@@ -515,12 +529,12 @@ struct identity
 template <class T>
 struct counting_iterator_t
 {
-    typedef counting_iterator_t             self_t;
-    typedef T                               difference_type;
-    typedef T                               value_type;
-    typedef void                            pointer;
-    typedef T                               reference;
-    typedef std::random_access_iterator_tag iterator_category;
+    using self_t            = counting_iterator_t;
+    using difference_type   = T;
+    using value_type        = T;
+    using pointer           = void;
+    using reference         = T;
+    using iterator_category = std::random_access_iterator_tag;
 
     T count;
 

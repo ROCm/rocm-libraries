@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ * Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -27,6 +27,8 @@
  ******************************************************************************/
 #pragma once
 
+#include <thrust/detail/config.h>
+
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 #include <thrust/system/hip/config.h>
 #include <thrust/system/hip/detail/execution_policy.h>
@@ -40,14 +42,50 @@ namespace hip_rocprim
 namespace __copy
 {
     template <class Derived, class InputIt, class OutputIt>
-    OutputIt THRUST_HIP_FUNCTION
-    device_to_device(execution_policy<Derived>& policy,
-                     InputIt                    first,
-                     InputIt                    last,
-                     OutputIt                   result)
+    OutputIt THRUST_HIP_FUNCTION device_to_device(execution_policy<Derived>& policy,
+                                                  InputIt                    first,
+                                                  InputIt                    last,
+                                                  OutputIt                   result,
+                                                  thrust::detail::true_type)
     {
-        typedef typename thrust::iterator_traits<InputIt>::value_type InputTy;
+        using InputTy = typename thrust::iterator_traits<InputIt>::value_type;
+        const auto n = thrust::distance(first, last);
+        if(n > 0)
+        {
+            const hipError_t status = trivial_copy_device_to_device(
+                policy,
+                reinterpret_cast<InputTy*>(thrust::raw_pointer_cast(&*result)),
+                reinterpret_cast<InputTy const*>(thrust::raw_pointer_cast(&*first)),
+                n);
+            hip_rocprim::throw_on_error(status, "__copy:: D->D: failed");
+        }
+
+        return result + n;
+    }
+
+    template <class Derived, class InputIt, class OutputIt>
+    OutputIt THRUST_HIP_FUNCTION device_to_device(execution_policy<Derived>& policy,
+                                                  InputIt                    first,
+                                                  InputIt                    last,
+                                                  OutputIt                   result,
+                                                  thrust::detail::false_type)
+    {
+        using InputTy = typename thrust::iterator_traits<InputIt>::value_type;
         return hip_rocprim::transform(policy, first, last, result, thrust::identity<InputTy>());
+    }
+
+    template <class Derived, class InputIt, class OutputIt>
+    OutputIt THRUST_HIP_FUNCTION device_to_device(execution_policy<Derived>& policy,
+                                                  InputIt                    first,
+                                                  InputIt                    last,
+                                                  OutputIt                   result)
+    {
+        return device_to_device(
+            policy,
+            first,
+            last,
+            result,
+            typename is_indirectly_trivially_relocatable_to<InputIt, OutputIt>::type());
     }
 } // namespace __copy
 } // namespace hip_rocprim

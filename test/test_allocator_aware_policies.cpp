@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2018 NVIDIA Corporation
- *  Modifications Copyright© 2019-2023 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -47,12 +47,12 @@ struct test_memory_resource_t final : thrust::mr::memory_resource<>
 template<typename Policy, template <typename> class CRTPBase>
 struct policy_info
 {
-    typedef Policy policy;
+    using policy = Policy;
 
     template<template <typename, template <typename> class> class Template, typename Argument>
     struct apply_base_second
     {
-        typedef Template<Argument, CRTPBase> type;
+        using type = Template<Argument, CRTPBase>;
     };
 };
 
@@ -128,33 +128,21 @@ struct TestAllocatorAttachment
     }
 };
 
-typedef policy_info<
-    thrust::detail::seq_t,
-    thrust::system::detail::sequential::execution_policy
-> sequential_info;
-typedef policy_info<
-    thrust::system::cpp::detail::par_t,
-    thrust::system::cpp::detail::execution_policy
-> cpp_par_info;
-typedef policy_info<
-    thrust::system::hip::detail::par_t,
-    thrust::hip_rocprim::execute_on_stream_base
-> hip_par_info;
-typedef policy_info<
-    thrust::system::omp::detail::par_t,
-    thrust::system::omp::detail::execution_policy
-> omp_par_info;
-typedef policy_info<
-    thrust::system::tbb::detail::par_t,
-    thrust::system::tbb::detail::execution_policy
-> tbb_par_info;
-
-typedef ::testing::Types<Params<sequential_info>,
-                         Params<cpp_par_info>,
-                         Params<hip_par_info>,
-                         Params<omp_par_info>,
-                         Params<tbb_par_info>>
-    PolicyTestsParams;
+using sequential_info = policy_info<thrust::detail::seq_t,
+    thrust::system::detail::sequential::execution_policy>;
+using cpp_par_info = policy_info<thrust::system::cpp::detail::par_t,
+    thrust::system::cpp::detail::execution_policy>;
+using hip_par_info = policy_info<thrust::system::hip::detail::par_t,
+    thrust::hip_rocprim::execute_on_stream_base>;
+using omp_par_info = policy_info<thrust::system::omp::detail::par_t,
+    thrust::system::omp::detail::execution_policy>;
+using tbb_par_info = policy_info<thrust::system::tbb::detail::par_t,
+    thrust::system::tbb::detail::execution_policy>;
+using PolicyTestsParams = ::testing::Types<Params<sequential_info>,
+                                           Params<cpp_par_info>,
+                                           Params<hip_par_info>,
+                                           Params<omp_par_info>,
+                                           Params<tbb_par_info>>;
 
 TESTS_DEFINE(AllocatorAwarePoliciesTests, PolicyTestsParams);
 

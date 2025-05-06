@@ -37,43 +37,41 @@ template<typename T, typename System>
                T, System, thrust::pointer<T,System>
              >
 {
-  private:
-    typedef thrust::detail::tagged_allocator<
-      T, System, thrust::pointer<T,System>
-    > super_t;
+private:
+    using super_t = thrust::detail::tagged_allocator<T, System, thrust::pointer<T, System>>;
 
     System &m_system;
 
   public:
-    typedef typename super_t::pointer   pointer;
-    typedef typename super_t::size_type size_type;
+    using pointer   = typename super_t::pointer;
+    using size_type = typename super_t::size_type;
 
-    inline __host__ __device__
+    inline THRUST_HOST_DEVICE
     temporary_allocator(const temporary_allocator &other) :
       super_t(),
       m_system(other.m_system)
     {}
 
-    inline __host__ __device__
+    inline THRUST_HOST_DEVICE
     explicit temporary_allocator(thrust::execution_policy<System> &system) :
       super_t(),
       m_system(thrust::detail::derived_cast(system))
     {}
 
-    __host__ __device__
+    THRUST_HOST_DEVICE
     pointer allocate(size_type cnt);
 
-    __host__ __device__
+    THRUST_HOST_DEVICE
     void deallocate(pointer p, size_type n);
 
-    __host__ __device__
+    THRUST_HOST_DEVICE
     inline System &system()
     {
       return m_system;
     } // end system()
 
   private:
-    typedef thrust::pair<pointer, size_type> pointer_and_size;
+    using pointer_and_size = thrust::pair<pointer, size_type>;
 }; // end temporary_allocator
 
 

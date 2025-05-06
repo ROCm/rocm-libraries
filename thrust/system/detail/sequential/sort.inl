@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2021 NVIDIA Corporation
- *  Modifications Copyright© 2019-2023 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -55,7 +55,7 @@ struct needs_reverse
 template<typename DerivedPolicy,
          typename RandomAccessIterator,
          typename StrictWeakOrdering>
-__host__ __device__
+THRUST_HOST_DEVICE
 void stable_sort(sequential::execution_policy<DerivedPolicy> &exec,
                  RandomAccessIterator first,
                  RandomAccessIterator last,
@@ -65,7 +65,7 @@ void stable_sort(sequential::execution_policy<DerivedPolicy> &exec,
   thrust::system::detail::sequential::stable_primitive_sort(exec, first, last);
 
   // if comp is greater<T> then reverse the keys
-  typedef typename thrust::iterator_traits<RandomAccessIterator>::value_type KeyType;
+  using KeyType = typename thrust::iterator_traits<RandomAccessIterator>::value_type;
 
   if(needs_reverse<KeyType,StrictWeakOrdering>::value)
   {
@@ -78,7 +78,7 @@ template<typename DerivedPolicy,
          typename RandomAccessIterator1,
          typename RandomAccessIterator2,
          typename StrictWeakOrdering>
-__host__ __device__
+THRUST_HOST_DEVICE
 void stable_sort_by_key(sequential::execution_policy<DerivedPolicy> &exec,
                         RandomAccessIterator1 first1,
                         RandomAccessIterator1 last1,
@@ -87,7 +87,7 @@ void stable_sort_by_key(sequential::execution_policy<DerivedPolicy> &exec,
                         thrust::detail::true_type)
 {
   // if comp is greater<T> then reverse the keys and values
-  typedef typename thrust::iterator_traits<RandomAccessIterator1>::value_type KeyType;
+  using KeyType = typename thrust::iterator_traits<RandomAccessIterator1>::value_type;
 
   // note, we also have to reverse the (unordered) input to preserve stability
   if(needs_reverse<KeyType,StrictWeakOrdering>::value)
@@ -114,7 +114,7 @@ void stable_sort_by_key(sequential::execution_policy<DerivedPolicy> &exec,
 template<typename DerivedPolicy,
          typename RandomAccessIterator,
          typename StrictWeakOrdering>
-__host__ __device__
+THRUST_HOST_DEVICE
 void stable_sort(sequential::execution_policy<DerivedPolicy> &exec,
                  RandomAccessIterator first,
                  RandomAccessIterator last,
@@ -129,7 +129,7 @@ template<typename DerivedPolicy,
          typename RandomAccessIterator1,
          typename RandomAccessIterator2,
          typename StrictWeakOrdering>
-__host__ __device__
+THRUST_HOST_DEVICE
 void stable_sort_by_key(sequential::execution_policy<DerivedPolicy> &exec,
                         RandomAccessIterator1 first1,
                         RandomAccessIterator1 last1,
@@ -159,7 +159,7 @@ struct use_primitive_sort
 template<typename DerivedPolicy,
          typename RandomAccessIterator,
          typename StrictWeakOrdering>
-__host__ __device__
+THRUST_HOST_DEVICE
 void stable_sort(sequential::execution_policy<DerivedPolicy> &exec,
                  RandomAccessIterator first,
                  RandomAccessIterator last,
@@ -182,7 +182,7 @@ template<typename DerivedPolicy,
          typename RandomAccessIterator1,
          typename RandomAccessIterator2,
          typename StrictWeakOrdering>
-__host__ __device__
+THRUST_HOST_DEVICE
 void stable_sort_by_key(sequential::execution_policy<DerivedPolicy> &exec,
                         RandomAccessIterator1 first1,
                         RandomAccessIterator1 last1,

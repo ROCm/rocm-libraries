@@ -35,19 +35,19 @@ namespace sequential
 {
 
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template<typename DerivedPolicy,
          typename InputIterator,
          typename OutputIterator,
          typename BinaryPredicate>
-__host__ __device__
+THRUST_HOST_DEVICE
   OutputIterator unique_copy(sequential::execution_policy<DerivedPolicy> &,
                              InputIterator first,
                              InputIterator last,
                              OutputIterator output,
                              BinaryPredicate binary_pred)
 {
-  typedef typename thrust::iterator_traits<InputIterator>::value_type T;
+  using T = typename thrust::iterator_traits<InputIterator>::value_type;
 
   if(first != last)
   {
@@ -78,7 +78,7 @@ __host__ __device__
 template<typename DerivedPolicy,
          typename ForwardIterator,
          typename BinaryPredicate>
-__host__ __device__
+THRUST_HOST_DEVICE
   ForwardIterator unique(sequential::execution_policy<DerivedPolicy> &exec,
                          ForwardIterator first,
                          ForwardIterator last,
@@ -92,14 +92,14 @@ __host__ __device__
 template<typename DerivedPolicy,
          typename ForwardIterator,
          typename BinaryPredicate>
-__host__ __device__
+THRUST_HOST_DEVICE
   typename thrust::iterator_traits<ForwardIterator>::difference_type
     unique_count(sequential::execution_policy<DerivedPolicy> &,
                  ForwardIterator first,
                  ForwardIterator last,
                  BinaryPredicate binary_pred)
 {
-  typedef typename thrust::iterator_traits<ForwardIterator>::value_type T;
+  using T = typename thrust::iterator_traits<ForwardIterator>::value_type;
   typename thrust::iterator_traits<ForwardIterator>::difference_type count{};
 
   if(first != last)

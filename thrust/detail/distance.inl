@@ -23,9 +23,9 @@
 
 THRUST_NAMESPACE_BEGIN
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template<typename InputIterator>
-inline __host__ __device__
+inline THRUST_HOST_DEVICE
   typename thrust::iterator_traits<InputIterator>::difference_type
     distance(InputIterator first, InputIterator last)
 {

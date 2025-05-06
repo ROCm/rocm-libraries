@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -25,6 +25,7 @@
 #include <thrust/detail/event_error.h>
 
 #include "test_seed.hpp"
+#include "thrust/detail/tuple.inl"
 
 #include <algorithm>
 #include <cstdlib>
@@ -61,6 +62,56 @@ inline std::string demangle(const char* name)
   return name;
 }
 #endif
+
+/// Safe sign-mixed comparisons, negative values always compare less
+/// than any values of unsigned types (in contrast to the behaviour of the built-in comparison operator)
+/// This is a backport of a C++20 standard library feature to C++14
+template<class T, class U>
+constexpr auto cmp_less(T t, U u) noexcept
+    -> std::enable_if_t<std::is_signed<T>::value == std::is_signed<U>::value || !std::is_integral<T>::value || !std::is_integral<U>::value, bool>
+{
+    return t < u;
+}
+
+template<class T, class U>
+constexpr auto cmp_less(T t, U u) noexcept
+    -> std::enable_if_t<std::is_signed<T>::value && !std::is_signed<U>::value && std::is_integral<T>::value, bool>
+{
+    // U is unsigned
+    return t < 0 || std::make_unsigned_t<T>(t) < u;
+}
+
+template<class T, class U>
+constexpr auto cmp_less(T t, U u) noexcept
+    -> std::enable_if_t<!std::is_signed<T>::value && std::is_signed<U>::value && std::is_integral<U>::value, bool>
+{
+    // T is unsigned U is signed
+    return u >= 0 && t < std::make_unsigned_t<U>(u);
+}
+
+template<class T, class U>
+constexpr bool cmp_greater(T t, U u) noexcept
+{
+    return cmp_less(u, t);
+}
+// Backport of saturate_cast from C++26 to C++14
+// From https://github.com/llvm/llvm-project/blob/52b18430ae105566f26152c0efc63998301b1134/libcxx/include/__numeric/saturation_arithmetic.h#L97
+// licensed under the MIT license
+template<typename Res, typename T>
+constexpr Res saturate_cast(T x) noexcept
+{
+    // Handle overflow
+    if(cmp_less(x , std::numeric_limits<Res>::min()))
+    {
+        return std::numeric_limits<Res>::min();
+    }
+    if(cmp_greater(x, std::numeric_limits<Res>::max()))
+    {
+        return std::numeric_limits<Res>::max();
+    }
+    // No overflow
+    return static_cast<Res>(x);
+}
 
 class UnitTestException
 {
@@ -151,8 +202,37 @@ std::vector<seed_type> get_seeds()
     return seeds;
 }
 
+template<class T, class enable = void>
+struct get_default_limits;
+
+template<class T>
+struct get_default_limits<T, std::enable_if_t<std::is_integral<T>::value>>
+{
+    static inline T min()
+    {
+        return std::numeric_limits<T>::min();
+    }
+    static inline T max()
+    {
+        return std::numeric_limits<T>::max();
+    }
+};
+
+template<class T>
+struct get_default_limits<T, std::enable_if_t<std::is_floating_point<T>::value>>
+{
+    static inline T min()
+    {
+        return T(-1);
+    }
+    static inline T max()
+    {
+        return T(1);
+    }
+};
+
 template <class T>
-inline auto get_random_data(size_t size, T, T, int seed) ->
+inline auto get_random_data(size_t size, T, T, seed_type seed) ->
     typename std::enable_if<std::is_same<T, bool>::value, thrust::host_vector<T>>::type
 {
     std::random_device          rd;
@@ -165,21 +245,21 @@ inline auto get_random_data(size_t size, T, T, int seed) ->
 }
 
 template <class T>
-inline auto get_random_data(size_t size, T min, T max, int seed) ->
+inline auto get_random_data(size_t size, T min, T max, seed_type seed) ->
     typename std::enable_if<rocprim::is_integral<T>::value && !std::is_same<T, bool>::value,
                             thrust::host_vector<T>>::type
 {
     std::random_device               rd;
     std::default_random_engine       gen(rd());
     gen.seed(seed);
-    std::uniform_int_distribution<T> distribution(min, max);
+    std::uniform_int_distribution<T> distribution(saturate_cast<T>(min), saturate_cast<T>(max));
     thrust::host_vector<T>           data(size);
     std::generate(data.begin(), data.end(), [&]() { return distribution(gen); });
     return data;
 }
 
 template <class T>
-inline auto get_random_data(size_t size, T min, T max, int seed) ->
+inline auto get_random_data(size_t size, T min, T max, seed_type seed) ->
     typename std::enable_if<rocprim::is_floating_point<T>::value, thrust::host_vector<T>>::type
 {
     std::random_device                rd;
@@ -193,19 +273,19 @@ inline auto get_random_data(size_t size, T min, T max, int seed) ->
 
 #if defined(_WIN32) && defined(__clang__)
 template <>
-inline thrust::host_vector<unsigned char> get_random_data(size_t size, unsigned char min, unsigned char max, int seed_value)
+inline thrust::host_vector<unsigned char> get_random_data(size_t size, unsigned char min, unsigned char max, seed_type seed_value)
 {
     std::random_device                 rd;
     std::default_random_engine         gen(rd());
     gen.seed(seed_value);
-    std::uniform_int_distribution<int> distribution(static_cast<int>(min), static_cast<int>(max));
+    std::uniform_int_distribution<int> distribution(static_cast<unsigned int>(min), static_cast<unsigned int>(max));
     thrust::host_vector<unsigned char> data(size);
     std::generate(data.begin(), data.end(), [&]() { return static_cast<unsigned char>(distribution(gen)); });
     return data;
 }
 
 template <>
-inline thrust::host_vector<signed char> get_random_data(size_t size, signed char min, signed char max, int seed_value)
+inline thrust::host_vector<signed char> get_random_data(size_t size, signed char min, signed char max, seed_type seed_value)
 {
     std::random_device                 rd;
     std::default_random_engine         gen(rd());
@@ -343,8 +423,8 @@ struct FixedVector
 template <typename Key, typename Value>
 struct key_value
 {
-    typedef Key   key_type;
-    typedef Value value_type;
+    using key_type  = Key;
+    using value_type = Value;
 
     __host__ __device__ key_value(void)
         : key()
@@ -626,3 +706,57 @@ struct precision_threshold<rocprim::half>
 {
     static constexpr float percentage = 0.075f;
 };
+
+template<class T,
+         typename std::enable_if_t<std::is_floating_point<T>::value>* = nullptr>
+inline
+void test_equality(const T &hvalue, const T &dvalue) {
+    // Check bitwise equality for +NaN, -NaN, +0.0, -0.0, +inf, -inf.
+    if( std::memcmp(&hvalue, &dvalue, sizeof(T)) == 0 ) return;
+
+    // Check value difference based on precision threshold
+    // relative difference or absolute difference with small values
+    auto tolerance = std::max<T>(std::abs(T(precision_threshold<T>::percentage) * hvalue),
+                                 T(precision_threshold<T>::percentage));
+    ASSERT_NEAR(hvalue, dvalue, tolerance);
+}
+
+template<class T,
+         typename std::enable_if_t<std::is_integral<T>::value>* = nullptr>
+inline
+void test_equality(const T &hvalue, const T &dvalue) {
+    ASSERT_EQ(hvalue, dvalue);
+}
+
+// Test vector comparing host and device results
+// If type is integral check for equality, if floating
+// check absolute or relative difference
+template<class T>
+void test_equality(const thrust::host_vector<T>&   hvalue,
+                   const thrust::device_vector<T>& dvalue)
+{
+    thrust::host_vector<T> hvalue_d(dvalue);
+    ASSERT_EQ(hvalue.size(), hvalue_d.size());
+    for(size_t i = 0; i < hvalue.size(); i++)
+    {
+        test_equality(hvalue[i], hvalue_d[i]);
+    }
+}
+
+// Test vector of pairs comparing host and device results
+// If type is integral check for equality, if floating
+// check absolute or relative difference
+template<typename X,
+         typename Y,
+         template<typename, typename> class Pair>
+void test_equality(const thrust::host_vector<Pair<X,Y>>&   hvalue,
+                   const thrust::device_vector<Pair<X,Y>>& dvalue)
+{
+    thrust::host_vector<Pair<X,Y>> hvalue_d(dvalue);
+    ASSERT_EQ(hvalue.size(), hvalue_d.size());
+    for(size_t i = 0; i < hvalue.size(); i++)
+    {
+        test_equality(hvalue[i].first, hvalue_d[i].first);
+        test_equality(hvalue[i].second, hvalue_d[i].second);
+    }
+}

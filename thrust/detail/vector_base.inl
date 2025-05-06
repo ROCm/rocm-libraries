@@ -107,7 +107,6 @@ template<typename T, typename Alloc>
   range_init(v.begin(), v.end());
 } // end vector_base::vector_base()
 
-#if THRUST_CPP_DIALECT >= 2011
   template<typename T, typename Alloc>
     vector_base<T,Alloc>
       ::vector_base(vector_base &&v)
@@ -116,7 +115,6 @@ template<typename T, typename Alloc>
   {
     *this = std::move(v);
   } //end vector_base::vector_base()
-#endif
 
 template<typename T, typename Alloc>
   vector_base<T,Alloc> &
@@ -136,7 +134,6 @@ template<typename T, typename Alloc>
   return *this;
 } // end vector_base::operator=()
 
-#if THRUST_CPP_DIALECT >= 2011
   template<typename T, typename Alloc>
     vector_base<T,Alloc> &
       vector_base<T,Alloc>
@@ -151,7 +148,6 @@ template<typename T, typename Alloc>
 
     return *this;
   } // end vector_base::operator=()
-#endif
 
 template<typename T, typename Alloc>
   template<typename OtherT, typename OtherAlloc>
@@ -194,6 +190,34 @@ template<typename T, typename Alloc>
 
   return *this;
 } // end vector_base::operator=()
+
+template<typename T, typename Alloc>
+    vector_base<T,Alloc>
+      ::vector_base(std::initializer_list<T> il)
+        :m_storage(),
+         m_size(0)
+  {
+    range_init(il.begin(), il.end());
+  } // end vector_base::vector_base()
+
+  template<typename T, typename Alloc>
+  vector_base<T,Alloc>
+    ::vector_base(std::initializer_list<T> il, const Alloc &alloc)
+    :m_storage(alloc),
+      m_size(0)
+  {
+    range_init(il.begin(), il.end());
+  } // end vector_base::vector_base()
+
+  template<typename T, typename Alloc>
+    vector_base<T,Alloc> &
+      vector_base<T,Alloc>
+      ::operator=(std::initializer_list<T> il)
+  {
+    assign(il.begin(), il.end());
+
+    return *this;
+  } // end vector_base::operator=()
 
 template<typename T, typename Alloc>
   template<typename IteratorOrIntegralType>
@@ -285,7 +309,7 @@ template<typename T, typename Alloc>
 {
   // check the type of InputIterator: if it's an integral type,
   // we need to interpret this call as (size_type, value_type)
-  typedef thrust::detail::is_integral<InputIterator> Integer;
+  using Integer = thrust::detail::is_integral<InputIterator>;
 
   init_dispatch(first, last, Integer());
 } // end vector_base::vector_base()
@@ -301,7 +325,7 @@ template<typename T, typename Alloc>
 {
   // check the type of InputIterator: if it's an integral type,
   // we need to interpret this call as (size_type, value_type)
-  typedef thrust::detail::is_integral<InputIterator> Integer;
+  using Integer = thrust::detail::is_integral<InputIterator>;
 
   init_dispatch(first, last, Integer());
 } // end vector_base::vector_base()
@@ -339,6 +363,7 @@ template<typename T, typename Alloc>
 } // end vector_base::resize()
 
 template<typename T, typename Alloc>
+  THRUST_HOST_DEVICE
   typename vector_base<T,Alloc>::size_type
     vector_base<T,Alloc>
       ::size(void) const
@@ -347,6 +372,7 @@ template<typename T, typename Alloc>
 } // end vector_base::size()
 
 template<typename T, typename Alloc>
+  THRUST_HOST_DEVICE
   typename vector_base<T,Alloc>::size_type
     vector_base<T,Alloc>
       ::max_size(void) const
@@ -396,6 +422,7 @@ template<typename T, typename Alloc>
 } // end vector_base::reserve()
 
 template<typename T, typename Alloc>
+  THRUST_HOST_DEVICE
   typename vector_base<T,Alloc>::size_type
     vector_base<T,Alloc>
       ::capacity(void) const
@@ -412,6 +439,7 @@ template<typename T, typename Alloc>
 } // end vector_base::shrink_to_fit()
 
 template<typename T, typename Alloc>
+  THRUST_HOST_DEVICE
   typename vector_base<T,Alloc>::reference
     vector_base<T,Alloc>
       ::operator[](const size_type n)
@@ -420,6 +448,7 @@ template<typename T, typename Alloc>
 } // end vector_base::operator[]
 
 template<typename T, typename Alloc>
+  THRUST_HOST_DEVICE
   typename vector_base<T,Alloc>::const_reference
     vector_base<T,Alloc>
       ::operator[](const size_type n) const
@@ -428,6 +457,7 @@ template<typename T, typename Alloc>
 } // end vector_base::operator[]
 
 template<typename T, typename Alloc>
+  THRUST_HOST_DEVICE
   typename vector_base<T,Alloc>::iterator
     vector_base<T,Alloc>
       ::begin(void)
@@ -436,6 +466,7 @@ template<typename T, typename Alloc>
 } // end vector_base::begin()
 
 template<typename T, typename Alloc>
+  THRUST_HOST_DEVICE
   typename vector_base<T,Alloc>::const_iterator
     vector_base<T,Alloc>
       ::begin(void) const
@@ -444,6 +475,7 @@ template<typename T, typename Alloc>
 } // end vector_base::begin()
 
 template<typename T, typename Alloc>
+  THRUST_HOST_DEVICE
   typename vector_base<T,Alloc>::const_iterator
     vector_base<T,Alloc>
       ::cbegin(void) const
@@ -452,6 +484,7 @@ template<typename T, typename Alloc>
 } // end vector_base::cbegin()
 
 template<typename T, typename Alloc>
+  THRUST_HOST_DEVICE
   typename vector_base<T,Alloc>::reverse_iterator
     vector_base<T,Alloc>
       ::rbegin(void)
@@ -460,6 +493,7 @@ template<typename T, typename Alloc>
 } // end vector_base::rbegin()
 
 template<typename T, typename Alloc>
+  THRUST_HOST_DEVICE
   typename vector_base<T,Alloc>::const_reverse_iterator
     vector_base<T,Alloc>
       ::rbegin(void) const
@@ -468,6 +502,7 @@ template<typename T, typename Alloc>
 } // end vector_base::rbegin()
 
 template<typename T, typename Alloc>
+  THRUST_HOST_DEVICE
   typename vector_base<T,Alloc>::const_reverse_iterator
     vector_base<T,Alloc>
       ::crbegin(void) const
@@ -476,6 +511,7 @@ template<typename T, typename Alloc>
 } // end vector_base::crbegin()
 
 template<typename T, typename Alloc>
+  THRUST_HOST_DEVICE
   typename vector_base<T,Alloc>::iterator
     vector_base<T,Alloc>
       ::end(void)
@@ -486,6 +522,7 @@ template<typename T, typename Alloc>
 } // end vector_base::end()
 
 template<typename T, typename Alloc>
+  THRUST_HOST_DEVICE
   typename vector_base<T,Alloc>::const_iterator
     vector_base<T,Alloc>
       ::end(void) const
@@ -496,6 +533,7 @@ template<typename T, typename Alloc>
 } // end vector_base::end()
 
 template<typename T, typename Alloc>
+  THRUST_HOST_DEVICE
   typename vector_base<T,Alloc>::const_iterator
     vector_base<T,Alloc>
       ::cend(void) const
@@ -504,6 +542,7 @@ template<typename T, typename Alloc>
 } // end vector_base::cend()
 
 template<typename T, typename Alloc>
+  THRUST_HOST_DEVICE
   typename vector_base<T,Alloc>::reverse_iterator
     vector_base<T,Alloc>
       ::rend(void)
@@ -512,6 +551,7 @@ template<typename T, typename Alloc>
 } // end vector_base::rend()
 
 template<typename T, typename Alloc>
+  THRUST_HOST_DEVICE
   typename vector_base<T,Alloc>::const_reverse_iterator
     vector_base<T,Alloc>
       ::rend(void) const
@@ -520,6 +560,7 @@ template<typename T, typename Alloc>
 } // end vector_base::rend()
 
 template<typename T, typename Alloc>
+  THRUST_HOST_DEVICE
   typename vector_base<T,Alloc>::const_reverse_iterator
     vector_base<T,Alloc>
       ::crend(void) const
@@ -528,6 +569,7 @@ template<typename T, typename Alloc>
 } // end vector_base::crend()
 
 template<typename T, typename Alloc>
+  THRUST_HOST_DEVICE
   typename vector_base<T,Alloc>::const_reference
     vector_base<T,Alloc>
       ::front(void) const
@@ -536,6 +578,7 @@ template<typename T, typename Alloc>
 } // end vector_base::front()
 
 template<typename T, typename Alloc>
+  THRUST_HOST_DEVICE
   typename vector_base<T,Alloc>::reference
     vector_base<T,Alloc>
       ::front(void)
@@ -544,6 +587,7 @@ template<typename T, typename Alloc>
 } // end vector_base::front()
 
 template<typename T, typename Alloc>
+  THRUST_HOST_DEVICE
   typename vector_base<T,Alloc>::const_reference
     vector_base<T,Alloc>
       ::back(void) const
@@ -554,6 +598,7 @@ template<typename T, typename Alloc>
 } // end vector_base::vector_base
 
 template<typename T, typename Alloc>
+  THRUST_HOST_DEVICE
   typename vector_base<T,Alloc>::reference
     vector_base<T,Alloc>
       ::back(void)
@@ -564,6 +609,7 @@ template<typename T, typename Alloc>
 } // end vector_base::vector_base
 
 template<typename T, typename Alloc>
+  THRUST_HOST_DEVICE
   typename vector_base<T,Alloc>::pointer
     vector_base<T,Alloc>
       ::data(void)
@@ -572,6 +618,7 @@ template<typename T, typename Alloc>
 } // end vector_base::data()
 
 template<typename T, typename Alloc>
+  THRUST_HOST_DEVICE
   typename vector_base<T,Alloc>::const_pointer
     vector_base<T,Alloc>
       ::data(void) const
@@ -596,6 +643,7 @@ template<typename T, typename Alloc>
 } // end vector_base::~vector_dev()
 
 template<typename T, typename Alloc>
+  THRUST_HOST_DEVICE
   bool vector_base<T,Alloc>
     ::empty(void) const
 {
@@ -670,7 +718,7 @@ template<typename T, typename Alloc>
 {
   // we could have received assign(n, x), so disambiguate on the
   // type of InputIterator
-  typedef typename thrust::detail::is_integral<InputIterator> integral;
+  using integral = typename thrust::detail::is_integral<InputIterator>;
 
   assign_dispatch(first, last, integral());
 } // end vector_base::assign()
@@ -714,7 +762,7 @@ template<typename T, typename Alloc>
 {
   // we could have received insert(position, n, x), so disambiguate on the
   // type of InputIterator
-  typedef typename thrust::detail::is_integral<InputIterator> integral;
+  using integral = typename thrust::detail::is_integral<InputIterator>;
 
   insert_dispatch(position, first, last, integral());
 } // end vector_base::insert()
@@ -1202,20 +1250,12 @@ template<typename T, typename Alloc>
   } // end catch
 } // end vector_base::allocate_and_copy()
 
-
-} // end detail
-
 template<typename T, typename Alloc>
-  void swap(detail::vector_base<T,Alloc> &a,
-            detail::vector_base<T,Alloc> &b)
+  void swap(vector_base<T,Alloc> &a,
+            vector_base<T,Alloc> &b)
 {
   a.swap(b);
 } // end swap()
-
-
-
-namespace detail
-{
 
 // iterator tags match
 template <typename InputIterator1, typename InputIterator2>
@@ -1234,8 +1274,8 @@ bool vector_equal(InputIterator1 first1, InputIterator1 last1,
 {
   typename thrust::iterator_difference<InputIterator1>::type n = thrust::distance(first1,last1);
 
-  typedef typename thrust::iterator_system<InputIterator1>::type FromSystem1;
-  typedef typename thrust::iterator_system<InputIterator2>::type FromSystem2;
+  using FromSystem1 = typename thrust::iterator_system<InputIterator1>::type;
+  using FromSystem2 = typename thrust::iterator_system<InputIterator2>::type;
 
   // bring both ranges to the host system
   // note that these copies are no-ops if the range is already convertible to the host system
@@ -1252,30 +1292,25 @@ template <typename InputIterator1, typename InputIterator2>
 bool vector_equal(InputIterator1 first1, InputIterator1 last1,
                   InputIterator2 first2)
 {
-  typedef typename thrust::iterator_system<InputIterator1>::type system1;
-  typedef typename thrust::iterator_system<InputIterator2>::type system2;
+  using system1 = typename thrust::iterator_system<InputIterator1>::type;
+  using system2 = typename thrust::iterator_system<InputIterator2>::type;
 
   // dispatch on the sameness of the two systems
   return vector_equal(first1, last1, first2,
     thrust::detail::is_same<system1,system2>());
 }
 
-} // end namespace detail
-
-
-
-
 template<typename T1, typename Alloc1,
          typename T2, typename Alloc2>
-bool operator==(const detail::vector_base<T1,Alloc1>& lhs,
-                const detail::vector_base<T2,Alloc2>& rhs)
+bool operator==(const vector_base<T1,Alloc1>& lhs,
+                const vector_base<T2,Alloc2>& rhs)
 {
     return lhs.size() == rhs.size() && detail::vector_equal(lhs.begin(), lhs.end(), rhs.begin());
 }
 
 template<typename T1, typename Alloc1,
          typename T2, typename Alloc2>
-bool operator==(const detail::vector_base<T1,Alloc1>& lhs,
+bool operator==(const vector_base<T1,Alloc1>& lhs,
                 const std::vector<T2,Alloc2>&         rhs)
 {
     return lhs.size() == rhs.size() && detail::vector_equal(lhs.begin(), lhs.end(), rhs.begin());
@@ -1284,22 +1319,22 @@ bool operator==(const detail::vector_base<T1,Alloc1>& lhs,
 template<typename T1, typename Alloc1,
          typename T2, typename Alloc2>
 bool operator==(const std::vector<T1,Alloc1>&         lhs,
-                const detail::vector_base<T2,Alloc2>& rhs)
+                const vector_base<T2,Alloc2>& rhs)
 {
     return lhs.size() == rhs.size() && detail::vector_equal(lhs.begin(), lhs.end(), rhs.begin());
 }
 
 template<typename T1, typename Alloc1,
          typename T2, typename Alloc2>
-bool operator!=(const detail::vector_base<T1,Alloc1>& lhs,
-                const detail::vector_base<T2,Alloc2>& rhs)
+bool operator!=(const vector_base<T1,Alloc1>& lhs,
+                const vector_base<T2,Alloc2>& rhs)
 {
     return !(lhs == rhs);
 }
 
 template<typename T1, typename Alloc1,
          typename T2, typename Alloc2>
-bool operator!=(const detail::vector_base<T1,Alloc1>& lhs,
+bool operator!=(const vector_base<T1,Alloc1>& lhs,
                 const std::vector<T2,Alloc2>&         rhs)
 {
     return !(lhs == rhs);
@@ -1308,9 +1343,11 @@ bool operator!=(const detail::vector_base<T1,Alloc1>& lhs,
 template<typename T1, typename Alloc1,
          typename T2, typename Alloc2>
 bool operator!=(const std::vector<T1,Alloc1>&         lhs,
-                const detail::vector_base<T2,Alloc2>& rhs)
+                const vector_base<T2,Alloc2>& rhs)
 {
     return !(lhs == rhs);
 }
+
+} // end namespace detail
 
 THRUST_NAMESPACE_END

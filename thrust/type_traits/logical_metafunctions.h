@@ -25,9 +25,6 @@
 #pragma once
 
 #include <thrust/detail/config.h>
-#include <thrust/detail/cpp11_required.h>
-
-#if THRUST_CPP_DIALECT >= 2011
 
 #include <type_traits>
 
@@ -129,7 +126,7 @@ constexpr bool disjunction_v = disjunction<Ts...>::value;
 #endif
 
 /*! \brief <a href="https://en.cppreference.com/w/cpp/types/integral_constant"><tt>std::integral_constant</tt></a>
- *  whose value is <tt>!Ts::value</tt>.
+ *  whose value is <tt>!T\::value</tt>.
  *
  *  \see negation_v
  *  \see negation_value
@@ -152,7 +149,7 @@ struct negation : std::integral_constant<bool, !T::value> {};
  */
 #endif
 
-/*! \brief <tt>constexpr bool</tt> whose value is <tt>!Ts::value</tt>.
+/*! \brief <tt>constexpr bool</tt> whose value is <tt>!T\::value</tt>.
  *
  *  \see negation
  *  \see negation_value
@@ -244,7 +241,7 @@ struct disjunction_value<B, Bs...>
 ///////////////////////////////////////////////////////////////////////////////
 
 /*! \brief <a href="https://en.cppreference.com/w/cpp/types/integral_constant"><tt>std::integral_constant</tt></a>
- *  whose value is <tt>!Bs</tt>.
+ *  whose value is <tt>!B</tt>.
  *
  *  \see negation_value_v
  *  \see negation
@@ -254,7 +251,7 @@ template <bool B>
 struct negation_value;
 
 #if THRUST_CPP_DIALECT >= 2014
-/*! \brief <tt>constexpr bool</tt> whose value is <tt>!Ts::value</tt>.
+/*! \brief <tt>constexpr bool</tt> whose value is <tt>!B</tt>.
  *
  *  \see negation_value
  *  \see negation
@@ -283,4 +280,3 @@ struct negation_value : std::integral_constant<bool, !B> {};
 
 THRUST_NAMESPACE_END
 
-#endif // THRUST_CPP_DIALECT >= 2011

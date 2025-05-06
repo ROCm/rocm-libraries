@@ -25,6 +25,6 @@
 
 THRUST_NAMESPACE_BEGIN
 
-typedef thrust::system::__THRUST_HOST_SYSTEM_NAMESPACE::tag host_system_tag;
+using host_system_tag = thrust::system::__THRUST_HOST_SYSTEM_NAMESPACE::tag;
 
 THRUST_NAMESPACE_END

@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019-2023, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2025, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -27,9 +27,10 @@
  ******************************************************************************/
 #pragma once
 
+#include <thrust/detail/config.h>
+
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 
-#include <thrust/detail/cstdint.h>
 #include <thrust/detail/temporary_array.h>
 #include <thrust/detail/minmax.h>
 #include <thrust/detail/mpl/math.h>
@@ -44,6 +45,7 @@
 #include <thrust/system/hip/detail/par_to_seq.h>
 #include <thrust/system/hip/detail/util.h>
 
+#include  <cstdint>
 
 // rocPRIM includes
 #include <rocprim/rocprim.hpp>
@@ -57,7 +59,7 @@ namespace __merge
     struct predicate_wrapper
     {
         Predicate                                  predicate;
-        typedef rocprim::tuple<KeyType, ValueType> pair_type;
+        using pair_type = rocprim::tuple<KeyType, ValueType>;
 
         THRUST_HIP_FUNCTION
         predicate_wrapper(Predicate p)
@@ -83,7 +85,7 @@ namespace __merge
           CompareOp                  compare_op)
 
     {
-        typedef size_t size_type;
+        using size_type = size_t;
 
         size_type input1_size
             = static_cast<size_type>(thrust::distance(keys1_first, keys1_last));
@@ -98,7 +100,7 @@ namespace __merge
         bool        debug_sync   = THRUST_HIP_DEBUG_SYNC_FLAG;
 
         // Determine temporary device storage requirements.
-        hip_rocprim::throw_on_error(rocprim::merge(NULL,
+        hip_rocprim::throw_on_error(rocprim::merge(nullptr,
                                                    storage_size,
                                                    keys1_first,
                                                    keys2_first,
@@ -111,7 +113,7 @@ namespace __merge
                                     "merge failed on 1st step");
 
         // Allocate temporary storage.
-        thrust::detail::temporary_array<thrust::detail::uint8_t, Derived>
+        thrust::detail::temporary_array<std::uint8_t, Derived>
             tmp(policy, storage_size);
         void *ptr = static_cast<void*>(tmp.data().get());
 
@@ -156,10 +158,10 @@ namespace __merge
           ItemsOutputIt              items_result,
           CompareOp                  compare_op)
     {
-        typedef size_t size_type;
+        using size_type = size_t;
 
-        typedef typename iterator_traits<KeysIt1>::value_type  KeyType;
-        typedef typename iterator_traits<ItemsIt1>::value_type ValueType;
+        using KeyType   = typename iterator_traits<KeysIt1>::value_type;
+        using ValueType = typename iterator_traits<ItemsIt1>::value_type;
 
         predicate_wrapper<KeyType, ValueType, CompareOp> wrapped_binary_pred(compare_op);
 
@@ -178,7 +180,7 @@ namespace __merge
         // Determine temporary device storage requirements.
         hip_rocprim::throw_on_error(
             rocprim::merge(
-                NULL,
+                nullptr,
                 storage_size,
                 rocprim::make_zip_iterator(rocprim::make_tuple(keys1_first, items1_first)),
                 rocprim::make_zip_iterator(rocprim::make_tuple(keys2_first, items2_first)),
@@ -191,7 +193,7 @@ namespace __merge
             "merge_by_key failed on 1st step");
 
         // Allocate temporary storage.
-        thrust::detail::temporary_array<thrust::detail::uint8_t, Derived>
+        thrust::detail::temporary_array<std::uint8_t, Derived>
             tmp(policy, storage_size);
         void *ptr = static_cast<void*>(tmp.data().get());
 
@@ -223,7 +225,7 @@ namespace __merge
 //-------------------------
 // Thrust API entry points
 //-------------------------
-__thrust_exec_check_disable__ template <class Derived,
+THRUST_EXEC_CHECK_DISABLE template <class Derived,
                                         class KeysIt1,
                                         class KeysIt2,
                                         class ResultIt,
@@ -241,7 +243,7 @@ merge(execution_policy<Derived>& policy,
     // struct workaround is required for HIP-clang
     struct workaround
     {
-        __host__ static ResultIt par(execution_policy<Derived>& policy,
+        THRUST_HOST static ResultIt par(execution_policy<Derived>& policy,
                                      KeysIt1                    keys1_first,
                                      KeysIt1                    keys1_last,
                                      KeysIt2                    keys2_first,
@@ -252,7 +254,7 @@ merge(execution_policy<Derived>& policy,
             return __merge::merge(
                 policy, keys1_first, keys1_last, keys2_first, keys2_last, result, compare_op);
         }
-        __device__ static ResultIt seq(execution_policy<Derived>& policy,
+        THRUST_DEVICE static ResultIt seq(execution_policy<Derived>& policy,
                                        KeysIt1                    keys1_first,
                                        KeysIt1                    keys1_last,
                                        KeysIt2                    keys2_first,
@@ -276,7 +278,7 @@ merge(execution_policy<Derived>& policy,
   #endif
 }
 
-__thrust_exec_check_disable__ template <class Derived,
+THRUST_EXEC_CHECK_DISABLE template <class Derived,
                                         class KeysIt1,
                                         class KeysIt2,
                                         class ItemsIt1,
@@ -299,7 +301,7 @@ merge_by_key(execution_policy<Derived>& policy,
   // struct workaround is required for HIP-clang
   struct workaround
   {
-        __host__
+        THRUST_HOST
         static pair<KeysOutputIt, ItemsOutputIt> par(execution_policy<Derived>& policy,
                             KeysIt1                    keys1_first,
                             KeysIt1                    keys1_last,
@@ -322,7 +324,7 @@ merge_by_key(execution_policy<Derived>& policy,
                                   items_result,
                                   compare_op);
         }
-        __device__
+        THRUST_DEVICE
         static pair<KeysOutputIt, ItemsOutputIt> seq(execution_policy<Derived>& policy,
                             KeysIt1                    keys1_first,
                             KeysIt1                    keys1_last,
@@ -357,7 +359,7 @@ merge_by_key(execution_policy<Derived>& policy,
 
 }
 
-__thrust_exec_check_disable__ template <class Derived,
+THRUST_EXEC_CHECK_DISABLE template <class Derived,
                                         class KeysIt1,
                                         class KeysIt2,
                                         class ResultIt>
@@ -369,7 +371,7 @@ merge(execution_policy<Derived>& policy,
       KeysIt2                    keys2_last,
       ResultIt                   result)
 {
-    typedef typename thrust::iterator_value<KeysIt1>::type keys_type;
+    using keys_type = typename thrust::iterator_value<KeysIt1>::type;
     return hip_rocprim::merge(
         policy, keys1_first, keys1_last, keys2_first, keys2_last, result, less<keys_type>());
 }
@@ -392,7 +394,7 @@ merge_by_key(execution_policy<Derived>& policy,
              KeysOutputIt               keys_result,
              ItemsOutputIt              items_result)
 {
-    typedef typename thrust::iterator_value<KeysIt1>::type keys_type;
+    using keys_type = typename thrust::iterator_value<KeysIt1>::type;
     return hip_rocprim::merge_by_key(policy,
                                      keys1_first,
                                      keys1_last,

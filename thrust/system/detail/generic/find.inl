@@ -40,7 +40,7 @@ namespace generic
 
 
 template<typename DerivedPolicy, typename InputIterator, typename T>
-__host__ __device__
+THRUST_HOST_DEVICE
 InputIterator find(thrust::execution_policy<DerivedPolicy> &exec,
                    InputIterator first,
                    InputIterator last,
@@ -55,7 +55,7 @@ InputIterator find(thrust::execution_policy<DerivedPolicy> &exec,
 template<typename TupleType>
 struct find_if_functor
 {
-  __host__ __device__
+  THRUST_HOST_DEVICE
   TupleType operator()(const TupleType& lhs, const TupleType& rhs) const
   {
     // select the smallest index among true results
@@ -76,14 +76,14 @@ struct find_if_functor
 
 
 template<typename DerivedPolicy, typename InputIterator, typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 InputIterator find_if(thrust::execution_policy<DerivedPolicy> &exec,
                       InputIterator first,
                       InputIterator last,
                       Predicate pred)
 {
-  typedef typename thrust::iterator_traits<InputIterator>::difference_type difference_type;
-  typedef typename thrust::tuple<bool,difference_type> result_type;
+  using difference_type = typename thrust::iterator_traits<InputIterator>::difference_type;
+  using result_type     = typename thrust::tuple<bool, difference_type>;
 
   // empty sequence
   if(first == last) return last;
@@ -98,9 +98,9 @@ InputIterator find_if(thrust::execution_policy<DerivedPolicy> &exec,
   const difference_type interval_size = (thrust::min)(interval_threshold, n);
 
   // force transform_iterator output to bool
-  typedef thrust::transform_iterator<Predicate, InputIterator, bool> XfrmIterator;
-  typedef thrust::tuple<XfrmIterator, thrust::counting_iterator<difference_type> > IteratorTuple;
-  typedef thrust::zip_iterator<IteratorTuple> ZipIterator;
+  using XfrmIterator  = thrust::transform_iterator<Predicate, InputIterator, bool>;
+  using IteratorTuple = thrust::tuple<XfrmIterator, thrust::counting_iterator<difference_type>>;
+  using ZipIterator   = thrust::zip_iterator<IteratorTuple>;
 
   IteratorTuple iter_tuple = thrust::make_tuple(XfrmIterator(first, pred),
                                                 thrust::counting_iterator<difference_type>(0));
@@ -134,13 +134,13 @@ InputIterator find_if(thrust::execution_policy<DerivedPolicy> &exec,
 
 
 template<typename DerivedPolicy, typename InputIterator, typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 InputIterator find_if_not(thrust::execution_policy<DerivedPolicy> &exec,
                           InputIterator first,
                           InputIterator last,
                           Predicate pred)
 {
-  return thrust::find_if(exec, first, last, thrust::detail::not1(pred));
+  return thrust::find_if(exec, first, last, thrust::not_fn(pred));
 } // end find()
 
 

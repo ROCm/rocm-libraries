@@ -20,8 +20,9 @@
 
 #include <thrust/random/normal_distribution.h>
 #include <thrust/random/uniform_real_distribution.h>
-#include <thrust/detail/cstdint.h>
 #include <thrust/detail/integer_traits.h>
+
+#include <cstdint>
 
 // for floating point infinity
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
@@ -37,7 +38,7 @@ namespace random
 
 
 template<typename RealType>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   normal_distribution<RealType>
     ::normal_distribution(RealType a, RealType b)
       :super_t(),m_param(a,b)
@@ -46,7 +47,7 @@ template<typename RealType>
 
 
 template<typename RealType>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   normal_distribution<RealType>
     ::normal_distribution(const param_type &parm)
       :super_t(),m_param(parm)
@@ -55,7 +56,7 @@ template<typename RealType>
 
 
 template<typename RealType>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   void normal_distribution<RealType>
     ::reset(void)
 {
@@ -65,7 +66,7 @@ template<typename RealType>
 
 template<typename RealType>
   template<typename UniformRandomNumberGenerator>
-    __host__ __device__
+    THRUST_HOST_DEVICE
     typename normal_distribution<RealType>::result_type
       normal_distribution<RealType>
         ::operator()(UniformRandomNumberGenerator &urng)
@@ -76,7 +77,7 @@ template<typename RealType>
 
 template<typename RealType>
   template<typename UniformRandomNumberGenerator>
-    __host__ __device__
+    THRUST_HOST_DEVICE
     typename normal_distribution<RealType>::result_type
       normal_distribution<RealType>
         ::operator()(UniformRandomNumberGenerator &urng,
@@ -87,7 +88,7 @@ template<typename RealType>
 
 
 template<typename RealType>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   typename normal_distribution<RealType>::param_type
     normal_distribution<RealType>
       ::param(void) const
@@ -97,7 +98,7 @@ template<typename RealType>
 
 
 template<typename RealType>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   void normal_distribution<RealType>
     ::param(const param_type &parm)
 {
@@ -106,7 +107,7 @@ template<typename RealType>
 
 
 template<typename RealType>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   typename normal_distribution<RealType>::result_type
     normal_distribution<RealType>
       ::min THRUST_PREVENT_MACRO_SUBSTITUTION (void) const
@@ -116,7 +117,7 @@ template<typename RealType>
 
 
 template<typename RealType>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   typename normal_distribution<RealType>::result_type
     normal_distribution<RealType>
       ::max THRUST_PREVENT_MACRO_SUBSTITUTION (void) const
@@ -126,7 +127,7 @@ template<typename RealType>
   // complain that it is a __host__ function
   union
   {
-    thrust::detail::uint32_t inf_as_int;
+    std::uint32_t inf_as_int;
     float result;
   } hack;
 
@@ -137,7 +138,7 @@ template<typename RealType>
 
 
 template<typename RealType>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   typename normal_distribution<RealType>::result_type
     normal_distribution<RealType>
       ::mean(void) const
@@ -147,7 +148,7 @@ template<typename RealType>
 
 
 template<typename RealType>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   typename normal_distribution<RealType>::result_type
     normal_distribution<RealType>
       ::stddev(void) const
@@ -157,7 +158,7 @@ template<typename RealType>
 
 
 template<typename RealType>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   bool normal_distribution<RealType>
     ::equal(const normal_distribution &rhs) const
 {
@@ -171,8 +172,8 @@ template<typename RealType>
       normal_distribution<RealType>
         ::stream_out(std::basic_ostream<CharT,Traits> &os) const
 {
-  typedef std::basic_ostream<CharT,Traits> ostream_type;
-  typedef typename ostream_type::ios_base  ios_base;
+  using ostream_type = std::basic_ostream<CharT, Traits>;
+  using ios_base     = typename ostream_type::ios_base;
 
   // save old flags and fill character
   const typename ios_base::fmtflags flags = os.flags();
@@ -197,8 +198,8 @@ template<typename RealType>
       normal_distribution<RealType>
         ::stream_in(std::basic_istream<CharT,Traits> &is)
 {
-  typedef std::basic_istream<CharT,Traits> istream_type;
-  typedef typename istream_type::ios_base  ios_base;
+  using istream_type = std::basic_istream<CharT, Traits>;
+  using ios_base     = typename istream_type::ios_base;
 
   // save old flags
   const typename ios_base::fmtflags flags = is.flags();
@@ -214,7 +215,7 @@ template<typename RealType>
 
 
 template<typename RealType>
-__host__ __device__
+THRUST_HOST_DEVICE
 bool operator==(const normal_distribution<RealType> &lhs,
                 const normal_distribution<RealType> &rhs)
 {
@@ -223,7 +224,7 @@ bool operator==(const normal_distribution<RealType> &lhs,
 
 
 template<typename RealType>
-__host__ __device__
+THRUST_HOST_DEVICE
 bool operator!=(const normal_distribution<RealType> &lhs,
                 const normal_distribution<RealType> &rhs)
 {

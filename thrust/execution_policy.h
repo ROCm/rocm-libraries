@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -50,10 +50,9 @@ namespace detail
 {
 
 
-typedef thrust::system::__THRUST_HOST_SYSTEM_NAMESPACE::detail::par_t host_t;
+using host_t = thrust::system::__THRUST_HOST_SYSTEM_NAMESPACE::detail::par_t;
 
-
-typedef thrust::system::__THRUST_DEVICE_SYSTEM_NAMESPACE::detail::par_t device_t;
+using device_t = thrust::system::__THRUST_DEVICE_SYSTEM_NAMESPACE::detail::par_t;
 
 
 } // end detail
@@ -276,17 +275,16 @@ template<typename DerivedPolicy>
  *
  *  struct printf_functor
  *  {
- *    __host__ __device__
+ *    THRUST_HOST_DEVICE
  *    void operator()(int x)
  *    {
  *      printf("%d\n", x);
  *    }
  *  };
  *  ...
- *  int vec(3);
- *  vec[0] = 0; vec[1] = 1; vec[2] = 2;
+ *  int vec[] = { 0, 1, 2 };
  *
- *  thrust::for_each(thrust::host, vec.begin(), vec.end(), printf_functor());
+ *  thrust::for_each(thrust::host, vec, vec + 3, printf_functor());
  *
  *  // 0 1 2 is printed to standard output in some unspecified order
  *  \endcode
@@ -325,7 +323,7 @@ static const detail::host_t host;
  *
  *  struct printf_functor
  *  {
- *    __host__ __device__
+ *    THRUST_HOST_DEVICE
  *    void operator()(int x)
  *    {
  *      printf("%d\n", x);
@@ -365,7 +363,7 @@ THRUST_INLINE_CONSTANT detail::device_t device;
  *
  *  struct printf_functor
  *  {
- *    __host__ __device__
+ *    THRUST_HOST_DEVICE
  *    void operator()(int x)
  *    {
  *      printf("%d\n", x);

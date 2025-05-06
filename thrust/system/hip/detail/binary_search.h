@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019-2023, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2025, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -27,8 +27,9 @@
  ******************************************************************************/
 #pragma once
 
+#include <thrust/detail/config.h>
+
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
-#include <thrust/detail/cstdint.h>
 #include <thrust/detail/temporary_array.h>
 #include <thrust/binary_search.h>
 #include <thrust/distance.h>
@@ -36,6 +37,8 @@
 #include <thrust/system/hip/execution_policy.h>
 
 #include <rocprim/rocprim.hpp>
+
+#include <cstdint>
 
 THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
@@ -67,7 +70,7 @@ namespace __binary_search
         thrust::detail::wrapped_function<CompareOp, bool> wrapped_op(compare_op);
 
         // Determine temporary device storage requirements.
-        hip_rocprim::throw_on_error(rocprim::lower_bound(NULL,
+        hip_rocprim::throw_on_error(rocprim::lower_bound(nullptr,
                                                          storage_size,
                                                          haystack_begin,
                                                          needles_begin,
@@ -80,7 +83,7 @@ namespace __binary_search
                                     "lower_bound: failed on 1st call");
 
         // Allocate temporary storage.
-        thrust::detail::temporary_array<thrust::detail::uint8_t, Derived>
+        thrust::detail::temporary_array<std::uint8_t, Derived>
             tmp(policy, storage_size);
         void *ptr = static_cast<void*>(tmp.data().get());
 
@@ -129,7 +132,7 @@ namespace __binary_search
         thrust::detail::wrapped_function<CompareOp, bool> wrapped_op(compare_op);
 
         // Determine temporary device storage requirements.
-        hip_rocprim::throw_on_error(rocprim::upper_bound(NULL,
+        hip_rocprim::throw_on_error(rocprim::upper_bound(nullptr,
                                                          storage_size,
                                                          haystack_begin,
                                                          needles_begin,
@@ -142,7 +145,7 @@ namespace __binary_search
                                     "upper_bound: failed on 1st call");
 
         // Allocate temporary storage.
-        thrust::detail::temporary_array<thrust::detail::uint8_t, Derived>
+        thrust::detail::temporary_array<std::uint8_t, Derived>
             tmp(policy, storage_size);
         void *ptr = static_cast<void*>(tmp.data().get());
 
@@ -191,7 +194,7 @@ namespace __binary_search
         thrust::detail::wrapped_function<CompareOp, bool> wrapped_op(compare_op);
 
         // Determine temporary device storage requirements.
-        hip_rocprim::throw_on_error(rocprim::binary_search(NULL,
+        hip_rocprim::throw_on_error(rocprim::binary_search(nullptr,
                                                            storage_size,
                                                            haystack_begin,
                                                            needles_begin,
@@ -204,7 +207,7 @@ namespace __binary_search
                                     "binary_search: failed on 1st call");
 
         // Allocate temporary storage.
-        thrust::detail::temporary_array<thrust::detail::uint8_t, Derived>
+        thrust::detail::temporary_array<std::uint8_t, Derived>
             tmp(policy, storage_size);
         void *ptr = static_cast<void*>(tmp.data().get());
 
@@ -249,7 +252,7 @@ lower_bound(execution_policy<Derived>& policy,
     // struct workaround is required for HIP-clang
     struct workaround
     {
-        __host__ static OutputIt par(execution_policy<Derived>& policy,
+        THRUST_HOST static OutputIt par(execution_policy<Derived>& policy,
                                      HaystackIt                 first,
                                      HaystackIt                 last,
                                      NeedlesIt                  values_first,
@@ -261,7 +264,7 @@ lower_bound(execution_policy<Derived>& policy,
                 policy, first, last, values_first, values_last, result, compare_op);
         }
 
-        __device__ static OutputIt seq(execution_policy<Derived>& policy,
+        THRUST_DEVICE static OutputIt seq(execution_policy<Derived>& policy,
                                        HaystackIt                 first,
                                        HaystackIt                 last,
                                        NeedlesIt                  values_first,
@@ -316,7 +319,7 @@ upper_bound(execution_policy<Derived>& policy,
     // struct workaround is required for HIP-clang
     struct workaround
     {
-        __host__ static OutputIt par(execution_policy<Derived>& policy,
+        THRUST_HOST static OutputIt par(execution_policy<Derived>& policy,
                                      HaystackIt                 first,
                                      HaystackIt                 last,
                                      NeedlesIt                  values_first,
@@ -328,7 +331,7 @@ upper_bound(execution_policy<Derived>& policy,
                 policy, first, last, values_first, values_last, result, compare_op);
         }
 
-        __device__ static OutputIt seq(execution_policy<Derived>& policy,
+        THRUST_DEVICE static OutputIt seq(execution_policy<Derived>& policy,
                                        HaystackIt                 first,
                                        HaystackIt                 last,
                                        NeedlesIt                  values_first,
@@ -381,7 +384,7 @@ binary_search(execution_policy<Derived>& policy,
     // struct workaround is required for HIP-clang
     struct workaround
     {
-        __host__ static OutputIt par(execution_policy<Derived>& policy,
+        THRUST_HOST static OutputIt par(execution_policy<Derived>& policy,
                                      HaystackIt                 first,
                                      HaystackIt                 last,
                                      NeedlesIt                  values_first,
@@ -393,7 +396,7 @@ binary_search(execution_policy<Derived>& policy,
                 policy, first, last, values_first, values_last, result, compare_op);
         }
 
-        __device__ static OutputIt seq(execution_policy<Derived>& policy,
+        THRUST_DEVICE static OutputIt seq(execution_policy<Derived>& policy,
                                        HaystackIt                 first,
                                        HaystackIt                 last,
                                        NeedlesIt                  values_first,
@@ -454,7 +457,7 @@ HaystackIt lower_bound(execution_policy<Derived>& policy,
     // struct workaround is required for HIP-clang
     struct workaround
     {
-        __host__
+        THRUST_HOST
         static HaystackIt par(execution_policy<Derived>& policy,
                               HaystackIt                 first,
                               HaystackIt                 last,
@@ -465,7 +468,7 @@ HaystackIt lower_bound(execution_policy<Derived>& policy,
             results_type result(policy, 1);
 
             {
-                typedef typename thrust::iterator_system<const T*>::type value_in_system_t;
+                using value_in_system_t = typename thrust::iterator_system<const T*>::type;
                 value_in_system_t                                        value_in_system;
                 using thrust::system::detail::generic::select_system;
                 thrust::copy_n(
@@ -482,8 +485,7 @@ HaystackIt lower_bound(execution_policy<Derived>& policy,
 
             difference_type h_result;
             {
-                typedef
-                    typename thrust::iterator_system<difference_type*>::type result_out_system_t;
+                using result_out_system_t = typename thrust::iterator_system<difference_type*>::type;
                 result_out_system_t                                          result_out_system;
                 using thrust::system::detail::generic::select_system;
                 thrust::copy_n(
@@ -498,7 +500,7 @@ HaystackIt lower_bound(execution_policy<Derived>& policy,
             return first + h_result;
         }
 
-        __device__
+        THRUST_DEVICE
         static HaystackIt seq(execution_policy<Derived>& policy,
                             HaystackIt                 first,
                             HaystackIt                 last,
@@ -540,7 +542,7 @@ HaystackIt upper_bound(execution_policy<Derived>& policy,
     // struct workaround is required for HIP-clang
     struct workaround
     {
-        __host__
+        THRUST_HOST
         static HaystackIt par(execution_policy<Derived>& policy,
                               HaystackIt                 first,
                               HaystackIt                 last,
@@ -551,7 +553,7 @@ HaystackIt upper_bound(execution_policy<Derived>& policy,
           results_type result(policy, 1);
 
           {
-                typedef typename thrust::iterator_system<const T*>::type value_in_system_t;
+                using value_in_system_t = typename thrust::iterator_system<const T*>::type;
                 value_in_system_t                                        value_in_system;
                 using thrust::system::detail::generic::select_system;
                 thrust::copy_n(
@@ -569,8 +571,7 @@ HaystackIt upper_bound(execution_policy<Derived>& policy,
 
           difference_type h_result;
           {
-                typedef
-                    typename thrust::iterator_system<difference_type*>::type result_out_system_t;
+                using result_out_system_t = typename thrust::iterator_system<difference_type*>::type;
                 result_out_system_t                                          result_out_system;
                 using thrust::system::detail::generic::select_system;
                 thrust::copy_n(
@@ -585,7 +586,7 @@ HaystackIt upper_bound(execution_policy<Derived>& policy,
           return first + h_result;
         }
 
-        __device__
+        THRUST_DEVICE
         static HaystackIt seq(execution_policy<Derived>& policy,
                             HaystackIt                 first,
                             HaystackIt                 last,
@@ -625,7 +626,7 @@ bool binary_search(execution_policy<Derived>& policy,
     // struct workaround is required for HIP-clang
     struct workaround
     {
-        __host__
+        THRUST_HOST
         static bool par(execution_policy<Derived>& policy,
                               HaystackIt                 first,
                               HaystackIt                 last,
@@ -636,7 +637,7 @@ bool binary_search(execution_policy<Derived>& policy,
           results_type result(policy, 1);
 
           {
-                typedef typename thrust::iterator_system<const T*>::type value_in_system_t;
+                using value_in_system_t = typename thrust::iterator_system<const T*>::type;
                 value_in_system_t                                        value_in_system;
                 using thrust::system::detail::generic::select_system;
                 thrust::copy_n(
@@ -654,7 +655,7 @@ bool binary_search(execution_policy<Derived>& policy,
 
           int h_result;
           {
-                typedef typename thrust::iterator_system<int*>::type result_out_system_t;
+                using result_out_system_t = typename thrust::iterator_system<int*>::type;
                 result_out_system_t                                  result_out_system;
                 using thrust::system::detail::generic::select_system;
                 thrust::copy_n(
@@ -669,7 +670,7 @@ bool binary_search(execution_policy<Derived>& policy,
           return h_result != 0;
         }
 
-        __device__
+        THRUST_DEVICE
         static bool seq(execution_policy<Derived>& policy,
                             HaystackIt                 first,
                             HaystackIt                 last,

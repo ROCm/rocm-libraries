@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019-2023, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2025, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -27,6 +27,8 @@
  ******************************************************************************/
 #pragma once
 
+#include <thrust/detail/config.h>
+
 #include <thrust/version.h>
 
 #include <hip/hip_runtime.h>
@@ -49,7 +51,7 @@ namespace hip_rocprim
     template <>
     struct execution_policy<tag> : thrust::execution_policy<tag>
     {
-        typedef tag tag_type;
+        using tag_type = tag;
     };
 
     struct tag : execution_policy<tag>,
@@ -60,7 +62,7 @@ namespace hip_rocprim
     template <class Derived>
     struct execution_policy : thrust::execution_policy<Derived>
     {
-       typedef tag tag_type;
+       using tag_type = tag;
        operator tag() const { return tag(); }
     };
 

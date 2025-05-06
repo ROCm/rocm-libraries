@@ -24,19 +24,22 @@
 
 #include <thrust/detail/config.h>
 
-#ifndef DOXYGEN_SHOULD_SKIP_THIS // skip overloaded implementation
+/*! \cond
+ *  skip overloaded implementation
+ */
 
 // #include the device system's vector header
 #define __THRUST_DEVICE_SYSTEM_MEMORY_HEADER <__THRUST_DEVICE_SYSTEM_ROOT/memory.h>
 #include __THRUST_DEVICE_SYSTEM_MEMORY_HEADER
 #undef __THRUST_DEVICE_SYSTEM_MEMORY_HEADER
 
-#endif // DOXYGEN_SHOULD_SKIP_THIS
+/*! \endcond
+ */
 
 THRUST_NAMESPACE_BEGIN
 
 /** \addtogroup memory_resources Memory Resources
- *  \ingroup memory_management_classes
+ *  \ingroup memory_management
  *  \{
  */
 

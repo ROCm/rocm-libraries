@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -28,7 +28,7 @@
 #include <iterator>
 #include <list>
 
-TESTS_DEFINE(CopyTests, FullTestsParams)
+TESTS_DEFINE(CopyTests, FullWithLargeTypesTestsParams)
 TESTS_DEFINE(CopyIntegerTests, IntegerTestsParams)
 
 TEST(HipThrustCopy, HostToDevice)
@@ -220,11 +220,11 @@ TYPED_TEST(CopyTests, TestCopyMatchingTypes)
     thrust::device_vector<T>                    d(5, (T)10);
     typename thrust::device_vector<T>::iterator d_result
         = thrust::copy(v.begin(), v.end(), d.begin());
-    ASSERT_EQ(d[0], T(0));
-    ASSERT_EQ(d[1], T(1));
-    ASSERT_EQ(d[2], T(2));
-    ASSERT_EQ(d[3], T(3));
-    ASSERT_EQ(d[4], T(4));
+    ASSERT_EQ(T(0), d[0]);
+    ASSERT_EQ(T(1), d[1]);
+    ASSERT_EQ(T(2), d[2]);
+    ASSERT_EQ(T(3), d[3]);
+    ASSERT_EQ(T(4), d[4]);
     ASSERT_EQ_QUIET(d_result, d.end());
 }
 
@@ -309,11 +309,11 @@ TYPED_TEST(CopyTests, TestCopyListTo)
 
     typename Vector::iterator v_result = thrust::copy(l.begin(), l.end(), v.begin());
 
-    ASSERT_EQ(v[0], 0);
-    ASSERT_EQ(v[1], 1);
-    ASSERT_EQ(v[2], 2);
-    ASSERT_EQ(v[3], 3);
-    ASSERT_EQ(v[4], 4);
+    ASSERT_EQ(T(0), v[0]);
+    ASSERT_EQ(T(1), v[1]);
+    ASSERT_EQ(T(2), v[2]);
+    ASSERT_EQ(T(3), v[3]);
+    ASSERT_EQ(T(4), v[4]);
     ASSERT_EQ_QUIET(v_result, v.end());
 
     l.clear();
@@ -323,22 +323,22 @@ TYPED_TEST(CopyTests, TestCopyListTo)
     ASSERT_EQ(l.size(), 5);
 
     typename std::list<T>::const_iterator iter = l.begin();
-    ASSERT_EQ(*iter, 0);
+    ASSERT_EQ(T(0), *iter);
     iter++;
-    ASSERT_EQ(*iter, 1);
+    ASSERT_EQ(T(1), *iter);
     iter++;
-    ASSERT_EQ(*iter, 2);
+    ASSERT_EQ(T(2), *iter);
     iter++;
-    ASSERT_EQ(*iter, 3);
+    ASSERT_EQ(T(3), *iter);
     iter++;
-    ASSERT_EQ(*iter, 4);
+    ASSERT_EQ(T(4), *iter);
     iter++;
 }
 
 template <typename T>
 struct is_even
 {
-    __host__ __device__ bool operator()(T x)
+    __host__ __device__ bool operator()(T x) const
     {
         return (static_cast<unsigned int>(x) & 1) == 0;
     }
@@ -347,7 +347,7 @@ struct is_even
 template <typename T>
 struct is_true
 {
-    __host__ __device__ bool operator()(T x)
+    __host__ __device__ bool operator()(T x) const
     {
         return x ? true : false;
     }
@@ -356,7 +356,7 @@ struct is_true
 template <typename T>
 struct mod_3
 {
-    __host__ __device__ unsigned int operator()(T x)
+    __host__ __device__ unsigned int operator()(T x) const
     {
         return static_cast<unsigned int>(x) % 3;
     }
@@ -403,7 +403,7 @@ TYPED_TEST(CopyIntegerTests, TestCopyIf)
             SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> h_data = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
+                size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
             thrust::device_vector<T> d_data = h_data;
 
             typename thrust::host_vector<T>::iterator   h_new_end;
@@ -444,6 +444,66 @@ TYPED_TEST(CopyIntegerTests, TestCopyIf)
     }
 }
 
+TEST(CopyLargeTypesTests, TestCopyIfStencilLargeType)
+{
+    using T = large_data;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    for(auto size : get_sizes())
+    {
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+        thrust::host_vector<T> h_data(size);
+        thrust::sequence(h_data.begin(), h_data.end());
+        thrust::device_vector<T> d_data(size);
+        thrust::sequence(d_data.begin(), d_data.end());
+
+        for(auto seed : get_seeds())
+        {
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+
+            thrust::host_vector<T> h_stencil = get_random_data<int>(size, std::numeric_limits<int>::min(), std::numeric_limits<int>::max(), seed);;
+            thrust::device_vector<T> d_stencil = h_stencil;
+
+            typename thrust::host_vector<T>::iterator   h_new_end;
+            typename thrust::device_vector<T>::iterator d_new_end;
+
+            // test with Predicate that returns a bool
+            {
+                thrust::host_vector<T>   h_result(size);
+                thrust::device_vector<T> d_result(size);
+
+                h_new_end
+                   = thrust::copy_if(h_data.begin(), h_data.end(), h_stencil.begin(), h_result.begin(), is_even<T>());
+                d_new_end
+                    = thrust::copy_if(d_data.begin(), d_data.end(), d_stencil.begin(), d_result.begin(), is_even<T>());
+
+                h_result.resize(h_new_end - h_result.begin());
+                d_result.resize(d_new_end - d_result.begin());
+
+                ASSERT_EQ(h_result, d_result);
+            }
+
+            // test with Predicate that returns a non-bool
+            {
+                thrust::host_vector<T>   h_result(size);
+                thrust::device_vector<T> d_result(size);
+
+                h_new_end
+                    = thrust::copy_if(h_data.begin(), h_data.end(), h_stencil.begin(), h_result.begin(), mod_3<T>());
+                d_new_end
+                    = thrust::copy_if(d_data.begin(), d_data.end(), d_stencil.begin(), d_result.begin(), mod_3<T>());
+
+                h_result.resize(h_new_end - h_result.begin());
+                d_result.resize(d_new_end - d_result.begin());
+
+                ASSERT_EQ(h_result, d_result);
+            }
+        }
+    }
+}
+
 TYPED_TEST(CopyIntegerTests, TestCopyIfStencil)
 {
     using T = typename TestFixture::input_type;
@@ -464,10 +524,10 @@ TYPED_TEST(CopyIntegerTests, TestCopyIfStencil)
             SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> h_stencil = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
+                size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
             thrust::device_vector<T> d_stencil = get_random_data<T>(
-                size, std::numeric_limits<T>::min(),
-                std::numeric_limits<T>::max(),
+                size, get_default_limits<T>::min(),
+                get_default_limits<T>::max(),
                 seed + seed_value_addition
             );
 
@@ -526,10 +586,10 @@ TYPED_TEST(CopyTests, TestCopyCountingIterator)
 
     thrust::copy(Policy{}, iter, iter + 4, vec.begin());
 
-    ASSERT_EQ(vec[0], T(1));
-    ASSERT_EQ(vec[1], T(2));
-    ASSERT_EQ(vec[2], T(3));
-    ASSERT_EQ(vec[3], T(4));
+    ASSERT_EQ(T(1), vec[0]);
+    ASSERT_EQ(T(2), vec[1]);
+    ASSERT_EQ(T(3), vec[2]);
+    ASSERT_EQ(T(4), vec[3]);
 }
 
 TYPED_TEST(CopyTests, TestCopyZipIterator)
@@ -576,12 +636,12 @@ TYPED_TEST(CopyTests, TestCopyConstantIteratorToZipIterator)
                  thrust::make_constant_iterator(thrust::tuple<T, T>(4, 7)) + v1.size(),
                  thrust::make_zip_iterator(thrust::make_tuple(v1.begin(), v2.begin())));
 
-    ASSERT_EQ(v1[0], T(4));
-    ASSERT_EQ(v1[1], T(4));
-    ASSERT_EQ(v1[2], T(4));
-    ASSERT_EQ(v2[0], T(7));
-    ASSERT_EQ(v2[1], T(7));
-    ASSERT_EQ(v2[2], T(7));
+    ASSERT_EQ(T(4), v1[0]);
+    ASSERT_EQ(T(4), v1[1]);
+    ASSERT_EQ(T(4), v1[2]);
+    ASSERT_EQ(T(7), v2[0]);
+    ASSERT_EQ(T(7), v2[1]);
+    ASSERT_EQ(T(7), v2[2]);
 }
 
 template <typename InputIterator, typename OutputIterator>

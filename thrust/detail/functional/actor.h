@@ -50,32 +50,27 @@ using eval_ref = typename std::conditional<
 template<typename Action, typename Env>
   struct apply_actor
 {
-  typedef typename Action::template result<Env>::type type;
+  using type = typename Action::template result<Env>::type;
 };
 
 template<typename Eval>
   struct actor
     : Eval
 {
-  typedef Eval eval_type;
+  using eval_type = Eval;
 
-  __host__ __device__
-  constexpr actor();
+  constexpr actor() = default;
 
-  __host__ __device__
+  THRUST_HOST_DEVICE
   actor(const Eval &base);
 
-  __host__ __device__
-  typename apply_actor<eval_type, thrust::null_type >::type
-  operator()(void) const;
-
   template <typename... Ts>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   typename apply_actor<eval_type, thrust::tuple<eval_ref<Ts>...>>::type
   operator()(Ts&&... ts) const;
 
   template<typename T>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   typename assign_result<Eval,T>::type
   operator=(const T &_1) const;
 }; // end actor
@@ -84,9 +79,9 @@ template<typename Eval>
 template<typename T>
   struct as_actor
 {
-  typedef value<T> type;
+  using type = value<T>;
 
-  static inline __host__ __device__ type convert(const T &x)
+  static inline THRUST_HOST_DEVICE type convert(const T &x)
   {
     return val(x);
   } // end convert()
@@ -96,9 +91,9 @@ template<typename T>
 template<typename Eval>
   struct as_actor<actor<Eval> >
 {
-  typedef actor<Eval> type;
+  using type = actor<Eval>;
 
-  static inline __host__ __device__ const type &convert(const actor<Eval> &x)
+  static inline THRUST_HOST_DEVICE const type &convert(const actor<Eval> &x)
   {
     return x;
   } // end convert()
@@ -106,7 +101,7 @@ template<typename Eval>
 
 template<typename T>
   typename as_actor<T>::type
-  __host__ __device__
+  THRUST_HOST_DEVICE
     make_actor(const T &x)
 {
   return as_actor<T>::convert(x);
@@ -120,10 +115,8 @@ template<typename Eval>
     thrust::detail::functional::actor<Eval>()
   >
 {
-  typedef typename thrust::detail::functional::apply_actor<
-    thrust::detail::functional::actor<Eval>,
-    thrust::null_type
-  >::type type;
+  using type =
+    typename thrust::detail::functional::apply_actor<thrust::detail::functional::actor<Eval>, thrust::tuple<>>::type;
 }; // end result_of
 
 template<typename Eval, typename Arg1>
@@ -131,10 +124,8 @@ template<typename Eval, typename Arg1>
     thrust::detail::functional::actor<Eval>(Arg1)
   >
 {
-  typedef typename thrust::detail::functional::apply_actor<
-    thrust::detail::functional::actor<Eval>,
-    thrust::tuple<Arg1>
-  >::type type;
+  using type =
+    typename thrust::detail::functional::apply_actor<thrust::detail::functional::actor<Eval>, thrust::tuple<Arg1>>::type;
 }; // end result_of
 
 template<typename Eval, typename Arg1, typename Arg2>
@@ -142,10 +133,8 @@ template<typename Eval, typename Arg1, typename Arg2>
     thrust::detail::functional::actor<Eval>(Arg1,Arg2)
   >
 {
-  typedef typename thrust::detail::functional::apply_actor<
-    thrust::detail::functional::actor<Eval>,
-    thrust::tuple<Arg1,Arg2>
-  >::type type;
+  using type = typename thrust::detail::functional::apply_actor<thrust::detail::functional::actor<Eval>,
+                                                                thrust::tuple<Arg1, Arg2>>::type;
 }; // end result_of
 
 } // end detail

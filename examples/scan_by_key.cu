@@ -1,13 +1,15 @@
-#include <thrust/device_vector.h>
 #include <thrust/copy.h>
+#include <thrust/device_vector.h>
 #include <thrust/scan.h>
+
 #include <iostream>
 
+#include "include/host_device.h"
+
 // BinaryPredicate for the head flag segment representation
-// equivalent to thrust::not2(thrust::project2nd<int,int>()));
+// equivalent to thrust::not_fn(thrust::project2nd<int,int>()));
 template <typename HeadFlagType>
 struct head_flag_predicate
-    : public thrust::binary_function<HeadFlagType,HeadFlagType,bool>
 {
     __host__ __device__
     bool operator()(HeadFlagType, HeadFlagType right) const

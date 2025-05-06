@@ -1,12 +1,27 @@
+/*
+ *  Copyright 2008-2013 NVIDIA Corporation
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+
 #include <unittest/unittest.h>
 #include <thrust/detail/static_assert.h>
 #include <iterator>
 #include <vector>
-#if THRUST_CPP_DIALECT >= 2011
-  #include <array>
-  #include <unordered_map>
-  #include <unordered_set>
-#endif
+#include <array>
+#include <unordered_map>
+#include <unordered_set>
 #include <string>
 #if THRUST_CPP_DIALECT >= 2017
   #include <string_view>
@@ -43,7 +58,7 @@ THRUST_STATIC_ASSERT((!thrust::is_contiguous_iterator<
 >::value));
 
 template <typename T>
-__host__
+THRUST_HOST
 void test_is_contiguous_iterator()
 {
   THRUST_STATIC_ASSERT((thrust::is_contiguous_iterator<
@@ -66,11 +81,9 @@ void test_is_contiguous_iterator()
     typename std::vector<T>::reverse_iterator
   >::value));
 
-  #if THRUST_CPP_DIALECT >= 2011
   THRUST_STATIC_ASSERT((thrust::is_contiguous_iterator<
     typename std::array<T, 1>::iterator
   >::value));
-  #endif
 
   THRUST_STATIC_ASSERT((!thrust::is_contiguous_iterator<
     typename std::list<T>::iterator
@@ -96,7 +109,6 @@ void test_is_contiguous_iterator()
     typename std::multimap<T, T>::iterator
   >::value));
 
-  #if THRUST_CPP_DIALECT >= 2011
   THRUST_STATIC_ASSERT((!thrust::is_contiguous_iterator<
     typename std::unordered_set<T>::iterator
   >::value));
@@ -112,7 +124,6 @@ void test_is_contiguous_iterator()
   THRUST_STATIC_ASSERT((!thrust::is_contiguous_iterator<
     typename std::unordered_multimap<T, T>::iterator
   >::value));
-  #endif
 
   THRUST_STATIC_ASSERT((!thrust::is_contiguous_iterator<
     std::istream_iterator<T>
@@ -125,7 +136,7 @@ void test_is_contiguous_iterator()
 DECLARE_GENERIC_UNITTEST(test_is_contiguous_iterator);
 
 template <typename Vector>
-__host__
+THRUST_HOST
 void test_is_contiguous_iterator_vectors()
 {
   THRUST_STATIC_ASSERT((thrust::is_contiguous_iterator<
@@ -144,7 +155,7 @@ template <typename IteratorT,
 struct check_unwrapped_iterator
 {
   using unwrapped_t = typename std::remove_reference<
-    decltype(thrust::detail::try_unwrap_contiguous_iterator(
+    decltype(thrust::try_unwrap_contiguous_iterator(
       std::declval<IteratorT>()))>::type;
 
   static constexpr bool value =

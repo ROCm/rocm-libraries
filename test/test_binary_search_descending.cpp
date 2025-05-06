@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2018 NVIDIA Corporation
- *  Modifications Copyright© 2019-2020 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -67,7 +67,7 @@ TYPED_TEST(BinarySearchDescendingTests, TestScalarUpperBoundDescendingSimple)
     using Vector = typename TestFixture::input_type;
     using Policy = typename TestFixture::execution_policy;
 
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -105,7 +105,7 @@ TYPED_TEST(BinarySearchDescendingTests, TestScalarBinarySearchDescendingSimple)
 {
     using Vector = typename TestFixture::input_type;
     using Policy = typename TestFixture::execution_policy;
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -133,7 +133,7 @@ TYPED_TEST(BinarySearchDescendingTests, TestScalarEqualRangeDescendingSimple)
 {
     using Vector = typename TestFixture::input_type;
     using Policy = typename TestFixture::execution_policy;
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
     

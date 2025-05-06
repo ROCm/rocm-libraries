@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -24,11 +24,11 @@
 
 #include "test_header.hpp"
 
-typedef ::testing::Types<Params<unsigned short>,
-                         Params<unsigned int>,
-                         Params<unsigned long>,
-                         Params<unsigned long long>>
-    UnsignedIntegralTypesParams;
+using UnsignedIntegralTypesParams = ::testing::Types<
+    Params<unsigned short>,
+    Params<unsigned int>,
+    Params<unsigned long>,
+    Params<unsigned long long>>;
 
 TESTS_DEFINE(ZipIteratorReduceByKeyTests, UnsignedIntegralTypesParams);
 
@@ -57,17 +57,17 @@ TYPED_TEST(ZipIteratorReduceByKeyTests, TestZipIteratorReduceByKey)
             SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> h_data0 = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
+                size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
             thrust::host_vector<T> h_data1 = get_random_data<T>(
                 size,
-                std::numeric_limits<T>::min(),
-                std::numeric_limits<T>::max(),
+                get_default_limits<T>::min(),
+                get_default_limits<T>::max(),
                 seed + seed_value_addition
             );
             thrust::host_vector<T> h_data2 = get_random_data<T>(
                 size,
-                std::numeric_limits<T>::min(),
-                std::numeric_limits<T>::max(),
+                get_default_limits<T>::min(),
+                get_default_limits<T>::max(),
                 seed + 2 * seed_value_addition
             );
 
@@ -75,7 +75,7 @@ TYPED_TEST(ZipIteratorReduceByKeyTests, TestZipIteratorReduceByKey)
             thrust::device_vector<T> d_data1 = h_data1;
             thrust::device_vector<T> d_data2 = h_data2;
 
-            typedef thrust::tuple<T, T> Tuple;
+            using Tuple = thrust::tuple<T, T>;
 
             // integer key, tuple value
             {
@@ -150,6 +150,53 @@ TYPED_TEST(ZipIteratorReduceByKeyTests, TestZipIteratorReduceByKey)
                               thrust::make_zip_iterator(thrust::make_tuple(d_data5.begin(), d_data6.begin())),
                               thrust::equal_to<Tuple>(),
                               TuplePlus<Tuple>());
+
+                ASSERT_EQ(h_data3, d_data3);
+                ASSERT_EQ(h_data4, d_data4);
+                ASSERT_EQ(h_data5, d_data5);
+                ASSERT_EQ(h_data6, d_data6);
+            }
+
+            // const inputs
+            {
+                thrust::host_vector<float>   h_data3(size, 0.0f);
+                thrust::host_vector<T>       h_data4(size, 0);
+                thrust::host_vector<T>       h_data5(size, 0);
+                thrust::host_vector<float>   h_data6(size, 0.0f);
+                thrust::device_vector<float> d_data3(size, 0.0f);
+                thrust::device_vector<T>     d_data4(size, 0);
+                thrust::device_vector<T>     d_data5(size, 0);
+                thrust::device_vector<float> d_data6(size, 0.0f);
+
+                // run on host
+                const T*     h_begin1 = thrust::raw_pointer_cast(h_data1.data());
+                const T*     h_begin2 = thrust::raw_pointer_cast(h_data2.data());
+                const float* h_begin3 = thrust::raw_pointer_cast(h_data3.data());
+                T*           h_begin4 = thrust::raw_pointer_cast(h_data4.data());
+                T*           h_begin5 = thrust::raw_pointer_cast(h_data5.data());
+                float*       h_begin6 = thrust::raw_pointer_cast(h_data6.data());
+                thrust::reduce_by_key(
+                    thrust::host,
+                    thrust::make_zip_iterator(thrust::make_tuple(h_begin1, h_begin2)),
+                    thrust::make_zip_iterator(thrust::make_tuple(h_begin1, h_begin2)) + size,
+                    h_begin3,
+                    thrust::make_zip_iterator(thrust::make_tuple(h_begin4, h_begin5)),
+                    h_begin6);
+
+                // run on device
+                const T*     d_begin1 = thrust::raw_pointer_cast(d_data1.data());
+                const T*     d_begin2 = thrust::raw_pointer_cast(d_data2.data());
+                const float* d_begin3 = thrust::raw_pointer_cast(d_data3.data());
+                T*           d_begin4 = thrust::raw_pointer_cast(d_data4.data());
+                T*           d_begin5 = thrust::raw_pointer_cast(d_data5.data());
+                float*       d_begin6 = thrust::raw_pointer_cast(d_data6.data());
+                thrust::reduce_by_key(
+                    thrust::device,
+                    thrust::make_zip_iterator(thrust::make_tuple(d_begin1, d_begin2)),
+                    thrust::make_zip_iterator(thrust::make_tuple(d_begin1, d_begin2)) + size,
+                    d_begin3,
+                    thrust::make_zip_iterator(thrust::make_tuple(d_begin4, d_begin5)),
+                    d_begin6);
 
                 ASSERT_EQ(h_data3, d_data3);
                 ASSERT_EQ(h_data4, d_data4);

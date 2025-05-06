@@ -108,9 +108,9 @@ template<typename InputIterator1,
                          OutputIterator result,
                          Predicate pred)
 {
-  typedef typename thrust::iterator_difference<InputIterator1>::type Size; 
-  typedef typename copy_if_detail::body<InputIterator1,InputIterator2,OutputIterator,Predicate,Size> Body;
-  
+  using Size = typename thrust::iterator_difference<InputIterator1>::type;
+  using Body = typename copy_if_detail::body<InputIterator1, InputIterator2, OutputIterator, Predicate, Size>;
+
   Size n = thrust::distance(first, last);
 
   if (n != 0)

@@ -1,6 +1,6 @@
  /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- *  Modifications Copyright© 2019-2023 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -28,9 +28,10 @@
 
 #pragma once
 
+#include <thrust/detail/config.h>
+
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 
-#include <thrust/detail/cstdint.h>
 #include <thrust/detail/temporary_array.h>
 #include <thrust/detail/minmax.h>
 #include <thrust/detail/mpl/math.h>
@@ -40,8 +41,11 @@
 #include <thrust/pair.h>
 #include <thrust/system/hip/config.h>
 #include <thrust/system/hip/detail/get_value.h>
+#include <thrust/system/hip/detail/general/temp_storage.h>
 #include <thrust/system/hip/detail/par_to_seq.h>
 #include <thrust/system/hip/detail/util.h>
+
+#include <cstdint>
 
 // rocPRIM includes
 #include <rocprim/rocprim.hpp>
@@ -49,7 +53,7 @@
 THRUST_NAMESPACE_BEGIN
 
 template <typename DerivedPolicy, typename ForwardIterator1, typename ForwardIterator2>
-thrust::pair<ForwardIterator1, ForwardIterator2> __host__ __device__
+thrust::pair<ForwardIterator1, ForwardIterator2> THRUST_HOST_DEVICE
 unique_by_key(const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
               ForwardIterator1                                            keys_first,
               ForwardIterator1                                            keys_last,
@@ -59,7 +63,7 @@ template <typename DerivedPolicy,
           typename InputIterator2,
           typename OutputIterator1,
           typename OutputIterator2>
- __host__ __device__ thrust::pair<OutputIterator1, OutputIterator2>
+ THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2>
 unique_by_key_copy(const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
                    InputIterator1                                              keys_first,
                    InputIterator1                                              keys_last,
@@ -71,25 +75,6 @@ namespace hip_rocprim
 {
 namespace __unique_by_key
 {
-
-    template <class KeyType, class ValueType, class Predicate>
-    struct predicate_wrapper
-    {
-        Predicate                                  predicate;
-        typedef rocprim::tuple<KeyType, ValueType> pair_type;
-
-        THRUST_HIP_FUNCTION
-        predicate_wrapper(Predicate p)
-            : predicate(p)
-        {
-        }
-
-        bool THRUST_HIP_DEVICE_FUNCTION operator()(pair_type const& lhs,
-                                                   pair_type const& rhs) const
-        {
-            return predicate(rocprim::get<0>(lhs), rocprim::get<0>(rhs));
-        }
-    }; // struct predicate_wrapper
 
     template <typename Derived,
               typename KeyInputIt,
@@ -107,12 +92,8 @@ namespace __unique_by_key
                   ValOutputIt                values_result,
                   BinaryPred                 binary_pred)
     {
-        typedef size_t size_type;
-
-        typedef typename iterator_traits<KeyInputIt>::value_type KeyType;
-        typedef typename iterator_traits<ValInputIt>::value_type ValueType;
-
-        predicate_wrapper<KeyType, ValueType, BinaryPred> wrapped_binary_pred(binary_pred);
+        using namespace thrust::system::hip_rocprim::temp_storage;
+        using size_type = size_t;
 
         size_type   num_items = static_cast<size_type>(thrust::distance(keys_first, keys_last));
         size_t      temp_storage_bytes = 0;
@@ -123,39 +104,49 @@ namespace __unique_by_key
             return thrust::make_pair(keys_result, values_result);
 
         // Determine temporary device storage requirements.
-        hip_rocprim::throw_on_error(
-            rocprim::unique(
-                NULL,
-                temp_storage_bytes,
-                rocprim::make_zip_iterator(rocprim::make_tuple(keys_first, values_first)),
-                rocprim::make_zip_iterator(rocprim::make_tuple(keys_result, values_result)),
-                reinterpret_cast<size_type*>(NULL),
-                num_items,
-                wrapped_binary_pred,
-                stream,
-                debug_sync),
-            "unique_by_key failed on 1st step");
+        hip_rocprim::throw_on_error(rocprim::unique_by_key(nullptr,
+                                                           temp_storage_bytes,
+                                                           keys_first,
+                                                           values_first,
+                                                           keys_result,
+                                                           values_result,
+                                                           static_cast<size_type*>(nullptr),
+                                                           num_items,
+                                                           binary_pred,
+                                                           stream,
+                                                           debug_sync),
+                                    "unique_by_key failed on 1st step");
+
+        size_t     storage_size;
+        void*      ptr       = nullptr;
+        void*      temp_stor = nullptr;
+        size_type* d_num_selected_out;
+
+        auto l_part = make_linear_partition(make_partition(&temp_stor, temp_storage_bytes),
+                                            ptr_aligned_array(&d_num_selected_out, 1));
+
+        // Calculate storage_size including alignment
+        hip_rocprim::throw_on_error(partition(ptr, storage_size, l_part));
 
         // Allocate temporary storage.
-        thrust::detail::temporary_array<thrust::detail::uint8_t, Derived>
-            tmp(policy, temp_storage_bytes + sizeof(size_type));
-        void *ptr = static_cast<void*>(tmp.data().get());
+        thrust::detail::temporary_array<std::uint8_t, Derived> tmp(policy, storage_size);
+        ptr = static_cast<void*>(tmp.data().get());
 
-        size_type* d_num_selected_out = reinterpret_cast<size_type*>(
-            reinterpret_cast<char*>(ptr) + temp_storage_bytes);
+        // Create pointers with alignment
+        hip_rocprim::throw_on_error(partition(ptr, storage_size, l_part));
 
-        hip_rocprim::throw_on_error(
-            rocprim::unique(
-                ptr,
-                temp_storage_bytes,
-                rocprim::make_zip_iterator(rocprim::make_tuple(keys_first, values_first)),
-                rocprim::make_zip_iterator(rocprim::make_tuple(keys_result, values_result)),
-                d_num_selected_out,
-                num_items,
-                wrapped_binary_pred,
-                stream,
-                debug_sync),
-            "unique_by_key failed on 2nd step");
+        hip_rocprim::throw_on_error(rocprim::unique_by_key(ptr,
+                                                           temp_storage_bytes,
+                                                           keys_first,
+                                                           values_first,
+                                                           keys_result,
+                                                           values_result,
+                                                           d_num_selected_out,
+                                                           num_items,
+                                                           binary_pred,
+                                                           stream,
+                                                           debug_sync),
+                                    "unique_by_key failed on 2nd step");
 
         size_type num_selected = get_value(policy, d_num_selected_out);
 
@@ -167,7 +158,7 @@ namespace __unique_by_key
 // Thrust API entry points
 //-------------------------
 
-__thrust_exec_check_disable__ template <class Derived,
+THRUST_EXEC_CHECK_DISABLE template <class Derived,
                                         class KeyInputIt,
                                         class ValInputIt,
                                         class KeyOutputIt,
@@ -185,7 +176,7 @@ pair<KeyOutputIt, ValOutputIt>
     // struct workaround is required for HIP-clang
     struct workaround
     {
-        __host__
+        THRUST_HOST
         static pair<KeyOutputIt, ValOutputIt> par(execution_policy<Derived>& policy,
                                                   KeyInputIt                 keys_first,
                                                   KeyInputIt                 keys_last,
@@ -202,7 +193,7 @@ pair<KeyOutputIt, ValOutputIt>
                                                   values_result,
                                                   binary_pred);
         }
-        __device__
+        THRUST_DEVICE
         static pair<KeyOutputIt, ValOutputIt> seq(execution_policy<Derived>& policy,
                                                   KeyInputIt                 keys_first,
                                                   KeyInputIt                 keys_last,
@@ -242,7 +233,7 @@ unique_by_key_copy(execution_policy<Derived>& policy,
                    KeyOutputIt                keys_result,
                    ValOutputIt                values_result)
 {
-    typedef typename iterator_traits<KeyInputIt>::value_type key_type;
+    using key_type = typename iterator_traits<KeyInputIt>::value_type;
     return hip_rocprim::unique_by_key_copy(policy,
                                            keys_first,
                                            keys_last,
@@ -263,7 +254,7 @@ unique_by_key(execution_policy<Derived>& policy,
     // struct workaround is required for HIP-clang
     struct workaround
     {
-        __host__ static pair<KeyInputIt, ValInputIt> par(execution_policy<Derived>& policy,
+        THRUST_HOST static pair<KeyInputIt, ValInputIt> par(execution_policy<Derived>& policy,
                                                          KeyInputIt                 keys_first,
                                                          KeyInputIt                 keys_last,
                                                          ValInputIt                 values_first,
@@ -272,7 +263,7 @@ unique_by_key(execution_policy<Derived>& policy,
             return hip_rocprim::unique_by_key_copy(
                 policy, keys_first, keys_last, values_first, keys_first, values_first, binary_pred);
         }
-        __device__ static pair<KeyInputIt, ValInputIt> seq(execution_policy<Derived>& policy,
+        THRUST_DEVICE static pair<KeyInputIt, ValInputIt> seq(execution_policy<Derived>& policy,
                                                            KeyInputIt                 keys_first,
                                                            KeyInputIt                 keys_last,
                                                            ValInputIt                 values_first,
@@ -296,7 +287,7 @@ unique_by_key(execution_policy<Derived>& policy,
               KeyInputIt                 keys_last,
               ValInputIt                 values_first)
 {
-    typedef typename iterator_traits<KeyInputIt>::value_type key_type;
+    using key_type = typename iterator_traits<KeyInputIt>::value_type;
     return hip_rocprim::unique_by_key(
         policy, keys_first, keys_last, values_first, equal_to<key_type>()
     );

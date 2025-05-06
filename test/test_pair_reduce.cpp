@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -56,16 +56,11 @@ TYPED_TEST(PairReduceTests, TestPairReduce)
         {
             SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
-            thrust::host_vector<T> h_p1 = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
-            ;
+            thrust::host_vector<T> h_p1 =
+              get_random_data<T>(size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
 
             thrust::host_vector<T> h_p2 = get_random_data<T>(
-                size,
-                std::numeric_limits<T>::min(),
-                std::numeric_limits<T>::max(),
-                seed + seed_value_addition);
-            ;
+              size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed + seed_value_addition);
 
             thrust::host_vector<P> h_pairs(size);
 
@@ -85,7 +80,8 @@ TYPED_TEST(PairReduceTests, TestPairReduce)
             // reduce on the device
             P d_result = thrust::reduce(d_pairs.begin(), d_pairs.end(), init, add_pairs());
 
-            ASSERT_EQ_QUIET(h_result, d_result);
+            test_equality(h_result.first, d_result.first);
+            test_equality(h_result.second, d_result.second);
         }
     }
 }

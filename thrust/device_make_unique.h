@@ -22,9 +22,7 @@
 #pragma once
 
 #include <thrust/detail/config.h>
-#include <thrust/detail/cpp11_required.h>
 
-#if THRUST_CPP_DIALECT >= 2011
 
 #include <thrust/allocate_unique.h>
 #include <thrust/device_new.h>
@@ -36,12 +34,13 @@ THRUST_NAMESPACE_BEGIN
 
 ///////////////////////////////////////////////////////////////////////////////
 
+/*! \brief A factory function for creating `unique_ptr`s to a newly allocated object in device
+ *         memory.
+ */
 template <typename T, typename... Args>
-__host__
+THRUST_HOST
 auto device_make_unique(Args&&... args)
-  THRUST_TRAILING_RETURN(decltype(
-    uninitialized_allocate_unique<T>(device_allocator<T>{})
-  ))
+  -> decltype(uninitialized_allocate_unique<T>(device_allocator<T>{}))
 {
 #if !defined(THRUST_DOXYGEN) // This causes Doxygen to choke for some reason.
   // FIXME: This is crude - we construct an unnecessary T on the host for
@@ -57,4 +56,3 @@ auto device_make_unique(Args&&... args)
 
 THRUST_NAMESPACE_END
 
-#endif // THRUST_CPP_DIALECT >= 2011

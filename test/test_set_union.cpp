@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -217,7 +217,7 @@ TYPED_TEST(SetUnionPrimitiveTests, TestSetUnionToDiscardIterator)
             SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> temp = get_random_data<T>(
-                2 * size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
+                2 * size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
 
             thrust::host_vector<T> h_a(temp.begin(), temp.begin() + size);
             thrust::host_vector<T> h_b(temp.begin() + size, temp.end());

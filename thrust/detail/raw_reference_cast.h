@@ -21,7 +21,6 @@
 #include <thrust/detail/type_traits/has_nested_type.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/detail/tuple_transform.h>
-#include <thrust/iterator/detail/tuple_of_iterator_references.h>
 
 
 // the order of declarations and definitions in this file is totally goofy
@@ -33,6 +32,8 @@ THRUST_NAMESPACE_BEGIN
 namespace detail
 {
 
+template<typename... Ts>
+class tuple_of_iterator_references;
 
 __THRUST_DEFINE_HAS_NESTED_TYPE(is_wrapped_reference, wrapped_reference_hint)
 
@@ -100,9 +101,7 @@ template<typename T>
     >::type
   >
 {
-  typedef typename add_reference<
-    typename pointer_element<typename T::pointer>::type
-  >::type type;
+  using type = typename add_reference<typename pointer_element<typename T::pointer>::type>::type;
 };
 
 
@@ -152,9 +151,7 @@ template <
     thrust::tuple<Ts...>
   >
 {
-  typedef thrust::tuple<
-    typename raw_reference_tuple_helper<Ts>::type...
-  > type;
+  using type = thrust::tuple<typename raw_reference_tuple_helper<Ts>::type...>;
 };
 
 
@@ -165,9 +162,7 @@ template <
     thrust::detail::tuple_of_iterator_references<Ts...>
   >
 {
-  typedef thrust::detail::tuple_of_iterator_references<
-    typename raw_reference_tuple_helper<Ts>::type...
-  > type;
+  using type = thrust::detail::tuple_of_iterator_references<typename raw_reference_tuple_helper<Ts>::type...>;
 };
 
 
@@ -187,37 +182,25 @@ template <
     thrust::tuple<Ts...>
   >
 {
-  private:
-    typedef thrust::tuple<Ts...> tuple_type;
+private:
+  using tuple_type = thrust::tuple<Ts...>;
 
-  public:
-    typedef typename eval_if<
-      is_unwrappable<tuple_type>::value,
-      raw_reference_detail::raw_reference_tuple_helper<tuple_type>,
-      add_reference<tuple_type>
-    >::type type;
+public:
+  using type = typename eval_if<
+                        is_unwrappable<tuple_type>::value,
+                        raw_reference_detail::raw_reference_tuple_helper<tuple_type>,
+                        add_reference<tuple_type>
+                        >::type;
 };
 
-
-template <
-  typename... Ts
->
-  struct raw_reference<
-    thrust::detail::tuple_of_iterator_references<Ts...>
-  >
+template <typename... Ts>
+struct raw_reference<thrust::detail::tuple_of_iterator_references<Ts...>>
 {
-  private:
-    typedef detail::tuple_of_iterator_references<Ts...> tuple_type;
+private:
+  using tuple_type = detail::tuple_of_iterator_references<Ts...>;
 
-  public:
-    typedef typename raw_reference_detail::raw_reference_tuple_helper<tuple_type>::type type;
-
-    // XXX figure out why is_unwrappable seems to be broken for tuple_of_iterator_references
-    //typedef typename eval_if<
-    //  is_unwrappable<tuple_type>::value,
-    //  raw_reference_detail::raw_reference_tuple_helper<tuple_type>,
-    //  add_reference<tuple_type>
-    //>::type type;
+public:
+  using type = typename raw_reference_detail::raw_reference_tuple_helper<tuple_type>::type;
 };
 
 
@@ -226,13 +209,13 @@ template <
 
 // provide declarations of raw_reference_cast's overloads for raw_reference_caster below
 template<typename T>
-__host__ __device__
+THRUST_HOST_DEVICE
 typename detail::raw_reference<T>::type
   raw_reference_cast(T &ref);
 
 
 template<typename T>
-__host__ __device__
+THRUST_HOST_DEVICE
 typename detail::raw_reference<const T>::type
   raw_reference_cast(const T &ref);
 
@@ -240,7 +223,7 @@ typename detail::raw_reference<const T>::type
 template<
   typename... Ts
 >
-__host__ __device__
+THRUST_HOST_DEVICE
 typename detail::enable_if_unwrappable<
   thrust::detail::tuple_of_iterator_references<Ts...>,
   typename detail::raw_reference<
@@ -257,14 +240,14 @@ namespace detail
 struct raw_reference_caster
 {
   template<typename T>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   typename detail::raw_reference<T>::type operator()(T &ref)
   {
     return thrust::raw_reference_cast(ref);
   }
 
   template<typename T>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   typename detail::raw_reference<const T>::type operator()(const T &ref)
   {
     return thrust::raw_reference_cast(ref);
@@ -273,7 +256,7 @@ struct raw_reference_caster
   template<
     typename... Ts
   >
-  __host__ __device__
+  THRUST_HOST_DEVICE
   typename detail::raw_reference<
     thrust::detail::tuple_of_iterator_references<Ts...>
   >::type
@@ -291,7 +274,7 @@ struct raw_reference_caster
 
 
 template<typename T>
-__host__ __device__
+THRUST_HOST_DEVICE
 typename detail::raw_reference<T>::type
   raw_reference_cast(T &ref)
 {
@@ -300,7 +283,7 @@ typename detail::raw_reference<T>::type
 
 
 template<typename T>
-__host__ __device__
+THRUST_HOST_DEVICE
 typename detail::raw_reference<const T>::type
   raw_reference_cast(const T &ref)
 {
@@ -311,7 +294,7 @@ typename detail::raw_reference<const T>::type
 template<
   typename... Ts
 >
-__host__ __device__
+THRUST_HOST_DEVICE
 typename detail::enable_if_unwrappable<
   thrust::detail::tuple_of_iterator_references<Ts...>,
   typename detail::raw_reference<

@@ -40,12 +40,12 @@ namespace generic
 
 template<typename DerivedPolicy,
          typename ForwardIterator>
-__host__ __device__
+THRUST_HOST_DEVICE
   ForwardIterator unique(thrust::execution_policy<DerivedPolicy> &exec,
                          ForwardIterator first,
                          ForwardIterator last)
 {
-  typedef typename thrust::iterator_traits<ForwardIterator>::value_type InputType;
+  using InputType = typename thrust::iterator_traits<ForwardIterator>::value_type;
 
   return thrust::unique(exec, first, last, thrust::equal_to<InputType>());
 } // end unique()
@@ -54,13 +54,13 @@ __host__ __device__
 template<typename DerivedPolicy,
          typename ForwardIterator,
          typename BinaryPredicate>
-__host__ __device__
+THRUST_HOST_DEVICE
   ForwardIterator unique(thrust::execution_policy<DerivedPolicy> &exec,
                          ForwardIterator first,
                          ForwardIterator last,
                          BinaryPredicate binary_pred)
 {
-  typedef typename thrust::iterator_traits<ForwardIterator>::value_type InputType;
+  using InputType = typename thrust::iterator_traits<ForwardIterator>::value_type;
 
   thrust::detail::temporary_array<InputType,DerivedPolicy> input(exec, first, last);
 
@@ -71,13 +71,13 @@ __host__ __device__
 template<typename DerivedPolicy,
          typename InputIterator,
          typename OutputIterator>
-__host__ __device__
+THRUST_HOST_DEVICE
   OutputIterator unique_copy(thrust::execution_policy<DerivedPolicy> &exec,
                              InputIterator first,
                              InputIterator last,
                              OutputIterator output)
 {
-  typedef typename thrust::iterator_value<InputIterator>::type value_type;
+  using value_type = typename thrust::iterator_value<InputIterator>::type;
   return thrust::unique_copy(exec, first,last,output,thrust::equal_to<value_type>());
 } // end unique_copy()
 
@@ -86,7 +86,7 @@ template<typename DerivedPolicy,
          typename InputIterator,
          typename OutputIterator,
          typename BinaryPredicate>
-__host__ __device__
+THRUST_HOST_DEVICE
   OutputIterator unique_copy(thrust::execution_policy<DerivedPolicy> &exec,
                              InputIterator first,
                              InputIterator last,
@@ -104,7 +104,7 @@ __host__ __device__
 template<typename DerivedPolicy,
          typename ForwardIterator,
          typename BinaryPredicate>
-__host__ __device__
+THRUST_HOST_DEVICE
   typename thrust::iterator_traits<ForwardIterator>::difference_type
     unique_count(thrust::execution_policy<DerivedPolicy> &exec,
                  ForwardIterator first,
@@ -121,13 +121,13 @@ __host__ __device__
 
 template<typename DerivedPolicy,
          typename ForwardIterator>
-__host__ __device__
+THRUST_HOST_DEVICE
   typename thrust::iterator_traits<ForwardIterator>::difference_type
     unique_count(thrust::execution_policy<DerivedPolicy> &exec,
                  ForwardIterator first,
                  ForwardIterator last)
 {
-  typedef typename thrust::iterator_value<ForwardIterator>::type value_type;
+  using value_type = typename thrust::iterator_value<ForwardIterator>::type;
   return thrust::unique_count(exec, first, last, thrust::equal_to<value_type>());
 } // end unique_copy()
 

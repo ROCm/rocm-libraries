@@ -1,8 +1,26 @@
+/*
+ *  Copyright 2008-2013 NVIDIA Corporation
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+
 #include <unittest/unittest.h>
 #include <thrust/set_operations.h>
 #include <thrust/execution_policy.h>
 
 
+#ifdef THRUST_TEST_DEVICE_SIDE
 template<typename ExecutionPolicy, typename Iterator1, typename Iterator2, typename Iterator3, typename Iterator4, typename Iterator5, typename Iterator6>
 __global__
 void set_intersection_by_key_kernel(ExecutionPolicy exec,
@@ -20,8 +38,8 @@ void set_intersection_by_key_kernel(ExecutionPolicy exec,
 template<typename ExecutionPolicy>
 void TestSetIntersectionByKeyDevice(ExecutionPolicy exec)
 {
-  typedef thrust::device_vector<int> Vector;
-  typedef typename Vector::iterator Iterator;
+  using Vector   = thrust::device_vector<int>;
+  using Iterator = typename Vector::iterator;
 
   Vector a_key(3), b_key(4);
   Vector a_val(3);
@@ -37,7 +55,7 @@ void TestSetIntersectionByKeyDevice(ExecutionPolicy exec)
 
   Vector result_key(2), result_val(2);
 
-  typedef thrust::pair<Iterator,Iterator> iter_pair;
+  using iter_pair = thrust::pair<Iterator, Iterator>;
   thrust::device_vector<iter_pair> end_vec(1);
 
   set_intersection_by_key_kernel<<<1,1>>>(exec,
@@ -78,13 +96,14 @@ void TestSetIntersectionByKeyDeviceNoSync()
   TestSetIntersectionByKeyDevice(thrust::cuda::par_nosync);
 }
 DECLARE_UNITTEST(TestSetIntersectionByKeyDeviceNoSync);
+#endif
 
 
 template<typename ExecutionPolicy>
 void TestSetIntersectionByKeyCudaStreams(ExecutionPolicy policy)
 {
-  typedef thrust::device_vector<int> Vector;
-  typedef Vector::iterator Iterator;
+  using Vector   = thrust::device_vector<int>;
+  using Iterator = Vector::iterator;
 
   Vector a_key(3), b_key(4);
   Vector a_val(3);

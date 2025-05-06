@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -47,18 +47,18 @@ TYPED_TEST(ZipIteratorScanVariablesTests, TestZipIteratorScan)
             SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> h_data0 = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
+                size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
             thrust::host_vector<T> h_data1 = get_random_data<T>(
                 size,
-                std::numeric_limits<T>::min(),
-                std::numeric_limits<T>::max(),
+                get_default_limits<T>::min(),
+                get_default_limits<T>::max(),
                 seed + seed_value_addition
             );
 
             thrust::device_vector<T> d_data0 = h_data0;
             thrust::device_vector<T> d_data1 = h_data1;
 
-            typedef thrust::tuple<T, T> Tuple;
+            using Tuple = thrust::tuple<T, T>;
 
             thrust::host_vector<Tuple>   h_result(size);
             thrust::device_vector<Tuple> d_result(size);
@@ -74,7 +74,12 @@ TYPED_TEST(ZipIteratorScanVariablesTests, TestZipIteratorScan)
                 thrust::make_zip_iterator(thrust::make_tuple(d_data0.end(), d_data1.end())),
                 d_result.begin(),
                 TuplePlus<Tuple>());
-            ASSERT_EQ_QUIET(h_result, d_result);
+            thrust::host_vector<Tuple> h_result_d(d_result);
+            for(size_t i = 0; i < h_result.size(); i++)
+            {
+                test_equality(thrust::get<0>(h_result[i]), thrust::get<0>(h_result_d[i]));
+                test_equality(thrust::get<1>(h_result[i]), thrust::get<1>(h_result_d[i]));
+            }
 
             // exclusive_scan (tuple output)
             thrust::exclusive_scan(
@@ -89,7 +94,12 @@ TYPED_TEST(ZipIteratorScanVariablesTests, TestZipIteratorScan)
                 d_result.begin(),
                 thrust::make_tuple<T, T>(0, 0),
                 TuplePlus<Tuple>());
-            ASSERT_EQ_QUIET(h_result, d_result);
+            h_result_d = d_result;
+            for(size_t i = 0; i < h_result.size(); i++)
+            {
+                test_equality(thrust::get<0>(h_result[i]), thrust::get<0>(h_result_d[i]));
+                test_equality(thrust::get<1>(h_result[i]), thrust::get<1>(h_result_d[i]));
+            }
 
             thrust::host_vector<T>   h_result0(size);
             thrust::host_vector<T>   h_result1(size);
@@ -107,8 +117,8 @@ TYPED_TEST(ZipIteratorScanVariablesTests, TestZipIteratorScan)
                 thrust::make_zip_iterator(thrust::make_tuple(d_data0.end(), d_data1.end())),
                 thrust::make_zip_iterator(thrust::make_tuple(d_result0.begin(), d_result1.begin())),
                 TuplePlus<Tuple>());
-            ASSERT_EQ_QUIET(h_result0, d_result0);
-            ASSERT_EQ_QUIET(h_result1, d_result1);
+            test_equality(h_result0, d_result0);
+            test_equality(h_result1, d_result1);
 
             // exclusive_scan (zip_iterator output)
             thrust::exclusive_scan(
@@ -123,8 +133,8 @@ TYPED_TEST(ZipIteratorScanVariablesTests, TestZipIteratorScan)
                 thrust::make_zip_iterator(thrust::make_tuple(d_result0.begin(), d_result1.begin())),
                 thrust::make_tuple<T, T>(0, 0),
                 TuplePlus<Tuple>());
-            ASSERT_EQ_QUIET(h_result0, d_result0);
-            ASSERT_EQ_QUIET(h_result1, d_result1);
+            test_equality(h_result0, d_result0);
+            test_equality(h_result1, d_result1);
         }
     }
 }

@@ -45,21 +45,20 @@ template<typename RandomAccessIterator1,
          typename Reference>
 struct join_iterator_base
 {
-  typedef typename thrust::detail::remove_reference<Reference>::type value_type;
+  using value_type = ::cuda::std::__libcpp_remove_reference_t<Reference>;
 
-  typedef typename thrust::iterator_system<RandomAccessIterator1>::type  system1;
-  typedef typename thrust::iterator_system<RandomAccessIterator2>::type  system2;
-  typedef typename thrust::detail::minimum_system<system1,system2>::type system;
+  using system1 = typename thrust::iterator_system<RandomAccessIterator1>::type;
+  using system2 = typename thrust::iterator_system<RandomAccessIterator2>::type;
+  using system  = typename thrust::detail::minimum_system<system1, system2>::type;
 
-  typedef thrust::iterator_adaptor<
-    join_iterator<RandomAccessIterator1,RandomAccessIterator2,Difference,Reference>,
-    thrust::counting_iterator<Difference>,
-    value_type,
-    system,
-    thrust::random_access_traversal_tag,
-    Reference,
-    Difference
-  > type;
+  using type =
+    thrust::iterator_adaptor<join_iterator<RandomAccessIterator1, RandomAccessIterator2, Difference, Reference>,
+                             thrust::counting_iterator<Difference>,
+                             value_type,
+                             system,
+                             thrust::random_access_traversal_tag,
+                             Reference,
+                             Difference>;
 }; // end join_iterator_base
 
 
@@ -74,11 +73,11 @@ class join_iterator
   : public join_iterator_detail::join_iterator_base<RandomAccessIterator1, RandomAccessIterator2, Difference, Reference>::type
 {
   private:
-    typedef typename join_iterator_detail::join_iterator_base<RandomAccessIterator1, RandomAccessIterator2, Difference, Reference>::type super_t;
-    typedef typename super_t::difference_type size_type;
+    using super_t = typename join_iterator_detail::join_iterator_base<RandomAccessIterator1, RandomAccessIterator2, Difference, Reference>::type;
+    using size_type = typename super_t::difference_type;
 
   public:
-    inline __host__ __device__
+    inline THRUST_HOST_DEVICE
     join_iterator(RandomAccessIterator1 first1, size_type n, RandomAccessIterator2 first2)
       : super_t(thrust::counting_iterator<size_type>(0)),
         m_n1(n),
@@ -87,7 +86,7 @@ class join_iterator
     {}
 
 
-    inline __host__ __device__
+    inline THRUST_HOST_DEVICE
     join_iterator(const join_iterator &other)
       : super_t(other),
         m_n1(other.m_n1),
@@ -104,7 +103,7 @@ class join_iterator
     // See goo.gl/LELTNp
     THRUST_DISABLE_MSVC_WARNING_BEGIN(4172)
 
-    __host__ __device__
+    THRUST_HOST_DEVICE
     typename super_t::reference dereference() const
     {
       size_type i = *super_t::base();
@@ -121,7 +120,7 @@ class join_iterator
 
 
 template<typename RandomAccessIterator1, typename Size, typename RandomAccessIterator2>
-__host__ __device__
+THRUST_HOST_DEVICE
 join_iterator<RandomAccessIterator1,RandomAccessIterator2,Size> make_join_iterator(RandomAccessIterator1 first1, Size n1, RandomAccessIterator2 first2)
 {
   return join_iterator<RandomAccessIterator1,RandomAccessIterator2,Size>(first1, n1, first2);

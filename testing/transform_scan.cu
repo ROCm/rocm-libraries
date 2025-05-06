@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -29,7 +29,7 @@ template<typename InputIterator,
          typename OutputIterator,
          typename UnaryFunction,
          typename AssociativeOperator>
-__host__ __device__
+THRUST_HOST_DEVICE
 OutputIterator transform_inclusive_scan(my_system &system,
                                         InputIterator,
                                         InputIterator,
@@ -62,7 +62,7 @@ template<typename InputIterator,
          typename OutputIterator,
          typename UnaryFunction,
          typename AssociativeOperator>
-__host__ __device__
+THRUST_HOST_DEVICE
 OutputIterator transform_inclusive_scan(my_tag,
                                         InputIterator,
                                         InputIterator,
@@ -94,7 +94,7 @@ template<typename InputIterator,
          typename UnaryFunction,
          typename T,
          typename AssociativeOperator>
-__host__ __device__
+THRUST_HOST_DEVICE
 OutputIterator transform_exclusive_scan(my_system &system,
                                         InputIterator,
                                         InputIterator,
@@ -130,7 +130,7 @@ template<typename InputIterator,
          typename UnaryFunction,
          typename T,
          typename AssociativeOperator>
-__host__ __device__
+THRUST_HOST_DEVICE
 OutputIterator transform_exclusive_scan(my_tag,
                                         InputIterator,
                                         InputIterator,
@@ -162,7 +162,7 @@ DECLARE_UNITTEST(TestTransformExclusiveScanDispatchImplicit);
 template <class Vector>
 void TestTransformScanSimple(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     typename Vector::iterator iter;
 
@@ -180,21 +180,21 @@ void TestTransformScanSimple(void)
     ASSERT_EQUAL(std::size_t(iter - output.begin()), input.size());
     ASSERT_EQUAL(input,  input_copy);
     ASSERT_EQUAL(output, result);
-
+    
     // exclusive scan with 0 init
     iter = thrust::transform_exclusive_scan(input.begin(), input.end(), output.begin(), thrust::negate<T>(), 0, thrust::plus<T>());
     result[0] = 0; result[1] = -1; result[2] = -4; result[3] = -2; result[4] = -6;
     ASSERT_EQUAL(std::size_t(iter - output.begin()), input.size());
     ASSERT_EQUAL(input,  input_copy);
     ASSERT_EQUAL(output, result);
-
+    
     // exclusive scan with nonzero init
     iter = thrust::transform_exclusive_scan(input.begin(), input.end(), output.begin(), thrust::negate<T>(), 3, thrust::plus<T>());
     result[0] = 3; result[1] = 2; result[2] = -1; result[3] = 1; result[4] = -3;
     ASSERT_EQUAL(std::size_t(iter - output.begin()), input.size());
     ASSERT_EQUAL(input,  input_copy);
     ASSERT_EQUAL(output, result);
-
+    
     // inplace inclusive scan
     input = input_copy;
     iter = thrust::transform_inclusive_scan(input.begin(), input.end(), input.begin(), thrust::negate<T>(), thrust::plus<T>());
@@ -231,7 +231,7 @@ struct Record {
 };
 
 struct negate {
-    __host__ __device__ int operator()(Record const& record) const
+    THRUST_HOST_DEVICE int operator()(Record const& record) const
     {
         return - record.number;
     }
@@ -277,22 +277,22 @@ struct TestTransformScan
 
         thrust::host_vector<T>   h_output(n);
         thrust::device_vector<T> d_output(n);
-
+        
         thrust::transform_inclusive_scan(h_input.begin(), h_input.end(), h_output.begin(), thrust::negate<T>(), thrust::plus<T>());
         thrust::transform_inclusive_scan(d_input.begin(), d_input.end(), d_output.begin(), thrust::negate<T>(), thrust::plus<T>());
         ASSERT_EQUAL(d_output, h_output);
-
+        
         thrust::transform_exclusive_scan(h_input.begin(), h_input.end(), h_output.begin(), thrust::negate<T>(), (T) 11, thrust::plus<T>());
         thrust::transform_exclusive_scan(d_input.begin(), d_input.end(), d_output.begin(), thrust::negate<T>(), (T) 11, thrust::plus<T>());
         ASSERT_EQUAL(d_output, h_output);
-
+        
         // in-place scans
         h_output = h_input;
         d_output = d_input;
         thrust::transform_inclusive_scan(h_output.begin(), h_output.end(), h_output.begin(), thrust::negate<T>(), thrust::plus<T>());
         thrust::transform_inclusive_scan(d_output.begin(), d_output.end(), d_output.begin(), thrust::negate<T>(), thrust::plus<T>());
         ASSERT_EQUAL(d_output, h_output);
-
+        
         h_output = h_input;
         d_output = d_input;
         thrust::transform_exclusive_scan(h_output.begin(), h_output.end(), h_output.begin(), thrust::negate<T>(), (T) 11, thrust::plus<T>());
@@ -305,8 +305,8 @@ VariableUnitTest<TestTransformScan, IntegralTypes> TestTransformScanInstance;
 template <class Vector>
 void TestTransformScanCountingIterator(void)
 {
-    typedef typename Vector::value_type T;
-    typedef typename thrust::iterator_system<typename Vector::iterator>::type space;
+    using T     = typename Vector::value_type;
+    using space = typename thrust::iterator_system<typename Vector::iterator>::type;
 
     thrust::counting_iterator<T, space> first(1);
 
@@ -329,7 +329,7 @@ struct TestTransformScanToDiscardIterator
         thrust::device_vector<T> d_input = h_input;
 
         thrust::discard_iterator<> reference(n);
-
+        
         thrust::discard_iterator<> h_result =
           thrust::transform_inclusive_scan(h_input.begin(),
                                            h_input.end(),
@@ -345,7 +345,7 @@ struct TestTransformScanToDiscardIterator
                                            thrust::plus<T>());
         ASSERT_EQUAL_QUIET(reference, h_result);
         ASSERT_EQUAL_QUIET(reference, d_result);
-
+        
         h_result =
           thrust::transform_exclusive_scan(h_input.begin(),
                                            h_input.end(),

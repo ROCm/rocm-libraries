@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -37,53 +37,52 @@
 #include <thrust/mr/allocator.h>
 
 // define some common lists of types
-typedef unittest::type_list<int,
-                            unsigned int,
-                            float> ThirtyTwoBitTypes;
+using ThirtyTwoBitTypes = unittest::type_list<int,
+                                              unsigned int,
+                                              float>;
 
-typedef unittest::type_list<long long,
-                            unsigned long long,
-                            double> SixtyFourBitTypes;
+using SixtyFourBitTypes = unittest::type_list<long long,
+                                              unsigned long long,
+                                              double>;
+using IntegralTypes = unittest::type_list<char,
+                                          signed char,
+                                          unsigned char,
+                                          short,
+                                          unsigned short,
+                                          int,
+                                          unsigned int,
+                                          long,
+                                          unsigned long,
+                                          long long,
+                                          unsigned long long>;
 
-typedef unittest::type_list<char,
-                            signed char,
-                            unsigned char,
-                            short,
-                            unsigned short,
-                            int,
-                            unsigned int,
-                            long,
-                            unsigned long,
-                            long long,
-                            unsigned long long> IntegralTypes;
+using SignedIntegralTypes = unittest::type_list<signed char,
+                                                signed short,
+                                                signed int,
+                                                signed long,
+                                                signed long long>;
 
-typedef unittest::type_list<signed char,
-                            signed short,
-                            signed int,
-                            signed long,
-                            signed long long> SignedIntegralTypes;
+using UnsignedIntegralTypes = unittest::type_list<unsigned char,
+                                                  unsigned short,
+                                                  unsigned int,
+                                                  unsigned long,
+                                                  unsigned long long>;
 
-typedef unittest::type_list<unsigned char,
-                            unsigned short,
-                            unsigned int,
-                            unsigned long,
-                            unsigned long long> UnsignedIntegralTypes;
+using ByteTypes = unittest::type_list<char,
+                                      signed char,
+                                      unsigned char>;
 
-typedef unittest::type_list<char,
-                            signed char,
-                            unsigned char> ByteTypes;
+using SmallIntegralTypes = unittest::type_list<char,
+                                               signed char,
+                                               unsigned char,
+                                               short,
+                                               unsigned short>;
 
-typedef unittest::type_list<char,
-                            signed char,
-                            unsigned char,
-                            short,
-                            unsigned short> SmallIntegralTypes;
+using LargeIntegralTypes = unittest::type_list<long long,
+                                               unsigned long long>;
 
-typedef unittest::type_list<long long,
-                            unsigned long long> LargeIntegralTypes;
-
-typedef unittest::type_list<float,
-                            double> FloatingPointTypes;
+using FloatingPointTypes = unittest::type_list<float,
+                                               double>;
 
 // A type that behaves as if it was a normal numeric type,
 // so it can be used in the same tests as "normal" numeric types.
@@ -91,7 +90,7 @@ typedef unittest::type_list<float,
 class custom_numeric
 {
 public:
-    __host__ __device__
+    THRUST_HOST_DEVICE
     custom_numeric()
     {
         fill(0);
@@ -100,26 +99,26 @@ public:
     // Allow construction from any integral numeric.
     template <typename T,
               typename = typename std::enable_if<std::is_integral<T>::value>::type>
-    __host__ __device__
+    THRUST_HOST_DEVICE
     custom_numeric(const T& i)
     {
         fill(static_cast<int>(i));
     }
 
-    __host__ __device__
+    THRUST_HOST_DEVICE
     custom_numeric(const custom_numeric & other)
     {
         fill(other.value[0]);
     }
 
-    __host__ __device__
+    THRUST_HOST_DEVICE
     custom_numeric & operator=(int val)
     {
         fill(val);
         return *this;
     }
 
-    __host__ __device__
+    THRUST_HOST_DEVICE
     custom_numeric & operator=(const custom_numeric & other)
     {
         fill(other.value[0]);
@@ -128,7 +127,7 @@ public:
 
     // cast to void * instead of bool to fool overload resolution
     // WTB C++11 explicit conversion operators
-    __host__ __device__
+    THRUST_HOST_DEVICE
     operator void *() const
     {
         // static cast first to avoid MSVC warning C4312
@@ -136,12 +135,12 @@ public:
     }
 
 #define DEFINE_OPERATOR(op)                                         \
-    __host__ __device__                                             \
+    THRUST_HOST_DEVICE                                             \
     custom_numeric & operator op() {                                \
         fill(op value[0]);                                          \
         return *this;                                               \
     }                                                               \
-    __host__ __device__                                             \
+    THRUST_HOST_DEVICE                                             \
     custom_numeric operator op(int) const {                         \
         custom_numeric ret(*this);                                  \
         op ret;                                                     \
@@ -154,7 +153,7 @@ public:
 #undef DEFINE_OPERATOR
 
 #define DEFINE_OPERATOR(op)                                         \
-    __host__ __device__                                             \
+    THRUST_HOST_DEVICE                                             \
     custom_numeric operator op () const                             \
     {                                                               \
         return custom_numeric(op value[0]);                         \
@@ -167,7 +166,7 @@ public:
 #undef DEFINE_OPERATOR
 
 #define DEFINE_OPERATOR(op)                                         \
-    __host__ __device__                                             \
+    THRUST_HOST_DEVICE                                             \
     custom_numeric operator op (const custom_numeric & other) const \
     {                                                               \
         return custom_numeric(value[0] op other.value[0]);          \
@@ -189,7 +188,7 @@ public:
 #define CONCAT(X, Y) X ## Y
 
 #define DEFINE_OPERATOR(op)                                         \
-    __host__ __device__                                             \
+    THRUST_HOST_DEVICE                                             \
     custom_numeric & operator CONCAT(op, =) (const custom_numeric & other) \
     {                                                               \
         fill(value[0] op other.value[0]);                           \
@@ -210,7 +209,7 @@ public:
 #undef DEFINE_OPERATOR
 
 #define DEFINE_OPERATOR(op)                                         \
-    __host__ __device__                                             \
+    THRUST_HOST_DEVICE                                             \
     friend bool operator op (const custom_numeric & lhs, const custom_numeric & rhs) \
     {                                                               \
         return lhs.value[0] op rhs.value[0];                        \
@@ -236,7 +235,7 @@ public:
 private:
     int value[5];
 
-    __host__ __device__
+    THRUST_HOST_DEVICE
     void fill(int val)
     {
         for (int i = 0; i < 5; ++i)
@@ -264,34 +263,34 @@ class integer_traits<custom_numeric>
 
 THRUST_NAMESPACE_END
 
-typedef unittest::type_list<char,
-                            signed char,
-                            unsigned char,
-                            short,
-                            unsigned short,
-                            int,
-                            unsigned int,
-                            long,
-                            unsigned long,
-                            long long,
-                            unsigned long long,
-                            float,
-                            double,
-                            custom_numeric> NumericTypes;
+using NumericTypes = unittest::type_list<char,
+                                         signed char,
+                                         unsigned char,
+                                         short,
+                                         unsigned short,
+                                         int,
+                                         unsigned int,
+                                         long,
+                                         unsigned long,
+                                         long long,
+                                         unsigned long long,
+                                         float,
+                                         double,
+                                         custom_numeric>;
 
-typedef unittest::type_list<char,
-                            signed char,
-                            unsigned char,
-                            short,
-                            unsigned short,
-                            int,
-                            unsigned int,
-                            long,
-                            unsigned long,
-                            long long,
-                            unsigned long long,
-                            float,
-                            double> BuiltinNumericTypes;
+using BuiltinNumericTypes = unittest::type_list<char,
+                                                signed char,
+                                                unsigned char,
+                                                short,
+                                                unsigned short,
+                                                int,
+                                                unsigned int,
+                                                long,
+                                                unsigned long,
+                                                long long,
+                                                unsigned long long,
+                                                float,
+                                                double>;
 
 inline void chop_prefix(std::string& str, const std::string& prefix)
 {
@@ -319,14 +318,11 @@ inline std::string base_class_name(const std::string& name)
 
 enum TestStatus { Pass = 0, Failure = 1, KnownFailure = 2, Error = 3, UnknownException = 4};
 
-typedef std::set<std::string>              ArgumentSet;
-typedef std::map<std::string, std::string> ArgumentMap;
+using ArgumentSet = std::set<std::string>;
+using ArgumentMap = std::map<std::string, std::string>;
 
 std::vector<size_t> get_test_sizes(void);
 void                set_test_sizes(const std::string&);
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
-bool                supports_managed_memory();
-#endif
 
 class UnitTest {
     public:
@@ -346,7 +342,7 @@ class UnitTestDriver;
 
 class UnitTestDriver
 {
-  typedef std::map<std::string, UnitTest*> TestMap;
+  using TestMap = std::map<std::string, UnitTest*>;
 
   TestMap test_map;
 
@@ -390,7 +386,6 @@ class NAME##UnitTest : public UnitTest {                         \
 };                                                               \
 NAME##UnitTest NAME##Instance
 
-#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_HIP
 // Macro to create host and device versions of a
 // unit test for a bunch of data types
 #define DECLARE_VECTOR_UNITTEST(VTEST)                          \
@@ -447,62 +442,6 @@ void VTEST##Universal(void) {                                   \
 DECLARE_UNITTEST(VTEST##Host);                                  \
 DECLARE_UNITTEST(VTEST##Device);                                \
 DECLARE_UNITTEST(VTEST##Universal);
-#else // THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
-// Macro to create host and device versions of a
-// unit test for a bunch of data types
-#define DECLARE_VECTOR_UNITTEST(VTEST)                          \
-void VTEST##Host(void) {                                        \
-    VTEST< thrust::host_vector<signed char> >();                \
-    VTEST< thrust::host_vector<short> >();                      \
-    VTEST< thrust::host_vector<int> >();                        \
-    VTEST< thrust::host_vector<float> >();                      \
-    VTEST< thrust::host_vector<custom_numeric> >();             \
-    /* MR vectors */                                            \
-    VTEST< thrust::host_vector<int,                             \
-        thrust::mr::stateless_resource_allocator<int,           \
-            thrust::host_memory_resource> > >();                \
-}                                                               \
-void VTEST##Device(void) {                                      \
-    VTEST< thrust::device_vector<signed char> >();              \
-    VTEST< thrust::device_vector<short> >();                    \
-    VTEST< thrust::device_vector<int> >();                      \
-    VTEST< thrust::device_vector<float> >();                    \
-    VTEST< thrust::device_vector<custom_numeric> >();           \
-    /* MR vectors */                                            \
-    VTEST< thrust::device_vector<int,                           \
-        thrust::mr::stateless_resource_allocator<int,           \
-            thrust::device_memory_resource> > >();              \
-}                                                               \
-void VTEST##Universal(void) {                                   \
-    if(supports_managed_memory()) {                             \
-        VTEST< thrust::universal_vector<int> >();               \
-    }                                                           \
-}                                                               \
-DECLARE_UNITTEST(VTEST##Host);                                  \
-DECLARE_UNITTEST(VTEST##Device);                                \
-DECLARE_UNITTEST(VTEST##Universal);
-
-// Same as above, but only for integral types
-#define DECLARE_INTEGRAL_VECTOR_UNITTEST(VTEST)                 \
-void VTEST##Host(void) {                                        \
-    VTEST< thrust::host_vector<signed char> >();                \
-    VTEST< thrust::host_vector<short> >();                      \
-    VTEST< thrust::host_vector<int> >();                        \
-}                                                               \
-void VTEST##Device(void) {                                      \
-    VTEST< thrust::device_vector<signed char> >();              \
-    VTEST< thrust::device_vector<short> >();                    \
-    VTEST< thrust::device_vector<int> >();                      \
-}                                                               \
-void VTEST##Universal(void) {                                   \
-    if(supports_managed_memory()) {                             \
-        VTEST< thrust::universal_vector<int> >();               \
-    }                                                           \
-}                                                               \
-DECLARE_UNITTEST(VTEST##Host);                                  \
-DECLARE_UNITTEST(VTEST##Device);                                \
-DECLARE_UNITTEST(VTEST##Universal);
-#endif
 
 // Macro to create instances of a test for several data types.
 #define DECLARE_GENERIC_UNITTEST(TEST)                           \
@@ -610,7 +549,7 @@ template<template <typename> class TestName, typename TypeList>
     void run()
     {
       // get the first type in the list
-      typedef typename unittest::get_type<TypeList,0>::type first_type;
+      using first_type = typename unittest::get_type<TypeList,0>::type;
 
       unittest::for_each_type<TypeList,TestName,first_type,0> for_each;
 
@@ -636,7 +575,7 @@ template<template <typename> class TestName, typename TypeList>
         for(size_t i = 0; i != sizes.size(); ++i)
         {
             // get the first type in the list
-            typedef typename unittest::get_type<TypeList,0>::type first_type;
+            using first_type = typename unittest::get_type<TypeList,0>::type;
 
             unittest::for_each_type<TypeList,TestName,first_type,0> loop;
 
@@ -664,13 +603,13 @@ template<template <typename> class TestName,
   void run()
   {
     // zip up the type list with Alloc
-    typedef typename unittest::transform1<TypeList, Alloc>::type AllocList;
+    using AllocList = typename unittest::transform1<TypeList, Alloc>::type;
 
     // zip up the type list & alloc list with Vector
-    typedef typename unittest::transform2<TypeList, AllocList, Vector>::type VectorList;
+    using VectorList = typename unittest::transform2<TypeList, AllocList, Vector>::type;
 
     // get the first type in the list
-    typedef typename unittest::get_type<VectorList,0>::type first_type;
+    using first_type = typename unittest::get_type<VectorList, 0>::type;
 
     unittest::for_each_type<VectorList,TestName,first_type,0> loop;
 
@@ -678,3 +617,4 @@ template<template <typename> class TestName,
     loop(0);
   }
 }; // end VectorUnitTest
+

@@ -1,3 +1,20 @@
+/*
+ *  Copyright 2008-2013 NVIDIA Corporation
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+
 #define THRUST_ENABLE_FUTURE_RAW_DATA_MEMBER
 
 #include <thrust/detail/config.h>
@@ -15,7 +32,7 @@
 template <typename T>
 struct custom_plus
 {
-  __host__ __device__
+  THRUST_HOST_DEVICE
   T operator()(T lhs, T rhs) const
   {
     return lhs + rhs;
@@ -44,7 +61,7 @@ struct custom_plus
     template <                                                                \
       typename ForwardIt, typename Sentinel                                   \
     >                                                                         \
-    __host__                                                                  \
+    THRUST_HOST                                                                  \
     auto operator()(                                                          \
       ForwardIt&& first, Sentinel&& last                                      \
     )                                                                         \
@@ -72,7 +89,7 @@ struct custom_plus
     template <                                                                \
       typename ForwardIt, typename Sentinel                                   \
     >                                                                         \
-    __host__                                                                  \
+    THRUST_HOST                                                                  \
     auto operator()(                                                          \
       ForwardIt&& first, Sentinel&& last                                      \
     )                                                                         \
@@ -349,7 +366,7 @@ struct test_async_reduce
   template <typename T>
   struct tester
   {
-    __host__
+    THRUST_HOST
     void operator()(std::size_t n)
     {
       thrust::host_vector<T>   h0(unittest::random_integers<T>(n));
@@ -603,7 +620,7 @@ struct test_async_reduce_counting_iterator
   template <typename T>
   struct tester
   {
-    __host__
+    THRUST_HOST
     void operator()()
     {
       constexpr std::size_t n = 15 * sizeof(T);
@@ -727,7 +744,7 @@ DECLARE_GENERIC_UNITTEST_WITH_TYPES_AND_NAME(
 template <typename T>
 struct test_async_reduce_using
 {
-  __host__
+  THRUST_HOST
   void operator()(std::size_t n)
   {
     thrust::host_vector<T>   h0(unittest::random_integers<T>(n));
@@ -772,7 +789,7 @@ DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES(
 template <typename T>
 struct test_async_reduce_after
 {
-  __host__
+  THRUST_HOST
   void operator()(std::size_t n)
   {
     thrust::host_vector<T>   h0(unittest::random_integers<T>(n));
@@ -840,7 +857,7 @@ DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES(
 template <typename T>
 struct test_async_reduce_on_then_after
 {
-  __host__
+  THRUST_HOST
   void operator()(std::size_t n)
   {
     thrust::host_vector<T>   h0(unittest::random_integers<T>(n));
@@ -915,7 +932,7 @@ DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES(
 template <typename T>
 struct test_async_reduce_allocator_on_then_after
 {
-  __host__
+  THRUST_HOST
   void operator()(std::size_t n)
   {
     thrust::host_vector<T>   h0(unittest::random_integers<T>(n));
@@ -1001,7 +1018,7 @@ DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES(
 template <typename T>
 struct test_async_reduce_caching
 {
-  __host__
+  THRUST_HOST
   void operator()(std::size_t n)
   {
     constexpr std::int64_t m = 32;
@@ -1051,7 +1068,7 @@ DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES(
 template <typename T>
 struct test_async_copy_then_reduce
 {
-  __host__
+  THRUST_HOST
   void operator()(std::size_t n)
   {
     thrust::host_vector<T>   h0a(unittest::random_integers<T>(n));
@@ -1134,5 +1151,46 @@ DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES(
 ///////////////////////////////////////////////////////////////////////////////
 
 // TODO: when_all from reductions.
+
+// See also issue: https://github.com/NVIDIA/cccl/issues/1886
+struct test_async_reduce_bug1886
+{
+  struct tuple_sum
+  {
+    __device__ thrust::tuple<int, int>
+    operator()(const thrust::tuple<int, int>& t1, const thrust::tuple<int, int>& t2) const
+    {
+      return thrust::make_tuple(thrust::get<0>(t1) + thrust::get<0>(t2), thrust::get<1>(t1) + thrust::get<1>(t2));
+    }
+  };
+
+  void operator()() const
+  {
+    // Initialize input data
+    thrust::device_vector<int> d_data1{1, 2, 3, 4, 5};
+    thrust::device_vector<int> d_data2{10, 20, 30, 40, 50};
+
+    using TupleType = thrust::tuple<int, int>;
+    using IteratorType =
+      thrust::zip_iterator<thrust::tuple<thrust::device_vector<int>::iterator, thrust::device_vector<int>::iterator>>;
+
+    // Create zip_begin and zip_end iterators
+    IteratorType zip_begin = thrust::make_zip_iterator(thrust::make_tuple(d_data1.begin(), d_data2.begin()));
+    IteratorType zip_end   = thrust::make_zip_iterator(thrust::make_tuple(d_data2.end(), d_data2.end()));
+
+    // Initialize the starting tuple
+    TupleType init = thrust::make_tuple(0, 0);
+
+    // Perform async reduce using zip_begin and zip_end
+    auto future = thrust::async::reduce(thrust::device, zip_begin, zip_end, init, tuple_sum());
+
+    // Get the result
+    TupleType result = future.get();
+
+    // Print the result
+    std::cout << "Sum: (" << thrust::get<0>(result) << ", " << thrust::get<1>(result) << ")" << std::endl;
+  }
+};
+DECLARE_UNITTEST(test_async_reduce_bug1886);
 
 #endif

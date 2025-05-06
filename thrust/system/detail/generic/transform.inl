@@ -38,18 +38,18 @@ template<typename DerivedPolicy,
          typename InputIterator,
          typename OutputIterator,
          typename UnaryFunction>
-__host__ __device__
+THRUST_HOST_DEVICE
   OutputIterator transform(thrust::execution_policy<DerivedPolicy> &exec,
                            InputIterator first,
                            InputIterator last,
                            OutputIterator result,
                            UnaryFunction op)
 {
-  typedef thrust::detail::unary_transform_functor<UnaryFunction> UnaryTransformFunctor;
+  using UnaryTransformFunctor = thrust::detail::unary_transform_functor<UnaryFunction>;
 
   // make an iterator tuple
-  typedef thrust::tuple<InputIterator,OutputIterator> IteratorTuple;
-  typedef thrust::zip_iterator<IteratorTuple> ZipIterator;
+  using IteratorTuple = thrust::tuple<InputIterator, OutputIterator>;
+  using ZipIterator   = thrust::zip_iterator<IteratorTuple>;
 
   ZipIterator zipped_result =
     thrust::for_each(exec,
@@ -66,7 +66,7 @@ template<typename DerivedPolicy,
          typename InputIterator2,
          typename OutputIterator,
          typename BinaryFunction>
-__host__ __device__
+THRUST_HOST_DEVICE
   OutputIterator transform(thrust::execution_policy<DerivedPolicy> &exec,
                            InputIterator1 first1,
                            InputIterator1 last1,
@@ -75,11 +75,11 @@ __host__ __device__
                            BinaryFunction op)
 {
   // given the minimal system, determine the binary transform functor we need
-  typedef thrust::detail::binary_transform_functor<BinaryFunction> BinaryTransformFunctor;
+  using BinaryTransformFunctor = thrust::detail::binary_transform_functor<BinaryFunction>;
 
   // make an iterator tuple
-  typedef thrust::tuple<InputIterator1,InputIterator2,OutputIterator> IteratorTuple;
-  typedef thrust::zip_iterator<IteratorTuple> ZipIterator;
+  using IteratorTuple = thrust::tuple<InputIterator1, InputIterator2, OutputIterator>;
+  using ZipIterator   = thrust::zip_iterator<IteratorTuple>;
 
   ZipIterator zipped_result =
     thrust::for_each(exec,
@@ -96,7 +96,7 @@ template<typename DerivedPolicy,
          typename ForwardIterator,
          typename UnaryFunction,
          typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
   ForwardIterator transform_if(thrust::execution_policy<DerivedPolicy> &exec,
                                InputIterator first,
                                InputIterator last,
@@ -104,11 +104,11 @@ __host__ __device__
                                UnaryFunction unary_op,
                                Predicate pred)
 {
-  typedef thrust::detail::unary_transform_if_functor<UnaryFunction,Predicate> UnaryTransformIfFunctor;
+  using UnaryTransformIfFunctor = thrust::detail::unary_transform_if_functor<UnaryFunction, Predicate>;
 
   // make an iterator tuple
-  typedef thrust::tuple<InputIterator,ForwardIterator> IteratorTuple;
-  typedef thrust::zip_iterator<IteratorTuple> ZipIterator;
+  using IteratorTuple = thrust::tuple<InputIterator, ForwardIterator>;
+  using ZipIterator   = thrust::zip_iterator<IteratorTuple>;
 
   ZipIterator zipped_result =
     thrust::for_each(exec,
@@ -126,7 +126,7 @@ template<typename DerivedPolicy,
          typename ForwardIterator,
          typename UnaryFunction,
          typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
   ForwardIterator transform_if(thrust::execution_policy<DerivedPolicy> &exec,
                                InputIterator1 first,
                                InputIterator1 last,
@@ -135,11 +135,11 @@ __host__ __device__
                                UnaryFunction unary_op,
                                Predicate pred)
 {
-  typedef thrust::detail::unary_transform_if_with_stencil_functor<UnaryFunction,Predicate> UnaryTransformIfFunctor;
+  using UnaryTransformIfFunctor = thrust::detail::unary_transform_if_with_stencil_functor<UnaryFunction, Predicate>;
 
   // make an iterator tuple
-  typedef thrust::tuple<InputIterator1,InputIterator2,ForwardIterator> IteratorTuple;
-  typedef thrust::zip_iterator<IteratorTuple> ZipIterator;
+  using IteratorTuple = thrust::tuple<InputIterator1, InputIterator2, ForwardIterator>;
+  using ZipIterator   = thrust::zip_iterator<IteratorTuple>;
 
   ZipIterator zipped_result =
     thrust::for_each(exec,
@@ -158,7 +158,7 @@ template<typename DerivedPolicy,
          typename ForwardIterator,
          typename BinaryFunction,
          typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
   ForwardIterator transform_if(thrust::execution_policy<DerivedPolicy> &exec,
                                InputIterator1 first1,
                                InputIterator1 last1,
@@ -168,11 +168,11 @@ __host__ __device__
                                BinaryFunction binary_op,
                                Predicate pred)
 {
-  typedef thrust::detail::binary_transform_if_functor<BinaryFunction,Predicate> BinaryTransformIfFunctor;
+  using BinaryTransformIfFunctor = thrust::detail::binary_transform_if_functor<BinaryFunction, Predicate>;
 
   // make an iterator tuple
-  typedef thrust::tuple<InputIterator1,InputIterator2,InputIterator3,ForwardIterator> IteratorTuple;
-  typedef thrust::zip_iterator<IteratorTuple> ZipIterator;
+  using IteratorTuple = thrust::tuple<InputIterator1, InputIterator2, InputIterator3, ForwardIterator>;
+  using ZipIterator   = thrust::zip_iterator<IteratorTuple>;
 
   ZipIterator zipped_result =
     thrust::for_each(exec,

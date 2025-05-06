@@ -1,25 +1,66 @@
+/*
+ *  Copyright 2008-2013 NVIDIA Corporation
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+
+#include "thrust/iterator/transform_iterator.h"
 #include <unittest/unittest.h>
 #include <thrust/copy.h>
 #include <thrust/sequence.h>
 #include <thrust/execution_policy.h>
 
-
 template<typename T>
 struct is_even
 {
-  __host__ __device__
-  bool operator()(T x) { return (static_cast<unsigned int>(x) & 1) == 0; }
+  THRUST_HOST_DEVICE bool operator()(T x)
+  {
+    return (static_cast<unsigned int>(x) & 1) == 0;
+  }
 };
 
 
 template<typename T>
 struct mod_3
 {
-  __host__ __device__
-  unsigned int operator()(T x) { return static_cast<unsigned int>(x) % 3; }
+  THRUST_HOST_DEVICE unsigned int operator()(T x)
+  {
+    return static_cast<unsigned int>(x) % 3;
+  }
 };
 
+template <typename T>
+struct mod_n
+{
+  T mod;
+  THRUST_HOST_DEVICE bool operator()(T x)
+  {
+    return (x % mod == 0) ? true : false;
+  }
+};
 
+template <typename T>
+struct multiply_n
+{
+  T multiplier;
+  THRUST_HOST_DEVICE T operator()(T x)
+  {
+    return x * multiplier;
+  }
+};
+
+#ifdef THRUST_TEST_DEVICE_SIDE
 template<typename ExecutionPolicy, typename Iterator1, typename Iterator2, typename Predicate, typename Iterator3>
 __global__ void copy_if_kernel(ExecutionPolicy exec, Iterator1 first, Iterator1 last, Iterator2 result1, Predicate pred, Iterator3 result2)
 {
@@ -100,11 +141,12 @@ void TestCopyIfDeviceNoSync()
   TestCopyIfDevice(thrust::cuda::par_nosync);
 }
 DECLARE_UNITTEST(TestCopyIfDeviceNoSync);
+#endif
 
 template<typename ExecutionPolicy>
 void TestCopyIfCudaStreams(ExecutionPolicy policy)
 {
-  typedef thrust::device_vector<int> Vector;
+  using Vector = thrust::device_vector<int>;
 
   Vector data(5);
   data[0] =  1; 
@@ -143,6 +185,7 @@ void TestCopyIfCudaStreamsNoSync(){
 DECLARE_UNITTEST(TestCopyIfCudaStreamsNoSync);
 
 
+#ifdef THRUST_TEST_DEVICE_SIDE
 template<typename ExecutionPolicy, typename Iterator1, typename Iterator2, typename Iterator3, typename Predicate, typename Iterator4>
 __global__ void copy_if_kernel(ExecutionPolicy exec, Iterator1 first, Iterator1 last, Iterator2 stencil_first, Iterator3 result1, Predicate pred, Iterator4 result2)
 {
@@ -226,13 +269,14 @@ void TestCopyIfStencilDeviceNoSync()
   TestCopyIfStencilDevice(thrust::cuda::par_nosync);
 }
 DECLARE_UNITTEST(TestCopyIfStencilDeviceNoSync);
+#endif
 
 
 template<typename ExecutionPolicy>
 void TestCopyIfStencilCudaStreams(ExecutionPolicy policy)
 {
-  typedef thrust::device_vector<int> Vector;
-  typedef Vector::value_type T;
+  using Vector = thrust::device_vector<int>;
+  using T      = Vector::value_type;
 
   Vector data(5);
   data[0] =  1; 
@@ -281,3 +325,75 @@ void TestCopyIfStencilCudaStreamsNoSync()
 }
 DECLARE_UNITTEST(TestCopyIfStencilCudaStreamsNoSync);
 
+void TestCopyIfWithMagnitude(int magnitude)
+{
+  using offset_t = std::size_t;
+
+  // Prepare input
+  offset_t num_items = offset_t{1ull} << magnitude;
+  thrust::counting_iterator<offset_t> begin(offset_t{0});
+  auto end = begin + num_items;
+  ASSERT_EQUAL(static_cast<offset_t>(thrust::distance(begin, end)), num_items);
+
+  // Run algorithm on large number of items
+  offset_t match_every_nth     = 1000000;
+  offset_t expected_num_copied = (num_items + match_every_nth - 1) / match_every_nth;
+  thrust::device_vector<offset_t> copied_out(expected_num_copied);
+  auto selected_out_end = thrust::copy_if(begin, end, copied_out.begin(), mod_n<offset_t>{match_every_nth});
+
+  // Ensure number of selected items are correct
+  offset_t num_selected_out = static_cast<offset_t>(thrust::distance(copied_out.begin(), selected_out_end));
+  ASSERT_EQUAL(num_selected_out, expected_num_copied);
+  copied_out.resize(expected_num_copied);
+
+  // Ensure selected items are correct
+  auto expected_out_it = thrust::make_transform_iterator(begin, multiply_n<offset_t>{match_every_nth});
+  bool all_results_correct = thrust::equal(copied_out.begin(), copied_out.end(), expected_out_it);
+  ASSERT_EQUAL(all_results_correct, true);
+}
+
+void TestCopyIfWithLargeNumberOfItems()
+{
+  TestCopyIfWithMagnitude(30);
+  TestCopyIfWithMagnitude(31);
+  TestCopyIfWithMagnitude(32);
+  TestCopyIfWithMagnitude(33);
+}
+DECLARE_UNITTEST(TestCopyIfWithLargeNumberOfItems);
+
+void TestCopyIfStencilWithMagnitude(int magnitude)
+{
+  using offset_t = std::size_t;
+
+  // Prepare input
+  offset_t num_items = offset_t{1ull} << magnitude;
+  thrust::counting_iterator<offset_t> begin(offset_t{0});
+  auto end = begin + num_items;
+  thrust::counting_iterator<offset_t> stencil(offset_t{0});
+  ASSERT_EQUAL(static_cast<offset_t>(thrust::distance(begin, end)), num_items);
+
+  // Run algorithm on large number of items
+  offset_t match_every_nth     = 1000000;
+  offset_t expected_num_copied = (num_items + match_every_nth - 1) / match_every_nth;
+  thrust::device_vector<offset_t> copied_out(expected_num_copied);
+  auto selected_out_end = thrust::copy_if(begin, end, stencil, copied_out.begin(), mod_n<offset_t>{match_every_nth});
+
+  // Ensure number of selected items are correct
+  offset_t num_selected_out = static_cast<offset_t>(thrust::distance(copied_out.begin(), selected_out_end));
+  ASSERT_EQUAL(num_selected_out, expected_num_copied);
+  copied_out.resize(expected_num_copied);
+
+  // Ensure selected items are correct
+  auto expected_out_it = thrust::make_transform_iterator(begin, multiply_n<offset_t>{match_every_nth});
+  bool all_results_correct = thrust::equal(copied_out.begin(), copied_out.end(), expected_out_it);
+  ASSERT_EQUAL(all_results_correct, true);
+}
+
+void TestCopyIfStencilWithLargeNumberOfItems()
+{
+  TestCopyIfStencilWithMagnitude(30);
+  TestCopyIfStencilWithMagnitude(31);
+  TestCopyIfStencilWithMagnitude(32);
+  TestCopyIfStencilWithMagnitude(33);
+}
+DECLARE_UNITTEST(TestCopyIfStencilWithLargeNumberOfItems);

@@ -1,3 +1,20 @@
+/*
+ *  Copyright 2008-2013 NVIDIA Corporation
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+
 #include <unittest/unittest.h>
 #include <thrust/find.h>
 #include <thrust/execution_policy.h>
@@ -10,8 +27,10 @@ struct equal_to_value_pred
 
     equal_to_value_pred(T value) : value(value) {}
 
-    __host__ __device__
-    bool operator()(T v) const { return v == value; }
+  THRUST_HOST_DEVICE bool operator()(T v) const
+  {
+    return v == value;
+  }
 };
 
 
@@ -22,8 +41,10 @@ struct not_equal_to_value_pred
 
     not_equal_to_value_pred(T value) : value(value) {}
 
-    __host__ __device__
-    bool operator()(T v) const { return v != value; }
+  THRUST_HOST_DEVICE bool operator()(T v) const
+  {
+    return v != value;
+  }
 };
 
 
@@ -34,11 +55,14 @@ struct less_than_value_pred
 
     less_than_value_pred(T value) : value(value) {}
 
-    __host__ __device__
-    bool operator()(T v) const { return v < value; }
+  THRUST_HOST_DEVICE bool operator()(T v) const
+  {
+    return v < value;
+  }
 };
 
 
+#ifdef THRUST_TEST_DEVICE_SIDE
 template<typename ExecutionPolicy, typename Iterator, typename T, typename Iterator2>
 __global__ void find_kernel(ExecutionPolicy exec, Iterator first, Iterator last, T value, Iterator2 result)
 {
@@ -53,10 +77,10 @@ void TestFindDevice(ExecutionPolicy exec)
 
   thrust::host_vector<int>   h_data = unittest::random_integers<int>(n);
   thrust::device_vector<int> d_data = h_data;
-  
-  typename thrust::host_vector<int>::iterator   h_iter;
-  
-  typedef typename thrust::device_vector<int>::iterator iter_type;
+
+  typename thrust::host_vector<int>::iterator h_iter;
+
+  using iter_type = typename thrust::device_vector<int>::iterator;
   thrust::device_vector<iter_type> d_result(1);
   
   h_iter = thrust::find(h_data.begin(), h_data.end(), int(0));
@@ -114,10 +138,10 @@ void TestFindIfDevice(ExecutionPolicy exec)
 
   thrust::host_vector<int>   h_data = unittest::random_integers<int>(n);
   thrust::device_vector<int> d_data = h_data;
-  
-  typename thrust::host_vector<int>::iterator   h_iter;
-  
-  typedef typename thrust::device_vector<int>::iterator iter_type;
+
+  typename thrust::host_vector<int>::iterator h_iter;
+
+  using iter_type = typename thrust::device_vector<int>::iterator;
   thrust::device_vector<iter_type> d_result(1);
   
   h_iter = thrust::find_if(h_data.begin(), h_data.end(), equal_to_value_pred<int>(0));
@@ -174,10 +198,10 @@ void TestFindIfNotDevice(ExecutionPolicy exec)
   size_t n = 100;
   thrust::host_vector<int>   h_data = unittest::random_integers<int>(n);
   thrust::device_vector<int> d_data = h_data;
-  
-  typename thrust::host_vector<int>::iterator   h_iter;
-  
-  typedef typename thrust::device_vector<int>::iterator iter_type;
+
+  typename thrust::host_vector<int>::iterator h_iter;
+
+  using iter_type = typename thrust::device_vector<int>::iterator;
   thrust::device_vector<iter_type> d_result(1);
   
   h_iter = thrust::find_if_not(h_data.begin(), h_data.end(), not_equal_to_value_pred<int>(0));
@@ -219,6 +243,7 @@ void TestFindIfNotDeviceDevice()
   TestFindIfNotDevice(thrust::device);
 };
 DECLARE_UNITTEST(TestFindIfNotDeviceDevice);
+#endif
 
 
 void TestFindCudaStreams()

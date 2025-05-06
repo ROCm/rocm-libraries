@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2023 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -26,14 +26,13 @@
 #include <thrust/detail/nv_target.h>
 
 #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-#  if (defined(_NVHPC_CUDA) || defined(__CUDA_ARCH__))
-#    include <thrust/system/cuda/detail/terminate.h>
-#  endif // NVCC device pass or NVC++
+#if (defined(_NVHPC_CUDA) || defined(__CUDA_ARCH__))
+#include <thrust/system/cuda/detail/terminate.h>
+#endif // NVCC device pass or NVC++
 #endif // CUDA
-
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 #include <thrust/system/hip/detail/terminate.h>
-#endif
+#endif // HIP
 
 THRUST_NAMESPACE_BEGIN
 namespace detail
@@ -41,7 +40,7 @@ namespace detail
 
 
 template<typename T, typename System>
-__host__ __device__
+THRUST_HOST_DEVICE
   typename temporary_allocator<T,System>::pointer
     temporary_allocator<T,System>
       ::allocate(typename temporary_allocator<T,System>::size_type cnt)
@@ -67,6 +66,8 @@ __host__ __device__
     ), ( // NV_IS_DEVICE
       thrust::system::hip::detail::terminate_with_message("temporary_buffer::allocate: get_temporary_buffer failed");
     ));
+#else
+    throw thrust::system::detail::bad_alloc("temporary_buffer::allocate: get_temporary_buffer failed");
 #endif
   } // end if
 
@@ -75,7 +76,7 @@ __host__ __device__
 
 
 template<typename T, typename System>
-__host__ __device__
+THRUST_HOST_DEVICE
   void temporary_allocator<T,System>
     ::deallocate(typename temporary_allocator<T,System>::pointer p, typename temporary_allocator<T,System>::size_type n)
 {

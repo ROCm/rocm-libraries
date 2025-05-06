@@ -26,7 +26,7 @@ namespace random
 {
 
 template<typename UIntType, size_t w, size_t k, size_t q, size_t s>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   linear_feedback_shift_engine<UIntType,w,k,q,s>
     ::linear_feedback_shift_engine(result_type value)
 {
@@ -34,7 +34,7 @@ template<typename UIntType, size_t w, size_t k, size_t q, size_t s>
 } // end linear_feedback_shift_engine::linear_feedback_shift_engine()
 
 template<typename UIntType, size_t w, size_t k, size_t q, size_t s>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   void linear_feedback_shift_engine<UIntType,w,k,q,s>
     ::seed(result_type value)
 {
@@ -42,7 +42,7 @@ template<typename UIntType, size_t w, size_t k, size_t q, size_t s>
 } // end linear_feedback_shift_engine::seed()
 
 template<typename UIntType, size_t w, size_t k, size_t q, size_t s>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   typename linear_feedback_shift_engine<UIntType,w,k,q,s>::result_type
     linear_feedback_shift_engine<UIntType,w,k,q,s>
       ::operator()(void)
@@ -55,7 +55,7 @@ template<typename UIntType, size_t w, size_t k, size_t q, size_t s>
 
 
 template<typename UIntType, size_t w, size_t k, size_t q, size_t s>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   void linear_feedback_shift_engine<UIntType,w,k,q,s>
     ::discard(unsigned long long z)
 {
@@ -71,8 +71,8 @@ template<typename UIntType, size_t w, size_t k, size_t q, size_t s>
     std::basic_ostream<CharT,Traits>& linear_feedback_shift_engine<UIntType,w,k,q,s>
       ::stream_out(std::basic_ostream<CharT,Traits> &os) const
 {
-  typedef std::basic_ostream<CharT,Traits> ostream_type;
-  typedef typename ostream_type::ios_base  ios_base;
+  using ostream_type = std::basic_ostream<CharT, Traits>;
+  using ios_base     = typename ostream_type::ios_base;
 
   // save old flags & fill character
   const typename ios_base::fmtflags flags = os.flags();
@@ -97,8 +97,8 @@ template<typename UIntType, size_t w, size_t k, size_t q, size_t s>
     std::basic_istream<CharT,Traits>& linear_feedback_shift_engine<UIntType,w,k,q,s>
       ::stream_in(std::basic_istream<CharT,Traits> &is)
 {
-  typedef std::basic_istream<CharT,Traits> istream_type;
-  typedef typename istream_type::ios_base     ios_base;
+  using istream_type = std::basic_istream<CharT, Traits>;
+  using ios_base     = typename istream_type::ios_base;
 
   // save old flags
   const typename ios_base::fmtflags flags = is.flags();
@@ -116,7 +116,7 @@ template<typename UIntType, size_t w, size_t k, size_t q, size_t s>
 
 
 template<typename UIntType, size_t w, size_t k, size_t q, size_t s>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   bool linear_feedback_shift_engine<UIntType,w,k,q,s>
     ::equal(const linear_feedback_shift_engine<UIntType,w,k,q,s> &rhs) const
 {
@@ -125,7 +125,7 @@ template<typename UIntType, size_t w, size_t k, size_t q, size_t s>
 
 
 template<typename UIntType, size_t w, size_t k, size_t q, size_t s>
-__host__ __device__
+THRUST_HOST_DEVICE
 bool operator==(const linear_feedback_shift_engine<UIntType,w,k,q,s> &lhs,
                 const linear_feedback_shift_engine<UIntType,w,k,q,s> &rhs)
 {
@@ -134,7 +134,7 @@ bool operator==(const linear_feedback_shift_engine<UIntType,w,k,q,s> &lhs,
 
 
 template<typename UIntType, size_t w, size_t k, size_t q, size_t s>
-__host__ __device__
+THRUST_HOST_DEVICE
 bool operator!=(const linear_feedback_shift_engine<UIntType,w,k,q,s> &lhs,
                 const linear_feedback_shift_engine<UIntType,w,k,q,s> &rhs)
 {

@@ -35,11 +35,11 @@ namespace sequential
 {
 
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template<typename DerivedPolicy,
          typename ForwardIterator,
          typename BinaryPredicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 ForwardIterator min_element(sequential::execution_policy<DerivedPolicy> &,
                             ForwardIterator first, 
                             ForwardIterator last,
@@ -65,11 +65,11 @@ ForwardIterator min_element(sequential::execution_policy<DerivedPolicy> &,
 }
 
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template<typename DerivedPolicy,
          typename ForwardIterator,
          typename BinaryPredicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 ForwardIterator max_element(sequential::execution_policy<DerivedPolicy> &,
                             ForwardIterator first, 
                             ForwardIterator last,
@@ -95,11 +95,11 @@ ForwardIterator max_element(sequential::execution_policy<DerivedPolicy> &,
 }
 
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template<typename DerivedPolicy,
          typename ForwardIterator,
          typename BinaryPredicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 thrust::pair<ForwardIterator,ForwardIterator> minmax_element(sequential::execution_policy<DerivedPolicy> &,
                                                              ForwardIterator first, 
                                                              ForwardIterator last,

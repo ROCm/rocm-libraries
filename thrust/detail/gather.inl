@@ -26,12 +26,12 @@
 
 THRUST_NAMESPACE_BEGIN
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template<typename DerivedPolicy,
          typename InputIterator,
          typename RandomAccessIterator,
          typename OutputIterator>
-__host__ __device__
+THRUST_HOST_DEVICE
   OutputIterator gather(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
                         InputIterator                                               map_first,
                         InputIterator                                               map_last,
@@ -43,13 +43,13 @@ __host__ __device__
 } // end gather()
 
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template<typename DerivedPolicy,
          typename InputIterator1,
          typename InputIterator2,
          typename RandomAccessIterator,
          typename OutputIterator>
-__host__ __device__
+THRUST_HOST_DEVICE
   OutputIterator gather_if(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
                            InputIterator1                                              map_first,
                            InputIterator1                                              map_last,
@@ -62,14 +62,14 @@ __host__ __device__
 } // end gather_if()
 
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template<typename DerivedPolicy,
          typename InputIterator1,
          typename InputIterator2,
          typename RandomAccessIterator,
          typename OutputIterator,
          typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
   OutputIterator gather_if(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
                            InputIterator1                                              map_first,
                            InputIterator1                                              map_last,
@@ -93,9 +93,9 @@ template<typename InputIterator,
 {
   using thrust::system::detail::generic::select_system;
 
-  typedef typename thrust::iterator_system<InputIterator>::type        System1;
-  typedef typename thrust::iterator_system<RandomAccessIterator>::type System2;
-  typedef typename thrust::iterator_system<OutputIterator>::type       System3;
+  using System1 = typename thrust::iterator_system<InputIterator>::type;
+  using System2 = typename thrust::iterator_system<RandomAccessIterator>::type;
+  using System3 = typename thrust::iterator_system<OutputIterator>::type;
 
   System1 system1;
   System2 system2;
@@ -117,10 +117,10 @@ template<typename InputIterator1,
 {
   using thrust::system::detail::generic::select_system;
 
-  typedef typename thrust::iterator_system<InputIterator1>::type       System1;
-  typedef typename thrust::iterator_system<InputIterator2>::type       System2;
-  typedef typename thrust::iterator_system<RandomAccessIterator>::type System3;
-  typedef typename thrust::iterator_system<OutputIterator>::type       System4;
+  using System1 = typename thrust::iterator_system<InputIterator1>::type;
+  using System2 = typename thrust::iterator_system<InputIterator2>::type;
+  using System3 = typename thrust::iterator_system<RandomAccessIterator>::type;
+  using System4 = typename thrust::iterator_system<OutputIterator>::type;
 
   System1 system1;
   System2 system2;
@@ -145,10 +145,10 @@ template<typename InputIterator1,
 {
   using thrust::system::detail::generic::select_system;
 
-  typedef typename thrust::iterator_system<InputIterator1>::type       System1;
-  typedef typename thrust::iterator_system<InputIterator2>::type       System2;
-  typedef typename thrust::iterator_system<RandomAccessIterator>::type System3;
-  typedef typename thrust::iterator_system<OutputIterator>::type       System4;
+  using System1 = typename thrust::iterator_system<InputIterator1>::type;
+  using System2 = typename thrust::iterator_system<InputIterator2>::type;
+  using System3 = typename thrust::iterator_system<RandomAccessIterator>::type;
+  using System4 = typename thrust::iterator_system<OutputIterator>::type;
 
   System1 system1;
   System2 system2;

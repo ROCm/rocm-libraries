@@ -1,3 +1,20 @@
+/*
+ *  Copyright 2008-2013 NVIDIA Corporation
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+
 #include <thrust/detail/config.h>
 
 // Disabled on MSVC && NVCC < 11.1 for GH issue #1098.
@@ -24,7 +41,7 @@ enum wait_policy
 template <typename T>
 struct custom_greater
 {
-  __host__ __device__
+  THRUST_HOST_DEVICE
   bool operator()(T rhs, T lhs) const
   {
     return lhs > rhs;
@@ -38,7 +55,7 @@ struct custom_greater
     template <                                                                \
       typename ForwardIt, typename Sentinel                                   \
     >                                                                         \
-    __host__                                                                  \
+    THRUST_HOST                                                                  \
     static void sync(                                                         \
       ForwardIt&& first, Sentinel&& last                                      \
     )                                                                         \
@@ -51,7 +68,7 @@ struct custom_greater
     template <                                                                \
       typename ForwardIt, typename Sentinel                                   \
     >                                                                         \
-    __host__                                                                  \
+    THRUST_HOST                                                                  \
     static auto async(                                                        \
       ForwardIt&& first, Sentinel&& last                                      \
     )                                                                         \
@@ -79,7 +96,7 @@ DEFINE_SORT_INVOKER(
     template <                                                                \
       typename ForwardIt, typename Sentinel                                   \
     >                                                                         \
-    __host__                                                                  \
+    THRUST_HOST                                                                  \
     static void sync(                                                         \
       ForwardIt&& first, Sentinel&& last                                      \
     )                                                                         \
@@ -92,7 +109,7 @@ DEFINE_SORT_INVOKER(
     template <                                                                \
       typename ForwardIt, typename Sentinel                                   \
     >                                                                         \
-    __host__                                                                  \
+    THRUST_HOST                                                                  \
     static auto async(                                                        \
       ForwardIt&& first, Sentinel&& last                                      \
     )                                                                         \
@@ -138,7 +155,7 @@ struct test_async_sort
   template <typename T>
   struct tester
   {
-    __host__
+    THRUST_HOST
     void operator()(std::size_t n)
     {
       thrust::host_vector<T>   h0_data(unittest::random_integers<T>(n));

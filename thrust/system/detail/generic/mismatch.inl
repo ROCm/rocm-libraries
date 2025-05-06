@@ -32,7 +32,7 @@ namespace generic
 
 
 template<typename DerivedPolicy, typename InputIterator1, typename InputIterator2>
-__host__ __device__
+THRUST_HOST_DEVICE
   thrust::pair<InputIterator1, InputIterator2>
     mismatch(thrust::execution_policy<DerivedPolicy> &exec,
              InputIterator1 first1,
@@ -46,7 +46,7 @@ __host__ __device__
 
 
 template<typename DerivedPolicy, typename InputIterator1, typename InputIterator2, typename BinaryPredicate>
-__host__ __device__
+THRUST_HOST_DEVICE
   thrust::pair<InputIterator1, InputIterator2>
     mismatch(thrust::execution_policy<DerivedPolicy> &exec,
              InputIterator1 first1,
@@ -55,8 +55,8 @@ __host__ __device__
              BinaryPredicate pred)
 {
   // Contributed by Erich Elsen
-  typedef thrust::tuple<InputIterator1,InputIterator2> IteratorTuple;
-  typedef thrust::zip_iterator<IteratorTuple>          ZipIterator;
+  using IteratorTuple = thrust::tuple<InputIterator1, InputIterator2>;
+  using ZipIterator   = thrust::zip_iterator<IteratorTuple>;
 
   ZipIterator zipped_first = thrust::make_zip_iterator(thrust::make_tuple(first1,first2));
   ZipIterator zipped_last  = thrust::make_zip_iterator(thrust::make_tuple(last1, first2));

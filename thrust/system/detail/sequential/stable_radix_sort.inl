@@ -24,9 +24,15 @@
 #include <thrust/iterator/transform_iterator.h>
 #include <thrust/iterator/zip_iterator.h>
 #include <thrust/detail/temporary_array.h>
-#include <thrust/detail/cstdint.h>
 #include <thrust/scatter.h>
 
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+#include <cuda/std/utility>
+#else
+#include <utility>
+#endif
+
+#include <cstdint>
 #include <limits>
 
 THRUST_NAMESPACE_BEGIN
@@ -41,14 +47,19 @@ namespace radix_sort_detail
 
 
 template <typename T>
-struct RadixEncoder : public thrust::identity<T>
-{};
+struct RadixEncoder
+{
+  THRUST_HOST_DEVICE T operator()(T x) const
+  {
+    return x;
+  }
+};
 
 
 template <>
-struct RadixEncoder<char> : public thrust::unary_function<char, unsigned char>
+struct RadixEncoder<char>
 {
-  __host__ __device__
+  THRUST_HOST_DEVICE
   unsigned char operator()(char x) const
   {
     if(std::numeric_limits<char>::is_signed)
@@ -63,9 +74,9 @@ struct RadixEncoder<char> : public thrust::unary_function<char, unsigned char>
 };
 
 template <>
-struct RadixEncoder<signed char> : public thrust::unary_function<signed char, unsigned char>
+struct RadixEncoder<signed char>
 {
-  __host__ __device__
+  THRUST_HOST_DEVICE
   unsigned char operator()(signed char x) const
   {
     return static_cast<unsigned char>(x) ^ static_cast<unsigned char>(1) << (8 * sizeof(unsigned char) - 1);
@@ -73,9 +84,9 @@ struct RadixEncoder<signed char> : public thrust::unary_function<signed char, un
 };
 
 template <>
-struct RadixEncoder<short> : public thrust::unary_function<short, unsigned short>
+struct RadixEncoder<short>
 {
-  __host__ __device__
+  THRUST_HOST_DEVICE
   unsigned short operator()(short x) const
   {
     return static_cast<unsigned short>(x) ^ static_cast<unsigned short>(1) << (8 * sizeof(unsigned short) - 1);
@@ -83,19 +94,19 @@ struct RadixEncoder<short> : public thrust::unary_function<short, unsigned short
 };
 
 template <>
-struct RadixEncoder<int> : public thrust::unary_function<int, unsigned int>
+struct RadixEncoder<int>
 {
-  __host__ __device__
-  unsigned long operator()(long x) const
+  THRUST_HOST_DEVICE
+  unsigned int operator()(int x) const
   {
     return x ^ static_cast<unsigned int>(1) << (8 * sizeof(unsigned int) - 1);
   }
 };
 
 template <>
-struct RadixEncoder<long> : public thrust::unary_function<long, unsigned long>
+struct RadixEncoder<long>
 {
-  __host__ __device__
+  THRUST_HOST_DEVICE
   unsigned long operator()(long x) const
   {
     return x ^ static_cast<unsigned long>(1) << (8 * sizeof(unsigned long) - 1);
@@ -103,9 +114,9 @@ struct RadixEncoder<long> : public thrust::unary_function<long, unsigned long>
 };
 
 template <>
-struct RadixEncoder<long long> : public thrust::unary_function<long long, unsigned long long>
+struct RadixEncoder<long long>
 {
-  __host__ __device__
+  THRUST_HOST_DEVICE
   unsigned long long operator()(long long x) const
   {
     return x ^ static_cast<unsigned long long>(1) << (8 * sizeof(unsigned long long) - 1);
@@ -114,27 +125,27 @@ struct RadixEncoder<long long> : public thrust::unary_function<long long, unsign
 
 // ideally we'd use uint32 here and uint64 below
 template <>
-struct RadixEncoder<float> : public thrust::unary_function<float, thrust::detail::uint32_t>
+struct RadixEncoder<float>
 {
-  __host__ __device__
-  thrust::detail::uint32_t operator()(float x) const
+  THRUST_HOST_DEVICE
+  std::uint32_t operator()(float x) const
   {
-    union { float f; thrust::detail::uint32_t i; } u;
+    union { float f; std::uint32_t i; } u;
     u.f = x;
-    thrust::detail::uint32_t mask = -static_cast<thrust::detail::int32_t>(u.i >> 31) | (static_cast<thrust::detail::uint32_t>(1) << 31);
+    std::uint32_t mask = -static_cast<std::int32_t>(u.i >> 31) | (static_cast<std::uint32_t>(1) << 31);
     return u.i ^ mask;
   }
 };
 
 template <>
-struct RadixEncoder<double> : public thrust::unary_function<double, thrust::detail::uint64_t>
+struct RadixEncoder<double>
 {
-  __host__ __device__
-  thrust::detail::uint64_t operator()(double x) const
+  THRUST_HOST_DEVICE
+  std::uint64_t operator()(double x) const
   {
-    union { double f; thrust::detail::uint64_t i; } u;
+    union { double f; std::uint64_t i; } u;
     u.f = x;
-    thrust::detail::uint64_t mask = -static_cast<thrust::detail::int64_t>(u.i >> 63) | (static_cast<thrust::detail::uint64_t>(1) << 63);
+    std::uint64_t mask = -static_cast<std::int64_t>(u.i >> 63) | (static_cast<std::uint64_t>(1) << 63);
     return u.i ^ mask;
   }
 };
@@ -144,23 +155,27 @@ struct RadixEncoder<double> : public thrust::unary_function<double, thrust::deta
 template<unsigned int RadixBits, typename KeyType>
   struct bucket_functor
 {
-  typedef RadixEncoder<KeyType> Encoder;
-  typedef typename Encoder::result_type EncodedType;
-  typedef size_t result_type;
+  using Encoder                    = RadixEncoder<KeyType>;
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+  using EncodedType                = decltype(::cuda::std::declval<Encoder>()(::cuda::std::declval<KeyType>()));
+#else
+  using EncodedType                = decltype(std::declval<Encoder>()(std::declval<KeyType>()));
+#endif
+  using result_type                = size_t;
   static const EncodedType BitMask = static_cast<EncodedType>((1 << RadixBits) - 1);
 
   Encoder encode;
   EncodedType bit_shift;
   size_t *histogram;
 
-  __host__ __device__
+  THRUST_HOST_DEVICE
   bucket_functor(EncodedType bit_shift, size_t *histogram)
     : encode(),
       bit_shift(bit_shift),
       histogram(histogram)
   {}
 
-  inline __host__ __device__
+  inline THRUST_HOST_DEVICE
   size_t operator()(KeyType key)
   {
     const EncodedType x = encode(key);
@@ -176,7 +191,7 @@ template<unsigned int RadixBits,
          typename RandomAccessIterator1,
          typename RandomAccessIterator2,
          typename Integer>
-inline __host__ __device__
+inline THRUST_HOST_DEVICE
 void radix_shuffle_n(sequential::execution_policy<DerivedPolicy> &exec,
                      RandomAccessIterator1 first,
                      const size_t n,
@@ -184,7 +199,7 @@ void radix_shuffle_n(sequential::execution_policy<DerivedPolicy> &exec,
                      Integer bit_shift,
                      size_t *histogram)
 {
-  typedef typename thrust::iterator_value<RandomAccessIterator1>::type KeyType;
+  using KeyType = typename thrust::iterator_value<RandomAccessIterator1>::type;
 
   // note that we are going to mutate the histogram during this sequential scatter
   thrust::scatter(exec,
@@ -201,7 +216,7 @@ template<unsigned int RadixBits,
          typename RandomAccessIterator3,
          typename RandomAccessIterator4,
          typename Integer>
-__host__ __device__
+THRUST_HOST_DEVICE
 void radix_shuffle_n(sequential::execution_policy<DerivedPolicy> &exec,
                      RandomAccessIterator1 keys_first,
                      RandomAccessIterator2 values_first,
@@ -211,7 +226,7 @@ void radix_shuffle_n(sequential::execution_policy<DerivedPolicy> &exec,
                      Integer bit_shift,
                      size_t *histogram)
 {
-  typedef typename thrust::iterator_value<RandomAccessIterator1>::type KeyType;
+  using KeyType = typename thrust::iterator_value<RandomAccessIterator1>::type;
 
   // note that we are going to mutate the histogram during this sequential scatter
   thrust::scatter(exec,
@@ -229,7 +244,7 @@ template<unsigned int RadixBits,
          typename RandomAccessIterator2,
          typename RandomAccessIterator3,
          typename RandomAccessIterator4>
-__host__ __device__
+THRUST_HOST_DEVICE
 void radix_sort(sequential::execution_policy<DerivedPolicy> &exec,
                 RandomAccessIterator1 keys1,
                 RandomAccessIterator2 keys2,
@@ -237,10 +252,14 @@ void radix_sort(sequential::execution_policy<DerivedPolicy> &exec,
                 RandomAccessIterator4 vals2,
                 const size_t N)
 {
-  typedef typename thrust::iterator_value<RandomAccessIterator1>::type KeyType;
 
-  typedef RadixEncoder<KeyType> Encoder;
-  typedef typename Encoder::result_type EncodedType;
+  using KeyType     = typename thrust::iterator_value<RandomAccessIterator1>::type;
+  using Encoder     = RadixEncoder<KeyType>;
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+  using EncodedType = decltype(::cuda::std::declval<Encoder>()(::cuda::std::declval<KeyType>()));
+#else
+  using EncodedType = decltype(std::declval<Encoder>()(std::declval<KeyType>()));
+#endif
 
   const unsigned int NumHistograms = (8 * sizeof(EncodedType) + (RadixBits - 1)) / RadixBits;
   const unsigned int HistogramSize =  1 << RadixBits;
@@ -348,7 +367,7 @@ struct radix_sort_dispatcher<1>
   template<typename DerivedPolicy,
            typename RandomAccessIterator1,
            typename RandomAccessIterator2>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   void operator()(sequential::execution_policy<DerivedPolicy> &exec,
                   RandomAccessIterator1 keys1, RandomAccessIterator2 keys2,
                   const size_t N)
@@ -361,7 +380,7 @@ struct radix_sort_dispatcher<1>
            typename RandomAccessIterator2,
            typename RandomAccessIterator3,
            typename RandomAccessIterator4>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   void operator()(sequential::execution_policy<DerivedPolicy> &exec,
                   RandomAccessIterator1 keys1, RandomAccessIterator2 keys2,
                   RandomAccessIterator3 vals1, RandomAccessIterator4 vals2,
@@ -378,7 +397,7 @@ struct radix_sort_dispatcher<2>
   template<typename DerivedPolicy,
            typename RandomAccessIterator1,
            typename RandomAccessIterator2>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   void operator()(sequential::execution_policy<DerivedPolicy> &exec,
                   RandomAccessIterator1 keys1, RandomAccessIterator2 keys2,
                   const size_t N)
@@ -405,7 +424,7 @@ struct radix_sort_dispatcher<2>
            typename RandomAccessIterator2,
            typename RandomAccessIterator3,
            typename RandomAccessIterator4>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   void operator()(sequential::execution_policy<DerivedPolicy> &exec,
                   RandomAccessIterator1 keys1, RandomAccessIterator2 keys2,
                   RandomAccessIterator3 vals1, RandomAccessIterator4 vals2,
@@ -435,7 +454,7 @@ struct radix_sort_dispatcher<4>
   template<typename DerivedPolicy,
            typename RandomAccessIterator1,
            typename RandomAccessIterator2>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   void operator()(sequential::execution_policy<DerivedPolicy> &exec,
                   RandomAccessIterator1 keys1, RandomAccessIterator2 keys2,
                   const size_t N)
@@ -455,7 +474,7 @@ struct radix_sort_dispatcher<4>
            typename RandomAccessIterator2,
            typename RandomAccessIterator3,
            typename RandomAccessIterator4>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   void operator()(sequential::execution_policy<DerivedPolicy> &exec,
                   RandomAccessIterator1 keys1, RandomAccessIterator2 keys2,
                   RandomAccessIterator3 vals1, RandomAccessIterator4 vals2,
@@ -479,7 +498,7 @@ struct radix_sort_dispatcher<8>
   template<typename DerivedPolicy,
            typename RandomAccessIterator1,
            typename RandomAccessIterator2>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   void operator()(sequential::execution_policy<DerivedPolicy> &exec,
                   RandomAccessIterator1 keys1, RandomAccessIterator2 keys2,
                   const size_t N)
@@ -499,7 +518,7 @@ struct radix_sort_dispatcher<8>
            typename RandomAccessIterator2,
            typename RandomAccessIterator3,
            typename RandomAccessIterator4>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   void operator()(sequential::execution_policy<DerivedPolicy> &exec,
                   RandomAccessIterator1 keys1, RandomAccessIterator2 keys2,
                   RandomAccessIterator3 vals1, RandomAccessIterator4 vals2,
@@ -520,13 +539,13 @@ struct radix_sort_dispatcher<8>
 template<typename DerivedPolicy,
          typename RandomAccessIterator1,
          typename RandomAccessIterator2>
-__host__ __device__
+THRUST_HOST_DEVICE
 void radix_sort(sequential::execution_policy<DerivedPolicy> &exec,
                 RandomAccessIterator1 keys1,
                 RandomAccessIterator2 keys2,
                 const size_t N)
 {
-  typedef typename thrust::iterator_value<RandomAccessIterator1>::type KeyType;
+  using KeyType = typename thrust::iterator_value<RandomAccessIterator1>::type;
   radix_sort_dispatcher<sizeof(KeyType)>()(exec, keys1, keys2, N);
 }
 
@@ -536,7 +555,7 @@ template<typename DerivedPolicy,
          typename RandomAccessIterator2,
          typename RandomAccessIterator3,
          typename RandomAccessIterator4>
-__host__ __device__
+THRUST_HOST_DEVICE
 void radix_sort(sequential::execution_policy<DerivedPolicy> &exec,
                 RandomAccessIterator1 keys1,
                 RandomAccessIterator2 keys2,
@@ -544,7 +563,7 @@ void radix_sort(sequential::execution_policy<DerivedPolicy> &exec,
                 RandomAccessIterator4 vals2,
                 const size_t N)
 {
-  typedef typename thrust::iterator_value<RandomAccessIterator1>::type KeyType;
+  using KeyType = typename thrust::iterator_value<RandomAccessIterator1>::type;
   radix_sort_dispatcher<sizeof(KeyType)>()(exec, keys1, keys2, vals1, vals2, N);
 }
 
@@ -554,12 +573,12 @@ void radix_sort(sequential::execution_policy<DerivedPolicy> &exec,
 
 template<typename DerivedPolicy,
          typename RandomAccessIterator>
-__host__ __device__
+THRUST_HOST_DEVICE
 void stable_radix_sort(sequential::execution_policy<DerivedPolicy> &exec,
                        RandomAccessIterator first,
                        RandomAccessIterator last)
 {
-  typedef typename thrust::iterator_value<RandomAccessIterator>::type KeyType;
+  using KeyType = typename thrust::iterator_value<RandomAccessIterator>::type;
 
   size_t N = last - first;
 
@@ -572,14 +591,14 @@ void stable_radix_sort(sequential::execution_policy<DerivedPolicy> &exec,
 template<typename DerivedPolicy,
          typename RandomAccessIterator1,
          typename RandomAccessIterator2>
-__host__ __device__
+THRUST_HOST_DEVICE
 void stable_radix_sort_by_key(sequential::execution_policy<DerivedPolicy> &exec,
                               RandomAccessIterator1 first1,
                               RandomAccessIterator1 last1,
                               RandomAccessIterator2 first2)
 {
-  typedef typename thrust::iterator_value<RandomAccessIterator1>::type KeyType;
-  typedef typename thrust::iterator_value<RandomAccessIterator2>::type ValueType;
+  using KeyType   = typename thrust::iterator_value<RandomAccessIterator1>::type;
+  using ValueType = typename thrust::iterator_value<RandomAccessIterator2>::type;
 
   size_t N = last1 - first1;
 

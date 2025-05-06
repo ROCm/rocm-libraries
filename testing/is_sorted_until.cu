@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -22,8 +22,8 @@
 template<typename Vector>
 void TestIsSortedUntilSimple(void)
 {
-    typedef typename Vector::value_type T;
-    typedef typename Vector::iterator Iterator;
+    using T        = typename Vector::value_type;
+    using Iterator = typename Vector::iterator;
 
     Vector v(4);
     v[0] = 0; v[1] = 5; v[2] = 8; v[3] = 0;
@@ -96,7 +96,7 @@ DECLARE_VECTOR_UNITTEST(TestIsSortedUntilRepeatedElements);
 template <class Vector>
 void TestIsSortedUntil(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     const size_t n = (1 << 16) + 13;
 
@@ -115,7 +115,7 @@ DECLARE_INTEGRAL_VECTOR_UNITTEST(TestIsSortedUntil);
 
 
 template<typename ForwardIterator>
-__host__ __device__
+THRUST_HOST_DEVICE
 ForwardIterator is_sorted_until(my_system &system, ForwardIterator first, ForwardIterator)
 {
     system.validate_dispatch();
@@ -135,7 +135,7 @@ DECLARE_UNITTEST(TestIsSortedUntilExplicit);
 
 
 template<typename ForwardIterator>
-__host__ __device__
+THRUST_HOST_DEVICE
 ForwardIterator is_sorted_until(my_tag, ForwardIterator first, ForwardIterator)
 {
     *first = 13;
@@ -152,3 +152,4 @@ void TestIsSortedUntilImplicit()
     ASSERT_EQUAL(13, vec.front());
 }
 DECLARE_UNITTEST(TestIsSortedUntilImplicit);
+

@@ -1,8 +1,26 @@
+/*
+ *  Copyright 2008-2013 NVIDIA Corporation
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+
 #include <unittest/unittest.h>
 #include <thrust/count.h>
 #include <thrust/execution_policy.h>
 
 
+#ifdef THRUST_TEST_DEVICE_SIDE
 template<typename ExecutionPolicy, typename Iterator, typename T, typename Iterator2>
 __global__
 void count_kernel(ExecutionPolicy exec, Iterator first, Iterator last, T value, Iterator2 result)
@@ -56,7 +74,10 @@ void count_if_kernel(ExecutionPolicy exec, Iterator first, Iterator last, Predic
 template<typename T>
 struct greater_than_five
 {
-  __host__ __device__ bool operator()(const T &x) const {return x > 5;}
+  THRUST_HOST_DEVICE bool operator()(const T& x) const
+  {
+    return x > 5;
+  }
 };
 
 
@@ -91,6 +112,7 @@ void TestCountIfDeviceDevice(const size_t n)
   TestCountIfDevice<T>(thrust::device, n);
 }
 DECLARE_VARIABLE_UNITTEST(TestCountIfDeviceDevice);
+#endif
 
 
 void TestCountCudaStreams()

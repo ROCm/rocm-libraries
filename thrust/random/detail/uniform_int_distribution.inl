@@ -29,7 +29,7 @@ namespace random
 
 
 template<typename IntType>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   uniform_int_distribution<IntType>
     ::uniform_int_distribution(IntType a, IntType b)
       :m_param(a,b)
@@ -38,7 +38,7 @@ template<typename IntType>
 
 
 template<typename IntType>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   uniform_int_distribution<IntType>
     ::uniform_int_distribution(const param_type &parm)
       :m_param(parm)
@@ -47,7 +47,7 @@ template<typename IntType>
 
 
 template<typename IntType>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   void uniform_int_distribution<IntType>
     ::reset(void)
 {
@@ -56,7 +56,7 @@ template<typename IntType>
 
 template<typename IntType>
   template<typename UniformRandomNumberGenerator>
-    __host__ __device__
+    THRUST_HOST_DEVICE
     typename uniform_int_distribution<IntType>::result_type
       uniform_int_distribution<IntType>
         ::operator()(UniformRandomNumberGenerator &urng)
@@ -67,7 +67,7 @@ template<typename IntType>
 
 template<typename IntType>
   template<typename UniformRandomNumberGenerator>
-    __host__ __device__
+    THRUST_HOST_DEVICE
     typename uniform_int_distribution<IntType>::result_type
       uniform_int_distribution<IntType>
         ::operator()(UniformRandomNumberGenerator &urng, const param_type &parm)
@@ -76,7 +76,7 @@ template<typename IntType>
   //     values if the range of the RNG is smaller than the range of the distribution
   //     we should improve this implementation in a later version
 
-  typedef typename thrust::detail::largest_available_float::type float_type;
+  using float_type = typename thrust::detail::largest_available_float::type;
 
   const float_type real_min(static_cast<float_type>(parm.first));
   const float_type real_max(static_cast<float_type>(parm.second));
@@ -90,7 +90,7 @@ template<typename IntType>
 
 
 template<typename IntType>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   typename uniform_int_distribution<IntType>::result_type
     uniform_int_distribution<IntType>
       ::a(void) const
@@ -100,7 +100,7 @@ template<typename IntType>
 
 
 template<typename IntType>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   typename uniform_int_distribution<IntType>::result_type
     uniform_int_distribution<IntType>
       ::b(void) const
@@ -110,7 +110,7 @@ template<typename IntType>
 
 
 template<typename IntType>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   typename uniform_int_distribution<IntType>::param_type
     uniform_int_distribution<IntType>
       ::param(void) const
@@ -120,7 +120,7 @@ template<typename IntType>
 
 
 template<typename IntType>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   void uniform_int_distribution<IntType>
     ::param(const param_type &parm)
 {
@@ -129,7 +129,7 @@ template<typename IntType>
 
 
 template<typename IntType>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   typename uniform_int_distribution<IntType>::result_type
     uniform_int_distribution<IntType>
       ::min THRUST_PREVENT_MACRO_SUBSTITUTION (void) const
@@ -139,7 +139,7 @@ template<typename IntType>
 
 
 template<typename IntType>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   typename uniform_int_distribution<IntType>::result_type
     uniform_int_distribution<IntType>
       ::max THRUST_PREVENT_MACRO_SUBSTITUTION (void) const
@@ -149,7 +149,7 @@ template<typename IntType>
 
 
 template<typename IntType>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   bool uniform_int_distribution<IntType>
     ::equal(const uniform_int_distribution &rhs) const
 {
@@ -163,8 +163,8 @@ template<typename IntType>
       uniform_int_distribution<IntType>
         ::stream_out(std::basic_ostream<CharT,Traits> &os) const
 {
-  typedef std::basic_ostream<CharT,Traits> ostream_type;
-  typedef typename ostream_type::ios_base  ios_base;
+  using ostream_type = std::basic_ostream<CharT, Traits>;
+  using ios_base     = typename ostream_type::ios_base;
 
   // save old flags and fill character
   const typename ios_base::fmtflags flags = os.flags();
@@ -189,8 +189,8 @@ template<typename IntType>
       uniform_int_distribution<IntType>
         ::stream_in(std::basic_istream<CharT,Traits> &is)
 {
-  typedef std::basic_istream<CharT,Traits> istream_type;
-  typedef typename istream_type::ios_base  ios_base;
+  using istream_type = std::basic_istream<CharT, Traits>;
+  using ios_base     = typename istream_type::ios_base;
 
   // save old flags
   const typename ios_base::fmtflags flags = is.flags();
@@ -206,7 +206,7 @@ template<typename IntType>
 
 
 template<typename IntType>
-__host__ __device__
+THRUST_HOST_DEVICE
 bool operator==(const uniform_int_distribution<IntType> &lhs,
                 const uniform_int_distribution<IntType> &rhs)
 {
@@ -215,7 +215,7 @@ bool operator==(const uniform_int_distribution<IntType> &lhs,
 
 
 template<typename IntType>
-__host__ __device__
+THRUST_HOST_DEVICE
 bool operator!=(const uniform_int_distribution<IntType> &lhs,
                 const uniform_int_distribution<IntType> &rhs)
 {

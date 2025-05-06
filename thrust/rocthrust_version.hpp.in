@@ -1,5 +1,5 @@
 /*
- *  Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@
 #define ROCTHRUST_VERSION_HPP_
 
 /// \def ROCTHRUST_VERSION
-/// \brief ROCTHRUST library version
+/// \brief rocThrust library version
 ///
 /// Version number may not be visible in the documentation.
 ///
@@ -28,7 +28,7 @@
 ///
 /// For example, if ROCTHRUST_VERSION is 100500, then the major version is 1,
 /// the minor version is 5, and the patch level is 0.
-#define ROCTHRUST_VERSION @rocthrust_VERSION_MAJOR@ * 100000 + @rocthrust_VERSION_MINOR@ * 100 + @rocthrust_VERSION_PATCH@
+#define ROCTHRUST_VERSION @rocthrust_VERSION_NUMBER@
 
 #define ROCTHRUST_VERSION_MAJOR @rocthrust_VERSION_MAJOR@
 #define ROCTHRUST_VERSION_MINOR @rocthrust_VERSION_MINOR@

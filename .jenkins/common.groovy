@@ -11,35 +11,39 @@ def runCompileCommand(platform, project, jobName, boolean debug=false, boolean s
     //Set CI node's gfx arch as target if PR, otherwise use default targets of the library
     String amdgpuTargets = env.BRANCH_NAME.startsWith('PR-') ? '-DAMDGPU_TARGETS=\$gfx_arch' : ''
 
-    def getRocPRIM = auxiliary.getLibrary('rocPRIM', platform.jenkinsLabel, null, sameOrg)
+    def getDependenciesCommand = ""
+    if (project.installLibraryDependenciesFromCI)
+    {
+        project.libraryDependencies.each
+        {
+            libraryName ->
+            getDependenciesCommand += auxiliary.getLibrary(libraryName, platform.jenkinsLabel, 'develop', sameOrg)
+        }
+    }
 
     def command = """#!/usr/bin/env bash
                 set -x
-                ${getRocPRIM}
+                ${getDependenciesCommand}
                 cd ${project.paths.project_build_prefix}
                 mkdir -p build/${buildTypeDir} && cd build/${buildTypeDir}
                 ${auxiliary.gfxTargetParser()}
-                ${cmake} -DCMAKE_CXX_COMPILER=/opt/rocm/bin/hipcc ${buildTypeArg} ${amdgpuTargets} -DBUILD_TEST=ON -DBUILD_BENCHMARK=ON ../..
+                ${cmake} --toolchain=toolchain-linux.cmake ${buildTypeArg} ${amdgpuTargets} -DBUILD_TEST=ON -DBUILD_BENCHMARK=ON ../..
                 make -j\$(nproc)
                 """
 
     platform.runCommand(this, command)
 }
 
-def runTestCommand (platform, project)
+def runTestCommand (platform, project, boolean rocmExamples=false)
 {
     String sudo = auxiliary.sudo(platform.jenkinsLabel)
 
     def testCommand = "ctest --output-on-failure"
     def hmmTestCommand = ''
-    def excludeRegex = 'reduce_by_key.hip'
-    
-    if (platform.jenkinsLabel.contains('gfx11'))
-    {
-        excludeRegex = /(reduce_by_key.hip|partition.hip|sort.hip|sort_by_key.hip|stable_sort_by_key.hip|stable_sort.hip|async_copy.hip|async_reduce.hip|async_scan.hip|async_sort.hip|async_transform.hip)/
-    }
+    // Note: temporarily disable scan tests below while waiting for a compiler fix
+    def excludeRegex = /(reduce_by_key.hip|scan)/
     testCommandExclude = "--exclude-regex \"${excludeRegex}\""
-    
+
     if (platform.jenkinsLabel.contains('gfx90a'))
     {
         hmmTestCommand = ""
@@ -61,6 +65,34 @@ def runTestCommand (platform, project)
                   """
 
     platform.runCommand(this, command)
+    //ROCM Examples
+    if (rocmExamples)
+    {
+        String buildString = ""
+        if (platform.os.contains("ubuntu")){
+            buildString += "sudo dpkg -i *.deb"
+        }
+        else {
+            buildString += "sudo rpm -i *.rpm"
+        }
+        testCommand = """#!/usr/bin/env bash
+                    set -ex
+                    cd ${project.paths.project_build_prefix}/build/release/package
+                    ${buildString}
+                    cd ../../..
+                    testDirs=("Libraries/rocThrust")
+                    git clone https://github.com/ROCm/rocm-examples.git
+                    rocm_examples_dir=\$(readlink -f rocm-examples)
+                    for testDir in \${testDirs[@]}; do
+                        cd \${rocm_examples_dir}/\${testDir}
+                        cmake -S . -B build
+                        cmake --build build
+                        cd ./build
+                        ctest --output-on-failure
+                    done
+                """
+        platform.runCommand(this, testCommand, "ROCM Examples")  
+    }
 }
 
 def runPackageCommand(platform, project)
@@ -72,4 +104,3 @@ def runPackageCommand(platform, project)
 }
 
 return this
-

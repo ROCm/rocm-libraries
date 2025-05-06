@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # Start of configuration
-preamble="Copyright +(\([cC]\) +)?"
+preamble="Copyright *(\([cC]\)|©)? *"
 postamble=",? +Advanced +Micro +Devices, +Inc\."
 find_pattern="$preamble([0-9]{4}-)?[0-9]{4}$postamble"
 # printf format string, receives the current year as a parameter
@@ -61,7 +61,6 @@ if $forkdiff; then
     source_commit="remotes/$remote/HEAD"
 
     # don't use fork-point for finding fork point (lol)
-    # see: https://stackoverflow.com/a/53981615
     diff_hash="$(git merge-base "$source_commit" "$branch")"
 fi
 

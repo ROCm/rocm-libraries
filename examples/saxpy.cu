@@ -1,10 +1,13 @@
-#include <thrust/transform.h>
 #include <thrust/device_vector.h>
-#include <thrust/host_vector.h>
 #include <thrust/functional.h>
+#include <thrust/host_vector.h>
+#include <thrust/transform.h>
+
+#include <algorithm>
 #include <iostream>
 #include <iterator>
-#include <algorithm>
+
+#include "include/host_device.h"
 
 // This example illustrates how to implement the SAXPY
 // operation (Y[i] = a * X[i] + Y[i]) using Thrust. 
@@ -15,7 +18,7 @@
 // implements the operation with a single transformation
 // and represents "best practice".
 
-struct saxpy_functor : public thrust::binary_function<float,float,float>
+struct saxpy_functor
 {
     const float a;
 

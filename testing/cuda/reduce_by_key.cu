@@ -1,3 +1,20 @@
+/*
+ *  Copyright 2008-2013 NVIDIA Corporation
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+
 #include <thrust/equal.h>
 #include <thrust/execution_policy.h>
 #include <thrust/iterator/counting_iterator.h>
@@ -8,6 +25,7 @@
 #include <cstdint>
 
 
+#ifdef THRUST_TEST_DEVICE_SIDE
 template<typename ExecutionPolicy, typename Iterator1, typename Iterator2, typename Iterator3, typename Iterator4, typename Iterator5>
 __global__
 void reduce_by_key_kernel(ExecutionPolicy exec,
@@ -48,13 +66,16 @@ void reduce_by_key_kernel(ExecutionPolicy exec,
 {
   *result = thrust::reduce_by_key(exec, keys_first, keys_last, values_first, keys_result, values_result, pred, binary_op);
 }
+#endif
 
 
 template<typename T>
 struct is_equal_div_10_reduce
 {
-  __host__ __device__
-  bool operator()(const T x, const T& y) const { return ((int) x / 10) == ((int) y / 10); }
+  THRUST_HOST_DEVICE bool operator()(const T x, const T& y) const
+  {
+    return ((int) x / 10) == ((int) y / 10);
+  }
 };
 
 
@@ -90,18 +111,17 @@ void initialize_values(Vector& values)
 }
 
 
+#ifdef THRUST_TEST_DEVICE_SIDE
 template<typename ExecutionPolicy>
 void TestReduceByKeyDevice(ExecutionPolicy exec)
 {
-  typedef int T;
-  
+  using T = int;
+
   thrust::device_vector<T> keys;
   thrust::device_vector<T> values;
 
-  typedef typename thrust::pair<
-    typename thrust::device_vector<T>::iterator,
-    typename thrust::device_vector<T>::iterator
-  > iterator_pair;
+  using iterator_pair =
+    typename thrust::pair<typename thrust::device_vector<T>::iterator, typename thrust::device_vector<T>::iterator>;
 
   thrust::device_vector<iterator_pair> new_last_vec(1);
   iterator_pair new_last;
@@ -201,13 +221,14 @@ void TestReduceByKeyDeviceNoSync()
   TestReduceByKeyDevice(thrust::cuda::par_nosync);
 }
 DECLARE_UNITTEST(TestReduceByKeyDeviceNoSync);
+#endif
 
 
 template<typename ExecutionPolicy>
 void TestReduceByKeyCudaStreams(ExecutionPolicy policy)
 {
-  typedef thrust::device_vector<int> Vector;
-  typedef Vector::value_type T;
+  using Vector = thrust::device_vector<int>;
+  using T      = Vector::value_type;
 
   Vector keys;
   Vector values;
@@ -293,34 +314,32 @@ DECLARE_UNITTEST(TestReduceByKeyCudaStreamsNoSync);
 
 
 // Maps indices to key ids
-class div_op : public thrust::unary_function<std::int64_t, std::int64_t>
+class div_op
 {
   std::int64_t m_divisor;
 
 public:
-  __host__ div_op(std::int64_t divisor)
-    : m_divisor(divisor)
+  THRUST_HOST div_op(std::int64_t divisor)
+      : m_divisor(divisor)
   {}
 
-  __host__ __device__
-  std::int64_t operator()(std::int64_t x) const
+  THRUST_HOST_DEVICE std::int64_t operator()(std::int64_t x) const
   {
     return x / m_divisor;
   }
 };
 
 // Produces unique sequence for key
-class mod_op : public thrust::unary_function<std::int64_t, std::int64_t>
+class mod_op
 {
   std::int64_t m_divisor;
 
 public:
-  __host__ mod_op(std::int64_t divisor)
-    : m_divisor(divisor)
+  THRUST_HOST mod_op(std::int64_t divisor)
+      : m_divisor(divisor)
   {}
 
-  __host__ __device__
-  std::int64_t operator()(std::int64_t x) const
+  THRUST_HOST_DEVICE std::int64_t operator()(std::int64_t x) const
   {
     // div: 2          
     // idx: 0 1   2 3   4 5 

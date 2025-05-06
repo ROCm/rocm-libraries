@@ -1,6 +1,6 @@
 /*
  *  Copyright 2018 NVIDIA Corporation
- *  Modifications Copyright 2023 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright 2023-2024 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -34,10 +34,8 @@ namespace mr
  *  \{
  */
 
-/*! A memory resource that uses global operators new and delete to allocate and deallocate memory. Uses alignment-enabled
- *      overloads when available, otherwise uses regular overloads and implements alignment requirements by itself.
- */
-class new_delete_resource final : public memory_resource<>
+#if !THRUST_DOXYGEN
+class new_delete_resource_base : public memory_resource<>
 {
 public:
     /*! Allocates memory of size at least \p bytes and alignment at least \p alignment.
@@ -96,10 +94,16 @@ public:
 #endif
     }
 };
+#endif // !THRUST_DOXYGEN
+
+/*! A memory resource that uses global operators new and delete to allocate and deallocate memory. Uses alignment-enabled
+ *      overloads when available, otherwise uses regular overloads and implements alignment requirements by itself.
+ */
+class new_delete_resource final : public new_delete_resource_base
+{};
 
 /*! \} // memory_resources
  */
 
 } // end mr
 THRUST_NAMESPACE_END
-

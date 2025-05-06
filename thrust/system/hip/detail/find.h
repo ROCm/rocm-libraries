@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2025, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -26,6 +26,8 @@
  *
  ******************************************************************************/
 #pragma once
+
+#include <thrust/detail/config.h>
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 #include <thrust/system/hip/config.h>
@@ -99,7 +101,7 @@ find_if_n(execution_policy<Derived>& policy,
           Size                       num_items,
           Predicate                  predicate)
 {
-    typedef typename thrust::tuple<bool, Size> result_type;
+    using result_type = typename thrust::tuple<bool, Size>;
 
     // empty sequence
     if(num_items == 0)
@@ -116,9 +118,9 @@ find_if_n(execution_policy<Derived>& policy,
     const Size interval_size      = (thrust::min)(interval_threshold, num_items);
 
     // force transform_iterator output to bool
-    typedef transform_input_iterator_t<bool, InputIt, Predicate>   XfrmIterator;
-    typedef thrust::tuple<XfrmIterator, counting_iterator_t<Size>> IteratorTuple;
-    typedef thrust::zip_iterator<IteratorTuple>                    ZipIterator;
+    using XfrmIterator  = transform_input_iterator_t<bool, InputIt, Predicate>;
+    using IteratorTuple = thrust::tuple<XfrmIterator, counting_iterator_t<Size>>;
+    using ZipIterator   = thrust::zip_iterator<IteratorTuple>;
 
     IteratorTuple iter_tuple
         = thrust::make_tuple(XfrmIterator(first, predicate), counting_iterator_t<Size>(0));
@@ -174,7 +176,7 @@ find_if_not(execution_policy<Derived>& policy,
             InputIt                    last,
             Predicate                  predicate)
 {
-    return hip_rocprim::find_if(policy, first, last, thrust::detail::not1(predicate));
+    return hip_rocprim::find_if(policy, first, last, thrust::not_fn(predicate));
 }
 
 template <class Derived, class InputIt, class T>

@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright© 2020 Advanced Micro Devices, Inc. All rights reserved.
+ * Modifications Copyright© 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
  *     * Redistributions of source code must retain the above copyright
@@ -30,9 +30,6 @@
 #pragma once
 
 #include <thrust/detail/config.h>
-#include <thrust/detail/cpp14_required.h>
-
-#if THRUST_CPP_DIALECT >= 2014
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 
@@ -59,13 +56,13 @@ struct async_transform_fn
   OutputIt output_;
   UnaryOperation op_;
 
-  __host__ __device__
+  THRUST_HOST_DEVICE
   async_transform_fn(ForwardIt&& first, OutputIt&& output, UnaryOperation&& op)
     : first_(std::move(first)), output_(std::move(output)), op_(std::move(op))
   {}
 
   template <typename Index>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   void operator()(Index idx)
   {
     output_[idx] = op_(thrust::raw_reference_cast(first_[idx]));
@@ -163,5 +160,3 @@ THRUST_RETURNS(
 THRUST_NAMESPACE_END
 
 #endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
-
-#endif

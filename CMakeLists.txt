@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright 2019-2023 Advanced Micro Devices, Inc.
+# Copyright 2019-2025 Advanced Micro Devices, Inc.
 # ########################################################################
 
 cmake_minimum_required(VERSION 3.10.2 FATAL_ERROR)
@@ -12,7 +12,48 @@ else()
 endif()
 
 # Thrust project
-project(rocthrust LANGUAGES CXX)
+# Note: C is required here for dependencies
+project(rocthrust LANGUAGES CXX C)
+
+# Set CXX flags
+if (NOT DEFINED CMAKE_CXX_STANDARD)
+  set(CMAKE_CXX_STANDARD 17)
+endif()
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+if (CMAKE_CXX_STANDARD EQUAL 14)
+  message(WARNING "C++14 will be deprecated in the next major release")
+elseif(NOT CMAKE_CXX_STANDARD EQUAL 17)
+  message(FATAL_ERROR "Only C++14 and C++17 are supported")
+endif()
+
+# Set HIP flags
+set(CMAKE_HIP_STANDARD 17)
+set(CMAKE_HIP_STANDARD_REQUIRED ON)
+set(CMAKE_HIP_EXTENSIONS OFF)
+
+include(CheckLanguage)
+include(CMakeDependentOption)
+
+# Build options
+# Disable -Werror
+option(DISABLE_WERROR "Disable building with Werror" ON)
+option(BUILD_TEST "Build tests" OFF)
+option(BUILD_HIPSTDPAR_TEST "Build hipstdpar tests" OFF)
+option(BUILD_HIPSTDPAR_TEST_WITH_TBB "Build hipstdpar tests with TBB" OFF)
+option(BUILD_EXAMPLES "Build examples" OFF)
+option(BUILD_BENCHMARKS "Build benchmarks" OFF)
+option(DOWNLOAD_ROCPRIM "Download rocPRIM and do not search for rocPRIM package" OFF)
+cmake_dependent_option(DOWNLOAD_ROCRAND "Download rocRAND and do not search for rocRAND package" OFF BUILD_BENCHMARKS OFF)
+option(DOWNLOAD_ROCRAND "Download rocRAND and do not search for rocRAND package" OFF)
+option(BUILD_ADDRESS_SANITIZER "Build with address sanitizer enabled" OFF)
+cmake_dependent_option(ENABLE_UPSTREAM_TESTS "Enable upstream (thrust) tests" ON BUILD_TEST OFF)
+#Set the header wrapper OFF by default.
+option(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY "Build with file/folder reorg with backward compatibility enabled" OFF)
+
+check_language(HIP)
+cmake_dependent_option(USE_HIPCXX "Use CMake HIP language support" OFF CMAKE_HIP_COMPILER OFF)
 
 #Adding CMAKE_PREFIX_PATH
 list( APPEND CMAKE_PREFIX_PATH /opt/rocm/llvm /opt/rocm ${ROCM_PATH} )
@@ -45,19 +86,30 @@ include( ROCMHeaderWrapper )
 include( ROCMCheckTargetIds )
 include( ROCMClients )
 
-# Use target ID syntax if supported for GPU_TARGETS
-if (NOT DEFINED AMDGPU_TARGETS)
-  set(GPU_TARGETS "all" CACHE STRING "GPU architectures to compile for")
+if(USE_HIPCXX)
+  enable_language(HIP)
 else()
-  set(GPU_TARGETS "${AMDGPU_TARGETS}" CACHE STRING "GPU architectures to compile for")
-endif()
-set_property(CACHE GPU_TARGETS PROPERTY STRINGS "all")
+  # Use target ID syntax if supported for GPU_TARGETS
+  if (NOT DEFINED AMDGPU_TARGETS)
+    set(GPU_TARGETS "all" CACHE STRING "GPU architectures to compile for")
+  else()
+    set(GPU_TARGETS "${AMDGPU_TARGETS}" CACHE STRING "GPU architectures to compile for")
+  endif()
+  set_property(CACHE GPU_TARGETS PROPERTY STRINGS "all")
 
-if(GPU_TARGETS STREQUAL "all")
-  rocm_check_target_ids(DEFAULT_AMDGPU_TARGETS
-    TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+;gfx940;gfx941;gfx942;gfx1030;gfx1100;gfx1101;gfx1102"
-  )
-  set(GPU_TARGETS "${DEFAULT_AMDGPU_TARGETS}" CACHE STRING "GPU architectures to compile for" FORCE)
+  if(GPU_TARGETS STREQUAL "all")
+    if(BUILD_ADDRESS_SANITIZER)
+      # ASAN builds require xnack
+      rocm_check_target_ids(DEFAULT_AMDGPU_TARGETS
+        TARGETS "gfx908:xnack+;gfx90a:xnack+;gfx942:xnack+;gfx950:xnack+"
+      )
+    else()
+      rocm_check_target_ids(DEFAULT_AMDGPU_TARGETS
+        TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1151;gfx1200;gfx1201"
+      )
+    endif()
+    set(GPU_TARGETS "${DEFAULT_AMDGPU_TARGETS}" CACHE STRING "GPU architectures to compile for" FORCE)
+  endif()
 endif()
 
 # Get dependencies
@@ -67,17 +119,6 @@ include(cmake/Dependencies.cmake)
 if (NOT WIN32)
   include(cmake/VerifyCompiler.cmake)
 endif()
-# Build options
-# Disable -Werror
-option(DISABLE_WERROR "Disable building with Werror" ON)
-option(BUILD_TEST "Build tests" OFF)
-option(BUILD_EXAMPLES "Build examples" OFF)
-option(BUILD_BENCHMARKS "Build benchmarks" OFF)
-option(DOWNLOAD_ROCPRIM "Download rocPRIM and do not search for rocPRIM package" OFF)
-option(BUILD_ADDRESS_SANITIZER "Build with address sanitizer enabled" OFF)
-option(ENABLE_UPSTREAM_TESTS "Enable upstream tests" OFF)
-#Set the header wrapper OFF by default.
-option(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY "Build with file/folder reorg with backward compatibility enabled" OFF)
 
 set(RNG_SEED_COUNT 0 CACHE STRING "Number of true random sequences to test each input size for")
 set(PRNG_SEEDS 1 CACHE STRING "Seeds of pseudo random sequences to test each input size for")
@@ -96,18 +137,10 @@ if (NOT THRUST_HOST_SYSTEM IN_LIST THRUST_HOST_SYSTEM_OPTIONS)
   )
 endif ()
 
-# Set CXX flags
-set(CMAKE_CXX_STANDARD 14)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_EXTENSIONS OFF)
-
-if(DISABLE_WERROR)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra ")
-else()
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Werror")
+set(COMPILE_OPTIONS -Wall -Wextra)
+if(NOT DISABLE_WERROR)
+  list(APPEND COMPILE_OPTIONS -Werror)
 endif()
-
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++14")
 
 if (WIN32)
   add_compile_options(-xhip)
@@ -116,13 +149,13 @@ endif()
 
 # Address Sanitizer
 if(BUILD_ADDRESS_SANITIZER)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -shared-libasan")
-  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=address -shared-libasan")
+  list(APPEND COMPILE_OPTIONS -fsanitize=address -shared-libasan)
   add_link_options(-fuse-ld=lld)
 endif()
 
 # Setup VERSION
-rocm_setup_version(VERSION "3.0.0")
+rocm_setup_version(VERSION "3.4.0")
+math(EXPR rocthrust_VERSION_NUMBER "${rocthrust_VERSION_MAJOR} * 100000 + ${rocthrust_VERSION_MINOR} * 100 + ${rocthrust_VERSION_PATCH}")
 
 # Print configuration summary
 include(cmake/Summary.cmake)
@@ -131,19 +164,19 @@ print_configuration_summary()
 # Thrust (with HIP backend)
 add_subdirectory(thrust)
 
-if(BUILD_TEST OR BUILD_BENCHMARKS)
+if(BUILD_TEST OR BUILD_BENCHMARKS OR BUILD_HIPSTDPAR_TEST)
   rocm_package_setup_component(clients)
 endif()
 
 # Tests
-if(BUILD_TEST)
+if(BUILD_TEST OR BUILD_HIPSTDPAR_TEST)
   rocm_package_setup_client_component(tests)
   if (ENABLE_UPSTREAM_TESTS)
     enable_testing()
   endif()
   # We still want the testing to be compiled to catch some errors
   #TODO: Get testing folder working with HIP on Windows
-  if (NOT WIN32)
+  if (NOT WIN32 AND BUILD_TEST)
     add_subdirectory(testing)
   endif()
   enable_testing()
@@ -157,7 +190,7 @@ endif()
 
 # Benchmarks
 if(BUILD_BENCHMARKS)
-  add_subdirectory(internal/benchmark)
+  add_subdirectory(benchmarks)
 endif()
 
 #Create header wrapper for backward compatibility
@@ -182,8 +215,8 @@ rocm_package_add_deb_dependencies(DEPENDS "rocprim-dev >= 2.10.1")
 rocm_package_add_rpm_dependencies(DEPENDS "rocprim-devel >= 2.10.1")
 set(CPACK_DEBIAN_PACKAGE_CONFLICTS "hip-thrust, thrust")
 set(CPACK_RPM_PACKAGE_CONFLICTS "hip-thrust, thrust")
-set(CPACK_DEBIAN_PACKAGE_PROVIDES "hipstdpar")
-set(CPACK_RPM_PACKAGE_PROVIDES "hipstdpar")
+set(CPACK_DEBIAN_DEVEL_PACKAGE_PROVIDES "hipstdpar")
+set(CPACK_RPM_DEVEL_PACKAGE_PROVIDES "hipstdpar")
 
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
 set(CPACK_RPM_PACKAGE_LICENSE "ASL 2.0")

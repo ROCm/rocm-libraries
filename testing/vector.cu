@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@
 #include <thrust/sequence.h>
 #include <thrust/device_malloc_allocator.h>
 
+#include <initializer_list>
 #include <vector>
 #include <list>
 #include <limits>
@@ -54,11 +55,35 @@ void TestVectorBool(void)
 }
 DECLARE_UNITTEST(TestVectorBool);
 
+template <class Vector>
+void TestVectorInitializerList(void)
+{
+    Vector v{1, 2, 3};
+    ASSERT_EQUAL(v.size(), 3lu);
+    ASSERT_EQUAL(v[0], 1);
+    ASSERT_EQUAL(v[1], 2);
+    ASSERT_EQUAL(v[2], 3);
+
+    v = {1, 2, 3, 4};
+    ASSERT_EQUAL(v.size(), 4lu);
+    ASSERT_EQUAL(v[0], 1);
+    ASSERT_EQUAL(v[1], 2);
+    ASSERT_EQUAL(v[2], 3);
+    ASSERT_EQUAL(v[3], 4);
+    
+    const auto alloc = v.get_allocator();
+    Vector v2{{1, 2, 3}, alloc};
+    ASSERT_EQUAL(v2.size(), 3lu);
+    ASSERT_EQUAL(v2[0], 1);
+    ASSERT_EQUAL(v2[1], 2);
+    ASSERT_EQUAL(v2[2], 3);
+}
+DECLARE_VECTOR_UNITTEST(TestVectorInitializerList);
 
 template <class Vector>
 void TestVectorFrontBack(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     Vector v(3);
     v[0] = 0; v[1] = 1; v[2] = 2;
@@ -72,8 +97,8 @@ DECLARE_VECTOR_UNITTEST(TestVectorFrontBack);
 template <class Vector>
 void TestVectorData(void)
 {
-    typedef typename Vector::pointer PointerT;
-    typedef typename Vector::const_pointer PointerConstT;
+    using PointerT = typename Vector::pointer;
+    using PointerConstT = typename Vector::const_pointer;
 
     Vector v(3);
     v[0] = 0; v[1] = 1; v[2] = 2;
@@ -127,7 +152,7 @@ DECLARE_VECTOR_UNITTEST(TestVectorElementAssignment);
 template <class Vector>
 void TestVectorFromSTLVector(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     std::vector<T> stl_vector(3);
     stl_vector[0] = 0;
@@ -154,7 +179,7 @@ DECLARE_VECTOR_UNITTEST(TestVectorFromSTLVector);
 template <class Vector>
 void TestVectorFillAssign(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     thrust::host_vector<T> v;
     v.assign(3, 13);
@@ -170,7 +195,7 @@ DECLARE_VECTOR_UNITTEST(TestVectorFillAssign);
 template <class Vector>
 void TestVectorAssignFromSTLVector(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     std::vector<T> stl_vector(3);
     stl_vector[0] = 0;
@@ -191,7 +216,7 @@ DECLARE_VECTOR_UNITTEST(TestVectorAssignFromSTLVector);
 template <class Vector>
 void TestVectorFromBiDirectionalIterator(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     std::list<T> stl_list;
     stl_list.push_back(0);
@@ -200,7 +225,7 @@ void TestVectorFromBiDirectionalIterator(void)
 
     Vector v(stl_list.begin(), stl_list.end());
 
-   ASSERT_EQUAL(v.size(), 3lu);
+    ASSERT_EQUAL(v.size(), 3lu);
     ASSERT_EQUAL(v[0], 0);
     ASSERT_EQUAL(v[1], 1);
     ASSERT_EQUAL(v[2], 2);
@@ -211,7 +236,7 @@ DECLARE_VECTOR_UNITTEST(TestVectorFromBiDirectionalIterator);
 template <class Vector>
 void TestVectorAssignFromBiDirectionalIterator(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     std::list<T> stl_list;
     stl_list.push_back(0);
@@ -232,7 +257,7 @@ DECLARE_VECTOR_UNITTEST(TestVectorAssignFromBiDirectionalIterator);
 template <class Vector>
 void TestVectorAssignFromHostVector(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     thrust::host_vector<T> h(3);
     h[0] = 0;
@@ -250,7 +275,7 @@ DECLARE_VECTOR_UNITTEST(TestVectorAssignFromHostVector);
 template <class Vector>
 void TestVectorToAndFromHostVector(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     thrust::host_vector<T> h(3);
     h[0] = 0;
@@ -289,7 +314,7 @@ DECLARE_VECTOR_UNITTEST(TestVectorToAndFromHostVector);
 template <class Vector>
 void TestVectorAssignFromDeviceVector(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     thrust::device_vector<T> d(3);
     d[0] = 0;
@@ -307,7 +332,7 @@ DECLARE_VECTOR_UNITTEST(TestVectorAssignFromDeviceVector);
 template <class Vector>
 void TestVectorToAndFromDeviceVector(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     thrust::device_vector<T> h(3);
     h[0] = 0;
@@ -346,7 +371,7 @@ DECLARE_VECTOR_UNITTEST(TestVectorToAndFromDeviceVector);
 template <class Vector>
 void TestVectorWithInitialValue(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     const T init = 17;
 
@@ -401,13 +426,13 @@ void TestVectorErasePosition(void)
 
     v.erase(v.begin() + 2);
 
-    ASSERT_EQUAL(v.size(), 2lu); 
+    ASSERT_EQUAL(v.size(), 2lu);
     ASSERT_EQUAL(v[0], 1);
     ASSERT_EQUAL(v[1], 3);
 
     v.erase(v.begin() + 1);
 
-    ASSERT_EQUAL(v.size(), 1lu); 
+    ASSERT_EQUAL(v.size(), 1lu);
     ASSERT_EQUAL(v[0], 1);
 
     v.erase(v.begin() + 0);
@@ -425,7 +450,7 @@ void TestVectorEraseRange(void)
 
     v.erase(v.begin() + 1, v.begin() + 3);
 
-    ASSERT_EQUAL(v.size(), 4lu); 
+    ASSERT_EQUAL(v.size(), 4lu);
     ASSERT_EQUAL(v[0], 0);
     ASSERT_EQUAL(v[1], 3);
     ASSERT_EQUAL(v[2], 4);
@@ -433,13 +458,13 @@ void TestVectorEraseRange(void)
 
     v.erase(v.begin() + 2, v.end());
 
-    ASSERT_EQUAL(v.size(), 2lu); 
+    ASSERT_EQUAL(v.size(), 2lu);
     ASSERT_EQUAL(v[0], 0);
     ASSERT_EQUAL(v[1], 3);
 
     v.erase(v.begin() + 0, v.begin() + 1);
 
-    ASSERT_EQUAL(v.size(), 1lu); 
+    ASSERT_EQUAL(v.size(), 1lu);
     ASSERT_EQUAL(v[0], 3);
 
     v.erase(v.begin(), v.end());
@@ -677,7 +702,7 @@ DECLARE_VECTOR_UNITTEST(TestVectorUninitialisedCopy);
 template <class Vector>
 void TestVectorShrinkToFit(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     Vector v;
 
@@ -704,7 +729,7 @@ struct LargeStruct
 {
   int data[N];
 
-  __host__ __device__
+  THRUST_HOST_DEVICE
   bool operator==(const LargeStruct & ls) const
   {
     for (int i = 0; i < N; i++)
@@ -719,7 +744,7 @@ void TestVectorContainingLargeType(void)
     // Thrust issue #5
     // http://code.google.com/p/thrust/issues/detail?id=5
     const static int N = 100;
-    typedef LargeStruct<N> T;
+    using T            = LargeStruct<N>;
 
     thrust::device_vector<T> dv1;
     thrust::host_vector<T>   hv1;
@@ -775,7 +800,6 @@ void TestVectorReversed(void)
 }
 DECLARE_VECTOR_UNITTEST(TestVectorReversed);
 
-#if THRUST_CPP_DIALECT >= 2011
   template <class Vector>
   void TestVectorMove(void)
   {
@@ -826,4 +850,4 @@ DECLARE_VECTOR_UNITTEST(TestVectorReversed);
     ASSERT_EQUAL(ptr3, ptr4);
   }
   DECLARE_VECTOR_UNITTEST(TestVectorMove);
-#endif
+

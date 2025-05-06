@@ -41,13 +41,13 @@ U& operator,(U&, void_exp_result<T>);
 template<typename src_type, typename dest_type> 
 struct clone_constness 
 {
-  typedef dest_type type; 
+  using type = dest_type; 
 }; 
 
 template<typename src_type, typename dest_type> 
 struct clone_constness<const src_type, dest_type> 
 { 
-  typedef const dest_type type; 
+  using type = const dest_type; 
 };
 
 } // end is_call_possible_detail
@@ -69,7 +69,7 @@ struct trait_name                                                               
       no member_function_name(...) const;                                                                                                 \
     };                                                                                                                                    \
                                                                                                                                           \
-    typedef typename thrust::detail::is_call_possible_detail::clone_constness<T, derived>::type derived_type;                             \
+    using derived_type = typename thrust::detail::is_call_possible_detail::clone_constness<T, derived>::type;                             \
                                                                                                                                           \
     template<typename U, typename Result>                                                                                                 \
     struct return_value_check                                                                                                             \
@@ -157,6 +157,6 @@ struct trait_name                                                               
                                                                                                                                           \
   public:                                                                                                                                 \
     static const bool value = impl<trait_name##_has_member<T,Signature>::value, Signature>::value;                                        \
-    typedef thrust::detail::integral_constant<bool,value> type;                                                                           \
+    using type = thrust::detail::integral_constant<bool,value>;                                                                           \
 }; 
 

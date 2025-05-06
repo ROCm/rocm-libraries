@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2023 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -37,12 +37,19 @@ namespace sequential
 
 
 template<typename T>
-__host__ __device__
+THRUST_HOST_DEVICE
   T *trivial_copy_n(const T *first,
                     std::ptrdiff_t n,
                     T *result)
 {
-  T* return_value = NULL;
+  if(n == 0)
+  {
+    // If `first` or `result` is an invalid pointer,
+    // the behavior of `std::memmove` is undefined, even if `n` is zero.
+    return result;
+  }
+
+  T* return_value = nullptr;
 
   NV_IF_TARGET(NV_IS_HOST, (
     std::memmove(result, first, n * sizeof(T));

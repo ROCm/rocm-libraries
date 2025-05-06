@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2022 NVIDIA Corporation
- *  Modifications Copyright© 2023 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -26,10 +26,14 @@
 #include <thrust/detail/config.h>
 
 #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
-#include <rocprim/detail/match_result_type.hpp>
+#include <rocprim/type_traits.hpp>
 #elif THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 #include <cuda/std/type_traits>
-#endif
+#elif defined(__has_include)
+#if __has_include(<cuda/std/type_traits>)
+#include <cuda/std/type_traits>
+#endif // __has_include
+#endif // THRUST_DEVICE_SYSTEM
 
 #include <type_traits>
 
@@ -41,35 +45,42 @@ template<typename T> class device_reference;
 namespace detail
 {
  /// helper classes [4.3].
- template<typename T, T v>
-   struct integral_constant
-   {
-     THRUST_INLINE_INTEGRAL_MEMBER_CONSTANT T value = v;
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+template<typename T, T v>
+using integral_constant = ::cuda::std::integral_constant<T, v>;
+using true_type  = ::cuda::std::true_type;
+using false_type = ::cuda::std::false_type;
+#else // THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
+template<typename T, T v>
+  struct integral_constant
+  {
+    THRUST_INLINE_INTEGRAL_MEMBER_CONSTANT T value = v;
 
-     typedef T                       value_type;
-     typedef integral_constant<T, v> type;
+    using value_type = T;
+    using type       = integral_constant<T, v>;
 
-     // We don't want to switch to std::integral_constant, because we want access
-     // to the C++14 operator(), but we'd like standard traits to interoperate
-     // with our version when tag dispatching.
-     integral_constant() = default;
+    // We don't want to switch to std::integral_constant, because we want access
+    // to the C++14 operator(), but we'd like standard traits to interoperate
+    // with our version when tag dispatching.
+    integral_constant() = default;
 
-     integral_constant(integral_constant const&) = default;
+    integral_constant(integral_constant const&) = default;
 
-     integral_constant& operator=(integral_constant const&) = default;
+    integral_constant& operator=(integral_constant const&) = default;
 
-     constexpr __host__ __device__
-     integral_constant(std::integral_constant<T, v>) noexcept {}
+    constexpr THRUST_HOST_DEVICE
+    integral_constant(std::integral_constant<T, v>) noexcept {}
 
-     constexpr __host__ __device__ operator value_type() const noexcept { return value; }
-     constexpr __host__ __device__ value_type operator()() const noexcept { return value; }
-   };
+    constexpr THRUST_HOST_DEVICE operator value_type() const noexcept { return value; }
+    constexpr THRUST_HOST_DEVICE value_type operator()() const noexcept { return value; }
+  };
 
- /// typedef for true_type
- typedef integral_constant<bool, true>  true_type;
+/// typedef for true_type
+using true_type = integral_constant<bool, true>;
 
- /// typedef for true_type
- typedef integral_constant<bool, false> false_type;
+/// typedef for true_type
+using false_type = integral_constant<bool, false>;
+#endif // THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 
 //template<typename T> struct is_integral : public std::tr1::is_integral<T> {};
 template<typename T> struct is_integral                           : public false_type {};
@@ -141,6 +152,19 @@ template<typename T> struct is_pod
  {};
 
 
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+template <typename T>
+struct has_trivial_constructor
+  : public integral_constant<bool, is_pod<T>::value || ::cuda::std::is_trivially_constructible<T>::value>
+{};
+
+template<typename T>
+struct has_trivial_copy_constructor
+  : public integral_constant<bool, is_pod<T>::value || ::cuda::std::is_trivially_copyable<T>::value>
+{};
+
+template<typename T> struct has_trivial_destructor : public is_pod<T> {};
+#else // THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
 template<typename T> struct has_trivial_constructor
   : public integral_constant<
       bool,
@@ -177,6 +201,7 @@ template <typename T>
 struct has_trivial_destructor : public is_pod<T>
 {
 };
+#endif // THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 
 template<typename T> struct is_const          : public false_type {};
 template<typename T> struct is_const<const T> : public true_type {};
@@ -187,49 +212,49 @@ template<typename T> struct is_volatile<volatile T> : public true_type {};
 template<typename T>
   struct add_const
 {
-  typedef T const type;
+  using type = T const;
 }; // end add_const
 
 template<typename T>
   struct remove_const
 {
-  typedef T type;
+  using type = T;
 }; // end remove_const
 
 template<typename T>
   struct remove_const<const T>
 {
-  typedef T type;
+  using type = T;
 }; // end remove_const
 
 template<typename T>
   struct add_volatile
 {
-  typedef volatile T type;
+  using type = volatile T;
 }; // end add_volatile
 
 template<typename T>
   struct remove_volatile
 {
-  typedef T type;
+  using type = T;
 }; // end remove_volatile
 
 template<typename T>
   struct remove_volatile<volatile T>
 {
-  typedef T type;
+  using type = T;
 }; // end remove_volatile
 
 template<typename T>
   struct add_cv
 {
-  typedef const volatile T type;
+  using type = const volatile T;
 }; // end add_cv
 
 template<typename T>
   struct remove_cv
 {
-  typedef typename remove_const<typename remove_volatile<T>::type>::type type;
+  using type = typename remove_const<typename remove_volatile<T>::type>::type;
 }; // end remove_cv
 
 
@@ -243,13 +268,17 @@ template<typename T> struct is_device_reference< thrust::device_reference<T> > :
 
 
 // NB: Careful with reference to void.
-template<typename _Tp, bool = (is_void<_Tp>::value || is_reference<_Tp>::value)>
-  struct __add_reference_helper
-  { typedef _Tp&    type; };
+template <typename _Tp, bool = (is_void<_Tp>::value || is_reference<_Tp>::value)>
+struct __add_reference_helper
+{
+  using type = _Tp&;
+};
 
-template<typename _Tp>
-  struct __add_reference_helper<_Tp, true>
-  { typedef _Tp     type; };
+template <typename _Tp>
+struct __add_reference_helper<_Tp, true>
+{
+  using type = _Tp;
+};
 
 template<typename _Tp>
   struct add_reference
@@ -258,13 +287,13 @@ template<typename _Tp>
 template<typename T>
   struct remove_reference
 {
-  typedef T type;
+  using type = T;
 }; // end remove_reference
 
 template<typename T>
   struct remove_reference<T&>
 {
-  typedef T type;
+  using type = T;
 }; // end remove_reference
 
 template<typename T1, typename T2>
@@ -303,88 +332,15 @@ template<typename T1, typename T2>
 {
 }; // end lazy_is_different
 
-#if THRUST_CPP_DIALECT >= 2011
 
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+template<class From, class To>
+using is_convertible = ::cuda::std::is_convertible<From, To>;
+#else // THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
 using std::is_convertible;
-
-#else
-
-namespace tt_detail
-{
-
-template<typename T>
-  struct is_int_or_cref
-{
-  typedef typename remove_reference<T>::type type_sans_ref;
-  static const bool value = (is_integral<T>::value
-                             || (is_integral<type_sans_ref>::value
-                                 && is_const<type_sans_ref>::value
-                                 && !is_volatile<type_sans_ref>::value));
-}; // end is_int_or_cref
+#endif // THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 
 
-THRUST_DISABLE_MSVC_POSSIBLE_LOSS_OF_DATA_WARNING_BEGIN
-THRUST_DISABLE_MSVC_FORCING_VALUE_TO_BOOL_WARNING_BEGIN
-
-template<typename From, typename To>
-  struct is_convertible_sfinae
-{
-  private:
-    typedef char                          yes;
-    typedef struct { char two_chars[2]; } no;
-
-    static inline yes   test(To) { return yes(); }
-    static inline no    test(...) { return no(); }
-    static inline typename remove_reference<From>::type& from() { typename remove_reference<From>::type* ptr = 0; return *ptr; }
-
-  public:
-    static const bool value = sizeof(test(from())) == sizeof(yes);
-}; // end is_convertible_sfinae
-
-
-THRUST_DISABLE_MSVC_FORCING_VALUE_TO_BOOL_WARNING_END
-THRUST_DISABLE_MSVC_POSSIBLE_LOSS_OF_DATA_WARNING_END
-
-
-template<typename From, typename To>
-  struct is_convertible_needs_simple_test
-{
-  static const bool from_is_void      = is_void<From>::value;
-  static const bool to_is_void        = is_void<To>::value;
-  static const bool from_is_float     = is_floating_point<typename remove_reference<From>::type>::value;
-  static const bool to_is_int_or_cref = is_int_or_cref<To>::value;
-
-  static const bool value = (from_is_void || to_is_void || (from_is_float && to_is_int_or_cref));
-}; // end is_convertible_needs_simple_test
-
-
-template<typename From, typename To,
-         bool = is_convertible_needs_simple_test<From,To>::value>
-  struct is_convertible
-{
-  static const bool value = (is_void<To>::value
-                             || (is_int_or_cref<To>::value
-                                 && !is_void<From>::value));
-}; // end is_convertible
-
-
-template<typename From, typename To>
-  struct is_convertible<From, To, false>
-{
-  static const bool value = (is_convertible_sfinae<typename
-                             add_reference<From>::type, To>::value);
-}; // end is_convertible
-
-
-} // end tt_detail
-
-template<typename From, typename To>
-  struct is_convertible
-    : public integral_constant<bool, tt_detail::is_convertible<From, To>::value>
-{
-}; // end is_convertible
-
-#endif
 
 template<typename T1, typename T2>
   struct is_one_convertible_to_the_other
@@ -444,10 +400,10 @@ template <typename Boolean>
 }; // end not_
 
 template<bool B, class T, class F>
-struct conditional { typedef T type; };
+struct conditional { using type = T; };
 
 template<class T, class F>
-struct conditional<false, T, F> { typedef F type; };
+struct conditional<false, T, F> { using type = F; };
 
 template <bool, typename Then, typename Else>
   struct eval_if
@@ -457,13 +413,13 @@ template <bool, typename Then, typename Else>
 template<typename Then, typename Else>
   struct eval_if<true, Then, Else>
 {
-  typedef typename Then::type type;
+  using type = typename Then::type;
 }; // end eval_if
 
 template<typename Then, typename Else>
   struct eval_if<false, Then, Else>
 {
-  typedef typename Else::type type;
+  using type = typename Else::type;
 }; // end eval_if
 
 template<typename T>
@@ -471,14 +427,14 @@ template<typename T>
 //  XXX WAR nvcc's confusion with thrust::identity
   struct identity_
 {
-  typedef T type;
+  using type = T;
 }; // end identity
 
 template<bool, typename T = void> struct enable_if {};
-template<typename T>              struct enable_if<true, T> {typedef T type;};
+template<typename T>              struct enable_if<true, T> {using type = T;};
 
 template<bool, typename T> struct lazy_enable_if {};
-template<typename T>       struct lazy_enable_if<true, T> {typedef typename T::type type;};
+template<typename T>       struct lazy_enable_if<true, T> {using type = typename T::type;};
 
 template<bool condition, typename T = void> struct disable_if : enable_if<!condition, T> {};
 template<bool condition, typename T>        struct lazy_disable_if : lazy_enable_if<!condition, T> {};
@@ -489,6 +445,8 @@ template<typename T1, typename T2, typename T = void>
     : enable_if< is_convertible<T1,T2>::value, T >
 {};
 
+template<typename T1, typename T2, typename T = void>
+using enable_if_convertible_t = typename enable_if_convertible<T1, T2, T>::type;
 
 template<typename T1, typename T2, typename T = void>
   struct disable_if_convertible
@@ -500,7 +458,6 @@ template<typename T1, typename T2, typename Result = void>
   struct enable_if_different
     : enable_if<is_different<T1,T2>::value, Result>
 {};
-
 
 template<typename T>
   struct is_numeric
@@ -523,29 +480,29 @@ namespace tt_detail
 
 template<typename T> struct make_unsigned_simple;
 
-template<> struct make_unsigned_simple<char>                   { typedef unsigned char          type; };
-template<> struct make_unsigned_simple<signed char>            { typedef unsigned char          type; };
-template<> struct make_unsigned_simple<unsigned char>          { typedef unsigned char          type; };
-template<> struct make_unsigned_simple<short>                  { typedef unsigned short         type; };
-template<> struct make_unsigned_simple<unsigned short>         { typedef unsigned short         type; };
-template<> struct make_unsigned_simple<int>                    { typedef unsigned int           type; };
-template<> struct make_unsigned_simple<unsigned int>           { typedef unsigned int           type; };
-template<> struct make_unsigned_simple<long int>               { typedef unsigned long int      type; };
-template<> struct make_unsigned_simple<unsigned long int>      { typedef unsigned long int      type; };
-template<> struct make_unsigned_simple<long long int>          { typedef unsigned long long int type; };
-template<> struct make_unsigned_simple<unsigned long long int> { typedef unsigned long long int type; };
+template<> struct make_unsigned_simple<char>                   { using type = unsigned char;          };
+template<> struct make_unsigned_simple<signed char>            { using type = unsigned char;          };
+template<> struct make_unsigned_simple<unsigned char>          { using type = unsigned char;          };
+template<> struct make_unsigned_simple<short>                  { using type = unsigned short;         };
+template<> struct make_unsigned_simple<unsigned short>         { using type = unsigned short;         };
+template<> struct make_unsigned_simple<int>                    { using type = unsigned int;           };
+template<> struct make_unsigned_simple<unsigned int>           { using type = unsigned int;           };
+template<> struct make_unsigned_simple<long int>               { using type = unsigned long int;      };
+template<> struct make_unsigned_simple<unsigned long int>      { using type = unsigned long int;      };
+template<> struct make_unsigned_simple<long long int>          { using type = unsigned long long int; };
+template<> struct make_unsigned_simple<unsigned long long int> { using type = unsigned long long int; };
 
 template<typename T>
   struct make_unsigned_base
 {
   // remove cv
-  typedef typename remove_cv<T>::type remove_cv_t;
+  using remove_cv_t = typename remove_cv<T>::type;
 
   // get the simple unsigned type
-  typedef typename make_unsigned_simple<remove_cv_t>::type unsigned_remove_cv_t;
+  using unsigned_remove_cv_t = typename make_unsigned_simple<remove_cv_t>::type;
 
   // add back const, volatile, both, or neither to the simple result
-  typedef typename eval_if<
+  using type = typename eval_if<
     is_const<T>::value && is_volatile<T>::value,
     // add cv back
     add_cv<unsigned_remove_cv_t>,
@@ -562,7 +519,7 @@ template<typename T>
         identity_<unsigned_remove_cv_t>
       >
     >
-  >::type type;
+  >::type;
 };
 
 } // end tt_detail
@@ -574,7 +531,7 @@ template<typename T>
 
 struct largest_available_float
 {
-  typedef double type;
+  using type = double;
 };
 
 // T1 wins if they are both the same size
@@ -587,46 +544,15 @@ template<typename T1, typename T2>
       >
 {};
 
-#if THRUST_CPP_DIALECT >= 2011
 
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+template<class Base, class Derived>
+using is_base_of = ::cuda::std::is_base_of<Base, Derived>;
+#else // THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
 using std::is_base_of;
-
-#else
-
-namespace is_base_of_ns
-{
-
-typedef char                          yes;
-typedef struct { char two_chars[2]; } no;
-
-template<typename Base, typename Derived>
-  struct host
-{
-  operator Base*() const;
-  operator Derived*();
-}; // end host
-
-template<typename Base, typename Derived>
-  struct impl
-{
-  template<typename T> static yes check(Derived *, T);
-  static no check(Base*, int);
-
-  static const bool value = sizeof(check(host<Base,Derived>(), int())) == sizeof(yes);
-}; // end impl
-
-} // end is_base_of_ns
+#endif // THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 
 
-template<typename Base, typename Derived>
-  struct is_base_of
-    : integral_constant<
-        bool,
-        is_base_of_ns::impl<Base,Derived>::value
-      >
-{};
-
-#endif
 
 template<typename Base, typename Derived, typename Result = void>
   struct enable_if_base_of
@@ -643,12 +569,15 @@ namespace is_assignable_ns
 template<typename T1, typename T2>
   class is_assignable
 {
-  typedef char                      yes_type;
-  typedef struct { char array[2]; } no_type;
+  using yes_type = char;
+  using no_type  = struct
+  {
+    char array[2];
+  };
 
   template<typename T> static typename add_reference<T>::type declval();
 
-  template<size_t> struct helper { typedef void * type; };
+  template<size_t> struct helper { using type = void *; };
 
   template<typename U1, typename U2> static yes_type test(typename helper<sizeof(declval<U1>() = declval<U2>())>::type);
 
@@ -683,18 +612,18 @@ template<typename T1, typename T2, typename Enable = void> struct promoted_numer
 
 template<typename T1, typename T2>
   struct promoted_numerical_type<T1,T2,typename enable_if<and_
-  <typename is_floating_point<T1>::type,typename is_floating_point<T2>::type>
+  <typename is_floating_point<T1>::type, typename is_floating_point<T2>::type>
   ::value>::type>
   {
-  typedef typename larger_type<T1,T2>::type type;
+  using type = typename larger_type<T1,T2>::type;
   };
 
 template<typename T1, typename T2>
   struct promoted_numerical_type<T1,T2,typename enable_if<and_
-  <typename is_integral<T1>::type,typename is_floating_point<T2>::type>
+  <typename is_integral<T1>::type, typename is_floating_point<T2>::type>
   ::value>::type>
   {
-  typedef T2 type;
+  using type = T2;
   };
 
 template<typename T1, typename T2>
@@ -702,7 +631,7 @@ template<typename T1, typename T2>
   <typename is_floating_point<T1>::type, typename is_integral<T2>::type>
   ::value>::type>
   {
-  typedef T1 type;
+  using type = T1;
   };
 
 template<typename T>
@@ -724,12 +653,18 @@ template<typename T>
 template <typename Invokable, typename... Args>
 using invoke_result_t =
 #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
-      typename ::rocprim::detail::invoke_result<Invokable, Args...>::type;
+  typename ::rocprim::invoke_result<Invokable, Args...>::type;
 #elif THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 #if THRUST_CPP_DIALECT < 2017
   typename ::cuda::std::result_of<Invokable(Args...)>::type;
 #else // 2017+
   ::cuda::std::invoke_result_t<Invokable, Args...>;
+#endif
+#else
+#if THRUST_CPP_DIALECT < 2017
+  std::result_of_t<Invokable(Args...)>;
+#else // 2017+
+  std::invoke_result_t<Invokable, Args...>;
 #endif
 #endif
 

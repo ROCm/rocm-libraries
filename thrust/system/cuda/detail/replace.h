@@ -83,7 +83,7 @@ namespace cuda_cub {
 template <class Derived,
           class Iterator,
           class T>
-void __host__ __device__
+void _CCCL_HOST_DEVICE
 replace(execution_policy<Derived> &policy,
         Iterator                   first,
         Iterator                   last,
@@ -104,7 +104,7 @@ template <class Derived,
           class Iterator,
           class Predicate,
           class T>
-void __host__ __device__
+void _CCCL_HOST_DEVICE
 replace_if(execution_policy<Derived> &policy,
            Iterator                   first,
            Iterator                   last,
@@ -124,7 +124,7 @@ template <class Derived,
           class StencilIt,
           class Predicate,
           class T>
-void __host__ __device__
+void _CCCL_HOST_DEVICE
 replace_if(execution_policy<Derived> &policy,
            Iterator                   first,
            Iterator                   last,
@@ -146,7 +146,7 @@ template <class Derived,
           class OutputIt,
           class Predicate,
           class T>
-OutputIt __host__ __device__
+OutputIt _CCCL_HOST_DEVICE
 replace_copy_if(execution_policy<Derived> &policy,
                 InputIt                    first,
                 InputIt                    last,
@@ -154,8 +154,8 @@ replace_copy_if(execution_policy<Derived> &policy,
                 Predicate                  predicate,
                 T const &                  new_value)
 {
-  typedef typename iterator_traits<OutputIt>::value_type output_type;
-  typedef __replace::new_value_if_f<Predicate, T, output_type> new_value_if_t;
+  using output_type    = typename iterator_traits<OutputIt>::value_type;
+  using new_value_if_t = __replace::new_value_if_f<Predicate, T, output_type>;
   return cuda_cub::transform(policy,
                              first,
                              last,
@@ -169,7 +169,7 @@ template <class Derived,
           class OutputIt,
           class Predicate,
           class T>
-OutputIt __host__ __device__
+OutputIt _CCCL_HOST_DEVICE
 replace_copy_if(execution_policy<Derived> &policy,
                 InputIt                    first,
                 InputIt                    last,
@@ -178,8 +178,8 @@ replace_copy_if(execution_policy<Derived> &policy,
                 Predicate                  predicate,
                 T const &                  new_value)
 {
-  typedef typename iterator_traits<OutputIt>::value_type output_type;
-  typedef __replace::new_value_if_f<Predicate, T, output_type> new_value_if_t;
+  using output_type    = typename iterator_traits<OutputIt>::value_type;
+  using new_value_if_t = __replace::new_value_if_f<Predicate, T, output_type>;
   return cuda_cub::transform(policy,
                            first,
                            last,
@@ -192,7 +192,7 @@ template <class Derived,
           class InputIt,
           class OutputIt,
           class T>
-OutputIt __host__ __device__
+OutputIt _CCCL_HOST_DEVICE
 replace_copy(execution_policy<Derived> &policy,
              InputIt                    first,
              InputIt                    last,

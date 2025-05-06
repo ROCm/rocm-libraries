@@ -7,6 +7,8 @@
 #include <iomanip>
 #include <cmath>
 
+#include "include/host_device.h"
+
 // we could vary M & N to find the perf sweet spot
 
 __host__ __device__
@@ -21,7 +23,7 @@ unsigned int hash(unsigned int a)
     return a;
 }
 
-struct estimate_pi : public thrust::unary_function<unsigned int,float>
+struct estimate_pi
 {
   __host__ __device__
   float operator()(unsigned int thread_id)

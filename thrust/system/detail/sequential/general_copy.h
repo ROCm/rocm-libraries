@@ -64,9 +64,9 @@ struct reference_is_assignable
 // introduce an iterator assign helper to deal with assignments from
 // a wrapped reference
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template<typename OutputIterator, typename InputIterator>
-inline __host__ __device__
+inline THRUST_HOST_DEVICE
 typename thrust::detail::enable_if<
   reference_is_assignable<InputIterator,OutputIterator>::value
 >::type
@@ -76,15 +76,15 @@ iter_assign(OutputIterator dst, InputIterator src)
 }
 
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template<typename OutputIterator, typename InputIterator>
-inline __host__ __device__
+inline THRUST_HOST_DEVICE
 typename thrust::detail::disable_if<
   reference_is_assignable<InputIterator,OutputIterator>::value
 >::type
 iter_assign(OutputIterator dst, InputIterator src)
 {
-  typedef typename thrust::iterator_value<InputIterator>::type value_type;
+  using value_type = typename thrust::iterator_value<InputIterator>::type;
 
   // insert a temporary and hope for the best
   *dst = static_cast<value_type>(*src);
@@ -94,10 +94,10 @@ iter_assign(OutputIterator dst, InputIterator src)
 } // end general_copy_detail
 
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template<typename InputIterator,
          typename OutputIterator>
-__host__ __device__
+THRUST_HOST_DEVICE
   OutputIterator general_copy(InputIterator first,
                               InputIterator last,
                               OutputIterator result)
@@ -116,11 +116,11 @@ __host__ __device__
 } // end general_copy()
 
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template<typename InputIterator,
          typename Size,
          typename OutputIterator>
-__host__ __device__
+THRUST_HOST_DEVICE
   OutputIterator general_copy_n(InputIterator first,
                                 Size n,
                                 OutputIterator result)

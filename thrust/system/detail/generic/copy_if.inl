@@ -49,7 +49,7 @@ template<typename IndexType,
          typename InputIterator2,
          typename OutputIterator,
          typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 OutputIterator copy_if(thrust::execution_policy<DerivedPolicy> &exec,
                        InputIterator1 first,
                        InputIterator1 last,
@@ -99,7 +99,7 @@ template<typename DerivedPolicy,
          typename InputIterator,
          typename OutputIterator,
          typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
   OutputIterator copy_if(thrust::execution_policy<DerivedPolicy> &exec,
                          InputIterator first,
                          InputIterator last,
@@ -119,7 +119,7 @@ template<typename DerivedPolicy,
          typename InputIterator2,
          typename OutputIterator,
          typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
    OutputIterator copy_if(thrust::execution_policy<DerivedPolicy> &exec,
                           InputIterator1 first,
                           InputIterator1 last,
@@ -127,8 +127,8 @@ __host__ __device__
                           OutputIterator result,
                           Predicate pred)
 {
-  typedef typename thrust::iterator_traits<InputIterator1>::difference_type difference_type;
-  
+  using difference_type = typename thrust::iterator_traits<InputIterator1>::difference_type;
+
   // empty sequence
   if(first == last)
     return result;

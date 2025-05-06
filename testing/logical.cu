@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -24,14 +24,14 @@
 template <class Vector>
 void TestAllOf(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     Vector v(3, 1);
 
     ASSERT_EQUAL(thrust::all_of(v.begin(), v.end(), thrust::identity<T>()), true);
 
     v[1] = 0;
-
+    
     ASSERT_EQUAL(thrust::all_of(v.begin(), v.end(), thrust::identity<T>()), false);
 
     ASSERT_EQUAL(thrust::all_of(v.begin() + 0, v.begin() + 0, thrust::identity<T>()), true);
@@ -43,7 +43,7 @@ DECLARE_VECTOR_UNITTEST(TestAllOf);
 
 
 template <class InputIterator, class Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 bool all_of(my_system &system, InputIterator, InputIterator, Predicate)
 {
     system.validate_dispatch();
@@ -63,7 +63,7 @@ DECLARE_UNITTEST(TestAllOfDispatchExplicit);
 
 
 template <class InputIterator, class Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 bool all_of(my_tag, InputIterator first, InputIterator, Predicate)
 {
     *first = 13;
@@ -86,14 +86,14 @@ DECLARE_UNITTEST(TestAllOfDispatchImplicit);
 template <class Vector>
 void TestAnyOf(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     Vector v(3, 1);
 
     ASSERT_EQUAL(thrust::any_of(v.begin(), v.end(), thrust::identity<T>()), true);
 
     v[1] = 0;
-
+    
     ASSERT_EQUAL(thrust::any_of(v.begin(), v.end(), thrust::identity<T>()), true);
 
     ASSERT_EQUAL(thrust::any_of(v.begin() + 0, v.begin() + 0, thrust::identity<T>()), false);
@@ -105,7 +105,7 @@ DECLARE_VECTOR_UNITTEST(TestAnyOf);
 
 
 template <class InputIterator, class Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 bool any_of(my_system &system, InputIterator, InputIterator, Predicate)
 {
     system.validate_dispatch();
@@ -125,7 +125,7 @@ DECLARE_UNITTEST(TestAnyOfDispatchExplicit);
 
 
 template <class InputIterator, class Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 bool any_of(my_tag, InputIterator first, InputIterator, Predicate)
 {
     *first = 13;
@@ -148,14 +148,14 @@ DECLARE_UNITTEST(TestAnyOfDispatchImplicit);
 template <class Vector>
 void TestNoneOf(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     Vector v(3, 1);
 
     ASSERT_EQUAL(thrust::none_of(v.begin(), v.end(), thrust::identity<T>()), false);
 
     v[1] = 0;
-
+    
     ASSERT_EQUAL(thrust::none_of(v.begin(), v.end(), thrust::identity<T>()), false);
 
     ASSERT_EQUAL(thrust::none_of(v.begin() + 0, v.begin() + 0, thrust::identity<T>()), true);
@@ -167,7 +167,7 @@ DECLARE_VECTOR_UNITTEST(TestNoneOf);
 
 
 template <class InputIterator, class Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 bool none_of(my_system &system, InputIterator, InputIterator, Predicate)
 {
     system.validate_dispatch();
@@ -187,7 +187,7 @@ DECLARE_UNITTEST(TestNoneOfDispatchExplicit);
 
 
 template <class InputIterator, class Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 bool none_of(my_tag, InputIterator first, InputIterator, Predicate)
 {
     *first = 13;
@@ -205,3 +205,4 @@ void TestNoneOfDispatchImplicit()
     ASSERT_EQUAL(13, vec.front());
 }
 DECLARE_UNITTEST(TestNoneOfDispatchImplicit);
+

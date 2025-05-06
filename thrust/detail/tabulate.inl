@@ -26,9 +26,9 @@
 THRUST_NAMESPACE_BEGIN
 
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template<typename DerivedPolicy, typename ForwardIterator, typename UnaryOperation>
-__host__ __device__
+THRUST_HOST_DEVICE
   void tabulate(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
                 ForwardIterator first,
                 ForwardIterator last,
@@ -46,7 +46,7 @@ template<typename ForwardIterator, typename UnaryOperation>
 {
   using thrust::system::detail::generic::select_system;
 
-  typedef typename thrust::iterator_system<ForwardIterator>::type System;
+  using System = typename thrust::iterator_system<ForwardIterator>::type;
 
   System system;
 

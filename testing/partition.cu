@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -32,17 +32,17 @@
 template<typename T>
 struct is_even
 {
-    __host__ __device__
+    THRUST_HOST_DEVICE
     bool operator()(T x) const { return ((int) x % 2) == 0; }
 };
 
-typedef unittest::type_list<unittest::int8_t,unittest::int16_t,unittest::int32_t> PartitionTypes;
+using PartitionTypes = unittest::type_list<unittest::int8_t, unittest::int16_t, unittest::int32_t>;
 
 template<typename Vector>
 void TestPartitionSimple(void)
 {
-    typedef typename Vector::value_type T;
-    typedef typename Vector::iterator   Iterator;
+    using T        = typename Vector::value_type;
+    using Iterator = typename Vector::iterator;
 
     // GCC 11 miscompiles and segfaults for certain versions of this test.
     // It's not reproducible on other compilers, and the test passes when
@@ -56,11 +56,11 @@ void TestPartitionSimple(void)
 #endif
 
     Vector data(5);
-    data[0] = 1;
-    data[1] = 2;
+    data[0] = 1; 
+    data[1] = 2; 
     data[2] = 1;
-    data[3] = 1;
-    data[4] = 2;
+    data[3] = 1; 
+    data[4] = 2; 
 
     Iterator iter = thrust::partition(data.begin(), data.end(), is_even<T>());
 
@@ -79,8 +79,8 @@ DECLARE_INTEGRAL_VECTOR_UNITTEST(TestPartitionSimple);
 template<typename Vector>
 void TestPartitionStencilSimple(void)
 {
-    typedef typename Vector::value_type T;
-    typedef typename Vector::iterator   Iterator;
+    using T        = typename Vector::value_type;
+    using Iterator = typename Vector::iterator;
 
     Vector data(5);
     data[0] = 0;
@@ -90,11 +90,11 @@ void TestPartitionStencilSimple(void)
     data[4] = 1;
 
     Vector stencil(5);
-    stencil[0] = 1;
-    stencil[1] = 2;
+    stencil[0] = 1; 
+    stencil[1] = 2; 
     stencil[2] = 1;
-    stencil[3] = 1;
-    stencil[4] = 2;
+    stencil[3] = 1; 
+    stencil[4] = 2; 
 
     Iterator iter = thrust::partition(data.begin(), data.end(), stencil.begin(), is_even<T>());
 
@@ -114,14 +114,14 @@ DECLARE_INTEGRAL_VECTOR_UNITTEST(TestPartitionStencilSimple);
 template<typename Vector>
 void TestPartitionCopySimple(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     Vector data(5);
-    data[0] =  1;
-    data[1] =  2;
+    data[0] =  1; 
+    data[1] =  2; 
     data[2] =  1;
-    data[3] =  1;
-    data[4] =  2;
+    data[3] =  1; 
+    data[4] =  2; 
 
     Vector true_results(2);
     Vector false_results(3);
@@ -149,21 +149,21 @@ DECLARE_INTEGRAL_VECTOR_UNITTEST(TestPartitionCopySimple);
 template<typename Vector>
 void TestPartitionCopyStencilSimple(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     Vector data(5);
-    data[0] =  0;
-    data[1] =  1;
+    data[0] =  0; 
+    data[1] =  1; 
     data[2] =  0;
-    data[3] =  0;
-    data[4] =  1;
+    data[3] =  0; 
+    data[4] =  1; 
 
     Vector stencil(5);
-    stencil[0] =  1;
-    stencil[1] =  2;
+    stencil[0] =  1; 
+    stencil[1] =  2; 
     stencil[2] =  1;
-    stencil[3] =  1;
-    stencil[4] =  2;
+    stencil[3] =  1; 
+    stencil[4] =  2; 
 
     Vector true_results(2);
     Vector false_results(3);
@@ -191,15 +191,15 @@ DECLARE_INTEGRAL_VECTOR_UNITTEST(TestPartitionCopyStencilSimple);
 template<typename Vector>
 void TestStablePartitionSimple(void)
 {
-    typedef typename Vector::value_type T;
-    typedef typename Vector::iterator   Iterator;
+    using T        = typename Vector::value_type;
+    using Iterator = typename Vector::iterator;
 
     Vector data(5);
-    data[0] =  1;
-    data[1] =  2;
+    data[0] =  1; 
+    data[1] =  2; 
     data[2] =  1;
-    data[3] =  3;
-    data[4] =  2;
+    data[3] =  3; 
+    data[4] =  2; 
 
     Iterator iter = thrust::stable_partition(data.begin(), data.end(), is_even<T>());
 
@@ -219,15 +219,15 @@ DECLARE_INTEGRAL_VECTOR_UNITTEST(TestStablePartitionSimple);
 template<typename Vector>
 void TestStablePartitionStencilSimple(void)
 {
-    typedef typename Vector::value_type T;
-    typedef typename Vector::iterator   Iterator;
+    using T        = typename Vector::value_type;
+    using Iterator = typename Vector::iterator;
 
     Vector data(5);
-    data[0] =  1;
-    data[1] =  2;
+    data[0] =  1; 
+    data[1] =  2; 
     data[2] =  1;
-    data[3] =  3;
-    data[4] =  2;
+    data[3] =  3; 
+    data[4] =  2; 
 
     Vector stencil(5);
     stencil[0] = 0;
@@ -254,14 +254,14 @@ DECLARE_VECTOR_UNITTEST(TestStablePartitionStencilSimple);
 template<typename Vector>
 void TestStablePartitionCopySimple(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     Vector data(5);
-    data[0] =  1;
-    data[1] =  2;
+    data[0] =  1; 
+    data[1] =  2; 
     data[2] =  1;
-    data[3] =  1;
-    data[4] =  2;
+    data[3] =  1; 
+    data[4] =  2; 
 
     Vector true_results(2);
     Vector false_results(3);
@@ -289,14 +289,14 @@ DECLARE_INTEGRAL_VECTOR_UNITTEST(TestStablePartitionCopySimple);
 template<typename Vector>
 void TestStablePartitionCopyStencilSimple(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     Vector data(5);
-    data[0] =  1;
-    data[1] =  2;
+    data[0] =  1; 
+    data[1] =  2; 
     data[2] =  1;
-    data[3] =  1;
-    data[4] =  2;
+    data[3] =  1; 
+    data[4] =  2; 
 
     Vector stencil(5);
     stencil[0] = false;
@@ -393,7 +393,7 @@ struct TestPartitionCopy
         // setup input ranges
         thrust::host_vector<T>   h_data = unittest::random_integers<T>(n);
         thrust::device_vector<T> d_data = h_data;
-
+        
         std::ptrdiff_t n_true  = thrust::count_if(h_data.begin(), h_data.end(), is_even<T>());
         std::ptrdiff_t n_false = n - n_true;
 
@@ -437,7 +437,7 @@ struct TestPartitionCopyStencil
         thrust::host_vector<T>   h_stencil = unittest::random_integers<T>(n);
         thrust::device_vector<T> d_data = h_data;
         thrust::device_vector<T> d_stencil = h_stencil;
-
+        
         std::ptrdiff_t n_true  = thrust::count_if(h_data.begin(), h_data.end(), is_even<T>());
         std::ptrdiff_t n_false = n - n_true;
 
@@ -481,7 +481,7 @@ struct TestStablePartitionCopyStencil
         thrust::host_vector<T>   h_stencil = unittest::random_integers<T>(n);
         thrust::device_vector<T> d_data = h_data;
         thrust::device_vector<T> d_stencil = h_stencil;
-
+        
         std::ptrdiff_t n_true  = thrust::count_if(h_stencil.begin(), h_stencil.end(), is_even<T>());
         std::ptrdiff_t n_false = n - n_true;
 
@@ -523,7 +523,7 @@ struct TestPartitionCopyToDiscardIterator
         // setup input ranges
         thrust::host_vector<T>   h_data = unittest::random_integers<T>(n);
         thrust::device_vector<T> d_data = h_data;
-
+        
         std::ptrdiff_t n_true  = thrust::count_if(h_data.begin(), h_data.end(), is_even<T>());
         std::ptrdiff_t n_false = n - n_true;
 
@@ -628,7 +628,7 @@ struct TestPartitionCopyStencilToDiscardIterator
         thrust::host_vector<T>   h_stencil = unittest::random_integers<T>(n);
         thrust::device_vector<T> d_data = h_data;
         thrust::device_vector<T> d_stencil = h_stencil;
-
+        
         std::ptrdiff_t n_true  = thrust::count_if(h_stencil.begin(), h_stencil.end(), is_even<T>());
         std::ptrdiff_t n_false = n - n_true;
 
@@ -787,7 +787,7 @@ struct TestStablePartitionCopy
         // setup input ranges
         thrust::host_vector<T>   h_data = unittest::random_integers<T>(n);
         thrust::device_vector<T> d_data = h_data;
-
+        
         std::ptrdiff_t n_true  = thrust::count_if(h_data.begin(), h_data.end(), is_even<T>());
         std::ptrdiff_t n_false = n - n_true;
 
@@ -825,7 +825,7 @@ struct TestStablePartitionCopyToDiscardIterator
         // setup input ranges
         thrust::host_vector<T>   h_data = unittest::random_integers<T>(n);
         thrust::device_vector<T> d_data = h_data;
-
+        
         std::ptrdiff_t n_true  = thrust::count_if(h_data.begin(), h_data.end(), is_even<T>());
         std::ptrdiff_t n_false = n - n_true;
 
@@ -930,7 +930,7 @@ struct TestStablePartitionCopyStencilToDiscardIterator
         thrust::host_vector<T>   h_stencil = unittest::random_integers<T>(n);
         thrust::device_vector<T> d_data = h_data;
         thrust::device_vector<T> d_stencil = h_stencil;
-
+        
         std::ptrdiff_t n_true  = thrust::count_if(h_stencil.begin(), h_stencil.end(), is_even<T>());
         std::ptrdiff_t n_false = n - n_true;
 
@@ -1034,7 +1034,7 @@ VariableUnitTest<TestStablePartitionCopyStencilToDiscardIterator, PartitionTypes
 struct is_ordered
 {
     template <typename Tuple>
-    __host__ __device__
+    THRUST_HOST_DEVICE
     bool operator()(const Tuple& t) const
     {
         return thrust::get<0>(t) <= thrust::get<1>(t);
@@ -1048,15 +1048,15 @@ void TestPartitionZipIterator(void)
     Vector data1(5);
     Vector data2(5);
 
-    data1[0] = 1;  data2[0] = 2;
+    data1[0] = 1;  data2[0] = 2; 
     data1[1] = 2;  data2[1] = 1;
     data1[2] = 1;  data2[2] = 2;
     data1[3] = 1;  data2[3] = 2;
     data1[4] = 2;  data2[4] = 1;
 
-    typedef typename Vector::iterator           Iterator;
-    typedef thrust::tuple<Iterator,Iterator>    IteratorTuple;
-    typedef thrust::zip_iterator<IteratorTuple> ZipIterator;
+    using Iterator      = typename Vector::iterator;
+    using IteratorTuple = thrust::tuple<Iterator, Iterator>;
+    using ZipIterator   = thrust::zip_iterator<IteratorTuple>;
 
     ZipIterator begin = thrust::make_zip_iterator(thrust::make_tuple(data1.begin(), data2.begin()));
     ZipIterator end   = thrust::make_zip_iterator(thrust::make_tuple(data1.end(),   data2.end()));
@@ -1092,15 +1092,15 @@ void TestPartitionStencilZipIterator(void)
     Vector stencil1(5);
     Vector stencil2(5);
 
-    stencil1[0] = 1;  stencil2[0] = 2;
+    stencil1[0] = 1;  stencil2[0] = 2; 
     stencil1[1] = 2;  stencil2[1] = 1;
     stencil1[2] = 1;  stencil2[2] = 2;
     stencil1[3] = 1;  stencil2[3] = 2;
     stencil1[4] = 2;  stencil2[4] = 1;
 
-    typedef typename Vector::iterator           Iterator;
-    typedef thrust::tuple<Iterator,Iterator>    IteratorTuple;
-    typedef thrust::zip_iterator<IteratorTuple> ZipIterator;
+    using Iterator      = typename Vector::iterator;
+    using IteratorTuple = thrust::tuple<Iterator, Iterator>;
+    using ZipIterator   = thrust::zip_iterator<IteratorTuple>;
 
     ZipIterator stencil_begin = thrust::make_zip_iterator(thrust::make_tuple(stencil1.begin(), stencil2.begin()));
 
@@ -1126,15 +1126,15 @@ void TestStablePartitionZipIterator(void)
     Vector data1(5);
     Vector data2(5);
 
-    data1[0] = 1;  data2[0] = 2;
+    data1[0] = 1;  data2[0] = 2; 
     data1[1] = 2;  data2[1] = 0;
     data1[2] = 1;  data2[2] = 3;
     data1[3] = 1;  data2[3] = 2;
     data1[4] = 2;  data2[4] = 1;
 
-    typedef typename Vector::iterator           Iterator;
-    typedef thrust::tuple<Iterator,Iterator>    IteratorTuple;
-    typedef thrust::zip_iterator<IteratorTuple> ZipIterator;
+    using Iterator      = typename Vector::iterator;
+    using IteratorTuple = thrust::tuple<Iterator, Iterator>;
+    using ZipIterator   = thrust::zip_iterator<IteratorTuple>;
 
     ZipIterator begin = thrust::make_zip_iterator(thrust::make_tuple(data1.begin(), data2.begin()));
     ZipIterator end   = thrust::make_zip_iterator(thrust::make_tuple(data1.end(),   data2.end()));
@@ -1170,15 +1170,15 @@ void TestStablePartitionStencilZipIterator(void)
     Vector stencil1(5);
     Vector stencil2(5);
 
-    stencil1[0] = 1;  stencil2[0] = 2;
+    stencil1[0] = 1;  stencil2[0] = 2; 
     stencil1[1] = 2;  stencil2[1] = 0;
     stencil1[2] = 1;  stencil2[2] = 3;
     stencil1[3] = 1;  stencil2[3] = 2;
     stencil1[4] = 2;  stencil2[4] = 1;
 
-    typedef typename Vector::iterator           Iterator;
-    typedef thrust::tuple<Iterator,Iterator>    IteratorTuple;
-    typedef thrust::zip_iterator<IteratorTuple> ZipIterator;
+    using Iterator      = typename Vector::iterator;
+    using IteratorTuple = thrust::tuple<Iterator, Iterator>;
+    using ZipIterator   = thrust::zip_iterator<IteratorTuple>;
 
     ZipIterator stencil_begin = thrust::make_zip_iterator(thrust::make_tuple(stencil1.begin(), stencil2.begin()));
 
@@ -1200,7 +1200,7 @@ DECLARE_VECTOR_UNITTEST(TestStablePartitionStencilZipIterator);
 
 template<typename ForwardIterator,
          typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 ForwardIterator partition(my_system &system,
                           ForwardIterator first,
                           ForwardIterator,
@@ -1228,7 +1228,7 @@ DECLARE_UNITTEST(TestPartitionDispatchExplicit);
 template<typename ForwardIterator,
          typename InputIterator,
          typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 ForwardIterator partition(my_system &system,
                           ForwardIterator first,
                           ForwardIterator,
@@ -1257,7 +1257,7 @@ DECLARE_UNITTEST(TestPartitionStencilDispatchExplicit);
 
 template<typename ForwardIterator,
          typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 ForwardIterator partition(my_tag,
                           ForwardIterator first,
                           ForwardIterator,
@@ -1283,7 +1283,7 @@ DECLARE_UNITTEST(TestPartitionDispatchImplicit);
 template<typename ForwardIterator,
          typename InputIterator,
          typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 ForwardIterator partition(my_tag,
                           ForwardIterator first,
                           ForwardIterator,
@@ -1311,7 +1311,7 @@ template<typename InputIterator,
          typename OutputIterator1,
          typename OutputIterator2,
          typename Predicate>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   thrust::pair<OutputIterator1,OutputIterator2>
     partition_copy(my_system &system,
                    InputIterator,
@@ -1346,7 +1346,7 @@ template<typename InputIterator1,
          typename OutputIterator1,
          typename OutputIterator2,
          typename Predicate>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   thrust::pair<OutputIterator1,OutputIterator2>
     partition_copy(my_system &system,
                    InputIterator1,
@@ -1382,7 +1382,7 @@ template<typename InputIterator,
          typename OutputIterator1,
          typename OutputIterator2,
          typename Predicate>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   thrust::pair<OutputIterator1,OutputIterator2>
     partition_copy(my_tag,
                    InputIterator first,
@@ -1415,7 +1415,7 @@ template<typename InputIterator1,
          typename OutputIterator1,
          typename OutputIterator2,
          typename Predicate>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   thrust::pair<OutputIterator1,OutputIterator2>
     partition_copy(my_tag,
                    InputIterator1 first,
@@ -1447,7 +1447,7 @@ DECLARE_UNITTEST(TestPartitionCopyStencilDispatchImplicit);
 
 template<typename ForwardIterator,
          typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 ForwardIterator stable_partition(my_system &system,
                                  ForwardIterator first,
                                  ForwardIterator,
@@ -1475,7 +1475,7 @@ DECLARE_UNITTEST(TestStablePartitionDispatchExplicit);
 template<typename ForwardIterator,
          typename InputIterator,
          typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 ForwardIterator stable_partition(my_system &system,
                                  ForwardIterator first,
                                  ForwardIterator,
@@ -1504,7 +1504,7 @@ DECLARE_UNITTEST(TestStablePartitionStencilDispatchExplicit);
 
 template<typename ForwardIterator,
          typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 ForwardIterator stable_partition(my_tag,
                                  ForwardIterator first,
                                  ForwardIterator,
@@ -1530,7 +1530,7 @@ DECLARE_UNITTEST(TestStablePartitionDispatchImplicit);
 template<typename ForwardIterator,
          typename InputIterator,
          typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 ForwardIterator stable_partition(my_tag,
                                  ForwardIterator first,
                                  ForwardIterator,
@@ -1559,7 +1559,7 @@ template<typename InputIterator,
          typename OutputIterator1,
          typename OutputIterator2,
          typename Predicate>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   thrust::pair<OutputIterator1,OutputIterator2>
     stable_partition_copy(my_system &system,
                           InputIterator,
@@ -1594,7 +1594,7 @@ template<typename InputIterator1,
          typename OutputIterator1,
          typename OutputIterator2,
          typename Predicate>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   thrust::pair<OutputIterator1,OutputIterator2>
     stable_partition_copy(my_system &system,
                           InputIterator1,
@@ -1630,7 +1630,7 @@ template<typename InputIterator,
          typename OutputIterator1,
          typename OutputIterator2,
          typename Predicate>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   thrust::pair<OutputIterator1,OutputIterator2>
     stable_partition_copy(my_tag,
                           InputIterator first,
@@ -1663,7 +1663,7 @@ template<typename InputIterator1,
          typename OutputIterator1,
          typename OutputIterator2,
          typename Predicate>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   thrust::pair<OutputIterator1,OutputIterator2>
     stable_partition_copy(my_tag,
                           InputIterator1 first,
@@ -1691,3 +1691,4 @@ void TestStablePartitionCopyStencilDispatchImplicit()
     ASSERT_EQUAL(13, vec.front());
 }
 DECLARE_UNITTEST(TestStablePartitionCopyStencilDispatchImplicit);
+

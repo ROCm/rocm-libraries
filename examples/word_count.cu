@@ -1,9 +1,11 @@
 #include <thrust/device_vector.h>
-#include <thrust/reduce.h>
 #include <thrust/functional.h>
 #include <thrust/inner_product.h>
+#include <thrust/reduce.h>
 
 #include <iostream>
+
+#include "include/host_device.h"
 
 // This example computes the number of words in a text sample
 // with a single call to thrust::inner_product.  The algorithm
@@ -21,7 +23,6 @@ bool is_alpha(const char c)
 
 // determines whether the right character begins a new word
 struct is_word_start
-    : public thrust::binary_function<const char&, const char&, bool>
 {
     __host__ __device__
     bool operator()(const char& left, const char& right) const

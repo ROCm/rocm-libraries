@@ -31,15 +31,15 @@ namespace sequential
 {
 
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template<typename RandomAccessIterator,
          typename StrictWeakOrdering>
-__host__ __device__
+THRUST_HOST_DEVICE
 void insertion_sort(RandomAccessIterator first,
                     RandomAccessIterator last,
                     StrictWeakOrdering comp)
 {
-  typedef typename thrust::iterator_value<RandomAccessIterator>::type value_type;
+  using value_type = typename thrust::iterator_value<RandomAccessIterator>::type;
 
   if(first == last) return;
 
@@ -79,18 +79,18 @@ void insertion_sort(RandomAccessIterator first,
 }
 
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template<typename RandomAccessIterator1,
          typename RandomAccessIterator2,
          typename StrictWeakOrdering>
-__host__ __device__
+THRUST_HOST_DEVICE
 void insertion_sort_by_key(RandomAccessIterator1 first1,
                            RandomAccessIterator1 last1,
                            RandomAccessIterator2 first2,
                            StrictWeakOrdering comp)
 {
-  typedef typename thrust::iterator_value<RandomAccessIterator1>::type value_type1;
-  typedef typename thrust::iterator_value<RandomAccessIterator2>::type value_type2;
+  using value_type1 = typename thrust::iterator_value<RandomAccessIterator1>::type;
+  using value_type2 = typename thrust::iterator_value<RandomAccessIterator2>::type;
 
   if(first1 == last1) return;
 

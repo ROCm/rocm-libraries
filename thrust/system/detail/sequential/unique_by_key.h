@@ -35,14 +35,14 @@ namespace sequential
 {
 
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template<typename DerivedPolicy,
          typename InputIterator1,
          typename InputIterator2,
          typename OutputIterator1,
          typename OutputIterator2,
          typename BinaryPredicate>
-__host__ __device__
+THRUST_HOST_DEVICE
   thrust::pair<OutputIterator1,OutputIterator2>
     unique_by_key_copy(sequential::execution_policy<DerivedPolicy> &,
                        InputIterator1 keys_first, 
@@ -52,8 +52,8 @@ __host__ __device__
                        OutputIterator2 values_output,
                        BinaryPredicate binary_pred)
 {
-  typedef typename thrust::iterator_traits<InputIterator1>::value_type  InputKeyType;
-  typedef typename thrust::iterator_traits<OutputIterator2>::value_type OutputValueType;
+  using InputKeyType    = typename thrust::iterator_traits<InputIterator1>::value_type;
+  using OutputValueType = typename thrust::iterator_traits<OutputIterator2>::value_type;
 
   if(keys_first != keys_last)
   {
@@ -95,7 +95,7 @@ template<typename DerivedPolicy,
          typename ForwardIterator1,
          typename ForwardIterator2,
          typename BinaryPredicate>
-__host__ __device__
+THRUST_HOST_DEVICE
   thrust::pair<ForwardIterator1,ForwardIterator2>
     unique_by_key(sequential::execution_policy<DerivedPolicy> &exec,
                   ForwardIterator1 keys_first, 

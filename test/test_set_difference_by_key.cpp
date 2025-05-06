@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -269,7 +269,7 @@ TYPED_TEST(SetDifferenceByKeyPrimitiveTests, TestSetDifferenceByKeyEquivalentRan
             SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> temp = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
+                size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
 
             thrust::host_vector<T> h_a_key = temp;
             thrust::sort(h_a_key.begin(), h_a_key.end());
@@ -277,14 +277,14 @@ TYPED_TEST(SetDifferenceByKeyPrimitiveTests, TestSetDifferenceByKeyEquivalentRan
 
             thrust::host_vector<T> h_a_val = get_random_data<T>(
                 size,
-                std::numeric_limits<T>::min(),
-                std::numeric_limits<T>::max(),
+                get_default_limits<T>::min(),
+                get_default_limits<T>::max(),
                 seed + seed_value_addition
             );
             thrust::host_vector<T> h_b_val = get_random_data<T>(
                 size,
-                std::numeric_limits<T>::min(),
-                std::numeric_limits<T>::max(),
+                get_default_limits<T>::min(),
+                get_default_limits<T>::max(),
                 seed + 2 * seed_value_addition
             );
 
@@ -348,7 +348,7 @@ TYPED_TEST(SetDifferenceByKeyPrimitiveTests, TestSetDifferenceByKeyMultiset)
             SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> temp = get_random_data<T>(
-                2 * size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
+                2 * size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
 
             // restrict elements to [min,13)
             for(typename thrust::host_vector<T>::iterator i = temp.begin(); i != temp.end(); ++i)
@@ -366,14 +366,14 @@ TYPED_TEST(SetDifferenceByKeyPrimitiveTests, TestSetDifferenceByKeyMultiset)
 
             thrust::host_vector<T> h_a_val = get_random_data<T>(
                 size,
-                std::numeric_limits<T>::min(),
-                std::numeric_limits<T>::max(),
+                get_default_limits<T>::min(),
+                get_default_limits<T>::max(),
                 seed + seed_value_addition
             );
             thrust::host_vector<T> h_b_val = get_random_data<T>(
                 size,
-                std::numeric_limits<T>::min(),
-                std::numeric_limits<T>::max(),
+                get_default_limits<T>::min(),
+                get_default_limits<T>::max(),
                 seed + 2 * seed_value_addition
             );
 

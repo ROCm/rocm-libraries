@@ -1,3 +1,20 @@
+/*
+ *  Copyright 2008-2013 NVIDIA Corporation
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+
 #include <unittest/unittest.h>
 #include <thrust/swap.h>
 #include <thrust/iterator/iterator_traits.h>
@@ -121,42 +138,38 @@ DECLARE_UNITTEST(TestSwapRangesForcedIterator);
 
 struct type_with_swap
 {
-  inline __host__ __device__
-  type_with_swap()
-    : m_x(), m_swapped(false)
+  inline THRUST_HOST_DEVICE type_with_swap()
+      : m_x()
+      , m_swapped(false)
   {}
 
-  inline __host__ __device__
-  type_with_swap(int x)
-    : m_x(x), m_swapped(false)
+  inline THRUST_HOST_DEVICE type_with_swap(int x)
+      : m_x(x)
+      , m_swapped(false)
   {}
 
-  inline __host__ __device__
-  type_with_swap(int x, bool s)
-    : m_x(x), m_swapped(s)
+  inline THRUST_HOST_DEVICE type_with_swap(int x, bool s)
+      : m_x(x)
+      , m_swapped(s)
   {}
 
-  inline __host__ __device__
-  type_with_swap(const type_with_swap &other)
-    : m_x(other.m_x), m_swapped(other.m_swapped)
+  inline THRUST_HOST_DEVICE type_with_swap(const type_with_swap& other)
+      : m_x(other.m_x)
+      , m_swapped(other.m_swapped)
   {}
 
-  inline __host__ __device__
-  bool operator==(const type_with_swap &other) const
+  inline THRUST_HOST_DEVICE bool operator==(const type_with_swap& other) const
   {
     return m_x == other.m_x && m_swapped == other.m_swapped;
   }
 
-#if THRUST_CPP_DIALECT >= 2011
   type_with_swap & operator=(const type_with_swap &) = default;
-#endif
 
   int m_x;
   bool m_swapped;
 };
 
-inline __host__ __device__
-void swap(type_with_swap &a, type_with_swap &b)
+inline THRUST_HOST_DEVICE void swap(type_with_swap& a, type_with_swap& b)
 {
   thrust::swap(a.m_x, b.m_x);
   a.m_swapped = true;

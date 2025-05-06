@@ -1,8 +1,36 @@
+/*
+ *  Copyright 2008-2013 NVIDIA Corporation
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+
 #include <unittest/unittest.h>
 #include <thrust/unique.h>
 #include <thrust/execution_policy.h>
 
 
+template<typename T>
+struct is_equal_div_10_unique
+{
+  THRUST_HOST_DEVICE bool operator()(const T x, const T& y) const
+  {
+    return ((int) x / 10) == ((int) y / 10);
+  }
+};
+
+
+#ifdef THRUST_TEST_DEVICE_SIDE
 template<typename ExecutionPolicy, typename Iterator1, typename Iterator2>
 __global__
 void unique_kernel(ExecutionPolicy exec, Iterator1 first, Iterator1 last, Iterator2 result)
@@ -19,19 +47,11 @@ void unique_kernel(ExecutionPolicy exec, Iterator1 first, Iterator1 last, Binary
 }
 
 
-template<typename T>
-struct is_equal_div_10_unique
-{
-  __host__ __device__
-  bool operator()(const T x, const T& y) const { return ((int) x / 10) == ((int) y / 10); }
-};
-
-
 template<typename ExecutionPolicy>
 void TestUniqueDevice(ExecutionPolicy exec)
 {
-  typedef thrust::device_vector<int> Vector;
-  typedef Vector::value_type T;
+  using Vector = thrust::device_vector<int>;
+  using T      = Vector::value_type;
 
   Vector data(10);
   data[0] = 11; 
@@ -99,13 +119,14 @@ void TestUniqueDeviceNoSync()
   TestUniqueDevice(thrust::cuda::par_nosync);
 }
 DECLARE_UNITTEST(TestUniqueDeviceNoSync);
+#endif
 
 
 template<typename ExecutionPolicy>
 void TestUniqueCudaStreams(ExecutionPolicy policy)
 {
-  typedef thrust::device_vector<int> Vector;
-  typedef Vector::value_type T;
+  using Vector = thrust::device_vector<int>;
+  using T      = Vector::value_type;
 
   Vector data(10);
   data[0] = 11; 
@@ -164,6 +185,7 @@ void TestUniqueCudaStreamsNoSync()
 DECLARE_UNITTEST(TestUniqueCudaStreamsNoSync);
 
 
+#ifdef THRUST_TEST_DEVICE_SIDE
 template<typename ExecutionPolicy, typename Iterator1, typename Iterator2, typename Iterator3>
 __global__
 void unique_copy_kernel(ExecutionPolicy exec, Iterator1 first, Iterator1 last, Iterator2 result1, Iterator3 result2)
@@ -183,8 +205,8 @@ void unique_copy_kernel(ExecutionPolicy exec, Iterator1 first, Iterator1 last, I
 template<typename ExecutionPolicy>
 void TestUniqueCopyDevice(ExecutionPolicy exec)
 {
-  typedef thrust::device_vector<int> Vector;
-  typedef Vector::value_type T;
+  using Vector = thrust::device_vector<int>;
+  using T      = Vector::value_type;
 
   Vector data(10);
   data[0] = 11; 
@@ -254,13 +276,14 @@ void TestUniqueCopyDeviceNoSync()
   TestUniqueCopyDevice(thrust::cuda::par_nosync);
 }
 DECLARE_UNITTEST(TestUniqueCopyDeviceNoSync);
+#endif
 
 
 template<typename ExecutionPolicy>
 void TestUniqueCopyCudaStreams(ExecutionPolicy policy)
 {
-  typedef thrust::device_vector<int> Vector;
-  typedef Vector::value_type T;
+  using Vector = thrust::device_vector<int>;
+  using T      = Vector::value_type;
 
   Vector data(10);
   data[0] = 11; 
@@ -321,6 +344,7 @@ void TestUniqueCopyCudaStreamsNoSync()
 DECLARE_UNITTEST(TestUniqueCopyCudaStreamsNoSync);
 
 
+#ifdef THRUST_TEST_DEVICE_SIDE
 template<typename ExecutionPolicy, typename Iterator1, typename Iterator2>
 __global__
 void unique_count_kernel(ExecutionPolicy exec, Iterator1 first, Iterator1 last, Iterator2 result)
@@ -340,8 +364,8 @@ void unique_count_kernel(ExecutionPolicy exec, Iterator1 first, Iterator1 last, 
 template<typename ExecutionPolicy>
 void TestUniqueCountDevice(ExecutionPolicy exec)
 {
-  typedef thrust::device_vector<int> Vector;
-  typedef Vector::value_type T;
+  using Vector = thrust::device_vector<int>;
+  using T      = Vector::value_type;
 
   Vector data(10);
   data[0] = 11; 
@@ -394,13 +418,14 @@ void TestUniqueCountDeviceNoSync()
   TestUniqueCountDevice(thrust::cuda::par_nosync);
 }
 DECLARE_UNITTEST(TestUniqueCountDeviceNoSync);
+#endif
 
 
 template<typename ExecutionPolicy>
 void TestUniqueCountCudaStreams(ExecutionPolicy policy)
 {
-  typedef thrust::device_vector<int> Vector;
-  typedef Vector::value_type T;
+  using Vector = thrust::device_vector<int>;
+  using T      = Vector::value_type;
 
   Vector data(10);
   data[0] = 11; 

@@ -34,7 +34,6 @@ template<typename T, typename System>
 } // end detail
 THRUST_NAMESPACE_END
 
-#include <thrust/detail/config.h>
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/iterator/detail/tagged_iterator.h>
 #include <thrust/detail/contiguous_storage.h>
@@ -57,56 +56,56 @@ template<typename T, typename System>
              >
 {
   private:
-    typedef contiguous_storage<
-      T,
-      no_throw_allocator<
-        temporary_allocator<T,System>
-      >
-    > super_t;
+    using super_t = contiguous_storage<
+                      T,
+                      no_throw_allocator<
+                        temporary_allocator<T,System>
+                      >
+                    >;
 
     // to help out the constructor
-    typedef no_throw_allocator<temporary_allocator<T,System> > alloc_type;
+    using alloc_type = no_throw_allocator<temporary_allocator<T,System> >;
 
   public:
-    typedef typename super_t::size_type size_type;
+    using size_type = typename super_t::size_type;
 
-    __host__ __device__
+    THRUST_HOST_DEVICE
     temporary_array(thrust::execution_policy<System> &system);
 
-    __host__ __device__
+    THRUST_HOST_DEVICE
     temporary_array(thrust::execution_policy<System> &system, size_type n);
 
     // provide a kill-switch to explicitly avoid initialization
-    __host__ __device__
+    THRUST_HOST_DEVICE
     temporary_array(int uninit, thrust::execution_policy<System> &system, size_type n);
 
     template<typename InputIterator>
-    __host__ __device__
+    THRUST_HOST_DEVICE
     temporary_array(thrust::execution_policy<System> &system,
                     InputIterator first,
                     size_type n);
 
     template<typename InputIterator, typename InputSystem>
-    __host__ __device__
+    THRUST_HOST_DEVICE
     temporary_array(thrust::execution_policy<System> &system,
                     thrust::execution_policy<InputSystem> &input_system,
                     InputIterator first,
                     size_type n);
 
     template<typename InputIterator>
-    __host__ __device__
+    THRUST_HOST_DEVICE
     temporary_array(thrust::execution_policy<System> &system,
                     InputIterator first,
                     InputIterator last);
 
     template<typename InputSystem, typename InputIterator>
-    __host__ __device__
+    THRUST_HOST_DEVICE
     temporary_array(thrust::execution_policy<System> &system,
                     thrust::execution_policy<InputSystem> &input_system,
                     InputIterator first,
                     InputIterator last);
 
-    __host__ __device__
+    THRUST_HOST_DEVICE
     ~temporary_array();
 }; // end temporary_array
 
@@ -116,7 +115,7 @@ template<typename Iterator, typename System>
   class tagged_iterator_range
 {
   public:
-    typedef thrust::detail::tagged_iterator<Iterator,System> iterator;
+    using iterator = thrust::detail::tagged_iterator<Iterator,System>;
 
     template<typename Ignored1, typename Ignored2>
     tagged_iterator_range(const Ignored1 &, const Ignored2 &, Iterator first, Iterator last)
@@ -163,7 +162,7 @@ template<typename Iterator, typename FromSystem, typename ToSystem>
         ToSystem
       >::type
 {
-  typedef typename move_to_system_base<Iterator,FromSystem,ToSystem>::type super_t;
+  using super_t = typename move_to_system_base<Iterator,FromSystem,ToSystem>::type;
 
   public:
     move_to_system(thrust::execution_policy<FromSystem> &from_system,

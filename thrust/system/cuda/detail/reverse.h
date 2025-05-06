@@ -35,14 +35,14 @@ THRUST_NAMESPACE_BEGIN
 namespace cuda_cub {
 
 template <class Derived, class ItemsIt, class ResultIt>
-ResultIt __host__ __device__
+ResultIt _CCCL_HOST_DEVICE
 reverse_copy(execution_policy<Derived> &policy,
              ItemsIt                    first,
              ItemsIt                    last,
              ResultIt                   result);
 
 template <class Derived, class ItemsIt>
-void __host__ __device__
+void _CCCL_HOST_DEVICE
 reverse(execution_policy<Derived> &policy,
         ItemsIt                    first,
         ItemsIt                    last);
@@ -62,7 +62,7 @@ namespace cuda_cub {
 template <class Derived,
           class ItemsIt,
           class ResultIt>
-ResultIt __host__ __device__
+ResultIt _CCCL_HOST_DEVICE
 reverse_copy(execution_policy<Derived> &policy,
              ItemsIt                    first,
              ItemsIt                    last,
@@ -76,12 +76,12 @@ reverse_copy(execution_policy<Derived> &policy,
 
 template <class Derived,
           class ItemsIt>
-void __host__ __device__
+void _CCCL_HOST_DEVICE
 reverse(execution_policy<Derived> &policy,
         ItemsIt                    first,
         ItemsIt                    last)
 {
-  typedef typename thrust::iterator_difference<ItemsIt>::type difference_type;
+  using difference_type = typename thrust::iterator_difference<ItemsIt>::type;
 
   // find the midpoint of [first,last)
   difference_type N = thrust::distance(first, last);

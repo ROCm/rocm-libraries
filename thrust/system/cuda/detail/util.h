@@ -27,6 +27,7 @@
 #pragma once
 
 #include <cstdio>
+#include <exception>
 #include <thrust/detail/config.h>
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/system/cuda/detail/execution_policy.h>
@@ -34,7 +35,7 @@
 #include <thrust/system/cuda/error.h>
 
 #include <cub/detail/device_synchronize.cuh>
-#include <cub/util_arch.cuh>
+#include <cub/config.cuh>
 #include <cub/util_device.cuh>
 
 #include <nv/target>
@@ -42,7 +43,7 @@
 THRUST_NAMESPACE_BEGIN
 namespace cuda_cub {
 
-inline __host__ __device__
+inline _CCCL_HOST_DEVICE
 cudaStream_t
 default_stream()
 {
@@ -55,7 +56,7 @@ default_stream()
 
 // Fallback implementation of the customization point.
 template <class Derived>
-__host__ __device__
+_CCCL_HOST_DEVICE
 cudaStream_t
 get_stream(execution_policy<Derived> &)
 {
@@ -64,7 +65,7 @@ get_stream(execution_policy<Derived> &)
 
 // Entry point/interface.
 template <class Derived>
-__host__ __device__ cudaStream_t
+_CCCL_HOST_DEVICE cudaStream_t
 stream(execution_policy<Derived> &policy)
 {
   return get_stream(derived_cast(policy));
@@ -73,7 +74,7 @@ stream(execution_policy<Derived> &policy)
 
 // Fallback implementation of the customization point.
 template <class Derived>
-__host__ __device__
+_CCCL_HOST_DEVICE
 bool
 must_perform_optional_stream_synchronization(execution_policy<Derived> &)
 {
@@ -82,7 +83,7 @@ must_perform_optional_stream_synchronization(execution_policy<Derived> &)
 
 // Entry point/interface.
 template <class Derived>
-__host__ __device__ bool
+_CCCL_HOST_DEVICE bool
 must_perform_optional_synchronization(execution_policy<Derived> &policy)
 {
   return must_perform_optional_stream_synchronization(derived_cast(policy));
@@ -90,9 +91,9 @@ must_perform_optional_synchronization(execution_policy<Derived> &policy)
 
 
 // Fallback implementation of the customization point.
-__thrust_exec_check_disable__
+_CCCL_EXEC_CHECK_DISABLE
 template <class Derived>
-__host__ __device__
+_CCCL_HOST_DEVICE
 cudaError_t
 synchronize_stream(execution_policy<Derived> &policy)
 {
@@ -101,7 +102,7 @@ synchronize_stream(execution_policy<Derived> &policy)
 
 // Entry point/interface.
 template <class Policy>
-__host__ __device__
+_CCCL_HOST_DEVICE
 cudaError_t
 synchronize(Policy &policy)
 {
@@ -109,9 +110,9 @@ synchronize(Policy &policy)
 }
 
 // Fallback implementation of the customization point.
-__thrust_exec_check_disable__
+_CCCL_EXEC_CHECK_DISABLE
 template <class Derived>
-__host__ __device__
+_CCCL_HOST_DEVICE
 cudaError_t
 synchronize_stream_optional(execution_policy<Derived> &policy)
 {
@@ -131,7 +132,7 @@ synchronize_stream_optional(execution_policy<Derived> &policy)
 
 // Entry point/interface.
 template <class Policy>
-__host__ __device__
+_CCCL_HOST_DEVICE
 cudaError_t
 synchronize_optional(Policy &policy)
 {
@@ -177,7 +178,7 @@ trivial_copy_to_device(Type *       dst,
 }
 
 template <class Policy, class Type>
-__host__ __device__ cudaError_t
+_CCCL_HOST_DEVICE cudaError_t
 trivial_copy_device_to_device(Policy &    policy,
                               Type *      dst,
                               Type const *src,
@@ -197,13 +198,13 @@ trivial_copy_device_to_device(Policy &    policy,
   return status;
 }
 
-inline void __host__ __device__
+inline void _CCCL_HOST_DEVICE
 terminate()
 {
   NV_IF_TARGET(NV_IS_HOST, (std::terminate();), (asm("trap;");));
 }
 
-__host__  __device__
+_CCCL_HOST_DEVICE
 inline void throw_on_error(cudaError_t status)
 {
   // Clear the global CUDA error state which may have been set by the last
@@ -246,7 +247,7 @@ inline void throw_on_error(cudaError_t status)
   }
 }
 
-__host__ __device__
+_CCCL_HOST_DEVICE
 inline void throw_on_error(cudaError_t status, char const *msg)
 {
   // Clear the global CUDA error state which may have been set by the last
@@ -297,26 +298,25 @@ template <class ValueType,
           class UnaryOp>
 struct transform_input_iterator_t
 {
-  typedef transform_input_iterator_t                         self_t;
-  typedef typename iterator_traits<InputIt>::difference_type difference_type;
-  typedef ValueType                                          value_type;
-  typedef void                                               pointer;
-  typedef value_type                                         reference;
-  typedef std::random_access_iterator_tag                    iterator_category;
+  using self_t            = transform_input_iterator_t;
+  using difference_type   = typename iterator_traits<InputIt>::difference_type;
+  using value_type        = ValueType;
+  using pointer           = void;
+  using reference         = value_type;
+  using iterator_category = std::random_access_iterator_tag;
 
   InputIt         input;
   mutable UnaryOp op;
 
-  __host__ __device__ __forceinline__
+  _CCCL_HOST_DEVICE _CCCL_FORCEINLINE
   transform_input_iterator_t(InputIt input, UnaryOp op)
       : input(input), op(op) {}
 
-#if THRUST_CPP_DIALECT >= 2011
   transform_input_iterator_t(const self_t &) = default;
-#endif
 
   // UnaryOp might not be copy assignable, such as when it is a lambda.  Define
   // an explicit copy assignment operator that doesn't try to assign it.
+  _CCCL_HOST_DEVICE
   self_t& operator=(const self_t& o)
   {
     input = o.input;
@@ -324,7 +324,7 @@ struct transform_input_iterator_t
   }
 
   /// Postfix increment
-  __host__ __device__ __forceinline__ self_t operator++(int)
+  _CCCL_HOST_DEVICE _CCCL_FORCEINLINE self_t operator++(int)
   {
     self_t retval = *this;
     ++input;
@@ -332,71 +332,71 @@ struct transform_input_iterator_t
   }
 
   /// Prefix increment
-  __host__ __device__ __forceinline__ self_t operator++()
+  _CCCL_HOST_DEVICE _CCCL_FORCEINLINE self_t operator++()
   {
     ++input;
     return *this;
   }
 
   /// Indirection
-  __host__ __device__ __forceinline__ reference operator*() const
+  _CCCL_HOST_DEVICE _CCCL_FORCEINLINE reference operator*() const
   {
     typename thrust::iterator_value<InputIt>::type x = *input;
     return op(x);
   }
   /// Indirection
-  __host__ __device__ __forceinline__ reference operator*()
+  _CCCL_HOST_DEVICE _CCCL_FORCEINLINE reference operator*()
   {
     typename thrust::iterator_value<InputIt>::type x = *input;
     return op(x);
   }
 
   /// Addition
-  __host__ __device__ __forceinline__ self_t operator+(difference_type n) const
+  _CCCL_HOST_DEVICE _CCCL_FORCEINLINE self_t operator+(difference_type n) const
   {
     return self_t(input + n, op);
   }
 
   /// Addition assignment
-  __host__ __device__ __forceinline__ self_t &operator+=(difference_type n)
+  _CCCL_HOST_DEVICE _CCCL_FORCEINLINE self_t &operator+=(difference_type n)
   {
     input += n;
     return *this;
   }
 
   /// Subtraction
-  __host__ __device__ __forceinline__ self_t operator-(difference_type n) const
+  _CCCL_HOST_DEVICE _CCCL_FORCEINLINE self_t operator-(difference_type n) const
   {
     return self_t(input - n, op);
   }
 
   /// Subtraction assignment
-  __host__ __device__ __forceinline__ self_t &operator-=(difference_type n)
+  _CCCL_HOST_DEVICE _CCCL_FORCEINLINE self_t &operator-=(difference_type n)
   {
     input -= n;
     return *this;
   }
 
   /// Distance
-  __host__ __device__ __forceinline__ difference_type operator-(self_t other) const
+  _CCCL_HOST_DEVICE _CCCL_FORCEINLINE difference_type operator-(self_t other) const
   {
     return input - other.input;
   }
 
   /// Array subscript
-  __host__ __device__ __forceinline__ reference operator[](difference_type n) const
+  _CCCL_HOST_DEVICE _CCCL_FORCEINLINE reference operator[](difference_type n) const
   {
     return op(input[n]);
   }
 
   /// Equal to
-  __host__ __device__ __forceinline__ bool operator==(const self_t &rhs) const
+  _CCCL_HOST_DEVICE _CCCL_FORCEINLINE bool operator==(const self_t &rhs) const
   {
     return (input == rhs.input);
   }
 
   /// Not equal to
-  __host__ __device__ __forceinline__ bool operator!=(const self_t &rhs) const
+  _CCCL_HOST_DEVICE _CCCL_FORCEINLINE bool operator!=(const self_t &rhs) const
   {
     return (input != rhs.input);
   }
@@ -408,29 +408,28 @@ template <class ValueType,
           class BinaryOp>
 struct transform_pair_of_input_iterators_t
 {
-  typedef transform_pair_of_input_iterators_t                 self_t;
-  typedef typename iterator_traits<InputIt1>::difference_type difference_type;
-  typedef ValueType                                           value_type;
-  typedef void                                                pointer;
-  typedef value_type                                          reference;
-  typedef std::random_access_iterator_tag                     iterator_category;
+  using self_t            = transform_pair_of_input_iterators_t;
+  using difference_type   = typename iterator_traits<InputIt1>::difference_type;
+  using value_type        = ValueType;
+  using pointer           = void;
+  using reference         = value_type;
+  using iterator_category = std::random_access_iterator_tag;
 
   InputIt1         input1;
   InputIt2         input2;
   mutable BinaryOp op;
 
-  __host__ __device__ __forceinline__
+  _CCCL_HOST_DEVICE _CCCL_FORCEINLINE
   transform_pair_of_input_iterators_t(InputIt1 input1_,
                                       InputIt2 input2_,
                                       BinaryOp op_)
       : input1(input1_), input2(input2_), op(op_) {}
 
-#if THRUST_CPP_DIALECT >= 2011
   transform_pair_of_input_iterators_t(const self_t &) = default;
-#endif
 
   // BinaryOp might not be copy assignable, such as when it is a lambda.
   // Define an explicit copy assignment operator that doesn't try to assign it.
+  _CCCL_HOST_DEVICE
   self_t& operator=(const self_t& o)
   {
     input1 = o.input1;
@@ -439,7 +438,7 @@ struct transform_pair_of_input_iterators_t
   }
 
   /// Postfix increment
-  __host__ __device__ __forceinline__ self_t operator++(int)
+  _CCCL_HOST_DEVICE _CCCL_FORCEINLINE self_t operator++(int)
   {
     self_t retval = *this;
     ++input1;
@@ -448,7 +447,7 @@ struct transform_pair_of_input_iterators_t
   }
 
   /// Prefix increment
-  __host__ __device__ __forceinline__ self_t operator++()
+  _CCCL_HOST_DEVICE _CCCL_FORCEINLINE self_t operator++()
   {
     ++input1;
     ++input2;
@@ -456,24 +455,24 @@ struct transform_pair_of_input_iterators_t
   }
 
   /// Indirection
-  __host__ __device__ __forceinline__ reference operator*() const
+  _CCCL_HOST_DEVICE _CCCL_FORCEINLINE reference operator*() const
   {
     return op(*input1, *input2);
   }
   /// Indirection
-  __host__ __device__ __forceinline__ reference operator*()
+  _CCCL_HOST_DEVICE _CCCL_FORCEINLINE reference operator*()
   {
     return op(*input1, *input2);
   }
 
   /// Addition
-  __host__ __device__ __forceinline__ self_t operator+(difference_type n) const
+  _CCCL_HOST_DEVICE _CCCL_FORCEINLINE self_t operator+(difference_type n) const
   {
     return self_t(input1 + n, input2 + n, op);
   }
 
   /// Addition assignment
-  __host__ __device__ __forceinline__ self_t &operator+=(difference_type n)
+  _CCCL_HOST_DEVICE _CCCL_FORCEINLINE self_t &operator+=(difference_type n)
   {
     input1 += n;
     input2 += n;
@@ -481,13 +480,13 @@ struct transform_pair_of_input_iterators_t
   }
 
   /// Subtraction
-  __host__ __device__ __forceinline__ self_t operator-(difference_type n) const
+  _CCCL_HOST_DEVICE _CCCL_FORCEINLINE self_t operator-(difference_type n) const
   {
     return self_t(input1 - n, input2 - n, op);
   }
 
   /// Subtraction assignment
-  __host__ __device__ __forceinline__ self_t &operator-=(difference_type n)
+  _CCCL_HOST_DEVICE _CCCL_FORCEINLINE self_t &operator-=(difference_type n)
   {
     input1 -= n;
     input2 -= n;
@@ -495,25 +494,25 @@ struct transform_pair_of_input_iterators_t
   }
 
   /// Distance
-  __host__ __device__ __forceinline__ difference_type operator-(self_t other) const
+  _CCCL_HOST_DEVICE _CCCL_FORCEINLINE difference_type operator-(self_t other) const
   {
     return input1 - other.input1;
   }
 
   /// Array subscript
-  __host__ __device__ __forceinline__ reference operator[](difference_type n) const
+  _CCCL_HOST_DEVICE _CCCL_FORCEINLINE reference operator[](difference_type n) const
   {
     return op(input1[n], input2[n]);
   }
 
   /// Equal to
-  __host__ __device__ __forceinline__ bool operator==(const self_t &rhs) const
+  _CCCL_HOST_DEVICE _CCCL_FORCEINLINE bool operator==(const self_t &rhs) const
   {
     return (input1 == rhs.input1) && (input2 == rhs.input2);
   }
 
   /// Not equal to
-  __host__ __device__ __forceinline__ bool operator!=(const self_t &rhs) const
+  _CCCL_HOST_DEVICE _CCCL_FORCEINLINE bool operator!=(const self_t &rhs) const
   {
     return (input1 != rhs.input1) || (input2 != rhs.input2);
   }
@@ -524,14 +523,14 @@ struct transform_pair_of_input_iterators_t
 struct identity
 {
   template <class T>
-  __host__ __device__ T const &
+  _CCCL_HOST_DEVICE T const &
   operator()(T const &t) const
   {
     return t;
   }
 
   template <class T>
-  __host__ __device__ T &
+  _CCCL_HOST_DEVICE T &
   operator()(T &t) const
   {
     return t;
@@ -542,20 +541,20 @@ struct identity
 template <class T>
 struct counting_iterator_t
 {
-  typedef counting_iterator_t             self_t;
-  typedef T                               difference_type;
-  typedef T                               value_type;
-  typedef void                            pointer;
-  typedef T                               reference;
-  typedef std::random_access_iterator_tag iterator_category;
+  using self_t            = counting_iterator_t;
+  using difference_type   = T;
+  using value_type        = T;
+  using pointer           = void;
+  using reference         = T;
+  using iterator_category = std::random_access_iterator_tag;
 
   T count;
 
-  __host__ __device__ __forceinline__
+  _CCCL_HOST_DEVICE _CCCL_FORCEINLINE
   counting_iterator_t(T count_) : count(count_) {}
 
   /// Postfix increment
-  __host__ __device__ __forceinline__ self_t operator++(int)
+  _CCCL_HOST_DEVICE _CCCL_FORCEINLINE self_t operator++(int)
   {
     self_t retval = *this;
     ++count;
@@ -563,70 +562,70 @@ struct counting_iterator_t
   }
 
   /// Prefix increment
-  __host__ __device__ __forceinline__ self_t operator++()
+  _CCCL_HOST_DEVICE _CCCL_FORCEINLINE self_t operator++()
   {
     ++count;
     return *this;
   }
 
   /// Indirection
-  __host__ __device__ __forceinline__ reference operator*() const
+  _CCCL_HOST_DEVICE _CCCL_FORCEINLINE reference operator*() const
   {
     return count;
   }
 
   /// Indirection
-  __host__ __device__ __forceinline__ reference operator*()
+  _CCCL_HOST_DEVICE _CCCL_FORCEINLINE reference operator*()
   {
     return count;
   }
 
   /// Addition
-  __host__ __device__ __forceinline__ self_t operator+(difference_type n) const
+  _CCCL_HOST_DEVICE _CCCL_FORCEINLINE self_t operator+(difference_type n) const
   {
     return self_t(count + n);
   }
 
   /// Addition assignment
-  __host__ __device__ __forceinline__ self_t &operator+=(difference_type n)
+  _CCCL_HOST_DEVICE _CCCL_FORCEINLINE self_t &operator+=(difference_type n)
   {
     count += n;
     return *this;
   }
 
   /// Subtraction
-  __host__ __device__ __forceinline__ self_t operator-(difference_type n) const
+  _CCCL_HOST_DEVICE _CCCL_FORCEINLINE self_t operator-(difference_type n) const
   {
     return self_t(count - n);
   }
 
   /// Subtraction assignment
-  __host__ __device__ __forceinline__ self_t &operator-=(difference_type n)
+  _CCCL_HOST_DEVICE _CCCL_FORCEINLINE self_t &operator-=(difference_type n)
   {
     count -= n;
     return *this;
   }
 
   /// Distance
-  __host__ __device__ __forceinline__ difference_type operator-(self_t other) const
+  _CCCL_HOST_DEVICE _CCCL_FORCEINLINE difference_type operator-(self_t other) const
   {
     return count - other.count;
   }
 
   /// Array subscript
-  __host__ __device__ __forceinline__ reference operator[](difference_type n) const
+  _CCCL_HOST_DEVICE _CCCL_FORCEINLINE reference operator[](difference_type n) const
   {
     return count + n;
   }
 
   /// Equal to
-  __host__ __device__ __forceinline__ bool operator==(const self_t &rhs) const
+  _CCCL_HOST_DEVICE _CCCL_FORCEINLINE bool operator==(const self_t &rhs) const
   {
     return (count == rhs.count);
   }
 
   /// Not equal to
-  __host__ __device__ __forceinline__ bool operator!=(const self_t &rhs) const
+  _CCCL_HOST_DEVICE _CCCL_FORCEINLINE bool operator!=(const self_t &rhs) const
   {
     return (count != rhs.count);
   }

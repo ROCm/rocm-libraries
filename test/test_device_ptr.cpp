@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -56,16 +56,10 @@ bool supports_hmm()
 
 bool use_hmm()
 {
-    if (getenv("ROCTHRUST_USE_HMM") == nullptr)
-    {
-        return false;
-    }
-
-    if (strcmp(getenv("ROCTHRUST_USE_HMM"), "1") == 0)
-    {
-        return true;
-    }
-    return false;
+    char*      env = test::get_env("ROCPRIM_USE_HMM");
+    const bool hmm = (env != nullptr) && (strcmp(env, "1") == 0);
+    test::clean_env(env);
+    return hmm;
 }
 
 TEST(DevicePtrTests, TestDevicePointerManipulation)

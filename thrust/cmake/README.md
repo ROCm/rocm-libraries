@@ -115,7 +115,7 @@ thrust_set_OMP_target(MyOMPTarget)
 These functions must be called **before** the corresponding system is loaded
 through `thrust_create_target` or `find_package(Thrust COMPONENT [OMP|TBB])`.
 
-#### Using an Explicit libcu++ CMake Target (CUDA)
+#### Using an Explicit libcu++ CMake Target
 
 In contrast to the optional TBB/OMP dependencies, there is no
 `thrust_set_libcudacxx_target` function that specifies an explicit libcu++

@@ -3,20 +3,102 @@
 Documentation for rocThrust available at
 [https://rocm.docs.amd.com/projects/rocThrust/en/latest/](https://rocm.docs.amd.com/projects/rocThrust/en/latest/).
 
-## rocThrust 3.0.0 for ROCm 6.0
+## rocThrust 3.4.0 for ROCm 6.5
+
+### Added
+
+* Added gfx950 support.
+* Merged changes from upstream CCCL/thrust 2.6.0
+
+### Known Issues
+* The order of the values being compared by thrust::exclusive_scan_by_key and thrust::inclusive_scan_by_key can change between runs when integers are being compared. This can cause incorrect output when a non-commutative operator such as division is being used.
+## rocThrust 3.3.0 for ROCm 6.4
+
+### Added
+
+* Added a section to install Thread Building Block (TBB) inside `cmake/Dependencies.cmake` if TBB is not already available.
+* Made Thread Building Block (TBB) an optional dependency with the new `BUILD_HIPSTDPAR_TEST_WITH_TBB` flag, default is `OFF`. When the flag is `OFF` and TBB is not already on the machine it will compile without TBB. Otherwise is will compile it with TBB.
+* Added extended tests to `rtest.py`. These tests are extra tests that did not fit the criteria of smoke and regression tests. These tests will take much longer to run relative to smoke and regression tests. Use `python rtest.py [--emulation|-e|--test|-t]=extended` to run these tests.
+* Added regression tests to `rtest.py`. These tests recreate scenarios that have caused hardware problems in past emulation environments. Use `python rtest.py [--emulation|-e|--test|-t]=regression` to run these tests.
+* Added smoke test options, which runs a subset of the unit tests and ensures that less than 2gb of VRAM will be used. Use `python rtest.py [--emulation|-e|--test|-t]=smoke` to run these tests.
+* Added `--emulation` option for `rtest.py`
+* Merged changes from upstream CCCL/thrust 2.4.0
+* Merged changes from upstream CCCL/thrust 2.5.0
+* Added `find_first_of` to HIPSTDPAR
+* Added `search` and `find_end` to HIPSTDPAR
+* Added `search_n` to HIPSTDPAR
+* Updated HIPSTDPAR's `adjacent_find` to use rocPRIM's implementation
+
+### Changed
+
+* Changed the C++ version from 14 to 17. C++14 will be deprecated in the next major release.
+* `--test|-t` is no longer a required flag for `rtest.py`. Instead, the user can use either `--emulation|-e` or `--test|-t`, but not both.
+* Split the contents of HIPSTDPAR's forwarding header into several implementation headers.
+* Fixed `copy_if` to work with large data types (512 bytes)
+
+### Known Issues
+*  `thrust::inclusive_scan_by_key` might produce incorrect results when it's used with -O2 or -O3 optimization.  
+  - The error is caused by a recent compiler change. There is a fix available that will be released at a later date. 
+
+## rocThrust 3.2.0 for ROCm 6.3
+
+### Added
+
+* Merged changes from upstream CCCL/thrust 2.3.2
+  * Only the NVIDIA backend uses `tuple` and `pair` types from libcu++, other backends continue to
+    use the original Thrust implementations and hence do not require libcu++ (CCCL) as a dependency.
+* Added the `thrust::hip::par_det` execution policy to enable bitwise reproducibility on algorithms that are not bitwise reproducible by default.
+
+### Changed
+
+* Updated the default value for the `-a` argument from `rmake.py` to `gfx906:xnack-,gfx1030,gfx1100,gfx1101,gfx1102,gfx1151,gfx1200,gfx1201`.
+* Enabled the upstream (thrust) test suite for execution by default. It can still be disabled by CMake option `-DENABLE_UPSTREAM_TESTS=OFF`.
+
+### Resolved issues
+
+* Fixed an issue in `rmake.py` where the list storing cmake options would contain individual characters instead of a full string of options.
+* Fixed the HIP backend not passing `TestCopyIfNonTrivial` from the upstream (thrust) test suite.
+* Fixed tests failing when compiled with `-D_GLIBCXX_ASSERTIONS=ON`.
+
+## rocThrust 3.1.0 for ROCm 6.2
+
 ### Additions
-- Updated to match upstream Thrust 2.0.1
-- NV_IF_TARGET macro from libcu++ for NVIDIA backend and HIP implementation for HIP backend.
+
+* Merged changes from upstream CCCL/thrust 2.2.0
+  * Updated the contents of `system/hip` and `test` with the upstream changes to `system/cuda` and `testing`
+* Added HIPSTDPAR library as part of rocThrust.
 
 ### Changes
-- The cmake build system now additionally accepts `GPU_TARGETS` in addition to `AMDGPU_TARGETS` for
-  setting the targeted gpu architectures. `GPU_TARGETS=all` will compile for all supported architectures.
-  `AMDGPU_TARGETS` is only provided for backwards compatibility, `GPU_TARGETS` should be preferred.
-- Removed cub symlink from the root of the repository.
-- Removed support for deprecated macros (THRUST_DEVICE_BACKEND and THRUST_HOST_BACKEND).
+
+* Updated internal calls to `rocprim::detail::invoke_result` to use the public API `rocprim::invoke_result`.
+* Use `rocprim::device_adjacent_difference` for `adjacent_difference` API call.
+* Updated internal use of custom iterator in `thrust::detail::unique_by_key` to use rocPRIM's `rocprim::unique_by_key`.
+* Updated `adjecent_difference` to make use of `rocprim:adjecent_difference` when iterators are comparable and not equal otherwise use `rocprim:adjacent_difference_inplace`.
 
 ### Fixes
-- Fixed a segmentation fault when binary search / upper bound / lower bound / equal range was invoked with `hip_rocprim::execute_on_stream_base` policy.
+* Fixed incorrect implementation of `thrust::optional<T&>::emplace()`.
+
+### Known issues
+* `thrust::reduce_by_key` outputs are not bit-wise reproducible, as run-to-run results for pseudo-associative reduction operators (e.g. floating-point arithmetic operators) are not deterministic on the same device.
+* Note that currently, rocThrust memory allocation is performed in such a way that most algorithmic API functions cannot be called from within hipGraphs.
+
+## rocThrust 3.0.0 for ROCm 6.0
+
+### Additions
+
+* Updated to match upstream Thrust 2.0.1
+* NV_IF_TARGET macro from libcu++ for NVIDIA backend and HIP implementation for HIP backend.
+
+### Changes
+
+* The cmake build system now additionally accepts `GPU_TARGETS` in addition to `AMDGPU_TARGETS` for
+  setting the targeted gpu architectures. `GPU_TARGETS=all` will compile for all supported architectures.
+  `AMDGPU_TARGETS` is only provided for backwards compatibility, `GPU_TARGETS` should be preferred.
+* Removed cub symlink from the root of the repository.
+* Removed support for deprecated macros (THRUST_DEVICE_BACKEND and THRUST_HOST_BACKEND).
+
+### Fixes
+* Fixed a segmentation fault when binary search / upper bound / lower bound / equal range was invoked with `hip_rocprim::execute_on_stream_base` policy.
 
 ### Known issues
 
@@ -27,14 +109,13 @@ Documentation for rocThrust available at
 
 ## rocThrust 2.18.0 for ROCm 5.7
 
-### Fixes 
-- `lower_bound`, `upper_bound`, and `binary_search` failed to compile for certain types.
-- Fixed issue where `transform_iterator` would not compile with `__device__`-only operators.
+### Fixes
+* `lower_bound`, `upper_bound`, and `binary_search` failed to compile for certain types.
+* Fixed issue where `transform_iterator` would not compile with `__device__`-only operators.
 
 ### Changes
-- Updated `docs` directory structure to match the standard of [rocm-docs-core](https://github.com/RadeonOpenCompute/rocm-docs-core).
-- Removed references to and workarounds for deprecated hcc
-
+* Updated `docs` directory structure to match the standard of [rocm-docs-core](https://github.com/RadeonOpenCompute/rocm-docs-core).
+* Removed references to and workarounds for deprecated hcc
 
 ## rocThrust 2.17.0 for ROCm 5.5
 

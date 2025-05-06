@@ -36,7 +36,7 @@ template<typename DerivedPolicy,
          typename InputIterator,
          typename RandomAccessIterator,
          typename OutputIterator>
-__host__ __device__
+THRUST_HOST_DEVICE
   OutputIterator gather(thrust::execution_policy<DerivedPolicy> &exec,
                         InputIterator                            map_first,
                         InputIterator                            map_last,
@@ -56,7 +56,7 @@ template<typename DerivedPolicy,
          typename InputIterator2,
          typename RandomAccessIterator,
          typename OutputIterator>
-__host__ __device__
+THRUST_HOST_DEVICE
   OutputIterator gather_if(thrust::execution_policy<DerivedPolicy> &exec,
                            InputIterator1                           map_first,
                            InputIterator1                           map_last,
@@ -64,7 +64,7 @@ __host__ __device__
                            RandomAccessIterator                     input_first,
                            OutputIterator                           result)
 {
-  typedef typename thrust::iterator_value<InputIterator2>::type StencilType;
+  using StencilType = typename thrust::iterator_value<InputIterator2>::type;
   return thrust::gather_if(exec,
                            map_first,
                            map_last,
@@ -81,7 +81,7 @@ template<typename DerivedPolicy,
          typename RandomAccessIterator,
          typename OutputIterator,
          typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
   OutputIterator gather_if(thrust::execution_policy<DerivedPolicy> &exec,
                            InputIterator1                           map_first,
                            InputIterator1                           map_last,
@@ -90,7 +90,7 @@ __host__ __device__
                            OutputIterator                           result,
                            Predicate                                pred)
 {
-  typedef typename thrust::iterator_value<RandomAccessIterator>::type InputType;
+  using InputType = typename thrust::iterator_value<RandomAccessIterator>::type;
   return thrust::transform_if(exec,
                               thrust::make_permutation_iterator(input_first, map_first),
                               thrust::make_permutation_iterator(input_first, map_last),

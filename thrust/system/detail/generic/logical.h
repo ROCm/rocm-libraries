@@ -32,15 +32,15 @@ namespace generic
 
 
 template<typename ExecutionPolicy, typename InputIterator, typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 bool all_of(thrust::execution_policy<ExecutionPolicy> &exec, InputIterator first, InputIterator last, Predicate pred)
 {
-  return thrust::find_if(exec, first, last, thrust::detail::not1(pred)) == last;
+  return thrust::find_if(exec, first, last, thrust::not_fn(pred)) == last;
 }
 
 
 template<typename ExecutionPolicy, typename InputIterator, typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 bool any_of(thrust::execution_policy<ExecutionPolicy> &exec, InputIterator first, InputIterator last, Predicate pred)
 {
   return thrust::find_if(exec, first, last, pred) != last;
@@ -48,7 +48,7 @@ bool any_of(thrust::execution_policy<ExecutionPolicy> &exec, InputIterator first
 
 
 template<typename ExecutionPolicy, typename InputIterator, typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 bool none_of(thrust::execution_policy<ExecutionPolicy> &exec, InputIterator first, InputIterator last, Predicate pred)
 {
   return !thrust::any_of(exec, first, last, pred);

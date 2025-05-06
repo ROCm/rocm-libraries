@@ -36,7 +36,7 @@ template<typename DerivedPolicy,
          typename InputIterator1,
          typename InputIterator2,
          typename RandomAccessIterator>
-__host__ __device__
+THRUST_HOST_DEVICE
   void scatter(thrust::execution_policy<DerivedPolicy> &exec,
                InputIterator1 first,
                InputIterator1 last,
@@ -56,7 +56,7 @@ template<typename DerivedPolicy,
          typename InputIterator2,
          typename InputIterator3,
          typename RandomAccessIterator>
-__host__ __device__
+THRUST_HOST_DEVICE
   void scatter_if(thrust::execution_policy<DerivedPolicy> &exec,
                   InputIterator1 first,
                   InputIterator1 last,
@@ -65,7 +65,7 @@ __host__ __device__
                   RandomAccessIterator output)
 {
   // default predicate is identity
-  typedef typename thrust::iterator_value<InputIterator3>::type StencilType;
+  using StencilType = typename thrust::iterator_value<InputIterator3>::type;
   thrust::scatter_if(exec, first, last, map, stencil, output, thrust::identity<StencilType>());
 } // end scatter_if()
 
@@ -76,7 +76,7 @@ template<typename DerivedPolicy,
          typename InputIterator3,
          typename RandomAccessIterator,
          typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
   void scatter_if(thrust::execution_policy<DerivedPolicy> &exec,
                   InputIterator1 first,
                   InputIterator1 last,
@@ -85,7 +85,7 @@ __host__ __device__
                   RandomAccessIterator output,
                   Predicate pred)
 {
-  typedef typename thrust::iterator_value<InputIterator1>::type InputType;
+  using InputType = typename thrust::iterator_value<InputIterator1>::type;
   thrust::transform_if(exec, first, last, stencil, thrust::make_permutation_iterator(output, map), thrust::identity<InputType>(), pred);
 } // end scatter_if()
 

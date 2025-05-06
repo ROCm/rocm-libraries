@@ -1,26 +1,44 @@
+/*
+ *  Copyright 2008-2013 NVIDIA Corporation
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+
 #include <unittest/unittest.h>
 #include <thrust/sort.h>
 #include <thrust/execution_policy.h>
 #include <thrust/functional.h>
 
 
+template<typename T>
+struct my_less
+{
+  THRUST_HOST_DEVICE
+  bool operator()(const T& lhs, const T& rhs) const
+  {
+    return lhs < rhs;
+  }
+};
+
+
+#ifdef THRUST_TEST_DEVICE_SIDE
 template<typename ExecutionPolicy, typename Iterator1, typename Iterator2, typename Compare>
 __global__
 void sort_by_key_kernel(ExecutionPolicy exec, Iterator1 keys_first, Iterator1 keys_last, Iterator2 values_first, Compare comp)
 {
   thrust::sort_by_key(exec, keys_first, keys_last, values_first, comp);
 }
-
-
-template<typename T>
-struct my_less
-{
-  __host__ __device__
-  bool operator()(const T& lhs, const T& rhs) const
-  {
-    return lhs < rhs;
-  }
-};
 
 
 template<typename T, typename ExecutionPolicy, typename Compare>
@@ -104,6 +122,7 @@ VariableUnitTest<
   TestSortByKeyDeviceDevice,
   unittest::type_list<unittest::int8_t,unittest::int32_t>
 > TestSortByKeyDeviceDeviceInstance;
+#endif
 
 
 void TestComparisonSortByKeyCudaStreams()

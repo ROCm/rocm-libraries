@@ -6,6 +6,8 @@
 #include <thrust/random.h>
 
 
+#include "include/host_device.h"
+
 // compute minimum and maximum values in a single reduction
 
 // minmax_pair stores the minimum and maximum 
@@ -22,7 +24,6 @@ struct minmax_pair
 // are initialized to x.
 template <typename T>
 struct minmax_unary_op
-  : public thrust::unary_function< T, minmax_pair<T> >
 {
   __host__ __device__
   minmax_pair<T> operator()(const T& x) const
@@ -40,7 +41,6 @@ struct minmax_unary_op
 // the minimums and maximums of the input pairs
 template <typename T>
 struct minmax_binary_op
-  : public thrust::binary_function< minmax_pair<T>, minmax_pair<T>, minmax_pair<T> >
 {
   __host__ __device__
   minmax_pair<T> operator()(const minmax_pair<T>& x, const minmax_pair<T>& y) const

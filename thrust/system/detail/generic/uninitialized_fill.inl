@@ -36,7 +36,7 @@ namespace detail
 template<typename DerivedPolicy,
          typename ForwardIterator,
          typename T>
-__host__ __device__
+THRUST_HOST_DEVICE
   void uninitialized_fill(thrust::execution_policy<DerivedPolicy> &exec,
                           ForwardIterator first,
                           ForwardIterator last,
@@ -49,14 +49,14 @@ __host__ __device__
 template<typename DerivedPolicy,
          typename ForwardIterator,
          typename T>
-__host__ __device__
+THRUST_HOST_DEVICE
   void uninitialized_fill(thrust::execution_policy<DerivedPolicy> &exec,
                           ForwardIterator first,
                           ForwardIterator last,
                           const T &x,
                           thrust::detail::false_type) // has_trivial_copy_constructor
 {
-  typedef typename iterator_traits<ForwardIterator>::value_type ValueType;
+  using ValueType = typename iterator_traits<ForwardIterator>::value_type;
 
   thrust::for_each(exec, first, last, thrust::detail::uninitialized_fill_functor<ValueType>(x));
 } // end uninitialized_fill()
@@ -65,7 +65,7 @@ template<typename DerivedPolicy,
          typename ForwardIterator,
          typename Size,
          typename T>
-__host__ __device__
+THRUST_HOST_DEVICE
   ForwardIterator uninitialized_fill_n(thrust::execution_policy<DerivedPolicy> &exec,
                                        ForwardIterator first,
                                        Size n,
@@ -79,14 +79,14 @@ template<typename DerivedPolicy,
          typename ForwardIterator,
          typename Size,
          typename T>
-__host__ __device__
+THRUST_HOST_DEVICE
   ForwardIterator uninitialized_fill_n(thrust::execution_policy<DerivedPolicy> &exec,
                                        ForwardIterator first,
                                        Size n,
                                        const T &x,
                                        thrust::detail::false_type) // has_trivial_copy_constructor
 {
-  typedef typename iterator_traits<ForwardIterator>::value_type ValueType;
+  using ValueType = typename iterator_traits<ForwardIterator>::value_type;
 
   return thrust::for_each_n(exec, first, n, thrust::detail::uninitialized_fill_functor<ValueType>(x));
 } // end uninitialized_fill()
@@ -96,15 +96,15 @@ __host__ __device__
 template<typename DerivedPolicy,
          typename ForwardIterator,
          typename T>
-__host__ __device__
+THRUST_HOST_DEVICE
   void uninitialized_fill(thrust::execution_policy<DerivedPolicy> &exec,
                           ForwardIterator first,
                           ForwardIterator last,
                           const T &x)
 {
-  typedef typename iterator_traits<ForwardIterator>::value_type ValueType;
+  using ValueType = typename iterator_traits<ForwardIterator>::value_type;
 
-  typedef thrust::detail::has_trivial_copy_constructor<ValueType> ValueTypeHasTrivialCopyConstructor;
+  using ValueTypeHasTrivialCopyConstructor = thrust::detail::has_trivial_copy_constructor<ValueType>;
 
   thrust::system::detail::generic::detail::uninitialized_fill(exec, first, last, x,
     ValueTypeHasTrivialCopyConstructor());
@@ -114,15 +114,15 @@ template<typename DerivedPolicy,
          typename ForwardIterator,
          typename Size,
          typename T>
-__host__ __device__
+THRUST_HOST_DEVICE
   ForwardIterator uninitialized_fill_n(thrust::execution_policy<DerivedPolicy> &exec,
                                        ForwardIterator first,
                                        Size n,
                                        const T &x)
 {
-  typedef typename iterator_traits<ForwardIterator>::value_type ValueType;
+  using ValueType = typename iterator_traits<ForwardIterator>::value_type;
 
-  typedef thrust::detail::has_trivial_copy_constructor<ValueType> ValueTypeHasTrivialCopyConstructor;
+  using ValueTypeHasTrivialCopyConstructor = thrust::detail::has_trivial_copy_constructor<ValueType>;
 
   return thrust::system::detail::generic::detail::uninitialized_fill_n(exec, first, n, x,
     ValueTypeHasTrivialCopyConstructor());

@@ -26,9 +26,9 @@
 THRUST_NAMESPACE_BEGIN
 
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template<typename DerivedPolicy, typename RandomAccessIterator>
-__host__ __device__
+THRUST_HOST_DEVICE
   void sort(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
             RandomAccessIterator first,
             RandomAccessIterator last)
@@ -38,11 +38,11 @@ __host__ __device__
 } // end sort()
 
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template<typename DerivedPolicy,
          typename RandomAccessIterator,
          typename StrictWeakOrdering>
-__host__ __device__
+THRUST_HOST_DEVICE
   void sort(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
             RandomAccessIterator first,
             RandomAccessIterator last,
@@ -53,9 +53,9 @@ __host__ __device__
 } // end sort()
 
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template<typename DerivedPolicy, typename RandomAccessIterator>
-__host__ __device__
+THRUST_HOST_DEVICE
   void stable_sort(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
                    RandomAccessIterator first,
                    RandomAccessIterator last)
@@ -65,11 +65,11 @@ __host__ __device__
 } // end stable_sort()
 
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template<typename DerivedPolicy,
          typename RandomAccessIterator,
          typename StrictWeakOrdering>
-__host__ __device__
+THRUST_HOST_DEVICE
   void stable_sort(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
                    RandomAccessIterator first,
                    RandomAccessIterator last,
@@ -80,11 +80,11 @@ __host__ __device__
 } // end stable_sort()
 
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template<typename DerivedPolicy,
          typename RandomAccessIterator1,
          typename RandomAccessIterator2>
-__host__ __device__
+THRUST_HOST_DEVICE
   void sort_by_key(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
                    RandomAccessIterator1 keys_first,
                    RandomAccessIterator1 keys_last,
@@ -95,12 +95,12 @@ __host__ __device__
 } // end sort_by_key()
 
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template<typename DerivedPolicy,
          typename RandomAccessIterator1,
          typename RandomAccessIterator2,
          typename StrictWeakOrdering>
-__host__ __device__
+THRUST_HOST_DEVICE
   void sort_by_key(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
                    RandomAccessIterator1 keys_first,
                    RandomAccessIterator1 keys_last,
@@ -112,11 +112,11 @@ __host__ __device__
 } // end sort_by_key()
 
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template<typename DerivedPolicy,
          typename RandomAccessIterator1,
          typename RandomAccessIterator2>
-__host__ __device__
+THRUST_HOST_DEVICE
   void stable_sort_by_key(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
                           RandomAccessIterator1 keys_first,
                           RandomAccessIterator1 keys_last,
@@ -127,12 +127,12 @@ __host__ __device__
 } // end stable_sort_by_key()
 
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template<typename DerivedPolicy,
          typename RandomAccessIterator1,
          typename RandomAccessIterator2,
          typename StrictWeakOrdering>
-__host__ __device__
+THRUST_HOST_DEVICE
   void stable_sort_by_key(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
                           RandomAccessIterator1 keys_first,
                           RandomAccessIterator1 keys_last,
@@ -144,9 +144,9 @@ __host__ __device__
 } // end stable_sort_by_key()
 
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template<typename DerivedPolicy, typename ForwardIterator>
-__host__ __device__
+THRUST_HOST_DEVICE
   bool is_sorted(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
                  ForwardIterator first,
                  ForwardIterator last)
@@ -156,9 +156,9 @@ __host__ __device__
 } // end is_sorted()
 
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template<typename DerivedPolicy, typename ForwardIterator, typename Compare>
-__host__ __device__
+THRUST_HOST_DEVICE
   bool is_sorted(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
                  ForwardIterator first,
                  ForwardIterator last,
@@ -169,9 +169,9 @@ __host__ __device__
 } // end is_sorted()
 
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template<typename DerivedPolicy, typename ForwardIterator>
-__host__ __device__
+THRUST_HOST_DEVICE
   ForwardIterator is_sorted_until(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
                                   ForwardIterator first,
                                   ForwardIterator last)
@@ -181,9 +181,9 @@ __host__ __device__
 } // end is_sorted_until()
 
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template<typename DerivedPolicy, typename ForwardIterator, typename Compare>
-__host__ __device__
+THRUST_HOST_DEVICE
   ForwardIterator is_sorted_until(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
                                   ForwardIterator first,
                                   ForwardIterator last,
@@ -204,7 +204,7 @@ template<typename RandomAccessIterator>
 {
   using thrust::system::detail::generic::select_system;
 
-  typedef typename thrust::iterator_system<RandomAccessIterator>::type System;
+  using System = typename thrust::iterator_system<RandomAccessIterator>::type;
 
   System system;
 
@@ -214,14 +214,14 @@ template<typename RandomAccessIterator>
 
 template<typename RandomAccessIterator,
          typename StrictWeakOrdering>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   void sort(RandomAccessIterator first,
             RandomAccessIterator last,
             StrictWeakOrdering comp)
 {
   using thrust::system::detail::generic::select_system;
 
-  typedef typename thrust::iterator_system<RandomAccessIterator>::type System;
+  using System = typename thrust::iterator_system<RandomAccessIterator>::type;
 
   System system;
 
@@ -235,7 +235,7 @@ template<typename RandomAccessIterator>
 {
   using thrust::system::detail::generic::select_system;
 
-  typedef typename thrust::iterator_system<RandomAccessIterator>::type System;
+  using System = typename thrust::iterator_system<RandomAccessIterator>::type;
 
   System system;
 
@@ -251,7 +251,7 @@ template<typename RandomAccessIterator,
 {
   using thrust::system::detail::generic::select_system;
 
-  typedef typename thrust::iterator_system<RandomAccessIterator>::type System;
+  using System = typename thrust::iterator_system<RandomAccessIterator>::type;
 
   System system;
 
@@ -272,8 +272,8 @@ template<typename RandomAccessIterator1,
 {
   using thrust::system::detail::generic::select_system;
 
-  typedef typename thrust::iterator_system<RandomAccessIterator1>::type System1;
-  typedef typename thrust::iterator_system<RandomAccessIterator2>::type System2;
+  using System1 = typename thrust::iterator_system<RandomAccessIterator1>::type;
+  using System2 = typename thrust::iterator_system<RandomAccessIterator2>::type;
 
   System1 system1;
   System2 system2;
@@ -292,8 +292,8 @@ template<typename RandomAccessIterator1,
 {
   using thrust::system::detail::generic::select_system;
 
-  typedef typename thrust::iterator_system<RandomAccessIterator1>::type System1;
-  typedef typename thrust::iterator_system<RandomAccessIterator2>::type System2;
+  using System1 = typename thrust::iterator_system<RandomAccessIterator1>::type;
+  using System2 = typename thrust::iterator_system<RandomAccessIterator2>::type;
 
   System1 system1;
   System2 system2;
@@ -310,8 +310,8 @@ template<typename RandomAccessIterator1,
 {
   using thrust::system::detail::generic::select_system;
 
-  typedef typename thrust::iterator_system<RandomAccessIterator1>::type System1;
-  typedef typename thrust::iterator_system<RandomAccessIterator2>::type System2;
+  using System1 = typename thrust::iterator_system<RandomAccessIterator1>::type;
+  using System2 = typename thrust::iterator_system<RandomAccessIterator2>::type;
 
   System1 system1;
   System2 system2;
@@ -330,8 +330,8 @@ template<typename RandomAccessIterator1,
 {
   using thrust::system::detail::generic::select_system;
 
-  typedef typename thrust::iterator_system<RandomAccessIterator1>::type System1;
-  typedef typename thrust::iterator_system<RandomAccessIterator2>::type System2;
+  using System1 = typename thrust::iterator_system<RandomAccessIterator1>::type;
+  using System2 = typename thrust::iterator_system<RandomAccessIterator2>::type;
 
   System1 system1;
   System2 system2;
@@ -346,7 +346,7 @@ template<typename ForwardIterator>
 {
   using thrust::system::detail::generic::select_system;
 
-  typedef typename thrust::iterator_system<ForwardIterator>::type System;
+  using System = typename thrust::iterator_system<ForwardIterator>::type;
 
   System system;
 
@@ -362,7 +362,7 @@ template<typename ForwardIterator,
 {
   using thrust::system::detail::generic::select_system;
 
-  typedef typename thrust::iterator_system<ForwardIterator>::type System;
+  using System = typename thrust::iterator_system<ForwardIterator>::type;
 
   System system;
 
@@ -376,7 +376,7 @@ template<typename ForwardIterator>
 {
   using thrust::system::detail::generic::select_system;
 
-  typedef typename thrust::iterator_system<ForwardIterator>::type System;
+  using System = typename thrust::iterator_system<ForwardIterator>::type;
 
   System system;
 
@@ -392,7 +392,7 @@ template<typename ForwardIterator,
 {
   using thrust::system::detail::generic::select_system;
 
-  typedef typename thrust::iterator_system<ForwardIterator>::type System;
+  using System = typename thrust::iterator_system<ForwardIterator>::type;
 
   System system;
 

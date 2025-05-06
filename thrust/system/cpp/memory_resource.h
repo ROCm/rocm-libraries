@@ -33,15 +33,10 @@ namespace system { namespace cpp
 //! \cond
 namespace detail
 {
-    typedef thrust::mr::fancy_pointer_resource<
-        thrust::mr::new_delete_resource,
-        thrust::cpp::pointer<void>
-    > native_resource;
+    using native_resource = thrust::mr::fancy_pointer_resource<thrust::mr::new_delete_resource, thrust::cpp::pointer<void>>;
 
-    typedef thrust::mr::fancy_pointer_resource<
-        thrust::mr::new_delete_resource,
-        thrust::cpp::universal_pointer<void>
-    > universal_native_resource;
+    using universal_native_resource =
+    thrust::mr::fancy_pointer_resource<thrust::mr::new_delete_resource, thrust::cpp::universal_pointer<void>>;
 } // namespace detail
 //! \endcond
 
@@ -53,13 +48,13 @@ namespace detail
 /*! The memory resource for the Standard C++ system. Uses \p
  *  mr::new_delete_resource and tags it with \p cpp::pointer.
  */
-typedef detail::native_resource memory_resource;
+using memory_resource = detail::native_resource;
 /*! The unified memory resource for the Standard C++ system. Uses
  *  \p mr::new_delete_resource and tags it with \p cpp::universal_pointer.
  */
-typedef detail::universal_native_resource universal_memory_resource;
+using universal_memory_resource = detail::universal_native_resource;
 /*! An alias for \p cpp::universal_memory_resource. */
-typedef detail::native_resource universal_host_pinned_memory_resource;
+using universal_host_pinned_memory_resource = detail::native_resource;
 
 /*! \} // memory_resources
  */

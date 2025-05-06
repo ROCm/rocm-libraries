@@ -15,13 +15,11 @@ extern "C" cudaError_t cudaFreeIgnoreShutdown(void* ptr) {
   return err; 
 }
 
-typedef thrust::system::cuda::detail::cuda_memory_resource<
-  cudaMalloc, 
-  cudaFreeIgnoreShutdown,
-  thrust::cuda::pointer<void>
-> device_ignore_shutdown_memory_resource;
+  using device_ignore_shutdown_memory_resource = thrust::system::cuda::detail::cuda_memory_resource<
+                                                  cudaMalloc, 
+                                                  cudaFreeIgnoreShutdown,
+                                                  thrust::cuda::pointer<void> >;
 
-#if THRUST_CPP_DIALECT >= 2011
   template <typename T>
   using device_ignore_shutdown_allocator = 
     thrust::mr::stateless_resource_allocator<
@@ -30,15 +28,6 @@ typedef thrust::system::cuda::detail::cuda_memory_resource<
     >;
     
   thrust::device_vector<double, device_ignore_shutdown_allocator<double>> d;
-#else
-  thrust::device_vector<
-    double, 
-    thrust::mr::stateless_resource_allocator<
-      double,
-      thrust::device_ptr_memory_resource<device_ignore_shutdown_memory_resource>
-    > 
-  > d;
-#endif
 
 int main() {
   d.resize(25);

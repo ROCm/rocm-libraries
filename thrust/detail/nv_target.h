@@ -27,4 +27,8 @@
 #  include <thrust/system/hip/detail/nv/target.h>
 #elif THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 #  include <nv/target>
+#else
+// When using a different backend, e.g. OpenMP, we still need to define the target.
+// We can simply reuse the HIP targets for this.
+#  include <thrust/system/hip/detail/nv/target.h>
 #endif

@@ -25,6 +25,8 @@
 #include <thrust/detail/config.h>
 #include <thrust/detail/memory_wrapper.h>
 #include <thrust/detail/vector_base.h>
+
+#include <initializer_list>
 #include <vector>
 #include <utility>
 
@@ -52,26 +54,26 @@ template<typename T, typename Alloc = std::allocator<T> >
     : public detail::vector_base<T,Alloc>
 {
   private:
-    typedef detail::vector_base<T,Alloc> Parent;
+    using Parent = detail::vector_base<T,Alloc>;
 
   public:
     /*! \cond
      */
-    typedef typename Parent::size_type  size_type;
-    typedef typename Parent::value_type value_type;
+    using size_type  = typename Parent::size_type;
+    using value_type = typename Parent::value_type;
     /*! \endcond
      */
 
     /*! This constructor creates an empty \p host_vector.
      */
-    __host__
+    THRUST_HOST
     host_vector(void)
       :Parent() {}
 
     /*! This constructor creates an empty \p host_vector.
      *  \param alloc The allocator to use by this host_vector.
      */
-    __host__
+    THRUST_HOST
     host_vector(const Alloc &alloc)
       :Parent(alloc) {}
 
@@ -79,14 +81,14 @@ template<typename T, typename Alloc = std::allocator<T> >
      */
     //  Define an empty destructor to explicitly specify
     //  its execution space qualifier, as a workaround for nvcc warning
-    __host__
+    THRUST_HOST
     ~host_vector(void) {}
 
     /*! This constructor creates a \p host_vector with the given
      *  size.
      *  \param n The number of elements to initially create.
      */
-    __host__
+    THRUST_HOST
     explicit host_vector(size_type n)
       :Parent(n) {}
 
@@ -95,7 +97,7 @@ template<typename T, typename Alloc = std::allocator<T> >
      *  \param n The number of elements to initially create.
      *  \param alloc The allocator to use by this host_vector.
      */
-    __host__
+    THRUST_HOST
     explicit host_vector(size_type n, const Alloc &alloc)
       :Parent(n,alloc) {}
 
@@ -104,7 +106,7 @@ template<typename T, typename Alloc = std::allocator<T> >
      *  \param n The number of elements to initially create.
      *  \param value An element to copy.
      */
-    __host__
+    THRUST_HOST
     explicit host_vector(size_type n, const value_type &value)
       :Parent(n,value) {}
 
@@ -114,14 +116,14 @@ template<typename T, typename Alloc = std::allocator<T> >
      *  \param value An element to copy.
      *  \param alloc The allocator to use by this host_vector.
      */
-    __host__
+    THRUST_HOST
     explicit host_vector(size_type n, const value_type &value, const Alloc &alloc)
       :Parent(n,value,alloc) {}
 
     /*! Copy constructor copies from an exemplar \p host_vector.
      *  \param v The \p host_vector to copy.
      */
-    __host__
+    THRUST_HOST
     host_vector(const host_vector &v)
       :Parent(v) {}
 
@@ -129,15 +131,14 @@ template<typename T, typename Alloc = std::allocator<T> >
      *  \param v The \p host_vector to copy.
      *  \param alloc The allocator to use by this host_vector.
      */
-    __host__
+    THRUST_HOST
     host_vector(const host_vector &v, const Alloc &alloc)
       :Parent(v,alloc) {}
 
-  #if THRUST_CPP_DIALECT >= 2011
     /*! Move constructor moves from another host_vector.
      *  \param v The host_vector to move.
      */
-     __host__
+     THRUST_HOST
     host_vector(host_vector &&v)
       :Parent(std::move(v)) {}
 
@@ -145,32 +146,29 @@ template<typename T, typename Alloc = std::allocator<T> >
      *  \param v The host_vector to move.
      *  \param alloc The allocator to use by this host_vector.
      */
-     __host__
+     THRUST_HOST
     host_vector(host_vector &&v, const Alloc &alloc)
       :Parent(std::move(v),alloc) {}
-  #endif
 
   /*! Assign operator copies from an exemplar \p host_vector.
    *  \param v The \p host_vector to copy.
    */
-  __host__
+  THRUST_HOST
   host_vector &operator=(const host_vector &v)
   { Parent::operator=(v); return *this; }
 
-  #if THRUST_CPP_DIALECT >= 2011
     /*! Move assign operator moves from another host_vector.
      *  \param v The host_vector to move.
      */
-     __host__
+     THRUST_HOST
      host_vector &operator=(host_vector &&v)
      { Parent::operator=(std::move(v)); return *this; }
-  #endif
 
     /*! Copy constructor copies from an exemplar \p host_vector with different type.
      *  \param v The \p host_vector to copy.
      */
     template<typename OtherT, typename OtherAlloc>
-    __host__
+    THRUST_HOST
     host_vector(const host_vector<OtherT,OtherAlloc> &v)
       :Parent(v) {}
 
@@ -178,7 +176,7 @@ template<typename T, typename Alloc = std::allocator<T> >
      *  \param v The \p host_vector to copy.
      */
     template<typename OtherT, typename OtherAlloc>
-    __host__
+    THRUST_HOST
     host_vector &operator=(const host_vector<OtherT,OtherAlloc> &v)
     { Parent::operator=(v); return *this; }
 
@@ -186,7 +184,7 @@ template<typename T, typename Alloc = std::allocator<T> >
      *  \param v The <tt>std::vector</tt> to copy.
      */
     template<typename OtherT, typename OtherAlloc>
-    __host__
+    THRUST_HOST
     host_vector(const std::vector<OtherT,OtherAlloc> &v)
       :Parent(v) {}
 
@@ -194,7 +192,7 @@ template<typename T, typename Alloc = std::allocator<T> >
      *  \param v The <tt>std::vector</tt> to copy.
      */
     template<typename OtherT, typename OtherAlloc>
-    __host__
+    THRUST_HOST
     host_vector &operator=(const std::vector<OtherT,OtherAlloc> &v)
     { Parent::operator=(v); return *this;}
 
@@ -204,7 +202,7 @@ template<typename T, typename Alloc = std::allocator<T> >
      *  \param v The \p vector_base to copy.
      */
     template<typename OtherT, typename OtherAlloc>
-    __host__
+    THRUST_HOST
     host_vector(const detail::vector_base<OtherT,OtherAlloc> &v)
       :Parent(v) {}
 
@@ -213,16 +211,35 @@ template<typename T, typename Alloc = std::allocator<T> >
      *  \param v The \p vector_base to copy.
      */
     template<typename OtherT, typename OtherAlloc>
-    __host__
+    THRUST_HOST
     host_vector &operator=(const detail::vector_base<OtherT,OtherAlloc> &v)
     { Parent::operator=(v); return *this; }
+    
+    /*! This constructor builds a \p host_vector from an intializer_list.
+     *  \param il The intializer_list.
+     */
+    host_vector(std::initializer_list<T> il)
+      :Parent(il) {}
+      
+    /*! This constructor builds a \p host_vector from an intializer_list.
+     *  \param il The intializer_list.
+     *  \param alloc The allocator to use by this host_vector.
+     */
+    host_vector(std::initializer_list<T> il, const Alloc &alloc)
+      :Parent(il, alloc) {}
+      
+    /*! Assign an \p intializer_list with a matching element type
+     *  \param il The intializer_list.
+     */
+    host_vector &operator=(std::initializer_list<T> il)
+    { Parent::operator=(il); return *this; }
 
     /*! This constructor builds a \p host_vector from a range.
      *  \param first The beginning of the range.
      *  \param last The end of the range.
      */
     template<typename InputIterator>
-    __host__
+    THRUST_HOST
     host_vector(InputIterator first, InputIterator last)
       :Parent(first, last) {}
 
@@ -232,7 +249,7 @@ template<typename T, typename Alloc = std::allocator<T> >
      *  \param alloc The allocator to use by this host_vector.
      */
     template<typename InputIterator>
-    __host__
+    THRUST_HOST
     host_vector(InputIterator first, InputIterator last, const Alloc &alloc)
       :Parent(first, last, alloc) {}
 

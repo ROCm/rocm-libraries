@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2018 NVIDIA Corporation
- *  Modifications Copyright© 2023 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -17,6 +17,8 @@
 
 #pragma once
 
+// Internal config header that is only included through thrust/detail/config/config.h
+
 #include <thrust/detail/config/cpp_dialect.h>
 
 #include <cstddef>
@@ -25,19 +27,20 @@
 #  define __has_cpp_attribute(X) 0
 #endif
 
-// Trailing return types seem to confuse Doxygen, and cause it to interpret
-// parts of the function's body as new function signatures.
-#if defined(THRUST_DOXYGEN)
-#  define THRUST_TRAILING_RETURN(...)
-#else
-#  define THRUST_TRAILING_RETURN(...) -> __VA_ARGS__
-#endif
-
 #if THRUST_CPP_DIALECT >= 2014 && __has_cpp_attribute(nodiscard)
 #  define THRUST_NODISCARD [[nodiscard]]
 #else
 #  define THRUST_NODISCARD
 #endif
+
+// NVCC below 11.3 does not support nodiscard on friend operators
+// It always fails with clang
+#if (defined(__CUDACC__) && (__CUDACC_VER_MAJOR__ <= 11 && __CUDACC_VER_MINOR__ < 3)) || THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_CLANG
+#  define THRUST_NODISCARD_FRIEND friend
+#else
+#  define THRUST_NODISCARD_FRIEND THRUST_NODISCARD friend
+#endif
+
 
 #if THRUST_CPP_DIALECT >= 2017 && __cpp_if_constexpr
 #  define THRUST_IF_CONSTEXPR if constexpr
@@ -53,25 +56,17 @@
 //#  if   THRUST_CPP_DIALECT >= 2017
 //#    define THRUST_INLINE_CONSTANT                 inline constexpr
 //#    define THRUST_INLINE_INTEGRAL_MEMBER_CONSTANT inline constexpr
-#  if THRUST_CPP_DIALECT >= 2011
-#    define THRUST_INLINE_CONSTANT                 static const __device__
+#    define THRUST_INLINE_CONSTANT                 static const _CCCL_DEVICE
 #    define THRUST_INLINE_INTEGRAL_MEMBER_CONSTANT static constexpr
-#  else
-#    define THRUST_INLINE_CONSTANT                 static const __device__
-#    define THRUST_INLINE_INTEGRAL_MEMBER_CONSTANT static const
-#  endif
+
 #else
 // FIXME: Add this when NVCC supports inline variables.
 //#  if   THRUST_CPP_DIALECT >= 2017
 //#    define THRUST_INLINE_CONSTANT                 inline constexpr
 //#    define THRUST_INLINE_INTEGRAL_MEMBER_CONSTANT inline constexpr
-#  if THRUST_CPP_DIALECT >= 2011
 #    define THRUST_INLINE_CONSTANT                 static constexpr
 #    define THRUST_INLINE_INTEGRAL_MEMBER_CONSTANT static constexpr
-#  else
-#    define THRUST_INLINE_CONSTANT                 static const
-#    define THRUST_INLINE_INTEGRAL_MEMBER_CONSTANT static const
-#  endif
+
 #endif
 
 #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP

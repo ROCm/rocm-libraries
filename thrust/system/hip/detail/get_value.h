@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2023 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -17,8 +17,9 @@
 
 #pragma once
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 #include <thrust/detail/config.h>
+
+#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 #include <thrust/detail/raw_pointer_cast.h>
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/system/detail/adl/assign_value.h>
@@ -35,7 +36,7 @@ template <typename DerivedPolicy, typename Pointer>
 typename thrust::iterator_value<Pointer>::type THRUST_HIP_FUNCTION
 get_value(execution_policy<DerivedPolicy>& exec, Pointer ptr)
 {
-    typedef typename thrust::iterator_value<Pointer>::type result_type;
+    using result_type = typename thrust::iterator_value<Pointer>::type;
 
     // WORKAROUND
     NV_IF_TARGET(

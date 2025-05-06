@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright 2019-2023 Advanced Micro Devices, Inc.
+# Copyright 2019-2024 Advanced Micro Devices, Inc.
 # ########################################################################
 
 cmake_minimum_required(VERSION 3.10.2 FATAL_ERROR)
@@ -49,10 +49,18 @@ find_package(rocprim REQUIRED CONFIG PATHS "${ROCPRIM_ROOT}")
 find_package(rocthrust REQUIRED CONFIG HINTS ${rocthrust_DIR} PATHS "/opt/rocm/rocthrust")
 
 # Build CXX flags
-set(CMAKE_CXX_STANDARD 14)
+if (NOT DEFINED CMAKE_CXX_STANDARD)
+  set(CMAKE_CXX_STANDARD 17)
+endif()
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Werror")
+
+if (CMAKE_CXX_STANDARD EQUAL 14)
+  message(WARNING "C++14 will be deprecated in the next major release")
+elseif(NOT CMAKE_CXX_STANDARD EQUAL 17)
+  message(FATAL_ERROR "Only C++14 and C++17 are supported")
+endif()
 
 # Enable testing (ctest)
 enable_testing()
@@ -60,6 +68,15 @@ enable_testing()
 function(add_rocthrust_test TEST_NAME TEST_SOURCES)
   list(GET TEST_SOURCES 0 TEST_MAIN_SOURCE)
   get_filename_component(TEST_TARGET ${TEST_MAIN_SOURCE} NAME_WE)
+
+  foreach(test_file ${TEST_SOURCES})
+    if(USE_HIPCXX)
+      set_source_files_properties(${test_file} PROPERTIES LANGUAGE HIP)
+    else()
+      set_source_files_properties(${test_file} PROPERTIES LANGUAGE CXX)
+    endif()
+  endforeach()
+
   add_executable(${TEST_TARGET} ${TEST_SOURCES})
   target_link_libraries(${TEST_TARGET}
     PRIVATE
@@ -71,8 +88,8 @@ function(add_rocthrust_test TEST_NAME TEST_SOURCES)
         PRIVATE
           --offload-arch=${gpu_target}
       )
+    endforeach()
   endif()
-  endforeach()
   add_test(${TEST_NAME} ${TEST_TARGET})
 endfunction()
 

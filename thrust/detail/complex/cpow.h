@@ -1,7 +1,7 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
  *  Copyright 2013 Filipe RNC Maia
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -22,34 +22,31 @@
 
 #include <thrust/complex.h>
 #include <thrust/detail/type_traits.h>
+
 #include <cmath>
+#include <type_traits>
 
 THRUST_NAMESPACE_BEGIN
 
 template <typename T0, typename T1>
-__host__ __device__
-complex<typename detail::promoted_numerical_type<T0, T1>::type>
+THRUST_HOST_DEVICE complex<typename detail::promoted_numerical_type<T0, T1>::type>
 pow(const complex<T0>& x, const complex<T1>& y)
 {
-  typedef typename detail::promoted_numerical_type<T0, T1>::type T;
+  using T = typename detail::promoted_numerical_type<T0, T1>::type;
   return exp(log(complex<T>(x)) * complex<T>(y));
 }
 
 template <typename T0, typename T1>
-__host__ __device__
-complex<typename detail::promoted_numerical_type<T0, T1>::type>
-pow(const complex<T0>& x, const T1& y)
+THRUST_HOST_DEVICE complex<typename detail::promoted_numerical_type<T0, T1>::type> pow(const complex<T0>& x, const T1& y)
 {
-  typedef typename detail::promoted_numerical_type<T0, T1>::type T;
+  using T = typename detail::promoted_numerical_type<T0, T1>::type;
   return exp(log(complex<T>(x)) * T(y));
 }
 
 template <typename T0, typename T1>
-__host__ __device__
-complex<typename detail::promoted_numerical_type<T0, T1>::type>
-pow(const T0& x, const complex<T1>& y)
+THRUST_HOST_DEVICE complex<typename detail::promoted_numerical_type<T0, T1>::type> pow(const T0& x, const complex<T1>& y)
 {
-  typedef typename detail::promoted_numerical_type<T0, T1>::type T;
+  using T = typename detail::promoted_numerical_type<T0, T1>::type;
   #ifdef __HIP_DEVICE_COMPILE__
     using ::log;
   #else

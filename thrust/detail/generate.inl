@@ -26,11 +26,11 @@
 
 THRUST_NAMESPACE_BEGIN
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template<typename DerivedPolicy,
          typename ForwardIterator,
          typename Generator>
-__host__ __device__
+THRUST_HOST_DEVICE
   void generate(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
                 ForwardIterator first,
                 ForwardIterator last,
@@ -41,12 +41,12 @@ __host__ __device__
 } // end generate()
 
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template<typename DerivedPolicy,
          typename OutputIterator,
          typename Size,
          typename Generator>
-__host__ __device__
+THRUST_HOST_DEVICE
   OutputIterator generate_n(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
                             OutputIterator first,
                             Size n,
@@ -65,7 +65,7 @@ template<typename ForwardIterator,
 {
   using thrust::system::detail::generic::select_system;
 
-  typedef typename thrust::iterator_system<ForwardIterator>::type System;
+  using System = typename thrust::iterator_system<ForwardIterator>::type;
 
   System system;
 
@@ -82,7 +82,7 @@ template<typename OutputIterator,
 {
   using thrust::system::detail::generic::select_system;
 
-  typedef typename thrust::iterator_system<OutputIterator>::type System;
+  using System = typename thrust::iterator_system<OutputIterator>::type;
 
   System system;
 

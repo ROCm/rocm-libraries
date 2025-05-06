@@ -1,3 +1,20 @@
+/*
+ *  Copyright 2008-2013 NVIDIA Corporation
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+
 #include <unittest/unittest.h>
 
 #include <thrust/detail/config.h>
@@ -7,7 +24,7 @@
 template<typename BaseAlloc, bool PropagateOnSwap>
 class stateful_allocator : public BaseAlloc
 {
-  typedef thrust::detail::allocator_traits<BaseAlloc> base_traits;
+  using base_traits = thrust::detail::allocator_traits<BaseAlloc>;
 
 public:
     stateful_allocator(int i) : state(i)
@@ -27,7 +44,6 @@ public:
         return *this;
     }
 
-#if THRUST_CPP_DIALECT >= 2011
     stateful_allocator(stateful_allocator && other)
         : BaseAlloc(std::move(other)), state(other.state)
     {
@@ -40,15 +56,14 @@ public:
         other.state = 0;
         return *this;
     }
-#endif
 
     static int last_allocated;
     static int last_deallocated;
 
-    typedef typename base_traits::pointer pointer;
-    typedef typename base_traits::const_pointer const_pointer;
-    typedef typename base_traits::reference reference;
-    typedef typename base_traits::const_reference const_reference;
+    using pointer = typename base_traits::pointer;
+    using const_pointer = typename base_traits::const_pointer;
+    using reference = typename base_traits::reference;
+    using const_reference = typename base_traits::const_reference;
 
     pointer allocate(std::size_t size)
     {
@@ -93,10 +108,10 @@ public:
         return os;
     }
 
-    typedef thrust::detail::false_type is_always_equal;
-    typedef thrust::detail::true_type propagate_on_container_copy_assignment;
-    typedef thrust::detail::true_type propagate_on_container_move_assignment;
-    typedef thrust::detail::integral_constant<bool, PropagateOnSwap> propagate_on_container_swap;
+    using is_always_equal = thrust::detail::false_type;
+    using propagate_on_container_copy_assignment = thrust::detail::true_type;
+    using propagate_on_container_move_assignment = thrust::detail::true_type;
+    using propagate_on_container_swap = thrust::detail::integral_constant<bool, PropagateOnSwap>;
 
 private:
     int state;
@@ -108,22 +123,22 @@ int stateful_allocator<BaseAlloc, PropagateOnSwap>::last_allocated = 0;
 template<typename BaseAlloc, bool PropagateOnSwap>
 int stateful_allocator<BaseAlloc, PropagateOnSwap>::last_deallocated = 0;
 
-typedef stateful_allocator<std::allocator<int>, true> host_alloc;
-typedef stateful_allocator<thrust::device_allocator<int>, true> device_alloc;
+using host_alloc   = stateful_allocator<std::allocator<int>, true>;
+using device_alloc = stateful_allocator<thrust::device_allocator<int>, true>;
 
-typedef thrust::host_vector<int, host_alloc> host_vector;
-typedef thrust::device_vector<int, device_alloc> device_vector;
+using host_vector   = thrust::host_vector<int, host_alloc>;
+using device_vector = thrust::device_vector<int, device_alloc>;
 
-typedef stateful_allocator<std::allocator<int>, false> host_alloc_nsp;
-typedef stateful_allocator<thrust::device_allocator<int>, false> device_alloc_nsp;
+using host_alloc_nsp   = stateful_allocator<std::allocator<int>, false>;
+using device_alloc_nsp = stateful_allocator<thrust::device_allocator<int>, false>;
 
-typedef thrust::host_vector<int, host_alloc_nsp> host_vector_nsp;
-typedef thrust::device_vector<int, device_alloc_nsp> device_vector_nsp;
+using host_vector_nsp   = thrust::host_vector<int, host_alloc_nsp>;
+using device_vector_nsp = thrust::device_vector<int, device_alloc_nsp>;
 
 template<typename Vector>
 void TestVectorAllocatorConstructors()
 {
-    typedef typename Vector::allocator_type Alloc;
+    using Alloc = typename Vector::allocator_type;
     Alloc alloc1(1);
     Alloc alloc2(2);
 
@@ -148,7 +163,6 @@ void TestVectorAllocatorConstructors()
     ASSERT_EQUAL(Alloc::last_allocated, 2);
     Alloc::last_allocated = 0;
 
-#if THRUST_CPP_DIALECT >= 2011
     // FIXME: uncomment this after the vector_base(vector_base&&, const Alloc&)
     // is fixed and implemented
     // Vector v5(std::move(v3), alloc2);
@@ -156,7 +170,6 @@ void TestVectorAllocatorConstructors()
     // ASSERT_EQUAL(v5.get_allocator(), alloc2);
     // ASSERT_EQUAL(Alloc::last_allocated, 1);
     // Alloc::last_allocated = 0;
-#endif
 
     Vector v6(v4.begin(), v4.end(), alloc2);
     ASSERT_EQUAL((v4 == v6), true);
@@ -181,7 +194,7 @@ void TestVectorAllocatorPropagateOnCopyAssignment()
 {
     ASSERT_EQUAL(thrust::detail::allocator_traits<typename Vector::allocator_type>::propagate_on_container_copy_assignment::value, true);
 
-    typedef typename Vector::allocator_type Alloc;
+    using Alloc = typename Vector::allocator_type;
     Alloc alloc1(1);
     Alloc alloc2(2);
 
@@ -207,14 +220,13 @@ void TestVectorAllocatorPropagateOnCopyAssignmentDevice()
 }
 DECLARE_UNITTEST(TestVectorAllocatorPropagateOnCopyAssignmentDevice);
 
-#if THRUST_CPP_DIALECT >= 2011
 template<typename Vector>
 void TestVectorAllocatorPropagateOnMoveAssignment()
 {
-    typedef typename Vector::allocator_type Alloc;
+    using Alloc = typename Vector::allocator_type;
     ASSERT_EQUAL(thrust::detail::allocator_traits<typename Vector::allocator_type>::propagate_on_container_copy_assignment::value, true);
 
-    typedef typename Vector::allocator_type Alloc;
+    using Alloc = typename Vector::allocator_type;
     Alloc alloc1(1);
     Alloc alloc2(2);
 
@@ -242,12 +254,11 @@ void TestVectorAllocatorPropagateOnMoveAssignmentDevice()
     TestVectorAllocatorPropagateOnMoveAssignment<device_vector>();
 }
 DECLARE_UNITTEST(TestVectorAllocatorPropagateOnMoveAssignmentDevice);
-#endif
 
 template<typename Vector>
 void TestVectorAllocatorPropagateOnSwap()
 {
-    typedef typename Vector::allocator_type Alloc;
+    using Alloc = typename Vector::allocator_type;
     Alloc alloc1(1);
     Alloc alloc2(2);
 

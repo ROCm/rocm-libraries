@@ -1,3 +1,20 @@
+/*
+ *  Copyright 2008-2013 NVIDIA Corporation
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+
 #include <unittest/unittest.h>
 #include <thrust/for_each.h>
 #include <thrust/execution_policy.h>
@@ -5,13 +22,20 @@
 
 static const size_t NUM_REGISTERS = 64;
 
-template <size_t N> __host__ __device__ void f   (int * x) { int temp = *x; f<N - 1>(x + 1); *x = temp;};
-template <>         __host__ __device__ void f<0>(int * /*x*/) { }
+template <size_t N>
+THRUST_HOST_DEVICE void f(int* x)
+{
+  int temp = *x;
+  f<N - 1>(x + 1);
+  *x = temp;
+};
+template <>
+THRUST_HOST_DEVICE void f<0>(int* /*x*/)
+{}
 template <size_t N>
 struct CopyFunctorWithManyRegisters
 {
-  __host__ __device__
-  void operator()(int * ptr)
+  THRUST_HOST_DEVICE void operator()(int* ptr)
   {
       f<N>(ptr);
   }
@@ -53,12 +77,15 @@ DECLARE_UNITTEST(TestForEachNLargeRegisterFootprint);
 template <typename T>
 struct mark_present_for_each
 {
-  T * ptr;
-  __host__ __device__ void
-  operator()(T x){ ptr[(int) x] = 1; }
+  T* ptr;
+  THRUST_HOST_DEVICE void operator()(T x)
+  {
+    ptr[(int) x] = 1;
+  }
 };
 
 
+#ifdef THRUST_TEST_DEVICE_SIDE
 template<typename ExecutionPolicy, typename Iterator, typename Function>
 __global__ void for_each_kernel(ExecutionPolicy exec, Iterator first, Iterator last, Function f)
 {
@@ -202,6 +229,7 @@ void TestForEachNDeviceDevice(const size_t n)
   ASSERT_EQUAL(h_output, d_output);
 }
 DECLARE_VARIABLE_UNITTEST(TestForEachNDeviceDevice);
+#endif
 
 
 void TestForEachCudaStreams()

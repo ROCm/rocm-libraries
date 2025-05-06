@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019-2020, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2024, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -32,16 +32,16 @@
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
     #ifndef __HIP_DEVICE_COMPILE__
         #define __THRUST_HAS_HIPRT__ 1
-        #define THRUST_HIP_RUNTIME_FUNCTION __host__ __device__ __forceinline__
+        #define THRUST_HIP_RUNTIME_FUNCTION THRUST_HOST_DEVICE THRUST_FORCEINLINE
         #define THRUST_RUNTIME_FUNCTION THRUST_HIP_RUNTIME_FUNCTION
     #else
         #define __THRUST_HAS_HIPRT__ 0
-        #define THRUST_HIP_RUNTIME_FUNCTION __host__ __forceinline__
+        #define THRUST_HIP_RUNTIME_FUNCTION THRUST_HOST THRUST_FORCEINLINE
         #define THRUST_RUNTIME_FUNCTION THRUST_HIP_RUNTIME_FUNCTION
     #endif
 #else
     #define __THRUST_HAS_HIPRT__ 0
-    #define THRUST_HIP_RUNTIME_FUNCTION __host__ __forceinline__
+    #define THRUST_HIP_RUNTIME_FUNCTION THRUST_HOST THRUST_FORCEINLINE
     #define THRUST_RUNTIME_FUNCTION THRUST_HIP_RUNTIME_FUNCTION
 #endif
 
@@ -59,9 +59,9 @@
 #define THRUST_HIP_DEVICE_CODE
 #endif
 
-#define THRUST_HIP_DEVICE_FUNCTION __device__ __forceinline__
-#define THRUST_HIP_HOST_FUNCTION __host__ __forceinline__
-#define THRUST_HIP_FUNCTION __host__ __device__ __forceinline__
+#define THRUST_HIP_DEVICE_FUNCTION THRUST_DEVICE THRUST_FORCEINLINE
+#define THRUST_HIP_HOST_FUNCTION THRUST_HOST THRUST_FORCEINLINE
+#define THRUST_HIP_FUNCTION THRUST_HOST_DEVICE THRUST_FORCEINLINE
 
 #ifdef THRUST_HIP_DEBUG_SYNC
 #define THRUST_HIP_DEBUG_SYNC_FLAG true
@@ -82,6 +82,3 @@
         auto ptr = function; \
         (void) ptr; \
     } while (0)
-
-#define THRUST_ROCPRIM_NS_PREFIX namespace thrust {   namespace hip_rocprim {
-#define THRUST_ROCPRIM_NS_POSTFIX }  }

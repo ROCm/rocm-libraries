@@ -23,9 +23,9 @@
 
 THRUST_NAMESPACE_BEGIN
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template <typename DerivedPolicy, typename InputIterator, typename OutputIterator>
-__host__ __device__
+THRUST_HOST_DEVICE
 OutputIterator adjacent_difference(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
                                    InputIterator first, InputIterator last,
                                    OutputIterator result)
@@ -36,9 +36,9 @@ OutputIterator adjacent_difference(const thrust::detail::execution_policy_base<D
 } // end adjacent_difference()
 
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template <typename DerivedPolicy, typename InputIterator, typename OutputIterator, typename BinaryFunction>
-__host__ __device__
+THRUST_HOST_DEVICE
 OutputIterator adjacent_difference(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
                                    InputIterator first, InputIterator last,
                                    OutputIterator result,
@@ -56,8 +56,8 @@ OutputIterator adjacent_difference(InputIterator first, InputIterator last,
 {
   using thrust::system::detail::generic::select_system;
 
-  typedef typename thrust::iterator_system<InputIterator>::type  System1;
-  typedef typename thrust::iterator_system<OutputIterator>::type System2;
+  using System1 = typename thrust::iterator_system<InputIterator>::type;
+  using System2 = typename thrust::iterator_system<OutputIterator>::type;
 
   System1 system1;
   System2 system2;
@@ -73,8 +73,8 @@ OutputIterator adjacent_difference(InputIterator first, InputIterator last,
 {
   using thrust::system::detail::generic::select_system;
 
-  typedef typename thrust::iterator_system<InputIterator>::type  System1;
-  typedef typename thrust::iterator_system<OutputIterator>::type System2;
+  using System1 = typename thrust::iterator_system<InputIterator>::type;
+  using System2 = typename thrust::iterator_system<OutputIterator>::type;
 
   System1 system1;
   System2 system2;

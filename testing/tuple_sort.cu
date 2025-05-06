@@ -1,3 +1,20 @@
+/*
+ *  Copyright 2008-2013 NVIDIA Corporation
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+
 #include <unittest/unittest.h>
 #include <thrust/tuple.h>
 #include <thrust/sort.h>
@@ -8,7 +25,7 @@ using namespace unittest;
 struct MakeTupleFunctor
 {
   template<typename T1, typename T2>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   thrust::tuple<T1,T2> operator()(T1 &lhs, T2 &rhs)
   {
     return thrust::make_tuple(lhs, rhs);
@@ -19,11 +36,8 @@ template<int N>
 struct GetFunctor
 {
   template<typename Tuple>
-  __host__ __device__
-  typename thrust::access_traits<
-    typename thrust::tuple_element<N, Tuple>::type
-  >::const_type
-  operator()(const Tuple &t)
+  THRUST_HOST_DEVICE
+  typename thrust::tuple_element<N, Tuple>::type operator()(const Tuple &t)
   {
     return thrust::get<N>(t);
   }
@@ -64,7 +78,7 @@ struct TestTupleStableSort
 
      // select values
      transform(h_tuples.begin(), h_tuples.end(), h_values.begin(), GetFunctor<1>());
-     
+
      device_vector<T> d_values(h_values.size());
      transform(d_tuples.begin(), d_tuples.end(), d_values.begin(), GetFunctor<1>());
 

@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -20,28 +20,33 @@
 #include <thrust/iterator/discard_iterator.h>
 #include <thrust/iterator/retag.h>
 
+// New GCC, new miscompile. 13 + TBB this time.
+#if defined(THRUST_HOST_COMPILER_GCC) && __GNUC__ == 13 && \
+    THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_TBB
+#define THRUST_GCC13_TBB_MISCOMPILE
+#endif
 
 template <class Vector>
 void TestReplaceSimple(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     Vector data(5);
-    data[0] =  1;
-    data[1] =  2;
+    data[0] =  1; 
+    data[1] =  2; 
     data[2] =  1;
-    data[3] =  3;
-    data[4] =  2;
+    data[3] =  3; 
+    data[4] =  2; 
 
     thrust::replace(data.begin(), data.end(), (T) 1, (T) 4);
     thrust::replace(data.begin(), data.end(), (T) 2, (T) 5);
 
     Vector result(5);
-    result[0] =  4;
-    result[1] =  5;
+    result[0] =  4; 
+    result[1] =  5; 
     result[2] =  4;
-    result[3] =  3;
-    result[4] =  5;
+    result[3] =  3; 
+    result[4] =  5; 
 
     ASSERT_EQUAL(data, result);
 }
@@ -49,7 +54,7 @@ DECLARE_VECTOR_UNITTEST(TestReplaceSimple);
 
 
 template<typename ForwardIterator, typename T>
-__host__ __device__
+THRUST_HOST_DEVICE
 void replace(my_system &system,
              ForwardIterator, ForwardIterator, const T &,
              const T &)
@@ -74,7 +79,7 @@ DECLARE_UNITTEST(TestReplaceDispatchExplicit);
 
 
 template<typename ForwardIterator, typename T>
-__host__ __device__
+THRUST_HOST_DEVICE
 void replace(my_tag,
              ForwardIterator first, ForwardIterator, const T &,
              const T &)
@@ -112,18 +117,18 @@ void TestReplace(const size_t n)
 }
 DECLARE_VARIABLE_UNITTEST(TestReplace);
 
-
+#ifndef THRUST_GCC13_TBB_MISCOMPILE
 template <class Vector>
 void TestReplaceCopySimple(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     Vector data(5);
-    data[0] = 1;
-    data[1] = 2;
+    data[0] = 1; 
+    data[1] = 2; 
     data[2] = 1;
-    data[3] = 3;
-    data[4] = 2;
+    data[3] = 3; 
+    data[4] = 2; 
 
     Vector dest(5);
 
@@ -131,19 +136,19 @@ void TestReplaceCopySimple(void)
     thrust::replace_copy(dest.begin(), dest.end(), dest.begin(), (T) 2, (T) 5);
 
     Vector result(5);
-    result[0] = 4;
-    result[1] = 5;
+    result[0] = 4; 
+    result[1] = 5; 
     result[2] = 4;
-    result[3] = 3;
-    result[4] = 5;
+    result[3] = 3; 
+    result[4] = 5; 
 
     ASSERT_EQUAL(dest, result);
 }
 DECLARE_VECTOR_UNITTEST(TestReplaceCopySimple);
-
+#endif
 
 template<typename InputIterator, typename OutputIterator, typename T>
-__host__ __device__
+THRUST_HOST_DEVICE
 OutputIterator replace_copy(my_system &system,
                             InputIterator, InputIterator,
                             OutputIterator result,
@@ -172,7 +177,7 @@ DECLARE_UNITTEST(TestReplaceCopyDispatchExplicit);
 
 
 template<typename InputIterator, typename OutputIterator, typename T>
-__host__ __device__
+THRUST_HOST_DEVICE
 OutputIterator replace_copy(my_tag,
                             InputIterator, InputIterator,
                             OutputIterator result,
@@ -203,10 +208,10 @@ void TestReplaceCopy(const size_t n)
 {
     thrust::host_vector<T>   h_data = unittest::random_samples<T>(n);
     thrust::device_vector<T> d_data = h_data;
-
+    
     T old_value = 0;
     T new_value = 1;
-
+    
     thrust::host_vector<T>   h_dest(n);
     thrust::device_vector<T> d_dest(n);
 
@@ -224,7 +229,7 @@ void TestReplaceCopyToDiscardIterator(const size_t n)
 {
     thrust::host_vector<T>   h_data = unittest::random_samples<T>(n);
     thrust::device_vector<T> d_data = h_data;
-
+    
     T old_value = 0;
     T new_value = 1;
 
@@ -246,29 +251,29 @@ DECLARE_VARIABLE_UNITTEST(TestReplaceCopyToDiscardIterator);
 template <typename T>
 struct less_than_five
 {
-  __host__ __device__ bool operator()(const T &val) const {return val < 5;}
+  THRUST_HOST_DEVICE bool operator()(const T &val) const {return val < 5;}
 };
 
 template <class Vector>
 void TestReplaceIfSimple(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     Vector data(5);
-    data[0] =  1;
-    data[1] =  3;
+    data[0] =  1; 
+    data[1] =  3; 
     data[2] =  4;
-    data[3] =  6;
-    data[4] =  5;
+    data[3] =  6; 
+    data[4] =  5; 
 
     thrust::replace_if(data.begin(), data.end(), less_than_five<T>(), (T) 0);
 
     Vector result(5);
-    result[0] =  0;
-    result[1] =  0;
+    result[0] =  0; 
+    result[1] =  0; 
     result[2] =  0;
-    result[3] =  6;
-    result[4] =  5;
+    result[3] =  6; 
+    result[4] =  5; 
 
     ASSERT_EQUAL(data, result);
 }
@@ -276,7 +281,7 @@ DECLARE_VECTOR_UNITTEST(TestReplaceIfSimple);
 
 
 template<typename ForwardIterator, typename Predicate, typename T>
-__host__ __device__
+THRUST_HOST_DEVICE
 void replace_if(my_system &system,
                 ForwardIterator, ForwardIterator,
                 Predicate,
@@ -302,7 +307,7 @@ DECLARE_UNITTEST(TestReplaceIfDispatchExplicit);
 
 
 template<typename ForwardIterator, typename Predicate, typename T>
-__host__ __device__
+THRUST_HOST_DEVICE
 void replace_if(my_tag,
                 ForwardIterator first, ForwardIterator,
                 Predicate,
@@ -328,14 +333,14 @@ DECLARE_UNITTEST(TestReplaceIfDispatchImplicit);
 template <class Vector>
 void TestReplaceIfStencilSimple(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     Vector data(5);
-    data[0] =  1;
-    data[1] =  3;
+    data[0] =  1; 
+    data[1] =  3; 
     data[2] =  4;
-    data[3] =  6;
-    data[4] =  5;
+    data[3] =  6; 
+    data[4] =  5; 
 
     Vector stencil(5);
     stencil[0] = 5;
@@ -347,11 +352,11 @@ void TestReplaceIfStencilSimple(void)
     thrust::replace_if(data.begin(), data.end(), stencil.begin(), less_than_five<T>(), (T) 0);
 
     Vector result(5);
-    result[0] =  1;
-    result[1] =  0;
+    result[0] =  1; 
+    result[1] =  0; 
     result[2] =  4;
-    result[3] =  0;
-    result[4] =  5;
+    result[3] =  0; 
+    result[4] =  5; 
 
     ASSERT_EQUAL(data, result);
 }
@@ -359,7 +364,7 @@ DECLARE_VECTOR_UNITTEST(TestReplaceIfStencilSimple);
 
 
 template<typename ForwardIterator, typename InputIterator, typename Predicate, typename T>
-__host__ __device__
+THRUST_HOST_DEVICE
 void replace_if(my_system &system,
                 ForwardIterator, ForwardIterator,
                 InputIterator,
@@ -387,7 +392,7 @@ DECLARE_UNITTEST(TestReplaceIfStencilDispatchExplicit);
 
 
 template<typename ForwardIterator, typename InputIterator, typename Predicate, typename T>
-__host__ __device__
+THRUST_HOST_DEVICE
 void replace_if(my_tag,
                 ForwardIterator first, ForwardIterator,
                 InputIterator,
@@ -446,25 +451,25 @@ DECLARE_VARIABLE_UNITTEST(TestReplaceIfStencil);
 template <class Vector>
 void TestReplaceCopyIfSimple(void)
 {
-    typedef typename Vector::value_type T;
-
+    using T = typename Vector::value_type;
+    
     Vector data(5);
-    data[0] =  1;
-    data[1] =  3;
+    data[0] =  1; 
+    data[1] =  3; 
     data[2] =  4;
-    data[3] =  6;
-    data[4] =  5;
+    data[3] =  6; 
+    data[4] =  5; 
 
     Vector dest(5);
 
     thrust::replace_copy_if(data.begin(), data.end(), dest.begin(), less_than_five<T>(), (T) 0);
 
     Vector result(5);
-    result[0] =  0;
-    result[1] =  0;
+    result[0] =  0; 
+    result[1] =  0; 
     result[2] =  0;
-    result[3] =  6;
-    result[4] =  5;
+    result[3] =  6; 
+    result[4] =  5; 
 
     ASSERT_EQUAL(dest, result);
 }
@@ -472,7 +477,7 @@ DECLARE_VECTOR_UNITTEST(TestReplaceCopyIfSimple);
 
 
 template<typename InputIterator, typename OutputIterator, typename Predicate, typename T>
-__host__ __device__
+THRUST_HOST_DEVICE
 OutputIterator replace_copy_if(my_system &system,
                                InputIterator, InputIterator,
                                OutputIterator result,
@@ -501,7 +506,7 @@ DECLARE_UNITTEST(TestReplaceCopyIfDispatchExplicit);
 
 
 template<typename InputIterator, typename OutputIterator, typename Predicate, typename T>
-__host__ __device__
+THRUST_HOST_DEVICE
 OutputIterator replace_copy_if(my_tag,
                                InputIterator, InputIterator,
                                OutputIterator result,
@@ -530,14 +535,14 @@ DECLARE_UNITTEST(TestReplaceCopyIfDispatchImplicit);
 template <class Vector>
 void TestReplaceCopyIfStencilSimple(void)
 {
-    typedef typename Vector::value_type T;
-
+    using T = typename Vector::value_type;
+    
     Vector data(5);
-    data[0] =  1;
-    data[1] =  3;
+    data[0] =  1; 
+    data[1] =  3; 
     data[2] =  4;
-    data[3] =  6;
-    data[4] =  5;
+    data[3] =  6; 
+    data[4] =  5; 
 
     Vector stencil(5);
     stencil[0] = 1;
@@ -551,11 +556,11 @@ void TestReplaceCopyIfStencilSimple(void)
     thrust::replace_copy_if(data.begin(), data.end(), stencil.begin(), dest.begin(), less_than_five<T>(), (T) 0);
 
     Vector result(5);
-    result[0] =  0;
-    result[1] =  3;
+    result[0] =  0; 
+    result[1] =  3; 
     result[2] =  0;
-    result[3] =  6;
-    result[4] =  5;
+    result[3] =  6; 
+    result[4] =  5; 
 
     ASSERT_EQUAL(dest, result);
 }
@@ -563,7 +568,7 @@ DECLARE_VECTOR_UNITTEST(TestReplaceCopyIfStencilSimple);
 
 
 template<typename InputIterator1, typename InputIterator2, typename OutputIterator, typename Predicate, typename T>
-__host__ __device__
+THRUST_HOST_DEVICE
 OutputIterator replace_copy_if(my_system &system,
                                InputIterator1, InputIterator1,
                                InputIterator2,
@@ -595,7 +600,7 @@ DECLARE_UNITTEST(TestReplaceCopyIfStencilDispatchExplicit);
 
 
 template<typename InputIterator1, typename InputIterator2, typename OutputIterator, typename Predicate, typename T>
-__host__ __device__
+THRUST_HOST_DEVICE
 OutputIterator replace_copy_if(my_tag,
                                InputIterator1, InputIterator1,
                                InputIterator2,
@@ -701,3 +706,4 @@ void TestReplaceCopyIfStencilToDiscardIterator(const size_t n)
     ASSERT_EQUAL_QUIET(reference, d_result);
 }
 DECLARE_VARIABLE_UNITTEST(TestReplaceCopyIfStencilToDiscardIterator);
+

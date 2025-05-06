@@ -30,7 +30,7 @@ namespace sequential
 {
 
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template<typename DerivedPolicy,
          typename InputIterator1,
          typename InputIterator2,
@@ -38,7 +38,7 @@ template<typename DerivedPolicy,
          typename OutputIterator2,
          typename BinaryPredicate,
          typename BinaryFunction>
-__host__ __device__
+THRUST_HOST_DEVICE
   thrust::pair<OutputIterator1,OutputIterator2>
     reduce_by_key(sequential::execution_policy<DerivedPolicy> &,
                   InputIterator1 keys_first,
@@ -49,8 +49,8 @@ __host__ __device__
                   BinaryPredicate binary_pred,
                   BinaryFunction binary_op)
 {
-  typedef typename thrust::iterator_traits<InputIterator1>::value_type  InputKeyType;
-  typedef typename thrust::iterator_traits<InputIterator2>::value_type  InputValueType;
+  using InputKeyType   = typename thrust::iterator_traits<InputIterator1>::value_type;
+  using InputValueType = typename thrust::iterator_traits<InputIterator2>::value_type;
 
   // Use the input iterator's value type per https://wg21.link/P0571
   using TemporaryType = typename thrust::iterator_value<InputIterator2>::type;

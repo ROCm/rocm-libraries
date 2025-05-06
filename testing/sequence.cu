@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -22,7 +22,7 @@
 
 
 template<typename ForwardIterator>
-__host__ __device__
+THRUST_HOST_DEVICE
 void sequence(my_system &system, ForwardIterator, ForwardIterator)
 {
     system.validate_dispatch();
@@ -41,7 +41,7 @@ DECLARE_UNITTEST(TestSequenceDispatchExplicit);
 
 
 template<typename ForwardIterator>
-__host__ __device__
+THRUST_HOST_DEVICE
 void sequence(my_tag, ForwardIterator first, ForwardIterator)
 {
     *first = 13;
@@ -112,7 +112,7 @@ void TestSequence(size_t n)
     thrust::sequence(d_data.begin(), d_data.end(), T(10), T(2));
 
     ASSERT_EQUAL(h_data, d_data);
-
+    
     thrust::sequence(h_data.begin(), h_data.end(), T(10), T(2));
     thrust::sequence(d_data.begin(), d_data.end(), T(10), T(2));
 
@@ -150,7 +150,7 @@ struct Vector
     Vector() = default;
     // Explicitly disable construction from size_t
     Vector(std::size_t) = delete;
-    __host__ __device__ Vector(int x_, int y_) : x{x_}, y{y_} {}
+    THRUST_HOST_DEVICE Vector(int x_, int y_) : x{x_}, y{y_} {}
     Vector(const Vector&) = default;
     Vector &operator=(const Vector&) = default;
 
@@ -158,18 +158,18 @@ struct Vector
 };
 
 // Vector-Vector addition
-__host__ __device__ Vector operator+(const Vector a, const Vector b)
+THRUST_HOST_DEVICE Vector operator+(const Vector a, const Vector b)
 {
   return Vector{a.x + b.x, a.y + b.y};
 }
 
 // Vector-Scalar Multiplication
 // Multiplication by std::size_t is required by thrust::sequence.
-__host__ __device__ Vector operator*(const std::size_t a, const Vector b)
+THRUST_HOST_DEVICE Vector operator*(const std::size_t a, const Vector b)
 {
   return Vector{static_cast<int>(a) * b.x, static_cast<int>(a) * b.y};
 }
-__host__ __device__ Vector operator*(const Vector b, const std::size_t a)
+THRUST_HOST_DEVICE Vector operator*(const Vector b, const std::size_t a)
 {
   return Vector{static_cast<int>(a) * b.x, static_cast<int>(a) * b.y};
 }

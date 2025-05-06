@@ -34,19 +34,19 @@ namespace sequential
 {
 
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template<typename DerivedPolicy,
          typename InputIterator,
          typename OutputIterator,
          typename BinaryFunction>
-__host__ __device__
+THRUST_HOST_DEVICE
 OutputIterator adjacent_difference(sequential::execution_policy<DerivedPolicy> &,
                                    InputIterator first,
                                    InputIterator last,
                                    OutputIterator result,
                                    BinaryFunction binary_op)
 {
-  typedef typename thrust::iterator_traits<InputIterator>::value_type InputType;
+  using InputType = typename thrust::iterator_traits<InputIterator>::value_type;
 
   if(first == last)
     return result;

@@ -1,5 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
+ *  Modifications Copyright (c) 2024, Advanced Micro Devices, Inc.  All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -40,31 +41,10 @@ namespace detail
 namespace functional
 {
 
-template<typename Eval>
-  __host__ __device__
-  constexpr actor<Eval>
-    ::actor()
-      : eval_type()
+template <typename Eval>
+THRUST_HOST_DEVICE actor<Eval>::actor(const Eval& base)
+    : eval_type(base)
 {}
-
-template<typename Eval>
-  __host__ __device__
-  actor<Eval>
-    ::actor(const Eval &base)
-      : eval_type(base)
-{}
-
-template<typename Eval>
-  __host__ __device__
-  typename apply_actor<
-    typename actor<Eval>::eval_type,
-    typename thrust::null_type
-  >::type
-    actor<Eval>
-      ::operator()(void) const
-{
-  return eval_type::eval(thrust::null_type());
-} // end basic_environment::operator()
 
 // actor::operator() needs to construct a tuple of references to its
 // arguments. To make this work with thrust::reference<T>, we need to
@@ -75,11 +55,19 @@ template<typename Eval>
 // - T& for any other types.
 // This struct provides a nicer diagnostic for when these conditions aren't
 // met.
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+template <typename T>
+using actor_check_ref_type =
+  ::cuda::std::integral_constant<bool,
+    ( std::is_lvalue_reference<T>::value ||
+      thrust::detail::is_wrapped_reference<T>::value )>;
+#else // THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
 template <typename T>
 using actor_check_ref_type =
   thrust::detail::integral_constant<bool,
     ( std::is_lvalue_reference<T>::value ||
       thrust::detail::is_wrapped_reference<T>::value )>;
+#endif // THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 
 template <typename... Ts>
 using actor_check_ref_types =
@@ -87,7 +75,7 @@ using actor_check_ref_types =
 
 template<typename Eval>
 template<typename... Ts>
-__host__ __device__
+THRUST_HOST_DEVICE
 typename apply_actor<typename actor<Eval>::eval_type,
                      thrust::tuple<eval_ref<Ts>...>>::type
 actor<Eval>::operator()(Ts&&... ts) const
@@ -101,7 +89,7 @@ actor<Eval>::operator()(Ts&&... ts) const
 
 template<typename Eval>
   template<typename T>
-    __host__ __device__
+    THRUST_HOST_DEVICE
     typename assign_result<Eval,T>::type
       actor<Eval>
         ::operator=(const T& _1) const

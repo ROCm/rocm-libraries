@@ -35,14 +35,14 @@ template <typename UnaryFunction, typename OutputIterator>
   class transform_output_iterator_proxy
 {
   public:
-    __host__ __device__
+    THRUST_HOST_DEVICE
     transform_output_iterator_proxy(const OutputIterator& out, UnaryFunction fun) : out(out), fun(fun)
     {
     }
 
-    __thrust_exec_check_disable__
+    THRUST_EXEC_CHECK_DISABLE
     template <typename T>
-    __host__ __device__
+    THRUST_HOST_DEVICE
     transform_output_iterator_proxy operator=(const T& x)
     {
       *out = fun(x);
@@ -58,15 +58,13 @@ template <typename UnaryFunction, typename OutputIterator>
 template <typename UnaryFunction, typename OutputIterator>
 struct transform_output_iterator_base
 {
-    typedef thrust::iterator_adaptor
-    <
-        transform_output_iterator<UnaryFunction, OutputIterator>
-      , OutputIterator
-      , thrust::use_default
-      , thrust::use_default
-      , thrust::use_default
-      , transform_output_iterator_proxy<UnaryFunction, OutputIterator>
-    > type;
+  using type =
+    thrust::iterator_adaptor<transform_output_iterator<UnaryFunction, OutputIterator>,
+                             OutputIterator,
+                             thrust::use_default,
+                             thrust::use_default,
+                             thrust::use_default,
+                             transform_output_iterator_proxy<UnaryFunction, OutputIterator>>;
 };
 
 // Register transform_output_iterator_proxy with 'is_proxy_reference' from

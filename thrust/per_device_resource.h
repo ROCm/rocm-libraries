@@ -17,9 +17,7 @@
 #pragma once
 
 #include <thrust/detail/config.h>
-#include <thrust/detail/cpp11_required.h>
 
-#if THRUST_CPP_DIALECT >= 2011
 
 #include <thrust/system/detail/generic/per_device_resource.h>
 #include <thrust/system/detail/adl/per_device_resource.h>
@@ -37,7 +35,7 @@ THRUST_NAMESPACE_BEGIN
  *  \return a pointer to a global instance of \p MR for the current device.
  */
 template<typename MR, typename DerivedPolicy>
-__host__
+THRUST_HOST
 MR * get_per_device_resource(const thrust::detail::execution_policy_base<DerivedPolicy> & system)
 {
     using thrust::system::detail::generic::get_per_device_resource;
@@ -58,7 +56,7 @@ MR * get_per_device_resource(const thrust::detail::execution_policy_base<Derived
 template<typename T, typename Upstream, typename ExecutionPolicy>
 class per_device_allocator : public thrust::mr::allocator<T, Upstream>
 {
-    typedef thrust::mr::allocator<T, Upstream> base;
+    using base = thrust::mr::allocator<T, Upstream>;
 
 public:
     /*! The \p rebind metafunction provides the type of an \p per_device_allocator instantiated with another type.
@@ -70,33 +68,32 @@ public:
     {
         /*! The typedef \p other gives the type of the rebound \p per_device_allocator.
          */
-        typedef per_device_allocator<U, Upstream, ExecutionPolicy> other;
+        using other = per_device_allocator<U, Upstream, ExecutionPolicy>;
     };
 
     /*! Default constructor. Uses \p get_global_resource to get the global instance of \p Upstream and initializes the
      *      \p allocator base subobject with that resource.
      */
-    __host__
+    THRUST_HOST
     per_device_allocator() : base(get_per_device_resource<Upstream>(ExecutionPolicy()))
     {
     }
 
     /*! Copy constructor. Copies the memory resource pointer. */
-    __host__ __device__
+    THRUST_HOST_DEVICE
     per_device_allocator(const per_device_allocator & other)
         : base(other) {}
 
     /*! Conversion constructor from an allocator of a different type. Copies the memory resource pointer. */
     template<typename U>
-    __host__ __device__
+    THRUST_HOST_DEVICE
     per_device_allocator(const per_device_allocator<U, Upstream, ExecutionPolicy> & other)
         : base(other) {}
 
     /*! Destructor. */
-    __host__ __device__
+    THRUST_HOST_DEVICE
     ~per_device_allocator() {}
 };
 
 THRUST_NAMESPACE_END
 
-#endif // THRUST_CPP_DIALECT >= 2011

@@ -23,9 +23,7 @@
 #pragma once
 
 #include <thrust/detail/config.h>
-#include <thrust/detail/cpp11_required.h>
 
-#if THRUST_CPP_DIALECT >= 2011
 
 #include <type_traits>
 #include <utility>
@@ -67,7 +65,7 @@ struct integer_sequence
   using value_type = T;
   using size_type = std::size_t;
 
-  __host__ __device__
+  THRUST_HOST_DEVICE
   static constexpr size_type size() noexcept
   {
     return sizeof...(Is);
@@ -377,4 +375,3 @@ struct integer_sequence_push_back_impl<T, I0, integer_sequence<T, Is...> >
 
 THRUST_NAMESPACE_END
 
-#endif // THRUST_CPP_DIALECT >= 2011

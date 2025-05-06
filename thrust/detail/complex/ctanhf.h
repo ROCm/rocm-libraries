@@ -64,8 +64,8 @@ namespace complex{
 
 using thrust::complex;
 
-__host__ __device__ inline
-complex<float> ctanhf(const complex<float>& z){
+THRUST_HOST_DEVICE inline complex<float> ctanhf(const complex<float>& z)
+{
   float x, y;
   float t, beta, s, rho, denom;
   uint32_t hx, ix;
@@ -101,25 +101,25 @@ complex<float> ctanhf(const complex<float>& z){
   return (complex<float>((beta * rho * s) / denom, t / denom));
 }
 
-  __host__ __device__ inline
-  complex<float> ctanf(complex<float> z){
-    z = ctanhf(complex<float>(-z.imag(), z.real()));
-    return (complex<float>(z.imag(), -z.real()));
-  }
+THRUST_HOST_DEVICE inline complex<float> ctanf(complex<float> z)
+{
+  z = ctanhf(complex<float>(-z.imag(), z.real()));
+  return (complex<float>(z.imag(), -z.real()));
+}
 
 } // namespace complex
 
 } // namespace detail
 
 template <>
-__host__ __device__
-inline complex<float> tan(const complex<float>& z){
+THRUST_HOST_DEVICE inline complex<float> tan(const complex<float>& z)
+{
   return detail::complex::ctanf(z);
 }
 
 template <>
-__host__ __device__
-inline complex<float> tanh(const complex<float>& z){
+THRUST_HOST_DEVICE inline complex<float> tanh(const complex<float>& z)
+{
   return detail::complex::ctanhf(z);
 }
 

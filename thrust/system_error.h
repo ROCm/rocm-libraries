@@ -24,10 +24,6 @@
 
 THRUST_NAMESPACE_BEGIN
 
-/*! \addtogroup system
- *  \{
- */
-
 /*! \namespace thrust::system
  *  \brief \p thrust::system is the namespace which contains specific Thrust
  *         backend systems. It also contains functionality for reporting error
@@ -39,9 +35,6 @@ THRUST_NAMESPACE_BEGIN
 namespace system
 {
 } // end system
-
-/*! \} // end system
- */
 
 THRUST_NAMESPACE_END
 

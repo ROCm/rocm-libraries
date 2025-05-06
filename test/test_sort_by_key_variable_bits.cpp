@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -40,7 +40,7 @@ TYPED_TEST(SortByKeyVariableTests, TestSortVariableBits)
                 SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
                 thrust::host_vector<T> h_keys = get_random_data<T>(
-                    size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
+                    size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
 
                 const T mask = (1 << num_bits) - 1;
                 for(size_t i = 0; i < size; i++)

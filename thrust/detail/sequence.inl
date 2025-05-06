@@ -26,9 +26,9 @@
 THRUST_NAMESPACE_BEGIN
 
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template<typename DerivedPolicy, typename ForwardIterator>
-__host__ __device__
+THRUST_HOST_DEVICE
   void sequence(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
                 ForwardIterator first,
                 ForwardIterator last)
@@ -38,9 +38,9 @@ __host__ __device__
 } // end sequence()
 
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template<typename DerivedPolicy, typename ForwardIterator, typename T>
-__host__ __device__
+THRUST_HOST_DEVICE
   void sequence(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
                 ForwardIterator first,
                 ForwardIterator last,
@@ -51,9 +51,9 @@ __host__ __device__
 } // end sequence()
 
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template<typename DerivedPolicy, typename ForwardIterator, typename T>
-__host__ __device__
+THRUST_HOST_DEVICE
   void sequence(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
                 ForwardIterator first,
                 ForwardIterator last,
@@ -71,7 +71,7 @@ template<typename ForwardIterator>
 {
   using thrust::system::detail::generic::select_system;
 
-  typedef typename thrust::iterator_system<ForwardIterator>::type System;
+  using System = typename thrust::iterator_system<ForwardIterator>::type;
 
   System system;
 
@@ -86,7 +86,7 @@ template<typename ForwardIterator, typename T>
 {
   using thrust::system::detail::generic::select_system;
 
-  typedef typename thrust::iterator_system<ForwardIterator>::type System;
+  using System = typename thrust::iterator_system<ForwardIterator>::type;
 
   System system;
 
@@ -102,7 +102,7 @@ template<typename ForwardIterator, typename T>
 {
   using thrust::system::detail::generic::select_system;
 
-  typedef typename thrust::iterator_system<ForwardIterator>::type System;
+  using System = typename thrust::iterator_system<ForwardIterator>::type;
 
   System system;
 

@@ -154,8 +154,8 @@ public:
     }
 
 private:
-    typedef typename Upstream::pointer void_ptr;
-    typedef typename thrust::detail::pointer_traits<void_ptr>::template rebind<char>::other char_ptr;
+    using void_ptr = typename Upstream::pointer;
+    using char_ptr = typename thrust::detail::pointer_traits<void_ptr>::template rebind<char>::other;
 
     struct chunk_descriptor
     {
@@ -163,10 +163,9 @@ private:
         void_ptr pointer;
     };
 
-    typedef thrust::host_vector<
-        chunk_descriptor,
-        allocator<chunk_descriptor, Bookkeeper>
-    > chunk_vector;
+    using chunk_vector = thrust::host_vector<
+                         chunk_descriptor,
+                         allocator<chunk_descriptor, Bookkeeper> >;
 
     struct oversized_block_descriptor
     {
@@ -174,13 +173,13 @@ private:
         std::size_t alignment;
         void_ptr pointer;
 
-        __host__ __device__
+        THRUST_HOST_DEVICE
         bool operator==(const oversized_block_descriptor & other) const
         {
             return size == other.size && alignment == other.alignment && pointer == other.pointer;
         }
 
-        __host__ __device__
+        THRUST_HOST_DEVICE
         bool operator<(const oversized_block_descriptor & other) const
         {
             return size < other.size || (size == other.size && alignment < other.alignment);
@@ -190,12 +189,12 @@ private:
     struct equal_pointers
     {
     public:
-        __host__ __device__
+        THRUST_HOST_DEVICE
         equal_pointers(void_ptr p) : p(p)
         {
         }
 
-        __host__ __device__
+        THRUST_HOST_DEVICE
         bool operator()(const oversized_block_descriptor & desc) const
         {
             return desc.pointer == p;
@@ -208,12 +207,12 @@ private:
     struct matching_alignment
     {
     public:
-        __host__ __device__
+        THRUST_HOST_DEVICE
         matching_alignment(std::size_t requested) : requested(requested)
         {
         }
 
-        __host__ __device__
+        THRUST_HOST_DEVICE
         bool operator()(const oversized_block_descriptor & desc) const
         {
             return desc.alignment >= requested;
@@ -223,47 +222,42 @@ private:
         std::size_t requested;
     };
 
-    typedef thrust::host_vector<
-        oversized_block_descriptor,
-        allocator<oversized_block_descriptor, Bookkeeper>
-    > oversized_block_vector;
+    using oversized_block_vector = thrust::host_vector<
+                                   oversized_block_descriptor,
+                                   allocator<oversized_block_descriptor, Bookkeeper> >;
 
-    typedef thrust::host_vector<
-        void_ptr,
-        allocator<void_ptr, Bookkeeper>
-    > pointer_vector;
+    using pointer_vector = thrust::host_vector<
+                           void_ptr,
+                           allocator<void_ptr, Bookkeeper> >;
 
     struct pool
     {
-        __host__
+        THRUST_HOST
         pool(const pointer_vector & free)
             : free_blocks(free),
             previous_allocated_count(0)
         {
         }
 
-        __host__
+        THRUST_HOST
         pool(const pool & other)
             : free_blocks(other.free_blocks),
             previous_allocated_count(other.previous_allocated_count)
         {
         }
 
-#if THRUST_CPP_DIALECT >= 2011
         pool & operator=(const pool &) = default;
-#endif
 
-        __host__
+        THRUST_HOST
         ~pool() {}
 
         pointer_vector free_blocks;
         std::size_t previous_allocated_count;
     };
 
-    typedef thrust::host_vector<
-        pool,
-        allocator<pool, Bookkeeper>
-    > pool_vector;
+    using pool_vector = thrust::host_vector<
+                        pool,
+                        allocator<pool, Bookkeeper> >;
 
     Upstream * m_upstream;
     Bookkeeper * m_bookkeeper;

@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019-2023, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2025, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -27,19 +27,23 @@
  ******************************************************************************/
 #pragma once
 
+#include <thrust/detail/config.h>
+
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 #include <thrust/detail/alignment.h>
-#include <thrust/detail/cstdint.h>
 #include <thrust/detail/temporary_array.h>
 #include <thrust/distance.h>
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/iterator/transform_iterator.h>
 #include <thrust/system/hip/config.h>
+#include <thrust/system/hip/detail/general/temp_storage.h>
 #include <thrust/system/hip/detail/par_to_seq.h>
 #include <thrust/system/hip/detail/util.h>
 
 // rocPRIM includes
 #include <rocprim/rocprim.hpp>
+
+#include <cstdint>
 
 THRUST_NAMESPACE_BEGIN
 
@@ -49,7 +53,7 @@ template <typename DerivedPolicy,
           typename InputIterator,
           typename OutputIterator,
           typename Predicate>
-OutputIterator __host__ __device__
+OutputIterator THRUST_HOST_DEVICE
 copy_if(const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
         InputIterator                                               first,
         InputIterator                                               last,
@@ -61,7 +65,7 @@ template <typename DerivedPolicy,
           typename InputIterator2,
           typename OutputIterator,
           typename Predicate>
-OutputIterator __host__ __device__
+OutputIterator THRUST_HOST_DEVICE
 copy_if(const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
         InputIterator1                                              first,
         InputIterator1                                              last,
@@ -73,11 +77,31 @@ namespace hip_rocprim
 {
 namespace __copy_if
 {
-    template <typename Derived, typename InputIt, typename OutputIt, typename Predicate>
-    THRUST_HIP_RUNTIME_FUNCTION OutputIt
-    copy_if(execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt output, Predicate predicate)
+    template <unsigned int ItemsPerThread, typename InputIt, typename BoolIt, typename IntIt, typename OutputIt>
+    ROCPRIM_KERNEL void copy_if_kernel(InputIt first, BoolIt flagsFirst, IntIt posFirst, const size_t size, OutputIt output)
     {
-        typedef typename iterator_traits<InputIt>::difference_type size_type;
+        const size_t baseIdx = (blockIdx.x * blockDim.x + threadIdx.x) * ItemsPerThread;
+
+        for (size_t i = 0; i < ItemsPerThread; ++i)
+        {
+            const size_t index = baseIdx + i;
+            if (index < size)
+            {
+                if (flagsFirst[index])
+                {
+                    output[posFirst[index] - 1] = first[index];
+                }
+            }
+        }
+    }
+
+    template <typename Derived, typename InputIt, typename OutputIt, typename Predicate>
+    THRUST_HIP_RUNTIME_FUNCTION auto
+    copy_if(execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt output, Predicate predicate)
+    -> std::enable_if_t<sizeof(typename std::iterator_traits<InputIt>::value_type) < 512, OutputIt>
+    {
+        using namespace thrust::system::hip_rocprim::temp_storage;
+        using size_type = typename iterator_traits<InputIt>::difference_type;
 
         size_type   num_items          = thrust::distance(first, last);
         size_t      temp_storage_bytes = 0;
@@ -88,26 +112,34 @@ namespace __copy_if
             return output;
 
         // Determine temporary device storage requirements.
-        hip_rocprim::throw_on_error(rocprim::select(NULL,
+        hip_rocprim::throw_on_error(rocprim::select(nullptr,
                                                     temp_storage_bytes,
                                                     first,
                                                     output,
-                                                    reinterpret_cast<size_type*>(NULL),
+                                                    static_cast<size_type*>(nullptr),
                                                     num_items,
                                                     predicate,
                                                     stream,
                                                     debug_sync),
                                     "copy_if failed on 1st step");
 
-        size_t storage_size = temp_storage_bytes + sizeof(size_type);
+        size_t     storage_size;
+        void*      ptr       = nullptr;
+        void*      temp_stor = nullptr;
+        size_type* d_num_selected_out;
+
+        auto l_part = make_linear_partition(make_partition(&temp_stor, temp_storage_bytes),
+                                            ptr_aligned_array(&d_num_selected_out, 1));
+
+        // Calculate storage_size including alignment
+        hip_rocprim::throw_on_error(partition(ptr, storage_size, l_part));
 
         // Allocate temporary storage.
-        thrust::detail::temporary_array<thrust::detail::uint8_t, Derived>
-            tmp(policy, storage_size);
-        void *ptr = static_cast<void*>(tmp.data().get());
+        thrust::detail::temporary_array<std::uint8_t, Derived> tmp(policy, storage_size);
+        ptr = static_cast<void*>(tmp.data().get());
 
-        size_type* d_num_selected_out
-		    = reinterpret_cast<size_type*>(reinterpret_cast<char*>(ptr) + temp_storage_bytes);
+        // Create pointers with alignment
+        hip_rocprim::throw_on_error(partition(ptr, storage_size, l_part));
 
         hip_rocprim::throw_on_error(rocprim::select(ptr,
                                                     temp_storage_bytes,
@@ -125,16 +157,102 @@ namespace __copy_if
         return output + num_selected;
     }
 
+    template <typename Derived, typename InputIt, typename OutputIt, typename Predicate, typename PredicateInputIt>
+    THRUST_HIP_RUNTIME_FUNCTION auto
+    copy_if_common(execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt output, Predicate predicate, PredicateInputIt predicate_input)
+    -> std::enable_if_t<!(sizeof(typename std::iterator_traits<InputIt>::value_type) < 512), OutputIt>
+    {
+        using namespace thrust::system::hip_rocprim::temp_storage;
+        using size_type = typename iterator_traits<InputIt>::difference_type;
+        using pos_type  = std::uint32_t;
+        using flag_type = std::uint8_t;
+
+        size_type   num_items  = thrust::distance(first, last);
+        hipStream_t stream     = hip_rocprim::stream(policy);
+        bool        debug_sync = THRUST_HIP_DEBUG_SYNC_FLAG;
+
+        if(num_items == 0)
+            return output;
+
+        // Note: although flags can be stored in a uint8_t, in the inclusive scan performed on flags below,
+        // the scan accumulator type to something larger (flag_type) to prevent overflow.
+        // For this reason, we call rocprim::inclusive_scan directly here and pass in the accumulator type as template argument.
+        thrust::detail::temporary_array<flag_type, Derived> flags(policy, num_items);
+
+        hip_rocprim::throw_on_error(rocprim::transform(predicate_input,
+                                                       flags.begin(),
+                                                       num_items,
+                                                       [predicate] __host__ __device__ (auto const & val){ return predicate(val) ? 1 : 0; },
+                                                       stream,
+                                                       debug_sync),
+                                    "copy_if failed on transform");
+
+        thrust::detail::temporary_array<pos_type, Derived> pos(policy, num_items);
+
+        // Get the required temporary storage size.
+        size_t storage_size = 0;
+        hip_rocprim::throw_on_error(rocprim::inclusive_scan<rocprim::default_config,
+                                    typename thrust::detail::temporary_array<flag_type, Derived>::iterator,
+                                    typename thrust::detail::temporary_array<pos_type, Derived>::iterator,
+                                    rocprim::plus<pos_type>,
+                                    pos_type>(nullptr, storage_size, flags.begin(), pos.begin(), num_items, rocprim::plus<pos_type>{}, stream, debug_sync),
+            "copy_if failed while determining inclusive scan storage size");
+
+        // Allocate temporary storage.
+        thrust::detail::temporary_array<std::uint8_t, Derived> tmp(policy, storage_size);
+        void *ptr = static_cast<void*>(tmp.data().get());
+
+        // Perform a scan on the positions.
+        hip_rocprim::throw_on_error(rocprim::inclusive_scan<rocprim::default_config,
+                                    typename thrust::detail::temporary_array<flag_type, Derived>::iterator,
+                                    typename thrust::detail::temporary_array<pos_type, Derived>::iterator,
+                                    rocprim::plus<pos_type>,
+                                    pos_type>(ptr, storage_size, flags.begin(), pos.begin(), num_items, rocprim::plus<pos_type>{}, stream, debug_sync),
+            "copy_if failed on inclusive scan");
+
+        // Pull out the values for which the predicate evaluated to true and compact them into the output array.
+        constexpr static size_t items_per_thread = 16;
+        constexpr static size_t threads_per_block = 256;
+        const size_t block_size = std::ceil(static_cast<float>(num_items) / items_per_thread / threads_per_block);
+
+        copy_if_kernel<items_per_thread><<<block_size, threads_per_block>>>(first, flags.begin(), pos.begin(), num_items, output);
+
+        return output + pos[num_items - 1];
+    }
+
+    template <typename Derived, typename InputIt, typename OutputIt, typename Predicate>
+    THRUST_HIP_RUNTIME_FUNCTION auto
+    copy_if(execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt output, Predicate predicate)
+    -> std::enable_if_t<!(sizeof(typename std::iterator_traits<InputIt>::value_type) < 512), OutputIt>
+    {
+        return copy_if_common(policy, first, last, output, predicate, first);
+    }
+
     template <typename Derived, typename InputIt, typename StencilIt, typename OutputIt, typename Predicate>
-    THRUST_HIP_RUNTIME_FUNCTION OutputIt
+    THRUST_HIP_RUNTIME_FUNCTION auto
     copy_if(execution_policy<Derived>& policy,
             InputIt                    first,
             InputIt                    last,
             StencilIt                  stencil,
             OutputIt                   output,
             Predicate                  predicate)
+    -> std::enable_if_t<!(sizeof(typename std::iterator_traits<InputIt>::value_type) < 512), OutputIt>
     {
-        typedef typename iterator_traits<InputIt>::difference_type size_type;
+        return copy_if_common(policy, first, last, output, predicate, stencil);
+    }
+
+    template <typename Derived, typename InputIt, typename StencilIt, typename OutputIt, typename Predicate>
+    THRUST_HIP_RUNTIME_FUNCTION auto
+    copy_if(execution_policy<Derived>& policy,
+            InputIt                    first,
+            InputIt                    last,
+            StencilIt                  stencil,
+            OutputIt                   output,
+            Predicate                  predicate)
+        -> std::enable_if_t<(sizeof(typename std::iterator_traits<InputIt>::value_type) < 512), OutputIt>
+    {
+        using namespace thrust::system::hip_rocprim::temp_storage;
+        using size_type = typename iterator_traits<InputIt>::difference_type;
 
         size_type   num_items          = thrust::distance(first, last);
         size_t      temp_storage_bytes = 0;
@@ -147,26 +265,40 @@ namespace __copy_if
         auto flags = thrust::make_transform_iterator(stencil, predicate);
 
         // Determine temporary device storage requirements.
-        hip_rocprim::throw_on_error(rocprim::select(NULL,
+        hip_rocprim::throw_on_error(rocprim::select(nullptr,
                                                     temp_storage_bytes,
                                                     first,
                                                     flags,
                                                     output,
-                                                    reinterpret_cast<size_type*>(NULL),
+                                                    static_cast<size_type*>(nullptr),
                                                     num_items,
                                                     stream,
                                                     debug_sync),
                                     "copy_if failed on 1st step");
 
-        size_t storage_size = temp_storage_bytes + sizeof(size_type);
+        size_t     storage_size;
+        void*      ptr       = nullptr;
+        void*      temp_stor = nullptr;
+        size_type* d_num_selected_out;
+
+        auto l_part = make_linear_partition(make_partition(&temp_stor, temp_storage_bytes),
+                                            ptr_aligned_array(&d_num_selected_out, 1));
+
+        // Calculate storage_size including alignment
+        hip_rocprim::throw_on_error(
+            partition(ptr,
+                      storage_size,
+                      l_part));
 
         // Allocate temporary storage.
-        thrust::detail::temporary_array<thrust::detail::uint8_t, Derived>
-            tmp(policy, storage_size);
-        void *ptr = static_cast<void*>(tmp.data().get());
+        thrust::detail::temporary_array<std::uint8_t, Derived> tmp(policy, storage_size);
+        ptr = static_cast<void*>(tmp.data().get());
 
-        size_type* d_num_selected_out
-		    = reinterpret_cast<size_type*>(reinterpret_cast<char*>(ptr) + temp_storage_bytes);
+        // Create pointers with alignment
+        hip_rocprim::throw_on_error(
+            partition(ptr,
+                      storage_size,
+                      l_part));
 
         hip_rocprim::throw_on_error(rocprim::select(ptr,
                                                     temp_storage_bytes,
@@ -183,7 +315,6 @@ namespace __copy_if
 
         return output + num_selected;
     }
-
 } // namespace __copy_if
 
 //-------------------------
@@ -201,7 +332,7 @@ copy_if(execution_policy<Derived>& policy,
     // struct workaround is required for HIP-clang
     struct workaround
     {
-        __host__ static OutputIterator par(execution_policy<Derived>& policy,
+        THRUST_HOST static OutputIterator par(execution_policy<Derived>& policy,
                                            InputIterator              first,
                                            InputIterator              last,
                                            OutputIterator             result,
@@ -209,7 +340,7 @@ copy_if(execution_policy<Derived>& policy,
         {
             return __copy_if::copy_if(policy, first, last, result, pred);
         }
-        __device__ static OutputIterator seq(execution_policy<Derived>& policy,
+        THRUST_DEVICE static OutputIterator seq(execution_policy<Derived>& policy,
                                              InputIterator              first,
                                              InputIterator              last,
                                              OutputIterator             result,
@@ -246,7 +377,7 @@ copy_if(execution_policy<Derived>& policy,
     // struct workaround is required for HIP-clang
     struct workaround
     {
-        __host__ static OutputIterator par(execution_policy<Derived>& policy,
+        THRUST_HOST static OutputIterator par(execution_policy<Derived>& policy,
                                            InputIterator              first,
                                            InputIterator              last,
                                            StencilIterator            stencil,
@@ -255,7 +386,7 @@ copy_if(execution_policy<Derived>& policy,
         {
             return __copy_if::copy_if(policy, first, last, stencil, result, pred);
         }
-        __device__ static OutputIterator seq(execution_policy<Derived>& policy,
+        THRUST_DEVICE static OutputIterator seq(execution_policy<Derived>& policy,
                                              InputIterator              first,
                                              InputIterator              last,
                                              StencilIterator            stencil,

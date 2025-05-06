@@ -1,3 +1,20 @@
+/*
+ *  Copyright 2008-2013 NVIDIA Corporation
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+
 #include <unittest/unittest.h>
 #include <thrust/detail/alignment.h>
 
@@ -67,29 +84,29 @@ DECLARE_UNITTEST(test_alignof_mocks_sizes);
 
 void test_alignof()
 {
-    ASSERT_EQUAL(THRUST_ALIGNOF(bool)                  , sizeof(bool));
-    ASSERT_EQUAL(THRUST_ALIGNOF(signed char)           , sizeof(signed char));
-    ASSERT_EQUAL(THRUST_ALIGNOF(unsigned char)         , sizeof(unsigned char));
-    ASSERT_EQUAL(THRUST_ALIGNOF(char)                  , sizeof(char));
-    ASSERT_EQUAL(THRUST_ALIGNOF(short int)             , sizeof(short int));
-    ASSERT_EQUAL(THRUST_ALIGNOF(unsigned short int)    , sizeof(unsigned short int));
-    ASSERT_EQUAL(THRUST_ALIGNOF(int)                   , sizeof(int));
-    ASSERT_EQUAL(THRUST_ALIGNOF(unsigned int)          , sizeof(unsigned int));
-    ASSERT_EQUAL(THRUST_ALIGNOF(long int)              , sizeof(long int));
-    ASSERT_EQUAL(THRUST_ALIGNOF(unsigned long int)     , sizeof(unsigned long int));
-    ASSERT_EQUAL(THRUST_ALIGNOF(long long int)         , sizeof(long long int));
-    ASSERT_EQUAL(THRUST_ALIGNOF(unsigned long long int), sizeof(unsigned long long int));
-    ASSERT_EQUAL(THRUST_ALIGNOF(float)                 , sizeof(float));
-    ASSERT_EQUAL(THRUST_ALIGNOF(double)                , sizeof(double));
-    ASSERT_EQUAL(THRUST_ALIGNOF(long double)           , sizeof(long double));
+    ASSERT_EQUAL(alignof(bool)                  , sizeof(bool));
+    ASSERT_EQUAL(alignof(signed char)           , sizeof(signed char));
+    ASSERT_EQUAL(alignof(unsigned char)         , sizeof(unsigned char));
+    ASSERT_EQUAL(alignof(char)                  , sizeof(char));
+    ASSERT_EQUAL(alignof(short int)             , sizeof(short int));
+    ASSERT_EQUAL(alignof(unsigned short int)    , sizeof(unsigned short int));
+    ASSERT_EQUAL(alignof(int)                   , sizeof(int));
+    ASSERT_EQUAL(alignof(unsigned int)          , sizeof(unsigned int));
+    ASSERT_EQUAL(alignof(long int)              , sizeof(long int));
+    ASSERT_EQUAL(alignof(unsigned long int)     , sizeof(unsigned long int));
+    ASSERT_EQUAL(alignof(long long int)         , sizeof(long long int));
+    ASSERT_EQUAL(alignof(unsigned long long int), sizeof(unsigned long long int));
+    ASSERT_EQUAL(alignof(float)                 , sizeof(float));
+    ASSERT_EQUAL(alignof(double)                , sizeof(double));
+    ASSERT_EQUAL(alignof(long double)           , sizeof(long double));
 
-    ASSERT_EQUAL(THRUST_ALIGNOF(alignof_mock_0), sizeof(char));
-    ASSERT_EQUAL(THRUST_ALIGNOF(alignof_mock_1), sizeof(int));
-    ASSERT_EQUAL(THRUST_ALIGNOF(alignof_mock_2), sizeof(int));
-    ASSERT_EQUAL(THRUST_ALIGNOF(alignof_mock_3), sizeof(int));
-    ASSERT_EQUAL(THRUST_ALIGNOF(alignof_mock_4), sizeof(int));
-    ASSERT_EQUAL(THRUST_ALIGNOF(alignof_mock_5), sizeof(int));
-    ASSERT_EQUAL(THRUST_ALIGNOF(alignof_mock_6), sizeof(int));
+    ASSERT_EQUAL(alignof(alignof_mock_0), sizeof(char));
+    ASSERT_EQUAL(alignof(alignof_mock_1), sizeof(int));
+    ASSERT_EQUAL(alignof(alignof_mock_2), sizeof(int));
+    ASSERT_EQUAL(alignof(alignof_mock_3), sizeof(int));
+    ASSERT_EQUAL(alignof(alignof_mock_4), sizeof(int));
+    ASSERT_EQUAL(alignof(alignof_mock_5), sizeof(int));
+    ASSERT_EQUAL(alignof(alignof_mock_6), sizeof(int));
 }
 DECLARE_UNITTEST(test_alignof);
 
@@ -190,9 +207,9 @@ DECLARE_UNITTEST(test_alignment_of);
 template <std::size_t Align>
 void test_aligned_type_instantiation()
 {
-    typedef typename thrust::detail::aligned_type<Align>::type type;
+    using type = typename thrust::detail::aligned_type<Align>::type;
     ASSERT_GEQUAL(sizeof(type), 1lu);
-    ASSERT_EQUAL(THRUST_ALIGNOF(type), Align);
+    ASSERT_EQUAL(alignof(type), Align);
     ASSERT_EQUAL(thrust::detail::alignment_of<type>::value, Align);
 }
 
@@ -209,133 +226,67 @@ void test_aligned_type()
 }
 DECLARE_UNITTEST(test_aligned_type);
 
-template <std::size_t Len, std::size_t Align>
-void test_aligned_storage_instantiation(thrust::detail::true_type /* Align is valid */)
-{
-    typedef typename thrust::detail::aligned_storage<Len, Align>::type type;
-    ASSERT_GEQUAL(sizeof(type), Len);
-    ASSERT_EQUAL(THRUST_ALIGNOF(type), Align);
-    ASSERT_EQUAL(thrust::detail::alignment_of<type>::value, Align);
-}
-
-template <std::size_t Len, std::size_t Align>
-void test_aligned_storage_instantiation(thrust::detail::false_type /* Align is invalid */)
-{
-  // no-op -- alignment is > max_align_t and MSVC complains loudly.
-}
-
-template <std::size_t Len, std::size_t Align>
-void test_aligned_storage_instantiation()
-{
-  typedef thrust::detail::integral_constant<
-      bool, Align <= THRUST_ALIGNOF(thrust::detail::max_align_t)>
-      ValidAlign;
-  test_aligned_storage_instantiation<Len, Align>(ValidAlign());
-}
-
-template <std::size_t Len>
-void test_aligned_storage_size()
-{
-    test_aligned_storage_instantiation<Len, 1>();
-    test_aligned_storage_instantiation<Len, 2>();
-    test_aligned_storage_instantiation<Len, 4>();
-    test_aligned_storage_instantiation<Len, 8>();
-    test_aligned_storage_instantiation<Len, 16>();
-    test_aligned_storage_instantiation<Len, 32>();
-    test_aligned_storage_instantiation<Len, 64>();
-    test_aligned_storage_instantiation<Len, 128>();
-}
-
-void test_aligned_storage()
-{
-    test_aligned_storage_size<1>();
-    test_aligned_storage_size<2>();
-    test_aligned_storage_size<4>();
-    test_aligned_storage_size<8>();
-    test_aligned_storage_size<16>();
-    test_aligned_storage_size<32>();
-    test_aligned_storage_size<64>();
-    test_aligned_storage_size<128>();
-    test_aligned_storage_size<256>();
-    test_aligned_storage_size<512>();
-    test_aligned_storage_size<1024>();
-    test_aligned_storage_size<2048>();
-    test_aligned_storage_size<4096>();
-    test_aligned_storage_size<8192>();
-    test_aligned_storage_size<16384>();
-
-    test_aligned_storage_size<3>();
-    test_aligned_storage_size<5>();
-    test_aligned_storage_size<7>();
-
-    test_aligned_storage_size<17>();
-    test_aligned_storage_size<42>();
-
-    test_aligned_storage_size<10000>();
-}
-DECLARE_UNITTEST(test_aligned_storage);
-
 void test_max_align_t()
 {
     ASSERT_GEQUAL(
-        THRUST_ALIGNOF(thrust::detail::max_align_t)
-      , THRUST_ALIGNOF(bool)
+        alignof(thrust::detail::max_align_t)
+      , alignof(bool)
     );
     ASSERT_GEQUAL(
-        THRUST_ALIGNOF(thrust::detail::max_align_t)
-      , THRUST_ALIGNOF(signed char)
+        alignof(thrust::detail::max_align_t)
+      , alignof(signed char)
     );
     ASSERT_GEQUAL(
-        THRUST_ALIGNOF(thrust::detail::max_align_t)
-      , THRUST_ALIGNOF(unsigned char)
+        alignof(thrust::detail::max_align_t)
+      , alignof(unsigned char)
     );
     ASSERT_GEQUAL(
-        THRUST_ALIGNOF(thrust::detail::max_align_t)
-      , THRUST_ALIGNOF(char)
+        alignof(thrust::detail::max_align_t)
+      , alignof(char)
     );
     ASSERT_GEQUAL(
-        THRUST_ALIGNOF(thrust::detail::max_align_t)
-      , THRUST_ALIGNOF(short int)
+        alignof(thrust::detail::max_align_t)
+      , alignof(short int)
     );
     ASSERT_GEQUAL(
-        THRUST_ALIGNOF(thrust::detail::max_align_t)
-      , THRUST_ALIGNOF(unsigned short int)
+        alignof(thrust::detail::max_align_t)
+      , alignof(unsigned short int)
     );
     ASSERT_GEQUAL(
-        THRUST_ALIGNOF(thrust::detail::max_align_t)
-      , THRUST_ALIGNOF(int)
+        alignof(thrust::detail::max_align_t)
+      , alignof(int)
     );
     ASSERT_GEQUAL(
-        THRUST_ALIGNOF(thrust::detail::max_align_t)
-      , THRUST_ALIGNOF(unsigned int)
+        alignof(thrust::detail::max_align_t)
+      , alignof(unsigned int)
     );
     ASSERT_GEQUAL(
-        THRUST_ALIGNOF(thrust::detail::max_align_t)
-      , THRUST_ALIGNOF(long int)
+        alignof(thrust::detail::max_align_t)
+      , alignof(long int)
     );
     ASSERT_GEQUAL(
-        THRUST_ALIGNOF(thrust::detail::max_align_t)
-      , THRUST_ALIGNOF(unsigned long int)
+        alignof(thrust::detail::max_align_t)
+      , alignof(unsigned long int)
     );
     ASSERT_GEQUAL(
-        THRUST_ALIGNOF(thrust::detail::max_align_t)
-      , THRUST_ALIGNOF(long long int)
+        alignof(thrust::detail::max_align_t)
+      , alignof(long long int)
     );
     ASSERT_GEQUAL(
-        THRUST_ALIGNOF(thrust::detail::max_align_t)
-      , THRUST_ALIGNOF(unsigned long long int)
+        alignof(thrust::detail::max_align_t)
+      , alignof(unsigned long long int)
     );
     ASSERT_GEQUAL(
-        THRUST_ALIGNOF(thrust::detail::max_align_t)
-      , THRUST_ALIGNOF(float)
+        alignof(thrust::detail::max_align_t)
+      , alignof(float)
     );
     ASSERT_GEQUAL(
-        THRUST_ALIGNOF(thrust::detail::max_align_t)
-      , THRUST_ALIGNOF(double)
+        alignof(thrust::detail::max_align_t)
+      , alignof(double)
     );
     ASSERT_GEQUAL(
-        THRUST_ALIGNOF(thrust::detail::max_align_t)
-      , THRUST_ALIGNOF(long double)
+        alignof(thrust::detail::max_align_t)
+      , alignof(long double)
     );
 }
 DECLARE_UNITTEST(test_max_align_t);

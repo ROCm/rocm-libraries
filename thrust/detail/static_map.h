@@ -46,7 +46,7 @@ struct cons
 
 
   template<unsigned int default_value>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   static unsigned int get(unsigned int key)
   {
     return (key == Head::key) ? (Head::value) : Tail::template get<default_value>(key);
@@ -64,7 +64,7 @@ struct cons<Head,void>
   };
 
   template<unsigned int default_value>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   static unsigned int get(unsigned int key)
   {
     return (key == Head::key) ? (Head::value) : default_value;
@@ -83,38 +83,21 @@ template<unsigned int default_value,
          unsigned int key7 = 0, unsigned int value7 = default_value>
 struct static_map
 {
-  typedef cons<
-    key_value<key0,value0>,
-    cons<
-      key_value<key1,value1>,
-      cons<
-        key_value<key2,value2>,
-        cons<
-          key_value<key3,value3>,
-          cons<
-            key_value<key4,value4>,
-            cons<
-              key_value<key5,value5>,
-              cons<
-                key_value<key6,value6>,
-                cons<
-                  key_value<key7,value7>
-                >
-              >
-            >
-          >
-        >
-      >
-    >
-  > impl;
+  using impl = cons<
+    key_value<key0, value0>,
+    cons<key_value<key1, value1>,
+         cons<key_value<key2, value2>,
+              cons<key_value<key3, value3>,
+                   cons<key_value<key4, value4>,
+                        cons<key_value<key5, value5>, cons<key_value<key6, value6>, cons<key_value<key7, value7>>>>>>>>>;
 
-  template<unsigned int key>
+  template <unsigned int key>
   struct static_get
   {
     static const unsigned int value = impl::template static_get<key,default_value>::value;
   };
 
-  __host__ __device__
+  THRUST_HOST_DEVICE
   static unsigned int get(unsigned int key)
   {
     return impl::template get<default_value>(key);
@@ -157,7 +140,7 @@ struct static_lookup
 
 
 template<typename StaticMap>
-__host__ __device__
+THRUST_HOST_DEVICE
 unsigned int lookup(unsigned int key)
 {
   return StaticMap::get(key);

@@ -17,6 +17,9 @@
 #pragma once
 
 #include <thrust/detail/config.h>
+
+#include <thrust/detail/temporary_array.h>
+#include <thrust/distance.h>
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/system/omp/detail/reduce.h>
 #include <thrust/system/omp/detail/default_decomposition.h>
@@ -41,7 +44,7 @@ template<typename DerivedPolicy,
                     OutputType init,
                     BinaryFunction binary_op)
 {
-  typedef typename thrust::iterator_difference<InputIterator>::type difference_type;
+  using difference_type = typename thrust::iterator_difference<InputIterator>::type;
 
   const difference_type n = thrust::distance(first,last);
 

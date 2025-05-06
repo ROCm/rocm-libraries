@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019-2023, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2025, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -26,6 +26,8 @@
  *
  ******************************************************************************/
 #pragma once
+
+#include <thrust/detail/config.h>
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 
@@ -53,7 +55,7 @@ namespace __parallel_for
     };
 
     template <unsigned int BlockSize, class F, class Size, unsigned int ItemsPerThread>
-    __global__
+    ROCPRIM_KERNEL
     THRUST_HIP_LAUNCH_BOUNDS(BlockSize)
     void kernel(F f, Size num_items, Size offset)
     {
@@ -99,15 +101,15 @@ namespace __parallel_for
 
         // Find maximum number of items per one step and number of steps
         constexpr size_t aligned_size_limit     = (config::size_limit / items_per_block) * items_per_block;
-        const Size number_of_launch             = (num_items + aligned_size_limit - 1) / aligned_size_limit;
+        const size_t number_of_launch             = (static_cast<size_t>(num_items) + aligned_size_limit - 1) / aligned_size_limit;
 
-        for(Size i = 0, offset = 0; i < number_of_launch; ++i, offset += aligned_size_limit)
+        for(size_t i = 0, offset = 0; i < number_of_launch; ++i, offset += aligned_size_limit)
         {
-            const size_t current_items = std::min<size_t>(num_items - offset, aligned_size_limit);
-            const unsigned int number_of_blocks = (current_items + items_per_block - 1) / items_per_block;
+            const size_t current_items = std::min<size_t>(static_cast<size_t>(num_items) - offset, aligned_size_limit);
+            const size_t number_of_blocks = (current_items + items_per_block - 1) / items_per_block;
 
             hipLaunchKernelGGL(HIP_KERNEL_NAME(kernel<block_size, F, Size, items_per_thread>),
-                               dim3(number_of_blocks),
+                               dim3(static_cast<uint32_t>(number_of_blocks)),
                                dim3(block_size),
                                0,
                                stream,
@@ -123,7 +125,7 @@ namespace __parallel_for
     }
 } // __parallel_for
 
-__thrust_exec_check_disable__ template <class Derived, class F, class Size>
+THRUST_EXEC_CHECK_DISABLE template <class Derived, class F, class Size>
 void THRUST_HIP_FUNCTION
 parallel_for(execution_policy<Derived>& policy, F f, Size count)
 {
@@ -135,7 +137,7 @@ parallel_for(execution_policy<Derived>& policy, F f, Size count)
     // struct workaround is required for HIP-clang
     struct workaround
     {
-        __host__
+        THRUST_HOST
         static void par(execution_policy<Derived>& policy, F f, Size count)
         {
             hipStream_t stream = hip_rocprim::stream(policy);
@@ -145,7 +147,7 @@ parallel_for(execution_policy<Derived>& policy, F f, Size count)
                                         "parallel_for: failed to synchronize");
         }
 
-        __device__
+        THRUST_DEVICE
         static void seq(execution_policy<Derived>& policy, F f, Size count)
         {
             (void)policy;

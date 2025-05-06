@@ -39,7 +39,7 @@ namespace detail
 struct swap_pair_elements
 {
   template <typename Tuple>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   void operator()(Tuple t)
   {
     // use unqualified swap to allow ADL to catch any user-defined swap
@@ -55,14 +55,14 @@ struct swap_pair_elements
 template<typename DerivedPolicy,
          typename ForwardIterator1,
          typename ForwardIterator2>
-__host__ __device__
+THRUST_HOST_DEVICE
   ForwardIterator2 swap_ranges(thrust::execution_policy<DerivedPolicy> &exec,
                                ForwardIterator1 first1,
                                ForwardIterator1 last1,
                                ForwardIterator2 first2)
 {
-  typedef thrust::tuple<ForwardIterator1,ForwardIterator2> IteratorTuple;
-  typedef thrust::zip_iterator<IteratorTuple>              ZipIterator;
+  using IteratorTuple = thrust::tuple<ForwardIterator1, ForwardIterator2>;
+  using ZipIterator   = thrust::zip_iterator<IteratorTuple>;
 
   ZipIterator result = thrust::for_each(exec,
                                         thrust::make_zip_iterator(thrust::make_tuple(first1, first2)),

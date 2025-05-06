@@ -1,3 +1,20 @@
+/*
+ *  Copyright 2008-2013 NVIDIA Corporation
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+
 #include <unittest/unittest.h>
 #include <thrust/replace.h>
 #include <thrust/execution_policy.h>
@@ -6,10 +23,14 @@
 template <typename T>
 struct less_than_five
 {
-  __host__ __device__ bool operator()(const T &val) const {return val < 5;}
+  THRUST_HOST_DEVICE bool operator()(const T& val) const
+  {
+    return val < 5;
+  }
 };
 
 
+#ifdef THRUST_TEST_DEVICE_SIDE
 template<typename ExecutionPolicy, typename Iterator, typename T1, typename T2>
 __global__
 void replace_kernel(ExecutionPolicy exec, Iterator first, Iterator last, T1 old_value, T2 new_value)
@@ -258,12 +279,13 @@ void TestReplaceCopyIfStencilDeviceDevice()
   TestReplaceCopyIfStencilDevice(thrust::device);
 }
 DECLARE_UNITTEST(TestReplaceCopyIfStencilDeviceDevice);
+#endif
 
 
 void TestReplaceCudaStreams()
 {
-  typedef thrust::device_vector<int> Vector;
-  typedef Vector::value_type T;
+  using Vector = thrust::device_vector<int>;
+  using T      = Vector::value_type;
 
   Vector data(5);
   data[0] =  1; 

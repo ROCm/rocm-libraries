@@ -27,11 +27,11 @@
 THRUST_NAMESPACE_BEGIN
 
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template<typename DerivedPolicy,
          typename ForwardIterator1,
          typename ForwardIterator2>
-__host__ __device__
+THRUST_HOST_DEVICE
   ForwardIterator2 swap_ranges(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
                                ForwardIterator1 first1,
                                ForwardIterator1 last1,
@@ -50,8 +50,8 @@ template<typename ForwardIterator1,
 {
   using thrust::system::detail::generic::select_system;
 
-  typedef typename thrust::iterator_system<ForwardIterator1>::type System1;
-  typedef typename thrust::iterator_system<ForwardIterator2>::type System2;
+  using System1 = typename thrust::iterator_system<ForwardIterator1>::type;
+  using System2 = typename thrust::iterator_system<ForwardIterator2>::type;
 
   System1 system1;
   System2 system2;

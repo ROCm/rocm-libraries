@@ -20,7 +20,7 @@ if(ROCMINFO_EXIT_CODE)
   message(FATAL_ERROR ${ROCMINFO_STDERR})
 endif()
 
-string(REGEX MATCHALL [[--(gfx[0-9]+)]]
+string(REGEX MATCHALL [[--(gfx[0-9a-f]+)]]
   ROCMINFO_MATCHES
   ${ROCMINFO_STDOUT}
 )
@@ -37,7 +37,7 @@ string(REGEX MATCHALL [[--(gfx[0-9]+)]]
 #   std::string ip;
 #   int id;
 # };
-# 
+#
 # std::vector<device> GFXIP_AND_ID{ {"gfx900",0},{"gfx803",1},{"gfx900",2} };
 # std::sort(GFXIP_AND_ID.begin(), GFXIP_AND_ID.end(),
 #           [](const device& lhs, const device& rhs)
@@ -85,14 +85,14 @@ list(SORT GFXIP_AND_ID)
 set(JSON_PAYLOAD)
 set(IT1 0)
 list(GET GFXIP_AND_ID ${IT1} I1)
-string(REGEX REPLACE ":[0-9]+" "" IP1 ${I1})
+string(REGEX REPLACE ":[0-9a-f]+" "" IP1 ${I1})
 list(LENGTH GFXIP_AND_ID COUNT)
 while(IT1 LESS COUNT)
   string(APPEND JSON_PAYLOAD "\n      \"${IP1}\": [")
   set(IT2 ${IT1})
   list(GET GFXIP_AND_ID ${IT2} I2)
-  string(REGEX REPLACE [[:[0-9]+$]] "" IP2 ${I2})
-  string(REGEX REPLACE [[^gfx[0-9]+:]] "" ID2 ${I2})
+  string(REGEX REPLACE [[:[0-9a-f]+$]] "" IP2 ${I2})
+  string(REGEX REPLACE [[^gfx[0-9a-f]+:]] "" ID2 ${I2})
   while(${IP2} STREQUAL ${IP1} AND IT2 LESS COUNT)
     string(APPEND JSON_PAYLOAD
              "\n        {\n"
@@ -102,13 +102,14 @@ while(IT1 LESS COUNT)
     math(EXPR IT2 "${IT2} + 1")
     if(IT2 LESS COUNT)
       list(GET GFXIP_AND_ID ${IT2} I2)
-      string(REGEX REPLACE [[:[0-9]+$]] "" IP2 ${I2})
-      string(REGEX REPLACE [[^gfx[0-9]+:]] "" ID2 ${I2})
+      string(REGEX REPLACE [[:[0-9a-f]+$]] "" IP2 ${I2})
+      string(REGEX REPLACE [[^gfx[0-9a-f]+:]] "" ID2 ${I2})
     endif()
   endwhile()
   string(REGEX REPLACE [[,$]] "" JSON_PAYLOAD ${JSON_PAYLOAD})
   string(APPEND JSON_PAYLOAD "\n      ],")
   set(IT1 ${IT2})
+  set(IP1 ${IP2})
 endwhile()
 string(REGEX REPLACE [[,$]] "" JSON_PAYLOAD ${JSON_PAYLOAD})
 
