@@ -48,12 +48,12 @@ namespace TensileLite
     class TENSILE_API ContractionProblemParameters
     {
     public:
-        void setGSU(uint16_t gsu)
+        void setGSU(int16_t gsu)
         {
             m_gsu = gsu;
         }
 
-        uint8_t gsu() const
+        int16_t gsu() const
         {
             return m_gsu;
         }
@@ -144,7 +144,7 @@ namespace TensileLite
         }
 
     private:
-        uint16_t         m_gsu            = 0; // default value
+        int16_t          m_gsu            = 0; // default value
         bool             m_gsuc           = false; // default value
         bool             m_gsuwgmrr       = false; // default value
         int16_t          m_wgm            = 0; // default value

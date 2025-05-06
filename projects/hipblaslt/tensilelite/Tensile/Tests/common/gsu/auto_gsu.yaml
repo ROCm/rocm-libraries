@@ -1,0 +1,65 @@
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
+
+GlobalParameters:
+  NumElementsToValidate: -1
+  MinimumRequiredVersion: 4.14.0
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 0
+  NewClient: 2
+  CSVExportWinner: 1
+  CSVMergeSameProblemID: 1
+  Device: 0
+  PrintSolutionRejectionReason: True
+  MinKForGSU: 2
+  CMakeBuildType: Debug
+
+BenchmarkProblems:
+  ########################################
+  # TN - standard
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      UseBias: 1
+      Batched: True
+      Activation: True
+      ActivationType: all
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 16, 1,  1,  2, 2,  2, 2] #64x64
+          - [32, 32, 8,  1,  1,  1, 1,  2, 2] #64x64
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
+        - DepthU: [64]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [0]
+        - TransposeLDS: [-1]
+        - 1LDSBuffer: [-1]
+        - GlobalSplitU: [-1]
+        - PreloadKernArgs: [1]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer","MultipleBufferSingleKernel"]
+        - GlobalSplitUCoalesced: [False,True]
+        - GlobalSplitUWorkGroupMappingRoundRobin: [False,True]
+        - SourceSwap: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [4096, 4096, 1, 4096]
+          - Exact: [128, 128, 1, 4096]
+          - Exact: [128, 128, 1, 128]
+        - BiasTypeArgs: ['h']
+        - ActivationArgs:
+          - [Enum: relu]

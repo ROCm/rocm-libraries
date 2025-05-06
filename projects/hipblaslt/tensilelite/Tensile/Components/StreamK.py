@@ -593,7 +593,7 @@ class StreamK(Component):
 
             codeAccVgprRead = deepcopy(writer.codes.accVgprRead) if writer.states.serializedStore else None
             # TODO STREAM-K remove this?
-            useCodeMulAlpha = kernel["MIArchVgpr"] and alpha and not (kernel["GlobalSplitU"] > 1)
+            useCodeMulAlpha = kernel["MIArchVgpr"] and alpha and not (kernel["GlobalSplitU"] > 1 or kernel["GlobalSplitU"] == -1)
             if useCodeMulAlpha: # do not set codeAccVgprRead=None if GSU>1
                 codeAccVgprRead = None
 

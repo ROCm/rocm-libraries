@@ -399,7 +399,7 @@ class LSUOn(LSU):
                 strideD1 = "StrideD%s" % (writer.states.indexChars[packedC1[0]])
                 module.add(VMulLOU32(dst=vgpr(writer.vgprs.cinRowPtr), src0=vgpr(writer.vgprs.coord1InMT), src1=sgpr(strideC1), comment=" offset 1"))
                 module.add(VMulLOU32(dst=vgpr(writer.vgprs.coutRowPtrD), src0=vgpr(writer.vgprs.coord1InMT), src1=sgpr(strideD1), comment=" offset 1"))
-                if kernel["ProblemType"]["UseE"] and (kernel["GlobalSplitU"] == 1):
+                if kernel["ProblemType"]["UseE"] and (kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1):
                         module.add(VMovB32(dst=vgpr(writer.vgprs.coutRowPtrE), src=vgpr(writer.vgprs.coord1InMT), comment=" save offset 1 for E"))
                 if writer.vgprs.coutRowPtrBias != -1:
                         index = packedC1[0] - 1
@@ -443,7 +443,7 @@ class LSUOn(LSU):
                     src=sgpr("AddressC+1"), \
                     comment="sgpr -> vgpr"))
 
-            if kernel["GlobalSplitU"] > 0:
+            if kernel["GlobalSplitU"] != 0:
                 gsuLabel = Label(label=writer.labels.getNameInc("GSU"), comment="")
                 with writer.allocTmpSgpr(1) as tmpSgprGSU:
                     module.add(SAndB32(dst=sgpr(tmpSgprGSU.idx), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
@@ -498,7 +498,7 @@ class LSUOn(LSU):
                         dst=vgpr(self.vgprs.addrScaleAlphaVec+1), \
                         src=sgpr("AddressScaleAlphaVec+1"), \
                         comment="sgpr -> vgpr"))
-            if kernel["GlobalSplitU"] > 0:
+            if kernel["GlobalSplitU"] != 0:
                 module.add(gsuLabel)
 
         return module
