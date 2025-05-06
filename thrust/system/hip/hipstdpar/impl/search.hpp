@@ -61,14 +61,14 @@ find_first_of(InputIt1 first, InputIt1 last,
     size_t temp_storage_size_bytes;
     void*  d_temp_storage = nullptr;
     // Get size of d_temp_storage
-    hipError_t error = ::rocprim::find_first_of(d_temp_storage,
-                                              temp_storage_size_bytes,
-                                              first,
-                                              s_first,
-                                              d_output,
-                                              size,
-                                              s_size,
-                                              p);
+     hipError_t error{};// = ::rocprim::find_first_of(d_temp_storage,
+    //                                           temp_storage_size_bytes,
+    //                                           first,
+    //                                           s_first,
+    //                                           d_output,
+    //                                           size,
+    //                                           s_size,
+    //                                           p);
 
     if (error != hipSuccess)
     {
@@ -77,14 +77,14 @@ find_first_of(InputIt1 first, InputIt1 last,
 
     d_temp_storage = thrust::malloc(dev_tag, temp_storage_size_bytes).get();
 
-    error = ::rocprim::find_first_of(d_temp_storage,
-                                   temp_storage_size_bytes,
-                                   first,
-                                   s_first,
-                                   d_output,
-                                   size,
-                                   s_size,
-                                   p);
+    // error = ::rocprim::find_first_of(d_temp_storage,
+    //                                temp_storage_size_bytes,
+    //                                first,
+    //                                s_first,
+    //                                d_output,
+    //                                size,
+    //                                s_size,
+    //                                p);
 
     if (error != hipSuccess)
     {
@@ -134,14 +134,14 @@ search(InputIt1 first, InputIt1 last,
     size_t temp_storage_size_bytes;
     void*  d_temp_storage = nullptr;
     // Get size of d_temp_storage
-    hipError_t error = ::rocprim::search(d_temp_storage,
-                                        temp_storage_size_bytes,
-                                        first,
-                                        s_first,
-                                        d_output,
-                                        size,
-                                        s_size,
-                                        p);
+    hipError_t error{};// = ::rocprim::search(d_temp_storage,
+    //                                     temp_storage_size_bytes,
+    //                                     first,
+    //                                     s_first,
+    //                                     d_output,
+    //                                     size,
+    //                                     s_size,
+    //                                     p);
 
     if (error != hipSuccess)
     {
@@ -150,14 +150,14 @@ search(InputIt1 first, InputIt1 last,
 
     d_temp_storage = thrust::malloc(dev_tag, temp_storage_size_bytes).get();
 
-    error = ::rocprim::search(d_temp_storage,
-                            temp_storage_size_bytes,
-                            first,
-                            s_first,
-                            d_output,
-                            size,
-                            s_size,
-                            p);
+    // error = ::rocprim::search(d_temp_storage,
+    //                         temp_storage_size_bytes,
+    //                         first,
+    //                         s_first,
+    //                         d_output,
+    //                         size,
+    //                         s_size,
+    //                         p);
 
     if (error != hipSuccess)
     {
@@ -208,8 +208,8 @@ InputIt THRUST_HIP_FUNCTION search_n(
   size_t temp_storage_size_bytes;
   void*  d_temp_storage = nullptr;
   // Get size of d_temp_storage
-  hipError_t error =
-    ::rocprim::search_n(d_temp_storage, temp_storage_size_bytes, first, d_output, size, count, d_value, p);
+  hipError_t error{};// =
+    //::rocprim::search_n(d_temp_storage, temp_storage_size_bytes, first, d_output, size, count, d_value, p);
 
   if (error != hipSuccess)
   {
@@ -218,7 +218,7 @@ InputIt THRUST_HIP_FUNCTION search_n(
 
   d_temp_storage = thrust::malloc(dev_tag, temp_storage_size_bytes).get();
 
-  error = ::rocprim::search_n(d_temp_storage, temp_storage_size_bytes, first, d_output, size, count, d_value, p);
+//   error = ::rocprim::search_n(d_temp_storage, temp_storage_size_bytes, first, d_output, size, count, d_value, p);
 
   if (error != hipSuccess)
   {
@@ -271,14 +271,14 @@ find_end(InputIt1 first, InputIt1 last,
     size_t temp_storage_size_bytes;
     void*  d_temp_storage = nullptr;
     // Get size of d_temp_storage
-    hipError_t error = ::rocprim::find_end(d_temp_storage,
-                                        temp_storage_size_bytes,
-                                        first,
-                                        s_first,
-                                        d_output,
-                                        size,
-                                        s_size,
-                                        p);
+    hipError_t error{};// = ::rocprim::find_end(d_temp_storage,
+    //                                     temp_storage_size_bytes,
+    //                                     first,
+    //                                     s_first,
+    //                                     d_output,
+    //                                     size,
+    //                                     s_size,
+    //                                     p);
 
     if (error != hipSuccess)
     {
@@ -287,14 +287,14 @@ find_end(InputIt1 first, InputIt1 last,
 
     d_temp_storage = thrust::malloc(dev_tag, temp_storage_size_bytes).get();
 
-    error = ::rocprim::find_end(d_temp_storage,
-                            temp_storage_size_bytes,
-                            first,
-                            s_first,
-                            d_output,
-                            size,
-                            s_size,
-                            p);
+    // error = ::rocprim::find_end(d_temp_storage,
+    //                         temp_storage_size_bytes,
+    //                         first,
+    //                         s_first,
+    //                         d_output,
+    //                         size,
+    //                         s_size,
+    //                         p);
 
     if (error != hipSuccess)
     {
@@ -340,8 +340,8 @@ InputIt THRUST_HIP_FUNCTION adjacent_find(InputIt first, InputIt last, BinaryPre
   size_t temp_storage_size_bytes;
   void*  d_temp_storage = nullptr;
   // Get size of d_temp_storage
-  hipError_t error =
-    ::rocprim::adjacent_find(d_temp_storage, temp_storage_size_bytes, first, d_output, size, p);
+  hipError_t error{};// =
+//     ::rocprim::adjacent_find(d_temp_storage, temp_storage_size_bytes, first, d_output, size, p);
 
   if (error != hipSuccess)
   {
@@ -350,7 +350,7 @@ InputIt THRUST_HIP_FUNCTION adjacent_find(InputIt first, InputIt last, BinaryPre
 
   d_temp_storage = thrust::malloc(dev_tag, temp_storage_size_bytes).get();
 
-  error = ::rocprim::adjacent_find(d_temp_storage, temp_storage_size_bytes, first, d_output, size, p);
+//   error = ::rocprim::adjacent_find(d_temp_storage, temp_storage_size_bytes, first, d_output, size, p);
 
   if (error != hipSuccess)
   {
@@ -584,7 +584,7 @@ namespace std
                 ::hipstd::is_offloadable_iterator<ForwardIt1>() &&
                 ::hipstd::is_offloadable_iterator<ForwardIt2>()>* = nullptr>
         inline
-        ForwardIt1 find_end(execution::parallel_unsequenced_policy, 
+        ForwardIt1 find_end(execution::parallel_unsequenced_policy,
                                  ForwardIt1 first, ForwardIt1 last,
                                  ForwardIt2 s_first, ForwardIt2 s_last)
     {
@@ -597,7 +597,7 @@ namespace std
                 !::hipstd::is_offloadable_iterator<ForwardIt1>() ||
                 !::hipstd::is_offloadable_iterator<ForwardIt2>()>* = nullptr>
         inline
-        ForwardIt1 find_end(execution::parallel_unsequenced_policy, 
+        ForwardIt1 find_end(execution::parallel_unsequenced_policy,
                                  ForwardIt1 first, ForwardIt1 last,
                                  ForwardIt2 s_first, ForwardIt2 s_last )
     {
@@ -612,7 +612,7 @@ namespace std
                 ::hipstd::is_offloadable_iterator<ForwardIt2>() &&
                 ::hipstd::is_offloadable_callable<BinaryPred>()>* = nullptr>
         inline
-        ForwardIt1 find_end(execution::parallel_unsequenced_policy, 
+        ForwardIt1 find_end(execution::parallel_unsequenced_policy,
                                  ForwardIt1 first, ForwardIt1 last,
                                  ForwardIt2 s_first, ForwardIt2 s_last, BinaryPred p)
     {
@@ -627,7 +627,7 @@ namespace std
                 !::hipstd::is_offloadable_iterator<ForwardIt2>() ||
                 !::hipstd::is_offloadable_callable<BinaryPred>()>* = nullptr>
         inline
-        ForwardIt1 find_end(execution::parallel_unsequenced_policy, 
+        ForwardIt1 find_end(execution::parallel_unsequenced_policy,
                                  ForwardIt1 first, ForwardIt1 last,
                                  ForwardIt2 s_first, ForwardIt2 s_last, BinaryPred p)
     {
@@ -642,7 +642,7 @@ namespace std
                 ::hipstd::is_offloadable_iterator<ForwardIt1>() &&
                 ::hipstd::is_offloadable_iterator<ForwardIt2>()>* = nullptr>
         inline
-        ForwardIt1 find_first_of(execution::parallel_unsequenced_policy, 
+        ForwardIt1 find_first_of(execution::parallel_unsequenced_policy,
                                  ForwardIt1 first, ForwardIt1 last,
                                  ForwardIt2 s_first, ForwardIt2 s_last)
     {
@@ -655,7 +655,7 @@ namespace std
                 !::hipstd::is_offloadable_iterator<ForwardIt1>() ||
                 !::hipstd::is_offloadable_iterator<ForwardIt2>()>* = nullptr>
         inline
-        ForwardIt1 find_first_of(execution::parallel_unsequenced_policy, 
+        ForwardIt1 find_first_of(execution::parallel_unsequenced_policy,
                                  ForwardIt1 first, ForwardIt1 last,
                                  ForwardIt2 s_first, ForwardIt2 s_last )
     {
@@ -670,7 +670,7 @@ namespace std
                 ::hipstd::is_offloadable_iterator<ForwardIt2>() &&
                 ::hipstd::is_offloadable_callable<BinaryPred>()>* = nullptr>
         inline
-        ForwardIt1 find_first_of(execution::parallel_unsequenced_policy, 
+        ForwardIt1 find_first_of(execution::parallel_unsequenced_policy,
                                  ForwardIt1 first, ForwardIt1 last,
                                  ForwardIt2 s_first, ForwardIt2 s_last, BinaryPred p)
     {
@@ -685,7 +685,7 @@ namespace std
                 !::hipstd::is_offloadable_iterator<ForwardIt2>() ||
                 !::hipstd::is_offloadable_callable<BinaryPred>()>* = nullptr>
         inline
-        ForwardIt1 find_first_of(execution::parallel_unsequenced_policy, 
+        ForwardIt1 find_first_of(execution::parallel_unsequenced_policy,
                                  ForwardIt1 first, ForwardIt1 last,
                                  ForwardIt2 s_first, ForwardIt2 s_last, BinaryPred p)
     {
@@ -1122,7 +1122,7 @@ namespace std
                 ::hipstd::is_offloadable_iterator<ForwardIt1>() &&
                 ::hipstd::is_offloadable_iterator<ForwardIt2>()>* = nullptr>
         inline
-        ForwardIt1 search(execution::parallel_unsequenced_policy, 
+        ForwardIt1 search(execution::parallel_unsequenced_policy,
                                  ForwardIt1 first, ForwardIt1 last,
                                  ForwardIt2 s_first, ForwardIt2 s_last)
     {
@@ -1135,7 +1135,7 @@ namespace std
                 !::hipstd::is_offloadable_iterator<ForwardIt1>() ||
                 !::hipstd::is_offloadable_iterator<ForwardIt2>()>* = nullptr>
         inline
-        ForwardIt1 search(execution::parallel_unsequenced_policy, 
+        ForwardIt1 search(execution::parallel_unsequenced_policy,
                                  ForwardIt1 first, ForwardIt1 last,
                                  ForwardIt2 s_first, ForwardIt2 s_last )
     {
@@ -1150,7 +1150,7 @@ namespace std
                 ::hipstd::is_offloadable_iterator<ForwardIt2>() &&
                 ::hipstd::is_offloadable_callable<BinaryPred>()>* = nullptr>
         inline
-        ForwardIt1 search(execution::parallel_unsequenced_policy, 
+        ForwardIt1 search(execution::parallel_unsequenced_policy,
                                  ForwardIt1 first, ForwardIt1 last,
                                  ForwardIt2 s_first, ForwardIt2 s_last, BinaryPred p)
     {
@@ -1165,7 +1165,7 @@ namespace std
                 !::hipstd::is_offloadable_iterator<ForwardIt2>() ||
                 !::hipstd::is_offloadable_callable<BinaryPred>()>* = nullptr>
         inline
-        ForwardIt1 search(execution::parallel_unsequenced_policy, 
+        ForwardIt1 search(execution::parallel_unsequenced_policy,
                                  ForwardIt1 first, ForwardIt1 last,
                                  ForwardIt2 s_first, ForwardIt2 s_last, BinaryPred p)
     {
