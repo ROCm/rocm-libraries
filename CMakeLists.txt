@@ -1,5 +1,8 @@
 # ########################################################################
-# Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+#
+# MIT License
+#
+# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -19,83 +22,116 @@
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 # ########################################################################
 
-cmake_minimum_required( VERSION 3.11 )
+cmake_minimum_required(VERSION 3.11)
+project(hipblas-common VERSION 1.2.0 LANGUAGES CXX)
 
-# Build documentation
-option(BUILD_DOCS "Build documentation" OFF)
+include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
 
-# Consider removing this in the future
-# This should appear before the project command, because it does not use FORCE
-if( WIN32 )
-  set( CMAKE_INSTALL_PREFIX "${PROJECT_BINARY_DIR}/package" CACHE PATH "Install path prefix, prepended onto install directories" )
-else( )
-  set( CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "Install path prefix, prepended onto install directories" )
-endif( )
+add_library(hipblas-common INTERFACE)
+add_library(roc::hipblas-common ALIAS hipblas-common)
 
-# This has to be initialized before the project() command appears
-# Set the default of CMAKE_BUILD_TYPE to be release, unless user specifies with -D.  MSVC_IDE does not use CMAKE_BUILD_TYPE
-if( NOT DEFINED CMAKE_CONFIGURATION_TYPES AND NOT DEFINED CMAKE_BUILD_TYPE )
-  set( CMAKE_BUILD_TYPE Release CACHE STRING "Choose the type of build, options are: None Debug Release RelWithDebInfo MinSizeRel." )
-endif()
+target_sources(hipblas-common 
+    INTERFACE
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/library/include/hipblas-common/hipblas-common.h>
+)
+target_include_directories(hipblas-common
+    INTERFACE
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/library/include>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+)
 
-project( hipblas-common LANGUAGES CXX )
+get_target_property(hipblas_headers_public hipblas-common INTERFACE_SOURCES)
+source_group("Header Files\\Public" FILES ${hipblas_headers_public})
 
-# Append our library helper cmake path and the cmake path for hip (for convenience)
-# Users may override HIP path by specifying their own in CMAKE_MODULE_PATH
-list( APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake  ${ROCM_PATH}/lib/cmake/hip /opt/rocm/lib/cmake/hip ${HIP_DIR}/cmake )
+write_basic_package_version_file(
+    "${CMAKE_CURRENT_BINARY_DIR}/cmake/hipblas-common-config-version.cmake"
+    VERSION ${PROJECT_VERSION}
+    COMPATIBILITY ExactVersion
+  )
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/hipblas-common-config.cmake.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/cmake/hipblas-common-config.cmake"
+    COPYONLY
+)
+install(
+    TARGETS hipblas-common
+    EXPORT hipblas-common-targets
+    COMPONENT hipBLAS-common_Development
+)
+install(
+    EXPORT hipblas-common-targets
+    DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/hipblas-common"
+    NAMESPACE roc::
+    COMPONENT hipBLAS-common_Development
+    FILE hipblas-common-targets.cmake
+)
+install(FILES
+    "${CMAKE_CURRENT_BINARY_DIR}/cmake/hipblas-common-config-version.cmake"
+    "${CMAKE_CURRENT_BINARY_DIR}/cmake/hipblas-common-config.cmake"
+    COMPONENT hipBLAS-common_Development 
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipblas-common
+)
+install(
+    FILES ${hipblas_headers_public}
+    COMPONENT hipBLAS-common_Development
+    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/hipblas-common"
+)
+install(
+    FILES "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md"
+    COMPONENT hipBLAS-common_Docs
+    DESTINATION "${CMAKE_INSTALL_DOCDIR}"
+)
+export(EXPORT hipblas-common-targets FILE hipblas-common-config.cmake)
 
-# NOTE:  workaround until hip cmake modules fixes symlink logic in their config files; remove when fixed
-list( APPEND CMAKE_PREFIX_PATH ${ROCM_PATH}/lib/cmake/hip /opt/rocm /opt/rocm/llvm /opt/rocm/hip )
+set(CPACK_PACKAGE_NAME hipBLAS-common)
+set(CPACK_PACKAGE_VENDOR "Advanced Micro Devices, Inc")
+set(CPACK_PACKAGE_CONTACT "hipBLAS Maintainer <hipblas-maintainer@amd.com>")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Common files shared by hipBLAS and hipBLASLt")
+set(CPACK_PACKAGE_INSTALL_DIRECTORY ${CPACK_PACKAGE_NAME})
+set(CPACK_PACKAGE_VERSION_MAJOR ${PROJECT_VERSION_MAJOR})
+set(CPACK_PACKAGE_VERSION_MINOR ${PROJECT_VERSION_MINOR})
+set(CPACK_PACKAGE_VERSION_PATCH ${PROJECT_VERSION_PATCH})
+set(CPACK_VERBATIM_VARIABLES YES)
+set(CPACK_RESOURCE_FILE_LICENSE ${CMAKE_CURRENT_LIST_DIR}/LICENSE.md)
+set(CPACK_RESOURCE_FILE_README ${CMAKE_CURRENT_LIST_DIR}/README.md)
+set(CPACK_COMPONENTS_ALL "hipBLAS-common_Development;hipBLAS-common_Docs")
 
-# This finds the rocm-cmake project, and installs it if not found
-# rocm-cmake contains common cmake code for rocm projects to help setup and install
-include(dependencies)
+set(CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT")
+set(CPACK_DEBIAN_PACKAGE_PROVIDES "hipblas-common (= 1.0.0)")
+set(CPACK_DEB_COMPONENT_INSTALL "ON")
 
-set ( VERSION_STRING "1.2.0" )
-rocm_setup_version( VERSION ${VERSION_STRING} )
+set(CPACK_DEBIAN_HIPBLAS-COMMON_DEVELOPMENT_PACKAGE_NAME "hipblas-common-dev")
+set(CPACK_DEBIAN_HIPBLAS-COMMON_DOCS_PACKAGE_NAME "hipblas-common-doc")
+set(CPACK_DEBIAN_HIPBLAS-COMMON_DOCS_PACKAGE_SECTION "doc")
+#set(CPACK_DEBIAN_PACKAGE_RELEASE "some git hash") # there is come etra functionality in rocm-cmake to compute this hash why not use the command line?
+#set(CPACK_DEBIAN_PACKAGE_DEPENDS "rocm-core") # I don't think we really need this to build
 
-option( BUILD_VERBOSE "Output additional build information" OFF )
+set(CPACK_RPM_COMPONENT_INSTALL "ON")
+set(CPACK_RPM_FILE_NAME "RPM-DEFAULT")
+set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "${CPACK_PACKAGING_INSTALL_PREFIX}")
+set(CPACK_RPM_PACKAGE_AUTOREQPROV "Off")
+set(CPACK_RPM_PACKAGE_LICENSE "MIT")
+#set(CPACK_RPM_PACKAGE_RELOCATABLE "Off") why?
+#set(CPACK_RPM_PACKAGE_AUTOREQPROV "Off") why?
+#set(CPACK_RPM_PACKAGE_REQUIRES "rocm-core")
+#set(CPACK_RPM_PACKAGE_RELEASE "hash")
 
-add_subdirectory( library )
+set(CPACK_RPM_HIPBLAS-COMMON_DEVELOPMENT_FILE_NAME "RPM-DEFAULT")
+set(CPACK_RPM_HIPBLAS-COMMON_DEVELOPMENT_PACKAGE_NAME "hipblas-common-devel")
+set(CPACK_RPM_HIPBLAS-COMMON_DEVELOPMENT_PACKAGE_PROVIDES "hipblas-common = 1.0.0")
 
-# Build docs
-if(BUILD_DOCS)
-  add_subdirectory(docs)
-endif()
+set(CPACK_RPM_HIPBLAS-COMMON_DOCS_FILE_NAME "RPM-DEFAULT")
+set(CPACK_RPM_HIPBLAS-COMMON_DOCS_PACKAGE_NAME "hipblas-common-doc")
 
-# The following code is setting variables to control the behavior of CPack to generate our
-if( WIN32 )
-    set( CPACK_SOURCE_GENERATOR "ZIP" )
-    set( CPACK_GENERATOR "ZIP" )
-endif( )
+include(CPack)
 
-set( CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md" )
-set( CPACK_RPM_PACKAGE_LICENSE "MIT")
+cpack_add_component(hipBLAS-common_Development
+    DISPLAY_NAME "Developer pre-requisites"
+    DESCRIPTION "hipBLAS-common header files required for development"
+)
 
-if (WIN32)
-  SET( CMAKE_INSTALL_PREFIX "C:/hipSDK" CACHE PATH "Install path" FORCE )
-  SET( INSTALL_PREFIX "C:/hipSDK" )
-  SET( CPACK_SET_DESTDIR FALSE )
-  SET( CPACK_PACKAGE_INSTALL_DIRECTORY "C:/hipSDK" )
-  SET( CPACK_PACKAGING_INSTALL_PREFIX "" )
-  set( CPACK_INCLUDE_TOPLEVEL_DIRECTORY OFF )
-else()
-  if( NOT CPACK_PACKAGING_INSTALL_PREFIX )
-    set( CPACK_PACKAGING_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}" )
-  endif()
-endif( )
-
-set( CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "\${CPACK_PACKAGING_INSTALL_PREFIX}" )
-
-set( package_name hipblas-common )
-
-set( HIPBLAS_CONFIG_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}" CACHE PATH "Path placed into ldconfig file" )
-
-rocm_create_package(
-    NAME ${package_name}
-    DESCRIPTION "Common files for hipBLAS libraries"
-    MAINTAINER "hipBLAS Maintainer <hipblas-maintainer@amd.com>"
-    LDCONFIG
-    LDCONFIG_DIR ${HIPBLAS_CONFIG_DIR}
-    HEADER_ONLY
+cpack_add_component(hipBLAS-common_Docs
+    DISPLAY_NAME "License file"
+    DISABLED
 )
