@@ -284,6 +284,7 @@ int main()
     bool         direct_to_from_reg;
     bool         half_lds;
     unsigned int workgroup_size;
+    unsigned int lds_size_bytes;
 
     const char* DELIM = "";
     std::cout << "{";
@@ -302,6 +303,9 @@ int main()
 
         // work backwards from the end
         auto arg = tokens.rbegin();
+
+        lds_size_bytes = std::stoul(*arg);
+        ++arg;
 
         std::string kernel_name = *arg;
 
@@ -348,6 +352,10 @@ int main()
         StockhamGeneratorSpecs specs2d(factors2d, factors, precisions, workgroup_size, scheme);
         if(!threads_per_transform.empty())
             specs2d.threads_per_transform = threads_per_transform.back();
+
+        // aim for occupancy-2 by default
+        specs.lds_byte_limit   = lds_size_bytes / 2;
+        specs2d.lds_byte_limit = lds_size_bytes / 2;
 
         // create spec and pass to stockham_variants, writes partial output to stdout
         std::cout << DELIM;

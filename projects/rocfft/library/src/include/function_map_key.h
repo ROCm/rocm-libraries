@@ -304,6 +304,10 @@ struct FMKey
     ComputeScheme         scheme        = CS_KERNEL_STOCKHAM;
     SBRC_TRANSPOSE_TYPE   sbrcTrans     = NONE;
     KernelConfig          kernel_config = KernelConfig::EmptyConfig();
+    // LDS size this config is intended for.  This is not a key
+    // field, and multiple configs that differ only in LDS size are
+    // allowed to coexist in the function pool.
+    size_t lds_size_bytes = 0;
 
     FMKey()             = default;
     FMKey(const FMKey&) = default;
@@ -361,29 +365,6 @@ struct FMKey
     {
         static FMKey empty;
         return empty;
-    }
-
-    // Decide if the base LDS usage of the kernel (just for row
-    // data), can fit in the specified LDS size.  We assume
-    // additional flags like apply_large_twiddle and ebtype can
-    // increase this and that might affect occupancy, but not affect
-    // whether the kernel can run.
-    bool base_lds_usage_fits(unsigned int lds_size) const
-    {
-        // 1D kernels aim for occupancy-2, so they can use half of the LDS
-        if(lengths[1] == 0)
-        {
-            auto row_bytes
-                = lengths[0] * complex_type_size(precision) * kernel_config.transforms_per_block;
-            if(kernel_config.half_lds)
-                row_bytes /= 2;
-            return row_bytes <= lds_size / 2;
-        }
-        // 2D kernels can use whole LDS for row data
-        else
-        {
-            return lengths[0] * lengths[1] * complex_type_size(precision) < lds_size;
-        }
     }
 };
 
