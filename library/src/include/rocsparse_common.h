@@ -52,9 +52,9 @@ namespace rocsparse
     rocsparse_status valset_2d(
         rocsparse_handle handle, I m, I n, int64_t ld, T value, T* array, rocsparse_order order);
 
-    template <typename I, typename T>
+    template <typename I, typename A, typename T>
     rocsparse_status
-        scale_array(rocsparse_handle handle, I length, const T* scalar_device_host, T* array);
+        scale_array(rocsparse_handle handle, I length, const T* scalar_device_host, A* array);
 
     template <typename I, typename T>
     rocsparse_status scale_2d_array(rocsparse_handle handle,

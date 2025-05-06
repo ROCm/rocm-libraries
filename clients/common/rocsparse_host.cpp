@@ -38,9 +38,9 @@
  *    level 1 SPARSE
  * ===========================================================================
  */
-template <typename I, typename T>
+template <typename T, typename I, typename X, typename Y>
 void host_axpby(
-    I size, I nnz, T alpha, const T* x_val, const I* x_ind, T beta, T* y, rocsparse_index_base base)
+    I size, I nnz, T alpha, const X* x_val, const I* x_ind, T beta, Y* y, rocsparse_index_base base)
 {
     for(I i = 0; i < size; ++i)
     {
@@ -8902,6 +8902,16 @@ template struct rocsparse_host<rocsparse_double_complex,
         std::vector<rocsparse_int>& csr_row_ptr,                                               \
         std::vector<rocsparse_int>& csr_col_ind);
 
+#define INSTANTIATE_IXYT_AXPBY(ITYPE, XTYPE, YTYPE, TTYPE)                           \
+    template void host_axpby<TTYPE, ITYPE, XTYPE, YTYPE>(ITYPE                size,  \
+                                                         ITYPE                nnz,   \
+                                                         TTYPE                alpha, \
+                                                         const XTYPE*         x_val, \
+                                                         const ITYPE*         x_ind, \
+                                                         TTYPE                beta,  \
+                                                         YTYPE*               y,     \
+                                                         rocsparse_index_base base);
+
 #define INSTANTIATE_COO2DENSE(ITYPE, TTYPE)                                              \
     template void host_coo_to_dense<ITYPE, TTYPE>(ITYPE                     m,           \
                                                   ITYPE                     n,           \
@@ -8968,14 +8978,6 @@ template struct rocsparse_host<rocsparse_double_complex,
                                            rocsparse_index_base base,         \
                                            ITYPE*               struct_pivot, \
                                            ITYPE*               numeric_pivot);             \
-    template void host_axpby<ITYPE, TTYPE>(ITYPE                size,         \
-                                           ITYPE                nnz,          \
-                                           TTYPE                alpha,        \
-                                           const TTYPE*         x_val,        \
-                                           const ITYPE*         x_ind,        \
-                                           TTYPE                beta,         \
-                                           TTYPE*               y,            \
-                                           rocsparse_index_base base);        \
     template void host_roti<ITYPE, TTYPE>(ITYPE nnz,                          \
                                           TTYPE * x_val,                      \
                                           const ITYPE*         x_ind,         \
@@ -9441,6 +9443,29 @@ INSTANTIATE_T(rocsparse_double_complex);
 
 INSTANTIATE_T_REAL_ONLY(float);
 INSTANTIATE_T_REAL_ONLY(double);
+
+INSTANTIATE_IXYT_AXPBY(int32_t, _Float16, _Float16, float);
+INSTANTIATE_IXYT_AXPBY(int32_t, float, float, float);
+INSTANTIATE_IXYT_AXPBY(int32_t, double, double, double);
+INSTANTIATE_IXYT_AXPBY(int32_t,
+                       rocsparse_float_complex,
+                       rocsparse_float_complex,
+                       rocsparse_float_complex);
+INSTANTIATE_IXYT_AXPBY(int32_t,
+                       rocsparse_double_complex,
+                       rocsparse_double_complex,
+                       rocsparse_double_complex);
+INSTANTIATE_IXYT_AXPBY(int64_t, _Float16, _Float16, float);
+INSTANTIATE_IXYT_AXPBY(int64_t, float, float, float);
+INSTANTIATE_IXYT_AXPBY(int64_t, double, double, double);
+INSTANTIATE_IXYT_AXPBY(int64_t,
+                       rocsparse_float_complex,
+                       rocsparse_float_complex,
+                       rocsparse_float_complex);
+INSTANTIATE_IXYT_AXPBY(int64_t,
+                       rocsparse_double_complex,
+                       rocsparse_double_complex,
+                       rocsparse_double_complex);
 
 INSTANTIATE_COO2DENSE(int32_t, _Float16);
 INSTANTIATE_COO2DENSE(int32_t, float);
