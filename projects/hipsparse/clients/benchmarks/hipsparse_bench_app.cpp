@@ -25,6 +25,7 @@
 #include "hipsparse_bench_app.hpp"
 #include "hipsparse_bench.hpp"
 
+#include <chrono>
 #include <fstream>
 #include <random>
 
