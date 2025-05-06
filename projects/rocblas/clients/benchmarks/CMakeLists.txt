@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -57,14 +57,14 @@ target_link_libraries( rocblas-bench PRIVATE rocblas_clients_testing_common rocb
 if( BUILD_FORTRAN_CLIENTS )
   target_link_libraries( rocblas-bench PRIVATE rocblas_fortran_client )
 endif( )
-target_link_libraries( rocblas-bench PRIVATE roc::rocblas hip::host hip::device ${BLAS_LIBRARY} ${GTEST_BOTH_LIBRARIES} )
+target_link_libraries( rocblas-bench PRIVATE roc::rocblas hip::host hip::device ${BLAS_LIBRARY} $<IF:$<TARGET_EXISTS:GTest::gtest>,GTest::gtest,GTest::GTest> $<IF:$<TARGET_EXISTS:GTest::gtest_main>,GTest::gtest_main,GTest::Main> )
 
 if( BUILD_WITH_TENSILE )
   target_link_libraries( rocblas-gemm-tune PRIVATE rocblas_clients_testing_common rocblas_clients_common )
   if( BUILD_FORTRAN_CLIENTS )
     target_link_libraries( rocblas-gemm-tune PRIVATE rocblas_fortran_client )
   endif( )
-  target_link_libraries( rocblas-gemm-tune PRIVATE roc::rocblas hip::host hip::device ${BLAS_LIBRARY} ${GTEST_BOTH_LIBRARIES} )
+  target_link_libraries( rocblas-gemm-tune PRIVATE roc::rocblas hip::host hip::device ${BLAS_LIBRARY} $<IF:$<TARGET_EXISTS:GTest::gtest>,GTest::gtest,GTest::GTest> $<IF:$<TARGET_EXISTS:GTest::gtest_main>,GTest::gtest_main,GTest::Main> )
 endif()
 
 if (NOT WIN32)

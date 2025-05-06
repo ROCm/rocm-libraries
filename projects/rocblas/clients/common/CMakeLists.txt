@@ -47,7 +47,6 @@ function( rocblas_client_library_settings lib_target_ )
     $<BUILD_INTERFACE:${HIP_INCLUDE_DIRS}>
     $<BUILD_INTERFACE:${BLAS_INCLUDE_DIR}>
     $<BUILD_INTERFACE:${BLIS_INCLUDE_DIR}> # may be blank if not used
-    $<BUILD_INTERFACE:${GTEST_INCLUDE_DIRS}>
   )
 
   target_include_directories( ${lib_target_}
@@ -156,7 +155,7 @@ target_compile_definitions( rocblas_clients_common PRIVATE ROCBLAS_REFERENCE_LIB
 
 
 # target is not linked as OBJECT library but we want any interface flags from dependencies
-target_link_libraries( rocblas_clients_common roc::rocblas hip::host hip::device ${GTEST_BOTH_LIBRARIES} ${COMMON_LINK_LIBS} )
-target_link_libraries( rocblas_clients_testing_common roc::rocblas hip::host hip::device ${BLAS_LIBRARY} ${GTEST_BOTH_LIBRARIES} ${COMMON_LINK_LIBS} )
+target_link_libraries( rocblas_clients_common roc::rocblas hip::host hip::device $<IF:$<TARGET_EXISTS:GTest::gtest>,GTest::gtest,GTest::GTest> $<IF:$<TARGET_EXISTS:GTest::gtest_main>,GTest::gtest_main,GTest::Main> ${COMMON_LINK_LIBS} )
+target_link_libraries( rocblas_clients_testing_common roc::rocblas hip::host hip::device ${BLAS_LIBRARY} $<IF:$<TARGET_EXISTS:GTest::gtest>,GTest::gtest,GTest::GTest> $<IF:$<TARGET_EXISTS:GTest::gtest_main>,GTest::gtest_main,GTest::Main> ${COMMON_LINK_LIBS} )
 
 
