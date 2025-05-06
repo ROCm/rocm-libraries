@@ -43,7 +43,7 @@ jobs:
       - name: Detect changed subtrees
         id: detect
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           python .github/scripts/pr_detect_changed_subtrees.py \
             --repo "${{ github.repository }}" \
@@ -62,15 +62,18 @@ jobs:
       - name: Fan out child PRs
         if: steps.detect.outputs.subtrees
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           python .github/scripts/pr_fanout.py \
             --repo "${{ github.repository }}" \
             --pr "${{ github.event.pull_request.number }}" \
             --subtrees "${{ steps.detect.outputs.subtrees }}"
 
-      - name: Track fanout PRs (placeholder)
-        run: echo "Child PRs tracked or linked"
-
-      - name: Post status to monorepo PR (placeholder)
-        run: echo "Success or failure posted back to monorepo PR"
+      - name: Reflect Checks to Monorepo PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python .github/scripts/pr_reflect_checks.py \
+            --repo ${{ github.repository }} \
+            --pr ${{ github.event.pull_request.number }}
+            --config ".github/repos-config.json"

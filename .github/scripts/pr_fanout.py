@@ -13,7 +13,7 @@ Arguments:
     --pr        : Pull request number
     --subtrees  : A newline-separated list of subtree folder names (from detect_changed_subtrees.py)
     --config    : OPTIONAL, path to the repos-config.json file
-    --dry-run   : If set, only logs actions without making changes.
+    --dry-run   : If set, will only log actions without making changes.
     --debug     : If set, enables detailed debug logging.
 
 Example Usage:
@@ -24,12 +24,11 @@ Example Usage:
 
 import argparse
 import subprocess
-import json
-import sys
 import logging
 from typing import List, Optional
 from github_cli_client import GitHubCLIClient
-from repo_config_model import RepoEntry, RepoConfig
+from repo_config_model import RepoEntry
+from config_loader import load_repo_config
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -44,17 +43,6 @@ def parse_arguments(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser.add_argument("--dry-run", action="store_true", help="If set, only logs actions without making changes.")
     parser.add_argument("--debug", action="store_true", help="If set, enables detailed debug logging.")
     return parser.parse_args(argv)
-
-def load_repo_config(config_path: str) -> List[RepoEntry]:
-    """Load and validate repository config from JSON using Pydantic."""
-    try:
-        with open(config_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        config = RepoConfig(**data)
-        return config.repositories
-    except Exception as e:
-        logger.error(f"Failed to load or validate config file '{config_path}': {e}")
-        sys.exit(1)
 
 def get_subtree_info(config: List[RepoEntry], subtrees: List[str]) -> List[RepoEntry]:
     """Filter and return relevant subtree info from the config."""

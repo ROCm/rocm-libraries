@@ -15,7 +15,6 @@ Requirements:
     - The repository must be accessible to the authenticated user.
 """
 
-import os
 import subprocess
 import json
 import logging
@@ -76,9 +75,12 @@ class GitHubCLIClient:
     def pr_view(self, repo: str, head: str) -> Optional[int]:
         """Check if a PR exists for the given repo and branch."""
         try:
-            result = self._run_gh_command(["pr", "view", "--json", "number", "--repo", repo, "--head", head])
-            pr_number = json.loads(result.stdout).get("number")
-            return int(pr_number) if pr_number else None
+            result = self._run_gh_command(["pr", "list", "--json", "number", "--repo", repo, "--head", head])
+            pr_list = json.loads(result.stdout)
+            if pr_list:
+                return pr_list[0]["number"]
+            else:
+                return None
         except subprocess.CalledProcessError:
             return None  # PR does not exist
 
@@ -106,3 +108,29 @@ class GitHubCLIClient:
         ]
         self._run_gh_command(cmd, dry_run=dry_run)
         logger.info(f"Edited PR for head '{head}' in {repo}.")
+
+    def sync_labels(self, source_repo: str, target_repo: str, labels: List[str], dry_run: Optional[bool] = False) -> None:
+        """Sync labels from the source repo to the target repo (only apply existing labels)."""
+        result = self._run_gh_command(
+            ["label", "list", "--repo", source_repo]
+        )
+        source_repo_labels = {label["name"] for label in json.loads(result.stdout)}
+        result = self._run_gh_command(
+            ["label", "list", "--repo", target_repo]
+        )
+        target_repo_labels = {label["name"] for label in json.loads(result.stdout)}
+        labels_set = set(labels)
+        labels_to_apply = labels_set & source_repo_labels & target_repo_labels
+        # Apply labels that exist in both source and target repos
+        # Wrap in quotes if label contains spaces
+        labels_arg = ",".join(f'"{label}"' if " " in label else label for label in labels_to_apply)
+        cmd = [
+            "pr", "edit",
+            "--repo", target_repo,
+            "--add-label", labels_arg
+        ]
+        if not dry_run:
+            self._run_gh_command(cmd, dry_run=dry_run)
+            logger.info(f"Applied labels '{labels_arg}' to PR in {target_repo}.")
+        else:
+            logger.info(f"Dry run: Labels '{labels_arg}' would be applied to PR in {target_repo}.")

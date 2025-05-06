@@ -38,7 +38,7 @@ jobs:
       - name: Compute Labels for PR
         id: compute_labels
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           python .github/scripts/pr_auto_label.py \
             --repo ${{ github.repository }} \
@@ -46,7 +46,7 @@ jobs:
 
       - name: Update labels
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if [ -n "${{ steps.compute_labels.outputs.remove }}" ]; then
             gh pr edit "${{ github.event.pull_request.number }}" --remove-label "${{ steps.compute_labels.outputs.remove }}"
@@ -54,3 +54,12 @@ jobs:
           if [ -n "${{ steps.compute_labels.outputs.add }}" ]; then
             gh pr edit "${{ github.event.pull_request.number }}" --add-label "${{ steps.compute_labels.outputs.add }}"
           fi
+
+      - name: Sync Custom Labels from Monorepo PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python .github/scripts/pr_fanout_sync_labels.py \
+            --repo ${{ github.repository }} \
+            --pr ${{ github.event.pull_request.number }}
+            --config ".github/repos-config.json"

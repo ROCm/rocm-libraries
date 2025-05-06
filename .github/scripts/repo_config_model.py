@@ -40,7 +40,6 @@ class RepoEntry(BaseModel):
     branch: str
     category: str
 
-
 class RepoConfig(BaseModel):
     """
     Represents the full config file structure.

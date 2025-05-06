@@ -6,7 +6,7 @@ PR Auto Label Script
 This script analyzes the file paths changed in a pull request and determines which
 labels should be added or removed based on the modified files.
 
-It uses GitHub's API to fetch the changed files and the existing labels on the pull request.
+It uses GitHub's cli to fetch the changed files and the existing labels on the pull request.
 Then, it computes the desired labels based on file paths, compares them to the existing labels,
 and applies the necessary additions and removals unless in dry-run mode.
 
@@ -34,13 +34,13 @@ import sys
 import os
 import logging
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 from github_cli_client import GitHubCLIClient
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def parse_arguments(argv=None) -> argparse.Namespace:
+def parse_arguments(argv: Optional[List[str]] = None) -> argparse.Namespace:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(description="Apply labels based on PR's changed files.")
     parser.add_argument("--repo", required=True, help="Full repository name (e.g., org/repo)")

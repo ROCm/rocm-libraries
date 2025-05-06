@@ -16,7 +16,7 @@ Arguments:
     --repo      : Full repository name (e.g., org/repo)
     --pr        : Pull request number
     --config    : OPTIONAL, path to the repos-config.json file
-    --dry-run   : If set, only logs actions without making changes.
+    --dry-run   : If set, will only log actions without making changes.
     --debug     : If set, enables detailed debug logging.
 
 Outputs:
@@ -36,17 +36,16 @@ Example Usage:
 import argparse
 import sys
 import os
-import json
 import logging
-from pathlib import Path
-from typing import List, Set
+from typing import List, Optional, Set
 from github_cli_client import GitHubCLIClient
-from repo_config_model import RepoEntry, RepoConfig
+from repo_config_model import RepoEntry
+from config_loader import load_repo_config
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def parse_arguments(argv=None) -> argparse.Namespace:
+def parse_arguments(argv: Optional[List[str]] = None) -> argparse.Namespace:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(description="Detect changed subtrees in a PR.")
     parser.add_argument("--repo", required=True, help="Full repository name (e.g., org/repo)")
@@ -55,17 +54,6 @@ def parse_arguments(argv=None) -> argparse.Namespace:
     parser.add_argument("--dry-run", action="store_true", help="Print results without writing to GITHUB_OUTPUT.")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
     return parser.parse_args(argv)
-
-def load_repo_config(config_path: str) -> List[RepoEntry]:
-    """Load and validate repository config from JSON using Pydantic."""
-    try:
-        with open(config_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        config = RepoConfig(**data)
-        return config.repositories
-    except Exception as e:
-        logger.error(f"Failed to load or validate config file '{config_path}': {e}")
-        sys.exit(1)
 
 def get_valid_prefixes(config: List[RepoEntry]) -> Set[str]:
     """Extract valid subtree prefixes from the configuration."""
