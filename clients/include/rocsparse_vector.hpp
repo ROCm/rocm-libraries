@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2019-2022 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -27,6 +27,7 @@
 #define ROCSPARSE_VECTOR_HPP
 
 #include "rocsparse_allocator.hpp"
+#include "rocsparse_clients_routine_trace.hpp"
 #include "rocsparse_init.hpp"
 
 template <memory_mode::value_t MODE, typename T>
@@ -77,6 +78,8 @@ public:
     template <memory_mode::value_t THAT_MODE>
     void unit_check(const dense_vector_t<THAT_MODE, T>& that_) const
     {
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
         switch(MODE)
         {
         case memory_mode::device:
@@ -113,6 +116,8 @@ public:
     void near_check(const dense_vector_t<THAT_MODE, T>& that_,
                     floating_data_t<T>                  tol_ = default_tolerance<T>::value) const
     {
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
         switch(MODE)
         {
         case memory_mode::device:
@@ -150,6 +155,8 @@ public:
     template <memory_mode::value_t THAT_MODE>
     void transfer_from(const dense_vector_t<THAT_MODE, T>& that)
     {
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
         CHECK_HIP_THROW_ERROR(this->size() == that.size() ? hipSuccess : hipErrorInvalidValue);
         auto err = hipMemcpy(this->data(),
                              that.data(),
@@ -189,6 +196,8 @@ struct host_vector : std::vector<T>
     template <memory_mode::value_t THAT_MODE>
     void transfer_from(const dense_vector_t<THAT_MODE, T>& that)
     {
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
         CHECK_HIP_THROW_ERROR(this->size() == that.size() ? hipSuccess : hipErrorInvalidValue);
         CHECK_HIP_THROW_ERROR(
             hipMemcpy(this->data(),
@@ -198,6 +207,8 @@ struct host_vector : std::vector<T>
     }
     void transfer_from(const host_vector<T>& that)
     {
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
         CHECK_HIP_THROW_ERROR(this->size() == that.size() ? hipSuccess : hipErrorInvalidValue);
         CHECK_HIP_THROW_ERROR(
             hipMemcpy(this->data(),
@@ -209,6 +220,8 @@ struct host_vector : std::vector<T>
     template <memory_mode::value_t THAT_MODE>
     void unit_check(const dense_vector_t<THAT_MODE, T>& that_) const
     {
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
         that_.unit_check(*this);
     }
 
@@ -216,11 +229,15 @@ struct host_vector : std::vector<T>
     void near_check(const dense_vector_t<THAT_MODE, T>& that_,
                     floating_data_t<T>                  tol_ = default_tolerance<T>::value) const
     {
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
         that_.near_check(*this, tol_);
     }
 
     void unit_check(const host_vector<T>& that_) const
     {
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
         unit_check_scalar<rocsparse_int>(this->size(), that_.size());
         unit_check_segments<T>(this->size(), this->data(), that_);
     }
@@ -228,6 +245,8 @@ struct host_vector : std::vector<T>
     void near_check(const host_vector<T>& that_,
                     floating_data_t<T>    tol_ = default_tolerance<T>::value) const
     {
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
         unit_check_scalar<rocsparse_int>(this->size(), that_.size());
         near_check_segments<T>(this->size(), this->data(), that_.data(), tol_);
     }
@@ -235,6 +254,8 @@ struct host_vector : std::vector<T>
     template <memory_mode::value_t THAT_MODE>
     void transfer_from(const T* that)
     {
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
         CHECK_HIP_THROW_ERROR(
             hipMemcpy(this->data(),
                       that,
@@ -244,6 +265,8 @@ struct host_vector : std::vector<T>
 
     void print(std::ostream& out) const
     {
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
         const size_t N = this->size();
         for(size_t i = 0; i < N; ++i)
         {
@@ -253,6 +276,8 @@ struct host_vector : std::vector<T>
 
     void print_limited(std::ostream& out, size_t bound) const
     {
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
         const size_t N = this->size();
         for(size_t i = 0; i < N; ++i)
         {
@@ -292,6 +317,8 @@ public:
 
     void resize(size_t s)
     {
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
         if(s != this->m_size)
         {
             if(this->m_val)
@@ -311,6 +338,8 @@ public:
     explicit dense_vector(const host_vector<T>& that, bool transfer = true)
         : dense_vector_t<MODE, T>(that.size(), allocator::malloc(that.size()))
     {
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
         if(transfer)
         {
             this->transfer_from(that);
@@ -320,6 +349,8 @@ public:
     explicit dense_vector(const dense_vector<MODE, T>& that, bool transfer = true)
         : dense_vector_t<MODE, T>(that.size(), allocator::malloc(that.size()))
     {
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
         if(transfer)
         {
             this->transfer_from(that);
@@ -329,6 +360,8 @@ public:
     explicit dense_vector(const dense_vector_t<MODE, T>& that, bool transfer = true)
         : dense_vector_t<MODE, T>(that.size(), allocator::malloc(that.size()))
     {
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
         if(transfer)
         {
             this->transfer_from(that);
@@ -339,6 +372,8 @@ public:
     explicit dense_vector(const dense_vector_t<THAT_MODE, T>& that, bool transfer = true)
         : dense_vector_t<MODE, T>(that.size(), allocator::malloc(that.size()))
     {
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
         if(transfer)
         {
             this->transfer_from(that);
@@ -389,6 +424,8 @@ dense_vector_t<MODE, T>::~dense_vector_t()
 template <memory_mode::value_t MODE, typename T>
 void dense_vector_t<MODE, T>::unit_check(const host_vector<T>& that_) const
 {
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
     switch(MODE)
     {
     case memory_mode::device:
@@ -411,6 +448,8 @@ void dense_vector_t<MODE, T>::unit_check(const host_vector<T>& that_) const
 template <memory_mode::value_t MODE, typename T>
 void dense_vector_t<MODE, T>::near_check(const host_vector<T>& that_, floating_data_t<T> tol_) const
 {
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
     switch(MODE)
     {
     case memory_mode::device:
@@ -433,6 +472,8 @@ void dense_vector_t<MODE, T>::near_check(const host_vector<T>& that_, floating_d
 template <memory_mode::value_t MODE, typename T>
 void dense_vector_t<MODE, T>::transfer_from(const host_vector<T>& that)
 {
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
     CHECK_HIP_THROW_ERROR(this->size() == that.size() ? hipSuccess : hipErrorInvalidValue);
     auto err = hipMemcpy(this->data(),
                          that.data(),
@@ -444,6 +485,8 @@ void dense_vector_t<MODE, T>::transfer_from(const host_vector<T>& that)
 template <memory_mode::value_t MODE, typename T>
 void dense_vector_t<MODE, T>::transfer_to(std::vector<T>& that) const
 {
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
     that.resize(this->m_size);
     CHECK_HIP_THROW_ERROR(hipMemcpy(that.data(),
                                     this->data(),
@@ -454,6 +497,8 @@ void dense_vector_t<MODE, T>::transfer_to(std::vector<T>& that) const
 template <memory_mode::value_t MODE, typename T>
 void dense_vector_t<MODE, T>::print() const
 {
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
     switch(MODE)
     {
     case memory_mode::host:

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -25,6 +25,8 @@
 
 #include "rocsparse_matrix_factory_zero.hpp"
 
+#include "rocsparse_clients_routine_trace.hpp"
+
 template <typename T, typename I, typename J>
 rocsparse_matrix_factory_zero<T, I, J>::rocsparse_matrix_factory_zero(){};
 
@@ -40,6 +42,8 @@ void rocsparse_matrix_factory_zero<T, I, J>::init_csr(std::vector<I>&        csr
                                                       rocsparse_fill_mode    uplo,
                                                       rocsparse_storage_mode storage)
 {
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
     csr_row_ptr.resize((M > 0) ? (M + 1) : 0, static_cast<I>(base));
     csr_col_ind.resize(0);
     csr_val.resize(0);
@@ -62,6 +66,8 @@ void rocsparse_matrix_factory_zero<T, I, J>::init_gebsr(std::vector<I>&        b
                                                         rocsparse_fill_mode    uplo,
                                                         rocsparse_storage_mode storage)
 {
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
     bsr_row_ptr.resize((Mb > 0) ? (Mb + 1) : 0, static_cast<I>(base));
     bsr_col_ind.resize(0);
     bsr_val.resize(0);
@@ -81,6 +87,8 @@ void rocsparse_matrix_factory_zero<T, I, J>::init_coo(std::vector<I>&        coo
                                                       rocsparse_fill_mode    uplo,
                                                       rocsparse_storage_mode storage)
 {
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
     coo_row_ind.resize(0);
     coo_col_ind.resize(0);
     coo_val.resize(0);

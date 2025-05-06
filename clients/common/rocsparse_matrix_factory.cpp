@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -28,10 +28,13 @@
 #include "rocsparse_importer_format_t.hpp"
 #include "rocsparse_init.hpp"
 
+#include "rocsparse_clients_routine_trace.hpp"
+
 static void get_matrix_full_filename(const Arguments& arg_,
                                      const char*      extension_,
                                      std::string&     full_filename_)
 {
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE
 
     if(arg_.timing)
     {
@@ -54,6 +57,8 @@ static void get_matrix_full_filename(const Arguments& arg_,
 template <typename T, typename I, typename J>
 rocsparse_matrix_factory<T, I, J>::~rocsparse_matrix_factory()
 {
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
     if(this->m_instance)
     {
         delete this->m_instance;
@@ -73,6 +78,8 @@ rocsparse_matrix_factory<T, I, J>::rocsparse_matrix_factory(const Arguments&    
                                                             )
     : m_arg(arg)
 {
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
     //
     // FORCE REINIT.
     //
@@ -214,6 +221,8 @@ void rocsparse_matrix_factory<T, I, J>::init_coo(std::vector<I>&      coo_row_in
                                                  int64_t&             nnz,
                                                  rocsparse_index_base base)
 {
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
     this->m_instance->init_coo(coo_row_ind,
                                coo_col_ind,
                                coo_val,
@@ -229,6 +238,8 @@ void rocsparse_matrix_factory<T, I, J>::init_coo(std::vector<I>&      coo_row_in
 template <typename T, typename I, typename J>
 void rocsparse_matrix_factory<T, I, J>::init_coo(host_coo_matrix<T, I>& that)
 {
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
     that.base = this->m_arg.baseA;
     that.m    = this->m_arg.M;
     that.n    = this->m_arg.N;
@@ -250,6 +261,8 @@ void rocsparse_matrix_factory<T, I, J>::init_coo(host_coo_matrix<T, I>& that,
                                                  I&                     N,
                                                  rocsparse_index_base   base)
 {
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
     that.base = base;
     that.m    = M;
     that.n    = N;
@@ -270,6 +283,8 @@ void rocsparse_matrix_factory<T, I, J>::init_coo(host_coo_matrix<T, I>& that,
 template <typename T, typename I, typename J>
 void rocsparse_matrix_factory<T, I, J>::init_coo(host_coo_matrix<T, I>& that, I& M, I& N)
 {
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
     this->init_coo(that, M, N, this->m_arg.baseA);
 }
 
@@ -285,6 +300,8 @@ void rocsparse_matrix_factory<T, I, J>::init_csr(std::vector<I>&      csr_row_pt
                                                  I&                   nnz,
                                                  rocsparse_index_base base)
 {
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
     this->m_instance->init_csr(csr_row_ptr,
                                csr_col_ind,
                                csr_val,
@@ -300,6 +317,8 @@ void rocsparse_matrix_factory<T, I, J>::init_csr(std::vector<I>&      csr_row_pt
 template <typename T, typename I, typename J>
 void rocsparse_matrix_factory<T, I, J>::init_csr(host_csr_matrix<T, I, J>& that)
 {
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
     that.base = this->m_arg.baseA;
     that.m    = this->m_arg.M;
     that.n    = this->m_arg.N;
@@ -321,6 +340,8 @@ void rocsparse_matrix_factory<T, I, J>::init_csr(host_csr_matrix<T, I, J>& that,
                                                  J&                        n,
                                                  rocsparse_index_base      base)
 {
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
     that.base = base;
     that.m    = m;
     that.n    = n;
@@ -341,6 +362,8 @@ void rocsparse_matrix_factory<T, I, J>::init_csr(host_csr_matrix<T, I, J>& that,
 template <typename T, typename I, typename J>
 void rocsparse_matrix_factory<T, I, J>::init_csr(host_csr_matrix<T, I, J>& that, J& m, J& n)
 {
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
     this->init_csr(that, m, n, this->m_arg.baseA);
 }
 
@@ -356,6 +379,8 @@ void rocsparse_matrix_factory<T, I, J>::init_csc(std::vector<I>&      csc_col_pt
                                                  I&                   nnz,
                                                  rocsparse_index_base base)
 {
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
     this->m_instance->init_csr(csc_col_ptr,
                                csc_row_ind,
                                csc_val,
@@ -374,6 +399,8 @@ void rocsparse_matrix_factory<T, I, J>::init_csc(host_csc_matrix<T, I, J>& that,
                                                  J&                        n,
                                                  rocsparse_index_base      base)
 {
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
     that.base = base;
     this->m_instance->init_csr(that.ptr,
                                that.ind,
@@ -404,6 +431,8 @@ void rocsparse_matrix_factory<T, I, J>::init_gebsr(std::vector<I>&      bsr_row_
                                                    J&                   col_block_dim,
                                                    rocsparse_index_base base)
 {
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
     this->m_instance->init_gebsr(bsr_row_ptr,
                                  bsr_col_ind,
                                  bsr_val,
@@ -429,6 +458,8 @@ void rocsparse_matrix_factory<T, I, J>::init_gebsr(host_gebsr_matrix<T, I, J>& t
                                                    J&                          col_block_dim_,
                                                    rocsparse_index_base        base_)
 {
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
     that.block_direction = block_dir_;
     that.mb              = mb_;
     that.nb              = nb_;
@@ -460,6 +491,8 @@ void rocsparse_matrix_factory<T, I, J>::init_gebsr(host_gebsr_matrix<T, I, J>& t
 template <typename T, typename I, typename J>
 void rocsparse_matrix_factory<T, I, J>::init_gebsr(host_gebsr_matrix<T, I, J>& that)
 {
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
     that.block_direction = this->m_arg.direction;
     that.mb              = this->m_arg.M;
     that.nb              = this->m_arg.N;
@@ -490,6 +523,8 @@ void rocsparse_matrix_factory<T, I, J>::init_gebsr(host_gebsr_matrix<T, I, J>& t
                                                    J&                          col_block_dim,
                                                    rocsparse_index_base        base_)
 {
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
     that.base = base_;
     that.mb   = mb;
     that.nb   = nb;
@@ -523,6 +558,8 @@ void rocsparse_matrix_factory<T, I, J>::init_gebsr_spezial(host_gebsr_matrix<T, 
                                                            J&                          Mb,
                                                            J&                          Nb)
 {
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
     I idx = 0;
 
     host_csr_matrix<T, I, J> hA;
@@ -595,6 +632,8 @@ void rocsparse_matrix_factory<T, I, J>::init_gebsc(std::vector<I>&      bsc_col_
                                                    J&                   col_block_dim,
                                                    rocsparse_index_base base)
 {
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
     this->m_instance->init_gebsr(bsc_col_ptr,
                                  bsc_row_ind,
                                  bsc_val,
@@ -625,6 +664,8 @@ void rocsparse_matrix_factory<T, I, J>::init_bsr(std::vector<I>&      bsr_row_pt
                                                  J&                   block_dim,
                                                  rocsparse_index_base base)
 {
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
     this->m_instance->init_gebsr(bsr_row_ptr,
                                  bsr_col_ind,
                                  bsr_val,
@@ -672,6 +713,8 @@ struct traits_init_bsr<
                      J&                                 nb_,
                      rocsparse_index_base               base_)
     {
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
         //
         // Initialize in case init_csr requires it as input.
         //
@@ -733,6 +776,8 @@ void rocsparse_matrix_factory<T, I, J>::init_bsr(host_gebsr_matrix<T, I, J>& tha
                                                  J&                          nb_,
                                                  rocsparse_index_base        base_)
 {
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
     device_gebsr_matrix<T, I, J> dB;
     this->init_bsr(that_, dB, mb_, nb_, base_);
 }
@@ -744,6 +789,8 @@ void rocsparse_matrix_factory<T, I, J>::init_bsr(host_gebsr_matrix<T, I, J>&   t
                                                  J&                            nb_,
                                                  rocsparse_index_base          base_)
 {
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
     traits_init_bsr<T, I, J>::init(*this, that_, that_on_device_, mb_, nb_, base_);
 }
 
@@ -775,6 +822,8 @@ struct traits_init_coo_aos<T, I, J, std::enable_if_t<std::is_same<I, J>{}>>
                      I&                                 N,
                      rocsparse_index_base               base)
     {
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
         host_csr_matrix<T, I, I> hA;
         factory.init_csr(hA, M, N, base);
         that.define(hA.m, hA.n, hA.nnz, hA.base);
@@ -789,6 +838,8 @@ void rocsparse_matrix_factory<T, I, J>::init_coo_aos(host_coo_aos_matrix<T, I>& 
                                                      I&                         N,
                                                      rocsparse_index_base       base)
 {
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
     traits_init_coo_aos<T, I, J>::init(*this, that, M, N, base);
 }
 
@@ -818,6 +869,8 @@ struct traits_init_ell<T, I, J, std::enable_if_t<std::is_same<I, J>{}>>
                      I&                                 N,
                      rocsparse_index_base               base)
     {
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
         host_csr_matrix<T, I, I> hA;
         factory.init_csr(hA, M, N, base);
         that.define(hA.m, hA.n, 0, hA.base);
@@ -833,6 +886,8 @@ void rocsparse_matrix_factory<T, I, J>::init_ell(host_ell_matrix<T, I>& that,
                                                  I&                     N,
                                                  rocsparse_index_base   base)
 {
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
     traits_init_ell<T, I, J>::init(*this, that, M, N, base);
 }
 
@@ -869,6 +924,8 @@ struct traits_init_hyb<T,
                      rocsparse_index_base               base,
                      bool&                              conform)
     {
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
         conform                                = true;
         rocsparse_hyb_partition part           = factory.m_arg.part;
         rocsparse_int           user_ell_width = factory.m_arg.algo;
@@ -925,6 +982,8 @@ template <typename T, typename I, typename J>
 void rocsparse_matrix_factory<T, I, J>::init_hyb(
     rocsparse_hyb_mat that, I& M, I& N, I& nnz, rocsparse_index_base base, bool& conform)
 {
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
     traits_init_hyb<T, I, J>::init(*this, that, M, N, nnz, base, conform);
 }
 
