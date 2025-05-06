@@ -41,7 +41,7 @@ def parse_arguments(argv: Optional[List[str]] = None) -> argparse.Namespace:
 
 def sync_labels(client: GitHubCLIClient, monorepo: str, pr_number: str, entries: List[RepoEntry], dry_run: bool) -> None:
     """Sync labels from the monorepo PR to the fanned-out PRs."""
-    source_labels = client.get_pr_labels(monorepo, pr_number)
+    source_labels = client.get_existing_labels(monorepo, pr_number)
     for entry in entries:
         branch = f"monorepo-pr-{pr_number}-{entry.name}"
         subrepo = entry.url
