@@ -4492,7 +4492,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if self.db["EnableAsserts"]:
       self.defineSgpr("SaveExecMask", 2, 2)
 
-    if kernel["GlobalSplitU"] > 0:
+    if kernel["GlobalSplitU"] != 0:
       self.defineSgpr("GSUSumIdx", 2, 2)
       self.defineSgpr("GSULog2BpeC", 1)
       self.defineSgpr("GSULog2BpeD", 1)
@@ -4653,7 +4653,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         # self.defineSgpr("dpTilesPerWG", 1, kernarg=True)
         self.states.numSgprStreamK += 3
 
-    if kernel["GlobalSplitU"] > 0:
+    if kernel["GlobalSplitU"] != 0:
       self.defineSgpr("GSU", 1)  # Can't move to the front because of the preload arguments
 
     if kernel["StreamK"]:

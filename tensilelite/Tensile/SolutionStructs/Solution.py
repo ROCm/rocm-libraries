@@ -933,7 +933,7 @@ class Solution(collections.abc.Mapping):
       if (not splitGSU):
         state["_GlobalAccumulation"] = 'MultipleBufferSingleKernel'
       else:
-        if state["GlobalSplitU"] > 1:
+        if state["GlobalSplitU"] > 1 or state["GlobalSplitU"] == -1:
           state["_GlobalAccumulation"] = 'MultipleBufferSingleKernel'
 
     if state["_GlobalAccumulation"] == 'MultipleBufferSingleKernel':
@@ -1219,7 +1219,7 @@ class Solution(collections.abc.Mapping):
     #  - The "NoLoad" loop is only generated if PrefetchGlobalRead>0
     #  - And Suppress does not work if GSU>1 for some reason
     if state["SuppressNoLoadLoop"] == 1:
-      if not (bufferLoad and state["PrefetchGlobalRead"] == 1 and (state["GlobalSplitU"]==1)):
+      if not (bufferLoad and state["PrefetchGlobalRead"] == 1 and (state["GlobalSplitU"]==1 or state["GlobalSplitU"]==-1)):
         state["SuppressNoLoadLoop"] = 0
 
     #print("PackedC0IdxChars", state["PackedC0IdxChars"])
@@ -2152,7 +2152,7 @@ class Solution(collections.abc.Mapping):
         return
 
     # GlobalSplitU doesn't work with some other things:
-    if state["GlobalSplitU"] > 1:
+    if state["GlobalSplitU"] > 1 or state["GlobalSplitU"] == -1:
       # added GSU support for DGEMM
       supported = \
         (state["ProblemType"]["DataType"].isSingle()) or \
@@ -2167,7 +2167,7 @@ class Solution(collections.abc.Mapping):
         return
 
     if state["ProblemType"]["DataType"].isHalf() and state["KernelLanguage"] == "Assembly":
-      if state["GlobalSplitU"] > 1 and (not state["_GlobalAccumulation"]):
+      if (state["GlobalSplitU"] > 1 or state["GlobalSplitU"] == -1) and (not state["_GlobalAccumulation"]):
         if state["AssertFree0ElementMultiple"] < 2:
           reject(state, printRejectionReason, "Assembly GSU half requires AF0EM>=2 (for atomics on edge tiles)")
 
@@ -2685,7 +2685,7 @@ class Solution(collections.abc.Mapping):
         if not math.log(state["MacroTile0"],2).is_integer() or \
             ldsSize > depthUConfig.maxLDS or \
             state["SourceSwap"] or \
-            (state["GlobalSplitU"] > 1) and (state["_GlobalAccumulation"] != 'MultipleBuffer') or \
+            (state["GlobalSplitU"] > 1 or state["GlobalSplitU"] == -1) and (state["_GlobalAccumulation"] != 'MultipleBuffer') or \
             state["MatrixInstBN"] > 1 and state["MatrixInstN"] == 4 :
           state["StoreRemapVectorWidth"] = 0
         else:
@@ -2770,8 +2770,8 @@ class Solution(collections.abc.Mapping):
       if not state["EnableMatrixInstruction"]:
         reject(state, printRejectionReason, "storeRemap only support MatrixInstruction kernel")
         return
-      if ((state["GlobalSplitU"] > 1) and (state["_GlobalAccumulation"] != 'MultipleBuffer' or state["_GlobalAccumulation"] == 'MultipleBufferSingleKernel')) or \
-        (state["GlobalSplitU"] == 1 and state["_GlobalAccumulation"] == 'SingleBuffer'):
+      if ((state["GlobalSplitU"] > 1 or state["GlobalSplitU"] == -1) and (state["_GlobalAccumulation"] != 'MultipleBuffer' or state["_GlobalAccumulation"] == 'MultipleBufferSingleKernel')) or \
+        ((state["GlobalSplitU"] == 1 or state["GlobalSplitU"] == -1) and state["_GlobalAccumulation"] == 'SingleBuffer'):
         reject(state, printRejectionReason, "storeRemap doesn't support GlobalSplitU yet, except GSU algorithm 2")
         return
       if packedC0 or packedC1:
@@ -3149,13 +3149,13 @@ class Solution(collections.abc.Mapping):
 
     # Set E
     if state["ProblemType"]["UseE"]:
-      if (state["_GlobalAccumulation"] == 'SingleBuffer') and state["GlobalSplitU"] > 1:
+      if (state["_GlobalAccumulation"] == 'SingleBuffer') and (state["GlobalSplitU"] > 1 or state["GlobalSplitU"] == -1):
         reject(state, printRejectionReason, "GlobalSplitU > 1 only compatible with MultipleBuffer")
       if len(state["PackedC1IndicesX"]) > 1:
         reject(state, printRejectionReason, "Use E does not support len(PackedC1IndicesX) > 1.")
       if not state["BufferStore"]:
         reject(state, printRejectionReason, "Use E only supports BufferStore due to no suppress no store.")
-      if state["StoreRemapVectorWidth"] and (state["GlobalSplitU"] == 1):
+      if state["StoreRemapVectorWidth"] and (state["GlobalSplitU"] == 1 or state["GlobalSplitU"] == -1):
         reject(state, printRejectionReason, "Use E does not support StoreRemapVectorWidth if GSU == 1.")
       if state["GroupLoadStore"]:
         reject(state, printRejectionReason, "Use E does not support GroupLoadStore.")
@@ -3171,13 +3171,13 @@ class Solution(collections.abc.Mapping):
 
     # Bias reduction
     if state["ProblemType"]["UseBias"] and state["ProblemType"]["Gradient"]:
-      if (state["_GlobalAccumulation"] == 'SingleBuffer') and state["GlobalSplitU"] > 1:
+      if (state["_GlobalAccumulation"] == 'SingleBuffer') and (state["GlobalSplitU"] > 1 or state["GlobalSplitU"] == -1):
         reject(state, printRejectionReason, "GlobalSplitU > 1 only compatible with MultipleBuffer for bias reduction")
       if len(state["PackedC1IndicesX"]) > 1:
         reject(state, printRejectionReason, "Bias reduction does not support len(PackedC1IndicesX) > 1.")
       if not state["BufferStore"]:
         reject(state, printRejectionReason, "Bias reduction only supports BufferStore due to no suppress no store.")
-      if state["StoreRemapVectorWidth"] and (state["GlobalSplitU"] == 1):
+      if state["StoreRemapVectorWidth"] and (state["GlobalSplitU"] == 1 or state["GlobalSplitU"] == -1):
         reject(state, printRejectionReason, "Bias reduction does not support StoreRemapVectorWidth if GSU == 1.")
       if state["GroupLoadStore"]:
         reject(state, printRejectionReason, "Bias reduction does not support GroupLoadStore.")
@@ -3198,7 +3198,7 @@ class Solution(collections.abc.Mapping):
       # TODO: support ONLL if necessary
       state["OptNoLoadLoop"] = 0
 
-    # if state["GlobalSplitU"] > 1:
+    # if state["GlobalSplitU"] > 1 or state["GlobalSplitU"] == -1:
     #   if state["ProblemType"]["SupportUserArgs"] and state["_GlobalAccumulation"] != 'MultipleBufferSingleKernel':
     #     reject(state, printRejectionReason, "Currently SupportUserArgs does not support GSU > 1.")
 

@@ -200,7 +200,7 @@ class ComputeStoreVgprsMFMA(ComputeStoreVgprs):
             strideD1 = "StrideD%s" % (writer.states.indexChars[packedC1[0]])
             module.add(VMulLOU32(dst=vgpr(writer.vgprs.cinRowPtr), src0=vgpr(lsuTid1), src1=sgpr(strideC1), comment=" offset 1"))
             module.add(VMulLOU32(dst=vgpr(writer.vgprs.coutRowPtrD), src0=vgpr(lsuTid1), src1=sgpr(strideD1), comment=" offset 1"))
-            if kernel["ProblemType"]["UseE"] and (kernel["GlobalSplitU"] == 1):
+            if kernel["ProblemType"]["UseE"] and (kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1):
                 module.add(VMovB32(dst=vgpr(writer.vgprs.coutRowPtrE), src=vgpr(lsuTid1), comment=" save offset 1 for E"))
             if writer.vgprs.coutRowPtrBias != -1:
                 index = packedC1[0] - 1
@@ -323,7 +323,7 @@ class ComputeStoreVgprsMFMASwap(ComputeStoreVgprs):
             strideD1 = "StrideD%s" % (writer.states.indexChars[packedC1[0]])
             module.add(VMulLOU32(dst=vgpr(writer.vgprs.cinRowPtr), src0=vgpr(lsuTid1), src1=sgpr(strideC1), comment=" offset 1"))
             module.add(VMulLOU32(dst=vgpr(writer.vgprs.coutRowPtrD), src0=vgpr(lsuTid1), src1=sgpr(strideD1), comment=" offset 1"))
-            if kernel["ProblemType"]["UseE"] and (kernel["GlobalSplitU"] == 1):
+            if kernel["ProblemType"]["UseE"] and (kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1):
                 module.add(VMovB32(dst=vgpr(writer.vgprs.coutRowPtrE), src=vgpr(lsuTid1), comment=" save offset 1 for E"))
             if writer.vgprs.coutRowPtrBias != -1:
                 index = packedC1[0] - 1

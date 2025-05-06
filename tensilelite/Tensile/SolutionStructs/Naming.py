@@ -36,8 +36,8 @@ def getKeyNoInternalArgs(state, splitGSU: bool):
   state_copy = deepcopy(state)
   state_copy["ProblemType"]["GroupedGemm"] = False
   if splitGSU:
-    state_copy["GlobalSplitU"] = "M" if (state_copy["GlobalSplitU"] > 1) else state_copy["GlobalSplitU"]
-  elif state["GlobalSplitU"] > 0:
+    state_copy["GlobalSplitU"] = "M" if (state_copy["GlobalSplitU"] > 1 or state_copy["GlobalSplitU"] == -1) else state_copy["GlobalSplitU"]
+  elif state["GlobalSplitU"] != 0:
     state_copy["GlobalSplitU"] = "M"
   state_copy["WorkGroupMapping"] = "M"
   state_copy["WorkGroupMappingXCC"] = "M"
@@ -105,13 +105,13 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
   if ignoreInternalArgs:
     state["ProblemType"]["GroupedGemm"] = False
     if splitGSU:
-      state["GlobalSplitU"] = "M" if (state["GlobalSplitU"] > 1) else state["GlobalSplitU"]
+      state["GlobalSplitU"] = "M" if (state["GlobalSplitU"] > 1 or state["GlobalSplitU"] == -1) else state["GlobalSplitU"]
 
 
   requiredParametersTemp = set(requiredParameters.union(["GlobalSplitU"]))
 
   if ignoreInternalArgs:
-    if state["GlobalSplitU"] > 0:
+    if state["GlobalSplitU"] > 0 or state["GlobalSplitU"] == -1:
       requiredParametersTemp.discard("GlobalSplitU")
   else:
     requiredParametersTemp = requiredParametersTemp.union(["WorkGroupMapping",

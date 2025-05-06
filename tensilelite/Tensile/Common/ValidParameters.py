@@ -255,7 +255,8 @@ validParameters = { # we need to make sure this matches develop
     # Split the unroll summation into multiple sections and combine the sections
     # GSU applies only to the unroll summation dimension
     # Set to 0 to disable GSU, kernel code will be generated without GSU support
-    "GlobalSplitU": list(range(0, 1024 + 1)),
+    # Set to -1 to choose GSU automatically in runtime, determined by function calculateAutoGSU
+    "GlobalSplitU": list(range(-1, 1024 + 1)),
     # choose how to do GlobalSplitU
     # 1: use atomic operation to accumulate on one buffer
     # 2: each GSU group write to each own buffer and accumulate by another kernel

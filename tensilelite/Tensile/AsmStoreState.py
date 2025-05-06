@@ -222,7 +222,7 @@ class StoreState:
         if kernel["StreamK"] > 0 and isWorkspace:
             self.useBias = DataDirection.NONE
 
-        isSingleKernel = (kernel["GlobalSplitU"] == 1 or kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel") or (kernel["StreamK"] > 0 and not isWorkspace)
+        isSingleKernel = ((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel") or (kernel["StreamK"] > 0 and not isWorkspace)
         self.referenceVgprDim = [[], []]
         if self.useBias == DataDirection.READ:
             self.referenceVgprDim[self.factorDim].append("Bias")
@@ -248,7 +248,7 @@ class StoreState:
                 self.sharedColBiasVgprs = kernelWriter.vgprPool.checkOut(self.numAddrVgpr, "sharedColBiasVgprs for packed elements")
             else:
                 self.sharedColBiasVgprs = None
-            if kernel["ProblemType"]["UseE"] and (kernel["GlobalSplitU"] == 1):
+            if kernel["ProblemType"]["UseE"] and (kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1):
                 self.sharedColEVgprs = kernelWriter.vgprPool.checkOut(self.numAddrVgpr, "sharedColEVgprs for packed elements")
             else:
                 self.sharedColEVgprs = None
@@ -291,7 +291,7 @@ class StoreState:
                 self.sharedColBiasVgprs = kernelWriter.vgprPool.checkOut(1, "sharedColBiasVgprs for packed elements")
             else:
                 self.sharedColBiasVgprs = None
-            if kernel["ProblemType"]["UseE"] and (kernel["GlobalSplitU"] == 1):
+            if kernel["ProblemType"]["UseE"] and (kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1):
                 self.sharedColEVgprs = kernelWriter.vgprPool.checkOut(1, "sharedColEVgprs for packed elements")
             else:
                 self.sharedColEVgprs = None
@@ -346,7 +346,7 @@ class StoreState:
         # TODO STREAM-K Update numVgprsPerElement for workspace
         if kernel["GroupLoadStore"] and kernel["ProblemType"]["UseBeta"]:
             self.numVgprsPerElement += self.cfg.numVgprsPerAddr
-        if kernel["ProblemType"]["UseE"] and (kernel["GlobalSplitU"] == 1):
+        if kernel["ProblemType"]["UseE"] and (kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1):
             self.numVgprsPerElement += self.cfg.numVgprsPerAddr  # E address
             # Only needed in gradient activation
             if (kernel["ProblemType"]["Gradient"] and kernel["ProblemType"]["ActivationType"] != 'none'):
@@ -490,7 +490,7 @@ class StoreState:
         scaleAlphaVecVgprMap = {}
         lastData = 0
 
-        isSingleKernel = (kernel["GlobalSplitU"] == 1 or kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel") or (kernel["StreamK"] > 0 and not isWorkspace)
+        isSingleKernel = ((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel") or (kernel["StreamK"] > 0 and not isWorkspace)
 
         for elementIdx in range(0, len(batchElements)):
             # Create the AddrCalc for each memory load/store
@@ -599,7 +599,7 @@ class StoreState:
                 dataBias = 0
             self.elementDataBias.append(dataBias)
             # Only needed in gradient activation
-            if (kernel["ProblemType"]["Gradient"] and kernel["ProblemType"]["ActivationType"] != 'none' and kernel["ProblemType"]["UseE"]) and (kernel["GlobalSplitU"] == 1):
+            if (kernel["ProblemType"]["Gradient"] and kernel["ProblemType"]["ActivationType"] != 'none' and kernel["ProblemType"]["UseE"]) and (kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1):
                 numVgprs = int(ceil(kernel["ProblemType"]["ComputeDataType"].numRegisters()))
                 dataE = kw.vgprPool.checkOutAligned(int(numVgprs*self.cfg.gwvw), \
                               int(ceil(numVgprs*self.cfg.gwvw)), "e data for ei=%u"%elementIdx, preventOverflow=False)
@@ -675,13 +675,13 @@ class StoreState:
                     addrBiasVgpr = self.sharedColBiasVgprs+elementCol
                 else:
                     addrBiasVgpr = None
-                if kernel["ProblemType"]["UseE"] and (kernel["GlobalSplitU"] == 1):
+                if kernel["ProblemType"]["UseE"] and (kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1):
                     addrEVgpr = self.sharedColEVgprs+elementCol
                 else:
                     addrEVgpr = None
                 #print ("d0=", d0, "vc0=", vc0, "elementCol=", elementCol)
 
-                if kernel["ProblemType"]["UseScaleAlphaVec"] and (kernel["GlobalSplitU"] == 1 or (kernel["StreamK"] > 0 and not isWorkspace)):
+                if kernel["ProblemType"]["UseScaleAlphaVec"] and ((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or (kernel["StreamK"] > 0 and not isWorkspace)):
                     if self.referenceVgprDim[self.factorDim] and self.referenceVgprDim[self.factorDim][0] == "ScaleAlpha":
                         addrScaleAlphaVecVgpr = self.sharedColScaleAlphaVecVgprs+elementCol
                     else:
@@ -689,7 +689,7 @@ class StoreState:
                 else:
                     addrScaleAlphaVecVgpr = None
 
-                if (kernel["ProblemType"]["UseScaleAB"] == "Vector") and (kernel["GlobalSplitU"] == 1 or (kernel["StreamK"] > 0 and not isWorkspace)):
+                if (kernel["ProblemType"]["UseScaleAB"] == "Vector") and ((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or (kernel["StreamK"] > 0 and not isWorkspace)):
                     if self.referenceVgprDim[0] and self.referenceVgprDim[0][0] == "ScaleA":
                         addrScaleAVecVgpr = self.sharedColScaleAVecVgprs+elementCol
                     else:
@@ -721,7 +721,7 @@ class StoreState:
                 else:
                     addrBiasVgpr = None
 
-                if kernel["ProblemType"]["UseE"] and (kernel["GlobalSplitU"] == 1):
+                if kernel["ProblemType"]["UseE"] and (kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1):
                     addrEVgpr = kw.vgprPool.checkOutAligned(self.cfg.numVgprsPerAddr, \
                         int(ceil(self.cfg.numVgprsPerAddr)), "loadEBatch-addr for ei=%u"%(elementIdx), preventOverflow=not isOptNLL)
                 else:

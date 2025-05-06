@@ -99,7 +99,7 @@ def reductionKernelNames(solution):
 
 def betaOnlyKernelNames(solution):
   betaOnlyKernelNames = []
-  if solution["GlobalSplitU"] > 1 or (solution["StreamK"] > 0 and solution["StreamKAtomic"] == 1):
+  if (solution["GlobalSplitU"] > 1 or solution["GlobalSplitU"] == -1) or (solution["StreamK"] > 0 and solution["StreamKAtomic"] == 1):
     if solution["ProblemType"]["UseBias"]:
       for btype in solution["ProblemType"]["BiasDataTypeList"]:
         betaOnlyKernelNames.append(KernelWriterBetaOnly.kernelName(solution, btype))
@@ -139,7 +139,7 @@ def initHelperKernelObjects(solution, kernelHelperType, cxxCompiler, isaInfoMap)
 
 def initBetaOnlyKernelObjects(solution):
   betaOnlyKernelObjects = []
-  if solution["GlobalSplitU"] > 1 or (solution["StreamK"] > 0 and solution["StreamKAtomic"] == 1):
+  if (solution["GlobalSplitU"] > 1 or solution["GlobalSplitU"] == -1) or (solution["StreamK"] > 0 and solution["StreamKAtomic"] == 1):
     if solution["ProblemType"]["UseBias"]:
       for btype in solution["ProblemType"]["BiasDataTypeList"]:
         state = {}

@@ -119,13 +119,13 @@ namespace TensileLite
         size_t             gwvwC = 1;
         size_t             gwvwD = 1;
 
-        size_t staggerU           = 0;
-        size_t staggerUMapping    = 0;
-        size_t depthU             = 0;
-        size_t globalSplitUPGR    = 0;
-        size_t globalSplitU       = 0;
-        size_t staggerStrideShift = 0;
-        int    workGroupMapping   = 0;
+        size_t  staggerU           = 0;
+        size_t  staggerUMapping    = 0;
+        size_t  depthU             = 0;
+        size_t  globalSplitUPGR    = 0;
+        int16_t globalSplitU       = 0;
+        size_t  staggerStrideShift = 0;
+        int     workGroupMapping   = 0;
 
         size_t packBatchDims              = 0;
         int    packSummationDims          = 0;
@@ -564,6 +564,10 @@ namespace TensileLite
         uint32_t magicNumberAlg2(uint32_t x, uint32_t* magicShift) const;
         uint32_t magicNumber(int magicDivAlg, uint32_t x, uint32_t* magicShift) const;
         uint32_t smallMagicNumber(uint32_t x) const;
+
+        inline void calculateAutoGSU(Problem const&  problem,
+                                     Hardware const* hardware) const;
+        mutable uint32_t autoGSU = 0;
     };
 
     template <typename TAct>

@@ -215,7 +215,7 @@ class GSUOn(GSU):
 
     @classmethod
     def matches(cls, writer, debug=False):
-        return writer.states.kernel["GlobalSplitU"] > 0
+        return writer.states.kernel["GlobalSplitU"] > 0 or writer.states.kernel["GlobalSplitU"] == -1
 
     def __call__(self):
         assert(0)
@@ -1208,7 +1208,7 @@ class GSUOn(GSU):
     def writeBiasToGlobal(self, writer, kernel, biasDataType, tP, tmpSgprRes, biasBpe):
         module = Module("GSU On writeBiasToGlobal")
 
-        if kernel["GlobalSplitU"] > 1 and not (kernel["GlobalSplitUAlgorithm"] == "SingleBuffer" and kernel["ProblemType"]["ComputeDataType"] == biasDataType):
+        if (kernel["GlobalSplitU"] > 1 or kernel["GlobalSplitU"] == -1) and not (kernel["GlobalSplitUAlgorithm"] == "SingleBuffer" and kernel["ProblemType"]["ComputeDataType"] == biasDataType):
             '''
             We use num_records to save the bias data, so we have to shift the global pointer.
             final offset = d_size * gsu + sizeI/J * gsuIdx
