@@ -2,140 +2,120 @@
   "repositories": [
     {
       "name": "miopen",
-      "reponame": "MIOpen",
       "url": "ROCm/MIOpen",
       "branch": "develop",
       "category": "projects"
     },
     {
       "name": "tensile",
-      "reponame": "Tensile",
       "url": "ROCm/Tensile",
       "branch": "develop",
       "category": "shared"
     },
     {
       "name": "composablekernel",
-      "reponame": "composable_kernel",
       "url": "ROCm/composable_kernel",
       "branch": "develop",
       "category": "projects"
     },
     {
       "name": "hipblas",
-      "reponame": "hipBLAS",
       "url": "ROCm/hipBLAS",
       "branch": "develop",
       "category": "projects"
     },
     {
       "name": "hipblas-common",
-      "reponame": "hipBLAS-common",
       "url": "ROCm/hipBLAS-common",
       "branch": "develop",
       "category": "projects"
     },
     {
       "name": "hipblaslt",
-      "reponame": "hipBLASLt",
       "url": "ROCm/hipBLASLt",
       "branch": "develop",
       "category": "projects"
     },
     {
       "name": "hipcub",
-      "reponame": "hipCUB",
       "url": "ROCm/hipCUB",
       "branch": "develop",
       "category": "projects"
     },
     {
       "name": "hipfft",
-      "reponame": "hipFFT",
       "url": "ROCm/hipFFT",
       "branch": "develop",
       "category": "projects"
     },
     {
       "name": "hiprand",
-      "reponame": "hipRAND",
       "url": "ROCm/hipRAND",
       "branch": "develop",
       "category": "projects"
     },
     {
       "name": "hipsolver",
-      "reponame": "hipSOLVER",
       "url": "ROCm/hipSOLVER",
       "branch": "develop",
       "category": "projects"
     },
     {
       "name": "hipsparse",
-      "reponame": "hipSPARSE",
       "url": "ROCm/hipSPARSE",
       "branch": "develop",
       "category": "projects"
     },
     {
       "name": "hipsparselt",
-      "reponame": "hipSPARSELt",
       "url": "ROCm/hipSPARSELt",
       "branch": "develop",
       "category": "projects"
     },
     {
       "name": "rocblas",
-      "reponame": "rocBLAS",
       "url": "ROCm/rocBLAS",
       "branch": "develop",
       "category": "projects"
     },
     {
       "name": "rocfft",
-      "reponame": "rocFFT",
       "url": "ROCm/rocFFT",
       "branch": "develop",
       "category": "projects"
     },
     {
       "name": "rocprim",
-      "reponame": "rocPRIM",
       "url": "ROCm/rocPRIM",
       "branch": "develop",
       "category": "projects"
     },
     {
       "name": "rocrand",
-      "reponame": "rocRAND",
       "url": "ROCm/rocRAND",
       "branch": "develop",
       "category": "projects"
     },
     {
       "name": "rocroller",
-      "reponame": "rocRoller",
       "url": "ROCm/rocRoller",
       "branch": "main",
       "category": "shared"
     },
     {
       "name": "rocsolver",
-      "reponame": "rocSOLVER",
       "url": "ROCm/rocSOLVER",
       "branch": "develop",
       "category": "projects"
     },
     {
       "name": "rocsparse",
-      "reponame": "rocSPARSE",
       "url": "ROCm/rocSPARSE",
       "branch": "develop",
       "category": "projects"
     },
     {
       "name": "rocthrust",
-      "reponame": "rocThrust",
       "url": "ROCm/rocThrust",
       "branch": "develop",
       "category": "projects"

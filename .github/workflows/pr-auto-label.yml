@@ -33,7 +33,7 @@ jobs:
       - name: Install python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install requests
+          pip install pydantic
 
       - name: Compute Labels for PR
         id: compute_labels

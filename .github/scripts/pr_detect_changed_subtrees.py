@@ -41,6 +41,7 @@ import logging
 from pathlib import Path
 from typing import List, Set
 from github_cli_client import GitHubCLIClient
+from repo_config_model import RepoEntry, RepoConfig
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -55,18 +56,20 @@ def parse_arguments(argv=None) -> argparse.Namespace:
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
     return parser.parse_args(argv)
 
-def load_repo_config(config_path: str) -> List[dict]:
-    """Load repository config from JSON."""
+def load_repo_config(config_path: str) -> List[RepoEntry]:
+    """Load and validate repository config from JSON using Pydantic."""
     try:
         with open(config_path, "r", encoding="utf-8") as f:
-            return json.load(f)["repositories"]
+            data = json.load(f)
+        config = RepoConfig(**data)
+        return config.repositories
     except Exception as e:
-        logger.error(f"Failed to load config file '{config_path}': {e}")
+        logger.error(f"Failed to load or validate config file '{config_path}': {e}")
         sys.exit(1)
 
-def get_valid_prefixes(config: List[dict]) -> Set[str]:
+def get_valid_prefixes(config: List[RepoEntry]) -> Set[str]:
     """Extract valid subtree prefixes from the configuration."""
-    valid_prefixes = {f"{entry['category']}/{entry['name']}" for entry in config}
+    valid_prefixes = {f"{entry.category}/{entry.name}" for entry in config}
     logger.debug("Valid subtrees:\n" + "\n".join(sorted(valid_prefixes)))
     return valid_prefixes
 

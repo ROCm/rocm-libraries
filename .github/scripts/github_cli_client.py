@@ -39,14 +39,18 @@ class GitHubCLIClient:
         except subprocess.CalledProcessError:
             return False
 
-    def _run_gh_command(self, args: List[str]) -> subprocess.CompletedProcess:
+    def _run_gh_command(self, args: List[str], dry_run: Optional[bool] = False) -> subprocess.CompletedProcess:
         """Run a `gh` CLI command and return the result."""
         cmd = ["gh"] + args
         logger.debug(f"Running command: {' '.join(cmd)}")
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        if result.returncode != 0:
-            logger.error(f"Command failed: {' '.join(cmd)}\n{result.stderr.strip()}")
-            raise subprocess.CalledProcessError(result.returncode, cmd, result.stdout, result.stderr)
+        # dry_run option only matters for operations that write to GitHub
+        if dry_run:
+            result = subprocess.CompletedProcess(cmd, 0, stdout="Dry run enabled. No changes made.", stderr="")
+        else:
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            if result.returncode != 0:
+                logger.error(f"Command failed: {' '.join(cmd)}\n{result.stderr.strip()}")
+                raise subprocess.CalledProcessError(result.returncode, cmd, result.stdout, result.stderr)
         return result
 
     def get_changed_files(self, repo: str, pr: int) -> List[str]:
@@ -78,7 +82,7 @@ class GitHubCLIClient:
         except subprocess.CalledProcessError:
             return None  # PR does not exist
 
-    def pr_create(self, repo: str, base: str, head: str, title: str, body: str, label: Optional[str] = None) -> None:
+    def pr_create(self, repo: str, base: str, head: str, title: str, body: str, dry_run: Optional[bool] = False) -> None:
         """Create a new pull request."""
         cmd = [
             "pr", "create",
@@ -88,18 +92,17 @@ class GitHubCLIClient:
             "--title", title,
             "--body", body
         ]
-        if label:
-            cmd += ["--label", label]
-        self._run_gh_command(cmd)
+        self._run_gh_command(cmd, dry_run=dry_run)
         logger.info(f"Created PR from {head} to {base} in {repo}.")
 
-    def pr_edit(self, repo: str, head: str, title: str, body: str) -> None:
+    def pr_edit(self, repo: str, head: str, title: str, body: str, dry_run: Optional[bool] = False) -> None:
         """Edit an existing pull request (title/body)."""
-        self._run_gh_command([
+        cmd = [
             "pr", "edit",
             "--repo", repo,
             "--head", head,
             "--title", title,
             "--body", body
-        ])
+        ]
+        self._run_gh_command(cmd, dry_run=dry_run)
         logger.info(f"Edited PR for head '{head}' in {repo}.")
