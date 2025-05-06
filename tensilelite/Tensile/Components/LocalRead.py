@@ -92,12 +92,16 @@ class LocalReadVALU(LocalRead):
                     #     tP["bpe"], \
                     #     paramList[-1]))
                 # paramTuple = tuple(paramList)
+                num = paramList[0] //65536
+                paramList[0] = paramList[0] - num * 65536
+                srcVgpr=vgpr("LocalReadAddr%s+%d"%(tc,num))
+
                 if numOffsets == 1:
                     ds = DSModifiers(na=1, offset=paramList[0])
                 if numOffsets == 2:
                     ds = DSModifiers(na=2, offset0=paramList[0], offset1=paramList[1])
                 LocalReadX = instruction.getInst()
-                localReadCode.add(LocalReadX(dst=destVgpr, src=vgpr("LocalReadAddr%s"%tc), ds=ds))
+                localReadCode.add(LocalReadX(dst=destVgpr, src=srcVgpr, ds=ds))
                 valuIdx += blockWidth
 
                 # TODO - handle vector-load
