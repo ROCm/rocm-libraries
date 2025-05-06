@@ -20,6 +20,7 @@
  * THE SOFTWARE.
  *
  * ************************************************************************ */
+#include "functions/argument.hpp"
 #include "functions/f_math.hpp"
 #include "instruction/common.hpp"
 #include "instruction/mem.hpp"
@@ -69,6 +70,7 @@ namespace rocisa
 void math_func(nb::module_ m);
 void branch_func(nb::module_ m);
 void cast_func(nb::module_ m);
+void argument_func(nb::module_ m);
 
 void init_func(nb::module_ m)
 {
@@ -84,4 +86,5 @@ void init_func(nb::module_ m)
     math_func(m_func);
     branch_func(m_func);
     cast_func(m_func);
+    argument_func(m_func);
 }
