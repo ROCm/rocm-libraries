@@ -20,7 +20,7 @@
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ################################################################################
 
-from rocisa import base, code
+from rocisa import code
 from rocisa.container import sgpr
 from rocisa.instruction import SMovB32
 from copy import deepcopy

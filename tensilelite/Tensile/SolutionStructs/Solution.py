@@ -38,9 +38,7 @@ from Tensile.Common import assignParameterWithDefault, IsaInfo, \
                     DepthUConfig, roundUpToNearestMultiple
 from Tensile.Common.DataType import DataType
 from Tensile.Common.GlobalParameters import defaultSolution, \
-                                            defaultInternalSupportParams, \
-                                            internalParameters
-from Tensile.CustomKernels import isCustomKernelConfig
+                                            defaultInternalSupportParams
 from Tensile.SolutionStructs.Naming import getSolutionNameFull
 from Tensile.SolutionStructs.Problem import ProblemType
 from Tensile.Toolchain.Component import Assembler

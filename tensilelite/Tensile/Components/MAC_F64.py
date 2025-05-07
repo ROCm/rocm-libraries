@@ -27,7 +27,7 @@ from rocisa.container import vgpr
 from rocisa.enum import DataTypeEnum
 from rocisa.instruction import VFmaF64, SSetPrior
 from ..Common.DataType import DataType
-from ..Component import Component, MAC
+from ..Component import MAC
 
 class FMA_F64_Plain(MAC):
     """

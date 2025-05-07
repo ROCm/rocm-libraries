@@ -35,7 +35,6 @@ import yaml
 import json
 from contextlib import contextmanager
 import os.path
-import sys
 
 from Tensile.Common.Utilities import _global_ti
 from Tensile.Common.Architectures import detectGlobalCurrentISA, isaToGfx, gfxToIsa

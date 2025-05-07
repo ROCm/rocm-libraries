@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2022-2023 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -76,7 +76,6 @@ class LraTileProperties:
     """
     Lra tile assignment properties.
     """
-    pass
 
 def PartialMatch(pattern, obj, debug=False, level=0):
     indent = "    " * level
@@ -196,7 +195,6 @@ class Component(metaclass=ComponentMeta):
         """
         Concrete subclasses must implement __call__.
         """
-        pass
 
     def commentHeader(self):
         """
@@ -208,19 +206,16 @@ class MAC(Component):
     """
     Multiply-accumulate block.
     """
-    pass
 
 class Signature(Component):
     """
     Function signature block.
     """
-    pass
 
 class LocalRead(Component):
     """
     Local read block.
     """
-    pass
 
 class SumUnroll(Component):
     """
@@ -242,31 +237,26 @@ class ShiftVectorComponents(Component):
     """
     Shift vector components block.
     """
-    pass
 
 class ComputeStoreVgprs(Component):
     """
     Compute store vgprs block.
     """
-    pass
 
 class NotLocalFullTileElements(Component):
     """
     Not local full tile elements block.
     """
-    pass
 
 class LraTileAssignment(Component):
     """
     Lra tile assignment block.
     """
-    pass
 
 class PackData(Component):
     """
     Pack data block.
     """
-    pass
 
 class SIA(Component):
     """

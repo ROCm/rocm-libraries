@@ -25,7 +25,6 @@ from subprocess import run, PIPE
 from typing import List, Optional
 
 from .Types import IsaVersion
-from .Utilities import locateExe
 
 import rocisa
 
@@ -87,7 +86,7 @@ SUPPORTED_ISA = [
     IsaVersion(11, 0, 0),
     IsaVersion(11, 0, 1),
     IsaVersion(11, 0, 2),
-    IsaVersion(11, 0, 3), 
+    IsaVersion(11, 0, 3),
     IsaVersion(11, 5, 0),
     IsaVersion(11, 5, 1),
     IsaVersion(12, 0, 0),

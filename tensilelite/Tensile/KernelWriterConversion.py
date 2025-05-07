@@ -24,7 +24,6 @@
 
 from typing import Dict
 from copy import deepcopy
-from typing import List
 
 from .KernelWriterBase import KernelWriterBase
 

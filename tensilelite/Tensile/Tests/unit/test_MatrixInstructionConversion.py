@@ -22,7 +22,6 @@
 #
 # SPDX-License-Identifier: MIT
 ################################################################################
-import pytest
 import yaml
 from pprint import pformat
 

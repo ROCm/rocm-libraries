@@ -23,10 +23,8 @@
 ################################################################################
 from copy import deepcopy
 from functools import lru_cache
-from typing import List
 
 from Tensile.Common.Constants import MAX_FILENAME_LENGTH
-from Tensile.Common.ValidParameters import validParameters
 from Tensile.Common.RequiredParameters import getRequiredParametersMin, getRequiredParametersFull
 
 from .Problem import ProblemType

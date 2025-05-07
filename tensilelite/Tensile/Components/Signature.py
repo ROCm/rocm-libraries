@@ -28,7 +28,6 @@ from ..Component import Signature
 from ..Common import DataDirection
 from ..Activation import ActivationType
 
-from math import ceil
 from dataclasses import dataclass, field
 
 @dataclass

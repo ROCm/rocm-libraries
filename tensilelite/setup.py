@@ -29,8 +29,6 @@
 # - installs TensileConfig.cmake so one call find_package(Tensile)
 ################################################################################
 from setuptools import setup
-import os.path
-import re
 
 def readRequirementsFromTxt():
   requirements = []

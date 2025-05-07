@@ -22,13 +22,11 @@
 #
 ################################################################################
 
-import itertools
 from typing import Dict
 
 from . import Properties
 from . import Hardware
 from . import Contractions
-from .SolutionStructs import Solution as OriginalSolution
 from Tensile.Common import state, IsaInfo, DepthUConfig
 from Tensile.Common.Architectures import gfxToIsa
 from Tensile.SolutionStructs.Naming import getSolutionNameMin, getKernelNameMin
