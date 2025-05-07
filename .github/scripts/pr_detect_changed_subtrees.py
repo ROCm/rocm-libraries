@@ -38,7 +38,6 @@ from github_cli_client import GitHubCLIClient
 from repo_config_model import RepoEntry
 from config_loader import load_repo_config
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 def parse_arguments(argv: Optional[List[str]] = None) -> argparse.Namespace:
@@ -86,8 +85,9 @@ def output_subtrees(matched_subtrees: List[str], dry_run: bool) -> None:
 def main(argv=None) -> None:
     """Main function to determine changed subtrees in PR."""
     args = parse_arguments(argv)
-    if args.debug:
-        logger.setLevel(logging.DEBUG)
+    logging.basicConfig(
+        level=logging.DEBUG if args.debug else logging.INFO
+    )
     client = GitHubCLIClient()
     config = load_repo_config(args.config)
     changed_files = [file for file in client.get_changed_files(args.repo, int(args.pr))]

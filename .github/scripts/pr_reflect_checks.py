@@ -29,7 +29,6 @@ from github_api_client import GitHubAPIClient
 from repo_config_model import RepoEntry
 from config_loader import load_repo_config
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 def parse_arguments(argv: Optional[List[str]] = None) -> argparse.Namespace:
@@ -65,9 +64,9 @@ def reflect_checks(client: GitHubAPIClient, monorepo: str, pr_number: int, confi
 def main(argv: Optional[List[str]] = None) -> None:
     """Main function to execute the PR checks reflection logic."""
     args = parse_arguments(argv)
-    if args.debug:
-        logger.setLevel(logging.DEBUG)
-
+    logging.basicConfig(
+        level=logging.DEBUG if args.debug else logging.INFO
+    )
     client = GitHubAPIClient()
     config = load_repo_config(args.config)
     reflect_checks(client, args.repo, int(args.pr), config, args.dry_run)

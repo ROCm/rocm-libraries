@@ -35,7 +35,6 @@ from pathlib import Path
 from typing import List, Optional
 from github_cli_client import GitHubCLIClient
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 def parse_arguments(argv: Optional[List[str]] = None) -> argparse.Namespace:
@@ -87,8 +86,9 @@ def output_labels(existing_labels: List[str], desired_labels: List[str], dry_run
 def main(argv=None) -> None:
     """Main function to execute the PR auto label logic."""
     args = parse_arguments(argv)
-    if args.debug:
-        logger.setLevel(logging.DEBUG)
+    logging.basicConfig(
+        level=logging.DEBUG if args.debug else logging.INFO
+    )
     client = GitHubCLIClient()
     changed_files = [file for file in client.get_changed_files(args.repo, int(args.pr))]
     existing_labels = client.get_existing_labels_on_pr(args.repo, int(args.pr))
