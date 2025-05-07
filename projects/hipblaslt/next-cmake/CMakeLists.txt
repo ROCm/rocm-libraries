@@ -82,7 +82,7 @@ set(ROCBLASLT_LIB_DIR "${HIPBLASLT_LIB_DIR}/src/amd_detail/rocblaslt")
 
 find_package(hip REQUIRED)
 if(HIPBLASLT_ENABLE_HOST)
-    if(NOT TARGET hip::hipblas-common)
+    if(NOT TARGET roc::hipblas-common)
         find_package(hipblas-common REQUIRED)
     endif()
     if(HIPBLASLT_ENABLE_BLIS)
