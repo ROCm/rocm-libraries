@@ -453,7 +453,9 @@ _defaultProblemType = {
     "SetConstStrideBias": [],
     # Summation dimension indices
     "MirrorDimsA": [],
+    "MirrorDimsMXSA": [],
     "MirrorDimsB": [],
+    "MirrorDimsMXSB": [],
     "MirrorDimsMetadata": [],
     # for LD description
     "NumIndicesLD": 4,
@@ -894,6 +896,11 @@ class ProblemType(Mapping):
     for i in range(1, len(self["IndexAssignmentsLD"])):
       self["IndexAssignmentsLD"][i] = self["IndexAssignmentsLD"][i-1] + 1
 
+    if self["MXBlockA"]:
+      self["IndexAssignmentsMXSA"] = deepcopy(self["IndexAssignmentsA"])
+    if self["MXBlockB"]:
+      self["IndexAssignmentsMXSB"] = deepcopy(self["IndexAssignmentsB"])
+
   ########################################
   def isGEMM(self):
     return self.operationType == 0
@@ -959,10 +966,20 @@ class ProblemType(Mapping):
       if state["IndexAssignmentsA"][i] == state["IndexUnroll"]:
         state["IndexUnrollA"] = i
         break
+    if state["MXBlockA"]:
+      for i in range(0, len(state["IndexAssignmentsMXSA"])):
+        if state["IndexAssignmentsMXSA"][i] == state["IndexUnroll"]:
+          state["IndexUnrollMXSA"] = i
+          break
     for i in range(0, len(state["IndexAssignmentsB"])):
       if state["IndexAssignmentsB"][i] == state["IndexUnroll"]:
         state["IndexUnrollB"] = i
         break
+    if state["MXBlockB"]:
+      for i in range(0, len(state["IndexAssignmentsMXSB"])):
+        if state["IndexAssignmentsMXSB"][i] == state["IndexUnroll"]:
+          state["IndexUnrollMXSB"] = i
+          break
     for i in range(0, len(state["IndexAssignmentsMetadata"])):
       if state["IndexAssignmentsMetadata"][i] == state["IndexUnroll"]:
         state["IndexUnrollM"] = i
@@ -976,7 +993,11 @@ class ProblemType(Mapping):
     else:
       dimList = state["IndicesFree"]
     state["Index01A"] = [i for i in state["IndexAssignmentsA"] if i in dimList][0]
+    if state["MXBlockA"]:
+      state["Index01MXSA"] = [i for i in state["IndexAssignmentsMXSA"] if i in dimList][0]
     state["Index01B"] = [i for i in state["IndexAssignmentsB"] if i in dimList][0]
+    if state["MXBlockB"]:
+      state["Index01MXSB"] = [i for i in state["IndexAssignmentsMXSB"] if i in dimList][0]
     #print2("Index01A: %u" % state["Index01A"])
     #print2("Index01B: %u" % state["Index01B"])
     # Store code is optimized for 0 as the fastest-moving in memory
@@ -1002,7 +1023,11 @@ class ProblemType(Mapping):
     unrollIdxA = state["IndexAssignmentsA"].index(state["IndexUnroll"])
     unrollIdxB = state["IndexAssignmentsB"].index(state["IndexUnroll"])
     state["TLUA"] = strideIdxA < unrollIdxA
+    if state["MXBlockA"]:
+      state["TLUMXSA"] = state["TLUA"]
     state["TLUB"] = strideIdxB < unrollIdxB
+    if state["MXBlockB"]:
+      state["TLUMXSB"] = state["TLUB"]
     #state["TLUB"] = True # hack
 
     if printIndexAssignmentInfo:

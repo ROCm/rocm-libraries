@@ -1598,7 +1598,9 @@ class Solution(collections.abc.Mapping):
     # TODO- Is it possible for devices with asmCaps["HasLDSTr"], we automatically use it when UnrollMajorLDS=0
     #       Supporting manually transpose load when having "HasLDSTr" is not worthy.
     state["enableLDSTrA"] = isLDSTrEnabled(isaInfoMap[isa].asmCaps, state["LDSTrInst"], state["UnrollMajorLDSA"], state["DirectToVgprA"], numBytes)
+    state["enableLDSTrMXSA"] = False
     state["enableLDSTrB"] = isLDSTrEnabled(isaInfoMap[isa].asmCaps, state["LDSTrInst"], state["UnrollMajorLDSB"], state["DirectToVgprB"], numBytes)
+    state["enableLDSTrMXSB"] = False
 
     # This reject kernels in 950 logic yaml, temporarily comment it out.
     # finalLDSTrInst = state["enableLDSTrA"] or state["enableLDSTrB"]
@@ -1751,6 +1753,41 @@ class Solution(collections.abc.Mapping):
       # not supported with multiple summations, bug is maybe something with
       # how stagger iteration is wrapped when unroll loop exits
       state["StaggerU"] = 0
+
+    if state["ProblemType"]["MXBlockA"]:
+      state["DirectToVgprMXSA"] = state["DirectToVgprA"]
+      if not state["DirectToVgprA"]:
+        state["ThreadTileMXSA"] = state["ThreadTileA"]
+        state["SubGroupMXSA"] = state["SubGroupA"]
+        state["MacroTileMXSA"] = state["MacroTileA"]
+        state["WaveSeparateGlobalReadMXSA"] = state["WaveSeparateGlobalReadA"]
+        state["NumLoadsCoalescedMXSA"] = state["NumLoadsCoalescedA"]
+        Solution.checkAndAssignWaveSeparateGlobalRead(state, 'MXSA', printRejectionReason)
+        state["DirectToLdsMXSA"] = False
+        state["LocalWriteUseSgprMXSA"] = False
+        state["ProblemType"]["MirrorDimsMXSA"] = list(state["ProblemType"]["MirrorDimsA"])
+        state["VectorWidthMXSA"] = state["VectorWidthA"]
+        state["MIWaveTileMXSA"] = state["MIWaveTileA"]
+        state["UnrollMajorLDSMXSA"] = state["UnrollMajorLDSA"]
+
+    if state["ProblemType"]["MXBlockB"]:
+      state["DirectToVgprMXSB"] = state["DirectToVgprB"]
+      if not state["DirectToVgprB"]:
+        state["ThreadTileMXSB"] = state["ThreadTileB"]
+        state["SubGroupMXSB"] = state["SubGroupB"]
+        state["MacroTileMXSB"] = state["MacroTileB"]
+        state["WaveSeparateGlobalReadMXSB"] = state["WaveSeparateGlobalReadB"]
+        state["NumLoadsCoalescedMXSB"] = state["NumLoadsCoalescedB"]
+        Solution.checkAndAssignWaveSeparateGlobalRead(state, 'MXSB', printRejectionReason)
+        state["DirectToLdsMXSB"] = False
+        state["LocalWriteUseSgprMXSB"] = False
+        state["ProblemType"]["MirrorDimsMXSB"]  = list(state["ProblemType"]["MirrorDimsB"])
+        state["VectorWidthMXSB"] = state["VectorWidthB"]
+        state["MIWaveTileMXSB"] = state["MIWaveTileB"]
+        state["UnrollMajorLDSMXSB"] = state["UnrollMajorLDSB"]
+
+    if state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]:
+      state["LocalReadVectorWidthMXS"] = state["MIInputPerThreadMXSA"]
 
     # Some restrictions for half:
     if state["KernelLanguage"] == "Assembly" \
@@ -2016,7 +2053,11 @@ class Solution(collections.abc.Mapping):
           depthUM = depthUA if state["DirectToVgprSparseMetadata"] else depthUA // 4
       state["_DepthU"] = state["DepthU"]# internal
       state["_DepthUA"] = depthUA# internal
+      if state["ProblemType"]["MXBlockA"]:
+        state["_DepthUMXSA"] = depthUA // state["ProblemType"]["MXBlockA"]
       state["_DepthUB"] = depthUB# internal
+      if state["ProblemType"]["MXBlockB"]:
+        state["_DepthUMXSB"] = depthUB // state["ProblemType"]["MXBlockB"]
       state["_DepthUMetadata"] = depthUM# internal
 
       Solution.checkAndAssignWaveSeparateGlobalRead(state, 'A', printRejectionReason)
