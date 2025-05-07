@@ -150,7 +150,7 @@ if(HIPBLASLT_ENABLE_HOST)
 
     target_link_libraries(hipblaslt
         PUBLIC
-            hip::hipblas-common
+            roc::hipblas-common
         PRIVATE
             hip::device
             rocisa::rocisa-cpp
