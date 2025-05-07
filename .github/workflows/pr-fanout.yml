@@ -79,13 +79,5 @@ jobs:
           python .github/scripts/pr_fanout.py \
             --repo "${{ github.repository }}" \
             --pr "${{ github.event.pull_request.number }}" \
-            --subtrees "${{ steps.detect.outputs.subtrees }}"
-
-      - name: Reflect Checks to Monorepo PR
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          python .github/scripts/pr_reflect_checks.py \
-            --repo ${{ github.repository }} \
-            --pr "${{ github.event.pull_request.number }}" \
-            --config ".github/repos-config.json"
+            --subtrees "${{ steps.detect.outputs.subtrees }}" \
+            --debug

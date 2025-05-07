@@ -56,27 +56,51 @@ def get_subtree_info(config: List[RepoEntry], subtrees: List[str]) -> List[RepoE
 
 def subtree_push(entry: RepoEntry, branch: str, prefix: str, subrepo_full_url: str, dry_run: bool) -> None:
     """Push the specified subtree to the sub-repo using `git subtree push`."""
-    push_cmd = ["git", "subtree", "push", "--prefix", prefix, subrepo_full_url, branch]
+    # the output for git subtree push spits out thousands of lines for history preservation, suppress it
+    push_cmd = ["git", "subtree", "push", "--prefix", prefix, subrepo_full_url, branch, "--quiet"]
     logger.debug(f"Running: {' '.join(push_cmd)}")
     if not dry_run:
-        subprocess.run(push_cmd, check=True)
+        # explicitly set the shell to bash if possible to avoid issue linked, which was hit in testing
+        # https://stackoverflow.com/questions/69493528/git-subtree-maximum-function-recursion-depth
+        # we also need to increase python's recursion limit to avoid hitting the recursion limit in the subprocess
+        try:
+            result = subprocess.run(
+                push_cmd,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            logging.debug(f"subtree push stdout:\n{result.stdout}")
+            logging.debug(f"subtree push stderr:\n{result.stderr}")
+        except subprocess.CalledProcessError as e:
+            logging.error(f"subtree push failed with exit code {e.returncode}")
+            logging.error(f"stdout:\n{e.stdout}")
+            logging.error(f"stderr:\n{e.stderr}")
+            raise RuntimeError("git subtree push failed — see logs for details.") from e
+        # subprocess.run(push_cmd, check=True)
 
 def main(argv: Optional[List[str]] = None) -> None:
     """Main function to execute the PR fanout logic."""
+    subprocess.run("echo $SHELL", shell=True)
     args = parse_arguments(argv)
     logging.basicConfig(
         level=logging.DEBUG if args.debug else logging.INFO
     )
     client = GitHubCLIClient()
     config = load_repo_config(args.config)
+    # Key in on intersection between the subtrees input argument (new-line delimited) and the config file contents
     subtrees = [line.strip() for line in args.subtrees.splitlines() if line.strip()]
     relevant_subtrees = get_subtree_info(config, subtrees)
     for entry in relevant_subtrees:
         branch = f"monorepo-pr-{args.pr}-{entry.name}"
         prefix = f"{entry.category}/{entry.name}"
         subrepo_full_url = f"https://github.com/{entry.url}.git"
-        pr_title = f"[Fanout] Sync {args.repo} PR #{args.pr} to {entry.name}"
-        pr_body = f"This is an automated PR for subtree `{entry.category}/{entry.name}` from monorepo PR #{args.pr}."
+        pr_title = f"[DO NOT MERGE] [Fanout] [Monorepo] PR #{args.pr} to {entry.name}"
+        pr_body = (
+            f"This is an automated PR for subtree `{entry.category}/{entry.name}` "
+            f"originating from monorepo PR [#{args.pr}](https://github.com/{args.repo}/pull/{args.pr}). "
+            f"PLEASE DO NOT MERGE OR TOUCH THIS PR, AUTOMATED WORKFLOWS FROM THE MONOREPO ARE USING IT."
+        )
         logger.debug(f"\nProcessing subtree: {entry.category}/{entry.name}")
         logger.debug(f"\tPrefix: {prefix}")
         logger.debug(f"\tBranch: {branch}")
@@ -86,8 +110,18 @@ def main(argv: Optional[List[str]] = None) -> None:
         pr_exists: bool = client.pr_view(entry.url, branch)
         if not pr_exists:
             if not args.dry_run:
-                client.pr_create(entry.url, entry.branch, branch, pr_title, pr_body)
-                logger.info(f"Created PR in {entry.url} for branch {branch}")
+                # check if the branch already exists in the subrepo and error out if it did not
+                # means git subtree push failed
+                check_branch_subprocess = subprocess.run(
+                    ["git", "ls-remote", "--heads", subrepo_full_url, branch],
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    check=True, text=True
+                )
+                if bool(check_branch_subprocess.stdout.strip()):
+                    client.pr_create(entry.url, entry.branch, branch, pr_title, pr_body)
+                    logger.info(f"Created PR in {entry.url} for branch {branch}")
+                else:
+                    logger.error(f"Branch {branch} does not exist in {entry.url}. Cannot create PR.")
 
 if __name__ == "__main__":
     main()
