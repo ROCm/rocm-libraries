@@ -58,6 +58,7 @@ namespace TensileLite
 
                 iot::mapRequired(io, "hardwarePredicate", s.hardwarePredicate);
                 iot::mapRequired(io, "problemPredicate", s.problemPredicate);
+                iot::mapRequired(io, "taskPredicate", s.taskPredicate);
 
                 iot::mapRequired(io, "debugKernel", s.debugKernel);
                 iot::mapOptional(io, "libraryLogicIndex", s.libraryLogicIndex);

@@ -32,6 +32,7 @@
 #include <vector>
 
 #include <Tensile/Tensile.hpp>
+#include <Tensile/Task.hpp>
 
 namespace TensileLite
 {
@@ -67,13 +68,15 @@ namespace TensileLite
 
     template <typename MySolution, typename MyProblem>
     inline bool softwarePredicate(const SolutionLibrarySearchType& searchType,
+                                  Task&                            task,
+                                  Hardware const&                  hardware,
                                   const MySolution&                solutions,
                                   const MyProblem&                 problem)
     {
         switch(searchType)
         {
         case SolutionLibrarySearchType::DEFAULT:
-            return (*solutions.problemPredicate)(problem);
+            return (*solutions.problemPredicate)(problem) && (*solutions.taskPredicate)(task);
             break;
         case SolutionLibrarySearchType::GEMM_TYPE_ONLY:
             return isGemmTypeSame(solutions, problem);

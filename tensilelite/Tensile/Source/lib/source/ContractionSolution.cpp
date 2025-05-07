@@ -30,6 +30,7 @@
 
 #include <Tensile/AMDGPU.hpp>
 #include <Tensile/ContractionProblem.hpp>
+#include <Tensile/Task.hpp>
 #include <Tensile/Utils.hpp>
 
 #include <algorithm>
@@ -491,58 +492,32 @@ namespace TensileLite
                 PrintBufferValueClass betaPrint(
                     (void*)args[i].beta, sizeof(args[i].beta), problems[i].betaType());
                 std::cout << "Gemm " << i << ":" << std::endl;
-                std::cout << "   "
-                          << "m: " << args[i].m << std::endl;
-                std::cout << "   "
-                          << "n: " << args[i].n << std::endl;
-                std::cout << "   "
-                          << "batch: " << args[i].batch << std::endl;
-                std::cout << "   "
-                          << "k: " << args[i].k << std::endl;
-                std::cout << "   "
-                          << "D: " << args[i].d << std::endl;
-                std::cout << "   "
-                          << "C: " << args[i].c << std::endl;
-                std::cout << "   "
-                          << "A: " << args[i].a << std::endl;
-                std::cout << "   "
-                          << "B: " << args[i].b << std::endl;
-                std::cout << "   "
-                          << "strideD1: " << args[i].strideD1 << std::endl;
-                std::cout << "   "
-                          << "strideD2: " << args[i].strideD2 << std::endl;
-                std::cout << "   "
-                          << "strideC1: " << args[i].strideC1 << std::endl;
-                std::cout << "   "
-                          << "strideC2: " << args[i].strideC2 << std::endl;
-                std::cout << "   "
-                          << "strideA1: " << args[i].strideA1 << std::endl;
-                std::cout << "   "
-                          << "strideA2: " << args[i].strideA2 << std::endl;
-                std::cout << "   "
-                          << "strideB1: " << args[i].strideB1 << std::endl;
-                std::cout << "   "
-                          << "strideB2: " << args[i].strideB2 << std::endl;
-                std::cout << "   "
-                          << "Alpha: " << alphaPrint << std::endl;
-                std::cout << "   "
-                          << "Beta: " << betaPrint << std::endl;
-                std::cout << "   "
-                          << "scaleAlphaVec: " << args[i].scaleAlphaVec << std::endl;
-                std::cout << "   "
-                          << "bias: " << args[i].bias << std::endl;
-                std::cout << "   "
-                          << "e: " << args[i].e << std::endl;
-                std::cout << "   "
-                          << "strideE1: " << args[i].strideE1 << std::endl;
-                std::cout << "   "
-                          << "strideE2: " << args[i].strideE2 << std::endl;
-                std::cout << "   "
-                          << "act0: " << args[i].act0 << std::endl;
-                std::cout << "   "
-                          << "act1: " << args[i].act1 << std::endl;
-                std::cout << "   "
-                          << "activationType: " << args[i].activationType << std::endl;
+                std::cout << "   " << "m: " << args[i].m << std::endl;
+                std::cout << "   " << "n: " << args[i].n << std::endl;
+                std::cout << "   " << "batch: " << args[i].batch << std::endl;
+                std::cout << "   " << "k: " << args[i].k << std::endl;
+                std::cout << "   " << "D: " << args[i].d << std::endl;
+                std::cout << "   " << "C: " << args[i].c << std::endl;
+                std::cout << "   " << "A: " << args[i].a << std::endl;
+                std::cout << "   " << "B: " << args[i].b << std::endl;
+                std::cout << "   " << "strideD1: " << args[i].strideD1 << std::endl;
+                std::cout << "   " << "strideD2: " << args[i].strideD2 << std::endl;
+                std::cout << "   " << "strideC1: " << args[i].strideC1 << std::endl;
+                std::cout << "   " << "strideC2: " << args[i].strideC2 << std::endl;
+                std::cout << "   " << "strideA1: " << args[i].strideA1 << std::endl;
+                std::cout << "   " << "strideA2: " << args[i].strideA2 << std::endl;
+                std::cout << "   " << "strideB1: " << args[i].strideB1 << std::endl;
+                std::cout << "   " << "strideB2: " << args[i].strideB2 << std::endl;
+                std::cout << "   " << "Alpha: " << alphaPrint << std::endl;
+                std::cout << "   " << "Beta: " << betaPrint << std::endl;
+                std::cout << "   " << "scaleAlphaVec: " << args[i].scaleAlphaVec << std::endl;
+                std::cout << "   " << "bias: " << args[i].bias << std::endl;
+                std::cout << "   " << "e: " << args[i].e << std::endl;
+                std::cout << "   " << "strideE1: " << args[i].strideE1 << std::endl;
+                std::cout << "   " << "strideE2: " << args[i].strideE2 << std::endl;
+                std::cout << "   " << "act0: " << args[i].act0 << std::endl;
+                std::cout << "   " << "act1: " << args[i].act1 << std::endl;
+                std::cout << "   " << "activationType: " << args[i].activationType << std::endl;
             }
         }
     }
@@ -1370,7 +1345,7 @@ namespace TensileLite
             assert(pAMDGPU != nullptr && pAMDGPU->computeUnitCount != 0);
             if(sizeMapping.streamK != 0)
             {
-                skGrid             = getSKGrid(problem, hardware, tiles);
+                skGrid = getSKGrid(problem, hardware, tiles);
                 rv.numWorkGroups.x = skGrid;
                 rv.numWorkGroups.y = 1;
                 rv.numWorkGroups.z = 1;
@@ -3135,10 +3110,12 @@ namespace TensileLite
 
         if(sizeMapping.streamK > 0 && sizeMapping.streamKAtomic == 0)
         {
+            const bool streamKDP = Debug::Instance().useStreamKDataParrallel();
             auto   tiles  = problem.getNumTiles(sizeMapping);
             size_t skGrid = getSKGrid(problem, hardware, tiles);
             // Get space required for partial tiles
-            size += partialTileSize(skGrid);
+            if(tiles % skGrid != 0 && !streamKDP)
+                size += partialTileSize(skGrid);
         }
         else
         {
@@ -3167,7 +3144,7 @@ namespace TensileLite
                         && (gsuMultiplier == 0))
                 {
                     size += problem.d().totalLogicalElements()
-                            * sizeMapping.workspaceSizePerElemBias * gsu;
+                            * problem.computeTypeElementSize() * gsu;
                 }
             }
 
@@ -3232,6 +3209,10 @@ namespace TensileLite
                                           Hardware const& hardware,
                                           size_t          tiles) const
     {
+        const bool streamKDP = Debug::Instance().useStreamKDataParrallel();
+        if(streamKDP)
+            return tiles;
+
         // If K==0, run kernel as DP with Alpha=0 to skip main loop and apply beta*c
         size_t z = 1;
         for(size_t i = 0; i < problem.boundIndices().size(); ++i)

@@ -1672,7 +1672,8 @@ namespace
         inputs.batchD = reinterpret_cast<void* const*>(prob.batch_D);
 
         // Set the GSU workspace
-        inputs.ws = prob.workspace;
+        inputs.ws            = prob.workspace;
+        inputs.workspaceSize = prob.workspaceSize;
 
         inputs.Synchronizer = prob.Synchronizer;
 
@@ -3531,7 +3532,8 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle       handle,
         {
             tensile_prob.setParams().resetInternalArgs();
         }
-
+        
+        TensileLite::Task task(*hardware, tensile_prob, *solution);
         tensile_prob.setWorkspaceSize(algo->max_workspace_bytes);
         if(!(*solution->hardwarePredicate)(*hardware))
         {
@@ -3553,6 +3555,20 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle       handle,
                 std::ostringstream msg;
                 msg << "Software match: " << solution->description();
                 solution->problemPredicate->debugEval(tensile_prob, msg);
+                msg << std::endl;
+                log_info(__func__, msg.str());
+            }
+
+            log_error(__func__, "Solution is not supported");
+            return rocblaslt_status_invalid_value;
+        }
+        if(!(*solution->taskPredicate)(task))
+        {
+            if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
+            {
+                std::ostringstream msg;
+                msg << "Software match: " << solution->description();
+                solution->taskPredicate->debugEval(task, msg);
                 msg << std::endl;
                 log_info(__func__, msg.str());
             }
@@ -3612,8 +3628,7 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle       handle,
                 if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
                 {
                     std::ostringstream msg;
-                    msg << "Match "
-                        << "[" << i << "]: " << solution->description();
+                    msg << "Match " << "[" << i << "]: " << solution->description();
                     solution->problemPredicate->debugEval(tensile_prob.gemms[i], msg);
                     msg << std::endl;
                     log_info(__func__, msg.str());

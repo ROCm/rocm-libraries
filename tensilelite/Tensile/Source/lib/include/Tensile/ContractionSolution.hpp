@@ -38,6 +38,7 @@
 #include <Tensile/ContractionProblem_fwd.hpp>
 #include <Tensile/DataTypes.hpp>
 #include <Tensile/Predicates.hpp>
+#include <Tensile/Task.hpp>
 #include <Tensile/Utils.hpp>
 
 #define TENSILE_COMMON_KERNEL_ARGS_SIZE 16
@@ -538,7 +539,8 @@ namespace TensileLite
         ThreadSafeValue<std::string> codeObjectFilename;
         bool                         debugKernel   = false;
         bool                         kernelArgsLog = false;
-
+        std::shared_ptr<Predicates::Predicate<Task>> taskPredicate
+            = std::make_shared<Predicates::True<Task>>();
         std::shared_ptr<Predicates::Predicate<Problem>> problemPredicate
             = std::make_shared<Predicates::True<Problem>>();
         std::shared_ptr<Predicates::Predicate<Hardware>> hardwarePredicate

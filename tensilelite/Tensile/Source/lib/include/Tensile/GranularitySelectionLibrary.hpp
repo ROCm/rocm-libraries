@@ -110,16 +110,19 @@ namespace TensileLite
 
                 auto rv = solutions.at(index);
 
+                Task task(hardware, problem, *rv);
                 if(debug)
                 {
                     std::cout << "Exact match: " << rv->description();
                     rv->problemPredicate->debugEval(problem, std::cout);
                     std::cout << std::endl;
+                    rv->taskPredicate->debugEval(task, std::cout);
+                    std::cout << std::endl;
                     rv->hardwarePredicate->debugEval(hardware, std::cout);
                     std::cout << std::endl;
                 }
 
-                if((*rv->problemPredicate)(problem) && (*rv->hardwarePredicate)(hardware))
+                if((*rv->problemPredicate)(problem) && (*rv->taskPredicate)(task) && (*rv->hardwarePredicate)(hardware))
                 {
                     return rv;
                 }
@@ -144,7 +147,9 @@ namespace TensileLite
 
                 if(myPerformance > bestPerformance)
                 {
+                    Task task(hardware, problem, *(row.second));
                     if((*row.second->problemPredicate)(problem)
+                       && (*row.second->taskPredicate)(task)
                        && (*row.second->hardwarePredicate)(hardware))
                     {
                         bestPerformance = myPerformance;
@@ -161,6 +166,8 @@ namespace TensileLite
                     if(debug)
                     {
                         row.second->problemPredicate->debugEval(problem, std::cout);
+                        std::cout << std::endl;
+                        row.second->taskPredicate->debugEval(task, std::cout);
                         std::cout << std::endl;
                         row.second->hardwarePredicate->debugEval(hardware, std::cout);
                         std::cout << std::endl;
@@ -188,7 +195,9 @@ namespace TensileLite
                     std::cout << row.second->description() << ": ";
                 }
 
-                if(softwarePredicate(searchType, *(row.second), problem)
+                Task task(hardware, problem, *(row.second));
+
+                if(softwarePredicate(searchType, task, hardware, *(row.second), problem)
                    && (*row.second->hardwarePredicate)(hardware))
                 {
                     rv.insert(row.second);
@@ -207,6 +216,8 @@ namespace TensileLite
                     if(searchType == SolutionLibrarySearchType::DEFAULT)
                     {
                         row.second->problemPredicate->debugEval(problem, std::cout);
+                        std::cout << std::endl;
+                        row.second->taskPredicate->debugEval(task, std::cout);
                         std::cout << std::endl;
                     }
                     row.second->hardwarePredicate->debugEval(hardware, std::cout);
@@ -245,9 +256,10 @@ namespace TensileLite
                         for(int idx = 0; idx < problems.size(); idx++)
                         {
                             auto problem = problems[idx];
+                            Task task(hardware, problem, *(row.second));
                             problem.setWorkspaceSizeGroupedGemm(ws);
                             problem.setGroupedGemmCount(problems.size());
-                            if(!(*row.second->problemPredicate)(problem))
+                            if(!(*row.second->problemPredicate)(problem) || !(*row.second->taskPredicate)(task))
                                 useSolution = false;
                         }
                     }
@@ -280,7 +292,10 @@ namespace TensileLite
                         for(int idx = 0; idx < problems.size(); idx++)
                         {
                             auto problem = problems[idx];
+                            Task task(hardware, problem, *(row.second));
                             row.second->problemPredicate->debugEval(problem, std::cout);
+                            std::cout << std::endl;
+                            row.second->taskPredicate->debugEval(task, std::cout);
                             std::cout << std::endl;
                         }
                     }
