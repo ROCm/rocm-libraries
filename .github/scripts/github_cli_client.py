@@ -80,12 +80,20 @@ class GitHubCLIClient:
         try:
             result = self._run_gh_command(["pr", "list", "--json", "number", "--repo", repo, "--head", head])
             pr_list = json.loads(result.stdout)
-            if pr_list:
-                return pr_list[0]["number"]
-            else:
-                return None
+            return pr_list[0]["number"] if pr_list else None
         except subprocess.CalledProcessError:
+            logger.warning(f"Failed to retrieve PR from {repo} with head {head}")
             return None  # PR does not exist
+
+    def get_pr_by_head_branch(self, repo: str, head: str) -> Optional[dict]:
+        """Get the PR object for a given head branch in a repository, if it exists."""
+        try:
+            result = self._run_gh_command(["pr", "list", "--json", "number,title,state", "--repo", repo, "--head", head])
+            pr_list = json.loads(result.stdout)
+            return pr_list[0] if pr_list else None
+        except subprocess.CalledProcessError:
+            logger.warning(f"Failed to retrieve PR from {repo} with head {head}")
+            return None
 
     def pr_create(self, repo: str, base: str, head: str, title: str, body: str, dry_run: Optional[bool] = False) -> None:
         """Create a new pull request."""
@@ -99,6 +107,15 @@ class GitHubCLIClient:
         ]
         self._run_gh_command(cmd, dry_run=dry_run)
         logger.info(f"Created PR from {head} to {base} in {repo}.")
+
+    def close_pr_and_delete_branch(self, repo: str, pr_number: int, dry_run: Optional[bool] = False) -> None:
+        """Close a pull request and delete the associated branch using the GitHub CLI."""
+        cmd = ["pr", "close", str(pr_number), "--repo", repo, "--delete-branch"]
+        if dry_run:
+            logger.info(f"Dry run: The pull request #{pr_number} would be closed and the branch would be deleted in repo '{repo}'")
+        else:
+            self._run_gh_command(cmd)
+            logger.info(f"Closed pull request #{pr_number} and deleted the associated branch in repo '{repo}'")
 
     def sync_labels(self, target_repo: str, pr_number: int, labels: List[str], dry_run: Optional[bool] = False) -> None:
         """Sync labels from the source repo to the target repo (only apply existing labels)."""

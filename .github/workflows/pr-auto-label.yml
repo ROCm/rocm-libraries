@@ -18,6 +18,11 @@ on:
       - labeled
       - unlabeled
 
+concurrency:
+  group: pr-auto-label-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+  # ensure that the workflow is not running for the same PR multiple times at once
+
 jobs:
   auto-label-pr:
     runs-on: ubuntu-latest
@@ -37,6 +42,11 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install pydantic
+
+      - name: Set up Git user
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
 
       - name: Compute Category Labels for PR
         id: compute_labels

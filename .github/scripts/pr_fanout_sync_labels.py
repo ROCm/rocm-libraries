@@ -33,7 +33,7 @@ def parse_arguments(argv: Optional[List[str]] = None) -> argparse.Namespace:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(description="Sync labels from monorepo PR to fanned-out PRs.")
     parser.add_argument("--repo", required=True, help="Full repository name (e.g., org/repo)")
-    parser.add_argument("--pr", required=True, help="Pull request number")
+    parser.add_argument("--pr", required=True, type=int, help="Pull request number")
     parser.add_argument("--config", required=False, default=".github/repos-config.json", help="Path to the repos-config.json file")
     parser.add_argument("--dry-run", action="store_true", help="If set, only logs actions without making changes.")
     parser.add_argument("--debug", action="store_true", help="If set, enables detailed debug logging.")

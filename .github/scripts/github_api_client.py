@@ -27,6 +27,7 @@ class GitHubAPIClient:
 
     def _get_json(self, url: str, error_msg: str) -> dict:
         """Helper method to perform a GET request and return JSON response."""
+        logger.debug(f"GET {url}")
         response = requests.get(url, headers=self.headers)
         if response.status_code != 200:
             logger.error(f"{error_msg}: {response.status_code} {response.text}")
@@ -41,55 +42,60 @@ class GitHubAPIClient:
             response.raise_for_status()
         return response.json()
 
-    def _check_run_payload(self, check_name: str, status: str, conclusion: str, summary: str, head_sha: str = None) -> dict:
-        """Create the payload for a check run."""
+    def _check_run_payload(self, check_name: str, status: str, details_url: str, conclusion: str, summary: str, head_sha: str) -> dict:
+        """Create the payload for a check run with potentially empty fields safely coerced to strings."""
         payload = {
             "name": check_name,
+            "head_sha": head_sha,
             "status": status,
-            "conclusion": conclusion,
+            "details_url": str(details_url or ""),
+            "conclusion": str(conclusion or "neutral"),
             "output": {
-                "title": check_name,
-                "summary": summary
+                "title": str(check_name or ""),
+                "summary": str(summary or "")
             }
         }
-        if head_sha:
-            payload["head_sha"] = head_sha
         return payload
 
     def get_pr_by_head_branch(self, repo_url: str, branch_name: str) -> dict | None:
         """Fetch the pull request associated with a specific head branch."""
-        head = f"{repo_url.split('/')[-1]}:{branch_name}"
-        url = f"{self.api_base}/repos/{repo_url}/pulls?head={head}&state=open"
+        org = repo_url.split('/')[0]  # Extract the organization name from repo_url
+        full_head_ref = f"{org}:{branch_name}"
+        url = f"{self.api_base}/repos/{repo_url}/pulls?head={full_head_ref}&state=open"
         prs = self._get_json(url, f"Failed to fetch PR by branch name in {repo_url}")
         return prs[0] if prs else None
 
     def get_pr_checks(self, repo_url: str, pr_number: int) -> list:
         """Fetch check runs associated with a pull request."""
-        url = f"{self.api_base}/repos/{repo_url}/pulls/{pr_number}/check-runs"
-        data = self._get_json(url, f"Failed to fetch PR checks in {repo_url}")
+        # the api has checks assigned to SHA, so map PR to a SHA first
+        pr_url = f"{self.api_base}/repos/{repo_url}/pulls/{pr_number}"
+        pr = self._get_json(pr_url, f"Failed to fetch PR #{pr_number} in {repo_url}")
+        sha = pr["head"]["sha"]
+        checks_url = f"{self.api_base}/repos/{repo_url}/commits/{sha}/check-runs"
+        data = self._get_json(checks_url, f"Failed to fetch check runs for commit {sha} in {repo_url}")
         return data.get("check_runs", [])
 
     def create_synthetic_check(self, repo_url: str, pr_number: int, check_name: str,
-                               status: str, conclusion: str, summary: str) -> None:
+                               status: str, details_url: str, conclusion: str, summary: str) -> None:
         """Create a synthetic check run for the monorepo pull request."""
         pr_url = f"{self.api_base}/repos/{repo_url}/pulls/{pr_number}"
         pr = self._get_json(pr_url, f"Failed to get PR for synthetic check in {repo_url}")
         head_sha = pr["head"]["sha"]
-        payload = self._check_run_payload(check_name, status, conclusion, summary, head_sha)
+        payload = self._check_run_payload(check_name, status, details_url, conclusion, summary, head_sha)
         url = f"{self.api_base}/repos/{repo_url}/check-runs"
         self._request_json("POST", url, payload, f"Failed to create synthetic check '{check_name}'")
         logger.info(f"Created synthetic check '{check_name}' for PR #{pr_number} in {repo_url}")
 
     def upsert_check_run(self, repo_url: str, check_name: str, pr_number: int,
-                         status: str, conclusion: str, summary: str) -> None:
+                         status: str, details_url: str, conclusion: str, summary: str) -> None:
         check_runs = self.get_pr_checks(repo_url, pr_number)
         existing = next((check for check in check_runs if check["name"] == check_name), None)
         """Create or update a check run in a repository."""
         if existing:
             check_run_id = existing["id"]
             url = f"{self.api_base}/repos/{repo_url}/check-runs/{check_run_id}"
-            payload = self._check_run_payload(check_name, status, conclusion, summary)
+            payload = self._check_run_payload(check_name, status, details_url, conclusion, summary, existing["head_sha"])
             self._request_json("PATCH", url, payload, f"Failed to update check '{check_name}'")
             logger.info(f"Updated check '{check_name}' on PR #{pr_number} in {repo_url}")
         else:
-            self.create_synthetic_check(repo_url, pr_number, check_name, status, conclusion, summary)
+            self.create_synthetic_check(repo_url, pr_number, check_name, status, details_url, conclusion, summary)

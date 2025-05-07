@@ -1,0 +1,44 @@
+name: Close Fanout PRs
+
+on:
+  pull_request:
+    types:
+      - closed
+
+concurrency:
+  group: pr-close-fanout-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+  # ensure that the workflow is not running for the same PR multiple times at once
+  # subsequent runs of the workflow will perform no-op if the subrepo PRs are already closed
+
+jobs:
+  close-fanouts:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout workflows
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          sparse-checkout: '.github'
+          token: ${{ secrets.MONOREPO_BOT_TOKEN }} # since we are touching subrepository PRs
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.12'
+
+      - name: Install python requirements
+        run: pip install pydantic
+
+      - name: Set up Git user
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Close fanned out PRs and delete branches
+        env:
+          GH_TOKEN: ${{ secrets.MONOREPO_BOT_TOKEN }}
+        run: |
+          python .github/scripts/pr_close_fanouts.py \
+            --repo "${{ github.repository }}" \
+            --pr "${{ github.event.pull_request.number }}" \
+            --config ".github/repos-config.json"

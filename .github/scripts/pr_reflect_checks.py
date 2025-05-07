@@ -35,7 +35,7 @@ def parse_arguments(argv: Optional[List[str]] = None) -> argparse.Namespace:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(description="Reflect fanned-out PR checks onto the monorepo PR.")
     parser.add_argument("--repo", required=True, help="Full repository name (e.g., org/repo)")
-    parser.add_argument("--pr", required=True, help="Pull request number")
+    parser.add_argument("--pr", required=True, type=int, help="Pull request number")
     parser.add_argument("--config", required=False, default=".github/repos-config.json", help="Path to the repos-config.json file")
     parser.add_argument("--dry-run", action="store_true", help="If set, only logs actions without making changes.")
     parser.add_argument("--debug", action="store_true", help="If set, enables detailed debug logging.")
@@ -55,11 +55,13 @@ def reflect_checks(client: GitHubAPIClient, monorepo: str, pr_number: int, confi
         for check in checks:
             check_name = f"{entry.name}: {check['name']}"
             status = check["status"]
+            details_url = check["details_url"]
             conclusion = check["conclusion"] or "neutral"
             summary = check.get("output", {}).get("summary", "")
             logger.info(f"[{check_name}] Status: {status} | Conclusion: {conclusion}")
+            logger.info(f"[{check_name}] URL: {details_url}")
             if not dry_run:
-                client.upsert_check_run(monorepo, check_name, pr_number, status, conclusion, summary)
+                client.upsert_check_run(monorepo, check_name, pr_number, status, details_url, conclusion, summary)
 
 def main(argv: Optional[List[str]] = None) -> None:
     """Main function to execute the PR checks reflection logic."""

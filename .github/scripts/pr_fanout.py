@@ -34,8 +34,8 @@ logger = logging.getLogger(__name__)
 def parse_arguments(argv: Optional[List[str]] = None) -> argparse.Namespace:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(description="Fanout monorepo PR to sub-repos.")
-    parser.add_argument("--repo", required=True, help="Full  repository name (e.g., org/monorepo)")
-    parser.add_argument("--pr", required=True, help="Pull request number")
+    parser.add_argument("--repo", required=True, help="Full  repository name (e.g., org/repo)")
+    parser.add_argument("--pr", required=True, type=int, help="Pull request number")
     parser.add_argument("--subtrees", required=True, help="Newline-separated list of changed subtrees (category/name)")
     parser.add_argument("--config", required=False, default=".github/repos-config.json", help="Path to the repos-config.json file")
     parser.add_argument("--dry-run", action="store_true", help="If set, only logs actions without making changes.")

@@ -41,7 +41,7 @@ def parse_arguments(argv: Optional[List[str]] = None) -> argparse.Namespace:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(description="Apply labels based on PR's changed files.")
     parser.add_argument("--repo", required=True, help="Full repository name (e.g., org/repo)")
-    parser.add_argument("--pr", required=True, help="Pull request number")
+    parser.add_argument("--pr", required=True, type=int, help="Pull request number")
     parser.add_argument("--dry-run", action="store_true", help="Print results without writing to GITHUB_OUTPUT.")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
     return parser.parse_args(argv)
