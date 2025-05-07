@@ -52,6 +52,7 @@ include(CMakeDependentOption)
 
 # Build options
 option(BUILD_TEST "Build tests (requires googletest)" OFF)
+option(CODE_COVERAGE "Enable code coverage" OFF)
 option(DEPENDENCIES_FORCE_DOWNLOAD "Download dependencies and do not search for packages" OFF)
 option(DOWNLOAD_CUB "Download CUB and thrust. Do not search for CUB package" OFF)
 option(BUILD_BENCHMARK "Build benchmarks" OFF)
@@ -76,7 +77,7 @@ option(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY "Build with file/folder reorg wit
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 # Set a default build type if none was specified
-if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES AND NOT CODE_COVERAGE)
   message(STATUS "Setting build type to 'Release' as none was specified.")
   set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose the type of build." FORCE)
   set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "" "Debug" "Release" "MinSizeRel" "RelWithDebInfo")
@@ -133,12 +134,12 @@ set(VERSION_STRING "3.5.0")
 rocm_setup_version(VERSION ${VERSION_STRING})
 math(EXPR hipcub_VERSION_NUMBER "${hipcub_VERSION_MAJOR} * 100000 + ${hipcub_VERSION_MINOR} * 100 + ${hipcub_VERSION_PATCH}")
 
-# Print configuration summary
-include(cmake/Summary.cmake)
-print_configuration_summary()
-
 # hipCUB library
 add_subdirectory(hipcub)
+
+if(CODE_COVERAGE)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0 -fprofile-instr-generate -fcoverage-mapping")
+endif()
 
 if(BUILD_TEST OR (BUILD_BENCHMARK AND NOT ONLY_INSTALL))
   rocm_package_setup_component(clients)
@@ -206,3 +207,7 @@ else()
     HEADER_ONLY
   )
 endif()
+
+# Print configuration summary
+include(cmake/Summary.cmake)
+print_configuration_summary()
