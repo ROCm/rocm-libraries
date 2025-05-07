@@ -3667,9 +3667,10 @@ namespace GEMMDriverTest
         // std::cout << TimerPool::summary() << std::endl;
     }
 
-    TEST_P(GEMMTestLargeMacroTileGPU, DISABLED_GPU_BasicGEMMF8F6F4)
+    TEST_P(GEMMTestLargeMacroTileGPU, GPU_BasicGEMMF8F6F4)
     {
-        // NOTE: This test takes about 13 seconds (without unroll) to finish
+        // NOTE: This test takes about 13 seconds (without enabling Unroll) to
+        // finish when FuseLoops orders all pairs of memory nodes one by one.
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
 
         auto gemm = setup_GEMMF8F6F4(32, 32, 64);
@@ -3687,8 +3688,8 @@ namespace GEMMDriverTest
         // Use unrollK will significantly increase the kernel generation time.
         // To enable unrollK, maxVGPR has to be increased as well.
         //
-        gemm.unrollK = 2;
-        setKernelOptions({.maxVGPRs = 1024});
+        //gemm.unrollK = 2;
+        //setKernelOptions({.maxVGPRs = 1024});
 
         basicGEMM<FP8, FP8, float>(gemm);
 
