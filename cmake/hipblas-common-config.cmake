@@ -25,5 +25,3 @@
 # adding two target files one with hip:: namespace and one with
 # roc:: namespace which is on deprecation path
 include("${CMAKE_CURRENT_LIST_DIR}/hipblas-common-config-targets.cmake")
-include("${CMAKE_CURRENT_LIST_DIR}/roc-hipblas-common-config-targets.cmake")
-message(DEPRECATION "roc::hipblas-common is deprecated. Use hip::hipblas-common")

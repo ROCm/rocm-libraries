@@ -31,6 +31,3 @@ find_package(hipblas-common REQUIRED)
 
 add_executable(hello-roc main.cpp)
 target_link_libraries(hello-roc PRIVATE roc::hipblas-common)
-
-add_executable(hello-hip main.cpp)
-target_link_libraries(hello-hip PRIVATE hip::hipblas-common)
