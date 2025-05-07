@@ -35,6 +35,7 @@
 #include <Tensile/GranularitySelectionLibrary.hpp>
 #include <Tensile/MLPClassificationLibrary.hpp>
 #include <Tensile/PropertyMatching.hpp>
+#include <Tensile/ContractionTaskPredicates.hpp>
 
 #include <cstddef>
 #include <map>
@@ -188,8 +189,11 @@ namespace TensileLite
             true, std::shared_ptr<TensileLite::Predicates::Predicate<TensileLite::Hardware>>);
         TENSILE_SERIALIZE_VECTOR(true,
                                  std::shared_ptr<TensileLite::Predicates::Predicate<TensileLite::AMDGPU>>);
+        TENSILE_SERIALIZE_VECTOR(true,
+                                 std::shared_ptr<TensileLite::Predicates::Predicate<TensileLite::Task>>);
         TENSILE_SERIALIZE_VECTOR(
             true, std::shared_ptr<TensileLite::Property<TensileLite::ContractionProblemGemm>>);
+        TENSILE_SERIALIZE_VECTOR(true, std::shared_ptr<TensileLite::Property<TensileLite::Task>>);
         TENSILE_SERIALIZE_VECTOR(
             true, std::shared_ptr<TensileLite::MLFeatures::MLFeature<TensileLite::ContractionProblemGemm>>);
 

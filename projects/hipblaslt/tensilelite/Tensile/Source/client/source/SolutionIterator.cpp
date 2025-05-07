@@ -96,13 +96,16 @@ namespace TensileLite
 
             // Test if the persistent kernel is eligible for the current hw and solution
             problem.checkPersistentKernelEligibility(solution, *m_hardware);
-            if(!(*solution.problemPredicate)(problem))
+            Task task(*m_hardware, problem, solution);
+            if(!(*solution.problemPredicate)(problem) || !(*solution.taskPredicate)(task))
             {
                 m_reporter->report(ResultKey::Validation, "DID_NOT_SATISFY_ASSERTS");
                 if(m_reporter->logAtLevel(LogLevel::Verbose) && !m_printWinnerOnly)
                 {
                     std::ostringstream msg;
                     solution.problemPredicate->debugEval(problem, msg);
+                    msg << std::endl;
+                    solution.taskPredicate->debugEval(task, msg);
                     msg << std::endl;
                     m_reporter->log(LogLevel::Verbose, msg.str());
                 }

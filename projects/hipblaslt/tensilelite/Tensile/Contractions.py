@@ -405,6 +405,19 @@ def extractDimPredicate(cls, key, value, predicateName):
     elif len(predicates) > 1:
         return cls.And(predicates)
 
+class TaskPredicate(Properties.Predicate):
+    @classmethod
+    def FromOriginalKeyPair(cls, pair):
+        (key, value) = pair
+        if key == "_WorkspaceSizePerElemC" and value > 0:
+            return cls("WorkspaceCheck")
+        return None
+
+    @classmethod
+    def FromOriginalState(cls, d, problemType, morePreds=[]):
+        predicates = [p for p in map(cls.FromOriginalKeyPair, d.items()) if p is not None]
+        return cls.And(predicates)
+
 class ProblemPredicate(Properties.Predicate):
     @classmethod
     def FromOriginalKeyPair(cls, pair):
@@ -432,9 +445,6 @@ class ProblemPredicate(Properties.Predicate):
                 raise RuntimeError("Unknown Multiple Value: {}".format(key))
 
             return cls(tag, index=index, value=value)
-
-        if key == "WorkspaceCheck" and (not all(val == 0 for val in value)):
-            return cls("WorkspaceCheck", index=0, value=value)
 
         if key.startswith('Assert'):
             raise RuntimeError("Unknown assertion key: {}".format(key))
@@ -663,6 +673,7 @@ class Solution:
                 'problemType',
                 'hardwarePredicate',
                 'problemPredicate',
+                'taskPredicate',
                 'sizeMapping',
                 'internalArgsSupport',
                 'debugKernel',
@@ -719,6 +730,7 @@ class Solution:
         rv.problemType = ProblemType.FromOriginalState(d['ProblemType'])
 
         rv.problemPredicate = ProblemPredicate.FromOriginalState(d, rv.problemType)
+        rv.taskPredicate = TaskPredicate.FromOriginalState(d, rv.problemType)
 
         if 'DebugKernel' in d:
             rv.debugKernel = d['DebugKernel']
@@ -774,6 +786,7 @@ class Solution:
         self.problemType = None
         self.hardwarePredicate = Hardware.HardwarePredicate('TruePred')
         self.problemPredicate = ProblemPredicate('TruePred')
+        self.taskPredicate = TaskPredicate('TruePred')
         self.sizeMapping = None
         self.debugKernel = False
         self.libraryLogicIndex = {}

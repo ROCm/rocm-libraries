@@ -120,6 +120,11 @@ namespace TensileLite
         return m_debugSelection;
     }
 
+    bool Debug::useStreamKDataParrallel() const
+    {
+        return m_dataParallel;
+    }
+
     int Debug::useExperimentalSelection() const
     {
         return m_experimentSelection;
@@ -184,6 +189,10 @@ namespace TensileLite
         const char* db_select = std::getenv("TENSILE_TAM_SELECTION_ENABLE");
         if(db_select)
             m_debugSelection = strtol(db_select, nullptr, 0) != 0;
+
+        const char* exp_streamkDP = std::getenv("TENSILE_STREAMK_DATA_PARALLEL");
+        if(exp_streamkDP)
+            m_dataParallel = strtol(exp_streamkDP, nullptr, 0) != 0;
 
         const char* exp_select = std::getenv("TENSILE_SOLUTION_SELECTION_METHOD");
         if(exp_select)

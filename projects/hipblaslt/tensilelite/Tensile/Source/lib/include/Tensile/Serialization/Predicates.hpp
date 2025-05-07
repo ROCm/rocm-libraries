@@ -229,5 +229,47 @@ namespace TensileLite
                 iot::enumCase(io, value, "gfx1201", AMDGPU::Processor::gfx1201);
             }
         };
+
+        template <typename IO>
+        struct SubclassMappingTraits<Predicates::Predicate<Task>, IO>
+            : public DefaultSubclassMappingTraits<
+                  SubclassMappingTraits<Predicates::Predicate<Task>, IO>,
+                  Predicates::Predicate<Task>,
+                  IO>
+        {
+            using Self = SubclassMappingTraits<Predicates::Predicate<Task>, IO>;
+            using Base = DefaultSubclassMappingTraits<
+                SubclassMappingTraits<Predicates::Predicate<Task>, IO>,
+                Predicates::Predicate<Task>,
+                IO>;
+            using SubclassMap = typename Base::SubclassMap;
+            const static SubclassMap subclasses;
+
+            using Generic = PredicateMappingTraits<Task, IO>;
+
+            static SubclassMap GetSubclasses()
+            {
+                SubclassMap rv({Base::template Pair<Predicates::Contraction::WorkspaceCheck>()});
+
+                auto gmap = Generic::GetSubclasses();
+                rv.insert(gmap.begin(), gmap.end());
+
+                return rv;
+            }
+        };
+
+        template <typename IO>
+        using TaskPredicateSMT = SubclassMappingTraits<Predicates::Predicate<Task>, IO>;
+
+        template <typename IO>
+        const typename TaskPredicateSMT<IO>::SubclassMap SubclassMappingTraits<Predicates::Predicate<Task>,IO>::subclasses
+            = TaskPredicateSMT<IO>::GetSubclasses();     
+
+        template <typename IO>
+        struct MappingTraits<Predicates::Contraction::WorkspaceCheck, IO>
+            : public AutoMappingTraits<Predicates::Contraction::WorkspaceCheck, IO>
+        {
+        };
+
     } // namespace Serialization
 } // namespace TensileLite
