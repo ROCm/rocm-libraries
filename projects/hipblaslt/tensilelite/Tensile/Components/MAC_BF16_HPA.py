@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2022 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -26,7 +26,7 @@ from rocisa.container import vgpr
 from rocisa.instruction import SSetPrior, VDot2F32BF16, VDot2CF32BF16
 
 from rocisa.enum import DataTypeEnum
-from ..TensileInstructions import DataType
+from ..Common.DataType import DataType
 from ..Component import Component, MAC
 
 class FMA_BF16_HPA(MAC):

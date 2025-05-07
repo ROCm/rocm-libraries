@@ -20,32 +20,26 @@
  * THE SOFTWARE.
  *
  * ************************************************************************ */
-#include <nanobind/nanobind.h>
+#pragma once
+#include "code.hpp"
+#include "enum.hpp"
 
-namespace nb = nanobind;
+#include <memory>
 
-void init_base(nb::module_ m);
-void init_containers(nb::module_ m);
-void init_label(nb::module_ m);
-void init_enum(nb::module_ m);
-void init_inst(nb::module_ m);
-void init_code(nb::module_ m);
-void init_count(nb::module_ m);
-void init_pass(nb::module_ m);
-void init_macro(nb::module_ m);
-void init_func(nb::module_ m);
-
-NB_MODULE(rocisa, m)
+namespace rocisa
 {
-    m.doc() = "Module rocisa.";
-    init_base(m);
-    init_containers(m);
-    init_label(m);
-    init_enum(m);
-    init_inst(m);
-    init_code(m);
-    init_count(m);
-    init_pass(m);
-    init_macro(m);
-    init_func(m);
-}
+    ////////////////////////////////////////
+    // If else
+    ////////////////////////////////////////
+
+    std::shared_ptr<Module> BranchIfZero(const std::string& sgprName,
+                                         const DataType     computeDataType,
+                                         const int          tmpSgprIdx,
+                                         const int          laneSC,
+                                         const Label&       label,
+                                         const int          waveFrontSize);
+
+    std::shared_ptr<Module> BranchIfNotZero(const std::string& sgprName,
+                                            const DataType     computeDataType,
+                                            const Label&       label);
+} // namespace rocisa

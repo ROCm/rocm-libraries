@@ -238,4 +238,12 @@ namespace rocisa
             return "";
         }
     }
+
+    enum class SaturateCastType : int
+    {
+        NORMAL     = 1,
+        DO_NOTHING = 2,
+        UPPER      = 3,
+        LOWER      = 4
+    };
 }

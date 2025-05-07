@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -25,11 +25,10 @@
 from rocisa.instruction import SMovB32, VMovB32
 from rocisa.code import Module
 from rocisa.container import vgpr, sgpr, ContinuousRegister
-from .Formatting import print2, printExit, printWarning
-from .Utils import roundUpToNearestMultiple
+from .Utilities import print2, printExit, printWarning, roundUpToNearestMultiple
+
 
 from contextlib import contextmanager
-from dataclasses import dataclass
 from enum import Enum
 from typing import List, Optional
 
@@ -416,7 +415,7 @@ class RegisterPool:
   def stateDetailed(self):
     for index, register in enumerate(self.pool):
         print("%u: %s"%(index, register.tag))
-  
+
   def growPool(self, rangeStart: int, rangeEnd: int, checkOutSize: int, comment: str=""):
     tl = []
     for _ in range(rangeStart, rangeEnd):

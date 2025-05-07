@@ -22,6 +22,8 @@
 
 from rocisa.code import Module, TextBlock, Label
 from rocisa.container import EXEC, VCC, MUBUFModifiers, vgpr, sgpr
+from rocisa.functions import vectorStaticDivideAndRemainder, vectorStaticMultiply, \
+    vectorStaticDivide, vectorStaticRemainder
 import rocisa.instruction as ri
 from argparse import ArgumentParser
 from dataclasses import dataclass
@@ -31,14 +33,15 @@ from math import log2, log
 import os
 import yaml
 import json
-import subprocess
 from contextlib import contextmanager
 import os.path
 import sys
 
-import Tensile.TensileInstructions as ti
+from Tensile.Common.Utilities import _global_ti
 from Tensile.Common.Architectures import detectGlobalCurrentISA, isaToGfx, gfxToIsa
+from Tensile.Common.DataType import DataType
 from Tensile.Common.GlobalParameters import restoreDefaultGlobalParameters, assignGlobalParameters
+from Tensile.Common.RegisterPool import RegisterPool, allocTmpGpr
 from Tensile.Toolchain.Validators import ToolchainDefaults, validateToolchain
 
 def record_num_calls(f):
@@ -71,7 +74,7 @@ def asm_func(func_name: str, module: Module):
         module.add(TextBlock(f'.size {func_name}, {end_label_name} - {func_name}\n'))
 
 @contextmanager
-def auto_exec_scope(sgpr_pool: ti.RegisterPool, module: Module):
+def auto_exec_scope(sgpr_pool: RegisterPool, module: Module):
     try:
         tmp_exec_reg_idx = sgpr_pool.checkOutAligned(2, 2)
         module.add(ri.SMovB64(sgpr(tmp_exec_reg_idx, 2), EXEC()))
@@ -85,7 +88,7 @@ class SoftmaxKernelGenerator:
     srd_alignment = 4
 
     def __init__(self,
-                 io_type: ti.DataType,
+                 io_type: DataType,
                  num_cols: int,
                  num_rows: int,
                  num_workitems: int,
@@ -94,8 +97,8 @@ class SoftmaxKernelGenerator:
         self.num_cols = num_cols
         self.num_rows = num_rows
         self.num_workitems = num_workitems
-        self.sgpr_pool = ti.RegisterPool(18, 's', True)
-        self.vgpr_pool = ti.RegisterPool(10, 'v', True)
+        self.sgpr_pool = RegisterPool(18, 's', True)
+        self.vgpr_pool = RegisterPool(10, 'v', True)
         self.sgpr_pool.addRange(3, 17) #TODO: estimate this
         self.vgpr_pool.addRange(1, 9) #TODO: estimate this
         self.t_id_reg_idx = 0 #TODO: support config on this
@@ -149,7 +152,7 @@ class SoftmaxKernelGenerator:
         else:
             assert False, f'Unsupported format: {format}'
 
-        self.io_type = ti.DataType(param_dict['io_type'])
+        self.io_type = DataType(param_dict['io_type'])
         self.num_cols = param_dict['num_cols']
         self.num_rows = param_dict['num_rows']
         self.num_workitems = param_dict['num_workitems']
@@ -245,15 +248,15 @@ class SoftmaxKernelGenerator:
         col_idx_reg_idx = tmp_reg_idx
         row_idx_reg_idx = tmp_reg_idx + 1
         byte_offset_reg_idx = self.vgpr_pool.checkOut(1)
-        module.add(ri.vectorStaticDivideAndRemainder(row_idx_reg_idx, col_idx_reg_idx, t_id_reg_idx, self.num_cols, None))
+        module.add(vectorStaticDivideAndRemainder(row_idx_reg_idx, col_idx_reg_idx, t_id_reg_idx, self.num_cols, None))
 
         if not stride_reg_idx:
-            module.add(ri.vectorStaticMultiply(vgpr(byte_offset_reg_idx), vgpr(row_idx_reg_idx), self.num_cols, None))
+            module.add(vectorStaticMultiply(vgpr(byte_offset_reg_idx), vgpr(row_idx_reg_idx), self.num_cols, None))
         else:
             module.add(ri.VMulLOU32(vgpr(byte_offset_reg_idx), vgpr(row_idx_reg_idx), sgpr(stride_reg_idx)))
 
         module.add(ri.VAddU32(vgpr(byte_offset_reg_idx), vgpr(byte_offset_reg_idx), vgpr(col_idx_reg_idx)))
-        module.add(ri.vectorStaticMultiply(vgpr(byte_offset_reg_idx), vgpr(byte_offset_reg_idx), self.bpe, None))
+        module.add(vectorStaticMultiply(vgpr(byte_offset_reg_idx), vgpr(byte_offset_reg_idx), self.bpe, None))
         self.vgpr_pool.checkIn(tmp_reg_idx)
         return module, byte_offset_reg_idx
 
@@ -381,8 +384,8 @@ class SoftmaxKernelGenerator:
 
         t_id_reg_idx = self.t_id_reg_idx
         addr_reg_idx = self.vgpr_pool.checkOut(1)
-        mod.add(ri.vectorStaticDivide(addr_reg_idx, t_id_reg_idx, self.num_cols, None))
-        mod.add(ri.vectorStaticMultiply(vgpr(addr_reg_idx), vgpr(addr_reg_idx), self.bpe * self.num_cols, None))
+        mod.add(vectorStaticDivide(addr_reg_idx, t_id_reg_idx, self.num_cols, None))
+        mod.add(vectorStaticMultiply(vgpr(addr_reg_idx), vgpr(addr_reg_idx), self.bpe * self.num_cols, None))
         mod.add(ri.DSLoadB32(vgpr(addr_reg_idx), vgpr(addr_reg_idx)))
         mod.add(ri.SWaitCnt(lgkmcnt=0))
         return mod, addr_reg_idx
@@ -423,13 +426,13 @@ class SoftmaxKernelGenerator:
         col_reg_idx = l_reg_idx + 2
         byte_offset_reg_idx = l_reg_idx + 3
         t_id_reg_idx = self.t_id_reg_idx
-        module.add(ri.vectorStaticDivideAndRemainder(byte_offset_reg_idx, col_reg_idx, t_id_reg_idx, self.num_cols, None))
-        module.add(ri.vectorStaticMultiply(vgpr(byte_offset_reg_idx), vgpr(byte_offset_reg_idx), self.num_cols, None))
+        module.add(vectorStaticDivideAndRemainder(byte_offset_reg_idx, col_reg_idx, t_id_reg_idx, self.num_cols, None))
+        module.add(vectorStaticMultiply(vgpr(byte_offset_reg_idx), vgpr(byte_offset_reg_idx), self.num_cols, None))
         module.add(ri.VAddU32(vgpr(byte_offset_reg_idx), vgpr(byte_offset_reg_idx), vgpr(col_reg_idx)))
-        module.add(ri.vectorStaticMultiply(vgpr(byte_offset_reg_idx), vgpr(byte_offset_reg_idx), self.bpe, None))
+        module.add(vectorStaticMultiply(vgpr(byte_offset_reg_idx), vgpr(byte_offset_reg_idx), self.bpe, None))
         module.add(ri.VMovB32(vgpr(l_reg_idx), vgpr(byte_offset_reg_idx)))
 
-        with ti.allocTmpGpr(self.sgpr_pool, 2, self.sgpr_pool.size(), 1) as tmp_sgpr_res:
+        with allocTmpGpr(self.sgpr_pool, 2, self.sgpr_pool.size(), 1) as tmp_sgpr_res:
             cmp_res_reg_idx = tmp_sgpr_res.idx
             reduction_col_reg_idx = self.vgpr_pool.checkOut(1)
 
@@ -464,13 +467,13 @@ class SoftmaxKernelGenerator:
         col_reg_idx = l_reg_idx + 2
         byte_offset_reg_idx = l_reg_idx + 3
         t_id_reg_idx = self.t_id_reg_idx
-        module.add(ri.vectorStaticDivideAndRemainder(byte_offset_reg_idx, col_reg_idx, t_id_reg_idx, self.num_cols, None))
-        module.add(ri.vectorStaticMultiply(vgpr(byte_offset_reg_idx), vgpr(byte_offset_reg_idx), self.num_cols, None))
+        module.add(vectorStaticDivideAndRemainder(byte_offset_reg_idx, col_reg_idx, t_id_reg_idx, self.num_cols, None))
+        module.add(vectorStaticMultiply(vgpr(byte_offset_reg_idx), vgpr(byte_offset_reg_idx), self.num_cols, None))
         module.add(ri.VAddU32(vgpr(byte_offset_reg_idx), vgpr(byte_offset_reg_idx), vgpr(col_reg_idx)))
-        module.add(ri.vectorStaticMultiply(vgpr(byte_offset_reg_idx), vgpr(byte_offset_reg_idx), self.bpe, None))
+        module.add(vectorStaticMultiply(vgpr(byte_offset_reg_idx), vgpr(byte_offset_reg_idx), self.bpe, None))
         module.add(ri.VMovB32(vgpr(l_reg_idx), vgpr(byte_offset_reg_idx)))
 
-        with ti.allocTmpGpr(self.sgpr_pool, 2, self.sgpr_pool.size(), 1) as tmp_sgpr_res:
+        with allocTmpGpr(self.sgpr_pool, 2, self.sgpr_pool.size(), 1) as tmp_sgpr_res:
             cmp_res_reg_idx = tmp_sgpr_res.idx
             reduction_col_reg_idx = self.vgpr_pool.checkOut(1)
 
@@ -507,7 +510,7 @@ class SoftmaxKernelGenerator:
         mod.add(ri.VMulF32(vgpr(data_reg_idx), 1.0 / log(2), vgpr(data_reg_idx)))
         mod.add(ri.VExpF32(vgpr(data_reg_idx), vgpr(data_reg_idx)))
 
-        if ti.Base._global_ti.getArchCaps()["TransOpWait"]:
+        if _global_ti.getArchCaps()["TransOpWait"]:
             mod.add(ri.SNop(waitState=0, comment="1 wait states"))
 
         return mod
@@ -522,7 +525,7 @@ class SoftmaxKernelGenerator:
 
         mod.add(ri.VRcpF32(vgpr(sum_reg_idx), vgpr(sum_reg_idx)))
 
-        if ti.Base._global_ti.getArchCaps()["TransOpWait"]:
+        if _global_ti.getArchCaps()["TransOpWait"]:
             mod.add(ri.SNop(waitState=0, comment="1 wait states"))
 
         mod.add(ri.VMulF32(vgpr(data_reg_idx), vgpr(data_reg_idx), vgpr(sum_reg_idx)))
@@ -541,7 +544,7 @@ class SoftmaxKernelGenerator:
 
         with auto_exec_scope(self.sgpr_pool, module):
             col_reg_idx = self.vgpr_pool.checkOut(1)
-            module.add(ri.vectorStaticRemainder(-1, col_reg_idx, self.t_id_reg_idx, self.num_cols, None, None))
+            module.add(vectorStaticRemainder(-1, col_reg_idx, self.t_id_reg_idx, self.num_cols, None, None))
             module.add(ri.VCmpXLtU32(VCC(), vgpr(col_reg_idx), sgpr(n_reg_idx)))
             self.vgpr_pool.checkIn(col_reg_idx)
             local_offset_mod, local_byte_offset_reg_idx = self.local_offset(n_reg_idx)
@@ -703,9 +706,9 @@ if __name__ == '__main__':
         arch = isaToGfx(isa)
         toolchain_path = validateToolchain(ToolchainDefaults.CXX_COMPILER)
 
-    ti.Base._global_ti.init(isa, toolchain_path, False)
-    ti.Base._global_ti.setKernel(isa, 64)
-    softmax = SoftmaxKernelGenerator(ti.DataType('S'), n, m, 256, arch)
+    _global_ti.init(isa, toolchain_path, False)
+    _global_ti.setKernel(isa, 64)
+    softmax = SoftmaxKernelGenerator(DataType('S'), n, m, 256, arch)
     kernel_body = softmax.softmax_kernel_body()
     args = softmax.kernel_args()
     func_name = softmax.func_name

@@ -761,12 +761,13 @@ namespace rocisa
     // Perform a sgpr version of magic division algo 2 (mul by magic number, Abit and shift)
     // dest is three consec SGPR, used for intermediate temp as well as final result
     // result quotient returned in sgpr(dest,1)
-    std::shared_ptr<Module> sMagicDiv2(const std::shared_ptr<RegisterContainer>& dst,
-                                       const std::shared_ptr<RegisterContainer>& dst2,
-                                       const std::shared_ptr<RegisterContainer>& dividend,
-                                       const std::shared_ptr<RegisterContainer>& magicNumber,
-                                       const std::shared_ptr<RegisterContainer>& magicShiftAbit,
-                                       const std::shared_ptr<RegisterContainer>& tmpSgpr)
+    inline std::shared_ptr<Module>
+        sMagicDiv2(const std::shared_ptr<RegisterContainer>& dst,
+                   const std::shared_ptr<RegisterContainer>& dst2,
+                   const std::shared_ptr<RegisterContainer>& dividend,
+                   const std::shared_ptr<RegisterContainer>& magicNumber,
+                   const std::shared_ptr<RegisterContainer>& magicShiftAbit,
+                   const std::shared_ptr<RegisterContainer>& tmpSgpr)
     {
         auto module = std::make_shared<Module>("sMagicDiv2");
 

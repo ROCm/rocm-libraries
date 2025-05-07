@@ -21,13 +21,15 @@
 ################################################################################
 
 from rocisa import countInstruction
-from rocisa.container import ContinuousRegister, SMEMModifiers
+from rocisa.code import Module, Label
+from rocisa.container import ContinuousRegister, SMEMModifiers, vgpr, sgpr
 from rocisa.instruction import SAddCU32, SAddU32, SAndB32, SAtomicDec, SBranch, SCBranchSCC0, \
     SCBranchSCC1, SCMovB32, SCSelectB32, SCmpEQI32, SCmpEQU32, SCmpGtI32, SCmpLeI32, SCmpLgU32, SCmpLtU32, \
     SLShiftLeftB32, SLShiftLeftB64, SLShiftRightB32, SMovB32, SMovB64, SMulI32, SNop, VReadfirstlaneB32, SSubI32, SSubU32, \
-    SWaitCnt, scalarStaticMultiply64, scalarUInt32DivideAndRemainder, VAddF32, VAddPKF32, VCmpGEI32, VCndMaskB32, VMovB32
+    SWaitCnt, VAddF32, VAddPKF32, VCmpGEI32, VCndMaskB32, VMovB32
+from rocisa.functions import scalarStaticMultiply64, scalarUInt32DivideAndRemainder
 
-from ..TensileInstructions import Module, Label, sgpr, vgpr, log2
+from ..Common import log2
 from ..Component import Component
 from ..AsmAddressCalculation import AddrCalculation
 import abc
@@ -1044,7 +1046,7 @@ class GSUOn(GSU):
                         module.add(VAddPKF32(dst=vgpr(vgprstart+j*2, 2), src0=vgpr(vgprstart+j*2, 2), \
                                    src1=vgpr(data+j*2, 2), comment="buffer pk"))
 
-                # prefetch 
+                # prefetch
                 if ss.optSrdIncForRow and addrCalc.rowInc:
                     module.add(addrCalc.incrementToNextRow(kernel, "D", ss, tmpS05, dst=tmpS06))
 
@@ -1081,7 +1083,7 @@ class GSUOn(GSU):
                             module.add(VAddPKF32(dst=vgpr(vgprstart+j*2, 2), src0=vgpr(vgprstart+j*2, 2), \
                                                  src1=vgpr(data+j*2, 2), comment="buffer pk"))
 
-                    # prefetch 
+                    # prefetch
                     if ss.optSrdIncForRow and addrCalc.rowInc:
                         module.add(addrCalc.incrementToNextRow(kernel, "D", ss, tmpS05, dst=tmpS06))
 

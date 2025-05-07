@@ -98,7 +98,7 @@ def processKernelSource(kernelWriterAssembly, data, splitGSU, kernel) -> KernelC
     Returns (error, source, header, kernelName).
     """
     kernelWriter = kernelWriterAssembly
-    kernelWriter.setTensileInstructions(data)
+    kernelWriter.setRocIsa(data)
     asmFilename = getKernelFileBase(splitGSU, kernel)
     err, src = kernelWriter.getSourceFileString(kernel)
     header = kernelWriter.getHeaderFileString(kernel)

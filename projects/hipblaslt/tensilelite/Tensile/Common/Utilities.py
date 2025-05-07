@@ -32,9 +32,21 @@ import re
 from inspect import currentframe, getframeinfo
 from copy import deepcopy
 from enum import Enum
+from math import log
 from pathlib import Path
 
 from Tensile import __version__
+
+from rocisa import rocIsa
+
+import pickle
+
+def fastdeepcopy(x):
+    # Note: Some object can't be pickled
+    return pickle.loads(pickle.dumps(x))
+
+# Global
+_global_ti = rocIsa.getInstance()
 
 _verbosity = 1
 
@@ -331,3 +343,29 @@ def isRhel8() -> bool:
         printWarning("Rhel8 environments may not support all tools for system queries such as rocm-smi.")
         return True
     return False
+
+########################################
+# Math
+########################################
+
+def log2(x):
+    return int(log(x, 2) + 0.5)
+
+def ceilDivide(numerator, denominator):
+    # import pdb
+    # pdb.set_trace()
+    try:
+        if numerator < 0 or denominator < 0:
+            raise ValueError
+    except ValueError:
+        print("ERROR: Can't have a negative register value")
+        return 0
+    try:
+        div = int((numerator+denominator-1) // denominator)
+    except ZeroDivisionError:
+        print("ERROR: Divide by 0")
+        return 0
+    return div
+
+def roundUpToNearestMultiple(numerator, denominator):
+    return ceilDivide(numerator,denominator)*int(denominator)

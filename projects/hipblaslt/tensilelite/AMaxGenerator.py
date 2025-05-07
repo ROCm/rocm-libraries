@@ -26,18 +26,18 @@ import rocisa.instruction as ri
 
 from argparse import ArgumentParser
 from dataclasses import dataclass
-from functools import wraps
-from typing import List, Tuple, Optional, Union
-from math import log2, log
+from typing import List, Tuple, Optional
+from math import log2
 import os
 import yaml
 import json
-import subprocess
 import collections
 from contextlib import contextmanager
-import Tensile.TensileInstructions as ti
+from Tensile.Common.Utilities import _global_ti
 from Tensile.Common.Architectures import detectGlobalCurrentISA, isaToGfx, gfxToIsa
+from Tensile.Common.DataType import DataType
 from Tensile.Common.GlobalParameters import restoreDefaultGlobalParameters, assignGlobalParameters
+from Tensile.Common.RegisterPool import RegisterPool
 from Tensile.Toolchain.Validators import ToolchainDefaults, validateToolchain
 
 def kernel_header(name: str, gfx_arch: str, vgpr: int, sgpr: int, lds: int):
@@ -105,9 +105,9 @@ class AMaxKernelGenerator:
     srd_alignment = 4
 
     def __init__(self,
-                 i_type: ti.DataType,
-                 o_type: ti.DataType,
-                 scale_type: ti.DataType,
+                 i_type: DataType,
+                 o_type: DataType,
+                 scale_type: DataType,
                  num_workitems: int,
                  num_load_count: int,
                  num_load_size: int,
@@ -120,8 +120,8 @@ class AMaxKernelGenerator:
         self.num_workitems = num_workitems
         self.num_load_count = num_load_count
         self.num_load_size = num_load_size
-        self.sgpr_pool = ti.RegisterPool(24, 's', True)
-        self.vgpr_pool = ti.RegisterPool(40, 'v', True)
+        self.sgpr_pool = RegisterPool(24, 's', True)
+        self.vgpr_pool = RegisterPool(40, 'v', True)
         self.sgpr_pool.add(0, 23) #TODO: estimate this
         self.vgpr_pool.add(0, 39) #TODO: estimate this
         self.debug_label = True
@@ -277,12 +277,12 @@ class AMaxKernelGenerator:
             self.defineVgpr("OffsetD", self.num_load_count * self.num_load_size, 1)
             self.defineVgpr("OutputD", self.num_load_count * self.num_load_size, self.num_load_size)
             self.defineVgpr("TmpD",    4, 1)
-            if self.scale_type == ti.DataType("F8") or self.scale_type == ti.DataType("F8N"):
+            if self.scale_type == DataType("F8") or self.scale_type == DataType("F8N"):
                 self.defineVgpr("Fp8NanInf", 1, 1)
                 self.defineVgpr("Fp8Max",    1, 1)
                 self.defineVgpr("Fp8Min",    1, 1)
                 self.defineVgpr("Fp8Tmp",    1, 1)
-            elif self.scale_type == ti.DataType("B8") or self.scale_type == ti.DataType("B8N"):
+            elif self.scale_type == DataType("B8") or self.scale_type == DataType("B8N"):
                 self.defineVgpr("BF8NanInf", 1, 1)
                 self.defineVgpr("BF8Max",    1, 1)
                 self.defineVgpr("BF8Min",    1, 1)
@@ -367,15 +367,15 @@ class AMaxKernelGenerator:
 
         mod.add(ri.VMovB32(vgpr("Output"), 0))
         if self.is_scale:
-            if self.scale_type == ti.DataType("F8N"):
+            if self.scale_type == DataType("F8N"):
                 mod.add(ri.VMovB32(vgpr("Fp8NanInf"), "0x207", comment="Nan and +/- inf"))
                 mod.add(ri.VMovB32(vgpr("Fp8Max"), "0x43700000", comment="Fp8 NANOO Max value 240 as float32"))
                 mod.add(ri.VMovB32(vgpr("Fp8Min"), "0xc3700000", comment="Fp8 NANOO Min value -240 as float32"))
-            elif self.scale_type == ti.DataType("F8"):
+            elif self.scale_type == DataType("F8"):
                 mod.add(ri.VMovB32(vgpr("Fp8NanInf"), "0x207", comment="Nan and +/- inf"))
                 mod.add(ri.VMovB32(vgpr("Fp8Max"), "0x43e00000", comment="Fp8 Max value 448 as float32"))
                 mod.add(ri.VMovB32(vgpr("Fp8Min"), "0xc3e00000", comment="Fp8 Min value -448 as float32"))
-            elif self.scale_type == ti.DataType("B8") or self.scale_type == ti.DataType("B8N"):
+            elif self.scale_type == DataType("B8") or self.scale_type == DataType("B8N"):
                 mod.add(ri.VMovB32(vgpr("BF8NanInf"), "0x207", comment="Nan and +/- inf"))
                 mod.add(ri.VMovB32(vgpr("BF8Max"), "0x47600000", comment="BF8 Max value 57344 as float32"))
                 mod.add(ri.VMovB32(vgpr("BF8Min"), "0xc7600000", comment="BF8 Min value -57344 as float32"))
@@ -436,12 +436,12 @@ class AMaxKernelGenerator:
         mod = Module("scale_per_data")
         if self.is_scale:
             mod.add(ri.VMulF32(vgpr(f"OutputD+{i}"), sgpr("Scale"), vgpr(f"Value+{i}")))
-            if self.scale_type == ti.DataType("F8") or self.scale_type == ti.DataType("F8N"):
+            if self.scale_type == DataType("F8") or self.scale_type == DataType("F8N"):
                 mod.add(ri.VCmpClassF32(dst=VCC(), src0=vgpr(f"OutputD+{i}"), src1=vgpr("Fp8NanInf")))
                 mod.add(ri.VMed3F32(dst=vgpr("Fp8Tmp"), src0=vgpr(f"OutputD+{i}"), src1=vgpr("Fp8Min"), src2=vgpr("Fp8Max")))
                 mod.add(ri.VCndMaskB32(dst=vgpr(f"OutputD+{i}"), src0=vgpr("Fp8Tmp"), src1=vgpr(f"OutputD+{i}"), src2=VCC()))
                 mod.add(ri.VCvtPkF32toFP8(vgpr(f"OutputD+{i}"), vgpr(f"OutputD+{i}"), vgpr(f"OutputD+{i}")))
-            elif self.scale_type == ti.DataType("B8") or self.scale_type == ti.DataType("B8N"):
+            elif self.scale_type == DataType("B8") or self.scale_type == DataType("B8N"):
                 mod.add(ri.VCmpClassF32(dst=VCC(), src0=vgpr(f"OutputD+{i}"), src1=vgpr("BF8NanInf")))
                 mod.add(ri.VMed3F32(dst=vgpr("BF8Tmp"), src0=vgpr(f"OutputD+{i}"), src1=vgpr("BF8Min"), src2=vgpr("BF8Max")))
                 mod.add(ri.VCndMaskB32(dst=vgpr(f"OutputD+{i}"), src0=vgpr("BF8Tmp"), src1=vgpr(f"OutputD+{i}"), src2=VCC()))
@@ -857,9 +857,9 @@ if __name__ == '__main__':
         arch = isaToGfx(isa)
         toolchain_path = validateToolchain(ToolchainDefaults.CXX_COMPILER)
 
-    ti.Base._global_ti.init(isa, toolchain_path, False)
-    ti.Base._global_ti.setKernel(isa, 64)
-    amax = AMaxKernelGenerator(ti.DataType(t), ti.DataType(d), ti.DataType(s), w, c, 4, arch, is_scale)
+    _global_ti.init(isa, toolchain_path, False)
+    _global_ti.setKernel(isa, 64)
+    amax = AMaxKernelGenerator(DataType(t), DataType(d), DataType(s), w, c, 4, arch, is_scale)
     kernel_body = amax.amax_kernel_body()
     args = amax.kernel_args()
     func_name = amax.func_name

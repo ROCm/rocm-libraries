@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -20,9 +20,9 @@
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ################################################################################
 
-from .TensileInstructions import DataType
 from .AsmAddressCalculation import AddrCalculation
 from .Common import DataDirection
+from .Common.DataType import DataType
 
 from math import ceil, trunc, modf
 from dataclasses import dataclass, field
@@ -53,7 +53,7 @@ class VectorDataTypes:
 
   def isValid(self):
     return self.scaleA.dataType != None or self.scaleB.dataType != None or self.biasM.dataType != None \
-    or self.scaleAlphaM.dataType != None or self.biasN.dataType != None or self.scaleAlphaN.dataType != None 
+    or self.scaleAlphaM.dataType != None or self.biasN.dataType != None or self.scaleAlphaN.dataType != None
 
 ##############################################################################
 # StoreState
@@ -753,7 +753,7 @@ class StoreState:
             self.elementAddr.append(AddrCalculation(kw, self, addrCVgpr, addrDVgpr, addrGSUSyncVgprs, addrEVgpr, addrBiasVgpr, addrScaleAVecVgpr, addrScaleBVecVgpr, addrScaleAlphaVecVgpr, element, coordOffset0, \
               self.kernelWriter.vgprs.coord1, coordOffset1, coordOffset1 - self.lastCoordOffset1, newCoord1, self.vectorDataTypes))
             self.lastCoordOffset1 = coordOffset1
-            
+
         # reset flag
         self.isReset = False
 

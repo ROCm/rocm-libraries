@@ -20,8 +20,9 @@
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ################################################################################
 
+from rocisa.code import Module, Label
+from rocisa.container import vgpr, sgpr
 from rocisa.instruction import VMovB32, SCmpGeU32
-from ..TensileInstructions import Module, Label, vgpr, sgpr
 from ..Component import Component
 import abc
 

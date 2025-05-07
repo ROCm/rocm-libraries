@@ -22,17 +22,15 @@
 #
 ################################################################################
 
-from rocisa.code import RegSet
-from rocisa.container import EXEC, vgpr, sgpr
+from rocisa.code import RegSet, Module
+from rocisa.container import EXEC, vgpr, sgpr, SDWAModifiers, DSModifiers, ContinuousRegister
+from rocisa.enum import SelectBit
 from rocisa.instruction import DSStoreB16, DSStoreB32, DSStoreB64, SBarrier, \
     SMovB32, SSetMask, VAddF32, VAddU32, VCmpXEqU32, VCvtPkBF8toF32, VCvtPkFP8toF32, \
-    VDot2F32BF16, VDot2F32F16, VLShiftLeftB32, VMovB32, vectorStaticDivide, \
-    vectorStaticRemainder, vectorStaticMultiply
+    VDot2F32BF16, VDot2F32F16, VLShiftLeftB32, VMovB32, VCvtBF16toFP32
+from rocisa.functions import vectorStaticDivide, vectorStaticRemainder, vectorStaticMultiply
 from ..Component import SumUnroll
-from ..Common import printExit
-from ..TensileInstructions.ExtInstructions import VCvtBF16toFP32
-from ..TensileInstructions import Module, SDWAModifiers, SelectBit, \
-    DSModifiers, ContinuousRegister, log2
+from ..Common import printExit, log2
 
 class SumUnrollMfma(SumUnroll):
     kernel = {"EnableMatrixInstruction": True}
@@ -129,8 +127,8 @@ class SumUnrollMfma(SumUnroll):
                             if writer.states.asmCaps['v_dot2_f32_bf16']:
                                 imod.add(VDot2F32BF16(dst=vgpr(valuSumStr), src0=vgpr("%s+%s"%(valuStr, iui_new_offset + inputIdx)), src1=sgpr("SumUnrollConstOne"), src2=vgpr(valuSumStr), comment="sum K"))
                             else:
-                                imod.add(VCvtBF16toFP32(dst=(tmpVgpr), src=("%s+%s"%(valuStr, iui_new_offset + inputIdx)), vgprMask=None, vi=0))
-                                imod.add(VCvtBF16toFP32(dst=(tmpVgpr+1), src=("%s+%s"%(valuStr, iui_new_offset + inputIdx)), vgprMask=hiBitsMaskVgpr, vi=1))
+                                imod.add(VCvtBF16toFP32(dst=vgpr(tmpVgpr), src=vgpr("%s+%s"%(valuStr, iui_new_offset + inputIdx)), vgprMask=None, vi=0))
+                                imod.add(VCvtBF16toFP32(dst=vgpr(tmpVgpr+1), src=vgpr("%s+%s"%(valuStr, iui_new_offset + inputIdx)), vgprMask=vgpr(hiBitsMaskVgpr), vi=1))
                                 imod.add(VAddF32(dst=vgpr(valuSumStr), src0=vgpr(tmpVgpr), src1=vgpr(valuSumStr), comment="sum K"))
                                 imod.add(VAddF32(dst=vgpr(valuSumStr), src0=vgpr(tmpVgpr+1), src1=vgpr(valuSumStr), comment="sum K"))
                     else:

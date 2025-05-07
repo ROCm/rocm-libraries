@@ -24,9 +24,9 @@ from rocisa.code import Module, Label, RegSet
 from rocisa.container import DSModifiers, ContinuousRegister
 from rocisa.instruction import DSLoadB128, DSLoadB32, DSLoadB64, DSStoreB128, \
     DSStoreB32, DSStoreB64, SAndB32, SCBranchSCC0, SCmpEQU32, SMovB32, SWaitCnt, \
-    VAddF32, VAddI32, VAddU32, VAndB32, VLShiftLeftAddU32, VMovB32, VMulLOU32, \
-    vectorStaticDivide
-from ..TensileInstructions import log2, ceilDivide
+    VAddF32, VAddI32, VAddU32, VAndB32, VLShiftLeftAddU32, VMovB32, VMulLOU32
+from rocisa.functions import vectorStaticDivide
+from ..Common import log2, ceilDivide
 from ..Component import Component
 from ..KernelWriterModules import *
 from ..AsmStoreState import StoreState, VectorDataTypes

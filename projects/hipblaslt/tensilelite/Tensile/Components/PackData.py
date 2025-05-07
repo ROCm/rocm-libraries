@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -23,17 +23,16 @@
 from rocisa import rocIsa
 from rocisa.code import Module
 from rocisa.container import vgpr, sgpr,SDWAModifiers, VOP3PModifiers
-from rocisa.enum import DataTypeEnum, SelectBit, UnusedBit
+from rocisa.enum import DataTypeEnum, SelectBit, UnusedBit, SaturateCastType
 from rocisa.instruction import VAdd3U32, VCvtF32toF16, VLShiftRightB32, \
                             VCmpUF32, VCndMaskB32, VCvtPkF32toFP8, VCvtPkF32toBF8, \
                             VCmpClassF32, VOrB32, VPackF16toB32, \
                             VAndOrB32, VBfeU32, VLShiftLeftB16, SNop, VMed3F32, \
                             VCvtPkF32toBF16, VAndB32, \
                             VMovB32, VLShiftLeftB32
+from rocisa.functions import VSaturateCastInt
 
-from ..TensileInstructions import DataType, \
-                            SaturateCastType, VSaturateCastInt
-
+from ..Common.DataType import DataType
 from ..Component import PackData
 
 def formatting(idx, inputPrefix, prefixOffset):

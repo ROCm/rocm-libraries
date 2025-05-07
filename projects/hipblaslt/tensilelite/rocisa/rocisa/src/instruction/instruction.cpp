@@ -62,7 +62,6 @@ void cvt_inst(nb::module_ m);
 void mem_inst(nb::module_ m);
 void mfma_inst(nb::module_ m);
 void ext_inst(nb::module_ m);
-void math_inst(nb::module_ m);
 
 using InstructionInputVector = std::vector<InstructionInput>;
 
@@ -156,5 +155,4 @@ void init_inst(nb::module_ m)
     mem_inst(m_inst);
     mfma_inst(m_inst);
     ext_inst(m_inst);
-    math_inst(m_inst);
 }

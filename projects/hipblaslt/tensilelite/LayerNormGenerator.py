@@ -27,18 +27,18 @@ import rocisa.instruction as ri
 
 from argparse import ArgumentParser
 from dataclasses import dataclass
-from functools import wraps
-from typing import List, Tuple, Optional, Union
-from math import log2, log
+from typing import List, Tuple, Optional
+from math import log2
 import os
 import yaml
 import json
-import subprocess
 import collections
 from contextlib import contextmanager
-import Tensile.TensileInstructions as ti
+from Tensile.Common.Utilities import _global_ti
 from Tensile.Common.Architectures import detectGlobalCurrentISA, isaToGfx, gfxToIsa
+from Tensile.Common.DataType import DataType
 from Tensile.Common.GlobalParameters import assignGlobalParameters, restoreDefaultGlobalParameters
+from Tensile.Common.RegisterPool import RegisterPool
 from Tensile.Toolchain.Validators import ToolchainDefaults, validateToolchain
 
 def kernel_header(name: str, gfx_arch: str, vgpr: int, sgpr: int, lds: int):
@@ -108,7 +108,7 @@ class LayerNormKernelGenerator:
     srd_alignment = 4
 
     def __init__(self,
-                 io_type: ti.DataType,
+                 io_type: DataType,
                  num_workitems: int,
                  num_load_count: int,
                  num_load_size: int,
@@ -120,8 +120,8 @@ class LayerNormKernelGenerator:
         self.num_load_count = num_load_count
         self.num_load_size = num_load_size
         self.sweep_once = sweep_once
-        self.sgpr_pool = ti.RegisterPool(24, 's', True)
-        self.vgpr_pool = ti.RegisterPool(40, 'v', True)
+        self.sgpr_pool = RegisterPool(24, 's', True)
+        self.vgpr_pool = RegisterPool(40, 'v', True)
         self.sgpr_pool.add(0, 23) #TODO: estimate this
         self.vgpr_pool.add(0, 39) #TODO: estimate this
         self.debug_label = True
@@ -258,7 +258,7 @@ class LayerNormKernelGenerator:
         mod.add(ri.SLoadB64(sgpr("AddressBeta", 2),   sgpr("KernelArg", 2), 40))
         mod.add(ri.SLoadB32(sgpr("SizeLength"),       sgpr("KernelArg", 2), 52))
         mod.add(ri.SLoadB32(sgpr("Eps"),              sgpr("KernelArg", 2), 56))
-        mod.add(ti.SWaitCnt(lgkmcnt=0))
+        mod.add(ri.SWaitCnt(lgkmcnt=0))
         mod.addSpaceLine()
         return mod
 
@@ -935,9 +935,9 @@ if __name__ == '__main__':
         arch = isaToGfx(isa)
         toolchain_path = validateToolchain(ToolchainDefaults.CXX_COMPILER)
 
-    ti.Base._global_ti.init(isa, toolchain_path, False)
-    ti.Base._global_ti.setKernel(isa, 64)
-    layernorm = LayerNormKernelGenerator(ti.DataType('S'), w, c, 4, sweep_once, arch)
+    _global_ti.init(isa, toolchain_path, False)
+    _global_ti.setKernel(isa, 64)
+    layernorm = LayerNormKernelGenerator(DataType('S'), w, c, 4, sweep_once, arch)
     kernel_body = layernorm.layernorm_kernel_body()
     args = layernorm.kernel_args()
     func_name = layernorm.func_name

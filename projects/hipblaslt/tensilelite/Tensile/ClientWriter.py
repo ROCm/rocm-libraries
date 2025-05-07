@@ -126,11 +126,11 @@ def main(config, assembler: Assembler, cCompiler: str, isaInfoMap, outputPath: P
   printIndexAssignmentInfo = False
   for logicFileName in logicFiles:
     (scheduleName, _, problemType, _, exactLogic, newLibrary) \
-        = LibraryIO.parseLibraryLogicFile(logicFileName, 
-                                          assembler, 
+        = LibraryIO.parseLibraryLogicFile(logicFileName,
+                                          assembler,
                                           splitGSU,
                                           printSolutionRejectionReason,
-                                          printIndexAssignmentInfo, 
+                                          printIndexAssignmentInfo,
                                           DepthUConfig(),
                                           isaInfoMap,
                                           globalParameters["LazyLibraryLoading"])
@@ -536,19 +536,19 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
         param('results-file', resultsFileName)
         param('performance-metric', globalParameters["PerformanceMetric"])
         param('problem-identifier', problemType.operationIdentifier)
-        param('compute-input-type', problemType.computeInputType.toEnum())
-        param('a-type',     problemType.aType.toEnum())
-        param('b-type',     problemType.bType.toEnum())
-        param('c-type',     problemType.cType.toEnum())
-        param('d-type',     problemType.dType.toEnum())
+        param('compute-input-type', problemType.computeInputType.toName())
+        param('a-type',     problemType.aType.toName())
+        param('b-type',     problemType.bType.toName())
+        param('c-type',     problemType.cType.toName())
+        param('d-type',     problemType.dType.toName())
         if problemType.useE:
-            param('e-type',     problemType.eType.toEnum())
+            param('e-type',     problemType.eType.toName())
         if problemType.outputAmaxD:
-            param('amaxD-type',     problemType.amaxDType.toEnum())
-        param('alpha-type', problemType.alphaType.toEnum())
-        param('beta-type',  problemType.betaType.toEnum())
-        param('f32-xdl-math-op', problemType.f32XdlMathOp.toEnum())
-        param('activation-compute-type', problemType.activationComputeDataType.toEnum())
+            param('amaxD-type',     problemType.amaxDType.toName())
+        param('alpha-type', problemType.alphaType.toName())
+        param('beta-type',  problemType.betaType.toName())
+        param('f32-xdl-math-op', problemType.f32XdlMathOp.toName())
+        param('activation-compute-type', problemType.activationComputeDataType.toName())
         param('use-gradient', problemType.useGradient)
         param('use-bias',   problemType.useBias)
         param('bias-source',   problemType.biasSrcWhiteList[0])
@@ -561,7 +561,7 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
         param('swizzle-tensor-b', problemType.swizzleTensorB)
         if biasTypeArgs:
           for btype in biasTypeArgs.biasTypes:
-            param('bias-type-args',  btype.toEnum())
+            param('bias-type-args',  btype.toName())
         if factorDimArgs:
           for fdim in factorDimArgs.factorDims:
             param('factor-dim-args', fdim)

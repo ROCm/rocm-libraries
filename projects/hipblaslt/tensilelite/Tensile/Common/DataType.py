@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2022-2023 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -231,7 +231,7 @@ class DataType:
     def toNameAbbrev(self):
         return self.properties['nameAbbrev']
     def toEnum(self):
-        return self.properties['enum'].name
+        return self.properties['enum']
     def toDevice(self, language):
         if language == "HIP":
             return self.properties['hip']
@@ -386,7 +386,7 @@ class DataType:
     def flopsPerMac(self):
         return 2 if self.isReal() else 8
 
-    def state(self): return self.toEnum()
+    def state(self): return self.toName()
 
     def __str__(self):
         return self.toChar()

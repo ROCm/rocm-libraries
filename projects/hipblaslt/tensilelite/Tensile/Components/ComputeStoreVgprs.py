@@ -22,14 +22,13 @@
 #
 ################################################################################
 
-from rocisa.container import ContinuousRegister
-from rocisa.instruction import SMulI32, VAddLShiftLeftU32, VAddU32, VMovB32, VMulLOU32, \
-    vectorStaticRemainder, vectorStaticDivideAndRemainder, vectorStaticDivide, vectorStaticMultiply
-from ..TensileInstructions import Module, vgpr, \
-                            sgpr, log2
+from rocisa.code import Module
+from rocisa.container import ContinuousRegister, vgpr, sgpr
+from rocisa.instruction import SMulI32, VAddLShiftLeftU32, VAddU32, VMovB32, VMulLOU32
+from rocisa.functions import vectorStaticRemainder, vectorStaticDivideAndRemainder, vectorStaticDivide, vectorStaticMultiply
 
 from ..Component import ComputeStoreVgprs
-from ..Common import DataDirection
+from ..Common import DataDirection, log2
 
 class ComputeStoreVgprsVALU(ComputeStoreVgprs):
     kernel = {"EnableMatrixInstruction": False,

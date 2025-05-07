@@ -25,8 +25,9 @@ from rocisa.container import vgpr, sgpr, accvgpr, Holder
 from rocisa.instruction import SBarrier, SBranch, SMovB32, SMovB64, SWaitCnt, \
   VAccvgprReadB32, VAccvgprWriteB32, VFmaF32, VFmaF64, VLShiftLeftB64, VMovB32, \
   VMulF32, VMulF64, VMulLOU32, VMulPKF16
+from rocisa.functions import BranchIfNotZero
 
-from .TensileInstructions import DataType, SBranchIfNotZero
+from Tensile.Common.DataType import DataType
 
 def allocPostLoopSrdSuppressRaw(ch: str, chAddress: str, labelStr: str, sgprLength) -> Module:
     module = Module("allocPostLoopSrdSuppress")
@@ -35,7 +36,7 @@ def allocPostLoopSrdSuppressRaw(ch: str, chAddress: str, labelStr: str, sgprLeng
     # Buffer-load uses one base read pointer stored in the SRD - set it here:
     module.add(SMovB64(dst=sgpr("Srd%s+0"%ch, 2), src=sgpr("Address%s+0"%chAddress, 2), comment="init SRD base address" ))
     module.add(SMovB32(dst=sgpr("Srd%s+3"%ch), src="Srd127_96", comment="Set bits 127_96 in post-loop SRD"))
-    module.add(SBranchIfNotZero("Address%s"%chAddress, DataType('int64'), label))
+    module.add(BranchIfNotZero("Address%s"%chAddress, DataType('int64').toEnum(), label))
     module.add(SMovB32(dst=sgpr("Srd%s+2"%ch), src=0))
     module.add(SBranch(label2.getLabelName()))
     module.add(label)
