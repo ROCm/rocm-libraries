@@ -219,6 +219,12 @@ function(TensileCreateLibraryFiles
   if (WIN32 OR (VIRTUALENV_BIN_DIR AND VIRTUALENV_PYTHON_EXENAME))
     set(CommandLine ${VIRTUALENV_BIN_DIR}/${VIRTUALENV_PYTHON_EXENAME} ${CommandLine})
   endif()
+  # Tensile relies on the tools from the path, so capture the configure time
+  # path. It would be better if this were explicit, but that would be a pretty
+  # big change.
+  set(CommandLine
+    "${CMAKE_COMMAND}" -E env "'PATH=$ENV{PATH}'" --
+    ${CommandLine})
   message(STATUS "Tensile_CREATE_COMMAND: ${CommandLine}")
 
   if(Tensile_EMBED_LIBRARY)
@@ -244,7 +250,8 @@ function(TensileCreateLibraryFiles
           OUTPUT_VARIABLE ASAN_LIB_PATH
           COMMAND_ECHO STDOUT)
         string(STRIP ${ASAN_LIB_PATH} ASAN_LIB_PATH)
-        set(CommandLine env LD_PRELOAD=${ASAN_LIB_PATH} ${CommandLine})
+        set(CommandLine ${CMAKE_COMMAND} -E env "'LD_PRELOAD=${ASAN_LIB_PATH}'" --
+            ${CommandLine})
       endif()
 
       add_custom_command(
