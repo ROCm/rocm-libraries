@@ -11,11 +11,11 @@ import os
 import requests
 import logging
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class GitHubAPIClient:
-    def __init__(self):
+    def __init__(self) -> None:
+        """Initialize the GitHub API client."""
         token = os.getenv("GH_TOKEN")
         if not token:
             raise EnvironmentError("GH_TOKEN environment variable not set.")

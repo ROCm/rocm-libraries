@@ -19,7 +19,7 @@ Arguments:
 
 Example Usage:
     To run in debug mode and perform a dry-run (no changes made):
-    python pr-reflect-checks.py --repo ROCm/rocm-libraries --pr 123 --debug --dry-run
+        python pr-reflect-checks.py --repo ROCm/rocm-libraries --pr 123 --debug --dry-run
 """
 
 import argparse
@@ -37,7 +37,7 @@ def parse_arguments(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Reflect fanned-out PR checks onto the monorepo PR.")
     parser.add_argument("--repo", required=True, help="Full repository name (e.g., org/repo)")
     parser.add_argument("--pr", required=True, help="Pull request number")
-    parser.add_argument("--config", required=False, default=".github/repos-config.json")
+    parser.add_argument("--config", required=False, default=".github/repos-config.json", help="Path to the repos-config.json file")
     parser.add_argument("--dry-run", action="store_true", help="If set, only logs actions without making changes.")
     parser.add_argument("--debug", action="store_true", help="If set, enables detailed debug logging.")
     return parser.parse_args(argv)

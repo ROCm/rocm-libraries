@@ -20,13 +20,11 @@ import json
 import logging
 from typing import List, Optional
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class GitHubCLIClient:
-    """Client for interacting with GitHub via the `gh` CLI."""
-
-    def __init__(self):
+    def __init__(self) -> None:
+        """Initialize the GitHub CLI client."""
         if not self._gh_available():
             raise EnvironmentError("GitHub CLI (`gh`) is not installed or not in PATH.")
 
@@ -62,7 +60,12 @@ class GitHubCLIClient:
         logger.debug(f"Changed files in PR #{pr}: {files}")
         return files
 
-    def get_existing_labels(self, repo: str, pr: int) -> List[str]:
+    def get_defined_labels(self, repo: str) -> List[str]:
+        """Get all labels defined in the given repository."""
+        result = self._run_gh_command(["label", "list", "--repo", repo, "--json", "name"])
+        return [label["name"] for label in json.loads(result.stdout)]
+
+    def get_existing_labels_on_pr(self, repo: str, pr: int) -> List[str]:
         """Fetch current labels on a PR."""
         result = self._run_gh_command(
             ["pr", "view", str(pr), "--repo", repo, "--json", "labels"]
@@ -97,40 +100,26 @@ class GitHubCLIClient:
         self._run_gh_command(cmd, dry_run=dry_run)
         logger.info(f"Created PR from {head} to {base} in {repo}.")
 
-    def pr_edit(self, repo: str, head: str, title: str, body: str, dry_run: Optional[bool] = False) -> None:
-        """Edit an existing pull request (title/body)."""
-        cmd = [
-            "pr", "edit",
-            "--repo", repo,
-            "--head", head,
-            "--title", title,
-            "--body", body
-        ]
-        self._run_gh_command(cmd, dry_run=dry_run)
-        logger.info(f"Edited PR for head '{head}' in {repo}.")
-
-    def sync_labels(self, source_repo: str, target_repo: str, labels: List[str], dry_run: Optional[bool] = False) -> None:
+    def sync_labels(self, target_repo: str, pr_number: int, labels: List[str], dry_run: Optional[bool] = False) -> None:
         """Sync labels from the source repo to the target repo (only apply existing labels)."""
+        logger.debug(f"Syncing labels to {target_repo} PR #{pr_number}.")
         result = self._run_gh_command(
-            ["label", "list", "--repo", source_repo]
-        )
-        source_repo_labels = {label["name"] for label in json.loads(result.stdout)}
-        result = self._run_gh_command(
-            ["label", "list", "--repo", target_repo]
+            ["label", "list", "--repo", target_repo, "--json", "name"]
         )
         target_repo_labels = {label["name"] for label in json.loads(result.stdout)}
         labels_set = set(labels)
-        labels_to_apply = labels_set & source_repo_labels & target_repo_labels
-        # Apply labels that exist in both source and target repos
+        labels_to_apply = labels_set & target_repo_labels
+        # Apply labels that exist in both source PR and target repos
         # Wrap in quotes if label contains spaces
         labels_arg = ",".join(f'"{label}"' if " " in label else label for label in labels_to_apply)
         cmd = [
             "pr", "edit",
+            str(pr_number),
             "--repo", target_repo,
             "--add-label", labels_arg
         ]
         if not dry_run:
             self._run_gh_command(cmd, dry_run=dry_run)
-            logger.info(f"Applied labels '{labels_arg}' to PR in {target_repo}.")
+            logger.info(f"Applied labels '{labels_arg}' to PR #{pr_number} in {target_repo}.")
         else:
-            logger.info(f"Dry run: Labels '{labels_arg}' would be applied to PR in {target_repo}.")
+            logger.info(f"Dry run: Labels '{labels_arg}' would be applied to PR #{pr_number} in {target_repo}.")

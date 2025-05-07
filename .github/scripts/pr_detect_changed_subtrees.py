@@ -2,7 +2,7 @@
 
 """
 PR Detect Changed Subtrees Script
-------------------
+---------------------------------
 This script analyzes a pull request's changed files and determines which subtrees
 (defined in .github/repos-config.json by category/name) were affected.
 
@@ -10,7 +10,7 @@ Steps:
     1. Fetch the changed files in the PR using the GitHub API.
     2. Load the subtree mapping from repos-config.json.
     3. Match changed paths against known category/name prefixes.
-    4. Emit a comma-separated list of changed subtrees to GITHUB_OUTPUT as 'subtrees'.
+    4. Emit a new-line separated list of changed subtrees to GITHUB_OUTPUT as 'subtrees'.
 
 Arguments:
     --repo      : Full repository name (e.g., org/repo)
@@ -21,16 +21,12 @@ Arguments:
 
 Outputs:
     Writes 'subtrees' key to the GitHub Actions $GITHUB_OUTPUT file, which
-    the workflow reads to call the subsequent python script to create/update PRs.
-    The output is a new-line separated list of subtrees.
+    the workflow reads to pass paths to the checkout and fanout stages.
+    The output is a new-line separated list of subtrees in `category/name` format.
 
 Example Usage:
-
     To run in debug mode and perform a dry-run (no changes made):
-    python pr_detect_changed_subtrees.py --repo ROCm/rocm-libraries --pr 123 --dry-run
-
-    To run in debug mode and get the changed subtrees output:
-    python pr_detect_changed_subtrees.py --repo ROCm/rocm-libraries --pr 123 --debug
+        python pr_detect_changed_subtrees.py --repo ROCm/rocm-libraries --pr 123 --dry-run
 """
 
 import argparse
@@ -68,7 +64,7 @@ def find_matched_subtrees(changed_files: List[str], valid_prefixes: Set[str]) ->
         for path in changed_files
         if len(path.split("/")) >= 2
     }
-    matched = sorted(prefix.split("/", 1)[1] for prefix in (changed_subtrees & valid_prefixes))
+    matched = sorted(changed_subtrees & valid_prefixes)
     logger.debug(f"Matched subtrees: {matched}")
     return matched
 
@@ -82,7 +78,7 @@ def output_subtrees(matched_subtrees: List[str], dry_run: bool) -> None:
         if output_file:
             with open(output_file, 'a') as f:
                 print(f"subtrees<<EOF\n{newline_separated}\nEOF", file=f)
-            logger.info(f"Wrote to GITHUB_OUTPUT: subtrees=<newline-separated values>")
+            logger.info("Wrote matched subtrees to GITHUB_OUTPUT.")
         else:
             logger.error("GITHUB_OUTPUT environment variable not set. Outputs cannot be written.")
             sys.exit(1)

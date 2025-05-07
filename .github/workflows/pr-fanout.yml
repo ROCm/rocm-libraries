@@ -29,6 +29,7 @@ jobs:
         with:
           sparse-checkout: .github
           sparse-checkout-cone-mode: true
+          token: ${{ secrets.MONOREPO_BOT_TOKEN }} # since we are touching subrepository PRs
 
       - name: Set up Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
@@ -43,7 +44,7 @@ jobs:
       - name: Detect changed subtrees
         id: detect
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.MONOREPO_BOT_TOKEN }}
         run: |
           python .github/scripts/pr_detect_changed_subtrees.py \
             --repo "${{ github.repository }}" \
@@ -58,11 +59,12 @@ jobs:
             .github
             ${{ steps.detect.outputs.subtrees }}
           fetch-depth: 0  # Needed for subtree splitting
+          token: ${{ secrets.MONOREPO_BOT_TOKEN }}
 
       - name: Fan out child PRs
         if: steps.detect.outputs.subtrees
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.MONOREPO_BOT_TOKEN }}
         run: |
           python .github/scripts/pr_fanout.py \
             --repo "${{ github.repository }}" \

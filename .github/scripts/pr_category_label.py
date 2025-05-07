@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 
 """
-PR Auto Label Script
+PR Category Label Script
 --------------------
 This script analyzes the file paths changed in a pull request and determines which
-labels should be added or removed based on the modified files.
+category labels should be added or removed based on the modified files.
 
 It uses GitHub's cli to fetch the changed files and the existing labels on the pull request.
 Then, it computes the desired labels based on file paths, compares them to the existing labels,
@@ -21,10 +21,8 @@ Outputs:
     the workflow reads to apply label changes using the GitHub CLI.
 
 Example Usage:
-
     To run in debug mode and perform a dry-run (no changes made):
         python pr_auto_label.py --repo ROCm/rocm-libraries --pr <pr-number> --dry-run --debug
-
     To run in debug mode and apply label changes:
         python pr_auto_label.py --repo ROCm/rocm-libraries --pr <pr-number> --debug
 """
@@ -93,7 +91,7 @@ def main(argv=None) -> None:
         logger.setLevel(logging.DEBUG)
     client = GitHubCLIClient()
     changed_files = [file for file in client.get_changed_files(args.repo, int(args.pr))]
-    existing_labels = client.get_existing_labels(args.repo, int(args.pr))
+    existing_labels = client.get_existing_labels_on_pr(args.repo, int(args.pr))
     desired_labels = compute_desired_labels(changed_files)
     output_labels(existing_labels, desired_labels, args.dry_run)
 
