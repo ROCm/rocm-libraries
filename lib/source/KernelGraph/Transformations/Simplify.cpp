@@ -25,6 +25,7 @@
  *******************************************************************************/
 
 #include <map>
+#include <queue>
 #include <unordered_set>
 #include <vector>
 
@@ -58,11 +59,165 @@ namespace rocRoller::KernelGraph
      */
     void removeRedundantSequenceEdges(KernelGraph& graph)
     {
-        auto isSequence = graph.control.isElemType<Sequence>();
-        for(auto edge : Graph::findRedundantEdges(graph.control, isSequence))
+        TIMER(t, "removeRedundantSequenceEdges");
+
+        std::unordered_map<int, std::unordered_set<int>> predecessors;
+        std::unordered_map<int, std::vector<int>>        successors;
+
+        for(auto const node : graph.control.getNodes())
         {
-            Log::debug("Deleting redundant Sequence edge: {}", edge);
-            graph.control.deleteElement(edge);
+            predecessors[node];
+            successors[node];
+            for(auto const parent : graph.control.getInputNodeIndices<Sequence>(node))
+            {
+                if(predecessors.at(node).contains(parent))
+                {
+                    //
+                    // Two nodes are connected by more than one (sequence) edge.
+                    // Each pair of nodes should be connected by at most one
+                    // (sequence) edge after the outer for-loop finishes.
+                    //
+                    graph.control.deleteElement<Sequence>(std::vector<int>{parent},
+                                                          std::vector<int>{node});
+                }
+                else
+                    predecessors.at(node).insert(parent);
+            }
+        }
+
+        for(auto const& [k, pred] : predecessors)
+            for(auto const& p : pred)
+                successors.at(p).push_back(k);
+
+        std::vector<int> roots;
+        for(auto const& [k, pred] : predecessors)
+        {
+            if(pred.empty())
+                roots.push_back(k);
+        }
+
+        //
+        // Calculate depth of each node
+        //
+        std::unordered_map<int, int> depth;
+        std::queue<int>              readyQueue;
+        std::unordered_set<int>      visited;
+        for(auto r : roots)
+        {
+            depth[r] = 0;
+            readyQueue.push(r);
+            visited.insert(r);
+        }
+
+        std::unordered_map<int, int> hit;
+        while(not readyQueue.empty())
+        {
+            auto node = readyQueue.front();
+            readyQueue.pop();
+
+            for(auto successor : successors.at(node))
+            {
+                if(visited.contains(successor))
+                    continue;
+
+                depth[successor] = std::max(depth[successor], depth.at(node) + 1);
+                hit[successor]++;
+                if(hit.at(successor) == predecessors.at(successor).size())
+                {
+                    readyQueue.push(successor);
+                    visited.insert(successor);
+                }
+            }
+        }
+
+        // TODO: sorting in unnecessary as we just want to know the maximum depth among successors
+        for(auto& [node, children] : successors)
+            std::sort(children.begin(), children.end(), [&](int a, int b) {
+                return depth.at(a) < depth.at(b);
+            });
+
+        std::vector<int>             round = std::move(roots);
+        std::vector<int>             next_round;
+        std::unordered_map<int, int> seen;
+
+        // TODO: might use a queue to replace the two buffers (round and next_round)
+        while(!round.empty())
+        {
+            for(auto node : round)
+            {
+                //
+                // Skip leaves as they have no successors
+                //
+                if(successors.at(node).empty())
+                    continue;
+
+                //
+                // Check the node's successors to see if a successor can be reached (seen)
+                // more than once. If true, the sequence edge between the node and that
+                // successor is redundant and can be removed.
+                //
+                readyQueue = {}; // no clear method
+                visited.clear();
+                seen.clear();
+
+                for(auto successor : successors.at(node))
+                {
+                    readyQueue.push(successor);
+                    seen[successor]++;
+                    visited.insert(successor);
+                }
+
+                //
+                // Start traversal until reaching nodes that are below
+                // successors
+                //
+                int const max_depth = depth.at(successors.at(node).back());
+                while(not readyQueue.empty())
+                {
+                    auto const node = readyQueue.front();
+                    readyQueue.pop();
+
+                    for(auto successor : successors.at(node))
+                    {
+                        if(depth.at(successor) <= max_depth)
+                        {
+                            seen[successor]++;
+                            if(not visited.contains(successor))
+                            {
+                                readyQueue.push(successor);
+                                visited.insert(successor);
+                            }
+                        }
+                    }
+                }
+
+                //
+                // Sequence edges to the successors that have been seen
+                // more than once are redundant.
+                //
+                for(auto const successor : successors.at(node))
+                {
+                    if(seen.at(successor) > 1)
+                    {
+                        graph.control.deleteElement<Sequence>(std::vector<int>{node},
+                                                              std::vector<int>{successor});
+                    }
+                }
+
+                //
+                // Insert successors that are ready (all its parents are
+                // visited) for next round
+                //
+                for(auto const successor : successors.at(node))
+                {
+                    auto const remaining = (--hit.at(successor));
+                    if(remaining == 0)
+                        next_round.push_back(successor);
+                }
+            }
+
+            round.swap(next_round);
+            next_round.clear();
         }
     }
 
@@ -268,7 +423,9 @@ namespace rocRoller::KernelGraph
             for(auto nop : nops)
                 graphChanged |= removeNOPIfRedundant(graph, nop);
             if(graphChanged)
+            {
                 removeRedundantSequenceEdges(graph);
+            }
         }
     }
 
