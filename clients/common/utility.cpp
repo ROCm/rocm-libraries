@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2021 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -91,18 +91,47 @@ extern "C" {
 /*  query for hipsparse version and git commit SHA-1. */
 void query_version(char* version)
 {
+    int  hipsparse_ver;
+    char hipsparse_rev[64];
+
+    hipsparseStatus_t status;
+
     hipsparseHandle_t handle;
-    hipsparseCreate(&handle);
+    status = hipsparseCreate(&handle);
+    if(HIPSPARSE_STATUS_SUCCESS != status)
+    {
+        std::cerr << "The creation of the hipsparseHandle_t failed." << std::endl;
+        throw(status);
+    }
 
-    int ver;
-    hipsparseGetVersion(handle, &ver);
+    status = hipsparseGetVersion(handle, &hipsparse_ver);
+    if(HIPSPARSE_STATUS_SUCCESS != status)
+    {
+        std::cerr << "hipsparseGetVersion failed." << std::endl;
+        throw(status);
+    }
 
-    char rev[128];
-    hipsparseGetGitRevision(handle, rev);
+    status = hipsparseGetGitRevision(handle, hipsparse_rev);
+    if(HIPSPARSE_STATUS_SUCCESS != status)
+    {
+        std::cerr << "hipsparseGetGitRevision failed." << std::endl;
+        throw(status);
+    }
 
-    sprintf(version, "v%d.%d.%d-%s", ver / 100000, ver / 100 % 1000, ver % 100, rev);
+    status = hipsparseDestroy(handle);
 
-    hipsparseDestroy(handle);
+    if(HIPSPARSE_STATUS_SUCCESS != status)
+    {
+        std::cerr << "rocsparse_destroy_handle failed." << std::endl;
+        throw(status);
+    }
+
+    sprintf(version,
+            "v%d.%d.%d-%s",
+            hipsparse_ver / 100000,
+            hipsparse_ver / 100 % 1000,
+            hipsparse_ver % 100,
+            hipsparse_rev);
 }
 
 /* ============================================================================================ */
