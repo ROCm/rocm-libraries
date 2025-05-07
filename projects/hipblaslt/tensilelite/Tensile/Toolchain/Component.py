@@ -30,7 +30,7 @@ from shlex import split
 from subprocess import check_output, STDOUT, CalledProcessError, PIPE, run
 from typing import List
 
-from Tensile.Common import SemanticVersion, print1
+from Tensile.Common import SemanticVersion
 from .Validators import ToolchainDefaults, validateToolchain
 
 def _invoke(args: List[str], desc: str=""):

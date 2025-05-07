@@ -21,21 +21,19 @@
 ################################################################################
 
 from rocisa.code import Label, Module
-from rocisa.container import SMEMModifiers, VOP3PModifiers, MUBUFModifiers, \
-  replaceHolder, EXEC, VCC, SDWAModifiers, vgpr, sgpr
+from rocisa.container import VOP3PModifiers, MUBUFModifiers, replaceHolder, \
+  EXEC, VCC, SDWAModifiers, vgpr, sgpr
 from rocisa.enum import CvtType, RoundType, SaturateCastType, SelectBit
 from rocisa.instruction import BufferAtomicAddF32, BufferAtomicCmpswapB32, \
-  BufferAtomicCmpswapB64, FlatAtomicCmpswapB32, SAddCU32, SAddU32, SAndB32, \
-  SAndB64, SAtomicDec, SBarrier, SBranch, SCBranchExecNZ, SCBranchExecZ, \
-  SCBranchSCC1, SCSelectB32, SCmpEQI32, SCmpEQU32, SCmpGtI32, SCmpLeI32, \
-  SLShiftLeftB32, SLShiftLeftB64, SLShiftRightB32, SMovB32, SMovB64, SMulI32, \
-  SNop, SOrB32, SOrB64, SOrSaveExecB32, SOrSaveExecB64, SSleep, SSubI32, SSubU32, \
-  SSwapPCB64, SWaitCnt, SWaitAlu, VAShiftRightI32, VAddCCOU32, VAddCOU32, VAddF32, VAddF64, \
-  VAddI32, VAddPKF16, VAddPKF32, VAddU32, VBfeI32, VCmpEQU32, VCmpGEI32, VCmpGtU32, \
-  VCmpNeU32, VCmpNeU64, VCndMaskB32, VCvtBF8toF32, VCvtF16toF32, VCvtF32toI32, \
-  VCvtFP8toF32, VCvtI32toF32, VCvtPkBF8toF32, VCvtPkFP8toF32, VFmaF64, VFmaMixF32, \
-  VLShiftRightB32, VMacF32, VMadMixF32, VMaxF32, VMovB32, VMovB64, VMulF32, VMulF64, \
-  VMulLOU32, VMulPKF16, VMulPKF32, VPackF16toB32, VReadfirstlaneB32, VRndneF32, VCvtBF16toFP32
+  BufferAtomicCmpswapB64, FlatAtomicCmpswapB32, SAndB32, SAndB64, SBarrier, \
+  SCBranchExecNZ, SCBranchExecZ, SMovB32, SMovB64, SNop, SOrB32, \
+  SOrB64, SOrSaveExecB32, SOrSaveExecB64, SSleep, SSwapPCB64, SWaitCnt, \
+  SWaitAlu, VAShiftRightI32, VAddCCOU32, VAddCOU32, VAddF32, VAddF64, \
+  VAddI32, VAddPKF16, VAddPKF32, VAddU32, VBfeI32, VCmpEQU32, VCmpGtU32, VCmpNeU32, \
+  VCmpNeU64, VCndMaskB32, VCvtBF8toF32, VCvtF16toF32, VCvtF32toI32, VCvtFP8toF32, VCvtI32toF32, VCvtPkBF8toF32, \
+  VCvtPkFP8toF32, VFmaF64, VFmaMixF32, VLShiftRightB32, VMacF32, VMadMixF32, VMaxF32, VMovB32, \
+  VMovB64, VMulF32, VMulF64, VMulLOU32, VMulPKF16, VMulPKF32, \
+  VPackF16toB32, VRndneF32, VCvtBF16toFP32
 
 from ..Common import DataDirection, SemanticVersion
 from ..Common.DataType import DataType

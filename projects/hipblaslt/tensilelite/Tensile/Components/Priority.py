@@ -29,7 +29,6 @@ class Priority(Component):
     """
     Raise/lower workgroup priority.
     """
-    pass
 
 class AggressivePriority(Priority):
     """

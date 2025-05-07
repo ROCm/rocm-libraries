@@ -31,7 +31,6 @@ import shutil
 from pathlib import Path
 from enum import Enum
 from glob import glob
-from typing import List
 
 from Tensile.SolutionStructs.Problem import ProblemType, ProblemSizesMock, ProblemSizesMockDummy
 from Tensile.SolutionStructs import ActivationArgs, BiasTypeArgs, FactorDimArgs

@@ -32,7 +32,7 @@ from Tensile.Activation import ActivationType
 from Tensile.Common import fastdeepcopy as deepcopy
 from Tensile.Common.Constants import INDEX_CHARS
 from Tensile.Common.DataType import DataType
-from Tensile.Common.Utilities import assignParameterWithDefault, printWarning, print2, print1, printExit
+from Tensile.Common.Utilities import assignParameterWithDefault, printWarning, print2, printExit
 
 
 

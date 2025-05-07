@@ -23,11 +23,8 @@
 ################################################################################
 
 import itertools
-import rocisa
-import math
 import os.path
 import subprocess
-import sys
 import time
 from collections import OrderedDict
 from copy import deepcopy
@@ -35,7 +32,7 @@ from typing import Dict
 
 from Tensile import __version__
 
-from .Architectures import isaToGfx, SUPPORTED_ISA
+from .Architectures import isaToGfx
 from .Types import IsaVersion, IsaInfo
 from .Utilities import locateExe, versionIsCompatible, print1, print2, printExit, printWarning, \
      getVerbosity

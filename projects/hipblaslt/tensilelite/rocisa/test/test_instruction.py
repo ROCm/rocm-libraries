@@ -24,10 +24,9 @@ import rocisa
 from rocisa.container import sgpr, vgpr
 from copy import deepcopy
 import math
-import pickle
 
 def test_instruction_common():
-    from rocisa.instruction import VMovB32, SMovB32
+    from rocisa.instruction import SMovB32
 
     inst = SMovB32(dst=sgpr(1), src=1.6)
     assert str(inst) == "s_mov_b32 s1, 1.6000000000000001\n"
@@ -60,9 +59,9 @@ def test_instruction_common():
     assert rocisa.countGlobalRead(module) == 1
 
 def test_instruction_cvt():
-    from rocisa.instruction import VCvtInstruction, VCvtF16toF32, VCvtF32toF16, VCvtF32toU32, \
-        VCvtU32toF32, VCvtI32toF32, VCvtF32toI32, VCvtFP8toF32, VCvtBF8toF32, VCvtPkFP8toF32, \
-            VCvtPkBF8toF32, VCvtPkF32toFP8, VCvtPkF32toBF8, VCvtSRF32toFP8, VCvtSRF32toBF8
+    from rocisa.instruction import VCvtF16toF32, VCvtF32toF16, VCvtF32toU32, VCvtU32toF32, \
+        VCvtI32toF32, VCvtF32toI32, VCvtFP8toF32, VCvtBF8toF32, VCvtPkFP8toF32, VCvtPkBF8toF32, \
+            VCvtPkF32toFP8, VCvtPkF32toBF8, VCvtSRF32toFP8, VCvtSRF32toBF8
 
     # Test VCvtF16toF32
     inst = VCvtF16toF32(dst=vgpr(1), src=vgpr(2), comment="test comment")
