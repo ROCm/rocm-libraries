@@ -302,7 +302,8 @@ TEST_F(CommandTest, GetRuntimeArguments)
            {DataType::Int64, 8},        {DataType::BFloat16, 2},
            {DataType::Raw32, 4},        {DataType::UInt8x4, 4},
            {DataType::UInt8, 1},        {DataType::UInt16, 2},
-           {DataType::UInt32, 4},       {DataType::UInt64, 8}};
+           {DataType::UInt32, 4},       {DataType::UInt64, 8},
+           {DataType::E8M0, 1}};
 
     // Check scalar
     for(auto const& [type, bytes] : typeSizes)

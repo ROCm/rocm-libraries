@@ -37,6 +37,7 @@
 #include <rocRoller/DataTypes/DataTypes_BF6.hpp>
 #include <rocRoller/DataTypes/DataTypes_BF8.hpp>
 #include <rocRoller/DataTypes/DataTypes_BFloat16.hpp>
+#include <rocRoller/DataTypes/DataTypes_E8M0.hpp>
 #include <rocRoller/DataTypes/DataTypes_FP4.hpp>
 #include <rocRoller/DataTypes/DataTypes_FP6.hpp>
 #include <rocRoller/DataTypes/DataTypes_FP8.hpp>
@@ -117,6 +118,7 @@ namespace rocRoller
         Bool, //< Single bit boolean (SCC)
         Bool32, //< Thirty-two booleans packed into 32bits.  Usually the result of a vector-comparison (VCC; On Wave32 VCC is a single Bool32).
         Bool64, //< Sixty-four booleans packed into 64bits.  Usually the result of a vector-comparison (VCC; On Wave64 VCC is a single Bool64).
+        E8M0, //< 8bits scale type
         None, //< Represents: any, unknown/unspecified, or a deferred type.
         Count
     };
@@ -1102,6 +1104,20 @@ namespace rocRoller
     {
     };
 
+    template <>
+    struct TypeInfo<E8M0> : public BaseTypeInfo<E8M0,
+                                                DataType::E8M0,
+                                                DataType::E8M0,
+                                                PointerType::Value,
+                                                1,
+                                                1,
+                                                8,
+                                                false,
+                                                true,
+                                                false>
+    {
+    };
+
     struct Buffer
     {
         uint32_t desc0;
@@ -1167,6 +1183,7 @@ namespace rocRoller
     DeclareEnumTypeInfo(Bool, bool);
     DeclareEnumTypeInfo(Bool32, Bool32);
     DeclareEnumTypeInfo(Bool64, Bool64);
+    DeclareEnumTypeInfo(E8M0, E8M0);
 
 #undef DeclareEnumTypeInfo
 

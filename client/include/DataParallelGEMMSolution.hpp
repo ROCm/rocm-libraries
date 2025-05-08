@@ -111,7 +111,7 @@ namespace rocRoller
                     if(solutionParams.scaleA == Operations::ScaleMode::Separate)
                     {
                         m_tagTensorScaleA = command->addOperation(rocRoller::Operations::Tensor(
-                            2, DataType::UInt8, unitStrides(solutionParams.transA)));
+                            2, DataType::E8M0, unitStrides(solutionParams.transA)));
                         m_tagLoadScaleA   = command->addOperation(
                             rocRoller::Operations::T_Load_Tiled(m_tagTensorScaleA.value()));
 
@@ -136,7 +136,7 @@ namespace rocRoller
                     if(solutionParams.scaleB == Operations::ScaleMode::Separate)
                     {
                         m_tagTensorScaleB = command->addOperation(rocRoller::Operations::Tensor(
-                            2, DataType::UInt8, unitStrides(solutionParams.transB)));
+                            2, DataType::E8M0, unitStrides(solutionParams.transB)));
                         m_tagLoadScaleB   = command->addOperation(
                             rocRoller::Operations::T_Load_Tiled(m_tagTensorScaleB.value()));
 

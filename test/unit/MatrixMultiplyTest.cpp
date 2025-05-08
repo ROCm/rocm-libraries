@@ -214,7 +214,7 @@ namespace MatrixMultiplyTest
             if(scaleA)
             {
                 tagTensorScaleA = command->addOperation(rocRoller::Operations::Tensor(
-                    2, DataType::UInt8, transA == "N" ? unitStridesN : unitStridesT));
+                    2, DataType::E8M0, transA == "N" ? unitStridesN : unitStridesT));
                 tagLoadScaleA
                     = command->addOperation(rocRoller::Operations::T_Load_Tiled(*tagTensorScaleA));
             }
@@ -222,7 +222,7 @@ namespace MatrixMultiplyTest
             if(scaleB)
             {
                 tagTensorScaleB = command->addOperation(rocRoller::Operations::Tensor(
-                    2, DataType::UInt8, transB == "N" ? unitStridesN : unitStridesT));
+                    2, DataType::E8M0, transB == "N" ? unitStridesN : unitStridesT));
                 tagLoadScaleB
                     = command->addOperation(rocRoller::Operations::T_Load_Tiled(*tagTensorScaleB));
             }
