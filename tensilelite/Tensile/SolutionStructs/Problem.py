@@ -988,7 +988,7 @@ class ProblemType(Mapping):
     # TODO: Distinguish all kernels by _TiToTc_ to be more consistent with rocblas
     gemmType = (self["DataType"].toChar(),self["DestDataType"].toChar(),self["ComputeDataType"].toChar() )
     if gemmType in _HPATypes:
-      name.append("".join([self["DestDataType"].toChar(), self["ComputeDataType"].toChar()]))
+      name[-1] += "".join([self["DestDataType"].toChar(), self["ComputeDataType"].toChar()])
 
     if not self["F32XdlMathOp"].isSingle() and self["DataType"].isSingle():
       name.append("".join(["M", self["F32XdlMathOp"].toChar()]))
