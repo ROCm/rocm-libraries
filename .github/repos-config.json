@@ -1,13 +1,6 @@
 {
   "repositories": [
     {
-      "name": "miopen",
-      "reponame": "MIOpen",
-      "url": "ROCm/MIOpen",
-      "branch": "staging",
-      "category": "projects"
-    },
-    {
       "name": "tensile",
       "reponame": "Tensile",
       "url": "ROCm/Tensile",
