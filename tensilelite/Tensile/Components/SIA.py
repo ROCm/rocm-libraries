@@ -675,7 +675,7 @@ def prepareLWInstToSched(writer, kernel, numLocalWritesPerSched, isNGLL=False):
             numDummy += lenB
             insertDummyTop = swapped
         for i in range(numDummy):
-            tmpList.append(DummyItem())
+            tmpList.append(None)
         if insertDummyTop:
           # add dummy at the top of the list
           itemsLWToSched = tmpList + itemsLWToSched
@@ -692,11 +692,11 @@ def prepareLWInstToSched(writer, kernel, numLocalWritesPerSched, isNGLL=False):
            and item.name.startswith("MetadataWrite") and countVMovB32(item)
         if not skip:
            for j in range(PRECISION-1):
-               itemsLWToSchedTemp.append(DummyItem())
+               itemsLWToSchedTemp.append(None)
     if itemsLWToSched:
         itemsLWToSchedTemp.append(itemsLWToSched.pop(0))
         for i in range(numLocalWritesPerSched + numLocalWritesPerSched % PRECISION - len(itemsLWToSchedTemp) % numLocalWritesPerSched):
-            itemsLWToSchedTemp.append(DummyItem())
+            itemsLWToSchedTemp.append(None)
     itemsLWToSched = itemsLWToSchedTemp
     # This counts the number of modules which contain a ds_write
     # Scheduler below keeps all writes in the same module in same iteration
@@ -764,7 +764,7 @@ def schedLocalWrite(writer, kernel, numLocalWriteModPerIter, numLocalWritesPerSc
             # Use a module to ensure these pieces stay together in the sub-iter scheduler
             imod = Module("LocalWriteMod%u"%u)
             imodNGLL = Module("LocalWriteMod%u"%u)
-            if not isinstance(item, DummyItem):
+            if item:
                 writesPerItem = countLocalWrite(item)
                 if kernel["ProblemType"]["Sparse"] and not writesPerItem:
                     writesPerItem = item.name.startswith("MetadataWrite") and countVMovB32(item)
@@ -817,7 +817,7 @@ def schedLocalWrite(writer, kernel, numLocalWriteModPerIter, numLocalWritesPerSc
                 imod.add(additionalIndexList[itemsLWToSchedIndex])
                 additionalIndexList.pop(itemsLWToSchedIndex)
             else:
-                imod.add(item)
+                imod.add(item if item else DummyItem())
 
             # schedule global instruction that need to be scheduled later
             numGlobalReadA = kernel["NumLoadsPerpendicularA"] * kernel["NumLoadsCoalescedA"]
@@ -869,7 +869,7 @@ def schedLocalWrite(writer, kernel, numLocalWriteModPerIter, numLocalWritesPerSc
                 skip = 0
             localwriteCnt += 1
             writer.codes.perIterLocalWrite[u].add(imod)
-            if isinstance(item, DummyItem):
+            if item is None:
                 imodNGLL.add(DummyItem())
             else:
                 imodNGLL.add(deepcopy(item))
