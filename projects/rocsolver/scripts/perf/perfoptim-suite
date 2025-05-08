@@ -1,0 +1,131 @@
+#!/usr/bin/env bash
+# Copyright (C) 2022-2024 Advanced Micro Devices, Inc.
+
+#set -eux
+
+# benchmarks to run
+# valid options are: (default will run all of them)
+# syevd         -> eigensolver D&C + QR algorithm (heevd in complex precision)
+# syevdx        -> eigensolver D&C + bisection (heevdx in complex precision)
+# syevj         -> eigensolver Jacobi (heevj in complex precision)
+# syevjBatch    -> eigensolver Jacobi batch version (heevjBatch in complex precision)
+# gesvd         -> SVD QR algorithm
+# gesvdj        -> SVD Jacobi
+# gesvdjBatch   -> SVD Jacobi batch version
+# potrf         -> Cholesky factorization
+# potrfBatch    -> Cholesky factorization batch version
+# geqrf         -> Orthogonal factorization
+# (note: several can be selected)
+Slist="syevd syevdx syevj syevjBatch gesvd gesvdj gesvdjBatch potrf potrfBatch geqrf"
+
+# precisions to use
+# valid options are: (default is d)
+# s -> real single precision
+# d -> real double precision
+# c -> complex single precision
+# z -> complex double precision
+# (note: several can be selected)
+Plist="s d c z"
+
+# size cases to run:
+# valid options are: (default is large)
+# small  -> see definitions in rocsolver-perfoptim-suite.py for included size values  
+# medium -> see definitions in rocsolver-perfoptim-suite.py for included size values
+# large  -> see definitions in rocsolver-perfoptim-suite.py for included size values
+# (note: select only one as small is a sub-set of medium which is a sub-set of large)
+Clist="small medium large"
+ 
+
+# Get and validate input arguments:
+error=true
+havecase=false
+suite=""
+precision=""
+case=""
+
+if [ $# == 0 ]; then
+    error=false
+    suite=$Slist
+    precision="d"
+    case="large"
+else
+    args=$@
+    for a in $args; do
+        for s in $Slist; do
+            if [ $a == $s ]; then
+                new=true
+                error=false
+                for ss in $suite; do
+                    if [ $a == $ss ]; then
+                        new=false
+                        break
+                    fi
+                done
+                if $new; then
+                    suite+="$s "
+                fi
+                break 
+            fi
+        done          
+        for p in $Plist; do
+            if [ $a == $p ]; then
+                new=true
+                error=false
+                for pp in $precision; do
+                    if [ $a == $pp ]; then
+                        new=false
+                        break
+                    fi
+                done
+                if $new; then
+                    precision+="$p "
+                fi
+                break
+            fi
+        done  
+        for c in $Clist; do
+            if [ $a == $c ]; then
+                if $havecase; then
+                    error=true
+                else
+                    error=false
+                    havecase=true
+                    case+="$c "
+                fi
+                break
+            fi
+        done  
+    done
+fi
+
+if $error; then
+    echo "Incorrect arguments..."
+    exit 1 
+fi
+if [ -z "$suite" ]; then
+    suite=$Slist
+fi
+if [ -z "$precision" ]; then
+    precision="d"
+fi
+if [ -z "$case" ]; then
+    case="large"
+fi
+
+
+# ensure this script is in the cwd
+cd "$(dirname "${BASH_SOURCE[0]}")"
+
+# setup output directory 
+output_dir=rocsolver_customer01_benchmarks
+mkdir -p "$output_dir"
+
+# run benchmarks
+for s in $suite; do
+    for p in $precision; do
+        for c in $case; do
+            python3 rocsolver-perfoptim-suite.py -v -o "$output_dir/$p${s}_benchmarks.csv" $s $p $c
+        done
+    done
+done
+
