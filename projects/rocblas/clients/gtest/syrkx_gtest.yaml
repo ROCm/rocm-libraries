@@ -84,7 +84,7 @@ Tests:
     - { alpha:  0.5, beta:  0.5 }
   batch_count: [ 1 ]
   pointer_mode_host: false
-  gpu_arch: ['90a','942']
+  gpu_arch: ['90a','942','950']
   os_flags: LINUX
 
 - name: syrkx_NaN

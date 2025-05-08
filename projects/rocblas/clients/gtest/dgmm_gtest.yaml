@@ -63,7 +63,7 @@ Tests:
     - { M:  2048, N:  2048, lda:    2048, ldc:    2048, incx: 1049100 }
   batch_count: [        1    ]
   api: C
-  gpu_arch: ['90a','942']
+  gpu_arch: ['90a','942','950']
   os_flags: LINUX
 
 - name: dgmm_quick_return

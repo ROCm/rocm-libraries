@@ -31,7 +31,7 @@ Definitions:
     # (n <= 3000 && n >= m) || (n %128 == 0 && m==n)
     - { M:  256, N:  256, lda:  256, stride_a:   65536 }
     - { M: 1024, N: 1024, lda: 1024, stride_a: 1048576 }
-    - { M: 3840, N: 3840, lda: 3840, stride_a: 14745600} # test for gfx90a and gfx942
+    - { M: 3840, N: 3840, lda: 3840, stride_a: 14745600} # test for gfx90a, gfx942, gfx950
 
   - &all_algo_matrix_size_range
     - { M:  4096, N:    2, lda:  4096, stride_a:     8192 } # skinny n

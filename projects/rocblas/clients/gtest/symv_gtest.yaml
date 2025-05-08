@@ -167,7 +167,7 @@ Tests:
   alpha_beta: *alpha_beta_range_small
   pointer_mode_device: false
   os_flags: LINUX
-  gpu_arch: ['90a','942']
+  gpu_arch: ['90a','942','950']
   atomics_mode: [0, 1]
 
 - name: symv_size_t_inc
@@ -179,7 +179,7 @@ Tests:
   alpha_beta: *alpha_beta_range_size_t_inc
   pointer_mode_device: false
   os_flags: LINUX
-  gpu_arch: ['90a','942']
+  gpu_arch: ['90a','942','950']
 
   # batched
 - name: symv_batched_bad

@@ -67,7 +67,7 @@ Tests:
   diag: [N]
   matrix_size: *size_t_index
   os_flags: LINUX
-  gpu_arch: ['90a','942']
+  gpu_arch: ['90a','942','950']
 
 # Regular tbsv
 - name: tbsv_bad_arg

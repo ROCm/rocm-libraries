@@ -146,7 +146,7 @@ Tests:
     pointer_mode_host: false
     function:
       - nrm2_ex: *hpa_half_precision
-    gpu_arch: ['90a','942']
+    gpu_arch: ['90a','942','950']
     os_flags: LINUX
 
 # All functions with incx, no incy, no alpha

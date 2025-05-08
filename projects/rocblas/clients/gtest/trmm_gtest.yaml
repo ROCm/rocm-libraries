@@ -218,7 +218,7 @@ Tests:
   alpha: [ 2 ]
   stride_scale: [ 1         ]
   batch_count: [           1 ]
-  gpu_arch: ['90a','942']
+  gpu_arch: ['90a','942','950']
   os_flags: LINUX
   outofplace: [false      ] # test inplace
 
@@ -238,7 +238,7 @@ Tests:
   alpha: [ 2 ]
   stride_scale: [ 1         ]
   batch_count: [           1 ]
-  gpu_arch: ['90a','942']
+  gpu_arch: ['90a','942','950']
   os_flags: LINUX
   outofplace: [       true] # test outofplace
 
@@ -258,7 +258,7 @@ Tests:
   alpha: [ 2 ]
   stride_scale: [ 1         ]
   batch_count: [           1 ]
-  gpu_arch: ['90a','942']
+  gpu_arch: ['90a','942','950']
   os_flags: LINUX
   outofplace: [false      ] # test inplace
 
@@ -278,7 +278,7 @@ Tests:
   alpha: [ 2 ]
   stride_scale: [ 1         ]
   batch_count: [           1 ]
-  gpu_arch: ['90a','942']
+  gpu_arch: ['90a','942','950']
   os_flags: LINUX
   outofplace: [       true] # test outofplace
 

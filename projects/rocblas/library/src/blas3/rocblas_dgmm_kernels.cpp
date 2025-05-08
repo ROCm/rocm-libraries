@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -76,23 +76,22 @@ rocblas_dgmm_kernel(rocblas_int    m,
 
 template <int DIM_X, int DIM_Y, bool side_right, typename TConstPtr, typename TPtr>
 ROCBLAS_KERNEL(DIM_X* DIM_Y)
-rocblas_dgmm_gfx942_kernel(rocblas_int    m,
-                           rocblas_int    n,
-                           TConstPtr      Aa,
-                           rocblas_stride offset_A,
-                           int64_t        lda,
-                           rocblas_stride stride_A,
-                           TConstPtr      Xa,
-                           int64_t        shift_x,
-                           int64_t        incx,
-                           rocblas_stride stride_x,
-                           TPtr           Ca,
-                           rocblas_stride offset_C,
-                           int64_t        ldc,
-                           rocblas_stride stride_C)
+rocblas_dgmm_gfx942_gfx950_kernel(rocblas_int    m,
+                                  rocblas_int    n,
+                                  TConstPtr      Aa,
+                                  rocblas_stride offset_A,
+                                  int64_t        lda,
+                                  rocblas_stride stride_A,
+                                  TConstPtr      Xa,
+                                  int64_t        shift_x,
+                                  int64_t        incx,
+                                  rocblas_stride stride_x,
+                                  TPtr           Ca,
+                                  rocblas_stride offset_C,
+                                  int64_t        ldc,
+                                  rocblas_stride stride_C)
 {
-// gfx942 kernels
-#if defined(__gfx942__)
+#if defined(__gfx942__) || defined(__gfx950__)
 
     rocblas_int tx = (blockIdx.x * DIM_X + threadIdx.x) * 2;
     rocblas_int ty = blockIdx.y * DIM_Y + threadIdx.y;
@@ -188,7 +187,9 @@ rocblas_status rocblas_internal_dgmm_launcher(rocblas_handle handle,
     rocblas_int k       = side == rocblas_side_left ? m : n;
     ptrdiff_t   shift_x = offset_x - ((incx < 0) ? ptrdiff_t(incx) * (k - 1) : 0);
 
-    bool is_gfx942 = handle->getArch() == 942 ? true : false;
+    bool is_gfx942           = handle->getArch() == 942 ? true : false;
+    bool is_gfx950           = handle->getArch() == 950 ? true : false;
+    bool is_gfx942_or_gfx950 = is_gfx942 || is_gfx950;
 
     //Identifying the precision to have an appropriate optimization
     static constexpr bool is_float
@@ -204,13 +205,13 @@ rocblas_status rocblas_internal_dgmm_launcher(rocblas_handle handle,
     dgmm_grid, dgmm_threads, 0, rocblas_stream, m, n, A, offset_A, lda, stride_A, x, shift_x, \
         incx, stride_x, C, offset_C, ldc, stride_C, batch_count
 
-#define dgmm_gfx942_KARGS                                                                     \
+#define dgmm_gfx942_gfx950_KARGS                                                              \
     dgmm_grid, dgmm_threads, 0, rocblas_stream, m, n, A, offset_A, lda, stride_A, x, shift_x, \
         incx, stride_x, C, offset_C, ldc, stride_C
 
     if(rocblas_side_left == side)
     {
-        if(is_gfx942
+        if(is_gfx942_or_gfx950
            && (is_float
                || ((is_double || is_complex_float) && m > dcdgmm_gfx942_m_lower_threshold)))
         {
@@ -223,8 +224,9 @@ rocblas_status rocblas_internal_dgmm_launcher(rocblas_handle handle,
             dim3 dgmm_grid(blocksX, blocksY, batch_count);
             dim3 dgmm_threads(DGMM_DIM_X, DGMM_DIM_Y);
 
-            ROCBLAS_LAUNCH_KERNEL((rocblas_dgmm_gfx942_kernel<DGMM_DIM_X, DGMM_DIM_Y, false>),
-                                  dgmm_gfx942_KARGS);
+            ROCBLAS_LAUNCH_KERNEL(
+                (rocblas_dgmm_gfx942_gfx950_kernel<DGMM_DIM_X, DGMM_DIM_Y, false>),
+                dgmm_gfx942_gfx950_KARGS);
         }
         else
         {
@@ -243,7 +245,7 @@ rocblas_status rocblas_internal_dgmm_launcher(rocblas_handle handle,
     }
     else
     {
-        if(is_gfx942
+        if(is_gfx942_or_gfx950
            && (is_float
                || ((is_double || is_complex_float) && m > dcdgmm_gfx942_m_lower_threshold)))
         {
@@ -256,8 +258,8 @@ rocblas_status rocblas_internal_dgmm_launcher(rocblas_handle handle,
             dim3 dgmm_grid(blocksX, blocksY, batch_count);
             dim3 dgmm_threads(DGMM_DIM_X, DGMM_DIM_Y);
 
-            ROCBLAS_LAUNCH_KERNEL((rocblas_dgmm_gfx942_kernel<DGMM_DIM_X, DGMM_DIM_Y, true>),
-                                  dgmm_gfx942_KARGS);
+            ROCBLAS_LAUNCH_KERNEL((rocblas_dgmm_gfx942_gfx950_kernel<DGMM_DIM_X, DGMM_DIM_Y, true>),
+                                  dgmm_gfx942_gfx950_KARGS);
         }
         else
         {

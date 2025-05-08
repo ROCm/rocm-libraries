@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -119,28 +119,27 @@ rocblas_ger_kernel(rocblas_int    m,
 #endif
 }
 
-//optimized kernel for SGER for gfx942
+//optimized kernel for SGER for gfx942/gfx950
 template <rocblas_int DIM_X, typename T, typename V, typename U, typename W>
 ROCBLAS_KERNEL(DIM_X)
-rocblas_sger_gfx942_kernel(rocblas_int    m,
-                           rocblas_int    n,
-                           V              alpha_device_host,
-                           rocblas_stride stride_alpha,
-                           const U        xa,
-                           rocblas_stride shiftx,
-                           int64_t        incx,
-                           rocblas_stride stridex,
-                           const U        ya,
-                           rocblas_stride shifty,
-                           int64_t        incy,
-                           rocblas_stride stridey,
-                           W              Aa,
-                           rocblas_stride shifta,
-                           int64_t        lda,
-                           rocblas_stride strideA)
+rocblas_sger_gfx942_gfx950_kernel(rocblas_int    m,
+                                  rocblas_int    n,
+                                  V              alpha_device_host,
+                                  rocblas_stride stride_alpha,
+                                  const U        xa,
+                                  rocblas_stride shiftx,
+                                  int64_t        incx,
+                                  rocblas_stride stridex,
+                                  const U        ya,
+                                  rocblas_stride shifty,
+                                  int64_t        incy,
+                                  rocblas_stride stridey,
+                                  W              Aa,
+                                  rocblas_stride shifta,
+                                  int64_t        lda,
+                                  rocblas_stride strideA)
 {
-// gfx942 kernels
-#if defined(__gfx942__)
+#if defined(__gfx942__) || defined(__gfx950__)
 
     rocblas_int tx  = (blockIdx.x * DIM_X + threadIdx.x) * 2;
     rocblas_int col = blockIdx.y;
@@ -408,14 +407,16 @@ rocblas_status rocblas_internal_ger_launcher(rocblas_handle handle,
 
     int batches = handle->getBatchGridDim((int)batch_count);
 
-    bool is_gfx90a = handle->getArch() == 910 ? true : false;
-    bool is_gfx942 = handle->getArch() == 942 ? true : false;
+    bool is_gfx90a           = handle->getArch() == 910 ? true : false;
+    bool is_gfx942           = handle->getArch() == 942 ? true : false;
+    bool is_gfx950           = handle->getArch() == 950 ? true : false;
+    bool is_gfx942_or_gfx950 = is_gfx942 || is_gfx950;
 
 #define ger_KARGS(alpha_)                                                                  \
     ger_grid, ger_threads, 0, rocblas_stream, m, n, alpha_, stride_alpha, x, shiftx, incx, \
         stridex, y, shifty, incy, stridey, A, offsetA, lda, strideA, batch_count
 
-#define ger_gfx942_KARGS(alpha_)                                                           \
+#define ger_gfx942_gfx950_KARGS(alpha_)                                                    \
     ger_grid, ger_threads, 0, rocblas_stream, m, n, alpha_, stride_alpha, x, shiftx, incx, \
         stridex, y, shifty, incy, stridey, A, offsetA, lda, strideA
 
@@ -463,7 +464,7 @@ rocblas_status rocblas_internal_ger_launcher(rocblas_handle handle,
     }
     else if(is_float && m > 1024)
     {
-        if(is_gfx942)
+        if(is_gfx942_or_gfx950)
         {
             static constexpr int DIM_X   = 256;
             rocblas_int          blocksX = (m - 1) / (DIM_X * 2) + 1;
@@ -472,13 +473,13 @@ rocblas_status rocblas_internal_ger_launcher(rocblas_handle handle,
 
             if(handle->pointer_mode == rocblas_pointer_mode_device)
             {
-                ROCBLAS_LAUNCH_KERNEL((rocblas_sger_gfx942_kernel<DIM_X, T>),
-                                      ger_gfx942_KARGS(alpha));
+                ROCBLAS_LAUNCH_KERNEL((rocblas_sger_gfx942_gfx950_kernel<DIM_X, T>),
+                                      ger_gfx942_gfx950_KARGS(alpha));
             }
             else
             {
-                ROCBLAS_LAUNCH_KERNEL((rocblas_sger_gfx942_kernel<DIM_X, T>),
-                                      ger_gfx942_KARGS(*alpha));
+                ROCBLAS_LAUNCH_KERNEL((rocblas_sger_gfx942_gfx950_kernel<DIM_X, T>),
+                                      ger_gfx942_gfx950_KARGS(*alpha));
             }
         }
         else
