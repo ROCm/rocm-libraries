@@ -2,8 +2,8 @@ name: Synchronize Subtrees
 
 on:
   workflow_dispatch:
-  # schedule:
-  #   - cron: '0 * * * *'
+  schedule:
+    - cron: '50 * * * *'
 
 env:
   MONOREPO_URL: github.com/ROCm/rocm-libraries.git
