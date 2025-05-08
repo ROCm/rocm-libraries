@@ -1,0 +1,64 @@
+# benchmark assembly and source kernels
+GlobalParameters:
+  MinimumRequiredVersion: 4.2.0
+  PrintLevel: 1
+  ForceRedoBenchmarkProblems: True
+  ForceRedoLibraryLogic: True
+  ForceRedoLibraryClient: True
+  EnqueuesPerSync: 1
+  SyncsPerBenchmark: 1
+  NumElementsToValidate: 1000
+  ValidationMaxToPrint: 4
+  ValidationPrintValids: False
+  ShortNames: False
+  MergeFiles: True
+  DataInitTypeA: 1
+  DataInitTypeB: 3
+  DataInitTypeC: 2
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 2
+  KernelTime: True
+  LibraryPrintDebug: 0
+  PrintSolutionRejectionReason: 1
+  PrintTensorD: 0
+
+BenchmarkProblems:
+
+  -
+    -
+      OperationType: TensorContraction
+      DataType: s
+      DestDataType: s
+      UseBeta: True
+      NumIndicesC : 2
+      IndexAssignmentsA : [0, 2]
+      IndexAssignmentsB : [2, 1]
+      UseBeta : False
+      UseInitialStridesAB : True
+
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - LoopTail: [True]
+        - EdgeType: ["ShiftPtr"]
+      ForkParameters:
+        - KernelLanguage: ["Assembly"]
+        - ThreadTile:
+          - [ 2, 2 ]
+        - WorkGroup:
+          - [  8, 8, 1 ]
+            #- [  16, 8, 1 ]
+        - DepthU: [8]
+        - GlobalReadVectorWidth: [1]
+        - VectorWidth: [1]
+
+        - FractionalLoad: [0]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+            - Range: [ [16], [16], [8]]
+            - Range: [ [124,4,132], [124,4,132], [16]]
+              #- Range: [ [128], [128], [32]]
+              #- Range: [ [124,4,132], [124,4,132], [4], [6], [16]]

@@ -1,0 +1,489 @@
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1151] # not supported by arch
+
+GlobalParameters:
+  NumElementsToValidate: -1
+  BoundsCheck: True
+  KernelTime: True
+  # PrintSolutionRejectionReason: True
+
+BenchmarkProblems:
+  ########################################
+  # TN
+  ########################################
+  - # hgemm TN
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - # MFMA 16x16, VW = 4
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - EdgeType: ["ShiftPtr"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 16, 1, 1, 4,4, 2,2]
+          # - [16, 16, 16, 1, 1, 4,4, 1,4]
+          # - [16, 16, 16, 1, 1, 4,4, 4,1]
+          - [16, 16, 4, 4, 1, 4,4, 2,2]
+          - [16, 16, 4, 4, 2, 4,4, 2,2]
+          - [16, 16, 4, 4, 4, 4,4, 2,2]
+          - [4, 4, 4, 16, 1, 4,4, 2,2]
+          - [4, 4, 4, 16, 2, 4,4, 2,2]
+          - [4, 4, 4, 16, 4, 4,4, 2,2]
+          - [4, 4, 4, 16, 8, 4,4, 2,2]
+          - [4, 4, 4, 16, 16, 4,4, 2,2]
+        - ThreadTile:
+          - [  8, 32 ]
+        - WorkGroup:
+          - [ 16, 16, 1 ]
+        - SourceSwap: [True]
+        - PrefetchGlobalRead: [1,2]
+        - AssertFree0ElementMultiple: [2]
+        - AssertFree1ElementMultiple: [4] # 4 for DTVB
+        - WorkGroupMapping: [8]
+        - PrefetchLocalRead: [1, 3, 5] # 2
+        - GlobalSplitU: [1]
+        - DepthU:  [16, 32, 64]
+        #- StoreVectorWidth: [4]
+        - VectorWidth: [2,4]
+        - GlobalReadVectorWidth: [2,4,8]
+        - LocalReadVectorWidth: [4,8]
+        - DirectToLdsA: [True]
+        - DirectToLdsB: [True]
+        - DirectToVgprA: [False, True]
+        - DirectToVgprB: [False, True]
+        - WaveSeparateGlobalReadA: [0, 1]
+        - WaveSeparateGlobalReadB: [0, 1]
+        - NumLoadsCoalescedA: [1,2]
+        - NumLoadsCoalescedB: [1,2]
+        - ScheduleIterAlg: [3]
+        - AssertSummationElementMultiple: [8]
+        - StaggerU: [0]
+        - NumElementsPerBatchStore: [0]
+        #- FractionalLoad: [0, 1, 2]
+        - BufferLoad: [True] # DirectToLds requires BufferLoad
+        - TransposeLDS: [1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [512, 512, 1, 1016]
+
+    - # MFMA 32x32, VW = 2
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - EdgeType: ["ShiftPtr"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [32, 32, 4, 2, 1, 2,2, 2,2]
+          - [32, 32, 4, 2, 2, 2,2, 2,2]
+          - [32, 32, 8, 1, 1, 2,2, 2,2]
+          - [32, 32, 8, 1, 1, 2,2, 1,4]
+          - [32, 32, 8, 1, 1, 2,2, 4,1]
+        - ThreadTile:
+          - [  8, 32 ]
+        - WorkGroup:
+          - [ 16, 16, 1 ]
+        - SourceSwap: [True]
+        - PrefetchGlobalRead: [1]
+        - AssertFree0ElementMultiple: [2]
+        # - AssertFree1ElementMultiple: [2]
+        - WorkGroupMapping: [8]
+        - PrefetchLocalRead: [1, 3] # 2
+        - GlobalSplitU: [1]
+        - DepthU:  [16, 32, 64]
+        #- StoreVectorWidth: [2]
+        - VectorWidth: [2,4]
+        - GlobalReadVectorWidth: [2,4]
+        - LocalReadVectorWidth: [2,4]
+        - DirectToLdsA: [True]
+        - DirectToLdsB: [True]
+        - DirectToVgprA: [False, True]
+        - DirectToVgprB: [False, True]
+        #- WaveSeparateGlobalReadA: [0, 1]
+        #- WaveSeparateGlobalReadB: [0, 1]
+        - NumLoadsCoalescedA: [1,2]
+        - NumLoadsCoalescedB: [1,2]
+        - ScheduleIterAlg: [3]
+        - AssertSummationElementMultiple: [8]
+        - StaggerU: [0]
+        - NumElementsPerBatchStore: [0]
+        - FractionalLoad: [0, 1, 2]
+        - BufferLoad: [True] # DirectToLds requires BufferLoad
+        - TransposeLDS: [1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [512, 512, 1, 1016]
+
+  ########################################
+  # TT
+  ########################################
+  - # hgemm TT
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+    - # MFMA 16x16, VW = 4
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - EdgeType: ["ShiftPtr"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 16, 1, 1, 4,4, 2,2]
+          # - [16, 16, 16, 1, 1, 4,4, 1,4]
+          # - [16, 16, 16, 1, 1, 4,4, 4,1]
+          - [16, 16, 4, 4, 1, 4,4, 2,2]
+          - [16, 16, 4, 4, 2, 4,4, 2,2]
+          - [16, 16, 4, 4, 4, 4,4, 2,2]
+          - [4, 4, 4, 16, 1, 4,4, 2,2]
+          - [4, 4, 4, 16, 2, 4,4, 2,2]
+          - [4, 4, 4, 16, 4, 4,4, 2,2]
+          - [4, 4, 4, 16, 8, 4,4, 2,2]
+          - [4, 4, 4, 16, 16, 4,4, 2,2]
+        - ThreadTile:
+          - [  8, 32 ]
+        - WorkGroup:
+          - [ 16, 16, 1 ]
+        - SourceSwap: [True]
+        - PrefetchGlobalRead: [1,2]
+        # - AssertFree0ElementMultiple: [2]
+        - AssertFree1ElementMultiple: [2]
+        - WorkGroupMapping: [8]
+        - PrefetchLocalRead: [1, 3, 5] # 2
+        - GlobalSplitU: [1]
+        - DepthU:  [16, 32, 64]
+        #- StoreVectorWidth: [4]
+        - VectorWidth: [2,4]
+        - GlobalReadVectorWidth: [2,4]
+        #- LocalReadVectorWidth: [4]
+        - DirectToLdsA: [True]
+        - DirectToLdsB: [True]
+        - DirectToVgprA: [False]
+        - DirectToVgprB: [False]
+        - WaveSeparateGlobalReadA: [0, 1]
+        - WaveSeparateGlobalReadB: [0, 1]
+        - NumLoadsCoalescedA: [1,2]
+        - NumLoadsCoalescedB: [1,2]
+        - ScheduleIterAlg: [3]
+        - AssertSummationElementMultiple: [8]
+        - StaggerU: [0]
+        - NumElementsPerBatchStore: [0]
+        #- FractionalLoad: [0, 1, 2]
+        - BufferLoad: [True] # DirectToLds requires BufferLoad
+        - TransposeLDS: [1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [512, 512, 1, 1016]
+
+    - # MFMA 32x32, VW = 2
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - EdgeType: ["ShiftPtr"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [32, 32, 4, 2, 1, 2,2, 2,2]
+          - [32, 32, 4, 2, 2, 2,2, 2,2]
+          # - [32, 32, 8, 1, 1, 2,2, 2,2]
+          - [32, 32, 8, 1, 1, 2,2, 1,4]
+          - [32, 32, 8, 1, 1, 2,2, 4,1]
+        - ThreadTile:
+          - [  8, 32 ]
+        - WorkGroup:
+          - [ 16, 16, 1 ]
+        - SourceSwap: [True]
+        - PrefetchGlobalRead: [1]
+        # - AssertFree0ElementMultiple: [2]
+        - AssertFree1ElementMultiple: [2]
+        - WorkGroupMapping: [8]
+        - PrefetchLocalRead: [1, 3] # 2
+        - GlobalSplitU: [1]
+        - DepthU:  [16, 32, 64]
+        #- StoreVectorWidth: [2]
+        - VectorWidth: [2,4]
+        - GlobalReadVectorWidth: [2,4]
+        #- LocalReadVectorWidth: [4]
+        - DirectToLdsA: [True]
+        - DirectToLdsB: [True]
+        - DirectToVgprA: [False]
+        - DirectToVgprB: [False]
+        #- WaveSeparateGlobalReadA: [0, 1]
+        #- WaveSeparateGlobalReadB: [0, 1]
+        # - NumLoadsCoalescedA: [1,2]
+        # - NumLoadsCoalescedB: [1,2]
+        - ScheduleIterAlg: [3]
+        - AssertSummationElementMultiple: [8]
+        - StaggerU: [0]
+        - NumElementsPerBatchStore: [0]
+        - FractionalLoad: [0, 1, 2]
+        - BufferLoad: [True] # DirectToLds requires BufferLoad
+        - TransposeLDS: [1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [512, 512, 1, 1016]
+
+  ########################################
+  # NN
+  ########################################
+  - # hgemm NN
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - # MFMA 16x16, VW = 4
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - EdgeType: ["ShiftPtr"]
+      ForkParameters:
+        - MatrixInstruction:
+          # - [16, 16, 16, 1, 1, 4,4, 2,2]
+          - [16, 16, 16, 1, 1, 4,4, 1,4]
+          - [16, 16, 16, 1, 1, 4,4, 4,1]
+          - [16, 16, 4, 4, 1, 4,4, 2,2]
+          - [16, 16, 4, 4, 2, 4,4, 2,2]
+          - [16, 16, 4, 4, 4, 4,4, 2,2]
+          - [4, 4, 4, 16, 1, 4,4, 2,2]
+          - [4, 4, 4, 16, 2, 4,4, 2,2]
+          - [4, 4, 4, 16, 4, 4,4, 2,2]
+          - [4, 4, 4, 16, 8, 4,4, 2,2]
+          - [4, 4, 4, 16, 16, 4,4, 2,2]
+        - ThreadTile:
+          - [  8, 32 ]
+        - WorkGroup:
+          - [ 16, 16, 1 ]
+        - SourceSwap: [True]
+        - PrefetchGlobalRead: [1]
+        - AssertFree0ElementMultiple: [2]
+        # - AssertFree1ElementMultiple: [2]
+        - WorkGroupMapping: [8]
+        - PrefetchLocalRead: [1, 3] # 2
+        - GlobalSplitU: [1]
+        - DepthU:  [16, 32, 64]
+        #- StoreVectorWidth: [4]
+        - VectorWidth: [2,4]
+        - GlobalReadVectorWidth: [2,4]
+        #- LocalReadVectorWidth: [4]
+        - DirectToLdsA: [True]
+        - DirectToLdsB: [True]
+        - DirectToVgprA: [False]
+        - DirectToVgprB: [False]
+        - WaveSeparateGlobalReadA: [0, 1]
+        - WaveSeparateGlobalReadB: [0, 1]
+        # - NumLoadsCoalescedA: [1,2]
+        # - NumLoadsCoalescedB: [1,2]
+        - ScheduleIterAlg: [3]
+        - AssertSummationElementMultiple: [8]
+        - StaggerU: [0]
+        - NumElementsPerBatchStore: [0]
+        #- FractionalLoad: [0, 1, 2]
+        - BufferLoad: [True] # DirectToLds requires BufferLoad
+        - TransposeLDS: [1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [512, 512, 1, 1016]
+
+    - # MFMA 32x32, VW = 2
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - EdgeType: ["ShiftPtr"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [32, 32, 4, 2, 1, 2,2, 2,2]
+          - [32, 32, 4, 2, 2, 2,2, 2,2]
+          # - [32, 32, 8, 1, 1, 2,2, 2,2]
+          - [32, 32, 8, 1, 1, 2,2, 1,4]
+          - [32, 32, 8, 1, 1, 2,2, 4,1]
+        - ThreadTile:
+          - [  8, 32 ]
+        - WorkGroup:
+          - [ 16, 16, 1 ]
+        - SourceSwap: [True]
+        - PrefetchGlobalRead: [1]
+        - AssertFree0ElementMultiple: [2]
+        # - AssertFree1ElementMultiple: [2]
+        - WorkGroupMapping: [8]
+        - PrefetchLocalRead: [1, 3] # 2
+        - GlobalSplitU: [1]
+        - DepthU:  [16, 32] # 64
+        #- StoreVectorWidth: [2]
+        - VectorWidth: [2,4]
+        - GlobalReadVectorWidth: [2,4]
+        #- LocalReadVectorWidth: [4]
+        - DirectToLdsA: [True]
+        - DirectToLdsB: [True]
+        - DirectToVgprA: [False]
+        - DirectToVgprB: [False]
+        #- WaveSeparateGlobalReadA: [0, 1]
+        #- WaveSeparateGlobalReadB: [0, 1]
+        - NumLoadsCoalescedA: [1,2]
+        - NumLoadsCoalescedB: [1,2]
+        - ScheduleIterAlg: [3]
+        - AssertSummationElementMultiple: [8]
+        - StaggerU: [0]
+        - NumElementsPerBatchStore: [0]
+        - FractionalLoad: [0, 1, 2]
+        - BufferLoad: [True] # DirectToLds requires BufferLoad
+        - TransposeLDS: [1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [512, 512, 1, 1016]
+
+  ########################################
+  # NT
+  ########################################
+  - # hgemm NT
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+    - # MFMA 16x16, VW = 4
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - EdgeType: ["ShiftPtr"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 16, 1, 1, 4,4, 2,2]
+          - [16, 16, 16, 1, 1, 4,4, 1,4]
+          - [16, 16, 16, 1, 1, 4,4, 4,1]
+          # - [16, 16, 4, 4, 1, 4,4, 2,2]
+          # - [16, 16, 4, 4, 2, 4,4, 2,2]
+          # - [16, 16, 4, 4, 4, 4,4, 2,2]
+          - [4, 4, 4, 16, 1, 4,4, 2,2]
+          - [4, 4, 4, 16, 2, 4,4, 2,2]
+          - [4, 4, 4, 16, 4, 4,4, 2,2]
+          - [4, 4, 4, 16, 8, 4,4, 2,2]
+          - [4, 4, 4, 16, 16, 4,4, 2,2]
+        - ThreadTile:
+          - [  8, 32 ]
+        - WorkGroup:
+          - [ 16, 16, 1 ]
+        - SourceSwap: [True]
+        - PrefetchGlobalRead: [1]
+        - AssertFree0ElementMultiple: [2]
+        - AssertFree1ElementMultiple: [2]
+        - WorkGroupMapping: [8]
+        - PrefetchLocalRead: [1, 2, 3]
+        - GlobalSplitU: [1]
+        - DepthU:  [32, 64] # 16
+        #- StoreVectorWidth: [4]
+        - VectorWidth: [2,4]
+        - GlobalReadVectorWidth: [2,4]
+        #- LocalReadVectorWidth: [4]
+        - DirectToLdsA: [True]
+        - DirectToLdsB: [True]
+        - DirectToVgprA: [False]
+        - DirectToVgprB: [False]
+        #- WaveSeparateGlobalReadA: [0, 1]
+        #- WaveSeparateGlobalReadB: [0, 1]
+        # - NumLoadsCoalescedA: [1,2]
+        # - NumLoadsCoalescedB: [1,2]
+        - ScheduleIterAlg: [3]
+        - AssertSummationElementMultiple: [8]
+        - StaggerU: [0]
+        - NumElementsPerBatchStore: [0]
+        #- FractionalLoad: [0, 1, 2]
+        - BufferLoad: [True] # DirectToLds requires BufferLoad
+        #- TransposeLDS: [1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [512, 512, 1, 1016]
+
+    - # MFMA 32x32, VW = 2
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - EdgeType: ["ShiftPtr"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [32, 32, 4, 2, 1, 2,2, 2,2]
+          - [32, 32, 4, 2, 2, 2,2, 2,2]
+          - [32, 32, 8, 1, 1, 2,2, 2,2]
+          # - [32, 32, 8, 1, 1, 2,2, 1,4]
+          # - [32, 32, 8, 1, 1, 2,2, 4,1]
+        - ThreadTile:
+          - [  8, 32 ]
+        - WorkGroup:
+          - [ 16, 16, 1 ]
+        - SourceSwap: [True]
+        - PrefetchGlobalRead: [1]
+        - AssertFree0ElementMultiple: [2]
+        - AssertFree1ElementMultiple: [2]
+        - WorkGroupMapping: [8]
+        - PrefetchLocalRead: [1, 2, 3]
+        - GlobalSplitU: [1]
+        - DepthU:  [16, 32, 64]
+        #- StoreVectorWidth: [2]
+        - VectorWidth: [2,4]
+        - GlobalReadVectorWidth: [2,4]
+        #- LocalReadVectorWidth: [4]
+        - DirectToLdsA: [True]
+        - DirectToLdsB: [True]
+        - DirectToVgprA: [False]
+        - DirectToVgprB: [False]
+        - WaveSeparateGlobalReadA: [0, 1]
+        - WaveSeparateGlobalReadB: [0, 1]
+        # - NumLoadsCoalescedA: [1,2]
+        # - NumLoadsCoalescedB: [1,2]
+        - ScheduleIterAlg: [3]
+        - AssertSummationElementMultiple: [8]
+        - StaggerU: [0]
+        - NumElementsPerBatchStore: [0]
+        - FractionalLoad: [0, 1, 2]
+        - BufferLoad: [True] # DirectToLds requires BufferLoad
+        #- TransposeLDS: [1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [512, 512, 1, 1016]

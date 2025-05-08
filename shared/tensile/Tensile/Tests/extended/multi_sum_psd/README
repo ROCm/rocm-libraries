@@ -1,0 +1,10 @@
+1sum,2sum,3sum : refer to number of summation dimensions used in the test
+psd : PackSummationDims. These tests set PackSummationDims=1
+gsu : GlobalSplitU - PSD and GSU interact so have specific tests for the combination
+_simple: test is a simple starter test that generates 1-2 solutions and 1-4 problem sizes.  Useful 
+   for initial debug if something fails.
+   If test does not contain _simple it generates many solutions and many problem sizes.
+_ scrambled: Re-orders summation indices in a different way.
+
+example: 3sum_gsu_simple.yaml, 2sum.yaml
+

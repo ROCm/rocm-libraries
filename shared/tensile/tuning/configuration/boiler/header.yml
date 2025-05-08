@@ -1,0 +1,25 @@
+GlobalParameters:
+  MinimumRequiredVersion: 4.2.0
+  ForceRedoBenchmarkProblems: True
+  ForceRedoLibraryLogic: True
+  ForceRedoLibraryClient: True
+  CMakeBuildType: Release
+  EnqueuesPerSync: 1
+  SyncsPerBenchmark: 1
+  LibraryPrintDebug: False
+  NumElementsToValidate: 0
+  ValidationMaxToPrint: 4
+  ValidationPrintValids: False
+  ShortNames: False
+  MergeFiles: True
+  Platform: 0
+  Device: 0
+  KernelTime: True
+  PinClocks: False
+  SleepPercent: 50
+  DataInitTypeBeta : 0
+  SolutionSelectionAlg: 1
+  PrintWinnersOnly: 1
+  DataInitTypeAB: 0
+#  PrintSolutionRejectionReason: 1
+

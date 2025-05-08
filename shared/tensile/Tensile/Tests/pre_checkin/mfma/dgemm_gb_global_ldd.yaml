@@ -1,0 +1,87 @@
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1151] # not supported by arch
+
+GlobalParameters:
+  NumElementsToValidate: -1
+  BoundsCheck: True
+  KernelTime: True
+  PrintSolutionRejectionReason: True
+  BufferOffsetA: 917504
+  BufferOffsetC: 896
+  DataInitTypeAlpha: 17
+  DataInitTypeBeta: 1
+
+BenchmarkProblems:
+  ########################################
+  # TN - standard
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: d
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      StridedBatched: False
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - EdgeType: ["ShiftPtr"]
+      ForkParameters:
+        - MatrixInstruction:
+          #- [16, 16, 4, 1, 1, 2,2, 2,2]
+          #- [16, 16, 4, 1, 1, 2,2, 1,4]
+          # - [16, 16, 4, 1, 1, 2,2, 4,1] # 128x32
+          #- [16, 16, 4, 1, 1, 3,3, 2,2]
+          #- [16, 16, 4, 1, 1, 3,3, 1,4]
+          #- [16, 16, 4, 1, 1, 3,3, 4,1]
+          # - [16, 16, 4, 1, 1, 4,4, 2,2] # 128x128
+          - [16, 16, 4, 1, 1, 4,3, 2,2] # 128x96
+          # - [16, 16, 4, 1, 1, 4,2, 2,2] # 128x64
+          #- [16, 16, 4, 1, 1, 4,4, 1,4]
+          # - [16, 16, 4, 1, 1, 4,4, 4,1] # 256x64
+          # - [16, 16, 4, 1, 1, 2,4, 4,1] # 128x64
+          # - [16, 16, 4, 1, 1, 2,6, 4,1] # 128x96 ddddddd
+          # - [16, 16, 4, 1, 1, 2,8, 4,1] # 128x128
+        #- AggressivePerfMode: [0,1]
+        - 1LDSBuffer: [1]
+        - BufferStore: [0, 1]
+        - BufferLoad: [0, 1]
+        - DepthU: [16]
+        # - EdgeType: ["ShiftPtr"]
+        #- GlobalReadVectorWidth: [1] # 2 has error?
+        #- InnerUnroll: [1,2]
+        # - LocalReadVectorWidth: [1, 2, 4]
+        - PrefetchLocalRead: [5]
+        - PrefetchGlobalRead: [2]
+        - ScheduleIterAlg: [3]
+        - StaggerU: [0]
+        # - StaggerUStride: [0,256]
+        # - StoreRemapVectorWidth: [1,2]
+        - TransposeLDS: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - VectorWidth: [2]
+        - WorkGroupMapping: [8]
+        # - AssertSummationElementMultiple: [1, 2]
+        - NumElementsPerBatchStore: [0]
+        - SourceSwap: [1]
+        #- DirectToVgprA: [0,1] # does not work with BufferLoad=0
+        - MIArchVgpr: [1]
+        - StorePriorityOpt: [1]
+        - StoreSyncOpt: [4]
+        - NonTemporalC: [3]
+        - NonTemporalD: [3]
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 1024, 1, 896, 128, 1024, 1024, 1024]
+          - Exact: [128, 1024, 2, 896, 128, 1024, 1024, 1024]
+          - Exact: [128, 1024, 1, 896, 1024, 1024, 1024, 1024]
+          - Exact: [128, 1024, 2, 896, 1024, 1024, 1024, 1024]

@@ -1,0 +1,100 @@
+GlobalParameters:
+  MinimumRequiredVersion: 4.4.0
+  PrintLevel: 1
+  ForceRedoBenchmarkProblems: True
+  ForceRedoLibraryLogic: True
+  ForceRedoLibraryClient: True
+  CMakeBuildType: Release
+  EnqueuesPerSync: 1
+  SyncsPerBenchmark: 1
+  LibraryPrintDebug: False
+  NumElementsToValidate: 256
+  ValidationMaxToPrint: 4
+  ValidationPrintValids: False
+  ShortNames: False
+  MergeFiles: True
+  Platform: 0
+  Device: 0
+  KernelTime: True
+  PinClocks: True
+  SleepPercent: 200
+  DataInitTypeBeta : 0
+  ExitOnFails: 0
+
+BenchmarkProblems:
+
+  ########################################
+  ########################################
+  ###
+  ###   TN
+  ###
+  ########################################
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: B
+      DestDataType: B
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+  ########################################
+  # TN - Super Skinny
+  ########################################
+    - # Benchmark Group
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - EdgeType: ["ShiftPtr"]
+        - LoopTail: [True]
+        - KernelLanguage: ["Assembly"]
+        - PrefetchLocalRead: [False]
+        - PrefetchGlobalRead: [False]
+        - WorkGroupMapping: [1]
+      ForkParameters:
+        - ThreadTile:
+          - [ 4, 4 ]
+        - WorkGroup:
+          - [ 8, 8, 1 ]
+        - GlobalSplitU: [1]
+        - DepthU: [ 8]
+        - VectorWidth: [-1]
+        - AssertSummationElementMultiple: [2]
+        - AssertFree0ElementMultiple: [2]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [ 128, 128, 1, 128 ]
+
+LibraryLogic:
+   ScheduleName: "Arcturus"
+   DeviceNames: ["Device 738c"]
+   ArchitectureName: "gfx908"
+
+#   ScheduleName: "vega20"
+#   DeviceNames: ["Device 66a0", "Device 66a1", "Device 66a7", "Device 66af", "Vega 20"]
+#   ArchitectureName: "gfx906"
+
+#    ScheduleName: "vega10"
+#    DeviceNames: ["Device 6863", "Device 6862", "Device 687f", "Device 6860", "Device 6861", "Vega 10 XTX [Radeon Vega Frontier Edition]", "Vega [Radeon RX Vega]",
+#        Vega, Device 6864, Device 686c]
+#    ArchitectureName: "gfx900"
+
+#   ScheduleName: "mi25"
+#   DeviceNames: ["Device 6860"]
+#   ArchitectureName: "gfx900"
+
+#   ScheduleName: "r9nano"
+#   DeviceNames: ["Device 7300"]
+#   ArchitectureName: "gfx803"
+
+#   ScheduleName: "hip"
+#   DeviceNames: ["Device 0000"]
+#   ArchitectureName: "fallback"
+
+LibraryClient:

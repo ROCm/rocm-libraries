@@ -1,0 +1,50 @@
+BenchmarkProblems:
+- - AllowNoFreeDims: true
+    DataType: s
+    IndexAssignmentsA: [0, 2]
+    IndexAssignmentsB: [1, 2, 0]
+    NumIndicesC: 2
+    OperationType: TensorContraction
+    SetConstStrideA: []
+    SetConstStrideB:
+    - [0, 0]
+    UseBeta: false
+    UseInitialStridesAB: true
+  - BenchmarkCommonParameters:
+    - EdgeType: [ShiftPtr]
+    BenchmarkFinalParameters:
+    - ProblemSizes:
+      - Exact: [16, 16, 8]
+    BenchmarkForkParameters: null
+    BenchmarkJoinParameters: null
+    ForkParameters:
+    - PrefetchGlobalRead: [1]
+    - KernelLanguage: [Source,Assembly]
+    - ThreadTile:
+      - [2, 2]
+    - WorkGroup:
+      - [8, 8, 1]
+    - DepthU: [8]
+    - GlobalReadVectorWidth: [-1]
+    - VectorWidth: [1]
+    - FractionalLoad: [0]
+    - PackBatchDims: [1]
+    - StaggerU: [0]
+    InitialSolutionParameters: null
+    JoinParameters: null
+GlobalParameters: {CMakeBuildType: Release, EnqueuesPerSync: 1, ForceRedoBenchmarkProblems: true,
+  ForceRedoLibraryClient: true, ForceRedoLibraryLogic: true, KernelTime: true, LibraryPrintDebug: false,
+  MergeFiles: true, MinimumRequiredVersion: 4.2.0, NumElementsToValidate: 1000,
+  ShortNames: false, SolutionSelectionAlg: 1, SyncsPerBenchmark: 1,
+  ValidationMaxToPrint: 4, ValidationPrintValids: false,
+  DataInitTypeAB: 1,
+  DataInitTypeBeta: 0,
+  DataInitTypeD: 2,
+  PrintIndexAssignments: 1,
+  PrintCodeCommands: 1,
+  OldClientSourceTmp: 0,
+  #PrintTensorD: 2,
+  # PrintTensorRef: 2,
+
+
+  # OldClientSourceTmp=0 causes missing KernelHeader.h, probably something with the pushdir/pop sourceTmp stuff.

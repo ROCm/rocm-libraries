@@ -1,0 +1,60 @@
+# A config to generate a fast kernel for large DGEMMs
+GlobalParameters:
+  EnqueuesPerSync: 1
+  LibraryPrintDebug: False
+  NumElementsToValidate: 0
+  KernelTime: True
+  #PinClocks: True
+  SleepPercent: 0
+  DataInitTypeBeta : 0
+  PrintSolutionRejectionReason: 0
+  PrintWinnersOnly: 1
+
+BenchmarkProblems:
+  ########################################
+  # NT - standard
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - EdgeType: ["ShiftPtr"]
+      ForkParameters:
+        - PrefetchLocalRead: [True]
+        - PrefetchGlobalRead: [True]
+        - ThreadTile:
+          - [ 8, 8 ]
+        - WorkGroup:
+          - [ 16, 32, 1 ]
+          - [ 32, 16, 1 ]
+          - [ 16, 16, 1 ]
+        - WorkGroupMapping: [1,8,64]
+        - StaggerU: [0,32]
+        - StaggerUMapping: [0,1]
+        - DepthU: [ 8,16 ]
+        - VectorWidth: [4]
+        - FractionalLoad: [1]
+        - AssertSummationElementMultiple: [4]
+        - AssertFree0ElementMultiple: [4]
+        - AssertFree1ElementMultiple: [4]
+      BenchmarkForkParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # A couple classic large matrix problems:
+          - Range: [ [4096], [4096], [1], [4096] ]
+          - Range: [ [5760], [5760], [1], [4096] ]
+          - Range: [ [5760], [5760], [1], [5760] ]
+          - Range: [ [7744], [7744], [1], [7744] ]
+
+  ########################################
+

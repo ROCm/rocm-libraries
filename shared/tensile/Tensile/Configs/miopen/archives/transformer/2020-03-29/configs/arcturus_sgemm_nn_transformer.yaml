@@ -1,0 +1,160 @@
+GlobalParameters: {CMakeBuildType: Release, DataInitTypeAB: 0, DataInitTypeBeta: 0, Device: 0, EnqueuesPerSync: 1, ForceRedoBenchmarkProblems: true, ForceRedoLibraryClient: true, ForceRedoLibraryLogic: true, KernelTime: true, LibraryPrintDebug: false, MergeFiles: true, MinimumRequiredVersion: 4.2.0, NewClient: 2, NumElementsToValidate: 0, PinClocks: false, Platform: 0, PrintWinnersOnly: 1, ShortNames: false, SleepPercent: 20, SolutionSelectionAlg: 1, SyncsPerBenchmark: 1, ValidationMaxToPrint: 4, ValidationPrintValids: false}
+BenchmarkProblems:
+- - {Batched: true, DataType: s, OperationType: GEMM, TransposeA: false, TransposeB: false,
+    UseBeta: true}
+  - BenchmarkCommonParameters:
+    - EdgeType: [ShiftPtr]
+    - KernelLanguage: [Assembly]
+    - LoopTail: [true]
+    - VectorWidth: [-1]
+    - GlobalSplitU: [1]
+    - GlobalReadVectorWidth: [-1]
+    BenchmarkFinalParameters:
+    - ProblemSizes:
+      - Exact: [1024, 9520, 1, 1024]
+      - Exact: [1024, 8160, 1, 1024]
+      - Exact: [1024, 7200, 1, 1024]
+      - Exact: [1024, 3968, 1, 1024]
+      - Exact: [1024, 3840, 1, 1024]
+      - Exact: [1024, 10200, 1, 1024]
+      - Exact: [4096, 9520, 1, 1024]
+      - Exact: [4096, 8160, 1, 1024]
+      - Exact: [4096, 7200, 1, 1024]
+      - Exact: [4096, 3968, 1, 1024]
+      - Exact: [4096, 3840, 1, 1024]
+      - Exact: [4096, 10200, 1, 1024]
+      - Exact: [1024, 9520, 1, 4096]
+      - Exact: [1024, 8160, 1, 4096]
+      - Exact: [1024, 7200, 1, 4096]
+      - Exact: [1024, 3968, 1, 4096]
+      - Exact: [1024, 3840, 1, 4096]
+      - Exact: [1024, 10200, 1, 4096]
+      - Exact: [1024, 9520, 1, 42720]
+      - Exact: [1024, 7200, 1, 42720]
+      - Exact: [1024, 3968, 1, 42720]
+    BenchmarkForkParameters: null
+    BenchmarkJoinParameters: null
+    ForkParameters:
+    - WorkGroupMapping: [8]
+    - GlobalSplitU: [1]
+    - DepthU: [8,16,32]
+    - VectorWidth: [1]
+    - GlobalReadVectorWidth: [-1,1,2,4]
+    - SuppressNoLoadLoop: [True,False]
+    - OptNoLoadLoop: [0,1]
+    - LdsPadA: [0, -1]
+    - LdsPadB: [0, -1]
+    - UseSgprForGRO: [0, 1]
+    - FractionalLoad: [0, 1]
+    - PrefetchLocalRead: [false, true]
+    - MatrixInstruction:
+      - [32, 32, 1, 2]
+      #- [32, 32, 2, 1]
+      #- [16, 16, 1, 4]
+    - ThreadTile:
+      - [ 1, 32 ]
+      - [ 2, 32 ]
+      - [ 4, 32 ]
+      - [ 1, 64 ]
+      - [ 2, 64 ]
+      #- [ 2, 16 ]
+      #- [ 4, 16 ]
+    - WorkGroup:
+      - [ 16, 16, 1 ]
+      - [ 64, 4, 1 ]
+    InitialSolutionParameters: null
+    JoinParameters: null
+  - BenchmarkCommonParameters:
+    - EdgeType: [ShiftPtr]
+    - KernelLanguage: [Assembly]
+    - LoopTail: [true]
+    - VectorWidth: [-1]
+    - GlobalReadVectorWidth: [-1]
+    BenchmarkFinalParameters:
+    - ProblemSizes:
+      - Exact: [64, 31, 1, 31]
+      - Exact: [64, 31, 1, 30]
+      - Exact: [64, 30, 1, 30]
+      - Exact: [64, 17, 1, 17]
+    BenchmarkForkParameters: null
+    BenchmarkJoinParameters: null
+    ForkParameters:
+    - WorkGroupMapping: [8]
+    - GlobalSplitU: [1]
+    - DepthU: [8,16,32]
+    - VectorWidth: [1]
+    - GlobalReadVectorWidth: [-1,1,2,4]
+    - SuppressNoLoadLoop: [True,False]
+    - OptNoLoadLoop: [0,1]
+    - LdsPadA: [0, -1]
+    - LdsPadB: [0, -1]
+    - UseSgprForGRO: [0, 1]
+    - FractionalLoad: [0, 1]
+    - PrefetchLocalRead: [false, true]
+    - MatrixInstruction:
+      - [32, 32, 1, 2]
+      #- [32, 32, 2, 1]
+      #- [16, 16, 1, 4]
+    - ThreadTile:
+      - [ 1, 32 ]
+      - [ 2, 32 ]
+      - [ 4, 32 ]
+      - [ 1, 64 ]
+      - [ 2, 64 ]
+      #- [ 2, 16 ]
+      #- [ 4, 16 ]
+    - WorkGroup:
+      - [ 16, 16, 1 ]
+      - [ 64, 4, 1 ]
+    InitialSolutionParameters: null
+    JoinParameters: null
+  - BenchmarkCommonParameters:
+    - EdgeType: [ShiftPtr]
+    - KernelLanguage: [Assembly]
+    - LoopTail: [true]
+    - VectorWidth: [-1]
+    - GlobalReadVectorWidth: [-1]
+    BenchmarkFinalParameters:
+    - ProblemSizes:
+      - Exact: [64, 15, 1, 17]
+      - Exact: [64, 15, 1, 15]
+      - Exact: [64, 15, 1, 15]
+      - Exact: [64, 14, 1, 15]
+      - Exact: [64, 14, 1, 14]
+    BenchmarkForkParameters: null
+    BenchmarkJoinParameters: null
+    ForkParameters:
+    - WorkGroupMapping: [8]
+    - GlobalSplitU: [1]
+    - DepthU: [8,16,32]
+    - VectorWidth: [1]
+    - GlobalReadVectorWidth: [-1,1,2,4]
+    - SuppressNoLoadLoop: [True,False]
+    - OptNoLoadLoop: [0,1]
+    - LdsPadA: [0, -1]
+    - LdsPadB: [0, -1]
+    - UseSgprForGRO: [0, 1]
+    - FractionalLoad: [0, 1]
+    - PrefetchLocalRead: [false, true]
+    - MatrixInstruction:
+      - [32, 32, 1, 2]
+      #- [32, 32, 2, 1]
+      #- [16, 16, 1, 4]
+    - ThreadTile:
+      - [ 1, 32 ]
+      - [ 2, 32 ]
+      - [ 4, 32 ]
+      - [ 1, 64 ]
+      - [ 2, 64 ]
+      #- [ 2, 16 ]
+      #- [ 4, 16 ]
+    - WorkGroup:
+      - [ 16, 16, 1 ]
+      - [ 64, 4, 1 ]
+    InitialSolutionParameters: null
+    JoinParameters: null
+LibraryLogic:
+  ArchitectureName: gfx908
+  DeviceNames: [Device 7380, Device 7388, Device 738c, Device 7390, Device 731f]
+  ScheduleName: arcturus
+LibraryClient:

@@ -1,0 +1,54 @@
+BenchmarkProblems:
+- - DataType: s
+    IndexAssignmentsA: [4, 3, 0, 5, 2]
+
+    # Unroll (5) is less than first non-sum so TLU=0, but strideB5 is not unit
+    IndexAssignmentsB: [4, 3, 5, 1, 2]
+    NumIndicesC: 3
+    OperationType: TensorContraction
+    SetConstStrideA:
+    - [0, 1]
+    - [4, 1]
+    SetConstStrideB:
+    - [2, 0]
+    - [4, 1]
+    UseBeta: false
+    UseInitialStridesAB: false
+  - BenchmarkCommonParameters:
+    - EdgeType: [ShiftPtr]
+    BenchmarkFinalParameters:
+    - ProblemSizes:
+      #- Exact: [36, 64, 1, 2, 2, 64] # fails
+      #- Exact: [16, 16, 1, 2, 1, 64]
+      - Exact: [16, 16, 1, 1, 2, 4]
+      #
+      #
+      #- Exact: [16, 16, 1, 2, 64] # fails
+      #- Exact: [16, 16, 1, 1, 64] # passes with upper summations==0
+    BenchmarkForkParameters: null
+    BenchmarkJoinParameters: null
+    ForkParameters:
+    - PrefetchGlobalRead: [1]
+    - KernelLanguage: [Source,Assembly]
+    - ThreadTile:
+      - [2, 2]
+    - WorkGroup:
+      - [8, 8, 1]
+    - DepthU: [4]
+    - GlobalReadVectorWidth: [-1]
+    - VectorWidth: [1]
+    - PackBatchDims: [0]
+    - OptNoLoadLoop: [0]
+    InitialSolutionParameters: null
+    JoinParameters: null
+GlobalParameters: {CMakeBuildType: Release, EnqueuesPerSync: 1, ForceRedoBenchmarkProblems: true,
+  ForceRedoLibraryClient: true, ForceRedoLibraryLogic: true, KernelTime: true, LibraryPrintDebug: false,
+  MergeFiles: true, MinimumRequiredVersion: 4.2.0, NumElementsToValidate: 1000,
+  ShortNames: false, SolutionSelectionAlg: 1, SyncsPerBenchmark: 1,
+  ValidationMaxToPrint: 4, ValidationPrintValids: false,
+  PrintIndexAssignments: 1,
+  DataInitTypeA: 3,
+  DataInitTypeB: 3,
+  DataInitTypeAlpha: 2,
+
+  }

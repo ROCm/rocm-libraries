@@ -1,0 +1,56 @@
+GlobalParameters:
+  EnqueuesPerSync: 1
+  NumElementsToValidate: -1
+  KernelTime: True
+  SleepPercent: 0
+  DataInitTypeBeta : 0
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeAlpha: 1
+  PrintSolutionRejectionReason: 1
+  PrintWinnersOnly: 0
+  PrintTensorA: 0
+  PrintTensorD: 0
+  PrintTensorRef: 0
+
+# 2sums, single zero-pad, with padding on the 'other' (non-unroll) summation dim
+BenchmarkProblems:
+  -
+    - # ProblemType
+      OperationType: TensorContraction
+      DataType: s
+      DestDataType: s
+      UseBeta: False
+      NumIndicesC: 2
+      IndexAssignmentsA: [ 0, 2, 3 ]
+      IndexAssignmentsB: [ 3, 2, 1 ]
+      ZeroPadA: [[0, 2,   2, 2]]
+      MirrorDimsA: [ 2 ]
+      UseInitialStridesAB: True
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - EdgeType: ["ShiftPtr"]
+      ForkParameters:
+        - PackSummationDims: [1]
+        - KernelLanguage: [Assembly]
+        - UseSgprForGRO: [0]
+        - PrefetchLocalRead: [True]
+        - PrefetchGlobalRead: [False,True]
+        - ThreadTile:
+          - [ 4, 4 ]
+        - WorkGroup:
+          - [ 8, 8, 1 ]
+        - StaggerU: [0]
+        - StaggerUMapping: [0]
+        - DepthU: [ 4]
+        - VectorWidth: [1]
+        - GlobalReadVectorWidth: [1]
+      BenchmarkForkParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: {sizes: [16,16,1,4], stridesA: [1,1,16] }
+          - Exact: {sizes: [16,16,1,16], stridesA: [1,1,16] }
+          - Exact: {sizes: [16,16,2,16], stridesA: [1,1,16] }

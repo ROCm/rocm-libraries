@@ -1,0 +1,69 @@
+GlobalParameters:
+  MinimumRequiredVersion: 4.4.0
+  PrintLevel: 1
+  LibraryPrintDebug: True
+  PrintSolutionRejectionReason: True
+  ForceRedoBenchmarkProblems: True
+  ForceRedoLibraryLogic: True
+  ForceRedoLibraryClient: True
+  CMakeBuildType: Release
+  EnqueuesPerSync: 1
+  SyncsPerBenchmark: 1
+  NumElementsToValidate: -1
+  ValidationMaxToPrint: 4
+  ValidationPrintValids: False
+  ShortNames: False
+  MergeFiles: True
+  Platform: 0
+  Device: 0
+  KernelTime: True
+  PinClocks: False
+  SleepPercent: 200
+  DataInitTypeBeta : 0
+  #PrintTensorA: 1
+  #PrintTensorB: 1
+  #PrintTensorC: 3
+  #PrintTensorD: 3
+
+BenchmarkProblems:
+  ########################################
+  # NN - standard
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - EdgeType: ["ShiftPtr"]
+        - LoopTail: [True]
+        - PrefetchLocalRead: [True]
+      ForkParameters:
+        - PrefetchGlobalRead: [True]
+        - ThreadTile:
+          - [ 8, 8 ]
+        - WorkGroup:
+          - [ 16, 16, 1 ]
+        - WorkGroupMapping: [8]
+        - GlobalSplitU: [1]
+        - DepthU: [ 8 ]
+        - VectorWidth: [-1]
+      BenchmarkForkParameters:
+      JoinParameters:
+        - MacroTile
+        - GlobalSplitU
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+            #- Range: [ [5760], [5760], [1], [5760] ]
+            #- Range: [ [4], [4], [1], [6] ]
+          - Range: [ [234], [123], [12], [634] ]
+
+  ########################################

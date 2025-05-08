@@ -1,0 +1,175 @@
+GlobalParameters:
+  MinimumRequiredVersion: 4.2.0
+  NumElementsToValidate: -1
+  BoundsCheck: False
+  KernelTime: True
+  HardwareMonitor: False
+
+BenchmarkProblems:
+  - # hgemm TT
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup - Assembly
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - LoopTail: [True]
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - PreloadKernelArguments:  [0, 1]
+        - DelayRemainingArguments: [False, True]
+
+        - PrefetchLocalRead: [False]
+        - PrefetchGlobalRead: [False,True]
+
+        - EdgeType: ["Branch", "ShiftPtr"]
+        - ThreadTile:
+          - [ 16, 8 ]
+        - WorkGroup:
+          - [ 16, 16,  1 ]
+        - DepthU: [32]
+        - VectorWidth: [-1]
+        - AssertSummationElementMultiple: [1]
+        - AssertFree0ElementMultiple: [1]
+        - StaggerU: [0, 2, 32]
+        - WorkGroupMapping: [ 1, 8 ]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [129,1,129], 0, [2], [62,1,62] ]
+
+  - # hgemm NT
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup - Assembly
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - LoopTail: [True]
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - PreloadKernelArguments:  [-1]
+        - DelayRemainingArguments: [False, True]
+
+        - PrefetchLocalRead: [False]
+        - PrefetchGlobalRead: [False,True]
+
+        - EdgeType: ["Branch", "ShiftPtr"]
+        - ThreadTile:
+          - [ 16, 8 ]
+        - WorkGroup:
+          - [ 16, 16,  1 ]
+        - DepthU: [32]
+        - VectorWidth: [-1]
+        - AssertSummationElementMultiple: [1]
+        - AssertFree0ElementMultiple: [1]
+        - StaggerU: [0, 2, 32]
+        - WorkGroupMapping: [ 1, 8 ]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [129,1,129], 0, [2], [62,1,62] ]
+
+  - # BFloat16 gemm TT
+    - # ProblemType
+      OperationType: GEMM
+      DataType: B
+      DestDataType: B
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup - Assembly
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - LoopTail: [True]
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - PreloadKernelArguments:  [0, 1]
+        - DelayRemainingArguments: [False, True]
+
+        - PrefetchLocalRead: [False]
+        - PrefetchGlobalRead: [False,True]
+
+        - EdgeType: ["Branch", "ShiftPtr"]
+        - ThreadTile:
+          - [ 16, 8 ]
+        - WorkGroup:
+          - [ 16, 16,  1 ]
+        - DepthU: [32]
+        - VectorWidth: [-1]
+        - AssertSummationElementMultiple: [1]
+        - AssertFree0ElementMultiple: [1]
+        - StaggerU: [0, 2, 32]
+        - WorkGroupMapping: [ 1, 8 ]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [129,1,129], 0, [2], [62,1,62] ]
+
+
+  - # sgemm TT
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      DestDataType: s
+      ComputeDataType: s
+      TransposeA: True
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup - Assembly
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - LoopTail: [True]
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - PreloadKernelArguments:  [0, 1]
+        - DelayRemainingArguments: [False, True]
+
+        - PrefetchLocalRead: [False]
+        - PrefetchGlobalRead: [False,True]
+
+        - EdgeType: ["Branch", "ShiftPtr"]
+        - ThreadTile:
+          - [ 8, 8 ]
+        - WorkGroup:
+          - [ 16, 16,  1 ]
+        - DepthU: [32]
+        - VectorWidth: [-1]
+        - AssertSummationElementMultiple: [1]
+        - AssertFree0ElementMultiple: [1]
+        - StaggerU: [0, 2, 32]
+        - WorkGroupMapping: [ 1, 8 ]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [129,1,129], 0, [2], [62,1,62] ]

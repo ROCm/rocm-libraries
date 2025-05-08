@@ -1,0 +1,59 @@
+TestParameters:
+  marks: []
+
+# benchmark assembly and source kernels
+GlobalParameters:
+  MinimumRequiredVersion: 4.2.0
+  NumElementsToValidate: -1
+  BoundsCheck: True
+  KernelTime: True
+  DataInitTypeA: 18
+  DataInitTypeB: 20
+  DataInitTypeC: 0
+  DataInitTypeAlpha: 2
+  DataInitTypeBeta: 1
+  #PrintTensorD: 0x2
+  #PrintTensorRef: 0x2
+
+BenchmarkProblems:
+  - # hgemm NN
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+
+    - # BenchmarkProblemSizeGroup - Assembly
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - LoopTail: [True]
+        - EdgeType: ["ShiftPtr"]
+      ForkParameters:
+        - KernelLanguage: ["Assembly"]
+        - GlobalSplitU: [1]
+        - PrefetchLocalRead: [False]
+        - PrefetchGlobalRead: [True]
+        - ThreadTile:
+          #- [ 4, 2 ]
+          - [ 4, 8 ]
+          #- [ 16, 16 ]
+          #- [ 8, 8 ]
+        - WorkGroup:
+          #- [ 16, 16,  1 ]
+          - [  8,  8,  1 ]
+        - DepthU: [16]
+        - VectorWidth: [-1]
+        - AssertSummationElementMultiple: [1]
+        - AssertFree0ElementMultiple: [1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [128], [128], [1], [128] ]
+          #- Range: [ [1024], [1024], [1], [1024] ]
+
