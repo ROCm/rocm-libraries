@@ -153,7 +153,7 @@ class SIA1(SIA):
 ################################################################################
 ################################################################################
 
-def checkLocalReadFIFO(localReadFIFO, miLatency, numWaves, currentMFMA, blockWidth):
+def checkLocalReadFIFO(localReadFIFO, miLatency, numWaves, numMFMA, blockWidth):
     # Add space to avoid LR FIFO stall
     # lrStallLatencyBuffer:
     # 40 quad-cycle - 4 x miLatency for b128
@@ -165,12 +165,12 @@ def checkLocalReadFIFO(localReadFIFO, miLatency, numWaves, currentMFMA, blockWid
     # The FIFO length is 16 so that each wave has 16/numWaves buffer.
     lrStallLatencyBuffer = roundUp(blockWidth) * 10 - ((16 / numWaves) * miLatency)
     if len(localReadFIFO) < (16 / numWaves):
-        localReadFIFO.append(currentMFMA)
+        localReadFIFO.append(numMFMA)
     else:
-        oldMFMA = localReadFIFO[0]
-        if (currentMFMA - oldMFMA) * miLatency >= lrStallLatencyBuffer:
+        oldNumMFMA = localReadFIFO[0]
+        if (numMFMA - oldNumMFMA) * miLatency >= lrStallLatencyBuffer:
             localReadFIFO.pop(0)
-            localReadFIFO.append(currentMFMA)
+            localReadFIFO.append(numMFMA)
         else:
             # FIFO is full
             return True
