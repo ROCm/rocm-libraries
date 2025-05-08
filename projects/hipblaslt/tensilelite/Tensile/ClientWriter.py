@@ -42,7 +42,7 @@ from . import ROOT_PATH
 from . import ClientExecutable
 from . import LibraryIO
 from Tensile.Common import ensurePath, print1, printExit, printWarning, ClientExecutionLock,\
-                           LIBRARY_LOGIC_DIR, LIBRARY_CLIENT_DIR, DepthUConfig
+                           LIBRARY_LOGIC_DIR, LIBRARY_CLIENT_DIR
 from Tensile.Common.Architectures import isaToGfx
 from Tensile.Common.GlobalParameters import globalParameters
 from .TensileCreateLibrary import copyStaticFiles
@@ -130,7 +130,6 @@ def main(config, assembler: Assembler, cCompiler: str, isaInfoMap, outputPath: P
                                           splitGSU,
                                           printSolutionRejectionReason,
                                           printIndexAssignmentInfo,
-                                          DepthUConfig(),
                                           isaInfoMap,
                                           globalParameters["LazyLibraryLoading"])
     functions.append((scheduleName, problemType))

@@ -27,7 +27,7 @@ from . import SolutionLibrary
 from .CustomYamlLoader import load_yaml_stream
 from Tensile import __version__
 from Tensile.Common import printExit, printWarning, print2, \
-                           versionIsCompatible, IsaInfo, DepthUConfig
+                           versionIsCompatible, IsaInfo
 from Tensile.Common.Architectures import gfxToIsa
 from Tensile.SolutionStructs import Solution, ProblemSizes
 from Tensile.SolutionStructs.Problem import ProblemType
@@ -208,7 +208,6 @@ def parseSolutionsFile(
         splitGSU: bool,
         printSolutionRejectionReason: bool,
         printIndexAssignmentInfo: bool,
-        depthUConfig: DepthUConfig,
         isaInfoMap
     ):
     """Wrapper function to read and parse a solutions file."""
@@ -219,7 +218,6 @@ def parseSolutionsFile(
                splitGSU,
                printSolutionRejectionReason,
                printIndexAssignmentInfo,
-               depthUConfig,
                isaInfoMap
             )
 
@@ -231,7 +229,6 @@ def parseSolutionsData(
         splitGSU: bool,
         printSolutionRejectionReason: bool,
         printIndexAssignmentInfo: bool,
-        depthUConfig: DepthUConfig,
         isaInfoMap
     ):
     """Parses problem sizes and solutions from the data of a solutions file."""
@@ -265,7 +262,6 @@ def parseSolutionsData(
                              splitGSU,
                              printSolutionRejectionReason,
                              printIndexAssignmentInfo,
-                             depthUConfig,
                              assembler,
                              isaInfoMap,
                              srcFile
@@ -291,7 +287,6 @@ def parseLibraryLogicFile(
         splitGSU: bool,
         printSolutionRejectionReason: bool,
         printIndexAssignmentInfo: bool,
-        depthUConfig: DepthUConfig,
         isaInfoMap: Dict[str, IsaInfo],
         lazyLibraryLoading: bool
     ):
@@ -303,7 +298,6 @@ def parseLibraryLogicFile(
                splitGSU,
                printSolutionRejectionReason,
                printIndexAssignmentInfo,
-               depthUConfig,
                isaInfoMap,
                lazyLibraryLoading
            )
@@ -316,7 +310,6 @@ def parseLibraryLogicData(
         splitGSU: bool,
         printSolutionRejectionReason: bool,
         printIndexAssignmentInfo: bool,
-        depthUConfig: DepthUConfig,
         isaInfoMap: Dict[str, IsaInfo],
         lazyLibraryLoading: bool
     ):
@@ -362,7 +355,6 @@ def parseLibraryLogicData(
                              splitGSU,
                              printSolutionRejectionReason,
                              printIndexAssignmentInfo,
-                             depthUConfig,
                              assembler,
                              isaInfoMap,
                              srcFile
@@ -386,7 +378,6 @@ def parseLibraryLogicData(
         splitGSU,
         printSolutionRejectionReason,
         printIndexAssignmentInfo,
-        depthUConfig,
         assembler,
         isaInfoMap,
         lazyLibraryLoading

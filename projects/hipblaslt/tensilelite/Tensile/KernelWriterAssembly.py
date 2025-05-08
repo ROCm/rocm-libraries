@@ -185,7 +185,8 @@ class KernelWriterAssembly(KernelWriter):
   ########################################
   def getOccupancy(self, numThreads, vgprs, sgprs, ldsSize, accvgprs=0, doubleVgpr=False):
 
-    ldsLimitedOccupancy = self.getLdsLimitedOccupancy(ldsSize)
+    deviceLdsSize = self.states.archCaps["DeviceLDS"]
+    ldsLimitedOccupancy = self.getLdsLimitedOccupancy(deviceLdsSize, ldsSize)
 
     if not doubleVgpr:
       vgprLimitedOccupancy    = self.getVgprOccupancy(numThreads, vgprs,          doubleVgpr)
@@ -219,13 +220,12 @@ class KernelWriterAssembly(KernelWriter):
     return lastVgprs, initOccupancy
 
   @staticmethod
-  def getLdsLimitedOccupancy(ldsSize):
-    maxLds = 65536
-    # As ldsSize gets large, rounding might push us slightly higher than maxLds.
-    # Clamp at maxLds
-    ldsSize = min(ldsSize + 255, maxLds) & 0x1ff00 # 256-byte granularity
+  def getLdsLimitedOccupancy(deviceLdsSize, ldsSize):
+    # As ldsSize gets large, rounding might push us slightly higher than deviceLdsSize.
+    # Clamp at deviceLdsSize
+    ldsSize = min(ldsSize + 255, deviceLdsSize) & 0xffffff00 # 256-byte granularity
 
-    ldsLimitedOccupancy = maxLds//ldsSize
+    ldsLimitedOccupancy = deviceLdsSize//ldsSize
     return ldsLimitedOccupancy
 
   @staticmethod

@@ -28,7 +28,7 @@ from . import LibraryIO
 from . import SolutionSelectionLibrary
 from Tensile.Common import print1, print2, HR, printExit, \
   assignParameterWithDefault, ProgressBar, printWarning, ensurePath, \
-  LIBRARY_LOGIC_DIR, BENCHMARK_DATA_DIR, getVerbosity, IsaInfo, DepthUConfig
+  LIBRARY_LOGIC_DIR, BENCHMARK_DATA_DIR, getVerbosity, IsaInfo
 from Tensile.Common.GlobalParameters import defaultAnalysisParameters, globalParameters, startTime
 from Tensile.SolutionStructs.Naming import getKernelNameMin, getSolutionNameMin, getSolutionNameFull
 
@@ -1431,7 +1431,6 @@ def generateLogic(
     splitGSU: bool,
     printSolutionRejectionReason: bool,
     printIndexAssignmentInfo: bool,
-    depthUConfig: DepthUConfig,
     isaInfoMap: Dict[str, IsaInfo]
   ):
 
@@ -1482,7 +1481,6 @@ def generateLogic(
                                       splitGSU,
                                       printSolutionRejectionReason,
                                       printIndexAssignmentInfo,
-                                      depthUConfig,
                                       isaInfoMap
                                   )
       if len(solutions) == 0:
@@ -1564,7 +1562,6 @@ def main(
       splitGSU: bool,
       printSolutionRejectionReason: bool,
       printIndexAssignmentInfo: bool,
-      depthUConfig: DepthUConfig,
       isaInfoMap: Dict[str, IsaInfo]
     ):
   benchmarkDataPath = outputPath / BENCHMARK_DATA_DIR
@@ -1577,6 +1574,5 @@ def main(
     splitGSU,
     printSolutionRejectionReason,
     printIndexAssignmentInfo,
-    depthUConfig,
     isaInfoMap
   )

@@ -294,14 +294,17 @@ inline std::map<std::string, int>
     return rv;
 }
 
-inline std::map<std::string, bool> initArchCaps(const IsaVersion& isaVersion)
+inline std::map<std::string, int> initArchCaps(const IsaVersion& isaVersion)
 {
     std::vector<std::array<int, 3>> b = {{9, 0, 6}, {9, 0, 8}, {9, 0, 10}, {9, 4, 2}};
-    std::map<std::string, bool>     rv;
+    std::map<std::string, int>     rv;
     rv["HasEccHalf"]
         = checkInList(isaVersion, {{9, 0, 6}, {9, 0, 8}, {9, 0, 10}, {9, 4, 2}, {9, 5, 0}});
     rv["Waitcnt0Disabled"] = checkInList(isaVersion, {{9, 0, 8}, {9, 0, 10}, {9, 4, 2}, {9, 5, 0}});
-    rv["HasLDSGT64K"]      = checkInList(isaVersion, {{9, 5, 0}});
+    int deviceLDS = 65536;
+    if(checkInList(isaVersion, {{9, 5, 0}}))
+        deviceLDS = 163840;
+    rv["DeviceLDS"]        = deviceLDS;
     rv["SeparateVscnt"]    = checkInList(isaVersion[0], {10, 11});
     rv["SeparateLGKMcnt"]  = isaVersion[0] == 12;
     rv["SeparateVMcnt"]    = isaVersion[0] == 12;
@@ -324,7 +327,7 @@ inline std::map<std::string, bool> initArchCaps(const IsaVersion& isaVersion)
 }
 
 inline std::map<std::string, int> initRegisterCaps(const IsaVersion&            isaVersion,
-                                                   std::map<std::string, bool>& archCaps)
+                                                   std::map<std::string, int>& archCaps)
 {
     std::map<std::string, int> rv;
     rv["MaxVgpr"] = 256;

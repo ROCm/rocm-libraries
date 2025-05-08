@@ -40,21 +40,6 @@ class SemanticVersion(NamedTuple):
 
 IsaVersion = SemanticVersion
 
-
-class DepthUConfig(NamedTuple):
-    deviceLDS: int=65536
-    maxLDS: int=65536
-
-
-def makeDepthUConfig(config: dict) -> DepthUConfig:
-    deviceLDS  = maxLDS = 65536
-    if "DeviceLDS" in config:
-        deviceLDS = config["DeviceLDS"]
-    if "MaxLDS" in config:
-        maxLDS = config["MaxLDS"]
-    return DepthUConfig(deviceLDS, maxLDS)
-
-
 class DebugConfig(NamedTuple):
     """
     Members:
