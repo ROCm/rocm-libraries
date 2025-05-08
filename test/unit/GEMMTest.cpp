@@ -454,6 +454,7 @@ namespace GEMMDriverTest
             params->setSplitStoreTileIntoWaveBlocks(gemm.splitStoreTileIntoWaveBlocks);
 
             params->swizzleScale                  = gemm.swizzleScale;
+            params->prefetchScale                 = gemm.prefetchScale;
             params->fuseLoops                     = gemm.fuseLoops;
             params->tailLoops                     = gemm.tailLoops;
             params->allowAmbiguousMemoryNodes     = gemm.allowAmbiguousMemoryNodes;
@@ -2281,7 +2282,8 @@ namespace GEMMDriverTest
             gemm.scaleAMode = Operations::ScaleMode::Separate;
             gemm.scaleBMode = Operations::ScaleMode::Separate;
 
-            gemm.swizzleScale = true;
+            gemm.swizzleScale  = true;
+            gemm.prefetchScale = true;
 
             gemm.scaleBlockSize = m_context->targetArchitecture().GetCapability(
                 GPUCapability::DefaultScaleBlockSize);
@@ -2292,7 +2294,8 @@ namespace GEMMDriverTest
             EXPECT_EQ(countSubstring(generatedCode, "buffer_load_ubyte "), 0);
             EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dword "), 0);
             // 1x4 wave config: NumAScaleLoadTiles = 256/64 = 4 and NumBScaleLoadTiles = 256/4/64 = 1
-            EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dwordx2 "), 5);
+            // prefetched : 2 * 5 = 10
+            EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dwordx2 "), 10);
         }
     }
 
@@ -2327,15 +2330,68 @@ namespace GEMMDriverTest
         gemm.scaleAMode = Operations::ScaleMode::Separate;
         gemm.scaleBMode = Operations::ScaleMode::Separate;
 
-        gemm.swizzleScale = true;
+        gemm.swizzleScale  = true;
+        gemm.prefetchScale = true;
 
         gemm.scaleBlockSize
             = m_context->targetArchitecture().GetCapability(GPUCapability::DefaultScaleBlockSize);
 
         basicGEMM<FP4, FP4, float>(gemm);
+
         std::string generatedCode = m_context->instructions()->toString();
         // no swizzle applied for scales loaded via LDS
         EXPECT_GT(countSubstring(generatedCode, "ds_read_u8 "), 0);
+    }
+
+    TEST_P(GEMMTestGPU, GPU_SwizzleScaledPrefetchD2LGEMMMXF4TN)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+        REQUIRE_ARCH_CAP(GPUCapability::HasBlockScaling32);
+
+        auto gemm = setup_GEMMF8F6F4(32, 32, 64);
+
+        gemm.macM = 256;
+        gemm.macN = 256;
+        gemm.macK = 128;
+
+        gemm.m = 2 * gemm.macM;
+        gemm.n = 3 * gemm.macN;
+        gemm.k = 4 * gemm.macK;
+
+        gemm.workgroupSizeX = 1 * gemm.wavefrontSize;
+        gemm.workgroupSizeY = 4;
+
+        gemm.loadLDSA      = true;
+        gemm.loadLDSB      = true;
+        gemm.loadLDSScaleA = false;
+        gemm.loadLDSScaleB = false;
+        gemm.direct2LDSA   = true;
+        gemm.direct2LDSB   = true;
+
+        gemm.unrollK           = 2;
+        gemm.prefetch          = true;
+        gemm.prefetchInFlight  = 2;
+        gemm.prefetchLDSFactor = 1;
+        gemm.prefetchMixMemOps = true;
+
+        gemm.scaleAMode = Operations::ScaleMode::Separate;
+        gemm.scaleBMode = Operations::ScaleMode::Separate;
+
+        gemm.swizzleScale  = true;
+        gemm.prefetchScale = true;
+
+        gemm.scaleBlockSize
+            = m_context->targetArchitecture().GetCapability(GPUCapability::DefaultScaleBlockSize);
+
+        basicGEMM<FP4, FP4, float>(gemm);
+
+        std::string generatedCode = m_context->instructions()->toString();
+        EXPECT_EQ(countSubstring(generatedCode, "ds_write"), 0);
+        EXPECT_EQ(countSubstring(generatedCode, "buffer_load_ubyte "), 0);
+        EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dword "), 0);
+        // 1x4 wave config: NumAScaleLoadTiles = 256/64 = 4 and NumBScaleLoadTiles = 256/4/64 = 1
+        // prefetched scale: 2 * 5 = 10
+        EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dwordx2 "), 10);
     }
 
     TEST_P(GEMMF8F6F4TestGPU, GPU_SwizzleScaled_Prefetch_GEMMF8F6F4)
@@ -2385,7 +2441,8 @@ namespace GEMMDriverTest
         gemm.scaleAMode = Operations::ScaleMode::Separate;
         gemm.scaleBMode = Operations::ScaleMode::Separate;
 
-        gemm.swizzleScale = true;
+        gemm.swizzleScale  = true;
+        gemm.prefetchScale = true;
 
         gemm.scaleBlockSize
             = m_context->targetArchitecture().GetCapability(GPUCapability::DefaultScaleBlockSize);
@@ -2415,6 +2472,10 @@ namespace GEMMDriverTest
 
         std::string generatedCode = m_context->instructions()->toString();
         EXPECT_EQ(countSubstring(generatedCode, "buffer_load_ubyte "), 0);
+        EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dword "), 0);
+        // 1x4 wave config: NumAScaleLoadTiles = 128/64 = 2 and NumBScaleLoadTiles = 256/4/64 = 1
+        // prefetched scale: 2 * 3 = 6
+        EXPECT_GE(countSubstring(generatedCode, "buffer_load_dwordx2 "), 6);
     }
 
     TEST_P(GEMMTestGPU, GPU_StoreHazardScaledGEMMMXF8TN)

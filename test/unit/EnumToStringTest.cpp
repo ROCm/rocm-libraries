@@ -118,6 +118,7 @@ TEST(EnumToStringTest, ALL)
         {DataType::Bool32, "Bool32"},
         {DataType::Bool64, "Bool64"},
         {DataType::E8M0, "E8M0"},
+        {DataType::E8M0x4, "E8M0x4"},
         {DataType::None, "None"},
     });
 

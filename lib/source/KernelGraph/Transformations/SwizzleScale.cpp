@@ -90,18 +90,6 @@ namespace rocRoller
             return rv;
         }
 
-        unsigned int getUnrollSize(KernelGraph const& graph, int unroll)
-        {
-            if(unroll == -1)
-                return 1u;
-
-            AssertFatal(graph.coordinates.get<Unroll>(unroll).has_value(),
-                        "The argument is not an Unroll coordinate");
-
-            Dimension unrollDim = graph.coordinates.get<Unroll>(unroll).value();
-            return getUnsignedInt(evaluate(getSize(unrollDim)));
-        }
-
         std::vector<DeferredConnection> addExchangeCT(KernelGraph& graph,
                                                       ContextPtr   context,
                                                       int          macTileTag,
@@ -114,7 +102,7 @@ namespace rocRoller
 
             std::vector<DeferredConnection> connections;
 
-            auto waveTile = *graph.coordinates.get<WaveTile>(waveTileTag);
+            auto waveTile = graph.coordinates.get<WaveTile>(waveTileTag).value();
             auto iWaveX   = graph.coordinates.addElement(waveTile.tileIndex(0));
             auto iWaveY   = graph.coordinates.addElement(waveTile.tileIndex(1));
 
@@ -707,9 +695,9 @@ namespace rocRoller
 
                 // update the SetCoordinate value and its Unroll coordinate connection
                 auto maybeSetCoordinate = findContainingOperation<SetCoordinate>(load.first, graph);
-                while(maybeSetCoordinate)
+                while(maybeSetCoordinate.has_value())
                 {
-                    auto tag = *maybeSetCoordinate;
+                    auto tag = maybeSetCoordinate.value();
 
                     auto unroll = graph.mapper.get<Unroll>(tag);
                     AssertFatal(unroll > 0,

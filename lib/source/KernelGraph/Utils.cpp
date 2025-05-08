@@ -1178,6 +1178,17 @@ namespace rocRoller
             return duplicateControlNodes(graph, nullptr, startNodes, [](int x) { return true; })[0];
         }
 
+        unsigned int getUnrollSize(KernelGraph const& graph, int unroll)
+        {
+            if(unroll == -1)
+                return 1u;
+            AssertFatal(graph.coordinates.get<Unroll>(unroll).has_value(),
+                        "The argument is not an Unroll coordinate");
+
+            Dimension unrollDim = graph.coordinates.get<Unroll>(unroll).value();
+            return getUnsignedInt(evaluate(getSize(unrollDim)));
+        }
+
         /**
         * @brief Get coordinates required by the code-generator.
         */
@@ -1213,5 +1224,4 @@ namespace rocRoller
         }
 
     }
-
 }

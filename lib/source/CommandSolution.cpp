@@ -408,6 +408,11 @@ namespace rocRoller
             std::make_shared<KernelGraph::SwizzleScale>(m_commandParameters, m_context));
         transforms.push_back(
             std::make_shared<KernelGraph::AddPrefetch>(m_commandParameters, m_context));
+        if(m_commandParameters->prefetch && m_commandParameters->prefetchScale)
+        {
+            transforms.push_back(
+                std::make_shared<KernelGraph::PrefetchScale>(m_commandParameters, m_context));
+        }
         transforms.push_back(std::make_shared<KernelGraph::AddF6LDSPadding>(m_context));
         transforms.push_back(
             std::make_shared<KernelGraph::AddDirect2LDS>(m_context, m_commandParameters));

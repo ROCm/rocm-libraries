@@ -38,6 +38,7 @@
 #include <rocRoller/DataTypes/DataTypes_BF8.hpp>
 #include <rocRoller/DataTypes/DataTypes_BFloat16.hpp>
 #include <rocRoller/DataTypes/DataTypes_E8M0.hpp>
+#include <rocRoller/DataTypes/DataTypes_E8M0x4.hpp>
 #include <rocRoller/DataTypes/DataTypes_FP4.hpp>
 #include <rocRoller/DataTypes/DataTypes_FP6.hpp>
 #include <rocRoller/DataTypes/DataTypes_FP8.hpp>
@@ -119,6 +120,7 @@ namespace rocRoller
         Bool32, //< Thirty-two booleans packed into 32bits.  Usually the result of a vector-comparison (VCC; On Wave32 VCC is a single Bool32).
         Bool64, //< Sixty-four booleans packed into 64bits.  Usually the result of a vector-comparison (VCC; On Wave64 VCC is a single Bool64).
         E8M0, //< 8bits scale type
+        E8M0x4, //< Four 8bits scale type; packed into 32bits
         None, //< Represents: any, unknown/unspecified, or a deferred type.
         Count
     };
@@ -1115,6 +1117,20 @@ namespace rocRoller
                                                 false,
                                                 true,
                                                 false>
+    {
+    };
+
+    template <>
+    struct TypeInfo<E8M0x4> : public BaseTypeInfo<E8M0x4,
+                                                  DataType::E8M0x4,
+                                                  DataType::E8M0,
+                                                  PointerType::Value,
+                                                  4,
+                                                  1,
+                                                  32,
+                                                  false,
+                                                  false,
+                                                  false>
     {
     };
 

@@ -624,6 +624,11 @@ namespace rocRoller
         int duplicateChain(KernelGraph& graph, std::vector<int> const& startNodes);
 
         /**
+        * @brief Get the unroll coordinate size, given the unroll coordinate tag.
+        */
+        unsigned int getUnrollSize(KernelGraph const& graph, int unroll);
+
+        /**
         * @brief Get coordinates required by the code-generator.
         */
         std::vector<int> getCodeGeneratorCoordinates(KernelGraph const& graph,
