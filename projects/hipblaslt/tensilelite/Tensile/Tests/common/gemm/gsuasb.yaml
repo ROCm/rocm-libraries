@@ -1,0 +1,124 @@
+TestParameters:
+  marks: [skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
+
+GlobalParameters:
+  MinimumRequiredVersion: 4.14.0
+  NumWarmups: 0
+  SleepPercent: 50
+  EnqueuesPerSync: 1
+  NumElementsToValidate: -1
+  DataInitTypeE: 16
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  DataInitTypeScaleAlphaVec: 2
+  NewClient: 2
+  Device: 0
+  CSVExportWinner: 1
+  CSVMergeSameProblemID: 1
+  MaxWorkspaceSize: 3355443200
+  PrintSolutionRejectionReason: True
+
+BenchmarkProblems:
+  ########################################
+  # NN - standard
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      # DataTypeA: f8
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 0
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+      BiasDataTypeList: [s]
+      UseBias:       0
+      UseE:          False
+      Activation:    False
+      UseScaleAB: ""
+      # SupportUserArgs: True
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16,16,16,1,  1,   2,2,2,2 ]
+        - AssertFree0ElementMultiple: [1]
+        - DepthU: [32]
+        - ScheduleIterAlg: [3]
+        - InnerUnroll: [1]
+        - ExpandPointerSwap: [1]
+        - TransposeLDS: [1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - StaggerU: [4]
+        - WaveSeparateGlobalReadB: [1]
+        - 1LDSBuffer: [-1]
+        - GlobalReadPerMfma: [1]
+        - LocalWritePerMfma: [-1]
+        - StoreVectorWidth: [-1]
+        - SourceSwap: [1]
+        - GlobalSplitU: [1, 2, 9, 17]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer", "SingleBuffer", "MultipleBufferSingleKernel"]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [ 2048, 128, 1, 1024 ]
+        - BiasTypeArgs: ['s']
+        - ActivationArgs:
+          - [Enum: none]
+
+  -
+    - # ProblemType
+      OperationType: GEMM
+      # DataTypeA: f8
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 0
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+      BiasDataTypeList: [s]
+      UseBias:       1
+      UseE:          False
+      Activation:    True
+      ActivationHPA: True
+      UseScaleAB: "Scalar"
+      # SupportUserArgs: True
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16,16,16,1,  1,   2,2,2,2 ]
+        - AssertFree0ElementMultiple: [1]
+        - DepthU: [32]
+        - ScheduleIterAlg: [3]
+        - InnerUnroll: [1]
+        - ExpandPointerSwap: [1]
+        - TransposeLDS: [1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - StaggerU: [4]
+        - WaveSeparateGlobalReadB: [1]
+        - 1LDSBuffer: [-1]
+        - GlobalReadPerMfma: [1]
+        - LocalWritePerMfma: [-1]
+        - StoreVectorWidth: [-1]
+        - SourceSwap: [1]
+        - GlobalSplitU: [1, 2, 9, 17]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel"]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [ 2048, 128, 1, 1024 ]
+        - BiasTypeArgs: ['s']
+        - ActivationArgs:
+          - [Enum: none]

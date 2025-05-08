@@ -1,0 +1,78 @@
+TestParameters:
+  marks: [skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported yet
+
+GlobalParameters:
+  MinimumRequiredVersion: 4.14.0
+  SleepPercent: 50
+  NumElementsToValidate: 128
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  NewClient: 2
+  CSVExportWinner: 1
+  CSVMergeSameProblemID: 1
+  Device: 0
+
+BenchmarkProblems:
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      TransposeA: 0
+      TransposeB: 1
+      UseBeta: True
+      Batched: True
+      UseBias: 1
+      Batched: True
+      Activation: True
+      UseScaleAlphaVec: 1
+
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16,16,4, 1, 1, 2, 3, 2, 2] # 64 x 96
+
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - DepthU: [32]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - LocalReadVectorWidth: [-1]
+        - TransposeLDS: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - StaggerU: [16]
+        - StaggerUStride: [-1]
+        - WorkGroupMapping: [1]
+        - StaggerUMapping: [0]
+        - 1LDSBuffer: [-1]
+        - WorkGroupMappingXCC: [8]
+        - WorkGroupMappingXCCGroup: [-1]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
+        - GlobalReadPerMfma: [1]
+        - LocalWritePerMfma: [-1]
+        - StoreRemapVectorWidth: [0]
+        - StoreVectorWidth: [-1]
+        - SourceSwap: [1]
+        - NumElementsPerBatchStore: [16]
+        - ClusterLocalRead: [1]
+        - NonTemporalA: [0]
+        - NonTemporalB: [0]
+        - DirectToVgprA: [1]
+        - DirectToVgprB: [0]
+        - WorkGroup: [[32,4,4]]
+
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [255, 255, 1, 255]
+        - BiasTypeArgs: ['s']
+        - ActivationArgs:
+          - [Enum: none]

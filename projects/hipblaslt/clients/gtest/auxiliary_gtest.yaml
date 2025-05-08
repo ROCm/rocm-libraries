@@ -1,0 +1,135 @@
+---
+include: hipblaslt_common.yaml
+include: known_bugs.yaml
+include: matmul_common.yaml
+
+Tests:
+- name: aux_handle_init_bad_arg
+  category: pre_checkin
+  function:
+    - aux_handle_init_bad_arg: *hpa_half_precision
+
+- name: aux_handle_destroy_bad_arg
+  category: pre_checkin
+  function:
+    - aux_handle_destroy_bad_arg: *hpa_half_precision
+
+- name: aux_handle
+  category: pre_checkin
+  function:
+    - aux_handle: *hpa_half_precision
+
+- name: aux_mat_init_bad_arg
+  category: pre_checkin
+  function:
+    - aux_mat_init_bad_arg: *hpa_half_precision
+
+- name: aux_mat_destroy_bad_arg
+  category: pre_checkin
+  function:
+    - aux_mat_destroy_bad_arg: *hpa_half_precision
+
+- name: aux_mat_set_attr_bad_arg
+  category: pre_checkin
+  function:
+    - aux_mat_set_attr_bad_arg: *hpa_half_precision
+
+- name: aux_mat_get_attr_bad_arg
+  category: pre_checkin
+  function:
+    - aux_mat_get_attr_bad_arg: *hpa_half_precision
+
+- name: aux_mat_set_get_attr
+  category: pre_checkin
+  function:
+    - aux_mat_set_get_attr: *hpa_half_precision
+
+- name: aux_matmul_init_bad_arg
+  category: pre_checkin
+  function:
+    - aux_matmul_init_bad_arg: *hpa_half_precision
+
+- name: aux_matmul_init
+  category: pre_checkin
+  function:
+    - aux_matmul_init: *hpa_half_precision
+
+- name: aux_matmul_set_attr_bad_arg
+  category: pre_checkin
+  function:
+    - aux_matmul_set_attr_bad_arg: *hpa_half_precision
+
+- name: aux_matmul_get_attr_bad_arg
+  category: pre_checkin
+  function:
+    - aux_matmul_get_attr_bad_arg: *hpa_half_precision
+
+- name: aux_matmul_set_get_attr
+  category: pre_checkin
+  function:
+    - aux_matmul_set_get_attr: *hpa_half_precision
+
+- name: aux_matmul_pref_get_attr_bad_arg
+  category: pre_checkin
+  function:
+    - aux_matmul_pref_get_attr_bad_arg: *hpa_half_precision
+
+- name: aux_matmul_pref_get_attr
+  category: pre_checkin
+  function:
+    - aux_matmul_pref_get_attr: *hpa_half_precision
+
+- name: aux_matmul_alg_init_bad_arg
+  category: pre_checkin
+  function:
+    - aux_matmul_alg_init_bad_arg: *hpa_half_precision
+
+- name: aux_matmul_alg_init
+  category: pre_checkin
+  function:
+    - aux_matmul_alg_init: *hpa_half_precision
+
+- name: aux_get_sol_with_null_biasaddr
+  category: pre_checkin
+  function:
+    - aux_get_sol_with_null_biasaddr: *hpa_half_precision
+
+- name: aux_get_sol_with_zero_alpha_null_a_b
+  category: pre_checkin
+  function:
+    - aux_get_sol_with_zero_alpha_null_a_b: *hpa_half_precision
+  alpha: 0
+  beta: 1
+
+- name: aux_get_sol_with_zero_alpha_null_a_b_ext
+  category: pre_checkin
+  function:
+    - aux_get_sol_with_zero_alpha_null_a_b_ext: *hpa_half_precision
+  alpha: 0
+  beta: 1
+
+- name: aux_matmul_alg_get_attr_bad_arg
+  category: pre_checkin
+  function:
+    - aux_matmul_alg_get_attr_bad_arg: *hpa_half_precision
+
+- name: aux_matmul_pref_init_bad_arg
+  category: pre_checkin
+  function:
+    - aux_matmul_pref_init_bad_arg: *hpa_half_precision
+
+- name: aux_matmul_pref_init
+  category: pre_checkin
+  function:
+    - aux_matmul_pref_init: *hpa_half_precision
+
+- name: aux_matmul_alg_null_matmul
+  category: pre_checkin
+  function:
+    - aux_matmul_alg_null_matmul: *hpa_half_precision
+  matrix_size: *small_matrix_size_range
+  transA: N
+  transB: N
+  alpha: 1
+  beta: 0
+...

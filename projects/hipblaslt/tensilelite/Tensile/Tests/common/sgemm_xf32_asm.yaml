@@ -1,0 +1,206 @@
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
+
+# benchmark assembly and source kernels
+GlobalParameters:
+  MinimumRequiredVersion: 4.2.0
+  CMakeBuildType: Release
+  # PrintLevel: 1
+  #ForceRedoBenchmarkProblems: True
+  #ForceRedoLibraryLogic: True
+  #ForceRedoLibraryClient: True
+  EnqueuesPerSync: 1
+  SyncsPerBenchmark: 1
+  NumElementsToValidate: -1
+  BoundsCheck: False
+  ValidationMaxToPrint: 4
+  ValidationPrintValids: False
+  KernelTime: True
+  NewClient: 2
+  PrintIndexAssignments: 1
+  # PrintSolutionRejectionReason: 1
+  Device: 0
+  PrintWinnersOnly: True
+  MinKForGSU: 1
+
+BenchmarkProblems:
+
+  ########################################
+  # NN - standard
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      DestDataType: s
+      ComputeDataType: s
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      F32XdlMathOp: x
+
+    - # BenchmarkProblemSizeGroup - Assembly
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - TransposeLDS: [0, 1]
+        - MatrixInstruction:
+            - [32, 32, 4, 1, 1, 1, 1, 1, 1]
+            - [16, 16, 8, 1, 1, 1, 1, 1, 1]
+        - ThreadTile:
+          - [ 4, 4 ]
+        - WorkGroup:
+          - [8, 8, 1 ]
+        - DepthU: [32]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [True]
+        - WorkGroupMapping: [8]
+        - GlobalSplitU: [1]
+        - InnerUnroll: [2]
+        - AssertSummationElementMultiple: [1, 2]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [128], 0, [1], [128] ]
+          - Range: [ [131], 0, [1], [131] ]
+          - Range: [ [1024], 0, [1], [1024] ]
+          - Range: [ [1031], 0, [1], [1031] ]
+
+  ########################################
+  # NT - standard
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      DestDataType: s
+      ComputeDataType: s
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+      F32XdlMathOp: x
+
+    - # BenchmarkProblemSizeGroup - Assembly
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - TransposeLDS: [0, 1]
+        - MatrixInstruction:
+            - [32, 32, 4, 1, 1, 1, 1, 1, 1]
+            - [16, 16, 8, 1, 1, 1, 1, 1, 1]
+        - ThreadTile:
+          - [ 4, 4 ]
+        - WorkGroup:
+          - [8, 8, 1 ]
+        - DepthU: [32]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [True]
+        - WorkGroupMapping: [8]
+        - GlobalSplitU: [1]
+        - InnerUnroll: [2]
+        - AssertSummationElementMultiple: [1, 2]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [128], 0, [1], [128] ]
+          - Range: [ [131], 0, [1], [131] ]
+          - Range: [ [1024], 0, [1], [1024] ]
+          - Range: [ [1031], 0, [1], [1031] ]
+
+  ########################################
+  # TN - standard
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      DestDataType: s
+      ComputeDataType: s
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      F32XdlMathOp: x
+
+    - # BenchmarkProblemSizeGroup - Assembly
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - TransposeLDS: [0, 1]
+        - MatrixInstruction:
+            - [32, 32, 4, 1, 1, 1, 1, 1, 1]
+            - [16, 16, 8, 1, 1, 1, 1, 1, 1]
+        - ThreadTile:
+          - [ 4, 4 ]
+        - WorkGroup:
+          - [8, 8, 1 ]
+        - DepthU: [32]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [True]
+        - WorkGroupMapping: [8]
+        - GlobalSplitU: [1]
+        - InnerUnroll: [2]
+        - AssertSummationElementMultiple: [1, 2]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [128], 0, [1], [128] ]
+          - Range: [ [131], 0, [1], [131] ]
+          - Range: [ [1024], 0, [1], [1024] ]
+          - Range: [ [1031], 0, [1], [1031] ]
+
+  ########################################
+  # TT - standard
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      DestDataType: s
+      ComputeDataType: s
+      TransposeA: True
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+      F32XdlMathOp: x
+
+    - # BenchmarkProblemSizeGroup - Assembly
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - TransposeLDS: [0, 1]
+        - MatrixInstruction:
+            - [32, 32, 4, 1, 1, 1, 1, 1, 1]
+            - [16, 16, 8, 1, 1, 1, 1, 1, 1]
+        - ThreadTile:
+          - [ 4, 4 ]
+        - WorkGroup:
+          - [8, 8, 1 ]
+        - DepthU: [32]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [True]
+        - WorkGroupMapping: [8]
+        - GlobalSplitU: [1]
+        - InnerUnroll: [2]
+        - AssertSummationElementMultiple: [1, 2]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [128], 0, [1], [128] ]
+          - Range: [ [131], 0, [1], [131] ]
+          - Range: [ [1024], 0, [1], [1024] ]
+          - Range: [ [1031], 0, [1], [1031] ]

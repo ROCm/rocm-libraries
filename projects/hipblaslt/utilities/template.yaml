@@ -1,0 +1,24 @@
+# Two steps, can comment out Bench or CreateLogic if you want to disable.
+Bench:
+  ProblemType:
+    ComputeDataType: s
+    ComputeInputDataType: s
+    DataTypeA: s
+    DataTypeB: s
+    DataTypeC: s
+    DataTypeD: s
+    TransposeA: 0
+    TransposeB: 0
+    UseBias: False
+  TestConfig:
+    ColdIter: 20
+    Iter: 100
+    AlgoMethod: "all"
+    RotatingBuffer: 512
+  TuningParameters:
+    # SplitK list control parameter example
+    # SplitK: [0, 4, 8]
+  ProblemSizes:
+  - [128, 128, 1, 128]
+  - [128, 128, 1, 128]
+CreateLogic: {}

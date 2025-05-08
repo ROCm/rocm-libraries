@@ -1,0 +1,55 @@
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
+GlobalParameters:
+  NumElementsToValidate: -1
+  MinimumRequiredVersion: 4.14.0
+  PrintLevel: 1
+  PrintSolutionRejectionReason: True
+  Device: 0
+  CMakeBuildType: Release
+  KernelTime: True
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 1
+  DataInitTypeA: 1
+  DataInitTypeB: 1
+  MaxWorkspaceSize: 13421772800
+
+BenchmarkProblems:
+  ########################################
+  # NN - standard
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: d
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+      Activation: False
+      B2BGemm: False
+
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+      ForkParameters:
+        - KernelLanguage: ["Assembly"]
+        - DepthU: [8, 16]
+        - GlobalSplitU: [1]
+        - ScheduleIterAlg: [3]
+        - MatrixInstruction:
+          - [4, 4, 4, 4, 1, 1, 1, 1, 1]
+        - AssertFree0ElementMultiple: [1]
+        - VectorWidthA: [1, 2]
+        - VectorWidthB: [1, 2]
+        - GlobalSplitU: [1,2]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
+        - SourceSwap: [0,1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 1024]
+          - Exact: [4608, 1335, 1, 640]

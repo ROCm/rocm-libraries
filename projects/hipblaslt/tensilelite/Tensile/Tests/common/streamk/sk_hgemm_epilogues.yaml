@@ -1,0 +1,131 @@
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
+
+GlobalParameters:
+  NumElementsToValidate: -1
+  BoundsCheck: False
+  KernelTime: False
+  DataInitTypeAlpha: 2
+  DataInitTypeBeta: 2
+  DataInitTypeA: 12
+  DataInitTypeB: 13
+  DataInitTypeC: 12
+  MaxWorkspaceSize: 134217728
+  NumWarmups: 10
+  EnqueuesPerSync: 30
+  # ValidationPrintValids: True
+  # PrintSolutionRejectionReason: True
+  # ForceGenerateKernel: True
+  # GenerateSourcesAndExit: True
+  KeepBuildTmp: True
+  # DeviceLDS: 163840
+  # MaxLDS: 163840
+  RotatingBufferSize: 514
+
+BenchmarkProblems:
+  - # HGEMM HHS NN
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      UseBias: 1
+      BiasDataTypeList: [s,h]
+      Activation: True
+      ActivationType: all
+      UseScaleAlphaVec: 1
+
+    - # Grid
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ['Assembly']
+      ForkParameters:
+        - MatrixInstruction:
+          # - [16,16,32,1, 1, 8,8, 2,2]
+          # - [16,16,32,1, 1, 4,8, 2,2]
+          # - [16,16,32,1, 1, 8,4, 2,2]
+          # - [16,16,32,1, 1, 2,8, 2,2]
+          # - [16,16,32,1, 1, 8,2, 2,2]
+          # - [16,16,32,1, 1, 1,8, 2,2]
+          # - [16,16,32,1, 1, 8,1, 2,2]
+          # - [16,16,32,1, 1, 4,4, 2,2]
+          - [16,16,16,1, 1, 2,4, 2,2]
+          # - [16,16,32,1, 1, 4,2, 2,2]
+          # - [16,16,32,1, 1, 1,4, 2,2]
+          # - [16,16,32,1, 1, 4,1, 2,2]
+          # - [16,16,32,1, 1, 2,2, 2,2]
+          # - [16,16,32,1, 1, 1,2, 2,2]
+          # - [16,16,32,1, 1, 2,1, 2,2]
+          # - [16,16,32,1, 1, 1,1, 2,2]
+
+          # - [16,16,32,1, 1, 4,9, 4,1]
+          # - [16,16,32,1, 1, 9,4, 1,4]
+          # - [16,16,32,1, 1, 2,8, 4,1]
+          # - [16,16,32,1, 1, 8,2, 1,4]
+          # - [16,16,32,1, 1, 1,8, 4,1]
+          # - [16,16,32,1, 1, 1,9, 4,1]
+          # - [16,16,32,1, 1, 2,9, 4,1]
+          # - [16,16,32,1, 1, 8,1, 1,4]
+          # - [16,16,32,1, 1, 9,1, 1,4]
+          # - [16,16,32,1, 1, 9,2, 1,4]
+
+          # - [32,32,16,1, 1, 7,2, 1,4]
+
+          # - [32,32,16,1, 1, 4,4, 2,2]
+          # - [32,32,16,1, 1, 2,4, 2,2]
+          # - [32,32,16,1, 1, 4,2, 2,2]
+          # # - [32,32,16,1, 1, 1,4, 2,2]
+          # # - [32,32,16,1, 1, 4,1, 2,2]
+          # - [32,32,16,1, 1, 2,2, 2,2]
+          # - [32,32,16,1, 1, 1,2, 2,2]
+          # - [32,32,16,1, 1, 2,1, 2,2]
+          # - [32,32,16,1, 1, 1,1, 2,2]
+        - 1LDSBuffer: [-1]
+        - ClusterLocalRead: [True]
+        - DepthU: [32]
+        - ExpandPointerSwap: [0]
+        - GlobalReadVectorWidthA: [2]
+        - GlobalReadVectorWidthB: [8]
+        - LdsBlockSizePerPadA: [512]
+        - LdsBlockSizePerPadB: [512]
+        - LdsPadA: [32]
+        - LdsPadB: [8]
+        - LocalReadVectorWidth: [4, 8]
+        # - NonTemporalC: [0, 3, 4, 7]
+        # - NonTemporalD: [0, 3, 4, 7]
+        # - NumElementsPerBatchStore: [0, 16]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - SourceSwap: [True]
+        - StaggerU: [0]
+        # - StaggerU: [0, 32]
+        # - StaggerUStride: [-1]
+        # - StaggerUMapping: [0, 1, 3]
+        # - StorePriorityOpt: [False, True]
+        # - StoreRemapVectorWidth: [0, 1, 2, 4, 8]
+        - StoreVectorWidth: [-1]
+        - StreamK: [3]
+        - StreamKXCCMapping: [8]
+        - TransposeLDS: [-1]
+        # - UnrollLoopSwapGlobalReadOrder: [0, 1]
+        - UseSgprForGRO: [0]
+        # - VectorWidthA: [1, 2, 4, 8]
+        # - VectorWidthB: [1, 2, 4, 8]
+        # - WaveSeparateGlobalReadA: [0, 1]
+        # - WaveSeparateGlobalReadB: [0, 1]
+        - WorkGroupMapping: [1]
+        # - WorkGroupMappingXCC: [1, 8, 16]
+        # - WorkGroupMappingXCCGroup: [304]
+        - ActivationFuncCall: [1]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [24000, 256, 1, 256]
+        - BiasTypeArgs: ['s', 'h']
+        - ActivationArgs:
+          - [Enum: gelu]
