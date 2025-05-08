@@ -1,0 +1,93 @@
+name: Auto Label PR
+
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+jobs:
+  label-pr:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout workflows
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: '.github'
+
+      - name: Get changed files
+        id: files
+        run: |
+          api="https://api.github.com/repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files?per_page=100"
+          files=""
+
+          while [ -n "$api" ]; do
+            response=$(curl -sS -D headers -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" "$api")
+            files+=$(echo "$response" | jq -r '.[].filename')$'\n'
+
+            api=$(grep -i '^link:' headers | sed -n 's/.*<\([^>]*\)>; rel="next".*/\1/p')
+          done
+
+          echo "changed_files=$(echo "$files" | tr '\n' ' ' | xargs)" >> "$GITHUB_OUTPUT"
+
+      - name: Get current labels
+        id: current_labels
+        run: |
+          current_labels=$(gh pr view ${{ github.event.pull_request.number }} --json labels -q '.labels[].name' | tr '\n' ' ')
+          echo "current_labels=${current_labels}" >> "$GITHUB_OUTPUT"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Read repo configurations
+        id: repos_config
+        run: |
+          repo_paths=$(jq -r '.repositories[] | "\(.category)/\(.name)"' .github/repos-config.json | tr '\n' ' ')
+          echo "repo_paths=$repo_paths" >> "$GITHUB_OUTPUT"
+
+      - name: Apply and remove labels
+        run: |
+          changed_files="${{ steps.files.outputs.changed_files }}"
+          current_labels="${{ steps.current_labels.outputs.current_labels }}"
+          repo_paths="${{ steps.repos_config.outputs.repo_paths }}"
+
+          labels_to_add=()
+          labels_to_remove=()
+
+          for entry in $repo_paths; do
+            category_repo="${entry}"                      # e.g., "projects/hipsparse"
+            category="${category_repo%%/*}"                # e.g., "projects"
+            name="${category_repo##*/}"                    # e.g., "hipsparse"
+
+            # Check if the category is 'projects' and set the label format accordingly
+            if [ "$category" == "projects" ]; then
+              label="project: ${name}"                     # e.g., "project: hipsparse"
+            else
+              label="${category}: ${name}"                 # e.g., "shared: rocroller"
+            fi
+
+            # Use full path with leading slash for exact match
+            if echo "$changed_files" | grep -qE "^${category_repo}/"; then
+              labels_to_add+=("$label")
+            else
+              if echo "$current_labels" | grep -q "$label"; then
+                labels_to_remove+=("$label")
+              fi
+            fi
+          done
+
+          if [ ${#labels_to_add[@]} -gt 0 ]; then
+            echo "Applying labels: ${labels_to_add[*]}"
+            for label in "${labels_to_add[@]}"; do
+              gh pr edit "${{ github.event.pull_request.number }}" --add-label "$label"
+            done
+          fi
+
+          if [ ${#labels_to_remove[@]} -gt 0 ]; then
+            echo "Removing labels: ${labels_to_remove[*]}"
+            for label in "${labels_to_remove[@]}"; do
+              gh pr edit "${{ github.event.pull_request.number }}" --remove-label "$label"
+            done
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

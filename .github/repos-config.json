@@ -1,0 +1,144 @@
+{
+  "repositories": [
+    {
+      "name": "miopen",
+      "reponame": "MIOpen",
+      "url": "ROCm/MIOpen",
+      "branch": "staging",
+      "category": "projects"
+    },
+    {
+      "name": "tensile",
+      "reponame": "Tensile",
+      "url": "ROCm/Tensile",
+      "branch": "staging",
+      "category": "shared"
+    },
+    {
+      "name": "composablekernel",
+      "reponame": "composable_kernel",
+      "url": "ROCm/composable_kernel",
+      "branch": "staging",
+      "category": "projects"
+    },
+    {
+      "name": "hipblas",
+      "reponame": "hipBLAS",
+      "url": "ROCm/hipBLAS",
+      "branch": "staging",
+      "category": "projects"
+    },
+    {
+      "name": "hipblas-common",
+      "reponame": "hipBLAS-common",
+      "url": "ROCm/hipBLAS-common",
+      "branch": "staging",
+      "category": "projects"
+    },
+    {
+      "name": "hipblaslt",
+      "reponame": "hipBLASLt",
+      "url": "ROCm/hipBLASLt",
+      "branch": "staging",
+      "category": "projects"
+    },
+    {
+      "name": "hipcub",
+      "reponame": "hipCUB",
+      "url": "ROCm/hipCUB",
+      "branch": "staging",
+      "category": "projects"
+    },
+    {
+      "name": "hipfft",
+      "reponame": "hipFFT",
+      "url": "ROCm/hipFFT",
+      "branch": "staging",
+      "category": "projects"
+    },
+    {
+      "name": "hiprand",
+      "reponame": "hipRAND",
+      "url": "ROCm/hipRAND",
+      "branch": "staging",
+      "category": "projects"
+    },
+    {
+      "name": "hipsolver",
+      "reponame": "hipSOLVER",
+      "url": "ROCm/hipSOLVER",
+      "branch": "staging",
+      "category": "projects"
+    },
+    {
+      "name": "hipsparse",
+      "reponame": "hipSPARSE",
+      "url": "ROCm/hipSPARSE",
+      "branch": "staging",
+      "category": "projects"
+    },
+    {
+      "name": "hipsparselt",
+      "reponame": "hipSPARSELt",
+      "url": "ROCm/hipSPARSELt",
+      "branch": "staging",
+      "category": "projects"
+    },
+    {
+      "name": "rocblas",
+      "reponame": "rocBLAS",
+      "url": "ROCm/rocBLAS",
+      "branch": "staging",
+      "category": "projects"
+    },
+    {
+      "name": "rocfft",
+      "reponame": "rocFFT",
+      "url": "ROCm/rocFFT",
+      "branch": "staging",
+      "category": "projects"
+    },
+    {
+      "name": "rocprim",
+      "reponame": "rocPRIM",
+      "url": "ROCm/rocPRIM",
+      "branch": "staging",
+      "category": "projects"
+    },
+    {
+      "name": "rocrand",
+      "reponame": "rocRAND",
+      "url": "ROCm/rocRAND",
+      "branch": "staging",
+      "category": "projects"
+    },
+    {
+      "name": "rocroller",
+      "reponame": "rocRoller",
+      "url": "ROCm/rocRoller",
+      "branch": "main",
+      "category": "shared"
+    },
+    {
+      "name": "rocsolver",
+      "reponame": "rocSOLVER",
+      "url": "ROCm/rocSOLVER",
+      "branch": "staging",
+      "category": "projects"
+    },
+    {
+      "name": "rocsparse",
+      "reponame": "rocSPARSE",
+      "url": "ROCm/rocSPARSE",
+      "branch": "staging",
+      "category": "projects"
+    },
+    {
+      "name": "rocthrust",
+      "reponame": "rocThrust",
+      "url": "ROCm/rocThrust",
+      "branch": "staging",
+      "category": "projects"
+    }
+  ]
+}
