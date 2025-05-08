@@ -142,7 +142,7 @@ Tests:
   uplo: [ U, L ]
   diag: [ N ]
   matrix_size: *int32_overflow_sizes
-  gpu_arch: ['90a','942']
+  gpu_arch: ['90a','942','950']
   os_flags: LINUX
 
 - name: trtri_graph_test

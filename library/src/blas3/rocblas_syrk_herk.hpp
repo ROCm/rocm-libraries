@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -31,8 +31,10 @@ template <typename T>
 inline bool rocblas_use_only_gemm(rocblas_handle handle, rocblas_int n, rocblas_int k)
 {
     //Identifying the architecture to have an appropriate optimization
-    bool is_gfx942 = handle->getArch() == 942 ? true : false;
-    bool is_gfx90a = handle->getArch() == 910 ? true : false;
+    bool is_gfx90a           = handle->getArch() == 910 ? true : false;
+    bool is_gfx942           = handle->getArch() == 942 ? true : false;
+    bool is_gfx950           = handle->getArch() == 950 ? true : false;
+    bool is_gfx942_or_gfx950 = is_gfx942 || is_gfx950;
 
     //Identifying the precision to have an appropriate optimization
     constexpr bool is_float          = std::is_same_v<T, float>;
@@ -42,7 +44,7 @@ inline bool rocblas_use_only_gemm(rocblas_handle handle, rocblas_int n, rocblas_
 
     //Optimized kernel which uses only GEMM
     return k >= syrk_k_lower_threshold
-           && ((is_gfx942
+           && ((is_gfx942_or_gfx950
                 && (((is_float || is_double) && n < sdsyrk_gfx942_n_higher_threshold)
                     || (is_complex_double && n < zsyrk_gfx942_n_higher_threshold)
                     || (is_complex_float && n < csyrk_gfx942_n_higher_threshold)))

@@ -142,7 +142,7 @@ Tests:
   pointer_mode_host: false
   alpha: [ 2 ]
   beta: [ 2 ]
-  gpu_arch: ['90a','942']
+  gpu_arch: ['90a','942','950']
   os_flags: LINUX
 
 - name: symm_ILP64_L
@@ -160,7 +160,7 @@ Tests:
   beta: [ 2 ]
   stride_scale: [1]
   os_flags: LINUX
-  gpu_arch: ['90a','942']
+  gpu_arch: ['90a','942','950']
 
 - name: symm_ILP64_R
   category: stress
@@ -177,7 +177,7 @@ Tests:
   beta: [ 2 ]
   stride_scale: [1]
   os_flags: LINUX
-  gpu_arch: ['90a','942']
+  gpu_arch: ['90a','942','950']
 
 - name: symm_batched_ILP64
   category: stress
@@ -192,7 +192,7 @@ Tests:
   alpha_beta: *alpha_beta
   api : [ C_64 ]
   os_flags: LINUX
-  gpu_arch: ['90a','942']
+  gpu_arch: ['90a','942','950']
 
 
 # batched
@@ -252,7 +252,7 @@ Tests:
   alpha: [ 2 ]
   beta: [ 2 ]
   batch_count: [ 1 ]
-  gpu_arch: ['90a','942']
+  gpu_arch: ['90a','942','950']
   os_flags: LINUX
 
 # strided batched

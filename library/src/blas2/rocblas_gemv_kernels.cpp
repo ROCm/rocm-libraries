@@ -179,12 +179,14 @@ rocblas_status rocblas_internal_gemv_launcher(rocblas_handle    handle,
     bool is_arch_10_or_11_or_12
         = arch_major == 10 || arch_major == 11 || arch_major == 12 ? true : false;
 
-    bool is_gfx11xx = arch_major == 11 ? true : false;
-    bool is_gfx12xx = arch_major == 12 ? true : false;
-    bool is_gfx908  = handle->getArch() == 908 ? true : false;
-    bool is_gfx906  = handle->getArch() == 906 ? true : false;
-    bool is_gfx90a  = handle->getArch() == 910 ? true : false;
-    bool is_gfx942  = handle->getArch() == 942 ? true : false;
+    bool is_gfx11xx          = arch_major == 11 ? true : false;
+    bool is_gfx12xx          = arch_major == 12 ? true : false;
+    bool is_gfx908           = handle->getArch() == 908 ? true : false;
+    bool is_gfx906           = handle->getArch() == 906 ? true : false;
+    bool is_gfx90a           = handle->getArch() == 910 ? true : false;
+    bool is_gfx942           = handle->getArch() == 942 ? true : false;
+    bool is_gfx950           = handle->getArch() == 950 ? true : false;
+    bool is_gfx942_or_gfx950 = is_gfx942 || is_gfx950;
 
     int batches = handle->getBatchGridDim((int)batch_count);
 
@@ -197,7 +199,7 @@ rocblas_status rocblas_internal_gemv_launcher(rocblas_handle    handle,
 
         if(!i64_incs && m <= 32 && n <= 32
            && ((is_gfx90a && batch_count >= gemv_sm_mn_gfx90a_batch_min_threshold)
-               || (is_gfx942 && batch_count >= gemv_sm_mn_gfx942_batch_min_threshold)))
+               || (is_gfx942_or_gfx950 && batch_count >= gemv_sm_mn_gfx942_batch_min_threshold)))
         {
 #define gemvn_sm_mn_batched_KARGS(alpha_, beta_)                                                 \
     gemvn_sm_mn_batched_grid, gemvn_sm_mn_batched_threads, 0, rocblas_stream, m, n, alpha_,      \
@@ -271,7 +273,7 @@ rocblas_status rocblas_internal_gemv_launcher(rocblas_handle    handle,
         else if(!i64_incs && is_atomics_allowed && (is_float || is_double) && (m == n)
                 && (m % rocblas_gemv_bx() == 0)
                 && (is_gfx90a
-                    || (is_gfx942
+                    || (is_gfx942_or_gfx950
                         && ((is_float && m < sgemvn_gfx942_double_buffered_higher_threshold)
                             || (is_double && n < dgemvn_gfx942_double_buffered_higher_threshold)))))
         {

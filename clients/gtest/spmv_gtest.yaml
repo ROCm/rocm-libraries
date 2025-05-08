@@ -120,7 +120,7 @@ Tests:
   alpha_beta: *alpha_beta_range_small
   pointer_mode_host: false
   os_flags: LINUX
-  gpu_arch: ['90a','942']
+  gpu_arch: ['90a','942','950']
 
 - name: spmv_size_t_inc
   category: stress
@@ -131,7 +131,7 @@ Tests:
   alpha_beta: *alpha_beta_range_size_t_inc
   pointer_mode_device: false
   os_flags: LINUX
-  gpu_arch: ['90a','942']
+  gpu_arch: ['90a','942','950']
 
 - name: spmv_ILP64
   category: stress

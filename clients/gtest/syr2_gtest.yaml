@@ -134,7 +134,7 @@ Tests:
   matrix_size: *size_t_n_incx_incy
   pointer_mode_device: false
   alpha_beta: *alpha_range_small
-  gpu_arch: ['90a','942']
+  gpu_arch: ['90a','942','950']
   os_flags: LINUX
 
 - name: syr2_ILP64

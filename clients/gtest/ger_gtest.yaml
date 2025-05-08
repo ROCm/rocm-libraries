@@ -111,7 +111,7 @@ Tests:
   incx_incy: *incx_incy_range_small
   alpha: [ -0.5 ]
   pointer_mode_host: false
-  gpu_arch: ['90a','942']
+  gpu_arch: ['90a','942','950']
 
 - name: ger_size_t_inc
   category: stress
