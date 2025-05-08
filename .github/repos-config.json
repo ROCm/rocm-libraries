@@ -8,13 +8,6 @@
       "category": "shared"
     },
     {
-      "name": "composablekernel",
-      "reponame": "composable_kernel",
-      "url": "ROCm/composable_kernel",
-      "branch": "staging",
-      "category": "projects"
-    },
-    {
       "name": "hipblas",
       "reponame": "hipBLAS",
       "url": "ROCm/hipBLAS",
