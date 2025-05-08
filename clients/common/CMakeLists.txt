@@ -61,6 +61,9 @@ function( rocblas_client_library_settings lib_target_ )
     target_compile_definitions( ${lib_target_} PRIVATE CLIENTS_NO_FORTRAN )
   endif()
 
+  if(BUILD_ADDRESS_SANITIZER)
+    target_compile_definitions( ${lib_target_} PRIVATE ASAN_BUILD )
+  endif()
 endfunction()
 
 set(rocblas_common_source
