@@ -1,0 +1,52 @@
+Spmm Matrix Batched Sizes:
+
+- &batched_algorithm_coverage_matrix_size_range
+  - { M: 64, N: 32, K: 16, lda: 64, ldb: 32, ldc: 67, ldd: 67}
+
+- &batched_small_matrix_size_range
+  - { M: 16, N: 16, K: 16, lda: 16, ldb: 16, ldc: 16, ldd: 16}
+  - { M: 64, N: 64, K: 64, lda: 64, ldb: 64, ldc: 64, ldd: 64}
+  - { M: 128, N: 128, K: 128, lda: 128, ldb: 128, ldc: 128, ldd: 128}
+
+- &batched_medium_matrix_size_range
+  - { M: 256, N: 256, K: 256, lda: 256, ldb: 256, ldc: 256, ldd: 256}
+
+- &batched_large_matrix_size_range
+  - { M: 512, N: 512, K: 512, lda: 512, ldb: 512, ldc: 512, ldd: 512}
+
+- &batched_deepbench_vec
+  - { M: 64, N: 12544, K: 64, lda: 64, ldb: 64, ldc: 12544, ldd: 12544}
+  - { M: 256, N: 3136, K: 64, lda: 256, ldb: 64, ldc: 3136, ldd: 3136}
+  - { M: 64, N: 3136, K: 256, lda: 64, ldb: 256, ldc: 3136, ldd: 3136}
+  - { M: 128, N: 784, K: 512, lda: 128, ldb: 512, ldc: 784, ldd: 784}
+  - { M: 512, N: 784, K: 128, lda: 512, ldb: 128, ldc: 784, ldd: 784}
+  - { M: 64, N: 784, K: 192, lda: 64, ldb: 192, ldc: 784, ldd: 784}
+  - { M: 256, N: 3136, K: 64, lda: 64, ldb: 64, ldc: 3136, ldd: 3136}
+  - { M: 64, N: 3136, K: 256, lda: 256, ldb: 256, ldc: 3136, ldd: 3136}
+  - { M: 128, N: 784, K: 512, lda: 512, ldb: 512, ldc: 784, ldd: 784}
+  - { M: 192, N: 784, K: 64, lda: 64, ldb: 64, ldc: 784, ldd: 784}
+  - { M: 512, N: 784, K: 128, lda: 128, ldb: 128, ldc: 784, ldd: 784}
+
+- &batched_conv_resnet50_bwddata
+  - { M: 64, N: 3136, K: 64, lda: 64, ldb: 64, ldc: 3136, ldd: 3136}
+
+- &batched_conv_inception4_bwddata
+  - { M: 1536, N: 64, K: 256, lda: 256, ldb: 256, ldc: 64, ldd: 64}
+  - { M: 1536, N: 64, K: 384, lda: 384, ldb: 384, ldc: 64, ldd: 64}
+
+- &batched_conv_ctest_fwd
+  - { M: 16, N: 12544, K: 64, lda: 16, ldb: 64, ldc: 12544, ldd: 12544}
+  - { M: 16, N: 3136, K: 128, lda: 16, ldb: 128, ldc: 3136, ldd: 3136}
+  - { M: 16, N: 3136, K: 256, lda: 16, ldb: 256, ldc: 3136, ldd: 3136}
+  - { M: 16, N: 3136, K: 64, lda: 16, ldb: 64, ldc: 3136, ldd: 3136}
+  - { M: 16, N: 32768, K: 480, lda: 16, ldb: 480, ldc: 32768, ldd: 32768}
+  - { M: 16, N: 784, K: 128, lda: 16, ldb: 128, ldc: 784, ldd: 784}
+  - { M: 16, N: 784, K: 192, lda: 16, ldb: 192, ldc: 784, ldd: 784}
+  - { M: 16, N: 784, K: 256, lda: 16, ldb: 256, ldc: 784, ldd: 784}
+  - { M: 16, N: 784, K: 320, lda: 16, ldb: 320, ldc: 784, ldd: 784}
+  - { M: 16, N: 784, K: 512, lda: 16, ldb: 512, ldc: 784, ldd: 784}
+  - { M: 16, N: 784, K: 64, lda: 16, ldb: 64, ldc: 784, ldd: 784}
+  - { M: 16, N: 8192, K: 480, lda: 16, ldb: 480, ldc: 8192, ldd: 8192}
+  - { M: 16, N: 8192, K: 512, lda: 16, ldb: 512, ldc: 8192, ldd: 8192}
+  - { M: 16, N: 8192, K: 528, lda: 16, ldb: 528, ldc: 8192, ldd: 8192}
+  - { M: 16, N: 8192, K: 832, lda: 16, ldb: 832, ldc: 8192, ldd: 8192}
