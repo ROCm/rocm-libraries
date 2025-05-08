@@ -28,6 +28,7 @@ from typing import List, Optional
 from github_cli_client import GitHubCLIClient
 from repo_config_model import RepoEntry
 from config_loader import load_repo_config
+from utils_fanout_naming import FanoutNaming
 
 logger = logging.getLogger(__name__)
 
@@ -92,36 +93,35 @@ def main(argv: Optional[List[str]] = None) -> None:
     subtrees = [line.strip() for line in args.subtrees.splitlines() if line.strip()]
     relevant_subtrees = get_subtree_info(config, subtrees)
     for entry in relevant_subtrees:
-        branch = f"monorepo-pr-{args.pr}-{entry.name}"
-        prefix = f"{entry.category}/{entry.name}"
-        subrepo_full_url = f"https://github.com/{entry.url}.git"
-        pr_title = f"[DO NOT MERGE] [Fanout] [Monorepo] PR #{args.pr} to {entry.name}"
-        pr_body = (
-            f"This is an automated PR for subtree `{entry.category}/{entry.name}` "
-            f"originating from monorepo PR [#{args.pr}](https://github.com/{args.repo}/pull/{args.pr}). "
-            f"PLEASE DO NOT MERGE OR TOUCH THIS PR, AUTOMATED WORKFLOWS FROM THE MONOREPO ARE USING IT."
+        entry_naming = FanoutNaming(
+            pr_number = args.pr,
+            monorepo = args.repo,
+            category = entry.category,
+            name = entry.name,
+            subrepo = entry.url
         )
-        logger.debug(f"\nProcessing subtree: {entry.category}/{entry.name}")
-        logger.debug(f"\tPrefix: {prefix}")
-        logger.debug(f"\tBranch: {branch}")
-        logger.debug(f"\tRemote: {subrepo_full_url}")
-        logger.debug(f"\tPR title: {pr_title}")
-        subtree_push(entry, branch, prefix, subrepo_full_url, args.dry_run)
-        pr_exists: bool = client.pr_view(entry.url, branch)
+        logger.debug(f"\nProcessing subtree: {entry_naming.prefix}")
+        logger.debug(f"\tBranch: {entry_naming.branch_name}")
+        logger.debug(f"\tRemote: {entry_naming.subrepo_full_url}")
+        logger.debug(f"\tPR title: {entry_naming.pr_title}")
+        subtree_push(entry, entry_naming.branch_name, entry_naming.prefix, entry_naming.subrepo_full_url, args.dry_run)
+        pr_exists: bool = client.pr_view(entry.url, entry_naming.branch_name)
         if not pr_exists:
             if not args.dry_run:
                 # check if the branch already exists in the subrepo and error out if it did not
                 # means git subtree push failed
                 check_branch_subprocess = subprocess.run(
-                    ["git", "ls-remote", "--heads", subrepo_full_url, branch],
+                    ["git", "ls-remote", "--heads", entry_naming.subrepo_full_url, entry_naming.branch_name],
                     stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                     check=True, text=True
                 )
                 if bool(check_branch_subprocess.stdout.strip()):
-                    client.pr_create(entry.url, entry.branch, branch, pr_title, pr_body)
-                    logger.info(f"Created PR in {entry.url} for branch {branch}")
+                    # entry.branch is the default branch for the subrepo
+                    # entry_naming.branch_name is the pull request branch name
+                    client.pr_create(entry.url, entry.branch, entry_naming.branch_name, entry_naming.pr_title, entry_naming.pr_body)
+                    logger.info(f"Created PR in {entry.url} for branch {entry_naming.branch_name}")
                 else:
-                    logger.error(f"Branch {branch} does not exist in {entry.url}. Cannot create PR.")
+                    logger.error(f"Branch {entry_naming.branch_name} does not exist in {entry.url}. Cannot create PR.")
 
 if __name__ == "__main__":
     main()

@@ -26,6 +26,7 @@ from typing import List, Optional
 from github_cli_client import GitHubCLIClient
 from repo_config_model import RepoEntry
 from config_loader import load_repo_config
+from utils_fanout_naming import FanoutNaming
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +45,7 @@ def sync_labels(client: GitHubCLIClient, monorepo: str, pr_number: str, entries:
     source_labels = client.get_existing_labels_on_pr(monorepo, pr_number)
     logger.debug(f"Monorepo PR #{pr_number} labels: {source_labels}")
     for entry in entries:
-        branch = f"monorepo-pr-{pr_number}-{entry.name}"
+        branch = FanoutNaming.compute_branch_name(pr_number, entry.name)
         logger.debug(f"Processing labels for {entry.url} PR branch {branch}")
         existing_pr = client.pr_view(entry.url, branch)
         if not existing_pr:
