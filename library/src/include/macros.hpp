@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2021-2023 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -47,10 +47,9 @@
 #define ROCBLAS_LAUNCH_KERNEL(...)                                                 \
     do                                                                             \
     {                                                                              \
-        hipError_t pre_status = hipPeekAtLastError();                              \
         hipLaunchKernelGGL(__VA_ARGS__);                                           \
-        hipError_t status = hipPeekAtLastError();                                  \
-        if(status != hipSuccess && status != pre_status)                           \
+        hipError_t status = hipExtGetLastError();                                  \
+        if(status != hipSuccess)                                                   \
             return rocblas_internal_convert_hip_to_rocblas_status_and_log(status); \
     } while(0)
 
@@ -59,10 +58,9 @@
     {                                                                                  \
         if(grid_.x != 0 && grid_.y != 0 && grid_.z != 0)                               \
         {                                                                              \
-            hipError_t pre_status = hipPeekAtLastError();                              \
             hipLaunchKernelGGL(__VA_ARGS__);                                           \
-            hipError_t status = hipPeekAtLastError();                                  \
-            if(status != hipSuccess && status != pre_status)                           \
+            hipError_t status = hipExtGetLastError();                                  \
+            if(status != hipSuccess)                                                   \
                 return rocblas_internal_convert_hip_to_rocblas_status_and_log(status); \
         }                                                                              \
     } while(0)
