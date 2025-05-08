@@ -30,6 +30,8 @@ target_link_libraries(GpuThreads PRIVATE "-fgpu-rdc")
 # needed to get intellisense to stop complaining about the co-ordinate built-ins not being defined
 target_compile_definitions(GpuThreads PUBLIC __HIP__)
 
+
+# target_link_libraries(GpuThreads PRIVATE libhipcxx::libhipcxx)
 #TODO: define an install target, and a GpuThreadsConfig.cmake so find_package can be used
 
 
