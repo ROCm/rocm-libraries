@@ -1,0 +1,232 @@
+# ########################################################################
+# Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+#
+# ########################################################################
+
+---
+include: rocsparse_common.yaml
+
+
+Definitions:
+  - &M_N_range_quick
+    - { M:  50, N:  50 }
+    - { M: 187, N: 187 }
+
+  - &M_N_range_checkin
+    - { M:   0, N:   0 }
+    - { M:  79, N:  79 }
+    - { M: 430, N: 430 }
+
+  - &M_N_range_nightly
+    - { M:   9381, N:   9381 }
+    - { M:  37017, N:  37017 }
+    - { M: 505194, N: 505194 }
+
+Tests:
+- name: bsric0_bad_arg
+  category: pre_checkin
+  function: bsric0_bad_arg
+  precision: *single_double_precisions_complex_real
+
+- name: bsric0
+  category: quick
+  function: bsric0
+  precision: *single_double_precisions_complex_real
+  M_N: *M_N_range_quick
+  block_dim: [4]
+  transA: [rocsparse_operation_none]
+  apol: [rocsparse_analysis_policy_reuse]
+  spol: [rocsparse_solve_policy_auto]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  direction: [rocsparse_direction_row, rocsparse_direction_column]
+  matrix: [rocsparse_matrix_zero]
+
+- name: bsric0
+  category: quick
+  function: bsric0
+  precision: *single_double_precisions_complex_real
+  M_N: *M_N_range_quick
+  block_dim: [1, 4, 9]
+  transA: [rocsparse_operation_none]
+  apol: [rocsparse_analysis_policy_reuse]
+  spol: [rocsparse_solve_policy_auto]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  direction: [rocsparse_direction_row, rocsparse_direction_column]
+  matrix: [rocsparse_matrix_random]
+
+- name: bsric0
+  category: pre_checkin
+  function: bsric0
+  precision: *single_double_precisions_complex_real
+  M_N: *M_N_range_checkin
+  block_dim: [3, 6, 15, 27]
+  transA: [rocsparse_operation_none]
+  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
+  spol: [rocsparse_solve_policy_auto]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  direction: [rocsparse_direction_row, rocsparse_direction_column]
+  matrix: [rocsparse_matrix_random]
+
+- name: bsric0
+  category: nightly
+  function: bsric0
+  precision: *single_double_precisions_complex_real
+  M_N: *M_N_range_nightly
+  block_dim: [5, 35]
+  transA: [rocsparse_operation_none]
+  apol: [rocsparse_analysis_policy_reuse]
+  spol: [rocsparse_solve_policy_auto]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  direction: [rocsparse_direction_row, rocsparse_direction_column]
+  matrix: [rocsparse_matrix_random]
+
+- name: bsric0_file
+  category: quick
+  function: bsric0
+  precision: *single_double_precisions
+  M: 1
+  N: 1
+  block_dim: [5, 21]
+  transA: [rocsparse_operation_none]
+  apol: [rocsparse_analysis_policy_reuse]
+  spol: [rocsparse_solve_policy_auto]
+  baseA: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_row]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [nos4,
+             nos6,
+             nos1,
+             nos2]
+
+- name: bsric0_file
+  category: pre_checkin
+  function: bsric0
+  precision: *double_precision
+  M: 1
+  N: 1
+  block_dim: [5, 8]
+  transA: [rocsparse_operation_none]
+  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
+  spol: [rocsparse_solve_policy_auto]
+  baseA: [rocsparse_index_base_one]
+  direction: [rocsparse_direction_column]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [scircuit,
+             nos3,
+             nos5,
+             nos7]
+
+- name: bsric0_file
+  category: nightly
+  function: bsric0
+  precision: *single_double_precisions
+  M: 1
+  N: 1
+  block_dim: [3]
+  transA: [rocsparse_operation_none]
+  apol: [rocsparse_analysis_policy_reuse]
+  spol: [rocsparse_solve_policy_auto]
+  baseA: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_column]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [amazon0312,
+             mac_econ_fwd500]
+
+- name: bsric0_file
+  category: nightly
+  function: bsric0
+  precision: *single_double_precisions
+  M: 1
+  N: 1
+  block_dim: [3]
+  transA: [rocsparse_operation_none]
+  apol: [rocsparse_analysis_policy_reuse]
+  spol: [rocsparse_solve_policy_auto]
+  baseA: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_column]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [ASIC_320k,
+             Chebyshev4]
+  skip_hardware: gfx940, gfx941
+
+- name: bsric0_file
+  category: quick
+  function: bsric0
+  precision: *single_double_precisions_complex
+  M: 1
+  N: 1
+  block_dim: [7]
+  transA: [rocsparse_operation_none]
+  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
+  spol: [rocsparse_solve_policy_auto]
+  baseA: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_column]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [ nos1,
+              nos2,
+              nos3,
+              nos5,
+              nos7,
+              Chevron2]
+
+- name: bsric0_file
+  category: pre_checkin
+  function: bsric0
+  precision: *single_double_precisions_complex
+  M: 1
+  N: 1
+  block_dim: [8, 16]
+  transA: [rocsparse_operation_none]
+  apol: [rocsparse_analysis_policy_force]
+  spol: [rocsparse_solve_policy_auto]
+  baseA: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_row]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [Chevron2]
+
+- name: bsric0_file
+  category: nightly
+  function: bsric0
+  precision: *single_double_precisions_complex
+  M: 1
+  N: 1
+  block_dim: [9]
+  transA: [rocsparse_operation_none]
+  apol: [rocsparse_analysis_policy_force]
+  spol: [rocsparse_solve_policy_auto]
+  baseA: [rocsparse_index_base_one]
+  direction: [rocsparse_direction_column]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [Chevron4]
+
+- name: bsric0_graph_test
+  category: pre_checkin
+  function: bsric0
+  precision: *single_double_precisions_complex_real
+  M_N: *M_N_range_quick
+  block_dim: [1, 4, 9]
+  transA: [rocsparse_operation_none]
+  apol: [rocsparse_analysis_policy_reuse]
+  spol: [rocsparse_solve_policy_auto]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  direction: [rocsparse_direction_row, rocsparse_direction_column]
+  matrix: [rocsparse_matrix_random]
+  graph_test: true

@@ -1,0 +1,118 @@
+# ########################################################################
+# Copyright (C) 2024 Advanced Micro Devices, Inc. All rights Reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+#
+# ########################################################################
+
+---
+include: rocsparse_common.yaml
+
+
+Tests:
+- name: extract_bad_arg
+  category: pre_checkin
+  function: extract_bad_arg
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions_complex_real
+
+
+- name: extract
+  category: quick
+  function: extract
+  indextype: *i32i32_i64i32_i64i64
+  precision: {f32_r, f64_c}
+  M: [17, 49]
+  N: [7, 17, 203]
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_zero]
+  formatA: [rocsparse_format_csr, rocsparse_format_csc ]
+  uplo: [rocsparse_fill_mode_lower, rocsparse_fill_mode_upper]
+  diag: [rocsparse_diag_type_non_unit, rocsparse_diag_type_unit]
+
+
+- name: extract
+  category: pre_checkin
+  function: extract
+  indextype: *i32i32_i64i32_i64i64
+  precision: f32_r
+  M: [49, 203, 20033, 3249, 79392]
+  N: [419, 65402]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  formatA: [rocsparse_format_csr, rocsparse_format_csc ]
+  uplo: [rocsparse_fill_mode_lower, rocsparse_fill_mode_upper]
+  diag: [rocsparse_diag_type_non_unit, rocsparse_diag_type_unit]
+
+- name: extract
+  category: nightly
+  function: extract
+  index_type_I: i64
+  index_type_J: i32
+  precision: f32_r
+  M: [179399, 33249, 931392]
+  N: [739392, 433370, 324943]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  formatA: [rocsparse_format_csr, rocsparse_format_csc ]
+  uplo: [rocsparse_fill_mode_lower, rocsparse_fill_mode_upper]
+  diag: [rocsparse_diag_type_non_unit, rocsparse_diag_type_unit]
+
+- name: extract
+  category: nightly
+  function: extract
+  index_type_I: i32
+  index_type_J: i32
+  precision: f32_r
+  M: [179399, 33249, 931392]
+  N: [739392, 433370, 324943]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  formatA: [rocsparse_format_csr, rocsparse_format_csc ]
+  uplo: [rocsparse_fill_mode_lower, rocsparse_fill_mode_upper]
+  diag: [rocsparse_diag_type_non_unit, rocsparse_diag_type_unit]
+
+
+- name: extract
+  category: nightly
+  function: extract
+  index_type_I: i64
+  index_type_J: i64
+  precision: *double_only_precisions_complex
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  formatA: [rocsparse_format_csr, rocsparse_format_csc ]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [Chebyshev4, Chevron2, Chevron3]
+  uplo: [rocsparse_fill_mode_lower, rocsparse_fill_mode_upper]
+  diag: [rocsparse_diag_type_non_unit, rocsparse_diag_type_unit]
+
+- name: extract
+  category: nightly
+  function: extract
+  index_type_I: i64
+  index_type_J: i64
+  precision: *double_only_precisions
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  formatA: [rocsparse_format_csr, rocsparse_format_csc ]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [bmwcra_1, nos2, nos3]
+  uplo: [rocsparse_fill_mode_lower, rocsparse_fill_mode_upper]
+  diag: [rocsparse_diag_type_non_unit, rocsparse_diag_type_unit]
