@@ -24,8 +24,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef __GPU_THREAD_H__
-#define __GPU_THREAD_H__
+#ifndef __GPU___THREAD_THREAD_H__
+#define __GPU___THREAD_THREAD_H__
 
 #include <utility>
 #include <type_traits>
@@ -52,8 +52,8 @@ namespace internal {
 
 enum {
     MAX_THREAD_WIDTH = 32,
-    MAIN_WORK_QUEUE_SIZE = 4096U, // TODO: Make this depend on hardware_concurrency or something.
     CPU_WORK_QUEUE_SIZE = 4096U, // TODO: Make this depend on hardware_concurrency or something.
+    MAIN_WORK_QUEUE_SIZE = 4096U, // TODO: Make this depend on hardware_concurrency or something.
 };
 
 //====================================================================================================================//
@@ -74,6 +74,7 @@ struct WorkNodeDeleter {
     void operator()(WorkNode_Header* ptr) { gpu::free(ptr); }
 };
 
+// TODO: split this file up into a WorkNode header and a thread header
 class thread {
   public:
     // TODO: temporary measure. Should to be replaced with an actual class.
@@ -307,14 +308,6 @@ __host__ WorkNode_Header *sendWorkNodeToGPU(WorkNode_Header *worknode_h);
 
 using internal::thread;
 
-namespace this_thread {
-__device__ gpu::thread::id get_id() noexcept;
-__device__ void pseudo_yield();
-__device__ unsigned int get_width() noexcept;
-__device__ unsigned int get_fiber_id() noexcept;
-
-} // namespace this_thread
-
 template <class Fn_t, class... Args_t>
 inline __host__ thread::thread(uint32_t width, Fn_t &&typed_fn, Args_t &&...args) {
     if (width > MAX_THREAD_WIDTH) {
@@ -362,4 +355,4 @@ inline __device__ thread::thread(uint32_t width [[maybe_unused]], Fn_t &&typed_f
 
 } // namespace gpu
 
-#endif // __GPU_THREAD_H__
+#endif // __GPU___THREAD_THREAD_H__
