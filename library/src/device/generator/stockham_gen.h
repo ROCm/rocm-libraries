@@ -97,7 +97,7 @@ struct StockhamPartialPassParams
 
     std::vector<unsigned int> parent_length;
     unsigned int              current_dim = 0;
-    unsigned int              off_dim = 0;
+    unsigned int              off_dim     = 0;
     std::vector<unsigned int> factors_off_dim;
 };
 

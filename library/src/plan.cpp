@@ -1199,7 +1199,7 @@ struct TempBufferLease
         buf         = std::move(other.buf);
         return *this;
     }
-    TempBufferLease(const TempBufferLease& other)            = delete;
+    TempBufferLease(const TempBufferLease& other) = delete;
     TempBufferLease& operator=(const TempBufferLease& other) = delete;
 
     std::shared_ptr<InternalTempBuffer> data()

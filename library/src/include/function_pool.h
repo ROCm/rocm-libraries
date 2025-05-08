@@ -211,7 +211,7 @@ public:
     {
     }
 
-    function_pool(function_pool& p)                = delete;
+    function_pool(function_pool& p) = delete;
     function_pool& operator=(const function_pool&) = delete;
 
     ~function_pool() = default;

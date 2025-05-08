@@ -91,8 +91,7 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
     unsigned int launcher_transforms_per_block() override
     {
         return transforms_per_block / max_factor_pp;
-    }   
-
+    }
 
     StatementList load_global_generator(unsigned int h,
                                         unsigned int hr,

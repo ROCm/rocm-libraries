@@ -317,7 +317,7 @@ struct FMKeyBase
     FMKeyBase()                 = default;
     FMKeyBase(const FMKeyBase&) = default;
 
-    virtual ~FMKeyBase() {};
+    virtual ~FMKeyBase(){};
 
     rocfft_precision precision;
     ComputeScheme    scheme;

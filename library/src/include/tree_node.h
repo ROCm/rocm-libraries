@@ -780,7 +780,7 @@ public:
         : comm_rank(comm_rank)
     {
     }
-    InternalTempBuffer(const InternalTempBuffer&)            = delete;
+    InternalTempBuffer(const InternalTempBuffer&) = delete;
     InternalTempBuffer& operator=(const InternalTempBuffer&) = delete;
     ~InternalTempBuffer()                                    = default;
 
@@ -836,8 +836,8 @@ private:
 class BufferPtr
 {
 public:
-    BufferPtr()                            = default;
-    BufferPtr(const BufferPtr&)            = default;
+    BufferPtr()                 = default;
+    BufferPtr(const BufferPtr&) = default;
     BufferPtr& operator=(const BufferPtr&) = default;
     ~BufferPtr()                           = default;
 
@@ -964,7 +964,7 @@ struct MultiPlanItem
 {
     MultiPlanItem();
     virtual ~MultiPlanItem();
-    MultiPlanItem(const MultiPlanItem&)            = delete;
+    MultiPlanItem(const MultiPlanItem&) = delete;
     MultiPlanItem& operator=(const MultiPlanItem&) = delete;
 
     // multi-process requests
