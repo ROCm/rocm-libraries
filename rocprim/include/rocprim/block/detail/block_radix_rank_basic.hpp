@@ -33,11 +33,12 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-template<unsigned int BlockSizeX,
-         unsigned int RadixBits,
-         bool         MemoizeOuterScan = false,
-         unsigned int BlockSizeY       = 1,
-         unsigned int BlockSizeZ       = 1>
+template<unsigned int            BlockSizeX,
+         unsigned int            RadixBits,
+         bool                    MemoizeOuterScan = false,
+         unsigned int            BlockSizeY       = 1,
+         unsigned int            BlockSizeZ       = 1,
+         arch::wavefront::target TargetWaveSize   = arch::wavefront::get_target()>
 class block_radix_rank
 {
     using digit_counter_type  = unsigned short;
@@ -47,7 +48,8 @@ class block_radix_rank
                                                   BlockSizeX,
                                                   ::rocprim::block_scan_algorithm::using_warp_scan,
                                                   BlockSizeY,
-                                                  BlockSizeZ>;
+                                                  BlockSizeZ,
+                                                  TargetWaveSize>;
 
     static constexpr unsigned int block_size   = BlockSizeX * BlockSizeY * BlockSizeZ;
     static constexpr unsigned int radix_digits = 1 << RadixBits;

@@ -98,27 +98,40 @@ BEGIN_ROCPRIM_NAMESPACE
 template<class Key,
          unsigned int BlockSizeX,
          unsigned int ItemsPerThread,
-         class Value             = empty_type,
-         unsigned int BlockSizeY = 1,
-         unsigned int BlockSizeZ = 1,
-         unsigned int RadixBitsPerPass
-         = (BlockSizeX * BlockSizeY * BlockSizeZ) % arch::wavefront::min_size() == 0
-               ? 8 /* match */
-               : 4 /* basic_memoize */,
+         class Value                                 = empty_type,
+         unsigned int               BlockSizeY       = 1,
+         unsigned int               BlockSizeZ       = 1,
+         unsigned int               RadixBitsPerPass = 0,
          block_radix_rank_algorithm RadixRankAlgorithm
-         = (BlockSizeX * BlockSizeY * BlockSizeZ) % arch::wavefront::min_size() == 0
-               ? block_radix_rank_algorithm::match
-               : block_radix_rank_algorithm::basic_memoize,
-         block_padding_hint PaddingHint = block_padding_hint::lds_occupancy_bound>
+         = block_radix_rank_algorithm::default_for_radix_sort,
+         block_padding_hint      PaddingHint    = block_padding_hint::lds_occupancy_bound,
+         arch::wavefront::target TargetWaveSize = arch::wavefront::get_target()>
 class block_radix_sort
 {
-    static_assert(RadixBitsPerPass > 0 && RadixBitsPerPass < 32,
-                  "The RadixBitsPerPass should be larger than 0 and smaller than the size "
+    // TODO: somehow when prefer_match is true on SPIR-V, results
+    // are incorrect. Block radix rank works fine though...
+    static constexpr bool prefer_match = (BlockSizeX * BlockSizeY * BlockSizeZ)
+                                             % arch::wavefront::size_from_target<TargetWaveSize>()
+                                         == 0;
+
+    static constexpr unsigned int radix_bits_per_pass = RadixBitsPerPass == 0
+                                                            ? (prefer_match ? 8 /* match */
+                                                                            : 4 /* basic_memoize */)
+                                                            : RadixBitsPerPass;
+
+    static constexpr block_radix_rank_algorithm radix_rank_algorithm
+        = RadixRankAlgorithm == block_radix_rank_algorithm::default_for_radix_sort
+              ? (prefer_match ? block_radix_rank_algorithm::match
+                              : block_radix_rank_algorithm::basic_memoize)
+              : RadixRankAlgorithm;
+
+    static_assert(radix_bits_per_pass > 0 && radix_bits_per_pass < 32,
+                  "The radix_bits_per_pass should be larger than 0 and smaller than the size "
                   "of an unsigned int");
 
     static constexpr unsigned int BlockSize   = BlockSizeX * BlockSizeY * BlockSizeZ;
     static constexpr bool         with_values = !std::is_same<Value, empty_type>::value;
-    static constexpr bool warp_striped = RadixRankAlgorithm == block_radix_rank_algorithm::match;
+    static constexpr bool warp_striped = radix_rank_algorithm == block_radix_rank_algorithm::match;
 
     ROCPRIM_DETAIL_DEVICE_STATIC_ASSERT(
         !warp_striped || (BlockSize % ::rocprim::arch::wavefront::min_size()) == 0,
@@ -128,16 +141,29 @@ class block_radix_sort
     static constexpr bool is_key_and_value_aligned
         = alignof(Key) == alignof(Value) && sizeof(Key) == sizeof(Value);
 
-    using block_rank_type    = ::rocprim::block_radix_rank<BlockSizeX,
-                                                        RadixBitsPerPass,
-                                                        RadixRankAlgorithm,
+    using block_rank_type = ::rocprim::block_radix_rank<BlockSizeX,
+                                                        radix_bits_per_pass,
+                                                        radix_rank_algorithm,
                                                         BlockSizeY,
                                                         BlockSizeZ,
-                                                        PaddingHint>;
-    using keys_exchange_type = ::rocprim::
-        block_exchange<Key, BlockSizeX, ItemsPerThread, BlockSizeY, BlockSizeZ, PaddingHint>;
-    using values_exchange_type = ::rocprim::
-        block_exchange<Value, BlockSizeX, ItemsPerThread, BlockSizeY, BlockSizeZ, PaddingHint>;
+                                                        PaddingHint,
+                                                        TargetWaveSize>;
+
+    using keys_exchange_type = ::rocprim::block_exchange<Key,
+                                                         BlockSizeX,
+                                                         ItemsPerThread,
+                                                         BlockSizeY,
+                                                         BlockSizeZ,
+                                                         PaddingHint,
+                                                         TargetWaveSize>;
+
+    using values_exchange_type = ::rocprim::block_exchange<Value,
+                                                           BlockSizeX,
+                                                           ItemsPerThread,
+                                                           BlockSizeY,
+                                                           BlockSizeZ,
+                                                           PaddingHint,
+                                                           TargetWaveSize>;
 
     // Struct used for creating a raw_storage object for this primitive's temporary storage.
     union storage_type_
@@ -1069,9 +1095,6 @@ public:
     }
 
 private:
-    static constexpr bool use_warp_exchange
-        = ::rocprim::arch::wavefront::min_size() % ItemsPerThread == 0 && ItemsPerThread <= 4;
-
     template<class SortedValue>
     ROCPRIM_DEVICE ROCPRIM_INLINE
     void blocked_to_warp_striped(Key (&keys)[ItemsPerThread],
@@ -1102,9 +1125,14 @@ private:
                                  storage_type& /* storage */,
                                  std::true_type)
     {
-        ::rocprim::warp_exchange<Key, ItemsPerThread>{}.blocked_to_striped_shuffle(keys, keys);
-        ::rocprim::warp_exchange<SortedValue, ItemsPerThread>{}.blocked_to_striped_shuffle(values,
-                                                                                           values);
+        constexpr int wave_size = ::rocprim::arch::wavefront::size_from_target<TargetWaveSize>();
+        using keys_warp_exchange
+            = ::rocprim::warp_exchange<Key, ItemsPerThread, wave_size, TargetWaveSize>;
+        using values_warp_exchange
+            = ::rocprim::warp_exchange<SortedValue, ItemsPerThread, wave_size, TargetWaveSize>;
+
+        keys_warp_exchange{}.blocked_to_striped_shuffle(keys, keys);
+        values_warp_exchange{}.blocked_to_striped_shuffle(values, values);
     }
 
     template<bool Descending,
@@ -1137,7 +1165,7 @@ private:
         {
             // This appears to be slower with high large items per thread.
             constexpr bool use_warp_exchange
-                = ::rocprim::arch::wavefront::min_size() % ItemsPerThread == 0
+                = arch::wavefront::size_from_target<TargetWaveSize>() % ItemsPerThread == 0
                   && ItemsPerThread <= 4;
             blocked_to_warp_striped(keys,
                                     values,
@@ -1151,7 +1179,7 @@ private:
         unsigned int ranks[ItemsPerThread];
         while(true)
         {
-            const int pass_bits = min(RadixBitsPerPass, end_bit - begin_bit);
+            const int pass_bits = min(radix_bits_per_pass, end_bit - begin_bit);
 
             block_rank_type().rank_keys(
                 keys,
@@ -1159,7 +1187,7 @@ private:
                 storage.get().rank,
                 [begin_bit, pass_bits, decomposer](const Key& key) mutable
                 { return key_codec::extract_digit(key, begin_bit, pass_bits, decomposer); });
-            begin_bit += RadixBitsPerPass;
+            begin_bit += radix_bits_per_pass;
 
             if(begin_bit >= end_bit)
             {
@@ -1296,6 +1324,100 @@ private:
         (void)values;
     }
 };
+
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
+template<class Key,
+         unsigned int BlockSizeX,
+         unsigned int ItemsPerThread,
+         class Value,
+         unsigned int               BlockSizeY,
+         unsigned int               BlockSizeZ,
+         unsigned int               RadixBitsPerPass,
+         block_radix_rank_algorithm RadixRankAlgorithm,
+         block_padding_hint         PaddingHint>
+class block_radix_sort<Key,
+                       BlockSizeX,
+                       ItemsPerThread,
+                       Value,
+                       BlockSizeY,
+                       BlockSizeZ,
+                       RadixBitsPerPass,
+                       RadixRankAlgorithm,
+                       PaddingHint,
+                       arch::wavefront::target::dynamic>
+{
+    using block_radix_sort_wave32 = block_radix_sort<Key,
+                                                     BlockSizeX,
+                                                     ItemsPerThread,
+                                                     Value,
+                                                     BlockSizeY,
+                                                     BlockSizeZ,
+                                                     RadixBitsPerPass,
+                                                     RadixRankAlgorithm,
+                                                     PaddingHint,
+                                                     arch::wavefront::target::size32>;
+    using block_radix_sort_wave64 = block_radix_sort<Key,
+                                                     BlockSizeX,
+                                                     ItemsPerThread,
+                                                     Value,
+                                                     BlockSizeY,
+                                                     BlockSizeZ,
+                                                     RadixBitsPerPass,
+                                                     RadixRankAlgorithm,
+                                                     PaddingHint,
+                                                     arch::wavefront::target::size64>;
+
+    using dispatch = detail::dispatch_wave_size<block_radix_sort_wave32, block_radix_sort_wave64>;
+
+public:
+    using storage_type = typename dispatch::storage_type;
+
+    template<typename... Args>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    auto sort(Args&&... args)
+    {
+        dispatch{}([](auto impl, auto&&... args) { impl.sort(args...); }, args...);
+    }
+
+    template<typename... Args>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    auto sort_desc(Args&&... args)
+    {
+        dispatch{}([](auto impl, auto&&... args) { impl.sort_desc(args...); }, args...);
+    }
+
+    template<typename... Args>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    auto sort_to_striped(Args&&... args)
+    {
+        dispatch{}([](auto impl, auto&&... args) { impl.sort_to_striped(args...); }, args...);
+    }
+
+    template<typename... Args>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    auto sort_desc_to_striped(Args&&... args)
+    {
+        dispatch{}([](auto impl, auto&&... args) { impl.sort_desc_to_striped(args...); }, args...);
+    }
+
+    template<typename... Args>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    auto sort_warp_striped_to_striped(Args&&... args)
+    {
+        dispatch{}([](auto impl, auto&&... args) { impl.sort_warp_striped_to_striped(args...); },
+                   args...);
+    }
+
+    template<typename... Args>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    auto sort_desc_warp_striped_to_striped(Args&&... args)
+    {
+        dispatch{}([](auto impl, auto&&... args)
+                   { impl.sort_desc_warp_striped_to_striped(args...); },
+                   args...);
+    }
+};
+#endif // DOXYGEN_SHOULD_SKIP_THIS
 
 END_ROCPRIM_NAMESPACE
 

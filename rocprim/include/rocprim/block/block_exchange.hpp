@@ -657,7 +657,9 @@ public:
     ///     ...
     /// }
     /// \endcode
-    template<unsigned int VirtualWaveSize = arch::wavefront::min_size(), class U, class Offset>
+    template<unsigned int VirtualWaveSize = arch::wavefront::size_from_target<TargetWaveSize>(),
+             class U,
+             class Offset>
     ROCPRIM_DEVICE ROCPRIM_INLINE
     void scatter_to_warp_striped(const T (&input)[ItemsPerThread],
                                  U (&output)[ItemsPerThread],

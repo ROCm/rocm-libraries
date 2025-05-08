@@ -294,7 +294,7 @@ public:
     {
         (void)storage;
 
-        if(VirtualWaveSize == ::rocprim::arch::wavefront::min_size())
+        if(VirtualWaveSize == ::rocprim::arch::wavefront::size())
         {
             return warp_readlane(input, warp_readfirstlane(src_lane));
         }

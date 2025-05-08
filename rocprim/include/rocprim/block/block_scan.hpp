@@ -212,7 +212,7 @@ public:
                         storage_type& storage,
                         BinaryFunction scan_op = BinaryFunction())
     {
-        base_type::inclusive_scan(input, output, storage, scan_op);
+        base_type{}.inclusive_scan(input, output, storage, scan_op);
     }
 
     /// \overload
@@ -236,7 +236,7 @@ public:
                         T& output,
                         BinaryFunction scan_op = BinaryFunction())
     {
-        base_type::inclusive_scan(input, output, scan_op);
+        base_type{}.inclusive_scan(input, output, scan_op);
     }
 
     /// \brief Performs inclusive scan and reduction across threads in a block.
@@ -297,7 +297,7 @@ public:
                         storage_type& storage,
                         BinaryFunction scan_op = BinaryFunction())
     {
-        base_type::inclusive_scan(input, output, reduction, storage, scan_op);
+        base_type{}.inclusive_scan(input, output, reduction, storage, scan_op);
     }
 
     /// \overload
@@ -323,7 +323,7 @@ public:
                         T& reduction,
                         BinaryFunction scan_op = BinaryFunction())
     {
-        base_type::inclusive_scan(input, output, reduction, scan_op);
+        base_type{}.inclusive_scan(input, output, reduction, scan_op);
     }
 
     /// \brief Performs inclusive scan across threads in a block, and uses
@@ -413,7 +413,7 @@ public:
                         PrefixCallback& prefix_callback_op,
                         BinaryFunction scan_op)
     {
-        base_type::inclusive_scan(input, output, storage, prefix_callback_op, scan_op);
+        base_type{}.inclusive_scan(input, output, storage, prefix_callback_op, scan_op);
     }
 
     /// \brief Performs inclusive scan across threads in a block.
@@ -475,11 +475,11 @@ public:
     {
         if(ItemsPerThread == 1)
         {
-            base_type::inclusive_scan(input[0], output[0], storage, scan_op);
+            base_type{}.inclusive_scan(input[0], output[0], storage, scan_op);
         }
         else
         {
-            base_type::inclusive_scan(input, output, storage, scan_op);
+            base_type{}.inclusive_scan(input, output, storage, scan_op);
         }
     }
 
@@ -510,11 +510,11 @@ public:
     {
         if(ItemsPerThread == 1)
         {
-            base_type::inclusive_scan(input[0], output[0], scan_op);
+            base_type{}.inclusive_scan(input[0], output[0], scan_op);
         }
         else
         {
-            base_type::inclusive_scan(input, output, scan_op);
+            base_type{}.inclusive_scan(input, output, scan_op);
         }
     }
 
@@ -576,7 +576,7 @@ public:
                         storage_type&  storage,
                         BinaryFunction scan_op = BinaryFunction())
     {
-        base_type::inclusive_scan(input, init, output, storage, scan_op);
+        base_type{}.inclusive_scan(input, init, output, storage, scan_op);
     }
 
     /// \overload
@@ -606,7 +606,7 @@ public:
                         T (&output)[ItemsPerThread],
                         BinaryFunction scan_op = BinaryFunction())
     {
-        base_type::inclusive_scan(input, init, output, scan_op);
+        base_type{}.inclusive_scan(input, init, output, scan_op);
     }
 
     /// \brief Performs inclusive scan and reduction across threads in a block.
@@ -672,11 +672,11 @@ public:
     {
         if(ItemsPerThread == 1)
         {
-            base_type::inclusive_scan(input[0], output[0], reduction, storage, scan_op);
+            base_type{}.inclusive_scan(input[0], output[0], reduction, storage, scan_op);
         }
         else
         {
-            base_type::inclusive_scan(input, output, reduction, storage, scan_op);
+            base_type{}.inclusive_scan(input, output, reduction, storage, scan_op);
         }
     }
 
@@ -709,11 +709,11 @@ public:
     {
         if(ItemsPerThread == 1)
         {
-            base_type::inclusive_scan(input[0], output[0], reduction, scan_op);
+            base_type{}.inclusive_scan(input[0], output[0], reduction, scan_op);
         }
         else
         {
-            base_type::inclusive_scan(input, output, reduction, scan_op);
+            base_type{}.inclusive_scan(input, output, reduction, scan_op);
         }
     }
 
@@ -780,7 +780,7 @@ public:
                         storage_type&  storage,
                         BinaryFunction scan_op = BinaryFunction())
     {
-        base_type::inclusive_scan(input, init, output, reduction, storage, scan_op);
+        base_type{}.inclusive_scan(input, init, output, reduction, storage, scan_op);
     }
 
     /// \overload
@@ -812,7 +812,7 @@ public:
                         T& reduction,
                         BinaryFunction scan_op = BinaryFunction())
     {
-        base_type::inclusive_scan(input, init, output, reduction, scan_op);
+        base_type{}.inclusive_scan(input, init, output, reduction, scan_op);
     }
 
     /// \brief Performs inclusive scan across threads in a block, and uses
@@ -906,11 +906,11 @@ public:
     {
         if(ItemsPerThread == 1)
         {
-            base_type::inclusive_scan(input[0], output[0], storage, prefix_callback_op, scan_op);
+            base_type{}.inclusive_scan(input[0], output[0], storage, prefix_callback_op, scan_op);
         }
         else
         {
-            base_type::inclusive_scan(input, output, storage, prefix_callback_op, scan_op);
+            base_type{}.inclusive_scan(input, output, storage, prefix_callback_op, scan_op);
         }
     }
 
@@ -972,7 +972,7 @@ public:
                         storage_type& storage,
                         BinaryFunction scan_op = BinaryFunction())
     {
-        base_type::exclusive_scan(input, output, init, storage, scan_op);
+        base_type{}.exclusive_scan(input, output, init, storage, scan_op);
     }
 
     /// \overload
@@ -999,7 +999,7 @@ public:
                         T init,
                         BinaryFunction scan_op = BinaryFunction())
     {
-        base_type::exclusive_scan(input, output, init, scan_op);
+        base_type{}.exclusive_scan(input, output, init, scan_op);
     }
 
     /// \brief Performs exclusive scan and reduction across threads in a block.
@@ -1065,7 +1065,7 @@ public:
                         storage_type& storage,
                         BinaryFunction scan_op = BinaryFunction())
     {
-        base_type::exclusive_scan(input, output, init, reduction, storage, scan_op);
+        base_type{}.exclusive_scan(input, output, init, reduction, storage, scan_op);
     }
 
     /// \overload
@@ -1094,7 +1094,7 @@ public:
                         T& reduction,
                         BinaryFunction scan_op = BinaryFunction())
     {
-        base_type::exclusive_scan(input, output, init, reduction, scan_op);
+        base_type{}.exclusive_scan(input, output, init, reduction, scan_op);
     }
 
     /// \brief Performs exclusive scan across threads in a block, and uses
@@ -1184,7 +1184,7 @@ public:
                         PrefixCallback& prefix_callback_op,
                         BinaryFunction scan_op)
     {
-        base_type::exclusive_scan(input, output, storage, prefix_callback_op, scan_op);
+        base_type{}.exclusive_scan(input, output, storage, prefix_callback_op, scan_op);
     }
 
     /// \brief Performs exclusive scan across threads in a block.
@@ -1251,11 +1251,11 @@ public:
     {
         if(ItemsPerThread == 1)
         {
-            base_type::exclusive_scan(input[0], output[0], init, storage, scan_op);
+            base_type{}.exclusive_scan(input[0], output[0], init, storage, scan_op);
         }
         else
         {
-            base_type::exclusive_scan(input, output, init, storage, scan_op);
+            base_type{}.exclusive_scan(input, output, init, storage, scan_op);
         }
     }
 
@@ -1289,11 +1289,11 @@ public:
     {
         if(ItemsPerThread == 1)
         {
-            base_type::exclusive_scan(input[0], output[0], init, scan_op);
+            base_type{}.exclusive_scan(input[0], output[0], init, scan_op);
         }
         else
         {
-            base_type::exclusive_scan(input, output, init, scan_op);
+            base_type{}.exclusive_scan(input, output, init, scan_op);
         }
     }
 
@@ -1366,11 +1366,11 @@ public:
     {
         if(ItemsPerThread == 1)
         {
-            base_type::exclusive_scan(input[0], output[0], init, reduction, storage, scan_op);
+            base_type{}.exclusive_scan(input[0], output[0], init, reduction, storage, scan_op);
         }
         else
         {
-            base_type::exclusive_scan(input, output, init, reduction, storage, scan_op);
+            base_type{}.exclusive_scan(input, output, init, reduction, storage, scan_op);
         }
     }
 
@@ -1406,11 +1406,11 @@ public:
     {
         if(ItemsPerThread == 1)
         {
-            base_type::exclusive_scan(input[0], output[0], init, reduction, scan_op);
+            base_type{}.exclusive_scan(input[0], output[0], init, reduction, scan_op);
         }
         else
         {
-            base_type::exclusive_scan(input, output, init, reduction, scan_op);
+            base_type{}.exclusive_scan(input, output, init, reduction, scan_op);
         }
     }
 
@@ -1505,11 +1505,11 @@ public:
     {
         if(ItemsPerThread == 1)
         {
-            base_type::exclusive_scan(input[0], output[0], storage, prefix_callback_op, scan_op);
+            base_type{}.exclusive_scan(input[0], output[0], storage, prefix_callback_op, scan_op);
         }
         else
         {
-            base_type::exclusive_scan(input, output, storage, prefix_callback_op, scan_op);
+            base_type{}.exclusive_scan(input, output, storage, prefix_callback_op, scan_op);
         }
     }
 };

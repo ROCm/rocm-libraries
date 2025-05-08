@@ -39,12 +39,11 @@ namespace wavefront
 /// \brief Return the number of threads in the wavefront.
 ///
 /// This function is not `constexpr`.
-    ROCPRIM_DEVICE ROCPRIM_INLINE
-unsigned int size()
+ROCPRIM_DEVICE ROCPRIM_INLINE
+unsigned int size() noexcept
 {
-    // This function is **not** constexpr because it will
-    // be using '__builtin_amdgcn_wavefrontsize()'.
-    return warpSize;
+    // Note: this function is **not** constexpr!
+    return __builtin_amdgcn_wavefrontsize();
 }
 
 /// \brief Return the minimum number of threads in the wavefront.
@@ -227,8 +226,14 @@ struct dispatch_wave_size
         // Now do the actual implementation selection. The compiler
         // *should* optimize this after lowering, but the extra
         // allocated shared memory due to union is unrecoverable.
-        return ::rocprim::arch::wavefront::size() == ROCPRIM_WARP_SIZE_64 ? select(Impl64{})
-                                                                          : select(Impl32{});
+        if(::rocprim::arch::wavefront::size() == ROCPRIM_WARP_SIZE_64)
+        {
+            return select(Impl64{});
+        }
+        else
+        {
+            return select(Impl32{});
+        }
     }
 };
 

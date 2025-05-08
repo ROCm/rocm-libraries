@@ -47,6 +47,8 @@ enum class block_radix_rank_algorithm
     match,
     /// \brief The default radix ranking algorithm.
     default_algorithm = basic,
+    /// \brief The placeholder for radix_sort default
+    default_for_radix_sort,
 };
 
 namespace detail
@@ -62,8 +64,10 @@ struct select_block_radix_rank_impl<block_radix_rank_algorithm::basic>
              unsigned int RadixBits,
              unsigned int BlockSizeY,
              unsigned int BlockSizeZ,
-             block_padding_hint>
-    using type = block_radix_rank<BlockSizeX, RadixBits, false, BlockSizeY, BlockSizeZ>;
+             block_padding_hint,
+             arch::wavefront::target TargetWaveSize>
+    using type
+        = block_radix_rank<BlockSizeX, RadixBits, false, BlockSizeY, BlockSizeZ, TargetWaveSize>;
 };
 
 template<>
@@ -73,19 +77,27 @@ struct select_block_radix_rank_impl<block_radix_rank_algorithm::basic_memoize>
              unsigned int RadixBits,
              unsigned int BlockSizeY,
              unsigned int BlockSizeZ,
-             block_padding_hint>
-    using type = block_radix_rank<BlockSizeX, RadixBits, true, BlockSizeY, BlockSizeZ>;
+             block_padding_hint,
+             arch::wavefront::target TargetWaveSize>
+    using type
+        = block_radix_rank<BlockSizeX, RadixBits, true, BlockSizeY, BlockSizeZ, TargetWaveSize>;
 };
 
 template<>
 struct select_block_radix_rank_impl<block_radix_rank_algorithm::match>
 {
-    template<unsigned int BlockSizeX,
-             unsigned int RadixBits,
-             unsigned int BlockSizeY,
-             unsigned int BlockSizeZ,
-             block_padding_hint PaddingHint>
-    using type = block_radix_rank_match<BlockSizeX, RadixBits, BlockSizeY, BlockSizeZ, PaddingHint>;
+    template<unsigned int            BlockSizeX,
+             unsigned int            RadixBits,
+             unsigned int            BlockSizeY,
+             unsigned int            BlockSizeZ,
+             block_padding_hint      PaddingHint,
+             arch::wavefront::target TargetWaveSize>
+    using type = block_radix_rank_match<BlockSizeX,
+                                        RadixBits,
+                                        BlockSizeY,
+                                        BlockSizeZ,
+                                        PaddingHint,
+                                        TargetWaveSize>;
 };
 } // namespace detail
 
@@ -140,18 +152,20 @@ struct select_block_radix_rank_impl<block_radix_rank_algorithm::match>
 /// \endcode
 template<unsigned int               BlockSizeX,
          unsigned int               RadixBits,
-         block_radix_rank_algorithm Algorithm   = block_radix_rank_algorithm::default_algorithm,
-         unsigned int               BlockSizeY  = 1,
-         unsigned int               BlockSizeZ  = 1,
-         block_padding_hint         PaddingHint = block_padding_hint::avoid_conflicts>
+         block_radix_rank_algorithm Algorithm      = block_radix_rank_algorithm::default_algorithm,
+         unsigned int               BlockSizeY     = 1,
+         unsigned int               BlockSizeZ     = 1,
+         block_padding_hint         PaddingHint    = block_padding_hint::avoid_conflicts,
+         arch::wavefront::target    TargetWaveSize = arch::wavefront::get_target(),
+         typename Enabled                          = void>
 class block_radix_rank
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
-    : private detail::select_block_radix_rank_impl<
-          Algorithm>::template type<BlockSizeX, RadixBits, BlockSizeY, BlockSizeZ, PaddingHint>
+    : private detail::select_block_radix_rank_impl<Algorithm>::
+          template type<BlockSizeX, RadixBits, BlockSizeY, BlockSizeZ, PaddingHint, TargetWaveSize>
 #endif
 {
-    using base_type = typename detail::select_block_radix_rank_impl<
-        Algorithm>::template type<BlockSizeX, RadixBits, BlockSizeY, BlockSizeZ, PaddingHint>;
+    using base_type = typename detail::select_block_radix_rank_impl<Algorithm>::
+        template type<BlockSizeX, RadixBits, BlockSizeY, BlockSizeZ, PaddingHint, TargetWaveSize>;
 
 public:
     /// \brief The number of digits each thread will process.
@@ -552,6 +566,63 @@ public:
         base_type::rank_keys(keys, ranks, storage, digit_extractor, prefix, counts);
     }
 };
+
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
+template<unsigned int               BlockSizeX,
+         unsigned int               RadixBits,
+         block_radix_rank_algorithm Algorithm,
+         unsigned int               BlockSizeY,
+         unsigned int               BlockSizeZ,
+         block_padding_hint         PaddingHint>
+class block_radix_rank<BlockSizeX,
+                       RadixBits,
+                       Algorithm,
+                       BlockSizeY,
+                       BlockSizeZ,
+                       PaddingHint,
+                       arch::wavefront::target::dynamic>
+{
+private:
+    using block_radix_rank_wave32 = block_radix_rank<BlockSizeX,
+                                                     RadixBits,
+                                                     Algorithm,
+                                                     BlockSizeY,
+                                                     BlockSizeZ,
+                                                     PaddingHint,
+                                                     arch::wavefront::target::size32>;
+    using block_radix_rank_wave64 = block_radix_rank<BlockSizeX,
+                                                     RadixBits,
+                                                     Algorithm,
+                                                     BlockSizeY,
+                                                     BlockSizeZ,
+                                                     PaddingHint,
+                                                     arch::wavefront::target::size64>;
+
+    using dispatch = detail::dispatch_wave_size<block_radix_rank_wave32, block_radix_rank_wave64>;
+
+public:
+    static_assert(block_radix_rank_wave32::digits_per_thread
+                      == block_radix_rank_wave64::digits_per_thread,
+                  "digits_per_thread is not the same for wavefront size 32 and 64!");
+    static constexpr unsigned int digits_per_thread = block_radix_rank_wave32::digits_per_thread;
+
+    using storage_type = typename dispatch::storage_type;
+
+    template<typename... Args>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    auto rank_keys(Args&&... args)
+    {
+        dispatch{}([](auto impl, auto&&... args) { impl.rank_keys(args...); }, args...);
+    }
+
+    template<typename... Args>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    auto rank_keys_desc(Args&&... args)
+    {
+        dispatch{}([](auto impl, auto&&... args) { impl.rank_keys_desc(args...); }, args...);
+    }
+};
+#endif // DOXYGEN_SHOULD_SKIP_THIS
 
 END_ROCPRIM_NAMESPACE
 

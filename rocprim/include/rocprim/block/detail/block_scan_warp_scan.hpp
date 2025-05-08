@@ -786,7 +786,8 @@ private:
                              T&                 output,
                              storage_type&      storage,
                              BinaryFunction     scan_op) ->
-        typename std::enable_if<(BlockSize_ > ::rocprim::arch::wavefront::min_size())>::type
+        typename std::enable_if<
+            (BlockSize_ > ::rocprim::arch::wavefront::size_from_target<TargetWaveSize>())>::type
     {
         storage_type_& storage_ = storage.get();
         // Perform warp scan on input values
@@ -822,7 +823,8 @@ private:
                              T&                 output,
                              storage_type&      storage,
                              BinaryFunction     scan_op) ->
-        typename std::enable_if<!(BlockSize_ > ::rocprim::arch::wavefront::min_size())>::type
+        typename std::enable_if<
+            !(BlockSize_ > ::rocprim::arch::wavefront::size_from_target<TargetWaveSize>())>::type
     {
         (void) flat_tid;
         (void) storage;

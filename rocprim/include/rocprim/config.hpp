@@ -140,8 +140,7 @@
     #define ROCPRIM_DETAIL_HAS_DPP 1
 #endif
 
-#if !defined(ROCPRIM_DISABLE_DPP) && defined(ROCPRIM_DETAIL_HAS_DPP) \
-    && !defined(ROCPRIM_TARGET_SPIRV)
+#if !defined(ROCPRIM_DISABLE_DPP) && defined(ROCPRIM_DETAIL_HAS_DPP) && !ROCPRIM_TARGET_SPIRV
     #define ROCPRIM_DETAIL_USE_DPP 1
 #else
     #define ROCPRIM_DETAIL_USE_DPP 0
