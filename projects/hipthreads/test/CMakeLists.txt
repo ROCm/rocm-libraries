@@ -12,6 +12,7 @@ function(add_compile_test testFileName)
     # needed to get intellisense to stop complaining about the co-ordinate built-ins not being defined
     target_compile_definitions(${testName} PUBLIC __HIP__)
 
+    # target_link_libraries(${testName} PRIVATE libhipcxx::libhipcxx)
     # add_custom_command(TARGET ${testName} POST_BUILD
     #     COMMAND ${LLVM_DIS} ${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/${testName}.dir/${testName}-host-x86_64-unknown-linux-gnu.bc
     # )
