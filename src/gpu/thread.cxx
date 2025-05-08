@@ -19,6 +19,9 @@
 
 #include "gpu/thread"
 
+// For cuda::std::__libcpp_thread_sleep_for
+#include <hip/std/atomic>
+
 namespace gpu {
 
 namespace internal {
@@ -442,6 +445,10 @@ static __global__ void detachWorkNode(WorkNode_Header *oldWorkNode) {
 //====================================================================================================================//
 
 namespace this_thread {
+_LIBGPU_EXPORTED_FROM_ABI __device__ void sleep_for(cuda::std::chrono::nanoseconds __ns) {
+  cuda::std::__libcpp_thread_sleep_for(__ns);
+}
+
 __device__ gpu::thread::id get_id() noexcept {
     using namespace internal;
     __shared__ WorkNode_Header *current;
