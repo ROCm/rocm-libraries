@@ -189,8 +189,8 @@ def getLocalWriteMFMAEnd(writer, kernel, tensorParametersA, tensorParametersB):
     #########
     # assign parameter
     # 1. we calculate number of mfma to prefetch localReads for next loop
-    # 2. we put barrier 1 mfma ahead that
-    # 3. we put last localWrite 1~2 mfma ahead barrier
+    # 2. we put a barrier before the last mfma
+    # 3. we put last localWrite before 2~3 mfma, then the barrier
     # localReads followed following sequence to be scheduled
     # ds_read[A][0], ds_read[B][0], ds_read[A][1:], ds_read[B][1:]
     # NOTE: we need this sequence for new feature "breaking waitcnt"
@@ -201,6 +201,7 @@ def getLocalWriteMFMAEnd(writer, kernel, tensorParametersA, tensorParametersB):
     tPM = tensorParametersA["tpsMetadata"] if tensorParametersA["is_sparse"] else tensorParametersB["tpsMetadata"]
 
     # we can skip some LR waitcnt
+    # Since the first mfma only use B[:1], so we only wait for B[0]
     isLocalReadsOpt = False
     tmpLatencyLeft  = 0
     tmpNumMfmaForLR = 0
@@ -235,6 +236,7 @@ def getLocalWriteMFMAEnd(writer, kernel, tensorParametersA, tensorParametersB):
         # ds_read[M][1:]
         if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
             calculateLatencyLeft((writer.states.numReadsPerIterMetadata//kernel["InnerUnroll"] - writer.states.numReadsPerUnrollMetadata), tPM["localReadInstruction"].blockWidth, tPM["localReadInstruction"].issueLatency)
+        # get the latency before B[:1]
         if isLocalReadsOpt:
             tmpLatencyLeft = latencyLeft
             tmpNumMfmaForLR = writer.states.numMfmaForLR
