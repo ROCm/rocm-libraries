@@ -107,14 +107,14 @@ def main(argv: Optional[List[str]] = None) -> None:
         subtree_push(entry, entry_naming.branch_name, entry_naming.prefix, entry_naming.subrepo_full_url, args.dry_run)
         pr_exists: bool = client.pr_view(entry.url, entry_naming.branch_name)
         if not pr_exists:
+            # check if the branch already exists in the subrepo and error out if it did not
+            # means git subtree push failed
+            check_branch_subprocess = subprocess.run(
+                ["git", "ls-remote", "--heads", entry_naming.subrepo_full_url, entry_naming.branch_name],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                check=True, text=True
+            )
             if not args.dry_run:
-                # check if the branch already exists in the subrepo and error out if it did not
-                # means git subtree push failed
-                check_branch_subprocess = subprocess.run(
-                    ["git", "ls-remote", "--heads", entry_naming.subrepo_full_url, entry_naming.branch_name],
-                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                    check=True, text=True
-                )
                 if bool(check_branch_subprocess.stdout.strip()):
                     # entry.branch is the default branch for the subrepo
                     # entry_naming.branch_name is the pull request branch name
@@ -122,6 +122,8 @@ def main(argv: Optional[List[str]] = None) -> None:
                     logger.info(f"Created PR in {entry.url} for branch {entry_naming.branch_name}")
                 else:
                     logger.error(f"Branch {entry_naming.branch_name} does not exist in {entry.url}. Cannot create PR.")
+            else:
+                logger.info(f"[Dry-run] Would create PR in {entry.url} for branch {entry_naming.branch_name}")
 
 if __name__ == "__main__":
     main()

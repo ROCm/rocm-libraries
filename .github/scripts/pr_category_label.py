@@ -75,8 +75,8 @@ def output_labels(existing_labels: List[str], desired_labels: List[str], dry_run
         output_file = os.environ.get("GITHUB_OUTPUT")
         if output_file:
             with open(output_file, 'a') as f:
-                print(f"add={','.join(to_add)}", file=f)
-                print(f"remove={','.join(to_remove)}", file=f)
+                print(f"label_add={','.join(to_add)}", file=f)
+                print(f"label_remove={','.join(to_remove)}", file=f)
             logger.info(f"Wrote to GITHUB_OUTPUT: add={','.join(to_add)}")
             logger.info(f"Wrote to GITHUB_OUTPUT: remove={','.join(to_remove)}")
         else:

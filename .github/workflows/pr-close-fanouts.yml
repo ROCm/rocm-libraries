@@ -5,15 +5,15 @@ on:
     types:
       - closed
 
+# ensure that the workflow is not running for the same PR multiple times at once
+# subsequent runs of the workflow will perform no-op if the subrepo PRs are already closed
 concurrency:
   group: pr-close-fanout-${{ github.event.pull_request.number }}
   cancel-in-progress: false
-  # ensure that the workflow is not running for the same PR multiple times at once
-  # subsequent runs of the workflow will perform no-op if the subrepo PRs are already closed
 
 jobs:
   close-fanouts:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout workflows
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
