@@ -178,5 +178,8 @@ namespace rocRoller
 
             {"WorkgroupIdxViaTTMP", Value::WorkgroupIdxViaTTMP},
             {"HasBufferOutOfBoundsCheckOption", Value::HasBufferOutOfBoundsCheckOption},
+
+            {"HasXCC", Value::HasXCC},
+            {"DefaultRemapXCCValue", Value::DefaultRemapXCCValue},
     };
 }

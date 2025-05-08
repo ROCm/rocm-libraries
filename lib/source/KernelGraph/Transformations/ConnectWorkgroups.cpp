@@ -407,6 +407,10 @@ namespace rocRoller
 
             if(m_params->workgroupRemapXCC)
             {
+                auto const& arch = m_context->targetArchitecture();
+                AssertFatal(arch.HasCapability(GPUCapability::HasXCC),
+                            "XCC-aware workgroup remapping not available on: ",
+                            arch.target().toString());
                 auto workgroupTags = kgraph.coordinates.getNodes<Workgroup>().to<std::vector>();
                 for(auto workgroupTag : workgroupTags)
                 {

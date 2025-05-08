@@ -88,6 +88,8 @@ namespace rocRoller
                 float scaleValueA, scaleValueB;
 
                 int scaleBlockSize;
+
+                std::pair<int, int> workgroupMapping;
             };
 
             /**
@@ -111,6 +113,10 @@ namespace rocRoller
                 // Number of wave tiles to execute per workgroup
                 int workgroupSizeX = 64;
                 int workgroupSizeY = 1;
+
+                std::pair<int, int> workgroupMapping       = {-1, -1};
+                bool                workgroupRemapXCC      = false;
+                int                 workgroupRemapXCCValue = -1;
 
                 // Datatype of inputs and outputs
                 std::string typeA;

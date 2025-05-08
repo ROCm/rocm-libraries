@@ -105,6 +105,10 @@ struct rocRoller::Serialization::
         iot::mapRequired(io, "wave_b", result.solutionParams.waveB);
         iot::mapRequired(io, "workgroup_size_x", result.solutionParams.workgroupSizeX);
         iot::mapRequired(io, "workgroup_size_y", result.solutionParams.workgroupSizeY);
+        iot::mapRequired(io, "workgroupMapping", result.solutionParams.workgroupMapping);
+        iot::mapRequired(io, "workgroupRemapXCC", result.solutionParams.workgroupRemapXCC);
+        iot::mapRequired(
+            io, "workgroupRemapXCCValue", result.solutionParams.workgroupRemapXCCValue);
         iot::mapRequired(io, "unroll_x", result.solutionParams.unrollX);
         iot::mapRequired(io, "unroll_y", result.solutionParams.unrollY);
         iot::mapRequired(io, "loadLDS_A", result.solutionParams.loadLDSA);
@@ -162,6 +166,9 @@ struct rocRoller::Serialization::MappingTraits<Client::GEMMClient::SolutionParam
         iot::mapRequired(io, "wave_b", params.waveB);
         iot::mapRequired(io, "workgroup_size_x", params.workgroupSizeX);
         iot::mapRequired(io, "workgroup_size_y", params.workgroupSizeY);
+        iot::mapRequired(io, "workgroupMapping", params.workgroupMapping);
+        iot::mapRequired(io, "workgroupRemapXCC", params.workgroupRemapXCC);
+        iot::mapRequired(io, "workgroupRemapXCCValue", params.workgroupRemapXCCValue);
         iot::mapRequired(io, "unroll_x", params.unrollX);
         iot::mapRequired(io, "unroll_y", params.unrollY);
         iot::mapRequired(io, "loadLDS_A", params.loadLDSA);
@@ -1033,8 +1040,11 @@ int main(int argc, const char* argv[])
         .waveK = -1,
         .waveB = -1,
 
-        .workgroupSizeX = 128,
-        .workgroupSizeY = 2,
+        .workgroupSizeX         = 128,
+        .workgroupSizeY         = 2,
+        .workgroupMapping       = {-1, -1},
+        .workgroupRemapXCC      = false,
+        .workgroupRemapXCCValue = -1,
 
         .scaleA = Operations::ScaleMode::None,
         .scaleB = Operations::ScaleMode::None,
@@ -1244,6 +1254,62 @@ int main(int argc, const char* argv[])
         "--workgroup_size_x", solution.workgroupSizeX, "Workgroup size in the x dimension.");
     app.add_option(
         "--workgroup_size_y", solution.workgroupSizeY, "Workgroup size in the y dimension.");
+    app.add_option(
+        "--workgroupMapping",
+        [&solution](auto res) -> bool {
+            auto wgm = res[0];
+            if(!wgm.empty())
+            {
+                bool fail = false;
+                try
+                {
+                    std::istringstream iss(wgm);
+                    std::string        token;
+
+                    iss.exceptions(std::ifstream::eofbit | std::ifstream::failbit
+                                   | std::ifstream::badbit);
+                    std::getline(iss, token, ',');
+                    auto dim = std::stoi(token);
+                    iss.exceptions(std::ifstream::failbit | std::ifstream::badbit);
+                    std::getline(iss, token, ',');
+                    auto size                 = std::stoi(token);
+                    solution.workgroupMapping = {dim, size};
+
+                    fail |= (dim != -1 && dim != 0 && dim != 1);
+                    fail |= (size != -1 && size < 1);
+                }
+                catch(const std::invalid_argument&)
+                {
+                    fail = true;
+                }
+                catch(const std::ios_base::failure&)
+                {
+                    fail = true;
+                }
+
+                if(fail)
+                {
+                    std::cout << "Invalid format for workgroupMapping." << std::endl;
+                    std::cout << std::endl;
+                    std::cout << "The workgroupMapping argument should be formatted like:"
+                              << std::endl;
+                    std::cout << std::endl;
+                    std::cout << "    --workgroupMapping=d,s" << std::endl;
+                    std::cout << std::endl;
+                    std::cout << "where d is 0 or 1, and s is a positive integer." << std::endl;
+                    std::cout << std::endl;
+                    std::cout << "For example: --workgroupMapping=0,6" << std::endl;
+                }
+                return !fail;
+            }
+            return false;
+        },
+        "Workgroup mapping dimension and size.");
+    app.add_flag(
+        "--workgroupRemapXCC", solution.workgroupRemapXCC, "Use an XCC-aware workgroup remapping.");
+    app.add_option("--workgroupRemapXCCValue",
+                   solution.workgroupRemapXCCValue,
+                   "Force an XCC-aware workgroup remapping value. (Optional)");
     app.add_option("--unroll_x", solution.unrollX, "Unroll size in X.");
     app.add_option("--unroll_y", solution.unrollY, "Unroll size in Y.");
     app.add_flag("--loadLDS_A", solution.loadLDSA, "Use LDS when loading A.");
@@ -1481,6 +1547,9 @@ int main(int argc, const char* argv[])
     solution.scaleA         = types.scaleA;
     solution.scaleB         = types.scaleB;
     solution.scaleBlockSize = types.scaleBlockSize;
+
+    // TODO: Reevaluate the relationship between problem and solution params.
+    problem.workgroupMapping = solution.workgroupMapping;
 
     run.check = !noCheckResult;
 

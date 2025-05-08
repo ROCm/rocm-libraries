@@ -476,8 +476,9 @@ namespace GEMMDriverTest
 
             if(gemm.workgroupRemapXCC)
             {
-                // Can we query this?
-                params->workgroupRemapXCC = 8;
+                REQUIRE_ARCH_CAP(GPUCapability::HasXCC);
+                params->workgroupRemapXCC = m_context->targetArchitecture().GetCapability(
+                    GPUCapability::DefaultRemapXCCValue);
             }
 
             if(gemm.loopOverTiles > 0)
@@ -984,6 +985,7 @@ namespace GEMMDriverTest
     TEST_P(GEMMTestGPU, GPU_BasicGEMMWorkgroupMappingXCC)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
+        REQUIRE_ARCH_CAP(GPUCapability::HasXCC);
         GEMMProblem gemm;
         gemm.workgroupMapping  = {0, 6};
         gemm.workgroupRemapXCC = true;

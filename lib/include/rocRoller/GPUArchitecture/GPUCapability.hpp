@@ -163,6 +163,9 @@ namespace rocRoller
             WorkgroupIdxViaTTMP,
             HasBufferOutOfBoundsCheckOption,
 
+            HasXCC,
+            DefaultRemapXCCValue,
+
             Count,
         };
 

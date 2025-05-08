@@ -50,6 +50,8 @@ namespace rocRoller
                 std::optional<Operations::OperationTag> m_tagTensorScaleA, m_tagLoadScaleA,
                     m_tagBlockScaleA, m_tagTensorScaleB, m_tagLoadScaleB, m_tagBlockScaleB;
 
+                Operations::OperationTag m_tagWGM;
+
             public:
                 using GEMMSolution::GEMMSolution;
 
@@ -195,6 +197,16 @@ namespace rocRoller
                     m_tagTensorD
                         = command->addOperation(Operations::Tensor(2, typeD, {(size_t)1})); // D
                     command->addOperation(Operations::T_Store_Tiled(m_tagD, m_tagTensorD));
+
+                    if(solutionParams.workgroupMapping.first != -1)
+                    {
+                        m_tagWGM = command->allocateTag();
+                        command->allocateArgument(DataType::UInt32,
+                                                  m_tagWGM,
+                                                  ArgumentType::Value,
+                                                  DataDirection::ReadOnly,
+                                                  rocRoller::WGM);
+                    }
 
                     return command;
                 }
@@ -431,6 +443,37 @@ namespace rocRoller
 
                     params->setManualWorkgroupSize({workgroup_size_x, workgroup_size_y, 1});
 
+                    if(solutionParams.workgroupMapping.first != -1)
+                    {
+                        auto dim  = solutionParams.workgroupMapping.first;
+                        auto size = solutionParams.workgroupMapping.second;
+
+                        AssertFatal(
+                            dim == 0 || dim == 1,
+                            "Only 0 (M) or 1 (N) are supported dimensions for workgroup mapping.",
+                            ShowValue(dim));
+
+                        // CommandSolution::generateKernelGraph creates the size Expression
+                        // and initializes the workgroupMapping.second
+                        params->workgroupMapping = {dim, nullptr};
+                    }
+
+                    if(solutionParams.workgroupRemapXCC)
+                    {
+                        AssertFatal(arch.HasCapability(GPUCapability::HasXCC),
+                                    "XCC-aware workgroup remapping not available on: ",
+                                    arch.target().toString());
+                        if(solutionParams.workgroupRemapXCCValue != -1)
+                        {
+                            params->workgroupRemapXCC = solutionParams.workgroupRemapXCCValue;
+                        }
+                        else
+                        {
+                            params->workgroupRemapXCC
+                                = arch.GetCapability(GPUCapability::DefaultRemapXCCValue);
+                        }
+                    }
+
                     params->setManualWavefrontCount(
                         {static_cast<uint>(solutionParams.macM / wave_m / wavetilePerWavefrontM),
                          static_cast<uint>(solutionParams.macN / wave_n / wavetilePerWavefrontN)});
@@ -469,6 +512,23 @@ namespace rocRoller
 
                     TensorDescriptor descD(fromString<DataType>(problemParams.typeD), {M, N}, "N");
                     setCommandTensorArg(commandArgs, m_tagTensorD, descD, (float*)nullptr);
+
+                    if(problemParams.workgroupMapping.first != -1)
+                    {
+                        auto const dim  = problemParams.workgroupMapping.first;
+                        auto const size = problemParams.workgroupMapping.second;
+
+                        AssertFatal(
+                            dim == 0 || dim == 1,
+                            "Only 0 (M) or 1 (N) are supported dimensions for workgroup mapping.",
+                            ShowValue(dim));
+
+                        AssertFatal(size > 0,
+                                    "Workgroup mapping size must be a positive non-zero integer.",
+                                    ShowValue(size));
+
+                        commandArgs.setArgument(m_tagWGM, ArgumentType::Value, size);
+                    }
 
                     return commandArgs;
                 }

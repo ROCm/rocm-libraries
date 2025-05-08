@@ -68,6 +68,20 @@ namespace rocRoller
                 rv << "_WG";
                 rocRoller::streamJoin(rv, std::vector{workgroupSizeX, workgroupSizeY}, "x");
 
+                if(workgroupMapping.first != -1)
+                {
+                    rv << "_WGM";
+                    rocRoller::streamJoin(
+                        rv, std::vector{workgroupMapping.first, workgroupMapping.second}, "");
+                }
+
+                rv << "_WGMXCC";
+                rocRoller::streamJoin(rv, std::vector{workgroupRemapXCC}, "");
+                if(workgroupRemapXCC && workgroupRemapXCCValue > 0)
+                {
+                    rocRoller::streamJoin(rv, std::vector{workgroupRemapXCCValue}, "");
+                }
+
                 rv << "_LDS";
                 rocRoller::streamJoin(rv, std::vector{loadLDSA, loadLDSB, storeLDSD}, "");
 
@@ -167,6 +181,24 @@ namespace rocRoller
                 s << "Unroll:    X:" << x.unrollX << " Y:" << x.unrollY << std::endl;
                 s << "Scheduler: " << x.scheduler << std::endl;
                 s << "WG size:   " << x.workgroupSizeX * x.workgroupSizeY << std::endl;
+                if(x.workgroupMapping.first != -1)
+                {
+                    s << "WG Mapping: " << x.workgroupMapping.first << ","
+                      << x.workgroupMapping.second << std::endl;
+                }
+                s << "WG XCC Remap: " << x.workgroupRemapXCC;
+                if(x.workgroupRemapXCC)
+                {
+                    if(x.workgroupRemapXCCValue != -1)
+                    {
+                        s << " value: " << x.workgroupRemapXCCValue;
+                    }
+                    else
+                    {
+                        s << " Default";
+                    }
+                }
+                s << std::endl;
                 s << "Type:      A:" << x.typeA << " B:" << x.typeB << " C:" << x.typeC
                   << " D:" << x.typeD << " ACC:" << x.typeAcc << std::endl;
                 s << "Tranpose:  " << toString(x.transA) << toString(x.transB) << std::endl;

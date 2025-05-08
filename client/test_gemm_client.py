@@ -233,6 +233,9 @@ wave_k: 2
 wave_b: 1
 workgroup_size_x: 128
 workgroup_size_y: 2
+workgroupMapping: [-1, -1]
+workgroupRemapXCC: false
+workgroupRemapXCCValue: -1
 unroll_x: 0
 unroll_y: 0
 loadLDS_A: true
@@ -280,6 +283,9 @@ wave_k: 8
 wave_b: 1
 workgroup_size_x: 128
 workgroup_size_y: 2
+workgroupMapping: [-1, -1]
+workgroupRemapXCC: false
+workgroupRemapXCCValue: -1
 unroll_x: 0
 unroll_y: 0
 loadLDS_A: true

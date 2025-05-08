@@ -115,6 +115,9 @@ class GEMMSolution:
 
     workgroup_size_x: int = 64 * 2
     workgroup_size_y: int = 2
+    workgroupMapping: tuple[int, int] = (-1, -1)
+    workgroupRemapXCC: bool = False
+    workgroupRemapXCCValue: int = -1
 
     unroll_x: int = 0
     unroll_y: int = 0
@@ -246,8 +249,10 @@ class GEMMRun(GEMM):
         arg_dict = {argName(key): value for key, value in asdict(self).items()}
         for key, value in extra_args.items():
             arg_dict[key] = value
-
-        args = list([f"--{key}={value}" for key, value in arg_dict.items()])
+        args = [
+            f"--{key}={','.join(map(str, value))}" if isinstance(value, tuple) else f"--{key}={value}"
+            for key, value in arg_dict.items()
+        ]
         retval = [command] + args
 
         return retval
