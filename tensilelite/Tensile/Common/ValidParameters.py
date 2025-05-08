@@ -785,7 +785,7 @@ validParameters = { # we need to make sure this matches develop
     # Intended for use with custom kernels which have confirmed to be correct
     "NoReject": [False, True],
     # Debug use only.
-    "ActivationFused": [False, True],
+    "ActivationFused": [True],
     # True-  function call
     # False- inline
     "ActivationFuncCall": [False, True],
@@ -802,7 +802,7 @@ validParameters = { # we need to make sure this matches develop
     "ForceDisableShadowInit": [False, True],
     # Enable LDS Transpose Instruction
     "LDSTrInst": [False, True],
-    # False: Use LocalSplitU. Number of WorkGroup[2] WorkItems (wave or thread) will compute the same output elements (matrix D) along different 
+    # False: Use LocalSplitU. Number of WorkGroup[2] WorkItems (wave or thread) will compute the same output elements (matrix D) along different
     #        unroll indices. The local sum from those WorkItems are reduced through LDS.
     # True:  Use WaveSplitK. Number of WorkGroup[2] threads in the same wave compute the same output elements (matrix D) along different unroll indices.
     #        The local sum from those threads are reduced through suffling using VALU instructions. Currently only support dot2 kernel.
