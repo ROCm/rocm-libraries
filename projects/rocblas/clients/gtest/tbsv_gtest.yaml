@@ -1,0 +1,247 @@
+---
+include: rocblas_common.yaml
+include: known_bugs.yaml
+
+Definitions:
+  - &small_matrix_size_range
+    - { N:     4, K:   2, lda:   4 }
+    - { N:    10, K:  15, lda:  16 }
+    - { N:    10, K:   9, lda:  10 }
+    - { N:    10, K:   5, lda:   7 }
+    - { N:   128, K:   1, lda: 128 }
+    - { N:   128, K: 100, lda: 100 }
+    - { N:   128, K: 255, lda: 256 }
+
+  - &special_case_range
+    - { N: 0, K: 1, lda: 2, incx: 1, batch_count: 1 }
+    - { N: 1, K: 1, lda: 2, incx: 1, batch_count: 0 }
+
+    - { N: -1, K:  0, lda: 1, incx: 1, batch_count:  0 }
+    - { N:  0, K: -1, lda: 1, incx: 1, batch_count:  0 }
+    - { N:  0, K:  0, lda: 0, incx: 1, batch_count:  0 }
+    - { N:  0, K:  1, lda: 1, incx: 1, batch_count:  0 }
+    - { N:  0, K:  0, lda: 1, incx: 0, batch_count:  0 }
+    - { N:  0, K:  0, lda: 1, incx: 1, batch_count: -1 }
+
+  - &medium_matrix_size_range
+    - { N:   192, K: 200, lda: 201 }
+    - { N:   256, K:  64, lda:  65 }
+    - { N:   384, K:   5, lda: 384 }
+    - { N:   800, K: 500, lda: 801 }
+
+  - &large_matrix_size_range
+    - { N:   640, K:  640, lda:  641 }
+    - { N:  1000, K:  511, lda:  512 }
+    - { N:  1024, K: 1025, lda: 1026 }
+    - { N:  2000, K:  256, lda: 1000 }
+
+  - &size_t_index
+    - { N:  3, K: 2, lda: *c_pos_x2_overflow_int32, incx: 1 }
+    - { N:  3, K: 2, lda: 3, incx: *c_pos_x2_overflow_int32 }
+    - { N:  3, K: 2, lda: 3, incx: *c_neg_x2_overflow_int32 }
+
+  - &common_args
+    precision: *single_double_precisions_complex_real
+    uplo: [L, U]
+    transA: [N, C]
+    diag: [N, U]
+
+Tests:
+- name: tbsv_arg_check
+  category: quick
+  function:
+  - tbsv: *single_double_precisions
+  - tbsv_batched: *single_double_precisions
+  - tbsv_strided_batched: *single_double_precisions
+  uplo: L
+  transA: N
+  diag: N
+  matrix_size: *special_case_range
+
+- name: tbsv_size_t
+  category: stress
+  function: tbsv
+  precision: *single_precision
+  uplo: [U, L]
+  transA: [N, T]
+  diag: [N]
+  matrix_size: *size_t_index
+  os_flags: LINUX
+  gpu_arch: ['90a','942']
+
+# Regular tbsv
+- name: tbsv_bad_arg
+  category: quick
+  function: tbsv_bad_arg
+  precision: *single_double_precisions_complex_real
+  uplo: [ L ]
+  transA: [ N ]
+  diag: [ N ]
+  api: [ C, FORTRAN, FORTRAN_64 ]
+
+- name: tbsv_fortran
+  category: quick
+  function: tbsv
+  arguments: *common_args
+  matrix_size: *small_matrix_size_range
+  incx: [ 2 ]
+  api: FORTRAN
+
+- name: tbsv_small
+  category: quick
+  function: tbsv
+  arguments: *common_args
+  matrix_size: *small_matrix_size_range
+  incx: [ -2, -1, 1, 2, 100 ]
+
+- name: tbsv_medium
+  category: pre_checkin
+  function: tbsv
+  arguments: *common_args
+  matrix_size: *medium_matrix_size_range
+  incx: [ 1 ]
+
+- name: tbsv_large
+  category: nightly
+  function: tbsv
+  arguments: *common_args
+  matrix_size: *large_matrix_size_range
+  incx: [ 1 ]
+
+- name: tbsv_ILP64
+  category: stress
+  arguments:
+    - { N: 2, lda: 2, K: 2, incx: 2147483649, batch_count: 1 }
+    - { N: 2, lda: 2, K: 2, incx: -2147483649, batch_count: 1 }
+    - { N: 2, lda: 2147483649, K: 2, incx: 1, batch_count: 1 }
+    - { N: 2, stride_a: 4, stride_x: 2, incx: 1, batch_count: *c_grid_yz_require_passes }
+  uplo: [ L ]
+  transA: [  N, T ]
+  diag: [ N ]
+  api: [ FORTRAN_64 ]
+  os_flags: [ LINUX ]
+  function:
+    - tbsv: *single_precision
+    - tbsv_batched: *single_precision
+    - tbsv_strided_batched: *single_precision
+
+# tbsv_batched
+- name: tbsv_batched_bad_arg
+  category: quick
+  function: tbsv_batched_bad_arg
+  precision: *single_double_precisions_complex_real
+  uplo: [ L ]
+  transA: [ N ]
+  diag: [ N ]
+  api: [ C, FORTRAN, FORTRAN_64 ]
+
+- name: tbsv_batched_fortran
+  category: quick
+  function: tbsv_batched
+  arguments: *common_args
+  matrix_size: *small_matrix_size_range
+  incx: [ 2 ]
+  batch_count: [ -1, 0, 3 ]
+  api: FORTRAN
+
+- name: tbsv_batched_small
+  category: quick
+  function: tbsv_batched
+  arguments: *common_args
+  matrix_size: *small_matrix_size_range
+  incx: [ -2, -1, 1, 2, 100 ]
+  batch_count: [ 1, 3 ]
+
+- name: tbsv_batched_medium
+  category: pre_checkin
+  function: tbsv_batched
+  arguments: *common_args
+  matrix_size: *medium_matrix_size_range
+  incx: [ 1 ]
+  batch_count: [ 3 ]
+
+- name: tbsv_batched_large
+  category: nightly
+  function: tbsv_batched
+  arguments: *common_args
+  matrix_size: *large_matrix_size_range
+  incx: [ 1 ]
+  batch_count: [ 3 ]
+
+# tbsv_strided_batched
+- name: tbsv_strided_batched_bad_arg
+  category: quick
+  function: tbsv_strided_batched_bad_arg
+  precision: *single_double_precisions_complex_real
+  uplo: [ L ]
+  transA: [ N ]
+  diag: [ N ]
+  api: [ C, FORTRAN, FORTRAN_64 ]
+
+- name: tbsv_strided_batched_fortran
+  category: quick
+  function: tbsv_strided_batched
+  arguments: *common_args
+  matrix_size: *small_matrix_size_range
+  incx: [ 2 ]
+  batch_count: [ -1, 0, 3 ]
+  stride_scale: [ 2 ]
+  api: FORTRAN
+
+- name: tbsv_strided_batched_small
+  category: quick
+  function: tbsv_strided_batched
+  arguments: *common_args
+  matrix_size: *small_matrix_size_range
+  incx: [ -3, 1, 100 ]
+  stride_scale: [ 1, 10, 100 ]
+  batch_count: [ 1, 3 ]
+
+- name: tbsv_strided_batched_medium
+  category: pre_checkin
+  function: tbsv_strided_batched
+  arguments: *common_args
+  matrix_size: *medium_matrix_size_range
+  incx: [ 1 ]
+  stride_scale: [ 1 ]
+  batch_count: [ 3 ]
+
+- name: tbsv_strided_batched_large
+  category: nightly
+  function: tbsv_strided_batched
+  arguments: *common_args
+  matrix_size: *large_matrix_size_range
+  incx: [ 1 ]
+  stride_scale: [ 1 ]
+  batch_count: [ 3 ]
+
+- name: tbsv_graph_test
+  category: pre_checkin
+  function: tbsv_strided_batched
+  arguments: *common_args
+  matrix_size:
+    - { N:   128, K:   1, lda: 128 }
+  incx: [ 1 ]
+  stride_scale: [ 1 ]
+  batch_count: [ 3 ]
+  graph_test: true
+
+- name: tbsv_repeatability_check
+  category: stress
+  function:
+    - tbsv
+    - tbsv_batched
+    - tbsv_strided_batched
+  arguments: *common_args
+  matrix_size:
+    - { N:   128, K:   1, lda: 128 }
+  incx: [ 1 ]
+  stride_scale: [ 1 ]
+  batch_count: [ 2 ]
+  initialization: hpl
+  atomics_mode: 0
+  iters: 5
+  pointer_mode_host: false
+  devices: 4
+  repeatability_check: true
+...

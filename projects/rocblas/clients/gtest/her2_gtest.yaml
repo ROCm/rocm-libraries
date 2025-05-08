@@ -1,0 +1,337 @@
+---
+include: rocblas_common.yaml
+include: known_bugs.yaml
+
+Definitions:
+  - &size_t_n_incx_incy
+    - { N: 2048, lda: 2097200, incx:        1, incy:        1 }
+    - { N: 2048, lda:    2048, incx:  2097200, incy:        1 }
+    - { N: 2048, lda:    2048, incx:        1, incy:  2097200 }
+    - { N: 2048, lda:    2048, incx: -2097200, incy:        1 }
+    - { N: 2048, lda:    2048, incx:        1, incy: -2097200 }
+
+  - &tiny_matrix
+    - { N:   16, lda:   16 }
+
+  - &small_matrix_size_range
+    - { N:     4, lda:   3 } # invalid lda
+    - { N:     1, lda:   1 }
+    - { N:    10, lda:  10 }
+    - { N:    16, lda: 100 }
+    - { N:    33, lda:  35 }
+    - { N:    65, lda:  65 }
+
+  - &special_case_range
+    # Quick return
+    - { N: 0, lda: 1, incx: 1, incy: 1, batch_count: 1 }
+    - { N: 1, lda: 1, incx: 1, incy: 1, batch_count: 0 }
+    # invalid_arg checks
+    - { N: -1, lda: 1, incx: 1, incy: 1, batch_count:  0 }
+    - { N:  0, lda: 0, incx: 1, incy: 1, batch_count:  0 }
+    - { N:  2, lda: 1, incx: 1, incy: 1, batch_count:  0 }
+    - { N:  0, lda: 1, incx: 0, incy: 1, batch_count:  0 }
+    - { N:  0, lda: 1, incx: 1, incy: 0, batch_count:  0 }
+    - { N:  0, lda: 1, incx: 1, incy: 1, batch_count: -1 }
+
+  - &medium_matrix_size_range
+    - { N:  1000, lda: 1000 }
+    - { N:  2011, lda: 2500 }
+
+  - &large_matrix_size_range
+    - { N:  2048, lda: 2048 }
+    - { N:  4011, lda: 4012 }
+
+  - &size_t_index
+    - { N:  46341, lda: 46341, stride_a:  2147488281, stride_x: 46341 }
+
+  - &incx_incy_range
+    - { incx:  -1, incy:   2 }
+    - { incx:   3, incy:  -1 }
+    - { incx:   2, incy:   2 }
+
+  - &incx_incy_range_small
+    - { incx: 1, incy: 1 }
+
+  - &alpha_range
+    - { alpha: -1.0, alphai:  0.5 }
+    - { alpha:  0.0, alphai: -0.5 }
+    - { alpha:  0.0, alphai:  0.0 }
+
+  - &alpha_range_small
+    - { alpha: 4.0, alphai: 2.0 }
+
+Tests:
+
+- name: her2_bad_arg
+  category: quick
+  function:
+  - her2_bad_arg: *single_double_precisions_complex
+  - her2_batched_bad_arg: *single_double_precisions_complex
+  - her2_strided_batched_bad_arg: *single_double_precisions_complex
+  api: [ C, FORTRAN, FORTRAN_64 ]
+
+- name: her2_arg_check
+  category: quick
+  function:
+  - her2
+  - her2_batched
+  - her2_strided_batched
+  precision: *single_double_precisions_complex
+  uplo: L
+  matrix_size: *special_case_range
+
+- name: her2_size_t_M
+  category: stress
+  function:
+  - her2
+  precision: *single_precision_complex
+  #- her2: *single_double_precisions_complex
+  # shared code for size_t with non-batched
+  #- her2_batched: *single_precision_complex
+  #- her2_strided_batched: *single_precision_complex
+  uplo: [U, L]
+  matrix_size: *size_t_index
+  pointer_mode_device: false
+  incx: 1
+  incy: 1
+  gpu_arch: ['90a','942']
+  os_flags: LINUX
+
+- name: her2_fortran
+  category: quick
+  function: her2
+  precision: *single_double_precisions_complex
+  uplo: [ U, L ]
+  matrix_size: *small_matrix_size_range
+  incx_incy: *incx_incy_range_small
+  alpha_beta: *alpha_range_small
+  api: FORTRAN
+
+- name: her2_NaN
+  category: quick
+  function: her2
+  precision: *single_double_precisions_complex
+  uplo: [ U ]
+  matrix_size: *tiny_matrix
+  incx_incy: *incx_incy_range_small
+  alpha: [ .NaN ]
+
+- name: her2_small
+  category: quick
+  function: her2
+  precision: *single_double_precisions_complex
+  uplo: [ U, L ]
+  matrix_size: *small_matrix_size_range
+  incx_incy: *incx_incy_range
+  alpha_beta: *alpha_range
+
+- name: her2_medium
+  category: pre_checkin
+  function: her2
+  precision: *single_double_precisions_complex
+  uplo: [ U, L ]
+  matrix_size: *medium_matrix_size_range
+  pointer_mode_host: false
+  incx_incy: *incx_incy_range_small
+  alpha_beta: *alpha_range_small
+
+- name: her2_large
+  category: nightly
+  function: her2
+  precision: *single_double_precisions_complex
+  uplo: [ U, L ]
+  matrix_size: *large_matrix_size_range
+  pointer_mode_device: false
+  incx_incy: *incx_incy_range_small
+  alpha_beta: *alpha_range_small
+
+- name: her2_size_t
+  category: stress
+  function: her2
+  precision: *single_precision_complex
+  uplo: [ U    ]
+  matrix_size: *size_t_n_incx_incy
+  pointer_mode_device: false
+  alpha_beta: *alpha_range_small
+  gpu_arch: ['90a','942']
+  os_flags: LINUX
+
+# batched
+- name: her2_batched_fortran
+  category: quick
+  function: her2_batched
+  precision: *single_double_precisions_complex
+  uplo: [ U, L ]
+  matrix_size: *small_matrix_size_range
+  incx_incy: *incx_incy_range_small
+  alpha_beta: *alpha_range_small
+  batch_count: [ -1, 0, 3 ]
+  api: FORTRAN
+
+- name: her2_batched_NaN
+  category: quick
+  function: her2_batched
+  precision: *double_precision_complex
+  uplo: [ U ]
+  matrix_size: *tiny_matrix
+  incx_incy: *incx_incy_range_small
+  alpha: [ .NaN ]
+  batch_count: [ 2 ]
+
+- name: her2_batched_small
+  category: quick
+  function: her2_batched
+  precision: *single_double_precisions_complex
+  uplo: [ U, L ]
+  matrix_size: *small_matrix_size_range
+  incx_incy: *incx_incy_range
+  alpha_beta: *alpha_range
+  batch_count: [ 3 ]
+
+- name: her2_batched_medium
+  category: pre_checkin
+  function: her2_batched
+  precision: *single_double_precisions_complex
+  uplo: [ U, L ]
+  matrix_size: *medium_matrix_size_range
+  pointer_mode_host: false
+  incx_incy: *incx_incy_range_small
+  alpha_beta: *alpha_range_small
+  batch_count: [ 3 ]
+
+- name: her2_batched_large
+  category: nightly
+  function: her2_batched
+  precision: *single_double_precisions_complex
+  uplo: [ U ]
+  matrix_size: *large_matrix_size_range
+  pointer_mode_device: false
+  incx_incy: *incx_incy_range_small
+  alpha_beta: *alpha_range_small
+  batch_count: [ 3 ]
+
+- name: her2_batched_grid_z_16bit
+  category: stress
+  arguments:
+    - { N: 3, lda:  3, incx: 1, incy: 1, batch_count: *c_grid_yz_require_passes} #generic kernel
+  alpha: [ 2.0 ]
+  uplo: [ U, L ]
+  pointer_mode_host: false
+  function:
+    - her2_batched: *single_precision_complex
+    - her2_strided_batched: *single_precision_complex
+  stride_scale: 1
+
+# strided batched
+- name: her2_strided_batched_fortran
+  category: quick
+  function: her2_strided_batched
+  precision: *single_double_precisions_complex
+  uplo: [ U, L ]
+  matrix_size: *small_matrix_size_range
+  incx_incy: *incx_incy_range_small
+  alpha_beta: *alpha_range_small
+  batch_count: [ -1, 0, 3 ]
+  stride_scale: [ 2 ]
+  api: FORTRAN
+
+- name: her2_strided_batched_NaN
+  category: quick
+  function: her2_strided_batched
+  precision: *single_precision_complex
+  uplo: [ L ]
+  matrix_size: *tiny_matrix
+  incx_incy: *incx_incy_range_small
+  alpha: [ .NaN ]
+  batch_count: [ 2 ]
+  stride_scale: [ 2 ]
+
+- name: her2_strided_batched_small
+  category: quick
+  function: her2_strided_batched
+  precision: *single_double_precisions_complex
+  uplo: [ U, L ]
+  matrix_size: *small_matrix_size_range
+  incx_incy: *incx_incy_range
+  alpha_beta: *alpha_range
+  stride_scale: [ 2.5 ]
+  batch_count: [ 3 ]
+
+- name: her2_strided_batched_medium
+  category: pre_checkin
+  function: her2_strided_batched
+  precision: *single_double_precisions_complex
+  uplo: [ U, L ]
+  matrix_size: *medium_matrix_size_range
+  pointer_mode_device: false
+  incx_incy: *incx_incy_range_small
+  alpha_beta: *alpha_range_small
+  stride_scale: [ 1.0 ]
+  batch_count: [ 3 ]
+
+- name: her2_strided_large
+  category: nightly
+  function: her2_strided_batched
+  precision: *single_double_precisions_complex
+  uplo: [ L ]
+  matrix_size: *large_matrix_size_range
+  pointer_mode_host: false
+  incx_incy: *incx_incy_range_small
+  alpha_beta: *alpha_range_small
+  stride_scale: [ 1.0 ]
+  batch_count: [ 1, 3 ]
+
+- name: her2_ILP64
+  category: stress
+  arguments:
+    - { N: 2, lda: 2147483649, incx: 1, incy: 1, batch_count: 1 }
+    - { N: 2, lda: 2, incx: 2147483649, incy: 1, batch_count: 1 }
+    - { N: 2, lda: 2, stride_a: 2, incx: 1, incy: 1, batch_count: *c_grid_yz_require_passes }
+  uplo: [ U, L ]
+  stride_scale: [ 1 ]
+  alpha_beta: *alpha_range_small
+  pointer_mode_host: false
+  api: [ C_64 ]
+  os_flags: [ LINUX ]
+  function:
+    - her2: *single_precision_complex
+    - her2_batched: *single_precision_complex
+    - her2_strided_batched: *single_precision_complex
+
+- name: her2_graph_test
+  category: pre_checkin
+  function:
+        - her2
+        - her2_batched
+        - her2_strided_batched
+  precision: *single_double_precisions_complex
+  matrix_size:
+        - { N:    33, lda:  35 }
+  uplo: [ U ]
+  incx_incy: *incx_incy_range_small
+  alpha: [ 2.0 ]
+  stride_scale: [ 1 ]
+  batch_count: [ 5 ]
+  graph_test: true
+
+- name: her2_repeatability_check
+  category: stress
+  function:
+        - her2
+        - her2_batched
+        - her2_strided_batched
+  precision: *single_double_precisions_complex
+  matrix_size:
+        - { N:    33, lda:  35 }
+  uplo: [ U ]
+  incx_incy: *incx_incy_range_small
+  alpha: [ 2.0 ]
+  stride_scale: [ 1 ]
+  batch_count: [ 2 ]
+  pointer_mode_host: false
+  initialization: hpl
+  atomics_mode: 0
+  iters: 5
+  devices: 4
+  repeatability_check: true
+...

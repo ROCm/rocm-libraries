@@ -1,0 +1,338 @@
+---
+include: rocblas_common.yaml
+include: known_bugs.yaml
+
+Definitions:
+  - &size_t_index
+    - { N: 65536, incx: 1, incy: 1 } # overflow packed index as int (n*(n+1)/2)
+
+  - &size_t_incx_incy
+    - { N: 4097, incx:  1048600, incy:      1  }
+    - { N: 4097, incx: -1048600, incy:      1  }
+    - { N: 4097, incx:       1, incy:  1048600 }
+    - { N: 4097, incx:       1, incy: -1048600 }
+
+  - &small_matrix_size_range
+    - { N:   1 }
+    - { N:   4 }
+    - { N:   9 }
+    - { N:  16 }
+    - { N:  63 }
+    - { N:  65 }
+    - { N: 128 }
+    - { N: 200 }
+
+  - &special_case_range
+    # Quick return
+    - { N: 0, incx: 1, incy: 1, batch_count: 1 }
+    - { N: 1, incx: 1, incy: 1, batch_count: 0 }
+
+    # invalid_arg checks
+    - { N: -1, incx: 1, incy: 1, batch_count:  0 }
+    - { N:  0, incx: 0, incy: 1, batch_count:  0 }
+    - { N:  0, incx: 1, incy: 0, batch_count:  0 }
+    - { N:  0, incx: 1, incy: 1, batch_count: -1 }
+
+  - &medium_matrix_size_range
+    - { N:   400 }
+    - { N:   500 }
+
+  - &large_matrix_size_range
+    - { N:  1000 }
+    - { N:  2000 }
+    - { N:  4011 }
+
+  - &incx_incy_range
+    - { incx:   1, incy:   1 }
+    - { incx:  -1, incy:   3 }
+    - { incx:   3, incy:  -1 }
+    - { incx:  10, incy: 100 }
+
+  - &incx_incy_range_small
+    - { incx: 2, incy: -2 }
+
+  - &alpha_beta_range
+    - { alpha:  2.0, beta:  0.0, alphai:  1.5, betai: 0.5 }
+    - { alpha: -1.0, beta: -1.0, alphai:  0.5, betai: 1.5 }
+    - { alpha:  2.0, beta:  1.0, alphai: -1.5, betai: 0.5 }
+    - { alpha:  0.0, beta:  1.0, alphai: -0.5, betai:   0 }
+
+  - &alpha_beta_range_small
+    - { alpha: 2.0, beta: 1.5, alphai: 0.5, betai: -1.5 }
+
+Tests:
+- name: hpmv_bad_arg
+  category: quick
+  function:
+  - hpmv_bad_arg
+  - hpmv_batched_bad_arg
+  - hpmv_strided_batched_bad_arg
+  precision: *single_double_precisions_complex
+  uplo: N
+  api: [ C, FORTRAN, FORTRAN_64 ]
+
+- name: hpmv_arg_check
+  category: quick
+  function:
+  - hpmv
+  - hpmv_batched
+  - hpmv_strided_batched
+  precision: *single_double_precisions_complex
+  uplo: L
+  matrix_size: *special_case_range
+
+# non-batched
+
+- name: hpmv_NaN
+  category: pre_checkin
+  function: hpmv
+  precision: *single_double_precisions_complex
+  uplo: [ U, L ]
+  N: [ 129 ]
+  incx_incy: *incx_incy_range_small
+  alpha: [ 2.0, .NaN ] # NaN is converted to 0.0 in test code
+  beta: [ 1.0, 0.5, .NaN ]
+
+- name: hpmv_fortran
+  category: quick
+  function: hpmv
+  precision: *single_double_precisions_complex
+  uplo: [ U, L ]
+  matrix_size: *small_matrix_size_range
+  incx_incy: *incx_incy_range_small
+  alpha_beta: *alpha_beta_range_small
+  api: FORTRAN
+
+- name: hpmv_small
+  category: quick
+  function: hpmv
+  precision: *single_double_precisions_complex
+  uplo: [ U, L ]
+  matrix_size: *small_matrix_size_range
+  incx_incy: *incx_incy_range
+  alpha_beta: *alpha_beta_range
+
+- name: hpmv_medium
+  category: pre_checkin
+  function: hpmv
+  precision: *single_double_precisions_complex
+  uplo: [ U, L ]
+  matrix_size: *medium_matrix_size_range
+  incx_incy: *incx_incy_range
+  alpha_beta: *alpha_beta_range
+
+- name: hpmv_large
+  category: nightly
+  function: hpmv
+  precision: *single_double_precisions_complex
+  uplo: [ U, L ]
+  matrix_size: *large_matrix_size_range
+  pointer_mode_device: false
+  incx_incy: *incx_incy_range_small
+  alpha_beta: *alpha_beta_range_small
+
+# batched
+
+- name: hpmv_batched_NaN
+  category: pre_checkin
+  function: hpmv_batched
+  precision: *single_double_precisions_complex
+  uplo: [ L ]
+  N: [ 129 ]
+  incx_incy: *incx_incy_range_small
+  alpha: [ 2.0, .NaN ] # NaN is converted to 0.0 in test code
+  beta: [ 0.5, 1.0, .NaN ]
+  batch_count: [ 3 ]
+
+- name: hpmv_batched_fortran
+  category: quick
+  function: hpmv_batched
+  precision: *single_double_precisions_complex
+  uplo: [ U, L ]
+  matrix_size: *small_matrix_size_range
+  incx_incy: *incx_incy_range_small
+  alpha_beta: *alpha_beta_range_small
+  batch_count: [ -1, 0, 3 ]
+  api: FORTRAN
+
+- name: hpmv_batched_small
+  category: quick
+  function: hpmv_batched
+  precision: *single_double_precisions_complex
+  uplo: [ U, L ]
+  matrix_size: *small_matrix_size_range
+  incx_incy: *incx_incy_range
+  alpha_beta: *alpha_beta_range
+  batch_count: [ 3 ]
+
+- name: hpmv_batched_medium
+  category: pre_checkin
+  function: hpmv_batched
+  precision: *single_double_precisions_complex
+  uplo: [ U, L ]
+  matrix_size: *medium_matrix_size_range
+  incx_incy: *incx_incy_range
+  alpha_beta: *alpha_beta_range
+  batch_count: [ 3 ]
+
+- name: hpmv_batched_large
+  category: nightly
+  function: hpmv_batched
+  precision: *single_double_precisions_complex
+  uplo: [ U, L ]
+  matrix_size: *large_matrix_size_range
+  pointer_mode_device: false
+  incx_incy: *incx_incy_range_small
+  alpha_beta: *alpha_beta_range_small
+  batch_count: [ 3 ]
+
+- name: hpmv_batched_grid_z_16bit
+  category: stress
+  arguments:
+    - { N:   3, incx: 1, incy: 1, batch_count: *c_grid_yz_require_passes} #generic kernel
+  uplo: [ U, L ]
+  alpha_beta: *alpha_beta_range_small
+  pointer_mode_host: false
+  function:
+    - hpmv_batched: *single_precision_complex
+    - hpmv_strided_batched: *single_precision_complex
+  stride_scale: 1
+
+# hpmv_strided_batched
+- name: hpmv_strided_batched_NaN
+  category: pre_checkin
+  function: hpmv_strided_batched
+  precision: *single_double_precisions_complex
+  uplo: [ U ]
+  N: [ 129 ]
+  incx_incy: *incx_incy_range_small
+  alpha: [ 2.0, .NaN ] # NaN is converted to 0.0 in test code
+  alphai: [ 0.5 ]
+  beta: [ 0.5, 1.0, .NaN ]
+  batch_count: [ 2 ]
+  stride_scale: [ 1.5 ]
+
+- name: hpmv_strided_batched_fortran
+  category: quick
+  function: hpmv_strided_batched
+  precision: *single_double_precisions_complex
+  uplo: [ U, L ]
+  matrix_size: *small_matrix_size_range
+  incx_incy: *incx_incy_range_small
+  alpha_beta: *alpha_beta_range_small
+  batch_count: [ -1, 0, 3 ]
+  stride_scale: [ 2 ]
+  api: FORTRAN
+
+- name: hpmv_strided_batched_small
+  category: quick
+  function: hpmv_strided_batched
+  precision: *single_double_precisions_complex
+  uplo: [ U, L ]
+  matrix_size: *small_matrix_size_range
+  incx_incy: *incx_incy_range
+  alpha_beta: *alpha_beta_range
+  batch_count: [ 3 ]
+  stride_scale: [ 2 ]
+
+- name: hpmv_strided_batched_medium
+  category: pre_checkin
+  function: hpmv_strided_batched
+  precision: *single_double_precisions_complex
+  uplo: [ U, L ]
+  matrix_size: *medium_matrix_size_range
+  incx_incy: *incx_incy_range
+  alpha_beta: *alpha_beta_range
+  batch_count: [ 3 ]
+  stride_scale: [ 1 ]
+
+- name: hpmv_strided_batched_large
+  category: nightly
+  function: hpmv_strided_batched
+  precision: *single_double_precisions_complex
+  uplo: [ U, L ]
+  matrix_size: *large_matrix_size_range
+  pointer_mode_host: false
+  incx_incy: *incx_incy_range_small
+  alpha_beta: *alpha_beta_range_small
+  batch_count: [ 3 ]
+  stride_scale: [ 1 ]
+
+- name: hpmv_graph_test
+  category: pre_checkin
+  function:
+        - hpmv
+        - hpmv_batched
+        - hpmv_strided_batched
+  precision: *single_double_precisions_complex
+  matrix_size:
+        - { N : 33}
+  uplo: [ U ]
+  incx: [ 1 ]
+  alpha: [ 2.0 ]
+  stride_scale: [ 1 ]
+  batch_count: [ 5 ]
+  graph_test: true
+
+- name: hpmv_size_t
+  category: stress
+  function: hpmv
+  precision: *single_precision_complex
+  matrix_size: *size_t_index
+  pointer_mode_host: false
+  uplo: [ U, L ]
+  alpha_beta: *alpha_beta_range_small
+  os_flags: LINUX
+  gpu_arch: ['90a','942']
+
+- name: hpmv_size_t_incx_incy
+  category: stress
+  function: hpmv
+  precision: *single_precision_complex
+  matrix_size: *size_t_incx_incy
+  pointer_mode_device: false
+  uplo: [ U, L ]
+  alpha_beta: *alpha_beta_range_small
+  os_flags: LINUX
+  gpu_arch: ['90a','942']
+
+- name: hpmv_ILP64
+  category: stress
+  arguments:
+    - { N: 2048, incx: 2, incy: -1, batch_count: 2 }
+    - { N: 2, incx: 2147483649, incy: 1, batch_count: 1 }
+    - { N: 2, incx: 1, incy: 2147483649, batch_count: 1 }
+    - { N: 2, incx: 1, incy: 1, batch_count: *c_grid_yz_require_passes }
+  uplo: [ U, L ]
+  stride_scale: [ 1 ]
+  alpha_beta: *alpha_beta_range_small
+  pointer_mode_host: false
+  api: [ C_64 ]
+  os_flags: [ LINUX ]
+  function:
+    - hpmv: *single_precision_complex
+    - hpmv_batched: *single_precision_complex
+    - hpmv_strided_batched: *single_precision_complex
+
+
+- name: hpmv_repeatability_check
+  category: stress
+  function:
+        - hpmv
+        - hpmv_batched
+        - hpmv_strided_batched
+  precision: *single_double_precisions_complex
+  matrix_size:
+        - { N : 33}
+  uplo: [ U ]
+  incx: [ 1 ]
+  alpha: [ 2.0 ]
+  stride_scale: [ 1 ]
+  batch_count: [ 2 ]
+  initialization: hpl
+  pointer_mode_host: false
+  atomics_mode: 0
+  iters: 5
+  devices: 4
+  repeatability_check: true
+...

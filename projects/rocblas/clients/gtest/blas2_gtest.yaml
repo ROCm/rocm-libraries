@@ -1,0 +1,25 @@
+
+include: gbmv_gtest.yaml
+include: gemv_gtest.yaml
+include: ger_gtest.yaml
+include: geruc_gtest.yaml
+include: hbmv_gtest.yaml
+include: hemv_gtest.yaml
+include: her_gtest.yaml
+include: her2_gtest.yaml
+include: hpmv_gtest.yaml
+include: hpr_gtest.yaml
+include: hpr2_gtest.yaml
+include: sbmv_gtest.yaml
+include: spmv_gtest.yaml
+include: spr_gtest.yaml
+include: spr2_gtest.yaml
+include: symv_gtest.yaml
+include: syr_gtest.yaml
+include: syr2_gtest.yaml
+include: tbmv_gtest.yaml
+include: tbsv_gtest.yaml
+include: tpmv_gtest.yaml
+include: tpsv_gtest.yaml
+include: trmv_gtest.yaml
+include: trsv_gtest.yaml

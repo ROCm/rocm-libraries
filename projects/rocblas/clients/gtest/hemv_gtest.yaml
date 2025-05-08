@@ -1,0 +1,333 @@
+---
+include: rocblas_common.yaml
+include: known_bugs.yaml
+
+Definitions:
+  - &small_matrix_size_range
+    - { N: 4, lda: 4 }
+    - { N: 9, lda: 9 }
+    - { N: 16, lda: 16 }
+    - { N: 63, lda: 63 }
+    - { N: 65, lda: 65 }
+    - { N: 128, lda: 128 }
+    - { N:     1, lda:    1 }
+    - { N:    10, lda:    9 }
+    - { N:     1, lda:    1 }
+    - { N:    10, lda:    2 }
+    - { N:   200, lda:  200 }
+
+  - &special_case_range
+    # Quick return
+    - { N: 0, lda: 1, incx: 1, incy: 1, batch_count: 1 }
+    - { N: 1, lda: 1, incx: 1, incy: 1, batch_count: 0 }
+
+    # invalid_arg checks
+    - { N: -1, lda: 1, incx: 1, incy: 1, batch_count:  0 }
+    - { N:  0, lda: 0, incx: 1, incy: 1, batch_count:  0 }
+    - { N:  1, lda: 0, incx: 1, incy: 1, batch_count:  0 }
+    - { N:  0, lda: 1, incx: 0, incy: 1, batch_count:  0 }
+    - { N:  0, lda: 1, incx: 1, incy: 0, batch_count:  0 }
+    - { N:  0, lda: 1, incx: 1, incy: 1, batch_count: -1 }
+
+  - &tiny_matrix_size
+    - { N:   127, lda: 127 }
+
+  - &medium_matrix_size_range
+    - { N:   400, lda:  400 }
+    - { N:   500, lda:  601 }
+
+  - &large_matrix_size_range
+    - { N:  1000, lda: 1000 }
+    - { N:  2000, lda: 2000 }
+    - { N:  4011, lda: 4011 }
+
+  - &incx_incy_range
+    - { incx:   1, incy:   1 }
+    - { incx:  -1, incy:   3 }
+    - { incx:   3, incy:  -1 }
+    - { incx:  10, incy: 100 }
+
+  - &incx_incy_range_small
+    - { incx: 2, incy: 2 }
+
+  - &alpha_beta_range
+    - { alpha:  2.0, beta:  0.0, alphai: 1.5, betai: 0.5 }
+    - { alpha: -1.0, beta: -1.0, alphai: 0.5, betai: 1.5 }
+    - { alpha:  2.0, beta:  1.0, alphai: -1.5, betai: 0.5 }
+    - { alpha:  0.0, beta:  1.0, alphai: -0.5, betai: 0 }
+
+  - &alpha_beta_range_small
+    - { alpha: 2.0, beta: 1.5, alphai: -0.5, betai: 2.5 }
+
+  - &alpha_beta_range_size_t_inc
+    - { alpha:  0,    alphai:  0,   beta:  0.5,   betai:  0 } # only incy used
+    - { alpha:  1,    alphai:  0,   beta:  0.5,   betai:  0 }
+
+  - &size_t_index
+    - { N: 46976, lda: 46976, stride_a: 2206744576 }
+
+  - &size_t_incx_incy
+    - { N: 3,     lda: 3,     incx: *c_pos_x2_overflow_int32, incy: 1 }  # x is m element
+    - { N: 3,     lda: 3,     incx: 1,                        incy: *c_pos_x2_overflow_int32 } # y is n element
+
+Tests:
+- name: hemv_bad_arg
+  category: quick
+  function:
+  - hemv_bad_arg
+  - hemv_batched_bad_arg
+  - hemv_strided_batched_bad_arg
+  precision: *single_double_precisions_complex
+  uplo: N
+  api: [ C, FORTRAN, FORTRAN_64 ]
+
+- name: hemv_NaN
+  category: pre_checkin
+  function: hemv
+  precision: *single_double_precisions_complex
+  uplo: [ U, L ]
+  matrix_size: *medium_matrix_size_range
+  incx_incy: *incx_incy_range_small
+  alpha: [ -1.0, .NaN ] # NaN is converted to 0.0 in test code
+  alphai: [ 1.0 ]
+  beta: [ 0.5, 1.0, .NaN ]
+  betai: [ 0.5 ]
+
+- name: hemv_fortran
+  category: quick
+  function: hemv
+  precision: *single_double_precisions_complex
+  uplo: [ U, L ]
+  matrix_size: *small_matrix_size_range
+  incx_incy: *incx_incy_range_small
+  alpha_beta: *alpha_beta_range_small
+  api: FORTRAN
+
+- name: hemv_small
+  category: quick
+  function: hemv
+  precision: *single_double_precisions_complex
+  uplo: [ U, L ]
+  matrix_size: *small_matrix_size_range
+  incx_incy: *incx_incy_range
+  alpha_beta: *alpha_beta_range
+
+- name: hemv_medium
+  category: pre_checkin
+  function: hemv
+  precision: *single_double_precisions_complex
+  uplo: [ U, L ]
+  matrix_size: *medium_matrix_size_range
+  incx_incy: *incx_incy_range
+  alpha_beta: *alpha_beta_range
+
+- name: hemv_large
+  category: nightly
+  function: hemv
+  precision: *single_double_precisions_complex
+  uplo: [ U, L ]
+  matrix_size: *large_matrix_size_range
+  incx_incy: *incx_incy_range_small
+  alpha_beta: *alpha_beta_range_small
+  pointer_mode_device: false
+
+- name: hemv_size_t
+  category: stress
+  function: hemv
+  precision: *single_precision_complex
+  uplo: [ U, L ]
+  matrix_size: *size_t_index
+  incx: 1
+  incy: 1
+  alpha_beta: *alpha_beta_range_small
+  pointer_mode_host: false
+
+- name: hemv_size_t_inc
+  category: stress
+  function: hemv
+  precision: *single_precision_complex
+  uplo: [ U, L ]
+  arguments: *size_t_incx_incy
+  alpha_beta: *alpha_beta_range_size_t_inc
+  pointer_mode_device: false
+  os_flags: LINUX
+  gpu_arch: ['90a','942']
+
+# hemv_batched
+- name: hemv_batched_NaN
+  category: pre_checkin
+  function: hemv_batched
+  precision: *single_double_precisions_complex
+  uplo: [ L ]
+  matrix_size: *tiny_matrix_size
+  incx_incy: *incx_incy_range
+  alpha: [ 1.5, .NaN ] # NaN is converted to 0.0 in test code
+  beta: [ 0.5, 1.0, .NaN ]
+  batch_count: [ 2 ]
+
+- name: hemv_batched_fortran
+  category: quick
+  function: hemv_batched
+  precision: *single_double_precisions_complex
+  uplo: [ U, L ]
+  matrix_size: *small_matrix_size_range
+  incx_incy: *incx_incy_range_small
+  alpha_beta: *alpha_beta_range_small
+  batch_count: [ -1, 0, 3 ]
+  api: FORTRAN
+
+- name: hemv_batched_small
+  category: quick
+  function: hemv_batched
+  precision: *single_double_precisions_complex
+  uplo: [ U, L ]
+  matrix_size: *small_matrix_size_range
+  incx_incy: *incx_incy_range
+  alpha_beta: *alpha_beta_range
+  batch_count: [ 3 ]
+
+- name: hemv_batched_medium
+  category: pre_checkin
+  function: hemv_batched
+  precision: *single_double_precisions_complex
+  uplo: [ U, L ]
+  matrix_size: *medium_matrix_size_range
+  incx_incy: *incx_incy_range
+  alpha_beta: *alpha_beta_range
+  batch_count: [ 3 ]
+
+- name: hemv_batched_large
+  category: nightly
+  function: hemv_batched
+  precision: *single_double_precisions_complex
+  uplo: [ U, L ]
+  matrix_size: *large_matrix_size_range
+  incx_incy: *incx_incy_range_small
+  alpha_beta: *alpha_beta_range_small
+  batch_count: [ 3 ]
+  pointer_mode_host: false
+
+- name: hemv_batched_grid_z_16bit
+  category: stress
+  arguments:
+    - { N:   3, lda:    3, incx: 1, incy: 1, batch_count: *c_grid_yz_require_passes} #generic kernel
+  uplo: [ U, L ]
+  alpha_beta: *alpha_beta_range_small
+  pointer_mode_host: false
+  function:
+    - hemv_batched: *single_precision_complex
+    - hemv_strided_batched: *single_precision_complex
+  stride_scale: [ 1 ]
+
+# hemv_strided_batched
+- name: hemv_strided_batched_NaN
+  category: pre_checkin
+  function: hemv_strided_batched
+  precision: *single_double_precisions_complex
+  uplo: [ U ]
+  matrix_size: *tiny_matrix_size
+  incx_incy: *incx_incy_range
+  alpha: [ 2.0, .NaN ] # NaN is converted to 0.0 in test code
+  beta: [ 0.5, 1.0, .NaN ]
+  batch_count: [ 2 ]
+  stride_scale: [ 1.5 ]
+
+- name: hemv_strided_batched_fortran
+  category: quick
+  function: hemv_strided_batched
+  precision: *single_double_precisions_complex
+  uplo: [ U, L ]
+  matrix_size: *small_matrix_size_range
+  incx_incy: *incx_incy_range_small
+  alpha_beta: *alpha_beta_range_small
+  batch_count: [ -1, 0, 3 ]
+  stride_scale: [ 2 ]
+  api: FORTRAN
+
+- name: hemv_strided_batched_small
+  category: quick
+  function: hemv_strided_batched
+  precision: *single_double_precisions_complex
+  uplo: [ U, L ]
+  matrix_size: *small_matrix_size_range
+  incx_incy: *incx_incy_range
+  alpha_beta: *alpha_beta_range
+  batch_count: [ 3 ]
+  stride_scale: [ 1.5]
+
+- name: hemv_strided_batched_medium
+  category: pre_checkin
+  function: hemv_strided_batched
+  precision: *single_double_precisions_complex
+  uplo: [ U, L ]
+  matrix_size: *medium_matrix_size_range
+  incx_incy: *incx_incy_range
+  alpha_beta: *alpha_beta_range
+  batch_count: [ 3 ]
+  stride_scale: [ 1 ]
+
+- name: hemv_strided_batched_large
+  category: nightly
+  function: hemv_strided_batched
+  precision: *single_double_precisions_complex
+  uplo: [ U, L ]
+  matrix_size: *large_matrix_size_range
+  incx_incy: *incx_incy_range_small
+  alpha_beta: *alpha_beta_range_small
+  batch_count: [ 3 ]
+  stride_scale: [ 1 ]
+  pointer_mode_host: false
+
+# 64-bit interface
+- name: hemv_ILP64
+  category: stress
+  arguments:
+    - { N: 2, lda: 2147483649, incx: 1, incy: 1, batch_count: 1 }
+    - { N: 2, lda: 2, incx: 2147483649, incy: 1, batch_count: 1 }
+    - { N: 2, lda: 2, incx: 1, incy: 2147483649, batch_count: 1 }
+    - { N: 2, lda: 2, incx: 1, incy: 1, batch_count: *c_grid_yz_require_passes }
+  uplo: [ U, L ]
+  stride_scale: [ 1 ]
+  alpha_beta: *alpha_beta_range_small
+  pointer_mode_host: false
+  api: [ C_64 ]
+  os_flags: [ LINUX ]
+  function:
+    - hemv: *single_precision_complex
+    - hemv_batched: *single_precision_complex
+    - hemv_strided_batched: *single_precision_complex
+
+- name: hemv_graph_test
+  category: pre_checkin
+  function:
+        - hemv
+        - hemv_batched
+        - hemv_strided_batched
+  precision: *single_double_precisions_complex
+  matrix_size: *tiny_matrix_size
+  uplo: [ U ]
+  alpha: [ 2.0 ]
+  stride_scale: [ 1 ]
+  batch_count: [ 5 ]
+  graph_test: true
+
+- name: hemv_repeatability_check
+  category: stress
+  function:
+    - hemv
+    - hemv_batched
+    - hemv_strided_batched
+  precision: *single_double_precisions_complex
+  initialization: hpl
+  uplo: [ U, L ]
+  matrix_size:
+    - { N:  4011, lda: 4011 }
+  alpha_beta: *alpha_beta_range_small
+  atomics_mode: 0
+  batch_count: [ 2 ]
+  iters: 5
+  stride_scale: 1
+  pointer_mode_host: false
+  devices: 4
+  repeatability_check: true
+...

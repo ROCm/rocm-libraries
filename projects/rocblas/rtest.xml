@@ -1,0 +1,30 @@
+
+<testset>
+<var name="TEST_BASE_OPTIONS" value="rocblas-test --gtest_output=xml --gtest_color=yes"></var>
+<test sets="psdb">
+  <run name="quick_pre_checkin">{TEST_BASE_OPTIONS} --gtest_filter=*quick*:*pre_checkin*-*known_bug*</run>
+</test>
+<test sets="osdb">
+  <run name="nightly">{TEST_BASE_OPTIONS} --gtest_filter=*nightly*-*known_bug*</run>
+</test>
+<test sets="smoke">
+  <run name="smoke_test">{TEST_BASE_OPTIONS} --yaml rocblas_smoke.yaml </run>
+</test>
+<test sets="code_coverage">
+  <run name="code coverage core">{TEST_BASE_OPTIONS} --gtest_filter=*quick*:*pre_checkin*:*ILP64*-*known_bug*:*stress* </run>
+  <run name="code coverage profiling and numerics">ROCBLAS_LAYER=4 ROCBLAS_CHECK_NUMERICS=4 {TEST_BASE_OPTIONS} --yaml rocblas_smoke.yaml </run>
+</test>
+<test sets="cqe">
+  <run name="cqe psdb">{TEST_BASE_OPTIONS} --gtest_filter=*quick*:*pre_checkin*-*known_bug*</run>
+  <run name="cqe nightly">{TEST_BASE_OPTIONS} --gtest_filter=*nightly*-*known_bug*</run>
+</test>
+<test sets="emulation_smoke">
+  <run name="emulation_smoke_test">{TEST_BASE_OPTIONS} --yaml rocblas_smoke.yaml </run>
+</test>
+<test sets="emulation_regression">
+  <run name="emulation_regression_test">{TEST_BASE_OPTIONS} --yaml rocblas_extras.yaml --gtest_filter=*regression*</run>
+</test>
+<test sets="emulation_extended">
+  <run name="emulation_extended_test">{TEST_BASE_OPTIONS} --yaml rocblas_extras.yaml --gtest_filter=*quick*:*pre_checkin*:*nightly*</run>
+</test>
+</testset>

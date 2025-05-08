@@ -1,0 +1,335 @@
+---
+include: rocblas_common.yaml
+include: known_bugs.yaml
+
+Definitions:
+
+
+  - &size_t_xy_range
+    - { N: 1048600, incx:  4096, incy:     1 }
+    - { N: 1048600, incx:     1, incy:  4096 }
+    # TODO add back when workaround for OpenBLAS on windows negative overflow failures
+    #- { N: 1048600, incx: -4096, incy:     1 }
+    #- { N: 1048600, incx:     1, incy: -4096 }
+
+  - &incx_incy_range
+    - { incx:  1, incy:  1 }
+    - { incx:  1, incy:  2 }
+    - { incx:  2, incy:  1 }
+    - { incx:  1, incy: -1 }
+    - { incx: -1, incy:  1 }
+    - { incx: -3, incy: -3 }
+    - { incx:  0, incy:  1 }
+    - { incx:  0, incy:  0 }
+    # - { incx:  1, incy:  0 } # Indeterminate when y is output
+
+  - &size_t_pos_neg_xy_range
+    - { N: 4,          incx: *c_pos_x2_overflow_int32, incy: 1 } # small operation count, should overflow x
+    - { N: 4,          incx: *c_neg_x2_overflow_int32, incy: 1 } # small operation count, should overflow x
+    - { N: 4,          incx: 1, incy: *c_pos_x2_overflow_int32 } # small operation count, should overflow y
+    - { N: 4,          incx: 1, incy: *c_neg_x2_overflow_int32 } # small operation count, should overflow y
+
+  - &incx_incy_range_y_output
+    - { incx:  1, incy:  1 }
+    - { incx:  2, incy:  1 }
+    - { incx:  1, incy: -3 }
+    - { incx: -1, incy:  1 }
+    - { incx:  0, incy:  1 }
+    # - { incx:  0, incy:  0 } # Indeterminate for axpy
+    # - { incx:  1, incy:  0 } # Indeterminate when y is output
+
+  - &incx_incy_range_small
+    - { incx: 1, incy: 1 }
+    - { incx: -3, incy: 2 }
+
+  - &alpha_beta_range
+    - { alpha:  1.0, beta:  0.0, alphai: 0.5, betai: 1.0 }
+    - { alpha:  2.0, beta: -1.0, alphai: 1.0, betai: 1.0 }
+    - { alpha:  0.0, beta:  0.0, alphai: 0.0, betai: 0.0 }
+
+  - &alpha_beta_range_small
+    - { alpha:  0.5, beta:  0.5, alphai: 0.5, betai: 1.0 }
+
+Tests:
+
+# for bad_arg no arguments should be used by test code
+  - name: blas1_bad_arg
+    category: quick
+    api: [ C, FORTRAN, FORTRAN_64 ]
+    function:
+      - axpy_bad_arg: *half_single_precisions_complex_real
+      - axpy_ex_bad_arg: *bfloat_half_single_double_complex_real_precisions
+      - axpy_batched_bad_arg: *half_single_precisions_complex_real
+      - axpy_batched_ex_bad_arg: *bfloat_half_single_double_complex_real_precisions
+      - axpy_strided_batched_bad_arg: *half_single_precisions_complex_real
+      - axpy_strided_batched_ex_bad_arg: *bfloat_half_single_double_complex_real_precisions
+
+# fortran
+  - name: blas1_with_alpha
+    category: quick
+    N: [ -1, 0, 64, 257 ]
+    incx_incy: *incx_incy_range_small
+    alpha_beta: *alpha_beta_range
+    api: FORTRAN
+    function:
+      - axpy: *half_single_precisions_complex_real
+      - axpy_ex: *bfloat_half_single_double_complex_real_precisions
+
+  - name: blas1_batched_with_alpha
+    category: quick
+    N: [ -1, 0, 64 ]
+    incx_incy: *incx_incy_range_small
+    alpha_beta: *alpha_beta_range
+    batch_count: [-1, 0, 5]
+    api: FORTRAN
+    function:
+      - axpy_batched: *half_single_precisions_complex_real
+      - axpy_batched_ex: *bfloat_half_single_double_complex_real_precisions
+
+  - name: blas1_strided_batched_with_alpha
+    category: quick
+    N: [ -1, 0, 64 ]
+    incx_incy: *incx_incy_range_small
+    alpha_beta: *alpha_beta_range
+    batch_count: [-1, 0, 5]
+    stride_scale: [1, 2]
+    api: FORTRAN
+    function:
+      - axpy_strided_batched: *half_single_precisions_complex_real
+      - axpy_strided_batched_ex: *bfloat_half_single_double_complex_real_precisions
+
+# quick
+  - name: blas1_with_alpha_HMM
+    category: HMM
+    N: [ 5, 33792 ]
+    incx_incy: *incx_incy_range_y_output
+    alpha_beta: *alpha_beta_range
+    function:
+      - axpy:  *half_single_precisions_complex_real
+    HMM: true
+
+  - name: blas1_with_alpha
+    category: quick
+    N: [ 5, 33792 ]
+    incx_incy: *incx_incy_range_y_output
+    alpha_beta: *alpha_beta_range
+    function:
+      - axpy:  *half_single_precisions_complex_real
+      - axpy_ex: *bfloat_half_single_double_complex_real_precisions
+
+  - name: axpy_ex_compute_check
+    category: quick
+    N: [1]
+    incx: 1
+    incy: 1
+    alpha: -1.001
+    function:
+      - axpy_ex: *hpa_half_precision
+
+  - name: blas1_batched_with_alpha
+    category: quick
+    N: [ 5, 33792 ]
+    incx_incy: *incx_incy_range_y_output
+    alpha_beta: *alpha_beta_range
+    batch_count: [-1, 0, 5]
+    function:
+      - axpy_batched:  *half_single_precisions_complex_real
+      - axpy_batched_ex: *bfloat_half_single_double_complex_real_precisions
+
+  - name: blas1_strided_batched_with_alpha
+    category: quick
+    N: [ 5, 33792 ]
+    incx_incy: *incx_incy_range_y_output
+    batch_count: [-1, 0, 5]
+    stride_scale: [ 1 ]
+    alpha_beta: *alpha_beta_range
+    function:
+      - axpy_strided_batched: *half_single_precisions_complex_real
+      - axpy_strided_batched_ex: *bfloat_half_single_double_complex_real_precisions
+
+# pre_checkin
+  - name: blas1_axpy_internal_api
+    category: pre_checkin
+    N: [ 1000 ]
+    incx_incy: *incx_incy_range_small
+    alpha: [ 1 ]
+    stride_scale: [ 1 ]
+    lda: *c_pos_overflow_int32 # lda, ldb used for internal api offset args
+    ldb: *c_pos_overflow_int32
+    function:
+      - axpy: *single_precision
+    pointer_mode_device: false
+    api: [ INTERNAL, INTERNAL_64 ]
+
+  - name: blas1_axpy_large_batch
+    category: stress
+    N: [ 4 ]
+    incx_incy: *incx_incy_range_small
+    alpha: [ 1 ]
+    batch_count: [ *c_grid_yz_require_passes ]
+    stride_scale: [ 1 ]
+    function:
+      - axpy_batched_ex: *half_precision
+      - axpy_batched: *single_precision
+      - axpy_strided_batched_ex: *half_precision
+      - axpy_strided_batched: *single_precision
+
+  - name: blas1_with_alpha
+    category: pre_checkin
+    N: [ 5007 ]
+    incx_incy: *incx_incy_range_small
+    alpha_beta: *alpha_beta_range
+    function:
+      - axpy_ex: *bfloat_half_single_double_complex_real_precisions
+
+  - name: blas1_batched_with_alpha
+    category: pre_checkin
+    N: [ 5000 ]
+    incx_incy: *incx_incy_range_small
+    alpha_beta: *alpha_beta_range
+    batch_count: [3]
+    function:
+      - axpy_batched_ex: *bfloat_half_single_double_complex_real_precisions
+
+  - name: blas1_strided_batched_with_alpha
+    category: pre_checkin
+    N: [ 5001 ]
+    incx_incy: *incx_incy_range_small
+    alpha_beta: *alpha_beta_range
+    batch_count: [2]
+    stride_scale: [ 2 ]
+    function:
+      - axpy_strided_batched_ex: *bfloat_half_single_double_complex_real_precisions
+
+  - name: axpy_multi_gpu
+    category: multi_gpu
+    N: [ 50007 ]
+    incx_incy: *incx_incy_range_small
+    threads_streams: *common_threads_streams
+    alpha_beta: *alpha_beta_range
+    devices: [0, 2, 4]
+    function:
+      - axpy_ex: *bfloat_half_single_double_complex_real_precisions
+
+# nightly
+  - name: blas1_with_alpha
+    category: nightly
+    N: [ 1000000 ]
+    incx_incy: *incx_incy_range_small
+    alpha_beta: *alpha_beta_range
+    function:
+      - axpy_ex: *bfloat_half_single_double_complex_real_precisions
+    pointer_mode_host: false
+
+  - name: axpy_multi_threads_streams
+    category: nightly
+    N: [ 50007 ]
+    incx_incy: *incx_incy_range_small
+    threads_streams: *common_threads_streams
+    alpha_beta: *alpha_beta_range
+    function:
+      - axpy_ex: *bfloat_half_single_double_complex_real_precisions
+    pointer_mode_device: false
+
+  - name: blas1_batched_with_alpha
+    category: nightly
+    N: [ 400000 ]
+    incx_incy: *incx_incy_range_small
+    alpha_beta: *alpha_beta_range
+    batch_count: [ 2, 11 ]
+    function:
+      - axpy_batched_ex: *bfloat_half_single_double_complex_real_precisions
+
+  - name: blas1_strided_batched_with_alpha
+    category: nightly
+    N: [ 300001 ]
+    incx_incy: *incx_incy_range_small
+    alpha_beta: *alpha_beta_range
+    batch_count: [ 3, 13 ]
+    stride_scale: [ 1 ]
+    function:
+      - axpy_strided_batched_ex: *bfloat_half_single_double_complex_real_precisions
+
+  - name: blas1_size_t
+    category: stress
+    matrix_size: *size_t_pos_neg_xy_range
+    alpha: [ 2 ]
+    pointer_mode_host: false
+    function:
+      - axpy_ex:  *half_precision
+      # axpy shared kernels for axpy_ex so only testing size_t with axpy_ex and half
+      # batched kernel only for batch_count > 8192, so large incx incy not practical
+      # all other precisions optimized kernels only for incx == incy == 1
+    os_flags: LINUX
+    # all GPU for now
+
+# pre_checkin - 64-bit (pre_checkin only testing interface, not 64-bit sizes)
+  - name: axpy_ILP64
+    category: pre_checkin
+    N: [ 64 ]
+    incx_incy: *incx_incy_range_small
+    alpha_beta: *alpha_beta_range_small
+    api: [ FORTRAN_64 ]
+    function:
+      - axpy: *half_single_precisions_complex_real
+      - axpy_ex: *bfloat_half_single_double_complex_real_precisions
+      - axpy_batched: *half_single_precisions_complex_real
+      - axpy_batched_ex: *bfloat_half_single_double_complex_real_precisions
+      - axpy_strided_batched: *half_single_precisions_complex_real
+      - axpy_strided_batched_ex: *bfloat_half_single_double_complex_real_precisions
+
+  - name: axpy_ILP64
+    category: stress
+    arguments:
+      - { N: 2147483649, incx:  1, incy:  1, batch_count: 1 }
+      - { N: 2147483649, incx: -1, incy: -1, batch_count: 1 }
+      - { N: 2, incx:  2147483649, incy:  1, batch_count: 1 }
+      - { N: 2, incx:  1, incy:  2147483649, batch_count: 1 }
+      - { N: 2, incx:  1, incy:  1, stride_x: 2, stride_y: 2, batch_count: *c_grid_yz_require_passes }
+      - { N: 2, incx: -2147483649, incy:  1, batch_count: 1 }
+      - { N: 2, incx:  1, incy: -2147483649, batch_count: 1 }
+    alpha_beta: *alpha_beta_range_small
+    api: [ C_64 ]
+    os_flags: [ LINUX ]
+    function:
+      - axpy: *single_precision
+      - axpy_ex: *single_precision
+      - axpy_batched: *single_precision
+      - axpy_batched_ex: *single_precision
+      - axpy_strided_batched: *single_precision
+      - axpy_strided_batched_ex: *single_precision
+
+  - name: blas1_nan_check
+    category: pre_checkin
+    arguments: *blas1_nan_common_args
+    function:
+      - axpy:  *half_single_precisions_complex_real
+      - axpy_batched: *half_single_precisions_complex_real
+      - axpy_strided_batched: *half_single_precisions_complex_real
+      - axpy_ex: *bfloat_half_single_double_complex_real_precisions
+      - axpy_batched_ex: *bfloat_half_single_double_complex_real_precisions
+      - axpy_strided_batched_ex: *bfloat_half_single_double_complex_real_precisions
+
+  - name: blas1_graph_check
+    category: pre_checkin
+    arguments: *blas1_graph_test_common_args
+    function:
+      - axpy:  *half_single_precisions_complex_real
+      - axpy_batched: *half_single_precisions_complex_real
+      - axpy_strided_batched: *half_single_precisions_complex_real
+      - axpy_ex: *bfloat_half_single_double_complex_real_precisions
+      - axpy_batched_ex: *bfloat_half_single_double_complex_real_precisions
+      - axpy_strided_batched_ex: *bfloat_half_single_double_complex_real_precisions
+
+  - name: blas1_repeatability_check
+    category: stress
+    arguments: *blas1_repeatability_common_args
+    function:
+       - axpy:  *half_single_precisions_complex_real
+       - axpy_batched: *half_single_precisions_complex_real
+       - axpy_strided_batched: *half_single_precisions_complex_real
+       - axpy_ex: *bfloat_half_single_double_complex_real_precisions
+       - axpy_batched_ex: *bfloat_half_single_double_complex_real_precisions
+       - axpy_strided_batched_ex: *bfloat_half_single_double_complex_real_precisions
+
+...

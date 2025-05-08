@@ -1,0 +1,289 @@
+---
+include: rocblas_common.yaml
+include: known_bugs.yaml
+
+Definitions:
+  - &small_matrix_size_range
+    - { N:     1 }
+    - { N:     4 }
+    - { N:    16 }
+    - { N:    33 }
+    - { N:    65 }
+
+  - &special_case_range
+    - { N: 0, incx: 1, incy: 1, batch_count: 1 }
+    - { N: 1, incx: 1, incy: 1, batch_count: 0 }
+# invalid_arg checks
+    - { N: -1, incx: 1, incy: 1, batch_count:  0 }
+    - { N:  0, incx: 0, incy: 1, batch_count:  0 }
+    - { N:  0, incx: 1, incy: 0, batch_count:  0 }
+    - { N:  0, incx: 1, incy: 1, batch_count: -1 }
+
+  - &medium_matrix_size_range
+    - { N:  1000 }
+    - { N:  2011 }
+
+  - &large_matrix_size_range
+    - { N:  2048 }
+    - { N:  4011 }
+
+  - &incx_incy_range
+    - { incx:  -1, incy:   2 }
+    - { incx:   3, incy:  -1 }
+    - { incx:   2, incy:   2 }
+
+  - &incx_incy_range_small
+    - { incx: 1, incy: 1 }
+
+  - &alpha_range
+    - { alpha: -1.0, alphai:  0.5 }
+    - { alpha:  0.0, alphai: -0.5 }
+    - { alpha:  0.0, alphai:  0.0 }
+
+  - &alpha_range_small
+    - { alpha: 4.0, alphai: 2.0 }
+
+  - &alpha_nan
+    - { alpha: .NaN }
+
+Tests:
+
+- name: hpr2_bad_arg
+  category: quick
+  function:
+  - hpr2_bad_arg: *single_double_precisions_complex
+  - hpr2_batched_bad_arg: *single_double_precisions_complex
+  - hpr2_strided_batched_bad_arg: *single_double_precisions_complex
+  api: [ C, FORTRAN, FORTRAN_64 ]
+
+- name: hpr2_arg_check
+  category: quick
+  function:
+  - hpr2: *single_double_precisions_complex
+  - hpr2_batched: *single_double_precisions_complex
+  - hpr2_strided_batched: *single_double_precisions_complex
+  uplo: L
+  matrix_size: *special_case_range
+
+- name: hpr2_fortran
+  category: quick
+  function: hpr2
+  precision: *single_double_precisions_complex
+  uplo: [ U, L ]
+  matrix_size: *small_matrix_size_range
+  incx_incy: *incx_incy_range_small
+  alpha_beta: *alpha_range_small
+  api: FORTRAN
+
+- name: hpr2_NaN
+  category: quick
+  function: hpr2
+  precision: *single_double_precisions_complex
+  uplo: [ U ]
+  N: [ 32 ]
+  incx_incy: *incx_incy_range_small
+  alpha_beta: *alpha_nan
+
+- name: hpr2_small
+  category: quick
+  function: hpr2
+  precision: *single_double_precisions_complex
+  uplo: [ U, L ]
+  matrix_size: *small_matrix_size_range
+  incx_incy: *incx_incy_range
+  alpha_beta: *alpha_range
+
+- name: hpr2_medium
+  category: pre_checkin
+  function: hpr2
+  precision: *single_double_precisions_complex
+  uplo: [ U, L ]
+  matrix_size: *medium_matrix_size_range
+  incx_incy: *incx_incy_range_small
+  alpha_beta: *alpha_range_small
+
+- name: hpr2_large
+  category: nightly
+  function: hpr2
+  precision: *single_double_precisions_complex
+  uplo: [ U, L ]
+  matrix_size: *large_matrix_size_range
+  incx_incy: *incx_incy_range_small
+  alpha_beta: *alpha_range_small
+
+# batched
+- name: hpr2_batched_fortran
+  category: quick
+  function: hpr2_batched
+  precision: *single_double_precisions_complex
+  uplo: [ U, L ]
+  matrix_size: *small_matrix_size_range
+  incx_incy: *incx_incy_range_small
+  alpha_beta: *alpha_range_small
+  batch_count: [ -1, 0, 3 ]
+  api: FORTRAN
+
+- name: hpr2_batched_NaN
+  category: quick
+  function: hpr2_batched
+  precision: *double_precision_complex
+  uplo: [ L ]
+  N: [ 32 ]
+  incx_incy: *incx_incy_range_small
+  alpha_beta: *alpha_nan
+  batch_count: [ 2 ]
+
+- name: hpr2_batched_small
+  category: quick
+  function: hpr2_batched
+  precision: *single_double_precisions_complex
+  uplo: [ U, L ]
+  matrix_size: *small_matrix_size_range
+  incx_incy: *incx_incy_range
+  alpha_beta: *alpha_range
+  batch_count: [ 3 ]
+
+- name: hpr2_batched_medium
+  category: pre_checkin
+  function: hpr2_batched
+  precision: *single_double_precisions_complex
+  uplo: [ U, L ]
+  matrix_size: *medium_matrix_size_range
+  incx_incy: *incx_incy_range_small
+  alpha_beta: *alpha_range_small
+  batch_count: [ 3 ]
+
+- name: hpr2_batched_large
+  category: nightly
+  function: hpr2_batched
+  precision: *single_double_precisions_complex
+  uplo: [ L ]
+  matrix_size: *large_matrix_size_range
+  incx_incy: *incx_incy_range_small
+  alpha_beta: *alpha_range_small
+  batch_count: [ 3 ]
+
+- name: hpr2_batched_grid_z_16bit
+  category: stress
+  arguments:
+    - { N:   3, incx: 1, incx: 1, batch_count: *c_grid_yz_require_passes} #generic kernel
+  uplo: [ U, L ]
+  alpha_beta: *alpha_range_small
+  pointer_mode_host: false
+  function:
+    - hpr2_batched: *single_precision_complex
+    - hpr2_strided_batched: *single_precision_complex
+  stride_scale: 1
+
+# hpr2_strided_batched
+- name: hpr2_strided_batched_fortran
+  category: quick
+  function: hpr2_strided_batched
+  precision: *single_double_precisions_complex
+  uplo: [ U, L ]
+  matrix_size: *small_matrix_size_range
+  incx_incy: *incx_incy_range_small
+  alpha_beta: *alpha_range_small
+  batch_count: [ 3 ]
+  stride_scale: [ 2 ]
+  api: FORTRAN
+
+- name: hpr2_strided_batched_NaN
+  category: quick
+  function: hpr2_strided_batched
+  precision: *single_precision_complex
+  uplo: [ U ]
+  N: [ 32 ]
+  incx_incy: *incx_incy_range_small
+  alpha_beta: *alpha_nan
+  batch_count: [ 2 ]
+  stride_scale: [ 2 ]
+
+- name: hpr2_strided_batched_small
+  category: quick
+  function: hpr2_strided_batched
+  precision: *single_double_precisions_complex
+  uplo: [ U, L ]
+  matrix_size: *small_matrix_size_range
+  incx_incy: *incx_incy_range
+  alpha_beta: *alpha_range
+  stride_scale: [ 2.5 ]
+  batch_count: [ 3 ]
+
+- name: hpr2_strided_batched_medium
+  category: pre_checkin
+  function: hpr2_strided_batched
+  precision: *single_double_precisions_complex
+  uplo: [ U, L ]
+  matrix_size: *medium_matrix_size_range
+  incx_incy: *incx_incy_range_small
+  alpha_beta: *alpha_range_small
+  stride_scale: [ 1.0, 2.5 ]
+  batch_count: [ 1, 3 ]
+
+- name: hpr2_strided_large
+  category: nightly
+  function: hpr2_strided_batched
+  precision: *single_double_precisions_complex
+  uplo: [ U ]
+  matrix_size: *large_matrix_size_range
+  incx_incy: *incx_incy_range_small
+  alpha_beta: *alpha_range_small
+  stride_scale: [ 1.0 ]
+  batch_count: [ 3 ]
+
+- name: hpr2_ILP64
+  category: stress
+  arguments:
+    - { N: 2048, incx: 2, incy: 1, batch_count: 2 }
+    - { N: 2, incx: 2147483649, incy: 1, batch_count: 1 }
+    - { N: 2, incx: 1, incy: -2147483649,  batch_count: 1 }
+    - { N: 2, stride_a: 2, incx: 1, incy: 1, batch_count: *c_grid_yz_require_passes }
+  uplo: [ U, L ]
+  stride_scale: [ 1 ]
+  alpha_beta: *alpha_range_small
+  pointer_mode_host: false
+  api: [ C_64 ]
+  os_flags: [ LINUX ]
+  function:
+    - hpr2: *single_precision_complex
+    - hpr2_batched: *single_precision_complex
+    - hpr2_strided_batched: *single_precision_complex
+
+- name: hpr2_graph_test
+  category: pre_checkin
+  function:
+        - hpr2
+        - hpr2_batched
+        - hpr2_strided_batched
+  precision: *single_double_precisions_complex
+  matrix_size:
+        - { N: 33 }
+  uplo: [ U ]
+  incx: [ 1 ]
+  alpha: [ 2.0 ]
+  stride_scale: [ 1 ]
+  batch_count: [ 5 ]
+  graph_test: true
+
+- name: hpr2_repeatability_check
+  category: stress
+  function:
+        - hpr2
+        - hpr2_batched
+        - hpr2_strided_batched
+  precision: *single_double_precisions_complex
+  matrix_size:
+        - { N: 33 }
+  uplo: [ U ]
+  incx: [ 1 ]
+  alpha: [ 2.0 ]
+  stride_scale: [ 1 ]
+  batch_count: [ 2 ]
+  iters: 5
+  initialization: hpl
+  atomics_mode: 0
+  pointer_mode_host: false
+  devices: 4
+  repeatability_check: true
+...
