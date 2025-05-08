@@ -77,7 +77,7 @@ void init_base(nb::module_ m)
         .def("__setstate__",
              [](rocisa::IsaInfo&                               self,
                 const std::tuple<std::map<std::string, int>,
-                                 std::map<std::string, bool>,
+                                 std::map<std::string, int>,
                                  std::map<std::string, int>,
                                  std::map<std::string, bool>>& state) {
                  new(&self) rocisa::IsaInfo{std::get<0>(state),

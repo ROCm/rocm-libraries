@@ -59,7 +59,7 @@ namespace rocisa
     struct IsaInfo
     {
         std::map<std::string, int>  asm_caps;
-        std::map<std::string, bool> arch_caps;
+        std::map<std::string, int>  arch_caps;
         std::map<std::string, int>  reg_caps;
         std::map<std::string, bool> asm_bugs;
     };
@@ -137,7 +137,7 @@ namespace rocisa
             return m_isainfo[m_threads[std::this_thread::get_id()].isaVersion].reg_caps;
         }
 
-        std::map<std::string, bool> getArchCaps()
+        std::map<std::string, int> getArchCaps()
         {
             return m_isainfo[m_threads[std::this_thread::get_id()].isaVersion].arch_caps;
         }
@@ -191,7 +191,7 @@ namespace rocisa
             return rocIsa::getInstance().getRegCaps();
         }
 
-        std::map<std::string, bool> getArchCaps() const
+        std::map<std::string, int> getArchCaps() const
         {
             return rocIsa::getInstance().getArchCaps();
         }
