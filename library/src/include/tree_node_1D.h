@@ -103,6 +103,34 @@ public:
 };
 
 /*****************************************************
+ * CS_KERNEL_STOCKHAM_PP  *
+ *****************************************************/
+class StockhamPP1DNode : public LeafNode
+{
+    friend class NodeFactory;
+
+protected:
+    StockhamPP1DNode(TreeNode* p, ComputeScheme s)
+        : LeafNode(p, s)
+    {
+        externalKernel = true;
+        need_twd_table = true;
+    }
+
+    void SetupGridParam_internal(GridParam& gp) override;
+
+public:
+    bool                CreateDeviceResources() override;
+    std::vector<size_t> CollapsibleDims() override;
+    bool                UseOutputLengthForPadding() override
+    {
+        // with embedded r2c, stockham nodes will change length, so the
+        // output length is different from the input length.
+        return ebtype != EmbeddedType::NONE;
+    }
+};
+
+/*****************************************************
  * SBCC  *
  *****************************************************/
 class SBCCNode : public LeafNode
@@ -133,6 +161,39 @@ public:
     // we can put codes here to switch-on/off some features at arch-wise
     bool KernelCheck(std::vector<FMKey>& kernel_keys = EmptyFMKeyVec) override;
 
+    // reads + writes are along columns so both may benefit from padding
+    bool PaddingBenefitsInput() override
+    {
+        return true;
+    }
+    bool PaddingBenefitsOutput() override
+    {
+        return true;
+    }
+    std::vector<size_t> CollapsibleDims() override;
+};
+
+/*****************************************************
+ * SBCC Partial-Pass *
+ *****************************************************/
+class SBCCPPNode : public LeafNode
+{
+    friend class NodeFactory;
+
+protected:
+    SBCCPPNode(TreeNode* p, ComputeScheme s)
+        : LeafNode(p, s)
+    {
+        externalKernel = true;
+        need_twd_table = true;
+    }
+
+    void SetupGridParam_internal(GridParam& gp) override;
+
+    // InitIntrinsicMode is the first step to check if eligible for buffer load/store
+    void InitIntrinsicMode();
+
+public:
     // reads + writes are along columns so both may benefit from padding
     bool PaddingBenefitsInput() override
     {

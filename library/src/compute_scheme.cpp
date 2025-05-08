@@ -34,7 +34,9 @@ static const std::map<ComputeScheme, const char*>& ComputeSchemetoStringMap()
     static const std::map<ComputeScheme, const char*> ComputeSchemetoString
         = {{ENUMSTR(CS_NONE)},
            {ENUMSTR(CS_KERNEL_STOCKHAM)},
+           {ENUMSTR(CS_KERNEL_STOCKHAM_PP)},
            {ENUMSTR(CS_KERNEL_STOCKHAM_BLOCK_CC)},
+           {ENUMSTR(CS_KERNEL_STOCKHAM_PP_BLOCK_CC)},
            {ENUMSTR(CS_KERNEL_STOCKHAM_BLOCK_RC)},
            {ENUMSTR(CS_KERNEL_STOCKHAM_BLOCK_CR)},
            {ENUMSTR(CS_KERNEL_TRANSPOSE)},
@@ -144,8 +146,10 @@ std::string PrintKernelSchemeAbbr(ComputeScheme cs)
     switch(cs)
     {
     case CS_KERNEL_STOCKHAM:
+    case CS_KERNEL_STOCKHAM_PP:
         return "sbrr";
     case CS_KERNEL_STOCKHAM_BLOCK_CC:
+    case CS_KERNEL_STOCKHAM_PP_BLOCK_CC:
         return "sbcc";
     case CS_KERNEL_STOCKHAM_BLOCK_CR:
         return "sbcr";

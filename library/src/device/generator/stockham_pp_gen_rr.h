@@ -29,21 +29,24 @@
 
 struct StockhamPartialPassKernelRR : public StockhamKernelRR
 {
-    explicit StockhamPartialPassKernelRR(const StockhamGeneratorSpecs& specs,
-                                         const std::vector<size_t>&    ppFactors,
-                                         const size_t                  ppLength)
+    explicit StockhamPartialPassKernelRR(const StockhamGeneratorSpecs&    specs,
+                                         const StockhamPartialPassParams& params)
         : StockhamKernelRR(specs)
-        , factors_pp(ppFactors)
-        , length_pp(ppLength)
+        , params(params)
     {
+        length_pp  = params.parent_length[params.off_dim];
+        factors_pp = params.factors_off_dim;
+
         max_factor_pp = *std::max_element(factors_pp.begin(), factors_pp.end());
 
         R.size = Expression{std::max(nregisters, max_factor_pp)};
     }
 
-    unsigned int        max_factor_pp;
-    std::vector<size_t> factors_pp;
-    unsigned int        length_pp;
+    StockhamPartialPassParams params;
+
+    unsigned int              max_factor_pp;
+    std::vector<unsigned int> factors_pp;
+    unsigned int              length_pp;
 
     Variable offset_pp{"offset_pp", "size_t"};
     Variable stride_lds_pp{"stride_lds_pp", "size_t"};
@@ -89,6 +92,11 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
         stmts += Declaration{inbound, batch < nbatch};
 
         return stmts;
+    }
+
+    std::vector<unsigned int> launcher_lengths() override
+    {
+        return params.parent_length;
     }
 
     StatementList load_global_generator(unsigned int h,

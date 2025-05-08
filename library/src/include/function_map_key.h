@@ -41,6 +41,7 @@ struct KernelConfig
     int                 workgroup_size        = 0;
     std::array<int, 2>  threads_per_transform = {0, 0};
     std::vector<size_t> factors               = {0};
+    std::vector<size_t> factors_pp            = {0};
     // above data is what we can tune
     //
     // the followings are other information of this kernel.
@@ -69,6 +70,7 @@ struct KernelConfig
 
     KernelConfig(bool                  use_3steps,
                  std::vector<size_t>&& factors,
+                 std::vector<size_t>&& factors_pp,
                  int                   tpb,
                  int                   wgs,
                  std::array<int, 2>&&  tpt,
@@ -89,6 +91,7 @@ struct KernelConfig
         , workgroup_size(wgs)
         , threads_per_transform(tpt)
         , factors(factors)
+        , factors_pp(factors_pp)
         , ebType(ebType)
         , direction(direction)
         , static_dim(static_dim)
@@ -109,7 +112,8 @@ struct KernelConfig
                         transforms_per_block,
                         workgroup_size,
                         threads_per_transform,
-                        factors)
+                        factors,
+                        factors_pp)
                == std::tie(rhs.use_3steps_large_twd,
                            rhs.half_lds,
                            rhs.direct_to_from_reg,
@@ -117,7 +121,8 @@ struct KernelConfig
                            rhs.transforms_per_block,
                            rhs.workgroup_size,
                            rhs.threads_per_transform,
-                           rhs.factors);
+                           rhs.factors,
+                           rhs.factors_pp);
     }
 
     bool operator<(const KernelConfig& rhs) const
@@ -129,7 +134,8 @@ struct KernelConfig
                         transforms_per_block,
                         workgroup_size,
                         threads_per_transform,
-                        factors)
+                        factors,
+                        factors_pp)
                < std::tie(rhs.use_3steps_large_twd,
                           rhs.half_lds,
                           rhs.direct_to_from_reg,
@@ -137,7 +143,8 @@ struct KernelConfig
                           rhs.transforms_per_block,
                           rhs.workgroup_size,
                           rhs.threads_per_transform,
-                          rhs.factors);
+                          rhs.factors,
+                          rhs.factors_pp);
     }
 
     std::string Print() const
@@ -154,6 +161,15 @@ struct KernelConfig
 
         std::string COMMA = "";
         for(auto factor : factors)
+        {
+            ss << COMMA << factor;
+            COMMA = ", ";
+        }
+        ss << "]";
+
+        ss << ", factors_pp: [";
+        COMMA = "";
+        for(auto factor : factors_pp)
         {
             ss << COMMA << factor;
             COMMA = ", ";
@@ -194,8 +210,12 @@ namespace std
             // which means the maximal factorization pass is 8
             auto factors_max_len = config.factors;
             factors_max_len.resize(TWIDDLES_MAX_RADICES);
-
             for(auto& v : factors_max_len)
+                h ^= std::hash<size_t>{}(v);
+
+            auto factors_pp_max_len = config.factors_pp;
+            factors_pp_max_len.resize(TWIDDLES_MAX_RADICES);
+            for(auto& v : factors_pp_max_len)
                 h ^= std::hash<size_t>{}(v);
             return h;
         }
@@ -220,6 +240,7 @@ struct ToString<KernelConfig>
         str += FieldDescriptor<int>().describe("wgs", value.workgroup_size) + ",";
         str += VectorFieldDescriptor<int>().describe("tpt", tpt) + ",";
         str += VectorFieldDescriptor<size_t>().describe("factors", value.factors) + ",";
+        str += VectorFieldDescriptor<size_t>().describe("factors_pp", value.factors_pp) + ",";
         // below: not tunable data, for AOT cache
         str += FieldDescriptor<std::string>().describe("ebtype", PrintEBType(value.ebType)) + ",";
         str += FieldDescriptor<int>().describe("direction", value.direction) + ",";
@@ -254,6 +275,7 @@ struct FromString<KernelConfig>
         FieldParser<int>().parse("wgs", ret.workgroup_size, current);
         VectorFieldParser<int>().parse("tpt", tpt, current);
         VectorFieldParser<size_t>().parse("factors", ret.factors, current);
+        VectorFieldParser<size_t>().parse("factors_pp", ret.factors_pp, current);
 
         if(DescriptorFormatVersion::UsingVersion < 2)
         {
@@ -284,6 +306,23 @@ struct FromString<KernelConfig>
     }
 };
 
+struct FMKeyBase
+{
+    FMKeyBase(rocfft_precision precision, ComputeScheme scheme = CS_NONE)
+        : precision(precision)
+        , scheme(scheme)
+    {
+    }
+
+    FMKeyBase()                 = default;
+    FMKeyBase(const FMKeyBase&) = default;
+
+    virtual ~FMKeyBase() {};
+
+    rocfft_precision precision;
+    ComputeScheme    scheme;
+};
+
 // length, precision, scheme are theose fundemantal information of a kernel;
 // SBRC_TRANS is also neccessary for SBRC or SBRC_3D, but for non-SBRC, it is just NONE
 // And the newly added KernerlConfig is the key to supporting the "multi-configurations".
@@ -297,13 +336,12 @@ struct FromString<KernelConfig>
 //    (And that is what exactly "fuction_pool::insert_default_entry()" and
 //                               "function_pool::get_actual_key()"" is doing
 //
-struct FMKey
+struct FMKey : public FMKeyBase
 {
     std::array<size_t, 2> lengths;
-    rocfft_precision      precision;
-    ComputeScheme         scheme        = CS_KERNEL_STOCKHAM;
-    SBRC_TRANSPOSE_TYPE   sbrcTrans     = NONE;
-    KernelConfig          kernel_config = KernelConfig::EmptyConfig();
+
+    SBRC_TRANSPOSE_TYPE sbrcTrans     = NONE;
+    KernelConfig        kernel_config = KernelConfig::EmptyConfig();
 
     FMKey()             = default;
     FMKey(const FMKey&) = default;
@@ -314,11 +352,11 @@ struct FMKey
           ComputeScheme       scheme        = CS_KERNEL_STOCKHAM,
           SBRC_TRANSPOSE_TYPE transpose     = NONE,
           KernelConfig        kernel_config = KernelConfig::EmptyConfig())
-        : lengths({length0, 0})
-        , precision(precision)
-        , scheme(scheme)
+        : FMKeyBase(precision, scheme)
+        , lengths({length0, 0})
         , sbrcTrans(transpose)
         , kernel_config(kernel_config)
+
     {
     }
 
@@ -329,9 +367,8 @@ struct FMKey
           ComputeScheme       scheme        = CS_KERNEL_2D_SINGLE,
           SBRC_TRANSPOSE_TYPE transpose     = NONE,
           KernelConfig        kernel_config = KernelConfig::EmptyConfig())
-        : lengths({length0, length1})
-        , precision(precision)
-        , scheme(scheme)
+        : FMKeyBase(precision, scheme)
+        , lengths({length0, length1})
         , sbrcTrans(transpose)
         , kernel_config(kernel_config)
     {
@@ -478,11 +515,14 @@ struct SimpleHash
     }
 };
 
-struct FMKeyPP
+// TODO: Check if FMKeyPP and FMKey can derive from a common base class
+// This should simplfy operations in the function_pool, e.g.,
+// FMKey key = GetKernelKey();
+// if(!pool.has_function(key))
+// in LeafNode::KernelCheck(std::vector<FMKey>& kernel_keys)
+struct FMKeyPP : public FMKeyBase
 {
     std::array<size_t, 3> lengths;
-    rocfft_precision      precision;
-    ComputeScheme         scheme          = CS_3D_PP;
     KernelConfig          kernel_config_1 = KernelConfig::EmptyConfig();
     KernelConfig          kernel_config_2 = KernelConfig::EmptyConfig();
 
@@ -497,9 +537,8 @@ struct FMKeyPP
             ComputeScheme    scheme          = CS_3D_PP,
             KernelConfig     kernel_config_1 = KernelConfig::EmptyConfig(),
             KernelConfig     kernel_config_2 = KernelConfig::EmptyConfig())
-        : lengths({length0, length1, length2})
-        , precision(precision)
-        , scheme(scheme)
+        : FMKeyBase(precision, scheme)
+        , lengths({length0, length1, length2})
         , kernel_config_1(kernel_config_1)
         , kernel_config_2(kernel_config_2)
     {
@@ -536,6 +575,12 @@ struct FMKeyPP
     {
         static FMKeyPP empty;
         return empty;
+    }
+
+    // TODO: Implement this
+    bool base_lds_usage_fits(unsigned int lds_size) const
+    {
+        return true;
     }
 };
 

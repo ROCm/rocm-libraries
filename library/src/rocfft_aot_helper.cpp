@@ -226,10 +226,9 @@ void build_stockham_function_pool(CompileQueue& queue)
     function_pool fp(65536);
 
     // fused Bluestein and partial-pass kernels are always built at runtime
-    auto fuseBlue  = BluesteinFuseType::BFT_NONE;
-    auto ppType    = PartialPassType::PPT_NONE;
-    auto ppFactors = std::vector<size_t>{};
-    auto ppLength  = 0;
+    auto fuseBlue = BluesteinFuseType::BFT_NONE;
+    auto ppType   = PartialPassType::PPT_NONE;
+    auto ppParams = StockhamPartialPassParams();
 
     for(const auto& i : fp.get_map())
     {
@@ -316,6 +315,7 @@ void build_stockham_function_pool(CompileQueue& queue)
                     specs.direct_to_from_reg    = i.second.direct_to_from_reg;
                     return stockham_rtc(specs,
                                         specs,
+                                        ppParams,
                                         nullptr,
                                         kernel_name,
                                         scheme,
@@ -335,8 +335,6 @@ void build_stockham_function_pool(CompileQueue& queue)
                                         cbtype,
                                         fuseBlue,
                                         ppType,
-                                        ppFactors,
-                                        ppLength,
                                         {},
                                         {});
                 };
@@ -624,10 +622,9 @@ void build_solution_kernels(CompileQueue& queue)
     solmap.get_all_kernels(kernel_nodes, true);
 
     // fused Bluestein and partial-pass kernels are always built at runtime
-    auto fuseBlue  = BluesteinFuseType::BFT_NONE;
-    auto ppType    = PartialPassType::PPT_NONE;
-    auto ppFactors = std::vector<size_t>{};
-    auto ppLength  = 0;
+    auto fuseBlue = BluesteinFuseType::BFT_NONE;
+    auto ppType   = PartialPassType::PPT_NONE;
+    auto ppParams = StockhamPartialPassParams();
 
     for(const SolutionNode& kernel_sol : kernel_nodes)
     {
@@ -711,6 +708,7 @@ void build_solution_kernels(CompileQueue& queue)
                     = [=](const std::string& kernel_name) -> std::string {
                     return stockham_rtc(specs,
                                         specs,
+                                        ppParams,
                                         nullptr,
                                         kernel_name,
                                         scheme,
@@ -730,8 +728,6 @@ void build_solution_kernels(CompileQueue& queue)
                                         cbtype,
                                         fuseBlue,
                                         ppType,
-                                        ppFactors,
-                                        ppLength,
                                         {},
                                         {});
                 };

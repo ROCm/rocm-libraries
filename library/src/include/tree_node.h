@@ -178,13 +178,12 @@ struct NodeMetaData
     size_t                  iDist = 0, oDist = 0;
     size_t                  iDistBlue = 0, oDistBlue = 0;
     size_t                  iOffset = 0, oOffset = 0;
-    bool                    applyPartialPass = false;
-    int                     direction        = -1;
-    rocfft_result_placement placement        = rocfft_placement_inplace;
-    rocfft_precision        precision        = rocfft_precision_single;
-    rocfft_array_type       inArrayType      = rocfft_array_type_unset;
-    rocfft_array_type       outArrayType     = rocfft_array_type_unset;
-    hipDeviceProp_t         deviceProp       = {};
+    int                     direction    = -1;
+    rocfft_result_placement placement    = rocfft_placement_inplace;
+    rocfft_precision        precision    = rocfft_precision_single;
+    rocfft_array_type       inArrayType  = rocfft_array_type_unset;
+    rocfft_array_type       outArrayType = rocfft_array_type_unset;
+    hipDeviceProp_t         deviceProp   = {};
     bool                    rootIsC2C;
 
     explicit NodeMetaData(TreeNode* refNode);
@@ -354,6 +353,8 @@ public:
     // specified kernel key from solution map. (if there is any)
     std::unique_ptr<FMKey> specified_key;
 
+    std::unique_ptr<FMKeyPP> specified_pp_key;
+
     // Tree structure:
     // non-owning pointer to parent node, may be null
     TreeNode* parent = nullptr;
@@ -373,11 +374,8 @@ public:
     size_t lengthBlue  = 0;
     size_t lengthBlueN = 0;
 
-    // enables partial pass for this node
-    bool applyPartialPass = false;
-
-    // Dimension of the FFT where partial-pass is applied
-    size_t ppDim = 0;
+    size_t ppOffDim  = 0;
+    size_t ppCurrDim = 0;
 
     //
     BluesteinType     typeBlue   = BluesteinType::BT_NONE;
@@ -490,6 +488,12 @@ public:
         return {};
     }
 
+    bool isPartialPassEnabled() const
+    {
+        return (scheme == CS_3D_PP || scheme == CS_KERNEL_STOCKHAM_PP
+                || scheme == CS_KERNEL_STOCKHAM_PP_BLOCK_CC);
+    }
+
     // able to fuse CS_KERNEL_STOCKHAM and CS_KERNEL_TRANSPOSE_Z_XY ?
     bool fuse_CS_KERNEL_TRANSPOSE_Z_XY();
     // able to fuse CS_KERNEL_STOCKHAM and CS_KERNEL_TRANSPOSE_XY_Z ?
@@ -540,6 +544,8 @@ public:
     TreeNode* GetRealEvenAncestor();
     bool      IsRootPlanC2CTransform();
 
+    TreeNode* GetPartialPassAncestor() const;
+
     // Set length of transpose kernel node, since those are easily
     // knowable just by looking at the scheme and they're used in
     // many plans.  Throws an exception if this is not a transpose
@@ -580,6 +586,18 @@ public:
 
         return (dimension == 1) ? FMKey(length[0], precision, scheme)
                                 : FMKey(length[0], length[1], precision, scheme);
+    }
+
+    virtual FMKeyPP GetPPKernelsKey() const
+    {
+        if(specified_pp_key)
+            return *specified_pp_key.get();
+
+        auto pp_parent_node = GetPartialPassAncestor();
+        if(pp_parent_node)
+            return FMKeyPP(length[0], length[1], length[2], precision, pp_parent_node->scheme);
+        else
+            throw std::runtime_error("Invalid parent node for partial pass");
     }
 
     // Compute the large twd decomposition base
@@ -762,7 +780,7 @@ public:
         : comm_rank(comm_rank)
     {
     }
-    InternalTempBuffer(const InternalTempBuffer&) = delete;
+    InternalTempBuffer(const InternalTempBuffer&)            = delete;
     InternalTempBuffer& operator=(const InternalTempBuffer&) = delete;
     ~InternalTempBuffer()                                    = default;
 
@@ -818,8 +836,8 @@ private:
 class BufferPtr
 {
 public:
-    BufferPtr()                 = default;
-    BufferPtr(const BufferPtr&) = default;
+    BufferPtr()                            = default;
+    BufferPtr(const BufferPtr&)            = default;
     BufferPtr& operator=(const BufferPtr&) = default;
     ~BufferPtr()                           = default;
 
@@ -946,7 +964,7 @@ struct MultiPlanItem
 {
     MultiPlanItem();
     virtual ~MultiPlanItem();
-    MultiPlanItem(const MultiPlanItem&) = delete;
+    MultiPlanItem(const MultiPlanItem&)            = delete;
     MultiPlanItem& operator=(const MultiPlanItem&) = delete;
 
     // multi-process requests

@@ -817,6 +817,12 @@ class Map(BaseNodeOps):
                                              function_map)).inline()
         throw = StatementList(Throw('std::runtime_error("' + str(key) + '")'))
         return If(Equal(insert, "false"), throw)
+    def assert_pp_insert(self, key, value_1, value_2, def_key_pool, function_map):
+        insert = Call('insert_default_pp_entry',
+                      arguments=ArgumentList(key, value_1, value_2, def_key_pool,
+                                             function_map)).inline()
+        throw = StatementList(Throw('std::runtime_error("' + str(key) + '")'))
+        return If(Equal(insert, "false"), throw)
 
     # def __getitem__(self, idx):
     #     return ArrayElement(self.name, idx)

@@ -41,6 +41,27 @@ inline std::string PrintMissingKernelInfo(const FMKey& key)
     return msg.str();
 }
 
+struct PartialPassParams
+{
+    PartialPassParams() = default;
+
+    PartialPassParams(ComputeScheme             scheme,
+                      unsigned int              current_dim,
+                      unsigned int              off_dim,
+                      std::vector<unsigned int> factors_off_dim)
+        : scheme(scheme)
+        , current_dim(current_dim)
+        , off_dim(off_dim)
+        , factors_off_dim(factors_off_dim)
+    {
+    }
+
+    ComputeScheme             scheme;
+    unsigned int              current_dim;
+    unsigned int              off_dim;
+    std::vector<unsigned int> factors_off_dim;
+};
+
 struct FFTKernel
 {
     std::vector<size_t> factors;
@@ -61,19 +82,25 @@ struct FFTKernel
     // build time), using runtime compilation.
     bool aot_rtc = false;
 
+    PartialPassParams pp_params;
+
     FFTKernel()                 = default;
     FFTKernel(const FFTKernel&) = default;
 
     FFTKernel& operator=(const FFTKernel&) = default;
 
-    FFTKernel(bool                  use_3steps,
-              std::vector<size_t>&& factors,
-              int                   tpb,
-              int                   wgs,
-              std::array<int, 2>&&  tpt,
-              bool                  half_lds           = false,
-              bool                  direct_to_from_reg = false,
-              bool                  aot_rtc            = false)
+    FFTKernel(bool                        use_3steps,
+              std::vector<size_t>&&       factors,
+              int                         tpb,
+              int                         wgs,
+              std::array<int, 2>&&        tpt,
+              bool                        half_lds           = false,
+              bool                        direct_to_from_reg = false,
+              bool                        aot_rtc            = false,
+              ComputeScheme               pp_scheme          = CS_NONE,
+              unsigned int                pp_current_dim     = 0,
+              unsigned int                pp_off_dim         = 0,
+              std::vector<unsigned int>&& pp_factors_off_dim = std::vector<unsigned int>())
         : factors(factors)
         , transforms_per_block(tpb)
         , workgroup_size(wgs)
@@ -82,6 +109,7 @@ struct FFTKernel
         , half_lds(half_lds)
         , direct_to_from_reg(direct_to_from_reg)
         , aot_rtc(aot_rtc)
+        , pp_params(pp_scheme, pp_current_dim, pp_off_dim, pp_factors_off_dim)
     {
     }
 
@@ -122,11 +150,8 @@ struct function_pool_data
     // when AOT generator adds a default key-kernel,
     // we get the keys of two version: empty-config vs full-config
     // make the pair as an entry in a map so that we know they are the same things
-    FPKeyMap   def_key_pool;
-    FPKeyMapPP def_key_pool_pp;
-
-    FPMap   function_map;
-    FPMapPP function_map_pp;
+    std::tuple<FPKeyMap, FPKeyMapPP> def_keys;
+    std::tuple<FPMap, FPMapPP>       function_maps;
 
     function_pool_data();
 
@@ -141,7 +166,10 @@ class function_pool
 {
     unsigned int max_lds_bytes;
     FPKeyMap&    def_key_pool;
-    FPMap&       function_map;
+    FPKeyMapPP&  def_pp_key_pool;
+
+    FPMap&   function_map;
+    FPMapPP& function_pp_map;
 
     const FMKey& get_actual_key(const FMKey& key) const
     {
@@ -155,11 +183,21 @@ class function_pool
             return key;
     }
 
+    const FMKeyPP& get_actual_pp_key(const FMKeyPP& key) const
+    {
+        if(def_pp_key_pool.count(key) > 0)
+            return def_pp_key_pool.at(key);
+        else
+            return key;
+    }
+
 public:
     function_pool(unsigned int max_lds_bytes)
         : max_lds_bytes(max_lds_bytes)
-        , def_key_pool(function_pool_data::get_function_pool_data().def_key_pool)
-        , function_map(function_pool_data::get_function_pool_data().function_map)
+        , def_key_pool(std::get<0>(function_pool_data::get_function_pool_data().def_keys))
+        , def_pp_key_pool(std::get<1>(function_pool_data::get_function_pool_data().def_keys))
+        , function_map(std::get<0>(function_pool_data::get_function_pool_data().function_maps))
+        , function_pp_map(std::get<1>(function_pool_data::get_function_pool_data().function_maps))
     {
         // We would only see zero if we received a
         // default-constructed device prop struct, which means
@@ -173,7 +211,7 @@ public:
     {
     }
 
-    function_pool(function_pool& p) = delete;
+    function_pool(function_pool& p)                = delete;
     function_pool& operator=(const function_pool&) = delete;
 
     ~function_pool() = default;
@@ -194,6 +232,14 @@ public:
         if(!real_key.base_lds_usage_fits(max_lds_bytes))
             return false;
         return function_map.count(real_key) > 0;
+    }
+
+    bool has_pp_function(const FMKeyPP& key) const
+    {
+        auto real_key = get_actual_pp_key(key);
+        if(!real_key.base_lds_usage_fits(max_lds_bytes))
+            return false;
+        return function_pp_map.count(real_key) > 0;
     }
 
     size_t get_largest_length(rocfft_precision precision) const
@@ -228,6 +274,25 @@ public:
         if(!real_key.base_lds_usage_fits(max_lds_bytes))
             throw std::out_of_range("kernel not found in map");
         return function_map.at(real_key);
+    }
+
+    FFTKernel get_pp_kernel(const FMKeyPP& key, ComputeScheme scheme) const
+    {
+        auto real_key = get_actual_pp_key(key);
+        if(!real_key.base_lds_usage_fits(max_lds_bytes))
+            throw std::out_of_range("kernel not found in partial-pass map");
+
+        auto kernel_list = function_pp_map.at(real_key);
+
+        auto scheme_0 = kernel_list[0].pp_params.scheme;
+        auto scheme_1 = kernel_list[1].pp_params.scheme;
+
+        if(scheme == scheme_0)
+            return kernel_list[0];
+        else if(scheme == scheme_1)
+            return kernel_list[1];
+        else
+            throw std::out_of_range("kernel not found in partial-pass map");
     }
 
     // helper for common used
@@ -273,6 +338,26 @@ static bool insert_default_entry(const FMKey&     def_key,
 
     // still use the detailed key with config to maintain the function map
     return std::get<1>(function_map.emplace(def_key, kernel));
+}
+
+static bool insert_default_pp_entry(const FMKeyPP&   def_key,
+                                    const FFTKernel& kernel_0,
+                                    const FFTKernel& kernel_1,
+                                    FPKeyMapPP&      def_key_pool,
+                                    FPMapPP&         function_map)
+{
+    // simple_key means the same thing as def_key, but we just remove kernel-config
+    // so we don't need to know the exact config when we're lookin' for the default kernel
+    FMKeyPP simple_key(def_key);
+    simple_key.kernel_config_1 = KernelConfig::EmptyConfig();
+    simple_key.kernel_config_2 = KernelConfig::EmptyConfig();
+
+    def_key_pool.emplace(simple_key, def_key);
+
+    std::array<FFTKernel, 2> kernels = {kernel_0, kernel_1};
+
+    // still use the detailed key with config to maintain the function map
+    return std::get<1>(function_map.emplace(def_key, kernels));
 }
 
 #endif // FUNCTION_POOL_H
