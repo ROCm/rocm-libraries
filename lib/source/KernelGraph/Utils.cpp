@@ -857,6 +857,32 @@ namespace rocRoller
             }
         }
 
+        std::set<int> getContainingSetCoordinates(KernelGraph const& graph, int node)
+        {
+            std::set<int> result;
+            int           tag = node;
+
+            while(true)
+            {
+                auto parent = only(graph.control.getInputNodeIndices<Body>(tag));
+                if(!parent)
+                    break;
+
+                auto setCoord = graph.control.get<SetCoordinate>(*parent);
+                if(!setCoord)
+                    break;
+
+                tag = *parent;
+
+                AssertFatal(graph.mapper.get<Unroll>(tag) > 0,
+                            "SetCoordinate needs Unroll dimension");
+
+                result.insert(tag);
+            }
+
+            return result;
+        }
+
         int getTopSetCoordinate(KernelGraph const& graph, int load)
         {
             int tag = load;

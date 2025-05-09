@@ -321,6 +321,15 @@ namespace rocRoller
         std::set<int> getTopSetCoordinates(KernelGraph& graph, std::vector<int> loads);
 
         /**
+         * @brief Get the tags of all of the SetCoordinate nodes directly upstream from node.
+         *
+         * @param graph
+         * @param node
+         * @return std::set<int>
+         */
+        std::set<int> getContainingSetCoordinates(KernelGraph const& graph, int node);
+
+        /**
          * @brief Get the SetCoordinate object upstream from load that sets the
          * coordinate for the dimension dim.
          *
