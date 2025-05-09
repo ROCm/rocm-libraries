@@ -1150,10 +1150,7 @@ rocsparselt_status
             }
 
             auto _algSelection = reinterpret_cast<_rocsparselt_matmul_alg_selection*>(algSelection);
-
-            auto in_type      = _matmulDescr->matrix_A->type;
-            auto out_type     = _matmulDescr->matrix_D->type;
-            auto compute_type = _matmulDescr->compute_type;
+            _rocsparselt_matmul_datatype matmul_datatype = is_matmul_datatype_valid(_matmulDescr->matrix_A->type, _matmulDescr->matrix_B->type, _matmulDescr->matrix_C->type, _matmulDescr->matrix_D->type, _matmulDescr->compute_type);
 
             int                               config_max_id = 0;
             _rocsparselt_matmul_alg_selection tmpAlgSelection(_handle);
@@ -1163,63 +1160,59 @@ rocsparselt_status
 
             rocsparselt_status status = rocsparselt_status_success;
 
-            if(in_type == HIP_R_16F && out_type == HIP_R_16F
-               && compute_type == rocsparselt_compute_f32)
+            switch(matmul_datatype)
             {
+            case MATMUL_DATATYPE_H_H_S:
                 status = findTopConfigs<__half, __half, float>(
                     _matmulDescr, &(tmpAlgSelection.configs[0]), &config_max_id, requestConfigs);
-            }
-            else if(in_type == HIP_R_16BF && out_type == HIP_R_16BF
-                    && compute_type == rocsparselt_compute_f32)
-            {
+                break;
+            case MATMUL_DATATYPE_B_B_S:
                 status = findTopConfigs<hip_bfloat16, hip_bfloat16, float>(
                     _matmulDescr, &(tmpAlgSelection.configs[0]), &config_max_id, requestConfigs);
-            }
-            else if(in_type == HIP_R_8I && out_type == HIP_R_8I
-                    && compute_type == rocsparselt_compute_i32)
-            {
+                break;
+            case MATMUL_DATATYPE_I8_I8_S:
                 status = findTopConfigs<int8_t, int8_t, float>(
                     _matmulDescr, &(tmpAlgSelection.configs[0]), &config_max_id, requestConfigs);
-            }
-            else if(in_type == HIP_R_8I && out_type == HIP_R_16F
-                    && compute_type == rocsparselt_compute_i32)
-            {
+                break;
+            case MATMUL_DATATYPE_I8_H_S:
                 status = findTopConfigs<int8_t, __half, float>(
                     _matmulDescr, &(tmpAlgSelection.configs[0]), &config_max_id, requestConfigs);
-            }
-            else if(in_type == HIP_R_8I && out_type == HIP_R_16BF
-                    && compute_type == rocsparselt_compute_i32)
-            {
+                break;
+            case MATMUL_DATATYPE_I8_B_S:
                 status = findTopConfigs<int8_t, hip_bfloat16, float>(
                     _matmulDescr, &(tmpAlgSelection.configs[0]), &config_max_id, requestConfigs);
-            }
-            else if(in_type == HIP_R_8F_E4M3 && out_type == HIP_R_32F
-                    && compute_type == rocsparselt_compute_f32)
-            {
+                break;
+            case MATMUL_DATATYPE_E4M3_S_S:
                 status = findTopConfigs<__hip_fp8_e4m3, float, float>(
                     _matmulDescr, &(tmpAlgSelection.configs[0]), &config_max_id, requestConfigs);
-            }
-            else if(in_type == HIP_R_8F_E5M2 && out_type == HIP_R_32F
-                    && compute_type == rocsparselt_compute_f32)
-            {
+                break;
+            case MATMUL_DATATYPE_E5M2_S_S:
                 status = findTopConfigs<__hip_fp8_e5m2, float, float>(
                     _matmulDescr, &(tmpAlgSelection.configs[0]), &config_max_id, requestConfigs);
+                break;
+            default:
+                status = rocsparselt_status_not_implemented;
             }
             if(status != rocsparselt_status_success)
                 return status;
 #else
-            if(in_type == HIP_R_16F && out_type == HIP_R_16F
-               && compute_type == rocsparselt_compute_f32)
+            switch(matmul_datatype)
+            {
+            case MATMUL_DATATYPE_H_H_S:
                 initSolutions<__half, __half, float>(
                     _handle, _matmulDescr->op_A, _matmulDescr->op_B, &config_max_id);
-            else if(in_type == HIP_R_16BF && out_type == HIP_R_16BF
-                    && compute_type == rocsparselt_compute_f32)
+                break;
+            case MATMUL_DATATYPE_B_B_S:
                 initSolutions<hip_bfloat16, hip_bfloat16, float>(
                     _handle, _matmulDescr->op_A, _matmulDescr->op_B, &config_max_id);
-            else if(in_type == HIP_R_8I && out_type == HIP_R_8I
-                    && compute_type == rocsparselt_compute_i32)
+                break;
+            case MATMUL_DATATYPE_I8_I8_S:
                 initSolutions<int8_t, int8_t, float>(
                     _handle, _matmulDescr->op_A, _matmulDescr->op_B, &config_max_id);
+                break;
+            default:
+                break;
+            }
             for(int i = 0; i < config_max_id; i++)
             {
                 configs[i].max_workspace_bytes = 0;
