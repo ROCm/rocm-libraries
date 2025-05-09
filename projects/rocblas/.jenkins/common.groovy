@@ -44,7 +44,9 @@ def runCompileCommand(platform, project, jobName, settings, boolean sameOrg=fals
             // requires at command execution time ${auxiliary.gfxTargetParser()} to set gfx_var variable
             if (settings.addressSanitizer)
             {
-                dynamicOptions = dynamicOptions + ' -a \$gfx_arch:xnack+'
+                // currently on sanitizer pipelines $gfx_arch includes xnack-/+
+                // dynamicOptions = dynamicOptions + ' -a \$gfx_arch:xnack+'
+                dynamicOptions = dynamicOptions + ' -a \$gfx_arch'
             }
             else
             {

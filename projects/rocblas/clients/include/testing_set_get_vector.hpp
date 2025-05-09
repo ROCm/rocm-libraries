@@ -41,6 +41,7 @@ void testing_set_get_vector(const Arguments& arg)
     // memory
     if(arg.algo == 1) // use arg.algo == 1 to test bad device pointer
     {
+#ifndef ASAN_BUILD
         T  host_data;
         T* host_data_ptr = &host_data;
 
@@ -52,27 +53,19 @@ void testing_set_get_vector(const Arguments& arg)
         status  = rocblas_get_vector_fn(1, sizeof(T), host_data_ptr, 1, host_data_ptr, 1);
         h_error = hipGetLastError(); // clear HIP error
         GTEST_ASSERT_TRUE(rocblas_status_internal_error == status);
-
+#else
+        GTEST_SKIP() << "ASAN_BUILD";
+#endif
         return;
     }
-    else if(N == 0)
+    else if(N <= 0 || incx <= 0 || incy <= 0 || ldd <= 0)
     {
-        DAPI_EXPECT(rocblas_status_success,
-                    rocblas_set_vector_fn,
-                    (N, sizeof(T), nullptr, incx, nullptr, ldd));
-        DAPI_EXPECT(rocblas_status_success,
-                    rocblas_get_vector_fn,
-                    (N, sizeof(T), nullptr, ldd, nullptr, incy));
-        return;
-    }
-    else if(N < 0 || incx <= 0 || incy <= 0 || ldd <= 0)
-    {
-        DAPI_EXPECT(rocblas_status_invalid_size,
-                    rocblas_set_vector_fn,
-                    (N, sizeof(T), nullptr, incx, nullptr, ldd));
-        DAPI_EXPECT(rocblas_status_invalid_size,
-                    rocblas_get_vector_fn,
-                    (N, sizeof(T), nullptr, ldd, nullptr, incy));
+        rocblas_status expected_status
+            = N == 0 ? rocblas_status_success : rocblas_status_invalid_size;
+        DAPI_EXPECT(
+            expected_status, rocblas_set_vector_fn, (N, sizeof(T), nullptr, incx, nullptr, ldd));
+        DAPI_EXPECT(
+            expected_status, rocblas_get_vector_fn, (N, sizeof(T), nullptr, ldd, nullptr, incy));
         return;
     }
 

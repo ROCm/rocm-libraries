@@ -51,6 +51,7 @@ void testing_set_get_matrix_async(const Arguments& arg)
 
     if(arg.algo == 1) // use arg.algo == 1 to test bad device pointer
     {
+#ifndef ASAN_BUILD
         T  host_data;
         T* host_data_ptr = &host_data;
 
@@ -63,7 +64,9 @@ void testing_set_get_matrix_async(const Arguments& arg)
             1, 1, sizeof(T), host_data_ptr, ldd, host_data_ptr, ldb, stream);
         h_error = hipGetLastError(); // clear HIP error
         GTEST_ASSERT_TRUE(rocblas_status_internal_error == status);
-
+#else
+        GTEST_SKIP() << "ASAN_BUILD";
+#endif
         return;
     }
     else if(rows == 0 || cols == 0)
