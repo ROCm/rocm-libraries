@@ -101,15 +101,15 @@ Options
 * `HIPBLASLT_ENABLE_BLIS`: Enable BLIS support (default `ON`)
 * `HIPBLASLT_ENABLE_HIP`: Use the HIP runtime (default `ON`)
 * `HIPBLASLT_ENABLE_LLVM`: Use msgpack for parsing configuration files (default `OFF`)
-* `HIBLASLT_ENABLE_MSGPACK`` Use msgpack for parsing configuration files (default `ON`)
+* `HIPBLASLT_ENABLE_MSGPACK`` Use msgpack for parsing configuration files (default `ON`)
 * `HIPBLASLT_ENABLE_OPENMP`: "Use OpenMP to improve performance (default `ON`)
 * `HIPBLASLT_ENABLE_ROCROLLER:` Use RocRoller library (default `OFF`)
 
 *Device libraries options:*
 
 * `HIPBLASLT_DEVICE_JOBS:` Allow N jobs generating device code libraries (default empty, uses nproc jobs)
-* `HIPBLASLT_DEVICE_KEEP_TMP:` Keep temporary build files (default `OFF`)
-* `HIPBLASLT_DEVICE_LIBLOGIC_PATH:` Custom path to library logic files (default empty, uses path to 'library')
+* `HIPBLASLT_KEEP_TMP:` Keep temporary build files (default `OFF`)
+* `HIPBLASLT_LIBLOGIC_PATH:` Custom path to library logic files (default empty, uses path to 'library')
 
 *Client options:*
 
