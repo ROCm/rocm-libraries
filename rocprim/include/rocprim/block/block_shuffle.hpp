@@ -399,7 +399,7 @@ public:
         up(flat_id, input, prev, storage);
 
         // Update block prefix
-        block_suffix = storage->buffer.get_unsafe_array()[BlockSize - 1];
+        block_suffix = storage.buffer.get_unsafe_array()[BlockSize - 1];
     }
 
     /// \brief The thread block rotates a blocked arrange of input items,
