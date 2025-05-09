@@ -823,13 +823,6 @@ class Solution(collections.abc.Mapping):
       reject(state, printRejectionReason, "DirectToLds%c does not supports NumLoadsCoalesced%c > 1 for zgemm"%(tc, tc))
       return False
 
-    # DirectToLds does not work if MacroTile is not power of 2
-    # LDS offset swap/rotate logic works only when MacroTile is power of 2
-    mt = state["MacroTile%c"%tc]
-    if mt & (mt - 1) != 0:
-      reject(state, printRejectionReason, "can't use DirectToLds if MacroTile%s is not power of 2"%tc)
-      return False
-
     # DirectToLds does not work with TLU=False and bpe > bpr and DepthU//NumLoadsCoalesced < 8
     # bpe > bpr case, Lower and upper 4 bytes elements are stored separately.
     # if TLU=False and DepthU//NumLoadsCoalesced is smaller than lower block size (8 elements),
