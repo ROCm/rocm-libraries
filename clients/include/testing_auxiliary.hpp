@@ -37,6 +37,25 @@
 #include "utility.hpp"
 #include <hipsparselt/hipsparselt.h>
 
+void testing_aux_get_version(const Arguments& arg)
+{
+    static int version;
+    hipsparselt_local_handle handle;
+    hipsparseLtGetVersion(handle, &version);
+
+    int major;
+    int minor;
+    int patch;
+    hipsparseLtGetProperty(HIP_LIBRARY_MAJOR_VERSION, &major);
+    hipsparseLtGetProperty(HIP_LIBRARY_MINOR_VERSION, &minor);
+    hipsparseLtGetProperty(HIP_LIBRARY_PATCH_LEVEL, &patch);
+    int version_ = major * 100000 + minor * 100 + patch;
+    ASSERT_EQ(version, version_);
+
+    char *rev = nullptr;
+    EXPECT_HIPSPARSE_STATUS(hipsparseLtGetGitRevision(handle, rev), HIPSPARSE_STATUS_INVALID_VALUE);
+}
+
 void testing_aux_handle_init_bad_arg(const Arguments& arg)
 {
     EXPECT_HIPSPARSE_STATUS(hipsparseLtInit(nullptr), HIPSPARSE_STATUS_INVALID_VALUE);
