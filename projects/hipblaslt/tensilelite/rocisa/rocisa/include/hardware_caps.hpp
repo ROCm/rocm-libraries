@@ -336,7 +336,7 @@ inline std::map<std::string, int> initRegisterCaps(const IsaVersion&            
 
     rv["PhysicalMaxVgpr"] = 512;
     rv["PhysicalMaxSgpr"] = 800;
-
+    rv["maxLDSConstOffset"] = 65536;
     if(isaVersion[0] == 10)
         rv["PhysicalMaxVgprCU"] = 1024 * 32;
     else if(isaVersion[0] == 11)
