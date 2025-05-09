@@ -107,11 +107,13 @@ enum class lookback_scan_determinism
     default_determinism = nondeterministic,
 };
 
+constexpr const int MAX_PAYLOAD_SIZE = ROCPRIM_MAX_ATOMIC_SIZE - 1;
+
 // lookback_scan_state object keeps track of prefixes status for
 // a look-back prefix scan. Initially every prefix can be either
 // invalid (padding values) or empty. One thread in a block should
 // later set it to partial, and later to complete.
-template<class T, bool UseSleep = false, bool IsSmall = (sizeof(T) <= 15)>
+template<class T, bool UseSleep = false, bool IsSmall = (sizeof(T) <= MAX_PAYLOAD_SIZE)>
 struct lookback_scan_state;
 
 /// Reduce lanes `0-valid_items` and return the result in lane 0.
