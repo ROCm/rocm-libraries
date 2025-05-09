@@ -30,7 +30,6 @@ from Tensile.KernelWriterBetaOnly import KernelWriterBetaOnly
 from Tensile.KernelWriterConversion import KernelWriterConversion
 from Tensile.KernelWriterActivationEnumHeader import KernelWriterActivationEnumHeader
 from Tensile.KernelWriterActivationFunction import KernelWriterActivationFunction
-from Tensile.KernelWriterActivationOnly import KernelWriterActivationOnly
 from Tensile.KernelWriterReduction import KernelWriterReduction
 
 
@@ -39,9 +38,8 @@ class KernelHelperEnum(IntEnum):
     Conversion = 1
     ActivationEnumHeader = 2
     ActivationFunction = 3
-    ActivationOnly = 4
-    Reduction = 5
-    All = 6
+    Reduction = 4
+    All = 5
 
 
 def conversionKernelNames(solution):
@@ -82,13 +80,6 @@ def activationFunctionNames(solution):
   return activationFunctionNames
 
 
-def activationOnlyKernelNames(solution):
-  activationOnlyKernelNames = []
-  if (solution["ActivationFused"] == False) and (solution["ProblemType"]["ActivationType"] != 'none'):
-    activationOnlyKernelNames.append(KernelWriterActivationOnly.kernelName(solution))
-  return activationOnlyKernelNames
-
-
 def reductionKernelNames(solution):
   reductionKernelNames = []
   if solution["ProblemType"]["Gradient"] and solution["ProblemType"]["UseBias"]:
@@ -112,7 +103,6 @@ def kernelObjectNameCallables():
     return [(KernelHelperEnum.Conversion, conversionKernelNames),
             (KernelHelperEnum.ActivationEnumHeader, activationEnumHeaderNames),
             (KernelHelperEnum.ActivationFunction, activationFunctionNames),
-            (KernelHelperEnum.ActivationOnly, activationOnlyKernelNames),
             (KernelHelperEnum.Reduction, reductionKernelNames),
             (KernelHelperEnum.BetaOnly, betaOnlyKernelNames)]
 
@@ -129,8 +119,6 @@ def initHelperKernelObjects(solution, kernelHelperType, cxxCompiler, isaInfoMap)
         result.extend(initActivationEnumHeaderObjects(solution))
     if kernelHelperType == KernelHelperEnum.ActivationFunction or kernelHelperType == KernelHelperEnum.All:
         result.extend(initActivationFunctionObjects(solution, cxxCompiler, isaInfoMap))
-    if kernelHelperType == KernelHelperEnum.ActivationOnly or kernelHelperType == KernelHelperEnum.All:
-        result.extend(initActivationOnlyKernelObjects(solution))
     if kernelHelperType == KernelHelperEnum.Reduction or kernelHelperType == KernelHelperEnum.All:
         result.extend(initReductionKernelObjects(solution))
     sortByEnum = lambda x: ("Enum" in x.getKernelName(), result.index(x))
@@ -236,21 +224,6 @@ def initActivationFunctionObjects(solution, cxxCompiler, isaInfoMap):
     state["Kernel"] = {"WavefrontSize": solution["WavefrontSize"], "ISA": tuple(solution["ISA"])}
     activationFunctionObjects.append(KernelWriterActivationFunction(state, cxxCompiler, list(isaInfoMap.keys())))
   return activationFunctionObjects
-
-
-def initActivationOnlyKernelObjects(solution):
-  activationOnlyKernelObjects = []
-  if (solution["ActivationFused"] == False) and (solution["ProblemType"]["ActivationType"] != 'none') :
-    state = {}
-    state["ProblemType"] = deepcopy(solution["ProblemType"])
-    state["ProblemType"]["GroupedGemm"] = False
-    state["ProblemType"]["UseBias"] = 0
-    state["ProblemType"]["BiasDataTypeList"] = []
-    state["KernelLanguage"] = "Source"
-    state["_GlobalAccumulation"] = solution["_GlobalAccumulation"]
-    state["ActivationFused"] = solution["ActivationFused"]
-    activationOnlyKernelObjects.append(KernelWriterActivationOnly(state))
-  return activationOnlyKernelObjects
 
 
 def initReductionKernelObjects(solution):
