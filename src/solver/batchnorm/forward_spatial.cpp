@@ -299,6 +299,7 @@ ConvSolution BnFwdTrainingSpatial::GetSolution(const ExecutionContext& context,
     auto result = ConvSolution{miopenStatusSuccess};
 
     {
+        auto use_hip = true;
         auto kernel = KernelInfo{};
 
         auto build_params = KernelBuildParameters{
@@ -339,11 +340,16 @@ ConvSolution BnFwdTrainingSpatial::GetSolution(const ExecutionContext& context,
             build_params.Define("MIO_BN_NCHW", in_nchw);
         }
 
-        kernel.kernel_file      = "MIOpenBatchNormFwdTrainSpatial.cl";
+        kernel.kernel_file      = use_hip? "MIOpenBatchNormFwdTrainSpatialHIP.cpp":"MIOpenBatchNormFwdTrainSpatial.cl";;
         std::string kernel_name = "MIOpenBatchNormFwdTrainSpatial";
-        kernel.kernel_name      = kernel_name;
+        if (use_hip) {
+            kernel_name += "HIP";
+            kernel.comp_options = build_params.GenerateFor(kbp::HIP{});
+        } else {
+            kernel.comp_options = build_params.GenerateFor(kbp::OpenCL{});
+        }
 
-        kernel.comp_options = build_params.GenerateFor(kbp::OpenCL{});
+        kernel.kernel_name = kernel_name;
 
         kernel.l_wk.push_back(xlocalsize);
         kernel.l_wk.push_back(ylocalsize);
