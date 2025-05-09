@@ -148,7 +148,7 @@ class LSUOn(LSU):
 
         numAccIdx    = len(self.LSUelementsArchIdx[0])
         numSetAccIdx = ceilDivide(numAccIdx, kernel["LocalSplitUReuseLDS"])
-
+        maxLDSConstOffset = writer.states.regCaps["maxLDSConstOffset"]
         # computeStoreVgprs
         if kernel["EnableMatrixInstruction"]:
             module.add(writer.computeStoreVgprs(kernel))
@@ -226,9 +226,6 @@ class LSUOn(LSU):
 
             dataPerWave = numAccVgpr * kernel["WavefrontSize"] * 4
             ldsStride   = dataPerWave * numWaves
-
-            addr = writer.vgprPool.checkOut(1,"addr")
-
             # Prepare Write/Read instruction info
             if bytesPerVector % 16 == 0:
                 DSStoreBX    = DSStoreB128
@@ -246,6 +243,9 @@ class LSUOn(LSU):
                 numInstPerVW = bytesPerVector // 4
                 regsPerStore = 1
 
+            maxOffset = (kernel["LocalSplitU"] -1) * ldsStride + ((numVgprPerLSU // self.LSUfullVw -1) * numInstPerVW + (numInstPerVW -1)) * regsPerStore * (bpr * kernel["WavefrontSize"])
+            numAddr = maxOffset // maxLDSConstOffset + 1
+            addr = writer.vgprPool.checkOut(numAddr,"addr")
             with writer.allocTmpSgpr(1) as tmpSgprInfo:
                 tmpSgpr = tmpSgprInfo.idx
                 module.add(SMovB32(dst=sgpr(tmpSgpr), src=hex(dataPerWave), \
@@ -298,6 +298,9 @@ class LSUOn(LSU):
                     comment="lsu offset = lsu_id * LSU Process Offset"))
                 module.add(VAddU32(dst=vgpr(addr), src0=vgpr(addr), src1=vgpr(tmpVgpr), \
                     comment="addr += lsu offset"))
+                for i in range(1,numAddr):
+                    module.add(VAddU32(vgpr(addr+i), maxLDSConstOffset*i, vgpr(addr), \
+                    comment="addr += maxLDSConstOffset*%u"%(i)))
 
             module.add(SWaitCnt(lgkmcnt=0, vscnt=0, comment="wait for all writes"))
             module.add(writer._syncThreads(kernel, "post-lsu local write"))
@@ -312,11 +315,14 @@ class LSUOn(LSU):
                     for r in range(0, kernel["LocalSplitU"]):
                         regIdx = (i * numInstPerVW + v) * regsPerStore
                         offset = r * ldsStride + regIdx * (bpr * kernel["WavefrontSize"])
+                        num = offset // maxLDSConstOffset
+                        offset -= num * maxLDSConstOffset
+                        srcvgpr = vgpr(addr+num)
                         if r == 0:
                             vgprStr = "LsuReduction+%u"%(localReadVgprIdx)
                         else:
                             vgprStr = inLoopTmpVgpr + (numVgprPerLSU * (r - 1) + regIdx)
-                        module.add(DSLoadBX(dst=vgpr(vgprStr, regsPerStore), src=vgpr(addr), \
+                        module.add(DSLoadBX(dst=vgpr(vgprStr, regsPerStore), src=srcvgpr, \
                                     ds=DSModifiers(offset=(offset)), \
                                     comment="r=%u i=%u, from acc[%d]"%(r, (i * numInstPerVW + v), neededAccVGPRIdx[0][(i * numInstPerVW + v)])))
                         # Generate Reduction code at the same time.
