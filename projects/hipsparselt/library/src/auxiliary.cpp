@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (c) 2022-2024 Advanced Micro Devices, Inc.
+ * Copyright (c) 2022-2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,19 +24,6 @@
 #include "activation.hpp"
 
 // clang-format off
-/* @deprecated */
-const hipsparseLtDatatype_t string_to_hipsparselt_datatype(const std::string& value)
-{
-    return
-        value == "f32_r" || value == "s" ? HIPSPARSELT_R_32F  :
-        value == "f16_r" || value == "h" ? HIPSPARSELT_R_16F  :
-        value == "bf16_r"                ? HIPSPARSELT_R_16BF  :
-        value == "i8_r"                  ? HIPSPARSELT_R_8I   :
-        value == "f8_r"                  ? HIPSPARSELT_R_8F   :
-        value == "bf8_r"                 ? HIPSPARSELT_R_8BF   :
-        static_cast<hipsparseLtDatatype_t>(-1);
-}
-
 const hipDataType string_to_hip_datatype(const std::string& value)
 {
     return
