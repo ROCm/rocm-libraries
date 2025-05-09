@@ -3972,7 +3972,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     self.states.b.numVgprLocalWriteSwapAddr = 0
     self.states.m.numVgprLocalWriteSwapAddr = 0
 
-    if self.states.archCaps["HasLDSGT64K"] and not kernel["StoreSwapAddr"]:
+    if self.states.archCaps["DeviceLDS"] > 65536 and not kernel["StoreSwapAddr"]:
       need128K = kernel["LdsOffsetA_Blk"]>=131072 and kernel["ExpandPointerSwap"] and not kernel["1LDSBuffer"]
       need64K = kernel["LdsOffsetA_Blk"]>=65536 and kernel["ExpandPointerSwap"] and not kernel["1LDSBuffer"]
       if need128K or kernel["LdsNumElementsAlignedA"]>=131072:

@@ -35,7 +35,7 @@ from Tensile.AsmStoreState import VectorDataTypes
 from Tensile.Common import assignParameterWithDefault, IsaInfo, \
                     print2, printExit, printWarning, \
                     roundUp, INDEX_CHARS, IsaVersion, SemanticVersion, \
-                    DepthUConfig, roundUpToNearestMultiple
+                    roundUpToNearestMultiple
 from Tensile.Common.DataType import DataType
 from Tensile.Common.GlobalParameters import defaultSolution, \
                                             defaultInternalSupportParams
@@ -156,7 +156,6 @@ class Solution(collections.abc.Mapping):
     splitGSU: bool,
     printSolutionRejectionReason: bool,
     printIndexAssignmentInfo: bool,
-    depthUConfig: DepthUConfig,
     assembler: Assembler,
     isaInfoMap: Dict[IsaVersion, IsaInfo],
     srcName: str = ""
@@ -221,8 +220,7 @@ class Solution(collections.abc.Mapping):
       printSolutionRejectionReason,
       printIndexAssignmentInfo,
       isaInfoMap,
-      assembler.rocm_version,
-      depthUConfig,
+      assembler.rocm_version
     )
     self._name = config["CustomKernelName"] if "CustomKernelName" in config and config["CustomKernelName"] else None
 
@@ -873,10 +871,13 @@ class Solution(collections.abc.Mapping):
     printRejectionReason: bool,
     printIndexAssignmentInfo: bool,
     isaInfoMap,
-    rocmVersion: SemanticVersion,
-    depthUConfig: DepthUConfig
+    rocmVersion: SemanticVersion
   ):
     isa = tuple(state["ISA"])
+
+    if state["MaxLDS"] == -1:
+      state["MaxLDS"] = isaInfoMap[isa].archCaps["DeviceLDS"]
+
     # NOTE: This entry should instead should already be set on the solution within the logic
     # files. This code will be removed once all logic files are updated to contain both
     # the keys "EnableF32XdlMathOp" and "F32XdlMathOp".
@@ -1355,8 +1356,7 @@ class Solution(collections.abc.Mapping):
         packedC1,
         printRejectionReason,
         isaInfoMap,
-        rocmVersion,
-        depthUConfig,
+        rocmVersion
       )
       if state["Valid"] or (state["ValidDepthU"] and (not state["Valid"])):
         break
@@ -1426,8 +1426,7 @@ class Solution(collections.abc.Mapping):
       packedC1,
       printRejectionReason: bool,
       isaInfoMap: Dict[IsaVersion, IsaInfo],
-      rocmVersion: SemanticVersion,
-      depthUConfig: DepthUConfig
+      rocmVersion: SemanticVersion
     ):
     ########################################
     # Auto search for DepthU starts here
@@ -1713,7 +1712,7 @@ class Solution(collections.abc.Mapping):
             padA, padB, padM = calcLdsPad(state["LocalReadVectorWidth"], isaInfoMap)
             ldsBlockSizePerPadA, ldsBlockSizePerPadB = calcLdsBlockSizePerPad(state["LocalReadVectorWidth"])
             ldsNumBytesA, ldsNumBytesAlignedA, ldsNumBytesB, ldsNumBytesAlignedB, ldsNumBytesMetadata, ldsNumBytesAlignedMetadata = calcLdsNumBytes(padA, ldsBlockSizePerPadA, padB, ldsBlockSizePerPadB)
-            if (ldsNumBytesAlignedA + ldsNumBytesAlignedB) > depthUConfig.maxLDS:
+            if (ldsNumBytesAlignedA + ldsNumBytesAlignedB) > state["MaxLDS"]:
               state["LocalReadVectorWidth"] //= 2
       else:
         if state["UseDotInstruction"]:
@@ -2577,7 +2576,7 @@ class Solution(collections.abc.Mapping):
 
       state["StoreSwapAddr"] = (state["PrefetchGlobalRead"] == 2) and \
         (state["1LDSBuffer"] == 0) and \
-        (offsetBlk + int(2**(math.ceil(math.log(offsetBlk, 2)))) > depthUConfig.maxLDS)
+        (offsetBlk + int(2**(math.ceil(math.log(offsetBlk, 2)))) > state["MaxLDS"])
 
       if offsetBlk > 0 and not state["StoreSwapAddr"]:
         # Rounds offsetBlk to a power of two to enable inlining {s,v}_xor constants for swapping offsets
@@ -2596,13 +2595,13 @@ class Solution(collections.abc.Mapping):
     # if User want to control the LDS usage, we may open this para in the future
     ldsNumBytesReduction = state["LocalSplitU"] * state["MacroTile0"] * state["MacroTile1"] * state["ProblemType"]["ComputeDataType"].numBytes() if state["LocalSplitU"] > 1 else 0
     state["LocalSplitUReuseLDS"] = 1
-    if ldsNumBytesReduction > depthUConfig.maxLDS:
-      state["LocalSplitUReuseLDS"] = math.ceil(ldsNumBytesReduction / depthUConfig.maxLDS)
+    if ldsNumBytesReduction > state["MaxLDS"]:
+      state["LocalSplitUReuseLDS"] = math.ceil(ldsNumBytesReduction / state["MaxLDS"])
       # reserve all the LDS to LSU.
-      ldsNumBytesReduction = depthUConfig.maxLDS
+      ldsNumBytesReduction = state["MaxLDS"]
 
     # lds max occupancy
-    ldsSizeOccupancy = depthUConfig.deviceLDS // state["MaxOccupancy"]
+    ldsSizeOccupancy = isaInfoMap[isa].archCaps["DeviceLDS"] // state["MaxOccupancy"]
     ldsNumBytesOccupancy = ldsSizeOccupancy
 
     #print("LdsOffsetB", state["LdsOffsetB"])
@@ -2619,7 +2618,7 @@ class Solution(collections.abc.Mapping):
     if state["1LDSBuffer"] == -1:
       if ldsNumBytesAB  <= max(ldsSizeOccupancy,32768) or \
           (state["ProblemType"]["ComputeDataType"].numBytes() * state["MacroTile0"] * state["MacroTile1"] > 32768*4 and \
-            not (ldsNumBytesAB > depthUConfig.deviceLDS)):
+            not (ldsNumBytesAB > isaInfoMap[isa].archCaps["DeviceLDS"])):
         state["1LDSBuffer"] = 0
       else:
         state["1LDSBuffer"] = 1
@@ -2674,7 +2673,7 @@ class Solution(collections.abc.Mapping):
         ldsNumElementsRemapC = max(ldsNumElementsRemapC, ldsNumElementsRemapC * (computeBytes / state["ProblemType"]["DestDataType"].numBytes()))
         ldsSize = ldsNumElementsRemapC * state["ProblemType"]["DestDataType"].numBytes()
         if not math.log(state["MacroTile0"],2).is_integer() or \
-            ldsSize > depthUConfig.maxLDS or \
+            ldsSize > state["MaxLDS"] or \
             state["SourceSwap"] or \
             (state["GlobalSplitU"] > 1 or state["GlobalSplitU"] == -1) and (state["_GlobalAccumulation"] != 'MultipleBuffer') or \
             state["MatrixInstBN"] > 1 and state["MatrixInstN"] == 4 :
@@ -2924,8 +2923,8 @@ class Solution(collections.abc.Mapping):
 
     state["LdsNumBytes"] = ldsNumBytes
     ldsSize = ldsNumBytes
-    if ldsSize > depthUConfig.maxLDS:
-      reject(state, printRejectionReason, "Kernel Uses %u > %u bytes of LDS" % ( ldsSize, depthUConfig.maxLDS))
+    if ldsSize > state["MaxLDS"]:
+      reject(state, printRejectionReason, "Kernel Uses %u > %u bytes of LDS" % ( ldsSize, state["MaxLDS"]))
       state["ValidDepthU"] = False
       return
 

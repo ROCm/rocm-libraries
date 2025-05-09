@@ -27,7 +27,7 @@ from typing import Dict
 from .Activation import ActivationType
 from . import Hardware
 from . import Properties
-from Tensile.Common import state, state_key_ordering, IsaInfo, DepthUConfig
+from Tensile.Common import state, state_key_ordering, IsaInfo
 from Tensile.Common.Architectures import gfxToIsa
 from Tensile.Common.DataType import DataType
 from Tensile.Common.GlobalParameters import internalParameters
@@ -690,7 +690,6 @@ class Solution:
         splitGSU: bool,
         printSolutionRejectionReason: bool,
         printIndexAssignmentInfo: bool,
-        depthUConfig: DepthUConfig,
         assembler: Assembler,
         isaInfoMap: Dict[str, IsaInfo]
     ):
@@ -699,7 +698,6 @@ class Solution:
                    splitGSU,
                    printSolutionRejectionReason,
                    printIndexAssignmentInfo,
-                   depthUConfig,
                    assembler,
                    isaInfoMap,
                    solution.srcName
@@ -712,7 +710,6 @@ class Solution:
             splitGSU: bool,
             printSolutionRejectionReason: bool,
             printIndexAssignmentInfo: bool,
-            depthUConfig: DepthUConfig,
             #mink
             assembler,
             isaInfoMap,
@@ -768,7 +765,6 @@ class Solution:
                                   splitGSU,
                                   printSolutionRejectionReason,
                                   printIndexAssignmentInfo,
-                                  depthUConfig,
                                   assembler,
                                   isaInfoMap,
                                   srcName

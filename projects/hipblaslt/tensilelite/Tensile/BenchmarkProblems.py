@@ -51,13 +51,13 @@ from .Toolchain.Assembly import AssemblyToolchain
 from .Toolchain.Source import SourceToolchain
 from Tensile.Common import HR, print1, print2, IsaInfo, IsaVersion, \
         printExit, printWarning, ensurePath, tqdm, state, \
-        BENCHMARK_PROBLEMS_DIR, BENCHMARK_DATA_DIR, DepthUConfig
+        BENCHMARK_PROBLEMS_DIR, BENCHMARK_DATA_DIR
 from Tensile.Common.Architectures import isaToGfx, gfxToVariants
 from Tensile.Common.GlobalParameters import globalParameters, startTime
 
 
 def _generateForkedSolutions(problemType, constantParams, forkPermutations, assembler: Assembler, \
-                            debugConfig: DebugConfig, depthUConfig: DepthUConfig, isaInfoMap: Dict[IsaVersion, IsaInfo]):
+                            debugConfig: DebugConfig, isaInfoMap: Dict[IsaVersion, IsaInfo]):
     """Creates a list with a Solution object for each parameter combination in forkPermutations"""
     print1("# Enumerating Solutions")
 
@@ -93,7 +93,6 @@ def _generateForkedSolutions(problemType, constantParams, forkPermutations, asse
                 debugConfig.splitGSU,
                 debugConfig.printSolutionRejectionReason,
                 debugConfig.printIndexAssignmentInfo,
-                depthUConfig,
                 assembler,
                 isaInfoMap
             )
@@ -112,7 +111,6 @@ def _getCustomKernelSolutionObj(
         internalSupportParams,
         assembler: Assembler,
         debugConfig: DebugConfig,
-        depthUConfig: DepthUConfig,
         isaInfoMap: Dict[IsaVersion, IsaInfo],
         directory=CUSTOM_KERNEL_PATH
     ):
@@ -136,7 +134,6 @@ def _getCustomKernelSolutionObj(
                debugConfig.printIndexAssignmentInfo,
                debugConfig.printSolutionRejectionReason,
                debugConfig.printIndexAssignmentInfo,
-               depthUConfig,
                assembler,
                isaInfoMap
            )
@@ -151,14 +148,13 @@ def _generateCustomKernelSolutions(
         failOnMismatch,
         assembler: Assembler,
         debugConfig: DebugConfig,
-        depthUConfig: DepthUConfig,
         isaInfoMap: Dict[str, IsaInfo]
     ):
     """Creates a list with a Solution object for each name in customKernel"""
     solutions = []
     for kernelName in customKernels:
         print1("# Processing custom kernel {}".format(kernelName))
-        solution = _getCustomKernelSolutionObj(kernelName, internalSupportParams, assembler, debugConfig, depthUConfig, isaInfoMap)
+        solution = _getCustomKernelSolutionObj(kernelName, internalSupportParams, assembler, debugConfig, isaInfoMap)
         # The ActivationType setting in YAML is meaningless in customKernel case.
         # Therefore, we override the customKernel setting with the ActivationType value from ProblemType to avoid false alarms during subsequent problemType checks.
         solution["ProblemType"]["ActivationType"] = problemType["ActivationType"]
@@ -203,7 +199,6 @@ def writeBenchmarkFiles(
         srcToolchain: SourceToolchain,
         sourcePath: Path,
         debugConfig: DebugConfig,
-        depthUConfig: DepthUConfig,
         deviceId: int,
         gfxName: str,
         isaInfoMap: Dict[IsaVersion, IsaInfo]
@@ -270,7 +265,6 @@ def writeBenchmarkFiles(
                      debugConfig.splitGSU,
                      debugConfig.printSolutionRejectionReason,
                      debugConfig.printIndexAssignmentInfo,
-                     depthUConfig,
                      isaInfoMap,
                  )
     newLibrary.applyNaming(debugConfig.splitGSU)
@@ -318,7 +312,7 @@ def writeBenchmarkFiles(
 def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSizeGroupIdx, useCache,
                          asmToolchain: AssemblyToolchain, srcToolchain: SourceToolchain, cCompiler: str,
                          buildTmpPath: Path, benchmarkProblemsPath: Path,
-                         debugConfig: DebugConfig, depthUConfig: DepthUConfig, deviceId: int,
+                         debugConfig: DebugConfig, deviceId: int,
                          gfxName: str, isaInfoMap: Dict[str, IsaInfo]
     ):
     """Run the benchmarking for a single entry in the BenchmarkProblems of a Tensile config"""
@@ -401,11 +395,11 @@ def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSize
 
             regSolutions = _generateForkedSolutions(benchmarkProcess.problemType, \
                     benchmarkStep.constantParams, forkPermutations, asmToolchain.assembler, \
-                        debugConfig, depthUConfig, isaInfoMap)
+                        debugConfig, isaInfoMap)
             kcSolutions = _generateCustomKernelSolutions(benchmarkProcess.problemType, \
                     benchmarkStep.customKernels, benchmarkStep.internalSupportParams, \
                     not benchmarkStep.customKernelWildcard, asmToolchain.assembler, debugConfig, \
-                        depthUConfig, isaInfoMap)
+                        isaInfoMap)
 
             maxPossibleSolutions += len(kcSolutions)
             solutions = regSolutions + kcSolutions
@@ -434,7 +428,7 @@ def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSize
                     benchmarkStep.problemSizes, benchmarkStep.biasTypeArgs, \
                     benchmarkStep.factorDimArgs, benchmarkStep.activationArgs, \
                     benchmarkStep.icacheFlushArgs, shortName, [], asmToolchain, srcToolchain, \
-                    sourcePath, debugConfig, depthUConfig, deviceId, gfxName, isaInfoMap)
+                    sourcePath, debugConfig, deviceId, gfxName, isaInfoMap)
             # ^ this mutates solutions
 
             # write cache data
@@ -507,7 +501,6 @@ def main(
     outputPath: Path,
     buildTmpPath: Path,
     debugConfig: DebugConfig,
-    depthUConfig: DepthUConfig,
     deviceId: int,
     gfxName: str,
     isaInfoMap: Dict[str, IsaInfo]
@@ -561,7 +554,6 @@ def main(
                             buildTmpPath,
                             benchmarkProblemsPath,
                             debugConfig,
-                            depthUConfig,
                             deviceId,
                             gfxName,
                             isaInfoMap

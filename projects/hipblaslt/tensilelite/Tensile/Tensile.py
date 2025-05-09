@@ -38,7 +38,7 @@ from typing import Dict
 from Tensile import __version__
 from Tensile.Common import print1, printExit, printWarning, ensurePath, HR, isRhel8, \
                            LIBRARY_LOGIC_DIR, setVerbosity, IsaInfo, makeDebugConfig, \
-                           makeDepthUConfig, DebugConfig, DepthUConfig, IsaVersion, coVersionMap
+                           DebugConfig, IsaVersion, coVersionMap
 from Tensile.Common.Architectures import detectGlobalCurrentISA, isaToGfx
 from Tensile.Common.Capabilities import makeIsaInfoMap
 from Tensile.Common.GlobalParameters import globalParameters, assignGlobalParameters, \
@@ -69,7 +69,6 @@ def executeStepsInConfig(
         isaInfoMap: Dict[str, IsaInfo],
         cCompiler: str,
         debugConfig: DebugConfig,
-        depthUConfig: DepthUConfig,
         deviceId: int
    ):
     """Conducts the steps in the provided ``config`` according to the Tensile workflow.
@@ -105,7 +104,6 @@ def executeStepsInConfig(
             outputPath,
             buildTmpPath,
             debugConfig,
-            depthUConfig,
             deviceId,
             gfxName,
             isaInfoMap,
@@ -133,7 +131,6 @@ def executeStepsInConfig(
                 debugConfig.splitGSU,
                 debugConfig.printSolutionRejectionReason,
                 debugConfig.printIndexAssignmentInfo,
-                depthUConfig,
                 isaInfoMap,
             )
             print1("")
@@ -482,7 +479,6 @@ def Tensile(userArgs):
     overrideParameters = argUpdatedGlobalParameters(args)
 
     debugConfig = makeDebugConfig(config["GlobalParameters"])
-    depthUConfig = makeDepthUConfig(config["GlobalParameters"])
 
     for key, value in overrideParameters.items():
         print("Overriding {0}={1}".format(key, value))
@@ -491,7 +487,7 @@ def Tensile(userArgs):
     if "MaxFileName" in globalParameters or "MaxFileName" in config:
         printWarning("MaxFileName is no longer configurable, it will be automatically set to 64")
 
-    executeStepsInConfig(config, outputPath, asmToolchain, srcToolchain, isaInfoMap, cCompiler, debugConfig, depthUConfig, device_id)
+    executeStepsInConfig(config, outputPath, asmToolchain, srcToolchain, isaInfoMap, cCompiler, debugConfig, device_id)
 
 def TensileConfigPath(*args):
     return os.path.join(os.path.dirname(os.path.realpath(__file__)), "Configs", *args)

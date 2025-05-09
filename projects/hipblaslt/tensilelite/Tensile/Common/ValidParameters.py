@@ -524,6 +524,7 @@ validParameters = { # we need to make sure this matches develop
     "MaxOccupancy": list(
         range(1, 40 + 1)
     ),  # wg / CU; if cache thrashing is hurting performance, this allocates extra lds to artificially limit occupancy
+    "MaxLDS": [-1, 65536, 163840],
     "WorkGroup": makeValidWorkGroups(),  # ( wg0 x wg1 x LocalSplitU ) dimensions of the workgroup which will operate on a tile and share lds
     # ThreadTile: ( tt0 x tt1 ) dimensions of the C tile that each thread works on,
     # TT=4 and VW=4 means a thread will work on a tight 4x4 tile of C, where VW=1 means the tile will work on 16 spread out values
