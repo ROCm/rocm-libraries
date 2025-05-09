@@ -163,22 +163,10 @@ namespace
             return libPath;
         }
 
-        auto                  soPath = rocblaslt_internal_get_so_path();
-        std::filesystem::path libPath(std::filesystem::path(soPath).parent_path());
-
-        auto pathIfExists = [](std::filesystem::path p) -> std::optional<std::filesystem::path> {
-            if(std::filesystem::exists(p))
-                return p;
-            return {};
-        };
-
-        if(auto p
-           = pathIfExists(libPath / ".." / "Tensile" / "library" / "hipblasltExtOpLibrary.dat"))
-            return p->string();
-        if(auto p = pathIfExists(libPath / "library" / "hipblasltExtOpLibrary.dat"))
-            return p->string();
-        if(auto p = pathIfExists(libPath / "hipblaslt" / "library" / "hipblasltExtOpLibrary.dat"))
-            return p->string();
+        auto path = rocblaslt_find_library_relative_path(
+            std::filesystem::path("hipblasltExtOpLibrary.dat"));
+        if(path)
+            return path->string();
 
         return DEFAULT_EXT_OP_LIBRARY_PATH;
     }

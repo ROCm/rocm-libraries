@@ -2178,6 +2178,63 @@ std::string rocblaslt_internal_get_so_path()
 }
 #endif
 
+std::optional<std::filesystem::path> rocblaslt_find_library_relative_path(
+    const std::optional<std::filesystem::path>& relpath,
+    const std::optional<std::filesystem::path>& default_lib_dir)
+{
+    auto pathIfExists
+        = [&](const std::filesystem::path& p) -> std::optional<std::filesystem::path> {
+        if(relpath)
+        {
+            auto full_path = p / (*relpath);
+            if(std::filesystem::exists(full_path))
+                return full_path;
+        }
+
+        if(std::filesystem::exists(p))
+            return p;
+        return {};
+    };
+
+    auto probeLibDir
+        = [&](const std::filesystem::path& lib_dir) -> std::optional<std::filesystem::path> {
+        // There are a few fallback locations that have grown over time:
+        //   {lib_dir}/hipblaslt/library
+        // Legacy:
+        //   {lib_dir}/../Tensile/library
+        //   {lib_dir}/library
+        if(auto p = pathIfExists(lib_dir / "hipblaslt" / "library"))
+            return *p;
+        if(auto p = pathIfExists(lib_dir.parent_path() / "Tensile" / "library"))
+            return *p;
+        if(auto p = pathIfExists(lib_dir / "library"))
+            return *p;
+        return std::nullopt;
+    };
+
+    if(default_lib_dir)
+    {
+        return probeLibDir(*default_lib_dir);
+    }
+
+    auto so_path       = std::filesystem::path(rocblaslt_internal_get_so_path()).parent_path();
+    bool windows_style = false;
+#ifdef _WIN32
+    windows_style = true;
+#endif
+
+    // If on Windows, probe the sibling lib directory first, as that is non-deprecated.
+    // Then fall back to the same-directory (bin) path.
+    if(windows_style)
+    {
+        auto sibling = probeLibDir(so_path.parent_path() / "lib");
+        if(sibling)
+            return sibling;
+    }
+
+    return probeLibDir(so_path);
+}
+
 void rocblaslt_log_error(const char* func, const char* var, const char* msg)
 {
     log_error(func, var, msg);
