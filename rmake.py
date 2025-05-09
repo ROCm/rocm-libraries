@@ -101,13 +101,10 @@ def config_cmd():
         # CPACK_PACKAGING_INSTALL_PREFIX= defined as blank as it is appended to end of path for archive creation
         cmake_platform_opts.append(f"-DCPACK_PACKAGING_INSTALL_PREFIX=")
         cmake_platform_opts.append(f'-DCMAKE_INSTALL_PREFIX="C:/hipSDK"')
-        cmake_platform_opts.append("-DCPACK_SOURCE_GENERATOR=ZIP")
-        cmake_platform_opts.append("-DCPACK_GENERATOR=ZIP")
     else:
         rocm_raw_path = os.getenv('ROCM_PATH', "/opt/rocm")
         rocm_path = rocm_raw_path
         cmake_platform_opts.append(f"-DROCM_DIR:PATH={rocm_path} -DCPACK_PACKAGING_INSTALL_PREFIX={rocm_path}")
-        cmake_platform_opts.append("-DCPACK_GENERATOR=\"DEB;RPM\"")
 
     print(f"Build source path: {src_path}")
 
