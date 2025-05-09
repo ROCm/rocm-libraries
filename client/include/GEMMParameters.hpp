@@ -136,7 +136,8 @@ namespace rocRoller
                 bool loadLDSScaleA = false;
                 bool loadLDSScaleB = false;
 
-                bool swizzleScale = false;
+                bool swizzleScale  = false;
+                bool prefetchScale = false;
 
                 // Other options
                 bool loadLDSA  = true;
@@ -149,6 +150,7 @@ namespace rocRoller
                 bool prefetch          = false;
                 int  prefetchInFlight  = 2;
                 int  prefetchLDSFactor = 0;
+                bool prefetchMixMemOps = false;
                 bool betaInFma         = true;
 
                 // Unroll Options

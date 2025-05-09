@@ -95,6 +95,7 @@ struct rocRoller::Serialization::
         iot::mapRequired(io, "loadLDSScale_A", result.solutionParams.loadLDSScaleA);
         iot::mapRequired(io, "loadLDSScale_B", result.solutionParams.loadLDSScaleB);
         iot::mapRequired(io, "swizzleScale", result.solutionParams.swizzleScale);
+        iot::mapRequired(io, "prefetchScale", result.solutionParams.prefetchScale);
 
         iot::mapRequired(io, "mac_m", result.solutionParams.macM);
         iot::mapRequired(io, "mac_n", result.solutionParams.macN);
@@ -119,6 +120,7 @@ struct rocRoller::Serialization::
         iot::mapRequired(io, "prefetch", result.solutionParams.prefetch);
         iot::mapRequired(io, "prefetchInFlight", result.solutionParams.prefetchInFlight);
         iot::mapRequired(io, "prefetchLDSFactor", result.solutionParams.prefetchLDSFactor);
+        iot::mapRequired(io, "prefetchMixMemOps", result.solutionParams.prefetchMixMemOps);
         iot::mapRequired(io, "betaInFma", result.solutionParams.betaInFma);
         iot::mapRequired(io, "scheduler", result.solutionParams.scheduler);
 
@@ -179,6 +181,7 @@ struct rocRoller::Serialization::MappingTraits<Client::GEMMClient::SolutionParam
         iot::mapRequired(io, "prefetch", params.prefetch);
         iot::mapRequired(io, "prefetchInFlight", params.prefetchInFlight);
         iot::mapRequired(io, "prefetchLDSFactor", params.prefetchLDSFactor);
+        iot::mapRequired(io, "prefetchMixMemOps", params.prefetchMixMemOps);
         iot::mapRequired(io, "betaInFma", params.betaInFma);
         iot::mapRequired(io, "scheduler", params.scheduler);
         iot::mapRequired(io, "matchMemoryAccess", params.matchMemoryAccess);
@@ -198,6 +201,7 @@ struct rocRoller::Serialization::MappingTraits<Client::GEMMClient::SolutionParam
         iot::mapRequired(io, "loadScaleLDS_A", params.loadLDSScaleA);
         iot::mapRequired(io, "loadScaleLDS_B", params.loadLDSScaleB);
         iot::mapRequired(io, "swizzleScale", params.swizzleScale);
+        iot::mapRequired(io, "prefetchScale", params.prefetchScale);
 
         iot::mapRequired(io, "streamK", params.streamK);
         iot::mapRequired(io, "streamKTwoTile", params.streamKTwoTile);
@@ -1054,7 +1058,8 @@ int main(int argc, const char* argv[])
         .loadLDSScaleA = false,
         .loadLDSScaleB = false,
 
-        .swizzleScale = false,
+        .swizzleScale  = false,
+        .prefetchScale = false,
 
         .loadLDSA  = true,
         .loadLDSB  = true,
@@ -1066,6 +1071,7 @@ int main(int argc, const char* argv[])
         .prefetch          = false,
         .prefetchInFlight  = 0,
         .prefetchLDSFactor = 0,
+        .prefetchMixMemOps = false,
 
         .betaInFma = true,
 
@@ -1330,6 +1336,10 @@ int main(int argc, const char* argv[])
     app.add_option("--prefetchLDSFactor",
                    solution.prefetchLDSFactor,
                    "Prefetch 1/prefetchLDSFactor of MacroTile from LDS");
+    auto prefetchMixMemOpsFlag
+        = app.add_flag("--prefetchMixMemOps",
+                       solution.prefetchMixMemOps,
+                       "Mix global and LDS memory operations during prefetching.");
     app.add_flag("--streamK", solution.streamK, "Enable StreamK algorithm.");
     app.add_flag("--streamKTwoTile", solution.streamKTwoTile, "Enable two-tile StreamK algorithm.");
 
@@ -1338,6 +1348,9 @@ int main(int argc, const char* argv[])
 
     app.add_flag(
         "--swizzleScale", solution.swizzleScale, "Use Swizzle when loading A and B scale.");
+    app.add_flag("--prefetchScale",
+                 solution.prefetchScale,
+                 "Prefetch scale values with using Swizzled scales.");
 
     //
     // Benchmarking options
@@ -1602,6 +1615,25 @@ int main(int argc, const char* argv[])
             solution.waveK = 32;
         if(solution.waveB == -1)
             solution.waveB = 1;
+    }
+
+    // Set default prefetchMixMemOps
+    if(prefetchMixMemOpsFlag->count() == 0)
+    {
+        solution.prefetchMixMemOps = false;
+
+        if(solution.prefetchLDSFactor != 0)
+            solution.prefetchMixMemOps = true;
+
+        if(solution.scaleB == Operations::ScaleMode::Separate && !solution.loadLDSScaleB)
+            solution.prefetchMixMemOps = false;
+
+        if(solution.scaleA == Operations::ScaleMode::Separate && !solution.loadLDSScaleA)
+            solution.prefetchMixMemOps = false;
+
+        // TODO: enable (prefetchMixMemOps == true && prefetchLDSFactor == 2 && direct2LDSA/B = true)
+        if(solution.prefetchLDSFactor == 2 && (solution.direct2LDSA || solution.direct2LDSB))
+            solution.prefetchMixMemOps = false;
     }
 
     //

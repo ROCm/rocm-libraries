@@ -246,6 +246,7 @@ direct2LDS_B: false
 prefetch: false
 prefetchInFlight: 0
 prefetchLDSFactor: 0
+prefetchMixMemOps: false
 betaInFma: true
 scheduler: Priority
 trans_A: N
@@ -264,6 +265,7 @@ scaleBlockSize: 0
 loadScaleLDS_A: false
 loadScaleLDS_B: false
 swizzleScale: false
+prefetchScale: false
 ...
 
 """
@@ -296,6 +298,7 @@ direct2LDS_B: false
 prefetch: false
 prefetchInFlight: 0
 prefetchLDSFactor: 0
+prefetchMixMemOps: false
 betaInFma: true
 scheduler: Priority
 matchMemoryAccess: true
@@ -312,6 +315,7 @@ scaleBlockSize: 0
 loadScaleLDS_A: false
 loadScaleLDS_B: false
 swizzleScale: false
+prefetchScale: false
 streamK: false
 streamKTwoTile: false
 ...

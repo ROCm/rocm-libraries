@@ -135,6 +135,7 @@ class GEMMSolution:
     prefetch: bool = True
     prefetchInFlight: int = 2
     prefetchLDSFactor: int = 0
+    prefetchMixMemOps: bool = False
 
     scale_A: str = "None"
     scale_B: str = "None"
@@ -146,6 +147,7 @@ class GEMMSolution:
     loadLDSScale_A: bool = False
     loadLDSScale_B: bool = False
     swizzleScale: bool = False
+    prefetchScale: bool = False
 
     streamK: bool = False
     numWGs: int = 0

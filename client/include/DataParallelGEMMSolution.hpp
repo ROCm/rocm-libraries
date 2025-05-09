@@ -396,9 +396,10 @@ namespace rocRoller
                         params->setDimensionInfo(*m_tagLoadScaleB, macTileBScale);
                     }
 
-                    params->unrollX      = solutionParams.unrollX;
-                    params->unrollY      = solutionParams.unrollY;
-                    params->swizzleScale = solutionParams.swizzleScale;
+                    params->unrollX       = solutionParams.unrollX;
+                    params->unrollY       = solutionParams.unrollY;
+                    params->swizzleScale  = solutionParams.swizzleScale;
+                    params->prefetchScale = solutionParams.prefetchScale;
 
                     if(solutionParams.prefetch)
                     {
@@ -406,23 +407,7 @@ namespace rocRoller
                         params->unrollK           = std::max(2, solutionParams.prefetchInFlight);
                         params->prefetchInFlight  = solutionParams.prefetchInFlight;
                         params->prefetchLDSFactor = solutionParams.prefetchLDSFactor;
-                        params->prefetchMixMemOps = false;
-
-                        if(solutionParams.prefetchLDSFactor != 0)
-                            params->prefetchMixMemOps = true;
-
-                        if(solutionParams.scaleB == Operations::ScaleMode::Separate
-                           && !solutionParams.loadLDSScaleB)
-                            params->prefetchMixMemOps = false;
-
-                        if(solutionParams.scaleA == Operations::ScaleMode::Separate
-                           && !solutionParams.loadLDSScaleA)
-                            params->prefetchMixMemOps = false;
-
-                        // TODO: enable (prefetchMixMemOps == true && prefetchLDSFactor == 2 && direct2LDSA/B = true)
-                        if(solutionParams.prefetchLDSFactor == 2
-                           && (solutionParams.direct2LDSA || solutionParams.direct2LDSB))
-                            params->prefetchMixMemOps = false;
+                        params->prefetchMixMemOps = solutionParams.prefetchMixMemOps;
                     }
                     else
                     {

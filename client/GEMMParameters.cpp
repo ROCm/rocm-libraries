@@ -94,14 +94,14 @@ namespace rocRoller
                 rv << "_UNROLL";
                 rocRoller::streamJoin(rv, std::vector{unrollX, unrollY}, "x");
 
-                rv << "_SwizzleScale";
-                rocRoller::streamJoin(rv, std::vector{swizzleScale}, "");
+                rv << "_SwizzleScale" << swizzleScale << prefetchScale;
 
                 if(prefetch)
                 {
                     rv << "_PF";
                     rocRoller::streamJoin(
                         rv, std::vector{prefetchInFlight, prefetchLDSFactor}, "x");
+                    rv << "m" << prefetchMixMemOps;
                 }
 
                 rv << "_MI";
