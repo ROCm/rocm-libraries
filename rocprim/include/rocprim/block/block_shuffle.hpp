@@ -534,7 +534,7 @@ public:
         this->down(flat_id, input, next, storage);
 
         // Update block prefixstorage_->
-        block_prefix = storage->next[0];
+        block_prefix = storage.buffer.get_unsafe_array()[0];
     }
 };
 
