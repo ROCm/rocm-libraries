@@ -109,29 +109,6 @@ constexpr hipsparseOrder_t char_to_hipsparselt_order(char value)
     }
 }
 
-// return precision string for hipsparseLtDatatype_t
-/* @deprecated */
-HIPSPARSELT_EXPORT
-constexpr const char* hipsparselt_datatype_to_string(hipsparseLtDatatype_t type)
-{
-    switch(type)
-    {
-    case HIPSPARSELT_R_32F:
-        return "f32_r";
-    case HIPSPARSELT_R_16F:
-        return "f16_r";
-    case HIPSPARSELT_R_16BF:
-        return "bf16_r";
-    case HIPSPARSELT_R_8I:
-        return "i8_r";
-    case HIPSPARSELT_R_8F:
-        return "f8_r";
-    case HIPSPARSELT_R_8BF:
-        return "bf8_r";
-    }
-    return "invalid";
-}
-
 // return precision string for hipDataType
 HIPSPARSELT_EXPORT
 constexpr const char* hip_datatype_to_string(hipDataType type)
@@ -173,11 +150,6 @@ constexpr const char* hipsparselt_computetype_to_string(hipsparseLtComputetype_t
 }
 
 // clang-format off
-
-/* @deprecated */
-HIPSPARSELT_EXPORT
-const hipsparseLtDatatype_t string_to_hipsparselt_datatype(const std::string& value);
-
 HIPSPARSELT_EXPORT
 const hipDataType string_to_hip_datatype(const std::string& value);
 

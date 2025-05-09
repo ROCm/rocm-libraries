@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2022-2024 Advanced Micro Devices, Inc.
+ * Copyright (c) 2022-2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -147,27 +147,6 @@ typedef struct {uint8_t data[11024];} hipsparseLtMatmulDescriptor_t;
 typedef struct {uint8_t data[11024];} hipsparseLtMatmulAlgSelection_t;
 typedef struct {uint8_t data[11024];} hipsparseLtMatmulPlan_t;
 #endif
-
-
-/* Types definitions */
-/*! @deprecated use hipDataType instead
- *  @TODO Keep this enum for backward supporting, will be deprecated in the later version.
- *  \ingroup types_module
- *  \brief List of hipsparselt data types.
- *
- *  \details
- *  Indicates the precision width of data stored in a hipsparselt type.
- *  Should use hipDatatype_t instead in the furture.
- */
-typedef enum
-{
-   HIPSPARSELT_R_16F = 150, /**< 16 bit floating point, real */
-   HIPSPARSELT_R_32F = 151, /**< 32 bit floating point, real */
-   HIPSPARSELT_R_8I  = 160, /**<  8 bit signed integer, real */
-   HIPSPARSELT_R_16BF = 168, /**< 16 bit bfloat, real */
-   HIPSPARSELT_R_8F  = 170, /**<  8 bit floating point, real */
-   HIPSPARSELT_R_8BF  = 171, /**<  8 bit bfloat, real */
-} hipsparseLtDatatype_t;
 
 /*! \ingroup types_module
  *  \brief Specify the sparsity of the structured matrix.
