@@ -17,7 +17,6 @@
   ComputeDataType: 0
   DataType: 7
   DataTypeA: 7
-  DataTypeAmaxD: 0
   DataTypeB: 7
   DataTypeE: 7
   DestDataType: 7
@@ -49,7 +48,6 @@
   NumIndicesLD: 4
   NumIndicesSummation: 1
   OperationType: GEMM
-  OutputAmaxD: false
   SetConstStrideA: []
   SetConstStrideB: []
   SetConstStrideBias: []
@@ -58,8 +56,6 @@
   StochasticRounding: false
   StridedBatched: true
   SupportUserArgs: true
-  SwizzleTensorA: false
-  SwizzleTensorB: false
   TLUA: true
   TLUB: false
   Tensor0: 0
@@ -238,7 +234,6 @@
       ComputeDataType: 0
       DataType: 7
       DataTypeA: 7
-      DataTypeAmaxD: 0
       DataTypeB: 7
       DataTypeE: 7
       DestDataType: 7
@@ -270,7 +265,6 @@
       NumIndicesLD: 4
       NumIndicesSummation: 1
       OperationType: GEMM
-      OutputAmaxD: false
       SetConstStrideA: []
       SetConstStrideB: []
       SetConstStrideBias: []
@@ -279,8 +273,6 @@
       StochasticRounding: false
       StridedBatched: true
       SupportUserArgs: true
-      SwizzleTensorA: false
-      SwizzleTensorB: false
       TLUA: true
       TLUB: false
       Tensor0: 0
@@ -520,7 +512,6 @@
       ComputeDataType: 0
       DataType: 7
       DataTypeA: 7
-      DataTypeAmaxD: 0
       DataTypeB: 7
       DataTypeE: 7
       DestDataType: 7
@@ -552,7 +543,6 @@
       NumIndicesLD: 4
       NumIndicesSummation: 1
       OperationType: GEMM
-      OutputAmaxD: false
       SetConstStrideA: []
       SetConstStrideB: []
       SetConstStrideBias: []
@@ -561,8 +551,6 @@
       StochasticRounding: false
       StridedBatched: true
       SupportUserArgs: true
-      SwizzleTensorA: false
-      SwizzleTensorB: false
       TLUA: true
       TLUB: false
       Tensor0: 0
@@ -802,7 +790,6 @@
       ComputeDataType: 0
       DataType: 7
       DataTypeA: 7
-      DataTypeAmaxD: 0
       DataTypeB: 7
       DataTypeE: 7
       DestDataType: 7
@@ -834,7 +821,6 @@
       NumIndicesLD: 4
       NumIndicesSummation: 1
       OperationType: GEMM
-      OutputAmaxD: false
       SetConstStrideA: []
       SetConstStrideB: []
       SetConstStrideBias: []
@@ -843,8 +829,6 @@
       StochasticRounding: false
       StridedBatched: true
       SupportUserArgs: true
-      SwizzleTensorA: false
-      SwizzleTensorB: false
       TLUA: true
       TLUB: false
       Tensor0: 0
@@ -1084,7 +1068,6 @@
       ComputeDataType: 0
       DataType: 7
       DataTypeA: 7
-      DataTypeAmaxD: 0
       DataTypeB: 7
       DataTypeE: 7
       DestDataType: 7
@@ -1116,7 +1099,6 @@
       NumIndicesLD: 4
       NumIndicesSummation: 1
       OperationType: GEMM
-      OutputAmaxD: false
       SetConstStrideA: []
       SetConstStrideB: []
       SetConstStrideBias: []
@@ -1125,8 +1107,6 @@
       StochasticRounding: false
       StridedBatched: true
       SupportUserArgs: true
-      SwizzleTensorA: false
-      SwizzleTensorB: false
       TLUA: true
       TLUB: false
       Tensor0: 0
@@ -1366,7 +1346,6 @@
       ComputeDataType: 0
       DataType: 7
       DataTypeA: 7
-      DataTypeAmaxD: 0
       DataTypeB: 7
       DataTypeE: 7
       DestDataType: 7
@@ -1398,7 +1377,6 @@
       NumIndicesLD: 4
       NumIndicesSummation: 1
       OperationType: GEMM
-      OutputAmaxD: false
       SetConstStrideA: []
       SetConstStrideB: []
       SetConstStrideBias: []
@@ -1407,8 +1385,6 @@
       StochasticRounding: false
       StridedBatched: true
       SupportUserArgs: true
-      SwizzleTensorA: false
-      SwizzleTensorB: false
       TLUA: true
       TLUB: false
       Tensor0: 0
@@ -1649,7 +1625,6 @@
       ComputeDataType: 0
       DataType: 7
       DataTypeA: 7
-      DataTypeAmaxD: 0
       DataTypeB: 7
       DataTypeE: 7
       DestDataType: 7
@@ -1681,7 +1656,6 @@
       NumIndicesLD: 4
       NumIndicesSummation: 1
       OperationType: GEMM
-      OutputAmaxD: false
       SetConstStrideA: []
       SetConstStrideB: []
       SetConstStrideBias: []
@@ -1690,8 +1664,6 @@
       StochasticRounding: false
       StridedBatched: true
       SupportUserArgs: true
-      SwizzleTensorA: false
-      SwizzleTensorB: false
       TLUA: true
       TLUB: false
       Tensor0: 0
@@ -1932,7 +1904,6 @@
       ComputeDataType: 0
       DataType: 7
       DataTypeA: 7
-      DataTypeAmaxD: 0
       DataTypeB: 7
       DataTypeE: 7
       DestDataType: 7
@@ -1964,7 +1935,6 @@
       NumIndicesLD: 4
       NumIndicesSummation: 1
       OperationType: GEMM
-      OutputAmaxD: false
       SetConstStrideA: []
       SetConstStrideB: []
       SetConstStrideBias: []
@@ -1973,8 +1943,6 @@
       StochasticRounding: false
       StridedBatched: true
       SupportUserArgs: true
-      SwizzleTensorA: false
-      SwizzleTensorB: false
       TLUA: true
       TLUB: false
       Tensor0: 0
@@ -2215,7 +2183,6 @@
       ComputeDataType: 0
       DataType: 7
       DataTypeA: 7
-      DataTypeAmaxD: 0
       DataTypeB: 7
       DataTypeE: 7
       DestDataType: 7
@@ -2247,7 +2214,6 @@
       NumIndicesLD: 4
       NumIndicesSummation: 1
       OperationType: GEMM
-      OutputAmaxD: false
       SetConstStrideA: []
       SetConstStrideB: []
       SetConstStrideBias: []
@@ -2256,8 +2222,6 @@
       StochasticRounding: false
       StridedBatched: true
       SupportUserArgs: true
-      SwizzleTensorA: false
-      SwizzleTensorB: false
       TLUA: true
       TLUB: false
       Tensor0: 0
@@ -2498,7 +2462,6 @@
       ComputeDataType: 0
       DataType: 7
       DataTypeA: 7
-      DataTypeAmaxD: 0
       DataTypeB: 7
       DataTypeE: 7
       DestDataType: 7
@@ -2530,7 +2493,6 @@
       NumIndicesLD: 4
       NumIndicesSummation: 1
       OperationType: GEMM
-      OutputAmaxD: false
       SetConstStrideA: []
       SetConstStrideB: []
       SetConstStrideBias: []
@@ -2539,8 +2501,6 @@
       StochasticRounding: false
       StridedBatched: true
       SupportUserArgs: true
-      SwizzleTensorA: false
-      SwizzleTensorB: false
       TLUA: true
       TLUB: false
       Tensor0: 0
@@ -2781,7 +2741,6 @@
       ComputeDataType: 0
       DataType: 7
       DataTypeA: 7
-      DataTypeAmaxD: 0
       DataTypeB: 7
       DataTypeE: 7
       DestDataType: 7
@@ -2813,7 +2772,6 @@
       NumIndicesLD: 4
       NumIndicesSummation: 1
       OperationType: GEMM
-      OutputAmaxD: false
       SetConstStrideA: []
       SetConstStrideB: []
       SetConstStrideBias: []
@@ -2822,8 +2780,6 @@
       StochasticRounding: false
       StridedBatched: true
       SupportUserArgs: true
-      SwizzleTensorA: false
-      SwizzleTensorB: false
       TLUA: true
       TLUB: false
       Tensor0: 0
@@ -3064,7 +3020,6 @@
       ComputeDataType: 0
       DataType: 7
       DataTypeA: 7
-      DataTypeAmaxD: 0
       DataTypeB: 7
       DataTypeE: 7
       DestDataType: 7
@@ -3096,7 +3051,6 @@
       NumIndicesLD: 4
       NumIndicesSummation: 1
       OperationType: GEMM
-      OutputAmaxD: false
       SetConstStrideA: []
       SetConstStrideB: []
       SetConstStrideBias: []
@@ -3105,8 +3059,6 @@
       StochasticRounding: false
       StridedBatched: true
       SupportUserArgs: true
-      SwizzleTensorA: false
-      SwizzleTensorB: false
       TLUA: true
       TLUB: false
       Tensor0: 0
@@ -3347,7 +3299,6 @@
       ComputeDataType: 0
       DataType: 7
       DataTypeA: 7
-      DataTypeAmaxD: 0
       DataTypeB: 7
       DataTypeE: 7
       DestDataType: 7
@@ -3379,7 +3330,6 @@
       NumIndicesLD: 4
       NumIndicesSummation: 1
       OperationType: GEMM
-      OutputAmaxD: false
       SetConstStrideA: []
       SetConstStrideB: []
       SetConstStrideBias: []
@@ -3388,8 +3338,6 @@
       StochasticRounding: false
       StridedBatched: true
       SupportUserArgs: true
-      SwizzleTensorA: false
-      SwizzleTensorB: false
       TLUA: true
       TLUB: false
       Tensor0: 0
@@ -3630,7 +3578,6 @@
       ComputeDataType: 0
       DataType: 7
       DataTypeA: 7
-      DataTypeAmaxD: 0
       DataTypeB: 7
       DataTypeE: 7
       DestDataType: 7
@@ -3662,7 +3609,6 @@
       NumIndicesLD: 4
       NumIndicesSummation: 1
       OperationType: GEMM
-      OutputAmaxD: false
       SetConstStrideA: []
       SetConstStrideB: []
       SetConstStrideBias: []
@@ -3671,8 +3617,6 @@
       StochasticRounding: false
       StridedBatched: true
       SupportUserArgs: true
-      SwizzleTensorA: false
-      SwizzleTensorB: false
       TLUA: true
       TLUB: false
       Tensor0: 0
@@ -3912,7 +3856,6 @@
       ComputeDataType: 0
       DataType: 7
       DataTypeA: 7
-      DataTypeAmaxD: 0
       DataTypeB: 7
       DataTypeE: 7
       DestDataType: 7
@@ -3944,7 +3887,6 @@
       NumIndicesLD: 4
       NumIndicesSummation: 1
       OperationType: GEMM
-      OutputAmaxD: false
       SetConstStrideA: []
       SetConstStrideB: []
       SetConstStrideBias: []
@@ -3953,8 +3895,6 @@
       StochasticRounding: false
       StridedBatched: true
       SupportUserArgs: true
-      SwizzleTensorA: false
-      SwizzleTensorB: false
       TLUA: true
       TLUB: false
       Tensor0: 0
@@ -4194,7 +4134,6 @@
       ComputeDataType: 0
       DataType: 7
       DataTypeA: 7
-      DataTypeAmaxD: 0
       DataTypeB: 7
       DataTypeE: 7
       DestDataType: 7
@@ -4226,7 +4165,6 @@
       NumIndicesLD: 4
       NumIndicesSummation: 1
       OperationType: GEMM
-      OutputAmaxD: false
       SetConstStrideA: []
       SetConstStrideB: []
       SetConstStrideBias: []
@@ -4235,8 +4173,6 @@
       StochasticRounding: false
       StridedBatched: true
       SupportUserArgs: true
-      SwizzleTensorA: false
-      SwizzleTensorB: false
       TLUA: true
       TLUB: false
       Tensor0: 0
@@ -4476,7 +4412,6 @@
       ComputeDataType: 0
       DataType: 7
       DataTypeA: 7
-      DataTypeAmaxD: 0
       DataTypeB: 7
       DataTypeE: 7
       DestDataType: 7
@@ -4508,7 +4443,6 @@
       NumIndicesLD: 4
       NumIndicesSummation: 1
       OperationType: GEMM
-      OutputAmaxD: false
       SetConstStrideA: []
       SetConstStrideB: []
       SetConstStrideBias: []
@@ -4517,8 +4451,6 @@
       StochasticRounding: false
       StridedBatched: true
       SupportUserArgs: true
-      SwizzleTensorA: false
-      SwizzleTensorB: false
       TLUA: true
       TLUB: false
       Tensor0: 0
@@ -4758,7 +4690,6 @@
       ComputeDataType: 0
       DataType: 7
       DataTypeA: 7
-      DataTypeAmaxD: 0
       DataTypeB: 7
       DataTypeE: 7
       DestDataType: 7
@@ -4790,7 +4721,6 @@
       NumIndicesLD: 4
       NumIndicesSummation: 1
       OperationType: GEMM
-      OutputAmaxD: false
       SetConstStrideA: []
       SetConstStrideB: []
       SetConstStrideBias: []
@@ -4799,8 +4729,6 @@
       StochasticRounding: false
       StridedBatched: true
       SupportUserArgs: true
-      SwizzleTensorA: false
-      SwizzleTensorB: false
       TLUA: true
       TLUB: false
       Tensor0: 0
@@ -5040,7 +4968,6 @@
       ComputeDataType: 0
       DataType: 7
       DataTypeA: 7
-      DataTypeAmaxD: 0
       DataTypeB: 7
       DataTypeE: 7
       DestDataType: 7
@@ -5072,7 +4999,6 @@
       NumIndicesLD: 4
       NumIndicesSummation: 1
       OperationType: GEMM
-      OutputAmaxD: false
       SetConstStrideA: []
       SetConstStrideB: []
       SetConstStrideBias: []
@@ -5081,8 +5007,6 @@
       StochasticRounding: false
       StridedBatched: true
       SupportUserArgs: true
-      SwizzleTensorA: false
-      SwizzleTensorB: false
       TLUA: true
       TLUB: false
       Tensor0: 0
@@ -5161,288 +5085,6 @@
     _WorkspaceSizePerElemBias: 0
     _WorkspaceSizePerElemC: 4
     _staggerStrideShift: 0
-    tailLoopOpt: true
-  - 1LDSBuffer: 1
-    ActivationAlt: false
-    ActivationFuncCall: true
-    ActivationFused: true
-    AssertAIGreaterThanEqual: -1
-    AssertAILessThanEqual: -1
-    AssertFree0ElementMultiple: 1
-    AssertFree1ElementMultiple: 1
-    AssertSummationElementMultiple: 1
-    AssignedDerivedParameters: true
-    AssignedProblemIndependentDerivedParameters: true
-    BufferLoad: true
-    BufferStore: true
-    CUCount: null
-    ClusterLocalRead: 1
-    CodeObjectVersion: default
-    ConvertAfterDS: false
-    CustomKernelName: ''
-    DebugStreamK: 0
-    DepthU: 32
-    DirectToLds: false
-    DirectToLdsA: false
-    DirectToLdsB: false
-    DirectToVgprA: false
-    DirectToVgprB: false
-    DirectToVgprSparseMetadata: false
-    EdgeType: ShiftPtr
-    EnableF32XdlMathOp: false
-    EnableMatrixInstruction: true
-    ExpandPointerSwap: 0
-    ForceDisableShadowInit: false
-    GlobalReadPerMfma: 1
-    GlobalReadVectorWidthA: 8
-    GlobalReadVectorWidthB: 8
-    GlobalSplitU: 1
-    GlobalSplitUAlgorithm: MultipleBuffer
-    GlobalSplitUCoalesced: false
-    GlobalSplitUWorkGroupMappingRoundRobin: false
-    GlobalWriteVectorWidth: 4
-    GroupLoadStore: false
-    GuaranteeNoPartialA: false
-    GuaranteeNoPartialB: true
-    GuaranteeNoPartialMetadata: true
-    ISA: [9, 4, 2]
-    InnerUnroll: 1
-    InterleaveAlpha: 0
-    InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
-      SupportUserGSU: true, UseUniversalArgs: true}
-    Kernel: true
-    KernelLanguage: Assembly
-    KernelNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_HAS_UserArgs_MT256x128x32_MI32x32x1_SN_GRVWA8_GRVWB8_K1_LBSPPA0_LBSPPB128_LPA0_LPB8_LRVW8_MIWT4_2_NLCA1_SVW4_VWA4_VWB2_WG64_4_1
-    LSCA: 256
-    LSCB: 32
-    LSPA: 8
-    LSPB: 64
-    LVCA: 32
-    LVCB: 4
-    LVPA: 1
-    LVPB: 8
-    LdsBlockSizePerPadA: 0
-    LdsBlockSizePerPadB: 128
-    LdsBlockSizePerPadMetadata: 0
-    LdsBytesNoAmax: 25600
-    LdsInitCVgprs: false
-    LdsNumBytes: 25600
-    LdsNumElementsAlignedA: 16384
-    LdsNumElementsAlignedB: 9216
-    LdsNumElementsAlignedMetadata: 0
-    LdsOffsetA: 0
-    LdsOffsetA_Blk: 32768
-    LdsOffsetB: 16384
-    LdsOffsetB_Blk: 49152
-    LdsOffsetBias: 0
-    LdsOffsetBiasGSU: 0
-    LdsOffsetBiasNonGSU: 0
-    LdsOffsetMetadata: 25600
-    LdsOffsetMetadata_Blk: 49152
-    LdsPadA: 0
-    LdsPadB: 8
-    LdsPadMetadata: -1
-    LocalReadVectorWidth: 8
-    LocalSplitU: 1
-    LocalSplitUReuseLDS: 1
-    LocalWritePerMfma: -1
-    LocalWriteUseSgprA: false
-    LocalWriteUseSgprB: false
-    LoopIters: 4
-    LoopUnroll: 32
-    MFMA_BF16_1K: true
-    MIArchVgpr: false
-    MIBlock: [32, 32, 8, 1, 1, 1]
-    MIInputPerThread: 4
-    MIInputPerThreadA: 4
-    MIInputPerThreadB: 4
-    MIInputPerThreadMetadata: 4
-    MIOutputVectorWidth: 4
-    MIRegPerOut: 1
-    MIWaveGroup: [2, 2]
-    MIWaveTile: [4, 2]
-    MIWaveTileA: 4
-    MIWaveTileB: 2
-    MIWaveTileMetadata: 0
-    MacroTile0: 256
-    MacroTile1: 128
-    MacroTileA: 256
-    MacroTileB: 128
-    MagicDivAlg: 2
-    MatrixInstB: 1
-    MatrixInstBM: 1
-    MatrixInstBN: 1
-    MatrixInstK: 8
-    MatrixInstM: 32
-    MatrixInstN: 32
-    MatrixInstruction: [32, 32, 8, 1]
-    MaxOccupancy: 40
-    NoLdsWriteCode: false
-    NoReject: false
-    NoTailLoop: false
-    NonTemporal: -1
-    NonTemporalA: 0
-    NonTemporalB: 0
-    NonTemporalC: 0
-    NonTemporalD: 0
-    NonTemporalE: 0
-    NonTemporalMetadata: 0
-    NonTemporalWS: 0
-    NumElementsPerBatchStore: 0
-    NumElementsPerThread: 128
-    NumGlobalWriteVectorsPerThread: 32
-    NumLoadsA: 4
-    NumLoadsB: 2
-    NumLoadsCoalescedA: 1
-    NumLoadsCoalescedB: 1
-    NumLoadsPerpendicularA: 4
-    NumLoadsPerpendicularB: 2
-    NumThreads: 256
-    OptNoLoadLoop: 1
-    PackedC0IdxChars: [I]
-    PackedC0IndicesX: [0]
-    PackedC1IdxChars: [J]
-    PackedC1IndicesX: [1]
-    PrefetchGlobalRead: 2
-    PrefetchLocalRead: 1
-    PreloadKernArgs: true
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationNoGuard: false
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: false
-      BiasDataTypeList: [0, 7]
-      BiasSrc: D
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      DataType: 7
-      DataTypeA: 7
-      DataTypeAmaxD: 0
-      DataTypeB: 7
-      DataTypeE: 7
-      DestDataType: 7
-      F32XdlMathOp: 0
-      Gradient: false
-      GroupedGemm: false
-      HighPrecisionAccumulate: true
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [3, 1, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexAssignmentsMetadata: [3, 0, 2]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 0
-      IndexUnrollM: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      MirrorDimsMetadata: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      OutputAmaxD: false
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SetConstStrideBias: []
-      SilentHighPrecisionAccumulate: false
-      Sparse: 0
-      StochasticRounding: false
-      StridedBatched: true
-      SupportUserArgs: true
-      SwizzleTensorA: false
-      SwizzleTensorB: false
-      TLUA: true
-      TLUB: false
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 0
-      UseBeta: true
-      UseBias: 1
-      UseE: false
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAB: ''
-      UseScaleAlphaVec: 1
-      UseScaleCD: false
-    ScheduleGlobalRead: 1
-    ScheduleIterAlg: 3
-    ScheduleLocalWrite: 1
-    SolutionIndex: 18
-    SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_HAS_UserArgs_MT256x128x32_MI32x32x1_SN_GRVWA8_GRVWB8_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA0_LBSPPB128_LPA0_LPB8_LRVW8_MIWT4_2_NLCA1_SU4_SUM0_SUS256_SVW4_VWA4_VWB2_WG64_4_1_WGM1_WGMXCC4_WGMXCCG80
-    SourceSwap: true
-    StaggerU: 4
-    StaggerUMapping: 0
-    StaggerUStride: 256
-    StorePriorityOpt: false
-    StoreRemapVectorWidth: 0
-    StoreSyncOpt: 0
-    StoreVectorWidth: 4
-    StreamK: 0
-    StreamKAtomic: 0
-    StreamKXCCMapping: 0
-    SubGroup0: 4
-    SubGroup1: 64
-    SubGroupA: 4
-    SubGroupB: 64
-    SuppressNoLoadLoop: false
-    ThreadTile: [1, 1]
-    ThreadTile0: 64
-    ThreadTile1: 2
-    ThreadTileA: 64
-    ThreadTileB: 2
-    TransposeLDS: 1
-    TransposeLDSMetadata: true
-    ULSGRODoubleG2L: 0
-    UnrollLoopSwapGlobalReadOrder: 0
-    UnrollMajorLDSA: false
-    UnrollMajorLDSB: true
-    UnrollMajorLDSMetadata: true
-    Use64bShadowLimit: 1
-    UseInstOffsetForGRO: 0
-    UseSgprForGRO: 0
-    Valid: true
-    VectorStore: -1
-    VectorWidthA: 4
-    VectorWidthB: 2
-    WaveSeparateGlobalReadA: 0
-    WaveSeparateGlobalReadB: 0
-    WaveSeparateGlobalReadMetadata: 0
-    WavefrontSize: 64
-    WorkGroup: [64, 4, 1]
-    WorkGroupMapping: 1
-    WorkGroupMappingXCC: 4
-    WorkGroupMappingXCCGroup: 80
-    WorkGroupReduction: false
-    WorkspaceCheck: [4, 0, 1]
-    _DepthU: 32
-    _DepthUA: 32
-    _DepthUB: 32
-    _DepthUMetadata: 32
-    _GlobalAccumulation: MultipleBuffer
-    _UseSgprForGRO: 0
-    _VectorStore: 1
-    _WorkspaceSizePerElemBias: 0
-    _WorkspaceSizePerElemC: 4
-    _staggerStrideShift: 2
     tailLoopOpt: true
   - 1LDSBuffer: 1
     ActivationAlt: false
@@ -5604,7 +5246,6 @@
       ComputeDataType: 0
       DataType: 7
       DataTypeA: 7
-      DataTypeAmaxD: 0
       DataTypeB: 7
       DataTypeE: 7
       DestDataType: 7
@@ -5636,7 +5277,6 @@
       NumIndicesLD: 4
       NumIndicesSummation: 1
       OperationType: GEMM
-      OutputAmaxD: false
       SetConstStrideA: []
       SetConstStrideB: []
       SetConstStrideBias: []
@@ -5645,8 +5285,6 @@
       StochasticRounding: false
       StridedBatched: true
       SupportUserArgs: true
-      SwizzleTensorA: false
-      SwizzleTensorB: false
       TLUA: true
       TLUB: false
       Tensor0: 0
@@ -5668,7 +5306,7 @@
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
-    SolutionIndex: 19
+    SolutionIndex: 18
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_HAS_UserArgs_MT128x64x64_MI16x16x1_SN_GRVWA8_GRVWB8_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA2048_LBSPPB256_LPA0_LPB16_LRVW8_MIWT4_2_NLCA1_SU4_SUM0_SUS256_SVW4_VWA4_VWB2_WG32_8_1_WGM1_WGMXCC4_WGMXCCG80
     SourceSwap: true
     StaggerU: 4
@@ -5886,7 +5524,6 @@
       ComputeDataType: 0
       DataType: 7
       DataTypeA: 7
-      DataTypeAmaxD: 0
       DataTypeB: 7
       DataTypeE: 7
       DestDataType: 7
@@ -5918,7 +5555,6 @@
       NumIndicesLD: 4
       NumIndicesSummation: 1
       OperationType: GEMM
-      OutputAmaxD: false
       SetConstStrideA: []
       SetConstStrideB: []
       SetConstStrideBias: []
@@ -5927,8 +5563,6 @@
       StochasticRounding: false
       StridedBatched: true
       SupportUserArgs: true
-      SwizzleTensorA: false
-      SwizzleTensorB: false
       TLUA: true
       TLUB: false
       Tensor0: 0
@@ -5950,7 +5584,7 @@
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
-    SolutionIndex: 20
+    SolutionIndex: 19
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_HAS_UserArgs_MT256x128x32_MI32x32x1_SN_GRVWA8_GRVWB8_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA0_LBSPPB128_LPA0_LPB8_LRVW8_MIWT2_2_NLCA1_SU0_SUM0_SUS0_SVW2_VWA2_VWB2_WG128_4_1_WGM1_WGMXCC4_WGMXCCG80
     SourceSwap: true
     StaggerU: 0
@@ -6168,7 +5802,6 @@
       ComputeDataType: 0
       DataType: 7
       DataTypeA: 7
-      DataTypeAmaxD: 0
       DataTypeB: 7
       DataTypeE: 7
       DestDataType: 7
@@ -6200,7 +5833,6 @@
       NumIndicesLD: 4
       NumIndicesSummation: 1
       OperationType: GEMM
-      OutputAmaxD: false
       SetConstStrideA: []
       SetConstStrideB: []
       SetConstStrideBias: []
@@ -6209,8 +5841,6 @@
       StochasticRounding: false
       StridedBatched: true
       SupportUserArgs: true
-      SwizzleTensorA: false
-      SwizzleTensorB: false
       TLUA: true
       TLUB: false
       Tensor0: 0
@@ -6232,7 +5862,7 @@
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
-    SolutionIndex: 21
+    SolutionIndex: 20
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_HAS_UserArgs_MT128x96x64_MI16x16x1_SN_GRVWA8_GRVWB8_GSU7_GSUC0_GSUWGMRR0_K1_LBSPPA2048_LBSPPB128_LPA0_LPB16_LRVW8_MIWT4_3_NLCA1_SU0_SUM0_SUS0_SVW4_VWA4_VWB1_WG32_8_1_WGM1_WGMXCC4_WGMXCCG80
     SourceSwap: true
     StaggerU: 0
@@ -6450,7 +6080,6 @@
       ComputeDataType: 0
       DataType: 7
       DataTypeA: 7
-      DataTypeAmaxD: 0
       DataTypeB: 7
       DataTypeE: 7
       DestDataType: 7
@@ -6482,7 +6111,6 @@
       NumIndicesLD: 4
       NumIndicesSummation: 1
       OperationType: GEMM
-      OutputAmaxD: false
       SetConstStrideA: []
       SetConstStrideB: []
       SetConstStrideBias: []
@@ -6491,8 +6119,6 @@
       StochasticRounding: false
       StridedBatched: true
       SupportUserArgs: true
-      SwizzleTensorA: false
-      SwizzleTensorB: false
       TLUA: true
       TLUB: false
       Tensor0: 0
@@ -6514,7 +6140,7 @@
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
-    SolutionIndex: 22
+    SolutionIndex: 21
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_HAS_UserArgs_MT32x32x64_MI16x16x1_SN_GRVWA8_GRVWB8_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA512_LBSPPB128_LPA32_LPB16_LRVW8_MIWT2_1_NLCA1_SU0_SUM0_SUS0_SVW2_VWA2_VWB1_WG16_8_1_WGM1_WGMXCC4_WGMXCCG80
     SourceSwap: true
     StaggerU: 0
@@ -6732,7 +6358,6 @@
       ComputeDataType: 0
       DataType: 7
       DataTypeA: 7
-      DataTypeAmaxD: 0
       DataTypeB: 7
       DataTypeE: 7
       DestDataType: 7
@@ -6764,7 +6389,6 @@
       NumIndicesLD: 4
       NumIndicesSummation: 1
       OperationType: GEMM
-      OutputAmaxD: false
       SetConstStrideA: []
       SetConstStrideB: []
       SetConstStrideBias: []
@@ -6773,8 +6397,6 @@
       StochasticRounding: false
       StridedBatched: true
       SupportUserArgs: true
-      SwizzleTensorA: false
-      SwizzleTensorB: false
       TLUA: true
       TLUB: false
       Tensor0: 0
@@ -6796,7 +6418,7 @@
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
-    SolutionIndex: 23
+    SolutionIndex: 22
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_HAS_UserArgs_MT256x128x32_MI16x16x1_SN_GRVWA8_GRVWB4_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA2048_LBSPPB256_LPA0_LPB4_LRVW4_MIWT4_4_NLCA1_SU0_SUM0_SUS0_SVW4_VWA4_VWB4_WG64_8_1_WGM1_WGMXCC4_WGMXCCG80
     SourceSwap: true
     StaggerU: 0
@@ -7014,7 +6636,6 @@
       ComputeDataType: 0
       DataType: 7
       DataTypeA: 7
-      DataTypeAmaxD: 0
       DataTypeB: 7
       DataTypeE: 7
       DestDataType: 7
@@ -7046,7 +6667,6 @@
       NumIndicesLD: 4
       NumIndicesSummation: 1
       OperationType: GEMM
-      OutputAmaxD: false
       SetConstStrideA: []
       SetConstStrideB: []
       SetConstStrideBias: []
@@ -7055,8 +6675,6 @@
       StochasticRounding: false
       StridedBatched: true
       SupportUserArgs: true
-      SwizzleTensorA: false
-      SwizzleTensorB: false
       TLUA: true
       TLUB: false
       Tensor0: 0
@@ -7078,7 +6696,7 @@
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
-    SolutionIndex: 24
+    SolutionIndex: 23
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_HAS_UserArgs_MT128x128x32_MI32x32x1_SN_GRVWA8_GRVWB8_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA0_LBSPPB128_LPA0_LPB8_LRVW8_MIWT2_1_NLCA1_SU0_SUM0_SUS0_SVW2_VWA2_VWB1_WG64_8_1_WGM1_WGMXCC4_WGMXCCG80
     SourceSwap: true
     StaggerU: 0
@@ -7296,7 +6914,6 @@
       ComputeDataType: 0
       DataType: 7
       DataTypeA: 7
-      DataTypeAmaxD: 0
       DataTypeB: 7
       DataTypeE: 7
       DestDataType: 7
@@ -7328,7 +6945,6 @@
       NumIndicesLD: 4
       NumIndicesSummation: 1
       OperationType: GEMM
-      OutputAmaxD: false
       SetConstStrideA: []
       SetConstStrideB: []
       SetConstStrideBias: []
@@ -7337,8 +6953,6 @@
       StochasticRounding: false
       StridedBatched: true
       SupportUserArgs: true
-      SwizzleTensorA: false
-      SwizzleTensorB: false
       TLUA: true
       TLUB: false
       Tensor0: 0
@@ -7360,7 +6974,7 @@
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
-    SolutionIndex: 25
+    SolutionIndex: 24
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_HAS_UserArgs_MT64x64x64_MI16x16x1_SN_GRVWA8_GRVWB8_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA1024_LBSPPB256_LPA32_LPB16_LRVW8_MIWT2_2_NLCA1_SU4_SUM0_SUS256_SVW2_VWA2_VWB2_WG32_8_1_WGM1_WGMXCC4_WGMXCCG80
     SourceSwap: true
     StaggerU: 4
@@ -7578,7 +7192,6 @@
       ComputeDataType: 0
       DataType: 7
       DataTypeA: 7
-      DataTypeAmaxD: 0
       DataTypeB: 7
       DataTypeE: 7
       DestDataType: 7
@@ -7610,7 +7223,6 @@
       NumIndicesLD: 4
       NumIndicesSummation: 1
       OperationType: GEMM
-      OutputAmaxD: false
       SetConstStrideA: []
       SetConstStrideB: []
       SetConstStrideBias: []
@@ -7619,8 +7231,6 @@
       StochasticRounding: false
       StridedBatched: true
       SupportUserArgs: true
-      SwizzleTensorA: false
-      SwizzleTensorB: false
       TLUA: true
       TLUB: false
       Tensor0: 0
@@ -7642,7 +7252,7 @@
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
-    SolutionIndex: 26
+    SolutionIndex: 25
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_HAS_UserArgs_MT32x16x64_MI16x16x1_SN_GRVWA8_GRVWB8_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA512_LBSPPB128_LPA16_LPB16_LRVW8_MIWT1_1_NLCA1_SU4_SUM0_SUS256_SVW1_VWA1_VWB1_WG32_4_1_WGM4_WGMXCC4_WGMXCCG80
     SourceSwap: true
     StaggerU: 4
@@ -7860,7 +7470,6 @@
       ComputeDataType: 0
       DataType: 7
       DataTypeA: 7
-      DataTypeAmaxD: 0
       DataTypeB: 7
       DataTypeE: 7
       DestDataType: 7
@@ -7892,7 +7501,6 @@
       NumIndicesLD: 4
       NumIndicesSummation: 1
       OperationType: GEMM
-      OutputAmaxD: false
       SetConstStrideA: []
       SetConstStrideB: []
       SetConstStrideBias: []
@@ -7901,8 +7509,6 @@
       StochasticRounding: false
       StridedBatched: true
       SupportUserArgs: true
-      SwizzleTensorA: false
-      SwizzleTensorB: false
       TLUA: true
       TLUB: false
       Tensor0: 0
@@ -7924,7 +7530,7 @@
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
-    SolutionIndex: 27
+    SolutionIndex: 26
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_HAS_UserArgs_MT32x16x32_MI16x16x1_SN_GRVWA8_GRVWB4_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB128_LPA16_LPB4_LRVW4_MIWT1_1_NLCA1_SU0_SUM0_SUS0_SVW1_VWA1_VWB1_WG32_4_1_WGM1_WGMXCC4_WGMXCCG80
     SourceSwap: true
     StaggerU: 0
@@ -8142,7 +7748,6 @@
       ComputeDataType: 0
       DataType: 7
       DataTypeA: 7
-      DataTypeAmaxD: 0
       DataTypeB: 7
       DataTypeE: 7
       DestDataType: 7
@@ -8174,7 +7779,6 @@
       NumIndicesLD: 4
       NumIndicesSummation: 1
       OperationType: GEMM
-      OutputAmaxD: false
       SetConstStrideA: []
       SetConstStrideB: []
       SetConstStrideBias: []
@@ -8183,8 +7787,6 @@
       StochasticRounding: false
       StridedBatched: true
       SupportUserArgs: true
-      SwizzleTensorA: false
-      SwizzleTensorB: false
       TLUA: true
       TLUB: false
       Tensor0: 0
@@ -8206,7 +7808,7 @@
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
-    SolutionIndex: 28
+    SolutionIndex: 27
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_HAS_UserArgs_MT32x32x32_MI16x16x1_SN_GRVWA4_GRVWB4_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB128_LPA16_LPB4_LRVW4_MIWT1_1_NLCA1_SU0_SUM0_SUS0_SVW1_VWA1_VWB1_WG32_8_1_WGM1_WGMXCC4_WGMXCCG80
     SourceSwap: true
     StaggerU: 0
@@ -8424,7 +8026,6 @@
       ComputeDataType: 0
       DataType: 7
       DataTypeA: 7
-      DataTypeAmaxD: 0
       DataTypeB: 7
       DataTypeE: 7
       DestDataType: 7
@@ -8456,7 +8057,6 @@
       NumIndicesLD: 4
       NumIndicesSummation: 1
       OperationType: GEMM
-      OutputAmaxD: false
       SetConstStrideA: []
       SetConstStrideB: []
       SetConstStrideBias: []
@@ -8465,8 +8065,6 @@
       StochasticRounding: false
       StridedBatched: true
       SupportUserArgs: true
-      SwizzleTensorA: false
-      SwizzleTensorB: false
       TLUA: true
       TLUB: false
       Tensor0: 0
@@ -8488,7 +8086,7 @@
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
-    SolutionIndex: 29
+    SolutionIndex: 28
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_HAS_UserArgs_MT64x32x128_MI16x16x1_SN_GRVWA8_GRVWB8_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA1024_LBSPPB256_LPA32_LPB16_LRVW8_MIWT2_1_NLCA1_SU4_SUM0_SUS256_SVW2_VWA2_VWB1_WG32_8_1_WGM1_WGMXCC4_WGMXCCG80
     SourceSwap: true
     StaggerU: 4
@@ -8706,7 +8304,6 @@
       ComputeDataType: 0
       DataType: 7
       DataTypeA: 7
-      DataTypeAmaxD: 0
       DataTypeB: 7
       DataTypeE: 7
       DestDataType: 7
@@ -8738,7 +8335,6 @@
       NumIndicesLD: 4
       NumIndicesSummation: 1
       OperationType: GEMM
-      OutputAmaxD: false
       SetConstStrideA: []
       SetConstStrideB: []
       SetConstStrideBias: []
@@ -8747,8 +8343,6 @@
       StochasticRounding: false
       StridedBatched: true
       SupportUserArgs: true
-      SwizzleTensorA: false
-      SwizzleTensorB: false
       TLUA: true
       TLUB: false
       Tensor0: 0
@@ -8770,7 +8364,7 @@
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
-    SolutionIndex: 30
+    SolutionIndex: 29
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_HAS_UserArgs_MT32x32x128_MI16x16x1_SN_GRVWA8_GRVWB8_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA512_LBSPPB256_LPA16_LPB16_LRVW8_MIWT1_1_NLCA1_SU0_SUM0_SUS0_SVW1_VWA1_VWB1_WG32_8_1_WGM1_WGMXCC4_WGMXCCG80
     SourceSwap: true
     StaggerU: 0
@@ -8988,7 +8582,6 @@
       ComputeDataType: 0
       DataType: 7
       DataTypeA: 7
-      DataTypeAmaxD: 0
       DataTypeB: 7
       DataTypeE: 7
       DestDataType: 7
@@ -9020,7 +8613,6 @@
       NumIndicesLD: 4
       NumIndicesSummation: 1
       OperationType: GEMM
-      OutputAmaxD: false
       SetConstStrideA: []
       SetConstStrideB: []
       SetConstStrideBias: []
@@ -9029,8 +8621,6 @@
       StochasticRounding: false
       StridedBatched: true
       SupportUserArgs: true
-      SwizzleTensorA: false
-      SwizzleTensorB: false
       TLUA: true
       TLUB: false
       Tensor0: 0
@@ -9052,7 +8642,7 @@
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
-    SolutionIndex: 31
+    SolutionIndex: 30
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_HAS_SAV_UserArgs_MT16x16x32_MI16x16x1_SN_GRVWA8_GRVWB4_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA128_LBSPPB128_LPA16_LPB4_LRVW4_MIWT1_1_NLCA1_SU0_SUM0_SUS0_SVW1_VWA1_VWB1_WG16_4_1_WGM1_WGMXCC4_WGMXCCG80
     SourceSwap: true
     StaggerU: 0
@@ -9270,7 +8860,6 @@
       ComputeDataType: 0
       DataType: 7
       DataTypeA: 7
-      DataTypeAmaxD: 0
       DataTypeB: 7
       DataTypeE: 7
       DestDataType: 7
@@ -9302,7 +8891,6 @@
       NumIndicesLD: 4
       NumIndicesSummation: 1
       OperationType: GEMM
-      OutputAmaxD: false
       SetConstStrideA: []
       SetConstStrideB: []
       SetConstStrideBias: []
@@ -9311,8 +8899,6 @@
       StochasticRounding: false
       StridedBatched: true
       SupportUserArgs: true
-      SwizzleTensorA: false
-      SwizzleTensorB: false
       TLUA: true
       TLUB: false
       Tensor0: 0
@@ -9334,7 +8920,7 @@
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
-    SolutionIndex: 32
+    SolutionIndex: 31
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_HAS_SAV_UserArgs_MT128x224x32_MI16x16x1_SN_GRVWA8_GRVWB4_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA1024_LBSPPB128_LPA0_LPB4_LRVW4_MIWT4_7_NLCA1_SU0_SUM0_SUS0_SVW4_VWA4_VWB1_WG32_8_1_WGM1_WGMXCC4_WGMXCCG80
     SourceSwap: true
     StaggerU: 0
@@ -9552,7 +9138,6 @@
       ComputeDataType: 0
       DataType: 7
       DataTypeA: 7
-      DataTypeAmaxD: 0
       DataTypeB: 7
       DataTypeE: 7
       DestDataType: 7
@@ -9584,7 +9169,6 @@
       NumIndicesLD: 4
       NumIndicesSummation: 1
       OperationType: GEMM
-      OutputAmaxD: false
       SetConstStrideA: []
       SetConstStrideB: []
       SetConstStrideBias: []
@@ -9593,8 +9177,6 @@
       StochasticRounding: false
       StridedBatched: true
       SupportUserArgs: true
-      SwizzleTensorA: false
-      SwizzleTensorB: false
       TLUA: true
       TLUB: false
       Tensor0: 0
@@ -9616,7 +9198,7 @@
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
-    SolutionIndex: 33
+    SolutionIndex: 32
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_HAS_SAV_UserArgs_MT32x16x64_MI16x16x1_SN_GRVWA8_GRVWB8_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA512_LBSPPB128_LPA16_LPB16_LRVW8_MIWT1_1_NLCA1_SU4_SUM0_SUS256_SVW1_VWA1_VWB1_WG32_4_1_WGM1_WGMXCC4_WGMXCCG80
     SourceSwap: true
     StaggerU: 4
@@ -9834,7 +9416,6 @@
       ComputeDataType: 0
       DataType: 7
       DataTypeA: 7
-      DataTypeAmaxD: 0
       DataTypeB: 7
       DataTypeE: 7
       DestDataType: 7
@@ -9866,7 +9447,6 @@
       NumIndicesLD: 4
       NumIndicesSummation: 1
       OperationType: GEMM
-      OutputAmaxD: false
       SetConstStrideA: []
       SetConstStrideB: []
       SetConstStrideBias: []
@@ -9875,8 +9455,6 @@
       StochasticRounding: false
       StridedBatched: true
       SupportUserArgs: true
-      SwizzleTensorA: false
-      SwizzleTensorB: false
       TLUA: true
       TLUB: false
       Tensor0: 0
@@ -9898,7 +9476,7 @@
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
-    SolutionIndex: 34
+    SolutionIndex: 33
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_HAS_SAV_UserArgs_MT32x64x256_MI16x16x1_SN_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA512_LBSPPB2048_LPA32_MIWT2_4_NTB4_SU0_SUM0_SUS0_SVW2_TLDS1_VWA2_VWB4_WG16_4_4_WGM1_WGMXCC1_WGMXCCG80
     SourceSwap: true
     StaggerU: 0
@@ -10116,7 +9694,6 @@
       ComputeDataType: 0
       DataType: 7
       DataTypeA: 7
-      DataTypeAmaxD: 0
       DataTypeB: 7
       DataTypeE: 7
       DestDataType: 7
@@ -10148,7 +9725,6 @@
       NumIndicesLD: 4
       NumIndicesSummation: 1
       OperationType: GEMM
-      OutputAmaxD: false
       SetConstStrideA: []
       SetConstStrideB: []
       SetConstStrideBias: []
@@ -10157,8 +9733,6 @@
       StochasticRounding: false
       StridedBatched: true
       SupportUserArgs: true
-      SwizzleTensorA: false
-      SwizzleTensorB: false
       TLUA: true
       TLUB: false
       Tensor0: 0
@@ -10180,7 +9754,7 @@
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
-    SolutionIndex: 35
+    SolutionIndex: 34
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_HAS_SAV_UserArgs_MT32x48x256_MI16x16x1_SN_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA512_LBSPPB512_LPA32_MIWT2_3_NTB4_SU0_SUM0_SUS0_SVW2_TLDS1_VWA2_VWB1_WG16_4_4_WGM1_WGMXCC1_WGMXCCG80
     SourceSwap: true
     StaggerU: 0
@@ -10398,7 +9972,6 @@
       ComputeDataType: 0
       DataType: 7
       DataTypeA: 7
-      DataTypeAmaxD: 0
       DataTypeB: 7
       DataTypeE: 7
       DestDataType: 7
@@ -10430,7 +10003,6 @@
       NumIndicesLD: 4
       NumIndicesSummation: 1
       OperationType: GEMM
-      OutputAmaxD: false
       SetConstStrideA: []
       SetConstStrideB: []
       SetConstStrideBias: []
@@ -10439,8 +10011,6 @@
       StochasticRounding: false
       StridedBatched: true
       SupportUserArgs: true
-      SwizzleTensorA: false
-      SwizzleTensorB: false
       TLUA: true
       TLUB: false
       Tensor0: 0
@@ -10462,7 +10032,7 @@
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
-    SolutionIndex: 36
+    SolutionIndex: 35
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_HAS_SAV_UserArgs_MT64x64x128_MI16x16x1_SN_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA1024_LBSPPB1024_LPA0_MIWT4_4_NTB4_SU0_SUM0_SUS0_SVW4_TLDS1_VWA4_VWB4_WG16_4_4_WGM1_WGMXCC1_WGMXCCG80
     SourceSwap: true
     StaggerU: 0
@@ -10680,7 +10250,6 @@
       ComputeDataType: 0
       DataType: 7
       DataTypeA: 7
-      DataTypeAmaxD: 0
       DataTypeB: 7
       DataTypeE: 7
       DestDataType: 7
@@ -10712,7 +10281,6 @@
       NumIndicesLD: 4
       NumIndicesSummation: 1
       OperationType: GEMM
-      OutputAmaxD: false
       SetConstStrideA: []
       SetConstStrideB: []
       SetConstStrideBias: []
@@ -10721,8 +10289,6 @@
       StochasticRounding: false
       StridedBatched: true
       SupportUserArgs: true
-      SwizzleTensorA: false
-      SwizzleTensorB: false
       TLUA: true
       TLUB: false
       Tensor0: 0
@@ -10744,7 +10310,7 @@
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
-    SolutionIndex: 37
+    SolutionIndex: 36
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_HAS_SAV_UserArgs_MT64x48x256_MI16x16x1_SN_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA1024_LBSPPB512_LPA0_MIWT4_3_NTB4_SU0_SUM0_SUS0_SVW4_TLDS1_VWA4_VWB1_WG16_4_4_WGM1_WGMXCC1_WGMXCCG80
     SourceSwap: true
     StaggerU: 0
@@ -10962,7 +10528,6 @@
       ComputeDataType: 0
       DataType: 7
       DataTypeA: 7
-      DataTypeAmaxD: 0
       DataTypeB: 7
       DataTypeE: 7
       DestDataType: 7
@@ -10994,7 +10559,6 @@
       NumIndicesLD: 4
       NumIndicesSummation: 1
       OperationType: GEMM
-      OutputAmaxD: false
       SetConstStrideA: []
       SetConstStrideB: []
       SetConstStrideBias: []
@@ -11003,8 +10567,6 @@
       StochasticRounding: false
       StridedBatched: true
       SupportUserArgs: true
-      SwizzleTensorA: false
-      SwizzleTensorB: false
       TLUA: true
       TLUB: false
       Tensor0: 0
@@ -11026,7 +10588,7 @@
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
-    SolutionIndex: 38
+    SolutionIndex: 37
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_HAS_SAV_UserArgs_MT32x192x128_MI16x16x1_SN_GRVWA8_GRVWB8_GSU4_GSUC0_GSUWGMRR0_K1_LBSPPA512_LBSPPB256_LPA32_LPB16_LRVW8_MIWT2_3_NTB7_NLCA1_SU0_SUM0_SUS0_SVW2_VWA2_VWB1_WG16_16_1_WGM1_WGMXCC1_WGMXCCG80
     SourceSwap: true
     StaggerU: 0
@@ -11245,7 +10807,6 @@
       ComputeDataType: 0
       DataType: 7
       DataTypeA: 7
-      DataTypeAmaxD: 0
       DataTypeB: 7
       DataTypeE: 7
       DestDataType: 7
@@ -11277,7 +10838,6 @@
       NumIndicesLD: 4
       NumIndicesSummation: 1
       OperationType: GEMM
-      OutputAmaxD: false
       SetConstStrideA: []
       SetConstStrideB: []
       SetConstStrideBias: []
@@ -11286,8 +10846,6 @@
       StochasticRounding: false
       StridedBatched: true
       SupportUserArgs: true
-      SwizzleTensorA: false
-      SwizzleTensorB: false
       TLUA: true
       TLUB: false
       Tensor0: 0
@@ -11309,7 +10867,7 @@
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
-    SolutionIndex: 39
+    SolutionIndex: 38
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_HAS_SAV_UserArgs_MT64x128x128_MI16x16x1_SN_GRVWA8_GRVWB8_GSU5_GSUC0_GSUWGMRR0_K1_LBSPPA1024_LBSPPB512_LPA0_LPB16_LRVW8_MIWT4_2_NTB4_NLCA1_SU0_SUM0_SUS0_SVW4_VWA4_VWB2_WG16_16_1_WGM4_WGMXCC4_WGMXCCG80
     SourceSwap: true
     StaggerU: 0
@@ -11528,7 +11086,6 @@
       ComputeDataType: 0
       DataType: 7
       DataTypeA: 7
-      DataTypeAmaxD: 0
       DataTypeB: 7
       DataTypeE: 7
       DestDataType: 7
@@ -11560,7 +11117,6 @@
       NumIndicesLD: 4
       NumIndicesSummation: 1
       OperationType: GEMM
-      OutputAmaxD: false
       SetConstStrideA: []
       SetConstStrideB: []
       SetConstStrideBias: []
@@ -11569,8 +11125,6 @@
       StochasticRounding: false
       StridedBatched: true
       SupportUserArgs: true
-      SwizzleTensorA: false
-      SwizzleTensorB: false
       TLUA: true
       TLUB: false
       Tensor0: 0
@@ -11592,7 +11146,7 @@
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
-    SolutionIndex: 40
+    SolutionIndex: 39
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_HAS_SAV_UserArgs_MT32x128x128_MI16x16x1_SN_CLR1_GRVWA8_GRVWB8_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA512_LBSPPB1024_LPA32_LPB16_LRVW8_MIWT2_4_NTB4_NLCA1_PLR1_SU0_SUM0_SUS0_SVW2_VWA2_VWB4_WG16_8_2_WGM1_WGMXCC1_WGMXCCG80
     SourceSwap: true
     StaggerU: 0
@@ -11810,7 +11364,6 @@
       ComputeDataType: 0
       DataType: 7
       DataTypeA: 7
-      DataTypeAmaxD: 0
       DataTypeB: 7
       DataTypeE: 7
       DestDataType: 7
@@ -11842,7 +11395,6 @@
       NumIndicesLD: 4
       NumIndicesSummation: 1
       OperationType: GEMM
-      OutputAmaxD: false
       SetConstStrideA: []
       SetConstStrideB: []
       SetConstStrideBias: []
@@ -11851,8 +11403,6 @@
       StochasticRounding: false
       StridedBatched: true
       SupportUserArgs: true
-      SwizzleTensorA: false
-      SwizzleTensorB: false
       TLUA: true
       TLUB: false
       Tensor0: 0
@@ -11874,7 +11424,7 @@
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
-    SolutionIndex: 41
+    SolutionIndex: 40
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_HAS_SAV_UserArgs_MT64x128x128_MI16x16x1_SN_CLR1_GRVWA8_GRVWB8_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA1024_LBSPPB1024_LPA0_LPB16_LRVW8_MIWT4_4_NTB7_NLCA1_PLR1_SU0_SUM0_SUS0_SVW4_VWA4_VWB4_WG16_8_2_WGM1_WGMXCC1_WGMXCCG80
     SourceSwap: true
     StaggerU: 0
@@ -12092,7 +11642,6 @@
       ComputeDataType: 0
       DataType: 7
       DataTypeA: 7
-      DataTypeAmaxD: 0
       DataTypeB: 7
       DataTypeE: 7
       DestDataType: 7
@@ -12124,7 +11673,6 @@
       NumIndicesLD: 4
       NumIndicesSummation: 1
       OperationType: GEMM
-      OutputAmaxD: false
       SetConstStrideA: []
       SetConstStrideB: []
       SetConstStrideBias: []
@@ -12133,8 +11681,6 @@
       StochasticRounding: false
       StridedBatched: true
       SupportUserArgs: true
-      SwizzleTensorA: false
-      SwizzleTensorB: false
       TLUA: true
       TLUB: false
       Tensor0: 0
@@ -12156,7 +11702,7 @@
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
-    SolutionIndex: 42
+    SolutionIndex: 41
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_AS_SAV_UserArgs_MT128x256x64_MI16x16x1_SN_GRVWB8_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA2048_LBSPPB1024_LPA0_LPB16_LRVW8_MIAV0_MIWT4_8_NLCA1_SU0_SUM0_SUS0_SVW4_VWA4_VWB8_WG32_8_1_WGM1_WGMXCC1_WGMXCCGn1
     SourceSwap: 1
     StaggerU: 0
@@ -12377,7 +11923,6 @@
       ComputeDataType: 0
       DataType: 7
       DataTypeA: 7
-      DataTypeAmaxD: 0
       DataTypeB: 7
       DataTypeE: 7
       DestDataType: 7
@@ -12409,7 +11954,6 @@
       NumIndicesLD: 4
       NumIndicesSummation: 1
       OperationType: GEMM
-      OutputAmaxD: false
       SetConstStrideA: []
       SetConstStrideB: []
       SetConstStrideBias: []
@@ -12418,8 +11962,6 @@
       StochasticRounding: false
       StridedBatched: true
       SupportUserArgs: true
-      SwizzleTensorA: false
-      SwizzleTensorB: false
       TLUA: true
       TLUB: false
       Tensor0: 0
@@ -12441,7 +11983,7 @@
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
-    SolutionIndex: 43
+    SolutionIndex: 42
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_AS_SAV_UserArgs_MT192x256x64_MI16x16x1_SN_GRVWB8_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA3072_LBSPPB1024_LPA32_LPB16_LRVW8_MIAV0_MIWT6_8_NLCA3_SU0_SUM0_SUS0_SVW2_VWA2_VWB8_WG32_8_1_WGM1_WGMXCC1_WGMXCCGn1
     SourceSwap: 1
     StaggerU: 0
@@ -12662,7 +12204,6 @@
       ComputeDataType: 0
       DataType: 7
       DataTypeA: 7
-      DataTypeAmaxD: 0
       DataTypeB: 7
       DataTypeE: 7
       DestDataType: 7
@@ -12694,7 +12235,6 @@
       NumIndicesLD: 4
       NumIndicesSummation: 1
       OperationType: GEMM
-      OutputAmaxD: false
       SetConstStrideA: []
       SetConstStrideB: []
       SetConstStrideBias: []
@@ -12703,8 +12243,6 @@
       StochasticRounding: false
       StridedBatched: true
       SupportUserArgs: true
-      SwizzleTensorA: false
-      SwizzleTensorB: false
       TLUA: true
       TLUB: false
       Tensor0: 0
@@ -12726,7 +12264,7 @@
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
-    SolutionIndex: 44
+    SolutionIndex: 43
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_AS_SAV_UserArgs_MT128x256x32_MI16x16x1_SN_GRVWB8_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA1024_LBSPPB256_LPA0_LPB8_LRVW4_MIWT8_4_NLCA1_SU8_SUM0_SUS256_SVW8_VWA8_VWB4_WG16_16_1_WGM16_WGMXCC1_WGMXCCGn1
     SourceSwap: 1
     StaggerU: 8
@@ -12947,7 +12485,6 @@
       ComputeDataType: 0
       DataType: 7
       DataTypeA: 7
-      DataTypeAmaxD: 0
       DataTypeB: 7
       DataTypeE: 7
       DestDataType: 7
@@ -12979,7 +12516,6 @@
       NumIndicesLD: 4
       NumIndicesSummation: 1
       OperationType: GEMM
-      OutputAmaxD: false
       SetConstStrideA: []
       SetConstStrideB: []
       SetConstStrideBias: []
@@ -12988,8 +12524,6 @@
       StochasticRounding: false
       StridedBatched: true
       SupportUserArgs: true
-      SwizzleTensorA: false
-      SwizzleTensorB: false
       TLUA: true
       TLUB: false
       Tensor0: 0
@@ -13011,7 +12545,7 @@
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
-    SolutionIndex: 45
+    SolutionIndex: 44
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_AS_SAV_UserArgs_MT256x128x32_MI16x16x1_SN_GRVWB8_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA2048_LBSPPB256_LPA0_LPB8_LRVW4_MIAV0_MIWT8_4_NLCA1_SU8_SUM0_SUS256_SVW8_VWA8_VWB4_WG32_8_1_WGM1_WGMXCC1_WGMXCCGn1
     SourceSwap: 1
     StaggerU: 8
@@ -13232,7 +12766,6 @@
       ComputeDataType: 0
       DataType: 7
       DataTypeA: 7
-      DataTypeAmaxD: 0
       DataTypeB: 7
       DataTypeE: 7
       DestDataType: 7
@@ -13264,7 +12797,6 @@
       NumIndicesLD: 4
       NumIndicesSummation: 1
       OperationType: GEMM
-      OutputAmaxD: false
       SetConstStrideA: []
       SetConstStrideB: []
       SetConstStrideBias: []
@@ -13273,8 +12805,6 @@
       StochasticRounding: false
       StridedBatched: true
       SupportUserArgs: true
-      SwizzleTensorA: false
-      SwizzleTensorB: false
       TLUA: true
       TLUB: false
       Tensor0: 0
@@ -13296,7 +12826,7 @@
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
-    SolutionIndex: 46
+    SolutionIndex: 45
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_AS_SAV_UserArgs_MT256x128x32_MI32x32x1_SN_GRVWB8_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA0_LBSPPB256_LPA0_LPB8_LRVW8_MIAV0_MIWT2_4_NLCA1_SU8_SUM0_SUS256_SVW2_VWA2_VWB4_WG128_2_1_WGM1_WGMXCC1_WGMXCCGn1
     SourceSwap: 1
     StaggerU: 8
@@ -13357,6 +12887,545 @@
     reorderGRInstForDTVB: false
     tailLoopOptA: true
     tailLoopOptB: true
+  - 1LDSBuffer: 1
+    ActivationAlt: false
+    ActivationFuncCall: false
+    ActivationFused: true
+    AssertFree0ElementMultiple: 1
+    AssertFree1ElementMultiple: 1
+    AssertSummationElementMultiple: 1
+    AssignedDerivedParameters: true
+    AssignedProblemIndependentDerivedParameters: true
+    BufferLoad: true
+    BufferStore: true
+    CUCount: null
+    ClusterLocalRead: 1
+    CodeObjectVersion: default
+    ConvertAfterDS: false
+    CustomKernelName: ''
+    DepthU: 32
+    DirectToLds: false
+    DirectToLdsA: false
+    DirectToLdsB: false
+    DirectToVgprSparseMetadata: false
+    EdgeType: ShiftPtr
+    EnableF32XdlMathOp: false
+    EnableMatrixInstruction: true
+    ExpandPointerSwap: 0
+    ForceDisableShadowInit: false
+    GlobalReadPerMfma: 1
+    GlobalReadVectorWidthA: 8
+    GlobalReadVectorWidthB: 8
+    GlobalSplitU: 1
+    GlobalSplitUAlgorithm: MultipleBuffer
+    GlobalWriteVectorWidth: 2
+    GroupLoadStore: 0
+    GuaranteeNoPartialA: false
+    GuaranteeNoPartialB: true
+    GuaranteeNoPartialMetadata: true
+    ISA: [9, 4, 2]
+    InnerUnroll: 1
+    InterleaveAlpha: 0
+    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true,
+      UseUniversalArgs: true}
+    KernelLanguage: Assembly
+    KernelNameMin: Cijk_Ailk_Bljk_BBS_BH_UserArgs_MT256x128x32_MI32x32x1_SN_GRVWB8_LBSPPA0_LBSPPB128_LPA0_LPB8_LRVW8_MIWT2_4_NTC4_NTD4_PLR1_SVW2_VWA2_VWB1_WSGRA1_WSGRB0_WG128_2_1
+    LSCA: 256
+    LSCB: 32
+    LSPA: 2
+    LSPB: 64
+    LVCA: 32
+    LVCB: 4
+    LVPA: 1
+    LVPB: 8
+    LdsBlockSizePerPadA: 0
+    LdsBlockSizePerPadB: 128
+    LdsBlockSizePerPadMetadata: 0
+    LdsInitCVgprs: false
+    LdsNumBytes: 25600
+    LdsNumElementsAlignedA: 16384
+    LdsNumElementsAlignedB: 9216
+    LdsNumElementsAlignedMetadata: 0
+    LdsOffsetA: 0
+    LdsOffsetA_Blk: 32768
+    LdsOffsetB: 16384
+    LdsOffsetB_Blk: 49152
+    LdsOffsetBias: 0
+    LdsOffsetBiasGSU: 0
+    LdsOffsetBiasNonGSU: 0
+    LdsOffsetMetadata: 25600
+    LdsOffsetMetadata_Blk: 49152
+    LdsPadA: 0
+    LdsPadB: 8
+    LdsPadMetadata: 0
+    LocalReadVectorWidth: 8
+    LocalSplitU: 1
+    LocalWritePerMfma: -1
+    LocalWriteUseSgprA: false
+    LocalWriteUseSgprB: false
+    LoopIters: 4
+    LoopUnroll: 32
+    MFMA_BF16_1K: true
+    MIArchVgpr: false
+    MIBlock: [32, 32, 8, 1, 1, 1]
+    MIInputPerThread: 4
+    MIInputPerThreadA: 4
+    MIInputPerThreadB: 4
+    MIInputPerThreadMetadata: 4
+    MIOutputVectorWidth: 4
+    MIRegPerOut: 1
+    MIWaveGroup: [4, 1]
+    MIWaveTile: [2, 4]
+    MIWaveTileA: 2
+    MIWaveTileB: 4
+    MIWaveTileMetadata: 0
+    MacroTile0: 256
+    MacroTile1: 128
+    MacroTileA: 256
+    MacroTileB: 128
+    MagicDivAlg: 2
+    MatrixInstB: 1
+    MatrixInstBM: 1
+    MatrixInstBN: 1
+    MatrixInstK: 8
+    MatrixInstM: 32
+    MatrixInstN: 32
+    MatrixInstruction: [32, 32, 8, 1]
+    MaxOccupancy: 40
+    NoLdsWriteCode: false
+    NoReject: false
+    NoTailLoop: false
+    NonTemporal: -1
+    NonTemporalA: 0
+    NonTemporalB: 0
+    NonTemporalC: 4
+    NonTemporalD: 4
+    NonTemporalE: 0
+    NonTemporalMetadata: 0
+    NumElementsPerBatchStore: 0
+    NumElementsPerThread: 128
+    NumGlobalWriteVectorsPerThread: 64
+    NumLoadsA: 4
+    NumLoadsB: 2
+    NumLoadsCoalescedA: 1
+    NumLoadsCoalescedB: 1
+    NumLoadsPerpendicularA: 4
+    NumLoadsPerpendicularB: 2
+    NumThreads: 256
+    OptNoLoadLoop: 1
+    PackedC0IdxChars: [I]
+    PackedC0IndicesX: [0]
+    PackedC1IdxChars: [J]
+    PackedC1IndicesX: [1]
+    PrefetchGlobalRead: 2
+    PrefetchLocalRead: 1
+    PreloadKernArgs: true
+    ProblemType:
+      Activation: true
+      ActivationComputeDataType: 0
+      ActivationNoGuard: false
+      ActivationType: hipblaslt_all
+      AllowNoFreeDims: false
+      AssignedDerivedParameters: true
+      Batched: true
+      BetaOnlyUseBias: false
+      BiasDataTypeList: [0, 7]
+      BiasSrc: D
+      ComplexConjugateA: false
+      ComplexConjugateB: false
+      ComputeDataType: 0
+      DataType: 7
+      DataTypeA: 7
+      DataTypeB: 7
+      DataTypeE: 7
+      DestDataType: 7
+      F32XdlMathOp: 0
+      Gradient: false
+      GroupedGemm: false
+      HighPrecisionAccumulate: true
+      Index0: 0
+      Index01A: 0
+      Index01B: 1
+      Index1: 1
+      IndexAssignmentsA: [0, 3, 2]
+      IndexAssignmentsB: [3, 1, 2]
+      IndexAssignmentsLD: [4, 5, 6, 7]
+      IndexAssignmentsMetadata: [3, 0, 2]
+      IndexUnroll: 3
+      IndexUnrollA: 1
+      IndexUnrollB: 0
+      IndexUnrollM: 0
+      IndicesBatch: [2]
+      IndicesFree: [0, 1]
+      IndicesSummation: [3]
+      MirrorDimsA: []
+      MirrorDimsB: []
+      MirrorDimsMetadata: []
+      NumIndicesBatch: 1
+      NumIndicesC: 3
+      NumIndicesFree: 2
+      NumIndicesLD: 4
+      NumIndicesSummation: 1
+      OperationType: GEMM
+      SetConstStrideA: []
+      SetConstStrideB: []
+      SetConstStrideBias: []
+      SilentHighPrecisionAccumulate: false
+      Sparse: 0
+      StochasticRounding: false
+      StridedBatched: true
+      SupportUserArgs: true
+      TLUA: true
+      TLUB: false
+      Tensor0: 0
+      Tensor1: 1
+      TileA: 0
+      TileAwareSelection: false
+      TileB: 1
+      TotalIndices: 4
+      TransposeA: false
+      TransposeB: false
+      UseBeta: true
+      UseBias: 1
+      UseE: false
+      UseInitialStridesAB: false
+      UseInitialStridesCD: false
+      UseScaleAB: ''
+      UseScaleAlphaVec: 1
+      UseScaleCD: false
+    ScheduleGlobalRead: 1
+    ScheduleIterAlg: 3
+    ScheduleLocalWrite: 1
+    SolutionIndex: 46
+    SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_UserArgs_MT256x128x32_MI32x32x1_SN_GRVWB8_GSU1_LBSPPA0_LBSPPB128_LPA0_LPB8_LRVW8_MIWT2_4_NTC4_NTD4_PLR1_SU0_SUM0_SUS0_SVW2_VWA2_VWB1_WSGRA1_WSGRB0_WG128_2_1_WGM1
+    SourceSwap: true
+    StaggerU: 0
+    StaggerUMapping: 0
+    StaggerUStride: 0
+    StorePriorityOpt: false
+    StoreRemapVectorWidth: 0
+    StoreSyncOpt: 0
+    StoreVectorWidth: 2
+    SubGroup0: 8
+    SubGroup1: 32
+    SubGroupA: 8
+    SubGroupB: 32
+    SuppressNoLoadLoop: false
+    ThreadTile: [1, 1]
+    ThreadTile0: 32
+    ThreadTile1: 4
+    ThreadTileA: 32
+    ThreadTileB: 4
+    TransposeLDS: 1
+    TransposeLDSMetadata: true
+    UnrollMajorLDSA: false
+    UnrollMajorLDSB: true
+    UnrollMajorLDSMetadata: true
+    Use64bShadowLimit: 1
+    UseInstOffsetForGRO: 0
+    UseSgprForGRO: -1
+    Valid: true
+    VectorStore: -1
+    VectorWidthA: 2
+    VectorWidthB: 1
+    WaveSeparateGlobalReadA: 1
+    WaveSeparateGlobalReadB: 0
+    WaveSeparateGlobalReadMetadata: 0
+    WavefrontSize: 64
+    WorkGroup: [128, 2, 1]
+    WorkGroupMapping: 1
+    WorkGroupMappingXCC: 1
+    WorkGroupReduction: false
+    WorkspaceCheck: [4, 0, 1]
+    _DepthU: 32
+    _DepthUA: 32
+    _DepthUB: 32
+    _DepthUMetadata: 32
+    _GlobalAccumulation: MultipleBuffer
+    _UseSgprForGRO: false
+    _VectorStore: 1
+    _WorkspaceSizePerElemBias: 0
+    _WorkspaceSizePerElemC: 4
+    _staggerStrideShift: 0
+  - 1LDSBuffer: 0
+    ActivationAlt: false
+    ActivationFuncCall: true
+    ActivationFused: true
+    AssertAIGreaterThanEqual: -1
+    AssertAILessThanEqual: -1
+    AssertFree0ElementMultiple: 1
+    AssertFree1ElementMultiple: 1
+    AssertSummationElementMultiple: 1
+    AssignedDerivedParameters: true
+    AssignedProblemIndependentDerivedParameters: true
+    BufferLoad: true
+    BufferStore: true
+    CUCount: null
+    ClusterLocalRead: 1
+    CodeObjectVersion: '4'
+    ConvertAfterDS: false
+    CustomKernelName: ''
+    DebugStreamK: 0
+    DepthU: 32
+    DirectToLds: false
+    DirectToLdsA: false
+    DirectToLdsB: false
+    DirectToVgprA: false
+    DirectToVgprB: false
+    DirectToVgprSparseMetadata: false
+    EdgeType: ShiftPtr
+    EnableF32XdlMathOp: false
+    EnableMatrixInstruction: true
+    ExpandPointerSwap: 0
+    ForceDisableShadowInit: false
+    GlobalReadPerMfma: 1
+    GlobalReadVectorWidthA: 8
+    GlobalReadVectorWidthB: 4
+    GlobalSplitU: 1
+    GlobalSplitUAlgorithm: MultipleBuffer
+    GlobalSplitUCoalesced: false
+    GlobalSplitUWorkGroupMappingRoundRobin: false
+    GlobalWriteVectorWidth: 2
+    GroupLoadStore: false
+    GuaranteeNoPartialA: false
+    GuaranteeNoPartialB: true
+    GuaranteeNoPartialMetadata: true
+    ISA: [9, 4, 2]
+    InnerUnroll: 1
+    InterleaveAlpha: 0
+    InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+      SupportUserGSU: true, UseUniversalArgs: true}
+    Kernel: true
+    KernelLanguage: Assembly
+    KernelNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_HAS_SAV_UserArgs_MT64x32x32_MI16x16x1_SN_LDSB0_GRVWA8_GRVWB4_K1_LBSPPA512_LBSPPB128_LPA32_LPB4_LRVW4_MIWT2_1_NTA0_NTB0_NLCA1_SVW2_VWA2_VWB1_WG32_8_1
+    LSCA: 64
+    LSCB: 32
+    LSPA: 32
+    LSPB: 32
+    LVCA: 8
+    LVCB: 8
+    LVPA: 4
+    LVPB: 8
+    LdsBlockSizePerPadA: 512
+    LdsBlockSizePerPadB: 128
+    LdsBlockSizePerPadMetadata: 0
+    LdsBytesNoAmax: 14976
+    LdsInitCVgprs: false
+    LdsNumBytes: 14976
+    LdsNumElementsAlignedA: 4608
+    LdsNumElementsAlignedB: 2176
+    LdsNumElementsAlignedMetadata: 0
+    LdsOffsetA: 0
+    LdsOffsetA_Blk: 8192
+    LdsOffsetB: 4608
+    LdsOffsetB_Blk: 12800
+    LdsOffsetBias: 0
+    LdsOffsetBiasGSU: 0
+    LdsOffsetBiasNonGSU: 0
+    LdsOffsetMetadata: 4608
+    LdsOffsetMetadata_Blk: 12800
+    LdsPadA: 32
+    LdsPadB: 4
+    LdsPadMetadata: 0
+    LocalReadVectorWidth: 4
+    LocalSplitU: 1
+    LocalSplitUReuseLDS: 1
+    LocalWritePerMfma: -1
+    LocalWriteUseSgprA: false
+    LocalWriteUseSgprB: false
+    LoopIters: 2
+    LoopUnroll: 32
+    MFMA_BF16_1K: true
+    MIArchVgpr: false
+    MIBlock: [16, 16, 16, 1, 1, 1]
+    MIInputPerThread: 4
+    MIInputPerThreadA: 4
+    MIInputPerThreadB: 4
+    MIInputPerThreadMetadata: 4
+    MIOutputVectorWidth: 4
+    MIRegPerOut: 1
+    MIWaveGroup: [2, 2]
+    MIWaveTile: [2, 1]
+    MIWaveTileA: 2
+    MIWaveTileB: 1
+    MIWaveTileMetadata: 0
+    MacroTile0: 64
+    MacroTile1: 32
+    MacroTileA: 64
+    MacroTileB: 32
+    MagicDivAlg: 2
+    MatrixInstB: 1
+    MatrixInstBM: 1
+    MatrixInstBN: 1
+    MatrixInstK: 16
+    MatrixInstM: 16
+    MatrixInstN: 16
+    MatrixInstruction: [16, 16, 16, 1]
+    MaxOccupancy: 40
+    NoLdsWriteCode: false
+    NoReject: false
+    NoTailLoop: false
+    NonTemporal: -1
+    NonTemporalA: 0
+    NonTemporalB: 0
+    NonTemporalC: 0
+    NonTemporalD: 4
+    NonTemporalE: 0
+    NonTemporalMetadata: 0
+    NonTemporalWS: 0
+    NumElementsPerBatchStore: 16
+    NumElementsPerThread: 8
+    NumGlobalWriteVectorsPerThread: 4
+    NumLoadsA: 1
+    NumLoadsB: 1
+    NumLoadsCoalescedA: 1
+    NumLoadsCoalescedB: 1
+    NumLoadsPerpendicularA: 1
+    NumLoadsPerpendicularB: 1
+    NumThreads: 256
+    OptNoLoadLoop: 1
+    PackedC0IdxChars: [I]
+    PackedC0IndicesX: [0]
+    PackedC1IdxChars: [J]
+    PackedC1IndicesX: [1]
+    PrefetchGlobalRead: 2
+    PrefetchLocalRead: 1
+    PreloadKernArgs: true
+    ProblemType:
+      Activation: true
+      ActivationComputeDataType: 0
+      ActivationNoGuard: false
+      ActivationType: hipblaslt_all
+      AllowNoFreeDims: false
+      AssignedDerivedParameters: true
+      Batched: true
+      BetaOnlyUseBias: false
+      BiasDataTypeList: [0, 7]
+      BiasSrc: D
+      ComplexConjugateA: false
+      ComplexConjugateB: false
+      ComputeDataType: 0
+      DataType: 7
+      DataTypeA: 7
+      DataTypeB: 7
+      DataTypeE: 7
+      DestDataType: 7
+      F32XdlMathOp: 0
+      Gradient: false
+      GroupedGemm: false
+      HighPrecisionAccumulate: true
+      Index0: 0
+      Index01A: 0
+      Index01B: 1
+      Index1: 1
+      IndexAssignmentsA: [0, 3, 2]
+      IndexAssignmentsB: [3, 1, 2]
+      IndexAssignmentsLD: [4, 5, 6, 7]
+      IndexAssignmentsMetadata: [3, 0, 2]
+      IndexUnroll: 3
+      IndexUnrollA: 1
+      IndexUnrollB: 0
+      IndexUnrollM: 0
+      IndicesBatch: [2]
+      IndicesFree: [0, 1]
+      IndicesSummation: [3]
+      MirrorDimsA: []
+      MirrorDimsB: []
+      MirrorDimsMetadata: []
+      NumIndicesBatch: 1
+      NumIndicesC: 3
+      NumIndicesFree: 2
+      NumIndicesLD: 4
+      NumIndicesSummation: 1
+      OperationType: GEMM
+      SetConstStrideA: []
+      SetConstStrideB: []
+      SetConstStrideBias: []
+      SilentHighPrecisionAccumulate: false
+      Sparse: 0
+      StochasticRounding: false
+      StridedBatched: true
+      SupportUserArgs: true
+      TLUA: true
+      TLUB: false
+      Tensor0: 0
+      Tensor1: 1
+      TileA: 0
+      TileAwareSelection: false
+      TileB: 1
+      TotalIndices: 4
+      TransposeA: 0
+      TransposeB: 0
+      UseBeta: true
+      UseBias: 1
+      UseE: false
+      UseInitialStridesAB: false
+      UseInitialStridesCD: false
+      UseScaleAB: ''
+      UseScaleAlphaVec: 1
+      UseScaleCD: false
+    ScheduleGlobalRead: 1
+    ScheduleIterAlg: 3
+    ScheduleLocalWrite: 1
+    SolutionIndex: 47
+    SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_HAS_SAV_UserArgs_MT64x32x32_MI16x16x1_SN_LDSB0_GRVWA8_GRVWB4_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA512_LBSPPB128_LPA32_LPB4_LRVW4_MIWT2_1_NTA0_NTB0_NLCA1_SU8_SUM0_SUS64_SVW2_VWA2_VWB1_WG32_8_1_WGM1_WGMXCC8_WGMXCCG304
+    SourceSwap: 1
+    StaggerU: 8
+    StaggerUMapping: 0
+    StaggerUStride: 64
+    StorePriorityOpt: false
+    StoreRemapVectorWidth: 0
+    StoreSyncOpt: 0
+    StoreVectorWidth: 2
+    StreamK: 0
+    StreamKAtomic: 0
+    StreamKXCCMapping: 0
+    SubGroup0: 8
+    SubGroup1: 32
+    SubGroupA: 8
+    SubGroupB: 32
+    SuppressNoLoadLoop: false
+    ThreadTile: [1, 1]
+    ThreadTile0: 8
+    ThreadTile1: 1
+    ThreadTileA: 8
+    ThreadTileB: 1
+    TransposeLDS: 1
+    TransposeLDSMetadata: true
+    ULSGRODoubleG2L: 0
+    UnrollLoopSwapGlobalReadOrder: 0
+    UnrollMajorLDSA: false
+    UnrollMajorLDSB: true
+    UnrollMajorLDSMetadata: true
+    Use64bShadowLimit: 1
+    UseInstOffsetForGRO: 0
+    UseSgprForGRO: -1
+    Valid: true
+    VectorStore: -1
+    VectorWidthA: 2
+    VectorWidthB: 1
+    WaveSeparateGlobalReadA: 0
+    WaveSeparateGlobalReadB: 0
+    WaveSeparateGlobalReadMetadata: 0
+    WavefrontSize: 64
+    WorkGroup: [32, 8, 1]
+    WorkGroupMapping: 1
+    WorkGroupMappingXCC: 8
+    WorkGroupMappingXCCGroup: -1
+    WorkGroupReduction: false
+    WorkspaceCheck: [4, 0, 1]
+    _DepthU: 32
+    _DepthUA: 32
+    _DepthUB: 32
+    _DepthUMetadata: 32
+    _GlobalAccumulation: MultipleBuffer
+    _UseSgprForGRO: false
+    _VectorStore: 1
+    _WorkspaceSizePerElemBias: 0
+    _WorkspaceSizePerElemC: 4
+    _staggerStrideShift: 0
+    tailLoopOptA: true
+    tailLoopOptB: true
 - [2, 3, 0, 1]
 - - - [128, 3584, 1, 37888]
     - [2, 111.5]
@@ -13397,71 +13466,73 @@
   - - [64, 512, 1, 128]
     - [16, 1.2]
   - - [16, 512, 1, 32]
-    - [31, 0.08]
+    - [30, 0.08]
   - - [128, 32768, 1, 256]
-    - [32, 48.35]
+    - [31, 48.35]
   - - [128, 512, 1, 704]
-    - [33, 7.74]
+    - [32, 7.74]
   - - [768, 16384, 1, 768]
-    - [18, 103.31]
+    - [46, 0.0]
   - - [768, 512, 1, 256]
-    - [19, 15.63]
+    - [18, 15.63]
   - - [32, 512, 1, 24]
-    - [31, 0.11]
+    - [30, 0.11]
   - - [256, 61440, 1, 192]
-    - [20, 66.7]
+    - [19, 66.7]
   - - [128, 1024, 1, 9775]
-    - [21, 44.17]
+    - [20, 44.17]
   - - [128, 1024, 1, 128]
-    - [22, 4.49]
+    - [21, 4.49]
   - - [256, 61440, 1, 104]
-    - [20, 40.47]
+    - [19, 40.47]
   - - [256, 61440, 1, 88]
-    - [23, 35.5]
+    - [22, 35.5]
   - - [9775, 1024, 1, 128]
-    - [24, 38.35]
+    - [23, 38.35]
   - - [32, 1024, 1, 32]
     - [17, 0.32]
   - - [256, 1024, 1, 544]
-    - [25, 17.87]
+    - [24, 17.87]
   - - [64, 1024, 1, 1216]
-    - [26, 9.84]
+    - [25, 9.84]
   - - [64, 1024, 1, 128]
     - [16, 2.35]
   - - [48, 1024, 1, 176]
-    - [27, 1.99]
+    - [26, 1.99]
   - - [36, 1024, 1, 60]
-    - [28, 0.57]
+    - [27, 0.57]
   - - [128, 1024, 1, 512]
-    - [29, 11.86]
+    - [28, 11.86]
   - - [64, 1024, 1, 1179]
-    - [30, 8.95]
+    - [29, 8.95]
   - - [32, 4608, 1, 3584]
-    - [34, 0.0]
+    - [33, 0.0]
   - - [32, 3584, 1, 3584]
-    - [35, 0.0]
+    - [34, 0.0]
   - - [64, 4608, 1, 3584]
-    - [36, 0.0]
+    - [35, 0.0]
   - - [64, 3584, 1, 3584]
-    - [37, 0.0]
+    - [36, 0.0]
   - - [32, 3584, 1, 37888]
-    - [38, 0.0]
+    - [37, 0.0]
   - - [64, 3584, 1, 37888]
-    - [39, 0.0]
+    - [38, 0.0]
   - - [32, 18944, 1, 3584]
-    - [40, 0.0]
+    - [39, 0.0]
   - - [64, 18944, 1, 3584]
-    - [41, 0.0]
+    - [40, 0.0]
   - - [128, 2048, 128, 2048]
-    - [42, 0.0]
+    - [41, 0.0]
   - - [192, 2048, 128, 2048]
-    - [43, 0.0]
+    - [42, 0.0]
   - - [2048, 16384, 1, 64]
-    - [44, 0.0]
+    - [43, 0.0]
   - - [5120, 2048, 1, 160]
-    - [45, 0.0]
+    - [44, 0.0]
   - - [5120, 2048, 1, 576]
-    - [46, 0.0]
+    - [45, 0.0]
+  - - [64, 32, 6144, 32]
+    - [47, 0.0]
 - null
 - null
 - DeviceEfficiency

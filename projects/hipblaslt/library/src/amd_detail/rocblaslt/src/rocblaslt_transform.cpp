@@ -53,23 +53,10 @@ namespace
             = "/opt/rocm/lib/hipblaslt/library/hipblasltTransform.hsaco";
 #endif
 
-        std::string           soPath = rocblaslt_internal_get_so_path();
-        std::filesystem::path libPath(std::filesystem::path(soPath).parent_path());
-
-        auto pathIfExists = [](std::filesystem::path p) -> std::optional<std::filesystem::path> {
-            if(std::filesystem::exists(p))
-                return p;
-            return {};
-        };
-
-        if(auto p
-           = pathIfExists(libPath / ".." / "Tensile" / "library" / "hipblasltTransform.hsaco"))
-            return *p;
-        if(auto p = pathIfExists(libPath / "library" / "hipblasltTransform.hsaco"))
-            return *p;
-        if(auto p = pathIfExists(libPath / "hipblaslt" / "library" / "hipblasltTransform.hsaco"))
-            return *p;
-
+        auto path = rocblaslt_find_library_relative_path(
+            std::filesystem::path("hipblasltTransform.hsaco"));
+        if(path)
+            return *path;
         return std::filesystem::path(DEFAULT_CO_PATH);
     }
 
