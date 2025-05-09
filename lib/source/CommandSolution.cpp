@@ -271,6 +271,11 @@ namespace rocRoller
         return m_context->instructions()->toString();
     }
 
+    std::string CommandKernel::getKernelName() const
+    {
+        return m_name;
+    }
+
     Generator<Instruction> commandComments(CommandPtr command)
     {
         co_yield Instruction::Comment(command->toString());

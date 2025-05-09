@@ -283,6 +283,8 @@ namespace rocRoller
 
         std::string getInstructions() const;
 
+        std::string getKernelName() const;
+
         ContextPtr getContext();
 
         /**
