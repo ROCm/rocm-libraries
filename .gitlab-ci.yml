@@ -432,6 +432,7 @@ test:all-gpus:
   extends:
     - .cmake-minimum
   allow_failure: true
+  timeout: 3h
   needs:
     - job: build:spirv
       parallel:
