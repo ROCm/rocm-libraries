@@ -78,11 +78,9 @@ def subtree_push(entry: RepoEntry, branch: str, prefix: str, subrepo_full_url: s
             logging.error(f"stdout:\n{e.stdout}")
             logging.error(f"stderr:\n{e.stderr}")
             raise RuntimeError("git subtree push failed — see logs for details.") from e
-        # subprocess.run(push_cmd, check=True)
 
 def main(argv: Optional[List[str]] = None) -> None:
     """Main function to execute the PR fanout logic."""
-    subprocess.run("echo $SHELL", shell=True)
     args = parse_arguments(argv)
     logging.basicConfig(
         level=logging.DEBUG if args.debug else logging.INFO
