@@ -40,6 +40,7 @@ include(CMakeDependentOption)
 # Disable -Werror
 option(DISABLE_WERROR "Disable building with Werror" ON)
 option(BUILD_TEST "Build tests" OFF)
+option(CODE_COVERAGE "Enable code coverage" OFF)
 option(BUILD_HIPSTDPAR_TEST "Build hipstdpar tests" OFF)
 option(BUILD_HIPSTDPAR_TEST_WITH_TBB "Build hipstdpar tests with TBB" OFF)
 option(BUILD_EXAMPLES "Build examples" OFF)
@@ -66,7 +67,7 @@ list(APPEND CMAKE_MODULE_PATH
 )
 
 # Set a default build type if none was specified
-if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES AND NOT CODE_COVERAGE)
   message(STATUS "Setting build type to 'Release' as none was specified.")
   set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose the type of build." FORCE)
   set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "" "Debug" "Release" "MinSizeRel" "RelWithDebInfo")
@@ -136,44 +137,45 @@ if (NOT THRUST_HOST_SYSTEM IN_LIST THRUST_HOST_SYSTEM_OPTIONS)
     "THRUST_HOST_SYSTEM must be one of ${THRUST_HOST_SYSTEM_OPTIONS}"
   )
 endif ()
-
+  
 set(COMPILE_OPTIONS -Wall -Wextra)
 if(NOT DISABLE_WERROR)
   list(APPEND COMPILE_OPTIONS -Werror)
 endif()
-
+  
 if (WIN32)
   add_compile_options(-xhip)
   add_compile_definitions(THRUST_IGNORE_DEPRECATED_CPP_DIALECT)
 endif()
-
+  
 # Address Sanitizer
 if(BUILD_ADDRESS_SANITIZER)
   list(APPEND COMPILE_OPTIONS -fsanitize=address -shared-libasan)
   add_link_options(-fuse-ld=lld)
 endif()
-
+  
 # Setup VERSION
 rocm_setup_version(VERSION "3.4.0")
 math(EXPR rocthrust_VERSION_NUMBER "${rocthrust_VERSION_MAJOR} * 100000 + ${rocthrust_VERSION_MINOR} * 100 + ${rocthrust_VERSION_PATCH}")
-
-# Print configuration summary
-include(cmake/Summary.cmake)
-print_configuration_summary()
-
+  
 # Thrust (with HIP backend)
 add_subdirectory(thrust)
-
+  
 if(BUILD_TEST OR BUILD_BENCHMARKS OR BUILD_HIPSTDPAR_TEST)
   rocm_package_setup_component(clients)
 endif()
 
+if(CODE_COVERAGE)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0 -fprofile-instr-generate -fcoverage-mapping")
+endif()
+  
 # Tests
 if(BUILD_TEST OR BUILD_HIPSTDPAR_TEST)
   rocm_package_setup_client_component(tests)
   if (ENABLE_UPSTREAM_TESTS)
     enable_testing()
   endif()
+  
   # We still want the testing to be compiled to catch some errors
   #TODO: Get testing folder working with HIP on Windows
   if (NOT WIN32 AND BUILD_TEST)
@@ -196,15 +198,15 @@ endif()
 #Create header wrapper for backward compatibility
 if(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY AND NOT WIN32)
   rocm_wrap_header_dir(
-      ${CMAKE_SOURCE_DIR}/thrust
-      PATTERNS "*.h" "*.inl" "*.cuh" "*.hpp"
-      HEADER_LOCATION include/thrust
-      GUARDS SYMLINK WRAPPER
-      WRAPPER_LOCATIONS rocthrust/${CMAKE_INSTALL_INCLUDEDIR}/thrust
-      OUTPUT_LOCATIONS rocthrust/wrapper/include/thrust
+    ${CMAKE_SOURCE_DIR}/thrust
+    PATTERNS "*.h" "*.inl" "*.cuh" "*.hpp"
+    HEADER_LOCATION include/thrust
+    GUARDS SYMLINK WRAPPER
+    WRAPPER_LOCATIONS rocthrust/${CMAKE_INSTALL_INCLUDEDIR}/thrust
+    OUTPUT_LOCATIONS rocthrust/wrapper/include/thrust
   )
 endif( )
-
+  
 set(THRUST_OPTIONS_DEBUG ${THRUST_OPTIONS_WARNINGS})
 set(THRUST_OPTIONS_RELEASE ${THRUST_OPTIONS_WARNINGS})
 
@@ -233,3 +235,7 @@ rocm_create_package(
   MAINTAINER "rocthrust-maintainer@amd.com"
   HEADER_ONLY
 )
+  
+# Print configuration summary
+include(cmake/Summary.cmake)
+print_configuration_summary()
