@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2022-2024 Advanced Micro Devices, Inc.
+ * Copyright (c) 2022-2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -112,28 +112,6 @@ hipsparseStatus_t hipCUSPARSEStatusToHIPStatus(cusparseStatus_t cuStatus)
 #else
 #error "CUDART_VERSION is not supported"
 #endif
-}
-
-/* @deprecated */
-cudaDataType HIPSparseLtDatatypeToCuSparseLtDatatype(hipsparseLtDatatype_t type)
-{
-    switch(type)
-    {
-    case HIPSPARSELT_R_32F:
-        return CUDA_R_32F;
-
-    case HIPSPARSELT_R_16BF:
-        return CUDA_R_16BF;
-
-    case HIPSPARSELT_R_16F:
-        return CUDA_R_16F;
-
-    case HIPSPARSELT_R_8I:
-        return CUDA_R_8I;
-
-    default:
-        throw HIPSPARSE_STATUS_NOT_SUPPORTED;
-    }
 }
 
 cudaDataType HIPDatatypeToCuSparseLtDatatype(hipDataType type)
