@@ -60,8 +60,14 @@ namespace TensileLite
                     lib.solutionsGuard  = ctx->solutionsGuard;
 
                     //Extract directory where TensileLibrary.dat/yaml file is located
+                    //TODO: Consider refactoring this to use filesystem::path handling instead
+                    //of string munging.
                     lib.libraryDirectory = ctx->filename;
-                    size_t directoryPos  = ctx->filename.rfind('/');
+                    size_t directoryPos  = ctx->filename.rfind('/'); // Posix style
+#ifdef _WIN32
+                    if(directoryPos == std::string::npos)
+                        directoryPos = ctx->filename.rfind('\\'); // Windows style
+#endif
                     if(directoryPos != std::string::npos)
                         lib.libraryDirectory.resize(directoryPos + 1);
                     else
