@@ -460,13 +460,6 @@ namespace TensileLite
                                                size_t                   gsu) const;
 
         template <bool T_Debug>
-        KernelInvocation generateActivationOnlyCall(Problem const&           problem,
-                                                    ContractionInputs const& inputs) const;
-
-        std::string activationOnlyKernelName(Problem const&           problem,
-                                             ContractionInputs const& inputs) const;
-
-        template <bool T_Debug>
         KernelInvocation generateReductionCall(Problem const&           problem,
                                                ContractionInputs const& inputs) const;
 
@@ -567,8 +560,7 @@ namespace TensileLite
         uint32_t magicNumber(int magicDivAlg, uint32_t x, uint32_t* magicShift) const;
         uint32_t smallMagicNumber(uint32_t x) const;
 
-        inline void calculateAutoGSU(Problem const&  problem,
-                                     Hardware const* hardware) const;
+        inline void      calculateAutoGSU(Problem const& problem, Hardware const* hardware) const;
         mutable uint32_t autoGSU = 0;
     };
 
