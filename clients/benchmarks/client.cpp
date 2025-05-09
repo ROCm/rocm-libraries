@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2022-2024 Advanced Micro Devices, Inc.
+ * Copyright (c) 2022-2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -519,7 +519,10 @@ try
         int                      version;
         hipsparselt_local_handle handle;
         hipsparseLtGetVersion(handle, &version);
-        hipsparselt_cout << "hipSPARSELt version: " << version << std::endl;
+
+        char rev[128];
+        hipsparseLtGetGitRevision(handle, &rev[0]);
+        hipsparselt_cout << "hipSPARSELt version: " << version << " revision: " << rev << "\n" << std::endl;
         return 0;
     }
 
