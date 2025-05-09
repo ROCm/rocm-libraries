@@ -1,93 +1,92 @@
+# Auto Label PR
+# -------------
+# This GitHub Actions workflow automatically adds or removes labels on a pull request
+# based on a custom Python script that analyzes the PR content and paths.
+#
+# Steps:
+#   - Run pr_category_label.py to determine which category labels to add/remove
+#   - Update labels on the PR using GitHub CLI (gh)
+#   - Run pr_fanout_sync_labels.py to sync custom labels from the monorepo PR to the subrepo PRs
+
 name: Auto Label PR
 
 on:
+  workflow_run:
+    workflows: ["Fanout Subtree PRs"]
+    types:
+      - completed
   pull_request:
     types:
-      - opened
-      - synchronize
-      - reopened
+      - labeled
+
+# ensure that the workflow is not running for the same PR multiple times at once
+concurrency:
+  group: pr-auto-label-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
 
 jobs:
-  label-pr:
-    runs-on: ubuntu-latest
+  auto-label-pr:
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout workflows
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           sparse-checkout: '.github'
+          token: ${{ secrets.MONOREPO_BOT_TOKEN }} # since we are touching labels on subrepository PRs
 
-      - name: Get changed files
-        id: files
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.12'
+
+      - name: Install python dependencies
         run: |
-          api="https://api.github.com/repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files?per_page=100"
-          files=""
+          python -m pip install --upgrade pip
+          pip install pydantic
 
-          while [ -n "$api" ]; do
-            response=$(curl -sS -D headers -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" "$api")
-            files+=$(echo "$response" | jq -r '.[].filename')$'\n'
-
-            api=$(grep -i '^link:' headers | sed -n 's/.*<\([^>]*\)>; rel="next".*/\1/p')
-          done
-
-          echo "changed_files=$(echo "$files" | tr '\n' ' ' | xargs)" >> "$GITHUB_OUTPUT"
-
-      - name: Get current labels
-        id: current_labels
+      - name: Set up Git user
         run: |
-          current_labels=$(gh pr view ${{ github.event.pull_request.number }} --json labels -q '.labels[].name' | tr '\n' ' ')
-          echo "current_labels=${current_labels}" >> "$GITHUB_OUTPUT"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Determine PR Number (workflow_run case only)
+        id: pr_number
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Read repo configurations
-        id: repos_config
+          GH_TOKEN: ${{ secrets.MONOREPO_BOT_TOKEN }}
         run: |
-          repo_paths=$(jq -r '.repositories[] | "\(.category)/\(.name)"' .github/repos-config.json | tr '\n' ' ')
-          echo "repo_paths=$repo_paths" >> "$GITHUB_OUTPUT"
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            BRANCH_NAME="${{ github.event.workflow_run.head_branch }}"
+            PR_NUMBER=$(gh pr list --head "${{ github.event.workflow_run.head_branch }}" --state open --json number -R "${{ github.repository }}" --jq '.[0].number')
+          else
+            PR_NUMBER="${{ github.event.pull_request.number }}"
+          fi
+          echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
 
-      - name: Apply and remove labels
+      - name: Compute Category Labels for PR
+        id: compute_labels
+        env:
+          GH_TOKEN: ${{ secrets.MONOREPO_BOT_TOKEN }}
         run: |
-          changed_files="${{ steps.files.outputs.changed_files }}"
-          current_labels="${{ steps.current_labels.outputs.current_labels }}"
-          repo_paths="${{ steps.repos_config.outputs.repo_paths }}"
+          python .github/scripts/pr_category_label.py \
+            --repo ${{ github.repository }} \
+            --pr ${{ steps.pr_number.outputs.pr_number }}
 
-          labels_to_add=()
-          labels_to_remove=()
-
-          for entry in $repo_paths; do
-            category_repo="${entry}"                      # e.g., "projects/hipsparse"
-            category="${category_repo%%/*}"                # e.g., "projects"
-            name="${category_repo##*/}"                    # e.g., "hipsparse"
-
-            # Check if the category is 'projects' and set the label format accordingly
-            if [ "$category" == "projects" ]; then
-              label="project: ${name}"                     # e.g., "project: hipsparse"
-            else
-              label="${category}: ${name}"                 # e.g., "shared: rocroller"
-            fi
-
-            # Use full path with leading slash for exact match
-            if echo "$changed_files" | grep -qE "^${category_repo}/"; then
-              labels_to_add+=("$label")
-            else
-              if echo "$current_labels" | grep -q "$label"; then
-                labels_to_remove+=("$label")
-              fi
-            fi
-          done
-
-          if [ ${#labels_to_add[@]} -gt 0 ]; then
-            echo "Applying labels: ${labels_to_add[*]}"
-            for label in "${labels_to_add[@]}"; do
-              gh pr edit "${{ github.event.pull_request.number }}" --add-label "$label"
-            done
+      - name: Update labels
+        env:
+          GH_TOKEN: ${{ secrets.MONOREPO_BOT_TOKEN }}
+        run: |
+          if [ -n "${{ steps.compute_labels.outputs.label_remove }}" ]; then
+            gh pr edit "${{ steps.pr_number.outputs.pr_number }}" --remove-label "${{ steps.compute_labels.outputs.label_remove }}"
+          fi
+          if [ -n "${{ steps.compute_labels.outputs.label_add }}" ]; then
+            gh pr edit "${{ steps.pr_number.outputs.pr_number }}" --add-label "${{ steps.compute_labels.outputs.label_add }}"
           fi
 
-          if [ ${#labels_to_remove[@]} -gt 0 ]; then
-            echo "Removing labels: ${labels_to_remove[*]}"
-            for label in "${labels_to_remove[@]}"; do
-              gh pr edit "${{ github.event.pull_request.number }}" --remove-label "$label"
-            done
-          fi
+      - name: Sync Custom Labels from Monorepo PR
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.MONOREPO_BOT_TOKEN }}
+        run: |
+          python .github/scripts/pr_fanout_sync_labels.py \
+            --repo ${{ github.repository }} \
+            --pr "${{ steps.pr_number.outputs.pr_number }}" \
+            --config ".github/repos-config.json"
