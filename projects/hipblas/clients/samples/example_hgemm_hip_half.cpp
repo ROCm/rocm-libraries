@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -227,12 +227,11 @@ int main()
             = relative_error < max_relative_error ? max_relative_error : relative_error;
     }
 
-    // 2 ^ -14, smallest positive normal number for IEEE16
-    float eps = 0.000061035;
+    float half_eps = 0.000488; // approx 2^-11, rounding machine epsilon for ieee754 half precision
 
     // tolerance is arbitrary right now
     float tolerance = 20;
-    if(max_relative_error != max_relative_error || max_relative_error > eps * tolerance)
+    if(max_relative_error != max_relative_error || max_relative_error > half_eps * tolerance)
     {
         std::cout << "FAIL: max_relative_error = " << max_relative_error << std::endl;
     }
