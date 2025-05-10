@@ -1,0 +1,62 @@
+# Reflect Fanout Checks via Repository Dispatch
+# ---------------------------------------------
+# This workflow listens for repository_dispatch events from sub-repositories,
+# indicating that a check run was updated on a fanout PR. It reflects that
+# check status back onto the corresponding monorepo pull request as a synthetic check.
+#
+# Triggered by: repository_dispatch from subrepos when a check run is updated
+#
+# Expected Payload:
+#   {
+#     "subrepo": "org/name",
+#     "subrepo_pr": 42,
+#     "monorepo_pr": 123
+#   }
+
+name: Reflect Subrepo Checks (Dispatch)
+
+on:
+  repository_dispatch:
+    types: [reflect-checks-push]
+
+jobs:
+  reflect-dispatched-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate a token
+        id: generate-token
+        uses: actions/create-github-app-token@df432ceedc7162793a195dd1713ff69aefc7379e
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - name: Checkout .github directory
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          sparse-checkout: .github
+          token: ${{ steps.generate-token.outputs.token }}
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.12'
+
+      - name: Install python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pydantic requests
+
+      - name: Set up Git user
+        run: |
+          git config user.name "assistant-librarian[bot]"
+          git config user.email "assistant-librarian[bot]@users.noreply.github.com"
+
+      - name: Reflect Checks from Subrepo
+        env:
+          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+        run: |
+          pr="${{ github.event.client_payload.monorepo_pr }}"
+          subrepo="${{ github.event.client_payload.subrepo }}"
+          echo "Dispatch received for monorepo PR #$pr from subrepo $subrepo"
+          python .github/scripts/pr_reflect_checks.py --repo "${{ github.repository }}" --pr "${pr}" --subrepo "${subrepo}"
