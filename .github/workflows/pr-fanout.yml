@@ -14,11 +14,11 @@
 name: Fanout Subtree PRs
 
 on:
-    pull_request:
-      types:
-        - opened
-        - synchronize
-        - reopened
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
 
 # ensure that the workflow is not running for the same PR multiple times at once
 concurrency:
