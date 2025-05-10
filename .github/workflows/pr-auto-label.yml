@@ -81,7 +81,7 @@ jobs:
       - name: Compute Category Labels for PR
         id: compute_labels
         env:
-          GH_TOKEN: ${{ secrets.MONOREPO_BOT_TOKEN }}
+          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
         run: |
           python .github/scripts/pr_category_label.py \
             --repo ${{ github.repository }} \
