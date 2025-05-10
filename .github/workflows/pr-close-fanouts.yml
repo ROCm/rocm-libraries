@@ -15,11 +15,18 @@ jobs:
   close-fanouts:
     runs-on: ubuntu-24.04
     steps:
+      - name: Generate a token
+        id: generate-token
+        uses: actions/create-github-app-token@df432ceedc7162793a195dd1713ff69aefc7379e # v2.0.6
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+
       - name: Checkout workflows
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           sparse-checkout: '.github'
-          token: ${{ secrets.MONOREPO_BOT_TOKEN }} # since we are touching subrepository PRs
+          token: ${{ steps.generate-token.outputs.token }} # since we are touching subrepository PRs
 
       - name: Set up Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
@@ -27,16 +34,18 @@ jobs:
           python-version: '3.12'
 
       - name: Install python requirements
-        run: pip install pydantic
+        run: |
+          python -m pip install --upgrade pip
+          pip install pydantic requests
 
       - name: Set up Git user
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "assistant-librarian[bot]"
+          git config user.email "assistant-librarian[bot]@users.noreply.github.com"
 
       - name: Close fanned out PRs and delete branches
         env:
-          GH_TOKEN: ${{ secrets.MONOREPO_BOT_TOKEN }}
+          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
         run: |
           python .github/scripts/pr_close_fanouts.py \
             --repo "${{ github.repository }}" \
