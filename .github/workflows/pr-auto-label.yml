@@ -42,6 +42,7 @@ jobs:
         with:
           app-id: ${{ secrets.APP_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
 
       - name: Checkout workflows
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -101,12 +102,13 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.generate-token.outputs.token }}
         run: |
-          if gh api orgs/${{ env.ORG_TO_CHECK }}/members/${{ github.event.pull_request.user.login }} --silent; then
-            gh pr edit "${{ github.event.pull_request.number }}" --repo "${{ github.repository }}" --add-label "${{ env.ORG_LABEL }}"
+          PR_USER=$(gh pr view "${{ steps.pr_number.outputs.pr_number }}" --json author -q .author.login)
+          if gh api orgs/${{ env.ORG_TO_CHECK }}/members/$PR_USER --silent; then
+            gh pr edit "${{ steps.pr_number.outputs.pr_number }}" --add-label "${{ env.ORG_LABEL }}"
           else
-            gh pr edit "${{ github.event.pull_request.number }}" --repo "${{ github.repository }}" --add-label "${{ env.EXTERNAL_LABEL}}"
+            gh pr edit "${{ steps.pr_number.outputs.pr_number }}" --add-label "${{ env.EXTERNAL_LABEL}}"
             # force remove the org label when the user is not in the org
-            gh pr edit "${{ github.event.pull_request.number }}" --repo "${{ github.repository }}" --remove-label "${{ env.ORG_LABEL }}"
+            gh pr edit "${{ steps.pr_number.outputs.pr_number }}" --remove-label "${{ env.ORG_LABEL }}"
           fi
 
       - name: Sync Custom Labels from Monorepo PR
