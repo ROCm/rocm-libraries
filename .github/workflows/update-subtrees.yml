@@ -28,12 +28,11 @@ jobs:
         run: |
           has_errors=false
           for repo in $(cat .github/repos-config.json | jq -r '.repositories[].name'); do
-            repo_name=$(cat .github/repos-config.json | jq -r ".repositories[] | select(.name == \"$repo\") | .reponame")
             url=$(cat .github/repos-config.json | jq -r ".repositories[] | select(.name == \"$repo\") | .url")
             branch=$(cat .github/repos-config.json | jq -r ".repositories[] | select(.name == \"$repo\") | .branch")
             category=$(cat .github/repos-config.json | jq -r ".repositories[] | select(.name == \"$repo\") | .category")
-            enable_pull=$(cat .github/repos-config.json | jq -r ".repositories[] | select(.name == \"$repo\") | .auto_subtree_pull // true")
-            enable_push=$(cat .github/repos-config.json | jq -r ".repositories[] | select(.name == \"$repo\") | .auto_subtree_push // true")
+            enable_pull=$(cat .github/repos-config.json | jq -r ".repositories[] | select(.name == \"$repo\") | .auto_subtree_pull")
+            enable_push=$(cat .github/repos-config.json | jq -r ".repositories[] | select(.name == \"$repo\") | .auto_subtree_push")
             if [ "$enable_pull" = true ]; then
               git subtree pull --prefix "${category}/${repo}" https://github.com/${url}.git $branch || {
                 has_errors=true
