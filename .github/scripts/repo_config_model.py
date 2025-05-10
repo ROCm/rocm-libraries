@@ -39,6 +39,9 @@ class RepoEntry(BaseModel):
     url: str
     branch: str
     category: str
+    auto_subtree_pull: bool
+    auto_subtree_push: bool
+    enable_pr_fanout: bool
 
 class RepoConfig(BaseModel):
     """

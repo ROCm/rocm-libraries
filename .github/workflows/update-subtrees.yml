@@ -32,15 +32,18 @@ jobs:
             url=$(cat .github/repos-config.json | jq -r ".repositories[] | select(.name == \"$repo\") | .url")
             branch=$(cat .github/repos-config.json | jq -r ".repositories[] | select(.name == \"$repo\") | .branch")
             category=$(cat .github/repos-config.json | jq -r ".repositories[] | select(.name == \"$repo\") | .category")
-
-            git subtree pull --prefix "${category}/${repo}" https://github.com/${url}.git $branch || {
-              has_errors=true
-            }
-
-            # Uncomment to enable pushing back to remote
-            # git subtree push --prefix "${category}/${repo}" https://github.com/${url}.git $branch || {
-            #   has_errors=true
-            # }
+            enable_pull=$(cat .github/repos-config.json | jq -r ".repositories[] | select(.name == \"$repo\") | .auto_subtree_pull // true")
+            enable_push=$(cat .github/repos-config.json | jq -r ".repositories[] | select(.name == \"$repo\") | .auto_subtree_push // true")
+            if [ "$enable_pull" = true ]; then
+              git subtree pull --prefix "${category}/${repo}" https://github.com/${url}.git $branch || {
+                has_errors=true
+              }
+            fi
+            if [ "$enable_push" = true ]; then
+              git subtree push --prefix "${category}/${repo}" https://github.com/${url}.git $branch || {
+                has_errors=true
+              }
+            fi
           done
 
           if [ "$has_errors" = true ]; then

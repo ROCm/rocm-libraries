@@ -5,6 +5,7 @@ PR Detect Changed Subtrees Script
 ---------------------------------
 This script analyzes a pull request's changed files and determines which subtrees
 (defined in .github/repos-config.json by category/name) were affected.
+Ignore if the repos-config.json entry has `enable_pr_fanout` set to false.
 
 Steps:
     1. Fetch the changed files in the PR using the GitHub API.
@@ -52,7 +53,11 @@ def parse_arguments(argv: Optional[List[str]] = None) -> argparse.Namespace:
 
 def get_valid_prefixes(config: List[RepoEntry]) -> Set[str]:
     """Extract valid subtree prefixes from the configuration."""
-    valid_prefixes = {f"{entry.category}/{entry.name}" for entry in config}
+    valid_prefixes = {
+        f"{entry.category}/{entry.name}"
+        for entry in config
+        if getattr(entry, "enable_pr_fanout", False)  # Default to False if not explicitly set
+    }
     logger.debug("Valid subtrees:\n" + "\n".join(sorted(valid_prefixes)))
     return valid_prefixes
 
@@ -64,6 +69,9 @@ def find_matched_subtrees(changed_files: List[str], valid_prefixes: Set[str]) ->
         if len(path.split("/")) >= 2
     }
     matched = sorted(changed_subtrees & valid_prefixes)
+    skipped = sorted(changed_subtrees - valid_prefixes)
+    if skipped:
+        logger.debug(f"Skipped subtrees (enable_pr_fanout=false or not in config): {skipped}")
     logger.debug(f"Matched subtrees: {matched}")
     return matched
 
