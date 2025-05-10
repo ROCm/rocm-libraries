@@ -23,7 +23,7 @@ on:
 
 # ensure that the workflow is not running for the same PR multiple times at once
 concurrency:
-  group: pr-auto-label-${{ github.event.pull_request.number }}
+  group: pr-auto-label-${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number || github.run_id }}
   cancel-in-progress: false
 
 # the monorepo and subrepos assumed to have these labels created in advance

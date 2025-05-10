@@ -88,4 +88,3 @@ jobs:
             --repo "${{ github.repository }}" \
             --pr "${{ github.event.pull_request.number }}" \
             --subtrees "${{ steps.detect.outputs.subtrees }}" \
-            --debug
