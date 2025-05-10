@@ -171,13 +171,15 @@ class GitHubCLIClient:
 
     def pr_view(self, repo: str, head: str) -> Optional[int]:
         """Check if a PR exists for the given repo and branch."""
-        url = f"{self.api_url}/repos/{repo}/pulls?head={head}&per_page=100"
+        # This is similar to get_pr_by_head_branch but returns only the PR number directly
+        url = f"{self.api_url}/repos/{repo}/pulls?head={repo.split('/')[0]}:{head}&per_page=100"
         logger.debug(f"Request URL: {url}")
         result = self._get_paginated_json(url, f"Failed to retrieve PR for head branch {head} in repo {repo}")
         return result[0]["number"] if result else None
 
     def get_pr_by_head_branch(self, repo: str, head: str) -> Optional[dict]:
         """Fetch the PR object for a given head branch in a repository, if it exists."""
+        # This is similar to pr_view but returns the full PR object
         url = f"{self.api_url}/repos/{repo}/pulls?head={repo.split('/')[0]}:{head}&state=open&per_page=100"
         logger.debug(f"Request URL: {url}")
         data = self._get_paginated_json(url, f"Failed to get PRs for {repo} with head {head}")
