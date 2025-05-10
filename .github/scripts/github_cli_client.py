@@ -122,7 +122,10 @@ class GitHubCLIClient:
         for attempt in range(retries):
             response = self.session.request(method, url, json=json)
             if response.ok:
-                return response.json()
+                if response.status_code == 204 or not response.text.strip():
+                    return {}  # DELETE requests have no json content
+                else:
+                    return response.json()
             else:
                 # for api rate limiting, we check the headers for remaining requests and reset time
                 if response.status_code == 403 and response.headers.get("X-RateLimit-Remaining") == "0":
