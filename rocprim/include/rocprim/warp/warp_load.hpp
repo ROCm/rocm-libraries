@@ -263,6 +263,7 @@ private:
                                        VirtualWaveSize,
                                        Method,
                                        ::rocprim::arch::wavefront::target::size64>;
+
     using dispatch = detail::dispatch_wave_size<warp_load_wave32, warp_load_wave64>;
 
 public:

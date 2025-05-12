@@ -1219,12 +1219,12 @@ private:
         return times.size() >= 2 ? stddev / mean : 0.0;
     }
 
-    size_t                  warmup_iterations;
-    bool                    cold;
-    bool                    record_as_whole;
+    size_t warmup_iterations;
+    bool   cold;
+    bool   record_as_whole;
 
     std::vector<hipEvent_t> events;
-    std::function<void()>   run_before_every_iteration_lambda = nullptr;
+    std::function<void()>   run_before_every_iteration_lambda       = nullptr;
     size_t                  total_gbench_iterations                 = 0;
     bool                    reset_total_gbench_iterations_every_run = true;
     std::vector<double>     times;
