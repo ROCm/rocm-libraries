@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2022-2024 Advanced Micro Devices, Inc.
+ * Copyright (c) 2022-2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -60,10 +60,12 @@ const char* hipDataType_to_string(hipDataType type)
         return "i8_r";
     case HIP_R_16BF:
         return "bf16_r";
+#if HIP_FP8_TYPE_OCP
     case HIP_R_8F_E4M3:
         return "f8_r";
     case HIP_R_8F_E5M2:
         return "bf8_r";
+#endif
     default:
         return "Invalid";
     }

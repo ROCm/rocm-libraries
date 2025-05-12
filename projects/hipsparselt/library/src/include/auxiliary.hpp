@@ -123,10 +123,12 @@ constexpr const char* hip_datatype_to_string(hipDataType type)
         return "bf16_r";
     case HIP_R_8I:
         return "i8_r";
+#if HIP_FP8_TYPE_OCP
     case HIP_R_8F_E4M3:
         return "f8_r";
     case HIP_R_8F_E5M2:
         return "bf8_r";
+#endif
     default:
         return "invalid";
     }

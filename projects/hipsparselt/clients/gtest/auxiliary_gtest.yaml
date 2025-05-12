@@ -149,4 +149,9 @@ Tests:
   function:
     - aux_get_workspace_size: *real_precisions
 
+- name: aux_get_version
+  category: pre_checkin
+  function:
+    - aux_get_version: *hpa_half_precision
+
 ...
