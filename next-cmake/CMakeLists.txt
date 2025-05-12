@@ -28,15 +28,15 @@ cmake_minimum_required(VERSION 3.25.0)
 project(hipblaslt VERSION 0.15.0 LANGUAGES CXX)
 
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/rocm-cmake/share/rocmcmakebuildtools/cmake")
+list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../cmake)
 
-include(ROCMInstallTargets)
-include(ROCMSetupVersion)
+include(Dependencies)
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 include(GenerateExportHeader)
 include(CMakeDependentOption)
 include(hipblaslt_python)
+include(hipblaslt_target_configure_sanitizers)
 
 rocm_setup_version(VERSION ${PROJECT_VERSION})
 set(hipblaslt_SOVERSION 0.15)
@@ -59,6 +59,8 @@ if(HIPBLASLT_ENABLE_CLIENT)
     # rocm-smi is not presently available on Windows so we do not require it.
     cmake_dependent_option(HIPBLASLT_REQUIRE_ROCM_SMI "Require rocm_smi." ON "NOT WIN32" OFF)
 endif()
+
+set(HIPBLASLT_ENABLE_ASAN OFF CACHE BOOL "Build hipBLASLt with address sanitizer enabled")
 
 if(HIPBLASLT_ENABLE_HOST)
     set(HIPBLASLT_BUILD_SHARED_LIBS ON CACHE BOOL "Build the hipblaslt library as shared vs static")
@@ -138,6 +140,25 @@ if(HIPBLASLT_ENABLE_LLVM)
 endif()
 if(HIPBLASLT_ENABLE_DEVICE)
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
+
+    if(HIPBLASLT_ENABLE_ASAN AND NOT WIN32)
+        set(ASAN_LIB_PATH "unset")
+        execute_process(
+            COMMAND ${CMAKE_CXX_COMPILER} --print-file-name=libclang_rt.asan-x86_64.so
+            OUTPUT_VARIABLE ASAN_LIB_PATH
+        )
+        # If ASAN_LIB_PATH is libclang_rt.asan-x86_64.so
+        # rather than /path/to/libclang_rt.asan-x86_64.so then
+        # we failed to locate it and HAS_PARENT_PATH is false.
+        string(STRIP ${ASAN_LIB_PATH} ASAN_LIB_PATH)
+        cmake_path(HAS_PARENT_PATH ASAN_LIB_PATH result)
+        if(NOT result)
+            message(FATAL_ERROR "Failed to locate libclang_rt.asan-x86_64.so ")
+        endif()
+        # Disable a few asan options to get builds going but these should be addressed
+        set(asan_opts "LD_PRELOAD=${ASAN_LIB_PATH}" "ASAN_OPTIONS=detect_leaks=0,new_delete_type_mismatch=0")
+    endif()
+
     if(HIPBLASLT_BUNDLE_PYTHON_DEPS)
         # Build the rocisa python extension.
         add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../tensilelite/rocisa"
@@ -150,7 +171,7 @@ if(HIPBLASLT_ENABLE_DEVICE)
         # setup. In the meantime, the directory passed here must match the
         # what is set there. Failure to do so will cause a ModuleNotFoundError
         # trying to load rocisa.
-        hipblaslt_configure_bundled_python_command("${CMAKE_BINARY_DIR}/lib")
+        hipblaslt_configure_bundled_python_command("${CMAKE_BINARY_DIR}/lib" "${asan_opts}")
     else()
         # Just pass through to the found python executable and trust that the
         # user set it up properly.
@@ -158,6 +179,7 @@ if(HIPBLASLT_ENABLE_DEVICE)
         set(HIPBLASLT_PYTHON_DEPS)
     endif()
 endif()
+
 if(HIPBLASLT_ENABLE_HOST)
     if(HIPBLASLT_BUILD_SHARED_LIBS)
         add_library(hipblaslt SHARED)
@@ -175,6 +197,10 @@ if(HIPBLASLT_ENABLE_HOST)
             rocisa::rocisa-cpp
             ${CMAKE_DL_LIBS}
     )
+
+    if(HIPBLASLT_ENABLE_ASAN)
+        hipblaslt_target_configure_sanitizers(hipblaslt PRIVATE)
+    endif()
 
     if(HIPBLASLT_ENABLE_OPENMP)
         target_link_libraries(hipblaslt PRIVATE OpenMP::OpenMP_CXX)
