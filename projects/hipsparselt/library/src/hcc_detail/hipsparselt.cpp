@@ -1101,9 +1101,9 @@ catch(...)
 hipsparseStatus_t hipsparseLtGetArchName(char** archName)
 try
 {
-    *archName        = nullptr;
-    std::string arch = "cuda";
-    *archName        = (char*)malloc(arch.size() * sizeof(char));
+    *archName = nullptr;
+    auto arch = rocsparselt_internal_get_arch_name();
+    *archName = (char*)malloc(arch.size() * sizeof(char));
     strncpy(*archName, arch.c_str(), arch.size());
     return HIPSPARSE_STATUS_SUCCESS;
 }
