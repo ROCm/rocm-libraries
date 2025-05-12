@@ -30,23 +30,21 @@ Build and install |project_name|
       :linenos:
 
       cd hipBLAS-common
-      # configure
-      CC=/opt/rocm/bin/amdclang++              \
       CXX=/opt/rocm/bin/amdclang++             \
       cmake -B build                           \
-            -S next-cmake                      \
-            -D CMAKE_INSTALL_PREFIX=$ROCM_PATH
-      # build and install
-      cmake --build build
-      cmake --install build
-
-Options
--------
-
-|project_name| is a header-only library and does not have any custom build options.
+            -S .                               \
+            -D CMAKE_INSTALL_PREFIX=<preferred installation path>
+      cmake --build build --target install
 
 CMake targets
 -------------
 
-* ``hip::hipblas-common``
-* ``roc::hipblas-common`` (deprecated)
+* ``roc::hipblas-common``
+
+Using rmake script
+------------------
+
+   .. code-block:: bash
+      :linenos:
+
+      python3 ./rmake.py --install
