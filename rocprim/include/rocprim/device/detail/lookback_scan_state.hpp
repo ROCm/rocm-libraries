@@ -109,11 +109,15 @@ enum class lookback_scan_determinism
 
 constexpr const int MAX_PAYLOAD_SIZE = ROCPRIM_MAX_ATOMIC_SIZE - 1;
 
-// lookback_scan_state object keeps track of prefixes status for
-// a look-back prefix scan. Initially every prefix can be either
-// invalid (padding values) or empty. One thread in a block should
-// later set it to partial, and later to complete.
-template<class T, bool UseSleep = false, bool IsSmall = (sizeof(T) <= MAX_PAYLOAD_SIZE)>
+/// \brief Optimized implementation of lookback scan, which is a parallel inclusive scan primitive for device level.
+///
+/// This object keeps track of prefixes status for a look-back prefix scan. Initially every prefix can be
+/// either invalid (padding values) or empty. One thread in a block should later set it to partial, and later to complete.
+///
+/// \tparam T The accumulator type of the scan operation.
+/// \tparam UseSleep [optional] If true, the execution of a wavefront is paused for a short duration, allowing other threads or processes to execute during idle periods.
+/// \tparam IsSmall [optional] Dependent on the size of `T`. If it's smaller than 16 bytes, it's set to true.
+template<class T, bool UseSleep = false, bool IsSmall = (sizeof(T) <= 15)>
 struct lookback_scan_state;
 
 /// Reduce lanes `0-valid_items` and return the result in lane 0.
@@ -200,7 +204,15 @@ public:
 
     static constexpr bool use_sleep = UseSleep;
 
-    // temp_storage must point to allocation of get_storage_size(number_of_blocks) bytes
+    /// \brief Initializes the lookback_scan_state with the given temporary storage and the given grid size.
+    ///
+    /// \param [in,out] state the lookback_scan_state object to be initialized.
+    /// \param [in] temp_storage the temporary storage necessary for the calculation. Its size can be queried with the get_storage_size function.
+    /// \param [in] number_of_blocks the grid size for the kernel operation.
+    /// \param [in] stream the stream which will run the kernel.
+    ///
+    /// \returns \p hipSuccess (\p 0) after successful scan; otherwise a HIP runtime error of
+    /// type \p hipError_t.
     ROCPRIM_HOST_DEVICE
     static inline hipError_t create(lookback_scan_state& state,
                                     void*                temp_storage,
@@ -212,6 +224,17 @@ public:
         return hipSuccess;
     }
 
+    /// \brief This function queries the size of the temporary storage for the lookback scan algorithm.
+    ///
+    /// \par Overview
+    /// The lookback_scan needs a certain amount of temporary storage for the calculation. This function calculates the necessary size of the storage.
+    ///
+    /// \param [in] number_of_blocks the grid size for the kernel operation.
+    /// \param [in] stream the stream which will run the kernel.
+    /// \param [out] storage_size this parameter will contain the storage size in bytes.
+    ///
+    /// \returns \p hipSuccess (\p 0) after successful scan; otherwise a HIP runtime error of
+    /// type \p hipError_t.
     ROCPRIM_HOST_DEVICE
     static inline hipError_t get_storage_size(const unsigned int number_of_blocks,
                                               const hipStream_t  stream,
@@ -225,6 +248,17 @@ public:
         return error;
     }
 
+    /// \brief This function queries the layout of the temporary storage for the lookback scan algorithm.
+    ///
+    /// \par Overview
+    /// The lookback_scan needs a certain amount of temporary storage for the calculation. This function queries the layout of the storage.
+    ///
+    /// \param [in] number_of_blocks the grid size for the kernel operation.
+    /// \param [in] stream the stream which will run the kernel.
+    /// \param [out] layout this parameter will contain the storage layout.
+    ///
+    /// \returns \p hipSuccess (\p 0) after successful scan; otherwise a HIP runtime error of
+    /// type \p hipError_t.
     ROCPRIM_HOST_DEVICE
     static inline hipError_t get_temp_storage_layout(const unsigned int            number_of_blocks,
                                                      const hipStream_t             stream,
@@ -236,6 +270,10 @@ public:
         return error;
     }
 
+    /// \brief This device function initializes the prefixes of the lookback_scan_state instance.
+    ///
+    /// \param [in] block_id the prefixes are initialized per block.
+    /// \param [in] number_of_blocks grid size.
     ROCPRIM_DEVICE ROCPRIM_INLINE
     void initialize_prefix(const unsigned int block_id, const unsigned int number_of_blocks)
     {
@@ -259,19 +297,31 @@ public:
         }
     }
 
+    /// \brief This device function sets the given prefix to the given value and to partial flag.
+    ///
+    /// \param [in] block_id the index of the prefix to be updated.
+    /// \param [in] value the value to update the prefix to.
     ROCPRIM_DEVICE ROCPRIM_INLINE
     void set_partial(const unsigned int block_id, const T value)
     {
         this->set(block_id, lookback_scan_prefix_flag::partial, value);
     }
 
+    /// \brief This device function sets the given prefix to the given value and to complete flag.
+    ///
+    /// \param [in] block_id the index of the prefix to be updated.
+    /// \param [in] value the value to update the prefix to.
     ROCPRIM_DEVICE ROCPRIM_INLINE
     void set_complete(const unsigned int block_id, const T value)
     {
         this->set(block_id, lookback_scan_prefix_flag::complete, value);
     }
 
-    // block_id must be > 0
+    /// \brief This device function queries the value and the flag of the given prefix.
+    ///
+    /// \param [in] block_id the index of the prefix to be queried.
+    /// \param [out] flag the flag of the prefix.
+    /// \param [out] value the value of the prefix.
     ROCPRIM_DEVICE ROCPRIM_INLINE
     void get(const unsigned int block_id, lookback_scan_prefix_flag& flag, T& value)
     {
@@ -303,8 +353,11 @@ public:
         value = prefix.value;
     }
 
-    /// \brief Gets the prefix value for a block. Should only be called after all
-    /// blocks/prefixes are completed.
+    /// \brief This device function queries the value of the given prefix. It should only be called after all the blocks/prefixes are complete.
+    ///
+    /// \param [in] block_id the index of the prefix to be queried.
+    ///
+    /// \returns the value of the prefix specified by the block_id.
     ROCPRIM_DEVICE ROCPRIM_INLINE
     T get_complete_value(const unsigned int block_id)
     {
@@ -316,6 +369,14 @@ public:
         return prefix.value;
     }
 
+    /// \brief This device function calculates the prefix for the next block, based on this block.
+    ///
+    /// \tparam F [optional] The type of the scan_op parameter.
+    ///
+    /// \param [in] scan_op the scan operation used.
+    /// \param [in] block_id the index of the prefix to be processed.
+    ///
+    /// \returns the value of the prefix specified by the block_id.
     template<typename F>
     ROCPRIM_DEVICE ROCPRIM_INLINE
     T get_prefix_forward(F scan_op, unsigned int block_id_)
@@ -419,7 +480,15 @@ public:
 
     static constexpr bool use_sleep = UseSleep;
 
-    // temp_storage must point to allocation of get_storage_size(number_of_blocks) bytes
+    /// \brief Initializes the lookback_scan_state with the given temporary storage and the given grid size.
+    ///
+    /// \param [in,out] state the lookback_scan_state object to be initialized.
+    /// \param [in] temp_storage the temporary storage necessary for the calculation. Its size can be queried with the get_storage_size function.
+    /// \param [in] number_of_blocks the grid size for the kernel operation.
+    /// \param [in] stream the stream which will run the kernel.
+    ///
+    /// \returns \p hipSuccess (\p 0) after successful scan; otherwise a HIP runtime error of
+    /// type \p hipError_t.
     ROCPRIM_HOST_DEVICE
     static inline hipError_t create(lookback_scan_state& state,
                                     void*                temp_storage,
@@ -444,6 +513,17 @@ public:
         return error;
     }
 
+    /// \brief This function queries the size of the temporary storage for the lookback scan algorithm.
+    ///
+    /// \par Overview
+    /// The lookback_scan needs a certain amount of temporary storage for the calculation. This function calculates the necessary size of the storage.
+    ///
+    /// \param [in] number_of_blocks the grid size for the kernel operation.
+    /// \param [in] stream the stream which will run the kernel.
+    /// \param [out] storage_size this parameter will contain the storage size in bytes.
+    ///
+    /// \returns \p hipSuccess (\p 0) after successful scan; otherwise a HIP runtime error of
+    /// type \p hipError_t.
     ROCPRIM_HOST_DEVICE
     static inline hipError_t get_storage_size(const unsigned int number_of_blocks,
                                               const hipStream_t  stream,
@@ -459,6 +539,17 @@ public:
         return error;
     }
 
+    /// \brief This function queries the layout of the temporary storage for the lookback scan algorithm.
+    ///
+    /// \par Overview
+    /// The lookback_scan needs a certain amount of temporary storage for the calculation. This function queries the layout of the storage.
+    ///
+    /// \param [in] number_of_blocks the grid size for the kernel operation.
+    /// \param [in] stream the stream which will run the kernel.
+    /// \param [out] layout this parameter will contain the storage layout.
+    ///
+    /// \returns \p hipSuccess (\p 0) after successful scan; otherwise a HIP runtime error of
+    /// type \p hipError_t.
     ROCPRIM_HOST_DEVICE
     static inline hipError_t get_temp_storage_layout(const unsigned int            number_of_blocks,
                                                      const hipStream_t             stream,
@@ -472,6 +563,10 @@ public:
         return error;
     }
 
+    /// \brief This device function initializes the prefixes of the lookback_scan_state instance.
+    ///
+    /// \param [in] block_id the prefixes are initialized per block.
+    /// \param [in] number_of_blocks grid size.
     ROCPRIM_DEVICE ROCPRIM_INLINE
     void initialize_prefix(const unsigned int block_id, const unsigned int number_of_blocks)
     {
@@ -488,19 +583,31 @@ public:
         }
     }
 
+    /// \brief Set the given prefix to the given value and to partial flag.
+    ///
+    /// \param [in] block_id the index of the prefix to be updated.
+    /// \param [in] value the value to update the prefix to.
     ROCPRIM_DEVICE ROCPRIM_INLINE
     void set_partial(const unsigned int block_id, const T value)
     {
         this->set(block_id, lookback_scan_prefix_flag::partial, value);
     }
 
+    /// \brief This device function sets the given prefix to the given value and to complete flag.
+    ///
+    /// \param [in] block_id the index of the prefix to be updated.
+    /// \param [in] value the value to update the prefix to.
     ROCPRIM_DEVICE ROCPRIM_INLINE
     void set_complete(const unsigned int block_id, const T value)
     {
         this->set(block_id, lookback_scan_prefix_flag::complete, value);
     }
 
-    // block_id must be > 0
+    /// \brief This device function queries the value and the flag of the given prefix.
+    ///
+    /// \param [in] block_id the index of the prefix to be queried.
+    /// \param [out] flag the flag of the prefix.
+    /// \param [out] value the value of the prefix.
     ROCPRIM_DEVICE ROCPRIM_INLINE
     void get(const unsigned int block_id, lookback_scan_prefix_flag& flag, T& value)
     {
@@ -529,8 +636,11 @@ public:
 #endif
     }
 
-    /// \brief Gets the prefix value for a block. Should only be called after all
-    /// blocks/prefixes are completed.
+    /// \brief This device function queries the value of the given prefix. It should only be called after all the blocks/prefixes are complete.
+    ///
+    /// \param [in] block_id the index of the prefix to be queried.
+    ///
+    /// \returns the value of the prefix specified by the block_id.
     ROCPRIM_DEVICE ROCPRIM_INLINE
     T get_complete_value(const unsigned int block_id)
     {
@@ -573,6 +683,14 @@ public:
 #endif
     }
 
+    /// \brief This device function calculates the prefix for the next block, based on this block.
+    ///
+    /// \tparam F [optional] The type of the scan_op parameter.
+    ///
+    /// \param [in] scan_op the scan operation used.
+    /// \param [in] block_id the index of the prefix to be processed.
+    ///
+    /// \returns the value of the prefix specified by the block_id.
     template<typename F>
     ROCPRIM_DEVICE ROCPRIM_INLINE
     T get_prefix_forward(F scan_op, unsigned int block_id_)
