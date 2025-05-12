@@ -124,10 +124,10 @@ T lookback_reduce_forward_init(F scan_op, T block_prefix, unsigned int valid_ite
     T prefix = block_prefix;
     for(unsigned int i = 0; i < valid_items; ++i)
     {
-#ifdef ROCPRIM_DETAIL_HAS_DPP_WF_ROTATE
+#ifdef ROCPRIM_DETAIL_HAS_DPP_WF
         prefix = warp_move_dpp<T, 0x134 /* DPP_WF_RL1 */>(prefix);
 #else
-        prefix = warp_shuffle_down(prefix, 1);
+        prefix = warp_shuffle_down(prefix, 1, ::rocprim::arch::wavefront::size());
 #endif
         prefix = scan_op(prefix, block_prefix);
     }
@@ -141,8 +141,7 @@ ROCPRIM_DEVICE ROCPRIM_INLINE
 T lookback_reduce_forward(F scan_op, T prefix, T block_prefix)
 {
 #ifdef ROCPRIM_DETAIL_HAS_DPP_WF
-    ROCPRIM_UNROLL
-    for(unsigned int i = 0; i < ::rocprim::arch::wavefront::min_size(); ++i)
+    for(unsigned int i = 0; i < ::rocprim::arch::wavefront::size(); ++i)
     {
         prefix = warp_move_dpp<T, 0x134 /* DPP_WF_RL1 */>(prefix);
         prefix = scan_op(prefix, block_prefix);
@@ -151,12 +150,12 @@ T lookback_reduce_forward(F scan_op, T prefix, T block_prefix)
     // If we can't rotate or shift the entire wavefront in one instruction,
     // iterate over rows of 16 lanes and use warp_readlane to communicate across rows.
     constexpr const int row_size = 16;
-    ROCPRIM_UNROLL
-    for(int j = ::rocprim::arch::wavefront::min_size(); j > 0; j -= row_size)
+
+    for(int j = ::rocprim::arch::wavefront::size(); j > 0; j -= row_size)
     {
         prefix = warp_readlane(
             prefix,
-            j /* automatically taken modulo ::rocprim::arch::wavefront::min_size(), first read is lane 0 */);
+            j /* automatically taken modulo ::rocprim::arch::wavefront::size(), first read is lane 0 */);
         prefix = scan_op(prefix, block_prefix);
 
         ROCPRIM_UNROLL
@@ -168,10 +167,9 @@ T lookback_reduce_forward(F scan_op, T prefix, T block_prefix)
     }
 #else
     // If no DPP available at all, fall back to shuffles.
-    ROCPRIM_UNROLL
-    for(unsigned int i = 0; i < ::rocprim::arch::wavefront::min_size(); ++i)
+    for(unsigned int i = 0; i < ::rocprim::arch::wavefront::size(); ++i)
     {
-        prefix = warp_shuffle(prefix, lane_id() + 1);
+        prefix = warp_shuffle(prefix, lane_id() + 1, ::rocprim::arch::wavefront::size());
         prefix = scan_op(prefix, block_prefix);
     }
 #endif
@@ -241,7 +239,7 @@ public:
     ROCPRIM_DEVICE ROCPRIM_INLINE
     void initialize_prefix(const unsigned int block_id, const unsigned int number_of_blocks)
     {
-        constexpr unsigned int padding = ::rocprim::arch::wavefront::min_size();
+        const unsigned int padding = ::rocprim::arch::wavefront::size();
 
         if(block_id < number_of_blocks)
         {
@@ -277,7 +275,7 @@ public:
     ROCPRIM_DEVICE ROCPRIM_INLINE
     void get(const unsigned int block_id, lookback_scan_prefix_flag& flag, T& value)
     {
-        constexpr unsigned int padding = ::rocprim::arch::wavefront::min_size();
+        const unsigned int padding = ::rocprim::arch::wavefront::size();
 
         prefix_type prefix;
 
@@ -310,7 +308,7 @@ public:
     ROCPRIM_DEVICE ROCPRIM_INLINE
     T get_complete_value(const unsigned int block_id)
     {
-        constexpr unsigned int padding = ::rocprim::arch::wavefront::min_size();
+        const unsigned int padding = ::rocprim::arch::wavefront::size();
 
         auto        p = prefixes[padding + block_id];
         prefix_type prefix{};
@@ -326,7 +324,7 @@ public:
 
         // There is one lookback scan per block, though a lookback scan is done by a single warp.
         // Because every lane of the warp checks a different lookback scan state value,
-        // we need space for at least ceil(CUs / arch::wavefront::min_size()) items in the cache,
+        // we need space for at least ceil(CUs / arch::wavefront::size()) items in the cache,
         // assuming that only one block is active per CU (assumes low occupancy).
         // For MI300, with 304 CUs, we have 304 / 64 = 5 items for the lookback cache.
         // Note that one item is kept in the `block_prefix` register, so we only need to
@@ -345,7 +343,7 @@ public:
               && cache_offset < max_lookback_per_thread)
         {
             cache[cache_offset++] = block_prefix;
-            lookback_block_id -= arch::wavefront::min_size();
+            lookback_block_id -= arch::wavefront::size();
             this->get(lookback_block_id, flag, block_prefix);
         }
 
@@ -362,7 +360,7 @@ public:
                 // All invalid, so we have to move one block back to
                 // get back to known civilization.
                 // Don't forget to pop one item off the cache too.
-                lookback_block_id += arch::wavefront::min_size();
+                lookback_block_id += arch::wavefront::size();
                 --cache_offset;
             }
 
@@ -398,7 +396,7 @@ private:
     ROCPRIM_DEVICE ROCPRIM_INLINE
     void set(const unsigned int block_id, const lookback_scan_prefix_flag flag, const T value)
     {
-        constexpr unsigned int padding = ::rocprim::arch::wavefront::min_size();
+        const unsigned int padding = ::rocprim::arch::wavefront::size();
 
         prefix_type            prefix = {value, flag};
         prefix_underlying_type p;
@@ -477,7 +475,7 @@ public:
     ROCPRIM_DEVICE ROCPRIM_INLINE
     void initialize_prefix(const unsigned int block_id, const unsigned int number_of_blocks)
     {
-        constexpr unsigned int padding = ::rocprim::arch::wavefront::min_size();
+        const unsigned int padding = ::rocprim::arch::wavefront::size();
         if(block_id < number_of_blocks)
         {
             prefixes_flags[padding + block_id]
@@ -506,7 +504,7 @@ public:
     ROCPRIM_DEVICE ROCPRIM_INLINE
     void get(const unsigned int block_id, lookback_scan_prefix_flag& flag, T& value)
     {
-        constexpr unsigned int padding = ::rocprim::arch::wavefront::min_size();
+        const unsigned int padding = ::rocprim::arch::wavefront::size();
 
         flag = this->get_flag(block_id);
 #if ROCPRIM_DETAIL_LOOKBACK_SCAN_STATE_WITHOUT_SLOW_FENCES
@@ -536,7 +534,7 @@ public:
     ROCPRIM_DEVICE ROCPRIM_INLINE
     T get_complete_value(const unsigned int block_id)
     {
-        constexpr unsigned int padding = ::rocprim::arch::wavefront::min_size();
+        const unsigned int padding = ::rocprim::arch::wavefront::size();
 
 #if ROCPRIM_DETAIL_LOOKBACK_SCAN_STATE_WITHOUT_SLOW_FENCES
         T           value;
@@ -557,7 +555,7 @@ public:
     ROCPRIM_DEVICE ROCPRIM_INLINE
     T get_partial_value(const unsigned int block_id)
     {
-        constexpr unsigned int padding = ::rocprim::arch::wavefront::min_size();
+        const unsigned int padding = ::rocprim::arch::wavefront::size();
 
 #if ROCPRIM_DETAIL_LOOKBACK_SCAN_STATE_WITHOUT_SLOW_FENCES
         T           value;
@@ -589,7 +587,7 @@ public:
                        && flag != lookback_scan_prefix_flag::invalid))
         {
             ++cache_offset;
-            lookback_block_id -= arch::wavefront::min_size();
+            lookback_block_id -= arch::wavefront::size();
             flag = this->get_flag(lookback_block_id);
         }
 
@@ -606,7 +604,7 @@ public:
                 // All invalid, so we have to move one block back to
                 // get back to known civilization.
                 // Don't forget to pop one item off the cache too.
-                lookback_block_id += arch::wavefront::min_size();
+                lookback_block_id += arch::wavefront::size();
                 --cache_offset;
             }
 
@@ -634,7 +632,7 @@ public:
         // These are all guaranteed to be PARTIAL
         while(cache_offset > 0)
         {
-            lookback_block_id += arch::wavefront::min_size();
+            lookback_block_id += arch::wavefront::size();
             --cache_offset;
             block_prefix = this->get_partial_value(lookback_block_id);
             prefix       = lookback_reduce_forward(scan_op, prefix, block_prefix);
@@ -647,7 +645,7 @@ private:
     ROCPRIM_DEVICE ROCPRIM_INLINE
     lookback_scan_prefix_flag get_flag(const unsigned int block_id)
     {
-        constexpr unsigned int padding = ::rocprim::arch::wavefront::min_size();
+        const unsigned int padding = ::rocprim::arch::wavefront::size();
 
         const unsigned int SLEEP_MAX     = 32;
         unsigned int       times_through = 1;
@@ -673,7 +671,7 @@ private:
     ROCPRIM_DEVICE ROCPRIM_INLINE
     void set(const unsigned int block_id, const lookback_scan_prefix_flag flag, const T value)
     {
-        constexpr unsigned int padding = ::rocprim::arch::wavefront::min_size();
+        const unsigned int padding = ::rocprim::arch::wavefront::size();
 
 #if ROCPRIM_DETAIL_LOOKBACK_SCAN_STATE_WITHOUT_SLOW_FENCES
         auto* values = static_cast<value_underlying_type*>(
@@ -717,7 +715,10 @@ private:
 template<class T,
          class BinaryFunction,
          class LookbackScanState,
-         lookback_scan_determinism Determinism = lookback_scan_determinism::default_determinism>
+         lookback_scan_determinism Determinism = lookback_scan_determinism::default_determinism,
+         ::rocprim::arch::wavefront::target TargetWaveSize
+         = ::rocprim::arch::wavefront::get_target(),
+         typename Enabled = void>
 class lookback_scan_prefix_op
 {
     static_assert(std::is_same<T, typename LookbackScanState::value_type>::value,
@@ -743,7 +744,9 @@ private:
         // from (block_id_ - 2) block etc.
         using headflag_scan_op_type = reverse_binary_op_wrapper<BinaryFunction, T, T>;
         using warp_reduce_prefix_type
-            = warp_reduce_crosslane<T, ::rocprim::arch::wavefront::min_size(), false>;
+            = warp_reduce_crosslane<T,
+                                    ::rocprim::arch::wavefront::size_from_target<TargetWaveSize>(),
+                                    false>;
 
         T block_prefix;
         scan_state_.get(block_id, flag, block_prefix);
@@ -773,7 +776,7 @@ private:
             // while we don't load a complete prefix, reduce partial prefixes
             while(::rocprim::detail::warp_all(flag != lookback_scan_prefix_flag::complete))
             {
-                previous_block_id -= ::rocprim::arch::wavefront::min_size();
+                previous_block_id -= ::rocprim::arch::wavefront::size_from_target<TargetWaveSize>();
                 reduce_partial_prefixes(previous_block_id, flag, partial_prefix);
                 prefix = scan_op_(partial_prefix, prefix);
             }
@@ -810,6 +813,57 @@ protected:
     unsigned int       block_id_;
     BinaryFunction     scan_op_;
     LookbackScanState& scan_state_;
+};
+
+template<class T,
+         class BinaryFunction,
+         class LookbackScanState,
+         lookback_scan_determinism Determinism>
+class lookback_scan_prefix_op<T,
+                              BinaryFunction,
+                              LookbackScanState,
+                              Determinism,
+                              ::rocprim::arch::wavefront::target::dynamic>
+{
+public:
+    ROCPRIM_DEVICE ROCPRIM_INLINE lookback_scan_prefix_op(unsigned int       block_id,
+                                                         BinaryFunction     scan_op,
+                                                         LookbackScanState& scan_state)
+        : wave32_op(block_id, scan_op, scan_state), wave64_op(block_id, scan_op, scan_state)
+    {}
+
+    ROCPRIM_DEVICE ROCPRIM_INLINE ~lookback_scan_prefix_op() = default;
+
+private:
+    using lookback_scan_prefix_op_wave32
+        = lookback_scan_prefix_op<T,
+                                  BinaryFunction,
+                                  LookbackScanState,
+                                  Determinism,
+                                  ::rocprim::arch::wavefront::target::size32>;
+    lookback_scan_prefix_op_wave32 wave32_op;
+    using lookback_scan_prefix_op_wave64
+        = lookback_scan_prefix_op<T,
+                                  BinaryFunction,
+                                  LookbackScanState,
+                                  Determinism,
+                                  ::rocprim::arch::wavefront::target::size64>;
+    lookback_scan_prefix_op_wave64 wave64_op;
+
+public:
+    template<typename... Args>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    auto operator()(Args&&... args)
+    {
+        if(::rocprim::arch::wavefront::size() == ROCPRIM_WARP_SIZE_32)
+        {
+            return wave32_op(args...);
+        }
+        else
+        {
+            return wave64_op(args...);
+        }
+    }
 };
 
 // This is a HOST only API

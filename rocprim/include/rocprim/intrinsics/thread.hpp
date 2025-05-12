@@ -286,13 +286,6 @@ namespace detail
         return flat_block_thread_id()/LogicalWarpSize;
     }
 
-    template<>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
-    unsigned int logical_warp_id<arch::wavefront::min_size()>()
-    {
-        return warp_id();
-    }
-
     ROCPRIM_DEVICE ROCPRIM_INLINE
     void memory_fence_system()
     {
