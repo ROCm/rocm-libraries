@@ -64,11 +64,22 @@ extern "C" {
 *  Currently, \p rocsparse_sparse_to_dense only supports the algorithm \ref rocsparse_sparse_to_dense_alg_default. 
 *  See full example below.
 *
-*  \p rocsparse_sparse_to_dense supports \ref rocsparse_datatype_f32_r, \ref rocsparse_datatype_f64_r, 
+*  \p rocsparse_sparse_to_dense supports \ref rocsparse_datatype_f16_r, \ref rocsparse_datatype_f32_r, \ref rocsparse_datatype_f64_r, 
 *  \ref rocsparse_datatype_f32_c, and \ref rocsparse_datatype_f64_c for values arrays in the sparse matrix 
 *  (stored in CSR, CSC, or COO format) and the dense matrix. For the row/column offset and row/column index arrays of the 
 *  sparse matrix, \p rocsparse_sparse_to_dense supports the precisions \ref rocsparse_indextype_i32 and 
 *  \ref rocsparse_indextype_i64.
+*
+*  \par Uniform Precisions:
+*  <table>
+*  <caption id="sparse_to_dense_uniform">Uniform Precisions</caption>
+*  <tr><th>A / B
+*  <tr><td>rocsparse_datatype_f16_r
+*  <tr><td>rocsparse_datatype_f32_r
+*  <tr><td>rocsparse_datatype_f64_r
+*  <tr><td>rocsparse_datatype_f32_c
+*  <tr><td>rocsparse_datatype_f64_c
+*  </table>
 *
 *  \note
 *  This function writes the required allocation size (in bytes) to \p buffer_size and
