@@ -34,6 +34,18 @@ list(REMOVE_DUPLICATES archs)
 set(python_venv_executable "${VIRTUALENV_BIN_DIR}/${VIRTUALENV_PYTHON_EXENAME}")
 set(python_launch_prefix "PYTHONPATH=${PROJECT_BINARY_DIR}/lib" "${python_venv_executable}")
 set(dat_depends "")
+
+if($ENV{ENABLE_ADDRESS_SANITIZER})
+    # Must populate LD_PRELOAD with ASAN runtime if ASAN is being used.
+    # Find the ASAN RT with compiler and update env for Tensile call.
+    execute_process(
+        COMMAND ${CMAKE_CXX_COMPILER} --print-file-name=libclang_rt.asan-x86_64.so
+        OUTPUT_VARIABLE ASAN_LIB_PATH
+        COMMAND_ECHO STDOUT)
+    string(STRIP ${ASAN_LIB_PATH} ASAN_LIB_PATH)
+    set(python_launch_prefix "LD_PRELOAD=${ASAN_LIB_PATH}" "${python_launch_prefix}")
+endif()
+
 foreach(arch IN LISTS archs)
     add_library(ExtOpObj_${arch} OBJECT)
     add_dependencies(ExtOpObj_${arch} rocisa)
@@ -56,7 +68,7 @@ foreach(arch IN LISTS archs)
             ${CMAKE_CURRENT_BINARY_DIR}/A_S_H_256_4_${arch}.s
     )
     add_custom_command(
-        OUTPUT 
+        OUTPUT
             ${CMAKE_CURRENT_BINARY_DIR}/L_256_4_1_${arch}.s
             ${CMAKE_CURRENT_BINARY_DIR}/L_256_4_0_${arch}.s
             ${CMAKE_CURRENT_BINARY_DIR}/S_8_32_${arch}.s
