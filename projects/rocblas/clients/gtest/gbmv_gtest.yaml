@@ -305,7 +305,7 @@ Tests:
   pointer_mode_device: false
   alpha: [ 2.0 ]
   beta: [ 3.0 ]
-  gpu_arch: ['90a','942']
+  gpu_arch: ['90a','942','950']
   os_flags: LINUX
 
 - name: gbmv_ILP64

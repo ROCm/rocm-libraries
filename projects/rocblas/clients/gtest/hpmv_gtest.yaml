@@ -283,7 +283,7 @@ Tests:
   uplo: [ U, L ]
   alpha_beta: *alpha_beta_range_small
   os_flags: LINUX
-  gpu_arch: ['90a','942']
+  gpu_arch: ['90a','942','950']
 
 - name: hpmv_size_t_incx_incy
   category: stress
@@ -294,7 +294,7 @@ Tests:
   uplo: [ U, L ]
   alpha_beta: *alpha_beta_range_small
   os_flags: LINUX
-  gpu_arch: ['90a','942']
+  gpu_arch: ['90a','942','950']
 
 - name: hpmv_ILP64
   category: stress

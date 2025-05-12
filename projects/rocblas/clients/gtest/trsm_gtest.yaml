@@ -885,7 +885,7 @@ Tests:
   stride_scale: [ 1 ]
   batch_count: [ 1 ]
   pointer_mode_device: false
-  gpu_arch: ['90a','942']
+  gpu_arch: ['90a','942','950']
   os_flags: LINUX
 
 - name: trsm_right_size_t_overflow
@@ -904,7 +904,7 @@ Tests:
   stride_scale: [ 1 ]
   batch_count: [ 1 ]
   pointer_mode_device: false
-  gpu_arch: ['90a','942']
+  gpu_arch: ['90a','942','950']
   os_flags: LINUX
 
 - name: trsm_left_internal_api

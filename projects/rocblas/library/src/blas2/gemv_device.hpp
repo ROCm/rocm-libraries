@@ -1385,8 +1385,7 @@ rocblas_gemvn_sm_mn_batched_kernel(rocblas_int    m,
                                    rocblas_stride stridey,
                                    rocblas_int    batch_count)
 {
-// gfx90a gfx942 kernels
-#if defined(__gfx90a__) || defined(__gfx942__)
+#if defined(__gfx90a__) || defined(__gfx942__) || defined(__gfx950__)
 
     const int b = blockIdx.x * blockDim.y + threadIdx.y;
     if(b >= batch_count)

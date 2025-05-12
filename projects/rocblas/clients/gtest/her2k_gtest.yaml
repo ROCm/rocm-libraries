@@ -59,7 +59,7 @@ Tests:
   alpha_beta:
     - { alpha:  0.5, alphai:  0.0, beta:  0.5, betai: 0.0 }
   pointer_mode_host: false
-  gpu_arch: ['90a','942']
+  gpu_arch: ['90a','942','950']
   os_flags: LINUX
 
 - name: her2k_quick

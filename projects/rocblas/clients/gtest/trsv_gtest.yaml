@@ -80,7 +80,7 @@ Tests:
   matrix_size: *size_t_index
   pointer_mode_device: false
   os_flags: LINUX
-  gpu_arch: ['90a','942']
+  gpu_arch: ['90a','942','950']
 
 - name: trsv_size_t_inc
   category: stress
@@ -92,7 +92,7 @@ Tests:
   matrix_size: *size_t_incx
   pointer_mode_device: false
   os_flags: LINUX
-  gpu_arch: ['90a','942']
+  gpu_arch: ['90a','942','950']
 
 # Regular trsv
 - name: trsv_fortran

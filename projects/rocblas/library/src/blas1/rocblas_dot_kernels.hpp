@@ -225,20 +225,19 @@ rocblas_dot_kernel(rocblas_int n,
 
 template <typename API_INT, int NB, typename T, typename U, typename V = T>
 ROCBLAS_KERNEL(NB)
-rocblas_dot_kernel_gfx942_float_double(rocblas_int n,
-                                       const U __restrict__ xa,
-                                       rocblas_stride shiftx,
-                                       API_INT        incx,
-                                       rocblas_stride stridex,
-                                       const U __restrict__ ya,
-                                       rocblas_stride shifty,
-                                       API_INT        incy,
-                                       rocblas_stride stridey,
-                                       V* __restrict__ workspace,
-                                       T* __restrict__ out)
+rocblas_dot_kernel_gfx942_gfx950_float_double(rocblas_int n,
+                                              const U __restrict__ xa,
+                                              rocblas_stride shiftx,
+                                              API_INT        incx,
+                                              rocblas_stride stridex,
+                                              const U __restrict__ ya,
+                                              rocblas_stride shifty,
+                                              API_INT        incy,
+                                              rocblas_stride stridey,
+                                              V* __restrict__ workspace,
+                                              T* __restrict__ out)
 {
-// gfx942 kernels
-#if defined(__gfx942__)
+#if defined(__gfx942__) || defined(__gfx950__)
     int         i = blockIdx.x * NB + threadIdx.x;
     const auto* x = load_ptr_batch(xa, blockIdx.z, shiftx, stridex);
     const auto* y = load_ptr_batch(ya, blockIdx.z, shifty, stridey);
@@ -407,8 +406,10 @@ rocblas_status rocblas_internal_dot_launcher(rocblas_handle __restrict__ handle,
     static constexpr bool is_double = std::is_same_v<V, double> && std::is_same_v<T, double>;
 
     //Identifying the architecture to have an appropriate optimization
-    int  arch_major = handle->getArchMajor();
-    bool is_gfx942  = handle->getArch() == 942 ? true : false;
+    int  arch_major          = handle->getArchMajor();
+    bool is_gfx942           = handle->getArch() == 942 ? true : false;
+    bool is_gfx950           = handle->getArch() == 950 ? true : false;
+    bool is_gfx942_or_gfx950 = is_gfx942 || is_gfx950;
 
     static constexpr int WIN = rocblas_dot_WIN<T>();
 
@@ -580,8 +581,8 @@ rocblas_status rocblas_internal_dot_launcher(rocblas_handle __restrict__ handle,
             RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->get_stream()));
         }
     }
-    //optimized gfx942 kernel for very large N
-    else if(is_gfx942 && (is_float || is_double) && n > sddot_gfx942_lower_threshold
+    //optimized gfx942_or_gfx950 kernel for very large N
+    else if(is_gfx942_or_gfx950 && (is_float || is_double) && n > sddot_gfx942_lower_threshold
             && (x != y || incx != incy || offsetx != offsety || stridex != stridey))
     {
         static constexpr bool ONE_BLOCK = false;
@@ -598,7 +599,7 @@ rocblas_status rocblas_internal_dot_launcher(rocblas_handle __restrict__ handle,
         dim3 grid(blocks, 1, batch_count);
         dim3 threads(DOT_NB);
 
-        ROCBLAS_LAUNCH_KERNEL((rocblas_dot_kernel_gfx942_float_double<API_INT, DOT_NB, T>),
+        ROCBLAS_LAUNCH_KERNEL((rocblas_dot_kernel_gfx942_gfx950_float_double<API_INT, DOT_NB, T>),
                               grid,
                               threads,
                               0,

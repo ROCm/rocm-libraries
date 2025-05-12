@@ -307,7 +307,7 @@ Tests:
   uplo: [ U, L ]
   transA: [ N, T ]
   diag: [ U, N ]
-  gpu_arch: ['90a','942']
+  gpu_arch: ['90a','942','950']
   os_flags: LINUX
 
 - name: tbmv_repeatability_check

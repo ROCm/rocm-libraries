@@ -268,7 +268,7 @@ Tests:
     alpha: [ 2 ]
     function:
       - scal_ex:  *hpa_half_precision
-    gpu_arch: ['90a','942']
+    gpu_arch: ['90a','942','950']
     os_flags: LINUX
 
   - name: blas1_large_batch
