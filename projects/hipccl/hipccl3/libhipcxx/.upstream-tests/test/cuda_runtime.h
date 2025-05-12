@@ -22,7 +22,7 @@
 #pragma once
 
 #include <hip/hip_runtime.h>
-#include <amd_utils.h>
+#include <amd/amd_utils.h>
 
 #define CUDART_VERSION 0
 

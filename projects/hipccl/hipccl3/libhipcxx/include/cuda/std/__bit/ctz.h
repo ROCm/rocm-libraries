@@ -29,7 +29,7 @@
 #define _LIBCUDACXX__BIT_CTZ_H
 
 #include <cuda/std/detail/__config>
-#include <amd_utils.h>
+#include <amd/amd_utils.h>
 
 #if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
 #  pragma GCC system_header
