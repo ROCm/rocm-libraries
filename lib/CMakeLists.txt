@@ -215,6 +215,7 @@ set(rocroller_src
     source/Observers/DGEMM16x16x4Write.cpp
     source/Observers/DGEMM4x4x4Write.cpp
     source/Observers/DLWrite.cpp
+    source/Observers/MEMObserver.cpp
     source/Observers/MFMAObserver.cpp
     source/Observers/OPSEL94x.cpp
     source/Observers/ObserverCreation.cpp

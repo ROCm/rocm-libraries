@@ -107,4 +107,14 @@ namespace rocRoller
     {
         return m_comments;
     }
+
+    Scheduling::InstructionStatus const& Instruction::peekedStatus() const
+    {
+        return m_peekedStatus;
+    }
+
+    void Instruction::setPeekedStatus(Scheduling::InstructionStatus status)
+    {
+        m_peekedStatus = std::move(status);
+    }
 }

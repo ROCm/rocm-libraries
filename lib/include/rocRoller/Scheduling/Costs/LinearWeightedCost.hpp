@@ -130,6 +130,12 @@ namespace rocRoller
             /// TODO: Remove once we have removed the redundant barrier nodes
             /// from the control graph.
             bool zeroFreeBarriers;
+
+            int vmemCycles    = 75;
+            int vmemQueueSize = 4;
+
+            int dsmemCycles    = 20;
+            int dsmemQueueSize = 4;
         };
 
         /**
@@ -165,7 +171,11 @@ namespace rocRoller
              */
             float cost(Instruction const& inst, InstructionStatus const& status) const override;
 
+            Weights const& getWeights() const;
+
         private:
+            Weights loadWeights(ContextPtr context) const;
+
             Weights m_weights;
         };
     }

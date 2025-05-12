@@ -203,6 +203,10 @@ namespace rocRoller
     {
         return m_storecnt;
     }
+    int WaitCount::vmcnt() const
+    {
+        return WaitCount::CombineValues(m_loadcnt, m_storecnt);
+    }
     int WaitCount::vscnt() const
     {
         return m_vscnt;
@@ -372,10 +376,9 @@ namespace rocRoller
             {
                 os << "s_waitcnt";
 
-                if(m_loadcnt >= 0 || m_storecnt >= 0)
+                if(vmcnt() >= 0)
                 {
-                    auto vmcnt = WaitCount::CombineValues(m_loadcnt, m_storecnt);
-                    os << " vmcnt(" << vmcnt << ")";
+                    os << " vmcnt(" << vmcnt() << ")";
                 }
 
                 if(m_kmcnt >= 0 || m_dscnt >= 0)

@@ -30,9 +30,9 @@
 #include <string>
 
 #include <rocRoller/CodeGen/WaitCount.hpp>
-#include <rocRoller/Context_fwd.hpp>
 #include <rocRoller/InstructionValues/Register_fwd.hpp>
 #include <rocRoller/Scheduling/Scheduler_fwd.hpp>
+#include <rocRoller/Scheduling/Scheduling.hpp>
 #include <rocRoller/Utilities/Settings_fwd.hpp>
 
 namespace rocRoller
@@ -148,6 +148,16 @@ namespace rocRoller
         std::string    getLabel() const;
 
         /**
+         * Get the status that was peeked by the Observers
+         */
+        Scheduling::InstructionStatus const& peekedStatus() const;
+
+        /**
+         * Set the status that was peeked by the Observers
+         */
+        void setPeekedStatus(Scheduling::InstructionStatus status);
+
+        /**
          * How many instructions actually executed by the GPU are included?
          * This includes the main instruction, as well as any s_nop or s_waitcnt
          * instructions attached to it.
@@ -214,6 +224,8 @@ namespace rocRoller
         std::array<std::string, MaxModifiers> m_modifiers;
 
         bool m_operandsAreInout = false;
+
+        Scheduling::InstructionStatus m_peekedStatus;
     };
 }
 

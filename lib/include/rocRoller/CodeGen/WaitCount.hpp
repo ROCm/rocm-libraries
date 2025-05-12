@@ -60,15 +60,14 @@ namespace rocRoller
 
         ~WaitCount() = default;
 
-        bool operator==(WaitCount a) const
+        bool operator==(WaitCount const& a) const
         {
             return a.m_loadcnt == m_loadcnt && a.m_storecnt == m_storecnt && a.m_vscnt == m_vscnt
                    && a.m_dscnt == m_dscnt && a.m_kmcnt == m_kmcnt && a.m_expcnt == m_expcnt;
         }
-        bool operator!=(WaitCount a) const
+        bool operator!=(WaitCount const& a) const
         {
-            return a.m_loadcnt != m_loadcnt || a.m_storecnt != m_storecnt || a.m_vscnt != m_vscnt
-                   || a.m_dscnt != m_dscnt || a.m_kmcnt != m_kmcnt || a.m_expcnt != m_expcnt;
+            return !(*this == a);
         }
 
         static WaitCount
@@ -99,6 +98,11 @@ namespace rocRoller
         int dscnt() const;
         int kmcnt() const;
         int expcnt() const;
+
+        /**
+         * vmcnt is the combination of loadcnt and storecnt for non-split counters
+         */
+        int vmcnt() const;
 
         int getCount(GPUWaitQueue) const;
 

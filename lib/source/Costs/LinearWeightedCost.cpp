@@ -73,6 +73,11 @@ namespace rocRoller
 
             iot::mapRequired(io, "isACCVGPRWrite", weights.isACCVGPRWrite);
             iot::mapRequired(io, "isACCVGPRRead", weights.isACCVGPRRead);
+
+            iot::mapOptional(io, "vmemCycles", weights.vmemCycles);
+            iot::mapOptional(io, "vmemQueueSize", weights.vmemQueueSize);
+            iot::mapOptional(io, "dsmemCycles", weights.dsmemCycles);
+            iot::mapOptional(io, "dsmemQueueSize", weights.dsmemQueueSize);
         }
 
         static void mapping(IO& io, Scheduling::Weights& weights, EmptyContext& ctx)
@@ -83,6 +88,38 @@ namespace rocRoller
 
     namespace Scheduling
     {
+        constexpr Weights GFX950_WEIGHTS = {.nops               = 153.0,
+                                            .vmcnt              = 27837.876403948347,
+                                            .lgkmcnt            = 284.2501430765567,
+                                            .vmQueueLen         = 27,
+                                            .vectorQueueSat     = 100.0,
+                                            .ldsQueueSat        = 134.0,
+                                            .lgkmQueueLen       = 24,
+                                            .stallCycles        = 1000.0,
+                                            .notMFMA            = 742.5531075466015,
+                                            .isMFMA             = 153.0,
+                                            .isSMEM             = 3464.0,
+                                            .isSControl         = 209.0,
+                                            .isSALU             = 776.0,
+                                            .isVMEMRead         = 73.30199520857629,
+                                            .isVMEMWrite        = 250.76112311852006,
+                                            .isLDSRead          = 40.40504506862233,
+                                            .isLDSWrite         = 330.0,
+                                            .isVALU             = 49.0,
+                                            .isACCVGPRWrite     = 470.0,
+                                            .isACCVGPRRead      = 196.23511040848362,
+                                            .newSGPRs           = 186.0,
+                                            .newVGPRs           = 158.0,
+                                            .highWaterMarkSGPRs = 447.0,
+                                            .highWaterMarkVGPRs = 140.97429777663493,
+                                            .fractionOfSGPRs    = 43.0705924763606,
+                                            .fractionOfVGPRs    = 514.0,
+                                            .outOfRegisters     = 1000000000.0,
+                                            .zeroFreeBarriers   = true,
+                                            .vmemCycles         = 384,
+                                            .vmemQueueSize      = 3,
+                                            .dsmemCycles        = 34,
+                                            .dsmemQueueSize     = 3};
         constexpr Weights GFX942_WEIGHTS = {.nops               = 194.43894526982916,
                                             .vmcnt              = 71.87967451224605,
                                             .lgkmcnt            = 57.99317255314543,
@@ -173,13 +210,18 @@ namespace rocRoller
 
         inline LinearWeightedCost::LinearWeightedCost(ContextPtr ctx)
             : Cost{ctx}
+            , m_weights(loadWeights(ctx))
+        {
+        }
+
+        Weights LinearWeightedCost::loadWeights(ContextPtr ctx) const
         {
             auto settingsFile = Settings::getInstance()->get(Settings::SchedulerWeights);
             if(!settingsFile.empty())
             {
                 try
                 {
-                    m_weights = Serialization::readYAMLFile<Weights>(settingsFile);
+                    return Serialization::readYAMLFile<Weights>(settingsFile);
                 }
                 catch(const std::exception& e)
                 {
@@ -195,19 +237,26 @@ namespace rocRoller
                 auto const& arch = ctx->targetArchitecture().target();
 
                 if(arch.isCDNA1GPU())
-                    m_weights = GFX908_WEIGHTS;
+                    return GFX908_WEIGHTS;
                 else if(arch.isCDNA2GPU())
-                    m_weights = GFX90A_WEIGHTS;
+                    return GFX90A_WEIGHTS;
                 else if(arch.isCDNA3GPU())
-                    m_weights = GFX942_WEIGHTS;
+                    return GFX942_WEIGHTS;
+                else if(arch.isCDNA35GPU())
+                    return GFX950_WEIGHTS;
                 else
                 {
                     Log::warn("Unsupported architecture {} for linear weighted cost; defaulting to "
                               "GFX90A weights",
                               arch.toString());
-                    m_weights = GFX90A_WEIGHTS;
+                    return GFX90A_WEIGHTS;
                 }
             }
+        }
+
+        Weights const& LinearWeightedCost::getWeights() const
+        {
+            return m_weights;
         }
 
         inline bool LinearWeightedCost::Match(Argument arg)

@@ -184,6 +184,7 @@ set(
     catch/KernelGraphSimplifyTest.cpp
     catch/LargerLDSTest.cpp
     catch/LoadPackedTest.cpp
+    catch/MEMObserverTest.cpp
     catch/MultipleLDSAllocationTest.cpp
     catch/RandomNumberExpressionTest.cpp
     catch/RandomNumberGenerationTest.cpp
