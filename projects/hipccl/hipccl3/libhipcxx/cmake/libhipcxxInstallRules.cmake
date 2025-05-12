@@ -43,6 +43,12 @@ rocm_install(DIRECTORY "${libhipcxx_SOURCE_DIR}/include/nv"
   PATTERN *
   PATTERN CMakeLists.txt EXCLUDE
 )
+rocm_install(DIRECTORY "${libhipcxx_SOURCE_DIR}/include/amd"
+  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+  FILES_MATCHING
+  PATTERN *
+  PATTERN CMakeLists.txt EXCLUDE
+)
 
 # Copy libhipcxx headers into hip folder additionally
 # for minimizing changes of existing dependee packages.
