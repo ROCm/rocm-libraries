@@ -237,8 +237,14 @@ add_custom_command( OUTPUT "${HIPBLAS_GENTEST}"
                     DEPENDS common/hipblas_gentest.py
                     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" )
 
+set( HIPBLAS_CLIENTS_README "${PROJECT_BINARY_DIR}/staging/hipblas_clients_readme.txt")
+add_custom_command( OUTPUT "${HIPBLAS_CLIENTS_README}"
+                    COMMAND ${CMAKE_COMMAND} -E copy hipblas_clients_readme.txt "${HIPBLAS_CLIENTS_README}"
+                    DEPENDS hipblas_clients_readme.txt
+                    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" )
 
-add_custom_target( hipblas-clients-common DEPENDS "${HIPBLAS_COMMON}" "${HIPBLAS_TEMPLATE}" "${HIPBLAS_SMOKE}" "${HIPBLAS_GENTEST}" )
+
+add_custom_target( hipblas-clients-common DEPENDS "${HIPBLAS_COMMON}" "${HIPBLAS_TEMPLATE}" "${HIPBLAS_SMOKE}" "${HIPBLAS_GENTEST}" "${HIPBLAS_CLIENTS_README}" )
 
 if( BUILD_CLIENTS_TESTS OR BUILD_CLIENTS_BENCHMARKS )
   rocm_install(
@@ -250,5 +256,11 @@ if( BUILD_CLIENTS_TESTS OR BUILD_CLIENTS_BENCHMARKS )
     PROGRAMS ${HIPBLAS_GENTEST}
     DESTINATION "${CMAKE_INSTALL_BINDIR}"
     COMPONENT clients-common
+  )
+  # this readme also serves to prevent an empty package hipblas-clients which dpkg may auto-remove entire hipblas-clients and non empty children
+  rocm_install(
+    FILES ${HIPBLAS_CLIENTS_README}
+    DESTINATION "${CMAKE_INSTALL_BINDIR}"
+    COMPONENT clients
   )
 endif()
