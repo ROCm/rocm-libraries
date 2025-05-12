@@ -431,7 +431,7 @@ string(REGEX REPLACE ".cpp" ".yaml" ROCSPARSE_TEST_YAMLS "${ROCSPARSE_TEST_SOURC
 # Prepare testing data
 set(ROCSPARSE_TEST_DATA "${PROJECT_BINARY_DIR}/staging/rocsparse_test.data")
 add_custom_command(OUTPUT "${ROCSPARSE_TEST_DATA}"
-                   COMMAND ${python} ../common/rocsparse_gentest.py -m ${PROJECT_BINARY_DIR}/matrices -I ../include rocsparse_test.yaml -o "${ROCSPARSE_TEST_DATA}"
+                   COMMAND ${Python3_EXECUTABLE} ../common/rocsparse_gentest.py -m ${PROJECT_BINARY_DIR}/matrices -I ../include rocsparse_test.yaml -o "${ROCSPARSE_TEST_DATA}"
                    DEPENDS ../common/rocsparse_gentest.py rocsparse_test.yaml ../include/rocsparse_common.yaml ${ROCSPARSE_TEST_YAMLS}
                    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
 add_custom_target(rocsparse-test-data
