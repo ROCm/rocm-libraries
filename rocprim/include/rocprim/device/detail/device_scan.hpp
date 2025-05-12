@@ -202,13 +202,18 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
         if(override_first_value)
         {
             if(Exclusive)
+            {
                 initial_value
                     = scan_op(previous_last_element[0], static_cast<AccType>(*(input - 1)));
+            }
             else if(flat_block_thread_id == 0)
+            {
                 values[0] = scan_op(previous_last_element[0], values[0]);
+            }
         }
 
         AccType reduction;
+
         // Since `override_first_value` isn't a constexpr and there's no exclusive block scan
         // overload without an initial_value parameter, the two scan types need separate
         // code paths, this duplicates a bit of code.
@@ -219,6 +224,12 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
                                                             reduction,
                                                             storage.scan,
                                                             scan_op);
+
+            // Reduction should not contain initial value.
+            if(flat_block_thread_id == 0)
+            {
+                scan_state.set_complete(flat_block_id, reduction);
+            }
         }
         else
         {
@@ -238,11 +249,14 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
                                                                 storage.scan,
                                                                 scan_op);
             }
-        }
 
-        if(flat_block_thread_id == 0)
-        {
-            scan_state.set_complete(flat_block_id, reduction);
+            // Reduction should include initial value. We can avoid block-wide communication
+            // communication by letting the thread that has the last element of the scan
+            // write it to memory.
+            if(flat_block_thread_id == block_size - 1)
+            {
+                scan_state.set_complete(flat_block_id, values[items_per_thread - 1]);
+            }
         }
     }
     else

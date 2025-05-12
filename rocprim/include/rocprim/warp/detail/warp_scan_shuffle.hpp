@@ -27,6 +27,7 @@
 #include "../../detail/various.hpp"
 
 #include "../../intrinsics.hpp"
+#include "../../intrinsics/warp_shuffle.hpp"
 #include "../../types.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
@@ -99,7 +100,7 @@ public:
     void inclusive_scan(T input, T& output, T& reduction, BinaryFunction scan_op)
     {
         inclusive_scan(input, output, scan_op);
-        // Broadcast value from the last thread in warp
+        // Broadcast value from the last thread in the warp
         reduction = warp_shuffle(output, VirtualWaveSize - 1, VirtualWaveSize);
     }
 
@@ -117,10 +118,10 @@ public:
     void inclusive_scan(T input, T& output, T& reduction, BinaryFunction scan_op, T init)
     {
         inclusive_scan(input, output, scan_op);
+        // Broadcast value from the last thread in the warp
+        reduction = warp_shuffle(output, VirtualWaveSize - 1, VirtualWaveSize);
         // Include init value in scan results
         output = scan_op(init, output);
-        // Broadcast value from the last thread in warp
-        reduction = warp_shuffle(output, VirtualWaveSize - 1, VirtualWaveSize);
     }
 
     template<class BinaryFunction>
@@ -165,7 +166,7 @@ public:
         T input, T& output, storage_type& /*storage*/, T& reduction, BinaryFunction scan_op)
     {
         inclusive_scan(input, output, scan_op);
-        // Broadcast value from the last thread in warp
+        // Broadcast value from the last thread in the warp
         reduction = warp_shuffle(output, VirtualWaveSize - 1, VirtualWaveSize);
         // Convert inclusive scan result to exclusive
         to_exclusive(output, output);
@@ -176,7 +177,7 @@ public:
     void exclusive_scan(T input, T& output, T init, T& reduction, BinaryFunction scan_op)
     {
         inclusive_scan(input, output, scan_op);
-        // Broadcast value from the last thread in warp
+        // Broadcast value from the last thread in the warp
         reduction = warp_shuffle(output, VirtualWaveSize - 1, VirtualWaveSize);
         // Convert inclusive scan result to exclusive
         to_exclusive(output, output, init, scan_op);
@@ -237,7 +238,7 @@ public:
               BinaryFunction scan_op)
     {
         inclusive_scan(input, inclusive_output, scan_op);
-        // Broadcast value from the last thread in warp
+        // Broadcast value from the last thread in the warp
         reduction = warp_shuffle(inclusive_output, VirtualWaveSize - 1, VirtualWaveSize);
         // Convert inclusive scan result to exclusive
         to_exclusive(inclusive_output, exclusive_output, init, scan_op);

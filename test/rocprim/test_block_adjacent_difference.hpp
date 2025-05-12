@@ -21,8 +21,9 @@
 // SOFTWARE.
 
 #ifdef _CLANGD
-    // When using clangd, we require some context of the template source
-    // to allow the language server to function properly.
+    // When using clangd, to allow the language server to function properly,
+    // some context of the template source is required to allow the language
+    // server to function properly.
     #include "test_block_adjacent_difference.cpp.in"
 #endif
 

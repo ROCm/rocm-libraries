@@ -100,8 +100,10 @@ public:
             }
             ::rocprim::wave_barrier();
         }
-        output                = scan_op(init, me);
-        storage_.threads[lid] = output;
+
+        // Apply the initial value. Do not write the result
+        // of applying the initial value to memory.
+        output = scan_op(init, me);
     }
 
     template<class BinaryFunction>

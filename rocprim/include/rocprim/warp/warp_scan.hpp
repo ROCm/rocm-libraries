@@ -396,6 +396,7 @@ public:
     /// \param [in] input thread input value.
     /// \param [out] output reference to a thread output value. May be aliased with \p input.
     /// \param [out] reduction result of reducing of all \p input values in logical warp.
+    /// This does not include \p init.
     /// \param [in] storage reference to a temporary storage object of type storage_type.
     /// \param [in] init initial value to seed the inclusive scan.
     /// \param [in] scan_op binary operation function object that will be used for scan.

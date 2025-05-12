@@ -37,6 +37,10 @@
 #include <cstddef>
 #include <vector>
 
+#if _CLANGD
+    #include "test_warp_scan.cpp"
+#endif
+
 test_suite_type_def(suite_name, name_suffix)
 
     typed_test_suite_def(RocprimWarpScanTests, name_suffix, warp_params);
@@ -473,14 +477,19 @@ typed_test_def(RocprimWarpScanTests, name_suffix, InclusiveScanReduceInitialValu
         // Calculate expected results on host
         for(size_t i = 0; i < output.size() / logical_warp_size; i++)
         {
-            acc_type accumulator(initial_value);
+            acc_type accumulator = acc_type(initial_value);
+            acc_type reduction   = input[i * logical_warp_size];
             for(size_t j = 0; j < logical_warp_size; j++)
             {
                 auto idx      = i * logical_warp_size + j;
                 accumulator   = binary_op_host(input[idx], accumulator);
                 expected[idx] = static_cast<T>(accumulator);
+                if(j > 0)
+                {
+                    reduction = binary_op_host(input[idx], reduction);
+                }
             }
-            expected_reductions[i] = expected[(i + 1) * logical_warp_size - 1];
+            expected_reductions[i] = static_cast<T>(reduction);
         }
 
         // Writing to device memory
