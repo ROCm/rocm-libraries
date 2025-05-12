@@ -72,8 +72,8 @@ if(HIPBLASLT_ENABLE_HOST)
     set(HIPBLASLT_ENABLE_ROCROLLER OFF CACHE BOOL "Use RocRoller library.")
     set(HIPBLASLT_ENABLE_BLIS ON CACHE BOOL "Enable BLIS support.") # I don't know that we can build with this OFF
     set(HIPBLASLT_ENABLE_LAZY_LOAD ON CACHE BOOL "Enable lazy loading of runtime code oject files to reduce ram usage.")
-    set(HIPBLASLT_ENABLE_SEPARATE_ARCHITECTURES ON CACHE BOOL "Build architecture specific libraries.")
     set(HIPBLASLT_ENABLE_MARKER ON CACHE BOOL "Use the marker library.")
+    set(HIPBLASLT_ENABLE_HIPBLAS_DIRECT OFF CACHE BOOL "Use the hipblas header directly.")
 endif()
 
 if(HIPBLASLT_ENABLE_DEVICE)
@@ -102,8 +102,13 @@ set(ROCBLASLT_LIB_DIR "${HIPBLASLT_LIB_DIR}/src/amd_detail/rocblaslt")
 
 find_package(hip REQUIRED)
 if(HIPBLASLT_ENABLE_HOST)
-    if(NOT TARGET roc::hipblas-common)
-        find_package(hipblas-common REQUIRED)
+    if(HIPBLASLT_ENABLE_HIPBLAS_DIRECT)
+        set(hipblas_target hipblas)
+    else()
+        set(hipblas_target hipblas-common)
+    endif()
+    if(NOT TARGET ${hipblas_target})
+        find_package(${hipblas_target} REQUIRED)
     endif()
     if(HIPBLASLT_ENABLE_BLIS)
         find_package(BLIS REQUIRED)
@@ -192,7 +197,7 @@ if(HIPBLASLT_ENABLE_HOST)
 
     target_link_libraries(hipblaslt
         PUBLIC
-            roc::hipblas-common
+            ${hipblas_target}
         PRIVATE
             hip::device
             rocisa::rocisa-cpp
@@ -216,6 +221,10 @@ if(HIPBLASLT_ENABLE_HOST)
             ROCM_USE_FLOAT16
             __HIP_PLATFORM_AMD__
     )
+
+    if(HIPBLASLT_ENABLE_HIPBLAS_DIRECT)
+        target_compile_definitions(hipblaslt PRIVATE LEGACY_HIPBLAS_DIRECT)
+    endif()
 
     if(HIPBLASLT_ENABLE_LAZY_LOAD)
         target_compile_definitions(hipblaslt PRIVATE ROCBLASLT_TENSILE_LAZY_LOAD)
