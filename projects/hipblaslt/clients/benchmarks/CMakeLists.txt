@@ -98,6 +98,8 @@ target_link_libraries( hipblaslt-bench PRIVATE ${COMMON_LINK_LIBS} )
 
 set_target_properties( hipblaslt-bench PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging"
+  BUILD_RPATH "${HIP_CLANG_ROOT}/lib"
+  INSTALL_RPATH "$ORIGIN/../llvm/lib"
 )
 
 add_dependencies( hipblaslt-bench hipblaslt-common )
