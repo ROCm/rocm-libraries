@@ -148,7 +148,7 @@ if(BUILD_CLIENTS_TESTS)
   # default to old behaviour
   set(rpath_sep ",")
   endif()
-  execute_process(COMMAND ${CMAKE_CXX_COMPILER} ${CONVERT_SOURCE} -O3 -L${ROCM_PATH}/${CMAKE_INSTALL_LIBDIR} -Wl,--enable-new-dtags,--build-id=sha1,--rpath${rpath_sep}$ENV{ROCM_EXE_RPATH} -o ${PROJECT_BINARY_DIR}/mtx2csr.exe RESULT_VARIABLE STATUS)
+  execute_process(COMMAND ${CMAKE_CXX_COMPILER} ${CONVERT_SOURCE} -O3 -Wl,--build-id=sha1 -o ${PROJECT_BINARY_DIR}/mtx2csr.exe RESULT_VARIABLE STATUS)
   if(STATUS AND NOT STATUS EQUAL 0)
     message(FATAL_ERROR "mtx2csr.exe failed to build, aborting.")
   endif()
