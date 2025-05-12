@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -322,7 +322,8 @@ void testing_gesvd_bad_arg()
 
         // int size_W;
         // hipsolver_gesvd_bufferSize(API, handle, left_svect, right_svect, m, n, dA.data(), lda, &size_W);
-        // device_strided_batch_vector<T> dWork(size_W, 1, size_W, 1);
+        // size_t bytes_W = sizeof(T) * size_W;
+        // device_strided_batch_vector<T> dWork(bytes_W, 1, bytes_W, 1);
         // if(size_W)
         //     CHECK_HIP_ERROR(dWork.memcheck());
 
@@ -350,7 +351,8 @@ void testing_gesvd_bad_arg()
         int size_W;
         hipsolver_gesvd_bufferSize(
             API, handle, left_svect, right_svect, m, n, dA.data(), lda, &size_W);
-        device_strided_batch_vector<T> dWork(size_W, 1, size_W, 1);
+        size_t                         bytes_W = sizeof(T) * size_W;
+        device_strided_batch_vector<T> dWork(bytes_W, 1, bytes_W, 1);
         if(size_W)
             CHECK_HIP_ERROR(dWork.memcheck());
 
@@ -1061,11 +1063,12 @@ void testing_gesvd(Arguments& argus)
     int size_W, w1, w2;
     hipsolver_gesvd_bufferSize(API, handle, leftv, rightv, m, n, (T*)nullptr, lda, &w1);
     hipsolver_gesvd_bufferSize(API, handle, leftvT, rightvT, mT, nT, (T*)nullptr, lda, &w2);
-    size_W = max(w1, w2);
+    size_W         = max(w1, w2);
+    size_t bytes_W = sizeof(T) * size_W;
 
     if(argus.mem_query)
     {
-        rocsolver_bench_inform(inform_mem_query, size_W);
+        rocsolver_bench_inform(inform_mem_query, bytes_W);
         return;
     }
 
@@ -1089,7 +1092,7 @@ void testing_gesvd(Arguments& argus)
     device_strided_batch_vector<int> dinfo(1, 1, 1, bc);
     device_strided_batch_vector<T>   dVT(size_VT, 1, stVT, bc);
     device_strided_batch_vector<T>   dUT(size_UT, 1, stUT, bc);
-    device_strided_batch_vector<T>   dWork(size_W, 1, size_W, 1); // size_W accounts for bc
+    device_strided_batch_vector<T>   dWork(bytes_W, 1, bytes_W, 1); // bytes_W accounts for bc
     if(size_VT)
         CHECK_HIP_ERROR(dVT.memcheck());
     if(size_UT)
