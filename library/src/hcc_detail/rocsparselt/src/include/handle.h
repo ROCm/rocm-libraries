@@ -30,6 +30,7 @@
 
 #include <fstream>
 #include <hip/hip_runtime_api.h>
+#include <hip/hip_fp8.h>
 #include <iostream>
 #include <memory>
 #include <vector>
