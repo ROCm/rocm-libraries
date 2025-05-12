@@ -505,23 +505,27 @@ inline hipError_t inclusive_scan(void*             temporary_storage,
                                  const hipStream_t stream            = 0,
                                  bool              debug_synchronous = false)
 {
+    // AccType may be const or a reference. Get the non-const, non-reference type.
+    // This is necessary because we may need to assign to instances of this type or create pointers to it.
+    using safe_acc_type = typename std::remove_const<typename std::remove_reference<AccType>::type>::type;
+
     // input_type() is a dummy initial value (not used)
     return detail::scan_impl<detail::lookback_scan_determinism::default_determinism,
                              false,
                              Config,
                              InputIterator,
                              OutputIterator,
-                             AccType,
+                             safe_acc_type,
                              BinaryFunction,
-                             AccType>(temporary_storage,
-                                      storage_size,
-                                      input,
-                                      output,
-                                      AccType{},
-                                      size,
-                                      scan_op,
-                                      stream,
-                                      debug_synchronous);
+                             safe_acc_type>(temporary_storage,
+                                            storage_size,
+                                            input,
+                                            output,
+                                            safe_acc_type{},
+                                            size,
+                                            scan_op,
+                                            stream,
+                                            debug_synchronous);
 }
 
 /// \brief Bitwise-reproducible parallel inclusive scan primitive for device level.
@@ -546,22 +550,26 @@ inline hipError_t deterministic_inclusive_scan(void*             temporary_stora
                                                const hipStream_t stream  = 0,
                                                bool              debug_synchronous = false)
 {
+    // AccType may be const or a reference. Get the non-const, non-reference type.
+    // This is necessary because we may need to assign to instances of this type or create pointers to it.
+    using safe_acc_type = typename std::remove_const<typename std::remove_reference<AccType>::type>::type;
+
     return detail::scan_impl<detail::lookback_scan_determinism::deterministic,
                              false,
                              Config,
                              InputIterator,
                              OutputIterator,
-                             AccType,
+                             safe_acc_type,
                              BinaryFunction,
-                             AccType>(temporary_storage,
-                                      storage_size,
-                                      input,
-                                      output,
-                                      AccType{},
-                                      size,
-                                      scan_op,
-                                      stream,
-                                      debug_synchronous);
+                             safe_acc_type>(temporary_storage,
+                                            storage_size,
+                                            input,
+                                            output,
+                                            safe_acc_type{},
+                                            size,
+                                            scan_op,
+                                            stream,
+                                            debug_synchronous);
 }
 
 /// \brief Parallel exclusive scan primitive for device level.
@@ -672,6 +680,10 @@ inline hipError_t exclusive_scan(void*               temporary_storage,
                                  const hipStream_t   stream            = 0,
                                  bool                debug_synchronous = false)
 {
+    // AccType may be const or a reference. Get the non-const, non-reference type.
+    // This is necessary because we may need to assign to instances of this type or create pointers to it.
+    using safe_acc_type = typename std::remove_const<typename std::remove_reference<AccType>::type>::type;
+
     return detail::scan_impl<detail::lookback_scan_determinism::default_determinism,
                              true,
                              Config,
@@ -679,15 +691,15 @@ inline hipError_t exclusive_scan(void*               temporary_storage,
                              OutputIterator,
                              InitValueType,
                              BinaryFunction,
-                             AccType>(temporary_storage,
-                                      storage_size,
-                                      input,
-                                      output,
-                                      initial_value,
-                                      size,
-                                      scan_op,
-                                      stream,
-                                      debug_synchronous);
+                             safe_acc_type>(temporary_storage,
+                                            storage_size,
+                                            input,
+                                            output,
+                                            initial_value,
+                                            size,
+                                            scan_op,
+                                            stream,
+                                            debug_synchronous);
 }
 
 /// \brief Bitwise-reproducible parallel exclusive scan primitive for device level.
@@ -714,6 +726,10 @@ inline hipError_t deterministic_exclusive_scan(void*               temporary_sto
                                                const hipStream_t   stream  = 0,
                                                bool                debug_synchronous = false)
 {
+    // AccType may be const or a reference. Get the non-const, non-reference type.
+    // This is necessary because we may need to assign to instances of this type or create pointers to it.
+    using safe_acc_type = typename std::remove_const<typename std::remove_reference<AccType>::type>::type;
+
     return detail::scan_impl<detail::lookback_scan_determinism::deterministic,
                              true,
                              Config,
@@ -721,15 +737,15 @@ inline hipError_t deterministic_exclusive_scan(void*               temporary_sto
                              OutputIterator,
                              InitValueType,
                              BinaryFunction,
-                             AccType>(temporary_storage,
-                                      storage_size,
-                                      input,
-                                      output,
-                                      initial_value,
-                                      size,
-                                      scan_op,
-                                      stream,
-                                      debug_synchronous);
+                             safe_acc_type>(temporary_storage,
+                                            storage_size,
+                                            input,
+                                            output,
+                                            initial_value,
+                                            size,
+                                            scan_op,
+                                            stream,
+                                            debug_synchronous);
 }
 
 /// @}
