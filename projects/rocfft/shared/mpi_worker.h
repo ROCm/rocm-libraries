@@ -1036,7 +1036,10 @@ int mpi_worker_main(const char*                                               de
             }
 
             std::cout << "\n";
+        }
 
+        if(mpi_rank == 0)
+        {
             std::cout << "Token: " << token << std::endl;
             std::cout << "\n";
 

@@ -40,6 +40,9 @@ def main():
         epilog="For a detailed usage overview, run: %(prog)s overview",
         parents=[conf_parser])
 
+    # NB: confgparser requires a value for boolean arguments, so action='store_true' isn't really an
+    # option for boolean argparse arguments which are also handled by configparser.
+
     parser.add_argument('--verbose', type=int, default=0)
     parser.add_argument('--logdir',
                         type=str,
@@ -50,13 +53,16 @@ def main():
                         default=None,
                         help='build directory')
     parser.add_argument('--build',
-                        type=lambda x: bool(x in ("yes", "true", "t", "1")),
+                        type=lambda x: bool(x.lower() in
+                                            ("yes", "true", "t", "1")),
                         default=False)
     parser.add_argument('--ccache',
-                        type=lambda x: bool(x in ("yes", "true", "t", "1")),
+                        type=lambda x: bool(x.lower() in
+                                            ("yes", "true", "t", "1")),
                         default=False)
     parser.add_argument('--buildcraympi',
-                        type=lambda x: bool(x in ("yes", "true", "t", "1")),
+                        type=lambda x: bool(x.lower() in
+                                            ("yes", "true", "t", "1")),
                         default=False)
     parser.add_argument('--launcher',
                         type=str,
@@ -132,6 +138,7 @@ def main():
     print("modules:", args.modules)
     print("exports", args.exports)
     print("build library?", args.build)
+    print("buildcraympi library?", args.buildcraympi)
 
     # Main job script:
 
