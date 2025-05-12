@@ -642,7 +642,7 @@ namespace TensileLite
         return found->i;
     }
 
-    size_t ContractionProblemGemm::getNumTiles(SizeMapping const& sizeMapping) const
+    size_t ContractionProblemGemm::getNumTiles(SizeMapping const& sizeMapping, size_t gsu) const
     {
         // Get the normal WorkGroup numbers by sizeMapping MacroTile
         dim3 numWG(1, 1, 1);
@@ -667,7 +667,7 @@ namespace TensileLite
         numWG.x = CeilDivide(numWG.x, sizeMapping.macroTile.x);
         numWG.y = CeilDivide(numWG.y, sizeMapping.macroTile.y);
         if(sizeMapping.streamK == 0)
-            numWG.y *= sizeMapping.globalSplitU;
+            numWG.y *= gsu;
 
         size_t problemTiles = numWG.x * numWG.y;
         if(sizeMapping.persistentKernelAlongBatch || sizeMapping.streamK != 0)

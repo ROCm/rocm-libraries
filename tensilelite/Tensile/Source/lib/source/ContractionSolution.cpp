@@ -872,7 +872,8 @@ namespace TensileLite
 
         if(sizeMapping.streamK != 0)
         {
-            auto tiles = problem.getNumTiles(sizeMapping);
+            assert(gsu == 1);
+            auto tiles = problem.getNumTiles(sizeMapping, gsu);
 
             // Clamp minimum iters per tile to 1 to allow stream-k index calculation to work in case K==0
             // In this case no actual iterations will be run, but workgroups will be mapped correctly for beta*C
@@ -1345,8 +1346,8 @@ namespace TensileLite
         if(gsu > 0)
             rv.numWorkGroups.y *= gsu;
 
-        size_t skGrid = 0;
-        auto   tiles  = problem.getNumTiles(sizeMapping);
+        size_t skGrid    = 0;
+        auto   tiles     = problem.getNumTiles(sizeMapping, gsu);
         if(sizeMapping.streamK != 0 || sizeMapping.persistentKernel != 0)
         {
             AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(&hardware);
@@ -2975,11 +2976,14 @@ namespace TensileLite
                                                       Hardware const& hardware) const
     {
         size_t size = 0;
+        // TODO: Pass GSU from problem and change value[2] to gsu if gsu != default value
+        size_t gsu = problem.getParams().gsu() > 0 ? problem.getParams().gsu() : sizeMapping.globalSplitU;
 
         if(sizeMapping.streamK > 0 && sizeMapping.streamKAtomic == 0)
         {
             const bool streamKDP = Debug::Instance().useStreamKDataParrallel();
-            auto   tiles  = problem.getNumTiles(sizeMapping);
+            assert(gsu == 1);
+            auto   tiles  = problem.getNumTiles(sizeMapping, gsu);
             size_t skGrid = getSKGrid(problem, hardware, tiles);
             // Get space required for partial tiles
             if(tiles % skGrid != 0 && !streamKDP)
@@ -2991,9 +2995,11 @@ namespace TensileLite
             calculateAutoGSU(problem, &hardware);
             size_t gsu = problem.getParams().gsu() > 0 ? problem.getParams().gsu() : autoGSU;
             size_t gsuMultiplier = gsu > 1 ? gsu : 0;
+            size_t tiles = problem.getNumTiles(sizeMapping, gsu);
+            size_t tileSize = sizeMapping.macroTile.x * sizeMapping.macroTile.y * sizeMapping.workspaceSizePerElemC;
+            size_t bufSize = gsu > 1 ? tiles * tileSize : 0;
+            size += bufSize;
 
-            size += problem.d().totalLogicalElements() * sizeMapping.workspaceSizePerElemC
-                    * gsuMultiplier;
             if(problemType.useGradient && problemType.useBias
                && problem.getParams().biasEnum() != rocisa::DataType::None)
             {
