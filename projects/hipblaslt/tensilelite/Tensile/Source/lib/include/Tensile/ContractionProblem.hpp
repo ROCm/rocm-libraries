@@ -1131,7 +1131,7 @@ namespace TensileLite
             return getOperationDescription();
         }
 
-        size_t getNumTiles(SizeMapping const& sizeMapping) const;
+        size_t getNumTiles(SizeMapping const& sizeMapping, size_t gsu) const;
         size_t getItersPerTile(SizeMapping const& sizeMapping) const;
 
         void checkPersistentKernelEligibility(ContractionSolution const& solution,
