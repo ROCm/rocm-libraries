@@ -60,7 +60,9 @@ namespace
     {
         void operator()(const Arguments& arg)
         {
-            if(!strcmp(arg.function, "aux_handle_init_bad_arg"))
+            if(!strcmp(arg.function, "aux_get_version"))
+                testing_aux_get_version(arg);
+            else if(!strcmp(arg.function, "aux_handle_init_bad_arg"))
                 testing_aux_handle_init_bad_arg(arg);
             else if(!strcmp(arg.function, "aux_handle_destroy_bad_arg"))
                 testing_aux_handle_destroy_bad_arg(arg);
@@ -134,7 +136,8 @@ namespace
         // Filter for which functions apply to this suite
         static bool function_filter(const Arguments& arg)
         {
-            return !strcmp(arg.function, "aux_handle_init_bad_arg")
+            return !strcmp(arg.function, "aux_get_version")
+                   || !strcmp(arg.function, "aux_handle_init_bad_arg")
                    || !strcmp(arg.function, "aux_handle_destroy_bad_arg")
                    || !strcmp(arg.function, "aux_handle")
                    || !strcmp(arg.function, "aux_mat_init_dense_bad_arg")

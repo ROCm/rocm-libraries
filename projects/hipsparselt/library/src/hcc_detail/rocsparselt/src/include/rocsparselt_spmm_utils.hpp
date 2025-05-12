@@ -113,10 +113,10 @@ inline int64_t rocsparselt_metadata_offset_in_compressed_matrix(int64_t     num_
         case HIP_R_16F:
         case HIP_R_16BF:
             return 2;
-        case HIP_R_8F_E4M3_FNUZ:
-        case HIP_R_8F_E5M2_FNUZ:
+#if HIP_FP8_TYPE_OCP
         case HIP_R_8F_E4M3:
         case HIP_R_8F_E5M2:
+#endif
         case HIP_R_8I:
             return 1;
         default:
@@ -207,10 +207,10 @@ inline rocsparselt_status validateMatrixArgs(const _rocsparselt_handle* handle,
     switch(valueType)
     {
     case HIP_R_8I:
-    case HIP_R_8F_E4M3_FNUZ:
-    case HIP_R_8F_E5M2_FNUZ:
+#if HIP_FP8_TYPE_OCP
     case HIP_R_8F_E4M3:
     case HIP_R_8F_E5M2:
+#endif
         num_elements = 16;
         break;
     default:
