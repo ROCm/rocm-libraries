@@ -52,6 +52,7 @@ endif()
 set(HIPBLASLT_ENABLE_DEVICE ON CACHE BOOL "Build hipBLASLt device libraries.")
 set(HIPBLASLT_ENABLE_CLIENT ON CACHE BOOL "Build hipBLASLt client apps.")
 cmake_dependent_option(HIPBLASLT_ENABLE_HOST "Build hipBLASLt host library." ON "HIPBLASLT_ENABLE_CLIENT" OFF)
+set(HIPBLASLT_ENABLE_COVERAGE OFF CACHE BOOL "Build gcov support")
 
 if(HIPBLASLT_ENABLE_CLIENT)
     set(HIPBLASLT_BUILD_TESTING ON CACHE BOOL "Build hipblaslt client tests.")
@@ -451,3 +452,48 @@ rocm_create_package(
     LDCONFIG
     LDCONFIG_DIR ${HIPBLASLT_CONFIG_DIR}
 )
+
+if(HIPBLASLT_ENABLE_COVERAGE)
+    target_compile_options(hipblaslt PRIVATE -g -O0 -fprofile-instr-generate -fcoverage-mapping)
+    target_link_options(hipblaslt PRIVATE -fprofile-instr-generate)
+
+    target_compile_options(hipblaslt-clients-common PRIVATE -g -O0 -fprofile-instr-generate -fcoverage-mapping)
+    target_link_options(hipblaslt-clients-common PRIVATE -fprofile-instr-generate)
+
+    target_compile_options(hipblaslt-bench PRIVATE -g -O0 -fprofile-instr-generate -fcoverage-mapping)
+    target_link_options(hipblaslt-bench PRIVATE -fprofile-instr-generate)
+
+    target_compile_options(hipblaslt-test PRIVATE -g -O0 -fprofile-instr-generate -fcoverage-mapping)
+    target_link_options(hipblaslt-test PRIVATE -fprofile-instr-generate)
+
+    set(coverage_dir "${CMAKE_CURRENT_BINARY_DIR}/coverage-report")
+    add_custom_target(
+        code_cov_tests
+        DEPENDS hipblaslt-test
+        COMMAND ${CMAKE_COMMAND} -E rm -rf "${coverage_dir}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${coverage_dir}/profraw"
+        COMMAND ${CMAKE_COMMAND} -E env LLVM_PROFILE_FILE="${coverage_dir}/profraw/hipblaslt-coverage_%p.profraw" 
+                                        GTEST_LISTENER=NO_PASS_LINE_IN_LOG 
+                                        $<TARGET_FILE:hipblaslt-test> 
+                                        --precompile=hipblaslt-test-precompile.db
+      )
+      find_program(
+        LLVM_PROFDATA
+        llvm-profdata
+        HINTS llvm/bin
+        REQUIRED
+      )
+      find_program(
+        LLVM_COV
+        llvm-cov
+        REQUIRED
+        HINTS llvm/bin
+      )
+      add_custom_target(
+        coverage
+        DEPENDS code_cov_tests
+        COMMAND ${LLVM_PROFDATA} merge -sparse "${coverage_dir}/profraw/hipblaslt-coverage_*.profraw" -o "${coverage_dir}/hipblaslt.profdata"
+        COMMAND ${LLVM_COV} report -object $<TARGET_FILE:hipblaslt> -instr-profile="${coverage_dir}/hipblaslt.profdata"
+        COMMAND ${LLVM_COV} show -object $<TARGET_FILE:hipblaslt> -instr-profile="${coverage_dir}/hipblaslt.profdata" -format=html -output-dir="${coverage_dir}"
+      )
+endif()
