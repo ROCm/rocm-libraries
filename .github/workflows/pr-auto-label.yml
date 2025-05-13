@@ -117,6 +117,11 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.generate-token.outputs.token }}
         run: |
+          if gh pr view "${{ steps.pr_number.outputs.pr_number }}" --json labels -q '.labels[].name' | grep -qFx "imported pr"; then
+            echo "Skipping org membership labeling for imported pull request."
+            exit 0
+          fi
+
           PR_USER=$(gh pr view "${{ steps.pr_number.outputs.pr_number }}" --json author -q .author.login)
           if gh api orgs/${{ env.ORG_TO_CHECK }}/members/$PR_USER --silent; then
             gh pr edit "${{ steps.pr_number.outputs.pr_number }}" --add-label "${{ env.ORG_LABEL }}"
