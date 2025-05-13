@@ -129,7 +129,7 @@ rocsparse_status rocsparse::cscmv_template(rocsparse_handle          handle,
     {
     case rocsparse_operation_none:
     {
-        static constexpr bool no_force_conj = false;
+        static constexpr bool force_conj = false;
         RETURN_IF_ROCSPARSE_ERROR(
             (rocsparse::csrmv_template<T, I, J, A, X, Y>(handle,
                                                          rocsparse_operation_transpose,
@@ -147,13 +147,13 @@ rocsparse_status rocsparse::cscmv_template(rocsparse_handle          handle,
                                                          x,
                                                          beta,
                                                          y,
-                                                         no_force_conj,
+                                                         force_conj,
                                                          fallback_algorithm)));
         return rocsparse_status_success;
     }
     case rocsparse_operation_transpose:
     {
-        static constexpr bool no_force_conj = false;
+        static constexpr bool force_conj = false;
         RETURN_IF_ROCSPARSE_ERROR(
             (rocsparse::csrmv_template<T, I, J, A, X, Y>(handle,
                                                          rocsparse_operation_none,
@@ -171,7 +171,7 @@ rocsparse_status rocsparse::cscmv_template(rocsparse_handle          handle,
                                                          x,
                                                          beta,
                                                          y,
-                                                         no_force_conj,
+                                                         force_conj,
                                                          fallback_algorithm)));
         return rocsparse_status_success;
     }

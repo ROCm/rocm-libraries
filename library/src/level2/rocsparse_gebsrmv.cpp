@@ -398,7 +398,7 @@ rocsparse_status rocsparse::gebsrmv_template(rocsparse_handle          handle, /
     if(row_block_dim == 1 && col_block_dim == 1)
     {
         static constexpr bool fallback_algorithm = true;
-        static constexpr bool no_force_conj      = false;
+        static constexpr bool force_conj         = false;
 
         RETURN_IF_ROCSPARSE_ERROR(
             (rocsparse::csrmv_template<T, rocsparse_int, rocsparse_int, T, T, T>(
@@ -418,7 +418,7 @@ rocsparse_status rocsparse::gebsrmv_template(rocsparse_handle          handle, /
                 x,
                 beta,
                 y,
-                no_force_conj,
+                force_conj,
                 fallback_algorithm)));
         return rocsparse_status_success;
     }

@@ -201,7 +201,7 @@ rocsparse_status rocsparse::csritsv_solve_ex_template(rocsparse_handle handle,
     ROCSPARSE_ROUTINE_TRACE;
 
     static constexpr bool fallback_algorithm = true;
-    static constexpr bool no_force_conj      = false;
+    static constexpr bool force_conj         = false;
 
     const bool                    breakable   = (host_tol != nullptr);
     const bool                    recordable  = (host_history != nullptr);
@@ -492,7 +492,7 @@ rocsparse_status rocsparse::csritsv_solve_ex_template(rocsparse_handle handle,
                                                            y,
                                                            alpha_device_host,
                                                            y_p,
-                                                           no_force_conj,
+                                                           force_conj,
                                                            fallback_algorithm));
                 //
                 // Add scale the residual
@@ -533,7 +533,7 @@ rocsparse_status rocsparse::csritsv_solve_ex_template(rocsparse_handle handle,
                                                               y,
                                                               alpha_device_host,
                                                               y_p,
-                                                              no_force_conj,
+                                                              force_conj,
                                                               fallback_algorithm));
             bool break_loop = false;
             if(compute_nrm)
@@ -633,7 +633,7 @@ rocsparse_status rocsparse::csritsv_solve_ex_template(rocsparse_handle handle,
                                                            y_p,
                                                            alpha_device_host,
                                                            y,
-                                                           no_force_conj,
+                                                           force_conj,
                                                            fallback_algorithm));
             }
 
@@ -682,7 +682,7 @@ rocsparse_status rocsparse::csritsv_solve_ex_template(rocsparse_handle handle,
                                                               y_p,
                                                               alpha_device_host,
                                                               y,
-                                                              no_force_conj,
+                                                              force_conj,
                                                               fallback_algorithm));
 
             if(compute_nrm)

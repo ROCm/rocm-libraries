@@ -388,7 +388,7 @@ rocsparse_status rocsparse::csrmv(rocsparse_handle          handle,
                                                     x_datatype,
                                                     y_datatype));
 
-    static constexpr bool no_force_conj = false;
+    static constexpr bool force_conj = false;
     RETURN_IF_ROCSPARSE_ERROR(f(handle,
                                 trans,
                                 alg,
@@ -405,7 +405,7 @@ rocsparse_status rocsparse::csrmv(rocsparse_handle          handle,
                                 x,
                                 beta_device_host,
                                 y,
-                                no_force_conj,
+                                force_conj,
                                 fallback_algorithm));
 
     return rocsparse_status_success;

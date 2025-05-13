@@ -486,11 +486,11 @@ namespace rocsparse
 
         case rocsparse_v2_spmv_stage_compute:
         {
-            static constexpr bool    no_fallback_algorithm = false;
-            const rocsparse_datatype scalar_datatype       = spmv_descr->get_scalar_datatype();
-            const rocsparse_datatype compute_datatype      = spmv_descr->get_compute_datatype();
-            const void*              local_alpha           = alpha;
-            const void*              local_beta            = beta;
+            static constexpr bool    fallback_algorithm = false;
+            const rocsparse_datatype scalar_datatype    = spmv_descr->get_scalar_datatype();
+            const rocsparse_datatype compute_datatype   = spmv_descr->get_compute_datatype();
+            const void*              local_alpha        = alpha;
+            const void*              local_beta         = beta;
 
             if(scalar_datatype != compute_datatype)
             {
@@ -565,7 +565,7 @@ namespace rocsparse
                                                             local_beta,
                                                             y_data_type,
                                                             y_values,
-                                                            no_fallback_algorithm)));
+                                                            fallback_algorithm)));
                 return rocsparse_status_success;
             }
 
@@ -592,7 +592,7 @@ namespace rocsparse
                                                                 local_beta,
                                                                 y_data_type,
                                                                 y_values,
-                                                                no_fallback_algorithm)));
+                                                                fallback_algorithm)));
                 return rocsparse_status_success;
             }
 
@@ -653,7 +653,7 @@ namespace rocsparse
                                       local_beta,
                                       y_data_type,
                                       y_values,
-                                      no_fallback_algorithm)));
+                                      fallback_algorithm)));
                 return rocsparse_status_success;
             }
             case rocsparse_format_csc:
@@ -683,7 +683,7 @@ namespace rocsparse
                                                             local_beta,
                                                             y_data_type,
                                                             y_values,
-                                                            no_fallback_algorithm)));
+                                                            fallback_algorithm)));
                 return rocsparse_status_success;
             }
             case rocsparse_format_ell:

@@ -385,8 +385,7 @@ static rocsparse_status rocsparse_csrmv_impl(rocsparse_handle          handle,
                                              rocsparse_mat_info        info,
                                              const X*                  x,
                                              const T*                  beta_device_host,
-                                             Y*                        y,
-                                             bool                      force_conj)
+                                             Y*                        y)
 {
     // Check for valid handle and matrix descriptor
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
@@ -449,7 +448,7 @@ static rocsparse_status rocsparse_csrmv_impl(rocsparse_handle          handle,
         = choose_rowsplit ? rocsparse::csrmv_alg_rowsplit : rocsparse::csrmv_alg_adaptive;
 
     static constexpr bool fallback_algorithm = true;
-    static constexpr bool no_force_conj      = false;
+    static constexpr bool force_conj         = false;
 
     RETURN_IF_ROCSPARSE_ERROR((rocsparse::csrmv_template<T, I, J, A, X, Y>(handle,
                                                                            trans,
@@ -467,7 +466,7 @@ static rocsparse_status rocsparse_csrmv_impl(rocsparse_handle          handle,
                                                                            x,
                                                                            beta_device_host,
                                                                            y,
-                                                                           no_force_conj,
+                                                                           force_conj,
                                                                            fallback_algorithm)));
     return rocsparse_status_success;
 }
@@ -699,8 +698,7 @@ C_IMPL(rocsparse_zcsrmv_analysis, rocsparse_double_complex);
                                                        info,                \
                                                        x,                   \
                                                        beta,                \
-                                                       y,                   \
-                                                       false));             \
+                                                       y));                 \
         return rocsparse_status_success;                                    \
     }                                                                       \
     catch(...)                                                              \
