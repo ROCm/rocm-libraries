@@ -46,7 +46,7 @@ This includes source code for Level 1, 2, and 3 BLAS functions in ``.cpp`` and `
       call functions with a ``_template`` extension.
 
 *  The ``*_imp.hpp`` files contain:
- 
+
    *  ``_template`` functions that can be exported to rocSOLVER. They usually call the ``_launcher`` functions.
    *  API implementations that can be instantiated for the original APIs with integer arguments using ``rocblas_int`` and
       again for the ILP64 API with integer arguments as ``int64_t``.
@@ -224,7 +224,7 @@ the ``hipStreamSynchronize(old_stream)`` API before setting the new stream.
 
 .. code-block:: cpp
 
-    // Synchronize the old stream
+    // Synchronize the old stream (optional)
     if(hipStreamSynchronize(old_stream) != hipSuccess) return EXIT_FAILURE;
 
     // Create a new stream (this step can be done before the steps above)
@@ -236,8 +236,8 @@ the ``hipStreamSynchronize(old_stream)`` API before setting the new stream.
     // Destroy the old stream (this step is optional but must come after synchronization)
     if(hipStreamDestroy(old_stream) != hipSuccess) return EXIT_FAILURE;
 
-The call to ``hipStreamSynchronize`` above is necessary because the ``rocBLAS_handle`` contains allocated device
-memory that must not be shared by multiple asynchronous streams at the same time.
+The call to ``hipStreamSynchronize`` above is necessary for user_owned allocation scheme because the ``rocBLAS_handle`` contains allocated device
+memory provided by the user that must not be shared by multiple asynchronous streams at the same time.
 
 If either the old or new stream is the default or ``NULL`` stream, it is not necessary to
 synchronize the old stream before destroying it, or before setting the new stream,
@@ -245,8 +245,8 @@ because the synchronization is implicit.
 
 .. note::
 
-   You can switch from one non-default stream to another without calling ``hipStreamSynchronize()`` by enabling stream-order memory allocation.
-   For more information, see :ref:`stream order alloc`.
+   You can switch from one non-default stream to another without calling ``hipStreamSynchronize()`` as the default memory allocation scheme (rocBLAS_managed) uses stream order allocation.
+   For more information, see :ref:`Device Memory Allocation Usage`.
 
 Creating the handle incurs a startup cost. There is an additional startup cost for
 GEMM functions to load GEMM kernels for a specific device. You can shift the
@@ -298,7 +298,7 @@ HIP has two important device management functions:
 *  ``hipSetDevice()``: Sets the default device to be used for subsequent HIP API calls from the thread.
 *  ``hipGetDevice()``: Returns the default device ID for the calling host thread.
 
-The device which was set using ``hipSetDevice()`` when ``hipStreamCreate()`` was called 
+The device which was set using ``hipSetDevice()`` when ``hipStreamCreate()`` was called
 is the one that is associated with a stream. If the device was not set using ``hipSetDevice()``, then the default device is used.
 
 You cannot switch the device in a stream between ``hipStreamCreate()`` and ``hipStreamDestroy()``.
@@ -674,7 +674,7 @@ rocBLAS has the following differences from legacy BLAS:
    In legacy BLAS, the following functions return a scalar result: ``dot``, ``nrm2``, ``asum``, ``amax``, and ``amin``.
 *  The first argument is a ``rocblas_handle`` argument. This is an opaque pointer to rocBLAS resources,
    corresponding to a single HIP stream.
-*  Scalar arguments like alpha and beta are pointers on either the host or device, controlled by the pointer mode of the rocBLAS handle. 
+*  Scalar arguments like alpha and beta are pointers on either the host or device, controlled by the pointer mode of the rocBLAS handle.
    In cases where the other arguments do not dictate an early return, if the alpha and beta pointers are ``NULL``,
    the function returns ``rocblas_status_invalid_pointer``.
 *  Vector and matrix arguments are always pointers to device memory.
@@ -685,7 +685,7 @@ rocBLAS has the following differences from legacy BLAS:
    This is to avoid slowing down execution to fetch and inspect alpha and beta values.
 *  The ``ROCBLAS_LAYER`` environment variable controls the option to log argument values.
 *  rocBLAS has added functionality, including the following:
-  
+
    *  batched
    *  strided_batched
    *  mixed precision in ``gemm_ex``, ``gemm_batched_ex``, and ``gemm_strided_batched_ex``
@@ -696,7 +696,7 @@ The following changes were made to accommodate the new features:
 *  For batched and strided_batched L2 and L3 functions, there is a quick-return-success for ``batch_count == 0``
    and an invalid-size error for ``batch_count < 0``.
 *  For batched and strided_batched L1 functions, there is a quick-return-success for ``batch_count <= 0``.
-*  When ``rocblas_pointer_mode == rocblas_pointer_mode_device``, alpha and beta are not copied 
+*  When ``rocblas_pointer_mode == rocblas_pointer_mode_device``, alpha and beta are not copied
    from the device to host for quick-return-success checks. In this case, the quick-return-success checks are omitted.
    This still provides a correct result, but the operation is slower.
 *  For strided_batched functions, there is no argument checking for the stride.
@@ -753,7 +753,7 @@ rocBLAS control flow
 
    *  If there is no return value, return ``rocblas_status_success``.
    *  If there is a return value:
-  
+
       * If the return value pointer argument is a ``NULL`` pointer, return ``rocblas_status_invalid_pointer``.
       * Otherwise, return ``rocblas_status_success``
 
@@ -2047,7 +2047,7 @@ To add new data-driven tests to the rocBLAS GoogleTest Framework, follow these s
    .. csv-table::
       :header: "Level","quick","pre_checkin","nightly"
       :widths: 20, 30, 30, 30
-   
+
       "Level 1", "2 - 12 sec", "20 - 36 sec", "70 - 200 sec"
       "Level 2", "6 - 36 sec", "35 - 100 sec", "200 - 650 sec"
       "Level 3", "20 sec - 2 min", "2 - 6 min", "12 - 24 min"

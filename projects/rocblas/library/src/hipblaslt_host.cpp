@@ -88,24 +88,6 @@ namespace
     template <>
     constexpr auto hipblaslt_compute_type<double> = HIPBLAS_COMPUTE_64F;
 
-    template <typename T>
-    auto convertScalarForHipblasLT(T num)
-    {
-        return static_cast<int8_t>(num);
-    }
-
-    template <>
-    auto convertScalarForHipblasLT(rocblas_float_complex num)
-    {
-        return static_cast<int8_t>(std::real(num));
-    }
-
-    template <>
-    auto convertScalarForHipblasLT(rocblas_double_complex num)
-    {
-        return static_cast<int8_t>(std::real(num));
-    }
-
     /**************************************************************************
     * We normally print error messages only once, to avoid excessive logging *
     **************************************************************************/
@@ -526,49 +508,9 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
             return rocblas_status_internal_error;
         }
 
-        auto h_alpha = *(prob.alpha);
-        auto h_beta  = *(prob.beta);
-
-        int batch_count = prob.batch_count;
-
-        std::vector<Ti const*> A(batch_count);
-        std::vector<Ti const*> B(batch_count);
-        std::vector<To*>       C(batch_count);
-        std::vector<To*>       D(batch_count);
-        RETURN_IF_HIP_ERROR(hipMemcpy(
-            (void*)(&A[0]), prob.batch_A, sizeof(void*) * batch_count, hipMemcpyDeviceToHost));
-        RETURN_IF_HIP_ERROR(hipMemcpy(
-            (void*)(&B[0]), prob.batch_B, sizeof(void*) * batch_count, hipMemcpyDeviceToHost));
-        RETURN_IF_HIP_ERROR(hipMemcpy(
-            (void*)(&C[0]), prob.batch_C, sizeof(void*) * batch_count, hipMemcpyDeviceToHost));
-        RETURN_IF_HIP_ERROR(hipMemcpy(
-            (void*)(&D[0]), prob.batch_D, sizeof(void*) * batch_count, hipMemcpyDeviceToHost));
-
         hipblaslt_ext::UserArguments* userArgs;
         hipHostMalloc(&userArgs, userArgsSize);
         gemm.getDefaultValueForDeviceUserArguments(userArgs);
-        for(int batch = 0; batch < batch_count; batch++)
-        {
-            userArgs[batch].m        = prob.m;
-            userArgs[batch].n        = prob.n;
-            userArgs[batch].k        = prob.k;
-            userArgs[batch].strideA1 = prob.col_stride_a;
-            userArgs[batch].strideB1 = prob.col_stride_b;
-            userArgs[batch].strideC1 = prob.col_stride_c;
-            userArgs[batch].strideD1 = prob.col_stride_d;
-            userArgs[batch].strideA2 = prob.batch_stride_a;
-            userArgs[batch].strideB2 = prob.batch_stride_b;
-            userArgs[batch].strideC2 = prob.batch_stride_c;
-            userArgs[batch].strideD2 = prob.batch_stride_d;
-            userArgs[batch].batch    = 1;
-            userArgs[batch].a        = (void*)(A[batch] + prob.buffer_offset_a);
-            userArgs[batch].b        = (void*)(B[batch] + prob.buffer_offset_b);
-            userArgs[batch].c        = (void*)(C[batch] + prob.buffer_offset_c);
-            userArgs[batch].d        = (void*)(D[batch] + prob.buffer_offset_d);
-
-            userArgs[batch].alpha[0] = convertScalarForHipblasLT(h_alpha);
-            userArgs[batch].beta[0]  = convertScalarForHipblasLT(h_beta);
-        }
 
         // Copy them to device memory
         hipblaslt_ext::UserArguments* d_userArgs
