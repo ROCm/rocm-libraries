@@ -34,11 +34,12 @@
 #include <vector>
 
 #include <rocRoller/DataTypes/DataTypes.hpp>
-#include <rocRoller/Expression.hpp>
+#include <rocRoller/Expression_fwd.hpp>
 #include <rocRoller/Operations/CommandArgument_fwd.hpp>
 #include <rocRoller/Operations/CommandArguments.hpp>
 #include <rocRoller/Operations/OperationTag.hpp>
 #include <rocRoller/Operations/Operations_fwd.hpp>
+#include <rocRoller/Serialization/Base_fwd.hpp>
 
 namespace rocRoller
 {
@@ -49,7 +50,7 @@ namespace rocRoller
         using OperationList = std::vector<std::shared_ptr<Operations::Operation>>;
 
         Command();
-        Command(bool sync);
+        explicit Command(bool sync);
         ~Command();
 
         Command(Command const& rhs);

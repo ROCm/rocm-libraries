@@ -83,7 +83,6 @@ set(
     unit/GPUInstructionInfoTest.cpp
     unit/GeneratorTest.cpp
     unit/HalfPrecisionTest.cpp
-    unit/InstructionTest.cpp
     unit/KernelGraphTest.cpp
     unit/KernelGraphTest/ConstantPropagation.cpp
     unit/KernelGraphTest/KernelGraphUtils.cpp
@@ -108,7 +107,6 @@ set(
     unit/RandomTest.cpp
     unit/RegisterAllocatorTest.cpp
     unit/RegisterLivenessObserverTest.cpp
-    unit/RegisterTest.cpp
     unit/SchedulerTest.cpp
     unit/ScopeTest.cpp
     unit/ScopeManagerTest.cpp
@@ -177,11 +175,13 @@ set(
     catch/HazardObserverTest.cpp
     catch/HypergraphTest.cpp
     catch/IdentifyParallelDimensionsTest.cpp
+    catch/InstructionTest.cpp
     catch/KernelArgumentsTest.cpp
     catch/KernelGraphColouringTest.cpp
     catch/KernelGraphConstraintsTest.cpp
     catch/KernelGraphRemoveDuplicatesTest.cpp
     catch/KernelGraphSimplifyTest.cpp
+    catch/LDSAllocationTest.cpp
     catch/LargerLDSTest.cpp
     catch/LoadPackedTest.cpp
     catch/MEMObserverTest.cpp
@@ -189,6 +189,7 @@ set(
     catch/RandomNumberExpressionTest.cpp
     catch/RandomNumberGenerationTest.cpp
     catch/RegisterTagManagerTest.cpp
+    catch/RegisterTest.cpp
     catch/ScalarExpressionTest.cpp
     catch/SettingsTest.cpp
     catch/SubDwordExpressionTest.cpp

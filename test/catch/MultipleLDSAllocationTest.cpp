@@ -146,9 +146,17 @@ namespace multipleLDSAllocTest
                     co_yield v_ptr->allocate();
                     const auto offset = i * m_numBytes1;
                     co_yield m_context->mem()->loadGlobal(v_ptr, v_a, offset, m_numBytes1);
-                    co_yield m_context->mem()->storeLocal(lds1_offset, v_ptr, offset, m_numBytes1);
-                    co_yield m_context->mem()->barrier();
-                    co_yield m_context->mem()->loadLocal(v_ptr, lds1_offset, offset, m_numBytes1);
+
+                    co_yield m_context->mem()
+                        ->storeLocal(lds1_offset, v_ptr, offset, m_numBytes1)
+                        .map(MemoryInstructions::addExtraDst(lds1));
+
+                    co_yield_(m_context->mem()->barrier({lds1}));
+
+                    co_yield m_context->mem()
+                        ->loadLocal(v_ptr, lds1_offset, offset, m_numBytes1)
+                        .map(MemoryInstructions::addExtraSrc(lds1));
+
                     co_yield m_context->mem()->storeGlobal(v_result, v_ptr, offset, m_numBytes1);
                 }
                 auto usedLDS = m_numBytes1 * m_numLoads1;
@@ -164,10 +172,18 @@ namespace multipleLDSAllocTest
                     co_yield v_ptr->allocate();
                     const auto offset = i * m_numBytes2;
                     co_yield m_context->mem()->loadGlobal(
+
                         v_ptr, v_a, usedLDS + offset, m_numBytes2);
-                    co_yield m_context->mem()->storeLocal(lds2_offset, v_ptr, offset, m_numBytes2);
-                    co_yield m_context->mem()->barrier();
-                    co_yield m_context->mem()->loadLocal(v_ptr, lds2_offset, offset, m_numBytes2);
+                    co_yield m_context->mem()
+                        ->storeLocal(lds2_offset, v_ptr, offset, m_numBytes2)
+                        .map(MemoryInstructions::addExtraDst(lds2));
+
+                    co_yield_(m_context->mem()->barrier({lds2}));
+
+                    co_yield m_context->mem()
+                        ->loadLocal(v_ptr, lds2_offset, offset, m_numBytes2)
+                        .map(MemoryInstructions::addExtraSrc(lds2));
+
                     co_yield m_context->mem()->storeGlobal(
                         v_result, v_ptr, usedLDS + offset, m_numBytes2);
                 }
@@ -185,9 +201,17 @@ namespace multipleLDSAllocTest
                     const auto offset = i * m_numBytes3;
                     co_yield m_context->mem()->loadGlobal(
                         v_ptr, v_a, usedLDS + offset, m_numBytes3);
-                    co_yield m_context->mem()->storeLocal(lds3_offset, v_ptr, offset, m_numBytes3);
-                    co_yield m_context->mem()->barrier();
-                    co_yield m_context->mem()->loadLocal(v_ptr, lds3_offset, offset, m_numBytes3);
+
+                    co_yield m_context->mem()
+                        ->storeLocal(lds3_offset, v_ptr, offset, m_numBytes3)
+                        .map(MemoryInstructions::addExtraDst(lds3));
+
+                    co_yield_(m_context->mem()->barrier({lds3}));
+
+                    co_yield m_context->mem()
+                        ->loadLocal(v_ptr, lds3_offset, offset, m_numBytes3)
+                        .map(MemoryInstructions::addExtraDst(lds3));
+
                     co_yield m_context->mem()->storeGlobal(
                         v_result, v_ptr, usedLDS + offset, m_numBytes3);
                 }
@@ -220,7 +244,7 @@ namespace multipleLDSAllocTest
         }
     }
 
-    TEST_CASE("Run multiple lds allocation test", "[lds][gpu]")
+    TEST_CASE("Run multiple lds allocation test", "[lds][codegen][gpu]")
     {
         auto       context   = TestContext::ForTestDevice();
         const auto numBytes1 = 256;

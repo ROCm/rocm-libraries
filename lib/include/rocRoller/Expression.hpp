@@ -658,6 +658,10 @@ namespace rocRoller
         concept CShift = CIsAnyOf<T, ShiftL, LogicalShiftR, ArithmeticShiftR>;
 
         template <typename T>
+        concept CBitwise
+            = CIsAnyOf<T, BitwiseAnd, BitwiseOr, BitwiseNegate, BitwiseXor, ShiftL, LogicalShiftR>;
+
+        template <typename T>
         concept CAssociativeBinary = requires
         {
             requires CBinary<T> && T::Properties[AlgebraicProperty::Associative] == true;

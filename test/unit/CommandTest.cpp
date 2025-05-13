@@ -26,6 +26,7 @@
 
 #include "SimpleFixture.hpp"
 #include "SourceMatcher.hpp"
+#include <rocRoller/Expression.hpp>
 #include <rocRoller/Operations/Command.hpp>
 #include <rocRoller/TensorDescriptor.hpp>
 

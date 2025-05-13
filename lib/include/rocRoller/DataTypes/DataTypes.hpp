@@ -331,7 +331,7 @@ namespace rocRoller
 
         inline VariableType getPointer() const
         {
-            assert(pointerType == PointerType::Value);
+            AssertFatal(pointerType == PointerType::Value, ShowValue(pointerType));
             return VariableType(dataType, PointerType::PointerGlobal);
         }
 

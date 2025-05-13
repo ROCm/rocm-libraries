@@ -242,6 +242,7 @@ set(rocroller_src
 
     source/Operations/BlockScale.cpp
     source/Operations/Command.cpp
+    source/Operations/CommandArgument.cpp
     source/Operations/Operation.cpp
     source/Operations/RandomNumberGenerator.cpp
     source/Operations/T_LoadStore.cpp

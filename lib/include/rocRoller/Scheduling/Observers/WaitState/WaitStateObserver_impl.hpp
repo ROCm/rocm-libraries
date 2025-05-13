@@ -29,6 +29,7 @@
 #include <rocRoller/Scheduling/Observers/WaitState/WaitStateObserver.hpp>
 
 #include <rocRoller/Context.hpp>
+#include <rocRoller/InstructionValues/Register.hpp>
 
 namespace rocRoller
 {

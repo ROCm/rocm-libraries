@@ -56,17 +56,16 @@ namespace rocRoller
     {
         for(Instruction const& inst : insts)
         {
-            Instruction copy = inst;
-            schedule(copy);
+            scheduleCopy(inst);
         }
     }
 
     template <std::ranges::input_range T>
     inline void Context::schedule(T&& insts)
     {
-        for(Instruction inst : insts)
+        for(Instruction const& inst : insts)
         {
-            schedule(inst);
+            scheduleCopy(inst);
         }
     }
 

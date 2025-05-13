@@ -26,6 +26,7 @@
 
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
+#include <rocRoller/CodeGen/Arithmetic/ArithmeticGenerator.hpp>
 #include <rocRoller/CodeGen/CopyGenerator.hpp>
 #include <rocRoller/CodeGen/MemoryInstructions.hpp>
 #include <rocRoller/CommandSolution.hpp>
@@ -418,25 +419,29 @@ namespace rocRollerTest
                 co_yield generateOp<Expression::BitwiseAnd>(v_lo, v_a, mask);
                 co_yield generateOp<Expression::LogicalShiftR>(
                     v_hi, v_a, Register::Value::Literal(16));
-                co_yield m_context->mem()->packAndStore(MemoryInstructions::MemoryKind::Local,
-                                                        lds_offset,
-                                                        v_lo,
-                                                        v_hi,
-                                                        Register::Value::Literal(i * 4));
+                co_yield m_context->mem()
+                    ->packAndStore(MemoryInstructions::MemoryKind::Local,
+                                   lds_offset,
+                                   v_lo,
+                                   v_hi,
+                                   Register::Value::Literal(i * 4))
+                    .map(MemoryInstructions::addExtraDst(lds));
             }
 
-            co_yield m_context->mem()->barrier();
+            co_yield_(m_context->mem()->barrier({lds}));
 
             // Load all values of a+a from LDS, then store in flat
             for(int i = 0; i < N / 2; i++)
             {
                 // Load and pack from LDS
-                co_yield m_context->mem()->loadAndPack(MemoryInstructions::MemoryKind::Local,
-                                                       v_a,
-                                                       lds_offset,
-                                                       Register::Value::Literal(i * 8),
-                                                       lds_offset,
-                                                       Register::Value::Literal(i * 8 + 4));
+                co_yield m_context->mem()
+                    ->loadAndPack(MemoryInstructions::MemoryKind::Local,
+                                  v_a,
+                                  lds_offset,
+                                  Register::Value::Literal(i * 8),
+                                  lds_offset,
+                                  Register::Value::Literal(i * 8 + 4))
+                    .map(MemoryInstructions::addExtraSrc(lds));
 
                 // Store and pack into flat
                 co_yield generateOp<Expression::BitwiseAnd>(v_lo, v_a, mask);
@@ -454,12 +459,14 @@ namespace rocRollerTest
             for(int i = 0; i < N / 2; i++)
             {
                 // Load and pack from LDS
-                co_yield m_context->mem()->loadAndPack(MemoryInstructions::MemoryKind::Local,
-                                                       v_a,
-                                                       lds_offset,
-                                                       Register::Value::Literal(i * 8 + 2),
-                                                       lds_offset,
-                                                       Register::Value::Literal(i * 8 + 6));
+                co_yield m_context->mem()
+                    ->loadAndPack(MemoryInstructions::MemoryKind::Local,
+                                  v_a,
+                                  lds_offset,
+                                  Register::Value::Literal(i * 8 + 2),
+                                  lds_offset,
+                                  Register::Value::Literal(i * 8 + 6))
+                    .map(MemoryInstructions::addExtraSrc(lds));
 
                 // Store and pack into flat
                 co_yield generateOp<Expression::BitwiseAnd>(v_lo, v_a, mask);

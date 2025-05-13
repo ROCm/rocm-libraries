@@ -30,10 +30,12 @@
 #include <memory>
 
 #include <rocRoller/Context_fwd.hpp>
-#include <rocRoller/DataTypes/DataTypes.hpp>
-#include <rocRoller/InstructionValues/Register.hpp>
+#include <rocRoller/InstructionValues/Register_fwd.hpp>
 #include <rocRoller/KernelGraph/KernelGraph_fwd.hpp>
 #include <rocRoller/KernelGraph/RegisterTagManager_fwd.hpp>
+
+#include <rocRoller/DataTypes/DataTypes.hpp>
+#include <rocRoller/Expression.hpp>
 
 namespace rocRoller
 {

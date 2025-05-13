@@ -435,14 +435,16 @@ namespace rocRoller
             {
                 co_yield dest->allocate();
             }
-            co_yield generate(dest, Expression::literal(0), m_context.lock());
-            for(int i = values.size() - 1; i > 0; --i)
+
+            auto iter = values.rbegin();
+            auto expr = (*iter)->expression();
+            ++iter;
+            for(; iter != values.rend(); ++iter)
             {
-                co_yield generateOp<Expression::BitwiseOr>(dest, dest, values[i]);
-                co_yield generateOp<Expression::ShiftL>(
-                    dest, dest, Register::Value::Literal(shift_amount * 8));
+                expr = (expr << Expression::literal(shift_amount * 8)) | (*iter)->expression();
             }
-            co_yield generateOp<Expression::BitwiseOr>(dest, dest, values[0]);
+
+            co_yield Expression::generate(dest, expr, m_context.lock());
         }
     }
 

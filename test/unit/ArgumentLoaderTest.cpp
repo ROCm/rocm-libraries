@@ -48,7 +48,7 @@ namespace rocRollerTest
     {
         void SetUp() override
         {
-            Settings::getInstance()->set(Settings::AllowUnkownInstructions, true);
+            Settings::getInstance()->set(Settings::AllowUnknownInstructions, true);
             GenericContextFixture::SetUp();
         }
     };

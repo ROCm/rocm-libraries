@@ -29,6 +29,7 @@
 #include <memory>
 
 #include <rocRoller/Context.hpp>
+#include <rocRoller/InstructionValues/Register_fwd.hpp>
 
 class TestContext;
 

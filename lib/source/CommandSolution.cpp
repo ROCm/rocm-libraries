@@ -462,7 +462,8 @@ namespace rocRoller
         m_context->kernel()->setKernelGraphMeta(m_kernelGraph);
         m_context->kernel()->setCommandMeta(m_command);
 
-        m_context->schedule(kernelInstructions(m_context, m_command, m_kernelGraph));
+        for(auto inst : kernelInstructions(m_context, m_command, m_kernelGraph))
+            m_context->schedule(inst);
     }
 
     std::vector<char> CommandKernel::assembleKernel()

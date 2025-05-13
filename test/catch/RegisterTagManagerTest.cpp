@@ -24,6 +24,7 @@
  *
  *******************************************************************************/
 
+#include <rocRoller/Expression.hpp>
 #include <rocRoller/KernelGraph/RegisterTagManager.hpp>
 
 #include <common/CommonGraphs.hpp>

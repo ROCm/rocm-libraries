@@ -26,7 +26,6 @@
 
 #pragma once
 
-#include <rocRoller/Expression.hpp>
 #include <rocRoller/Operations/CommandArgument.hpp>
 #include <rocRoller/Utilities/Error.hpp>
 #include <rocRoller/Utilities/Utils.hpp>
@@ -40,12 +39,12 @@ namespace rocRoller
                                             size_t        offset,
                                             DataDirection direction,
                                             std::string   name)
-        : m_command(com)
+        : m_command(std::move(com))
         , m_size(variableType.getElementSize())
         , m_variableType(variableType)
         , m_offset(offset)
         , m_direction(direction)
-        , m_name(name)
+        , m_name(std::move(name))
     {
     }
 
@@ -154,11 +153,6 @@ namespace rocRoller
         default:
             Throw<FatalError>("Unsupported argument type ", ShowValue(m_variableType));
         }
-    }
-
-    inline Expression::ExpressionPtr CommandArgument::expression()
-    {
-        return std::make_shared<Expression::Expression>(shared_from_this());
     }
 
     inline bool CommandArgument::operator==(const CommandArgument& rhs) const

@@ -117,7 +117,8 @@ struct asdf
     asdf(std::initializer_list<int> fd)
         : fdsa{}
     {
-        assert(fd.size() <= fdsa.size());
+        using namespace rocRoller;
+        AssertFatal(fd.size() <= fdsa.size(), ShowValue(fd.size()), ShowValue(fdsa.size()));
         std::copy(fd.begin(), fd.end(), fdsa.begin());
     }
 };

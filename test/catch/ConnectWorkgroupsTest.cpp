@@ -460,16 +460,16 @@ namespace ConnectWorkgroupsTest
             graph.coordinates.addElement(PassThrough(), {middleLinear}, {m_workgroupD});
 
             /* coordinate graph is:
-	     *                           Workgroup(0)
-	     *                               |
-	     *                           PassThrough
-	     *                               |
-	     *                             Linear
-	     *                               |
-	     *                           PassThrough
-	     *                               |
-	     *                          Workgroup(0)
-	     */
+             *                           Workgroup(0)
+             *                               |
+             *                           PassThrough
+             *                               |
+             *                             Linear
+             *                               |
+             *                           PassThrough
+             *                               |
+             *                          Workgroup(0)
+             */
 
             m_newWorkgroupD = remapWorkgroupXCC(graph, m_workgroupD, m_numXCC);
             m_newWorkgroupU = remapWorkgroupXCC(graph, m_workgroupU, m_numXCC);

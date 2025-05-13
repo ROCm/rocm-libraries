@@ -30,11 +30,16 @@
 #include <rocRoller/Operations/CommandArgument_fwd.hpp>
 #include <rocRoller/Operations/CommandArguments_fwd.hpp>
 #include <rocRoller/Operations/OperationTag.hpp>
+#include <rocRoller/Utilities/Comparison.hpp>
 
 namespace rocRoller
 {
     std::string   toString(ArgumentType);
     std::ostream& operator<<(std::ostream&, ArgumentType);
+
+    using ArgumentOffsetMap
+        = std::unordered_map<std::tuple<Operations::OperationTag, ArgumentType, int>, int>;
+    using ArgumentOffsetMapPtr = std::shared_ptr<const ArgumentOffsetMap>;
 
     class CommandArguments
     {

@@ -89,12 +89,13 @@ namespace rocRoller
                        DefaultValueType defaultValue,
                        int              bit);
 
-        std::string             help() const;
-        std::optional<std::any> getFromEnv() const;
-        std::any                getDefault() const;
-        T                       getTypeValue(std::string const&) const;
-        T                       getValue() const;
-        int                     getBitIndex() const;
+        std::string             help() const override;
+        std::optional<std::any> getFromEnv() const override;
+        std::any                getDefault() const override;
+        int                     getBitIndex() const override;
+
+        T getTypeValue(std::string const&) const;
+        T getValue() const;
     };
 
     std::string   toString(LogLevel level);
@@ -183,7 +184,7 @@ namespace rocRoller
             false,
             -1};
 
-        static inline const SettingsOption<bool> AllowUnkownInstructions{
+        static inline const SettingsOption<bool> AllowUnknownInstructions{
             "ROCROLLER_ALLOW_UNKNOWN_INSTRUCTIONS",
             "Whether to allow arbitrary instructions.",
             false,
@@ -198,6 +199,12 @@ namespace rocRoller
 
         static inline const SettingsOption<bool> LogGraphs{
             "ROCROLLER_LOG_GRAPHS", "Whether to log graphs after each lowering stage.", true, -1};
+
+        static inline const SettingsOption<bool> LogGraphMapperConnections{
+            "ROCROLLER_LOG_GRAPHS_WITH_MAPPER",
+            "Whether to include mapper connections in the per-stage graphs.",
+            false,
+            -1};
 
         static inline const SettingsOption<AssemblerType> KernelAssembler{
             "ROCROLLER_ASSEMBLER", "Which assembler method to use", AssemblerType::Subprocess, -1};

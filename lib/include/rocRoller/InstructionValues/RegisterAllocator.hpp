@@ -26,9 +26,7 @@
 
 #pragma once
 
-#include <rocRoller/InstructionValues/Register.hpp>
-
-class RegisterTest_RegisterToString_Test;
+#include <rocRoller/InstructionValues/Register_fwd.hpp>
 
 namespace rocRoller
 {
@@ -108,8 +106,6 @@ namespace rocRoller
             void free(std::vector<int> const& registers);
 
         private:
-            friend class ::RegisterTest_RegisterToString_Test;
-
             //> Allocate these specific registers.
             void allocate(AllocationPtr alloc, std::vector<int> const& registers);
 

@@ -262,10 +262,10 @@ namespace rocRoller
          *
          * Checks if the loads destination tile is associated with an
          * Exchange operation.
-	 *
-	 * The tile is either directly connected to an Exchange, or
-	 * it's connected through an Index to a tile that is directly
-	 * connected to an Exchange.
+         *
+         * The tile is either directly connected to an Exchange, or
+         * it's connected through an Index to a tile that is directly
+         * connected to an Exchange.
          */
         bool isLoadForExchange(int loadTag, KernelGraph const& graph)
         {

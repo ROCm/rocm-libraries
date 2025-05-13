@@ -32,12 +32,17 @@
 #include <string>
 
 #include <rocRoller/InstructionValues/Register.hpp>
+#include <rocRoller/Utilities/Array.hpp>
 #include <rocRoller/Utilities/Error.hpp>
 
 namespace rocRoller
 {
     inline Generator<std::string> Instruction::EscapeComment(std::string comment, int indent)
     {
+        auto isblank = [](auto x) { return std::isblank(x); };
+        if(comment.empty() || std::all_of(comment.begin(), comment.end(), isblank))
+            co_return;
+
         std::string prefix;
         for(int i = 0; i < indent; i++)
         {
@@ -72,14 +77,12 @@ namespace rocRoller
                                     std::string const&                        comment)
         : m_opcode(opcode)
     {
-        AssertFatal(dst.size() <= m_dst.size(), ShowValue(dst.size()), ShowValue(m_dst.size()));
-        AssertFatal(src.size() <= m_src.size(), ShowValue(src.size()), ShowValue(m_src.size()));
+        append(m_dst, dst);
+        append(m_src, src);
+
         AssertFatal(modifiers.size() <= m_modifiers.size(),
                     ShowValue(modifiers.size()),
                     ShowValue(m_modifiers.size()));
-
-        std::copy(dst.begin(), dst.end(), m_dst.begin());
-        std::copy(src.begin(), src.end(), m_src.begin());
         std::copy(modifiers.begin(), modifiers.end(), m_modifiers.begin());
 
         addComment(comment);
@@ -267,22 +270,66 @@ namespace rocRoller
         return rv;
     }
 
-    inline std::array<Register::ValuePtr, Instruction::MaxSrcRegisters> const&
-        Instruction::getSrcs() const
+    inline Instruction& Instruction::addExtraDst(Register::ValuePtr reg)
     {
-        return m_src;
+        append(m_extraDsts, reg);
+
+        return *this;
     }
 
-    inline std::array<Register::ValuePtr, Instruction::MaxDstRegisters> const&
-        Instruction::getDsts() const
+    inline Instruction& Instruction::addExtraSrc(Register::ValuePtr reg)
+    {
+        append(m_extraSrcs, reg);
+
+        return *this;
+    }
+
+    inline auto const& Instruction::getDsts() const
     {
         // For in/out operands, m_src and m_inoutDsts are populated and m_dst is empty
         return m_operandsAreInout ? m_inoutDsts : m_dst;
     }
 
+    inline auto const& Instruction::getSrcs() const
+    {
+        return m_src;
+    }
+
+    inline auto const& Instruction::getExtraDsts() const
+    {
+        return m_extraDsts;
+    }
+
+    inline auto const& Instruction::getExtraSrcs() const
+    {
+        return m_extraSrcs;
+    }
+
     inline bool Instruction::hasRegisters() const
     {
-        return (m_src[0] || m_dst[0]);
+        return !getAllOperands().empty();
+    }
+
+    inline Generator<Register::ValuePtr> Instruction::getAllDsts() const
+    {
+        auto notNull = [](Register::ValuePtr val) -> bool { return (bool)val; };
+
+        co_yield filter(notNull, getDsts());
+        co_yield filter(notNull, getExtraDsts());
+    }
+
+    inline Generator<Register::ValuePtr> Instruction::getAllSrcs() const
+    {
+        auto notNull = [](Register::ValuePtr val) -> bool { return (bool)val; };
+
+        co_yield filter(notNull, getSrcs());
+        co_yield filter(notNull, getExtraSrcs());
+    }
+
+    inline Generator<Register::ValuePtr> Instruction::getAllOperands() const
+    {
+        co_yield getAllDsts();
+        co_yield getAllSrcs();
     }
 
     inline constexpr bool Instruction::readsSpecialRegisters() const
@@ -345,35 +392,32 @@ namespace rocRoller
         return m_waitCount;
     }
 
-    inline bool Instruction::isAfterWriteDependency(
-        std::array<Register::ValuePtr, Instruction::MaxDstRegisters> const& previousDest) const
+    template <CForwardRangeOf<Register::ValuePtr> T>
+    bool Instruction::isAfterWriteDependency(T const& previousDest) const
     {
-        for(auto const& regA : m_src)
+        for(auto const& myReg : getAllSrcs())
         {
-            if(regA)
+            for(auto const& prevReg : previousDest)
             {
-                for(auto const& regB : previousDest)
+                if(prevReg && prevReg->intersects(myReg))
+                    return true;
+            }
+        }
+        for(auto const& myReg : getAllDsts())
+        {
+            // dst -> dst dependencies are not counted for LDS for now.
+            // Once we split the LDS allocations it should be possible to
+            // track this as well.
+            if(myReg->regType() != Register::Type::LocalData)
+            {
+                for(auto const& prevReg : previousDest)
                 {
-                    if(regB && regA->intersects(regB))
-                    {
+                    if(prevReg && prevReg->intersects(myReg))
                         return true;
-                    }
                 }
             }
         }
-        for(auto const& regA : m_dst)
-        {
-            if(regA)
-            {
-                for(auto const& regB : previousDest)
-                {
-                    if(regB && regA->intersects(regB))
-                    {
-                        return true;
-                    }
-                }
-            }
-        }
+
         return false;
     }
 

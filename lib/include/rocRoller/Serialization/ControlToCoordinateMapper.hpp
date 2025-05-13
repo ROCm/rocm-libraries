@@ -29,7 +29,6 @@
 #include <rocRoller/DataTypes/DataTypes.hpp>
 #include <rocRoller/Graph/Hypergraph.hpp>
 #include <rocRoller/KernelGraph/ControlToCoordinateMapper.hpp>
-#include <rocRoller/Serialization/AssemblyKernel.hpp>
 #include <rocRoller/Serialization/Base.hpp>
 #include <rocRoller/Serialization/Containers.hpp>
 #include <rocRoller/Serialization/Enum.hpp>

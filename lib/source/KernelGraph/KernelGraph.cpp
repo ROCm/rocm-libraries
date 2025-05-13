@@ -100,10 +100,12 @@ namespace rocRoller
 
             KernelGraph newGraph = transformation->apply(*this);
 
+            bool drawMappings = Settings::getInstance()->get(Settings::LogGraphMapperConnections);
+
             if(Settings::getInstance()->get(Settings::LogGraphs))
                 Log::debug("KernelGraph::transform: {}, post: {}",
                            transformation->name(),
-                           newGraph.toDOT(false, transformString));
+                           newGraph.toDOT(drawMappings, transformString));
 
             if(checkConstraints)
             {

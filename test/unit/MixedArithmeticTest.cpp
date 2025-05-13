@@ -72,17 +72,16 @@ namespace MixedArithmeticTest
 
     struct TernaryArgument
     {
-        Register::Type                    arg1RegType;
-        VariableType                      arg1VarType;
-        std::vector<CommandArgumentValue> arg1Values;
+        Register::Type arg1RegType;
+        VariableType   arg1VarType;
 
-        Register::Type                    arg2RegType;
-        VariableType                      arg2VarType;
-        std::vector<CommandArgumentValue> arg2Values;
+        Register::Type arg2RegType;
+        VariableType   arg2VarType;
 
-        Register::Type                    arg3RegType;
-        VariableType                      arg3VarType;
-        std::vector<CommandArgumentValue> arg3Values;
+        Register::Type arg3RegType;
+        VariableType   arg3VarType;
+
+        std::vector<std::array<CommandArgumentValue, 3>> argValues;
 
         Register::Type resultRegType;
         VariableType   resultVarType;
@@ -104,6 +103,23 @@ namespace MixedArithmeticTest
         for(size_t i = 0; i < values.size(); i++)
         {
             args.append(concatenate("a", i), values[i]);
+        }
+
+        auto rv = make_shared_device<uint8_t>(args.size());
+        HIP_CHECK(hipMemcpy(rv.get(), args.data(), args.size(), hipMemcpyHostToDevice));
+
+        return rv;
+    }
+
+    template <size_t Idx, size_t Size>
+    std::shared_ptr<uint8_t>
+        createDeviceArray(std::vector<std::array<CommandArgumentValue, Size>> const& values)
+    {
+        KernelArguments args;
+
+        for(size_t i = 0; i < values.size(); i++)
+        {
+            args.append(concatenate("a", i), values[i][Idx]);
         }
 
         auto rv = make_shared_device<uint8_t>(args.size());
@@ -548,7 +564,7 @@ namespace MixedArithmeticTest
         requires(
             Expression::CTernary<Operation> || Expression::CTernaryMixed<Operation>) void testBody()
         {
-            auto const& param = GetParam();
+            auto        param = GetParam();
             std::string paramStr;
             {
                 std::ostringstream msg;
@@ -556,6 +572,21 @@ namespace MixedArithmeticTest
                 paramStr = msg.str();
             }
             auto command = std::make_shared<Command>();
+
+            size_t maxValues = 1024;
+            if(param.argValues.size() > maxValues)
+            {
+                auto stride    = NextPrime(param.argValues.size() / maxValues);
+                auto tmpValues = std::move(param.argValues);
+                param.argValues.resize(0);
+                param.argValues.reserve(maxValues);
+
+                for(size_t i = 0; i < maxValues; i++)
+                {
+                    auto idx = (i * stride) % tmpValues.size();
+                    param.argValues.push_back(tmpValues[i]);
+                }
+            }
 
             CommandArgumentPtr arg1Arg, arg2Arg, arg3Arg, destArg;
 
@@ -630,79 +661,78 @@ namespace MixedArithmeticTest
 
                 Register::ValuePtr arg1, arg2, arg3;
 
-                for(size_t arg1Idx = 0; arg1Idx < param.arg1Values.size(); arg1Idx++)
-                {
-                    co_yield Instruction::Comment(concatenate("Loading arg1 value ",
-                                                              arg1Idx,
-                                                              " (",
-                                                              toString(param.arg1Values[arg1Idx]),
-                                                              ")"));
-                    co_yield getValueReg(m_context,
-                                         arg1,
-                                         param.arg1RegType,
-                                         param.arg1VarType,
-                                         param.arg1Values[arg1Idx],
-                                         arg1Ptr,
-                                         arg1Idx);
+                CommandArgumentValue prevArg1, prevArg2, prevArg3;
 
-                    for(size_t arg2Idx = 0; arg2Idx < param.arg2Values.size(); arg2Idx++)
+                for(size_t argIdx = 0; argIdx < param.argValues.size(); argIdx++)
+                {
+                    auto const& [argValue1, argValue2, argValue3] = param.argValues[argIdx];
+
+                    if(argValue1 != prevArg1)
                     {
-                        co_yield Instruction::Comment(
-                            concatenate("Loading arg2 value ",
-                                        arg2Idx,
-                                        " (",
-                                        toString(param.arg2Values[arg2Idx]),
-                                        ")"));
+                        co_yield Instruction::Comment(concatenate(
+                            "Loading arg1 value ", argIdx, " (", toString(argValue1), ")"));
+                        co_yield getValueReg(m_context,
+                                             arg1,
+                                             param.arg1RegType,
+                                             param.arg1VarType,
+                                             argValue1,
+                                             arg1Ptr,
+                                             argIdx);
+
+                        prevArg1 = argValue1;
+                    }
+
+                    if(argValue2 != prevArg2)
+                    {
+                        co_yield Instruction::Comment(concatenate(
+                            "Loading arg2 value ", argIdx, " (", toString(argValue2), ")"));
                         co_yield getValueReg(m_context,
                                              arg2,
                                              param.arg2RegType,
                                              param.arg2VarType,
-                                             param.arg2Values[arg2Idx],
+                                             argValue2,
                                              arg2Ptr,
-                                             arg2Idx);
-
-                        for(size_t arg3Idx = 0; arg3Idx < param.arg3Values.size(); arg3Idx++)
-                        {
-                            co_yield Instruction::Comment(
-                                concatenate("Loading arg3 value ",
-                                            arg3Idx,
-                                            " (",
-                                            toString(param.arg3Values[arg3Idx]),
-                                            ")"));
-                            co_yield getValueReg(m_context,
-                                                 arg3,
-                                                 param.arg3RegType,
-                                                 param.arg3VarType,
-                                                 param.arg3Values[arg3Idx],
-                                                 arg3Ptr,
-                                                 arg3Idx);
-
-                            auto result = Register::Value::Placeholder(
-                                m_context, param.resultRegType, param.resultVarType, 1);
-
-                            co_yield generateOp<Operation>(result, arg1, arg2, arg3);
-
-                            auto v_result = result;
-
-                            if(result->regType() != Register::Type::Vector)
-                            {
-                                v_result = Register::Value::Placeholder(
-                                    m_context, Register::Type::Vector, param.resultVarType, 1);
-                                co_yield v_result->allocate();
-
-                                co_yield m_context->copier()->copy(
-                                    v_result, result, "Move result to VGPR");
-                            }
-
-                            co_yield m_context->mem()->storeGlobal(
-                                resultPtr, v_result, 0, param.resultVarType.getElementSize());
-
-                            co_yield generateOp<Expression::Add>(
-                                resultPtr,
-                                Register::Value::Literal(param.resultVarType.getElementSize()),
-                                resultPtr);
-                        }
+                                             argIdx);
+                        prevArg2 = argValue2;
                     }
+
+                    if(argValue3 != prevArg3)
+                    {
+                        co_yield Instruction::Comment(concatenate(
+                            "Loading arg3 value ", argIdx, " (", toString(argValue3), ")"));
+                        co_yield getValueReg(m_context,
+                                             arg3,
+                                             param.arg3RegType,
+                                             param.arg3VarType,
+                                             argValue3,
+                                             arg3Ptr,
+                                             argIdx);
+                        prevArg3 = argValue3;
+                    }
+
+                    auto result = Register::Value::Placeholder(
+                        m_context, param.resultRegType, param.resultVarType, 1);
+
+                    co_yield generateOp<Operation>(result, arg1, arg2, arg3);
+
+                    auto v_result = result;
+
+                    if(result->regType() != Register::Type::Vector)
+                    {
+                        v_result = Register::Value::Placeholder(
+                            m_context, Register::Type::Vector, param.resultVarType, 1);
+                        co_yield v_result->allocate();
+
+                        co_yield m_context->copier()->copy(v_result, result, "Move result to VGPR");
+                    }
+
+                    co_yield m_context->mem()->storeGlobal(
+                        resultPtr, v_result, 0, param.resultVarType.getElementSize());
+
+                    co_yield generateOp<Expression::Add>(
+                        resultPtr,
+                        Register::Value::Literal(param.resultVarType.getElementSize()),
+                        resultPtr);
                 }
             };
 
@@ -714,9 +744,8 @@ namespace MixedArithmeticTest
             commandKernel.setContext(m_context);
             commandKernel.generateKernel();
 
-            int numResultValues
-                = param.arg1Values.size() * param.arg2Values.size() * param.arg3Values.size();
-            int numResultBytes = numResultValues * param.resultVarType.getElementSize();
+            int numResultValues = param.argValues.size();
+            int numResultBytes  = numResultValues * param.resultVarType.getElementSize();
 
             auto                     d_result = make_shared_device<uint8_t>(numResultBytes);
             std::shared_ptr<uint8_t> d_arg1, d_arg2, d_arg3;
@@ -727,19 +756,19 @@ namespace MixedArithmeticTest
 
             if(arg1Arg)
             {
-                d_arg1 = createDeviceArray(param.arg1Values);
+                d_arg1 = createDeviceArray<0>(param.argValues);
                 commandArgs.setArgument(tagArg1, ArgumentType::Value, d_arg1.get());
             }
 
             if(arg2Arg)
             {
-                d_arg2 = createDeviceArray(param.arg2Values);
+                d_arg2 = createDeviceArray<1>(param.argValues);
                 commandArgs.setArgument(tagArg2, ArgumentType::Value, d_arg2.get());
             }
 
             if(arg3Arg)
             {
-                d_arg3 = createDeviceArray(param.arg3Values);
+                d_arg3 = createDeviceArray<2>(param.argValues);
                 commandArgs.setArgument(tagArg3, ArgumentType::Value, d_arg3.get());
             }
 
@@ -747,32 +776,26 @@ namespace MixedArithmeticTest
 
             auto result = getDeviceValues(d_result, numResultValues, param.resultVarType);
 
-            int idx = 0;
-            for(auto arg1Val : param.arg1Values)
+            for(int idx = 0; idx < param.argValues.size(); idx++)
             {
-                for(auto arg2Val : param.arg2Values)
+                auto const& [arg1Val, arg2Val, arg3Val] = param.argValues[idx];
+                auto arg1_rt  = castToResult(arg1Val, param.resultVarType);
+                auto arg2_rt  = castToResult(arg2Val, param.resultVarType);
+                auto arg3_rt  = castToResult(arg3Val, param.resultVarType);
+                auto arg1_exp = std::make_shared<Expression::Expression>(arg1_rt);
+                auto arg2_exp = std::make_shared<Expression::Expression>(arg2_rt);
+                auto arg3_exp = std::make_shared<Expression::Expression>(arg3_rt);
+
+                auto expr = std::make_shared<Expression::Expression>(
+                    Operation{arg1_exp, arg2_exp, arg3_exp});
+
+                if(expr)
                 {
-                    for(auto arg3Val : param.arg3Values)
-                    {
-                        auto arg1_rt  = castToResult(arg1Val, param.resultVarType);
-                        auto arg2_rt  = castToResult(arg2Val, param.resultVarType);
-                        auto arg3_rt  = castToResult(arg3Val, param.resultVarType);
-                        auto arg1_exp = std::make_shared<Expression::Expression>(arg1_rt);
-                        auto arg2_exp = std::make_shared<Expression::Expression>(arg2_rt);
-                        auto arg3_exp = std::make_shared<Expression::Expression>(arg3_rt);
-
-                        auto expr = std::make_shared<Expression::Expression>(
-                            Operation{arg1_exp, arg2_exp, arg3_exp});
-
-                        if(expr)
-                        {
-                            auto reference = Expression::evaluate(expr);
-                            compareResultValues(reference, result[idx], arg1Val, arg2Val, arg3Val);
-                        }
-
-                        idx++;
-                    }
+                    auto reference = Expression::evaluate(expr);
+                    compareResultValues(reference, result[idx], arg1Val, arg2Val, arg3Val);
                 }
+
+                idx++;
             }
         }
     };
@@ -896,6 +919,26 @@ namespace MixedArithmeticTest
         return {};
     }
 
+    std::vector<std::array<CommandArgumentValue, 3>>
+        inputs(VariableType vtype1, VariableType vtype2, VariableType vtype3)
+    {
+        auto i1 = inputs(vtype1);
+        auto i2 = inputs(vtype2);
+        auto i3 = inputs(vtype3);
+
+        std::vector<std::array<CommandArgumentValue, 3>> rv;
+        rv.reserve(i1.size() * i2.size() * i3.size());
+
+        for(auto v1 : i1)
+            for(auto v2 : i2)
+                for(auto v3 : i3)
+                {
+                    rv.push_back({v1, v2, v3});
+                }
+
+        return rv;
+    }
+
     std::vector<BinaryArgument> binaryArguments()
     {
         std::vector<Register::Type> regTypes{
@@ -1010,17 +1053,17 @@ namespace MixedArithmeticTest
                                         arg1VarType,
                                         VariableType::Promote(arg2VarType, arg3VarType));
 
+                                    auto values = inputs(arg1VarType, arg2VarType, arg3VarType);
+
                                     rv.push_back(TernaryArgument{arg1RegType,
                                                                  arg1VarType,
-                                                                 inputs(arg1VarType),
 
                                                                  arg2RegType,
                                                                  arg2VarType,
-                                                                 inputs(arg2VarType),
 
                                                                  arg3RegType,
                                                                  arg3VarType,
-                                                                 inputs(arg3VarType),
+                                                                 values,
 
                                                                  resultRegType,
                                                                  resultVarType});

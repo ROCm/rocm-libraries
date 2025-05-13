@@ -81,6 +81,41 @@ namespace rocRoller
 
         std::string   toString(AllocationState state);
         std::ostream& operator<<(std::ostream& stream, AllocationState state);
+
+        enum
+        {
+            /// Contiguity equal to element count
+            FULLY_CONTIGUOUS = -3,
+
+            /// Suffucient contiguity to fit the datatype
+            VALUE_CONTIGUOUS = -2,
+
+            /// Won't be using allocator
+            /// (e.g. taking allocation from elsewhere or assigning particular register numbers)
+            MANUAL = -1,
+
+            Count = 255,
+        };
+
+        struct AllocationOptions
+        {
+            /// In units of registers
+            int contiguousChunkWidth = VALUE_CONTIGUOUS;
+
+            /// Allocation x must have (x % alignment) == alignmentPhase. -1 means to use default for register type.
+            int alignment      = -1;
+            int alignmentPhase = 0;
+
+            static AllocationOptions FullyContiguous();
+
+            auto operator<=>(AllocationOptions const& other) const = default;
+        };
+
+        std::string toString(RegisterId const& regId);
+
+        // For some reason, GCC will not find the operator declared in Utils.hpp.
+        std::ostream& operator<<(std::ostream& stream, RegisterId const& regId);
+
     }
 
 }

@@ -46,7 +46,7 @@ namespace rocRoller
 
         struct E_Unary
         {
-            E_Unary(OperationTag a);
+            explicit E_Unary(OperationTag a);
             E_Unary(const std::initializer_list<OperationTag>&);
             std::string                      toString() const;
             OperationTag                     getTag() const;
@@ -67,7 +67,7 @@ namespace rocRoller
 #define MAKE_UNARY_XOP(FUNC)                                  \
     struct FUNC : public E_Unary                              \
     {                                                         \
-        FUNC(OperationTag a)                                  \
+        explicit FUNC(OperationTag a)                         \
             : E_Unary(a)                                      \
         {                                                     \
         }                                                     \
@@ -75,7 +75,7 @@ namespace rocRoller
             : E_Unary(args)                                   \
         {                                                     \
         }                                                     \
-        std::string name() const                              \
+        std::string name() const override                     \
         {                                                     \
             return #FUNC;                                     \
         }                                                     \
@@ -98,7 +98,7 @@ namespace rocRoller
                 , destType(destType)
             {
             }
-            std::string name() const
+            std::string name() const override
             {
                 return "E_Cvt";
             }
@@ -139,7 +139,7 @@ namespace rocRoller
             : E_Binary(args)                                  \
         {                                                     \
         }                                                     \
-        std::string name() const                              \
+        std::string name() const override                     \
         {                                                     \
             return #FUNC;                                     \
         }                                                     \
@@ -160,7 +160,7 @@ namespace rocRoller
                 , destType(destType)
             {
             }
-            std::string name() const
+            std::string name() const override
             {
                 return "E_StochasticRoundingCvt";
             }
@@ -210,7 +210,7 @@ namespace rocRoller
             : E_Ternary(args)                                 \
         {                                                     \
         }                                                     \
-        std::string name() const                              \
+        std::string name() const override                     \
         {                                                     \
             return #FUNC;                                     \
         }                                                     \
@@ -221,7 +221,7 @@ namespace rocRoller
         {
         public:
             T_Execute() = delete;
-            T_Execute(OperationTag starting_tag);
+            explicit T_Execute(OperationTag starting_tag);
             std::unordered_set<OperationTag> getInputs() const;
             std::unordered_set<OperationTag> getOutputs() const;
             OperationTag                     addXOp(std::shared_ptr<XOp>);

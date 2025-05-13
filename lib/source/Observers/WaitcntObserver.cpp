@@ -141,6 +141,21 @@ namespace rocRoller
                 = Settings::getInstance()->get(Settings::LogLvl) >= LogLevel::Verbose;
             m_displayState = Settings::getInstance()->get(Settings::LogLvl) >= LogLevel::Debug;
 
+            {
+                auto const& architecture = context->targetArchitecture();
+
+                auto hasBarrier       = architecture.HasCapability(GPUCapability::s_barrier);
+                auto hasBarrierSignal = architecture.HasCapability(GPUCapability::s_barrier_signal);
+
+                AssertFatal(hasBarrier || hasBarrierSignal,
+                            "Either s_barrier or s_barrier_signal must be supported.",
+                            ShowValue(architecture.target()));
+
+                m_barrierOpcode = architecture.HasCapability(GPUCapability::s_barrier_signal)
+                                      ? "s_barrier_signal"
+                                      : "s_barrier";
+            }
+
             for(uint8_t i = 0; i < static_cast<uint8_t>(GPUWaitQueue::Count); i++)
             {
                 GPUWaitQueue waitQueue         = static_cast<GPUWaitQueue>(i);
@@ -180,8 +195,6 @@ namespace rocRoller
                     addLabelState(inst.getLabel());
                 }
             }
-
-            observeWaitDirect2LDS(inst);
 
             auto instWaitQueues = info.getWaitQueues();
 
@@ -226,7 +239,10 @@ namespace rocRoller
                         }
                         for(int i = 0; i < instWaitCnt; i++)
                         {
-                            m_instructionQueues[waitQueue].push_back(inst.getDsts());
+                            WaitQueueRegisters queueRegisters;
+                            append(queueRegisters, inst.getAllDsts());
+
+                            m_instructionQueues[waitQueue].push_back(std::move(queueRegisters));
                         }
                         m_typeInQueue[waitQueue] = queueType;
                     }
@@ -272,6 +288,85 @@ namespace rocRoller
                 }
             }
             return retval.str();
+        }
+
+        WaitCount WaitcntObserver::computeImplicitWaitCount(Instruction const& inst,
+                                                            std::string*       explanation) const
+        {
+            auto        context      = m_context.lock();
+            const auto& architecture = context->targetArchitecture();
+
+            WaitCount rv;
+
+            AssertFatal(architecture.HasCapability(GPUCapability::s_barrier)
+                            || architecture.HasCapability(GPUCapability::s_barrier_signal),
+                        "Either s_barrier or s_barrier_signal must be supported");
+            if(inst.getOpCode() == m_barrierOpcode)
+            {
+                if(context->kernelOptions().alwaysWaitZeroBeforeBarrier)
+                {
+                    if(explanation != nullptr)
+                    {
+                        *explanation += "WaitCnt Needed: alwaysWaitZeroBeforeBarrier is set.\n";
+                    }
+                    rv.combine(WaitCount::Zero(architecture));
+                }
+            }
+
+            return rv;
+        }
+
+        WaitCount WaitcntObserver::computeWaitCount(Instruction const& inst,
+                                                    std::string*       explanation) const
+        {
+            auto        context      = m_context.lock();
+            const auto& architecture = context->targetArchitecture();
+
+            WaitCount retval = computeImplicitWaitCount(inst, explanation);
+
+            if(inst.getOpCode().size() > 0 && inst.hasRegisters())
+            {
+                for(int i = 0; i < static_cast<int>(GPUWaitQueue::Count); i++)
+                {
+                    GPUWaitQueue waitQueue = static_cast<GPUWaitQueue>(i);
+                    for(int queue_i = m_instructionQueues.at(waitQueue).size() - 1; queue_i >= 0;
+                        queue_i--)
+                    {
+                        if(inst.isAfterWriteDependency(m_instructionQueues.at(waitQueue)[queue_i]))
+                        {
+                            if(m_needsWaitZero.at(waitQueue))
+                            {
+                                retval.combine(WaitCount(architecture, waitQueue, 0));
+                                if(explanation != nullptr)
+                                {
+                                    *explanation += "WaitCnt Needed: Intersects with registers in '"
+                                                    + waitQueue.toString()
+                                                    + "', which needs a wait zero.\n";
+                                }
+                            }
+                            else
+                            {
+                                int waitval
+                                    = m_instructionQueues.at(waitQueue).size() - (queue_i + 1);
+                                retval.combine(WaitCount(architecture, waitQueue, waitval));
+                                if(explanation != nullptr)
+                                {
+                                    *explanation += "WaitCnt Needed: Intersects with registers in '"
+                                                    + waitQueue.toString() + "', at "
+                                                    + std::to_string(queue_i)
+                                                    + " and the queue size is "
+                                                    + std::to_string(
+                                                        m_instructionQueues.at(waitQueue).size())
+                                                    + ", so a waitcnt of " + std::to_string(waitval)
+                                                    + " is required.\n";
+                                }
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+            return retval.getAsSaturatedWaitCount(architecture);
         }
     }
 }

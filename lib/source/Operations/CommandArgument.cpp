@@ -24,16 +24,13 @@
  *
  *******************************************************************************/
 
-#pragma once
-
-#include <memory>
+#include <rocRoller/Expression.hpp>
+#include <rocRoller/Operations/CommandArgument.hpp>
 
 namespace rocRoller
 {
-    namespace KernelGraph
+    Expression::ExpressionPtr CommandArgument::expression()
     {
-        class GraphTransform;
-
-        using GraphTransformPtr = std::shared_ptr<GraphTransform>;
+        return std::make_shared<Expression::Expression>(shared_from_this());
     }
 }

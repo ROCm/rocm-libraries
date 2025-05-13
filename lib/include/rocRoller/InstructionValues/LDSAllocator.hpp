@@ -152,6 +152,9 @@ namespace rocRoller
          */
         std::string toString() const;
 
+        bool intersects(LDSAllocation const& other) const;
+        bool intersects(std::shared_ptr<LDSAllocation> const& other) const;
+
     private:
         /**
          * @brief Set the amount of bytes allocated

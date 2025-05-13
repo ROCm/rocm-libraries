@@ -90,7 +90,7 @@ namespace rocRoller
 
         static int CombineValues(int lhs, int rhs);
 
-        void combine(WaitCount const& other);
+        WaitCount& combine(WaitCount const& other);
 
         int loadcnt() const;
         int storecnt() const;
@@ -113,12 +113,12 @@ namespace rocRoller
         void setKMcnt(int value);
         void setExpcnt(int value);
 
-        void combineLoadcnt(int value);
-        void combineStorecnt(int value);
-        void combineVscnt(int value);
-        void combineDScnt(int value);
-        void combineKMcnt(int value);
-        void combineExpcnt(int value);
+        WaitCount& combineLoadcnt(int value);
+        WaitCount& combineStorecnt(int value);
+        WaitCount& combineVscnt(int value);
+        WaitCount& combineDScnt(int value);
+        WaitCount& combineKMcnt(int value);
+        WaitCount& combineExpcnt(int value);
 
         std::vector<std::string> const& comments() const;
 

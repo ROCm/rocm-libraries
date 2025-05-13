@@ -26,6 +26,7 @@
 
 #include <memory>
 
+#include <rocRoller/CodeGen/Annotate.hpp>
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
 #include <rocRoller/CodeGen/Buffer.hpp>
 #include <rocRoller/CodeGen/BufferInstructionOptions.hpp>
@@ -607,6 +608,16 @@ namespace rocRoller
                 co_yield generate(m0, m0->expression() + Expression::literal(info.ldsWriteStride));
             }
 
+            if(info.offset->regType() == Register::Type::Literal
+               && !m_context->targetArchitecture().isSupportedConstantValue(info.offset))
+            {
+                const auto offsetValue = getUnsignedInt(info.offset->getLiteralValue());
+                info.offset            = Register::Value::Placeholder(
+                    m_context, Register::Type::Scalar, DataType::UInt32, 1);
+                co_yield generate(info.offset, Expression::literal(offsetValue))
+                    .map(AddComment(fmt::format("{} is not a supported value!", offsetValue)));
+            }
+
             co_yield m_context->mem()->moveData<Dir>(info.kind,
                                                      readAddr,
                                                      nullptr,
@@ -829,6 +840,8 @@ namespace rocRoller
             auto unsegmentedDataType = DataTypeInfo::Get(info.data->variableType().dataType);
             auto segmentTypeInfo     = DataTypeInfo::Get(unsegmentedDataType.segmentVariableType);
 
+            AssertFatal(info.offset->regType() == Register::Type::Literal,
+                        ShowValue(info.offset->description()));
             auto offsetValue = getUnsignedInt(info.offset->getLiteralValue());
 
             uint numVGPRBlocks = 1;
@@ -873,12 +886,6 @@ namespace rocRoller
                         if(r * bytesPerMove > 0)
                         {
                             const auto newOffsetValue = offsetValue + r * bytesPerMove;
-                            if(!m_context->targetArchitecture().isSupportedConstantValue(
-                                   Register::Value::Literal(newOffsetValue)))
-                            {
-                                info.offset = Register::Value::Placeholder(
-                                    m_context, Register::Type::Scalar, DataType::UInt32, 1);
-                            }
                             co_yield generate(info.offset, Expression::literal(newOffsetValue));
                         }
 
@@ -1155,13 +1162,6 @@ namespace rocRoller
                     info, coords, tag, false /* preserveOffset */, true /* direct2LDS */);
 
                 // set global read offset
-                if(!m_context->targetArchitecture().isSupportedConstantValue(info.offset))
-                {
-                    const auto offsetValue = getUnsignedInt(info.offset->getLiteralValue());
-                    info.offset            = Register::Value::Placeholder(
-                        m_context, Register::Type::Scalar, DataType::UInt32, 1);
-                    co_yield generate(info.offset, Expression::literal(offsetValue));
-                }
             }
 
             if(allStridesAreLiteral)
@@ -1260,7 +1260,8 @@ namespace rocRoller
                 tag,
                 nullptr,
                 ldsOffset,
-                coords);
+                coords)
+                .map(MemoryInstructions::addExtraSrc(ldsAllocation));
         }
 
         Generator<Instruction> LoadStoreTileGenerator::loadMacroTileDirect2LDS(
@@ -1320,7 +1321,8 @@ namespace rocRoller
                 ldsOffset,
                 nullptr,
                 coords,
-                {});
+                {})
+                .map(MemoryInstructions::addExtraDst(ldsAllocation));
             co_yield Instruction::Unlock("Unlock M0");
         }
 
@@ -1369,7 +1371,8 @@ namespace rocRoller
                 ldsOffset,
                 coords,
                 {},
-                load.isTransposedTile);
+                load.isTransposedTile)
+                .map(MemoryInstructions::addExtraSrc(ldsAllocation));
         }
 
         Generator<Instruction> LoadStoreTileGenerator::loadMacroTileWAVE(int              tag,
@@ -1594,7 +1597,8 @@ namespace rocRoller
                 coords,
                 {},
                 /*isTransposedTile*/ false,
-                /*isPadded*/ paddingBytes > 0);
+                /*isPadded*/ paddingBytes > 0)
+                .map(MemoryInstructions::addExtraDst(ldsAllocation));
         }
 
         Generator<Instruction> LoadStoreTileGenerator::storeMacroTileVGPR(int               tag,
@@ -1724,7 +1728,8 @@ namespace rocRoller
             n /= packing;
 
             co_yield moveTile<MemoryInstructions::MemoryDirection::Store>(
-                MemoryInstructions::MemoryKind::Local, m, n, varType, tag, agpr, ldsOffset, coords);
+                MemoryInstructions::MemoryKind::Local, m, n, varType, tag, agpr, ldsOffset, coords)
+                .map(MemoryInstructions::addExtraDst(ldsAllocation));
         }
 
         Generator<Instruction> LoadStoreTileGenerator::storeMacroTileWAVE(int               tag,

@@ -30,8 +30,6 @@
 
 #include <rocRoller/Serialization/Base.hpp>
 
-#include <rocRoller/Expression.hpp>
-
 namespace rocRoller
 {
     namespace Serialization

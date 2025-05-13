@@ -28,6 +28,7 @@
 
 #include "TestContext.hpp"
 
+#include <rocRoller/InstructionValues/Register.hpp>
 #include <rocRoller/Utilities/Utils.hpp>
 
 #include <catch2/catch_test_macros.hpp>

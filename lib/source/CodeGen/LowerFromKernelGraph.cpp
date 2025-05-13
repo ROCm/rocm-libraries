@@ -657,15 +657,15 @@ namespace rocRoller
 
             Generator<Instruction> operator()(int tag, Barrier const&, Transformer)
             {
-                std::string comment = "Wait for LDS Tile: ";
+                std::vector<Register::ValuePtr> srcs;
                 for(auto& c : m_graph->mapper.getConnections(tag))
                 {
-                    auto ldsTileTag = c.coordinate;
-                    comment += std::to_string(ldsTileTag);
-                    comment += " ";
+                    auto srcTag = c.coordinate;
+                    auto reg    = m_context->registerTagManager()->getRegister(srcTag);
+                    srcs.push_back(std::move(reg));
                 }
 
-                co_yield m_context->mem()->barrier(comment);
+                co_yield m_context->mem()->barrier(srcs);
             }
 
             Generator<Instruction> operator()(int tag, ComputeIndex const& ci, Transformer coords)
