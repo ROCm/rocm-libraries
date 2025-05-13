@@ -95,6 +95,8 @@ The following is the complete list of affected functions and how their default a
 
 ### Added
 
+* Added `-b` option to `rmake.py`. This option will allow users to build benchmarks only instead of having 
+to build tests as well with `-c` option.
 * Added extended tests to `rtest.py`. These tests are extra tests that did not fit the criteria of smoke and regression tests. These tests will take much longer to run relative to smoke and regression tests.
  * Use `python rtest.py [--emulation|-e|--test|-t]=extended` to run these tests.
 * Added regression tests to `rtest.py`. Regression tests are a subset of tests that caused hardware problems for past emulation environments.

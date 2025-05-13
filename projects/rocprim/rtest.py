@@ -2,352 +2,179 @@
 """Copyright (c) 2021-2024 Advanced Micro Devices, Inc. All rights reserved.
 Run tests on build"""
 
-import re
 import os
 import sys
 import subprocess
-import shlex
 import argparse
-import pathlib
-import platform
-from genericpath import exists
-from fnmatch import fnmatchcase
 from xml.dom import minidom
-import multiprocessing
-import time
+import platform as pf
 
-args = {}
-OS_info = {}
+#TODO Implement time outs when its added to the xml
+#TODO Implement VRAM limit when its added to the xml
 
-timeout = False
-test_proc = None
-stop = 0
+class TestRunner():
+    def __get_vram__(self):
+        if self.OS_info['System'] == 'Linux':
+            process = subprocess.run('rocm-smi --showmeminfo vram', shell=True, stdout=subprocess.PIPE)
+            gpu_id = os.getenv('HIP_VISIBLE_DEVICES', '0')
 
-test_script = [ 'cd %IDIR%', '%XML%' ]
-
-def parse_args():
-    """Parse command-line arguments"""
-    parser = argparse.ArgumentParser(description="""
-    Checks build arguments
-    """)
-    parser.add_argument('-e', '--emulation', required=False, default="",
-                        help='Test set to run from rtest.xml (optional, eg.smoke). At least one but not both of -e or -t must be set')
-    parser.add_argument('-t', '--test', required=False, default="", 
-                        help='Test set to run from rtest.xml (optional, e.g. osdb). At least one but not both of -e or -t must be set')
-    parser.add_argument('-g', '--debug', required=False, default=False,  action='store_true',
-                        help='Test Debug build (optional, default: false)')
-    parser.add_argument('-o', '--output', type=str, required=False, default="xml", 
-                        help='Test output file (optional, default: test_detail.xml)')
-    parser.add_argument(      '--install_dir', type=str, required=False, default="build", 
-                        help='Installation directory where build or release folders are (optional, default: build)')
-    parser.add_argument(      '--fail_test', default=False, required=False, action='store_true',
-                        help='Return as if test failed (optional, default: false)')
-    # parser.add_argument('-v', '--verbose', required=False, default = False, action='store_true',
-    #                     help='Verbose install (optional, default: False)')
-    return parser.parse_args()
-
-
-def vram_detect():
-    global OS_info
-    OS_info["VRAM"] = 0
-    if os.name == "nt":
-        cmd = "hipinfo.exe"
-        process = subprocess.run([cmd], stdout=subprocess.PIPE)
-        for line_in in process.stdout.decode().splitlines():
-            if 'totalGlobalMem' in line_in:
-                OS_info["VRAM"] = float(line_in.split()[1])
-                break
-    else:
-        cmd = "rocminfo"
-        process = subprocess.run([cmd], stdout=subprocess.PIPE)
-        for line_in in process.stdout.decode().splitlines():
-            match = re.search(r'.*Size:.*([0-9]+)\(.*\).*KB', line_in, re.IGNORECASE)
-            if match:
-                OS_info["VRAM"] = float(match.group(1))/(1024*1024)
-                break
-
-def os_detect():
-    global OS_info
-    if os.name == "nt":
-        OS_info["ID"] = platform.system()
-    else:
-        inf_file = "/etc/os-release"
-        if os.path.exists(inf_file):
-            with open(inf_file) as f:
-                for line in f:
-                    if "=" in line:
-                        k,v = line.strip().split("=")
-                        OS_info[k] = v.replace('"','')
-    OS_info["NUM_PROC"] = os.cpu_count()
-    vram_detect()
-    print(OS_info)
-
-
-def create_dir(dir_path):
-    if os.path.isabs(dir_path):
-        full_path = dir_path
-    else:
-        full_path = os.path.join( os.getcwd(), dir_path )
-    return pathlib.Path(full_path).mkdir(parents=True, exist_ok=True)
-
-def delete_dir(dir_path) :
-    if (not os.path.exists(dir_path)):
-        return
-    if os.name == "nt":
-        return run_cmd( "RMDIR" , f"/S /Q {dir_path}")
-    else:
-        linux_path = pathlib.Path(dir_path).absolute()
-        return run_cmd( "rm" , f"-rf {linux_path}")
-
-class TimerProcess(multiprocessing.Process):
-
-    def __init__(self, start, stop, kill_pid):
-        multiprocessing.Process.__init__(self)
-        self.quit = multiprocessing.Event()
-        self.timed_out = multiprocessing.Event()
-        self.start_time = start
-        self.max_time = stop
-        self.kill_pid = kill_pid
-
-    def run(self):
-        while not self.quit.is_set():
-            #print( f'time_stop {self.start_time} limit {self.max_time}')
-            if (self.max_time == 0):
-                return
-            t = time.monotonic()
-            if ( t - self.start_time > self.max_time ):
-                print( f'killing {self.kill_pid} t {t}')
-                if os.name == "nt":
-                    cmd = ['TASKKILL', '/F', '/T', '/PID', str(self.kill_pid)]
-                    proc = subprocess.Popen(cmd, stdout=sys.stdout, stderr=sys.stderr)
-                else:
-                    os.kill(self.kill_pid, signal.SIGKILL)  
-                self.timed_out.set()
-                self.stop()
-            pass
-
-    def stop(self):
-        self.quit.set()
-    
-    def stopped(self):
-        return self.timed_out.is_set()
-
-
-def time_stop(start, pid):
-    global timeout, stop
-    while (True):
-        print( f'time_stop {start} limit {stop}')
-        t = time.monotonic()
-        if (stop == 0):
-            return
-        if ( (stop > 0) and (t - start > stop) ):
-            print( f'killing {pid} t {t}')
-            if os.name == "nt":
-                cmd = ['TASKKILL', '/F', '/T', '/PID', str(pid)]
-                proc = subprocess.Popen(cmd, stdout=sys.stdout, stderr=sys.stderr)
-            else:
-                test_proc.kill()
-            timeout = True
-            stop = 0
-        time.sleep(0)
-
-def run_cmd(cmd, test = False, time_limit = 0):
-    global args
-    global test_proc, timer_thread
-    global stop
-    if (cmd.startswith('cd ')):
-        return os.chdir(cmd[3:])
-    if (cmd.startswith('mkdir ')):
-        return create_dir(cmd[6:])
-    cmdline = f"{cmd}"
-    print(cmdline)
-    try:
-        if not test:
-            proc = subprocess.run(cmdline, check=True, stderr=subprocess.STDOUT, shell=True)
-            status = proc.returncode
-        else:
-            error = False
-            timeout = False
-            test_proc = subprocess.Popen(cmdline, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=True)
-            if time_limit > 0:
-                start = time.monotonic()
-                #p = multiprocessing.Process(target=time_stop, args=(start, test_proc.pid))
-                p = TimerProcess(start, time_limit, test_proc.pid)
-                p.start()
-            while True:
-                output = test_proc.stdout.readline()
-                if output == '' and test_proc.poll() is not None:
+            for l in process.stdout.decode().splitlines():
+                if 'Total Memory' in l and f'GPU[{gpu_id}]' in l:
+                    self.OS_info['VRAM'] = float(l.split()[-1]) / (1024 ** 3)
                     break
-                elif output:
-                    outstring = output.strip()
-                    print (outstring)
-                    error = error or re.search(r'FAILED', outstring)
-            status = test_proc.poll()
-            if time_limit > 0:
-                p.stop()
-                p.join()
-                timeout = p.stopped()
-                print(f"timeout {timeout}")
-            if error: 
-                status = 1
-            elif timeout:
-                status = 2
-            else:
-                status = test_proc.returncode    
-    except:
-        import traceback
-        exc = traceback.format_exc()
-        print( "Python Exception: {0}".format(exc) )
-        status = 3
-    return status
 
-def batch(script, xml):
-    global OS_info
-    global args
-    # 
-    cwd = pathlib.os.curdir
-    rtest_cwd_path = os.path.abspath( os.path.join( cwd, 'rtest.xml') )
+    def __parse_args__(self):
+        self.parser.add_argument('-e', '--emulation', required=False, default='',
+                            help='Test set to run from rtest.xml (optional, eg.smoke). At least one but not both of -e or -t must be set')
+        self.parser.add_argument('-t', '--test', required=False, default='', 
+                            help='Test set to run from rtest.xml (optional, e.g. osdb). At least one but not both of -e or -t must be set')
+        self.parser.add_argument('-g', '--debug', required=False, default=False,  action='store_true',
+                            help='Test Debug build (optional, default: false)')
+        self.parser.add_argument('-o', '--output', type=str, required=False, default=None, 
+                            help='Test output file (optional, default: None [output to stdout])')
+        self.parser.add_argument(      '--install_dir', type=str, required=False, default="build", 
+                            help='Installation directory where build or release folders are (optional, default: build)')
+        self.parser.add_argument(      '--test_dir', type=str, required=False, default=None,
+                            help='Test directory where rocprim tests are (optinal, default=None)')
+        self.parser.add_argument(      '--fail_test', default=False, required=False, action='store_true',
+                            help='Return as if test failed (optional, default: false)')
+        self.args = self.parser.parse_args()
 
-    if os.path.isfile(rtest_cwd_path) and os.path.dirname(rtest_cwd_path).endswith( "staging" ):
-        # if in a staging directory then test locally
-        test_dir = cwd 
-    else:
-        # deal with windows pathing
-        install_dir = '//'.join(args.install_dir.split('\\'))
+    def __init__(self):
+        self.parser = argparse.ArgumentParser(description="""
+        Checks build arguments
+        """)
 
-        if args.debug: 
-            build_type = "debug"
-        else: 
-            #check if  we have a release folder in build
-            if os.path.isdir(f'{install_dir}//release//test'):
-                build_type = "release"
-            else:
-                build_type = ""
+        self.__parse_args__()
         
-        if len(build_type) > 0:
-            test_dir = f"{install_dir}//{build_type}//test"
-        else:
-            test_dir = f"{install_dir}//test"
-    fail = False
-    for i in range(len(script)):
-        cmdline = script[i]
-        xcmd = cmdline.replace('%IDIR%', test_dir)
-        cmd = xcmd.replace('%ODIR%', args.output)
-        if cmd.startswith('tdir '):
-            if pathlib.Path(cmd[5:]).exists():
-                return 0 # all further cmds skipped
+        if (self.args.emulation != '') ^ (self.args.test != ''):
+            if self.args.emulation != '':
+                self.test_choice = self.args.emulation
             else:
-                continue
-        error = False
-        if cmd.startswith('%XML%'):
-            # run the matching tests listed in the xml test file
-            var_subs = {}
-            for var in xml.getElementsByTagName('var'):
-                name = var.getAttribute('name')
-                val = var.getAttribute('value')
-                var_subs[name] = val
-            for test in xml.getElementsByTagName('test'):
-                sets = test.getAttribute('sets')
-                runset = sets.split(',')
+                self.test_choice = self.args.test
+        else:
+            raise ValueError('At least one but not both of -e/--emulation or -t/--test must be set')
+        
+        sysInfo = pf.uname()
 
-                A, B = args.test != '', args.emulation != ''
-                if not (A ^ B):
-                    raise ValueError('At least one but not both of -e/--emulation or -t/--test must be set')
+        # getting os information
+        self.OS_info = {
+            "Machine" : sysInfo.machine,
+            "Node Name" : sysInfo.node,
+            "Num Processor" : os.cpu_count(),
+            "Processor" : sysInfo.processor,
+            "Release" : sysInfo.release,
+            "System" : sysInfo.system,
+            "Version" : sysInfo.version,
+        }
 
-                if args.test in runset:
-                    for run in test.getElementsByTagName('run'):
-                        name = run.getAttribute('name')
-                        vram_limit = run.getAttribute('vram_min')
-                        if vram_limit:
-                            if OS_info["VRAM"] < float(vram_limit):
-                                print( f'***\n*** Skipped: {name} due to VRAM req.\n***')
-                                continue
-                        if name:
-                            print( f'***\n*** Running: {name}\n***')
-                        time_limit = run.getAttribute('time_max')
-                        if time_limit:
-                            timeout = float(time_limit)
-                        else:
-                            timeout = 0
+        self.__get_vram__()
 
-                        raw_cmd = run.firstChild.data
-                        var_cmd = raw_cmd.format_map(var_subs)
-                        error = run_cmd(var_cmd, True, timeout)
-                        if (error == 2):
-                            print( f'***\n*** Timed out when running: {name}\n***')
+        m = ' System Information '
+
+        print()
+        print(f'{m:-^100}')
+        
+        for k in self.OS_info:
+            print(f'\t {k}: {self.OS_info[k]}')
+        print()
+
+        self.lib_dir = os.path.dirname(os.path.abspath(__file__)) 
+        self.xml_path = os.path.join(self.lib_dir, r'rtest.xml')
+
+        if self.args.test_dir:
+            if not os.path.isdir(self.args.test_dir):
+                raise ValueError(f'Value {self.args.test_dir} is not a directory!')
+
+            self.test_dir = self.args.test_dir
+        else:
+            # find the test dir with default install dir
+            if self.args.install_dir == 'build':
+                # if its debug mode
+                if self.args.debug: 
+                    self.test_dir = os.path.join(self.lib_dir, f'build/debug/test')
+                # if its release mode
+                elif os.path.isdir(os.path.join(self.lib_dir, f'build/release/test')): 
+                    self.test_dir = os.path.join(self.lib_dir, f'build/release/test')
+                elif os.path.isdir(os.path.join(self.lib_dir, f'build/test')):
+                    self.test_dir = os.path.join(self.lib_dir, f'build/test')
+                else:
+                    raise FileNotFoundError(f'Did not find test directory')
+            else:
+                # if its an actual directory AND it has test directory
+                if os.path.isdir(os.path.join(self.args.install_dir, f'test')):
+                    self.test_dir = os.path.join(self.args.install_dir, f'test')
+                else:
+                    raise ValueError(f'{self.args.install_dir} is not a valid install directory!')
                 
-                if args.emulation in runset:
-                    for run in test.getElementsByTagName('run'):
-                        name = run.getAttribute('name')
-                        vram_limit = run.getAttribute('vram_min')
-                        if vram_limit:
-                            if OS_info["VRAM"] < float(vram_limit):
-                                print( f'***\n*** Skipped: {name} due to VRAM req.\n***')
-                                continue
-                        if name:
-                            print( f'***\n*** Running: {name}\n***')
-                        time_limit = run.getAttribute('time_max')
-                        if time_limit:
-                            timeout = float(time_limit)
-                        else:
-                            timeout = 0
-
-                        raw_cmd = run.firstChild.data
-                        var_cmd = raw_cmd.format_map(var_subs)
-                        error = run_cmd(var_cmd, True, timeout)
-                        if (error == 2):
-                            print( f'***\n*** Timed out when running: {name}\n***')
+        if self.args.output:
+            self.output = open(os.path.abspath(self.args.output), 'w')
+            self.output_path = os.path.abspath(self.args.output)
         else:
-            error = run_cmd(cmd)
-        fail = fail or error
-    if (fail):
-        if (cmd == "%XML%"):
-            print(f"FAILED xml test suite!")
-        else:
-            print(f"ERROR running: {cmd}")
-        if (os.curdir != cwd):
-            os.chdir( cwd )
-        return 1
-    if (os.curdir != cwd):
-        os.chdir( cwd )
-    
-    return 0
+            self.output = None
+            self.output_path = None
+        
+        if self.OS_info['System'] == 'Windows':
+            self.lib_dir = self.lib_dir.replace('\\', '/')
+            self.xml_path = self.xml_path.replace('\\', '/')
+            self.test_dir = self.test_dir.replace('\\', '/')
 
-def run_tests():
-    global test_script
-    global xmlDoc
+            if self.output_path:
+                self.output_path = self.output_path.replace('\\', '/')
+                self.output = open(os.path.abspath(self.output_path), 'w')
 
-    # install
-    cwd = os.curdir
+        m = ' Current Paths'
+        print(f'{m:-^100}')
+        print(f'Working Directory: {self.lib_dir}')
+        print(f'rtest.xml:         {self.xml_path}')
+        print(f'Test Directory:    {self.test_dir}')
+        print(f'Output File:       {self.output_path}')
+        
+        print()
 
-    xmlPath = os.path.join( cwd, 'rtest.xml')
-    xmlDoc = minidom.parse( xmlPath )
+    def __call__(self):
+        xml_file = minidom.parse(self.xml_path)
 
-    scripts = []
-    scripts.append( test_script )
-    for i in scripts:
-        if (batch(i, xmlDoc)):
-            #print("Failure in script. ABORTING")
-            if (os.curdir != cwd):
-                os.chdir( cwd )
-            return 1       
-    if (os.curdir != cwd):
-        os.chdir( cwd )
-    return 0
+        curr_dir = os.curdir
 
-def main():
-    global args
-    global timer_thread
+        os.chdir(self.test_dir)
 
-    os_detect()
-    args = parse_args()
+        cmd_values = {}
+        for var in xml_file.getElementsByTagName('var'):
+            name, val = var.getAttribute('name'), var.getAttribute('value')
+            cmd_values[name] = val
 
-    status = run_tests()
+        noMatch = True
+        for test in xml_file.getElementsByTagName('test'):
+            sets = test.getAttribute('sets')
+            if self.test_choice == sets:
 
-    if args.fail_test: 
-        status = 1
-    if (status):
-        sys.exit(status)
+                for run in test.getElementsByTagName('run'):
+                    temp = run.firstChild.data
+                    temp = temp.replace('{', '')
+                    temp = temp.replace('}', '')
+                    cmd_list = temp.split()
+
+                    cmd_str = ''
+                    for var in cmd_list:
+                        cmd_str += cmd_values[var]
+
+                m = 'Final Command'
+                print(f'{m:-^100}')
+                print(cmd_str)
+                print()
+
+                subprocess.run(cmd_str, shell=True, stdout=self.output)
+                noMatch = False
+                break
+
+        os.chdir(curr_dir)
+        if noMatch:
+            raise ValueError(f'Test value passed in: "{self.test_choice}" does not match any known test suite')  
+
+        if self.args.fail_test:
+            sys.exit(1)              
 
 if __name__ == '__main__':
-    main()
+    runner = TestRunner()
+    runner()
