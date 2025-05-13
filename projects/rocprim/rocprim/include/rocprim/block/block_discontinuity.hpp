@@ -35,7 +35,7 @@
 BEGIN_ROCPRIM_NAMESPACE
 
 /// \brief The \p block_discontinuity class is a block level parallel primitive which provides
-/// methods for flagging items that are discontinued within an ordered set of items across
+/// methods for flagging items that are discontinuous within an ordered set of items across
 /// threads in a block.
 ///
 /// \tparam T the input type.
