@@ -8,6 +8,12 @@ on:
       - 'develop'
       - 'staging'
       - 'main'
+    # Ignore changes to top-level files and directories
+    # that are not part of the subtree structure
+    paths-ignore:
+      - '.github/**'
+      - 'docs/**'
+      - '*.md'
 
 # ensure that the workflow is not running for the same PR multiple times at once
 # subsequent runs of the workflow will perform no-op if the subrepo PRs are already closed
