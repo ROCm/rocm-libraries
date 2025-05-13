@@ -935,15 +935,19 @@ try
             rocsparse::copy_trm_info(dest->bsrsmt_lower_info, src->bsrsmt_lower_info));
     }
 
-    if(src->csrmv_info != nullptr)
+    rocsparse_csrmv_info src_csrmv_info  = src->get_csrmv_info();
+    rocsparse_csrmv_info dest_csrmv_info = dest->get_csrmv_info();
+    if(src_csrmv_info != nullptr)
     {
-        index_type_J = src->csrmv_info->index_type_J;
+        index_type_J = src_csrmv_info->index_type_J;
 
-        if(dest->csrmv_info == nullptr)
+        if(dest_csrmv_info == nullptr)
         {
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse::create_csrmv_info(&dest->csrmv_info));
+            dest_csrmv_info = new _rocsparse_csrmv_info();
+            dest->set_csrmv_info(dest_csrmv_info);
         }
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::copy_csrmv_info(dest->csrmv_info, src->csrmv_info));
+
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::copy_csrmv_info(dest_csrmv_info, src_csrmv_info));
     }
 
     if(src->csric0_info != nullptr)
@@ -1235,12 +1239,6 @@ try
     if(info->bsrsvt_upper_info == info->bsrsmt_upper_info)
     {
         info->bsrsvt_upper_info = nullptr;
-    }
-
-    // Clear csrmv info struct
-    if(info->csrmv_info != nullptr)
-    {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::destroy_csrmv_info(info->csrmv_info));
     }
 
     // Clear bsrsvt upper info struct

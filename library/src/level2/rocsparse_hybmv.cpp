@@ -158,6 +158,7 @@ rocsparse_status rocsparse::hybmv_template(rocsparse_handle          handle,
                 T* coo_beta = nullptr;
                 rocsparse::one(handle, &coo_beta);
 
+                static constexpr bool fallback_algorithm = true;
                 RETURN_IF_ROCSPARSE_ERROR((rocsparse::coomv_template<T, rocsparse_int, T, T, T>(
                     handle,
                     trans,
@@ -172,10 +173,12 @@ rocsparse_status rocsparse::hybmv_template(rocsparse_handle          handle,
                     hyb->coo_col_ind,
                     x,
                     coo_beta,
-                    y)));
+                    y,
+                    fallback_algorithm)));
             }
             else
             {
+                static constexpr bool fallback_algorithm = true;
                 RETURN_IF_ROCSPARSE_ERROR((rocsparse::coomv_template<T, rocsparse_int, T, T, T>(
                     handle,
                     trans,
@@ -190,14 +193,15 @@ rocsparse_status rocsparse::hybmv_template(rocsparse_handle          handle,
                     hyb->coo_col_ind,
                     x,
                     beta_device_host,
-                    y)));
+                    y,
+                    fallback_algorithm)));
             }
         }
         else
         {
             // Beta is applied by ELL part, IF ell_nnz > 0
             T coo_beta = (hyb->ell_nnz > 0) ? static_cast<T>(1) : *beta_device_host;
-
+            static constexpr bool fallback_algorithm = true;
             RETURN_IF_ROCSPARSE_ERROR(
                 (rocsparse::coomv_template<T, rocsparse_int, T, T, T>(handle,
                                                                       trans,
@@ -212,7 +216,8 @@ rocsparse_status rocsparse::hybmv_template(rocsparse_handle          handle,
                                                                       hyb->coo_col_ind,
                                                                       x,
                                                                       &coo_beta,
-                                                                      y)));
+                                                                      y,
+                                                                      fallback_algorithm)));
         }
     }
 

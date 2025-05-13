@@ -31,9 +31,6 @@ Sparse Level 2 Functions
 ============================================================================= === ==
 Function name                                                                 yes no
 ============================================================================= === ==
-:cpp:func:`rocsparse_Xbsrmv_ex_analysis() <rocsparse_sbsrmv_ex_analysis>`     x
-:cpp:func:`rocsparse_bsrmv_ex_clear`                                          x
-:cpp:func:`rocsparse_Xbsrmv_ex() <rocsparse_sbsrmv_ex>`                       x
 :cpp:func:`rocsparse_Xbsrmv_analysis() <rocsparse_sbsrmv_analysis>`           x
 :cpp:func:`rocsparse_bsrmv_clear`                                             x
 :cpp:func:`rocsparse_Xbsrmv() <rocsparse_sbsrmv>`                             x
@@ -60,8 +57,7 @@ Function name                                                                 ye
 :cpp:func:`rocsparse_Xgemvi() <rocsparse_sgemvi>`                             x
 ============================================================================= === ==
 
-The reproducibility of :cpp:func:`rocsparse_Xbsrmv_ex() <rocsparse_sbsrmv_ex>`,
-:cpp:func:`rocsparse_Xbsrmv() <rocsparse_sbsrmv>`, :cpp:func:`rocsparse_Xbsrxmv() <rocsparse_sbsrxmv>`,
+The reproducibility of :cpp:func:`rocsparse_Xbsrmv() <rocsparse_sbsrmv>`, :cpp:func:`rocsparse_Xbsrxmv() <rocsparse_sbsrxmv>`,
 :cpp:func:`rocsparse_Xcoomv() <rocsparse_scoomv>`, :cpp:func:`rocsparse_Xcsrmv() <rocsparse_scsrmv>`,
 :cpp:func:`rocsparse_Xellmv() <rocsparse_sellmv>`, :cpp:func:`rocsparse_Xhybmv() <rocsparse_shybmv>`,
 and :cpp:func:`rocsparse_Xgebsrmv() <rocsparse_sgebsrmv>` is more complicated depending on whether A
@@ -72,8 +68,6 @@ is transposed or not. See the below chart to determine whether these routines ar
 |    Routine                                    +--------+--------+--------+--------+
 |                                               |  Yes   |   No   |  Yes   |   No   |
 +===============================================+========+========+========+========+
-| rocsparse_Xbsrmv_ex                           |   x    |        |  N/A   |  N/A   |
-+-----------------------------------------------+--------+--------+--------+--------+
 | rocsparse_Xbsrmv                              |   x    |        |  N/A   |  N/A   |
 +-----------------------------------------------+--------+--------+--------+--------+
 | rocsparse_Xbsrxmv                             |   x    |        |  N/A   |  N/A   |

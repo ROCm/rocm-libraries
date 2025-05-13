@@ -56,9 +56,11 @@ rocsparse_status rocsparse::csrmv_analysis_template(rocsparse_handle          ha
                                                     const void*               csr_val_,
                                                     const void*               csr_row_ptr_,
                                                     const void*               csr_col_ind_,
-                                                    rocsparse_mat_info        info)
+                                                    rocsparse_csrmv_info*     p_csrmv_info)
 {
     ROCSPARSE_ROUTINE_TRACE;
+
+    p_csrmv_info[0] = nullptr;
 
     const J  m           = static_cast<J>(m_);
     const J  n           = static_cast<J>(n_);
@@ -78,14 +80,14 @@ rocsparse_status rocsparse::csrmv_analysis_template(rocsparse_handle          ha
     case rocsparse::csrmv_alg_adaptive:
     {
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmv_analysis_adaptive_template_dispatch(
-            handle, trans, m, n, nnz, descr, csr_val, csr_row_ptr, csr_col_ind, info));
+            handle, trans, m, n, nnz, descr, csr_val, csr_row_ptr, csr_col_ind, p_csrmv_info));
         return rocsparse_status_success;
     }
 
     case rocsparse::csrmv_alg_lrb:
     {
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmv_analysis_lrb_template_dispatch(
-            handle, trans, m, n, nnz, descr, csr_val, csr_row_ptr, csr_col_ind, info));
+            handle, trans, m, n, nnz, descr, csr_val, csr_row_ptr, csr_col_ind, p_csrmv_info));
         return rocsparse_status_success;
     }
 
@@ -113,11 +115,12 @@ rocsparse_status rocsparse::csrmv_template(rocsparse_handle          handle,
                                            const void*               csr_row_ptr_begin_,
                                            const void*               csr_row_ptr_end_,
                                            const void*               csr_col_ind_,
-                                           rocsparse_mat_info        info,
+                                           rocsparse_csrmv_info      csrmv_info,
                                            const void*               x_,
                                            const void*               beta_device_host_,
                                            void*                     y_,
-                                           bool                      force_conj)
+                                           bool                      force_conj,
+                                           bool                      fallback_algorithm)
 {
     ROCSPARSE_ROUTINE_TRACE;
 
@@ -149,8 +152,33 @@ rocsparse_status rocsparse::csrmv_template(rocsparse_handle          handle,
         return rocsparse_status_success;
     }
 
-    if(info == nullptr || info->csrmv_info == nullptr || trans != rocsparse_operation_none
-       || (alg == rocsparse::csrmv_alg_lrb && descr->type == rocsparse_matrix_type_symmetric))
+    if(fallback_algorithm)
+    {
+        if((alg != rocsparse::csrmv_alg_rowsplit) && (csrmv_info == nullptr))
+        {
+            ROCSPARSE_WARNING_MESSAGE("The csmrv routine will use the ROWSPLIT algorithm since no "
+                                      "prior analysis has been executed");
+            alg = rocsparse::csrmv_alg_rowsplit;
+        }
+        else if((alg != rocsparse::csrmv_alg_rowsplit) && (trans != rocsparse_operation_none))
+        {
+            ROCSPARSE_WARNING_MESSAGE(
+                "The csmrv routine will use the ROWSPLIT algorithm since no other algorithm "
+                "support transpose or conjugate transpose operation");
+            alg = rocsparse::csrmv_alg_rowsplit;
+        }
+        else if((alg == rocsparse::csrmv_alg_lrb)
+                && (descr->type == rocsparse_matrix_type_symmetric))
+        {
+            ROCSPARSE_WARNING_MESSAGE("The csmrv routine will use the ROWSPLIT algorithm since the "
+                                      "LRB algorithm does not support symmetric matrices");
+            alg = rocsparse::csrmv_alg_rowsplit;
+        }
+    }
+
+    switch(alg)
+    {
+    case rocsparse::csrmv_alg_rowsplit:
     {
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmv_rowsplit_template_dispatch(handle,
                                                                               trans,
@@ -169,94 +197,81 @@ rocsparse_status rocsparse::csrmv_template(rocsparse_handle          handle,
                                                                               force_conj));
         return rocsparse_status_success;
     }
-    else
-    {
-        // If csrmv info is available, call csrmv adaptive or lrb
 
+    case rocsparse::csrmv_alg_adaptive:
+    {
         //
         // Rows must be stored contiguously.
         //
         if((csr_row_ptr_begin + 1) != csr_row_ptr_end)
         {
             // LCOV_EXCL_START
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_internal_error);
+            RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
+                rocsparse_status_internal_error, "csrmv adaptive algorithm does not support CSR4");
             // LCOV_EXCL_STOP
         }
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmv_adaptive_template_dispatch(handle,
+                                                                              trans,
+                                                                              m,
+                                                                              n,
+                                                                              nnz,
+                                                                              alpha_device_host,
+                                                                              descr,
+                                                                              csr_val,
+                                                                              csr_row_ptr_begin,
+                                                                              csr_col_ind,
+                                                                              csrmv_info,
+                                                                              x,
+                                                                              beta_device_host,
+                                                                              y,
+                                                                              force_conj));
 
-        switch(alg)
+        return rocsparse_status_success;
+    }
+
+    case rocsparse::csrmv_alg_lrb:
+    {
+        //
+        // Rows must be stored contiguously.
+        //
+        if((csr_row_ptr_begin + 1) != csr_row_ptr_end)
         {
-        case rocsparse::csrmv_alg_rowsplit:
-        {
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmv_rowsplit_template_dispatch(handle,
-                                                                                  trans,
-                                                                                  m,
-                                                                                  n,
-                                                                                  nnz,
-                                                                                  alpha_device_host,
-                                                                                  descr,
-                                                                                  csr_val,
-                                                                                  csr_row_ptr_begin,
-                                                                                  csr_row_ptr_end,
-                                                                                  csr_col_ind,
-                                                                                  x,
-                                                                                  beta_device_host,
-                                                                                  y,
-                                                                                  force_conj));
-            return rocsparse_status_success;
+            // LCOV_EXCL_START
+            RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_internal_error,
+                                                   "csrmv lrb algorithm does not support CSR4");
+            // LCOV_EXCL_STOP
         }
-        case rocsparse::csrmv_alg_adaptive:
-        {
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmv_adaptive_template_dispatch(handle,
-                                                                                  trans,
-                                                                                  m,
-                                                                                  n,
-                                                                                  nnz,
-                                                                                  alpha_device_host,
-                                                                                  descr,
-                                                                                  csr_val,
-                                                                                  csr_row_ptr_begin,
-                                                                                  csr_col_ind,
-                                                                                  info->csrmv_info,
-                                                                                  x,
-                                                                                  beta_device_host,
-                                                                                  y,
-                                                                                  force_conj));
-            return rocsparse_status_success;
-        }
-        case rocsparse::csrmv_alg_lrb:
-        {
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmv_lrb_template_dispatch(handle,
-                                                                             trans,
-                                                                             m,
-                                                                             n,
-                                                                             nnz,
-                                                                             alpha_device_host,
-                                                                             descr,
-                                                                             csr_val,
-                                                                             csr_row_ptr_begin,
-                                                                             csr_col_ind,
-                                                                             info->csrmv_info,
-                                                                             x,
-                                                                             beta_device_host,
-                                                                             y,
-                                                                             force_conj));
-            return rocsparse_status_success;
-        }
-        }
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmv_lrb_template_dispatch(handle,
+                                                                         trans,
+                                                                         m,
+                                                                         n,
+                                                                         nnz,
+                                                                         alpha_device_host,
+                                                                         descr,
+                                                                         csr_val,
+                                                                         csr_row_ptr_begin,
+                                                                         csr_col_ind,
+                                                                         csrmv_info,
+                                                                         x,
+                                                                         beta_device_host,
+                                                                         y,
+                                                                         force_conj));
+        return rocsparse_status_success;
+    }
     }
 }
 
 template <typename I, typename J, typename A>
-rocsparse_status rocsparse_csrmv_analysis_impl(rocsparse_handle          handle,
-                                               rocsparse_operation       trans,
-                                               J                         m,
-                                               J                         n,
-                                               I                         nnz,
-                                               const rocsparse_mat_descr descr,
-                                               const A*                  csr_val,
-                                               const I*                  csr_row_ptr,
-                                               const J*                  csr_col_ind,
-                                               rocsparse_mat_info        info)
+static rocsparse_status rocsparse_csrmv_analysis_impl(rocsparse_handle          handle,
+                                                      rocsparse_operation       trans,
+                                                      J                         m,
+                                                      J                         n,
+                                                      I                         nnz,
+                                                      const rocsparse_mat_descr descr,
+                                                      const A*                  csr_val,
+                                                      const I*                  csr_row_ptr,
+                                                      const J*                  csr_col_ind,
+                                                      rocsparse_mat_info        info)
 {
     // Check for valid handle and matrix descriptor
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
@@ -318,38 +333,60 @@ rocsparse_status rocsparse_csrmv_analysis_impl(rocsparse_handle          handle,
     ROCSPARSE_CHECKARG_ARRAY(6, nnz, csr_val);
     ROCSPARSE_CHECKARG_ARRAY(8, nnz, csr_col_ind);
 
-    RETURN_IF_ROCSPARSE_ERROR((rocsparse::csrmv_analysis_template<I, J, A>(
-        handle,
-        trans,
-        info != nullptr ? rocsparse::csrmv_alg_adaptive : rocsparse::csrmv_alg_rowsplit,
-        m,
-        n,
-        nnz,
-        descr,
-        csr_val,
-        csr_row_ptr,
-        csr_col_ind,
-        info)));
+    rocsparse_csrmv_info csrmv_info = (info != nullptr) ? info->get_csrmv_info() : nullptr;
+
+    if(csrmv_info != nullptr)
+    {
+        delete csrmv_info;
+        info->set_csrmv_info(nullptr);
+        csrmv_info = nullptr;
+    }
+
+    const bool choose_rowsplit = (info == nullptr);
+
+    const rocsparse::csrmv_alg alg_to_apply
+        = choose_rowsplit ? rocsparse::csrmv_alg_rowsplit : rocsparse::csrmv_alg_adaptive;
+
+    RETURN_IF_ROCSPARSE_ERROR((rocsparse::csrmv_analysis_template<I, J, A>(handle,
+                                                                           trans,
+                                                                           alg_to_apply,
+                                                                           m,
+                                                                           n,
+                                                                           nnz,
+                                                                           descr,
+                                                                           csr_val,
+                                                                           csr_row_ptr,
+                                                                           csr_col_ind,
+                                                                           &csrmv_info)));
+
+    if(info != nullptr)
+    {
+        info->set_csrmv_info(csrmv_info);
+    }
+    else if(csrmv_info != nullptr)
+    {
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_internal_error);
+    }
 
     return rocsparse_status_success;
 }
 
 template <typename T, typename I, typename J, typename A, typename X, typename Y>
-rocsparse_status rocsparse_csrmv_impl(rocsparse_handle          handle,
-                                      rocsparse_operation       trans,
-                                      J                         m,
-                                      J                         n,
-                                      I                         nnz,
-                                      const T*                  alpha_device_host,
-                                      const rocsparse_mat_descr descr,
-                                      const A*                  csr_val,
-                                      const I*                  csr_row_ptr,
-                                      const J*                  csr_col_ind,
-                                      rocsparse_mat_info        info,
-                                      const X*                  x,
-                                      const T*                  beta_device_host,
-                                      Y*                        y,
-                                      bool                      force_conj)
+static rocsparse_status rocsparse_csrmv_impl(rocsparse_handle          handle,
+                                             rocsparse_operation       trans,
+                                             J                         m,
+                                             J                         n,
+                                             I                         nnz,
+                                             const T*                  alpha_device_host,
+                                             const rocsparse_mat_descr descr,
+                                             const A*                  csr_val,
+                                             const I*                  csr_row_ptr,
+                                             const J*                  csr_col_ind,
+                                             rocsparse_mat_info        info,
+                                             const X*                  x,
+                                             const T*                  beta_device_host,
+                                             Y*                        y,
+                                             bool                      force_conj)
 {
     // Check for valid handle and matrix descriptor
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
@@ -404,58 +441,69 @@ rocsparse_status rocsparse_csrmv_impl(rocsparse_handle          handle,
     ROCSPARSE_CHECKARG_POINTER(12, beta_device_host);
     ROCSPARSE_CHECKARG_ARRAY(13, ysize, y);
 
-    RETURN_IF_ROCSPARSE_ERROR((rocsparse::csrmv_template<T, I, J, A, X, Y>(
-        handle,
-        trans,
-        info != nullptr ? rocsparse::csrmv_alg_adaptive : rocsparse::csrmv_alg_rowsplit,
-        m,
-        n,
-        nnz,
-        alpha_device_host,
-        descr,
-        csr_val,
-        csr_row_ptr,
-        csr_row_ptr + 1,
-        csr_col_ind,
-        info,
-        x,
-        beta_device_host,
-        y,
-        false)));
+    rocsparse_csrmv_info csrmv_info = (info != nullptr) ? info->get_csrmv_info() : nullptr;
+
+    const bool choose_rowsplit = (info == nullptr);
+
+    const rocsparse::csrmv_alg alg_to_apply
+        = choose_rowsplit ? rocsparse::csrmv_alg_rowsplit : rocsparse::csrmv_alg_adaptive;
+
+    static constexpr bool fallback_algorithm = true;
+    static constexpr bool no_force_conj      = false;
+
+    RETURN_IF_ROCSPARSE_ERROR((rocsparse::csrmv_template<T, I, J, A, X, Y>(handle,
+                                                                           trans,
+                                                                           alg_to_apply,
+                                                                           m,
+                                                                           n,
+                                                                           nnz,
+                                                                           alpha_device_host,
+                                                                           descr,
+                                                                           csr_val,
+                                                                           csr_row_ptr,
+                                                                           csr_row_ptr + 1,
+                                                                           csr_col_ind,
+                                                                           csrmv_info,
+                                                                           x,
+                                                                           beta_device_host,
+                                                                           y,
+                                                                           no_force_conj,
+                                                                           fallback_algorithm)));
     return rocsparse_status_success;
 }
 
 #define INSTANTIATE(T, I, J)                                               \
     template rocsparse_status rocsparse::csrmv_analysis_template<I, J, T>( \
-        rocsparse_handle          handle,                                  \
-        rocsparse_operation       trans,                                   \
-        rocsparse::csrmv_alg      alg,                                     \
-        int64_t                   m,                                       \
-        int64_t                   n,                                       \
-        int64_t                   nnz,                                     \
-        const rocsparse_mat_descr descr,                                   \
-        const void*               csr_val,                                 \
-        const void*               csr_row_ptr,                             \
-        const void*               csr_col_ind,                             \
-        rocsparse_mat_info        info);                                          \
+        rocsparse_handle,                                                  \
+        rocsparse_operation,                                               \
+        rocsparse::csrmv_alg,                                              \
+        int64_t,                                                           \
+        int64_t,                                                           \
+        int64_t,                                                           \
+        const rocsparse_mat_descr,                                         \
+        const void*,                                                       \
+        const void*,                                                       \
+        const void*,                                                       \
+        rocsparse_csrmv_info*);                                            \
     template rocsparse_status rocsparse::csrmv_template<T, I, J, T, T, T>( \
-        rocsparse_handle          handle,                                  \
-        rocsparse_operation       trans,                                   \
-        rocsparse::csrmv_alg      alg,                                     \
-        int64_t                   m,                                       \
-        int64_t                   n,                                       \
-        int64_t                   nnz,                                     \
-        const void*               alpha_device_host,                       \
-        const rocsparse_mat_descr descr,                                   \
-        const void*               csr_val,                                 \
-        const void*               csr_row_ptr_begin,                       \
-        const void*               csr_row_ptr_end,                         \
-        const void*               csr_col_ind,                             \
-        rocsparse_mat_info        info,                                    \
-        const void*               x,                                       \
-        const void*               beta_device_host,                        \
-        void*                     y,                                       \
-        bool                      force_conj);
+        rocsparse_handle,                                                  \
+        rocsparse_operation,                                               \
+        rocsparse::csrmv_alg,                                              \
+        int64_t,                                                           \
+        int64_t,                                                           \
+        int64_t,                                                           \
+        const void*,                                                       \
+        const rocsparse_mat_descr,                                         \
+        const void*,                                                       \
+        const void*,                                                       \
+        const void*,                                                       \
+        const void*,                                                       \
+        rocsparse_csrmv_info,                                              \
+        const void*,                                                       \
+        const void*,                                                       \
+        void*,                                                             \
+        bool,                                                              \
+        bool);
 
 INSTANTIATE(float, int32_t, int32_t);
 INSTANTIATE(float, int64_t, int32_t);
@@ -473,17 +521,17 @@ INSTANTIATE(rocsparse_double_complex, int64_t, int64_t);
 
 #define INSTANTIATE_MIXED_ANALYSIS(I, J, A)                                \
     template rocsparse_status rocsparse::csrmv_analysis_template<I, J, A>( \
-        rocsparse_handle          handle,                                  \
-        rocsparse_operation       trans,                                   \
-        rocsparse::csrmv_alg      alg,                                     \
-        int64_t                   m,                                       \
-        int64_t                   n,                                       \
-        int64_t                   nnz,                                     \
-        const rocsparse_mat_descr descr,                                   \
-        const void*               csr_val,                                 \
-        const void*               csr_row_ptr,                             \
-        const void*               csr_col_ind,                             \
-        rocsparse_mat_info        info);
+        rocsparse_handle,                                                  \
+        rocsparse_operation,                                               \
+        rocsparse::csrmv_alg,                                              \
+        int64_t,                                                           \
+        int64_t,                                                           \
+        int64_t,                                                           \
+        const rocsparse_mat_descr,                                         \
+        const void*,                                                       \
+        const void*,                                                       \
+        const void*,                                                       \
+        rocsparse_csrmv_info*)
 
 INSTANTIATE_MIXED_ANALYSIS(int32_t, int32_t, int8_t);
 INSTANTIATE_MIXED_ANALYSIS(int64_t, int32_t, int8_t);
@@ -492,23 +540,24 @@ INSTANTIATE_MIXED_ANALYSIS(int64_t, int64_t, int8_t);
 
 #define INSTANTIATE_MIXED(T, I, J, A, X, Y)                                \
     template rocsparse_status rocsparse::csrmv_template<T, I, J, A, X, Y>( \
-        rocsparse_handle          handle,                                  \
-        rocsparse_operation       trans,                                   \
-        rocsparse::csrmv_alg      alg,                                     \
-        int64_t                   m,                                       \
-        int64_t                   n,                                       \
-        int64_t                   nnz,                                     \
-        const void*               alpha_device_host,                       \
-        const rocsparse_mat_descr descr,                                   \
-        const void*               csr_val,                                 \
-        const void*               csr_row_ptr_begin,                       \
-        const void*               csr_row_ptr_end,                         \
-        const void*               csr_col_ind,                             \
-        rocsparse_mat_info        info,                                    \
-        const void*               x,                                       \
-        const void*               beta_device_host,                        \
-        void*                     y,                                       \
-        bool                      force_conj);
+        rocsparse_handle,                                                  \
+        rocsparse_operation,                                               \
+        rocsparse::csrmv_alg,                                              \
+        int64_t,                                                           \
+        int64_t,                                                           \
+        int64_t,                                                           \
+        const void*,                                                       \
+        const rocsparse_mat_descr,                                         \
+        const void*,                                                       \
+        const void*,                                                       \
+        const void*,                                                       \
+        const void*,                                                       \
+        rocsparse_csrmv_info,                                              \
+        const void*,                                                       \
+        const void*,                                                       \
+        void*,                                                             \
+        bool,                                                              \
+        bool)
 
 INSTANTIATE_MIXED(int32_t, int32_t, int32_t, int8_t, int8_t, int32_t);
 INSTANTIATE_MIXED(int32_t, int64_t, int32_t, int8_t, int8_t, int32_t);
@@ -676,8 +725,13 @@ try
     rocsparse::log_trace(handle, "rocsparse_csrmv_clear", (const void*&)info);
 
     // Destroy csrmv info struct
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse::destroy_csrmv_info(info->csrmv_info));
-    info->csrmv_info = nullptr;
+    rocsparse_csrmv_info csrmv_info = info->get_csrmv_info();
+
+    if(csrmv_info != nullptr)
+    {
+        delete csrmv_info;
+        info->set_csrmv_info(nullptr);
+    }
 
     return rocsparse_status_success;
     // LCOV_EXCL_START

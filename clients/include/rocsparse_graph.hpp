@@ -120,13 +120,13 @@ namespace testing
     * ===========================================================================
     */
 
-    TESTING_COMPUTE_TEMPLATE(bsrmv_ex_analysis)
-    TESTING_COMPUTE_TEMPLATE(bsrmv_ex)
+    TESTING_COMPUTE_TEMPLATE(bsrmv_analysis)
+    TESTING_COMPUTE_TEMPLATE(bsrmv)
     TESTING_COMPUTE_TEMPLATE(bsrxmv)
     TESTING_TEMPLATE(bsrsv_zero_pivot)
     TESTING_COMPUTE_TEMPLATE(bsrsv_buffer_size)
     TESTING_COMPUTE_TEMPLATE(bsrsv_analysis)
-    TESTING_TEMPLATE(bsrmv_ex_clear)
+    TESTING_TEMPLATE(bsrmv_clear)
     TESTING_TEMPLATE(bsrsv_clear)
     TESTING_COMPUTE_TEMPLATE(bsrsv_solve)
     TESTING_COMPUTE_TEMPLATE(coomv)

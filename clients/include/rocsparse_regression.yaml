@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2024 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2024-2025 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -68,7 +68,7 @@ Tests:
   <<: *common
   transA: [rocsparse_operation_none, rocsparse_operation_transpose]
   alpha_beta: *alpha_beta
-  spmv_alg: [rocsparse_spmv_alg_csr_adaptive, rocsparse_spmv_alg_csr_stream]
+  spmv_alg: [rocsparse_spmv_alg_csr_adaptive, rocsparse_spmv_alg_csr_rowsplit]
   filename: [nos4]
 
 - name: level2_spmv_csr_complex
@@ -79,7 +79,51 @@ Tests:
   <<: *common
   transA: [rocsparse_operation_none, rocsparse_operation_conjugate_transpose]
   alpha_beta: *alpha_beta
-  spmv_alg: [rocsparse_spmv_alg_csr_stream, rocsparse_spmv_alg_csr_lrb]
+  spmv_alg: [rocsparse_spmv_alg_csr_rowsplit, rocsparse_spmv_alg_csr_lrb]
+  filename: [Chevron2]
+
+- name: level2_v2_spmv_csr_real
+  category: pre_checkin
+  function: v2_spmv_csr
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions
+  <<: *common
+  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
+  alpha_beta: *alpha_beta
+  spmv_alg: [rocsparse_spmv_alg_csr_rowsplit]
+  filename: [nos4]
+
+- name: level2_v2_spmv_csr_real
+  category: pre_checkin
+  function: v2_spmv_csr
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions
+  <<: *common
+  transA: [rocsparse_operation_none]
+  alpha_beta: *alpha_beta
+  spmv_alg: [rocsparse_spmv_alg_csr_adaptive]
+  filename: [nos4]
+
+- name: level2_v2_spmv_csr_complex
+  category: pre_checkin
+  function: v2_spmv_csr
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions_complex
+  <<: *common
+  transA: [rocsparse_operation_none, rocsparse_operation_conjugate_transpose]
+  alpha_beta: *alpha_beta
+  spmv_alg: [rocsparse_spmv_alg_csr_rowsplit]
+  filename: [Chevron2]
+
+- name: level2_v2_spmv_csr_complex
+  category: pre_checkin
+  function: v2_spmv_csr
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions_complex
+  <<: *common
+  transA: [rocsparse_operation_none]
+  alpha_beta: *alpha_beta
+  spmv_alg: [rocsparse_spmv_alg_csr_lrb]
   filename: [Chevron2]
 
 #################################################################################

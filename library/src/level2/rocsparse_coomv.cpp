@@ -31,20 +31,21 @@
 
 namespace rocsparse
 {
-    typedef rocsparse_status (*coomv_t)(rocsparse_handle          handle,
-                                        rocsparse_operation       trans,
-                                        rocsparse_coomv_alg       alg,
-                                        int64_t                   m,
-                                        int64_t                   n,
-                                        int64_t                   nnz,
-                                        const void*               alpha_device_host,
-                                        const rocsparse_mat_descr descr,
-                                        const void*               coo_val,
-                                        const void*               coo_row_ind,
-                                        const void*               coo_col_ind,
-                                        const void*               x,
-                                        const void*               beta_device_host,
-                                        void*                     y);
+    typedef rocsparse_status (*coomv_t)(rocsparse_handle,
+                                        rocsparse_operation,
+                                        rocsparse_coomv_alg,
+                                        int64_t,
+                                        int64_t,
+                                        int64_t,
+                                        const void*,
+                                        const rocsparse_mat_descr,
+                                        const void*,
+                                        const void*,
+                                        const void*,
+                                        const void*,
+                                        const void*,
+                                        void*,
+                                        bool);
 
     using coomv_tuple = std::tuple<rocsparse_datatype,
                                    rocsparse_indextype,
@@ -263,7 +264,8 @@ rocsparse_status rocsparse::coomv(rocsparse_handle          handle,
                                   rocsparse_datatype        beta_device_host_datatype,
                                   const void*               beta_device_host,
                                   rocsparse_datatype        y_datatype,
-                                  void*                     y)
+                                  void*                     y,
+                                  bool                      fallback_algorithm)
 {
     ROCSPARSE_ROUTINE_TRACE;
     rocsparse::coomv_t f;
@@ -287,7 +289,8 @@ rocsparse_status rocsparse::coomv(rocsparse_handle          handle,
                                 coo_col_ind,
                                 x,
                                 beta_device_host,
-                                y));
+                                y,
+                                fallback_algorithm));
 
     return rocsparse_status_success;
 }

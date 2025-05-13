@@ -33,23 +33,24 @@ namespace rocsparse
 
 {
 
-    typedef rocsparse_status (*csrmv_t)(rocsparse_handle          handle,
-                                        rocsparse_operation       trans,
-                                        rocsparse::csrmv_alg      alg,
-                                        int64_t                   m,
-                                        int64_t                   n,
-                                        int64_t                   nnz,
-                                        const void*               alpha_device_host,
-                                        const rocsparse_mat_descr descr,
-                                        const void*               csr_val,
-                                        const void*               csr_row_ptr,
-                                        const void*               csr_row_ptr_end,
-                                        const void*               csr_col_ind,
-                                        rocsparse_mat_info        info,
-                                        const void*               x,
-                                        const void*               beta_device_host,
-                                        void*                     y,
-                                        bool                      force_conj);
+    typedef rocsparse_status (*csrmv_t)(rocsparse_handle,
+                                        rocsparse_operation,
+                                        rocsparse::csrmv_alg,
+                                        int64_t,
+                                        int64_t,
+                                        int64_t,
+                                        const void*,
+                                        const rocsparse_mat_descr,
+                                        const void*,
+                                        const void*,
+                                        const void*,
+                                        const void*,
+                                        rocsparse_csrmv_info,
+                                        const void*,
+                                        const void*,
+                                        void*,
+                                        bool,
+                                        bool);
 
     using csrmv_tuple = std::tuple<rocsparse_datatype,
                                    rocsparse_indextype,
@@ -367,13 +368,14 @@ rocsparse_status rocsparse::csrmv(rocsparse_handle          handle,
                                   const void*               csr_row_ptr_end,
                                   rocsparse_indextype       csr_col_ind_indextype,
                                   const void*               csr_col_ind,
-                                  rocsparse_mat_info        info,
+                                  rocsparse_csrmv_info      csrmv_info,
                                   rocsparse_datatype        x_datatype,
                                   const void*               x,
                                   rocsparse_datatype        beta_device_host_datatype,
                                   const void*               beta_device_host,
                                   rocsparse_datatype        y_datatype,
-                                  void*                     y)
+                                  void*                     y,
+                                  bool                      fallback_algorithm)
 {
 
     ROCSPARSE_ROUTINE_TRACE;
@@ -386,6 +388,7 @@ rocsparse_status rocsparse::csrmv(rocsparse_handle          handle,
                                                     x_datatype,
                                                     y_datatype));
 
+    static constexpr bool no_force_conj = false;
     RETURN_IF_ROCSPARSE_ERROR(f(handle,
                                 trans,
                                 alg,
@@ -398,11 +401,12 @@ rocsparse_status rocsparse::csrmv(rocsparse_handle          handle,
                                 csr_row_ptr,
                                 csr_row_ptr_end,
                                 csr_col_ind,
-                                info,
+                                csrmv_info,
                                 x,
                                 beta_device_host,
                                 y,
-                                false));
+                                no_force_conj,
+                                fallback_algorithm));
 
     return rocsparse_status_success;
 }

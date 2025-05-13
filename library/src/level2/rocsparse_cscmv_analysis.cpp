@@ -40,7 +40,7 @@ namespace rocsparse
                                                  const void*,
                                                  const void*,
                                                  const void*,
-                                                 rocsparse_mat_info);
+                                                 rocsparse_csrmv_info*);
 
     using cscmv_analysis_tuple
         = std::tuple<rocsparse_indextype, rocsparse_indextype, rocsparse_datatype>;
@@ -152,13 +152,13 @@ rocsparse_status rocsparse::cscmv_analysis(rocsparse_handle          handle,
                                            const void*               csc_col_ptr,
                                            rocsparse_indextype       csc_row_ind_indextype,
                                            const void*               csc_row_ind,
-                                           rocsparse_mat_info        info)
+                                           rocsparse_csrmv_info*     p_csrmv_info)
 {
     ROCSPARSE_ROUTINE_TRACE;
     rocsparse::cscmv_analysis_t f;
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscmv_analysis_find(
         &f, csc_col_ptr_indextype, csc_row_ind_indextype, csc_val_datatype));
     RETURN_IF_ROCSPARSE_ERROR(
-        f(handle, trans, alg, m, n, nnz, descr, csc_val, csc_col_ptr, csc_row_ind, info));
+        f(handle, trans, alg, m, n, nnz, descr, csc_val, csc_col_ptr, csc_row_ind, p_csrmv_info));
     return rocsparse_status_success;
 }

@@ -41,7 +41,7 @@ namespace rocsparse
                                                  const void*,
                                                  const void*,
                                                  int64_t,
-                                                 rocsparse_mat_info);
+                                                 rocsparse_bsrmv_info*);
 
     using bsrmv_analysis_tuple
         = std::tuple<rocsparse_indextype, rocsparse_indextype, rocsparse_datatype>;
@@ -154,7 +154,7 @@ rocsparse_status rocsparse::bsrmv_analysis(rocsparse_handle          handle,
                                            rocsparse_indextype       bsr_col_ind_indextype,
                                            const void*               bsr_col_ind,
                                            int64_t                   block_dim,
-                                           rocsparse_mat_info        info)
+                                           rocsparse_bsrmv_info*     p_bsrmv_info)
 {
     ROCSPARSE_ROUTINE_TRACE;
     rocsparse::bsrmv_analysis_t f;
@@ -171,6 +171,6 @@ rocsparse_status rocsparse::bsrmv_analysis(rocsparse_handle          handle,
                                 bsr_row_ptr,
                                 bsr_col_ind,
                                 block_dim,
-                                info));
+                                p_bsrmv_info));
     return rocsparse_status_success;
 }
