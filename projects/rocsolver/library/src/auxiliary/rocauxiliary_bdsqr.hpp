@@ -90,10 +90,13 @@ __device__ void bdsqr_QRstep(const rocblas_int tid,
                              S* D,
                              S* E,
                              T* V,
+                             const rocblas_stride shiftV,
                              const rocblas_int ldv,
                              T* U,
+                             const rocblas_stride shiftU,
                              const rocblas_int ldu,
                              T* C,
+                             const rocblas_stride shiftC,
                              const rocblas_int ldc,
                              const S sh,
                              S* rots)
@@ -176,18 +179,18 @@ __device__ void bdsqr_QRstep(const rocblas_int tid,
     rocblas_direct direc = (t2b ? rocblas_forward_direction : rocblas_backward_direction);
     if(V && nv)
     {
-        run_lasr(rocblas_side_left, rocblas_pivot_variable, direc, n, nv, rots, rots + n, V, ldv,
-                 tid, tid_inc);
+        run_lasr(rocblas_side_left, rocblas_pivot_variable, direc, n, nv, rots, rots + n,
+                 V + shiftV, ldv, tid, tid_inc);
     }
     if(U && nu)
     {
         run_lasr(rocblas_side_right, rocblas_pivot_variable, direc, nu, n, rots + nr, rots + nr + n,
-                 U, ldu, tid, tid_inc);
+                 U + shiftU, ldu, tid, tid_inc);
     }
     if(C && nc)
     {
         run_lasr(rocblas_side_left, rocblas_pivot_variable, direc, n, nc, rots + nr, rots + nr + n,
-                 C, ldc, tid, tid_inc);
+                 C + shiftC, ldc, tid, tid_inc);
     }
 }
 
@@ -604,8 +607,8 @@ ROCSOLVER_KERNEL void bdsqr_compute(const rocblas_int n,
             if(tid == 0)
                 splits[4 * sid] = (t2b ? 1 : -1);
 
-            bdsqr_QRstep(tid, tid_inc, t2b, k - i + 1, nv, nu, nc, D + i, E + i, V + i, ldv,
-                         U + i * ldu, ldu, C + i, ldc, smin, rots + incW * i);
+            bdsqr_QRstep(tid, tid_inc, t2b, k - i + 1, nv, nu, nc, D + i, E + i, V, i, ldv, U,
+                         i * ldu, ldu, C, i, ldc, smin, rots + incW * i);
         }
         else
         {
