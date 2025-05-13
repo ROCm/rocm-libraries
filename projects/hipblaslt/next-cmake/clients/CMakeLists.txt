@@ -49,6 +49,7 @@ target_link_libraries(hipblaslt-clients-common
         roc::hipblaslt
         ${LAPACK_LIBRARIES} 
         ${BLAS_LIBRARIES}
+        ${CBLAS_LIBRARIES}
     PRIVATE
         hip::device
 )
