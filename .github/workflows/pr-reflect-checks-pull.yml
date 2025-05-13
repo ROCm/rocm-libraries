@@ -6,7 +6,7 @@
 # sub-repositories is not feasible.
 #
 # Key Features:
-# - Runs every 30 minutes using a cron schedule
+# - Runs every 15 minutes using a cron schedule
 # - Also supports manual triggering via workflow_dispatch
 # - Uses the GitHub CLI to list all open PRs on the monorepo
 # - For each open PR, executes `pr-reflect-checks.py` to post synthetic checks
@@ -25,7 +25,7 @@ name: Reflect Subrepo Checks (Polling)
 
 on:
   schedule:
-    - cron: '*/10 * * * *'  # every 10 minutes
+    - cron: '*/15 * * * *'  # every 15 minutes
   workflow_dispatch:
 
 jobs:
