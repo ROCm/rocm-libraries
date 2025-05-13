@@ -107,6 +107,8 @@ namespace rocRoller
         std::map<GPUCapability, int> const&              getAllCapabilities() const;
         std::map<std::string, GPUInstructionInfo> const& getAllIntructionInfo() const;
 
+        bool isSupportedScaleBlockSize(int size) const;
+
     private:
         GPUArchitectureTarget                     m_archTarget;
         std::map<GPUCapability, int>              m_capabilities;

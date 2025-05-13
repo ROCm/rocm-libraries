@@ -87,8 +87,11 @@ namespace rocRoller
                 {
                     std::vector<key_type> keys;
                     keys.reserve(value.size());
-                    for(auto const& pair : value)
-                        keys.push_back(pair.first);
+                    std::transform(value.begin(),
+                                   value.end(),
+                                   std::back_inserter(keys),
+                                   [](auto const& pair) { return pair.first; });
+
                     std::sort(keys.begin(), keys.end());
 
                     for(auto const& key : keys)

@@ -37,6 +37,7 @@
 #include <rocRoller/KernelGraph/RegisterTagManager.hpp>
 #include <rocRoller/KernelGraph/Transforms/ConnectWorkgroups.hpp>
 #include <rocRoller/KernelGraph/Transforms/ConnectWorkgroups_detail.hpp>
+#include <rocRoller/Operations/Command.hpp>
 
 #include "CustomMatchers.hpp"
 #include "TestContext.hpp"
@@ -125,49 +126,223 @@ namespace ConnectWorkgroupsTest
         }
     }
 
-    struct RemapWorkgroupXCCGraph
+    class RemapWorkgroupKernel : public AssemblyTestKernel
     {
         using GD = rocRoller::Graph::Direction;
 
-        rocRoller::KernelGraph::KernelGraph graph;
-        std::map<GD, std::pair<int, int>>   workgroups;
+    public:
+        RemapWorkgroupKernel(rocRoller::ContextPtr context, int dim, uint numTilesM, uint numTilesN)
+            : AssemblyTestKernel(context)
+            , m_dim(dim)
+            , m_numTilesX(numTilesM)
+            , m_numTilesY(numTilesN)
+        {
+            makeGraph();
+        }
 
-        RemapWorkgroupXCCGraph() = delete;
+        std::vector<rocRoller::Expression::ExpressionPtr> kernelRemapWorkgroupExpression()
+        {
+            using namespace rocRoller::KernelGraph::CoordinateGraph;
+            using GD = rocRoller::Graph::Direction;
 
-        RemapWorkgroupXCCGraph(uint numXCC, uint size)
+            auto transformer = Transformer(&m_graph->coordinates);
+            transformer.fillExecutionCoordinates(m_context);
+
+            auto wgRegister = m_context->registerTagManager()->getRegister(m_workgroupU);
+
+            auto exprs = m_graph->coordinates.forward(
+                {wgRegister->expression()}, {m_workgroupU}, {m_wgx, m_wgy});
+
+            return exprs;
+        }
+
+        uint reference(uint wg)
+        {
+            return 0;
+        }
+
+        void generate() override
+        {
+            using namespace rocRoller;
+
+            auto kernel = m_context->kernel();
+
+            m_context->schedule(kernel->preamble());
+            m_context->schedule(kernel->prolog());
+
+            auto kb = [&]() -> Generator<Instruction> {
+                Register::ValuePtr s_wgm, s_wgx, s_wgy;
+                co_yield m_context->argLoader()->getValue("WGM", s_wgm);
+                co_yield m_context->argLoader()->getValue("WGX", s_wgx);
+                co_yield m_context->argLoader()->getValue("WGY", s_wgy);
+
+                auto v_wgx
+                    = Register::Value::Placeholder(m_context,
+                                                   Register::Type::Vector,
+                                                   {DataType::UInt32, PointerType::PointerGlobal},
+                                                   1);
+                auto v_wgy
+                    = Register::Value::Placeholder(m_context,
+                                                   Register::Type::Vector,
+                                                   {DataType::UInt32, PointerType::PointerGlobal},
+                                                   1);
+
+                co_yield v_wgx->allocate();
+                co_yield v_wgy->allocate();
+                co_yield m_context->copier()->copy(v_wgx, s_wgx, "Move pointer");
+                co_yield m_context->copier()->copy(v_wgy, s_wgy, "Move pointer");
+                auto wgIndex = m_context->kernel()->workgroupIndex()[0];
+                co_yield Expression::generate(v_wgx,
+                                              v_wgx->expression()
+                                                  + wgIndex->expression() * Expression::literal(4),
+                                              m_context);
+                co_yield Expression::generate(v_wgy,
+                                              v_wgy->expression()
+                                                  + wgIndex->expression() * Expression::literal(4),
+                                              m_context);
+
+                Register::ValuePtr s_remappedX, s_remappedY;
+                auto               exprs = kernelRemapWorkgroupExpression();
+                co_yield Expression::generate(s_remappedX, exprs[0], m_context);
+                co_yield Expression::generate(s_remappedY, exprs[1], m_context);
+
+                auto v_remappedX = Register::Value::Placeholder(
+                    m_context, Register::Type::Vector, {DataType::UInt32}, 1);
+                co_yield m_context->copier()->copy(v_remappedX, s_remappedX, "Move value");
+
+                auto v_remappedY = Register::Value::Placeholder(
+                    m_context, Register::Type::Vector, {DataType::UInt32}, 1);
+                co_yield m_context->copier()->copy(v_remappedY, s_remappedY, "Move value");
+
+                co_yield m_context->mem()->storeGlobal(
+                    v_wgx, v_remappedX, 0, DataTypeInfo::Get(DataType::UInt32).elementBytes);
+                co_yield m_context->mem()->storeGlobal(
+                    v_wgy, v_remappedY, 0, DataTypeInfo::Get(DataType::UInt32).elementBytes);
+            };
+
+            m_context->schedule(kb());
+            m_context->schedule(kernel->postamble());
+            m_context->schedule(kernel->amdgpu_metadata());
+        }
+
+    private:
+        void makeGraph()
         {
             using namespace rocRoller::Expression;
             using namespace rocRoller::KernelGraph;
             using namespace rocRoller::KernelGraph::CoordinateGraph;
             using namespace ConnectWorkgroupsDetail;
 
-            auto workgroupU = graph.coordinates.addElement(Workgroup(0, literal(size)));
-            auto workgroupD = graph.coordinates.addElement(Workgroup(0, literal(size)));
+            auto kernel = m_context->kernel();
 
-            auto middleLinear = graph.coordinates.addElement(Linear());
+            m_command  = std::make_shared<rocRoller::Command>();
+            auto wgmOp = m_command->addOperation(
+                rocRoller::Operations::Scalar(rocRoller::DataType::UInt32));
+            auto wgmCommandArgument
+                = m_command->allocateArgument(rocRoller::DataType::UInt32,
+                                              wgmOp,
+                                              rocRoller::ArgumentType::Value,
+                                              rocRoller::DataDirection::ReadOnly);
+            m_wgm = kernel->addArgument({"WGM",
+                                         rocRoller::DataType::UInt32,
+                                         rocRoller::DataDirection::ReadOnly,
+                                         wgmCommandArgument->expression()});
+            kernel->addArgument(
+                {"WGX",
+                 {rocRoller::DataType::UInt32, rocRoller::PointerType::PointerGlobal},
+                 rocRoller::DataDirection::WriteOnly});
+            kernel->addArgument(
+                {"WGY",
+                 {rocRoller::DataType::UInt32, rocRoller::PointerType::PointerGlobal},
+                 rocRoller::DataDirection::WriteOnly});
 
-            graph.coordinates.addElement(PassThrough(), {workgroupU}, {middleLinear});
-            graph.coordinates.addElement(PassThrough(), {middleLinear}, {workgroupD});
+            KernelGraph graph;
 
-            /* coordinate graph is:
-	     *                           Workgroup(0)
-	     *                               |
-	     *                           PassThrough
-	     *                               |
-	     *                             Linear
-	     *                               |
-	     *                           PassThrough
-	     *                               |
-	     *                          Workgroup(0)
-	     */
+            TileSizeInfo info{.sizes = {rocRoller::Expression::literal(m_numTilesX),
+                                        rocRoller::Expression::literal(m_numTilesY),
+                                        nullptr}};
 
-            auto newWorkgroupD = remapWorkgroupXCC(graph, workgroupD, numXCC);
-            auto newWorkgroupU = remapWorkgroupXCC(graph, workgroupU, numXCC);
+            std::tie(m_workgroupU, m_wgx, m_wgy) = workgroupMapping(
+                info, graph, rocRoller::Graph::Direction::Downstream, m_dim, m_wgm);
 
-            workgroups[GD::Upstream]   = {workgroupD, newWorkgroupD};
-            workgroups[GD::Downstream] = {workgroupU, newWorkgroupU};
+            m_graph = std::make_shared<KernelGraph>(graph);
         }
+
+        rocRoller::KernelGraph::KernelGraphPtr m_graph;
+        rocRoller::CommandPtr                  m_command;
+
+        uint m_numTilesX, m_numTilesY;
+
+        int m_dim;
+        int m_workgroupU;
+        int m_wgx, m_wgy;
+
+        rocRoller::Expression::ExpressionPtr m_wgm;
     };
+
+    TEST_CASE("Remap Workgroup GPU", "[kernel-graph][gpu]")
+    {
+        uint numTilesM = 22u;
+        uint numTilesN = 7u;
+
+        auto remapDim = GENERATE(0, 1);
+        {
+            // Note:
+            //
+            //   remapDim = 0 corresponds to the M dimension for D in a GEMM
+            //   remapDim = 1 corresponds to the N dimension for D in a GEMM
+            //
+            // The remapped dimension is baked into the kernel
+
+            auto context = TestContext::ForTestDevice().get();
+            auto kernel  = RemapWorkgroupKernel(context, remapDim, numTilesM, numTilesN);
+
+            auto totalSize = numTilesM * numTilesN;
+
+            auto WGM = GENERATE(3u, 5u, 7u);
+            {
+                //
+                // WGM is the workgroup-mapping "group size".  It is a kernel argument.
+                //
+
+                // Launch kernel
+                std::vector<uint> wgx(totalSize), wgy(totalSize);
+                {
+                    auto d_wgx      = make_shared_device(wgx);
+                    auto d_wgy      = make_shared_device(wgy);
+                    auto invocation = rocRoller::KernelInvocation{{totalSize, 1, 1}, {1, 1, 1}, 0};
+                    kernel(invocation, WGM, d_wgx.get(), d_wgy.get());
+
+                    CHECK_THAT(
+                        hipMemcpy(
+                            wgx.data(), d_wgx.get(), sizeof(uint) * totalSize, hipMemcpyDefault),
+                        HasHipSuccess(0));
+                    CHECK_THAT(
+                        hipMemcpy(
+                            wgy.data(), d_wgy.get(), sizeof(uint) * totalSize, hipMemcpyDefault),
+                        HasHipSuccess(0));
+                }
+
+                // Check result
+                std::map<std::pair<uint, uint>, int> coverage;
+                for(uint i = 0; i < totalSize; ++i)
+                {
+                    auto mapped = std::pair<uint, uint>{wgx[i], wgy[i]};
+                    coverage[mapped]++;
+                }
+
+                CHECK(coverage.size() == totalSize);
+                for(uint i = 0; i < numTilesM; ++i)
+                {
+                    for(uint j = 0; j < numTilesN; ++j)
+                    {
+                        auto mapped = std::pair<uint, uint>{i, j};
+                        CHECK(coverage[mapped] == 1);
+                    }
+                }
+            }
+        }
+    }
 
     class RemapWorkgroupXCCKernel : public AssemblyTestKernel
     {
@@ -285,16 +460,16 @@ namespace ConnectWorkgroupsTest
             graph.coordinates.addElement(PassThrough(), {middleLinear}, {m_workgroupD});
 
             /* coordinate graph is:
-	     *                           Workgroup(0)
-	     *                               |
-	     *                           PassThrough
-	     *                               |
-	     *                             Linear
-	     *                               |
-	     *                           PassThrough
-	     *                               |
-	     *                          Workgroup(0)
-	     */
+             *                           Workgroup(0)
+             *                               |
+             *                           PassThrough
+             *                               |
+             *                             Linear
+             *                               |
+             *                           PassThrough
+             *                               |
+             *                          Workgroup(0)
+             */
 
             m_newWorkgroupD = remapWorkgroupXCC(graph, m_workgroupD, m_numXCC);
             m_newWorkgroupU = remapWorkgroupXCC(graph, m_workgroupU, m_numXCC);

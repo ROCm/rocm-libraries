@@ -32,6 +32,8 @@
 #include <sstream>
 
 #include <rocRoller/Context_fwd.hpp>
+
+#include <rocRoller/KernelOptions.hpp>
 #include <rocRoller/Utilities/Settings.hpp>
 
 #include "Utilities.hpp"

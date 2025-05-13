@@ -128,7 +128,7 @@ RUN wget -nv --show-progress --progress=dot:mega -O /tmp/amdgpu_install.deb ${RO
     && rm /tmp/amdgpu_install.deb \
     && if test -n "${ROCROLLER_AMDGPU_BUILD_NUMBER}"; then amdgpu-repo --amdgpu-build=${ROCROLLER_AMDGPU_BUILD_NUMBER} --rocm-build=${ROCROLLER_AMDGPU_BUILD_URI}; fi \
     && amdgpu-install -y --usecase=rocmdev --no-dkms
-RUN apt-get update && apt-get install -y rocm-llvm-dev
+RUN apt-get update && apt-get install -o Dpkg::Options::="--force-overwrite" -y rocm-llvm-dev
 
 # g++-13
 RUN apt-get update && apt-get install -y \

@@ -44,12 +44,7 @@ namespace rocRoller::KernelGraph
             // that we can tell if we are above or below there.
             std::map<int, int> coordSetBy;
 
-            auto parents = graph.control.nodesContaining(controlNode).to<std::set>();
-            Log::debug("{} parents: {}", controlNode, concatenate(parents));
-
-            auto setCoordNodes
-                = graph.control.nodesContaining(controlNode)
-                      .filter(graph.control.isElemType<ControlGraph::SetCoordinate>());
+            auto setCoordNodes = getContainingSetCoordinates(graph, controlNode);
 
             for(auto setCoordNode : setCoordNodes)
             {
@@ -184,6 +179,8 @@ namespace rocRoller::KernelGraph
 
     KernelGraph LoadPacked::apply(KernelGraph const& original)
     {
+        TIMER(t, "KernelGraph::LoadPacked");
+
         using namespace ControlGraph;
         using namespace CoordinateGraph;
         using namespace LoadPackedDetail;

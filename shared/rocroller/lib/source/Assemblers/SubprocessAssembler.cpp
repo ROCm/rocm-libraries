@@ -29,6 +29,8 @@
 #include <fstream>
 
 #include <rocRoller/Assemblers/SubprocessAssembler.hpp>
+
+#include <rocRoller/GPUArchitecture/GPUArchitectureLibrary.hpp>
 #include <rocRoller/Utilities/Component.hpp>
 #include <rocRoller/Utilities/Settings.hpp>
 #include <rocRoller/Utilities/Timer.hpp>

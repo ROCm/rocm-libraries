@@ -259,4 +259,20 @@ namespace rocRoller
         ss << "(Offset: " << m_offset << ", Size: " << m_size << ")";
         return ss.str();
     }
+
+    bool LDSAllocation::intersects(LDSAllocation const& other) const
+    {
+        auto myMax    = m_offset + m_size;
+        auto otherMax = other.m_offset + other.m_size;
+
+        return (myMax > other.m_offset && myMax <= otherMax)
+               || (otherMax > m_offset && otherMax <= myMax);
+    }
+
+    bool LDSAllocation::intersects(std::shared_ptr<LDSAllocation> const& other) const
+    {
+        AssertFatal(other);
+
+        return intersects(*other);
+    }
 }

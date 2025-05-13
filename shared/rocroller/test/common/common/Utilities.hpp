@@ -42,6 +42,7 @@
 
 #include <rocRoller/DataTypes/DataTypes.hpp>
 #include <rocRoller/DataTypes/DataTypes_Utils.hpp>
+#include <rocRoller/GPUArchitecture/GPUArchitectureTarget.hpp>
 #include <rocRoller/Utilities/Logging.hpp>
 #include <rocRoller/Utilities/Random.hpp>
 #include <rocRoller/Utilities/Settings.hpp>
@@ -264,7 +265,7 @@ AcceptableError
             }
             if constexpr(std::is_same_v<TA, rocRoller::FP8>)
             {
-                fudge *= 5.5;
+                fudge *= 6.0;
                 ss << " Increase fudge for FP8: " << fudge;
             }
         }

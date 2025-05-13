@@ -50,59 +50,24 @@ namespace rocRoller
      */
     namespace Register
     {
-        enum
-        {
-            /// Contiguity equal to element count
-            FULLY_CONTIGUOUS = -3,
-
-            /// Suffucient contiguity to fit the datatype
-            VALUE_CONTIGUOUS = -2,
-
-            /// Won't be using allocator
-            /// (e.g. taking allocation from elsewhere or assigning particular register numbers)
-            MANUAL = -1,
-
-            Count = 255,
-        };
-        struct AllocationOptions
-        {
-            /// In units of registers
-            int contiguousChunkWidth = VALUE_CONTIGUOUS;
-
-            /// Allocation x must have (x % alignment) == alignmentPhase. -1 means to use default for register type.
-            int alignment      = -1;
-            int alignmentPhase = 0;
-
-            static AllocationOptions FullyContiguous();
-
-            auto operator<=>(AllocationOptions const& other) const = default;
-        };
-
         struct RegisterId
         {
-            RegisterId(Type regType, int index)
-                : regType(regType)
-                , regIndex(index)
-            {
-            }
-            Type        regType;
-            int         regIndex;
+            Type regType;
+            int  regIndex;
+            int  ldsSize = 0;
+
             auto        operator<=>(RegisterId const&) const = default;
             std::string toString() const;
         };
-
-        std::string toString(RegisterId const& regId);
-
-        // For some reason, GCC will not find the operator declared in Utils.hpp.
-        std::ostream& operator<<(std::ostream& stream, RegisterId const& regId);
-
         struct RegisterIdHash
         {
             size_t operator()(RegisterId const& regId) const noexcept
             {
                 size_t h1 = static_cast<size_t>(regId.regType);
                 size_t h2 = static_cast<size_t>(regId.regIndex);
-                return h1 | (h2 << std::bit_width(static_cast<unsigned int>(Type::Count)));
+                size_t h3 = static_cast<size_t>(regId.ldsSize);
+                return h1 | (h2 << std::bit_width(static_cast<unsigned int>(Type::Count)))
+                       | (h3 << 32);
             }
         };
 
@@ -292,7 +257,15 @@ namespace rocRoller
              */
             std::vector<ValuePtr> split(std::vector<std::vector<int>> const& indices);
 
-            bool intersects(Register::ValuePtr) const;
+            /**
+             * Returns true if `this` and `other` share any registers or LDS addresses.
+             */
+            bool intersects(Value const& other) const;
+
+            /**
+             * Returns true if `this` and `other` share any registers or LDS addresses.
+             */
+            bool intersects(ValuePtr const& other) const;
 
             /**
              * Return sub-elements of multi-value values.

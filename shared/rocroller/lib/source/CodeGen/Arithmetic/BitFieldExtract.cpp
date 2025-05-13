@@ -47,6 +47,7 @@ namespace rocRoller
     RegisterComponentTemplateSpec(BitFieldExtractGenerator, DataType::UInt16);
     RegisterComponentTemplateSpec(BitFieldExtractGenerator, DataType::UInt32);
     RegisterComponentTemplateSpec(BitFieldExtractGenerator, DataType::UInt64);
+    RegisterComponentTemplateSpec(BitFieldExtractGenerator, DataType::E8M0);
 
     template <>
     std::shared_ptr<UnaryArithmeticGenerator<Expression::BitFieldExtract>> GetGenerator(

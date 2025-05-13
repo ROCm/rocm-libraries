@@ -158,6 +158,8 @@ namespace rocRoller
                                  std::string const&     kernelName,
                                  KernelOptions const&   kernelOpts);
 
+        void scheduleCopy(Instruction const& inst);
+
         // If we are generating code for a real Hip device, refers to its
         // device index.
         int             m_hipDeviceIdx = -1;

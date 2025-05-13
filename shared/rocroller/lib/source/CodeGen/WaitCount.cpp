@@ -24,9 +24,11 @@
  *
  *******************************************************************************/
 
+#include <rocRoller/CodeGen/WaitCount.hpp>
+
 #include "rocRoller/GPUArchitecture/GPUArchitectureLibrary.hpp"
 #include "rocRoller/GPUArchitecture/GPUArchitectureTarget.hpp"
-#include <rocRoller/CodeGen/WaitCount.hpp>
+#include <rocRoller/CodeGen/Instruction.hpp>
 #include <rocRoller/Utilities/Settings.hpp>
 
 namespace rocRoller
@@ -179,7 +181,7 @@ namespace rocRoller
         return std::min(lhs, rhs);
     }
 
-    void WaitCount::combine(WaitCount const& other)
+    WaitCount& WaitCount::combine(WaitCount const& other)
     {
         m_loadcnt  = CombineValues(m_loadcnt, other.m_loadcnt);
         m_storecnt = CombineValues(m_storecnt, other.m_storecnt);
@@ -193,6 +195,8 @@ namespace rocRoller
         m_hasEXPCnt      = other.m_hasEXPCnt;
 
         m_comments.insert(m_comments.end(), other.m_comments.begin(), other.m_comments.end());
+
+        return *this;
     }
 
     int WaitCount::loadcnt() const
@@ -202,6 +206,10 @@ namespace rocRoller
     int WaitCount::storecnt() const
     {
         return m_storecnt;
+    }
+    int WaitCount::vmcnt() const
+    {
+        return WaitCount::CombineValues(m_loadcnt, m_storecnt);
     }
     int WaitCount::vscnt() const
     {
@@ -266,29 +274,40 @@ namespace rocRoller
         m_expcnt = value;
     }
 
-    void WaitCount::combineLoadcnt(int value)
+    WaitCount& WaitCount::combineLoadcnt(int value)
     {
         m_loadcnt = CombineValues(m_loadcnt, value);
+        return *this;
     }
-    void WaitCount::combineStorecnt(int value)
+
+    WaitCount& WaitCount::combineStorecnt(int value)
     {
         m_storecnt = CombineValues(m_storecnt, value);
+        return *this;
     }
-    void WaitCount::combineVscnt(int value)
+
+    WaitCount& WaitCount::combineVscnt(int value)
     {
         m_vscnt = CombineValues(m_vscnt, value);
+        return *this;
     }
-    void WaitCount::combineDScnt(int value)
+
+    WaitCount& WaitCount::combineDScnt(int value)
     {
         m_dscnt = CombineValues(m_dscnt, value);
+        return *this;
     }
-    void WaitCount::combineKMcnt(int value)
+
+    WaitCount& WaitCount::combineKMcnt(int value)
     {
         m_kmcnt = CombineValues(m_kmcnt, value);
+        return *this;
     }
-    void WaitCount::combineExpcnt(int value)
+
+    WaitCount& WaitCount::combineExpcnt(int value)
     {
         m_expcnt = CombineValues(m_expcnt, value);
+        return *this;
     }
 
     std::vector<std::string> const& WaitCount::comments() const
@@ -372,10 +391,9 @@ namespace rocRoller
             {
                 os << "s_waitcnt";
 
-                if(m_loadcnt >= 0 || m_storecnt >= 0)
+                if(vmcnt() >= 0)
                 {
-                    auto vmcnt = WaitCount::CombineValues(m_loadcnt, m_storecnt);
-                    os << " vmcnt(" << vmcnt << ")";
+                    os << " vmcnt(" << vmcnt() << ")";
                 }
 
                 if(m_kmcnt >= 0 || m_dscnt >= 0)
@@ -394,7 +412,8 @@ namespace rocRoller
 
             if(commentIter != m_comments.end())
             {
-                os << " // " << *commentIter;
+                for(auto const& line : Instruction::EscapeComment(*commentIter))
+                    os << line;
                 commentIter++;
             }
 
@@ -409,16 +428,38 @@ namespace rocRoller
 
             if(commentIter != m_comments.end())
             {
-                os << " // " << *commentIter;
+                for(auto const& line : Instruction::EscapeComment(*commentIter))
+                    os << line;
                 commentIter++;
             }
 
             os << "\n";
         }
 
-        for(; commentIter != m_comments.end(); commentIter++)
+        if(level > LogLevel::Debug)
         {
-            os << "// " << *commentIter << "\n";
+            auto fieldComment = fmt::format(
+                "m_loadcnt({}) m_storecnt({}) m_vscnt({}) m_dscnt({}) m_kmcnt({}) m_expcnt({})",
+                m_loadcnt,
+                m_storecnt,
+                m_vscnt,
+                m_dscnt,
+                m_kmcnt,
+                m_expcnt);
+
+            for(auto const& line : Instruction::EscapeComment(fieldComment))
+                os << line;
+            os << "\n";
+        }
+
+        if(commentIter != m_comments.end())
+        {
+            for(; commentIter != m_comments.end(); commentIter++)
+            {
+                for(auto const& line : Instruction::EscapeComment(*commentIter))
+                    os << line;
+            }
+            os << "\n";
         }
     }
 

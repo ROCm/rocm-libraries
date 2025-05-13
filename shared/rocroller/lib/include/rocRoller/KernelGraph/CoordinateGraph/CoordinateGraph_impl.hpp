@@ -28,8 +28,9 @@
 
 #include <vector>
 
-#include <rocRoller/Graph/Hypergraph.hpp>
 #include <rocRoller/KernelGraph/CoordinateGraph/CoordinateGraph.hpp>
+
+#include <rocRoller/Expression.hpp>
 
 namespace rocRoller
 {

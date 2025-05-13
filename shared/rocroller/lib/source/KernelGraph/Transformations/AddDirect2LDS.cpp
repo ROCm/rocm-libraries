@@ -27,30 +27,12 @@
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/Transforms/AddDirect2LDS.hpp>
+#include <rocRoller/KernelGraph/Transforms/Simplify.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>
 namespace rocRoller
 {
     namespace KernelGraph
     {
-        bool isChain(KernelGraph const& kgraph, int op1, int op2)
-        {
-            for(auto tag : kgraph.control.depthFirstVisit(op1, Graph::Direction::Downstream))
-            {
-                if(tag == op2)
-                {
-                    return true;
-                }
-            }
-            return false;
-        }
-
-        bool isLeaf(KernelGraph const& kgraph, int tag)
-        {
-            auto children
-                = kgraph.control.getNeighbours<Graph::Direction::Downstream>(tag).to<std::vector>();
-            return children.empty();
-        }
-
         std::vector<std::pair<int, int>> searchCandidates(KernelGraph const&   kgraph,
                                                           CommandParametersPtr params,
                                                           ContextPtr           context)
@@ -63,99 +45,105 @@ namespace rocRoller
             std::vector<std::pair<int, int>> result;
             for(auto loadGlobal : loadTiledNodes)
             {
+                std::vector<int> storeLDSTag;
+
                 auto internalMacroTile = kgraph.mapper.get<MacroTile>(loadGlobal);
                 auto macTile           = kgraph.coordinates.getNode<MacroTile>(internalMacroTile);
 
-                auto maybeDirect2LDS = kgraph.mapper.get<LDS>(loadGlobal);
-                if(maybeDirect2LDS == -1)
+                auto load = kgraph.control.get<LoadTiled>(loadGlobal).value();
+                if(!load.isDirect2LDS)
                     continue;
 
                 for(auto storeLDS : storeLDSTileNodes)
                 {
-
-                    bool sameMacroTile
-                        = (kgraph.mapper.get<MacroTile>(storeLDS) == internalMacroTile);
                     auto LDSTileTag = kgraph.mapper.get<LDS>(storeLDS);
                     auto LDSTile    = kgraph.coordinates.getNode<LDS>(LDSTileTag);
+
+                    auto sameMacroTile
+                        = (kgraph.mapper.get<MacroTile>(storeLDS) == internalMacroTile);
 
                     if(!LDSTile.isDirect2LDS)
                         continue;
 
                     if(sameMacroTile)
-                        result.push_back({loadGlobal, storeLDS});
+                        storeLDSTag.push_back(storeLDS);
+                }
+
+                if(storeLDSTag.size() == 0)
+                    continue;
+                else if(storeLDSTag.size() == 1)
+                    result.push_back({loadGlobal, storeLDSTag[0]});
+                else if(storeLDSTag.size() == 2)
+                {
+                    for(const auto& storeLDS : storeLDSTag)
+                    {
+                        auto maybeForLoop1 = findContainingOperation<ForLoopOp>(loadGlobal, kgraph);
+                        auto maybeForLoop2 = findContainingOperation<ForLoopOp>(storeLDS, kgraph);
+                        auto bothInSameForLoop
+                            = maybeForLoop1 && maybeForLoop2 && (*maybeForLoop1 == *maybeForLoop2);
+                        auto bothBeforeForLoop = !maybeForLoop1 && !maybeForLoop2;
+                        if(bothInSameForLoop || bothBeforeForLoop)
+                            result.push_back({loadGlobal, storeLDS});
+                    }
+                }
+                else
+                {
+                    Log::debug("  AddDirect2LDS: More than 2 ComputeIndex operation required for "
+                               "StoreLDSTile.");
                 }
             }
             return result;
         }
 
-        void mergeOperations(KernelGraph& kgraph, int globalOp, int ldsOp)
+        void replaceLoadTiled(KernelGraph&                     kgraph,
+                              std::vector<std::pair<int, int>> direct2LDSInfo,
+                              std::vector<int>&                used)
         {
             using namespace ControlGraph;
-            auto variableType = getVariableType(kgraph, globalOp);
 
-            if(isChain(kgraph, globalOp, ldsOp))
+            for(const auto& info : direct2LDSInfo)
             {
-                Log::debug("  Merge LoadTiled {} and StoreLDSTile {} chain.", globalOp, ldsOp);
+                auto globalOp = info.first;
+                auto ldsOp    = info.second;
+
+                auto variableType = getVariableType(kgraph, globalOp);
+
+                auto codegen = getCodeGeneratorCoordinates(kgraph, ldsOp);
 
                 // create LoadTileDirect2LDS operation
                 auto direct2lds = kgraph.control.addElement(LoadTileDirect2LDS(variableType));
-                moveConnections(kgraph, globalOp, direct2lds);
-                moveConnections(kgraph, ldsOp, direct2lds);
+                moveConnections(kgraph, globalOp, direct2lds, 0);
+                moveConnections(kgraph, ldsOp, direct2lds, codegen.size());
 
-                // replace operations
-                replaceWith(kgraph, globalOp, kgraph.control.addElement(NOP()), false);
-                replaceWith(kgraph, ldsOp, direct2lds, false);
+                // replace LoadTiled with Direct2LDS
+                replaceWith(kgraph, globalOp, direct2lds, false);
+                Log::debug(
+                    "  Replace LoadTiled {} with LoadTileDirect2LDS {}.", globalOp, direct2lds);
 
-                purgeNodes(kgraph, {globalOp});
-                purgeNodes(kgraph, {ldsOp});
-            }
-            else
-            {
-                Log::debug("  Merge LoadTiled {} and StoreLDSTile {} leaf.", globalOp, ldsOp);
-
-                // the LoadTiled and StoreLDSTile have to be the leaf node
-                AssertFatal(isLeaf(kgraph, globalOp) && isLeaf(kgraph, ldsOp));
-
-                // create LoadTileDirect2LDS operation
-                auto direct2lds = kgraph.control.addElement(LoadTileDirect2LDS(variableType));
-                moveConnections(kgraph, globalOp, direct2lds);
-                moveConnections(kgraph, ldsOp, direct2lds);
-
-                // find the barrier before StoreLDSTile operation
-                int ldsBarrier      = -1;
-                int computeIndexTag = -1;
-                for(auto parent : kgraph.control.depthFirstVisit(ldsOp, Graph::Direction::Upstream))
-                {
-                    bool containing = ldsBarrier != -1
-                                      && (kgraph.control.get<Body>(ldsBarrier)
-                                          || kgraph.control.get<Sequence>(ldsBarrier));
-                    ldsBarrier = parent;
-                    if(kgraph.control.get<ComputeIndex>(parent))
-                    {
-                        computeIndexTag = parent;
-                    }
-
-                    auto maybeBarrier = kgraph.control.get<Barrier>(parent);
-                    if(maybeBarrier && containing)
-                    {
-                        break;
-                    }
-                }
-                AssertFatal(computeIndexTag != -1 && ldsBarrier != -1);
-
-                // add LoadTileDirect2LDS operation to the graph
-                auto barrier = kgraph.control.addElement(Barrier());
-                reconnect<Graph::Direction::Upstream>(kgraph, -1, computeIndexTag);
-                kgraph.control.addElement(Sequence(), {globalOp}, {computeIndexTag});
-                replaceWith(kgraph, globalOp, kgraph.control.addElement(NOP()), false);
-                replaceWith(kgraph, ldsBarrier, kgraph.control.addElement(NOP()), false);
-                replaceWith(kgraph, ldsOp, barrier, false);
-                kgraph.control.addElement(Sequence(), {barrier}, {direct2lds});
-                purgeNodes(kgraph, {globalOp});
-                purgeNodes(kgraph, {ldsOp});
-                purgeNodes(kgraph, {ldsBarrier});
+                used.push_back(globalOp);
             }
         }
+
+        void replaceStoreLDS(KernelGraph&                     kgraph,
+                             std::vector<std::pair<int, int>> direct2LDSInfo,
+                             std::vector<int>&                used)
+        {
+            using namespace ControlGraph;
+            for(const auto& info : direct2LDSInfo)
+            {
+                auto ldsOp = info.second;
+
+                auto it = std::find(used.cbegin(), used.cend(), ldsOp);
+                if(it != used.cend())
+                    continue;
+
+                replaceWith(kgraph, ldsOp, kgraph.control.addElement(NOP()), false);
+                Log::debug("  Replace StoreLDSTile {} with NOP.", ldsOp);
+
+                used.push_back(ldsOp);
+            }
+        }
+
         /** This transformation does:
          *
          *    1. Search the pairs of LoadTiled and StoreLDSTile operations that connects to the same internal MacroTile
@@ -171,14 +159,20 @@ namespace rocRoller
 
             if(candidates.size() > 0)
             {
+
                 AssertFatal(
                     m_context->targetArchitecture().HasCapability(GPUCapability::HasDirectToLds),
                     "Not have DirectToLds capability");
-            }
 
-            for(auto loadAndStore : candidates)
+                std::vector<int> used;
+                replaceLoadTiled(kgraph, candidates, used);
+                replaceStoreLDS(kgraph, candidates, used);
+
+                purgeNodes(kgraph, used);
+            }
+            else
             {
-                mergeOperations(kgraph, loadAndStore.first, loadAndStore.second);
+                Log::debug("No candidates for AddDirect2LDS.");
             }
 
             return kgraph;

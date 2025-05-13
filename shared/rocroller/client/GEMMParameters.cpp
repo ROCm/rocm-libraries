@@ -38,14 +38,26 @@ namespace rocRoller
                 rv << "GEMM_" << toString(transA) << toString(transB);
 
                 if(scaleA != rocRoller::Operations::ScaleMode::None)
+                {
                     rv << "_mx" << typeA;
+                    if(scaleA == rocRoller::Operations::ScaleMode::Separate)
+                        rv << "_bs" << scaleBlockSize;
+                }
                 else
+                {
                     rv << "_" << typeA;
+                }
 
                 if(scaleB != rocRoller::Operations::ScaleMode::None)
+                {
                     rv << "_mx" << typeB;
+                    if(scaleB == rocRoller::Operations::ScaleMode::Separate)
+                        rv << "_bs" << scaleBlockSize;
+                }
                 else
+                {
                     rv << "_" << typeB;
+                }
 
                 for(auto const& t : {typeC, typeD, typeAcc})
                     rv << "_" << t;
@@ -55,6 +67,20 @@ namespace rocRoller
 
                 rv << "_WG";
                 rocRoller::streamJoin(rv, std::vector{workgroupSizeX, workgroupSizeY}, "x");
+
+                if(workgroupMapping.first != -1)
+                {
+                    rv << "_WGM";
+                    rocRoller::streamJoin(
+                        rv, std::vector{workgroupMapping.first, workgroupMapping.second}, "");
+                }
+
+                rv << "_WGMXCC";
+                rocRoller::streamJoin(rv, std::vector{workgroupRemapXCC}, "");
+                if(workgroupRemapXCC && workgroupRemapXCCValue > 0)
+                {
+                    rocRoller::streamJoin(rv, std::vector{workgroupRemapXCCValue}, "");
+                }
 
                 rv << "_LDS";
                 rocRoller::streamJoin(rv, std::vector{loadLDSA, loadLDSB, storeLDSD}, "");
@@ -68,14 +94,14 @@ namespace rocRoller
                 rv << "_UNROLL";
                 rocRoller::streamJoin(rv, std::vector{unrollX, unrollY}, "x");
 
-                rv << "_SwizzleScale";
-                rocRoller::streamJoin(rv, std::vector{swizzleScale}, "");
+                rv << "_SwizzleScale" << swizzleScale << prefetchScale;
 
                 if(prefetch)
                 {
                     rv << "_PF";
                     rocRoller::streamJoin(
                         rv, std::vector{prefetchInFlight, prefetchLDSFactor}, "x");
+                    rv << "m" << prefetchMixMemOps;
                 }
 
                 rv << "_MI";
@@ -138,7 +164,13 @@ namespace rocRoller
                 s << "Tiling:    " << x.macM << "x" << x.macN << "x" << x.macK << std::endl;
                 s << "MI:        " << x.waveM << "x" << x.waveN << "x" << x.waveK << "x" << x.waveB
                   << std::endl;
-                s << "Scaling:   A:" << x.scaleA << " B:" << x.scaleB << std::endl;
+                s << "Scaling:   A:" << x.scaleA << " B:" << x.scaleB;
+                if(x.scaleA == rocRoller::Operations::ScaleMode::Separate
+                   or x.scaleB == rocRoller::Operations::ScaleMode::Separate)
+                {
+                    s << " BlockSize:" << x.scaleBlockSize;
+                }
+                s << std::endl;
                 s << "SwizzleScale:        " << x.swizzleScale << std::endl;
                 s << "LDS:       " << x.loadLDSA << x.loadLDSB << x.storeLDSD << std::endl;
                 s << "Direct2LDS:       " << x.direct2LDSA << x.direct2LDSB << std::endl;
@@ -149,6 +181,24 @@ namespace rocRoller
                 s << "Unroll:    X:" << x.unrollX << " Y:" << x.unrollY << std::endl;
                 s << "Scheduler: " << x.scheduler << std::endl;
                 s << "WG size:   " << x.workgroupSizeX * x.workgroupSizeY << std::endl;
+                if(x.workgroupMapping.first != -1)
+                {
+                    s << "WG Mapping: " << x.workgroupMapping.first << ","
+                      << x.workgroupMapping.second << std::endl;
+                }
+                s << "WG XCC Remap: " << x.workgroupRemapXCC;
+                if(x.workgroupRemapXCC)
+                {
+                    if(x.workgroupRemapXCCValue != -1)
+                    {
+                        s << " value: " << x.workgroupRemapXCCValue;
+                    }
+                    else
+                    {
+                        s << " Default";
+                    }
+                }
+                s << std::endl;
                 s << "Type:      A:" << x.typeA << " B:" << x.typeB << " C:" << x.typeC
                   << " D:" << x.typeD << " ACC:" << x.typeAcc << std::endl;
                 s << "Tranpose:  " << toString(x.transA) << toString(x.transB) << std::endl;

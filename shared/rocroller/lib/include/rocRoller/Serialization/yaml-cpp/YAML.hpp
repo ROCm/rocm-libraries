@@ -207,6 +207,14 @@ namespace rocRoller
         }
 
         template <>
+        inline void EmitterOutput::output(E8M0& obj)
+        {
+            std::stringstream ss;
+            ss << obj;
+            *emitter << ss.str();
+        }
+
+        template <>
         struct IOTraits<EmitterOutput>
         {
             using IO = EmitterOutput;
@@ -563,6 +571,28 @@ namespace YAML
             }
 
             rhs.data = node[0].as<decltype(rhs.data)>();
+            return true;
+        }
+    };
+
+    template <>
+    struct convert<rocRoller::E8M0>
+    {
+        static Node encode(const rocRoller::E8M0& rhs)
+        {
+            Node node;
+            node.push_back(rhs.scale);
+            return node;
+        }
+
+        static bool decode(const Node& node, rocRoller::E8M0& rhs)
+        {
+            if(!node.IsSequence() || node.size() != 1)
+            {
+                return false;
+            }
+
+            rhs.scale = node[0].as<decltype(rhs.scale)>();
             return true;
         }
     };

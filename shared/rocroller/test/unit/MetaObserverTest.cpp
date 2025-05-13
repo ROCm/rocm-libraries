@@ -98,7 +98,8 @@ static_assert(Scheduling::CObserver<TestFalseObserver>);
 
 TEST_F(MetaObserverTest, MultipleObserverTest)
 {
-    rocRoller::ContextPtr m_context = std::make_shared<Context>();
+    rocRoller::ContextPtr m_context
+        = Context::ForTarget({rocRoller::GPUArchitectureGFX::GFX90A}, "kernel");
 
     std::tuple<Scheduling::AllocatingObserver,
                Scheduling::WaitcntObserver,

@@ -29,9 +29,9 @@
 #include <map>
 #include <memory>
 
-#include <rocRoller/Expression_fwd.hpp>
-#include <rocRoller/InstructionValues/Register.hpp>
 #include <rocRoller/KernelGraph/RegisterTagManager.hpp>
+
+#include <rocRoller/InstructionValues/Register.hpp>
 #include <rocRoller/Utilities/Error.hpp>
 
 namespace rocRoller

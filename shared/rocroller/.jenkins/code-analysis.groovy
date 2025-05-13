@@ -16,21 +16,21 @@ def runCI =
 
     def uniqueTag = params?."Unique Docker image tag" ? org.apache.commons.lang.RandomStringUtils.random(9, true, true) : ""
 
+    def baseParams = rocRollerGetBaseParameters()
+
     def nodes = new dockerNodes(nodeDetails, jobName, prj)
     nodes.dockerArray.each {
         _, docker ->
-        if (params?.ROCROLLER_AMDGPU_URL)
-        {
-            docker.buildArgs += " --build-arg ROCROLLER_AMDGPU_URL=${params.ROCROLLER_AMDGPU_URL}"
+        // parameters inherited from target job
+        ["ROCROLLER_AMDGPU_URL", "ROCROLLER_AMDGPU_BUILD_NUMBER", "ROCROLLER_AMDGPU_BUILD_URI"].each {
+            param ->
+            def value = params?."${param}" ?: baseParams?."${param}";
+            if (value)
+            {
+                docker.buildArgs += " --build-arg ${param}=${value}"
+            }
         }
-        if (params?.ROCROLLER_AMDGPU_BUILD_NUMBER)
-        {
-            docker.buildArgs += " --build-arg ROCROLLER_AMDGPU_BUILD_NUMBER=${params.ROCROLLER_AMDGPU_BUILD_NUMBER}"
-        }
-        if (params?.ROCROLLER_AMDGPU_BUILD_URI)
-        {
-            docker.buildArgs += " --build-arg ROCROLLER_AMDGPU_BUILD_URI=${params.ROCROLLER_AMDGPU_BUILD_URI}"
-        }
+
         if (uniqueTag)
         {
             docker.customFinalTag = uniqueTag
@@ -59,47 +59,35 @@ def runCI =
     buildProject(prj, formatCheck, nodes.dockerArray, compileCommand, testCommand, null)
 }
 
-def rocRollerDefaultParameters() {
-    def defaultValues = [
-        ROCROLLER_AMDGPU_URL: params?.ROCROLLER_AMDGPU_URL ?: "",
-        ROCROLLER_AMDGPU_BUILD_NUMBER: params?.ROCROLLER_AMDGPU_BUILD_NUMBER ?: "",
-        ROCROLLER_AMDGPU_BUILD_URI: params?.ROCROLLER_AMDGPU_BUILD_URI ?: ""
-    ]
-    if (env.CHANGE_ID)
-    {
-        def targetParams = jenkins.model.Jenkins.instance.getItemByFullName(env.JOB_NAME)
-            .parent.getJob(env.CHANGE_TARGET)
-            ?.lastBuild
-            ?.actions
-            ?.find {it.class.name == "hudson.model.ParametersAction"}
-            ?.parameters;
-        if (targetParams != null)
-        {
-            targetParams.each {
-                param ->
-                if (defaultValues.containsKey(param.name))
-                {
-                    defaultValues[param.name] = param.value
-                }
-            }
-        }
-    }
-    return [
+def rocRollerGetBaseParameters() {
+    def baseParameters = jenkins.model.Jenkins.instance.getItemByFullName(env.JOB_NAME)
+        .parent.getJob(env.CHANGE_TARGET)
+        ?.getProperty(hudson.model.ParametersDefinitionProperty)
+        ?.parameterDefinitions
+        ?.collect {[ it.name, it.defaultParameterValue.value]}
+        ?.collectEntries();
+    return baseParameters;
+}
+
+ci: {
+    String urlJobName = auxiliary.getTopJobName(env.BUILD_URL)
+
+    def additionalParameters = [
         string(
             name: "ROCROLLER_AMDGPU_URL",
-            defaultValue: defaultValues["ROCROLLER_AMDGPU_URL"],
+            defaultValue: params?.ROCROLLER_AMDGPU_URL ?: "",
             trim: true,
             description: "URL to retrieve AMDGPU install package from"
         ),
         string(
             name: "ROCROLLER_AMDGPU_BUILD_NUMBER",
-            defaultValue: defaultValues["ROCROLLER_AMDGPU_BUILD_NUMBER"],
+            defaultValue: params?.ROCROLLER_AMDGPU_BUILD_NUMBER ?: "",
             trim: true,
             description: "Build number to use for AMDGPU"
         ),
         string(
             name: "ROCROLLER_AMDGPU_BUILD_URI",
-            defaultValue: defaultValues["ROCROLLER_AMDGPU_BUILD_URI"],
+            defaultValue: params?.ROCROLLER_AMDGPU_BUILD_URI ?: "",
             trim: true,
             description: "Specify the specific artifact path for AMDGPU"
         ),
@@ -109,12 +97,6 @@ def rocRollerDefaultParameters() {
             description: "Whether to tag the built docker image with a unique tag. WARNING: Use sparingly, each unique tag costs significant storage space."
         )
     ]
-}
-
-ci: {
-    String urlJobName = auxiliary.getTopJobName(env.BUILD_URL)
-
-    def additionalParameters = rocRollerDefaultParameters()
     auxiliary.registerAdditionalParameters(additionalParameters)
 
     def propertyList = ["enterprise":[pipelineTriggers([cron('0 1 * * 0')])]]

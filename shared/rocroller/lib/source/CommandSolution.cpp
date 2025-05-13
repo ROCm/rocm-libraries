@@ -29,6 +29,7 @@
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/ExecutableKernel.hpp>
+#include <rocRoller/ExpressionTransformations.hpp>
 #include <rocRoller/KernelArguments.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/Transforms/All.hpp>
@@ -270,6 +271,11 @@ namespace rocRoller
         return m_context->instructions()->toString();
     }
 
+    std::string CommandKernel::getKernelName() const
+    {
+        return m_name;
+    }
+
     Generator<Instruction> commandComments(CommandPtr command)
     {
         co_yield Instruction::Comment(command->toString());
@@ -377,6 +383,21 @@ namespace rocRoller
                 m_commandParameters->loopOverOutputTilesTopLoop,
                 m_context));
         }
+        if(m_commandParameters->workgroupMapping)
+        {
+            Expression::ExpressionPtr size;
+            {
+                auto arguments = m_command->getArguments();
+                auto it        = std::find_if(arguments.cbegin(), arguments.cend(), [](auto x) {
+                    return x->name() == rocRoller::WGM;
+                });
+                AssertFatal(it != arguments.cend(),
+                            "Can not find WGM Command argument required for workgroup mapping.");
+                size = std::make_shared<Expression::Expression>(*it);
+            }
+            Expression::enableDivideBy(size, m_context);
+            m_commandParameters->workgroupMapping->second = size;
+        }
         transforms.push_back(
             std::make_shared<KernelGraph::ConnectWorkgroups>(m_commandParameters, m_context));
         transforms.push_back(
@@ -392,10 +413,15 @@ namespace rocRoller
             std::make_shared<KernelGraph::SwizzleScale>(m_commandParameters, m_context));
         transforms.push_back(
             std::make_shared<KernelGraph::AddPrefetch>(m_commandParameters, m_context));
+        if(m_commandParameters->prefetch && m_commandParameters->prefetchScale)
+        {
+            transforms.push_back(
+                std::make_shared<KernelGraph::PrefetchScale>(m_commandParameters, m_context));
+        }
         transforms.push_back(std::make_shared<KernelGraph::AddF6LDSPadding>(m_context));
-        transforms.push_back(std::make_shared<KernelGraph::AddComputeIndex>());
         transforms.push_back(
             std::make_shared<KernelGraph::AddDirect2LDS>(m_context, m_commandParameters));
+        transforms.push_back(std::make_shared<KernelGraph::AddComputeIndex>());
         transforms.push_back(std::make_shared<KernelGraph::AddPRNG>(m_context));
         transforms.push_back(
             std::make_shared<KernelGraph::UpdateWavefrontParameters>(m_commandParameters));
@@ -436,7 +462,8 @@ namespace rocRoller
         m_context->kernel()->setKernelGraphMeta(m_kernelGraph);
         m_context->kernel()->setCommandMeta(m_command);
 
-        m_context->schedule(kernelInstructions(m_context, m_command, m_kernelGraph));
+        for(auto inst : kernelInstructions(m_context, m_command, m_kernelGraph))
+            m_context->schedule(inst);
     }
 
     std::vector<char> CommandKernel::assembleKernel()

@@ -28,7 +28,6 @@
 
 #include <rocRoller/KernelGraph/CoordinateGraph/CoordinateGraph.hpp>
 
-#include <rocRoller/Graph/Hypergraph.hpp>
 #include <rocRoller/KernelGraph/CoordinateGraph/CoordinateEdgeVisitor.hpp>
 
 namespace rocRoller

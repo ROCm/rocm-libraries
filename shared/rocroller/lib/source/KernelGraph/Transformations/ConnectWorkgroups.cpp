@@ -43,13 +43,26 @@ namespace rocRoller
         {
             void TileSizeInfo::recordSize(int dim, int tileNumTag, auto direction, auto expr)
             {
+                // TODO: Is there a way to make this safer?
+                //
+                // The result of, for example:
+                //
+                //     matrixSize(M) / tileSize(M)
+                //
+                // should fit within a UInt32
+                auto toUInt32 = [](Expression::ExpressionPtr expr) -> Expression::ExpressionPtr {
+                    return std::make_shared<Expression::Expression>(
+                        Expression::Convert{{.arg{expr}}, DataType::UInt32});
+                };
+
                 AssertFatal(0 <= dim && dim < 3);
 
                 if(expr != nullptr)
                 {
                     if(sizes[dim] == nullptr)
                     {
-                        sizes[dim] = expr;
+                        sizes[dim]
+                            = resultType(expr).varType != DataType::UInt32 ? toUInt32(expr) : expr;
                     }
                     else
                     {
@@ -148,6 +161,166 @@ namespace rocRoller
                 return rv;
             }
 
+            void connectWorkgroupsWithMapping(TileSizeInfo const&                  info,
+                                              rocRoller::KernelGraph::KernelGraph& graph,
+                                              int                                  dimension,
+                                              Expression::ExpressionPtr            size)
+            {
+                auto totalSize = totalNumberOfWorkgroups(info);
+                auto numDims   = workgroupDimensions(info);
+
+                AssertFatal(numDims == 2);
+                AssertFatal(dimension == 0 || dimension == 1);
+
+                for(auto direction : {GD::Downstream, GD::Upstream})
+                {
+                    // Downstream: Starting at wgTop looking down
+                    // Upstream:   Starting at wgBot looking up
+
+                    auto [_, parallel, perpendicular]
+                        = workgroupMapping(info, graph, direction, dimension, size);
+
+                    std::array<int, 2> tileNumTags = {parallel, perpendicular};
+
+                    for(auto dim = 0; dim < numDims; ++dim)
+                    {
+                        for(auto tileNumTag : info.danglers.at({dim, direction}))
+                        {
+                            if(direction == GD::Upstream)
+                            {
+                                Log::debug("KernelGraph::ConnectWorkgroups: Adding PassThrough "
+                                           "from tile {} to mapped-tile {} (size {})",
+                                           tileNumTag,
+                                           tileNumTags[dim],
+                                           toString(info.sizes[dim]));
+                                graph.coordinates.addElement(
+                                    PassThrough(), {tileNumTag}, {tileNumTags[dim]});
+                            }
+                            else
+                            {
+                                Log::debug("KernelGraph::ConnectWorkgroups: Adding PassThrough "
+                                           "from mapped-tile {} (size {}) to tile {}",
+                                           tileNumTags[dim],
+                                           toString(info.sizes[dim]),
+                                           tileNumTag);
+                                graph.coordinates.addElement(
+                                    PassThrough(), {tileNumTags[dim]}, {tileNumTag});
+                            }
+                        }
+                    }
+                }
+            }
+
+            std::tuple<int, int, int> workgroupMapping(TileSizeInfo const&                  info,
+                                                       rocRoller::KernelGraph::KernelGraph& graph,
+                                                       GD                        direction,
+                                                       uint                      dimension,
+                                                       Expression::ExpressionPtr size)
+            {
+                AssertFatal(dimension == 0 || dimension == 1);
+                AssertFatal(workgroupDimensions(info) == 2);
+
+                auto totalSize = totalNumberOfWorkgroups(info);
+                auto workgroup = graph.coordinates.addElement(Workgroup(0, totalSize));
+
+                // Downstream: Starting at workgroup looking down (forward transform)
+                // Upstream:   Starting at workgroup looking up (reverse transform)
+
+                using ExpressionPtr     = Expression::ExpressionPtr;
+                using ExpressionPtrPair = std::pair<ExpressionPtr, ExpressionPtr>;
+                using ExpressionPtrVectorPair
+                    = std::pair<std::vector<ExpressionPtr>, std::vector<ExpressionPtr>>;
+
+                auto one  = Expression::literal(1u);
+                auto zero = Expression::literal(0u);
+
+                auto PA = [](int slot) {
+                    return std::make_shared<Expression::Expression>(
+                        Expression::PositionalArgument{slot});
+                };
+
+                auto parallelSize      = info.sizes[dimension];
+                auto perpendicularSize = info.sizes[1 - dimension];
+
+                auto blockSize     = size * perpendicularSize;
+                auto bigBlockSize  = (totalSize / blockSize) * blockSize;
+                auto tailBlockSize = parallelSize % size;
+
+                auto groupNumber = graph.coordinates.addElement(Linear());
+                auto groupIndex  = graph.coordinates.addElement(Linear(size, nullptr));
+
+                auto blockNumber = graph.coordinates.addElement(Linear());
+                auto blockIndex  = graph.coordinates.addElement(Linear(perpendicularSize, nullptr));
+
+                auto bigBlockNumber = graph.coordinates.addElement(Linear());
+                auto bigBlockIndex  = graph.coordinates.addElement(Linear(bigBlockSize, nullptr));
+
+                auto tailBlockNumber = graph.coordinates.addElement(Linear());
+                auto tailBlockIndex  = graph.coordinates.addElement(Linear(tailBlockSize, nullptr));
+
+                auto parallel = graph.coordinates.addElement(Linear(parallelSize, nullptr));
+                auto perpendicular
+                    = graph.coordinates.addElement(Linear(perpendicularSize, nullptr));
+
+                // 0 argument is bigBlockNumber
+                auto condition = PA(0) == Expression::literal(0u);
+
+                ExpressionPtrVectorPair stridesParallel{{zero, size, one, zero},
+                                                        {zero, zero, zero, one}};
+                ExpressionPtrPair initialValuesParallel{nullptr, (parallelSize / size) * size};
+
+                ExpressionPtrVectorPair stridesPerpendicular{{zero, one, zero}, {zero, zero, one}};
+                ExpressionPtrPair       initialValuesPerpendicular{nullptr, nullptr};
+
+                if(direction == GD::Upstream)
+                {
+                    graph.coordinates.addElement(PiecewiseAffineJoin(condition,
+                                                                     stridesPerpendicular,
+                                                                     initialValuesPerpendicular),
+                                                 {perpendicular},
+                                                 {bigBlockNumber, blockIndex, tailBlockNumber});
+
+                    graph.coordinates.addElement(
+                        PiecewiseAffineJoin(condition, stridesParallel, initialValuesParallel),
+                        {parallel},
+                        {bigBlockNumber, blockNumber, groupIndex, tailBlockIndex});
+
+                    graph.coordinates.addElement(
+                        Flatten(), {tailBlockNumber, tailBlockIndex}, {bigBlockIndex});
+
+                    graph.coordinates.addElement(
+                        Flatten(), {blockNumber, blockIndex}, {groupNumber});
+                    graph.coordinates.addElement(Flatten(), {groupNumber, groupIndex}, {workgroup});
+                    graph.coordinates.addElement(
+                        Flatten(), {bigBlockNumber, bigBlockIndex}, {workgroup});
+                }
+                else
+                {
+                    graph.coordinates.addElement(
+                        Tile(), {workgroup}, {bigBlockNumber, bigBlockIndex});
+                    graph.coordinates.addElement(Tile(), {workgroup}, {groupNumber, groupIndex});
+                    graph.coordinates.addElement(Tile(), {groupNumber}, {blockNumber, blockIndex});
+                    graph.coordinates.addElement(
+                        Tile(), {bigBlockIndex}, {tailBlockNumber, tailBlockIndex});
+
+                    graph.coordinates.addElement(
+                        PiecewiseAffineJoin(condition, stridesParallel, initialValuesParallel),
+                        {bigBlockNumber, blockNumber, groupIndex, tailBlockIndex},
+                        {parallel});
+
+                    graph.coordinates.addElement(PiecewiseAffineJoin(condition,
+                                                                     stridesPerpendicular,
+                                                                     initialValuesPerpendicular),
+                                                 {bigBlockNumber, blockIndex, tailBlockNumber},
+                                                 {perpendicular});
+                }
+
+                if(dimension == 0)
+                    return {workgroup, parallel, perpendicular};
+
+                return {workgroup, perpendicular, parallel};
+            }
+
             int remapWorkgroupXCC(rocRoller::KernelGraph::KernelGraph& graph,
                                   int                                  workgroupTag,
                                   uint                                 numXCC)
@@ -162,6 +335,7 @@ namespace rocRoller
 
                 auto newWorkgroupTag = graph.coordinates.addElement(Workgroup(0, size));
 
+                // Upstream: newWorkgroupTag is added above workgroupTag
                 auto direction = empty(graph.coordinates.getNeighbours(workgroupTag, GD::Upstream))
                                      ? GD::Upstream
                                      : GD::Downstream;
@@ -175,13 +349,13 @@ namespace rocRoller
                 auto cu
                     = graph.coordinates.addElement(Linear(ceilDiv(size, numXCCLiteral), nullptr));
 
-                auto DF = [](int tag) {
+                auto PA = [](int slot) {
                     return std::make_shared<Expression::Expression>(
-                        Expression::DataFlowTag{tag, Register::Type::Scalar, DataType::UInt32});
+                        Expression::PositionalArgument{slot});
                 };
 
                 // 0 argument is XCC, 1 argument is CU
-                auto condition = DF(0) <= (size % numXCCLiteral);
+                auto condition = PA(0) <= (size % numXCCLiteral);
 
                 ExpressionPtrVectorPair strides{{ceilDiv(size, numXCCLiteral), one},
                                                 {size / numXCCLiteral, one}};
@@ -221,7 +395,28 @@ namespace rocRoller
             auto kgraph = original;
             auto info   = getTileSizeInfo(original);
 
-            connectWorkgroupsNoMapping(info, kgraph);
+            if(m_params->workgroupMapping)
+            {
+                auto [dimension, size] = m_params->workgroupMapping.value();
+                connectWorkgroupsWithMapping(info, kgraph, dimension, size);
+            }
+            else
+            {
+                connectWorkgroupsNoMapping(info, kgraph);
+            }
+
+            if(m_params->workgroupRemapXCC)
+            {
+                auto const& arch = m_context->targetArchitecture();
+                AssertFatal(arch.HasCapability(GPUCapability::HasXCC),
+                            "XCC-aware workgroup remapping not available on: ",
+                            arch.target().toString());
+                auto workgroupTags = kgraph.coordinates.getNodes<Workgroup>().to<std::vector>();
+                for(auto workgroupTag : workgroupTags)
+                {
+                    remapWorkgroupXCC(kgraph, workgroupTag, m_params->workgroupRemapXCC.value());
+                }
+            }
 
             return kgraph;
         }

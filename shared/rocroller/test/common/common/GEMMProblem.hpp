@@ -76,7 +76,8 @@ struct GEMMProblem
     bool betaInFma                 = true;
     bool literalStrides            = true;
 
-    bool swizzleScale = false;
+    bool swizzleScale  = false;
+    bool prefetchScale = false;
 
     bool prefetch          = false;
     int  prefetchInFlight  = 1;
@@ -94,8 +95,13 @@ struct GEMMProblem
     bool loadLDSScaleA = false;
     bool loadLDSScaleB = false;
 
+    std::pair<int, int> workgroupMapping  = {-1, -1};
+    bool                workgroupRemapXCC = false;
+
     rocRoller::Operations::ScaleMode scaleAMode = rocRoller::Operations::ScaleMode::None;
     rocRoller::Operations::ScaleMode scaleBMode = rocRoller::Operations::ScaleMode::None;
+
+    int scaleBlockSize = -1;
 
     auto operator<=>(GEMMProblem const& rhs) const = default;
 };

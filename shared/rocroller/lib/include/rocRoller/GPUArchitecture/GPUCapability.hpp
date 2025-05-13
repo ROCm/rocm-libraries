@@ -69,6 +69,7 @@ namespace rocRoller
             HasMFMA,
             HasMFMA_fp8,
             HasMFMA_f8f6f4,
+            HasMFMA_scale_f8f6f4,
             HasMFMA_f64,
             HasMFMA_bf16_32x32x4,
             HasMFMA_bf16_32x32x4_1k,
@@ -137,6 +138,9 @@ namespace rocRoller
             ArchAccUnifiedRegs,
             PackedWorkitemIDs,
 
+            HasBlockScaling32,
+            DefaultScaleBlockSize,
+
             HasXnack,
 
             UnalignedVGPRs,
@@ -158,6 +162,9 @@ namespace rocRoller
 
             WorkgroupIdxViaTTMP,
             HasBufferOutOfBoundsCheckOption,
+
+            HasXCC,
+            DefaultRemapXCCValue,
 
             Count,
         };

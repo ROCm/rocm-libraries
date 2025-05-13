@@ -26,6 +26,7 @@
 
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
+#include <rocRoller/CodeGen/Arithmetic/ArithmeticGenerator.hpp>
 #include <rocRoller/CodeGen/CopyGenerator.hpp>
 #include <rocRoller/CodeGen/MemoryInstructions.hpp>
 #include <rocRoller/CodeGen/Utils.hpp>
@@ -232,17 +233,21 @@ namespace TransposeLoadsTest
                 co_yield generateOp<Expression::Add>(vLDSPtr, vLDSBasePtr, vLinearWorkitemOffset);
             }
 
-            co_yield m_context->mem()->loadGlobal(vA0, vAPtr, /*offset*/ 0, bytesPerTrLoad);
+            co_yield m_context->mem()->loadGlobal(vA0, vAPtr, 0, bytesPerTrLoad);
             co_yield m_context->mem()->loadGlobal(vA1, vAPtr, bytesPerTrLoad, bytesPerTrLoad);
-            co_yield m_context->mem()->storeLocal(vLDSPtr, vA0, /*offset*/ 0, bytesPerTrLoad);
-            co_yield m_context->mem()->storeLocal(
-                vLDSPtr, vA1, bytesPerTrLoad + extraLdsBytes, bytesPerTrLoad);
-            co_yield m_context->mem()->barrier();
+            co_yield m_context->mem()
+                ->storeLocal(vLDSPtr, vA0, 0, bytesPerTrLoad)
+                .map(MemoryInstructions::addExtraDst(lds));
+            co_yield m_context->mem()
+                ->storeLocal(vLDSPtr, vA1, bytesPerTrLoad + extraLdsBytes, bytesPerTrLoad)
+                .map(MemoryInstructions::addExtraDst(lds));
+            co_yield_(m_context->mem()->barrier({lds}));
 
             co_yield generateOp<Expression::Multiply>(vLinearWordOffset, vWorkitemX, vBytesPerWord);
             co_yield generateOp<Expression::Add>(vTrLoadIdxAddr, vTrLoadIdxAddr, vLinearWordOffset);
-            co_yield m_context->mem()->loadGlobal(
-                vTransposeWorkitemIdx, vTrLoadIdxAddr, /*offset*/ 0, bytesPerWord);
+            co_yield m_context->mem()
+                ->loadGlobal(vTransposeWorkitemIdx, vTrLoadIdxAddr, 0, bytesPerWord)
+                .map(MemoryInstructions::addExtraSrc(lds));
             if constexpr(elementBits == 6)
             {
                 auto v128Bits16Bytes = Register::Value::Placeholder(
@@ -260,15 +265,19 @@ namespace TransposeLoadsTest
 
             co_yield generateOp<Expression::Add>(vLDSPtr, vLDSBasePtr, vTransposeOffset);
 
-            co_yield m_context->mem()->transposeLoadLocal(
-                vA0T, vLDSPtr, /*offset*/ 0, bytesPerTrLoad + extraLdsBytes, elementBits);
-            co_yield m_context->mem()->transposeLoadLocal(vA1T,
-                                                          vLDSPtr,
-                                                          /*offset*/ threadTrLoadOffset,
-                                                          bytesPerTrLoad + extraLdsBytes,
-                                                          elementBits);
+            co_yield m_context->mem()
+                ->transposeLoadLocal(
+                    vA0T, vLDSPtr, /*offset*/ 0, bytesPerTrLoad + extraLdsBytes, elementBits)
+                .map(MemoryInstructions::addExtraSrc(lds));
+            co_yield m_context->mem()
+                ->transposeLoadLocal(vA1T,
+                                     vLDSPtr,
+                                     /*offset*/ threadTrLoadOffset,
+                                     bytesPerTrLoad + extraLdsBytes,
+                                     elementBits)
+                .map(MemoryInstructions::addExtraSrc(lds));
 
-            co_yield m_context->mem()->barrier();
+            co_yield_(m_context->mem()->barrier({lds}));
             if constexpr(elementBits == 6)
             {
                 auto vLinearTRLoadBytesOffset = Register::Value::Placeholder(

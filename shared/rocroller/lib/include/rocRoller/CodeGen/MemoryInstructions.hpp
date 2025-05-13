@@ -351,14 +351,18 @@ namespace rocRoller
         Generator<Instruction> bufferLoad2LDS(Register::ValuePtr                data,
                                               std::shared_ptr<BufferDescriptor> buffDesc,
                                               BufferInstructionOptions          buffOpts,
-                                              int                               numBytes);
+                                              int                               numBytes,
+                                              Register::ValuePtr                soffset);
 
         /**
-         * @brief Generate the instructions required to add a memory barrier.
+         * @brief Generate the instructions required to add a wave synchronization barrier.
          *
          * @return Generator<Instruction>
          */
-        Generator<Instruction> barrier();
+        Generator<Instruction> barrier(CForwardRangeOf<Register::ValuePtr> auto srcs,
+                                       std::string                              comment = "");
+        Generator<Instruction> barrier(std::initializer_list<Register::ValuePtr> srcs,
+                                       std::string                               comment = "");
 
         /**
          * @brief Add the offset to a new register if the offset is greater than maxOffset allowed by the
@@ -372,8 +376,21 @@ namespace rocRoller
         Generator<Instruction>
             addLargerOffset2Addr(int& offset, Register::ValuePtr& addr, std::string inst);
 
+        /**
+     * Returns a function which can be used with Generator<Instruction>::map() to add `dst` as an extra destination operand to all memory instructions that are yielded by that generator.
+     */
+        static auto addExtraDst(Register::ValuePtr dst);
+
+        /**
+     * Returns a function which can be used with Generator<Instruction>::map() to add `src` as an extra source operand to all memory instructions that are yielded by that generator.
+     */
+        static auto addExtraSrc(Register::ValuePtr src);
+
     private:
         const int m_wordSize = 4; // in bytes
+
+        Generator<Instruction> barrierImpl(CForwardRangeOf<Register::ValuePtr> auto srcs,
+                                           std::string                              comment);
 
         std::weak_ptr<Context> m_context;
 

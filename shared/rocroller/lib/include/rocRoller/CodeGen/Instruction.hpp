@@ -30,9 +30,9 @@
 #include <string>
 
 #include <rocRoller/CodeGen/WaitCount.hpp>
-#include <rocRoller/Context_fwd.hpp>
 #include <rocRoller/InstructionValues/Register_fwd.hpp>
 #include <rocRoller/Scheduling/Scheduler_fwd.hpp>
+#include <rocRoller/Scheduling/Scheduling.hpp>
 #include <rocRoller/Utilities/Settings_fwd.hpp>
 
 namespace rocRoller
@@ -41,11 +41,11 @@ namespace rocRoller
     {
         enum
         {
-            MaxDstRegisters = 2,
-            MaxSrcRegisters = 5,
-            MaxModifiers    = 10,
-            MaxAllocations  = 4,
-            Count           = 255,
+            MaxDstRegisters   = 2,
+            MaxSrcRegisters   = 5,
+            MaxExtraRegisters = 5,
+            MaxModifiers      = 10,
+            MaxAllocations    = 4,
         };
 
         Instruction(std::string const&                        opcode,
@@ -95,8 +95,60 @@ namespace rocRoller
         static Instruction Lock(Scheduling::Dependency const& dependency, std::string comment);
         static Instruction Unlock(std::string comment);
 
-        std::array<Register::ValuePtr, MaxDstRegisters> const& getDsts() const;
-        std::array<Register::ValuePtr, MaxSrcRegisters> const& getSrcs() const;
+        /**
+         * This instruction will be considered to write `reg` even though it
+         * will not be included in the actual dst operands in the string
+         * rendering.  This will include it in the wait queue for the
+         * instruction if it's a memory instruction.
+         */
+        Instruction& addExtraDst(Register::ValuePtr reg);
+
+        /**
+         * This instruction will implicitly add a waitcnt for any pending
+         * load/stores on `reg`, without including it in the input operands for
+         * the string rendering of this instruction.
+         */
+        Instruction& addExtraSrc(Register::ValuePtr reg);
+
+        /**
+         * Returns all the destination operands that will appear in the instruction.
+         */
+        auto const& getDsts() const;
+
+        /**
+         * Returns all the source operands that will appear in the instruction.
+         */
+        auto const& getSrcs() const;
+
+        /**
+         * Returns all the 'extra' destination operands; i.e. ones that will
+         * not appear in the instruction.
+         */
+        auto const& getExtraDsts() const;
+
+        /**
+         * Returns all the 'extra' source operands; i.e. ones that will
+         * not appear in the instruction.
+         */
+        auto const& getExtraSrcs() const;
+
+        /**
+         * Yields all the destination operands, including ones that will not
+         * appear in the instruction.
+         */
+        Generator<Register::ValuePtr> getAllDsts() const;
+
+        /**
+         * Yields all the source operands, including ones that will not
+         * appear in the instruction.
+         */
+        Generator<Register::ValuePtr> getAllSrcs() const;
+
+        /**
+         * Yields all destination and source operands, including ones that will
+         * not appear in the instruction.
+         */
+        Generator<Register::ValuePtr> getAllOperands() const;
 
         bool           hasRegisters() const;
         constexpr bool readsSpecialRegisters() const;
@@ -106,10 +158,11 @@ namespace rocRoller
          * @brief Returns |currentSrc n previousDest| > 0 or |currentDest n previousDest| > 0
          *
          * @param previousDest Destination registers of previous instruction.
-         * @return Whether this instructions registers intersect with a past instructions destination registers.
+         * @return Whether this instructions registers intersect with a past
+         * instruction's destination registers.
          */
-        bool isAfterWriteDependency(
-            std::array<Register::ValuePtr, Instruction::MaxDstRegisters> const& previousDest) const;
+        template <CForwardRangeOf<Register::ValuePtr> T>
+        bool isAfterWriteDependency(T const& previousDest) const;
 
         void        toStream(std::ostream&, LogLevel level) const;
         std::string toString(LogLevel level) const;
@@ -125,7 +178,7 @@ namespace rocRoller
             return m_nopCount;
         }
 
-        Instruction lock(Scheduling::Dependency const& depedency, std::string comment);
+        Instruction lock(Scheduling::Dependency const& dependency, std::string comment);
         Instruction unlock(std::string comment);
 
         void                    addControlOp(int id);
@@ -148,6 +201,16 @@ namespace rocRoller
         std::string    getLabel() const;
 
         /**
+         * Get the status that was peeked by the Observers
+         */
+        Scheduling::InstructionStatus const& peekedStatus() const;
+
+        /**
+         * Set the status that was peeked by the Observers
+         */
+        void setPeekedStatus(Scheduling::InstructionStatus status);
+
+        /**
          * How many instructions actually executed by the GPU are included?
          * This includes the main instruction, as well as any s_nop or s_waitcnt
          * instructions attached to it.
@@ -168,12 +231,17 @@ namespace rocRoller
         void codaString(std::ostream& oss, LogLevel level) const;
 
         /**
+         * Attempts to find a pointer to the context by looking at all the operands.
+         */
+        ContextPtr findContextFromOperands() const;
+
+        /**
          * A comment detailing allocations that happened when scheduling this instruction.
          */
         void allocationString(std::ostream& oss, LogLevel level) const;
 
         /**
-         * Assembler directive(s), if this instruction contains an any.
+         * Assembler directive(s), if this instruction contains any.
          */
         void directiveString(std::ostream& oss, LogLevel level) const;
 
@@ -211,9 +279,14 @@ namespace rocRoller
         std::array<Register::ValuePtr, MaxDstRegisters> m_dst;
         std::array<Register::ValuePtr, MaxSrcRegisters> m_src;
 
+        std::array<Register::ValuePtr, MaxExtraRegisters> m_extraDsts;
+        std::array<Register::ValuePtr, MaxExtraRegisters> m_extraSrcs;
+
         std::array<std::string, MaxModifiers> m_modifiers;
 
         bool m_operandsAreInout = false;
+
+        Scheduling::InstructionStatus m_peekedStatus;
     };
 }
 

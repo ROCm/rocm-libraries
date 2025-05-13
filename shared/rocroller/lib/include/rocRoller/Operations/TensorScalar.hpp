@@ -40,7 +40,7 @@ namespace rocRoller
         {
         public:
             Literal() = delete;
-            Literal(CommandArgumentValue value);
+            explicit Literal(CommandArgumentValue value);
 
             std::string          toString() const;
             CommandArgumentValue value() const;
@@ -60,7 +60,7 @@ namespace rocRoller
         {
         public:
             Scalar() = delete;
-            Scalar(VariableType variableType);
+            explicit Scalar(VariableType variableType);
 
             std::string toString() const;
             std::string toString(const unsigned char*) const;

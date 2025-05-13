@@ -25,6 +25,8 @@
  *******************************************************************************/
 
 #include <rocRoller/Operations/Command.hpp>
+
+#include <rocRoller/Expression.hpp>
 #include <rocRoller/Operations/Operations.hpp>
 
 namespace rocRoller

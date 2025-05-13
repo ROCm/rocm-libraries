@@ -115,7 +115,7 @@ namespace GlobalLoadStoreInstructionsTest
                     const auto offset = i * 4;
                     co_yield m_context->mem()->loadGlobal(v_addr, v_data, offset, 4);
                     co_yield m_context->mem()->storeGlobal(v_result, v_addr, offset, 4);
-                    co_yield m_context->mem()->barrier();
+                    co_yield_(m_context->mem()->barrier({v_result}));
                 }
             };
 

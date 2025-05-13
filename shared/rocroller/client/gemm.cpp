@@ -91,9 +91,11 @@ struct rocRoller::Serialization::
 
         iot::mapRequired(io, "scale_A", result.solutionParams.scaleA);
         iot::mapRequired(io, "scale_B", result.solutionParams.scaleB);
+        iot::mapRequired(io, "scaleBlockSize", result.solutionParams.scaleBlockSize);
         iot::mapRequired(io, "loadLDSScale_A", result.solutionParams.loadLDSScaleA);
         iot::mapRequired(io, "loadLDSScale_B", result.solutionParams.loadLDSScaleB);
         iot::mapRequired(io, "swizzleScale", result.solutionParams.swizzleScale);
+        iot::mapRequired(io, "prefetchScale", result.solutionParams.prefetchScale);
 
         iot::mapRequired(io, "mac_m", result.solutionParams.macM);
         iot::mapRequired(io, "mac_n", result.solutionParams.macN);
@@ -104,6 +106,10 @@ struct rocRoller::Serialization::
         iot::mapRequired(io, "wave_b", result.solutionParams.waveB);
         iot::mapRequired(io, "workgroup_size_x", result.solutionParams.workgroupSizeX);
         iot::mapRequired(io, "workgroup_size_y", result.solutionParams.workgroupSizeY);
+        iot::mapRequired(io, "workgroupMapping", result.solutionParams.workgroupMapping);
+        iot::mapRequired(io, "workgroupRemapXCC", result.solutionParams.workgroupRemapXCC);
+        iot::mapRequired(
+            io, "workgroupRemapXCCValue", result.solutionParams.workgroupRemapXCCValue);
         iot::mapRequired(io, "unroll_x", result.solutionParams.unrollX);
         iot::mapRequired(io, "unroll_y", result.solutionParams.unrollY);
         iot::mapRequired(io, "loadLDS_A", result.solutionParams.loadLDSA);
@@ -114,6 +120,7 @@ struct rocRoller::Serialization::
         iot::mapRequired(io, "prefetch", result.solutionParams.prefetch);
         iot::mapRequired(io, "prefetchInFlight", result.solutionParams.prefetchInFlight);
         iot::mapRequired(io, "prefetchLDSFactor", result.solutionParams.prefetchLDSFactor);
+        iot::mapRequired(io, "prefetchMixMemOps", result.solutionParams.prefetchMixMemOps);
         iot::mapRequired(io, "betaInFma", result.solutionParams.betaInFma);
         iot::mapRequired(io, "scheduler", result.solutionParams.scheduler);
 
@@ -161,6 +168,9 @@ struct rocRoller::Serialization::MappingTraits<Client::GEMMClient::SolutionParam
         iot::mapRequired(io, "wave_b", params.waveB);
         iot::mapRequired(io, "workgroup_size_x", params.workgroupSizeX);
         iot::mapRequired(io, "workgroup_size_y", params.workgroupSizeY);
+        iot::mapRequired(io, "workgroupMapping", params.workgroupMapping);
+        iot::mapRequired(io, "workgroupRemapXCC", params.workgroupRemapXCC);
+        iot::mapRequired(io, "workgroupRemapXCCValue", params.workgroupRemapXCCValue);
         iot::mapRequired(io, "unroll_x", params.unrollX);
         iot::mapRequired(io, "unroll_y", params.unrollY);
         iot::mapRequired(io, "loadLDS_A", params.loadLDSA);
@@ -171,6 +181,7 @@ struct rocRoller::Serialization::MappingTraits<Client::GEMMClient::SolutionParam
         iot::mapRequired(io, "prefetch", params.prefetch);
         iot::mapRequired(io, "prefetchInFlight", params.prefetchInFlight);
         iot::mapRequired(io, "prefetchLDSFactor", params.prefetchLDSFactor);
+        iot::mapRequired(io, "prefetchMixMemOps", params.prefetchMixMemOps);
         iot::mapRequired(io, "betaInFma", params.betaInFma);
         iot::mapRequired(io, "scheduler", params.scheduler);
         iot::mapRequired(io, "matchMemoryAccess", params.matchMemoryAccess);
@@ -186,9 +197,11 @@ struct rocRoller::Serialization::MappingTraits<Client::GEMMClient::SolutionParam
 
         iot::mapRequired(io, "scale_A", params.scaleA);
         iot::mapRequired(io, "scale_B", params.scaleB);
+        iot::mapRequired(io, "scaleBlockSize", params.scaleBlockSize);
         iot::mapRequired(io, "loadScaleLDS_A", params.loadLDSScaleA);
         iot::mapRequired(io, "loadScaleLDS_B", params.loadLDSScaleB);
         iot::mapRequired(io, "swizzleScale", params.swizzleScale);
+        iot::mapRequired(io, "prefetchScale", params.prefetchScale);
 
         iot::mapRequired(io, "streamK", params.streamK);
         iot::mapRequired(io, "streamKTwoTile", params.streamKTwoTile);
@@ -356,11 +369,22 @@ namespace rocRoller::Client::GEMMClient
 
         if(problemParams.scaleA == Operations::ScaleMode::Separate)
         {
-            auto dataTypeA  = TypeInfo<A>::Var.dataType;
-            auto descAScale = TensorDescriptor(
-                dataTypeA,
-                {size_t(problemParams.m), size_t(problemParams.k / elementsPerMXBlock)},
-                problemParams.transA == TransposeType::T ? "T" : "N");
+            auto scaleBlockSize = problemParams.scaleBlockSize;
+            AssertFatal(scaleBlockSize != -1, "scaleBlockSize must be set to scale A.");
+            AssertFatal(arch.isSupportedScaleBlockSize(scaleBlockSize),
+                        fmt::format("Architecture {} does not support block scaling (size: {}).",
+                                    arch.target().toString(),
+                                    scaleBlockSize));
+            AssertFatal(problemParams.k % scaleBlockSize == 0,
+                        fmt::format("K: {} must be a multiple of the scale block size: {}",
+                                    problemParams.k,
+                                    scaleBlockSize));
+            auto dataTypeA = TypeInfo<A>::Var.dataType;
+            auto descAScale
+                = TensorDescriptor(dataTypeA,
+                                   {static_cast<size_t>(problemParams.m),
+                                    static_cast<size_t>(problemParams.k / scaleBlockSize)},
+                                   problemParams.transA == TransposeType::T ? "T" : "N");
             auto [aScaleTag, bScaleTag] = gemm->getABScaleTags();
             setCommandTensorArg(commandArgs, aScaleTag.value(), descAScale, deviceScaleA.get());
         }
@@ -375,11 +399,22 @@ namespace rocRoller::Client::GEMMClient
 
         if(problemParams.scaleB == Operations::ScaleMode::Separate)
         {
-            auto dataTypeB  = TypeInfo<A>::Var.dataType;
-            auto descBScale = TensorDescriptor(
-                dataTypeB,
-                {size_t(problemParams.k / elementsPerMXBlock), size_t(problemParams.n)},
-                problemParams.transB == TransposeType::T ? "T" : "N");
+            auto scaleBlockSize = problemParams.scaleBlockSize;
+            AssertFatal(scaleBlockSize != -1, "scaleBlockSize must be set to scale B.");
+            AssertFatal(arch.isSupportedScaleBlockSize(scaleBlockSize),
+                        fmt::format("Architecture {} does not support block scaling (size: {}).",
+                                    arch.target().toString(),
+                                    scaleBlockSize));
+            AssertFatal(problemParams.k % scaleBlockSize == 0,
+                        fmt::format("K: {} must be a multiple of the scale block size: {}",
+                                    problemParams.k,
+                                    scaleBlockSize));
+            auto dataTypeB = TypeInfo<A>::Var.dataType;
+            auto descBScale
+                = TensorDescriptor(dataTypeB,
+                                   {static_cast<size_t>(problemParams.k / scaleBlockSize),
+                                    static_cast<size_t>(problemParams.n)},
+                                   problemParams.transB == TransposeType::T ? "T" : "N");
             auto [aScaleTag, bScaleTag] = gemm->getABScaleTags();
             setCommandTensorArg(commandArgs, bScaleTag.value(), descBScale, deviceScaleB.get());
         }
@@ -640,12 +675,6 @@ namespace rocRoller::Client::GEMMClient
 
         auto const& arch = context->targetArchitecture().target();
 
-        if(arch.isRDNA4GPU())
-        {
-            std::cout << "FIXME: Client tests are disabled on " << arch.toString() << std::endl;
-            return {nullptr, ReturnCodes::SolutionNotSupportedOnArch};
-        }
-
         if(solution.streamK)
         {
             if(context->targetArchitecture().HasCapability(GPUCapability::ArchAccUnifiedRegs))
@@ -686,6 +715,8 @@ namespace rocRoller::Client::GEMMClient
 
         Operations::ScaleMode scaleA = Operations::ScaleMode::None;
         Operations::ScaleMode scaleB = Operations::ScaleMode::None;
+
+        int scaleBlockSize = -1;
     };
 
     struct IOParameters
@@ -963,19 +994,128 @@ namespace rocRoller::Client::GEMMClient
         }
         if((types.scaleA != solution.scaleA) || (types.scaleA != solution.scaleB))
         {
-            std::cout << "NOTE: MX Scalings been superceded by solution." << std::endl;
+            std::cout << "NOTE: MX Scalings have been superceded by solution." << std::endl;
+        }
+        if(types.scaleBlockSize != solution.scaleBlockSize)
+        {
+            std::cout << "NOTE: MX scale block size has been superceded by solution." << std::endl;
         }
 
-        types.typeA   = solution.typeA;
-        types.typeB   = solution.typeB;
-        types.typeC   = solution.typeC;
-        types.typeD   = solution.typeD;
-        types.typeAcc = solution.typeAcc;
-        types.transA  = solution.transA;
-        types.transB  = solution.transB;
-        types.scaleA  = solution.scaleA;
-        types.scaleB  = solution.scaleB;
+        types.typeA          = solution.typeA;
+        types.typeB          = solution.typeB;
+        types.typeC          = solution.typeC;
+        types.typeD          = solution.typeD;
+        types.typeAcc        = solution.typeAcc;
+        types.transA         = solution.transA;
+        types.transB         = solution.transB;
+        types.scaleA         = solution.scaleA;
+        types.scaleB         = solution.scaleB;
+        types.scaleBlockSize = solution.scaleBlockSize;
     }
+}
+
+constexpr bool PARSE_SUCCESS = true;
+constexpr bool PARSE_FAILURE = false;
+
+static bool ParseMI(const std::string&                                 arg,
+                    rocRoller::Client::GEMMClient::SolutionParameters& solution)
+{
+    if(arg.empty())
+        return PARSE_FAILURE;
+
+    bool fail = false;
+    try
+    {
+        std::istringstream iss(arg);
+        std::string        token;
+
+        iss.exceptions(std::ifstream::eofbit | std::ifstream::failbit | std::ifstream::badbit);
+        std::getline(iss, token, 'x');
+        solution.waveM = std::stoi(token);
+        std::getline(iss, token, 'x');
+        solution.waveN = std::stoi(token);
+        std::getline(iss, token, 'x');
+        solution.waveK = std::stoi(token);
+        iss.exceptions(std::ifstream::failbit | std::ifstream::badbit);
+        std::getline(iss, token, 'x');
+        solution.waveB = std::stoi(token);
+    }
+    catch(const std::invalid_argument&)
+    {
+        fail = true;
+    }
+    catch(const std::ios_base::failure&)
+    {
+        fail = true;
+    }
+
+    fail |= (solution.waveM < 1) || (solution.waveN < 1) || (solution.waveK < 1)
+            || (solution.waveB < 1);
+
+    if(fail)
+    {
+        std::cerr << "Invalid format for MI instruction." << std::endl;
+        std::cerr << std::endl;
+        std::cerr << "The MI argument should be formatted like:" << std::endl;
+        std::cerr << std::endl;
+        std::cerr << "    --mi=MxNxKxB" << std::endl;
+        std::cerr << std::endl;
+        std::cerr << "For example: --mi=32x32x2x1" << std::endl;
+
+        return PARSE_FAILURE;
+    }
+
+    return PARSE_SUCCESS;
+}
+
+static bool ParseWorkgroupMapping(const std::string&                                 arg,
+                                  rocRoller::Client::GEMMClient::SolutionParameters& solution)
+{
+    if(arg.empty())
+        return PARSE_FAILURE;
+
+    bool fail = false;
+    try
+    {
+        std::istringstream iss(arg);
+        std::string        token;
+
+        iss.exceptions(std::ifstream::eofbit | std::ifstream::failbit | std::ifstream::badbit);
+        std::getline(iss, token, ',');
+        auto dim = std::stoi(token);
+        iss.exceptions(std::ifstream::failbit | std::ifstream::badbit);
+        std::getline(iss, token, ',');
+        auto size                 = std::stoi(token);
+        solution.workgroupMapping = {dim, size};
+
+        fail |= (dim != -1 && dim != 0 && dim != 1);
+        fail |= (size != -1 && size < 1);
+    }
+    catch(const std::invalid_argument&)
+    {
+        fail = true;
+    }
+    catch(const std::ios_base::failure&)
+    {
+        fail = true;
+    }
+
+    if(fail)
+    {
+        std::cerr << "Invalid format for workgroupMapping." << std::endl;
+        std::cerr << std::endl;
+        std::cerr << "The workgroupMapping argument should be formatted like:" << std::endl;
+        std::cerr << std::endl;
+        std::cerr << "    --workgroupMapping=d,s" << std::endl;
+        std::cerr << std::endl;
+        std::cerr << "where d is 0 or 1, and s is a positive integer." << std::endl;
+        std::cerr << std::endl;
+        std::cerr << "For example: --workgroupMapping=0,6" << std::endl;
+
+        return PARSE_FAILURE;
+    }
+
+    return PARSE_SUCCESS;
 }
 
 /*
@@ -1002,16 +1142,22 @@ int main(int argc, const char* argv[])
         .waveK = -1,
         .waveB = -1,
 
-        .workgroupSizeX = 128,
-        .workgroupSizeY = 2,
+        .workgroupSizeX         = 128,
+        .workgroupSizeY         = 2,
+        .workgroupMapping       = {-1, -1},
+        .workgroupRemapXCC      = false,
+        .workgroupRemapXCCValue = -1,
 
         .scaleA = Operations::ScaleMode::None,
         .scaleB = Operations::ScaleMode::None,
 
+        .scaleBlockSize = -1,
+
         .loadLDSScaleA = false,
         .loadLDSScaleB = false,
 
-        .swizzleScale = false,
+        .swizzleScale  = false,
+        .prefetchScale = false,
 
         .loadLDSA  = true,
         .loadLDSB  = true,
@@ -1023,6 +1169,7 @@ int main(int argc, const char* argv[])
         .prefetch          = false,
         .prefetchInFlight  = 0,
         .prefetchLDSFactor = 0,
+        .prefetchMixMemOps = false,
 
         .betaInFma = true,
 
@@ -1141,6 +1288,9 @@ int main(int argc, const char* argv[])
         },
         "Enable MX scaling of B matrix [None | Separate | SingleScale].",
         "Default: None.");
+    app.add_option("--scaleBlockSize",
+                   types.scaleBlockSize,
+                   "Set MX scaling block size for A and B. (default: 32)");
 
     //
     // Kernel options
@@ -1156,58 +1306,22 @@ int main(int argc, const char* argv[])
 
     app.add_option(
         "--mi",
-        [&solution](auto res) -> bool {
-            auto mi = res[0];
-            if(!mi.empty())
-            {
-                bool fail = false;
-                try
-                {
-                    std::istringstream iss(mi);
-                    std::string        token;
-
-                    iss.exceptions(std::ifstream::eofbit | std::ifstream::failbit
-                                   | std::ifstream::badbit);
-                    std::getline(iss, token, 'x');
-                    solution.waveM = std::stoi(token);
-                    std::getline(iss, token, 'x');
-                    solution.waveN = std::stoi(token);
-                    std::getline(iss, token, 'x');
-                    solution.waveK = std::stoi(token);
-                    iss.exceptions(std::ifstream::failbit | std::ifstream::badbit);
-                    std::getline(iss, token, 'x');
-                    solution.waveB = std::stoi(token);
-                }
-                catch(const std::invalid_argument&)
-                {
-                    fail = true;
-                }
-                catch(const std::ios_base::failure&)
-                {
-                    fail = true;
-                }
-                fail |= (solution.waveM < 1) || (solution.waveN < 1) || (solution.waveK < 1)
-                        || (solution.waveB < 1);
-                if(fail)
-                {
-                    std::cout << "Invalid format for MI instruction." << std::endl;
-                    std::cout << std::endl;
-                    std::cout << "The MI argument should be formatted like:" << std::endl;
-                    std::cout << std::endl;
-                    std::cout << "    --mi=MxNxKxB" << std::endl;
-                    std::cout << std::endl;
-                    std::cout << "For example: --mi=32x32x2x1" << std::endl;
-                }
-                return !fail;
-            }
-            return false;
-        },
+        [&solution](auto& args) -> bool { return ParseMI(args[0], solution); },
         "MI instruction to use.  Default 32x32x2x1 for floats, 32x32x8x1 for halfs.");
 
     app.add_option(
         "--workgroup_size_x", solution.workgroupSizeX, "Workgroup size in the x dimension.");
     app.add_option(
         "--workgroup_size_y", solution.workgroupSizeY, "Workgroup size in the y dimension.");
+    app.add_option(
+        "--workgroupMapping",
+        [&solution](auto& args) -> bool { return ParseWorkgroupMapping(args[0], solution); },
+        "Workgroup mapping dimension and size.");
+    app.add_flag(
+        "--workgroupRemapXCC", solution.workgroupRemapXCC, "Use an XCC-aware workgroup remapping.");
+    app.add_option("--workgroupRemapXCCValue",
+                   solution.workgroupRemapXCCValue,
+                   "Force an XCC-aware workgroup remapping value. (Optional)");
     app.add_option("--unroll_x", solution.unrollX, "Unroll size in X.");
     app.add_option("--unroll_y", solution.unrollY, "Unroll size in Y.");
     app.add_flag("--loadLDS_A", solution.loadLDSA, "Use LDS when loading A.");
@@ -1228,6 +1342,10 @@ int main(int argc, const char* argv[])
     app.add_option("--prefetchLDSFactor",
                    solution.prefetchLDSFactor,
                    "Prefetch 1/prefetchLDSFactor of MacroTile from LDS");
+    auto prefetchMixMemOpsFlag
+        = app.add_flag("--prefetchMixMemOps",
+                       solution.prefetchMixMemOps,
+                       "Mix global and LDS memory operations during prefetching.");
     app.add_flag("--streamK", solution.streamK, "Enable StreamK algorithm.");
     app.add_flag("--streamKTwoTile", solution.streamKTwoTile, "Enable two-tile StreamK algorithm.");
 
@@ -1236,6 +1354,9 @@ int main(int argc, const char* argv[])
 
     app.add_flag(
         "--swizzleScale", solution.swizzleScale, "Use Swizzle when loading A and B scale.");
+    app.add_flag("--prefetchScale",
+                 solution.prefetchScale,
+                 "Prefetch scale values with using Swizzled scales.");
 
     //
     // Benchmarking options
@@ -1409,28 +1530,45 @@ int main(int argc, const char* argv[])
         problem.scaleValueA = 1.0f;
     }
 
+    auto const& arch = GPUArchitectureLibrary::getInstance()->GetArch(solution.architecture);
+    if(types.scaleBlockSize == -1
+       && (types.scaleA == Operations::ScaleMode::Separate
+           || types.scaleB == Operations::ScaleMode::Separate))
+    {
+        AssertFatal(arch.HasCapability(GPUCapability::HasBlockScaling32),
+                    fmt::format("Architecture {} does not support block scaling.",
+                                arch.target().toString()));
+        types.scaleBlockSize   = arch.GetCapability(GPUCapability::DefaultScaleBlockSize);
+        problem.scaleBlockSize = types.scaleBlockSize;
+    }
+
     AssertFatal((types.typeAcc == "float") || (types.typeAcc == "half")
                 || (types.typeAcc == "bf16"));
 
-    problem.typeA   = types.typeA;
-    problem.typeB   = types.typeB;
-    problem.typeC   = types.typeC;
-    problem.typeD   = types.typeD;
-    problem.typeAcc = types.typeAcc;
-    problem.transA  = types.transA;
-    problem.transB  = types.transB;
-    problem.scaleA  = types.scaleA;
-    problem.scaleB  = types.scaleB;
+    problem.typeA          = types.typeA;
+    problem.typeB          = types.typeB;
+    problem.typeC          = types.typeC;
+    problem.typeD          = types.typeD;
+    problem.typeAcc        = types.typeAcc;
+    problem.transA         = types.transA;
+    problem.transB         = types.transB;
+    problem.scaleA         = types.scaleA;
+    problem.scaleB         = types.scaleB;
+    problem.scaleBlockSize = types.scaleBlockSize;
 
-    solution.typeA   = types.typeA;
-    solution.typeB   = types.typeB;
-    solution.typeC   = types.typeC;
-    solution.typeD   = types.typeD;
-    solution.typeAcc = types.typeAcc;
-    solution.transA  = types.transA;
-    solution.transB  = types.transB;
-    solution.scaleA  = types.scaleA;
-    solution.scaleB  = types.scaleB;
+    solution.typeA          = types.typeA;
+    solution.typeB          = types.typeB;
+    solution.typeC          = types.typeC;
+    solution.typeD          = types.typeD;
+    solution.typeAcc        = types.typeAcc;
+    solution.transA         = types.transA;
+    solution.transB         = types.transB;
+    solution.scaleA         = types.scaleA;
+    solution.scaleB         = types.scaleB;
+    solution.scaleBlockSize = types.scaleBlockSize;
+
+    // TODO: Reevaluate the relationship between problem and solution params.
+    problem.workgroupMapping = solution.workgroupMapping;
 
     run.check = !noCheckResult;
 
@@ -1438,51 +1576,130 @@ int main(int argc, const char* argv[])
     io.doSaveCO  = coOption->count() > 0;
 
     // Set default MI sizes
-    if(problem.typeA == "float" && problem.typeB == "float" && problem.typeC == "float"
-       && problem.typeD == "float")
+    if(arch.HasCapability(GPUCapability::HasMFMA))
     {
-        if(solution.waveM == -1)
-            solution.waveM = 32;
-        if(solution.waveN == -1)
-            solution.waveN = 32;
-        if(solution.waveK == -1)
-            solution.waveK = 2;
-        if(solution.waveB == -1)
-            solution.waveB = 1;
+        if(problem.typeA == "float" && problem.typeB == "float" && problem.typeC == "float"
+           && problem.typeD == "float")
+        {
+            if(solution.waveM == -1)
+                solution.waveM = 32;
+            if(solution.waveN == -1)
+                solution.waveN = 32;
+            if(solution.waveK == -1)
+                solution.waveK = 2;
+            if(solution.waveB == -1)
+                solution.waveB = 1;
+        }
+        else if(solution.typeA == "half" && solution.typeB == "half")
+        {
+            if(solution.waveM == -1)
+                solution.waveM = 32;
+            if(solution.waveN == -1)
+                solution.waveN = 32;
+            if(solution.waveK == -1)
+                solution.waveK = 8;
+            if(solution.waveB == -1)
+                solution.waveB = 1;
+        }
+        else if(solution.typeA == "bf16" && solution.typeB == "bf16")
+        {
+            if(solution.waveM == -1)
+                solution.waveM = 16;
+            if(solution.waveN == -1)
+                solution.waveN = 16;
+            if(solution.waveK == -1)
+                solution.waveK = 8;
+            if(solution.waveB == -1)
+                solution.waveB = 1;
+        }
+        else if((solution.typeA == "fp8" && solution.typeB == "fp8")
+                || (solution.typeA == "bf8" && solution.typeB == "bf8"))
+        {
+            if(solution.waveM == -1)
+                solution.waveM = 16;
+            if(solution.waveN == -1)
+                solution.waveN = 16;
+            if(solution.waveK == -1)
+                solution.waveK = 32;
+            if(solution.waveB == -1)
+                solution.waveB = 1;
+        }
     }
-    else if(solution.typeA == "half" && solution.typeB == "half")
+    else if(arch.HasCapability(GPUCapability::HasWMMA))
     {
-        if(solution.waveM == -1)
-            solution.waveM = 32;
-        if(solution.waveN == -1)
-            solution.waveN = 32;
-        if(solution.waveK == -1)
-            solution.waveK = 8;
-        if(solution.waveB == -1)
-            solution.waveB = 1;
+        if(arch.target().isRDNA4GPU())
+        {
+            if((solution.typeA == "half" && solution.typeB == "half")
+               || (solution.typeA == "bf16" && solution.typeB == "bf16")
+               || (solution.typeA == "fp8" && solution.typeB == "fp8")
+               || (solution.typeA == "bf8" && solution.typeB == "bf8")
+               || (solution.typeA == "bf8" && solution.typeB == "fp8")
+               || (solution.typeA == "fp8" && solution.typeB == "bf8"))
+            {
+                if(solution.waveM == -1)
+                    solution.waveM = 16;
+                if(solution.waveN == -1)
+                    solution.waveN = 16;
+                if(solution.waveK == -1)
+                    solution.waveK = 16;
+                if(solution.waveB == -1)
+                    solution.waveB = 1;
+            }
+            else
+            {
+                // Override default settings for the `example` and `generate` subcommands.
+                if(example->parsed() || generate->parsed())
+                {
+                    solution.typeA = "half";
+                    solution.typeB = "half";
+                    solution.typeC = "half";
+                    solution.typeD = "half";
+                    solution.waveM = 16;
+                    solution.waveN = 16;
+                    solution.waveK = 16;
+                    solution.waveB = 1;
+                }
+                else
+                {
+                    Throw<FatalError>("Unsupported MI on: ",
+                                      arch.target().toString(),
+                                      ShowValue(problem.typeA),
+                                      ShowValue(problem.typeB),
+                                      ShowValue(problem.typeC),
+                                      ShowValue(problem.typeD),
+                                      ShowValue(problem.typeAcc));
+                }
+            }
+            // TODO Support prefetch on gfx12
+            solution.prefetch = false;
+        }
+        else
+        {
+            Throw<FatalError>("Unsupported arch for GEMM client: ", arch.target().toString());
+        }
     }
-    else if(solution.typeA == "bf16" && solution.typeB == "bf16")
+    else
     {
-        if(solution.waveM == -1)
-            solution.waveM = 16;
-        if(solution.waveN == -1)
-            solution.waveN = 16;
-        if(solution.waveK == -1)
-            solution.waveK = 8;
-        if(solution.waveB == -1)
-            solution.waveB = 1;
+        Throw<FatalError>("Unsupported arch for GEMM client: ", arch.target().toString());
     }
-    else if((solution.typeA == "fp8" && solution.typeB == "fp8")
-            || (solution.typeA == "bf8" && solution.typeB == "bf8"))
+
+    // Set default prefetchMixMemOps
+    if(prefetchMixMemOpsFlag->count() == 0)
     {
-        if(solution.waveM == -1)
-            solution.waveM = 16;
-        if(solution.waveN == -1)
-            solution.waveN = 16;
-        if(solution.waveK == -1)
-            solution.waveK = 32;
-        if(solution.waveB == -1)
-            solution.waveB = 1;
+        solution.prefetchMixMemOps = false;
+
+        if(solution.prefetchLDSFactor != 0)
+            solution.prefetchMixMemOps = true;
+
+        if(solution.scaleB == Operations::ScaleMode::Separate && !solution.loadLDSScaleB)
+            solution.prefetchMixMemOps = false;
+
+        if(solution.scaleA == Operations::ScaleMode::Separate && !solution.loadLDSScaleA)
+            solution.prefetchMixMemOps = false;
+
+        // TODO: enable (prefetchMixMemOps == true && prefetchLDSFactor == 2 && direct2LDSA/B = true)
+        if(solution.prefetchLDSFactor == 2 && (solution.direct2LDSA || solution.direct2LDSB))
+            solution.prefetchMixMemOps = false;
     }
 
     //

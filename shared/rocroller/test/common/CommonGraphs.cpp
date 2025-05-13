@@ -77,8 +77,7 @@ namespace rocRollerTest::Graphs
 
         if(m_aMode == Operations::ScaleMode::Separate)
         {
-            auto scaleA
-                = m_command->addOperation(rocRoller::Operations::Tensor(2, DataType::UInt8));
+            auto scaleA = m_command->addOperation(rocRoller::Operations::Tensor(2, DataType::E8M0));
             m_tagScaleA = m_command->addOperation(rocRoller::Operations::T_Load_Tiled(scaleA));
 
             tagA = m_command->addOperation(
@@ -91,8 +90,7 @@ namespace rocRollerTest::Graphs
 
         if(m_bMode == Operations::ScaleMode::Separate)
         {
-            auto scaleB
-                = m_command->addOperation(rocRoller::Operations::Tensor(2, DataType::UInt8));
+            auto scaleB = m_command->addOperation(rocRoller::Operations::Tensor(2, DataType::E8M0));
             m_tagScaleB = m_command->addOperation(rocRoller::Operations::T_Load_Tiled(scaleB));
 
             tagB = m_command->addOperation(

@@ -39,6 +39,7 @@ from typing import Dict, Tuple, Optional
 import pandas as pd
 import rrperf
 import rrperf.args as args
+import rrperf.utils as utils
 import yaml
 
 
@@ -189,7 +190,7 @@ def run_problems(
             if p.returncode == 0:
                 status = "ok"
             elif p.returncode == SOLUTION_NOT_SUPPORTED_ON_ARCH:
-                status = "skipped (not support on arch)"
+                status = "skipped (not supported on " + utils.rocm_gfx() + ")"
             else:
                 status = "error"
                 result = False
@@ -277,7 +278,7 @@ def run_cli(
         rrperf.rocm_control.pin_clocks(rocm_smi)
 
     if suite is None and token is None:
-        suite = "all"
+        suite = "all_gfx120X" if utils.rocm_gfx().startswith("gfx120") else "all"
 
     generator = empty()
     if suite is not None:

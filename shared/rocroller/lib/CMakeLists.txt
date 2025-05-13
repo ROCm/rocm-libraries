@@ -201,6 +201,7 @@ set(rocroller_src
     source/KernelGraph/Transformations/LowerTile.cpp
     source/KernelGraph/Transformations/OrderEpilogueBlocks.cpp
     source/KernelGraph/Transformations/OrderMemory.cpp
+    source/KernelGraph/Transformations/PrefetchScale.cpp
     source/KernelGraph/Transformations/RemoveDuplicates.cpp
     source/KernelGraph/Transformations/Simplify.cpp
     source/KernelGraph/Transformations/SwizzleScale.cpp
@@ -214,6 +215,7 @@ set(rocroller_src
     source/Observers/DGEMM16x16x4Write.cpp
     source/Observers/DGEMM4x4x4Write.cpp
     source/Observers/DLWrite.cpp
+    source/Observers/MEMObserver.cpp
     source/Observers/MFMAObserver.cpp
     source/Observers/OPSEL94x.cpp
     source/Observers/ObserverCreation.cpp
@@ -240,6 +242,7 @@ set(rocroller_src
 
     source/Operations/BlockScale.cpp
     source/Operations/Command.cpp
+    source/Operations/CommandArgument.cpp
     source/Operations/Operation.cpp
     source/Operations/RandomNumberGenerator.cpp
     source/Operations/T_LoadStore.cpp

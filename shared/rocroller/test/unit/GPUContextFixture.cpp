@@ -45,7 +45,7 @@ void BaseGPUContextFixture::SetUp()
 
     if(!isLocalDevice())
     {
-        Settings::getInstance()->set(Settings::AllowUnkownInstructions, true);
+        Settings::getInstance()->set(Settings::AllowUnknownInstructions, true);
     }
     ContextFixture::SetUp();
 

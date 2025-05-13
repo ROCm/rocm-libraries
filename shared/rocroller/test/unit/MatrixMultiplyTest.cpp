@@ -56,8 +56,6 @@ using namespace rocRoller;
 
 namespace MatrixMultiplyTest
 {
-    static int const ScaleBlockSize = 32;
-
     template <typename T>
     concept isF8 = std::is_same_v<T, FP8> || std::is_same_v<T, BF8>;
 
@@ -120,11 +118,12 @@ namespace MatrixMultiplyTest
                                      int         wave_n,
                                      int         wave_k,
                                      int         wave_b,
-                                     bool        useLDSB = true,
-                                     std::string transA  = "N",
-                                     std::string transB  = "N",
-                                     bool        scaleA  = false,
-                                     bool        scaleB  = false)
+                                     bool        useLDSB        = true,
+                                     std::string transA         = "N",
+                                     std::string transB         = "N",
+                                     bool        scaleA         = false,
+                                     bool        scaleB         = false,
+                                     const uint  scaleBlockSize = 32)
         {
             commandKernel = nullptr;
 
@@ -137,6 +136,11 @@ namespace MatrixMultiplyTest
             if constexpr(isF6F4<TA> || isF6F4<TB>)
             {
                 REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+            }
+
+            if(scaleA || scaleB)
+            {
+                REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_scale_f8f6f4);
             }
 
             auto dataTypeA   = TypeInfo<TA>::Var.dataType;
@@ -210,7 +214,7 @@ namespace MatrixMultiplyTest
             if(scaleA)
             {
                 tagTensorScaleA = command->addOperation(rocRoller::Operations::Tensor(
-                    2, DataType::UInt8, transA == "N" ? unitStridesN : unitStridesT));
+                    2, DataType::E8M0, transA == "N" ? unitStridesN : unitStridesT));
                 tagLoadScaleA
                     = command->addOperation(rocRoller::Operations::T_Load_Tiled(*tagTensorScaleA));
             }
@@ -218,7 +222,7 @@ namespace MatrixMultiplyTest
             if(scaleB)
             {
                 tagTensorScaleB = command->addOperation(rocRoller::Operations::Tensor(
-                    2, DataType::UInt8, transB == "N" ? unitStridesN : unitStridesT));
+                    2, DataType::E8M0, transB == "N" ? unitStridesN : unitStridesT));
                 tagLoadScaleB
                     = command->addOperation(rocRoller::Operations::T_Load_Tiled(*tagTensorScaleB));
             }
@@ -236,10 +240,16 @@ namespace MatrixMultiplyTest
             {
                 ASSERT_TRUE(scaleB);
 
+                AssertFatal(
+                    arch.isSupportedScaleBlockSize(scaleBlockSize),
+                    fmt::format("Architecture {} does not support block scaling (size: {}).",
+                                arch.target().toString(),
+                                scaleBlockSize));
+
                 auto scaledA = command->addOperation(rocRoller::Operations::BlockScale(
-                    tagLoadA, 2, tagLoadScaleA, {1, ScaleBlockSize}));
+                    tagLoadA, 2, tagLoadScaleA, {1, scaleBlockSize}));
                 auto scaledB = command->addOperation(rocRoller::Operations::BlockScale(
-                    tagLoadB, 2, tagLoadScaleB, {ScaleBlockSize, 1}));
+                    tagLoadB, 2, tagLoadScaleB, {scaleBlockSize, 1}));
 
                 tagStoreD = command->addOperation(
                     rocRoller::Operations::T_Mul(scaledA, scaledB, dataTypeAcc)); // D = A * B
@@ -269,10 +279,14 @@ namespace MatrixMultiplyTest
 
             if(scaleA)
             {
+                AssertFatal(wave_k % scaleBlockSize == 0,
+                            fmt::format("wave_k: {} must be a multiple of the scale block size: {}",
+                                        wave_k,
+                                        scaleBlockSize));
                 auto macTileScaleA = KernelGraph::CoordinateGraph::MacroTile(
-                    {mac_m, mac_k / ScaleBlockSize},
+                    {mac_m, static_cast<int>(mac_k / scaleBlockSize)},
                     LayoutType::MATRIX_A,
-                    {wave_m, wave_n, wave_k / ScaleBlockSize, wave_b},
+                    {wave_m, wave_n, static_cast<int>(wave_k / scaleBlockSize), wave_b},
                     MemoryType::WAVE);
                 params->setDimensionInfo(tagLoadScaleA.value(), macTileScaleA);
             }
@@ -286,10 +300,14 @@ namespace MatrixMultiplyTest
 
             if(scaleB)
             {
+                AssertFatal(wave_k % scaleBlockSize == 0,
+                            fmt::format("wave_k: {} must be a multiple of the scale block size: {}",
+                                        wave_k,
+                                        scaleBlockSize));
                 auto macTileScaleB = KernelGraph::CoordinateGraph::MacroTile(
-                    {mac_k / ScaleBlockSize, mac_n},
+                    {static_cast<int>(mac_k / scaleBlockSize), mac_n},
                     LayoutType::MATRIX_B,
-                    {wave_m, wave_n, wave_k / ScaleBlockSize, wave_b},
+                    {wave_m, wave_n, static_cast<int>(wave_k / scaleBlockSize), wave_b},
                     MemoryType::WAVE);
                 params->setDimensionInfo(tagLoadScaleB.value(), macTileScaleB);
             }
@@ -306,16 +324,14 @@ namespace MatrixMultiplyTest
                 TensorDescriptor descA(dataTypeA, {M, K}, transA);
                 TensorDescriptor descB(dataTypeB, {K, N}, transB);
                 TensorDescriptor descD(dataTypeD, {M, N}, {1u, M});
-                TensorDescriptor descScaleA(dataTypeA, {M, K / ScaleBlockSize}, transA);
-                TensorDescriptor descScaleB(dataTypeB, {K / ScaleBlockSize, N}, transB);
 
                 float rangeA = range<TA>();
                 float rangeB = range<TB>();
 
                 uint32_t seed = 9861u;
 
-                auto       blockScalingA = (scaleA) ? ScaleBlockSize : 1;
-                auto       blockScalingB = (scaleB) ? ScaleBlockSize : 1;
+                auto       blockScalingA = (scaleA) ? scaleBlockSize : 1;
+                auto       blockScalingB = (scaleB) ? scaleBlockSize : 1;
                 const auto dgenA
                     = getDataGenerator<TA>(descA, -rangeA, rangeA, seed, blockScalingA);
                 const auto dgenB
@@ -351,11 +367,21 @@ namespace MatrixMultiplyTest
 
                 if(scaleA)
                 {
+                    AssertFatal(K % scaleBlockSize == 0,
+                                fmt::format("K: {} must be a multiple of the scale block size: {}",
+                                            K,
+                                            scaleBlockSize));
+                    TensorDescriptor descScaleA(dataTypeA, {M, K / scaleBlockSize}, transA);
                     setCommandTensorArg(
                         commandArgs, tagTensorScaleA.value(), descScaleA, d_scaleA.get());
                 }
                 if(scaleB)
                 {
+                    AssertFatal(K % scaleBlockSize == 0,
+                                fmt::format("K: {} must be a multiple of the scale block size: {}",
+                                            K,
+                                            scaleBlockSize));
+                    TensorDescriptor descScaleB(dataTypeB, {K / scaleBlockSize, N}, transB);
                     setCommandTensorArg(
                         commandArgs, tagTensorScaleB.value(), descScaleB, d_scaleB.get());
                 }
@@ -1365,7 +1391,7 @@ namespace MatrixMultiplyTest
 
     TEST_P(MatrixMultiplyF8F6F4TestGPU, GPU_ScaledMatrixMultiplyMacroTileF8F6F4)
     {
-        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_scale_f8f6f4);
 
         auto [typeAB, MFMAK, transOp] = std::get<1>(GetParam());
 
@@ -1662,6 +1688,8 @@ namespace MatrixMultiplyTest
 
     TEST_P(ScaledMatrixMultiplyMixedTestGPU, GPU_ScaledMatrixMultiplyMacroTileMixed)
     {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_scale_f8f6f4);
+
         auto [typeA, typeB, MFMAK, transOp] = std::get<1>(GetParam());
 
         int waveM = (MFMAK == 128) ? 16 : 32;
@@ -1721,7 +1749,8 @@ namespace MatrixMultiplyTest
                         float       alpha,
                         double      err,
                         bool        transA,
-                        bool        transB)
+                        bool        transB,
+                        const uint  scaleBlockSize)
     {
         auto dataTypeA = TypeInfo<TA>::Var.dataType;
         auto dataTypeB = TypeInfo<TB>::Var.dataType;
@@ -1735,8 +1764,8 @@ namespace MatrixMultiplyTest
         auto D     = std::vector<float>(M * N);
         auto ref_D = std::vector<float>(M * N);
 
-        auto AX = std::vector<uint8_t>(M * K / ScaleBlockSize);
-        auto BX = std::vector<uint8_t>(K * N / ScaleBlockSize);
+        auto AX = std::vector<uint8_t>(M * K / scaleBlockSize);
+        auto BX = std::vector<uint8_t>(K * N / scaleBlockSize);
         std::fill(AX.begin(), AX.end(), scaleA);
         std::fill(BX.begin(), BX.end(), scaleB);
 
@@ -1762,18 +1791,24 @@ namespace MatrixMultiplyTest
                           float               alpha,
                           double              err,
                           bool                transA,
-                          bool                transB)
+                          bool                transB,
+                          const uint          scaleBlockSize = 32)
     {
         if(typeB == rocRoller::DataType::FP8)
-            exeScaledCPUMM<TA, FP8>(m, n, k, scaleA, scaleB, alpha, err, transA, transB);
+            exeScaledCPUMM<TA, FP8>(
+                m, n, k, scaleA, scaleB, alpha, err, transA, transB, scaleBlockSize);
         else if(typeB == rocRoller::DataType::BF8)
-            exeScaledCPUMM<TA, BF8>(m, n, k, scaleA, scaleB, alpha, err, transA, transB);
+            exeScaledCPUMM<TA, BF8>(
+                m, n, k, scaleA, scaleB, alpha, err, transA, transB, scaleBlockSize);
         else if(typeB == rocRoller::DataType::FP6)
-            exeScaledCPUMM<TA, FP6>(m, n, k, scaleA, scaleB, alpha, err, transA, transB);
+            exeScaledCPUMM<TA, FP6>(
+                m, n, k, scaleA, scaleB, alpha, err, transA, transB, scaleBlockSize);
         else if(typeB == rocRoller::DataType::BF6)
-            exeScaledCPUMM<TA, BF6>(m, n, k, scaleA, scaleB, alpha, err, transA, transB);
+            exeScaledCPUMM<TA, BF6>(
+                m, n, k, scaleA, scaleB, alpha, err, transA, transB, scaleBlockSize);
         else if(typeB == rocRoller::DataType::FP4)
-            exeScaledCPUMM<TA, FP4>(m, n, k, scaleA, scaleB, alpha, err, transA, transB);
+            exeScaledCPUMM<TA, FP4>(
+                m, n, k, scaleA, scaleB, alpha, err, transA, transB, scaleBlockSize);
         else
             Throw<FatalError>("Invalid type.");
     }

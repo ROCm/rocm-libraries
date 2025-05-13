@@ -224,6 +224,11 @@ namespace rocRoller
                 {
                     auto loadTile    = k.control.get<LoadTiled>(opTag).value();
                     isTransposedTile = loadTile.isTransposedTile;
+                    if(isDirect2LDS)
+                    {
+                        loadTile.isDirect2LDS = isDirect2LDS;
+                        k.control.setElement(opTag, loadTile);
+                    }
                 }
                 auto loadLDSOp  = k.control.addElement(LoadLDSTile(varType, isTransposedTile));
                 auto storeLDSOp = k.control.addElement(StoreLDSTile(varType.dataType));
@@ -255,9 +260,6 @@ namespace rocRoller
                 k.mapper.connect<LDS>(storeLDSOp, ldsTag);
                 k.mapper.connect<User>(loadLDSOp, userTag); // For F6 Padding
                 k.mapper.connect<LDS>(loadLDSOp, ldsTag);
-
-                if(isDirect2LDS)
-                    k.mapper.connect<LDS>(opTag, ldsTag);
 
                 if(isLoad)
                 {

@@ -258,7 +258,7 @@ namespace rocRoller
          *
          * the coordinate transform is
          *
-         *   selector = Condition(I, J)
+         *   selector = Condition(I, J) ? 0 : 1
          *   Join(I, J; F)(i, j) = i * strides[selector]_i + j * strides[selector]_j + initial[selector]
          *
          */

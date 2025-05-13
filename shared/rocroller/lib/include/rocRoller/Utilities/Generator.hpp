@@ -510,11 +510,22 @@ namespace rocRoller
         Handle m_coroutine;
     };
 
-    template <typename T, std::predicate<T> Predicate>
-    Generator<T> filter(Predicate predicate, Generator<T> gen);
+    /**
+     * Yields elements from `range` for which `predicate` returns true. Range
+     * can be a Generator or another collection or range.
+     */
+    template <std::ranges::input_range Range, typename Predicate>
+    requires(std::predicate<Predicate, std::ranges::range_value_t<Range>>)
+        Generator<std::ranges::range_value_t<Range>> filter(Predicate predicate, Range range);
 
-    template <typename T, std::invocable<T> Func>
-    Generator<std::invoke_result_t<Func, T>> map(Func func, Generator<T> gen);
+    /**
+     * Yields the result of applying `func` on each element from `range`. Range
+     * can be a Generator or another collection or range.
+     */
+    template <std::ranges::input_range Range, typename Func>
+    requires(std::invocable<Func, std::ranges::range_value_t<Range>>)
+        Generator<std::invoke_result_t<Func, std::ranges::range_value_t<Range>>> map(Func  func,
+                                                                                     Range range);
 
     /**
      * Yields the first `n` values from `gen`

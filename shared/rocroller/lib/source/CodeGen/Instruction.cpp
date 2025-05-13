@@ -29,37 +29,28 @@
 
 namespace rocRoller
 {
-    bool Instruction::requiresVnopForHazard() const
+    ContextPtr Instruction::findContextFromOperands() const
     {
         // TODO: Reevalute this method for retrieving/passing the context.
-        ContextPtr ctx = nullptr;
-        for(const auto& r : m_src)
-        {
-            if(r && r->context())
-            {
-                ctx = r->context();
-                break;
-            }
-        }
-        if(nullptr == ctx)
-        {
-            for(const auto& r : m_dst)
-            {
-                if(r && r->context())
-                {
-                    ctx = r->context();
-                    break;
-                }
-            }
-        }
-        return nullptr != ctx && ctx->targetArchitecture().target().isGFX12GPU();
+        for(auto const& reg : getAllOperands())
+            if(reg->context())
+                return reg->context();
+
+        return nullptr;
+    }
+
+    bool Instruction::requiresVnopForHazard() const
+    {
+        auto ctx = findContextFromOperands();
+
+        return ctx && ctx->targetArchitecture().target().isGFX12GPU();
     }
 
     void Instruction::codaString(std::ostream& os, LogLevel level) const
     {
         if(level >= LogLevel::Terse && m_comments.size() > 1)
         {
-            // Only include everything but the first comment in the code string.
+            // Only include everything but the first comment in the coda string.
             for(int i = 1; i < m_comments.size(); i++)
             {
                 for(auto const& line : EscapeComment(m_comments[i]))
@@ -70,26 +61,45 @@ namespace rocRoller
             }
         }
 
-        ContextPtr ctx;
-        for(auto const& r : m_src)
-            if(r && r->context())
+        if(level >= LogLevel::Info)
+        {
+            if(m_extraDsts[0])
             {
-                ctx = r->context();
-                break;
-            }
-        for(auto const& r : m_dst)
-            if(r && r->context())
-            {
-                ctx = r->context();
-                break;
+                std::string comment = "Extra dsts:";
+                for(auto const& dst : m_extraDsts)
+                {
+                    if(dst)
+                        comment += " " + dst->description();
+                }
+                for(auto const& line : EscapeComment(comment))
+                    os << line;
+                os << "\n";
             }
 
-        if(ctx && ctx->kernelOptions().logLevel >= LogLevel::Debug)
+            if(m_extraSrcs[0])
+            {
+                std::string comment = "Extra srcs:";
+                for(auto const& src : m_extraSrcs)
+                {
+                    if(src)
+                        comment += " " + src->description();
+                }
+                for(auto const& line : EscapeComment(comment))
+                    os << line;
+                os << "\n";
+            }
+        }
+
+        if(level >= LogLevel::Trace)
         {
-            auto status = ctx->observer()->peek(*this);
-            for(auto const& line : EscapeComment(status.toString()))
-                os << line;
-            os << "\n";
+            auto ctx = findContextFromOperands();
+            if(ctx)
+            {
+                auto status = ctx->observer()->peek(*this);
+                for(auto const& line : EscapeComment(status.toString()))
+                    os << line;
+                os << "\n";
+            }
         }
     }
 
@@ -106,5 +116,15 @@ namespace rocRoller
     std::vector<std::string> const& Instruction::comments() const
     {
         return m_comments;
+    }
+
+    Scheduling::InstructionStatus const& Instruction::peekedStatus() const
+    {
+        return m_peekedStatus;
+    }
+
+    void Instruction::setPeekedStatus(Scheduling::InstructionStatus status)
+    {
+        m_peekedStatus = std::move(status);
     }
 }

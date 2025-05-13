@@ -41,6 +41,7 @@ namespace rocRoller
 
     const std::string SCRATCH = "SCRATCH";
     const std::string NUMWGS  = "numWGs";
+    const std::string WGM     = "WGM";
 
     struct KernelOptions
     {

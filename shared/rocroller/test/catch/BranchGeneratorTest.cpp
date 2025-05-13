@@ -34,6 +34,7 @@
 
 #include <rocRoller/CodeGen/BranchGenerator.hpp>
 #include <rocRoller/InstructionValues/LabelAllocator.hpp>
+#include <rocRoller/Scheduling/Scheduler.hpp>
 
 using namespace rocRoller;
 
