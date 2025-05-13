@@ -650,10 +650,11 @@ def prepareLWInstToSched(writer, kernel, numLocalWritesPerSched, isNGLL=False):
     # create a plan #
     #################
     itemsLWToSched = list(writer.codes.localWriteA.items()) + list(writer.codes.localWriteB.items())
+    numDummy = 0
+    insertDummyTop = False
     if kernel["PrefetchGlobalRead"] == 2:
         # PrefetchGlobalRead + DirectToLds/DirectToVgpr case, need to add dummy list to insert global read
-        tmpList = []
-        numDummy = 0
+
         lenA = len(list(writer.codes.globalReadA.middle.items()))
         lenB = len(list(writer.codes.globalReadB.middle.items()))
         lenAFooter = len(list(writer.codes.globalReadA.footer.items()))
@@ -676,19 +677,21 @@ def prepareLWInstToSched(writer, kernel, numLocalWritesPerSched, isNGLL=False):
               lenB -= lenBFooter
             numDummy += lenB
             insertDummyTop = swapped
-        for i in range(numDummy):
-            tmpList.append(None)
-        if insertDummyTop:
-          # add dummy at the top of the list
-          itemsLWToSched = tmpList + itemsLWToSched
-        else:
-          # add dummy at the bottom of the list
-          itemsLWToSched = itemsLWToSched + tmpList
     # extend localWrite by inserting empty Module
     # See getNumLocalWritePerMfma for how this work
     itemsLWToSchedTemp = []
-    for i in range(len(itemsLWToSched)-1):
-        item = itemsLWToSched.pop(0)
+    itemsLWToSchedLength_1 = len(itemsLWToSched) - 1
+    for i in range(itemsLWToSchedLength_1 + numDummy):
+        if insertDummyTop:
+            if i < numDummy:
+                item = None
+            else:
+                item = itemsLWToSched.pop(0)
+        else:
+            if i < itemsLWToSchedLength_1:
+                item = itemsLWToSched.pop(0)
+            else:
+                item = None
         itemsLWToSchedTemp.append(item)
         skip = kernel["PrefetchGlobalRead"] == 2 and kernel["ProblemType"]["Sparse"] and kernel["DirectToVgprSparseMetadata"] \
            and item.name.startswith("MetadataWrite") and countVMovB32(item)
