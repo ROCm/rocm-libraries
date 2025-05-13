@@ -60,15 +60,14 @@ namespace rocRoller
 
         ~WaitCount() = default;
 
-        bool operator==(WaitCount a) const
+        bool operator==(WaitCount const& a) const
         {
             return a.m_loadcnt == m_loadcnt && a.m_storecnt == m_storecnt && a.m_vscnt == m_vscnt
                    && a.m_dscnt == m_dscnt && a.m_kmcnt == m_kmcnt && a.m_expcnt == m_expcnt;
         }
-        bool operator!=(WaitCount a) const
+        bool operator!=(WaitCount const& a) const
         {
-            return a.m_loadcnt != m_loadcnt || a.m_storecnt != m_storecnt || a.m_vscnt != m_vscnt
-                   || a.m_dscnt != m_dscnt || a.m_kmcnt != m_kmcnt || a.m_expcnt != m_expcnt;
+            return !(*this == a);
         }
 
         static WaitCount
@@ -91,7 +90,7 @@ namespace rocRoller
 
         static int CombineValues(int lhs, int rhs);
 
-        void combine(WaitCount const& other);
+        WaitCount& combine(WaitCount const& other);
 
         int loadcnt() const;
         int storecnt() const;
@@ -99,6 +98,11 @@ namespace rocRoller
         int dscnt() const;
         int kmcnt() const;
         int expcnt() const;
+
+        /**
+         * vmcnt is the combination of loadcnt and storecnt for non-split counters
+         */
+        int vmcnt() const;
 
         int getCount(GPUWaitQueue) const;
 
@@ -109,12 +113,12 @@ namespace rocRoller
         void setKMcnt(int value);
         void setExpcnt(int value);
 
-        void combineLoadcnt(int value);
-        void combineStorecnt(int value);
-        void combineVscnt(int value);
-        void combineDScnt(int value);
-        void combineKMcnt(int value);
-        void combineExpcnt(int value);
+        WaitCount& combineLoadcnt(int value);
+        WaitCount& combineStorecnt(int value);
+        WaitCount& combineVscnt(int value);
+        WaitCount& combineDScnt(int value);
+        WaitCount& combineKMcnt(int value);
+        WaitCount& combineExpcnt(int value);
 
         std::vector<std::string> const& comments() const;
 

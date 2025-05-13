@@ -346,7 +346,9 @@ namespace rocRoller
         }
         break;
         default:
-            Throw<FatalError>("Unsupported datatype for convert to FP8: ", ShowValue(dataType));
+            Throw<FatalError>("Unsupported datatype for convert to FP8: ",
+                              ShowValue(dataType),
+                              ShowValue(arg->description()));
         }
     }
 

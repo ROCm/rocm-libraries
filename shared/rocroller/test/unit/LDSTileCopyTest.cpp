@@ -100,66 +100,27 @@ namespace LDSCopyTest
     {
         auto loadTiledNodes    = kgraph.control.getNodes<LoadTiled>().to<std::vector>();
         auto storeLDSTileNodes = kgraph.control.getNodes<StoreLDSTile>().to<std::vector>();
-
-        AssertFatal(loadTiledNodes.size() == storeLDSTileNodes.size());
-
         for(auto loadGlobal : loadTiledNodes)
         {
-            auto globalOpChildren
-                = kgraph.control.getNeighbours<Graph::Direction::Downstream>(loadGlobal)
-                      .template to<std::vector>();
-            AssertFatal(globalOpChildren.empty());
-
             auto internalMacroTile = kgraph.mapper.get<MacroTile>(loadGlobal);
-
             for(auto storeLDS : storeLDSTileNodes)
             {
-                // find the pair of LoadTiled and StoreLDSTile operations
                 if(kgraph.mapper.get<MacroTile>(storeLDS) == internalMacroTile)
                 {
-                    // find the barrier before StoreLDSTile operation
-                    int lastTag         = -1;
-                    int computeIndexTag = -1;
-                    for(auto parent :
-                        kgraph.control.depthFirstVisit(storeLDS, Graph::Direction::Upstream))
-                    {
-                        bool containing = lastTag != -1
-                                          && (kgraph.control.get<Body>(lastTag)
-                                              || kgraph.control.get<Sequence>(lastTag));
-                        lastTag = parent;
-                        if(kgraph.control.get<ComputeIndex>(parent))
-                        {
-                            computeIndexTag = parent;
-                        }
-
-                        auto barrier = kgraph.control.get<Barrier>(parent);
-                        if(barrier && containing)
-                        {
-                            break;
-                        }
-                    }
-
                     // add LoadTileDirect2LDS operation
                     auto direct2lds
                         = kgraph.control.addElement(LoadTileDirect2LDS(DataType::UInt32));
-                    auto barrier = kgraph.control.addElement(Barrier());
-                    kgraph.control.addElement(Sequence(), {barrier}, {direct2lds});
 
-                    // move the LoadTiled and StoreLDSTile connections to Direct2LDS
-                    moveConnections(kgraph, loadGlobal, direct2lds);
-                    moveConnections(kgraph, storeLDS, direct2lds);
+                    // copy mapper connections to LoadTileDirect2LDS operation
+                    moveConnections(kgraph, loadGlobal, direct2lds, 0);
+                    moveConnections(kgraph, storeLDS, direct2lds, 2);
 
-                    // merge LoadTiled and StoreLDSTile operations
-                    AssertFatal(computeIndexTag != -1);
-                    reconnect<Graph::Direction::Upstream>(kgraph, -1, computeIndexTag);
-                    kgraph.control.addElement(Sequence(), {loadGlobal}, {computeIndexTag});
-                    kgraph.control.addElement(Sequence(), {storeLDS}, {barrier});
-
-                    replaceWith(kgraph, loadGlobal, kgraph.control.addElement(NOP()), false);
+                    // replace LoadTiled
+                    replaceWith(kgraph, loadGlobal, direct2lds, false);
                     replaceWith(kgraph, storeLDS, kgraph.control.addElement(NOP()), false);
-                    replaceWith(kgraph, lastTag, kgraph.control.addElement(NOP()), false);
 
-                    purgeNodes(kgraph, {loadGlobal, storeLDS, lastTag});
+                    // remove nodes
+                    purgeNodes(kgraph, {loadGlobal, storeLDS});
                 }
             }
         }
@@ -307,11 +268,10 @@ namespace LDSCopyTest
         auto lowerTile = std::make_shared<LowerTile>(params, m_context);
         kgraph         = kgraph.transform(lowerTile);
 
+        addDirect2LDS(kgraph);
+
         auto addComputeIndex = std::make_shared<AddComputeIndex>();
         kgraph               = kgraph.transform(addComputeIndex);
-
-        // manually add LoadTileDirect2LDS operation
-        addDirect2LDS(kgraph);
 
         auto updateWavefrontParams = std::make_shared<UpdateWavefrontParameters>(params);
         kgraph                     = kgraph.transform(updateWavefrontParams);

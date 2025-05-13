@@ -42,8 +42,6 @@ namespace rocRoller
     {
         namespace GEMMClient
         {
-            constexpr int elementsPerMXBlock = 32;
-
             /**
              * @brief Indicates whether a matrix is supplied in transposed form or not
              */
@@ -88,6 +86,10 @@ namespace rocRoller
 
                 // When scaleA/B is ScaleMode::SingleScale
                 float scaleValueA, scaleValueB;
+
+                int scaleBlockSize;
+
+                std::pair<int, int> workgroupMapping;
             };
 
             /**
@@ -112,6 +114,10 @@ namespace rocRoller
                 int workgroupSizeX = 64;
                 int workgroupSizeY = 1;
 
+                std::pair<int, int> workgroupMapping       = {-1, -1};
+                bool                workgroupRemapXCC      = false;
+                int                 workgroupRemapXCCValue = -1;
+
                 // Datatype of inputs and outputs
                 std::string typeA;
                 std::string typeB;
@@ -125,10 +131,13 @@ namespace rocRoller
                 Operations::ScaleMode scaleA;
                 Operations::ScaleMode scaleB;
 
+                int scaleBlockSize;
+
                 bool loadLDSScaleA = false;
                 bool loadLDSScaleB = false;
 
-                bool swizzleScale = false;
+                bool swizzleScale  = false;
+                bool prefetchScale = false;
 
                 // Other options
                 bool loadLDSA  = true;
@@ -141,6 +150,7 @@ namespace rocRoller
                 bool prefetch          = false;
                 int  prefetchInFlight  = 2;
                 int  prefetchLDSFactor = 0;
+                bool prefetchMixMemOps = false;
                 bool betaInFma         = true;
 
                 // Unroll Options

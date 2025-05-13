@@ -702,67 +702,132 @@ namespace MemoryInstructionsTest
 
                 // Load 8 bytes into LDS1
                 co_yield m_context->mem()->loadGlobal(v_a->subset({0}), v_ptr, 0, 1);
-                co_yield m_context->mem()->storeLocal(lds1_offset, v_a->subset({0}), 0, 1);
+                co_yield m_context->mem()
+                    ->storeLocal(lds1_offset, v_a->subset({0}), 0, 1)
+                    .map(MemoryInstructions::addExtraDst(lds1));
                 co_yield m_context->mem()->loadGlobal(v_a->subset({0}), v_ptr, 1, 1);
-                co_yield m_context->mem()->storeLocal(lds1_offset, v_a->subset({0}), 1, 1);
+                co_yield m_context->mem()
+                    ->storeLocal(lds1_offset, v_a->subset({0}), 1, 1)
+                    .map(MemoryInstructions::addExtraDst(lds1));
                 co_yield m_context->mem()->loadGlobal(v_a->subset({0}), v_ptr, 2, 2);
-                co_yield m_context->mem()->storeLocal(
-                    lds1, v_a->subset({0}), 2, 2); // Use LDS1 value instead of offset register
+
+                // Use LDS1 value instead of offset register
+                co_yield m_context->mem()
+                    ->storeLocal(lds1, v_a->subset({0}), 2, 2)
+                    .map(MemoryInstructions::addExtraDst(lds1));
+
                 co_yield m_context->mem()->loadGlobal(v_a->subset({0}), v_ptr, 4, 4);
-                co_yield m_context->mem()->storeLocal(lds1_offset, v_a->subset({0}), 4, 4);
+                co_yield m_context->mem()
+                    ->storeLocal(lds1_offset, v_a->subset({0}), 4, 4)
+                    .map(MemoryInstructions::addExtraDst(lds1));
 
                 // Load 36 bytes into LDS2
                 co_yield m_context->mem()->loadGlobal(v_a->subset({0, 1}), v_ptr, 8, 8);
-                co_yield m_context->mem()->storeLocal(lds2_offset, v_a->subset({0, 1}), 0, 8);
+
+                co_yield m_context->mem()
+                    ->storeLocal(lds2_offset, v_a->subset({0, 1}), 0, 8)
+                    .map(MemoryInstructions::addExtraDst(lds2));
+
                 co_yield m_context->mem()->loadGlobal(v_a->subset({0, 1, 2}), v_ptr, 16, 12);
-                co_yield m_context->mem()->store(MemoryInstructions::MemoryKind::Local,
-                                                 lds2_offset,
-                                                 v_a->subset({0, 1, 2}),
-                                                 Register::Value::Literal(8),
-                                                 12);
+                co_yield m_context->mem()
+                    ->store(MemoryInstructions::MemoryKind::Local,
+                            lds2_offset,
+                            v_a->subset({0, 1, 2}),
+                            Register::Value::Literal(8),
+                            12)
+                    .map(MemoryInstructions::addExtraDst(lds2));
+
                 co_yield m_context->mem()->loadGlobal(v_a->subset({0, 1, 2, 3}), v_ptr, 28, 16);
-                co_yield m_context->mem()->store(MemoryInstructions::MemoryKind::Local,
-                                                 lds2_offset,
-                                                 v_a->subset({0, 1, 2, 3}),
-                                                 twenty,
-                                                 16);
+                co_yield m_context->mem()
+                    ->store(MemoryInstructions::MemoryKind::Local,
+                            lds2_offset,
+                            v_a->subset({0, 1, 2, 3}),
+                            twenty,
+                            16)
+                    .map(MemoryInstructions::addExtraDst(lds2));
 
                 // Read 8 bytes from LDS1 and store to global data
-                co_yield m_context->mem()->loadLocal(v_a->subset({0}), lds1_offset, 0, 1);
+                co_yield m_context->mem()
+                    ->loadLocal(v_a->subset({0}), lds1_offset, 0, 1)
+                    .map(MemoryInstructions::addExtraSrc(lds1));
+
                 co_yield m_context->mem()->storeGlobal(v_result, v_a->subset({0}), 0, 1);
-                co_yield m_context->mem()->loadLocal(v_a->subset({0}), lds1_offset, 1, 1);
+
+                co_yield m_context->mem()
+                    ->loadLocal(v_a->subset({0}), lds1_offset, 1, 1)
+                    .map(MemoryInstructions::addExtraSrc(lds1));
+
                 co_yield m_context->mem()->storeGlobal(v_result, v_a->subset({0}), 1, 1);
-                co_yield m_context->mem()->loadLocal(v_a->subset({0}), lds1_offset, 2, 2);
+
+                co_yield m_context->mem()
+                    ->loadLocal(v_a->subset({0}), lds1_offset, 2, 2)
+                    .map(MemoryInstructions::addExtraSrc(lds1));
+
                 co_yield m_context->mem()->storeGlobal(v_result, v_a->subset({0}), 2, 2);
-                co_yield m_context->mem()->loadLocal(v_a->subset({0}), lds1_offset, 4, 4);
+
+                co_yield m_context->mem()
+                    ->loadLocal(v_a->subset({0}), lds1_offset, 4, 4)
+                    .map(MemoryInstructions::addExtraSrc(lds1));
+
                 co_yield m_context->mem()->storeGlobal(v_result, v_a->subset({0}), 4, 2);
                 co_yield m_context->mem()->storeGlobal(v_result, v_a->subset({0}), 6, 2, true);
 
                 // Read 36 bytes from LDS2 and store to global data
-                co_yield m_context->mem()->loadLocal(
-                    v_a->subset({0, 1}), lds2, 0, 8); // Use LDS2 value instead of offset register
+                // Use LDS2 value instead of offset register
+                co_yield m_context->mem()
+                    ->loadLocal(v_a->subset({0, 1}), lds2, 0, 8)
+                    .map(MemoryInstructions::addExtraSrc(lds1));
+
                 co_yield m_context->mem()->storeGlobal(v_result, v_a->subset({0, 1}), 8, 8);
-                co_yield m_context->mem()->load(MemoryInstructions::MemoryKind::Local,
-                                                v_a->subset({0, 1, 2}),
-                                                lds2_offset,
-                                                Register::Value::Literal(8),
-                                                12);
+
+                co_yield m_context->mem()
+                    ->load(MemoryInstructions::MemoryKind::Local,
+                           v_a->subset({0, 1, 2}),
+                           lds2_offset,
+                           Register::Value::Literal(8),
+                           12)
+                    .map(MemoryInstructions::addExtraSrc(lds2));
+
                 co_yield m_context->mem()->storeGlobal(v_result, v_a->subset({0, 1, 2}), 16, 12);
-                co_yield m_context->mem()->load(MemoryInstructions::MemoryKind::Local,
-                                                v_a->subset({0, 1, 2, 3}),
-                                                lds2_offset,
-                                                twenty,
-                                                16);
+
+                co_yield m_context->mem()
+                    ->load(MemoryInstructions::MemoryKind::Local,
+                           v_a->subset({0, 1, 2, 3}),
+                           lds2_offset,
+                           twenty,
+                           16)
+                    .map(MemoryInstructions::addExtraSrc(lds2));
+
                 co_yield m_context->mem()->storeGlobal(v_result, v_a->subset({0, 1, 2, 3}), 28, 16);
 
                 // Load 44 bytes into LDS3
                 co_yield m_context->mem()->loadGlobal(v_a, v_ptr, 44, 44);
-                co_yield m_context->mem()->storeLocal(lds3_offset, v_a, 0, 44);
-                co_yield m_context->mem()->loadLocal(v_a, lds3_offset, 0, 44);
+
+                co_yield m_context->mem()
+                    ->storeLocal(lds3_offset, v_a, 0, 44)
+                    .map(MemoryInstructions::addExtraDst(lds3));
+
+                co_yield m_context->mem()
+                    ->loadLocal(v_a, lds3_offset, 0, 44)
+                    .map(MemoryInstructions::addExtraSrc(lds3));
+
                 co_yield m_context->mem()->storeGlobal(v_result, v_a, 44, 44);
             };
 
-            m_context->schedule(kb());
+            auto assertDSOpsHaveExtraOperands = [&](Instruction inst) {
+                if(inst.getOpCode().find("ds_read") != std::string::npos)
+                {
+                    EXPECT_NE(inst.getExtraSrcs()[0], nullptr);
+                }
+                else if(inst.getOpCode().find("ds_write") != std::string::npos)
+                {
+                    EXPECT_NE(inst.getExtraDsts()[0], nullptr);
+                }
+
+                return inst;
+            };
+
+            m_context->schedule(kb().map(assertDSOpsHaveExtraOperands));
             m_context->schedule(k->postamble());
             m_context->schedule(k->amdgpu_metadata());
         }
@@ -877,24 +942,33 @@ namespace MemoryInstructionsTest
                     v_a, workitemIndex[0], Register::Value::Literal(5));
                 co_yield generateOp<Expression::ShiftL>(
                     lds3_current, lds3_current, Register::Value::Literal(2));
-                co_yield m_context->mem()->storeLocal(lds3_current, v_a, 0, 4);
+                co_yield m_context->mem()
+                    ->storeLocal(lds3_current, v_a, 0, 4)
+                    .map(MemoryInstructions::addExtraDst(lds3));
 
-                co_yield m_context->mem()->barrier();
+                co_yield_(m_context->mem()->barrier({lds3}));
 
                 // Store the contents of lds3[workitemIndex.x + 1 % workItemCount] into v_result[workitemIndex.x]
+
                 co_yield generateOp<Expression::Add>(
                     lds3_current, workitemIndex[0], Register::Value::Literal(1));
                 co_yield m_context->copier()->copy(literal,
                                                    Register::Value::Literal(workItemCount - 1));
+
                 co_yield generateOp<Expression::BitwiseAnd>(lds3_current, lds3_current, literal);
                 co_yield generateOp<Expression::Add>(lds3_current, lds3_offset, lds3_current);
                 co_yield generateOp<Expression::ShiftL>(
                     lds3_current, lds3_current, Register::Value::Literal(2));
-                co_yield m_context->mem()->loadLocal(v_a, lds3_current, 0, 4);
+
+                co_yield m_context->mem()
+                    ->loadLocal(v_a, lds3_current, 0, 4)
+                    .map(MemoryInstructions::addExtraSrc(lds3));
+
                 co_yield generateOp<Expression::ShiftL>(
                     lds3_current, workitemIndex[0], Register::Value::Literal(2));
                 co_yield generateOp<Expression::Add>(
                     v_result->subset({0}), v_result->subset({0}), lds3_current);
+
                 co_yield m_context->mem()->storeGlobal(v_result, v_a, 0, 4);
             };
 
@@ -1100,7 +1174,8 @@ namespace MemoryInstructionsTest
         // Test loadLocalWidth
         {
             auto kb = [&]() -> Generator<Instruction> {
-                co_yield m_context->mem()->barrier();
+                co_yield Instruction::Wait(WaitCount::Zero(m_context->targetArchitecture()));
+                co_yield_(m_context->mem()->barrier({}));
                 co_yield m_context->mem()->loadLocal(v_data, v_addr_32bit, 0, 16);
             };
 
@@ -1139,7 +1214,9 @@ namespace MemoryInstructionsTest
             ds_read_b32 v2, v6 offset:8
             ds_read_b32 v3, v6 offset:12
             )";
-            EXPECT_THAT(NormalizedSource(output()), testing::HasSubstr(NormalizedSource(expected)));
+            EXPECT_THAT(NormalizedSource(output()), testing::HasSubstr(NormalizedSource(expected)))
+                << NormalizedSource(output()) << "------\n"
+                << output();
         }
     }
 
@@ -1379,6 +1456,8 @@ namespace MemoryInstructionsTest
             auto wordgroupSizeTotal = product(m_context->kernel()->workgroupSize());
             auto m0                 = m_context->getM0();
 
+            const auto soffset = Register::Value::Literal(0);
+
             do
             {
                 if(bytesPerMove == 0)
@@ -1417,14 +1496,17 @@ namespace MemoryInstructionsTest
                 {
                     bytesPerMove = maxWidth * wordSize;
                 }
-                co_yield m_context->mem()->barrier();
-                co_yield m_context->mem()->bufferLoad2LDS(
-                    vgprSerial, bufDesc, bufInstOpts, bytesPerMove);
+                co_yield_(m_context->mem()->barrier({v_lds}));
+                co_yield m_context->mem()
+                    ->bufferLoad2LDS(vgprSerial, bufDesc, bufInstOpts, bytesPerMove, soffset)
+                    .map(MemoryInstructions::addExtraDst(v_lds));
                 remain -= bytesPerMove;
             } while(remain > 0);
 
-            co_yield m_context->mem()->barrier();
-            co_yield m_context->mem()->loadLocal(v_ptr, v_lds, 0, N);
+            co_yield_(m_context->mem()->barrier({v_lds}));
+            co_yield m_context->mem()
+                ->loadLocal(v_ptr, v_lds, 0, N)
+                .map(MemoryInstructions::addExtraSrc(v_lds));
 
             co_yield m_context->mem()->storeGlobal(v_result, v_ptr, 0, N);
         };

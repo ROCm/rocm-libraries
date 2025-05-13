@@ -130,6 +130,10 @@ namespace rocRoller
             return "Bool32";
         case DataType::Bool64:
             return "Bool64";
+        case DataType::E8M0:
+            return "E8M0";
+        case DataType::E8M0x4:
+            return "E8M0x4";
         case DataType::None:
             return "None";
         case DataType::Count:;
@@ -205,6 +209,10 @@ namespace rocRoller
             return "BL32";
         case DataType::Bool64:
             return "BL64";
+        case DataType::E8M0:
+            return "E8M0";
+        case DataType::E8M0x4:
+            return "4xE8M0";
         case DataType::None:
             return "NA";
 
@@ -548,6 +556,9 @@ namespace rocRoller
         registerTypeInfo<PointerLocal>();
         registerTypeInfo<PointerGlobal>();
         registerTypeInfo<Buffer>();
+
+        registerTypeInfo<E8M0>();
+        registerTypeInfo<E8M0x4>();
     }
 
     void DataTypeInfo::registerAllTypeInfoOnce()

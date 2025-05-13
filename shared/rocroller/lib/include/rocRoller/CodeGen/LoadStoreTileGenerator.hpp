@@ -222,7 +222,6 @@ namespace rocRoller
             Generator<Instruction> moveTileDirect2LDS(LoadStoreTileInfo& info,
                                                       int                numBytes,
                                                       bool               setM0,
-                                                      Register::ValuePtr readOffset,
                                                       Register::ValuePtr readAddr);
             Generator<Instruction> loadTileLiteralStridesPack(LoadStoreTileInfo& info);
             Generator<Instruction> loadTileRuntimeStridesPack(LoadStoreTileInfo& info);

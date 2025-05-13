@@ -101,6 +101,97 @@ namespace rocRoller
                 return pathToLoop;
             }
 
+            /**
+             * @brief Find the first and last nodes in `nodes` which are totally ordered
+             *
+             * Returns the first and last nodes as a pair
+             *
+             */
+            static std::pair<int, int>
+                getFirstAndLastNodes(rocRoller::KernelGraph::KernelGraph const& graph,
+                                     std::vector<int> const&                    nodes)
+            {
+                AssertFatal(not nodes.empty());
+
+                using namespace rocRoller::KernelGraph::ControlGraph;
+
+                int firstNode = nodes[0];
+                int lastNode  = nodes[0];
+                for(int i = 1; i < nodes.size(); i++)
+                {
+                    auto order
+                        = graph.control.compareNodes(rocRoller::IgnoreCache, firstNode, nodes[i]);
+                    // If this assertion fails, that means the nodes are not totally ordered
+                    AssertFatal(order != NodeOrdering::Undefined, "nodes are not totally ordered");
+                    if(order != NodeOrdering::LeftFirst
+                       and order != NodeOrdering::LeftInBodyOfRight)
+                    {
+                        firstNode = nodes[i];
+                    }
+
+                    order = graph.control.compareNodes(rocRoller::IgnoreCache, lastNode, nodes[i]);
+                    // If this assertion fails, that means the nodes are not totally ordered
+                    AssertFatal(order != NodeOrdering::Undefined, "nodes are not totally ordered");
+                    if(order == NodeOrdering::LeftFirst or order == NodeOrdering::LeftInBodyOfRight)
+                    {
+                        lastNode = nodes[i];
+                    }
+                }
+
+                return {firstNode, lastNode};
+            }
+
+            /**
+             * @brief Order a new group (nodes) with existing groups. Each group consists of
+             *        a pair of nodes which are the first and last nodes of memory nodes in a
+             *        for-loop.
+             *
+             */
+            static void orderGroups(rocRoller::KernelGraph::KernelGraph& graph,
+                                    std::set<std::pair<int, int>>&       groups,
+                                    std::vector<int>&                    nodes)
+
+            {
+                if(nodes.empty())
+                    return;
+
+                //
+                // Create a new group using the first and last node of `nodes`.
+                // An assumption here is `nodes` should be totally ordered.
+                //
+                auto [firstNode, lastNode] = getFirstAndLastNodes(graph, nodes);
+                if(groups.empty())
+                {
+                    groups.emplace(firstNode, lastNode);
+                    return;
+                }
+
+                auto [new_group, inserted] = groups.emplace(firstNode, lastNode); // Add new group
+                AssertFatal(inserted); // Should not have identical group
+
+                //
+                // Order (insert sequence edges) the new group with existing groups.
+                // An important assumption here is groups should not overlap.
+                //
+                if(new_group != groups.begin())
+                {
+                    auto prev_group = std::prev(new_group);
+                    AssertFatal(prev_group->second < firstNode);
+                    auto sc1 = getTopSetCoordinate(graph, prev_group->second);
+                    auto sc2 = getTopSetCoordinate(graph, firstNode);
+                    graph.control.addElement(Sequence(), {sc1}, {sc2});
+                }
+
+                if(*new_group != *groups.rbegin())
+                {
+                    auto next_group = std::next(new_group);
+                    AssertFatal(next_group->first > lastNode);
+                    auto sc1 = getTopSetCoordinate(graph, lastNode);
+                    auto sc2 = getTopSetCoordinate(graph, next_group->first);
+                    graph.control.addElement(Sequence(), {sc1}, {sc2});
+                }
+            }
+
             void fuseLoops(KernelGraph& graph, int tag)
             {
                 rocRoller::Log::getLogger()->debug("KernelGraph::fuseLoops({})", tag);
@@ -171,6 +262,26 @@ namespace rocRoller
 
                 auto fusedLoopTag = *forLoopsToFuse.begin();
 
+                auto fusedLoopBodyChildren
+                    = graph.control.getOutputNodeIndices<Body>(fusedLoopTag).to<std::vector>();
+
+                auto initializeGroups = [&]<typename T>() {
+                    std::set<std::pair<int, int>> groups;
+                    auto                          nodes
+                        = filter(graph.control.isElemType<T>(),
+                                 graph.control.depthFirstVisit(
+                                     fusedLoopBodyChildren, dontWalkPastForLoop, GD::Downstream))
+                              .template to<std::vector>();
+                    if(not nodes.empty())
+                        groups.emplace(getFirstAndLastNodes(graph, nodes));
+                    return groups;
+                };
+
+                auto groups_loads     = initializeGroups.template operator()<LoadTiled>();
+                auto groups_ldsLoads  = initializeGroups.template operator()<LoadLDSTile>();
+                auto groups_stores    = initializeGroups.template operator()<StoreTiled>();
+                auto groups_ldsStores = initializeGroups.template operator()<StoreLDSTile>();
+
                 for(auto const& forLoopTag : forLoopsToFuse)
                 {
                     if(forLoopTag == fusedLoopTag)
@@ -201,6 +312,36 @@ namespace rocRoller
                         {
                             graph.control.deleteElement(edge);
                         }
+                    }
+
+                    //
+                    // Extract the memory nodes in forLoopTag, which will be used
+                    // at the end to order with memory nodes in fusedLoopTag.
+                    //
+                    std::vector<int> loads;
+                    std::vector<int> ldsLoads;
+                    std::vector<int> stores;
+                    std::vector<int> ldsStores;
+                    {
+                        auto children = graph.control.getOutputNodeIndices<Body>(forLoopTag)
+                                            .to<std::vector>();
+
+                        loads = filter(graph.control.isElemType<LoadTiled>(),
+                                       graph.control.depthFirstVisit(
+                                           children, dontWalkPastForLoop, GD::Downstream))
+                                    .to<std::vector>();
+                        ldsLoads = filter(graph.control.isElemType<LoadLDSTile>(),
+                                          graph.control.depthFirstVisit(
+                                              children, dontWalkPastForLoop, GD::Downstream))
+                                       .to<std::vector>();
+                        stores = filter(graph.control.isElemType<StoreTiled>(),
+                                        graph.control.depthFirstVisit(
+                                            children, dontWalkPastForLoop, GD::Downstream))
+                                     .to<std::vector>();
+                        ldsStores = filter(graph.control.isElemType<StoreLDSTile>(),
+                                           graph.control.depthFirstVisit(
+                                               children, dontWalkPastForLoop, GD::Downstream))
+                                        .to<std::vector>();
                     }
 
                     for(auto const& child :
@@ -238,35 +379,21 @@ namespace rocRoller
                     }
 
                     purgeFor(graph, forLoopTag);
+
+                    //
+                    // Order the memory nodes in forLoopTag with memory
+                    // nodes in fusedLoopTag.
+                    //
+                    // An important assumption here is the memory nodes of
+                    // forLoopTag should be ordered totally already, and
+                    // orderGroups leverages this fact to connect the first and
+                    // last nodes with other groups to achieve total ordering.
+                    //
+                    orderGroups(graph, groups_loads, loads);
+                    orderGroups(graph, groups_ldsLoads, ldsLoads);
+                    orderGroups(graph, groups_stores, stores);
+                    orderGroups(graph, groups_ldsStores, ldsStores);
                 }
-
-                auto children
-                    = graph.control.getOutputNodeIndices<Body>(fusedLoopTag).to<std::vector>();
-
-                auto loads = filter(graph.control.isElemType<LoadTiled>(),
-                                    graph.control.depthFirstVisit(
-                                        children, dontWalkPastForLoop, GD::Downstream))
-                                 .to<std::vector>();
-
-                auto ldsLoads = filter(graph.control.isElemType<LoadLDSTile>(),
-                                       graph.control.depthFirstVisit(
-                                           children, dontWalkPastForLoop, GD::Downstream))
-                                    .to<std::vector>();
-
-                auto stores = filter(graph.control.isElemType<StoreTiled>(),
-                                     graph.control.depthFirstVisit(
-                                         children, dontWalkPastForLoop, GD::Downstream))
-                                  .to<std::vector>();
-
-                auto ldsStores = filter(graph.control.isElemType<StoreLDSTile>(),
-                                        graph.control.depthFirstVisit(
-                                            children, dontWalkPastForLoop, GD::Downstream))
-                                     .to<std::vector>();
-
-                orderMemoryNodes(graph, loads, true);
-                orderMemoryNodes(graph, ldsLoads, true);
-                orderMemoryNodes(graph, stores, true);
-                orderMemoryNodes(graph, ldsStores, true);
             }
         }
 

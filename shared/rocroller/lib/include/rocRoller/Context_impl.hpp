@@ -43,6 +43,8 @@ namespace rocRoller
 
     inline void Context::schedule(Instruction& inst)
     {
+        auto status = m_observer->peek(inst);
+        inst.setPeekedStatus(std::move(status));
         m_observer->modify(inst);
         m_observer->observe(inst);
 
@@ -54,17 +56,16 @@ namespace rocRoller
     {
         for(Instruction const& inst : insts)
         {
-            Instruction copy = inst;
-            schedule(copy);
+            scheduleCopy(inst);
         }
     }
 
     template <std::ranges::input_range T>
     inline void Context::schedule(T&& insts)
     {
-        for(Instruction inst : insts)
+        for(Instruction const& inst : insts)
         {
-            schedule(inst);
+            scheduleCopy(inst);
         }
     }
 

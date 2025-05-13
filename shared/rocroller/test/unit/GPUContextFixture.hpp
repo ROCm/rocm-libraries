@@ -27,6 +27,8 @@
 #pragma once
 
 #include "ContextFixture.hpp"
+#include <rocRoller/Context.hpp>
+#include <rocRoller/GPUArchitecture/GPUArchitectureLibrary.hpp>
 #include <rocRoller/GPUArchitecture/GPUArchitectureTarget.hpp>
 #include <rocRoller/Utilities/Utils.hpp>
 

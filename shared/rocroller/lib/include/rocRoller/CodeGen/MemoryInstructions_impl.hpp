@@ -27,8 +27,6 @@
 #include <algorithm>
 #include <ranges>
 
-#include <rocRoller/CodeGen/Arithmetic/ArithmeticGenerator.hpp>
-
 namespace rocRoller
 {
     inline MemoryInstructions::MemoryInstructions(ContextPtr context)
@@ -51,76 +49,53 @@ namespace rocRoller
         int                offsetVal = 0;
         Register::ValuePtr newAddr   = addr;
 
-        if(offset && offset->regType() == Register::Type::Literal)
-            offsetVal = getUnsignedInt(offset->getLiteralValue());
+        if(offset && kind != MemoryKind::Buffer2LDS)
+        {
+            if(offset->regType() == Register::Type::Literal)
+            {
+                offsetVal = getUnsignedInt(offset->getLiteralValue());
+            }
+            else
+            {
+                // If the provided offset is not a literal, create a new
+                // register that will store the value of addr + offset and pass
+                // it to the load function.
+
+                auto addrType = DataType::Int32;
+                if(kind == MemoryKind::Global || kind == MemoryKind::Scalar)
+                    addrType = DataType::Int64;
+                newAddr = Register::Value::Placeholder(context, addr->regType(), addrType, 1);
+
+                auto expr = addr->expression() + offset->expression();
+                co_yield generate(newAddr, expr, context);
+            }
+        }
 
         switch(kind)
         {
         case MemoryKind::Global:
-            // If the provided offset is not a literal, create a new register that will store the value
-            // of addr + offset and pass it to loadGlobal
-            if(offset && offset->regType() != Register::Type::Literal)
-            {
-                newAddr
-                    = Register::Value::Placeholder(context, addr->regType(), DataType::Int64, 1);
-                co_yield generateOp<Expression::Add>(newAddr, addr, offset);
-            }
-
             co_yield loadGlobal(dest, newAddr, offsetVal, numBytes, high);
             break;
 
         case MemoryKind::Local:
-            // If the provided offset is not a literal, create a new register that will store the value
-            // of addr + offset and pass it to loadLocal
-            if(offset && offset->regType() != Register::Type::Literal)
-            {
-                newAddr
-                    = Register::Value::Placeholder(context, addr->regType(), DataType::Int32, 1);
-                co_yield generateOp<Expression::Add>(newAddr, addr, offset);
-            }
-
             co_yield loadLocal(dest, newAddr, offsetVal, numBytes, comment, high);
             break;
 
         case MemoryKind::Scalar:
-            // If the provided offset is not a literal, create a new register that will store the value
-            // of addr + offset and pass it to loadScalar
-            if(offset && offset->regType() != Register::Type::Literal)
-            {
-                newAddr
-                    = Register::Value::Placeholder(context, addr->regType(), DataType::Int64, 1);
-                co_yield generateOp<Expression::Add>(newAddr, addr, offset);
-            }
             co_yield loadScalar(dest, newAddr, offsetVal, numBytes, buffOpts.glc);
             break;
 
         case MemoryKind::Buffer:
             AssertFatal(bufDesc);
-            // If the provided offset is not a literal, create a new register that will store the value
-            // of addr + offset and pass it to loadBuffer
-            if(offset && offset->regType() != Register::Type::Literal)
-            {
-                newAddr
-                    = Register::Value::Placeholder(context, addr->regType(), DataType::Int32, 1);
-                co_yield generateOp<Expression::Add>(newAddr, addr, offset);
-            }
-
             co_yield loadBuffer(
                 dest, newAddr->subset({0}), offsetVal, bufDesc, buffOpts, numBytes, high);
             break;
 
         case MemoryKind::Buffer2LDS:
             AssertFatal(bufDesc);
-            // If the provided offset is not a literal, create a new register that will store the value
-            // of addr + offset and pass it to bufferLoad2LDS
-            if(offset && offset->regType() != Register::Type::Literal)
-            {
-                newAddr
-                    = Register::Value::Placeholder(context, addr->regType(), DataType::Int32, 1);
-                co_yield generateOp<Expression::Add>(newAddr, addr, offset);
-            }
-
-            co_yield bufferLoad2LDS(newAddr->subset({0}), bufDesc, buffOpts, numBytes);
+            AssertFatal(offset->regType() == Register::Type::Literal
+                        || offset->regType() == Register::Type::Scalar);
+            co_yield bufferLoad2LDS(newAddr->subset({0}), bufDesc, buffOpts, numBytes, offset);
 
             break;
         default:
@@ -143,59 +118,43 @@ namespace rocRoller
         int                offsetVal = 0;
         Register::ValuePtr newAddr   = addr;
 
-        if(offset && offset->regType() == Register::Type::Literal)
-            offsetVal = getUnsignedInt(offset->getLiteralValue());
+        if(offset)
+        {
+            if(offset->regType() == Register::Type::Literal)
+            {
+                offsetVal = getUnsignedInt(offset->getLiteralValue());
+            }
+            else
+            {
+                // If the provided offset is not a literal, create a new
+                // register that will store the value of addr + offset and pass
+                // it to the store function.
+
+                auto addrType = DataType::Int32;
+                if(kind == MemoryKind::Global || kind == MemoryKind::Scalar)
+                    addrType = DataType::Int64;
+                newAddr = Register::Value::Placeholder(context, addr->regType(), addrType, 1);
+
+                auto expr = addr->expression() + offset->expression();
+                co_yield generate(newAddr, expr, context);
+            }
+        }
 
         switch(kind)
         {
         case MemoryKind::Global:
-            // If the provided offset is not a literal, create a new register that will store the value
-            // of addr + offset and pass it to storeGlobal
-            if(offset && offset->regType() != Register::Type::Literal)
-            {
-                newAddr
-                    = Register::Value::Placeholder(context, addr->regType(), DataType::Int64, 1);
-                co_yield generateOp<Expression::Add>(newAddr, addr, offset);
-            }
-
             co_yield storeGlobal(newAddr, data, offsetVal, numBytes, high);
             break;
 
         case MemoryKind::Local:
-            // If the provided offset is not a literal, create a new register that will store the value
-            // of addr + offset and pass it to storeLocal
-            if(offset && offset->regType() != Register::Type::Literal)
-            {
-                newAddr
-                    = Register::Value::Placeholder(context, addr->regType(), DataType::Int32, 1);
-                co_yield generateOp<Expression::Add>(newAddr, addr, offset);
-            }
-
             co_yield storeLocal(newAddr, data, offsetVal, numBytes, comment, high);
             break;
 
         case MemoryKind::Buffer:
-            // If the provided offset is not a literal, create a new register that will store the value
-            // of addr + offset and pass it to storeBuffer
-            if(offset && offset->regType() != Register::Type::Literal)
-            {
-                newAddr
-                    = Register::Value::Placeholder(context, addr->regType(), DataType::Int32, 1);
-                co_yield generateOp<Expression::Add>(newAddr, addr, offset);
-            }
-
             co_yield storeBuffer(data, newAddr, offsetVal, bufDesc, buffOpts, numBytes, high);
             break;
-        case MemoryKind::Scalar:
-            // If the provided offset is not a literal, create a new register that will store the value
-            // of addr + offset and pass it to storeScalar
-            if(offset && offset->regType() != Register::Type::Literal)
-            {
-                newAddr
-                    = Register::Value::Placeholder(context, addr->regType(), DataType::Int64, 1);
-                co_yield generateOp<Expression::Add>(newAddr, addr, offset);
-            }
 
+        case MemoryKind::Scalar:
             co_yield storeScalar(newAddr, data, offsetVal, numBytes, buffOpts.glc);
             break;
 
@@ -733,7 +692,8 @@ namespace rocRoller
         MemoryInstructions::bufferLoad2LDS(Register::ValuePtr                data,
                                            std::shared_ptr<BufferDescriptor> buffDesc,
                                            BufferInstructionOptions          buffOpts,
-                                           int                               numBytes)
+                                           int                               numBytes,
+                                           Register::ValuePtr                soffset)
     {
         AssertFatal(data != nullptr);
         AssertFatal(buffOpts.lds);
@@ -793,8 +753,8 @@ namespace rocRoller
         }
 
         const auto& gpu = ctx->targetArchitecture().target();
-        const auto  soffset
-            = gpu.isGFX12GPU() ? Register::Value::NullLiteral() : Register::Value::Literal(0);
+        if(gpu.isGFX12GPU())
+            soffset = Register::Value::NullLiteral();
         co_yield_(Instruction("buffer_load_" + opEnd,
                               {},
                               {data, sgprSrd, soffset},
@@ -935,26 +895,50 @@ namespace rocRoller
                 WaitCount::Zero(ctx->targetArchitecture(), "DEBUG: Wait after store"));
     }
 
-    inline Generator<Instruction> MemoryInstructions::barrier()
+    inline Generator<Instruction>
+        MemoryInstructions::barrier(CForwardRangeOf<Register::ValuePtr> auto srcs,
+                                    std::string                              comment)
+    {
+        co_yield barrierImpl(std::move(srcs), std::move(comment));
+    }
+    inline Generator<Instruction>
+        MemoryInstructions::barrier(std::initializer_list<Register::ValuePtr> srcs,
+                                    std::string                               comment)
+    {
+        co_yield barrierImpl(std::move(srcs), std::move(comment));
+    }
+
+    inline Generator<Instruction>
+        MemoryInstructions::barrierImpl(CForwardRangeOf<Register::ValuePtr> auto srcs,
+                                        std::string                              comment)
     {
         const auto& arch = m_context.lock()->targetArchitecture();
         if(arch.HasCapability(GPUCapability::s_barrier))
         {
-            co_yield Instruction("s_barrier", {}, {}, {}, "Memory barrier");
+            Instruction inst("s_barrier", {}, {}, {}, std::move(comment));
+            for(auto reg : srcs)
+                inst.addExtraSrc(reg);
+            co_yield inst;
         }
         else if(arch.HasCapability(GPUCapability::s_barrier_signal))
         {
             const auto normalBarrierID = -1;
-            co_yield_(Instruction("s_barrier_signal",
-                                  {},
-                                  {Register::Value::Literal(normalBarrierID)},
-                                  {},
-                                  "Memory barrier signal"));
+            {
+                Instruction inst("s_barrier_signal",
+                                 {},
+                                 {Register::Value::Literal(normalBarrierID)},
+                                 {},
+                                 comment);
+                for(auto reg : srcs)
+                    inst.addExtraSrc(reg);
+                co_yield inst;
+            }
+
             co_yield_(Instruction("s_barrier_wait",
                                   {},
                                   {Register::Value::Literal(normalBarrierID)},
                                   {},
-                                  "Memory barrier wait"));
+                                  std::move(comment)));
         }
         else
         {
@@ -963,4 +947,29 @@ namespace rocRoller
         }
     }
 
+    inline auto MemoryInstructions::addExtraDst(Register::ValuePtr dst)
+    {
+        return [dst](Instruction inst) -> Instruction {
+            if(GPUInstructionInfo::isVMEM(inst.getOpCode())
+               || GPUInstructionInfo::isLDS(inst.getOpCode()))
+            {
+                inst.addExtraDst(dst);
+            }
+
+            return inst;
+        };
+    }
+
+    inline auto MemoryInstructions::addExtraSrc(Register::ValuePtr src)
+    {
+        return [src](Instruction inst) -> Instruction {
+            if(GPUInstructionInfo::isVMEM(inst.getOpCode())
+               || GPUInstructionInfo::isLDS(inst.getOpCode()))
+            {
+                inst.addExtraSrc(src);
+            }
+
+            return inst;
+        };
+    }
 }

@@ -217,6 +217,7 @@ namespace rocRollerTest
 
     TEST_F(CostTest, NonexistentSchedulerWeightsFile)
     {
+        Component::ComponentFactoryBase::ClearAllCaches();
         Settings::getInstance()->set(Settings::SchedulerWeights, "/dev/null/foo");
         EXPECT_THROW(
             Component::Get<Scheduling::Cost>(Scheduling::CostFunction::LinearWeighted, m_context),

@@ -162,10 +162,10 @@ namespace rocRoller
     template <std::floating_point T>
     std::unordered_set<T> GPUArchitecture::supportedConstantValues() const
     {
-        static_assert(CIsAnyOf<T, float, double, Half, BFloat16, FP8, BF8, FP6, BF6, FP4>,
+        static_assert(CIsAnyOf<T, float, double, Half, BFloat16, FP8, BF8, FP6, BF6, FP4, E8M0>,
                       "Unsupported floating point type");
 
-        if constexpr(CIsAnyOf<T, BFloat16, FP8, BF8, FP6, BF6, FP4>)
+        if constexpr(CIsAnyOf<T, BFloat16, FP8, BF8, FP6, BF6, FP4, E8M0>)
         {
             return {};
         }
@@ -202,5 +202,14 @@ namespace rocRoller
         GPUArchitecture::getAllIntructionInfo() const
     {
         return m_instructionInfos;
+    }
+
+    inline bool GPUArchitecture::isSupportedScaleBlockSize(int size) const
+    {
+        if(m_capabilities.contains(GPUCapability::HasBlockScaling32) && (size == 32))
+        {
+            return true;
+        }
+        return false;
     }
 }

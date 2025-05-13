@@ -31,6 +31,7 @@
 #include <rocRoller/Scheduling/Observers/RegisterLivenessObserver.hpp>
 #include <rocRoller/Scheduling/Observers/SupportedInstructionObserver.hpp>
 
+#include <rocRoller/Scheduling/Observers/FunctionalUnit/MEMObserver.hpp>
 #include <rocRoller/Scheduling/Observers/FunctionalUnit/MFMAObserver.hpp>
 #include <rocRoller/Scheduling/Observers/FunctionalUnit/WMMAObserver.hpp>
 
@@ -71,6 +72,8 @@ namespace rocRoller
                 AllocatingObserver,
                 WaitcntObserver,
                 MFMAObserver,
+                VMEMObserver,
+                DSMEMObserver,
                 WMMAObserver,
                 // Hazard Observers
                 ACCVGPRReadWrite,

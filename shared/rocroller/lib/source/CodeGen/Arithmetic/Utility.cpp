@@ -34,7 +34,7 @@ namespace rocRoller
                                Register::ValuePtr& msd,
                                Register::ValuePtr  input)
         {
-            assert(input->regType() == Register::Type::Literal);
+            AssertFatal(input->regType() == Register::Type::Literal, ShowValue(input->regType()));
             uint64_t value = std::visit(
                 [](auto v) {
                     using T = std::decay_t<decltype(v)>;

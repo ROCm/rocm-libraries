@@ -31,6 +31,7 @@
 #include <rocRoller/CodeGen/BranchGenerator.hpp>
 #include <rocRoller/CodeGen/CopyGenerator.hpp>
 #include <rocRoller/CodeGen/CrashKernelGenerator.hpp>
+#include <rocRoller/CodeGen/Instruction.hpp>
 #include <rocRoller/CodeGen/MemoryInstructions.hpp>
 #include <rocRoller/ExpressionTransformations.hpp>
 #include <rocRoller/GPUArchitecture/GPUArchitecture.hpp>
@@ -294,6 +295,12 @@ namespace rocRoller
     void Context::allocateScratch(Expression::ExpressionPtr size)
     {
         m_scratchAllocator = simplify(m_scratchAllocator + size);
+    }
+
+    void Context::scheduleCopy(Instruction const& inst)
+    {
+        auto copy = inst;
+        schedule(copy);
     }
 
 }

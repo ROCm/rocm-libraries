@@ -431,20 +431,23 @@ namespace rocRoller
         return rocRoller::take(n, std::move(*this));
     }
 
-    template <typename T, std::predicate<T> Predicate>
-    Generator<T> filter(Predicate predicate, Generator<T> gen)
+    template <std::ranges::input_range Range, typename Predicate>
+    requires(std::predicate<Predicate, std::ranges::range_value_t<Range>>)
+        Generator<std::ranges::range_value_t<Range>> filter(Predicate predicate, Range range)
     {
-        for(auto val : gen)
+        for(auto val : range)
         {
             if(predicate(val))
                 co_yield val;
         }
     }
 
-    template <typename T, std::invocable<T> Func>
-    Generator<std::invoke_result_t<Func, T>> map(Func func, Generator<T> gen)
+    template <std::ranges::input_range Range, typename Func>
+    requires(std::invocable<Func, std::ranges::range_value_t<Range>>)
+        Generator<std::invoke_result_t<Func, std::ranges::range_value_t<Range>>> map(Func  func,
+                                                                                     Range range)
     {
-        for(auto val : gen)
+        for(auto val : range)
             co_yield func(val);
     }
 

@@ -3,11 +3,14 @@ Architectures:
     Capabilities:
       ArchAccUnifiedRegs: 0
       CMPXWritesSGPR: 0
+      DefaultRemapXCCValue: 8
+      DefaultScaleBlockSize: 32
       DefaultWavefrontSize: 64
       HasAccCD: 0
       HasAccumOffset: 0
       HasAddLshl: 0
       HasAtomicAdd: 0
+      HasBlockScaling32: 0
       HasCodeObjectV4: 0
       HasCodeObjectV5: 0
       HasDSReadTransposeB16: 0
@@ -30,12 +33,14 @@ Architectures:
       HasMFMA_f64: 0
       HasMFMA_f8f6f4: 0
       HasMFMA_fp8: 0
+      HasMFMA_scale_f8f6f4: 0
       HasPRNG: 0
       HasPermLanes16: 0
       HasPermLanes32: 0
       HasSMulHi: 0
       HasWave64: 0
       HasWiderDirectToLds: 0
+      HasXCC: 0
       HasXnack: 0
       MaxExpcnt: 7
       MaxLdsSize: 163840

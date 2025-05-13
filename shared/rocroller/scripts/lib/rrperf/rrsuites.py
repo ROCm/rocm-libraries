@@ -23,6 +23,7 @@
 #
 ################################################################################
 
+from itertools import product
 import pathlib
 from rrperf.problems import GEMMRun, CodeGenRun, TensileRun
 
@@ -59,6 +60,20 @@ fp8fp8_fp32 = dict(
 bf8bf8_fp32 = dict(
     type_A="bf8",
     type_B="bf8",
+    type_C="float",
+    type_D="float",
+)
+
+fp8bf8_fp32 = dict(
+    type_A="fp8",
+    type_B="bf8",
+    type_C="float",
+    type_D="float",
+)
+
+bf8fp8_fp32 = dict(
+    type_A="bf8",
+    type_B="fp8",
     type_C="float",
     type_D="float",
 )
@@ -141,6 +156,25 @@ def unit():
     yield mkGEMM(default, fp32)
     yield mkGEMM(default, fp16)
     yield from tail_loop_reproducer()
+
+
+def unit_gfx120X():
+    default = dict(
+        M=1024,
+        N=1024,
+        K=128,
+        mac_m=64,
+        mac_n=64,
+        mac_k=64,
+        wave_m=16,
+        wave_n=16,
+        wave_k=16,
+        numWarmUp=1,
+        numOuter=1,
+        numInner=1,
+    )
+    yield mkGEMM(default, fp16)
+    yield mkGEMM(default, bf16_fp32)
 
 
 def sgemm():
@@ -324,6 +358,38 @@ def hgemm():
 
     # TODO: Enable once visualizer is working
     # yield from visualizer()
+
+
+def hgemm_gfx120X():
+    params = dict(
+        wave_m=16,
+        wave_n=16,
+        wave_k=16,
+        workgroup_size_x=64,
+        prefetch=False,
+    )
+
+    type_specifiers = [("half", fp16),
+                       ("bf16", bf16_bf16),
+                       ("float", fp16),
+                       ("float", fp8fp8_fp32),
+                       ("float", fp8bf8_fp32),
+                       ("float", bf8bf8_fp32),
+                       ("float", bf8fp8_fp32),
+                       ]
+
+    for sched in ["Priority", "Cooperative", "Sequential"]:
+        for a, b in product("NT", repeat=2):
+            for acc, abcd in type_specifiers:
+                yield mkGEMM(
+                    HGEMM_7680x8448x8192,
+                    type_acc=acc,
+                    trans_A=a,
+                    trans_B=b,
+                    scheduler=sched,
+                    **abcd,
+                    **params,
+                )
 
 
 def visualizer():
@@ -1263,6 +1329,182 @@ def bf16bf16gemm_32x32x4():
     )
 
 
+def fp4_target():
+    yield GEMMRun(
+        M=4096,
+        N=4096,
+        K=32768,
+        mac_m=256,
+        mac_n=256,
+        mac_k=128,
+        wave_m=32,
+        wave_n=32,
+        wave_k=64,
+        wave_b=1,
+        workgroup_size_x=128,
+        workgroup_size_y=2,
+        unroll_x=0,
+        unroll_y=0,
+        loadLDS_A=True,
+        loadLDS_B=True,
+        loadLDSScale_A=True,
+        loadLDSScale_B=True,
+        storeLDS_D=True,
+        prefetch=True,
+        prefetchInFlight=2,
+        prefetchLDSFactor=2,
+        betaInFma=True,
+        scheduler="Priority",
+        match_memory_access=True,
+        trans_A="T",
+        trans_B="N",
+        type_A="fp4",
+        type_B="fp4",
+        type_C="half",
+        type_D="half",
+        type_acc="float",
+        scale_A="Separate",
+        scale_B="Separate",
+        scaleBlockSize=32,
+        numOuter=1,
+        numWarmUp=1000,
+        numInner=1000)
+
+
+def fp4_target_d2lds_mi32x32x64_pf2x1():
+    yield GEMMRun(
+        M=4096,
+        N=4096,
+        K=32768,
+        mac_m=256,
+        mac_n=256,
+        mac_k=128,
+        wave_m=32,
+        wave_n=32,
+        wave_k=64,
+        wave_b=1,
+        workgroup_size_x=128,
+        workgroup_size_y=2,
+        unroll_x=0,
+        unroll_y=0,
+        direct2LDS_A=True,
+        direct2LDS_B=True,
+        loadLDSScale_A=True,
+        loadLDSScale_B=True,
+        storeLDS_D=True,
+        prefetch=True,
+        prefetchInFlight=2,
+        prefetchLDSFactor=1,
+        betaInFma=True,
+        scheduler="Priority",
+        match_memory_access=True,
+        trans_A="T",
+        trans_B="N",
+        type_A="fp4",
+        type_B="fp4",
+        type_C="half",
+        type_D="half",
+        type_acc="float",
+        scale_A="Separate",
+        scale_B="Separate",
+        scaleBlockSize=32,
+        numOuter=1,
+        numWarmUp=1000,
+        numInner=1000)
+
+
+def fp4_target_d2lds_mi32x32x64_pf4x1():
+    yield GEMMRun(
+        M=4096,
+        N=4096,
+        K=32768,
+        mac_m=256,
+        mac_n=256,
+        mac_k=128,
+        wave_m=32,
+        wave_n=32,
+        wave_k=64,
+        wave_b=1,
+        workgroup_size_x=128,
+        workgroup_size_y=2,
+        unroll_x=0,
+        unroll_y=0,
+        direct2LDS_A=True,
+        direct2LDS_B=True,
+        loadLDSScale_A=True,
+        loadLDSScale_B=True,
+        storeLDS_D=True,
+        prefetch=True,
+        prefetchInFlight=4,
+        prefetchLDSFactor=1,
+        betaInFma=True,
+        scheduler="Priority",
+        match_memory_access=True,
+        trans_A="T",
+        trans_B="N",
+        type_A="fp4",
+        type_B="fp4",
+        type_C="half",
+        type_D="half",
+        type_acc="float",
+        scale_A="Separate",
+        scale_B="Separate",
+        scaleBlockSize=32,
+        numOuter=1,
+        numWarmUp=1000,
+        numInner=1000)
+
+
+def fp4_target_d2lds_mi16x16x128_pf4x1():
+    yield GEMMRun(
+        M=4096,
+        N=4096,
+        K=32768,
+        mac_m=256,
+        mac_n=256,
+        mac_k=128,
+        wave_m=16,
+        wave_n=16,
+        wave_k=128,
+        wave_b=1,
+        workgroup_size_x=128,
+        workgroup_size_y=2,
+        unroll_x=0,
+        unroll_y=0,
+        direct2LDS_A=True,
+        direct2LDS_B=True,
+        loadLDSScale_A=True,
+        loadLDSScale_B=True,
+        storeLDS_D=True,
+        prefetch=True,
+        prefetchInFlight=4,
+        prefetchLDSFactor=1,
+        betaInFma=True,
+        scheduler="Priority",
+        match_memory_access=True,
+        trans_A="T",
+        trans_B="N",
+        type_A="fp4",
+        type_B="fp4",
+        type_C="half",
+        type_D="half",
+        type_acc="float",
+        scale_A="Separate",
+        scale_B="Separate",
+        scaleBlockSize=32,
+        numOuter=1,
+        numWarmUp=1000,
+        numInner=1000)
+
+
+def fp4_kernels():
+    yield from fp4_target()
+    yield from fp4_target_d2lds_mi32x32x64_pf2x1()
+    yield from fp4_target_d2lds_mi32x32x64_pf4x1()
+    # enable 16x16x128 tests when code generation time is reduced
+    # yield from fp4_target_d2lds_mi16x16x128_pf4x1()
+
+
 def all():
     yield from sgemm()
     yield from hgemm()
@@ -1270,6 +1512,10 @@ def all():
     yield from streamk()
     yield from scalar_is_zero()
     yield from codegen()
+
+
+def all_gfx120X():
+    yield from hgemm_gfx120X()
 
 
 def hgemm_guideposts():

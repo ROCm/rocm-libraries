@@ -90,6 +90,10 @@ namespace GPUArchitectureGenerator
              {{"v_mfma_f32_16x16x32_fp8_fp8 v[0:3], v[32:33], v[36:37], v[0:3]"}, ""}},
             {rocRoller::GPUCapability::HasMFMA_f8f6f4,
              {{"v_mfma_f32_16x16x128_f8f6f4 a[0:3], v[32:39], v[40:47], a[0:3]"}, ""}},
+            {rocRoller::GPUCapability::HasMFMA_scale_f8f6f4,
+             {{"v_mfma_scale_f32_16x16x128_f8f6f4 a[0:3], v[30:33], v[34:39], a[0:3], v4, v5 "
+               "cbsz:0b100 blgp:0b010"},
+              ""}},
             {rocRoller::GPUCapability::HasMFMA_f64,
              {{"v_mfma_f64_16x16x4f64 v[0:7], v[32:33], v[36:37], v[0:7]"}, ""}},
             {rocRoller::GPUCapability::HasMFMA_bf16_32x32x4_1k,
@@ -257,9 +261,24 @@ namespace GPUArchitectureGenerator
                                                  {.sramecc = true}},
             }},
            {rocRoller::GPUCapability::HasWave64,
-            std::vector<rocRoller::GPUArchitectureTarget>(
-                rocRoller::SupportedArchitectures.begin(),
-                rocRoller::SupportedArchitectures.end())}};
+            std::vector<rocRoller::GPUArchitectureTarget>(rocRoller::SupportedArchitectures.begin(),
+                                                          rocRoller::SupportedArchitectures.end())},
+           {rocRoller::GPUCapability::HasBlockScaling32,
+            {
+                rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX950},
+                rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX950,
+                                                 {.xnack = true}},
+                rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX950,
+                                                 {.sramecc = true}},
+            }},
+           {rocRoller::GPUCapability::HasXCC,
+            {
+                rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX950},
+                rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX950,
+                                                 {.xnack = true}},
+                rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX950,
+                                                 {.sramecc = true}},
+            }}};
 
     inline std::vector<rocRoller::GPUArchitectureTarget> gfx908ISAs()
     {

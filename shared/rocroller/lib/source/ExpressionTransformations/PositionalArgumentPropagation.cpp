@@ -113,9 +113,15 @@ namespace rocRoller
 
             ExpressionPtr operator()(DataFlowTag const& expr)
             {
-                AssertFatal(expr.tag >= 0);
-                AssertFatal(expr.tag < m_arguments.size());
-                return call(m_arguments[expr.tag]);
+                DataFlowTag cpy = expr;
+                return std::make_shared<Expression>(cpy);
+            }
+
+            ExpressionPtr operator()(PositionalArgument const& expr)
+            {
+                AssertFatal(expr.slot >= 0);
+                AssertFatal(expr.slot < m_arguments.size());
+                return call(m_arguments[expr.slot]);
             }
 
             template <CValue Value>

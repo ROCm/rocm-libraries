@@ -27,6 +27,7 @@
 #pragma once
 
 #include <rocRoller/CodeGen/Instruction.hpp>
+#include <rocRoller/Expression.hpp>
 #include <rocRoller/Utilities/Error.hpp>
 #include <rocRoller/Utilities/Generator.hpp>
 

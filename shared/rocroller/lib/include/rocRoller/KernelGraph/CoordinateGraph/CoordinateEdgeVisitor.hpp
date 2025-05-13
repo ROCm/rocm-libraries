@@ -385,6 +385,39 @@ namespace rocRoller
                 return {index};
             }
 
+            std::vector<Expression::ExpressionPtr> operator()(PiecewiseAffineJoin const& e)
+            {
+                AssertFatal(srcs.size() == e.strides.first.size(),
+                            ShowValue(e.strides.first.size()));
+                AssertFatal(dsts.size() == 1, ShowValue(dsts.size()));
+                auto branchTrue  = indexes[0] * e.strides.first[0];
+                auto branchFalse = indexes[0] * e.strides.second[0];
+                for(uint d = 1; d < srcs.size(); ++d)
+                {
+                    branchTrue  = branchTrue + indexes[d] * e.strides.first[d];
+                    branchFalse = branchFalse + indexes[d] * e.strides.second[d];
+                }
+                if(e.initialValues.first)
+                    branchTrue = branchTrue + e.initialValues.first;
+                if(e.initialValues.second)
+                    branchFalse = branchFalse + e.initialValues.second;
+
+                auto condition = positionalArgumentPropagation(e.condition, indexes);
+
+                auto result = std::make_shared<Expression::Expression>(
+                    Expression::Conditional{condition, branchTrue, branchFalse});
+                setComment(result, "PiecewiseAffineJoin");
+
+                // TODO: This isn't right; but currently only used
+                // within Workgroup remappings, and these don't
+                // contribute to strides.
+                auto delta = getDelta(srcTags[0]);
+                deltas.emplace(dstTags[0], delta);
+                setComment(result, "DPiecewiseAffineJoin");
+
+                return {result};
+            }
+
             std::vector<Expression::ExpressionPtr> operator()(Sunder const& e)
             {
                 AssertFatal(srcs.size() > 1 && srcs.size() == indexes.size(),
@@ -493,6 +526,39 @@ namespace rocRoller
                 deltas.emplace(srcTags[0], delta);
                 setComment(index, "DSplit");
                 return {index};
+            }
+
+            std::vector<Expression::ExpressionPtr> operator()(PiecewiseAffineJoin const& e)
+            {
+                AssertFatal(dsts.size() == e.strides.first.size(),
+                            ShowValue(e.strides.first.size()));
+                AssertFatal(srcs.size() == 1, ShowValue(srcs.size()));
+                auto branchTrue  = indexes[0] * e.strides.first[0];
+                auto branchFalse = indexes[0] * e.strides.second[0];
+                for(uint d = 1; d < dsts.size(); ++d)
+                {
+                    branchTrue  = branchTrue + indexes[d] * e.strides.first[d];
+                    branchFalse = branchFalse + indexes[d] * e.strides.second[d];
+                }
+                if(e.initialValues.first)
+                    branchTrue = branchTrue + e.initialValues.first;
+                if(e.initialValues.second)
+                    branchFalse = branchFalse + e.initialValues.second;
+
+                auto condition = positionalArgumentPropagation(e.condition, indexes);
+
+                auto result = std::make_shared<Expression::Expression>(
+                    Expression::Conditional{condition, branchTrue, branchFalse});
+                setComment(result, "PiecewiseAffineJoin");
+
+                // TODO: This isn't right; but currently only used
+                // within Workgroup remappings, and these don't
+                // contribute to strides.
+                auto delta = getDelta(dstTags[0]);
+                deltas.emplace(srcTags[0], delta);
+                setComment(result, "DPiecewiseAffineJoin");
+
+                return {result};
             }
 
             std::vector<Expression::ExpressionPtr> operator()(Sunder const& e)

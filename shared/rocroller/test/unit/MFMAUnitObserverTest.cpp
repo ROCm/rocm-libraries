@@ -28,6 +28,8 @@
 
 #include <rocRoller/Scheduling/Observers/FunctionalUnit/MFMAObserver.hpp>
 
+#include <rocRoller/InstructionValues/Register.hpp>
+
 #include "GPUContextFixture.hpp"
 
 using namespace rocRoller;

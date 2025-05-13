@@ -31,6 +31,9 @@
 
 #include "Utilities.hpp"
 
+#include <rocRoller/Utilities/Component.hpp>
+#include <rocRoller/Utilities/Settings.hpp>
+
 class SimpleFixture : public ::testing::Test
 {
 protected:

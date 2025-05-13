@@ -125,7 +125,8 @@ namespace rocRoller
         bool         fuseLoops = true;
         bool         tailLoops = true;
 
-        bool swizzleScale = false;
+        bool swizzleScale  = false;
+        bool prefetchScale = false;
 
         bool prefetch          = false;
         int  prefetchInFlight  = 1;
@@ -139,6 +140,9 @@ namespace rocRoller
         std::string       loopOverOutputTilesTopLoop       = XLOOP;
         std::vector<uint> loopOverOutputTilesCoordSizes    = {};
         uint              loopOverOutputTilesIteratedTiles = 0;
+
+        std::optional<std::pair<int, Expression::ExpressionPtr>> workgroupMapping  = {};
+        std::optional<int>                                       workgroupRemapXCC = {};
 
     private:
         std::map<Operations::OperationTag, KernelGraph::CoordinateGraph::Dimension> m_dimInfo;
@@ -278,6 +282,8 @@ namespace rocRoller
         KernelGraph::KernelGraphPtr getKernelGraph() const;
 
         std::string getInstructions() const;
+
+        std::string getKernelName() const;
 
         ContextPtr getContext();
 

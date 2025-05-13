@@ -107,6 +107,7 @@ namespace rocRoller
         template <typename T, typename IO>
         struct CustomMappingTraits
         {
+            // cppcheck-suppress duplInheritedMember
             static const bool flow = false;
         };
 

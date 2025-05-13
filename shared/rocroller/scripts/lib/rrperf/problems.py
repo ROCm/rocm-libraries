@@ -115,6 +115,9 @@ class GEMMSolution:
 
     workgroup_size_x: int = 64 * 2
     workgroup_size_y: int = 2
+    workgroupMapping: tuple[int, int] = (-1, -1)
+    workgroupRemapXCC: bool = False
+    workgroupRemapXCCValue: int = -1
 
     unroll_x: int = 0
     unroll_y: int = 0
@@ -132,13 +135,19 @@ class GEMMSolution:
     prefetch: bool = True
     prefetchInFlight: int = 2
     prefetchLDSFactor: int = 0
+    prefetchMixMemOps: bool = False
 
     scale_A: str = "None"
     scale_B: str = "None"
 
+    # If scale_A or scale_B is Separate, scaleBlockSize
+    # needs to be set to a valid block size (e.g. 32)
+    scaleBlockSize: int = -1
+
     loadLDSScale_A: bool = False
     loadLDSScale_B: bool = False
     swizzleScale: bool = False
+    prefetchScale: bool = False
 
     streamK: bool = False
     numWGs: int = 0
@@ -242,8 +251,10 @@ class GEMMRun(GEMM):
         arg_dict = {argName(key): value for key, value in asdict(self).items()}
         for key, value in extra_args.items():
             arg_dict[key] = value
-
-        args = list([f"--{key}={value}" for key, value in arg_dict.items()])
+        args = [
+            f"--{key}={','.join(map(str, value))}" if isinstance(value, tuple) else f"--{key}={value}"
+            for key, value in arg_dict.items()
+        ]
         retval = [command] + args
 
         return retval

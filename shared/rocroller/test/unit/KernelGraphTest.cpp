@@ -1192,12 +1192,12 @@ namespace KernelGraphTest
         auto expectedCommand = R".(
         Tensor.FP8.d2 0, (base=&0, lim=&8, sizes={&16 &24 }, strides={&32 &40 })
         T_LOAD_TILED 1 Source 0
-        Tensor.UInt8.d2 2, (base=&48, lim=&56, sizes={&64 &72 }, strides={&80 &88 })
+        Tensor.E8M0.d2 2, (base=&48, lim=&56, sizes={&64 &72 }, strides={&80 &88 })
         T_LOAD_TILED 3 Source 2
         BlockScale(Separate, {1, 32}): Data: 1, Scale: 3
         Tensor.FP6.d2 5, (base=&96, lim=&104, sizes={&112 &120 }, strides={&128 &136 })
         T_LOAD_TILED 6 Source 5
-        Tensor.UInt8.d2 7, (base=&144, lim=&152, sizes={&160 &168 }, strides={&176 &184 })
+        Tensor.E8M0.d2 7, (base=&144, lim=&152, sizes={&160 &168 }, strides={&176 &184 })
         T_LOAD_TILED 8 Source 7
         BlockScale(Separate, {32, 1}): Data: 6, Scale: 8
         T_Mul 4 9 Value: Float
@@ -2981,6 +2981,13 @@ namespace KernelGraphTest
             return maybeForLoop->loopName == rocRoller::KLOOP;
         };
 
+        auto storeLDSPredicate = [&](int tag) -> bool {
+            auto maybeStoreLDSTile = kgraph.control.get<StoreLDSTile>(tag);
+            if(!maybeStoreLDSTile)
+                return false;
+            return true;
+        };
+
         auto kernel  = *only(kgraph.control.roots());
         auto forLoop = *only(kgraph.control.findNodes(kernel, forKLoopPredicate, GD::Downstream));
 
@@ -2998,6 +3005,13 @@ namespace KernelGraphTest
 
         EXPECT_FALSE(ldsDeallocateFromKernel.empty());
         EXPECT_TRUE(ldsDeallocateInsideLoop.empty());
+
+        for(auto storeLDS : kgraph.control.findNodes(kernel, storeLDSPredicate, GD::Downstream))
+        {
+            auto deallocate = only(kgraph.control.getOutputNodeIndices<Sequence>(storeLDS));
+            auto barrier    = only(kgraph.control.getOutputNodeIndices<Sequence>(*deallocate));
+            EXPECT_EQ(kgraph.mapper.get<LDS>(storeLDS), kgraph.mapper.get<LDS>(*barrier));
+        }
     }
 
     TEST_F(KernelGraphTest, WaitZero)

@@ -80,7 +80,7 @@ namespace rocRoller
 
             /**
              * @brief Connect dangling MacroTileNumber coordinate to
-             * matching Workgroup coordinations.
+             * matching Workgroup coordinates.
              *
              * No mapping is done.  That is; MacroTileNumber(dim=X)
              * gets PassThrough'd to Workgroup(dim=X).
@@ -89,13 +89,38 @@ namespace rocRoller
                 connectWorkgroupsNoMapping(TileSizeInfo const& info, KernelGraph& kgraph);
 
             /**
-	     * @brief Remap Workgroup to be more cache friendly
-	     * (consecutive workgroups land within the same XCC).
-	     *
-	     * Modifies the coordinate graph.
-	     *
-	     * Returns the newly added Workgroup dimension.
-	     */
+             * @brief Connect dangling MacroTileNumber coordinate to
+             * matching Workgroup coordinates.
+             *
+             * Performs Workgroup Mapping (via workgroupMapping).
+             */
+            void connectWorkgroupsWithMapping(TileSizeInfo const&                  info,
+                                              rocRoller::KernelGraph::KernelGraph& graph,
+                                              int                                  dimension,
+                                              Expression::ExpressionPtr            size);
+
+            /**
+             * @brief Apply Workgroup Mapping.
+             *
+             * Map workgroups to tiles in a Z-order-inspired blockwise manner where
+             * the blocks are divided/bounded by `size` along `dimension` (M=0 or N=1).
+             *
+             * TODO add a more descriptive comment.
+             */
+            std::tuple<int, int, int> workgroupMapping(TileSizeInfo const&                  info,
+                                                       rocRoller::KernelGraph::KernelGraph& graph,
+                                                       rocRoller::Graph::Direction direction,
+                                                       uint                        dimension,
+                                                       Expression::ExpressionPtr   size);
+
+            /**
+             * @brief Remap Workgroup to be more cache friendly
+             * (consecutive workgroups land within the same XCC).
+             *
+             * Modifies the coordinate graph.
+             *
+             * Returns the newly added Workgroup dimension.
+             */
             int remapWorkgroupXCC(rocRoller::KernelGraph::KernelGraph& graph,
                                   int                                  workgroupTag,
                                   uint                                 numXCC);

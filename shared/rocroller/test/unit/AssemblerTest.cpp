@@ -30,6 +30,8 @@
 #include "GenericContextFixture.hpp"
 #include "SimpleFixture.hpp"
 
+#include <filesystem>
+
 using namespace rocRoller;
 
 class AssemblerTest : public SimpleFixture

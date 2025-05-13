@@ -37,7 +37,7 @@ namespace rocRoller
         /**
          * @brief Observer that checks for invalid instructions.
          *
-         * If the `AllowUnkownInstructions` setting is false, this
+         * If the `AllowUnknownInstructions` setting is false, this
          * observer checks every instruction that is scheduled, and if it isn't
          * present in the GPUArchitecture, then an exception is thrown.
          *
@@ -55,7 +55,7 @@ namespace rocRoller
 
             static bool runtimeRequired()
             {
-                return !Settings::getInstance()->get(Settings::AllowUnkownInstructions);
+                return !Settings::getInstance()->get(Settings::AllowUnknownInstructions);
             }
 
         private:

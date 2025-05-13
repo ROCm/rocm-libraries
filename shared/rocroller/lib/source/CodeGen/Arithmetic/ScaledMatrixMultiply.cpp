@@ -111,22 +111,49 @@ namespace rocRoller
             AssertFatal(isValidOutputType(matC->variableType()),
                         "Invalid matrix C data type",
                         ShowValue(matC->variableType()));
-            AssertFatal(dest->regType() == Register::Type::Accumulator,
-                        "Invalid matrix D register type",
-                        ShowValue(dest->regType()));
+            auto const& arch = m_context->targetArchitecture();
+            if(arch.HasCapability(GPUCapability::HasAccCD))
+            {
+                AssertFatal(dest->regType() == Register::Type::Accumulator,
+                            "Invalid matrix D register type",
+                            ShowValue(dest->regType()));
+            }
+            else
+            {
+                AssertFatal(dest->regType() == Register::Type::Vector,
+                            "Invalid matrix D register type",
+                            ShowValue(dest->regType()));
+            }
             AssertFatal(isValidOutputType(dest->variableType()),
                         "Invalid matrix D data type",
                         ShowValue(dest->variableType()));
 
-            auto        typeA = matA->variableType().dataType;
-            auto        typeB = matB->variableType().dataType;
-            std::string cbsz  = "cbsz:" + Arithmetic::getModifier(typeA); // Matrix A type
-            std::string blgp  = "blgp:" + Arithmetic::getModifier(typeB); // Matrix B type
+            auto typeA = matA->variableType().dataType;
+            auto typeB = matB->variableType().dataType;
 
-            auto mfma = concatenate("v_mfma_scale_f32_", M, "x", N, "x", K, "_f8f6f4");
+            std::string mi;
+            std::string modifiers;
 
-            co_yield_(
-                Instruction(mfma, {dest}, {matA, matB, matC, scaleA, scaleB}, {cbsz, blgp}, ""));
+            if(arch.HasCapability(GPUCapability::HasMFMA_scale_f8f6f4))
+            {
+                AssertFatal((M == 16 && N == 16 && K == 128) || (M == 32 && N == 32 && K == 64),
+                            "Invalid wavetile {}x{}x{} for scaled MFMA instruction for {}.",
+                            M,
+                            N,
+                            K,
+                            arch.target().toString());
+                mi = concatenate("v_mfma_scale_f32_", M, "x", N, "x", K, "_f8f6f4");
+
+                modifiers += "cbsz:" + Arithmetic::getModifier(typeA);
+                modifiers += " blgp:" + Arithmetic::getModifier(typeB);
+            }
+            else
+            {
+                Throw<FatalError>("Scaled Matrix Multiplication is not supported for",
+                                  arch.target().toString());
+            }
+
+            co_yield_(Instruction(mi, {dest}, {matA, matB, matC, scaleA, scaleB}, {modifiers}, ""));
         }
     }
 }

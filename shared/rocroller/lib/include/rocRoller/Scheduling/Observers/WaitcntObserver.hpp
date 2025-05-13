@@ -26,6 +26,7 @@
 
 #pragma once
 
+#include <rocRoller/CodeGen/Instruction.hpp>
 #include <rocRoller/Context.hpp>
 #include <rocRoller/GPUArchitecture/GPUInstructionInfo.hpp>
 #include <rocRoller/Scheduling/Scheduling.hpp>
@@ -35,9 +36,11 @@ namespace rocRoller
     namespace Scheduling
     {
         template <typename T>
-        using WaitQueueMap  = std::unordered_map<GPUWaitQueue, T, GPUWaitQueue::Hash>;
-        using WaitCntQueues = WaitQueueMap<
-            std::vector<std::array<Register::ValuePtr, Instruction::MaxDstRegisters>>>;
+        using WaitQueueMap = std::unordered_map<GPUWaitQueue, T, GPUWaitQueue::Hash>;
+
+        using WaitQueueRegisters = std::array<Register::ValuePtr, Instruction::MaxExtraRegisters>;
+
+        using WaitCntQueues = WaitQueueMap<std::vector<WaitQueueRegisters>>;
 
         /**
          * @brief This struct is used to store the _unallocated_ state of the waitcnt queues.
@@ -109,9 +112,12 @@ namespace rocRoller
             // a waitcnt 0 is required.
             WaitQueueMap<GPUWaitQueueType> m_typeInQueue;
 
+            std::string m_barrierOpcode;
+
+            bool m_needsWaitDirect2LDS = false;
+
             bool m_includeExplanation;
             bool m_displayState;
-            bool m_needsWaitDirect2LDS = false;
 
             // This member tracks, for every label, what the waitcnt state was when that label was encountered.
             std::unordered_map<std::string, WaitcntState> m_labelStates;
@@ -133,6 +139,12 @@ namespace rocRoller
              * This function updates the given wait queue by applying the given waitcnt.
              **/
             void applyWaitToQueue(int waitCnt, GPUWaitQueue queue);
+
+            /**
+             * This function determines if there's a needed wait count that is needed
+             */
+            WaitCount computeImplicitWaitCount(Instruction const& inst,
+                                               std::string*       explanation = nullptr) const;
 
             /**
              * @brief This function determines if an instruction needs a wait count inserted before it and provides an explanation as to why it's needed.

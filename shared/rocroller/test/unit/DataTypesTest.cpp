@@ -64,7 +64,9 @@ using InputTypes = ::testing::Types<std::tuple<float>,
                                     std::tuple<rocRoller::Bool32>,
                                     std::tuple<rocRoller::Bool64>,
                                     std::tuple<rocRoller::FP6x16>,
-                                    std::tuple<rocRoller::BF6x16>>;
+                                    std::tuple<rocRoller::BF6x16>,
+                                    std::tuple<rocRoller::E8M0>,
+                                    std::tuple<rocRoller::E8M0x4>>;
 
 TYPED_TEST_SUITE(TypedDataTypesTest, InputTypes);
 
@@ -134,6 +136,8 @@ static_assert(rocRoller::TypeInfo<rocRoller::FP8x4>::Var == rocRoller::DataType:
 static_assert(rocRoller::TypeInfo<rocRoller::BF6x16>::Var == rocRoller::DataType::BF6x16, "BF6x16");
 static_assert(rocRoller::TypeInfo<rocRoller::FP6x16>::Var == rocRoller::DataType::FP6x16, "FP6x16");
 static_assert(rocRoller::TypeInfo<rocRoller::FP4x8>::Var == rocRoller::DataType::FP4x8, "FP4x8");
+static_assert(rocRoller::TypeInfo<rocRoller::E8M0>::Var == rocRoller::DataType::E8M0, "E8M0");
+static_assert(rocRoller::TypeInfo<rocRoller::E8M0x4>::Var == rocRoller::DataType::E8M0x4, "E8M0x4");
 
 static_assert(rocRoller::TypeInfo<float>::Packing == 1, "Float");
 static_assert(rocRoller::TypeInfo<double>::Packing == 1, "Double");
@@ -163,6 +167,8 @@ static_assert(rocRoller::TypeInfo<rocRoller::FP8x4>::Packing == 4, "FP8x4");
 static_assert(rocRoller::TypeInfo<rocRoller::BF6x16>::Packing == 16, "BF6x16");
 static_assert(rocRoller::TypeInfo<rocRoller::FP6x16>::Packing == 16, "FP6x16");
 static_assert(rocRoller::TypeInfo<rocRoller::FP4x8>::Packing == 8, "FP4x8");
+static_assert(rocRoller::TypeInfo<rocRoller::E8M0>::Packing == 1, "E8M0");
+static_assert(rocRoller::TypeInfo<rocRoller::E8M0x4>::Packing == 4, "E8M0x4");
 
 static_assert(rocRoller::TypeInfo<float>::RegisterCount == 1, "Float");
 static_assert(rocRoller::TypeInfo<double>::RegisterCount == 2, "Double");
@@ -192,6 +198,8 @@ static_assert(rocRoller::TypeInfo<rocRoller::FP8x4>::RegisterCount == 1, "FP8x4"
 static_assert(rocRoller::TypeInfo<rocRoller::BF6x16>::RegisterCount == 3, "BF6x16");
 static_assert(rocRoller::TypeInfo<rocRoller::FP6x16>::RegisterCount == 3, "FP6x16");
 static_assert(rocRoller::TypeInfo<rocRoller::FP4x8>::RegisterCount == 1, "FP4x8");
+static_assert(rocRoller::TypeInfo<rocRoller::E8M0>::RegisterCount == 1, "E8M0");
+static_assert(rocRoller::TypeInfo<rocRoller::E8M0x4>::RegisterCount == 1, "E8M0x4");
 
 struct Enumerations : public ::testing::TestWithParam<rocRoller::DataType>
 {
@@ -246,7 +254,9 @@ INSTANTIATE_TEST_SUITE_P(DataTypesTest,
                                            rocRoller::DataType::FP6,
                                            rocRoller::DataType::BF6x16,
                                            rocRoller::DataType::FP6x16,
-                                           rocRoller::DataType::FP4));
+                                           rocRoller::DataType::FP4,
+                                           rocRoller::DataType::E8M0,
+                                           rocRoller::DataType::E8M0x4));
 
 class DataTypesTest : public SimpleFixture
 {

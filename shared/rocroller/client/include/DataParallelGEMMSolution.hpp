@@ -50,6 +50,8 @@ namespace rocRoller
                 std::optional<Operations::OperationTag> m_tagTensorScaleA, m_tagLoadScaleA,
                     m_tagBlockScaleA, m_tagTensorScaleB, m_tagLoadScaleB, m_tagBlockScaleB;
 
+                Operations::OperationTag m_tagWGM;
+
             public:
                 using GEMMSolution::GEMMSolution;
 
@@ -111,13 +113,16 @@ namespace rocRoller
                     if(solutionParams.scaleA == Operations::ScaleMode::Separate)
                     {
                         m_tagTensorScaleA = command->addOperation(rocRoller::Operations::Tensor(
-                            2, DataType::UInt8, unitStrides(solutionParams.transA)));
+                            2, DataType::E8M0, unitStrides(solutionParams.transA)));
                         m_tagLoadScaleA   = command->addOperation(
                             rocRoller::Operations::T_Load_Tiled(m_tagTensorScaleA.value()));
 
                         m_tagBlockScaleA = mulInputA
                             = command->addOperation(rocRoller::Operations::BlockScale(
-                                m_tagA, 2, m_tagLoadScaleA, {1, elementsPerMXBlock}));
+                                m_tagA,
+                                2,
+                                m_tagLoadScaleA,
+                                {1, static_cast<unsigned long>(solutionParams.scaleBlockSize)}));
                     }
                     else if(solutionParams.scaleA == Operations::ScaleMode::SingleScale)
                     {
@@ -133,13 +138,16 @@ namespace rocRoller
                     if(solutionParams.scaleB == Operations::ScaleMode::Separate)
                     {
                         m_tagTensorScaleB = command->addOperation(rocRoller::Operations::Tensor(
-                            2, DataType::UInt8, unitStrides(solutionParams.transB)));
+                            2, DataType::E8M0, unitStrides(solutionParams.transB)));
                         m_tagLoadScaleB   = command->addOperation(
                             rocRoller::Operations::T_Load_Tiled(m_tagTensorScaleB.value()));
 
                         m_tagBlockScaleB = mulInputB
                             = command->addOperation(rocRoller::Operations::BlockScale(
-                                m_tagB, 2, m_tagLoadScaleB, {elementsPerMXBlock, 1}));
+                                m_tagB,
+                                2,
+                                m_tagLoadScaleB,
+                                {static_cast<unsigned long>(solutionParams.scaleBlockSize), 1}));
                     }
                     else if(solutionParams.scaleB == Operations::ScaleMode::SingleScale)
                     {
@@ -189,6 +197,16 @@ namespace rocRoller
                     m_tagTensorD
                         = command->addOperation(Operations::Tensor(2, typeD, {(size_t)1})); // D
                     command->addOperation(Operations::T_Store_Tiled(m_tagD, m_tagTensorD));
+
+                    if(solutionParams.workgroupMapping.first != -1)
+                    {
+                        m_tagWGM = command->allocateTag();
+                        command->allocateArgument(DataType::UInt32,
+                                                  m_tagWGM,
+                                                  ArgumentType::Value,
+                                                  DataDirection::ReadOnly,
+                                                  rocRoller::WGM);
+                    }
 
                     return command;
                 }
@@ -296,6 +314,22 @@ namespace rocRoller
                                 ShowValue(wave_n),
                                 ShowValue(wavetilePerWavefrontN));
 
+                    if(solutionParams.scaleA == Operations::ScaleMode::Separate
+                       || solutionParams.scaleB == Operations::ScaleMode::Separate)
+                    {
+                        AssertFatal(
+                            arch.isSupportedScaleBlockSize(solutionParams.scaleBlockSize),
+                            fmt::format(
+                                "Architecture {} does not support block scaling (size: {}).",
+                                solutionParams.architecture.toString(),
+                                solutionParams.scaleBlockSize));
+                        AssertFatal(
+                            solutionParams.waveK % solutionParams.scaleBlockSize == 0,
+                            fmt::format("waveK: {} must be a multiple of the scale block size: {}",
+                                        solutionParams.waveK,
+                                        solutionParams.scaleBlockSize));
+                    }
+
                     params->setManualKernelDimension(2);
                     params->setWaveTilesPerWavefront(wavetilePerWavefrontM, wavetilePerWavefrontN);
 
@@ -338,11 +372,12 @@ namespace rocRoller
                     if(solutionParams.scaleA == Operations::ScaleMode::Separate)
                     {
                         auto macTileAScale = KernelGraph::CoordinateGraph::MacroTile(
-                            {solutionParams.macM, solutionParams.macK / elementsPerMXBlock},
+                            {solutionParams.macM,
+                             solutionParams.macK / solutionParams.scaleBlockSize},
                             LayoutType::MATRIX_A,
                             {solutionParams.waveM,
                              solutionParams.waveN,
-                             solutionParams.waveK / elementsPerMXBlock,
+                             solutionParams.waveK / solutionParams.scaleBlockSize,
                              solutionParams.waveB},
                             solutionParams.loadLDSScaleA ? MemoryType::LDS : MemoryType::WAVE);
                         params->setDimensionInfo(*m_tagLoadScaleA, macTileAScale);
@@ -350,38 +385,29 @@ namespace rocRoller
                     if(solutionParams.scaleB == Operations::ScaleMode::Separate)
                     {
                         auto macTileBScale = KernelGraph::CoordinateGraph::MacroTile(
-                            {solutionParams.macK / elementsPerMXBlock, solutionParams.macN},
+                            {solutionParams.macK / solutionParams.scaleBlockSize,
+                             solutionParams.macN},
                             LayoutType::MATRIX_B,
                             {solutionParams.waveM,
                              solutionParams.waveN,
-                             solutionParams.waveK / elementsPerMXBlock,
+                             solutionParams.waveK / solutionParams.scaleBlockSize,
                              solutionParams.waveB},
                             solutionParams.loadLDSScaleB ? MemoryType::LDS : MemoryType::WAVE);
                         params->setDimensionInfo(*m_tagLoadScaleB, macTileBScale);
                     }
 
-                    params->unrollX      = solutionParams.unrollX;
-                    params->unrollY      = solutionParams.unrollY;
-                    params->swizzleScale = solutionParams.swizzleScale;
+                    params->unrollX       = solutionParams.unrollX;
+                    params->unrollY       = solutionParams.unrollY;
+                    params->swizzleScale  = solutionParams.swizzleScale;
+                    params->prefetchScale = solutionParams.prefetchScale;
 
                     if(solutionParams.prefetch)
                     {
                         params->prefetch          = true;
-                        params->unrollK           = solutionParams.prefetchInFlight;
+                        params->unrollK           = std::max(2, solutionParams.prefetchInFlight);
                         params->prefetchInFlight  = solutionParams.prefetchInFlight;
                         params->prefetchLDSFactor = solutionParams.prefetchLDSFactor;
-                        params->prefetchMixMemOps = false;
-
-                        if(solutionParams.prefetchLDSFactor != 0)
-                            params->prefetchMixMemOps = true;
-
-                        if(solutionParams.scaleB == Operations::ScaleMode::Separate
-                           && !solutionParams.loadLDSScaleB)
-                            params->prefetchMixMemOps = false;
-
-                        if(solutionParams.scaleA == Operations::ScaleMode::Separate
-                           && !solutionParams.loadLDSScaleA)
-                            params->prefetchMixMemOps = false;
+                        params->prefetchMixMemOps = solutionParams.prefetchMixMemOps;
                     }
                     else
                     {
@@ -401,6 +427,37 @@ namespace rocRoller
                     uint workgroup_size_y = 1;
 
                     params->setManualWorkgroupSize({workgroup_size_x, workgroup_size_y, 1});
+
+                    if(solutionParams.workgroupMapping.first != -1)
+                    {
+                        auto dim  = solutionParams.workgroupMapping.first;
+                        auto size = solutionParams.workgroupMapping.second;
+
+                        AssertFatal(
+                            dim == 0 || dim == 1,
+                            "Only 0 (M) or 1 (N) are supported dimensions for workgroup mapping.",
+                            ShowValue(dim));
+
+                        // CommandSolution::generateKernelGraph creates the size Expression
+                        // and initializes the workgroupMapping.second
+                        params->workgroupMapping = {dim, nullptr};
+                    }
+
+                    if(solutionParams.workgroupRemapXCC)
+                    {
+                        AssertFatal(arch.HasCapability(GPUCapability::HasXCC),
+                                    "XCC-aware workgroup remapping not available on: ",
+                                    arch.target().toString());
+                        if(solutionParams.workgroupRemapXCCValue != -1)
+                        {
+                            params->workgroupRemapXCC = solutionParams.workgroupRemapXCCValue;
+                        }
+                        else
+                        {
+                            params->workgroupRemapXCC
+                                = arch.GetCapability(GPUCapability::DefaultRemapXCCValue);
+                        }
+                    }
 
                     params->setManualWavefrontCount(
                         {static_cast<uint>(solutionParams.macM / wave_m / wavetilePerWavefrontM),
@@ -440,6 +497,23 @@ namespace rocRoller
 
                     TensorDescriptor descD(fromString<DataType>(problemParams.typeD), {M, N}, "N");
                     setCommandTensorArg(commandArgs, m_tagTensorD, descD, (float*)nullptr);
+
+                    if(problemParams.workgroupMapping.first != -1)
+                    {
+                        auto const dim  = problemParams.workgroupMapping.first;
+                        auto const size = problemParams.workgroupMapping.second;
+
+                        AssertFatal(
+                            dim == 0 || dim == 1,
+                            "Only 0 (M) or 1 (N) are supported dimensions for workgroup mapping.",
+                            ShowValue(dim));
+
+                        AssertFatal(size > 0,
+                                    "Workgroup mapping size must be a positive non-zero integer.",
+                                    ShowValue(size));
+
+                        commandArgs.setArgument(m_tagWGM, ArgumentType::Value, size);
+                    }
 
                     return commandArgs;
                 }

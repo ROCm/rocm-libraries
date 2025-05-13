@@ -86,6 +86,7 @@ namespace rocRoller
             {"HasMFMA", Value::HasMFMA},
             {"HasMFMA_fp8", Value::HasMFMA_fp8},
             {"HasMFMA_f8f6f4", Value::HasMFMA_f8f6f4},
+            {"HasMFMA_scale_f8f6f4", Value::HasMFMA_scale_f8f6f4},
             {"HasMFMA_f64", Value::HasMFMA_f64},
             {"HasMFMA_bf16_32x32x4", Value::HasMFMA_bf16_32x32x4},
             {"HasMFMA_bf16_32x32x4_1k", Value::HasMFMA_bf16_32x32x4_1k},
@@ -155,6 +156,9 @@ namespace rocRoller
             {"HasWave64", Value::HasWave64},
             {"DefaultWavefrontSize", Value::DefaultWavefrontSize},
 
+            {"HasBlockScaling32", Value::HasBlockScaling32},
+            {"DefaultScaleBlockSize", Value::DefaultScaleBlockSize},
+
             {"UnalignedVGPRs", Value::UnalignedVGPRs},
             {"UnalignedSGPRs", Value::UnalignedSGPRs},
 
@@ -174,5 +178,8 @@ namespace rocRoller
 
             {"WorkgroupIdxViaTTMP", Value::WorkgroupIdxViaTTMP},
             {"HasBufferOutOfBoundsCheckOption", Value::HasBufferOutOfBoundsCheckOption},
+
+            {"HasXCC", Value::HasXCC},
+            {"DefaultRemapXCCValue", Value::DefaultRemapXCCValue},
     };
 }

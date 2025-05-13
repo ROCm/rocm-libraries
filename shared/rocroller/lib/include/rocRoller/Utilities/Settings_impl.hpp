@@ -32,7 +32,6 @@
 #include <stdlib.h>
 #include <type_traits>
 
-#include <rocRoller/Scheduling/Scheduler.hpp>
 #include <rocRoller/Utilities/Error.hpp>
 #include <rocRoller/Utilities/RTTI.hpp>
 #include <rocRoller/Utilities/Settings.hpp>

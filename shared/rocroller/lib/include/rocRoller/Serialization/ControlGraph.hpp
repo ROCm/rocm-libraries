@@ -30,7 +30,6 @@
 #include <rocRoller/DataTypes/DataTypes.hpp>
 #include <rocRoller/Graph/Hypergraph.hpp>
 #include <rocRoller/KernelGraph/ControlGraph/ControlGraph.hpp>
-#include <rocRoller/Serialization/AssemblyKernel.hpp>
 #include <rocRoller/Serialization/Base.hpp>
 #include <rocRoller/Serialization/Containers.hpp>
 #include <rocRoller/Serialization/Enum.hpp>
@@ -318,6 +317,8 @@ namespace rocRoller
                                            KernelGraph::ControlGraph::LoadLDSTile>)
                 {
                     iot::mapRequired(io, "isTransposedTile", op.isTransposedTile);
+                    if constexpr(std::same_as<Op, KernelGraph::ControlGraph::LoadTiled>)
+                        iot::mapRequired(io, "isDirect2LDS", op.isDirect2LDS);
                 }
                 else
                 {

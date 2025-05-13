@@ -796,7 +796,7 @@ namespace rocRoller
 
         inline CommandArgumentValue Value::getLiteralValue() const
         {
-            assert(m_regType == Type::Literal);
+            AssertFatal(m_regType == Type::Literal, ShowValue(m_regType));
 
             return m_literalValue;
         }

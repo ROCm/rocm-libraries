@@ -115,9 +115,15 @@ namespace largerLDSTest
 
                     const auto offset = i * m_numBytes;
                     co_yield m_context->mem()->loadGlobal(v_ptr, v_a, offset, m_numBytes);
-                    co_yield m_context->mem()->storeLocal(lds_offset, v_ptr, offset, m_numBytes);
-                    co_yield m_context->mem()->barrier();
+
+                    co_yield m_context->mem()
+                        ->storeLocal(lds_offset, v_ptr, offset, m_numBytes)
+                        .map(MemoryInstructions::addExtraDst(lds));
+
+                    co_yield_(m_context->mem()->barrier({lds}));
+
                     co_yield m_context->mem()->loadLocal(v_ptr, lds_offset, offset, m_numBytes);
+
                     co_yield m_context->mem()->storeGlobal(v_result, v_ptr, offset, m_numBytes);
                 }
             };
@@ -131,7 +137,7 @@ namespace largerLDSTest
         int m_numBytes, m_numLoads;
     };
 
-    TEST_CASE("Assemble larger lds test 1", "[largerLDS][codegen]")
+    TEST_CASE("Assemble larger lds test 1", "[lds][largerLDS][codegen]")
     {
         SUPPORTED_ARCH_SECTION(arch)
         {
@@ -144,7 +150,7 @@ namespace largerLDSTest
         }
     }
 
-    TEST_CASE("Run larger lds test", "[largerLDS][gpu]")
+    TEST_CASE("Run larger lds test", "[lds][largerLDS][codegen][gpu]")
     {
         auto context = TestContext::ForTestDevice();
 

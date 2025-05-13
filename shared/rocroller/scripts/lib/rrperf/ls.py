@@ -29,6 +29,7 @@ import argparse
 
 import rrperf.args as args
 import rrperf.rrsuites
+import rrperf.utils as utils
 
 
 def get_args(parser: argparse.ArgumentParser):
@@ -40,7 +41,10 @@ def run(args):
 
     suite = args.suite
     if suite is None:
-        suite = "all"
+        if utils.rocm_gfx().startswith("gfx120"):
+            suite = "all_gfx120X"
+        else:
+            suite = "all"
 
     generator = getattr(rrperf.rrsuites, suite)
     for x in generator():

@@ -252,7 +252,7 @@ namespace rocRoller
             if(tensor.getTag().uninitialized())
             {
                 tensor.setTag(m_nextTagValue);
-                m_nextTagValue++;
+                ++m_nextTagValue;
             }
 
             return {tensor.getTag()};
@@ -263,7 +263,7 @@ namespace rocRoller
             if(scalar.getTag().uninitialized())
             {
                 scalar.setTag(m_nextTagValue);
-                m_nextTagValue++;
+                ++m_nextTagValue;
             }
 
             return {scalar.getTag()};
@@ -274,7 +274,7 @@ namespace rocRoller
             if(literal.getTag().uninitialized())
             {
                 literal.setTag(m_nextTagValue);
-                m_nextTagValue++;
+                ++m_nextTagValue;
             }
             return {literal.getTag()};
         }
@@ -284,7 +284,7 @@ namespace rocRoller
             if(blockScale.getTag().uninitialized())
             {
                 blockScale.setTag(m_nextTagValue);
-                m_nextTagValue++;
+                ++m_nextTagValue;
             }
 
             return {blockScale.getTag()};
@@ -295,7 +295,7 @@ namespace rocRoller
             if(load.getTag().uninitialized())
             {
                 load.setTag(m_nextTagValue);
-                m_nextTagValue++;
+                ++m_nextTagValue;
             }
 
             return {load.getTag()};
@@ -306,7 +306,7 @@ namespace rocRoller
             if(load.getTag().uninitialized())
             {
                 load.setTag(m_nextTagValue);
-                m_nextTagValue++;
+                ++m_nextTagValue;
             }
 
             return {load.getTag()};
@@ -317,7 +317,7 @@ namespace rocRoller
             if(load.getTag().uninitialized())
             {
                 load.setTag(m_nextTagValue);
-                m_nextTagValue++;
+                ++m_nextTagValue;
             }
 
             return {load.getTag()};
@@ -328,7 +328,7 @@ namespace rocRoller
             if(mul.getTag().uninitialized())
             {
                 mul.setTag(m_nextTagValue);
-                m_nextTagValue++;
+                ++m_nextTagValue;
             }
 
             return {mul.getTag()};
@@ -339,7 +339,7 @@ namespace rocRoller
             if(store.getTag().uninitialized())
             {
                 store.setTag(m_nextTagValue);
-                m_nextTagValue++;
+                ++m_nextTagValue;
             }
 
             return {store.getTag()};
@@ -350,7 +350,7 @@ namespace rocRoller
             if(store.getTag().uninitialized())
             {
                 store.setTag(m_nextTagValue);
-                m_nextTagValue++;
+                ++m_nextTagValue;
             }
 
             return {store.getTag()};
@@ -361,7 +361,7 @@ namespace rocRoller
             if(exec.getTag().uninitialized())
             {
                 exec.setTag(m_nextTagValue);
-                m_nextTagValue++;
+                ++m_nextTagValue;
             }
 
             return {exec.getTag()};
@@ -378,7 +378,7 @@ namespace rocRoller
             if(rng.getTag().uninitialized())
             {
                 rng.setTag(m_nextTagValue);
-                m_nextTagValue++;
+                ++m_nextTagValue;
             }
 
             return {rng.getTag()};
@@ -397,7 +397,7 @@ namespace rocRoller
             if(ternary.getTag().uninitialized())
             {
                 ternary.setTag(m_nextTagValue);
-                m_nextTagValue++;
+                ++m_nextTagValue;
             }
 
             return {ternary.getTag()};
@@ -408,7 +408,7 @@ namespace rocRoller
             if(binary.getTag().uninitialized())
             {
                 binary.setTag(m_nextTagValue);
-                m_nextTagValue++;
+                ++m_nextTagValue;
             }
 
             return {binary.getTag()};
@@ -419,7 +419,7 @@ namespace rocRoller
             if(unary.getTag().uninitialized())
             {
                 unary.setTag(m_nextTagValue);
-                m_nextTagValue++;
+                ++m_nextTagValue;
             }
 
             return {unary.getTag()};
