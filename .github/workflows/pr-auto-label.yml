@@ -20,6 +20,10 @@ on:
     types:
       - labeled
       - unlabeled
+    branches:
+      - 'develop'
+      - 'staging'
+      - 'main'
 
 # ensure that the workflow is not running for the same PR multiple times at once
 concurrency:
