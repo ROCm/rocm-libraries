@@ -124,8 +124,8 @@ endif()
 
 
 # Setup version
-rocm_setup_version(VERSION 3.3.0)
-set(hipsparse_SOVERSION 1.1.0)
+rocm_setup_version(VERSION 4.0.0)
+set(hipsparse_SOVERSION 4.0.0)
 
 # hipSPARSE library
 add_subdirectory(library)
@@ -173,14 +173,6 @@ if(BUILD_CLIENTS_SAMPLES OR BUILD_CLIENTS_TESTS OR BUILD_CLIENTS_BENCHMARKS)
         RPM "${OPENMP_RPM}"
     )
   endif()
-  if(BUILD_CLIENTS_SAMPLES)
-    rocm_package_setup_client_component(
-      samples
-      DEPENDS
-        COMPONENT clients-common
-        DEB "${GFORTRAN_DEB}"
-        RPM "${GFORTRAN_RPM}")
-  endif()
 
   if( BUILD_CLIENTS_BENCHMARKS )
   rocm_package_setup_client_component(
@@ -197,8 +189,6 @@ if(BUILD_CLIENTS_SAMPLES OR BUILD_CLIENTS_TESTS OR BUILD_CLIENTS_BENCHMARKS)
   if(NOT WIN32)
     rocm_package_add_rpm_dependencies(COMPONENT tests DEPENDS "${GFORTRAN_RPM}")
     rocm_package_add_deb_dependencies(COMPONENT tests DEPENDS "${GFORTRAN_DEB}")
-    rocm_package_add_rpm_dependencies(COMPONENT samples DEPENDS "${GFORTRAN_RPM}")
-    rocm_package_add_deb_dependencies(COMPONENT samples DEPENDS "${GFORTRAN_DEB}")
     rocm_package_add_rpm_dependencies(COMPONENT benchmarks DEPENDS "${GFORTRAN_RPM}")
     rocm_package_add_deb_dependencies(COMPONENT benchmarks DEPENDS "${GFORTRAN_DEB}")
   endif()
