@@ -20,6 +20,10 @@ on:
     types:
       - labeled
       - unlabeled
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
     branches:
       - 'develop'
       - 'staging'
@@ -72,7 +76,7 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.generate-token.outputs.token }}
         run: |
-          PR_STATUS=$(gh pr view ${{ steps.pr_number.outputs.pr_number }} --json draft -q .draft)
+          PR_STATUS=$(gh pr view ${{ steps.pr_number.outputs.pr_number }} --json isDraft -q .isDraft)
           if [ "$PR_STATUS" == "true" ]; then
             echo "This PR is a draft. Skipping the workflow."
             exit 0
@@ -134,6 +138,7 @@ jobs:
           fi
 
       - name: Sync Custom Labels from Monorepo PR
+        if: github.event_name == 'workflow_run'
         env:
           GH_TOKEN: ${{ steps.generate-token.outputs.token }}
         run: |

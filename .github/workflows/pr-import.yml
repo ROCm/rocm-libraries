@@ -139,7 +139,6 @@ jobs:
           } >> pr_body.txt
 
           gh pr create \
-            --draft \
             --base develop \
             --head "${{ steps.import-branch.outputs.import_branch }}" \
             --title "$PR_TITLE" \
