@@ -277,7 +277,7 @@ public:
     bool isDefaultHipBLASLtArch()
     {
         int gfx_arch = getArch();
-        if(gfx_arch == 1200 || gfx_arch == 1201)
+        if(gfx_arch == 1200 || gfx_arch == 1201 || gfx_arch == 950)
         {
             return true;
         }
