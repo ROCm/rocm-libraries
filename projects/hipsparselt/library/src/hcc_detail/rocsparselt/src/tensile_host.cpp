@@ -174,10 +174,12 @@ namespace
             return rocisa::DataType::BFloat16;
         case HIP_R_8I:
             return rocisa::DataType::Int8;
+#if HIP_FP8_TYPE_OCP
         case HIP_R_8F_E4M3:
             return rocisa::DataType::Float8;
         case HIP_R_8F_E5M2:
             return rocisa::DataType::BFloat8;
+#endif
         default:
             assert(!"hipblasltDatatype_to_tensile_type: non-supported type");
             return rocisa::DataType::None;

@@ -14,11 +14,22 @@
 name: Fanout Subtree PRs
 
 on:
-  pull_request:
+  pull_request_target:
     types:
       - opened
       - synchronize
       - reopened
+      - ready_for_review
+    branches:
+      - 'develop'
+      - 'staging'
+      - 'main'
+    # Ignore changes to top-level files and directories
+    # that are not part of the subtree structure
+    paths-ignore:
+      - '.github/**'
+      - 'docs/**'
+      - '*.md'
 
 # ensure that the workflow is not running for the same PR multiple times at once
 concurrency:
@@ -27,6 +38,8 @@ concurrency:
 
 jobs:
   fanout:
+    # Skip if PR is in draft status
+    if: github.event.pull_request.draft == false
     runs-on: ubuntu-24.04
     steps:
       - name: Generate a token
@@ -40,6 +53,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
+          ref: refs/pull/${{ github.event.pull_request.number }}/merge
           sparse-checkout: .github
           sparse-checkout-cone-mode: true
           token: ${{ steps.generate-token.outputs.token }}
@@ -73,6 +87,7 @@ jobs:
         if: steps.detect.outputs.subtrees
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
+          ref: refs/pull/${{ github.event.pull_request.number }}/merge
           sparse-checkout: |
             .github
             ${{ steps.detect.outputs.subtrees }}

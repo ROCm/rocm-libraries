@@ -49,12 +49,17 @@ target_link_libraries(hipblaslt-clients-common
         roc::hipblaslt
         ${LAPACK_LIBRARIES} 
         ${BLAS_LIBRARIES}
+        ${CBLAS_LIBRARIES}
     PRIVATE
         hip::device
 )
 target_compile_definitions(hipblaslt-clients-common PRIVATE CLIENTS_NO_FORTRAN) # necessary?
 
-target_link_libraries(hipblaslt-bench 
+if(HIPBLASLT_ENABLE_ASAN)
+    hipblaslt_target_configure_sanitizers(hipblaslt-clients-common PUBLIC)
+endif()
+
+target_link_libraries(hipblaslt-bench
     PRIVATE
         hip::device
         hipblaslt-clients-common

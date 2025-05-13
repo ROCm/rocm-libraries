@@ -26,7 +26,6 @@
 
 include(FetchContent)
 
-
 find_package(ROCM 0.11.0 CONFIG QUIET PATHS "${ROCM_PATH}") # First version with Sphinx doc gen improvement
 if(NOT ROCM_FOUND)
   message(STATUS "ROCm CMake not found. Fetching...")

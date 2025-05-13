@@ -37,6 +37,25 @@
 #include "utility.hpp"
 #include <hipsparselt/hipsparselt.h>
 
+void testing_aux_get_version(const Arguments& arg)
+{
+    static int version;
+    hipsparselt_local_handle handle;
+    hipsparseLtGetVersion(handle, &version);
+
+    int major;
+    int minor;
+    int patch;
+    hipsparseLtGetProperty(HIP_LIBRARY_MAJOR_VERSION, &major);
+    hipsparseLtGetProperty(HIP_LIBRARY_MINOR_VERSION, &minor);
+    hipsparseLtGetProperty(HIP_LIBRARY_PATCH_LEVEL, &patch);
+    int version_ = major * 100000 + minor * 100 + patch;
+    ASSERT_EQ(version, version_);
+
+    char *rev = nullptr;
+    EXPECT_HIPSPARSE_STATUS(hipsparseLtGetGitRevision(handle, rev), HIPSPARSE_STATUS_INVALID_VALUE);
+}
+
 void testing_aux_handle_init_bad_arg(const Arguments& arg)
 {
     EXPECT_HIPSPARSE_STATUS(hipsparseLtInit(nullptr), HIPSPARSE_STATUS_INVALID_VALUE);
@@ -646,7 +665,7 @@ void testing_aux_matmul_init_bad_arg(const Arguments& arg)
     // C or D must be dense martrix
     hipsparselt_local_mat_descr matCS_(
         hipsparselt_matrix_type_structured, handle, M, N, ldc, arg.c_type, HIPSPARSE_ORDER_COL);
-    EXPECT_HIPSPARSE_STATUS(matC.status(), HIPSPARSE_STATUS_SUCCESS);
+    EXPECT_HIPSPARSE_STATUS(matCS_.status(), HIPSPARSE_STATUS_SUCCESS);
     EXPECT_HIPSPARSE_STATUS(
         hipsparseLtMatmulDescriptorInit(
             handle, &m_descr, opA, opB, matA, matB, matCS_, matD, arg.compute_type),
@@ -683,6 +702,7 @@ void testing_aux_matmul_init_bad_arg(const Arguments& arg)
     }
 #endif
 
+    // check the C and D matrices has the same memory order.
     hipsparselt_local_mat_descr matDR_(
         hipsparselt_matrix_type_dense, handle, M, N, ldc, arg.d_type, HIPSPARSE_ORDER_ROW);
     EXPECT_HIPSPARSE_STATUS(matDR_.status(), HIPSPARSE_STATUS_SUCCESS);
@@ -1581,6 +1601,18 @@ void testing_aux_matmul_plan_init_bad_arg(const Arguments& arg)
                             HIPSPARSE_STATUS_INVALID_VALUE);
     EXPECT_HIPSPARSE_STATUS(hipsparseLtMatmulPlanInit(handle, &plan, matmul, &alg_sel_),
                             HIPSPARSE_STATUS_INVALID_VALUE);
+
+    // check the A and B matrices has the same value of num_batches.
+    int num_batches_a = 2;
+    int num_batches_b = 3;
+    EXPECT_HIPSPARSE_STATUS(hipsparseLtMatDescSetAttribute(
+            handle, matA, HIPSPARSELT_MAT_NUM_BATCHES, &num_batches_a, sizeof(num_batches_a)),
+        HIPSPARSE_STATUS_SUCCESS);
+    EXPECT_HIPSPARSE_STATUS(hipsparseLtMatDescSetAttribute(
+            handle, matB, HIPSPARSELT_MAT_NUM_BATCHES, &num_batches_b, sizeof(num_batches_b)),
+        HIPSPARSE_STATUS_SUCCESS);
+    EXPECT_HIPSPARSE_STATUS(hipsparseLtMatmulPlanInit(handle, &plan, matmul, alg_sel),
+        HIPSPARSE_STATUS_INVALID_VALUE);
 }
 
 void testing_aux_matmul_plan_destroy_bad_arg(const Arguments& arg)

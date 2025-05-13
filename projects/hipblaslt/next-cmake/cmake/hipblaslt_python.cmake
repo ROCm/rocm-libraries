@@ -25,7 +25,7 @@
 # can invoke the Python interpreter valid for the build parameters. Because
 # this may involve a multi token list, it must be used without quotes in
 # COMMAND lists.
-function(hipblaslt_configure_bundled_python_command python_binary_dir)
+function(hipblaslt_configure_bundled_python_command python_binary_dir asan_options)
     # Set up a python command which sets PYTHONPATH and copies the current
     # PATH to the build time invocation, invoking python with the -P option
     # to enable additional environment protections.
@@ -56,9 +56,11 @@ function(hipblaslt_configure_bundled_python_command python_binary_dir)
         "${CMAKE_COMMAND}" -E env
         "PYTHONPATH=${_python_path}"
         "PATH=${_path}"
+        "${asan_options}"
         --
         "${Python3_EXECUTABLE}"
     )
     message(VERBOSE "Python command: ${_python_command}")
     set(HIPBLASLT_PYTHON_COMMAND "${_python_command}" PARENT_SCOPE)
+
 endfunction()
