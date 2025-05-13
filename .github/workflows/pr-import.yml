@@ -142,4 +142,5 @@ jobs:
             --base develop \
             --head "${{ steps.import-branch.outputs.import_branch }}" \
             --title "$PR_TITLE" \
+            --label "imported pr" \
             --body-file pr_body.txt
