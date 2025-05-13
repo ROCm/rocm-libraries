@@ -70,6 +70,22 @@ private:
 namespace TensileLite
 {
 
+    enum class HeaderFields
+    {
+        transA = 0,
+        transB,
+        batch_count,
+        m,
+        n,
+        k,
+        a_type,
+        b_type,
+        c_type,
+        compute_type,
+        solution_index,
+        count
+    };
+
     class ProblemOverride
     {
     public:
