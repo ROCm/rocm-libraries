@@ -23,6 +23,7 @@
 #
 ################################################################################
 
+from itertools import product
 import pathlib
 from rrperf.problems import GEMMRun, CodeGenRun, TensileRun
 
@@ -59,6 +60,20 @@ fp8fp8_fp32 = dict(
 bf8bf8_fp32 = dict(
     type_A="bf8",
     type_B="bf8",
+    type_C="float",
+    type_D="float",
+)
+
+fp8bf8_fp32 = dict(
+    type_A="fp8",
+    type_B="bf8",
+    type_C="float",
+    type_D="float",
+)
+
+bf8fp8_fp32 = dict(
+    type_A="bf8",
+    type_B="fp8",
     type_C="float",
     type_D="float",
 )
@@ -141,6 +156,25 @@ def unit():
     yield mkGEMM(default, fp32)
     yield mkGEMM(default, fp16)
     yield from tail_loop_reproducer()
+
+
+def unit_gfx120X():
+    default = dict(
+        M=1024,
+        N=1024,
+        K=128,
+        mac_m=64,
+        mac_n=64,
+        mac_k=64,
+        wave_m=16,
+        wave_n=16,
+        wave_k=16,
+        numWarmUp=1,
+        numOuter=1,
+        numInner=1,
+    )
+    yield mkGEMM(default, fp16)
+    yield mkGEMM(default, bf16_fp32)
 
 
 def sgemm():
@@ -324,6 +358,38 @@ def hgemm():
 
     # TODO: Enable once visualizer is working
     # yield from visualizer()
+
+
+def hgemm_gfx120X():
+    params = dict(
+        wave_m=16,
+        wave_n=16,
+        wave_k=16,
+        workgroup_size_x=64,
+        prefetch=False,
+    )
+
+    type_specifiers = [("half", fp16),
+                       ("bf16", bf16_bf16),
+                       ("float", fp16),
+                       ("float", fp8fp8_fp32),
+                       ("float", fp8bf8_fp32),
+                       ("float", bf8bf8_fp32),
+                       ("float", bf8fp8_fp32),
+                       ]
+
+    for sched in ["Priority", "Cooperative", "Sequential"]:
+        for a, b in product("NT", repeat=2):
+            for acc, abcd in type_specifiers:
+                yield mkGEMM(
+                    HGEMM_7680x8448x8192,
+                    type_acc=acc,
+                    trans_A=a,
+                    trans_B=b,
+                    scheduler=sched,
+                    **abcd,
+                    **params,
+                )
 
 
 def visualizer():
@@ -1446,6 +1512,10 @@ def all():
     yield from streamk()
     yield from scalar_is_zero()
     yield from codegen()
+
+
+def all_gfx120X():
+    yield from hgemm_gfx120X()
 
 
 def hgemm_guideposts():

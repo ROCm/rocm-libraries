@@ -675,12 +675,6 @@ namespace rocRoller::Client::GEMMClient
 
         auto const& arch = context->targetArchitecture().target();
 
-        if(arch.isRDNA4GPU())
-        {
-            std::cout << "FIXME: Client tests are disabled on " << arch.toString() << std::endl;
-            return {nullptr, ReturnCodes::SolutionNotSupportedOnArch};
-        }
-
         if(solution.streamK)
         {
             if(context->targetArchitecture().HasCapability(GPUCapability::ArchAccUnifiedRegs))
@@ -1524,11 +1518,11 @@ int main(int argc, const char* argv[])
         problem.scaleValueA = 1.0f;
     }
 
+    auto const& arch = GPUArchitectureLibrary::getInstance()->GetArch(solution.architecture);
     if(types.scaleBlockSize == -1
        && (types.scaleA == Operations::ScaleMode::Separate
            || types.scaleB == Operations::ScaleMode::Separate))
     {
-        auto const& arch = GPUArchitectureLibrary::getInstance()->GetArch(solution.architecture);
         AssertFatal(arch.HasCapability(GPUCapability::HasBlockScaling32),
                     fmt::format("Architecture {} does not support block scaling.",
                                 arch.target().toString()));
@@ -1570,51 +1564,111 @@ int main(int argc, const char* argv[])
     io.doSaveCO  = coOption->count() > 0;
 
     // Set default MI sizes
-    if(problem.typeA == "float" && problem.typeB == "float" && problem.typeC == "float"
-       && problem.typeD == "float")
+    if(arch.HasCapability(GPUCapability::HasMFMA))
     {
-        if(solution.waveM == -1)
-            solution.waveM = 32;
-        if(solution.waveN == -1)
-            solution.waveN = 32;
-        if(solution.waveK == -1)
-            solution.waveK = 2;
-        if(solution.waveB == -1)
-            solution.waveB = 1;
+        if(problem.typeA == "float" && problem.typeB == "float" && problem.typeC == "float"
+           && problem.typeD == "float")
+        {
+            if(solution.waveM == -1)
+                solution.waveM = 32;
+            if(solution.waveN == -1)
+                solution.waveN = 32;
+            if(solution.waveK == -1)
+                solution.waveK = 2;
+            if(solution.waveB == -1)
+                solution.waveB = 1;
+        }
+        else if(solution.typeA == "half" && solution.typeB == "half")
+        {
+            if(solution.waveM == -1)
+                solution.waveM = 32;
+            if(solution.waveN == -1)
+                solution.waveN = 32;
+            if(solution.waveK == -1)
+                solution.waveK = 8;
+            if(solution.waveB == -1)
+                solution.waveB = 1;
+        }
+        else if(solution.typeA == "bf16" && solution.typeB == "bf16")
+        {
+            if(solution.waveM == -1)
+                solution.waveM = 16;
+            if(solution.waveN == -1)
+                solution.waveN = 16;
+            if(solution.waveK == -1)
+                solution.waveK = 8;
+            if(solution.waveB == -1)
+                solution.waveB = 1;
+        }
+        else if((solution.typeA == "fp8" && solution.typeB == "fp8")
+                || (solution.typeA == "bf8" && solution.typeB == "bf8"))
+        {
+            if(solution.waveM == -1)
+                solution.waveM = 16;
+            if(solution.waveN == -1)
+                solution.waveN = 16;
+            if(solution.waveK == -1)
+                solution.waveK = 32;
+            if(solution.waveB == -1)
+                solution.waveB = 1;
+        }
     }
-    else if(solution.typeA == "half" && solution.typeB == "half")
+    else if(arch.HasCapability(GPUCapability::HasWMMA))
     {
-        if(solution.waveM == -1)
-            solution.waveM = 32;
-        if(solution.waveN == -1)
-            solution.waveN = 32;
-        if(solution.waveK == -1)
-            solution.waveK = 8;
-        if(solution.waveB == -1)
-            solution.waveB = 1;
+        if(arch.target().isRDNA4GPU())
+        {
+            if((solution.typeA == "half" && solution.typeB == "half")
+               || (solution.typeA == "bf16" && solution.typeB == "bf16")
+               || (solution.typeA == "fp8" && solution.typeB == "fp8")
+               || (solution.typeA == "bf8" && solution.typeB == "bf8")
+               || (solution.typeA == "bf8" && solution.typeB == "fp8")
+               || (solution.typeA == "fp8" && solution.typeB == "bf8"))
+            {
+                if(solution.waveM == -1)
+                    solution.waveM = 16;
+                if(solution.waveN == -1)
+                    solution.waveN = 16;
+                if(solution.waveK == -1)
+                    solution.waveK = 16;
+                if(solution.waveB == -1)
+                    solution.waveB = 1;
+            }
+            else
+            {
+                // Override default settings for the `example` and `generate` subcommands.
+                if(example->parsed() || generate->parsed())
+                {
+                    solution.typeA = "half";
+                    solution.typeB = "half";
+                    solution.typeC = "half";
+                    solution.typeD = "half";
+                    solution.waveM = 16;
+                    solution.waveN = 16;
+                    solution.waveK = 16;
+                    solution.waveB = 1;
+                }
+                else
+                {
+                    Throw<FatalError>("Unsupported MI on: ",
+                                      arch.target().toString(),
+                                      ShowValue(problem.typeA),
+                                      ShowValue(problem.typeB),
+                                      ShowValue(problem.typeC),
+                                      ShowValue(problem.typeD),
+                                      ShowValue(problem.typeAcc));
+                }
+            }
+            // TODO Support prefetch on gfx12
+            solution.prefetch = false;
+        }
+        else
+        {
+            Throw<FatalError>("Unsupported arch for GEMM client: ", arch.target().toString());
+        }
     }
-    else if(solution.typeA == "bf16" && solution.typeB == "bf16")
+    else
     {
-        if(solution.waveM == -1)
-            solution.waveM = 16;
-        if(solution.waveN == -1)
-            solution.waveN = 16;
-        if(solution.waveK == -1)
-            solution.waveK = 8;
-        if(solution.waveB == -1)
-            solution.waveB = 1;
-    }
-    else if((solution.typeA == "fp8" && solution.typeB == "fp8")
-            || (solution.typeA == "bf8" && solution.typeB == "bf8"))
-    {
-        if(solution.waveM == -1)
-            solution.waveM = 16;
-        if(solution.waveN == -1)
-            solution.waveN = 16;
-        if(solution.waveK == -1)
-            solution.waveK = 32;
-        if(solution.waveB == -1)
-            solution.waveB = 1;
+        Throw<FatalError>("Unsupported arch for GEMM client: ", arch.target().toString());
     }
 
     // Set default prefetchMixMemOps

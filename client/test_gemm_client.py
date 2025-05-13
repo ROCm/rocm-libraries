@@ -513,10 +513,6 @@ def test_gemm_config(tmp_path):
 def test_gemm_generate(tmp_path):
     """GEMM 'generate' basics."""
 
-    # TODO This is a temporary fix to enable GFX12 CI
-    if rocm_gfx().startswith("gfx12"):
-        return
-
     with chdir(tmp_path):
         # "gemm generate" should pass
         subprocess.run([gemm, "generate"], check=True)

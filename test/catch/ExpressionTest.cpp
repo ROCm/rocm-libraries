@@ -1556,7 +1556,7 @@ namespace ExpressionTest
             auto result = R"(
                 v_add_co_u32 v2, s[0:1], 1, v0
                 v_addc_co_u32 v3, s[0:1], 1, v1, s[0:1]
-                )";
+            )";
 
             CHECK(NormalizedSource(context.output()) == NormalizedSource(result));
         }
@@ -1607,7 +1607,7 @@ namespace ExpressionTest
             auto result = R"(
                 v_add_co_u32 v2, vcc, 100, v0
                 v_addc_co_u32 v3, vcc, 0, v1, vcc
-                )";
+            )";
 
             CHECK(NormalizedSource(context.output()) == NormalizedSource(result));
         }
@@ -1632,7 +1632,7 @@ namespace ExpressionTest
                 v_mov_b32 v1, 0
                 v_add_co_u32 v2, s[0:1], 1, v0
                 v_addc_co_u32 v3, s[0:1], 32, v1, s[0:1]
-        )";
+            )";
 
             CHECK(NormalizedSource(context.output()) == NormalizedSource(result));
         }
@@ -1655,9 +1655,9 @@ namespace ExpressionTest
             context.get()->schedule(Expression::generate(destReg, expr1, context.get()));
 
             auto result = R"(
-          v_add_co_u32 v2, s[0:1], 5, v0
-          v_addc_co_u32 v3, s[0:1], 0, v1, s[0:1]
-          )";
+                v_add_co_u32 v2, s[0:1], 5, v0
+                v_addc_co_u32 v3, s[0:1], 0, v1, s[0:1]
+            )";
 
             CHECK(NormalizedSource(context.output()) == NormalizedSource(result));
         }
@@ -1685,7 +1685,7 @@ namespace ExpressionTest
             auto result = R"(
                 v_add_co_u32 v4, s[0:1], v0, v2
                 v_addc_co_u32 v5, s[0:1], v1, v3, s[0:1]
-                )";
+            )";
 
             CHECK(NormalizedSource(context.output()) == NormalizedSource(result));
         }
@@ -1711,8 +1711,8 @@ namespace ExpressionTest
             context.get()->schedule(Expression::generate(destReg, expr1, context.get()));
 
             auto result = R"(
-            v_add_co_u32 v4, s[0:1], v0, v2
-            v_addc_co_u32 v5, s[0:1], 0, v1, s[0:1]
+                v_add_co_u32 v4, s[0:1], v0, v2
+                v_addc_co_u32 v5, s[0:1], 0, v1, s[0:1]
             )";
 
             CHECK(NormalizedSource(context.output()) == NormalizedSource(result));

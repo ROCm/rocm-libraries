@@ -23,29 +23,25 @@
 #
 ################################################################################
 
-"""List benchmark suites."""
-
-import argparse
-
-import rrperf.args as args
-import rrperf.rrsuites
-import rrperf.utils as utils
+import functools
+import subprocess
 
 
-def get_args(parser: argparse.ArgumentParser):
-    args.suite(parser)
+@functools.cache
+def rocm_gfx():
+    """Return GPU architecture (gfxXXXX) for local GPU device."""
+    output = None
+    try:
+        output = subprocess.run(
+            ["rocminfo"], capture_output=True, text=True, check=True
+        ).stdout
+    except subprocess.CalledProcessError:
+        return None
 
+    for line in output.splitlines():
+        if line.startswith("  Name:"):
+            _, arch, *_ = list(map(lambda x: x.strip(), line.split()))
+            if arch.startswith("gfx"):
+                return arch
 
-def run(args):
-    """List benchmarks."""
-
-    suite = args.suite
-    if suite is None:
-        if utils.rocm_gfx().startswith("gfx120"):
-            suite = "all_gfx120X"
-        else:
-            suite = "all"
-
-    generator = getattr(rrperf.rrsuites, suite)
-    for x in generator():
-        print(x)
+    return None
