@@ -1,4 +1,4 @@
-// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -367,11 +367,21 @@ namespace detail
             }
 
             wrapped_type reduction;
-            lookback_block_scan<Exclusive, block_scan_type>(wrapped_values,
-                                                            wrapped_initial_value,
-                                                            reduction,
-                                                            storage.scan,
-                                                            wrapped_op);
+            if constexpr(Exclusive)
+            {
+                lookback_block_scan<Exclusive, block_scan_type>(wrapped_values,
+                                                                wrapped_initial_value,
+                                                                reduction,
+                                                                storage.scan,
+                                                                wrapped_op);
+            }
+            else
+            {
+                lookback_block_scan<Exclusive, block_scan_type>(wrapped_values,
+                                                                reduction,
+                                                                storage.scan,
+                                                                wrapped_op);
+            }
 
             if(flat_thread_id == 0)
             {

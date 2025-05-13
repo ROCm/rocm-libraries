@@ -39,7 +39,6 @@
 #include <rocprim/device/device_search.hpp>
 #include <rocprim/functional.hpp>
 #include <rocprim/type_traits.hpp>
-#include <rocprim/type_traits_interface.hpp>
 #include <rocprim/types.hpp>
 
 #include <algorithm>

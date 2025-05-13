@@ -1,4 +1,4 @@
-// Copyright (c) 2018-2020 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -33,17 +33,10 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-template<
-    class T,
-    unsigned int WarpSize,
-    bool UseDPP = ROCPRIM_DETAIL_USE_DPP
->
-using warp_scan_crosslane =
-    typename std::conditional<
-        UseDPP,
-        warp_scan_dpp<T, WarpSize>,
-        warp_scan_shuffle<T, WarpSize>
-    >::type;
+template<class T, unsigned int VirtualWaveSize, bool UseDPP = ROCPRIM_DETAIL_USE_DPP>
+using warp_scan_crosslane = typename std::conditional<UseDPP,
+                                                      warp_scan_dpp<T, VirtualWaveSize>,
+                                                      warp_scan_shuffle<T, VirtualWaveSize>>::type;
 
 } // end namespace detail
 

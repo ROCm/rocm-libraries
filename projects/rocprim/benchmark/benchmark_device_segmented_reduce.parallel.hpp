@@ -25,6 +25,8 @@
 
 #include "benchmark_utils.hpp"
 
+#include "../common/utils_device_ptr.hpp"
+
 // Google Benchmark
 #include <benchmark/benchmark.h>
 
@@ -37,6 +39,7 @@
 #include <iostream>
 #include <limits>
 #include <locale>
+#include <numeric>
 #include <string>
 #include <vector>
 
@@ -71,28 +74,42 @@ inline std::string config_name<rocprim::default_config>()
     return "default_config";
 }
 
-template<typename T              = int,
+template<typename T,
          typename BinaryFunction = rocprim::plus<T>,
          typename Config         = rocprim::default_config>
-struct device_segmented_reduce_benchmark : public config_autotune_interface
+struct device_segmented_reduce_benchmark : public benchmark_utils::autotune_interface
 {
+private:
+    std::vector<size_t> desired_segments;
+    size_t              total_size;
+
+public:
+    device_segmented_reduce_benchmark()
+    {
+        this->desired_segments = std::vector<size_t>{1, 10, 100, 1000, 10000};
+    }
+
+    device_segmented_reduce_benchmark(size_t desired_segment)
+    {
+        desired_segments.push_back(desired_segment);
+    }
 
     std::string name() const override
     {
-        return bench_naming::format_name("{lvl:device,algo:segmented_reduce,key_type:"
-                                         + std::string(Traits<T>::name())
-                                         + ",cfg:" + config_name<Config>() + "}");
+        return bench_naming::format_name(
+            "{lvl:device,algo:segmented_reduce,key_type:" + std::string(Traits<T>::name())
+            + (desired_segments.size() == 1
+                   ? ",segment_count:" + std::to_string(desired_segments[0])
+                   : "")
+            + ",cfg:" + config_name<Config>() + "}");
     }
 
-    static constexpr unsigned int batch_size  = 10;
-    static constexpr unsigned int warmup_size = 5;
-
-    void run_benchmark(benchmark::State&   state,
-                       size_t              desired_segment,
-                       size_t              bytes,
-                       const managed_seed& seed,
-                       hipStream_t         stream) const
+    void run_benchmark(benchmark_utils::state&& state, size_t desired_segment)
     {
+        const auto& stream = state.stream;
+        const auto& bytes  = state.bytes;
+        const auto& seed   = state.seed;
+
         using offset_type = int;
         using value_type  = T;
 
@@ -120,118 +137,59 @@ struct device_segmented_reduce_benchmark : public config_autotune_interface
         std::vector<value_type> values_input(size);
         std::iota(values_input.begin(), values_input.end(), 0);
 
-        offset_type* d_offsets;
-        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_offsets),
-                            (segments_count + 1) * sizeof(offset_type)));
-        HIP_CHECK(hipMemcpy(d_offsets,
-                            offsets.data(),
-                            (segments_count + 1) * sizeof(offset_type),
-                            hipMemcpyHostToDevice));
+        common::device_ptr<offset_type> d_offsets(offsets);
 
-        value_type* d_values_input;
-        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_values_input), size * sizeof(value_type)));
-        HIP_CHECK(hipMemcpy(d_values_input,
-                            values_input.data(),
-                            size * sizeof(value_type),
-                            hipMemcpyHostToDevice));
+        common::device_ptr<value_type> d_values_input(values_input);
 
-        value_type* d_aggregates_output;
-        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_aggregates_output),
-                            segments_count * sizeof(value_type)));
+        common::device_ptr<value_type> d_aggregates_output(segments_count);
 
         rocprim::plus<value_type> reduce_op;
         value_type                init(0);
 
-        void*  d_temporary_storage     = nullptr;
         size_t temporary_storage_bytes = 0;
 
-        HIP_CHECK(rp::segmented_reduce<Config>(d_temporary_storage,
+        HIP_CHECK(rp::segmented_reduce<Config>(nullptr,
                                                temporary_storage_bytes,
-                                               d_values_input,
-                                               d_aggregates_output,
+                                               d_values_input.get(),
+                                               d_aggregates_output.get(),
                                                segments_count,
-                                               d_offsets,
-                                               d_offsets + 1,
+                                               d_offsets.get(),
+                                               d_offsets.get() + 1,
                                                reduce_op,
                                                init,
                                                stream));
 
-        HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
+        common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
         HIP_CHECK(hipDeviceSynchronize());
 
-        // Warm-up
-        for(size_t i = 0; i < warmup_size; i++)
-        {
-            HIP_CHECK(rp::segmented_reduce<Config>(d_temporary_storage,
-                                                   temporary_storage_bytes,
-                                                   d_values_input,
-                                                   d_aggregates_output,
-                                                   segments_count,
-                                                   d_offsets,
-                                                   d_offsets + 1,
-                                                   reduce_op,
-                                                   init,
-                                                   stream));
-        }
-        HIP_CHECK(hipDeviceSynchronize());
-
-        // HIP events creation
-        hipEvent_t start, stop;
-        HIP_CHECK(hipEventCreate(&start));
-        HIP_CHECK(hipEventCreate(&stop));
-
-        for(auto _ : state)
-        {
-            // Record start event
-            HIP_CHECK(hipEventRecord(start, stream));
-
-            for(size_t i = 0; i < batch_size; i++)
+        state.run(
+            [&]
             {
-                HIP_CHECK(rp::segmented_reduce<Config>(d_temporary_storage,
+                HIP_CHECK(rp::segmented_reduce<Config>(d_temporary_storage.get(),
                                                        temporary_storage_bytes,
-                                                       d_values_input,
-                                                       d_aggregates_output,
+                                                       d_values_input.get(),
+                                                       d_aggregates_output.get(),
                                                        segments_count,
-                                                       d_offsets,
-                                                       d_offsets + 1,
+                                                       d_offsets.get(),
+                                                       d_offsets.get() + 1,
                                                        reduce_op,
                                                        init,
                                                        stream));
-            }
+            });
 
-            // Record stop event and wait until it completes
-            HIP_CHECK(hipEventRecord(stop, stream));
-            HIP_CHECK(hipEventSynchronize(stop));
-
-            float elapsed_mseconds;
-            HIP_CHECK(hipEventElapsedTime(&elapsed_mseconds, start, stop));
-            state.SetIterationTime(elapsed_mseconds / 1000);
-        }
-
-        // Destroy HIP events
-        HIP_CHECK(hipEventDestroy(start));
-        HIP_CHECK(hipEventDestroy(stop));
-
-        state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(value_type));
-        state.SetItemsProcessed(state.iterations() * batch_size * size);
-
-        HIP_CHECK(hipFree(d_temporary_storage));
-        HIP_CHECK(hipFree(d_offsets));
-        HIP_CHECK(hipFree(d_values_input));
-        HIP_CHECK(hipFree(d_aggregates_output));
+        total_size += size;
     }
 
-    void run(benchmark::State&   state,
-             size_t              bytes,
-             const managed_seed& seed,
-             hipStream_t         stream) const override
+    void run(benchmark_utils::state&& state) override
     {
-        constexpr std::array<size_t, 5> desired_segments{1, 10, 100, 1000, 10000};
+        total_size = 0;
 
         for(const auto desired_segment : desired_segments)
         {
-            run_benchmark(state, desired_segment, bytes, seed, stream);
+            run_benchmark(std::forward<benchmark_utils::state>(state), desired_segment);
         }
+
+        state.set_throughput(total_size, sizeof(T));
     }
 };
 

@@ -21,16 +21,14 @@
 // SOFTWARE.
 
 #include "benchmark_utils.hpp"
-#include "cmdparser.hpp"
 
 #include "../common/utils_data_generation.hpp"
-
-#include <benchmark/benchmark.h>
+#include "../common/utils_device_ptr.hpp"
 
 #include <rocprim/block/block_load_func.hpp>
 #include <rocprim/block/block_run_length_decode.hpp>
 #include <rocprim/block/block_store_func.hpp>
-#include <rocprim/type_traits_interface.hpp>
+#include <rocprim/type_traits.hpp>
 #include <rocprim/types.hpp>
 
 #include <chrono>
@@ -38,10 +36,6 @@
 #include <string>
 #include <type_traits>
 #include <vector>
-
-#ifndef DEFAULT_N
-const size_t DEFAULT_BYTES = 1024 * 1024 * 32 * 4;
-#endif
 
 template<typename ItemT,
          typename OffsetT,
@@ -100,11 +94,12 @@ template<typename ItemT,
          unsigned RunsPerThread,
          unsigned DecodedItemsPerThread,
          unsigned Trials = 100>
-void run_benchmark(benchmark::State&   state,
-                   size_t              bytes,
-                   const managed_seed& seed,
-                   hipStream_t         stream)
+void run_benchmark(benchmark_utils::state&& state)
 {
+    const auto& bytes  = state.bytes;
+    const auto& seed   = state.seed;
+    const auto& stream = state.stream;
+
     // Calculate the number of elements N
     size_t         N               = bytes / sizeof(ItemT);
     constexpr auto runs_per_block  = BlockSize * RunsPerThread;
@@ -133,147 +128,76 @@ void run_benchmark(benchmark::State&   state,
     }
     const OffsetT output_length = run_offsets.back();
 
-    ItemT* d_run_items{};
-    HIP_CHECK(hipMalloc(&d_run_items, run_items.size() * sizeof(ItemT)));
-    HIP_CHECK(hipMemcpy(d_run_items,
-                        run_items.data(),
-                        run_items.size() * sizeof(ItemT),
-                        hipMemcpyHostToDevice));
+    common::device_ptr<ItemT> d_run_items(run_items);
 
-    OffsetT* d_run_offsets{};
-    HIP_CHECK(hipMalloc(&d_run_offsets, run_offsets.size() * sizeof(OffsetT)));
-    HIP_CHECK(hipMemcpy(d_run_offsets,
-                        run_offsets.data(),
-                        run_offsets.size() * sizeof(OffsetT),
-                        hipMemcpyHostToDevice));
+    common::device_ptr<OffsetT> d_run_offsets(run_offsets);
 
-    ItemT* d_output{};
-    HIP_CHECK(hipMalloc(&d_output, output_length * sizeof(ItemT)));
+    common::device_ptr<ItemT> d_output(output_length);
 
-    for(auto _ : state)
-    {
-        auto start = std::chrono::steady_clock::now();
-        hipLaunchKernelGGL(HIP_KERNEL_NAME(block_run_length_decode_kernel<ItemT,
-                                                                          OffsetT,
-                                                                          BlockSize,
-                                                                          RunsPerThread,
-                                                                          DecodedItemsPerThread,
-                                                                          Trials>),
-                           dim3(num_runs / runs_per_block),
-                           dim3(BlockSize),
-                           0,
-                           stream,
-                           d_run_items,
-                           d_run_offsets,
-                           d_output);
-        HIP_CHECK(hipPeekAtLastError());
-        HIP_CHECK(hipDeviceSynchronize());
+    state.run(
+        [&]
+        {
+            block_run_length_decode_kernel<ItemT,
+                                           OffsetT,
+                                           BlockSize,
+                                           RunsPerThread,
+                                           DecodedItemsPerThread,
+                                           Trials>
+                <<<dim3(num_runs / runs_per_block), dim3(BlockSize), 0, stream>>>(
+                    d_run_items.get(),
+                    d_run_offsets.get(),
+                    d_output.get());
+            HIP_CHECK(hipPeekAtLastError());
+            HIP_CHECK(hipDeviceSynchronize());
+        });
 
-        auto end = std::chrono::steady_clock::now();
-        auto elapsed_seconds
-            = std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
-
-        state.SetIterationTime(elapsed_seconds.count());
-    }
-    state.SetBytesProcessed(state.iterations() * output_length * sizeof(ItemT) * Trials);
-    state.SetItemsProcessed(state.iterations() * output_length * Trials);
-
-    HIP_CHECK(hipFree(d_run_items));
-    HIP_CHECK(hipFree(d_run_offsets));
-    HIP_CHECK(hipFree(d_output));
+    state.set_throughput(output_length * Trials, sizeof(ItemT));
 }
 
 #define CREATE_BENCHMARK(IT, OT, MINRL, MAXRL, BS, RPT, DIPT)                                      \
-    benchmark::RegisterBenchmark(                                                                  \
+    executor.queue_fn(                                                                             \
         bench_naming::format_name("{lvl:block,algo:run_length_decode"                              \
                                   ",item_type:" #IT ",offset_type:" #OT ",min_run_length:" #MINRL  \
                                   ",max_run_length:" #MAXRL ",cfg:{block_size:" #BS                \
                                   ",run_per_thread:" #RPT ",decoded_items_per_thread:" #DIPT "}}") \
             .c_str(),                                                                              \
-        &run_benchmark<IT, OT, MINRL, MAXRL, BS, RPT, DIPT>,                                       \
-        bytes,                                                                                     \
-        seed,                                                                                      \
-        stream)
+        &run_benchmark<IT, OT, MINRL, MAXRL, BS, RPT, DIPT>);
 
 int main(int argc, char* argv[])
 {
-    cli::Parser parser(argc, argv);
-    parser.set_optional<size_t>("size", "size", DEFAULT_BYTES, "number of bytes");
-    parser.set_optional<int>("trials", "trials", -1, "number of iterations");
-    parser.set_optional<std::string>("name_format",
-                                     "name_format",
-                                     "human",
-                                     "either: json,human,txt");
-    parser.set_optional<std::string>("seed", "seed", "random", get_seed_message());
-    parser.run_and_exit_if_error();
+    benchmark_utils::executor executor(argc, argv, 128 * benchmark_utils::MiB, 1, 0);
 
-    // Parse argv
-    benchmark::Initialize(&argc, argv);
-    const size_t bytes  = parser.get<size_t>("size");
-    const int    trials = parser.get<int>("trials");
-    bench_naming::set_format(parser.get<std::string>("name_format"));
-    const std::string  seed_type = parser.get<std::string>("seed");
-    const managed_seed seed(seed_type);
+    CREATE_BENCHMARK(int, int, 1, 5, 128, 2, 4)
+    CREATE_BENCHMARK(int, int, 1, 10, 128, 2, 4)
+    CREATE_BENCHMARK(int, int, 1, 50, 128, 2, 4)
+    CREATE_BENCHMARK(int, int, 1, 100, 128, 2, 4)
+    CREATE_BENCHMARK(int, int, 1, 500, 128, 2, 4)
+    CREATE_BENCHMARK(int, int, 1, 1000, 128, 2, 4)
+    CREATE_BENCHMARK(int, int, 1, 5000, 128, 2, 4)
 
-    // HIP
-    hipStream_t stream = 0; // default
+    CREATE_BENCHMARK(double, long long, 1, 5, 128, 2, 4)
+    CREATE_BENCHMARK(double, long long, 1, 10, 128, 2, 4)
+    CREATE_BENCHMARK(double, long long, 1, 50, 128, 2, 4)
+    CREATE_BENCHMARK(double, long long, 1, 100, 128, 2, 4)
+    CREATE_BENCHMARK(double, long long, 1, 500, 128, 2, 4)
+    CREATE_BENCHMARK(double, long long, 1, 1000, 128, 2, 4)
+    CREATE_BENCHMARK(double, long long, 1, 5000, 128, 2, 4)
 
-    // Benchmark info
-    add_common_benchmark_info();
-    benchmark::AddCustomContext("bytes", std::to_string(bytes));
-    benchmark::AddCustomContext("seed", seed_type);
+    CREATE_BENCHMARK(rocprim::int128_t, rocprim::int128_t, 1, 5, 128, 2, 4)
+    CREATE_BENCHMARK(rocprim::int128_t, rocprim::int128_t, 1, 10, 128, 2, 4)
+    CREATE_BENCHMARK(rocprim::int128_t, rocprim::int128_t, 1, 50, 128, 2, 4)
+    CREATE_BENCHMARK(rocprim::int128_t, rocprim::int128_t, 1, 100, 128, 2, 4)
+    CREATE_BENCHMARK(rocprim::int128_t, rocprim::int128_t, 1, 500, 128, 2, 4)
+    CREATE_BENCHMARK(rocprim::int128_t, rocprim::int128_t, 1, 1000, 128, 2, 4)
+    CREATE_BENCHMARK(rocprim::int128_t, rocprim::int128_t, 1, 5000, 128, 2, 4)
 
-    // Add benchmarks
-    std::vector<benchmark::internal::Benchmark*> benchmarks{
-        CREATE_BENCHMARK(int, int, 1, 5, 128, 2, 4),
-        CREATE_BENCHMARK(int, int, 1, 10, 128, 2, 4),
-        CREATE_BENCHMARK(int, int, 1, 50, 128, 2, 4),
-        CREATE_BENCHMARK(int, int, 1, 100, 128, 2, 4),
-        CREATE_BENCHMARK(int, int, 1, 500, 128, 2, 4),
-        CREATE_BENCHMARK(int, int, 1, 1000, 128, 2, 4),
-        CREATE_BENCHMARK(int, int, 1, 5000, 128, 2, 4),
+    CREATE_BENCHMARK(rocprim::uint128_t, rocprim::uint128_t, 1, 5, 128, 2, 4)
+    CREATE_BENCHMARK(rocprim::uint128_t, rocprim::uint128_t, 1, 10, 128, 2, 4)
+    CREATE_BENCHMARK(rocprim::uint128_t, rocprim::uint128_t, 1, 50, 128, 2, 4)
+    CREATE_BENCHMARK(rocprim::uint128_t, rocprim::uint128_t, 1, 100, 128, 2, 4)
+    CREATE_BENCHMARK(rocprim::uint128_t, rocprim::uint128_t, 1, 500, 128, 2, 4)
+    CREATE_BENCHMARK(rocprim::uint128_t, rocprim::uint128_t, 1, 1000, 128, 2, 4)
+    CREATE_BENCHMARK(rocprim::uint128_t, rocprim::uint128_t, 1, 5000, 128, 2, 4)
 
-        CREATE_BENCHMARK(double, long long, 1, 5, 128, 2, 4),
-        CREATE_BENCHMARK(double, long long, 1, 10, 128, 2, 4),
-        CREATE_BENCHMARK(double, long long, 1, 50, 128, 2, 4),
-        CREATE_BENCHMARK(double, long long, 1, 100, 128, 2, 4),
-        CREATE_BENCHMARK(double, long long, 1, 500, 128, 2, 4),
-        CREATE_BENCHMARK(double, long long, 1, 1000, 128, 2, 4),
-        CREATE_BENCHMARK(double, long long, 1, 5000, 128, 2, 4),
-
-        CREATE_BENCHMARK(rocprim::int128_t, rocprim::int128_t, 1, 5, 128, 2, 4),
-        CREATE_BENCHMARK(rocprim::int128_t, rocprim::int128_t, 1, 10, 128, 2, 4),
-        CREATE_BENCHMARK(rocprim::int128_t, rocprim::int128_t, 1, 50, 128, 2, 4),
-        CREATE_BENCHMARK(rocprim::int128_t, rocprim::int128_t, 1, 100, 128, 2, 4),
-        CREATE_BENCHMARK(rocprim::int128_t, rocprim::int128_t, 1, 500, 128, 2, 4),
-        CREATE_BENCHMARK(rocprim::int128_t, rocprim::int128_t, 1, 1000, 128, 2, 4),
-        CREATE_BENCHMARK(rocprim::int128_t, rocprim::int128_t, 1, 5000, 128, 2, 4),
-
-        CREATE_BENCHMARK(rocprim::uint128_t, rocprim::uint128_t, 1, 5, 128, 2, 4),
-        CREATE_BENCHMARK(rocprim::uint128_t, rocprim::uint128_t, 1, 10, 128, 2, 4),
-        CREATE_BENCHMARK(rocprim::uint128_t, rocprim::uint128_t, 1, 50, 128, 2, 4),
-        CREATE_BENCHMARK(rocprim::uint128_t, rocprim::uint128_t, 1, 100, 128, 2, 4),
-        CREATE_BENCHMARK(rocprim::uint128_t, rocprim::uint128_t, 1, 500, 128, 2, 4),
-        CREATE_BENCHMARK(rocprim::uint128_t, rocprim::uint128_t, 1, 1000, 128, 2, 4),
-        CREATE_BENCHMARK(rocprim::uint128_t, rocprim::uint128_t, 1, 5000, 128, 2, 4)};
-
-    // Use manual timing
-    for(auto& b : benchmarks)
-    {
-        b->UseManualTime();
-        b->Unit(benchmark::kMillisecond);
-    }
-
-    // Force number of iterations
-    if(trials > 0)
-    {
-        for(auto& b : benchmarks)
-        {
-            b->Iterations(trials);
-        }
-    }
-
-    // Run benchmarks
-    benchmark::RunSpecifiedBenchmarks();
-    return 0;
+    executor.run();
 }

@@ -32,7 +32,6 @@
 #include <rocprim/device/device_radix_sort.hpp>
 #include <rocprim/device/device_radix_sort_config.hpp>
 #include <rocprim/type_traits.hpp>
-#include <rocprim/type_traits_interface.hpp>
 #include <rocprim/types/double_buffer.hpp>
 
 #include "../../common/utils_device_ptr.hpp"
@@ -41,7 +40,6 @@
 #include "test_seed.hpp"
 #include "test_utils.hpp"
 #include "test_utils_assertions.hpp"
-#include "test_utils_custom_float_traits_type.hpp"
 #include "test_utils_custom_float_type.hpp"
 #include "test_utils_custom_test_types.hpp"
 #include "test_utils_data_generation.hpp"
@@ -117,8 +115,7 @@ auto generate_key_input(KeyIter keys_input, size_t size, engine_type& rng_engine
 // Working around custom_float_test_type, which is both a float and a common::custom_type
 template<class T>
 constexpr bool is_custom_not_float_test_type
-    = common::is_custom_type<T>::value && !std::is_same<test_utils::custom_float_type, T>::value
-      && !std::is_same<test_utils::custom_float_traits_type, T>::value;
+    = common::is_custom_type<T>::value && !std::is_same<test_utils::custom_float_type, T>::value;
 
 template<class Config, bool Descending, class Key>
 auto invoke_sort_keys(void*        d_temporary_storage,

@@ -80,9 +80,12 @@ public:
 
 using custom_int2    = common::custom_type<int, int, true>;
 using custom_double2 = common::custom_type<double, double, true>;
+using custom_large   = common::custom_huge_type<1024, long long>;
 
 using RocprimDeviceMergeTestsParams = ::testing::Types<
     DeviceMergeParams<int, double>,
+    DeviceMergeParams<rocprim::bfloat16, half>,
+    DeviceMergeParams<short, half>,
     DeviceMergeParams<unsigned long, unsigned int, rocprim::greater<unsigned long>>,
     DeviceMergeParams<float, custom_double2>,
     DeviceMergeParams<int, float>,
@@ -93,7 +96,8 @@ using RocprimDeviceMergeTestsParams = ::testing::Types<
     DeviceMergeParams<rocprim::bfloat16, rocprim::bfloat16, rocprim::less<rocprim::bfloat16>>,
     DeviceMergeParams<custom_double2, custom_int2, rocprim::greater<custom_double2>>,
     DeviceMergeParams<custom_int2, char>,
-    DeviceMergeParams<int, int, ::rocprim::less<int>, true>>;
+    DeviceMergeParams<int, int, ::rocprim::less<int>, true>,
+    DeviceMergeParams<custom_large, custom_large>>;
 
 // size1, size2
 std::vector<std::tuple<size_t, size_t>> get_sizes()
@@ -143,6 +147,14 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKey)
             // hipMallocManaged() currently doesnt support zero byte allocation
             continue;
         }
+
+        if((std::get<0>(sizes) + std::get<1>(sizes) >= 100000
+            && sizeof(key_type) > sizeof(size_t) * 16))
+        {
+            // Huge types are slow
+            continue;
+        }
+
         SCOPED_TRACE(
             testing::Message() << "with sizes = {" <<
             std::get<0>(sizes) << ", " << std::get<1>(sizes) << "}"
@@ -279,6 +291,14 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKeyValue)
             // hipMallocManaged() currently doesnt support zero byte allocation
             continue;
         }
+
+        if((std::get<0>(sizes) + std::get<1>(sizes) >= 100000
+            && sizeof(key_type) > sizeof(size_t) * 16))
+        {
+            // Huge types are slow
+            continue;
+        }
+
         SCOPED_TRACE(
             testing::Message() << "with sizes = {" <<
             std::get<0>(sizes) << ", " << std::get<1>(sizes) << "}"
@@ -423,7 +443,9 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKeyValue)
     }
 
     if (TestFixture::use_graphs)
+    {
         HIP_CHECK(hipStreamDestroy(stream));
+    }
 }
 
 template<bool UseGraphs = false, typename config = rocprim::default_config>

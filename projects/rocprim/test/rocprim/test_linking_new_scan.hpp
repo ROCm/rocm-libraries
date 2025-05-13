@@ -163,7 +163,9 @@ template<class Config = default_config,
          class OutputIterator,
          class BinaryFunction
          = ::rocprim::plus<typename std::iterator_traits<InputIterator>::value_type>,
-         class AccType = typename std::iterator_traits<InputIterator>::value_type>
+         class AccType
+         = ::rocprim::accumulator_t<BinaryFunction,
+                                    typename std::iterator_traits<InputIterator>::value_type>>
 inline hipError_t inclusive_scan(void*             temporary_storage,
                                  size_t&           storage_size,
                                  InputIterator     input,

@@ -37,7 +37,7 @@
 #include <rocprim/block/block_load_func.hpp>
 #include <rocprim/block/block_radix_sort.hpp>
 #include <rocprim/block/block_store_func.hpp>
-#include <rocprim/type_traits_interface.hpp>
+#include <rocprim/type_traits.hpp>
 #include <rocprim/types.hpp>
 
 #include <algorithm>
@@ -84,26 +84,30 @@ __global__ __launch_bounds__(BlockSize) void sort_key_kernel(key_type*    device
     key_type keys[ItemsPerThread];
     rocprim::block_load_direct_blocked(lid, device_keys_output + block_offset, keys);
 
-    rocprim::block_radix_sort<key_type,
-                              BlockSize,
-                              ItemsPerThread,
-                              rocprim::empty_type,
-                              1,
-                              1,
-                              RadixBitsPerPass>
-        bsort;
-
+    using block_radix_sort = rocprim::block_radix_sort<key_type,
+                                                       BlockSize,
+                                                       ItemsPerThread,
+                                                       rocprim::empty_type,
+                                                       1,
+                                                       1,
+                                                       RadixBitsPerPass>;
+    block_radix_sort                          bsort;
     test_utils::select_decomposer_t<key_type> decomposer{};
 
+    // Share LDS storage between all different sort invocations explicitely.
+    // This resolves local memory allocation exceeding limits when targeting SPIR-V.
+    __shared__ typename block_radix_sort::storage_type storage;
+
+    // Sort differently depending on passed flags.
     if(to_striped)
     {
         if(descending)
         {
-            bsort.sort_desc_to_striped(keys, start_bit, end_bit, decomposer);
+            bsort.sort_desc_to_striped(keys, storage, start_bit, end_bit, decomposer);
         }
         else
         {
-            bsort.sort_to_striped(keys, start_bit, end_bit, decomposer);
+            bsort.sort_to_striped(keys, storage, start_bit, end_bit, decomposer);
         }
 
         rocprim::block_store_direct_striped<BlockSize>(lid, device_keys_output + block_offset, keys);
@@ -112,11 +116,11 @@ __global__ __launch_bounds__(BlockSize) void sort_key_kernel(key_type*    device
     {
         if(descending)
         {
-            bsort.sort_desc(keys, start_bit, end_bit, decomposer);
+            bsort.sort_desc(keys, storage, start_bit, end_bit, decomposer);
         }
         else
         {
-            bsort.sort(keys, start_bit, end_bit, decomposer);
+            bsort.sort(keys, storage, start_bit, end_bit, decomposer);
         }
 
         rocprim::block_store_direct_blocked(lid, device_keys_output + block_offset, keys);
@@ -144,19 +148,25 @@ __global__ __launch_bounds__(BlockSize) void sort_key_value_kernel(key_type*   d
     rocprim::block_load_direct_blocked(lid, device_keys_output + block_offset, keys);
     rocprim::block_load_direct_blocked(lid, device_values_output + block_offset, values);
 
-    rocprim::
-        block_radix_sort<key_type, BlockSize, ItemsPerThread, value_type, 1, 1, RadixBitsPerPass>
-                                              bsort;
+    using block_radix_sort = rocprim::
+        block_radix_sort<key_type, BlockSize, ItemsPerThread, value_type, 1, 1, RadixBitsPerPass>;
+    block_radix_sort                          bsort;
     test_utils::select_decomposer_t<key_type> decomposer{};
+
+    // Share LDS storage between all different sort invocations explicitely.
+    // This resolved local memory allocation exceeding limits when targeting SPIR-V.
+    __shared__ typename block_radix_sort::storage_type storage;
+
+    // Sort differently depending on passed flags.
     if(to_striped)
     {
         if(descending)
         {
-            bsort.sort_desc_to_striped(keys, values, start_bit, end_bit, decomposer);
+            bsort.sort_desc_to_striped(keys, values, storage, start_bit, end_bit, decomposer);
         }
         else
         {
-            bsort.sort_to_striped(keys, values, start_bit, end_bit, decomposer);
+            bsort.sort_to_striped(keys, values, storage, start_bit, end_bit, decomposer);
         }
 
         rocprim::block_store_direct_striped<BlockSize>(lid, device_keys_output + block_offset, keys);
@@ -166,11 +176,11 @@ __global__ __launch_bounds__(BlockSize) void sort_key_value_kernel(key_type*   d
     {
         if(descending)
         {
-            bsort.sort_desc(keys, values, start_bit, end_bit, decomposer);
+            bsort.sort_desc(keys, values, storage, start_bit, end_bit, decomposer);
         }
         else
         {
-            bsort.sort(keys, values, start_bit, end_bit, decomposer);
+            bsort.sort(keys, values, storage, start_bit, end_bit, decomposer);
         }
 
         rocprim::block_store_direct_blocked(lid, device_keys_output + block_offset, keys);

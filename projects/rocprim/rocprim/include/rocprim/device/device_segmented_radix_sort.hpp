@@ -39,7 +39,6 @@
 #include "../block/block_load.hpp"
 #include "../iterator/counting_iterator.hpp"
 #include "../iterator/reverse_iterator.hpp"
-#include "../thread/radix_key_codec.hpp"
 #include "detail/device_segmented_radix_sort.hpp"
 #include "device_partition.hpp"
 #include "device_segmented_radix_sort_config.hpp"
@@ -348,12 +347,12 @@ hipError_t segmented_radix_sort_impl(void * temporary_storage,
         return segment_length > max_small_segment_length;
     };
 
-    const bool with_double_buffer = keys_tmp != nullptr;
-    const unsigned int bits = end_bit - begin_bit;
-    const unsigned int iterations = ::rocprim::detail::ceiling_div(bits, params.long_radix_bits);
-    const bool to_output = with_double_buffer || (iterations - 1) % 2 == 0;
-    is_result_in_output           = (iterations % 2 == 0) != to_output;
-    const bool         do_partitioning
+    const bool         with_double_buffer = keys_tmp != nullptr;
+    const unsigned int bits               = end_bit - begin_bit;
+    const unsigned int iterations         = ::rocprim::detail::ceiling_div(bits, params.radix_bits);
+    const bool         to_output          = with_double_buffer || (iterations - 1) % 2 == 0;
+    is_result_in_output                   = (iterations % 2 == 0) != to_output;
+    const bool do_partitioning
         = partitioning_allowed && segments >= params.warp_sort_config.partitioning_threshold;
 
     const size_t medium_segment_indices_size = three_way_partitioning ? segments : 0;

@@ -24,7 +24,10 @@
 #include <type_traits>
 
 #include "../../config.hpp"
-#include "../../intrinsics.hpp"
+#include "../../intrinsics/arch.hpp"
+#include "../../intrinsics/thread.hpp"
+#include "../../intrinsics/warp.hpp"
+#include "../../types.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
 
@@ -32,10 +35,13 @@ namespace detail
 {
 
 // Returns logical warp id of the last thread in thread's segment
-template<bool HeadSegmented, unsigned int WarpSize, class Flag>
+template<bool         HeadSegmented,
+         unsigned int WarpSize,
+         class Flag,
+         arch::wavefront::target Target = arch::wavefront::get_target()>
 ROCPRIM_DEVICE ROCPRIM_INLINE
 auto last_in_warp_segment(Flag flag) ->
-    typename std::enable_if<(WarpSize <= arch::wavefront::min_size()), unsigned int>::type
+    typename std::enable_if<(WarpSize <= arch::wavefront::max_size()), unsigned int>::type
 {
     // Get flags (now every thread know where the flags are)
     lane_mask_type warp_flags = ::rocprim::ballot(flag);
@@ -53,11 +59,24 @@ auto last_in_warp_segment(Flag flag) ->
     // Make sure last item in logical warp is marked as a tail
     warp_flags |= lane_mask_type(1) << (WarpSize - 1U);
     // Calculate logical lane id of the last valid value in the segment
-#if ROCPRIM_WAVEFRONT_SIZE == 32
-    return ::__ffs(warp_flags) - 1;
-#else
-    return ::__ffsll(warp_flags) - 1;
-#endif
+
+    if constexpr(Target == arch::wavefront::target::size32)
+    {
+        // The static_cast prevents "error: call to '__ffs' is ambiguous"
+        return ::__ffs(static_cast<unsigned int>(warp_flags)) - 1;
+    }
+    else if constexpr(Target == arch::wavefront::target::size64)
+    {
+        // The static_cast prevents "error: call to '__ffsll' is ambiguous"
+        return ::__ffsll(static_cast<unsigned long long int>(warp_flags)) - 1;
+    }
+    else
+    {
+        // Dynamic case, used for SPIR-V.
+        return arch::wavefront::size() == ROCPRIM_WARP_SIZE_32
+                   ? ::__ffs(static_cast<unsigned int>(warp_flags)) - 1
+                   : ::__ffsll(static_cast<unsigned long long int>(warp_flags)) - 1;
+    }
 }
 
 } // end namespace detail

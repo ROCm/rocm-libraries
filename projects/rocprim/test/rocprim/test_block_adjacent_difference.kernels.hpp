@@ -23,10 +23,16 @@
 #ifndef TEST_BLOCK_ADJACENT_DIFFERENCE_KERNELS_HPP_
 #define TEST_BLOCK_ADJACENT_DIFFERENCE_KERNELS_HPP_
 
+#include "test_utils.hpp"
+#include "test_utils_types.hpp"
+
 #include "../common_test_header.hpp"
 
 #include "../../common/utils_device_ptr.hpp"
-#include "test_utils.hpp"
+
+#include <rocprim/block/block_adjacent_difference.hpp>
+#include <rocprim/block/block_load_func.hpp>
+#include <rocprim/block/block_store.hpp>
 
 // Host (CPU) implementaions of the wrapping function that allows to pass 3 args
 template<class T, class FlagType, class FlagOp>
@@ -51,46 +57,6 @@ struct test_op
         return (b + b) - a;
     }
 };
-
-template<class Type,
-         class FlagType,
-         class FlagOpType,
-         unsigned int BlockSize,
-         unsigned int ItemsPerThread>
-__global__ __launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU) void flag_heads_kernel(
-    Type* device_input, long long* device_heads)
-{
-    const unsigned int lid             = threadIdx.x;
-    const unsigned int items_per_block = BlockSize * ItemsPerThread;
-    const unsigned int block_offset    = blockIdx.x * items_per_block;
-
-    Type input[ItemsPerThread];
-    rocprim::block_load_direct_blocked(lid, device_input + block_offset, input);
-
-    rocprim::block_adjacent_difference<Type, BlockSize> adjacent_difference;
-    __shared__ typename decltype(adjacent_difference)::storage_type storage;
-
-    FlagType head_flags[ItemsPerThread];
-
-    // Still need to test it even tough its deprecated
-    ROCPRIM_CLANG_SUPPRESS_WARNING_WITH_PUSH("-Wdeprecated")
-    if(blockIdx.x % 2 == 1)
-    {
-        const Type tile_predecessor_item = device_input[block_offset - 1];
-        adjacent_difference.flag_heads(head_flags,
-                                       tile_predecessor_item,
-                                       input,
-                                       FlagOpType(),
-                                       storage);
-    }
-    else
-    {
-        adjacent_difference.flag_heads(head_flags, input, FlagOpType(), storage);
-    }
-    ROCPRIM_CLANG_SUPPRESS_WARNING_POP
-
-    rocprim::block_store_direct_blocked(lid, device_heads + block_offset, head_flags);
-}
 
 template<typename T,
          typename Output,
@@ -250,449 +216,13 @@ __global__ __launch_bounds__(
     rocprim::block_store_direct_blocked(lid, output + block_offset, thread_output);
 }
 
-template<class Type,
-         class FlagType,
-         class FlagOpType,
-         unsigned int BlockSize,
-         unsigned int ItemsPerThread>
-__global__ __launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU) void flag_tails_kernel(
-    Type* device_input, long long* device_tails)
-{
-    const unsigned int lid             = threadIdx.x;
-    const unsigned int items_per_block = BlockSize * ItemsPerThread;
-    const unsigned int block_offset    = blockIdx.x * items_per_block;
-
-    Type input[ItemsPerThread];
-    rocprim::block_load_direct_blocked(lid, device_input + block_offset, input);
-
-    rocprim::block_adjacent_difference<Type, BlockSize> adjacent_difference;
-    __shared__ typename decltype(adjacent_difference)::storage_type storage;
-
-    FlagType tail_flags[ItemsPerThread];
-
-    // Still need to test it even tough its deprecated
-    ROCPRIM_CLANG_SUPPRESS_WARNING_WITH_PUSH("-Wdeprecated")
-    if(blockIdx.x % 2 == 0)
-    {
-        const Type tile_successor_item = device_input[block_offset + items_per_block];
-        adjacent_difference.flag_tails(tail_flags,
-                                       tile_successor_item,
-                                       input,
-                                       FlagOpType(),
-                                       storage);
-    }
-    else
-    {
-        adjacent_difference.flag_tails(tail_flags, input, FlagOpType(), storage);
-    }
-    ROCPRIM_CLANG_SUPPRESS_WARNING_POP
-
-    rocprim::block_store_direct_blocked(lid, device_tails + block_offset, tail_flags);
-}
-
-template<class Type,
-         class FlagType,
-         class FlagOpType,
-         unsigned int BlockSize,
-         unsigned int ItemsPerThread>
-__global__ __launch_bounds__(
-    BlockSize,
-    ROCPRIM_DEFAULT_MIN_WARPS_PER_EU) void flag_heads_and_tails_kernel(Type*      device_input,
-                                                                       long long* device_heads,
-                                                                       long long* device_tails)
-{
-    const unsigned int lid             = threadIdx.x;
-    const unsigned int items_per_block = BlockSize * ItemsPerThread;
-    const unsigned int block_offset    = blockIdx.x * items_per_block;
-
-    Type input[ItemsPerThread];
-    rocprim::block_load_direct_blocked(lid, device_input + block_offset, input);
-
-    rocprim::block_adjacent_difference<Type, BlockSize> adjacent_difference;
-    __shared__ typename decltype(adjacent_difference)::storage_type storage;
-
-    FlagType head_flags[ItemsPerThread];
-    FlagType tail_flags[ItemsPerThread];
-
-    // Still need to test it even tough its deprecated
-    ROCPRIM_CLANG_SUPPRESS_WARNING_WITH_PUSH("-Wdeprecated")
-    if(blockIdx.x % 4 == 0)
-    {
-        const Type tile_successor_item = device_input[block_offset + items_per_block];
-        adjacent_difference.flag_heads_and_tails(head_flags,
-                                                 tail_flags,
-                                                 tile_successor_item,
-                                                 input,
-                                                 FlagOpType(),
-                                                 storage);
-    }
-    else if(blockIdx.x % 4 == 1)
-    {
-        const Type tile_predecessor_item = device_input[block_offset - 1];
-        const Type tile_successor_item   = device_input[block_offset + items_per_block];
-        adjacent_difference.flag_heads_and_tails(head_flags,
-                                                 tile_predecessor_item,
-                                                 tail_flags,
-                                                 tile_successor_item,
-                                                 input,
-                                                 FlagOpType(),
-                                                 storage);
-    }
-    else if(blockIdx.x % 4 == 2)
-    {
-        const Type tile_predecessor_item = device_input[block_offset - 1];
-        adjacent_difference.flag_heads_and_tails(head_flags,
-                                                 tile_predecessor_item,
-                                                 tail_flags,
-                                                 input,
-                                                 FlagOpType(),
-                                                 storage);
-    }
-    else if(blockIdx.x % 4 == 3)
-    {
-        adjacent_difference.flag_heads_and_tails(head_flags,
-                                                 tail_flags,
-                                                 input,
-                                                 FlagOpType(),
-                                                 storage);
-    }
-    ROCPRIM_CLANG_SUPPRESS_WARNING_POP
-
-    rocprim::block_store_direct_blocked(lid, device_heads + block_offset, head_flags);
-    rocprim::block_store_direct_blocked(lid, device_tails + block_offset, tail_flags);
-}
-
-template<class Type,
-         class FlagType,
-         class FlagOpType,
-         unsigned int Method,
-         unsigned int BlockSize,
-         unsigned int ItemsPerThread>
-auto test_block_adjacent_difference() -> typename std::enable_if<Method == 0>::type
-{
-    using type = Type;
-    // std::vector<bool> is a special case that will cause an error in hipMemcpy
-    // rocprim::half/rocprim::bfloat16 are special cases that cannot be compared '=='
-    // in ASSERT_EQ
-    using stored_flag_type = typename std::conditional<
-        std::is_same<bool, FlagType>::value,
-        int,
-        typename std::conditional<std::is_same<rocprim::half, FlagType>::value
-                                      || std::is_same<rocprim::bfloat16, FlagType>::value,
-                                  float,
-                                  FlagType>::type>::type;
-    using flag_type                          = FlagType;
-    using flag_op_type                       = FlagOpType;
-    static constexpr size_t block_size       = BlockSize;
-    static constexpr size_t items_per_thread = ItemsPerThread;
-    static constexpr size_t items_per_block  = block_size * items_per_thread;
-    static constexpr size_t size             = items_per_block * 20;
-    static constexpr size_t grid_size        = size / items_per_block;
-
-    SCOPED_TRACE(testing::Message() << "items_per_block = " << items_per_block);
-    SCOPED_TRACE(testing::Message() << "size = " << size);
-    SCOPED_TRACE(testing::Message() << "grid_size = " << grid_size);
-
-    // Given block size not supported
-    if(block_size > test_utils::get_max_block_size())
-    {
-        return;
-    }
-
-    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
-    {
-        unsigned int seed_value
-            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
-
-        // Generate data
-        std::vector<type> input
-            = test_utils::get_random_data_wrapped<type>(size, 0, 10, seed_value);
-
-        // Calculate expected results on host
-        std::vector<stored_flag_type> expected_heads(size);
-        flag_op_type                  flag_op;
-        for(size_t bi = 0; bi < size / items_per_block; bi++)
-        {
-            for(size_t ii = 0; ii < items_per_block; ii++)
-            {
-                const size_t i = bi * items_per_block + ii;
-                if(ii == 0)
-                {
-                    expected_heads[i] = bi % 2 == 1
-                                            ? apply<Type, FlagType, FlagOpType>(flag_op,
-                                                                                input[i - 1],
-                                                                                input[i],
-                                                                                ii)
-                                            : stored_flag_type(true);
-                }
-                else
-                {
-                    expected_heads[i]
-                        = apply<Type, FlagType, FlagOpType>(flag_op, input[i - 1], input[i], ii);
-                }
-            }
-        }
-
-        // Preparing Device
-        common::device_ptr<type>      device_input(input);
-        common::device_ptr<long long> device_heads(size);
-
-        // Running kernel
-        hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(
-                flag_heads_kernel<type, flag_type, flag_op_type, block_size, items_per_thread>),
-            dim3(grid_size),
-            dim3(block_size),
-            0,
-            0,
-            device_input.get(),
-            device_heads.get());
-        HIP_CHECK(hipGetLastError());
-        HIP_CHECK(hipDeviceSynchronize());
-
-        // Reading results
-        const auto heads = device_heads.load();
-
-        // Validating results
-        for(size_t i = 0; i < size; i++)
-        {
-            ASSERT_EQ(heads[i], expected_heads[i]);
-        }
-    }
-}
-
-template<class Type,
-         class FlagType,
-         class FlagOpType,
-         unsigned int Method,
-         unsigned int BlockSize,
-         unsigned int ItemsPerThread>
-auto test_block_adjacent_difference() -> typename std::enable_if<Method == 1>::type
-{
-    using type = Type;
-    // std::vector<bool> is a special case that will cause an error in hipMemcpy
-    // rocprim::half/rocprim::bfloat16 are special cases that cannot be compared '=='
-    // in ASSERT_EQ
-    using stored_flag_type = typename std::conditional<
-        std::is_same<bool, FlagType>::value,
-        int,
-        typename std::conditional<std::is_same<rocprim::half, FlagType>::value
-                                      || std::is_same<rocprim::bfloat16, FlagType>::value,
-                                  float,
-                                  FlagType>::type>::type;
-    using flag_type                          = FlagType;
-    using flag_op_type                       = FlagOpType;
-    static constexpr size_t block_size       = BlockSize;
-    static constexpr size_t items_per_thread = ItemsPerThread;
-    static constexpr size_t items_per_block  = block_size * items_per_thread;
-    static constexpr size_t size             = items_per_block * 20;
-    static constexpr size_t grid_size        = size / items_per_block;
-
-    SCOPED_TRACE(testing::Message() << "items_per_block = " << items_per_block);
-    SCOPED_TRACE(testing::Message() << "size = " << size);
-    SCOPED_TRACE(testing::Message() << "grid_size = " << grid_size);
-
-    // Given block size not supported
-    if(block_size > test_utils::get_max_block_size())
-    {
-        return;
-    }
-
-    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
-    {
-        unsigned int seed_value
-            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
-
-        // Generate data
-        std::vector<type> input
-            = test_utils::get_random_data_wrapped<type>(size, 0, 10, seed_value);
-
-        // Calculate expected results on host
-        std::vector<stored_flag_type> expected_tails(size);
-        flag_op_type                  flag_op;
-        for(size_t bi = 0; bi < size / items_per_block; bi++)
-        {
-            for(size_t ii = 0; ii < items_per_block; ii++)
-            {
-                const size_t i = bi * items_per_block + ii;
-                if(ii == items_per_block - 1)
-                {
-                    expected_tails[i] = bi % 2 == 0
-                                            ? apply<Type, FlagType, FlagOpType>(flag_op,
-                                                                                input[i],
-                                                                                input[i + 1],
-                                                                                ii + 1)
-                                            : stored_flag_type(true);
-                }
-                else
-                {
-                    expected_tails[i] = apply<Type, FlagType, FlagOpType>(flag_op,
-                                                                          input[i],
-                                                                          input[i + 1],
-                                                                          ii + 1);
-                }
-            }
-        }
-
-        // Preparing Device
-        common::device_ptr<type>      device_input(input);
-        common::device_ptr<long long> device_tails(size);
-
-        // Running kernel
-        hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(
-                flag_tails_kernel<type, flag_type, flag_op_type, block_size, items_per_thread>),
-            dim3(grid_size),
-            dim3(block_size),
-            0,
-            0,
-            device_input.get(),
-            device_tails.get());
-        HIP_CHECK(hipGetLastError());
-        HIP_CHECK(hipDeviceSynchronize());
-
-        // Reading results
-        const auto tails = device_tails.load();
-
-        // Validating results
-        for(size_t i = 0; i < size; i++)
-        {
-            ASSERT_EQ(tails[i], expected_tails[i]);
-        }
-    }
-}
-
-template<class Type,
-         class FlagType,
-         class FlagOpType,
-         unsigned int Method,
-         unsigned int BlockSize,
-         unsigned int ItemsPerThread>
-auto test_block_adjacent_difference() -> typename std::enable_if<Method == 2>::type
-{
-    using type = Type;
-    // std::vector<bool> is a special case that will cause an error in hipMemcpy
-    // rocprim::half/rocprim::bfloat16 are special cases that cannot be compared '=='
-    // in ASSERT_EQ
-    using stored_flag_type = typename std::conditional<
-        std::is_same<bool, FlagType>::value,
-        int,
-        typename std::conditional<std::is_same<rocprim::half, FlagType>::value
-                                      || std::is_same<rocprim::bfloat16, FlagType>::value,
-                                  float,
-                                  FlagType>::type>::type;
-    using flag_type                          = FlagType;
-    using flag_op_type                       = FlagOpType;
-    static constexpr size_t block_size       = BlockSize;
-    static constexpr size_t items_per_thread = ItemsPerThread;
-    static constexpr size_t items_per_block  = block_size * items_per_thread;
-    static constexpr size_t size             = items_per_block * 20;
-    static constexpr size_t grid_size        = size / items_per_block;
-
-    SCOPED_TRACE(testing::Message() << "items_per_block = " << items_per_block);
-    SCOPED_TRACE(testing::Message() << "size = " << size);
-    SCOPED_TRACE(testing::Message() << "grid_size = " << grid_size);
-
-    // Given block size not supported
-    if(block_size > test_utils::get_max_block_size())
-    {
-        return;
-    }
-
-    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
-    {
-        unsigned int seed_value
-            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
-
-        // Generate data
-        std::vector<type> input
-            = test_utils::get_random_data_wrapped<type>(size, 0, 10, seed_value);
-
-        // Calculate expected results on host
-        std::vector<stored_flag_type> expected_heads(size);
-        std::vector<stored_flag_type> expected_tails(size);
-        flag_op_type                  flag_op;
-        for(size_t bi = 0; bi < size / items_per_block; bi++)
-        {
-            for(size_t ii = 0; ii < items_per_block; ii++)
-            {
-                const size_t i = bi * items_per_block + ii;
-                if(ii == 0)
-                {
-                    expected_heads[i] = (bi % 4 == 1 || bi % 4 == 2)
-                                            ? apply<Type, FlagType, FlagOpType>(flag_op,
-                                                                                input[i - 1],
-                                                                                input[i],
-                                                                                ii)
-                                            : stored_flag_type(true);
-                }
-                else
-                {
-                    expected_heads[i]
-                        = apply<Type, FlagType, FlagOpType>(flag_op, input[i - 1], input[i], ii);
-                }
-                if(ii == items_per_block - 1)
-                {
-                    expected_tails[i] = (bi % 4 == 0 || bi % 4 == 1)
-                                            ? apply<Type, FlagType, FlagOpType>(flag_op,
-                                                                                input[i],
-                                                                                input[i + 1],
-                                                                                ii + 1)
-                                            : stored_flag_type(true);
-                }
-                else
-                {
-                    expected_tails[i] = apply<Type, FlagType, FlagOpType>(flag_op,
-                                                                          input[i],
-                                                                          input[i + 1],
-                                                                          ii + 1);
-                }
-            }
-        }
-
-        // Preparing Device
-        common::device_ptr<type>      device_input(input);
-        common::device_ptr<long long> device_heads(size);
-        common::device_ptr<long long> device_tails(size);
-
-        // Running kernel
-        hipLaunchKernelGGL(HIP_KERNEL_NAME(flag_heads_and_tails_kernel<type,
-                                                                       flag_type,
-                                                                       flag_op_type,
-                                                                       block_size,
-                                                                       items_per_thread>),
-                           dim3(grid_size),
-                           dim3(block_size),
-                           0,
-                           0,
-                           device_input.get(),
-                           device_heads.get(),
-                           device_tails.get());
-        HIP_CHECK(hipGetLastError());
-        HIP_CHECK(hipDeviceSynchronize());
-
-        // Reading results
-        const auto heads = device_heads.load();
-        const auto tails = device_tails.load();
-        // Validating results
-        for(size_t i = 0; i < size; i++)
-        {
-            ASSERT_EQ(heads[i], expected_heads[i]);
-            ASSERT_EQ(tails[i], expected_tails[i]);
-        }
-    }
-}
-
 template<typename T,
          typename Output,
          typename BinaryFunction,
          unsigned int Method,
          unsigned int BlockSize,
          unsigned int ItemsPerThread>
-auto test_block_adjacent_difference() -> typename std::enable_if<Method == 3>::type
+auto test_block_adjacent_difference() -> typename std::enable_if<Method == 0>::type
 {
     using stored_type = std::conditional_t<std::is_same<Output, bool>::value, int, Output>;
 
@@ -779,7 +309,7 @@ template<typename T,
          unsigned int Method,
          unsigned int BlockSize,
          unsigned int ItemsPerThread>
-auto test_block_adjacent_difference() -> typename std::enable_if<Method == 4>::type
+auto test_block_adjacent_difference() -> typename std::enable_if<Method == 1>::type
 {
     using stored_type = std::conditional_t<std::is_same<Output, bool>::value, int, Output>;
 
@@ -866,7 +396,7 @@ template<typename T,
          unsigned int Method,
          unsigned int BlockSize,
          unsigned int ItemsPerThread>
-auto test_block_adjacent_difference() -> typename std::enable_if<Method == 5>::type
+auto test_block_adjacent_difference() -> typename std::enable_if<Method == 2>::type
 {
     using stored_type = std::conditional_t<std::is_same<Output, bool>::value, int, Output>;
 
@@ -968,7 +498,7 @@ template<typename T,
          unsigned int Method,
          unsigned int BlockSize,
          unsigned int ItemsPerThread>
-auto test_block_adjacent_difference() -> typename std::enable_if<Method == 6>::type
+auto test_block_adjacent_difference() -> typename std::enable_if<Method == 3>::type
 {
     using stored_type = std::conditional_t<std::is_same<Output, bool>::value, int, Output>;
 

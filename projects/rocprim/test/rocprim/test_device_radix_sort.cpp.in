@@ -24,7 +24,6 @@
 
 #include "../../common/utils_custom_type.hpp"
 
-#include "test_utils_custom_float_traits_type.hpp"
 #include "test_utils_custom_float_type.hpp"
 #include "test_utils_custom_test_types.hpp"
 
@@ -87,7 +86,6 @@ using __custom__uint64_t2 = common::custom_type<uint64_t, uint64_t, true>;
     INSTANTIATE(params<rocprim::bfloat16,   rocprim::bfloat16>)
     INSTANTIATE(params<int,                 __custom_float2>)
     INSTANTIATE(params<test_utils::custom_float_type, int>)
-    INSTANTIATE(params<test_utils::custom_float_traits_type, int>)
     INSTANTIATE(params<unsigned int, test_utils::custom_test_array_type<int, 32>>)
 
     // start_bit and end_bit

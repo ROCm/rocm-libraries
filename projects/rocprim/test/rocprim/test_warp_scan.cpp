@@ -41,7 +41,9 @@ struct Integral;
 #define warp_params WarpParamsIntegral
 #define name_suffix Integral
 
-#include "test_warp_scan.hpp"
+#if !_CLANGD
+    #include "test_warp_scan.hpp"
+#endif
 
 #undef suite_name
 #undef warp_params
@@ -52,4 +54,6 @@ struct Floating;
 #define warp_params WarpParamsFloating
 #define name_suffix Floating
 
-#include "test_warp_scan.hpp"
+#if !_CLANGD
+    #include "test_warp_scan.hpp"
+#endif
