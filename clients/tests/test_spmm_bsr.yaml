@@ -494,7 +494,7 @@ Tests:
   orderB: [rocsparse_order_column]
   orderC: [rocsparse_order_column]
   filename: [Chevron4]
-  req_memory: 14
+  req_memory: 18
 
 - name: spmm_bsr_file
   category: nightly
