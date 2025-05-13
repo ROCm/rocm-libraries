@@ -43,6 +43,10 @@ target_include_directories(sample-helper
         $<BUILD_INTERFACE:${TEMP_CLIENTS_SOURCE_DIR}/include>
 )
 
+if(HIPBLASLT_ENABLE_ASAN)
+    hipblaslt_target_configure_sanitizers(sample-helper INTERFACE)
+endif()
+
 target_link_libraries(sample-helper
     INTERFACE
         roc::hipblaslt
