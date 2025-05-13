@@ -5496,7 +5496,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
         vgprIdx = ((vgprIdx+1)//2)*2
         if(self.states.archCaps["VgprBank"]):
           vgprIdx += 1
-        self.states.m.startVgprValu  = vgprIdx
+        # gfx1250
+        if self.states.m.numVgprValu >= 2: 
+          vgprIdx = ((vgprIdx+1)//2)*2
+        self.states.m.startVgprValu = vgprIdx
         vgprIdx += self.states.m.numVgprValu
         numVgprValuPackMetadata = 0
         if not kernel["UnrollMajorLDSMetadata"]:

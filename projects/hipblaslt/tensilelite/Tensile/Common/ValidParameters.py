@@ -87,7 +87,7 @@ def makeValidWMMA():
     return [[16, 16, 4, 1], [16, 16, 8, 1], [16, 16, 16, 1], [16, 16, 32, 1], [16, 16, 64, 1]]
 
 def makeValidSWMMA():
-    return [[16, 16, 32, 1], [16, 16, 64, 1]]
+    return [[16, 16, 32, 1], [16, 16, 64, 1], [16, 16, 128, 1]]
 
 @lru_cache
 def makeValidMFMA():
