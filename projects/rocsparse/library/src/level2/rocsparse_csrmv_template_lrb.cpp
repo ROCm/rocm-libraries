@@ -43,33 +43,29 @@ rocsparse_status rocsparse::csrmv_analysis_lrb_template_dispatch(rocsparse_handl
                                                                  I                         nnz,
                                                                  const rocsparse_mat_descr descr,
                                                                  const A*                  csr_val,
-                                                                 const I*           csr_row_ptr,
-                                                                 const J*           csr_col_ind,
-                                                                 rocsparse_mat_info info)
+                                                                 const I*              csr_row_ptr,
+                                                                 const J*              csr_col_ind,
+                                                                 rocsparse_csrmv_info* p_csrmv_info)
 {
     ROCSPARSE_ROUTINE_TRACE;
 
-    // Clear csrmv info
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse::destroy_csrmv_info(info->csrmv_info));
-
-    // Create csrmv info
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse::create_csrmv_info(&info->csrmv_info));
+    p_csrmv_info[0]                 = new _rocsparse_csrmv_info();
+    rocsparse_csrmv_info csrmv_info = p_csrmv_info[0];
 
     // Stream
     hipStream_t stream = handle->stream;
 
     RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(
-        (void**)&info->csrmv_info->lrb.rows_offsets_scratch, sizeof(J) * m, stream));
+        (void**)&csrmv_info->lrb.rows_offsets_scratch, sizeof(J) * m, stream));
     RETURN_IF_HIP_ERROR(
-        rocsparse_hipMallocAsync((void**)&info->csrmv_info->lrb.rows_bins, sizeof(J) * m, stream));
-    RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(
-        (void**)&info->csrmv_info->lrb.n_rows_bins, sizeof(J) * 32, stream));
+        rocsparse_hipMallocAsync((void**)&csrmv_info->lrb.rows_bins, sizeof(J) * m, stream));
+    RETURN_IF_HIP_ERROR(
+        rocsparse_hipMallocAsync((void**)&csrmv_info->lrb.n_rows_bins, sizeof(J) * 32, stream));
 
     RETURN_IF_HIP_ERROR(
-        hipMemsetAsync(info->csrmv_info->lrb.rows_offsets_scratch, 0, sizeof(J) * m, stream));
-    RETURN_IF_HIP_ERROR(hipMemsetAsync(info->csrmv_info->lrb.rows_bins, 0, sizeof(J) * m, stream));
-    RETURN_IF_HIP_ERROR(
-        hipMemsetAsync(info->csrmv_info->lrb.n_rows_bins, 0, sizeof(J) * 32, stream));
+        hipMemsetAsync(csrmv_info->lrb.rows_offsets_scratch, 0, sizeof(J) * m, stream));
+    RETURN_IF_HIP_ERROR(hipMemsetAsync(csrmv_info->lrb.rows_bins, 0, sizeof(J) * m, stream));
+    RETURN_IF_HIP_ERROR(hipMemsetAsync(csrmv_info->lrb.n_rows_bins, 0, sizeof(J) * 32, stream));
 
     dim3 blocks(256);
     dim3 threads(WG_SIZE);
@@ -81,8 +77,8 @@ rocsparse_status rocsparse::csrmv_analysis_lrb_template_dispatch(rocsparse_handl
         stream,
         m,
         csr_row_ptr,
-        static_cast<J*>(info->csrmv_info->lrb.rows_offsets_scratch),
-        static_cast<J*>(info->csrmv_info->lrb.n_rows_bins));
+        static_cast<J*>(csrmv_info->lrb.rows_offsets_scratch),
+        static_cast<J*>(csrmv_info->lrb.n_rows_bins));
 
     // Copy bin sizes to CPU for later workgroup size determination.
     // If we modify the phase-2 and phase-3 preprocessing kernels so we don't directly reuse
@@ -91,12 +87,12 @@ rocsparse_status rocsparse::csrmv_analysis_lrb_template_dispatch(rocsparse_handl
     // size and then do more in the (SpMV) kernels to compute intra-kernel iteration bounds.
     J temp[32];
     RETURN_IF_HIP_ERROR(hipMemcpyAsync(
-        temp, info->csrmv_info->lrb.n_rows_bins, sizeof(J) * 32, hipMemcpyDeviceToHost, stream));
+        temp, csrmv_info->lrb.n_rows_bins, sizeof(J) * 32, hipMemcpyDeviceToHost, stream));
     RETURN_IF_HIP_ERROR(hipStreamSynchronize(stream));
 
     for(int i = 0; i < 32; i++)
     {
-        info->csrmv_info->lrb.nRowsBins[i] = temp[i];
+        csrmv_info->lrb.nRowsBins[i] = temp[i];
     }
 
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::csrmvn_preprocess_device_32_bins_3phase_phase2),
@@ -104,7 +100,7 @@ rocsparse_status rocsparse::csrmv_analysis_lrb_template_dispatch(rocsparse_handl
                                        1,
                                        0,
                                        stream,
-                                       static_cast<J*>(info->csrmv_info->lrb.n_rows_bins));
+                                       static_cast<J*>(csrmv_info->lrb.n_rows_bins));
 
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
         (rocsparse::csrmvn_preprocess_device_32_bins_3phase_phase3<WG_SIZE>),
@@ -114,9 +110,9 @@ rocsparse_status rocsparse::csrmv_analysis_lrb_template_dispatch(rocsparse_handl
         stream,
         m,
         csr_row_ptr,
-        static_cast<J*>(info->csrmv_info->lrb.rows_offsets_scratch),
-        static_cast<J*>(info->csrmv_info->lrb.n_rows_bins),
-        static_cast<J*>(info->csrmv_info->lrb.rows_bins));
+        static_cast<J*>(csrmv_info->lrb.rows_offsets_scratch),
+        static_cast<J*>(csrmv_info->lrb.n_rows_bins),
+        static_cast<J*>(csrmv_info->lrb.rows_bins));
 
     // Optionally, sort bins (adds preprocessing cost, but often substantially reduces SpMV consumer-kernel time)
     /*if(true)
@@ -131,12 +127,12 @@ rocsparse_status rocsparse::csrmv_analysis_lrb_template_dispatch(rocsparse_handl
         RETURN_IF_HIP_ERROR(rocprim::segmented_radix_sort_keys(
             nullptr,
             temp_storage_bytes,
-            static_cast<J*>(info->csrmv_info->lrb.rows_bins),
-            static_cast<J*>(info->csrmv_info->lrb.rows_offsets_scratch),
+            static_cast<J*>(csrmv_info->lrb.rows_bins),
+            static_cast<J*>(csrmv_info->lrb.rows_offsets_scratch),
             m,
             (32 - 1),
-            static_cast<J*>(info->csrmv_info->lrb.n_rows_bins),
-            static_cast<J*>(info->csrmv_info->lrb.n_rows_bins) + 1,
+            static_cast<J*>(csrmv_info->lrb.n_rows_bins),
+            static_cast<J*>(csrmv_info->lrb.n_rows_bins) + 1,
             startbit,
             endbit,
             stream));
@@ -156,12 +152,12 @@ rocsparse_status rocsparse::csrmv_analysis_lrb_template_dispatch(rocsparse_handl
         RETURN_IF_HIP_ERROR(rocprim::segmented_radix_sort_keys(
             temp_storage_ptr,
             temp_storage_bytes,
-            static_cast<J*>(info->csrmv_info->lrb.rows_bins),
-            static_cast<J*>(info->csrmv_info->lrb.rows_offsets_scratch),
+            static_cast<J*>(csrmv_info->lrb.rows_bins),
+            static_cast<J*>(csrmv_info->lrb.rows_offsets_scratch),
             m,
             (32 - 1),
-            static_cast<J*>(info->csrmv_info->lrb.n_rows_bins),
-            static_cast<J*>(info->csrmv_info->lrb.n_rows_bins) + 1,
+            static_cast<J*>(csrmv_info->lrb.n_rows_bins),
+            static_cast<J*>(csrmv_info->lrb.n_rows_bins) + 1,
             startbit,
             endbit,
             stream));
@@ -172,9 +168,9 @@ rocsparse_status rocsparse::csrmv_analysis_lrb_template_dispatch(rocsparse_handl
         }
 
         // Swap
-        void* tmp                              = info->csrmv_info->lrb.rows_bins;
-        info->csrmv_info->lrb.rows_bins            = info->csrmv_info->lrb.rows_offsets_scratch;
-        info->csrmv_info->lrb.rows_offsets_scratch = tmp;
+        void* tmp                              = csrmv_info->lrb.rows_bins;
+        csrmv_info->lrb.rows_bins            = csrmv_info->lrb.rows_offsets_scratch;
+        csrmv_info->lrb.rows_offsets_scratch = tmp;
     }*/
 
     // Determine how many cross-workgroup global synchronization flags we'll need for Longrows
@@ -191,31 +187,30 @@ rocsparse_status rocsparse::csrmv_analysis_lrb_template_dispatch(rocsparse_handl
         uint32_t block_size      = WG_SIZE;
         uint32_t bin_max_row_len = (1 << j);
         uint32_t num_wgs_per_row = (bin_max_row_len - 1) / (BLOCK_MULTIPLIER * block_size) + 1;
-        uint32_t grid_size       = info->csrmv_info->lrb.nRowsBins[j] * num_wgs_per_row;
+        uint32_t grid_size       = csrmv_info->lrb.nRowsBins[j] * num_wgs_per_row;
 
         max_required_grid = rocsparse::max(grid_size, max_required_grid);
     }
 
     if(max_required_grid != 0)
     {
-        info->csrmv_info->lrb.size = max_required_grid;
+        csrmv_info->lrb.size = max_required_grid;
 
-        RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync((void**)&info->csrmv_info->lrb.wg_flags,
-                                                     sizeof(uint32_t) * info->csrmv_info->lrb.size,
-                                                     stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(
+            (void**)&csrmv_info->lrb.wg_flags, sizeof(uint32_t) * csrmv_info->lrb.size, stream));
     }
 
     // Store some pointers to verify correct execution
-    info->csrmv_info->trans       = trans;
-    info->csrmv_info->m           = m;
-    info->csrmv_info->n           = n;
-    info->csrmv_info->nnz         = nnz;
-    info->csrmv_info->descr       = descr;
-    info->csrmv_info->csr_row_ptr = csr_row_ptr;
-    info->csrmv_info->csr_col_ind = csr_col_ind;
+    csrmv_info->trans       = trans;
+    csrmv_info->m           = m;
+    csrmv_info->n           = n;
+    csrmv_info->nnz         = nnz;
+    csrmv_info->descr       = descr;
+    csrmv_info->csr_row_ptr = csr_row_ptr;
+    csrmv_info->csr_col_ind = csr_col_ind;
 
-    info->csrmv_info->index_type_I = rocsparse::get_indextype<I>();
-    info->csrmv_info->index_type_J = rocsparse::get_indextype<J>();
+    csrmv_info->index_type_I = rocsparse::get_indextype<I>();
+    csrmv_info->index_type_J = rocsparse::get_indextype<J>();
 
     return rocsparse_status_success;
 }
@@ -692,7 +687,7 @@ rocsparse_status rocsparse::csrmv_lrb_template_dispatch(rocsparse_handle        
         const ATYPE*              csr_val,                                     \
         const ITYPE*              csr_row_ptr,                                 \
         const JTYPE*              csr_col_ind,                                 \
-        rocsparse_mat_info        info);
+        rocsparse_csrmv_info*     p_csrmv_info);
 
 // Uniform precision
 INSTANTIATE(int32_t, int32_t, float);

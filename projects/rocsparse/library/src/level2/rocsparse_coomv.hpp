@@ -61,7 +61,8 @@ namespace rocsparse
                                     const void*               coo_col_ind,
                                     const void*               x,
                                     const void*               beta_device_host,
-                                    void*                     y);
+                                    void*                     y,
+                                    bool                      fallback_algorithm);
 
     rocsparse_status coomv_analysis(rocsparse_handle          handle,
                                     rocsparse_operation       trans,
@@ -97,6 +98,7 @@ namespace rocsparse
                            rocsparse_datatype        beta_device_host_datatype,
                            const void*               beta_device_host,
                            rocsparse_datatype        y_datatype,
-                           void*                     y);
+                           void*                     y,
+                           bool                      fallback_algorithm);
 
 }

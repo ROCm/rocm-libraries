@@ -40,7 +40,7 @@ namespace rocsparse
                                              const void*               bsr_row_ptr,
                                              const void*               bsr_col_ind,
                                              int64_t                   block_dim,
-                                             rocsparse_mat_info        info);
+                                             rocsparse_bsrmv_info*     p_bsrmv_info);
 
     template <typename T, typename I, typename J, typename A, typename X, typename Y>
     rocsparse_status bsrmv_template_dispatch(rocsparse_handle          handle,
@@ -72,7 +72,7 @@ namespace rocsparse
                                                       const I*                  bsr_row_ptr,
                                                       const J*                  bsr_col_ind,
                                                       J                         block_dim,
-                                                      rocsparse_csrmv_info      info,
+                                                      rocsparse_bsrmv_info      bsrmv_info,
                                                       const X*                  x,
                                                       const T*                  beta_device_host,
                                                       Y*                        y);
@@ -90,7 +90,7 @@ namespace rocsparse
                                     const void*               bsr_row_ptr,
                                     const void*               bsr_col_ind,
                                     int64_t                   block_dim,
-                                    rocsparse_mat_info        info,
+                                    rocsparse_bsrmv_info      bsrmv_info,
                                     const void*               x,
                                     const void*               beta_device_host,
                                     void*                     y);
@@ -109,7 +109,7 @@ namespace rocsparse
                                     rocsparse_indextype       bsr_col_ind_indextype,
                                     const void*               bsr_col_ind,
                                     int64_t                   block_dim,
-                                    rocsparse_mat_info        info);
+                                    rocsparse_bsrmv_info*     p_bsrmv_info);
 
     rocsparse_status bsrmv(rocsparse_handle          handle,
                            rocsparse_direction       dir,
@@ -127,7 +127,7 @@ namespace rocsparse
                            rocsparse_indextype       bsr_col_ind_indextype,
                            const void*               bsr_col_ind,
                            int64_t                   block_dim,
-                           rocsparse_mat_info        info,
+                           rocsparse_bsrmv_info      bsrmv_info,
                            rocsparse_datatype        x_datatype,
                            const void*               x,
                            rocsparse_datatype        beta_device_host_datatype,

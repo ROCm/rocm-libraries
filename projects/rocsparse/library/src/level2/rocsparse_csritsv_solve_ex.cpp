@@ -200,6 +200,9 @@ rocsparse_status rocsparse::csritsv_solve_ex_template(rocsparse_handle handle,
 {
     ROCSPARSE_ROUTINE_TRACE;
 
+    static constexpr bool fallback_algorithm = true;
+    static constexpr bool no_force_conj      = false;
+
     const bool                    breakable   = (host_tol != nullptr);
     const bool                    recordable  = (host_history != nullptr);
     const bool                    compute_nrm = (recordable || breakable);
@@ -485,11 +488,12 @@ rocsparse_status rocsparse::csritsv_solve_ex_template(rocsparse_handle handle,
                                                            ptr_begin,
                                                            ptr_end,
                                                            csr_col_ind,
-                                                           info,
+                                                           info->get_csrmv_info(),
                                                            y,
                                                            alpha_device_host,
                                                            y_p,
-                                                           false));
+                                                           no_force_conj,
+                                                           fallback_algorithm));
                 //
                 // Add scale the residual
                 //
@@ -525,11 +529,12 @@ rocsparse_status rocsparse::csritsv_solve_ex_template(rocsparse_handle handle,
                                                               ptr_begin,
                                                               ptr_end,
                                                               csr_col_ind,
-                                                              info,
+                                                              info->get_csrmv_info(),
                                                               y,
                                                               alpha_device_host,
                                                               y_p,
-                                                              false));
+                                                              no_force_conj,
+                                                              fallback_algorithm));
             bool break_loop = false;
             if(compute_nrm)
             {
@@ -624,11 +629,12 @@ rocsparse_status rocsparse::csritsv_solve_ex_template(rocsparse_handle handle,
                                                            ptr_begin,
                                                            ptr_end,
                                                            csr_col_ind,
-                                                           info,
+                                                           info->get_csrmv_info(),
                                                            y_p,
                                                            alpha_device_host,
                                                            y,
-                                                           false));
+                                                           no_force_conj,
+                                                           fallback_algorithm));
             }
 
             //
@@ -672,11 +678,12 @@ rocsparse_status rocsparse::csritsv_solve_ex_template(rocsparse_handle handle,
                                                               ptr_begin,
                                                               ptr_end,
                                                               csr_col_ind,
-                                                              info,
+                                                              info->get_csrmv_info(),
                                                               y_p,
                                                               alpha_device_host,
                                                               y,
-                                                              false));
+                                                              no_force_conj,
+                                                              fallback_algorithm));
 
             if(compute_nrm)
             {

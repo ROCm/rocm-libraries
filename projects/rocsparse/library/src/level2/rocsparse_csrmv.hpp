@@ -43,9 +43,9 @@ namespace rocsparse
                                                                I                         nnz,
                                                                const rocsparse_mat_descr descr,
                                                                const A*                  csr_val,
-                                                               const I*           csr_row_ptr,
-                                                               const J*           csr_col_ind,
-                                                               rocsparse_mat_info info);
+                                                               const I*              csr_row_ptr,
+                                                               const J*              csr_col_ind,
+                                                               rocsparse_csrmv_info* p_csrmv_info);
 
     template <typename I, typename J, typename A>
     rocsparse_status csrmv_analysis_lrb_template_dispatch(rocsparse_handle          handle,
@@ -57,7 +57,7 @@ namespace rocsparse
                                                           const A*                  csr_val,
                                                           const I*                  csr_row_ptr,
                                                           const J*                  csr_col_ind,
-                                                          rocsparse_mat_info        info);
+                                                          rocsparse_csrmv_info*     p_csrmv_info);
 
     template <typename I, typename J, typename A>
     rocsparse_status csrmv_analysis_template(rocsparse_handle          handle,
@@ -70,7 +70,7 @@ namespace rocsparse
                                              const void*               csr_val,
                                              const void*               csr_row_ptr,
                                              const void*               csr_col_ind,
-                                             rocsparse_mat_info        info);
+                                             rocsparse_csrmv_info*     p_csrmv_info);
 
     template <typename T, typename I, typename J, typename A, typename X, typename Y>
     rocsparse_status csrmv_rowsplit_template_dispatch(rocsparse_handle          handle,
@@ -100,7 +100,7 @@ namespace rocsparse
                                                       const A*                  csr_val,
                                                       const I*                  csr_row_ptr,
                                                       const J*                  csr_col_ind,
-                                                      rocsparse_csrmv_info      info,
+                                                      rocsparse_csrmv_info      csrmv_info,
                                                       const X*                  x,
                                                       const T*                  beta_device_host,
                                                       Y*                        y,
@@ -136,11 +136,12 @@ namespace rocsparse
                                     const void*               csr_row_ptr_begin,
                                     const void*               csr_row_ptr_end,
                                     const void*               csr_col_ind,
-                                    rocsparse_mat_info        info,
+                                    rocsparse_csrmv_info      csrmv_info,
                                     const void*               x,
                                     const void*               beta,
                                     void*                     y,
-                                    bool                      force_conj);
+                                    bool                      force_conj,
+                                    bool                      fallback_algorithm);
 
     rocsparse_status csrmv_analysis(rocsparse_handle          handle,
                                     rocsparse_operation       trans,
@@ -155,7 +156,7 @@ namespace rocsparse
                                     const void*               csr_row_ptr,
                                     rocsparse_indextype       csr_col_ind_indextype,
                                     const void*               csr_col_ind,
-                                    rocsparse_mat_info        info);
+                                    rocsparse_csrmv_info*     p_csrmv_info);
 
     rocsparse_status csrmv(rocsparse_handle          handle,
                            rocsparse_operation       trans,
@@ -174,12 +175,13 @@ namespace rocsparse
                            const void*               csr_row_ptr_end,
                            rocsparse_indextype       csr_col_ind_indextype,
                            const void*               csr_col_ind,
-                           rocsparse_mat_info        info,
+                           rocsparse_csrmv_info      csrmv_info,
                            rocsparse_datatype        x_datatype,
                            const void*               x,
                            rocsparse_datatype        beta_device_host_datatype,
                            const void*               beta_device_host,
                            rocsparse_datatype        y_datatype,
-                           void*                     y);
+                           void*                     y,
+                           bool                      fallback_algorithm);
 
 }

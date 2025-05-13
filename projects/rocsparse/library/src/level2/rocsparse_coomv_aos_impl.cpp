@@ -379,7 +379,8 @@ rocsparse_status rocsparse::coomv_aos_template(rocsparse_handle          handle,
                                                const void*               coo_ind_,
                                                const void*               x_,
                                                const void*               beta_device_host_,
-                                               void*                     y_)
+                                               void*                     y_,
+                                               bool                      fallback_algorithm)
 {
     ROCSPARSE_ROUTINE_TRACE;
 
@@ -476,19 +477,20 @@ rocsparse_status rocsparse::coomv_aos_template(rocsparse_handle          handle,
 
 #define INSTANTIATE(T, I)                                                   \
     template rocsparse_status rocsparse::coomv_aos_template<T, I, T, T, T>( \
-        rocsparse_handle          handle,                                   \
-        rocsparse_operation       trans,                                    \
-        rocsparse_coomv_aos_alg   coomv_aos_alg,                            \
-        int64_t                   m,                                        \
-        int64_t                   n,                                        \
-        int64_t                   nnz,                                      \
-        const void*               alpha_device_host,                        \
-        const rocsparse_mat_descr descr,                                    \
-        const void*               coo_val,                                  \
-        const void*               coo_ind,                                  \
-        const void*               x,                                        \
-        const void*               beta_device_host,                         \
-        void*                     y)
+        rocsparse_handle,                                                   \
+        rocsparse_operation,                                                \
+        rocsparse_coomv_aos_alg,                                            \
+        int64_t,                                                            \
+        int64_t,                                                            \
+        int64_t,                                                            \
+        const void*,                                                        \
+        const rocsparse_mat_descr,                                          \
+        const void*,                                                        \
+        const void*,                                                        \
+        const void*,                                                        \
+        const void*,                                                        \
+        void*,                                                              \
+        bool)
 
 INSTANTIATE(float, int32_t);
 INSTANTIATE(float, int64_t);
@@ -502,19 +504,20 @@ INSTANTIATE(rocsparse_double_complex, int64_t);
 
 #define INSTANTIATE_MIXED(T, I, A, X, Y)                                    \
     template rocsparse_status rocsparse::coomv_aos_template<T, I, A, X, Y>( \
-        rocsparse_handle          handle,                                   \
-        rocsparse_operation       trans,                                    \
-        rocsparse_coomv_aos_alg   coomv_aos_alg,                            \
-        int64_t                   m,                                        \
-        int64_t                   n,                                        \
-        int64_t                   nnz,                                      \
-        const void*               alpha_device_host,                        \
-        const rocsparse_mat_descr descr,                                    \
-        const void*               coo_val,                                  \
-        const void*               coo_ind,                                  \
-        const void*               x,                                        \
-        const void*               beta_device_host,                         \
-        void*                     y)
+        rocsparse_handle,                                                   \
+        rocsparse_operation,                                                \
+        rocsparse_coomv_aos_alg,                                            \
+        int64_t,                                                            \
+        int64_t,                                                            \
+        int64_t,                                                            \
+        const void*,                                                        \
+        const rocsparse_mat_descr,                                          \
+        const void*,                                                        \
+        const void*,                                                        \
+        const void*,                                                        \
+        const void*,                                                        \
+        void*,                                                              \
+        bool)
 
 INSTANTIATE_MIXED(int32_t, int32_t, int8_t, int8_t, int32_t);
 INSTANTIATE_MIXED(int32_t, int64_t, int8_t, int8_t, int32_t);

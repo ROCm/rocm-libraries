@@ -41,7 +41,7 @@ namespace rocsparse
                                              const void*               csc_val,
                                              const void*               csc_col_ptr,
                                              const void*               csc_row_ind,
-                                             rocsparse_mat_info        info);
+                                             rocsparse_csrmv_info*     p_csrmv_info);
 
     template <typename T, typename I, typename J, typename A, typename X, typename Y>
     rocsparse_status cscmv_template(rocsparse_handle          handle,
@@ -55,10 +55,11 @@ namespace rocsparse
                                     const void*               csc_val,
                                     const void*               csc_col_ptr,
                                     const void*               csc_row_ind,
-                                    rocsparse_mat_info        info,
+                                    rocsparse_csrmv_info      csrmv_info,
                                     const void*               x,
                                     const void*               beta,
-                                    void*                     y);
+                                    void*                     y,
+                                    bool                      fallback_algorithm);
 
     rocsparse_status cscmv_analysis(rocsparse_handle          handle,
                                     rocsparse_operation       trans,
@@ -73,7 +74,7 @@ namespace rocsparse
                                     const void*               csc_row_ptr,
                                     rocsparse_indextype       csc_col_ind_indextype,
                                     const void*               csc_col_ind,
-                                    rocsparse_mat_info        info);
+                                    rocsparse_csrmv_info*     p_csrmv_info);
 
     rocsparse_status cscmv(rocsparse_handle          handle,
                            rocsparse_operation       trans,
@@ -90,12 +91,13 @@ namespace rocsparse
                            const void*               csc_col_ptr,
                            rocsparse_indextype       csc_row_ind_indextype,
                            const void*               csc_row_ind,
-                           rocsparse_mat_info        info,
+                           rocsparse_csrmv_info      csrmv_info,
                            rocsparse_datatype        x_datatype,
                            const void*               x,
                            rocsparse_datatype        beta_device_host_datatype,
                            const void*               beta_device_host,
                            rocsparse_datatype        y_datatype,
-                           void*                     y);
+                           void*                     y,
+                           bool                      fallback_algorithm);
 
 }

@@ -44,10 +44,11 @@ namespace rocsparse
                                         const void*,
                                         const void*,
                                         const void*,
-                                        rocsparse_mat_info,
+                                        rocsparse_csrmv_info,
                                         const void*,
                                         const void*,
-                                        void*);
+                                        void*,
+                                        bool);
 
     using cscmv_tuple = std::tuple<rocsparse_datatype,
                                    rocsparse_indextype,
@@ -364,13 +365,14 @@ rocsparse_status rocsparse::cscmv(rocsparse_handle          handle,
                                   const void*               csc_col_ptr,
                                   rocsparse_indextype       csc_row_ind_indextype,
                                   const void*               csc_row_ind,
-                                  rocsparse_mat_info        info,
+                                  rocsparse_csrmv_info      csrmv_info,
                                   rocsparse_datatype        x_datatype,
                                   const void*               x,
                                   rocsparse_datatype        beta_device_host_datatype,
                                   const void*               beta_device_host,
                                   rocsparse_datatype        y_datatype,
-                                  void*                     y)
+                                  void*                     y,
+                                  bool                      fallback_algorithm)
 {
     ROCSPARSE_ROUTINE_TRACE;
     rocsparse::cscmv_t f;
@@ -393,10 +395,11 @@ rocsparse_status rocsparse::cscmv(rocsparse_handle          handle,
                                 csc_val,
                                 csc_col_ptr,
                                 csc_row_ind,
-                                info,
+                                csrmv_info,
                                 x,
                                 beta_device_host,
-                                y));
+                                y,
+                                fallback_algorithm));
 
     return rocsparse_status_success;
 }

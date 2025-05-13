@@ -10,11 +10,13 @@ Documentation for rocSPARSE is available at
 
 ### Added
 * Adds `SpGEAM` generic routine for computing sparse matrix addition in CSR format
-* Adds `v2_SpMV` generic routine for computing sparse matrix vector multiplication
+* Adds `v2_SpMV` generic routine for computing sparse matrix vector multiplication. As opposed to the deprecated `rocsparse_spmv` routine, this routine does not use a fallback algorithm if a non-implemented configuration is encountered and will return an error in such a case. For the deprecated routine `rocsparse_spmv`, the user can enable warning messages in situations where a fallback algorithm is used by either calling upfront the routine `rocsparse_enable_debug` or exporting the variable `ROCSPARSE_DEBUG` (with the shell command `export ROCSPARSE_DEBUG=1`).
 
 ### Removed
 
 * The deprecated `rocsparse_spmv_ex` routine
+* The deprecated `rocsparse_sbsrmv_ex`, `rocsparse_dbsrmv_ex`, `rocsparse_cbsrmv_ex`, and `rocsparse_zbsrmv_ex`  routines
+* The deprecated `rocsparse_sbsrmv_ex_analysis`, `rocsparse_dbsrmv_ex_analysis`, `rocsparse_cbsrmv_ex_analysis`, and `rocsparse_zbsrmv_ex_analysis`  routines
 
 ### Upcoming changes
 * Deprecated the `rocsparse_spmv` routine. Users should use the `rocsparse_v2_spmv` routine going forward.

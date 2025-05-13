@@ -397,6 +397,9 @@ rocsparse_status rocsparse::gebsrmv_template(rocsparse_handle          handle, /
     // row_block_dim == 1 and col_block_dim == 1 is the CSR case
     if(row_block_dim == 1 && col_block_dim == 1)
     {
+        static constexpr bool fallback_algorithm = true;
+        static constexpr bool no_force_conj      = false;
+
         RETURN_IF_ROCSPARSE_ERROR(
             (rocsparse::csrmv_template<T, rocsparse_int, rocsparse_int, T, T, T>(
                 handle,
@@ -415,7 +418,8 @@ rocsparse_status rocsparse::gebsrmv_template(rocsparse_handle          handle, /
                 x,
                 beta,
                 y,
-                false)));
+                no_force_conj,
+                fallback_algorithm)));
         return rocsparse_status_success;
     }
 

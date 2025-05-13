@@ -231,9 +231,6 @@ Sparse Level 2 Functions
 ============================================================================= ====== ====== ============== ==============
 Function name                                                                 single double single complex double complex
 ============================================================================= ====== ====== ============== ==============
-:cpp:func:`rocsparse_Xbsrmv_ex_analysis() <rocsparse_sbsrmv_ex_analysis>`     x      x      x              x
-:cpp:func:`rocsparse_bsrmv_ex_clear`
-:cpp:func:`rocsparse_Xbsrmv_ex() <rocsparse_sbsrmv_ex>`                       x      x      x              x
 :cpp:func:`rocsparse_Xbsrmv_analysis() <rocsparse_sbsrmv_analysis>`           x      x      x              x
 :cpp:func:`rocsparse_bsrmv_clear`
 :cpp:func:`rocsparse_Xbsrmv() <rocsparse_sbsrmv>`                             x      x      x              x

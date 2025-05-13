@@ -292,6 +292,7 @@ namespace rocsparse
                           void*                       temp_buffer)
     {
         ROCSPARSE_ROUTINE_TRACE;
+        static constexpr bool fallback_algorithm = true;
 
         RETURN_IF_ROCSPARSE_ERROR((rocsparse::check_spmv_alg(mat->format, alg)));
 
@@ -311,7 +312,7 @@ namespace rocsparse
             }
             case rocsparse_spmv_stage_preprocess:
             {
-                if(alg == rocsparse_spmv_alg_coo_atomic && mat->analysed == false)
+                if(mat->analysed == false)
                 {
                     RETURN_IF_ROCSPARSE_ERROR((rocsparse::coomv_analysis(handle,
                                                                          trans,
@@ -352,7 +353,8 @@ namespace rocsparse
                                                             beta_type,
                                                             beta,
                                                             y->data_type,
-                                                            y->values)));
+                                                            y->values,
+                                                            fallback_algorithm)));
                 return rocsparse_status_success;
             }
             }
@@ -394,7 +396,8 @@ namespace rocsparse
                                                                 beta_type,
                                                                 beta,
                                                                 y->data_type,
-                                                                y->values)));
+                                                                y->values,
+                                                                fallback_algorithm)));
                 return rocsparse_status_success;
             }
             }
@@ -412,11 +415,9 @@ namespace rocsparse
 
             case rocsparse_spmv_stage_preprocess:
             {
-                //
-                // If algorithm 1 or default is selected and analysis step is required
-                //
-                if(alg == rocsparse_spmv_alg_default && mat->analysed == false)
+                if(mat->analysed == false)
                 {
+                    rocsparse_bsrmv_info bsrmv_info;
                     RETURN_IF_ROCSPARSE_ERROR((rocsparse::bsrmv_analysis(handle,
                                                                          mat->block_dir,
                                                                          trans,
@@ -431,7 +432,8 @@ namespace rocsparse
                                                                          mat->col_type,
                                                                          mat->const_col_data,
                                                                          mat->block_dim,
-                                                                         mat->info)));
+                                                                         &bsrmv_info)));
+                    mat->info->set_bsrmv_info(bsrmv_info);
                     mat->analysed = true;
                 }
 
@@ -456,7 +458,7 @@ namespace rocsparse
                                                             mat->col_type,
                                                             mat->const_col_data,
                                                             mat->block_dim,
-                                                            mat->info,
+                                                            mat->info->get_bsrmv_info(),
                                                             x->data_type,
                                                             x->const_values,
                                                             beta_type,
@@ -483,14 +485,12 @@ namespace rocsparse
 
             case rocsparse_spmv_stage_preprocess:
             {
-
                 //
                 // If algorithm 1 or default is selected and analysis step is required
                 //
-                if((alg == rocsparse_spmv_alg_default || alg == rocsparse_spmv_alg_csr_adaptive
-                    || alg == rocsparse_spmv_alg_csr_lrb)
-                   && mat->analysed == false)
+                if(mat->analysed == false)
                 {
+                    rocsparse_csrmv_info csrmv_info{};
                     RETURN_IF_ROCSPARSE_ERROR((rocsparse::csrmv_analysis(handle,
                                                                          trans,
                                                                          alg_csrmv,
@@ -504,8 +504,8 @@ namespace rocsparse
                                                                          mat->const_row_data,
                                                                          mat->col_type,
                                                                          mat->const_col_data,
-                                                                         mat->info)));
-
+                                                                         &csrmv_info)));
+                    mat->info->set_csrmv_info(csrmv_info);
                     mat->analysed = true;
                 }
 
@@ -514,32 +514,33 @@ namespace rocsparse
 
             case rocsparse_spmv_stage_compute:
             {
-                RETURN_IF_ROCSPARSE_ERROR((
-                    rocsparse::csrmv(handle,
-                                     trans,
-                                     alg_csrmv,
-                                     mat->rows,
-                                     mat->cols,
-                                     mat->nnz,
-                                     alpha_type,
-                                     alpha,
-                                     mat->descr,
-                                     mat->data_type,
-                                     mat->const_val_data,
-                                     mat->row_type,
-                                     mat->const_row_data,
-                                     mat->row_type,
-                                     reinterpret_cast<const char*>(mat->const_row_data)
-                                         + rocsparse::indextype_sizeof(mat->row_type),
-                                     mat->col_type,
-                                     mat->const_col_data,
-                                     (alg == rocsparse_spmv_alg_csr_rowsplit) ? nullptr : mat->info,
-                                     x->data_type,
-                                     x->const_values,
-                                     beta_type,
-                                     beta,
-                                     y->data_type,
-                                     y->values)));
+                RETURN_IF_ROCSPARSE_ERROR(
+                    (rocsparse::csrmv(handle,
+                                      trans,
+                                      alg_csrmv,
+                                      mat->rows,
+                                      mat->cols,
+                                      mat->nnz,
+                                      alpha_type,
+                                      alpha,
+                                      mat->descr,
+                                      mat->data_type,
+                                      mat->const_val_data,
+                                      mat->row_type,
+                                      mat->const_row_data,
+                                      mat->row_type,
+                                      reinterpret_cast<const char*>(mat->const_row_data)
+                                          + rocsparse::indextype_sizeof(mat->row_type),
+                                      mat->col_type,
+                                      mat->const_col_data,
+                                      mat->info->get_csrmv_info(),
+                                      x->data_type,
+                                      x->const_values,
+                                      beta_type,
+                                      beta,
+                                      y->data_type,
+                                      y->values,
+                                      fallback_algorithm)));
                 return rocsparse_status_success;
             }
             }
@@ -560,13 +561,9 @@ namespace rocsparse
 
             case rocsparse_spmv_stage_preprocess:
             {
-                //
-                // If algorithm 1 or default is selected and analysis step is required
-                //
-                if((alg == rocsparse_spmv_alg_default || alg == rocsparse_spmv_alg_csr_adaptive
-                    || alg == rocsparse_spmv_alg_csr_lrb)
-                   && mat->analysed == false)
+                if(mat->analysed == false)
                 {
+                    rocsparse_csrmv_info csrmv_info{};
                     RETURN_IF_ROCSPARSE_ERROR((rocsparse::cscmv_analysis(handle,
                                                                          trans,
                                                                          alg_csrmv,
@@ -580,8 +577,8 @@ namespace rocsparse
                                                                          mat->const_col_data,
                                                                          mat->row_type,
                                                                          mat->const_row_data,
-                                                                         mat->info)));
-
+                                                                         &csrmv_info)));
+                    mat->info->set_csrmv_info(csrmv_info);
                     mat->analysed = true;
                 }
                 return rocsparse_status_success;
@@ -589,29 +586,29 @@ namespace rocsparse
 
             case rocsparse_spmv_stage_compute:
             {
-                RETURN_IF_ROCSPARSE_ERROR((
-                    rocsparse::cscmv(handle,
-                                     trans,
-                                     alg_csrmv,
-                                     mat->rows,
-                                     mat->cols,
-                                     mat->nnz,
-                                     alpha_type,
-                                     alpha,
-                                     mat->descr,
-                                     mat->data_type,
-                                     mat->const_val_data,
-                                     mat->col_type,
-                                     mat->const_col_data,
-                                     mat->row_type,
-                                     mat->const_row_data,
-                                     (alg == rocsparse_spmv_alg_csr_rowsplit) ? nullptr : mat->info,
-                                     x->data_type,
-                                     x->const_values,
-                                     beta_type,
-                                     beta,
-                                     y->data_type,
-                                     y->values)));
+                RETURN_IF_ROCSPARSE_ERROR((rocsparse::cscmv(handle,
+                                                            trans,
+                                                            alg_csrmv,
+                                                            mat->rows,
+                                                            mat->cols,
+                                                            mat->nnz,
+                                                            alpha_type,
+                                                            alpha,
+                                                            mat->descr,
+                                                            mat->data_type,
+                                                            mat->const_val_data,
+                                                            mat->col_type,
+                                                            mat->const_col_data,
+                                                            mat->row_type,
+                                                            mat->const_row_data,
+                                                            mat->info->get_csrmv_info(),
+                                                            x->data_type,
+                                                            x->const_values,
+                                                            beta_type,
+                                                            beta,
+                                                            y->data_type,
+                                                            y->values,
+                                                            fallback_algorithm)));
                 return rocsparse_status_success;
             }
             }

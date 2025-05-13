@@ -32,10 +32,14 @@
 #include <hip/hip_runtime_api.h>
 
 /*! \brief typedefs to opaque info structs */
-typedef struct _rocsparse_trm_info*     rocsparse_trm_info;
-typedef struct _rocsparse_csrmv_info*   rocsparse_csrmv_info;
-typedef struct _rocsparse_csrgemm_info* rocsparse_csrgemm_info;
-typedef struct _rocsparse_csritsv_info* rocsparse_csritsv_info;
+typedef struct _rocsparse_trm_info*      rocsparse_trm_info;
+typedef struct _rocsparse_csrmv_info*    rocsparse_csrmv_info;
+typedef struct _rocsparse_csrgemm_info*  rocsparse_csrgemm_info;
+typedef struct _rocsparse_csritsv_info*  rocsparse_csritsv_info;
+typedef struct _rocsparse_adaptive_info* rocsparse_adaptive_info;
+typedef struct _rocsparse_lrb_info*      rocsparse_lrb_info;
+typedef struct _rocsparse_bsrmv_info*    rocsparse_bsrmv_info;
+typedef struct _rocsparse_csrmv_info*    rocsparse_cscmv_info;
 
 /********************************************************************************
  * \brief rocsparse_handle is a structure holding the rocsparse library context.
@@ -163,19 +167,21 @@ struct _rocsparse_hyb_mat
  *******************************************************************************/
 struct _rocsparse_mat_info
 {
-    // info structs
-    rocsparse_trm_info bsrsv_upper_info{};
-    rocsparse_trm_info bsrsv_lower_info{};
-    rocsparse_trm_info bsrsvt_upper_info{};
-    rocsparse_trm_info bsrsvt_lower_info{};
-    rocsparse_trm_info bsric0_info{};
-    rocsparse_trm_info bsrilu0_info{};
-    rocsparse_trm_info bsrsm_upper_info{};
-    rocsparse_trm_info bsrsm_lower_info{};
-    rocsparse_trm_info bsrsmt_upper_info{};
-    rocsparse_trm_info bsrsmt_lower_info{};
+protected:
+    rocsparse_csrmv_info csrmv_info{};
+    rocsparse_bsrmv_info bsrmv_info{};
 
-    rocsparse_csrmv_info   csrmv_info{};
+public:
+    rocsparse_trm_info     bsrsv_upper_info{};
+    rocsparse_trm_info     bsrsv_lower_info{};
+    rocsparse_trm_info     bsrsvt_upper_info{};
+    rocsparse_trm_info     bsrsvt_lower_info{};
+    rocsparse_trm_info     bsric0_info{};
+    rocsparse_trm_info     bsrilu0_info{};
+    rocsparse_trm_info     bsrsm_upper_info{};
+    rocsparse_trm_info     bsrsm_lower_info{};
+    rocsparse_trm_info     bsrsmt_upper_info{};
+    rocsparse_trm_info     bsrsmt_lower_info{};
     rocsparse_trm_info     csric0_info{};
     rocsparse_trm_info     csrilu0_info{};
     rocsparse_trm_info     csrsv_upper_info{};
@@ -203,6 +209,12 @@ struct _rocsparse_mat_info
     size_t      boost_tol_size{};
     const void* boost_tol{};
     const void* boost_val{};
+
+    void                 set_csrmv_info(rocsparse_csrmv_info value);
+    rocsparse_csrmv_info get_csrmv_info();
+
+    void                 set_bsrmv_info(rocsparse_bsrmv_info value);
+    rocsparse_bsrmv_info get_bsrmv_info();
 };
 
 /********************************************************************************
@@ -216,17 +228,22 @@ struct _rocsparse_color_info
 {
 };
 
-struct rocsparse_adaptive_info
+struct _rocsparse_adaptive_info
 {
+
     size_t    size{}; // num row blocks
     int64_t   first_row{};
     int64_t   last_row{};
     void*     row_blocks{};
     uint32_t* wg_flags{};
     void*     wg_ids{};
+
+public:
+    ~_rocsparse_adaptive_info();
+    void clear();
 };
 
-struct rocsparse_lrb_info
+struct _rocsparse_lrb_info
 {
     void* rows_offsets_scratch{}; // size of m
     void* rows_bins{}; // size of m
@@ -236,18 +253,19 @@ struct rocsparse_lrb_info
     uint32_t* wg_flags{};
 
     int64_t nRowsBins[32]{}; // host array
+
+    ~_rocsparse_lrb_info();
+    void clear();
 };
 
 /********************************************************************************
  * \brief rocsparse_csrmv_info is a structure holding the rocsparse csrmv info
- * data gathered during csrmv_analysis. It must be initialized using the
- * create_csrmv_info() routine. It should be destroyed at the end
- * destroy_csrmv_info().
+ * data gathered during csrmv_analysis.
  *******************************************************************************/
 struct _rocsparse_csrmv_info
 {
-    rocsparse_adaptive_info adaptive;
-    rocsparse_lrb_info      lrb;
+    _rocsparse_adaptive_info adaptive{};
+    _rocsparse_lrb_info      lrb{};
 
     // some data to verify correct execution
     rocsparse_operation         trans = rocsparse_operation_none;
@@ -261,27 +279,68 @@ struct _rocsparse_csrmv_info
 
     rocsparse_indextype index_type_I = rocsparse_indextype_u16;
     rocsparse_indextype index_type_J = rocsparse_indextype_u16;
+
+    _rocsparse_csrmv_info() {}
+
+    ~_rocsparse_csrmv_info()
+    {
+        this->clear();
+    }
+
+    void clear()
+    {
+        this->adaptive.clear();
+        this->lrb.clear();
+        this->trans        = rocsparse_operation_none;
+        this->m            = 0;
+        this->n            = 0;
+        this->nnz          = 0;
+        this->max_rows     = 0;
+        this->descr        = nullptr;
+        this->csr_row_ptr  = nullptr;
+        this->csr_col_ind  = nullptr;
+        this->index_type_I = rocsparse_indextype_u16;
+        this->index_type_J = rocsparse_indextype_u16;
+    }
+};
+
+/********************************************************************************
+ * \brief rocsparse_bsrmv_info is a structure holding the rocsparse bsrmv info
+ * data gathered during bsrmv_analysis.
+ *******************************************************************************/
+struct _rocsparse_bsrmv_info
+{
+protected:
+    rocsparse_csrmv_info m_csrmv_info{};
+
+public:
+    _rocsparse_bsrmv_info() {}
+
+    ~_rocsparse_bsrmv_info()
+    {
+        if(this->m_csrmv_info)
+        {
+            delete this->m_csrmv_info;
+            this->m_csrmv_info = nullptr;
+        }
+    }
+
+    rocsparse_csrmv_info get_csrmv_info()
+    {
+        return this->m_csrmv_info;
+    }
+    void set_csrmv_info(rocsparse_csrmv_info value)
+    {
+        this->m_csrmv_info = value;
+    }
 };
 
 namespace rocsparse
 {
     /********************************************************************************
- * \brief rocsparse_csrmv_info is a structure holding the rocsparse csrmv info
- * data gathered during csrmv_analysis. It must be initialized using the
- * create_csrmv_info() routine. It should be destroyed at the end
- * using destroy_csrmv_info().
- *******************************************************************************/
-    rocsparse_status create_csrmv_info(rocsparse_csrmv_info* info);
-
-    /********************************************************************************
- * \brief Copy csrmv info.
- *******************************************************************************/
+   * \brief Copy csrmv info.
+   *******************************************************************************/
     rocsparse_status copy_csrmv_info(rocsparse_csrmv_info dest, const rocsparse_csrmv_info src);
-
-    /********************************************************************************
- * \brief Destroy csrmv info.
- *******************************************************************************/
-    rocsparse_status destroy_csrmv_info(rocsparse_csrmv_info info);
 }
 
 struct _rocsparse_trm_info

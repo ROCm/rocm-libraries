@@ -100,30 +100,30 @@ rocsparse_status rocsparse_v2_spmv_buffer_size(rocsparse_handle            handl
 *
 *  <table>
 *  <caption id="v2_spmv_csr_algorithms">CSR/CSC Algorithms</caption>
-*  <tr><th>Algorithm                            <th>Deterministic  <th>Preprocessing  <th>Notes
-*  <tr><td>rocsparse_spmv_alg_csr_rowsplit</td> <td>Yes</td>       <td>No</td>        <td>Is best suited for matrices with all rows having a similar number of non-zeros. Can out perform adaptive and LRB algorithms in certain sparsity patterns. Will perform very poorly if some rows have few non-zeros and some rows have many non-zeros.</td>
-*  <tr><td>rocsparse_spmv_alg_csr_stream</td>   <td>Yes</td>       <td>No</td>        <td>[Deprecated] old name for rocsparse_spmv_alg_csr_rowsplit.</td>
-*  <tr><td>rocsparse_spmv_alg_csr_adaptive</td> <td>No</td>        <td>Yes</td>       <td>Generally the fastest algorithm across all matrix sparsity patterns. This includes matrices that have some rows with many non-zeros and some rows with few non-zeros. Requires a lengthy preprocessing that needs to be amortized over many subsequent sparse vector products.</td>
-*  <tr><td>rocsparse_spmv_alg_csr_lrb</td>      <td>No</td>        <td>Yes</td>       <td>Like adaptive algorithm, generally performs well accross all matrix sparsity patterns. Generally not as fast as adaptive algorithm, however uses a much faster pre-processing step. Good for when only a few number of sparse vector products will be performed.</td>
+*  <tr><th>Algorithm                            <th>Deterministic  <th>Notes
+*  <tr><td>rocsparse_spmv_alg_csr_rowsplit</td> <td>Yes</td>       <td>Is best suited for matrices with all rows having a similar number of non-zeros. Can out perform adaptive and LRB algorithms in certain sparsity patterns. Will perform very poorly if some rows have few non-zeros and some rows have many non-zeros.</td>
+*  <tr><td>rocsparse_spmv_alg_csr_stream</td>   <td>Yes</td>       <td>[Deprecated] old name for rocsparse_spmv_alg_csr_rowsplit.</td>
+*  <tr><td>rocsparse_spmv_alg_csr_adaptive</td> <td>No</td>        <td>Generally the fastest algorithm across all matrix sparsity patterns. This includes matrices that have some rows with many non-zeros and some rows with few non-zeros. Requires a lengthy preprocessing that needs to be amortized over many subsequent sparse vector products.</td>
+*  <tr><td>rocsparse_spmv_alg_csr_lrb</td>      <td>No</td>        <td>Like adaptive algorithm, generally performs well accross all matrix sparsity patterns. Generally not as fast as adaptive algorithm, however uses a much faster pre-processing step. Good for when only a few number of sparse vector products will be performed.</td>
 *  </table>
 *
 *  <table>
 *  <caption id="v2_spmv_coo_algorithms">COO Algorithms</caption>
-*  <tr><th>COO Algorithms                     <th>Deterministic   <th>Preprocessing <th>Notes
-*  <tr><td>rocsparse_spmv_alg_coo</td>        <td>Yes</td>        <td>Yes</td>      <td>Generally not as fast as atomic algorithm but is deterministic</td>
-*  <tr><td>rocsparse_spmv_alg_coo_atomic</td> <td>No</td>         <td>No</td>       <td>Generally the fastest COO algorithm</td>
+*  <tr><th>COO Algorithms                     <th>Deterministic   <th>Notes
+*  <tr><td>rocsparse_spmv_alg_coo</td>        <td>Yes</td>        <td>Generally not as fast as atomic algorithm but is deterministic</td>
+*  <tr><td>rocsparse_spmv_alg_coo_atomic</td> <td>No</td>         <td>Generally the fastest COO algorithm</td>
 *  </table>
 *
 *  <table>
 *  <caption id="v2_spmv_ell_algorithms">ELL Algorithms</caption>
-*  <tr><th>ELL Algorithms                <th>Deterministic   <th>Preprocessing <th>Notes
-*  <tr><td>rocsparse_spmv_alg_ell</td>   <td>Yes</td>        <td>No</td>       <td></td>
+*  <tr><th>ELL Algorithms                <th>Deterministic   <th>Notes
+*  <tr><td>rocsparse_spmv_alg_ell</td>   <td>Yes</td>        <td></td>
 *  </table>
 *
 *  <table>
 *  <caption id="v2_spmv_bsr_algorithms">BSR Algorithms</caption>
-*  <tr><th>BSR Algorithm                 <th>Deterministic   <th>Preprocessing <th>Notes
-*  <tr><td>rocsparse_spmv_alg_bsr</td>   <td>Yes</td>        <td>No</td>       <td></td>
+*  <tr><th>BSR Algorithm                 <th>Deterministic   <th>Notes
+*  <tr><td>rocsparse_spmv_alg_bsr</td>   <td>Yes</td>        <td></td>
 *  </table>
 *
 *  \p rocsparse_v2_spmv supports multiple combinations of data types and compute types. The tables below indicate the currently

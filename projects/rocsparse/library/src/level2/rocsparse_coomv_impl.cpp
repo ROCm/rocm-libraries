@@ -183,7 +183,21 @@ rocsparse_status rocsparse::coomv_analysis_template(rocsparse_handle          ha
                          (const void*&)coo_col_ind);
 
     ROCSPARSE_CHECKARG_ENUM(1, trans);
+
     ROCSPARSE_CHECKARG_ENUM(2, alg);
+
+    switch(alg)
+    {
+    case rocsparse_coomv_alg_default:
+    case rocsparse_coomv_alg_segmented:
+    {
+        break;
+    }
+    case rocsparse_coomv_alg_atomic:
+    {
+        return rocsparse_status_success;
+    }
+    }
 
     // Check matrix type
     ROCSPARSE_CHECKARG(
@@ -567,7 +581,8 @@ rocsparse_status rocsparse::coomv_template(rocsparse_handle          handle,
                                            const void*               coo_col_ind_,
                                            const void*               x_,
                                            const void*               beta_device_host_,
-                                           void*                     y_)
+                                           void*                     y_,
+                                           bool                      fallback_algorithm)
 {
     ROCSPARSE_ROUTINE_TRACE;
 
@@ -688,6 +703,8 @@ namespace rocsparse
         ROCSPARSE_CHECKARG_ARRAY(8, nnz, coo_row_ind);
         ROCSPARSE_CHECKARG_ARRAY(9, nnz, coo_col_ind);
 
+        static constexpr bool fallback_algorithm = true;
+
         RETURN_IF_ROCSPARSE_ERROR(
             (rocsparse::coomv_template<T, rocsparse_int, T, T, T>(handle,
                                                                   trans,
@@ -702,38 +719,38 @@ namespace rocsparse
                                                                   coo_col_ind,
                                                                   x,
                                                                   beta_device_host,
-                                                                  y)));
+                                                                  y,
+                                                                  fallback_algorithm)));
         return rocsparse_status_success;
     }
 }
 
-#define INSTANTIATE(T, I)                                               \
-    template rocsparse_status rocsparse::coomv_analysis_template<I, T>( \
-        rocsparse_handle          handle,                               \
-        rocsparse_operation       trans,                                \
-        rocsparse_coomv_alg       coomv_alg,                            \
-        int64_t                   m,                                    \
-        int64_t                   n,                                    \
-        int64_t                   nnz,                                  \
-        const rocsparse_mat_descr descr,                                \
-        const void*               coo_val,                              \
-        const void*               coo_row_ind,                          \
-        const void*               coo_col_ind);                                       \
-    template rocsparse_status rocsparse::coomv_template<T, I, T, T, T>( \
-        rocsparse_handle          handle,                               \
-        rocsparse_operation       trans,                                \
-        rocsparse_coomv_alg       coomv_alg,                            \
-        int64_t                   m,                                    \
-        int64_t                   n,                                    \
-        int64_t                   nnz,                                  \
-        const void*               alpha_device_host,                    \
-        const rocsparse_mat_descr descr,                                \
-        const void*               coo_val,                              \
-        const void*               coo_row_ind,                          \
-        const void*               coo_col_ind,                          \
-        const void*               x,                                    \
-        const void*               beta_device_host,                     \
-        void*                     y);
+#define INSTANTIATE(T, I)                                                                         \
+    template rocsparse_status rocsparse::coomv_analysis_template<I, T>(rocsparse_handle,          \
+                                                                       rocsparse_operation,       \
+                                                                       rocsparse_coomv_alg,       \
+                                                                       int64_t,                   \
+                                                                       int64_t,                   \
+                                                                       int64_t,                   \
+                                                                       const rocsparse_mat_descr, \
+                                                                       const void*,               \
+                                                                       const void*,               \
+                                                                       const void*);              \
+    template rocsparse_status rocsparse::coomv_template<T, I, T, T, T>(rocsparse_handle,          \
+                                                                       rocsparse_operation,       \
+                                                                       rocsparse_coomv_alg,       \
+                                                                       int64_t,                   \
+                                                                       int64_t,                   \
+                                                                       int64_t,                   \
+                                                                       const void*,               \
+                                                                       const rocsparse_mat_descr, \
+                                                                       const void*,               \
+                                                                       const void*,               \
+                                                                       const void*,               \
+                                                                       const void*,               \
+                                                                       const void*,               \
+                                                                       void*,                     \
+                                                                       bool)
 
 INSTANTIATE(float, int32_t);
 INSTANTIATE(float, int64_t);
@@ -745,18 +762,17 @@ INSTANTIATE(rocsparse_double_complex, int32_t);
 INSTANTIATE(rocsparse_double_complex, int64_t);
 #undef INSTANTIATE
 
-#define INSTANTIATE_MIXED_ANALYSIS(I, A)                                \
-    template rocsparse_status rocsparse::coomv_analysis_template<I, A>( \
-        rocsparse_handle          handle,                               \
-        rocsparse_operation       trans,                                \
-        rocsparse_coomv_alg       coomv_alg,                            \
-        int64_t                   m,                                    \
-        int64_t                   n,                                    \
-        int64_t                   nnz,                                  \
-        const rocsparse_mat_descr descr,                                \
-        const void*               coo_val,                              \
-        const void*               coo_row_ind,                          \
-        const void*               coo_col_ind)
+#define INSTANTIATE_MIXED_ANALYSIS(I, A)                                                          \
+    template rocsparse_status rocsparse::coomv_analysis_template<I, A>(rocsparse_handle,          \
+                                                                       rocsparse_operation,       \
+                                                                       rocsparse_coomv_alg,       \
+                                                                       int64_t,                   \
+                                                                       int64_t,                   \
+                                                                       int64_t,                   \
+                                                                       const rocsparse_mat_descr, \
+                                                                       const void*,               \
+                                                                       const void*,               \
+                                                                       const void*)
 
 INSTANTIATE_MIXED_ANALYSIS(int32_t, int8_t);
 INSTANTIATE_MIXED_ANALYSIS(int64_t, int8_t);
@@ -764,22 +780,22 @@ INSTANTIATE_MIXED_ANALYSIS(int32_t, int32_t);
 INSTANTIATE_MIXED_ANALYSIS(int64_t, int32_t);
 #undef INSTANTIATE_MIXED_ANALYSIS
 
-#define INSTANTIATE_MIXED(T, I, A, X, Y)                                \
-    template rocsparse_status rocsparse::coomv_template<T, I, A, X, Y>( \
-        rocsparse_handle          handle,                               \
-        rocsparse_operation       trans,                                \
-        rocsparse_coomv_alg       coomv_alg,                            \
-        int64_t                   m,                                    \
-        int64_t                   n,                                    \
-        int64_t                   nnz,                                  \
-        const void*               alpha_device_host,                    \
-        const rocsparse_mat_descr descr,                                \
-        const void*               coo_val,                              \
-        const void*               coo_row_ind,                          \
-        const void*               coo_col_ind,                          \
-        const void*               x,                                    \
-        const void*               beta_device_host,                     \
-        void*                     y)
+#define INSTANTIATE_MIXED(T, I, A, X, Y)                                                          \
+    template rocsparse_status rocsparse::coomv_template<T, I, A, X, Y>(rocsparse_handle,          \
+                                                                       rocsparse_operation,       \
+                                                                       rocsparse_coomv_alg,       \
+                                                                       int64_t,                   \
+                                                                       int64_t,                   \
+                                                                       int64_t,                   \
+                                                                       const void*,               \
+                                                                       const rocsparse_mat_descr, \
+                                                                       const void*,               \
+                                                                       const void*,               \
+                                                                       const void*,               \
+                                                                       const void*,               \
+                                                                       const void*,               \
+                                                                       void*,                     \
+                                                                       bool)
 
 INSTANTIATE_MIXED(int32_t, int32_t, int8_t, int8_t, int32_t);
 INSTANTIATE_MIXED(int32_t, int64_t, int8_t, int8_t, int32_t);
