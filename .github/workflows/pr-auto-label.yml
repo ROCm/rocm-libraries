@@ -67,6 +67,17 @@ jobs:
           fi
           echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
 
+      - name: Check if PR is a draft
+        id: check_draft
+        env:
+          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+        run: |
+          PR_STATUS=$(gh pr view ${{ steps.pr_number.outputs.pr_number }} --json draft -q .draft)
+          if [ "$PR_STATUS" == "true" ]; then
+            echo "This PR is a draft. Skipping the workflow."
+            exit 0
+          fi
+
       - name: Checkout workflows
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:

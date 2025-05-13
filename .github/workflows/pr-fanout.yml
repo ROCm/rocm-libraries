@@ -19,6 +19,7 @@ on:
       - opened
       - synchronize
       - reopened
+      - ready_for_review
     branches:
       - 'develop'
       - 'staging'
@@ -37,6 +38,8 @@ concurrency:
 
 jobs:
   fanout:
+    # Skip if PR is in draft status
+    if: github.event.pull_request.draft == false
     runs-on: ubuntu-24.04
     steps:
       - name: Generate a token
