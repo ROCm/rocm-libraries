@@ -7,7 +7,7 @@
       "category": "projects",
       "auto_subtree_pull": true,
       "auto_subtree_push": false,
-      "enable_pr_fanout": true
+      "enable_pr_fanout": false
     },
     {
       "name": "tensile",
@@ -16,7 +16,7 @@
       "category": "shared",
       "auto_subtree_pull": true,
       "auto_subtree_push": false,
-      "enable_pr_fanout": true
+      "enable_pr_fanout": false
     },
     {
       "name": "composablekernel",
@@ -25,7 +25,7 @@
       "category": "projects",
       "auto_subtree_pull": true,
       "auto_subtree_push": false,
-      "enable_pr_fanout": true
+      "enable_pr_fanout": false
     },
     {
       "name": "hipblas",
@@ -34,7 +34,7 @@
       "category": "projects",
       "auto_subtree_pull": true,
       "auto_subtree_push": false,
-      "enable_pr_fanout": true
+      "enable_pr_fanout": false
     },
     {
       "name": "hipblas-common",
@@ -43,7 +43,7 @@
       "category": "projects",
       "auto_subtree_pull": true,
       "auto_subtree_push": false,
-      "enable_pr_fanout": true
+      "enable_pr_fanout": false
     },
     {
       "name": "hipblaslt",
@@ -52,7 +52,7 @@
       "category": "projects",
       "auto_subtree_pull": true,
       "auto_subtree_push": false,
-      "enable_pr_fanout": true
+      "enable_pr_fanout": false
     },
     {
       "name": "hipcub",
@@ -61,7 +61,7 @@
       "category": "projects",
       "auto_subtree_pull": true,
       "auto_subtree_push": false,
-      "enable_pr_fanout": true
+      "enable_pr_fanout": false
     },
     {
       "name": "hipfft",
@@ -70,7 +70,7 @@
       "category": "projects",
       "auto_subtree_pull": true,
       "auto_subtree_push": false,
-      "enable_pr_fanout": true
+      "enable_pr_fanout": false
     },
     {
       "name": "hiprand",
@@ -79,7 +79,7 @@
       "category": "projects",
       "auto_subtree_pull": true,
       "auto_subtree_push": false,
-      "enable_pr_fanout": true
+      "enable_pr_fanout": false
     },
     {
       "name": "hipsolver",
@@ -88,7 +88,7 @@
       "category": "projects",
       "auto_subtree_pull": true,
       "auto_subtree_push": false,
-      "enable_pr_fanout": true
+      "enable_pr_fanout": false
     },
     {
       "name": "hipsparse",
@@ -97,7 +97,7 @@
       "category": "projects",
       "auto_subtree_pull": true,
       "auto_subtree_push": false,
-      "enable_pr_fanout": true
+      "enable_pr_fanout": false
     },
     {
       "name": "hipsparselt",
@@ -106,7 +106,7 @@
       "category": "projects",
       "auto_subtree_pull": true,
       "auto_subtree_push": false,
-      "enable_pr_fanout": true
+      "enable_pr_fanout": false
     },
     {
       "name": "rocblas",
@@ -115,7 +115,7 @@
       "category": "projects",
       "auto_subtree_pull": true,
       "auto_subtree_push": false,
-      "enable_pr_fanout": true
+      "enable_pr_fanout": false
     },
     {
       "name": "rocfft",
@@ -124,16 +124,16 @@
       "category": "projects",
       "auto_subtree_pull": true,
       "auto_subtree_push": false,
-      "enable_pr_fanout": true
+      "enable_pr_fanout": false
     },
     {
       "name": "rocprim",
       "url": "ROCm/rocPRIM",
       "branch": "develop",
       "category": "projects",
-      "auto_subtree_pull": true,
-      "auto_subtree_push": false,
-      "enable_pr_fanout": true
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true,
+      "enable_pr_fanout": false
     },
     {
       "name": "rocrand",
@@ -142,7 +142,7 @@
       "category": "projects",
       "auto_subtree_pull": true,
       "auto_subtree_push": false,
-      "enable_pr_fanout": true
+      "enable_pr_fanout": false
     },
     {
       "name": "rocroller",
@@ -151,7 +151,7 @@
       "category": "shared",
       "auto_subtree_pull": true,
       "auto_subtree_push": false,
-      "enable_pr_fanout": true
+      "enable_pr_fanout": false
     },
     {
       "name": "rocsolver",
@@ -160,7 +160,7 @@
       "category": "projects",
       "auto_subtree_pull": true,
       "auto_subtree_push": false,
-      "enable_pr_fanout": true
+      "enable_pr_fanout": false
     },
     {
       "name": "rocsparse",
@@ -169,7 +169,7 @@
       "category": "projects",
       "auto_subtree_pull": true,
       "auto_subtree_push": false,
-      "enable_pr_fanout": true
+      "enable_pr_fanout": false
     },
     {
       "name": "rocthrust",
@@ -178,7 +178,7 @@
       "category": "projects",
       "auto_subtree_pull": true,
       "auto_subtree_push": false,
-      "enable_pr_fanout": true
+      "enable_pr_fanout": false
     }
   ]
 }
