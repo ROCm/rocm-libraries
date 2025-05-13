@@ -1014,6 +1014,110 @@ namespace rocRoller::Client::GEMMClient
     }
 }
 
+constexpr bool PARSE_SUCCESS = true;
+constexpr bool PARSE_FAILURE = false;
+
+static bool ParseMI(const std::string&                                 arg,
+                    rocRoller::Client::GEMMClient::SolutionParameters& solution)
+{
+    if(arg.empty())
+        return PARSE_FAILURE;
+
+    bool fail = false;
+    try
+    {
+        std::istringstream iss(arg);
+        std::string        token;
+
+        iss.exceptions(std::ifstream::eofbit | std::ifstream::failbit | std::ifstream::badbit);
+        std::getline(iss, token, 'x');
+        solution.waveM = std::stoi(token);
+        std::getline(iss, token, 'x');
+        solution.waveN = std::stoi(token);
+        std::getline(iss, token, 'x');
+        solution.waveK = std::stoi(token);
+        iss.exceptions(std::ifstream::failbit | std::ifstream::badbit);
+        std::getline(iss, token, 'x');
+        solution.waveB = std::stoi(token);
+    }
+    catch(const std::invalid_argument&)
+    {
+        fail = true;
+    }
+    catch(const std::ios_base::failure&)
+    {
+        fail = true;
+    }
+
+    fail |= (solution.waveM < 1) || (solution.waveN < 1) || (solution.waveK < 1)
+            || (solution.waveB < 1);
+
+    if(fail)
+    {
+        std::cerr << "Invalid format for MI instruction." << std::endl;
+        std::cerr << std::endl;
+        std::cerr << "The MI argument should be formatted like:" << std::endl;
+        std::cerr << std::endl;
+        std::cerr << "    --mi=MxNxKxB" << std::endl;
+        std::cerr << std::endl;
+        std::cerr << "For example: --mi=32x32x2x1" << std::endl;
+
+        return PARSE_FAILURE;
+    }
+
+    return PARSE_SUCCESS;
+}
+
+static bool ParseWorkgroupMapping(const std::string&                                 arg,
+                                  rocRoller::Client::GEMMClient::SolutionParameters& solution)
+{
+    if(arg.empty())
+        return PARSE_FAILURE;
+
+    bool fail = false;
+    try
+    {
+        std::istringstream iss(arg);
+        std::string        token;
+
+        iss.exceptions(std::ifstream::eofbit | std::ifstream::failbit | std::ifstream::badbit);
+        std::getline(iss, token, ',');
+        auto dim = std::stoi(token);
+        iss.exceptions(std::ifstream::failbit | std::ifstream::badbit);
+        std::getline(iss, token, ',');
+        auto size                 = std::stoi(token);
+        solution.workgroupMapping = {dim, size};
+
+        fail |= (dim != -1 && dim != 0 && dim != 1);
+        fail |= (size != -1 && size < 1);
+    }
+    catch(const std::invalid_argument&)
+    {
+        fail = true;
+    }
+    catch(const std::ios_base::failure&)
+    {
+        fail = true;
+    }
+
+    if(fail)
+    {
+        std::cerr << "Invalid format for workgroupMapping." << std::endl;
+        std::cerr << std::endl;
+        std::cerr << "The workgroupMapping argument should be formatted like:" << std::endl;
+        std::cerr << std::endl;
+        std::cerr << "    --workgroupMapping=d,s" << std::endl;
+        std::cerr << std::endl;
+        std::cerr << "where d is 0 or 1, and s is a positive integer." << std::endl;
+        std::cerr << std::endl;
+        std::cerr << "For example: --workgroupMapping=0,6" << std::endl;
+
+        return PARSE_FAILURE;
+    }
+
+    return PARSE_SUCCESS;
+}
+
 /*
  * Parse the command line and dispatch.
  */
@@ -1202,52 +1306,7 @@ int main(int argc, const char* argv[])
 
     app.add_option(
         "--mi",
-        [&solution](auto res) -> bool {
-            auto mi = res[0];
-            if(!mi.empty())
-            {
-                bool fail = false;
-                try
-                {
-                    std::istringstream iss(mi);
-                    std::string        token;
-
-                    iss.exceptions(std::ifstream::eofbit | std::ifstream::failbit
-                                   | std::ifstream::badbit);
-                    std::getline(iss, token, 'x');
-                    solution.waveM = std::stoi(token);
-                    std::getline(iss, token, 'x');
-                    solution.waveN = std::stoi(token);
-                    std::getline(iss, token, 'x');
-                    solution.waveK = std::stoi(token);
-                    iss.exceptions(std::ifstream::failbit | std::ifstream::badbit);
-                    std::getline(iss, token, 'x');
-                    solution.waveB = std::stoi(token);
-                }
-                catch(const std::invalid_argument&)
-                {
-                    fail = true;
-                }
-                catch(const std::ios_base::failure&)
-                {
-                    fail = true;
-                }
-                fail |= (solution.waveM < 1) || (solution.waveN < 1) || (solution.waveK < 1)
-                        || (solution.waveB < 1);
-                if(fail)
-                {
-                    std::cout << "Invalid format for MI instruction." << std::endl;
-                    std::cout << std::endl;
-                    std::cout << "The MI argument should be formatted like:" << std::endl;
-                    std::cout << std::endl;
-                    std::cout << "    --mi=MxNxKxB" << std::endl;
-                    std::cout << std::endl;
-                    std::cout << "For example: --mi=32x32x2x1" << std::endl;
-                }
-                return !fail;
-            }
-            return false;
-        },
+        [&solution](auto& args) -> bool { return ParseMI(args[0], solution); },
         "MI instruction to use.  Default 32x32x2x1 for floats, 32x32x8x1 for halfs.");
 
     app.add_option(
@@ -1256,54 +1315,7 @@ int main(int argc, const char* argv[])
         "--workgroup_size_y", solution.workgroupSizeY, "Workgroup size in the y dimension.");
     app.add_option(
         "--workgroupMapping",
-        [&solution](auto res) -> bool {
-            auto wgm = res[0];
-            if(!wgm.empty())
-            {
-                bool fail = false;
-                try
-                {
-                    std::istringstream iss(wgm);
-                    std::string        token;
-
-                    iss.exceptions(std::ifstream::eofbit | std::ifstream::failbit
-                                   | std::ifstream::badbit);
-                    std::getline(iss, token, ',');
-                    auto dim = std::stoi(token);
-                    iss.exceptions(std::ifstream::failbit | std::ifstream::badbit);
-                    std::getline(iss, token, ',');
-                    auto size                 = std::stoi(token);
-                    solution.workgroupMapping = {dim, size};
-
-                    fail |= (dim != -1 && dim != 0 && dim != 1);
-                    fail |= (size != -1 && size < 1);
-                }
-                catch(const std::invalid_argument&)
-                {
-                    fail = true;
-                }
-                catch(const std::ios_base::failure&)
-                {
-                    fail = true;
-                }
-
-                if(fail)
-                {
-                    std::cout << "Invalid format for workgroupMapping." << std::endl;
-                    std::cout << std::endl;
-                    std::cout << "The workgroupMapping argument should be formatted like:"
-                              << std::endl;
-                    std::cout << std::endl;
-                    std::cout << "    --workgroupMapping=d,s" << std::endl;
-                    std::cout << std::endl;
-                    std::cout << "where d is 0 or 1, and s is a positive integer." << std::endl;
-                    std::cout << std::endl;
-                    std::cout << "For example: --workgroupMapping=0,6" << std::endl;
-                }
-                return !fail;
-            }
-            return false;
-        },
+        [&solution](auto& args) -> bool { return ParseWorkgroupMapping(args[0], solution); },
         "Workgroup mapping dimension and size.");
     app.add_flag(
         "--workgroupRemapXCC", solution.workgroupRemapXCC, "Use an XCC-aware workgroup remapping.");
