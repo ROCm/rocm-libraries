@@ -22,8 +22,10 @@
 
 #include <limits>
 
+#ifndef DISABLE_ROCTX
 #if !defined(ROCBLAS_STATIC_LIB) && !defined(WIN32)
 #include <roctracer/roctx.h>
+#endif
 #endif
 
 #include "logging.hpp"
@@ -124,6 +126,7 @@ const char* c_rocblas_internal = "rocblas_internal";
 
 void rocblas_internal_logger::log_endline(rocblas_internal_ostream& os)
 {
+#ifndef DISABLE_ROCTX
 #if !defined(ROCBLAS_STATIC_LIB) && !defined(WIN32)
     if(!m_active)
     {
@@ -132,13 +135,16 @@ void rocblas_internal_logger::log_endline(rocblas_internal_ostream& os)
         m_active = true;
     }
 #endif
+#endif
     os << std::endl;
 }
 
 void rocblas_internal_logger::log_cleanup()
 {
+#ifndef DISABLE_ROCTX
 #if !defined(ROCBLAS_STATIC_LIB) && !defined(WIN32)
     roctxRangePop();
+#endif
 #endif
 }
 
