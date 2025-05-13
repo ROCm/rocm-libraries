@@ -86,7 +86,7 @@ jobs:
           GH_TOKEN: ${{ steps.generate-token.outputs.token }}
         run: |
           PR_JSON=$(gh pr view ${{ github.event.inputs.subrepo-pr-number }} \
-            --repo ${{ github.event.inputs.subrepo-repo }} \
+            --repo ${{ github.event.inputs.subrepo-upstream }} \
             --json title,body,headRefName,headRepository \
             --jq '{title: .title, body: .body, head_ref: .headRefName, head_repo: .headRepository.cloneUrl}')
 
@@ -122,11 +122,12 @@ jobs:
         run: |
           IMPORT_BRANCH="import/${{ github.event.inputs.subrepo-prefix }}/pr-${{ github.event.inputs.subrepo-pr-number }}"
           PR_TITLE="${{ steps.prdata.outputs.title }}"
+          UPSTREAM_REPO="${{ github.event.inputs.subrepo-upstream }}"
           SUBREPO_REPO="${{ github.event.inputs.subrepo-repo }}"
           SUBREPO_PR_NUMBER="${{ github.event.inputs.subrepo-pr-number }}"
           SUBREPO_URL="https://github.com/$SUBREPO_REPO/pull/$SUBREPO_PR_NUMBER"
 
-          AUTHOR=$(gh pr view "$SUBREPO_PR_NUMBER" --repo "$SUBREPO_REPO" --json author --jq .author.login)
+          AUTHOR=$(gh pr view "$SUBREPO_PR_NUMBER" --repo "$UPSTREAM_REPO" --json author --jq .author.login)
 
           echo "${{ steps.prdata.outputs.body }}" > pr_body.txt
 
