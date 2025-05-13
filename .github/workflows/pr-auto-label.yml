@@ -16,7 +16,7 @@ on:
     workflows: ["Fanout Subtree PRs"]
     types:
       - completed
-  pull_request:
+  pull_request_target:
     types:
       - labeled
       - unlabeled
@@ -44,9 +44,23 @@ jobs:
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
 
+      - name: Determine PR Number (workflow_run case only)
+        id: pr_number
+        env:
+          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            BRANCH_NAME="${{ github.event.workflow_run.head_branch }}"
+            PR_NUMBER=$(gh pr list --head "${{ github.event.workflow_run.head_branch }}" --state open --json number -R "${{ github.repository }}" --jq '.[0].number')
+          else
+            PR_NUMBER="${{ github.event.pull_request.number }}"
+          fi
+          echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
+
       - name: Checkout workflows
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
+          ref: refs/pull/${{ steps.pr_number.outputs.pr_number }}/merge
           sparse-checkout: '.github'
           token: ${{ steps.generate-token.outputs.token }} # since we are touching labels on subrepository PRs
 
@@ -64,19 +78,6 @@ jobs:
         run: |
           git config user.name "assistant-librarian[bot]"
           git config user.email "assistant-librarian[bot]@users.noreply.github.com"
-
-      - name: Determine PR Number (workflow_run case only)
-        id: pr_number
-        env:
-          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_run" ]; then
-            BRANCH_NAME="${{ github.event.workflow_run.head_branch }}"
-            PR_NUMBER=$(gh pr list --head "${{ github.event.workflow_run.head_branch }}" --state open --json number -R "${{ github.repository }}" --jq '.[0].number')
-          else
-            PR_NUMBER="${{ github.event.pull_request.number }}"
-          fi
-          echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
 
       - name: Compute Category Labels for PR
         id: compute_labels
