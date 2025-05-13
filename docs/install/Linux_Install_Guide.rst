@@ -143,6 +143,7 @@ shown in the table below:
 
    "``./install.sh -h``", "Help information."
    "``./install.sh -d``", "Build the library dependencies and library in your local directory. The ``-d`` flag only needs to be used once. For subsequent invocations of ``install.sh``, it is not necessary to rebuild the dependencies."
+   "``./install.sh --upgrade_tensile_venv_pip``", "On RPM-based Linux distributions it may be required to upgrade ``pip`` for the build to succeed."
    "``./install.sh``", "Build the library in your local directory. It is assumed the dependencies have been built."
    "``./install.sh -i``", "Build the library, then build and install the rocBLAS package in ``/opt/rocm/rocblas``. You will be prompted for ``sudo`` access. This installs it for all users. To keep rocBLAS in your local directory, do not use the ``-i`` flag."
 
