@@ -248,9 +248,37 @@ inline rocisa::DataType hipDataType_to_tensile_type(hipDataType type)
     }
 }
 
-namespace
+inline rocisa::DataType rocComputeType_to_tensile_type(rocblaslt_compute_type type)
 {
-    rocisa::DataType roc2TensileType(rocblaslt_compute_type, bool);
+    switch(type)
+    {
+    case rocblaslt_compute_f32_fast_xf32:
+        return rocisa::DataType::XFloat32;
+    case rocblaslt_compute_f32_fast_f16:
+        return rocisa::DataType::Half;
+    case rocblaslt_compute_f32_fast_bf16:
+        return rocisa::DataType::BFloat16;
+    case rocblaslt_compute_f16:
+    case rocblaslt_compute_f32:
+    case rocblaslt_compute_f32_fast_f8_fnuz:
+    case rocblaslt_compute_f32_fast_bf8_fnuz:
+    case rocblaslt_compute_f32_fast_f8bf8_fnuz:
+    case rocblaslt_compute_f32_fast_bf8f8_fnuz:
+#ifdef ROCM_USE_FLOAT8
+    case rocblaslt_compute_f32_fast_f8:
+    case rocblaslt_compute_f32_fast_bf8:
+    case rocblaslt_compute_f32_fast_f8bf8:
+    case rocblaslt_compute_f32_fast_bf8f8:
+#endif
+        return rocisa::DataType::Float;
+    case rocblaslt_compute_f64:
+        return rocisa::DataType::Double;
+    case rocblaslt_compute_i32:
+        return rocisa::DataType::Int32;
+    default:
+        assert(!"rocDataType_to_tensile_type: non-supported type");
+        return rocisa::DataType::None;
+    }
 }
 
 namespace TensileLite
@@ -262,3 +290,5 @@ TensileLite::ProblemOverride
     RocblasltContractionProblem2ProblemOverride(const RocblasltContractionProblem&);
 
 TensileLite::ProblemOverride TensileDataGemm2ProblemOverride(std::shared_ptr<void>);
+
+TensileLite::ContractionProblemGemm* ExtractProblemGemm(std::shared_ptr<void>);

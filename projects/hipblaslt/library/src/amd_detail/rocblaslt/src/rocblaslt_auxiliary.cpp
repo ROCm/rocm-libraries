@@ -191,12 +191,35 @@ bool problem_override_from_file(rocblaslt_handle&                 handle,
                                           &overrideResults[0].algo,
                                           &required_workspace_size))
                 {
+                    success = true;
+                }
+                else
+                { // there is no solution for xfloat32, fallback comput_type to fp32
+                    if(problem.compute_type == rocblaslt_compute_f32_fast_xf32)
+                    {
+                        problem.compute_type = rocblaslt_compute_f32;
+                        if(rocblaslt_status_success
+                           == isSolutionSupported(handle,
+                                                  problem,
+                                                  tensile_data,
+                                                  &overrideResults[0].algo,
+                                                  &required_workspace_size))
+                        {
+                            success = true;
+                            log_info(__func__, "Use the fallback fp32 solution");
+                        }
+
+                        problem.compute_type = rocblaslt_compute_f32_fast_xf32;
+                    }
+                }
+
+                if(success)
+                {
 
                     heuristicResult_copy(&heuristicResultsArray[0],
                                          &overrideResults[0],
                                          pref->max_workspace_bytes,
                                          required_workspace_size);
-                    success = true;
                 }
             }
         }
@@ -258,9 +281,33 @@ bool problem_override_from_file_cpp(
                                           tuning,
                                           workspaceSizeInBytes))
                 {
+                    success = true;
+                }
+                else
+                { // there is no solution for xfloat32, fallback comput_type to fp32
+                    auto problem = ExtractProblemGemm(gemmData);
+                    if(problem->f32XdlMathOp() == rocisa::DataType::XFloat32)
+                    {
+                        problem->setF32XdlMathOp(rocisa::DataType::Float);
+                        if(rocblaslt_status_success
+                           == isSolutionSupported(
+                               handle,
+                               static_cast<const rocblaslt::RocGemmType>(gemmType),
+                               gemmData,
+                               overrideResults[0].algo,
+                               tuning,
+                               workspaceSizeInBytes))
+                        {
+                            success = true;
+                            log_info(__func__, "Use the fallback fp32 solution");
+                        }
+                    }
+                }
+
+                if(success)
+                {
                     overrideResults[0].workspaceSize = workspaceSizeInBytes;
                     heuristicResultsArray.push_back(overrideResults[0]);
-                    success = true;
                 }
             }
         }
@@ -1760,7 +1807,7 @@ rocblaslt_status
             if(override_success)
                 requestedAlgoCount--;
 
-            log_api(__func__, "returnAlgoCount", override_success ? 1 : 0);
+            log_api(__func__, "OverrideAlgoCount", override_success ? 1 : 0);
         }
 
         if(requestedAlgoCount > 0)
@@ -2017,7 +2064,7 @@ rocblaslt_status
             override_success = problem_override_from_file_cpp(
                 handle, gemmType, gemmData, workspaceBytes, override_result, override.file_path);
 
-            log_api(__func__, "returnAlgoCount", override_success ? 1 : 0);
+            log_api(__func__, "OverrideAlgoCount", override_success ? 1 : 0);
         }
 
         if(requestedAlgoCount - override_result.size() > 0)
