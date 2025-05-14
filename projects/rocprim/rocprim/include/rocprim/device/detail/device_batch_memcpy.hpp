@@ -126,6 +126,12 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE static Alias read_item(InputIt buffer_src, O
     return *(buffer_src + offset);
 }
 
+template<class SizeAlias, class SizeType>
+ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE static SizeAlias read_size(SizeType size_buffer)
+{
+    return *(reinterpret_cast<SizeAlias*>(size_buffer));
+}
+
 template<bool IsMemCpy,
          class Alias,
          class InputIt,
@@ -341,6 +347,12 @@ struct batch_memcpy_impl
                                   typename std::iterator_traits<typename std::iterator_traits<
                                       InputBufferItType>::value_type>::value_type>::type;
 
+    using OffsetAlias = 
+        typename std::conditional<
+        IsMemCpy, 
+        size_t,
+        typename std::iterator_traits<BufferSizeItType>::value_type>::type;
+
     // Offset over buffers.
     using buffer_offset_type = uint32_t;
 
@@ -545,8 +557,9 @@ private:
                 if(blev_buffer_offset < num_blev_buffers)
                 {
                     auto tile_buffer_id = buffer_by_size_class[blev_buffer_offset].buffer_id;
+                    OffsetAlias curr_size = batch_memcpy::read_size<OffsetAlias, buffer_size_type>(buffers.sizes[tile_buffer_id]);
                     tile_offsets[i]
-                        = rocprim::detail::ceiling_div(buffers.sizes[tile_buffer_id],
+                        = rocprim::detail::ceiling_div(curr_size,
                                                        blev_block_size * blev_bytes_per_thread);
                 }
                 else
@@ -621,9 +634,11 @@ private:
             {
                 const auto buffer_id = buffers_by_size_class[buffer_offset].buffer_id;
 
+                OffsetAlias curr_size = batch_memcpy::read_size<OffsetAlias, buffer_size_type>(tile_buffers.sizes[buffer_id]);
+                
                 batch_memcpy::copy_items<IsMemCpy>(tile_buffers.srcs[buffer_id],
                                                    tile_buffers.dsts[buffer_id],
-                                                   tile_buffers.sizes[buffer_id]);
+                                                   curr_size);
             }
         }
 
