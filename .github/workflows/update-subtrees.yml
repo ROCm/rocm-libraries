@@ -9,6 +9,10 @@ env:
   MONOREPO_URL: github.com/ROCm/rocm-libraries.git
   MONOREPO_BRANCH: develop
 
+concurrency:
+  group: pr-fanout-${{ env.MONOREPO_BRANCH }}
+  cancel-in-progress: false
+
 jobs:
   synchronize-subtrees:
     runs-on: ubuntu-24.04
@@ -32,6 +36,10 @@ jobs:
           git config user.name "assistant-librarian[bot]"
           git config user.email "assistant-librarian[bot]@users.noreply.github.com"
 
+      - name: Switch to the Monorepo branch
+        run: |
+          git checkout -B "${{ env.MONOREPO_BRANCH }}" "origin/${{ env.MONOREPO_BRANCH }}"
+
       - name: Update Repositories in the Monorepo
         run: |
           has_errors=false
@@ -47,9 +55,12 @@ jobs:
               }
             fi
             if [ "$enable_push" = true ]; then
-              git subtree push --prefix "${category}/${repo}" https://github.com/${url}.git $branch --quiet || {
+              git fetch origin subtrees/${repo}/${branch}
+              git subtree split --prefix="${category}/${repo}" -b subtrees/${repo}/${branch} --rejoin || {
                 has_errors=true
               }
+              git push origin subtrees/${repo}/${branch}
+              git push https://github.com/${url}.git subtrees/${repo}/${branch}:${branch}
             fi
           done
 
