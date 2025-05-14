@@ -3882,11 +3882,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
       tpALocal = self.states.bpr if tensorParametersA["bpe"] * vwa < self.states.bpr else tensorParametersA["bpe"] * vwa
       numVgprG2LAllocatedLocal = roundUp((kernel["NumLoadsCoalescedA"] * kernel["NumLoadsPerpendicularA"] * \
         tpALocal) / (float)(self.states.bpr))
-      if self.states.archCaps["HasEccHalf"] or not self.states.asmCaps["HasWMMA_V1"]:
+      if (self.states.archCaps["HasEccHalf"] or not self.states.asmCaps["HasWMMA_V1"]) and (bpeMax * vwa < self.states.bpr):
         # This check is to reserve porential usage of VGPRs for gfx12 8-bit code gen
         # We should optimize the usage for better performance.
-        self.states.a.numVgprG2LAllocated = roundUp((kernel["NumLoadsCoalescedA"] * kernel["NumLoadsPerpendicularA"] * \
-          tpA) / (float)(self.states.bpr))
+        self.states.a.numVgprG2LAllocated = self.states.a.numVgprG2L * (int)(self.states.bpr/(bpeMax * vwa))
       else:
         self.states.a.numVgprG2LAllocated = self.states.a.numVgprG2L
     else:
@@ -3916,11 +3915,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
       tpBLocal = self.states.bpr if tensorParametersB["bpe"] * vwb < self.states.bpr else tensorParametersB["bpe"] * vwb
       numVgprG2LAllocatedLocal = roundUp((kernel["NumLoadsCoalescedB"] * kernel["NumLoadsPerpendicularB"] * \
         tpBLocal) / (float)(self.states.bpr))
-      if self.states.archCaps["HasEccHalf"] or not self.states.asmCaps["HasWMMA_V1"]:
+      if (self.states.archCaps["HasEccHalf"] or not self.states.asmCaps["HasWMMA_V1"]) and (bpeMax * vwb < self.states.bpr):
         # This check is to reserve porential usage of VGPRs for gfx12 8-bit code gen
         # We should optimize the usage for better performance.
-        self.states.b.numVgprG2LAllocated = roundUp((kernel["NumLoadsCoalescedB"] * kernel["NumLoadsPerpendicularB"] * \
-          tpB) / (float)(self.states.bpr))
+        self.states.b.numVgprG2LAllocated = self.states.b.numVgprG2L * (int)(self.states.bpr/(bpeMax * vwb))
       else:
         self.states.b.numVgprG2LAllocated = self.states.b.numVgprG2L
     else:
