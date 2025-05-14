@@ -3,7 +3,7 @@
 Documentation for rocRAND is available at
 [https://rocm.docs.amd.com/projects/rocRAND/en/latest/](https://rocm.docs.amd.com/projects/rocRAND/en/latest/)
 
-## (Unreleased) rocRAND 3.4.0 for ROCm 6.5
+## rocRAND 3.4.0 for ROCm 6.5
 
 ### Added
 
