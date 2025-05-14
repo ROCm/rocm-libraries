@@ -10,7 +10,7 @@ env:
   MONOREPO_BRANCH: develop
 
 concurrency:
-  group: pr-fanout-${{ env.MONOREPO_BRANCH }}
+  group: pr-update-subtrees-develop
   cancel-in-progress: false
 
 jobs:
