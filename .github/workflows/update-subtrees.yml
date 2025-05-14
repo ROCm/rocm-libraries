@@ -56,7 +56,8 @@ jobs:
             fi
             if [ "$enable_push" = true ]; then
               git fetch origin subtrees/${repo}/${branch}
-              git subtree split --prefix="${category}/${repo}" -b subtrees/${repo}/${branch} --rejoin || {
+              git branch -f subtrees/${repo}/${branch} origin/subtrees/${repo}/${branch}
+              git subtree split --prefix="${category}/${repo}" -b subtrees/${repo}/${branch} --quiet --rejoin || {
                 has_errors=true
               }
               git push origin subtrees/${repo}/${branch}
