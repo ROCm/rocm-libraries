@@ -54,7 +54,7 @@ jobs:
                 has_errors=true
               }
             fi
-            if [ "$enable_push" = true ]; then
+            # if [ "$enable_push" = true ]; then
               # git fetch origin subtrees/${repo}/${branch}
               # git branch -f subtrees/${repo}/${branch} origin/subtrees/${repo}/${branch}
               # git subtree split --prefix="${category}/${repo}" -b subtrees/${repo}/${branch} --quiet --rejoin || {
@@ -62,7 +62,7 @@ jobs:
               # }
               # git push origin subtrees/${repo}/${branch}
               # git push https://github.com/${url}.git subtrees/${repo}/${branch}:${branch}
-            fi
+            # fi
           done
 
           if [ "$has_errors" = true ]; then
