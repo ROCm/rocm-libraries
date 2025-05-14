@@ -2,6 +2,12 @@
 
 Full documentation for hipCUB is available at [https://rocm.docs.amd.com/projects/hipCUB/en/latest/](https://rocm.docs.amd.com/projects/hipCUB/en/latest/).
 
+## hipCUB-3.6.0 for ROCm 7.0
+
+### Removed
+
+* The AMD GPU targets `gfx803` and `gfx900` are no longer built by default. If you would like to build for these architectures, please specify them explicitly in the `AMDGPU_TARGETS` cmake option.
+
 ## hipCUB-3.5.0 for ROCm 6.5.0
 
 ### Added
