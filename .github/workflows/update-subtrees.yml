@@ -47,7 +47,7 @@ jobs:
               }
             fi
             if [ "$enable_push" = true ]; then
-              git subtree push --prefix "${category}/${repo}" https://github.com/${url}.git $branch || {
+              git subtree push --prefix "${category}/${repo}" https://github.com/${url}.git $branch --quiet || {
                 has_errors=true
               }
             fi
