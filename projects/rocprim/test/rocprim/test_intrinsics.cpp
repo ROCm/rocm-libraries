@@ -544,7 +544,7 @@ void masked_bit_count_kernel(unsigned int*             out,
                              const max_lane_mask_type  active_lanes)
 {
     const unsigned int out_index = blockIdx.x * blockDim.x + threadIdx.x;
-    const unsigned int in_index  = out_index / rocprim::arch::wavefront::min_size();
+    const unsigned int in_index  = out_index / rocprim::arch::wavefront::size();
 
     const auto   value  = static_cast<rocprim::lane_mask_type>(in[in_index]);
     unsigned int result = test_type_helper<unsigned int>::uninitialized();
@@ -655,7 +655,7 @@ void warp_any_all_kernel(unsigned int*             out,
 {
     const unsigned int index = blockIdx.x * blockDim.x + threadIdx.x;
     const unsigned int predicate
-        = (in[index / rocprim::arch::wavefront::min_size()] >> rocprim::lane_id()) & 1;
+        = (in[index / rocprim::arch::wavefront::size()] >> rocprim::lane_id()) & 1;
 
     unsigned int result = test_type_helper<unsigned int>::uninitialized();
     if(is_lane_active(active_lanes, rocprim::lane_id()))
@@ -1105,7 +1105,7 @@ void group_elect_kernel(max_lane_mask_type* output,
     const unsigned int input_index = blockIdx.x * blockDim.x + threadIdx.x;
 
     const unsigned int output_index
-        = blockIdx.x * warps_per_block + threadIdx.x / ::rocprim::arch::wavefront::min_size();
+        = blockIdx.x * warps_per_block + threadIdx.x / ::rocprim::arch::wavefront::size();
 
     if(rocprim::group_elect(input[input_index]))
     {
