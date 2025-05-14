@@ -1254,21 +1254,23 @@ class KernelWriter(metaclass=abc.ABCMeta):
             # we need to make sure globalRead before localWrite
             if writeItems and not countGlobalRead(globalReadCode):
               writeItem = writeItems.pop(0)
+              if writeItem.itemsSize():
+                iterCode.add(writeItem)
+                # if there is localWrite at first mfma, need to skip it in waitcnt.
+                if i == 0:
+                  skipLocalWriteWaitcnt += countLocalWrite(writeItem) + countDSStoreB256(writeItem)
+                if not localReadItemsThisLoop:
+                  self.states.perIterLocalWriteCanSkip[iteration] += countLocalWrite(writeItem) + countDSStoreB256(writeItem)
+        if mfmaIndex == self.states.lwEndMfmaIndex:
+          while writeItems:
+            writeItem = writeItems.pop(0)
+            if writeItem.itemsSize():
+              # generate all remaining pre code before the first Store C
               iterCode.add(writeItem)
-              # if there is localWrite at first mfma, need to skip it in waitcnt.
               if i == 0:
                 skipLocalWriteWaitcnt += countLocalWrite(writeItem) + countDSStoreB256(writeItem)
               if not localReadItemsThisLoop:
                 self.states.perIterLocalWriteCanSkip[iteration] += countLocalWrite(writeItem) + countDSStoreB256(writeItem)
-        if mfmaIndex == self.states.lwEndMfmaIndex:
-          while writeItems:
-            writeItem = writeItems.pop(0)
-            # generate all remaining pre code before the first Store C
-            iterCode.add(writeItem)
-            if i == 0:
-              skipLocalWriteWaitcnt += countLocalWrite(writeItem) + countDSStoreB256(writeItem)
-            if not localReadItemsThisLoop:
-              self.states.perIterLocalWriteCanSkip[iteration] += countLocalWrite(writeItem) + countDSStoreB256(writeItem)
 
         ####
         # scheduled pointer
