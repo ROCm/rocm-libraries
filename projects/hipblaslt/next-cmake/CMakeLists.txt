@@ -72,7 +72,7 @@ if(HIPBLASLT_ENABLE_HOST)
     set(HIPBLASLT_ENABLE_ROCROLLER OFF CACHE BOOL "Use RocRoller library.")
     set(HIPBLASLT_ENABLE_BLIS ON CACHE BOOL "Enable BLIS support.") # I don't know that we can build with this OFF
     set(HIPBLASLT_ENABLE_LAZY_LOAD ON CACHE BOOL "Enable lazy loading of runtime code oject files to reduce ram usage.")
-    set(HIPBLASLT_ENABLE_MARKER ON CACHE BOOL "Use the marker library.")
+    cmake_dependent_option(HIPBLASLT_ENABLE_MARKER "Use the marker library." ON "NOT WIN32" OFF)
     set(HIPBLASLT_ENABLE_HIPBLAS_DIRECT OFF CACHE BOOL "Use the hipblas header directly.")
 endif()
 
@@ -198,7 +198,7 @@ if(HIPBLASLT_ENABLE_HOST)
 
     target_link_libraries(hipblaslt
         PUBLIC
-            ${hipblas_target}
+            roc::${hipblas_target}
         PRIVATE
             hip::device
             rocisa::rocisa-cpp
