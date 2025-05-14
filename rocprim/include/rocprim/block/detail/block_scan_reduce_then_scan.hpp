@@ -559,7 +559,12 @@ private:
                 thread_reduction = input;
             }
 
+            ::rocprim::wave_barrier();
+
             storage_.threads[idx_start] = thread_reduction;
+
+            ::rocprim::wave_barrier();
+
             ROCPRIM_UNROLL
             for(unsigned int i = 1; i < thread_reduction_size_; i++)
             {
@@ -607,7 +612,12 @@ private:
                 thread_reduction = scan_op(init, input);
             }
 
+            ::rocprim::wave_barrier();
+
             storage_.threads[idx_start] = thread_reduction;
+
+            ::rocprim::wave_barrier();
+
             ROCPRIM_UNROLL
             for(unsigned int i = 1; i < thread_reduction_size_; i++)
             {
