@@ -353,10 +353,10 @@ class CodeModules:
   globalReadB: Optional[Module]               = None
   globalReadIncrements: Optional[Module]      = None
   ## MFMA
-  unrollLoopHeader: Optional[Module]          = None
-  perIterGlobalRead: Optional[List[Module]]   = None
-  perIterLocalWrite: Optional[List[Module]]   = None
-  perIterLocalWriteCodeNGLL: Optional[Module] = None
+  unrollLoopHeader: Optional[Module]                                  = None
+  perIterGlobalRead: Optional[List[Module]]                           = None
+  perIterLocalWrite: Optional[List[Tuple[List[int], Module]]]         = None
+  perIterLocalWriteCodeNGLL: Optional[List[Tuple[List[int], Module]]] = None
 
 @dataclass
 class ExternClasses:
@@ -530,9 +530,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
     self.codes.unrollLoopHeader = Module()
     # schedule of work for each local_read iteration:
     self.codes.perIterGlobalRead = [ Module() for i in range (kernel["LoopIters"]) ]
-    self.codes.perIterLocalWrite = [ Module() for i in range (kernel["LoopIters"]) ]
+    self.codes.perIterLocalWrite = [ [[], Module()] for i in range (kernel["LoopIters"]) ]
     if lastLc:
-      self.codes.perIterLocalWriteCodeNGLL = [ Module() for i in range (kernel["LoopIters"]) ]
+      self.codes.perIterLocalWriteCodeNGLL = [ [[], Module()] for i in range (kernel["LoopIters"]) ]
     self.states.perIterLocalWriteCanSkip = [ 0 for i in range (kernel["LoopIters"]) ]
     assert([item.name for item in self.codes.globalReadIncrements.items()] == ['globalReadIncrementA', 'globalReadIncrementB'])
 
@@ -579,9 +579,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
       waitLWCode = Module(), syncCode = Module(), packCode = Module(), prevIterCode = Module(), NLLlast = False):
 
     iterCode = Module()
-    globalReadCode = deepcopy(self.codes.perIterGlobalRead[iteration])
-    localWriteCode = self.codes.perIterLocalWrite[iteration]
-    isBarrier = kernel["LoopIters"] - self.states.numItersPLR
+    globalReadCode       = deepcopy(self.codes.perIterGlobalRead[iteration])
+    localWriteCodeCounts = self.codes.perIterLocalWrite[iteration][0]
+    localWriteCode       = self.codes.perIterLocalWrite[iteration][1]
+    isBarrier            = kernel["LoopIters"] - self.states.numItersPLR
     hasLocalRead = countLocalRead(localReadCode)
 
     # Default schedule is other, local reads, then local writes:
@@ -1096,6 +1097,16 @@ class KernelWriter(metaclass=abc.ABCMeta):
       def hasAnyDependency(lr: DSLoadInstruction, insts: List[Instruction]):
         return any(hasDependency(lr, inst) for inst in insts)
 
+      def calculateRangeAndUpdateCounter(itemCounter, writeCounters, length):
+        newItemCounter = itemCounter + length
+        numLoops = 0
+        for count in writeCounters:
+          if count > newItemCounter:
+            break
+          numLoops += 1
+        return numLoops, newItemCounter
+
+      itemCounter = 0
       for i in range(numMfmaPerIter):
         mfmaIndex = iteration * numMfmaPerIter + i
         insertInst = countInstruction(iterCode)
@@ -1112,7 +1123,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
           if self.states.numItersPLR:
             # take ds_write into account to schedule ds_read, assume A and B localwrite have same width (TLDS=1)
             if (mfmaIndex >= self.states.lwStartMfmaIndex) and not countGlobalRead(globalReadCode):
-              for j in range(min(len(writeItems),self.states.numLocalWriteModPerMfma)):
+              writeItemLength = (localWriteCodeCounts[-1] - itemCounter) if localWriteCodeCounts else 0
+              writeItemLength = min(writeItemLength, self.states.numLocalWriteModPerMfma)
+              numLoops, itemCounter = calculateRangeAndUpdateCounter(itemCounter, localWriteCodeCounts, writeItemLength)
+              for j in range(numLoops):
                 if countLocalWrite(writeItems[j]):
                   latencyLeft -= (tPA["localWriteInstruction"].issueLatency*2)
             readLeftLROPT = 0
@@ -1249,28 +1263,29 @@ class KernelWriter(metaclass=abc.ABCMeta):
           if flagInsert:
             iterCode.add(SSetPrior(prior=3, comment="store optimization"))
         if (mfmaIndex >= self.states.lwStartMfmaIndex):
-          for j in range(self.states.numLocalWriteModPerMfma):
+          numLoops, itemCounter = calculateRangeAndUpdateCounter(itemCounter, localWriteCodeCounts, self.states.numLocalWriteModPerMfma)
+          for j in range(numLoops):
             # in case there are localWrite and globalread in same iteration
             # we need to make sure globalRead before localWrite
             if writeItems and not countGlobalRead(globalReadCode):
+              localWriteCodeCounts.pop(0)
               writeItem = writeItems.pop(0)
-              if writeItem.itemsSize():
-                iterCode.add(writeItem)
-                # if there is localWrite at first mfma, need to skip it in waitcnt.
-                if i == 0:
-                  skipLocalWriteWaitcnt += countLocalWrite(writeItem) + countDSStoreB256(writeItem)
-                if not localReadItemsThisLoop:
-                  self.states.perIterLocalWriteCanSkip[iteration] += countLocalWrite(writeItem) + countDSStoreB256(writeItem)
-        if mfmaIndex == self.states.lwEndMfmaIndex:
-          while writeItems:
-            writeItem = writeItems.pop(0)
-            if writeItem.itemsSize():
-              # generate all remaining pre code before the first Store C
               iterCode.add(writeItem)
+              # if there is localWrite at first mfma, need to skip it in waitcnt.
               if i == 0:
                 skipLocalWriteWaitcnt += countLocalWrite(writeItem) + countDSStoreB256(writeItem)
               if not localReadItemsThisLoop:
                 self.states.perIterLocalWriteCanSkip[iteration] += countLocalWrite(writeItem) + countDSStoreB256(writeItem)
+        if mfmaIndex == self.states.lwEndMfmaIndex:
+          while writeItems:
+            localWriteCodeCounts.pop(0)
+            writeItem = writeItems.pop(0)
+            # generate all remaining pre code before the first Store C
+            iterCode.add(writeItem)
+            if i == 0:
+              skipLocalWriteWaitcnt += countLocalWrite(writeItem) + countDSStoreB256(writeItem)
+            if not localReadItemsThisLoop:
+              self.states.perIterLocalWriteCanSkip[iteration] += countLocalWrite(writeItem) + countDSStoreB256(writeItem)
 
         ####
         # scheduled pointer
@@ -1735,13 +1750,13 @@ class KernelWriter(metaclass=abc.ABCMeta):
         iterCode.addComment0("dataAtIterB=%u numReadsIterB=%u skipReadsIterB=%u readsPerIterB=%u" % (dataAtIterB, numReadsIterB, skipReadsIterB, self.states.numReadsPerIterB))
         if kernel["ScheduleIterAlg"] == 0 or kernel["ScheduleIterAlg"] == 1:
           for i in range (max(dataAtIterA,dataAtIterB),iteration+1):
-            localWrites += countLocalWrite(self.codes.perIterLocalWrite[i])
-            localWrites += countDSStoreB256(self.codes.perIterLocalWrite[i])
+            localWrites += countLocalWrite(self.codes.perIterLocalWrite[i][1])
+            localWrites += countDSStoreB256(self.codes.perIterLocalWrite[i][1])
         # ScheduleIterAlg=2, localwrite is after waitCnt, no need to count it's current iteration.
         if kernel["ScheduleIterAlg"] == 3:
           for i in range (max(dataAtIterA,dataAtIterB)+1,iteration):
-            localWrites += countLocalWrite(self.codes.perIterLocalWrite[i])
-            localWrites += countDSStoreB256(self.codes.perIterLocalWrite[i])
+            localWrites += countLocalWrite(self.codes.perIterLocalWrite[i][1])
+            localWrites += countDSStoreB256(self.codes.perIterLocalWrite[i][1])
           if kernel["ScheduleLocalWrite"] > 0:
             # current iteration localWrite count
             localWrites += skipLocalWriteWaitcnt
@@ -2223,7 +2238,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         #  1) local write code in previous u (u-1) has local write (it comes with waitcnt vmcnt)
         countLW = 0
         if (u > 0):
-          countLW += countLocalWrite(self.codes.perIterLocalWrite[u-1])
+          countLW += countLocalWrite(self.codes.perIterLocalWrite[u-1][1])
         if countLW == 0:
           module.add(self.getWaitcntCodeForDirectToVgpr(kernel, tensorParametersA, tensorParametersB, localWriteEndIter, u, isNLL=(not isNGLL), NLLlast=NLLlast))
 

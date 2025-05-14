@@ -23,7 +23,7 @@
 from rocisa import countInstruction, countGlobalRead, countLocalWrite, \
                    countDSStoreB128, countVMovB32
 from rocisa.base import Item
-from rocisa.code import Module
+from rocisa.code import Module, TextBlock
 from rocisa.container import DSModifiers, HolderContainer, replaceHolder
 
 from rocisa.instruction import SWaitCnt, SWaitAlu, DSStoreB128, DSStoreB64, DSStoreB32
@@ -636,7 +636,7 @@ def noSchedLocalWrite(writer, kernel, tensorParametersA, tensorParametersB, loca
     #   so don't add to schedule, these will be added separately and before the first iter
     if kernel["PrefetchGlobalRead"]:
         # do we need a module here? That would prevent these from being scheduled
-        imod = writer.codes.perIterLocalWrite[localWriteEndIter].add(Module())
+        imod = writer.codes.perIterLocalWrite[localWriteEndIter][1].add(Module())
         imod.add(
             writer._wait(kernel, tensorParametersA, tensorParametersB, 0, -1, -1, \
             "1wait for global read"))
@@ -792,12 +792,15 @@ def schedLocalWrite(writer, kernel, numLocalWriteModPerIter, numLocalWritesPerSc
             else:
                 itemPerIter = foundIndex + 1
 
+        perIterLocalWriteCodeCounter = 0
+        perIterLocalWriteCodeNGLLCounter = 0
+
         itemsLWToSchedLengthLeft = itemsLWToSchedLength - itemsLWToSchedIndexLast
         for itemsLWToSchedIndex, item in itemsLWToSched[:itemPerIter]:
             for gapIndex in range(itemsLWToSchedIndexLast, itemsLWToSchedIndex + 1):
+                imodList = []
+                imodNGLLList = []
                 # Use a module to ensure these pieces stay together in the sub-iter scheduler
-                imod = Module("LocalWriteMod%u"%u)
-                imodNGLL = Module("LocalWriteMod%u"%u)
                 if gapIndex == itemsLWToSchedIndex:
                     if item:
                         writesPerItem = countLocalWrite(item)
@@ -823,18 +826,18 @@ def schedLocalWrite(writer, kernel, numLocalWriteModPerIter, numLocalWritesPerSc
                             else:
                                 globalReadInstOffset = 0
 
-                            imod.addComment0("sched write - iter %u writesPerItem=%u"%(u,writesPerItem))
-                            imodNGLL.addComment0("sched write - iter %u writesPerItem=%u"%(u,writesPerItem))
+                            imodList.append(TextBlock("/* sched write - iter %u writesPerItem=%u */\n"%(u,writesPerItem)))
+                            imodNGLLList.append(TextBlock("/* sched write - iter %u writesPerItem=%u */\n"%(u,writesPerItem)))
                             # if writesPerItem>1 this indicates multiple LocalWrites in the same module
                             # this happens in some transpose cases.  Here the first write needs to wait
                             # for the associated global read to finish, then the remaining writes can flow
                             # TODO - can schedule these writes across iters, should figure this out above
                             readsToWait = readsToWait - 1
                             readsToWaitNGLL = readsToWaitNGLL - 1
-                            imod.add(SWaitCnt(lgkmcnt=-1, \
+                            imodList.append(SWaitCnt(lgkmcnt=-1, \
                                 vmcnt=min(maxVmcnt, readsToWait), vscnt=-1, \
                                 comment="wait for global read before writing to local"))
-                            imodNGLL.add(SWaitCnt(lgkmcnt=-1, \
+                            imodNGLLList.append(SWaitCnt(lgkmcnt=-1, \
                                 vmcnt=min(maxVmcnt, readsToWaitNGLL), vscnt=-1, \
                                 comment="wait for global read before writing to local"))
                         # PK and StoreCUnroll is removed so you cannot find any HolderContainer in s_waitcnt
@@ -848,12 +851,12 @@ def schedLocalWrite(writer, kernel, numLocalWriteModPerIter, numLocalWritesPerSc
                                 for wc in wcList:
                                     replaceHolder(wc, (readsToWaitAdjust))
                 if gapIndex in additionalIndexList:
-                    imod.add(additionalIndexList[gapIndex])
+                    imodList.append(additionalIndexList[gapIndex])
                     additionalIndexList.pop(gapIndex)
                 elif gapIndex < itemsLWToSchedIndex or (not item):
                     pass
                 else:
-                    imod.add(item)
+                    imodList.append(item)
                 # schedule global instruction that need to be scheduled later
                 numGlobalReadA = kernel["NumLoadsPerpendicularA"] * kernel["NumLoadsCoalescedA"]
                 numGlobalReadB = kernel["NumLoadsPerpendicularB"] * kernel["NumLoadsCoalescedB"]
@@ -886,15 +889,15 @@ def schedLocalWrite(writer, kernel, numLocalWriteModPerIter, numLocalWritesPerSc
                             if reads > readCnt:
                                 break
                             if kernel["ExpertSchedulingMode"] > 0:
-                                imod.add(SWaitAlu(vm_vsrc=0, comment="wait for local read to vgpr complete"))
+                                imodList.append(SWaitAlu(vm_vsrc=0, comment="wait for local read to vgpr complete"))
                             # PK and StoreCUnroll is removed so you cannot find any HolderContainer in s_waitcnt
                             hasHolder, wcList = hasHolderInWaitCnt(itemGR)
                             if hasHolder:
                                 for wc in wcList:
                                     replaceHolder(wc, (readsToWait))
-                                imod.add(itemGR)
+                                imodList.append(itemGR)
                             else:
-                                imod.add(itemGR)
+                                imodList.append(itemGR)
                             readsToWait = readsToWait + readsInc # GR instruction increments vmcnt
                             itemsGRToSchedLater.pop(0)
 
@@ -906,13 +909,24 @@ def schedLocalWrite(writer, kernel, numLocalWriteModPerIter, numLocalWritesPerSc
                 if gapIndex < itemsLWToSchedIndex or (not item):
                     pass
                 else:
-                    imodNGLL.add(deepcopy(item))
-                writer.codes.perIterLocalWrite[u].add(imod)
+                    imodNGLLList.append(deepcopy(item))
+
+                perIterLocalWriteCodeCounter += 1
+                perIterLocalWriteCodeNGLLCounter += 1
+                if imodList:
+                    imod = Module("LocalWriteMod%u"%u)
+                    imod.addItems(imodList)
+                    writer.codes.perIterLocalWrite[u][0].append(perIterLocalWriteCodeCounter)
+                    writer.codes.perIterLocalWrite[u][1].add(imod)
                 if lastLc:
                     # local write code for NGLL should be updated at the last lc
                     # in init acc opt case, the last inner loop generated is not for the last lc.
                     # in that case, local write code for NGLL is not as expected.
-                    writer.codes.perIterLocalWriteCodeNGLL[u].add(imodNGLL)
+                    if imodNGLLList:
+                        imodNGLL = Module("LocalWriteModNGLL%u"%u)
+                        imodNGLL.addItems(imodNGLLList)
+                        writer.codes.perIterLocalWriteCodeNGLL[u][0].append(perIterLocalWriteCodeNGLLCounter)
+                        writer.codes.perIterLocalWriteCodeNGLL[u][1].add(imodNGLL)
             itemsLWToSchedIndexLast = itemsLWToSchedIndex + 1
         itemsLWToSched = itemsLWToSched[itemPerIter:]
 
