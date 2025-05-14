@@ -69,7 +69,6 @@ def runTestCommand (platform, project)
                     popd
                 """
     platform.runCommand(this, yamlTestCommand)
-    junit "${stagingDir}/*.xml"
 }
 
 def runCoverageCommand (platform, project, String cmdDir = "release-debug")
