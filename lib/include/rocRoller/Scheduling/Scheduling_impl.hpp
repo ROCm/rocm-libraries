@@ -75,6 +75,8 @@ namespace rocRoller
                                waitCount.toString(LogLevel::Terse),
                                ", nop ",
                                nops,
+                               ", reused ",
+                               reusedOperands,
                                ", q {",
                                waitLengths,
                                "}, a {",
@@ -89,6 +91,8 @@ namespace rocRoller
             stallCycles = std::max(stallCycles, other.stallCycles);
             waitCount.combine(other.waitCount);
             nops = std::max(nops, other.nops);
+
+            reusedOperands = std::max(reusedOperands, other.reusedOperands);
 
             for(int i = 0; i < waitLengths.size(); i++)
             {

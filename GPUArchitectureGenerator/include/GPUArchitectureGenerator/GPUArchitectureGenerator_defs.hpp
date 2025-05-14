@@ -1014,11 +1014,11 @@ namespace GPUArchitectureGenerator
                  //       a fixed latency.
                  // Using passes instead of cycles (1 pass = 4 cycles)
                  // if (either matrix is F8) -> 8 passes   else() -> 4 passes
-                 rocRoller::GPUInstructionInfo("v_mfma_f32_16x16x128_f8f6f4", 0, {}, 8),
-                 rocRoller::GPUInstructionInfo("v_mfma_scale_f32_16x16x128_f8f6f4", 0, {}, 8),
+                 rocRoller::GPUInstructionInfo("v_mfma_f32_16x16x128_f8f6f4", 0, {}, 4),
+                 rocRoller::GPUInstructionInfo("v_mfma_scale_f32_16x16x128_f8f6f4", 0, {}, 4),
                  // if (either matrix is F8) -> 16 passes  else() -> 8 passes
-                 rocRoller::GPUInstructionInfo("v_mfma_f32_32x32x64_f8f6f4", 0, {}, 16),
-                 rocRoller::GPUInstructionInfo("v_mfma_scale_f32_32x32x64_f8f6f4", 0, {}, 16),
+                 rocRoller::GPUInstructionInfo("v_mfma_f32_32x32x64_f8f6f4", 0, {}, 8),
+                 rocRoller::GPUInstructionInfo("v_mfma_scale_f32_32x32x64_f8f6f4", 0, {}, 8),
                  rocRoller::GPUInstructionInfo("v_prng_b32", 0, {}, 1),
                  // DS_READ_B64_TR_B{16,8,4} and DS_READ_B96_TR_B6
                  rocRoller::GPUInstructionInfo("ds_read_b64_tr_b16",
