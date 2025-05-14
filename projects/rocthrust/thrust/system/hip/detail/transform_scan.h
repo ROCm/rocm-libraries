@@ -48,7 +48,7 @@ namespace hip_rocprim
 {
 
 template <class Derived, class InputIt, class OutputIt, class TransformOp, class ScanOp>
-OutputIt transform_inclusive_scan(
+OutputIt THRUST_HOST_DEVICE transform_inclusive_scan(
   execution_policy<Derived>& policy,
   InputIt first,
   InputIt last,
@@ -56,7 +56,7 @@ OutputIt transform_inclusive_scan(
   TransformOp transform_op,
   ScanOp scan_op)
 {
-  // Use the input iterator's value type per https://wg21.link/P0571
+  // Use the transformed input iterator's value type per https://wg21.link/P0571
   using input_type  = typename thrust::iterator_value<InputIt>::type;
   using result_type = thrust::detail::invoke_result_t<TransformOp, input_type>;
   using value_type  = thrust::remove_cvref_t<result_type>;
@@ -69,7 +69,29 @@ OutputIt transform_inclusive_scan(
 }
 
 template <class Derived, class InputIt, class OutputIt, class TransformOp, class InitialValueType, class ScanOp>
-OutputIt transform_exclusive_scan(
+OutputIt THRUST_HOST_DEVICE transform_inclusive_scan(
+  execution_policy<Derived>& policy,
+  InputIt first,
+  InputIt last,
+  OutputIt result,
+  TransformOp transform_op,
+  InitialValueType init,
+  ScanOp scan_op)
+{
+  using input_type  = typename thrust::iterator_value<InputIt>::type;
+  using result_type = thrust::detail::invoke_result_t<TransformOp, input_type>;
+  using value_type  = thrust::remove_cvref_t<result_type>;
+
+  using size_type              = typename iterator_traits<InputIt>::difference_type;
+  size_type num_items          = static_cast<size_type>(thrust::distance(first, last));
+  using transformed_iterator_t = transform_input_iterator_t<value_type, InputIt, TransformOp>;
+
+  return hip_rocprim::inclusive_scan_n(
+    policy, transformed_iterator_t(first, transform_op), num_items, result, init, scan_op);
+}
+
+template <class Derived, class InputIt, class OutputIt, class TransformOp, class InitialValueType, class ScanOp>
+OutputIt THRUST_HOST_DEVICE transform_exclusive_scan(
   execution_policy<Derived>& policy,
   InputIt first,
   InputIt last,
