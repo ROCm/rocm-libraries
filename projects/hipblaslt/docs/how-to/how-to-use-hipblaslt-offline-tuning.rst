@@ -48,13 +48,18 @@ To find and use the best GEMM kernel for a problem, follow these steps:
 
       export HIPBLASLT_TUNING_FILE=tuning.txt
    
+   Additionally, you can set the environment variable to specify that the solution found in the tuning stage is under the constraint of the max workspace size setting:
+
+   .. code-block:: bash
+
+      export HIPBLASLT_TUNING_USER_MAX_WORKSPACE=<value> (Default value is: 128 * 1024 * 1024)
+   
    The default settings for the following parameters in ``hipblaslt-bench`` are changed in the tuning environment.
 
    .. code-block:: bash
 
       --iters |-i <value>             (Default value is: 1000)
       --cold_iters |-j <value>        (Default value is: 1000)
-      --algo_method <value>           (Default value is: all)
       --requested_solution <value>    (Default value is: -1)
       --rotating <value>              (Default value is: 512)
 
