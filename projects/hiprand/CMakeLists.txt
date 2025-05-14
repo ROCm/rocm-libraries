@@ -41,7 +41,7 @@ endif()
 # hipRAND project
 #
 project(hipRAND CXX)
-set(hipRAND_VERSION "2.12.0")
+set(hipRAND_VERSION "2.13.0")
 
 # Build options
 option(BUILD_ADDRESS_SANITIZER "Build with address sanitizer enabled" OFF)
@@ -223,7 +223,7 @@ endif()
 
 rocm_create_package(
         NAME ${package_name}
-        DESCRIPTION "Radeon Open Compute RAND library"
+        DESCRIPTION "A GPU-based random number generation library, written in HIP"
         MAINTAINER "hipRAND Maintainer <hiprand-maintainer@amd.com>"
         LDCONFIG
         LDCONFIG_DIR ${HIPRAND_CONFIG_DIR}
