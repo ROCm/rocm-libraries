@@ -44,7 +44,7 @@ BEGIN_ROCPRIM_NAMESPACE
 /// \p ItemsPerThread \p items to the thread block.
 ///
 /// \tparam OutputIterator [inferred] an iterator type for input (can be a simple
-/// pointer
+/// pointer)
 /// \tparam T [inferred] the data type
 /// \tparam ItemsPerThread [inferred] the number of items to be processed by
 /// each thread
@@ -83,7 +83,7 @@ void block_store_direct_blocked(unsigned int flat_id,
 /// \p ItemsPerThread \p items to the thread block.
 ///
 /// \tparam OutputIterator [inferred] an iterator type for input (can be a simple
-/// pointer
+/// pointer)
 /// \tparam T [inferred] the data type
 /// \tparam ItemsPerThread [inferred] the number of items to be processed by
 /// each thread
@@ -132,7 +132,7 @@ void block_store_direct_blocked(unsigned int flat_id,
 /// block_load_direct_blocked:
 /// * \p ItemsPerThread is odd.
 /// * The datatype \p T is not a primitive or a HIP vector type (e.g. int2,
-/// int4, etc.
+/// int4, etc.)
 ///
 /// \tparam T [inferred] the output data type
 /// \tparam U [inferred] the input data type
@@ -197,7 +197,7 @@ block_store_direct_blocked_vectorized(unsigned int flat_id,
 ///
 /// \tparam BlockSize the number of threads in a block
 /// \tparam OutputIterator [inferred] an iterator type for input (can be a simple
-/// pointer
+/// pointer)
 /// \tparam T [inferred] the data type
 /// \tparam ItemsPerThread [inferred] the number of items to be processed by
 /// each thread
@@ -237,7 +237,7 @@ void block_store_direct_striped(unsigned int flat_id,
 ///
 /// \tparam BlockSize the number of threads in a block
 /// \tparam OutputIterator [inferred] an iterator type for input (can be a simple
-/// pointer
+/// pointer)
 /// \tparam T [inferred] the data type
 /// \tparam ItemsPerThread [inferred] the number of items to be processed by
 /// each thread
@@ -283,7 +283,6 @@ void block_store_direct_striped(unsigned int flat_id,
 /// \p ItemsPerThread \p items to the thread block.
 ///
 /// * The number of threads in the block must be a multiple of \p VirtualWaveSize.
-/// * The default \p VirtualWaveSize is a hardware warpsize and is an optimal value.
 /// * \p VirtualWaveSize must be a power of two and equal or less than the size of
 ///   hardware warp.
 /// * Using \p VirtualWaveSize smaller than hardware warpsize could result in lower
@@ -291,7 +290,7 @@ void block_store_direct_striped(unsigned int flat_id,
 ///
 /// \tparam VirtualWaveSize [optional] the number of threads in a warp
 /// \tparam OutputIterator [inferred] an iterator type for input (can be a simple
-/// pointer
+/// pointer)
 /// \tparam T [inferred] the data type
 /// \tparam ItemsPerThread [inferred] the number of items to be processed by
 /// each thread
@@ -299,10 +298,7 @@ void block_store_direct_striped(unsigned int flat_id,
 /// \param flat_id a local flat 1D thread id in a block (tile) for the calling thread
 /// \param block_output the input iterator from the thread block to store to
 /// \param items array that data is stored to thread block
-template<unsigned int VirtualWaveSize = arch::wavefront::min_size(),
-         class OutputIterator,
-         class T,
-         unsigned int ItemsPerThread>
+template<unsigned int VirtualWaveSize, class OutputIterator, class T, unsigned int ItemsPerThread>
 ROCPRIM_DEVICE ROCPRIM_INLINE
 void block_store_direct_warp_striped(unsigned int   flat_id,
                                      OutputIterator block_output,
@@ -329,6 +325,46 @@ void block_store_direct_warp_striped(unsigned int   flat_id,
 }
 
 /// \brief Stores a warp-striped arrangement of items from across the thread block
+/// into a blocked arrangement on continuous memory, using the hardware warp size.
+///
+/// \ingroup blockmodule_warp_store_functions
+/// The warp-striped arrangement is assumed to be (\p VirtualWaveSize * \p ItemsPerThread) items
+/// across a thread block. Each thread uses a \p flat_id to store a range of
+/// \p ItemsPerThread \p items to the thread block.
+///
+/// \tparam OutputIterator [inferred] an iterator type for input (can be a simple
+/// pointer)
+/// \tparam T [inferred] the data type
+/// \tparam ItemsPerThread [inferred] the number of items to be processed by
+/// each thread
+///
+/// \param flat_id a local flat 1D thread id in a block (tile) for the calling thread
+/// \param block_output the input iterator from the thread block to store to
+/// \param items array that data is stored to thread block
+template<class OutputIterator, class T, unsigned int ItemsPerThread>
+ROCPRIM_DEVICE ROCPRIM_INLINE
+void block_store_direct_warp_striped(unsigned int   flat_id,
+                                     OutputIterator block_output,
+                                     T (&items)[ItemsPerThread])
+{
+    if constexpr(arch::wavefront::min_size() == arch::wavefront::max_size())
+    {
+        block_store_direct_warp_striped<arch::wavefront::min_size()>(flat_id, block_output, items);
+    }
+    else
+    {
+        if(arch::wavefront::size() == ROCPRIM_WARP_SIZE_64)
+        {
+            block_store_direct_warp_striped<ROCPRIM_WARP_SIZE_64>(flat_id, block_output, items);
+        }
+        else
+        {
+            block_store_direct_warp_striped<ROCPRIM_WARP_SIZE_32>(flat_id, block_output, items);
+        }
+    }
+}
+
+/// \brief Stores a warp-striped arrangement of items from across the thread block
 /// into a blocked arrangement on continuous memory, which is guarded by range \p valid.
 ///
 /// \ingroup blockmodule_warp_store_functions
@@ -337,7 +373,6 @@ void block_store_direct_warp_striped(unsigned int   flat_id,
 /// \p ItemsPerThread \p items to the thread block.
 ///
 /// * The number of threads in the block must be a multiple of \p VirtualWaveSize.
-/// * The default \p VirtualWaveSize is a hardware warpsize and is an optimal value.
 /// * \p VirtualWaveSize must be a power of two and equal or less than the size of
 ///   hardware warp.
 /// * Using \p VirtualWaveSize smaller than hardware warpsize could result in lower
@@ -345,7 +380,7 @@ void block_store_direct_warp_striped(unsigned int   flat_id,
 ///
 /// \tparam VirtualWaveSize [optional] the number of threads in a warp
 /// \tparam OutputIterator [inferred] an iterator type for input (can be a simple
-/// pointer
+/// pointer)
 /// \tparam T [inferred] the data type
 /// \tparam ItemsPerThread [inferred] the number of items to be processed by
 /// each thread
@@ -354,10 +389,7 @@ void block_store_direct_warp_striped(unsigned int   flat_id,
 /// \param block_output the input iterator from the thread block to store to
 /// \param items array that data is stored to thread block
 /// \param valid maximum range of valid numbers to store
-template<unsigned int VirtualWaveSize = arch::wavefront::min_size(),
-         class OutputIterator,
-         class T,
-         unsigned int ItemsPerThread>
+template<unsigned int VirtualWaveSize, class OutputIterator, class T, unsigned int ItemsPerThread>
 ROCPRIM_DEVICE ROCPRIM_INLINE
 void block_store_direct_warp_striped(unsigned int   flat_id,
                                      OutputIterator block_output,
@@ -390,17 +422,95 @@ void block_store_direct_warp_striped(unsigned int   flat_id,
     }
 }
 
-template<class V                      = rocprim::uint128_t,
-         unsigned int VirtualWaveSize = arch::wavefront::min_size(),
+/// \brief Stores a warp-striped arrangement of items from across the thread block
+/// into a blocked arrangement on continuous memory, which is guarded by range \p valid,
+/// using the hardware warp size.
+///
+/// \ingroup blockmodule_warp_store_functions
+/// The warp-striped arrangement is assumed to be (\p VirtualWaveSize * \p ItemsPerThread) items
+/// across a thread block. Each thread uses a \p flat_id to store a range of
+/// \p ItemsPerThread \p items to the thread block.
+///
+/// \tparam OutputIterator [inferred] an iterator type for input (can be a simple
+/// pointer)
+/// \tparam T [inferred] the data type
+/// \tparam ItemsPerThread [inferred] the number of items to be processed by
+/// each thread
+///
+/// \param flat_id a local flat 1D thread id in a block (tile) for the calling thread
+/// \param block_output the input iterator from the thread block to store to
+/// \param items array that data is stored to thread block
+/// \param valid maximum range of valid numbers to store
+template<class OutputIterator, class T, unsigned int ItemsPerThread>
+ROCPRIM_DEVICE ROCPRIM_INLINE
+void block_store_direct_warp_striped(unsigned int   flat_id,
+                                     OutputIterator block_output,
+                                     T (&items)[ItemsPerThread],
+                                     unsigned int valid)
+{
+    if constexpr(arch::wavefront::min_size() == arch::wavefront::max_size())
+    {
+        block_store_direct_warp_striped<arch::wavefront::min_size()>(flat_id,
+                                                                     block_output,
+                                                                     items,
+                                                                     valid);
+    }
+    else
+    {
+        if(arch::wavefront::size() == ROCPRIM_WARP_SIZE_64)
+        {
+            block_store_direct_warp_striped<ROCPRIM_WARP_SIZE_64>(flat_id,
+                                                                  block_output,
+                                                                  items,
+                                                                  valid);
+        }
+        else
+        {
+            block_store_direct_warp_striped<ROCPRIM_WARP_SIZE_32>(flat_id,
+                                                                  block_output,
+                                                                  items,
+                                                                  valid);
+        }
+    }
+}
+
+/// \brief Stores a blocked arrangement of items from across the thread block
+/// into a blocked arrangement on continuous memory.
+///
+/// \ingroup blockmodule_cast_store_functions
+/// The block arrangement is assumed to be (block-threads * \p ItemsPerThread) items
+/// across a thread block. Each thread uses a \p flat_id to store a range of
+/// \p ItemsPerThread \p items to the thread block.
+///
+/// The following conditions will prevent casting and switch to default
+/// block_store_direct_blocked:
+/// * \p ItemsPerThread * sizeof(T) should be a multiple of sizeof(V)
+/// * The datatype \p T is not a primitive or a HIP vector type (e.g. int2,
+/// int4, etc.)
+///
+/// \tparam V [optional] the type it will be casted to
+/// \tparam VirtualWaveSize [optional] the number of threads in a warp
+/// \tparam T [inferred] the output data type
+/// \tparam U [inferred] the input data type
+/// \tparam ItemsPerThread [inferred] the number of items to be processed by
+/// each thread
+///
+/// \param flat_id a local flat 1D thread id in a block (tile) for the calling thread
+/// \param block_output the input iterator from the thread block to load from
+/// \param items array that data is loaded to
+template<class V = rocprim::uint128_t,
+         unsigned int VirtualWaveSize,
          class T,
          class U,
          unsigned int ItemsPerThread>
 ROCPRIM_DEVICE ROCPRIM_INLINE
 auto block_store_direct_blocked_cast(unsigned int flat_id,
                                      T*           block_output,
-                                     U (&items)[ItemsPerThread]) ->
-    typename std::enable_if<detail::is_vectorizable<T, ItemsPerThread>::value
-                            && (ItemsPerThread * sizeof(T)) % sizeof(V) == 0>::type
+                                     U (&items)[ItemsPerThread])
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
+    -> typename std::enable_if<detail::is_vectorizable<T, ItemsPerThread>::value
+                               && (ItemsPerThread * sizeof(T)) % sizeof(V) == 0>::type
+#endif // DOXYGEN_SHOULD_SKIP_THIS
 {
     static_assert(std::is_convertible<U, T>::value,
                   "The type U must be such that it can be implicitly converted to T.");
@@ -416,8 +526,9 @@ auto block_store_direct_blocked_cast(unsigned int flat_id,
     }
 }
 
-template<class V                      = rocprim::uint128_t,
-         unsigned int VirtualWaveSize = arch::wavefront::min_size(),
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
+template<class V = rocprim::uint128_t,
+         unsigned int VirtualWaveSize,
          class T,
          class U,
          unsigned int ItemsPerThread>
@@ -429,6 +540,56 @@ auto block_store_direct_blocked_cast(unsigned int flat_id,
                             || (ItemsPerThread * sizeof(T)) % sizeof(V) != 0>::type
 {
     block_store_direct_blocked(flat_id, block_output, items);
+}
+#endif // DOXYGEN_SHOULD_SKIP_THIS
+
+/// \brief Stores a blocked arrangement of items from across the thread block
+/// into a blocked arrangement on continuous memory, using the hardware warp size.
+///
+/// \ingroup blockmodule_cast_store_functions
+/// The block arrangement is assumed to be (block-threads * \p ItemsPerThread) items
+/// across a thread block. Each thread uses a \p flat_id to store a range of
+/// \p ItemsPerThread \p items to the thread block.
+///
+/// The following conditions will prevent casting and switch to default
+/// block_load_direct_blocked:
+/// * \p ItemsPerThread * sizeof(T) should be a multiple of sizeof(V)
+/// * The datatype \p T is not a primitive or a HIP vector type (e.g. int2,
+/// int4, etc.)
+///
+/// \tparam V [optional] the type it will be casted to
+/// \tparam T [inferred] the output data type
+/// \tparam U [inferred] the input data type
+/// \tparam ItemsPerThread [inferred] the number of items to be processed by
+/// each thread
+///
+/// \param flat_id a local flat 1D thread id in a block (tile) for the calling thread
+/// \param block_output the input iterator from the thread block to load from
+/// \param items array that data is loaded to
+template<class V = rocprim::uint128_t, class T, class U, unsigned int ItemsPerThread>
+ROCPRIM_DEVICE ROCPRIM_INLINE
+auto block_store_direct_blocked_cast(unsigned int flat_id,
+                                     T*           block_output,
+                                     U (&items)[ItemsPerThread])
+{
+
+    if constexpr(arch::wavefront::min_size() == arch::wavefront::max_size())
+    {
+        block_store_direct_blocked_cast<V, arch::wavefront::min_size()>(flat_id,
+                                                                        block_output,
+                                                                        items);
+    }
+    else
+    {
+        if(arch::wavefront::size() == ROCPRIM_WARP_SIZE_64)
+        {
+            block_store_direct_blocked_cast<V, ROCPRIM_WARP_SIZE_64>(flat_id, block_output, items);
+        }
+        else
+        {
+            block_store_direct_blocked_cast<V, ROCPRIM_WARP_SIZE_32>(flat_id, block_output, items);
+        }
+    }
 }
 
 END_ROCPRIM_NAMESPACE
