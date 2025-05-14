@@ -166,6 +166,14 @@ if( NOT BUILD_CUDA AND NOT LEGACY_HIPBLAS_DIRECT )
   target_link_libraries(hipblaslt INTERFACE roc::hipblas-common)
 endif()
 
+if(NOT WIN32)
+    include(CheckCXXLinkerFlag)
+    check_cxx_linker_flag(-lstdc++fs HAS_LIB_STD_FILESYSTEM)
+    if(HAS_LIB_STD_FILESYSTEM)
+        target_link_libraries(hipblaslt PRIVATE stdc++fs)
+    endif()
+endif()
+
 # RocRoller integration
 include(FetchContent)
 if(USE_ROCROLLER)
