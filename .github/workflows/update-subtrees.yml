@@ -47,9 +47,11 @@ jobs:
               }
             fi
             if [ "$enable_push" = true ]; then
-              git subtree push --prefix "${category}/${repo}" https://github.com/${url}.git $branch --quiet || {
-                has_errors=true
-              }
+              git checkout -B "subtrees/${branch}/${repo}" "origin/subtrees/${branch}/${repo}"
+              git subtree merge --prefix="${category}/${repo}" "origin/${{ env.MONOREPO_BRANCH }}"
+              git push origin subtrees/${branch}/${repo}
+              git push https://github.com/${url}.git subtrees/${branch}/${repo}:${branch}
+              git checkout "${{ env.MONOREPO_BRANCH }}" # Switch back for next loop iteration
             fi
           done
 
