@@ -25859,3 +25859,22 @@ HIPBLAS_EXPORT const char* hipblasStatusToString(hipblasStatus_t status);
 #endif
 
 #endif
+
+// Macros used before hipBLAS version 3.0
+#define HIPBLAS_R_16F HIP_R_16F
+#define HIPBLAS_R_32F HIP_R_32F
+#define HIPBLAS_R_64F HIP_R_64F
+#define HIPBLAS_C_16F HIP_C_16F
+#define HIPBLAS_C_32F HIP_C_32F
+#define HIPBLAS_C_64F HIP_C_64F
+#define HIPBLAS_R_8I HIP_R_8I
+#define HIPBLAS_R_8U HIP_R_8U
+#define HIPBLAS_R_32I HIP_R_32I
+#define HIPBLAS_R_32U HIP_R_32U
+#define HIPBLAS_C_8I HIP_C_8I
+#define HIPBLAS_C_8U HIP_C_8U
+#define HIPBLAS_C_32I HIP_C_32I
+#define HIPBLAS_C_32U HIP_C_32U
+#define HIPBLAS_R_16B HIP_R_16BF
+#define HIPBLAS_C_16B HIP_C_16BF
+#define HIPBLAS_DATATYPE_INVALID hipDataType(31)
