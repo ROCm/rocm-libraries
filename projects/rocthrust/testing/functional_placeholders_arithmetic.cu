@@ -21,6 +21,8 @@
 
 #include <unittest/unittest.h>
 
+THRUST_DISABLE_MSVC_WARNING_BEGIN(4244) // warning C4244: '=': conversion from 'int' to '_Ty', possible loss of data
+
 #define BINARY_FUNCTIONAL_PLACEHOLDERS_TEST(name, op, reference_functor, type_list)                               \
   template <typename Vector>                                                                                      \
   struct TestFunctionalPlaceholders##name                                                                         \
@@ -70,7 +72,7 @@ BINARY_FUNCTIONAL_PLACEHOLDERS_TEST(Modulus, %, thrust::modulus, SmallIntegralTy
 
 #define UNARY_FUNCTIONAL_PLACEHOLDERS_TEST(name, reference_operator, functor)             \
   template <typename Vector>                                                              \
-  void TestFunctionalPlaceholders##name(void)                                             \
+  void TestFunctionalPlaceholders##name()                                                 \
   {                                                                                       \
     static const size_t num_samples = 10000;                                              \
     using T                         = typename Vector::value_type;                        \
@@ -98,3 +100,5 @@ struct unary_plus_reference
 
 UNARY_FUNCTIONAL_PLACEHOLDERS_TEST(UnaryPlus, +, unary_plus_reference);
 UNARY_FUNCTIONAL_PLACEHOLDERS_TEST(Negate, -, thrust::negate);
+
+THRUST_DISABLE_MSVC_WARNING_END(4244)

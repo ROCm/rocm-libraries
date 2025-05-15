@@ -22,43 +22,38 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
 #include <thrust/detail/functional/actor.h>
 
 #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 #  include <cuda/std/functional>
-#  include <cuda/std/type_traits>
-namespace _std = ::cuda::std;
 #elif defined(__has_include)
 #  if __has_include(<cuda/std/functional>)
 #    include <cuda/std/functional>
-namespace _std = ::cuda::std;
-#  else
-#    include <functional>
-namespace _std = std;
-#  endif
-#  if __has_include(<cuda/std/type_traits>)
-#    include <cuda/std/type_traits>
-#  else
-#    include <type_traits>
 #  endif
 #else
-#  include <functional>
 #  include <type_traits>
-namespace _std = std;
 #endif
 
-#include <utility>
+#include <functional>
 
 THRUST_NAMESPACE_BEGIN
 
 /*! \addtogroup function_objects Function Objects
  */
 
-//! deprecated [Since 3.4.0]
+//! deprecated [Since 2.6]
 template <typename Operation>
 struct THRUST_DEPRECATED unary_traits;
 
-//! deprecated [Since 3.4.0]
+//! deprecated [Since 2.6]
 template <typename Operation>
 struct THRUST_DEPRECATED binary_traits;
 
@@ -74,7 +69,7 @@ struct THRUST_DEPRECATED binary_traits;
  *  Unary Function must define nested aliases. Those are
  *  provided by the base class \p unary_function.
  *
- *  deprecated [Since 3.4.0]
+ *  deprecated [Since 2.6]
  *
  *  The following code snippet demonstrates how to construct an
  *  Adaptable Unary Function using \p unary_function.
@@ -82,7 +77,7 @@ struct THRUST_DEPRECATED binary_traits;
  *  \code
  *  struct sine : public thrust::unary_function<float,float>
  *  {
- *    THRUST_HOST_DEVICE
+ *    __host__ __device__
  *    float operator()(float x) { return sinf(x); }
  *  };
  *  \endcode
@@ -115,7 +110,7 @@ struct THRUST_DEPRECATED unary_function
  *  Binary Function must define nested aliases. Those are
  *  provided by the base class \p binary_function.
  *
- *  deprecated [Since 3.4.0]
+ *  deprecated [Since 2.6]
  *
  *  The following code snippet demonstrates how to construct an
  *  Adaptable Binary Function using \p binary_function.
@@ -123,7 +118,7 @@ struct THRUST_DEPRECATED unary_function
  *  \code
  *  struct exponentiate : public thrust::binary_function<float,float,float>
  *  {
- *    THRUST_HOST_DEVICE
+ *    __host__ __device__
  *    float operator()(float x, float y) { return powf(x,y); }
  *  };
  *  \endcode
@@ -234,23 +229,27 @@ struct THRUST_DEPRECATED binary_function
  *  \see binary_function
  */
 template <typename T = void>
-struct plus : public _std::plus<T>
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+struct plus : public ::cuda::std::plus<T>
+#else
+struct plus : public ::std::plus<T>
+#endif
 {
   /*! \typedef first_argument_type
    *  \brief The type of the function object's first argument.
-   *  deprecated [Since 3.5.0]
+   *  deprecated [Since 2.6]
    */
   using first_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
 
   /*! \typedef second_argument_type
    *  \brief The type of the function object's second argument.
-   *  deprecated [Since 3.5.0]
+   *  deprecated [Since 2.6]
    */
   using second_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
 
   /*! \typedef result_type
    *  \brief The type of the function object's result;
-   *  deprecated [Since 3.5.0]
+   *  deprecated [Since 2.6]
    */
   using result_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
 }; // end plus
@@ -290,23 +289,27 @@ struct plus : public _std::plus<T>
  *  \see binary_function
  */
 template <typename T = void>
-struct minus : public _std::minus<T>
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+struct minus : public ::cuda::std::minus<T>
+#else
+struct minus : public ::std::minus<T>
+#endif
 {
   /*! \typedef first_argument_type
    *  \brief The type of the function object's first argument.
-   *  deprecated [Since 3.5.0]
+   *  deprecated [Since 2.6]
    */
   using first_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
 
   /*! \typedef second_argument_type
    *  \brief The type of the function object's second argument.
-   *  deprecated [Since 3.5.0]
+   *  deprecated [Since 2.6]
    */
   using second_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
 
   /*! \typedef result_type
    *  \brief The type of the function object's result;
-   *  deprecated [Since 3.5.0]
+   *  deprecated [Since 2.6]
    */
   using result_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
 }; // end minus
@@ -346,23 +349,27 @@ struct minus : public _std::minus<T>
  *  \see binary_function
  */
 template <typename T = void>
-struct multiplies : public _std::multiplies<T>
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+struct multiplies : public ::cuda::std::multiplies<T>
+#else
+struct multiplies : public ::std::multiplies<T>
+#endif
 {
   /*! \typedef first_argument_type
    *  \brief The type of the function object's first argument.
-   *  deprecated [Since 3.5.0]
+   *  deprecated [Since 2.6]
    */
   using first_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
 
   /*! \typedef second_argument_type
    *  \brief The type of the function object's second argument.
-   *  deprecated [Since 3.5.0]
+   *  deprecated [Since 2.6]
    */
   using second_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
 
   /*! \typedef result_type
    *  \brief The type of the function object's result;
-   *  deprecated [Since 3.5.0]
+   *  deprecated [Since 2.6]
    */
   using result_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
 }; // end multiplies
@@ -402,23 +409,27 @@ struct multiplies : public _std::multiplies<T>
  *  \see binary_function
  */
 template <typename T = void>
-struct divides : public _std::divides<T>
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+struct divides : public ::cuda::std::divides<T>
+#else
+struct divides : public ::std::divides<T>
+#endif
 {
   /*! \typedef first_argument_type
    *  \brief The type of the function object's first argument.
-   *  deprecated [Since 3.5.0]
+   *  deprecated [Since 2.6]
    */
   using first_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
 
   /*! \typedef second_argument_type
    *  \brief The type of the function object's second argument.
-   *  deprecated [Since 3.5.0]
+   *  deprecated [Since 2.6]
    */
   using second_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
 
   /*! \typedef result_type
    *  \brief The type of the function object's result;
-   *  deprecated [Since 3.5.0]
+   *  deprecated [Since 2.6]
    */
   using result_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
 }; // end divides
@@ -458,23 +469,27 @@ struct divides : public _std::divides<T>
  *  \see binary_function
  */
 template <typename T = void>
-struct modulus : public _std::modulus<T>
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+struct modulus : public ::cuda::std::modulus<T>
+#else
+struct modulus : public ::std::modulus<T>
+#endif
 {
   /*! \typedef first_argument_type
    *  \brief The type of the function object's first argument.
-   *  deprecated [Since 3.5.0]
+   *  deprecated [Since 2.6]
    */
   using first_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
 
   /*! \typedef second_argument_type
    *  \brief The type of the function object's second argument.
-   *  deprecated [Since 3.5.0]
+   *  deprecated [Since 2.6]
    */
   using second_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
 
   /*! \typedef result_type
    *  \brief The type of the function object's result;
-   *  deprecated [Since 3.5.0]
+   *  deprecated [Since 2.6]
    */
   using result_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
 }; // end modulus
@@ -523,6 +538,9 @@ struct negate
    */
   using result_type = T;
 
+  THRUST_DIAG_PUSH
+  THRUST_DIAG_SUPPRESS_MSVC(4146) // unary minus operator applied to unsigned type, result still unsigned
+
   /*! Function call operator. The return value is <tt>-x</tt>.
    */
   THRUST_EXEC_CHECK_DISABLE
@@ -530,6 +548,9 @@ struct negate
   {
     return -x;
   }
+
+  THRUST_DIAG_POP
+
 }; // end negate
 
 /*! \brief Specialization of \p negate for type void.
@@ -613,23 +634,27 @@ THRUST_UNARY_FUNCTOR_VOID_SPECIALIZATION(square, x* x);
  *  \see binary_function
  */
 template <typename T = void>
-struct equal_to : public _std::equal_to<T>
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+struct equal_to : public ::cuda::std::equal_to<T>
+#else
+struct equal_to : public ::std::equal_to<T>
+#endif
 {
   /*! \typedef first_argument_type
    *  \brief The type of the function object's first argument.
-   *  deprecated [Since 3.5.0]
+   *  deprecated [Since 2.6]
    */
   using first_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
 
   /*! \typedef second_argument_type
    *  \brief The type of the function object's second argument.
-   *  deprecated [Since 3.5.0]
+   *  deprecated [Since 2.6]
    */
   using second_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
 
   /*! \typedef result_type
    *  \brief The type of the function object's result;
-   *  deprecated [Since 3.5.0]
+   *  deprecated [Since 2.6]
    */
   using result_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
 }; // end equal_to
@@ -647,23 +672,27 @@ struct equal_to : public _std::equal_to<T>
  *  \see binary_function
  */
 template <typename T = void>
-struct not_equal_to : public _std::not_equal_to<T>
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+struct not_equal_to : public ::cuda::std::not_equal_to<T>
+#else
+struct not_equal_to : public ::std::not_equal_to<T>
+#endif
 {
   /*! \typedef first_argument_type
    *  \brief The type of the function object's first argument.
-   *  deprecated [Since 3.5.0]
+   *  deprecated [Since 2.6]
    */
   using first_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
 
   /*! \typedef second_argument_type
    *  \brief The type of the function object's second argument.
-   *  deprecated [Since 3.5.0]
+   *  deprecated [Since 2.6]
    */
   using second_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
 
   /*! \typedef result_type
    *  \brief The type of the function object's result;
-   *  deprecated [Since 3.5.0]
+   *  deprecated [Since 2.6]
    */
   using result_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
 }; // end not_equal_to
@@ -681,23 +710,27 @@ struct not_equal_to : public _std::not_equal_to<T>
  *  \see binary_function
  */
 template <typename T = void>
-struct greater : public _std::greater<T>
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+struct greater : public ::cuda::std::greater<T>
+#else
+struct greater : public ::std::greater<T>
+#endif
 {
   /*! \typedef first_argument_type
    *  \brief The type of the function object's first argument.
-   *  deprecated [Since 3.5.0]
+   *  deprecated [Since 2.6]
    */
   using first_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
 
   /*! \typedef second_argument_type
    *  \brief The type of the function object's second argument.
-   *  deprecated [Since 3.5.0]
+   *  deprecated [Since 2.6]
    */
   using second_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
 
   /*! \typedef result_type
    *  \brief The type of the function object's result;
-   *  deprecated [Since 3.5.0]
+   *  deprecated [Since 2.6]
    */
   using result_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
 }; // end greater
@@ -715,23 +748,27 @@ struct greater : public _std::greater<T>
  *  \see binary_function
  */
 template <typename T = void>
-struct less : public _std::less<T>
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+struct less : public ::cuda::std::less<T>
+#else
+struct less : public ::std::less<T>
+#endif
 {
   /*! \typedef first_argument_type
    *  \brief The type of the function object's first argument.
-   *  deprecated [Since 3.5.0]
+   *  deprecated [Since 2.6]
    */
   using first_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
 
   /*! \typedef second_argument_type
    *  \brief The type of the function object's second argument.
-   *  deprecated [Since 3.5.0]
+   *  deprecated [Since 2.6]
    */
   using second_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
 
   /*! \typedef result_type
    *  \brief The type of the function object's result;
-   *  deprecated [Since 3.5.0]
+   *  deprecated [Since 2.6]
    */
   using result_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
 }; // end less
@@ -749,23 +786,27 @@ struct less : public _std::less<T>
  *  \see binary_function
  */
 template <typename T = void>
-struct greater_equal : public _std::greater_equal<T>
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+struct greater_equal : public ::cuda::std::greater_equal<T>
+#else
+struct greater_equal : public ::std::greater_equal<T>
+#endif
 {
   /*! \typedef first_argument_type
    *  \brief The type of the function object's first argument.
-   *  deprecated [Since 3.5.0]
+   *  deprecated [Since 2.6]
    */
   using first_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
 
   /*! \typedef second_argument_type
    *  \brief The type of the function object's second argument.
-   *  deprecated [Since 3.5.0]
+   *  deprecated [Since 2.6]
    */
   using second_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
 
   /*! \typedef result_type
    *  \brief The type of the function object's result;
-   *  deprecated [Since 3.5.0]
+   *  deprecated [Since 2.6]
    */
   using result_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
 }; // end greater_equal
@@ -783,23 +824,27 @@ struct greater_equal : public _std::greater_equal<T>
  *  \see binary_function
  */
 template <typename T = void>
-struct less_equal : public _std::less_equal<T>
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+struct less_equal : public ::cuda::std::less_equal<T>
+#else
+struct less_equal : public ::std::less_equal<T>
+#endif
 {
   /*! \typedef first_argument_type
    *  \brief The type of the function object's first argument.
-   *  deprecated [Since 3.5.0]
+   *  deprecated [Since 2.6]
    */
   using first_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
 
   /*! \typedef second_argument_type
    *  \brief The type of the function object's second argument.
-   *  deprecated [Since 3.5.0]
+   *  deprecated [Since 2.6]
    */
   using second_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
 
   /*! \typedef result_type
    *  \brief The type of the function object's result;
-   *  deprecated [Since 3.5.0]
+   *  deprecated [Since 2.6]
    */
   using result_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
 }; // end less_equal
@@ -824,23 +869,27 @@ struct less_equal : public _std::less_equal<T>
  *  \see binary_function
  */
 template <typename T = void>
-struct logical_and : public _std::logical_and<T>
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+struct logical_and : public ::cuda::std::logical_and<T>
+#else
+struct logical_and : public ::std::logical_and<T>
+#endif
 {
   /*! \typedef first_argument_type
    *  \brief The type of the function object's first argument.
-   *  deprecated [Since 3.5.0]
+   *  deprecated [Since 2.6]
    */
   using first_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
 
   /*! \typedef second_argument_type
    *  \brief The type of the function object's second argument.
-   *  deprecated [Since 3.5.0]
+   *  deprecated [Since 2.6]
    */
   using second_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
 
   /*! \typedef result_type
    *  \brief The type of the function object's result;
-   *  deprecated [Since 3.5.0]
+   *  deprecated [Since 2.6]
    */
   using result_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
 }; // end logical_and
@@ -857,23 +906,27 @@ struct logical_and : public _std::logical_and<T>
  *  \see binary_function
  */
 template <typename T = void>
-struct logical_or : public _std::logical_or<T>
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+struct logical_or : public ::cuda::std::logical_or<T>
+#else
+struct logical_or : public ::std::logical_or<T>
+#endif
 {
   /*! \typedef first_argument_type
    *  \brief The type of the function object's first argument.
-   *  deprecated [Since 3.5.0]
+   *  deprecated [Since 2.6]
    */
   using first_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
 
   /*! \typedef second_argument_type
    *  \brief The type of the function object's second argument.
-   *  deprecated [Since 3.5.0]
+   *  deprecated [Since 2.6]
    */
   using second_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
 
   /*! \typedef result_type
    *  \brief The type of the function object's result;
-   *  deprecated [Since 3.5.0]
+   *  deprecated [Since 2.6]
    */
   using result_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
 }; // end logical_or
@@ -904,23 +957,27 @@ struct logical_or : public _std::logical_or<T>
  *  \see unary_function
  */
 template <typename T = void>
-struct logical_not : public _std::logical_not<T>
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+struct logical_not : public ::cuda::std::logical_not<T>
+#else
+struct logical_not : public ::std::logical_not<T>
+#endif
 {
   /*! \typedef first_argument_type
    *  \brief The type of the function object's first argument.
-   *  deprecated [Since 3.5.0]
+   *  deprecated [Since 2.6]
    */
   using first_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
 
   /*! \typedef second_argument_type
    *  \brief The type of the function object's second argument.
-   *  deprecated [Since 3.5.0]
+   *  deprecated [Since 2.6]
    */
   using second_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
 
   /*! \typedef result_type
    *  \brief The type of the function object's result;
-   *  deprecated [Since 3.5.0]
+   *  deprecated [Since 2.6]
    */
   using result_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
 }; // end logical_not
@@ -967,23 +1024,27 @@ struct logical_not : public _std::logical_not<T>
  *  \see binary_function
  */
 template <typename T = void>
-struct bit_and : public _std::bit_and<T>
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+struct bit_and : public ::cuda::std::bit_and<T>
+#else
+struct bit_and : public ::std::bit_and<T>
+#endif
 {
   /*! \typedef first_argument_type
    *  \brief The type of the function object's first argument.
-   *  deprecated [Since 3.5.0]
+   *  deprecated [Since 2.6]
    */
   using first_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
 
   /*! \typedef second_argument_type
    *  \brief The type of the function object's second argument.
-   *  deprecated [Since 3.5.0]
+   *  deprecated [Since 2.6]
    */
   using second_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
 
   /*! \typedef result_type
    *  \brief The type of the function object's result;
-   *  deprecated [Since 3.5.0]
+   *  deprecated [Since 2.6]
    */
   using result_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
 }; // end bit_and
@@ -1022,23 +1083,27 @@ struct bit_and : public _std::bit_and<T>
  *  \see binary_function
  */
 template <typename T = void>
-struct bit_or : public _std::bit_or<T>
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+struct bit_or : public ::cuda::std::bit_or<T>
+#else
+struct bit_or : public ::std::bit_or<T>
+#endif
 {
   /*! \typedef first_argument_type
    *  \brief The type of the function object's first argument.
-   *  deprecated [Since 3.5.0]
+   *  deprecated [Since 2.6]
    */
   using first_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
 
   /*! \typedef second_argument_type
    *  \brief The type of the function object's second argument.
-   *  deprecated [Since 3.5.0]
+   *  deprecated [Since 2.6]
    */
   using second_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
 
   /*! \typedef result_type
    *  \brief The type of the function object's result;
-   *  deprecated [Since 3.5.0]
+   *  deprecated [Since 2.6]
    */
   using result_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
 }; // end bit_or
@@ -1077,23 +1142,27 @@ struct bit_or : public _std::bit_or<T>
  *  \see binary_function
  */
 template <typename T = void>
-struct bit_xor : public _std::bit_xor<T>
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+struct bit_xor : public ::cuda::std::bit_xor<T>
+#else
+struct bit_xor : public ::std::bit_xor<T>
+#endif
 {
   /*! \typedef first_argument_type
    *  \brief The type of the function object's first argument.
-   *  deprecated [Since 3.5.0]
+   *  deprecated [Since 2.6]
    */
   using first_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
 
   /*! \typedef second_argument_type
    *  \brief The type of the function object's second argument.
-   *  deprecated [Since 3.5.0]
+   *  deprecated [Since 2.6]
    */
   using second_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
 
   /*! \typedef result_type
    *  \brief The type of the function object's result;
-   *  deprecated [Since 3.5.0]
+   *  deprecated [Since 2.6]
    */
   using result_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
 }; // end bit_xor
@@ -1182,19 +1251,19 @@ struct maximum
 {
   /*! \typedef first_argument_type
    *  \brief The type of the function object's first argument.
-   *  deprecated [Since 3.4.0]
+   *  deprecated [Since 2.6]
    */
   using first_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
 
   /*! \typedef second_argument_type
    *  \brief The type of the function object's second argument.
-   *  deprecated [Since 3.4.0]
+   *  deprecated [Since 2.6]
    */
   using second_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
 
   /*! \typedef result_type
    *  \brief The type of the function object's result;
-   *  deprecated [Since 3.4.0]
+   *  deprecated [Since 2.6]
    */
   using result_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
 
@@ -1241,19 +1310,19 @@ struct minimum
 {
   /*! \typedef first_argument_type
    *  \brief The type of the function object's first argument.
-   *  deprecated [Since 3.4.0]
+   *  deprecated [Since 2.6]
    */
   using first_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
 
   /*! \typedef second_argument_type
    *  \brief The type of the function object's second argument.
-   *  deprecated [Since 3.4.0]
+   *  deprecated [Since 2.6]
    */
   using second_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
 
   /*! \typedef result_type
    *  \brief The type of the function object's result;
-   *  deprecated [Since 3.4.0]
+   *  deprecated [Since 2.6]
    */
   using result_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
 
@@ -1293,19 +1362,19 @@ struct project1st
 {
   /*! \typedef first_argument_type
    *  \brief The type of the function object's first argument.
-   *  deprecated [Since 3.4.0]
+   *  deprecated [Since 2.6]
    */
   using first_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T1;
 
   /*! \typedef second_argument_type
    *  \brief The type of the function object's second argument.
-   *  deprecated [Since 3.4.0]
+   *  deprecated [Since 2.6]
    */
   using second_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T2;
 
   /*! \typedef result_type
    *  \brief The type of the function object's result;
-   *  deprecated [Since 3.4.0]
+   *  deprecated [Since 2.6]
    */
   using result_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T1;
 
@@ -1358,19 +1427,19 @@ struct project2nd
 {
   /*! \typedef first_argument_type
    *  \brief The type of the function object's first argument.
-   *  deprecated [Since 3.4.0]
+   *  deprecated [Since 2.6]
    */
   using first_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T1;
 
   /*! \typedef second_argument_type
    *  \brief The type of the function object's second argument.
-   *  deprecated [Since 3.4.0]
+   *  deprecated [Since 2.6]
    */
   using second_argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T2;
 
   /*! \typedef result_type
    *  \brief The type of the function object's result;
-   *  deprecated [Since 3.4.0]
+   *  deprecated [Since 2.6]
    */
   using result_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T2;
 
@@ -1417,7 +1486,7 @@ struct project2nd<void, void>
  *  There is rarely any reason to construct a <tt>unary_negate</tt> directly;
  *  it is almost always easier to use the helper function not1.
  *
- *  deprecated [Since 3.4.0]
+ *  deprecated [Since 2.6]
  *
  *  \see https://en.cppreference.com/w/cpp/utility/functional/unary_negate
  *  \see not1
@@ -1465,14 +1534,14 @@ THRUST_SUPPRESS_DEPRECATED_PUSH
  *  \c npred of <tt>not1(pred)</tt> is also a model of Adaptable Predicate and
  *  <tt>npred(x)</tt> always returns the same value as <tt>!pred(x)</tt>.
  *
- *  deprecated [Since 3.4.0]
+ *  deprecated [Since 2.6]
  *
  *  \param pred The Adaptable Predicate to negate.
  *  \return A new object, <tt>npred</tt> such that <tt>npred(x)</tt> always returns
  *          the same value as <tt>!pred(x)</tt>.
- *
  *  \tparam Predicate is a model of <a
- * href="https://en.cppreference.com/w/cpp/utility/functional/unary_negate">Adaptable Predicate</a>. \see unary_negate
+ * href="https://en.cppreference.com/w/cpp/utility/functional/unary_negate">Adaptable Predicate</a>.
+ *  \see unary_negate
  *  \see not2
  */
 template <typename Predicate>
@@ -1488,7 +1557,7 @@ THRUST_SUPPRESS_DEPRECATED_POP
  *  There is rarely any reason to construct a <tt>binary_negate</tt> directly;
  *  it is almost always easier to use the helper function not2.
  *
- *  deprecated [Since 3.4.0]
+ *  deprecated [Since 2.6]
  *
  *  \see https://en.cppreference.com/w/cpp/utility/functional/binary_negate
  */
@@ -1540,14 +1609,12 @@ THRUST_SUPPRESS_DEPRECATED_PUSH
  *  \c npred of <tt>not2(pred)</tt> is also a model of Adaptable Binary Predicate and
  *  <tt>npred(x,y)</tt> always returns the same value as <tt>!pred(x,y)</tt>.
  *
- *  deprecated [Since 3.4.0]
+ *  deprecated [Since 2.6]
  *
  *  \param pred The Adaptable Binary Predicate to negate.
  *  \return A new object, <tt>npred</tt> such that <tt>npred(x,y)</tt> always returns
  *          the same value as <tt>!pred(x,y)</tt>.
- *
  *  \tparam Binary Predicate is a model of an Adaptable Binary Predicate.
- *
  *  \see binary_negate
  *  \see not1
  */
@@ -1579,23 +1646,21 @@ struct not_fun_t
 };
 } // namespace detail
 
-//! Alias which uses cuda std library for CUDA backend and C++ std library for other backends
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-template <typename T>
-using decay_t = ::cuda::std::__decay_t<T>;
-#else
-template <typename T>
-using decay_t = std::decay_t<T>;
-#endif
-
 //! Takes a predicate (a callable returning bool) and returns a new predicate that returns the negated result.
 //! \see https://en.cppreference.com/w/cpp/utility/functional/not_fn
 // TODO(bgruber): alias to ::cuda::std::not_fn in C++17
 template <class F>
-THRUST_HOST_DEVICE auto not_fn(F&& f) -> detail::not_fun_t<decay_t<F>>
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+THRUST_HOST_DEVICE auto not_fn(F&& f) -> detail::not_fun_t<::cuda::std::__decay_t<F>>
 {
-  return detail::not_fun_t<decay_t<F>>{std::forward<F>(f)};
+  return detail::not_fun_t<::cuda::std::__decay_t<F>>{std::forward<F>(f)};
 }
+#else
+THRUST_HOST_DEVICE auto not_fn(F&& f) -> detail::not_fun_t<::std::decay_t<F>>
+{
+  return detail::not_fun_t<::std::decay_t<F>>{std::forward<F>(f)};
+}
+#endif
 
 /*! \}
  */

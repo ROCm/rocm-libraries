@@ -15,14 +15,21 @@
  *  limitations under the License.
  */
 
+#include <thrust/detail/config.h>
+
+#include <thrust/copy.h>
+#include <thrust/device_free.h>
+#include <thrust/device_malloc.h>
 #include <thrust/iterator/constant_iterator.h>
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/iterator/discard_iterator.h>
 #include <thrust/iterator/retag.h>
 #include <thrust/iterator/zip_iterator.h>
-#include <thrust/memory.h>
 #include <thrust/sequence.h>
+#include <thrust/universal_vector.h>
 
+#include <algorithm>
+#include <array>
 #include <iterator>
 #include <list>
 
@@ -30,8 +37,34 @@
 #include "test_param_fixtures.hpp"
 #include "test_utils.hpp"
 
+using IntegralVariableParams =
+  ::testing::Types<Params<signed char>,
+                   Params<unsigned char>,
+                   Params<short>,
+                   Params<unsigned short>,
+                   Params<int>,
+                   Params<unsigned int>>;
+
+using VectorTestsParams = ::testing::Types<
+  Params<thrust::host_vector<signed char>>,
+  Params<thrust::host_vector<short>>,
+  Params<thrust::host_vector<int>>,
+  Params<thrust::host_vector<float>>,
+  Params<thrust::host_vector<int, thrust::mr::stateless_resource_allocator<int, thrust::host_memory_resource>>>,
+  Params<thrust::device_vector<signed char>>,
+  Params<thrust::device_vector<short>>,
+  Params<thrust::device_vector<int>>,
+  Params<thrust::device_vector<float>>,
+  Params<thrust::device_vector<int, thrust::mr::stateless_resource_allocator<int, thrust::device_memory_resource>>>,
+  Params<thrust::universal_vector<int>>,
+  Params<thrust::device_vector<
+    int,
+    thrust::mr::stateless_resource_allocator<int, thrust::universal_host_pinned_memory_resource>>>>;
+
 TESTS_DEFINE(CopyTests, FullWithLargeTypesTestsParams)
 TESTS_DEFINE(CopyIntegerTests, IntegerTestsParams)
+TESTS_DEFINE(CopyIfSequenceTest, IntegralVariableParams)
+TESTS_DEFINE(CopyIfStencilSimpleTest, VectorTestsParams)
 
 TEST(HipThrustCopy, HostToDevice)
 {
@@ -98,11 +131,11 @@ TEST(CopyTests, TestCopyFromConstIterator)
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
   std::vector<T> v(5);
-  v[0] = T(0);
-  v[1] = T(1);
-  v[2] = T(2);
-  v[3] = T(3);
-  v[4] = T(4);
+  v[0] = 0;
+  v[1] = 1;
+  v[2] = 2;
+  v[3] = 3;
+  v[4] = 4;
 
   std::vector<int>::const_iterator begin = v.begin();
   std::vector<int>::const_iterator end   = v.end();
@@ -110,21 +143,21 @@ TEST(CopyTests, TestCopyFromConstIterator)
   // copy to host_vector
   thrust::host_vector<T> h(5, (T) 10);
   thrust::host_vector<T>::iterator h_result = thrust::copy(begin, end, h.begin());
-  ASSERT_EQ(h[0], T(0));
-  ASSERT_EQ(h[1], T(1));
-  ASSERT_EQ(h[2], T(2));
-  ASSERT_EQ(h[3], T(3));
-  ASSERT_EQ(h[4], T(4));
+  ASSERT_EQ(h[0], 0);
+  ASSERT_EQ(h[1], 1);
+  ASSERT_EQ(h[2], 2);
+  ASSERT_EQ(h[3], 3);
+  ASSERT_EQ(h[4], 4);
   ASSERT_EQ_QUIET(h_result, h.end());
 
   // copy to device_vector
   thrust::device_vector<T> d(5, (T) 10);
   thrust::device_vector<T>::iterator d_result = thrust::copy(begin, end, d.begin());
-  ASSERT_EQ(d[0], T(0));
-  ASSERT_EQ(d[1], T(1));
-  ASSERT_EQ(d[2], T(2));
-  ASSERT_EQ(d[3], T(3));
-  ASSERT_EQ(d[4], T(4));
+  ASSERT_EQ(d[0], 0);
+  ASSERT_EQ(d[1], 1);
+  ASSERT_EQ(d[2], 2);
+  ASSERT_EQ(d[3], 3);
+  ASSERT_EQ(d[4], 4);
   ASSERT_EQ_QUIET(d_result, d.end());
 }
 
@@ -194,11 +227,11 @@ TYPED_TEST(CopyTests, TestCopyMatchingTypes)
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
   Vector v(5);
-  v[0] = T(0);
-  v[1] = T(1);
-  v[2] = T(2);
-  v[3] = T(3);
-  v[4] = T(4);
+  v[0] = 0;
+  v[1] = 1;
+  v[2] = 2;
+  v[3] = 3;
+  v[4] = 4;
 
   // copy to host_vector
   thrust::host_vector<T> h(5, (T) 10);
@@ -213,49 +246,52 @@ TYPED_TEST(CopyTests, TestCopyMatchingTypes)
   // copy to device_vector
   thrust::device_vector<T> d(5, (T) 10);
   typename thrust::device_vector<T>::iterator d_result = thrust::copy(v.begin(), v.end(), d.begin());
-  ASSERT_EQ(T(0), d[0]);
-  ASSERT_EQ(T(1), d[1]);
-  ASSERT_EQ(T(2), d[2]);
-  ASSERT_EQ(T(3), d[3]);
-  ASSERT_EQ(T(4), d[4]);
+  ASSERT_EQ(d[0], 0);
+  ASSERT_EQ(d[1], 1);
+  ASSERT_EQ(d[2], 2);
+  ASSERT_EQ(d[3], 3);
+  ASSERT_EQ(d[4], 4);
   ASSERT_EQ_QUIET(d_result, d.end());
 }
+
+THRUST_DISABLE_MSVC_WARNING_BEGIN(4244) // '=': conversion from 'int' to '_Ty', possible loss of data
 
 TYPED_TEST(CopyTests, TestCopyMixedTypes)
 {
   using Vector = typename TestFixture::input_type;
-  using T      = typename Vector::value_type;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
   Vector v(5);
-  v[0] = T(0);
-  v[1] = T(1);
-  v[2] = T(2);
-  v[3] = T(3);
-  v[4] = T(4);
+  v[0] = 0;
+  v[1] = 1;
+  v[2] = 2;
+  v[3] = 3;
+  v[4] = 4;
 
   // copy to host_vector with different type
   thrust::host_vector<float> h(5, (float) 10);
   typename thrust::host_vector<float>::iterator h_result = thrust::copy(v.begin(), v.end(), h.begin());
 
-  ASSERT_EQ(h[0], T(0));
-  ASSERT_EQ(h[1], T(1));
-  ASSERT_EQ(h[2], T(2));
-  ASSERT_EQ(h[3], T(3));
-  ASSERT_EQ(h[4], T(4));
+  ASSERT_EQ(h[0], 0);
+  ASSERT_EQ(h[1], 1);
+  ASSERT_EQ(h[2], 2);
+  ASSERT_EQ(h[3], 3);
+  ASSERT_EQ(h[4], 4);
   ASSERT_EQ_QUIET(h_result, h.end());
 
   // copy to device_vector with different type
   thrust::device_vector<float> d(5, (float) 10);
   typename thrust::device_vector<float>::iterator d_result = thrust::copy(v.begin(), v.end(), d.begin());
-  ASSERT_EQ(d[0], T(0));
-  ASSERT_EQ(d[1], T(1));
-  ASSERT_EQ(d[2], T(2));
-  ASSERT_EQ(d[3], T(3));
-  ASSERT_EQ(d[4], T(4));
+  ASSERT_EQ(d[0], 0);
+  ASSERT_EQ(d[1], 1);
+  ASSERT_EQ(d[2], 2);
+  ASSERT_EQ(d[3], 3);
+  ASSERT_EQ(d[4], 4);
   ASSERT_EQ_QUIET(d_result, d.end());
 }
+
+THRUST_DISABLE_MSVC_WARNING_END(4244)
 
 TEST(CopyTests, TestCopyVectorBool)
 {
@@ -300,45 +336,45 @@ TYPED_TEST(CopyTests, TestCopyListTo)
 
   typename Vector::iterator v_result = thrust::copy(l.begin(), l.end(), v.begin());
 
-  ASSERT_EQ(T(0), v[0]);
-  ASSERT_EQ(T(1), v[1]);
-  ASSERT_EQ(T(2), v[2]);
-  ASSERT_EQ(T(3), v[3]);
-  ASSERT_EQ(T(4), v[4]);
+  ASSERT_EQ(v[0], T(0));
+  ASSERT_EQ(v[1], T(1));
+  ASSERT_EQ(v[2], T(2));
+  ASSERT_EQ(v[3], T(3));
+  ASSERT_EQ(v[4], T(4));
   ASSERT_EQ_QUIET(v_result, v.end());
 
   l.clear();
 
   thrust::copy(v.begin(), v.end(), std::back_insert_iterator<std::list<T>>(l));
 
-  ASSERT_EQ(l.size(), 5);
+  ASSERT_EQ(l.size(), 5lu);
 
   typename std::list<T>::const_iterator iter = l.begin();
-  ASSERT_EQ(T(0), *iter);
+  ASSERT_EQ(*iter, T(0));
   iter++;
-  ASSERT_EQ(T(1), *iter);
+  ASSERT_EQ(*iter, T(1));
   iter++;
-  ASSERT_EQ(T(2), *iter);
+  ASSERT_EQ(*iter, T(2));
   iter++;
-  ASSERT_EQ(T(3), *iter);
+  ASSERT_EQ(*iter, T(3));
   iter++;
-  ASSERT_EQ(T(4), *iter);
+  ASSERT_EQ(*iter, T(4));
   iter++;
 }
 
 template <typename T>
 struct is_even
 {
-  __host__ __device__ bool operator()(T x) const
+  THRUST_HOST_DEVICE bool operator()(T x)
   {
-    return (static_cast<unsigned int>(x) & 1) == 0;
+    return (x & 1) == 0;
   }
 };
 
 template <typename T>
 struct is_true
 {
-  __host__ __device__ bool operator()(T x) const
+  THRUST_HOST_DEVICE bool operator()(T x) const
   {
     return x ? true : false;
   }
@@ -347,34 +383,34 @@ struct is_true
 template <typename T>
 struct mod_3
 {
-  __host__ __device__ unsigned int operator()(T x) const
+  THRUST_HOST_DEVICE unsigned int operator()(T x)
   {
-    return static_cast<unsigned int>(x) % 3;
+    return x % 3;
   }
 };
 
 TYPED_TEST(CopyTests, TestCopyIfSimple)
 {
   using Vector = typename TestFixture::input_type;
-  using Policy = typename TestFixture::execution_policy;
   using T      = typename Vector::value_type;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
   Vector v(5);
-  v[0] = T(0);
-  v[1] = T(1);
-  v[2] = T(2);
-  v[3] = T(3);
-  v[4] = T(4);
+  v[0] = 0;
+  v[1] = 1;
+  v[2] = 2;
+  v[3] = 3;
+  v[4] = 4;
 
-  Vector dest(3);
+  Vector dest(4);
 
-  typename Vector::iterator dest_end = thrust::copy_if(Policy{}, v.begin(), v.end(), dest.begin(), is_even<T>());
+  typename Vector::iterator dest_end = thrust::copy_if(v.begin(), v.end(), dest.begin(), is_true<T>());
 
-  ASSERT_EQ(T(0), dest[0]);
-  ASSERT_EQ(T(2), dest[1]);
-  ASSERT_EQ(T(4), dest[2]);
+  ASSERT_EQ(1, dest[0]);
+  ASSERT_EQ(2, dest[1]);
+  ASSERT_EQ(3, dest[2]);
+  ASSERT_EQ(4, dest[3]);
   ASSERT_EQ_QUIET(dest.end(), dest_end);
 }
 
@@ -428,6 +464,131 @@ TYPED_TEST(CopyIntegerTests, TestCopyIf)
       }
     }
   }
+}
+
+TYPED_TEST(CopyIntegerTests, TestCopyIfIntegral)
+{
+  using T = typename TestFixture::input_type;
+
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  for (auto size : get_sizes())
+  {
+    SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+    thrust::host_vector<T> h_data   = random_integers<T>(size);
+    thrust::device_vector<T> d_data = h_data;
+
+    typename thrust::host_vector<T>::iterator h_new_end;
+    typename thrust::device_vector<T>::iterator d_new_end;
+
+    // test with Predicate that returns a bool
+    {
+      thrust::host_vector<T> h_result(size);
+      thrust::device_vector<T> d_result(size);
+
+      h_new_end = thrust::copy_if(h_data.begin(), h_data.end(), h_result.begin(), is_even<T>());
+      d_new_end = thrust::copy_if(d_data.begin(), d_data.end(), d_result.begin(), is_even<T>());
+
+      h_result.resize(h_new_end - h_result.begin());
+      d_result.resize(d_new_end - d_result.begin());
+
+      ASSERT_EQ(h_result, d_result);
+    }
+
+    // test with Predicate that returns a non-bool
+    {
+      thrust::host_vector<T> h_result(size);
+      thrust::device_vector<T> d_result(size);
+
+      h_new_end = thrust::copy_if(h_data.begin(), h_data.end(), h_result.begin(), mod_3<T>());
+      d_new_end = thrust::copy_if(d_data.begin(), d_data.end(), d_result.begin(), mod_3<T>());
+
+      h_result.resize(h_new_end - h_result.begin());
+      d_result.resize(d_new_end - d_result.begin());
+
+      ASSERT_EQ(h_result, d_result);
+    }
+  }
+}
+
+TYPED_TEST(CopyIfSequenceTest, TestCopyIfSequence)
+{
+  using T = typename TestFixture::input_type;
+
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  for (auto size : get_sizes())
+  {
+    SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+    thrust::host_vector<T> h_data(size);
+    thrust::sequence(h_data.begin(), h_data.end());
+    thrust::device_vector<T> d_data(size);
+    thrust::sequence(d_data.begin(), d_data.end());
+
+    typename thrust::host_vector<T>::iterator h_new_end;
+    typename thrust::device_vector<T>::iterator d_new_end;
+
+    // test with Predicate that returns a bool
+    {
+      thrust::host_vector<T> h_result(size);
+      thrust::device_vector<T> d_result(size);
+
+      h_new_end = thrust::copy_if(h_data.begin(), h_data.end(), h_result.begin(), is_even<T>());
+      d_new_end = thrust::copy_if(d_data.begin(), d_data.end(), d_result.begin(), is_even<T>());
+
+      h_result.resize(h_new_end - h_result.begin());
+      d_result.resize(d_new_end - d_result.begin());
+
+      ASSERT_EQ(h_result, d_result);
+    }
+
+    // test with Predicate that returns a non-bool
+    {
+      thrust::host_vector<T> h_result(size);
+      thrust::device_vector<T> d_result(size);
+
+      h_new_end = thrust::copy_if(h_data.begin(), h_data.end(), h_result.begin(), mod_3<T>());
+      d_new_end = thrust::copy_if(d_data.begin(), d_data.end(), d_result.begin(), mod_3<T>());
+
+      h_result.resize(h_new_end - h_result.begin());
+      d_result.resize(d_new_end - d_result.begin());
+
+      ASSERT_EQ(h_result, d_result);
+    }
+  }
+}
+
+TYPED_TEST(CopyIfStencilSimpleTest, TestCopyIfStencilSimple)
+{
+  using Vector = typename TestFixture::input_type;
+  using T      = typename Vector::value_type;
+
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  Vector v(5);
+  v[0] = 0;
+  v[1] = 1;
+  v[2] = 2;
+  v[3] = 3;
+  v[4] = 4;
+
+  Vector s(5);
+  s[0] = 1;
+  s[1] = 1;
+  s[2] = 0;
+  s[3] = 1;
+  s[4] = 0;
+
+  Vector dest(3);
+
+  typename Vector::iterator dest_end = thrust::copy_if(v.begin(), v.end(), s.begin(), dest.begin(), is_true<T>());
+
+  ASSERT_EQ(0, dest[0]);
+  ASSERT_EQ(1, dest[1]);
+  ASSERT_EQ(3, dest[2]);
+  ASSERT_EQ_QUIET(dest.end(), dest_end);
 }
 
 TEST(CopyLargeTypesTests, TestCopyIfStencilLargeType)
@@ -503,56 +664,138 @@ TYPED_TEST(CopyIntegerTests, TestCopyIfStencil)
     thrust::device_vector<T> d_data(size);
     thrust::sequence(d_data.begin(), d_data.end());
 
-    for (auto seed : get_seeds())
+    thrust::host_vector<T> h_stencil   = random_integers<T>(size);
+    thrust::device_vector<T> d_stencil = random_integers<T>(size);
+
+    typename thrust::host_vector<T>::iterator h_new_end;
+    typename thrust::device_vector<T>::iterator d_new_end;
+
+    // test with Predicate that returns a bool
     {
-      SCOPED_TRACE(testing::Message() << "with seed= " << seed);
-
-      thrust::host_vector<T> h_stencil =
-        get_random_data<T>(size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
-      thrust::device_vector<T> d_stencil = get_random_data<T>(
-        size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed + seed_value_addition);
-
       thrust::host_vector<T> h_result(size);
       thrust::device_vector<T> d_result(size);
 
-      typename thrust::host_vector<T>::iterator h_new_end;
-      typename thrust::device_vector<T>::iterator d_new_end;
+      h_new_end = thrust::copy_if(h_data.begin(), h_data.end(), h_stencil.begin(), h_result.begin(), is_even<T>());
+      d_new_end = thrust::copy_if(d_data.begin(), d_data.end(), d_stencil.begin(), d_result.begin(), is_even<T>());
 
-      // test with Predicate that returns a bool
-      {
-        thrust::host_vector<T> h_result(size);
-        thrust::device_vector<T> d_result(size);
+      h_result.resize(h_new_end - h_result.begin());
+      d_result.resize(d_new_end - d_result.begin());
 
-        h_new_end = thrust::copy_if(h_data.begin(), h_data.end(), h_result.begin(), is_even<T>());
-        d_new_end = thrust::copy_if(d_data.begin(), d_data.end(), d_result.begin(), is_even<T>());
-
-        h_result.resize(h_new_end - h_result.begin());
-        d_result.resize(d_new_end - d_result.begin());
-
-        ASSERT_EQ(h_result, d_result);
-      }
-
-      // test with Predicate that returns a non-bool
-      {
-        thrust::host_vector<T> h_result(size);
-        thrust::device_vector<T> d_result(size);
-
-        h_new_end = thrust::copy_if(h_data.begin(), h_data.end(), h_result.begin(), mod_3<T>());
-        d_new_end = thrust::copy_if(d_data.begin(), d_data.end(), d_result.begin(), mod_3<T>());
-
-        h_result.resize(h_new_end - h_result.begin());
-        d_result.resize(d_new_end - d_result.begin());
-
-        ASSERT_EQ(h_result, d_result);
-      }
+      ASSERT_EQ(h_result, d_result);
     }
+
+    // test with Predicate that returns a non-bool
+    {
+      thrust::host_vector<T> h_result(size);
+      thrust::device_vector<T> d_result(size);
+
+      h_new_end = thrust::copy_if(h_data.begin(), h_data.end(), h_stencil.begin(), h_result.begin(), mod_3<T>());
+      d_new_end = thrust::copy_if(d_data.begin(), d_data.end(), d_stencil.begin(), d_result.begin(), mod_3<T>());
+
+      h_result.resize(h_new_end - h_result.begin());
+      d_result.resize(d_new_end - d_result.begin());
+
+      ASSERT_EQ(h_result, d_result);
+    }
+  }
+}
+
+namespace
+{
+
+struct object_with_non_trivial_ctor
+{
+  // This struct will only properly assign if its `magic` member is
+  // set to this certain number.
+  static constexpr int MAGIC = 923390;
+
+  int field;
+  int magic;
+
+  THRUST_HOST_DEVICE object_with_non_trivial_ctor()
+  {
+    magic = MAGIC;
+    field = 0;
+  }
+  THRUST_HOST_DEVICE object_with_non_trivial_ctor(int f)
+  {
+    magic = MAGIC;
+    field = f;
+  }
+
+  object_with_non_trivial_ctor(const object_with_non_trivial_ctor& x) = default;
+
+  // This non-trivial assignment requires that `this` points to initialized
+  // memory
+  THRUST_HOST_DEVICE object_with_non_trivial_ctor& operator=(const object_with_non_trivial_ctor& x)
+  {
+    // To really copy over x's field value, require we have magic value set.
+    // If copy_if copies to uninitialized bits, the field will rarely be 923390.
+    if (magic == MAGIC)
+    {
+      field = x.field;
+    }
+    return *this;
+  }
+};
+
+struct always_true
+{
+  THRUST_HOST_DEVICE bool operator()(const object_with_non_trivial_ctor&)
+  {
+    return true;
+  };
+};
+
+} // namespace
+
+TEST(CopyTests, TestCopyIfNonTrivial)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  // Attempting to copy an object_with_non_trivial_ctor into uninitialized
+  // memory will fail:
+  {
+    static constexpr size_t BufferAlign = alignof(object_with_non_trivial_ctor);
+    static constexpr size_t BufferSize  = sizeof(object_with_non_trivial_ctor);
+    alignas(BufferAlign) std::array<unsigned char, BufferSize> buffer;
+
+    // Fill buffer with 0s to prevent warnings about uninitialized reads while
+    // ensure that the 'magic number' mechanism works as intended:
+    std::fill(buffer.begin(), buffer.end(), static_cast<unsigned char>(0));
+
+    object_with_non_trivial_ctor initialized;
+    object_with_non_trivial_ctor* uninitialized = reinterpret_cast<object_with_non_trivial_ctor*>(buffer.data());
+
+    object_with_non_trivial_ctor source(42);
+    initialized    = source;
+    *uninitialized = source;
+
+    ASSERT_EQ(42, initialized.field);
+    ASSERT_NE(42, uninitialized->field);
+  }
+
+  // This test ensures that we use placement new instead of assigning
+  // to uninitialized memory. See Thrust Github issue #1153.
+  thrust::device_vector<object_with_non_trivial_ctor> a(10, object_with_non_trivial_ctor(99));
+  thrust::device_vector<object_with_non_trivial_ctor> b(10);
+
+  thrust::copy_if(a.begin(), a.end(), b.begin(), always_true());
+
+  for (int i = 0; i < 10; i++)
+  {
+    object_with_non_trivial_ctor ha(a[i]);
+    object_with_non_trivial_ctor hb(b[i]);
+    int ia = ha.field;
+    int ib = hb.field;
+
+    ASSERT_EQ(ia, ib);
   }
 }
 
 TYPED_TEST(CopyTests, TestCopyCountingIterator)
 {
   using Vector = typename TestFixture::input_type;
-  using Policy = typename TestFixture::execution_policy;
   using T      = typename Vector::value_type;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -561,35 +804,33 @@ TYPED_TEST(CopyTests, TestCopyCountingIterator)
 
   Vector vec(4);
 
-  thrust::copy(Policy{}, iter, iter + 4, vec.begin());
+  thrust::copy(iter, iter + 4, vec.begin());
 
-  ASSERT_EQ(T(1), vec[0]);
-  ASSERT_EQ(T(2), vec[1]);
-  ASSERT_EQ(T(3), vec[2]);
-  ASSERT_EQ(T(4), vec[3]);
+  ASSERT_EQ(vec[0], 1);
+  ASSERT_EQ(vec[1], 2);
+  ASSERT_EQ(vec[2], 3);
+  ASSERT_EQ(vec[3], 4);
 }
 
 TYPED_TEST(CopyTests, TestCopyZipIterator)
 {
   using Vector = typename TestFixture::input_type;
-  using Policy = typename TestFixture::execution_policy;
   using T      = typename Vector::value_type;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
   Vector v1(3);
-  v1[0] = T(1);
-  v1[1] = T(2);
-  v1[2] = T(3);
+  v1[0] = 1;
+  v1[1] = 2;
+  v1[2] = 3;
   Vector v2(3);
-  v2[0] = T(4);
-  v2[1] = T(5);
-  v2[2] = T(6);
+  v2[0] = 4;
+  v2[1] = 5;
+  v2[2] = 6;
   Vector v3(3, T(0));
   Vector v4(3, T(0));
 
-  thrust::copy(Policy{},
-               thrust::make_zip_iterator(thrust::make_tuple(v1.begin(), v2.begin())),
+  thrust::copy(thrust::make_zip_iterator(thrust::make_tuple(v1.begin(), v2.begin())),
                thrust::make_zip_iterator(thrust::make_tuple(v1.end(), v2.end())),
                thrust::make_zip_iterator(thrust::make_tuple(v3.begin(), v4.begin())));
 
@@ -600,7 +841,6 @@ TYPED_TEST(CopyTests, TestCopyZipIterator)
 TYPED_TEST(CopyTests, TestCopyConstantIteratorToZipIterator)
 {
   using Vector = typename TestFixture::input_type;
-  using Policy = typename TestFixture::execution_policy;
   using T      = typename Vector::value_type;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -608,17 +848,16 @@ TYPED_TEST(CopyTests, TestCopyConstantIteratorToZipIterator)
   Vector v1(3, T(0));
   Vector v2(3, T(0));
 
-  thrust::copy(Policy{},
-               thrust::make_constant_iterator(thrust::tuple<T, T>(4, 7)),
+  thrust::copy(thrust::make_constant_iterator(thrust::tuple<T, T>(4, 7)),
                thrust::make_constant_iterator(thrust::tuple<T, T>(4, 7)) + v1.size(),
                thrust::make_zip_iterator(thrust::make_tuple(v1.begin(), v2.begin())));
 
-  ASSERT_EQ(T(4), v1[0]);
-  ASSERT_EQ(T(4), v1[1]);
-  ASSERT_EQ(T(4), v1[2]);
-  ASSERT_EQ(T(7), v2[0]);
-  ASSERT_EQ(T(7), v2[1]);
-  ASSERT_EQ(T(7), v2[2]);
+  ASSERT_EQ(v1[0], 4);
+  ASSERT_EQ(v1[1], 4);
+  ASSERT_EQ(v1[2], 4);
+  ASSERT_EQ(v2[0], 7);
+  ASSERT_EQ(v2[1], 7);
+  ASSERT_EQ(v2[2], 7);
 }
 
 template <typename InputIterator, typename OutputIterator>
@@ -659,8 +898,7 @@ TEST(CopyTests, TestCopyDispatchImplicit)
 }
 
 template <typename InputIterator, typename OutputIterator, typename Predicate>
-__host__ __device__ OutputIterator
-copy_if(my_system& system, InputIterator, InputIterator, OutputIterator result, Predicate)
+OutputIterator copy_if(my_system& system, InputIterator, InputIterator, OutputIterator result, Predicate)
 {
   system.validate_dispatch();
   return result;
@@ -679,7 +917,7 @@ TEST(CopyTests, TestCopyIfDispatchExplicit)
 }
 
 template <typename InputIterator, typename OutputIterator, typename Predicate>
-__host__ __device__ OutputIterator copy_if(my_tag, InputIterator, InputIterator, OutputIterator result, Predicate)
+OutputIterator copy_if(my_tag, InputIterator, InputIterator, OutputIterator result, Predicate)
 {
   *result = 13;
   return result;
@@ -698,7 +936,7 @@ TEST(CopyTests, TestCopyIfDispatchImplicit)
 }
 
 template <typename InputIterator1, typename InputIterator2, typename OutputIterator, typename Predicate>
-__host__ __device__ OutputIterator
+OutputIterator
 copy_if(my_system& system, InputIterator1, InputIterator1, InputIterator2, OutputIterator result, Predicate)
 {
   system.validate_dispatch();
@@ -718,8 +956,7 @@ TEST(CopyTests, TestCopyIfStencilDispatchExplicit)
 }
 
 template <typename InputIterator1, typename InputIterator2, typename OutputIterator, typename Predicate>
-__host__ __device__ OutputIterator
-copy_if(my_tag, InputIterator1, InputIterator1, InputIterator2, OutputIterator result, Predicate)
+OutputIterator copy_if(my_tag, InputIterator1, InputIterator1, InputIterator2, OutputIterator result, Predicate)
 {
   *result = 13;
   return result;
@@ -739,6 +976,92 @@ TEST(CopyTests, TestCopyIfStencilDispatchImplicit)
     0);
 
   ASSERT_EQ(13, vec.front());
+}
+
+struct only_set_when_expected_it
+{
+  long long expected;
+  bool* flag;
+
+  THRUST_HOST_DEVICE only_set_when_expected_it operator++() const
+  {
+    return *this;
+  }
+  THRUST_HOST_DEVICE only_set_when_expected_it operator*() const
+  {
+    return *this;
+  }
+  template <typename Difference>
+  THRUST_HOST_DEVICE only_set_when_expected_it operator+(Difference) const
+  {
+    return *this;
+  }
+  template <typename Difference>
+  THRUST_HOST_DEVICE only_set_when_expected_it operator+=(Difference) const
+  {
+    return *this;
+  }
+  template <typename Index>
+  THRUST_HOST_DEVICE only_set_when_expected_it operator[](Index) const
+  {
+    return *this;
+  }
+
+  THRUST_DEVICE void operator=(long long value) const
+  {
+    if (value == expected)
+    {
+      *flag = true;
+    }
+  }
+};
+
+THRUST_NAMESPACE_BEGIN
+namespace detail
+{
+// We need this type to pass as a non-const ref for unary_transform_functor
+// to compile:
+template <>
+struct is_non_const_reference<only_set_when_expected_it> : thrust::true_type
+{};
+} // end namespace detail
+
+template <>
+struct iterator_traits<only_set_when_expected_it>
+{
+  using value_type        = long long;
+  using reference         = only_set_when_expected_it;
+  using iterator_category = thrust::random_access_device_iterator_tag;
+};
+THRUST_NAMESPACE_END
+
+void TestCopyWithBigIndexesHelper(int magnitude)
+{
+  thrust::counting_iterator<long long> begin(0);
+  thrust::counting_iterator<long long> end = begin + (1ll << magnitude);
+  ASSERT_EQ(thrust::distance(begin, end), 1ll << magnitude);
+
+  thrust::device_ptr<bool> has_executed = thrust::device_malloc<bool>(1);
+  *has_executed                         = false;
+
+  only_set_when_expected_it out = {(1ll << magnitude) - 1, thrust::raw_pointer_cast(has_executed)};
+
+  thrust::copy(thrust::device, begin, end, out);
+
+  bool has_executed_h = *has_executed;
+  thrust::device_free(has_executed);
+
+  ASSERT_EQ(has_executed_h, true);
+}
+
+TEST(CopyTests, TestCopyWithBigIndexes)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  TestCopyWithBigIndexesHelper(30);
+  TestCopyWithBigIndexesHelper(31);
+  TestCopyWithBigIndexesHelper(32);
+  TestCopyWithBigIndexesHelper(33);
 }
 
 __global__ THRUST_HIP_LAUNCH_BOUNDS_DEFAULT void CopyKernel(int const N, int* in_array, int* out_array)

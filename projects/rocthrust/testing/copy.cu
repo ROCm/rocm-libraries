@@ -34,7 +34,7 @@
 
 #include <unittest/unittest.h>
 
-void TestCopyFromConstIterator(void)
+void TestCopyFromConstIterator()
 {
   using T = int;
 
@@ -70,7 +70,7 @@ void TestCopyFromConstIterator(void)
 }
 DECLARE_UNITTEST(TestCopyFromConstIterator);
 
-void TestCopyToDiscardIterator(void)
+void TestCopyToDiscardIterator()
 {
   using T = int;
 
@@ -90,7 +90,7 @@ void TestCopyToDiscardIterator(void)
 }
 DECLARE_UNITTEST(TestCopyToDiscardIterator);
 
-void TestCopyToDiscardIteratorZipped(void)
+void TestCopyToDiscardIteratorZipped()
 {
   using T = int;
 
@@ -127,7 +127,7 @@ void TestCopyToDiscardIteratorZipped(void)
 DECLARE_UNITTEST(TestCopyToDiscardIteratorZipped);
 
 template <class Vector>
-void TestCopyMatchingTypes(void)
+void TestCopyMatchingTypes()
 {
   using T = typename Vector::value_type;
 
@@ -160,8 +160,10 @@ void TestCopyMatchingTypes(void)
 }
 DECLARE_VECTOR_UNITTEST(TestCopyMatchingTypes);
 
+THRUST_DISABLE_MSVC_WARNING_BEGIN(4244) // '=': conversion from 'int' to '_Ty', possible loss of data
+
 template <class Vector>
-void TestCopyMixedTypes(void)
+void TestCopyMixedTypes()
 {
   Vector v(5);
   v[0] = 0;
@@ -193,7 +195,9 @@ void TestCopyMixedTypes(void)
 }
 DECLARE_INTEGRAL_VECTOR_UNITTEST(TestCopyMixedTypes);
 
-void TestCopyVectorBool(void)
+THRUST_DISABLE_MSVC_WARNING_END(4244)
+
+void TestCopyVectorBool()
 {
   std::vector<bool> v(3);
   v[0] = true;
@@ -217,7 +221,7 @@ void TestCopyVectorBool(void)
 DECLARE_UNITTEST(TestCopyVectorBool);
 
 template <class Vector>
-void TestCopyListTo(void)
+void TestCopyListTo()
 {
   using T = typename Vector::value_type;
 
@@ -288,7 +292,7 @@ struct mod_3
 };
 
 template <class Vector>
-void TestCopyIfSimple(void)
+void TestCopyIfSimple()
 {
   using T = typename Vector::value_type;
 
@@ -416,7 +420,7 @@ void TestCopyIfSequence(const size_t n)
 DECLARE_INTEGRAL_VARIABLE_UNITTEST(TestCopyIfSequence);
 
 template <class Vector>
-void TestCopyIfStencilSimple(void)
+void TestCopyIfStencilSimple()
 {
   using T = typename Vector::value_type;
 
@@ -534,7 +538,7 @@ void TestCopyIfNonTrivial()
 
     // Fill buffer with 0s to prevent warnings about uninitialized reads while
     // ensure that the 'magic number' mechanism works as intended:
-    std::fill(buffer.begin(), buffer.end(), 0);
+    std::fill(buffer.begin(), buffer.end(), static_cast<unsigned char>(0));
 
     object_with_non_trivial_ctor initialized;
     object_with_non_trivial_ctor* uninitialized = reinterpret_cast<object_with_non_trivial_ctor*>(buffer.data());
@@ -567,7 +571,7 @@ void TestCopyIfNonTrivial()
 DECLARE_UNITTEST(TestCopyIfNonTrivial);
 
 template <typename Vector>
-void TestCopyCountingIterator(void)
+void TestCopyCountingIterator()
 {
   using T = typename Vector::value_type;
 
@@ -585,7 +589,7 @@ void TestCopyCountingIterator(void)
 DECLARE_INTEGRAL_VECTOR_UNITTEST(TestCopyCountingIterator);
 
 template <typename Vector>
-void TestCopyZipIterator(void)
+void TestCopyZipIterator()
 {
   using T = typename Vector::value_type;
 
@@ -610,7 +614,7 @@ void TestCopyZipIterator(void)
 DECLARE_VECTOR_UNITTEST(TestCopyZipIterator);
 
 template <typename Vector>
-void TestCopyConstantIteratorToZipIterator(void)
+void TestCopyConstantIteratorToZipIterator()
 {
   using T = typename Vector::value_type;
 

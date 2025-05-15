@@ -28,7 +28,7 @@
 
 #include <unittest/unittest.h>
 
-void TestCopyNFromConstIterator(void)
+void TestCopyNFromConstIterator()
 {
   using T = int;
 
@@ -63,7 +63,7 @@ void TestCopyNFromConstIterator(void)
 }
 DECLARE_UNITTEST(TestCopyNFromConstIterator);
 
-void TestCopyNToDiscardIterator(void)
+void TestCopyNToDiscardIterator()
 {
   using T = int;
 
@@ -86,7 +86,7 @@ void TestCopyNToDiscardIterator(void)
 DECLARE_UNITTEST(TestCopyNToDiscardIterator);
 
 template <class Vector>
-void TestCopyNMatchingTypes(void)
+void TestCopyNMatchingTypes()
 {
   using T = typename Vector::value_type;
 
@@ -119,8 +119,10 @@ void TestCopyNMatchingTypes(void)
 }
 DECLARE_VECTOR_UNITTEST(TestCopyNMatchingTypes);
 
+THRUST_DISABLE_MSVC_WARNING_BEGIN(4244) // '=': conversion from 'int' to '_Ty', possible loss of data
+
 template <class Vector>
-void TestCopyNMixedTypes(void)
+void TestCopyNMixedTypes()
 {
   Vector v(5);
   v[0] = 0;
@@ -152,7 +154,9 @@ void TestCopyNMixedTypes(void)
 }
 DECLARE_INTEGRAL_VECTOR_UNITTEST(TestCopyNMixedTypes);
 
-void TestCopyNVectorBool(void)
+THRUST_DISABLE_MSVC_WARNING_END(4244)
+
+void TestCopyNVectorBool()
 {
   std::vector<bool> v(3);
   v[0] = true;
@@ -176,7 +180,7 @@ void TestCopyNVectorBool(void)
 DECLARE_UNITTEST(TestCopyNVectorBool);
 
 template <class Vector>
-void TestCopyNListTo(void)
+void TestCopyNListTo()
 {
   using T = typename Vector::value_type;
 
@@ -220,7 +224,7 @@ void TestCopyNListTo(void)
 DECLARE_VECTOR_UNITTEST(TestCopyNListTo);
 
 template <typename Vector>
-void TestCopyNCountingIterator(void)
+void TestCopyNCountingIterator()
 {
   using T = typename Vector::value_type;
 
@@ -238,7 +242,7 @@ void TestCopyNCountingIterator(void)
 DECLARE_INTEGRAL_VECTOR_UNITTEST(TestCopyNCountingIterator);
 
 template <typename Vector>
-void TestCopyNZipIterator(void)
+void TestCopyNZipIterator()
 {
   using T = typename Vector::value_type;
 
@@ -265,7 +269,7 @@ void TestCopyNZipIterator(void)
 DECLARE_VECTOR_UNITTEST(TestCopyNZipIterator);
 
 template <typename Vector>
-void TestCopyNConstantIteratorToZipIterator(void)
+void TestCopyNConstantIteratorToZipIterator()
 {
   using T = typename Vector::value_type;
 

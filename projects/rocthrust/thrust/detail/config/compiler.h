@@ -42,29 +42,27 @@
 //! deprecated [Since 2.7]
 #define THRUST_HOST_COMPILER_UNKNOWN 0
 //! deprecated [Since 2.7]
-#define THRUST_HOST_COMPILER_MSVC    1
+#define THRUST_HOST_COMPILER_MSVC 1
 //! deprecated [Since 2.7]
-#define THRUST_HOST_COMPILER_GCC     2
+#define THRUST_HOST_COMPILER_GCC 2
 //! deprecated [Since 2.7]
-#define THRUST_HOST_COMPILER_CLANG   3
+#define THRUST_HOST_COMPILER_CLANG 3
 //! deprecated [Since 2.7]
-#define THRUST_HOST_COMPILER_INTEL   4
-//! deprecated [Since 2.7]
-#define THRUST_HOST_COMPILER_NVHPC   5
+#define THRUST_HOST_COMPILER_INTEL 4
 
 // enumerate device compilers we know about
 //! deprecated [Since 2.7]
 #define THRUST_DEVICE_COMPILER_UNKNOWN 0
 //! deprecated [Since 2.7]
-#define THRUST_DEVICE_COMPILER_MSVC    1
+#define THRUST_DEVICE_COMPILER_MSVC 1
 //! deprecated [Since 2.7]
-#define THRUST_DEVICE_COMPILER_GCC     2
+#define THRUST_DEVICE_COMPILER_GCC 2
 //! deprecated [Since 2.7]
-#define THRUST_DEVICE_COMPILER_CLANG   3
+#define THRUST_DEVICE_COMPILER_CLANG 3
 //! deprecated [Since 2.7]
-#define THRUST_DEVICE_COMPILER_NVCC    4
+#define THRUST_DEVICE_COMPILER_NVCC 4
 //! deprecated [Since 2.7]
-#define THRUST_DEVICE_COMPILER_HIP     5
+#define THRUST_DEVICE_COMPILER_HIP 5
 
 // figure out which host compiler we're using
 #if defined(_MSC_VER)
@@ -182,6 +180,14 @@
 #  define THRUST_DISABLE_GCC_WARNING_END(x)
 #endif
 
+#if (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_INTEL) && !defined(__CUDA_ARCH__)
+#  define THRUST_DISABLE_ICC_WARNING_BEGIN(x) THRUST_DIAG_PUSH THRUST_DIAG_SUPPRESS_ICC(x)
+#  define THRUST_DISABLE_ICC_WARNING_END(x)   THRUST_DIAG_POP
+#else
+#  define THRUST_DISABLE_ICC_WARNING_BEGIN(x)
+#  define THRUST_DISABLE_ICC_WARNING_END(x)
+#endif
+
 #define THRUST_DISABLE_MSVC_POSSIBLE_LOSS_OF_DATA_WARNING_BEGIN \
   THRUST_DISABLE_MSVC_WARNING_BEGIN(4244 4267)                  \
   /**/
@@ -222,10 +228,12 @@
 #define THRUST_DISABLE_CLANG_AND_GCC_INITIALIZER_REORDERING_WARNING_BEGIN \
   THRUST_DISABLE_CLANG_WARNING_BEGIN(-Wreorder)                           \
   THRUST_DISABLE_GCC_WARNING_BEGIN(-Wreorder)                             \
+  THRUST_DISABLE_ICC_WARNING_BEGIN(2407)                                  \
   /**/
 #define THRUST_DISABLE_CLANG_AND_GCC_INITIALIZER_REORDERING_WARNING_END \
   THRUST_DISABLE_CLANG_WARNING_END(-Wreorder)                           \
   THRUST_DISABLE_GCC_WARNING_END(-Wreorder)                             \
+  THRUST_DISABLE_ICC_WARNING_END(2407)                                  \
   /**/
 #define THRUST_DISABLE_CLANG_AND_GCC_INITIALIZER_REORDERING_WARNING(x) \
   THRUST_DISABLE_CLANG_AND_GCC_INITIALIZER_REORDERING_WARNING_BEGIN    \
