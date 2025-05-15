@@ -41,6 +41,7 @@
 #endif
 
 #include "bfloat16_dev.hpp"
+#include "miopen_type_traits.hpp"
 
 #ifndef MIOPEN_USE_FPMIX
 #define MIOPEN_USE_FPMIX 0
@@ -49,8 +50,6 @@
 #ifndef MIOPEN_USE_BFPMIX
 #define MIOPEN_USE_BFPMIX 0
 #endif
-
-#define _FLOAT_ACCUM float
 
 #if MIOPEN_USE_FP16 == 1
 #define FP_TYPE ::__half
@@ -95,7 +94,7 @@
 
 #if MIOPEN_USE_BFPMIX == 1
 // Enables bfloat16, stored in ushort
-#define FP_TYPE uint16_t
+#define FP_TYPE ushort
 
 #ifdef MIO_BN_NODPP
 #undef MIO_BN_NODPP
@@ -254,6 +253,8 @@ struct __half4
     __host__ __device__ __half4& operator=(const __half4&) = default;
 };
 
+// TODO: implement __half8
+
 template <typename T, int N>
 struct mapped_vector_type
 {
@@ -315,42 +316,42 @@ struct mapped_vector_type<int, 2>
     using type = int2;
 };
 
-#if MIO_BN_VECTORIZE
-
-#if MIO_LAYOUT_NHWC
-// NHWC vectorize in X direction which corresponds
-// to channels
+using _FpAccum = float;
 
 // _C suffix means used for computation
+using _FpPrec_C =
+    typename std::conditional<static_cast<bool>(MIO_BN_VECTORIZE) &&
+                                  static_cast<bool>(MIO_LAYOUT_NHWC),
+                              typename mapped_vector_type<FP_TYPE_PREC, VEC_SIZE>::type,
+                              FP_TYPE_PREC>::type;
+
 // _LS suffix means used for loading / storing
-#define _FLOAT_PREC_C _FLOAT_PREC4
-#define _FLOAT_PREC_LS _FLOAT_PREC4
-#define _FLOAT_C _FLOAT4
-#define _FLOAT_LS _FLOAT4
-#define _FLOAT_ACCUM_C _FLOAT_ACCUM4
-#define _FLOAT_ACCUM_LS _FLOAT_ACCUM4
-#else
-// NCHW vectorize in Y direction which corresponds
-// to HW
+using _FpPrec_LS =
+    typename std::conditional<static_cast<bool>(MIO_BN_VECTORIZE),
+                              typename mapped_vector_type<FP_TYPE_PREC, VEC_SIZE>::type,
+                              FP_TYPE_PREC>::type;
 
-#define _FLOAT_PREC_C FP_TYPE_PREC
-#define _FLOAT_PREC_LS _FLOAT_PREC4
+// _C suffix means used for computation
+using _Fp_C = typename std::conditional<static_cast<bool>(MIO_BN_VECTORIZE) &&
+                                            static_cast<bool>(MIO_LAYOUT_NHWC),
+                                        typename mapped_vector_type<FP_TYPE, VEC_SIZE>::type,
+                                        FP_TYPE>::type;
 
-#define _FLOAT_C _FLOAT
-#define _FLOAT_LS _FLOAT4
-#define _FLOAT_ACCUM_C _FLOAT_ACCUM
-#define _FLOAT_ACCUM_LS _FLOAT_ACCUM4
-#endif
-#else
+// _LS suffix means used for loading / storing
+using _Fp_LS = typename std::conditional<static_cast<bool>(MIO_BN_VECTORIZE),
+                                         typename mapped_vector_type<FP_TYPE, VEC_SIZE>::type,
+                                         FP_TYPE>::type;
 
-#define _FLOAT_PREC_C FP_TYPE_PREC
-#define _FLOAT_PREC_LS _FLOAT_PREC
-#define _FLOAT_C FP_TYPE
-#define _FLOAT_LS FP_TYPE
-#define _FLOAT_ACCUM_C _FLOAT_ACCUM
-#define _FLOAT_ACCUM_LS _FLOAT_ACCUM
+// _C suffix means used for computation
+using _FpAccum_C = typename std::conditional<static_cast<bool>(MIO_BN_VECTORIZE) &&
+                                                 static_cast<bool>(MIO_LAYOUT_NHWC),
+                                             typename mapped_vector_type<_FpAccum, VEC_SIZE>::type,
+                                             _FpAccum>::type;
 
-#endif
+// _LS suffix means used for loading / storing
+using _FpAccum_LS = typename std::conditional<static_cast<bool>(MIO_BN_VECTORIZE),
+                                              typename mapped_vector_type<_FpAccum, VEC_SIZE>::type,
+                                              _FpAccum>::type;
 
 // Hip does have fma which does the same thing as OpenCL mad
 template <typename T>
@@ -561,8 +562,8 @@ __forceinline__ __device__ __host__ void _accumulate_mad(T& a, T const& b, T con
 // _C suffix means used for computation
 // _LS suffix means used for loading / storing
 template <typename FpAccum, typename FpAccum_C, typename FpPrec_C>
-__forceinline__ __device__ void running_stash(FpPrec_C* resultRunningMean,
-                                              FpPrec_C* resultRunningVariance,
+__forceinline__ __device__ void running_stash(FpPrec_C* __restrict resultRunningMean,
+                                              FpPrec_C* __restrict resultRunningVariance,
                                               double expAvgFactor,
                                               FpAccum_C mean,
                                               FpAccum_C variance,
@@ -590,6 +591,19 @@ __forceinline__ __device__ void running_stash(FpPrec_C* resultRunningMean,
         static_cast<FpPrec_C>((FpAccum{1.0} - static_cast<FpAccum>(expAvgFactor)) *
                                   static_cast<FpAccum_C>(resultRunningVariance[channel]) +
                               static_cast<FpAccum>(expAvgFactor) * adjust);
+}
+
+// _C suffix means used for computation
+// _LS suffix means used for loading / storing
+template <typename FpAccum_C, typename FpPrec_C>
+__forceinline__ __device__ void saved_stash(FpPrec_C* __restrict resultSaveMean,
+                                            FpPrec_C* __restrict resultSaveInvVariance,
+                                            FpAccum_C mean,
+                                            FpAccum_C invVariance,
+                                            unsigned int channel)
+{
+    resultSaveMean[channel]        = static_cast<FpPrec_C>(mean);
+    resultSaveInvVariance[channel] = static_cast<FpPrec_C>(invVariance);
 }
 
 #endif // BATCHNORM_FUNCTIONS_HPP

@@ -342,47 +342,48 @@ struct MIOpenBatchNormFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
 
 #if (MIO_BN_VARIANT != 2)
 extern "C" __global__ void __launch_bounds__(MIO_BN_GRP0* MIO_BN_GRP1* MIO_BN_GRP2)
-    MIOpenBatchNormFwdTrainSpatialHIP(
-        const FP_TYPE* __restrict in,
-        FP_TYPE* __restrict out,
-        const FP_TYPE_PREC* __restrict scale,
-        const FP_TYPE_PREC* __restrict bias,
-        FP_TYPE_PREC INHW,
+    MIOpenBatchNormFwdTrainSpatialHIP(const FP_TYPE* __restrict in,
+                                      FP_TYPE* __restrict out,
+                                      const FP_TYPE_PREC* __restrict scale,
+                                      const FP_TYPE_PREC* __restrict bias,
+                                      FP_TYPE_PREC INHW,
 #if (MIO_RUNNING_RESULT == 1)
-        [[maybe_unused]] double expAvgFactor,
-        [[maybe_unused]] FP_TYPE_PREC* __restrict resultRunningMean,
-        [[maybe_unused]] FP_TYPE_PREC* __restrict resultRunningVariance,
+                                      double expAvgFactor,
+                                      FP_TYPE_PREC* __restrict resultRunningMean,
+                                      FP_TYPE_PREC* __restrict resultRunningVariance,
 #endif
-        double epsilon
+                                      double epsilon
 #if (MIO_SAVE_MEAN_VARIANCE == 1)
-        ,
-        [[maybe_unused]] FP_TYPE_PREC* __restrict resultSaveMean,
-        [[maybe_unused]] FP_TYPE_PREC* __restrict resultSaveInvVariance
+                                      ,
+                                      FP_TYPE_PREC* __restrict resultSaveMean,
+                                      FP_TYPE_PREC* __restrict resultSaveInvVariance
 #endif
     )
 {
     FP_TYPE_PREC mean, variance, invVariance;
-    const unsigned int lid                    = threadIdx.x;
-    [[maybe_unused]] const unsigned int grpid = blockIdx.x;
+    const unsigned int lid = threadIdx.x;
 
-    MIOpenBatchNormFwdTrainSpatialHIPImpl<MIO_BN_VARIANT, FP_TYPE, FP_TYPE_PREC, _FLOAT_ACCUM>{}(
+    MIOpenBatchNormFwdTrainSpatialHIPImpl<MIO_BN_VARIANT, FP_TYPE, FP_TYPE_PREC, _FpAccum>{}(
         in, out, scale, bias, INHW, epsilon, mean, variance, invVariance);
 
-    if(lid == 0)
+    if constexpr(MIO_RUNNING_RESULT == 1 || MIO_SAVE_MEAN_VARIANCE == 1)
     {
-        if constexpr(MIO_RUNNING_RESULT == 1)
+        if(lid == 0)
         {
-            running_stash<_FLOAT_ACCUM, _FLOAT_ACCUM_C, _FLOAT_PREC_C>(
-                resultRunningMean, resultRunningVariance, expAvgFactor, mean, variance, grpid);
-        }
+            const unsigned int grpid = blockIdx.x;
+            if constexpr(MIO_RUNNING_RESULT == 1)
+            {
+                running_stash<_FpAccum, _FpAccum_C, _FpPrec_C>(
+                    resultRunningMean, resultRunningVariance, expAvgFactor, mean, variance, grpid);
+            }
 
-        if constexpr(MIO_SAVE_MEAN_VARIANCE == 1)
-        {
-            // saved_stash(resultSaveMean, resultSaveInvVariance, mean, invVariance, grpid);
+            if constexpr(MIO_SAVE_MEAN_VARIANCE == 1)
+            {
+                saved_stash<_FpAccum_C, _FpPrec_C>(
+                    resultSaveMean, resultSaveInvVariance, mean, invVariance, grpid);
+            }
         }
     }
-
-    return;
 }
 
 #endif
