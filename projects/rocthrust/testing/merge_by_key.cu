@@ -26,8 +26,12 @@
 
 #include <unittest/unittest.h>
 
+#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
+#  include <type_traits>
+#endif
+
 template <typename Vector>
-void TestMergeByKeySimple(void)
+void TestMergeByKeySimple()
 {
   const Vector a_key{0, 2, 4}, a_val{13, 7, 42}, b_key{0, 3, 3, 4}, b_val{42, 42, 7, 13};
   Vector ref_key{0, 0, 2, 3, 3, 4, 4}, ref_val{13, 42, 7, 42, 7, 42, 13};
@@ -125,16 +129,27 @@ void TestMergeByKeyDispatchImplicit()
 template <typename T, typename CompareOp, typename... Args>
 auto call_merge_by_key(Args&&... args) -> decltype(thrust::merge_by_key(std::forward<Args>(args)...))
 {
-  THRUST_IF_CONSTEXPR (std::is_void<CompareOp>::value)
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+  THRUST_IF_CONSTEXPR (::cuda::std::is_void<CompareOp>::value)
+#else
+  THRUST_IF_CONSTEXPR (::std::is_void<CompareOp>::value)
+#endif
   {
     return thrust::merge_by_key(std::forward<Args>(args)...);
   }
   else
   {
     // TODO(bgruber): remove next line in C++17 and pass CompareOp{} directly to stable_sort
-    using C = std::conditional_t<std::is_void<CompareOp>::value, thrust::less<T>, CompareOp>;
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+    using C = ::cuda::std::__conditional_t<::cuda::std::is_void<CompareOp>::value, thrust::less<T>, CompareOp>;
+#else
+    using C = ::std::conditional_t<::std::is_void<CompareOp>::value, thrust::less<T>, CompareOp>;
+#endif
     return thrust::merge_by_key(std::forward<Args>(args)..., C{});
   }
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+  _CCCL_UNREACHABLE();
+#endif
 }
 
 DECLARE_UNITTEST(TestMergeByKeyDispatchImplicit);
@@ -156,7 +171,11 @@ void TestMergeByKey(size_t n)
     const thrust::host_vector<T> h_a_vals(random_vals.begin(), random_vals.begin() + size_a);
     const thrust::host_vector<T> h_b_vals(random_vals.begin() + size_a, random_vals.end());
 
-    THRUST_IF_CONSTEXPR (std::is_void<CompareOp>::value)
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+    THRUST_IF_CONSTEXPR (::cuda::std::is_void<CompareOp>::value)
+#else
+    THRUST_IF_CONSTEXPR (::std::is_void<CompareOp>::value)
+#endif
     {
       thrust::stable_sort(h_a_keys.begin(), h_a_keys.end());
       thrust::stable_sort(h_b_keys.begin(), h_b_keys.end());
@@ -164,7 +183,11 @@ void TestMergeByKey(size_t n)
     else
     {
       // TODO(bgruber): remove next line in C++17 and pass CompareOp{} directly to stable_sort
-      using C = std::conditional_t<std::is_void<CompareOp>::value, thrust::less<T>, CompareOp>;
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+      using C = ::cuda::std::__conditional_t<::cuda::std::is_void<CompareOp>::value, thrust::less<T>, CompareOp>;
+#else
+      using C = ::std::conditional_t<::std::is_void<CompareOp>::value, thrust::less<T>, CompareOp>;
+#endif
       thrust::stable_sort(h_a_keys.begin(), h_a_keys.end(), C{});
       thrust::stable_sort(h_b_keys.begin(), h_b_keys.end(), C{});
     }
