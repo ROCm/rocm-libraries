@@ -1,0 +1,54 @@
+resources:
+  repositories:
+  - repository: pipelines_repo
+    type: github
+    endpoint: ROCm
+    name: ROCm/ROCm
+
+variables:
+- group: common
+- template: /.azuredevops/variables-global.yml@pipelines_repo
+
+trigger:
+  batch: true
+  branches:
+    include:
+    - develop
+    - mainline
+  paths:
+    include:
+    - projects/rocprim
+    exclude:
+    - projects/rocprim/.githooks
+    - projects/rocprim/.github
+    - projects/rocprim/.gitlab
+    - projects/rocprim/.jenkins
+    - projects/rocprim/docs
+    - projects/rocprim/'.*.y*ml'
+    - projects/rocprim/'*.md'
+    - projects/rocprim/LICENSE.txt
+    - projects/rocprim/NOTICES.txt
+
+pr:
+  autoCancel: true
+  branches:
+    include:
+    - develop
+    - mainline
+  paths:
+    include:
+      projects/rocprim
+    exclude:
+    - projects/rocprim/.githooks
+    - projects/rocprim/.github
+    - projects/rocprim/.gitlab
+    - projects/rocprim/.jenkins
+    - projects/rocprim/docs
+    - projects/rocprim/'.*.y*ml'
+    - projects/rocprim/'*.md'
+    - projects/rocprim/LICENSE.txt
+    - projects/rocprim/NOTICES.txt
+  drafts: false
+
+jobs:
+  - template: ${{ variables.CI_COMPONENT_PATH }}/rocPRIM.yml@pipelines_repo
