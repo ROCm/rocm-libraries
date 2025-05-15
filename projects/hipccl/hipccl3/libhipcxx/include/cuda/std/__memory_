@@ -44,7 +44,6 @@
 #include <cuda/std/__memory/allocator_arg_t.h>
 #include <cuda/std/__memory/allocator_traits.h>
 #include <cuda/std/__memory/temporary_buffer.h>
-#include <cuda/std/__memory/unique_ptr.h>
 #include <cuda/std/__memory/uses_allocator.h>
 #include <cuda/std/memory>
 
