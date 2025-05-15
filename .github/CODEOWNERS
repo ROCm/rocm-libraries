@@ -5,6 +5,9 @@
 **/docs/ @ROCm/rocm-documentation
 **/library/include/ @ROCm/rocm-documentation
 
+# CI ownership
+/.azuredevops/ @ROCm/external-ci
+
 # Project-specific ownership
 /projects/miopen/* @BrianHarrisonAMD @BradPepersAMD @adickin-amd @JonathanLichtnerAMD
 /projects/composablekernel/* @illsilin @carlushuang @qianfengz @aosewski @poyenc @geyyer @bartekxk @andriy-ca @afagaj @asleepzzz @tenpercent @ThomasNing @coderfeli
