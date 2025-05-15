@@ -2,6 +2,40 @@
 
 Welcome to the ROCm Libraries monorepo. This repository consolidates multiple ROCm-related libraries and shared components into a single repository to streamline development, CI, and integration. The first set of libraries focuses on components required for building PyTorch.
 
+# Monorepo Migration Status
+
+This table provides the current status of the migration of specific ROCm libraries.
+
+**Key:**
+- **Completed**: Fully migrated and integrated. This monorepo should be considered the source of truth for this project.
+- **In Progress**: Ongoing migration, tests, or integration. Please refrain from submitting new pull requests on the individual repo of the project, and develop on the monorepo.
+- **Pending**: Not yet started or in the early planning stages. The individual repo should be considered the source of truth for this project.
+
+| Component           | Migration Status | Notes                                 |
+|---------------------|------------------|---------------------------------------|
+| `composablekernel`  | Pending     |  |
+| `hipblas`           | Pending     |  |
+| `hipblas-common`    | Pending     |  |
+| `hipblaslt`         | Pending     |  |
+| `hipcub`            | Pending     | 2nd in line |
+| `hipfft`            | Pending     | Considered in next set to migrate. |
+| `hiprand`           | Pending     | Considered in next set to migrate. |
+| `hipsolver`         | Pending     |  |
+| `hipsparse`         | Pending     |  |
+| `hipsparselt`       | Pending     |  |
+| `miopen`            | Pending     |  |
+| `rocblas`           | Pending     |  |
+| `rocfft`            | Pending     | Considered in next set to migrate. |
+| `rocprim`           | In Progress 🔥     | Initial migration steps completed.   |
+| `rocrand`           | Pending          | Next in line |
+| `rocsolver`         | Pending      |  |
+| `rocsparse`         | Pending        |  |
+| `rocthrust`         | Pending          | 3rd in line |
+| `rocroller`  | Pending       |  |
+| `tensile`    | Pending      |  |
+
+---
+
 ## Nomenclature
 
 Project names have been standardized to match the casing and punctuation of released packages. This removes inconsistent camel-casing and underscores used in legacy repositories.
