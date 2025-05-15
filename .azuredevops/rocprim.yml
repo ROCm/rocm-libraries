@@ -51,3 +51,6 @@ pr:
 
 jobs:
   - template: ${{ variables.CI_COMPONENT_PATH }}/rocPRIM.yml@pipelines_repo
+    parameters:
+      sparseCheckout: true
+      sparseCheckoutDir: projects/rocprim
