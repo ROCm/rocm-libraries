@@ -12139,7 +12139,7 @@ class KernelWriterAssembly(KernelWriter):
           addr1 = ""
         if ss.optSrdIncForRow and addrCalc.rowInc:
           module.add(addrCalc.incrementToNextRow(kernel, "D", ss, tmpS01))
-            
+
         dataType     = kernel["ProblemType"]["DestDataType"]
         globalOffset = addrCalc.globalOffset
       elif tc == 'TD':
@@ -13385,7 +13385,7 @@ class KernelWriterAssembly(KernelWriter):
           globalReadStr = ' '.join([str(x) for x in self.codes.perIterGlobalRead[i].flatitems()])
           count += countGlobalRead(self.codes.perIterGlobalRead[i])
           # PGR=2 case, global read is in LocalWriteCode
-          count += countGlobalRead(self.codes.perIterLocalWrite[i])
+          count += countGlobalRead(self.codes.perIterLocalWrite[i][1])
         needToWait += count
         if u == localWriteEndIter + 1 and beforeBarrier:
           # beforeBarrier case, reduce the amount of non-Vgpr global read
