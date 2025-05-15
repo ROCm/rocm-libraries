@@ -4,6 +4,7 @@ resources:
     type: github
     endpoint: ROCm
     name: ROCm/ROCm
+    ref: refs/heads/amd/danielsu/rocprim-sparse
 
 variables:
 - group: common
