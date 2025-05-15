@@ -42,5 +42,7 @@
     #include "impl/swap.hpp"
     #include "impl/transformation.hpp"
     #include "impl/uninitialized.hpp"
-    
+    // Math library implementation
+    #include "impl/math_lib.hpp"
+
 #endif
