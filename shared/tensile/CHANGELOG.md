@@ -9,14 +9,17 @@
 - Added support for non-default HIP SDK installations on Windows
 - Added master solution library documentation
 - Added compiler version dependent assembler and architecture capabilities
+- Added documentation from GitHub Wiki to ROCm docs
 
 ### Changed
 
+- Loosened check for CLI compiler choices
 - Introduced 4-tuple targets for bundler invocations
 - Introduced PATHEXT extensions on Windows when searching for toolchain components
 - Enabled passing fully qualified paths to toolchain components
 - Enabled environment variable overrides when searching for a ROCm stack 
 - Improved default toolchain configuration
+- Ignored f824 flake errors
 
 ### Removed
 
@@ -26,6 +29,8 @@
 
 ### Resolved issues
 
+- Fixed configure time path not being invoked at build
+- Fixed find_package for msgpack to work with versions 5 and 6
 - Fixed rhel9 testing
 - Fixed gfx908 builds
 - Fixed "argument list too long" error
