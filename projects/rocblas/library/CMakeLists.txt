@@ -82,8 +82,52 @@ function( rocblas_library_settings lib_target_ )
     target_link_libraries( ${lib_target_} PRIVATE hip::device )
   else()
     target_link_libraries( ${lib_target_} PRIVATE hip::device -lstdc++fs --rtlib=compiler-rt --unwindlib=libgcc)
-    if (BUILD_SHARED_LIBS)
-      target_link_libraries(${lib_target_} PRIVATE -lroctx64)
+
+    if(BUILD_SHARED_LIBS)
+      set(ROCTX_PATH "" CACHE STRING "Path to the roctx library (directory containing libroctx64.so)")
+
+      find_path(ROCTRACER_INCLUDE_DIR
+        NAMES roctracer/roctx.h
+        HINTS
+        ${ROCTX_PATH}
+        ${ROCTX_PATH}/include
+        /opt/rocm/include
+        ${ROCTX_PATH}/../include
+        DOC "Path to the roctracer include directory containing roctx.h")
+
+      find_library(ROCTX_LIBRARY
+        NAMES roctx64
+        HINTS
+        ${ROCTX_PATH} # User-provided path
+        ${ROCTX_PATH}/lib
+        PATHS
+        /opt/rocm/lib # Default ROCm path
+        NO_DEFAULT_PATH
+      )
+
+      if(ROCTRACER_INCLUDE_DIR AND ROCTX_LIBRARY)
+        message(STATUS "Found roctracer include directory: ${ROCTRACER_INCLUDE_DIR}")
+        message(STATUS "Found roctx library: ${ROCTX_LIBRARY}")
+
+        # Add the include directory
+        target_include_directories(${lib_target_} PRIVATE ${ROCTRACER_INCLUDE_DIR})
+
+        # Link the rocTx lib
+        target_link_libraries(${lib_target_} PRIVATE ${ROCTX_LIBRARY})
+        message(STATUS "ROCTX tracing support enabled for target ${lib_target_}.")
+      else()
+        message(WARNING "ROCTX tracing will be disabled for target ${lib_target_}.")
+
+        if(NOT ROCTRACER_INCLUDE_DIR)
+          message(WARNING "Header 'roctracer/roctx.h' not found.")
+        endif()
+
+        if(NOT ROCTX_LIBRARY)
+          message(WARNING "Library 'roctx64' not found. ROCTX_PATH: '${ROCTX_PATH}' Default PATH: '/opt/rocm/lib'.")
+        endif()
+
+        target_compile_definitions(${lib_target_} PRIVATE "DISABLE_ROCTX")
+      endif()
     endif()
   endif()
     target_link_libraries( ${lib_target_} PRIVATE Threads::Threads )

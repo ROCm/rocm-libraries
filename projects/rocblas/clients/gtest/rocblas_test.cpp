@@ -21,18 +21,23 @@
  * ************************************************************************ */
 
 #include "rocblas_test.hpp"
-#include "client_utility.hpp"
 
-#include <cstdlib>
-#include <exception>
-#include <regex>
 #ifdef WIN32
+// Must include windows.h before dependent headers.
+// Specifically this must be before client_utility.hpp uses `#pragma GCC poison`
+// to poison 'ctime' and 'abort', as those are used in standard library headers.
 #include <windows.h>
 #define strcasecmp(A, B) _stricmp(A, B)
 #else
 #include <pthread.h>
 #include <unistd.h>
 #endif
+
+#include "client_utility.hpp"
+
+#include <cstdlib>
+#include <exception>
+#include <regex>
 
 /*********************************************
  * thread pool functions
