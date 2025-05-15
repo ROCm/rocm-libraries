@@ -14,7 +14,6 @@ trigger:
   branches:
     include:
     - develop
-    - mainline
   paths:
     include:
     - projects/rocprim
@@ -34,7 +33,6 @@ pr:
   branches:
     include:
     - develop
-    - mainline
   paths:
     include:
       projects/rocprim
