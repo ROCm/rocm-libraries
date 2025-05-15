@@ -21,7 +21,7 @@
 #include <unittest/unittest.h>
 
 template <class Vector>
-void TestCountSimple(void)
+void TestCountSimple()
 {
   Vector data(5);
   data[0] = 1;
@@ -59,7 +59,7 @@ struct greater_than_five
 };
 
 template <class Vector>
-void TestCountIfSimple(void)
+void TestCountIfSimple()
 {
   using T = typename Vector::value_type;
 
@@ -88,7 +88,7 @@ void TestCountIf(const size_t n)
 DECLARE_VARIABLE_UNITTEST(TestCountIf);
 
 template <typename Vector>
-void TestCountFromConstIteratorSimple(void)
+void TestCountFromConstIteratorSimple()
 {
   Vector data(5);
   data[0] = 1;
@@ -131,7 +131,7 @@ void TestCountDispatchImplicit()
 {
   thrust::device_vector<int> vec(1);
 
-  int result = thrust::count(thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.end()), 13);
+  auto result = thrust::count(thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.end()), 13);
 
   ASSERT_EQUAL(13, result);
 }
