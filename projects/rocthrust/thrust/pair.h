@@ -23,11 +23,17 @@
 
 #include <thrust/detail/config.h>
 
-#include <thrust/type_traits/is_trivially_relocatable.h>
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
+#include _THRUST_STD_INCLUDE(utility)
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
-
-#  include _THRUST_STD_INCLUDE(utility)
 
 THRUST_NAMESPACE_BEGIN
 
@@ -46,12 +52,12 @@ THRUST_NAMESPACE_BEGIN
  *  \tparam N This parameter selects the member of interest.
  *  \tparam T A \c pair type of interest.
  */
-#  ifdef _CCCL_DOXYGEN_INVOKED // Provide a fake alias for doxygen
+#  ifdef DOXYGEN_SHOULD_SKIP_THIS // Provide a fake alias for doxygen
 template <size_t N, class T>
 using tuple_element = _THRUST_STD::tuple_element<N, T>;
-#  else
+#  else // ^^^ DOXYGEN_SHOULD_SKIP_THIS ^^^ / vvv !DOXYGEN_SHOULD_SKIP_THIS vvv
 using _THRUST_STD::tuple_element;
-#  endif // _CCCL_DOXYGEN_INVOKED
+#  endif // DOXYGEN_SHOULD_SKIP_THIS
 
 /*! This convenience metafunction is included for compatibility with
  *  \p tuple. It returns \c 2, the number of elements of a \p pair,
@@ -59,12 +65,12 @@ using _THRUST_STD::tuple_element;
  *
  *  \tparam Pair A \c pair type of interest.
  */
-#  ifdef _CCCL_DOXYGEN_INVOKED // Provide a fake alias for doxygen
+#  ifdef DOXYGEN_SHOULD_SKIP_THIS // Provide a fake alias for doxygen
 template <class T>
 using tuple_size = _THRUST_STD::tuple_size<T>;
-#  else
+#  else // ^^^ DOXYGEN_SHOULD_SKIP_THIS ^^^ / vvv !DOXYGEN_SHOULD_SKIP_THIS vvv
 using _THRUST_STD::tuple_size;
-#  endif // _CCCL_DOXYGEN_INVOKED
+#  endif // DOXYGEN_SHOULD_SKIP_THIS
 
 /*! \p pair is a generic data structure encapsulating a heterogeneous
  *  pair of values.
@@ -77,12 +83,12 @@ using _THRUST_STD::tuple_size;
  *          requirements on the type of \p T2. <tt>T2</tt>'s type is
  *          provided by <tt>pair::second_type</tt>.
  */
-#  ifdef _CCCL_DOXYGEN_INVOKED // Provide a fake alias for doxygen
+#  ifdef DOXYGEN_SHOULD_SKIP_THIS // Provide a fake alias for doxygen
 template <class T, class U>
 using pair = _THRUST_STD::pair<T, U>;
-#  else
+#  else // ^^^ DOXYGEN_SHOULD_SKIP_THIS ^^^ / vvv !DOXYGEN_SHOULD_SKIP_THIS vvv
 using _THRUST_STD::pair;
-#  endif // _CCCL_DOXYGEN_INVOKED
+#  endif // DOXYGEN_SHOULD_SKIP_THIS
 
 using _THRUST_STD::get;
 using _THRUST_STD::make_pair;
@@ -99,8 +105,6 @@ using _THRUST_STD::make_pair;
 THRUST_NAMESPACE_END
 
 #else // !_THRUST_HAS_DEVICE_SYSTEM_STD
-
-#  include <utility>
 
 THRUST_NAMESPACE_BEGIN
 
