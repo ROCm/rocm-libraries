@@ -595,7 +595,11 @@ public:
 
         auto pp_parent_node = GetPartialPassAncestor();
         if(pp_parent_node)
-            return FMKeyPP(length[0], length[1], length[2], precision, pp_parent_node->scheme);
+            return FMKeyPP(pp_parent_node->length[0],
+                           pp_parent_node->length[1],
+                           pp_parent_node->length[2],
+                           precision,
+                           pp_parent_node->scheme);
         else
             throw std::runtime_error("Invalid parent node for partial pass");
     }

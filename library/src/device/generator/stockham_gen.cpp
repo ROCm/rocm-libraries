@@ -23,6 +23,7 @@ using namespace std::placeholders;
 
 #include "generator.h"
 #include "stockham_gen.h"
+#include <algorithm>
 #include <array>
 #include <iostream>
 #include <sstream>
@@ -265,51 +266,42 @@ void stockham_partial_pass_variants(const std::string&               kernel_name
                           params_2.off_dim,
                           launchers);
         }
-        // SBRR_PP + SBCC_PP
-        else if(params_1.current_dim == 1 && params_2.current_dim == 2)
+        else if(params_1.current_dim == 2 && params_2.current_dim == 0)
         {
-            StockhamPartialPassKernelRR kernelRR(specs1, params_1);
+            StockhamPartialPassKernelRR kernelCC(specs1, params_1);
             make_launcher(specs1.precisions,
-                          {{"pp_stoc", specs1.scheme, "", ""}},
-                          kernelRR,
-                          "CS_KERNEL_STOCKHAM_PP",
+                          {{"pp_sbcc", specs1.scheme, "", ""}},
+                          kernelCC,
+                          "CS_KERNEL_STOCKHAM_PP_BLOCK_CC",
                           params_1.factors_off_dim,
                           params_1.current_dim,
                           params_1.off_dim,
                           launchers);
 
-            StockhamPartialPassKernelCC kernelCC(specs2, params_2, false);
+            StockhamPartialPassKernelCC kernelRR(specs2, params_2, false);
             make_launcher(specs2.precisions,
-                          {{"pp_sbcc", specs2.scheme, "", ""}},
-                          kernelCC,
-                          "CS_KERNEL_STOCKHAM_PP_BLOCK_CC",
+                          {{"pp_stoc", specs2.scheme, "", ""}},
+                          kernelRR,
+                          "CS_KERNEL_STOCKHAM_PP",
                           params_2.factors_off_dim,
                           params_2.current_dim,
                           params_2.off_dim,
                           launchers);
         }
-        // SBRR_PP + SBRR_PP
-        else if(params_1.current_dim == 0 && params_2.current_dim == 1)
+        // SBRR_PP + SBCC_PP
+        else if((params_1.current_dim == 1 && params_2.current_dim == 2)
+                || (params_1.current_dim == 2 && params_2.current_dim == 1))
         {
-            StockhamPartialPassKernelRR kernelRR1(specs1, params_1);
-            make_launcher(specs1.precisions,
-                          {{"pp_stoc", specs1.scheme, "", ""}},
-                          kernelRR1,
-                          "CS_KERNEL_STOCKHAM_PP",
-                          params_1.factors_off_dim,
-                          params_1.current_dim,
-                          params_1.off_dim,
-                          launchers);
-
-            StockhamPartialPassKernelRR kernelRR2(specs2, params_2);
-            make_launcher(specs2.precisions,
-                          {{"pp_stoc", specs2.scheme, "", ""}},
-                          kernelRR2,
-                          "CS_KERNEL_STOCKHAM_PP",
-                          params_2.factors_off_dim,
-                          params_2.current_dim,
-                          params_2.off_dim,
-                          launchers);
+            throw std::runtime_error("CS_KERNEL_STOCKHAM_PP + CS_KERNEL_STOCKHAM_PP_BLOCK_CC not "
+                                     "yet implemented for CS_3D_PP");
+        }
+        // SBRR_PP + SBRR_PP
+        else if((params_1.current_dim == 0 && params_2.current_dim == 1)
+                || (params_1.current_dim == 1 && params_2.current_dim == 0))
+        {
+            throw std::runtime_error(
+                "CS_KERNEL_STOCKHAM_PP_BLOCK_CC + CS_KERNEL_STOCKHAM_PP_BLOCK_CC not yet "
+                "implemented for CS_3D_PP");
         }
         else
         {
@@ -443,6 +435,17 @@ void stockham_variants(const std::string&            kernel_name,
     output_json(launchers, kernel_name, output);
 }
 
+size_t pp_current_dim_rm(const size_t current_dim)
+{
+    if(current_dim == 0)
+        return 2;
+
+    if(current_dim == 2)
+        return 0;
+
+    return current_dim;
+}
+
 int main()
 {
     std::string line;
@@ -546,6 +549,23 @@ int main()
                 break;
             default:
                 throw std::runtime_error("Invalid dimensions configuration for CS_3D_PP");
+            }
+
+            // parent length from column to row-major
+            std::reverse(parent_length.begin(), parent_length.end());
+
+            // current dim from column to row-major
+            auto dims_rm = dims;
+            for(auto& dim : dims_rm)
+                dim = pp_current_dim_rm(dim);
+
+            if(dims_rm != dims)
+            {
+                factors1.swap(factors2);
+                pp_factors_1.swap(pp_factors_2);
+                std::reverse(workgroup_size.begin(), workgroup_size.end());
+                std::reverse(threads_per_transform.begin(), threads_per_transform.end());
+                std::reverse(direct_to_from_reg.begin(), direct_to_from_reg.end());
             }
 
             if(threads_per_transform.size() != 2)
