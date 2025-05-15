@@ -59,6 +59,7 @@
 #ifndef _THRUST_HAS_DEVICE_SYSTEM_STD
 #  define _THRUST_STD_INCLUDE(LIB) <LIB>
 #  define _THRUST_STD              ::std
+#  define _THRUST_HAS_DEVICE_SYSTEM_STD 0
 #  define _THRUST_STD_NAMESPACE_BEGIN \
     namespace std                     \
     {

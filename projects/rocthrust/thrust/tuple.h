@@ -32,9 +32,24 @@
 
 #include <thrust/detail/config.h>
 
-#include <thrust/type_traits/is_trivially_relocatable.h>
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
+#include _THRUST_STD_INCLUDE(tuple)
+
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#  include <cstddef>
+#  include <type_traits>
+#endif
 
 THRUST_NAMESPACE_BEGIN
+
+// define null_type for backwards compatability
 struct null_type
 {};
 
@@ -75,8 +90,6 @@ THRUST_NAMESPACE_END
 // implementation of thrust::tuple.
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
 
-#  include _THRUST_STD_INCLUDE(tuple)
-
 THRUST_NAMESPACE_BEGIN
 
 /*! \addtogroup utility
@@ -96,12 +109,12 @@ THRUST_NAMESPACE_BEGIN
  *  \see pair
  *  \see tuple
  */
-#  ifdef _CCCL_DOXYGEN_INVOKED
+#  ifdef DOXYGEN_SHOULD_SKIP_THIS // Provide a fake alias for doxygen
 template <size_t N, class T>
 using tuple_element = _THRUST_STD::tuple_element<N, T>;
-#  else
+#  else // ^^^ DOXYGEN_SHOULD_SKIP_THIS ^^^ / vvv !DOXYGEN_SHOULD_SKIP_THIS vvv
 using _THRUST_STD::tuple_element;
-#  endif
+#  endif // DOXYGEN_SHOULD_SKIP_THIS
 
 /*! This metafunction returns the number of elements
  *  of a \p tuple type of interest.
@@ -111,12 +124,12 @@ using _THRUST_STD::tuple_element;
  *  \see pair
  *  \see tuple
  */
-#  ifdef _CCCL_DOXYGEN_INVOKED
+#  ifdef DOXYGEN_SHOULD_SKIP_THIS // Provide a fake alias for doxygen
 template <class T>
 using tuple_size = _THRUST_STD::tuple_size<T>;
-#  else
+#  else // ^^^ DOXYGEN_SHOULD_SKIP_THIS ^^^ / vvv !DOXYGEN_SHOULD_SKIP_THIS vvv
 using _THRUST_STD::tuple_size;
-#  endif
+#  endif // DOXYGEN_SHOULD_SKIP_THIS
 
 /*! \brief \p tuple is a heterogeneous, fixed-size collection of values.
  *  An instantiation of \p tuple with two arguments is similar to an
@@ -155,12 +168,12 @@ using _THRUST_STD::tuple_size;
  *  \see tuple_size
  *  \see tie
  */
-#  ifdef _CCCL_DOXYGEN_INVOKED
+#  ifdef DOXYGEN_SHOULD_SKIP_THIS // Provide a fake alias for doxygen
 template <class... Ts>
 using tuple = _THRUST_STD::tuple<T...>;
-#  else
+#  else // ^^^ DOXYGEN_SHOULD_SKIP_THIS ^^^ / vvv !DOXYGEN_SHOULD_SKIP_THIS vvv
 using _THRUST_STD::tuple;
-#  endif
+#  endif // DOXYGEN_SHOULD_SKIP_THIS
 
 using _THRUST_STD::get;
 using _THRUST_STD::make_tuple;
@@ -176,6 +189,117 @@ using _THRUST_STD::tie;
  */
 
 THRUST_NAMESPACE_END
+
+_THRUST_STD_NAMESPACE_BEGIN
+
+template <>
+struct tuple_size<tuple<THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type>> : tuple_size<tuple<>>
+{};
+
+template <class T0>
+struct tuple_size<tuple<T0,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type>> : tuple_size<tuple<T0>>
+{};
+
+template <class T0, class T1>
+struct tuple_size<tuple<T0,
+                        T1,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type>> : tuple_size<tuple<T0, T1>>
+{};
+
+template <class T0, class T1, class T2>
+struct tuple_size<tuple<T0,
+                        T1,
+                        T2,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type>> : tuple_size<tuple<T0, T1, T2>>
+{};
+
+template <class T0, class T1, class T2, class T3>
+struct tuple_size<tuple<T0,
+                        T1,
+                        T2,
+                        T3,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type>> : tuple_size<tuple<T0, T1, T2, T3>>
+{};
+
+template <class T0, class T1, class T2, class T3, class T4>
+struct tuple_size<tuple<T0,
+                        T1,
+                        T2,
+                        T3,
+                        T4,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type>> : tuple_size<tuple<T0, T1, T2, T3, T4>>
+{};
+
+template <class T0, class T1, class T2, class T3, class T4, class T5>
+struct tuple_size<tuple<T0,
+                        T1,
+                        T2,
+                        T3,
+                        T4,
+                        T5,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type>> : tuple_size<tuple<T0, T1, T2, T3, T4, T5>>
+{};
+
+template <class T0, class T1, class T2, class T3, class T4, class T5, class T6>
+struct tuple_size<
+  tuple<T0, T1, T2, T3, T4, T5, T6, THRUST_NS_QUALIFIER::null_type, THRUST_NS_QUALIFIER::null_type, THRUST_NS_QUALIFIER::null_type>>
+    : tuple_size<tuple<T0, T1, T2, T3, T4, T5, T6>>
+{};
+
+template <class T0, class T1, class T2, class T3, class T4, class T5, class T6, class T7>
+struct tuple_size<tuple<T0, T1, T2, T3, T4, T5, T6, T7, THRUST_NS_QUALIFIER::null_type, THRUST_NS_QUALIFIER::null_type>>
+    : tuple_size<tuple<T0, T1, T2, T3, T4, T5, T6, T7>>
+{};
+
+template <class T0, class T1, class T2, class T3, class T4, class T5, class T6, class T7, class T8>
+struct tuple_size<tuple<T0, T1, T2, T3, T4, T5, T6, T7, T8, THRUST_NS_QUALIFIER::null_type>>
+    : tuple_size<tuple<T0, T1, T2, T3, T4, T5, T6, T7, T8>>
+{};
+
+_THRUST_STD_NAMESPACE_END
 
 #else
 
@@ -271,7 +395,6 @@ template <int N, class HT, class TT>
 THRUST_HOST_DEVICE inline typename access_traits<typename tuple_element<N, detail::cons<HT, TT>>::type>::const_type
 get(const detail::cons<HT, TT>& t);
 
-#  if THRUST_CPP_DIALECT >= 2017
 /*! Constructs a \p tuple from a variadic list of types \p Ts, allowing the \p tuple to deduce
  *  its type as \p tuple<Ts...> based on the types of the provided arguments.
  *
@@ -311,7 +434,6 @@ struct pair;
  */
 template <class T1, class T2>
 THRUST_HOST_DEVICE tuple(pair<T1, T2>) -> tuple<T1, T2>;
-#  endif
 
 /*! \brief \p tuple is a class template that can be instantiated with up to ten
  *  arguments. Each template argument specifies the type of element in the \p
@@ -787,6 +909,7 @@ tie(T0& t0, T1& t1, T2& t2, T3& t3, T4& t4, T5& t5, T6& t6, T7& t7, T8& t8, T9& 
 THRUST_NAMESPACE_END
 
 _THRUST_STD_NAMESPACE_BEGIN
+
 template <class... Ts>
 struct tuple_size<THRUST_NS_QUALIFIER::tuple<Ts...>> : std::tuple_size<std::tuple<Ts...>>
 {};
@@ -794,11 +917,6 @@ struct tuple_size<THRUST_NS_QUALIFIER::tuple<Ts...>> : std::tuple_size<std::tupl
 template <size_t Id, class... Ts>
 struct tuple_element<Id, THRUST_NS_QUALIFIER::tuple<Ts...>> : std::tuple_element<Id, std::tuple<Ts...>>
 {};
-_THRUST_STD_NAMESPACE_END
-
-#endif // THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-
-_THRUST_STD_NAMESPACE_BEGIN
 
 template <>
 struct tuple_size<THRUST_NS_QUALIFIER::tuple<
@@ -924,3 +1042,5 @@ struct tuple_size<THRUST_NS_QUALIFIER::tuple<T0, T1, T2, T3, T4, T5, T6, T7, T8,
 {};
 
 _THRUST_STD_NAMESPACE_END
+
+#endif // _THRUST_HAS_DEVICE_SYSTEM_STD
