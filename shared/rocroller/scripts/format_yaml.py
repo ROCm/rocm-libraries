@@ -83,7 +83,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "output",
         type=str,
-        nargs="?",
+        nargs="*",
         help="Optional output file (default: print to stdout)",
     )
     parser.add_argument(
@@ -92,6 +92,19 @@ if __name__ == "__main__":
         action="store_true",
         help="Overwrite output file without confirmation",
     )
+    parser.add_argument(
+        "--in-place", "-I", action="store_true", help="Format files in-place."
+    )
     args = parser.parse_args()
 
-    format_yaml(args.input, args.output, args.force)
+    if args.in_place:
+        args.input = [args.input] + args.output
+        for filename in args.input:
+            format_yaml(filename, filename, True)
+    else:
+        assert len(args.output) <= 1
+        if len(args.output) == 1:
+            args.output = args.output[0]
+        else:
+            args.output = None
+        format_yaml(args.input, args.output, args.force)

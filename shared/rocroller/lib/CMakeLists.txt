@@ -201,6 +201,7 @@ set(rocroller_src
     source/KernelGraph/Transformations/LowerTile.cpp
     source/KernelGraph/Transformations/OrderEpilogueBlocks.cpp
     source/KernelGraph/Transformations/OrderMemory.cpp
+    source/KernelGraph/Transformations/OrderMultiplyNodes.cpp
     source/KernelGraph/Transformations/PrefetchScale.cpp
     source/KernelGraph/Transformations/RemoveDuplicates.cpp
     source/KernelGraph/Transformations/Simplify.cpp

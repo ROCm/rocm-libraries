@@ -53,6 +53,8 @@ namespace rocRoller
             WaitCount    waitCount;
             unsigned int nops = 0;
 
+            unsigned int reusedOperands = 0;
+
             /// The new length of each of the queues.
             std::array<int, GPUWaitQueueType::Count> waitLengths;
 

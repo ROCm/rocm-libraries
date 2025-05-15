@@ -142,40 +142,23 @@ namespace rocRoller
             insertBefore(graph, forLoop, preNOP, postNOP);
         }
 
-        void insertInLoopCopies(KernelGraph& graph, int forLoop, auto const& copies)
+        void insertInLoopCopies(KernelGraph& graph, auto const& copies)
         {
-            int copyBefore = -1;
-            {
-                auto bodies = graph.control.getOutputNodeIndices<Body>(forLoop).to<std::vector>();
-                auto isBarrierPredicate
-                    = [&](int x) { return graph.control.get<Barrier>(x).has_value(); };
-                auto barriers = filter(isBarrierPredicate,
-                                       graph.control.depthFirstVisit(bodies, GD::Downstream))
-                                    .template to<std::vector>();
-
-                std::sort(barriers.begin(),
-                          barriers.end(),
-                          topoComp(std::make_shared<KernelGraph>(graph)));
-
-                copyBefore = barriers.back();
-            }
-            AssertFatal(copyBefore != -1);
-
-            auto preNOP  = graph.control.addElement(NOP());
-            auto postNOP = graph.control.addElement(NOP());
             for(auto copy : copies)
             {
-                graph.control.addElement(Sequence(), {preNOP}, {copy});
-                graph.control.addElement(Sequence(), {copy}, {postNOP});
+                for(auto exchange : copy.second)
+                {
+                    insertBefore(graph, exchange, copy.first, copy.first);
+                }
             }
-            insertBefore(graph, copyBefore, preNOP, postNOP);
         }
 
         void prefetchScaleLoads(KernelGraph& graph, ContextPtr context)
         {
             auto root = graph.control.roots().only().value();
 
-            std::vector<int>                 preLoopLoad, preLoopCopy, inLoopCopy;
+            std::vector<int>                 preLoopLoad;
+            std::map<int, std::vector<int>>  inLoopCopy;
             std::vector<std::pair<int, int>> inLoopLoad;
 
             auto forLoop = -1;
@@ -238,10 +221,8 @@ namespace rocRoller
                     replaceWith(graph, topOp, graph.control.addElement(NOP()), false);
 
                     preLoopLoad.push_back(topOp);
-                    preLoopCopy.push_back(copyTag);
                     inLoopLoad.push_back(std::make_pair(duplicateChain(graph, {topOp}),
                                                         graph.mapper.get<Unroll>(loadTag, 2)));
-                    inLoopCopy.push_back(duplicateControlNode(graph, copyTag));
 
                     // update the indexes of the associated exchange macrotiles
                     auto location = graph.coordinates.getLocation(macTileTag);
@@ -257,6 +238,20 @@ namespace rocRoller
                         graph.coordinates.deleteElement(input);
                         graph.coordinates.addElement(
                             edge, {exchangeTileTag.value()}, {destMacTileTag});
+
+                        std::optional<int> exchangeTag;
+                        for(auto c : graph.mapper.getCoordinateConnections(exchangeTileTag.value()))
+                        {
+                            auto maybeExchange = graph.control.get<Exchange>(c.control);
+                            if(maybeExchange.has_value())
+                            {
+                                exchangeTag = c.control;
+                                break;
+                            }
+                        }
+                        AssertFatal(exchangeTag.has_value());
+                        inLoopCopy[copyTag].push_back(
+                            getTopSetCoordinate(graph, exchangeTag.value()));
                     }
                 }
             }
@@ -270,8 +265,7 @@ namespace rocRoller
             AssertFatal(forLoop != -1);
             insertInLoopLoads(graph, inLoopLoad, forLoop);
 
-            insertPreLoopCopies(graph, forLoop, preLoopCopy);
-            insertInLoopCopies(graph, forLoop, inLoopCopy);
+            insertInLoopCopies(graph, inLoopCopy);
         }
 
         KernelGraph PrefetchScale::apply(KernelGraph const& original)

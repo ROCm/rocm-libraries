@@ -18,6 +18,7 @@ rocRoller is a software library for generating AMDGPU kernels.
     - [Cmake and make commands](#cmake-and-make-commands)
       - [CMake Options](#cmake-options)
     - [Running the tests](#running-the-tests)
+    - [Updating pregenerated GPUArchitecture yaml files](#updating-pregenerated-gpuarchitecture-yaml-files)
   - [GEMM client](#gemm-client)
   - [File Structure](#file-structure)
   - [Coding Practices](#coding-practices)
@@ -201,9 +202,9 @@ mkdir ./build
 cd ./build
 cmake -DROCROLLER_USE_PREGENERATED_ARCH_DEF=OFF ../
 make -j GPUArchitecture_def
-find ./share/rocRoller/split_yamls/ -type f -name "*.yaml" -exec realpath {} \; | xargs -I {} ../scripts/format_yaml.py -f {} {}
-rm -rf ../GPUArchitectureGenerator/pregenerated/*.yaml
 cp ./share/rocRoller/split_yamls/*.yaml ../GPUArchitectureGenerator/pregenerated/
+cd ../GPUArchitectureGenerator/pregenerated/
+../../scripts/format_yaml.py -I *.yaml
 ```
 
 ## GEMM client
