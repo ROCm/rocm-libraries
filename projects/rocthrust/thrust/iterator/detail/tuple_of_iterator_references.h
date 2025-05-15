@@ -19,6 +19,14 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
 #include <thrust/detail/raw_reference_cast.h>
 #include <thrust/detail/reference_forward_declaration.h>
 #include <thrust/pair.h>
@@ -27,14 +35,10 @@
 #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 #  include <cuda/std/tuple>
 #  include <cuda/std/type_traits>
-#elif defined(__has_include)
-#  if __has_include(<cuda/std/tuple>)
-#    include <cuda/std/tuple>
-#  endif // __has_include(<cuda/std/tuple>)
-#  if __has_include(<cuda/std/type_traits>)
-#    include <cuda/std/type_traits>
-#  endif // __has_include(<cuda/std/type_traits>)
-#endif // THRUST_DEVICE_SYSTEM
+#else
+#  include <type_traits>
+#  include <utility>
+#endif
 
 #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 
@@ -71,7 +75,9 @@ public:
   using super_t = thrust::tuple<Ts...>;
   using super_t::super_t;
 
-  tuple_of_iterator_references() = default;
+  inline THRUST_HOST_DEVICE tuple_of_iterator_references()
+      : super_t()
+  {}
 
   // allow implicit construction from tuple<refs>
   inline THRUST_HOST_DEVICE tuple_of_iterator_references(const super_t& other)
@@ -140,14 +146,16 @@ public:
 
 } // namespace detail
 
-template <class... Ts>
-struct __is_tuple_of_iterator_references<THRUST_NS_QUALIFIER::detail::tuple_of_iterator_references<Ts...>>
-    : integral_constant<bool, true>
-{};
-
 THRUST_NAMESPACE_END
 
 _LIBCUDACXX_BEGIN_NAMESPACE_STD
+
+template <class>
+struct __is_tuple_of_iterator_references;
+
+template <class... Ts>
+struct __is_tuple_of_iterator_references<THRUST_NS_QUALIFIER::detail::tuple_of_iterator_references<Ts...>> : true_type
+{};
 
 // define tuple_size, tuple_element, etc.
 template <class... Ts>
@@ -188,13 +196,21 @@ namespace detail
 template <typename... Ts>
 class tuple_of_iterator_references : public thrust::tuple<Ts...>
 {
-private:
-  using super_t = thrust::tuple<Ts...>;
-
 public:
+  using super_t = thrust::tuple<Ts...>;
+  using super_t::super_t;
+
+  inline THRUST_HOST_DEVICE tuple_of_iterator_references()
+      : super_t()
+  {}
+
   // allow implicit construction from tuple<refs>
   inline THRUST_HOST_DEVICE tuple_of_iterator_references(const super_t& other)
       : super_t(other)
+  {}
+
+  inline THRUST_HOST_DEVICE tuple_of_iterator_references(super_t&& other)
+      : super_t(::std::move(other))
   {}
 
   // allow assignment from tuples
@@ -228,26 +244,18 @@ public:
     using tuple_type = thrust::tuple<Us...>;
 
     // XXX perhaps this could be accelerated
-    tuple_type other_tuple = other;
-    super_t::operator=(other_tuple);
+    super_t::operator=(tuple_type{other});
     return *this;
   }
 
-  // duplicate thrust::tuple's constructors
-  inline THRUST_HOST_DEVICE tuple_of_iterator_references() {}
-
-  inline THRUST_HOST_DEVICE tuple_of_iterator_references(typename access_traits<Ts>::parameter_type... ts)
-      : super_t(ts...)
-  {}
+  // this overload of swap() permits swapping tuple_of_iterator_references returned as temporaries from
+  // iterator dereferences
+  template <typename... Us>
+  inline THRUST_HOST_DEVICE friend void swap(tuple_of_iterator_references&& x, tuple_of_iterator_references<Us...>&& y)
+  {
+    x.swap(y);
+  }
 };
-
-// this overload of swap() permits swapping tuple_of_iterator_references returned as temporaries from
-// iterator dereferences
-template <typename... Ts, typename... Us>
-inline THRUST_HOST_DEVICE void swap(tuple_of_iterator_references<Ts...> x, tuple_of_iterator_references<Us...> y)
-{
-  x.swap(y);
-}
 
 } // namespace detail
 
