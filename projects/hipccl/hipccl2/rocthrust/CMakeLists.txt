@@ -231,7 +231,7 @@ set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "\${CPACK_PACKAGING_INSTALL_PR
 
 rocm_create_package(
   NAME rocthrust
-  DESCRIPTION "Radeon Open Compute Thrust library"
+  DESCRIPTION "rocThrust is a ROCm port of the Thrust library, written in HIP"
   MAINTAINER "rocthrust-maintainer@amd.com"
   HEADER_ONLY
 )
