@@ -27,12 +27,12 @@ This table provides the current status of the migration of specific ROCm librari
 | `rocblas`           | Pending     |  |
 | `rocfft`            | Pending     | Considered in next set to migrate. |
 | `rocprim`           | In Progress 🔥     | Initial migration steps completed.   |
-| `rocrand`           | Pending          | Next in line |
-| `rocsolver`         | Pending      |  |
-| `rocsparse`         | Pending        |  |
-| `rocthrust`         | Pending          | 3rd in line |
-| `rocroller`  | Pending       |  |
-| `tensile`    | Pending      |  |
+| `rocrand`           | Pending     | Next in line |
+| `rocsolver`         | Pending     |  |
+| `rocsparse`         | Pending     |  |
+| `rocthrust`         | Pending     | 3rd in line |
+| `rocroller`         | Pending     |  |
+| `tensile`           | Pending     |  |
 
 ---
 
