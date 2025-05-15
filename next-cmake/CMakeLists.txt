@@ -61,7 +61,8 @@ if(HIPBLASLT_ENABLE_CLIENT)
     cmake_dependent_option(HIPBLASLT_REQUIRE_ROCM_SMI "Require rocm_smi." ON "NOT WIN32" OFF)
 endif()
 
-set(HIPBLASLT_ENABLE_ASAN OFF CACHE BOOL "Build hipBLASLt with address sanitizer enabled")
+set(HIPBLASLT_ENABLE_ASAN OFF CACHE BOOL "Build hipBLASLt with address sanitizer enabled.")
+set(HIPBLASLT_ENABLE_LAZY_LOAD ON CACHE BOOL "Enable lazy loading of runtime code oject files to reduce ram usage.")
 
 if(HIPBLASLT_ENABLE_HOST)
     set(HIPBLASLT_BUILD_SHARED_LIBS ON CACHE BOOL "Build the hipblaslt library as shared vs static")
@@ -79,8 +80,13 @@ endif()
 if(HIPBLASLT_ENABLE_DEVICE)
     set(HIPBLASLT_BUNDLE_PYTHON_DEPS ON CACHE BOOL "Build python dependencies requied for device code generation.")
     set(HIPBLASLT_DEVICE_JOBS "" CACHE STRING "Number of CPU threads to use for building device libraries (will use nproc if unset).")
-    set(HIPBLASLT_KEEP_TMP OFF CACHE STRING "Keep temporary build directory for device libraries (turning this ON  bloat the build size).")
+    set(HIPBLASLT_KEEP_BUILD_TMP OFF CACHE STRING "Keep temporary build directory for device libraries (turning this ON  bloat the build size).")
     set(HIPBLASLT_LIBLOGIC_PATH "" CACHE STRING "Path to library logic files (will use 'library' if unset).")
+    set(HIPBLASLT_LIBRARY_FORMAT "" CACHE STRING "Format of master solution library files (msgpack or yaml).")
+    set(HIPBLASLT_ASM_DEBUG "" CACHE STRING "Keep debug information for built code objects.")
+    set(HIPBLASLT_LOGIC_FILTER "" CACHE STRING "Cutomsized logic filter, default is *, i.e. all logics.")
+    set(HIPBLASLT_NO_COMPRESS "" CACHE STRING "Do not compress device code object files.")
+    set(HIPBLASLT_EXPERIMENTAL "" CACHE STRING "Process experimental logic files.")
     set(device_library_dir "${CMAKE_BINARY_DIR}/Tensile/library")
     file(MAKE_DIRECTORY "${device_library_dir}")
 endif()
@@ -194,6 +200,7 @@ if(HIPBLASLT_ENABLE_HOST)
         add_library(hipblaslt STATIC)
         target_compile_definitions(hipblaslt PRIVATE HIPBLASLT_STATIC_LIB)
     endif()
+    rocm_set_soversion(hipblaslt ${hipblaslt_SOVERSION})
     add_library(roc::hipblaslt ALIAS hipblaslt)
 
     target_link_libraries(hipblaslt
@@ -207,10 +214,6 @@ if(HIPBLASLT_ENABLE_HOST)
 
     if(HIPBLASLT_ENABLE_ASAN)
         hipblaslt_target_configure_sanitizers(hipblaslt PRIVATE)
-    endif()
-
-    if(HIPBLASLT_ENABLE_OPENMP)
-        target_link_libraries(hipblaslt PRIVATE OpenMP::OpenMP_CXX)
     endif()
 
     target_compile_features(hipblaslt PUBLIC cxx_std_17) # I would like to make this configurable
@@ -303,9 +306,22 @@ if(HIPBLASLT_ENABLE_HOST)
     rocm_export_targets(
         TARGETS roc::hipblaslt
         DEPENDS PACKAGE hip
-        DEPENDS PACKAGE hipblas-common
+        DEPENDS PACKAGE ${hipblas_target}
         NAMESPACE roc::
     )
+
+    if( LEGACY_HIPBLAS_DIRECT )
+        rocm_package_add_dependencies(DEPENDS "hipblas >= 0.50.0")
+    else()
+        set(hipblas_common_minimum 1.0.0)
+        if(HIPBLASLT_BUILD_SHARED_LIBS)
+            rocm_package_add_deb_dependencies(COMPONENT devel DEPENDS "hipblas-common-dev >= ${hipblas_common_minimum}")
+            rocm_package_add_rpm_dependencies(COMPONENT devel DEPENDS "hipblas-common-devel >= ${hipblas_common_minimum}")
+        else()
+            rocm_package_add_deb_dependencies(COMPONENT devel DEPENDS "hipblas-common-static-dev >= ${hipblas_common_minimum}")
+            rocm_package_add_rpm_dependencies(COMPONENT devel DEPENDS "hipblas-common-static-devel >= ${hipblas_common_minimum}")
+        endif()
+    endif()
 endif()
 
 if(HIPBLASLT_ENABLE_DEVICE)
@@ -332,6 +348,11 @@ include(ROCMCreatePackage)
 include(ROCMClients)
 
 #set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "\${CPACK_PACKAGING_INSTALL_PREFIX}" "\${CPACK_PACKAGING_INSTALL_PREFIX}/include" "\${CPACK_PACKAGING_INSTALL_PREFIX}/lib")
+if(NOT CLIENTS_OS)
+    rocm_set_os_id(CLIENTS_OS)
+    string(TOLOWER "${CLIENTS_OS}" CLIENTS_OS)
+    rocm_read_os_release(CLIENTS_OS_VERSION VERSION_ID)
+endif()
 
 set(GFORTRAN_RPM "libgfortran4")
 set(GFORTRAN_DEB "libgfortran4")
@@ -347,6 +368,17 @@ endif()
 
 if(HIPBLASLT_ENABLE_CLIENT)
     rocm_install(
+        TARGETS
+            hipblaslt-bench
+            hipblaslt-bench-groupedgemm-fixed-mk
+            hipblaslt-bench-extop-layernorm
+            hipblaslt-bench-extop-matrixtransform
+            hipblaslt-bench-extop-softmax
+            hipblaslt-bench-extop-amax
+            hipblaslt-sequence
+        COMPONENT benchmarks
+    )
+    rocm_install(
         FILES 
             "${HIPBLASLT_CLIENTS_DIR}/include/hipblaslt_common.yaml"
             "${HIPBLASLT_CLIENTS_DIR}/include/hipblaslt_template.yaml"
@@ -358,7 +390,6 @@ if(HIPBLASLT_ENABLE_CLIENT)
         DESTINATION "${CMAKE_INSTALL_BINDIR}"
         COMPONENT clients-common
     )
-    rocm_install(TARGETS hipblaslt-bench COMPONENT benchmarks)
     rocm_install(
         FILES "${HIPBLASLT_CLIENTS_DIR}/benchmarks/sequence.yaml"
         DESTINATION "${CMAKE_INSTALL_BINDIR}"
@@ -409,6 +440,7 @@ if(HIPBLASLT_ENABLE_SAMPLES)
         TARGETS
             sample_hipblaslt_gemm
             sample_hipblaslt_gemm_ext
+            sample_hipblaslt_gemm_ext_deprecated
             sample_hipblaslt_gemm_batched
             sample_hipblaslt_gemm_batched_ext
             sample_hipblaslt_gemm_tuning_splitk_ext
@@ -453,7 +485,10 @@ if(HIPBLASLT_ENABLE_SAMPLES)
     )
     rocm_package_setup_client_component(samples)
 endif()
-
+# rocm_create_package makes decisions on what type of package to produce 
+# based on BUILD_SHARED_LIBS. If we don't set this here we will only get
+# a dev package.
+set(BUILD_SHARED_LIBS ${HIPBLASLT_BUILD_SHARED_LIBS})
 set(HIPBLASLT_CONFIG_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}" CACHE PATH "Path placed into ldconfig file")
 rocm_create_package(
     NAME hipblaslt

@@ -62,7 +62,7 @@ find_path(BLIS_INCLUDE_DIR
 )
 
 find_library(BLIS_LIB
-    NAMES blis-mt blis
+    NAMES libblis-mt.a libblis.a
     PATHS
         ${BLIS_ROOT}
         ENV BLIS_ROOT
