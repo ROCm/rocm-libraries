@@ -25,9 +25,9 @@
 
 THRUST_DISABLE_MSVC_POSSIBLE_LOSS_OF_DATA_WARNING_BEGIN
 
-// There is a unfortunate miscompilation of the gcc-12 vectorizer leading to OOB writes
+// There is a unfortunate miscompilation of the gcc-11 vectorizer leading to OOB writes
 // Adding this attribute suffices that this miscompilation does not appear anymore
-#if (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_GCC) && __GNUC__ >= 12
+#if (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_GCC) && __GNUC__ >= 11
 #  define THRUST_DISABLE_BROKEN_GCC_VECTORIZER __attribute__((optimize("no-tree-vectorize")))
 #else
 #  define THRUST_DISABLE_BROKEN_GCC_VECTORIZER
@@ -36,7 +36,7 @@ THRUST_DISABLE_MSVC_POSSIBLE_LOSS_OF_DATA_WARNING_BEGIN
 const size_t NUM_SAMPLES = 10000;
 
 template <class InputVector, class OutputVector, class Operator, class ReferenceOperator>
-THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestUnaryFunctional(void)
+THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestUnaryFunctional()
 {
   using InputType  = typename InputVector::value_type;
   using OutputType = typename OutputVector::value_type;
@@ -54,7 +54,7 @@ THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestUnaryFunctional(void)
 }
 
 template <class InputVector, class OutputVector, class Operator, class ReferenceOperator>
-THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestBinaryFunctional(void)
+THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestBinaryFunctional()
 {
   using InputType  = typename InputVector::value_type;
   using OutputType = typename OutputVector::value_type;
@@ -79,11 +79,17 @@ THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestBinaryFunctional(void)
 
 // XXX add bool to list
 // Instantiate a macro for all integer-like data types
-#define INSTANTIATE_INTEGER_TYPES(Macro, vector_type, operator_name)                                             \
-  Macro(vector_type, operator_name, unittest::int8_t) Macro(vector_type, operator_name, unittest::uint8_t)       \
-    Macro(vector_type, operator_name, unittest::int16_t) Macro(vector_type, operator_name, unittest::uint16_t)   \
-      Macro(vector_type, operator_name, unittest::int32_t) Macro(vector_type, operator_name, unittest::uint32_t) \
-        Macro(vector_type, operator_name, unittest::int64_t) Macro(vector_type, operator_name, unittest::uint64_t)
+// clang-format off
+#define INSTANTIATE_INTEGER_TYPES(Macro, vector_type, operator_name)   \
+Macro(vector_type, operator_name, unittest::int8_t  )                  \
+Macro(vector_type, operator_name, unittest::uint8_t )                  \
+Macro(vector_type, operator_name, unittest::int16_t )                  \
+Macro(vector_type, operator_name, unittest::uint16_t)                  \
+Macro(vector_type, operator_name, unittest::int32_t )                  \
+Macro(vector_type, operator_name, unittest::uint32_t)                  \
+Macro(vector_type, operator_name, unittest::int64_t )                  \
+Macro(vector_type, operator_name, unittest::uint64_t)
+// clang-format on
 
 // Instantiate a macro for all integer and floating point data types
 #define INSTANTIATE_ALL_TYPES(Macro, vector_type, operator_name) \
@@ -119,12 +125,12 @@ THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestBinaryFunctional(void)
 
 // op(T) -> T
 #define DECLARE_UNARY_ARITHMETIC_FUNCTIONAL_UNITTEST(operator_name, OperatorName)                      \
-  void Test##OperatorName##FunctionalHost(void)                                                        \
+  void Test##OperatorName##FunctionalHost()                                                            \
   {                                                                                                    \
     INSTANTIATE_ALL_TYPES(INSTANTIATE_UNARY_ARITHMETIC_FUNCTIONAL_TEST, host_vector, operator_name);   \
   }                                                                                                    \
   DECLARE_UNITTEST(Test##OperatorName##FunctionalHost);                                                \
-  void Test##OperatorName##FunctionalDevice(void)                                                      \
+  void Test##OperatorName##FunctionalDevice()                                                          \
   {                                                                                                    \
     INSTANTIATE_ALL_TYPES(INSTANTIATE_UNARY_ARITHMETIC_FUNCTIONAL_TEST, device_vector, operator_name); \
   }                                                                                                    \
@@ -132,12 +138,12 @@ THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestBinaryFunctional(void)
 
 // op(T) -> bool
 #define DECLARE_UNARY_LOGICAL_FUNCTIONAL_UNITTEST(operator_name, OperatorName)                      \
-  void Test##OperatorName##FunctionalHost(void)                                                     \
+  void Test##OperatorName##FunctionalHost()                                                         \
   {                                                                                                 \
     INSTANTIATE_ALL_TYPES(INSTANTIATE_UNARY_LOGICAL_FUNCTIONAL_TEST, host_vector, operator_name);   \
   }                                                                                                 \
   DECLARE_UNITTEST(Test##OperatorName##FunctionalHost);                                             \
-  void Test##OperatorName##FunctionalDevice(void)                                                   \
+  void Test##OperatorName##FunctionalDevice()                                                       \
   {                                                                                                 \
     INSTANTIATE_ALL_TYPES(INSTANTIATE_UNARY_LOGICAL_FUNCTIONAL_TEST, device_vector, operator_name); \
   }                                                                                                 \
@@ -145,12 +151,12 @@ THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestBinaryFunctional(void)
 
 // op(T,T) -> T
 #define DECLARE_BINARY_ARITHMETIC_FUNCTIONAL_UNITTEST(operator_name, OperatorName)                      \
-  void Test##OperatorName##FunctionalHost(void)                                                         \
+  void Test##OperatorName##FunctionalHost()                                                             \
   {                                                                                                     \
     INSTANTIATE_ALL_TYPES(INSTANTIATE_BINARY_ARITHMETIC_FUNCTIONAL_TEST, host_vector, operator_name);   \
   }                                                                                                     \
   DECLARE_UNITTEST(Test##OperatorName##FunctionalHost);                                                 \
-  void Test##OperatorName##FunctionalDevice(void)                                                       \
+  void Test##OperatorName##FunctionalDevice()                                                           \
   {                                                                                                     \
     INSTANTIATE_ALL_TYPES(INSTANTIATE_BINARY_ARITHMETIC_FUNCTIONAL_TEST, device_vector, operator_name); \
   }                                                                                                     \
@@ -158,12 +164,12 @@ THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestBinaryFunctional(void)
 
 // op(T,T) -> T (for integer T only)
 #define DECLARE_BINARY_INTEGER_ARITHMETIC_FUNCTIONAL_UNITTEST(operator_name, OperatorName)                  \
-  void Test##OperatorName##FunctionalHost(void)                                                             \
+  void Test##OperatorName##FunctionalHost()                                                                 \
   {                                                                                                         \
     INSTANTIATE_INTEGER_TYPES(INSTANTIATE_BINARY_ARITHMETIC_FUNCTIONAL_TEST, host_vector, operator_name);   \
   }                                                                                                         \
   DECLARE_UNITTEST(Test##OperatorName##FunctionalHost);                                                     \
-  void Test##OperatorName##FunctionalDevice(void)                                                           \
+  void Test##OperatorName##FunctionalDevice()                                                               \
   {                                                                                                         \
     INSTANTIATE_INTEGER_TYPES(INSTANTIATE_BINARY_ARITHMETIC_FUNCTIONAL_TEST, device_vector, operator_name); \
   }                                                                                                         \
@@ -171,24 +177,28 @@ THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestBinaryFunctional(void)
 
 // op(T,T) -> bool
 #define DECLARE_BINARY_LOGICAL_FUNCTIONAL_UNITTEST(operator_name, OperatorName)                      \
-  void Test##OperatorName##FunctionalHost(void)                                                      \
+  void Test##OperatorName##FunctionalHost()                                                          \
   {                                                                                                  \
     INSTANTIATE_ALL_TYPES(INSTANTIATE_BINARY_LOGICAL_FUNCTIONAL_TEST, host_vector, operator_name);   \
   }                                                                                                  \
   DECLARE_UNITTEST(Test##OperatorName##FunctionalHost);                                              \
-  void Test##OperatorName##FunctionalDevice(void)                                                    \
+  void Test##OperatorName##FunctionalDevice()                                                        \
   {                                                                                                  \
     INSTANTIATE_ALL_TYPES(INSTANTIATE_BINARY_LOGICAL_FUNCTIONAL_TEST, device_vector, operator_name); \
   }                                                                                                  \
   DECLARE_UNITTEST(Test##OperatorName##FunctionalDevice);
 
+THRUST_DISABLE_MSVC_WARNING_BEGIN(4146) // warning C4146: unary minus operator applied to unsigned type, result still
+                                        // unsigned
+
 // Create the unit tests
 DECLARE_UNARY_ARITHMETIC_FUNCTIONAL_UNITTEST(negate, Negate);
+THRUST_DISABLE_MSVC_WARNING_END(4146)
 DECLARE_UNARY_LOGICAL_FUNCTIONAL_UNITTEST(logical_not, LogicalNot);
 
 // Ad-hoc testing for other functionals
 template <class Vector>
-THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestIdentityFunctional(void)
+THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestIdentityFunctional()
 {
   using T = typename Vector::value_type;
 
@@ -207,7 +217,7 @@ THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestIdentityFunctional(void)
 DECLARE_VECTOR_UNITTEST(TestIdentityFunctional);
 
 template <class Vector>
-THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestProject1stFunctional(void)
+THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestProject1stFunctional()
 {
   using T = typename Vector::value_type;
 
@@ -231,7 +241,7 @@ THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestProject1stFunctional(void)
 DECLARE_VECTOR_UNITTEST(TestProject1stFunctional);
 
 template <class Vector>
-THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestProject2ndFunctional(void)
+THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestProject2ndFunctional()
 {
   using T = typename Vector::value_type;
 
@@ -255,7 +265,7 @@ THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestProject2ndFunctional(void)
 DECLARE_VECTOR_UNITTEST(TestProject2ndFunctional);
 
 template <class Vector>
-THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestMaximumFunctional(void)
+THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestMaximumFunctional()
 {
   using T = typename Vector::value_type;
 
@@ -282,7 +292,7 @@ THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestMaximumFunctional(void)
 DECLARE_VECTOR_UNITTEST(TestMaximumFunctional);
 
 template <class Vector>
-THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestMinimumFunctional(void)
+THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestMinimumFunctional()
 {
   using T = typename Vector::value_type;
 
@@ -309,7 +319,7 @@ THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestMinimumFunctional(void)
 DECLARE_VECTOR_UNITTEST(TestMinimumFunctional);
 
 template <class Vector>
-THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestNot1(void)
+THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestNot1()
 {
   using T = typename Vector::value_type;
 
@@ -342,7 +352,7 @@ DECLARE_INTEGRAL_VECTOR_UNITTEST(TestNot1);
       && THRUST_CPP_DIALECT == 2011)
 
 template <class Vector>
-THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestNot2(void)
+THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestNot2()
 {
   using T = typename Vector::value_type;
 

@@ -24,17 +24,40 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
 #include <thrust/detail/type_traits.h>
+#include <thrust/type_traits/is_trivially_relocatable.h>
 
 #include <cmath>
 #include <complex>
 #include <sstream>
-#include <type_traits>
+#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
+#  include <type_traits>
+#endif
+
+/*! \cond
+ */
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+template <typename T>
+using remove_reference_t = ::cuda::std::__libcpp_remove_reference_t<T>;
+#else
+template <typename T>
+using remove_reference_t = ::std::remove_reference_t<T>;
+#endif
+/*! \endcond
+ */
 
 #define THRUST_STD_COMPLEX_REAL(z) \
-  reinterpret_cast<const typename thrust::detail::remove_reference<decltype(z)>::type::value_type(&)[2]>(z)[0]
+  reinterpret_cast<const typename remove_reference_t<decltype(z)>::value_type(&)[2]>(z)[0]
 #define THRUST_STD_COMPLEX_IMAG(z) \
-  reinterpret_cast<const typename thrust::detail::remove_reference<decltype(z)>::type::value_type(&)[2]>(z)[1]
+  reinterpret_cast<const typename remove_reference_t<decltype(z)>::value_type(&)[2]>(z)[1]
 #define THRUST_STD_COMPLEX_DEVICE THRUST_DEVICE
 
 THRUST_NAMESPACE_BEGIN
@@ -332,24 +355,22 @@ public:
   }
 
 private:
-/**
- * @brief Storage of two \p complex numbers.
- */
 #if defined(__CUDACC__) && ((__CUDACC_VER_MAJOR__ < 11) || (__CUDACC_VER_MAJOR__ == 11 && __CUDACC_VER_MINOR__ < 7))
   struct __align__(sizeof(T) * 2) storage
-#elif (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_ICC)
+#elif (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_INTEL)
   struct storage
-#else
+#else // !((THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_INTEL) || (defined(__CUDACC__) && ((__CUDACC_VER_MAJOR__ < 11)
+      // || (__CUDACC_VER_MAJOR__ == 11 && __CUDACC_VER_MINOR__ < 7))))
   struct alignas(sizeof(T) * 2) storage
-#endif
+#endif // !((THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_INTEL) || (defined(__CUDACC__) && ((__CUDACC_VER_MAJOR__ < 11)
+       // || (__CUDACC_VER_MAJOR__ == 11 && __CUDACC_VER_MINOR__ < 7))))
   {
     T x; /**< @brief The first \p complex. */
     T y; /**< @brief The second \p complex. */
   }
-#if (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_ICC)
+#if (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_INTEL)
   __attribute__((aligned(sizeof(T) * 2)))
-#endif
-
+#endif // THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_INTEL
   ;
   storage data;
 };
