@@ -25,6 +25,7 @@
 #include "rocsparse_bench_app.hpp"
 #include "rocsparse_bench.hpp"
 #include "rocsparse_random.hpp"
+#include <chrono>
 #include <fstream>
 
 rocsparse_bench_app* rocsparse_bench_app::s_instance = nullptr;

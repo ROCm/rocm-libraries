@@ -165,6 +165,27 @@ namespace rocsparse
     static const std::map<sddmm_buffer_size_template_tuple, sddmm_buffer_size_template_t>
         s_sddmm_buffer_size_template_dispatch{{
 
+            SDDMM_BUFFER_SIZE_TEMPLATE_CONFIG(rocsparse_datatype_f16_r,
+                                              rocsparse_indextype_i32,
+                                              rocsparse_indextype_i32,
+                                              rocsparse_datatype_f16_r,
+                                              rocsparse_datatype_f16_r,
+                                              rocsparse_datatype_f16_r),
+
+            SDDMM_BUFFER_SIZE_TEMPLATE_CONFIG(rocsparse_datatype_f16_r,
+                                              rocsparse_indextype_i64,
+                                              rocsparse_indextype_i32,
+                                              rocsparse_datatype_f16_r,
+                                              rocsparse_datatype_f16_r,
+                                              rocsparse_datatype_f16_r),
+
+            SDDMM_BUFFER_SIZE_TEMPLATE_CONFIG(rocsparse_datatype_f16_r,
+                                              rocsparse_indextype_i64,
+                                              rocsparse_indextype_i64,
+                                              rocsparse_datatype_f16_r,
+                                              rocsparse_datatype_f16_r,
+                                              rocsparse_datatype_f16_r),
+
             SDDMM_BUFFER_SIZE_TEMPLATE_CONFIG(rocsparse_datatype_f32_r,
                                               rocsparse_indextype_i32,
                                               rocsparse_indextype_i32,
@@ -532,6 +553,27 @@ namespace rocsparse
 
     static const std::map<sddmm_preprocess_template_tuple, sddmm_preprocess_template_t>
         s_sddmm_preprocess_template_dispatch{{
+
+            SDDMM_PREPROCESS_TEMPLATE_CONFIG(rocsparse_datatype_f16_r,
+                                             rocsparse_indextype_i32,
+                                             rocsparse_indextype_i32,
+                                             rocsparse_datatype_f16_r,
+                                             rocsparse_datatype_f16_r,
+                                             rocsparse_datatype_f16_r),
+
+            SDDMM_PREPROCESS_TEMPLATE_CONFIG(rocsparse_datatype_f16_r,
+                                             rocsparse_indextype_i64,
+                                             rocsparse_indextype_i32,
+                                             rocsparse_datatype_f16_r,
+                                             rocsparse_datatype_f16_r,
+                                             rocsparse_datatype_f16_r),
+
+            SDDMM_PREPROCESS_TEMPLATE_CONFIG(rocsparse_datatype_f16_r,
+                                             rocsparse_indextype_i64,
+                                             rocsparse_indextype_i64,
+                                             rocsparse_datatype_f16_r,
+                                             rocsparse_datatype_f16_r,
+                                             rocsparse_datatype_f16_r),
 
             SDDMM_PREPROCESS_TEMPLATE_CONFIG(rocsparse_datatype_f32_r,
                                              rocsparse_indextype_i32,
@@ -902,6 +944,27 @@ namespace rocsparse
     // clang-format on
 
     static const std::map<sddmm_template_tuple, sddmm_template_t> s_sddmm_template_dispatch{{
+
+        SDDMM_TEMPLATE_CONFIG(rocsparse_datatype_f16_r,
+                              rocsparse_indextype_i32,
+                              rocsparse_indextype_i32,
+                              rocsparse_datatype_f16_r,
+                              rocsparse_datatype_f16_r,
+                              rocsparse_datatype_f16_r),
+
+        SDDMM_TEMPLATE_CONFIG(rocsparse_datatype_f16_r,
+                              rocsparse_indextype_i64,
+                              rocsparse_indextype_i32,
+                              rocsparse_datatype_f16_r,
+                              rocsparse_datatype_f16_r,
+                              rocsparse_datatype_f16_r),
+
+        SDDMM_TEMPLATE_CONFIG(rocsparse_datatype_f16_r,
+                              rocsparse_indextype_i64,
+                              rocsparse_indextype_i64,
+                              rocsparse_datatype_f16_r,
+                              rocsparse_datatype_f16_r,
+                              rocsparse_datatype_f16_r),
 
         SDDMM_TEMPLATE_CONFIG(rocsparse_datatype_f32_r,
                               rocsparse_indextype_i32,

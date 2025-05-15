@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2023 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -40,7 +40,9 @@ static constexpr size_t s_var_string_size
     = countof(rocsparse_clients_envariables::s_var_string_all);
 
 static constexpr const char* s_var_bool_names[s_var_bool_size]
-    = {"ROCSPARSE_CLIENTS_VERBOSE", "ROCSPARSE_CLIENTS_TEST_DEBUG_ARGUMENTS"};
+    = {"ROCSPARSE_CLIENTS_VERBOSE",
+       "ROCSPARSE_CLIENTS_TEST_DEBUG_ARGUMENTS",
+       "ROCSPARSE_CLIENTS_ROCTX"};
 static constexpr const char* s_var_string_names[s_var_string_size]
     = {"ROCSPARSE_CLIENTS_MATRICES_DIR", "ROCSPARSE_TEST_DATA"};
 static constexpr const char* s_var_bool_descriptions[s_var_bool_size]
@@ -135,9 +137,6 @@ public:
     };
 
     //
-    // \brief Return value of a string variable.
-    //
-    //
     // \brief Is a Boolean variable defined ?
     //
     inline bool is_defined(rocsparse_clients_envariables::var_bool v) const
@@ -174,65 +173,25 @@ private:
     {
         for(auto tag : rocsparse_clients_envariables::s_var_bool_all)
         {
-            switch(tag)
+            const bool success = rocsparse_getenv(
+                s_var_bool_names[tag], this->m_var_bool_defined[tag], this->m_var_bool[tag]);
+            if(!success)
             {
-            case rocsparse_clients_envariables::VERBOSE:
-            {
-                const bool success = rocsparse_getenv(
-                    s_var_bool_names[tag], this->m_var_bool_defined[tag], this->m_var_bool[tag]);
-                if(!success)
-                {
-                    std::cerr << "rocsparse_getenv failed on fetching " << s_var_bool_names[tag]
-                              << std::endl;
-                    throw(rocsparse_status_invalid_value);
-                }
-                break;
-            }
-            case rocsparse_clients_envariables::TEST_DEBUG_ARGUMENTS:
-            {
-                const bool success = rocsparse_getenv(
-                    s_var_bool_names[tag], this->m_var_bool_defined[tag], this->m_var_bool[tag]);
-                if(!success)
-                {
-                    std::cerr << "rocsparse_getenv failed on fetching " << s_var_bool_names[tag]
-                              << std::endl;
-                    throw(rocsparse_status_invalid_value);
-                }
-                break;
-            }
+                std::cerr << "rocsparse_getenv failed on fetching " << s_var_bool_names[tag]
+                          << std::endl;
+                throw(rocsparse_status_invalid_value);
             }
         }
 
         for(auto tag : rocsparse_clients_envariables::s_var_string_all)
         {
-            switch(tag)
+            const bool success = rocsparse_getenv(
+                s_var_string_names[tag], this->m_var_string_defined[tag], this->m_var_string[tag]);
+            if(!success)
             {
-            case rocsparse_clients_envariables::MATRICES_DIR:
-            {
-                const bool success = rocsparse_getenv(s_var_string_names[tag],
-                                                      this->m_var_string_defined[tag],
-                                                      this->m_var_string[tag]);
-                if(!success)
-                {
-                    std::cerr << "rocsparse_getenv failed on fetching " << s_var_string_names[tag]
-                              << std::endl;
-                    throw(rocsparse_status_invalid_value);
-                }
-                break;
-            }
-            case rocsparse_clients_envariables::TEST_DATA_DIR:
-            {
-                const bool success = rocsparse_getenv(s_var_string_names[tag],
-                                                      this->m_var_string_defined[tag],
-                                                      this->m_var_string[tag]);
-                if(!success)
-                {
-                    std::cerr << "rocsparse_getenv failed on fetching " << s_var_string_names[tag]
-                              << std::endl;
-                    throw(rocsparse_status_invalid_value);
-                }
-                break;
-            }
+                std::cerr << "rocsparse_getenv failed on fetching " << s_var_string_names[tag]
+                          << std::endl;
+                throw(rocsparse_status_invalid_value);
             }
         }
 
@@ -240,56 +199,22 @@ private:
         {
             for(auto tag : rocsparse_clients_envariables::s_var_bool_all)
             {
-                switch(tag)
-                {
-                case rocsparse_clients_envariables::VERBOSE:
-                {
-                    const bool v = this->m_var_bool[tag];
-                    std::cout << ""
-                              << "env variable " << s_var_bool_names[tag] << " : "
-                              << ((this->m_var_bool_defined[tag]) ? ((v) ? "enabled" : "disabled")
-                                                                  : "<undefined>")
-                              << std::endl;
-                    break;
-                }
-                case rocsparse_clients_envariables::TEST_DEBUG_ARGUMENTS:
-                {
-                    const bool v = this->m_var_bool[tag];
-                    std::cout << ""
-                              << "env variable " << s_var_bool_names[tag] << " : "
-                              << ((this->m_var_bool_defined[tag]) ? ((v) ? "enabled" : "disabled")
-                                                                  : "<undefined>")
-                              << std::endl;
-                    break;
-                }
-                }
+                const bool v = this->m_var_bool[tag];
+                std::cout << ""
+                          << "env variable " << s_var_bool_names[tag] << " : "
+                          << ((this->m_var_bool_defined[tag]) ? ((v) ? "enabled" : "disabled")
+                                                              : "<undefined>")
+                          << std::endl;
             }
 
             for(auto tag : rocsparse_clients_envariables::s_var_string_all)
             {
-                switch(tag)
-                {
-                case rocsparse_clients_envariables::MATRICES_DIR:
-                {
-                    const std::string v = this->m_var_string[tag];
-                    std::cout << ""
-                              << "env variable " << s_var_string_names[tag] << " : "
-                              << ((this->m_var_string_defined[tag]) ? this->m_var_string[tag]
-                                                                    : "<undefined>")
-                              << std::endl;
-                    break;
-                }
-                case rocsparse_clients_envariables::TEST_DATA_DIR:
-                {
-                    const std::string v = this->m_var_string[tag];
-                    std::cout << ""
-                              << "env variable " << s_var_string_names[tag] << " : "
-                              << ((this->m_var_string_defined[tag]) ? this->m_var_string[tag]
-                                                                    : "<undefined>")
-                              << std::endl;
-                    break;
-                }
-                }
+                const std::string v = this->m_var_string[tag];
+                std::cout << ""
+                          << "env variable " << s_var_string_names[tag] << " : "
+                          << ((this->m_var_string_defined[tag]) ? this->m_var_string[tag]
+                                                                : "<undefined>")
+                          << std::endl;
             }
         }
     }

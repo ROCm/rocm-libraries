@@ -51,6 +51,26 @@ struct rocsparse_test_dispatch<rocsparse_test_dispatch_enum::it>
 };
 
 template <>
+struct rocsparse_test_dispatch<rocsparse_test_dispatch_enum::it_sparse_to_dense>
+{
+    template <template <typename...> class TEST>
+    static auto dispatch(const Arguments& arg)
+    {
+        return rocsparse_it_sparse_to_dense_dispatch<TEST>(arg);
+    }
+};
+
+template <>
+struct rocsparse_test_dispatch<rocsparse_test_dispatch_enum::it_dense_to_sparse>
+{
+    template <template <typename...> class TEST>
+    static auto dispatch(const Arguments& arg)
+    {
+        return rocsparse_it_dense_to_sparse_dispatch<TEST>(arg);
+    }
+};
+
+template <>
 struct rocsparse_test_dispatch<rocsparse_test_dispatch_enum::it_plus_int8_float16>
 {
     template <template <typename...> class TEST>
@@ -71,12 +91,42 @@ struct rocsparse_test_dispatch<rocsparse_test_dispatch_enum::ijt>
 };
 
 template <>
+struct rocsparse_test_dispatch<rocsparse_test_dispatch_enum::ijt_sparse_to_dense>
+{
+    template <template <typename...> class TEST>
+    static auto dispatch(const Arguments& arg)
+    {
+        return rocsparse_ijt_sparse_to_dense_dispatch<TEST>(arg);
+    }
+};
+
+template <>
+struct rocsparse_test_dispatch<rocsparse_test_dispatch_enum::ijt_dense_to_sparse>
+{
+    template <template <typename...> class TEST>
+    static auto dispatch(const Arguments& arg)
+    {
+        return rocsparse_ijt_dense_to_sparse_dispatch<TEST>(arg);
+    }
+};
+
+template <>
 struct rocsparse_test_dispatch<rocsparse_test_dispatch_enum::ixyt>
 {
     template <template <typename...> class TEST>
     static auto dispatch(const Arguments& arg)
     {
         return rocsparse_ixyt_dispatch<TEST>(arg);
+    }
+};
+
+template <>
+struct rocsparse_test_dispatch<rocsparse_test_dispatch_enum::ixyt_axpby>
+{
+    template <template <typename...> class TEST>
+    static auto dispatch(const Arguments& arg)
+    {
+        return rocsparse_ixyt_axpby_dispatch<TEST>(arg);
     }
 };
 

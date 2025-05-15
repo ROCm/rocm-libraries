@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -48,9 +48,20 @@ Tests:
   function: dense_to_sparse_csc
   indextype: *i32i32_i64i32_i64i64
   precision: *single_double_precisions_complex_real
-  M: [-1, 487, 1000]
-  N: [-3, 523, 1000]
+  M: [487, 1000]
+  N: [523, 1000]
   denseld: [100, 2000]
+  baseA: [rocsparse_index_base_zero]
+  order: [rocsparse_order_row, rocsparse_order_column]
+
+- name: dense_to_sparse_csc
+  category: pre_checkin
+  function: dense_to_sparse_csc
+  indextype: *i32i32_i64i32_i64i64
+  precision: *half_precision
+  M: [56, 678, 3845]
+  N: [98, 234, 2875]
+  denseld: [4000]
   baseA: [rocsparse_index_base_zero]
   order: [rocsparse_order_row, rocsparse_order_column]
 

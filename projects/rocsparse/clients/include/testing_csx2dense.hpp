@@ -24,7 +24,7 @@
 
 #pragma once
 
-#include <rocsparse.hpp>
+#include "rocsparse.hpp"
 
 #include "auto_testing_bad_arg.hpp"
 #include "gbyte.hpp"

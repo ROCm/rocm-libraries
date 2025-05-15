@@ -30,6 +30,7 @@
 #ifndef UTILITY_HPP
 #define UTILITY_HPP
 
+#include "rocsparse_clients_routine_trace.hpp"
 #include "rocsparse_matrix.hpp"
 #include "rocsparse_test.hpp"
 
@@ -182,6 +183,12 @@ inline constexpr size_t rocsparse_datatype_sizeof(rocsparse_datatype datatype_)
     return static_cast<size_t>(0);
 }
 
+inline std::ostream& operator<<(std::ostream& os_, const _Float16& that_)
+{
+    os_ << (float)that_;
+    return os_;
+}
+
 /*! \brief  local handle which is automatically created and destroyed  */
 class rocsparse_local_handle
 {
@@ -192,6 +199,8 @@ public:
         : capture_started(false)
         , graph_testing(false)
     {
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
         const rocsparse_status status = rocsparse_create_handle(&this->handle);
         if(status != rocsparse_status_success)
         {
@@ -202,6 +211,8 @@ public:
         : capture_started(false)
         , graph_testing(arg.graph_test)
     {
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
         const rocsparse_status status = rocsparse_create_handle(&this->handle);
         if(status != rocsparse_status_success)
         {
@@ -210,6 +221,8 @@ public:
     }
     ~rocsparse_local_handle()
     {
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
         rocsparse_destroy_handle(this->handle);
     }
 
@@ -225,6 +238,8 @@ public:
 
     void rocsparse_stream_begin_capture()
     {
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
         if(!(this->graph_testing))
         {
             return;
@@ -246,6 +261,8 @@ public:
 
     void rocsparse_stream_end_capture(rocsparse_int runs = 1)
     {
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
         if(!(this->graph_testing))
         {
             return;
@@ -296,6 +313,8 @@ class rocsparse_local_mat_descr
 public:
     rocsparse_local_mat_descr()
     {
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
         const rocsparse_status status = rocsparse_create_mat_descr(&this->descr);
         if(status != rocsparse_status_success)
         {
@@ -305,6 +324,8 @@ public:
 
     ~rocsparse_local_mat_descr()
     {
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
         rocsparse_destroy_mat_descr(this->descr);
     }
 
@@ -327,6 +348,8 @@ class rocsparse_local_mat_info
 public:
     rocsparse_local_mat_info()
     {
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
         const rocsparse_status status = rocsparse_create_mat_info(&this->info);
         if(status != rocsparse_status_success)
         {
@@ -335,12 +358,16 @@ public:
     }
     ~rocsparse_local_mat_info()
     {
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
         rocsparse_destroy_mat_info(this->info);
     }
 
     // Sometimes useful to reset local info
     void reset()
     {
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
         rocsparse_destroy_mat_info(this->info);
         const rocsparse_status status = rocsparse_create_mat_info(&this->info);
         if(status != rocsparse_status_success)
@@ -368,6 +395,8 @@ class rocsparse_local_color_info
 public:
     rocsparse_local_color_info()
     {
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
         const rocsparse_status status = rocsparse_create_color_info(&this->info);
         if(status != rocsparse_status_success)
         {
@@ -376,12 +405,16 @@ public:
     }
     ~rocsparse_local_color_info()
     {
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
         rocsparse_destroy_color_info(this->info);
     }
 
     // Sometimes useful to reset local info
     void reset()
     {
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
         rocsparse_destroy_color_info(this->info);
         const rocsparse_status status = rocsparse_create_color_info(&this->info);
         if(status != rocsparse_status_success)
@@ -425,6 +458,8 @@ class rocsparse_local_hyb_mat
 public:
     rocsparse_local_hyb_mat()
     {
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
         const rocsparse_status status = rocsparse_create_hyb_mat(&this->hyb);
         if(status != rocsparse_status_success)
         {
@@ -433,6 +468,8 @@ public:
     }
     ~rocsparse_local_hyb_mat()
     {
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
         rocsparse_destroy_hyb_mat(this->hyb);
     }
 
@@ -461,6 +498,8 @@ public:
                           rocsparse_index_base idx_base,
                           rocsparse_datatype   compute_type)
     {
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
         const rocsparse_status status = rocsparse_create_spvec_descr(
             &this->descr, size, nnz, indices, values, idx_type, idx_base, compute_type);
         if(status != rocsparse_status_success)
@@ -470,6 +509,8 @@ public:
     }
     ~rocsparse_local_spvec()
     {
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
         if(this->descr != nullptr)
         {
             rocsparse_destroy_spvec_descr(this->descr);
@@ -503,6 +544,8 @@ public:
                           rocsparse_index_base idx_base,
                           rocsparse_datatype   compute_type)
     {
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
         const rocsparse_status status = rocsparse_create_coo_descr(&this->descr,
                                                                    m,
                                                                    n,
@@ -542,6 +585,8 @@ public:
                           rocsparse_index_base idx_base,
                           rocsparse_datatype   compute_type)
     {
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
         const rocsparse_status status = rocsparse_create_coo_aos_descr(
             &this->descr, m, n, nnz, coo_ind, coo_val, idx_type, idx_base, compute_type);
         if(status != rocsparse_status_success)
@@ -569,6 +614,8 @@ public:
                           rocsparse_datatype   compute_type,
                           bool                 csc_format = false)
     {
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
         if(csc_format == false)
         {
             const rocsparse_status status = rocsparse_create_csr_descr(&this->descr,
@@ -641,6 +688,7 @@ public:
                           rocsparse_datatype   compute_type,
                           rocsparse_format     format)
     {
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE
 
         if(format == rocsparse_format_bsr)
         {
@@ -697,6 +745,8 @@ public:
                           rocsparse_index_base idx_base,
                           rocsparse_datatype   compute_type)
     {
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
         const rocsparse_status status = rocsparse_create_bell_descr(&this->descr,
                                                                     m,
                                                                     n,
@@ -723,6 +773,8 @@ public:
                           rocsparse_index_base idx_base,
                           rocsparse_datatype   compute_type)
     {
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
         const rocsparse_status status = rocsparse_create_ell_descr(
             &this->descr, m, n, ell_col_ind, ell_val, ell_width, idx_type, idx_base, compute_type);
         if(status != rocsparse_status_success)
@@ -740,6 +792,8 @@ public:
 
     ~rocsparse_local_spmat()
     {
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
         if(this->descr != nullptr)
             rocsparse_destroy_spmat_descr(this->descr);
     }
@@ -763,6 +817,8 @@ class rocsparse_local_dnvec
 public:
     rocsparse_local_dnvec(int64_t size, void* values, rocsparse_datatype compute_type)
     {
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
         const rocsparse_status status
             = rocsparse_create_dnvec_descr(&this->descr, size, values, compute_type);
         if(status != rocsparse_status_success)
@@ -779,6 +835,8 @@ public:
 
     ~rocsparse_local_dnvec()
     {
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
         if(this->descr != nullptr)
             rocsparse_destroy_dnvec_descr(this->descr);
     }
@@ -807,6 +865,8 @@ public:
                           rocsparse_datatype compute_type,
                           rocsparse_order    order)
     {
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
         const rocsparse_status status = rocsparse_create_dnmat_descr(
             &this->descr, rows, cols, ld, values, compute_type, order);
         if(status != rocsparse_status_success)
@@ -823,6 +883,8 @@ public:
 
     ~rocsparse_local_dnmat()
     {
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
         if(this->descr != nullptr)
             rocsparse_destroy_dnmat_descr(this->descr);
     }

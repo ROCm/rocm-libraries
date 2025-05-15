@@ -1388,6 +1388,62 @@ rocsparse_status rocsparse_spgeam_get_output(rocsparse_handle        handle,
                                              size_t                  data_size_in_bytes);
 
 /*! \ingroup aux_module
+   *  \brief Sparse matrix spmv.
+   *
+   *  \details
+   *  \p rocsparse_create_spmv_descr creates the descriptor of the \ref rocsparse_v2_spmv_buffer_size and
+   *  \ref rocsparse_v2_spmv routines.
+
+   *  @param[out]
+   *  descr        pointer to the descriptor of the SpMV routine.
+   *
+   *  \retval      rocsparse_status_success the operation completed successfully.
+   *  \retval      rocsparse_status_invalid_pointer \p descr pointer is invalid.
+   */
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_create_spmv_descr(rocsparse_spmv_descr* descr);
+
+/*! \ingroup aux_module
+   *  \brief Sparse matrix spmv.
+   *
+   *  \details
+   *  \p rocsparse_destroy_spmv_descr destroys the descriptor of the \ref rocsparse_v2_spmv_buffer_size and
+   *  \ref rocsparse_v2_spmv routines.
+   *
+   *  @param[in]
+   *  descr        descriptor of the v2_spmv routine.
+*  \retval      rocsparse_status_success the operation completed successfully.
+*/
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_destroy_spmv_descr(rocsparse_spmv_descr descr);
+
+/*! \ingroup aux_module
+   *  \brief Set the requested \ref rocsparse_spmv_input data in the SpMV descriptor
+   *
+   *  @param[in]
+   *  handle      the pointer to the handle to the rocSPARSE library context.
+   *  @param[inout]
+   *  descr       the pointer to the SpMV descriptor.
+   *  @param[in]
+   *  input       one possible value of \ref rocsparse_spmv_input
+   *  @param[in]
+   *  in          input value
+   *  @param[in]
+   *  size_in_bytes input value size in bytes.
+   *
+   *  \retval rocsparse_status_success the operation completed successfully.
+   *  \retval rocsparse_status_invalid_pointer if \p descr or \p in is invalid.
+   *  \retval rocsparse_status_invalid_value if \p input is invalid.
+   *  \retval rocsparse_status_invalid_size if \p size_in_bytes is zero.
+   */
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_spmv_set_input(rocsparse_handle     handle,
+                                          rocsparse_spmv_descr descr,
+                                          rocsparse_spmv_input input,
+                                          const void*          in,
+                                          size_t               size_in_bytes);
+
+/*! \ingroup aux_module
  *  \brief Get the fields of the sparse COO matrix descriptor
  *  \details
  *  \p rocsparse_coo_get gets the fields of the sparse COO matrix descriptor

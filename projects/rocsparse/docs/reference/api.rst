@@ -127,6 +127,12 @@ Auxiliary Functions
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_spgeam_get_output`              |
 +-----------------------------------------------------+
+|:cpp:func:`rocsparse_create_spmv_descr`              |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_destroy_spmv_descr`             |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_spmv_set_input`                 |
++-----------------------------------------------------+
 |:cpp:func:`rocsparse_coo_get`                        |
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_coo_aos_get`                    |
@@ -225,9 +231,6 @@ Sparse Level 2 Functions
 ============================================================================= ====== ====== ============== ==============
 Function name                                                                 single double single complex double complex
 ============================================================================= ====== ====== ============== ==============
-:cpp:func:`rocsparse_Xbsrmv_ex_analysis() <rocsparse_sbsrmv_ex_analysis>`     x      x      x              x
-:cpp:func:`rocsparse_bsrmv_ex_clear`
-:cpp:func:`rocsparse_Xbsrmv_ex() <rocsparse_sbsrmv_ex>`                       x      x      x              x
 :cpp:func:`rocsparse_Xbsrmv_analysis() <rocsparse_sbsrmv_analysis>`           x      x      x              x
 :cpp:func:`rocsparse_bsrmv_clear`
 :cpp:func:`rocsparse_Xbsrmv() <rocsparse_sbsrmv>`                             x      x      x              x
@@ -464,7 +467,9 @@ documentation for details on what data types and compute types are supported.
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_spmv()`                         |
 +-----------------------------------------------------+
-|:cpp:func:`rocsparse_spmv_ex()`                      |
+|:cpp:func:`rocsparse_v2_spmv_buffer_size()`          |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_v2_spmv()`                      |
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_spsv()`                         |
 +-----------------------------------------------------+

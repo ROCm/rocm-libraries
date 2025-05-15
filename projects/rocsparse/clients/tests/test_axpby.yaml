@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -46,6 +46,17 @@ Tests:
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
 
 - name: axpby
+  category: quick
+  function: axpby
+  indextype: *i32_i64
+  precision: *float16_float16_float32_xyt_precision
+  M: [100]
+  nnz: [10, 20]
+  alpha: [0.3]
+  beta: [0.0]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+
+- name: axpby
   category: pre_checkin
   function: axpby
   indextype: *i32_i64
@@ -57,6 +68,17 @@ Tests:
   beta: [1.2]
   betai: [-1.1, 0.26]
   baseA: [rocsparse_index_base_one]
+
+- name: axpby
+  category: pre_checkin
+  function: axpby
+  indextype: *i32_i64
+  precision: *float16_float16_float32_xyt_precision
+  M: [47000]
+  nnz: [11000]
+  alpha: [0.3]
+  beta: [0.0]
+  baseA: [rocsparse_index_base_zero]
 
 - name: axpby
   category: nightly

@@ -22,9 +22,9 @@
  *
  * ************************************************************************ */
 
+#include "rocsparse/rocsparse.h"
 #include <hip/hip_runtime_api.h>
 #include <iostream>
-#include <rocsparse/rocsparse.h>
 #include <vector>
 
 #define HIP_CHECK(stat)                                                        \

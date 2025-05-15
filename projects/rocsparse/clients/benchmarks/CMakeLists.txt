@@ -167,6 +167,12 @@ set(ROCSPARSE_CLIENTS_TESTINGS
 ../testings/testing_spmv_csr.cpp
 ../testings/testing_spmv_csc.cpp
 ../testings/testing_spmv_ell.cpp
+../testings/testing_v2_spmv_bsr.cpp
+../testings/testing_v2_spmv_coo.cpp
+../testings/testing_v2_spmv_coo_aos.cpp
+../testings/testing_v2_spmv_csr.cpp
+../testings/testing_v2_spmv_csc.cpp
+../testings/testing_v2_spmv_ell.cpp
 ../testings/testing_spsv_csr.cpp
 ../testings/testing_spsv_coo.cpp
 ../testings/testing_spitsv_csr.cpp
@@ -221,6 +227,13 @@ if (NOT WIN32)
    target_link_libraries(rocsparse-bench PRIVATE OpenMP::OpenMP_CXX -Wl,-rpath=${HIP_CLANG_ROOT}/lib)
   else()
    target_link_libraries(rocsparse-bench PRIVATE libomp)
+  endif()
+endif()
+
+if (NOT WIN32)
+  if (BUILD_WITH_ROCTX)
+    target_link_libraries(rocsparse-bench PRIVATE -lroctx64)
+    target_compile_definitions( rocsparse-bench PRIVATE ROCSPARSE_CLIENTS_WITH_ROCTX )
   endif()
 endif()
 

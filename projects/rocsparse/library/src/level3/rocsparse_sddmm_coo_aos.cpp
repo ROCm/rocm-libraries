@@ -298,7 +298,8 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_coo_aos, T, I, J, A, B, C>
     template struct rocsparse::                               \
         rocsparse_sddmm_st<rocsparse_format_coo_aos, TTYPE, ITYPE, JTYPE, ATYPE, BTYPE, CTYPE>
 
-INSTANTIATE(float, int32_t, int32_t, _Float16, _Float16, float);
+// Uniform precision
+INSTANTIATE(_Float16, int32_t, int32_t, _Float16, _Float16, _Float16);
 INSTANTIATE(float, int32_t, int32_t, float, float, float);
 INSTANTIATE(double, int32_t, int32_t, double, double, double);
 INSTANTIATE(rocsparse_float_complex,
@@ -314,7 +315,7 @@ INSTANTIATE(rocsparse_double_complex,
             rocsparse_double_complex,
             rocsparse_double_complex);
 
-INSTANTIATE(float, int64_t, int64_t, _Float16, _Float16, float);
+INSTANTIATE(_Float16, int64_t, int64_t, _Float16, _Float16, _Float16);
 INSTANTIATE(float, int64_t, int64_t, float, float, float);
 INSTANTIATE(double, int64_t, int64_t, double, double, double);
 INSTANTIATE(rocsparse_float_complex,
@@ -329,5 +330,9 @@ INSTANTIATE(rocsparse_double_complex,
             rocsparse_double_complex,
             rocsparse_double_complex,
             rocsparse_double_complex);
+
+// Mixed precision
+INSTANTIATE(float, int32_t, int32_t, _Float16, _Float16, float);
+INSTANTIATE(float, int64_t, int64_t, _Float16, _Float16, float);
 
 #undef INSTANTIATE

@@ -156,6 +156,12 @@ set(ROCSPARSE_TEST_SOURCES
   test_spmv_csr.cpp
   test_spmv_csc.cpp
   test_spmv_ell.cpp
+  test_v2_spmv_bsr.cpp
+  test_v2_spmv_coo.cpp
+  test_v2_spmv_coo_aos.cpp
+  test_v2_spmv_csr.cpp
+  test_v2_spmv_csc.cpp
+  test_v2_spmv_ell.cpp
   test_spsv_csr.cpp
   test_spitsv_csr.cpp
   test_spsv_coo.cpp
@@ -292,6 +298,12 @@ set(ROCSPARSE_CLIENTS_TESTINGS
 ../testings/testing_spmv_csr.cpp
 ../testings/testing_spmv_csc.cpp
 ../testings/testing_spmv_ell.cpp
+../testings/testing_v2_spmv_coo.cpp
+../testings/testing_v2_spmv_coo_aos.cpp
+../testings/testing_v2_spmv_csr.cpp
+../testings/testing_v2_spmv_bsr.cpp
+../testings/testing_v2_spmv_csc.cpp
+../testings/testing_v2_spmv_ell.cpp
 ../testings/testing_spsv_csr.cpp
 ../testings/testing_spitsv_csr.cpp
 ../testings/testing_spsv_coo.cpp
@@ -402,6 +414,12 @@ if (NOT WIN32)
   endif()
 endif()
 
+if (NOT WIN32)
+  if (BUILD_WITH_ROCTX)
+    target_link_libraries(rocsparse-test PRIVATE -lroctx64)
+    target_compile_definitions( rocsparse-test PRIVATE ROCSPARSE_CLIENTS_WITH_ROCTX )
+  endif()
+endif()
 
 # Set test output directory
 set_target_properties(rocsparse-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging")
@@ -413,7 +431,7 @@ string(REGEX REPLACE ".cpp" ".yaml" ROCSPARSE_TEST_YAMLS "${ROCSPARSE_TEST_SOURC
 # Prepare testing data
 set(ROCSPARSE_TEST_DATA "${PROJECT_BINARY_DIR}/staging/rocsparse_test.data")
 add_custom_command(OUTPUT "${ROCSPARSE_TEST_DATA}"
-                   COMMAND ${python} ../common/rocsparse_gentest.py -m ${PROJECT_BINARY_DIR}/matrices -I ../include rocsparse_test.yaml -o "${ROCSPARSE_TEST_DATA}"
+                   COMMAND ${Python3_EXECUTABLE} ../common/rocsparse_gentest.py -m ${PROJECT_BINARY_DIR}/matrices -I ../include rocsparse_test.yaml -o "${ROCSPARSE_TEST_DATA}"
                    DEPENDS ../common/rocsparse_gentest.py rocsparse_test.yaml ../include/rocsparse_common.yaml ${ROCSPARSE_TEST_YAMLS}
                    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
 add_custom_target(rocsparse-test-data

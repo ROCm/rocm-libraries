@@ -309,6 +309,21 @@ rocsparse_spgeam_get_output
 
 .. doxygenfunction:: rocsparse_spgeam_get_output
 
+rocsparse_create_spmv_descr
+---------------------------
+
+.. doxygenfunction:: rocsparse_create_spmv_descr
+
+rocsparse_destroy_spmv_descr
+----------------------------
+
+.. doxygenfunction:: rocsparse_destroy_spmv_descr
+
+rocsparse_spmv_set_input
+------------------------
+
+.. doxygenfunction:: rocsparse_spmv_set_input
+
 rocsparse_coo_get
 -----------------
 

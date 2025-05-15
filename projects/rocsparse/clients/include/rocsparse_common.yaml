@@ -155,7 +155,7 @@ Datatypes:
         rocsparse_spmv_alg_default: 0
         rocsparse_spmv_alg_coo: 1
         rocsparse_spmv_alg_csr_adaptive: 2
-        rocsparse_spmv_alg_csr_stream: 3
+        rocsparse_spmv_alg_csr_rowsplit: 3
         rocsparse_spmv_alg_ell: 4
         rocsparse_spmv_alg_coo_atomic: 5
         rocsparse_spmv_alg_bsr: 6
@@ -259,6 +259,8 @@ Real precisions: &real_precisions
     { a_type: i8_r, b_type: i8_r, c_type: f32_r, compute_type: f32_r }
   - &float16_float16_float32_float32_abct_precision
     { a_type: f16_r, b_type: f16_r, c_type: f32_r, compute_type: f32_r }
+  - &float16_float16_float16_float16_abct_precision
+    { a_type: f16_r, b_type: f16_r, c_type: f16_r, compute_type: f16_r }
   - &int8_precision
     { a_type: i8_r, b_type: i8_r, c_type: i8_r, x_type: i8_r, y_type: i8_r, compute_type: i8_r }
   - &half_precision
@@ -404,7 +406,7 @@ All rocsparse_spmv_alg: &all_rocsparse_spmv_alg
         [rocsparse_spmv_alg_default,
          rocsparse_spmv_alg_coo,
          rocsparse_spmv_alg_csr_adaptive,
-         rocsparse_spmv_alg_csr_stream,
+         rocsparse_spmv_alg_csr_rowsplit,
          rocsparse_spmv_alg_ell,
          rocsparse_spmv_alg_coo_atomic,
          rocsparse_spmv_alg_bsr,
@@ -412,7 +414,7 @@ All rocsparse_spmv_alg: &all_rocsparse_spmv_alg
 
 All rocsparse_spmv_alg_csr: &all_rocsparse_spmv_alg_csr
         [rocsparse_spmv_alg_csr_adaptive,
-         rocsparse_spmv_alg_csr_stream,
+         rocsparse_spmv_alg_csr_rowsplit,
          rocsparse_spmv_alg_csr_lrb]
 
 All rocsparse_spsv_alg: &all_rocsparse_spsv_alg

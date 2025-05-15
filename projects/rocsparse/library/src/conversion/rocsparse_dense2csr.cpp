@@ -38,14 +38,17 @@
         ITYPE*                    csx_row_col_ptr_A,                                \
         JTYPE*                    csx_col_row_ind_A);
 
+INSTANTIATE(rocsparse_direction_row, int32_t, int32_t, _Float16);
 INSTANTIATE(rocsparse_direction_row, int32_t, int32_t, float);
 INSTANTIATE(rocsparse_direction_row, int32_t, int32_t, double);
 INSTANTIATE(rocsparse_direction_row, int32_t, int32_t, rocsparse_float_complex);
 INSTANTIATE(rocsparse_direction_row, int32_t, int32_t, rocsparse_double_complex);
+INSTANTIATE(rocsparse_direction_row, int64_t, int32_t, _Float16);
 INSTANTIATE(rocsparse_direction_row, int64_t, int32_t, float);
 INSTANTIATE(rocsparse_direction_row, int64_t, int32_t, double);
 INSTANTIATE(rocsparse_direction_row, int64_t, int32_t, rocsparse_float_complex);
 INSTANTIATE(rocsparse_direction_row, int64_t, int32_t, rocsparse_double_complex);
+INSTANTIATE(rocsparse_direction_row, int64_t, int64_t, _Float16);
 INSTANTIATE(rocsparse_direction_row, int64_t, int64_t, float);
 INSTANTIATE(rocsparse_direction_row, int64_t, int64_t, double);
 INSTANTIATE(rocsparse_direction_row, int64_t, int64_t, rocsparse_float_complex);

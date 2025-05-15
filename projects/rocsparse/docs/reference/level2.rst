@@ -12,33 +12,6 @@ This module holds all sparse level 2 routines.
 
 The sparse level 2 routines describe operations between a matrix in sparse format and a vector in dense format.
 
-rocsparse_bsrmv_ex_analysis()
------------------------------
-
-.. doxygenfunction:: rocsparse_sbsrmv_ex_analysis
-  :outline:
-.. doxygenfunction:: rocsparse_dbsrmv_ex_analysis
-  :outline:
-.. doxygenfunction:: rocsparse_cbsrmv_ex_analysis
-  :outline:
-.. doxygenfunction:: rocsparse_zbsrmv_ex_analysis
-
-rocsparse_bsrmv_ex()
---------------------
-
-.. doxygenfunction:: rocsparse_sbsrmv_ex
-  :outline:
-.. doxygenfunction:: rocsparse_dbsrmv_ex
-  :outline:
-.. doxygenfunction:: rocsparse_cbsrmv_ex
-  :outline:
-.. doxygenfunction:: rocsparse_zbsrmv_ex
-
-rocsparse_bsrmv_ex_clear()
---------------------------
-
-.. doxygenfunction:: rocsparse_bsrmv_ex_clear
-
 rocsparse_bsrmv_analysis()
 --------------------------
 

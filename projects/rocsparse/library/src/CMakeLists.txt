@@ -64,8 +64,10 @@ set(rocsparse_source
   src/level1/rocsparse_spvv.cpp
 
 # Level2
-  src/level2/rocsparse_bsrmv_ex.cpp
+  src/level2/rocsparse_bsrmv_impl.cpp
   src/level2/rocsparse_bsrmv.cpp
+  src/level2/rocsparse_bsrmv_analysis.cpp
+  #
   src/level2/rocsparse_bsrxmv.cpp
   src/level2/rocsparse_bsrxmv_spzl_2x2.cpp
   src/level2/rocsparse_bsrxmv_spzl_3x3.cpp
@@ -79,13 +81,28 @@ set(rocsparse_source
   src/level2/rocsparse_bsrsv_analysis.cpp
   src/level2/rocsparse_bsrsv_buffer_size.cpp
   src/level2/rocsparse_bsrsv_solve.cpp
+  #
+  src/level2/rocsparse_coomv_impl.cpp
   src/level2/rocsparse_coomv.cpp
+  src/level2/rocsparse_coomv_analysis.cpp
+  #
+  src/level2/rocsparse_coomv_aos_impl.cpp
   src/level2/rocsparse_coomv_aos.cpp
+  #
   src/level2/rocsparse_csrmv_template_rowsplit.cpp
   src/level2/rocsparse_csrmv_template_adaptive.cpp
   src/level2/rocsparse_csrmv_template_lrb.cpp
+  src/level2/rocsparse_csrmv_impl.cpp
   src/level2/rocsparse_csrmv.cpp
+  src/level2/rocsparse_csrmv_analysis.cpp
+  #
+  src/level2/rocsparse_cscmv_impl.cpp
   src/level2/rocsparse_cscmv.cpp
+  src/level2/rocsparse_cscmv_analysis.cpp
+  #
+  src/level2/rocsparse_ellmv_impl.cpp
+  src/level2/rocsparse_ellmv.cpp
+  #
   src/level2/rocsparse_csrsv.cpp
   src/level2/rocsparse_csrsv_analysis.cpp
   src/level2/rocsparse_csrsv_buffer_size.cpp
@@ -96,10 +113,9 @@ set(rocsparse_source
   src/level2/rocsparse_csritsv_solve.cpp
   src/level2/rocsparse_csritsv_solve_ex.cpp
   src/level2/rocsparse_coosv.cpp
-  src/level2/rocsparse_ellmv.cpp
   src/level2/rocsparse_hybmv.cpp
+  src/level2/rocsparse_v2_spmv.cpp
   src/level2/rocsparse_spmv.cpp
-  src/level2/rocsparse_spmv_ex.cpp
   src/level2/rocsparse_spsv.cpp
   src/level2/rocsparse_spitsv.cpp
   src/level2/rocsparse_gebsrmv.cpp
@@ -486,6 +502,7 @@ set(rocsparse_source
   src/conversion/rocsparse_gell2csr.cpp
   src/conversion/rocsparse_ggthr.cpp
   src/conversion/rocsparse_convert_array.cpp
+  src/conversion/rocsparse_convert_scalar.cpp
   src/conversion/rocsparse_sparse_to_sparse_buffer_size.cpp
   src/conversion/rocsparse_sparse_to_sparse.cpp
   src/conversion/rocsparse_sparse_to_sparse_compute.cpp

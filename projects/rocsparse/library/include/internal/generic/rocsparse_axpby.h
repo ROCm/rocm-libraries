@@ -68,6 +68,13 @@ extern "C" {
 *  <tr><td>rocsparse_datatype_f64_c
 *  </table>
 *
+*  \par Mixed precisions:
+*  <table>
+*  <caption id="axpby_mixed">Mixed Precisions</caption>
+*  <tr><th>X / Y                   <th>compute_type
+*  <tr><td>rocsparse_datatype_f16_r <td>rocsparse_datatype_f32_r
+*  </table>
+*
 *  \note
 *  This function is non blocking and executed asynchronously with respect to the host.
 *  It may return before the actual computation has finished.

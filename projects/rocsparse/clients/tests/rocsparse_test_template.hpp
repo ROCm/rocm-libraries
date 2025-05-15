@@ -229,6 +229,8 @@ namespace
                 }
 
                 case rocsparse_test_dispatch_enum::it:
+                case rocsparse_test_dispatch_enum::it_sparse_to_dense:
+                case rocsparse_test_dispatch_enum::it_dense_to_sparse:
                 case rocsparse_test_dispatch_enum::it_plus_int8_float16:
                 {
                     s << rocsparse_indextype2string(arg.index_type_I) << '_'
@@ -236,6 +238,8 @@ namespace
                     break;
                 }
                 case rocsparse_test_dispatch_enum::ijt:
+                case rocsparse_test_dispatch_enum::ijt_sparse_to_dense:
+                case rocsparse_test_dispatch_enum::ijt_dense_to_sparse:
                 {
                     s << rocsparse_indextype2string(arg.index_type_I) << '_'
                       << rocsparse_indextype2string(arg.index_type_J) << '_'
@@ -243,6 +247,7 @@ namespace
                     break;
                 }
                 case rocsparse_test_dispatch_enum::ixyt:
+                case rocsparse_test_dispatch_enum::ixyt_axpby:
                 {
                     s << rocsparse_indextype2string(arg.index_type_I) << '_'
                       << rocsparse_datatype2string(arg.x_type) << '_'
@@ -441,37 +446,6 @@ namespace
     };
 
     template <rocsparse_test_enum::value_type ROUTINE>
-    struct rocsparse_test_ijabct_sddmm_template
-    {
-        template <typename A,
-                  typename B,
-                  typename C,
-                  typename T,
-                  typename I,
-                  typename J,
-                  typename = void>
-        struct test_call : rocsparse_test_invalid
-        {
-        };
-
-        template <typename I, typename J, typename A, typename B, typename C, typename T>
-        struct test_call<I,
-                         J,
-                         A,
-                         B,
-                         C,
-                         T,
-                         typename std::enable_if<std::is_integral<I>::value>::type>
-            : rocsparse_test_template<ROUTINE>::template test_call_proxy<I, J, A, B, C, T>
-        {
-        };
-
-        struct test : rocsparse_test_template<ROUTINE>::template test_proxy<test, test_call>
-        {
-        };
-    };
-
-    template <rocsparse_test_enum::value_type ROUTINE>
     struct rocsparse_test_ijt_template
     {
         using check_t = rocsparse_test_check<ROUTINE>;
@@ -489,30 +463,6 @@ namespace
                          T,
                          typename std::enable_if<check_t::template is_type_valid<I, J, T>()>::type>
             : rocsparse_test_template<ROUTINE>::template test_call_proxy<I, J, T>
-        {
-        };
-
-        struct test : rocsparse_test_template<ROUTINE>::template test_proxy<test, test_call>
-        {
-        };
-    };
-
-    template <rocsparse_test_enum::value_type ROUTINE>
-    struct rocsparse_test_it_plus_int8_float16_template
-    {
-        using check_t = rocsparse_test_check<ROUTINE>;
-        //
-        template <typename T, typename I = int32_t, typename = void>
-        struct test_call : rocsparse_test_invalid
-        {
-        };
-
-        //
-        template <typename I, typename T>
-        struct test_call<I,
-                         T,
-                         typename std::enable_if<check_t::template is_type_valid<I, T>()>::type>
-            : rocsparse_test_template<ROUTINE>::template test_call_proxy<I, T>
         {
         };
 

@@ -200,10 +200,19 @@ rocsparse_status rocsparse_sddmm_preprocess(rocsparse_handle            handle,
 *  <table>
 *  <caption id="sddmm_uniform">Uniform Precisions</caption>
 *  <tr><th>A / B / C / compute_type
+*  <tr><td>rocsparse_datatype_f16_r
 *  <tr><td>rocsparse_datatype_f32_r
 *  <tr><td>rocsparse_datatype_f64_r
 *  <tr><td>rocsparse_datatype_f32_c
 *  <tr><td>rocsparse_datatype_f64_c
+*  </table>
+*
+*  \par Mixed precisions:
+*  <table>
+*  <caption id="sddmm_mixed">Mixed Precisions</caption>
+*  <tr><th>A / B                    <th>C                        <th>compute_type
+*  <tr><td>rocsparse_datatype_f16_r <td>rocsparse_datatype_f32_r <td>rocsparse_datatype_f32_r
+*  <tr><td>rocsparse_datatype_f16_r <td>rocsparse_datatype_f16_r <td>rocsparse_datatype_f32_r
 *  </table>
 *
 *  \note

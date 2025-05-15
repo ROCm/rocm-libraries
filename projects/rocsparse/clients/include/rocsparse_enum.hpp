@@ -40,8 +40,8 @@ struct rocsparse_itilu0_alg_t
     static constexpr uint32_t nvalues = 5;
 
     // clang-format off
-  static constexpr value_t  values[nvalues] = {rocsparse_itilu0_alg_default,
-   					         rocsparse_itilu0_alg_async_inplace,
+    static constexpr value_t  values[nvalues] = {rocsparse_itilu0_alg_default,
+   					                             rocsparse_itilu0_alg_async_inplace,
                                                  rocsparse_itilu0_alg_async_split,
                                                  rocsparse_itilu0_alg_sync_split,
                                                  rocsparse_itilu0_alg_sync_split_fusion};
@@ -104,10 +104,10 @@ struct rocsparse_matrix_type_t
     using value_t                     = rocsparse_matrix_type;
     static constexpr uint32_t nvalues = 4;
     // clang-format off
-  static constexpr value_t  values[nvalues] = {rocsparse_matrix_type_general,
-                                               rocsparse_matrix_type_symmetric,
-                                               rocsparse_matrix_type_hermitian,
-                                               rocsparse_matrix_type_triangular};
+    static constexpr value_t  values[nvalues] = {rocsparse_matrix_type_general,
+                                                 rocsparse_matrix_type_symmetric,
+                                                 rocsparse_matrix_type_hermitian,
+                                                 rocsparse_matrix_type_triangular};
     // clang-format on
 };
 

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -31,8 +31,8 @@
 #ifndef ROCSPARSE_HPP
 #define ROCSPARSE_HPP
 
+#include "rocsparse.h"
 #include "rocsparse_traits.hpp"
-#include <rocsparse.h>
 
 #define REAL_TEMPLATE(NAME_, ...)                              \
     template <typename T>                                      \
@@ -311,8 +311,8 @@ REAL_COMPLEX_TEMPLATE(sctr,
  *    level 2 SPARSE
  * ===========================================================================
  */
-// bsrmv_ex_analysis
-REAL_COMPLEX_TEMPLATE(bsrmv_ex_analysis,
+// bsrmv_analysis
+REAL_COMPLEX_TEMPLATE(bsrmv_analysis,
                       rocsparse_handle          handle,
                       rocsparse_direction       dir,
                       rocsparse_operation       trans,
@@ -326,8 +326,8 @@ REAL_COMPLEX_TEMPLATE(bsrmv_ex_analysis,
                       rocsparse_int             bsr_dim,
                       rocsparse_mat_info        info);
 
-// bsrmv_ex
-REAL_COMPLEX_TEMPLATE(bsrmv_ex,
+// bsrmv
+REAL_COMPLEX_TEMPLATE(bsrmv,
                       rocsparse_handle          handle,
                       rocsparse_direction       dir,
                       rocsparse_operation       trans,

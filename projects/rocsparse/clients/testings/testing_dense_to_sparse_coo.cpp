@@ -305,18 +305,18 @@ void testing_dense_to_sparse_coo(const Arguments& arg)
                             gpu_gbyte,
                             display_key_t::time_ms,
                             get_gpu_time_msec(gpu_time_used));
-
-        // clang-format on
     }
 }
 
 #define INSTANTIATE(ITYPE, TYPE)                                                          \
     template void testing_dense_to_sparse_coo_bad_arg<ITYPE, TYPE>(const Arguments& arg); \
     template void testing_dense_to_sparse_coo<ITYPE, TYPE>(const Arguments& arg)
+INSTANTIATE(int32_t, _Float16);
 INSTANTIATE(int32_t, float);
 INSTANTIATE(int32_t, double);
 INSTANTIATE(int32_t, rocsparse_float_complex);
 INSTANTIATE(int32_t, rocsparse_double_complex);
+INSTANTIATE(int64_t, _Float16);
 INSTANTIATE(int64_t, float);
 INSTANTIATE(int64_t, double);
 INSTANTIATE(int64_t, rocsparse_float_complex);

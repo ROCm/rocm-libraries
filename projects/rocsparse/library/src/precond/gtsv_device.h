@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
-* Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -28,117 +28,115 @@
 
 namespace rocsparse
 {
-    // clang-format off
-// Consider tridiagonal linear system A * x = rhs where A is m x m. Matrix A is represented by the three
-// arrays (the diagonal, upper diagonal, and lower diagonal) each of length m. The first entry in the
-// lower diagonal must be zero and the last entry in the upper diagonal must be zero. We solve this linear
-// system using the "Spike-Diagonal Pivoting" algorithm as detailed in the thesis:
-//
-// "Scalable Parallel Tridiagonal Algorithms with diagonal pivoting and their optimizations for many-core
-// architectures by L. Chang"
-//
-// See also:
-//
-// "L. Chang, J. A. Stratton, H. Kim and W. W. Hwu, "A scalable, numerically stable, high-performance tridiagonal
-// solver using GPUs," SC '12: Proceedings of the International Conference on High Performance Computing, Networking,
-// Storage and Analysis, Salt Lake City, UT, USA, 2012, pp. 1-11, doi: 10.1109/SC.2012.12."
-//
-// Here we give a rough outline:
-//
-// Given the tridiagonal linear system A * x = rhs. We first decompose this into A * x = D * S * x = rhs where
-// D is a block diagonal matrix and S is the "spike" matrix. We then define y = S * x which then allows us to
-// first solve D * y = rhs and then solve S * x = y. Because each block in the block diagonal matrix D is indendent,
-// we can solve each block in parallel. Specifically we use one thread for each diagonal block in D. We could use
-// the Thomas algorithm here, however because we want to incorporate some pivoting mechanism, we instead have each thread
-// decompose its diagonal block in to L * B * M^T where both L and M are lower triangular matrices and B is a diagonal
-// matrix. Specifically if the matrix D has the form:
-//
-// D = |D1  0  0  0  0  .  0 |
-//     |0   D2 0  0  0  .  0 |
-//     |0   0  D3 0  0  .  0 |
-//     |0   0  0  D4 0  .  0 |
-//     |.   .  .  .  .  .  . |
-//     |.               .  . |
-//     |0   .  .  .  .  .  Dm|
-//
-// Then D_i = L_i * B_i * M_i^T for i = 1..m. Note that each Di is itself tridiagonal. The matrices L, B, and M can
-// be computed by noting that:
-//
-// D_i = |Pd C | = |Id      0   | |Pd  0 | |Id Pd^-1*C|
-//       |A  Tr|   |A*Pd^-1 In-d| |0   Ts| |0  In-d   |
-//
-// where Pd is either 1x1 or 2x2 and Id is either 1x1 or 2x2 identity matrix. Ts is computed as Ts = Tr - A*Pd^-1*C.
-// For example consider one of the block diagonal matrices:
-//
-// Di = |2 1 0 0 0 0|
-//      |1 2 1 0 0 0|
-//      |0 1 2 1 0 0|
-//      |0 0 1 2 1 0|
-//      |0 0 0 1 2 1|
-//      |0 0 0 0 1 2|
-//
-// Then if using no pivoting (i.e. Pd is 1x1) we get:
-//
-// Pd = 2, Pd^-1 = 1/2, A = |1|, C = |1 0 0 0 0|, and Ts = |3/2 1  0  0  0|
-//                          |0|                            |1   2  1  0  0|
-//                          |0|                            |0   1  2  1  0|
-//                          |0|                            |0   0  1  2  1|
-//                          |0|                            |0   0  0  1  2|
-//
-// We can then recursively perform this on each subsequent Ts until we get:
-//
-// Di = |1   0   0   0   0   0| |2  0   0   0   0   0  | |1   1/2 0   0   0   0  |
-//      |1/2 1   0   0   0   0| |0  3/2 0   0   0   0  | |0   1   2/3 0   0   0  |
-//      |0   2/3 1   0   0   0| |0  0   4/3 0   0   0  | |0   0   1   3/4 0   0  |
-//      |0   0   3/4 1   0   0| |0  0   0   5/4 0   0  | |0   0   0   1   4/5 0  |
-//      |0   0   0   4/5 1   0| |0  0   0   0   6/5 0  | |0   0   0   0   1   5/6|
-//      |0   0   0   0   5/6 1| |0  0   0   0   0   7/6| |0   0   0   0   0   1  |
-//
-// Solving each of these systems then is just a matter of solving L * B * yi = rhsi
-// followed by M^T * xi = yi. The determination of whether we should use Pd as 1x1 or 2x2
-// is based off the Bunch-Kaufmann pivoting criteria. See cited sources above.
-//
-// Let us now return to our factoization of the original tridiagonal linear system,
-// A * x = D * S * x = rhs. We broke up finding the solution into the two phases. First
-// solving D * y = rhs and then secondly solving S * x = y. We now know how to solve
-// the first phase which is also the phase that performs the pivoting. We therefore focus on
-// solving the "spike" linear system. If the original matrix A is:
-//
-// A = |2 1 0 0 0 0 0 0| = |2 1 0 0 0 0 0 0| |1   0   v11   0   0   0   0   0|
-//     |1 2 1 0 0 0 0 0|   |1 2 0 0 0 0 0 0| |0   1   v12   0   0   0   0   0|
-//     |0 1 2 1 0 0 0 0|   |0 0 2 1 0 0 0 0| |0   w21 1     0   v21 0   0   0|
-//     |0 0 1 2 1 0 0 0|   |0 0 1 2 0 0 0 0| |0   w22 0     1   v22 0   0   0|
-//     |0 0 0 1 2 1 0 0|   |0 0 0 0 2 1 0 0| |0   0   0     w31 1   0   v31 0|
-//     |0 0 0 0 1 2 0 0|   |0 0 0 0 1 2 0 0| |0   0   0     w32 0   1   v32 0|
-//     |0 0 0 0 0 1 2 1|   |0 0 0 0 0 0 2 1| |0   0   0     0   0   w41 1   0|
-//     |0 0 0 0 0 0 1 2|   |0 0 0 0 0 0 1 2| |0   0   0     0   0   w42 0   1|
-//                         --------D-------- ----------------S----------------
-//
-// Here we use 2x2 blocks in D but in practice we use much larger blocks, for example 128x128.
-// We can solve for all the v and w unknowns by solving the following:
-//
-// |2 1||v11| = |0| and |2 1||w21| = |1| etc.
-// |1 2||v12|   |1|     |1 2||w22|   |0|
-//
-// Solving S * x = y then involves recursively decomposing the "spike" matrix like so:
-//
-// S = |1   0   v11   0   0   0   0   0| = |1  0   v11 0  0  0  0   0| |1 0 0 0 v11' 0 0 0|
-//     |0   1   v12   0   0   0   0   0|   |0  1   v12 0  0  0  0   0| |0 1 0 0 v12' 0 0 0|
-//     |0   w21 1     0   v21 0   0   0|   |0  w21 1   0  0  0  0   0| |0 0 1 0 v13' 0 0 0|
-//     |0   w22 0     1   v22 0   0   0|   |0  w22 0   1  0  0  0   0| |0 0 0 1 v14' 0 0 0|
-//     |0   0   0     w31 1   0   v31 0|   |0  0   0   0  1  0  v31 0| |0 0 0 w21' 1 0 0 0|
-//     |0   0   0     w32 0   1   v32 0|   |0  0   0   0  0  1  v32 0| |0 0 0 w22' 0 1 0 0|
-//     |0   0   0     0   0   w41 1   0|   |0  0   0   0  0  w41 1  0| |0 0 0 w23' 0 0 1 0|
-//     |0   0   0     0   0   w42 0   1|   |0  0   0   0  0  w42 0  0| |0 0 0 w24' 0 0 0 1|
-//
-// In the above the non-prime w and v values (i.e. v11, v12, w21, w22 etc) have been previously
-// computed. The primed w and v values (i.e. v11', v12', w21', w22' etc) can be found by solving:
-//
-// |1   0   v11 0||v11'| = |0| etc...
-// |0   1   v12 0||v12'|   |0|
-// |0   w21 1   0||v13'|   |0|
-// |0   w22 0   1||v14'|   |1|
-    // clang-format on
+    // Consider tridiagonal linear system A * x = rhs where A is m x m. Matrix A is represented by the three
+    // arrays (the diagonal, upper diagonal, and lower diagonal) each of length m. The first entry in the
+    // lower diagonal must be zero and the last entry in the upper diagonal must be zero. We solve this linear
+    // system using the "Spike-Diagonal Pivoting" algorithm as detailed in the thesis:
+    //
+    // "Scalable Parallel Tridiagonal Algorithms with diagonal pivoting and their optimizations for many-core
+    // architectures by L. Chang"
+    //
+    // See also:
+    //
+    // "L. Chang, J. A. Stratton, H. Kim and W. W. Hwu, "A scalable, numerically stable, high-performance tridiagonal
+    // solver using GPUs," SC '12: Proceedings of the International Conference on High Performance Computing, Networking,
+    // Storage and Analysis, Salt Lake City, UT, USA, 2012, pp. 1-11, doi: 10.1109/SC.2012.12."
+    //
+    // Here we give a rough outline:
+    //
+    // Given the tridiagonal linear system A * x = rhs. We first decompose this into A * x = D * S * x = rhs where
+    // D is a block diagonal matrix and S is the "spike" matrix. We then define y = S * x which then allows us to
+    // first solve D * y = rhs and then solve S * x = y. Because each block in the block diagonal matrix D is indendent,
+    // we can solve each block in parallel. Specifically we use one thread for each diagonal block in D. We could use
+    // the Thomas algorithm here, however because we want to incorporate some pivoting mechanism, we instead have each thread
+    // decompose its diagonal block in to L * B * M^T where both L and M are lower triangular matrices and B is a diagonal
+    // matrix. Specifically if the matrix D has the form:
+    //
+    // D = |D1  0  0  0  0  .  0 |
+    //     |0   D2 0  0  0  .  0 |
+    //     |0   0  D3 0  0  .  0 |
+    //     |0   0  0  D4 0  .  0 |
+    //     |.   .  .  .  .  .  . |
+    //     |.               .  . |
+    //     |0   .  .  .  .  .  Dm|
+    //
+    // Then D_i = L_i * B_i * M_i^T for i = 1..m. Note that each Di is itself tridiagonal. The matrices L, B, and M can
+    // be computed by noting that:
+    //
+    // D_i = |Pd C | = |Id      0   | |Pd  0 | |Id Pd^-1*C|
+    //       |A  Tr|   |A*Pd^-1 In-d| |0   Ts| |0  In-d   |
+    //
+    // where Pd is either 1x1 or 2x2 and Id is either 1x1 or 2x2 identity matrix. Ts is computed as Ts = Tr - A*Pd^-1*C.
+    // For example consider one of the block diagonal matrices:
+    //
+    // Di = |2 1 0 0 0 0|
+    //      |1 2 1 0 0 0|
+    //      |0 1 2 1 0 0|
+    //      |0 0 1 2 1 0|
+    //      |0 0 0 1 2 1|
+    //      |0 0 0 0 1 2|
+    //
+    // Then if using no pivoting (i.e. Pd is 1x1) we get:
+    //
+    // Pd = 2, Pd^-1 = 1/2, A = |1|, C = |1 0 0 0 0|, and Ts = |3/2 1  0  0  0|
+    //                          |0|                            |1   2  1  0  0|
+    //                          |0|                            |0   1  2  1  0|
+    //                          |0|                            |0   0  1  2  1|
+    //                          |0|                            |0   0  0  1  2|
+    //
+    // We can then recursively perform this on each subsequent Ts until we get:
+    //
+    // Di = |1   0   0   0   0   0| |2  0   0   0   0   0  | |1   1/2 0   0   0   0  |
+    //      |1/2 1   0   0   0   0| |0  3/2 0   0   0   0  | |0   1   2/3 0   0   0  |
+    //      |0   2/3 1   0   0   0| |0  0   4/3 0   0   0  | |0   0   1   3/4 0   0  |
+    //      |0   0   3/4 1   0   0| |0  0   0   5/4 0   0  | |0   0   0   1   4/5 0  |
+    //      |0   0   0   4/5 1   0| |0  0   0   0   6/5 0  | |0   0   0   0   1   5/6|
+    //      |0   0   0   0   5/6 1| |0  0   0   0   0   7/6| |0   0   0   0   0   1  |
+    //
+    // Solving each of these systems then is just a matter of solving L * B * yi = rhsi
+    // followed by M^T * xi = yi. The determination of whether we should use Pd as 1x1 or 2x2
+    // is based off the Bunch-Kaufmann pivoting criteria. See cited sources above.
+    //
+    // Let us now return to our factoization of the original tridiagonal linear system,
+    // A * x = D * S * x = rhs. We broke up finding the solution into the two phases. First
+    // solving D * y = rhs and then secondly solving S * x = y. We now know how to solve
+    // the first phase which is also the phase that performs the pivoting. We therefore focus on
+    // solving the "spike" linear system. If the original matrix A is:
+    //
+    // A = |2 1 0 0 0 0 0 0| = |2 1 0 0 0 0 0 0| |1   0   v11   0   0   0   0   0|
+    //     |1 2 1 0 0 0 0 0|   |1 2 0 0 0 0 0 0| |0   1   v12   0   0   0   0   0|
+    //     |0 1 2 1 0 0 0 0|   |0 0 2 1 0 0 0 0| |0   w21 1     0   v21 0   0   0|
+    //     |0 0 1 2 1 0 0 0|   |0 0 1 2 0 0 0 0| |0   w22 0     1   v22 0   0   0|
+    //     |0 0 0 1 2 1 0 0|   |0 0 0 0 2 1 0 0| |0   0   0     w31 1   0   v31 0|
+    //     |0 0 0 0 1 2 0 0|   |0 0 0 0 1 2 0 0| |0   0   0     w32 0   1   v32 0|
+    //     |0 0 0 0 0 1 2 1|   |0 0 0 0 0 0 2 1| |0   0   0     0   0   w41 1   0|
+    //     |0 0 0 0 0 0 1 2|   |0 0 0 0 0 0 1 2| |0   0   0     0   0   w42 0   1|
+    //                         --------D-------- ----------------S----------------
+    //
+    // Here we use 2x2 blocks in D but in practice we use much larger blocks, for example 128x128.
+    // We can solve for all the v and w unknowns by solving the following:
+    //
+    // |2 1||v11| = |0| and |2 1||w21| = |1| etc.
+    // |1 2||v12|   |1|     |1 2||w22|   |0|
+    //
+    // Solving S * x = y then involves recursively decomposing the "spike" matrix like so:
+    //
+    // S = |1   0   v11   0   0   0   0   0| = |1  0   v11 0  0  0  0   0| |1 0 0 0 v11' 0 0 0|
+    //     |0   1   v12   0   0   0   0   0|   |0  1   v12 0  0  0  0   0| |0 1 0 0 v12' 0 0 0|
+    //     |0   w21 1     0   v21 0   0   0|   |0  w21 1   0  0  0  0   0| |0 0 1 0 v13' 0 0 0|
+    //     |0   w22 0     1   v22 0   0   0|   |0  w22 0   1  0  0  0   0| |0 0 0 1 v14' 0 0 0|
+    //     |0   0   0     w31 1   0   v31 0|   |0  0   0   0  1  0  v31 0| |0 0 0 w21' 1 0 0 0|
+    //     |0   0   0     w32 0   1   v32 0|   |0  0   0   0  0  1  v32 0| |0 0 0 w22' 0 1 0 0|
+    //     |0   0   0     0   0   w41 1   0|   |0  0   0   0  0  w41 1  0| |0 0 0 w23' 0 0 1 0|
+    //     |0   0   0     0   0   w42 0   1|   |0  0   0   0  0  w42 0  0| |0 0 0 w24' 0 0 0 1|
+    //
+    // In the above the non-prime w and v values (i.e. v11, v12, w21, w22 etc) have been previously
+    // computed. The primed w and v values (i.e. v11', v12', w21', w22' etc) can be found by solving:
+    //
+    // |1   0   v11 0||v11'| = |0| etc...
+    // |0   1   v12 0||v12'|   |0|
+    // |0   w21 1   0||v13'|   |0|
+    // |0   w22 0   1||v14'|   |1|
 
     template <uint32_t BLOCKSIZE, uint32_t BLOCKDIM, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)

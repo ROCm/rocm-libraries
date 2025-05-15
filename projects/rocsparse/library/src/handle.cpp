@@ -30,6 +30,26 @@
 
 ROCSPARSE_KERNEL(1) void init_kernel(){};
 
+rocsparse_csrmv_info _rocsparse_mat_info::get_csrmv_info()
+{
+    return this->csrmv_info;
+}
+
+void _rocsparse_mat_info::set_csrmv_info(rocsparse_csrmv_info value)
+{
+    this->csrmv_info = value;
+}
+
+rocsparse_bsrmv_info _rocsparse_mat_info::get_bsrmv_info()
+{
+    return this->bsrmv_info;
+}
+
+void _rocsparse_mat_info::set_bsrmv_info(rocsparse_bsrmv_info value)
+{
+    this->bsrmv_info = value;
+}
+
 /*******************************************************************************
  * constructor
  ******************************************************************************/
@@ -76,11 +96,13 @@ _rocsparse_handle::_rocsparse_handle()
     buffer_size = (coomv_size > 1024 * 1024) ? coomv_size : 1024 * 1024;
     THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&buffer, buffer_size));
 
+    // Device alpha and beta
+    THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&alpha, sizeof(double) * 2));
+    THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&beta, sizeof(double) * 2));
+
     // Device one
-    THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&sone, sizeof(float)));
-    THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&done, sizeof(double)));
-    THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&cone, sizeof(rocsparse_float_complex)));
-    THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&zone, sizeof(rocsparse_double_complex)));
+    THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&sone, sizeof(float) * 2));
+    THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&done, sizeof(double) * 2));
 
     // Execute empty kernel for initialization
 
@@ -89,23 +111,15 @@ _rocsparse_handle::_rocsparse_handle()
     THROW_WITH_MESSAGE_IF_HIP_ERROR(hipGetLastError(), "'empty kernel scheduling failed'");
 
     // Execute memset for initialization
-    THROW_IF_HIP_ERROR(hipMemsetAsync(sone, 0, sizeof(float), stream));
-    THROW_IF_HIP_ERROR(hipMemsetAsync(done, 0, sizeof(double), stream));
-    THROW_IF_HIP_ERROR(hipMemsetAsync(cone, 0, sizeof(rocsparse_float_complex), stream));
-    THROW_IF_HIP_ERROR(hipMemsetAsync(zone, 0, sizeof(rocsparse_double_complex), stream));
+    THROW_IF_HIP_ERROR(hipMemsetAsync(sone, 0, sizeof(float) * 2, stream));
+    THROW_IF_HIP_ERROR(hipMemsetAsync(done, 0, sizeof(double) * 2, stream));
 
-    float  hsone = 1.0f;
-    double hdone = 1.0;
-
-    rocsparse_float_complex  hcone = rocsparse_float_complex(1.0f, 0.0f);
-    rocsparse_double_complex hzone = rocsparse_double_complex(1.0, 0.0);
-
-    THROW_IF_HIP_ERROR(hipMemcpyAsync(sone, &hsone, sizeof(float), hipMemcpyHostToDevice, stream));
-    THROW_IF_HIP_ERROR(hipMemcpyAsync(done, &hdone, sizeof(double), hipMemcpyHostToDevice, stream));
-    THROW_IF_HIP_ERROR(hipMemcpyAsync(
-        cone, &hcone, sizeof(rocsparse_float_complex), hipMemcpyHostToDevice, stream));
-    THROW_IF_HIP_ERROR(hipMemcpyAsync(
-        zone, &hzone, sizeof(rocsparse_double_complex), hipMemcpyHostToDevice, stream));
+    const float  s_value = 1.0f;
+    const double d_value = 1.0;
+    THROW_IF_HIP_ERROR(
+        hipMemcpyAsync(sone, &s_value, sizeof(float), hipMemcpyHostToDevice, stream));
+    THROW_IF_HIP_ERROR(
+        hipMemcpyAsync(done, &d_value, sizeof(double), hipMemcpyHostToDevice, stream));
 
     // Wait for device transfer to finish
     THROW_IF_HIP_ERROR(hipStreamSynchronize(stream));
@@ -159,8 +173,8 @@ _rocsparse_handle::~_rocsparse_handle()
     PRINT_IF_HIP_ERROR(rocsparse_hipFree(buffer));
     PRINT_IF_HIP_ERROR(rocsparse_hipFree(sone));
     PRINT_IF_HIP_ERROR(rocsparse_hipFree(done));
-    PRINT_IF_HIP_ERROR(rocsparse_hipFree(cone));
-    PRINT_IF_HIP_ERROR(rocsparse_hipFree(zone));
+    PRINT_IF_HIP_ERROR(rocsparse_hipFree(alpha));
+    PRINT_IF_HIP_ERROR(rocsparse_hipFree(beta));
 
     // destroy blas handle
     rocsparse_status status = rocsparse::blas_destroy_handle(this->blas_handle);
@@ -242,35 +256,6 @@ rocsparse_status _rocsparse_handle::get_pointer_mode(rocsparse_pointer_mode* use
 
     *user_mode = this->pointer_mode;
     return rocsparse_status_success;
-}
-
-/********************************************************************************
- * \brief rocsparse_csrmv_info is a structure holding the rocsparse csrmv info
- * data gathered during csrmv_analysis. It must be initialized using the
- * create_csrmv_info() routine. It should be destroyed at the end
- * using destroy_csrmv_info().
- *******************************************************************************/
-rocsparse_status rocsparse::create_csrmv_info(rocsparse_csrmv_info* info)
-{
-    ROCSPARSE_ROUTINE_TRACE;
-
-    if(info == nullptr)
-    {
-        return rocsparse_status_invalid_pointer;
-    }
-    else
-    {
-        // Allocate
-        try
-        {
-            *info = new _rocsparse_csrmv_info;
-        }
-        catch(const rocsparse_status& status)
-        {
-            return status;
-        }
-        return rocsparse_status_success;
-    }
 }
 
 /********************************************************************************
@@ -477,51 +462,6 @@ rocsparse_status rocsparse::copy_csrmv_info(rocsparse_csrmv_info       dest,
     dest->csr_row_ptr = src->csr_row_ptr;
     dest->csr_col_ind = src->csr_col_ind;
 
-    return rocsparse_status_success;
-}
-
-/********************************************************************************
- * \brief Destroy csrmv info.
- *******************************************************************************/
-rocsparse_status rocsparse::destroy_csrmv_info(rocsparse_csrmv_info info)
-{
-    ROCSPARSE_ROUTINE_TRACE;
-
-    if(info == nullptr)
-    {
-        return rocsparse_status_success;
-    }
-
-    // Clean up adaptive arrays
-    if(info->adaptive.size > 0)
-    {
-        RETURN_IF_HIP_ERROR(rocsparse_hipFree(info->adaptive.row_blocks));
-        RETURN_IF_HIP_ERROR(rocsparse_hipFree(info->adaptive.wg_flags));
-        RETURN_IF_HIP_ERROR(rocsparse_hipFree(info->adaptive.wg_ids));
-    }
-
-    if(info->lrb.size > 0)
-    {
-        RETURN_IF_HIP_ERROR(rocsparse_hipFree(info->lrb.wg_flags));
-    }
-
-    if(info->m > 0)
-    {
-        RETURN_IF_HIP_ERROR(rocsparse_hipFree(info->lrb.rows_offsets_scratch));
-        RETURN_IF_HIP_ERROR(rocsparse_hipFree(info->lrb.rows_bins));
-    }
-
-    RETURN_IF_HIP_ERROR(rocsparse_hipFree(info->lrb.n_rows_bins));
-
-    // Destruct
-    try
-    {
-        delete info;
-    }
-    catch(const rocsparse_status& status)
-    {
-        return status;
-    }
     return rocsparse_status_success;
 }
 
@@ -1069,4 +1009,61 @@ rocsparse_status rocsparse::get_rocsparse_status_for_hip_status(hipError_t statu
     default:
         return rocsparse_status_internal_error;
     }
+}
+
+_rocsparse_lrb_info::~_rocsparse_lrb_info()
+{
+    WARNING_IF_HIP_ERROR(rocsparse_hipFree(this->wg_flags));
+    WARNING_IF_HIP_ERROR(rocsparse_hipFree(this->rows_offsets_scratch));
+    WARNING_IF_HIP_ERROR(rocsparse_hipFree(this->rows_bins));
+    WARNING_IF_HIP_ERROR(rocsparse_hipFree(this->n_rows_bins));
+
+    this->wg_flags             = nullptr;
+    this->rows_offsets_scratch = nullptr;
+    this->rows_bins            = nullptr;
+    this->n_rows_bins          = nullptr;
+}
+
+void _rocsparse_lrb_info::clear()
+{
+    THROW_IF_HIP_ERROR(rocsparse_hipFree(this->wg_flags));
+    THROW_IF_HIP_ERROR(rocsparse_hipFree(this->rows_offsets_scratch));
+    THROW_IF_HIP_ERROR(rocsparse_hipFree(this->rows_bins));
+    THROW_IF_HIP_ERROR(rocsparse_hipFree(this->n_rows_bins));
+
+    this->wg_flags             = nullptr;
+    this->rows_offsets_scratch = nullptr;
+    this->rows_bins            = nullptr;
+    this->n_rows_bins          = nullptr;
+    this->size                 = 0;
+    memset(this->nRowsBins, 0, sizeof(int64_t) * 32);
+}
+
+_rocsparse_adaptive_info::~_rocsparse_adaptive_info()
+{
+
+    WARNING_IF_HIP_ERROR(rocsparse_hipFree(this->row_blocks));
+    WARNING_IF_HIP_ERROR(rocsparse_hipFree(this->wg_flags));
+    WARNING_IF_HIP_ERROR(rocsparse_hipFree(this->wg_ids));
+
+    this->row_blocks = nullptr;
+    this->wg_flags   = nullptr;
+    this->wg_ids     = nullptr;
+    this->size       = 0;
+    this->first_row  = 0;
+    this->last_row   = 0;
+}
+
+void _rocsparse_adaptive_info::clear()
+{
+    THROW_IF_HIP_ERROR(rocsparse_hipFree(this->row_blocks));
+    THROW_IF_HIP_ERROR(rocsparse_hipFree(this->wg_flags));
+    THROW_IF_HIP_ERROR(rocsparse_hipFree(this->wg_ids));
+
+    this->row_blocks = nullptr;
+    this->wg_flags   = nullptr;
+    this->wg_ids     = nullptr;
+    this->size       = 0;
+    this->first_row  = 0;
+    this->last_row   = 0;
 }

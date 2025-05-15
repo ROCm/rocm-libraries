@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2023 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -29,8 +29,8 @@
 #ifndef ROCSPARSE_GRAPH_HPP
 #define ROCSPARSE_GRAPH_HPP
 
+#include "rocsparse.hpp"
 #include "utility.hpp"
-#include <rocsparse.hpp>
 #include <utility>
 #include <vector>
 
@@ -120,13 +120,13 @@ namespace testing
     * ===========================================================================
     */
 
-    TESTING_COMPUTE_TEMPLATE(bsrmv_ex_analysis)
-    TESTING_COMPUTE_TEMPLATE(bsrmv_ex)
+    TESTING_COMPUTE_TEMPLATE(bsrmv_analysis)
+    TESTING_COMPUTE_TEMPLATE(bsrmv)
     TESTING_COMPUTE_TEMPLATE(bsrxmv)
     TESTING_TEMPLATE(bsrsv_zero_pivot)
     TESTING_COMPUTE_TEMPLATE(bsrsv_buffer_size)
     TESTING_COMPUTE_TEMPLATE(bsrsv_analysis)
-    TESTING_TEMPLATE(bsrmv_ex_clear)
+    TESTING_TEMPLATE(bsrmv_clear)
     TESTING_TEMPLATE(bsrsv_clear)
     TESTING_COMPUTE_TEMPLATE(bsrsv_solve)
     TESTING_COMPUTE_TEMPLATE(coomv)
@@ -299,6 +299,7 @@ namespace testing
     TESTING_TEMPLATE(dense_to_sparse)
     TESTING_TEMPLATE(spvv)
     TESTING_TEMPLATE(spmv)
+    TESTING_TEMPLATE(v2_spmv)
     TESTING_TEMPLATE(spsv)
     TESTING_TEMPLATE(spsm)
     TESTING_TEMPLATE(spmm)

@@ -360,15 +360,12 @@ rocsparse_status
                                                          const A*                  csr_val,
                                                          const I*                  csr_row_ptr,
                                                          const J*                  csr_col_ind,
-                                                         rocsparse_mat_info        info)
+                                                         rocsparse_csrmv_info*     p_csrmv_info)
 {
     ROCSPARSE_ROUTINE_TRACE;
 
-    // Clear csrmv info
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse::destroy_csrmv_info(info->csrmv_info));
-
-    // Create csrmv info
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse::create_csrmv_info(&info->csrmv_info));
+    p_csrmv_info[0]                 = new _rocsparse_csrmv_info();
+    rocsparse_csrmv_info csrmv_info = p_csrmv_info[0];
 
     if(trans == rocsparse_operation_none)
     {
@@ -376,7 +373,7 @@ rocsparse_status
         hipStream_t stream = handle->stream;
 
         // row blocks size
-        info->csrmv_info->adaptive.size = 0;
+        csrmv_info->adaptive.size = 0;
 
         // Temporary arrays to hold device data
         std::vector<I> hptr(m + 1);
@@ -389,63 +386,60 @@ rocsparse_status
         // Determine row blocks array size
         ComputeRowBlocks<I, J>((I*)NULL,
                                (J*)NULL,
-                               info->csrmv_info->adaptive.size,
-                               info->csrmv_info->adaptive.first_row,
-                               info->csrmv_info->adaptive.last_row,
+                               csrmv_info->adaptive.size,
+                               csrmv_info->adaptive.first_row,
+                               csrmv_info->adaptive.last_row,
                                hptr.data(),
                                m,
                                false);
 
         // Create row blocks, workgroup flag, and workgroup data structures
-        std::vector<I>        row_blocks(info->csrmv_info->adaptive.size, 0);
-        std::vector<uint32_t> wg_flags(info->csrmv_info->adaptive.size, 0);
-        std::vector<J>        wg_ids(info->csrmv_info->adaptive.size, 0);
+        std::vector<I>        row_blocks(csrmv_info->adaptive.size, 0);
+        std::vector<uint32_t> wg_flags(csrmv_info->adaptive.size, 0);
+        std::vector<J>        wg_ids(csrmv_info->adaptive.size, 0);
 
         ComputeRowBlocks<I, J>(row_blocks.data(),
                                wg_ids.data(),
-                               info->csrmv_info->adaptive.size,
-                               info->csrmv_info->adaptive.first_row,
-                               info->csrmv_info->adaptive.last_row,
+                               csrmv_info->adaptive.size,
+                               csrmv_info->adaptive.first_row,
+                               csrmv_info->adaptive.last_row,
                                hptr.data(),
                                m,
                                true);
 
         if(descr->type == rocsparse_matrix_type_symmetric)
         {
-            info->csrmv_info->max_rows
-                = maxRowsInABlock(row_blocks.data(), info->csrmv_info->adaptive.size);
+            csrmv_info->max_rows = maxRowsInABlock(row_blocks.data(), csrmv_info->adaptive.size);
         }
 
         // Allocate memory on device to hold csrmv info, if required
-        if(info->csrmv_info->adaptive.size > 0)
+        if(csrmv_info->adaptive.size > 0)
         {
+            RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync((void**)&csrmv_info->adaptive.row_blocks,
+                                                         sizeof(I) * csrmv_info->adaptive.size,
+                                                         handle->stream));
             RETURN_IF_HIP_ERROR(
-                rocsparse_hipMallocAsync((void**)&info->csrmv_info->adaptive.row_blocks,
-                                         sizeof(I) * info->csrmv_info->adaptive.size,
+                rocsparse_hipMallocAsync((void**)&csrmv_info->adaptive.wg_flags,
+                                         sizeof(uint32_t) * csrmv_info->adaptive.size,
                                          handle->stream));
-            RETURN_IF_HIP_ERROR(
-                rocsparse_hipMallocAsync((void**)&info->csrmv_info->adaptive.wg_flags,
-                                         sizeof(uint32_t) * info->csrmv_info->adaptive.size,
-                                         handle->stream));
-            RETURN_IF_HIP_ERROR(
-                rocsparse_hipMallocAsync((void**)&info->csrmv_info->adaptive.wg_ids,
-                                         sizeof(J) * info->csrmv_info->adaptive.size,
-                                         handle->stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync((void**)&csrmv_info->adaptive.wg_ids,
+                                                         sizeof(J) * csrmv_info->adaptive.size,
+                                                         handle->stream));
 
             // Copy row blocks information to device
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync(info->csrmv_info->adaptive.row_blocks,
+            RETURN_IF_HIP_ERROR(hipMemcpyAsync(csrmv_info->adaptive.row_blocks,
                                                row_blocks.data(),
-                                               sizeof(I) * info->csrmv_info->adaptive.size,
+                                               sizeof(I) * csrmv_info->adaptive.size,
                                                hipMemcpyHostToDevice,
                                                stream));
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync(info->csrmv_info->adaptive.wg_flags,
+            RETURN_IF_HIP_ERROR(hipMemcpyAsync(csrmv_info->adaptive.wg_flags,
                                                wg_flags.data(),
-                                               sizeof(uint32_t) * info->csrmv_info->adaptive.size,
+                                               sizeof(uint32_t) * csrmv_info->adaptive.size,
                                                hipMemcpyHostToDevice,
                                                stream));
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync(info->csrmv_info->adaptive.wg_ids,
+            RETURN_IF_HIP_ERROR(hipMemcpyAsync(csrmv_info->adaptive.wg_ids,
                                                wg_ids.data(),
-                                               sizeof(J) * info->csrmv_info->adaptive.size,
+                                               sizeof(J) * csrmv_info->adaptive.size,
                                                hipMemcpyHostToDevice,
                                                stream));
 
@@ -454,16 +448,16 @@ rocsparse_status
         }
     }
     // Store some pointers to verify correct execution
-    info->csrmv_info->trans       = trans;
-    info->csrmv_info->m           = m;
-    info->csrmv_info->n           = n;
-    info->csrmv_info->nnz         = nnz;
-    info->csrmv_info->descr       = descr;
-    info->csrmv_info->csr_row_ptr = csr_row_ptr;
-    info->csrmv_info->csr_col_ind = csr_col_ind;
+    csrmv_info->trans       = trans;
+    csrmv_info->m           = m;
+    csrmv_info->n           = n;
+    csrmv_info->nnz         = nnz;
+    csrmv_info->descr       = descr;
+    csrmv_info->csr_row_ptr = csr_row_ptr;
+    csrmv_info->csr_col_ind = csr_col_ind;
 
-    info->csrmv_info->index_type_I = rocsparse::get_indextype<I>();
-    info->csrmv_info->index_type_J = rocsparse::get_indextype<J>();
+    csrmv_info->index_type_I = rocsparse::get_indextype<I>();
+    csrmv_info->index_type_J = rocsparse::get_indextype<J>();
 
     return rocsparse_status_success;
 }
@@ -763,7 +757,7 @@ rocsparse_status rocsparse::csrmv_adaptive_template_dispatch(rocsparse_handle   
         const ATYPE*              csr_val,                                          \
         const ITYPE*              csr_row_ptr,                                      \
         const JTYPE*              csr_col_ind,                                      \
-        rocsparse_mat_info        info);
+        rocsparse_csrmv_info*     info);
 
 // Uniform precision
 INSTANTIATE(int32_t, int32_t, float);
