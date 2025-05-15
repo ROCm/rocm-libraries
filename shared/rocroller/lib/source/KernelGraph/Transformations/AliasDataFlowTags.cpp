@@ -562,6 +562,8 @@ namespace rocRoller
 
         KernelGraph AliasDataFlowTags::apply(KernelGraph const& original)
         {
+            TIMER(t, "KernelGraph::AliasDataFlowTags");
+
             auto rv = original;
 
             auto aliases = AliasDataFlowTagsDetail::findAliasCandidates(rv);
