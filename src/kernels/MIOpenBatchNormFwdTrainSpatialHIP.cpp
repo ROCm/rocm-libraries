@@ -24,13 +24,9 @@
  *
  *******************************************************************************/
 
-#ifndef MIOPEN_DONT_USE_HIP_RUNTIME_HEADERS
-#include <hip/hip_fp16.h>
-#include <hip/hip_runtime.h>
-#endif
-
 #include "batchnorm_functions.hpp"
 #include "activation_functions.hpp"
+#include "reduction_functions.hpp"
 
 #ifndef MIO_LAYOUT_NHWC
 #define MIO_LAYOUT_NHWC 0
@@ -38,58 +34,14 @@
 
 static_assert(MIO_LAYOUT_NHWC == 0 || MIO_LAYOUT_NHWC == 1, "MIO_LAYOUT_NHWC must be 0 or 1");
 
-#if defined(__AMDGCN__) && !(MIO_BN_GFX103X || MIO_BN_GFX110X || MIO_BN_GFX120X)
-static constexpr bool MIOPEN_USE_AMDGCN = true;
-#else
-static constexpr bool MIOPEN_USE_AMDGCN = false;
-#endif
-
-// there is no half4 implementation in hip so we should implement one
-struct half4
-{
-    half x, y, z, w;
-
-    __host__ __device__ half4() = default;
-
-    __host__ __device__ half4(half a, half b, half c, half d) : x(a), y(b), z(c), w(d) {}
-
-    __host__ __device__ half4& operator=(const half4&) = default;
-};
-
-// Hip does have fma which does the same thing as OpenCL mad
-template <typename T>
-struct HipMad
-{
-    static_assert(sizeof(T) == sizeof(half) || sizeof(T) == sizeof(float) ||
-                      sizeof(T) == sizeof(double),
-                  "Input floating point type size is wrong!");
-    __forceinline__ __device__ auto operator()(T _1, T _2, T _3)
-    {
-        if constexpr(sizeof(T) == sizeof(half))
-        {
-            // TODO: I don't know if this is right, it uses _Float16
-            return fma(
-                static_cast<_Float16>(_1), static_cast<_Float16>(_2), static_cast<_Float16>(_3));
-        }
-        else if constexpr(sizeof(T) == sizeof(float))
-        {
-            return fma(static_cast<float>(_1), static_cast<float>(_2), static_cast<float>(_3));
-        }
-        else
-        {
-            return fma(static_cast<double>(_1), static_cast<double>(_2), static_cast<double>(_3));
-        }
-    }
-};
-
-template <int MIoBnVariant>
+template <int MIoBnVariant, typename FpType, typename FpPrecType, typename FpAccumType>
 struct MIOpenBatchNormFwdTrainSpatialHIPImpl
 {
 };
 
 // This is the instance for MIO_BN_VARIANT == 1
-template <>
-struct MIOpenBatchNormFwdTrainSpatialHIPImpl<1>
+template <typename FpType, typename FpPrecType, typename FpAccumType>
+struct MIOpenBatchNormFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
 {
     // Configs
     static constexpr int MIO_MAX_READ =
@@ -112,30 +64,33 @@ struct MIOpenBatchNormFwdTrainSpatialHIPImpl<1>
     static constexpr int MIO_BN_LESSOUT = (MIO_BN_NHW - MIO_BN_REMOUT);
 
     // Kernel
-    __forceinline__ __device__ void
-    operator()([[maybe_unused]] const FP_TYPE* __restrict in,
-               [[maybe_unused]] FP_TYPE* __restrict out,
-               [[maybe_unused]] const FP_TYPE_PREC* __restrict scale,
-               [[maybe_unused]] const FP_TYPE_PREC* __restrict bias,
-               [[maybe_unused]] FP_TYPE_PREC INHW,
-               [[maybe_unused]] double epsilon)
+    __forceinline__ __device__ void operator()(const FpType* __restrict in,
+                                               FpType* __restrict out,
+                                               const FpPrecType* __restrict scale,
+                                               const FpPrecType* __restrict bias,
+                                               FpPrecType INHW,
+                                               double epsilon,
+                                               FpPrecType& mean,
+                                               FpPrecType& variance,
+                                               FpPrecType& invVariance)
     {
-        [[maybe_unused]] FP_TYPE mean        = 0;
-        [[maybe_unused]] FP_TYPE variance    = 0;
-        [[maybe_unused]] FP_TYPE invVariance = 0;
-        [[maybe_unused]] FP_TYPE pvscale, pvbias;
+        FpPrecType pvscale, pvbias;
 
-        [[maybe_unused]] __shared__ FP_TYPE_PREC lcl_bias;
-        [[maybe_unused]] __shared__ FP_TYPE_PREC lcl_scale;
+        mean        = 0;
+        variance    = 0;
+        invVariance = 0;
 
-        [[maybe_unused]] unsigned int index = 0;
-        unsigned int lid                    = threadIdx.x;
-        unsigned int grpid                  = blockIdx.x;
+        __shared__ FpPrecType lcl_bias;
+        __shared__ FpPrecType lcl_scale;
+
+        unsigned int index       = 0;
+        const unsigned int lid   = threadIdx.x;
+        const unsigned int grpid = blockIdx.x;
 #if !MIO_LAYOUT_NHWC
-        [[maybe_unused]] unsigned int chwid = grpid * MIO_BN_HW;
+        const unsigned int chwid = grpid * MIO_BN_HW;
 #endif
-        [[maybe_unused]] unsigned int nidx  = 0;
-        [[maybe_unused]] unsigned int hwidx = 0;
+        unsigned int nidx  = 0;
+        unsigned int hwidx = 0;
 
         if(lid == 0)
         {
@@ -147,43 +102,56 @@ struct MIOpenBatchNormFwdTrainSpatialHIPImpl<1>
 
         if constexpr(!MIO_LAYOUT_NHWC && MIO_BN_HW >= 4096)
         {
-            FP_TYPE4 read4;
+            using fp_type4 = typename mapped_vector_type<FpType, 4>::type;
+            fp_type4 read4;
 #pragma unroll
             for(unsigned int k = lid << 2; k < static_cast<decltype(k)>(MIO_BN_LESS4); k += GRPRD)
             {
                 nidx  = k / MIO_BN_HW;
                 hwidx = k - (nidx * MIO_BN_HW);
                 index = nidx * MIO_BN_CHW + chwid + hwidx;
-                read4 = *(reinterpret_cast<const FP_TYPE4*>(in + index));
-                mean += FLOAT2FLOATPREC(read4.x);
-                mean += FLOAT2FLOATPREC(read4.y);
-                mean += FLOAT2FLOATPREC(read4.z);
-                mean += FLOAT2FLOATPREC(read4.w);
-                variance = fma(FLOAT2FLOATPREC(read4.x), FLOAT2FLOATPREC(read4.x), variance);
-                variance = fma(FLOAT2FLOATPREC(read4.y), FLOAT2FLOATPREC(read4.y), variance);
-                variance = fma(FLOAT2FLOATPREC(read4.z), FLOAT2FLOATPREC(read4.z), variance);
-                variance = fma(FLOAT2FLOATPREC(read4.w), FLOAT2FLOATPREC(read4.w), variance);
+                read4 = *(reinterpret_cast<const fp_type4*>(in + index));
+                mean += fp_to_fpprec<FpPrecType>(read4.x);
+                mean += fp_to_fpprec<FpPrecType>(read4.y);
+                mean += fp_to_fpprec<FpPrecType>(read4.z);
+                mean += fp_to_fpprec<FpPrecType>(read4.w);
+                variance = fma(
+                    fp_to_fpprec<FpPrecType>(read4.x), fp_to_fpprec<FpPrecType>(read4.x), variance);
+                variance = fma(
+                    fp_to_fpprec<FpPrecType>(read4.y), fp_to_fpprec<FpPrecType>(read4.y), variance);
+                variance = fma(
+                    fp_to_fpprec<FpPrecType>(read4.z), fp_to_fpprec<FpPrecType>(read4.z), variance);
+                variance = fma(
+                    fp_to_fpprec<FpPrecType>(read4.w), fp_to_fpprec<FpPrecType>(read4.w), variance);
             }
 
             if constexpr(MIO_BN_REM4)
             {
-                unsigned int remkey = (lid << 2) + MIO_BN_LESS4;
-                nidx                = remkey / MIO_BN_HW;
-                hwidx               = remkey - (nidx * MIO_BN_HW);
-                index               = nidx * MIO_BN_CHW + chwid + hwidx;
+                const unsigned int remkey = (lid << 2) + MIO_BN_LESS4;
+                nidx                      = remkey / MIO_BN_HW;
+                hwidx                     = remkey - (nidx * MIO_BN_HW);
+                index                     = nidx * MIO_BN_CHW + chwid + hwidx;
                 // TODO: This is not right, index is unsigned int, MIO_BN_NCHW is int
                 // comparing them is not right.
                 if(index < (MIO_BN_NCHW - 3))
                 {
-                    read4 = *(reinterpret_cast<const FP_TYPE4*>(in + index));
-                    mean += FLOAT2FLOATPREC(read4.x);
-                    mean += FLOAT2FLOATPREC(read4.y);
-                    mean += FLOAT2FLOATPREC(read4.z);
-                    mean += FLOAT2FLOATPREC(read4.w);
-                    variance = fma(FLOAT2FLOATPREC(read4.x), FLOAT2FLOATPREC(read4.x), variance);
-                    variance = fma(FLOAT2FLOATPREC(read4.y), FLOAT2FLOATPREC(read4.y), variance);
-                    variance = fma(FLOAT2FLOATPREC(read4.z), FLOAT2FLOATPREC(read4.z), variance);
-                    variance = fma(FLOAT2FLOATPREC(read4.w), FLOAT2FLOATPREC(read4.w), variance);
+                    read4 = *(reinterpret_cast<const fp_type4*>(in + index));
+                    mean += fp_to_fpprec<FpPrecType>(read4.x);
+                    mean += fp_to_fpprec<FpPrecType>(read4.y);
+                    mean += fp_to_fpprec<FpPrecType>(read4.z);
+                    mean += fp_to_fpprec<FpPrecType>(read4.w);
+                    variance = fma(fp_to_fpprec<FpPrecType>(read4.x),
+                                   fp_to_fpprec<FpPrecType>(read4.x),
+                                   variance);
+                    variance = fma(fp_to_fpprec<FpPrecType>(read4.y),
+                                   fp_to_fpprec<FpPrecType>(read4.y),
+                                   variance);
+                    variance = fma(fp_to_fpprec<FpPrecType>(read4.z),
+                                   fp_to_fpprec<FpPrecType>(read4.z),
+                                   variance);
+                    variance = fma(fp_to_fpprec<FpPrecType>(read4.w),
+                                   fp_to_fpprec<FpPrecType>(read4.w),
+                                   variance);
                 }
             }
         }
@@ -202,7 +170,7 @@ struct MIOpenBatchNormFwdTrainSpatialHIPImpl<1>
                 {
                     index = nidx * MIO_BN_CHW + chwid + hwidx;
                 }
-                const auto xin = FLOAT2FLOATPREC(*(in + index));
+                const auto xin = fp_to_fpprec<FpPrecType>(in[index]);
                 mean += xin;
                 variance = fma(xin, xin, variance);
             }
@@ -225,8 +193,8 @@ struct MIOpenBatchNormFwdTrainSpatialHIPImpl<1>
                     {
                         index = nidx * MIO_BN_CHW + chwid + hwidx;
                     }
-                    const auto xin = (index < MIO_BN_NCHW) ? FLOAT2FLOATPREC(*(in + index))
-                                                           : static_cast<FP_TYPE_PREC>(0);
+                    const auto xin =
+                        (index < MIO_BN_NCHW) ? fp_to_fpprec<FpPrecType>(in[index]) : FpPrecType{0};
                     mean += xin;
                     variance = fma(xin, xin, variance);
                 }
@@ -237,31 +205,48 @@ struct MIOpenBatchNormFwdTrainSpatialHIPImpl<1>
 
         constexpr auto lcl_data_size =
             static_cast<bool>(MIOPEN_USE_AMDGCN) ? MIO_BN_LDSGCN_SIZE : MIO_BN_LDS_SIZE;
-        [[maybe_unused]] __shared__ _FLOAT_ACCUM lcl_data_x[lcl_data_size];
-        [[maybe_unused]] __shared__ _FLOAT_ACCUM lcl_data_y[lcl_data_size];
+        __shared__ FpAccumType lcl_data_x[lcl_data_size];
+        __shared__ FpAccumType lcl_data_y[lcl_data_size];
 
         if constexpr(!MIOPEN_USE_AMDGCN)
         {
-            // TODO: these functions need to be implemented
-            // lds_reduce2(&mean, &variance, (_FLOAT_ACCUM)INHW, lcl_data_x, lcl_data_y, lid);
+            // TODO: I don't know if this is right
+            // mean is FpType, could be 16 bit floating point type
+            // but we are going to perform lds_reduce2 over FpAccumType&
+            // which is hardcoded to float, so &mean which has type FpType&
+            // should be case to FpAccumType&, which is unsafe. and the
+            // internal data pattern could be inconsistent between these 2
+            // types.
+            lds_reduce2<FpAccumType, lcl_data_size>(reinterpret_cast<FpAccumType&>(mean),
+                                                    reinterpret_cast<FpAccumType&>(variance),
+                                                    static_cast<FpAccumType>(INHW),
+                                                    lcl_data_x,
+                                                    lcl_data_y,
+                                                    lid);
         }
         else
         {
-            // gcn_reduce2(&mean, &variance, (_FLOAT_ACCUM)INHW, lcl_data_x, lcl_data_y, lid);
+            // TODO: this as well as above
+            gcn_reduce2<FpAccumType, lcl_data_size>(reinterpret_cast<FpAccumType&>(mean),
+                                                    reinterpret_cast<FpAccumType&>(variance),
+                                                    static_cast<FpAccumType>(INHW),
+                                                    lcl_data_x,
+                                                    lcl_data_y,
+                                                    lid);
         }
 
         // REDUCTION COMPLETE ---------------------------
         // TODO: it seems that fma doesn't directly supports half, it supports _Float16
-        // here I don't know if I should run mad for FP_TYPE_PREC or FP_TYPE, if I only
-        // need to run this for FP_TYPE_PREC, then we don't need to have this HipMad struct.
-        variance = HipMad<decltype(variance)>{}(-mean, mean, variance);
-        if(variance < static_cast<decltype(variance)>(0))
+        // here I don't know if I should run mad for FpPrecType or FpType, if I only
+        // need to run this for FpPrecType, then we don't need to have this hip_mad struct.
+        variance = hip_mad<FpPrecType>{}(-mean, mean, variance);
+        if(variance < FpPrecType{0})
         {
-            variance = static_cast<decltype(variance)>(0);
+            variance = FpPrecType{0};
         }
         // TODO: I don't know if this is correct, the input epsilon is double, but it should be
-        // casted to FP_TYPE here
-        invVariance = rsqrt(variance + static_cast<decltype(variance)>(epsilon));
+        // casted to FpType here
+        invVariance = rsqrt(variance + static_cast<FpPrecType>(epsilon));
         pvscale     = lcl_scale;
         pvbias      = lcl_bias;
 
@@ -269,7 +254,7 @@ struct MIOpenBatchNormFwdTrainSpatialHIPImpl<1>
         {
             constexpr unsigned int k_limit =
                 static_cast<bool>(MIO_LAYOUT_NHWC) ? MIO_BN_NHW : MIO_BN_LESS;
-#pragma unroll
+#pragma unroll 2
             for(unsigned int k = lid; k < k_limit; k += MIO_BN_GRP0)
             {
                 nidx  = k / MIO_BN_HW;
@@ -282,12 +267,72 @@ struct MIOpenBatchNormFwdTrainSpatialHIPImpl<1>
                 {
                     index = nidx * MIO_BN_CHW + chwid + hwidx;
                 }
-                out[index] =
-                    FLOATPREC2FLOAT(fma(pvscale,
-                                        (FLOAT2FLOATPREC(*(in + index)) - FLOAT2FLOATPREC(mean)) *
-                                            FLOAT2FLOATPREC(invVariance),
-                                        pvbias));
-                // TODO: continue to MIOpenBatchNormFwdTrainSpatial.cl:377
+                out[index] = fpprec_to_fp<FpType>(
+                    fma(pvscale,
+                        (fp_to_fpprec<FpPrecType>(in[index]) - fp_to_fpprec<FpPrecType>(mean)) *
+                            fp_to_fpprec<FpPrecType>(invVariance),
+                        pvbias));
+            }
+        }
+        else
+        {
+            FpPrecType xhat[MIO_MAX_READ];
+#pragma unroll 2
+            for(unsigned int k = (MIO_MAX_READ * lid); k < MIO_BN_LESSOUT; k += MIO_BN_CHUNK)
+            {
+#pragma unroll
+                for(unsigned int j = 0; j < MIO_MAX_READ; ++j)
+                {
+                    const unsigned int l = k + j;
+                    nidx                 = l / MIO_BN_HW;
+                    hwidx                = l - (nidx * MIO_BN_HW);
+                    index                = nidx * MIO_BN_CHW + chwid + hwidx;
+                    xhat[j] =
+                        (fp_to_fpprec<FpPrecType>(in[index]) - fp_to_fpprec<FpPrecType>(mean)) *
+                        fp_to_fpprec<FpPrecType>(invVariance);
+                }
+
+                __syncthreads();
+#pragma unroll
+                for(unsigned int j = 0; j < MIO_MAX_READ; ++j)
+                {
+                    const unsigned int l = k + j;
+                    nidx                 = l / MIO_BN_HW;
+                    hwidx                = l - (nidx * MIO_BN_HW);
+                    index                = nidx * MIO_BN_CHW + chwid + hwidx;
+                    out[index]           = fpprec_to_fp<FpType>(fma(pvscale, xhat[j], pvbias));
+                }
+
+                if constexpr(MIO_BN_REMOUT)
+                {
+                    const unsigned int remkeyout = (MIO_MAX_READ * lid) + MIO_BN_LESSOUT;
+#pragma unroll
+                    for(unsigned int j = 0; j < MIO_MAX_READ; ++j)
+                    {
+                        unsigned int l = remkeyout + j;
+                        nidx           = l / MIO_BN_HW;
+                        hwidx          = l - (nidx * MIO_BN_HW);
+                        index          = nidx * MIO_BN_CHW + chwid + hwidx;
+                        const auto xin = (index < MIO_BN_NCHW) ? fp_to_fpprec<FpPrecType>(in[index])
+                                                               : FpPrecType{0};
+                        xhat[j]        = (xin - fp_to_fpprec<FpPrecType>(mean)) *
+                                  fp_to_fpprec<FpPrecType>(invVariance);
+                    }
+
+                    __syncthreads();
+#pragma unroll
+                    for(unsigned int j = 0; j < MIO_MAX_READ; ++j)
+                    {
+                        const unsigned int l = remkeyout + j;
+                        nidx                 = l / MIO_BN_HW;
+                        hwidx                = l - (nidx * MIO_BN_HW);
+                        index                = nidx * MIO_BN_CHW + chwid + hwidx;
+                        if(index < MIO_BN_NCHW)
+                        {
+                            out[index] = fpprec_to_fp<FpType>(fma(pvscale, xhat[j], pvbias));
+                        }
+                    }
+                }
             }
         }
 
@@ -316,15 +361,27 @@ extern "C" __global__ void __launch_bounds__(MIO_BN_GRP0* MIO_BN_GRP1* MIO_BN_GR
 #endif
     )
 {
-    MIOpenBatchNormFwdTrainSpatialHIPImpl<MIO_BN_VARIANT>{}(in, out, scale, bias, INHW, epsilon);
-#if (MIO_RUNNING_RESULT == 1)
-    // TODO: these functions need to be implemented
-    // running_stash(
-    // resultRunningMean, resultRunningVariance, expAvgFactor, mean, variance, grpid);
-#endif
-#if (MIO_SAVE_MEAN_VARIANCE == 1)
-    // saved_stash(resultSaveMean, resultSaveInvVariance, mean, invVariance, grpid);
-#endif
+    FP_TYPE_PREC mean, variance, invVariance;
+    const unsigned int lid                    = threadIdx.x;
+    [[maybe_unused]] const unsigned int grpid = blockIdx.x;
+
+    MIOpenBatchNormFwdTrainSpatialHIPImpl<MIO_BN_VARIANT, FP_TYPE, FP_TYPE_PREC, _FLOAT_ACCUM>{}(
+        in, out, scale, bias, INHW, epsilon, mean, variance, invVariance);
+
+    if(lid == 0)
+    {
+        if constexpr(MIO_RUNNING_RESULT == 1)
+        {
+            running_stash<_FLOAT_ACCUM, _FLOAT_ACCUM_C, _FLOAT_PREC_C>(
+                resultRunningMean, resultRunningVariance, expAvgFactor, mean, variance, grpid);
+        }
+
+        if constexpr(MIO_SAVE_MEAN_VARIANCE == 1)
+        {
+            // saved_stash(resultSaveMean, resultSaveInvVariance, mean, invVariance, grpid);
+        }
+    }
+
     return;
 }
 
