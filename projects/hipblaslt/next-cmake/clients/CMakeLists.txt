@@ -65,10 +65,39 @@ target_link_libraries(hipblaslt-bench
         hipblaslt-clients-common
 )
 
-# TODO: Still haven't added hipblaslt-bench-groupedgemm-fixed-mk and related targets
+if(HIPBLASLT_ENABLE_OPENMP)
+    target_link_libraries(hipblaslt-bench PRIVATE OpenMP::OpenMP_CXX)
+endif()
 
 add_subdirectory(common)
 add_subdirectory(bench)
+
+add_executable(hipblaslt-bench-groupedgemm-fixed-mk "${TEMP_CLIENTS_SOURCE_DIR}/benchmarks/client_groupedgemm_fixed_mk.cpp")
+target_link_libraries(hipblaslt-bench-groupedgemm-fixed-mk PRIVATE hipblaslt-clients-common hip::device)
+target_compile_definitions(hipblaslt-bench-groupedgemm-fixed-mk PRIVATE ROCBLASLT_INTERNAL_API )
+
+add_executable(hipblaslt-bench-extop-layernorm "${TEMP_CLIENTS_SOURCE_DIR}/benchmarks/client_extop_layernorm.cpp")
+target_link_libraries(hipblaslt-bench-extop-layernorm PRIVATE hipblaslt-clients-common hip::device)
+target_compile_definitions(hipblaslt-bench-extop-layernorm PRIVATE ROCBLASLT_INTERNAL_API)
+
+add_executable(hipblaslt-bench-extop-matrixtransform "${TEMP_CLIENTS_SOURCE_DIR}/benchmarks/client_extop_matrixtransform.cpp")
+target_link_libraries(hipblaslt-bench-extop-matrixtransform PRIVATE hipblaslt-clients-common hip::device)
+target_compile_definitions(hipblaslt-bench-extop-matrixtransform PRIVATE ROCBLASLT_INTERNAL_API )
+
+add_executable(hipblaslt-bench-extop-softmax "${TEMP_CLIENTS_SOURCE_DIR}/benchmarks/client_extop_softmax.cpp")
+target_link_libraries(hipblaslt-bench-extop-softmax PRIVATE hipblaslt-clients-common hip::device)
+target_compile_definitions(hipblaslt-bench-extop-softmax PRIVATE ROCBLASLT_INTERNAL_API )
+
+add_executable(hipblaslt-bench-extop-amax "${TEMP_CLIENTS_SOURCE_DIR}/benchmarks/client_extop_amax.cpp")
+target_link_libraries(hipblaslt-bench-extop-amax PRIVATE hipblaslt-clients-common hip::device)
+target_compile_definitions(hipblaslt-bench-extop-amax PRIVATE ROCBLASLT_INTERNAL_API )
+
+find_package(LLVM REQUIRED)
+add_executable(hipblaslt-sequence "${TEMP_CLIENTS_SOURCE_DIR}/benchmarks/client_sequence.cpp")
+target_link_libraries(hipblaslt-sequence PRIVATE hipblaslt-clients-common hip::device)
+target_compile_definitions(hipblaslt-sequence PRIVATE ROCBLASLT_INTERNAL_API)
+target_link_libraries(hipblaslt-sequence PRIVATE LLVMObjectYAML)
+target_include_directories(hipblaslt-sequence PRIVATE ${LLVM_INCLUDE_DIRS})
 
 if(BUILD_TESTING OR HIPBLASLT_BUILD_TESTING)
     find_package(GTest REQUIRED)
@@ -80,8 +109,6 @@ if(BUILD_TESTING OR HIPBLASLT_BUILD_TESTING)
         PRIVATE
             hip::device
             hipblaslt-clients-common
-            ${LAPACK_LIBRARIES}
-            ${BLAS_LIBRARIES}
             GTest::gtest
     )
     if(HIPBLASLT_ENABLE_BLIS)
