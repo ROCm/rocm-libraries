@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -38,18 +38,18 @@ namespace
             CHECK_ROCBLAS_ERROR(rocblas_create_handle(&handle));
 
             // Make sure the default atomics_mode is rocblas_atomics_allowed
-            rocblas_atomics_mode mode = rocblas_atomics_not_allowed;
-            CHECK_ROCBLAS_ERROR(rocblas_get_atomics_mode(handle, &mode));
-            EXPECT_EQ(rocblas_atomics_allowed, mode);
-
-            // Make sure set()/get() functions work
-            CHECK_ROCBLAS_ERROR(rocblas_set_atomics_mode(handle, rocblas_atomics_not_allowed));
+            rocblas_atomics_mode mode = rocblas_atomics_allowed;
             CHECK_ROCBLAS_ERROR(rocblas_get_atomics_mode(handle, &mode));
             EXPECT_EQ(rocblas_atomics_not_allowed, mode);
 
+            // Make sure set()/get() functions work
             CHECK_ROCBLAS_ERROR(rocblas_set_atomics_mode(handle, rocblas_atomics_allowed));
             CHECK_ROCBLAS_ERROR(rocblas_get_atomics_mode(handle, &mode));
             EXPECT_EQ(rocblas_atomics_allowed, mode);
+
+            CHECK_ROCBLAS_ERROR(rocblas_set_atomics_mode(handle, rocblas_atomics_not_allowed));
+            CHECK_ROCBLAS_ERROR(rocblas_get_atomics_mode(handle, &mode));
+            EXPECT_EQ(rocblas_atomics_not_allowed, mode);
 
             CHECK_ROCBLAS_ERROR(rocblas_destroy_handle(handle));
         }
