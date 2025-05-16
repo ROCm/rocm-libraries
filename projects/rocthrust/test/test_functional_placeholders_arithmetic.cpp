@@ -23,7 +23,8 @@
 #include "test_param_fixtures.hpp"
 #include "test_utils.hpp"
 
-THRUST_DISABLE_MSVC_WARNING_BEGIN(4244) // warning C4244: '=': conversion from 'int' to '_Ty', possible loss of data
+THRUST_DIAG_PUSH
+THRUST_DIAG_SUPPRESS_MSVC(4244) // warning C4244: '=': conversion from 'int' to '_Ty', possible loss of data
 
 using ThirtyTwoBitTypesParams =
   ::testing::Types<Params<thrust::host_vector<int>>,
@@ -138,4 +139,4 @@ struct unary_plus_reference
 UNARY_FUNCTIONAL_PLACEHOLDERS_TEST(UnaryPlus, +, unary_plus_reference);
 UNARY_FUNCTIONAL_PLACEHOLDERS_TEST(Negate, -, thrust::negate);
 
-THRUST_DISABLE_MSVC_WARNING_END(4244)
+THRUST_DIAG_POP

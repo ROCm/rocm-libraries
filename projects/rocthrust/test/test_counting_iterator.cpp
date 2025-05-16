@@ -18,14 +18,55 @@
 #include <thrust/binary_search.h>
 #include <thrust/distance.h>
 #include <thrust/iterator/counting_iterator.h>
+#include <thrust/iterator/detail/iterator_traits.h>
 #include <thrust/sort.h>
 
 #include <cstdint>
 
 #include "test_param_fixtures.hpp"
+#include "test_real_assertions.hpp"
 #include "test_utils.hpp"
 
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+#  include <cuda/std/iterator>
+#  include <cuda/std/type_traits>
+#else
+#  include <iterator>
+#  include <type_traits>
+#endif
+
 TESTS_DEFINE(CountingIteratorTests, NumericalTestsParams);
+
+THRUST_DIAG_PUSH
+THRUST_DIAG_SUPPRESS_MSVC(4244 4267) // possible loss of data
+
+// ensure that we properly support thrust::counting_iterator from cuda::std
+TEST(CountingIteratorTests, TestIteratorTraits)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+  using It = cuda::std::iterator_traits<thrust::counting_iterator<int>>;
+#else
+  using It = ::std::iterator_traits<thrust::counting_iterator<int>>;
+#endif
+  using category = thrust::detail::iterator_category_with_system_and_traversal<std::random_access_iterator_tag,
+                                                                               thrust::any_system_tag,
+                                                                               thrust::random_access_traversal_tag>;
+
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+  using cuda::std::is_same;
+#else
+  using ::std::is_same;
+#endif
+  static_assert(is_same<It::difference_type, ptrdiff_t>::value, "");
+  static_assert(is_same<It::value_type, int>::value, "");
+  static_assert(is_same<It::pointer, void>::value, "");
+  static_assert(is_same<It::reference, signed int>::value, "");
+  static_assert(is_same<It::iterator_category, category>::value, "");
+
+  static_assert(::thrust::detail::is_cpp17_random_access_iterator<thrust::counting_iterator<int>>::value, "");
+}
 
 TYPED_TEST(CountingIteratorTests, TestCountingDefaultConstructor)
 {
@@ -44,7 +85,7 @@ TEST(CountingIteratorTests, TestCountingIteratorCopyConstructor)
 
   thrust::counting_iterator<int> iter1(iter0);
 
-  ASSERT_EQ(iter0, iter1);
+  ASSERT_EQ_QUIET(iter0, iter1);
   ASSERT_EQ(*iter0, *iter1);
 
   // construct from related space
@@ -54,6 +95,13 @@ TEST(CountingIteratorTests, TestCountingIteratorCopyConstructor)
   thrust::counting_iterator<int, thrust::device_system_tag> d_iter = iter0;
   ASSERT_EQ(*iter0, *d_iter);
 }
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+static_assert(cuda::std::is_trivially_copy_constructible<thrust::counting_iterator<int>>::value, "");
+static_assert(cuda::std::is_trivially_copyable<thrust::counting_iterator<int>>::value, "");
+#else
+static_assert(::std::is_trivially_copy_constructible<thrust::counting_iterator<int>>::value, "");
+static_assert(::std::is_trivially_copyable<thrust::counting_iterator<int>>::value, "");
+#endif
 
 TEST(CountingIteratorTests, TestCountingIteratorIncrement)
 {
@@ -221,7 +269,7 @@ TEST(CountingIteratorTests, TestCountingIteratorLowerBound)
     SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
     thrust::host_vector<unsigned int> h_data = get_random_data<unsigned int>(
-      n, std::numeric_limits<unsigned int>::min(), std::numeric_limits<unsigned int>::max(), seed);
+      n, get_default_limits<unsigned int>::min(), get_default_limits<unsigned int>::max(), seed);
     for (unsigned int i = 0; i < n; ++i)
     {
       h_data[i] %= M;
@@ -247,8 +295,8 @@ TEST(CountingIteratorTests, TestCountingIteratorLowerBound)
 
 TEST(CountingIteratorTests, TestCountingIteratorDifference)
 {
-  using Iterator   = typename thrust::counting_iterator<std::uint64_t>;
-  using Difference = typename thrust::iterator_difference<Iterator>::type;
+  using Iterator   = thrust::counting_iterator<std::uint64_t>;
+  using Difference = thrust::iterator_difference<Iterator>::type;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -259,3 +307,5 @@ TEST(CountingIteratorTests, TestCountingIteratorDifference)
 
   ASSERT_EQ(diff, last - first);
 }
+
+THRUST_DIAG_POP

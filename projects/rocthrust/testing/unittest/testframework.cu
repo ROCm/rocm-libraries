@@ -59,7 +59,7 @@ const size_t max_threshold     = (std::numeric_limits<size_t>::max)();
 
 std::vector<size_t> test_sizes;
 
-std::vector<size_t> get_test_sizes(void)
+std::vector<size_t> get_test_sizes()
 {
   return test_sizes;
 }
@@ -280,7 +280,7 @@ void report_results(std::vector<TestResult>& test_results, double elapsed_minute
   std::cout << "Time:  " << elapsed_minutes << " minutes" << std::endl;
 }
 
-void UnitTestDriver::list_tests(void)
+void UnitTestDriver::list_tests()
 {
   for (TestMap::iterator iter = test_map.begin(); iter != test_map.end(); iter++)
   {
@@ -297,10 +297,11 @@ bool UnitTestDriver::run_tests(std::vector<UnitTest*>& tests_to_run, const Argum
 {
   std::time_t start_time = std::time(0);
 
-  THRUST_DISABLE_MSVC_FORCING_VALUE_TO_BOOL_WARNING_BEGIN
+  THRUST_DIAG_PUSH
+  THRUST_DIAG_SUPPRESS_MSVC(4800) // Forcing value to bool
   bool verbose = kwargs.count("verbose");
   bool concise = kwargs.count("concise");
-  THRUST_DISABLE_MSVC_FORCING_VALUE_TO_BOOL_WARNING_END
+  THRUST_DIAG_POP
 
   std::vector<TestResult> test_results;
 
