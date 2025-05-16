@@ -246,7 +246,7 @@ public:
     void log_bench(rocblas_handle handle, Ts&&... xs)
     {
         const char* atomics_str
-            = handle->atomics_mode == rocblas_atomics_not_allowed ? "--atomics_not_allowed" : "";
+            = handle->atomics_mode == rocblas_atomics_allowed ? "--atomics_allowed" : "";
         log_arguments(*handle->log_bench_os, " ", std::forward<Ts>(xs)..., atomics_str);
     }
 
