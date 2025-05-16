@@ -95,4 +95,4 @@ This monorepo contains multiple subprojects, each of which retains the license u
 - 💬 [Start a discussion](https://github.com/ROCm/rocm-libraries/discussions)
 - 🐞 [Open an issue](https://github.com/ROCm/rocm-libraries/issues)
 
-We're happy to help!
+We're happy to help!!
