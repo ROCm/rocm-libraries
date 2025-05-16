@@ -4125,6 +4125,28 @@ class KernelWriterAssembly(KernelWriter):
                          comment="xor both lds buffer offsets to enable swapping"))
     return module
 
+
+  def lwaInitAddressesForDTLTailLoop(self, kernel, tP):
+    module = Module("lwaInitAddressesForDTLTailLoop")
+
+    tc = tP["tensorChar"]
+    waveSize = kernel["WavefrontSize"]
+    if kernel["DirectToLds%c"%tc] and kernel["NonDTLTailLoop%s"%tc]:
+      module.addComment0("Set local write offsets for %c to be same as DTL %uB load"%(tc, kernel["GlobalReadVectorWidth%c"%tc] * tP["bpe"]))
+      module.add(VAndB32(dst=vgpr("LocalWriteAddr%c"%tc), src0=(waveSize - 1), src1=vgpr("Serial"), comment="Serial % wavesize"))
+      module.add(VLShiftLeftB32(dst=vgpr("LocalWriteAddr%c"%tc), shiftHex=hex(log2(kernel["GlobalReadVectorWidth%c"%tc] * tP["bpe"])), src=vgpr("LocalWriteAddr%c"%tc), comment=""))
+      module.add(VAddU32(dst=vgpr("LocalWriteAddr%s"%tc), src0=sgpr("LocalWriteAddr%c"%tc), src1=vgpr("LocalWriteAddr%s"%tc), \
+                         comment="" ))
+      numLw = 0
+      if tP["isA"]:
+        numLw = self.states.a.numVgprLocalWriteAddrTailLoop
+      elif tP["isB"]:
+        numLw = self.states.b.numVgprLocalWriteAddrTailLoop
+      for i in range(1,numLw):
+        module.add(VAddU32(dst=vgpr("LocalWriteAddr%s + %s"%(tc, i)), src0=(i * 0x10000), \
+                           src1=vgpr("LocalWriteAddr%s"%tc), comment="" ))
+    return module
+
   ##############################################################################
   # openShadowInit
   # Label after prefetches are launched.  This is present even if ShadowInit not
@@ -4541,14 +4563,14 @@ class KernelWriterAssembly(KernelWriter):
     numG2LMetadata  = 0
     if not kernel["DirectToVgprA"]:
       if ("ULSGRODoubleG2L" in kernel) and kernel["ULSGRODoubleG2L"] == 1:
-        numG2LA = self.states.a.numVgprG2LAllocated*2
+        numG2LA = self.states.a.numVgprG2LTailloopAllocated*2
       else:
-        numG2LA = self.states.a.numVgprG2LAllocated
+        numG2LA = self.states.a.numVgprG2LTailloopAllocated
     if not kernel["DirectToVgprB"]:
       if ("ULSGRODoubleG2L" in kernel) and kernel["ULSGRODoubleG2L"] == 1:
-        numG2LB = self.states.b.numVgprG2LAllocated*2
+        numG2LB = self.states.b.numVgprG2LTailloopAllocated*2
       else:
-        numG2LB = self.states.b.numVgprG2LAllocated
+        numG2LB = self.states.b.numVgprG2LTailloopAllocated
     if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
       numG2LMetadata = self.states.m.numVgprG2LAllocated
 
@@ -4565,14 +4587,37 @@ class KernelWriterAssembly(KernelWriter):
       imod.addComment0("Check out VGPR (numG2LA,numG2LB,numG2LMetadata) = (%d,%d,%d)"%(numG2LA,numG2LB,numG2LMetadata))
     if numG2LA > 0:
       imod.add(RegSet("v", "vgprG2LA_BASE", vgprBase))
-      imod.add(self.moduleVgprMacroG2LA)
+      if kernel["DirectToLdsA"] and kernel["NonDTLTailLoopA"]:
+        imod.add(RegSet("v", "vgprG2LA", "vgprG2LA_BASE", 0))
+      else:
+        imod.add(self.moduleVgprMacroG2LA)
     if numG2LB > 0:
       imod.add(RegSet("v", "vgprG2LB_BASE", vgprBase + numG2LA))
-      imod.add(self.moduleVgprMacroG2LB)
+      if kernel["DirectToLdsB"] and kernel["NonDTLTailLoopB"]:
+        imod.add(RegSet("v", "vgprG2LB", "vgprG2LB_BASE", 0))
+      else:
+        imod.add(self.moduleVgprMacroG2LB)
     if numG2LMetadata > 0:
       imod.add(RegSet("v", "vgprG2LMetadata", vgprBase + numG2LA + numG2LB))
 
     return imod, vgprBase
+
+  def tailLoopAllocDTLLWVgpr(self, kernel):
+    imod     = Module("tailLoopAllocDTLLWVgpr")
+    vgprBase = -1
+    numLWA   = self.states.a.numVgprLocalWriteAddrTailLoop
+    numLWB   = self.states.b.numVgprLocalWriteAddrTailLoop
+
+    if numLWA + numLWB > 0:
+      vgprBase = self.vgprPool.checkOutAligned(numLWA + numLWB, 2)
+      imod.addComment0("Check out VGPR (numLWA,numLWB) = (%d,%d)"%(numLWA,numLWB))
+    if numLWA > 0 and (kernel["DirectToLdsA"] and kernel["NonDTLTailLoopA"]):
+      imod.add(RegSet("v", "vgprLocalWriteAddrA", vgprBase))
+    if numLWB > 0 and (kernel["DirectToLdsB"] and kernel["NonDTLTailLoopB"]):
+      imod.add(RegSet("v", "vgprLocalWriteAddrB", vgprBase + numLWA))
+
+    return imod, vgprBase
+
 
   def tailLoopAllocDTVVgpr(self, kernel, tensorParametersA, tensorParametersB):
     imodA     = Module("tailLoopAllocDTVVgprA")
@@ -7471,7 +7516,7 @@ class KernelWriterAssembly(KernelWriter):
       isGlc = bool(tP["NonTemporal"] & 0x1)
       isSlc = bool(tP["NonTemporal"] & 0x2)
       isNT  = bool(tP["NonTemporal"] & 0x4)
-      isLds = True if kernel["DirectToLds%s"%tc] else False
+      isLds = True if (kernel["DirectToLds%s"%tc] and not kernel["NonDTLTailLoop%s"%tc]) else False
 
       directToLdsLoads = 0
       if doTailOpt == 2 and behavior == "LOAD":
@@ -7550,14 +7595,7 @@ class KernelWriterAssembly(KernelWriter):
                   #   numElementsPerLoad = 2
                   # elif self.states.archCaps["HasEccHalf"]:
                   #   destVgprHi = self.vgprPool.checkOut(1, 'destVgprHi')
-                  if (not tP["isM"]) and kernel["DirectToLds%c"%tc] and (not tP["tlu"]) and tP["glvw"]>=4 and kernel["AssertSummationElementMultiple"] % 4 == 0:
-                    # Pack four byte values into a single load dword (for DTL only for now)
-                    numElementsPerLoad = 4
-                    dataIsByte = False
-                  else:
-                    dataIsByte = True
-
-                  if (not tP["isM"]) and kernel["DirectToLds%c"%tc] and (not tP["tlu"]) and tP["glvw"]>=4 and kernel["AssertSummationElementMultiple"] % 4 == 0:
+                  if (not tP["isM"]) and isLds and (not tP["tlu"]) and tP["glvw"]>=4 and kernel["AssertSummationElementMultiple"] % 4 == 0:
                     if tP["glvw"] == 4:
                       # Pack four byte values into a single load dword (for DTL only for now)
                       numElementsPerLoad = 4
@@ -7590,9 +7628,11 @@ class KernelWriterAssembly(KernelWriter):
                       eccOffset = _getEccOffset(tP["globalReadInstruction"].totalWidth, bpr=self.states.bpr, bpe=eccBpe, \
                         glvw=tP["glvw"], idx=loopCnt, numVgprG2L=numVgprG2L)
                 elif dataType.isHalf() or dataType.isBFloat16():
-                  if tP["glvw"]>1 and kernel["AssertSummationElementMultiple"] % 2 == 0:
+                  if tP["glvw"]>1 and kernel["AssertSummationElementMultiple"] % 2 == 0 and not isLds:
                   # Pack two FP16 values into a single load dword x2
                     numElementsPerLoad = 2
+                  elif isLds and kernel["AssertSummationElementMultiple"] % 2 == 0:
+                    numElementsPerLoad = kernel["GlobalReadVectorWidth%c"%tc]
                   elif self.states.archCaps["HasEccHalf"]:
                     # In some cards, loading half types into register will zero out
                     # the other half. Therefore we need to load into a separate register
@@ -7645,7 +7685,7 @@ class KernelWriterAssembly(KernelWriter):
                   if not kernel["_UseSgprForGRO"]:
                     soffset = "0"
                   # instruction offset with Sgpr for GRO
-                  elif kernel["DirectToLds%s"%tc] and kernel["UseInstOffsetForGRO"]:
+                  elif isLds and kernel["UseInstOffsetForGRO"]:
                     soffset = sgpr("ScalarGlobalReadOffset%s+%u"%(tc, graIdx))
                   # Sgpr for GRO
                   else:
@@ -7661,7 +7701,7 @@ class KernelWriterAssembly(KernelWriter):
                     soffset_prev = soffset
                     soffset = "0"
 
-                  if kernel["DirectToLds%s"%tc]:
+                  if isLds:
                     # need to increment ldsInc only once per each loopCnt
                     # this is pre count up, so increment it at r == 0
                     if r == 0:
@@ -7710,7 +7750,7 @@ class KernelWriterAssembly(KernelWriter):
                       # Pack two FP16 values into a single load dword x2
                       r += 1 # skip next element since we loaded 2X here
                       comment = "load packed 2X half buffer value"
-                    elif not kernel["DirectToLds%s"%tc]:
+                    elif not isLds:
                       hi16=loopCnt%2 if tP["glvw"]==1 else r%2
                       comment="load one buffer value"
 
@@ -7721,7 +7761,7 @@ class KernelWriterAssembly(KernelWriter):
                       # Pack two FP16 values into a single load dword x2
                     #  r += 1 # skip next element since we loaded 2X here
                     #  comment = "load packed 2X half buffer value"
-                    if not kernel["DirectToLds%s"%tc]:
+                    if not isLds:
                       hi8  = (loopCnt%4) %2 if tP["glvw"]==1 else (r%4) %2
                       hi16 = False if tP["glvw"]==1 else (r%4)//2
                       comment="load one buffer value"
@@ -7756,6 +7796,7 @@ class KernelWriterAssembly(KernelWriter):
                           module.add(SBranch(labelName=jumpLabel.getLabelName(), comment=""))
                   else:
                     if (doTailOpt == 0) or (doTailOpt == 2 and behavior == "LOAD" and r >= rStart and r < rEnd):
+
                       module.add(self.chooseGlobalRead(True, \
                                 bpl, destVgpr=loadVgpr, \
                                 addr0=vgpr(offsetVgpr), addr1=sgpr("Srd%s"%tc, 4), \
@@ -7769,7 +7810,7 @@ class KernelWriterAssembly(KernelWriter):
                     codeMod.add(VAddU32(dst=vgpr(offsetVgpr), src0=vgpr(offsetVgpr), src1=soffset_prev, comment="mirror unroll: restore GRO=GRO+SGRO"))
                     module.add(codeMod)
 
-                  if kernel["DirectToLds%s"%tc] and kernel["UseInstOffsetForGRO"]:
+                  if isLds and kernel["UseInstOffsetForGRO"]:
                     instOffsetInc += ldsInc
 
                 else: # Not buffer load, ie 'flat' load
@@ -9345,7 +9386,11 @@ class KernelWriterAssembly(KernelWriter):
         localWriteCode.add(SBarrier(comment="dump LDS"))
         localWriteCode.add(self.getCmpAssert(self.asmAssert.ne, sgpr("WorkGroup0"),1))
 
-    if (not kernel["DirectToLds%s"%tc]):
+    # Enable local write if not DTL or using nonDTL loads in tail loop
+    if (not kernel["DirectToLds%s"%tc]) or \
+       (((tP["isA"] and kernel["NonDTLTailLoopA"]) or \
+        (tP["isB"] and kernel["NonDTLTailLoopB"])) and self.states.inTailLoop):
+      # Skip local write if DTVA or DTVB
       if not ((tP["isA"] or tP["isB"]) and kernel["DirectToVgpr%s"%tc]):
         localWriteBody(tP)
       if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
