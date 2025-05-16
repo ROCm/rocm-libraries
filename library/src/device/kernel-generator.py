@@ -158,7 +158,7 @@ def generate_cpu_function_pool_main(num_files):
             type='void',
             name=f'function_pool_init_{i}',
             value=
-            'std::tuple<FPKeyMap, FPKeyMapPP>& def_keys, std::tuple<FPMap, FPMapPP>& function_maps'
+            'std::tuple<FPKeyMap, PPFPKeyMap>& def_keys, std::tuple<FPMap, PPFPMap>& function_maps'
         )
 
     call_list = StatementList()
@@ -241,8 +241,8 @@ def generate_cpu_function_pool_pieces(functions, pp_functions, num_files):
     # Assemble contents of each file to return in a list
     pieces = [None] * num_files
     piece_args = ArgumentList(
-        'std::tuple<FPKeyMap, FPKeyMapPP>& def_keys',
-        'std::tuple<FPMap, FPMapPP>& function_maps')
+        'std::tuple<FPKeyMap, PPFPKeyMap>& def_keys',
+        'std::tuple<FPMap, PPFPMap>& function_maps')
     for k in range(num_files):
         pieces[k] = StatementList(
             Include('"../include/function_pool.h"'),

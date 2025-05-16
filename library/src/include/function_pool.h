@@ -57,9 +57,9 @@ struct PartialPassParams
     {
     }
 
-    ComputeScheme             scheme;
-    unsigned int              current_dim;
-    unsigned int              off_dim;
+    ComputeScheme             scheme      = CS_NONE;
+    unsigned int              current_dim = 0;
+    unsigned int              off_dim     = 0;
     std::vector<unsigned int> factors_off_dim;
 };
 
@@ -141,18 +141,18 @@ struct FFTKernel
 };
 
 typedef std::unordered_multimap<FMKey, FMKey, SimpleHash>  FPKeyMap;
-typedef std::unordered_map<FMKeyPP, FMKeyPP, SimpleHashPP> FPKeyMapPP;
+typedef std::unordered_map<FMKeyPP, FMKeyPP, SimpleHashPP> PPFPKeyMap;
 
 typedef std::unordered_multimap<FMKey, FFTKernel, SimpleHash>               FPMap;
-typedef std::unordered_map<FMKeyPP, std::array<FFTKernel, 2>, SimpleHashPP> FPMapPP;
+typedef std::unordered_map<FMKeyPP, std::array<FFTKernel, 2>, SimpleHashPP> PPFPMap;
 
 struct function_pool_data
 {
     // when AOT generator adds a default key-kernel,
     // we get the keys of two version: empty-config vs full-config
     // make the pair as an entry in a map so that we know they are the same things
-    std::tuple<FPKeyMap, FPKeyMapPP> def_keys;
-    std::tuple<FPMap, FPMapPP>       function_maps;
+    std::tuple<FPKeyMap, PPFPKeyMap> def_keys;
+    std::tuple<FPMap, PPFPMap>       function_maps;
 
     function_pool_data();
 
@@ -167,10 +167,10 @@ class function_pool
 {
     unsigned int max_lds_bytes;
     FPKeyMap&    def_key_pool;
-    FPKeyMapPP&  def_pp_key_pool;
+    PPFPKeyMap&  def_pp_key_pool;
 
     FPMap&   function_map;
-    FPMapPP& function_pp_map;
+    PPFPMap& function_pp_map;
 
     // look in the specified map for the specified key, returning an
     // iterator to the item that fits best into the available LDS
@@ -243,7 +243,7 @@ public:
             throw std::runtime_error("function_pool: max_lds_bytes not initialized");
     }
 
-    function_pool(function_pool& p) = delete;
+    function_pool(function_pool& p)                = delete;
     function_pool& operator=(const function_pool&) = delete;
 
     ~function_pool() = default;
@@ -386,8 +386,8 @@ static void insert_default_entry(const FMKey&     def_key,
 static bool insert_default_pp_entry(const FMKeyPP&   def_key,
                                     const FFTKernel& kernel_0,
                                     const FFTKernel& kernel_1,
-                                    FPKeyMapPP&      def_key_pool,
-                                    FPMapPP&         function_map)
+                                    PPFPKeyMap&      def_key_pool,
+                                    PPFPMap&         function_map)
 {
     // simple_key means the same thing as def_key, but we just remove kernel-config
     // so we don't need to know the exact config when we're lookin' for the default kernel

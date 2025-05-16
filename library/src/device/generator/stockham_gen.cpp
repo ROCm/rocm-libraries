@@ -436,15 +436,72 @@ void stockham_variants(const std::string&            kernel_name,
     output_json(launchers, kernel_name, output);
 }
 
-size_t pp_current_dim_rm(const size_t current_dim)
+size_t pp_dim_rm(const size_t dim)
 {
-    if(current_dim == 0)
+    if(dim == 0)
         return 2;
 
-    if(current_dim == 2)
+    if(dim == 2)
         return 0;
 
-    return current_dim;
+    return dim;
+}
+
+void pp_params_rm(std::vector<unsigned int>& parent_length,
+                  std::vector<unsigned int>& dims,
+                  std::vector<unsigned int>& factors1,
+                  std::vector<unsigned int>& factors2,
+                  std::vector<unsigned int>& pp_factors1,
+                  std::vector<unsigned int>& pp_factors2,
+                  std::vector<unsigned int>& workgroup_size,
+                  std::vector<unsigned int>& threads_per_transform,
+                  std::vector<bool>&         direct_to_from_reg)
+{
+    std::reverse(parent_length.begin(), parent_length.end());
+
+    auto dims_rm = dims;
+    for(auto& dim : dims_rm)
+        dim = pp_dim_rm(dim);
+
+    if(dims_rm != dims)
+    {
+        factors1.swap(factors2);
+        pp_factors1.swap(pp_factors2);
+        std::reverse(workgroup_size.begin(), workgroup_size.end());
+        std::reverse(threads_per_transform.begin(), threads_per_transform.end());
+        std::reverse(direct_to_from_reg.begin(), direct_to_from_reg.end());
+    }
+}
+
+unsigned int get_pp_off_dim(const std::vector<unsigned int>& dims)
+{
+    if(dims.size() != 2)
+        throw std::runtime_error("CS_3D_PP requires two dimensions configuration");
+
+    unsigned int dims_sum = 0, off_dim = 0;
+    for(const auto& dim : dims)
+    {
+        if(dim < 0 || dim > 2)
+            throw std::runtime_error("Invalid dimensions configuration for CS_3D_PP");
+
+        dims_sum += dim;
+    }
+    switch(dims_sum)
+    {
+    case 1:
+        off_dim = 2;
+        break;
+    case 2:
+        off_dim = 1;
+        break;
+    case 3:
+        off_dim = 0;
+        break;
+    default:
+        throw std::runtime_error("Invalid dimensions configuration for CS_3D_PP");
+    }
+
+    return off_dim;
 }
 
 static size_t max_bytes_per_element(const std::vector<unsigned int>& precisions)
@@ -494,17 +551,17 @@ int main()
         ++arg;
         scheme = *arg;
 
-        std::vector<unsigned int> parent_length, dims, pp_factors_1, pp_factors_2;
+        std::vector<unsigned int> parent_length, dims, pp_factors1, pp_factors2;
         if(scheme == "CS_3D_PP")
         {
             ++arg;
             parent_length = parse_uints_csv(*arg);
 
             ++arg;
-            pp_factors_2 = parse_uints_csv(*arg);
+            pp_factors2 = parse_uints_csv(*arg);
 
             ++arg;
-            pp_factors_1 = parse_uints_csv(*arg);
+            pp_factors1 = parse_uints_csv(*arg);
 
             ++arg;
             dims = parse_uints_csv(*arg);
@@ -542,48 +599,17 @@ int main()
             ++arg;
             factors1 = parse_uints_csv(*arg);
 
-            if(dims.size() != 2)
-                throw std::runtime_error("CS_3D_PP requires two dimensions configuration");
+            auto off_dim = get_pp_off_dim(dims);
 
-            unsigned int dims_sum = 0, off_dim = 0;
-            for(const auto& dim : dims)
-            {
-                if(dim < 0 || dim > 2)
-                    throw std::runtime_error("Invalid dimensions configuration for CS_3D_PP");
-
-                dims_sum += dim;
-            }
-            switch(dims_sum)
-            {
-            case 1:
-                off_dim = 2;
-                break;
-            case 2:
-                off_dim = 1;
-                break;
-            case 3:
-                off_dim = 0;
-                break;
-            default:
-                throw std::runtime_error("Invalid dimensions configuration for CS_3D_PP");
-            }
-
-            // parent length from column to row-major
-            std::reverse(parent_length.begin(), parent_length.end());
-
-            // current dim from column to row-major
-            auto dims_rm = dims;
-            for(auto& dim : dims_rm)
-                dim = pp_current_dim_rm(dim);
-
-            if(dims_rm != dims)
-            {
-                factors1.swap(factors2);
-                pp_factors_1.swap(pp_factors_2);
-                std::reverse(workgroup_size.begin(), workgroup_size.end());
-                std::reverse(threads_per_transform.begin(), threads_per_transform.end());
-                std::reverse(direct_to_from_reg.begin(), direct_to_from_reg.end());
-            }
+            pp_params_rm(parent_length,
+                         dims,
+                         factors1,
+                         factors2,
+                         pp_factors1,
+                         pp_factors2,
+                         workgroup_size,
+                         threads_per_transform,
+                         direct_to_from_reg);
 
             if(threads_per_transform.size() != 2)
                 throw std::runtime_error(
@@ -600,8 +626,8 @@ int main()
             specs2.direct_to_from_reg    = direct_to_from_reg[1];
             specs2.threads_per_transform = threads_per_transform[1];
 
-            StockhamPartialPassParams pp_params_1(parent_length, dims[0], off_dim, pp_factors_1);
-            StockhamPartialPassParams pp_params_2(parent_length, dims[1], off_dim, pp_factors_2);
+            StockhamPartialPassParams pp_params_1(parent_length, dims[0], off_dim, pp_factors1);
+            StockhamPartialPassParams pp_params_2(parent_length, dims[1], off_dim, pp_factors2);
 
             stockham_partial_pass_variants(
                 kernel_name, specs1, specs2, pp_params_1, pp_params_2, std::cout);
