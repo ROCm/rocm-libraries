@@ -31,7 +31,7 @@ subtrees:
       - file: reference/api.rst
         title: Exported functions
       - file: reference/types.rst
-        title: hipSPARSE datatypes
+        title: hipSPARSE data types
       - file: reference/precision.rst
         title: hipSPARSE precision support
       - file: reference/auxiliary.rst
