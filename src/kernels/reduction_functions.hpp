@@ -27,7 +27,13 @@
 #ifndef GUARD_REDUCTION_FUNCTIONS_HPP
 #define GUARD_REDUCTION_FUNCTIONS_HPP
 
-#include "batchnorm_functions.hpp"
+// NOTE: This header should be independent from batchnorm_functions.hpp
+// Even is in OpenCL implementation, these functions are only enabled under
+// certain condition. But now, these template will not be compiled before
+// calling them.
+// #include "batchnorm_functions.hpp"
+namespace miopen {
+namespace reduction {
 
 template <typename FloatAccum, unsigned int SizeLclData>
 __forceinline__ __device__ void lds_reduce2(FloatAccum& x,
@@ -37,8 +43,6 @@ __forceinline__ __device__ void lds_reduce2(FloatAccum& x,
                                             FloatAccum (&lcl_data_y)[SizeLclData],
                                             unsigned int lid)
 {
-    static_assert(!static_cast<bool>(MIOPEN_USE_AMDGCN),
-                  "this function is only enabled when MIOPEN_USE_AMDGCN == 0");
     lcl_data_x[lid] = x;
     lcl_data_y[lid] = y;
     __syncthreads();
@@ -115,5 +119,8 @@ __forceinline__ __device__ void gcn_reduce2(FloatAccum& x,
     x *= scale;
     y *= scale;
 }
+
+} // namespace reduction
+} // namespace miopen
 
 #endif

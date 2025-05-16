@@ -386,9 +386,12 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         ${COMPOSABLE_KERNEL_INCLUDE}
         ${COMPOSABLE_KERNEL_DYNAMIC_ASM_INCLUDE}
         ${GPU_GENERAL_TENSOR_REORDER_KERNEL_HIP_INCLUDE}
+        kernels/vector_types.hpp
         kernels/activation_functions.hpp
         kernels/batchnorm_functions.hpp
         kernels/reduction_functions.hpp
+        kernels/configuration.hpp
+        kernels/default_configurations.hpp
         kernels/gpu_reference_kernel/fp8_kern_types.h
         kernels/Conv_Winograd_v13_3_12_fp16dot_stride1.inc
         kernels/Conv_Winograd_v13_3_12_fp16dot_stride2_dec.inc
