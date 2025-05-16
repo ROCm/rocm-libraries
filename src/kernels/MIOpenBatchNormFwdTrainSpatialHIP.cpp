@@ -24,44 +24,55 @@
  *
  *******************************************************************************/
 
+// NOTE: These included headers should be standalone, they shouldn't relay on each other,
+// otherwise the dependencies will be pretty messed up.
+// TODO: actually these headers are not that independent due to the Macros that being used
+// currently. we should remove as more macros as we can.
 #include "batchnorm_functions.hpp"
 #include "activation_functions.hpp"
 #include "reduction_functions.hpp"
 
-#ifndef MIO_LAYOUT_NHWC
-#define MIO_LAYOUT_NHWC 0
-#endif
+// Load the configs to this file
+namespace /*anonymous*/ {
+using mio_config    = miopen::config;
+using mio_bn_config = miopen::batchnorm::config;
+} // namespace
 
-static_assert(MIO_LAYOUT_NHWC == 0 || MIO_LAYOUT_NHWC == 1, "MIO_LAYOUT_NHWC must be 0 or 1");
+namespace miopen {
+namespace batchnorm {
 
 template <int MIoBnVariant, typename FpType, typename FpPrecType, typename FpAccumType>
 struct MIOpenBatchNormFwdTrainSpatialHIPImpl
 {
+    static_assert(false, "this variant is not supported.");
 };
 
 // This is the instance for MIO_BN_VARIANT == 1
 template <typename FpType, typename FpPrecType, typename FpAccumType>
 struct MIOpenBatchNormFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
 {
-    // Configs
-    static constexpr int MIO_MAX_READ =
-        MIO_LAYOUT_NHWC == 1 ? MIO_MAX_READ : (MIO_BN_HW >= 4096 ? 3 : 2);
-    static constexpr int RD_BLK = 1;
-    static constexpr int GRPRD =
-        MIO_LAYOUT_NHWC == 1 ? (MIO_BN_GRP0 * RD_BLK) : (MIO_BN_GRP0 * RD_BLK * 4);
-
-    static constexpr int MIO_BN_REM4   = (MIO_BN_NHW - ((MIO_BN_NHW / GRPRD) * GRPRD));
-    static constexpr int MIO_BN_LESS4  = (MIO_BN_NHW - MIO_BN_REM4);
-    static constexpr int MIO_BN_CHUNK4 = (MIO_MAX_READ * GRPRD);
-    static constexpr int MIO_BN_REMOUT4 =
-        (MIO_BN_NHW - ((MIO_BN_NHW / MIO_BN_CHUNK4) * MIO_BN_CHUNK4));
-    static constexpr int MIO_BN_LESSOUT4 = (MIO_BN_NHW - MIO_BN_REMOUT4);
-    static constexpr int MIO_BN_REM   = (MIO_BN_NHW - ((MIO_BN_NHW / MIO_BN_GRP0) * MIO_BN_GRP0));
-    static constexpr int MIO_BN_LESS  = (MIO_BN_NHW - MIO_BN_REM);
-    static constexpr int MIO_BN_CHUNK = (MIO_MAX_READ * MIO_BN_GRP0);
-    static constexpr int MIO_BN_REMOUT =
-        (MIO_BN_NHW - ((MIO_BN_NHW / MIO_BN_CHUNK) * MIO_BN_CHUNK));
-    static constexpr int MIO_BN_LESSOUT = (MIO_BN_NHW - MIO_BN_REMOUT);
+    // These are the configs for this variant
+    static constexpr unsigned int max_read =
+        mio_config::layout_nhwc ? 1 : (mio_bn_config::hw >= 4096 ? 3 : 2);
+    static constexpr unsigned int rd_blk = 1;
+    static constexpr unsigned int grprd  = mio_config::layout_nhwc
+                                               ? (mio_bn_config::launch_dim.grp0 * rd_blk)
+                                               : (mio_bn_config::launch_dim.grp0 * rd_blk * 4);
+    static constexpr unsigned int rem4 =
+        mio_bn_config::nhw - ((mio_bn_config::nhw / grprd) * grprd);
+    static constexpr unsigned int less4  = mio_bn_config::nhw - rem4;
+    static constexpr unsigned int chunk4 = max_read * grprd;
+    static constexpr unsigned int remout4 =
+        mio_bn_config::nhw - ((mio_bn_config::nhw / chunk4) * chunk4);
+    static constexpr unsigned int lessout4 = mio_bn_config::nhw - remout4;
+    static constexpr unsigned int rem =
+        mio_bn_config::nhw -
+        ((mio_bn_config::nhw / mio_bn_config::launch_dim.grp0) * mio_bn_config::launch_dim.grp0);
+    static constexpr unsigned int less  = mio_bn_config::nhw - rem;
+    static constexpr unsigned int chunk = max_read * mio_bn_config::launch_dim.grp0;
+    static constexpr unsigned int remout =
+        mio_bn_config::nhw - ((mio_bn_config::nhw / chunk) * chunk);
+    static constexpr unsigned int lessout = mio_bn_config::nhw - remout;
 
     // Kernel
     __forceinline__ __device__ void operator()(const FpType* __restrict in,
@@ -86,9 +97,14 @@ struct MIOpenBatchNormFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
         unsigned int index       = 0;
         const unsigned int lid   = threadIdx.x;
         const unsigned int grpid = blockIdx.x;
-#if !MIO_LAYOUT_NHWC
-        const unsigned int chwid = grpid * MIO_BN_HW;
-#endif
+
+        // Note: this variable is only used when mio_config::layout_nhwc is false.
+        unsigned int chwid;
+        if constexpr(!mio_config::layout_nhwc)
+        {
+            chwid = grpid * mio_bn_config::hw;
+        }
+
         unsigned int nidx  = 0;
         unsigned int hwidx = 0;
 
@@ -100,16 +116,16 @@ struct MIOpenBatchNormFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
 
         __syncthreads();
 
-        if constexpr(!MIO_LAYOUT_NHWC && MIO_BN_HW >= 4096)
+        if constexpr(!mio_config::layout_nhwc && mio_bn_config::hw >= 4096)
         {
             using fp_type4 = typename mapped_vector_type<FpType, 4>::type;
             fp_type4 read4;
 #pragma unroll
-            for(unsigned int k = lid << 2; k < static_cast<decltype(k)>(MIO_BN_LESS4); k += GRPRD)
+            for(unsigned int k = lid << 2; k < less4; k += grprd)
             {
-                nidx  = k / MIO_BN_HW;
-                hwidx = k - (nidx * MIO_BN_HW);
-                index = nidx * MIO_BN_CHW + chwid + hwidx;
+                nidx  = k / mio_bn_config::hw;
+                hwidx = k - (nidx * mio_bn_config::hw);
+                index = nidx * mio_bn_config::chw + chwid + hwidx;
                 read4 = *(reinterpret_cast<const fp_type4*>(in + index));
                 mean += fp_to_fpprec<FpPrecType>(read4.x);
                 mean += fp_to_fpprec<FpPrecType>(read4.y);
@@ -125,15 +141,18 @@ struct MIOpenBatchNormFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
                     fp_to_fpprec<FpPrecType>(read4.w), fp_to_fpprec<FpPrecType>(read4.w), variance);
             }
 
-            if constexpr(MIO_BN_REM4)
+            if constexpr(rem4 > 0u)
             {
-                const unsigned int remkey = (lid << 2) + MIO_BN_LESS4;
-                nidx                      = remkey / MIO_BN_HW;
-                hwidx                     = remkey - (nidx * MIO_BN_HW);
-                index                     = nidx * MIO_BN_CHW + chwid + hwidx;
-                // TODO: This is not right, index is unsigned int, MIO_BN_NCHW is int
-                // comparing them is not right.
-                if(index < (MIO_BN_NCHW - 3))
+                const unsigned int remkey = (lid << 2) + less4;
+                nidx                      = remkey / mio_bn_config::hw;
+                hwidx                     = remkey - (nidx * mio_bn_config::hw);
+                index                     = nidx * mio_bn_config::chw + chwid + hwidx;
+
+                // TODO: mio_bn_config::nchw could smaller than 3, mio_bn_config::nchw - 3
+                // may result in a negative result, index is unsigned int, so the value on
+                // the right of `<` will decay to unsigned int, a negative value will become
+                // a really large positive value.
+                if(index < (mio_bn_config::nchw - 3))
                 {
                     read4 = *(reinterpret_cast<const fp_type4*>(in + index));
                     mean += fp_to_fpprec<FpPrecType>(read4.x);
@@ -158,43 +177,45 @@ struct MIOpenBatchNormFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
         else
         {
 #pragma unroll
-            for(unsigned int k = lid; k < static_cast<decltype(k)>(MIO_BN_LESS); k += MIO_BN_GRP0)
+            for(unsigned int k = lid; k < less; k += mio_bn_config::launch_dim.grp0)
             {
-                nidx  = k / MIO_BN_HW;
-                hwidx = k - (nidx * MIO_BN_HW);
-                if constexpr(MIO_LAYOUT_NHWC)
+                nidx  = k / mio_bn_config::hw;
+                hwidx = k - (nidx * mio_bn_config::hw);
+                if constexpr(mio_config::layout_nhwc)
                 {
-                    index = nidx * MIO_BN_CHW + hwidx * MIO_BN_C + grpid;
+                    index = nidx * mio_bn_config::chw + hwidx * mio_bn_config::c + grpid;
                 }
                 else
                 {
-                    index = nidx * MIO_BN_CHW + chwid + hwidx;
+                    index = nidx * mio_bn_config::chw + chwid + hwidx;
                 }
                 const auto xin = fp_to_fpprec<FpPrecType>(in[index]);
                 mean += xin;
                 variance = fma(xin, xin, variance);
             }
 
-            // TODO: not really understand whey MIO_BN_REM is integer instead of boolean value
-            if constexpr(MIO_BN_REM)
+            if constexpr(rem > 0u)
             {
-                // TODO: here I have to cast the lid into int64_t, to avoid compile error
-                // could be able to use signed int, if lid is not going exceed the limit
-                if(static_cast<int64_t>(lid) < MIO_BN_REM)
+                // Note: hip compiler has a bug, it throws compiler warning for comparing unsigned
+                // int with 0 value, when rem is 0. but when rem is 0, this code block should not be
+                // compiler due to we use if constexpr above.
+                if(static_cast<int>(lid) < static_cast<int>(rem))
                 {
-                    unsigned int remkey = lid + MIO_BN_LESS;
-                    nidx                = remkey / MIO_BN_HW;
-                    hwidx               = remkey - (nidx * MIO_BN_HW);
-                    if constexpr(MIO_LAYOUT_NHWC)
+                    unsigned int remkey = lid + less;
+                    nidx                = remkey / mio_bn_config::hw;
+                    hwidx               = remkey - (nidx * mio_bn_config::hw);
+                    if constexpr(mio_config::layout_nhwc)
                     {
-                        index = nidx * MIO_BN_CHW + hwidx * MIO_BN_C + grpid;
+                        index = nidx * mio_bn_config::chw + hwidx * mio_bn_config::c + grpid;
                     }
                     else
                     {
-                        index = nidx * MIO_BN_CHW + chwid + hwidx;
+                        index = nidx * mio_bn_config::chw + chwid + hwidx;
                     }
-                    const auto xin =
-                        (index < MIO_BN_NCHW) ? fp_to_fpprec<FpPrecType>(in[index]) : FpPrecType{0};
+
+                    const auto xin = index < mio_bn_config::nchw
+                                         ? fp_to_fpprec<FpPrecType>(in[index])
+                                         : FpPrecType{0};
                     mean += xin;
                     variance = fma(xin, xin, variance);
                 }
@@ -204,11 +225,11 @@ struct MIOpenBatchNormFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
         __syncthreads();
 
         constexpr auto lcl_data_size =
-            static_cast<bool>(MIOPEN_USE_AMDGCN) ? MIO_BN_LDSGCN_SIZE : MIO_BN_LDS_SIZE;
+            mio_bn_config::use_amdgnc ? mio_bn_config::lds_gcn_size : mio_bn_config::lds_size;
         __shared__ FpAccumType lcl_data_x[lcl_data_size];
         __shared__ FpAccumType lcl_data_y[lcl_data_size];
 
-        if constexpr(!MIOPEN_USE_AMDGCN)
+        if constexpr(!mio_bn_config::use_amdgnc)
         {
             // TODO: I don't know if this is right
             // mean is FpType, could be 16 bit floating point type
@@ -217,55 +238,53 @@ struct MIOpenBatchNormFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
             // should be case to FpAccumType&, which is unsafe. and the
             // internal data pattern could be inconsistent between these 2
             // types.
-            lds_reduce2<FpAccumType, lcl_data_size>(reinterpret_cast<FpAccumType&>(mean),
-                                                    reinterpret_cast<FpAccumType&>(variance),
-                                                    static_cast<FpAccumType>(INHW),
-                                                    lcl_data_x,
-                                                    lcl_data_y,
-                                                    lid);
+            miopen::reduction::lds_reduce2<FpAccumType, lcl_data_size>(
+                reinterpret_cast<FpAccumType&>(mean),
+                reinterpret_cast<FpAccumType&>(variance),
+                static_cast<FpAccumType>(INHW),
+                lcl_data_x,
+                lcl_data_y,
+                lid);
         }
         else
         {
             // TODO: this as well as above
-            gcn_reduce2<FpAccumType, lcl_data_size>(reinterpret_cast<FpAccumType&>(mean),
-                                                    reinterpret_cast<FpAccumType&>(variance),
-                                                    static_cast<FpAccumType>(INHW),
-                                                    lcl_data_x,
-                                                    lcl_data_y,
-                                                    lid);
+            miopen::reduction::gcn_reduce2<FpAccumType, lcl_data_size>(
+                reinterpret_cast<FpAccumType&>(mean),
+                reinterpret_cast<FpAccumType&>(variance),
+                static_cast<FpAccumType>(INHW),
+                lcl_data_x,
+                lcl_data_y,
+                lid);
         }
 
         // REDUCTION COMPLETE ---------------------------
-        // TODO: it seems that fma doesn't directly supports half, it supports _Float16
-        // here I don't know if I should run mad for FpPrecType or FpType, if I only
-        // need to run this for FpPrecType, then we don't need to have this hip_mad struct.
-        variance = hip_mad<FpPrecType>{}(-mean, mean, variance);
+        variance = fma(-mean, mean, variance);
         if(variance < FpPrecType{0})
         {
             variance = FpPrecType{0};
         }
-        // TODO: I don't know if this is correct, the input epsilon is double, but it should be
-        // casted to FpType here
+
+        // unsafe: casting double to FpPrecType
         invVariance = rsqrt(variance + static_cast<FpPrecType>(epsilon));
         pvscale     = lcl_scale;
         pvbias      = lcl_bias;
 
-        if constexpr(MIO_LAYOUT_NHWC || MIO_BN_REM == 0)
+        if constexpr(mio_config::layout_nhwc || rem == 0)
         {
-            constexpr unsigned int k_limit =
-                static_cast<bool>(MIO_LAYOUT_NHWC) ? MIO_BN_NHW : MIO_BN_LESS;
+            constexpr unsigned int k_limit = mio_config::layout_nhwc ? mio_bn_config::nhw : less;
 #pragma unroll 2
-            for(unsigned int k = lid; k < k_limit; k += MIO_BN_GRP0)
+            for(unsigned int k = lid; k < k_limit; k += mio_bn_config::launch_dim.grp0)
             {
-                nidx  = k / MIO_BN_HW;
-                hwidx = k - (nidx * MIO_BN_HW);
-                if constexpr(MIO_LAYOUT_NHWC)
+                nidx  = k / mio_bn_config::hw;
+                hwidx = k - (nidx * mio_bn_config::hw);
+                if constexpr(mio_config::layout_nhwc)
                 {
-                    index = nidx * MIO_BN_CHW + hwidx * MIO_BN_C + grpid;
+                    index = nidx * mio_bn_config::chw + hwidx * mio_bn_config::c + grpid;
                 }
                 else
                 {
-                    index = nidx * MIO_BN_CHW + chwid + hwidx;
+                    index = nidx * mio_bn_config::chw + chwid + hwidx;
                 }
                 out[index] = fpprec_to_fp<FpType>(
                     fma(pvscale,
@@ -276,17 +295,17 @@ struct MIOpenBatchNormFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
         }
         else
         {
-            FpPrecType xhat[MIO_MAX_READ];
+            FpPrecType xhat[max_read];
 #pragma unroll 2
-            for(unsigned int k = (MIO_MAX_READ * lid); k < MIO_BN_LESSOUT; k += MIO_BN_CHUNK)
+            for(unsigned int k = (max_read * lid); k < lessout; k += chunk)
             {
 #pragma unroll
-                for(unsigned int j = 0; j < MIO_MAX_READ; ++j)
+                for(unsigned int j = 0; j < max_read; ++j)
                 {
                     const unsigned int l = k + j;
-                    nidx                 = l / MIO_BN_HW;
-                    hwidx                = l - (nidx * MIO_BN_HW);
-                    index                = nidx * MIO_BN_CHW + chwid + hwidx;
+                    nidx                 = l / mio_bn_config::hw;
+                    hwidx                = l - (nidx * mio_bn_config::hw);
+                    index                = nidx * mio_bn_config::chw + chwid + hwidx;
                     xhat[j] =
                         (fp_to_fpprec<FpPrecType>(in[index]) - fp_to_fpprec<FpPrecType>(mean)) *
                         fp_to_fpprec<FpPrecType>(invVariance);
@@ -294,40 +313,43 @@ struct MIOpenBatchNormFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
 
                 __syncthreads();
 #pragma unroll
-                for(unsigned int j = 0; j < MIO_MAX_READ; ++j)
+                for(unsigned int j = 0; j < max_read; ++j)
                 {
                     const unsigned int l = k + j;
-                    nidx                 = l / MIO_BN_HW;
-                    hwidx                = l - (nidx * MIO_BN_HW);
-                    index                = nidx * MIO_BN_CHW + chwid + hwidx;
+                    nidx                 = l / mio_bn_config::hw;
+                    hwidx                = l - (nidx * mio_bn_config::hw);
+                    index                = nidx * mio_bn_config::chw + chwid + hwidx;
                     out[index]           = fpprec_to_fp<FpType>(fma(pvscale, xhat[j], pvbias));
                 }
 
-                if constexpr(MIO_BN_REMOUT)
+                if constexpr(remout > 0u)
                 {
-                    const unsigned int remkeyout = (MIO_MAX_READ * lid) + MIO_BN_LESSOUT;
+                    const unsigned int remkeyout = (max_read * lid) + lessout;
 #pragma unroll
-                    for(unsigned int j = 0; j < MIO_MAX_READ; ++j)
+                    for(unsigned int j = 0; j < max_read; ++j)
                     {
                         unsigned int l = remkeyout + j;
-                        nidx           = l / MIO_BN_HW;
-                        hwidx          = l - (nidx * MIO_BN_HW);
-                        index          = nidx * MIO_BN_CHW + chwid + hwidx;
-                        const auto xin = (index < MIO_BN_NCHW) ? fp_to_fpprec<FpPrecType>(in[index])
-                                                               : FpPrecType{0};
+                        nidx           = l / mio_bn_config::hw;
+                        hwidx          = l - (nidx * mio_bn_config::hw);
+                        index          = nidx * mio_bn_config::chw + chwid + hwidx;
+                        // TODO: comparing different types
+                        const auto xin = (index < mio_bn_config::nchw)
+                                             ? fp_to_fpprec<FpPrecType>(in[index])
+                                             : FpPrecType{0};
                         xhat[j]        = (xin - fp_to_fpprec<FpPrecType>(mean)) *
                                   fp_to_fpprec<FpPrecType>(invVariance);
                     }
 
                     __syncthreads();
 #pragma unroll
-                    for(unsigned int j = 0; j < MIO_MAX_READ; ++j)
+                    for(unsigned int j = 0; j < max_read; ++j)
                     {
                         const unsigned int l = remkeyout + j;
-                        nidx                 = l / MIO_BN_HW;
-                        hwidx                = l - (nidx * MIO_BN_HW);
-                        index                = nidx * MIO_BN_CHW + chwid + hwidx;
-                        if(index < MIO_BN_NCHW)
+                        nidx                 = l / mio_bn_config::hw;
+                        hwidx                = l - (nidx * mio_bn_config::hw);
+                        index                = nidx * mio_bn_config::chw + chwid + hwidx;
+
+                        if(index < mio_bn_config::nchw)
                         {
                             out[index] = fpprec_to_fp<FpType>(fma(pvscale, xhat[j], pvbias));
                         }
@@ -340,48 +362,67 @@ struct MIOpenBatchNormFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
     }
 };
 
-#if (MIO_BN_VARIANT != 2)
-extern "C" __global__ void __launch_bounds__(MIO_BN_GRP0* MIO_BN_GRP1* MIO_BN_GRP2)
-    MIOpenBatchNormFwdTrainSpatialHIP(const FP_TYPE* __restrict in,
-                                      FP_TYPE* __restrict out,
-                                      const FP_TYPE_PREC* __restrict scale,
-                                      const FP_TYPE_PREC* __restrict bias,
-                                      FP_TYPE_PREC INHW,
-#if (MIO_RUNNING_RESULT == 1)
-                                      double expAvgFactor,
-                                      FP_TYPE_PREC* __restrict resultRunningMean,
-                                      FP_TYPE_PREC* __restrict resultRunningVariance,
+} // namespace batchnorm
+} // namespace miopen
+
+/// C interfaces
+
+// TODO: This can be removed after every variant has been implemnted
+// [[deprecated]]
+#if(MIO_BN_VARIANT != 2)
+extern "C" __global__ void __launch_bounds__(
+    mio_bn_config::launch_dim.grp0* mio_bn_config::launch_dim.grp1* mio_bn_config::launch_dim.grp2)
+    MIOpenBatchNormFwdTrainSpatialHIP(
+        const typename mio_bn_config::fp_type* __restrict in,
+        typename mio_bn_config::fp_type* __restrict out,
+        const typename mio_bn_config::fp_prec_type* __restrict scale,
+        const typename mio_bn_config::fp_prec_type* __restrict bias,
+        typename mio_bn_config::fp_prec_type INHW,
+// TODO: should find a better way of doing this
+// but it's hard becasue C does not support function
+// overloads.
+// [[deprecated]]
+#if(MIO_RUNNING_RESULT == 1)
+        double expAvgFactor,
+        typename mio_bn_config::fp_prec_type* __restrict resultRunningMean,
+        typename mio_bn_config::fp_prec_type* __restrict resultRunningVariance,
 #endif
-                                      double epsilon
-#if (MIO_SAVE_MEAN_VARIANCE == 1)
-                                      ,
-                                      FP_TYPE_PREC* __restrict resultSaveMean,
-                                      FP_TYPE_PREC* __restrict resultSaveInvVariance
+        double epsilon
+#if(MIO_SAVE_MEAN_VARIANCE == 1)
+        ,
+        typename mio_bn_config::fp_prec_type* __restrict resultSaveMean,
+        typename mio_bn_config::fp_prec_type* __restrict resultSaveInvVariance
 #endif
     )
 {
-    FP_TYPE_PREC mean, variance, invVariance;
-    const unsigned int lid = threadIdx.x;
+    using fp_type          = typename mio_bn_config::fp_type;
+    using fp_prec_type     = typename mio_bn_config::fp_prec_type;
+    using fp_accum_type    = typename mio_bn_config::fp_accum_type;
+    using fp_accum_c_type  = typename mio_bn_config::fp_accum_c_type;
+    using fp_prec_c_type   = typename mio_bn_config::fp_prec_c_type;
+    constexpr auto variant = mio_bn_config::variant;
 
-    MIOpenBatchNormFwdTrainSpatialHIPImpl<MIO_BN_VARIANT, FP_TYPE, FP_TYPE_PREC, _FpAccum>{}(
-        in, out, scale, bias, INHW, epsilon, mean, variance, invVariance);
+    using forward_train_spatial_impl = miopen::batchnorm::
+        MIOpenBatchNormFwdTrainSpatialHIPImpl<variant, fp_type, fp_prec_type, fp_accum_type>;
 
-    if constexpr(MIO_RUNNING_RESULT == 1 || MIO_SAVE_MEAN_VARIANCE == 1)
+    fp_prec_type mean, variance, invVariance;
+    const unsigned int lid   = threadIdx.x;
+    const unsigned int grpid = blockIdx.x;
+
+    forward_train_spatial_impl{}(in, out, scale, bias, INHW, epsilon, mean, variance, invVariance);
+
+    if(lid == 0)
     {
-        if(lid == 0)
+        if constexpr(mio_config::running_result)
         {
-            const unsigned int grpid = blockIdx.x;
-            if constexpr(MIO_RUNNING_RESULT == 1)
-            {
-                running_stash<_FpAccum, _FpAccum_C, _FpPrec_C>(
-                    resultRunningMean, resultRunningVariance, expAvgFactor, mean, variance, grpid);
-            }
+            miopen::batchnorm::running_stash<fp_accum_type, fp_accum_c_type, fp_prec_c_type>(
+                resultRunningMean, resultRunningVariance, expAvgFactor, mean, variance, grpid);
+        }
 
-            if constexpr(MIO_SAVE_MEAN_VARIANCE == 1)
-            {
-                saved_stash<_FpAccum_C, _FpPrec_C>(
-                    resultSaveMean, resultSaveInvVariance, mean, invVariance, grpid);
-            }
+        if constexpr(mio_config::save_mean_variance)
+        {
+            miopen::batchnorm::saved_stash<fp_accum_c_type, fp_prec_c_type>(
+                resultSaveMean, resultSaveInvVariance, mean, invVariance, grpid);
         }
     }
 }
