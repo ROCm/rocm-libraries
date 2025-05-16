@@ -436,7 +436,6 @@ void stockham_variants(const std::string&            kernel_name,
     output_json(launchers, kernel_name, output);
 }
 
-
 size_t pp_current_dim_rm(const size_t current_dim)
 {
     if(current_dim == 0)
@@ -464,9 +463,9 @@ int main()
 {
     std::string line;
 
-    std::string kernel_name;
-    std::string scheme;
-    bool        half_lds;
+    std::string  kernel_name;
+    std::string  scheme;
+    bool         half_lds;
     unsigned int lds_size_bytes;
 
     const char* DELIM = "";
@@ -631,13 +630,13 @@ int main()
             // second dimension for 2D_SINGLE
             StockhamGeneratorSpecs specs2d(
                 factors2d, factors, precisions, workgroup_size[0], scheme);
-                
+
             if(!threads_per_transform.empty())
                 specs2d.threads_per_transform = threads_per_transform.back();
 
             // aim for occupancy-2 by default
             specs.lds_byte_limit   = lds_size_bytes / 2;
-            specs2d.lds_byte_limit = lds_size_bytes / 2;    
+            specs2d.lds_byte_limit = lds_size_bytes / 2;
 
             stockham_variants(kernel_name, specs, specs2d, std::cout);
         }

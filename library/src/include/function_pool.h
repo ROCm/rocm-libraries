@@ -243,7 +243,7 @@ public:
             throw std::runtime_error("function_pool: max_lds_bytes not initialized");
     }
 
-    function_pool(function_pool& p)                = delete;
+    function_pool(function_pool& p) = delete;
     function_pool& operator=(const function_pool&) = delete;
 
     ~function_pool() = default;
