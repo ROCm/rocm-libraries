@@ -38,6 +38,17 @@ namespace rocRoller
         namespace CT = rocRoller::KernelGraph::CoordinateGraph;
 
         /**
+         * @brief A struct to record a loop's parent loops (the loops that
+         *        contain this loop inside their Body) and child loops (the
+         *        loops that are inside the Body of this loop)
+         */
+        struct LoopBodyInfo
+        {
+            std::unordered_set<int> parentLoops;
+            std::set<int>           childLoops;
+        };
+
+        /**
          * @brief Fuse Loops Transformation
          *
          * This transformation looks for the following pattern:
@@ -192,9 +203,17 @@ namespace rocRoller
                 }
             }
 
-            void fuseLoops(KernelGraph& graph, int tag)
+            void fuseLoops(KernelGraph&                           graph,
+                           int                                    tag,
+                           std::unordered_map<int, LoopBodyInfo>& loopInfo)
             {
                 rocRoller::Log::getLogger()->debug("KernelGraph::fuseLoops({})", tag);
+
+                //
+                // Return early if no sufficient loops to fuse
+                //
+                if(loopInfo.at(tag).childLoops.size() < 2)
+                    return;
 
                 auto dontWalkPastForLoop = [&](int tag) -> bool {
                     for(auto neighbour : graph.control.getNeighbours(tag, GD::Downstream))
@@ -207,25 +226,13 @@ namespace rocRoller
                     return true;
                 };
 
-                // Find all of the paths from the top of one of a body to a
-                // ForLoopOp.
-                auto bodies = graph.control.getOutputNodeIndices<Body>(tag).to<std::set>();
-                std::vector<std::vector<int>> paths;
-                for(auto const& body : bodies)
-                {
-                    auto path = pathToForLoop(graph, body);
-                    if(!path.empty())
-                        paths.push_back(path);
-                }
-
                 // See if any of the ForLoopOps that were found in paths
                 // should be fused together.
                 std::unordered_set<int>   forLoopsToFuse;
                 Expression::ExpressionPtr loopIncrement;
                 Expression::ExpressionPtr loopLength;
-                for(auto const& path : paths)
+                for(auto const& forLoop : loopInfo.at(tag).childLoops)
                 {
-                    auto forLoop = path.back();
                     if(forLoopsToFuse.count(forLoop) != 0)
                         return;
 
@@ -352,6 +359,19 @@ namespace rocRoller
                                                           std::vector<int>{child});
                     }
 
+                    //
+                    // Set the children loops of forLoopTag to be the children of fusedLoopTag
+                    //
+                    for(auto& child : loopInfo.at(forLoopTag).childLoops)
+                    {
+                        if(loopInfo.contains(child))
+                        {
+                            loopInfo.at(child).parentLoops.insert(fusedLoopTag);
+                            loopInfo.at(fusedLoopTag).childLoops.insert(child);
+                            loopInfo.at(child).parentLoops.erase(forLoopTag);
+                        }
+                    }
+
                     for(auto const& parent :
                         graph.control.getInputNodeIndices<Sequence>(forLoopTag).to<std::vector>())
                     {
@@ -378,6 +398,17 @@ namespace rocRoller
                                                           std::vector<int>{forLoopTag});
                     }
 
+                    //
+                    // Set the parent loops of forLoopTag to be the parent of fusedLoopTag
+                    // and remove forLoopTag from loopInfo.
+                    //
+                    for(auto parent : loopInfo.at(forLoopTag).parentLoops)
+                    {
+                        loopInfo.at(parent).childLoops.insert(fusedLoopTag);
+                        loopInfo.at(fusedLoopTag).parentLoops.insert(parent);
+                    }
+                    loopInfo.erase(forLoopTag);
+
                     purgeFor(graph, forLoopTag);
 
                     //
@@ -397,18 +428,77 @@ namespace rocRoller
             }
         }
 
+        static std::optional<int>
+            getChildLoopInsideBody(KernelGraph const& kg, int tag, std::unordered_set<int>& visited)
+        {
+            if(isOperation<ForLoopOp>(kg.control.getElement(tag)))
+                return tag;
+
+            std::optional<int> ret;
+            for(auto node : kg.control.getOutputNodeIndices(tag, [](ControlEdge) { return true; }))
+            {
+                if(visited.contains(node))
+                    continue;
+
+                visited.insert(node);
+                auto childLoop = getChildLoopInsideBody(kg, node, visited);
+                if(childLoop.has_value())
+                {
+                    //
+                    // We can early return here. But to verify the assumption
+                    // that each Body edge has one loop at most, we continue
+                    // the traversal.
+                    //
+                    AssertFatal(not ret.has_value(),
+                                "Each Body edge should contain at most only one loop");
+                    ret = childLoop;
+                }
+            }
+            return ret;
+        }
+
+        static void populateChildLoops(KernelGraph const&                     kg,
+                                       int                                    tag,
+                                       std::unordered_map<int, LoopBodyInfo>& loopInfo)
+        {
+            std::unordered_set<int> visited;
+            loopInfo[tag];
+
+            for(auto node : kg.control.getOutputNodeIndices<Body>(tag))
+            {
+                visited.clear();
+                auto childLoop = getChildLoopInsideBody(kg, node, visited);
+                if(childLoop.has_value())
+                    loopInfo.at(tag).childLoops.insert(childLoop.value());
+            }
+        }
+
         KernelGraph FuseLoops::apply(KernelGraph const& k)
         {
             TIMER(t, "KernelGraph::fuseLoops");
 
             auto newGraph = k;
 
+            std::unordered_map<int, LoopBodyInfo> loopInfo;
+            {
+                auto loops = newGraph.control.getNodes<ForLoopOp>().to<std::vector>();
+                for(auto loop : loops)
+                    populateChildLoops(newGraph, loop, loopInfo);
+
+                //
+                // Populate parent loops
+                //
+                for(auto& [loop, info] : loopInfo)
+                    for(auto& child : info.childLoops)
+                        loopInfo.at(child).parentLoops.insert(loop);
+            }
+
             for(const auto node :
                 newGraph.control.depthFirstVisit(*newGraph.control.roots().begin()))
             {
                 if(isOperation<ForLoopOp>(newGraph.control.getElement(node)))
                 {
-                    FuseLoopsNS::fuseLoops(newGraph, node);
+                    FuseLoopsNS::fuseLoops(newGraph, node, loopInfo);
                 }
             }
 

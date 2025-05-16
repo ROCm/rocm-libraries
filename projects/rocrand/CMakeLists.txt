@@ -251,7 +251,7 @@ set(ROCRAND_CONFIG_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDI
 
 rocm_create_package(
     NAME ${package_name}
-    DESCRIPTION "Radeon Open Compute RAND library"
+    DESCRIPTION "rocRAND is a ROCm random number generation library"
     MAINTAINER "rocRAND Maintainer <hiprand-maintainer@amd.com>"
     LDCONFIG
     # LDCONFIG_DIR ${ROCRAND_CONFIG_DIR}

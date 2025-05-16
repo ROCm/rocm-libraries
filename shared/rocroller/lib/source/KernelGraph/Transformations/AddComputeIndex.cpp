@@ -686,6 +686,8 @@ namespace rocRoller::KernelGraph
 
     KernelGraph AddComputeIndex::apply(KernelGraph const& original)
     {
+        TIMER(t, "KernelGraph::AddComputeIndex");
+
         AddComputeIndexer indexer;
 
         for(auto candidate :

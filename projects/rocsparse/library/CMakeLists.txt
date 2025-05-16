@@ -40,7 +40,7 @@ if(BUILD_ROCSPARSE_ILP64)
 endif()
 
 if (rocblas_FOUND)
-  message("Build rocSPARSE library with rocBLAS")
+  message("-- Build rocSPARSE library with rocBLAS")
   add_compile_options(-DROCSPARSE_WITH_ROCBLAS)
 endif()
 

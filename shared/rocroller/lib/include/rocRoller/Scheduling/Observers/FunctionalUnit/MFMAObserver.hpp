@@ -59,6 +59,9 @@ namespace rocRoller
 
             int m_remainingCycles = 0;
 
+            std::vector<Register::RegisterId> m_aOperands;
+            std::vector<Register::RegisterId> m_bOperands;
+
             std::weak_ptr<Context> m_context;
         };
 

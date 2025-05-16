@@ -9125,7 +9125,7 @@ Architectures:
         ImplicitAccess: false
         Instruction: v_mfma_f32_16x16x128_f8f6f4
         IsBranch: false
-        Latency: 8
+        Latency: 4
         MaxLiteral: 0
         WaitCount: 0
         WaitQueues: []
@@ -9469,7 +9469,7 @@ Architectures:
         ImplicitAccess: false
         Instruction: v_mfma_f32_32x32x64_f8f6f4
         IsBranch: false
-        Latency: 16
+        Latency: 8
         MaxLiteral: 0
         WaitCount: 0
         WaitQueues: []
@@ -9701,7 +9701,7 @@ Architectures:
         ImplicitAccess: false
         Instruction: v_mfma_scale_f32_16x16x128_f8f6f4
         IsBranch: false
-        Latency: 8
+        Latency: 4
         MaxLiteral: 0
         WaitCount: 0
         WaitQueues: []
@@ -9709,7 +9709,7 @@ Architectures:
         ImplicitAccess: false
         Instruction: v_mfma_scale_f32_32x32x64_f8f6f4
         IsBranch: false
-        Latency: 16
+        Latency: 8
         MaxLiteral: 0
         WaitCount: 0
         WaitQueues: []

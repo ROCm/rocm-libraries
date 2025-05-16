@@ -298,9 +298,66 @@ namespace rocRoller::KernelGraph
     /*
      * Helper for removeRedundantNOPs (early return).
      *
+     * Remove NOPs that have multiple inputs/outputs (MIMO) if they are redundant
+     *
      * Returns true if it modified the graph; false otherwise.
      */
-    bool removeNOPIfRedundant(KernelGraph& graph, int nop)
+    static bool removeMIMONOPIfRedundant(KernelGraph& graph, int nop)
+    {
+        auto hasBody = !empty(graph.control.getOutputNodeIndices<Body>(nop));
+        if(hasBody)
+            return false;
+
+        //
+        // Can we reach all output nodes from each input node?
+        //
+        auto inputs = graph.control.getInputNodeIndices(nop, [](ControlEdge) { return true; })
+                          .to<std::vector>();
+        auto outputs = graph.control.getOutputNodeIndices(nop, [](ControlEdge) { return true; })
+                           .to<std::vector>();
+
+        auto dontGoThroughNOP = [&](int x) -> bool {
+            auto tail = *only(graph.control.getNeighbours<GD::Upstream>(x));
+            auto head = *only(graph.control.getNeighbours<GD::Downstream>(x));
+            return (nop != tail) && (nop != head);
+        };
+
+        for(auto input : inputs)
+        {
+            auto reachable = graph.control.depthFirstVisit(input, dontGoThroughNOP, GD::Downstream)
+                                 .to<std::unordered_set>();
+            for(auto output : outputs)
+            {
+                if(!reachable.contains(output))
+                    return false;
+            }
+        }
+
+        // If we get here, we can reach all outputs from each input
+        // without going through the NOP.  Delete it!
+
+        auto incoming = only(graph.control.getNeighbours<GD::Upstream>(nop));
+        auto outgoing = only(graph.control.getNeighbours<GD::Downstream>(nop));
+        if((!incoming) || (!outgoing))
+            return false;
+
+        Log::debug("Deleting redundant NOP: {}", nop);
+
+        graph.control.deleteElement(*incoming);
+        graph.control.deleteElement(*outgoing);
+        graph.control.deleteElement(nop);
+
+        return true;
+    }
+
+    /*
+     * Helper for removeRedundantNOPs (early return).
+     *
+     * Remove NOPs that have single input/output (SISO) if they are redundant
+     *
+     * Returns true if it modified the graph; false otherwise.
+     */
+    static bool removeSISONOPIfRedundant(KernelGraph& graph, int nop)
     {
         auto hasBody = !empty(graph.control.getOutputNodeIndices<Body>(nop));
         if(hasBody)
@@ -367,46 +424,7 @@ namespace rocRoller::KernelGraph
             return true;
         }
 
-        //
-        // Can we reach all output nodes from each input node?
-        //
-        auto inputs = graph.control.getInputNodeIndices(nop, [](ControlEdge) { return true; })
-                          .to<std::vector>();
-        auto outputs = graph.control.getOutputNodeIndices(nop, [](ControlEdge) { return true; })
-                           .to<std::vector>();
-
-        auto dontGoThroughNOP = [&](int x) -> bool {
-            auto tail = *only(graph.control.getNeighbours<GD::Upstream>(x));
-            auto head = *only(graph.control.getNeighbours<GD::Downstream>(x));
-            return (nop != tail) && (nop != head);
-        };
-
-        for(auto input : inputs)
-        {
-            auto reachable = graph.control.depthFirstVisit(input, dontGoThroughNOP, GD::Downstream)
-                                 .to<std::unordered_set>();
-            for(auto output : outputs)
-            {
-                if(!reachable.contains(output))
-                    return false;
-            }
-        }
-
-        // If we get here, we can reach all outputs from each input
-        // without going through the NOP.  Delete it!
-
-        auto incoming = only(graph.control.getNeighbours<GD::Upstream>(nop));
-        auto outgoing = only(graph.control.getNeighbours<GD::Downstream>(nop));
-        if((!incoming) || (!outgoing))
-            return false;
-
-        Log::debug("Deleting redundant NOP: {}", nop);
-
-        graph.control.deleteElement(*incoming);
-        graph.control.deleteElement(*outgoing);
-        graph.control.deleteElement(nop);
-
-        return true;
+        return false;
     }
 
     /**
@@ -415,16 +433,23 @@ namespace rocRoller::KernelGraph
     void removeRedundantNOPs(KernelGraph& graph)
     {
         removeRedundantSequenceEdges(graph);
-        bool graphChanged = true;
-        while(graphChanged)
+
+        auto const removeNOPFcns = {removeSISONOPIfRedundant, removeMIMONOPIfRedundant};
+
+        for(auto const& fcn : removeNOPFcns)
         {
-            graphChanged = false;
-            auto nops    = graph.control.getNodes<NOP>().to<std::vector>();
-            for(auto nop : nops)
-                graphChanged |= removeNOPIfRedundant(graph, nop);
-            if(graphChanged)
+            bool graphChanged = true;
+            while(graphChanged)
             {
-                removeRedundantSequenceEdges(graph);
+                graphChanged = false;
+                auto nops    = graph.control.getNodes<NOP>().to<std::vector>();
+                for(auto nop : nops)
+                    graphChanged |= fcn(graph, nop);
+
+                if(graphChanged)
+                {
+                    removeRedundantSequenceEdges(graph);
+                }
             }
         }
     }

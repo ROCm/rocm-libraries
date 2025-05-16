@@ -1205,8 +1205,8 @@ try
     int32_t     geam_ex_op          = 0;
     int32_t     api                 = 0;
     bool        datafile            = rocblas_parse_data(argc, argv);
-    bool        atomics_allowed     = true;
-    bool        atomics_not_allowed = false;
+    bool        atomics_allowed     = false;
+    bool        atomics_not_allowed = true;
     bool        log_function_name   = false;
     bool        log_datatype        = false;
     bool        any_stride          = false;
@@ -1411,12 +1411,12 @@ try
          "geam_ex_operation, 0: min_plus operation, 1: plus_min operation")
 
         ("atomics_allowed",
-         bool_switch(&atomics_allowed)->default_value(true),
-         "Atomic operations with non-determinism in results are allowed (default true)")
+         bool_switch(&atomics_allowed)->default_value(false),
+         "Atomic operations with non-determinism in results are allowed (default false)")
 
         ("atomics_not_allowed",
-         bool_switch(&atomics_not_allowed)->default_value(false),
-         "Atomic operations with non-determinism in results are not allowed (default false)")
+         bool_switch(&atomics_not_allowed)->default_value(true),
+         "Atomic operations with non-determinism in results are not allowed (default true)")
 
         ("device",
          value<int32_t>(&device_id)->default_value(0),
@@ -1528,8 +1528,10 @@ try
     }
 
     // transfer local variable state
-
-    arg.atomics_mode = atomics_not_allowed ? rocblas_atomics_not_allowed : rocblas_atomics_allowed;
+    arg.atomics_mode = rocblas_atomics_not_allowed;
+    // two command line options so if either changed from default enable atomics
+    if(atomics_allowed == true || atomics_not_allowed == false)
+        arg.atomics_mode = rocblas_atomics_allowed;
 
     if(api)
         arg.api = rocblas_client_api(api);

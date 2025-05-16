@@ -1941,19 +1941,19 @@ public:
             case fft_precision_half:
             {
                 buffer_printer<rocfft_complex<rocfft_fp16>> s;
-                s.print_buffer(buf, ilength(), istride, nbatch, idist, ioffset);
+                s.print_buffer_half(buf, ilength(), istride, nbatch, idist, ioffset);
                 break;
             }
             case fft_precision_single:
             {
                 buffer_printer<rocfft_complex<float>> s;
-                s.print_buffer(buf, ilength(), istride, nbatch, idist, ioffset);
+                s.print_buffer_single(buf, ilength(), istride, nbatch, idist, ioffset);
                 break;
             }
             case fft_precision_double:
             {
                 buffer_printer<rocfft_complex<double>> s;
-                s.print_buffer(buf, ilength(), istride, nbatch, idist, ioffset);
+                s.print_buffer_double(buf, ilength(), istride, nbatch, idist, ioffset);
                 break;
             }
             }
@@ -1968,19 +1968,19 @@ public:
             case fft_precision_half:
             {
                 buffer_printer<rocfft_fp16> s;
-                s.print_buffer(buf, ilength(), istride, nbatch, idist, ioffset);
+                s.print_buffer_half(buf, ilength(), istride, nbatch, idist, ioffset);
                 break;
             }
             case fft_precision_single:
             {
                 buffer_printer<float> s;
-                s.print_buffer(buf, ilength(), istride, nbatch, idist, ioffset);
+                s.print_buffer_single(buf, ilength(), istride, nbatch, idist, ioffset);
                 break;
             }
             case fft_precision_double:
             {
                 buffer_printer<double> s;
-                s.print_buffer(buf, ilength(), istride, nbatch, idist, ioffset);
+                s.print_buffer_double(buf, ilength(), istride, nbatch, idist, ioffset);
                 break;
             }
             }
@@ -2004,18 +2004,18 @@ public:
             case fft_precision_half:
             {
                 buffer_printer<rocfft_complex<rocfft_fp16>> s;
-                s.print_buffer(buf, olength(), ostride, nbatch, odist, ooffset);
+                s.print_buffer_half(buf, olength(), ostride, nbatch, odist, ooffset);
                 break;
             }
             case fft_precision_single:
             {
                 buffer_printer<rocfft_complex<float>> s;
-                s.print_buffer(buf, olength(), ostride, nbatch, odist, ooffset);
+                s.print_buffer_single(buf, olength(), ostride, nbatch, odist, ooffset);
                 break;
             }
             case fft_precision_double:
                 buffer_printer<rocfft_complex<double>> s;
-                s.print_buffer(buf, olength(), ostride, nbatch, odist, ooffset);
+                s.print_buffer_double(buf, olength(), ostride, nbatch, odist, ooffset);
                 break;
             }
             break;
@@ -2029,19 +2029,19 @@ public:
             case fft_precision_half:
             {
                 buffer_printer<rocfft_fp16> s;
-                s.print_buffer(buf, olength(), ostride, nbatch, odist, ooffset);
+                s.print_buffer_half(buf, olength(), ostride, nbatch, odist, ooffset);
                 break;
             }
             case fft_precision_single:
             {
                 buffer_printer<float> s;
-                s.print_buffer(buf, olength(), ostride, nbatch, odist, ooffset);
+                s.print_buffer_single(buf, olength(), ostride, nbatch, odist, ooffset);
                 break;
             }
             case fft_precision_double:
             {
                 buffer_printer<double> s;
-                s.print_buffer(buf, olength(), ostride, nbatch, odist, ooffset);
+                s.print_buffer_double(buf, olength(), ostride, nbatch, odist, ooffset);
                 break;
             }
             }
@@ -3855,7 +3855,7 @@ void init_local_input(int                                       comm_rank,
         {
         case fft_precision_half:
             set_input<Tbuff, rocfft_fp16>(bufvec,
-                                          fft_input_random_generator_device,
+                                          params.igen,
                                           params.itype,
                                           brick_len_nobatch,
                                           brick_len_nobatch,
@@ -3870,7 +3870,7 @@ void init_local_input(int                                       comm_rank,
             break;
         case fft_precision_single:
             set_input<Tbuff, float>(bufvec,
-                                    fft_input_random_generator_device,
+                                    params.igen,
                                     params.itype,
                                     brick_len_nobatch,
                                     brick_len_nobatch,
@@ -3885,7 +3885,7 @@ void init_local_input(int                                       comm_rank,
             break;
         case fft_precision_double:
             set_input<Tbuff, double>(bufvec,
-                                     fft_input_random_generator_device,
+                                     params.igen,
                                      params.itype,
                                      brick_len_nobatch,
                                      brick_len_nobatch,

@@ -7,20 +7,7 @@ rocBLAS documentation is available at
 
 ### Added
 
-### Changed
-
-### Removed
-
-* `rocblas_hgemm_kernel_name`, `rocblas_sgemm_kernel_name`, and `rocblas_dgemm_kernel_name` API functions
-
-### Optimized
-
-### Resolved issues
-
-## (Unreleased) rocBLAS 4.5.0
-
-### Added
-
+* gfx950 support
 * `ROCBLAS_LAYER = 8` internal API logging for `gemm` debugging
 * Support for AOCL 5.0 gcc build as a client reference library 
 * Allow `PkgConfig` for client reference library fallback detection 
@@ -28,10 +15,17 @@ rocBLAS documentation is available at
 ### Changed
 
 * `CMAKE_CXX_COMPILER` is now passed on during compilation for a Tensile build 
+* Change default atomics mode from `allowed` to `not allowed`
 
 ### Removed
 
 * Support code for non-production gfx targets 
+* `rocblas_hgemm_kernel_name`, `rocblas_sgemm_kernel_name`, and `rocblas_dgemm_kernel_name` API functions
+* Use of `warpSize` as a constexpr
+* Use of deprecated behavior of `hipPeekLastError`
+* `rocblas_is_user_managing_device_memory` and `rocblas_set_device_memory_size` API functions
+* `rocblas_float8.h` and `rocblas_hip_f8_impl.h` files
+* `rocblas_gemm_ex3`, `rocblas_gemm_batched_ex3`, `rocblas_gemm_strided_batched_ex3` API functions
 
 ### Optimized
 
@@ -48,6 +42,9 @@ rocBLAS documentation is available at
 * Support numerics when `trsm` is running with `rocblas_status_perf_degraded` 
 * Fixed the build dependency installation of `joblib` on some operating systems
 * Return `rocblas_status_internal_error` when `rocblas_[set,get]_ [matrix,vector]` is called with a host pointer in place of a device pointer 
+* Reduced the default verbosity level for internal GEMM backend information
+* Updated from the deprecated rocm-cmake to ROCmCMakeBuildTools
+* Corrected AlmaLinux gfortran package dependencies
 
 ### Upcoming changes
 

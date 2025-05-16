@@ -104,6 +104,8 @@ TEST_P(MFMAUnitObserverTest, GPU_InContext)
     auto mfmaInst = Instruction(opCode(), {agpr}, {v0, v1, agpr}, {}, "");
     auto valuInst = Instruction("v_add_f32", {v0}, {v0, v1}, {}, "");
 
+    auto ldsInst = Instruction("ds_read_u128", {v0}, {v0, v1}, {}, "");
+
     EXPECT_EQ(0, m_context->peek(mfmaInst).stallCycles);
     EXPECT_EQ(0, m_context->peek(valuInst).stallCycles);
 
@@ -124,6 +126,33 @@ TEST_P(MFMAUnitObserverTest, GPU_InContext)
 
     EXPECT_EQ(latency, m_context->peek(mfmaInst).stallCycles);
     EXPECT_EQ(0, m_context->peek(valuInst).stallCycles);
+
+    for(int i = 0; i < 4; i++)
+        m_context->schedule(ldsInst);
+
+    m_context->schedule(mfmaInst);
+    EXPECT_GE(mfmaInst.peekedStatus().stallCycles, 0);
+    EXPECT_LT(mfmaInst.peekedStatus().stallCycles, latency);
+
+    EXPECT_EQ(2, mfmaInst.peekedStatus().reusedOperands);
+
+    {
+        auto mfmaInst2 = Instruction(opCode(), {agpr}, {v1, v0, agpr}, {}, "");
+        m_context->schedule(mfmaInst2);
+        EXPECT_EQ(0, mfmaInst2.peekedStatus().reusedOperands);
+    }
+
+    {
+        auto mfmaInst2 = Instruction(opCode(), {agpr}, {v1, v1, agpr}, {}, "");
+        m_context->schedule(mfmaInst2);
+        EXPECT_EQ(1, mfmaInst2.peekedStatus().reusedOperands);
+    }
+
+    {
+        auto mfmaInst2 = Instruction(opCode(), {agpr}, {v0, v1, agpr}, {}, "");
+        m_context->schedule(mfmaInst2);
+        EXPECT_EQ(1, mfmaInst2.peekedStatus().reusedOperands);
+    }
 }
 
 INSTANTIATE_TEST_SUITE_P(

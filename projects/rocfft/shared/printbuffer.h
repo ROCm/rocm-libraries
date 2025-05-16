@@ -24,12 +24,14 @@
 #include "hostbuf.h"
 #include "increment.h"
 #include <algorithm>
+#include <iomanip>
 #include <vector>
 
 // Output a formatted general-dimensional array with given length and stride in batches
 // separated by dist.
 template <typename Toutput, typename T1, typename T2, typename Tsize, typename Tstream>
-inline void printbuffer(const Toutput*         output,
+inline void printbuffer(const size_t&          num_decimals,
+                        const Toutput*         output,
                         const std::vector<T1>& length,
                         const std::vector<T2>& stride,
                         const Tsize            nbatch,
@@ -46,7 +48,8 @@ inline void printbuffer(const Toutput*         output,
         {
             const int i
                 = std::inner_product(index.begin(), index.end(), stride.begin(), i_base + offset);
-            stream << output[i] << " ";
+
+            stream << std::fixed << std::setprecision(num_decimals) << output[i] << " ";
             for(int li = index.size(); li-- > 0;)
             {
                 if(index[li] == (length[li] - 1))
@@ -69,24 +72,40 @@ class buffer_printer
     // The scalar versions might be part of a planar format.
 public:
     template <typename Tint1, typename Tint2, typename Tsize, typename Tstream = std::ostream>
-    static void print_buffer(const std::vector<hostbuf>& buf,
-                             const std::vector<Tint1>&   length,
-                             const std::vector<Tint2>&   stride,
-                             const Tsize                 nbatch,
-                             const Tsize                 dist,
-                             const std::vector<size_t>&  offset,
-                             Tstream&                    stream = std::cout)
+    static void print_buffer_half(const std::vector<hostbuf>& buf,
+                                  const std::vector<Tint1>&   length,
+                                  const std::vector<Tint2>&   stride,
+                                  const Tsize                 nbatch,
+                                  const Tsize                 dist,
+                                  const std::vector<size_t>&  offset,
+                                  Tstream&                    stream = std::cout)
     {
-        for(const auto& vec : buf)
-        {
-            printbuffer(reinterpret_cast<const Telem*>(vec.data()),
-                        length,
-                        stride,
-                        nbatch,
-                        dist,
-                        offset[0],
-                        stream);
-        }
+        auto num_decimals = 3;
+        print_buffer(num_decimals, buf, length, stride, nbatch, dist, offset, stream);
+    };
+    template <typename Tint1, typename Tint2, typename Tsize, typename Tstream = std::ostream>
+    static void print_buffer_single(const std::vector<hostbuf>& buf,
+                                    const std::vector<Tint1>&   length,
+                                    const std::vector<Tint2>&   stride,
+                                    const Tsize                 nbatch,
+                                    const Tsize                 dist,
+                                    const std::vector<size_t>&  offset,
+                                    Tstream&                    stream = std::cout)
+    {
+        auto num_decimals = 6;
+        print_buffer(num_decimals, buf, length, stride, nbatch, dist, offset, stream);
+    };
+    template <typename Tint1, typename Tint2, typename Tsize, typename Tstream = std::ostream>
+    static void print_buffer_double(const std::vector<hostbuf>& buf,
+                                    const std::vector<Tint1>&   length,
+                                    const std::vector<Tint2>&   stride,
+                                    const Tsize                 nbatch,
+                                    const Tsize                 dist,
+                                    const std::vector<size_t>&  offset,
+                                    Tstream&                    stream = std::cout)
+    {
+        auto num_decimals = 15;
+        print_buffer(num_decimals, buf, length, stride, nbatch, dist, offset, stream);
     };
     template <typename Tstream = std::ostream>
     static void print_buffer_flat(const std::vector<hostbuf>& buf,
@@ -101,6 +120,30 @@ public:
             for(size_t i = 0; i < size[0]; ++i)
                 stream << " " << data[i];
             stream << std::endl;
+        }
+    };
+
+private:
+    template <typename Tint1, typename Tint2, typename Tsize, typename Tstream = std::ostream>
+    static void print_buffer(const size_t&               num_decimals,
+                             const std::vector<hostbuf>& buf,
+                             const std::vector<Tint1>&   length,
+                             const std::vector<Tint2>&   stride,
+                             const Tsize                 nbatch,
+                             const Tsize                 dist,
+                             const std::vector<size_t>&  offset,
+                             Tstream&                    stream)
+    {
+        for(const auto& vec : buf)
+        {
+            printbuffer(num_decimals,
+                        reinterpret_cast<const Telem*>(vec.data()),
+                        length,
+                        stride,
+                        nbatch,
+                        dist,
+                        offset[0],
+                        stream);
         }
     };
 };

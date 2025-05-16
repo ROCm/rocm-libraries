@@ -53,29 +53,73 @@ namespace rocRoller
         {
             InstructionStatus rv;
             if(isMFMAInstruction(inst))
+            {
                 rv.stallCycles = m_remainingCycles;
+
+                auto aOperands = inst.getSrcs()[0]->getRegisterIds().to<std::vector>();
+                if(aOperands == m_aOperands)
+                    rv.reusedOperands++;
+
+                auto bOperands = inst.getSrcs()[1]->getRegisterIds().to<std::vector>();
+                if(bOperands == m_bOperands)
+                    rv.reusedOperands++;
+            }
             return rv;
         }
 
         void MFMAObserver::modify(Instruction& inst) const
         {
             if(m_remainingCycles > 0 && !inst.isCommentOnly()
-               && Settings::Get(Settings::LogLvl) >= LogLevel::Debug)
+               && Settings::Get(Settings::LogLvl) >= LogLevel::Info)
                 inst.addComment(concatenate("MFMA remaining: ", m_remainingCycles));
         }
 
         void MFMAObserver::observe(Instruction const& inst)
         {
+            const static std::unordered_set<std::string> variableCycleInsts
+                = {"v_mfma_f32_16x16x128_f8f6f4",
+                   "v_mfma_scale_f32_16x16x128_f8f6f4",
+                   "v_mfma_f32_32x32x64_f8f6f4",
+                   "v_mfma_scale_f32_32x32x64_f8f6f4"};
+
             if(isMFMAInstruction(inst))
             {
                 auto info
                     = m_context.lock()->targetArchitecture().GetInstructionInfo(inst.getOpCode());
 
-                m_remainingCycles = info.getLatency();
+                auto latency        = info.getLatency();
+                auto initialLatency = latency;
+
+                if(variableCycleInsts.contains(inst.getOpCode()))
+                {
+                    bool any8Bits = false;
+                    for(auto const& src : inst.getSrcs())
+                    {
+                        if(!src)
+                            continue;
+                        auto info    = DataTypeInfo::Get(src->variableType());
+                        auto seg     = info.segmentVariableType;
+                        auto segInfo = DataTypeInfo::Get(seg);
+                        if(segInfo.elementBits == 8 && !segInfo.isIntegral)
+                            any8Bits = true;
+                    }
+
+                    if(any8Bits)
+                    {
+                        Log::trace("Found instruction {} with 8-bit src.", inst.getOpCode());
+                        latency *= 2;
+                    }
+                }
+
+                m_remainingCycles = latency;
+
+                m_aOperands = inst.getSrcs()[0]->getRegisterIds().to<std::vector>();
+                m_bOperands = inst.getSrcs()[1]->getRegisterIds().to<std::vector>();
             }
             else
             {
-                m_remainingCycles = std::max(0, m_remainingCycles - inst.numExecutedInstructions());
+                int myCycles = inst.numExecutedInstructions() + inst.peekedStatus().stallCycles;
+                m_remainingCycles = std::max(0, m_remainingCycles - myCycles);
             }
         }
 

@@ -787,6 +787,13 @@ namespace MatrixMultiplyTest
     {
     };
 
+    // Params are: (AB type, waveK), (transA, transB)
+    class MatrixMultiplyF16AccWMMATestGPU
+        : public BaseMatrixMultiplyContextFixture<
+              std::tuple<std::pair<rocRoller::DataType, int>, std::pair<std::string, std::string>>>
+    {
+    };
+
     // Params are: A type, B type, waveK, (transA, transB)
     class MatrixMultiplyMixedWMMATestGPU
         : public BaseMatrixMultiplyContextFixture<std::tuple<rocRoller::DataType,
@@ -796,7 +803,8 @@ namespace MatrixMultiplyTest
     {
     };
 
-    class MatrixMultiplyABCWMMATestGPU : public BaseMatrixMultiplyContextFixture<>
+    // Params: waveK
+    class MatrixMultiplyABCWMMATestGPU : public BaseMatrixMultiplyContextFixture<int>
     {
     };
 
@@ -857,9 +865,8 @@ namespace MatrixMultiplyTest
         EXPECT_EQ(countSubstring(generatedCode, wmmaMnemonic), numWMMAs);
     }
 
-    TEST_P(MatrixMultiplyWMMATestGPU, GPU_MatrixMultiplyMacroTileWMMAF16Accum)
+    TEST_P(MatrixMultiplyF16AccWMMATestGPU, GPU_MatrixMultiplyMacroTileWMMA)
     {
-        REQUIRE_ARCH_CAP(GPUCapability::HasWMMA_F16_ACC);
         const auto [typeAndWaveK, transOp] = std::get<1>(GetParam());
         const auto [dataType, waveK]       = typeAndWaveK;
         const auto [transA, transB]        = transOp;
@@ -867,10 +874,26 @@ namespace MatrixMultiplyTest
         switch(dataType)
         {
         case DataType::Half:
+            if(waveK == 16)
+            {
+                REQUIRE_ARCH_CAP(GPUCapability::HasWMMA_f16_16x16x16_f16);
+            }
+            else
+            {
+                Throw<FatalError>("Invalid waveK value.", ShowValue(waveK));
+            }
             matrixMultiplyMacroTile<Half, Half, Half, Half>(
                 16, 16, waveK, 1, false, transA, transB);
             break;
         case DataType::BFloat16:
+            if(waveK == 16)
+            {
+                REQUIRE_ARCH_CAP(GPUCapability::HasWMMA_bf16_16x16x16_bf16);
+            }
+            else
+            {
+                Throw<FatalError>("Invalid waveK value.", ShowValue(waveK));
+            }
             matrixMultiplyMacroTile<BFloat16, BFloat16, BFloat16, BFloat16>(
                 16, 16, waveK, 1, false, transA, transB);
             typeStr = "bf16";
@@ -915,9 +938,8 @@ namespace MatrixMultiplyTest
         EXPECT_EQ(countSubstring(generatedCode, wmmaMnemonic), numWMMAs);
     }
 
-    TEST_P(MatrixMultiplyWMMATestGPU, GPU_MatrixMultiplyABWMMAF16Accum)
+    TEST_P(MatrixMultiplyF16AccWMMATestGPU, GPU_MatrixMultiplyABWMMA)
     {
-        REQUIRE_ARCH_CAP(GPUCapability::HasWMMA_F16_ACC);
         const auto [typeAndWaveK, transOp] = std::get<1>(GetParam());
         const auto [typeAB, waveK]         = typeAndWaveK;
         const auto [transA, transB]        = transOp;
@@ -925,10 +947,26 @@ namespace MatrixMultiplyTest
         switch(typeAB)
         {
         case DataType::Half:
+            if(waveK == 16)
+            {
+                REQUIRE_ARCH_CAP(GPUCapability::HasWMMA_f16_16x16x16_f16);
+            }
+            else
+            {
+                Throw<FatalError>("Invalid waveK value.", ShowValue(waveK));
+            }
             matrixMultiplyAB<Half, Half, Half, Half>(
                 16, 16, waveK, 1, false, transA == "T", transB == "T");
             break;
         case DataType::BFloat16:
+            if(waveK == 16)
+            {
+                REQUIRE_ARCH_CAP(GPUCapability::HasWMMA_bf16_16x16x16_bf16);
+            }
+            else
+            {
+                Throw<FatalError>("Invalid waveK value.", ShowValue(waveK));
+            }
             matrixMultiplyAB<BFloat16, BFloat16, BFloat16, BFloat16>(
                 16, 16, waveK, 1, false, transA == "T", transB == "T");
             typeStr = "bf16";
@@ -1039,24 +1077,40 @@ namespace MatrixMultiplyTest
         EXPECT_EQ(countSubstring(generatedCode, wmmaMnemonic), numWMMAs);
     }
 
-    TEST_P(MatrixMultiplyABCWMMATestGPU, GPU_MatrixMultiplyABCWMMAFP16)
+    TEST_P(MatrixMultiplyABCWMMATestGPU, GPU_MatrixMultiplyABCF16AccWMMAFP16)
     {
-        REQUIRE_ARCH_CAP(GPUCapability::HasWMMA_F16_ACC);
-        matrixMultiplyABC<Half, Half>(16, 16, 16, 1);
+        const auto waveK = std::get<1>(GetParam());
+        if(waveK == 16)
+        {
+            REQUIRE_ARCH_CAP(GPUCapability::HasWMMA_f16_16x16x16_f16);
+        }
+        else
+        {
+            Throw<FatalError>("Invalid waveK value.", ShowValue(waveK));
+        }
+        matrixMultiplyABC<Half, Half>(16, 16, waveK, 1);
 
         const auto        numWMMAs = 2; // mac_k = 2 * wave_k
-        const std::string wmmaMnemonic{"v_wmma_f16_16x16x16_f16"};
+        const std::string wmmaMnemonic{fmt::format("v_wmma_f16_16x16x{}_f16", waveK)};
         std::string       generatedCode = m_context->instructions()->toString();
         EXPECT_EQ(countSubstring(generatedCode, wmmaMnemonic), numWMMAs);
     }
 
-    TEST_P(MatrixMultiplyABCWMMATestGPU, GPU_MatrixMultiplyABCWMMABFloat16)
+    TEST_P(MatrixMultiplyABCWMMATestGPU, GPU_MatrixMultiplyABCF16AccWMMABFloat16)
     {
-        REQUIRE_ARCH_CAP(GPUCapability::HasWMMA_F16_ACC);
-        matrixMultiplyABC<BFloat16, BFloat16>(16, 16, 16, 1);
+        const auto waveK = std::get<1>(GetParam());
+        if(waveK == 16)
+        {
+            REQUIRE_ARCH_CAP(GPUCapability::HasWMMA_bf16_16x16x16_bf16);
+        }
+        else
+        {
+            Throw<FatalError>("Invalid waveK value.", ShowValue(waveK));
+        }
+        matrixMultiplyABC<BFloat16, BFloat16>(16, 16, waveK, 1);
 
         const auto        numWMMAs = 2; // mac_k = 2 * wave_k
-        const std::string wmmaMnemonic{"v_wmma_bf16_16x16x16_bf16"};
+        const std::string wmmaMnemonic{fmt::format("v_wmma_bf16_16x16x{}_bf16", waveK)};
         std::string       generatedCode = m_context->instructions()->toString();
         EXPECT_EQ(countSubstring(generatedCode, wmmaMnemonic), numWMMAs);
     }
@@ -1598,6 +1652,20 @@ namespace MatrixMultiplyTest
 
     INSTANTIATE_TEST_SUITE_P(
         MatrixMultiply120X,
+        MatrixMultiplyF16AccWMMATestGPU,
+        ::testing::Combine(
+            ::testing::Values(GPUArchitectureTarget{GPUArchitectureGFX::GFX1200},
+                              GPUArchitectureTarget{GPUArchitectureGFX::GFX1201}),
+            ::testing::Combine(
+                ::testing::Values(std::make_pair(rocRoller::DataType::Half, /*waveK*/ 16),
+                                  std::make_pair(rocRoller::DataType::BFloat16, /*waveK*/ 16)),
+                ::testing::Values(std::pair<std::string, std::string>("N", "N"),
+                                  std::pair<std::string, std::string>("N", "T"),
+                                  std::pair<std::string, std::string>("T", "N"),
+                                  std::pair<std::string, std::string>("T", "T")))));
+
+    INSTANTIATE_TEST_SUITE_P(
+        MatrixMultiply120X,
         MatrixMultiplyMixedWMMATestGPU,
         ::testing::Combine(
             ::testing::Values(GPUArchitectureTarget{GPUArchitectureGFX::GFX1200},
@@ -1611,9 +1679,12 @@ namespace MatrixMultiplyTest
                                   std::pair<std::string, std::string>("T", "N"),
                                   std::pair<std::string, std::string>("T", "T")))));
 
-    INSTANTIATE_TEST_SUITE_P(MatrixMultiplyABCWMMATestGPU,
-                             MatrixMultiplyABCWMMATestGPU,
-                             wmmaSupportedISATuples());
+    INSTANTIATE_TEST_SUITE_P(
+        MatrixMultiplyABC120X,
+        MatrixMultiplyABCWMMATestGPU,
+        ::testing::Combine(::testing::Values(GPUArchitectureTarget{GPUArchitectureGFX::GFX1200},
+                                             GPUArchitectureTarget{GPUArchitectureGFX::GFX1201}),
+                           ::testing::Values(/*waveK*/ 16)));
 
     INSTANTIATE_TEST_SUITE_P(MatrixMultiplyTest,
                              MatrixMultiplyTestGPUF8,

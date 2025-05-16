@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -64,16 +64,9 @@ ROCBLAS_EXPORT rocblas_status rocblas_get_pointer_mode(rocblas_handle        han
  *  \details
  *  Some rocBLAS functions may have implementations which use atomic operations to increase performance.
  *  By using atomic operations, results are not guaranteed to be identical between multiple runs.
- *  Results will be accurate with or without atomic operations, but if it is required to
- *  have bit-wise reproducible results, atomic operations should not be used.
- *
- *  Atomic operations can be turned on or off for a handle by calling rocblas_set_atomics_mode.
- *  By default, this is set to `rocblas_atomics_allowed`.
+ *  Results will be accurate with or without atomic operations. Atomic operations in rocBLAS are turned
+ *  off by default. They can be turned on or off for a handle by calling rocblas_set_atomics_mode.
  */
-ROCBLAS_DEPRECATED_MSG(
-    "Atomic operations in rocBLAS will be turned off by default in future releases."
-    "The default mode will be set to rocblas_atomics_not_allowed but users can enable "
-    "using rocblas_set_atomics_mode. ")
 ROCBLAS_EXPORT rocblas_status rocblas_set_atomics_mode(rocblas_handle       handle,
                                                        rocblas_atomics_mode atomics_mode);
 
