@@ -126,14 +126,14 @@ jobs:
           UPSTREAM_REPO="${{ github.event.inputs.subrepo-upstream }}"
           SUBREPO_REPO="${{ github.event.inputs.subrepo-repo }}"
           SUBREPO_PR_NUMBER="${{ github.event.inputs.subrepo-pr-number }}"
-          SUBREPO_URL="https://github.com/$SUBREPO_REPO/pull/$SUBREPO_PR_NUMBER"
+          SUBREPO_URL="https://github.com/$UPSTREAM_REPO/pull/$SUBREPO_PR_NUMBER"
           AUTHOR=$(gh pr view "$SUBREPO_PR_NUMBER" --repo "$UPSTREAM_REPO" --json author --jq .author.login)
 
           echo "${{ steps.prdata.outputs.body }}" > pr_body.txt
           {
             echo ""
             echo "---"
-            echo "🔁 Imported from [$SUBREPO_REPO#$SUBREPO_PR_NUMBER]($SUBREPO_URL)"
+            echo "🔁 Imported from [$UPSTREAM_REPO#$SUBREPO_PR_NUMBER]($SUBREPO_URL)"
             echo "🧑‍💻 Originally authored by @$AUTHOR"
           } >> pr_body.txt
 
