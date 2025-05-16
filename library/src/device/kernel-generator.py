@@ -195,17 +195,16 @@ def generate_cpu_function_pool_pieces(functions, pp_functions, num_files):
     ]
 
     # Cycles through each file per loop execution to distribute work amongst N files
-    i = 0
-    j = 0
-    i_offset = 0 if len(pp_functions) == 0 else len(precisions)
+    curr_func, curr_pp_func = 0, 0
+    curr_func_offset = 0 if len(pp_functions) == 0 else len(precisions)
     curr_file = 0
-    while i < len(all_functions) - i_offset:
-        f = all_functions[i]
+    while curr_func < len(all_functions) - curr_func_offset:
+        f = all_functions[curr_func]
         length, precision, scheme, transpose = f.meta.length, f.meta.precision, f.meta.scheme, f.meta.transpose
 
         if scheme == 'CS_3D_PP':
             piece_contents[curr_file] += Assign(var_pp_kernel_1, FFTKernel(f))            
-            f = all_functions[i + i_offset]
+            f = all_functions[curr_func + curr_func_offset]
             piece_contents[curr_file] += Assign(var_pp_kernel_2, FFTKernel(f))
             
             key = Call(
@@ -218,7 +217,7 @@ def generate_cpu_function_pool_pieces(functions, pp_functions, num_files):
                 key, var_pp_kernel_1, var_pp_kernel_2, 'std::get<1>(def_keys)', 
                 'std::get<1>(function_maps)')
             
-            j = j + 1
+            curr_pp_func = curr_pp_func + 1
         else:
             if isinstance(length, (int, str)):
                 length = [length, 0]
@@ -232,11 +231,10 @@ def generate_cpu_function_pool_pieces(functions, pp_functions, num_files):
                 key, var_kernel, 'std::get<0>(def_keys)', 'std::get<0>(function_maps)',
                 f.meta.lds_size_bytes)
         
-        if j == len(precisions):
-            j = 0
-            i = i + len(precisions) + 1         
+        if curr_pp_func == len(precisions):
+            curr_func, curr_pp_func = curr_func + len(precisions) + 1, 0
         else:
-            i = i + 1
+            curr_func = curr_func + 1
             
         curr_file = (curr_file + 1) % num_files
 
@@ -1160,7 +1158,7 @@ def generate_kernel_functions(kernels, precisions, launchers_json):
                                  params=params,
                                  precision=p,
                                  runtime_compile=runtime_compile,
-                                 scheme=scheme,                                 
+                                 scheme=scheme,
                                  workgroup_size=workgroup_size,
                                  transforms_per_block=transforms_per_block,
                                  threads_per_transform=tpt_list,
@@ -1255,7 +1253,8 @@ def generate_kernels(kernels, precisions, stockham_gen):
             if len(k.factors) == 1:
                 half_lds = False
 
-            # Send data over to subprocess
+            # Send data over to subprocess 
+                   
             if isinstance(k.workgroup_size, list):
                 proc.stdin.write(" " + ','.join([str(f) for f in k.workgroup_size]))
             else: 
@@ -1272,6 +1271,7 @@ def generate_kernels(kernels, precisions, stockham_gen):
                 direct_to_from_reg = getattr(k, 'direct_to_from_reg', True)
                 proc.stdin.write(' 1' if direct_to_from_reg else ' 0')
             
+            # check for data specific to partial-pass 3D kernels
             if hasattr(k, 'dims'):
                 proc.stdin.write(" " + ','.join([str(f) for f in k.dims]))
                 proc.stdin.write(" " + ','.join([str(f)
