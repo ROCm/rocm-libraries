@@ -355,9 +355,6 @@ hipError_t upper_bound(void * temporary_storage,
     // Clear any existing error
     (void) hipGetLastError();
 
-    // Clear any existing error
-    (void) hipGetLastError();
-
     static_assert(detail::is_default_or_has_tag<Config, detail::upper_bound_config_tag>::value,
                   "Config must be a specialization of struct template upper_bound_config");
     using value_type  = typename std::iterator_traits<NeedlesIterator>::value_type;
