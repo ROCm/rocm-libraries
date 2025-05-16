@@ -90,14 +90,14 @@ backend:
 * :ref:`SPR <hipblas_spr>` functions with ``std:complex<float>`` and
   ``std:complex<double>``.
 * All the batched functions except for :ref:`TRSM <hipblas_trsm>`,
-  :ref:`GEMV <hipblas_gemv>`, and :ref:`GEMM <hipblas_gemm>` and 
+  :ref:`GEMV <hipblas_gemv>`, and :ref:`GEMM <hipblas_gemm>` and
   :ref:`solver functions <solver_api>`
   (:ref:`GETRF <hipblas_getrf>`, :ref:`GETRS <hipblas_getrs>`,
   :ref:`GEQRF <hipblas_geqrf>`, :ref:`GELS <hipblas_gels>`).
 * All the strided_batched functions except for :ref:`GEMV <hipblas_gemv>` and
   :ref:`GEMM <hipblas_gemm>`.
 * :ref:`TRTRI <hipblas_trtri>` and :ref:`TRSMEX <hipblas_trsmex>` functions.
-* :ref:`GETRF <hipblas_getrf>`, :ref:`GETRS <hipblas_getrs>`, 
+* :ref:`GETRF <hipblas_getrf>`, :ref:`GETRS <hipblas_getrs>`,
   :ref:`GEQRF <hipblas_geqrf>`, and :ref:`GELS <hipblas_gels>` non-batched and
   strided_batched functions.
 
@@ -171,14 +171,6 @@ hipblasStride
 hipblasBfloat16
 ----------------
 .. doxygenstruct:: hipblasBfloat16
-
-hipblasComplex
----------------
-.. doxygenstruct:: hipblasComplex
-
-hipblasDoubleComplex
------------------------
-.. doxygenstruct:: hipblasDoubleComplex
 
 Enums
 =====
