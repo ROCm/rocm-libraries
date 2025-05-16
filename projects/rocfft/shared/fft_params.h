@@ -1941,19 +1941,19 @@ public:
             case fft_precision_half:
             {
                 buffer_printer<rocfft_complex<rocfft_fp16>> s;
-                s.print_buffer(buf, ilength(), istride, nbatch, idist, ioffset);
+                s.print_buffer_half(buf, ilength(), istride, nbatch, idist, ioffset);
                 break;
             }
             case fft_precision_single:
             {
                 buffer_printer<rocfft_complex<float>> s;
-                s.print_buffer(buf, ilength(), istride, nbatch, idist, ioffset);
+                s.print_buffer_single(buf, ilength(), istride, nbatch, idist, ioffset);
                 break;
             }
             case fft_precision_double:
             {
                 buffer_printer<rocfft_complex<double>> s;
-                s.print_buffer(buf, ilength(), istride, nbatch, idist, ioffset);
+                s.print_buffer_double(buf, ilength(), istride, nbatch, idist, ioffset);
                 break;
             }
             }
@@ -1968,19 +1968,19 @@ public:
             case fft_precision_half:
             {
                 buffer_printer<rocfft_fp16> s;
-                s.print_buffer(buf, ilength(), istride, nbatch, idist, ioffset);
+                s.print_buffer_half(buf, ilength(), istride, nbatch, idist, ioffset);
                 break;
             }
             case fft_precision_single:
             {
                 buffer_printer<float> s;
-                s.print_buffer(buf, ilength(), istride, nbatch, idist, ioffset);
+                s.print_buffer_single(buf, ilength(), istride, nbatch, idist, ioffset);
                 break;
             }
             case fft_precision_double:
             {
                 buffer_printer<double> s;
-                s.print_buffer(buf, ilength(), istride, nbatch, idist, ioffset);
+                s.print_buffer_double(buf, ilength(), istride, nbatch, idist, ioffset);
                 break;
             }
             }
@@ -2004,18 +2004,18 @@ public:
             case fft_precision_half:
             {
                 buffer_printer<rocfft_complex<rocfft_fp16>> s;
-                s.print_buffer(buf, olength(), ostride, nbatch, odist, ooffset);
+                s.print_buffer_half(buf, olength(), ostride, nbatch, odist, ooffset);
                 break;
             }
             case fft_precision_single:
             {
                 buffer_printer<rocfft_complex<float>> s;
-                s.print_buffer(buf, olength(), ostride, nbatch, odist, ooffset);
+                s.print_buffer_single(buf, olength(), ostride, nbatch, odist, ooffset);
                 break;
             }
             case fft_precision_double:
                 buffer_printer<rocfft_complex<double>> s;
-                s.print_buffer(buf, olength(), ostride, nbatch, odist, ooffset);
+                s.print_buffer_double(buf, olength(), ostride, nbatch, odist, ooffset);
                 break;
             }
             break;
@@ -2029,19 +2029,19 @@ public:
             case fft_precision_half:
             {
                 buffer_printer<rocfft_fp16> s;
-                s.print_buffer(buf, olength(), ostride, nbatch, odist, ooffset);
+                s.print_buffer_half(buf, olength(), ostride, nbatch, odist, ooffset);
                 break;
             }
             case fft_precision_single:
             {
                 buffer_printer<float> s;
-                s.print_buffer(buf, olength(), ostride, nbatch, odist, ooffset);
+                s.print_buffer_single(buf, olength(), ostride, nbatch, odist, ooffset);
                 break;
             }
             case fft_precision_double:
             {
                 buffer_printer<double> s;
-                s.print_buffer(buf, olength(), ostride, nbatch, odist, ooffset);
+                s.print_buffer_double(buf, olength(), ostride, nbatch, odist, ooffset);
                 break;
             }
             }
@@ -2284,13 +2284,13 @@ public:
     // number of bricks to split that dimension on.  Field length
     // starts with batch dimension, followed by FFT dimensions
     // slowest to fastest.
-    // num_nodes represents the number of nodes used in the parallel
-    // computer, which are assumed to have at least ngpus each
-    void distribute_field(int                              ngpus,
+    // num_ranks represents the number of ranks used in the parallel
+    // computer, which are assumed to have at least gpusperrank each
+    void distribute_field(int                              gpusperrank,
                           const std::vector<unsigned int>& brick_grid,
                           std::vector<fft_field>&          fields,
                           const std::vector<size_t>&       field_length,
-                          int                              num_nodes)
+                          int                              num_ranks)
     {
         if(brick_grid.size() != field_length.size())
             throw std::runtime_error(
@@ -2305,11 +2305,11 @@ public:
 
         auto& field = fields.emplace_back();
 
-        // start with empty brick in field
+        // Start with empty brick in field
         field.bricks.reserve(total_bricks);
         field.bricks.emplace_back();
 
-        // go over the grid
+        // Go over the grid
         for(size_t i = 0; i < brick_grid.size(); ++i)
         {
             std::vector<fft_brick> cur_bricks;
@@ -2329,21 +2329,25 @@ public:
                     new_brick.lower.push_back(cur_length / brick_count * ibrick);
                     // last brick needs to include the whole split len
                     if(ibrick == brick_count - 1)
+                    {
                         new_brick.upper.push_back(cur_length);
+                    }
                     else
+                    {
                         new_brick.upper.push_back(std::min(
                             cur_length, new_brick.lower.back() + cur_length / brick_count));
+                    }
                 }
             }
         }
 
-        // give all bricks contiguous strides
+        // Give all bricks contiguous strides
         int brickIdx = 0;
         for(auto& b : field.bricks)
         {
             b.stride.resize(b.upper.size());
 
-            // fill strides from fastest to slowest
+            // Fill strides from fastest to slowest
             size_t brick_dist = 1;
             for(size_t distIdx = 0; distIdx < b.upper.size(); ++distIdx)
             {
@@ -2351,47 +2355,49 @@ public:
                 brick_dist *= *(b.upper.rbegin() + distIdx) - *(b.lower.rbegin() + distIdx);
             }
 
-            // split across ranks for a multi-process transform,
+            // Split across ranks for a multi-process transform,
             // otherwise split across bricks.  assume there's one
             // rank/device per brick
             if(mp_lib == fft_mp_lib_none)
             {
-                b.device = brickIdx++;
+                b.device = brickIdx;
             }
             else
             {
-                int rank = brickIdx / ngpus; // determine MPI rank
-                int gpu  = brickIdx % ngpus; // determine GPU within rank
+                int rank = brickIdx / gpusperrank; // determine MPI rank
+                int gpu  = brickIdx % gpusperrank; // determine GPU within rank
 
                 b.rank   = rank;
-                b.device = (rank % num_nodes) * ngpus + gpu;
-
-                brickIdx++;
+                b.device = gpu;
             }
+            brickIdx++;
         }
     }
 
     // Distribute problem input among specified grid of devices/processors.
     // Grid specifies number of bricks per dimension, starting with batch
     // and ending with fastest FFT dimension. For single-proc single-proc
-    // multi-gpu, ngpus represents the number of GPUs to use;
+    // multi-gpu, gpusperrank represents the number of GPUs to use;
     // while for multi-proc it represents the number of GPUs on each rank.
-    void distribute_input(int ngpus, const std::vector<unsigned int>& brick_grid, int num_nodes = 1)
+    void distribute_input(int                              gpusperrank,
+                          const std::vector<unsigned int>& brick_grid,
+                          int                              num_ranks = 1)
     {
         auto len = length;
         len.insert(len.begin(), nbatch);
-        distribute_field(ngpus, brick_grid, ifields, len, num_nodes);
+        distribute_field(gpusperrank, brick_grid, ifields, len, num_ranks);
     }
 
     // Distribute problem output among specified grid of devices/processors.
     // Grid specifies number of bricks per dimension, starting with batch
     // and ending with fastest FFT dimension.
-    void
-        distribute_output(int ngpus, const std::vector<unsigned int>& brick_grid, int num_nodes = 1)
+    void distribute_output(int                              gpusperrank,
+                           const std::vector<unsigned int>& brick_grid,
+                           int                              num_ranks = 1)
     {
         auto len = olength();
         len.insert(len.begin(), nbatch);
-        distribute_field(ngpus, brick_grid, ofields, len, num_nodes);
+        distribute_field(gpusperrank, brick_grid, ofields, len, num_ranks);
     }
 };
 
