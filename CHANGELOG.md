@@ -3,6 +3,12 @@
 Documentation for rocThrust available at
 [https://rocm.docs.amd.com/projects/rocThrust/en/latest/](https://rocm.docs.amd.com/projects/rocThrust/en/latest/).
 
+## rocThrust 3.5.0 for ROCm 7.0
+
+### Changed
+
+* Updated the required version of Google Benchmark from 1.8.0 to 1.9.0.
+
 ## rocThrust 3.4.0 for ROCm 6.5
 
 ### Added
