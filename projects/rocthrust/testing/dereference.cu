@@ -23,7 +23,8 @@
 
 #include <unittest/unittest.h>
 
-THRUST_DISABLE_MSVC_POSSIBLE_LOSS_OF_DATA_WARNING_BEGIN
+THRUST_DIAG_PUSH
+THRUST_DIAG_SUPPRESS_MSVC(4244 4267) // possible loss of data
 
 template <typename Iterator1, typename Iterator2>
 #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA || THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
@@ -48,7 +49,7 @@ void simple_copy(Iterator1 first1, Iterator1 last1, Iterator2 first2)
 #endif
 }
 
-void TestDeviceDereferenceDeviceVectorIterator(void)
+void TestDeviceDereferenceDeviceVectorIterator()
 {
   thrust::device_vector<int> input = unittest::random_integers<int>(100);
   thrust::device_vector<int> output(input.size(), 0);
@@ -59,7 +60,7 @@ void TestDeviceDereferenceDeviceVectorIterator(void)
 }
 DECLARE_UNITTEST(TestDeviceDereferenceDeviceVectorIterator);
 
-void TestDeviceDereferenceDevicePtr(void)
+void TestDeviceDereferenceDevicePtr()
 {
   thrust::device_vector<int> input = unittest::random_integers<int>(100);
   thrust::device_vector<int> output(input.size(), 0);
@@ -74,7 +75,7 @@ void TestDeviceDereferenceDevicePtr(void)
 }
 DECLARE_UNITTEST(TestDeviceDereferenceDevicePtr);
 
-void TestDeviceDereferenceTransformIterator(void)
+void TestDeviceDereferenceTransformIterator()
 {
   thrust::device_vector<int> input = unittest::random_integers<int>(100);
   thrust::device_vector<int> output(input.size(), 0);
@@ -87,7 +88,7 @@ void TestDeviceDereferenceTransformIterator(void)
 }
 DECLARE_UNITTEST(TestDeviceDereferenceTransformIterator);
 
-void TestDeviceDereferenceCountingIterator(void)
+void TestDeviceDereferenceCountingIterator()
 {
   thrust::counting_iterator<int> first(1);
   thrust::counting_iterator<int> last(6);
@@ -104,7 +105,7 @@ void TestDeviceDereferenceCountingIterator(void)
 }
 DECLARE_UNITTEST(TestDeviceDereferenceCountingIterator);
 
-void TestDeviceDereferenceTransformedCountingIterator(void)
+void TestDeviceDereferenceTransformedCountingIterator()
 {
   thrust::counting_iterator<int> first(1);
   thrust::counting_iterator<int> last(6);
@@ -123,4 +124,4 @@ void TestDeviceDereferenceTransformedCountingIterator(void)
 }
 DECLARE_UNITTEST(TestDeviceDereferenceTransformedCountingIterator);
 
-THRUST_DISABLE_MSVC_POSSIBLE_LOSS_OF_DATA_WARNING_END
+THRUST_DIAG_POP

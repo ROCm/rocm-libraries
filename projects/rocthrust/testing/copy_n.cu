@@ -119,7 +119,8 @@ void TestCopyNMatchingTypes()
 }
 DECLARE_VECTOR_UNITTEST(TestCopyNMatchingTypes);
 
-THRUST_DISABLE_MSVC_WARNING_BEGIN(4244) // '=': conversion from 'int' to '_Ty', possible loss of data
+THRUST_DIAG_PUSH
+THRUST_DIAG_SUPPRESS_MSVC(4244) // '=': conversion from 'int' to '_Ty', possible loss of data
 
 template <class Vector>
 void TestCopyNMixedTypes()
@@ -154,7 +155,7 @@ void TestCopyNMixedTypes()
 }
 DECLARE_INTEGRAL_VECTOR_UNITTEST(TestCopyNMixedTypes);
 
-THRUST_DISABLE_MSVC_WARNING_END(4244)
+THRUST_DIAG_POP
 
 void TestCopyNVectorBool()
 {

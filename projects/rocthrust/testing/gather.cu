@@ -26,10 +26,11 @@
 
 #include <unittest/unittest.h>
 
-THRUST_DISABLE_MSVC_POSSIBLE_LOSS_OF_DATA_WARNING_BEGIN
+THRUST_DIAG_PUSH
+THRUST_DIAG_SUPPRESS_MSVC(4244 4267) // possible loss of data
 
 template <class Vector>
-void TestGatherSimple(void)
+void TestGatherSimple()
 {
   Vector map(5); // gather indices
   Vector src(8); // source vector
@@ -152,7 +153,7 @@ void TestGatherToDiscardIterator(const size_t n)
 DECLARE_VARIABLE_UNITTEST(TestGatherToDiscardIterator);
 
 template <class Vector>
-void TestGatherIfSimple(void)
+void TestGatherIfSimple()
 {
   Vector flg(5); // predicate array
   Vector map(5); // gather indices
@@ -342,7 +343,7 @@ void TestGatherIfToDiscardIterator(const size_t n)
 DECLARE_VARIABLE_UNITTEST(TestGatherIfToDiscardIterator);
 
 template <typename Vector>
-void TestGatherCountingIterator(void)
+void TestGatherCountingIterator()
 {
   Vector source(10);
   thrust::sequence(source.begin(), source.end(), 0);
@@ -378,4 +379,4 @@ void TestGatherCountingIterator(void)
 }
 DECLARE_INTEGRAL_VECTOR_UNITTEST(TestGatherCountingIterator);
 
-THRUST_DISABLE_MSVC_POSSIBLE_LOSS_OF_DATA_WARNING_END
+THRUST_DIAG_POP
