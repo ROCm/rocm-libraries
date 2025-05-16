@@ -126,7 +126,7 @@ namespace rocRoller::KernelGraph
         void generate(std::set<int> candidates);
         void call(ControlGraph::Operation const& op, int tag);
 
-        KernelGraph                  m_graph;
+        KernelGraph const&           m_graph;
         std::set<int>                m_completedControlNodes;
         std::vector<ReadWriteRecord> m_trace;
         std::unordered_map<int, int> m_bodyParent;
