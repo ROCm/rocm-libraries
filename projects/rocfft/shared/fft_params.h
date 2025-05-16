@@ -3855,7 +3855,7 @@ void init_local_input(int                                       comm_rank,
         {
         case fft_precision_half:
             set_input<Tbuff, rocfft_fp16>(bufvec,
-                                          fft_input_random_generator_device,
+                                          params.igen,
                                           params.itype,
                                           brick_len_nobatch,
                                           brick_len_nobatch,
@@ -3870,7 +3870,7 @@ void init_local_input(int                                       comm_rank,
             break;
         case fft_precision_single:
             set_input<Tbuff, float>(bufvec,
-                                    fft_input_random_generator_device,
+                                    params.igen,
                                     params.itype,
                                     brick_len_nobatch,
                                     brick_len_nobatch,
@@ -3885,7 +3885,7 @@ void init_local_input(int                                       comm_rank,
             break;
         case fft_precision_double:
             set_input<Tbuff, double>(bufvec,
-                                     fft_input_random_generator_device,
+                                     params.igen,
                                      params.itype,
                                      brick_len_nobatch,
                                      brick_len_nobatch,
