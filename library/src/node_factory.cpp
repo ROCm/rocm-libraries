@@ -1014,9 +1014,9 @@ bool NodeFactory::use_CS_3D_RC(const function_pool& pool, NodeMetaData& nodeData
 
 bool NodeFactory::use_CS_3D_PP(const function_pool& pool, NodeMetaData& nodeData)
 {
-    if(!pool.has_pp_function(
+    if(!pool.has_function(
 
-           FMKeyPP(nodeData.length[0],
+           PPFMKey(nodeData.length[0],
                    nodeData.length[1],
                    nodeData.length[2],
                    nodeData.precision,

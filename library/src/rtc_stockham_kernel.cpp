@@ -77,7 +77,7 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
         {
             auto pp_key = node.GetPPKernelsKey();
 
-            kernel = node.pool.get_pp_kernel(pp_key, node.scheme);
+            kernel = node.pool.get_kernel(pp_key, node.scheme);
 
             std::copy(kernel->factors.begin(), kernel->factors.end(), std::back_inserter(factors));
             std::vector<unsigned int> precisions = {static_cast<unsigned int>(node.precision)};

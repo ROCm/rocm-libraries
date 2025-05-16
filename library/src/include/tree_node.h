@@ -353,7 +353,7 @@ public:
     // specified kernel key from solution map. (if there is any)
     std::unique_ptr<FMKey> specified_key;
 
-    std::unique_ptr<FMKeyPP> specified_pp_key;
+    std::unique_ptr<PPFMKey> specified_pp_key;
 
     // Tree structure:
     // non-owning pointer to parent node, may be null
@@ -588,14 +588,14 @@ public:
                                 : FMKey(length[0], length[1], precision, scheme);
     }
 
-    virtual FMKeyPP GetPPKernelsKey() const
+    virtual PPFMKey GetPPKernelsKey() const
     {
         if(specified_pp_key)
             return *specified_pp_key.get();
 
         auto pp_parent_node = GetPartialPassAncestor();
         if(pp_parent_node)
-            return FMKeyPP(pp_parent_node->length[0],
+            return PPFMKey(pp_parent_node->length[0],
                            pp_parent_node->length[1],
                            pp_parent_node->length[2],
                            precision,

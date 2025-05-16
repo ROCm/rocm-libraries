@@ -950,8 +950,8 @@ void StockhamPP1DNode::SetupGridParam_internal(GridParam& gp)
     for(size_t j = 1; j < length.size(); j++)
         batch_accum *= length[j];
 
-    FMKeyPP key    = GetPPKernelsKey();
-    auto    kernel = pool.get_pp_kernel(key, scheme);
+    PPFMKey key    = GetPPKernelsKey();
+    auto    kernel = pool.get_kernel(key, scheme);
 
     bwd      = kernel.transforms_per_block;
     wgs      = kernel.workgroup_size;
@@ -1157,8 +1157,8 @@ std::vector<size_t> SBCCNode::CollapsibleDims()
 
 void SBCCPPNode::SetupGridParam_internal(GridParam& gp)
 {
-    FMKeyPP key    = GetPPKernelsKey();
-    auto    kernel = pool.get_pp_kernel(key, scheme);
+    PPFMKey key    = GetPPKernelsKey();
+    auto    kernel = pool.get_kernel(key, scheme);
 
     bwd = kernel.transforms_per_block;
     wgs = kernel.workgroup_size;

@@ -208,14 +208,14 @@ def generate_cpu_function_pool_pieces(functions, pp_functions, num_files):
             piece_contents[curr_file] += Assign(var_pp_kernel_2, FFTKernel(f))
             
             key = Call(
-                name='FMKeyPP',
+                name='PPFMKey',
                 arguments=ArgumentList(length[0], length[1], length[2],
                                        precisions[precision],
                                        scheme, 'pp_kernel_1.get_kernel_config()',
                                        'pp_kernel_2.get_kernel_config()')).inline()
-            piece_contents[curr_file] += function_map.assert_pp_insert(
+            piece_contents[curr_file] += function_map.insert_pp(
                 key, var_pp_kernel_1, var_pp_kernel_2, 'std::get<1>(def_keys)', 
-                'std::get<1>(function_maps)')
+                'std::get<1>(function_maps)', f.meta.lds_size_bytes)
             
             curr_pp_func = curr_pp_func + 1
         else:
@@ -227,7 +227,7 @@ def generate_cpu_function_pool_pieces(functions, pp_functions, num_files):
                 arguments=ArgumentList(length[0], length[1], precisions[precision],
                                        scheme, transpose or 'NONE',
                                        'kernel.get_kernel_config()')).inline()
-            piece_contents[curr_file] += function_map.assert_insert(
+            piece_contents[curr_file] += function_map.insert(
                 key, var_kernel, 'std::get<0>(def_keys)', 'std::get<0>(function_maps)',
                 f.meta.lds_size_bytes)
         

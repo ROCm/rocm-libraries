@@ -106,8 +106,8 @@ void LeafNode::GetKernelFactors()
 {
     if(isPartialPassEnabled())
     {
-        FMKeyPP key   = GetPPKernelsKey();
-        kernelFactors = pool.get_pp_kernel(key, scheme).factors;
+        PPFMKey key   = GetPPKernelsKey();
+        kernelFactors = pool.get_kernel(key, scheme).factors;
     }
     else
     {
@@ -118,8 +118,8 @@ void LeafNode::GetKernelFactors()
 
 void LeafNode::GetKernelPartialPassFactors()
 {
-    FMKeyPP key     = GetPPKernelsKey();
-    auto    kernel  = pool.get_pp_kernel(key, scheme);
+    PPFMKey key     = GetPPKernelsKey();
+    auto    kernel  = pool.get_kernel(key, scheme);
     kernelFactorsPP = std::vector<size_t>(kernel.pp_params.factors_off_dim.begin(),
                                           kernel.pp_params.factors_off_dim.end());
 
@@ -196,11 +196,11 @@ bool LeafNode::KernelCheck(std::vector<FMKey>& kernel_keys)
 
     if(isPartialPassEnabled())
     {
-        FMKeyPP key = GetPPKernelsKey();
-        if(!pool.has_pp_function(key))
+        PPFMKey key = GetPPKernelsKey();
+        if(!pool.has_function(key))
             return false;
 
-        auto kernel = pool.get_pp_kernel(key, scheme);
+        auto kernel = pool.get_kernel(key, scheme);
         dir2regMode = (kernel.direct_to_from_reg) ? DirectRegType::TRY_ENABLE_IF_SUPPORT
                                                   : DirectRegType::FORCE_OFF_OR_NOT_SUPPORT;
 

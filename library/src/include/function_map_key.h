@@ -308,8 +308,11 @@ struct FromString<KernelConfig>
 
 struct FMKeyBase
 {
-    FMKeyBase(rocfft_precision precision, ComputeScheme scheme = CS_NONE)
-        : precision(precision)
+    FMKeyBase(std::array<size_t, 3> lengths,
+              rocfft_precision      precision,
+              ComputeScheme         scheme = CS_NONE)
+        : lengths(lengths)
+        , precision(precision)
         , scheme(scheme)
     {
     }
@@ -323,6 +326,8 @@ struct FMKeyBase
     // field, and multiple configs that differ only in LDS size are
     // allowed to coexist in the function pool.
     size_t lds_size_bytes = 0;
+
+    std::array<size_t, 3> lengths;
 
     rocfft_precision precision;
     ComputeScheme    scheme;
@@ -343,8 +348,6 @@ struct FMKeyBase
 //
 struct FMKey : public FMKeyBase
 {
-    std::array<size_t, 2> lengths;
-
     SBRC_TRANSPOSE_TYPE sbrcTrans     = NONE;
     KernelConfig        kernel_config = KernelConfig::EmptyConfig();
 
@@ -357,8 +360,7 @@ struct FMKey : public FMKeyBase
           ComputeScheme       scheme        = CS_KERNEL_STOCKHAM,
           SBRC_TRANSPOSE_TYPE transpose     = NONE,
           KernelConfig        kernel_config = KernelConfig::EmptyConfig())
-        : FMKeyBase(precision, scheme)
-        , lengths({length0, 0})
+        : FMKeyBase({length0, 0, 0}, precision, scheme)
         , sbrcTrans(transpose)
         , kernel_config(kernel_config)
 
@@ -372,8 +374,7 @@ struct FMKey : public FMKeyBase
           ComputeScheme       scheme        = CS_KERNEL_2D_SINGLE,
           SBRC_TRANSPOSE_TYPE transpose     = NONE,
           KernelConfig        kernel_config = KernelConfig::EmptyConfig())
-        : FMKeyBase(precision, scheme)
-        , lengths({length0, length1})
+        : FMKeyBase({length0, length1, 0}, precision, scheme)
         , sbrcTrans(transpose)
         , kernel_config(kernel_config)
     {
@@ -497,38 +498,31 @@ struct SimpleHash
     }
 };
 
-// TODO: Check if FMKeyPP and FMKey can derive from a common base class
-// This should simplfy operations in the function_pool, e.g.,
-// FMKey key = GetKernelKey();
-// if(!pool.has_function(key))
-// in LeafNode::KernelCheck(std::vector<FMKey>& kernel_keys)
-struct FMKeyPP : public FMKeyBase
+struct PPFMKey : public FMKeyBase
 {
-    std::array<size_t, 3> lengths;
-    KernelConfig          kernel_config_1 = KernelConfig::EmptyConfig();
-    KernelConfig          kernel_config_2 = KernelConfig::EmptyConfig();
+    KernelConfig kernel_config_1 = KernelConfig::EmptyConfig();
+    KernelConfig kernel_config_2 = KernelConfig::EmptyConfig();
 
-    FMKeyPP()               = default;
-    FMKeyPP(const FMKeyPP&) = default;
+    PPFMKey()               = default;
+    PPFMKey(const PPFMKey&) = default;
 
     // with every data
-    FMKeyPP(size_t           length0,
+    PPFMKey(size_t           length0,
             size_t           length1,
             size_t           length2,
             rocfft_precision precision,
             ComputeScheme    scheme          = CS_3D_PP,
             KernelConfig     kernel_config_1 = KernelConfig::EmptyConfig(),
             KernelConfig     kernel_config_2 = KernelConfig::EmptyConfig())
-        : FMKeyBase(precision, scheme)
-        , lengths({length0, length1, length2})
+        : FMKeyBase({length0, length1, length2}, precision, scheme)
         , kernel_config_1(kernel_config_1)
         , kernel_config_2(kernel_config_2)
     {
     }
 
-    FMKeyPP& operator=(const FMKeyPP&) = default;
+    PPFMKey& operator=(const PPFMKey&) = default;
 
-    bool operator==(const FMKeyPP& rhs) const
+    bool operator==(const PPFMKey& rhs) const
     {
         return std::tie(lengths, precision, scheme, kernel_config_1, kernel_config_2)
                == std::tie(rhs.lengths,
@@ -538,12 +532,12 @@ struct FMKeyPP : public FMKeyBase
                            rhs.kernel_config_2);
     }
 
-    bool operator!=(const FMKeyPP& rhs) const
+    bool operator!=(const PPFMKey& rhs) const
     {
         return !((*this) == rhs);
     }
 
-    bool operator<(const FMKeyPP& rhs) const
+    bool operator<(const PPFMKey& rhs) const
     {
         return std::tie(lengths, precision, scheme, kernel_config_1, kernel_config_2)
                < std::tie(rhs.lengths,
@@ -553,9 +547,9 @@ struct FMKeyPP : public FMKeyBase
                           rhs.kernel_config_2);
     }
 
-    static FMKeyPP EmptyFMKeyPP()
+    static PPFMKey EmptyPPFMKey()
     {
-        static FMKeyPP empty;
+        static PPFMKey empty;
         return empty;
     }
 
@@ -568,7 +562,7 @@ struct FMKeyPP : public FMKeyBase
 
 struct SimpleHashPP
 {
-    size_t operator()(const FMKeyPP& p) const noexcept
+    size_t operator()(const PPFMKey& p) const noexcept
     {
         size_t h = 0;
         for(auto& v : p.lengths)
