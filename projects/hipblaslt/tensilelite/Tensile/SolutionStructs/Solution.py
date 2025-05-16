@@ -371,6 +371,22 @@ class Solution(collections.abc.Mapping):
     state["tailLoopOptA"] = True
     state["tailLoopOptB"] = True
 
+    # Use nonDTL loads in DTL tail loop
+    state["NonDTLTailLoopA"] = False
+    state["NonDTLTailLoopB"] = False
+
+    bpeA = state["ProblemType"]["DataTypeA"].numBytes()
+    bpeB = state["ProblemType"]["DataTypeB"].numBytes()
+    asem = state["AssertSummationElementMultiple"]
+    # For DTL, we use nonDTL loads in tail loop only if
+    # a partial 32b read is required to read the last few elements of a row/col of A/B
+    # i.e. ASEM * BPE % 4 != 0. In this case dword/dwordx4 DTL load will
+    # zero out the entire partial 32b read and cause accuracy issues.
+    if (asem * bpeA) % 4 != 0:
+      state["NonDTLTailLoopA"] = not state["ProblemType"]["TLUA"]
+    if (asem * bpeB) % 4 != 0:
+      state["NonDTLTailLoopB"] = not state["ProblemType"]["TLUB"]
+
     if (state["ISA"] != (9, 4, 2)) or \
        (state["ProblemType"]["Sparse"]) or \
        (state["UseDotInstruction"]):
@@ -804,9 +820,6 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "can't use DirectToLds for LSC%c and LSP%c * bpe != NumThreads * GlobalReadVectorWidth%c * bpe%c > 4"%(tc, tc, tc, tc))
         return False
 
-    # so far, DirectToLds does not work well with PGR=2
-    # performance is not good and a lot of ds_read for DTL can cause scheduling issue(TODO: need fix)
-
     # so far, DirectToLds does not work with LRVW=2
     if state["LocalReadVectorWidth"] == 2:
       reject(state, printRejectionReason, "can't use DirectToLds for LocalReadVectorWidth == 2")
@@ -830,6 +843,12 @@ class Solution(collections.abc.Mapping):
     if (not state["ProblemType"]["TLU%c"%tc]) and state["ProblemType"]["DataType"].numRegisters() > 1 and \
        state["_DepthU%s"%tc] // state["NumLoadsCoalesced%c"%tc] < 8:
       reject(state, printRejectionReason, "DirectToLds%c does not work with TLU=False and bpe > bpr and DepthU//NumLoadsCoalesced%c < 8"%(tc, tc))
+      return False
+
+    # TODO: Currently DTL with input types of different size is not support. There are functional issues
+    # This needs to be fixed.
+    if state["ProblemType"]["DataType%s"%tc].numBytes() != state["ProblemType"]["DataType"].numBytes():
+      reject(state, printRejectionReason, "DirectToLds%s with conversion to different sized data types is not supported"%tc)
       return False
 
     # DTL + input type conversion
@@ -2321,6 +2340,7 @@ class Solution(collections.abc.Mapping):
     # LDS (load size coalesced) * LSPA must load some multiple of 256 bytes.
     # No longer support loadX2/loadx4 .
     if state["DirectToLds"]:
+
       if (not state["DirectToVgprA"]) and Solution.isDirectToLdsDoable(state, 'A', isaInfoMap, printRejectionReason):
         state["DirectToLdsA"] = True
         state["LocalWriteUseSgprA"] = True
