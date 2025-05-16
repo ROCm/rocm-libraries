@@ -1,6 +1,6 @@
 .. meta::
-  :description: hipSPARSE documentation and API reference library
-  :keywords: hipSPARSE, rocSPARSE, ROCm, API, documentation
+  :description: hipSPARSE sparse level 2 functions API documentation
+  :keywords: hipSPARSE, rocSPARSE, ROCm, API, documentation, level 2 functions
 
 .. _hipsparse_level2_functions:
 
@@ -8,7 +8,7 @@
 Sparse level 2 functions
 ********************************************************************
 
-This module holds all sparse level 2 routines.
+This module contains all sparse level 2 routines.
 
 The sparse level 2 routines describe operations between a matrix in sparse format and a vector in dense format.
 
