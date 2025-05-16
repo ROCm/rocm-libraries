@@ -33,6 +33,13 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/detail/type_traits.h>
 #include <thrust/iterator/detail/permutation_iterator_base.h>
 #include <thrust/iterator/iterator_facade.h>
@@ -164,7 +171,8 @@ private:
   // MSVC 2013 and 2015 incorrectly warning about returning a reference to
   // a local/temporary here.
   // See goo.gl/LELTNp
-  THRUST_DISABLE_MSVC_WARNING_BEGIN(4172)
+  THRUST_DIAG_PUSH
+  THRUST_DIAG_SUPPRESS_MSVC(4172)
 
   THRUST_EXEC_CHECK_DISABLE
   THRUST_HOST_DEVICE typename super_t::reference dereference() const
@@ -172,7 +180,7 @@ private:
     return *(m_element_iterator + *this->base());
   }
 
-  THRUST_DISABLE_MSVC_WARNING_END(4172)
+  THRUST_DIAG_POP
 
   // make friends for the copy constructor
   template <typename, typename>

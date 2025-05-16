@@ -24,10 +24,11 @@
 
 #include <unittest/unittest.h>
 
-THRUST_DISABLE_MSVC_POSSIBLE_LOSS_OF_DATA_WARNING_BEGIN
+THRUST_DIAG_PUSH
+THRUST_DIAG_SUPPRESS_MSVC(4244 4267) // possible loss of data
 
 template <class Vector>
-void TestFillSimple(void)
+void TestFillSimple()
 {
   using T = typename Vector::value_type;
 
@@ -72,7 +73,7 @@ void TestFillSimple(void)
 }
 DECLARE_VECTOR_UNITTEST(TestFillSimple);
 
-void TestFillDiscardIterator(void)
+void TestFillDiscardIterator()
 {
   // there's no result to check because fill returns void
   thrust::fill(
@@ -84,7 +85,7 @@ void TestFillDiscardIterator(void)
 DECLARE_UNITTEST(TestFillDiscardIterator);
 
 template <class Vector>
-void TestFillMixedTypes(void)
+void TestFillMixedTypes()
 {
   Vector v(4);
 
@@ -138,7 +139,7 @@ void TestFill(size_t n)
 DECLARE_VARIABLE_UNITTEST(TestFill);
 
 template <class Vector>
-void TestFillNSimple(void)
+void TestFillNSimple()
 {
   using T = typename Vector::value_type;
 
@@ -187,7 +188,7 @@ void TestFillNSimple(void)
 }
 DECLARE_VECTOR_UNITTEST(TestFillNSimple);
 
-void TestFillNDiscardIterator(void)
+void TestFillNDiscardIterator()
 {
   thrust::discard_iterator<thrust::host_system_tag> h_result =
     thrust::fill_n(thrust::discard_iterator<thrust::host_system_tag>(), 10, 13);
@@ -203,7 +204,7 @@ void TestFillNDiscardIterator(void)
 DECLARE_UNITTEST(TestFillNDiscardIterator);
 
 template <class Vector>
-void TestFillNMixedTypes(void)
+void TestFillNMixedTypes()
 {
   Vector v(4);
 
@@ -263,7 +264,7 @@ void TestFillN(size_t n)
 DECLARE_VARIABLE_UNITTEST(TestFillN);
 
 template <typename Vector>
-void TestFillZipIterator(void)
+void TestFillZipIterator()
 {
   using T = typename Vector::value_type;
 
@@ -287,7 +288,7 @@ void TestFillZipIterator(void)
 };
 DECLARE_VECTOR_UNITTEST(TestFillZipIterator);
 
-void TestFillTuple(void)
+void TestFillTuple()
 {
   using T     = int;
   using Tuple = thrust::tuple<T, T>;
@@ -307,7 +308,7 @@ struct TypeWithTrivialAssigment
   int x, y, z;
 };
 
-void TestFillWithTrivialAssignment(void)
+void TestFillWithTrivialAssignment()
 {
   using T = TypeWithTrivialAssigment;
 
@@ -364,7 +365,7 @@ struct TypeWithNonTrivialAssigment
   }
 };
 
-void TestFillWithNonTrivialAssignment(void)
+void TestFillWithNonTrivialAssignment()
 {
   using T = TypeWithNonTrivialAssigment;
 
@@ -463,4 +464,4 @@ void TestFillNDispatchImplicit()
 }
 DECLARE_UNITTEST(TestFillNDispatchImplicit);
 
-THRUST_DISABLE_MSVC_POSSIBLE_LOSS_OF_DATA_WARNING_END
+THRUST_DIAG_POP
