@@ -54,6 +54,7 @@ target_link_libraries(sample-helper
 
 add_subdirectory(01_hipblaslt_gemm)
 add_subdirectory(01_hipblaslt_gemm_ext)
+add_subdirectory(01_hipblaslt_gemm_ext_deprecated)
 add_subdirectory(02_hipblaslt_gemm_batched)
 add_subdirectory(02_hipblaslt_gemm_batched_ext)
 add_subdirectory(03_hipblaslt_gemm_tuning_splitk_ext)

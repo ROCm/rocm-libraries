@@ -1929,13 +1929,19 @@ void testing_matmul_with_bias(const Arguments& arg,
         if(arg.scaleA == hipblaslt_scaling_format::Scalar
            || arg.scaleA == hipblaslt_scaling_format::Vector)
         {
-            hipblaslt_init(hScaleA[i].buf(), size_scaleAVec[i], 1, size_scaleAVec[i], Talpha);
+            if(arg.norm_check)
+                hipblaslt_init_small(hScaleA[i].buf(), size_scaleAVec[i], 1, size_scaleAVec[i], Talpha);
+            else
+                hipblaslt_init(hScaleA[i].buf(), size_scaleAVec[i], 1, size_scaleAVec[i], Talpha);
         }
 
         if(arg.scaleB == hipblaslt_scaling_format::Scalar
            || arg.scaleB == hipblaslt_scaling_format::Vector)
         {
-            hipblaslt_init(hScaleB[i].buf(), size_scaleBVec[i], 1, size_scaleBVec[i], Talpha);
+            if(arg.norm_check)
+                hipblaslt_init_small(hScaleB[i].buf(), size_scaleBVec[i], 1, size_scaleBVec[i], Talpha);
+            else
+                hipblaslt_init(hScaleB[i].buf(), size_scaleBVec[i], 1, size_scaleBVec[i], Talpha);
         }
 
         if(arg.scaleC)
