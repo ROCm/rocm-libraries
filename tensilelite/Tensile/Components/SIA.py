@@ -929,6 +929,10 @@ def schedLocalWrite(writer, kernel, numLocalWriteModPerIter, numLocalWritesPerSc
                         writer.codes.perIterLocalWriteCodeNGLL[u][0].append(perIterLocalWriteCodeNGLLCounter)
                         writer.codes.perIterLocalWriteCodeNGLL[u][1].add(imodNGLL)
             itemsLWToSchedIndexLast = itemsLWToSchedIndex + 1
+        if writer.codes.perIterLocalWrite[u][0] and writer.codes.perIterLocalWrite[u][0][-1] != perIterLocalWriteCodeCounter:
+            writer.codes.perIterLocalWrite[u][0].append(perIterLocalWriteCodeCounter)
+        if lastLc and writer.codes.perIterLocalWriteCodeNGLL[u][0] and writer.codes.perIterLocalWriteCodeNGLL[u][0][-1] != perIterLocalWriteCodeNGLLCounter:
+            writer.codes.perIterLocalWriteCodeNGLL[u][0].append(perIterLocalWriteCodeNGLLCounter)
         itemsLWToSched = itemsLWToSched[itemPerIter:]
 
     # should never run out of items to schedule

@@ -586,7 +586,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
     localWriteCode       = self.codes.perIterLocalWrite[iteration][1]
     isBarrier            = kernel["LoopIters"] - self.states.numItersPLR
     hasLocalRead = countLocalRead(localReadCode)
-
     # Default schedule is other, local reads, then local writes:
     if self.states.scheduleIterAlg==0:
       # simple schedule, just add the modules in-order
@@ -1127,8 +1126,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
             if (mfmaIndex >= self.states.lwStartMfmaIndex) and not countGlobalRead(globalReadCode):
               writeItemLength = (localWriteCodeCounts[-1] - itemCounter) if localWriteCodeCounts else 0
               writeItemLength = min(writeItemLength, self.states.numLocalWriteModPerMfma)
-              numLoops, itemCounter = calculateRangeAndUpdateCounter(itemCounter, localWriteCodeCounts, writeItemLength)
-              for j in range(numLoops):
+              numLoops, _ = calculateRangeAndUpdateCounter(itemCounter, localWriteCodeCounts, writeItemLength)
+              for j in range(min(len(writeItems), numLoops)):
                 if countLocalWrite(writeItems[j]):
                   latencyLeft -= (tPA["localWriteInstruction"].issueLatency*2)
             readLeftLROPT = 0
@@ -1266,7 +1265,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
             iterCode.add(SSetPrior(prior=3, comment="store optimization"))
         if (mfmaIndex >= self.states.lwStartMfmaIndex):
           numLoops, itemCounter = calculateRangeAndUpdateCounter(itemCounter, localWriteCodeCounts, self.states.numLocalWriteModPerMfma)
-          for j in range(numLoops):
+          for j in range(min(len(writeItems), numLoops)):
             # in case there are localWrite and globalread in same iteration
             # we need to make sure globalRead before localWrite
             if writeItems and not countGlobalRead(globalReadCode):
