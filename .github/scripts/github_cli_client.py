@@ -185,6 +185,13 @@ class GitHubCLIClient:
         data = self._get_paginated_json(url, f"Failed to get PRs for {repo} with head {head}")
         return data[0] if data else None
 
+    def get_pr_by_number(self, repo: str, pr_number: int) -> Optional[dict]:
+        """Fetch the PR object for a given PR number in a repository."""
+        url = f"{self.api_url}/repos/{repo}/pulls/{pr_number}"
+        logger.debug(f"Fetching PR #{pr_number} from {repo}")
+        response = self._get_json(url, f"Failed to get PR #{pr_number} from {repo}")
+        return response
+
     def pr_create(self, repo: str, base: str, head: str, title: str, body: str, dry_run: bool = False) -> None:
         """Create a new pull request."""
         url = f"{self.api_url}/repos/{repo}/pulls"
@@ -244,3 +251,32 @@ class GitHubCLIClient:
                 logger.info(f"Dry run: Labels '{labels_for_logging}' would be applied to PR #{pr_number} in {target_repo}.")
         else:
             logger.info(f"No valid labels to apply to PR #{pr_number} in {target_repo}.")
+
+    def get_squash_merge_commit(self, repo: str, pr_number: int) -> Optional[str]:
+        """Get the squash merge commit SHA of a merged pull request."""
+        url = f"{self.api_url}/repos/{repo}/pulls/{pr_number}"
+        logger.debug(f"Request URL: {url}")
+        data = self._get_json(url, f"Failed to fetch PR #{pr_number} from {repo}")
+        if not data:
+            logger.error(f"No data returned for PR #{pr_number}")
+            return None
+        if data.get("merged") and data.get("merge_commit_sha"):
+            logger.debug(f"PR #{pr_number} merged commit: {data['merge_commit_sha']}")
+            return data["merge_commit_sha"]
+        logger.warning(f"PR #{pr_number} is not merged or missing merge commit SHA.")
+        return None
+
+    def get_user(self, username: str) -> tuple[str, str]:
+        """Fetch the name and email of a GitHub user. Falls back to login and no-reply email."""
+        url = f"{self.api_url}/users/{username}"
+        logger.debug(f"Fetching user profile for @{username}")
+        data = self._get_json(url, f"Failed to fetch user profile for @{username}")
+        name = data.get("name") or username
+        email = data.get("email")
+        if not email:
+            user_id = data.get("id")
+            if user_id:
+                email = f"{user_id}+{username}@users.noreply.github.com"
+            else:
+                email = f"{username}@users.noreply.github.com"
+        return name, email
