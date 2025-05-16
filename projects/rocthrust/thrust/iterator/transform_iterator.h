@@ -33,11 +33,23 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
 // #include the details first
 #include <thrust/detail/type_traits.h>
 #include <thrust/iterator/detail/transform_iterator.inl>
 #include <thrust/iterator/iterator_facade.h>
 #include <thrust/iterator/iterator_traits.h>
+
+#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
+#  include <type_traits>
+#endif
 
 THRUST_NAMESPACE_BEGIN
 
@@ -68,7 +80,7 @@ THRUST_NAMESPACE_BEGIN
  *  // note: functor inherits from unary_function
  *  struct square_root : public thrust::unary_function<float,float>
  *  {
- *    THRUST_HOST_DEVICE
+ *    __host__ __device__
  *    float operator()(float x) const
  *    {
  *      return sqrtf(x);
@@ -111,7 +123,7 @@ THRUST_NAMESPACE_BEGIN
  *  // note: functor inherits from unary_function
  *  struct square : public thrust::unary_function<float,float>
  *  {
- *    THRUST_HOST_DEVICE
+ *    __host__ __device__
  *    float operator()(float x) const
  *    {
  *      return x * x;
@@ -152,7 +164,7 @@ THRUST_NAMESPACE_BEGIN
  *  // note: functor *does not* inherit from unary_function
  *  struct square_root
  *  {
- *    THRUST_HOST_DEVICE
+ *    __host__ __device__
  *    float operator()(float x) const
  *    {
  *      return sqrtf(x);
@@ -236,8 +248,8 @@ public:
   template <typename OtherAdaptableUnaryFunction, typename OtherIterator, typename OtherReference, typename OtherValue>
   THRUST_HOST_DEVICE transform_iterator(
     const transform_iterator<OtherAdaptableUnaryFunction, OtherIterator, OtherReference, OtherValue>& other,
-    typename thrust::detail::enable_if_convertible<OtherIterator, Iterator>::type*                             = 0,
-    typename thrust::detail::enable_if_convertible<OtherAdaptableUnaryFunction, AdaptableUnaryFunction>::type* = 0)
+    thrust::detail::enable_if_convertible_t<OtherIterator, Iterator>*                             = 0,
+    thrust::detail::enable_if_convertible_t<OtherAdaptableUnaryFunction, AdaptableUnaryFunction>* = 0)
       : super_t(other.base())
       , m_f(other.functor())
   {}
@@ -254,14 +266,11 @@ public:
    */
   THRUST_HOST_DEVICE transform_iterator& operator=(const transform_iterator& other)
   {
-    return do_assign(other,
-    // XXX gcc 4.2.1 crashes on is_copy_assignable; just assume the functor is assignable as a WAR
-#if (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_GCC) && (THRUST_GCC_VERSION <= 40201)
-                     thrust::detail::true_type()
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+    return do_assign(other, ::cuda::std::is_copy_assignable<AdaptableUnaryFunction>());
 #else
-                     typename thrust::detail::is_copy_assignable<AdaptableUnaryFunction>::type()
-#endif // THRUST_HOST_COMPILER
-    );
+    return do_assign(other, ::std::is_copy_assignable<AdaptableUnaryFunction>());
+#endif
   }
 
   /*! This method returns a copy of this \p transform_iterator's \c AdaptableUnaryFunction.
@@ -298,7 +307,8 @@ private:
   // MSVC 2013 and 2015 incorrectly warning about returning a reference to
   // a local/temporary here.
   // See goo.gl/LELTNp
-  THRUST_DISABLE_MSVC_WARNING_BEGIN(4172)
+  THRUST_DIAG_PUSH
+  THRUST_DIAG_SUPPRESS_MSVC(4172)
 
   THRUST_EXEC_CHECK_DISABLE
   THRUST_HOST_DEVICE typename super_t::reference dereference() const
@@ -310,7 +320,7 @@ private:
     return m_f(x);
   }
 
-  THRUST_DISABLE_MSVC_WARNING_END(4172)
+  THRUST_DIAG_POP
 
   // tag this as mutable per Dave Abrahams in this thread:
   // http://lists.boost.org/Archives/boost/2004/05/65332.php

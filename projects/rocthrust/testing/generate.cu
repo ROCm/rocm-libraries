@@ -21,14 +21,15 @@
 
 #include <unittest/unittest.h>
 
-THRUST_DISABLE_MSVC_POSSIBLE_LOSS_OF_DATA_WARNING_BEGIN
+THRUST_DIAG_PUSH
+THRUST_DIAG_SUPPRESS_MSVC(4244 4267) // possible loss of data
 
 template <typename T>
 struct return_value
 {
   T val;
 
-  return_value(void) {}
+  return_value() {}
   return_value(T v)
       : val(v)
   {}
@@ -40,7 +41,7 @@ struct return_value
 };
 
 template <class Vector>
-void TestGenerateSimple(void)
+void TestGenerateSimple()
 {
   using T = typename Vector::value_type;
 
@@ -61,7 +62,7 @@ void TestGenerateSimple(void)
 DECLARE_VECTOR_UNITTEST(TestGenerateSimple);
 
 template <typename ForwardIterator, typename Generator>
-THRUST_HOST_DEVICE void generate(my_system& system, ForwardIterator /*first*/, ForwardIterator, Generator)
+void generate(my_system& system, ForwardIterator /*first*/, ForwardIterator, Generator)
 {
   system.validate_dispatch();
 }
@@ -78,7 +79,7 @@ void TestGenerateDispatchExplicit()
 DECLARE_UNITTEST(TestGenerateDispatchExplicit);
 
 template <typename ForwardIterator, typename Generator>
-THRUST_HOST_DEVICE void generate(my_tag, ForwardIterator first, ForwardIterator, Generator)
+void generate(my_tag, ForwardIterator first, ForwardIterator, Generator)
 {
   *first = 13;
 }
@@ -126,7 +127,7 @@ void TestGenerateToDiscardIterator(const size_t)
 DECLARE_VARIABLE_UNITTEST(TestGenerateToDiscardIterator);
 
 template <class Vector>
-void TestGenerateNSimple(void)
+void TestGenerateNSimple()
 {
   using T = typename Vector::value_type;
 
@@ -147,7 +148,7 @@ void TestGenerateNSimple(void)
 DECLARE_VECTOR_UNITTEST(TestGenerateNSimple);
 
 template <typename ForwardIterator, typename Size, typename Generator>
-THRUST_HOST_DEVICE ForwardIterator generate_n(my_system& system, ForwardIterator first, Size, Generator)
+ForwardIterator generate_n(my_system& system, ForwardIterator first, Size, Generator)
 {
   system.validate_dispatch();
   return first;
@@ -165,7 +166,7 @@ void TestGenerateNDispatchExplicit()
 DECLARE_UNITTEST(TestGenerateNDispatchExplicit);
 
 template <typename ForwardIterator, typename Size, typename Generator>
-THRUST_HOST_DEVICE ForwardIterator generate_n(my_tag, ForwardIterator first, Size, Generator)
+ForwardIterator generate_n(my_tag, ForwardIterator first, Size, Generator)
 {
   *first = 13;
   return first;
@@ -201,7 +202,7 @@ void TestGenerateNToDiscardIterator(const size_t n)
 DECLARE_VARIABLE_UNITTEST(TestGenerateNToDiscardIterator);
 
 template <typename Vector>
-void TestGenerateZipIterator(void)
+void TestGenerateZipIterator()
 {
   using T = typename Vector::value_type;
 
@@ -221,7 +222,7 @@ void TestGenerateZipIterator(void)
 };
 DECLARE_VECTOR_UNITTEST(TestGenerateZipIterator);
 
-void TestGenerateTuple(void)
+void TestGenerateTuple()
 {
   using T     = int;
   using Tuple = thrust::tuple<T, T>;
@@ -236,4 +237,4 @@ void TestGenerateTuple(void)
 };
 DECLARE_UNITTEST(TestGenerateTuple);
 
-THRUST_DISABLE_MSVC_POSSIBLE_LOSS_OF_DATA_WARNING_END
+THRUST_DIAG_POP

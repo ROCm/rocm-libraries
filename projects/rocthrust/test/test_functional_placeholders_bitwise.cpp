@@ -114,7 +114,8 @@ struct rebind_vector<thrust::universal_vector<T, Allocator>, U>
     ASSERT_EQ(reference, result);                                                                               \
   }
 
-THRUST_DISABLE_MSVC_WARNING_BEGIN(4244) // warning C4244: '=': conversion from 'int' to '_Ty', possible loss of data
+THRUST_DIAG_PUSH
+THRUST_DIAG_SUPPRESS_MSVC(4244) // warning C4244: '=': conversion from 'int' to '_Ty', possible loss of data
 
 BINARY_FUNCTIONAL_PLACEHOLDERS_TEST(BitAnd, &, thrust::bit_and);
 BINARY_FUNCTIONAL_PLACEHOLDERS_TEST(BitOr, |, thrust::bit_or);
@@ -149,4 +150,4 @@ TYPED_TEST(BitNegateTests, TestFunctionalPlaceholdersBitNegate)
   ASSERT_EQ(reference, result);
 }
 
-THRUST_DISABLE_MSVC_WARNING_END(4244)
+THRUST_DIAG_POP

@@ -22,7 +22,9 @@
 #include "test_real_assertions.hpp"
 #include "test_param_fixtures.hpp"
 #include "test_utils.hpp"
-THRUST_DISABLE_MSVC_POSSIBLE_LOSS_OF_DATA_WARNING_BEGIN
+
+THRUST_DIAG_PUSH
+THRUST_DIAG_SUPPRESS_MSVC(4244 4267) // possible loss of data
 
 using VectorParams = ::testing::Types<Params<thrust::host_vector<short>>, Params<thrust::host_vector<int>>>;
 
@@ -42,13 +44,12 @@ struct return_value
 {
   T val;
 
-  return_value(void) {}
-
+  return_value() {}
   return_value(T v)
       : val(v)
   {}
 
-  __host__ __device__ T operator()(void)
+  THRUST_HOST_DEVICE T operator()(void)
   {
     return val;
   }
@@ -77,7 +78,7 @@ TYPED_TEST(GenerateVectorTests, TestGenerateSimple)
 }
 
 template <typename ForwardIterator, typename Generator>
-__host__ __device__ void generate(my_system& system, ForwardIterator, ForwardIterator, Generator)
+void generate(my_system& system, ForwardIterator /*first*/, ForwardIterator, Generator)
 {
   system.validate_dispatch();
 }
@@ -95,7 +96,7 @@ TEST(GenerateTests, TestGenerateDispatchExplicit)
 }
 
 template <typename ForwardIterator, typename Generator>
-__host__ __device__ void generate(my_tag, ForwardIterator first, ForwardIterator, Generator)
+void generate(my_tag, ForwardIterator first, ForwardIterator, Generator)
 {
   *first = 13;
 }
@@ -117,8 +118,7 @@ TYPED_TEST(GenerateVariablesTests, TestGenerate)
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  const std::vector<size_t> sizes = get_sizes();
-  for (auto size : sizes)
+  for (auto size : get_sizes())
   {
     thrust::host_vector<T> h_result(size);
     thrust::device_vector<T> d_result(size);
@@ -174,7 +174,7 @@ TYPED_TEST(GenerateVectorTests, TestGenerateNSimple)
 }
 
 template <typename ForwardIterator, typename Size, typename Generator>
-__host__ __device__ ForwardIterator generate_n(my_system& system, ForwardIterator first, Size, Generator)
+ForwardIterator generate_n(my_system& system, ForwardIterator first, Size, Generator)
 {
   system.validate_dispatch();
   return first;
@@ -193,7 +193,7 @@ TEST(GenerateTests, TestGenerateNDispatchExplicit)
 }
 
 template <typename ForwardIterator, typename Size, typename Generator>
-__host__ __device__ ForwardIterator generate_n(my_tag, ForwardIterator first, Size, Generator)
+ForwardIterator generate_n(my_tag, ForwardIterator first, Size, Generator)
 {
   *first = 13;
   return first;
@@ -216,8 +216,7 @@ TYPED_TEST(GenerateVariablesTests, TestGenerateNToDiscardIterator)
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  const std::vector<size_t> sizes = get_sizes();
-  for (auto size : sizes)
+  for (auto size : get_sizes())
   {
     T value = 13;
     return_value<T> f(value);
@@ -273,4 +272,4 @@ TEST(GenerateTests, TestGenerateTuple)
   ASSERT_EQ_QUIET(h, d);
 }
 
-THRUST_DISABLE_MSVC_POSSIBLE_LOSS_OF_DATA_WARNING_END
+THRUST_DIAG_POP

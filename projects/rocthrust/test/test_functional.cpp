@@ -26,7 +26,8 @@
 #include "test_param_fixtures.hpp"
 #include "test_utils.hpp"
 
-THRUST_DISABLE_MSVC_POSSIBLE_LOSS_OF_DATA_WARNING_BEGIN
+THRUST_DIAG_PUSH
+THRUST_DIAG_SUPPRESS_MSVC(4244 4267) // possible loss of data
 
 using AllTypesParams = ::testing::Types<
   Params<thrust::host_vector<int8_t>>,
@@ -192,12 +193,13 @@ THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestBinaryFunctional()
     TestBinaryFunctional<Vector, Vector, thrust::operator_name<data_type>, std::operator_name<data_type>>(); \
   }
 
-THRUST_DISABLE_MSVC_WARNING_BEGIN(4146) // warning C4146: unary minus operator applied to unsigned type, result still
-                                        // unsigned
+THRUST_DIAG_PUSH
+THRUST_DIAG_SUPPRESS_MSVC(4146) // warning C4146: unary minus operator applied to unsigned type, result still
+                                // unsigned
 
 // Create the unit tests
 DECLARE_UNARY_ARITHMETIC_FUNCTIONAL_UNITTEST(negate, Negate);
-THRUST_DISABLE_MSVC_WARNING_END(4146)
+THRUST_DIAG_POP
 DECLARE_UNARY_LOGICAL_FUNCTIONAL_UNITTEST(logical_not, LogicalNot);
 
 // Ad-hoc testing for other functionals
@@ -394,4 +396,4 @@ TYPED_TEST(VectorTests, TestNot2) THRUST_DISABLE_BROKEN_GCC_VECTORIZER
 
 #endif // Weird GCC11 failure case
 
-THRUST_DISABLE_MSVC_POSSIBLE_LOSS_OF_DATA_WARNING_END
+THRUST_DIAG_POP
