@@ -679,9 +679,9 @@ void testing_logging(const Arguments& arg)
 
     // Auxiliary function
     int pmode = (int)test_pointer_mode;
-    trace_ofs2 << "rocblas_create_handle,atomics_allowed\n";
-    trace_ofs2 << "rocblas_set_pointer_mode," << pmode << ",atomics_allowed\n";
-    trace_ofs2 << "rocblas_get_pointer_mode," << pmode << ",atomics_allowed\n";
+    trace_ofs2 << "rocblas_create_handle,atomics_not_allowed\n";
+    trace_ofs2 << "rocblas_set_pointer_mode," << pmode << ",atomics_not_allowed\n";
+    trace_ofs2 << "rocblas_get_pointer_mode," << pmode << ",atomics_not_allowed\n";
 
     auto transA_letter = rocblas2char_operation(transA);
     auto transB_letter = rocblas2char_operation(transB);
@@ -699,7 +699,7 @@ void testing_logging(const Arguments& arg)
         // AMAX
         //
         trace_ofs2 << replaceX<T>(arg.api, "rocblas_iXamax") << "," << n << "," << (void*)dx << ","
-                   << incx << ",atomics_allowed\n";
+                   << incx << ",atomics_not_allowed\n";
         bench_ofs2 << bench.c_str() << " -f iamax -r " << rocblas_precision_string<T> << " -n " << n
                    << " --incx " << incx << bench_endl;
 
@@ -707,7 +707,7 @@ void testing_logging(const Arguments& arg)
         // AMIN
         //
         trace_ofs2 << replaceX<T>(arg.api, "rocblas_iXamin") << "," << n << "," << (void*)dx << ","
-                   << incx << ",atomics_allowed\n";
+                   << incx << ",atomics_not_allowed\n";
         bench_ofs2 << bench.c_str() << " -f iamin -r " << rocblas_precision_string<T> << " -n " << n
                    << " --incx " << incx << bench_endl;
 
@@ -715,7 +715,7 @@ void testing_logging(const Arguments& arg)
         // ASUM
         //
         trace_ofs2 << replaceX<T>(arg.api, "rocblas_PXasum") << "," << n << "," << (void*)dx << ","
-                   << incx << ",atomics_allowed\n";
+                   << incx << ",atomics_not_allowed\n";
         bench_ofs2 << bench.c_str() << " -f asum -r " << rocblas_precision_string<T> << " -n " << n
                    << " --incx " << incx << bench_endl;
 
@@ -723,7 +723,7 @@ void testing_logging(const Arguments& arg)
         // COPY
         //
         trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xcopy") << "," << n << "," << (void*)dx << ","
-                   << incx << "," << (void*)dy << "," << incy << ",atomics_allowed\n";
+                   << incx << "," << (void*)dy << "," << incy << ",atomics_not_allowed\n";
         bench_ofs2 << bench.c_str() << " -f copy -r " << rocblas_precision_string<T> << " -n " << n
                    << " --incx " << incx << " --incy " << incy << bench_endl;
     }
@@ -733,7 +733,7 @@ void testing_logging(const Arguments& arg)
     //
     trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xaxpy") << "," << n << "," << h_alpha << ","
                << (void*)dx << "," << incx << "," << (void*)dy << "," << incy
-               << ",atomics_allowed\n";
+               << ",atomics_not_allowed\n";
     bench_ofs2 << bench.c_str() << " -f axpy -r " << rocblas_precision_string<T> << " -n " << n
                << " " << rocblas_internal_log_bench_scalar_value("alpha", &h_alpha) << " --incx "
                << incx << " --incy " << incy << bench_endl;
@@ -746,7 +746,7 @@ void testing_logging(const Arguments& arg)
     {
         trace_ofs2 << replaceX<T>(arg.api, "rocblas_axpy_ex") << "," << n << "," << h_alpha << ","
                    << dt_str << "," << (void*)dx << "," << dt_str << "," << incx << "," << (void*)dy
-                   << "," << dt_str << "," << incy << "," << dt_str << ",atomics_allowed\n";
+                   << "," << dt_str << "," << incy << "," << dt_str << ",atomics_not_allowed\n";
         bench_ofs2 << bench.c_str() << " -f axpy_ex"
                    << " -n " << n << " "
                    << rocblas_internal_log_bench_scalar_value("alpha", &h_alpha) << " --a_type "
@@ -757,7 +757,7 @@ void testing_logging(const Arguments& arg)
     {
         trace_ofs2 << replaceX<T>(arg.api, "rocblas_axpy_ex") << "," << n << "," << dt_str << ","
                    << (void*)dx << "," << dt_str << "," << incx << "," << (void*)dy << "," << dt_str
-                   << "," << incy << "," << dt_str << ",atomics_allowed\n";
+                   << "," << incy << "," << dt_str << ",atomics_not_allowed\n";
         // no bench output TODO
     }
 
@@ -765,7 +765,7 @@ void testing_logging(const Arguments& arg)
     // DOT
     //
     trace_ofs2 << replaceX<T>(arg.api, "rocblas_XdotU") << "," << n << "," << (void*)dx << ","
-               << incx << "," << (void*)dy << "," << incy << ",atomics_allowed\n";
+               << incx << "," << (void*)dy << "," << incy << ",atomics_not_allowed\n";
     bench_ofs2 << bench.c_str() << " -f dot -r " << rocblas_precision_string<T> << " -n " << n
                << " --incx " << incx << " --incy " << incy << bench_endl;
 
@@ -776,7 +776,7 @@ void testing_logging(const Arguments& arg)
         // NRM2
         //
         trace_ofs2 << replaceX<T>(arg.api, "rocblas_PXnrm2") << "," << n << "," << (void*)dx << ","
-                   << incx << ",atomics_allowed\n";
+                   << incx << ",atomics_not_allowed\n";
         bench_ofs2 << bench.c_str() << " -f nrm2 -r " << rocblas_precision_string<T> << " -n " << n
                    << " --incx " << incx << bench_endl;
 
@@ -784,7 +784,7 @@ void testing_logging(const Arguments& arg)
         // SCAL (real alpha)
         //
         trace_ofs2 << replaceX<T>(arg.api, "rocblas_XPscal") << "," << n << "," << h_real_alpha
-                   << "," << (void*)dx << "," << incx << ",atomics_allowed\n";
+                   << "," << (void*)dx << "," << incx << ",atomics_not_allowed\n";
         bench_ofs2 << bench.c_str() << " -f scal --a_type "
                    << rocblas_precision_string<T> << " --b_type "
                    << rocblas_precision_string<real_t<T>> << " -n " << n << " "
@@ -795,7 +795,7 @@ void testing_logging(const Arguments& arg)
         // SCAL
         //
         trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xscal") << "," << n << "," << h_alpha << ","
-                   << (void*)dx << "," << incx << ",atomics_allowed\n";
+                   << (void*)dx << "," << incx << ",atomics_not_allowed\n";
         bench_ofs2 << bench.c_str() << " -f scal --a_type "
                    << rocblas_precision_string<T> << " --b_type "
                    << rocblas_precision_string<T> << " -n " << n << " "
@@ -806,7 +806,7 @@ void testing_logging(const Arguments& arg)
         // SWAP
         //
         trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xswap") << "," << n << "," << (void*)dx << ","
-                   << incx << "," << (void*)dy << "," << incy << ",atomics_allowed\n";
+                   << incx << "," << (void*)dy << "," << incy << ",atomics_not_allowed\n";
 
         bench_ofs2 << bench.c_str() << " -f swap -r " << rocblas_precision_string<T> << " -n " << n
                    << " --incx " << incx << " --incy " << incy << bench_endl;
@@ -819,7 +819,7 @@ void testing_logging(const Arguments& arg)
         trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xgbmv") << "," << transA << "," << m << "," << n
                    << "," << kl << "," << ku << "," << h_alpha << "," << (void*)da << "," << lda
                    << "," << (void*)dx << "," << incx << "," << h_beta << "," << (void*)dy << ","
-                   << incy << ",atomics_allowed\n";
+                   << incy << ",atomics_not_allowed\n";
 
         bench_ofs2 << bench.c_str() << " -f gbmv -r "
                    << rocblas_precision_string<T> << " --transposeA " << transA_letter << " -m "
@@ -835,7 +835,7 @@ void testing_logging(const Arguments& arg)
         trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xgemv") << "," << transA << "," << m << "," << n
                    << "," << h_alpha << "," << (void*)da << "," << lda << "," << (void*)dx << ","
                    << incx << "," << h_beta << "," << (void*)dy << "," << incy
-                   << ",atomics_allowed\n";
+                   << ",atomics_not_allowed\n";
 
         bench_ofs2 << bench.c_str() << " -f gemv -r "
                    << rocblas_precision_string<T> << " --transposeA " << transA_letter << " -m "
@@ -850,7 +850,7 @@ void testing_logging(const Arguments& arg)
         //
         trace_ofs2 << replaceX<T>(arg.api, "rocblas_XgerU") << "," << m << "," << n << ","
                    << h_alpha << "," << (void*)dx << "," << incx << "," << (void*)dy << "," << incy
-                   << "," << (void*)da << "," << lda << ",atomics_allowed\n";
+                   << "," << (void*)da << "," << lda << ",atomics_not_allowed\n";
         bench_ofs2 << bench.c_str() << " -f " << replaceX<T>(rocblas_client_api::C, "gerU")
                    << " -r " << rocblas_precision_string<T> << " -m " << m << " -n " << n << " "
                    << rocblas_internal_log_bench_scalar_value("alpha", &h_alpha) << " --incx "
@@ -864,7 +864,7 @@ void testing_logging(const Arguments& arg)
             trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xsbmv") << "," << uplo << "," << n << ","
                        << k << "," << h_alpha << "," << (void*)da << "," << lda << "," << (void*)dx
                        << "," << incx << "," << h_beta << "," << (void*)dy << "," << incy
-                       << ",atomics_allowed\n";
+                       << ",atomics_not_allowed\n";
             bench_ofs2 << bench.c_str() << " -f sbmv -r "
                        << rocblas_precision_string<T> << " --uplo " << uplo_letter << " -n " << n
                        << " -k " << k << " "
@@ -878,7 +878,7 @@ void testing_logging(const Arguments& arg)
             //
             trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xspmv") << "," << uplo << "," << n << ","
                        << h_alpha << "," << (void*)da << "," << (void*)dx << "," << incx << ","
-                       << h_beta << "," << (void*)dy << "," << incy << ",atomics_allowed\n";
+                       << h_beta << "," << (void*)dy << "," << incy << ",atomics_not_allowed\n";
             bench_ofs2 << bench.c_str() << " -f spmv -r "
                        << rocblas_precision_string<T> << " --uplo " << uplo_letter << " -n " << n
                        << " " << rocblas_internal_log_bench_scalar_value("alpha", &h_alpha)
@@ -891,7 +891,7 @@ void testing_logging(const Arguments& arg)
             //
             trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xspr") << "," << uplo << "," << n << ","
                        << h_alpha << "," << (void*)dx << "," << incx << "," << (void*)da
-                       << ",atomics_allowed\n";
+                       << ",atomics_not_allowed\n";
             bench_ofs2 << bench.c_str() << " -f spr -r "
                        << rocblas_precision_string<T> << " --uplo " << uplo_letter << " -n " << n
                        << " " << rocblas_internal_log_bench_scalar_value("alpha", &h_alpha)
@@ -902,7 +902,7 @@ void testing_logging(const Arguments& arg)
             //
             trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xspr2") << "," << uplo << "," << n << ","
                        << h_alpha << "," << (void*)dx << "," << incx << "," << (void*)dy << ","
-                       << incy << "," << (void*)da << ",atomics_allowed\n";
+                       << incy << "," << (void*)da << ",atomics_not_allowed\n";
             bench_ofs2 << bench.c_str() << " -f spr2 -r "
                        << rocblas_precision_string<T> << " --uplo " << uplo_letter << " -n " << n
                        << " " << rocblas_internal_log_bench_scalar_value("alpha", &h_alpha)
@@ -914,7 +914,7 @@ void testing_logging(const Arguments& arg)
         //
         trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xsymv") << "," << uplo << "," << n << ","
                    << h_alpha << "," << (void*)da << "," << lda << "," << (void*)dx << "," << incx
-                   << "," << h_beta << "," << (void*)dy << "," << incy << ",atomics_allowed\n";
+                   << "," << h_beta << "," << (void*)dy << "," << incy << ",atomics_not_allowed\n";
         bench_ofs2 << bench.c_str() << " -f symv -r " << rocblas_precision_string<T> << " --uplo "
                    << uplo_letter << " -n " << n << " "
                    << rocblas_internal_log_bench_scalar_value("alpha", &h_alpha) << " --lda " << lda
@@ -927,7 +927,7 @@ void testing_logging(const Arguments& arg)
         //
         trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xsyr") << "," << uplo << "," << n << ","
                    << h_alpha << "," << (void*)dx << "," << incx << "," << (void*)da << "," << lda
-                   << ",atomics_allowed\n";
+                   << ",atomics_not_allowed\n";
         bench_ofs2 << bench.c_str() << " -f syr -r " << rocblas_precision_string<T> << " --uplo "
                    << uplo_letter << " -n " << n << " "
                    << rocblas_internal_log_bench_scalar_value("alpha", &h_alpha) << " --incx "
@@ -938,7 +938,7 @@ void testing_logging(const Arguments& arg)
         //
         trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xsyr2") << "," << uplo << "," << n << ","
                    << h_alpha << "," << (void*)dx << "," << incx << "," << (void*)dy << "," << incy
-                   << "," << (void*)da << "," << lda << ",atomics_allowed\n";
+                   << "," << (void*)da << "," << lda << ",atomics_not_allowed\n";
         bench_ofs2 << bench.c_str() << " -f syr2 -r " << rocblas_precision_string<T> << " --uplo "
                    << uplo_letter << " -n " << n << " "
                    << rocblas_internal_log_bench_scalar_value("alpha", &h_alpha) << " --lda " << lda
@@ -949,7 +949,7 @@ void testing_logging(const Arguments& arg)
         //
         trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xtbmv") << "," << uplo << "," << transA << ","
                    << diag << "," << n << "," << k << "," << (void*)da << "," << lda << ","
-                   << (void*)dx << "," << incx << ",atomics_allowed\n";
+                   << (void*)dx << "," << incx << ",atomics_not_allowed\n";
 
         bench_ofs2 << bench.c_str() << " -f tbmv -r " << rocblas_precision_string<T> << " --uplo "
                    << uplo_letter << " --transposeA " << transA_letter << " --diag " << diag_letter
@@ -961,7 +961,7 @@ void testing_logging(const Arguments& arg)
         //
         trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xtpmv") << "," << uplo << "," << transA << ","
                    << diag << "," << n << "," << (void*)da << "," << (void*)dx << "," << incx
-                   << ",atomics_allowed\n";
+                   << ",atomics_not_allowed\n";
 
         bench_ofs2 << bench.c_str() << " -f tpmv -r " << rocblas_precision_string<T> << " --uplo "
                    << uplo_letter << " --transposeA " << transA_letter << " --diag " << diag_letter
@@ -972,7 +972,7 @@ void testing_logging(const Arguments& arg)
         //
         trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xtrmv") << "," << uplo << "," << transA << ","
                    << diag << "," << n << "," << (void*)da << "," << lda << "," << (void*)dx << ","
-                   << incx << ",atomics_allowed\n";
+                   << incx << ",atomics_not_allowed\n";
 
         bench_ofs2 << bench.c_str() << " -f trmv -r " << rocblas_precision_string<T> << " --uplo "
                    << uplo_letter << " --transposeA " << transA_letter << " --diag " << diag_letter
@@ -983,7 +983,7 @@ void testing_logging(const Arguments& arg)
         //
         trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xtbsv") << "," << uplo << "," << transA << ","
                    << diag << "," << n << "," << k << "," << (void*)da << "," << lda << ","
-                   << (void*)dx << "," << incx << ",atomics_allowed\n";
+                   << (void*)dx << "," << incx << ",atomics_not_allowed\n";
         if(test_pointer_mode == rocblas_pointer_mode_host)
             bench_ofs2 << bench.c_str() << " -f tbsv -r "
                        << rocblas_precision_string<T> << " --uplo " << uplo_letter
@@ -995,7 +995,7 @@ void testing_logging(const Arguments& arg)
         //
         trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xtpsv") << "," << uplo << "," << transA << ","
                    << diag << "," << n << "," << (void*)da << "," << (void*)dx << "," << incx
-                   << ",atomics_allowed\n";
+                   << ",atomics_not_allowed\n";
         if(test_pointer_mode == rocblas_pointer_mode_host)
             bench_ofs2 << bench.c_str() << " -f tpsv -r "
                        << rocblas_precision_string<T> << " --uplo " << uplo_letter
@@ -1007,7 +1007,7 @@ void testing_logging(const Arguments& arg)
         //
         trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xtrsv") << "," << uplo << "," << transA << ","
                    << diag << "," << n << "," << (void*)da << "," << lda << "," << (void*)dx << ","
-                   << incx << ",atomics_allowed\n";
+                   << incx << ",atomics_not_allowed\n";
 
         if(test_pointer_mode == rocblas_pointer_mode_host)
             bench_ofs2 << bench.c_str() << " -f trsv -r "
@@ -1023,7 +1023,7 @@ void testing_logging(const Arguments& arg)
         trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xtrsm") << "," << side << "," << uplo << ","
                    << transA << "," << diag << "," << m << "," << n << "," << h_alpha << ","
                    << (void*)da << "," << lda << "," << (void*)db << "," << ldb
-                   << ",atomics_allowed\n";
+                   << ",atomics_not_allowed\n";
 
         bench_ofs2 << bench.c_str() << " -f trsm -r " << rocblas_precision_string<T> << " --side "
                    << side_letter << " --uplo " << uplo_letter << " --transposeA " << transA_letter
@@ -1037,7 +1037,7 @@ void testing_logging(const Arguments& arg)
         trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xgeam") << "," << transA << "," << transB << ","
                    << m << "," << n << "," << h_alpha << "," << (void*)da << "," << lda << ","
                    << h_beta << "," << (void*)db << "," << ldb << "," << (void*)dc << "," << ldc
-                   << ",atomics_allowed\n";
+                   << ",atomics_not_allowed\n";
 
         bench_ofs2 << bench.c_str() << " -f geam -r "
                    << rocblas_precision_string<T> << " --transposeA " << transA_letter
@@ -1052,7 +1052,7 @@ void testing_logging(const Arguments& arg)
         trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xsymm") << "," << side << "," << uplo << ","
                    << m << "," << n << "," << h_alpha << "," << (void*)da << "," << lda << ","
                    << (void*)db << "," << ldb << "," << h_beta << "," << (void*)dc << "," << ldc
-                   << ",atomics_allowed\n";
+                   << ",atomics_not_allowed\n";
 
         bench_ofs2 << bench.c_str() << " -f symm -r " << rocblas_precision_string<T> << " --side "
                    << side_letter << " --uplo " << uplo_letter << " -m " << m << " -n " << n << " "
@@ -1066,7 +1066,7 @@ void testing_logging(const Arguments& arg)
         //
         trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xsyrk") << "," << uplo << "," << transA << ","
                    << n << "," << k << "," << h_alpha << "," << (void*)da << "," << lda << ","
-                   << h_beta << "," << (void*)dc << "," << ldc << ",atomics_allowed\n";
+                   << h_beta << "," << (void*)dc << "," << ldc << ",atomics_not_allowed\n";
 
         bench_ofs2 << bench.c_str() << " -f syrk -r " << rocblas_precision_string<T> << " --uplo "
                    << uplo_letter << " --transposeA " << transA_letter << " -n " << n << " -k " << k
@@ -1080,7 +1080,7 @@ void testing_logging(const Arguments& arg)
         trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xsyr2k") << "," << uplo << "," << transA << ","
                    << n << "," << k << "," << h_alpha << "," << (void*)da << "," << lda << ","
                    << (void*)db << "," << ldb << "," << h_beta << "," << (void*)dc << "," << ldc
-                   << ",atomics_allowed\n";
+                   << ",atomics_not_allowed\n";
 
         bench_ofs2 << bench.c_str() << " -f syr2k -r " << rocblas_precision_string<T> << " --uplo "
                    << uplo_letter << " --transposeA " << transA_letter << " -n " << n << " -k " << k
@@ -1095,7 +1095,7 @@ void testing_logging(const Arguments& arg)
         trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xsyrkx") << "," << uplo << "," << transA << ","
                    << n << "," << k << "," << h_alpha << "," << (void*)da << "," << lda << ","
                    << (void*)db << "," << ldb << "," << h_beta << "," << (void*)dc << "," << ldc
-                   << ",atomics_allowed\n";
+                   << ",atomics_not_allowed\n";
 
         bench_ofs2 << bench.c_str() << " -f syrkx -r " << rocblas_precision_string<T> << " --uplo "
                    << uplo_letter << " --transposeA " << transA_letter << " -n " << n << " -k " << k
@@ -1110,7 +1110,7 @@ void testing_logging(const Arguments& arg)
         trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xtrmm") << "," << side << "," << uplo << ","
                    << transA << "," << diag << "," << m << "," << n << "," << h_alpha << ","
                    << (void*)da << "," << lda << "," << (void*)db << "," << ldb << "," << (void*)dc
-                   << "," << ldc << ",atomics_allowed\n";
+                   << "," << ldc << ",atomics_not_allowed\n";
 
         bench_ofs2 << bench.c_str() << " -f trmm -r " << rocblas_precision_string<T> << " --side "
                    << side_letter << " --uplo " << uplo_letter << " --transposeA " << transA_letter
@@ -1125,7 +1125,7 @@ void testing_logging(const Arguments& arg)
     trace_ofs2 << replaceX<T>(arg.api, "rocblas_Xgemm") << "," << transA << "," << transB << ","
                << m << "," << n << "," << k << "," << h_alpha << "," << (void*)da << "," << lda
                << "," << (void*)db << "," << ldb << "," << h_beta << "," << (void*)dc << "," << ldc
-               << ",atomics_allowed\n";
+               << ",atomics_not_allowed\n";
 
     bench_ofs2 << bench.c_str() << " -f gemm -r " << rocblas_precision_string<T> << " --transposeA "
                << transA_letter << " --transposeB " << transB_letter << " -m " << m << " -n " << n
@@ -1141,7 +1141,7 @@ void testing_logging(const Arguments& arg)
                << transB << "," << m << "," << n << "," << k << "," << h_alpha << "," << (void*)da
                << "," << lda << "," << stride_a << "," << (void*)db << "," << ldb << "," << stride_b
                << "," << h_beta << "," << (void*)dc << "," << ldc << "," << stride_c << ","
-               << batch_count << ",atomics_allowed\n";
+               << batch_count << ",atomics_not_allowed\n";
 
     bench_ofs2 << bench.c_str() << " -f gemm_strided_batched -r "
                << rocblas_precision_string<T> << " --transposeA " << transA_letter
@@ -1195,7 +1195,7 @@ void testing_logging(const Arguments& arg)
                    << "," << (void*)dc << "," << rocblas_datatype_string(c_type) << "," << ldc
                    << "," << (void*)dd << "," << rocblas_datatype_string(d_type) << "," << ldd
                    << "," << rocblas_datatype_string(compute_type) << "," << algo << ","
-                   << solution_index << ",none,atomics_allowed\n";
+                   << solution_index << ",none,atomics_not_allowed\n";
 
         bench_ofs2 << bench.c_str() << " -f gemm_ex"
                    << " --transposeA " << transA_letter << " --transposeB " << transB_letter
@@ -1219,7 +1219,7 @@ void testing_logging(const Arguments& arg)
                    << rocblas_datatype_string(c_type) << "," << ldc << "," << stride_c << ","
                    << (void*)dd << "," << rocblas_datatype_string(d_type) << "," << ldd << ","
                    << stride_d << "," << batch_count << "," << rocblas_datatype_string(compute_type)
-                   << "," << algo << "," << solution_index << ",none,atomics_allowed\n";
+                   << "," << algo << "," << solution_index << ",none,atomics_not_allowed\n";
 
         bench_ofs2 << bench.c_str() << " -f gemm_strided_batched_ex"
                    << " --transposeA " << transA_letter << " --transposeB " << transB_letter
@@ -1237,7 +1237,7 @@ void testing_logging(const Arguments& arg)
     } // !complex
 
     // Auxiliary function
-    trace_ofs2 << "rocblas_destroy_handle,atomics_allowed\n";
+    trace_ofs2 << "rocblas_destroy_handle,atomics_not_allowed\n";
 
 #ifdef BUILD_WITH_HIPBLASLT
     if(arg.algo == 1)
@@ -1251,7 +1251,7 @@ void testing_logging(const Arguments& arg)
                        << "," << transA << "," << transB << "," << m << "," << n << "," << k << ","
                        << h_alpha << "," << (void*)da << "," << lda << "," << (void*)db << ","
                        << ldb << "," << h_beta << "," << (void*)dc << "," << ldc << "," << (void*)dc
-                       << "," << ldc << ",atomics_allowed\n"; // logs d info as also for gemm_ex
+                       << "," << ldc << ",atomics_not_allowed\n"; // logs d info as also for gemm_ex
         } // !complex
     }
 #endif // BUILD_WITH_HIPBLASLT

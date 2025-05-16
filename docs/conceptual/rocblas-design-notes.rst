@@ -328,8 +328,7 @@ Some functions within the rocBLAS library such as ``gemv``, ``symv``, ``trsv``, 
 and ``gemm`` can use atomic operations to increase performance.
 By using atomics, functions might not give bit-wise reproducible results.
 Differences between multiple runs should not be significant and the results will
-remain accurate. However, if you require identical results across multiple runs,
-atomics should be turned off. For more information, see :any:`rocblas_atomics_mode`,
+remain accurate. If you want to allow atomic operations, see :any:`rocblas_atomics_mode`,
 :any:`rocblas_set_atomics_mode`, and :any:`rocblas_get_atomics_mode`.
 
 In addition to the API above, rocBLAS also provides the environment variable ``ROCBLAS_DEFAULT_ATOMICS_MODE``,
@@ -350,12 +349,9 @@ In rocBLAS, bitwise-reproducible results can be obtained under the following con
 *  Identical GFX target ISA
 *  Single HIP stream active per rocBLAS handle
 *  Identical ROCm versions
-*  Disabled atomic operations (for more information, see :ref:`Atomic Operations`)
+*  Atomic operations are not allowed (for more information, see :ref:`Atomic Operations`)
 
-By default, rocBLAS might use atomic operations to achieve better performance in some functions.
-To ensure bitwise reproducible results when users require identical results across multiple runs,
-the functions in the list below require atomics to be disabled.
-All other functions are bitwise reproducible by default.
+By default, atomic operations are not allowed. All other functions are bitwise reproducible by default.
 
 .. note::
 
@@ -363,9 +359,9 @@ All other functions are bitwise reproducible by default.
    If device memory is unavailable, these functions proceed to use an unoptimized kernel, which could also produce variable results.
    To notify users that an unoptimized kernel is being used, the function returns the :any:`rocblas_status_perf_degraded` status.
 
-=================================
-Functions using atomic operations
-=================================
+======================================================
+Functions that can be enabled to use atomic operations
+======================================================
 
  :any:`rocblas_sgemv`
  :any:`rocblas_dgemv`
