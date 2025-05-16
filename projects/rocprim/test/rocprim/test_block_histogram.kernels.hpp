@@ -168,16 +168,18 @@ void test_block_histogram_input_arrays()
         common::device_ptr<BinType> device_output_bin(output_bin);
 
         // Running kernel
-        hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(
-                histogram_kernel<block_size, items_per_thread, bin, algorithm, T, BinType>),
-            dim3(grid_size),
-            dim3(block_size),
-            0,
-            0,
-            device_output.get(),
-            device_output_bin.get());
-        HIP_CHECK(hipGetLastError());
+        HIP_CHECK_LAUNCH_SYNC(
+            hipLaunchKernelGGL(
+                HIP_KERNEL_NAME(
+                    histogram_kernel<block_size, items_per_thread, bin, algorithm, T, BinType>),
+                dim3(grid_size),
+                dim3(block_size),
+                0,
+                0,
+                device_output.get(),
+                device_output_bin.get()
+            )
+        );
 
         // Reading results back
         output_bin = device_output_bin.load();

@@ -121,14 +121,16 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t bytes)
         // Record start event
         HIP_CHECK(hipEventRecord(start, stream));
 
-        hipLaunchKernelGGL(HIP_KERNEL_NAME(kernel<Benchmark, T, BlockSize, ItemsPerThread, Trials>),
-                           dim3(size / items_per_block),
-                           dim3(BlockSize),
-                           0,
-                           stream,
-                           d_input,
-                           d_output);
-        HIP_CHECK(hipGetLastError());
+        HIP_CHECK_LAUNCH(
+            hipLaunchKernelGGL(HIP_KERNEL_NAME(kernel<Benchmark, T, BlockSize, ItemsPerThread, Trials>),
+                               dim3(size / items_per_block),
+                               dim3(BlockSize),
+                               0,
+                               stream,
+                               d_input,
+                               d_output
+            )
+        );
 
         // Record stop event and wait until it completes
         HIP_CHECK(hipEventRecord(stop, stream));

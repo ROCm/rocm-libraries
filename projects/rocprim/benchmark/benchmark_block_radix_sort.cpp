@@ -166,29 +166,33 @@ void run_benchmark(benchmark::State&   state,
 
         if(benchmark_kind == benchmark_kinds::sort_keys)
         {
-            hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(
-                    sort_keys_kernel<T, BlockSize, RadixBitsPerPass, ItemsPerThread, Trials>),
-                dim3(size / items_per_block),
-                dim3(BlockSize),
-                0,
-                stream,
-                d_input,
-                d_output);
+            HIP_CHECK_LAUNCH(
+                hipLaunchKernelGGL(
+                    HIP_KERNEL_NAME(
+                        sort_keys_kernel<T, BlockSize, RadixBitsPerPass, ItemsPerThread, Trials>),
+                    dim3(size / items_per_block),
+                    dim3(BlockSize),
+                    0,
+                    stream,
+                    d_input,
+                    d_output
+                )
+            );
         }
         else if(benchmark_kind == benchmark_kinds::sort_pairs)
         {
-            hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(
-                    sort_pairs_kernel<T, BlockSize, RadixBitsPerPass, ItemsPerThread, Trials>),
-                dim3(size / items_per_block),
-                dim3(BlockSize),
-                0,
-                stream,
-                d_input,
-                d_output);
+            HIP_CHECK_LAUNCH(
+                hipLaunchKernelGGL(
+                    HIP_KERNEL_NAME(
+                        sort_pairs_kernel<T, BlockSize, RadixBitsPerPass, ItemsPerThread, Trials>),
+                    dim3(size / items_per_block),
+                    dim3(BlockSize),
+                    0,
+                    stream,
+                    d_input,
+                    d_output)
+            );
         }
-        HIP_CHECK(hipGetLastError());
 
         // Record stop event and wait until it completes
         HIP_CHECK(hipEventRecord(stop, stream));

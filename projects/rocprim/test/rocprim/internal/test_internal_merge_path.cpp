@@ -29,9 +29,18 @@ void serial_merge(std::vector<T>& input,
 
     common::device_ptr<T> device_data(input);
 
-    merge_kernel<IPT>
-        <<<1, 1>>>(device_data.get(), rocprim::detail::range_t<>{0, mid, mid, N}, compare_function);
-    HIP_CHECK(hipGetLastError());
+    HIP_CHECK_LAUNCH_SYNC(
+        hipLaunchKernelGGL(
+            HIP_KERNEL_NAME(merge_kernel<IPT>),
+            dim3(1),
+            dim3(1),
+            0,
+            0,
+            device_data.get(),
+            rocprim::detail::range_t<>{0, mid, mid, N},
+            compare_function
+        )
+    );
 
     output = device_data.load();
 }

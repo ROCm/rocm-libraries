@@ -702,6 +702,9 @@ inline hipError_t merge_inplace(void*             temporary_storage,
                                 const hipStream_t stream            = 0,
                                 bool              debug_synchronous = false)
 {
+    // Clear any existing error
+    (void) hipGetLastError();
+
     using config = detail::default_or_custom_config<Config, merge_inplace_config<>>;
 
     constexpr size_t global_block_size      = config::global_merge_block_size;

@@ -205,7 +205,6 @@ TYPED_TEST(RocprimDeviceAdjacentFindTests, AdjacentFind)
                 gHelper.createAndLaunchGraph(stream);
             }
 
-            HIP_CHECK(hipGetLastError());
             HIP_CHECK(hipDeviceSynchronize());
 
             // Allocate memory for output and copy to host side

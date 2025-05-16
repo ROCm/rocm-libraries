@@ -212,6 +212,9 @@ hipError_t lower_bound(void * temporary_storage,
                        hipStream_t stream = 0,
                        bool debug_synchronous = false)
 {
+    // Clear any existing error
+    (void) hipGetLastError();
+
     static_assert(detail::is_default_or_has_tag<Config, detail::lower_bound_config_tag>::value,
                   "Config must be a specialization of struct template lower_bound_config");
 
@@ -349,6 +352,9 @@ hipError_t upper_bound(void * temporary_storage,
                        hipStream_t stream = 0,
                        bool debug_synchronous = false)
 {
+    // Clear any existing error
+    (void) hipGetLastError();
+
     static_assert(detail::is_default_or_has_tag<Config, detail::upper_bound_config_tag>::value,
                   "Config must be a specialization of struct template upper_bound_config");
     using value_type  = typename std::iterator_traits<NeedlesIterator>::value_type;
@@ -480,6 +486,9 @@ hipError_t binary_search(void * temporary_storage,
                          hipStream_t stream = 0,
                          bool debug_synchronous = false)
 {
+    // Clear any existing error
+    (void) hipGetLastError();
+
     static_assert(detail::is_default_or_has_tag<Config, detail::binary_search_config_tag>::value,
                   "Config must be a specialization of struct template binary_search_config");
     using value_type  = typename std::iterator_traits<NeedlesIterator>::value_type;

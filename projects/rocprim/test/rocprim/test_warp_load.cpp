@@ -264,10 +264,17 @@ TYPED_TEST(WarpLoadTest, WarpLoad)
     common::device_ptr<T> d_input(input);
     common::device_ptr<T> d_output(items_count);
 
-    warp_load_kernel<block_size, items_per_thread, warp_size, method>
-        <<<dim3(1), dim3(block_size), 0, 0>>>(d_input.get(), d_output.get());
-    HIP_CHECK(hipGetLastError());
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK_LAUNCH_SYNC(
+        hipLaunchKernelGGL(
+            HIP_KERNEL_NAME(warp_load_kernel<block_size, items_per_thread, warp_size, method>),
+            dim3(1),
+            dim3(block_size),
+            0,
+            0,
+            d_input.get(),
+            d_output.get()
+        )
+    );
 
     std::vector<T> output = d_output.load();
 
@@ -301,13 +308,19 @@ TYPED_TEST(WarpLoadTest, WarpLoadGuarded)
     common::device_ptr<T> d_input(input);
     common::device_ptr<T> d_output(items_count);
 
-    warp_load_guarded_kernel<block_size, items_per_thread, warp_size, method>
-        <<<dim3(1), dim3(block_size), 0, 0>>>(d_input.get(),
-                                              d_output.get(),
-                                              valid_items,
-                                              oob_default);
-    HIP_CHECK(hipGetLastError());
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK_LAUNCH_SYNC(
+        hipLaunchKernelGGL(
+            HIP_KERNEL_NAME(warp_load_guarded_kernel<block_size, items_per_thread, warp_size, method>),
+            dim3(1),
+            dim3(block_size),
+            0,
+            0,
+            d_input.get(),
+            d_output.get(),
+            valid_items,
+            oob_default
+        )
+    );
 
     std::vector<T> output = d_output.load();
 

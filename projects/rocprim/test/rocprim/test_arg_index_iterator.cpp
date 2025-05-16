@@ -162,7 +162,6 @@ TYPED_TEST(RocprimArgIndexIteratorTests, ReduceArgMinimum)
                                   reduce_op,
                                   stream,
                                   debug_synchronous));
-        HIP_CHECK(hipGetLastError());
         HIP_CHECK(hipDeviceSynchronize());
 
         // Copy output to host

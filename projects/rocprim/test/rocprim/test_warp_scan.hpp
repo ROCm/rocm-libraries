@@ -117,28 +117,33 @@ typed_test_def(RocprimWarpScanTests, name_suffix, InclusiveScan)
         // Launching kernel
         if (current_device_warp_size == ws32)
         {
-            hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(warp_inclusive_scan_kernel<T, block_size_ws32, logical_warp_size>),
-                dim3(grid_size),
-                dim3(block_size),
-                0,
-                0,
-                device_input.get(),
-                device_output.get());
+            HIP_CHECK_LAUNCH_SYNC(
+                hipLaunchKernelGGL(
+                    HIP_KERNEL_NAME(warp_inclusive_scan_kernel<T, block_size_ws32, logical_warp_size>),
+                    dim3(grid_size),
+                    dim3(block_size),
+                    0,
+                    0,
+                    device_input.get(),
+                    device_output.get()
+                )
+            );
         }
         else if (current_device_warp_size == ws64)
         {
-            hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(warp_inclusive_scan_kernel<T, block_size_ws64, logical_warp_size>),
-                dim3(grid_size),
-                dim3(block_size),
-                0,
-                0,
-                device_input.get(),
-                device_output.get());
+            HIP_CHECK_LAUNCH_SYNC(
+                hipLaunchKernelGGL(
+                    HIP_KERNEL_NAME(warp_inclusive_scan_kernel<T, block_size_ws64, logical_warp_size>),
+                    dim3(grid_size),
+                    dim3(block_size),
+                    0,
+                    0,
+                    device_input.get(),
+                    device_output.get()
+                )
+            );
         }
 
-        HIP_CHECK(hipGetLastError());
         HIP_CHECK(hipDeviceSynchronize());
 
         // Read from device memory
@@ -351,32 +356,37 @@ typed_test_def(RocprimWarpScanTests, name_suffix, InclusiveScanReduce)
         // Launching kernel
         if (current_device_warp_size == ws32)
         {
-            hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(
-                    warp_inclusive_scan_reduce_kernel<T, block_size_ws32, logical_warp_size>),
-                dim3(grid_size),
-                dim3(block_size_ws32),
-                0,
-                0,
-                device_input.get(),
-                device_output.get(),
-                device_output_reductions.get());
+            HIP_CHECK_LAUNCH_SYNC(
+                hipLaunchKernelGGL(
+                    HIP_KERNEL_NAME(
+                        warp_inclusive_scan_reduce_kernel<T, block_size_ws32, logical_warp_size>),
+                    dim3(grid_size),
+                    dim3(block_size_ws32),
+                    0,
+                    0,
+                    device_input.get(),
+                    device_output.get(),
+                    device_output_reductions.get()
+                )
+            );
         }
         else if(current_device_warp_size == ws64)
         {
-            hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(
-                    warp_inclusive_scan_reduce_kernel<T, block_size_ws64, logical_warp_size>),
-                dim3(grid_size),
-                dim3(block_size_ws64),
-                0,
-                0,
-                device_input.get(),
-                device_output.get(),
-                device_output_reductions.get());
+            HIP_CHECK_LAUNCH_SYNC(
+                hipLaunchKernelGGL(
+                    HIP_KERNEL_NAME(
+                        warp_inclusive_scan_reduce_kernel<T, block_size_ws64, logical_warp_size>),
+                    dim3(grid_size),
+                    dim3(block_size_ws64),
+                    0,
+                    0,
+                    device_input.get(),
+                    device_output.get(),
+                    device_output_reductions.get()
+                )
+            );
         }
 
-        HIP_CHECK(hipGetLastError());
         HIP_CHECK(hipDeviceSynchronize());
 
         // Read from device memory
@@ -601,30 +611,35 @@ typed_test_def(RocprimWarpScanTests, name_suffix, ExclusiveScan)
         // Launching kernel
         if (current_device_warp_size == ws32)
         {
-            hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(warp_exclusive_scan_kernel<T, block_size_ws32, logical_warp_size>),
-                dim3(grid_size),
-                dim3(block_size_ws32),
-                0,
-                0,
-                device_input.get(),
-                device_output.get(),
-                init);
+            HIP_CHECK_LAUNCH_SYNC(
+                hipLaunchKernelGGL(
+                    HIP_KERNEL_NAME(warp_exclusive_scan_kernel<T, block_size_ws32, logical_warp_size>),
+                    dim3(grid_size),
+                    dim3(block_size_ws32),
+                    0,
+                    0,
+                    device_input.get(),
+                    device_output.get(),
+                    init
+                )
+            );
         }
         else if (current_device_warp_size == ws64)
         {
-            hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(warp_exclusive_scan_kernel<T, block_size_ws64, logical_warp_size>),
-                dim3(grid_size),
-                dim3(block_size_ws64),
-                0,
-                0,
-                device_input.get(),
-                device_output.get(),
-                init);
+            HIP_CHECK_LAUNCH_SYNC(
+                hipLaunchKernelGGL(
+                    HIP_KERNEL_NAME(warp_exclusive_scan_kernel<T, block_size_ws64, logical_warp_size>),
+                    dim3(grid_size),
+                    dim3(block_size_ws64),
+                    0,
+                    0,
+                    device_input.get(),
+                    device_output.get(),
+                    init
+                )
+            );
         }
 
-        HIP_CHECK(hipGetLastError());
         HIP_CHECK(hipDeviceSynchronize());
 
         // Read from device memory
@@ -832,30 +847,35 @@ typed_test_def(RocprimWarpScanTests, name_suffix, ExclusiveScanWoInit)
         // Launching kernel
         if(current_device_warp_size == ws32)
         {
-            hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(
-                    warp_exclusive_scan_wo_init_kernel<T, block_size_ws32, logical_warp_size>),
-                dim3(grid_size),
-                dim3(block_size_ws32),
-                0,
-                0,
-                device_input.get(),
-                device_output.get());
+            HIP_CHECK_LAUNCH_SYNC(
+                hipLaunchKernelGGL(
+                    HIP_KERNEL_NAME(
+                        warp_exclusive_scan_wo_init_kernel<T, block_size_ws32, logical_warp_size>),
+                    dim3(grid_size),
+                    dim3(block_size_ws32),
+                    0,
+                    0,
+                    device_input.get(),
+                    device_output.get()
+                )
+            );
         }
         else if(current_device_warp_size == ws64)
         {
-            hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(
-                    warp_exclusive_scan_wo_init_kernel<T, block_size_ws64, logical_warp_size>),
-                dim3(grid_size),
-                dim3(block_size_ws64),
-                0,
-                0,
-                device_input.get(),
-                device_output.get());
+            HIP_CHECK_LAUNCH_SYNC(
+                hipLaunchKernelGGL(
+                    HIP_KERNEL_NAME(
+                        warp_exclusive_scan_wo_init_kernel<T, block_size_ws64, logical_warp_size>),
+                    dim3(grid_size),
+                    dim3(block_size_ws64),
+                    0,
+                    0,
+                    device_input.get(),
+                    device_output.get()
+                )
+            );
         }
 
-        HIP_CHECK(hipGetLastError());
         HIP_CHECK(hipDeviceSynchronize());
 
         // Read from device memory
@@ -963,33 +983,38 @@ typed_test_def(RocprimWarpScanTests, name_suffix, ExclusiveReduceScan)
         // Launching kernel
         if (current_device_warp_size == ws32)
         {
-            hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(
-                    warp_exclusive_scan_reduce_kernel<T, block_size_ws32, logical_warp_size>),
-                dim3(grid_size),
-                dim3(block_size_ws32),
-                0,
-                0,
-                device_input.get(),
-                device_output.get(),
-                device_output_reductions.get(),
-                init);
+            HIP_CHECK_LAUNCH_SYNC(
+                hipLaunchKernelGGL(
+                    HIP_KERNEL_NAME(
+                        warp_exclusive_scan_reduce_kernel<T, block_size_ws32, logical_warp_size>),
+                    dim3(grid_size),
+                    dim3(block_size_ws32),
+                    0,
+                    0,
+                    device_input.get(),
+                    device_output.get(),
+                    device_output_reductions.get(),
+                    init
+                )
+            );
         }
         else if (current_device_warp_size == ws64)
         {
-            hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(
-                    warp_exclusive_scan_reduce_kernel<T, block_size_ws64, logical_warp_size>),
-                dim3(grid_size),
-                dim3(block_size_ws64),
-                0,
-                0,
-                device_input.get(),
-                device_output.get(),
-                device_output_reductions.get(),
-                init);
+            HIP_CHECK_LAUNCH_SYNC(
+                hipLaunchKernelGGL(
+                    HIP_KERNEL_NAME(
+                        warp_exclusive_scan_reduce_kernel<T, block_size_ws64, logical_warp_size>),
+                    dim3(grid_size),
+                    dim3(block_size_ws64),
+                    0,
+                    0,
+                    device_input.get(),
+                    device_output.get(),
+                    device_output_reductions.get(),
+                    init
+                )
+            );
         }
-        HIP_CHECK(hipGetLastError());
         HIP_CHECK(hipDeviceSynchronize());
 
         // Read from device memory
@@ -1102,33 +1127,38 @@ typed_test_def(RocprimWarpScanTests, name_suffix, ExclusiveReduceScanWoInit)
         // Launching kernel
         if(current_device_warp_size == ws32)
         {
-            hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(warp_exclusive_scan_reduce_wo_init_kernel<T,
-                                                                          block_size_ws32,
-                                                                          logical_warp_size>),
-                dim3(grid_size),
-                dim3(block_size_ws32),
-                0,
-                0,
-                device_input.get(),
-                device_output.get(),
-                device_output_reductions.get());
+            HIP_CHECK_LAUNCH_SYNC(
+                hipLaunchKernelGGL(
+                    HIP_KERNEL_NAME(warp_exclusive_scan_reduce_wo_init_kernel<T,
+                                    block_size_ws32,
+                                    logical_warp_size>),
+                    dim3(grid_size),
+                    dim3(block_size_ws32),
+                    0,
+                    0,
+                    device_input.get(),
+                    device_output.get(),
+                    device_output_reductions.get()
+                )
+            );
         }
         else if(current_device_warp_size == ws64)
         {
-            hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(warp_exclusive_scan_reduce_wo_init_kernel<T,
-                                                                          block_size_ws64,
-                                                                          logical_warp_size>),
-                dim3(grid_size),
-                dim3(block_size_ws64),
-                0,
-                0,
-                device_input.get(),
-                device_output.get(),
-                device_output_reductions.get());
+            HIP_CHECK_LAUNCH_SYNC(
+                hipLaunchKernelGGL(
+                    HIP_KERNEL_NAME(warp_exclusive_scan_reduce_wo_init_kernel<T,
+                                    block_size_ws64,
+                                    logical_warp_size>),
+                    dim3(grid_size),
+                    dim3(block_size_ws64),
+                    0,
+                    0,
+                    device_input.get(),
+                    device_output.get(),
+                    device_output_reductions.get()
+                )
+            );
         }
-        HIP_CHECK(hipGetLastError());
         HIP_CHECK(hipDeviceSynchronize());
 
         // Read from device memory
@@ -1237,32 +1267,37 @@ typed_test_def(RocprimWarpScanTests, name_suffix, Scan)
         // Launching kernel
         if (current_device_warp_size == ws32)
         {
-            hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(warp_scan_kernel<T, block_size_ws32, logical_warp_size>),
-                dim3(grid_size),
-                dim3(block_size_ws32),
-                0,
-                0,
-                device_input.get(),
-                device_inclusive_output.get(),
-                device_exclusive_output.get(),
-                init);
+            HIP_CHECK_LAUNCH_SYNC(
+                hipLaunchKernelGGL(
+                    HIP_KERNEL_NAME(warp_scan_kernel<T, block_size_ws32, logical_warp_size>),
+                    dim3(grid_size),
+                    dim3(block_size_ws32),
+                    0,
+                    0,
+                    device_input.get(),
+                    device_inclusive_output.get(),
+                    device_exclusive_output.get(),
+                    init
+                )
+            );
         }
         else if (current_device_warp_size == ws64)
         {
-            hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(warp_scan_kernel<T, block_size_ws64, logical_warp_size>),
-                dim3(grid_size),
-                dim3(block_size_ws64),
-                0,
-                0,
-                device_input.get(),
-                device_inclusive_output.get(),
-                device_exclusive_output.get(),
-                init);
+            HIP_CHECK_LAUNCH_SYNC(
+                hipLaunchKernelGGL(
+                    HIP_KERNEL_NAME(warp_scan_kernel<T, block_size_ws64, logical_warp_size>),
+                    dim3(grid_size),
+                    dim3(block_size_ws64),
+                    0,
+                    0,
+                    device_input.get(),
+                    device_inclusive_output.get(),
+                    device_exclusive_output.get(),
+                    init
+                )
+            );
         }
 
-        HIP_CHECK(hipGetLastError());
         HIP_CHECK(hipDeviceSynchronize());
 
         // Read from device memory
@@ -1370,34 +1405,39 @@ typed_test_def(RocprimWarpScanTests, name_suffix, ScanReduce)
         // Launching kernel
         if (current_device_warp_size == ws32)
         {
-            hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(warp_scan_reduce_kernel<T, block_size_ws32, logical_warp_size>),
-                dim3(grid_size),
-                dim3(block_size_ws32),
-                0,
-                0,
-                device_input.get(),
-                device_inclusive_output.get(),
-                device_exclusive_output.get(),
-                device_output_reductions.get(),
-                init);
+            HIP_CHECK_LAUNCH_SYNC(
+                hipLaunchKernelGGL(
+                    HIP_KERNEL_NAME(warp_scan_reduce_kernel<T, block_size_ws32, logical_warp_size>),
+                    dim3(grid_size),
+                    dim3(block_size_ws32),
+                    0,
+                    0,
+                    device_input.get(),
+                    device_inclusive_output.get(),
+                    device_exclusive_output.get(),
+                    device_output_reductions.get(),
+                    init
+                )
+            );
         }
         else if (current_device_warp_size == ws64)
         {
-            hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(warp_scan_reduce_kernel<T, block_size_ws64, logical_warp_size>),
-                dim3(grid_size),
-                dim3(block_size_ws64),
-                0,
-                0,
-                device_input.get(),
-                device_inclusive_output.get(),
-                device_exclusive_output.get(),
-                device_output_reductions.get(),
-                init);
+            HIP_CHECK_LAUNCH_SYNC(
+                hipLaunchKernelGGL(
+                    HIP_KERNEL_NAME(warp_scan_reduce_kernel<T, block_size_ws64, logical_warp_size>),
+                    dim3(grid_size),
+                    dim3(block_size_ws64),
+                    0,
+                    0,
+                    device_input.get(),
+                    device_inclusive_output.get(),
+                    device_exclusive_output.get(),
+                    device_output_reductions.get(),
+                    init
+                )
+            );
         }
 
-        HIP_CHECK(hipGetLastError());
         HIP_CHECK(hipDeviceSynchronize());
 
         // Read from device memory
@@ -1506,28 +1546,33 @@ typed_test_def(RocprimWarpScanTests, name_suffix, InclusiveScanCustomType)
         // Launching kernel
         if (current_device_warp_size == ws32)
         {
-            hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(warp_inclusive_scan_kernel<T, block_size_ws32, logical_warp_size>),
-                dim3(grid_size),
-                dim3(block_size_ws32),
-                0,
-                0,
-                device_input.get(),
-                device_output.get());
+            HIP_CHECK_LAUNCH_SYNC(
+                hipLaunchKernelGGL(
+                    HIP_KERNEL_NAME(warp_inclusive_scan_kernel<T, block_size_ws32, logical_warp_size>),
+                    dim3(grid_size),
+                    dim3(block_size_ws32),
+                    0,
+                    0,
+                    device_input.get(),
+                    device_output.get()
+                )
+            );
         }
         else if (current_device_warp_size == ws64)
         {
-            hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(warp_inclusive_scan_kernel<T, block_size_ws64, logical_warp_size>),
-                dim3(grid_size),
-                dim3(block_size_ws64),
-                0,
-                0,
-                device_input.get(),
-                device_output.get());
+            HIP_CHECK_LAUNCH_SYNC(
+                hipLaunchKernelGGL(
+                    HIP_KERNEL_NAME(warp_inclusive_scan_kernel<T, block_size_ws64, logical_warp_size>),
+                    dim3(grid_size),
+                    dim3(block_size_ws64),
+                    0,
+                    0,
+                    device_input.get(),
+                    device_output.get()
+                )
+            );
         }
 
-        HIP_CHECK(hipGetLastError());
         HIP_CHECK(hipDeviceSynchronize());
 
         // Read from device memory

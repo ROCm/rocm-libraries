@@ -249,17 +249,18 @@ auto test_block_exchange(int /*device_id*/) -> typename std::enable_if<Method ==
 
     // Running kernel
     constexpr unsigned int grid_size = (size / items_per_block);
-    hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(
-            blocked_to_striped_kernel<type, output_type, items_per_block, items_per_thread>),
-        dim3(grid_size),
-        dim3(block_size),
-        0,
-        0,
-        device_input.get(),
-        device_output.get());
-    HIP_CHECK(hipGetLastError());
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK_LAUNCH_SYNC(
+        hipLaunchKernelGGL(
+            HIP_KERNEL_NAME(
+                blocked_to_striped_kernel<type, output_type, items_per_block, items_per_thread>),
+            dim3(grid_size),
+            dim3(block_size),
+            0,
+            0,
+            device_input.get(),
+            device_output.get()
+        )
+    );
 
     // Reading results
     const auto output = device_output.load();
@@ -321,17 +322,18 @@ auto test_block_exchange(int /*device_id*/) -> typename std::enable_if<Method ==
 
     // Running kernel
     constexpr unsigned int grid_size = (size / items_per_block);
-    hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(
-            striped_to_blocked_kernel<type, output_type, items_per_block, items_per_thread>),
-        dim3(grid_size),
-        dim3(block_size),
-        0,
-        0,
-        device_input.get(),
-        device_output.get());
-    HIP_CHECK(hipGetLastError());
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK_LAUNCH_SYNC(
+        hipLaunchKernelGGL(
+            HIP_KERNEL_NAME(
+                striped_to_blocked_kernel<type, output_type, items_per_block, items_per_thread>),
+            dim3(grid_size),
+            dim3(block_size),
+            0,
+            0,
+            device_input.get(),
+            device_output.get()
+        )
+    );
 
     // Reading results
     const auto output = device_output.load();
@@ -406,17 +408,18 @@ auto test_block_exchange(int device_id) -> typename std::enable_if<Method == 2>:
 
     // Running kernel
     constexpr unsigned int grid_size = (size / items_per_block);
-    hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(
-            blocked_to_warp_striped_kernel<type, output_type, items_per_block, items_per_thread>),
-        dim3(grid_size),
-        dim3(block_size),
-        0,
-        0,
-        device_input.get(),
-        device_output.get());
-    HIP_CHECK(hipGetLastError());
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK_LAUNCH_SYNC(
+        hipLaunchKernelGGL(
+            HIP_KERNEL_NAME(
+                blocked_to_warp_striped_kernel<type, output_type, items_per_block, items_per_thread>),
+            dim3(grid_size),
+            dim3(block_size),
+            0,
+            0,
+            device_input.get(),
+            device_output.get()
+        )
+    );
 
     // Reading results
     const auto output = device_output.load();
@@ -491,17 +494,18 @@ auto test_block_exchange(int device_id) -> typename std::enable_if<Method == 3>:
 
     // Running kernel
     constexpr unsigned int grid_size = (size / items_per_block);
-    hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(
-            warp_striped_to_blocked_kernel<type, output_type, items_per_block, items_per_thread>),
-        dim3(grid_size),
-        dim3(block_size),
-        0,
-        0,
-        device_input.get(),
-        device_output.get());
-    HIP_CHECK(hipGetLastError());
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK_LAUNCH_SYNC(
+        hipLaunchKernelGGL(
+            HIP_KERNEL_NAME(
+                warp_striped_to_blocked_kernel<type, output_type, items_per_block, items_per_thread>),
+            dim3(grid_size),
+            dim3(block_size),
+            0,
+            0,
+            device_input.get(),
+            device_output.get()
+        )
+    );
 
     // Reading results
     const auto output = device_output.load();
@@ -572,18 +576,19 @@ auto test_block_exchange(int /*device_id*/) -> typename std::enable_if<Method ==
 
     // Running kernel
     constexpr unsigned int grid_size = (size / items_per_block);
-    hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(
-            scatter_to_blocked_kernel<type, output_type, items_per_block, items_per_thread>),
-        dim3(grid_size),
-        dim3(block_size),
-        0,
-        0,
-        device_input.get(),
-        device_output.get(),
-        device_ranks.get());
-    HIP_CHECK(hipGetLastError());
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK_LAUNCH_SYNC(
+        hipLaunchKernelGGL(
+            HIP_KERNEL_NAME(
+                scatter_to_blocked_kernel<type, output_type, items_per_block, items_per_thread>),
+            dim3(grid_size),
+            dim3(block_size),
+            0,
+            0,
+            device_input.get(),
+            device_output.get(),
+            device_ranks.get()
+        )
+    );
 
     // Reading results
     const auto output = device_output.load();
@@ -656,18 +661,19 @@ auto test_block_exchange(int /*device_id*/) -> typename std::enable_if<Method ==
 
     // Running kernel
     constexpr unsigned int grid_size = (size / items_per_block);
-    hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(
-            scatter_to_striped_kernel<type, output_type, items_per_block, items_per_thread>),
-        dim3(grid_size),
-        dim3(block_size),
-        0,
-        0,
-        device_input.get(),
-        device_output.get(),
-        device_ranks.get());
-    HIP_CHECK(hipGetLastError());
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK_LAUNCH_SYNC(
+        hipLaunchKernelGGL(
+            HIP_KERNEL_NAME(
+                scatter_to_striped_kernel<type, output_type, items_per_block, items_per_thread>),
+            dim3(grid_size),
+            dim3(block_size),
+            0,
+            0,
+            device_input.get(),
+            device_output.get(),
+            device_ranks.get()
+        )
+    );
 
     // Reading results
     const auto output = device_output.load();

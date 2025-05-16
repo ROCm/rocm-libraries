@@ -114,20 +114,22 @@ void TestSortKeyValue()
         // Running kernel, ignored if invalid size
         if(size > 0)
         {
-            hipLaunchKernelGGL(HIP_KERNEL_NAME(sort_pairs_kernel<block_size,
-                                                                 items_per_thread,
-                                                                 key_type,
-                                                                 value_type,
-                                                                 algo,
-                                                                 binary_op_type>),
-                               dim3(grid_size),
-                               dim3(block_size),
-                               0,
-                               stream,
-                               device_key_output.get(),
-                               device_value_output.get(),
-                               size);
-            HIP_CHECK(hipGetLastError());
+            HIP_CHECK_LAUNCH_SYNC(
+                hipLaunchKernelGGL(HIP_KERNEL_NAME(sort_pairs_kernel<block_size,
+                                                   items_per_thread,
+                                                   key_type,
+                                                   value_type,
+                                                   algo,
+                                                   binary_op_type>),
+                                   dim3(grid_size),
+                                   dim3(block_size),
+                                   0,
+                                   stream,
+                                   device_key_output.get(),
+                                   device_value_output.get(),
+                                   size
+                )
+            );
         }
 
         // Reading results back

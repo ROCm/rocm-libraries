@@ -263,6 +263,9 @@ hipError_t segmented_inclusive_scan(void * temporary_storage,
                                     hipStream_t stream = 0,
                                     bool debug_synchronous = false)
 {
+    // Clear any existing error
+    (void) hipGetLastError();
+
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
     using result_type = input_type;
 
@@ -384,6 +387,9 @@ hipError_t segmented_exclusive_scan(void * temporary_storage,
                                     hipStream_t stream = 0,
                                     bool debug_synchronous = false)
 {
+    // Clear any existing error
+    (void) hipGetLastError();
+
     return detail::segmented_scan_impl<true, Config>(
         temporary_storage, storage_size,
         input, output, segments, begin_offsets, end_offsets, initial_value,
@@ -486,6 +492,9 @@ hipError_t segmented_inclusive_scan(void * temporary_storage,
                                     hipStream_t stream = 0,
                                     bool debug_synchronous = false)
 {
+    // Clear any existing error
+    (void) hipGetLastError();
+
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
     using result_type = input_type;
     using flag_type = typename std::iterator_traits<HeadFlagIterator>::value_type;
@@ -603,6 +612,9 @@ hipError_t segmented_exclusive_scan(void * temporary_storage,
                                     hipStream_t stream = 0,
                                     bool debug_synchronous = false)
 {
+    // Clear any existing error
+    (void) hipGetLastError();
+
     using result_type = InitValueType;
     using flag_type = typename std::iterator_traits<HeadFlagIterator>::value_type;
     using headflag_scan_op_wrapper_type =

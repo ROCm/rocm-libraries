@@ -298,7 +298,6 @@ TYPED_TEST(RocprimDeviceAdjacentDifferenceTests, AdjacentDifference)
                                                                        rocprim::minus<>{},
                                                                        stream,
                                                                        debug_synchronous));
-                HIP_CHECK(hipGetLastError());
 
                 if(TestFixture::use_graphs)
                 {

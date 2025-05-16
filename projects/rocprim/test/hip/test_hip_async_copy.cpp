@@ -166,14 +166,16 @@ TEST_F(HipAsyncCopyTests, AsyncCopyDepthFirst)
         const unsigned int grid_size = (sizes[i] + block_size - 1) / block_size;
         if(sizes[i] > 0)
         {
-            hipLaunchKernelGGL(HIP_KERNEL_NAME(increment_kernel),
+            HIP_CHECK_LAUNCH(
+                hipLaunchKernelGGL(HIP_KERNEL_NAME(increment_kernel),
                                dim3(grid_size),
                                dim3(block_size),
                                0,
                                streams[i],
                                d_inputs[i].get(),
-                               sizes[i]);
-            HIP_CHECK(hipGetLastError());
+                               sizes[i]
+                )
+            );
         }
         HIP_CHECK(hipMemcpyAsync(outputs[i].data(),
                                  d_inputs[i].get(),
@@ -201,14 +203,16 @@ TEST_F(HipAsyncCopyTests, AsyncCopyBreadthFirst)
         const unsigned int grid_size = (sizes[i] + block_size - 1) / block_size;
         if(sizes[i] > 0)
         {
-            hipLaunchKernelGGL(HIP_KERNEL_NAME(increment_kernel),
-                               dim3(grid_size),
-                               dim3(block_size),
-                               0,
-                               streams[i],
-                               d_inputs[i].get(),
-                               sizes[i]);
-            HIP_CHECK(hipGetLastError());
+            HIP_CHECK_LAUNCH(
+                hipLaunchKernelGGL(HIP_KERNEL_NAME(increment_kernel),
+                                   dim3(grid_size),
+                                   dim3(block_size),
+                                   0,
+                                   streams[i],
+                                   d_inputs[i].get(),
+                                   sizes[i]
+                )
+            );
         }
     }
     for(size_t i = 0; i < sizes.size(); i++)
@@ -251,14 +255,16 @@ TEST(HipAsyncCopyTestsExtra, StreamInStruct)
 
     common::device_ptr<T>     d_input(input);
     const unsigned int        grid_size = (size + block_size - 1) / block_size;
-    hipLaunchKernelGGL(HIP_KERNEL_NAME(increment_kernel),
-                       dim3(grid_size),
-                       dim3(block_size),
-                       0,
-                       stream_wrapper.stream,
-                       d_input.get(),
-                       size);
-    HIP_CHECK(hipGetLastError());
+    HIP_CHECK_LAUNCH(
+        hipLaunchKernelGGL(HIP_KERNEL_NAME(increment_kernel),
+                           dim3(grid_size),
+                           dim3(block_size),
+                           0,
+                           stream_wrapper.stream,
+                           d_input.get(),
+                           size
+        )
+    );
 
     vector_type output(size);
     HIP_CHECK(hipMemcpyAsync(output.data(),

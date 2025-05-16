@@ -75,8 +75,16 @@ TEST(RocprimConfigDispatchTests, HostMatchesDevice)
 
     common::device_ptr<target_arch> device_arch_ptr(1);
 
-    hipLaunchKernelGGL(write_target_arch, dim3(1), dim3(1), 0, stream, device_arch_ptr.get());
-    HIP_CHECK(hipGetLastError());
+    HIP_CHECK_LAUNCH_SYNC(
+        hipLaunchKernelGGL(
+            write_target_arch,
+            dim3(1),
+            dim3(1),
+            0,
+            stream,
+            device_arch_ptr.get()
+        )
+    );
 
     const auto device_arch = device_arch_ptr.load_value_at(0);
 
