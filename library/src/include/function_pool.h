@@ -140,11 +140,11 @@ struct FFTKernel
     }
 };
 
-typedef std::unordered_multimap<FMKey, FMKey, SimpleHash>       FPKeyMap;
-typedef std::unordered_multimap<FMKeyPP, FMKeyPP, SimpleHashPP> FPKeyMapPP;
+typedef std::unordered_multimap<FMKey, FMKey, SimpleHash>  FPKeyMap;
+typedef std::unordered_map<FMKeyPP, FMKeyPP, SimpleHashPP> FPKeyMapPP;
 
-typedef std::unordered_multimap<FMKey, FFTKernel, SimpleHash>                    FPMap;
-typedef std::unordered_multimap<FMKeyPP, std::array<FFTKernel, 2>, SimpleHashPP> FPMapPP;
+typedef std::unordered_multimap<FMKey, FFTKernel, SimpleHash>               FPMap;
+typedef std::unordered_map<FMKeyPP, std::array<FFTKernel, 2>, SimpleHashPP> FPMapPP;
 
 struct function_pool_data
 {
@@ -213,14 +213,6 @@ class function_pool
             return key;
     }
 
-    const FMKeyPP& get_actual_pp_key(const FMKeyPP& key) const
-    {
-        if(def_pp_key_pool.count(key) > 0)
-            return def_pp_key_pool.at(key);
-        else
-            return key;
-    }
-
 public:
     function_pool(unsigned int max_lds_bytes)
         : max_lds_bytes(max_lds_bytes)
@@ -238,8 +230,10 @@ public:
 
     function_pool(const hipDeviceProp_t& prop)
         : max_lds_bytes(prop.sharedMemPerBlock)
-        , def_key_pool(function_pool_data::get_function_pool_data().def_key_pool)
-        , function_map(function_pool_data::get_function_pool_data().function_map)
+        , def_key_pool(std::get<0>(function_pool_data::get_function_pool_data().def_keys))
+        , def_pp_key_pool(std::get<1>(function_pool_data::get_function_pool_data().def_keys))
+        , function_map(std::get<0>(function_pool_data::get_function_pool_data().function_maps))
+        , function_pp_map(std::get<1>(function_pool_data::get_function_pool_data().function_maps))
         , deviceProp(prop)
     {
         // We would only see zero if we received a
@@ -271,14 +265,6 @@ public:
     {
         auto real_key = get_actual_key(key);
         return find_key_in_map(function_map, real_key) != function_map.end();
-    }
-
-    bool has_pp_function(const FMKeyPP& key) const
-    {
-        auto real_key = get_actual_pp_key(key);
-        if(!real_key.base_lds_usage_fits(max_lds_bytes))
-            return false;
-        return function_pp_map.count(real_key) > 0;
     }
 
     bool has_pp_function(const FMKeyPP& key) const
@@ -322,25 +308,6 @@ public:
         if(it == function_map.end())
             throw std::out_of_range("kernel not found in map");
         return it->second;
-    }
-
-    FFTKernel get_pp_kernel(const FMKeyPP& key, ComputeScheme scheme) const
-    {
-        auto real_key = get_actual_pp_key(key);
-        if(!real_key.base_lds_usage_fits(max_lds_bytes))
-            throw std::out_of_range("kernel not found in partial-pass map");
-
-        auto kernel_list = function_pp_map.at(real_key);
-
-        auto scheme_0 = kernel_list[0].pp_params.scheme;
-        auto scheme_1 = kernel_list[1].pp_params.scheme;
-
-        if(scheme == scheme_0)
-            return kernel_list[0];
-        else if(scheme == scheme_1)
-            return kernel_list[1];
-        else
-            throw std::out_of_range("kernel not found in partial-pass map");
     }
 
     FFTKernel get_pp_kernel(const FMKeyPP& key, ComputeScheme scheme) const
@@ -413,7 +380,7 @@ static void insert_default_entry(const FMKey&     def_key,
     def_key_pool.emplace(simple_key, def_key_with_lds);
 
     // still use the detailed key with config to maintain the function map
-    std::get<1>(function_map.emplace(def_key_with_lds, kernel))
+    function_map.emplace(def_key_with_lds, kernel);
 }
 
 static bool insert_default_pp_entry(const FMKeyPP&   def_key,
@@ -427,27 +394,6 @@ static bool insert_default_pp_entry(const FMKeyPP&   def_key,
     FMKeyPP simple_key(def_key);
     simple_key.kernel_config_1 = KernelConfig::EmptyConfig();
     simple_key.kernel_config_2 = KernelConfig::EmptyConfig();
-
-    def_key_pool.emplace(simple_key, def_key);
-
-    std::array<FFTKernel, 2> kernels = {kernel_0, kernel_1};
-
-    // still use the detailed key with config to maintain the function map
-    return std::get<1>(function_map.emplace(def_key, kernels));
-}
-
-static bool insert_default_pp_entry(const FMKeyPP&   def_key,
-                                    const FFTKernel& kernel_0,
-                                    const FFTKernel& kernel_1,
-                                    FPKeyMapPP&      def_key_pool,
-                                    FPMapPP&         function_map)
-{
-    // simple_key means the same thing as def_key, but we just remove kernel-config
-    // so we don't need to know the exact config when we're lookin' for the default kernel
-    FMKeyPP simple_key(def_key);
-    simple_key.kernel_config_1 = KernelConfig::EmptyConfig();
-    simple_key.kernel_config_2 = KernelConfig::EmptyConfig();
-    
 
     def_key_pool.emplace(simple_key, def_key);
 

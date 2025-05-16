@@ -460,18 +460,6 @@ static size_t max_bytes_per_element(const std::vector<unsigned int>& precisions)
     return element_size;
 }
 
-static size_t max_bytes_per_element(const std::vector<unsigned int>& precisions)
-{
-    // generate for the maximum element size in the available
-    // precisions
-    size_t element_size = 0;
-    for(auto p : precisions)
-    {
-        element_size = std::max(element_size, complex_type_size(static_cast<rocfft_precision>(p)));
-    }
-    return element_size;
-}
-
 int main()
 {
     std::string line;
