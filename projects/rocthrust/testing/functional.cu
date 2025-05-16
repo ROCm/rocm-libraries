@@ -23,7 +23,8 @@
 
 #include <unittest/unittest.h>
 
-THRUST_DISABLE_MSVC_POSSIBLE_LOSS_OF_DATA_WARNING_BEGIN
+THRUST_DIAG_PUSH
+THRUST_DIAG_SUPPRESS_MSVC(4244 4267) // possible loss of data
 
 // There is a unfortunate miscompilation of the gcc-11 vectorizer leading to OOB writes
 // Adding this attribute suffices that this miscompilation does not appear anymore
@@ -188,12 +189,12 @@ Macro(vector_type, operator_name, unittest::uint64_t)
   }                                                                                                  \
   DECLARE_UNITTEST(Test##OperatorName##FunctionalDevice);
 
-THRUST_DISABLE_MSVC_WARNING_BEGIN(4146) // warning C4146: unary minus operator applied to unsigned type, result still
-                                        // unsigned
+THRUST_DIAG_PUSH
+THRUST_DIAG_SUPPRESS_MSVC(4146) // warning C4146: unary minus operator applied to unsigned type, result still unsigned
 
 // Create the unit tests
 DECLARE_UNARY_ARITHMETIC_FUNCTIONAL_UNITTEST(negate, Negate);
-THRUST_DISABLE_MSVC_WARNING_END(4146)
+THRUST_DIAG_POP
 DECLARE_UNARY_LOGICAL_FUNCTIONAL_UNITTEST(logical_not, LogicalNot);
 
 // Ad-hoc testing for other functionals
@@ -383,4 +384,4 @@ DECLARE_VECTOR_UNITTEST(TestNot2);
 
 #endif // Weird GCC11 failure case
 
-THRUST_DISABLE_MSVC_POSSIBLE_LOSS_OF_DATA_WARNING_END
+THRUST_DIAG_POP

@@ -24,9 +24,15 @@
 #include "test_param_fixtures.hpp"
 #include "test_utils.hpp"
 
+THRUST_DIAG_PUSH
+THRUST_DIAG_SUPPRESS_MSVC(4244 4267) // possible loss of data
+
 template <typename Iterator1, typename Iterator2>
-__global__ THRUST_HIP_LAUNCH_BOUNDS_DEFAULT void
-simple_copy_on_device(Iterator1 first1, Iterator1 last1, Iterator2 first2)
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA || THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
+__global__ THRUST_HIP_LAUNCH_BOUNDS_DEFAULT
+#endif
+  void
+  simple_copy_on_device(Iterator1 first1, Iterator1 last1, Iterator2 first2)
 {
   while (first1 != last1)
   {
@@ -37,8 +43,11 @@ simple_copy_on_device(Iterator1 first1, Iterator1 last1, Iterator2 first2)
 template <typename Iterator1, typename Iterator2>
 void simple_copy(Iterator1 first1, Iterator1 last1, Iterator2 first2)
 {
-  hipLaunchKernelGGL(
-    HIP_KERNEL_NAME(simple_copy_on_device<Iterator1, Iterator2>), dim3(1), dim3(1), 0, 0, first1, last1, first2);
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA || THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
+  simple_copy_on_device<<<1, 1>>>(first1, last1, first2);
+#else
+  simple_copy_on_device(first1, last1, first2);
+#endif
 }
 
 TEST(DereferenceTests, TestDeviceDereferenceDeviceVectorIterator)
@@ -50,7 +59,7 @@ TEST(DereferenceTests, TestDeviceDereferenceDeviceVectorIterator)
     SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
     thrust::device_vector<int> input =
-      get_random_data<int>(100, std::numeric_limits<int>::min(), std::numeric_limits<int>::max(), seed);
+      get_random_data<int>(100, get_default_limits<int>::min(), get_default_limits<int>::max(), seed);
     thrust::device_vector<int> output(input.size(), 0);
 
     simple_copy(input.begin(), input.end(), output.begin());
@@ -68,7 +77,7 @@ TEST(DereferenceTests, TestDeviceDereferenceDevicePtr)
     SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
     thrust::device_vector<int> input =
-      get_random_data<int>(100, std::numeric_limits<int>::min(), std::numeric_limits<int>::max(), seed);
+      get_random_data<int>(100, get_default_limits<int>::min(), get_default_limits<int>::max(), seed);
     thrust::device_vector<int> output(input.size(), 0);
 
     thrust::device_ptr<int> _first1 = &input[0];
@@ -90,7 +99,7 @@ TEST(DereferenceTests, TestDeviceDereferenceTransformIterator)
     SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
     thrust::device_vector<int> input =
-      get_random_data<int>(100, std::numeric_limits<int>::min(), std::numeric_limits<int>::max(), seed);
+      get_random_data<int>(100, get_default_limits<int>::min(), get_default_limits<int>::max(), seed);
     thrust::device_vector<int> output(input.size(), 0);
 
     simple_copy(thrust::make_transform_iterator(input.begin(), thrust::identity<int>()),
@@ -138,3 +147,5 @@ TEST(DereferenceTests, TestDeviceDereferenceTransformedCountingIterator)
   ASSERT_EQ(output[3], -4);
   ASSERT_EQ(output[4], -5);
 }
+
+THRUST_DIAG_POP

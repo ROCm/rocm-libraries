@@ -127,7 +127,8 @@ TYPED_TEST(CopyNTests, TestCopyNMatchingTypes)
   ASSERT_EQ_QUIET(d_result, d.end());
 }
 
-THRUST_DISABLE_MSVC_WARNING_BEGIN(4244) // '=': conversion from 'int' to '_Ty', possible loss of data
+THRUST_DIAG_PUSH
+THRUST_DIAG_SUPPRESS_MSVC(4244) // '=': conversion from 'int' to '_Ty', possible loss of data
 
 TYPED_TEST(CopyNTests, TestCopyNMixedTypes)
 {
@@ -164,7 +165,7 @@ TYPED_TEST(CopyNTests, TestCopyNMixedTypes)
   ASSERT_EQ_QUIET(d_result, d.end());
 }
 
-THRUST_DISABLE_MSVC_WARNING_END(4244)
+THRUST_DIAG_POP
 
 TEST(CopyNTests, TestCopyNVectorBool)
 {
