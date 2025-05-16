@@ -289,7 +289,9 @@ endif( )
 if(WIN32)
   set(CPACK_SOURCE_GENERATOR "ZIP")
   set(CPACK_GENERATOR "ZIP")
-  set(CMAKE_INSTALL_PREFIX "C:/hipSDK" CACHE PATH "Install path" FORCE)
+  if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+    set(CMAKE_INSTALL_PREFIX "C:/hipSDK" CACHE PATH "Install path" FORCE)
+  endif()
   set(INSTALL_PREFIX "C:/hipSDK")
   set(CPACK_SET_DESTDIR OFF)
   set(CPACK_PACKAGE_INSTALL_DIRECTORY "C:/hipSDK")
@@ -323,3 +325,5 @@ rocm_create_package(
     LDCONFIG
     LDCONFIG_DIR ${ROCFFT_CONFIG_DIR}
 )
+
+option(BUILD_CODE_COVERAGE "Build with code coverage flags (clang only)" OFF)

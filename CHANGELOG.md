@@ -5,6 +5,15 @@ Documentation for rocFFT is available at
 
 ## rocFFT 1.0.34 (unreleased)
 
+### Optimized
+
+* Implemented single-precision 1D kernels for lengths:
+  - 4704
+  - 5488
+  - 6144
+  - 6561
+  - 8192
+
 ### Removed
 
 * Removed rocfft-rider legacy compatibility from clients

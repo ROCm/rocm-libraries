@@ -1471,9 +1471,6 @@
 {"Problem":{"arch":"gfx90a","token":"96_96_96_sp_op_real_fwd"},
  "Solutions":[ {"sol_node_type":"SOL_INTERNAL_NODE","using_scheme":"CS_REAL_3D_EVEN","solution_childnodes":[ {"child_token":"96_sp_ip_complex","child_option":10},{"child_token":"sbcc_96_sp_ip_complex","child_option":3},{"child_token":"sbcc_96_sp_ip_complex","child_option":2} ]}
                ]},
-{"Problem":{"arch":"gfx90a","token":"14348907_sp_ip_complex"},
- "Solutions":[ {"sol_node_type":"SOL_INTERNAL_NODE","using_scheme":"CS_L1D_TRTRT","solution_childnodes":[ {"child_token":"leafnode_token_builtin_kernel","child_option":0},{"child_token":"6561_sp_ip_complex","child_option":3},{"child_token":"leafnode_token_builtin_kernel","child_option":0},{"child_token":"2187_sp_ip_complex","child_option":2},{"child_token":"leafnode_token_builtin_kernel","child_option":0} ]}
-               ]},
 {"Problem":{"arch":"gfx90a","token":"16777216_sp_ip_complex"},
  "Solutions":[ {"sol_node_type":"SOL_INTERNAL_NODE","using_scheme":"CS_L1D_TRTRT","solution_childnodes":[ {"child_token":"leafnode_token_builtin_kernel","child_option":0},{"child_token":"4096_sp_ip_complex","child_option":1},{"child_token":"leafnode_token_builtin_kernel","child_option":0},{"child_token":"4096_sp_ip_complex","child_option":1},{"child_token":"leafnode_token_builtin_kernel","child_option":0} ]}
                ]},
@@ -1508,12 +1505,6 @@
 {"Problem":{"arch":"gfx90a","token":"43008_dp_op_complex"},
  "Solutions":[ {"sol_node_type":"SOL_INTERNAL_NODE","using_scheme":"CS_L1D_CC","solution_childnodes":[ {"child_token":"sbcc_224_dp_ip_complex","child_option":0},{"child_token":"sbrc_192_dp_ip_complex","child_option":2} ]}
                ]},
-{"Problem":{"arch":"gfx90a","token":"6561_sp_ip_complex"},
- "Solutions":[ {"sol_node_type":"SOL_DUMMY","using_scheme":"CS_NONE","solution_childnodes":[  ]}
-              ,{"sol_node_type":"SOL_INTERNAL_NODE","using_scheme":"CS_L1D_CC","solution_childnodes":[ {"child_token":"sbcc_81_sp_ip_complex","child_option":0},{"child_token":"sbrc_81_sp_ip_complex","child_option":0} ]}
-              ,{"sol_node_type":"SOL_INTERNAL_NODE","using_scheme":"CS_L1D_CC","solution_childnodes":[ {"child_token":"sbcc_81_sp_ip_complex","child_option":0},{"child_token":"sbrc_81_sp_ip_complex","child_option":1} ]}
-              ,{"sol_node_type":"SOL_INTERNAL_NODE","using_scheme":"CS_L1D_CC","solution_childnodes":[ {"child_token":"sbcc_81_sp_ip_complex","child_option":1},{"child_token":"sbrc_81_sp_ip_complex","child_option":2} ]}
-               ]},
 {"Problem":{"arch":"gfx90a","token":"8192_dp_ip_complex"},
  "Solutions":[ {"sol_node_type":"SOL_DUMMY","using_scheme":"CS_NONE","solution_childnodes":[  ]}
               ,{"sol_node_type":"SOL_INTERNAL_NODE","using_scheme":"CS_L1D_CC","solution_childnodes":[ {"child_token":"sbcc_64_dp_ip_complex","child_option":2},{"child_token":"sbrc_128_dp_ip_complex","child_option":2} ]}
@@ -1529,9 +1520,6 @@
 {"Problem":{"arch":"gfx90a","token":"55_55_dp_ip_complex"},
  "Solutions":[ {"sol_node_type":"SOL_DUMMY","using_scheme":"CS_NONE","solution_childnodes":[  ]}
               ,{"sol_node_type":"SOL_INTERNAL_NODE","using_scheme":"CS_2D_RTRT","solution_childnodes":[ {"child_token":"55_dp_ip_complex","child_option":1},{"child_token":"leafnode_token_builtin_kernel","child_option":0},{"child_token":"55_dp_ip_complex","child_option":2},{"child_token":"leafnode_token_builtin_kernel","child_option":0} ]}
-               ]},
-{"Problem":{"arch":"gfx90a","token":"6561_6561_sp_ip_complex"},
- "Solutions":[ {"sol_node_type":"SOL_INTERNAL_NODE","using_scheme":"CS_2D_RTRT","solution_childnodes":[ {"child_token":"6561_sp_ip_complex","child_option":2},{"child_token":"leafnode_token_builtin_kernel","child_option":0},{"child_token":"6561_sp_ip_complex","child_option":2},{"child_token":"leafnode_token_builtin_kernel","child_option":0} ]}
                ]},
 {"Problem":{"arch":"gfx90a","token":"125_125_sp_ip_complex"},
  "Solutions":[ {"sol_node_type":"SOL_DUMMY","using_scheme":"CS_NONE","solution_childnodes":[  ]}

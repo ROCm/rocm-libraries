@@ -378,6 +378,8 @@ int main(int argc, char* argv[])
         pobuffer[i] = obuffer->at(i).data();
     }
 
+    init_bench_input(params, ibricks, ibuffer, ibuffer_cpu, is_host_gen);
+
     // Execute a warm-up call
     params.execute(pibuffer.data(), pobuffer.data());
 

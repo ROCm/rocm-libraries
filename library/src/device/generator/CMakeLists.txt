@@ -21,6 +21,7 @@
 # #############################################################################
 
 add_library( generator OBJECT generator.cpp fftgenerator.cpp )
+rocfft_add_coverage_flags( generator )
 
 add_executable( stockham_gen stockham_gen.cpp )
 target_link_libraries( stockham_gen PRIVATE generator )

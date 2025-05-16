@@ -44,6 +44,14 @@ function( rocfft_link_internal_lib target lib )
   )
 endfunction()
 
+# Add code coverage flags to a library target, if enabled
+function( rocfft_add_coverage_flags target )
+  if( BUILD_CODE_COVERAGE )
+    target_compile_options( ${target} PRIVATE -g -O0 -fprofile-instr-generate -fcoverage-mapping )
+    target_link_options( ${target} INTERFACE -fprofile-instr-generate )
+  endif()
+endfunction()
+
 add_executable( rocfft_rtc_helper rocfft_rtc_helper.cpp )
 
 # each backend requires different libraries for host and device code
@@ -334,6 +342,7 @@ foreach( target
     target_compile_options( ${target} PRIVATE -Og )
   endif()
   target_link_libraries( ${target} PUBLIC ${ROCFFT_HOST_LINK_LIBS} ${ROCFFT_RTC_LINK_LIBS} )
+  rocfft_add_coverage_flags( ${target} )
   target_link_directories( ${target} PRIVATE ${ROCFFT_HOST_LINK_DIRS} )
 
 endforeach()
@@ -372,6 +381,7 @@ add_library( rocfft
   ${rocfft_source}
   ${relative_rocfft_headers_public}
   )
+rocfft_add_coverage_flags( rocfft )
 
 if( ROCFFT_MPI_ENABLE )
   target_compile_definitions(rocfft PRIVATE ROCFFT_MPI_ENABLE)

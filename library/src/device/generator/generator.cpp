@@ -225,19 +225,6 @@ Variable::Variable(const std::string& _name,
         this->size = Expression{size};
 }
 
-Variable::Variable(const std::string& _name,
-                   const std::string& _type,
-                   bool               pointer,
-                   bool restrict,
-                   const Expression& _size)
-    : name(_name)
-    , type(_type)
-    , pointer(pointer)
-    , restrict(restrict)
-    , size(_size)
-{
-}
-
 // NOTE: cppcheck doesn't realize all of the members are actually
 // initialized here
 //
@@ -387,14 +374,6 @@ std::string ComplexLiteral::render() const
     return ret;
 }
 
-std::string ComplexMultiply::render() const
-{
-    auto& a = std::get<Variable>(args[0]);
-    auto& b = std::get<Variable>(args[1]);
-    auto  r = ComplexLiteral{a.x() * b.x() - a.y() * b.y(), a.y() * b.x() + a.x() * b.y()};
-    return r.render();
-}
-
 std::string TwiddleMultiply::render() const
 {
     auto& a = vars[0];
@@ -414,18 +393,8 @@ Parens::Parens(Expression&& inside)
 {
 }
 
-Parens::Parens(const Expression& inside)
-    : args{inside}
-{
-}
-
 Parens::Parens(std::vector<Expression>&& args)
     : args(std::move(args))
-{
-}
-
-Parens::Parens(const std::vector<Expression>& args)
-    : args{args}
 {
 }
 

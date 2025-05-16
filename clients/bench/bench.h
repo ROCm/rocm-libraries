@@ -232,7 +232,7 @@ void copy_host_input_to_dev(std::vector<hostbuf>& host_buffers, std::vector<gpub
     {
         if(hipMemcpy(buffers[i].data(),
                      host_buffers[i].data(),
-                     host_buffers.size(),
+                     host_buffers[i].size(),
                      hipMemcpyHostToDevice)
            != hipSuccess)
             throw std::runtime_error("hipMemcpy failure");

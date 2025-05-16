@@ -83,9 +83,9 @@ def unique(kernels):
     r, s = list(), set()
     for kernel in kernels:
         if isinstance(kernel.length, list):
-            key = tuple(kernel.length) + (kernel.scheme, )
+            key = tuple(kernel.length) + (kernel.scheme, kernel.lds_size_bytes)
         else:
-            key = (kernel.length, kernel.scheme)
+            key = (kernel.length, kernel.scheme, kernel.lds_size_bytes)
         if key not in s:
             s.add(key)
             r.append(kernel)
@@ -215,7 +215,8 @@ def generate_cpu_function_pool_pieces(functions, pp_functions, num_files):
                                        scheme, 'pp_kernel_1.get_kernel_config()',
                                        'pp_kernel_2.get_kernel_config()')).inline()
             piece_contents[curr_file] += function_map.assert_pp_insert(
-                key, var_pp_kernel_1, var_pp_kernel_2, 'std::get<1>(def_keys)', 'std::get<1>(function_maps)')
+                key, var_pp_kernel_1, var_pp_kernel_2, 'std::get<1>(def_keys)', 
+                'std::get<1>(function_maps)')
             
             j = j + 1
         else:
@@ -228,7 +229,8 @@ def generate_cpu_function_pool_pieces(functions, pp_functions, num_files):
                                        scheme, transpose or 'NONE',
                                        'kernel.get_kernel_config()')).inline()
             piece_contents[curr_file] += function_map.assert_insert(
-                key, var_kernel, 'std::get<0>(def_keys)', 'std::get<0>(function_maps)')
+                key, var_kernel, 'std::get<0>(def_keys)', 'std::get<0>(function_maps)',
+                f.meta.lds_size_bytes)
         
         if j == len(precisions):
             j = 0
@@ -236,7 +238,7 @@ def generate_cpu_function_pool_pieces(functions, pp_functions, num_files):
         else:
             i = i + 1
             
-        curr_file = (curr_file + 1) % num_files            
+        curr_file = (curr_file + 1) % num_files
 
     # Assemble contents of each file to return in a list
     pieces = [None] * num_files
@@ -271,7 +273,13 @@ def kernel_name(ns):
     elif ns.scheme == 'CS_KERNEL_STOCKHAM_BLOCK_CR':
         postfix = '_sbcr'
 
+    if hasattr(ns, 'lds_size_bytes'):
+        postfix += f'_lds{ns.lds_size_bytes}'
+
     return f'rocfft_len{length}{postfix}'
+
+
+LDS_160k = 160 * 1024
 
 
 # yapf: disable
@@ -737,11 +745,34 @@ def list_small_kernels():
         NS(length=4000, workgroup_size=256, threads_per_transform=200, factors=(10, 10, 10, 4), runtime_compile=True),
         NS(length=4050, workgroup_size=256, threads_per_transform=135, factors=(10, 5, 3, 3, 3, 3), runtime_compile=True),
         NS(length=4096, workgroup_size=256, threads_per_transform=256, factors=(16, 16, 16), runtime_compile=True),
+        NS(length=4704, workgroup_size=256, threads_per_transform=224, factors=(8, 4, 7, 7, 3), double_precision=False, runtime_compile=True),
+        NS(length=5488, workgroup_size=256, threads_per_transform=196, factors=(7, 4, 7, 4, 7), double_precision=False, runtime_compile=True),
+        NS(length=6144, workgroup_size=512, threads_per_transform=512, factors=(16, 4, 8, 3, 4), double_precision=False, runtime_compile=True),
+        NS(length=6561, workgroup_size=256, threads_per_transform=243, factors=(3, 3, 3, 3, 3, 3, 3, 3), double_precision=False, runtime_compile=True),
+        NS(length=8192, workgroup_size=512, threads_per_transform=512, factors=(16, 4, 4, 4, 8), double_precision=False, runtime_compile=True),
+
+        # configs for 160kiB LDS
+        NS(length=4704, workgroup_size=256, threads_per_transform=224, factors=(8, 4, 7, 7, 3), lds_size_bytes=LDS_160k, runtime_compile=True),
+        NS(length=5488, workgroup_size=256, threads_per_transform=196, factors=(7, 4, 7, 4, 7), lds_size_bytes=LDS_160k, runtime_compile=True),
+        NS(length=6144, workgroup_size=384, threads_per_transform=256, factors=(4, 8, 8, 8, 3), lds_size_bytes=LDS_160k, runtime_compile=True),
+        NS(length=6561, workgroup_size=256, threads_per_transform=243, factors=(3, 3, 3, 3, 3, 3, 3, 3), lds_size_bytes=LDS_160k, runtime_compile=True),
+        NS(length=8192, workgroup_size=512, threads_per_transform=512, factors=(16, 4, 16, 8), lds_size_bytes=LDS_160k, runtime_compile=True),
+        NS(length=9216, workgroup_size=512, threads_per_transform=512, factors=(4, 8, 4, 4, 3, 6), lds_size_bytes=LDS_160k, runtime_compile=True),
+        NS(length=10000, workgroup_size=512, threads_per_transform=500, factors=(4, 5, 5, 10, 10), lds_size_bytes=LDS_160k, runtime_compile=True),
+        NS(length=10240, workgroup_size=512, threads_per_transform=512, factors=(8, 4, 4, 4, 5, 4), lds_size_bytes=LDS_160k, runtime_compile=True),
+        NS(length=10752, workgroup_size=512, threads_per_transform=512, factors=(4, 16, 8, 7, 3), double_precision=False, lds_size_bytes=LDS_160k, runtime_compile=True),
+        NS(length=11200, workgroup_size=512, threads_per_transform=448, factors=(4, 7, 5, 16, 5), double_precision=False, lds_size_bytes=LDS_160k, runtime_compile=True),
+        NS(length=12288, workgroup_size=512, threads_per_transform=512, factors=(8, 8, 4, 6, 8), double_precision=False, lds_size_bytes=LDS_160k, runtime_compile=True),
+        NS(length=16384, workgroup_size=512, threads_per_transform=512, factors=(8, 16, 4, 8, 4), double_precision=False, lds_size_bytes=LDS_160k, runtime_compile=True),
+        NS(length=16807, workgroup_size=384, threads_per_transform=343, factors=(7, 7, 7, 7, 7), double_precision=False, lds_size_bytes=LDS_160k, runtime_compile=True),
+        NS(length=18816, workgroup_size=512, threads_per_transform=448, factors=(8, 8, 7, 7, 6), double_precision=False, lds_size_bytes=LDS_160k, runtime_compile=True),
+        NS(length=19200, workgroup_size=512, threads_per_transform=480, factors=(8, 10, 8, 5, 6), double_precision=False, lds_size_bytes=LDS_160k, runtime_compile=True),
+        NS(length=20480, workgroup_size=512, threads_per_transform=512, factors=(4, 4, 16, 10, 8), double_precision=False, lds_size_bytes=LDS_160k, runtime_compile=True),
     ]
 
     kernels = [NS(**kernel.__dict__,
                   scheme='CS_KERNEL_STOCKHAM',
-                  precision=['sp', 'dp']) for kernel in kernels1d]
+                  precision=['sp','dp'] if not hasattr(kernel, 'double_precision') or kernel.double_precision else ['sp']) for kernel in kernels1d]
 
     return kernels
 
@@ -1135,6 +1166,7 @@ def generate_kernel_functions(kernels, precisions, launchers_json):
                                  threads_per_transform=tpt_list,
                                  transpose=sbrc_transpose_type,
                                  use_3steps_large_twd=use_3steps_large_twd,
+                                 lds_size_bytes=kernel.lds_size_bytes,
                                  pp_child_scheme=pp_child_scheme,
                                  pp_factors = pp_factors,
                                  pp_current_dim = pp_current_dim,
@@ -1188,6 +1220,10 @@ def generate_kernels(kernels, precisions, stockham_gen):
         # Send input if any remaining
         if kernel_idx < num_kernels:
             k = kernels[kernel_idx]
+
+            kernel_precisions = k.precision if hasattr(
+                k, 'precision') else precisions
+
             # 2D single kernels always specify threads per transform
             if isinstance(k.length, list):
                 proc.stdin.write(','.join([str(f)
@@ -1195,13 +1231,14 @@ def generate_kernels(kernels, precisions, stockham_gen):
                 proc.stdin.write(','.join([str(f)
                                            for f in k.factors[1]]) + " ")
                 proc.stdin.write(
-                    ','.join([str(pre_enum[pre]) for pre in precisions]) + " ")
+                    ','.join([str(pre_enum[pre])
+                              for pre in kernel_precisions]) + " ")
                 proc.stdin.write(','.join(
                     [str(f) for f in k.threads_per_transform]))
             else:
                 proc.stdin.write(','.join([str(f) for f in k.factors]) + " ")
                 proc.stdin.write(','.join(
-                    [str(pre_enum[pre]) for pre in precisions]))
+                    [str(pre_enum[pre]) for pre in kernel_precisions]))
                 # 1D kernels might not, and need to default to 'uwide'
                 threads_per_transform = getattr(
                     k, 'threads_per_transform', {
@@ -1244,7 +1281,9 @@ def generate_kernels(kernels, precisions, stockham_gen):
                 proc.stdin.write(','.join([str(f) for f in k.length]))
             
             proc.stdin.write(f' {k.scheme}')
-            proc.stdin.write(f' {kernel_name(k)}\n')
+            proc.stdin.write(f' {kernel_name(k)}')
+            proc.stdin.write(f' {k.lds_size_bytes}')
+            proc.stdin.write('\n')
 
             kernel_idx += 1
             proc.stdin.flush()
@@ -1304,6 +1343,11 @@ def cli():
     all_kernels = list_small_kernels() + list_large_kernels()
 
     kernels += all_kernels + kernels_2d + kernel_3d_pp
+
+    # set default lds size (64k) on kernels if not specified
+    for k in kernels:
+        if not hasattr(k, 'lds_size_bytes'):
+            k.lds_size_bytes = 65536
 
     kernels = unique(kernels)
 

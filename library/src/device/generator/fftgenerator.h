@@ -137,22 +137,6 @@ struct FFTBuffer : public Variable
     }
 };
 
-struct FFTBufferList
-{
-    std::vector<FFTBuffer> buffers;
-
-    FFTBufferList(){};
-    FFTBufferList(std::initializer_list<FFTBuffer> il)
-        : buffers(il){};
-    FFTBufferList(std::vector<FFTBuffer> buffers)
-        : buffers(buffers){};
-
-    void append(FFTBuffer const& buffer)
-    {
-        buffers.push_back(buffer);
-    }
-};
-
 //
 // FFT distributed GPU work helper
 //
@@ -178,13 +162,6 @@ struct FFTGPUWorkParams
     {
         length = product(factors.cbegin(), factors.cend());
         set_pass(0);
-    }
-    FFTGPUWorkParams(unsigned int length,
-                     unsigned int threads_per_transform,
-                     Variable     write,
-                     Variable     thread)
-        : FFTGPUWorkParams(std::vector<unsigned int>{length}, threads_per_transform, write, thread)
-    {
     }
 
     virtual ~FFTGPUWorkParams() = default;
@@ -228,18 +205,13 @@ struct FFTApplyTwiddle;
 struct FFTApplyTwiddleInline;
 struct FFTApplyTwiddleTable;
 struct FFTButterfly;
-struct FFTComplexToReal;
 struct FFTComputeOffsets;
 struct FFTExchange;
 struct FFTExchangeHalf;
 struct FFTExchangeDual;
 struct FFTLoadStockham;
 struct FFTLoadStockhamDual;
-struct FFTLoadStraight;
-struct FFTLoadStraightDual;
-struct FFTRealToComplex;
 struct FFTStoreStockham;
-struct FFTStoreStraight;
 struct FFTBluesteinPadMul;
 struct FFTBluesteinFFTMul;
 struct FFTBluesteinResMul;
@@ -250,18 +222,13 @@ using FFTOperation = std::variant<FFTApplyTwiddle,
                                   FFTApplyTwiddleInline,
                                   FFTApplyTwiddleTable,
                                   FFTButterfly,
-                                  FFTComplexToReal,
                                   FFTComputeOffsets,
                                   FFTExchange,
                                   FFTExchangeHalf,
                                   FFTExchangeDual,
                                   FFTLoadStockham,
                                   FFTLoadStockhamDual,
-                                  FFTLoadStraight,
-                                  FFTLoadStraightDual,
-                                  FFTRealToComplex,
                                   FFTStoreStockham,
-                                  FFTStoreStraight,
                                   FFTBluesteinPadMul,
                                   FFTBluesteinFFTMul,
                                   FFTBluesteinResMul,
@@ -354,131 +321,6 @@ struct FFTComputeOffsets
         stmts += If(batch >= nbatch, {Return()});
 
         return stmts;
-    }
-};
-
-struct FFTLoadStraight : public FFTGPUWork
-{
-    FFTBuffer src, dst;
-
-    FFTLoadStraight() = delete;
-    FFTLoadStraight(FFTBuffer const& dst, FFTBuffer const& src, FFTGPUWorkParams const& params)
-        : FFTGPUWork(params)
-        , src(src)
-        , dst(dst)
-    {
-    }
-
-    StatementList generate(unsigned int const h) const override
-    {
-        StatementList stmts;
-        for(unsigned int w = 0; w < params.width; ++w)
-        {
-            auto tid = params.thread + h * params.threads_per_transform;
-            auto idx = tid + w * (params.length / params.width);
-            stmts += Assign(dst[params.thread + w * params.width],
-                            LoadGlobal(src, src.offset + idx * src.stride));
-        }
-        return stmts;
-    }
-};
-
-struct FFTLoadStraightDual : public FFTGPUWork
-{
-    FFTBuffer src, dst;
-
-    Variable lds_is_real{"lds_is_real", "bool"}; //  XXX
-
-    FFTLoadStraightDual() = delete;
-    FFTLoadStraightDual(FFTBuffer dst, FFTBuffer src, FFTGPUWorkParams params)
-        : FFTGPUWork(params)
-        , src(src)
-        , dst(dst)
-    {
-    }
-
-    StatementList generate(unsigned int const h) const override
-    {
-        StatementList stmts;
-        for(unsigned int w = 0; w < params.width; ++w)
-        {
-            auto tid = params.thread + h * params.threads_per_transform;
-            auto idx = tid + w * (params.length / params.width);
-            stmts += Assign(dst[params.thread + w * params.width], src[idx]);
-        }
-        return StatementList{If{Not{lds_is_real}, stmts}};
-    }
-};
-
-struct FFTStoreStraight : public FFTGPUWork
-{
-    FFTBuffer src, dst;
-
-    FFTStoreStraight() = delete;
-    FFTStoreStraight(FFTBuffer const& dst, FFTBuffer const& src, FFTGPUWorkParams const& params)
-        : FFTGPUWork(params)
-        , src(src)
-        , dst(dst)
-    {
-    }
-
-    StatementList generate(unsigned int h) const override
-    {
-        StatementList stmts;
-        for(unsigned int w = 0; w < params.width; ++w)
-        {
-            auto tid = params.thread + h * params.threads_per_transform;
-            auto idx = (tid / params.nheight) * (params.width * params.nheight)
-                       + tid % params.nheight + w * params.nheight;
-            stmts += StoreGlobal(dst, dst.offset + idx * dst.stride, src[h * params.width + w]);
-        }
-        return stmts;
-    }
-};
-
-struct FFTStoreStraightDual : public FFTGPUWork
-{
-    FFTBuffer src, dst;
-
-    Variable lds_is_real{"lds_is_real", "bool"}; //  XXX
-
-    FFTStoreStraightDual() = delete;
-    FFTStoreStraightDual(FFTBuffer dst, FFTBuffer src, FFTGPUWorkParams params)
-        : FFTGPUWork(params)
-        , src(src)
-        , dst(dst)
-    {
-    }
-
-    StatementList generate(unsigned int const h) const override
-    {
-        StatementList stmts;
-        for(unsigned int w = 0; w < params.width; ++w)
-        {
-            auto tid = params.thread + h * params.threads_per_transform;
-            auto idx = (tid / params.nheight) * (params.width * params.nheight)
-                       + tid % params.nheight + w * params.nheight;
-            stmts += StoreGlobal(dst, dst.offset + idx * dst.stride, src[h * params.width + w]);
-        }
-        return stmts;
-    }
-};
-
-struct FFTRealToComplex
-{
-    StatementList lower() const
-    {
-        // XXX
-        return StatementList{};
-    }
-};
-
-struct FFTComplexToReal
-{
-    StatementList lower() const
-    {
-        // XXX
-        return StatementList{};
     }
 };
 
@@ -1085,8 +927,6 @@ void operator+=(FFTOperationList& opers, const FFTOperationList& ops);
 struct FFTBaseVisitor
 {
     MAKE_VISITOR_OPERATOR(FFTOperation, FFTComputeOffsets);
-    MAKE_VISITOR_OPERATOR(FFTOperation, FFTLoadStraight);
-    MAKE_VISITOR_OPERATOR(FFTOperation, FFTLoadStraightDual);
     MAKE_VISITOR_OPERATOR(FFTOperation, FFTLoadStockham);
     MAKE_VISITOR_OPERATOR(FFTOperation, FFTLoadStockhamDual);
     MAKE_VISITOR_OPERATOR(FFTOperation, FFTApplyTwiddle);
@@ -1096,9 +936,6 @@ struct FFTBaseVisitor
     MAKE_VISITOR_OPERATOR(FFTOperation, FFTExchange);
     MAKE_VISITOR_OPERATOR(FFTOperation, FFTExchangeHalf);
     MAKE_VISITOR_OPERATOR(FFTOperation, FFTExchangeDual);
-    MAKE_VISITOR_OPERATOR(FFTOperation, FFTRealToComplex);
-    MAKE_VISITOR_OPERATOR(FFTOperation, FFTComplexToReal);
-    MAKE_VISITOR_OPERATOR(FFTOperation, FFTStoreStraight);
     MAKE_VISITOR_OPERATOR(FFTOperation, FFTStoreStockham);
     MAKE_VISITOR_OPERATOR(FFTOperation, FFTBluesteinPadMul);
     MAKE_VISITOR_OPERATOR(FFTOperation, FFTBluesteinFFTMul);
@@ -1107,8 +944,6 @@ struct FFTBaseVisitor
     MAKE_VISITOR_OPERATOR(FFTOperation, FFTZero);
 
     MAKE_TRIVIAL_VISIT(FFTOperation, FFTComputeOffsets);
-    MAKE_TRIVIAL_VISIT(FFTOperation, FFTLoadStraight);
-    MAKE_TRIVIAL_VISIT(FFTOperation, FFTLoadStraightDual);
     MAKE_TRIVIAL_VISIT(FFTOperation, FFTLoadStockham);
     MAKE_TRIVIAL_VISIT(FFTOperation, FFTLoadStockhamDual);
     MAKE_TRIVIAL_VISIT(FFTOperation, FFTApplyTwiddle);
@@ -1117,9 +952,6 @@ struct FFTBaseVisitor
     MAKE_TRIVIAL_VISIT(FFTOperation, FFTButterfly);
     MAKE_TRIVIAL_VISIT(FFTOperation, FFTExchangeHalf);
     MAKE_TRIVIAL_VISIT(FFTOperation, FFTExchangeDual);
-    MAKE_TRIVIAL_VISIT(FFTOperation, FFTRealToComplex);
-    MAKE_TRIVIAL_VISIT(FFTOperation, FFTComplexToReal);
-    MAKE_TRIVIAL_VISIT(FFTOperation, FFTStoreStraight);
     MAKE_TRIVIAL_VISIT(FFTOperation, FFTStoreStockham);
     MAKE_TRIVIAL_VISIT(FFTOperation, FFTBluesteinPadMul);
     MAKE_TRIVIAL_VISIT(FFTOperation, FFTBluesteinResMul);
@@ -1149,102 +981,8 @@ struct FFTBaseVisitor
 };
 
 //
-// Detect if list has any complex/real conversions
-//
-
-struct HasRealComplexConversionVisitor : public FFTBaseVisitor
-{
-    bool has_conversion = false;
-
-    FFTOperation visit_FFTRealToComplex(const FFTRealToComplex& x) override
-    {
-        has_conversion = true;
-        return FFTBaseVisitor::visit_FFTRealToComplex(x);
-    }
-
-    FFTOperation visit_FFTComplexToReal(const FFTComplexToReal& x) override
-    {
-        has_conversion = true;
-        return FFTBaseVisitor::visit_FFTComplexToReal(x);
-    }
-};
-
-static bool has_real_complex_conversion(const FFTOperationList& t)
-{
-    auto visitor = HasRealComplexConversionVisitor();
-    visitor(t);
-    return visitor.has_conversion;
-}
-
-//
-// Half LDS transform
-//
-
-struct HalfLDSVisitor : public FFTBaseVisitor
-{
-    FFTOperation visit_FFTExchange(FFTExchange const& x) override
-    {
-        auto lds = x.lds;
-        //        lds.set_real();
-        auto y = FFTExchangeHalf(x.R, lds, x.params);
-        return FFTBaseVisitor::visit_FFTExchangeHalf(y);
-    }
-};
-
-static FFTOperationList make_half_lds(const FFTOperationList& t)
-{
-    if(!has_real_complex_conversion(t))
-    {
-        auto visitor = HalfLDSVisitor();
-        return visitor(t);
-    }
-    return t;
-}
-
-struct DualLDSVisitor : public FFTBaseVisitor
-{
-    FFTBuffer lds_real, lds_complex;
-    Variable  lds_is_real{"lds_is_real", "bool"};
-
-    DualLDSVisitor(const FFTBuffer& lds_real, const FFTBuffer& lds_complex)
-        : lds_real(lds_real)
-        , lds_complex(lds_complex)
-    {
-    }
-
-    FFTOperation visit_FFTExchange(FFTExchange const& x) override
-    {
-        auto y = FFTExchangeDual(x.R, lds_real, lds_complex, x.params);
-        return FFTBaseVisitor::visit_FFTExchangeDual(y);
-    }
-};
-
-static FFTOperationList make_dual_lds(const FFTOperationList& t,
-                                      const FFTBuffer&        lds_real,
-                                      const FFTBuffer&        lds_complex)
-{
-    auto visitor = DualLDSVisitor(lds_real, lds_complex);
-    return visitor(t);
-}
-
-//
 // Twiddle transforms
 //
-
-struct InlineTwiddleVisitor : public FFTBaseVisitor
-{
-    FFTOperation visit_FFTApplyTwiddle(FFTApplyTwiddle const& x) override
-    {
-        auto y = FFTApplyTwiddleInline(x);
-        return FFTBaseVisitor::visit_FFTApplyTwiddleInline(y);
-    }
-};
-
-static FFTOperationList make_inline_twiddle(const FFTOperationList& t)
-{
-    auto visitor = InlineTwiddleVisitor();
-    return visitor(t);
-}
 
 struct TableTwiddleVisitor : public FFTBaseVisitor
 {
@@ -1264,33 +1002,6 @@ struct TableTwiddleVisitor : public FFTBaseVisitor
 static FFTOperationList make_table_twiddle(const FFTOperationList& t, Variable twiddles)
 {
     auto visitor = TableTwiddleVisitor(twiddles);
-    return visitor(t);
-}
-
-//
-// Stride transforms
-//
-
-struct StrideVisitor : public FFTBaseVisitor
-{
-    std::string bufname;
-
-    StrideVisitor(std::string bufname)
-        : bufname(bufname)
-    {
-    }
-
-    FFTBuffer visit_FFTBuffer(FFTBuffer const& x) override
-    {
-        if(x.name == bufname)
-            return FFTBuffer(x.name, x.offset, Literal{1});
-        return x;
-    }
-};
-
-static FFTOperationList make_unit_stride(const FFTOperationList& t, std::string bufname)
-{
-    auto visitor = StrideVisitor(bufname);
     return visitor(t);
 }
 
@@ -1422,96 +1133,6 @@ struct StockhamTransform
         }
 
         ops += FFTStoreStockham(R, X, work);
-
-        return ops;
-    }
-};
-
-struct StockhamDeviceTransform
-{
-    unsigned int              length;
-    std::vector<unsigned int> factors;
-
-    unsigned int threads_per_block;
-    unsigned int threads_per_transform;
-
-    std::shared_ptr<Context> context;
-
-    FFTBuffer R{"R", Literal{0}, Literal{1}, 0};
-    FFTBuffer lds{"lds", Variable{"offset_lds", "int"}, Variable{"stride_lds", "int"}};
-    FFTBuffer X{"X", Variable{"offset", "size_t"}, Variable{"stride_x", "size_t"}};
-
-    Variable dim{"dim", "unsigned int"};
-    Variable nbatch{"nbatch", "size_t"};
-    Variable lengths{"lengths", "size_t", true, true};
-    Variable stride{"stride", "size_t", true, true};
-    Variable offset{"offset", "size_t"};
-
-    Variable write{"write", "bool"};
-    Variable thread{"thread", "size_t"};
-    Variable batch{"batch", "size_t"};
-
-    Variable twiddles{"twiddles", "scalar_type", true, true};
-    Variable load_cb_fn{"load_cb_fn", "void*"};
-    Variable load_cb_data{"load_cb_data", "void*"};
-    Variable load_cb_lds_bytes{"load_cb_lds_bytes", "unsigned int"};
-    Variable store_cb_fn{"store_cb_fn", "void*"};
-    Variable store_cb_data{"store_cb_data", "void*"};
-
-    StockhamDeviceTransform(std::vector<unsigned int> factors,
-                            unsigned int              threads_per_block,
-                            unsigned int              threads_per_transform,
-                            std::shared_ptr<Context>  context)
-        : factors(factors)
-        , threads_per_block(threads_per_block)
-        , threads_per_transform(threads_per_transform)
-        , context(context)
-    {
-        length = product(factors.cbegin(), factors.cend());
-        context->add_argument(lengths);
-        context->add_argument(stride);
-        context->add_argument(nbatch);
-        context->add_argument(load_cb_fn);
-        context->add_argument(load_cb_data);
-        context->add_argument(load_cb_lds_bytes);
-        context->add_argument(store_cb_fn);
-        context->add_argument(store_cb_data);
-        context->add_argument(X.variable());
-        context->add_local(std::get<Variable>(X.offset));
-        context->add_local(std::get<Variable>(X.stride));
-        context->add_local(std::get<Variable>(lds.offset));
-        context->add_local(std::get<Variable>(lds.stride));
-        context->add_local(batch);
-        context->add_local(thread);
-        context->add_local(write);
-        R.size = compute_nregisters(length, factors, threads_per_transform);
-        context->add_local(R.variable());
-    }
-
-    FFTOperationList generate()
-    {
-        FFTOperationList ops;
-        FFTGPUWorkParams work(factors, threads_per_transform, write, thread);
-
-        //ops += FFTLoadStraightDual(R, lds, work);
-
-        for(unsigned int pass = 0; pass < factors.size(); ++pass)
-        {
-            bool first_pass = pass == 0;
-            bool last_pass  = pass == factors.size() - 1;
-
-            work.set_pass(pass);
-
-            if(!first_pass)
-                ops += FFTApplyTwiddle(R, work, context);
-
-            ops += FFTButterfly(R, -1, work);
-
-            if(!last_pass)
-                ops += FFTExchange(R, lds, work);
-        }
-
-        //       ops += FFTStoreStockham(R, lds, work);
 
         return ops;
     }
