@@ -35,6 +35,7 @@
 #   [HOST <default system>]          # Optionally change the default backend
 #   [DEVICE <default system>]        # Optionally change the default backend
 #   [ADVANCED]                       # Optionally mark options as advanced
+#   [GLOBAL]                         # Optionally mark the target as GLOBAL
 # )
 #
 # # Use a custom TBB, CUB, and/or OMP
@@ -53,6 +54,7 @@
 #   IGNORE_DEPRECATED_API         # Silence build warnings about deprecated APIs
 #   IGNORE_DEPRECATED_CPP_DIALECT # Silence build warnings about deprecated compilers and C++ standards
 #   IGNORE_DEPRECATED_CPP_11      # Only silence deprecation warnings for C++11
+#   IGNORE_DEPRECATED_CPP_14      # Only silence deprecation warnings for C++14
 #   IGNORE_DEPRECATED_COMPILER    # Only silence deprecation warnings for old compilers
 #   IGNORE_CUB_VERSION            # Skip configure-time and compile-time CUB version checks
 # )
@@ -76,6 +78,9 @@
 # thrust_debug_target(TargetName "${THRUST_VERSION}")
 
 cmake_minimum_required(VERSION 3.15)
+
+cmake_policy(PUSH)
+cmake_policy(SET CMP0074 NEW)
 
 # Minimum supported libcudacxx version:
 set(thrust_libcudacxx_version "${Thrust_VERSION}")
@@ -107,12 +112,14 @@ set(THRUST_VERSION_COUNT ${${CMAKE_FIND_PACKAGE_NAME}_VERSION_COUNT} CACHE INTER
 function(thrust_create_target target_name)
   thrust_debug("Assembling target ${target_name}. Options: ${ARGN}" internal)
   set(options
+    GLOBAL
     ADVANCED
     FROM_OPTIONS
     IGNORE_CUB_VERSION_CHECK
     IGNORE_DEPRECATED_API
     IGNORE_DEPRECATED_COMPILER
     IGNORE_DEPRECATED_CPP_11
+    IGNORE_DEPRECATED_CPP_14
     IGNORE_DEPRECATED_CPP_DIALECT
   )
   set(keys
@@ -180,7 +187,11 @@ function(thrust_create_target target_name)
   # We can just create an INTERFACE IMPORTED target here instead of going
   # through _thrust_declare_interface_alias as long as we aren't hanging any
   # Thrust/CUB include paths directly on ${target_name}.
-  add_library(${target_name} INTERFACE IMPORTED)
+  set(TCT_AS_GLOBAL )
+  if (TCT_GLOBAL)
+    set(TCT_AS_GLOBAL GLOBAL)
+  endif()
+  add_library(${target_name} INTERFACE IMPORTED ${TCT_AS_GLOBAL})
   target_link_libraries(${target_name}
     INTERFACE
     Thrust::${TCT_HOST}::Host
@@ -583,28 +594,16 @@ macro(_thrust_find_TBB required)
       set(_THRUST_STASH_MODULE_PATH "${CMAKE_MODULE_PATH}")
       set(CMAKE_MODULE_PATH "${_THRUST_CMAKE_DIR}")
 
-      # Push policy CMP0074 to silence warnings about TBB_ROOT being set. This
-      # var is used unconventionally in this FindTBB.cmake module.
-      cmake_policy(PUSH)
-      cmake_policy(SET CMP0074 OLD)
-      set(_THRUST_STASH_TBB_ROOT "${TBB_ROOT}")
-      set(THRUST_TBB_ROOT "" CACHE PATH "Path to the root of the TBB installation.")
-      if (TBB_ROOT AND NOT THRUST_TBB_ROOT)
-      message(
-        "Warning: TBB_ROOT is set. "
-        "Thrust uses THRUST_TBB_ROOT to avoid issues with CMake Policy CMP0074. "
-        "Please set this variable instead when using Thrust with TBB."
-      )
+      # Legacy support for a removed THRUST_TBB_ROOT option:
+      if (THRUST_TBB_ROOT AND NOT TBB_ROOT)
+        set(TBB_ROOT "${THRUST_TBB_ROOT}")
       endif()
-      set(TBB_ROOT "${THRUST_TBB_ROOT}")
 
       find_package(TBB
         ${_THRUST_QUIET_FLAG}
         ${required}
       )
 
-      cmake_policy(POP)
-      set(TBB_ROOT "${_THRUST_STASH_TBB_ROOT}")
       set(CMAKE_MODULE_PATH "${_THRUST_STASH_MODULE_PATH}")
     endif()
 
@@ -619,11 +618,17 @@ endmacro()
 # Wrap the OpenMP flags for CUDA targets
 function(thrust_fixup_omp_target omp_target)
   get_target_property(opts ${omp_target} INTERFACE_COMPILE_OPTIONS)
-  if (opts MATCHES "\\$<\\$<COMPILE_LANGUAGE:CXX>:([^>]*)>")
-    target_compile_options(${omp_target} INTERFACE
-      $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:-Xcompiler=${CMAKE_MATCH_1}>
-    )
-  endif()
+  foreach (opt IN LISTS opts)
+    if (opts MATCHES "\\$<\\$<COMPILE_LANGUAGE:CXX>:SHELL:([^>]*)>")
+      target_compile_options(${omp_target} INTERFACE
+        $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:SHELL:-Xcompiler=${CMAKE_MATCH_1}>
+      )
+    elseif (opts MATCHES "\\$<\\$<COMPILE_LANGUAGE:CXX>:([^>]*)>")
+      target_compile_options(${omp_target} INTERFACE
+        $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:-Xcompiler=${CMAKE_MATCH_1}>
+      )
+    endif()
+  endforeach()
 endfunction()
 
 if (THRUST_DISPATCH_TYPE STREQUAL "Force32bit")
@@ -760,3 +765,5 @@ if (NOT Thrust_CONFIG)
   set(Thrust_CONFIG "${CMAKE_CURRENT_LIST_FILE}")
 endif()
 find_package_handle_standard_args(Thrust CONFIG_MODE)
+
+cmake_policy(POP)
