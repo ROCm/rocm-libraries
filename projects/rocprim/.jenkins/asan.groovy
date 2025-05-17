@@ -14,9 +14,10 @@ def runCI =
 
     def nodes = new dockerNodes(nodeDetails, jobName, prj)
 
-    def commonGroovy
-    def settings = [rocmExamples:true,
+    def settings = [addressSanitizer: true,
                     debug:false]
+
+    def commonGroovy
 
     boolean formatCheck = false
      
