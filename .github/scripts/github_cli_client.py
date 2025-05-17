@@ -142,6 +142,23 @@ class GitHubCLIClient:
                         logger.error(f"Max retries reached for method {method} at {url}. Giving up.")
                         return {}
 
+    def _generate_check_run_payload(self, name: str, head_sha: str, status: str,
+                                    details_url: str, conclusion: str, completed_at: str,
+                                    title: str, summary: str) -> dict:
+        """Create the payload for a check run with potentially empty fields safely coerced to strings."""
+        return {
+            "name": name,
+            "head_sha": head_sha,
+            "status": status,
+            "details_url": details_url,
+            "conclusion": conclusion if status == "completed" else "",
+            "completed_at": completed_at if status == "completed" else "",
+            "output": {
+                "title": title or name,
+                "summary": summary or "",
+            }
+        }
+
     def get_changed_files(self, repo: str, pr: int) -> List[str]:
         """Fetch the changed files in a pull request using GitHub API."""
         url = f"{self.api_url}/repos/{repo}/pulls/{pr}/files?per_page=100"
@@ -244,3 +261,50 @@ class GitHubCLIClient:
                 logger.info(f"Dry run: Labels '{labels_for_logging}' would be applied to PR #{pr_number} in {target_repo}.")
         else:
             logger.info(f"No valid labels to apply to PR #{pr_number} in {target_repo}.")
+
+    def get_head_sha_for_pr(self, repo: str, pr_number: int) -> Optional[str]:
+        """Fetch the head SHA for a given pull request number in a repository."""
+        url = f"{self.api_url}/repos/{repo}/pulls/{pr_number}"
+        logger.debug(f"Request URL: {url}")
+        data = self._get_json(url, f"Failed to fetch PR #{pr_number} in {repo}")
+        return data.get("head", {}).get("sha")
+
+    def get_branch_name_for_pr(self, repo: str, pr_number: int) -> Optional[str]:
+        """Fetch the head branch name for a given pull request number in a repository."""
+        url = f"{self.api_url}/repos/{repo}/pulls/{pr_number}"
+        logger.debug(f"Request URL: {url}")
+        data = self._get_json(url, f"Failed to fetch PR #{pr_number} in {repo}")
+        return data.get("head", {}).get("ref")
+
+    def get_check_runs_for_ref(self, repo: str, ref: str) -> list:
+        """Fetch check runs for a specific reference in a repository."""
+        url = f"{self.api_url}/repos/{repo}/commits/{ref}/check-runs?per_page=100"
+        logger.debug(f"Request URL: {url}")
+        data = self._get_paginated_json(url, f"Failed to get check runs for {repo}@{ref}")
+        return data.get("check_runs", [])
+
+    def get_check_run_by_name(self, repo: str, sha: str, name: str) -> Optional[dict]:
+        """Return the check run with a given name for a specific commit SHA, if it exists."""
+        check_runs = self.get_check_runs_for_ref(repo, sha)
+        for check in check_runs:
+            if check["name"] == name:
+                return check
+        return None
+
+    def upsert_check_run(self, repo: str, name: str, sha: str, status: str,
+                         details_url: str, conclusion: str, completed_at: str,
+                         title: str, summary: str) -> dict:
+        """Create or update a check run for a specific commit SHA."""
+        existing = self.get_check_run_by_name(repo, sha, name)
+        payload = self._generate_check_run_payload(name, sha, status, details_url,
+                                                   conclusion, completed_at, title, summary)
+        logger.debug(f"Check run payload: {payload}")
+        if existing:
+            check_id = existing["id"]
+            url = f"{self.api_url}/repos/{repo}/check-runs/{check_id}"
+            logger.debug(f"Updating check run '{name}' for {repo}@{sha}")
+            return self._request_json("PATCH", url, payload, f"Failed to update check run '{name}'")
+        else:
+            url = f"{self.api_url}/repos/{repo}/check-runs"
+            logger.debug(f"Creating new check run '{name}' for {repo}@{sha}")
+            return self._request_json("POST", url, payload, f"Failed to create check run '{name}'")

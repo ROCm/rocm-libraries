@@ -1,0 +1,77 @@
+# Reflect Fanout Checks GitHub Action
+# ------------------------------------
+# This workflow periodically runs a Python script that reflects the check status of
+# fanout pull requests (in sub-repositories) back onto the monorepo pull request.
+# Using polling mechanism for migration, as getting push events from all the
+# sub-repositories is not feasible.
+#
+# Key Features:
+# - Runs every 15 minutes using a cron schedule
+# - Also supports manual triggering via workflow_dispatch
+# - Uses the GitHub CLI to list all open PRs on the monorepo
+# - For each open PR, executes `pr-reflect-checks.py` to post synthetic checks
+# - Skips closed or merged PRs automatically
+#
+# Prerequisites:
+# - Your Python script must support CLI args: --repo and --pr
+# - The `gh` CLI tool is preinstalled in GitHub-hosted runners
+# - The script must handle cases where fanout branches or checks are missing
+#
+# Example Invocation:
+#   python scripts/reflect/pr-reflect-checks.py --repo ROCm/rocm-libraries --pr 123
+
+
+name: Reflect Subrepo Checks (Polling)
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'  # every 15 minutes
+  workflow_dispatch:
+
+jobs:
+  reflect:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Generate a token
+        id: generate-token
+        uses: actions/create-github-app-token@df432ceedc7162793a195dd1713ff69aefc7379e # v2.0.6
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - name: Checkout code
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          sparse-checkout: .github
+          token: ${{ steps.generate-token.outputs.token }}
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.12'
+
+      - name: Install python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pydantic requests
+
+      - name: Set up Git user
+        run: |
+          git config user.name "assistant-librarian[bot]"
+          git config user.email "assistant-librarian[bot]@users.noreply.github.com"
+
+      - name: Reflect Checks
+        env:
+          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+        run: |
+          prs=$(gh pr list --repo "${{ github.repository }}" --state open --json number --jq '.[].number')
+          if [ -z "$prs" ]; then
+            echo "No open pull requests found — skipping."
+            exit 0
+          fi
+          # Iterate over each pull request and reflect the checks
+          for pr in $prs; do
+            echo "Processing PR #${pr}"
+            python .github/scripts/pr_reflect_checks.py --repo "${{ github.repository }}" --pr "${pr}" --debug
+          done
