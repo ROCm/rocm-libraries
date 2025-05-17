@@ -27,6 +27,7 @@
 #include "cmdparser.hpp"
 
 #include "../common/utils_custom_type.hpp"
+#include "../common/utils_device_ptr.hpp"
 
 // gbench
 #include <benchmark/benchmark.h>
@@ -36,24 +37,23 @@
 
 // rocPRIM
 #include <rocprim/device/config_types.hpp>
+#include <rocprim/device/detail/device_config_helper.hpp>
 #include <rocprim/device/device_search_n.hpp>
-#include <rocprim/device/device_search_n_config.hpp>
 #include <rocprim/functional.hpp>
-#include <rocprim/types.hpp>
+#ifndef BENCHMARK_CONFIG_TUNING
+    #include <rocprim/types.hpp>
+#endif
 
-// C++ Standard Library
-#include <algorithm>
 #include <cstddef>
-#include <functional>
-#include <memory>
-#include <stdint.h>
 #include <string>
-#include <type_traits>
 #include <vector>
-
-using custom_int2            = common::custom_type<int>;
-using custom_double2         = common::custom_type<double>;
-using custom_longlong_double = common::custom_type<long long, double>;
+#ifdef BENCHMARK_CONFIG_TUNING
+    #include <memory>
+#else
+    #include <functional>
+    #include <stdint.h>
+    #include <type_traits>
+#endif
 
 namespace
 {
@@ -75,444 +75,149 @@ constexpr bool is_type_arr_end = true;
 template<typename T>
 constexpr bool is_type_arr_end<T, void_type<typename T::next>> = false;
 
-template<typename Config, typename InputType>
-inline unsigned int search_n_get_item_per_block()
+template<typename Config>
+std::string search_n_config_name()
 {
-    using input_type     = InputType;
-    using config         = Config;
-    using wrapped_config = rocprim::detail::wrapped_search_n_config<config, input_type>;
-
-    hipStream_t                  stream = 0; // default
-    rocprim::detail::target_arch target_arch;
-    HIP_CHECK(rocprim::detail::host_target_arch(stream, target_arch));
-    const auto         params = rocprim::detail::dispatch_target_arch<wrapped_config>(target_arch);
-    const unsigned int block_size       = params.kernel_config.block_size;
-    const unsigned int items_per_thread = params.kernel_config.items_per_thread;
-    const unsigned int items_per_block  = block_size * items_per_thread;
-    return items_per_block;
+    const rocprim::detail::search_n_config_params config = Config();
+    return "{bs:" + std::to_string(config.kernel_config.block_size)
+           + ",ipt:" + std::to_string(config.kernel_config.items_per_thread)
+           + ",threshold:" + std::to_string(config.threshold) + "}";
 }
 
-enum class benchmark_search_n_mode
+#ifndef BENCHMARK_CONFIG_TUNING
+template<>
+std::string search_n_config_name<rocprim::default_config>()
 {
-    NORMAL = 0,
-    NOISE  = 1,
+    return "default_config";
+}
+#endif
+
+template<size_t Value>
+struct count_equal_to
+{
+    std::string name() const
+    {
+        return "count_equal_to<" + std::to_string(Value) + ">";
+    }
+    constexpr size_t resolve(size_t) const
+    {
+        return Value;
+    }
 };
 
-inline std::string to_string(benchmark_search_n_mode e) noexcept
+template<size_t Value>
+struct count_is_percent_of_size
 {
-    switch(e)
+    std::string name() const
     {
-        case benchmark_search_n_mode::NORMAL: return "NORMAL";
-        case benchmark_search_n_mode::NOISE: return "NOISE";
-        default: return "UNKNOWN";
+        return "count_is_percent_of_size<" + std::to_string(Value) + ">";
     }
-}
+    constexpr size_t resolve(size_t size) const
+    {
+        return size * Value / 100;
+    }
+};
 
 } // namespace
 
-template<typename InputType, typename OutputType, benchmark_search_n_mode mode>
-class benchmark_search_n
+template<class InputType,
+         class OutputType,
+         class CountCalculator,
+         class Config = rocprim::default_config>
+class benchmark_search_n : public benchmark_utils::autotune_interface
 {
-public:
-    const managed_seed     seed;
-    const hipStream_t      stream;
-    size_t                 size_byte;
-    size_t                 count_byte;
-    size_t                 start_pos_byte;
-    InputType              value;
-    std::vector<InputType> input;
-
-private:
-    size_t       size;
-    size_t       count;
-    size_t       start_pos;
-    const size_t warmup_size       = 10;
-    const size_t batch_size        = 10;
-    size_t       temp_storage_size = 0;
-    size_t       noise_sequence    = 0;
-    bool         create_noise      = false;
-
-    hipEvent_t start;
-    hipEvent_t stop;
-
-    void*       d_temp_storage = nullptr;
-    InputType*  d_input;
-    OutputType* d_output;
-    InputType*  d_value;
-
-    void create() noexcept
-    {
-        switch(mode)
-        {
-            case benchmark_search_n_mode::NORMAL:
-                {
-                    input.resize(size);
-                    if(start_pos + count < size)
-                    {
-                        std::fill(input.begin(), input.begin() + start_pos, 0);
-                        std::fill(input.begin() + start_pos,
-                                  input.begin() + count + start_pos,
-                                  value);
-                        std::fill(input.begin() + count + start_pos, input.end(), 0);
-                    }
-                    else
-                    {
-                        std::fill(input.begin(), input.end(), 0);
-                    }
-                    break;
-                }
-            case benchmark_search_n_mode::NOISE:
-                {
-                    InputType h_noise{0};
-                    input = std::vector<InputType>(size, value);
-
-                    if(create_noise)
-                    {
-                        size_t cur_tile  = 0;
-                        size_t last_tile = size / count - 1;
-                        while(cur_tile != last_tile)
-                        {
-                            input[cur_tile * count + count - 1] = h_noise;
-                            ++cur_tile;
-                        }
-                    }
-                    break;
-                }
-            default:
-                {
-                    break;
-                }
-        }
-
-        HIP_CHECK(hipMallocAsync(&d_value, sizeof(InputType), stream));
-        HIP_CHECK(hipMallocAsync(&d_input, sizeof(InputType) * input.size(), stream));
-        HIP_CHECK(hipMallocAsync(&d_output, sizeof(OutputType), stream));
-        HIP_CHECK(
-            hipMemcpyAsync(d_value, &value, sizeof(InputType), hipMemcpyHostToDevice, stream));
-        HIP_CHECK(hipMemcpyAsync(d_input,
-                                 input.data(),
-                                 sizeof(InputType) * input.size(),
-                                 hipMemcpyHostToDevice,
-                                 stream));
-
-        HIP_CHECK(hipEventCreate(&start));
-        HIP_CHECK(hipEventCreate(&stop));
-    }
-
-    void release() noexcept
-    {
-        decltype(input) tmp;
-        input.swap(tmp); // clear input memspace
-        HIP_CHECK(hipEventDestroy(start));
-        HIP_CHECK(hipEventDestroy(stop));
-        HIP_CHECK(hipFree(d_value));
-
-        HIP_CHECK(hipFree(d_input));
-        HIP_CHECK(hipFree(d_output));
-    }
-
-    void launch_search_n()
-    {
-        HIP_CHECK(::rocprim::search_n(d_temp_storage,
-                                      temp_storage_size,
-                                      d_input,
-                                      d_output,
-                                      size,
-                                      count,
-                                      d_value,
-                                      rocprim::equal_to<InputType>{},
-                                      stream,
-                                      false));
-    }
-
-    static void run(benchmark::State& state, benchmark_search_n const* _self)
-    {
-        auto& self = *const_cast<benchmark_search_n*>(_self);
-        self.create();
-
-        // allocate memory
-        self.launch_search_n();
-        HIP_CHECK(hipMallocAsync(&self.d_temp_storage, self.temp_storage_size, self.stream));
-        // Warm-up
-        for(size_t i = 0; i < self.warmup_size; ++i)
-        {
-            self.launch_search_n();
-        }
-        HIP_CHECK(hipStreamSynchronize(self.stream));
-
-        // Run
-        for(auto _ : state)
-        {
-            // Record start event
-            HIP_CHECK(hipEventRecord(self.start, self.stream));
-
-            for(size_t i = 0; i < self.batch_size; ++i)
-            {
-                self.launch_search_n();
-            }
-
-            // Record stop event and wait until it completes
-            HIP_CHECK(hipEventRecord(self.stop, self.stream));
-            HIP_CHECK(hipEventSynchronize(self.stop));
-
-            float elapsed_mseconds;
-            HIP_CHECK(hipEventElapsedTime(&elapsed_mseconds, self.start, self.stop));
-            state.SetIterationTime(elapsed_mseconds / 1000);
-        }
-        // Clean-up
-        HIP_CHECK(hipFree(self.d_temp_storage));
-        self.d_temp_storage    = nullptr;
-        self.temp_storage_size = 0;
-        state.SetBytesProcessed(state.iterations() * self.batch_size * self.size
-                                * sizeof(*(self.d_input)));
-        state.SetItemsProcessed(state.iterations() * self.batch_size * self.size);
-        self.release();
-    }
 
 public:
-    benchmark_search_n(
-        const managed_seed _seed,
-        const hipStream_t  _stream,
-        const size_t       _size_byte,
-        const size_t       _count_byte, // for NOISE benchmarks, this is the multiple of count
-        const size_t       _start_pos_byte) noexcept
-        : seed(_seed)
-        , stream(_stream)
-        , size_byte(_size_byte)
-        , count_byte(_count_byte)
-        , start_pos_byte(_start_pos_byte)
-        , value{1}
-        , input()
+    void run(benchmark_utils::state&& state) override
     {
-        switch(mode)
-        {
-            case benchmark_search_n_mode::NORMAL:
-                {
-                    size      = size_byte / sizeof(InputType);
-                    count     = count_byte / sizeof(InputType);
-                    start_pos = start_pos_byte / sizeof(InputType);
-                    break;
-                }
-            case benchmark_search_n_mode::NOISE:
-                {
-                    size  = size_byte / sizeof(InputType);
-                    count = count_byte;
-                    noise_sequence
-                        = _start_pos_byte == (size_t)-1
-                              ? search_n_get_item_per_block<rocprim::default_config, InputType>()
-                              : _start_pos_byte;
+        const auto& stream    = state.stream;
+        const auto& size_byte = state.bytes;
 
-                    if(size > noise_sequence * count)
-                    {
-                        count        = noise_sequence * count;
-                        create_noise = true;
-                    }
-                    break;
-                }
+        InputType                      h_noise{0};
+        InputType                      h_value{1};
+        common::device_ptr<void>       d_temp_storage;
+        size_t                         temp_storage_size = 0;
+        size_t                         size;
+        size_t                         count;
+        std::vector<InputType>         input{};
+        common::device_ptr<InputType>  d_input;
+        common::device_ptr<OutputType> d_output(1);
+        common::device_ptr<InputType>  d_value(std::vector<decltype(h_value)>{h_value}, stream);
+
+        size = size_byte / sizeof(InputType);
+
+        count            = CountCalculator{}.resolve(size);
+        size_t cur_tile  = 0;
+        size_t last_tile = size / count - 1;
+        input            = std::vector<InputType>(size, h_value);
+        while(cur_tile != last_tile)
+        {
+            input[cur_tile * count + count - 1] = h_noise;
+            ++cur_tile;
         }
+
+        d_input.store_async(input, stream);
+
+        auto launch_search_n = [&]()
+        {
+            HIP_CHECK(::rocprim::search_n<Config>(d_temp_storage.get(),
+                                                  temp_storage_size,
+                                                  d_input.get(),
+                                                  d_output.get(),
+                                                  size,
+                                                  count,
+                                                  d_value.get(),
+                                                  rocprim::equal_to<InputType>{},
+                                                  stream,
+                                                  false));
+        };
+
+        // allocate temp memory
+        launch_search_n();
+        d_temp_storage.resize_async(temp_storage_size, stream);
+
+        state.run([&] { launch_search_n(); });
+
+        state.set_throughput(size, sizeof(InputType));
     }
 
-    benchmark::internal::Benchmark* bench_register() const noexcept
+    std::string name() const override
     {
-        return benchmark::RegisterBenchmark(
-            bench_naming::format_name(
-                "{lvl:device,algo:search_n,input_type:" + std::string(Traits<InputType>::name())
-                + ",size:" + std::to_string(size) + ",count:" + std::to_string(count)
-                + ",mode:" + to_string(mode) + ",cfg:default_config}")
-                .c_str(),
-            run,
-            this);
+        return bench_naming::format_name("{lvl:device,algo:search_n,data_type:"
+                                         + std::string(Traits<InputType>::name())
+                                         + ",count_calculator:" + CountCalculator{}.name()
+                                         + ",cfg:" + search_n_config_name<Config>() + "}")
+            .c_str();
     }
 };
 
-using destructor_t = std::function<void(void)>;
-static std::vector<destructor_t> destructors;
+#ifdef BENCHMARK_CONFIG_TUNING
 
-static void clean_up_benchmarks_search_n()
-{
-    for(auto& i : destructors)
-    {
-        i();
-    }
-    destructors = {};
-}
-
-template<typename T>
-inline void add_one_benchmark_search_n(std::vector<benchmark::internal::Benchmark*>& benchmarks,
-                                       const managed_seed                            _seed,
-                                       const hipStream_t                             _stream,
-                                       const size_t                                  _size_byte)
-{
-    // normal
-    auto half = new benchmark_search_n<T, size_t, benchmark_search_n_mode::NORMAL>(_seed,
-                                                                                   _stream,
-                                                                                   _size_byte,
-                                                                                   _size_byte / 2,
-                                                                                   _size_byte / 2);
-    // small count test
-    auto small_count1
-        = new benchmark_search_n<T, size_t, benchmark_search_n_mode::NOISE>(_seed,
-                                                                            _stream,
-                                                                            _size_byte,
-                                                                            1, // count times
-                                                                            1);
-    auto small_count2
-        = new benchmark_search_n<T, size_t, benchmark_search_n_mode::NOISE>(_seed,
-                                                                            _stream,
-                                                                            _size_byte,
-                                                                            1, // count times
-                                                                            2);
-    auto small_count4
-        = new benchmark_search_n<T, size_t, benchmark_search_n_mode::NOISE>(_seed,
-                                                                            _stream,
-                                                                            _size_byte,
-                                                                            1, // count times
-                                                                            4);
-    auto small_count6
-        = new benchmark_search_n<T, size_t, benchmark_search_n_mode::NOISE>(_seed,
-                                                                            _stream,
-                                                                            _size_byte,
-                                                                            1, // count times
-                                                                            6);
-    auto small_count8
-        = new benchmark_search_n<T, size_t, benchmark_search_n_mode::NOISE>(_seed,
-                                                                            _stream,
-                                                                            _size_byte,
-                                                                            1, // count times
-                                                                            8);
-    auto small_count10
-        = new benchmark_search_n<T, size_t, benchmark_search_n_mode::NOISE>(_seed,
-                                                                            _stream,
-                                                                            _size_byte,
-                                                                            1, // count times
-                                                                            10);
-    auto small_count12
-        = new benchmark_search_n<T, size_t, benchmark_search_n_mode::NOISE>(_seed,
-                                                                            _stream,
-                                                                            _size_byte,
-                                                                            1, // count times
-                                                                            12);
-    auto small_count36
-        = new benchmark_search_n<T, size_t, benchmark_search_n_mode::NOISE>(_seed,
-                                                                            _stream,
-                                                                            _size_byte,
-                                                                            1, // count times
-                                                                            36);
-    // mid count test
-    auto mid_count1023
-        = new benchmark_search_n<T, size_t, benchmark_search_n_mode::NOISE>(_seed,
-                                                                            _stream,
-                                                                            _size_byte,
-                                                                            1, // count times
-                                                                            1023);
-    auto mid_count2047
-        = new benchmark_search_n<T, size_t, benchmark_search_n_mode::NOISE>(_seed,
-                                                                            _stream,
-                                                                            _size_byte,
-                                                                            1, // count times
-                                                                            2047);
-
-    auto mid_count4095
-        = new benchmark_search_n<T, size_t, benchmark_search_n_mode::NOISE>(_seed,
-                                                                            _stream,
-                                                                            _size_byte,
-                                                                            1, // count times
-                                                                            4095);
-    // big input
-    auto big_count3 = new benchmark_search_n<T, size_t, benchmark_search_n_mode::NOISE>(
-        _seed,
-        _stream,
-        _size_byte,
-        3, // count times
-        (size_t)-1); // block_size
-    auto big_count6 = new benchmark_search_n<T, size_t, benchmark_search_n_mode::NOISE>(
-        _seed,
-        _stream,
-        _size_byte,
-        6, // count times
-        (size_t)-1); // block_size
-    std::vector<benchmark::internal::Benchmark*> bs = {
-
-        small_count1->bench_register(),
-        small_count2->bench_register(),
-        small_count4->bench_register(),
-        small_count6->bench_register(),
-        small_count8->bench_register(),
-        small_count10->bench_register(),
-        small_count12->bench_register(),
-        small_count36->bench_register(),
-
-        mid_count1023->bench_register(),
-        mid_count2047->bench_register(),
-        mid_count4095->bench_register(),
-
-        big_count3->bench_register(),
-        big_count6->bench_register(),
-        half->bench_register()};
-
-    destructors.emplace_back(
-        [=]()
-        {
-            delete small_count1;
-            delete small_count2;
-            delete small_count4;
-            delete small_count6;
-            delete small_count8;
-            delete small_count10;
-            delete small_count12;
-            delete small_count36;
-
-            delete mid_count1023;
-            delete mid_count2047;
-            delete mid_count4095;
-
-            delete big_count3;
-            delete big_count6;
-
-            delete half;
-        });
-
-    benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
-}
-
-template<typename T, std::enable_if_t<!is_type_arr_end<T>, bool> = true>
-inline void add_benchmark_search_n(std::vector<benchmark::internal::Benchmark*>& benchmarks,
-                                   const managed_seed                            _seed,
-                                   const hipStream_t                             _stream,
-                                   const size_t                                  _size_byte)
-{
-    add_one_benchmark_search_n<typename T::type>(benchmarks, _seed, _stream, _size_byte);
-    add_benchmark_search_n<typename T::next>(benchmarks, _seed, _stream, _size_byte);
-}
-template<typename T, std::enable_if_t<is_type_arr_end<T>, bool> = true>
-inline void add_benchmark_search_n(std::vector<benchmark::internal::Benchmark*>& benchmarks,
-                                   const managed_seed                            _seed,
-                                   const hipStream_t                             _stream,
-                                   const size_t                                  _size_byte)
-{
-    add_one_benchmark_search_n<typename T::type>(benchmarks, _seed, _stream, _size_byte);
-}
-
-using benchmark_search_n_types = type_arr<custom_int2,
-                                          custom_longlong_double,
-                                          int8_t,
-                                          int16_t,
-                                          int32_t,
-                                          int64_t,
-                                          rocprim::int128_t,
-                                          rocprim::uint128_t,
-                                          rocprim::half,
-                                          float,
-                                          double>;
-
-template<typename InputT, unsigned int BlockSize>
+template<typename T, unsigned int BlockSize, unsigned int ItemsPerThread, size_t Threshold>
 struct device_search_n_benchmark_generator
 {
-    // TODO: add implementation
-    struct create_search_n_algorithm
-    {};
-    // TODO: add implementation
-    static void create(std::vector<std::unique_ptr<config_autotune_interface>>&) {}
+    static void create(std::vector<std::unique_ptr<benchmark_utils::autotune_interface>>& storage)
+    {
+        using config = rocprim::search_n_config<BlockSize, ItemsPerThread, Threshold>;
+        storage.emplace_back(
+            std::make_unique<benchmark_search_n<T, size_t, count_equal_to<1>, config>>());
+        storage.emplace_back(
+            std::make_unique<benchmark_search_n<T, size_t, count_equal_to<6>, config>>());
+        storage.emplace_back(
+            std::make_unique<benchmark_search_n<T, size_t, count_equal_to<10>, config>>());
+        storage.emplace_back(
+            std::make_unique<benchmark_search_n<T, size_t, count_equal_to<14>, config>>());
+        storage.emplace_back(
+            std::make_unique<benchmark_search_n<T, size_t, count_equal_to<25>, config>>());
+        storage.emplace_back(
+            std::make_unique<
+                benchmark_search_n<T, size_t, count_is_percent_of_size<50>, config>>());
+        storage.emplace_back(
+            std::make_unique<
+                benchmark_search_n<T, size_t, count_is_percent_of_size<100>, config>>());
+    }
 };
+
+#endif // BENCHMARK_CONFIG_TUNING
 
 #endif // ROCPRIM_BENCHMARK_DEVICE_SEARCH_N_PARALLEL_HPP_

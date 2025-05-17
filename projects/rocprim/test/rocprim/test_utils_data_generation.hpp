@@ -28,13 +28,11 @@
 #include "../common_test_header.hpp"
 
 #include "test_seed.hpp"
-#include "test_utils_custom_float_traits_type.hpp"
 #include "test_utils_custom_float_type.hpp"
 #include "test_utils_custom_test_types.hpp"
 
 #include <rocprim/config.hpp>
 #include <rocprim/type_traits.hpp>
-#include <rocprim/type_traits_interface.hpp>
 #include <rocprim/types.hpp>
 
 #include <algorithm>
@@ -60,11 +58,6 @@ struct numeric_limits_custom_test_type : public numeric_limits<typename T::value
 } // namespace detail
 
 // Numeric limits which also supports common::custom_type<T, T, true> and custom_test_array_type<T, N> classes
-template<>
-struct numeric_limits<test_utils::custom_float_traits_type>
-    : detail::numeric_limits_custom_test_type<test_utils::custom_float_traits_type>
-{};
-
 template<>
 struct numeric_limits<test_utils::custom_float_type>
     : detail::numeric_limits_custom_test_type<test_utils::custom_float_type>

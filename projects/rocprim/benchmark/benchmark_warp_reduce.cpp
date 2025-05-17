@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -21,10 +21,9 @@
 // SOFTWARE.
 
 #include "benchmark_utils.hpp"
-// CmdParser
-#include "cmdparser.hpp"
 
-// Google Benchmark
+#include "../common/utils_device_ptr.hpp"
+
 #include <benchmark/benchmark.h>
 
 // HIP API
@@ -41,52 +40,54 @@
 #include <type_traits>
 #include <vector>
 
-#ifndef DEFAULT_BYTES
-const size_t DEFAULT_BYTES = 1024 * 1024 * 32 * 4;
-#endif
-
-template<bool AllReduce, typename T, unsigned int WarpSize, unsigned int Trials>
+template<bool AllReduce, typename T, unsigned int VirtualWaveSize, unsigned int Trials>
 __global__ __launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE)
 void warp_reduce_kernel(const T* d_input, T* d_output)
 {
-    const unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
-
-    auto value = d_input[i];
-
-    using wreduce_t = rocprim::warp_reduce<T, WarpSize, AllReduce>;
-    __shared__ typename wreduce_t::storage_type storage;
-    ROCPRIM_NO_UNROLL
-    for(unsigned int trial = 0; trial < Trials; ++trial)
+    if constexpr(VirtualWaveSize <= rocprim::arch::wavefront::max_size())
     {
-        wreduce_t().reduce(value, value, storage);
-    }
+        const unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
 
-    d_output[i] = value;
+        auto value = d_input[i];
+
+        using wreduce_t = rocprim::warp_reduce<T, VirtualWaveSize, AllReduce>;
+        __shared__ typename wreduce_t::storage_type storage;
+        ROCPRIM_NO_UNROLL
+        for(unsigned int trial = 0; trial < Trials; ++trial)
+        {
+            wreduce_t().reduce(value, value, storage);
+        }
+
+        d_output[i] = value;
+    }
 }
 
-template<typename T, typename Flag, unsigned int WarpSize, unsigned int Trials>
+template<typename T, typename Flag, unsigned int VirtualWaveSize, unsigned int Trials>
 __global__ __launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE)
 void segmented_warp_reduce_kernel(const T* d_input, Flag* d_flags, T* d_output)
 {
-    const unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
-
-    auto value = d_input[i];
-    auto flag  = d_flags[i];
-
-    using wreduce_t = rocprim::warp_reduce<T, WarpSize>;
-    __shared__ typename wreduce_t::storage_type storage;
-    ROCPRIM_NO_UNROLL
-    for(unsigned int trial = 0; trial < Trials; ++trial)
+    if constexpr(VirtualWaveSize <= rocprim::arch::wavefront::max_size())
     {
-        wreduce_t().head_segmented_reduce(value, value, flag, storage);
-    }
+        const unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
 
-    d_output[i] = value;
+        auto value = d_input[i];
+        auto flag  = d_flags[i];
+
+        using wreduce_t = rocprim::warp_reduce<T, VirtualWaveSize>;
+        __shared__ typename wreduce_t::storage_type storage;
+        ROCPRIM_NO_UNROLL
+        for(unsigned int trial = 0; trial < Trials; ++trial)
+        {
+            wreduce_t().head_segmented_reduce(value, value, flag, storage);
+        }
+
+        d_output[i] = value;
+    }
 }
 
 template<bool         AllReduce,
          bool         Segmented,
-         unsigned int WarpSize,
+         unsigned int VirtualWaveSize,
          unsigned int BlockSize,
          unsigned int Trials,
          typename T,
@@ -95,7 +96,7 @@ inline auto execute_warp_reduce_kernel(
     T* input, T* output, Flag* /* flags */, size_t size, hipStream_t stream) ->
     typename std::enable_if<!Segmented>::type
 {
-    hipLaunchKernelGGL(HIP_KERNEL_NAME(warp_reduce_kernel<AllReduce, T, WarpSize, Trials>),
+    hipLaunchKernelGGL(HIP_KERNEL_NAME(warp_reduce_kernel<AllReduce, T, VirtualWaveSize, Trials>),
                        dim3(size / BlockSize),
                        dim3(BlockSize),
                        0,
@@ -107,7 +108,7 @@ inline auto execute_warp_reduce_kernel(
 
 template<bool         AllReduce,
          bool         Segmented,
-         unsigned int WarpSize,
+         unsigned int VirtualWaveSize,
          unsigned int BlockSize,
          unsigned int Trials,
          typename T,
@@ -116,28 +117,30 @@ inline auto
     execute_warp_reduce_kernel(T* input, T* output, Flag* flags, size_t size, hipStream_t stream) ->
     typename std::enable_if<Segmented>::type
 {
-    hipLaunchKernelGGL(HIP_KERNEL_NAME(segmented_warp_reduce_kernel<T, Flag, WarpSize, Trials>),
-                       dim3(size / BlockSize),
-                       dim3(BlockSize),
-                       0,
-                       stream,
-                       input,
-                       flags,
-                       output);
+    hipLaunchKernelGGL(
+        HIP_KERNEL_NAME(segmented_warp_reduce_kernel<T, Flag, VirtualWaveSize, Trials>),
+        dim3(size / BlockSize),
+        dim3(BlockSize),
+        0,
+        stream,
+        input,
+        flags,
+        output);
     HIP_CHECK(hipGetLastError());
 }
 
 template<bool AllReduce,
          bool Segmented,
          typename T,
-         unsigned int WarpSize,
+         unsigned int VirtualWaveSize,
          unsigned int BlockSize,
          unsigned int Trials = 100>
-void run_benchmark(benchmark::State&   state,
-                   size_t              bytes,
-                   const managed_seed& seed,
-                   hipStream_t         stream)
+void run_benchmark(benchmark_utils::state&& state)
 {
+    const auto& stream = state.stream;
+    const auto& bytes  = state.bytes;
+    const auto& seed   = state.seed;
+
     using flag_type = unsigned char;
 
     // Calculate the number of elements
@@ -148,139 +151,63 @@ void run_benchmark(benchmark::State&   state,
     const auto     random_range = limit_random_range<T>(0, 10);
     std::vector<T> input
         = get_random_data<T>(size, random_range.first, random_range.second, seed.get_0());
-    std::vector<flag_type> flags = get_random_data<flag_type>(size, 0, 1, seed.get_1());
-    T*                     d_input;
-    flag_type*             d_flags;
-    T*                     d_output;
-    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_input), size * sizeof(T)));
-    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_flags), size * sizeof(flag_type)));
-    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_output), size * sizeof(T)));
-    HIP_CHECK(hipMemcpy(d_input, input.data(), size * sizeof(T), hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(d_flags, flags.data(), size * sizeof(flag_type), hipMemcpyHostToDevice));
+    std::vector<flag_type>        flags = get_random_data<flag_type>(size, 0, 1, seed.get_1());
+    common::device_ptr<T>         d_input(input);
+    common::device_ptr<flag_type> d_flags(flags);
+    common::device_ptr<T>         d_output(size);
     HIP_CHECK(hipDeviceSynchronize());
 
-    // HIP events creation
-    hipEvent_t start, stop;
-    HIP_CHECK(hipEventCreate(&start));
-    HIP_CHECK(hipEventCreate(&stop));
+    state.run(
+        [&]
+        {
+            execute_warp_reduce_kernel<AllReduce, Segmented, VirtualWaveSize, BlockSize, Trials>(
+                d_input.get(),
+                d_output.get(),
+                d_flags.get(),
+                size,
+                stream);
+        });
 
-    for(auto _ : state)
-    {
-        // Record start event
-        HIP_CHECK(hipEventRecord(start, stream));
-
-        execute_warp_reduce_kernel<AllReduce, Segmented, WarpSize, BlockSize, Trials>(d_input,
-                                                                                      d_output,
-                                                                                      d_flags,
-                                                                                      size,
-                                                                                      stream);
-
-        // Record stop event and wait until it completes
-        HIP_CHECK(hipEventRecord(stop, stream));
-        HIP_CHECK(hipEventSynchronize(stop));
-
-        float elapsed_mseconds;
-        HIP_CHECK(hipEventElapsedTime(&elapsed_mseconds, start, stop));
-        state.SetIterationTime(elapsed_mseconds / 1000);
-    }
-
-    // Destroy HIP events
-    HIP_CHECK(hipEventDestroy(start));
-    HIP_CHECK(hipEventDestroy(stop));
-
-    state.SetBytesProcessed(state.iterations() * Trials * size * sizeof(T));
-    state.SetItemsProcessed(state.iterations() * Trials * size);
-
-    HIP_CHECK(hipFree(d_input));
-    HIP_CHECK(hipFree(d_output));
-    HIP_CHECK(hipFree(d_flags));
+    state.set_throughput(Trials * size, sizeof(T));
 }
 
 #define CREATE_BENCHMARK(T, WS, BS)                                                           \
-    benchmark::RegisterBenchmark(                                                             \
+    executor.queue_fn(                                                                        \
         bench_naming::format_name("{lvl:warp,algo:reduce,key_type:" #T ",broadcast_result:"   \
                                   + std::string(AllReduce ? "true" : "false")                 \
                                   + ",segmented:" + std::string(Segmented ? "true" : "false") \
                                   + ",ws:" #WS ",cfg:{bs:" #BS "}}")                          \
             .c_str(),                                                                         \
-        run_benchmark<AllReduce, Segmented, T, WS, BS>,                                       \
-        bytes,                                                                                \
-        seed,                                                                                 \
-        stream)
+        run_benchmark<AllReduce, Segmented, T, WS, BS>);
 
-#define BENCHMARK_TYPE(type)                                        \
-    CREATE_BENCHMARK(type, 32, 64), CREATE_BENCHMARK(type, 37, 64), \
-        CREATE_BENCHMARK(type, 61, 64), CREATE_BENCHMARK(type, 64, 64)
+// clang-format off
+#define BENCHMARK_TYPE(type)       \
+    CREATE_BENCHMARK(type, 32, 64) \
+    CREATE_BENCHMARK(type, 37, 64) \
+    CREATE_BENCHMARK(type, 61, 64) \
+    CREATE_BENCHMARK(type, 64, 64)
+// clang-format on
 
 template<bool AllReduce, bool Segmented>
-void add_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
-                    size_t                                        bytes,
-                    const managed_seed&                           seed,
-                    hipStream_t                                   stream)
+void add_benchmarks(benchmark_utils::executor& executor)
 {
-    std::vector<benchmark::internal::Benchmark*> bs = {BENCHMARK_TYPE(int),
-                                                       BENCHMARK_TYPE(float),
-                                                       BENCHMARK_TYPE(double),
-                                                       BENCHMARK_TYPE(int8_t),
-                                                       BENCHMARK_TYPE(uint8_t),
-                                                       BENCHMARK_TYPE(rocprim::half),
-                                                       BENCHMARK_TYPE(rocprim::int128_t),
-                                                       BENCHMARK_TYPE(rocprim::uint128_t)};
-
-    benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
+    BENCHMARK_TYPE(int)
+    BENCHMARK_TYPE(float)
+    BENCHMARK_TYPE(double)
+    BENCHMARK_TYPE(int8_t)
+    BENCHMARK_TYPE(uint8_t)
+    BENCHMARK_TYPE(rocprim::half)
+    BENCHMARK_TYPE(rocprim::int128_t)
+    BENCHMARK_TYPE(rocprim::uint128_t)
 }
 
 int main(int argc, char* argv[])
 {
-    cli::Parser parser(argc, argv);
-    parser.set_optional<size_t>("size", "size", DEFAULT_BYTES, "number of bytes");
-    parser.set_optional<int>("trials", "trials", -1, "number of iterations");
-    parser.set_optional<std::string>("name_format",
-                                     "name_format",
-                                     "human",
-                                     "either: json,human,txt");
-    parser.set_optional<std::string>("seed", "seed", "random", get_seed_message());
-    parser.run_and_exit_if_error();
+    benchmark_utils::executor executor(argc, argv, 128 * benchmark_utils::MiB, 1, 0);
 
-    // Parse argv
-    benchmark::Initialize(&argc, argv);
-    const size_t bytes  = parser.get<size_t>("size");
-    const int    trials = parser.get<int>("trials");
-    bench_naming::set_format(parser.get<std::string>("name_format"));
-    const std::string  seed_type = parser.get<std::string>("seed");
-    const managed_seed seed(seed_type);
+    add_benchmarks<false, false>(executor);
+    add_benchmarks<true, false>(executor);
+    add_benchmarks<false, true>(executor);
 
-    // HIP
-    hipStream_t stream = 0; // default
-
-    // Benchmark info
-    add_common_benchmark_info();
-    benchmark::AddCustomContext("bytes", std::to_string(bytes));
-    benchmark::AddCustomContext("seed", seed_type);
-
-    // Add benchmarks
-    std::vector<benchmark::internal::Benchmark*> benchmarks;
-    add_benchmarks<false, false>(benchmarks, bytes, seed, stream);
-    add_benchmarks<true, false>(benchmarks, bytes, seed, stream);
-    add_benchmarks<false, true>(benchmarks, bytes, seed, stream);
-
-    // Use manual timing
-    for(auto& b : benchmarks)
-    {
-        b->UseManualTime();
-        b->Unit(benchmark::kMillisecond);
-    }
-
-    // Force number of iterations
-    if(trials > 0)
-    {
-        for(auto& b : benchmarks)
-        {
-            b->Iterations(trials);
-        }
-    }
-
-    // Run benchmarks
-    benchmark::RunSpecifiedBenchmarks();
-    return 0;
+    executor.run();
 }

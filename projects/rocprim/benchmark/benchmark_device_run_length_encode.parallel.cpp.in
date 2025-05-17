@@ -28,7 +28,7 @@
 #include <stdint.h>
 
 namespace {
-    auto benchmarks = config_autotune_register::create_bulk(
+    auto unused = benchmark_utils::executor::queue_autotune(
         device_run_length_encode_benchmark_generator<
         @KeyType@,
         @BlockSize@>::create);

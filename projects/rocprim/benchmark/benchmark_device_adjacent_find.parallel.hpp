@@ -66,7 +66,7 @@ inline std::string config_name<rocprim::default_config>()
 template<typename InputT,
          unsigned int FirstAdjPosDecimal,
          typename Config = rocprim::default_config>
-struct device_adjacent_find_benchmark : public config_autotune_interface
+struct device_adjacent_find_benchmark : public benchmark_utils::autotune_interface
 {
 
     std::string name() const override
@@ -79,14 +79,12 @@ struct device_adjacent_find_benchmark : public config_autotune_interface
             + ",cfg:" + config_name<Config>() + "}");
     }
 
-    static constexpr size_t warmup_size = 5;
-    static constexpr size_t batch_size  = 10;
-
-    void run(benchmark::State&   state,
-             size_t              bytes,
-             const managed_seed& seed,
-             hipStream_t         stream) const override
+    void run(benchmark_utils::state&& state) override
     {
+        const auto& stream = state.stream;
+        const auto& bytes  = state.bytes;
+        const auto& seed   = state.seed;
+
         using input_type  = InputT;
         using output_type = std::size_t;
 
@@ -161,48 +159,9 @@ struct device_adjacent_find_benchmark : public config_autotune_interface
         launch_adjacent_find();
         HIP_CHECK(hipMalloc(&d_tmp_storage, tmp_storage_size));
 
-        // Warm-up
-        for(size_t i = 0; i < warmup_size; ++i)
-        {
-            launch_adjacent_find();
-        }
-        HIP_CHECK(hipDeviceSynchronize());
+        state.run([&] { launch_adjacent_find(); });
 
-        // HIP events creation
-        hipEvent_t start, stop;
-        HIP_CHECK(hipEventCreate(&start));
-        HIP_CHECK(hipEventCreate(&stop));
-
-        // Run
-        for(auto _ : state)
-        {
-            // Record start event
-            HIP_CHECK(hipEventRecord(start, stream));
-
-            for(size_t i = 0; i < batch_size; ++i)
-            {
-                launch_adjacent_find();
-            }
-
-            // Record stop event and wait until it completes
-            HIP_CHECK(hipEventRecord(stop, stream));
-            HIP_CHECK(hipEventSynchronize(stop));
-
-            HIP_CHECK(hipGetLastError());
-            HIP_CHECK(hipDeviceSynchronize());
-
-            float elapsed_mseconds;
-            HIP_CHECK(hipEventElapsedTime(&elapsed_mseconds, start, stop));
-            state.SetIterationTime(elapsed_mseconds / 1000);
-        }
-
-        // Destroy HIP events
-        HIP_CHECK(hipEventDestroy(start));
-        HIP_CHECK(hipEventDestroy(stop));
-
-        state.SetBytesProcessed(state.iterations() * batch_size * first_adj_index
-                                * sizeof(*d_input));
-        state.SetItemsProcessed(state.iterations() * batch_size * first_adj_index);
+        state.set_throughput(first_adj_index, sizeof(input_type));
 
         HIP_CHECK(hipFree(d_input));
         HIP_CHECK(hipFree(d_output));
@@ -225,7 +184,8 @@ struct device_adjacent_find_benchmark_generator
             static constexpr unsigned int items_per_thread = 1u << ItemsPerThreadExp;
             using generated_config = rocprim::adjacent_find_config<BlockSize, items_per_thread>;
 
-            void operator()(std::vector<std::unique_ptr<config_autotune_interface>>& storage)
+            void operator()(
+                std::vector<std::unique_ptr<benchmark_utils::autotune_interface>>& storage)
             {
                 storage.emplace_back(
                     std::make_unique<device_adjacent_find_benchmark<InputT,
@@ -233,7 +193,7 @@ struct device_adjacent_find_benchmark_generator
                                                                     generated_config>>());
             }
         };
-        void operator()(std::vector<std::unique_ptr<config_autotune_interface>>& storage)
+        void operator()(std::vector<std::unique_ptr<benchmark_utils::autotune_interface>>& storage)
         {
             static_for_each<
                 make_index_range<unsigned int, min_items_per_thread, max_items_per_thread_exponent>,
@@ -241,7 +201,7 @@ struct device_adjacent_find_benchmark_generator
         }
     };
 
-    static void create(std::vector<std::unique_ptr<config_autotune_interface>>& storage)
+    static void create(std::vector<std::unique_ptr<benchmark_utils::autotune_interface>>& storage)
     {
         static_for_each<std::integer_sequence<unsigned int, 1, 5, 9>, create_pos>(storage);
     }

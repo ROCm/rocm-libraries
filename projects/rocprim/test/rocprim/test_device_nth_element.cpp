@@ -90,7 +90,6 @@ void inline compare_cpp_14(InputVector     input,
     ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(sorted_output, sorted_input));
 }
 
-#if CPP17
 template<class InputVector, class OutputVector, class CompareFunction>
 void inline compare_cpp_17(InputVector     input,
                            OutputVector    output,
@@ -122,7 +121,6 @@ void inline compare_cpp_17(InputVector     input,
 
     ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(sorted_output, sorted_input));
 }
-#endif
 
 template<class InputVector, class OutputVector, class CompareFunction>
 void inline compare(InputVector     input,
@@ -131,12 +129,7 @@ void inline compare(InputVector     input,
                     CompareFunction compare_op)
 {
     compare_cpp_14(input, output, nth_element, compare_op);
-#if CPP17
-    // this comparison is only compiled and executed if c++17 is available
     compare_cpp_17(input, output, nth_element, compare_op);
-#else
-    ROCPRIM_PRAGMA_MESSAGE("c++17 not available skips direct comparison with std::nth_element");
-#endif
 }
 
 // ---------------------------------------------------------

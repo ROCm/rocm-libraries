@@ -39,7 +39,7 @@ namespace detail
 
 template<typename Key,
          unsigned int BlockSize,
-         unsigned int WarpSize,
+         unsigned int VirtualWaveSize,
          unsigned int ItemsPerThread,
          typename Value>
 class warp_sort_stable
@@ -122,12 +122,12 @@ private:
         const auto lane = lane_id();
         const auto warp = warp_id();
 
-        const auto warp_offset     = warp * ItemsPerThread * arch::wavefront::min_size();
+        const auto warp_offset     = warp * ItemsPerThread * arch::wavefront::size();
         const auto warp_input_size = warp_offset > input_size ? 0 : input_size - warp_offset;
         const auto shared_keys     = &storage.keys[warp_offset];
 
         ROCPRIM_UNROLL
-        for(auto partition_size = 1u; partition_size < WarpSize; partition_size <<= 1u)
+        for(auto partition_size = 1u; partition_size < VirtualWaveSize; partition_size <<= 1u)
         {
             ROCPRIM_UNROLL
             for(auto i = 0u; i < ItemsPerThread; ++i)
@@ -181,13 +181,13 @@ private:
         const auto lane = lane_id();
         const auto warp = warp_id();
 
-        const auto warp_offset     = warp * ItemsPerThread * arch::wavefront::min_size();
+        const auto warp_offset     = warp * ItemsPerThread * arch::wavefront::size();
         const auto warp_input_size = warp_offset > input_size ? 0 : input_size - warp_offset;
         const auto shared_keys     = &storage.keys[warp_offset];
         const auto shared_values   = &storage.values[warp_offset];
 
         ROCPRIM_UNROLL
-        for(auto partition_size = 1u; partition_size < WarpSize; partition_size <<= 1u)
+        for(auto partition_size = 1u; partition_size < VirtualWaveSize; partition_size <<= 1u)
         {
             ROCPRIM_UNROLL
             for(auto i = 0u; i < ItemsPerThread; ++i)
@@ -237,7 +237,7 @@ private:
     }
 
 public:
-    static_assert(detail::is_power_of_two(WarpSize), "WarpSize must be power of 2");
+    static_assert(detail::is_power_of_two(VirtualWaveSize), "VirtualWaveSize must be power of 2");
 
     ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_WITH_PUSH
     using storage_type = raw_storage<storage_type_>;
@@ -350,8 +350,8 @@ public:
     }
 };
 
-template<typename Key, unsigned int BlockSize, unsigned int WarpSize, typename Value>
-class warp_sort_stable<Key, BlockSize, WarpSize, 1, Value>
+template<typename Key, unsigned int BlockSize, unsigned int VirtualWaveSize, typename Value>
+class warp_sort_stable<Key, BlockSize, VirtualWaveSize, 1, Value>
 {
 private:
     constexpr static unsigned items_per_thread = 1;
@@ -422,7 +422,7 @@ private:
     }
 
 public:
-    static_assert(detail::is_power_of_two(WarpSize), "WarpSize must be power of 2");
+    static_assert(detail::is_power_of_two(VirtualWaveSize), "VirtualWaveSize must be power of 2");
 
     using storage_type = empty_storage_type;
 
@@ -430,7 +430,7 @@ public:
     ROCPRIM_DEVICE ROCPRIM_INLINE void sort(Key& thread_key, BinaryFunction compare_function)
     {
         ROCPRIM_UNROLL
-        for(auto i = 1u; i < WarpSize; i <<= 1u)
+        for(auto i = 1u; i < VirtualWaveSize; i <<= 1u)
         {
             const auto thread_rank = merge_rank<false>(i, thread_key, compare_function);
             thread_key             = warp_permute(thread_key, thread_rank);
@@ -477,11 +477,11 @@ public:
     {
         (void)storage;
 
-        const auto warp_offset     = warp_id() * arch::wavefront::min_size();
+        const auto warp_offset     = warp_id() * arch::wavefront::size();
         const auto warp_input_size = warp_offset > input_size ? 0 : input_size - warp_offset;
 
         ROCPRIM_UNROLL
-        for(auto i = 1u; i < WarpSize; i <<= 1u)
+        for(auto i = 1u; i < VirtualWaveSize; i <<= 1u)
         {
             const auto thread_rank
                 = merge_rank<true>(i, thread_key, compare_function, warp_input_size);
@@ -494,7 +494,7 @@ public:
         sort(Key& thread_key, V& thread_value, BinaryFunction compare_function)
     {
         ROCPRIM_UNROLL
-        for(auto i = 1u; i < WarpSize; i <<= 1u)
+        for(auto i = 1u; i < VirtualWaveSize; i <<= 1u)
         {
             const auto thread_rank = merge_rank<false>(i, thread_key, compare_function);
             thread_key             = warp_permute(thread_key, thread_rank);
@@ -562,11 +562,11 @@ public:
     {
         (void)storage;
 
-        const auto warp_offset     = warp_id() * arch::wavefront::min_size();
+        const auto warp_offset     = warp_id() * arch::wavefront::size();
         const auto warp_input_size = warp_offset > input_size ? 0 : input_size - warp_offset;
 
         ROCPRIM_UNROLL
-        for(auto i = 1u; i < WarpSize; i <<= 1u)
+        for(auto i = 1u; i < VirtualWaveSize; i <<= 1u)
         {
             const auto thread_rank
                 = merge_rank<true>(i, thread_key, compare_function, warp_input_size);

@@ -78,9 +78,10 @@ public:
     static constexpr bool   use_graphs            = Params::use_graphs;
 };
 
-using custom_short2  = common::custom_type<short, short, true>;
-using custom_int2    = common::custom_type<int, int, true>;
-using custom_double2 = common::custom_type<double, double, true>;
+using custom_short2      = common::custom_type<short, short, true>;
+using custom_int2        = common::custom_type<int, int, true>;
+using custom_double2     = common::custom_type<double, double, true>;
+using custom_int64_array = test_utils::custom_test_array_type<std::int64_t, 8>;
 
 using RocprimDeviceTransformTestsParams
     = ::testing::Types<DeviceTransformParams<int, int, true>,
@@ -92,7 +93,10 @@ using RocprimDeviceTransformTestsParams
                        DeviceTransformParams<short, int, true>,
                        DeviceTransformParams<custom_short2, custom_int2, true>,
                        DeviceTransformParams<int, float>,
+                       DeviceTransformParams<uint64_t, uint64_t>,
+                       DeviceTransformParams<rocprim::uint128_t, rocprim::uint128_t>,
                        DeviceTransformParams<custom_double2, custom_double2>,
+                       DeviceTransformParams<custom_int64_array, custom_int64_array>,
                        DeviceTransformParams<int, int, false, 512>,
                        DeviceTransformParams<float, float, false, 2048>,
                        DeviceTransformParams<double, double, false, 4096>,
@@ -304,6 +308,120 @@ TYPED_TEST(RocprimDeviceTransformTests, BinaryTransform)
     }
 }
 
+template<class Functor, class OutputIterator, class... Inputs>
+OutputIterator transform_nary(Functor f, size_t size, OutputIterator out, Inputs... inputs)
+{
+    for(size_t i = 0; i < size; i++)
+    {
+        *out++ = f(*inputs++...);
+    }
+
+    return out;
+}
+
+template<class T1, class T2, class T3, class U>
+struct ternary_transform
+{
+    __device__ __host__
+    inline constexpr U
+        operator()(const T1& a, const T2& b, const T3& c) const
+    {
+        return a + b + c;
+    }
+};
+
+TYPED_TEST(RocprimDeviceTransformTests, TernaryTransform)
+{
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    using T1                                    = typename TestFixture::input_type;
+    using T2                                    = typename TestFixture::input_type;
+    using U                                     = typename TestFixture::output_type;
+    static constexpr bool use_identity_iterator = TestFixture::use_identity_iterator;
+    const bool            debug_synchronous     = TestFixture::debug_synchronous;
+    using Config                                = size_limit_config_t<TestFixture::size_limit>;
+
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
+    {
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
+
+        for(auto size : test_utils::get_sizes(seed_value))
+        {
+            hipStream_t stream = 0; // default
+            if(TestFixture::use_graphs)
+            {
+                // Default stream does not support hipGraph stream capture, so create one
+                HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+            }
+
+            SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+            // Generate data
+            std::vector<T1> input1
+                = test_utils::get_random_data_wrapped<T1>(size, 1, 100, seed_value);
+            std::vector<T2> input2
+                = test_utils::get_random_data_wrapped<T2>(size, 1, 100, seed_value);
+            std::vector<T2> input3
+                = test_utils::get_random_data_wrapped<T1>(size, 1, 100, seed_value);
+
+            common::device_ptr<T1> d_input1(input1);
+            common::device_ptr<T2> d_input2(input2);
+            common::device_ptr<T2> d_input3(input3);
+            common::device_ptr<U>  d_output(input1.size());
+
+            // Calculate expected results on host
+            std::vector<U> expected(input1.size());
+
+            transform_nary(ternary_transform<T1, T2, T1, U>(),
+                           input1.size(),
+                           expected.begin(),
+                           input1.begin(),
+                           input2.begin(),
+                           input3.begin());
+
+            test_utils::GraphHelper gHelper;
+            if(TestFixture::use_graphs)
+            {
+                gHelper.startStreamCapture(stream);
+            }
+
+            // Run
+            HIP_CHECK(rocprim::transform<Config>(
+                rocprim::tuple(d_input1.get(), d_input2.get(), d_input3.get()),
+                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output.get()),
+                input1.size(),
+                ternary_transform<T1, T2, T1, U>(),
+                stream,
+                debug_synchronous));
+
+            if(TestFixture::use_graphs)
+            {
+                gHelper.createAndLaunchGraph(stream, true, false);
+            }
+
+            HIP_CHECK(hipGetLastError());
+            HIP_CHECK(hipDeviceSynchronize());
+
+            // Copy output to host
+            const auto output = d_output.load();
+
+            // Check if output values are as expected
+            ASSERT_NO_FATAL_FAILURE(
+                test_utils::assert_near(output, expected, test_utils::precision<U>));
+
+            if(TestFixture::use_graphs)
+            {
+                gHelper.cleanupGraphHelper();
+                HIP_CHECK(hipStreamDestroy(stream));
+            }
+        }
+    }
+}
+
 template<class T>
 struct flag_expected_op_t
 {
@@ -418,4 +536,66 @@ TEST(RocprimDeviceTransformTests, LargeIndices)
 TEST(RocprimDeviceTransformTests, LargeIndicesWithGraphs)
 {
     testLargeIndices<true>();
+}
+
+TEST(RocprimDeviceTransformTests, UnalignedPointer)
+{
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    using T = int;
+
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
+    {
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
+
+        for(auto size : test_utils::get_sizes(seed_value))
+        {
+            hipStream_t stream = 0; // default
+
+            SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+            // Generate data
+            std::vector<T> input
+                = test_utils::get_random_data_wrapped<T>(size + 2, 1, 100, seed_value);
+
+            uint8_t* d_unaligned;
+            HIP_CHECK(hipMalloc(&d_unaligned, (size + 3) * sizeof(T)));
+            T* d_input = reinterpret_cast<T*>(d_unaligned + 1);
+            HIP_CHECK(
+                hipMemcpy(d_input, input.data(), (size + 2) * sizeof(T), hipMemcpyHostToDevice));
+
+            // Calculate expected results on host
+            std::vector<T> expected(input.size());
+            // First and last values should be unchanged.
+            expected[0]                = input[0];
+            expected[input.size() - 1] = input[input.size() - 1];
+            std::transform(input.begin() + 1,
+                           input.end() - 1,
+                           expected.begin() + 1,
+                           transform<T>());
+
+            // Run
+            HIP_CHECK(rocprim::transform(d_input + 1,
+                                         d_input + 1,
+                                         input.size() - 2,
+                                         transform<T>(),
+                                         stream));
+
+            HIP_CHECK(hipGetLastError());
+            HIP_CHECK(hipDeviceSynchronize());
+
+            // Copy output to host
+            std::vector<T> output(size + 2);
+            HIP_CHECK(
+                hipMemcpy(output.data(), d_input, (size + 2) * sizeof(T), hipMemcpyDeviceToHost));
+
+            // Check if output values are as expected
+            ASSERT_NO_FATAL_FAILURE(
+                test_utils::assert_near(output, expected, test_utils::precision<T>));
+        }
+    }
 }

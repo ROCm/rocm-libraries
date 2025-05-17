@@ -22,14 +22,10 @@
 
 #include "benchmark_device_adjacent_find.parallel.hpp"
 #include "benchmark_utils.hpp"
-#include "cmdparser.hpp"
 
 #ifndef BENCHMARK_CONFIG_TUNING
     #include "../common/utils_custom_type.hpp"
 #endif
-
-// gbench
-#include <benchmark/benchmark.h>
 
 // HIP
 #include <hip/hip_runtime.h>
@@ -46,15 +42,7 @@
     #include <stdint.h>
 #endif
 
-#ifndef DEFAULT_N
-const size_t DEFAULT_BYTES = size_t{2} << 30; // 2 GiB
-#endif
-
-#define CREATE_BENCHMARK(T, P)                                        \
-    {                                                                 \
-        const device_adjacent_find_benchmark<T, P> instance;          \
-        REGISTER_BENCHMARK(benchmarks, size, seed, stream, instance); \
-    }
+#define CREATE_BENCHMARK(T, P) executor.queue_instance(device_adjacent_find_benchmark<T, P>());
 
 #define CREATE_ADJACENT_FIND_BENCHMARKS(T) \
     CREATE_BENCHMARK(T, 1)                 \
@@ -63,56 +51,9 @@ const size_t DEFAULT_BYTES = size_t{2} << 30; // 2 GiB
 
 int main(int argc, char* argv[])
 {
-    cli::Parser parser(argc, argv);
-    parser.set_optional<size_t>("size", "size", DEFAULT_BYTES, "number of input bytes");
-    parser.set_optional<int>("trials", "trials", -1, "number of iterations");
-    parser.set_optional<std::string>("name_format",
-                                     "name_format",
-                                     "human",
-                                     "either: json,human,txt");
-    parser.set_optional<std::string>("seed", "seed", "random", get_seed_message());
-#ifdef BENCHMARK_CONFIG_TUNING
-    // optionally run an evenly split subset of benchmarks, when making multiple program invocations
-    parser.set_optional<int>("parallel_instance",
-                             "parallel_instance",
-                             0,
-                             "parallel instance index");
-    parser.set_optional<int>("parallel_instances",
-                             "parallel_instances",
-                             1,
-                             "total parallel instances");
-#endif
-    parser.run_and_exit_if_error();
+    benchmark_utils::executor executor(argc, argv, 2 * benchmark_utils::GiB, 10, 5);
 
-    // Parse argv
-    benchmark::Initialize(&argc, argv);
-    const size_t size   = parser.get<size_t>("size");
-    const int    trials = parser.get<int>("trials");
-    bench_naming::set_format(parser.get<std::string>("name_format"));
-    const std::string  seed_type = parser.get<std::string>("seed");
-    const managed_seed seed(seed_type);
-
-    // HIP
-    hipStream_t stream = 0; // default
-
-    // Benchmark info
-    add_common_benchmark_info();
-    benchmark::AddCustomContext("size", std::to_string(size));
-    benchmark::AddCustomContext("seed", seed_type);
-
-    // Add benchmarks
-    std::vector<benchmark::internal::Benchmark*> benchmarks{};
-#ifdef BENCHMARK_CONFIG_TUNING
-    const int parallel_instance  = parser.get<int>("parallel_instance");
-    const int parallel_instances = parser.get<int>("parallel_instances");
-    config_autotune_register::register_benchmark_subset(benchmarks,
-                                                        parallel_instance,
-                                                        parallel_instances,
-                                                        size,
-                                                        seed,
-                                                        stream);
-#else // BENCHMARK_CONFIG_TUNING \
-    // add_adjacent_find_benchmarks(benchmarks, size, seed, stream);
+#ifndef BENCHMARK_CONFIG_TUNING
     using custom_float2          = common::custom_type<float, float>;
     using custom_double2         = common::custom_type<double, double>;
     using custom_int2            = common::custom_type<int, int>;
@@ -129,31 +70,14 @@ int main(int argc, char* argv[])
     CREATE_ADJACENT_FIND_BENCHMARKS(double)
     CREATE_ADJACENT_FIND_BENCHMARKS(rocprim::int128_t)
     CREATE_ADJACENT_FIND_BENCHMARKS(rocprim::uint128_t)
+
     // Custom types
     CREATE_ADJACENT_FIND_BENCHMARKS(custom_float2)
     CREATE_ADJACENT_FIND_BENCHMARKS(custom_double2)
     CREATE_ADJACENT_FIND_BENCHMARKS(custom_int2)
     CREATE_ADJACENT_FIND_BENCHMARKS(custom_char_double)
     CREATE_ADJACENT_FIND_BENCHMARKS(custom_longlong_double)
-#endif // BENCHMARK_CONFIG_TUNING
+#endif
 
-    // Use manual timing
-    for(auto& b : benchmarks)
-    {
-        b->UseManualTime();
-        b->Unit(benchmark::kMillisecond);
-    }
-
-    // Force number of iterations
-    if(trials > 0)
-    {
-        for(auto& b : benchmarks)
-        {
-            b->Iterations(trials);
-        }
-    }
-
-    // Run benchmarks
-    benchmark::RunSpecifiedBenchmarks();
-    return 0;
+    executor.run();
 }

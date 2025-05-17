@@ -20,6 +20,13 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#ifdef _CLANGD
+    // When using clangd, to allow the language server to function properly,
+    // some context of the template source is required to allow the language
+    // server to function properly.
+    #include "test_block_scan.cpp.in"
+#endif
+
 block_reduce_test_suite_type_def(suite_name_single, name_suffix)
 block_reduce_test_suite_type_def(suite_name_array, name_suffix)
 
@@ -286,13 +293,18 @@ typed_test_def(suite_name_single, name_suffix, InclusiveScanReduceInitialValue)
         for(size_t i = 0; i < output.size() / block_size; i++)
         {
             acc_type accumulator(initial_value);
+            acc_type reduction = output[i * block_size];
             for(size_t j = 0; j < block_size; j++)
             {
-                auto idx      = i * block_size + j;
+                size_t idx    = i * block_size + j;
                 accumulator   = binary_op_host(output[idx], accumulator);
                 expected[idx] = static_cast<T>(accumulator);
+                if(j > 0)
+                {
+                    reduction = binary_op_host(output[idx], reduction);
+                }
             }
-            expected_reductions[i] = expected[(i + 1) * block_size - 1];
+            expected_reductions[i] = reduction;
         }
 
         // Writing to device memory

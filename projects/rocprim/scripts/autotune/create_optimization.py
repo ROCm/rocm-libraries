@@ -556,6 +556,14 @@ class AlgorithmDeviceTransform(Algorithm):
     def __init__(self, fallback_entries):
         Algorithm.__init__(self, fallback_entries)
 
+class AlgorithmDeviceTransformPointer(Algorithm):
+    algorithm_name = "device_transform_pointer"
+    cpp_configuration_template_name = "transform_pointer_config_template"
+    config_selection_params = [
+        SelectionType(name="value_type", is_optional=False, select_on_size_only=False)]
+    def __init__(self, fallback_entries):
+        Algorithm.__init__(self, fallback_entries)
+
 class AlgorithmDevicePartitionTwoWayPredicate(Algorithm):
     algorithm_name = "device_partition_two_way_predicate"
     cpp_configuration_template_name = "partition_two_way_predicate_config_template"
@@ -591,6 +599,14 @@ class AlgorithmDevicePartitionPredicate(Algorithm):
 class AlgorithmDevicePartitionThreeWay(Algorithm):
     algorithm_name = "device_partition_three_way"
     cpp_configuration_template_name = "partition_three_way_config_template"
+    config_selection_params = [
+        SelectionType(name="data_type", is_optional=False, select_on_size_only=False)]
+    def __init__(self, fallback_entries):
+        Algorithm.__init__(self, fallback_entries)
+
+class AlgorithmDeviceSearchN(Algorithm):
+    algorithm_name = "device_search_n"
+    cpp_configuration_template_name = "search_n_config_template"
     config_selection_params = [
         SelectionType(name="data_type", is_optional=False, select_on_size_only=False)]
     def __init__(self, fallback_entries):
@@ -717,6 +733,8 @@ def create_algorithm(algorithm_name: str, fallback_entries: List[FallbackCase]):
         return AlgorithmDeviceSegmentedRadixSort(fallback_entries)
     elif algorithm_name == 'device_transform':
         return AlgorithmDeviceTransform(fallback_entries)
+    elif algorithm_name == 'device_transform_pointer':
+        return AlgorithmDeviceTransformPointer(fallback_entries)
     elif algorithm_name == 'device_partition_two_way_predicate':
         return AlgorithmDevicePartitionTwoWayPredicate(fallback_entries)
     elif algorithm_name == 'device_partition_two_way_flag':
@@ -727,6 +745,8 @@ def create_algorithm(algorithm_name: str, fallback_entries: List[FallbackCase]):
         return AlgorithmDevicePartitionPredicate(fallback_entries)
     elif algorithm_name == 'device_partition_three_way':
         return AlgorithmDevicePartitionThreeWay(fallback_entries)
+    elif algorithm_name == 'device_search_n':
+        return AlgorithmDeviceSearchN(fallback_entries)
     elif algorithm_name == 'device_select_flag':
         return AlgorithmDeviceSelectFlag(fallback_entries)
     elif algorithm_name == 'device_select_predicate':

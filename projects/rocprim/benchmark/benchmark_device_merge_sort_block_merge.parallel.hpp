@@ -26,6 +26,7 @@
 #include "benchmark_utils.hpp"
 
 #include "../common/utils_data_generation.hpp"
+#include "../common/utils_device_ptr.hpp"
 
 // Google Benchmark
 #include <benchmark/benchmark.h>
@@ -69,7 +70,7 @@ inline std::string config_name<rocprim::default_config>()
 template<typename Key    = int,
          typename Value  = rocprim::empty_type,
          typename Config = rocprim::default_config>
-struct device_merge_sort_block_merge_benchmark : public config_autotune_interface
+struct device_merge_sort_block_merge_benchmark : public benchmark_utils::autotune_interface
 {
     std::string name() const override
     {
@@ -79,19 +80,18 @@ struct device_merge_sort_block_merge_benchmark : public config_autotune_interfac
                                          + ",cfg:" + config_name<Config>() + "}");
     }
 
-    static constexpr unsigned int batch_size  = 10;
-    static constexpr unsigned int warmup_size = 5;
     // Because merge_sort_block_merge expects partially sorted input:
     using block_sort_config = rocprim::default_config;
 
     // keys benchmark
     template<typename val = Value>
-    auto do_run(benchmark::State&   state,
-                size_t              bytes,
-                const managed_seed& seed,
-                hipStream_t         stream) const ->
+    auto do_run(benchmark_utils::state&& state) const ->
         typename std::enable_if<std::is_same<val, ::rocprim::empty_type>::value, void>::type
     {
+        const auto& stream = state.stream;
+        const auto& bytes  = state.bytes;
+        const auto& seed   = state.seed;
+
         using key_type = Key;
 
         // Calculate the number of elements
@@ -104,14 +104,8 @@ struct device_merge_sort_block_merge_benchmark : public config_autotune_interfac
                                         common::generate_limits<key_type>::max(),
                                         seed.get_0());
 
-        key_type* d_keys_input;
-        key_type* d_keys;
-        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_keys_input), size * sizeof(key_type)));
-        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_keys), size * sizeof(key_type)));
-        HIP_CHECK(hipMemcpy(d_keys_input,
-                            keys_input.data(),
-                            size * sizeof(key_type),
-                            hipMemcpyHostToDevice));
+        common::device_ptr<key_type> d_keys_input(keys_input);
+        common::device_ptr<key_type> d_keys(size);
         HIP_CHECK(hipDeviceSynchronize());
 
         ::rocprim::less<key_type> lesser_op;
@@ -119,8 +113,8 @@ struct device_merge_sort_block_merge_benchmark : public config_autotune_interfac
 
         // Merge_sort_block_merge algorithm expects partially sorted input:
         unsigned int sorted_block_size;
-        HIP_CHECK(rocprim::detail::merge_sort_block_sort<block_sort_config>(d_keys_input,
-                                                                            d_keys_input,
+        HIP_CHECK(rocprim::detail::merge_sort_block_sort<block_sort_config>(d_keys_input.get(),
+                                                                            d_keys_input.get(),
                                                                             values_ptr,
                                                                             values_ptr,
                                                                             size,
@@ -129,11 +123,10 @@ struct device_merge_sort_block_merge_benchmark : public config_autotune_interfac
                                                                             stream,
                                                                             false));
 
-        void*  d_temporary_storage     = nullptr;
         size_t temporary_storage_bytes = 0;
-        HIP_CHECK(rocprim::detail::merge_sort_block_merge<Config>(d_temporary_storage,
+        HIP_CHECK(rocprim::detail::merge_sort_block_merge<Config>(nullptr,
                                                                   temporary_storage_bytes,
-                                                                  d_keys,
+                                                                  d_keys.get(),
                                                                   values_ptr,
                                                                   size,
                                                                   sorted_block_size,
@@ -141,30 +134,22 @@ struct device_merge_sort_block_merge_benchmark : public config_autotune_interfac
                                                                   stream,
                                                                   false));
 
-        HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
+        common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
         HIP_CHECK(hipDeviceSynchronize());
 
-        hipError_t err;
-        // Warm-up
-        for(size_t i = 0; i < warmup_size; ++i)
-        {
-            err = rocprim::detail::merge_sort_block_merge<Config>(d_temporary_storage,
-                                                                  temporary_storage_bytes,
-                                                                  d_keys,
-                                                                  values_ptr,
-                                                                  size,
-                                                                  sorted_block_size,
-                                                                  lesser_op,
-                                                                  stream,
-                                                                  false);
-        }
+        hipError_t err = rocprim::detail::merge_sort_block_merge<Config>(d_temporary_storage.get(),
+                                                                         temporary_storage_bytes,
+                                                                         d_keys.get(),
+                                                                         values_ptr,
+                                                                         size,
+                                                                         sorted_block_size,
+                                                                         lesser_op,
+                                                                         stream,
+                                                                         false);
         if(err == hipError_t::hipErrorAssert)
         {
-            state.SkipWithError("SKIPPING: block_sort_items_per_block >= "
-                                "block_merge_items_per_block does not hold");
-            HIP_CHECK(hipFree(d_temporary_storage));
-            HIP_CHECK(hipFree(d_keys_input));
-            HIP_CHECK(hipFree(d_keys));
+            state.gbench_state.SkipWithError("SKIPPING: block_sort_items_per_block >= "
+                                             "block_merge_items_per_block does not hold");
             return;
         }
         else if(err != hipSuccess)
@@ -174,59 +159,42 @@ struct device_merge_sort_block_merge_benchmark : public config_autotune_interfac
         }
         HIP_CHECK(hipDeviceSynchronize());
 
-        // HIP events creation
-        hipEvent_t start, stop;
-        HIP_CHECK(hipEventCreate(&start));
-        HIP_CHECK(hipEventCreate(&stop));
+        state.run_before_every_iteration(
+            [&]
+            {
+                HIP_CHECK(hipMemcpyAsync(d_keys.get(),
+                                         d_keys_input.get(),
+                                         size * sizeof(key_type),
+                                         hipMemcpyDeviceToDevice,
+                                         stream));
+            });
 
-        for(auto _ : state)
-        {
-            // Record start event
-            HIP_CHECK(hipMemcpyAsync(d_keys,
-                                     d_keys_input,
-                                     size * sizeof(key_type),
-                                     hipMemcpyDeviceToDevice,
-                                     stream));
-            HIP_CHECK(hipEventRecord(start, stream));
-            HIP_CHECK(rocprim::detail::merge_sort_block_merge<Config>(d_temporary_storage,
-                                                                      temporary_storage_bytes,
-                                                                      d_keys,
-                                                                      values_ptr,
-                                                                      size,
-                                                                      sorted_block_size,
-                                                                      lesser_op,
-                                                                      stream,
-                                                                      false));
+        state.run(
+            [&]
+            {
+                HIP_CHECK(rocprim::detail::merge_sort_block_merge<Config>(d_temporary_storage.get(),
+                                                                          temporary_storage_bytes,
+                                                                          d_keys.get(),
+                                                                          values_ptr,
+                                                                          size,
+                                                                          sorted_block_size,
+                                                                          lesser_op,
+                                                                          stream,
+                                                                          false));
+            });
 
-            // Record stop event and wait until it completes
-            HIP_CHECK(hipEventRecord(stop, stream));
-            HIP_CHECK(hipEventSynchronize(stop));
-
-            float elapsed_mseconds;
-            HIP_CHECK(hipEventElapsedTime(&elapsed_mseconds, start, stop));
-            state.SetIterationTime(elapsed_mseconds / 1000);
-        }
-
-        // Destroy HIP events
-        HIP_CHECK(hipEventDestroy(start));
-        HIP_CHECK(hipEventDestroy(stop));
-
-        state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(key_type));
-        state.SetItemsProcessed(state.iterations() * batch_size * size);
-
-        HIP_CHECK(hipFree(d_temporary_storage));
-        HIP_CHECK(hipFree(d_keys_input));
-        HIP_CHECK(hipFree(d_keys));
+        state.set_throughput(size, sizeof(key_type));
     }
 
     // pairs benchmark
     template<typename val = Value>
-    auto do_run(benchmark::State&   state,
-                size_t              bytes,
-                const managed_seed& seed,
-                hipStream_t         stream) const ->
+    auto do_run(benchmark_utils::state&& state) const ->
         typename std::enable_if<!std::is_same<val, ::rocprim::empty_type>::value, void>::type
     {
+        const auto& stream = state.stream;
+        const auto& bytes  = state.bytes;
+        const auto& seed   = state.seed;
+
         using key_type   = Key;
         using value_type = Value;
 
@@ -243,23 +211,11 @@ struct device_merge_sort_block_merge_benchmark : public config_autotune_interfac
         std::vector<value_type> values_input(size);
         std::iota(values_input.begin(), values_input.end(), 0);
 
-        key_type* d_keys_input;
-        key_type* d_keys;
-        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_keys_input), size * sizeof(key_type)));
-        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_keys), size * sizeof(key_type)));
-        HIP_CHECK(hipMemcpy(d_keys_input,
-                            keys_input.data(),
-                            size * sizeof(key_type),
-                            hipMemcpyHostToDevice));
+        common::device_ptr<key_type> d_keys_input(keys_input);
+        common::device_ptr<key_type> d_keys(size);
 
-        value_type* d_values_input;
-        value_type* d_values;
-        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_values_input), size * sizeof(value_type)));
-        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_values), size * sizeof(value_type)));
-        HIP_CHECK(hipMemcpy(d_values_input,
-                            values_input.data(),
-                            size * sizeof(value_type),
-                            hipMemcpyHostToDevice));
+        common::device_ptr<value_type> d_values_input(values_input);
+        common::device_ptr<value_type> d_values(size);
 
         HIP_CHECK(hipDeviceSynchronize());
 
@@ -267,54 +223,43 @@ struct device_merge_sort_block_merge_benchmark : public config_autotune_interfac
 
         // Merge_sort_block_merge algorithm expects partially sorted input:
         unsigned int sorted_block_size;
-        HIP_CHECK(rocprim::detail::merge_sort_block_sort<block_sort_config>(d_keys_input,
-                                                                            d_keys_input,
-                                                                            d_values_input,
-                                                                            d_values_input,
+        HIP_CHECK(rocprim::detail::merge_sort_block_sort<block_sort_config>(d_keys_input.get(),
+                                                                            d_keys_input.get(),
+                                                                            d_values_input.get(),
+                                                                            d_values_input.get(),
                                                                             size,
                                                                             sorted_block_size,
                                                                             lesser_op,
                                                                             stream,
                                                                             false));
 
-        void*  d_temporary_storage     = nullptr;
         size_t temporary_storage_bytes = 0;
-        HIP_CHECK(rocprim::detail::merge_sort_block_merge<Config>(d_temporary_storage,
+        HIP_CHECK(rocprim::detail::merge_sort_block_merge<Config>(nullptr,
                                                                   temporary_storage_bytes,
-                                                                  d_keys,
-                                                                  d_values,
+                                                                  d_keys.get(),
+                                                                  d_values.get(),
                                                                   size,
                                                                   sorted_block_size,
                                                                   lesser_op,
                                                                   stream,
                                                                   false));
 
-        HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
+        common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
         HIP_CHECK(hipDeviceSynchronize());
 
-        hipError_t err;
-        // Warm-up
-        for(size_t i = 0; i < warmup_size; ++i)
-        {
-            err = rocprim::detail::merge_sort_block_merge<Config>(d_temporary_storage,
-                                                                  temporary_storage_bytes,
-                                                                  d_keys,
-                                                                  d_values,
-                                                                  size,
-                                                                  sorted_block_size,
-                                                                  lesser_op,
-                                                                  stream,
-                                                                  false);
-        }
+        hipError_t err = rocprim::detail::merge_sort_block_merge<Config>(d_temporary_storage.get(),
+                                                                         temporary_storage_bytes,
+                                                                         d_keys.get(),
+                                                                         d_values.get(),
+                                                                         size,
+                                                                         sorted_block_size,
+                                                                         lesser_op,
+                                                                         stream,
+                                                                         false);
         if(err == hipError_t::hipErrorAssert)
         {
-            state.SkipWithError("SKIPPING: block_sort_items_per_block >= "
-                                "block_merge_items_per_block does not hold");
-            HIP_CHECK(hipFree(d_temporary_storage));
-            HIP_CHECK(hipFree(d_keys_input));
-            HIP_CHECK(hipFree(d_keys));
-            HIP_CHECK(hipFree(d_values_input));
-            HIP_CHECK(hipFree(d_values));
+            state.gbench_state.SkipWithError("SKIPPING: block_sort_items_per_block >= "
+                                             "block_merge_items_per_block does not hold");
             return;
         }
         else if(err != hipSuccess)
@@ -324,64 +269,41 @@ struct device_merge_sort_block_merge_benchmark : public config_autotune_interfac
         }
         HIP_CHECK(hipDeviceSynchronize());
 
-        // HIP events creation
-        hipEvent_t start, stop;
-        HIP_CHECK(hipEventCreate(&start));
-        HIP_CHECK(hipEventCreate(&stop));
+        state.run_before_every_iteration(
+            [&]
+            {
+                HIP_CHECK(hipMemcpyAsync(d_keys.get(),
+                                         d_keys_input.get(),
+                                         size * sizeof(key_type),
+                                         hipMemcpyDeviceToDevice,
+                                         stream));
+                HIP_CHECK(hipMemcpyAsync(d_values.get(),
+                                         d_values_input.get(),
+                                         size * sizeof(value_type),
+                                         hipMemcpyDeviceToDevice,
+                                         stream));
+            });
 
-        for(auto _ : state)
-        {
-            // Record start event
-            HIP_CHECK(hipMemcpyAsync(d_keys,
-                                     d_keys_input,
-                                     size * sizeof(key_type),
-                                     hipMemcpyDeviceToDevice,
-                                     stream));
-            HIP_CHECK(hipMemcpyAsync(d_values,
-                                     d_values_input,
-                                     size * sizeof(value_type),
-                                     hipMemcpyDeviceToDevice,
-                                     stream));
-            HIP_CHECK(hipEventRecord(start, stream));
-            HIP_CHECK(rocprim::detail::merge_sort_block_merge<Config>(d_temporary_storage,
-                                                                      temporary_storage_bytes,
-                                                                      d_keys,
-                                                                      d_values,
-                                                                      size,
-                                                                      sorted_block_size,
-                                                                      lesser_op,
-                                                                      stream,
-                                                                      false));
+        state.run(
+            [&]
+            {
+                HIP_CHECK(rocprim::detail::merge_sort_block_merge<Config>(d_temporary_storage.get(),
+                                                                          temporary_storage_bytes,
+                                                                          d_keys.get(),
+                                                                          d_values.get(),
+                                                                          size,
+                                                                          sorted_block_size,
+                                                                          lesser_op,
+                                                                          stream,
+                                                                          false));
+            });
 
-            // Record stop event and wait until it completes
-            HIP_CHECK(hipEventRecord(stop, stream));
-            HIP_CHECK(hipEventSynchronize(stop));
-
-            float elapsed_mseconds;
-            HIP_CHECK(hipEventElapsedTime(&elapsed_mseconds, start, stop));
-            state.SetIterationTime(elapsed_mseconds / 1000);
-        }
-
-        // Destroy HIP events
-        HIP_CHECK(hipEventDestroy(start));
-        HIP_CHECK(hipEventDestroy(stop));
-
-        state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(key_type));
-        state.SetItemsProcessed(state.iterations() * batch_size * size);
-
-        HIP_CHECK(hipFree(d_temporary_storage));
-        HIP_CHECK(hipFree(d_keys_input));
-        HIP_CHECK(hipFree(d_keys));
-        HIP_CHECK(hipFree(d_values_input));
-        HIP_CHECK(hipFree(d_values));
+        state.set_throughput(size, sizeof(key_type));
     }
 
-    void run(benchmark::State&   state,
-             size_t              bytes,
-             const managed_seed& seed,
-             hipStream_t         stream) const override
+    void run(benchmark_utils::state&& state) override
     {
-        do_run(state, bytes, seed, stream);
+        do_run(std::forward<benchmark_utils::state>(state));
     }
 };
 
@@ -409,13 +331,13 @@ struct device_merge_sort_block_merge_benchmark_generator
         using benchmark_struct
             = device_merge_sort_block_merge_benchmark<Key, Value, generated_config>;
 
-        void operator()(std::vector<std::unique_ptr<config_autotune_interface>>& storage)
+        void operator()(std::vector<std::unique_ptr<benchmark_utils::autotune_interface>>& storage)
         {
             storage.emplace_back(std::make_unique<benchmark_struct>());
         }
     };
 
-    static void create(std::vector<std::unique_ptr<config_autotune_interface>>& storage)
+    static void create(std::vector<std::unique_ptr<benchmark_utils::autotune_interface>>& storage)
     {
         static constexpr unsigned int min_items_per_thread_exponent = 0u;
 

@@ -21,19 +21,20 @@
 #ifndef ROCPRIM_DEVICE_DEVICE_TRANSFORM_HPP_
 #define ROCPRIM_DEVICE_DEVICE_TRANSFORM_HPP_
 
-#include <algorithm>
-#include <iostream>
-#include <iterator>
-#include <type_traits>
-
-#include "../config.hpp"
 #include "../common.hpp"
+#include "../config.hpp"
 #include "../detail/various.hpp"
 #include "../iterator/zip_iterator.hpp"
 #include "../types/tuple.hpp"
 
-#include "device_transform_config.hpp"
 #include "detail/device_transform.hpp"
+#include "device_transform_config.hpp"
+
+#include <algorithm>
+#include <iostream>
+#include <iterator>
+#include <tuple>
+#include <type_traits>
 
 /// \addtogroup devicemodule
 /// @{
@@ -43,7 +44,8 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-template<class Config,
+template<bool IsPointer,
+         class Config,
          class ResultType,
          class InputIterator,
          class OutputIterator,
@@ -52,12 +54,90 @@ ROCPRIM_KERNEL
     ROCPRIM_LAUNCH_BOUNDS(device_params<Config>().kernel_config.block_size) void transform_kernel(
     InputIterator input, const size_t size, OutputIterator output, UnaryFunction transform_op)
 {
-    transform_kernel_impl<device_params<Config>().kernel_config.block_size,
+    transform_kernel_impl<IsPointer,
+                          device_params<Config>().kernel_config.block_size,
                           device_params<Config>().kernel_config.items_per_thread,
+                          device_params<Config>().load_type,
                           ResultType>(input, size, output, transform_op);
 }
 
-} // end of detail namespace
+template<bool IsPointer,
+         class Config,
+         class InputIterator,
+         class OutputIterator,
+         class UnaryFunction>
+inline hipError_t transform_impl(InputIterator     input,
+                                 OutputIterator    output,
+                                 const size_t      size,
+                                 UnaryFunction     transform_op,
+                                 const hipStream_t stream,
+                                 bool              debug_synchronous)
+{
+    if(size == size_t(0))
+    {
+        return hipSuccess;
+    }
+
+    using input_type  = typename std::iterator_traits<InputIterator>::value_type;
+    using result_type = typename ::rocprim::invoke_result<UnaryFunction, input_type>::type;
+
+    using config = detail::wrapped_transform_config<Config, input_type, IsPointer>;
+
+    detail::target_arch target_arch;
+    hipError_t          result = detail::host_target_arch(stream, target_arch);
+    if(result != hipSuccess)
+    {
+        return result;
+    }
+    const detail::transform_config_params params
+        = detail::dispatch_target_arch<config>(target_arch);
+
+    const unsigned int block_size       = params.kernel_config.block_size;
+    const unsigned int items_per_thread = params.kernel_config.items_per_thread;
+    const auto         items_per_block  = block_size * items_per_thread;
+
+    // Start point for time measurements
+    std::chrono::steady_clock::time_point start;
+
+    const auto size_limit             = params.kernel_config.size_limit;
+    const auto number_of_blocks_limit = ::rocprim::max<size_t>(size_limit / items_per_block, 1);
+
+    auto number_of_blocks = (size + items_per_block - 1) / items_per_block;
+    if(debug_synchronous)
+    {
+        std::cout << "block_size " << block_size << '\n';
+        std::cout << "number of blocks " << number_of_blocks << '\n';
+        std::cout << "number of blocks limit " << number_of_blocks_limit << '\n';
+        std::cout << "items_per_block " << items_per_block << '\n';
+    }
+
+    const auto aligned_size_limit = number_of_blocks_limit * items_per_block;
+
+    // Launch number_of_blocks_limit blocks while there is still at least as many blocks left as the limit
+    const auto number_of_launch = (size + aligned_size_limit - 1) / aligned_size_limit;
+    for(size_t i = 0, offset = 0; i < number_of_launch; ++i, offset += aligned_size_limit)
+    {
+        const auto current_size   = std::min(size - offset, aligned_size_limit);
+        const auto current_blocks = (current_size + items_per_block - 1) / items_per_block;
+
+        if(debug_synchronous)
+        {
+            start = std::chrono::steady_clock::now();
+        }
+
+        detail::transform_kernel<IsPointer, config, result_type>
+            <<<dim3(current_blocks), dim3(block_size), 0, stream>>>(input + offset,
+                                                                    current_size,
+                                                                    output + offset,
+                                                                    transform_op);
+
+        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("transform_kernel", current_size, start);
+    }
+
+    return hipSuccess;
+}
+
+} // namespace detail
 
 /// \brief Parallel transform primitive for device level.
 ///
@@ -123,65 +203,16 @@ inline hipError_t transform(InputIterator     input,
                             const hipStream_t stream            = 0,
                             bool              debug_synchronous = false)
 {
-    if( size == size_t(0) )
-        return hipSuccess;
+    constexpr bool is_pointer
+        = std::is_pointer<InputIterator>::value && std::is_pointer<OutputIterator>::value;
 
-    using input_type = typename std::iterator_traits<InputIterator>::value_type;
-    using result_type = typename ::rocprim::invoke_result<UnaryFunction, input_type>::type;
-
-    using config = detail::wrapped_transform_config<Config, result_type>;
-
-    detail::target_arch target_arch;
-    hipError_t          result = detail::host_target_arch(stream, target_arch);
-    if(result != hipSuccess)
-    {
-        return result;
-    }
-    const detail::transform_config_params params
-        = detail::dispatch_target_arch<config>(target_arch);
-
-    const unsigned int block_size       = params.kernel_config.block_size;
-    const unsigned int items_per_thread = params.kernel_config.items_per_thread;
-    const auto         items_per_block  = block_size * items_per_thread;
-
-    // Start point for time measurements
-    std::chrono::steady_clock::time_point start;
-
-    const auto size_limit             = params.kernel_config.size_limit;
-    const auto number_of_blocks_limit = ::rocprim::max<size_t>(size_limit / items_per_block, 1);
-
-    auto number_of_blocks = (size + items_per_block - 1)/items_per_block;
-    if(debug_synchronous)
-    {
-        std::cout << "block_size " << block_size << '\n';
-        std::cout << "number of blocks " << number_of_blocks << '\n';
-        std::cout << "number of blocks limit " << number_of_blocks_limit << '\n';
-        std::cout << "items_per_block " << items_per_block << '\n';
-    }
-
-    const auto aligned_size_limit = number_of_blocks_limit * items_per_block;
-
-    // Launch number_of_blocks_limit blocks while there is still at least as many blocks left as the limit
-    const auto number_of_launch = (size + aligned_size_limit - 1) / aligned_size_limit;
-    for(size_t i = 0, offset = 0; i < number_of_launch; ++i, offset += aligned_size_limit) {
-        const auto current_size = std::min(size - offset, aligned_size_limit);
-        const auto current_blocks = (current_size + items_per_block - 1) / items_per_block;
-
-        if(debug_synchronous)
-            start = std::chrono::steady_clock::now();
-        hipLaunchKernelGGL(HIP_KERNEL_NAME(detail::transform_kernel<config, result_type>),
-                           dim3(current_blocks),
-                           dim3(block_size),
-                           0,
-                           stream,
-                           input + offset,
-                           current_size,
-                           output + offset,
-                           transform_op);
-        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("transform_kernel", current_size, start);
-    }
-
-    return hipSuccess;
+    return detail::transform_impl<is_pointer, Config, InputIterator, OutputIterator, UnaryFunction>(
+        input,
+        output,
+        size,
+        transform_op,
+        stream,
+        debug_synchronous);
 }
 
 /// \brief Parallel device-level transform primitive for two inputs.
@@ -241,32 +272,104 @@ inline hipError_t transform(InputIterator     input,
 /// // output: [2, 4, 6, 8, 10, 12, 14, 16]
 /// \endcode
 /// \endparblock
-template<
-    class Config = default_config,
-    class InputIterator1,
-    class InputIterator2,
-    class OutputIterator,
-    class BinaryFunction
->
-inline
-hipError_t transform(InputIterator1 input1,
-                     InputIterator2 input2,
-                     OutputIterator output,
-                     const size_t size,
-                     BinaryFunction transform_op,
-                     const hipStream_t stream = 0,
-                     bool debug_synchronous = false)
+template<class Config = default_config,
+         class InputIterator1,
+         class InputIterator2,
+         class OutputIterator,
+         class BinaryFunction>
+inline hipError_t transform(InputIterator1    input1,
+                            InputIterator2    input2,
+                            OutputIterator    output,
+                            const size_t      size,
+                            BinaryFunction    transform_op,
+                            const hipStream_t stream            = 0,
+                            bool              debug_synchronous = false)
 {
     using value_type1 = typename std::iterator_traits<InputIterator1>::value_type;
     using value_type2 = typename std::iterator_traits<InputIterator2>::value_type;
     return transform<Config>(
-        ::rocprim::make_zip_iterator(::rocprim::make_tuple(input1, input2)), output,
-        size, detail::unpack_binary_op<value_type1, value_type2, BinaryFunction>(transform_op),
-        stream, debug_synchronous
-    );
+        ::rocprim::make_zip_iterator(::rocprim::make_tuple(input1, input2)),
+        output,
+        size,
+        detail::unpack_binary_op<value_type1, value_type2, BinaryFunction>(transform_op),
+        stream,
+        debug_synchronous);
 }
 
-
+/// \brief Parallel device-level transform primitive for an arbitrary amount of inputs.
+///
+/// transform function performs a device-wide transformation operation
+/// on n input ranges using binary \p transform_op operator.
+///
+/// \par Overview
+/// * Ranges specified by \p output and all iterators in \p input_iters must have at least \p size elements.
+///
+/// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `transform_config`.
+/// \tparam InputIterators all the random-access iterator types of the input range. These types must meet the
+/// requirements of a C++ InputIterator concept. It can be a simple pointer type.
+/// \tparam OutputIterator random-access iterator type of the output range. Must meet the
+/// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
+/// \tparam BinaryFunction type of binary function used for transform.
+///
+/// \param [in] input_iters a tuple of iterators to the input sequences where num_items elements are read from each.
+/// \param [out] output iterator to the first element in the output range.
+/// \param [in] size number of element in the input range.
+/// \param [in] transform_op an n-ary function object used for the transform, where n is the number of input sequences.
+/// The function object must not modify the object passed to it.
+/// \param [in] stream [optional] HIP stream object. The default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
+/// launch is forced. Default value is \p false.
+///
+/// \par Example
+/// \parblock
+/// In this example a device-level transform operation is performed on three arrays of
+/// integer values (element-wise sum is performed).
+///
+/// \code{.cpp}
+/// #include <rocprim/rocprim.hpp>
+///
+/// // custom transform function
+/// auto transform_op =
+///     [] __device__ (int a, int b, int c) -> int
+///     {
+///         return a + b + c;
+///     };
+///
+/// // Prepare input and output (declare pointers, allocate device memory etc.)
+/// size_t size;   // e.g., 8
+/// int* input1;   // e.g., [1, 2, 3, 4, 5, 6, 7, 8]
+/// int* input2;   // e.g., [1, 2, 3, 4, 5, 6, 7, 8]
+/// int* input3;   // e.g., [1, 2, 3, 4, 5, 6, 7, 8]
+/// int* output;   // empty array of 8 elements
+///
+/// // perform transform
+/// rocprim::transform(
+///     rocprim::tuple(input1, input2, input3), output, input1.size(), transform_op
+/// );
+/// // output: [3, 6, 9, 12, 15, 18, 21, 24]
+/// \endcode
+/// \endparblock
+template<class Config = default_config,
+         class... InputIterators,
+         class OutputIterator,
+         class TransformOp>
+inline hipError_t transform(rocprim::tuple<InputIterators...> input_iters,
+                            OutputIterator                    output,
+                            const size_t                      size,
+                            TransformOp                       transform_op,
+                            const hipStream_t                 stream            = 0,
+                            bool                              debug_synchronous = false)
+{
+    return transform<Config>(
+        ::rocprim::make_zip_iterator(input_iters),
+        output,
+        size,
+        detail::unpack_nary_op<TransformOp,
+                               typename std::iterator_traits<InputIterators>::value_type...>(
+            transform_op),
+        stream,
+        debug_synchronous);
+}
 
 END_ROCPRIM_NAMESPACE
 
