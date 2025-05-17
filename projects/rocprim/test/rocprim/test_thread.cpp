@@ -115,14 +115,16 @@ TYPED_TEST(RocprimThreadTests, FlatBlockThreadID)
         common::device_ptr<Type> device_output(block_size);
 
         // Running kernel
-        hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(flat_id_kernel<block_size_x, block_size_y, block_size_z>),
-            dim3(1),
-            dim3(block_size_x, block_size_y, block_size_z),
-            0,
-            0,
-            device_output.get());
-        HIP_CHECK(hipGetLastError());
+        HIP_CHECK_LAUNCH_SYNC(
+            hipLaunchKernelGGL(
+                HIP_KERNEL_NAME(flat_id_kernel<block_size_x, block_size_y, block_size_z>),
+                dim3(1),
+                dim3(block_size_x, block_size_y, block_size_z),
+                0,
+                0,
+                device_output.get()
+            )
+        );
 
         // Reading results from device
         output = device_output.load();
@@ -181,14 +183,16 @@ TYPED_TEST(RocprimThreadTests, FlatBlockID)
         // Preparing device
         common::device_ptr<Type> device_output(block_size);
         // Running kernel
-        hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(block_id_kernel<block_size_x, block_size_y, block_size_z>),
-            dim3(block_size_x, block_size_y, block_size_z),
-            dim3(block_size_x, block_size_y, block_size_z),
-            0,
-            0,
-            device_output.get());
-        HIP_CHECK(hipGetLastError());
+        HIP_CHECK_LAUNCH_SYNC(
+            hipLaunchKernelGGL(
+                HIP_KERNEL_NAME(block_id_kernel<block_size_x, block_size_y, block_size_z>),
+                dim3(block_size_x, block_size_y, block_size_z),
+                dim3(block_size_x, block_size_y, block_size_z),
+                0,
+                0,
+                device_output.get()
+            )
+        );
 
         // Reading results from device
         output = device_output.load();

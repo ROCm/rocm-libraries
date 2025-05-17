@@ -85,16 +85,18 @@ typed_test_def(suite_name, name_suffix, LoadStoreClass)
         common::device_ptr<Type> device_output(size);
 
         // Running kernel
-        hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(
-                load_store_kernel<Type, load_method, store_method, block_size, items_per_thread>),
-            dim3(grid_size),
-            dim3(block_size),
-            0,
-            0,
-            device_input.get(),
-            device_output.get());
-        HIP_CHECK(hipGetLastError());
+        HIP_CHECK_LAUNCH_SYNC(
+            hipLaunchKernelGGL(
+                HIP_KERNEL_NAME(
+                    load_store_kernel<Type, load_method, store_method, block_size, items_per_thread>),
+                dim3(grid_size),
+                dim3(block_size),
+                0,
+                0,
+                device_input.get(),
+                device_output.get()
+            )
+        );
 
         // Reading results from device
         const auto output = device_output.load();
@@ -169,19 +171,21 @@ typed_test_def(suite_name, name_suffix, LoadStoreClassValid)
         common::device_ptr<Type> device_output(output);
 
         // Running kernel
-        hipLaunchKernelGGL(HIP_KERNEL_NAME(load_store_valid_kernel<Type,
-                                                                   load_method,
-                                                                   store_method,
-                                                                   block_size,
-                                                                   items_per_thread>),
-                           dim3(grid_size),
-                           dim3(block_size),
-                           0,
-                           0,
-                           device_input.get(),
-                           device_output.get(),
-                           valid);
-        HIP_CHECK(hipGetLastError());
+        HIP_CHECK_LAUNCH_SYNC(
+            hipLaunchKernelGGL(HIP_KERNEL_NAME(load_store_valid_kernel<Type,
+                                               load_method,
+                                               store_method,
+                                               block_size,
+                                               items_per_thread>),
+                               dim3(grid_size),
+                               dim3(block_size),
+                               0,
+                               0,
+                               device_input.get(),
+                               device_output.get(),
+                               valid
+            )
+        );
 
         // Reading results from device
         output = device_output.load();
@@ -255,20 +259,22 @@ typed_test_def(suite_name, name_suffix, LoadStoreClassDefault)
         common::device_ptr<Type> device_output(size);
 
         // Running kernel
-        hipLaunchKernelGGL(HIP_KERNEL_NAME(load_store_valid_default_kernel<Type,
-                                                                           load_method,
-                                                                           store_method,
-                                                                           block_size,
-                                                                           items_per_thread>),
-                           dim3(grid_size),
-                           dim3(block_size),
-                           0,
-                           0,
-                           device_input.get(),
-                           device_output.get(),
-                           valid,
-                           _default);
-        HIP_CHECK(hipGetLastError());
+        HIP_CHECK_LAUNCH_SYNC(
+            hipLaunchKernelGGL(HIP_KERNEL_NAME(load_store_valid_default_kernel<Type,
+                                               load_method,
+                                               store_method,
+                                               block_size,
+                                               items_per_thread>),
+                               dim3(grid_size),
+                               dim3(block_size),
+                               0,
+                               0,
+                               device_input.get(),
+                               device_output.get(),
+                               valid,
+                               _default
+            )
+        );
 
         // Reading results from device
         const auto output = device_output.load();

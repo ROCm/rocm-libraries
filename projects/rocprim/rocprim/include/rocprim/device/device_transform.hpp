@@ -126,6 +126,9 @@ inline hipError_t transform(InputIterator     input,
     if( size == size_t(0) )
         return hipSuccess;
 
+    // Clear any existing error
+    (void) hipGetLastError();
+
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
     using result_type = typename ::rocprim::invoke_result<UnaryFunction, input_type>::type;
 
@@ -257,6 +260,9 @@ hipError_t transform(InputIterator1 input1,
                      const hipStream_t stream = 0,
                      bool debug_synchronous = false)
 {
+    // Clear any existing error
+    (void) hipGetLastError();
+
     using value_type1 = typename std::iterator_traits<InputIterator1>::value_type;
     using value_type2 = typename std::iterator_traits<InputIterator2>::value_type;
     return transform<Config>(

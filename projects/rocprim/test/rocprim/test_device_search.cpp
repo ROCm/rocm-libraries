@@ -252,7 +252,6 @@ TYPED_TEST(RocprimDeviceSearchTests, Search)
                     gHelper.createAndLaunchGraph(stream);
                 }
 
-                HIP_CHECK(hipGetLastError());
                 HIP_CHECK(hipDeviceSynchronize());
 
                 // Copy output to host
@@ -389,7 +388,6 @@ TYPED_TEST(RocprimDeviceSearchTests, SearchRepetition)
                 gHelper.createAndLaunchGraph(stream);
             }
 
-            HIP_CHECK(hipGetLastError());
             HIP_CHECK(hipDeviceSynchronize());
 
             const auto output = d_output.load()[0];

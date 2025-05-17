@@ -273,9 +273,8 @@ public:
 
             for(size_t i = 0; i < batch_size; ++i)
             {
-                dispatch_block_sort(stable_tag, size, stream, d_input, d_output);
+                HIP_CHECK_LAUNCH(dispatch_block_sort(stable_tag, size, stream, d_input, d_output));
             }
-            HIP_CHECK(hipGetLastError());
 
             // Record stop event and wait until it completes
             HIP_CHECK(hipEventRecord(stop, stream));

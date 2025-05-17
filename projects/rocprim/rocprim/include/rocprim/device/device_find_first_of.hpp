@@ -366,6 +366,9 @@ hipError_t find_first_of(void*          temporary_storage,
                          hipStream_t    stream            = 0,
                          bool           debug_synchronous = false)
 {
+    // Clear any existing error
+    (void) hipGetLastError();
+
     return detail::find_first_of_impl<Config>(temporary_storage,
                                               storage_size,
                                               input,

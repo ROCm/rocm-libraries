@@ -100,16 +100,16 @@ typed_test_def(RocprimWarpSortShuffleBasedTests, name_suffix, Sort)
         common::device_ptr<T> d_output(output);
 
         // Launching kernel
-        hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(test_hip_warp_sort<items_per_thread, block_size, logical_warp_size, T>),
-            dim3(grid_size),
-            dim3(block_size),
-            0,
-            0,
-            d_output.get());
-
-        HIP_CHECK(hipGetLastError());
-        HIP_CHECK(hipDeviceSynchronize());
+        HIP_CHECK_LAUNCH_SYNC(
+            hipLaunchKernelGGL(
+                HIP_KERNEL_NAME(test_hip_warp_sort<items_per_thread, block_size, logical_warp_size, T>),
+                dim3(grid_size),
+                dim3(block_size),
+                0,
+                0,
+                d_output.get()
+            )
+        );
 
         // Read from device memory
         output = d_output.load();
@@ -190,20 +190,20 @@ typed_test_def(RocprimWarpSortShuffleBasedTests, name_suffix, SortKeyInt)
         common::device_ptr<T> d_output_value(output_value);
 
         // Launching kernel
-        hipLaunchKernelGGL(HIP_KERNEL_NAME(test_hip_sort_key_value_kernel<items_per_thread,
-                                                                          block_size,
-                                                                          logical_warp_size,
-                                                                          T,
-                                                                          T>),
-                           dim3(grid_size),
-                           dim3(block_size),
-                           0,
-                           0,
-                           d_output_key.get(),
-                           d_output_value.get());
-
-        HIP_CHECK(hipGetLastError());
-        HIP_CHECK(hipDeviceSynchronize());
+        HIP_CHECK_LAUNCH_SYNC(
+            hipLaunchKernelGGL(HIP_KERNEL_NAME(test_hip_sort_key_value_kernel<items_per_thread,
+                                               block_size,
+                                               logical_warp_size,
+                                               T,
+                                               T>),
+                               dim3(grid_size),
+                               dim3(block_size),
+                               0,
+                               0,
+                               d_output_key.get(),
+                               d_output_value.get()
+            )
+        );
 
         // Read from device memory
         output_key   = d_output_key.load();

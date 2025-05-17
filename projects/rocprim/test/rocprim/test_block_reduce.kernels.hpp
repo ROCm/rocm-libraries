@@ -102,12 +102,13 @@ struct static_run_algo
         );
 
         // Running kernel
-        hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(reduce_kernel<BlockSize, Algorithm, T, BinaryOp>),
-            dim3(grid_size), dim3(BlockSize), 0, 0,
-            device_output, device_output_reductions
+        HIP_CHECK_LAUNCH_SYNC(
+            hipLaunchKernelGGL(
+                HIP_KERNEL_NAME(reduce_kernel<BlockSize, Algorithm, T, BinaryOp>),
+                dim3(grid_size), dim3(BlockSize), 0, 0,
+                device_output, device_output_reductions
+            )
         );
-        HIP_CHECK(hipGetLastError());
 
         // Reading results back
         HIP_CHECK(
@@ -175,12 +176,13 @@ struct static_run_valid
         );
 
         // Running kernel
-        hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(reduce_valid_kernel<BlockSize, Algorithm, T, BinaryOp>),
-            dim3(grid_size), dim3(BlockSize), 0, 0,
-            device_output, device_output_reductions, valid_items
+        HIP_CHECK_LAUNCH_SYNC(
+            hipLaunchKernelGGL(
+                HIP_KERNEL_NAME(reduce_valid_kernel<BlockSize, Algorithm, T, BinaryOp>),
+                dim3(grid_size), dim3(BlockSize), 0, 0,
+                device_output, device_output_reductions, valid_items
+            )
         );
-        HIP_CHECK(hipGetLastError());
 
         // Reading results back
         HIP_CHECK(
@@ -286,16 +288,18 @@ void test_block_reduce_input_arrays()
         common::device_ptr<T> device_output_reductions(output_reductions);
 
         // Running kernel
-        hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(
-                reduce_array_kernel<block_size, items_per_thread, algorithm, T, binary_op_type>),
-            dim3(grid_size),
-            dim3(block_size),
-            0,
-            0,
-            device_output.get(),
-            device_output_reductions.get());
-        HIP_CHECK(hipGetLastError());
+        HIP_CHECK_LAUNCH_SYNC(
+            hipLaunchKernelGGL(
+                HIP_KERNEL_NAME(
+                    reduce_array_kernel<block_size, items_per_thread, algorithm, T, binary_op_type>),
+                dim3(grid_size),
+                dim3(block_size),
+                0,
+                0,
+                device_output.get(),
+                device_output_reductions.get()
+            )
+        );
 
         // Reading results back
         output_reductions = device_output_reductions.load();

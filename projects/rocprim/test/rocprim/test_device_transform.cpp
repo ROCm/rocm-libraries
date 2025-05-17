@@ -186,7 +186,6 @@ TYPED_TEST(RocprimDeviceTransformTests, Transform)
                 gHelper.createAndLaunchGraph(stream, true, false);
             }
 
-            HIP_CHECK(hipGetLastError());
             HIP_CHECK(hipDeviceSynchronize());
 
             // Copy output to host
@@ -285,7 +284,6 @@ TYPED_TEST(RocprimDeviceTransformTests, BinaryTransform)
                 gHelper.createAndLaunchGraph(stream, true, false);
             }
 
-            HIP_CHECK(hipGetLastError());
             HIP_CHECK(hipDeviceSynchronize());
 
             // Copy output to host
@@ -389,7 +387,6 @@ void testLargeIndices()
                 gHelper.createAndLaunchGraph(stream, true, false);
             }
 
-            HIP_CHECK(hipGetLastError());
             HIP_CHECK(hipDeviceSynchronize());
 
             // Copy output to host

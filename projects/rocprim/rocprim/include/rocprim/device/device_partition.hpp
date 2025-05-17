@@ -527,6 +527,9 @@ inline hipError_t partition_two_way(void*                       temporary_storag
                                     const hipStream_t           stream            = 0,
                                     const bool                  debug_synchronous = false)
 {
+    // Clear any existing error
+    (void) hipGetLastError();
+
     using flag_type          = ::rocprim::empty_type; //dummy
     using inequality_op_type = ::rocprim::empty_type; //dummy
     using offset_type        = unsigned int;
@@ -667,6 +670,9 @@ inline hipError_t partition_two_way(void*                       temporary_storag
                                     const hipStream_t           stream            = 0,
                                     const bool                  debug_synchronous = false)
 {
+    // Clear any existing error
+    (void) hipGetLastError();
+
     using unary_predicate_type = ::rocprim::empty_type; // dummy
     using inequality_op_type   = ::rocprim::empty_type; // dummy
     using offset_type          = unsigned int;
@@ -792,6 +798,9 @@ hipError_t partition(void * temporary_storage,
                      const hipStream_t stream = 0,
                      const bool debug_synchronous = false)
 {
+    // Clear any existing error
+    (void) hipGetLastError();
+
     using unary_predicate_type = ::rocprim::empty_type; // dummy
     using inequality_op_type   = ::rocprim::empty_type; // dummy
     using offset_type          = unsigned int;
@@ -923,6 +932,9 @@ hipError_t partition(void * temporary_storage,
                      const hipStream_t stream = 0,
                      const bool debug_synchronous = false)
 {
+    // Clear any existing error
+    (void) hipGetLastError();
+
     using flag_type          = ::rocprim::empty_type; //dummy
     using inequality_op_type = ::rocprim::empty_type; //dummy
     using offset_type        = unsigned int;
@@ -1102,6 +1114,9 @@ hipError_t partition_three_way(void * temporary_storage,
                                const hipStream_t stream = 0,
                                const bool debug_synchronous = false)
 {
+    // Clear any existing error
+    (void) hipGetLastError();
+
     // Dummy flag type
     using flag_type = ::rocprim::empty_type;
     flag_type * flags = nullptr;

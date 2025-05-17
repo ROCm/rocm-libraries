@@ -282,15 +282,17 @@ auto run_benchmark(benchmark::State&   state,
         // Record start event
         HIP_CHECK(hipEventRecord(start, stream));
 
-        hipLaunchKernelGGL(HIP_KERNEL_NAME(kernel<Benchmark, BlockSize, ItemsPerThread, WithTile>),
-                           dim3(num_blocks),
-                           dim3(BlockSize),
-                           0,
-                           stream,
-                           d_input,
-                           d_output,
-                           Trials);
-        HIP_CHECK(hipGetLastError());
+        HIP_CHECK_LAUNCH(
+            hipLaunchKernelGGL(HIP_KERNEL_NAME(kernel<Benchmark, BlockSize, ItemsPerThread, WithTile>),
+                               dim3(num_blocks),
+                               dim3(BlockSize),
+                               0,
+                               stream,
+                               d_input,
+                               d_output,
+                               Trials
+            )
+        );
 
         // Record stop event and wait until it completes
         HIP_CHECK(hipEventRecord(stop, stream));
@@ -368,16 +370,18 @@ auto run_benchmark(benchmark::State&   state,
         // Record start event
         HIP_CHECK(hipEventRecord(start, stream));
 
-        hipLaunchKernelGGL(HIP_KERNEL_NAME(kernel<Benchmark, BlockSize, ItemsPerThread, WithTile>),
-                           dim3(num_blocks),
-                           dim3(BlockSize),
-                           0,
-                           stream,
-                           d_input,
-                           d_tile_sizes,
-                           d_output,
-                           Trials);
-        HIP_CHECK(hipGetLastError());
+        HIP_CHECK_LAUNCH(
+            hipLaunchKernelGGL(HIP_KERNEL_NAME(kernel<Benchmark, BlockSize, ItemsPerThread, WithTile>),
+                               dim3(num_blocks),
+                               dim3(BlockSize),
+                               0,
+                               stream,
+                               d_input,
+                               d_tile_sizes,
+                               d_output,
+                               Trials
+            )
+        );
 
         // Record stop event and wait until it completes
         HIP_CHECK(hipEventRecord(stop, stream));

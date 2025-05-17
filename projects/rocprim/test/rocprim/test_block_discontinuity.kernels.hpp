@@ -263,17 +263,18 @@ auto test_block_discontinuity()
         common::device_ptr<flag_type> device_heads(size);
 
         // Running kernel
-        hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(
-                flag_heads_kernel<type, flag_type, flag_op_type, block_size, items_per_thread>),
-            dim3(grid_size),
-            dim3(block_size),
-            0,
-            0,
-            device_input.get(),
-            device_heads.get());
-        HIP_CHECK(hipGetLastError());
-        HIP_CHECK(hipDeviceSynchronize());
+        HIP_CHECK_LAUNCH_SYNC(
+            hipLaunchKernelGGL(
+                HIP_KERNEL_NAME(
+                    flag_heads_kernel<type, flag_type, flag_op_type, block_size, items_per_thread>),
+                dim3(grid_size),
+                dim3(block_size),
+                0,
+                0,
+                device_input.get(),
+                device_heads.get()
+            )
+        );
 
         // Reading results
         const auto heads = device_heads.load_to_unique_ptr();
@@ -349,17 +350,18 @@ auto test_block_discontinuity()
         common::device_ptr<flag_type> device_tails(size);
 
         // Running kernel
-        hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(
-                flag_tails_kernel<type, flag_type, flag_op_type, block_size, items_per_thread>),
-            dim3(grid_size),
-            dim3(block_size),
-            0,
-            0,
-            device_input.get(),
-            device_tails.get());
-        HIP_CHECK(hipGetLastError());
-        HIP_CHECK(hipDeviceSynchronize());
+        HIP_CHECK_LAUNCH_SYNC(
+            hipLaunchKernelGGL(
+                HIP_KERNEL_NAME(
+                    flag_tails_kernel<type, flag_type, flag_op_type, block_size, items_per_thread>),
+                dim3(grid_size),
+                dim3(block_size),
+                0,
+                0,
+                device_input.get(),
+                device_tails.get()
+            )
+        );
 
         const auto tails = device_tails.load_to_unique_ptr();
         test_utils::assert_eq(tails.get(),
@@ -447,20 +449,21 @@ auto test_block_discontinuity()
         common::device_ptr<flag_type> device_tails(size);
 
         // Running kernel
-        hipLaunchKernelGGL(HIP_KERNEL_NAME(flag_heads_and_tails_kernel<type,
-                                                                       flag_type,
-                                                                       flag_op_type,
-                                                                       block_size,
-                                                                       items_per_thread>),
-                           dim3(grid_size),
-                           dim3(block_size),
-                           0,
-                           0,
-                           device_input.get(),
-                           device_heads.get(),
-                           device_tails.get());
-        HIP_CHECK(hipGetLastError());
-        HIP_CHECK(hipDeviceSynchronize());
+        HIP_CHECK_LAUNCH_SYNC(
+            hipLaunchKernelGGL(HIP_KERNEL_NAME(flag_heads_and_tails_kernel<type,
+                                               flag_type,
+                                               flag_op_type,
+                                               block_size,
+                                               items_per_thread>),
+                               dim3(grid_size),
+                               dim3(block_size),
+                               0,
+                               0,
+                               device_input.get(),
+                               device_heads.get(),
+                               device_tails.get()
+            )
+        );
 
         const auto heads = device_heads.load_to_unique_ptr();
         const auto tails = device_tails.load_to_unique_ptr();

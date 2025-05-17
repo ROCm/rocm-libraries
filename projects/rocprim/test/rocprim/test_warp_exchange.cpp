@@ -254,10 +254,17 @@ TYPED_TEST(WarpExchangeTest, WarpExchange)
     common::device_ptr<T> d_output(items_count);
     HIP_CHECK(hipMemset(d_output.get(), 0, items_count * sizeof(T)));
 
-    warp_exchange_kernel<items_per_thread, warp_size, exchange_op>
-        <<<dim3(1), dim3(block_size), 0, 0>>>(d_input.get(), d_output.get());
-    HIP_CHECK(hipGetLastError());
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK_LAUNCH_SYNC(
+        hipLaunchKernelGGL(
+            HIP_KERNEL_NAME(warp_exchange_kernel<items_per_thread, warp_size, exchange_op>),
+            dim3(1),
+            dim3(block_size),
+            0,
+            0,
+            d_input.get(),
+            d_output.get()
+        )
+    );
 
     auto output = d_output.load();
 
@@ -300,10 +307,18 @@ TYPED_TEST(WarpExchangeTest, WarpExchangeNotInplace)
     common::device_ptr<T> d_output(items_count);
     HIP_CHECK(hipMemset(d_output.get(), 0, items_count * sizeof(T)));
 
-    warp_exchange_kernel<items_per_thread, warp_size, exchange_op>
-        <<<dim3(1), dim3(block_size), 0, 0>>>(d_input.get(), d_output.get(), false);
-    HIP_CHECK(hipGetLastError());
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK_LAUNCH_SYNC(
+        hipLaunchKernelGGL(
+            HIP_KERNEL_NAME(warp_exchange_kernel<items_per_thread, warp_size, exchange_op>),
+            dim3(1),
+            dim3(block_size),
+            0,
+            0,
+            d_input.get(),
+            d_output.get(),
+            false
+        )
+    );
 
     auto output = d_output.load();
 
@@ -408,10 +423,18 @@ TYPED_TEST(WarpExchangeScatterTest, WarpExchangeScatter)
     common::device_ptr<T>       d_output(items_count);
     HIP_CHECK(hipMemset(d_output.get(), 0, items_count * sizeof(T)));
 
-    warp_exchange_scatter_kernel<items_per_thread, warp_size>
-        <<<dim3(1), dim3(block_size), 0, 0>>>(d_input.get(), d_output.get(), d_ranks.get());
-    HIP_CHECK(hipGetLastError());
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK_LAUNCH_SYNC(
+        hipLaunchKernelGGL(
+            HIP_KERNEL_NAME(warp_exchange_scatter_kernel<items_per_thread, warp_size>),
+            dim3(1),
+            dim3(block_size),
+            0,
+            0,
+            d_input.get(),
+            d_output.get(),
+            d_ranks.get()
+        )
+    );
 
     auto output = d_output.load();
 

@@ -334,7 +334,6 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceSum)
                 gHelper.createAndLaunchGraph(stream);
             }
 
-            HIP_CHECK(hipGetLastError());
             HIP_CHECK(hipDeviceSynchronize());
 
             // Copy output to host
@@ -457,7 +456,6 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceArgMinimum)
                 gHelper.createAndLaunchGraph(stream);
             }
 
-            HIP_CHECK(hipGetLastError());
             HIP_CHECK(hipDeviceSynchronize());
 
             // Copy output to host
@@ -543,7 +541,6 @@ void testLargeIndices()
                 gHelper.createAndLaunchGraph(stream, true, false);
             }
 
-            HIP_CHECK(hipGetLastError());
             HIP_CHECK(hipDeviceSynchronize());
 
             // Copy output to host
@@ -672,7 +669,6 @@ TYPED_TEST(RocprimDeviceReducePrecisionTests, ReduceSumInputEqualExponentFunctio
             gHelper.createAndLaunchGraph(stream);
         }
 
-        HIP_CHECK(hipGetLastError());
         HIP_CHECK(hipDeviceSynchronize());
 
         // Copy output to host

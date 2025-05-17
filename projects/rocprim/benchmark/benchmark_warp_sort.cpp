@@ -151,17 +151,20 @@ void run_benchmark(benchmark::State&   state,
             ROCPRIM_NO_UNROLL
             for(unsigned int trial = 0; trial < Trials; ++trial)
             {
-                hipLaunchKernelGGL(
-                    HIP_KERNEL_NAME(
-                        warp_sort_by_key_kernel<Key, Value, BlockSize, WarpSize, ItemsPerThread>),
-                    dim3(size / items_per_block),
-                    dim3(BlockSize),
-                    0,
-                    stream,
-                    d_input_key,
-                    d_input_value,
-                    d_output_key,
-                    d_output_value);
+                HIP_CHECK_LAUNCH(
+                    hipLaunchKernelGGL(
+                        HIP_KERNEL_NAME(
+                            warp_sort_by_key_kernel<Key, Value, BlockSize, WarpSize, ItemsPerThread>),
+                        dim3(size / items_per_block),
+                        dim3(BlockSize),
+                        0,
+                        stream,
+                        d_input_key,
+                        d_input_value,
+                        d_output_key,
+                        d_output_value
+                    )
+                );
             }
         }
         else
@@ -169,17 +172,19 @@ void run_benchmark(benchmark::State&   state,
             ROCPRIM_NO_UNROLL
             for(unsigned int trial = 0; trial < Trials; ++trial)
             {
-                hipLaunchKernelGGL(
-                    HIP_KERNEL_NAME(warp_sort_kernel<Key, BlockSize, WarpSize, ItemsPerThread>),
-                    dim3(size / items_per_block),
-                    dim3(BlockSize),
-                    0,
-                    stream,
-                    d_input_key,
-                    d_output_key);
+                HIP_CHECK_LAUNCH(
+                    hipLaunchKernelGGL(
+                        HIP_KERNEL_NAME(warp_sort_kernel<Key, BlockSize, WarpSize, ItemsPerThread>),
+                        dim3(size / items_per_block),
+                        dim3(BlockSize),
+                        0,
+                        stream,
+                        d_input_key,
+                        d_output_key
+                    )
+                );
             }
         }
-        HIP_CHECK(hipGetLastError());
 
         // Record stop event and wait until it completes
         HIP_CHECK(hipEventRecord(stop, stream));

@@ -539,6 +539,9 @@ hipError_t partial_sort_copy(void*              temporary_storage,
                              bool               debug_synchronous = false,
                              Decomposer         decomposer        = Decomposer())
 {
+    // Clear any existing error
+    (void) hipGetLastError();
+
     using key_type = typename std::iterator_traits<KeysInputIterator>::value_type;
     static_assert(
         std::is_same<key_type,
@@ -658,6 +661,9 @@ hipError_t partial_sort(void*          temporary_storage,
                         bool           debug_synchronous = false,
                         Decomposer     decomposer        = {})
 {
+    // Clear any existing error
+    (void) hipGetLastError();
+
     return detail::
         partial_sort_impl<Config, KeysIterator, KeysIterator, BinaryFunction, Decomposer, true>(
             temporary_storage,

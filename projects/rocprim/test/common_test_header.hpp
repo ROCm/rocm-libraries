@@ -45,18 +45,25 @@
 #include <hip/hip_runtime.h>
 #include <hip/hip_vector_types.h>
 
+// GoogleTest-compatible HIP_CHECK macro that can be used for calls that allocate memory within
+// a loop. If condition fails with a hipErrorOutOfMemory, the loop iteration is skipped.
 #define HIP_CHECK_MEMORY(condition)                                                         \
     {                                                                                       \
+        (void) hipGetLastError();                                                           \
         hipError_t error = condition;                                                       \
-        if(error == hipErrorOutOfMemory)                                                    \
+        if (error == hipErrorOutOfMemory)                                                   \
         {                                                                                   \
             std::cout << "Out of memory. Skipping size = " << size << std::endl;            \
+            (void) hipGetLastError();                                                       \
             break;                                                                          \
         }                                                                                   \
-        if(error != hipSuccess)                                                             \
+        if (error != hipSuccess)                                                            \
         {                                                                                   \
-            std::cout << "HIP error: " << hipGetErrorString(error) << " line: " << __LINE__ \
-                      << std::endl;                                                         \
+            [error]()                                                                       \
+            {                                                                               \
+                FAIL() << "HIP error: " << hipGetErrorString(error) << std::endl            \
+                       << "File: " << __FILE__ << " line: " << __LINE__;                    \
+            }();                                                                            \
             exit(error);                                                                    \
         }                                                                                   \
     }
