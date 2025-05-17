@@ -1,45 +1,40 @@
-# Fanout Subtree PRs
-# ------------------
-# This GitHub Actions workflow detects which subtrees (from a monorepo structure)
-# were changed in a pull request, and automatically creates or updates corresponding
-# pull requests in their respective original repositories using `git subtree split`.
+# Apply Patch to Subrepos After Merge
+# -----------------------------------
+# This GitHub Actions workflow runs after a pull request is merged into the monorepo.
+# It identifies which subtrees (defined in .github/repos-config.json) were affected,
+# generates a patch from the merge commit, and applies that patch to the corresponding
+# sub-repositories by cloning them and committing the patch directly.
 #
-# Steps:
-# 1. Checkout the monorepo.
-# 2. Set up Python to run detection and fanout scripts.
-# 3. Run a Python script to detect which subtrees were changed (based on repos-config.json).
-# 4. For each changed subtree, create or update a PR in the corresponding sub-repo.
-# 5. (Placeholder) Track or report the child PR status to the monorepo PR.
+# Key Steps:
+# 1. Generate a GitHub App token for authentication.
+# 2. Checkout the monorepo at the merge commit.
+# 3. Use a Python script to detect which subtrees were modified.
+# 4. For each changed subtree:
+#    - Generate a patch from the merge commit for that subtree.
+#    - Determine the appropriate author (based on PR metadata or fallback).
+#    - Clone the target sub-repo and apply the patch.
+#    - Amend the commit message to include links to the monorepo PR and commit.
+#    - Push the commit directly to the sub-repo.
+#
+# This ensures downstream sub-repositories are updated to reflect changes
+# made in the monorepo immediately after merge.
 
-name: Fanout Subtree PRs
+name: Merged PR to Patch Subrepos
 
 on:
-  pull_request_target:
+  pull_request:
     types:
-      - opened
-      - synchronize
-      - reopened
-      - ready_for_review
+      - closed
     branches:
       - 'develop'
-      - 'staging'
-      - 'main'
-    # Ignore changes to top-level files and directories
-    # that are not part of the subtree structure
-    paths-ignore:
-      - '.github/**'
-      - 'docs/**'
-      - '*.md'
 
-# ensure that the workflow is not running for the same PR multiple times at once
 concurrency:
-  group: pr-fanout-${{ github.event.pull_request.number }}
+  group: pr-merge-sync-patch-${{ github.event.pull_request.number }}
   cancel-in-progress: false
 
 jobs:
-  fanout:
-    # Skip if PR is in draft status
-    if: github.event.pull_request.draft == false
+  patch:
+    if: github.event.pull_request.merged == true
     runs-on: ubuntu-24.04
     steps:
       - name: Generate a token
@@ -53,7 +48,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          ref: refs/pull/${{ github.event.pull_request.number }}/merge
           sparse-checkout: .github
           sparse-checkout-cone-mode: true
           token: ${{ steps.generate-token.outputs.token }}
@@ -73,7 +67,7 @@ jobs:
           git config user.name "assistant-librarian[bot]"
           git config user.email "assistant-librarian[bot]@users.noreply.github.com"
 
-      - name: Detect changed subtrees
+      - name: Detect changed subtrees from merged PR
         id: detect
         env:
           GH_TOKEN: ${{ steps.generate-token.outputs.token }}
@@ -82,25 +76,25 @@ jobs:
             --repo "${{ github.repository }}" \
             --pr "${{ github.event.pull_request.number }}" \
             --config ".github/repos-config.json" \
-            --require-fanout
+            --require-auto-push
 
       - name: Checkout full repo with changed subtrees
         if: steps.detect.outputs.subtrees
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          ref: refs/pull/${{ github.event.pull_request.number }}/merge
           sparse-checkout: |
             .github
             ${{ steps.detect.outputs.subtrees }}
-          fetch-depth: 0  # Needed for subtree splitting
           token: ${{ steps.generate-token.outputs.token }}
+          fetch-depth: 0
 
-      - name: Fan out child PRs
+      - name: Generate and apply patches
         if: steps.detect.outputs.subtrees
         env:
           GH_TOKEN: ${{ steps.generate-token.outputs.token }}
         run: |
-          python .github/scripts/pr_fanout.py \
+          python .github/scripts/pr_merge_sync_patches.py \
             --repo "${{ github.repository }}" \
             --pr "${{ github.event.pull_request.number }}" \
             --subtrees "${{ steps.detect.outputs.subtrees }}" \
+            --config ".github/repos-config.json"
