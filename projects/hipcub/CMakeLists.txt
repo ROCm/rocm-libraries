@@ -58,6 +58,7 @@ option(DOWNLOAD_CUB "Download CUB and thrust. Do not search for CUB package" OFF
 option(BUILD_BENCHMARK "Build benchmarks" OFF)
 option(BUILD_EXAMPLE "Build Examples" OFF)
 option(BUILD_ADDRESS_SANITIZER "Build with address sanitizer enabled" OFF)
+option(BUILD_OFFLOAD_COMPRESS "Build hipCUB with offload compression" ON)
 
 check_language(HIP)
 cmake_dependent_option(USE_HIPCXX "Use CMake HIP language support" OFF CMAKE_HIP_COMPILER OFF)
@@ -110,7 +111,7 @@ else()
         )
       else()
         rocm_check_target_ids(DEFAULT_AMDGPU_TARGETS
-          TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+;gfx942;gfx1030;gfx1100;gfx1101;gfx1102;gfx1151;gfx1200;gfx1201"
+          TARGETS "gfx906:xnack-;gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+;gfx942;gfx1030;gfx1100;gfx1101;gfx1102;gfx1151;gfx1200;gfx1201"
         )
       endif()
       set(GPU_TARGETS "${DEFAULT_AMDGPU_TARGETS}" CACHE STRING "GPU architectures to compile for" FORCE)
@@ -127,6 +128,17 @@ include(Dependencies)
 if(BUILD_ADDRESS_SANITIZER)
   add_compile_options(-fsanitize=address -shared-libasan)
   add_link_options(-fuse-ld=lld)
+endif()
+
+include(CheckCXXCompilerFlag)
+
+if(BUILD_OFFLOAD_COMPRESS)
+  check_cxx_compiler_flag("--offload-compress" CXX_COMPILER_SUPPORTS_OFFLOAD_COMPRESS)
+  if(CXX_COMPILER_SUPPORTS_OFFLOAD_COMPRESS)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --offload-compress")
+  else()
+    message(STATUS "Warning: BUILD_OFFLOAD_COMPRESS=ON but flag not supported by compiler. Ignoring option.")
+  endif()
 endif()
 
 # Setup VERSION
