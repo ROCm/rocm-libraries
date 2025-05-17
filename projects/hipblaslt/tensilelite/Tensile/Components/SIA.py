@@ -700,14 +700,15 @@ def prepareLWInstToSched(writer, kernel, numLocalWritesPerSched, isNGLL=False):
         if not skip:
            for _ in range(PRECISION-1):
                counter += 1
-    if itemsLWToSched:
-        itemsLWToSchedTemp.append([counter, itemsLWToSched.pop(0)])
+    if itemsLWToSched or (numDummy and itemsLWToSchedLength_1 == -1):
+        if itemsLWToSched:
+            itemsLWToSchedTemp.append([counter, itemsLWToSched.pop(0)])
         counter += 1
         for i in range(numLocalWritesPerSched + numLocalWritesPerSched % PRECISION - counter % numLocalWritesPerSched):
             counter += 1
     itemsLWToSched = itemsLWToSchedTemp
     if not itemsLWToSched:
-        itemsLWToSched.append([0, None])
+        itemsLWToSched.append([max(0, counter - 1), None])
     elif itemsLWToSched[-1][0] != (counter - 1):
         itemsLWToSched.append([counter - 1, None])  # end of the list if not equal to counter
     # This counts the number of modules which contain a ds_write
@@ -754,7 +755,7 @@ def schedLocalWrite(writer, kernel, numLocalWriteModPerIter, numLocalWritesPerSc
     globalReadInstOffset = 0
     additionalIndexList  = {}
     skip = 0
-    if itemsLWToSched and itemsLWToSched[0][1] is None:
+    if itemsLWToSched and itemsLWToSched[0][0] == 0 and itemsLWToSched[0][1] is None:
         itemsLWToSched.pop(0) # remove the dummy item
 
     itemsLWToSchedIndexLast = 0
@@ -928,6 +929,10 @@ def schedLocalWrite(writer, kernel, numLocalWriteModPerIter, numLocalWritesPerSc
                         writer.codes.perIterLocalWriteCodeNGLL[u][0].append(perIterLocalWriteCodeNGLLCounter)
                         writer.codes.perIterLocalWriteCodeNGLL[u][1].add(imodNGLL)
             itemsLWToSchedIndexLast = itemsLWToSchedIndex + 1
+        if writer.codes.perIterLocalWrite[u][0] and writer.codes.perIterLocalWrite[u][0][-1] != perIterLocalWriteCodeCounter:
+            writer.codes.perIterLocalWrite[u][0].append(perIterLocalWriteCodeCounter)
+        if lastLc and writer.codes.perIterLocalWriteCodeNGLL[u][0] and writer.codes.perIterLocalWriteCodeNGLL[u][0][-1] != perIterLocalWriteCodeNGLLCounter:
+            writer.codes.perIterLocalWriteCodeNGLL[u][0].append(perIterLocalWriteCodeNGLLCounter)
         itemsLWToSched = itemsLWToSched[itemPerIter:]
 
     # should never run out of items to schedule
