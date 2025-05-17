@@ -399,7 +399,7 @@ public:
         up(flat_id, input, prev, storage);
 
         // Update block prefix
-        block_suffix = storage->buffer.get_unsafe_array()[BlockSize - 1];
+        block_suffix = storage.buffer.get_unsafe_array()[BlockSize - 1];
     }
 
     /// \brief The thread block rotates a blocked arrange of input items,
@@ -534,7 +534,7 @@ public:
         this->down(flat_id, input, next, storage);
 
         // Update block prefixstorage_->
-        block_prefix = storage->next[0];
+        block_prefix = storage.buffer.get_unsafe_array()[0];
     }
 };
 
