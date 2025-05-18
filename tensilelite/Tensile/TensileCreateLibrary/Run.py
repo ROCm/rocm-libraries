@@ -228,6 +228,12 @@ def writeSolutionsAndKernels(
     generateSourcesAndExit=False,
     compress=True,
 ):
+    if globalParameters["PythonProfile"]:
+        globalParameters["CpuThreads"] = 0
+        printWarning("Python profiling is enabled. CpuThreads set to 0.")
+        import yappi
+        yappi.start()
+
     codeObjectFiles = []
 
     outputPath = Path(outputPath)
@@ -289,6 +295,15 @@ def writeSolutionsAndKernels(
 
     writeHelpers(outputPath, kernelHelperObjs, KERNEL_HELPER_FILENAME_CPP, KERNEL_HELPER_FILENAME_H)
     srcKernelFile = Path(outputPath) / "Kernels.cpp"
+
+    if globalParameters["PythonProfile"]:
+        yappi.stop()
+        yappi.get_func_stats().save("yappi_results.profile", type="callgrind")
+        with open("yappi_results.txt", "w") as f:
+            yappi.get_func_stats().print_all(out=f)
+        if globalParameters["CpuThreads"] != 0:
+            with open("yappi_thread_stats.txt", "w") as f:
+                yappi.get_thread_stats().print_all(out=f)
 
     if not generateSourcesAndExit:
         codeObjectFiles += buildAssemblyCodeObjectFiles(
