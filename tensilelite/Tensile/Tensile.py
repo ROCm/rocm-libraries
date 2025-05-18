@@ -463,9 +463,9 @@ def Tensile(userArgs):
         offloadBundler,
     )
 
-    if "ISA" in args.global_parameters:
-        isaList = [IsaVersion(isa[0], isa[1], isa[2]) for isa in args.global_parameters["ISA"]]
-        
+    if "ISA" in config["GlobalParameters"]:
+        isaList = [IsaVersion(isa[0], isa[1], isa[2]) for isa in config["GlobalParameters"]["ISA"]]
+
     else:
         isaList = [detectGlobalCurrentISA(device_id, enumerator)]
 

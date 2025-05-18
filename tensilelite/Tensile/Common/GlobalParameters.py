@@ -125,6 +125,8 @@ globalParameters["NumWarmups"] = 0
 
 globalParameters["PythonProfile"] = False  # Enable python profiling
 
+globalParameters["ISA"] = []
+
 ########################################
 # less common
 ########################################
