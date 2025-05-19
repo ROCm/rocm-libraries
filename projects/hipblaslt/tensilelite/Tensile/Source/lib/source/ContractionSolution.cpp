@@ -2995,7 +2995,8 @@ namespace TensileLite
             calculateAutoGSU(problem, &hardware);
             size_t gsu = problem.getParams().gsu() > 0 ? problem.getParams().gsu() : autoGSU;
             size_t gsuMultiplier = gsu > 1 ? gsu : 0;
-            size_t tiles = problem.getNumTiles(sizeMapping, gsu);
+            size_t batch = problem.d().sizes()[2];
+            size_t tiles = problem.getNumTiles(sizeMapping, gsu) * batch;
             size_t tileSize = sizeMapping.macroTile.x * sizeMapping.macroTile.y * sizeMapping.workspaceSizePerElemC;
             size_t bufSize = gsu > 1 ? tiles * tileSize : 0;
             size += bufSize;
