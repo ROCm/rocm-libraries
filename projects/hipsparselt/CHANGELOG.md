@@ -2,7 +2,7 @@
 
 Full documentation for hipSPARSELt is available at [rocm.docs.amd.com/projects/hipSPARSELt](https://rocm.docs.amd.com/projects/hipSPARSELt/en/latest/index.html).
 
-## (Unreleased) hipSPARSELt 0.2.4 for ROCm 6.5.0
+## (Unreleased) hipSPARSELt 0.2.4 for ROCm 7.0.0
 
 ### Added
 
@@ -13,16 +13,17 @@ Full documentation for hipSPARSELt is available at [rocm.docs.amd.com/projects/h
 * Support for ROC-TX if `HIPSPARSELT_ENABLE_MARKER=1` is set.
 * Support for the cuSPARSELt v0.6.3 backend.
 
-### Changed
-
-* Support for the LLVM target gfx940 and gfx941 has been removed.
-
 ### Optimized
 
 * Improved the library loading time.
 * Provided more kernels for FP16 datatype.
 
-## (Unreleased) hipSPARSELt 0.2.3 for ROCm 6.4.0
+### Removed
+
+* Support for LLVM targets gfx940 and gfx941 has been removed.
+* `hipsparseLtDatatype_t` has been removed.
+
+## hipSPARSELt 0.2.3 for ROCm 6.4.0
 
 ### Added
 
