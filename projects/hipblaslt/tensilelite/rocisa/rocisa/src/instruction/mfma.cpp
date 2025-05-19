@@ -140,6 +140,7 @@ void mfma_inst(nb::module_ m_mfma)
                       const std::shared_ptr<rocisa::RegisterContainer>&,
                       const std::shared_ptr<rocisa::RegisterContainer>&,
                       const std::shared_ptr<rocisa::RegisterContainer>&,
+                      bool, 
                       const std::string&>(),
              nb::arg("instType"),
              nb::arg("accType"),
@@ -149,6 +150,7 @@ void mfma_inst(nb::module_ m_mfma)
              nb::arg("a"),
              nb::arg("b"),
              nb::arg("metadata"),
+             nb::arg("neg")     = false,
              nb::arg("comment") = "")
         .def_rw("a", &rocisa::SMFMAInstruction::a)
         .def_rw("b", &rocisa::SMFMAInstruction::b)
