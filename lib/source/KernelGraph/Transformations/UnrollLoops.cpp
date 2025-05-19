@@ -231,6 +231,57 @@ namespace rocRoller
             }
         }
 
+        static void buildControlStack(KernelGraph&             graph,
+                                      int const                tag,
+                                      std::unordered_set<int>& visited,
+                                      std::vector<int>&        controlStack,
+                                      bool const               bodyParent)
+        {
+            auto const traverseEdge = [&]<typename EdgeType>() {
+                for(auto parent : graph.control.getInputNodeIndices<EdgeType>(tag))
+                {
+                    if(visited.contains(parent))
+                        continue;
+
+                    visited.insert(parent);
+                    buildControlStack(
+                        graph, parent, visited, controlStack, !std::is_same_v<EdgeType, Sequence>);
+                }
+            };
+            traverseEdge.template operator()<Body>();
+            traverseEdge.template operator()<Else>();
+            traverseEdge.template operator()<Sequence>();
+            if(bodyParent)
+                controlStack.push_back(tag);
+        }
+
+        static void orderCurrentAndPreviousNodes(KernelGraph&                        graph,
+                                                 std::optional<std::pair<int, int>>& previousNodes,
+                                                 std::set<int>&                      currentNodes)
+        {
+            if(currentNodes.empty())
+                return;
+
+            auto [firstNode, lastNode] = getFirstAndLastNodes(graph, currentNodes);
+
+            if(previousNodes.has_value())
+            {
+                auto A = std::get<1>(previousNodes.value());
+                auto B = firstNode;
+
+                std::vector<int>        controlStackA;
+                std::unordered_set<int> visited;
+                buildControlStack(graph, A, visited, controlStackA, true);
+
+                std::vector<int> controlStackB;
+                visited.clear();
+                buildControlStack(graph, B, visited, controlStackB, true);
+
+                graph.control.orderMemoryNodes(controlStackA, controlStackB, true);
+            }
+            previousNodes = std::make_pair(firstNode, lastNode);
+        }
+
         UnrollLoops::UnrollLoops(CommandParametersPtr params, ContextPtr context)
             : m_params(params)
             , m_context(context)
@@ -447,11 +498,13 @@ namespace rocRoller
             };
 
             Log::debug("  Ordering loop {}", tag);
-            std::set<int> previousLoads;
-            std::set<int> previousLDSLoads;
-            std::set<int> previousStores;
-            std::set<int> previousLDSStores;
-            auto          name = getForLoopName(graph, tag);
+
+            std::optional<std::pair<int, int>> previousLoads;
+            std::optional<std::pair<int, int>> previousLDSLoads;
+            std::optional<std::pair<int, int>> previousStores;
+            std::optional<std::pair<int, int>> previousLDSStores;
+
+            auto name = getForLoopName(graph, tag);
             for(int i = 0; i < unrollAmount; i++)
             {
                 duplicatedBodies[i]   = connectWithSetCoord(duplicatedBodies[i], i);
@@ -459,17 +512,11 @@ namespace rocRoller
                 auto currentLDSLoads  = getTops(isLoadLDSTile, duplicatedBodies[i]);
                 auto currentStores    = getTops(isStoreTiled, duplicatedBodies[i]);
                 auto currentLDSStores = getTops(isStoreLDSTile, duplicatedBodies[i]);
-                if(i > 0)
-                {
-                    orderMemoryNodes(graph, previousLoads, currentLoads, true);
-                    orderMemoryNodes(graph, previousLDSLoads, currentLDSLoads, true);
-                    orderMemoryNodes(graph, previousStores, currentStores, true);
-                    orderMemoryNodes(graph, previousLDSStores, currentLDSStores, true);
-                }
-                previousLoads     = currentLoads;
-                previousLDSLoads  = currentLDSLoads;
-                previousStores    = currentStores;
-                previousLDSStores = currentLDSStores;
+
+                orderCurrentAndPreviousNodes(graph, previousLoads, currentLoads);
+                orderCurrentAndPreviousNodes(graph, previousLDSLoads, currentLDSLoads);
+                orderCurrentAndPreviousNodes(graph, previousStores, currentStores);
+                orderCurrentAndPreviousNodes(graph, previousLDSStores, currentLDSStores);
 
                 currentLDSLoads
                     = filter(isLoadLDSTile,
