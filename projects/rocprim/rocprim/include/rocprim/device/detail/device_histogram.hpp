@@ -226,11 +226,12 @@ struct is_sample_vectorizable
 
 template<unsigned int BlockSize, unsigned int ItemsPerThread, unsigned int Channels, class Sample>
 ROCPRIM_DEVICE ROCPRIM_INLINE
-    typename std::enable_if<is_sample_vectorizable<ItemsPerThread, Channels, Sample>::value>::type
+typename std::enable_if<is_sample_vectorizable<ItemsPerThread, Channels, Sample>::value>::type
     load_samples(unsigned int flat_id,
                  Sample*      samples,
                  sample_vector<Sample, Channels> (&values)[ItemsPerThread])
 {
+#if !defined(__SPIRV__) // Temp fix SPIR-V has a problem with the casting path for the global kernel
     using packed_samples_type = int[sizeof(Sample) * Channels * ItemsPerThread / sizeof(int)];
 
     if(reinterpret_cast<uintptr_t>(samples) % sizeof(int) == 0)
@@ -247,6 +248,12 @@ ROCPRIM_DEVICE ROCPRIM_INLINE
             reinterpret_cast<const sample_vector<Sample, Channels>*>(samples),
             values);
     }
+#else
+    block_load_direct_striped<BlockSize>(
+        flat_id,
+        reinterpret_cast<const sample_vector<Sample, Channels>*>(samples),
+        values);
+#endif
 }
 
 template<unsigned int BlockSize, unsigned int ItemsPerThread, unsigned int Channels, class Sample>
