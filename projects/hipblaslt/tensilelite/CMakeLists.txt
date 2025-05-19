@@ -93,7 +93,12 @@ if(DEFINED DEVELOP_MODE)
                  "#!/bin/bash\n"
                  "set -euo pipefail\n"
                  "${CMAKE_BUILD_COMMAND}\n"
-                 "PYTHONPATH=${PYTHONPATH} ${Python_EXECUTABLE} ${TENSILE_BIN_ROOT}/${BIN} \"$@\"\n"
+                 "if [[ \"$\{DEBUGPY_ENABLE:-\}\" == \"1\" ]]; then\n"
+                 "    echo \"===DEBUGPY_READY===\"\n"
+                 "    PYTHONPATH=${PYTHONPATH} ${Python_EXECUTABLE} -m debugpy --listen 0.0.0.0:5678 --wait-for-client ${TENSILE_BIN_ROOT}/${BIN} \"$@\"\n"
+                 "else\n"
+                 "    PYTHONPATH=${PYTHONPATH} ${Python_EXECUTABLE} ${TENSILE_BIN_ROOT}/${BIN} \"$@\"\n"
+                 "fi\n"
             )
             execute_process(COMMAND chmod +x "${PROJECT_BINARY_DIR}/${BIN}.sh")
         endif()

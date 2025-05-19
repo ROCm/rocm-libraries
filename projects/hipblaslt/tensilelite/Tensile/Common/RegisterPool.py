@@ -33,6 +33,7 @@ from enum import Enum
 from typing import List, Optional
 
 import traceback
+from math import floor
 
 ################################################################################
 # RegisterPool
@@ -418,8 +419,27 @@ class RegisterPool:
 
   def growPool(self, rangeStart: int, rangeEnd: int, checkOutSize: int, comment: str=""):
     tl = []
-    for _ in range(rangeStart, rangeEnd):
-      tl.append(self.checkOut(checkOutSize, comment))
+    if checkOutSize == 1:  # need to check if this works for checkOutSize > 1
+      continuous = 0
+      availList = []
+      for i in range(0, len(self.pool)):
+        s = self.pool[i]
+        if s.status != RegisterPool.Status.Available:
+          if continuous > 0:
+            availList.append(continuous)
+            continuous = 0
+        elif s.status == RegisterPool.Status.Available:
+          continuous += 1
+      rangeTotal = rangeEnd - rangeStart
+      for numGpr in availList:
+        rangeTurn = floor(numGpr / checkOutSize)
+        tl.append(self.checkOut(checkOutSize * rangeTurn, comment))
+        rangeTotal -= numGpr
+      if rangeTotal > 0:
+        tl.append(self.checkOut(checkOutSize * rangeTotal, comment))
+    else:
+      for _ in range(rangeStart, rangeEnd):
+        tl.append(self.checkOut(checkOutSize, comment))
     for t in tl:
       self.checkIn(t)
 
