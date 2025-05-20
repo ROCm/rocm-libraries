@@ -12058,9 +12058,9 @@ class KernelWriterAssembly(KernelWriter):
             mubuf2.offen = False
             mubuf2.offset12 = 0
             module.add(SMovB32(dst=tmpSgpr, src=offset2, comment="large offset"))
-          module.add(BufferStoreB128(src=vgpr(int(srcVgpr +shiftRpv*i), shiftRpv), vaddr=addr0, \
-            saddr=addr1, soffset=tmpSgpr, mubuf=mubuf2, comment=comment))
-
+          vgprOff = int(srcVgpr + shiftRpv * i) if isinstance(srcVgpr, int) else f"{srcVgpr}+{int(shiftRpv * i)}"
+          module.add(BufferStoreB128(src=vgpr(vgprOff, shiftRpv), vaddr=addr0, \
+                saddr=addr1, soffset=tmpSgpr, mubuf=mubuf2, comment=comment))
       else:
         assert 0, "bad bps"
 
