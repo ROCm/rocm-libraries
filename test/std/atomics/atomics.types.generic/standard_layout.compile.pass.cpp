@@ -11,15 +11,18 @@
 // <atomic>
 
 #include "gpu/atomic"
+#include "hip/hip_runtime.h"
 #include <type_traits>
 #include <cassert>
 
 #include "test_macros.h"
 #include "atomic_helpers.h"
 
+#include "force_include_hip.h"
+
 template <class Tp>
 struct CheckStandardLayout {
-  void operator()() const {
+  __host__ __device__ void operator()() const {
     typedef gpu::atomic<Tp> Atomic;
     static_assert(std::is_standard_layout<Atomic>::value, "");
   }
@@ -29,6 +32,5 @@ int main(int, char**) {
   TestEachIntegralType<CheckStandardLayout>()();
   TestEachFloatingPointType<CheckStandardLayout>()();
   TestEachPointerType<CheckStandardLayout>()();
-
   return 0;
 }

@@ -15,7 +15,7 @@
 #include "test_macros.h"
 
 template <typename T>
-__device__ constexpr bool test() {
+__host__ __device__ constexpr bool test() {
   [[maybe_unused]] constexpr T a;
   static_assert(std::is_nothrow_constructible_v<T>);
   ASSERT_NOEXCEPT(T{});
@@ -23,14 +23,14 @@ __device__ constexpr bool test() {
 }
 
 struct throwing {
-  __device__ throwing() {}
+  __host__ __device__ throwing() {}
 };
 
 struct trivial {
   int a;
 };
 
-__global__ void test() {
+__host__ __device__ void test() {
   static_assert(test<gpu::atomic<bool>>());
   static_assert(test<gpu::atomic<int>>());
   static_assert(test<gpu::atomic<int*>>());
