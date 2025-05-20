@@ -540,21 +540,44 @@ class KernelWriterAssembly(KernelWriter):
     if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
       module.add(self.defineSgpr("GlobalReadIncsMetadata", self.states.m.numSgprGlobalReadIncs))
 
-    if self.states.lrvwTileA > 1 or self.states.lrvwTileB > 1 or self.states.lrvwTileMetadata > 1:
-      if kernel["ProblemType"]["DataType"].isHalf() or kernel["ProblemType"]["DataType"].isBFloat16() \
-         or kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].is8bitFloat():
+    needPackK16  = False
+    needPackK8Lw = False
+    needPackK8Hi = False
+
+    if kernel["ProblemType"]["DataType"].isHalf() or kernel["ProblemType"]["DataType"].isBFloat16():
+      if self.states.lrvwTileA > 1 or self.states.lrvwTileB > 1:
+        needPackK16 = True
+      if self.states.lrvwTileMetadata > 1:
+        needPackK8Lw = True
+      if self.states.lrvwTileMetadata > 2:
+        needPackK8Hi = True
+    elif kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].is8bitFloat():
+      if self.states.lrvwTileA > 1 or self.states.lrvwTileB > 1 or self.states.lrvwTileMetadata > 1:
+        needPackK8Lw = True
+      if self.states.lrvwTileA > 2 or self.states.lrvwTileB > 2 or self.states.lrvwTileMetadata > 2:
+        needPackK8Hi = True
+    
+    # need extra sgpr for packing metadata
+    tPackM = "M" if needPackK16 and needPackK8Lw else ""
+
+    if needPackK16:
         module.add(self.defineSgpr("PackKForV0", 1))
         module.add(self.defineSgpr("PackKForV1", 1))
         if kernel["StreamK"] != 0:
           self.states.nonPostLoopSgpr.append("PackKForV0")
           self.states.nonPostLoopSgpr.append("PackKForV1")
-        if (self.states.lrvwTileA > 2 or self.states.lrvwTileB > 2 or self.states.lrvwTileMetadata > 2) and \
-            (kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].is8bitFloat()):
-          module.add(self.defineSgpr("PackKForV2", 1))
-          module.add(self.defineSgpr("PackKForV3", 1))
-          if kernel["StreamK"] != 0:
-            self.states.nonPostLoopSgpr.append("PackKForV2")
-            self.states.nonPostLoopSgpr.append("PackKForV3")
+    if needPackK8Lw:
+      module.add(self.defineSgpr("PackKFor%sV0"%tPackM, 1))
+      module.add(self.defineSgpr("PackKFor%sV1"%tPackM, 1))
+      if kernel["StreamK"] != 0 and not needPackK16 :
+        self.states.nonPostLoopSgpr.append("PackKForV0")
+        self.states.nonPostLoopSgpr.append("PackKForV1")
+    if needPackK8Hi:
+      module.add(self.defineSgpr("PackKFor%sV2"%tPackM, 1))
+      module.add(self.defineSgpr("PackKFor%sV3"%tPackM, 1))
+      if kernel["StreamK"] != 0 and not needPackK16:
+        self.states.nonPostLoopSgpr.append("PackKForV2")
+        self.states.nonPostLoopSgpr.append("PackKForV3")
 
     if kernel["ProblemType"]["StochasticRounding"]:
       module.add(self.defineSgpr("RNDSeed", 1))
@@ -823,7 +846,9 @@ class KernelWriterAssembly(KernelWriter):
     if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
       moduleVgprMacro.add(RegSet("v", "vgprG2LMetadata", "vgprBase", self.states.m.startVgprG2L - self.states.startVgpr))
 
-    if ((tPA["bpe"] < 4 and not kernel["UnrollMajorLDSA"]) or (tPB["bpe"] < 4 and not kernel["UnrollMajorLDSB"])) \
+    if ((tPA["bpe"] < 4 and not kernel["UnrollMajorLDSA"]) or                                              \
+        (tPB["bpe"] < 4 and not kernel["UnrollMajorLDSB"]) or                                              \
+        (not kernel["UnrollMajorLDSMetadata"] and kernel["MIInputPerThreadMetadata"] == 4))                \
         and (kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].is8bitFloat()):
       moduleVgprMacro.add(RegSet("v", "vgprPackTemp", "vgprBase", self.states.a.startVgprValuPackTemp - self.states.startVgpr))
 
@@ -2064,16 +2089,34 @@ class KernelWriterAssembly(KernelWriter):
     # define the rest of sgprs
     module.addModuleAsFlatItems(self.defineVariableSgprs(kernel))
 
-    if self.states.lrvwTileA > 1 or self.states.lrvwTileB > 1 or self.states.lrvwTileMetadata > 1:
-      if kernel["ProblemType"]["DataType"].isHalf() or kernel["ProblemType"]["DataType"].isBFloat16():
+    needPackK16  = False
+    needPackK8Lw = False
+    needPackK8Hi = False
+
+    if kernel["ProblemType"]["DataType"].isHalf() or kernel["ProblemType"]["DataType"].isBFloat16():
+      if self.states.lrvwTileA > 1 or self.states.lrvwTileB > 1:
+        needPackK16 = True
+      if self.states.lrvwTileMetadata > 1:
+        needPackK8Lw = True
+      if self.states.lrvwTileMetadata > 2:
+        needPackK8Hi = True
+    elif kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].is8bitFloat():
+      if self.states.lrvwTileA > 1 or self.states.lrvwTileB > 1 or self.states.lrvwTileMetadata > 1:
+        needPackK8Lw = True
+      if self.states.lrvwTileA > 2 or self.states.lrvwTileB > 2 or self.states.lrvwTileMetadata > 2:
+        needPackK8Hi = True
+
+    # need extra sgpr for packing metadata
+    tPackM = "M" if needPackK16 and needPackK8Lw else ""
+    if needPackK16:
         module.add(SMovB32(dst=sgpr("PackKForV0"), src="0x05040100", comment=""))
         module.add(SMovB32(dst=sgpr("PackKForV1"), src="0x07060302", comment=""))
-      if kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].is8bitFloat():
-        module.add(SMovB32(dst=sgpr("PackKForV0"), src="0x0c0c0400", comment=""))
-        module.add(SMovB32(dst=sgpr("PackKForV1"), src="0x0c0c0501", comment=""))
-        if self.states.lrvwTileA > 2 or self.states.lrvwTileB > 2 or self.states.lrvwTileMetadata > 2:
-          module.add(SMovB32(dst=sgpr("PackKForV2"), src="0x0c0c0602", comment=""))
-          module.add(SMovB32(dst=sgpr("PackKForV3"), src="0x0c0c0703", comment=""))
+    if needPackK8Lw:
+        module.add(SMovB32(dst=sgpr("PackKFor%sV0"%tPackM), src="0x0c0c0400", comment=""))
+        module.add(SMovB32(dst=sgpr("PackKFor%sV1"%tPackM), src="0x0c0c0501", comment=""))
+    if needPackK8Hi:
+        module.add(SMovB32(dst=sgpr("PackKFor%sV2"%tPackM), src="0x0c0c0602", comment=""))
+        module.add(SMovB32(dst=sgpr("PackKFor%sV3"%tPackM), src="0x0c0c0703", comment=""))
 
     # self.states.groOffsetInMacroTile == 1 case, subtract pre-pad here
     if self.states.groOffsetInMacroTile:
@@ -4540,7 +4583,9 @@ class KernelWriterAssembly(KernelWriter):
     imodMisc        = Module("tailLoopAllocValuMiscVgpr")
     vgprBaseMisc    = -1
     numVgprPackTemp = 0
-    if ((tensorParametersA["bpe"] < 4 and not kernel["UnrollMajorLDSA"]) or (tensorParametersB["bpe"] < 4 and not kernel["UnrollMajorLDSB"])) \
+    if ((tensorParametersA["bpe"] < 4 and not kernel["UnrollMajorLDSA"])                                   \
+        or (tensorParametersB["bpe"] < 4 and not kernel["UnrollMajorLDSB"])                                \
+        or (not kernel["UnrollMajorLDSMetadata"] and kernel["MIInputPerThreadMetadata"] == 4))             \
         and (kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].is8bitFloat()):
       numVgprPackTemp = 1
     numVgprCvtTemp = 0
