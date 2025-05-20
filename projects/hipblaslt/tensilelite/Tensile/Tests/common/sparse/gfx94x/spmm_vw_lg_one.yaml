@@ -1,0 +1,425 @@
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
+
+GlobalParameters:
+  SleepPercent: 50
+  CSVExportWinner: 1
+  CSVMergeSameProblemID: 1
+  Device: 0
+  MaxFileName: 256
+  # PrintTensorD: 0x2
+  #DataInitTypeA: 1
+  #DataInitTypeB: 8
+  # DataInitTypeD: 3
+  # DataInitTypeE: 3
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 0
+  # DataInitTypeBias: 0
+  # DataInitTypeScaleD: 0
+  # NumMergedFiles: 4
+  # ShortNames: True
+  PrintSolutionRejectionReason: True
+  # PrintWinnersOnly: True
+  NumElementsToValidate: -1
+  NumWarmups: 0
+  EnqueuesPerSync: 0
+  SyncsPerBenchmark: 1
+  NumBenchmarks: 1
+  # KernelTime: False
+  MinKForGSU: 1
+  # PrintCodeCommands: True
+  # CpuThreads: 1
+  # GenerateSourcesAndExit: True
+  # ValidationPrintValids: True
+  # ValidationMaxToPrint: 64
+  # ForceGenerateKernel: True
+  # ShowProgressBar: 0
+  #PruneSparseMode: 1
+  #PrintTensorD: 1
+  #PrintTensorRef: 1
+BenchmarkProblems:
+
+  #######################################
+  # NN - standard
+  #######################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: H
+      DestDataType: H
+      ComputeDataType: s
+      HighPrecisionAccumulate:  True
+      TransposeA: 0
+      TransposeB: 0
+      UseBeta: True
+      Sparse: 1
+      Batched: True
+      Activation: True
+      ActivationType: all
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        #- EdgeType: ["ShiftPtr"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 8, 8, 2, 2]
+          - [16, 16, 32, 1, 1, 4, 4, 2, 2]
+        - DepthU: [64]
+        - VectorWidthA: [1,2,4,8]
+        - VectorWidthB: [1,2,4,8]
+        - TransposeLDS: [-1]
+        - ScheduleIterAlg: [3]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [2]
+        - 1LDSBuffer: [-1]
+        - DirectToVgprSparseMetadata: [0]
+        - WorkGroupMapping: [1]
+        - StoreVectorWidth: [-1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [32, 32, 1, 64] # classic format
+          - Exact: [32, 32, 1, 96] # classic format
+        - ActivationArgs:
+          - [Enum: none]
+
+  #######################################
+  # NT - standard
+  #######################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: H
+      DestDataType: H
+      ComputeDataType: s
+      HighPrecisionAccumulate:  True
+      TransposeA: 0
+      TransposeB: 1
+      UseBeta: True
+      Sparse: 1
+      Batched: True
+      Activation: True
+      ActivationType: all
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        #- EdgeType: ["ShiftPtr"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 8, 8, 2, 2]
+          - [16, 16, 32, 1, 1, 4, 4, 2, 2]
+        - DepthU: [64]
+        - VectorWidthA: [1,2,4,8]
+        - VectorWidthB: [1,2,4,8]
+        - TransposeLDS: [-1]
+        - ScheduleIterAlg: [3]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [2]
+        - 1LDSBuffer: [-1]
+        - DirectToVgprSparseMetadata: [0]
+        - WorkGroupMapping: [1]
+        - StoreVectorWidth: [-1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [32, 32, 1, 64] # classic format
+          - Exact: [32, 32, 1, 96] # classic format
+        - ActivationArgs:
+          - [Enum: none]
+
+  #######################################
+  # TN - standard
+  #######################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: H
+      DestDataType: H
+      ComputeDataType: s
+      HighPrecisionAccumulate:  True
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Sparse: 1
+      Batched: True
+      Activation: True
+      ActivationType: all
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        #- EdgeType: ["ShiftPtr"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 8, 8, 2, 2]
+          - [16, 16, 32, 1, 1, 4, 4, 2, 2]
+        - DepthU: [64]
+        - VectorWidthA: [1,2,4,8]
+        - VectorWidthB: [1,2,4,8]
+        - TransposeLDS: [-1]
+        - ScheduleIterAlg: [3]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [2]
+        - 1LDSBuffer: [-1]
+        - DirectToVgprSparseMetadata: [0]
+        - WorkGroupMapping: [1]
+        - StoreVectorWidth: [-1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [32, 32, 1, 64] # classic format
+          - Exact: [32, 32, 1, 96] # classic format
+        - ActivationArgs:
+          - [Enum: none]
+
+  #######################################
+  # TT - standard
+  #######################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: H
+      DestDataType: H
+      ComputeDataType: s
+      HighPrecisionAccumulate:  True
+      TransposeA: 1
+      TransposeB: 1
+      UseBeta: True
+      Sparse: 1
+      Batched: True
+      Activation: True
+      ActivationType: all
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        #- EdgeType: ["ShiftPtr"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 8, 8, 2, 2]
+          - [16, 16, 32, 1, 1, 4, 4, 2, 2]
+        - DepthU: [64]
+        - VectorWidthA: [1,2,4,8]
+        - VectorWidthB: [1,2,4,8]
+        - TransposeLDS: [-1]
+        - ScheduleIterAlg: [3]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [2]
+        - 1LDSBuffer: [-1]
+        - DirectToVgprSparseMetadata: [0]
+        - WorkGroupMapping: [1]
+        - StoreVectorWidth: [-1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [32, 32, 1, 64] # classic format
+          - Exact: [32, 32, 1, 96] # classic format
+        - ActivationArgs:
+          - [Enum: none]
+
+
+  #######################################
+  # NN - standard
+  #######################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: i8
+      DestDataTyp: i8
+      ComputeDataType: s
+      HighPrecisionAccumulate:  True
+      TransposeA: 0
+      TransposeB: 0
+      UseBeta: True
+      Sparse: 1
+      Batched: True
+      Activation: True
+      ActivationType: all
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        #- EdgeType: ["ShiftPtr"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 64, 1, 1, 8, 8, 2, 2]
+          - [16, 16, 64, 1, 1, 4, 4, 2, 2]
+        - DepthU: [64]
+        - VectorWidthA: [1,2,4,8]
+        - VectorWidthB: [1,2,4,8]
+        - TransposeLDS: [-1]
+        - ScheduleIterAlg: [3]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [2]
+        - 1LDSBuffer: [-1]
+        - DirectToVgprSparseMetadata: [0]
+        - WorkGroupMapping: [1]
+        - StoreVectorWidth: [-1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [32, 32, 1, 64] # classic format
+          - Exact: [32, 32, 1, 96] # classic format
+        - ActivationArgs:
+          - [Enum: none]
+
+  #######################################
+  # NT - standard
+  #######################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: i8
+      DestDataTyp: i8
+      ComputeDataType: s
+      HighPrecisionAccumulate:  True
+      TransposeA: 0
+      TransposeB: 1
+      UseBeta: True
+      Sparse: 1
+      Batched: True
+      Activation: True
+      ActivationType: all
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        #- EdgeType: ["ShiftPtr"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 64, 1, 1, 8, 8, 2, 2]
+          - [16, 16, 64, 1, 1, 4, 4, 2, 2]
+        - DepthU: [64]
+        - VectorWidthA: [1,2,4,8]
+        - VectorWidthB: [1,2,4,8]
+        - TransposeLDS: [-1]
+        - ScheduleIterAlg: [3]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [2]
+        - 1LDSBuffer: [-1]
+        - DirectToVgprSparseMetadata: [0]
+        - WorkGroupMapping: [1]
+        - StoreVectorWidth: [-1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [32, 32, 1, 64] # classic format
+          - Exact: [32, 32, 1, 96] # classic format
+        - ActivationArgs:
+          - [Enum: none]
+
+  #######################################
+  # TN - standard
+  #######################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: i8
+      DestDataTyp: i8
+      ComputeDataType: s
+      HighPrecisionAccumulate:  True
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Sparse: 1
+      Batched: True
+      Activation: True
+      ActivationType: all
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        #- EdgeType: ["ShiftPtr"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 64, 1, 1, 8, 8, 2, 2]
+          - [16, 16, 64, 1, 1, 4, 4, 2, 2]
+        - DepthU: [64]
+        - VectorWidthA: [1,2,4,8]
+        - VectorWidthB: [1,2,4,8]
+        - TransposeLDS: [-1]
+        - ScheduleIterAlg: [3]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [2]
+        - 1LDSBuffer: [-1]
+        - DirectToVgprSparseMetadata: [0]
+        - WorkGroupMapping: [1]
+        - StoreVectorWidth: [-1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [32, 32, 1, 64] # classic format
+          - Exact: [32, 32, 1, 96] # classic format
+        - ActivationArgs:
+          - [Enum: none]
+
+  #######################################
+  # TT - standard
+  #######################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: i8
+      DestDataTyp: i8
+      ComputeDataType: s
+      HighPrecisionAccumulate:  True
+      TransposeA: 1
+      TransposeB: 1
+      UseBeta: True
+      Sparse: 1
+      Batched: True
+      Activation: True
+      ActivationType: all
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        #- EdgeType: ["ShiftPtr"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 64, 1, 1, 8, 8, 2, 2]
+          - [16, 16, 64, 1, 1, 4, 4, 2, 2]
+        - DepthU: [64]
+        - VectorWidthA: [1,2,4,8]
+        - VectorWidthB: [1,2,4,8]
+        - TransposeLDS: [-1]
+        - ScheduleIterAlg: [3]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [2]
+        - 1LDSBuffer: [-1]
+        - DirectToVgprSparseMetadata: [0]
+        - WorkGroupMapping: [1]
+        - StoreVectorWidth: [-1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [32, 32, 1, 64] # classic format
+          - Exact: [32, 32, 1, 96] # classic format
+        - ActivationArgs:
+          - [Enum: none]
