@@ -93,13 +93,13 @@ if(BUILD_TEST OR BUILD_HIPSTDPAR_TEST)
   # for cache serialization.  We also want to use a static SQLite,
   # and distro static libraries aren't typically built
   # position-independent.
-  if(DEFINED ENV{SQLITE_3_43_2_SRC_URL})
-    set(SQLITE_3_43_2_SRC_URL_INIT $ENV{SQLITE_3_43_2_SRC_URL})
+  if(DEFINED ENV{SQLITE_3_49_2_SRC_URL})
+    set(SQLITE_3_49_2_SRC_URL_INIT $ENV{SQLITE_3_49_2_SRC_URL})
   else()
-    set(SQLITE_3_43_2_SRC_URL_INIT https://www.sqlite.org/2023/sqlite-amalgamation-3430200.zip)
+    set(SQLITE_3_49_2_SRC_URL_INIT https://sqlite.org/2025/sqlite-amalgamation-3490200.zip)
   endif()
-    set(SQLITE_3_43_2_SRC_URL ${SQLITE_3_43_2_SRC_URL_INIT} CACHE STRING "Location of SQLite source code")
-    set(SQLITE_SRC_3_43_2_SHA3_256 af02b88cc922e7506c6659737560c0756deee24e4e7741d4b315af341edd8b40 CACHE STRING "SHA3-256 hash of SQLite source code")
+    set(SQLITE_3_49_2_SRC_URL ${SQLITE_3_49_2_SRC_URL_INIT} CACHE STRING "Location of SQLite source code")
+    set(SQLITE_SRC_3_43_2_SHA3_256 fad307cde789046256b4960734d7fec6b31db7f5dc8525474484885faf82866c CACHE STRING "SHA3-256 hash of SQLite source code")
 
     # embed SQLite
     if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.24)
@@ -109,7 +109,7 @@ if(BUILD_TEST OR BUILD_HIPSTDPAR_TEST)
 
   message("Downloading SQLite.")
   FetchContent_Declare(sqlite_local
-    URL ${SQLITE_3_43_2_SRC_URL}
+    URL ${SQLITE_3_49_2_SRC_URL}
     URL_HASH SHA3_256=${SQLITE_SRC_3_43_2_SHA3_256}
   )
   FetchContent_MakeAvailable(sqlite_local)
