@@ -1,0 +1,53 @@
+# Reflect Checks to Monorepo (Push-style)
+# ----------------------------------------
+# This GitHub Actions workflow runs on check updates in subrepo PRs that are part of a
+# fanout from a monorepo. When a check is updated (e.g., CI passes/fails), this workflow:
+#
+# - Parses the branch name to extract the monorepo PR number
+# - Sends a `repository_dispatch` event to the monorepo to reflect the updated check
+# - Requires a GitHub App token (`GH_APP_TOKEN`) with repo/workflow access to monorepo
+#
+# Triggered on: check_run events (completed)
+# Target repo: monorepo, which listens for `repository_dispatch` events
+
+name: Reflect Check Updates to Monorepo
+
+on:
+  check_run:
+  status:
+
+jobs:
+  dispatch:
+    # only run if the check_run event is for a pull request
+    if: github.event.check_run.pull_requests != []
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Generate a token
+        id: generate-token
+        uses: actions/create-github-app-token@df432ceedc7162793a195dd1713ff69aefc7379e # v2.0.6
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - name: Extract monorepo PR number
+        id: extract
+        run: |
+          head_branch="${{ github.event.check_run.check_suite.head_branch }}"
+          # Extract monorepo PR number from branch (monorepo-pr/<num>/<subtree>)
+          if [[ "$head_branch" =~ ^monorepo-pr/([0-9]+)/.+$ ]]; then
+            MONOREPO_PR="${BASH_REMATCH[1]}"
+          else
+            echo "Branch '$head_branch' does not match expected pattern. Not a fanout branch."
+            exit 0  # Skip silently
+          fi
+          echo "monorepo_pr=$MONOREPO_PR" >> "$GITHUB_OUTPUT"
+
+      - name: Send repository_dispatch to monorepo
+        env:
+          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+        run: |
+          gh api repos/ROCm/rocm-libraries/dispatches \
+            --method POST \
+            --field event_type="reflect-checks-push" \
+            --field client_payload='{"subrepo": "'"${{ github.repository }}"'", "monorepo_pr": ${{ steps.extract.outputs.monorepo_pr }}}'
