@@ -643,6 +643,18 @@ namespace rocRoller
         std::vector<int> getCodeGeneratorCoordinates(KernelGraph const& graph,
                                                      int                tag,
                                                      bool               isDirect2LDS = false);
+
+        /**
+        * @brief Get the first and last nodes from a set of nodes that are totally ordered
+        */
+        template <typename T>
+        std::pair<int, int> getFirstAndLastNodes(KernelGraph const& graph, T const& nodes);
+
+        /**
+        * @brief Remove redundant body edges in control graph. This is a baseline method for
+        *        verifying correctness.
+        */
+        void removeRedundantBodyEdgesBaselineMethod(KernelGraph& graph);
     }
 }
 
