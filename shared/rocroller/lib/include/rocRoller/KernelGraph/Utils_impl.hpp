@@ -288,4 +288,45 @@ namespace rocRoller::KernelGraph
 
         return newStartNodes;
     }
+
+    /**
+     * @brief Get the first and last nodes from a set of nodes that are totally ordered
+     */
+    template <typename T>
+    std::pair<int, int> getFirstAndLastNodes(KernelGraph const& graph, T const& nodes)
+    {
+        AssertFatal(not nodes.empty());
+
+        auto firstNode = *nodes.begin();
+        auto lastNode  = *nodes.begin();
+
+        for(auto const& n : nodes)
+        {
+            using namespace rocRoller::KernelGraph::ControlGraph;
+
+            if(firstNode != n)
+            {
+                auto order = graph.control.compareNodes(rocRoller::IgnoreCache, firstNode, n);
+                // If this assertion fails, that means the nodes are not totally ordered
+                AssertFatal(order != NodeOrdering::Undefined, "nodes are not totally ordered");
+                if(order != NodeOrdering::LeftFirst and order != NodeOrdering::LeftInBodyOfRight)
+                {
+                    firstNode = n;
+                }
+            }
+
+            if(lastNode != n)
+            {
+                auto order = graph.control.compareNodes(rocRoller::IgnoreCache, lastNode, n);
+                // If this assertion fails, that means the nodes are not totally ordered
+                AssertFatal(order != NodeOrdering::Undefined, "nodes are not totally ordered");
+                if(order == NodeOrdering::LeftFirst or order == NodeOrdering::LeftInBodyOfRight)
+                {
+                    lastNode = n;
+                }
+            }
+        }
+        return {firstNode, lastNode};
+    }
+
 }

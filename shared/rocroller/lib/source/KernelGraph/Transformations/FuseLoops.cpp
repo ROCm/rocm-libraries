@@ -113,46 +113,6 @@ namespace rocRoller
             }
 
             /**
-             * @brief Find the first and last nodes in `nodes` which are totally ordered
-             *
-             * Returns the first and last nodes as a pair
-             *
-             */
-            static std::pair<int, int>
-                getFirstAndLastNodes(rocRoller::KernelGraph::KernelGraph const& graph,
-                                     std::vector<int> const&                    nodes)
-            {
-                AssertFatal(not nodes.empty());
-
-                using namespace rocRoller::KernelGraph::ControlGraph;
-
-                int firstNode = nodes[0];
-                int lastNode  = nodes[0];
-                for(int i = 1; i < nodes.size(); i++)
-                {
-                    auto order
-                        = graph.control.compareNodes(rocRoller::IgnoreCache, firstNode, nodes[i]);
-                    // If this assertion fails, that means the nodes are not totally ordered
-                    AssertFatal(order != NodeOrdering::Undefined, "nodes are not totally ordered");
-                    if(order != NodeOrdering::LeftFirst
-                       and order != NodeOrdering::LeftInBodyOfRight)
-                    {
-                        firstNode = nodes[i];
-                    }
-
-                    order = graph.control.compareNodes(rocRoller::IgnoreCache, lastNode, nodes[i]);
-                    // If this assertion fails, that means the nodes are not totally ordered
-                    AssertFatal(order != NodeOrdering::Undefined, "nodes are not totally ordered");
-                    if(order == NodeOrdering::LeftFirst or order == NodeOrdering::LeftInBodyOfRight)
-                    {
-                        lastNode = nodes[i];
-                    }
-                }
-
-                return {firstNode, lastNode};
-            }
-
-            /**
              * @brief Order a new group (nodes) with existing groups. Each group consists of
              *        a pair of nodes which are the first and last nodes of memory nodes in a
              *        for-loop.
