@@ -231,7 +231,6 @@ typename std::enable_if<is_sample_vectorizable<ItemsPerThread, Channels, Sample>
                  Sample*      samples,
                  sample_vector<Sample, Channels> (&values)[ItemsPerThread])
 {
-#if !defined(__SPIRV__) // Temp fix SPIR-V has a problem with the casting path for the global kernel
     using packed_samples_type = int[sizeof(Sample) * Channels * ItemsPerThread / sizeof(int)];
 
     if(reinterpret_cast<uintptr_t>(samples) % sizeof(int) == 0)
@@ -248,12 +247,6 @@ typename std::enable_if<is_sample_vectorizable<ItemsPerThread, Channels, Sample>
             reinterpret_cast<const sample_vector<Sample, Channels>*>(samples),
             values);
     }
-#else
-    block_load_direct_striped<BlockSize>(
-        flat_id,
-        reinterpret_cast<const sample_vector<Sample, Channels>*>(samples),
-        values);
-#endif
 }
 
 template<unsigned int BlockSize, unsigned int ItemsPerThread, unsigned int Channels, class Sample>
@@ -496,6 +489,7 @@ ROCPRIM_DEVICE ROCPRIM_INLINE void
         load_samples<BlockSize>(flat_id, samples, values, valid_count);
     }
 
+    ROCPRIM_UNROLL
     for(unsigned int i = 0; i < ItemsPerThread; i++)
     {
         for(unsigned int channel = 0; channel < ActiveChannels; channel++)
