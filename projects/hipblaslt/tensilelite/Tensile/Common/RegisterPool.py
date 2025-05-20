@@ -433,8 +433,9 @@ class RegisterPool:
       rangeTotal = rangeEnd - rangeStart
       for numGpr in availList:
         rangeTurn = floor(numGpr / checkOutSize)
-        tl.append(self.checkOut(checkOutSize * rangeTurn, comment))
-        rangeTotal -= numGpr
+        if rangeTurn > 0:
+          tl.append(self.checkOut(checkOutSize * rangeTurn, comment))
+          rangeTotal -= rangeTurn
       if rangeTotal > 0:
         tl.append(self.checkOut(checkOutSize * rangeTotal, comment))
     else:
