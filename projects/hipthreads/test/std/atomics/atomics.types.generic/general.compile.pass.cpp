@@ -65,7 +65,7 @@
 #include "test_macros.h"
 
 template <class T>
-__device__ void test() {
+__host__ __device__ void test() {
   T a;
   typename T::value_type v;
 #if TEST_STD_VER >= 20
@@ -95,7 +95,7 @@ __device__ void test() {
   // a.notify_all();
 }
 
-__global__ void test() {
+__host__ __device__ void test() {
   test<gpu::atomic<operator_hijacker>>();
   test<volatile gpu::atomic<operator_hijacker>>();
 }

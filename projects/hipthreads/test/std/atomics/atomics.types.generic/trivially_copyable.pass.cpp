@@ -19,27 +19,28 @@
 #include <chrono> // for nanoseconds
 
 #include "test_macros.h"
-#include "kernel_launcher.h"
+#include "force_include_hip.h"
 
 #ifndef TEST_HAS_NO_THREADS
 #  include <thread> // for thread_id
 #endif
 
 struct TriviallyCopyable {
-  __device__ explicit TriviallyCopyable(int i) : i_(i) { }
+  __host__ __device__ explicit TriviallyCopyable(int i) : i_(i) { }
   int i_;
 };
 
 template <class T>
-__device__ void test(T t) {
+__host__ __device__ void test(T t) {
   gpu::atomic<T> t0(t);
 }
 
-__global__ void gmain() {
+int main(int, char**) {
   test(TriviallyCopyable(42));
   test(std::chrono::nanoseconds(2));
 #ifndef TEST_HAS_NO_THREADS
   // TODO: Uncomment this and use gpu::this_thread::get_id()
   //test(std::this_thread::get_id());
 #endif
+  return 0;
 }

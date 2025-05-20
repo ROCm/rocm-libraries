@@ -14,13 +14,13 @@
 #include "gpu/atomic"
 #include <cassert>
 
-#include "kernel_launcher.h"
+#include "force_include_hip.h"
 
 struct throwing {
-  __device__ throwing() { throw 42; }
+  __host__ __device__ throwing() { throw 42; }
 };
 
-__global__ void gmain() {
+int main(int, char**) {
   try {
     [[maybe_unused]] gpu::atomic<throwing> a;
     assert(false);

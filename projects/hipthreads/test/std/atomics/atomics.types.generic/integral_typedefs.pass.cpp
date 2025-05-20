@@ -40,6 +40,7 @@
 #include <type_traits>
 
 #include "test_macros.h"
+#include "force_include_hip.h"
 
 int main(int, char**)
 {
@@ -75,6 +76,5 @@ int main(int, char**)
     static_assert((std::is_same<gpu::atomic<uint32_t>,  gpu::atomic_uint32_t>::value), "");
     static_assert((std::is_same<gpu::atomic<int64_t>,   gpu::atomic_int64_t>::value), "");
     static_assert((std::is_same<gpu::atomic<uint64_t>,  gpu::atomic_uint64_t>::value), "");
-
-  return 0;
+    return 0;
 }
