@@ -179,6 +179,7 @@ jobs:
 
   therock-test-linux:
     name: "rocPRIM math-lib test"
+    needs: therock-build-linux
     runs-on: "linux-mi300-1gpu-ossci-rocm"
     strategy:
       fail-fast: false
