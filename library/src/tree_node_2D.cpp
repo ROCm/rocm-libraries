@@ -316,7 +316,7 @@ bool Single2DNode::CreateDeviceResources()
 
 void Single2DNode::SetupGridParam_internal(GridParam& gp)
 {
-    auto kernel = pool.get_kernel(GetKernelKey());
+    auto kernel = GetKernel();
     bwd         = kernel.transforms_per_block;
     wgs         = kernel.workgroup_size;
 

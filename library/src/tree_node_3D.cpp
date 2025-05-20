@@ -884,7 +884,7 @@ void SBRCTranspose3DNode::TuneDirectRegType()
 void SBRCTransXY_ZNode::SetupGridParam_internal(GridParam& gp)
 {
     // sbrcTransType has already been assigned in KernelCheck();
-    auto kernel = pool.get_kernel(GetKernelKey());
+    auto kernel = GetKernel();
     bwd         = kernel.transforms_per_block;
     wgs         = kernel.workgroup_size;
     lds         = length[0] * bwd;
@@ -899,7 +899,7 @@ void SBRCTransXY_ZNode::SetupGridParam_internal(GridParam& gp)
 void SBRCTransZ_XYNode::SetupGridParam_internal(GridParam& gp)
 {
     // sbrcTransType has already been assigned in KernelCheck();
-    auto kernel = pool.get_kernel(GetKernelKey());
+    auto kernel = GetKernel();
     bwd         = kernel.transforms_per_block;
     wgs         = kernel.workgroup_size;
     lds         = length[0] * bwd;

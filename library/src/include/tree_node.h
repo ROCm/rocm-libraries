@@ -41,6 +41,7 @@
 #include "function_pool.h"
 #include "kargs.h"
 #include "load_store_ops.h"
+#include "logging.h"
 #include "rtc_kernel.h"
 #include <hip/hip_runtime_api.h>
 
@@ -594,14 +595,56 @@ public:
             return *specified_pp_key.get();
 
         auto pp_parent_node = GetPartialPassAncestor();
-        if(pp_parent_node)
-            return PPFMKey(pp_parent_node->length[0],
-                           pp_parent_node->length[1],
-                           pp_parent_node->length[2],
-                           precision,
-                           pp_parent_node->scheme);
-        else
+        if(!pp_parent_node)
             throw std::runtime_error("Invalid parent node for partial pass");
+
+        return PPFMKey(pp_parent_node->length[0],
+                       pp_parent_node->length[1],
+                       pp_parent_node->length[2],
+                       precision,
+                       pp_parent_node->scheme);
+    }
+
+    virtual FFTKernel GetKernel() const
+    {
+        if(isPartialPassEnabled())
+        {
+            auto key = GetPPKernelsKey();
+            return pool.get_kernel(key, scheme);
+        }
+        else
+        {
+            auto key = GetKernelKey();
+            return pool.get_kernel(key);
+        }
+    }
+
+    virtual bool HasKernel() const
+    {
+        if(isPartialPassEnabled())
+        {
+            auto key = GetPPKernelsKey();
+            if(!pool.has_function(key))
+            {
+                if(LOG_TRACE_ENABLED())
+                    (*LogSingleton::GetInstance().GetTraceOS()) << PrintMissingKernelInfo(key);
+
+                return false;
+            }
+        }
+        else
+        {
+            auto key = GetKernelKey();
+            if(!pool.has_function(key))
+            {
+                if(LOG_TRACE_ENABLED())
+                    (*LogSingleton::GetInstance().GetTraceOS()) << PrintMissingKernelInfo(key);
+
+                return false;
+            }
+        }
+
+        return true;
     }
 
     // Compute the large twd decomposition base

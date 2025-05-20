@@ -104,22 +104,13 @@ FMKey LeafNode::GetKernelKey() const
 
 void LeafNode::GetKernelFactors()
 {
-    if(isPartialPassEnabled())
-    {
-        PPFMKey key   = GetPPKernelsKey();
-        kernelFactors = pool.get_kernel(key, scheme).factors;
-    }
-    else
-    {
-        FMKey key     = GetKernelKey();
-        kernelFactors = pool.get_kernel(key).factors;
-    }
+    auto kernel   = GetKernel();
+    kernelFactors = kernel.factors;
 }
 
 void LeafNode::GetKernelPartialPassFactors()
 {
-    PPFMKey key     = GetPPKernelsKey();
-    auto    kernel  = pool.get_kernel(key, scheme);
+    auto kernel     = GetKernel();
     kernelFactorsPP = std::vector<size_t>(kernel.pp_params.factors_off_dim.begin(),
                                           kernel.pp_params.factors_off_dim.end());
 
@@ -194,38 +185,19 @@ bool LeafNode::KernelCheck(std::vector<FMKey>& kernel_keys)
         }
     }
 
+    // get the final key and check if we have the kernel.
+    // Note that the check is trivial if we are using "specified_key"
+    // since we definitly have the kernel, but not trivial if it's the auto-gen key
+    HasKernel();
+
+    GetKernelFactors();
+
     if(isPartialPassEnabled())
-    {
-        PPFMKey key = GetPPKernelsKey();
-        if(!pool.has_function(key))
-            return false;
-
-        auto kernel = pool.get_kernel(key, scheme);
-        dir2regMode = (kernel.direct_to_from_reg) ? DirectRegType::TRY_ENABLE_IF_SUPPORT
-                                                  : DirectRegType::FORCE_OFF_OR_NOT_SUPPORT;
-
         GetKernelPartialPassFactors();
-    }
-    else
-    {
-        // get the final key and check if we have the kernel.
-        // Note that the check is trivial if we are using "specified_key"
-        // since we definitly have the kernel, but not trivial if it's the auto-gen key
-        FMKey key = GetKernelKey();
-        if(!pool.has_function(key))
-        {
-            if(LOG_TRACE_ENABLED())
-                (*LogSingleton::GetInstance().GetTraceOS()) << PrintMissingKernelInfo(key);
 
-            return false;
-        }
-
-        dir2regMode = (pool.get_kernel(key).direct_to_from_reg)
-                          ? DirectRegType::TRY_ENABLE_IF_SUPPORT
-                          : DirectRegType::FORCE_OFF_OR_NOT_SUPPORT;
-
-        GetKernelFactors();
-    }
+    auto kernel = GetKernel();
+    dir2regMode = (kernel.direct_to_from_reg) ? DirectRegType::TRY_ENABLE_IF_SUPPORT
+                                              : DirectRegType::FORCE_OFF_OR_NOT_SUPPORT;
 
     return true;
 }

@@ -30,15 +30,28 @@
 #include <sstream>
 #include <unordered_map>
 
-inline std::string PrintMissingKernelInfo(const FMKey& key)
+inline std::string PrintMissingKernelInfoBase(const FMKeyBase& key)
 {
     std::stringstream msg;
     msg << "Kernel not found: \n"
         << "\tlength: " << key.lengths[0] << "," << key.lengths[1] << "\n"
         << "\tprecision: " << key.precision << "\n"
-        << "\tscheme: " << PrintScheme(key.scheme) << "\n"
-        << "\tSBRC Transpose type: " << PrintSBRCTransposeType(key.sbrcTrans) << std::endl;
+        << "\tscheme: " << PrintScheme(key.scheme) << "\n";
+    return msg.str();
+}
 
+inline std::string PrintMissingKernelInfo(const PPFMKey& key)
+{
+    std::stringstream msg;
+    msg << PrintMissingKernelInfoBase(key);
+    return msg.str();
+}
+
+inline std::string PrintMissingKernelInfo(const FMKey& key)
+{
+    std::stringstream msg;
+    msg << PrintMissingKernelInfoBase(key)
+        << "\tSBRC Transpose type: " << PrintSBRCTransposeType(key.sbrcTrans) << std::endl;
     return msg.str();
 }
 

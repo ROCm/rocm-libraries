@@ -900,8 +900,7 @@ void Stockham1DNode::SetupGridParam_internal(GridParam& gp)
     for(size_t j = 1; j < length.size(); j++)
         batch_accum *= length[j];
 
-    auto key    = GetKernelKey();
-    auto kernel = pool.get_kernel(key);
+    auto kernel = GetKernel();
 
     bwd      = kernel.transforms_per_block;
     wgs      = kernel.workgroup_size;
@@ -950,8 +949,7 @@ void StockhamPP1DNode::SetupGridParam_internal(GridParam& gp)
     for(size_t j = 1; j < length.size(); j++)
         batch_accum *= length[j];
 
-    PPFMKey key    = GetPPKernelsKey();
-    auto    kernel = pool.get_kernel(key, scheme);
+    auto kernel = GetKernel();
 
     bwd      = kernel.transforms_per_block;
     wgs      = kernel.workgroup_size;
@@ -990,8 +988,7 @@ bool SBCCNode::KernelCheck(std::vector<FMKey>& kernel_keys)
 
     if(large1D > 0)
     {
-        FMKey key      = GetKernelKey();
-        auto  kernel   = pool.get_kernel(key);
+        auto kernel    = GetKernel();
         largeTwd3Steps = kernel.use_3steps_large_twd;
         get_large_twd_base_steps(large1D, largeTwd3Steps, largeTwdBase, ltwdSteps);
     }
@@ -1128,7 +1125,7 @@ void SBCCNode::TuneIntrinsicMode()
 
 void SBCCNode::SetupGridParam_internal(GridParam& gp)
 {
-    auto kernel = pool.get_kernel(GetKernelKey());
+    auto kernel = GetKernel();
     bwd         = kernel.transforms_per_block;
     wgs         = kernel.workgroup_size;
 
@@ -1157,8 +1154,7 @@ std::vector<size_t> SBCCNode::CollapsibleDims()
 
 void SBCCPPNode::SetupGridParam_internal(GridParam& gp)
 {
-    PPFMKey key    = GetPPKernelsKey();
-    auto    kernel = pool.get_kernel(key, scheme);
+    auto kernel = GetKernel();
 
     bwd = kernel.transforms_per_block;
     wgs = kernel.workgroup_size;

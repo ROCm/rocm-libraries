@@ -53,10 +53,6 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
 
     std::optional<FFTKernel> kernel;
 
-    // find function pool entry so we can construct specs for the generator
-    // NB: make sure all SBRC-type node have the correct trans_type value
-    FMKey key;
-    key = node.GetKernelKey();
     switch(pool_scheme)
     {
     case CS_KERNEL_STOCKHAM:
@@ -71,59 +67,39 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
         if((pool_scheme == CS_KERNEL_STOCKHAM_BLOCK_RC) && (node.sbrcTranstype == NONE))
             throw std::runtime_error("Invalid SBRC_TRANS_TYPE for SBRC kernel");
 
+        // these go into the function pool normally and are passed to
+        // the generator as-is
+        kernel = node.GetKernel();
+
         std::vector<unsigned int> factors;
+        std::copy(kernel->factors.begin(), kernel->factors.end(), std::back_inserter(factors));
+        std::vector<unsigned int> precisions = {static_cast<unsigned int>(node.precision)};
+
+        specs.emplace(factors,
+                      std::vector<unsigned int>(),
+                      precisions,
+                      static_cast<unsigned int>(kernel->workgroup_size),
+                      PrintScheme(node.scheme));
+
+        specs->threads_per_transform = kernel->threads_per_transform[0];
+        specs->half_lds              = kernel->half_lds;
+        specs->direct_to_from_reg    = kernel->direct_to_from_reg;
 
         if(node.isPartialPassEnabled())
         {
-            auto pp_key = node.GetPPKernelsKey();
-
-            kernel = node.pool.get_kernel(pp_key, node.scheme);
-
-            std::copy(kernel->factors.begin(), kernel->factors.end(), std::back_inserter(factors));
-            std::vector<unsigned int> precisions = {static_cast<unsigned int>(node.precision)};
-
             pp_params.off_dim         = node.ppOffDim;
             pp_params.current_dim     = node.ppCurrDim;
             pp_params.factors_off_dim = std::vector<unsigned int>(
                 kernel->pp_params.factors_off_dim.begin(), kernel->pp_params.factors_off_dim.end());
             pp_params.parent_length
                 = std::vector<unsigned int>(node.length.begin(), node.length.end());
-
-            specs.emplace(factors,
-                          std::vector<unsigned int>(),
-                          precisions,
-                          static_cast<unsigned int>(kernel->workgroup_size),
-                          PrintScheme(node.scheme));
-
-            specs->threads_per_transform = kernel->threads_per_transform[0];
-            specs->half_lds              = kernel->half_lds;
-            specs->direct_to_from_reg    = kernel->direct_to_from_reg;
-        }
-        else
-        {
-            // these go into the function pool normally and are passed to
-            // the generator as-is
-            kernel = node.pool.get_kernel(key);
-
-            std::copy(kernel->factors.begin(), kernel->factors.end(), std::back_inserter(factors));
-            std::vector<unsigned int> precisions = {static_cast<unsigned int>(node.precision)};
-
-            specs.emplace(factors,
-                          std::vector<unsigned int>(),
-                          precisions,
-                          static_cast<unsigned int>(kernel->workgroup_size),
-                          PrintScheme(node.scheme));
-
-            specs->threads_per_transform = kernel->threads_per_transform[0];
-            specs->half_lds              = kernel->half_lds;
-            specs->direct_to_from_reg    = kernel->direct_to_from_reg;
         }
 
         break;
     }
     case CS_KERNEL_2D_SINGLE:
     {
-        kernel = node.pool.get_kernel(key);
+        kernel = node.GetKernel();
 
         std::vector<unsigned int> factors1d;
         std::vector<unsigned int> factors2d;
