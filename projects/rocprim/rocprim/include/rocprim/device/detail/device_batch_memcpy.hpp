@@ -341,7 +341,6 @@ struct batch_memcpy_impl
                                   typename std::iterator_traits<typename std::iterator_traits<
                                       InputBufferItType>::value_type>::value_type>::type;
 
-
     // Offset over buffers.
     using buffer_offset_type = uint32_t;
 
@@ -546,6 +545,11 @@ private:
                 if(blev_buffer_offset < num_blev_buffers)
                 {
                     auto tile_buffer_id = buffer_by_size_class[blev_buffer_offset].buffer_id;
+                    /* In the case that buffer_size_type is rocthrust::device_reference<T> a static cast to 
+                    / unsigned long long is needed so that the type passed into ceiling_div is not 
+                    / rocthrust::device_reference<T>. This is possible since rocthrust::device_reference<T>
+                    / can be implicitly cast to type T.
+                    */
                     unsigned long long size = static_cast<unsigned long long>(buffers.sizes[tile_buffer_id]);
                     tile_offsets[i]
                         = rocprim::detail::ceiling_div(size,
@@ -622,7 +626,11 @@ private:
                 buffer_offset += warps_per_block)
             {
                 const auto buffer_id = buffers_by_size_class[buffer_offset].buffer_id;
-                
+                /* In the case that buffer_size_type is rocthrust::device_reference<T> a static cast to 
+                / unsigned long long is needed so that the type passed into copy_items is not 
+                / rocthrust::device_reference<T>. This is possible since rocthrust::device_reference<T>
+                / can be implicitly cast to type T.
+                */
                 unsigned long long size = static_cast<unsigned long long>(tile_buffers.sizes[buffer_id]);
                 batch_memcpy::copy_items<IsMemCpy>(tile_buffers.srcs[buffer_id],
                             tile_buffers.dsts[buffer_id],
