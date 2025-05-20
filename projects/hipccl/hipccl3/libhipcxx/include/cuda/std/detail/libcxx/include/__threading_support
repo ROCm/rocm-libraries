@@ -27,6 +27,8 @@
 #ifndef _LIBCUDACXX_THREADING_SUPPORT
 #define _LIBCUDACXX_THREADING_SUPPORT
 
+#include <hip/hip_runtime.h>
+
 #include <cuda/std/detail/__config>
 
 #if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)

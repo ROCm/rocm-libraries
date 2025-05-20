@@ -28,6 +28,8 @@
 #ifndef _LIBCUDACXX___CUDA_CHRONO_H
 #define _LIBCUDACXX___CUDA_CHRONO_H
 
+#include <hip/hip_runtime.h>
+
 #include <cuda/std/detail/__config>
 
 #if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
