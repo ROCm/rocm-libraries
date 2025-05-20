@@ -649,6 +649,12 @@ namespace rocRoller
         */
         template <typename T>
         std::pair<int, int> getFirstAndLastNodes(KernelGraph const& graph, T const& nodes);
+
+        /**
+        * @brief Remove redundant body edges in control graph. This is a baseline method for
+        *        verifying correctness.
+        */
+        void removeRedundantBodyEdgesBaselineMethod(KernelGraph& graph);
     }
 }
 

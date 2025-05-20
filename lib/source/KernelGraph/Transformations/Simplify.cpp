@@ -221,47 +221,6 @@ namespace rocRoller::KernelGraph
         }
     }
 
-    /*
-     * Helper for removeRedundantBodyEdges (early return).
-     */
-    bool isRedundantBodyEdge(KernelGraph const& graph, int edge)
-    {
-        auto tail = *only(graph.control.getNeighbours<GD::Upstream>(edge));
-        auto head = *only(graph.control.getNeighbours<GD::Downstream>(edge));
-
-        auto onlyFollowDifferentBodyEdges = [&](int x) -> bool {
-            auto isSame = x == edge;
-            auto isBody = CF::isEdge<Body>(graph.control.getElement(x));
-            return !isSame && isBody;
-        };
-
-        {
-            auto reachable
-                = !graph.control.depthFirstVisit(tail, onlyFollowDifferentBodyEdges, GD::Downstream)
-                       .filter([head](int x) { return x == head; })
-                       .empty();
-
-            if(reachable)
-                return true;
-        }
-
-        auto otherBodies = graph.control.getOutputNodeIndices<Body>(tail).filter(
-            [head](int x) { return x != head; });
-
-        for(auto top : otherBodies)
-        {
-            auto reachable
-                = !graph.control
-                       .depthFirstVisit(top, graph.control.isElemType<Sequence>(), GD::Downstream)
-                       .filter([head](int x) { return x == head; })
-                       .empty();
-
-            if(reachable)
-                return true;
-        }
-        return false;
-    }
-
     /**
      * @brief Remove redundant Body edges in the control graph.
      *
@@ -283,14 +242,128 @@ namespace rocRoller::KernelGraph
      */
     void removeRedundantBodyEdges(KernelGraph& graph)
     {
-        auto edges
-            = graph.control.getEdges().filter(graph.control.isElemType<Body>()).to<std::vector>();
-        for(auto edge : edges)
+        TIMER(t, "removeRedundantBodyEdges");
+
+        //
+        // The idea is to use depth to identify redundant Body edges, where
+        // "depth" means the longest path from root to the node.
+        //
+        // For example,
+        //
+        //       N0
+        //        @
+        //        |\ (Body)
+        //  (Body)| \
+        //        |  @ N1
+        //        | /
+        //        |/ (Sequence)
+        //        @
+        //       N2
+        //
+        // In this case, N0 happens to be the root node (i.e., depth(N0)=0),
+        // and depth(N1) = 1, depth(N2) = 2. So edge N0-N2 is redundant.
+        //
+        // Notice that this approach assumes a Body node can only have
+        // Sequence edge coming from another Body node with the same
+        // parent. The approach will produce incorrect results if this
+        // assumption does not hold.
+        //
+
+        std::unordered_map<int, std::unordered_set<int>> predecessors;
+        std::unordered_map<int, std::unordered_set<int>> successors;
+
+        std::unordered_map<int, std::unordered_set<int>> bodyPredecessors;
+
+        for(auto const node : graph.control.getNodes())
         {
-            if(isRedundantBodyEdge(graph, edge))
+            bodyPredecessors[node];
+            for(auto const parent : graph.control.getInputNodeIndices<Body>(node))
             {
-                Log::debug("Deleting redundant Body edge: {}", edge);
-                graph.control.deleteElement(edge);
+                if(bodyPredecessors.at(node).contains(parent))
+                {
+                    //
+                    // Two nodes are connected by more than one (Body) edge.
+                    // Each pair of nodes should be connected by at most one
+                    // (Body) edge after the outer for-loop finishes.
+                    //
+                    graph.control.deleteElement<Body>(std::vector<int>{parent},
+                                                      std::vector<int>{node});
+                }
+                else
+                    bodyPredecessors.at(node).insert(parent);
+            }
+
+            predecessors[node];
+            successors[node];
+            for(auto const parent : graph.control.getInputNodeIndices<Sequence>(node))
+            {
+                predecessors.at(node).insert(parent);
+                successors[parent].insert(node);
+            }
+        }
+
+        //
+        // Include nodes via Body edges as successors (and predecessors)
+        //
+        for(auto const& [node, bPredecessors] : bodyPredecessors)
+        {
+            for(auto pred : bPredecessors)
+            {
+                successors.at(pred).insert(node);
+                predecessors.at(node).insert(pred);
+            }
+        }
+
+        std::unordered_map<int, int> depth;
+        std::queue<int>              readyQueue;
+        std::unordered_set<int>      visited;
+        for(auto const& [node, pred] : predecessors)
+        {
+            if(pred.empty())
+            {
+                depth[node] = 0;
+                readyQueue.push(node);
+                visited.insert(node);
+            }
+        }
+
+        //
+        // Calculate the depth of each node
+        //
+        std::unordered_map<int, int> hit;
+        while(not readyQueue.empty())
+        {
+            auto node = readyQueue.front();
+            readyQueue.pop();
+
+            for(auto successor : successors.at(node))
+            {
+                if(visited.contains(successor))
+                    continue;
+
+                depth[successor] = std::max(depth[successor], depth.at(node) + 1);
+                hit[successor]++;
+                if(hit.at(successor) == predecessors.at(successor).size())
+                {
+                    readyQueue.push(successor);
+                    visited.insert(successor);
+                }
+            }
+        }
+
+        //
+        // Check nodes via Body edges. If depth(node) != depth(predecessor) + 1, the Body
+        // edge between the node and its predecessor is redundant and can be deleted.
+        //
+        for(auto const& [node, bPredecessors] : bodyPredecessors)
+        {
+            for(auto pred : bPredecessors)
+            {
+                AssertFatal(depth.at(pred) < depth.at(node),
+                            "node's predecessor should have smaller depth");
+                if(depth.at(pred) + 1 != depth.at(node))
+                    graph.control.deleteElement<Body>(std::vector<int>{pred},
+                                                      std::vector<int>{node});
             }
         }
     }
