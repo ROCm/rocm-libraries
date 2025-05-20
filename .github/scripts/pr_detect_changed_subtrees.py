@@ -14,11 +14,14 @@ Steps:
     4. Emit a new-line separated list of changed subtrees to GITHUB_OUTPUT as 'subtrees'.
 
 Arguments:
-    --repo      : Full repository name (e.g., org/repo)
-    --pr        : Pull request number
-    --config    : OPTIONAL, path to the repos-config.json file
-    --dry-run   : If set, will only log actions without making changes.
-    --debug     : If set, enables detailed debug logging.
+    --repo              : Full repository name (e.g., org/repo)
+    --pr                : Pull request number
+    --config            : OPTIONAL, path to the repos-config.json file.
+    --require-fanout    : If set, only include entries with enable_pr_fanout=true.
+    --require-auto-pull : If set, only include entries with auto_subtree_pull=true.
+    --require-auto-push : If set, only include entries with auto_subtree_push=true.
+    --dry-run           : If set, will only log actions without making changes.
+    --debug             : If set, enables detailed debug logging.
 
 Outputs:
     Writes 'subtrees' key to the GitHub Actions $GITHUB_OUTPUT file, which
@@ -26,8 +29,8 @@ Outputs:
     The output is a new-line separated list of subtrees in `category/name` format.
 
 Example Usage:
-    To run in debug mode and perform a dry-run (no changes made):
-        python pr_detect_changed_subtrees.py --repo ROCm/rocm-libraries --pr 123 --dry-run
+    To run in fanout situations in debug mode and perform a dry-run (no changes made):
+        python pr_detect_changed_subtrees.py --repo ROCm/rocm-libraries --pr 123 --require-fanout --debug --dry-run
 """
 
 import argparse
@@ -47,6 +50,9 @@ def parse_arguments(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser.add_argument("--repo", required=True, help="Full repository name (e.g., org/repo)")
     parser.add_argument("--pr", required=True, type=int, help="Pull request number")
     parser.add_argument("--config", required=False, default=".github/repos-config.json", help="Path to the repos-config.json file")
+    parser.add_argument("--require-fanout", action="store_true", help="Only include entries with enable_pr_fanout=true")
+    parser.add_argument("--require-auto-pull", action="store_true", help="Only include entries with auto_subtree_pull=true")
+    parser.add_argument("--require-auto-push", action="store_true", help="Only include entries with auto_subtree_push=true")
     parser.add_argument("--dry-run", action="store_true", help="Print results without writing to GITHUB_OUTPUT.")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
     return parser.parse_args(argv)
@@ -61,6 +67,21 @@ def get_valid_prefixes(config: List[RepoEntry]) -> Set[str]:
     logger.debug("Valid subtrees:\n" + "\n".join(sorted(valid_prefixes)))
     return valid_prefixes
 
+def get_valid_prefixes(config: List[RepoEntry], require_fanout: bool = False,
+                       require_auto_pull: bool = False, require_auto_push: bool = False) -> Set[str]:
+    """Extract valid subtree prefixes from the configuration based on filters."""
+    valid_prefixes = set()
+    for entry in config:
+        if require_fanout and not getattr(entry, "enable_pr_fanout", False):
+            continue
+        if require_auto_pull and not getattr(entry, "auto_subtree_pull", False):
+            continue
+        if require_auto_push and not getattr(entry, "auto_subtree_push", False):
+            continue
+        valid_prefixes.add(f"{entry.category}/{entry.name}")
+    logger.debug("Valid subtrees:\n" + "\n".join(sorted(valid_prefixes)))
+    return valid_prefixes
+
 def find_matched_subtrees(changed_files: List[str], valid_prefixes: Set[str]) -> List[str]:
     """Find subtrees that match the changed files."""
     changed_subtrees = {
@@ -71,7 +92,7 @@ def find_matched_subtrees(changed_files: List[str], valid_prefixes: Set[str]) ->
     matched = sorted(changed_subtrees & valid_prefixes)
     skipped = sorted(changed_subtrees - valid_prefixes)
     if skipped:
-        logger.debug(f"Skipped subtrees (enable_pr_fanout=false or not in config): {skipped}")
+        logger.debug(f"Skipped subtrees: {skipped}")
     logger.debug(f"Matched subtrees: {matched}")
     return matched
 
@@ -94,12 +115,12 @@ def main(argv=None) -> None:
     """Main function to determine changed subtrees in PR."""
     args = parse_arguments(argv)
     logging.basicConfig(
-        level=logging.DEBUG if args.debug else logging.INFO
+        level = logging.DEBUG if args.debug else logging.INFO
     )
     client = GitHubCLIClient()
     config = load_repo_config(args.config)
     changed_files = client.get_changed_files(args.repo, int(args.pr))
-    valid_prefixes = get_valid_prefixes(config)
+    valid_prefixes = get_valid_prefixes(config, args.require_fanout, args.require_auto_pull, args.require_auto_push)
     matched_subtrees = find_matched_subtrees(changed_files, valid_prefixes)
     output_subtrees(matched_subtrees, args.dry_run)
 
