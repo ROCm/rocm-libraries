@@ -192,7 +192,11 @@ if (WIN32)
     add_custom_command( TARGET hipblas-test POST_BUILD COMMAND ${CMAKE_COMMAND} ARGS -E copy ${file_i} ${PROJECT_BINARY_DIR}/staging/ )
   endforeach( file_i )
 
-  add_custom_command( TARGET hipblas-test POST_BUILD COMMAND ${CMAKE_COMMAND} ARGS -E copy_directory ${ROCBLAS_PATH}/bin/rocblas/library/ ${PROJECT_BINARY_DIR}/staging/library/)
+  if(DEFINED ROCBLAS_PATH)
+    add_custom_command( TARGET hipblas-test POST_BUILD COMMAND ${CMAKE_COMMAND} ARGS -E copy_directory ${ROCBLAS_PATH}/bin/rocblas/library/ ${PROJECT_BINARY_DIR}/staging/library/)
+  else()
+    message(WARNING "ROCBLAS_PATH not set. rocBLAS Tensile runtime kernels will not be copied to client staging directory (insitu testing affected).")
+  endif()
 endif()
 
 set_target_properties( hipblas-test PROPERTIES
