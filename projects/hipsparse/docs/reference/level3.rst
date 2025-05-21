@@ -1,6 +1,6 @@
 .. meta::
-  :description: hipSPARSE documentation and API reference library
-  :keywords: hipSPARSE, rocSPARSE, ROCm, API, documentation
+  :description: hipSPARSE sparse level 3 functions API documentation
+  :keywords: hipSPARSE, rocSPARSE, ROCm, API, documentation, level 3 functions
 
 .. _hipsparse_level3_functions:
 
@@ -8,9 +8,10 @@
 Sparse level 3 functions
 ********************************************************************
 
-This module holds all sparse level 3 routines.
+This module contains all sparse level 3 routines.
 
-The sparse level 3 routines describe operations between a matrix in sparse format and multiple vectors in dense format that can also be seen as a dense matrix.
+The sparse level 3 routines describe operations between a matrix in sparse format and multiple vectors in dense format
+that can also be seen as a dense matrix.
 
 hipsparseXbsrmm()
 =================

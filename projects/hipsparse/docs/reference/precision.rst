@@ -61,7 +61,7 @@ For example, the dense matrix sparse vector multiplication function is implement
 * ``hipsparseCgemvi`` - For single-precision complex sparse matrices.
 * ``hipsparseZgemvi`` - For double-precision complex sparse matrices.
 
-In the documentation, these are often represented generically as ``hipsparseXgemvi()``, where ``X`` is a
+In the documentation, these functions are often represented generically as ``hipsparseXgemvi()``, where ``X`` is a
 placeholder for the precision type character.
 
 Understanding precision in function signatures
@@ -94,8 +94,8 @@ variant.
 Generic functions and mixed precision
 -------------------------------------
 
-hipSPARSE provides generic functions that allow for mixed precision operations. These functions use data type
-enumerations to specify precision when creating matrix/vector descriptors and during computation.
+hipSPARSE provides generic functions that allow for mixed-precision operations. These functions use data type
+enumerations to specify precision when creating matrix or vector descriptors and during computation.
 
 For example, when creating a sparse matrix descriptor:
 
@@ -126,10 +126,10 @@ This approach enables:
 
 * Using different precision types for matrices and vectors.
 * Specifying computation precision independently of storage precision.
-* Supporting mixed precision workflows with a unified API.
+* Supporting mixed-precision workflows with a unified API.
 
 The advantage of using different data types is to save on memory bandwidth and storage when a user application
-allows while performing the actual computation in a higher precision.
+allows for it while performing the actual computation in a higher precision.
 
 Real versus complex precision
 -----------------------------

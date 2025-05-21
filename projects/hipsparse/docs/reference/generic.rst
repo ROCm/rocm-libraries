@@ -1,6 +1,6 @@
 .. meta::
-  :description: hipSPARSE documentation and API reference library
-  :keywords: hipSPARSE, rocSPARSE, ROCm, API, documentation
+  :description: hipSPARSE sparse generic functions API documentation
+  :keywords: hipSPARSE, rocSPARSE, ROCm, API, documentation, generic functions
 
 .. _hipsparse_generic_functions:
 
@@ -8,7 +8,7 @@
 Sparse generic functions
 ********************************************************************
 
-This module holds all sparse generic routines.
+This module contains all sparse generic routines.
 
 The sparse generic routines describe operations that manipulate sparse matrices.
 
