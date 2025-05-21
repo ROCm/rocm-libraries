@@ -29,7 +29,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: 'ROCm/TheRock/.github/workflows/build_linux_packages.yml@users/geomin12/monorepo-therock-test'
+    uses: ROCm/TheRock/.github/workflows/build_linux_packages.yml@users/geomin12/monorepo-therock-test
     with:
         amdgpu_families: "gfx94X-dcgpu"
         expect_failure: false
@@ -38,40 +38,9 @@ jobs:
   therock-test-linux:
     name: "rocPRIM math-lib test"
     needs: therock-build-linux
-    runs-on: "linux-mi300-1gpu-ossci-rocm"
-    strategy:
-      fail-fast: false
-    defaults:
-      run:
-        shell: bash
-    env:
-      VENV_DIR: ${{ github.workspace }}/.venv
-      ARTIFACT_RUN_ID: "${{ github.run_id }}"
-      OUTPUT_ARTIFACTS_DIR: ${{ github.workspace }}/build
-      THEROCK_BIN_DIR: ${{ github.workspace }}/build/bin
-
-    steps:
-      - name: Checkout TheRock repository
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          repository: ROCm/TheRock
-     
-      - name: Run setup test environment workflow
-        uses: './.github/actions/setup_test_environment'
-        with:
-          ARTIFACT_RUN_ID: ${{ env.ARTIFACT_RUN_ID }}
-          AMDGPU_FAMILIES: "gfx94X-dcgpu"
-          OUTPUT_ARTIFACTS_DIR: ${{ env.OUTPUT_ARTIFACTS_DIR }}
-          VENV_DIR: ${{ env.VENV_DIR }}
-          FETCH_ARTIFACT_ARGS: "--prim --tests"
-          PLATFORM: "linux"
-
-
-      - name: Run rocprim tests
-        env:
-          TEST_TO_IGNORE: "'rocprim.lookback_reproducibility|rocprim.linking|rocprim.device_merge_inplace|rocprim.device_merge_sort|rocprim.device_partition|rocprim.device_radix_sort|rocprim.device_select'"
-        run: |
-          ctest --test-dir ${THEROCK_BIN_DIR}/rocprim \
-            --output-on-failure \
-            --parallel 8 \
-            --exclude-regex ${TEST_TO_IGNORE}
+    uses: ROCm/TheRock/.github/workflows/test_rocprim.yml@users/geomin12/monorepo-therock-test
+    with:
+        artifact_run_id: "${{ github.run_id }}"
+        amdgpu_families: "gfx94X-dcgpu"
+        test_runs_on: "linux-mi300-1gpu-ossci-rocm"
+        platform: "linux"
