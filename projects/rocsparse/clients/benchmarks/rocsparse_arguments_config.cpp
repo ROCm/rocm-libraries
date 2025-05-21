@@ -127,9 +127,10 @@ rocsparse_arguments_config::rocsparse_arguments_config()
         this->boostval                    = static_cast<double>(0);
         this->boostvali                   = static_cast<double>(0);
         this->tolm                        = static_cast<double>(0);
-        this->graph_test                  = static_cast<bool>(0);
-        this->skip_reproducibility        = static_cast<bool>(0);
-        this->sparsity_pattern_statistics = static_cast<bool>(0);
+        this->graph_test                  = false;
+        this->skip_reproducibility        = false;
+        this->sparsity_pattern_statistics = false;
+        this->call_stage_analysis         = true;
         this->filename[0]                 = '\0';
         this->function[0]                 = '\0';
         this->name[0]                     = '\0';
@@ -441,8 +442,10 @@ void rocsparse_arguments_config::set_description(options_description& desc)
       "Indicates what algorithm to use when running rocsparse_gtsv_interleaved_batch. Possibly choices are thomas: 1, lu: 2, qr: 3 (default:3)")
 
       ("sparsity-pattern-statistics",
-       "enable sparsity pattern statistics: min,max and median of the number of non-zeros per row and per column of the sparsity pattern of the matrix A will be part of benchmarking results.");
+       "enable sparsity pattern statistics: min,max and median of the number of non-zeros per row and per column of the sparsity pattern of the matrix A will be part of benchmarking results.")
 
+      ("no-stage-analysis",
+       "disable the stage analysis in algorithms where it applies.");
     // clang-format on
 }
 
@@ -551,6 +554,11 @@ int rocsparse_arguments_config::parse(int& argc, char**& argv, options_descripti
     if(vm.count("sparsity-pattern-statistics"))
     {
         this->sparsity_pattern_statistics = true;
+    }
+
+    if(vm.count("no-stage-analysis"))
+    {
+        this->call_stage_analysis = false;
     }
 
     if(this->b_transA == 'N')

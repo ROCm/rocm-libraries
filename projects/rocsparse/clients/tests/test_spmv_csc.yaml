@@ -109,6 +109,7 @@ Tests:
   matrix: [rocsparse_matrix_random]
   matrix_type: [rocsparse_matrix_type_general]
   spmv_alg: [rocsparse_spmv_alg_csr_adaptive, rocsparse_spmv_alg_csr_rowsplit]
+  call_stage_analysis: [false, true]
 
 - name: spmv_csc
   category: nightly
@@ -294,6 +295,7 @@ Tests:
   matrix_type: [rocsparse_matrix_type_symmetric, rocsparse_matrix_type_triangular]
   uplo: [rocsparse_fill_mode_upper]
   spmv_alg: [rocsparse_spmv_alg_csr_adaptive, rocsparse_spmv_alg_csr_rowsplit]
+  call_stage_analysis: [false, true]
 
 - name: spmv_csc
   category: nightly

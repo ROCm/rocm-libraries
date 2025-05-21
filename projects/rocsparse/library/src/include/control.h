@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -183,6 +183,18 @@ namespace rocsparse
             ROCSPARSE_ERROR_MESSAGE(TMP_STATUS_FOR_CHECK, "none");              \
             return TMP_STATUS_FOR_CHECK;                                        \
         }                                                                       \
+    } while(false)
+
+#define WARNING_IF_ROCSPARSE_ERROR(INPUT_STATUS_FOR_CHECK)                          \
+    do                                                                              \
+    {                                                                               \
+        const rocsparse_status TMP_STATUS_FOR_CHECK = (INPUT_STATUS_FOR_CHECK);     \
+        if(TMP_STATUS_FOR_CHECK != rocsparse_status_success)                        \
+        {                                                                           \
+            std::stringstream s;                                                    \
+            s << "rocsparse error detected: code '" << TMP_STATUS_FOR_CHECK << "'"; \
+            ROCSPARSE_WARNING_MESSAGE(s.str().c_str());                             \
+        }                                                                           \
     } while(false)
 
 //

@@ -50,6 +50,165 @@ void _rocsparse_mat_info::set_bsrmv_info(rocsparse_bsrmv_info value)
     this->bsrmv_info = value;
 }
 
+_rocsparse_mat_info::~_rocsparse_mat_info()
+{
+    // Uncouple shared meta data
+    if(this->bsrsv_lower_info == this->bsrilu0_info || this->bsrsv_lower_info == this->bsric0_info
+       || this->bsrsv_lower_info == this->bsrsm_lower_info)
+    {
+        this->bsrsv_lower_info = nullptr;
+    }
+
+    // Uncouple shared meta data
+    if(this->bsrsm_lower_info == this->bsrilu0_info || this->bsrsm_lower_info == this->bsric0_info)
+    {
+        this->bsrsm_lower_info = nullptr;
+    }
+
+    // Uncouple shared meta data
+    if(this->bsrilu0_info == this->bsric0_info)
+    {
+        this->bsrilu0_info = nullptr;
+    }
+
+    // Uncouple shared meta data
+    if(this->csrsv_lower_info == this->csrilu0_info || this->csrsv_lower_info == this->csric0_info
+       || this->csrsv_lower_info == this->csrsm_lower_info)
+    {
+        this->csrsv_lower_info = nullptr;
+    }
+
+    // Uncouple shared meta data
+    if(this->csrsm_lower_info == this->csrilu0_info || this->csrsm_lower_info == this->csric0_info)
+    {
+        this->csrsm_lower_info = nullptr;
+    }
+
+    // Uncouple shared meta data
+    if(this->csrilu0_info == this->csric0_info)
+    {
+        this->csrilu0_info = nullptr;
+    }
+
+    // Uncouple shared meta data
+    if(this->csrsv_upper_info == this->csrsm_upper_info)
+    {
+        this->csrsv_upper_info = nullptr;
+    }
+
+    // Uncouple shared meta data
+    if(this->bsrsv_upper_info == this->bsrsm_upper_info)
+    {
+        this->bsrsv_upper_info = nullptr;
+    }
+
+    // Uncouple shared meta data
+    if(this->csrsvt_lower_info == this->csrsmt_lower_info)
+    {
+        this->csrsvt_lower_info = nullptr;
+    }
+
+    // Uncouple shared meta data
+    if(this->bsrsvt_lower_info == this->bsrsmt_lower_info)
+    {
+        this->bsrsvt_lower_info = nullptr;
+    }
+
+    // Uncouple shared meta data
+    if(this->csrsvt_upper_info == this->csrsmt_upper_info)
+    {
+        this->csrsvt_upper_info = nullptr;
+    }
+
+    // Uncouple shared meta data
+    if(this->bsrsvt_upper_info == this->bsrsmt_upper_info)
+    {
+        this->bsrsvt_upper_info = nullptr;
+    }
+
+    // Clear bsrsvt upper info struct
+    WARNING_IF_ROCSPARSE_ERROR(rocsparse::destroy_trm_info(this->bsrsvt_upper_info));
+
+    // Clear bsrsvt lower info struct
+    WARNING_IF_ROCSPARSE_ERROR(rocsparse::destroy_trm_info(this->bsrsvt_lower_info));
+
+    // Clear bsric0 info struct
+    WARNING_IF_ROCSPARSE_ERROR(rocsparse::destroy_trm_info(this->bsric0_info));
+
+    // Clear bsrilu0 info struct
+    WARNING_IF_ROCSPARSE_ERROR(rocsparse::destroy_trm_info(this->bsrilu0_info));
+
+    // Clear csrsvt upper info struct
+    WARNING_IF_ROCSPARSE_ERROR(rocsparse::destroy_trm_info(this->csrsvt_upper_info));
+
+    // Clear csrsvt lower info struct
+    WARNING_IF_ROCSPARSE_ERROR(rocsparse::destroy_trm_info(this->csrsvt_lower_info));
+
+    // Clear csrsmt upper info struct
+    WARNING_IF_ROCSPARSE_ERROR(rocsparse::destroy_trm_info(this->csrsmt_upper_info));
+
+    // Clear csrsmt lower info struct
+    WARNING_IF_ROCSPARSE_ERROR(rocsparse::destroy_trm_info(this->csrsmt_lower_info));
+
+    // Clear bsrsmt upper info struct
+    WARNING_IF_ROCSPARSE_ERROR(rocsparse::destroy_trm_info(this->bsrsmt_upper_info));
+
+    // Clear bsrsmt lower info struct
+    WARNING_IF_ROCSPARSE_ERROR(rocsparse::destroy_trm_info(this->bsrsmt_lower_info));
+
+    // Clear csric0 info struct
+    WARNING_IF_ROCSPARSE_ERROR(rocsparse::destroy_trm_info(this->csric0_info));
+
+    // Clear csrilu0 info struct
+    WARNING_IF_ROCSPARSE_ERROR(rocsparse::destroy_trm_info(this->csrilu0_info));
+
+    // Clear bsrsv upper info struct
+    WARNING_IF_ROCSPARSE_ERROR(rocsparse::destroy_trm_info(this->bsrsv_upper_info));
+
+    // Clear bsrsv lower info struct
+    WARNING_IF_ROCSPARSE_ERROR(rocsparse::destroy_trm_info(this->bsrsv_lower_info));
+
+    // Clear csrsv upper info struct
+    WARNING_IF_ROCSPARSE_ERROR(rocsparse::destroy_trm_info(this->csrsv_upper_info));
+
+    // Clear csrsv lower info struct
+    WARNING_IF_ROCSPARSE_ERROR(rocsparse::destroy_trm_info(this->csrsv_lower_info));
+
+    // Clear csrsm upper info struct
+    WARNING_IF_ROCSPARSE_ERROR(rocsparse::destroy_trm_info(this->csrsm_upper_info));
+
+    // Clear csrsm lower info struct
+    WARNING_IF_ROCSPARSE_ERROR(rocsparse::destroy_trm_info(this->csrsm_lower_info));
+
+    // Clear bsrsm upper info struct
+    WARNING_IF_ROCSPARSE_ERROR(rocsparse::destroy_trm_info(this->bsrsm_upper_info));
+
+    // Clear bsrsm lower info struct
+    WARNING_IF_ROCSPARSE_ERROR(rocsparse::destroy_trm_info(this->bsrsm_lower_info));
+
+    // Clear csrgemm info struct
+    WARNING_IF_ROCSPARSE_ERROR(rocsparse::destroy_csrgemm_info(this->csrgemm_info));
+
+    // Clear csritsv info struct
+    WARNING_IF_ROCSPARSE_ERROR(rocsparse::destroy_csritsv_info(this->csritsv_info));
+
+    // Clear zero pivot
+    WARNING_IF_HIP_ERROR(rocsparse_hipFree(this->zero_pivot));
+
+    // Clear singular pivot
+    WARNING_IF_HIP_ERROR(rocsparse_hipFree(this->singular_pivot));
+
+    if(this->csrmv_info != nullptr)
+    {
+        delete this->csrmv_info;
+    }
+
+    if(this->bsrmv_info != nullptr)
+    {
+        delete this->bsrmv_info;
+    }
+}
+
 /*******************************************************************************
  * constructor
  ******************************************************************************/

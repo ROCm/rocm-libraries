@@ -561,6 +561,7 @@ Arguments:
   - graph_test: c_bool
   - skip_reproducibility: c_bool
   - sparsity_pattern_statistics: c_bool
+  - call_stage_analysis: c_bool
   - filename: c_char*128
   - function: c_char*64
   - name: c_char*64
@@ -707,6 +708,7 @@ Defaults:
   graph_test: false
   skip_reproducibility: false
   sparsity_pattern_statistics: false
+  call_stage_analysis: true
   workspace_size: 0
   category: nightly
   hardware: all
