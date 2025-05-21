@@ -28,6 +28,14 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
 #ifdef _CCCL_CUDA_COMPILER
 
 #  include <thrust/system/cuda/config.h>
@@ -114,7 +122,7 @@ struct Tuning<sm30, T>
 
   using type =
     PtxPolicy<256,
-              CUB_MAX(1, 20 / SCALE_FACTOR_4B),
+              (((20 / SCALE_FACTOR_4B) > (1)) ? (20 / SCALE_FACTOR_4B) : (1)),
               2,
               cub::BLOCK_REDUCE_WARP_REDUCTIONS,
               cub::LOAD_DEFAULT,
@@ -127,7 +135,7 @@ struct Tuning<sm35, T> : Tuning<sm30, T>
   // ReducePolicy1B (GTX Titan: 228.7 GB/s @ 192M 1B items)
   using ReducePolicy1B =
     PtxPolicy<128,
-              CUB_MAX(1, 24 / Tuning::SCALE_FACTOR_1B),
+              (((24 / Tuning::SCALE_FACTOR_1B) > (1)) ? (24 / Tuning::SCALE_FACTOR_1B) : (1)),
               4,
               cub::BLOCK_REDUCE_WARP_REDUCTIONS,
               cub::LOAD_LDG,
@@ -136,13 +144,13 @@ struct Tuning<sm35, T> : Tuning<sm30, T>
   // ReducePolicy4B types (GTX Titan: 255.1 GB/s @ 48M 4B items)
   using ReducePolicy4B =
     PtxPolicy<256,
-              CUB_MAX(1, 20 / Tuning::SCALE_FACTOR_4B),
+              (((20 / Tuning::SCALE_FACTOR_4B) > (1)) ? (20 / Tuning::SCALE_FACTOR_4B) : (1)),
               4,
               cub::BLOCK_REDUCE_WARP_REDUCTIONS,
               cub::LOAD_LDG,
               cub::GRID_MAPPING_DYNAMIC>;
 
-  using type = typename thrust::detail::conditional<(sizeof(T) < 4), ReducePolicy1B, ReducePolicy4B>::type;
+  using type = ::cuda::std::__conditional_t<(sizeof(T) < 4), ReducePolicy1B, ReducePolicy4B>;
 }; // Tuning sm35
 
 template <class InputIt, class OutputIt, class T, class Size, class ReductionOp>
@@ -159,9 +167,10 @@ struct ReduceAgent
     //
     using tuning = Tuning<Arch, T>;
 
-    using Vector       = typename cub::CubVector<T, PtxPlan::VECTOR_LOAD_LENGTH>;
-    using LoadIt       = typename core::LoadIterator<PtxPlan, InputIt>::type;
-    using BlockReduce  = cub::BlockReduce<T, PtxPlan::BLOCK_THREADS, PtxPlan::BLOCK_ALGORITHM, 1, 1, Arch::ver>;
+    using Vector      = typename cub::CubVector<T, PtxPlan::VECTOR_LOAD_LENGTH>;
+    using LoadIt      = typename core::LoadIterator<PtxPlan, InputIt>::type;
+    using BlockReduce = cub::BlockReduce<T, PtxPlan::BLOCK_THREADS, PtxPlan::BLOCK_ALGORITHM, 1, 1, Arch::ver>;
+
     using VectorLoadIt = cub::CacheModifiedInputIterator<PtxPlan::LOAD_MODIFIER, Vector, Size>;
 
     struct TempStorage
@@ -212,8 +221,8 @@ struct ReduceAgent
     VECTOR_LOAD_LENGTH = ptx_plan::VECTOR_LOAD_LENGTH,
 
     ATTEMPT_VECTORIZATION = (VECTOR_LOAD_LENGTH > 1) && (ITEMS_PER_THREAD % VECTOR_LOAD_LENGTH == 0)
-                         && thrust::detail::is_pointer<InputIt>::value
-                         && thrust::detail::is_arithmetic<typename thrust::detail::remove_cv<T>>::value
+                         && ::cuda::std::is_pointer<InputIt>::value
+                         && ::cuda::std::is_arithmetic<typename ::cuda::std::remove_cv<T>>::value
   };
 
   struct impl
@@ -704,7 +713,7 @@ cudaError_t THRUST_RUNTIME_FUNCTION doit_step(
     else if (reduce_plan.grid_mapping == cub::GRID_MAPPING_DYNAMIC)
     {
       // Work is distributed dynamically
-      size_t num_tiles = cub::DivideAndRoundUp(num_items, reduce_plan.items_per_tile);
+      size_t num_tiles = ::cuda::ceil_div(num_items, reduce_plan.items_per_tile);
 
       // if not enough to fill the device with threadblocks
       // then fill the device with threadblocks
