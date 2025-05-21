@@ -779,8 +779,8 @@ namespace TensileLite
 
         if(problemType.stridedBatched)
         {
-            args.template append<void const*>("a", inputs.a);
-            args.template append<void const*>("b", inputs.b);
+            args.template append<void const*>("a", problemType.sparse==1 ? inputs.compressed : inputs.a);
+            args.template append<void const*>("b", problemType.sparse==2 ? inputs.compressed : inputs.b);
         }
         else
         {
