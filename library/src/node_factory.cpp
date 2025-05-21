@@ -1022,7 +1022,7 @@ bool NodeFactory::use_CS_3D_PP(const function_pool& pool, NodeMetaData& nodeData
                    CS_3D_PP)))
         return false;
 
-    // Partial pass is currently restricted large enough batch sizes,
+    // Partial pass is currently restricted to large enough batch sizes,
     // unite stride, interleaved FFTs.
     bool batchCondition = (nodeData.batch >= 5);
 

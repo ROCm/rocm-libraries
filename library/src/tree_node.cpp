@@ -114,25 +114,49 @@ void LeafNode::GetKernelPartialPassFactors()
     kernelFactorsPP = std::vector<size_t>(kernel.pp_params.factors_off_dim.begin(),
                                           kernel.pp_params.factors_off_dim.end());
 
-    if(scheme == CS_KERNEL_STOCKHAM_PP)
+    switch(ppOffDim)
     {
-        std::stringstream msg;
-        msg << "work in the off-dimension:" << std::endl;
-        msg << "\t     radix: [";
-        for(const auto factor : kernelFactorsPP)
-            msg << " " << factor;
-        msg << " ] pass(es) + Hadamard product with twiddle factors. \n";
-        comments.push_back(msg.str());
+    case 0: // work along x will be split between y and z
+    {
+        throw std::runtime_error(
+            "GetKernelPartialPassFactors: partial-passes along x not currently supported");
+        break;
     }
-    if(scheme == CS_KERNEL_STOCKHAM_PP_BLOCK_CC)
+    case 1: // work along y will be split between x and z
     {
-        std::stringstream msg;
-        msg << "work in the off-dimension:" << std::endl;
-        msg << "\t     local data transposition + radix: [";
-        for(const auto factor : kernelFactorsPP)
-            msg << " " << factor;
-        msg << " ] pass(es). \n";
-        comments.push_back(msg.str());
+        if(scheme == CS_KERNEL_STOCKHAM_PP)
+        {
+            std::stringstream msg;
+            msg << "work in the off-dimension:" << std::endl;
+            msg << "\t     radix: [";
+            for(const auto factor : kernelFactorsPP)
+                msg << " " << factor;
+            msg << " ] pass(es) + Hadamard product with twiddle factors. \n";
+            comments.push_back(msg.str());
+        }
+        if(scheme == CS_KERNEL_STOCKHAM_PP_BLOCK_CC)
+        {
+            std::stringstream msg;
+            msg << "work in the off-dimension:" << std::endl;
+            msg << "\t     local data transposition + radix: [";
+            for(const auto factor : kernelFactorsPP)
+                msg << " " << factor;
+            msg << " ] pass(es). \n";
+            comments.push_back(msg.str());
+        }
+
+        break;
+    }
+    case 2: // work along z will be split between x and y
+    {
+        // x row fft + partial pass along z
+        // partial pass along z + y col fft
+        throw std::runtime_error(
+            "GetKernelPartialPassFactors: partial-passes along z not currently supported");
+        break;
+    }
+    default:
+        throw std::runtime_error("Invalid off-dimension for partial pass");
     }
 }
 

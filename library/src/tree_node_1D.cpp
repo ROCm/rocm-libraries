@@ -1165,9 +1165,8 @@ void SBCCPPNode::SetupGridParam_internal(GridParam& gp)
     gp.b_x *= product(length.begin() + 2, length.end()) * batch;
     gp.wgs_x = wgs;
 
-    // Grid arrangement is different for partial
-    // pass SBCC kernels for improved global memory
-    // access patterns.
+    // Grid arrangement is different than regular SBCC
+    // for improved global memory access patterns.
     auto factor = *std::max_element(kernelFactorsPP.begin(), kernelFactorsPP.end());
 
     gp.b_x /= factor;

@@ -80,7 +80,6 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
                       precisions,
                       static_cast<unsigned int>(kernel->workgroup_size),
                       PrintScheme(node.scheme));
-
         specs->threads_per_transform = kernel->threads_per_transform[0];
         specs->half_lds              = kernel->half_lds;
         specs->direct_to_from_reg    = kernel->direct_to_from_reg;

@@ -351,9 +351,8 @@ public:
     // sbrc transpose type
     mutable SBRC_TRANSPOSE_TYPE sbrcTranstype = SBRC_TRANSPOSE_TYPE::NONE;
 
-    // specified kernel key from solution map. (if there is any)
-    std::unique_ptr<FMKey> specified_key;
-
+    // specified kernel keys from solution map. (if there are any)
+    std::unique_ptr<FMKey>   specified_key;
     std::unique_ptr<PPFMKey> specified_pp_key;
 
     // Tree structure:
@@ -375,7 +374,10 @@ public:
     size_t lengthBlue  = 0;
     size_t lengthBlueN = 0;
 
-    size_t ppOffDim  = 0;
+    // Index of off-dimension in partial-pass nodes
+    size_t ppOffDim = 0;
+
+    // Index of current dimension (full pass) in partial-pass nodes
     size_t ppCurrDim = 0;
 
     //
@@ -489,6 +491,7 @@ public:
         return {};
     }
 
+    // Check node scheme to see if partial pass is enabled
     bool isPartialPassEnabled() const
     {
         return (scheme == CS_3D_PP || scheme == CS_KERNEL_STOCKHAM_PP
@@ -545,6 +548,8 @@ public:
     TreeNode* GetRealEvenAncestor();
     bool      IsRootPlanC2CTransform();
 
+    // Return ancestor node of 'this' that is partial-pass, or
+    // nullptr if there is no such ancestor
     TreeNode* GetPartialPassAncestor() const;
 
     // Set length of transpose kernel node, since those are easily
@@ -589,6 +594,10 @@ public:
                                 : FMKey(length[0], length[1], precision, scheme);
     }
 
+    // Partial pass parent nodes, e.g., CS_3D_PP, have
+    // two kernels associated with them. The key for
+    // querying the function pool is different from the
+    // the standard kernel key.
     virtual PPFMKey GetPPKernelsKey() const
     {
         if(specified_pp_key)
@@ -605,6 +614,8 @@ public:
                        pp_parent_node->scheme);
     }
 
+    // Query the function pool with the right key,
+    // and return the kernel linked to this node.
     virtual FFTKernel GetKernel() const
     {
         if(isPartialPassEnabled())
@@ -619,6 +630,8 @@ public:
         }
     }
 
+    // Check if the function pool has a kernel,
+    // querying it with the key linked to this node.
     virtual bool HasKernel() const
     {
         if(isPartialPassEnabled())

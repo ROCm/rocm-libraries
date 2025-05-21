@@ -770,7 +770,7 @@ void PP3DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
         // x row fft + partial pass along z
         // partial pass along z + y col fft
         throw std::runtime_error(
-            "PP3DNode::BuildTree_internal:: partial-passes along z not currently supported");
+            "PP3DNode::BuildTree_internal: partial-passes along z not currently supported");
         break;
     }
     default:

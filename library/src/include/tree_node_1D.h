@@ -105,16 +105,14 @@ public:
 /*****************************************************
  * CS_KERNEL_STOCKHAM_PP  *
  *****************************************************/
-class StockhamPP1DNode : public LeafNode
+class StockhamPP1DNode : public Stockham1DNode
 {
     friend class NodeFactory;
 
 protected:
     StockhamPP1DNode(TreeNode* p, ComputeScheme s)
-        : LeafNode(p, s)
+        : Stockham1DNode(p, s)
     {
-        externalKernel = true;
-        need_twd_table = true;
     }
 
     void SetupGridParam_internal(GridParam& gp) override;
@@ -122,12 +120,6 @@ protected:
 public:
     bool                CreateDeviceResources() override;
     std::vector<size_t> CollapsibleDims() override;
-    bool                UseOutputLengthForPadding() override
-    {
-        // with embedded r2c, stockham nodes will change length, so the
-        // output length is different from the input length.
-        return ebtype != EmbeddedType::NONE;
-    }
 };
 
 /*****************************************************
@@ -176,33 +168,19 @@ public:
 /*****************************************************
  * SBCC Partial-Pass *
  *****************************************************/
-class SBCCPPNode : public LeafNode
+class SBCCPPNode : public SBCCNode
 {
     friend class NodeFactory;
 
 protected:
     SBCCPPNode(TreeNode* p, ComputeScheme s)
-        : LeafNode(p, s)
+        : SBCCNode(p, s)
     {
-        externalKernel = true;
-        need_twd_table = true;
     }
 
     void SetupGridParam_internal(GridParam& gp) override;
 
-    // InitIntrinsicMode is the first step to check if eligible for buffer load/store
-    void InitIntrinsicMode();
-
 public:
-    // reads + writes are along columns so both may benefit from padding
-    bool PaddingBenefitsInput() override
-    {
-        return true;
-    }
-    bool PaddingBenefitsOutput() override
-    {
-        return true;
-    }
     std::vector<size_t> CollapsibleDims() override;
 };
 
