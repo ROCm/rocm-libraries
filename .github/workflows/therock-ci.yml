@@ -21,26 +21,80 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  setup:
+    name: "Setup"
+    runs-on: ubuntu-24.04
+    outputs:
+      jobs: ${{ steps.jobs.outputs.jobs }}
+    steps:
+      - name: Checkout rocm-libraries Repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: "ROCm/rocm-libraries"
 
-  # need setup step
+      - name: Checkout TheRock Repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: "ROCm/TheRock"
+          path: "TheRock"
+          ref: users/geomin12/monorepo-therock-test
 
+      - name: Generate a token
+        id: generate-token
+        uses: actions/create-github-app-token@df432ceedc7162793a195dd1713ff69aefc7379e # v2.0.6
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.12'
+
+      - name: Install python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pydantic requests
+
+        # get the script, see what PR items there are (or do checkout process or share with Joseph's work)
+      - name: Detect changed subtrees
+        id: detect
+        env:
+          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+        run: |
+          python .github/scripts/pr_detect_changed_subtrees.py \
+            --repo "${{ github.repository }}" \
+            --pr "${{ github.event.pull_request.number }}" \
+            --config ".github/repos-config.json"
+
+      - name: Determine jobs to run
+        id: jobs
+        if: steps.detect.outputs.subtrees
+        env:
+          SUBTREES: ${{ steps.detect.outputs.subtrees }}
+        run: |
+          python ./TheRock/build_tools/github_actions/monorepo_configure_ci.py
+          
   therock-build-linux:
     name: Build Linux Packages
+    needs: setup
+    if: ${{ needs.setup.outputs.jobs != '[]' }}
     permissions:
       contents: read
       id-token: write
     uses: ROCm/TheRock/.github/workflows/build_linux_packages.yml@users/geomin12/monorepo-therock-test
     with:
-        amdgpu_families: "gfx94X-dcgpu"
-        expect_failure: false
-        extra_cmake_options: "-DTHEROCK_ENABLE_PRIM=ON -DTHEROCK_ENABLE_ALL=OFF"
+      amdgpu_families: "gfx94X-dcgpu"
+      expect_failure: false
+      extra_cmake_options: "-DTHEROCK_ENABLE_PRIM=ON -DTHEROCK_ENABLE_ALL=OFF"
 
   therock-test-linux:
     name: "rocPRIM math-lib test"
     needs: therock-build-linux
     uses: ROCm/TheRock/.github/workflows/test_rocprim.yml@users/geomin12/monorepo-therock-test
     with:
-        artifact_run_id: "${{ github.run_id }}"
-        amdgpu_families: "gfx94X-dcgpu"
-        test_runs_on: "linux-mi300-1gpu-ossci-rocm"
-        platform: "linux"
+      artifact_run_id: "${{ github.run_id }}"
+      amdgpu_families: "gfx94X-dcgpu"
+      test_runs_on: "linux-mi300-1gpu-ossci-rocm"
+      platform: "linux"
