@@ -53,6 +53,7 @@ namespace rocsparse
                                    rocsparse_datatype,
                                    rocsparse_datatype>;
 
+    // clang-format off
 #define COOMV_CONFIG(T, I, A, X, Y)                                         \
     {                                                                       \
         coomv_tuple(T, I, A, X, Y),                                         \
@@ -62,6 +63,7 @@ namespace rocsparse
                            typename rocsparse::datatype_traits<X>::type_t,  \
                            typename rocsparse::datatype_traits<Y>::type_t>  \
     }
+    // clang-format on
 
     static const std::map<coomv_tuple, coomv_t> s_coomv_dispatch{
         {COOMV_CONFIG(rocsparse_datatype_f32_r,
@@ -128,6 +130,18 @@ namespace rocsparse
                       rocsparse_indextype_i64,
                       rocsparse_datatype_i8_r,
                       rocsparse_datatype_i8_r,
+                      rocsparse_datatype_f32_r),
+
+         COOMV_CONFIG(rocsparse_datatype_f32_r,
+                      rocsparse_indextype_i32,
+                      rocsparse_datatype_f16_r,
+                      rocsparse_datatype_f16_r,
+                      rocsparse_datatype_f32_r),
+
+         COOMV_CONFIG(rocsparse_datatype_f32_r,
+                      rocsparse_indextype_i64,
+                      rocsparse_datatype_f16_r,
+                      rocsparse_datatype_f16_r,
                       rocsparse_datatype_f32_r),
 
          COOMV_CONFIG(rocsparse_datatype_f32_c,

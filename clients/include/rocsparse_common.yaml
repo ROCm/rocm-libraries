@@ -253,6 +253,8 @@ Real precisions: &real_precisions
     { a_type: i8_r, x_type: i8_r, y_type: i32_r, compute_type: i32_r }
   - &int8_int8_float32_float32_axyt_precision
     { a_type: i8_r, x_type: i8_r, y_type: f32_r, compute_type: f32_r }
+  - &float16_float16_float32_float32_axyt_precision
+    { a_type: f16_r, x_type: f16_r, y_type: f32_r, compute_type: f32_r }
   - &int8_int8_int32_int32_abct_precision
     { a_type: i8_r, b_type: i8_r, c_type: i32_r, compute_type: i32_r }
   - &int8_int8_float32_float32_abct_precision

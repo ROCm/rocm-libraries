@@ -492,6 +492,20 @@ Tests:
   category: pre_checkin
   function: spmv_csc
   indextype: *i32i32_i64i32_i64i64
+  precision: *float16_float16_float32_float32_axyt_precision
+  M: [22, 196, 1102]
+  N: [45, 425, 2301]
+  alpha_beta: *alpha_beta_range_checkin
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+  matrix_type: [rocsparse_matrix_type_general]
+  spmv_alg: [rocsparse_spmv_alg_csr_adaptive, rocsparse_spmv_alg_csr_lrb]
+
+- name: spmv_csc
+  category: pre_checkin
+  function: spmv_csc
+  indextype: *i32i32_i64i32_i64i64
   precision: *cmplx32_cmplx64_cmplx64_cmplx64
   M: [16, 78, 294, 482, 6830]
   N: [16, 93, 297, 657, 4634]
