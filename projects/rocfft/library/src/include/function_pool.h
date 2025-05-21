@@ -26,6 +26,7 @@
 #include "../../../shared/rocfft_complex.h"
 #include "../device/kernels/common.h"
 #include "function_map_key.h"
+#include <functional>
 #include <optional>
 #include <sstream>
 #include <unordered_map>
@@ -227,7 +228,10 @@ public:
         return 0;
     }
 
-    std::vector<size_t> get_lengths(rocfft_precision precision, ComputeScheme scheme) const
+    // Optional filter can be specified to only get lengths where the filter returns true
+    std::vector<size_t> get_lengths(rocfft_precision            precision,
+                                    ComputeScheme               scheme,
+                                    std::function<bool(size_t)> filter = {}) const
     {
         std::vector<size_t> lengths;
         for(auto const& kv : function_map)
@@ -237,7 +241,10 @@ public:
             if(kv.first.lengths[1] == 0 && kv.first.precision == precision
                && kv.first.scheme == scheme && kv.first.sbrcTrans == NONE)
             {
-                lengths.push_back(kv.first.lengths[0]);
+                if(!filter || filter(kv.first.lengths[0]))
+                {
+                    lengths.push_back(kv.first.lengths[0]);
+                }
             }
         }
 
