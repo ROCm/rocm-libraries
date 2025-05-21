@@ -241,9 +241,6 @@ Tests:
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_random]
 
-
-
-
 - name: v2_spmv_ell_file
   category: quick
   function: v2_spmv_ell
@@ -266,6 +263,18 @@ Tests:
   precision: *int8_int8_float32_float32_axyt_precision
   M: [34, 104, 343, 5196]
   N: [57, 109, 458, 3425]
+  alpha_beta: *alpha_beta_range_checkin
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+
+- name: v2_spmv_ell
+  category: pre_checkin
+  function: v2_spmv_ell
+  indextype: *i32_i64
+  precision: *float16_float16_float32_float32_axyt_precision
+  M: [22935]
+  N: [19058]
   alpha_beta: *alpha_beta_range_checkin
   transA: [rocsparse_operation_none]
   baseA: [rocsparse_index_base_zero]

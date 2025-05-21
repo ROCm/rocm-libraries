@@ -9778,7 +9778,9 @@ INSTANTIATE_IJAXYT(int64_t, int64_t, int8_t, int8_t, int32_t, int32_t);
 INSTANTIATE_IJAXYT(int32_t, int32_t, int8_t, int8_t, float, float);
 INSTANTIATE_IJAXYT(int64_t, int32_t, int8_t, int8_t, float, float);
 INSTANTIATE_IJAXYT(int64_t, int64_t, int8_t, int8_t, float, float);
-
+INSTANTIATE_IJAXYT(int32_t, int32_t, _Float16, _Float16, float, float);
+INSTANTIATE_IJAXYT(int64_t, int32_t, _Float16, _Float16, float, float);
+INSTANTIATE_IJAXYT(int64_t, int64_t, _Float16, _Float16, float, float);
 INSTANTIATE_IJAXYT(int32_t, int32_t, float, double, double, double);
 INSTANTIATE_IJAXYT(int64_t, int32_t, float, double, double, double);
 INSTANTIATE_IJAXYT(int64_t, int64_t, float, double, double, double);
@@ -9969,6 +9971,8 @@ INSTANTIATE_IAXYT(int32_t, int8_t, int8_t, int32_t, int32_t);
 INSTANTIATE_IAXYT(int64_t, int8_t, int8_t, int32_t, int32_t);
 INSTANTIATE_IAXYT(int32_t, int8_t, int8_t, float, float);
 INSTANTIATE_IAXYT(int64_t, int8_t, int8_t, float, float);
+INSTANTIATE_IAXYT(int32_t, _Float16, _Float16, float, float);
+INSTANTIATE_IAXYT(int64_t, _Float16, _Float16, float, float);
 INSTANTIATE_IAXYT(
     int32_t, float, rocsparse_float_complex, rocsparse_float_complex, rocsparse_float_complex);
 INSTANTIATE_IAXYT(

@@ -277,6 +277,18 @@ Tests:
   category: pre_checkin
   function: spmv_ell
   indextype: *i32_i64
+  precision: *float16_float16_float32_float32_axyt_precision
+  M: [77, 205, 586]
+  N: [89, 496, 928]
+  alpha_beta: *alpha_beta_range_checkin
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_random]
+
+- name: spmv_ell
+  category: pre_checkin
+  function: spmv_ell
+  indextype: *i32_i64
   precision: *float32_cmplx32_cmplx32_cmplx32_axyt_precision
   M: [16, 78, 294, 482, 68302]
   N: [16, 93, 297, 657, 46342]

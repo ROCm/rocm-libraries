@@ -59,6 +59,8 @@ INSTANTIATE_MIXED(int32_t, int8_t, int8_t, int32_t, int32_t);
 INSTANTIATE_MIXED(int64_t, int8_t, int8_t, int32_t, int32_t);
 INSTANTIATE_MIXED(int32_t, int8_t, int8_t, float, float);
 INSTANTIATE_MIXED(int64_t, int8_t, int8_t, float, float);
+INSTANTIATE_MIXED(int32_t, _Float16, _Float16, float, float);
+INSTANTIATE_MIXED(int64_t, _Float16, _Float16, float, float);
 
 INSTANTIATE_MIXED(
     int32_t, float, rocsparse_float_complex, rocsparse_float_complex, rocsparse_float_complex);

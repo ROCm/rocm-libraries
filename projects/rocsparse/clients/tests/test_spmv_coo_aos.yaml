@@ -38,7 +38,7 @@ Definitions:
     - { alpha:   0.0, beta:  0.0,  alphai:  1.5, betai:  0.5 }
     - { alpha:   2.0, beta:  0.67, alphai:  0.0, betai:  1.5 }
 
-Tests:
+Tests:  
 - name: spmv_coo_aos_bad_arg
   category: pre_checkin
   function: spmv_coo_aos_bad_arg
@@ -243,9 +243,9 @@ Tests:
 #
 # mixed precision
 #
-- name: spmv_coo_file
+- name: spmv_coo_aos_file
   category: quick
-  function: spmv_coo
+  function: spmv_coo_aos
   indextype: *i32_i64
   precision: *float32_float64_float64_float64
   M: 1
@@ -260,9 +260,9 @@ Tests:
              amazon0312,
              sme3Dc]
 
-- name: spmv_coo
+- name: spmv_coo_aos
   category: pre_checkin
-  function: spmv_coo
+  function: spmv_coo_aos
   indextype: *i32_i64
   precision: *float32_float64_float64_float64
   M: [34, 104, 343, 5196]
@@ -274,10 +274,9 @@ Tests:
   storage: [rocsparse_storage_mode_sorted]
   spmv_alg: [rocsparse_spmv_alg_coo_atomic]
 
-
-- name: spmv_coo_file
+- name: spmv_coo_aos_file
   category: quick
-  function: spmv_coo
+  function: spmv_coo_aos
   indextype: *i32_i64
   precision: *int8_int8_int32_int32_axyt_precision
   M: 1
@@ -292,9 +291,9 @@ Tests:
              amazon0312,
              sme3Dc]
 
-- name: spmv_coo
+- name: spmv_coo_aos
   category: pre_checkin
-  function: spmv_coo
+  function: spmv_coo_aos
   indextype: *i32_i64
   precision: *int8_int8_float32_float32_axyt_precision
   M: [34, 104, 343, 5196]
@@ -306,9 +305,23 @@ Tests:
   storage: [rocsparse_storage_mode_sorted]
   spmv_alg: [rocsparse_spmv_alg_coo_atomic]
 
-- name: spmv_coo
+- name: spmv_coo_aos
   category: pre_checkin
-  function: spmv_coo
+  function: spmv_coo_aos
+  indextype: *i32_i64
+  precision: *float16_float16_float32_float32_axyt_precision
+  M: [7812]
+  N: [8923]
+  alpha_beta: *alpha_beta_range_checkin
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_random]
+  storage: [rocsparse_storage_mode_sorted]
+  spmv_alg: [rocsparse_spmv_alg_coo_atomic]
+
+- name: spmv_coo_aos
+  category: pre_checkin
+  function: spmv_coo_aos
   indextype: *i32_i64
   precision: *float32_cmplx32_cmplx32_cmplx32_axyt_precision
   M: [16, 78, 294, 482, 68302]
@@ -320,9 +333,9 @@ Tests:
   storage: [rocsparse_storage_mode_sorted]
   spmv_alg: [rocsparse_spmv_alg_coo]
 
-- name: spmv_coo_file
+- name: spmv_coo_aos_file
   category: nightly
-  function: spmv_coo
+  function: spmv_coo_aos
   indextype: *i32_i64
   precision: *float64_cmplx64_cmplx64_cmplx64_axyt_precision
   M: 1
@@ -337,10 +350,9 @@ Tests:
              shipsec1,
              scircuit]
 
-
-- name: spmv_coo
+- name: spmv_coo_aos
   category: pre_checkin
-  function: spmv_coo
+  function: spmv_coo_aos
   indextype: *i32_i64
   precision: *cmplx32_cmplx64_cmplx64_cmplx64
   M: [16, 78, 294, 482, 68302]
@@ -352,9 +364,9 @@ Tests:
   storage: [rocsparse_storage_mode_sorted]
   spmv_alg: [rocsparse_spmv_alg_coo]
 
-- name: spmv_coo_file
+- name: spmv_coo_aos_file
   category: nightly
-  function: spmv_coo
+  function: spmv_coo_aos
   indextype: *i32_i64
   precision: *cmplx32_cmplx64_cmplx64_cmplx64
   M: 1
@@ -368,7 +380,3 @@ Tests:
   filename: [Chebyshev4,
              shipsec1,
              scircuit]
-
-
-
-

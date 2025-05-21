@@ -45,13 +45,13 @@ namespace rocsparse
     using cscmv_analysis_tuple
         = std::tuple<rocsparse_indextype, rocsparse_indextype, rocsparse_datatype>;
 
-#define CSCMV_ANALYSIS_CONFIG(I_, J_, T_)                                             \
-    {                                                                                 \
-        cscmv_analysis_tuple(I_, J_, T_),                                             \
-            cscmv_analysis_template<typename rocsparse::indextype_traits<I_>::type_t, \
-                                    typename rocsparse::indextype_traits<J_>::type_t, \
-                                    typename rocsparse::datatype_traits<T_>::type_t>  \
-    }
+    // clang-format off
+#define CSCMV_ANALYSIS_CONFIG(I_, J_, A_)                                      \
+    {cscmv_analysis_tuple(I_, J_, A_),                                         \
+     cscmv_analysis_template<typename rocsparse::indextype_traits<I_>::type_t, \
+                             typename rocsparse::indextype_traits<J_>::type_t, \
+                             typename rocsparse::datatype_traits<A_>::type_t>}
+    // clang-format on
 
     static const std::map<cscmv_analysis_tuple, cscmv_analysis_t> s_cscmv_analysis_dispatch{
         {CSCMV_ANALYSIS_CONFIG(
@@ -86,15 +86,22 @@ namespace rocsparse
          CSCMV_ANALYSIS_CONFIG(
              rocsparse_indextype_i64, rocsparse_indextype_i64, rocsparse_datatype_i8_r),
          CSCMV_ANALYSIS_CONFIG(
-             rocsparse_indextype_i64, rocsparse_indextype_i32, rocsparse_datatype_i8_r)}};
+             rocsparse_indextype_i64, rocsparse_indextype_i32, rocsparse_datatype_i8_r),
+
+         CSCMV_ANALYSIS_CONFIG(
+             rocsparse_indextype_i32, rocsparse_indextype_i32, rocsparse_datatype_f16_r),
+         CSCMV_ANALYSIS_CONFIG(
+             rocsparse_indextype_i64, rocsparse_indextype_i64, rocsparse_datatype_f16_r),
+         CSCMV_ANALYSIS_CONFIG(
+             rocsparse_indextype_i64, rocsparse_indextype_i32, rocsparse_datatype_f16_r)}};
 
     static rocsparse_status cscmv_analysis_find(cscmv_analysis_t*   function_,
                                                 rocsparse_indextype i_type_,
                                                 rocsparse_indextype j_type_,
-                                                rocsparse_datatype  t_type_)
+                                                rocsparse_datatype  a_type_)
     {
         const auto& it = rocsparse::s_cscmv_analysis_dispatch.find(
-            rocsparse::cscmv_analysis_tuple(i_type_, j_type_, t_type_));
+            rocsparse::cscmv_analysis_tuple(i_type_, j_type_, a_type_));
 
         if(it != rocsparse::s_cscmv_analysis_dispatch.end())
         {
@@ -107,7 +114,7 @@ namespace rocsparse
             std::cout << "invalid precision configuration: "
                       << "i_type: " << rocsparse::to_string(i_type_) << std::endl
                       << ", j_type: " << rocsparse::to_string(j_type_) << std::endl
-                      << ", t_type: " << rocsparse::to_string(t_type_) << std::endl;
+                      << ", a_type: " << rocsparse::to_string(a_type_) << std::endl;
 
             std::cout << "available configuration are: " << std::endl;
             for(const auto& p : rocsparse::s_cscmv_analysis_dispatch)
@@ -115,12 +122,12 @@ namespace rocsparse
                 const auto& t      = p.first;
                 const auto  i_type = std::get<0>(t);
                 const auto  j_type = std::get<1>(t);
-                const auto  t_type = std::get<2>(t);
+                const auto  a_type = std::get<2>(t);
                 std::cout << std::endl
                           << std::endl
                           << "i_type: " << rocsparse::to_string(i_type) << std::endl
                           << ", j_type: " << rocsparse::to_string(j_type) << std::endl
-                          << ", t_type: " << rocsparse::to_string(t_type) << std::endl;
+                          << ", a_type: " << rocsparse::to_string(a_type) << std::endl;
             }
 #endif
 
@@ -128,7 +135,7 @@ namespace rocsparse
             sstr << "invalid precision configuration: "
                  << "i_type: " << rocsparse::to_string(i_type_)
                  << ", j_type: " << rocsparse::to_string(j_type_)
-                 << ", t_type: " << rocsparse::to_string(t_type_);
+                 << ", a_type: " << rocsparse::to_string(a_type_);
 
             RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value,
                                                    sstr.str().c_str());

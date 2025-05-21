@@ -399,6 +399,9 @@ INSTANTIATE_MIXED(int32_t, int64_t, int64_t, int8_t, int8_t, int32_t);
 INSTANTIATE_MIXED(float, int32_t, int32_t, int8_t, int8_t, float);
 INSTANTIATE_MIXED(float, int64_t, int32_t, int8_t, int8_t, float);
 INSTANTIATE_MIXED(float, int64_t, int64_t, int8_t, int8_t, float);
+INSTANTIATE_MIXED(float, int32_t, int32_t, _Float16, _Float16, float);
+INSTANTIATE_MIXED(float, int64_t, int32_t, _Float16, _Float16, float);
+INSTANTIATE_MIXED(float, int64_t, int64_t, _Float16, _Float16, float);
 INSTANTIATE_MIXED(rocsparse_float_complex,
                   int32_t,
                   int32_t,

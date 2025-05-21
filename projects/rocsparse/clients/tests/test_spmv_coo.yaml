@@ -323,6 +323,19 @@ Tests:
   storage: [rocsparse_storage_mode_sorted]
   spmv_alg: [rocsparse_spmv_alg_coo_atomic]
 
+- name: spmv_coo
+  category: pre_checkin
+  function: spmv_coo
+  indextype: *i32_i64
+  precision: *float16_float16_float32_float32_axyt_precision
+  M: [5867]
+  N: [5968]
+  alpha_beta: *alpha_beta_range_checkin
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+  storage: [rocsparse_storage_mode_sorted]
+  spmv_alg: [rocsparse_spmv_alg_coo_atomic]
 
 - name: spmv_coo
   category: pre_checkin
@@ -354,9 +367,6 @@ Tests:
   filename: [Chebyshev4,
              shipsec1,
              scircuit]
-
-
-
 
 - name: spmv_coo
   category: pre_checkin

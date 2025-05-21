@@ -131,7 +131,9 @@ public:
         , m_operation((rocsparse_operation)-1)
         , m_scalar_datatype((rocsparse_datatype)-1)
         , m_compute_datatype((rocsparse_datatype)-1)
-
+        , m_csrmv_info{}
+        , m_cscmv_info{}
+        , m_bsrmv_info{}
     {
     }
 
