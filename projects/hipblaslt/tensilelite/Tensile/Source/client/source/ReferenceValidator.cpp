@@ -485,51 +485,42 @@ namespace TensileLite
             if(m_printTensorA)
             {
                 auto a = problem.a();
+                m_reporter->logTensor(
+                    LogLevel::Verbose, "A", reference.a, problem.a(), reference.a);
                 if(problem.sparse() && problem.sparse() != 2)
                 {
-                    m_reporter->logTensor(
-                        LogLevel::Verbose, "Ref A", reference.a, problem.a(), reference.a);
-                    a = problem.compressed();
+                    m_reporter->logTensor(LogLevel::Verbose,
+                                          "Compressed A",
+                                          reference.compressed,
+                                          problem.compressed(),
+                                          reference.compressed);
                 }
-
-                HIP_CHECK_EXC(hipMemcpy(m_cpuResultBuffer.get(),
-                                        result.a,
-                                        a.totalAllocatedBytes(),
-                                        hipMemcpyDeviceToHost));
-                m_reporter->logTensor(LogLevel::Verbose, "A", m_cpuResultBuffer.get(), a, result.a);
             }
 
             if(m_printTensorB)
             {
                 auto b = problem.b();
-                if(problem.sparse() == 2)
+                m_reporter->logTensor(
+                    LogLevel::Verbose, "B", reference.b, problem.b(), reference.b);
+                if(problem.sparse() && problem.sparse() == 2)
                 {
-                    m_reporter->logTensor(
-                        LogLevel::Verbose, "Ref B", reference.b, problem.b(), reference.b);
-                    b = problem.compressed();
+                    m_reporter->logTensor(LogLevel::Verbose,
+                                          "Compressed B",
+                                          reference.compressed,
+                                          problem.compressed(),
+                                          reference.compressed);
                 }
-
-                HIP_CHECK_EXC(hipMemcpy(m_cpuResultBuffer.get(),
-                                        result.b,
-                                        b.totalAllocatedBytes(),
-                                        hipMemcpyDeviceToHost));
-                m_reporter->logTensor(LogLevel::Verbose, "B", m_cpuResultBuffer.get(), b, result.b);
             }
 
             if(m_printTensorA || m_printTensorB)
             {
                 if(problem.sparse())
                 {
-                    auto metadata = problem.metadata();
-                    HIP_CHECK_EXC(hipMemcpy(m_cpuResultBuffer.get(),
-                                            result.metadata,
-                                            metadata.totalAllocatedBytes(),
-                                            hipMemcpyDeviceToHost));
                     m_reporter->logTensor(LogLevel::Verbose,
                                           "Metadata",
-                                          m_cpuResultBuffer.get(),
+                                          reference.metadata,
                                           problem.metadata(),
-                                          result.metadata);
+                                          reference.metadata);
                 }
             }
 

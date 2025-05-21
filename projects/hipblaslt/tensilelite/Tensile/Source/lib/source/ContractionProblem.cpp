@@ -564,9 +564,9 @@ namespace TensileLite
         gemm.m_tensors[ContractionProblemGemm::TENSOR::SCALED] = TensorDescriptor("scaleD");
         gemm.m_tensors[ContractionProblemGemm::TENSOR::SCALEALPHAVEC]
             = TensorDescriptor("scaleAlphaVec");
-        gemm.m_tensors[ContractionProblemGemm::TENSOR::METADATA] = TensorDescriptor("metadata");
-        gemm.m_tensors[ContractionProblemGemm::TENSOR::AMAXD]    = TensorDescriptor("amaxD");
-        gemm.m_tensor_compressed                                 = TensorDescriptor("compressed");
+        gemm.m_tensors[ContractionProblemGemm::TENSOR::METADATA]   = TensorDescriptor("metadata");
+        gemm.m_tensors[ContractionProblemGemm::TENSOR::AMAXD]      = TensorDescriptor("amaxD");
+        gemm.m_tensors[ContractionProblemGemm::TENSOR::COMPRESSED] = TensorDescriptor("compressed");
         return gemm;
     }
 
@@ -935,12 +935,13 @@ namespace TensileLite
                                             ? 0
                                             : metadata_strides[i - 1] * metadata_sizes[i - 1];
             }
-            m_tensor_compressed = TensorDescriptor("compressed",
-                                                   aTensor.dataType(),
-                                                   compressed_sizes.begin(),
-                                                   compressed_sizes.end(),
-                                                   compressed_strides.begin(),
-                                                   compressed_strides.end());
+            m_tensors[ContractionProblemGemm::TENSOR::COMPRESSED]
+                = TensorDescriptor("compressed",
+                                    m_sparse != 2 ? aTensor.dataType() : bTensor.dataType(),
+                                    compressed_sizes.begin(),
+                                    compressed_sizes.end(),
+                                    compressed_strides.begin(),
+                                    compressed_strides.end());
 
             m_tensors[ContractionProblemGemm::TENSOR::METADATA]
                 = TensorDescriptor("metadata",
@@ -950,7 +951,7 @@ namespace TensileLite
                                    metadata_strides.begin(),
                                    metadata_strides.end());
 
-            m_allocatedElementsNonBatchCompressedA = 1;
+            m_allocatedElementsNonBatchCompressed = 1;
             for(int idx = 0; idx < compressed().dimensions(); idx++)
             {
                 bool isBatch = m_batchIndices.end()
@@ -960,16 +961,16 @@ namespace TensileLite
                                                    return bi.a == idx;
                                                });
                 if(!isBatch)
-                    m_allocatedElementsNonBatchCompressedA
-                        += m_tensor_compressed.strides()[idx]
-                           * (m_tensor_compressed.sizes()[idx] - 1);
+                    m_allocatedElementsNonBatchCompressed
+                        += m_tensors[ContractionProblemGemm::TENSOR::COMPRESSED].strides()[idx]
+                           * (m_tensors[ContractionProblemGemm::TENSOR::COMPRESSED].sizes()[idx] - 1);
             }
         }
         else
         {
-            m_tensor_compressed                                 = TensorDescriptor("compressed");
-            m_tensors[ContractionProblemGemm::TENSOR::METADATA] = TensorDescriptor("metadata");
-            m_allocatedElementsNonBatchCompressedA              = 0;
+            m_tensors[ContractionProblemGemm::TENSOR::COMPRESSED] = TensorDescriptor("compressed");
+            m_tensors[ContractionProblemGemm::TENSOR::METADATA]   = TensorDescriptor("metadata");
+            m_allocatedElementsNonBatchCompressed                 = 0;
         }
     }
 
@@ -1526,7 +1527,8 @@ namespace TensileLite
                                          void const*          _scaleAlphaVec,
                                          void*                _ws,
                                          void*                _Synchronizer,
-                                         unsigned char const* _metadata)
+                                         unsigned char const* _metadata,
+                                         void const*          _compressed)
         : a(_a)
         , b(_b)
         , c(_c)
@@ -1546,6 +1548,7 @@ namespace TensileLite
         , ws(_ws)
         , Synchronizer(_Synchronizer)
         , metadata(_metadata)
+        , compressed(_compressed)
     {
     }
 
