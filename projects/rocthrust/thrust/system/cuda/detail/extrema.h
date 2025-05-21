@@ -28,6 +28,14 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
 #ifdef _CCCL_CUDA_COMPILER
 
 #  include <thrust/system/cuda/config.h>
@@ -265,7 +273,7 @@ cudaError_t THRUST_RUNTIME_FUNCTION doit_step(
     else if (reduce_plan.grid_mapping == cub::GRID_MAPPING_DYNAMIC)
     {
       // Work is distributed dynamically
-      size_t num_tiles = cub::DivideAndRoundUp(num_items, reduce_plan.items_per_tile);
+      size_t num_tiles = ::cuda::ceil_div(num_items, reduce_plan.items_per_tile);
 
       // if not enough to fill the device with threadblocks
       // then fill the device with threadblocks
