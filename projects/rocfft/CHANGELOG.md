@@ -5,8 +5,18 @@ Documentation for rocFFT is available at
 
 ## rocFFT 1.0.34 (unreleased)
 
+### Added
+
+* Added gfx950 support.
+
+### Removed
+
+* Removed rocfft-rider legacy compatibility from clients
+* Removed support for the gfx940 and gfx941 targets from the client programs.
+
 ### Optimized
 
+* Removed unnecessary HIP event/stream allocation and synchronization during MPI transforms.
 * Implemented single-precision 1D kernels for lengths:
   - 4704
   - 5488
@@ -14,28 +24,10 @@ Documentation for rocFFT is available at
   - 6561
   - 8192
 
-### Removed
-
-* Removed rocfft-rider legacy compatibility from clients
-
-## rocFFT 1.0.33 for ROCm 6.5.0
-
-### Optimized
-
-* Removed unnecessary HIP event/stream allocation and synchronization during MPI transforms.
-
-### Added
-
-* Added gfx950 support.
-
 ### Resolved issues
 
 * Fixed kernel faults on multi-device transforms that gather to a single device, when the input/output bricks are not 
   contiguous.
-
-### Removed
-
-* Remove support for the gfx940 and gfx941 targets from the client programs.
 
 ## rocFFT 1.0.32 for ROCm 6.4.0
 
