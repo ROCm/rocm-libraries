@@ -504,6 +504,37 @@ unsigned int get_pp_off_dim(const std::vector<unsigned int>& dims)
     return off_dim;
 }
 
+void validate_pp_length(const StockhamPartialPassParams& pp_params,
+                        const std::vector<unsigned int>& factors)
+
+{
+    unsigned int length_curr
+        = std::accumulate(factors.begin(), factors.end(), 1, std::multiplies<unsigned int>());
+
+    auto curr_dim = pp_params.current_dim;
+    if(length_curr != pp_params.parent_length[curr_dim])
+        throw std::runtime_error("Invalid partial-pass kernel length configuration");
+}
+
+void validate_pp_off_dim_length(const StockhamPartialPassParams& pp_params_1,
+                                const StockhamPartialPassParams& pp_params_2)
+{
+    auto off_factors_all = pp_params_1.factors_off_dim;
+    off_factors_all.insert(off_factors_all.end(),
+                           pp_params_2.factors_off_dim.begin(),
+                           pp_params_2.factors_off_dim.end());
+
+    unsigned int length_off_dim = std::accumulate(
+        off_factors_all.begin(), off_factors_all.end(), 1, std::multiplies<unsigned int>());
+
+    if(pp_params_1.parent_length[pp_params_1.off_dim]
+       != pp_params_2.parent_length[pp_params_2.off_dim])
+        throw std::runtime_error("Invalid partial-pass kernel off-dimension length");
+
+    if(length_off_dim != pp_params_1.parent_length[pp_params_1.off_dim])
+        throw std::runtime_error("Invalid partial-pass kernel off-dimension length");
+}
+
 static size_t max_bytes_per_element(const std::vector<unsigned int>& precisions)
 {
     // generate for the maximum element size in the available
@@ -628,6 +659,10 @@ int main()
 
             StockhamPartialPassParams pp_params_1(parent_length, dims[0], off_dim, pp_factors1);
             StockhamPartialPassParams pp_params_2(parent_length, dims[1], off_dim, pp_factors2);
+
+            validate_pp_length(pp_params_1, factors1);
+            validate_pp_length(pp_params_2, factors2);
+            validate_pp_off_dim_length(pp_params_1, pp_params_2);
 
             stockham_partial_pass_variants(
                 kernel_name, specs1, specs2, pp_params_1, pp_params_2, std::cout);
