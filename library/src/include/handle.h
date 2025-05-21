@@ -210,6 +210,8 @@ public:
     const void* boost_tol{};
     const void* boost_val{};
 
+    ~_rocsparse_mat_info();
+
     void                 set_csrmv_info(rocsparse_csrmv_info value);
     rocsparse_csrmv_info get_csrmv_info();
 
@@ -404,10 +406,33 @@ namespace rocsparse
  *******************************************************************************/
 struct _rocsparse_csritsv_info
 {
+protected:
+    rocsparse_csrmv_info m_csrmv_info{};
+
+public:
     bool                is_submatrix;
     int64_t             ptr_end_size{};
     rocsparse_indextype ptr_end_indextype{};
     void*               ptr_end{};
+
+    rocsparse_csrmv_info get_csrmv_info()
+    {
+        return this->m_csrmv_info;
+    }
+    void set_csrmv_info(rocsparse_csrmv_info value)
+    {
+        this->m_csrmv_info = value;
+    }
+
+    _rocsparse_csritsv_info() = default;
+
+    ~_rocsparse_csritsv_info()
+    {
+        if(this->m_csrmv_info)
+        {
+            delete this->m_csrmv_info;
+        }
+    }
 };
 
 namespace rocsparse

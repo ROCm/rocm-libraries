@@ -107,6 +107,8 @@ public:
         rocsparse_storage_mode storage     = arg.storage;
         rocsparse_datatype     ttype       = get_datatype<T>();
 
+        const bool call_stage_analysis = arg.call_stage_analysis;
+
         // Create rocsparse handle
         rocsparse_local_handle handle(arg);
 
@@ -184,9 +186,12 @@ public:
             rocsparse_spmv(PARAMS(h_alpha, matA, x, h_beta, y, rocsparse_spmv_stage_buffer_size)));
         CHECK_HIP_ERROR(rocsparse_hipMalloc(&dbuffer, buffer_size));
 
-        // Run preprocess
-        CHECK_ROCSPARSE_ERROR(
-            rocsparse_spmv(PARAMS(h_alpha, matA, x, h_beta, y, rocsparse_spmv_stage_preprocess)));
+        if(call_stage_analysis)
+        {
+            // Run preprocess
+            CHECK_ROCSPARSE_ERROR(rocsparse_spmv(
+                PARAMS(h_alpha, matA, x, h_beta, y, rocsparse_spmv_stage_preprocess)));
+        }
 
         if(arg.unit_check)
         {
