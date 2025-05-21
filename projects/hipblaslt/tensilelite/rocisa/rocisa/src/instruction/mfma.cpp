@@ -62,6 +62,8 @@ namespace rocisa
             return DataType::Float8BFloat8;
         case InstType::INST_BF8_F8:
             return DataType::BFloat8Float8;
+        case InstType::INST_F4:
+            return DataType::Float4;
         default:
             throw std::runtime_error("Unknown instruction type");
         }

@@ -189,7 +189,7 @@ class SumUnrollMfma(SumUnroll):
                 writer.undefineSgpr("SumUnrollConstOne")
 
         # bias data type
-        diasBpe        = kernel["ProblemType"]["ComputeDataType"].numBytes()
+        diasBpe        = int(kernel["ProblemType"]["ComputeDataType"].numBytes())
         # get constant parameter
         tile01         = tP["tile01Idx"]
         waveWidth      = writer.states.kernel["WavefrontSize"]
@@ -302,8 +302,8 @@ class SumUnrollMfma(SumUnroll):
         for vIdx in range(0, numVectorsPerTile):
             for eIdx in range(0, numReadPerTileVector):
                 # normal case
-                offset_val = (eIdx + vIdx * MIWaveGroupShape[tile01]) * maxKId * kernel["ProblemType"]["ComputeDataType"].numBytes()
-                bps = kernel["ProblemType"]["ComputeDataType"].numBytes()
+                offset_val = int((eIdx + vIdx * MIWaveGroupShape[tile01]) * maxKId * kernel["ProblemType"]["ComputeDataType"].numBytes())
+                bps = int(kernel["ProblemType"]["ComputeDataType"].numBytes())
                 ds  = DSModifiers(offset=offset_val)
                 dst = vgpr(tReg)
                 vgprStr = "ValuSum+%u"%idx

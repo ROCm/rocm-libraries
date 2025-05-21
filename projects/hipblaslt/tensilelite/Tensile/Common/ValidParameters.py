@@ -83,8 +83,7 @@ def makeValidWorkGroups():
     return validWorkGroups
 
 def makeValidWMMA():
-    # TODO- add back [16, 16, 128, 1] when the toolchain is ready.
-    return [[16, 16, 4, 1], [16, 16, 8, 1], [16, 16, 16, 1], [16, 16, 32, 1], [16, 16, 64, 1]]
+    return [[16, 16, 4, 1], [16, 16, 8, 1], [16, 16, 16, 1], [16, 16, 32, 1], [16, 16, 64, 1], [16, 16, 128, 1]]
 
 def makeValidSWMMAC():
     return [[16, 16, 32, 1], [16, 16, 64, 1], [16, 16, 128, 1]]
@@ -765,8 +764,8 @@ validParameters = { # we need to make sure this matches develop
     # NOTE: for input bpe=32, max GRVW is 4  (to fit dwordx4) (FP32), min GRVW is 1 (dword)
     #                 bpe=16, max GRVW is 8  (to fit dwordx4) (FP16), min GRVW is 2 (dword)
     #                 bpe=8,  max GRVW is 16 (to fit dwordx4) (INT8), min GRVW is 4 (dword)
-    "GlobalReadVectorWidthA": [-2, -1, 1, 2, 3, 4, 6, 8, 16],
-    "GlobalReadVectorWidthB": [-2, -1, 1, 2, 3, 4, 6, 8, 16],
+    "GlobalReadVectorWidthA": [-2, -1, 1, 2, 3, 4, 6, 8, 16, 32],
+    "GlobalReadVectorWidthB": [-2, -1, 1, 2, 3, 4, 6, 8, 16, 32],
     # Controls desired width (#elements) for loads from LDS -> VGPR.
     # -1 : Set LocalReadVectorWidth =  VectorWidth
     #  1 cannot be used for half type.
@@ -776,7 +775,7 @@ validParameters = { # we need to make sure this matches develop
     # NOTE: for input bpe=32, max LRVW is 4  (to fit ds_read_b128) (FP32)
     #                 bpe=16, max LRVW is 8  (to fit ds_read_b128) (FP16)
     #                 bpe=8,  max LRVW is 16 (to fit ds_read_b128) (INT8)
-    "LocalReadVectorWidth": [-1, 1, 2, 4, 8, 16],
+    "LocalReadVectorWidth": [-1, 1, 2, 4, 8, 16, 32],
     # threads should read/write/operate on this many contiguous elements from the C matrix.
     # If VW=4 then thread0 will process 4 consec C elements, then thread1 next 4, etc.
     # If the ThreadTile is > VectorWidth then thread0 will next operate on the 4 elements in C at (4*NumThreads)

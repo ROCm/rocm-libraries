@@ -207,6 +207,11 @@ inline std::map<std::string, int>
                           assemblerPath,
                           "v_wmma_f64_16x16x8_f64 v[0:15], v[16:23], v[24:31], v[0:15]",
                           isDebug);
+    
+    rv["HasWMMA_f8f6f4"] = tryAssembler(isaVersion,
+                                        assemblerPath,
+                                        "v_wmma_f32_16x16x128_f8f6f4 v[0:7], v[16:31], v[16:31], v[0:7]",
+                                        isDebug);
 
     rv["HasWMMA_f8f6f4"] = tryAssembler(isaVersion,
                                         assemblerPath,

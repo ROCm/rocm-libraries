@@ -1186,7 +1186,9 @@ namespace TensileLite
             cSize *= 2; // Include read C and write D in gbytes
         }
         double gbyte
-            = (aSize * a().elementBytes() + bSize * b().elementBytes() + cSize * c().elementBytes())
+            = (multiplyElementSize(aSize, a().elementBytes()) +
+               multiplyElementSize(bSize, b().elementBytes()) +
+               multiplyElementSize(cSize, c().elementBytes()))
               * 1e-9;
 
         m_arithmeticIntensity = gflop / gbyte;

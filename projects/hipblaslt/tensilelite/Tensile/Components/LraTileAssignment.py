@@ -191,7 +191,7 @@ class LraTileAssignmentTransposedMFMA(LraTileAssignment):
 
         # strider for each type of index
         mt           = kernel["MacroTile%u" % tile01]
-        strideTile   = int(tP["localReadInstruction"].blockWidth * writer.states.bpr) // tP["bpeDS"]
+        strideTile   = int(int(tP["localReadInstruction"].blockWidth * writer.states.bpr) // tP["bpeDS"])
         strideUnroll = mt + ldsPad
         strideWave   = kernel["MatrixInstM"] * vectorWidth
 
@@ -327,7 +327,7 @@ class LraTileAssignmentTransposedMFMAB8(LraTileAssignmentTransposedMFMA):
 
         # strider for each type of index
         mt           = kernel["MacroTile%u" % tile01]
-        strideTile   = int(tP["localReadInstruction"].blockWidth * writer.states.bpr) // tP["bpeDS"]
+        strideTile   = int(int(tP["localReadInstruction"].blockWidth * writer.states.bpr) // tP["bpeDS"])
         strideUnroll = mt + ldsPad
         strideWave   = kernel["MatrixInstM"] * vectorWidth
 
@@ -424,6 +424,19 @@ class LraTileAssignmentTransposedMFMA_BF8FP8(LraTileAssignmentTransposedMFMA_FP8
     asmCaps = {
         "HasLDSTrB64B8": True
     }
+
+class LraTileAssignmentTransposedMFMAF4(LraTileAssignmentTransposedMFMA):
+    kernel = {"EnableMatrixInstruction": True,
+              "DirectToVgprA": False,
+              "DirectToVgprB": False,
+              "ProblemType": {
+                  "DataType": DataType("F4")
+              }}
+
+    def __call__(self, writer, kernel, tP):
+        if not tP["enableLDSTr"]:
+            comp = LraTileAssignmentMFMA()
+            return comp(writer, kernel, tP)
 
 class LraTileAssignmentMFMA(LraTileAssignment):
     kernel = {"EnableMatrixInstruction": True, }

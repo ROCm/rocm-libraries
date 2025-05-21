@@ -424,6 +424,11 @@ namespace TensileLite
                     initArray<BFloat8_fnuz>(
                         initMode, static_cast<BFloat8_fnuz*>(array), descriptor);
                     break;
+#ifdef TENSILE_USE_FP4
+                case rocisa::DataType::Float4:
+                    initArray<Float4x2>(initMode, static_cast<Float4x2*>(array), descriptor);
+                    break;
+#endif // #ifdef TENSILE_USE_FP4
                 case rocisa::DataType::Int64:
                 case rocisa::DataType::XFloat32:
                 case rocisa::DataType::ComplexFloat:
@@ -679,8 +684,9 @@ namespace TensileLite
             template <typename T, InitMode Mode>
             void initArray(T* array, size_t elements)
             {
+                size_t numPacks = elements / TypeInfo<T>::Packing;
 #pragma omp parallel for
-                for(size_t i = 0; i < elements; i++)
+                for(size_t i = 0; i < numPacks; i++)
                 {
                     array[i] = getValue<T, Mode>();
                 }
@@ -689,8 +695,9 @@ namespace TensileLite
             template <typename T>
             void initArrayConvert(T* array, size_t elements)
             {
+                size_t numPacks = elements / TypeInfo<T>::Packing;
 #pragma omp parallel for
-                for(size_t i = 0; i < elements; i++)
+                for(size_t i = 0; i < numPacks; i++)
                 {
                     array[i] = ConvertTo<T>(i);
                 }
@@ -709,11 +716,12 @@ namespace TensileLite
                 auto const& sizes = tensor.sizes();
                 auto        count = CoordCount(sizes.begin(), sizes.end());
 #pragma omp parallel for
-                for(size_t idx = 0; idx < count; idx++)
+                for(size_t idx = 0; idx < count; idx+=TypeInfo<T>::Packing)
                 {
                     std::vector<size_t> coord(tensor.dimensions(), 0);
                     CoordNumbered(idx, coord.begin(), coord.end(), sizes.begin(), sizes.end());
-                    array[tensor.index(coord)] = static_cast<T>(idx);
+                    size_t tensorIndex = tensor.index(coord) / TypeInfo<T>::Packing;
+                    array[tensorIndex] = ConvertTo<T>(idx);
                 }
             }
 
@@ -723,11 +731,12 @@ namespace TensileLite
                 auto const& sizes = tensor.sizes();
                 auto        count = CoordCount(sizes.begin(), sizes.end());
 #pragma omp parallel for
-                for(size_t idx = 0; idx < count; idx++)
+                for(size_t idx = 0; idx < count; idx+=TypeInfo<T>::Packing)
                 {
                     std::vector<size_t> coord(tensor.dimensions(), 0);
                     CoordNumbered(idx, coord.begin(), coord.end(), sizes.begin(), sizes.end());
-                    array[tensor.index(coord)] = static_cast<T>(coord[dim]);
+                    size_t tensorIndex = tensor.index(coord) / TypeInfo<T>::Packing;
+                    array[tensorIndex] = ConvertTo<T>(coord[dim]);
                 }
             }
 
@@ -758,11 +767,12 @@ namespace TensileLite
                 auto const& sizes = tensor.sizes();
                 auto        count = CoordCount(sizes.begin(), sizes.end());
 #pragma omp parallel for
-                for(size_t idx = 0; idx < count; idx++)
+                for(size_t idx = 0; idx < count; idx+=TypeInfo<T>::Packing)
                 {
                     std::vector<size_t> coord(tensor.dimensions(), 0);
                     CoordNumbered(idx, coord.begin(), coord.end(), sizes.begin(), sizes.end());
-                    array[tensor.index(coord)] = static_cast<T>(coord[0] == coord[1] ? 1 : 0);
+                    size_t tensorIndex = tensor.index(coord) / TypeInfo<T>::Packing;
+                    array[tensorIndex] = ConvertTo<T>(coord[0] == coord[1] ? 1 : 0);
                 }
             }
 
@@ -772,11 +782,12 @@ namespace TensileLite
                 auto const& sizes = tensor.sizes();
                 auto        count = CoordCount(sizes.begin(), sizes.end());
 #pragma omp parallel for
-                for(size_t idx = 0; idx < count; idx++)
+                for(size_t idx = 0; idx < count; idx+=TypeInfo<T>::Packing)
                 {
                     std::vector<size_t> coord(tensor.dimensions(), 0);
                     CoordNumbered(idx, coord.begin(), coord.end(), sizes.begin(), sizes.end());
-                    array[tensor.index(coord)] = getTrigValue<T>(idx, useCos, useAbs);
+                    size_t tensorIndex = tensor.index(coord) / TypeInfo<T>::Packing;
+                    array[tensorIndex] = getTrigValue<T>(idx, useCos, useAbs);
                 }
             }
 
@@ -784,9 +795,9 @@ namespace TensileLite
             void initArrayTrig(T* array, size_t elements)
             {
 #pragma omp parallel for
-                for(size_t i = 0; i < elements; i++)
+                for(size_t i = 0; i < elements; i+=TypeInfo<T>::Packing)
                 {
-                    array[i] = getTrigValue<T>(i, useCos, useAbs);
+                    array[i/TypeInfo<T>::Packing] = getTrigValue<T>(i, useCos, useAbs);
                 }
             }
 
@@ -2111,6 +2122,127 @@ namespace TensileLite
             return std::numeric_limits<int8_t>::min();
         }
 
+#ifdef TENSILE_USE_FP4
+        template <>
+        inline Float4x2 DataInitialization::getValue<Float4x2, InitMode::Zero>()
+        {
+            union
+            {
+                uint8_t bits;
+                Float4x2 value;
+            } x;
+
+            x.bits = 0x0;
+            return x.value;
+        }
+        template <>
+        inline Float4x2 DataInitialization::getValue<Float4x2, InitMode::One>()
+        {
+            union
+            {
+                uint8_t bits;
+                Float4x2 value;
+            } x;
+
+            x.bits = 0x22;
+            return x.value;
+        }
+        template <>
+        inline Float4x2 DataInitialization::getValue<Float4x2, InitMode::Two>()
+        {
+            union
+            {
+                uint8_t bits;
+                Float4x2 value;
+            } x;
+
+            x.bits = 0x44;
+            return x.value;
+        }
+        template <>
+        inline Float4x2 DataInitialization::getValue<Float4x2, InitMode::NegOne>()
+        {
+            union
+            {
+                uint8_t bits;
+                Float4x2 value;
+            } x;
+
+            x.bits = 0xaa;
+            return x.value;
+        }
+        template <>
+        inline Float4x2 DataInitialization::getValue<Float4x2, InitMode::Max>()
+        {
+            union
+            {
+                uint8_t bits;
+                Float4x2 value;
+            } x;
+
+            x.bits = 0x77;
+            return x.value;
+        }
+        template <>
+        inline Float4x2 DataInitialization::getValue<Float4x2, InitMode::DenormMin>()
+        {
+            union
+            {
+                uint8_t bits;
+                Float4x2 value;
+            } x;
+
+            x.bits = 0x11;
+            return x.value;
+        }
+        template <>
+        inline Float4x2 DataInitialization::getValue<Float4x2, InitMode::DenormMax>()
+        {
+            union
+            {
+                uint8_t bits;
+                Float4x2 value;
+            } x;
+
+            x.bits = 0x11;
+            return x.value;
+        }
+        template <>
+        inline Float4x2 DataInitialization::getValue<Float4x2, InitMode::NaN>()
+        {
+            throw std::runtime_error("NaN not available for float4.");
+        }
+        template <>
+        inline Float4x2 DataInitialization::getValue<Float4x2, InitMode::Inf>()
+        {
+            throw std::runtime_error("Inf not available for float4.");
+        }
+        template <>
+        inline Float4x2 DataInitialization::getValue<Float4x2, InitMode::Random>()
+        {
+            union
+            {
+                uint8_t bits;
+                Float4x2 value;
+            } x;
+
+            uint8_t val0 = static_cast<uint8_t>(rand() % 15);
+            uint8_t val1 = static_cast<uint8_t>(rand() % 15);
+            x.bits = (val1 << 4) | val0;
+            return x.value;
+        }
+        template <>
+        inline Float4x2 DataInitialization::getValue<Float4x2, InitMode::BadInput>()
+        {
+            throw std::runtime_error("BadInput not available for float4.");
+        }
+        template <>
+        inline Float4x2 DataInitialization::getValue<Float4x2, InitMode::BadOutput>()
+        {
+            throw std::runtime_error("BadOutput not available for float4.");
+        }
+#endif // #ifdef TENSILE_USE_FP4
+
         template <>
         inline bool DataInitialization::isBadInput<float>(float value)
         {
@@ -2188,6 +2320,14 @@ namespace TensileLite
         {
             return value == DataInitialization::getValue<int8_t, InitMode::BadInput>();
         }
+
+#ifdef TENSILE_USE_FP4
+        template <>
+        inline bool DataInitialization::isBadInput<Float4x2>(Float4x2 value)
+        {
+            return false;
+        }
+#endif // #ifdef TENSILE_USE_FP4
 
         template <>
         inline bool DataInitialization::isBadOutput<float>(float value)
@@ -2268,6 +2408,14 @@ namespace TensileLite
             return value == DataInitialization::getValue<int8_t, InitMode::BadOutput>();
         }
 
+#ifdef TENSILE_USE_FP4
+        template <>
+        inline bool DataInitialization::isBadOutput<Float4x2>(Float4x2 value)
+        {
+            return false;
+        }
+#endif // #ifdef TENSILE_USE_FP4
+
         template <>
         inline float DataInitialization::getTrigValue<float>(int idx, bool useCos, bool useAbs)
         {
@@ -2342,6 +2490,16 @@ namespace TensileLite
         {
             throw std::runtime_error("Trig not available for Int8.");
         }
+
+#ifdef TENSILE_USE_FP4
+        template <>
+        inline Float4x2 DataInitialization::getTrigValue<Float4x2>(int idx, bool useCos, bool useAbs)
+        {
+            float val0 = getTrigValue<float>(idx, useCos, useAbs);
+            float val1 = getTrigValue<float>(idx, useCos, useAbs);
+            return Float4x2(val0, val1);
+        }
+#endif // #ifdef TENSILE_USE_FP4
 
         template <>
         inline std::complex<float>
@@ -2610,6 +2768,15 @@ namespace TensileLite
             return getValue<int8_t, InitMode::Random>();
         }
 
+#ifdef TENSILE_USE_FP4
+        template <>
+        inline Float4x2 DataInitialization::getValue<Float4x2, InitMode::RandomNarrow>()
+        {
+            return Float4x2(rocm_random_narrow_range<float>{}(),
+                           rocm_random_narrow_range<float>{}());
+        }
+#endif // #ifdef TENSILE_USE_FP4
+
         template <typename T>
         inline T getValueWithUpperLowerBoundFP(double upper = 1.0, double lower = -1.0)
         {
@@ -2715,6 +2882,15 @@ namespace TensileLite
             return getValueWithUpperLowerBoundInteger<int8_t>();
         }
 
+#ifdef TENSILE_USE_FP4
+        template <>
+        inline Float4x2 DataInitialization::getValue<Float4x2, InitMode::RandomNegPosLimited>()
+        {
+            return Float4x2(getValueWithUpperLowerBoundFP<float>(),
+                            getValueWithUpperLowerBoundFP<float>());
+        }
+#endif // #ifdef TENSILE_USE_FP4
+
         template <>
         inline float DataInitialization::ConvertTo<float>(size_t i)
         {
@@ -2796,6 +2972,14 @@ namespace TensileLite
             return static_cast<int8_t>(i);
         }
 
+#ifdef TENSILE_USE_FP4
+        template <>
+        inline Float4x2 DataInitialization::ConvertTo<Float4x2>(size_t i)
+        {
+            return Float4x2(float(i), float(i));
+        }
+#endif // #ifdef TENSILE_USE_FP4
+
         template <>
         inline float DataInitialization::convertDoubleTo<float>(double value)
         {
@@ -2875,5 +3059,12 @@ namespace TensileLite
         {
             return static_cast<BFloat8_fnuz>(value);
         }
+#ifdef TENSILE_USE_FP4
+        template <>
+        inline Float4x2 DataInitialization::convertDoubleTo<Float4x2>(double value)
+        {
+            return Float4x2(float(value), float(value));
+        }
+#endif // #ifdef TENSILE_USE_FP4
     } // namespace Client
 } // namespace TensileLite

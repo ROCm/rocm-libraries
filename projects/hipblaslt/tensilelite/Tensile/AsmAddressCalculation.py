@@ -596,6 +596,7 @@ class AddrCalculation:
                     params.append("sgprWorkGroup%u"%i)
             params.append("%s" % (tmpVgpr+2))
             module.add(MacroInstruction(name="GLOBAL_OFFSET_C", args=params))
+            module.add(vectorMultiply64Bpe(addrVgpr, addrVgpr, tPB["bpeGR"]))
             module.add(VMovB32(dst=vgpr(tmpVgpr+2), src=vgpr(addrVgpr+0), comment="temp store offset 0"))
             module.add(VMovB32(dst=vgpr(tmpVgpr+3), src=vgpr(addrVgpr+1), comment="temp store offset 1"))
 

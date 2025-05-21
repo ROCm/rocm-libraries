@@ -62,12 +62,12 @@ class LocalReadVALU(LocalRead):
         # dot2: currently only support unroll major LDS
         if kernel["UseDotInstruction"]:
             numVectorsPerTile = kernel["ThreadTile%u"%tile01]
-            numReadsPerVector = (writer.states.lrvwUnrollA * tP["bpe"]) // (blockWidth*4) # bytes/register
+            numReadsPerVector = ceil((writer.states.lrvwUnrollA * tP["bpe"]) // (blockWidth*4)) # bytes/register
             LdsPad            = kernel["LdsPad%s"%tc] if kernel["LdsBlockSizePerPad%s"%tc] == 0 else 0
             tileStride        = kernel["_DepthU%s"%tc] + LdsPad if kernel["UnrollMajorLDS%s" % tP["tensorChar"]] else 1
         else:
             numVectorsPerTile = (kernel["ThreadTile%u"%tile01]//kernel["VectorWidthA"])
-            numReadsPerVector = (kernel["VectorWidthA"] * tP["bpe"]) // (blockWidth*4) # bytes/register
+            numReadsPerVector = ceil((kernel["VectorWidthA"] * tP["bpe"]) // (blockWidth*4)) # bytes/register
 
         for vIdx in range(0, numVectorsPerTile):
             for rIdx in range(0, int(numReadsPerVector)):
@@ -81,11 +81,11 @@ class LocalReadVALU(LocalRead):
                 for oIdx in range(0, numOffsets):
                     # dot2
                     if kernel["UseDotInstruction"]:
-                        paramList.append(((rIdx*blockWidth + kernel["SubGroup%u"%tile01] * (vIdx*numOffsets+oIdx) * tileStride \
-                            + tP["localReadOffset"]) * tP["bpe"] + tP["localReadSwapByteOffset"]) // offsetMultiplier)
+                        paramList.append(int(((rIdx*blockWidth + kernel["SubGroup%u"%tile01] * (vIdx*numOffsets+oIdx) * tileStride \
+                            + tP["localReadOffset"]) * tP["bpe"] + tP["localReadSwapByteOffset"]) // offsetMultiplier))
                     else:
-                        paramList.append(((rIdx*blockWidth + kernel["SubGroup%u"%tile01] * (vIdx*numOffsets+oIdx)*kernel["VectorWidthA"] \
-                            + tP["localReadOffset"]) * tP["bpe"] + tP["localReadSwapByteOffset"]) // offsetMultiplier)
+                        paramList.append(int(((rIdx*blockWidth + kernel["SubGroup%u"%tile01] * (vIdx*numOffsets+oIdx)*kernel["VectorWidthA"] \
+                            + tP["localReadOffset"]) * tP["bpe"] + tP["localReadSwapByteOffset"]) // offsetMultiplier))
                     # print("Debug: Matrix{}, rIdx offset {}, vIdx offset {}, bpe {}, net offset {}".format( \
                     #     tP["tensorChar"], \
                     #     rIdx * blockWidth, \
@@ -587,12 +587,12 @@ class LocalReadMFMA(LocalRead):
             UnrollStride = 1
 
         numVectorsPerTile = kernel["MIWaveTile"][tile01] // vectorWidth
-        numReadsPerVector = (vectorWidth * tP["bpeDS"]) // int(tileBlockWidth * bpr)
+        numReadsPerVector = int((vectorWidth * tP["bpeDS"]) / (tileBlockWidth * bpr))
         # overloading numReadsPerUnroll for DirectToLds x2/x4 case when blockWidth of instruction < LocalReadVectorWidth
         # fp64 TLU=1 reading 0.5element/lane/read..
         # for TLU=0 case, blockWidth and LRVW should match
         enableLDSTr = tP["enableLDSTr"]
-        numReadsPerUnroll = ceil(tP["bpeDS"] * kernel["MIInputPerThread%s"%tc] / int(unrollBlockWidth * bpr))
+        numReadsPerUnroll = int(ceil(tP["bpeDS"] * kernel["MIInputPerThread%s"%tc] / (unrollBlockWidth * bpr)))
         numVgpr  = int(ceil(blockWidth))
         tmpvgprFP32 = []
         if tc == 'A':
@@ -603,7 +603,7 @@ class LocalReadMFMA(LocalRead):
             lrvwTile = writer.states.lrvwTileMetadata
         else:
             lrvwTile = 1
-        numElementPerRead = 1 if kernel["ConvertAfterDS"] and not kernel["UseF32XEmulation"] else (int(blockWidth * bpr) // tP['bpe'] // lrvwTile)
+        numElementPerRead = 1 if kernel["ConvertAfterDS"] and not kernel["UseF32XEmulation"] else int(int(blockWidth * bpr) // tP['bpe'] // lrvwTile)
         inputPerThread   = kernel["LocalReadVectorWidth"] if not writer.states.inTailLoop else kernel["MIInputPerThread%s"%tc]
 
         abmatrixinfo = writer.states.a if tc == 'A' else writer.states.b
@@ -660,7 +660,7 @@ class LocalReadMFMA(LocalRead):
             if writer.states.asmCaps["HasWMMA_V3"]:
                 if tP["bpeDS"] == 1:
                     LocalReadX = instruction.getInst(0)
-                    wtRegStride = kernel[f"MIInputPerThread{tc}"] * tP["bpeDS"] // bpr
+                    wtRegStride = int(kernel[f"MIInputPerThread{tc}"] * tP["bpeDS"] // bpr)
                     numUnrolledIncrements = 32
                     vwTrLoad = 8
                     for tIdx in range(numberMTilesPerWave):
@@ -677,23 +677,23 @@ class LocalReadMFMA(LocalRead):
                                 localReadCode.add(LocalReadX(dst=destVgpr, src=vgpr("LocalReadAddr%s"%tc), ds=ds, comment="LDS Transpose"))
                 elif tP["bpeDS"] == 2:
                     for tIdx in range(0, numberMTilesPerWave):
-                        offset_val = (tP["localReadOffset"]+MIWaveGroupShape[tile01]*tIdx) * tP["bpeDS"]
+                        offset_val = int((tP["localReadOffset"]+MIWaveGroupShape[tile01]*tIdx) * tP["bpeDS"])
                         unpaddedOffset = offset_val
                         if (kernel["LdsBlockSizePerPad%s"%tc] != 0) and (kernel["LdsPad%s"%tc] != 0):
-                            offset_val += (offset_val // kernel["LdsBlockSizePerPad%s"%tc]) * kernel["LdsPad%s"%tc] * tP["bpeDS"]
+                            offset_val += int((offset_val // kernel["LdsBlockSizePerPad%s"%tc]) * kernel["LdsPad%s"%tc] * tP["bpeDS"])
                         ds = DSModifiers(na=1, offset=offset_val)
                         LocalReadX = instruction.getInst(0)
-                        wtRegStride = kernel[f"MIInputPerThread{tc}"] * tP["bpeDS"] // bpr
+                        wtRegStride = int(kernel[f"MIInputPerThread{tc}"] * tP["bpeDS"] // bpr)
                         destVgpr = vgpr("Valu%s_X%u_I%u+%u+0"%(tc,bufferIdx,iui, wtRegStride*tIdx), blockWidth)
                         comment = "LDS Transpose"
                         valuiIdx = int(valufIdx)
                         localReadCode = imod.add(Module("LocalRead%s Valu%u"%(tc,valuiIdx)))
                         localReadCode.add(LocalReadX(dst=destVgpr, src=vgpr("LocalReadAddr%s"%tc), ds=ds, comment=comment))
                         destVgpr = vgpr("Valu%s_X%u_I%u+%u+%u"%(tc,bufferIdx,iui, wtRegStride*tIdx, blockWidth), blockWidth)
-                        incrementBytes = UnrollStride*inputPerThread*tP["bpeDS"]
+                        incrementBytes = int(UnrollStride*inputPerThread*tP["bpeDS"])
                         offset_val = unpaddedOffset + incrementBytes
                         if (kernel["LdsBlockSizePerPad%s"%tc] != 0) and (kernel["LdsPad%s"%tc] != 0):
-                            offset_val += (offset_val // kernel["LdsBlockSizePerPad%s"%tc]) * kernel["LdsPad%s"%tc] * tP["bpeDS"]
+                            offset_val += int((offset_val // kernel["LdsBlockSizePerPad%s"%tc]) * kernel["LdsPad%s"%tc] * tP["bpeDS"])
                         ds = DSModifiers(na=1, offset=offset_val)
                         localReadCode.add(LocalReadX(dst=destVgpr, src=vgpr("LocalReadAddr%s"%tc), ds=ds, comment=comment))
                 else:
@@ -897,7 +897,7 @@ class LocalReadMFMA(LocalRead):
                                     isHigh16Bits = False
                                     #Case A
                                     if kernel["UnrollMajorLDS%s"%tc]:
-                                        cvtTimes = (blockWidth * writer.states.bpr // tP["bpeDS"]) // kernel["MIInputPerThread%s"%tc]
+                                        cvtTimes = int(blockWidth * writer.states.bpr // tP["bpeDS"]) // kernel["MIInputPerThread%s"%tc]
                                         for i in range(0, cvtTimes):
                                             offset = cvtTimes - i - 1
                                             if writer.states.asmCaps["Hascvtf16_fp8"]:
@@ -948,10 +948,10 @@ class LocalReadMFMA(LocalRead):
 
                                             if rIdx == numReadsPerUnroll-1:
                                                 for i in range(0, numVgpr):
-                                                    vgprIdx = (vIdx * numVgpr + i) * tP["bpe"] * kernel["MIInputPerThread%s"%tc] // writer.states.bpr * min(writer.states.bpr // tP["bpe"], vectorWidth)
+                                                    vgprIdx = int((vIdx * numVgpr + i) * tP["bpe"] * kernel["MIInputPerThread%s"%tc] // writer.states.bpr * min(writer.states.bpr // tP["bpe"], vectorWidth))
                                                     vgprOffset = 0
                                                     for vectorIdx in range(0, 2):
-                                                        for elementIdx in range(0, tP["bpe"]*kernel["MIInputPerThread%s"%tc]//writer.states.bpr):
+                                                        for elementIdx in range(0, int(tP["bpe"]*kernel["MIInputPerThread%s"%tc]//writer.states.bpr)):
                                                             packCodeT.add(VPermB32(dst=vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, vgprIdx+vgprOffset)), \
                                                                                 src0=vgpr("Valu%s_X%u_I%u_D%u+%u"%(tc, bufferIdx, iui, elementIdx*2+1, i+vIdx*numVgpr)), \
                                                                                 src1=vgpr("Valu%s_X%u_I%u_D%u+%u"%(tc, bufferIdx, iui, elementIdx*2, i+vIdx*numVgpr)), \
@@ -977,10 +977,10 @@ class LocalReadMFMA(LocalRead):
 
                                             if rIdx == numReadsPerUnroll-1:
                                                 for i in range(0, numVgpr*2):
-                                                    vgprIdx = (2 * vIdx * numVgpr + i) * tP["bpe"] * kernel["MIInputPerThread%s"%tc] // writer.states.bpr * min(writer.states.bpr // tP["bpe"], vectorWidth)
+                                                    vgprIdx = int((2 * vIdx * numVgpr + i) * tP["bpe"] * kernel["MIInputPerThread%s"%tc] // writer.states.bpr * min(writer.states.bpr // tP["bpe"], vectorWidth))
                                                     vgprOffset = 0
                                                     for vectorIdx in range(0, 2):
-                                                        for elementIdx in range(0, tP["bpe"]*kernel["MIInputPerThread%s"%tc]//writer.states.bpr):
+                                                        for elementIdx in range(0, int(tP["bpe"]*kernel["MIInputPerThread%s"%tc]//writer.states.bpr)):
                                                             packCodeT.add(VPermB32(dst=vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, vgprIdx+vgprOffset)), \
                                                                                 src0=vgpr("Valu%s_X%u_I%u_D%u+%u"%(tc, bufferIdx, iui, elementIdx*2+1, i+2*vIdx*numVgpr)), \
                                                                                 src1=vgpr("Valu%s_X%u_I%u_D%u+%u"%(tc, bufferIdx, iui, elementIdx*2, i+2*vIdx*numVgpr)), \
@@ -1020,10 +1020,10 @@ class LocalReadMFMA(LocalRead):
 
                                             if rIdx == numReadsPerUnroll-1:
                                                 for i in range(0, numVgpr*2):
-                                                    vgprIdx = (2 * vIdx * numVgpr + i) * tP["bpe"] * kernel["MIInputPerThread%s"%tc] // writer.states.bpr * min(writer.states.bpr // tP["bpe"], vectorWidth)
+                                                    vgprIdx = int((2 * vIdx * numVgpr + i) * tP["bpe"] * kernel["MIInputPerThread%s"%tc] // writer.states.bpr * min(writer.states.bpr // tP["bpe"], vectorWidth))
                                                     vgprOffset = 0
                                                     for vectorIdx in range(0, 2):
-                                                        for elementIdx in range(0, tP["bpe"]*kernel["MIInputPerThread%s"%tc]//writer.states.bpr):
+                                                        for elementIdx in range(0, int(tP["bpe"]*kernel["MIInputPerThread%s"%tc]//writer.states.bpr)):
                                                             packCodeT.add(VPermB32(dst=vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, vgprIdx+vgprOffset)), \
                                                                                 src0=vgpr("Valu%s_X%u_I%u_D%u+%u"%(tc, bufferIdx, iui, elementIdx*2+1, i+2*vIdx*numVgpr)), \
                                                                                 src1=vgpr("Valu%s_X%u_I%u_D%u+%u"%(tc, bufferIdx, iui, elementIdx*2, i+2*vIdx*numVgpr)), \
@@ -1036,7 +1036,7 @@ class LocalReadMFMA(LocalRead):
                                 highBitsForHalf = 0
                                 isHigh8Bits = 0
                                 isHigh16Bits = 0
-                                numElementPerReg = writer.states.bpr//tP["bpe"]
+                                numElementPerReg = int(writer.states.bpr//tP["bpe"])
 
                                 needPackK16  = False
                                 needPackK8Lw = False
@@ -1053,7 +1053,7 @@ class LocalReadMFMA(LocalRead):
                                 if rIdx == numReadsPerUnroll-1:
                                     for i in range(0, numVgpr):
                                         # convert from [tile][MiInputPerThread][vector] to [tile][vector][MiInputPerThread]
-                                        vgprIdx = (vIdx*numVgpr+i)*tP["bpeDS"]*kernel["MIInputPerThread%s"%tc]//writer.states.bpr*min(writer.states.bpr//tP["bpeDS"],vectorWidth)
+                                        vgprIdx = int((vIdx*numVgpr+i)*tP["bpeDS"]*kernel["MIInputPerThread%s"%tc]//writer.states.bpr*min(writer.states.bpr//tP["bpeDS"],vectorWidth))
                                         if numSplitMetadata:
                                             vgprIdx = (vIdx*numVgpr+i)*ceil(tP["bpeDS"]*kernel["MIInputPerThread%s"%tc] / writer.states.bpr)*min(writer.states.bpr//tP["bpeDS"],vectorWidth)
                                             if kernel["MIInputPerThread%s"%tc] == 4:
@@ -1100,7 +1100,7 @@ class LocalReadMFMA(LocalRead):
                                         elif kernel["ProblemType"]["DataType"].isHalf() or kernel["MFMA_BF16_1K"] or kernel["ProblemType"]["DataType"].isBFloat16():
                                             vgprOffset = 0
                                             for vectorIdx in range(0, numElementPerReg):
-                                                for elementIdx in range(0, tP["bpe"]*kernel["MIInputPerThread%s"%tc]//writer.states.bpr):
+                                                for elementIdx in range(0, int(tP["bpe"]*kernel["MIInputPerThread%s"%tc]//writer.states.bpr)):
                                                     packCodeT.add(VPermB32(dst=vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, vgprIdx+vgprOffset)), src0=vgpr("Valu%s_X%u_I%u_D%u+%u"%(tc, bufferIdx, iui, elementIdx*numElementPerReg+1, i+vIdx*numVgpr)), src1=vgpr("Valu%s_X%u_I%u_D%u+%u"%(tc, bufferIdx, iui, elementIdx*numElementPerReg, i+vIdx*numVgpr)), src2=sgpr("PackKForV%u"%vectorIdx), \
                                                                         comment="select K=%u%u for vector=%u"%(elementIdx*numElementPerReg,  elementIdx*numElementPerReg+1, vectorIdx)))
                                                     vgprOffset += 1
@@ -1110,7 +1110,7 @@ class LocalReadMFMA(LocalRead):
                                             for vectorIdx in range(0, numElementPerReg):
                                                 if vectorWidth <= 2 and vectorIdx > 1:
                                                     break
-                                                for elementIdx in range(0, tP["bpe"]*kernel["MIInputPerThread%s"%tc]//writer.states.bpr):
+                                                for elementIdx in range(0, int(tP["bpe"]*kernel["MIInputPerThread%s"%tc]//writer.states.bpr)):
                                                     packCodeT.add(VPermB32(dst=vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, vgprIdx+vgprOffset)), src0=vgpr("Valu%s_X%u_I%u_D%u+%u"%(tc, bufferIdx, iui, elementIdx*numElementPerReg+1, i+vIdx*numVgpr)), src1=vgpr("Valu%s_X%u_I%u_D%u+%u"%(tc, bufferIdx, iui, elementIdx*numElementPerReg, i+vIdx*numVgpr)), src2=sgpr("PackKForV%u"%vectorIdx), \
                                                                         comment="select K=%u%u for vector=%u"%(elementIdx*4,  elementIdx*4+1, vectorIdx)))
                                                     packCodeT.add(VPermB32(dst=vgpr("PackTemp"), src0=vgpr("Valu%s_X%u_I%u_D%u+%u"%(tc, bufferIdx, iui, elementIdx*numElementPerReg+3, i+vIdx*numVgpr)), src1=vgpr("Valu%s_X%u_I%u_D%u+%u"%(tc, bufferIdx, iui, elementIdx*numElementPerReg+2, i+vIdx*numVgpr)), src2=sgpr("PackKForV%u"%vectorIdx), \
@@ -1191,7 +1191,7 @@ class LocalReadMFMA(LocalRead):
                                         offset_val = offset_val + (blockOffsetSMFMA * blockId)
                                     else:
                                         offset_val = offset_val + (blockOffsetSMFMA * blockId) * UnrollStride
-                                offset_val = (rIdx * numElementPerRead * UnrollStride + offset_val + tP["localReadOffset"]) * tP["bpeDS"]
+                                offset_val = int((rIdx * numElementPerRead * UnrollStride + offset_val + tP["localReadOffset"]) * tP["bpeDS"])
                             elif writer.states.asmCaps["HasMFMA_f8f6f4"] and kernel["ProblemType"]["DataType"].is8bitFloat() and kernel["MatrixInstK"] > 32:
                                 incOffset = 0
                                 midIdx = numReadsPerUnroll // 2
@@ -1232,19 +1232,19 @@ class LocalReadMFMA(LocalRead):
                             # For wmma_v3, the maximum number of bytes per read is 16 bytes in 4 vgprs, which happens in the case of fp16/bf16/fp8/bf8/f4.
                             elif tuple(kernel["ISA"][:2]) == (12, 5) \
                                     and (kernel["ProblemType"]["DataType"].is8bitFloat() or kernel["ProblemType"]["DataType"].isBFloat16() \
-                                        or kernel["ProblemType"]["DataType"].isHalf() or kernel["ProblemType"]["DataType"].isInt8()):
+                                        or kernel["ProblemType"]["DataType"].isHalf() or kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].isFloat4()):
                                 if kernel["UnrollMajorLDS%s" % tP["tensorChar"]]:
                                     incOffset = rIdx * numElementPerRead * UnrollStride * 2
                                 else:
                                     vw = kernel["LocalReadVectorWidth"]
                                     incOffset = (rIdx // vw) * UnrollStride * vw
                                     incOffset += rIdx * numElementPerRead * UnrollStride
-                                offset_val = (incOffset + offset_val + tP["localReadOffset"]) * tP["bpeDS"]
+                                offset_val = int((incOffset + offset_val + tP["localReadOffset"]) * tP["bpeDS"])
                             else:
-                                offset_val = (rIdx * numElementPerRead * UnrollStride + offset_val + tP["localReadOffset"]) * tP["bpeDS"]
+                                offset_val = int((rIdx * numElementPerRead * UnrollStride + offset_val + tP["localReadOffset"]) * tP["bpeDS"])
 
                             if (kernel["LdsBlockSizePerPad%s"%tc] != 0) and (kernel["LdsPad%s"%tc] != 0):
-                                offset_val = offset_val + (offset_val // kernel["LdsBlockSizePerPad%s"%tc]) * kernel["LdsPad%s"%tc] * tP["bpeDS"]
+                                offset_val = int(offset_val + (offset_val // kernel["LdsBlockSizePerPad%s"%tc]) * kernel["LdsPad%s"%tc] * tP["bpeDS"])
                             offset_val = offset_val + tP["localReadSwapByteOffset"]
                             # TODO: Add NLC>1 offset calcs here? 
                             if (kernel["DirectToLds%s" % tc] and  \

@@ -73,12 +73,16 @@ namespace rocisa
             return "F8B8N";
         case rocisa::DataType::BFloat8Float8_fnuz:
             return "B8F8N";
-        case rocisa::DataType::Count:;
+#ifdef TENSILE_USE_FP4
+        case rocisa::DataType::Float4:
+            return "F4";
+#endif // #ifdef TENSILE_USE_FP4
+        case DataType::Count:;
         }
         return "Invalid";
     }
 
-    size_t GetElementSize(rocisa::DataType d)
+    float GetElementSize(rocisa::DataType d)
     {
         switch(d)
         {
@@ -120,6 +124,10 @@ namespace rocisa
             return TensileLite::TypeInfo<Float8BFloat8_fnuz>::ElementSize;
         case rocisa::DataType::BFloat8Float8_fnuz:
             return TensileLite::TypeInfo<BFloat8Float8_fnuz>::ElementSize;
+#ifdef TENSILE_USE_FP4
+        case rocisa::DataType::Float4:
+            return TensileLite::TypeInfo<TensileLite::Float4x2>::ElementSize;
+#endif // #ifdef TENSILE_USE_FP4
         case rocisa::DataType::Count:;
         }
         return 1;
@@ -239,6 +247,9 @@ namespace TensileLite
         registerTypeInfo<BFloat8Float8>();
         registerTypeInfo<Float8BFloat8_fnuz>();
         registerTypeInfo<BFloat8Float8_fnuz>();
+#ifdef TENSILE_USE_FP4
+        registerTypeInfo<Float4x2>();
+#endif // #ifdef TENSILE_USE_FP4
     }
 
     void DataTypeInfo::registerAllTypeInfoOnce()

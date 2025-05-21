@@ -537,6 +537,7 @@ _validGEMMTypes = [
     ("B8N", "F8N", "S"),
     ("F8B8N", "F8N", "S"),
     ("B8F8N", "F8N", "S"),
+    ("F4", "S", "S"),
 ]
 
 
@@ -593,6 +594,7 @@ _HPATypes = [
     ("B8N", "F8N", "S"),
     ("F8B8N", "F8N", "S"),
     ("B8F8N", "F8N", "S"),
+    ("F4", "S", "S"),
 ]
 
 def problemTypeToEnum(problemType):

@@ -124,7 +124,7 @@ class SoftmaxKernelGenerator:
 
     @property
     def lds_usage_byte(self) -> int:
-        return self.num_cols * self.num_rows * self.io_type.numBytes()
+        return self.num_cols * self.num_rows * int(self.io_type.numBytes())
 
     @property
     def func_name(self):
@@ -226,7 +226,7 @@ class SoftmaxKernelGenerator:
 
     @property
     def bpe(self) -> int:
-        return self.io_type.numBytes()
+        return int(self.io_type.numBytes())
 
     def load_kernel_args(self):
         kernel_args_addr = 0

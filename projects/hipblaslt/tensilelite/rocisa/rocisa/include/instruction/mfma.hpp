@@ -161,8 +161,12 @@ namespace rocisa
                 return is_wmma_v3 ? "fp8_bf8" : (variant[2] > 32 ? "f8f6f4" : "fp8_bf8");
             case InstType::INST_BF8_F8:
                 return is_wmma_v3 ? "bf8_fp8" : (variant[2] > 32 ? "f8f6f4" : "bf8_fp8");
+            case InstType::INST_F4:
+                return "f8f6f4";
             default:
-                throw std::runtime_error("Type not found");
+                std::string msg("Type not found");
+                msg += std::to_string(int(iType));
+                throw std::runtime_error(msg);
             }
         }
 
@@ -231,6 +235,9 @@ namespace rocisa
                 {
                 case InstType::INST_F8:
                     inputPermuteStr = variant[2] > 64 ? " matrix_a_fmt:MATRIX_FMT_FP8 matrix_b_fmt:MATRIX_FMT_FP8" : "";
+                    break;
+                case InstType::INST_F4:
+                    inputPermuteStr = variant[2] > 64 ? " matrix_a_fmt:MATRIX_FMT_FP4 matrix_b_fmt:MATRIX_FMT_FP4" : "";
                     break;
                 default:
                     break;

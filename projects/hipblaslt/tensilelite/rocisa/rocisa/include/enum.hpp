@@ -54,6 +54,7 @@ namespace rocisa
         BFloat8,
         Float8BFloat8,
         BFloat8Float8,
+        Float4,
         Count,
         None = Count
     };
@@ -147,6 +148,8 @@ namespace rocisa
             return "Float8BFloat8";
         case DataType::BFloat8Float8:
             return "BFloat8Float8";
+        case DataType::Float4:
+            return "Float4";
         default:
             return "Invalid";
         }
@@ -201,7 +204,8 @@ namespace rocisa
         INST_TR16_B128  = 38,
         INST_CVT        = 39,
         INST_MACRO      = 40,
-        INST_NOTYPE     = 41
+        INST_F4         = 41,
+        INST_NOTYPE     = 42
     };
 
     enum class SelectBit : int

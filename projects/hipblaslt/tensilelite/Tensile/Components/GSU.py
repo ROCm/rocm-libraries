@@ -429,8 +429,9 @@ class GSUOn(GSU):
                 elif tc == "B" and kernel["ProblemType"]["SwizzleTensorB"]:
                     mult_MI_Dim = "*MI_N"
 
+                duBpe = f'{int(kernel["_DepthU%s" % tc] * tP["bpeGR"])}*{mult_MI_Dim}' if mult_MI_Dim else int(kernel["_DepthU%s" % tc] * tP["bpeGR"])
                 module.add(SAndB32(dst=sgpr(gsuSgpr), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
-                module.add(SMulI32(dst=sgpr(gsuSgpr), src0=sgpr(gsuSgpr), src1="DepthU*Bpe%s%s"%(tcGR, mult_MI_Dim), comment="GSU*DepthU*Bpe%s"%(mult_MI_Dim)))
+                module.add(SMulI32(dst=sgpr(gsuSgpr), src0=sgpr(gsuSgpr), src1=duBpe, comment="GSU*DepthU*Bpe%s"%(mult_MI_Dim)))
                 module.add(SAndB32(dst=sgpr(tmpSgpr), src0=sgpr("GSU"), src1=hex(0x8000), comment="SCC = (GSUC == 1) ?"))
 
                 m = sgpr(gsuSgpr)
@@ -439,7 +440,7 @@ class GSUOn(GSU):
                     m.setMinus(True)
 
                 incr = sgpr("GlobalReadIncs%s+%u"%(tc, loopIdx))
-                duBpe = "DepthU*Bpe%s%s"%(tcGR, mult_MI_Dim)
+                duBpe = f'{int(kernel["DepthU"]*tP["bpeGR"])}{mult_MI_Dim}'
                 # multiply by stride, optimizing if unit stride
                 if writer.isConstUnitStride(stride):
                     module.add(SCSelectB32(dst=incr, src0=duBpe, src1=m, comment="incr%s (unrollIdx)"%(tc)))

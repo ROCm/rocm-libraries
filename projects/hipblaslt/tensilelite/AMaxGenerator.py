@@ -122,7 +122,7 @@ class AMaxKernelGenerator:
         self.i_type = i_type
         self.o_type = o_type
         self.scale_type = scale_type
-        self.bpe = i_type.numBytes()
+        self.bpe = int(i_type.numBytes())
         self.num_workitems = num_workitems
         self.num_load_count = num_load_count
         self.num_load_size = num_load_size
@@ -360,7 +360,7 @@ class AMaxKernelGenerator:
 
         mod.add(ri.SMovB32(sgpr("Dst+0"), sgpr("AddressOut+0")))
         mod.add(ri.SMovB32(sgpr("Dst+1"), sgpr("AddressOut+1")))
-        mod.add(ri.SMovB32(sgpr("Dst+2"), self.o_type.numBytes()))
+        mod.add(ri.SMovB32(sgpr("Dst+2"), int(self.o_type.numBytes())))
         mod.add(ri.SMovB32(sgpr("Dst+3"), "Srd127_96"))
         mod.addSpaceLine()
 
