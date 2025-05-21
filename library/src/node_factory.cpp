@@ -983,8 +983,7 @@ bool NodeFactory::use_CS_3D_RC(const function_pool& pool, NodeMetaData& nodeData
         return false;
 
     // Check the C part.
-    // The first R is built recursively with 2D_FFT, or with a
-    // 1_D FTT + partial pass(es). leave the check part to themselves
+    // The first R is built recursively with 2D_FFT, leave the check part to themselves
     auto kernel = pool.get_kernel(key);
 
     // hack for this special case

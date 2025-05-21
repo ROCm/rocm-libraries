@@ -147,8 +147,9 @@ protected:
         scheme = CS_3D_PP;
     }
 
-    void AssignParams_internal() override;
-    void BuildTree_internal(SchemeTreeVec& child_scheme_trees = EmptySchemeTreeVec) override;
+    void   AssignParams_internal() override;
+    void   BuildTree_internal(SchemeTreeVec& child_scheme_trees = EmptySchemeTreeVec) override;
+    size_t GetPPOffDim() const;
 };
 
 /*****************************************************
