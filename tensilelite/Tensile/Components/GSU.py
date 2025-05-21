@@ -127,7 +127,7 @@ class GSU(Component):
         pass
 
     @abc.abstractmethod
-    def storeBranches(self, writer, kernel, gsuPartialsLabel, vectorWidths, elements, tmpVgpr, cvtVgprStruct, vectorDataTypes, endLabel):
+    def reductionBranches(self, writer, kernel, vectorWidths, elements, tmpVgpr, cvtVgprStruct, vectorDataTypes, endLabel):
         pass
     
 class GSUOff(GSU):
@@ -204,8 +204,8 @@ class GSUOff(GSU):
         module.add(self.graIncrementsAB(writer, kernel, tensorParametersA, tensorParametersB, tPM))
         return module
     
-    def storeBranches(self, writer, kernel, tPB, gsuPartialsLabel, vectorWidths, elements, tmpVgpr, cvtVgprStruct, endLabel):
-        module = Module("GSU Off storeBranches")
+    def reductionBranches(self, writer, kernel, tPB, vectorWidths, elements, tmpVgpr, cvtVgprStruct, endLabel):
+        module = Module("GSU Off reductionBranches")
         return module
 
     def globalWriteBatchProlog(self, writer, kernel, tmpVgpr, tmpVgprSize, tmpVgprDynamic, \
@@ -974,8 +974,8 @@ class GSUOn(GSU):
             module.add(SMovB64(sgpr(tmpS06+0, 2), sgpr("WSDstart+0", 2), "Move workspace start"))
             module.add(SMovB64(sgpr(tmpS06+2, 2), sgpr("SrdD+2", 2), ""))
 
-            ReductionStartlabel = Label(writer.labels.getNameInc("Reduction_Start"), "Reduction Start")
-            ReductionEndlabel   = Label(writer.labels.getNameInc("Reduction_End"), "Reduction End")
+            accumulationStartlabel = Label(writer.labels.getNameInc("Accumulation_Start"), "Accumulation Start")
+            accumulationEndlabel   = Label(writer.labels.getNameInc("Accumulation_End"), "Accumulation End")
             module.add(SAndB32(dst=sgpr("GSUSync"), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
 
             # pre-load
@@ -1069,13 +1069,13 @@ class GSUOn(GSU):
 
             module.add(SSubI32(dst=sgpr("GSUSync"), src0=sgpr("GSUSync"), src1=1))
             module.add(SCmpLeI32(src0=sgpr("GSUSync"), src1=0-unrolledWGs, comment=""))
-            module.add(SCBranchSCC1(labelName=ReductionEndlabel.getLabelName(), comment="Reduction finished"))
+            module.add(SCBranchSCC1(labelName=accumulationEndlabel.getLabelName(), comment="Accumulation finished"))
             module.add(SAddU32(dst=sgpr("WSDstart+0"), src0=sgpr("WSDstart+0"), src1=sgpr(tmpS04+0), comment="" ))
             module.add(SAddCU32(dst=sgpr("WSDstart+1"), src0=sgpr("WSDstart+1"), src1=sgpr(tmpS04+1), comment="" ))
             module.add(SMovB64(sgpr(tmpS06+0, 2), sgpr("WSDstart+0", 2), "Move workspace start"))
             module.add(SCmpLeI32(src0=sgpr("GSUSync"), src1=0, comment="disable buffer load if GSUSync <= 0"))
             module.add(SCSelectB32(sgpr(tmpS06+2), 0, sgpr(tmpS06+2), ""))
-            module.add(ReductionStartlabel)
+            module.add(accumulationStartlabel)
 
             for uidx in range(0, unrolledWGs):
                 for elementIdx in range(0, len(batchElements)):
@@ -1106,14 +1106,14 @@ class GSUOn(GSU):
 
                 module.add(SSubI32(dst=sgpr("GSUSync"), src0=sgpr("GSUSync"), src1=1))
                 module.add(SCmpLeI32(src0=sgpr("GSUSync"), src1=0-unrolledWGs, comment=""))
-                module.add(SCBranchSCC1(labelName=ReductionEndlabel.getLabelName(), comment="Reduction finished"))
+                module.add(SCBranchSCC1(labelName=accumulationEndlabel.getLabelName(), comment="Accumulation finished"))
                 module.add(SAddU32(dst=sgpr("WSDstart+0"), src0=sgpr("WSDstart+0"), src1=sgpr(tmpS04+0), comment="" ))
                 module.add(SAddCU32(dst=sgpr("WSDstart+1"), src0=sgpr("WSDstart+1"), src1=sgpr(tmpS04+1), comment="" ))
                 module.add(SMovB64(sgpr(tmpS06+0, 2), sgpr("WSDstart+0", 2), "Move workspace start"))
                 module.add(SCmpLeI32(src0=sgpr("GSUSync"), src1=0, comment="disable buffer load if GSUSync <= 0"))
                 module.add(SCSelectB32(sgpr(tmpS06+2), 0, sgpr(tmpS06+2), ""))
 
-            module.add(SBranch(labelName=ReductionStartlabel.getLabelName(), comment=""))
+            module.add(SBranch(labelName=accumulationStartlabel.getLabelName(), comment=""))
 
             for k in range(unrolledWGs, 0, -1):
                 module.addSpaceLine()
@@ -1156,10 +1156,10 @@ class GSUOn(GSU):
                                 module.add(VAddPKF32(dst=vgpr(vgprstart+j*2, 2), src0=vgpr(vgprstart+j*2, 2), \
                                                      src1=vgpr(data+j*2, 2), comment="buffer pk"))
 
-                module.add(SBranch(labelName=ReductionEndlabel.getLabelName(), comment="Reduction End"))
+                module.add(SBranch(labelName=accumulationEndlabel.getLabelName(), comment="Accumulation End"))
 
             module.addComment("buffer add end\n")
-            module.add(ReductionEndlabel)
+            module.add(accumulationEndlabel)
             module.add(SMovB64(sgpr("WSDstart+0", 2), sgpr(tmpWSD+0, 2), "restore for next batch"))
             writer.sgprPool.checkIn(tmpWSD)
 
@@ -1255,46 +1255,32 @@ class GSUOn(GSU):
 
         return module
 
-    def storeBranches(self, writer, kernel, tPB, gsuPartialsLabel, vectorWidths, elements, tmpVgpr, cvtVgprStruct, vectorDataTypes, factorDims, endLabel):
-        module = Module("GSU On storeBranches")
-        module.add(self.storeBranchesCommon(writer, kernel, tPB, gsuPartialsLabel, vectorWidths, elements, tmpVgpr, cvtVgprStruct, vectorDataTypes, factorDims, endLabel))
-        return module
-    
-    def storeBranchesCommon(self, writer, kernel, tPB, gsuPartialsLabel, vectorWidths, elements, tmpVgpr, cvtVgprStruct, vectorDataTypes, factorDims, endLabel):
-        module = Module("GSU Common storeBranches")
-
-        gsuStoreLabel = Label(label=writer.labels.getNameInc("GSU_Store"), comment="")
-
-        # if we did not start the tile, store partials
-        # branch to beta == 0 store path
-        # module.add(writer.longBranchScc0(gsuPartialsLabel, posNeg=1, tmpSgprInfo=None, comment=""))
-
-        module.add(gsuStoreLabel)
-
+    def reductionBranches(self, writer, kernel, tPB, vectorWidths, elements, tmpVgpr, cvtVgprStruct, vectorDataTypes, factorDims, endLabel):
+        module = Module("GSU On reductionBranches")
+        
         edges = [False] # no edge variant
         alphas = [False]
         betas = [False] # no beta variant
         edgeI = edges[0]
-        #edgeI = True  # set to True to disable vector stores
         alpha = alphas[0]
         beta = betas[0]
         gwvw = vectorWidths[edgeI]
         atomic = (kernel["GlobalSplitU"] > 1) and (kernel["_GlobalAccumulation"] != 'MultipleBuffer' and kernel["_GlobalAccumulation"] != 'MultipleBufferSingleKernel')
         
         module.add(self.reductionProcedure(writer, kernel, tPB, vectorWidths, elements, alpha, beta, edges, atomic, gwvw, tmpVgpr, cvtVgprStruct, vectorDataTypes, endLabel))
-    
+        
         return module
     
     def reductionProcedure(self, writer, kernel, tPB, vectorWidths, elements, alpha, beta, edges, atomic, gwvw, tmpVgpr, cvtVgprStruct, vectorDataTypes, endLabel):
         module = Module("GSU Common reductionProcedure")
 
-        fixupLabels = {}
+        reductionLabels = {}
         for edge in edges:
-            fixupLabels[edge] = Label(writer.labels.getNameInc("GSU_Fixup_B%u_E%u" % (1 if beta else 0, 1 if edge else 0)), comment="")
+            reductionLabels[edge] = Label(writer.labels.getNameInc("Reduction_B%u_E%u" % (1 if beta else 0, 1 if edge else 0)), comment="")
         
         for edge in edges:
             # write label for batch case
-            module.add(fixupLabels[edge])
+            module.add(reductionLabels[edge])
 
             # PreLoopVmcntCaseStr = ""
             # # not generate Case 2 if StoreCInUnroll with StoreVectorWidth==1 (Case 2 will be same as Case 3)
@@ -1310,7 +1296,7 @@ class GSUOn(GSU):
             #     if self.currPreLoopVmcntCase in self.preLoopVmcntDict:
             #         self.preLoopVmcntDict[self.currPreLoopVmcntCase] = 0
 
-            edgeI = edge
+            edgeI = edge # TODO: remove?
             gwvw = vectorWidths[edgeI] # TODO: remove?
 
             ########################################
@@ -1482,9 +1468,6 @@ class GSUOn(GSU):
                 print(writer.sgprPool.state())
             module.addComment1("edge=%d, allocate %u sgpr. perBatchTmpS=%u perBatchMaskS=%u perElementMaskS=%u elementsPerBatch=%u" %
                     (edgeI, numSgprs, ss.cfg.numTempSgprPerBatch, ss.cfg.numMaskSgprPerBatch, ss.cfg.numMaskSgprPerElement, numElementsPerBatch))
-            # kStr += "// storeStats, %d, %d, %d\n"% (edgeI, numSgprs, numElementsPerBatch)
-            # so if we don't have *GPR resources to handle a larger batch then need
-            # to mark overflowedResources rather than generate a kernel that won't work.
 
             with writer.allocTmpSgpr(numSgprs, 2) as tmpSgprRes:
                 tmpSgpr = tmpSgprRes
@@ -1492,21 +1475,13 @@ class GSUOn(GSU):
 
                 codeAccVgprRead = deepcopy(writer.codes.accVgprRead) if writer.states.serializedStore else None
                 codeAccVgprWrite = deepcopy(writer.codes.accVgprWrite) if writer.states.serializedStore else None
-                mulAlpha = writer.codes.mulAlphaMultipleBuffer if (kernel["_GlobalAccumulation"] == 'MultipleBuffer' or kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel') else writer.codes.mulAlphaOther
-                codeMulAlpha = deepcopy(mulAlpha) if writer.states.serializedStore else None
-
+                
                 if kernel["MIArchVgpr"] and alpha and not kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel':
                     codeAccVgprRead = None
                     # Only apply when 2 wave optimization features are enabled
                     if (kernel["StorePriorityOpt"] or kernel["StoreSyncOpt"]) and beta:
                         self.alphaBeforeLoadC = True
-                    # When LSU>1, don't use the VGPRs from the endSum.
-                    if (kernel["LocalSplitU"] > 1):
-                        codeMulAlpha = None
-                else:
-                    codeMulAlpha = None
         
-                biasLocalBarrierInit = False                
                 # calculate address in workspace
                 module.add(self.computeWorkspaceSrd(writer, kernel))
 
@@ -1517,17 +1492,13 @@ class GSUOn(GSU):
                     # print("BATCH[%u/%u]: elements[edgeI][%u:%u] VGPRs=%u" % (batchIdx, numBatches, elementStartIdx, elementStopIdx,numVgprsPerElement ))
                     # elementVgprs can be large and should be perfectly tuned to the number of available
                     # VGPRS.    We do not want to accidentally overflow and grow the pool here:
-
                     module.add(self.partialWriteBatch(writer, kernel, tPB, ss, batchIdx, alpha, beta, edge, atomic, \
                             gwvw, elementsThisBatch, writer.vgprs.addrD, writer.vgprs.addrC, \
                             tmpVgpr, tmpVgprDynamic, cvtVgprStruct, \
                             elementSgprs, tmpSgpr, codeAccVgprRead, codeAccVgprWrite))
-                    biasLocalBarrierInit = True
 
                 # synchronize GSUWG in reductionBatch. If is the last WG -> do reduction; else branch to GW_END
                 ss.firstBatch = True
-                reductionStartLabel = Label(writer.labels.getNameInc("reduction_start"), comment="Reduction start")
-                module.add(reductionStartLabel)
                 for batchIdx in range(0, numBatches):
                     elementStartIdx = batchIdx * numElementsPerBatch
                     elementStopIdx = min(elementStartIdx + numElementsPerBatch, len(elements[edgeI]))
@@ -1535,15 +1506,12 @@ class GSUOn(GSU):
                     # print("BATCH[%u/%u]: elements[edgeI][%u:%u] VGPRs=%u" % (batchIdx, numBatches, elementStartIdx, elementStopIdx,numVgprsPerElement ))
                     # elementVgprs can be large and should be perfectly tuned to the number of available
                     # VGPRS.    We do not want to accidentally overflow and grow the pool here:
-
                     module.add(self.reductionBatch(writer, kernel, tPB, ss, batchIdx, alpha, beta, edge, atomic, \
                             gwvw, elementsThisBatch, writer.vgprs.addrD, writer.vgprs.addrC, \
                             tmpVgpr, tmpVgprDynamic, cvtVgprStruct, \
                             elementSgprs, tmpSgpr, codeAccVgprRead, codeAccVgprWrite, endLabel))
 
                 module.add(SWaitCnt(vmcnt=0, comment="wait for buffer_load to finish"))
-                reductionEndLabel = Label(writer.labels.getNameInc("reduction_end"), comment="Reduction end")
-                module.add(reductionEndLabel)
                 ss.resetState()
 
             # Free after final vgpr vcalculation
@@ -1578,8 +1546,6 @@ class GSUOn(GSU):
         # ss.setupStoreElementsForBatch(kernel, gwvw, batchElements, batchElementSgprs, isOptNLL=False, factorDim=0, isWorkspace=True)
         ss.setupStoreElementsForBatchWihoutVgprCheckOut(kernel, gwvw, batchElements, batchElementSgprs, isOptNLL=True, factorDim=0, isWorkspace=True)
 
-        loadsIssued = 0
-        storesIssued = 0
         tmpS01 = tmpSgpr.idx # scratch sgprs
         tmpS02 = tmpSgpr.idx + 1
         tmpS01Res = ContinuousRegister(tmpS01, 1)
@@ -1607,12 +1573,6 @@ class GSUOn(GSU):
             module.add(VMovB32(dst=vgpr(bufferOOB), src="BufferOOB"))
         else:
             bufferOOB = None
-
-        # Internal state for GlobalWriteBatch
-        # 0 for None, 1 for WorkGroupReduction = False, 2 for WorkGroupReduction = True
-        # storeBiasD = 0
-        # if writer.states.useBias == DataDirection.WRITE and (not kernel["WorkGroupReduction"]) and kernel["ProblemType"]["BiasSrc"] == "D":
-        #     storeBiasD = 1
 
         if beta and kernel["StoreSyncOpt"]:
             module.add(SSleep(kernel["StoreSyncOpt"] - 1, "optimization: sync and wait"))
@@ -1845,10 +1805,6 @@ class GSUOn(GSU):
 
         ss.firstBatch = False
         ss.checkInTempVgprC()
-        
-        # TODO: 2 waits have been executed after accvgpr write
-        # if writer.states.serializedStore:
-        #     module.add(SNop(0, "1 wait state required when next inst writes vgprs held by previous dwordx4 store inst"))
 
         return module
     
@@ -2045,8 +2001,6 @@ class GSUOn(GSU):
                 module.add(Synchronizerlabel)
 
                 for i in range(0, GSUP1):
-                    if i != 0:
-                        module.addSpaceLine()
                     vmcnt = SyncloadedData = SyncloadedData -1
                     module.add(SWaitCnt(lgkmcnt=lgkmcnt, vmcnt=vmcnt, vscnt=vscnt, comment="(wait for buffer ready)"))
 
@@ -2092,8 +2046,6 @@ class GSUOn(GSU):
 
                     vmcnt = k
                     for i in range(0, k):
-                        if i != 0:
-                            module.addSpaceLine()
                         vmcnt = vmcnt -1 if vmcnt > 0 else 0
                         module.add(SWaitCnt(lgkmcnt=lgkmcnt, vmcnt=vmcnt, vscnt=vscnt, comment="(wait for buffer ready)"))
 
@@ -2147,8 +2099,8 @@ class GSUOn(GSU):
                 # Insert check synchronizer done code here for better scheduling
                 module.add(checkSyncCode)
 
-            ReductionStartlabel = Label(writer.labels.getNameInc("Reduction_Start"), "Reduction Start")
-            ReductionEndlabel   = Label(writer.labels.getNameInc("Reduction_End"), "Reduction End")
+            accumulationStartlabel = Label(writer.labels.getNameInc("Accumulation_Start"), "Accumulation Start")
+            accumulationEndlabel   = Label(writer.labels.getNameInc("Accumulation_End"), "Accumulation End")
             module.add(SAndB32(dst=sgpr("GSUSync"), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
 
             # pre-load
@@ -2243,12 +2195,12 @@ class GSUOn(GSU):
 
             module.add(SSubI32(dst=sgpr("GSUSync"), src0=sgpr("GSUSync"), src1=1))
             module.add(SCmpLeI32(src0=sgpr("GSUSync"), src1=0-unrolledWGs, comment=""))
-            module.add(SCBranchSCC1(labelName=ReductionEndlabel.getLabelName(), comment="Reduction finished"))
+            module.add(SCBranchSCC1(labelName=accumulationEndlabel.getLabelName(), comment="Accumulation finished"))
             module.add(SAddU32(dst=sgpr(tmpS06+0), src0=sgpr(tmpS06+0), src1=sgpr(tmpS04+0), comment="" ))
             module.add(SAddCU32(dst=sgpr(tmpS06+1), src0=sgpr(tmpS06+1), src1=sgpr(tmpS04+1), comment="" ))
             module.add(SCmpLeI32(src0=sgpr("GSUSync"), src1=0, comment="disable buffer load if GSUSync <= 0"))
             module.add(SCSelectB32(sgpr(tmpS06+2), 0, sgpr(tmpS06+2), ""))
-            module.add(ReductionStartlabel)
+            module.add(accumulationStartlabel)
 
             for uidx in range(0, unrolledWGs):
                 module.add(SMovB32(dst=sgpr(soffset), src=sgpr("WSDstart"), comment="restore offset for element0"))
@@ -2280,13 +2232,13 @@ class GSUOn(GSU):
 
                 module.add(SSubI32(dst=sgpr("GSUSync"), src0=sgpr("GSUSync"), src1=1))
                 module.add(SCmpLeI32(src0=sgpr("GSUSync"), src1=0-unrolledWGs, comment=""))
-                module.add(SCBranchSCC1(labelName=ReductionEndlabel.getLabelName(), comment="Reduction finished"))
+                module.add(SCBranchSCC1(labelName=accumulationEndlabel.getLabelName(), comment="Accumulation finished"))
                 module.add(SAddU32(dst=sgpr(tmpS06+0), src0=sgpr(tmpS06+0), src1=sgpr(tmpS04+0), comment="" ))
                 module.add(SAddCU32(dst=sgpr(tmpS06+1), src0=sgpr(tmpS06+1), src1=sgpr(tmpS04+1), comment="" ))
                 module.add(SCmpLeI32(src0=sgpr("GSUSync"), src1=0, comment="disable buffer load if GSUSync <= 0"))
                 module.add(SCSelectB32(sgpr(tmpS06+2), 0, sgpr(tmpS06+2), ""))
 
-            module.add(SBranch(labelName=ReductionStartlabel.getLabelName(), comment=""))
+            module.add(SBranch(labelName=accumulationStartlabel.getLabelName(), comment=""))
 
             for k in range(unrolledWGs, 0, -1):
                 module.addSpaceLine()
@@ -2327,10 +2279,10 @@ class GSUOn(GSU):
                                 module.add(VAddPKF32(dst=vgpr(vgprstart+j*2, 2), src0=vgpr(vgprstart+j*2, 2), \
                                             src1=vgpr(data+j*2, 2), comment="buffer pk"))
 
-                module.add(SBranch(labelName=ReductionEndlabel.getLabelName(), comment="Reduction End"))
+                module.add(SBranch(labelName=accumulationEndlabel.getLabelName(), comment="Accumulation End"))
 
             module.addComment("buffer add end\n")
-            module.add(ReductionEndlabel)
+            module.add(accumulationEndlabel)
             writer.sgprPool.checkIn(tmpWSD)
 
         writer.sgprPool.checkIn(tmpS06)
