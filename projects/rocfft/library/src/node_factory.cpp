@@ -690,16 +690,21 @@ ComputeScheme
         }
         else
         {
-            auto largest = pool.get_largest_length(nodeData.precision);
+            // get largest pow2 1D length
+            auto pow2_lengths = pool.get_lengths(
+                nodeData.precision, CS_KERNEL_STOCKHAM, [](size_t len) { return IsPo2(len); });
+
+            auto largest = std::max_element(pow2_lengths.cbegin(), pow2_lengths.cend());
+
             // need to ignore len 1, or we're going into a infinity decompostion loop
             // basically not gonna happen unless someone builds only a len1 kernel...
-            if(largest <= 1)
+            if(largest == pow2_lengths.cend() || *largest <= 1)
             {
                 failed = true;
             }
-            else if(nodeData.length[0] > largest * largest)
+            else if(nodeData.length[0] > *largest * *largest)
             {
-                divLength1 = nodeData.length[0] / largest;
+                divLength1 = nodeData.length[0] / *largest;
             }
             else
             {
