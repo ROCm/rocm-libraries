@@ -152,6 +152,7 @@ struct Arguments
     bool graph_test;
     bool skip_reproducibility;
     bool sparsity_pattern_statistics;
+    bool call_stage_analysis;
     char filename[128];
     char function[64];
     char name[64];
@@ -293,6 +294,7 @@ struct Arguments
         ROCSPARSE_FORMAT_CHECK(graph_test);
         ROCSPARSE_FORMAT_CHECK(skip_reproducibility);
         ROCSPARSE_FORMAT_CHECK(sparsity_pattern_statistics);
+        ROCSPARSE_FORMAT_CHECK(call_stage_analysis);
         ROCSPARSE_FORMAT_CHECK(filename);
         ROCSPARSE_FORMAT_CHECK(function);
         ROCSPARSE_FORMAT_CHECK(name);
@@ -507,6 +509,7 @@ private:
         print("graph_test", arg.graph_test);
         print("skip_reproducibility", arg.skip_reproducibility);
         print("sparsity_pattern_statistics", arg.sparsity_pattern_statistics);
+        print("call_stage_analysis", arg.call_stage_analysis);
         print("name", arg.name);
         print("category", arg.category);
         print("hardware", arg.hardware);

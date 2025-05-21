@@ -100,14 +100,15 @@ void testing_csrmv_bad_arg(const Arguments& arg)
 template <typename T>
 void testing_csrmv(const Arguments& arg)
 {
-    auto                  tol         = get_near_check_tol<T>(arg);
-    rocsparse_int         M           = arg.M;
-    rocsparse_int         N           = arg.N;
-    rocsparse_operation   trans       = arg.transA;
-    rocsparse_index_base  base        = arg.baseA;
-    rocsparse_matrix_type matrix_type = arg.matrix_type;
-    rocsparse_fill_mode   uplo        = arg.uplo;
-    rocsparse_spmv_alg    alg         = arg.spmv_alg;
+    auto                  tol                 = get_near_check_tol<T>(arg);
+    rocsparse_int         M                   = arg.M;
+    rocsparse_int         N                   = arg.N;
+    rocsparse_operation   trans               = arg.transA;
+    rocsparse_index_base  base                = arg.baseA;
+    rocsparse_matrix_type matrix_type         = arg.matrix_type;
+    rocsparse_fill_mode   uplo                = arg.uplo;
+    rocsparse_spmv_alg    alg                 = arg.spmv_alg;
+    const bool            call_stage_analysis = arg.call_stage_analysis;
 
     host_scalar<T> h_alpha(arg.get_alpha<T>());
     host_scalar<T> h_beta(arg.get_beta<T>());
@@ -124,7 +125,9 @@ void testing_csrmv(const Arguments& arg)
     // Create matrix info
     rocsparse_local_mat_info info_ptr;
 
-    rocsparse_mat_info info = (alg == rocsparse_spmv_alg_csr_adaptive) ? info_ptr : nullptr;
+    rocsparse_mat_info info = (call_stage_analysis)
+                                  ? ((alg == rocsparse_spmv_alg_csr_adaptive) ? info_ptr : nullptr)
+                                  : nullptr;
 
     // Set matrix index base
     CHECK_ROCSPARSE_ERROR(rocsparse_set_mat_index_base(descr, base));
@@ -179,9 +182,12 @@ void testing_csrmv(const Arguments& arg)
     device_dense_matrix<T> dy(hy);
 
     // If adaptive, run analysis step
-    if(alg == rocsparse_spmv_alg_csr_adaptive)
+    if(call_stage_analysis)
     {
-        CHECK_ROCSPARSE_ERROR(rocsparse_csrmv_analysis<T>(PARAMS_ANALYSIS(dA)));
+        if(alg == rocsparse_spmv_alg_csr_adaptive)
+        {
+            CHECK_ROCSPARSE_ERROR(rocsparse_csrmv_analysis<T>(PARAMS_ANALYSIS(dA)));
+        }
     }
 
     if(arg.unit_check)
@@ -259,8 +265,7 @@ void testing_csrmv(const Arguments& arg)
                             get_gpu_time_msec(gpu_time_used));
     }
 
-    // If adaptive, clear analysis data
-    if(alg == rocsparse_spmv_alg_csr_adaptive)
+    if(info != nullptr)
     {
         CHECK_ROCSPARSE_ERROR(rocsparse_csrmv_clear(handle, info));
     }

@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -72,6 +72,7 @@ Tests:
   matrix: [rocsparse_matrix_random]
   storage: [rocsparse_storage_mode_unsorted]
   spmv_alg: [rocsparse_spmv_alg_coo, rocsparse_spmv_alg_coo_atomic]
+  call_stage_analysis: [false, true]
 
 - name: spmv_coo_aos
   category: nightly
@@ -237,6 +238,7 @@ Tests:
   storage: [rocsparse_storage_mode_sorted]
   spmv_alg: [rocsparse_spmv_alg_coo, rocsparse_spmv_alg_coo_atomic]
   graph_test: true
+  call_stage_analysis: [false, true]
 
 #
 # mixed precision
