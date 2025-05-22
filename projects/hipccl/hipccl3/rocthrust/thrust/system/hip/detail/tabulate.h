@@ -30,54 +30,50 @@
 #include <thrust/detail/config.h>
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
-#include <thrust/distance.h>
-#include <thrust/iterator/counting_iterator.h>
-#include <thrust/system/hip/config.h>
-#include <thrust/system/hip/detail/execution_policy.h>
-#include <thrust/system/hip/detail/transform.h>
+#  include <thrust/system/hip/config.h>
+
+#  include <thrust/distance.h>
+#  include <thrust/iterator/counting_iterator.h>
+#  include <thrust/system/hip/detail/execution_policy.h>
+#  include <thrust/system/hip/detail/transform.h>
 
 THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
 {
 
-namespace __tabulate {
-
-  template <class Iterator, class TabulateOp, class Size>
-  struct functor
-  {
-    Iterator items;
-    TabulateOp op;
-
-    THRUST_HOST_DEVICE
-    functor(Iterator items_, TabulateOp op_)
-        : items(items_), op(op_) {}
-
-    void THRUST_DEVICE operator()(Size idx)
-    {
-      items[idx] = op(idx);
-    }
-  };    // struct functor
-
-}    // namespace __tabulate
-
-template <class Derived,
-          class Iterator,
-          class TabulateOp>
-void THRUST_HIP_FUNCTION
-tabulate(execution_policy<Derived>& policy,
-         Iterator                   first,
-         Iterator                   last,
-         TabulateOp                 tabulate_op)
+namespace __tabulate
 {
-    using size_type = typename iterator_traits<Iterator>::difference_type;
 
-    size_type count = thrust::distance(first, last);
+template <class Iterator, class TabulateOp, class Size>
+struct functor
+{
+  Iterator items;
+  TabulateOp op;
 
-    using functor_t = __tabulate::functor<Iterator, TabulateOp, size_type>;
+  THRUST_HOST_DEVICE functor(Iterator items_, TabulateOp op_)
+      : items(items_)
+      , op(op_)
+  {}
 
-    hip_rocprim::parallel_for(policy,
-                              functor_t(first, tabulate_op),
-                              count);
+  void THRUST_DEVICE operator()(Size idx)
+  {
+    items[idx] = op(idx);
+  }
+}; // struct functor
+
+} // namespace __tabulate
+
+template <class Derived, class Iterator, class TabulateOp>
+void THRUST_HIP_FUNCTION
+tabulate(execution_policy<Derived>& policy, Iterator first, Iterator last, TabulateOp tabulate_op)
+{
+  using size_type = typename iterator_traits<Iterator>::difference_type;
+
+  size_type count = thrust::distance(first, last);
+
+  using functor_t = __tabulate::functor<Iterator, TabulateOp, size_type>;
+
+  hip_rocprim::parallel_for(policy, functor_t(first, tabulate_op), count);
 }
 
 } // namespace hip_rocprim

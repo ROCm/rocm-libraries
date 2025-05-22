@@ -1,3 +1,23 @@
+// Copyright (c) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 #include <thrust/copy.h>
 #include <thrust/device_vector.h>
 #include <thrust/fill.h>
@@ -12,7 +32,7 @@
 
 // this example illustrates how to make strided access to a range of values
 // examples:
-//   strided_range([0, 1, 2, 3, 4, 5, 6], 1) -> [0, 1, 2, 3, 4, 5, 6] 
+//   strided_range([0, 1, 2, 3, 4, 5, 6], 1) -> [0, 1, 2, 3, 4, 5, 6]
 //   strided_range([0, 1, 2, 3, 4, 5, 6], 2) -> [0, 2, 4, 6]
 //   strided_range([0, 1, 2, 3, 4, 5, 6], 3) -> [0, 3, 6]
 //   ...
@@ -20,81 +40,85 @@
 template <typename Iterator>
 class strided_range
 {
-    public:
+public:
+  using difference_type = typename thrust::iterator_difference<Iterator>::type;
 
-    using difference_type = typename thrust::iterator_difference<Iterator>::type;
-
-    struct stride_functor
-    {
-        difference_type stride;
-
-        stride_functor(difference_type stride)
-            : stride(stride) {}
-
-        __host__ __device__
-        difference_type operator()(const difference_type& i) const
-        { 
-            return stride * i;
-        }
-    };
-
-    using CountingIterator    = typename thrust::counting_iterator<difference_type>;
-    using TransformIterator   = typename thrust::transform_iterator<stride_functor, CountingIterator>;
-    using PermutationIterator = typename thrust::permutation_iterator<Iterator, TransformIterator>;
-
-    // type of the strided_range iterator
-    using iterator = PermutationIterator;
-
-    // construct strided_range for the range [first,last)
-    strided_range(Iterator first, Iterator last, difference_type stride)
-        : first(first), last(last), stride(stride) {}
-   
-    iterator begin(void) const
-    {
-        return PermutationIterator(first, TransformIterator(CountingIterator(0), stride_functor(stride)));
-    }
-
-    iterator end(void) const
-    {
-        return begin() + ((last - first) + (stride - 1)) / stride;
-    }
-    
-    protected:
-    Iterator first;
-    Iterator last;
+  struct stride_functor
+  {
     difference_type stride;
+
+    stride_functor(difference_type stride)
+        : stride(stride)
+    {}
+
+    __host__ __device__ difference_type operator()(const difference_type& i) const
+    {
+      return stride * i;
+    }
+  };
+
+  using CountingIterator    = typename thrust::counting_iterator<difference_type>;
+  using TransformIterator   = typename thrust::transform_iterator<stride_functor, CountingIterator>;
+  using PermutationIterator = typename thrust::permutation_iterator<Iterator, TransformIterator>;
+
+  // type of the strided_range iterator
+  using iterator = PermutationIterator;
+
+  // construct strided_range for the range [first,last)
+  strided_range(Iterator first, Iterator last, difference_type stride)
+      : first(first)
+      , last(last)
+      , stride(stride)
+  {}
+
+  iterator begin(void) const
+  {
+    return PermutationIterator(first, TransformIterator(CountingIterator(0), stride_functor(stride)));
+  }
+
+  iterator end(void) const
+  {
+    return begin() + ((last - first) + (stride - 1)) / stride;
+  }
+
+protected:
+  Iterator first;
+  Iterator last;
+  difference_type stride;
 };
 
 int main(void)
 {
-    thrust::device_vector<int> data(8);
-    data[0] = 10;
-    data[1] = 20;
-    data[2] = 30;
-    data[3] = 40;
-    data[4] = 50;
-    data[5] = 60;
-    data[6] = 70;
-    data[7] = 80;
+  thrust::device_vector<int> data(8);
+  data[0] = 10;
+  data[1] = 20;
+  data[2] = 30;
+  data[3] = 40;
+  data[4] = 50;
+  data[5] = 60;
+  data[6] = 70;
+  data[7] = 80;
 
-    // print the initial data
-    std::cout << "data: ";
-    thrust::copy(data.begin(), data.end(), std::ostream_iterator<int>(std::cout, " "));  std::cout << std::endl;
+  // print the initial data
+  std::cout << "data: ";
+  thrust::copy(data.begin(), data.end(), std::ostream_iterator<int>(std::cout, " "));
+  std::cout << std::endl;
 
-    using Iterator = thrust::device_vector<int>::iterator;
-    
-    // create strided_range with indices [0,2,4,6]
-    strided_range<Iterator> evens(data.begin(), data.end(), 2);
-    std::cout << "sum of even indices: " << thrust::reduce(evens.begin(), evens.end()) << std::endl;
-    
-    // create strided_range with indices [1,3,5,7]
-    strided_range<Iterator> odds(data.begin() + 1, data.end(), 2);
-    std::cout << "sum of odd indices:  " << thrust::reduce(odds.begin(), odds.end()) << std::endl;
+  using Iterator = thrust::device_vector<int>::iterator;
 
-    // set odd elements to 0 with fill()
-    std::cout << "setting odd indices to zero: ";
-    thrust::fill(odds.begin(), odds.end(), 0);
-    thrust::copy(data.begin(), data.end(), std::ostream_iterator<int>(std::cout, " "));  std::cout << std::endl;
+  // create strided_range with indices [0,2,4,6]
+  strided_range<Iterator> evens(data.begin(), data.end(), 2);
+  std::cout << "sum of even indices: " << thrust::reduce(evens.begin(), evens.end()) << std::endl;
 
-    return 0;
+  // create strided_range with indices [1,3,5,7]
+  strided_range<Iterator> odds(data.begin() + 1, data.end(), 2);
+  std::cout << "sum of odd indices:  " << thrust::reduce(odds.begin(), odds.end()) << std::endl;
+
+  // set odd elements to 0 with fill()
+  std::cout << "setting odd indices to zero: ";
+  thrust::fill(odds.begin(), odds.end(), 0);
+  thrust::copy(data.begin(), data.end(), std::ostream_iterator<int>(std::cout, " "));
+  std::cout << std::endl;
+
+  return 0;
 }

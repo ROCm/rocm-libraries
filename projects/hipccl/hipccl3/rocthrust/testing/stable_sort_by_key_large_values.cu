@@ -25,7 +25,7 @@ struct greater_div_10
 {
   THRUST_HOST_DEVICE bool operator()(const T& lhs, const T& rhs) const
   {
-    return ((int)lhs) / 10 > ((int)rhs) / 10;
+    return ((int) lhs) / 10 > ((int) rhs) / 10;
   }
 };
 
@@ -55,14 +55,8 @@ void _TestStableSortByKeyWithLargeValues()
   ASSERT_EQUAL_QUIET(h_vals, d_vals);
 
   // so cuda::stable_merge_sort_by_key() is called
-  thrust::stable_sort_by_key(h_keys.begin(),
-                             h_keys.end(),
-                             h_vals.begin(),
-                             greater_div_10<unsigned int>());
-  thrust::stable_sort_by_key(d_keys.begin(),
-                             d_keys.end(),
-                             d_vals.begin(),
-                             greater_div_10<unsigned int>());
+  thrust::stable_sort_by_key(h_keys.begin(), h_keys.end(), h_vals.begin(), greater_div_10<unsigned int>());
+  thrust::stable_sort_by_key(d_keys.begin(), d_keys.end(), d_vals.begin(), greater_div_10<unsigned int>());
 
   ASSERT_EQUAL_QUIET(h_keys, d_keys);
   ASSERT_EQUAL_QUIET(h_vals, d_vals);

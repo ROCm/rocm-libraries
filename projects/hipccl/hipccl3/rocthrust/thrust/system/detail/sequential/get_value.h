@@ -17,8 +17,9 @@
 #pragma once
 
 #include <thrust/detail/config.h>
-#include <thrust/system/detail/sequential/execution_policy.h>
+
 #include <thrust/detail/raw_pointer_cast.h>
+#include <thrust/system/detail/sequential/execution_policy.h>
 
 THRUST_NAMESPACE_BEGIN
 namespace system
@@ -28,18 +29,14 @@ namespace detail
 namespace sequential
 {
 
-
-template<typename DerivedPolicy, typename Pointer>
-THRUST_HOST_DEVICE
-  typename thrust::iterator_value<Pointer>::type
-    get_value(sequential::execution_policy<DerivedPolicy> &, Pointer ptr)
+template <typename DerivedPolicy, typename Pointer>
+THRUST_HOST_DEVICE typename thrust::iterator_value<Pointer>::type
+get_value(sequential::execution_policy<DerivedPolicy>&, Pointer ptr)
 {
   return *thrust::raw_pointer_cast(ptr);
 } // end get_value()
 
-
-} // end sequential
-} // end detail
-} // end system
+} // namespace sequential
+} // namespace detail
+} // namespace system
 THRUST_NAMESPACE_END
-

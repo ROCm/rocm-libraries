@@ -21,6 +21,7 @@
 #pragma once
 
 #include <thrust/detail/config.h>
+
 #include <thrust/detail/execution_policy.h>
 #include <thrust/pair.h>
 
@@ -30,7 +31,6 @@ THRUST_NAMESPACE_BEGIN
  *  \ingroup algorithms
  *  \{
  */
-
 
 /*! \p merge combines two sorted ranges <tt>[first1, last1)</tt> and <tt>[first2, last2)</tt>
  *  into a single sorted range. That is, it copies from <tt>[first1, last1)</tt> and
@@ -53,23 +53,28 @@ THRUST_NAMESPACE_BEGIN
  *  \return The end of the output range.
  *
  *  \tparam DerivedPolicy The name of the derived execution policy.
- *  \tparam InputIterator1 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>,
- *          \p InputIterator1 and \p InputIterator2 have the same \c value_type,
- *          \p InputIterator1's \c value_type is a model of <a href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a>,
- *          the ordering on \p InputIterator1's \c value_type is a strict weak ordering, as defined in the <a href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a> requirements,
- *          and \p InputIterator1's \c value_type is convertable to a type in \p OutputIterator's set of \c value_types.
- *  \tparam InputIterator2 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>,
+ *  \tparam InputIterator1 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input
+ * Iterator</a>, \p InputIterator1 and \p InputIterator2 have the same \c value_type, \p InputIterator1's \c value_type
+ * is a model of <a href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a>, the
+ * ordering on \p InputIterator1's \c value_type is a strict weak ordering, as defined in the <a
+ * href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a> requirements, and \p
+ * InputIterator1's \c value_type is convertable to a type in \p OutputIterator's set of \c value_types. \tparam
+ * InputIterator2 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>,
  *          \p InputIterator2 and \p InputIterator1 have the same \c value_type,
- *          \p InputIterator2's \c value_type is a model of <a href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a>,
- *          the ordering on \p InputIterator2's \c value_type is a strict weak ordering, as defined in the <a href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a> requirements,
- *          and \p InputIterator2's \c value_type is convertable to a type in \p OutputIterator's set of \c value_types.
- *  \tparam OutputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/output_iterator">Output Iterator</a>.
+ *          \p InputIterator2's \c value_type is a model of <a
+ * href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a>, the ordering on \p
+ * InputIterator2's \c value_type is a strict weak ordering, as defined in the <a
+ * href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a> requirements, and \p
+ * InputIterator2's \c value_type is convertable to a type in \p OutputIterator's set of \c value_types. \tparam
+ * OutputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/output_iterator">Output
+ * Iterator</a>.
  *
- *  \pre The ranges <tt>[first1, last1)</tt> and <tt>[first2, last2)</tt> shall be sorted with respect to <tt>operator<</tt>.
- *  \pre The resulting range shall not overlap with either input range.
+ *  \pre The ranges <tt>[first1, last1)</tt> and <tt>[first2, last2)</tt> shall be sorted with respect to
+ * <tt>operator<</tt>. \pre The resulting range shall not overlap with either input range.
  *
  *  The following code snippet demonstrates how to use
- *  \p merge to compute the merger of two sorted sets of integers using the \p thrust::host execution policy for parallelization:
+ *  \p merge to compute the merger of two sorted sets of integers using the \p thrust::host execution policy for
+ * parallelization:
  *
  *  \code
  *  #include <thrust/merge.h>
@@ -93,18 +98,14 @@ THRUST_NAMESPACE_BEGIN
  *  \see \p sort
  *  \see \p is_sorted
  */
-template<typename DerivedPolicy,
-         typename InputIterator1,
-         typename InputIterator2,
-         typename OutputIterator>
-THRUST_HOST_DEVICE
-  OutputIterator merge(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
-                       InputIterator1 first1,
-                       InputIterator1 last1,
-                       InputIterator2 first2,
-                       InputIterator2 last2,
-                       OutputIterator result);
-
+template <typename DerivedPolicy, typename InputIterator1, typename InputIterator2, typename OutputIterator>
+THRUST_HOST_DEVICE OutputIterator merge(
+  const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
+  InputIterator1 first1,
+  InputIterator1 last1,
+  InputIterator2 first2,
+  InputIterator2 last2,
+  OutputIterator result);
 
 /*! \p merge combines two sorted ranges <tt>[first1, last1)</tt> and <tt>[first2, last2)</tt>
  *  into a single sorted range. That is, it copies from <tt>[first1, last1)</tt> and
@@ -123,20 +124,24 @@ THRUST_HOST_DEVICE
  *  \param result The beginning of the merged output.
  *  \return The end of the output range.
  *
- *  \tparam InputIterator1 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>,
- *          \p InputIterator1 and \p InputIterator2 have the same \c value_type,
- *          \p InputIterator1's \c value_type is a model of <a href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a>,
- *          the ordering on \p InputIterator1's \c value_type is a strict weak ordering, as defined in the <a href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a> requirements,
- *          and \p InputIterator1's \c value_type is convertable to a type in \p OutputIterator's set of \c value_types.
- *  \tparam InputIterator2 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>,
+ *  \tparam InputIterator1 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input
+ * Iterator</a>, \p InputIterator1 and \p InputIterator2 have the same \c value_type, \p InputIterator1's \c value_type
+ * is a model of <a href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a>, the
+ * ordering on \p InputIterator1's \c value_type is a strict weak ordering, as defined in the <a
+ * href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a> requirements, and \p
+ * InputIterator1's \c value_type is convertable to a type in \p OutputIterator's set of \c value_types. \tparam
+ * InputIterator2 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>,
  *          \p InputIterator2 and \p InputIterator1 have the same \c value_type,
- *          \p InputIterator2's \c value_type is a model of <a href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a>,
- *          the ordering on \p InputIterator2's \c value_type is a strict weak ordering, as defined in the <a href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a> requirements,
- *          and \p InputIterator2's \c value_type is convertable to a type in \p OutputIterator's set of \c value_types.
- *  \tparam OutputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/output_iterator">Output Iterator</a>.
+ *          \p InputIterator2's \c value_type is a model of <a
+ * href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a>, the ordering on \p
+ * InputIterator2's \c value_type is a strict weak ordering, as defined in the <a
+ * href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a> requirements, and \p
+ * InputIterator2's \c value_type is convertable to a type in \p OutputIterator's set of \c value_types. \tparam
+ * OutputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/output_iterator">Output
+ * Iterator</a>.
  *
- *  \pre The ranges <tt>[first1, last1)</tt> and <tt>[first2, last2)</tt> shall be sorted with respect to <tt>operator<</tt>.
- *  \pre The resulting range shall not overlap with either input range.
+ *  \pre The ranges <tt>[first1, last1)</tt> and <tt>[first2, last2)</tt> shall be sorted with respect to
+ * <tt>operator<</tt>. \pre The resulting range shall not overlap with either input range.
  *
  *  The following code snippet demonstrates how to use
  *  \p merge to compute the merger of two sorted sets of integers.
@@ -158,15 +163,9 @@ THRUST_HOST_DEVICE
  *  \see \p sort
  *  \see \p is_sorted
  */
-template<typename InputIterator1,
-         typename InputIterator2,
-         typename OutputIterator>
-  OutputIterator merge(InputIterator1 first1,
-                       InputIterator1 last1,
-                       InputIterator2 first2,
-                       InputIterator2 last2,
-                       OutputIterator result);
-
+template <typename InputIterator1, typename InputIterator2, typename OutputIterator>
+OutputIterator
+merge(InputIterator1 first1, InputIterator1 last1, InputIterator2 first2, InputIterator2 last2, OutputIterator result);
 
 /*! \p merge combines two sorted ranges <tt>[first1, last1)</tt> and <tt>[first2, last2)</tt>
  *  into a single sorted range. That is, it copies from <tt>[first1, last1)</tt> and
@@ -190,14 +189,15 @@ template<typename InputIterator1,
  *  \return The end of the output range.
  *
  *  \tparam DerivedPolicy The name of the derived execution policy.
- *  \tparam InputIterator1 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>,
- *          \p InputIterator1's \c value_type is convertable to \p StrictWeakCompare's \c first_argument_type.
- *          and \p InputIterator1's \c value_type is convertable to a type in \p OutputIterator's set of \c value_types.
- *  \tparam InputIterator2 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>,
+ *  \tparam InputIterator1 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input
+ * Iterator</a>, \p InputIterator1's \c value_type is convertable to \p StrictWeakCompare's \c first_argument_type. and
+ * \p InputIterator1's \c value_type is convertable to a type in \p OutputIterator's set of \c value_types. \tparam
+ * InputIterator2 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>,
  *          \p InputIterator2's \c value_type is convertable to \p StrictWeakCompare's \c second_argument_type.
  *          and \p InputIterator2's \c value_type is convertable to a type in \p OutputIterator's set of \c value_types.
- *  \tparam OutputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/output_iterator">Output Iterator</a>.
- *  \tparam StrictWeakCompare is a model of <a href="https://en.cppreference.com/w/cpp/concepts/strict_weak_order">Strict Weak Ordering</a>.
+ *  \tparam OutputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/output_iterator">Output
+ * Iterator</a>. \tparam StrictWeakCompare is a model of <a
+ * href="https://en.cppreference.com/w/cpp/concepts/strict_weak_order">Strict Weak Ordering</a>.
  *
  *  \pre The ranges <tt>[first1, last1)</tt> and <tt>[first2, last2)</tt> shall be sorted with respect to \p comp.
  *  \pre The resulting range shall not overlap with either input range.
@@ -228,20 +228,19 @@ template<typename InputIterator1,
  *  \see \p sort
  *  \see \p is_sorted
  */
-template<typename DerivedPolicy,
-         typename InputIterator1,
-         typename InputIterator2,
-         typename OutputIterator,
-         typename StrictWeakCompare>
-THRUST_HOST_DEVICE
-  OutputIterator merge(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
-                       InputIterator1 first1,
-                       InputIterator1 last1,
-                       InputIterator2 first2,
-                       InputIterator2 last2,
-                       OutputIterator result,
-                       StrictWeakCompare comp);
-
+template <typename DerivedPolicy,
+          typename InputIterator1,
+          typename InputIterator2,
+          typename OutputIterator,
+          typename StrictWeakCompare>
+THRUST_HOST_DEVICE OutputIterator merge(
+  const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
+  InputIterator1 first1,
+  InputIterator1 last1,
+  InputIterator2 first2,
+  InputIterator2 last2,
+  OutputIterator result,
+  StrictWeakCompare comp);
 
 /*! \p merge combines two sorted ranges <tt>[first1, last1)</tt> and <tt>[first2, last2)</tt>
  *  into a single sorted range. That is, it copies from <tt>[first1, last1)</tt> and
@@ -261,14 +260,15 @@ THRUST_HOST_DEVICE
  *  \param comp Comparison operator.
  *  \return The end of the output range.
  *
- *  \tparam InputIterator1 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>,
- *          \p InputIterator1's \c value_type is convertable to \p StrictWeakCompare's \c first_argument_type.
- *          and \p InputIterator1's \c value_type is convertable to a type in \p OutputIterator's set of \c value_types.
- *  \tparam InputIterator2 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>,
+ *  \tparam InputIterator1 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input
+ * Iterator</a>, \p InputIterator1's \c value_type is convertable to \p StrictWeakCompare's \c first_argument_type. and
+ * \p InputIterator1's \c value_type is convertable to a type in \p OutputIterator's set of \c value_types. \tparam
+ * InputIterator2 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>,
  *          \p InputIterator2's \c value_type is convertable to \p StrictWeakCompare's \c second_argument_type.
  *          and \p InputIterator2's \c value_type is convertable to a type in \p OutputIterator's set of \c value_types.
- *  \tparam OutputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/output_iterator">Output Iterator</a>.
- *  \tparam StrictWeakCompare is a model of <a href="https://en.cppreference.com/w/cpp/concepts/strict_weak_order">Strict Weak Ordering</a>.
+ *  \tparam OutputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/output_iterator">Output
+ * Iterator</a>. \tparam StrictWeakCompare is a model of <a
+ * href="https://en.cppreference.com/w/cpp/concepts/strict_weak_order">Strict Weak Ordering</a>.
  *
  *  \pre The ranges <tt>[first1, last1)</tt> and <tt>[first2, last2)</tt> shall be sorted with respect to \p comp.
  *  \pre The resulting range shall not overlap with either input range.
@@ -294,27 +294,24 @@ THRUST_HOST_DEVICE
  *  \see \p sort
  *  \see \p is_sorted
  */
-template<typename InputIterator1,
-         typename InputIterator2,
-         typename OutputIterator,
-         typename StrictWeakCompare>
-  OutputIterator merge(InputIterator1 first1,
-                       InputIterator1 last1,
-                       InputIterator2 first2,
-                       InputIterator2 last2,
-                       OutputIterator result,
-                       StrictWeakCompare comp);
-
+template <typename InputIterator1, typename InputIterator2, typename OutputIterator, typename StrictWeakCompare>
+OutputIterator
+merge(InputIterator1 first1,
+      InputIterator1 last1,
+      InputIterator2 first2,
+      InputIterator2 last2,
+      OutputIterator result,
+      StrictWeakCompare comp);
 
 /*! \p merge_by_key performs a key-value merge. That is, \p merge_by_key copies elements from
  *  <tt>[keys_first1, keys_last1)</tt> and <tt>[keys_first2, keys_last2)</tt> into a single range,
  *  <tt>[keys_result, keys_result + (keys_last1 - keys_first1) + (keys_last2 - keys_first2))</tt> such that
  *  the resulting range is in ascending key order.
  *
- *  At the same time, \p merge_by_key copies elements from the two associated ranges <tt>[values_first1 + (keys_last1 - keys_first1))</tt>
- *  and <tt>[values_first2 + (keys_last2 - keys_first2))</tt> into a single range,
- *  <tt>[values_result, values_result + (keys_last1 - keys_first1) + (keys_last2 - keys_first2))</tt> such that
- *  the resulting range is in ascending order implied by each input element's associated key.
+ *  At the same time, \p merge_by_key copies elements from the two associated ranges <tt>[values_first1 + (keys_last1 -
+ * keys_first1))</tt> and <tt>[values_first2 + (keys_last2 - keys_first2))</tt> into a single range, <tt>[values_result,
+ * values_result + (keys_last1 - keys_first1) + (keys_last2 - keys_first2))</tt> such that the resulting range is in
+ * ascending order implied by each input element's associated key.
  *
  *  \p merge_by_key is stable, meaning both that the relative order of elements within each input range is
  *  preserved, and that for equivalent elements in all input key ranges the element from the first range
@@ -338,25 +335,29 @@ template<typename InputIterator1,
  *          and such that <tt>p.second</tt> is the end of the output range of values.
  *
  *  \tparam DerivedPolicy The name of the derived execution policy.
- *  \tparam InputIterator1 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>,
- *          \p InputIterator1 and \p InputIterator2 have the same \c value_type,
- *          \p InputIterator1's \c value_type is a model of <a href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a>,
- *          the ordering on \p InputIterator1's \c value_type is a strict weak ordering, as defined in the <a href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a> requirements,
- *          and \p InputIterator1's \c value_type is convertable to a type in \p OutputIterator's set of \c value_types.
- *  \tparam InputIterator2 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>,
+ *  \tparam InputIterator1 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input
+ * Iterator</a>, \p InputIterator1 and \p InputIterator2 have the same \c value_type, \p InputIterator1's \c value_type
+ * is a model of <a href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a>, the
+ * ordering on \p InputIterator1's \c value_type is a strict weak ordering, as defined in the <a
+ * href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a> requirements, and \p
+ * InputIterator1's \c value_type is convertable to a type in \p OutputIterator's set of \c value_types. \tparam
+ * InputIterator2 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>,
  *          \p InputIterator2 and \p InputIterator1 have the same \c value_type,
- *          \p InputIterator2's \c value_type is a model of <a href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a>,
- *          the ordering on \p InputIterator2's \c value_type is a strict weak ordering, as defined in the <a href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a> requirements,
- *          and \p InputIterator2's \c value_type is convertable to a type in \p OutputIterator's set of \c value_types.
- *  \tparam InputIterator3 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>,
- *          and \p InputIterator3's \c value_type is convertible to a type in \p OutputIterator2's set of \c value_types.
- *  \tparam InputIterator4 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>,
- *          and \p InputIterator4's \c value_type is convertible to a type in \p OutputIterator2's set of \c value_types.
- *  \tparam OutputIterator1 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/output_iterator">Output Iterator</a>.
- *  \tparam OutputIterator2 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/output_iterator">Output Iterator</a>.
+ *          \p InputIterator2's \c value_type is a model of <a
+ * href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a>, the ordering on \p
+ * InputIterator2's \c value_type is a strict weak ordering, as defined in the <a
+ * href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a> requirements, and \p
+ * InputIterator2's \c value_type is convertable to a type in \p OutputIterator's set of \c value_types. \tparam
+ * InputIterator3 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>,
+ *          and \p InputIterator3's \c value_type is convertible to a type in \p OutputIterator2's set of \c
+ * value_types. \tparam InputIterator4 is a model of <a
+ * href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>, and \p InputIterator4's \c
+ * value_type is convertible to a type in \p OutputIterator2's set of \c value_types. \tparam OutputIterator1 is a model
+ * of <a href="https://en.cppreference.com/w/cpp/iterator/output_iterator">Output Iterator</a>. \tparam OutputIterator2
+ * is a model of <a href="https://en.cppreference.com/w/cpp/iterator/output_iterator">Output Iterator</a>.
  *
- *  \pre The ranges <tt>[keys_first1, keys_last1)</tt> and <tt>[keys_first2, keys_last2)</tt> shall be sorted with respect to <tt>operator<</tt>.
- *  \pre The resulting ranges shall not overlap with any input range.
+ *  \pre The ranges <tt>[keys_first1, keys_last1)</tt> and <tt>[keys_first2, keys_last2)</tt> shall be sorted with
+ * respect to <tt>operator<</tt>. \pre The resulting ranges shall not overlap with any input range.
  *
  *  The following code snippet demonstrates how to use
  *  \p merge_by_key to compute the merger of two sets of integers sorted in
@@ -391,26 +392,33 @@ template<typename InputIterator1,
  *  \see \p sort_by_key
  *  \see \p is_sorted
  */
-template<typename DerivedPolicy, typename InputIterator1, typename InputIterator2, typename InputIterator3, typename InputIterator4, typename OutputIterator1, typename OutputIterator2>
-THRUST_HOST_DEVICE
-  thrust::pair<OutputIterator1,OutputIterator2>
-    merge_by_key(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
-                 InputIterator1 keys_first1, InputIterator1 keys_last1,
-                 InputIterator2 keys_first2, InputIterator2 keys_last2,
-                 InputIterator3 values_first1, InputIterator4 values_first2,
-                 OutputIterator1 keys_result,
-                 OutputIterator2 values_result);
-
+template <typename DerivedPolicy,
+          typename InputIterator1,
+          typename InputIterator2,
+          typename InputIterator3,
+          typename InputIterator4,
+          typename OutputIterator1,
+          typename OutputIterator2>
+THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> merge_by_key(
+  const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
+  InputIterator1 keys_first1,
+  InputIterator1 keys_last1,
+  InputIterator2 keys_first2,
+  InputIterator2 keys_last2,
+  InputIterator3 values_first1,
+  InputIterator4 values_first2,
+  OutputIterator1 keys_result,
+  OutputIterator2 values_result);
 
 /*! \p merge_by_key performs a key-value merge. That is, \p merge_by_key copies elements from
  *  <tt>[keys_first1, keys_last1)</tt> and <tt>[keys_first2, keys_last2)</tt> into a single range,
  *  <tt>[keys_result, keys_result + (keys_last1 - keys_first1) + (keys_last2 - keys_first2))</tt> such that
  *  the resulting range is in ascending key order.
  *
- *  At the same time, \p merge_by_key copies elements from the two associated ranges <tt>[values_first1 + (keys_last1 - keys_first1))</tt>
- *  and <tt>[values_first2 + (keys_last2 - keys_first2))</tt> into a single range,
- *  <tt>[values_result, values_result + (keys_last1 - keys_first1) + (keys_last2 - keys_first2))</tt> such that
- *  the resulting range is in ascending order implied by each input element's associated key.
+ *  At the same time, \p merge_by_key copies elements from the two associated ranges <tt>[values_first1 + (keys_last1 -
+ * keys_first1))</tt> and <tt>[values_first2 + (keys_last2 - keys_first2))</tt> into a single range, <tt>[values_result,
+ * values_result + (keys_last1 - keys_first1) + (keys_last2 - keys_first2))</tt> such that the resulting range is in
+ * ascending order implied by each input element's associated key.
  *
  *  \p merge_by_key is stable, meaning both that the relative order of elements within each input range is
  *  preserved, and that for equivalent elements in all input key ranges the element from the first range
@@ -430,25 +438,29 @@ THRUST_HOST_DEVICE
  *  \return A \p pair \c p such that <tt>p.first</tt> is the end of the output range of keys,
  *          and such that <tt>p.second</tt> is the end of the output range of values.
  *
- *  \tparam InputIterator1 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>,
- *          \p InputIterator1 and \p InputIterator2 have the same \c value_type,
- *          \p InputIterator1's \c value_type is a model of <a href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a>,
- *          the ordering on \p InputIterator1's \c value_type is a strict weak ordering, as defined in the <a href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a> requirements,
- *          and \p InputIterator1's \c value_type is convertable to a type in \p OutputIterator's set of \c value_types.
- *  \tparam InputIterator2 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>,
+ *  \tparam InputIterator1 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input
+ * Iterator</a>, \p InputIterator1 and \p InputIterator2 have the same \c value_type, \p InputIterator1's \c value_type
+ * is a model of <a href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a>, the
+ * ordering on \p InputIterator1's \c value_type is a strict weak ordering, as defined in the <a
+ * href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a> requirements, and \p
+ * InputIterator1's \c value_type is convertable to a type in \p OutputIterator's set of \c value_types. \tparam
+ * InputIterator2 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>,
  *          \p InputIterator2 and \p InputIterator1 have the same \c value_type,
- *          \p InputIterator2's \c value_type is a model of <a href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a>,
- *          the ordering on \p InputIterator2's \c value_type is a strict weak ordering, as defined in the <a href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a> requirements,
- *          and \p InputIterator2's \c value_type is convertable to a type in \p OutputIterator's set of \c value_types.
- *  \tparam InputIterator3 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>,
- *          and \p InputIterator3's \c value_type is convertible to a type in \p OutputIterator2's set of \c value_types.
- *  \tparam InputIterator4 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>,
- *          and \p InputIterator4's \c value_type is convertible to a type in \p OutputIterator2's set of \c value_types.
- *  \tparam OutputIterator1 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/output_iterator">Output Iterator</a>.
- *  \tparam OutputIterator2 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/output_iterator">Output Iterator</a>.
+ *          \p InputIterator2's \c value_type is a model of <a
+ * href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a>, the ordering on \p
+ * InputIterator2's \c value_type is a strict weak ordering, as defined in the <a
+ * href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a> requirements, and \p
+ * InputIterator2's \c value_type is convertable to a type in \p OutputIterator's set of \c value_types. \tparam
+ * InputIterator3 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>,
+ *          and \p InputIterator3's \c value_type is convertible to a type in \p OutputIterator2's set of \c
+ * value_types. \tparam InputIterator4 is a model of <a
+ * href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>, and \p InputIterator4's \c
+ * value_type is convertible to a type in \p OutputIterator2's set of \c value_types. \tparam OutputIterator1 is a model
+ * of <a href="https://en.cppreference.com/w/cpp/iterator/output_iterator">Output Iterator</a>. \tparam OutputIterator2
+ * is a model of <a href="https://en.cppreference.com/w/cpp/iterator/output_iterator">Output Iterator</a>.
  *
- *  \pre The ranges <tt>[keys_first1, keys_last1)</tt> and <tt>[keys_first2, keys_last2)</tt> shall be sorted with respect to <tt>operator<</tt>.
- *  \pre The resulting ranges shall not overlap with any input range.
+ *  \pre The ranges <tt>[keys_first1, keys_last1)</tt> and <tt>[keys_first2, keys_last2)</tt> shall be sorted with
+ * respect to <tt>operator<</tt>. \pre The resulting ranges shall not overlap with any input range.
  *
  *  The following code snippet demonstrates how to use
  *  \p merge_by_key to compute the merger of two sets of integers sorted in
@@ -467,7 +479,8 @@ THRUST_HOST_DEVICE
  *  int keys_result[13];
  *  int vals_result[13];
  *
- *  thrust::pair<int*,int*> end = thrust::merge_by_key(A_keys, A_keys + 6, B_keys, B_keys + 7, A_vals, B_vals, keys_result, vals_result);
+ *  thrust::pair<int*,int*> end = thrust::merge_by_key(A_keys, A_keys + 6, B_keys, B_keys + 7, A_vals, B_vals,
+ * keys_result, vals_result);
  *
  *  // keys_result = {1, 1, 1, 2, 3, 3, 5, 5, 7, 8, 9, 11, 13}
  *  // vals_result = {0, 1, 1, 1, 0, 1, 0, 1, 0, 1, 0,  0,  1}
@@ -477,24 +490,31 @@ THRUST_HOST_DEVICE
  *  \see \p sort_by_key
  *  \see \p is_sorted
  */
-template<typename InputIterator1, typename InputIterator2, typename InputIterator3, typename InputIterator4, typename OutputIterator1, typename OutputIterator2>
-  thrust::pair<OutputIterator1,OutputIterator2>
-    merge_by_key(InputIterator1 keys_first1, InputIterator1 keys_last1,
-                 InputIterator2 keys_first2, InputIterator2 keys_last2,
-                 InputIterator3 values_first1, InputIterator4 values_first2,
-                 OutputIterator1 keys_result,
-                 OutputIterator2 values_result);
-
+template <typename InputIterator1,
+          typename InputIterator2,
+          typename InputIterator3,
+          typename InputIterator4,
+          typename OutputIterator1,
+          typename OutputIterator2>
+thrust::pair<OutputIterator1, OutputIterator2> merge_by_key(
+  InputIterator1 keys_first1,
+  InputIterator1 keys_last1,
+  InputIterator2 keys_first2,
+  InputIterator2 keys_last2,
+  InputIterator3 values_first1,
+  InputIterator4 values_first2,
+  OutputIterator1 keys_result,
+  OutputIterator2 values_result);
 
 /*! \p merge_by_key performs a key-value merge. That is, \p merge_by_key copies elements from
  *  <tt>[keys_first1, keys_last1)</tt> and <tt>[keys_first2, keys_last2)</tt> into a single range,
  *  <tt>[keys_result, keys_result + (keys_last1 - keys_first1) + (keys_last2 - keys_first2))</tt> such that
  *  the resulting range is in ascending key order.
  *
- *  At the same time, \p merge_by_key copies elements from the two associated ranges <tt>[values_first1 + (keys_last1 - keys_first1))</tt>
- *  and <tt>[values_first2 + (keys_last2 - keys_first2))</tt> into a single range,
- *  <tt>[values_result, values_result + (keys_last1 - keys_first1) + (keys_last2 - keys_first2))</tt> such that
- *  the resulting range is in ascending order implied by each input element's associated key.
+ *  At the same time, \p merge_by_key copies elements from the two associated ranges <tt>[values_first1 + (keys_last1 -
+ * keys_first1))</tt> and <tt>[values_first2 + (keys_last2 - keys_first2))</tt> into a single range, <tt>[values_result,
+ * values_result + (keys_last1 - keys_first1) + (keys_last2 - keys_first2))</tt> such that the resulting range is in
+ * ascending order implied by each input element's associated key.
  *
  *  \p merge_by_key is stable, meaning both that the relative order of elements within each input range is
  *  preserved, and that for equivalent elements in all input key ranges the element from the first range
@@ -521,22 +541,24 @@ template<typename InputIterator1, typename InputIterator2, typename InputIterato
  *          and such that <tt>p.second</tt> is the end of the output range of values.
  *
  *  \tparam DerivedPolicy The name of the derived execution policy.
- *  \tparam InputIterator1 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>,
- *          \p InputIterator1's \c value_type is convertable to \p StrictWeakCompare's \c first_argument_type.
- *          and \p InputIterator1's \c value_type is convertable to a type in \p OutputIterator1's set of \c value_types.
- *  \tparam InputIterator2 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>,
+ *  \tparam InputIterator1 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input
+ * Iterator</a>, \p InputIterator1's \c value_type is convertable to \p StrictWeakCompare's \c first_argument_type. and
+ * \p InputIterator1's \c value_type is convertable to a type in \p OutputIterator1's set of \c value_types. \tparam
+ * InputIterator2 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>,
  *          \p InputIterator2's \c value_type is convertable to \p StrictWeakCompare's \c second_argument_type.
- *          and \p InputIterator2's \c value_type is convertable to a type in \p OutputIterator1's set of \c value_types.
- *  \tparam InputIterator3 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>,
- *          and \p InputIterator3's \c value_type is convertible to a type in \p OutputIterator2's set of \c value_types.
- *  \tparam InputIterator4 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>,
- *          and \p InputIterator4's \c value_type is convertible to a type in \p OutputIterator2's set of \c value_types.
- *  \tparam OutputIterator1 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/output_iterator">Output Iterator</a>.
- *  \tparam OutputIterator2 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/output_iterator">Output Iterator</a>.
- *  \tparam StrictWeakCompare is a model of <a href="https://en.cppreference.com/w/cpp/concepts/strict_weak_order">Strict Weak Ordering</a>.
+ *          and \p InputIterator2's \c value_type is convertable to a type in \p OutputIterator1's set of \c
+ * value_types. \tparam InputIterator3 is a model of <a
+ * href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>, and \p InputIterator3's \c
+ * value_type is convertible to a type in \p OutputIterator2's set of \c value_types. \tparam InputIterator4 is a model
+ * of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>, and \p InputIterator4's \c
+ * value_type is convertible to a type in \p OutputIterator2's set of \c value_types. \tparam OutputIterator1 is a model
+ * of <a href="https://en.cppreference.com/w/cpp/iterator/output_iterator">Output Iterator</a>. \tparam OutputIterator2
+ * is a model of <a href="https://en.cppreference.com/w/cpp/iterator/output_iterator">Output Iterator</a>. \tparam
+ * StrictWeakCompare is a model of <a href="https://en.cppreference.com/w/cpp/concepts/strict_weak_order">Strict Weak
+ * Ordering</a>.
  *
- *  \pre The ranges <tt>[keys_first1, keys_last1)</tt> and <tt>[keys_first2, keys_last2)</tt> shall be sorted with respect to \p comp.
- *  \pre The resulting ranges shall not overlap with any input range.
+ *  \pre The ranges <tt>[keys_first1, keys_last1)</tt> and <tt>[keys_first2, keys_last2)</tt> shall be sorted with
+ * respect to \p comp. \pre The resulting ranges shall not overlap with any input range.
  *
  *  The following code snippet demonstrates how to use
  *  \p merge_by_key to compute the merger of two sets of integers sorted in
@@ -572,27 +594,35 @@ template<typename InputIterator1, typename InputIterator2, typename InputIterato
  *  \see \p sort_by_key
  *  \see \p is_sorted
  */
-template<typename DerivedPolicy, typename InputIterator1, typename InputIterator2, typename InputIterator3, typename InputIterator4, typename OutputIterator1, typename OutputIterator2, typename Compare>
-THRUST_HOST_DEVICE
-  thrust::pair<OutputIterator1,OutputIterator2>
-    merge_by_key(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
-                 InputIterator1 keys_first1, InputIterator1 keys_last1,
-                 InputIterator2 keys_first2, InputIterator2 keys_last2,
-                 InputIterator3 values_first1, InputIterator4 values_first2,
-                 OutputIterator1 keys_result,
-                 OutputIterator2 values_result,
-                 Compare comp);
-
+template <typename DerivedPolicy,
+          typename InputIterator1,
+          typename InputIterator2,
+          typename InputIterator3,
+          typename InputIterator4,
+          typename OutputIterator1,
+          typename OutputIterator2,
+          typename Compare>
+THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> merge_by_key(
+  const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
+  InputIterator1 keys_first1,
+  InputIterator1 keys_last1,
+  InputIterator2 keys_first2,
+  InputIterator2 keys_last2,
+  InputIterator3 values_first1,
+  InputIterator4 values_first2,
+  OutputIterator1 keys_result,
+  OutputIterator2 values_result,
+  Compare comp);
 
 /*! \p merge_by_key performs a key-value merge. That is, \p merge_by_key copies elements from
  *  <tt>[keys_first1, keys_last1)</tt> and <tt>[keys_first2, keys_last2)</tt> into a single range,
  *  <tt>[keys_result, keys_result + (keys_last1 - keys_first1) + (keys_last2 - keys_first2))</tt> such that
  *  the resulting range is in ascending key order.
  *
- *  At the same time, \p merge_by_key copies elements from the two associated ranges <tt>[values_first1 + (keys_last1 - keys_first1))</tt>
- *  and <tt>[values_first2 + (keys_last2 - keys_first2))</tt> into a single range,
- *  <tt>[values_result, values_result + (keys_last1 - keys_first1) + (keys_last2 - keys_first2))</tt> such that
- *  the resulting range is in ascending order implied by each input element's associated key.
+ *  At the same time, \p merge_by_key copies elements from the two associated ranges <tt>[values_first1 + (keys_last1 -
+ * keys_first1))</tt> and <tt>[values_first2 + (keys_last2 - keys_first2))</tt> into a single range, <tt>[values_result,
+ * values_result + (keys_last1 - keys_first1) + (keys_last2 - keys_first2))</tt> such that the resulting range is in
+ * ascending order implied by each input element's associated key.
  *
  *  \p merge_by_key is stable, meaning both that the relative order of elements within each input range is
  *  preserved, and that for equivalent elements in all input key ranges the element from the first range
@@ -615,22 +645,24 @@ THRUST_HOST_DEVICE
  *  \return A \p pair \c p such that <tt>p.first</tt> is the end of the output range of keys,
  *          and such that <tt>p.second</tt> is the end of the output range of values.
  *
- *  \tparam InputIterator1 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>,
- *          \p InputIterator1's \c value_type is convertable to \p StrictWeakCompare's \c first_argument_type.
- *          and \p InputIterator1's \c value_type is convertable to a type in \p OutputIterator1's set of \c value_types.
- *  \tparam InputIterator2 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>,
+ *  \tparam InputIterator1 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input
+ * Iterator</a>, \p InputIterator1's \c value_type is convertable to \p StrictWeakCompare's \c first_argument_type. and
+ * \p InputIterator1's \c value_type is convertable to a type in \p OutputIterator1's set of \c value_types. \tparam
+ * InputIterator2 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>,
  *          \p InputIterator2's \c value_type is convertable to \p StrictWeakCompare's \c second_argument_type.
- *          and \p InputIterator2's \c value_type is convertable to a type in \p OutputIterator1's set of \c value_types.
- *  \tparam InputIterator3 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>,
- *          and \p InputIterator3's \c value_type is convertible to a type in \p OutputIterator2's set of \c value_types.
- *  \tparam InputIterator4 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>,
- *          and \p InputIterator4's \c value_type is convertible to a type in \p OutputIterator2's set of \c value_types.
- *  \tparam OutputIterator1 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/output_iterator">Output Iterator</a>.
- *  \tparam OutputIterator2 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/output_iterator">Output Iterator</a>.
- *  \tparam StrictWeakCompare is a model of <a href="https://en.cppreference.com/w/cpp/concepts/strict_weak_order">Strict Weak Ordering</a>.
+ *          and \p InputIterator2's \c value_type is convertable to a type in \p OutputIterator1's set of \c
+ * value_types. \tparam InputIterator3 is a model of <a
+ * href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>, and \p InputIterator3's \c
+ * value_type is convertible to a type in \p OutputIterator2's set of \c value_types. \tparam InputIterator4 is a model
+ * of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>, and \p InputIterator4's \c
+ * value_type is convertible to a type in \p OutputIterator2's set of \c value_types. \tparam OutputIterator1 is a model
+ * of <a href="https://en.cppreference.com/w/cpp/iterator/output_iterator">Output Iterator</a>. \tparam OutputIterator2
+ * is a model of <a href="https://en.cppreference.com/w/cpp/iterator/output_iterator">Output Iterator</a>. \tparam
+ * StrictWeakCompare is a model of <a href="https://en.cppreference.com/w/cpp/concepts/strict_weak_order">Strict Weak
+ * Ordering</a>.
  *
- *  \pre The ranges <tt>[keys_first1, keys_last1)</tt> and <tt>[keys_first2, keys_last2)</tt> shall be sorted with respect to \p comp.
- *  \pre The resulting ranges shall not overlap with any input range.
+ *  \pre The ranges <tt>[keys_first1, keys_last1)</tt> and <tt>[keys_first2, keys_last2)</tt> shall be sorted with
+ * respect to \p comp. \pre The resulting ranges shall not overlap with any input range.
  *
  *  The following code snippet demonstrates how to use
  *  \p merge_by_key to compute the merger of two sets of integers sorted in
@@ -649,7 +681,8 @@ THRUST_HOST_DEVICE
  *  int keys_result[13];
  *  int vals_result[13];
  *
- *  thrust::pair<int*,int*> end = thrust::merge_by_key(A_keys, A_keys + 6, B_keys, B_keys + 7, A_vals, B_vals, keys_result, vals_result, thrust::greater<int>());
+ *  thrust::pair<int*,int*> end = thrust::merge_by_key(A_keys, A_keys + 6, B_keys, B_keys + 7, A_vals, B_vals,
+ * keys_result, vals_result, thrust::greater<int>());
  *
  *  // keys_result = {13, 11, 9, 8, 7, 5, 5, 3, 3, 2, 1, 1, 1}
  *  // vals_result = { 1,  0, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 1}
@@ -659,15 +692,23 @@ THRUST_HOST_DEVICE
  *  \see \p sort_by_key
  *  \see \p is_sorted
  */
-template<typename InputIterator1, typename InputIterator2, typename InputIterator3, typename InputIterator4, typename OutputIterator1, typename OutputIterator2, typename StrictWeakCompare>
-  thrust::pair<OutputIterator1,OutputIterator2>
-    merge_by_key(InputIterator1 keys_first1, InputIterator1 keys_last1,
-                 InputIterator2 keys_first2, InputIterator2 keys_last2,
-                 InputIterator3 values_first1, InputIterator4 values_first2,
-                 OutputIterator1 keys_result,
-                 OutputIterator2 values_result,
-                 StrictWeakCompare comp);
-
+template <typename InputIterator1,
+          typename InputIterator2,
+          typename InputIterator3,
+          typename InputIterator4,
+          typename OutputIterator1,
+          typename OutputIterator2,
+          typename StrictWeakCompare>
+thrust::pair<OutputIterator1, OutputIterator2> merge_by_key(
+  InputIterator1 keys_first1,
+  InputIterator1 keys_last1,
+  InputIterator2 keys_first2,
+  InputIterator2 keys_last2,
+  InputIterator3 values_first1,
+  InputIterator4 values_first2,
+  OutputIterator1 keys_result,
+  OutputIterator2 values_result,
+  StrictWeakCompare comp);
 
 /*! \} // merging
  */

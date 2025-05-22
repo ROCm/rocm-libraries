@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -23,19 +23,18 @@
 
 // Internal config header that is only included through thrust/detail/config/config.h
 
-
 #if defined(__CUDACC__) || defined(_NVHPC_CUDA)
 
-#define __thrust_forceinline__ __forceinline__
+#  define __thrust_forceinline__ __forceinline__
 
 #elif THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 
-#define __thrust_forceinline__ __forceinline__
+#  define __thrust_forceinline__ __forceinline__
 
 #else
 
 // TODO add
 
-#define __thrust_forceinline__
+#  define __thrust_forceinline__
 
 #endif

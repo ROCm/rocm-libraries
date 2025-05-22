@@ -14,7 +14,6 @@
  *  limitations under the License.
  */
 
-
 /*! \file universal_ptr.h
  *  \brief A pointer to a variable which resides memory accessible to both
  *         hosts and devices.
@@ -23,4 +22,3 @@
 #pragma once
 
 #include <thrust/universal_allocator.h>
-

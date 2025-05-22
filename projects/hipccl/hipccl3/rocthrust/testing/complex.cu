@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2024 NVIDIA Corporation
- *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -14,8 +14,9 @@
  *  See the License for the specific language governing permissions and
  *  limitations under the License.
  */
-#include <thrust/complex.h>
 #include <thrust/detail/config.h>
+
+#include <thrust/complex.h>
 
 #include <complex>
 #include <iostream>
@@ -162,8 +163,7 @@ struct TestComplexConstructionAndAssignment
     }
   }
 };
-SimpleUnitTest<TestComplexConstructionAndAssignment, FloatingPointTypes>
-  TestComplexConstructionAndAssignmentInstance;
+SimpleUnitTest<TestComplexConstructionAndAssignment, FloatingPointTypes> TestComplexConstructionAndAssignmentInstance;
 
 template <typename T>
 struct TestComplexConstructionAndAssignmentWithPromoting
@@ -327,8 +327,7 @@ struct TestComplexComparisionOperators
     }
   }
 };
-SimpleUnitTest<TestComplexComparisionOperators, FloatingPointTypes>
-  TestComplexComparisionOperatorsInstance;
+SimpleUnitTest<TestComplexComparisionOperators, FloatingPointTypes> TestComplexComparisionOperatorsInstance;
 
 template <typename T>
 struct TestComplexMemberOperators
@@ -380,7 +379,7 @@ struct TestComplexMemberOperators
       ASSERT_ALMOST_EQUAL(a_thrust, a_std);
 
       // casting operator
-      a_std = (std::complex<T>)a_thrust;
+      a_std = (std::complex<T>) a_thrust;
       ASSERT_ALMOST_EQUAL(a_thrust.real(), a_std.real());
       ASSERT_ALMOST_EQUAL(a_thrust.imag(), a_std.imag());
     }
@@ -567,8 +566,7 @@ struct TestComplexExponentialFunctions
     static_assert(std::is_same<thrust::complex<T>, decltype(thrust::log10(a))>::value, "");
   }
 };
-SimpleUnitTest<TestComplexExponentialFunctions, FloatingPointTypes>
-  TestComplexExponentialFunctionsInstance;
+SimpleUnitTest<TestComplexExponentialFunctions, FloatingPointTypes> TestComplexExponentialFunctionsInstance;
 
 template <typename T>
 struct TestComplexPowerFunctions
@@ -599,8 +597,8 @@ struct TestComplexPowerFunctions
 
     // Test power functions with promoted types.
     {
-      using T0 = T;
-      using T1 = other_floating_point_type_t<T0>;
+      using T0       = T;
+      using T1       = other_floating_point_type_t<T0>;
       using promoted = typename thrust::detail::promoted_numerical_type<T0, T1>::type;
 
       thrust::host_vector<T0> data = unittest::random_samples<T0>(4);
@@ -615,13 +613,17 @@ struct TestComplexPowerFunctions
       ASSERT_ALMOST_EQUAL(thrust::pow(b_thrust, a_thrust), std::pow(b_std, a_std));
       static_assert(std::is_same<thrust::complex<promoted>, decltype(thrust::pow(b_thrust, a_thrust))>::value, "");
       ASSERT_ALMOST_EQUAL(thrust::pow(a_thrust, b_thrust.real()), std::pow(a_std, b_std.real()));
-      static_assert(std::is_same<thrust::complex<promoted>, decltype(thrust::pow(a_thrust, b_thrust.real()))>::value, "");
+      static_assert(std::is_same<thrust::complex<promoted>, decltype(thrust::pow(a_thrust, b_thrust.real()))>::value,
+                    "");
       ASSERT_ALMOST_EQUAL(thrust::pow(b_thrust, a_thrust.real()), std::pow(b_std, a_std.real()));
-      static_assert(std::is_same<thrust::complex<promoted>, decltype(thrust::pow(b_thrust, a_thrust.real()))>::value, "");
+      static_assert(std::is_same<thrust::complex<promoted>, decltype(thrust::pow(b_thrust, a_thrust.real()))>::value,
+                    "");
       ASSERT_ALMOST_EQUAL(thrust::pow(a_thrust.real(), b_thrust), std::pow(a_std.real(), b_std));
-      static_assert(std::is_same<thrust::complex<promoted>, decltype(thrust::pow(a_thrust.real(), b_thrust))>::value, "");
+      static_assert(std::is_same<thrust::complex<promoted>, decltype(thrust::pow(a_thrust.real(), b_thrust))>::value,
+                    "");
       ASSERT_ALMOST_EQUAL(thrust::pow(b_thrust.real(), a_thrust), std::pow(b_std.real(), a_std));
-      static_assert(std::is_same<thrust::complex<promoted>, decltype(thrust::pow(b_thrust.real(), a_thrust))>::value, "");
+      static_assert(std::is_same<thrust::complex<promoted>, decltype(thrust::pow(b_thrust.real(), a_thrust))>::value,
+                    "");
     }
   }
 };
@@ -651,7 +653,6 @@ struct TestComplexTrigonometricFunctions
     static_assert(std::is_same<thrust::complex<T>, decltype(thrust::sinh(a))>::value, "");
     static_assert(std::is_same<thrust::complex<T>, decltype(thrust::tanh(a))>::value, "");
 
-
     ASSERT_ALMOST_EQUAL(thrust::acos(a), std::acos(c));
     ASSERT_ALMOST_EQUAL(thrust::asin(a), std::asin(c));
     ASSERT_ALMOST_EQUAL(thrust::atan(a), std::atan(c));
@@ -665,11 +666,9 @@ struct TestComplexTrigonometricFunctions
     static_assert(std::is_same<thrust::complex<T>, decltype(thrust::acosh(a))>::value, "");
     static_assert(std::is_same<thrust::complex<T>, decltype(thrust::asinh(a))>::value, "");
     static_assert(std::is_same<thrust::complex<T>, decltype(thrust::atanh(a))>::value, "");
-
   }
 };
-SimpleUnitTest<TestComplexTrigonometricFunctions, FloatingPointTypes>
-  TestComplexTrigonometricFunctionsInstance;
+SimpleUnitTest<TestComplexTrigonometricFunctions, FloatingPointTypes> TestComplexTrigonometricFunctionsInstance;
 
 template <typename T>
 struct TestComplexStreamOperators
@@ -708,8 +707,7 @@ struct TestComplexStdComplexDeviceInterop
     ASSERT_ALMOST_EQUAL(vec[2].imag(), thrust::complex<T>(device_vec[2]).imag());
   }
 };
-SimpleUnitTest<TestComplexStdComplexDeviceInterop, FloatingPointTypes>
-  TestComplexStdComplexDeviceInteropInstance;
+SimpleUnitTest<TestComplexStdComplexDeviceInterop, FloatingPointTypes> TestComplexStdComplexDeviceInteropInstance;
 
 template <typename T>
 struct TestComplexExplicitConstruction
@@ -727,5 +725,4 @@ struct TestComplexExplicitConstruction
     (void) result;
   }
 };
-SimpleUnitTest<TestComplexExplicitConstruction, FloatingPointTypes>
-  TestComplexExplicitConstructionInstance;
+SimpleUnitTest<TestComplexExplicitConstruction, FloatingPointTypes> TestComplexExplicitConstructionInstance;

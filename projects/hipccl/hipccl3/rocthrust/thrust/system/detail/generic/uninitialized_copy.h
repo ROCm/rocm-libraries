@@ -14,10 +14,10 @@
  *  limitations under the License.
  */
 
-
 #pragma once
 
 #include <thrust/detail/config.h>
+
 #include <thrust/system/detail/generic/tag.h>
 
 THRUST_NAMESPACE_BEGIN
@@ -28,24 +28,13 @@ namespace detail
 namespace generic
 {
 
-template<typename ExecutionPolicy,
-         typename InputIterator,
-         typename ForwardIterator>
-THRUST_HOST_DEVICE
-  ForwardIterator uninitialized_copy(thrust::execution_policy<ExecutionPolicy> &exec,
-                                     InputIterator first,
-                                     InputIterator last,
-                                     ForwardIterator result);
+template <typename ExecutionPolicy, typename InputIterator, typename ForwardIterator>
+THRUST_HOST_DEVICE ForwardIterator uninitialized_copy(
+  thrust::execution_policy<ExecutionPolicy>& exec, InputIterator first, InputIterator last, ForwardIterator result);
 
-template<typename ExecutionPolicy,
-         typename InputIterator,
-         typename Size,
-         typename ForwardIterator>
-THRUST_HOST_DEVICE
-  ForwardIterator uninitialized_copy_n(thrust::execution_policy<ExecutionPolicy> &exec,
-                                       InputIterator first,
-                                       Size n,
-                                       ForwardIterator result);
+template <typename ExecutionPolicy, typename InputIterator, typename Size, typename ForwardIterator>
+THRUST_HOST_DEVICE ForwardIterator uninitialized_copy_n(
+  thrust::execution_policy<ExecutionPolicy>& exec, InputIterator first, Size n, ForwardIterator result);
 
 } // end namespace generic
 } // end namespace detail
@@ -53,4 +42,3 @@ THRUST_HOST_DEVICE
 THRUST_NAMESPACE_END
 
 #include <thrust/system/detail/generic/uninitialized_copy.inl>
-

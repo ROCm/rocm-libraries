@@ -22,8 +22,10 @@
 #pragma once
 
 #include <thrust/detail/config.h>
-#include <thrust/system/cuda/memory.h>
+
 #include <thrust/detail/vector_base.h>
+#include <thrust/system/cuda/memory.h>
+
 #include <vector>
 
 THRUST_NAMESPACE_BEGIN
@@ -73,17 +75,19 @@ using universal_vector = thrust::detail::vector_base<T, Allocator>;
 
 } // namespace cuda_cub
 
-namespace system { namespace cuda
+namespace system
 {
-using thrust::cuda_cub::vector;
+namespace cuda
+{
 using thrust::cuda_cub::universal_vector;
-}}
+using thrust::cuda_cub::vector;
+} // namespace cuda
+} // namespace system
 
 namespace cuda
 {
-using thrust::cuda_cub::vector;
 using thrust::cuda_cub::universal_vector;
-}
+using thrust::cuda_cub::vector;
+} // namespace cuda
 
 THRUST_NAMESPACE_END
-

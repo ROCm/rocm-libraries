@@ -19,4 +19,3 @@
 #include <thrust/detail/config.h>
 
 // this system has no special reverse functions
-

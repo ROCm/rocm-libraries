@@ -30,11 +30,11 @@
 #include <thrust/detail/config.h>
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
-#include <thrust/system/hip/config.h>
+#  include <thrust/system/hip/config.h>
 
-#include <thrust/detail/minmax.h>
-#include <thrust/distance.h>
-#include <thrust/system/hip/detail/execution_policy.h>
+#  include <thrust/detail/minmax.h>
+#  include <thrust/distance.h>
+#  include <thrust/system/hip/detail/execution_policy.h>
 
 THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
@@ -42,155 +42,122 @@ namespace hip_rocprim
 
 // XXX forward declare to circumvent circular depedency
 template <class Derived, class InputIt, class Predicate>
-InputIt THRUST_HIP_FUNCTION
-find_if(execution_policy<Derived>& policy,
-        InputIt                    first,
-        InputIt                    last,
-        Predicate                  predicate);
+InputIt THRUST_HIP_FUNCTION find_if(execution_policy<Derived>& policy, InputIt first, InputIt last, Predicate predicate);
 
 template <class Derived, class InputIt, class Predicate>
 InputIt THRUST_HIP_FUNCTION
-find_if_not(execution_policy<Derived>& policy,
-            InputIt                    first,
-            InputIt                    last,
-            Predicate                  predicate);
+find_if_not(execution_policy<Derived>& policy, InputIt first, InputIt last, Predicate predicate);
 
 template <class Derived, class InputIt, class T>
-InputIt THRUST_HIP_FUNCTION
-find(execution_policy<Derived>& policy, InputIt first, InputIt last, T const& value);
+InputIt THRUST_HIP_FUNCTION find(execution_policy<Derived>& policy, InputIt first, InputIt last, T const& value);
 
 }; // namespace hip_rocprim
 THRUST_NAMESPACE_END
 
-#include <thrust/iterator/zip_iterator.h>
-#include <thrust/system/hip/detail/reduce.h>
+#  include <thrust/iterator/zip_iterator.h>
+#  include <thrust/system/hip/detail/reduce.h>
 
 THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
 {
 namespace __find_if
 {
-    template <typename TupleType>
-    struct functor
+template <typename TupleType>
+struct functor
+{
+  TupleType THRUST_HIP_DEVICE_FUNCTION operator()(const TupleType& lhs, const TupleType& rhs) const
+  {
+    // select the smallest index among true results
+    if (thrust::get<0>(lhs) && thrust::get<0>(rhs))
     {
-        TupleType THRUST_HIP_DEVICE_FUNCTION
-        operator()(const TupleType& lhs,
-                   const TupleType& rhs) const
-        {
-            // select the smallest index among true results
-            if(thrust::get<0>(lhs) && thrust::get<0>(rhs))
-            {
-                return TupleType(true, (thrust::min)(thrust::get<1>(lhs), thrust::get<1>(rhs)));
-            }
-            else if(thrust::get<0>(lhs))
-            {
-                return lhs;
-            }
-            else
-            {
-                return rhs;
-            }
-        }
-    };
+      return TupleType(true, (thrust::min)(thrust::get<1>(lhs), thrust::get<1>(rhs)));
+    }
+    else if (thrust::get<0>(lhs))
+    {
+      return lhs;
+    }
+    else
+    {
+      return rhs;
+    }
+  }
+};
 } // namespace __find_if
 
 template <class Derived, class InputIt, class Size, class Predicate>
 InputIt THRUST_HIP_FUNCTION
-find_if_n(execution_policy<Derived>& policy,
-          InputIt                    first,
-          Size                       num_items,
-          Predicate                  predicate)
+find_if_n(execution_policy<Derived>& policy, InputIt first, Size num_items, Predicate predicate)
 {
-    using result_type = typename thrust::tuple<bool, Size>;
+  using result_type = typename thrust::tuple<bool, Size>;
 
-    // empty sequence
-    if(num_items == 0)
-        return first;
+  // empty sequence
+  if (num_items == 0)
+  {
+    return first;
+  }
 
-    // this implementation breaks up the sequence into separate intervals
-    // in an attempt to early-out as soon as a value is found
-    //
-    // XXX compose find_if from a look-back prefix scan algorithm
-    //     and abort kernel when the first element is found
+  // this implementation breaks up the sequence into separate intervals
+  // in an attempt to early-out as soon as a value is found
+  //
+  // XXX compose find_if from a look-back prefix scan algorithm
+  //     and abort kernel when the first element is found
 
-    // TODO incorporate sizeof(InputType) into interval_threshold and round to multiple of 32
-    const Size interval_threshold = 1 << 20;
-    const Size interval_size      = (thrust::min)(interval_threshold, num_items);
+  // TODO incorporate sizeof(InputType) into interval_threshold and round to multiple of 32
+  const Size interval_threshold = 1 << 20;
+  const Size interval_size      = (thrust::min)(interval_threshold, num_items);
 
-    // force transform_iterator output to bool
-    using XfrmIterator  = transform_input_iterator_t<bool, InputIt, Predicate>;
-    using IteratorTuple = thrust::tuple<XfrmIterator, counting_iterator_t<Size>>;
-    using ZipIterator   = thrust::zip_iterator<IteratorTuple>;
+  // force transform_iterator output to bool
+  using XfrmIterator  = transform_input_iterator_t<bool, InputIt, Predicate>;
+  using IteratorTuple = thrust::tuple<XfrmIterator, counting_iterator_t<Size>>;
+  using ZipIterator   = thrust::zip_iterator<IteratorTuple>;
 
-    IteratorTuple iter_tuple
-        = thrust::make_tuple(XfrmIterator(first, predicate), counting_iterator_t<Size>(0));
+  IteratorTuple iter_tuple = thrust::make_tuple(XfrmIterator(first, predicate), counting_iterator_t<Size>(0));
 
-    ZipIterator begin = thrust::make_zip_iterator(iter_tuple);
-    ZipIterator end   = begin + num_items;
+  ZipIterator begin = thrust::make_zip_iterator(iter_tuple);
+  ZipIterator end   = begin + num_items;
 
-    for(ZipIterator interval_begin = begin; interval_begin < end;
-        interval_begin += interval_size)
+  for (ZipIterator interval_begin = begin; interval_begin < end; interval_begin += interval_size)
+  {
+    ZipIterator interval_end = interval_begin + interval_size;
+    if (end < interval_end)
     {
-        ZipIterator interval_end = interval_begin + interval_size;
-        if(end < interval_end)
-        {
-            interval_end = end;
-        } // end if
+      interval_end = end;
+    } // end if
 
-        result_type result = reduce(policy,
-                                    interval_begin,
-                                    interval_end,
-                                    result_type(false, interval_end - begin),
-                                    __find_if::functor<result_type>());
+    result_type result = reduce(
+      policy, interval_begin, interval_end, result_type(false, interval_end - begin), __find_if::functor<result_type>());
 
-        // see if we found something
-        if(thrust::get<0>(result))
-        {
-            return first + thrust::get<1>(result);
-        }
+    // see if we found something
+    if (thrust::get<0>(result))
+    {
+      return first + thrust::get<1>(result);
     }
+  }
 
-    hip_rocprim::throw_on_error(
-        hip_rocprim::synchronize_optional(policy),
-        "find_if_n: failed to synchronize"
-    );
+  hip_rocprim::throw_on_error(hip_rocprim::synchronize_optional(policy), "find_if_n: failed to synchronize");
 
-    //nothing was found if we reach here...
-    return first + num_items;
+  // nothing was found if we reach here...
+  return first + num_items;
+}
+
+template <class Derived, class InputIt, class Predicate>
+InputIt THRUST_HIP_FUNCTION find_if(execution_policy<Derived>& policy, InputIt first, InputIt last, Predicate predicate)
+{
+  return hip_rocprim::find_if_n(policy, first, thrust::distance(first, last), predicate);
 }
 
 template <class Derived, class InputIt, class Predicate>
 InputIt THRUST_HIP_FUNCTION
-find_if(execution_policy<Derived>& policy,
-        InputIt                    first,
-        InputIt                    last,
-        Predicate                  predicate)
+find_if_not(execution_policy<Derived>& policy, InputIt first, InputIt last, Predicate predicate)
 {
-    return hip_rocprim::find_if_n(policy, first, thrust::distance(first, last), predicate);
-}
-
-template <class Derived, class InputIt, class Predicate>
-InputIt THRUST_HIP_FUNCTION
-find_if_not(execution_policy<Derived>& policy,
-            InputIt                    first,
-            InputIt                    last,
-            Predicate                  predicate)
-{
-    return hip_rocprim::find_if(policy, first, last, thrust::not_fn(predicate));
+  return hip_rocprim::find_if(policy, first, last, thrust::not_fn(predicate));
 }
 
 template <class Derived, class InputIt, class T>
-InputIt THRUST_HIP_FUNCTION
-find(execution_policy<Derived>& policy,
-     InputIt                    first,
-     InputIt                    last,
-     T const&                   value)
+InputIt THRUST_HIP_FUNCTION find(execution_policy<Derived>& policy, InputIt first, InputIt last, T const& value)
 {
-    using thrust::placeholders::_1;
-    return hip_rocprim::find_if(policy,
-                                first,
-                                last,
-                                 _1 == value);
+  using thrust::placeholders::_1;
+  return hip_rocprim::find_if(policy, first, last, _1 == value);
 }
 
 } // namespace hip_rocprim

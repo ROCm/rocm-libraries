@@ -32,18 +32,16 @@
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 
-#include <thrust/iterator/iterator_traits.h>
+#  include <thrust/system/hip/config.h>
 
-#include <thrust/system/hip/config.h>
-#include <thrust/system/hip/detail/async/customization.h>
-#include <thrust/system/hip/detail/scan.h>
-#include <thrust/system/hip/future.h>
+#  include <thrust/distance.h>
+#  include <thrust/iterator/iterator_traits.h>
+#  include <thrust/system/hip/detail/async/customization.h>
+#  include <thrust/system/hip/detail/scan.h>
+#  include <thrust/system/hip/future.h>
+#  include <thrust/type_traits/remove_cvref.h>
 
-#include <thrust/type_traits/remove_cvref.h>
-
-#include <thrust/distance.h>
-
-#include <type_traits>
+#  include <type_traits> // IWYU pragma: export
 
 // TODO specialize for thrust::plus to use e.g. InclusiveSum instead of IncScan
 //  - Note that thrust::plus<> is transparent, cub::Sum is not. This should be
@@ -55,104 +53,161 @@ namespace system
 {
 namespace hip
 {
-    namespace detail
-    {
+namespace detail
+{
 
-        template <typename DerivedPolicy,
-                  typename ForwardIt,
-                  typename Size,
-                  typename OutputIt,
-                  typename BinaryOp>
-        unique_eager_event async_inclusive_scan_n(execution_policy<DerivedPolicy>& policy,
-                                                  ForwardIt                        first,
-                                                  Size                             n,
-                                                  OutputIt                         out,
-                                                  BinaryOp                         op)
-        {
-            auto const device_alloc = get_async_device_allocator(policy);
+template <typename DerivedPolicy, typename ForwardIt, typename Size, typename OutputIt, typename BinaryOp>
+unique_eager_event
+async_inclusive_scan_n(execution_policy<DerivedPolicy>& policy, ForwardIt first, Size n, OutputIt out, BinaryOp op)
+{
+  auto const device_alloc = get_async_device_allocator(policy);
 
-            unique_eager_event ev;
-            // Determine temporary device storage requirements.
+  unique_eager_event ev;
+  // Determine temporary device storage requirements.
 
-            size_t tmp_size = 0;
-            thrust::hip_rocprim::throw_on_error(thrust::hip_rocprim::__scan::invoke_inclusive_scan(
-                                                    policy,
-                                                    nullptr,
-                                                    tmp_size,
-                                                    first,
-                                                    out,
-                                                    n,
-                                                    op,
-                                                    0, // Null stream, just for sizing.
-                                                    THRUST_HIP_DEBUG_SYNC_FLAG),
-                                                "after determining tmp storage "
-                                                "requirements for inclusive_scan");
+  size_t tmp_size = 0;
+  thrust::hip_rocprim::throw_on_error(
+    thrust::hip_rocprim::__scan::invoke_inclusive_scan(
+      policy,
+      nullptr,
+      tmp_size,
+      first,
+      out,
+      n,
+      op,
+      0, // Null stream, just for sizing.
+      THRUST_HIP_DEBUG_SYNC_FLAG),
+    "after determining tmp storage "
+    "requirements for inclusive_scan");
 
-            // Allocate temporary storage.
+  // Allocate temporary storage.
 
-            auto tmp
-                = uninitialized_allocate_unique_n<std::uint8_t>(device_alloc, tmp_size);
+  auto tmp = uninitialized_allocate_unique_n<std::uint8_t>(device_alloc, tmp_size);
 
-            // The array was dynamically allocated, so we assume that it's suitably
-            // aligned for any type of data. `malloc`/`hipMalloc`/`new`/`std::allocator`
-            // make this guarantee.
-            void* const tmp_ptr = raw_pointer_cast(tmp.get());
+  // The array was dynamically allocated, so we assume that it's suitably
+  // aligned for any type of data. `malloc`/`hipMalloc`/`new`/`std::allocator`
+  // make this guarantee.
+  void* const tmp_ptr = raw_pointer_cast(tmp.get());
 
-            // Set up stream with dependencies.
+  // Set up stream with dependencies.
 
-            hipStream_t user_raw_stream = thrust::hip_rocprim::stream(policy);
+  hipStream_t user_raw_stream = thrust::hip_rocprim::stream(policy);
 
-            if(thrust::hip_rocprim::default_stream() != user_raw_stream)
-            {
-                ev = make_dependent_event(std::tuple_cat(
-                    std::make_tuple(std::move(tmp), unique_stream(nonowning, user_raw_stream)),
-                    extract_dependencies(std::move(thrust::detail::derived_cast(policy)))));
-            }
-            else
-            {
-                ev = make_dependent_event(std::tuple_cat(
-                    std::make_tuple(std::move(tmp)),
-                    extract_dependencies(std::move(thrust::detail::derived_cast(policy)))));
-            }
+  if (thrust::hip_rocprim::default_stream() != user_raw_stream)
+  {
+    ev = make_dependent_event(std::tuple_cat(std::make_tuple(std::move(tmp), unique_stream(nonowning, user_raw_stream)),
+                                             extract_dependencies(std::move(thrust::detail::derived_cast(policy)))));
+  }
+  else
+  {
+    ev = make_dependent_event(std::tuple_cat(
+      std::make_tuple(std::move(tmp)), extract_dependencies(std::move(thrust::detail::derived_cast(policy)))));
+  }
 
-            // Run reduction.
-            thrust::hip_rocprim::throw_on_error(
-                thrust::hip_rocprim::__scan::invoke_inclusive_scan(policy,
-                                                                   tmp_ptr,
-                                                                   tmp_size,
-                                                                   first,
-                                                                   out,
-                                                                   n,
-                                                                   op,
-                                                                   user_raw_stream,
-                                                                   THRUST_HIP_DEBUG_SYNC_FLAG),
-                "after dispatching inclusive_scan kernel");
+  // Run reduction.
+  thrust::hip_rocprim::throw_on_error(
+    thrust::hip_rocprim::__scan::invoke_inclusive_scan(
+      policy, tmp_ptr, tmp_size, first, out, n, op, user_raw_stream, THRUST_HIP_DEBUG_SYNC_FLAG),
+    "after dispatching inclusive_scan kernel");
 
-            return ev;
-        }
-
-    }
+  return ev;
 }
-} // namespace system::cuda::detail
+
+template <typename DerivedPolicy,
+          typename ForwardIt,
+          typename Size,
+          typename OutputIt,
+          typename InitialValueType,
+          typename BinaryOp>
+unique_eager_event async_inclusive_scan_n(
+  execution_policy<DerivedPolicy>& policy, ForwardIt first, Size n, OutputIt out, InitialValueType init, BinaryOp op)
+{
+  auto const device_alloc = get_async_device_allocator(policy);
+
+  unique_eager_event ev;
+  // Determine temporary device storage requirements.
+
+  size_t tmp_size = 0;
+  thrust::hip_rocprim::throw_on_error(
+    thrust::hip_rocprim::__scan::invoke_inclusive_scan(
+      policy,
+      nullptr,
+      tmp_size,
+      first,
+      out,
+      n,
+      init,
+      op,
+      0, // Null stream, just for sizing.
+      THRUST_HIP_DEBUG_SYNC_FLAG),
+    "after determining tmp storage "
+    "requirements for inclusive_scan");
+
+  // Allocate temporary storage.
+
+  auto tmp = uninitialized_allocate_unique_n<std::uint8_t>(device_alloc, tmp_size);
+
+  // The array was dynamically allocated, so we assume that it's suitably
+  // aligned for any type of data. `malloc`/`hipMalloc`/`new`/`std::allocator`
+  // make this guarantee.
+  void* const tmp_ptr = raw_pointer_cast(tmp.get());
+
+  // Set up stream with dependencies.
+
+  hipStream_t user_raw_stream = thrust::hip_rocprim::stream(policy);
+
+  if (thrust::hip_rocprim::default_stream() != user_raw_stream)
+  {
+    ev = make_dependent_event(std::tuple_cat(std::make_tuple(std::move(tmp), unique_stream(nonowning, user_raw_stream)),
+                                             extract_dependencies(std::move(thrust::detail::derived_cast(policy)))));
+  }
+  else
+  {
+    ev = make_dependent_event(std::tuple_cat(
+      std::make_tuple(std::move(tmp)), extract_dependencies(std::move(thrust::detail::derived_cast(policy)))));
+  }
+
+  // Run reduction.
+  thrust::hip_rocprim::throw_on_error(
+    thrust::hip_rocprim::__scan::invoke_inclusive_scan(
+      policy, tmp_ptr, tmp_size, first, out, n, init, op, user_raw_stream, THRUST_HIP_DEBUG_SYNC_FLAG),
+    "after dispatching inclusive_scan kernel");
+
+  return ev;
+}
+
+} // namespace detail
+} // namespace hip
+} // namespace system
 
 namespace hip_rocprim
 {
 
 // ADL entry point.
-template <typename DerivedPolicy,
-          typename ForwardIt,
-          typename Sentinel,
-          typename OutputIt,
-          typename BinaryOp>
-auto async_inclusive_scan(execution_policy<DerivedPolicy>& policy,
-                          ForwardIt                        first,
-                          Sentinel&&                       last,
-                          OutputIt&&                       out,
-                          BinaryOp&&                       op)
-    THRUST_RETURNS(thrust::system::hip::detail::async_inclusive_scan_n(
-        policy, first, distance(first, THRUST_FWD(last)), THRUST_FWD(out), THRUST_FWD(op)))
+template <typename DerivedPolicy, typename ForwardIt, typename Sentinel, typename OutputIt, typename BinaryOp>
+auto async_inclusive_scan(
+  execution_policy<DerivedPolicy>& policy, ForwardIt first, Sentinel&& last, OutputIt&& out, BinaryOp&& op)
+  THRUST_RETURNS(thrust::system::hip::detail::async_inclusive_scan_n(
+    policy, first, distance(first, THRUST_FWD(last)), THRUST_FWD(out), THRUST_FWD(op)))
 
-} // hip_rocprim
+  // ADL entry point.
+  template <typename DerivedPolicy,
+            typename ForwardIt,
+            typename Sentinel,
+            typename OutputIt,
+            typename InitialValueType,
+            typename BinaryOp>
+  auto async_inclusive_scan(
+    execution_policy<DerivedPolicy>& policy,
+    ForwardIt first,
+    Sentinel&& last,
+    OutputIt&& out,
+    InitialValueType&& init,
+    BinaryOp&& op)
+    THRUST_RETURNS(thrust::system::hip::detail::async_inclusive_scan_n(
+      policy, first, distance(first, THRUST_FWD(last)), THRUST_FWD(out), THRUST_FWD(init), THRUST_FWD(op)))
+
+} // namespace hip_rocprim
 
 THRUST_NAMESPACE_END
 

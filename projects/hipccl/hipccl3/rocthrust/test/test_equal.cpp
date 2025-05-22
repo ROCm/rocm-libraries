@@ -28,141 +28,123 @@ TESTS_DEFINE(EqualsPrimitiveTests, NumericalTestsParams);
 
 TYPED_TEST(EqualTests, TestEqualSimple)
 {
-    using Vector = typename TestFixture::input_type;
-    using Policy = typename TestFixture::execution_policy;
-    using T      = typename Vector::value_type;
+  using Vector = typename TestFixture::input_type;
+  using Policy = typename TestFixture::execution_policy;
+  using T      = typename Vector::value_type;
 
-    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    Vector v1(5);
-    Vector v2(5);
-    v1[0] = T(5);
-    v1[1] = T(2);
-    v1[2] = T(0);
-    v1[3] = T(0);
-    v1[4] = T(0);
-    v2[0] = T(5);
-    v2[1] = T(2);
-    v2[2] = T(0);
-    v2[3] = T(6);
-    v2[4] = T(1);
+  Vector v1(5);
+  Vector v2(5);
+  v1[0] = T(5);
+  v1[1] = T(2);
+  v1[2] = T(0);
+  v1[3] = T(0);
+  v1[4] = T(0);
+  v2[0] = T(5);
+  v2[1] = T(2);
+  v2[2] = T(0);
+  v2[3] = T(6);
+  v2[4] = T(1);
 
-    ASSERT_EQ(thrust::equal(Policy{}, v1.begin(), v1.end(), v1.begin()), true);
-    ASSERT_EQ(thrust::equal(Policy{}, v1.begin(), v1.end(), v2.begin()), false);
-    ASSERT_EQ(thrust::equal(Policy{}, v2.begin(), v2.end(), v2.begin()), true);
+  ASSERT_EQ(thrust::equal(Policy{}, v1.begin(), v1.end(), v1.begin()), true);
+  ASSERT_EQ(thrust::equal(Policy{}, v1.begin(), v1.end(), v2.begin()), false);
+  ASSERT_EQ(thrust::equal(Policy{}, v2.begin(), v2.end(), v2.begin()), true);
 
-    ASSERT_EQ(thrust::equal(Policy{}, v1.begin(), v1.begin() + 0, v1.begin()), true);
-    ASSERT_EQ(thrust::equal(Policy{}, v1.begin(), v1.begin() + 1, v1.begin()), true);
-    ASSERT_EQ(thrust::equal(Policy{}, v1.begin(), v1.begin() + 3, v2.begin()), true);
-    ASSERT_EQ(thrust::equal(Policy{}, v1.begin(), v1.begin() + 4, v2.begin()), false);
+  ASSERT_EQ(thrust::equal(Policy{}, v1.begin(), v1.begin() + 0, v1.begin()), true);
+  ASSERT_EQ(thrust::equal(Policy{}, v1.begin(), v1.begin() + 1, v1.begin()), true);
+  ASSERT_EQ(thrust::equal(Policy{}, v1.begin(), v1.begin() + 3, v2.begin()), true);
+  ASSERT_EQ(thrust::equal(Policy{}, v1.begin(), v1.begin() + 4, v2.begin()), false);
 
-    ASSERT_EQ(thrust::equal(Policy{}, v1.begin(), v1.end(), v2.begin(), thrust::less_equal<T>()), true);
-    ASSERT_EQ(thrust::equal(Policy{}, v1.begin(), v1.end(), v2.begin(), thrust::greater<T>()), false);
+  ASSERT_EQ(thrust::equal(Policy{}, v1.begin(), v1.end(), v2.begin(), thrust::less_equal<T>()), true);
+  ASSERT_EQ(thrust::equal(Policy{}, v1.begin(), v1.end(), v2.begin(), thrust::greater<T>()), false);
 }
 
 TYPED_TEST(EqualsPrimitiveTests, TestEqual)
 {
-    using T = typename TestFixture::input_type;
+  using T = typename TestFixture::input_type;
 
-    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    for(auto size : get_sizes())
+  for (auto size : get_sizes())
+  {
+    SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+    for (auto seed : get_seeds())
     {
-        SCOPED_TRACE(testing::Message() << "with size= " << size);
+      SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
-        for(auto seed : get_seeds())
-        {
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+      thrust::host_vector<T> h_data1 =
+        get_random_data<T>(size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
+      thrust::host_vector<T> h_data2 = get_random_data<T>(
+        size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed + seed_value_addition);
 
-            thrust::host_vector<T> h_data1 = get_random_data<T>(
-                size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
-            thrust::host_vector<T> h_data2 = get_random_data<T>(
-                size, get_default_limits<T>::min(),
-                get_default_limits<T>::max(),
-                seed + seed_value_addition
-            );
+      thrust::device_vector<T> d_data1 = h_data1;
+      thrust::device_vector<T> d_data2 = h_data2;
 
-            thrust::device_vector<T> d_data1 = h_data1;
-            thrust::device_vector<T> d_data2 = h_data2;
+      // empty ranges
+      ASSERT_EQ(thrust::equal(h_data1.begin(), h_data1.begin(), h_data1.begin()), true);
+      ASSERT_EQ(thrust::equal(d_data1.begin(), d_data1.begin(), d_data1.begin()), true);
 
-            //empty ranges
-            ASSERT_EQ(thrust::equal(h_data1.begin(), h_data1.begin(), h_data1.begin()), true);
-            ASSERT_EQ(thrust::equal(d_data1.begin(), d_data1.begin(), d_data1.begin()), true);
+      // symmetric cases
+      ASSERT_EQ(thrust::equal(h_data1.begin(), h_data1.end(), h_data1.begin()), true);
+      ASSERT_EQ(thrust::equal(d_data1.begin(), d_data1.end(), d_data1.begin()), true);
 
-            //symmetric cases
-            ASSERT_EQ(thrust::equal(h_data1.begin(), h_data1.end(), h_data1.begin()), true);
-            ASSERT_EQ(thrust::equal(d_data1.begin(), d_data1.end(), d_data1.begin()), true);
+      if (size > 0)
+      {
+        h_data1[0] = 0;
+        h_data2[0] = 1;
+        d_data1[0] = 0;
+        d_data2[0] = 1;
 
-            if(size > 0)
-            {
-                h_data1[0] = 0;
-                h_data2[0] = 1;
-                d_data1[0] = 0;
-                d_data2[0] = 1;
+        // different vectors
+        ASSERT_EQ(thrust::equal(h_data1.begin(), h_data1.end(), h_data2.begin()), false);
+        ASSERT_EQ(thrust::equal(d_data1.begin(), d_data1.end(), d_data2.begin()), false);
 
-                //different vectors
-                ASSERT_EQ(thrust::equal(h_data1.begin(), h_data1.end(), h_data2.begin()), false);
-                ASSERT_EQ(thrust::equal(d_data1.begin(), d_data1.end(), d_data2.begin()), false);
-
-                //different predicates
-                ASSERT_EQ(
-                    thrust::equal(
-                        h_data1.begin(), h_data1.begin() + 1, h_data2.begin(), thrust::less<T>()),
-                    true);
-                ASSERT_EQ(
-                    thrust::equal(
-                        d_data1.begin(), d_data1.begin() + 1, d_data2.begin(), thrust::less<T>()),
-                    true);
-                ASSERT_EQ(thrust::equal(h_data1.begin(),
-                                        h_data1.begin() + 1,
-                                        h_data2.begin(),
-                                        thrust::greater<T>()),
-                          false);
-                ASSERT_EQ(thrust::equal(d_data1.begin(),
-                                        d_data1.begin() + 1,
-                                        d_data2.begin(),
-                                        thrust::greater<T>()),
-                          false);
-            }
-        }
+        // different predicates
+        ASSERT_EQ(thrust::equal(h_data1.begin(), h_data1.begin() + 1, h_data2.begin(), thrust::less<T>()), true);
+        ASSERT_EQ(thrust::equal(d_data1.begin(), d_data1.begin() + 1, d_data2.begin(), thrust::less<T>()), true);
+        ASSERT_EQ(thrust::equal(h_data1.begin(), h_data1.begin() + 1, h_data2.begin(), thrust::greater<T>()), false);
+        ASSERT_EQ(thrust::equal(d_data1.begin(), d_data1.begin() + 1, d_data2.begin(), thrust::greater<T>()), false);
+      }
     }
+  }
 }
 
 template <typename InputIterator1, typename InputIterator2>
 bool equal(my_system& system, InputIterator1, InputIterator1, InputIterator2)
 {
-    system.validate_dispatch();
-    return false;
+  system.validate_dispatch();
+  return false;
 }
 
 TEST(EqualTests, TestEqualDispatchExplicit)
 {
-    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    thrust::device_vector<int> vec(1);
+  thrust::device_vector<int> vec(1);
 
-    my_system sys(0);
-    thrust::equal(sys, vec.begin(), vec.end(), vec.begin());
+  my_system sys(0);
+  thrust::equal(sys, vec.begin(), vec.end(), vec.begin());
 
-    ASSERT_EQ(true, sys.is_valid());
+  ASSERT_EQ(true, sys.is_valid());
 }
 
 template <typename InputIterator1, typename InputIterator2>
 bool equal(my_tag, InputIterator1 first, InputIterator1, InputIterator2)
 {
-    *first = 13;
-    return false;
+  *first = 13;
+  return false;
 }
 
 TEST(EqualTests, TestEqualDispatchImplicit)
 {
-    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
-    
-    thrust::device_vector<int> vec(1);
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    thrust::equal(thrust::retag<my_tag>(vec.begin()),
-                  thrust::retag<my_tag>(vec.end()),
-                  thrust::retag<my_tag>(vec.begin()));
+  thrust::device_vector<int> vec(1);
 
-    ASSERT_EQ(13, vec.front());
+  thrust::equal(
+    thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.end()), thrust::retag<my_tag>(vec.begin()));
+
+  ASSERT_EQ(13, vec.front());
 }

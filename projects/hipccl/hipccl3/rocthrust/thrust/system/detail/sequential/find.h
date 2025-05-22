@@ -14,14 +14,14 @@
  *  limitations under the License.
  */
 
-
 /*! \file find.h
- *  \brief Sequential implementation of find_if. 
+ *  \brief Sequential implementation of find_if.
  */
 
 #pragma once
 
 #include <thrust/detail/config.h>
+
 #include <thrust/detail/function.h>
 #include <thrust/system/detail/sequential/execution_policy.h>
 
@@ -33,27 +33,20 @@ namespace detail
 namespace sequential
 {
 
-
 THRUST_EXEC_CHECK_DISABLE
-template<typename DerivedPolicy,
-         typename InputIterator,
-         typename Predicate>
-THRUST_HOST_DEVICE
-InputIterator find_if(execution_policy<DerivedPolicy> &,
-                      InputIterator first,
-                      InputIterator last,
-                      Predicate pred)
+template <typename DerivedPolicy, typename InputIterator, typename Predicate>
+THRUST_HOST_DEVICE InputIterator
+find_if(execution_policy<DerivedPolicy>&, InputIterator first, InputIterator last, Predicate pred)
 {
   // wrap pred
-  thrust::detail::wrapped_function<
-    Predicate,
-    bool
-  > wrapped_pred(pred);
+  thrust::detail::wrapped_function<Predicate, bool> wrapped_pred(pred);
 
-  while(first != last)
+  while (first != last)
   {
     if (wrapped_pred(*first))
+    {
       return first;
+    }
 
     ++first;
   }
@@ -62,9 +55,7 @@ InputIterator find_if(execution_policy<DerivedPolicy> &,
   return first;
 }
 
-
 } // end namespace sequential
 } // end namespace detail
 } // end namespace system
 THRUST_NAMESPACE_END
-

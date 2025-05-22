@@ -20,4 +20,3 @@
 
 // this system inherits get_value
 #include <thrust/system/detail/sequential/get_value.h>
-

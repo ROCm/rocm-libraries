@@ -30,60 +30,48 @@
 #include <thrust/detail/config.h>
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
-#include <thrust/system/hip/detail/execution_policy.h>
+#  include <thrust/system/hip/detail/execution_policy.h>
 
 THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
 {
-    template <class Derived, class ItemsIt, class ResultIt>
-    ResultIt THRUST_HOST_DEVICE
-    reverse_copy(execution_policy<Derived>& policy,
-                 ItemsIt                    first,
-                 ItemsIt                    last,
-                 ResultIt                   result);
+template <class Derived, class ItemsIt, class ResultIt>
+ResultIt THRUST_HOST_DEVICE
+reverse_copy(execution_policy<Derived>& policy, ItemsIt first, ItemsIt last, ResultIt result);
 
-    template <class Derived, class ItemsIt>
-    void THRUST_HOST_DEVICE
-    reverse(execution_policy<Derived>& policy,
-            ItemsIt                    first,
-            ItemsIt                    last);
+template <class Derived, class ItemsIt>
+void THRUST_HOST_DEVICE reverse(execution_policy<Derived>& policy, ItemsIt first, ItemsIt last);
 } // namespace hip_rocprim
 THRUST_NAMESPACE_END
 
-#include <thrust/advance.h>
-#include <thrust/distance.h>
-#include <thrust/iterator/reverse_iterator.h>
-#include <thrust/system/hip/detail/copy.h>
-#include <thrust/system/hip/detail/swap_ranges.h>
+#  include <thrust/advance.h>
+#  include <thrust/distance.h>
+#  include <thrust/iterator/reverse_iterator.h>
+#  include <thrust/system/hip/detail/copy.h>
+#  include <thrust/system/hip/detail/swap_ranges.h>
 
 THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
 {
-    template <class Derived, class ItemsIt, class ResultIt>
-    ResultIt THRUST_HIP_FUNCTION
-    reverse_copy(execution_policy<Derived>& policy,
-                 ItemsIt                    first,
-                 ItemsIt                    last,
-                 ResultIt                   result)
-    {
-        return hip_rocprim::copy(
-            policy, thrust::make_reverse_iterator(last), thrust::make_reverse_iterator(first), result
-        );
-    }
+template <class Derived, class ItemsIt, class ResultIt>
+ResultIt THRUST_HIP_FUNCTION
+reverse_copy(execution_policy<Derived>& policy, ItemsIt first, ItemsIt last, ResultIt result)
+{
+  return hip_rocprim::copy(policy, thrust::make_reverse_iterator(last), thrust::make_reverse_iterator(first), result);
+}
 
-    template <class Derived, class ItemsIt>
-    void THRUST_HIP_FUNCTION
-    reverse(execution_policy<Derived>& policy, ItemsIt first, ItemsIt last)
-    {
-        using difference_type = typename thrust::iterator_difference<ItemsIt>::type;
+template <class Derived, class ItemsIt>
+void THRUST_HIP_FUNCTION reverse(execution_policy<Derived>& policy, ItemsIt first, ItemsIt last)
+{
+  using difference_type = typename thrust::iterator_difference<ItemsIt>::type;
 
-        // find the midpoint of [first,last)
-        difference_type N = thrust::distance(first, last);
-        ItemsIt         mid(first);
-        thrust::advance(mid, N / 2);
+  // find the midpoint of [first,last)
+  difference_type N = thrust::distance(first, last);
+  ItemsIt mid(first);
+  thrust::advance(mid, N / 2);
 
-        hip_rocprim::swap_ranges(policy, first, mid, thrust::make_reverse_iterator(last));
-    }
+  hip_rocprim::swap_ranges(policy, first, mid, thrust::make_reverse_iterator(last));
+}
 } // namespace hip_rocprim
 THRUST_NAMESPACE_END
 #endif

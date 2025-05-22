@@ -30,206 +30,212 @@
 #include <thrust/detail/config.h>
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
-#include <thrust/detail/temporary_array.h>
-#include <thrust/binary_search.h>
-#include <thrust/distance.h>
-#include <thrust/system/hip/detail/par_to_seq.h>
-#include <thrust/system/hip/execution_policy.h>
+#  include <rocprim/rocprim.hpp>
 
-#include <rocprim/rocprim.hpp>
+#  include <thrust/binary_search.h>
+#  include <thrust/detail/temporary_array.h>
+#  include <thrust/distance.h>
+#  include <thrust/system/hip/detail/par_to_seq.h>
+#  include <thrust/system/hip/execution_policy.h>
 
-#include <cstdint>
+#  include <cstdint>
 
 THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
 {
 namespace __binary_search
 {
-    template <typename Derived, typename HaystackIt, typename NeedlesIt, typename OutputIt, typename CompareOp>
-    THRUST_HIP_RUNTIME_FUNCTION OutputIt
-    lower_bound(execution_policy<Derived>& policy,
-                HaystackIt                 haystack_begin,
-                HaystackIt                 haystack_end,
-                NeedlesIt                  needles_begin,
-                NeedlesIt                  needles_end,
-                OutputIt                   result,
-                CompareOp                  compare_op)
-    {
-        using size_type = typename iterator_traits<NeedlesIt>::difference_type;
+template <typename Derived, typename HaystackIt, typename NeedlesIt, typename OutputIt, typename CompareOp>
+THRUST_HIP_RUNTIME_FUNCTION OutputIt lower_bound(
+  execution_policy<Derived>& policy,
+  HaystackIt haystack_begin,
+  HaystackIt haystack_end,
+  NeedlesIt needles_begin,
+  NeedlesIt needles_end,
+  OutputIt result,
+  CompareOp compare_op)
+{
+  using size_type = typename iterator_traits<NeedlesIt>::difference_type;
 
-        const size_type needles_size  = thrust::distance(needles_begin, needles_end);
-        const size_type haystack_size = thrust::distance(haystack_begin, haystack_end);
+  const size_type needles_size  = thrust::distance(needles_begin, needles_end);
+  const size_type haystack_size = thrust::distance(haystack_begin, haystack_end);
 
-        if(needles_size == 0)
-            return result;
+  if (needles_size == 0)
+  {
+    return result;
+  }
 
-        size_t      storage_size = 0;
-        hipStream_t stream       = hip_rocprim::stream(policy);
-        bool        debug_sync   = THRUST_HIP_DEBUG_SYNC_FLAG;
+  size_t storage_size = 0;
+  hipStream_t stream  = hip_rocprim::stream(policy);
+  bool debug_sync     = THRUST_HIP_DEBUG_SYNC_FLAG;
 
-        thrust::detail::wrapped_function<CompareOp, bool> wrapped_op(compare_op);
+  thrust::detail::wrapped_function<CompareOp, bool> wrapped_op(compare_op);
 
-        // Determine temporary device storage requirements.
-        hip_rocprim::throw_on_error(rocprim::lower_bound(nullptr,
-                                                         storage_size,
-                                                         haystack_begin,
-                                                         needles_begin,
-                                                         result,
-                                                         haystack_size,
-                                                         needles_size,
-                                                         wrapped_op,
-                                                         stream,
-                                                         debug_sync),
-                                    "lower_bound: failed on 1st call");
+  // Determine temporary device storage requirements.
+  hip_rocprim::throw_on_error(
+    rocprim::lower_bound(
+      nullptr,
+      storage_size,
+      haystack_begin,
+      needles_begin,
+      result,
+      haystack_size,
+      needles_size,
+      wrapped_op,
+      stream,
+      debug_sync),
+    "lower_bound: failed on 1st call");
 
-        // Allocate temporary storage.
-        thrust::detail::temporary_array<std::uint8_t, Derived>
-            tmp(policy, storage_size);
-        void *ptr = static_cast<void*>(tmp.data().get());
+  // Allocate temporary storage.
+  thrust::detail::temporary_array<std::uint8_t, Derived> tmp(policy, storage_size);
+  void* ptr = static_cast<void*>(tmp.data().get());
 
-        hip_rocprim::throw_on_error(rocprim::lower_bound(ptr,
-                                                         storage_size,
-                                                         haystack_begin,
-                                                         needles_begin,
-                                                         result,
-                                                         haystack_size,
-                                                         needles_size,
-                                                         wrapped_op,
-                                                         stream,
-                                                         debug_sync),
-                                    "lower_bound: failed on 2nt call");
+  hip_rocprim::throw_on_error(
+    rocprim::lower_bound(
+      ptr,
+      storage_size,
+      haystack_begin,
+      needles_begin,
+      result,
+      haystack_size,
+      needles_size,
+      wrapped_op,
+      stream,
+      debug_sync),
+    "lower_bound: failed on 2nt call");
 
-        hip_rocprim::throw_on_error(
-            hip_rocprim::synchronize_optional(policy),
-            "lower_bound: failed to synchronize"
-        );
+  hip_rocprim::throw_on_error(hip_rocprim::synchronize_optional(policy), "lower_bound: failed to synchronize");
 
-        return result + needles_size;
-    }
+  return result + needles_size;
+}
 
-    template <typename Derived, typename HaystackIt, typename NeedlesIt, typename OutputIt, typename CompareOp>
-    THRUST_HIP_RUNTIME_FUNCTION OutputIt
-    upper_bound(execution_policy<Derived>& policy,
-                HaystackIt                 haystack_begin,
-                HaystackIt                 haystack_end,
-                NeedlesIt                  needles_begin,
-                NeedlesIt                  needles_end,
-                OutputIt                   result,
-                CompareOp                  compare_op)
-    {
-        using size_type = typename iterator_traits<NeedlesIt>::difference_type;
+template <typename Derived, typename HaystackIt, typename NeedlesIt, typename OutputIt, typename CompareOp>
+THRUST_HIP_RUNTIME_FUNCTION OutputIt upper_bound(
+  execution_policy<Derived>& policy,
+  HaystackIt haystack_begin,
+  HaystackIt haystack_end,
+  NeedlesIt needles_begin,
+  NeedlesIt needles_end,
+  OutputIt result,
+  CompareOp compare_op)
+{
+  using size_type = typename iterator_traits<NeedlesIt>::difference_type;
 
-        const size_type needles_size  = thrust::distance(needles_begin, needles_end);
-        const size_type haystack_size = thrust::distance(haystack_begin, haystack_end);
+  const size_type needles_size  = thrust::distance(needles_begin, needles_end);
+  const size_type haystack_size = thrust::distance(haystack_begin, haystack_end);
 
-        if(needles_size == 0)
-            return result;
+  if (needles_size == 0)
+  {
+    return result;
+  }
 
-        size_t      storage_size = 0;
-        hipStream_t stream       = hip_rocprim::stream(policy);
-        bool        debug_sync   = THRUST_HIP_DEBUG_SYNC_FLAG;
+  size_t storage_size = 0;
+  hipStream_t stream  = hip_rocprim::stream(policy);
+  bool debug_sync     = THRUST_HIP_DEBUG_SYNC_FLAG;
 
-        thrust::detail::wrapped_function<CompareOp, bool> wrapped_op(compare_op);
+  thrust::detail::wrapped_function<CompareOp, bool> wrapped_op(compare_op);
 
-        // Determine temporary device storage requirements.
-        hip_rocprim::throw_on_error(rocprim::upper_bound(nullptr,
-                                                         storage_size,
-                                                         haystack_begin,
-                                                         needles_begin,
-                                                         result,
-                                                         haystack_size,
-                                                         needles_size,
-                                                         wrapped_op,
-                                                         stream,
-                                                         debug_sync),
-                                    "upper_bound: failed on 1st call");
+  // Determine temporary device storage requirements.
+  hip_rocprim::throw_on_error(
+    rocprim::upper_bound(
+      nullptr,
+      storage_size,
+      haystack_begin,
+      needles_begin,
+      result,
+      haystack_size,
+      needles_size,
+      wrapped_op,
+      stream,
+      debug_sync),
+    "upper_bound: failed on 1st call");
 
-        // Allocate temporary storage.
-        thrust::detail::temporary_array<std::uint8_t, Derived>
-            tmp(policy, storage_size);
-        void *ptr = static_cast<void*>(tmp.data().get());
+  // Allocate temporary storage.
+  thrust::detail::temporary_array<std::uint8_t, Derived> tmp(policy, storage_size);
+  void* ptr = static_cast<void*>(tmp.data().get());
 
-        hip_rocprim::throw_on_error(rocprim::upper_bound(ptr,
-                                                         storage_size,
-                                                         haystack_begin,
-                                                         needles_begin,
-                                                         result,
-                                                         haystack_size,
-                                                         needles_size,
-                                                         wrapped_op,
-                                                         stream,
-                                                         debug_sync),
-                                    "upper_bound: failed on 2nt call");
+  hip_rocprim::throw_on_error(
+    rocprim::upper_bound(
+      ptr,
+      storage_size,
+      haystack_begin,
+      needles_begin,
+      result,
+      haystack_size,
+      needles_size,
+      wrapped_op,
+      stream,
+      debug_sync),
+    "upper_bound: failed on 2nt call");
 
-        hip_rocprim::throw_on_error(
-            hip_rocprim::synchronize_optional(policy),
-            "upper_bound: failed to synchronize"
-        );
+  hip_rocprim::throw_on_error(hip_rocprim::synchronize_optional(policy), "upper_bound: failed to synchronize");
 
-        return result + needles_size;
-    }
+  return result + needles_size;
+}
 
-    template <typename Derived, typename HaystackIt, typename NeedlesIt, typename OutputIt, typename CompareOp>
-    THRUST_HIP_RUNTIME_FUNCTION OutputIt
-    binary_search(execution_policy<Derived>& policy,
-                  HaystackIt                 haystack_begin,
-                  HaystackIt                 haystack_end,
-                  NeedlesIt                  needles_begin,
-                  NeedlesIt                  needles_end,
-                  OutputIt                   result,
-                  CompareOp                  compare_op)
-    {
-        using size_type = typename iterator_traits<NeedlesIt>::difference_type;
+template <typename Derived, typename HaystackIt, typename NeedlesIt, typename OutputIt, typename CompareOp>
+THRUST_HIP_RUNTIME_FUNCTION OutputIt binary_search(
+  execution_policy<Derived>& policy,
+  HaystackIt haystack_begin,
+  HaystackIt haystack_end,
+  NeedlesIt needles_begin,
+  NeedlesIt needles_end,
+  OutputIt result,
+  CompareOp compare_op)
+{
+  using size_type = typename iterator_traits<NeedlesIt>::difference_type;
 
-        const size_type needles_size  = thrust::distance(needles_begin, needles_end);
-        const size_type haystack_size = thrust::distance(haystack_begin, haystack_end);
+  const size_type needles_size  = thrust::distance(needles_begin, needles_end);
+  const size_type haystack_size = thrust::distance(haystack_begin, haystack_end);
 
-        if(needles_size == 0)
-            return result;
+  if (needles_size == 0)
+  {
+    return result;
+  }
 
-        size_t      storage_size = 0;
-        hipStream_t stream       = hip_rocprim::stream(policy);
-        bool        debug_sync   = THRUST_HIP_DEBUG_SYNC_FLAG;
+  size_t storage_size = 0;
+  hipStream_t stream  = hip_rocprim::stream(policy);
+  bool debug_sync     = THRUST_HIP_DEBUG_SYNC_FLAG;
 
-        thrust::detail::wrapped_function<CompareOp, bool> wrapped_op(compare_op);
+  thrust::detail::wrapped_function<CompareOp, bool> wrapped_op(compare_op);
 
-        // Determine temporary device storage requirements.
-        hip_rocprim::throw_on_error(rocprim::binary_search(nullptr,
-                                                           storage_size,
-                                                           haystack_begin,
-                                                           needles_begin,
-                                                           result,
-                                                           haystack_size,
-                                                           needles_size,
-                                                           wrapped_op,
-                                                           stream,
-                                                           debug_sync),
-                                    "binary_search: failed on 1st call");
+  // Determine temporary device storage requirements.
+  hip_rocprim::throw_on_error(
+    rocprim::binary_search(
+      nullptr,
+      storage_size,
+      haystack_begin,
+      needles_begin,
+      result,
+      haystack_size,
+      needles_size,
+      wrapped_op,
+      stream,
+      debug_sync),
+    "binary_search: failed on 1st call");
 
-        // Allocate temporary storage.
-        thrust::detail::temporary_array<std::uint8_t, Derived>
-            tmp(policy, storage_size);
-        void *ptr = static_cast<void*>(tmp.data().get());
+  // Allocate temporary storage.
+  thrust::detail::temporary_array<std::uint8_t, Derived> tmp(policy, storage_size);
+  void* ptr = static_cast<void*>(tmp.data().get());
 
-        hip_rocprim::throw_on_error(rocprim::binary_search(ptr,
-                                                           storage_size,
-                                                           haystack_begin,
-                                                           needles_begin,
-                                                           result,
-                                                           haystack_size,
-                                                           needles_size,
-                                                           wrapped_op,
-                                                           stream,
-                                                           debug_sync),
-                                    "binary_search: failed on 2nt call");
+  hip_rocprim::throw_on_error(
+    rocprim::binary_search(
+      ptr,
+      storage_size,
+      haystack_begin,
+      needles_begin,
+      result,
+      haystack_size,
+      needles_size,
+      wrapped_op,
+      stream,
+      debug_sync),
+    "binary_search: failed on 2nt call");
 
-        hip_rocprim::throw_on_error(
-            hip_rocprim::synchronize_optional(policy),
-            "binary_search: failed to synchronize"
-        );
+  hip_rocprim::throw_on_error(hip_rocprim::synchronize_optional(policy), "binary_search: failed to synchronize");
 
-        return result + needles_size;
-    }
+  return result + needles_size;
+}
 
 } // namespace __binary_search
 
@@ -240,200 +246,177 @@ namespace __binary_search
 // Vector functions
 
 template <class Derived, class HaystackIt, class NeedlesIt, class OutputIt, class CompareOp>
-OutputIt THRUST_HIP_FUNCTION
-lower_bound(execution_policy<Derived>& policy,
-            HaystackIt                 first,
-            HaystackIt                 last,
-            NeedlesIt                  values_first,
-            NeedlesIt                  values_last,
-            OutputIt                   result,
-            CompareOp                  compare_op)
+OutputIt THRUST_HIP_FUNCTION lower_bound(
+  execution_policy<Derived>& policy,
+  HaystackIt first,
+  HaystackIt last,
+  NeedlesIt values_first,
+  NeedlesIt values_last,
+  OutputIt result,
+  CompareOp compare_op)
 {
-    // struct workaround is required for HIP-clang
-    struct workaround
+  // struct workaround is required for HIP-clang
+  struct workaround
+  {
+    THRUST_HOST static OutputIt
+    par(execution_policy<Derived>& policy,
+        HaystackIt first,
+        HaystackIt last,
+        NeedlesIt values_first,
+        NeedlesIt values_last,
+        OutputIt result,
+        CompareOp compare_op)
     {
-        THRUST_HOST static OutputIt par(execution_policy<Derived>& policy,
-                                     HaystackIt                 first,
-                                     HaystackIt                 last,
-                                     NeedlesIt                  values_first,
-                                     NeedlesIt                  values_last,
-                                     OutputIt                   result,
-                                     CompareOp                  compare_op)
-        {
-            return __binary_search::lower_bound(
-                policy, first, last, values_first, values_last, result, compare_op);
-        }
+      return __binary_search::lower_bound(policy, first, last, values_first, values_last, result, compare_op);
+    }
 
-        THRUST_DEVICE static OutputIt seq(execution_policy<Derived>& policy,
-                                       HaystackIt                 first,
-                                       HaystackIt                 last,
-                                       NeedlesIt                  values_first,
-                                       NeedlesIt                  values_last,
-                                       OutputIt                   result,
-                                       CompareOp                  compare_op)
-        {
-            return thrust::lower_bound(cvt_to_seq(derived_cast(policy)),
-                                       first,
-                                       last,
-                                       values_first,
-                                       values_last,
-                                       result,
-                                       compare_op);
-        }
+    THRUST_DEVICE static OutputIt
+    seq(execution_policy<Derived>& policy,
+        HaystackIt first,
+        HaystackIt last,
+        NeedlesIt values_first,
+        NeedlesIt values_last,
+        OutputIt result,
+        CompareOp compare_op)
+    {
+      return thrust::lower_bound(
+        cvt_to_seq(derived_cast(policy)), first, last, values_first, values_last, result, compare_op);
+    }
   };
 
-  #if __THRUST_HAS_HIPRT__
-    return workaround::par(policy, first, last, values_first, values_last, result, compare_op);
-  #else
-    return workaround::seq(policy, first, last, values_first, values_last, result, compare_op);
-  #endif
-
-
-
+#  if __THRUST_HAS_HIPRT__
+  return workaround::par(policy, first, last, values_first, values_last, result, compare_op);
+#  else
+  return workaround::seq(policy, first, last, values_first, values_last, result, compare_op);
+#  endif
 }
 
 template <class Derived, class HaystackIt, class NeedlesIt, class OutputIt>
-OutputIt THRUST_HIP_FUNCTION
-lower_bound(execution_policy<Derived>& policy,
-            HaystackIt                 first,
-            HaystackIt                 last,
-            NeedlesIt                  values_first,
-            NeedlesIt                  values_last,
-            OutputIt                   result)
+OutputIt THRUST_HIP_FUNCTION lower_bound(
+  execution_policy<Derived>& policy,
+  HaystackIt first,
+  HaystackIt last,
+  NeedlesIt values_first,
+  NeedlesIt values_last,
+  OutputIt result)
 {
-    return hip_rocprim::lower_bound(
-        policy, first, last, values_first, values_last, result, rocprim::less<>()
-    );
+  return hip_rocprim::lower_bound(policy, first, last, values_first, values_last, result, rocprim::less<>());
 }
 
 template <class Derived, class HaystackIt, class NeedlesIt, class OutputIt, class CompareOp>
-OutputIt THRUST_HIP_FUNCTION
-upper_bound(execution_policy<Derived>& policy,
-            HaystackIt                 first,
-            HaystackIt                 last,
-            NeedlesIt                  values_first,
-            NeedlesIt                  values_last,
-            OutputIt                   result,
-            CompareOp                  compare_op)
+OutputIt THRUST_HIP_FUNCTION upper_bound(
+  execution_policy<Derived>& policy,
+  HaystackIt first,
+  HaystackIt last,
+  NeedlesIt values_first,
+  NeedlesIt values_last,
+  OutputIt result,
+  CompareOp compare_op)
 {
-    // struct workaround is required for HIP-clang
-    struct workaround
+  // struct workaround is required for HIP-clang
+  struct workaround
+  {
+    THRUST_HOST static OutputIt
+    par(execution_policy<Derived>& policy,
+        HaystackIt first,
+        HaystackIt last,
+        NeedlesIt values_first,
+        NeedlesIt values_last,
+        OutputIt result,
+        CompareOp compare_op)
     {
-        THRUST_HOST static OutputIt par(execution_policy<Derived>& policy,
-                                     HaystackIt                 first,
-                                     HaystackIt                 last,
-                                     NeedlesIt                  values_first,
-                                     NeedlesIt                  values_last,
-                                     OutputIt                   result,
-                                     CompareOp                  compare_op)
-        {
-            return __binary_search::upper_bound(
-                policy, first, last, values_first, values_last, result, compare_op);
-        }
+      return __binary_search::upper_bound(policy, first, last, values_first, values_last, result, compare_op);
+    }
 
-        THRUST_DEVICE static OutputIt seq(execution_policy<Derived>& policy,
-                                       HaystackIt                 first,
-                                       HaystackIt                 last,
-                                       NeedlesIt                  values_first,
-                                       NeedlesIt                  values_last,
-                                       OutputIt                   result,
-                                       CompareOp                  compare_op)
-        {
-            return thrust::upper_bound(cvt_to_seq(derived_cast(policy)),
-                                       first,
-                                       last,
-                                       values_first,
-                                       values_last,
-                                       result,
-                                       compare_op);
-        }
+    THRUST_DEVICE static OutputIt
+    seq(execution_policy<Derived>& policy,
+        HaystackIt first,
+        HaystackIt last,
+        NeedlesIt values_first,
+        NeedlesIt values_last,
+        OutputIt result,
+        CompareOp compare_op)
+    {
+      return thrust::upper_bound(
+        cvt_to_seq(derived_cast(policy)), first, last, values_first, values_last, result, compare_op);
+    }
   };
 
-  #if __THRUST_HAS_HIPRT__
-    return workaround::par(policy, first, last, values_first, values_last, result, compare_op);
-  #else
-    return workaround::seq(policy, first, last, values_first, values_last, result, compare_op);
-  #endif
-
+#  if __THRUST_HAS_HIPRT__
+  return workaround::par(policy, first, last, values_first, values_last, result, compare_op);
+#  else
+  return workaround::seq(policy, first, last, values_first, values_last, result, compare_op);
+#  endif
 }
 
 template <class Derived, class HaystackIt, class NeedlesIt, class OutputIt>
-OutputIt THRUST_HIP_FUNCTION
-upper_bound(execution_policy<Derived>& policy,
-            HaystackIt                 first,
-            HaystackIt                 last,
-            NeedlesIt                  values_first,
-            NeedlesIt                  values_last,
-            OutputIt                   result)
+OutputIt THRUST_HIP_FUNCTION upper_bound(
+  execution_policy<Derived>& policy,
+  HaystackIt first,
+  HaystackIt last,
+  NeedlesIt values_first,
+  NeedlesIt values_last,
+  OutputIt result)
 {
-    return hip_rocprim::upper_bound(
-        policy, first, last, values_first, values_last, result, rocprim::less<>()
-    );
+  return hip_rocprim::upper_bound(policy, first, last, values_first, values_last, result, rocprim::less<>());
 }
 
 template <class Derived, class HaystackIt, class NeedlesIt, class OutputIt, class CompareOp>
-OutputIt THRUST_HIP_FUNCTION
-binary_search(execution_policy<Derived>& policy,
-              HaystackIt                 first,
-              HaystackIt                 last,
-              NeedlesIt                  values_first,
-              NeedlesIt                  values_last,
-              OutputIt                   result,
-              CompareOp                  compare_op)
+OutputIt THRUST_HIP_FUNCTION binary_search(
+  execution_policy<Derived>& policy,
+  HaystackIt first,
+  HaystackIt last,
+  NeedlesIt values_first,
+  NeedlesIt values_last,
+  OutputIt result,
+  CompareOp compare_op)
 {
-    // struct workaround is required for HIP-clang
-    struct workaround
+  // struct workaround is required for HIP-clang
+  struct workaround
+  {
+    THRUST_HOST static OutputIt
+    par(execution_policy<Derived>& policy,
+        HaystackIt first,
+        HaystackIt last,
+        NeedlesIt values_first,
+        NeedlesIt values_last,
+        OutputIt result,
+        CompareOp compare_op)
     {
-        THRUST_HOST static OutputIt par(execution_policy<Derived>& policy,
-                                     HaystackIt                 first,
-                                     HaystackIt                 last,
-                                     NeedlesIt                  values_first,
-                                     NeedlesIt                  values_last,
-                                     OutputIt                   result,
-                                     CompareOp                  compare_op)
-        {
-            return __binary_search::binary_search(
-                policy, first, last, values_first, values_last, result, compare_op);
-        }
+      return __binary_search::binary_search(policy, first, last, values_first, values_last, result, compare_op);
+    }
 
-        THRUST_DEVICE static OutputIt seq(execution_policy<Derived>& policy,
-                                       HaystackIt                 first,
-                                       HaystackIt                 last,
-                                       NeedlesIt                  values_first,
-                                       NeedlesIt                  values_last,
-                                       OutputIt                   result,
-                                       CompareOp                  compare_op)
-        {
-            return thrust::binary_search(cvt_to_seq(derived_cast(policy)),
-                                         first,
-                                         last,
-                                         values_first,
-                                         values_last,
-                                         result,
-                                         compare_op);
-        }
+    THRUST_DEVICE static OutputIt
+    seq(execution_policy<Derived>& policy,
+        HaystackIt first,
+        HaystackIt last,
+        NeedlesIt values_first,
+        NeedlesIt values_last,
+        OutputIt result,
+        CompareOp compare_op)
+    {
+      return thrust::binary_search(
+        cvt_to_seq(derived_cast(policy)), first, last, values_first, values_last, result, compare_op);
+    }
   };
 
-  #if __THRUST_HAS_HIPRT__
-    return workaround::par(policy, first, last, values_first, values_last, result, compare_op);
-  #else
-    return workaround::seq(policy, first, last, values_first, values_last, result, compare_op);
-  #endif
-
+#  if __THRUST_HAS_HIPRT__
+  return workaround::par(policy, first, last, values_first, values_last, result, compare_op);
+#  else
+  return workaround::seq(policy, first, last, values_first, values_last, result, compare_op);
+#  endif
 }
 
 template <class Derived, class HaystackIt, class NeedlesIt, class OutputIt>
-OutputIt THRUST_HIP_FUNCTION
-binary_search(execution_policy<Derived>& policy,
-              HaystackIt                 first,
-              HaystackIt                 last,
-              NeedlesIt                  values_first,
-              NeedlesIt                  values_last,
-              OutputIt                   result)
+OutputIt THRUST_HIP_FUNCTION binary_search(
+  execution_policy<Derived>& policy,
+  HaystackIt first,
+  HaystackIt last,
+  NeedlesIt values_first,
+  NeedlesIt values_last,
+  OutputIt result)
 {
-    return hip_rocprim::binary_search(
-        policy, first, last, values_first, values_last, result, rocprim::less<>()
-    );
+  return hip_rocprim::binary_search(policy, first, last, values_first, values_last, result, rocprim::less<>());
 }
 
 // Scalar functions
@@ -442,258 +425,186 @@ binary_search(execution_policy<Derived>& policy,
 // because HIP support of device-side memory allocation is under development
 // (it is used in generic/binary_search.inl by thrust::detail::temporary_array).
 
-template<typename Derived, typename HaystackIt, typename T, typename CompareOp>
-THRUST_HIP_FUNCTION
-HaystackIt lower_bound(execution_policy<Derived>& policy,
-                       HaystackIt                 first,
-                       HaystackIt                 last,
-                       const T&                   value,
-                       CompareOp                  compare_op)
+template <typename Derived, typename HaystackIt, typename T, typename CompareOp>
+THRUST_HIP_FUNCTION HaystackIt
+lower_bound(execution_policy<Derived>& policy, HaystackIt first, HaystackIt last, const T& value, CompareOp compare_op)
 {
-    using difference_type = typename thrust::iterator_traits<HaystackIt>::difference_type;
-    using values_type = typename thrust::detail::temporary_array<T, Derived>;
-    using results_type = typename thrust::detail::temporary_array<difference_type, Derived>;
+  using difference_type = typename thrust::iterator_traits<HaystackIt>::difference_type;
+  using values_type     = typename thrust::detail::temporary_array<T, Derived>;
+  using results_type    = typename thrust::detail::temporary_array<difference_type, Derived>;
 
-    // struct workaround is required for HIP-clang
-    struct workaround
+  // struct workaround is required for HIP-clang
+  struct workaround
+  {
+    THRUST_HOST static HaystackIt
+    par(execution_policy<Derived>& policy, HaystackIt first, HaystackIt last, const T& value, CompareOp compare_op)
     {
-        THRUST_HOST
-        static HaystackIt par(execution_policy<Derived>& policy,
-                              HaystackIt                 first,
-                              HaystackIt                 last,
-                              const T&                   value,
-                              CompareOp                  compare_op)
-        {
-            values_type  values(policy, 1);
-            results_type result(policy, 1);
+      values_type values(policy, 1);
+      results_type result(policy, 1);
 
-            {
-                using value_in_system_t = typename thrust::iterator_system<const T*>::type;
-                value_in_system_t                                        value_in_system;
-                using thrust::system::detail::generic::select_system;
-                thrust::copy_n(
-                    select_system(
-                        thrust::detail::derived_cast(thrust::detail::strip_const(value_in_system)),
-                        thrust::detail::derived_cast(thrust::detail::strip_const(policy))),
-                    &value,
-                    1,
-                    values.begin());
-            }
+      {
+        using value_in_system_t = typename thrust::iterator_system<const T*>::type;
+        value_in_system_t value_in_system;
+        using thrust::system::detail::generic::select_system;
+        thrust::copy_n(select_system(thrust::detail::derived_cast(thrust::detail::strip_const(value_in_system)),
+                                     thrust::detail::derived_cast(thrust::detail::strip_const(policy))),
+                       &value,
+                       1,
+                       values.begin());
+      }
 
-            __binary_search::lower_bound(
-                policy, first, last, values.begin(), values.end(), result.begin(), compare_op);
+      __binary_search::lower_bound(policy, first, last, values.begin(), values.end(), result.begin(), compare_op);
 
-            difference_type h_result;
-            {
-                using result_out_system_t = typename thrust::iterator_system<difference_type*>::type;
-                result_out_system_t                                          result_out_system;
-                using thrust::system::detail::generic::select_system;
-                thrust::copy_n(
-                    select_system(thrust::detail::derived_cast(thrust::detail::strip_const(policy)),
-                                  thrust::detail::derived_cast(
-                                      thrust::detail::strip_const(result_out_system))),
-                    result.begin(),
-                    1,
-                    &h_result);
-            }
+      difference_type h_result;
+      {
+        using result_out_system_t = typename thrust::iterator_system<difference_type*>::type;
+        result_out_system_t result_out_system;
+        using thrust::system::detail::generic::select_system;
+        thrust::copy_n(select_system(thrust::detail::derived_cast(thrust::detail::strip_const(policy)),
+                                     thrust::detail::derived_cast(thrust::detail::strip_const(result_out_system))),
+                       result.begin(),
+                       1,
+                       &h_result);
+      }
 
-            return first + h_result;
-        }
+      return first + h_result;
+    }
 
-        THRUST_DEVICE
-        static HaystackIt seq(execution_policy<Derived>& policy,
-                            HaystackIt                 first,
-                            HaystackIt                 last,
-                            const T&                   value,
-                            CompareOp                  compare_op)
-        {
-          difference_type result;
-          thrust::lower_bound(cvt_to_seq(derived_cast(policy)),
-                              first,
-                              last,
-                              &value,
-                              &value + 1,
-                              &result,
-                              compare_op);
-          return first + result;
-        }
-    };
+    THRUST_DEVICE static HaystackIt
+    seq(execution_policy<Derived>& policy, HaystackIt first, HaystackIt last, const T& value, CompareOp compare_op)
+    {
+      difference_type result;
+      thrust::lower_bound(cvt_to_seq(derived_cast(policy)), first, last, &value, &value + 1, &result, compare_op);
+      return first + result;
+    }
+  };
 
-    #if __THRUST_HAS_HIPRT__
-      return workaround::par(policy, first, last, value, compare_op);
-    #else
-      return workaround::seq(policy, first, last, value, compare_op);
-    #endif
-
+#  if __THRUST_HAS_HIPRT__
+  return workaround::par(policy, first, last, value, compare_op);
+#  else
+  return workaround::seq(policy, first, last, value, compare_op);
+#  endif
 }
 
-template<typename Derived, typename HaystackIt, typename T, typename CompareOp>
-THRUST_HIP_FUNCTION
-HaystackIt upper_bound(execution_policy<Derived>& policy,
-                       HaystackIt                 first,
-                       HaystackIt                 last,
-                       const T&                   value,
-                       CompareOp                  compare_op)
+template <typename Derived, typename HaystackIt, typename T, typename CompareOp>
+THRUST_HIP_FUNCTION HaystackIt
+upper_bound(execution_policy<Derived>& policy, HaystackIt first, HaystackIt last, const T& value, CompareOp compare_op)
 {
-    using difference_type = typename thrust::iterator_traits<HaystackIt>::difference_type;
-    using values_type = typename thrust::detail::temporary_array<T, Derived>;
-    using results_type = typename thrust::detail::temporary_array<difference_type, Derived>;
+  using difference_type = typename thrust::iterator_traits<HaystackIt>::difference_type;
+  using values_type     = typename thrust::detail::temporary_array<T, Derived>;
+  using results_type    = typename thrust::detail::temporary_array<difference_type, Derived>;
 
-    // struct workaround is required for HIP-clang
-    struct workaround
+  // struct workaround is required for HIP-clang
+  struct workaround
+  {
+    THRUST_HOST static HaystackIt
+    par(execution_policy<Derived>& policy, HaystackIt first, HaystackIt last, const T& value, CompareOp compare_op)
     {
-        THRUST_HOST
-        static HaystackIt par(execution_policy<Derived>& policy,
-                              HaystackIt                 first,
-                              HaystackIt                 last,
-                              const T&                   value,
-                              CompareOp                  compare_op)
-        {
-          values_type values(policy, 1);
-          results_type result(policy, 1);
+      values_type values(policy, 1);
+      results_type result(policy, 1);
 
-          {
-                using value_in_system_t = typename thrust::iterator_system<const T*>::type;
-                value_in_system_t                                        value_in_system;
-                using thrust::system::detail::generic::select_system;
-                thrust::copy_n(
-                    select_system(
-                        thrust::detail::derived_cast(thrust::detail::strip_const(value_in_system)),
-                        thrust::detail::derived_cast(thrust::detail::strip_const(policy))),
-                    &value,
-                    1,
-                    values.begin());
-          }
+      {
+        using value_in_system_t = typename thrust::iterator_system<const T*>::type;
+        value_in_system_t value_in_system;
+        using thrust::system::detail::generic::select_system;
+        thrust::copy_n(select_system(thrust::detail::derived_cast(thrust::detail::strip_const(value_in_system)),
+                                     thrust::detail::derived_cast(thrust::detail::strip_const(policy))),
+                       &value,
+                       1,
+                       values.begin());
+      }
 
-          __binary_search::upper_bound(
-              policy, first, last, values.begin(), values.end(), result.begin(), compare_op
-          );
+      __binary_search::upper_bound(policy, first, last, values.begin(), values.end(), result.begin(), compare_op);
 
-          difference_type h_result;
-          {
-                using result_out_system_t = typename thrust::iterator_system<difference_type*>::type;
-                result_out_system_t                                          result_out_system;
-                using thrust::system::detail::generic::select_system;
-                thrust::copy_n(
-                    select_system(thrust::detail::derived_cast(thrust::detail::strip_const(policy)),
-                                  thrust::detail::derived_cast(
-                                      thrust::detail::strip_const(result_out_system))),
-                    result.begin(),
-                    1,
-                    &h_result);
-          }
+      difference_type h_result;
+      {
+        using result_out_system_t = typename thrust::iterator_system<difference_type*>::type;
+        result_out_system_t result_out_system;
+        using thrust::system::detail::generic::select_system;
+        thrust::copy_n(select_system(thrust::detail::derived_cast(thrust::detail::strip_const(policy)),
+                                     thrust::detail::derived_cast(thrust::detail::strip_const(result_out_system))),
+                       result.begin(),
+                       1,
+                       &h_result);
+      }
 
-          return first + h_result;
-        }
+      return first + h_result;
+    }
 
-        THRUST_DEVICE
-        static HaystackIt seq(execution_policy<Derived>& policy,
-                            HaystackIt                 first,
-                            HaystackIt                 last,
-                            const T&                   value,
-                            CompareOp                  compare_op)
-        {
-          difference_type result;
-          thrust::upper_bound(cvt_to_seq(derived_cast(policy)),
-                              first,
-                              last,
-                              &value,
-                              &value + 1,
-                              &result,
-                              compare_op);
-          return first + result;
-        }
-    };
+    THRUST_DEVICE static HaystackIt
+    seq(execution_policy<Derived>& policy, HaystackIt first, HaystackIt last, const T& value, CompareOp compare_op)
+    {
+      difference_type result;
+      thrust::upper_bound(cvt_to_seq(derived_cast(policy)), first, last, &value, &value + 1, &result, compare_op);
+      return first + result;
+    }
+  };
 
-    #if __THRUST_HAS_HIPRT__
-      return workaround::par(policy, first, last, value, compare_op);
-    #else
-      return workaround::seq(policy, first, last, value, compare_op);
-    #endif
+#  if __THRUST_HAS_HIPRT__
+  return workaround::par(policy, first, last, value, compare_op);
+#  else
+  return workaround::seq(policy, first, last, value, compare_op);
+#  endif
 }
 
-template<typename Derived, typename HaystackIt, typename T, typename CompareOp>
-THRUST_HIP_FUNCTION
-bool binary_search(execution_policy<Derived>& policy,
-                   HaystackIt                 first,
-                   HaystackIt                 last,
-                   const T&                   value,
-                   CompareOp                  compare_op)
+template <typename Derived, typename HaystackIt, typename T, typename CompareOp>
+THRUST_HIP_FUNCTION bool binary_search(
+  execution_policy<Derived>& policy, HaystackIt first, HaystackIt last, const T& value, CompareOp compare_op)
 {
-    using values_type = typename thrust::detail::temporary_array<T, Derived>;
-    using results_type = typename thrust::detail::temporary_array<int, Derived>;
+  using values_type  = typename thrust::detail::temporary_array<T, Derived>;
+  using results_type = typename thrust::detail::temporary_array<int, Derived>;
 
-    // struct workaround is required for HIP-clang
-    struct workaround
+  // struct workaround is required for HIP-clang
+  struct workaround
+  {
+    THRUST_HOST static bool
+    par(execution_policy<Derived>& policy, HaystackIt first, HaystackIt last, const T& value, CompareOp compare_op)
     {
-        THRUST_HOST
-        static bool par(execution_policy<Derived>& policy,
-                              HaystackIt                 first,
-                              HaystackIt                 last,
-                              const T&                   value,
-                              CompareOp                  compare_op)
-        {
-          values_type values(policy, 1);
-          results_type result(policy, 1);
+      values_type values(policy, 1);
+      results_type result(policy, 1);
 
-          {
-                using value_in_system_t = typename thrust::iterator_system<const T*>::type;
-                value_in_system_t                                        value_in_system;
-                using thrust::system::detail::generic::select_system;
-                thrust::copy_n(
-                    select_system(
-                        thrust::detail::derived_cast(thrust::detail::strip_const(value_in_system)),
-                        thrust::detail::derived_cast(thrust::detail::strip_const(policy))),
-                    &value,
-                    1,
-                    values.begin());
-          }
+      {
+        using value_in_system_t = typename thrust::iterator_system<const T*>::type;
+        value_in_system_t value_in_system;
+        using thrust::system::detail::generic::select_system;
+        thrust::copy_n(select_system(thrust::detail::derived_cast(thrust::detail::strip_const(value_in_system)),
+                                     thrust::detail::derived_cast(thrust::detail::strip_const(policy))),
+                       &value,
+                       1,
+                       values.begin());
+      }
 
-          __binary_search::binary_search(
-              policy, first, last, values.begin(), values.end(), result.begin(), compare_op
-          );
+      __binary_search::binary_search(policy, first, last, values.begin(), values.end(), result.begin(), compare_op);
 
-          int h_result;
-          {
-                using result_out_system_t = typename thrust::iterator_system<int*>::type;
-                result_out_system_t                                  result_out_system;
-                using thrust::system::detail::generic::select_system;
-                thrust::copy_n(
-                    select_system(thrust::detail::derived_cast(thrust::detail::strip_const(policy)),
-                                  thrust::detail::derived_cast(
-                                      thrust::detail::strip_const(result_out_system))),
-                    result.begin(),
-                    1,
-                    &h_result);
-          }
+      int h_result;
+      {
+        using result_out_system_t = typename thrust::iterator_system<int*>::type;
+        result_out_system_t result_out_system;
+        using thrust::system::detail::generic::select_system;
+        thrust::copy_n(select_system(thrust::detail::derived_cast(thrust::detail::strip_const(policy)),
+                                     thrust::detail::derived_cast(thrust::detail::strip_const(result_out_system))),
+                       result.begin(),
+                       1,
+                       &h_result);
+      }
 
-          return h_result != 0;
-        }
+      return h_result != 0;
+    }
 
-        THRUST_DEVICE
-        static bool seq(execution_policy<Derived>& policy,
-                            HaystackIt                 first,
-                            HaystackIt                 last,
-                            const T&                   value,
-                            CompareOp                  compare_op)
-        {
-          bool result;
-          thrust::binary_search(cvt_to_seq(derived_cast(policy)),
-                              first,
-                              last,
-                              &value,
-                              &value + 1,
-                              &result,
-                              compare_op);
-          return result;
-        }
-    };
+    THRUST_DEVICE static bool
+    seq(execution_policy<Derived>& policy, HaystackIt first, HaystackIt last, const T& value, CompareOp compare_op)
+    {
+      bool result;
+      thrust::binary_search(cvt_to_seq(derived_cast(policy)), first, last, &value, &value + 1, &result, compare_op);
+      return result;
+    }
+  };
 
-    #if __THRUST_HAS_HIPRT__
-      return workaround::par(policy, first, last, value, compare_op);
-    #else
-      return workaround::seq(policy, first, last, value, compare_op);
-    #endif
+#  if __THRUST_HAS_HIPRT__
+  return workaround::par(policy, first, last, value, compare_op);
+#  else
+  return workaround::seq(policy, first, last, value, compare_op);
+#  endif
 }
 
 } // namespace hip_rocprim

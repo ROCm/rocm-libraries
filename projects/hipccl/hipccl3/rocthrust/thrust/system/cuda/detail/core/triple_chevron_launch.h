@@ -33,123 +33,105 @@
 
 THRUST_NAMESPACE_BEGIN
 
-namespace cuda_cub {
-namespace launcher {
+namespace cuda_cub
+{
+namespace launcher
+{
 
-  struct _CCCL_VISIBILITY_HIDDEN triple_chevron
+struct _CCCL_VISIBILITY_HIDDEN triple_chevron
+{
+  using Size = size_t;
+  dim3 const grid;
+  dim3 const block;
+  Size const shared_mem;
+  cudaStream_t const stream;
+
+  THRUST_RUNTIME_FUNCTION triple_chevron(dim3 grid_, dim3 block_, Size shared_mem_ = 0, cudaStream_t stream_ = 0)
+      : grid(grid_)
+      , block(block_)
+      , shared_mem(shared_mem_)
+      , stream(stream_)
+  {}
+
+  template <class K, class... Args>
+  cudaError_t _CCCL_HOST doit_host(K k, Args const&... args) const
   {
-    using Size = size_t;
-    dim3 const grid;
-    dim3 const block;
-    Size const shared_mem;
-    cudaStream_t const stream;
+    k<<<grid, block, shared_mem, stream>>>(args...);
+    return cudaPeekAtLastError();
+  }
 
-    THRUST_RUNTIME_FUNCTION
-    triple_chevron(dim3         grid_,
-                   dim3         block_,
-                   Size         shared_mem_ = 0,
-                   cudaStream_t stream_     = 0)
-        : grid(grid_),
-          block(block_),
-          shared_mem(shared_mem_),
-          stream(stream_) {}
+  template <class T>
+  size_t _CCCL_DEVICE align_up(size_t offset) const
+  {
+    return ::cuda::ceil_div(offset, alignof(T)) * alignof(T);
+  }
 
-    template<class K, class... Args>
-    cudaError_t _CCCL_HOST
-    doit_host(K k, Args const&... args) const
+  size_t _CCCL_DEVICE argument_pack_size(size_t size) const
+  {
+    return size;
+  }
+
+  template <class... Args>
+  size_t _CCCL_DEVICE argument_pack_size(size_t size, Args const&...) const
+  {
+    int dummy[] = {(size += align_up<Args>(size) + sizeof(Args), 0)...};
+    (void) dummy;
+    return size;
+  }
+
+  template <class Arg>
+  void _CCCL_DEVICE copy_arg(char* buffer, size_t& offset, Arg arg) const
+  {
+    offset = align_up<Arg>(offset);
+    for (int i = 0; i != sizeof(Arg); ++i)
     {
-      k<<<grid, block, shared_mem, stream>>>(args...);
-      return cudaPeekAtLastError();
+      buffer[offset + i] = reinterpret_cast<const char*>(&arg)[i];
     }
+    offset += sizeof(Arg);
+  }
 
-    template<class T>
-    size_t _CCCL_DEVICE
-    align_up(size_t offset) const
-    {
-      return ::cuda::ceil_div(offset, alignof(T)) * alignof(T);
-    }
+  _CCCL_DEVICE void fill_arguments(char*, size_t) const {}
 
-    size_t _CCCL_DEVICE argument_pack_size(size_t size) const
-    {
-      return size;
-    }
+  template <class... Args>
+  _CCCL_DEVICE void fill_arguments(char* buffer, size_t offset, Args const&... args) const
+  {
+    int dummy[] = {(copy_arg(buffer, offset, args), 0)...};
+    (void) dummy;
+  }
 
-    template <class... Args>
-    size_t _CCCL_DEVICE
-    argument_pack_size(size_t size, Args const&...) const
-    {
-       int dummy[] = {(size += align_up<Args>(size) + sizeof(Args), 0)...};
-      (void) dummy;
-      return size;
-    }
+#ifdef THRUST_RDC_ENABLED
+  template <class K, class... Args>
+  cudaError_t _CCCL_DEVICE doit_device(K k, Args const&... args) const
+  {
+    const size_t size  = argument_pack_size(0, args...);
+    void* param_buffer = cudaGetParameterBuffer(64, size);
+    fill_arguments((char*) param_buffer, 0, args...);
+    return launch_device(k, param_buffer);
+  }
 
-    template <class Arg>
-    void _CCCL_DEVICE copy_arg(char* buffer, size_t& offset, Arg arg) const
-    {
-      offset = align_up<Arg>(offset);
-      for (int i = 0; i != sizeof(Arg); ++i)
-        buffer[offset + i] = reinterpret_cast<const char*>(&arg)[i];
-      offset += sizeof(Arg);
-    }
+  template <class K>
+  cudaError_t _CCCL_DEVICE launch_device(K k, void* buffer) const
+  {
+    return cudaLaunchDevice((void*) k, buffer, dim3(grid), dim3(block), shared_mem, stream);
+  }
+#else
+  template <class K, class... Args>
+  cudaError_t _CCCL_DEVICE doit_device(K, Args const&...) const
+  {
+    return cudaErrorNotSupported;
+  }
+#endif
 
-    _CCCL_DEVICE
-    void fill_arguments(char*, size_t) const
-    {}
+  _CCCL_EXEC_CHECK_DISABLE
+  template <class K, class... Args>
+  THRUST_FUNCTION cudaError_t doit(K k, Args const&... args) const
+  {
+    NV_IF_TARGET(NV_IS_HOST, (return doit_host(k, args...);), (return doit_device(k, args...);));
+  }
 
-    template<class... Args>
-    _CCCL_DEVICE
-    void fill_arguments(char* buffer,
-                        size_t offset,
-                        Args const&... args) const
-    {
-      int dummy[] = {(copy_arg(buffer, offset, args), 0)...};
-      (void) dummy;
-    }
+}; // struct triple_chevron
 
-    #ifdef THRUST_RDC_ENABLED
-    template<class K, class... Args>
-    cudaError_t _CCCL_DEVICE
-    doit_device(K k, Args const&... args) const
-    {
-      const size_t size = argument_pack_size(0,args...);
-      void *param_buffer = cudaGetParameterBuffer(64,size);
-      fill_arguments((char*)param_buffer, 0, args...);
-      return launch_device(k, param_buffer);
-    }
-
-    template <class K>
-    cudaError_t _CCCL_DEVICE
-    launch_device(K k, void* buffer) const
-    {
-      return cudaLaunchDevice((void*)k,
-                              buffer,
-                              dim3(grid),
-                              dim3(block),
-                              shared_mem,
-                              stream);
-    }
-    #else
-    template<class K, class... Args>
-    cudaError_t _CCCL_DEVICE
-    doit_device(K, Args const&... ) const
-    {
-      return cudaErrorNotSupported;
-    }
-    #endif
-
-    _CCCL_EXEC_CHECK_DISABLE
-    template <class K, class... Args>
-    THRUST_FUNCTION
-    cudaError_t doit(K k, Args const&... args) const
-    {
-      NV_IF_TARGET(NV_IS_HOST,
-                   (return doit_host(k, args...);),
-                   (return doit_device(k, args...);));
-    }
-
-  }; // struct triple_chevron
-
-}    // namespace launcher
-}    // namespace cuda_
+} // namespace launcher
+} // namespace cuda_cub
 
 THRUST_NAMESPACE_END

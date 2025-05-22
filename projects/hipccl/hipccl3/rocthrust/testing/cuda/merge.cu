@@ -15,28 +15,29 @@
  *  limitations under the License.
  */
 
-#include <unittest/unittest.h>
-#include <thrust/merge.h>
-#include <thrust/functional.h>
-#include <thrust/sort.h>
-#include <thrust/extrema.h>
 #include <thrust/execution_policy.h>
+#include <thrust/extrema.h>
+#include <thrust/functional.h>
+#include <thrust/merge.h>
+#include <thrust/sort.h>
 
+#include <unittest/unittest.h>
 
 #ifdef THRUST_TEST_DEVICE_SIDE
-template<typename ExecutionPolicy, typename Iterator1, typename Iterator2, typename Iterator3, typename Iterator4>
-__global__
-void merge_kernel(ExecutionPolicy exec,
-                  Iterator1 first1, Iterator1 last1,
-                  Iterator2 first2, Iterator2 last2,
-                  Iterator3 result1,
-                  Iterator4 result2)
+template <typename ExecutionPolicy, typename Iterator1, typename Iterator2, typename Iterator3, typename Iterator4>
+__global__ void merge_kernel(
+  ExecutionPolicy exec,
+  Iterator1 first1,
+  Iterator1 last1,
+  Iterator2 first2,
+  Iterator2 last2,
+  Iterator3 result1,
+  Iterator4 result2)
 {
   *result2 = thrust::merge(exec, first1, last1, first2, last2, result1);
 }
 
-
-template<typename ExecutionPolicy>
+template <typename ExecutionPolicy>
 void TestMergeDevice(ExecutionPolicy exec)
 {
   const size_t n         = 10000;
@@ -55,7 +56,7 @@ void TestMergeDevice(ExecutionPolicy exec)
   const thrust::device_vector<int> d_a = h_a;
   const thrust::device_vector<int> d_b = h_b;
 
-  for(size_t i = 0; i < num_sizes; i++)
+  for (size_t i = 0; i < num_sizes; i++)
   {
     const size_t size = sizes[i];
 
@@ -68,11 +69,8 @@ void TestMergeDevice(ExecutionPolicy exec)
     const auto h_end = thrust::merge(h_a.begin(), h_a.end(), h_b.begin(), h_b.begin() + size, h_result.begin());
     h_result.resize(h_end - h_result.begin());
 
-    merge_kernel<<<1,1>>>(exec,
-                          d_a.begin(), d_a.end(),
-                          d_b.begin(), d_b.begin() + size,
-                          d_result.begin(),
-                          d_end.begin());
+    merge_kernel<<<1, 1>>>(
+      exec, d_a.begin(), d_a.end(), d_b.begin(), d_b.begin() + size, d_result.begin(), d_end.begin());
     cudaError_t const err = cudaDeviceSynchronize();
     ASSERT_EQUAL(cudaSuccess, err);
 
@@ -82,13 +80,11 @@ void TestMergeDevice(ExecutionPolicy exec)
   }
 }
 
-
 void TestMergeDeviceSeq()
 {
   TestMergeDevice(thrust::seq);
 }
 DECLARE_UNITTEST(TestMergeDeviceSeq);
-
 
 void TestMergeDeviceDevice()
 {
@@ -96,7 +92,6 @@ void TestMergeDeviceDevice()
 }
 DECLARE_UNITTEST(TestMergeDeviceDevice);
 #endif
-
 
 void TestMergeCudaStreams()
 {
@@ -117,4 +112,3 @@ void TestMergeCudaStreams()
   cudaStreamDestroy(s);
 }
 DECLARE_UNITTEST(TestMergeCudaStreams);
-
