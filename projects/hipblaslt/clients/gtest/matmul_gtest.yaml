@@ -1923,6 +1923,44 @@ Tests:
   unit_check: 1
   gpu_arch: '942'
 
+- name: matmul_large_nt_f8_bf8_dst_f8_bf8_f16_bf16_f32_gfx942
+  category: pre_checkin
+  function:
+    matmul:
+    - *f8_precision_dst_f8
+    - *f8_precision_dst_fp16
+    - *f8_precision_dst_bf16
+    - *f8_precision_dst_fp32
+    - *bf8_precision_dst_bf8
+    - *bf8_precision_dst_fp16
+    - *bf8_precision_dst_bf16
+    - *bf8_precision_dst_fp32
+  matrix_size:
+    - { M:  117760, N:  117760, K:  4096 }
+  transA: N
+  transB: T
+  alpha: [1.0, 2.0]
+  beta: [ 0.0, 2.0 ]
+  scaleA: [ 0, 1]
+  scaleB: [ 0, 1]
+  bias_vector: [0, 1]
+  bias_type: f32_r
+  unit_check: 1
+  gpu_arch: '942'
+
+- name: matmul_large_nt_f64_dst_f64_gfx942
+  category: pre_checkin
+  function:
+    matmul: *double_precision
+  matrix_size:
+    - { M:  117760, N:  117760, K:  4096 }
+  transA: N
+  transB: T
+  alpha: [1.0, 2.0]
+  beta: [ 0.0, 2.0 ]
+  unit_check: 1
+  gpu_arch: '942'
+
 - name: matmul_mx_datatypes
   category: pre_checkin
   function:
