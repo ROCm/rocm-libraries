@@ -14,11 +14,10 @@ on:
     branches:
       # Remove later.
       - users/geomin12/therock-ci
-      #- 'develop'
-      #- 'staging'
-      #- 'main'
+      - 'develop'
+      - 'staging'
+      - 'main'
     paths-ignore:
-      - ".github/**"
       - "docs/**"
       - "*.md"
 
