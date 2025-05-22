@@ -1,7 +1,7 @@
 /*! \file */
 
 /* ************************************************************************
- * Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -44,7 +44,7 @@ void rocsparse::warning_message(const char* msg_,
                                 const char* file_,
                                 int         line_)
 {
-    if(rocsparse_debug_variables.get_debug_verbose())
+    if(rocsparse_debug_variables.get_debug_warnings())
     {
         std::cout << "// rocSPARSE.warning: { \"function\": \"" << function_ << "\"," << std::endl
                   << "//                      \"line\"    : \"" << line_ << "\"," << std::endl

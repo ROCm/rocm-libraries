@@ -22,6 +22,7 @@
  *
  * ************************************************************************ */
 
+#include "rocsparse_clients_envariables.hpp"
 #include "rocsparse_parse_data.hpp"
 #include "rocsparse_reproducibility.hpp"
 #include "utility.hpp"
@@ -173,6 +174,22 @@ public:
 
 int main(int argc, char** argv)
 {
+    //
+    // Enable debug mode for testing.
+    //
+    rocsparse_enable_debug();
+
+    //
+    // Enable test debug arguments.
+    //
+    if(rocsparse_clients_envariables::is_defined(
+           rocsparse_clients_envariables::TEST_DEBUG_ARGUMENTS)
+       == false)
+    {
+        rocsparse_clients_envariables::set(rocsparse_clients_envariables::TEST_DEBUG_ARGUMENTS,
+                                           true);
+    }
+
     // Get version
     rocsparse_handle handle;
     rocsparse_status status = rocsparse_create_handle(&handle);
