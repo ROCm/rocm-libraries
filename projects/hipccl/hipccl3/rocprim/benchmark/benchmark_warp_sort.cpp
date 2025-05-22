@@ -21,13 +21,11 @@
 // SOFTWARE.
 
 #include "benchmark_utils.hpp"
-// CmdParser
-#include "cmdparser.hpp"
 
 #include "../common/utils_custom_type.hpp"
 
-// Google Benchmark
 #include <benchmark/benchmark.h>
+
 // HIP API
 #include <hip/hip_runtime.h>
 // rocPRIM
@@ -41,10 +39,6 @@
 #include <stdint.h>
 #include <string>
 #include <vector>
-
-#ifndef DEFAULT_BYTES
-const size_t DEFAULT_BYTES = 1024 * 1024 * 32 * 4;
-#endif
 
 template<typename K, unsigned int BlockSize, unsigned int WarpSize, unsigned int ItemsPerThread>
 __global__ __launch_bounds__(BlockSize)
@@ -95,11 +89,12 @@ template<typename Key,
          typename Value              = Key,
          bool         SortByKey      = false,
          unsigned int Trials         = 100>
-void run_benchmark(benchmark::State&   state,
-                   size_t              bytes,
-                   const managed_seed& seed,
-                   hipStream_t         stream)
+void run_benchmark(benchmark_utils::state&& state)
 {
+    const auto& stream = state.stream;
+    const auto& bytes  = state.bytes;
+    const auto& seed   = state.seed;
+
     // Calculate the number of elements
     size_t size = bytes / sizeof(Key);
 
@@ -136,70 +131,49 @@ void run_benchmark(benchmark::State&   state,
                             hipMemcpyHostToDevice));
     HIP_CHECK(hipDeviceSynchronize());
 
-    // HIP events creation
-    hipEvent_t start, stop;
-    HIP_CHECK(hipEventCreate(&start));
-    HIP_CHECK(hipEventCreate(&stop));
-
-    for(auto _ : state)
-    {
-        // Record start event
-        HIP_CHECK(hipEventRecord(start, stream));
-
-        if(SortByKey)
+    state.run(
+        [&]
         {
-            ROCPRIM_NO_UNROLL
-            for(unsigned int trial = 0; trial < Trials; ++trial)
+            if(SortByKey)
             {
-                hipLaunchKernelGGL(
-                    HIP_KERNEL_NAME(
-                        warp_sort_by_key_kernel<Key, Value, BlockSize, WarpSize, ItemsPerThread>),
-                    dim3(size / items_per_block),
-                    dim3(BlockSize),
-                    0,
-                    stream,
-                    d_input_key,
-                    d_input_value,
-                    d_output_key,
-                    d_output_value);
+                ROCPRIM_NO_UNROLL
+                for(unsigned int trial = 0; trial < Trials; ++trial)
+                {
+                    hipLaunchKernelGGL(HIP_KERNEL_NAME(warp_sort_by_key_kernel<Key,
+                                                                               Value,
+                                                                               BlockSize,
+                                                                               WarpSize,
+                                                                               ItemsPerThread>),
+                                       dim3(size / items_per_block),
+                                       dim3(BlockSize),
+                                       0,
+                                       stream,
+                                       d_input_key,
+                                       d_input_value,
+                                       d_output_key,
+                                       d_output_value);
+                }
             }
-        }
-        else
-        {
-            ROCPRIM_NO_UNROLL
-            for(unsigned int trial = 0; trial < Trials; ++trial)
+            else
             {
-                hipLaunchKernelGGL(
-                    HIP_KERNEL_NAME(warp_sort_kernel<Key, BlockSize, WarpSize, ItemsPerThread>),
-                    dim3(size / items_per_block),
-                    dim3(BlockSize),
-                    0,
-                    stream,
-                    d_input_key,
-                    d_output_key);
+                ROCPRIM_NO_UNROLL
+                for(unsigned int trial = 0; trial < Trials; ++trial)
+                {
+                    hipLaunchKernelGGL(
+                        HIP_KERNEL_NAME(warp_sort_kernel<Key, BlockSize, WarpSize, ItemsPerThread>),
+                        dim3(size / items_per_block),
+                        dim3(BlockSize),
+                        0,
+                        stream,
+                        d_input_key,
+                        d_output_key);
+                }
             }
-        }
-        HIP_CHECK(hipGetLastError());
+        });
 
-        // Record stop event and wait until it completes
-        HIP_CHECK(hipEventRecord(stop, stream));
-        HIP_CHECK(hipEventSynchronize(stop));
+    auto type_size = SortByKey ? sizeof(Key) + sizeof(Value) : sizeof(Key);
 
-        float elapsed_mseconds;
-        HIP_CHECK(hipEventElapsedTime(&elapsed_mseconds, start, stop));
-        state.SetIterationTime(elapsed_mseconds / 1000);
-    }
-
-    // Destroy HIP events
-    HIP_CHECK(hipEventDestroy(start));
-    HIP_CHECK(hipEventDestroy(stop));
-
-    // SortByKey also transfers values
-    auto sorted_type_size = sizeof(Key);
-    if(SortByKey)
-        sorted_type_size += sizeof(Value);
-    state.SetBytesProcessed(state.iterations() * size * sorted_type_size * Trials);
-    state.SetItemsProcessed(state.iterations() * size * Trials);
+    state.set_throughput(size * Trials, type_size);
 
     HIP_CHECK(hipFree(d_input_key));
     HIP_CHECK(hipFree(d_output_key));
@@ -207,71 +181,51 @@ void run_benchmark(benchmark::State&   state,
     HIP_CHECK(hipFree(d_output_value));
 }
 
-#define CREATE_SORT_BENCHMARK(K, BS, WS, IPT)                                        \
-    benchmark::RegisterBenchmark(                                                    \
-        bench_naming::format_name("{lvl:warp,algo:sort,key_type:" #K ",value_type:"  \
-                                  + std::string(Traits<rocprim::empty_type>::name()) \
-                                  + ",ws:" #WS ",cfg:{bs:" #BS ",ipt:" #IPT "}}")    \
-            .c_str(),                                                                \
-        run_benchmark<K, BS, WS, IPT>,                                               \
-        bytes,                                                                       \
-        seed,                                                                        \
-        stream)
+#define CREATE_SORT_BENCHMARK(K, BS, WS, IPT)                                                      \
+    executor.queue_fn(bench_naming::format_name("{lvl:warp,algo:sort,key_type:" #K ",value_type:"  \
+                                                + std::string(Traits<rocprim::empty_type>::name()) \
+                                                + ",ws:" #WS ",cfg:{bs:" #BS ",ipt:" #IPT "}}")    \
+                          .c_str(),                                                                \
+                      run_benchmark<K, BS, WS, IPT>);
 
-#define CREATE_SORTBYKEY_BENCHMARK(K, V, BS, WS, IPT)                                         \
-    benchmark::RegisterBenchmark(bench_naming::format_name("{lvl:warp,algo:sort,key_type:" #K \
-                                                           ",value_type:" #V ",ws:" #WS       \
-                                                           ",cfg:{bs:" #BS ",ipt:" #IPT "}}") \
-                                     .c_str(),                                                \
-                                 run_benchmark<K, BS, WS, IPT, V, true>,                      \
-                                 bytes,                                                       \
-                                 seed,                                                        \
-                                 stream)
+#define CREATE_SORTBYKEY_BENCHMARK(K, V, BS, WS, IPT)                                        \
+    executor.queue_fn(bench_naming::format_name("{lvl:warp,algo:sort,key_type:" #K           \
+                                                ",value_type:" #V ",ws:" #WS ",cfg:{bs:" #BS \
+                                                ",ipt:" #IPT "}}")                           \
+                          .c_str(),                                                          \
+                      run_benchmark<K, BS, WS, IPT, V, true>);
 
-#define BENCHMARK_TYPE(type)                                                              \
-    CREATE_SORT_BENCHMARK(type, 64, 64, 1), CREATE_SORT_BENCHMARK(type, 64, 64, 2),       \
-        CREATE_SORT_BENCHMARK(type, 64, 64, 4), CREATE_SORT_BENCHMARK(type, 128, 64, 1),  \
-        CREATE_SORT_BENCHMARK(type, 128, 64, 2), CREATE_SORT_BENCHMARK(type, 128, 64, 4), \
-        CREATE_SORT_BENCHMARK(type, 256, 64, 1), CREATE_SORT_BENCHMARK(type, 256, 64, 2), \
-        CREATE_SORT_BENCHMARK(type, 256, 64, 4), CREATE_SORT_BENCHMARK(type, 64, 32, 1),  \
-        CREATE_SORT_BENCHMARK(type, 64, 32, 2), CREATE_SORT_BENCHMARK(type, 64, 16, 1),   \
-        CREATE_SORT_BENCHMARK(type, 64, 16, 2), CREATE_SORT_BENCHMARK(type, 64, 16, 4)
+// clang-format off
+#define BENCHMARK_TYPE(type)                \
+    CREATE_SORT_BENCHMARK(type, 64, 64, 1)  \
+    CREATE_SORT_BENCHMARK(type, 64, 64, 2)  \
+    CREATE_SORT_BENCHMARK(type, 64, 64, 4)  \
+    CREATE_SORT_BENCHMARK(type, 128, 64, 1) \
+    CREATE_SORT_BENCHMARK(type, 128, 64, 2) \
+    CREATE_SORT_BENCHMARK(type, 128, 64, 4) \
+    CREATE_SORT_BENCHMARK(type, 256, 64, 1) \
+    CREATE_SORT_BENCHMARK(type, 256, 64, 2) \
+    CREATE_SORT_BENCHMARK(type, 256, 64, 4) \
+    CREATE_SORT_BENCHMARK(type, 64, 32, 1)  \
+    CREATE_SORT_BENCHMARK(type, 64, 32, 2)  \
+    CREATE_SORT_BENCHMARK(type, 64, 16, 1)  \
+    CREATE_SORT_BENCHMARK(type, 64, 16, 2)  \
+    CREATE_SORT_BENCHMARK(type, 64, 16, 4)
+// clang-format on
 
-#define BENCHMARK_KEY_TYPE(type, value)                      \
-    CREATE_SORTBYKEY_BENCHMARK(type, value, 64, 64, 1),      \
-        CREATE_SORTBYKEY_BENCHMARK(type, value, 64, 64, 2),  \
-        CREATE_SORTBYKEY_BENCHMARK(type, value, 64, 64, 4),  \
-        CREATE_SORTBYKEY_BENCHMARK(type, value, 256, 64, 1), \
-        CREATE_SORTBYKEY_BENCHMARK(type, value, 256, 64, 2), \
-        CREATE_SORTBYKEY_BENCHMARK(type, value, 256, 64, 4)
+// clang-format off
+#define BENCHMARK_KEY_TYPE(type, value)                 \
+    CREATE_SORTBYKEY_BENCHMARK(type, value, 64, 64, 1)  \
+    CREATE_SORTBYKEY_BENCHMARK(type, value, 64, 64, 2)  \
+    CREATE_SORTBYKEY_BENCHMARK(type, value, 64, 64, 4)  \
+    CREATE_SORTBYKEY_BENCHMARK(type, value, 256, 64, 1) \
+    CREATE_SORTBYKEY_BENCHMARK(type, value, 256, 64, 2) \
+    CREATE_SORTBYKEY_BENCHMARK(type, value, 256, 64, 4)
+// clang-format on
 
 int main(int argc, char* argv[])
 {
-    cli::Parser parser(argc, argv);
-    parser.set_optional<size_t>("size", "size", DEFAULT_BYTES, "number of bytes");
-    parser.set_optional<int>("trials", "trials", -1, "number of iterations");
-    parser.set_optional<std::string>("name_format",
-                                     "name_format",
-                                     "human",
-                                     "either: json,human,txt");
-    parser.set_optional<std::string>("seed", "seed", "random", get_seed_message());
-    parser.run_and_exit_if_error();
-
-    // Parse argv
-    benchmark::Initialize(&argc, argv);
-    const size_t bytes  = parser.get<size_t>("size");
-    const int    trials = parser.get<int>("trials");
-    bench_naming::set_format(parser.get<std::string>("name_format"));
-    const std::string  seed_type = parser.get<std::string>("seed");
-    const managed_seed seed(seed_type);
-
-    // HIP
-    hipStream_t stream = 0; // default
-
-    // Benchmark info
-    add_common_benchmark_info();
-    benchmark::AddCustomContext("bytes", std::to_string(bytes));
-    benchmark::AddCustomContext("seed", seed_type);
+    benchmark_utils::executor executor(argc, argv, 128 * benchmark_utils::MiB, 1, 0);
 
     using custom_double2    = common::custom_type<double, double>;
     using custom_int_double = common::custom_type<int, double>;
@@ -280,46 +234,27 @@ int main(int argc, char* argv[])
     using custom_char_double     = common::custom_type<char, double>;
     using custom_longlong_double = common::custom_type<long long, double>;
 
-    std::vector<benchmark::internal::Benchmark*> benchmarks
-        = {BENCHMARK_TYPE(int),
-           BENCHMARK_TYPE(float),
-           BENCHMARK_TYPE(double),
-           BENCHMARK_TYPE(int8_t),
-           BENCHMARK_TYPE(uint8_t),
-           BENCHMARK_TYPE(rocprim::half),
-           BENCHMARK_TYPE(rocprim::int128_t),
-           BENCHMARK_TYPE(rocprim::uint128_t),
+    BENCHMARK_TYPE(int)
+    BENCHMARK_TYPE(float)
+    BENCHMARK_TYPE(double)
+    BENCHMARK_TYPE(int8_t)
+    BENCHMARK_TYPE(uint8_t)
+    BENCHMARK_TYPE(rocprim::half)
+    BENCHMARK_TYPE(rocprim::int128_t)
+    BENCHMARK_TYPE(rocprim::uint128_t)
 
-           BENCHMARK_KEY_TYPE(float, float),
-           BENCHMARK_KEY_TYPE(unsigned int, int),
-           BENCHMARK_KEY_TYPE(int, custom_double2),
-           BENCHMARK_KEY_TYPE(int, custom_int_double),
-           BENCHMARK_KEY_TYPE(custom_int2, custom_double2),
-           BENCHMARK_KEY_TYPE(custom_int2, custom_char_double),
-           BENCHMARK_KEY_TYPE(custom_int2, custom_longlong_double),
-           BENCHMARK_KEY_TYPE(int8_t, int8_t),
-           BENCHMARK_KEY_TYPE(uint8_t, uint8_t),
-           BENCHMARK_KEY_TYPE(rocprim::half, rocprim::half),
-           BENCHMARK_KEY_TYPE(rocprim::int128_t, rocprim::int128_t),
-           BENCHMARK_KEY_TYPE(rocprim::uint128_t, rocprim::uint128_t)};
+    BENCHMARK_KEY_TYPE(float, float)
+    BENCHMARK_KEY_TYPE(unsigned int, int)
+    BENCHMARK_KEY_TYPE(int, custom_double2)
+    BENCHMARK_KEY_TYPE(int, custom_int_double)
+    BENCHMARK_KEY_TYPE(custom_int2, custom_double2)
+    BENCHMARK_KEY_TYPE(custom_int2, custom_char_double)
+    BENCHMARK_KEY_TYPE(custom_int2, custom_longlong_double)
+    BENCHMARK_KEY_TYPE(int8_t, int8_t)
+    BENCHMARK_KEY_TYPE(uint8_t, uint8_t)
+    BENCHMARK_KEY_TYPE(rocprim::half, rocprim::half)
+    BENCHMARK_KEY_TYPE(rocprim::int128_t, rocprim::int128_t)
+    BENCHMARK_KEY_TYPE(rocprim::uint128_t, rocprim::uint128_t)
 
-    // Use manual timing
-    for(auto& b : benchmarks)
-    {
-        b->UseManualTime();
-        b->Unit(benchmark::kMillisecond);
-    }
-
-    // Force number of iterations
-    if(trials > 0)
-    {
-        for(auto& b : benchmarks)
-        {
-            b->Iterations(trials);
-        }
-    }
-
-    // Run benchmarks
-    benchmark::RunSpecifiedBenchmarks();
-    return 0;
+    executor.run();
 }

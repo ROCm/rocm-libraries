@@ -29,7 +29,7 @@
 #include "test_utils_bfloat16.hpp"
 #include "test_utils_custom_test_types.hpp"
 
-#include <rocprim/type_traits_interface.hpp>
+#include <rocprim/type_traits.hpp>
 #include <rocprim/types.hpp>
 
 #include <gtest/gtest.h>

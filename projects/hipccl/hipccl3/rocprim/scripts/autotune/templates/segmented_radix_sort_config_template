@@ -6,7 +6,7 @@ ROCPRIM_DEVICE_DETAIL_CONFIG_DEVICE_SEGMENTED_RADIX_SORT_HPP_
 
 {% macro kernel_configuration(measurement) -%}
 segmented_radix_sort_config<
-    {{ measurement['cfg']['lrb'] }}, {{ measurement['cfg']['srb'] }},
+    {{ measurement['cfg']['rb'] }},
     kernel_config<{{ measurement['cfg']['bs'] }}, {{ measurement['cfg']['ipt'] }}>, 
     typename std::conditional<
         {{ measurement['cfg']['wsc']['pa'] }},
