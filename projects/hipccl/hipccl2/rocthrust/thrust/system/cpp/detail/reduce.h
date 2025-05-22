@@ -20,4 +20,3 @@
 
 // this system inherits reduce
 #include <thrust/system/detail/sequential/reduce.h>
-

@@ -21,14 +21,15 @@
 #pragma once
 
 #include <thrust/detail/config.h>
-#include <thrust/detail/cpp14_required.h>
 
-#if THRUST_CPP_DIALECT >= 2014
+#include <thrust/detail/cpp_version_check.h>
 
-#include <thrust/execution_policy.h>
-#include <thrust/detail/static_assert.h>
+#if THRUST_CPP_DIALECT >= 2017
 
-#include <utility>
+#  include <thrust/detail/static_assert.h>
+#  include <thrust/execution_policy.h>
+
+#  include <utility>
 
 /*! \cond
  */
@@ -41,9 +42,9 @@
 */
 
 // #include the device system's pointer.h header.
-#define __THRUST_DEVICE_SYSTEM_POINTER_HEADER <__THRUST_DEVICE_SYSTEM_ROOT/pointer.h>
-  #include __THRUST_DEVICE_SYSTEM_POINTER_HEADER
-#undef __THRUST_DEVICE_SYSTEM_POINTER_HEADER
+#  define __THRUST_DEVICE_SYSTEM_POINTER_HEADER <__THRUST_DEVICE_SYSTEM_ROOT/pointer.h>
+#  include __THRUST_DEVICE_SYSTEM_POINTER_HEADER
+#  undef __THRUST_DEVICE_SYSTEM_POINTER_HEADER
 
 /*
 // #include the host system's future.h header.
@@ -53,9 +54,9 @@
 */
 
 // #include the device system's future.h header.
-#define __THRUST_DEVICE_SYSTEM_FUTURE_HEADER <__THRUST_DEVICE_SYSTEM_ROOT/future.h>
-  #include __THRUST_DEVICE_SYSTEM_FUTURE_HEADER
-#undef __THRUST_DEVICE_SYSTEM_FUTURE_HEADER
+#  define __THRUST_DEVICE_SYSTEM_FUTURE_HEADER <__THRUST_DEVICE_SYSTEM_ROOT/future.h>
+#  include __THRUST_DEVICE_SYSTEM_FUTURE_HEADER
+#  undef __THRUST_DEVICE_SYSTEM_FUTURE_HEADER
 
 /*! \endcond
  */
@@ -77,18 +78,16 @@ THRUST_NAMESPACE_BEGIN
 namespace unimplemented
 {
 
-struct no_unique_eager_event_type_found {};
+struct no_unique_eager_event_type_found
+{};
 
-inline THRUST_HOST
-no_unique_eager_event_type_found
-unique_eager_event_type(...) noexcept;
+inline THRUST_HOST no_unique_eager_event_type_found unique_eager_event_type(...) noexcept;
 
-struct no_unique_eager_future_type_found {};
+struct no_unique_eager_future_type_found
+{};
 
 template <typename T>
-THRUST_HOST
-no_unique_eager_future_type_found
-unique_eager_future_type(...) noexcept;
+THRUST_HOST no_unique_eager_future_type_found unique_eager_future_type(...) noexcept;
 
 } // namespace unimplemented
 
@@ -98,9 +97,7 @@ namespace unique_eager_event_type_detail
 using unimplemented::unique_eager_event_type;
 
 template <typename System>
-using select = decltype(
-  unique_eager_event_type(std::declval<System>())
-);
+using select = decltype(unique_eager_event_type(std::declval<System>()));
 
 } // namespace unique_eager_event_type_detail
 
@@ -110,9 +107,7 @@ namespace unique_eager_future_type_detail
 using unimplemented::unique_eager_future_type;
 
 template <typename System, typename T>
-using select = decltype(
-  unique_eager_future_type<T>(std::declval<System>())
-);
+using select = decltype(unique_eager_future_type<T>(std::declval<System>()));
 
 } // namespace unique_eager_future_type_detail
 
@@ -152,25 +147,24 @@ using host_future = host_unique_eager_future<T>;
 
 ///////////////////////////////////////////////////////////////////////////////
 
-using device_unique_eager_event = unique_eager_event_type_detail::select<
-  thrust::system::__THRUST_DEVICE_SYSTEM_NAMESPACE::tag
->;
+using device_unique_eager_event =
+  unique_eager_event_type_detail::select<thrust::system::__THRUST_DEVICE_SYSTEM_NAMESPACE::tag>;
 
 using device_event = device_unique_eager_event;
 
 ///////////////////////////////////////////////////////////////////////////////
 
 template <typename T>
-using device_unique_eager_future = unique_eager_future_type_detail::select<
-  thrust::system::__THRUST_DEVICE_SYSTEM_NAMESPACE::tag, T
->;
+using device_unique_eager_future =
+  unique_eager_future_type_detail::select<thrust::system::__THRUST_DEVICE_SYSTEM_NAMESPACE::tag, T>;
 
 template <typename T>
 using device_future = device_unique_eager_future<T>;
 
 ///////////////////////////////////////////////////////////////////////////////
 
-struct new_stream_t final {};
+struct new_stream_t final
+{};
 
 THRUST_INLINE_CONSTANT new_stream_t new_stream{};
 

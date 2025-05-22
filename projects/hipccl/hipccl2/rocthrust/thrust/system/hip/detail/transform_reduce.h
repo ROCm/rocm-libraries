@@ -30,30 +30,24 @@
 #include <thrust/detail/config.h>
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
-#include <iterator>
-#include <thrust/distance.h>
-#include <thrust/system/hip/detail/reduce.h>
+#  include <thrust/distance.h>
+#  include <thrust/system/hip/detail/reduce.h>
+
+#  include <iterator>
 
 THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
 {
 
 template <class Derived, class InputIt, class TransformOp, class T, class ReduceOp>
-T THRUST_HIP_FUNCTION
-transform_reduce(execution_policy<Derived>& policy,
-                 InputIt                    first,
-                 InputIt                    last,
-                 TransformOp                transform_op,
-                 T                          init,
-                 ReduceOp                   reduce_op)
+T THRUST_HIP_FUNCTION transform_reduce(
+  execution_policy<Derived>& policy, InputIt first, InputIt last, TransformOp transform_op, T init, ReduceOp reduce_op)
 {
-    using size_type = typename iterator_traits<InputIt>::difference_type;
-    size_type num_items = static_cast<size_type>(thrust::distance(first, last));
-    using transformed_iterator_t = transform_input_iterator_t<T, InputIt, TransformOp>;
+  using size_type              = typename iterator_traits<InputIt>::difference_type;
+  size_type num_items          = static_cast<size_type>(thrust::distance(first, last));
+  using transformed_iterator_t = transform_input_iterator_t<T, InputIt, TransformOp>;
 
-    return reduce_n(
-        policy, transformed_iterator_t(first, transform_op), num_items, init, reduce_op
-    );
+  return reduce_n(policy, transformed_iterator_t(first, transform_op), num_items, init, reduce_op);
 }
 
 } // namespace hip_rocprim

@@ -17,6 +17,7 @@
 #pragma once
 
 #include <thrust/detail/config.h>
+
 #include <thrust/detail/raw_reference_cast.h>
 
 THRUST_NAMESPACE_BEGIN
@@ -25,71 +26,59 @@ namespace detail
 {
 
 template <typename Function, typename Result>
-  struct wrapped_function
+struct wrapped_function
 {
   // mutable because Function::operator() might be const
   mutable Function m_f;
 
-  inline THRUST_HOST_DEVICE
-  wrapped_function()
-    : m_f()
+  inline THRUST_HOST_DEVICE wrapped_function()
+      : m_f()
   {}
 
-  inline THRUST_HOST_DEVICE
-  wrapped_function(const Function& f)
-    : m_f(f)
+  inline THRUST_HOST_DEVICE wrapped_function(const Function& f)
+      : m_f(f)
   {}
 
   THRUST_EXEC_CHECK_DISABLE
   template <typename Argument>
-  THRUST_FORCEINLINE THRUST_HOST_DEVICE
-  Result operator()(Argument& x) const
+  THRUST_FORCEINLINE THRUST_HOST_DEVICE Result operator()(Argument& x) const
   {
     return static_cast<Result>(m_f(thrust::raw_reference_cast(x)));
   }
 
   THRUST_EXEC_CHECK_DISABLE
   template <typename Argument>
-  THRUST_FORCEINLINE THRUST_HOST_DEVICE
-  Result operator()(const Argument& x) const
+  THRUST_FORCEINLINE THRUST_HOST_DEVICE Result operator()(const Argument& x) const
   {
     return static_cast<Result>(m_f(thrust::raw_reference_cast(x)));
   }
 
   THRUST_EXEC_CHECK_DISABLE
   template <typename Argument1, typename Argument2>
-  THRUST_FORCEINLINE THRUST_HOST_DEVICE
-  Result operator()(Argument1& x, Argument2& y) const
+  THRUST_FORCEINLINE THRUST_HOST_DEVICE Result operator()(Argument1& x, Argument2& y) const
   {
-    return static_cast<Result>(m_f(thrust::raw_reference_cast(x),
-                                   thrust::raw_reference_cast(y)));
+    return static_cast<Result>(m_f(thrust::raw_reference_cast(x), thrust::raw_reference_cast(y)));
   }
 
   THRUST_EXEC_CHECK_DISABLE
   template <typename Argument1, typename Argument2>
-  THRUST_FORCEINLINE THRUST_HOST_DEVICE
-  Result operator()(const Argument1& x, Argument2& y) const
+  THRUST_FORCEINLINE THRUST_HOST_DEVICE Result operator()(const Argument1& x, Argument2& y) const
   {
-    return static_cast<Result>(m_f(thrust::raw_reference_cast(x),
-                                   thrust::raw_reference_cast(y)));
+    return static_cast<Result>(m_f(thrust::raw_reference_cast(x), thrust::raw_reference_cast(y)));
   }
 
   THRUST_EXEC_CHECK_DISABLE
   template <typename Argument1, typename Argument2>
-  THRUST_FORCEINLINE THRUST_HOST_DEVICE
-  Result operator()(const Argument1& x, const Argument2& y) const
+  THRUST_FORCEINLINE THRUST_HOST_DEVICE Result operator()(const Argument1& x, const Argument2& y) const
   {
-    return static_cast<Result>(m_f(thrust::raw_reference_cast(x),
-                                   thrust::raw_reference_cast(y)));
+    return static_cast<Result>(m_f(thrust::raw_reference_cast(x), thrust::raw_reference_cast(y)));
   }
 
   THRUST_EXEC_CHECK_DISABLE
   template <typename Argument1, typename Argument2>
-  THRUST_FORCEINLINE THRUST_HOST_DEVICE
-  Result operator()(Argument1& x, const Argument2& y) const
+  THRUST_FORCEINLINE THRUST_HOST_DEVICE Result operator()(Argument1& x, const Argument2& y) const
   {
-    return static_cast<Result>(m_f(thrust::raw_reference_cast(x),
-                                   thrust::raw_reference_cast(y)));
+    return static_cast<Result>(m_f(thrust::raw_reference_cast(x), thrust::raw_reference_cast(y)));
   }
 }; // end wrapped_function
 
@@ -99,58 +88,50 @@ struct wrapped_function<Function, void>
 {
   // mutable because Function::operator() might be const
   mutable Function m_f;
-  inline THRUST_HOST_DEVICE
-  wrapped_function()
-    : m_f()
+  inline THRUST_HOST_DEVICE wrapped_function()
+      : m_f()
   {}
 
-  inline THRUST_HOST_DEVICE
-  wrapped_function(const Function& f)
-    : m_f(f)
+  inline THRUST_HOST_DEVICE wrapped_function(const Function& f)
+      : m_f(f)
   {}
 
   THRUST_EXEC_CHECK_DISABLE
   template <typename Argument>
-  THRUST_FORCEINLINE THRUST_HOST_DEVICE
-  void operator()(Argument& x) const
+  THRUST_FORCEINLINE THRUST_HOST_DEVICE void operator()(Argument& x) const
   {
     m_f(thrust::raw_reference_cast(x));
   }
 
   THRUST_EXEC_CHECK_DISABLE
   template <typename Argument>
-  THRUST_FORCEINLINE THRUST_HOST_DEVICE
-  void operator()(const Argument& x) const
+  THRUST_FORCEINLINE THRUST_HOST_DEVICE void operator()(const Argument& x) const
   {
     m_f(thrust::raw_reference_cast(x));
   }
 
   THRUST_EXEC_CHECK_DISABLE
   template <typename Argument1, typename Argument2>
-  THRUST_FORCEINLINE THRUST_HOST_DEVICE
-  void operator()(Argument1& x, Argument2& y) const
+  THRUST_FORCEINLINE THRUST_HOST_DEVICE void operator()(Argument1& x, Argument2& y) const
   {
     m_f(thrust::raw_reference_cast(x), thrust::raw_reference_cast(y));
   }
 
   THRUST_EXEC_CHECK_DISABLE
   template <typename Argument1, typename Argument2>
-  THRUST_FORCEINLINE THRUST_HOST_DEVICE
-  void operator()(const Argument1& x, Argument2& y) const
+  THRUST_FORCEINLINE THRUST_HOST_DEVICE void operator()(const Argument1& x, Argument2& y) const
   {
     m_f(thrust::raw_reference_cast(x), thrust::raw_reference_cast(y));
   }
   THRUST_EXEC_CHECK_DISABLE
   template <typename Argument1, typename Argument2>
-  THRUST_FORCEINLINE THRUST_HOST_DEVICE
-  void operator()(const Argument1& x, const Argument2& y) const
+  THRUST_FORCEINLINE THRUST_HOST_DEVICE void operator()(const Argument1& x, const Argument2& y) const
   {
     m_f(thrust::raw_reference_cast(x), thrust::raw_reference_cast(y));
   }
   THRUST_EXEC_CHECK_DISABLE
   template <typename Argument1, typename Argument2>
-  THRUST_FORCEINLINE THRUST_HOST_DEVICE
-  void operator()(Argument1& x, const Argument2& y) const
+  THRUST_FORCEINLINE THRUST_HOST_DEVICE void operator()(Argument1& x, const Argument2& y) const
   {
     m_f(thrust::raw_reference_cast(x), thrust::raw_reference_cast(y));
   }

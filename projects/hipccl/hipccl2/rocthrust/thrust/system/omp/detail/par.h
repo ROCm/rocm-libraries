@@ -17,6 +17,7 @@
 #pragma once
 
 #include <thrust/detail/config.h>
+
 #include <thrust/detail/allocator_aware_execution_policy.h>
 #include <thrust/system/omp/detail/execution_policy.h>
 
@@ -28,33 +29,27 @@ namespace omp
 namespace detail
 {
 
-
-struct par_t : thrust::system::omp::detail::execution_policy<par_t>,
-  thrust::detail::allocator_aware_execution_policy<
-    thrust::system::omp::detail::execution_policy>
+struct par_t
+    : thrust::system::omp::detail::execution_policy<par_t>
+    , thrust::detail::allocator_aware_execution_policy<thrust::system::omp::detail::execution_policy>
 {
-  THRUST_HOST_DEVICE
-  constexpr par_t() : thrust::system::omp::detail::execution_policy<par_t>() {}
+  THRUST_HOST_DEVICE constexpr par_t()
+      : thrust::system::omp::detail::execution_policy<par_t>()
+  {}
 };
 
-
-} // end detail
-
+} // namespace detail
 
 static const detail::par_t par;
 
-
-} // end omp
-} // end system
-
+} // namespace omp
+} // namespace system
 
 // alias par here
 namespace omp
 {
 
-
 using thrust::system::omp::par;
 
-
-} // end omp
+} // namespace omp
 THRUST_NAMESPACE_END

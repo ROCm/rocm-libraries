@@ -5,7 +5,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 // SPDX-FileCopyrightText: Copyright (c) 2024 NVIDIA CORPORATION & AFFILIATES.
-// SPDX-FileCopyrightText: Modifications Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// SPDX-FileCopyrightText: Modifications Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 //===----------------------------------------------------------------------===//
 
@@ -56,20 +56,20 @@
 
 // Convenient shortcuts to silence common warnings
 #if THRUST_HOST_COMPILER == THRUST_DEVICE_COMPILER_CLANG
-#  define THRUST_SUPPRESS_DEPRECATED_PUSH \
+#  define THRUST_SUPPRESS_DEPRECATED_PUSH      \
     THRUST_DIAG_PUSH                           \
     THRUST_DIAG_SUPPRESS_CLANG("-Wdeprecated") \
     THRUST_DIAG_SUPPRESS_CLANG("-Wdeprecated-declarations")
 #  define THRUST_SUPPRESS_DEPRECATED_POP THRUST_DIAG_POP
 #elif (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_GCC) || (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_ICC)
-#  define THRUST_SUPPRESS_DEPRECATED_PUSH \
-    THRUST_DIAG_PUSH                           \
-    THRUST_DIAG_SUPPRESS_GCC("-Wdeprecated")   \
+#  define THRUST_SUPPRESS_DEPRECATED_PUSH    \
+    THRUST_DIAG_PUSH                         \
+    THRUST_DIAG_SUPPRESS_GCC("-Wdeprecated") \
     THRUST_DIAG_SUPPRESS_GCC("-Wdeprecated-declarations")
 #  define THRUST_SUPPRESS_DEPRECATED_POP THRUST_DIAG_POP
 #elif THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC
 #  define THRUST_SUPPRESS_DEPRECATED_PUSH \
-    THRUST_DIAG_PUSH                           \
+    THRUST_DIAG_PUSH                      \
     THRUST_DIAG_SUPPRESS_MSVC(4996)
 #  define THRUST_SUPPRESS_DEPRECATED_POP THRUST_DIAG_POP
 #else // !THRUST_COMPILER_CLANG && !THRUST_COMPILER_GCC

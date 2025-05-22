@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -42,119 +42,116 @@
 
 struct basic
 {
-    template <typename T, typename OpT, typename Policy>
-    float64_t run(thrust::device_vector<T>& input,
-                  thrust::device_vector<T>& output,
-                  const std::size_t         elements_in_A,
-                  const OpT                 op,
-                  Policy                    policy)
-    {
-        bench_utils::gpu_timer d_timer;
+  template <typename T, typename OpT, typename Policy>
+  float64_t run(thrust::device_vector<T>& input,
+                thrust::device_vector<T>& output,
+                const std::size_t elements_in_A,
+                const OpT op,
+                Policy policy)
+  {
+    bench_utils::gpu_timer d_timer;
 
-        d_timer.start(0);
-        op(policy,
-           input.cbegin(),
-           input.cbegin() + elements_in_A,
-           input.cbegin() + elements_in_A,
-           input.cend(),
-           output.begin());
-        d_timer.stop(0);
+    d_timer.start(0);
+    op(policy,
+       input.cbegin(),
+       input.cbegin() + elements_in_A,
+       input.cbegin() + elements_in_A,
+       input.cend(),
+       output.begin());
+    d_timer.stop(0);
 
-        return d_timer.get_duration();
-    }
+    return d_timer.get_duration();
+  }
 };
 
 template <class T, class OpT>
 void run_benchmark(benchmark::State& state,
                    const std::size_t elements,
                    const std::string seed_type,
-                   const int         entropy_reduction,
+                   const int entropy_reduction,
                    const std::size_t input_size_ratio)
 {
-    // Benchmark object
-    basic benchmark {};
+  // Benchmark object
+  basic benchmark{};
 
-    // GPU times
-    std::vector<double> gpu_times;
+  // GPU times
+  std::vector<double> gpu_times;
 
-    // Generate input
-    const auto entropy = bench_utils::get_entropy_percentage(entropy_reduction) / 100.0f;
-    const auto elements_in_A
-        = static_cast<std::size_t>(static_cast<double>(input_size_ratio * elements) / 100.0f);
+  // Generate input
+  const auto entropy       = bench_utils::get_entropy_percentage(entropy_reduction) / 100.0f;
+  const auto elements_in_A = static_cast<std::size_t>(static_cast<double>(input_size_ratio * elements) / 100.0f);
 
-    thrust::device_vector<T> input = bench_utils::generate(elements, seed_type, entropy);
-    thrust::device_vector<T> output(elements);
+  thrust::device_vector<T> input = bench_utils::generate(elements, seed_type, entropy);
+  thrust::device_vector<T> output(elements);
 
-    thrust::sort(input.begin(), input.begin() + elements_in_A);
-    thrust::sort(input.begin() + elements_in_A, input.end());
+  thrust::sort(input.begin(), input.begin() + elements_in_A);
+  thrust::sort(input.begin() + elements_in_A, input.end());
 
-    OpT               op {};
-    const std::size_t elements_in_AB = thrust::distance(output.begin(),
-                                                        op(thrust::detail::device_t {},
-                                                           input.cbegin(),
-                                                           input.cbegin() + elements_in_A,
-                                                           input.cbegin() + elements_in_A,
-                                                           input.cend(),
-                                                           output.begin()));
+  OpT op{};
+  const std::size_t elements_in_AB = thrust::distance(
+    output.begin(),
+    op(thrust::detail::device_t{},
+       input.cbegin(),
+       input.cbegin() + elements_in_A,
+       input.cbegin() + elements_in_A,
+       input.cend(),
+       output.begin()));
 
-    bench_utils::caching_allocator_t alloc {};
-    thrust::detail::device_t         policy {};
+  bench_utils::caching_allocator_t alloc{};
+  thrust::detail::device_t policy{};
 
-    for(auto _ : state)
-    {
-        float64_t duration
-            = benchmark.template run<T, OpT>(input, output, elements_in_A, op, policy(alloc));
-        state.SetIterationTime(duration);
-        gpu_times.push_back(duration);
-    }
+  for (auto _ : state)
+  {
+    float64_t duration = benchmark.template run<T, OpT>(input, output, elements_in_A, op, policy(alloc));
+    state.SetIterationTime(duration);
+    gpu_times.push_back(duration);
+  }
 
-    // BytesProcessed include read and written bytes, so when the BytesProcessed/s are reported
-    // it will actually be the global memory bandwidth gotten.
-    state.SetBytesProcessed(state.iterations() * (elements + elements_in_AB) * sizeof(T));
-    state.SetItemsProcessed(state.iterations() * elements);
+  // BytesProcessed include read and written bytes, so when the BytesProcessed/s are reported
+  // it will actually be the global memory bandwidth gotten.
+  state.SetBytesProcessed(state.iterations() * (elements + elements_in_AB) * sizeof(T));
+  state.SetItemsProcessed(state.iterations() * elements);
 
-    const double gpu_cv         = bench_utils::StatisticsCV(gpu_times);
-    state.counters["gpu_noise"] = gpu_cv;
+  const double gpu_cv         = bench_utils::StatisticsCV(gpu_times);
+  state.counters["gpu_noise"] = gpu_cv;
 }
 
-#define CREATE_BENCHMARK(T, Elements, EntropyReduction, InputSizeRatio)                           \
-    benchmark::RegisterBenchmark(                                                                 \
-        bench_utils::bench_naming::format_name(                                                   \
-            "{algo:" + algo_name + ",subalgo:basic" + ",input_type:" #T + ",elements:" #Elements  \
-            + ",entropy:" + std::to_string(bench_utils::get_entropy_percentage(EntropyReduction)) \
-            + ",input_size_ratio:" #InputSizeRatio)                                               \
-            .c_str(),                                                                             \
-        run_benchmark<T, OpT>,                                                                    \
-        Elements,                                                                                 \
-        seed_type,                                                                                \
-        EntropyReduction,                                                                         \
-        InputSizeRatio)
+#define CREATE_BENCHMARK(T, Elements, EntropyReduction, InputSizeRatio)                                               \
+  benchmark::RegisterBenchmark(                                                                                       \
+    bench_utils::bench_naming::format_name(                                                                           \
+      "{algo:" + algo_name + ",subalgo:basic" + ",input_type:" #T + ",elements:" #Elements + ",entropy:"              \
+      + std::to_string(bench_utils::get_entropy_percentage(EntropyReduction)) + ",input_size_ratio:" #InputSizeRatio) \
+      .c_str(),                                                                                                       \
+    run_benchmark<T, OpT>,                                                                                            \
+    Elements,                                                                                                         \
+    seed_type,                                                                                                        \
+    EntropyReduction,                                                                                                 \
+    InputSizeRatio)
 
-#define BENCHMARK_ELEMENTS(type, elements, entropy)                                               \
-    CREATE_BENCHMARK(type, elements, entropy, 25), CREATE_BENCHMARK(type, elements, entropy, 50), \
-        CREATE_BENCHMARK(type, elements, entropy, 75)
+#define BENCHMARK_ELEMENTS(type, elements, entropy)                                             \
+  CREATE_BENCHMARK(type, elements, entropy, 25), CREATE_BENCHMARK(type, elements, entropy, 50), \
+    CREATE_BENCHMARK(type, elements, entropy, 75)
 
-#define BENCHMARK_TYPE_ENTROPY(type, entropy)                                               \
-    BENCHMARK_ELEMENTS(type, 1 << 16, entropy), BENCHMARK_ELEMENTS(type, 1 << 20, entropy), \
-        BENCHMARK_ELEMENTS(type, 1 << 24, entropy), BENCHMARK_ELEMENTS(type, 1 << 28, entropy)
+#define BENCHMARK_TYPE_ENTROPY(type, entropy)                                             \
+  BENCHMARK_ELEMENTS(type, 1 << 16, entropy), BENCHMARK_ELEMENTS(type, 1 << 20, entropy), \
+    BENCHMARK_ELEMENTS(type, 1 << 24, entropy), BENCHMARK_ELEMENTS(type, 1 << 28, entropy)
 
 template <class OpT>
-void add_benchmarks(const std::string&                            algo_name,
-                    std::vector<benchmark::internal::Benchmark*>& benchmarks,
-                    const std::string                             seed_type)
+void add_benchmarks(
+  const std::string& algo_name, std::vector<benchmark::internal::Benchmark*>& benchmarks, const std::string seed_type)
 {
-    constexpr int entropy_reductions[] = {0, 4}; // 1.000, 0.201;
+  constexpr int entropy_reductions[] = {0, 4}; // 1.000, 0.201;
 
-    for(int entropy_reduction : entropy_reductions)
-    {
-        std::vector<benchmark::internal::Benchmark*> bs
-            = {BENCHMARK_TYPE_ENTROPY(int8_t, entropy_reduction),
-               BENCHMARK_TYPE_ENTROPY(int16_t, entropy_reduction),
-               BENCHMARK_TYPE_ENTROPY(int32_t, entropy_reduction),
-               BENCHMARK_TYPE_ENTROPY(int64_t, entropy_reduction)};
+  for (int entropy_reduction : entropy_reductions)
+  {
+    std::vector<benchmark::internal::Benchmark*> bs = {
+      BENCHMARK_TYPE_ENTROPY(int8_t, entropy_reduction),
+      BENCHMARK_TYPE_ENTROPY(int16_t, entropy_reduction),
+      BENCHMARK_TYPE_ENTROPY(int32_t, entropy_reduction),
+      BENCHMARK_TYPE_ENTROPY(int64_t, entropy_reduction)};
 
-        benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
-    }
+    benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
+  }
 }
 
 #endif // ROCTHRUST_BASE_HPP_

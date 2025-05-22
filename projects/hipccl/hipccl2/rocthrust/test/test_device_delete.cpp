@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2023 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -24,41 +24,42 @@
 
 struct Foo
 {
-    __host__ __device__ Foo(void)
-        : set_me_upon_destruction(nullptr)
-    {
-    }
+  __host__ __device__ Foo(void)
+      : set_me_upon_destruction(nullptr)
+  {}
 
-    __host__ __device__ ~Foo(void)
-    {
+  __host__ __device__ ~Foo(void)
+  {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-        // __device__ overload
-        if(set_me_upon_destruction != 0)
-            *set_me_upon_destruction = true;
-#endif
+    // __device__ overload
+    if (set_me_upon_destruction != 0)
+    {
+      *set_me_upon_destruction = true;
     }
+#endif
+  }
 
-    bool* set_me_upon_destruction;
+  bool* set_me_upon_destruction;
 };
 
 // KNOWN_FAILURE
 // GTest may throw a link error if there is not at least 1 test case per executable
 TEST(DeviceDelete, TestDeviceDeleteDestructorInvocation)
 {
-    /*
-    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  /*
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    thrust::device_vector<bool> destructor_flag(1, false);
+  thrust::device_vector<bool> destructor_flag(1, false);
 
-    thrust::device_ptr<Foo> foo_ptr = thrust::device_new<Foo>();
+  thrust::device_ptr<Foo> foo_ptr = thrust::device_new<Foo>();
 
-    Foo exemplar;
-    exemplar.set_me_upon_destruction = thrust::raw_pointer_cast(&destructor_flag[0]);
-    *foo_ptr                         = exemplar;
+  Foo exemplar;
+  exemplar.set_me_upon_destruction = thrust::raw_pointer_cast(&destructor_flag[0]);
+  *foo_ptr                         = exemplar;
 
-    ASSERT_EQ(false, destructor_flag[0]);
+  ASSERT_EQ(false, destructor_flag[0]);
 
-    thrust::device_delete(foo_ptr);
+  thrust::device_delete(foo_ptr);
 
-    ASSERT_EQ(true, destructor_flag[0]);*/
+  ASSERT_EQ(true, destructor_flag[0]);*/
 }

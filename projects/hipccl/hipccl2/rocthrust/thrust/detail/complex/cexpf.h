@@ -1,7 +1,7 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
  *  Copyright 2013 Filipe RNC Maia
- *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved. 
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -56,8 +56,10 @@
 #include <thrust/detail/complex/math_private.h>
 
 THRUST_NAMESPACE_BEGIN
-namespace detail{
-namespace complex{
+namespace detail
+{
+namespace complex
+{
 
 THRUST_HOST_DEVICE inline float frexp_expf(float x, int* expt)
 {
@@ -80,8 +82,8 @@ THRUST_HOST_DEVICE inline complex<float> ldexp_cexpf(complex<float> z, int expt)
   float x, y, exp_x, scale1, scale2;
   int ex_expt, half_expt;
 
-  x = z.real();
-  y = z.imag();
+  x     = z.real();
+  y     = z.imag();
   exp_x = frexp_expf(x, &ex_expt);
   expt += ex_expt;
 
@@ -90,8 +92,7 @@ THRUST_HOST_DEVICE inline complex<float> ldexp_cexpf(complex<float> z, int expt)
   half_expt = expt - half_expt;
   set_float_word(scale2, (0x7f + half_expt) << 23);
 
-  return (complex<float>(cos(y) * exp_x * scale1 * scale2,
-			 sin(y) * exp_x * scale1 * scale2));
+  return (complex<float>(cos(y) * exp_x * scale1 * scale2, sin(y) * exp_x * scale1 * scale2));
 }
 
 THRUST_HOST_DEVICE inline complex<float> cexpf(const complex<float>& z)
@@ -99,9 +100,8 @@ THRUST_HOST_DEVICE inline complex<float> cexpf(const complex<float>& z)
   float x, y, exp_x;
   uint32_t hx, hy;
 
-  const uint32_t
-    exp_ovfl  = 0x42b17218,		/* MAX_EXP * ln2 ~= 88.722839355 */
-    cexp_ovfl = 0x43400074;		/* (MAX_EXP - MIN_DENORM_EXP) * ln2 */
+  const uint32_t exp_ovfl = 0x42b17218, /* MAX_EXP * ln2 ~= 88.722839355 */
+    cexp_ovfl             = 0x43400074; /* (MAX_EXP - MIN_DENORM_EXP) * ln2 */
 
   x = z.real();
   y = z.imag();
@@ -111,32 +111,44 @@ THRUST_HOST_DEVICE inline complex<float> cexpf(const complex<float>& z)
 
   /* cexp(x + I 0) = exp(x) + I 0 */
   if (hy == 0)
+  {
     return (complex<float>(exp(x), y));
+  }
   get_float_word(hx, x);
   /* cexp(0 + I y) = cos(y) + I sin(y) */
-  if ((hx & 0x7fffffff) == 0){
+  if ((hx & 0x7fffffff) == 0)
+  {
     return (complex<float>(cos(y), sin(y)));
   }
-  if (hy >= 0x7f800000) {
-    if ((hx & 0x7fffffff) != 0x7f800000) {
+  if (hy >= 0x7f800000)
+  {
+    if ((hx & 0x7fffffff) != 0x7f800000)
+    {
       /* cexp(finite|NaN +- I Inf|NaN) = NaN + I NaN */
       return (complex<float>(y - y, y - y));
-    } else if (hx & 0x80000000) {
+    }
+    else if (hx & 0x80000000)
+    {
       /* cexp(-Inf +- I Inf|NaN) = 0 + I 0 */
       return (complex<float>(0.0, 0.0));
-    } else {
+    }
+    else
+    {
       /* cexp(+Inf +- I Inf|NaN) = Inf + I NaN */
       return (complex<float>(x, y - y));
     }
   }
 
-  if (hx >= exp_ovfl && hx <= cexp_ovfl) {
+  if (hx >= exp_ovfl && hx <= cexp_ovfl)
+  {
     /*
      * x is between 88.7 and 192, so we must scale to avoid
      * overflow in expf(x).
      */
     return (ldexp_cexpf(z, 0));
-  } else {
+  }
+  else
+  {
     /*
      * Cases covered here:
      *  -  x < exp_ovfl and exp(x) won't overflow (common case)
@@ -157,6 +169,6 @@ template <>
 THRUST_HOST_DEVICE inline complex<float> exp(const complex<float>& z)
 {
   return detail::complex::cexpf(z);
-}    
-  
+}
+
 THRUST_NAMESPACE_END

@@ -1,3 +1,23 @@
+// Copyright (c) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 #include <thrust/copy.h>
 #include <thrust/device_vector.h>
 #include <thrust/fill.h>
@@ -12,82 +32,87 @@
 
 // this example illustrates how to tile a range multiple times
 // examples:
-//   tiled_range([0, 1, 2, 3], 1) -> [0, 1, 2, 3] 
-//   tiled_range([0, 1, 2, 3], 2) -> [0, 1, 2, 3, 0, 1, 2, 3] 
-//   tiled_range([0, 1, 2, 3], 3) -> [0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3] 
+//   tiled_range([0, 1, 2, 3], 1) -> [0, 1, 2, 3]
+//   tiled_range([0, 1, 2, 3], 2) -> [0, 1, 2, 3, 0, 1, 2, 3]
+//   tiled_range([0, 1, 2, 3], 3) -> [0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3]
 //   ...
 
 template <typename Iterator>
 class tiled_range
 {
-    public:
-    using difference_type = typename thrust::iterator_difference<Iterator>::type;
+public:
+  using difference_type = typename thrust::iterator_difference<Iterator>::type;
 
-    struct tile_functor
+  struct tile_functor
+  {
+    difference_type tile_size;
+
+    tile_functor(difference_type tile_size)
+        : tile_size(tile_size)
+    {}
+
+    __host__ __device__ difference_type operator()(const difference_type& i) const
     {
-        difference_type tile_size;
-
-        tile_functor(difference_type tile_size)
-            : tile_size(tile_size)
-        {}
-
-        __host__ __device__ difference_type operator()(const difference_type& i) const
-        {
-            return i % tile_size;
-        }
-    };
-
-    using CountingIterator    = typename thrust::counting_iterator<difference_type>;
-    using TransformIterator   = typename thrust::transform_iterator<tile_functor, CountingIterator>;
-    using PermutationIterator = typename thrust::permutation_iterator<Iterator, TransformIterator>;
-
-    // type of the tiled_range iterator
-    using iterator = PermutationIterator;
-
-    // construct repeated_range for the range [first,last)
-    tiled_range(Iterator first, Iterator last, difference_type tiles)
-        : first(first), last(last), tiles(tiles) {}
-   
-    iterator begin(void) const
-    {
-        return PermutationIterator(first, TransformIterator(CountingIterator(0), tile_functor(last - first)));
+      return i % tile_size;
     }
+  };
 
-    iterator end(void) const
-    {
-        return begin() + tiles * (last - first);
-    }
-    
-    protected:
-    Iterator first;
-    Iterator last;
-    difference_type tiles;
+  using CountingIterator    = typename thrust::counting_iterator<difference_type>;
+  using TransformIterator   = typename thrust::transform_iterator<tile_functor, CountingIterator>;
+  using PermutationIterator = typename thrust::permutation_iterator<Iterator, TransformIterator>;
+
+  // type of the tiled_range iterator
+  using iterator = PermutationIterator;
+
+  // construct repeated_range for the range [first,last)
+  tiled_range(Iterator first, Iterator last, difference_type tiles)
+      : first(first)
+      , last(last)
+      , tiles(tiles)
+  {}
+
+  iterator begin(void) const
+  {
+    return PermutationIterator(first, TransformIterator(CountingIterator(0), tile_functor(last - first)));
+  }
+
+  iterator end(void) const
+  {
+    return begin() + tiles * (last - first);
+  }
+
+protected:
+  Iterator first;
+  Iterator last;
+  difference_type tiles;
 };
 
 int main(void)
 {
-    thrust::device_vector<int> data(4);
-    data[0] = 10;
-    data[1] = 20;
-    data[2] = 30;
-    data[3] = 40;
+  thrust::device_vector<int> data(4);
+  data[0] = 10;
+  data[1] = 20;
+  data[2] = 30;
+  data[3] = 40;
 
-    // print the initial data
-    std::cout << "range        ";
-    thrust::copy(data.begin(), data.end(), std::ostream_iterator<int>(std::cout, " "));  std::cout << std::endl;
+  // print the initial data
+  std::cout << "range        ";
+  thrust::copy(data.begin(), data.end(), std::ostream_iterator<int>(std::cout, " "));
+  std::cout << std::endl;
 
-    using Iterator = thrust::device_vector<int>::iterator;
-  
-    // create tiled_range with two tiles
-    tiled_range<Iterator> two(data.begin(), data.end(), 2);
-    std::cout << "two tiles:   ";
-    thrust::copy(two.begin(), two.end(), std::ostream_iterator<int>(std::cout, " "));  std::cout << std::endl;
-    
-    // create tiled_range with three tiles
-    tiled_range<Iterator> three(data.begin(), data.end(), 3);
-    std::cout << "three tiles: ";
-    thrust::copy(three.begin(), three.end(), std::ostream_iterator<int>(std::cout, " "));  std::cout << std::endl;
+  using Iterator = thrust::device_vector<int>::iterator;
 
-    return 0;
+  // create tiled_range with two tiles
+  tiled_range<Iterator> two(data.begin(), data.end(), 2);
+  std::cout << "two tiles:   ";
+  thrust::copy(two.begin(), two.end(), std::ostream_iterator<int>(std::cout, " "));
+  std::cout << std::endl;
+
+  // create tiled_range with three tiles
+  tiled_range<Iterator> three(data.begin(), data.end(), 3);
+  std::cout << "three tiles: ";
+  thrust::copy(three.begin(), three.end(), std::ostream_iterator<int>(std::cout, " "));
+  std::cout << std::endl;
+
+  return 0;
 }
-

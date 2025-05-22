@@ -1,7 +1,7 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
  *  Copyright 2013 Filipe RNC Maia
- *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -56,8 +56,10 @@
 #include <thrust/detail/complex/math_private.h>
 
 THRUST_NAMESPACE_BEGIN
-namespace detail{
-namespace complex{
+namespace detail
+{
+namespace complex
+{
 /*
  * Compute exp(x), scaled to avoid spurious overflow.  An exponent is
  * returned separately in 'expt'.
@@ -91,8 +93,8 @@ THRUST_HOST_DEVICE inline complex<double> ldexp_cexp(complex<double> z, int expt
   double x, y, exp_x, scale1, scale2;
   int ex_expt, half_expt;
 
-  x = z.real();
-  y = z.imag();
+  x     = z.real();
+  y     = z.imag();
   exp_x = frexp_exp(x, &ex_expt);
   expt += ex_expt;
 
@@ -105,8 +107,7 @@ THRUST_HOST_DEVICE inline complex<double> ldexp_cexp(complex<double> z, int expt
   half_expt = expt - half_expt;
   insert_words(scale2, (0x3ff + half_expt) << 20, 0);
 
-  return (complex<double>(cos(y) * exp_x * scale1 * scale2,
-			  sin(y) * exp_x * scale1 * scale2));
+  return (complex<double>(cos(y) * exp_x * scale1 * scale2, sin(y) * exp_x * scale1 * scale2));
 }
 
 THRUST_HOST_DEVICE inline complex<double> cexp(const complex<double>& z)
@@ -114,10 +115,8 @@ THRUST_HOST_DEVICE inline complex<double> cexp(const complex<double>& z)
   double x, y, exp_x;
   uint32_t hx, hy, lx, ly;
 
-  const uint32_t
-    exp_ovfl  = 0x40862e42,			/* high bits of MAX_EXP * ln2 ~= 710 */
-    cexp_ovfl = 0x4096b8e4;			/* (MAX_EXP - MIN_DENORM_EXP) * ln2 */
-
+  const uint32_t exp_ovfl = 0x40862e42, /* high bits of MAX_EXP * ln2 ~= 710 */
+    cexp_ovfl             = 0x4096b8e4; /* (MAX_EXP - MIN_DENORM_EXP) * ln2 */
 
   x = z.real();
   y = z.imag();
@@ -127,32 +126,45 @@ THRUST_HOST_DEVICE inline complex<double> cexp(const complex<double>& z)
 
   /* cexp(x + I 0) = exp(x) + I 0 */
   if ((hy | ly) == 0)
+  {
     return (complex<double>(exp(x), y));
+  }
   extract_words(hx, lx, x);
   /* cexp(0 + I y) = cos(y) + I sin(y) */
   if (((hx & 0x7fffffff) | lx) == 0)
+  {
     return (complex<double>(cos(y), sin(y)));
+  }
 
-  if (hy >= 0x7ff00000) {
-    if (lx != 0 || (hx & 0x7fffffff) != 0x7ff00000) {
+  if (hy >= 0x7ff00000)
+  {
+    if (lx != 0 || (hx & 0x7fffffff) != 0x7ff00000)
+    {
       /* cexp(finite|NaN +- I Inf|NaN) = NaN + I NaN */
       return (complex<double>(y - y, y - y));
-    } else if (hx & 0x80000000) {
+    }
+    else if (hx & 0x80000000)
+    {
       /* cexp(-Inf +- I Inf|NaN) = 0 + I 0 */
       return (complex<double>(0.0, 0.0));
-    } else {
+    }
+    else
+    {
       /* cexp(+Inf +- I Inf|NaN) = Inf + I NaN */
       return (complex<double>(x, y - y));
     }
   }
 
-  if (hx >= exp_ovfl && hx <= cexp_ovfl) {
+  if (hx >= exp_ovfl && hx <= cexp_ovfl)
+  {
     /*
      * x is between 709.7 and 1454.3, so we must scale to avoid
      * overflow in exp(x).
      */
     return (ldexp_cexp(z, 0));
-  } else {
+  }
+  else
+  {
     /*
      * Cases covered here:
      *  -  x < exp_ovfl and exp(x) won't overflow (common case)

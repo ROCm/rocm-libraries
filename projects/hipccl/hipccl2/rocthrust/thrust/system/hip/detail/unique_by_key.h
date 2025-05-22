@@ -1,4 +1,4 @@
- /******************************************************************************
+/******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
  *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
@@ -32,271 +32,248 @@
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 
-#include <thrust/detail/temporary_array.h>
-#include <thrust/detail/minmax.h>
-#include <thrust/detail/mpl/math.h>
-#include <thrust/detail/range/head_flags.h>
-#include <thrust/distance.h>
-#include <thrust/functional.h>
-#include <thrust/pair.h>
-#include <thrust/system/hip/config.h>
-#include <thrust/system/hip/detail/get_value.h>
-#include <thrust/system/hip/detail/general/temp_storage.h>
-#include <thrust/system/hip/detail/par_to_seq.h>
-#include <thrust/system/hip/detail/util.h>
+#  include <thrust/system/hip/config.h>
 
-#include <cstdint>
+#  include <thrust/detail/minmax.h>
+#  include <thrust/detail/mpl/math.h>
+#  include <thrust/detail/range/head_flags.h>
+#  include <thrust/detail/temporary_array.h>
+#  include <thrust/distance.h>
+#  include <thrust/functional.h>
+#  include <thrust/pair.h>
+#  include <thrust/system/hip/detail/general/temp_storage.h>
+#  include <thrust/system/hip/detail/get_value.h>
+#  include <thrust/system/hip/detail/par_to_seq.h>
+#  include <thrust/system/hip/detail/util.h>
+
+#  include <cstdint>
 
 // rocPRIM includes
-#include <rocprim/rocprim.hpp>
+#  include <rocprim/rocprim.hpp>
 
 THRUST_NAMESPACE_BEGIN
 
 template <typename DerivedPolicy, typename ForwardIterator1, typename ForwardIterator2>
-thrust::pair<ForwardIterator1, ForwardIterator2> THRUST_HOST_DEVICE
-unique_by_key(const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
-              ForwardIterator1                                            keys_first,
-              ForwardIterator1                                            keys_last,
-              ForwardIterator2                                            values_first);
+thrust::pair<ForwardIterator1, ForwardIterator2> THRUST_HOST_DEVICE unique_by_key(
+  const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
+  ForwardIterator1 keys_first,
+  ForwardIterator1 keys_last,
+  ForwardIterator2 values_first);
 template <typename DerivedPolicy,
           typename InputIterator1,
           typename InputIterator2,
           typename OutputIterator1,
           typename OutputIterator2>
- THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2>
-unique_by_key_copy(const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
-                   InputIterator1                                              keys_first,
-                   InputIterator1                                              keys_last,
-                   InputIterator2                                              values_first,
-                   OutputIterator1                                             keys_result,
-                   OutputIterator2                                             values_result);
+THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> unique_by_key_copy(
+  const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
+  InputIterator1 keys_first,
+  InputIterator1 keys_last,
+  InputIterator2 values_first,
+  OutputIterator1 keys_result,
+  OutputIterator2 values_result);
 
 namespace hip_rocprim
 {
 namespace __unique_by_key
 {
 
-    template <typename Derived,
-              typename KeyInputIt,
-              typename ValInputIt,
-              typename KeyOutputIt,
-              typename ValOutputIt,
-              typename BinaryPred>
-    THRUST_HIP_RUNTIME_FUNCTION
-    pair<KeyOutputIt, ValOutputIt>
-    unique_by_key(execution_policy<Derived>& policy,
-                  KeyInputIt                 keys_first,
-                  KeyInputIt                 keys_last,
-                  ValInputIt                 values_first,
-                  KeyOutputIt                keys_result,
-                  ValOutputIt                values_result,
-                  BinaryPred                 binary_pred)
-    {
-        using namespace thrust::system::hip_rocprim::temp_storage;
-        using size_type = size_t;
+template <typename Derived,
+          typename KeyInputIt,
+          typename ValInputIt,
+          typename KeyOutputIt,
+          typename ValOutputIt,
+          typename BinaryPred>
+THRUST_HIP_RUNTIME_FUNCTION pair<KeyOutputIt, ValOutputIt> unique_by_key(
+  execution_policy<Derived>& policy,
+  KeyInputIt keys_first,
+  KeyInputIt keys_last,
+  ValInputIt values_first,
+  KeyOutputIt keys_result,
+  ValOutputIt values_result,
+  BinaryPred binary_pred)
+{
+  using namespace thrust::system::hip_rocprim::temp_storage;
+  using size_type = size_t;
 
-        size_type   num_items = static_cast<size_type>(thrust::distance(keys_first, keys_last));
-        size_t      temp_storage_bytes = 0;
-        hipStream_t stream             = hip_rocprim::stream(policy);
-        bool        debug_sync         = THRUST_HIP_DEBUG_SYNC_FLAG;
+  size_type num_items       = static_cast<size_type>(thrust::distance(keys_first, keys_last));
+  size_t temp_storage_bytes = 0;
+  hipStream_t stream        = hip_rocprim::stream(policy);
+  bool debug_sync           = THRUST_HIP_DEBUG_SYNC_FLAG;
 
-        if(num_items == 0)
-            return thrust::make_pair(keys_result, values_result);
+  if (num_items == 0)
+  {
+    return thrust::make_pair(keys_result, values_result);
+  }
 
-        // Determine temporary device storage requirements.
-        hip_rocprim::throw_on_error(rocprim::unique_by_key(nullptr,
-                                                           temp_storage_bytes,
-                                                           keys_first,
-                                                           values_first,
-                                                           keys_result,
-                                                           values_result,
-                                                           static_cast<size_type*>(nullptr),
-                                                           num_items,
-                                                           binary_pred,
-                                                           stream,
-                                                           debug_sync),
-                                    "unique_by_key failed on 1st step");
+  // Determine temporary device storage requirements.
+  hip_rocprim::throw_on_error(
+    rocprim::unique_by_key(
+      nullptr,
+      temp_storage_bytes,
+      keys_first,
+      values_first,
+      keys_result,
+      values_result,
+      static_cast<size_type*>(nullptr),
+      num_items,
+      binary_pred,
+      stream,
+      debug_sync),
+    "unique_by_key failed on 1st step");
 
-        size_t     storage_size;
-        void*      ptr       = nullptr;
-        void*      temp_stor = nullptr;
-        size_type* d_num_selected_out;
+  size_t storage_size;
+  void* ptr       = nullptr;
+  void* temp_stor = nullptr;
+  size_type* d_num_selected_out;
 
-        auto l_part = make_linear_partition(make_partition(&temp_stor, temp_storage_bytes),
-                                            ptr_aligned_array(&d_num_selected_out, 1));
+  auto l_part =
+    make_linear_partition(make_partition(&temp_stor, temp_storage_bytes), ptr_aligned_array(&d_num_selected_out, 1));
 
-        // Calculate storage_size including alignment
-        hip_rocprim::throw_on_error(partition(ptr, storage_size, l_part));
+  // Calculate storage_size including alignment
+  hip_rocprim::throw_on_error(partition(ptr, storage_size, l_part));
 
-        // Allocate temporary storage.
-        thrust::detail::temporary_array<std::uint8_t, Derived> tmp(policy, storage_size);
-        ptr = static_cast<void*>(tmp.data().get());
+  // Allocate temporary storage.
+  thrust::detail::temporary_array<std::uint8_t, Derived> tmp(policy, storage_size);
+  ptr = static_cast<void*>(tmp.data().get());
 
-        // Create pointers with alignment
-        hip_rocprim::throw_on_error(partition(ptr, storage_size, l_part));
+  // Create pointers with alignment
+  hip_rocprim::throw_on_error(partition(ptr, storage_size, l_part));
 
-        hip_rocprim::throw_on_error(rocprim::unique_by_key(ptr,
-                                                           temp_storage_bytes,
-                                                           keys_first,
-                                                           values_first,
-                                                           keys_result,
-                                                           values_result,
-                                                           d_num_selected_out,
-                                                           num_items,
-                                                           binary_pred,
-                                                           stream,
-                                                           debug_sync),
-                                    "unique_by_key failed on 2nd step");
+  hip_rocprim::throw_on_error(
+    rocprim::unique_by_key(
+      ptr,
+      temp_storage_bytes,
+      keys_first,
+      values_first,
+      keys_result,
+      values_result,
+      d_num_selected_out,
+      num_items,
+      binary_pred,
+      stream,
+      debug_sync),
+    "unique_by_key failed on 2nd step");
 
-        size_type num_selected = get_value(policy, d_num_selected_out);
+  size_type num_selected = get_value(policy, d_num_selected_out);
 
-        return thrust::make_pair(keys_result + num_selected, values_result + num_selected);
-    }
+  return thrust::make_pair(keys_result + num_selected, values_result + num_selected);
+}
 } // namespace __unique_by_key
 
 //-------------------------
 // Thrust API entry points
 //-------------------------
 
-THRUST_EXEC_CHECK_DISABLE template <class Derived,
-                                        class KeyInputIt,
-                                        class ValInputIt,
-                                        class KeyOutputIt,
-                                        class ValOutputIt,
-                                        class BinaryPred>
-pair<KeyOutputIt, ValOutputIt>
-    THRUST_HIP_FUNCTION unique_by_key_copy(execution_policy<Derived>& policy,
-                                           KeyInputIt                 keys_first,
-                                           KeyInputIt                 keys_last,
-                                           ValInputIt                 values_first,
-                                           KeyOutputIt                keys_result,
-                                           ValOutputIt                values_result,
-                                           BinaryPred                 binary_pred)
+THRUST_EXEC_CHECK_DISABLE
+template <class Derived, class KeyInputIt, class ValInputIt, class KeyOutputIt, class ValOutputIt, class BinaryPred>
+pair<KeyOutputIt, ValOutputIt> THRUST_HIP_FUNCTION unique_by_key_copy(
+  execution_policy<Derived>& policy,
+  KeyInputIt keys_first,
+  KeyInputIt keys_last,
+  ValInputIt values_first,
+  KeyOutputIt keys_result,
+  ValOutputIt values_result,
+  BinaryPred binary_pred)
 {
-    // struct workaround is required for HIP-clang
-    struct workaround
+  // struct workaround is required for HIP-clang
+  struct workaround
+  {
+    THRUST_HOST static pair<KeyOutputIt, ValOutputIt>
+    par(execution_policy<Derived>& policy,
+        KeyInputIt keys_first,
+        KeyInputIt keys_last,
+        ValInputIt values_first,
+        KeyOutputIt keys_result,
+        ValOutputIt values_result,
+        BinaryPred binary_pred)
     {
-        THRUST_HOST
-        static pair<KeyOutputIt, ValOutputIt> par(execution_policy<Derived>& policy,
-                                                  KeyInputIt                 keys_first,
-                                                  KeyInputIt                 keys_last,
-                                                  ValInputIt                 values_first,
-                                                  KeyOutputIt                keys_result,
-                                                  ValOutputIt                values_result,
-                                                  BinaryPred                 binary_pred)
-        {
-            return __unique_by_key::unique_by_key(policy,
-                                                  keys_first,
-                                                  keys_last,
-                                                  values_first,
-                                                  keys_result,
-                                                  values_result,
-                                                  binary_pred);
-        }
-        THRUST_DEVICE
-        static pair<KeyOutputIt, ValOutputIt> seq(execution_policy<Derived>& policy,
-                                                  KeyInputIt                 keys_first,
-                                                  KeyInputIt                 keys_last,
-                                                  ValInputIt                 values_first,
-                                                  KeyOutputIt                keys_result,
-                                                  ValOutputIt                values_result,
-                                                  BinaryPred                 binary_pred)
-        {
-            return thrust::unique_by_key_copy(
-                cvt_to_seq(derived_cast(policy)),
-                keys_first,
-                keys_last,
-                values_first,
-                keys_result,
-                values_result,
-                binary_pred
-            );
-        }
-    };
-    #if __THRUST_HAS_HIPRT__
-        return workaround::par(policy, keys_first, keys_last, values_first, keys_result, values_result, binary_pred);
-    #else
-        return workaround::seq(policy, keys_first, keys_last, values_first, keys_result, values_result, binary_pred);
-    #endif
+      return __unique_by_key::unique_by_key(
+        policy, keys_first, keys_last, values_first, keys_result, values_result, binary_pred);
+    }
+    THRUST_DEVICE static pair<KeyOutputIt, ValOutputIt>
+    seq(execution_policy<Derived>& policy,
+        KeyInputIt keys_first,
+        KeyInputIt keys_last,
+        ValInputIt values_first,
+        KeyOutputIt keys_result,
+        ValOutputIt values_result,
+        BinaryPred binary_pred)
+    {
+      return thrust::unique_by_key_copy(
+        cvt_to_seq(derived_cast(policy)), keys_first, keys_last, values_first, keys_result, values_result, binary_pred);
+    }
+  };
+#  if __THRUST_HAS_HIPRT__
+  return workaround::par(policy, keys_first, keys_last, values_first, keys_result, values_result, binary_pred);
+#  else
+  return workaround::seq(policy, keys_first, keys_last, values_first, keys_result, values_result, binary_pred);
+#  endif
 }
 
-template <class Derived,
-          class KeyInputIt,
-          class ValInputIt,
-          class KeyOutputIt,
-          class ValOutputIt>
-pair<KeyOutputIt, ValOutputIt> THRUST_HIP_FUNCTION
-unique_by_key_copy(execution_policy<Derived>& policy,
-                   KeyInputIt                 keys_first,
-                   KeyInputIt                 keys_last,
-                   ValInputIt                 values_first,
-                   KeyOutputIt                keys_result,
-                   ValOutputIt                values_result)
+template <class Derived, class KeyInputIt, class ValInputIt, class KeyOutputIt, class ValOutputIt>
+pair<KeyOutputIt, ValOutputIt> THRUST_HIP_FUNCTION unique_by_key_copy(
+  execution_policy<Derived>& policy,
+  KeyInputIt keys_first,
+  KeyInputIt keys_last,
+  ValInputIt values_first,
+  KeyOutputIt keys_result,
+  ValOutputIt values_result)
 {
-    using key_type = typename iterator_traits<KeyInputIt>::value_type;
-    return hip_rocprim::unique_by_key_copy(policy,
-                                           keys_first,
-                                           keys_last,
-                                           values_first,
-                                           keys_result,
-                                           values_result,
-                                           equal_to<key_type>());
+  using key_type = typename iterator_traits<KeyInputIt>::value_type;
+  return hip_rocprim::unique_by_key_copy(
+    policy, keys_first, keys_last, values_first, keys_result, values_result, equal_to<key_type>());
 }
 
 template <class Derived, class KeyInputIt, class ValInputIt, class BinaryPred>
-pair<KeyInputIt, ValInputIt> THRUST_HIP_FUNCTION
-unique_by_key(execution_policy<Derived>& policy,
-              KeyInputIt                 keys_first,
-              KeyInputIt                 keys_last,
-              ValInputIt                 values_first,
-              BinaryPred                 binary_pred)
+pair<KeyInputIt, ValInputIt> THRUST_HIP_FUNCTION unique_by_key(
+  execution_policy<Derived>& policy,
+  KeyInputIt keys_first,
+  KeyInputIt keys_last,
+  ValInputIt values_first,
+  BinaryPred binary_pred)
 {
-    // struct workaround is required for HIP-clang
-    struct workaround
+  // struct workaround is required for HIP-clang
+  struct workaround
+  {
+    THRUST_HOST static pair<KeyInputIt, ValInputIt>
+    par(execution_policy<Derived>& policy,
+        KeyInputIt keys_first,
+        KeyInputIt keys_last,
+        ValInputIt values_first,
+        BinaryPred binary_pred)
     {
-        THRUST_HOST static pair<KeyInputIt, ValInputIt> par(execution_policy<Derived>& policy,
-                                                         KeyInputIt                 keys_first,
-                                                         KeyInputIt                 keys_last,
-                                                         ValInputIt                 values_first,
-                                                         BinaryPred                 binary_pred)
-        {
-            return hip_rocprim::unique_by_key_copy(
-                policy, keys_first, keys_last, values_first, keys_first, values_first, binary_pred);
-        }
-        THRUST_DEVICE static pair<KeyInputIt, ValInputIt> seq(execution_policy<Derived>& policy,
-                                                           KeyInputIt                 keys_first,
-                                                           KeyInputIt                 keys_last,
-                                                           ValInputIt                 values_first,
-                                                           BinaryPred                 binary_pred)
-        {
-            return thrust::unique_by_key(
-                cvt_to_seq(derived_cast(policy)), keys_first, keys_last, values_first, binary_pred);
-        }
+      return hip_rocprim::unique_by_key_copy(
+        policy, keys_first, keys_last, values_first, keys_first, values_first, binary_pred);
+    }
+    THRUST_DEVICE static pair<KeyInputIt, ValInputIt>
+    seq(execution_policy<Derived>& policy,
+        KeyInputIt keys_first,
+        KeyInputIt keys_last,
+        ValInputIt values_first,
+        BinaryPred binary_pred)
+    {
+      return thrust::unique_by_key(cvt_to_seq(derived_cast(policy)), keys_first, keys_last, values_first, binary_pred);
+    }
   };
-  #if __THRUST_HAS_HIPRT__
-      return workaround::par(policy, keys_first, keys_last, values_first, binary_pred);
-  #else
-      return workaround::seq(policy, keys_first, keys_last, values_first, binary_pred);
-  #endif
+#  if __THRUST_HAS_HIPRT__
+  return workaround::par(policy, keys_first, keys_last, values_first, binary_pred);
+#  else
+  return workaround::seq(policy, keys_first, keys_last, values_first, binary_pred);
+#  endif
 }
 
 template <class Derived, class KeyInputIt, class ValInputIt>
 pair<KeyInputIt, ValInputIt> THRUST_HIP_FUNCTION
-unique_by_key(execution_policy<Derived>& policy,
-              KeyInputIt                 keys_first,
-              KeyInputIt                 keys_last,
-              ValInputIt                 values_first)
+unique_by_key(execution_policy<Derived>& policy, KeyInputIt keys_first, KeyInputIt keys_last, ValInputIt values_first)
 {
-    using key_type = typename iterator_traits<KeyInputIt>::value_type;
-    return hip_rocprim::unique_by_key(
-        policy, keys_first, keys_last, values_first, equal_to<key_type>()
-    );
+  using key_type = typename iterator_traits<KeyInputIt>::value_type;
+  return hip_rocprim::unique_by_key(policy, keys_first, keys_last, values_first, equal_to<key_type>());
 }
 
 } // namespace hip_rocprim
 THRUST_NAMESPACE_END
 
-#include <thrust/memory.h>
-#include <thrust/unique.h>
+#  include <thrust/memory.h>
+#  include <thrust/unique.h>
 
 #endif

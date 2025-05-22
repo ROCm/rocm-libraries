@@ -22,9 +22,9 @@
 #include "test_header.hpp"
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
-#define PARALLEL_FOR thrust::hip_rocprim::parallel_for
+#  define PARALLEL_FOR thrust::hip_rocprim::parallel_for
 #elif THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
-#define PARALLEL_FOR thrust::cuda_cub::parallel_for
+#  define PARALLEL_FOR thrust::cuda_cub::parallel_for
 #endif
 
 #ifdef PARALLEL_FOR
@@ -36,50 +36,50 @@ TESTS_DEFINE(ParallelForTests, TestsParams)
 template <typename T>
 struct add_functor
 {
-    T*       ptr;
-    __host__ __device__ void operator()(size_t x)
-    {
-        atomicAdd(ptr, T(x + 1));
-    }
+  T* ptr;
+  __host__ __device__ void operator()(size_t x)
+  {
+    atomicAdd(ptr, T(x + 1));
+  }
 };
 
 TYPED_TEST(ParallelForTests, HostPathSimpleTest)
 {
-    thrust::device_system_tag tag;
-    using T = typename TestFixture::input_type;
+  thrust::device_system_tag tag;
+  using T = typename TestFixture::input_type;
 
-    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    const std::vector<size_t> sizes = { (1ull << 31) + 65535, (1ull << 32) + (1ull << 20) - 1 };
+  const std::vector<size_t> sizes = {(1ull << 31) + 65535, (1ull << 32) + (1ull << 20) - 1};
 
-    for(auto size : sizes)
-    {
-        SCOPED_TRACE(testing::Message() << "with size = " << size);
+  for (auto size : sizes)
+  {
+    SCOPED_TRACE(testing::Message() << "with size = " << size);
 
-        auto ptr      = thrust::malloc<T>(tag, sizeof(T));
-        auto raw_ptr  = thrust::raw_pointer_cast(ptr);
-        ASSERT_NE(raw_ptr, nullptr);
+    auto ptr     = thrust::malloc<T>(tag, sizeof(T));
+    auto raw_ptr = thrust::raw_pointer_cast(ptr);
+    ASSERT_NE(raw_ptr, nullptr);
 
-        // Zero input memory
-        HIP_CHECK(hipMemset(raw_ptr, 0, sizeof(T)));
+    // Zero input memory
+    HIP_CHECK(hipMemset(raw_ptr, 0, sizeof(T)));
 
-        // Create unary function
-        add_functor<T> func;
-        func.ptr = raw_ptr;
+    // Create unary function
+    add_functor<T> func;
+    func.ptr = raw_ptr;
 
-        // Add all numbers: 1+2+...+size = size * (size+1) / 2
-        PARALLEL_FOR(tag, func, size);
+    // Add all numbers: 1+2+...+size = size * (size+1) / 2
+    PARALLEL_FOR(tag, func, size);
 
-        T output;
-        HIP_CHECK(hipMemcpy(&output, raw_ptr, sizeof(T), hipMemcpyDeviceToHost));
-        output *= 2;
+    T output;
+    HIP_CHECK(hipMemcpy(&output, raw_ptr, sizeof(T), hipMemcpyDeviceToHost));
+    output *= 2;
 
-        ASSERT_EQ(output, T(size * (size + 1)));
+    ASSERT_EQ(output, T(size * (size + 1)));
 
-        // Free
-        thrust::free(tag, ptr);
-    }
+    // Free
+    thrust::free(tag, ptr);
+  }
 }
 
-#undef PARALLEL_FOR
+#  undef PARALLEL_FOR
 #endif

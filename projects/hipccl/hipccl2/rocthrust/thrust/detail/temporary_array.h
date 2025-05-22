@@ -28,152 +28,116 @@ namespace detail
 
 // Forward declare temporary_array, as it's used by the CUDA copy backend, which
 // is included in contiguous_storage's definition.
-template<typename T, typename System>
-  class temporary_array;
+template <typename T, typename System>
+class temporary_array;
 
-} // end detail
+} // namespace detail
 THRUST_NAMESPACE_END
 
-#include <thrust/iterator/iterator_traits.h>
-#include <thrust/iterator/detail/tagged_iterator.h>
-#include <thrust/detail/contiguous_storage.h>
-#include <thrust/detail/allocator/temporary_allocator.h>
 #include <thrust/detail/allocator/no_throw_allocator.h>
+#include <thrust/detail/allocator/temporary_allocator.h>
+#include <thrust/detail/contiguous_storage.h>
 #include <thrust/detail/memory_wrapper.h>
+#include <thrust/iterator/detail/tagged_iterator.h>
+#include <thrust/iterator/iterator_traits.h>
 
 THRUST_NAMESPACE_BEGIN
 namespace detail
 {
 
-
-template<typename T, typename System>
-  class temporary_array
-    : public contiguous_storage<
-               T,
-               no_throw_allocator<
-                 temporary_allocator<T,System>
-               >
-             >
+template <typename T, typename System>
+class temporary_array : public contiguous_storage<T, no_throw_allocator<temporary_allocator<T, System>>>
 {
-  private:
-    using super_t = contiguous_storage<
-                      T,
-                      no_throw_allocator<
-                        temporary_allocator<T,System>
-                      >
-                    >;
+private:
+  using super_t = contiguous_storage<T, no_throw_allocator<temporary_allocator<T, System>>>;
 
-    // to help out the constructor
-    using alloc_type = no_throw_allocator<temporary_allocator<T,System> >;
+  // to help out the constructor
+  using alloc_type = no_throw_allocator<temporary_allocator<T, System>>;
 
-  public:
-    using size_type = typename super_t::size_type;
+public:
+  using size_type = typename super_t::size_type;
 
-    THRUST_HOST_DEVICE
-    temporary_array(thrust::execution_policy<System> &system);
+  THRUST_HOST_DEVICE temporary_array(thrust::execution_policy<System>& system);
 
-    THRUST_HOST_DEVICE
-    temporary_array(thrust::execution_policy<System> &system, size_type n);
+  THRUST_HOST_DEVICE temporary_array(thrust::execution_policy<System>& system, size_type n);
 
-    // provide a kill-switch to explicitly avoid initialization
-    THRUST_HOST_DEVICE
-    temporary_array(int uninit, thrust::execution_policy<System> &system, size_type n);
+  // provide a kill-switch to explicitly avoid initialization
+  THRUST_HOST_DEVICE temporary_array(int uninit, thrust::execution_policy<System>& system, size_type n);
 
-    template<typename InputIterator>
-    THRUST_HOST_DEVICE
-    temporary_array(thrust::execution_policy<System> &system,
-                    InputIterator first,
-                    size_type n);
+  template <typename InputIterator>
+  THRUST_HOST_DEVICE temporary_array(thrust::execution_policy<System>& system, InputIterator first, size_type n);
 
-    template<typename InputIterator, typename InputSystem>
-    THRUST_HOST_DEVICE
-    temporary_array(thrust::execution_policy<System> &system,
-                    thrust::execution_policy<InputSystem> &input_system,
-                    InputIterator first,
-                    size_type n);
+  template <typename InputIterator, typename InputSystem>
+  THRUST_HOST_DEVICE temporary_array(
+    thrust::execution_policy<System>& system,
+    thrust::execution_policy<InputSystem>& input_system,
+    InputIterator first,
+    size_type n);
 
-    template<typename InputIterator>
-    THRUST_HOST_DEVICE
-    temporary_array(thrust::execution_policy<System> &system,
-                    InputIterator first,
-                    InputIterator last);
+  template <typename InputIterator>
+  THRUST_HOST_DEVICE temporary_array(thrust::execution_policy<System>& system, InputIterator first, InputIterator last);
 
-    template<typename InputSystem, typename InputIterator>
-    THRUST_HOST_DEVICE
-    temporary_array(thrust::execution_policy<System> &system,
-                    thrust::execution_policy<InputSystem> &input_system,
-                    InputIterator first,
-                    InputIterator last);
+  template <typename InputSystem, typename InputIterator>
+  THRUST_HOST_DEVICE temporary_array(
+    thrust::execution_policy<System>& system,
+    thrust::execution_policy<InputSystem>& input_system,
+    InputIterator first,
+    InputIterator last);
 
-    THRUST_HOST_DEVICE
-    ~temporary_array();
+  THRUST_HOST_DEVICE ~temporary_array();
 }; // end temporary_array
 
-
 // XXX eliminate this when we do ranges for real
-template<typename Iterator, typename System>
-  class tagged_iterator_range
+template <typename Iterator, typename System>
+class tagged_iterator_range
 {
-  public:
-    using iterator = thrust::detail::tagged_iterator<Iterator,System>;
+public:
+  using iterator = thrust::detail::tagged_iterator<Iterator, System>;
 
-    template<typename Ignored1, typename Ignored2>
-    tagged_iterator_range(const Ignored1 &, const Ignored2 &, Iterator first, Iterator last)
-      : m_begin(first),
-        m_end(last)
-    {}
+  template <typename Ignored1, typename Ignored2>
+  tagged_iterator_range(const Ignored1&, const Ignored2&, Iterator first, Iterator last)
+      : m_begin(first)
+      , m_end(last)
+  {}
 
-    iterator begin(void) const { return m_begin; }
-    iterator end(void) const { return m_end; }
+  iterator begin(void) const
+  {
+    return m_begin;
+  }
+  iterator end(void) const
+  {
+    return m_end;
+  }
 
-  private:
-    iterator m_begin, m_end;
+private:
+  iterator m_begin, m_end;
 };
-
 
 // if FromSystem is convertible to ToSystem, then just make a shallow
 // copy of the range. else, use a temporary_array
 // note that the resulting iterator is explicitly tagged with ToSystem either way
-template<typename Iterator, typename FromSystem, typename ToSystem>
-  struct move_to_system_base
-    : public eval_if<
-        is_convertible<
-          FromSystem,
-          ToSystem
-        >::value,
-        identity_<
-          tagged_iterator_range<Iterator,ToSystem>
-        >,
-        identity_<
-          temporary_array<
-            typename thrust::iterator_value<Iterator>::type,
-            ToSystem
-          >
-        >
-      >
+template <typename Iterator, typename FromSystem, typename ToSystem>
+struct move_to_system_base
+    : public eval_if<is_convertible<FromSystem, ToSystem>::value,
+                     identity_<tagged_iterator_range<Iterator, ToSystem>>,
+                     identity_<temporary_array<typename thrust::iterator_value<Iterator>::type, ToSystem>>>
 {};
 
-
-template<typename Iterator, typename FromSystem, typename ToSystem>
-  class move_to_system
-    : public move_to_system_base<
-        Iterator,
-        FromSystem,
-        ToSystem
-      >::type
+template <typename Iterator, typename FromSystem, typename ToSystem>
+class move_to_system : public move_to_system_base<Iterator, FromSystem, ToSystem>::type
 {
-  using super_t = typename move_to_system_base<Iterator,FromSystem,ToSystem>::type;
+  using super_t = typename move_to_system_base<Iterator, FromSystem, ToSystem>::type;
 
-  public:
-    move_to_system(thrust::execution_policy<FromSystem> &from_system,
-                   thrust::execution_policy<ToSystem> &to_system,
-                   Iterator first,
-                   Iterator last)
-      : super_t(to_system, from_system, first, last) {}
+public:
+  move_to_system(thrust::execution_policy<FromSystem>& from_system,
+                 thrust::execution_policy<ToSystem>& to_system,
+                 Iterator first,
+                 Iterator last)
+      : super_t(to_system, from_system, first, last)
+  {}
 };
 
-
-} // end detail
+} // namespace detail
 THRUST_NAMESPACE_END
 
 #include <thrust/detail/temporary_array.inl>
