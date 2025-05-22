@@ -24,15 +24,14 @@
 THRUST_NAMESPACE_BEGIN
 
 // forward declaration of constant_iterator
-template<typename,typename,typename> class constant_iterator;
+template <typename, typename, typename>
+class constant_iterator;
 
 namespace detail
 {
 
-template<typename Value,
-         typename Incrementable,
-         typename System>
-  struct constant_iterator_base
+template <typename Value, typename Incrementable, typename System>
+struct constant_iterator_base
 {
   using value_type = Value;
 
@@ -58,7 +57,6 @@ template<typename Value,
     reference>;
 }; // end constant_iterator_base
 
-} // end detail
-  
-THRUST_NAMESPACE_END
+} // namespace detail
 
+THRUST_NAMESPACE_END

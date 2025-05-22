@@ -30,13 +30,14 @@
 #include <thrust/detail/config.h>
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
-#include <iterator>
-#include <thrust/system/hip/config.h>
+#  include <thrust/system/hip/config.h>
 
-#include <thrust/system/hip/detail/util.h>
-#include <thrust/system/hip/detail/parallel_for.h>
-#include <thrust/detail/function.h>
-#include <thrust/distance.h>
+#  include <thrust/detail/function.h>
+#  include <thrust/distance.h>
+#  include <thrust/system/hip/detail/parallel_for.h>
+#  include <thrust/system/hip/detail/util.h>
+
+#  include <iterator>
 
 THRUST_NAMESPACE_BEGIN
 
@@ -47,21 +48,20 @@ namespace hip_rocprim
 template <class Input, class UnaryOp>
 struct for_each_f
 {
-    Input   input;
-    UnaryOp op;
+  Input input;
+  UnaryOp op;
 
-    THRUST_HIP_FUNCTION
-    for_each_f(Input input, UnaryOp op)
-        : input(input)
-        , op(op)
-    {
-    }
+  THRUST_HIP_FUNCTION
+  for_each_f(Input input, UnaryOp op)
+      : input(input)
+      , op(op)
+  {}
 
-    template <class Size>
-    THRUST_HIP_FUNCTION void operator()(Size idx)
-    {
-        op(raw_reference_cast(*(input + static_cast<typename std::iterator_traits<Input>::difference_type>(idx))));
-    }
+  template <class Size>
+  THRUST_HIP_FUNCTION void operator()(Size idx)
+  {
+    op(raw_reference_cast(*(input + static_cast<typename std::iterator_traits<Input>::difference_type>(idx))));
+  }
 };
 
 //-------------------------
@@ -70,27 +70,23 @@ struct for_each_f
 
 // for_each_n
 template <class Derived, class Input, class Size, class UnaryOp>
-Input THRUST_HIP_FUNCTION
-for_each_n(execution_policy<Derived>& policy, Input first, Size count, UnaryOp op)
+Input THRUST_HIP_FUNCTION for_each_n(execution_policy<Derived>& policy, Input first, Size count, UnaryOp op)
 {
-    using wrapped_t = thrust::detail::wrapped_function<UnaryOp, void>;
-    wrapped_t wrapped_op(op);
+  using wrapped_t = thrust::detail::wrapped_function<UnaryOp, void>;
+  wrapped_t wrapped_op(op);
 
-    hip_rocprim::parallel_for(policy,
-                              for_each_f<Input, wrapped_t>(first, wrapped_op),
-                              count);
+  hip_rocprim::parallel_for(policy, for_each_f<Input, wrapped_t>(first, wrapped_op), count);
 
-    return first + static_cast<typename std::iterator_traits<Input>::difference_type>(count);
+  return first + static_cast<typename std::iterator_traits<Input>::difference_type>(count);
 }
 
 // for_each
 template <class Derived, class Input, class UnaryOp>
-Input THRUST_HIP_FUNCTION
-for_each(execution_policy<Derived>& policy, Input first, Input last, UnaryOp op)
+Input THRUST_HIP_FUNCTION for_each(execution_policy<Derived>& policy, Input first, Input last, UnaryOp op)
 {
-    using size_type = typename iterator_traits<Input>::difference_type;
-    size_type count = static_cast<size_type>(thrust::distance(first, last));
-    return hip_rocprim::for_each_n(policy, first, count, op);
+  using size_type = typename iterator_traits<Input>::difference_type;
+  size_type count = static_cast<size_type>(thrust::distance(first, last));
+  return hip_rocprim::for_each_n(policy, first, count, op);
 }
 
 } // namespace hip_rocprim

@@ -20,4 +20,3 @@
 
 // this system inherits sort
 #include <thrust/system/detail/sequential/sort.h>
-

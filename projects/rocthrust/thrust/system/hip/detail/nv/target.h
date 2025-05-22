@@ -5,7 +5,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 // SPDX-FileCopyrightText: Copyright (c) 2023 NVIDIA CORPORATION & AFFILIATES.
-// SPDX-FileCopyrightText: Modifications Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
+// SPDX-FileCopyrightText: Modifications Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 //===----------------------------------------------------------------------===//
 
@@ -16,6 +16,6 @@
 #ifndef __NV_TARGET_H
 #define __NV_TARGET_H
 
-#include "detail/__target_macros.h"
+#include "detail/__target_macros.h" // IWYU pragma: export
 
 #endif // __NV_TARGET_H

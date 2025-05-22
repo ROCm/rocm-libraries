@@ -30,318 +30,289 @@ TESTS_DEFINE(SetSymmetricDifferencePrimitiveTests, NumericalTestsParams);
 TESTS_DEFINE(SetSymmetricDifferenceIntegerTests, IntegerTestsParams);
 
 template <typename InputIterator1, typename InputIterator2, typename OutputIterator>
-OutputIterator set_symmetric_difference(my_system& system,
-                                        InputIterator1,
-                                        InputIterator1,
-                                        InputIterator2,
-                                        InputIterator2,
-                                        OutputIterator result)
+OutputIterator set_symmetric_difference(
+  my_system& system, InputIterator1, InputIterator1, InputIterator2, InputIterator2, OutputIterator result)
 {
-    system.validate_dispatch();
-    return result;
+  system.validate_dispatch();
+  return result;
 }
 
 TEST(SetSymmetricDifferenceTests, TestSetSymmetricDifferenceDispatchExplicit)
 {
-    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    thrust::device_vector<int> vec(1);
+  thrust::device_vector<int> vec(1);
 
-    my_system sys(0);
-    thrust::set_symmetric_difference(
-        sys, vec.begin(), vec.begin(), vec.begin(), vec.begin(), vec.begin());
+  my_system sys(0);
+  thrust::set_symmetric_difference(sys, vec.begin(), vec.begin(), vec.begin(), vec.begin(), vec.begin());
 
-    ASSERT_EQ(true, sys.is_valid());
+  ASSERT_EQ(true, sys.is_valid());
 }
 
 template <typename InputIterator1, typename InputIterator2, typename OutputIterator>
-OutputIterator set_symmetric_difference(
-    my_tag, InputIterator1, InputIterator1, InputIterator2, InputIterator2, OutputIterator result)
+OutputIterator
+set_symmetric_difference(my_tag, InputIterator1, InputIterator1, InputIterator2, InputIterator2, OutputIterator result)
 {
-    *result = 13;
-    return result;
+  *result = 13;
+  return result;
 }
 
 TEST(SetSymmetricDifferenceTests, TestSetSymmetricDifferenceDispatchImplicit)
 {
-    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    thrust::device_vector<int> vec(1);
+  thrust::device_vector<int> vec(1);
 
-    thrust::set_symmetric_difference(thrust::retag<my_tag>(vec.begin()),
-                                     thrust::retag<my_tag>(vec.begin()),
-                                     thrust::retag<my_tag>(vec.begin()),
-                                     thrust::retag<my_tag>(vec.begin()),
-                                     thrust::retag<my_tag>(vec.begin()));
+  thrust::set_symmetric_difference(
+    thrust::retag<my_tag>(vec.begin()),
+    thrust::retag<my_tag>(vec.begin()),
+    thrust::retag<my_tag>(vec.begin()),
+    thrust::retag<my_tag>(vec.begin()),
+    thrust::retag<my_tag>(vec.begin()));
 
-    ASSERT_EQ(13, vec.front());
+  ASSERT_EQ(13, vec.front());
 }
 
 TYPED_TEST(SetSymmetricDifferenceTests, TestSetSymmetricDifferenceSimple)
 {
-    using Vector   = typename TestFixture::input_type;
-    using Policy   = typename TestFixture::execution_policy;
-    using Iterator = typename Vector::iterator;
+  using Vector   = typename TestFixture::input_type;
+  using Policy   = typename TestFixture::execution_policy;
+  using Iterator = typename Vector::iterator;
 
-    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    Vector a(4), b(5);
+  Vector a(4), b(5);
 
-    a[0] = 0;
-    a[1] = 2;
-    a[2] = 4;
-    a[3] = 6;
-    b[0] = 0;
-    b[1] = 3;
-    b[2] = 3;
-    b[3] = 4;
-    b[4] = 7;
+  a[0] = 0;
+  a[1] = 2;
+  a[2] = 4;
+  a[3] = 6;
+  b[0] = 0;
+  b[1] = 3;
+  b[2] = 3;
+  b[3] = 4;
+  b[4] = 7;
 
-    Vector ref(5);
-    ref[0] = 2;
-    ref[1] = 3;
-    ref[2] = 3;
-    ref[3] = 6;
-    ref[4] = 7;
+  Vector ref(5);
+  ref[0] = 2;
+  ref[1] = 3;
+  ref[2] = 3;
+  ref[3] = 6;
+  ref[4] = 7;
 
-    Vector result(5);
+  Vector result(5);
 
-    Iterator end
-        = thrust::set_symmetric_difference(Policy{}, a.begin(), a.end(), b.begin(), b.end(), result.begin());
+  Iterator end = thrust::set_symmetric_difference(Policy{}, a.begin(), a.end(), b.begin(), b.end(), result.begin());
 
-    EXPECT_EQ(result.end(), end);
-    ASSERT_EQ(ref, result);
+  EXPECT_EQ(result.end(), end);
+  ASSERT_EQ(ref, result);
 }
 
 TYPED_TEST(SetSymmetricDifferencePrimitiveTests, TestSetSymmetricDifference)
 {
-    using T = typename TestFixture::input_type;
+  using T = typename TestFixture::input_type;
 
-    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    for(auto size : get_sizes())
+  for (auto size : get_sizes())
+  {
+    SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+    size_t expanded_sizes[]   = {0, 1, size / 2, size, size + 1, 2 * size};
+    size_t num_expanded_sizes = sizeof(expanded_sizes) / sizeof(size_t);
+
+    for (auto seed : get_seeds())
     {
-        SCOPED_TRACE(testing::Message() << "with size= " << size);
+      SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
-        size_t expanded_sizes[]   = {0, 1, size / 2, size, size + 1, 2 * size};
-        size_t num_expanded_sizes = sizeof(expanded_sizes) / sizeof(size_t);
+      thrust::host_vector<T> random = get_random_data<unsigned short int>(
+        size + *thrust::max_element(expanded_sizes, expanded_sizes + num_expanded_sizes), 0, 255, seed);
 
-        for(auto seed : get_seeds())
-        {
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+      thrust::host_vector<T> h_a(random.begin(), random.begin() + size);
+      thrust::host_vector<T> h_b(random.begin() + size, random.end());
 
-            thrust::host_vector<T> random = get_random_data<unsigned short int>(
-                size + *thrust::max_element(expanded_sizes, expanded_sizes + num_expanded_sizes),
-                0,
-                255,
-                seed
-            );
+      thrust::stable_sort(h_a.begin(), h_a.end());
+      thrust::stable_sort(h_b.begin(), h_b.end());
 
-            thrust::host_vector<T> h_a(random.begin(), random.begin() + size);
-            thrust::host_vector<T> h_b(random.begin() + size, random.end());
+      thrust::device_vector<T> d_a = h_a;
+      thrust::device_vector<T> d_b = h_b;
 
-            thrust::stable_sort(h_a.begin(), h_a.end());
-            thrust::stable_sort(h_b.begin(), h_b.end());
+      for (size_t i = 0; i < num_expanded_sizes; i++)
+      {
+        size_t expanded_size = expanded_sizes[i];
 
-            thrust::device_vector<T> d_a = h_a;
-            thrust::device_vector<T> d_b = h_b;
+        thrust::host_vector<T> h_result(size + expanded_size);
+        thrust::device_vector<T> d_result(size + expanded_size);
 
-            for(size_t i = 0; i < num_expanded_sizes; i++)
-            {
-                size_t expanded_size = expanded_sizes[i];
+        typename thrust::host_vector<T>::iterator h_end;
+        typename thrust::device_vector<T>::iterator d_end;
 
-                thrust::host_vector<T>   h_result(size + expanded_size);
-                thrust::device_vector<T> d_result(size + expanded_size);
+        h_end = thrust::set_symmetric_difference(
+          h_a.begin(), h_a.end(), h_b.begin(), h_b.begin() + expanded_size, h_result.begin());
+        h_result.resize(h_end - h_result.begin());
 
-                typename thrust::host_vector<T>::iterator   h_end;
-                typename thrust::device_vector<T>::iterator d_end;
+        d_end = thrust::set_symmetric_difference(
+          d_a.begin(), d_a.end(), d_b.begin(), d_b.begin() + expanded_size, d_result.begin());
+        d_result.resize(d_end - d_result.begin());
 
-                h_end = thrust::set_symmetric_difference(h_a.begin(),
-                                                         h_a.end(),
-                                                         h_b.begin(),
-                                                         h_b.begin() + expanded_size,
-                                                         h_result.begin());
-                h_result.resize(h_end - h_result.begin());
-
-                d_end = thrust::set_symmetric_difference(d_a.begin(),
-                                                         d_a.end(),
-                                                         d_b.begin(),
-                                                         d_b.begin() + expanded_size,
-                                                         d_result.begin());
-                d_result.resize(d_end - d_result.begin());
-
-                ASSERT_EQ(h_result, d_result);
-            }
-        }
+        ASSERT_EQ(h_result, d_result);
+      }
     }
+  }
 }
 
 TYPED_TEST(SetSymmetricDifferencePrimitiveTests, TestSetSymmetricDifferenceEquivalentRanges)
 {
-    using T = typename TestFixture::input_type;
+  using T = typename TestFixture::input_type;
 
-    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    for(auto size : get_sizes())
+  for (auto size : get_sizes())
+  {
+    SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+    for (auto seed : get_seeds())
     {
-        SCOPED_TRACE(testing::Message() << "with size= " << size);
+      SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
-        for(auto seed : get_seeds())
-        {
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+      thrust::host_vector<T> temp =
+        get_random_data<T>(size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
 
-            thrust::host_vector<T> temp = get_random_data<T>(
-                size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
+      thrust::host_vector<T> h_a = temp;
+      thrust::sort(h_a.begin(), h_a.end());
+      thrust::host_vector<T> h_b = h_a;
 
-            thrust::host_vector<T> h_a = temp;
-            thrust::sort(h_a.begin(), h_a.end());
-            thrust::host_vector<T> h_b = h_a;
+      thrust::device_vector<T> d_a = h_a;
+      thrust::device_vector<T> d_b = h_b;
 
-            thrust::device_vector<T> d_a = h_a;
-            thrust::device_vector<T> d_b = h_b;
+      thrust::host_vector<T> h_result(h_a.size() + h_b.size());
+      thrust::device_vector<T> d_result(h_result.size());
 
-            thrust::host_vector<T>   h_result(h_a.size() + h_b.size());
-            thrust::device_vector<T> d_result(h_result.size());
+      typename thrust::host_vector<T>::iterator h_end;
+      typename thrust::device_vector<T>::iterator d_end;
 
-            typename thrust::host_vector<T>::iterator   h_end;
-            typename thrust::device_vector<T>::iterator d_end;
+      h_end = thrust::set_symmetric_difference(h_a.begin(), h_a.end(), h_b.begin(), h_b.end(), h_result.begin());
+      h_result.erase(h_end, h_result.end());
 
-            h_end = thrust::set_symmetric_difference(
-                h_a.begin(), h_a.end(), h_b.begin(), h_b.end(), h_result.begin());
-            h_result.erase(h_end, h_result.end());
+      d_end = thrust::set_symmetric_difference(d_a.begin(), d_a.end(), d_b.begin(), d_b.end(), d_result.begin());
+      d_result.erase(d_end, d_result.end());
 
-            d_end = thrust::set_symmetric_difference(
-                d_a.begin(), d_a.end(), d_b.begin(), d_b.end(), d_result.begin());
-            d_result.erase(d_end, d_result.end());
-
-            ASSERT_EQ(h_result, d_result);
-        }
+      ASSERT_EQ(h_result, d_result);
     }
+  }
 }
 
 TYPED_TEST(SetSymmetricDifferencePrimitiveTests, TestSetSymmetricDifferenceMultiset)
 {
-    using T = typename TestFixture::input_type;
+  using T = typename TestFixture::input_type;
 
-    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    for(auto size : get_sizes())
+  for (auto size : get_sizes())
+  {
+    SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+    for (auto seed : get_seeds())
     {
-        SCOPED_TRACE(testing::Message() << "with size= " << size);
+      SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
-        for(auto seed : get_seeds())
-        {
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+      thrust::host_vector<T> temp =
+        get_random_data<T>(2 * size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
 
-            thrust::host_vector<T> temp = get_random_data<T>(
-                2 * size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
+      // restrict elements to [min,13)
+      for (typename thrust::host_vector<T>::iterator i = temp.begin(); i != temp.end(); ++i)
+      {
+        int temp = static_cast<int>(*i);
+        temp %= 13;
+        *i = temp;
+      }
 
-            // restrict elements to [min,13)
-            for(typename thrust::host_vector<T>::iterator i = temp.begin(); i != temp.end(); ++i)
-            {
-                int temp = static_cast<int>(*i);
-                temp %= 13;
-                *i = temp;
-            }
+      thrust::host_vector<T> h_a(temp.begin(), temp.begin() + size);
+      thrust::host_vector<T> h_b(temp.begin() + size, temp.end());
 
-            thrust::host_vector<T> h_a(temp.begin(), temp.begin() + size);
-            thrust::host_vector<T> h_b(temp.begin() + size, temp.end());
+      thrust::sort(h_a.begin(), h_a.end());
+      thrust::sort(h_b.begin(), h_b.end());
 
-            thrust::sort(h_a.begin(), h_a.end());
-            thrust::sort(h_b.begin(), h_b.end());
+      thrust::device_vector<T> d_a = h_a;
+      thrust::device_vector<T> d_b = h_b;
 
-            thrust::device_vector<T> d_a = h_a;
-            thrust::device_vector<T> d_b = h_b;
+      thrust::host_vector<T> h_result(h_a.size() + h_b.size());
+      thrust::device_vector<T> d_result(h_result.size());
 
-            thrust::host_vector<T>   h_result(h_a.size() + h_b.size());
-            thrust::device_vector<T> d_result(h_result.size());
+      typename thrust::host_vector<T>::iterator h_end;
+      typename thrust::device_vector<T>::iterator d_end;
 
-            typename thrust::host_vector<T>::iterator   h_end;
-            typename thrust::device_vector<T>::iterator d_end;
+      h_end = thrust::set_difference(h_a.begin(), h_a.end(), h_b.begin(), h_b.end(), h_result.begin());
+      h_result.erase(h_end, h_result.end());
 
-            h_end = thrust::set_difference(
-                h_a.begin(), h_a.end(), h_b.begin(), h_b.end(), h_result.begin());
-            h_result.erase(h_end, h_result.end());
+      d_end = thrust::set_difference(d_a.begin(), d_a.end(), d_b.begin(), d_b.end(), d_result.begin());
+      d_result.erase(d_end, d_result.end());
 
-            d_end = thrust::set_difference(
-                d_a.begin(), d_a.end(), d_b.begin(), d_b.end(), d_result.begin());
-            d_result.erase(d_end, d_result.end());
-
-            ASSERT_EQ_QUIET(h_result, d_result);
-        }
+      ASSERT_EQ_QUIET(h_result, d_result);
     }
+  }
 }
 
 TYPED_TEST(SetSymmetricDifferenceIntegerTests, TestSetSymmetricDifferenceKeyValue)
 {
-    using U = typename TestFixture::input_type;
-    using T = key_value<U, U>;
+  using U = typename TestFixture::input_type;
+  using T = key_value<U, U>;
 
-    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    for(auto size : get_sizes())
+  for (auto size : get_sizes())
+  {
+    SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+    for (auto seed : get_seeds())
     {
-        SCOPED_TRACE(testing::Message() << "with size= " << size);
+      SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
-        for(auto seed : get_seeds())
+      thrust::host_vector<U> h_keys_a =
+        get_random_data<U>(size, get_default_limits<U>::min(), get_default_limits<U>::max(), seed);
+      thrust::host_vector<U> h_values_a = get_random_data<U>(
+        size, get_default_limits<U>::min(), get_default_limits<U>::max(), seed + seed_value_addition);
+
+      thrust::host_vector<U> h_keys_b = get_random_data<U>(
+        size, get_default_limits<U>::min(), get_default_limits<U>::max(), seed + 2 * seed_value_addition);
+      thrust::host_vector<U> h_values_b = get_random_data<U>(
+        size, get_default_limits<U>::min(), get_default_limits<U>::max(), seed + 3 * seed_value_addition);
+
+      thrust::host_vector<T> h_a(size), h_b(size);
+      for (size_t i = 0; i < size; ++i)
+      {
+        h_a[i] = T(h_keys_a[i], h_values_a[i]);
+
+        if (i % 2 == 1)
         {
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
-
-            thrust::host_vector<U> h_keys_a = get_random_data<U>(
-                size, get_default_limits<U>::min(), get_default_limits<U>::max(), seed);
-            thrust::host_vector<U> h_values_a = get_random_data<U>(
-                size,
-                get_default_limits<U>::min(),
-                get_default_limits<U>::max(),
-                seed + seed_value_addition
-            );
-
-            thrust::host_vector<U> h_keys_b = get_random_data<U>(
-                size,
-                get_default_limits<U>::min(),
-                get_default_limits<U>::max(),
-                seed + 2 * seed_value_addition
-            );
-            thrust::host_vector<U> h_values_b = get_random_data<U>(
-                size,
-                get_default_limits<U>::min(),
-                get_default_limits<U>::max(),
-                seed + 3 * seed_value_addition
-            );
-
-            thrust::host_vector<T> h_a(size), h_b(size);
-            for(size_t i = 0; i < size; ++i)
-            {
-                h_a[i] = T(h_keys_a[i], h_values_a[i]);
-
-                if(i % 2 == 1)
-                    h_b[i] = T(h_keys_b[i], h_values_b[i]);
-                else
-                    h_b[i] = T(h_keys_a[i], h_values_a[i]);
-            }
-
-            thrust::stable_sort(h_a.begin(), h_a.end());
-            thrust::stable_sort(h_b.begin(), h_b.end());
-
-            thrust::device_vector<T> d_a = h_a;
-            thrust::device_vector<T> d_b = h_b;
-
-            thrust::host_vector<T>   h_result(h_a.size() + h_b.size());
-            thrust::device_vector<T> d_result(h_result.size());
-
-            typename thrust::host_vector<T>::iterator   h_end;
-            typename thrust::device_vector<T>::iterator d_end;
-
-            h_end = thrust::set_symmetric_difference(
-                h_a.begin(), h_a.end(), h_b.begin(), h_b.end(), h_result.begin());
-            h_result.erase(h_end, h_result.end());
-
-            d_end = thrust::set_symmetric_difference(
-                d_a.begin(), d_a.end(), d_b.begin(), d_b.end(), d_result.begin());
-
-            d_result.erase(d_end, d_result.end());
-
-            ASSERT_EQ_QUIET(h_result, d_result);
+          h_b[i] = T(h_keys_b[i], h_values_b[i]);
         }
+        else
+        {
+          h_b[i] = T(h_keys_a[i], h_values_a[i]);
+        }
+      }
+
+      thrust::stable_sort(h_a.begin(), h_a.end());
+      thrust::stable_sort(h_b.begin(), h_b.end());
+
+      thrust::device_vector<T> d_a = h_a;
+      thrust::device_vector<T> d_b = h_b;
+
+      thrust::host_vector<T> h_result(h_a.size() + h_b.size());
+      thrust::device_vector<T> d_result(h_result.size());
+
+      typename thrust::host_vector<T>::iterator h_end;
+      typename thrust::device_vector<T>::iterator d_end;
+
+      h_end = thrust::set_symmetric_difference(h_a.begin(), h_a.end(), h_b.begin(), h_b.end(), h_result.begin());
+      h_result.erase(h_end, h_result.end());
+
+      d_end = thrust::set_symmetric_difference(d_a.begin(), d_a.end(), d_b.begin(), d_b.end(), d_result.begin());
+
+      d_result.erase(d_end, d_result.end());
+
+      ASSERT_EQ_QUIET(h_result, d_result);
     }
+  }
 }

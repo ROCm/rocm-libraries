@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019-2024, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2025, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -31,10 +31,12 @@
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 
-#include <iterator>
-#include <thrust/distance.h>
-#include <thrust/system/hip/config.h>
-#include <thrust/system/hip/detail/for_each.h>
+#  include <thrust/system/hip/config.h>
+
+#  include <thrust/distance.h>
+#  include <thrust/system/hip/detail/for_each.h>
+
+#  include <iterator>
 
 THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
@@ -44,44 +46,36 @@ namespace hip_rocprim
 template <class Generator>
 struct generate_f
 {
-    Generator generator;
+  Generator generator;
 
-    THRUST_HIP_FUNCTION
-    generate_f(Generator generator_)
-        : generator(generator_)
-    {
-    }
+  THRUST_HIP_FUNCTION
+  generate_f(Generator generator_)
+      : generator(generator_)
+  {}
 
-    template <class T>
-    THRUST_HIP_DEVICE_FUNCTION void operator()(T const& value)
-    {
-        T& lvalue = const_cast<T&>(value);
-        lvalue    = generator();
-    }
+  template <class T>
+  THRUST_HIP_DEVICE_FUNCTION void operator()(T const& value)
+  {
+    T& lvalue = const_cast<T&>(value);
+    lvalue    = generator();
+  }
 };
 
 // for_each_n
 template <class Derived, class OutputIt, class Size, class Generator>
 OutputIt THRUST_HIP_FUNCTION
-generate_n(execution_policy<Derived>& policy,
-           OutputIt                   result,
-           Size                       count,
-           Generator                  generator)
+generate_n(execution_policy<Derived>& policy, OutputIt result, Size count, Generator generator)
 {
-    return hip_rocprim::for_each_n(policy, result, count, generate_f<Generator>(generator));
+  return hip_rocprim::for_each_n(policy, result, count, generate_f<Generator>(generator));
 }
 
 // for_each
 template <class Derived, class OutputIt, class Generator>
-void THRUST_HIP_FUNCTION
-generate(execution_policy<Derived>& policy,
-         OutputIt                   first,
-         OutputIt                   last,
-         Generator                  generator)
+void THRUST_HIP_FUNCTION generate(execution_policy<Derived>& policy, OutputIt first, OutputIt last, Generator generator)
 {
-    hip_rocprim::generate_n(policy, first, thrust::distance(first, last), generator);
+  hip_rocprim::generate_n(policy, first, thrust::distance(first, last), generator);
 }
 
 } // namespace hip_rocprim
 THRUST_NAMESPACE_END
-#endif //THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP

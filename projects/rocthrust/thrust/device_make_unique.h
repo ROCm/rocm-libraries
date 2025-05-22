@@ -14,7 +14,6 @@
  *  limitations under the License.
  */
 
-
 /*! \file device_make_unique.h
  *  \brief A factory function for creating `unique_ptr`s to device objects.
  */
@@ -23,12 +22,11 @@
 
 #include <thrust/detail/config.h>
 
-
 #include <thrust/allocate_unique.h>
+#include <thrust/detail/type_deduction.h>
+#include <thrust/device_allocator.h>
 #include <thrust/device_new.h>
 #include <thrust/device_ptr.h>
-#include <thrust/device_allocator.h>
-#include <thrust/detail/type_deduction.h>
 
 THRUST_NAMESPACE_BEGIN
 
@@ -38,9 +36,7 @@ THRUST_NAMESPACE_BEGIN
  *         memory.
  */
 template <typename T, typename... Args>
-THRUST_HOST
-auto device_make_unique(Args&&... args)
-  -> decltype(uninitialized_allocate_unique<T>(device_allocator<T>{}))
+THRUST_HOST auto device_make_unique(Args&&... args) -> decltype(uninitialized_allocate_unique<T>(device_allocator<T>{}))
 {
 #if !defined(THRUST_DOXYGEN) // This causes Doxygen to choke for some reason.
   // FIXME: This is crude - we construct an unnecessary T on the host for
@@ -55,4 +51,3 @@ auto device_make_unique(Args&&... args)
 ///////////////////////////////////////////////////////////////////////////////
 
 THRUST_NAMESPACE_END
-

@@ -21,63 +21,63 @@
 
 TEST(MrPoolOptionsTests, TestPoolOptionsBasicValidity)
 {
-    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    thrust::mr::pool_options options = thrust::mr::pool_options();
-    ASSERT_EQ(options.validate(), false);
+  thrust::mr::pool_options options = thrust::mr::pool_options();
+  ASSERT_EQ(options.validate(), false);
 
-    options.max_blocks_per_chunk = 1024;
-    options.max_bytes_per_chunk = 1024 * 1024;
-    options.smallest_block_size = 8;
-    options.largest_block_size = 1024;
-    ASSERT_EQ(options.validate(), true);
+  options.max_blocks_per_chunk = 1024;
+  options.max_bytes_per_chunk  = 1024 * 1024;
+  options.smallest_block_size  = 8;
+  options.largest_block_size   = 1024;
+  ASSERT_EQ(options.validate(), true);
 
-    // the minimum number of blocks per chunk is bigger than the max
-    options.min_blocks_per_chunk = 1025;
-    ASSERT_EQ(options.validate(), false);
-    options.min_blocks_per_chunk = 128;
-    ASSERT_EQ(options.validate(), true);
+  // the minimum number of blocks per chunk is bigger than the max
+  options.min_blocks_per_chunk = 1025;
+  ASSERT_EQ(options.validate(), false);
+  options.min_blocks_per_chunk = 128;
+  ASSERT_EQ(options.validate(), true);
 
-    // the minimum number of bytes per chunk is bigger than the max
-    options.min_bytes_per_chunk = 1025 * 1024;
-    ASSERT_EQ(options.validate(), false);
-    options.min_bytes_per_chunk = 1024;
-    ASSERT_EQ(options.validate(), true);
+  // the minimum number of bytes per chunk is bigger than the max
+  options.min_bytes_per_chunk = 1025 * 1024;
+  ASSERT_EQ(options.validate(), false);
+  options.min_bytes_per_chunk = 1024;
+  ASSERT_EQ(options.validate(), true);
 
-    // smallest block size is bigger than the largest block size
-    options.smallest_block_size = 2048;
-    ASSERT_EQ(options.validate(), false);
-    options.smallest_block_size = 8;
-    ASSERT_EQ(options.validate(), true);
+  // smallest block size is bigger than the largest block size
+  options.smallest_block_size = 2048;
+  ASSERT_EQ(options.validate(), false);
+  options.smallest_block_size = 8;
+  ASSERT_EQ(options.validate(), true);
 }
 
 TEST(MrPoolOptionsTests, TestPoolOptionsComplexValidity)
 {
-    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
-    
-    thrust::mr::pool_options options = thrust::mr::pool_options();
-    ASSERT_EQ(options.validate(), false);
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    options.max_blocks_per_chunk = 1024;
-    options.max_bytes_per_chunk = 1024 * 1024;
-    options.smallest_block_size = 8;
-    options.largest_block_size = 1024;
-    ASSERT_EQ(options.validate(), true);
+  thrust::mr::pool_options options = thrust::mr::pool_options();
+  ASSERT_EQ(options.validate(), false);
 
-    options.min_bytes_per_chunk = 2 * 1024;
-    options.max_bytes_per_chunk = 256 * 1024;
+  options.max_blocks_per_chunk = 1024;
+  options.max_bytes_per_chunk  = 1024 * 1024;
+  options.smallest_block_size  = 8;
+  options.largest_block_size   = 1024;
+  ASSERT_EQ(options.validate(), true);
 
-    // the biggest allowed allocation (deduced from blocks in chunks)
-    // is smaller than the minimal allowed one (defined in bytes)
-    options.max_blocks_per_chunk = 1;
-    ASSERT_EQ(options.validate(), false);
-    options.max_blocks_per_chunk = 1024;
-    ASSERT_EQ(options.validate(), true);
+  options.min_bytes_per_chunk = 2 * 1024;
+  options.max_bytes_per_chunk = 256 * 1024;
 
-    // the smallest allowed allocation (deduced from blocks in chunks)
-    // is bigger than the maximum allowed one (defined in bytes)
-    options.min_blocks_per_chunk = 1024 * 1024;
-    ASSERT_EQ(options.validate(), false);
-    options.min_blocks_per_chunk = 128;
-    ASSERT_EQ(options.validate(), true);
+  // the biggest allowed allocation (deduced from blocks in chunks)
+  // is smaller than the minimal allowed one (defined in bytes)
+  options.max_blocks_per_chunk = 1;
+  ASSERT_EQ(options.validate(), false);
+  options.max_blocks_per_chunk = 1024;
+  ASSERT_EQ(options.validate(), true);
+
+  // the smallest allowed allocation (deduced from blocks in chunks)
+  // is bigger than the maximum allowed one (defined in bytes)
+  options.min_blocks_per_chunk = 1024 * 1024;
+  ASSERT_EQ(options.validate(), false);
+  options.min_blocks_per_chunk = 128;
+  ASSERT_EQ(options.validate(), true);
 }

@@ -20,4 +20,3 @@
 
 // this system inherits unique_by_key
 #include <thrust/system/detail/sequential/unique_by_key.h>
-

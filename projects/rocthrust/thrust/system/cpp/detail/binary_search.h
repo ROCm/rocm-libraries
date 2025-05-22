@@ -20,4 +20,3 @@
 
 // this system inherits the binary search algorithms
 #include <thrust/system/detail/sequential/binary_search.h>
-

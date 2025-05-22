@@ -30,9 +30,9 @@
 #include <thrust/random/xor_combine_engine.h>
 
 // distributions
+#include <thrust/random/normal_distribution.h>
 #include <thrust/random/uniform_int_distribution.h>
 #include <thrust/random/uniform_real_distribution.h>
-#include <thrust/random/normal_distribution.h>
 
 #include <cstdint>
 
@@ -41,7 +41,6 @@ THRUST_NAMESPACE_BEGIN
 /*! \addtogroup random Random Number Generation
  *  \{
  */
-
 
 /*! \namespace thrust::random
  *  \brief \p thrust::random is the namespace which contains random number engine class templates,
@@ -66,7 +65,6 @@ namespace random
  */
 using ranlux24 = discard_block_engine<ranlux24_base, 223, 23>;
 
-
 /*! \typedef ranlux48
  *  \brief A random number engine with predefined parameters which implements the
  *         RANLUX level-4 random number generation algorithm.
@@ -74,7 +72,6 @@ using ranlux24 = discard_block_engine<ranlux24_base, 223, 23>;
  *        shall produce the value \c 88229545517833 .
  */
 using ranlux48 = discard_block_engine<ranlux48_base, 389, 11>;
-
 
 /*! \typedef taus88
  *  \brief A random number engine with predefined parameters which implements
@@ -102,16 +99,15 @@ using default_random_engine = minstd_rand;
 /*! \} // end predefined_random
  */
 
-} // end random
-
+} // namespace random
 
 /*! \} // end random
  */
 
 // import names into thrust::
+using random::default_random_engine;
 using random::ranlux24;
 using random::ranlux48;
 using random::taus88;
-using random::default_random_engine;
 
 THRUST_NAMESPACE_END

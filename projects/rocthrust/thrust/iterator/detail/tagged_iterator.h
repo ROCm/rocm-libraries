@@ -17,19 +17,21 @@
 #pragma once
 
 #include <thrust/detail/config.h>
+
+#include <thrust/detail/use_default.h>
 #include <thrust/iterator/iterator_adaptor.h>
 #include <thrust/iterator/iterator_traits.h>
-#include <thrust/detail/use_default.h>
 #include <thrust/type_traits/is_contiguous_iterator.h>
 
 THRUST_NAMESPACE_BEGIN
 namespace detail
 {
 
-template <typename,typename> class tagged_iterator;
+template <typename, typename>
+class tagged_iterator;
 
-template<typename Iterator, typename Tag>
-  struct tagged_iterator_base
+template <typename Iterator, typename Tag>
+struct tagged_iterator_base
 {
   using type =
     thrust::iterator_adaptor<tagged_iterator<Iterator, Tag>,
@@ -41,21 +43,18 @@ template<typename Iterator, typename Tag>
                              typename thrust::iterator_difference<Iterator>::type>;
 }; // end tagged_iterator_base
 
-template<typename Iterator, typename Tag>
-  class tagged_iterator
-    : public tagged_iterator_base<Iterator,Tag>::type
+template <typename Iterator, typename Tag>
+class tagged_iterator : public tagged_iterator_base<Iterator, Tag>::type
 {
-  private:
+private:
   using super_t = typename tagged_iterator_base<Iterator, Tag>::type;
 
+public:
+  THRUST_HOST_DEVICE tagged_iterator() {}
 
-  public:
-    THRUST_HOST_DEVICE
-    tagged_iterator() {}
-
-    THRUST_HOST_DEVICE
-    explicit tagged_iterator(Iterator x)
-      : super_t(x) {}
+  THRUST_HOST_DEVICE explicit tagged_iterator(Iterator x)
+      : super_t(x)
+  {}
 }; // end tagged_iterator
 
 /*! \p make_tagged_iterator creates a \p tagged_iterator
@@ -73,13 +72,11 @@ inline auto make_tagged_iterator(Iterator iter) -> tagged_iterator<Iterator, Tag
   return tagged_iterator<Iterator, Tag>(iter);
 }
 
-} // end detail
+} // namespace detail
 
 // tagged_iterator is trivial if its base iterator is.
 template <typename BaseIterator, typename Tag>
-struct proclaim_contiguous_iterator<
-  detail::tagged_iterator<BaseIterator, Tag>
-> : is_contiguous_iterator<BaseIterator> {};
+struct proclaim_contiguous_iterator<detail::tagged_iterator<BaseIterator, Tag>> : is_contiguous_iterator<BaseIterator>
+{};
 
 THRUST_NAMESPACE_END
-

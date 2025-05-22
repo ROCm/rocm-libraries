@@ -20,4 +20,3 @@
 
 // this system inherits scan
 #include <thrust/system/detail/sequential/scan.h>
-

@@ -20,4 +20,3 @@
 
 // this system inherits uninitialized_copy
 #include <thrust/system/cpp/detail/uninitialized_copy.h>
-

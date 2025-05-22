@@ -14,7 +14,6 @@
  *  limitations under the License.
  */
 
-
 /*! \file thrust/sort.h
  *  \brief Functions for reorganizing ranges into sorted order
  */
@@ -22,6 +21,7 @@
 #pragma once
 
 #include <thrust/detail/config.h>
+
 #include <thrust/detail/execution_policy.h>
 
 THRUST_NAMESPACE_BEGIN
@@ -30,7 +30,6 @@ THRUST_NAMESPACE_BEGIN
  *  \ingroup algorithms
  *  \{
  */
-
 
 /*! \p sort sorts the elements in <tt>[first, last)</tt> into
  *  ascending order, meaning that if \c i and \c j are any two valid
@@ -49,11 +48,12 @@ THRUST_NAMESPACE_BEGIN
  *  \param last The end of the sequence.
  *
  *  \tparam DerivedPolicy The name of the derived execution policy.
- *  \tparam RandomAccessIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/random_access_iterator">Random Access Iterator</a>,
- *          \p RandomAccessIterator is mutable,
- *          and \p RandomAccessIterator's \c value_type is a model of <a href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a>,
- *          and the ordering relation on \p RandomAccessIterator's \c value_type is a <em>strict weak ordering</em>, as defined in the
- *          <a href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a> requirements.
+ *  \tparam RandomAccessIterator is a model of <a
+ * href="https://en.cppreference.com/w/cpp/iterator/random_access_iterator">Random Access Iterator</a>, \p
+ * RandomAccessIterator is mutable, and \p RandomAccessIterator's \c value_type is a model of <a
+ * href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a>, and the ordering
+ * relation on \p RandomAccessIterator's \c value_type is a <em>strict weak ordering</em>, as defined in the <a
+ * href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a> requirements.
  *
  *  The following code snippet demonstrates how to use \p sort to sort
  *  a sequence of integers using the \p thrust::host execution policy for parallelization:
@@ -72,12 +72,10 @@ THRUST_NAMESPACE_BEGIN
  *  \see \p stable_sort
  *  \see \p sort_by_key
  */
-template<typename DerivedPolicy, typename RandomAccessIterator>
-THRUST_HOST_DEVICE
-  void sort(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
-            RandomAccessIterator first,
-            RandomAccessIterator last);
-
+template <typename DerivedPolicy, typename RandomAccessIterator>
+THRUST_HOST_DEVICE void sort(const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
+                             RandomAccessIterator first,
+                             RandomAccessIterator last);
 
 /*! \p sort sorts the elements in <tt>[first, last)</tt> into
  *  ascending order, meaning that if \c i and \c j are any two valid
@@ -92,11 +90,12 @@ THRUST_HOST_DEVICE
  *  \param first The beginning of the sequence.
  *  \param last The end of the sequence.
  *
- *  \tparam RandomAccessIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/random_access_iterator">Random Access Iterator</a>,
- *          \p RandomAccessIterator is mutable,
- *          and \p RandomAccessIterator's \c value_type is a model of <a href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a>,
- *          and the ordering relation on \p RandomAccessIterator's \c value_type is a <em>strict weak ordering</em>, as defined in the
- *          <a href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a> requirements.
+ *  \tparam RandomAccessIterator is a model of <a
+ * href="https://en.cppreference.com/w/cpp/iterator/random_access_iterator">Random Access Iterator</a>, \p
+ * RandomAccessIterator is mutable, and \p RandomAccessIterator's \c value_type is a model of <a
+ * href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a>, and the ordering
+ * relation on \p RandomAccessIterator's \c value_type is a <em>strict weak ordering</em>, as defined in the <a
+ * href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a> requirements.
  *
  *  The following code snippet demonstrates how to use \p sort to sort
  *  a sequence of integers.
@@ -114,10 +113,8 @@ THRUST_HOST_DEVICE
  *  \see \p stable_sort
  *  \see \p sort_by_key
  */
-template<typename RandomAccessIterator>
-  void sort(RandomAccessIterator first,
-            RandomAccessIterator last);
-
+template <typename RandomAccessIterator>
+void sort(RandomAccessIterator first, RandomAccessIterator last);
 
 /*! \p sort sorts the elements in <tt>[first, last)</tt> into
  *  ascending order, meaning that if \c i and \c j are any two valid
@@ -138,11 +135,11 @@ template<typename RandomAccessIterator>
  *  \param comp  Comparison operator.
  *
  *  \tparam DerivedPolicy The name of the derived execution policy.
- *  \tparam RandomAccessIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/random_access_iterator">Random Access Iterator</a>,
- *          \p RandomAccessIterator is mutable,
- *          and \p RandomAccessIterator's \c value_type is convertible to \p StrictWeakOrdering's
- *          \c first_argument_type and \c second_argument_type.
- *  \tparam StrictWeakOrdering is a model of <a href="https://en.cppreference.com/w/cpp/concepts/strict_weak_order">Strict Weak Ordering</a>.
+ *  \tparam RandomAccessIterator is a model of <a
+ * href="https://en.cppreference.com/w/cpp/iterator/random_access_iterator">Random Access Iterator</a>, \p
+ * RandomAccessIterator is mutable, and \p RandomAccessIterator's \c value_type is convertible to \p
+ * StrictWeakOrdering's \c first_argument_type and \c second_argument_type. \tparam StrictWeakOrdering is a model of <a
+ * href="https://en.cppreference.com/w/cpp/concepts/strict_weak_order">Strict Weak Ordering</a>.
  *
  *  The following code demonstrates how to sort integers in descending order
  *  using the greater<int> comparison operator using the \p thrust::host execution policy for parallelization:
@@ -162,15 +159,12 @@ template<typename RandomAccessIterator>
  *  \see \p stable_sort
  *  \see \p sort_by_key
  */
-template<typename DerivedPolicy,
-         typename RandomAccessIterator,
-         typename StrictWeakOrdering>
-THRUST_HOST_DEVICE
-  void sort(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
-            RandomAccessIterator first,
-            RandomAccessIterator last,
-            StrictWeakOrdering comp);
-
+template <typename DerivedPolicy, typename RandomAccessIterator, typename StrictWeakOrdering>
+THRUST_HOST_DEVICE void
+sort(const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
+     RandomAccessIterator first,
+     RandomAccessIterator last,
+     StrictWeakOrdering comp);
 
 /*! \p sort sorts the elements in <tt>[first, last)</tt> into
  *  ascending order, meaning that if \c i and \c j are any two valid
@@ -187,11 +181,11 @@ THRUST_HOST_DEVICE
  *  \param last The end of the sequence.
  *  \param comp  Comparison operator.
  *
- *  \tparam RandomAccessIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/random_access_iterator">Random Access Iterator</a>,
- *          \p RandomAccessIterator is mutable,
- *          and \p RandomAccessIterator's \c value_type is convertible to \p StrictWeakOrdering's
- *          \c first_argument_type and \c second_argument_type.
- *  \tparam StrictWeakOrdering is a model of <a href="https://en.cppreference.com/w/cpp/concepts/strict_weak_order">Strict Weak Ordering</a>.
+ *  \tparam RandomAccessIterator is a model of <a
+ * href="https://en.cppreference.com/w/cpp/iterator/random_access_iterator">Random Access Iterator</a>, \p
+ * RandomAccessIterator is mutable, and \p RandomAccessIterator's \c value_type is convertible to \p
+ * StrictWeakOrdering's \c first_argument_type and \c second_argument_type. \tparam StrictWeakOrdering is a model of <a
+ * href="https://en.cppreference.com/w/cpp/concepts/strict_weak_order">Strict Weak Ordering</a>.
  *
  *  The following code demonstrates how to sort integers in descending order
  *  using the greater<int> comparison operator.
@@ -210,13 +204,8 @@ THRUST_HOST_DEVICE
  *  \see \p stable_sort
  *  \see \p sort_by_key
  */
-template<typename RandomAccessIterator,
-         typename StrictWeakOrdering>
-THRUST_HOST_DEVICE
-  void sort(RandomAccessIterator first,
-            RandomAccessIterator last,
-            StrictWeakOrdering comp);
-
+template <typename RandomAccessIterator, typename StrictWeakOrdering>
+THRUST_HOST_DEVICE void sort(RandomAccessIterator first, RandomAccessIterator last, StrictWeakOrdering comp);
 
 /*! \p stable_sort is much like \c sort: it sorts the elements in
  *  <tt>[first, last)</tt> into ascending order, meaning that if \c i
@@ -239,11 +228,12 @@ THRUST_HOST_DEVICE
  *  \param last The end of the sequence.
  *
  *  \tparam DerivedPolicy The name of the derived execution policy.
- *  \tparam RandomAccessIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/random_access_iterator">Random Access Iterator</a>,
- *          \p RandomAccessIterator is mutable,
- *          and \p RandomAccessIterator's \c value_type is a model of <a href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a>,
- *          and the ordering relation on \p RandomAccessIterator's \c value_type is a <em>strict weak ordering</em>, as defined in the
- *          <a href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a> requirements.
+ *  \tparam RandomAccessIterator is a model of <a
+ * href="https://en.cppreference.com/w/cpp/iterator/random_access_iterator">Random Access Iterator</a>, \p
+ * RandomAccessIterator is mutable, and \p RandomAccessIterator's \c value_type is a model of <a
+ * href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a>, and the ordering
+ * relation on \p RandomAccessIterator's \c value_type is a <em>strict weak ordering</em>, as defined in the <a
+ * href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a> requirements.
  *
  *  The following code snippet demonstrates how to use \p sort to sort
  *  a sequence of integers using the \p thrust::host execution policy for parallelization:
@@ -262,12 +252,10 @@ THRUST_HOST_DEVICE
  *  \see \p sort
  *  \see \p stable_sort_by_key
  */
-template<typename DerivedPolicy, typename RandomAccessIterator>
-THRUST_HOST_DEVICE
-  void stable_sort(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
-                   RandomAccessIterator first,
-                   RandomAccessIterator last);
-
+template <typename DerivedPolicy, typename RandomAccessIterator>
+THRUST_HOST_DEVICE void stable_sort(const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
+                                    RandomAccessIterator first,
+                                    RandomAccessIterator last);
 
 /*! \p stable_sort is much like \c sort: it sorts the elements in
  *  <tt>[first, last)</tt> into ascending order, meaning that if \c i
@@ -286,11 +274,12 @@ THRUST_HOST_DEVICE
  *  \param first The beginning of the sequence.
  *  \param last The end of the sequence.
  *
- *  \tparam RandomAccessIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/random_access_iterator">Random Access Iterator</a>,
- *          \p RandomAccessIterator is mutable,
- *          and \p RandomAccessIterator's \c value_type is a model of <a href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a>,
- *          and the ordering relation on \p RandomAccessIterator's \c value_type is a <em>strict weak ordering</em>, as defined in the
- *          <a href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a> requirements.
+ *  \tparam RandomAccessIterator is a model of <a
+ * href="https://en.cppreference.com/w/cpp/iterator/random_access_iterator">Random Access Iterator</a>, \p
+ * RandomAccessIterator is mutable, and \p RandomAccessIterator's \c value_type is a model of <a
+ * href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a>, and the ordering
+ * relation on \p RandomAccessIterator's \c value_type is a <em>strict weak ordering</em>, as defined in the <a
+ * href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a> requirements.
  *
  *  The following code snippet demonstrates how to use \p sort to sort
  *  a sequence of integers.
@@ -308,10 +297,8 @@ THRUST_HOST_DEVICE
  *  \see \p sort
  *  \see \p stable_sort_by_key
  */
-template<typename RandomAccessIterator>
-  void stable_sort(RandomAccessIterator first,
-                   RandomAccessIterator last);
-
+template <typename RandomAccessIterator>
+void stable_sort(RandomAccessIterator first, RandomAccessIterator last);
 
 /*! \p stable_sort is much like \c sort: it sorts the elements in
  *  <tt>[first, last)</tt> into ascending order, meaning that if \c i
@@ -336,11 +323,11 @@ template<typename RandomAccessIterator>
  *  \param comp Comparison operator.
  *
  *  \tparam DerivedPolicy The name of the derived execution policy.
- *  \tparam RandomAccessIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/random_access_iterator">Random Access Iterator</a>,
- *          \p RandomAccessIterator is mutable,
- *          and \p RandomAccessIterator's \c value_type is convertible to \p StrictWeakOrdering's
- *          \c first_argument_type and \c second_argument_type.
- *  \tparam StrictWeakOrdering is a model of <a href="https://en.cppreference.com/w/cpp/concepts/strict_weak_order">Strict Weak Ordering</a>.
+ *  \tparam RandomAccessIterator is a model of <a
+ * href="https://en.cppreference.com/w/cpp/iterator/random_access_iterator">Random Access Iterator</a>, \p
+ * RandomAccessIterator is mutable, and \p RandomAccessIterator's \c value_type is convertible to \p
+ * StrictWeakOrdering's \c first_argument_type and \c second_argument_type. \tparam StrictWeakOrdering is a model of <a
+ * href="https://en.cppreference.com/w/cpp/concepts/strict_weak_order">Strict Weak Ordering</a>.
  *
  *  The following code demonstrates how to sort integers in descending order
  *  using the greater<int> comparison operator using the \p thrust::host execution policy for parallelization:
@@ -360,15 +347,12 @@ template<typename RandomAccessIterator>
  *  \see \p sort
  *  \see \p stable_sort_by_key
  */
-template<typename DerivedPolicy,
-         typename RandomAccessIterator,
-         typename StrictWeakOrdering>
-THRUST_HOST_DEVICE
-  void stable_sort(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
-                   RandomAccessIterator first,
-                   RandomAccessIterator last,
-                   StrictWeakOrdering comp);
-
+template <typename DerivedPolicy, typename RandomAccessIterator, typename StrictWeakOrdering>
+THRUST_HOST_DEVICE void stable_sort(
+  const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
+  RandomAccessIterator first,
+  RandomAccessIterator last,
+  StrictWeakOrdering comp);
 
 /*! \p stable_sort is much like \c sort: it sorts the elements in
  *  <tt>[first, last)</tt> into ascending order, meaning that if \c i
@@ -389,11 +373,11 @@ THRUST_HOST_DEVICE
  *  \param last The end of the sequence.
  *  \param comp Comparison operator.
  *
- *  \tparam RandomAccessIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/random_access_iterator">Random Access Iterator</a>,
- *          \p RandomAccessIterator is mutable,
- *          and \p RandomAccessIterator's \c value_type is convertible to \p StrictWeakOrdering's
- *          \c first_argument_type and \c second_argument_type.
- *  \tparam StrictWeakOrdering is a model of <a href="https://en.cppreference.com/w/cpp/concepts/strict_weak_order">Strict Weak Ordering</a>.
+ *  \tparam RandomAccessIterator is a model of <a
+ * href="https://en.cppreference.com/w/cpp/iterator/random_access_iterator">Random Access Iterator</a>, \p
+ * RandomAccessIterator is mutable, and \p RandomAccessIterator's \c value_type is convertible to \p
+ * StrictWeakOrdering's \c first_argument_type and \c second_argument_type. \tparam StrictWeakOrdering is a model of <a
+ * href="https://en.cppreference.com/w/cpp/concepts/strict_weak_order">Strict Weak Ordering</a>.
  *
  *  The following code demonstrates how to sort integers in descending order
  *  using the greater<int> comparison operator.
@@ -412,17 +396,12 @@ THRUST_HOST_DEVICE
  *  \see \p sort
  *  \see \p stable_sort_by_key
  */
-template<typename RandomAccessIterator,
-         typename StrictWeakOrdering>
-  void stable_sort(RandomAccessIterator first,
-                   RandomAccessIterator last,
-                   StrictWeakOrdering comp);
-
+template <typename RandomAccessIterator, typename StrictWeakOrdering>
+void stable_sort(RandomAccessIterator first, RandomAccessIterator last, StrictWeakOrdering comp);
 
 ///////////////
 // Key Value //
 ///////////////
-
 
 /*! \p sort_by_key performs a key-value sort. That is, \p sort_by_key sorts the
  *  elements in <tt>[keys_first, keys_last)</tt> and <tt>[values_first,
@@ -448,15 +427,17 @@ template<typename RandomAccessIterator,
  *  \param values_first The beginning of the value sequence.
  *
  *  \tparam DerivedPolicy The name of the derived execution policy.
- *  \tparam RandomAccessIterator1 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/random_access_iterator">Random Access Iterator</a>,
- *          \p RandomAccessIterator1 is mutable,
- *          and \p RandomAccessIterator1's \c value_type is a model of <a href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a>,
- *          and the ordering relation on \p RandomAccessIterator1's \c value_type is a <em>strict weak ordering</em>, as defined in the
- *          <a href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a> requirements.
- *  \tparam RandomAccessIterator2 is a model of <a href="https://en.cppreference.com/w/cpp/named_req/RandomAccessIterator">Random Access Iterator</a>,
- *          and \p RandomAccessIterator2 is mutable.
+ *  \tparam RandomAccessIterator1 is a model of <a
+ * href="https://en.cppreference.com/w/cpp/iterator/random_access_iterator">Random Access Iterator</a>, \p
+ * RandomAccessIterator1 is mutable, and \p RandomAccessIterator1's \c value_type is a model of <a
+ * href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a>, and the ordering
+ * relation on \p RandomAccessIterator1's \c value_type is a <em>strict weak ordering</em>, as defined in the <a
+ * href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a> requirements. \tparam
+ * RandomAccessIterator2 is a model of <a href="https://en.cppreference.com/w/cpp/named_req/RandomAccessIterator">Random
+ * Access Iterator</a>, and \p RandomAccessIterator2 is mutable.
  *
- *  \pre The range <tt>[keys_first, keys_last))</tt> shall not overlap the range <tt>[values_first, values_first + (keys_last - keys_first))</tt>.
+ *  \pre The range <tt>[keys_first, keys_last))</tt> shall not overlap the range <tt>[values_first, values_first +
+ * (keys_last - keys_first))</tt>.
  *
  *  The following code snippet demonstrates how to use \p sort_by_key to sort
  *  an array of character values using integers as sorting keys using the \p thrust::host execution policy
@@ -478,15 +459,12 @@ template<typename RandomAccessIterator,
  *  \see \p stable_sort_by_key
  *  \see \p sort
  */
-template<typename DerivedPolicy,
-         typename RandomAccessIterator1,
-         typename RandomAccessIterator2>
-THRUST_HOST_DEVICE
-  void sort_by_key(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
-                   RandomAccessIterator1 keys_first,
-                   RandomAccessIterator1 keys_last,
-                   RandomAccessIterator2 values_first);
-
+template <typename DerivedPolicy, typename RandomAccessIterator1, typename RandomAccessIterator2>
+THRUST_HOST_DEVICE void sort_by_key(
+  const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
+  RandomAccessIterator1 keys_first,
+  RandomAccessIterator1 keys_last,
+  RandomAccessIterator2 values_first);
 
 /*! \p sort_by_key performs a key-value sort. That is, \p sort_by_key sorts the
  *  elements in <tt>[keys_first, keys_last)</tt> and <tt>[values_first,
@@ -508,15 +486,17 @@ THRUST_HOST_DEVICE
  *  \param keys_last The end of the key sequence.
  *  \param values_first The beginning of the value sequence.
  *
- *  \tparam RandomAccessIterator1 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/random_access_iterator">Random Access Iterator</a>,
- *          \p RandomAccessIterator1 is mutable,
- *          and \p RandomAccessIterator1's \c value_type is a model of <a href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a>,
- *          and the ordering relation on \p RandomAccessIterator1's \c value_type is a <em>strict weak ordering</em>, as defined in the
- *          <a href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a> requirements.
- *  \tparam RandomAccessIterator2 is a model of <a href="https://en.cppreference.com/w/cpp/named_req/RandomAccessIterator">Random Access Iterator</a>,
- *          and \p RandomAccessIterator2 is mutable.
+ *  \tparam RandomAccessIterator1 is a model of <a
+ * href="https://en.cppreference.com/w/cpp/iterator/random_access_iterator">Random Access Iterator</a>, \p
+ * RandomAccessIterator1 is mutable, and \p RandomAccessIterator1's \c value_type is a model of <a
+ * href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a>, and the ordering
+ * relation on \p RandomAccessIterator1's \c value_type is a <em>strict weak ordering</em>, as defined in the <a
+ * href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a> requirements. \tparam
+ * RandomAccessIterator2 is a model of <a href="https://en.cppreference.com/w/cpp/named_req/RandomAccessIterator">Random
+ * Access Iterator</a>, and \p RandomAccessIterator2 is mutable.
  *
- *  \pre The range <tt>[keys_first, keys_last))</tt> shall not overlap the range <tt>[values_first, values_first + (keys_last - keys_first))</tt>.
+ *  \pre The range <tt>[keys_first, keys_last))</tt> shall not overlap the range <tt>[values_first, values_first +
+ * (keys_last - keys_first))</tt>.
  *
  *  The following code snippet demonstrates how to use \p sort_by_key to sort
  *  an array of character values using integers as sorting keys.
@@ -536,12 +516,8 @@ THRUST_HOST_DEVICE
  *  \see \p stable_sort_by_key
  *  \see \p sort
  */
-template<typename RandomAccessIterator1,
-         typename RandomAccessIterator2>
-  void sort_by_key(RandomAccessIterator1 keys_first,
-                   RandomAccessIterator1 keys_last,
-                   RandomAccessIterator2 values_first);
-
+template <typename RandomAccessIterator1, typename RandomAccessIterator2>
+void sort_by_key(RandomAccessIterator1 keys_first, RandomAccessIterator1 keys_last, RandomAccessIterator2 values_first);
 
 /*! \p sort_by_key performs a key-value sort. That is, \p sort_by_key sorts the
  *  elements in <tt>[keys_first, keys_last)</tt> and <tt>[values_first,
@@ -569,15 +545,16 @@ template<typename RandomAccessIterator1,
  *  \param comp Comparison operator.
  *
  *  \tparam DerivedPolicy The name of the derived execution policy.
- *  \tparam RandomAccessIterator1 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/random_access_iterator">Random Access Iterator</a>,
- *          \p RandomAccessIterator1 is mutable,
- *          and \p RandomAccessIterator1's \c value_type is convertible to \p StrictWeakOrdering's
- *          \c first_argument_type and \c second_argument_type.
- *  \tparam RandomAccessIterator2 is a model of <a href="https://en.cppreference.com/w/cpp/named_req/RandomAccessIterator">Random Access Iterator</a>,
- *          and \p RandomAccessIterator2 is mutable.
- *  \tparam StrictWeakOrdering is a model of <a href="https://en.cppreference.com/w/cpp/concepts/strict_weak_order">Strict Weak Ordering</a>.
+ *  \tparam RandomAccessIterator1 is a model of <a
+ * href="https://en.cppreference.com/w/cpp/iterator/random_access_iterator">Random Access Iterator</a>, \p
+ * RandomAccessIterator1 is mutable, and \p RandomAccessIterator1's \c value_type is convertible to \p
+ * StrictWeakOrdering's \c first_argument_type and \c second_argument_type. \tparam RandomAccessIterator2 is a model of
+ * <a href="https://en.cppreference.com/w/cpp/named_req/RandomAccessIterator">Random Access Iterator</a>, and \p
+ * RandomAccessIterator2 is mutable. \tparam StrictWeakOrdering is a model of <a
+ * href="https://en.cppreference.com/w/cpp/concepts/strict_weak_order">Strict Weak Ordering</a>.
  *
- *  \pre The range <tt>[keys_first, keys_last))</tt> shall not overlap the range <tt>[values_first, values_first + (keys_last - keys_first))</tt>.
+ *  \pre The range <tt>[keys_first, keys_last))</tt> shall not overlap the range <tt>[values_first, values_first +
+ * (keys_last - keys_first))</tt>.
  *
  *  The following code snippet demonstrates how to use \p sort_by_key to sort
  *  an array of character values using integers as sorting keys using the \p thrust::host execution policy
@@ -599,17 +576,16 @@ template<typename RandomAccessIterator1,
  *  \see \p stable_sort_by_key
  *  \see \p sort
  */
-template<typename DerivedPolicy,
-         typename RandomAccessIterator1,
-         typename RandomAccessIterator2,
-         typename StrictWeakOrdering>
-THRUST_HOST_DEVICE
-  void sort_by_key(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
-                   RandomAccessIterator1 keys_first,
-                   RandomAccessIterator1 keys_last,
-                   RandomAccessIterator2 values_first,
-                   StrictWeakOrdering comp);
-
+template <typename DerivedPolicy,
+          typename RandomAccessIterator1,
+          typename RandomAccessIterator2,
+          typename StrictWeakOrdering>
+THRUST_HOST_DEVICE void sort_by_key(
+  const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
+  RandomAccessIterator1 keys_first,
+  RandomAccessIterator1 keys_last,
+  RandomAccessIterator2 values_first,
+  StrictWeakOrdering comp);
 
 /*! \p sort_by_key performs a key-value sort. That is, \p sort_by_key sorts the
  *  elements in <tt>[keys_first, keys_last)</tt> and <tt>[values_first,
@@ -633,15 +609,16 @@ THRUST_HOST_DEVICE
  *  \param values_first The beginning of the value sequence.
  *  \param comp Comparison operator.
  *
- *  \tparam RandomAccessIterator1 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/random_access_iterator">Random Access Iterator</a>,
- *          \p RandomAccessIterator1 is mutable,
- *          and \p RandomAccessIterator1's \c value_type is convertible to \p StrictWeakOrdering's
- *          \c first_argument_type and \c second_argument_type.
- *  \tparam RandomAccessIterator2 is a model of <a href="https://en.cppreference.com/w/cpp/named_req/RandomAccessIterator">Random Access Iterator</a>,
- *          and \p RandomAccessIterator2 is mutable.
- *  \tparam StrictWeakOrdering is a model of <a href="https://en.cppreference.com/w/cpp/concepts/strict_weak_order">Strict Weak Ordering</a>.
+ *  \tparam RandomAccessIterator1 is a model of <a
+ * href="https://en.cppreference.com/w/cpp/iterator/random_access_iterator">Random Access Iterator</a>, \p
+ * RandomAccessIterator1 is mutable, and \p RandomAccessIterator1's \c value_type is convertible to \p
+ * StrictWeakOrdering's \c first_argument_type and \c second_argument_type. \tparam RandomAccessIterator2 is a model of
+ * <a href="https://en.cppreference.com/w/cpp/named_req/RandomAccessIterator">Random Access Iterator</a>, and \p
+ * RandomAccessIterator2 is mutable. \tparam StrictWeakOrdering is a model of <a
+ * href="https://en.cppreference.com/w/cpp/concepts/strict_weak_order">Strict Weak Ordering</a>.
  *
- *  \pre The range <tt>[keys_first, keys_last))</tt> shall not overlap the range <tt>[values_first, values_first + (keys_last - keys_first))</tt>.
+ *  \pre The range <tt>[keys_first, keys_last))</tt> shall not overlap the range <tt>[values_first, values_first +
+ * (keys_last - keys_first))</tt>.
  *
  *  The following code snippet demonstrates how to use \p sort_by_key to sort
  *  an array of character values using integers as sorting keys.  The keys
@@ -662,14 +639,11 @@ THRUST_HOST_DEVICE
  *  \see \p stable_sort_by_key
  *  \see \p sort
  */
-template<typename RandomAccessIterator1,
-         typename RandomAccessIterator2,
-         typename StrictWeakOrdering>
-  void sort_by_key(RandomAccessIterator1 keys_first,
-                   RandomAccessIterator1 keys_last,
-                   RandomAccessIterator2 values_first,
-                   StrictWeakOrdering comp);
-
+template <typename RandomAccessIterator1, typename RandomAccessIterator2, typename StrictWeakOrdering>
+void sort_by_key(RandomAccessIterator1 keys_first,
+                 RandomAccessIterator1 keys_last,
+                 RandomAccessIterator2 values_first,
+                 StrictWeakOrdering comp);
 
 /*! \p stable_sort_by_key performs a key-value sort. That is, \p stable_sort_by_key
  *  sorts the elements in <tt>[keys_first, keys_last)</tt> and <tt>[values_first,
@@ -697,15 +671,17 @@ template<typename RandomAccessIterator1,
  *  \param values_first The beginning of the value sequence.
  *
  *  \tparam DerivedPolicy The name of the derived execution policy.
- *  \tparam RandomAccessIterator1 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/random_access_iterator">Random Access Iterator</a>,
- *          \p RandomAccessIterator1 is mutable,
- *          and \p RandomAccessIterator1's \c value_type is a model of <a href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a>,
- *          and the ordering relation on \p RandomAccessIterator1's \c value_type is a <em>strict weak ordering</em>, as defined in the
- *          <a href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a> requirements.
- *  \tparam RandomAccessIterator2 is a model of <a href="https://en.cppreference.com/w/cpp/named_req/RandomAccessIterator">Random Access Iterator</a>,
- *          and \p RandomAccessIterator2 is mutable.
+ *  \tparam RandomAccessIterator1 is a model of <a
+ * href="https://en.cppreference.com/w/cpp/iterator/random_access_iterator">Random Access Iterator</a>, \p
+ * RandomAccessIterator1 is mutable, and \p RandomAccessIterator1's \c value_type is a model of <a
+ * href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a>, and the ordering
+ * relation on \p RandomAccessIterator1's \c value_type is a <em>strict weak ordering</em>, as defined in the <a
+ * href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a> requirements. \tparam
+ * RandomAccessIterator2 is a model of <a href="https://en.cppreference.com/w/cpp/named_req/RandomAccessIterator">Random
+ * Access Iterator</a>, and \p RandomAccessIterator2 is mutable.
  *
- *  \pre The range <tt>[keys_first, keys_last))</tt> shall not overlap the range <tt>[values_first, values_first + (keys_last - keys_first))</tt>.
+ *  \pre The range <tt>[keys_first, keys_last))</tt> shall not overlap the range <tt>[values_first, values_first +
+ * (keys_last - keys_first))</tt>.
  *
  *  The following code snippet demonstrates how to use \p stable_sort_by_key to sort
  *  an array of characters using integers as sorting keys using the \p thrust::host execution policy for
@@ -727,15 +703,12 @@ template<typename RandomAccessIterator1,
  *  \see \p sort_by_key
  *  \see \p stable_sort
  */
-template<typename DerivedPolicy,
-         typename RandomAccessIterator1,
-         typename RandomAccessIterator2>
-THRUST_HOST_DEVICE
-  void stable_sort_by_key(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
-                          RandomAccessIterator1 keys_first,
-                          RandomAccessIterator1 keys_last,
-                          RandomAccessIterator2 values_first);
-
+template <typename DerivedPolicy, typename RandomAccessIterator1, typename RandomAccessIterator2>
+THRUST_HOST_DEVICE void stable_sort_by_key(
+  const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
+  RandomAccessIterator1 keys_first,
+  RandomAccessIterator1 keys_last,
+  RandomAccessIterator2 values_first);
 
 /*! \p stable_sort_by_key performs a key-value sort. That is, \p stable_sort_by_key
  *  sorts the elements in <tt>[keys_first, keys_last)</tt> and <tt>[values_first,
@@ -759,15 +732,17 @@ THRUST_HOST_DEVICE
  *  \param keys_last The end of the key sequence.
  *  \param values_first The beginning of the value sequence.
  *
- *  \tparam RandomAccessIterator1 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/random_access_iterator">Random Access Iterator</a>,
- *          \p RandomAccessIterator1 is mutable,
- *          and \p RandomAccessIterator1's \c value_type is a model of <a href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a>,
- *          and the ordering relation on \p RandomAccessIterator1's \c value_type is a <em>strict weak ordering</em>, as defined in the
- *          <a href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a> requirements.
- *  \tparam RandomAccessIterator2 is a model of <a href="https://en.cppreference.com/w/cpp/named_req/RandomAccessIterator">Random Access Iterator</a>,
- *          and \p RandomAccessIterator2 is mutable.
+ *  \tparam RandomAccessIterator1 is a model of <a
+ * href="https://en.cppreference.com/w/cpp/iterator/random_access_iterator">Random Access Iterator</a>, \p
+ * RandomAccessIterator1 is mutable, and \p RandomAccessIterator1's \c value_type is a model of <a
+ * href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a>, and the ordering
+ * relation on \p RandomAccessIterator1's \c value_type is a <em>strict weak ordering</em>, as defined in the <a
+ * href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a> requirements. \tparam
+ * RandomAccessIterator2 is a model of <a href="https://en.cppreference.com/w/cpp/named_req/RandomAccessIterator">Random
+ * Access Iterator</a>, and \p RandomAccessIterator2 is mutable.
  *
- *  \pre The range <tt>[keys_first, keys_last))</tt> shall not overlap the range <tt>[values_first, values_first + (keys_last - keys_first))</tt>.
+ *  \pre The range <tt>[keys_first, keys_last))</tt> shall not overlap the range <tt>[values_first, values_first +
+ * (keys_last - keys_first))</tt>.
  *
  *  The following code snippet demonstrates how to use \p stable_sort_by_key to sort
  *  an array of characters using integers as sorting keys.
@@ -787,12 +762,9 @@ THRUST_HOST_DEVICE
  *  \see \p sort_by_key
  *  \see \p stable_sort
  */
-template<typename RandomAccessIterator1,
-         typename RandomAccessIterator2>
-  void stable_sort_by_key(RandomAccessIterator1 keys_first,
-                          RandomAccessIterator1 keys_last,
-                          RandomAccessIterator2 values_first);
-
+template <typename RandomAccessIterator1, typename RandomAccessIterator2>
+void stable_sort_by_key(
+  RandomAccessIterator1 keys_first, RandomAccessIterator1 keys_last, RandomAccessIterator2 values_first);
 
 /*! \p stable_sort_by_key performs a key-value sort. That is, \p stable_sort_by_key
  *  sorts the elements in <tt>[keys_first, keys_last)</tt> and <tt>[values_first,
@@ -822,15 +794,16 @@ template<typename RandomAccessIterator1,
  *  \param comp Comparison operator.
  *
  *  \tparam DerivedPolicy The name of the derived execution policy.
- *  \tparam RandomAccessIterator1 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/random_access_iterator">Random Access Iterator</a>,
- *          \p RandomAccessIterator1 is mutable,
- *          and \p RandomAccessIterator1's \c value_type is convertible to \p StrictWeakOrdering's
- *          \c first_argument_type and \c second_argument_type.
- *  \tparam RandomAccessIterator2 is a model of <a href="https://en.cppreference.com/w/cpp/named_req/RandomAccessIterator">Random Access Iterator</a>,
- *          and \p RandomAccessIterator2 is mutable.
- *  \tparam StrictWeakOrdering is a model of <a href="https://en.cppreference.com/w/cpp/concepts/strict_weak_order">Strict Weak Ordering</a>.
+ *  \tparam RandomAccessIterator1 is a model of <a
+ * href="https://en.cppreference.com/w/cpp/iterator/random_access_iterator">Random Access Iterator</a>, \p
+ * RandomAccessIterator1 is mutable, and \p RandomAccessIterator1's \c value_type is convertible to \p
+ * StrictWeakOrdering's \c first_argument_type and \c second_argument_type. \tparam RandomAccessIterator2 is a model of
+ * <a href="https://en.cppreference.com/w/cpp/named_req/RandomAccessIterator">Random Access Iterator</a>, and \p
+ * RandomAccessIterator2 is mutable. \tparam StrictWeakOrdering is a model of <a
+ * href="https://en.cppreference.com/w/cpp/concepts/strict_weak_order">Strict Weak Ordering</a>.
  *
- *  \pre The range <tt>[keys_first, keys_last))</tt> shall not overlap the range <tt>[values_first, values_first + (keys_last - keys_first))</tt>.
+ *  \pre The range <tt>[keys_first, keys_last))</tt> shall not overlap the range <tt>[values_first, values_first +
+ * (keys_last - keys_first))</tt>.
  *
  *  The following code snippet demonstrates how to use \p sort_by_key to sort
  *  an array of character values using integers as sorting keys using the \p thrust::host execution policy for
@@ -853,17 +826,16 @@ template<typename RandomAccessIterator1,
  *  \see \p sort_by_key
  *  \see \p stable_sort
  */
-template<typename DerivedPolicy,
-         typename RandomAccessIterator1,
-         typename RandomAccessIterator2,
-         typename StrictWeakOrdering>
-THRUST_HOST_DEVICE
-  void stable_sort_by_key(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
-                          RandomAccessIterator1 keys_first,
-                          RandomAccessIterator1 keys_last,
-                          RandomAccessIterator2 values_first,
-                          StrictWeakOrdering comp);
-
+template <typename DerivedPolicy,
+          typename RandomAccessIterator1,
+          typename RandomAccessIterator2,
+          typename StrictWeakOrdering>
+THRUST_HOST_DEVICE void stable_sort_by_key(
+  const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
+  RandomAccessIterator1 keys_first,
+  RandomAccessIterator1 keys_last,
+  RandomAccessIterator2 values_first,
+  StrictWeakOrdering comp);
 
 /*! \p stable_sort_by_key performs a key-value sort. That is, \p stable_sort_by_key
  *  sorts the elements in <tt>[keys_first, keys_last)</tt> and <tt>[values_first,
@@ -889,15 +861,16 @@ THRUST_HOST_DEVICE
  *  \param values_first The beginning of the value sequence.
  *  \param comp Comparison operator.
  *
- *  \tparam RandomAccessIterator1 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/random_access_iterator">Random Access Iterator</a>,
- *          \p RandomAccessIterator1 is mutable,
- *          and \p RandomAccessIterator1's \c value_type is convertible to \p StrictWeakOrdering's
- *          \c first_argument_type and \c second_argument_type.
- *  \tparam RandomAccessIterator2 is a model of <a href="https://en.cppreference.com/w/cpp/named_req/RandomAccessIterator">Random Access Iterator</a>,
- *          and \p RandomAccessIterator2 is mutable.
- *  \tparam StrictWeakOrdering is a model of <a href="https://en.cppreference.com/w/cpp/concepts/strict_weak_order">Strict Weak Ordering</a>.
+ *  \tparam RandomAccessIterator1 is a model of <a
+ * href="https://en.cppreference.com/w/cpp/iterator/random_access_iterator">Random Access Iterator</a>, \p
+ * RandomAccessIterator1 is mutable, and \p RandomAccessIterator1's \c value_type is convertible to \p
+ * StrictWeakOrdering's \c first_argument_type and \c second_argument_type. \tparam RandomAccessIterator2 is a model of
+ * <a href="https://en.cppreference.com/w/cpp/named_req/RandomAccessIterator">Random Access Iterator</a>, and \p
+ * RandomAccessIterator2 is mutable. \tparam StrictWeakOrdering is a model of <a
+ * href="https://en.cppreference.com/w/cpp/concepts/strict_weak_order">Strict Weak Ordering</a>.
  *
- *  \pre The range <tt>[keys_first, keys_last))</tt> shall not overlap the range <tt>[values_first, values_first + (keys_last - keys_first))</tt>.
+ *  \pre The range <tt>[keys_first, keys_last))</tt> shall not overlap the range <tt>[values_first, values_first +
+ * (keys_last - keys_first))</tt>.
  *
  *  The following code snippet demonstrates how to use \p sort_by_key to sort
  *  an array of character values using integers as sorting keys.  The keys
@@ -919,25 +892,20 @@ THRUST_HOST_DEVICE
  *  \see \p sort_by_key
  *  \see \p stable_sort
  */
-template<typename RandomAccessIterator1,
-         typename RandomAccessIterator2,
-         typename StrictWeakOrdering>
-  void stable_sort_by_key(RandomAccessIterator1 keys_first,
-                          RandomAccessIterator1 keys_last,
-                          RandomAccessIterator2 values_first,
-                          StrictWeakOrdering comp);
-
+template <typename RandomAccessIterator1, typename RandomAccessIterator2, typename StrictWeakOrdering>
+void stable_sort_by_key(RandomAccessIterator1 keys_first,
+                        RandomAccessIterator1 keys_last,
+                        RandomAccessIterator2 values_first,
+                        StrictWeakOrdering comp);
 
 /*! \} // end sorting
  */
-
 
 /*! \addtogroup reductions
  *  \{
  *  \addtogroup predicates
  *  \{
  */
-
 
 /*! \p is_sorted returns \c true if the range <tt>[first, last)</tt> is
  *  sorted in ascending order, and \c false otherwise.
@@ -954,10 +922,11 @@ template<typename RandomAccessIterator1,
  *  \return \c true, if the sequence is sorted; \c false, otherwise.
  *
  *  \tparam DerivedPolicy The name of the derived execution policy.
- *  \tparam ForwardIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward Iterator</a>,
- *          \p ForwardIterator's \c value_type is a model of <a href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a>,
- *          and the ordering on objects of \p ForwardIterator's \c value_type is a <em>strict weak ordering</em>, as defined
- *          in the <a href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a> requirements.
+ *  \tparam ForwardIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward
+ * Iterator</a>, \p ForwardIterator's \c value_type is a model of <a
+ * href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a>, and the ordering on
+ * objects of \p ForwardIterator's \c value_type is a <em>strict weak ordering</em>, as defined in the <a
+ * href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a> requirements.
  *
  *
  *  The following code demonstrates how to use \p is_sorted to test whether the
@@ -994,12 +963,9 @@ template<typename RandomAccessIterator1,
  *  \see \c stable_sort
  *  \see \c less<T>
  */
-template<typename DerivedPolicy, typename ForwardIterator>
-THRUST_HOST_DEVICE
-  bool is_sorted(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
-                 ForwardIterator first,
-                 ForwardIterator last);
-
+template <typename DerivedPolicy, typename ForwardIterator>
+THRUST_HOST_DEVICE bool is_sorted(
+  const thrust::detail::execution_policy_base<DerivedPolicy>& exec, ForwardIterator first, ForwardIterator last);
 
 /*! \p is_sorted returns \c true if the range <tt>[first, last)</tt> is
  *  sorted in ascending order, and \c false otherwise.
@@ -1012,10 +978,11 @@ THRUST_HOST_DEVICE
  *  \param last  The end of the sequence.
  *  \return \c true, if the sequence is sorted; \c false, otherwise.
  *
- *  \tparam ForwardIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward Iterator</a>,
- *          \p ForwardIterator's \c value_type is a model of <a href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a>,
- *          and the ordering on objects of \p ForwardIterator's \c value_type is a <em>strict weak ordering</em>, as defined
- *          in the <a href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a> requirements.
+ *  \tparam ForwardIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward
+ * Iterator</a>, \p ForwardIterator's \c value_type is a model of <a
+ * href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a>, and the ordering on
+ * objects of \p ForwardIterator's \c value_type is a <em>strict weak ordering</em>, as defined in the <a
+ * href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a> requirements.
  *
  *
  *  The following code demonstrates how to use \p is_sorted to test whether the
@@ -1050,12 +1017,10 @@ THRUST_HOST_DEVICE
  *  \see \c stable_sort
  *  \see \c less<T>
  */
-template<typename ForwardIterator>
-  bool is_sorted(ForwardIterator first,
-                 ForwardIterator last);
+template <typename ForwardIterator>
+bool is_sorted(ForwardIterator first, ForwardIterator last);
 
-
-/*! \p is_sorted returns \c true if the range <tt>[first, last)</tt> is sorted in ascending 
+/*! \p is_sorted returns \c true if the range <tt>[first, last)</tt> is sorted in ascending
  *  order accoring to a user-defined comparison operation, and \c false otherwise.
  *
  *  Specifically, this version of \p is_sorted returns \c false if for some iterator \c i in
@@ -1070,10 +1035,10 @@ template<typename ForwardIterator>
  *  \return \c true, if the sequence is sorted according to comp; \c false, otherwise.
  *
  *  \tparam DerivedPolicy The name of the derived execution policy.
- *  \tparam ForwardIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward Iterator</a>,
- *          and \p ForwardIterator's \c value_type is convertible to both \c StrictWeakOrdering's \c first_argument_type
- *          and \c second_argument_type.
- *  \tparam Compare is a model of <a href="https://en.cppreference.com/w/cpp/concepts/strict_weak_order">Strict Weak Ordering</a>.
+ *  \tparam ForwardIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward
+ * Iterator</a>, and \p ForwardIterator's \c value_type is convertible to both \c StrictWeakOrdering's \c
+ * first_argument_type and \c second_argument_type. \tparam Compare is a model of <a
+ * href="https://en.cppreference.com/w/cpp/concepts/strict_weak_order">Strict Weak Ordering</a>.
  *
  *  The following code snippet demonstrates how to use \p is_sorted to test whether the
  *  contents of a \c device_vector are stored in descending order using the \p thrust::device execution
@@ -1109,15 +1074,14 @@ template<typename ForwardIterator>
  *  \see \c stable_sort
  *  \see \c less<T>
  */
-template<typename DerivedPolicy, typename ForwardIterator, typename Compare>
-THRUST_HOST_DEVICE
-  bool is_sorted(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
-                 ForwardIterator first,
-                 ForwardIterator last,
-                 Compare comp);
+template <typename DerivedPolicy, typename ForwardIterator, typename Compare>
+THRUST_HOST_DEVICE bool
+is_sorted(const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
+          ForwardIterator first,
+          ForwardIterator last,
+          Compare comp);
 
-
-/*! \p is_sorted returns \c true if the range <tt>[first, last)</tt> is sorted in ascending 
+/*! \p is_sorted returns \c true if the range <tt>[first, last)</tt> is sorted in ascending
  *  order accoring to a user-defined comparison operation, and \c false otherwise.
  *
  *  Specifically, this version of \p is_sorted returns \c false if for some iterator \c i in
@@ -1128,10 +1092,10 @@ THRUST_HOST_DEVICE
  *  \param comp  Comparison operator.
  *  \return \c true, if the sequence is sorted according to comp; \c false, otherwise.
  *
- *  \tparam ForwardIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward Iterator</a>,
- *          and \p ForwardIterator's \c value_type is convertible to both \c StrictWeakOrdering's \c first_argument_type
- *          and \c second_argument_type.
- *  \tparam Compare is a model of <a href="https://en.cppreference.com/w/cpp/concepts/strict_weak_order">Strict Weak Ordering</a>.
+ *  \tparam ForwardIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward
+ * Iterator</a>, and \p ForwardIterator's \c value_type is convertible to both \c StrictWeakOrdering's \c
+ * first_argument_type and \c second_argument_type. \tparam Compare is a model of <a
+ * href="https://en.cppreference.com/w/cpp/concepts/strict_weak_order">Strict Weak Ordering</a>.
  *
  *  The following code snippet demonstrates how to use \p is_sorted to test whether the
  *  contents of a \c device_vector are stored in descending order.
@@ -1165,11 +1129,8 @@ THRUST_HOST_DEVICE
  *  \see \c stable_sort
  *  \see \c less<T>
  */
-template<typename ForwardIterator, typename Compare>
-  bool is_sorted(ForwardIterator first,
-                 ForwardIterator last,
-                 Compare comp);
-
+template <typename ForwardIterator, typename Compare>
+bool is_sorted(ForwardIterator first, ForwardIterator last, Compare comp);
 
 /*! This version of \p is_sorted_until returns the last iterator \c i in <tt>[first,last]</tt> for
  *  which the range <tt>[first,last)</tt> is sorted using \c operator<. If <tt>distance(first,last) < 2</tt>,
@@ -1183,23 +1144,24 @@ template<typename ForwardIterator, typename Compare>
  *  \return The last iterator in the input range for which it is sorted.
  *
  *  \tparam DerivedPolicy The name of the derived execution policy.
- *  \tparam ForwardIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward Iterator</a> and
- *          \p ForwardIterator's \c value_type is a model of <a href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a>.
+ *  \tparam ForwardIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward
+ * Iterator</a> and \p ForwardIterator's \c value_type is a model of <a
+ * href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a>.
  *
  *  The following code snippet demonstrates how to use \p is_sorted_until to find the first position
  *  in an array where the data becomes unsorted using the \p thrust::host execution policy for
  *  parallelization:
- *  
+ *
  *  \code
  *  #include <thrust/sort.h>
  *  #include <thrust/execution_policy.h>
  *
  *  ...
- *   
+ *
  *  int A[8] = {0, 1, 2, 3, 0, 1, 2, 3};
- *  
+ *
  *  int * B = thrust::is_sorted_until(thrust::host, A, A + 8);
- *  
+ *
  *  // B - A is 4
  *  // [A, B) is sorted
  *  \endcode
@@ -1210,12 +1172,9 @@ template<typename ForwardIterator, typename Compare>
  *  \see \p stable_sort
  *  \see \p stable_sort_by_key
  */
-template<typename DerivedPolicy, typename ForwardIterator>
-THRUST_HOST_DEVICE
-  ForwardIterator is_sorted_until(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
-                                  ForwardIterator first,
-                                  ForwardIterator last);
-
+template <typename DerivedPolicy, typename ForwardIterator>
+THRUST_HOST_DEVICE ForwardIterator is_sorted_until(
+  const thrust::detail::execution_policy_base<DerivedPolicy>& exec, ForwardIterator first, ForwardIterator last);
 
 /*! This version of \p is_sorted_until returns the last iterator \c i in <tt>[first,last]</tt> for
  *  which the range <tt>[first,last)</tt> is sorted using \c operator<. If <tt>distance(first,last) < 2</tt>,
@@ -1225,21 +1184,22 @@ THRUST_HOST_DEVICE
  *  \param last The end of the range of interest.
  *  \return The last iterator in the input range for which it is sorted.
  *
- *  \tparam ForwardIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward Iterator</a> and
- *          \p ForwardIterator's \c value_type is a model of <a href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a>.
+ *  \tparam ForwardIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward
+ * Iterator</a> and \p ForwardIterator's \c value_type is a model of <a
+ * href="https://en.cppreference.com/w/cpp/named_req/LessThanComparable">LessThan Comparable</a>.
  *
  *  The following code snippet demonstrates how to use \p is_sorted_until to find the first position
  *  in an array where the data becomes unsorted:
- *  
+ *
  *  \code
  *  #include <thrust/sort.h>
  *
  *  ...
- *   
+ *
  *  int A[8] = {0, 1, 2, 3, 0, 1, 2, 3};
- *  
+ *
  *  int * B = thrust::is_sorted_until(A, A + 8);
- *  
+ *
  *  // B - A is 4
  *  // [A, B) is sorted
  *  \endcode
@@ -1250,14 +1210,12 @@ THRUST_HOST_DEVICE
  *  \see \p stable_sort
  *  \see \p stable_sort_by_key
  */
-template<typename ForwardIterator>
-  ForwardIterator is_sorted_until(ForwardIterator first,
-                                  ForwardIterator last);
-
+template <typename ForwardIterator>
+ForwardIterator is_sorted_until(ForwardIterator first, ForwardIterator last);
 
 /*! This version of \p is_sorted_until returns the last iterator \c i in <tt>[first,last]</tt> for
- *  which the range <tt>[first,last)</tt> is sorted using the function object \c comp. If <tt>distance(first,last) < 2</tt>,
- *  \p is_sorted_until simply returns \p last.
+ *  which the range <tt>[first,last)</tt> is sorted using the function object \c comp. If <tt>distance(first,last) <
+ * 2</tt>, \p is_sorted_until simply returns \p last.
  *
  *  The algorithm's execution is parallelized as determined by \p exec.
  *
@@ -1268,9 +1226,9 @@ template<typename ForwardIterator>
  *  \return The last iterator in the input range for which it is sorted.
  *
  *  \tparam DerivedPolicy The name of the derived execution policy.
- *  \tparam ForwardIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward Iterator</a> and
- *          \p ForwardIterator's \c value_type is convertible to \p Compare's \c argument_type.
- *  \tparam Compare is a model of <a href="https://en.cppreference.com/w/cpp/concepts/strict_weak_order">Strict Weak Ordering</a>.
+ *  \tparam ForwardIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward
+ * Iterator</a> and \p ForwardIterator's \c value_type is convertible to \p Compare's \c argument_type. \tparam Compare
+ * is a model of <a href="https://en.cppreference.com/w/cpp/concepts/strict_weak_order">Strict Weak Ordering</a>.
  *
  *  The following code snippet demonstrates how to use \p is_sorted_until to find the first position
  *  in an array where the data becomes unsorted in descending order using the \p thrust::host execution
@@ -1282,12 +1240,12 @@ template<typename ForwardIterator>
  *  #include <thrust/execution_policy.h>
  *
  *  ...
- *   
+ *
  *  int A[8] = {3, 2, 1, 0, 3, 2, 1, 0};
- *  
+ *
  *  thrust::greater<int> comp;
  *  int * B = thrust::is_sorted_until(thrust::host, A, A + 8, comp);
- *  
+ *
  *  // B - A is 4
  *  // [A, B) is sorted in descending order
  *  \endcode
@@ -1298,26 +1256,25 @@ template<typename ForwardIterator>
  *  \see \p stable_sort
  *  \see \p stable_sort_by_key
  */
-template<typename DerivedPolicy, typename ForwardIterator, typename Compare>
-THRUST_HOST_DEVICE
-  ForwardIterator is_sorted_until(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
-                                  ForwardIterator first,
-                                  ForwardIterator last,
-                                  Compare comp);
-
+template <typename DerivedPolicy, typename ForwardIterator, typename Compare>
+THRUST_HOST_DEVICE ForwardIterator is_sorted_until(
+  const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
+  ForwardIterator first,
+  ForwardIterator last,
+  Compare comp);
 
 /*! This version of \p is_sorted_until returns the last iterator \c i in <tt>[first,last]</tt> for
- *  which the range <tt>[first,last)</tt> is sorted using the function object \c comp. If <tt>distance(first,last) < 2</tt>,
- *  \p is_sorted_until simply returns \p last.
+ *  which the range <tt>[first,last)</tt> is sorted using the function object \c comp. If <tt>distance(first,last) <
+ * 2</tt>, \p is_sorted_until simply returns \p last.
  *
  *  \param first The beginning of the range of interest.
  *  \param last The end of the range of interest.
  *  \param comp The function object to use for comparison.
  *  \return The last iterator in the input range for which it is sorted.
  *
- *  \tparam ForwardIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward Iterator</a> and
- *          \p ForwardIterator's \c value_type is convertible to \p Compare's \c argument_type.
- *  \tparam Compare is a model of <a href="https://en.cppreference.com/w/cpp/concepts/strict_weak_order">Strict Weak Ordering</a>.
+ *  \tparam ForwardIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward
+ * Iterator</a> and \p ForwardIterator's \c value_type is convertible to \p Compare's \c argument_type. \tparam Compare
+ * is a model of <a href="https://en.cppreference.com/w/cpp/concepts/strict_weak_order">Strict Weak Ordering</a>.
  *
  *  The following code snippet demonstrates how to use \p is_sorted_until to find the first position
  *  in an array where the data becomes unsorted in descending order:
@@ -1327,12 +1284,12 @@ THRUST_HOST_DEVICE
  *  #include <thrust/functional.h>
  *
  *  ...
- *   
+ *
  *  int A[8] = {3, 2, 1, 0, 3, 2, 1, 0};
- *  
+ *
  *  thrust::greater<int> comp;
  *  int * B = thrust::is_sorted_until(A, A + 8, comp);
- *  
+ *
  *  // B - A is 4
  *  // [A, B) is sorted in descending order
  *  \endcode
@@ -1343,11 +1300,8 @@ THRUST_HOST_DEVICE
  *  \see \p stable_sort
  *  \see \p stable_sort_by_key
  */
-template<typename ForwardIterator, typename Compare>
-  ForwardIterator is_sorted_until(ForwardIterator first,
-                                  ForwardIterator last,
-                                  Compare comp);
-
+template <typename ForwardIterator, typename Compare>
+ForwardIterator is_sorted_until(ForwardIterator first, ForwardIterator last, Compare comp);
 
 /*! \} // end predicates
  *  \} // end reductions

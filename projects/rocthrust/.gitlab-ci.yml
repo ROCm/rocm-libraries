@@ -9,6 +9,7 @@ include:
       - /defaults.yaml
       - /deps-cmake.yaml
       - /deps-docs.yaml
+      - /deps-format.yaml
       - /deps-rocm.yaml
       - /deps-windows.yaml
       - /deps-nvcc.yaml
@@ -32,6 +33,10 @@ variables:
   PACKAGE_DIR: $BUILD_DIR/package
   ROCPRIM_GIT_BRANCH: develop_stream
   ROCPRIM_DIR: ${CI_PROJECT_DIR}/rocPRIM
+
+clang-format:
+  extends:
+    - .lint:clang-format
 
 copyright-date:
   extends:
@@ -150,7 +155,7 @@ build:cmake-latest:
     matrix:
       - BUILD_TYPE: Release
         BUILD_TARGET: [BENCHMARKS, TEST, EXAMPLES]
-        BUILD_VERSION: [14, 17]
+        BUILD_VERSION: 17
 
 build:cmake-minimum:
   stage: build
@@ -161,7 +166,7 @@ build:cmake-minimum:
     matrix:
       - BUILD_TYPE: Release
         BUILD_TARGET: [BENCHMARKS, TEST, EXAMPLES]
-        BUILD_VERSION: 14
+        BUILD_VERSION: 17
 
 build:package:
   stage: build
@@ -226,7 +231,7 @@ build:windows:
       -D CMAKE_CXX_FLAGS=-Wno-deprecated-declarations
       -D CMAKE_CXX_COMPILER:FILEPATH="${env:HIP_PATH}/bin/clang++.exe"
       -D CMAKE_INSTALL_PREFIX:PATH="$CI_PROJECT_DIR/build/install"
-      -D CMAKE_CXX_STANDARD=14
+      -D CMAKE_CXX_STANDARD=17
       -D CMAKE_PREFIX_PATH:PATH="$ROCPRIM_DIR/build/install;${env:HIP_PATH}" *>&1
     - \& cmake --build "$CI_PROJECT_DIR/build" *>&1
   artifacts:
@@ -288,7 +293,7 @@ test:doc:
         matrix:
           - BUILD_TYPE: Release
             BUILD_TARGET: TEST
-            BUILD_VERSION: 14
+            BUILD_VERSION: 17
   script:
     - cd $CI_PROJECT_DIR/build
     - cmake
@@ -339,7 +344,7 @@ test-bitwise-repro-generate:
         matrix:
           - BUILD_TYPE: Release
             BUILD_TARGET: TEST
-            BUILD_VERSION: 14
+            BUILD_VERSION: 17
   cache:
     key: database
     paths:
@@ -361,7 +366,7 @@ test-bitwise-repro:
         matrix:
           - BUILD_TYPE: Release
             BUILD_TARGET: TEST
-            BUILD_VERSION: 14
+            BUILD_VERSION: 17
   cache:
     key: database
     paths:
@@ -452,6 +457,7 @@ build:cuda-and-omp:
       -D THRUST_MULTICONFIG_ENABLE_SYSTEM_CUDA=ON
       -D CMAKE_C_COMPILER_LAUNCHER=phc_sccache_c
       -D CMAKE_CXX_COMPILER_LAUNCHER=phc_sccache_cxx
+      -D THRUST_MULTICONFIG_ENABLE_DIALECT_CPP14=FALSE
       -D CMAKE_CUDA_COMPILER_LAUNCHER=phc_sccache_cuda
       -B $CI_PROJECT_DIR/build
       -S $CCCL_DIR/thrust
@@ -526,7 +532,7 @@ benchmark:
         matrix:
           - BUILD_TYPE: Release
             BUILD_TARGET: BENCHMARKS
-            BUILD_VERSION: 14
+            BUILD_VERSION: 17
   extends:
     - .cmake-minimum
     - .gpus:rocm

@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -15,35 +15,36 @@
  *  limitations under the License.
  */
 
-#include <unittest/unittest.h>
-#include <thrust/sort.h>
 #include <thrust/functional.h>
+#include <thrust/sort.h>
 
+#include <unittest/unittest.h>
 
 template <typename T, unsigned int N>
 void _TestStableSortWithLargeKeys(void)
 {
-    size_t n = (128 * 1024) / sizeof(FixedVector<T,N>);
+  size_t n = (128 * 1024) / sizeof(FixedVector<T, N>);
 
-    thrust::host_vector< FixedVector<T,N> > h_keys(n);
+  thrust::host_vector<FixedVector<T, N>> h_keys(n);
 
-    for(size_t i = 0; i < n; i++)
-        // XXX Use proper random number generation facility.
-        h_keys[i] = FixedVector<T,N>(rand());
+  for (size_t i = 0; i < n; i++)
+  {
+    // XXX Use proper random number generation facility.
+    h_keys[i] = FixedVector<T, N>(rand());
+  }
 
-    thrust::device_vector< FixedVector<T,N> > d_keys = h_keys;
-    
-    thrust::stable_sort(h_keys.begin(), h_keys.end());
-    thrust::stable_sort(d_keys.begin(), d_keys.end());
+  thrust::device_vector<FixedVector<T, N>> d_keys = h_keys;
 
-    ASSERT_EQUAL_QUIET(h_keys, d_keys);
+  thrust::stable_sort(h_keys.begin(), h_keys.end());
+  thrust::stable_sort(d_keys.begin(), d_keys.end());
+
+  ASSERT_EQUAL_QUIET(h_keys, d_keys);
 }
 
 void TestStableSortWithLargeKeys(void)
 {
-    _TestStableSortWithLargeKeys<int,    2>();
-    _TestStableSortWithLargeKeys<int,   17>();
-    _TestStableSortWithLargeKeys<int,  128>();
+  _TestStableSortWithLargeKeys<int, 2>();
+  _TestStableSortWithLargeKeys<int, 17>();
+  _TestStableSortWithLargeKeys<int, 128>();
 }
 DECLARE_UNITTEST(TestStableSortWithLargeKeys);
-

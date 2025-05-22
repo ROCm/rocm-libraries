@@ -31,22 +31,22 @@
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 
-#include <thrust/detail/mpl/math.h>
-#include <thrust/detail/temporary_array.h>
-#include <thrust/distance.h>
-#include <thrust/extrema.h>
-#include <thrust/pair.h>
-#include <thrust/set_operations.h>
-#include <thrust/system/hip/detail/execution_policy.h>
-#include <thrust/system/hip/detail/get_value.h>
-#include <thrust/system/hip/detail/general/temp_storage.h>
-#include <thrust/system/hip/detail/par_to_seq.h>
-#include <thrust/system/hip/detail/util.h>
+#  include <thrust/detail/mpl/math.h>
+#  include <thrust/detail/temporary_array.h>
+#  include <thrust/distance.h>
+#  include <thrust/extrema.h>
+#  include <thrust/pair.h>
+#  include <thrust/set_operations.h>
+#  include <thrust/system/hip/detail/execution_policy.h>
+#  include <thrust/system/hip/detail/general/temp_storage.h>
+#  include <thrust/system/hip/detail/get_value.h>
+#  include <thrust/system/hip/detail/par_to_seq.h>
+#  include <thrust/system/hip/detail/util.h>
 
-#include <cstdint>
+#  include <cstdint>
 
 // rocprim include
-#include <rocprim/rocprim.hpp>
+#  include <rocprim/rocprim.hpp>
 
 THRUST_NAMESPACE_BEGIN
 
@@ -55,791 +55,778 @@ namespace hip_rocprim
 
 namespace __set_operations
 {
-    template <bool UpperBound, class IntT, class Size, class It, class T, class Comp>
-    THRUST_HIP_DEVICE_FUNCTION void
-    binary_search_iteration(It data, Size &begin, Size &end, T key, int shift, Comp comp)
-    {
-        IntT scale = (1 << shift) - 1;
-        Size  mid   = ((begin + scale * end) >> shift);
+template <bool UpperBound, class IntT, class Size, class It, class T, class Comp>
+THRUST_HIP_DEVICE_FUNCTION void binary_search_iteration(It data, Size& begin, Size& end, T key, int shift, Comp comp)
+{
+  IntT scale = (1 << shift) - 1;
+  Size mid   = ((begin + scale * end) >> shift);
 
-        T    key2 = data[mid];
-        bool pred = UpperBound ? !comp(key, key2) : comp(key2, key);
-        if(pred)
-            begin = mid + static_cast<Size>(1);
-        else
-            end = mid;
+  T key2    = data[mid];
+  bool pred = UpperBound ? !comp(key, key2) : comp(key2, key);
+  if (pred)
+  {
+    begin = mid + static_cast<Size>(1);
+  }
+  else
+  {
+    end = mid;
+  }
+}
+
+template <bool UpperBound, class Size, class T, class It, class Comp>
+THRUST_HIP_DEVICE_FUNCTION int binary_search(It data, Size count, T key, Comp comp)
+{
+  Size begin = 0;
+  Size end   = count;
+  while (begin < end)
+  {
+    binary_search_iteration<UpperBound, int>(data, begin, end, key, 1, comp);
+  }
+  return begin;
+}
+
+template <bool UpperBound, class Size, class IntT, class T, class It, class Comp>
+THRUST_HIP_DEVICE_FUNCTION Size biased_binary_search(It data, Size count, T key, IntT levels, Comp comp)
+{
+  Size begin = 0;
+  Size end   = count;
+
+  if (levels >= 4 && begin < end)
+  {
+    binary_search_iteration<UpperBound, IntT>(data, begin, end, key, 9, comp);
+  }
+  if (levels >= 3 && begin < end)
+  {
+    binary_search_iteration<UpperBound, IntT>(data, begin, end, key, 7, comp);
+  }
+  if (levels >= 2 && begin < end)
+  {
+    binary_search_iteration<UpperBound, IntT>(data, begin, end, key, 5, comp);
+  }
+  if (levels >= 1 && begin < end)
+  {
+    binary_search_iteration<UpperBound, IntT>(data, begin, end, key, 4, comp);
+  }
+
+  while (begin < end)
+  {
+    binary_search_iteration<UpperBound, IntT>(data, begin, end, key, 1, comp);
+  }
+  return begin;
+}
+
+template <bool UpperBound, class Size, class It1, class It2, class Comp>
+THRUST_HIP_DEVICE_FUNCTION Size merge_path(It1 a, Size aCount, It2 b, Size bCount, Size diag, Comp comp)
+{
+  using T = typename thrust::iterator_traits<It1>::value_type;
+
+  Size begin = thrust::max((Size) 0, diag - bCount);
+  Size end   = thrust::min(diag, aCount);
+
+  while (begin < end)
+  {
+    Size mid  = (begin + end) >> 1;
+    T aKey    = a[mid];
+    T bKey    = b[diag - 1 - mid];
+    bool pred = UpperBound ? comp(aKey, bKey) : !comp(bKey, aKey);
+    if (pred)
+    {
+      begin = mid + 1;
+    }
+    else
+    {
+      end = mid;
+    }
+  }
+  return begin;
+}
+
+template <class It1, class It2, class Size, class Size2, class CompareOp>
+pair<Size, Size> THRUST_HIP_DEVICE_FUNCTION
+balanced_path(It1 keys1, It2 keys2, Size num_keys1, Size num_keys2, Size diag, Size2 levels, CompareOp compare_op)
+{
+  using T = typename iterator_traits<It1>::value_type;
+
+  Size index1 = merge_path<false>(keys1, num_keys1, keys2, num_keys2, diag, compare_op);
+  Size index2 = diag - index1;
+
+  bool star = false;
+  if (index2 < num_keys2)
+  {
+    T x = keys2[index2];
+
+    // Search for the beginning of the duplicate run in both A and B.
+    Size start1 = biased_binary_search<false>(keys1, index1, x, levels, compare_op);
+    Size start2 = biased_binary_search<false>(keys2, index2, x, levels, compare_op);
+
+    // The distance between x's merge path and its lower_bound is its rank.
+    // We add up the a and b ranks and evenly distribute them to
+    // get a stairstep path.
+    Size run1      = index1 - start1;
+    Size run2      = index2 - start2;
+    Size total_run = run1 + run2;
+
+    // Attempt to advance b and regress a.
+    Size advance2 = max<Size>(total_run >> 1, total_run - run1);
+    Size end2     = min<Size>(num_keys2, start2 + advance2 + 1);
+
+    Size run_end2 = index2 + binary_search<true>(keys2 + index2, end2 - index2, x, compare_op);
+    run2          = run_end2 - start2;
+
+    advance2      = min<Size>(advance2, run2);
+    Size advance1 = total_run - advance2;
+
+    bool round_up = (advance1 == advance2 + 1) && (advance2 < run2);
+    if (round_up)
+    {
+      star = true;
     }
 
-    template <bool UpperBound, class Size, class T, class It, class Comp>
-    THRUST_HIP_DEVICE_FUNCTION int
-    binary_search(It data, Size count, T key, Comp comp)
+    index1 = start1 + advance1;
+  }
+  return thrust::make_pair(index1, (diag - index1) + star);
+} // func balanced_path
+
+//---------------------------------------------------------------------
+// Utility functions
+//---------------------------------------------------------------------
+
+template <unsigned int BlockSize, unsigned int ItemsPerThread>
+using set_operations_config = rocprim::kernel_config<BlockSize, ItemsPerThread>;
+
+template <class Key, class Value>
+struct set_operations_config_900
+{
+  static constexpr unsigned int item_scale =
+    ::rocprim::detail::ceiling_div<unsigned int>(::rocprim::max(sizeof(Key), sizeof(Value)), sizeof(int));
+
+  using type = set_operations_config<256, ::rocprim::max(1u, 16u / item_scale)>;
+};
+
+template <class Config,
+          class KeysIt1,
+          class KeysIt2,
+          class ValuesIt1,
+          class ValuesIt2,
+          class KeysOutputIt,
+          class ValuesOutputIt,
+          class Size,
+          class CompareOp,
+          class SetOp,
+          bool HAS_VALUES>
+class SetOpAgent
+{
+  using key_type   = typename std::iterator_traits<KeysIt1>::value_type;
+  using value_type = typename std::iterator_traits<ValuesIt1>::value_type;
+
+  static constexpr int BLOCK_THREADS    = Config::block_size;
+  static constexpr int ITEMS_PER_THREAD = Config::items_per_thread;
+
+public:
+  template <bool IS_FULL_TILE, class T, class It1, class It2>
+  THRUST_HIP_DEVICE_FUNCTION void
+  gmem_to_reg(T (&output)[ITEMS_PER_THREAD], It1 input1, It2 input2, int count1, int count2)
+  {
+    const unsigned int thread_id = ::rocprim::detail::block_thread_id<0>();
+    if (IS_FULL_TILE)
     {
-        Size begin = 0;
-        Size end   = count;
-        while(begin < end)
-            binary_search_iteration<UpperBound, int>(data, begin, end, key, 1, comp);
-        return begin;
+#  pragma unroll
+      for (int ITEM = 0; ITEM < ITEMS_PER_THREAD - 1; ++ITEM)
+      {
+        int idx      = BLOCK_THREADS * ITEM + thread_id;
+        output[ITEM] = (idx < count1) ? static_cast<T>(input1[idx]) : static_cast<T>(input2[idx - count1]);
+      }
+
+      // last ITEM might be a conditional load even for full tiles
+      // please check first before attempting to load.
+      int ITEM = ITEMS_PER_THREAD - 1;
+      int idx  = BLOCK_THREADS * ITEM + thread_id;
+      if (idx < count1 + count2)
+      {
+        output[ITEM] = (idx < count1) ? static_cast<T>(input1[idx]) : static_cast<T>(input2[idx - count1]);
+      }
+    }
+    else
+    {
+#  pragma unroll
+      for (int ITEM = 0; ITEM < ITEMS_PER_THREAD; ++ITEM)
+      {
+        int idx = BLOCK_THREADS * ITEM + thread_id;
+        if (idx < count1 + count2)
+        {
+          output[ITEM] = (idx < count1) ? static_cast<T>(input1[idx]) : static_cast<T>(input2[idx - count1]);
+        }
+      }
+    }
+  }
+
+  template <class T, unsigned int OutputSize>
+  THRUST_HIP_DEVICE_FUNCTION void
+  reg_to_shared(rocprim::uninitialized_array<T, OutputSize>& output, T (&input)[ITEMS_PER_THREAD])
+  {
+    const unsigned int thread_id = ::rocprim::detail::block_thread_id<0>();
+#  pragma unroll
+    for (int ITEM = 0; ITEM < ITEMS_PER_THREAD; ++ITEM)
+    {
+      int idx = BLOCK_THREADS * ITEM + thread_id;
+      output.emplace(idx, input[ITEM]);
+    }
+  }
+
+  template <class OutputIt, class T, class SharedIt>
+  THRUST_HIP_DEVICE_FUNCTION void scatter(
+    OutputIt output,
+    T (&input)[ITEMS_PER_THREAD],
+    SharedIt shared,
+    int active_mask,
+    Size thread_output_prefix,
+    Size tile_output_prefix,
+    int tile_output_count)
+  {
+    int local_scatter_idx = thread_output_prefix - tile_output_prefix;
+#  pragma unroll
+    for (int ITEM = 0; ITEM < ITEMS_PER_THREAD; ++ITEM)
+    {
+      if (active_mask & (1 << ITEM))
+      {
+        shared[local_scatter_idx++] = input[ITEM];
+      }
+    }
+    ::rocprim::syncthreads();
+
+    const unsigned int thread_id = ::rocprim::detail::block_thread_id<0>();
+    for (int item = thread_id; item < tile_output_count; item += BLOCK_THREADS)
+    {
+      output[tile_output_prefix + item] = shared[item];
+    }
+  }
+
+  THRUST_HIP_DEVICE_FUNCTION
+  int serial_set_op(
+    key_type* keys,
+    int keys1_beg,
+    int keys2_beg,
+    int keys1_count,
+    int keys2_count,
+    key_type (&output)[ITEMS_PER_THREAD],
+    int (&indices)[ITEMS_PER_THREAD],
+    CompareOp compare_op,
+    SetOp set_op)
+  {
+    int active_mask = set_op(keys, keys1_beg, keys2_beg, keys1_count, keys2_count, output, indices, compare_op);
+
+    return active_mask;
+  }
+
+  template <bool IS_LAST_TILE, class LookBackScanState>
+  THRUST_HIP_DEVICE_FUNCTION void consume_tile(
+    Size tile_idx,
+    LookBackScanState& lookback_scan_state,
+    KeysIt1 keys1_in,
+    KeysIt2 keys2_in,
+    ValuesIt1 values1_in,
+    ValuesIt2 values2_in,
+    KeysOutputIt keys_out,
+    ValuesOutputIt values_out,
+    CompareOp compare_op,
+    SetOp set_op,
+    pair<Size, Size>* partitions,
+    Size* output_count)
+  {
+    using block_scan_type = ::rocprim::block_scan<Size, BLOCK_THREADS>;
+
+    using offset_scan_prefix_op_type = ::rocprim::detail::offset_lookback_scan_prefix_op<Size, LookBackScanState>;
+
+    ROCPRIM_SHARED_MEMORY union
+    {
+      struct
+      {
+        typename block_scan_type::storage_type scan;
+        typename offset_scan_prefix_op_type::storage_type prefix_op;
+      };
+
+      struct
+      {
+        int offset[BLOCK_THREADS];
+
+        union
+        {
+          // Allocate extra shmem than truely neccessary
+          // This will permit to avoid range checks in
+          // serial set operations, e.g. serial_set_difference
+          ::rocprim::uninitialized_array<key_type, BLOCK_THREADS + ITEMS_PER_THREAD * BLOCK_THREADS> keys_shared;
+          ::rocprim::uninitialized_array<value_type, BLOCK_THREADS + ITEMS_PER_THREAD * BLOCK_THREADS> values_shared;
+        };
+      };
+    } storage;
+
+    pair<Size, Size> partition_beg = partitions[tile_idx + 0];
+    pair<Size, Size> partition_end = partitions[tile_idx + 1];
+
+    Size keys1_beg = partition_beg.first;
+    Size keys1_end = partition_end.first;
+    Size keys2_beg = partition_beg.second;
+    Size keys2_end = partition_end.second;
+
+    // number of keys per tile
+    //
+    int num_keys1 = static_cast<int>(keys1_end - keys1_beg);
+    int num_keys2 = static_cast<int>(keys2_end - keys2_beg);
+
+    // load keys into shared memory for further processing
+    key_type keys_loc[ITEMS_PER_THREAD];
+
+    gmem_to_reg<!IS_LAST_TILE>(keys_loc, keys1_in + keys1_beg, keys2_in + keys2_beg, num_keys1, num_keys2);
+
+    reg_to_shared(storage.keys_shared, keys_loc);
+
+    ::rocprim::syncthreads();
+
+    int diag_loc = min<int>(ITEMS_PER_THREAD * threadIdx.x, num_keys1 + num_keys2);
+
+    pair<int, int> partition_loc = balanced_path(
+      &storage.keys_shared.get_unsafe_array()[0],
+      &storage.keys_shared.get_unsafe_array()[num_keys1],
+      num_keys1,
+      num_keys2,
+      diag_loc,
+      4,
+      compare_op);
+
+    int keys1_beg_loc = partition_loc.first;
+    int keys2_beg_loc = partition_loc.second;
+
+    // compute difference between next and current thread
+    // to obtain number of elements per thread
+    int value = threadIdx.x == 0 ? (num_keys1 << 16) | num_keys2 : (partition_loc.first << 16) | partition_loc.second;
+
+    int dst             = threadIdx.x == 0 ? BLOCK_THREADS - 1 : threadIdx.x - 1;
+    storage.offset[dst] = value;
+
+    ::rocprim::syncthreads();
+
+    pair<int, int> partition1_loc =
+      thrust::make_pair(storage.offset[threadIdx.x] >> 16, storage.offset[threadIdx.x] & 0xFFFF);
+
+    int keys1_end_loc = partition1_loc.first;
+    int keys2_end_loc = partition1_loc.second;
+
+    int num_keys1_loc = keys1_end_loc - keys1_beg_loc;
+    int num_keys2_loc = keys2_end_loc - keys2_beg_loc;
+
+    // perform serial set operation
+    //
+    int indices[ITEMS_PER_THREAD];
+
+    int active_mask = serial_set_op(
+      &storage.keys_shared.get_unsafe_array()[0],
+      keys1_beg_loc,
+      keys2_beg_loc + num_keys1,
+      num_keys1_loc,
+      num_keys2_loc,
+      keys_loc,
+      indices,
+      compare_op,
+      set_op);
+    ::rocprim::syncthreads();
+
+    // look-back scan over thread_output_count
+    // to compute global thread_output_base and tile_otput_count;
+    Size tile_output_count    = 0;
+    Size thread_output_prefix = 0;
+    Size tile_output_prefix   = 0;
+    Size thread_output_count  = static_cast<Size>(__popc(active_mask));
+
+    if (tile_idx == 0) // first tile
+    {
+      block_scan_type().exclusive_scan(
+        thread_output_count, thread_output_prefix, Size(0), tile_output_count, storage.scan, ::rocprim::plus<Size>());
+      if (threadIdx.x == 0)
+      {
+        // Update tile status if this is not the last tile
+        if (!IS_LAST_TILE)
+        {
+          lookback_scan_state.set_complete(0, tile_output_count);
+        }
+      }
+    }
+    else
+    {
+      auto prefix_op = offset_scan_prefix_op_type(tile_idx, lookback_scan_state, storage.prefix_op);
+      block_scan_type().exclusive_scan(
+        thread_output_count, thread_output_prefix, storage.scan, prefix_op, ::rocprim::plus<Size>());
+
+      ::rocprim::syncthreads();
+
+      tile_output_count  = prefix_op.get_reduction();
+      tile_output_prefix = prefix_op.get_exclusive_prefix();
     }
 
-    template <bool UpperBound, class Size, class IntT, class T, class It, class Comp>
-    THRUST_HIP_DEVICE_FUNCTION Size
-    biased_binary_search(It data, Size count, T key, IntT levels, Comp comp)
+    ::rocprim::syncthreads();
+
+    // scatter results
+    //
+    scatter(keys_out,
+            keys_loc,
+            &storage.keys_shared.get_unsafe_array()[0],
+            active_mask,
+            thread_output_prefix,
+            tile_output_prefix,
+            tile_output_count);
+
+    if (HAS_VALUES)
     {
-        Size begin = 0;
-        Size end   = count;
+      value_type values_loc[ITEMS_PER_THREAD];
+      gmem_to_reg<!IS_LAST_TILE>(values_loc, values1_in + keys1_beg, values2_in + keys2_beg, num_keys1, num_keys2);
 
-        if(levels >= 4 && begin < end)
-            binary_search_iteration<UpperBound, IntT>(data, begin, end, key, 9, comp);
-        if(levels >= 3 && begin < end)
-            binary_search_iteration<UpperBound, IntT>(data, begin, end, key, 7, comp);
-        if(levels >= 2 && begin < end)
-            binary_search_iteration<UpperBound, IntT>(data, begin, end, key, 5, comp);
-        if(levels >= 1 && begin < end)
-            binary_search_iteration<UpperBound, IntT>(data, begin, end, key, 4, comp);
+      ::rocprim::syncthreads();
 
-        while(begin < end)
-            binary_search_iteration<UpperBound, IntT>(data, begin, end, key, 1, comp);
-        return begin;
+      reg_to_shared(storage.values_shared, values_loc);
+
+      ::rocprim::syncthreads();
+
+// gather items from shared mem
+//
+#  pragma unroll
+      for (int ITEM = 0; ITEM < ITEMS_PER_THREAD; ++ITEM)
+      {
+        if (active_mask & (1 << ITEM))
+        {
+          values_loc[ITEM] = storage.values_shared.get_unsafe_array()[indices[ITEM]];
+        }
+      }
+
+      ::rocprim::syncthreads();
+
+      scatter(values_out,
+              values_loc,
+              &storage.values_shared.get_unsafe_array()[0],
+              active_mask,
+              thread_output_prefix,
+              tile_output_prefix,
+              tile_output_count);
     }
 
-    template <bool UpperBound, class Size, class It1, class It2, class Comp>
-    THRUST_HIP_DEVICE_FUNCTION Size
-    merge_path(It1 a, Size aCount, It2 b, Size bCount, Size diag, Comp comp)
+    if (IS_LAST_TILE && threadIdx.x == 0)
     {
-        using T = typename thrust::iterator_traits<It1>::value_type;
-
-        Size begin = thrust::max((Size)0, diag - bCount);
-        Size end   = thrust::min(diag, aCount);
-
-        while(begin < end)
-        {
-            Size  mid  = (begin + end) >> 1;
-            T    aKey = a[mid];
-            T    bKey = b[diag - 1 - mid];
-            bool pred = UpperBound ? comp(aKey, bKey) : !comp(bKey, aKey);
-            if(pred)
-                begin = mid + 1;
-            else
-                end = mid;
-        }
-        return begin;
+      *output_count = tile_output_prefix + tile_output_count;
     }
+  }
+};
 
-    template <class It1, class It2, class Size, class Size2, class CompareOp>
-    pair<Size, Size> THRUST_HIP_DEVICE_FUNCTION
-    balanced_path(It1       keys1,
-                  It2       keys2,
-                  Size      num_keys1,
-                  Size      num_keys2,
-                  Size      diag,
-                  Size2     levels,
-                  CompareOp compare_op)
+//---------------------------------------------------------------------
+// Serial set operations
+//---------------------------------------------------------------------
+
+// serial_set_intersection
+// -----------------------
+// emit A if A and B are in range and equal.
+struct serial_set_intersection
+{
+  // max_input_size <= 32
+  template <class T, class CompareOp, int ITEMS_PER_THREAD>
+  int THRUST_HIP_DEVICE_FUNCTION operator()(
+    T* keys,
+    int keys1_beg,
+    int keys2_beg,
+    int keys1_count,
+    int keys2_count,
+    T (&output)[ITEMS_PER_THREAD],
+    int (&indices)[ITEMS_PER_THREAD],
+    CompareOp compare_op)
+  {
+    int active_mask = 0;
+
+    int aBegin = keys1_beg;
+    int bBegin = keys2_beg;
+    int aEnd   = keys1_beg + keys1_count;
+    int bEnd   = keys2_beg + keys2_count;
+
+    T aKey = keys[aBegin];
+    T bKey = keys[bBegin];
+
+#  pragma unroll
+    for (int i = 0; i < ITEMS_PER_THREAD; ++i)
     {
-        using T = typename iterator_traits<It1>::value_type;
-
-        Size index1 = merge_path<false>(keys1, num_keys1, keys2, num_keys2, diag, compare_op);
-        Size index2 = diag - index1;
-
-        bool star = false;
-        if(index2 < num_keys2)
-        {
-            T x = keys2[index2];
-
-            // Search for the beginning of the duplicate run in both A and B.
-            Size start1 = biased_binary_search<false>(keys1, index1, x, levels, compare_op);
-            Size start2 = biased_binary_search<false>(keys2, index2, x, levels, compare_op);
-
-            // The distance between x's merge path and its lower_bound is its rank.
-            // We add up the a and b ranks and evenly distribute them to
-            // get a stairstep path.
-            Size run1      = index1 - start1;
-            Size run2      = index2 - start2;
-            Size total_run = run1 + run2;
-
-            // Attempt to advance b and regress a.
-            Size advance2 = max<Size>(total_run >> 1, total_run - run1);
-            Size end2     = min<Size>(num_keys2, start2 + advance2 + 1);
-
-            Size run_end2
-                = index2 + binary_search<true>(keys2 + index2, end2 - index2, x, compare_op);
-            run2 = run_end2 - start2;
-
-            advance2      = min<Size>(advance2, run2);
-            Size advance1 = total_run - advance2;
-
-            bool round_up = (advance1 == advance2 + 1) && (advance2 < run2);
-            if(round_up)
-                star = true;
-
-            index1 = start1 + advance1;
-        }
-        return thrust::make_pair(index1, (diag - index1) + star);
-    } // func balanced_path
-
-    //---------------------------------------------------------------------
-    // Utility functions
-    //---------------------------------------------------------------------
-
-    template <unsigned int BlockSize, unsigned int ItemsPerThread>
-    using set_operations_config = rocprim::kernel_config<BlockSize, ItemsPerThread>;
-
-    template <class Key, class Value>
-    struct set_operations_config_900
-    {
-        static constexpr unsigned int item_scale = ::rocprim::detail::ceiling_div<unsigned int>(
-            ::rocprim::max(sizeof(Key), sizeof(Value)), sizeof(int));
-
-        using type = set_operations_config<256, ::rocprim::max(1u, 16u / item_scale)>;
-    };
-
-    template <class Config,
-              class KeysIt1,
-              class KeysIt2,
-              class ValuesIt1,
-              class ValuesIt2,
-              class KeysOutputIt,
-              class ValuesOutputIt,
-              class Size,
-              class CompareOp,
-              class SetOp,
-              bool HAS_VALUES>
-    class SetOpAgent
-    {
-        using key_type   = typename std::iterator_traits<KeysIt1>::value_type;
-        using value_type = typename std::iterator_traits<ValuesIt1>::value_type;
-
-        static constexpr int BLOCK_THREADS    = Config::block_size;
-        static constexpr int ITEMS_PER_THREAD = Config::items_per_thread;
-
-    public:
-        template <bool IS_FULL_TILE, class T, class It1, class It2>
-        THRUST_HIP_DEVICE_FUNCTION void
-        gmem_to_reg(T (&output)[ITEMS_PER_THREAD], It1 input1, It2 input2, int count1, int count2)
-        {
-            const unsigned int thread_id = ::rocprim::detail::block_thread_id<0>();
-            if(IS_FULL_TILE)
-            {
-#pragma unroll
-                for(int ITEM = 0; ITEM < ITEMS_PER_THREAD - 1; ++ITEM)
-                {
-                    int idx      = BLOCK_THREADS * ITEM + thread_id;
-                    output[ITEM] = (idx < count1) ? static_cast<T>(input1[idx])
-                                                  : static_cast<T>(input2[idx - count1]);
-                }
-
-                // last ITEM might be a conditional load even for full tiles
-                // please check first before attempting to load.
-                int ITEM = ITEMS_PER_THREAD - 1;
-                int idx  = BLOCK_THREADS * ITEM + thread_id;
-                if(idx < count1 + count2)
-                    output[ITEM] = (idx < count1) ? static_cast<T>(input1[idx])
-                                                  : static_cast<T>(input2[idx - count1]);
-            }
-            else
-            {
-#pragma unroll
-                for(int ITEM = 0; ITEM < ITEMS_PER_THREAD; ++ITEM)
-                {
-                    int idx = BLOCK_THREADS * ITEM + thread_id;
-                    if(idx < count1 + count2)
-                    {
-                        output[ITEM] = (idx < count1) ? static_cast<T>(input1[idx])
-                                                      : static_cast<T>(input2[idx - count1]);
-                    }
-                }
-            }
-        }
-
-        template <class T, unsigned int OutputSize>
-        THRUST_HIP_DEVICE_FUNCTION void
-        reg_to_shared(rocprim::uninitialized_array<T, OutputSize>& output,
-                      T                                            (&input)[ITEMS_PER_THREAD])
-        {
-            const unsigned int thread_id = ::rocprim::detail::block_thread_id<0>();
-            #pragma unroll
-            for(int ITEM = 0; ITEM < ITEMS_PER_THREAD; ++ITEM)
-            {
-                int idx     = BLOCK_THREADS * ITEM + thread_id;
-                output.emplace(idx, input[ITEM]);
-            }
-        }
-
-        template <class OutputIt, class T, class SharedIt>
-        THRUST_HIP_DEVICE_FUNCTION
-        void scatter(OutputIt output,
-                     T (&input)[ITEMS_PER_THREAD],
-                     SharedIt shared,
-                     int      active_mask,
-                     Size     thread_output_prefix,
-                     Size     tile_output_prefix,
-                     int      tile_output_count)
-        {
-            int local_scatter_idx = thread_output_prefix - tile_output_prefix;
-            #pragma unroll
-            for(int ITEM = 0; ITEM < ITEMS_PER_THREAD; ++ITEM)
-            {
-                if(active_mask & (1 << ITEM))
-                {
-                    shared[local_scatter_idx++] = input[ITEM];
-                }
-            }
-            ::rocprim::syncthreads();
-
-            const unsigned int thread_id = ::rocprim::detail::block_thread_id<0>();
-            for(int item = thread_id; item < tile_output_count; item += BLOCK_THREADS)
-            {
-                output[tile_output_prefix + item] = shared[item];
-            }
-        }
-
-        THRUST_HIP_DEVICE_FUNCTION
-        int serial_set_op(key_type* keys,
-                          int       keys1_beg,
-                          int       keys2_beg,
-                          int       keys1_count,
-                          int       keys2_count,
-                          key_type (&output)[ITEMS_PER_THREAD],
-                          int (&indices)[ITEMS_PER_THREAD],
-                          CompareOp compare_op,
-                          SetOp     set_op)
-        {
-            int active_mask = set_op(
-                keys, keys1_beg, keys2_beg, keys1_count, keys2_count, output, indices, compare_op);
-
-            return active_mask;
-        }
-
-        template <bool IS_LAST_TILE, class LookBackScanState>
-        THRUST_HIP_DEVICE_FUNCTION
-        void consume_tile(Size               tile_idx,
-                          LookBackScanState& lookback_scan_state,
-                          KeysIt1            keys1_in,
-                          KeysIt2            keys2_in,
-                          ValuesIt1          values1_in,
-                          ValuesIt2          values2_in,
-                          KeysOutputIt       keys_out,
-                          ValuesOutputIt     values_out,
-                          CompareOp          compare_op,
-                          SetOp              set_op,
-                          pair<Size, Size>*  partitions,
-                          Size*              output_count)
-        {
-            using block_scan_type = ::rocprim::block_scan<Size, BLOCK_THREADS>;
-
-            using offset_scan_prefix_op_type
-                = ::rocprim::detail::offset_lookback_scan_prefix_op<Size, LookBackScanState>;
-
-            ROCPRIM_SHARED_MEMORY union
-            {
-                struct
-                {
-                    typename block_scan_type::storage_type            scan;
-                    typename offset_scan_prefix_op_type::storage_type prefix_op;
-                };
-
-                struct
-                {
-                    int offset[BLOCK_THREADS];
-
-                    union
-                    {
-                        // Allocate extra shmem than truely neccessary
-                        // This will permit to avoid range checks in
-                        // serial set operations, e.g. serial_set_difference
-                        ::rocprim::uninitialized_array<key_type,
-                                                       BLOCK_THREADS
-                                                           + ITEMS_PER_THREAD * BLOCK_THREADS>
-                            keys_shared;
-                        ::rocprim::uninitialized_array<value_type,
-                                                       BLOCK_THREADS
-                                                           + ITEMS_PER_THREAD * BLOCK_THREADS>
-                            values_shared;
-                    };
-                };
-            } storage;
-
-            pair<Size, Size> partition_beg = partitions[tile_idx + 0];
-            pair<Size, Size> partition_end = partitions[tile_idx + 1];
-
-            Size keys1_beg = partition_beg.first;
-            Size keys1_end = partition_end.first;
-            Size keys2_beg = partition_beg.second;
-            Size keys2_end = partition_end.second;
-
-            // number of keys per tile
-            //
-            int num_keys1 = static_cast<int>(keys1_end - keys1_beg);
-            int num_keys2 = static_cast<int>(keys2_end - keys2_beg);
-
-            // load keys into shared memory for further processing
-            key_type keys_loc[ITEMS_PER_THREAD];
-
-            gmem_to_reg<!IS_LAST_TILE>(
-                keys_loc, keys1_in + keys1_beg, keys2_in + keys2_beg, num_keys1, num_keys2);
-
-            reg_to_shared(storage.keys_shared, keys_loc);
-
-            ::rocprim::syncthreads();
-
-            int diag_loc = min<int>(ITEMS_PER_THREAD * threadIdx.x, num_keys1 + num_keys2);
-
-            pair<int, int> partition_loc
-                = balanced_path(&storage.keys_shared.get_unsafe_array()[0],
-                                &storage.keys_shared.get_unsafe_array()[num_keys1],
-                                num_keys1,
-                                num_keys2,
-                                diag_loc,
-                                4,
-                                compare_op);
-
-            int keys1_beg_loc = partition_loc.first;
-            int keys2_beg_loc = partition_loc.second;
-
-            // compute difference between next and current thread
-            // to obtain number of elements per thread
-            int value = threadIdx.x == 0 ? (num_keys1 << 16) | num_keys2
-                                         : (partition_loc.first << 16) | partition_loc.second;
-
-            int dst             = threadIdx.x == 0 ? BLOCK_THREADS - 1 : threadIdx.x - 1;
-            storage.offset[dst] = value;
-
-            ::rocprim::syncthreads();
-
-            pair<int, int> partition1_loc = thrust::make_pair(storage.offset[threadIdx.x] >> 16,
-                                                              storage.offset[threadIdx.x] & 0xFFFF);
-
-            int keys1_end_loc = partition1_loc.first;
-            int keys2_end_loc = partition1_loc.second;
-
-            int num_keys1_loc = keys1_end_loc - keys1_beg_loc;
-            int num_keys2_loc = keys2_end_loc - keys2_beg_loc;
-
-            // perform serial set operation
-            //
-            int indices[ITEMS_PER_THREAD];
-
-            int active_mask = serial_set_op(&storage.keys_shared.get_unsafe_array()[0],
-                                            keys1_beg_loc,
-                                            keys2_beg_loc + num_keys1,
-                                            num_keys1_loc,
-                                            num_keys2_loc,
-                                            keys_loc,
-                                            indices,
-                                            compare_op,
-                                            set_op);
-            ::rocprim::syncthreads();
-
-            // look-back scan over thread_output_count
-            // to compute global thread_output_base and tile_otput_count;
-            Size tile_output_count    = 0;
-            Size thread_output_prefix = 0;
-            Size tile_output_prefix   = 0;
-            Size thread_output_count  = static_cast<Size>(__popc(active_mask));
-
-            if(tile_idx == 0) // first tile
-            {
-                block_scan_type().exclusive_scan(thread_output_count,
-                                                 thread_output_prefix,
-                                                 Size(0),
-                                                 tile_output_count,
-                                                 storage.scan,
-                                                 ::rocprim::plus<Size>());
-                if(threadIdx.x == 0)
-                {
-                    // Update tile status if this is not the last tile
-                    if(!IS_LAST_TILE)
-                    {
-                        lookback_scan_state.set_complete(0, tile_output_count);
-                    }
-                }
-            }
-            else
-            {
-                auto prefix_op
-                    = offset_scan_prefix_op_type(tile_idx, lookback_scan_state, storage.prefix_op);
-                block_scan_type().exclusive_scan(thread_output_count,
-                                                 thread_output_prefix,
-                                                 storage.scan,
-                                                 prefix_op,
-                                                 ::rocprim::plus<Size>());
-
-                ::rocprim::syncthreads();
-
-                tile_output_count  = prefix_op.get_reduction();
-                tile_output_prefix = prefix_op.get_exclusive_prefix();
-            }
-
-            ::rocprim::syncthreads();
-
-            // scatter results
-            //
-            scatter(keys_out,
-                    keys_loc,
-                    &storage.keys_shared.get_unsafe_array()[0],
-                    active_mask,
-                    thread_output_prefix,
-                    tile_output_prefix,
-                    tile_output_count);
-
-            if(HAS_VALUES)
-            {
-                value_type values_loc[ITEMS_PER_THREAD];
-                gmem_to_reg<!IS_LAST_TILE>(values_loc,
-                                           values1_in + keys1_beg,
-                                           values2_in + keys2_beg,
-                                           num_keys1,
-                                           num_keys2);
-
-                ::rocprim::syncthreads();
-
-                reg_to_shared(storage.values_shared, values_loc);
-
-                ::rocprim::syncthreads();
-
-                // gather items from shared mem
-                //
-                #pragma unroll
-                for(int ITEM = 0; ITEM < ITEMS_PER_THREAD; ++ITEM)
-                {
-                    if(active_mask & (1 << ITEM))
-                    {
-                        values_loc[ITEM] = storage.values_shared.get_unsafe_array()[indices[ITEM]];
-                    }
-                }
-
-                ::rocprim::syncthreads();
-
-                scatter(values_out,
-                        values_loc,
-                        &storage.values_shared.get_unsafe_array()[0],
-                        active_mask,
-                        thread_output_prefix,
-                        tile_output_prefix,
-                        tile_output_count);
-            }
-
-            if(IS_LAST_TILE && threadIdx.x == 0)
-            {
-                *output_count = tile_output_prefix + tile_output_count;
-            }
-        }
-    };
-
-    //---------------------------------------------------------------------
-    // Serial set operations
-    //---------------------------------------------------------------------
-
-    // serial_set_intersection
-    // -----------------------
-    // emit A if A and B are in range and equal.
-    struct serial_set_intersection
-    {
-        // max_input_size <= 32
-        template <class T, class CompareOp, int ITEMS_PER_THREAD>
-        int THRUST_HIP_DEVICE_FUNCTION
-        operator()(T*  keys,
-                   int keys1_beg,
-                   int keys2_beg,
-                   int keys1_count,
-                   int keys2_count,
-                   T (&output)[ITEMS_PER_THREAD],
-                   int (&indices)[ITEMS_PER_THREAD],
-                   CompareOp compare_op)
-        {
-            int active_mask = 0;
-
-            int aBegin = keys1_beg;
-            int bBegin = keys2_beg;
-            int aEnd   = keys1_beg + keys1_count;
-            int bEnd   = keys2_beg + keys2_count;
-
-            T aKey = keys[aBegin];
-            T bKey = keys[bBegin];
-
-            #pragma unroll
-            for(int i = 0; i < ITEMS_PER_THREAD; ++i)
-            {
-                bool pA = compare_op(aKey, bKey);
-                bool pB = compare_op(bKey, aKey);
-
-                // The outputs must come from A by definition of set interection.
-                output[i]  = aKey;
-                indices[i] = aBegin;
-
-                if((aBegin < aEnd) && (bBegin < bEnd) && pA == pB)
-                    active_mask |= 1 << i;
-
-                if(!pB)
-                {
-                    aKey = keys[++aBegin];
-                }
-                if(!pA)
-                {
-                    bKey = keys[++bBegin];
-                }
-            }
-            return active_mask;
-        }
-    }; // struct serial_set_intersection
-
-    // serial_set_symmetric_difference
-    // ---------------------
-    // emit A if A < B and emit B if B < A.
-    struct serial_set_symmetric_difference
-    {
-        // max_input_size <= 32
-        template <class T, class CompareOp, int ITEMS_PER_THREAD>
-        int THRUST_HIP_DEVICE_FUNCTION
-        operator()(T*  keys,
-                   int keys1_beg,
-                   int keys2_beg,
-                   int keys1_count,
-                   int keys2_count,
-                   T (&output)[ITEMS_PER_THREAD],
-                   int (&indices)[ITEMS_PER_THREAD],
-                   CompareOp compare_op)
-        {
-            int active_mask = 0;
-
-            int aBegin = keys1_beg;
-            int bBegin = keys2_beg;
-            int aEnd   = keys1_beg + keys1_count;
-            int bEnd   = keys2_beg + keys2_count;
-            int end    = aEnd + bEnd;
-
-            T aKey = keys[aBegin];
-            T bKey = keys[bBegin];
-
-#pragma unroll
-            for(int i = 0; i < ITEMS_PER_THREAD; ++i)
-            {
-                bool pB = aBegin >= aEnd;
-                bool pA = !pB && bBegin >= bEnd;
-
-                if(!pA && !pB)
-                {
-                    pA = compare_op(aKey, bKey);
-                    pB = !pA && compare_op(bKey, aKey);
-                }
-
-                // The outputs must come from A by definition of set difference.
-                output[i]  = pA ? aKey : bKey;
-                indices[i] = pA ? aBegin : bBegin;
-
-                if(aBegin + bBegin < end && pA != pB)
-                    active_mask |= 1 << i;
-
-                if(!pB)
-                {
-                    aKey = keys[++aBegin];
-                }
-                if(!pA)
-                {
-                    bKey = keys[++bBegin];
-                }
-            }
-            return active_mask;
-        }
-    }; // struct set_symmetric_difference
-
-    // serial_set_difference
-    // ---------------------
-    // emit A if A < B
-    struct serial_set_difference
-    {
-        // max_input_size <= 32
-        template <class T, class CompareOp, int ITEMS_PER_THREAD>
-        int THRUST_HIP_DEVICE_FUNCTION
-        operator()(T*  keys,
-                   int keys1_beg,
-                   int keys2_beg,
-                   int keys1_count,
-                   int keys2_count,
-                   T (&output)[ITEMS_PER_THREAD],
-                   int (&indices)[ITEMS_PER_THREAD],
-                   CompareOp compare_op)
-        {
-            int active_mask = 0;
-
-            int aBegin = keys1_beg;
-            int bBegin = keys2_beg;
-            int aEnd   = keys1_beg + keys1_count;
-            int bEnd   = keys2_beg + keys2_count;
-            int end    = aEnd + bEnd;
-
-            T aKey = keys[aBegin];
-            T bKey = keys[bBegin];
-
-            #pragma unroll
-            for(int i = 0; i < ITEMS_PER_THREAD; ++i)
-            {
-                bool pB = aBegin >= aEnd;
-                bool pA = !pB && bBegin >= bEnd;
-
-                if(!pA && !pB)
-                {
-                    pA = compare_op(aKey, bKey);
-                    pB = !pA && compare_op(bKey, aKey);
-                }
-
-                // The outputs must come from A by definition of set difference.
-                output[i]  = aKey;
-                indices[i] = aBegin;
-
-                if(aBegin + bBegin < end && pA)
-                    active_mask |= 1 << i;
-
-                if(!pB)
-                {
-                    aKey = keys[++aBegin];
-                }
-                if(!pA)
-                {
-                    bKey = keys[++bBegin];
-                }
-            }
-            return active_mask;
-        }
-    }; // struct set_difference
-
-    // serial_set_union
-    // ----------------
-    // emit A if A <= B else emit B
-    struct serial_set_union
-    {
-        // max_input_size <= 32
-        template <class T, class CompareOp, int ITEMS_PER_THREAD>
-        int THRUST_HIP_DEVICE_FUNCTION
-        operator()(T*  keys,
-                   int keys1_beg,
-                   int keys2_beg,
-                   int keys1_count,
-                   int keys2_count,
-                   T (&output)[ITEMS_PER_THREAD],
-                   int (&indices)[ITEMS_PER_THREAD],
-                   CompareOp compare_op)
-        {
-            int active_mask = 0;
-
-            int aBegin = keys1_beg;
-            int bBegin = keys2_beg;
-            int aEnd   = keys1_beg + keys1_count;
-            int bEnd   = keys2_beg + keys2_count;
-            int end    = aEnd + bEnd;
-
-            T aKey = keys[aBegin];
-            T bKey = keys[bBegin];
-
-            #pragma unroll
-            for(int i = 0; i < ITEMS_PER_THREAD; ++i)
-            {
-                bool pB = aBegin >= aEnd;
-                bool pA = !pB && bBegin >= bEnd;
-
-                if(!pA && !pB)
-                {
-                    pA = compare_op(aKey, bKey);
-                    pB = !pA && compare_op(bKey, aKey);
-                }
-
-                // Output A in case of a tie, so check if b < a.
-                output[i]  = pB ? bKey : aKey;
-                indices[i] = pB ? bBegin : aBegin;
-
-                if(aBegin + bBegin < end)
-                    active_mask |= 1 << i;
-
-                if(!pB)
-                {
-                    aKey = keys[++aBegin];
-                }
-                if(!pA)
-                {
-                    bKey = keys[++bBegin];
-                }
-            }
-            return active_mask;
-        }
-    }; // struct set_union
-
-    template <class Config,
-              bool HAS_VALUES,
-              class KeysIt1,
-              class KeysIt2,
-              class ValuesIt1,
-              class ValuesIt2,
-              class Size,
-              class KeysOutputIt,
-              class ValuesOutputIt,
-              class CompareOp,
-              class SetOp,
-              class LookBackScanState>
-    ROCPRIM_KERNEL
-    THRUST_HIP_LAUNCH_BOUNDS_DEFAULT
-    void lookback_set_op_kernel(KeysIt1                                         keys1,
-                                KeysIt2                                         keys2,
-                                ValuesIt1                                       values1,
-                                ValuesIt2                                       values2,
-                                KeysOutputIt                                    keys_output,
-                                ValuesOutputIt                                  values_output,
-                                CompareOp                                       compare_op,
-                                SetOp                                           set_op,
-                                pair<Size, Size>*                               partitions,
-                                Size*                                           output_count,
-                                LookBackScanState                               lookback_scan_state,
-                                rocprim::detail::ordered_block_id<unsigned int> ordered_bid)
-    {
-        ROCPRIM_SHARED_MEMORY
-        typename rocprim::detail::ordered_block_id<unsigned int>::storage_type storage_ordered_bid;
-
-        const int num_tiles = gridDim.x;
-        const int tile_idx
-            = ordered_bid.get(::rocprim::flat_block_thread_id(), storage_ordered_bid);
-
-        SetOpAgent<Config,
-                   KeysIt1,
-                   KeysIt2,
-                   ValuesIt1,
-                   ValuesIt2,
-                   KeysOutputIt,
-                   ValuesOutputIt,
-                   Size,
-                   CompareOp,
-                   SetOp,
-                   HAS_VALUES>
-            agent;
-
-        if(tile_idx < num_tiles - 1)
-        {
-            agent.template consume_tile<false>(tile_idx,
-                                               lookback_scan_state,
-                                               keys1,
-                                               keys2,
-                                               values1,
-                                               values2,
-                                               keys_output,
-                                               values_output,
-                                               compare_op,
-                                               set_op,
-                                               partitions,
-                                               output_count);
-        }
-        else
-        {
-            agent.template consume_tile<true>(tile_idx,
-                                              lookback_scan_state,
-                                              keys1,
-                                              keys2,
-                                              values1,
-                                              values2,
-                                              keys_output,
-                                              values_output,
-                                              compare_op,
-                                              set_op,
-                                              partitions,
-                                              output_count);
-        }
+      bool pA = compare_op(aKey, bKey);
+      bool pB = compare_op(bKey, aKey);
+
+      // The outputs must come from A by definition of set interection.
+      output[i]  = aKey;
+      indices[i] = aBegin;
+
+      if ((aBegin < aEnd) && (bBegin < bEnd) && pA == pB)
+      {
+        active_mask |= 1 << i;
+      }
+
+      if (!pB)
+      {
+        aKey = keys[++aBegin];
+      }
+      if (!pA)
+      {
+        bKey = keys[++bBegin];
+      }
     }
+    return active_mask;
+  }
+}; // struct serial_set_intersection
+
+// serial_set_symmetric_difference
+// ---------------------
+// emit A if A < B and emit B if B < A.
+struct serial_set_symmetric_difference
+{
+  // max_input_size <= 32
+  template <class T, class CompareOp, int ITEMS_PER_THREAD>
+  int THRUST_HIP_DEVICE_FUNCTION operator()(
+    T* keys,
+    int keys1_beg,
+    int keys2_beg,
+    int keys1_count,
+    int keys2_count,
+    T (&output)[ITEMS_PER_THREAD],
+    int (&indices)[ITEMS_PER_THREAD],
+    CompareOp compare_op)
+  {
+    int active_mask = 0;
+
+    int aBegin = keys1_beg;
+    int bBegin = keys2_beg;
+    int aEnd   = keys1_beg + keys1_count;
+    int bEnd   = keys2_beg + keys2_count;
+    int end    = aEnd + bEnd;
+
+    T aKey = keys[aBegin];
+    T bKey = keys[bBegin];
+
+#  pragma unroll
+    for (int i = 0; i < ITEMS_PER_THREAD; ++i)
+    {
+      bool pB = aBegin >= aEnd;
+      bool pA = !pB && bBegin >= bEnd;
+
+      if (!pA && !pB)
+      {
+        pA = compare_op(aKey, bKey);
+        pB = !pA && compare_op(bKey, aKey);
+      }
+
+      // The outputs must come from A by definition of set difference.
+      output[i]  = pA ? aKey : bKey;
+      indices[i] = pA ? aBegin : bBegin;
+
+      if (aBegin + bBegin < end && pA != pB)
+      {
+        active_mask |= 1 << i;
+      }
+
+      if (!pB)
+      {
+        aKey = keys[++aBegin];
+      }
+      if (!pA)
+      {
+        bKey = keys[++bBegin];
+      }
+    }
+    return active_mask;
+  }
+}; // struct set_symmetric_difference
+
+// serial_set_difference
+// ---------------------
+// emit A if A < B
+struct serial_set_difference
+{
+  // max_input_size <= 32
+  template <class T, class CompareOp, int ITEMS_PER_THREAD>
+  int THRUST_HIP_DEVICE_FUNCTION operator()(
+    T* keys,
+    int keys1_beg,
+    int keys2_beg,
+    int keys1_count,
+    int keys2_count,
+    T (&output)[ITEMS_PER_THREAD],
+    int (&indices)[ITEMS_PER_THREAD],
+    CompareOp compare_op)
+  {
+    int active_mask = 0;
+
+    int aBegin = keys1_beg;
+    int bBegin = keys2_beg;
+    int aEnd   = keys1_beg + keys1_count;
+    int bEnd   = keys2_beg + keys2_count;
+    int end    = aEnd + bEnd;
+
+    T aKey = keys[aBegin];
+    T bKey = keys[bBegin];
+
+#  pragma unroll
+    for (int i = 0; i < ITEMS_PER_THREAD; ++i)
+    {
+      bool pB = aBegin >= aEnd;
+      bool pA = !pB && bBegin >= bEnd;
+
+      if (!pA && !pB)
+      {
+        pA = compare_op(aKey, bKey);
+        pB = !pA && compare_op(bKey, aKey);
+      }
+
+      // The outputs must come from A by definition of set difference.
+      output[i]  = aKey;
+      indices[i] = aBegin;
+
+      if (aBegin + bBegin < end && pA)
+      {
+        active_mask |= 1 << i;
+      }
+
+      if (!pB)
+      {
+        aKey = keys[++aBegin];
+      }
+      if (!pA)
+      {
+        bKey = keys[++bBegin];
+      }
+    }
+    return active_mask;
+  }
+}; // struct set_difference
+
+// serial_set_union
+// ----------------
+// emit A if A <= B else emit B
+struct serial_set_union
+{
+  // max_input_size <= 32
+  template <class T, class CompareOp, int ITEMS_PER_THREAD>
+  int THRUST_HIP_DEVICE_FUNCTION operator()(
+    T* keys,
+    int keys1_beg,
+    int keys2_beg,
+    int keys1_count,
+    int keys2_count,
+    T (&output)[ITEMS_PER_THREAD],
+    int (&indices)[ITEMS_PER_THREAD],
+    CompareOp compare_op)
+  {
+    int active_mask = 0;
+
+    int aBegin = keys1_beg;
+    int bBegin = keys2_beg;
+    int aEnd   = keys1_beg + keys1_count;
+    int bEnd   = keys2_beg + keys2_count;
+    int end    = aEnd + bEnd;
+
+    T aKey = keys[aBegin];
+    T bKey = keys[bBegin];
+
+#  pragma unroll
+    for (int i = 0; i < ITEMS_PER_THREAD; ++i)
+    {
+      bool pB = aBegin >= aEnd;
+      bool pA = !pB && bBegin >= bEnd;
+
+      if (!pA && !pB)
+      {
+        pA = compare_op(aKey, bKey);
+        pB = !pA && compare_op(bKey, aKey);
+      }
+
+      // Output A in case of a tie, so check if b < a.
+      output[i]  = pB ? bKey : aKey;
+      indices[i] = pB ? bBegin : aBegin;
+
+      if (aBegin + bBegin < end)
+      {
+        active_mask |= 1 << i;
+      }
+
+      if (!pB)
+      {
+        aKey = keys[++aBegin];
+      }
+      if (!pA)
+      {
+        bKey = keys[++bBegin];
+      }
+    }
+    return active_mask;
+  }
+}; // struct set_union
+
+template <class Config,
+          bool HAS_VALUES,
+          class KeysIt1,
+          class KeysIt2,
+          class ValuesIt1,
+          class ValuesIt2,
+          class Size,
+          class KeysOutputIt,
+          class ValuesOutputIt,
+          class CompareOp,
+          class SetOp,
+          class LookBackScanState>
+ROCPRIM_KERNEL THRUST_HIP_LAUNCH_BOUNDS_DEFAULT void lookback_set_op_kernel(
+  KeysIt1 keys1,
+  KeysIt2 keys2,
+  ValuesIt1 values1,
+  ValuesIt2 values2,
+  KeysOutputIt keys_output,
+  ValuesOutputIt values_output,
+  CompareOp compare_op,
+  SetOp set_op,
+  pair<Size, Size>* partitions,
+  Size* output_count,
+  LookBackScanState lookback_scan_state,
+  rocprim::detail::ordered_block_id<unsigned int> ordered_bid)
+{
+  ROCPRIM_SHARED_MEMORY
+  typename rocprim::detail::ordered_block_id<unsigned int>::storage_type storage_ordered_bid;
+
+  const int num_tiles = gridDim.x;
+  const int tile_idx  = ordered_bid.get(::rocprim::flat_block_thread_id(), storage_ordered_bid);
+
+  SetOpAgent<Config, KeysIt1, KeysIt2, ValuesIt1, ValuesIt2, KeysOutputIt, ValuesOutputIt, Size, CompareOp, SetOp, HAS_VALUES>
+    agent;
+
+  if (tile_idx < num_tiles - 1)
+  {
+    agent.template consume_tile<false>(
+      tile_idx,
+      lookback_scan_state,
+      keys1,
+      keys2,
+      values1,
+      values2,
+      keys_output,
+      values_output,
+      compare_op,
+      set_op,
+      partitions,
+      output_count);
+  }
+  else
+  {
+    agent.template consume_tile<true>(
+      tile_idx,
+      lookback_scan_state,
+      keys1,
+      keys2,
+      values1,
+      values2,
+      keys_output,
+      values_output,
+      compare_op,
+      set_op,
+      partitions,
+      output_count);
+  }
+}
 
 #  define ROCTHRUST_HIP_SYNC_AND_RETURN_ON_ERROR(name, size, start)                        \
     {                                                                                      \
@@ -858,500 +845,504 @@ namespace __set_operations
       }                                                                                    \
     }
 
-    template <bool HAS_VALUES,
-              class KeysIt1,
-              class KeysIt2,
-              class ValuesIt1,
-              class ValuesIt2,
-              class Size,
-              class KeysOutputIt,
-              class ValuesOutputIt,
-              class CompareOp,
-              class SetOp>
-    hipError_t THRUST_HIP_RUNTIME_FUNCTION
-    doit_step(void*          temporary_storage,
-              size_t&        storage_size,
-              KeysIt1        keys1,
-              KeysIt2        keys2,
-              ValuesIt1      values1,
-              ValuesIt2      values2,
-              Size           num_keys1,
-              Size           num_keys2,
-              KeysOutputIt   keys_output,
-              ValuesOutputIt values_output,
-              Size*          output_count,
-              CompareOp      compare_op,
-              SetOp          set_op,
-              hipStream_t    stream,
-              bool           debug_synchronous)
-    {
-        using key_type   = typename std::iterator_traits<KeysIt1>::value_type;
-        using value_type = typename std::iterator_traits<ValuesIt1>::value_type;
+template <bool HAS_VALUES,
+          class KeysIt1,
+          class KeysIt2,
+          class ValuesIt1,
+          class ValuesIt2,
+          class Size,
+          class KeysOutputIt,
+          class ValuesOutputIt,
+          class CompareOp,
+          class SetOp>
+hipError_t THRUST_HIP_RUNTIME_FUNCTION doit_step(
+  void* temporary_storage,
+  size_t& storage_size,
+  KeysIt1 keys1,
+  KeysIt2 keys2,
+  ValuesIt1 values1,
+  ValuesIt2 values2,
+  Size num_keys1,
+  Size num_keys2,
+  KeysOutputIt keys_output,
+  ValuesOutputIt values_output,
+  Size* output_count,
+  CompareOp compare_op,
+  SetOp set_op,
+  hipStream_t stream,
+  bool debug_synchronous)
+{
+  using key_type   = typename std::iterator_traits<KeysIt1>::value_type;
+  using value_type = typename std::iterator_traits<ValuesIt1>::value_type;
 
-        using config = typename set_operations_config_900<key_type, value_type>::type;
+  using config = typename set_operations_config_900<key_type, value_type>::type;
 
-        using block_state_type      = ::rocprim::detail::lookback_scan_state<Size>;
-        using ordered_block_id_type = ::rocprim::detail::ordered_block_id<unsigned int>;
+  using block_state_type      = ::rocprim::detail::lookback_scan_state<Size>;
+  using ordered_block_id_type = ::rocprim::detail::ordered_block_id<unsigned int>;
 
-        constexpr unsigned int block_size       = config::block_size;
-        constexpr unsigned int items_per_thread = config::items_per_thread;
-        constexpr unsigned int items_per_block  = block_size * items_per_thread - 1;
+  constexpr unsigned int block_size       = config::block_size;
+  constexpr unsigned int items_per_thread = config::items_per_thread;
+  constexpr unsigned int items_per_block  = block_size * items_per_thread - 1;
 
-        Size keys_total = num_keys1 + num_keys2;
-        if(keys_total == 0)
-            return hipErrorInvalidValue;
+  Size keys_total = num_keys1 + num_keys2;
+  if (keys_total == 0)
+  {
+    return hipErrorInvalidValue;
+  }
 
-        hipError_t status = hipSuccess;
+  hipError_t status = hipSuccess;
 
-        const unsigned int number_of_blocks = (keys_total + items_per_block - 1) / items_per_block;
+  const unsigned int number_of_blocks = (keys_total + items_per_block - 1) / items_per_block;
 
-        // Calculate required temporary storage
-        size_t scan_state_bytes;
-        status = block_state_type::get_storage_size(number_of_blocks, stream, scan_state_bytes);
-        if (status != hipSuccess) {
-            return status;
-        }
-        scan_state_bytes = ::rocprim::detail::align_size(scan_state_bytes);
-        size_t ordered_block_id_bytes
-            = ::rocprim::detail::align_size(ordered_block_id_type::get_storage_size());
-        size_t partition_storage_bytes = (number_of_blocks + 1) * sizeof(pair<Size, Size>);
-        if(temporary_storage == nullptr)
-        {
-            // storage_size is never zero
-            storage_size = scan_state_bytes + ordered_block_id_bytes + partition_storage_bytes;
-            return hipSuccess;
-        }
+  // Calculate required temporary storage
+  size_t scan_state_bytes;
+  status = block_state_type::get_storage_size(number_of_blocks, stream, scan_state_bytes);
+  if (status != hipSuccess)
+  {
+    return status;
+  }
+  scan_state_bytes               = ::rocprim::detail::align_size(scan_state_bytes);
+  size_t ordered_block_id_bytes  = ::rocprim::detail::align_size(ordered_block_id_type::get_storage_size());
+  size_t partition_storage_bytes = (number_of_blocks + 1) * sizeof(pair<Size, Size>);
+  if (temporary_storage == nullptr)
+  {
+    // storage_size is never zero
+    storage_size = scan_state_bytes + ordered_block_id_bytes + partition_storage_bytes;
+    return hipSuccess;
+  }
 
-        // Start point for time measurements
-        std::chrono::high_resolution_clock::time_point start;
-        if(debug_synchronous)
-        {
-            std::cout << "keys_total " << keys_total << '\n';
-            std::cout << "number_of_blocks " << number_of_blocks << '\n';
-            std::cout << "block_size " << block_size << '\n';
-            std::cout << "items_per_thread " << items_per_thread << '\n';
-            std::cout << "items_per_block " << items_per_block << '\n';
-        }
+  // Start point for time measurements
+  std::chrono::high_resolution_clock::time_point start;
+  if (debug_synchronous)
+  {
+    std::cout << "keys_total " << keys_total << '\n';
+    std::cout << "number_of_blocks " << number_of_blocks << '\n';
+    std::cout << "block_size " << block_size << '\n';
+    std::cout << "items_per_thread " << items_per_thread << '\n';
+    std::cout << "items_per_block " << items_per_block << '\n';
+  }
 
-        auto ptr = reinterpret_cast<char*>(temporary_storage);
-        // Create and initialize lookback_scan_state obj
-        block_state_type blocks_state; 
-        status = block_state_type::create(blocks_state, ptr, number_of_blocks, stream);
-        if (status != hipSuccess) {
-            return status;
-        }
-        ptr += scan_state_bytes;
-        // Create and initialize ordered_block_id obj
-        auto ordered_bid
-            = ordered_block_id_type::create(reinterpret_cast<ordered_block_id_type::id_type*>(ptr));
-        ptr += ordered_block_id_bytes;
-        pair<Size, Size>* partitions = reinterpret_cast<pair<Size, Size>*>(ptr);
+  auto ptr = reinterpret_cast<char*>(temporary_storage);
+  // Create and initialize lookback_scan_state obj
+  block_state_type blocks_state;
+  status = block_state_type::create(blocks_state, ptr, number_of_blocks, stream);
+  if (status != hipSuccess)
+  {
+    return status;
+  }
+  ptr += scan_state_bytes;
+  // Create and initialize ordered_block_id obj
+  auto ordered_bid = ordered_block_id_type::create(reinterpret_cast<ordered_block_id_type::id_type*>(ptr));
+  ptr += ordered_block_id_bytes;
+  pair<Size, Size>* partitions = reinterpret_cast<pair<Size, Size>*>(ptr);
 
-        if(debug_synchronous)
-            start = std::chrono::high_resolution_clock::now();
-        auto grid_size = (number_of_blocks + block_size - 1) / block_size;
-        hipLaunchKernelGGL(
-          HIP_KERNEL_NAME(rocprim::detail::init_lookback_scan_state_kernel),
-          dim3(grid_size),
-          dim3(block_size),
-          0,
-          stream,
-          blocks_state,
-          number_of_blocks,
-          ordered_bid);
-        ROCTHRUST_HIP_SYNC_AND_RETURN_ON_ERROR("init_lookback_scan_state_kernel", number_of_blocks, start)
+  if (debug_synchronous)
+  {
+    start = std::chrono::high_resolution_clock::now();
+  }
+  auto grid_size = (number_of_blocks + block_size - 1) / block_size;
+  hipLaunchKernelGGL(
+    HIP_KERNEL_NAME(rocprim::detail::init_lookback_scan_state_kernel),
+    dim3(grid_size),
+    dim3(block_size),
+    0,
+    stream,
+    blocks_state,
+    number_of_blocks,
+    ordered_bid);
+  ROCTHRUST_HIP_SYNC_AND_RETURN_ON_ERROR("init_lookback_scan_state_kernel", number_of_blocks, start)
 
-        status = __parallel_for::parallel_for(
-            number_of_blocks + 1,
-            [=] THRUST_DEVICE(Size idx) mutable {
-                Size partition_at = min<Size>(idx * items_per_block, num_keys1 + num_keys2);
-                partitions[idx]   = balanced_path(
-                    keys1, keys2, num_keys1, num_keys2, partition_at, 4ll, compare_op);
-            },
-            stream);
-        if(status != hipSuccess)
-            return status;
+  status = __parallel_for::parallel_for(
+    number_of_blocks + 1,
+    [=] THRUST_DEVICE(Size idx) mutable {
+      Size partition_at = min<Size>(idx * items_per_block, num_keys1 + num_keys2);
+      partitions[idx]   = balanced_path(keys1, keys2, num_keys1, num_keys2, partition_at, 4ll, compare_op);
+    },
+    stream);
+  if (status != hipSuccess)
+  {
+    return status;
+  }
 
-        if(debug_synchronous)
-            start = std::chrono::high_resolution_clock::now();
-        hipLaunchKernelGGL(
-          HIP_KERNEL_NAME(lookback_set_op_kernel<config, HAS_VALUES>),
-          dim3(number_of_blocks),
-          dim3(block_size),
-          0,
-          stream,
-          keys1,
-          keys2,
-          values1,
-          values2,
-          keys_output,
-          values_output,
-          compare_op,
-          set_op,
-          partitions,
-          output_count,
-          blocks_state,
-          ordered_bid);
-        ROCTHRUST_HIP_SYNC_AND_RETURN_ON_ERROR("lookback_set_op_kernel", keys_total, start)
+  if (debug_synchronous)
+  {
+    start = std::chrono::high_resolution_clock::now();
+  }
+  hipLaunchKernelGGL(
+    HIP_KERNEL_NAME(lookback_set_op_kernel<config, HAS_VALUES>),
+    dim3(number_of_blocks),
+    dim3(block_size),
+    0,
+    stream,
+    keys1,
+    keys2,
+    values1,
+    values2,
+    keys_output,
+    values_output,
+    compare_op,
+    set_op,
+    partitions,
+    output_count,
+    blocks_state,
+    ordered_bid);
+  ROCTHRUST_HIP_SYNC_AND_RETURN_ON_ERROR("lookback_set_op_kernel", keys_total, start)
 
-        return status;
-    }
-
-#undef ROCTHRUST_HIP_SYNC_AND_RETURN_ON_ERROR
-
-    template <bool HAS_VALUES,
-              typename Derived,
-              typename KeysIt1,
-              typename KeysIt2,
-              typename ValuesIt1,
-              typename ValuesIt2,
-              typename KeysOutputIt,
-              typename ValuesOutputIt,
-              typename CompareOp,
-              typename SetOp>
-    THRUST_HIP_RUNTIME_FUNCTION
-    pair<KeysOutputIt, ValuesOutputIt>
-    set_operations(execution_policy<Derived>& policy,
-                   KeysIt1                    keys1_first,
-                   KeysIt1                    keys1_last,
-                   KeysIt2                    keys2_first,
-                   KeysIt2                    keys2_last,
-                   ValuesIt1                  values1_first,
-                   ValuesIt2                  values2_first,
-                   KeysOutputIt               keys_output,
-                   ValuesOutputIt             values_output,
-                   CompareOp                  compare_op,
-                   SetOp                      set_op)
-    {
-        using namespace thrust::system::hip_rocprim::temp_storage;
-
-        using size_type = typename iterator_traits<KeysIt1>::difference_type;
-        size_type num_keys1 = static_cast<size_type>(thrust::distance(keys1_first, keys1_last));
-        size_type num_keys2 = static_cast<size_type>(thrust::distance(keys2_first, keys2_last));
-
-        if(num_keys1 + num_keys2 == 0)
-            return thrust::make_pair(keys_output, values_output);
-
-        size_t      temp_storage_bytes = 0;
-        hipStream_t stream             = hip_rocprim::stream(policy);
-        bool        debug_sync         = THRUST_HIP_DEBUG_SYNC_FLAG;
-
-        hip_rocprim::throw_on_error(doit_step<HAS_VALUES>(nullptr,
-                                                          temp_storage_bytes,
-                                                          keys1_first,
-                                                          keys2_first,
-                                                          values1_first,
-                                                          values2_first,
-                                                          num_keys1,
-                                                          num_keys2,
-                                                          keys_output,
-                                                          values_output,
-                                                          static_cast<size_type*>(nullptr),
-                                                          compare_op,
-                                                          set_op,
-                                                          stream,
-                                                          debug_sync),
-                                    "set_operations failed on 1st step");
-
-        temp_storage_bytes = rocprim::detail::align_size(temp_storage_bytes);
-
-        size_t     storage_size;
-        void*      ptr       = nullptr;
-        void*      temp_stor = nullptr;
-        size_type* d_output_count;
-
-        auto l_part = make_linear_partition(make_partition(&temp_stor, temp_storage_bytes),
-                                            ptr_aligned_array(&d_output_count, 1));
-
-        // Calculate storage_size including alignment
-        hip_rocprim::throw_on_error(partition(ptr, storage_size, l_part));
-
-        // Allocate temporary storage.
-        thrust::detail::temporary_array<std::uint8_t, Derived> tmp(policy, storage_size);
-        ptr = static_cast<void*>(tmp.data().get());
-
-        // Create pointers with alignment
-        hip_rocprim::throw_on_error(partition(ptr, storage_size, l_part));
-
-        hip_rocprim::throw_on_error(doit_step<HAS_VALUES>(ptr,
-                                                          temp_storage_bytes,
-                                                          keys1_first,
-                                                          keys2_first,
-                                                          values1_first,
-                                                          values2_first,
-                                                          num_keys1,
-                                                          num_keys2,
-                                                          keys_output,
-                                                          values_output,
-                                                          d_output_count,
-                                                          compare_op,
-                                                          set_op,
-                                                          stream,
-                                                          debug_sync),
-                                    "set_operations failed on 2nd step");
-
-        size_type output_count = hip_rocprim::get_value(policy, d_output_count);
-
-        return thrust::make_pair(keys_output + output_count, values_output + output_count);
-    }
+  return status;
 }
+
+#  undef ROCTHRUST_HIP_SYNC_AND_RETURN_ON_ERROR
+
+template <bool HAS_VALUES,
+          typename Derived,
+          typename KeysIt1,
+          typename KeysIt2,
+          typename ValuesIt1,
+          typename ValuesIt2,
+          typename KeysOutputIt,
+          typename ValuesOutputIt,
+          typename CompareOp,
+          typename SetOp>
+THRUST_HIP_RUNTIME_FUNCTION pair<KeysOutputIt, ValuesOutputIt> set_operations(
+  execution_policy<Derived>& policy,
+  KeysIt1 keys1_first,
+  KeysIt1 keys1_last,
+  KeysIt2 keys2_first,
+  KeysIt2 keys2_last,
+  ValuesIt1 values1_first,
+  ValuesIt2 values2_first,
+  KeysOutputIt keys_output,
+  ValuesOutputIt values_output,
+  CompareOp compare_op,
+  SetOp set_op)
+{
+  using namespace thrust::system::hip_rocprim::temp_storage;
+
+  using size_type     = typename iterator_traits<KeysIt1>::difference_type;
+  size_type num_keys1 = static_cast<size_type>(thrust::distance(keys1_first, keys1_last));
+  size_type num_keys2 = static_cast<size_type>(thrust::distance(keys2_first, keys2_last));
+
+  if (num_keys1 + num_keys2 == 0)
+  {
+    return thrust::make_pair(keys_output, values_output);
+  }
+
+  size_t temp_storage_bytes = 0;
+  hipStream_t stream        = hip_rocprim::stream(policy);
+  bool debug_sync           = THRUST_HIP_DEBUG_SYNC_FLAG;
+
+  hip_rocprim::throw_on_error(
+    doit_step<HAS_VALUES>(
+      nullptr,
+      temp_storage_bytes,
+      keys1_first,
+      keys2_first,
+      values1_first,
+      values2_first,
+      num_keys1,
+      num_keys2,
+      keys_output,
+      values_output,
+      static_cast<size_type*>(nullptr),
+      compare_op,
+      set_op,
+      stream,
+      debug_sync),
+    "set_operations failed on 1st step");
+
+  temp_storage_bytes = rocprim::detail::align_size(temp_storage_bytes);
+
+  size_t storage_size;
+  void* ptr       = nullptr;
+  void* temp_stor = nullptr;
+  size_type* d_output_count;
+
+  auto l_part =
+    make_linear_partition(make_partition(&temp_stor, temp_storage_bytes), ptr_aligned_array(&d_output_count, 1));
+
+  // Calculate storage_size including alignment
+  hip_rocprim::throw_on_error(partition(ptr, storage_size, l_part));
+
+  // Allocate temporary storage.
+  thrust::detail::temporary_array<std::uint8_t, Derived> tmp(policy, storage_size);
+  ptr = static_cast<void*>(tmp.data().get());
+
+  // Create pointers with alignment
+  hip_rocprim::throw_on_error(partition(ptr, storage_size, l_part));
+
+  hip_rocprim::throw_on_error(
+    doit_step<HAS_VALUES>(
+      ptr,
+      temp_storage_bytes,
+      keys1_first,
+      keys2_first,
+      values1_first,
+      values2_first,
+      num_keys1,
+      num_keys2,
+      keys_output,
+      values_output,
+      d_output_count,
+      compare_op,
+      set_op,
+      stream,
+      debug_sync),
+    "set_operations failed on 2nd step");
+
+  size_type output_count = hip_rocprim::get_value(policy, d_output_count);
+
+  return thrust::make_pair(keys_output + output_count, values_output + output_count);
+}
+} // namespace __set_operations
 
 //-------------------------
 // Thrust API entry points
 //-------------------------
 
 template <class Derived, class ItemsIt1, class ItemsIt2, class OutputIt, class CompareOp>
-OutputIt THRUST_HIP_FUNCTION
-set_difference(execution_policy<Derived>& policy,
-               ItemsIt1                   items1_first,
-               ItemsIt1                   items1_last,
-               ItemsIt2                   items2_first,
-               ItemsIt2                   items2_last,
-               OutputIt                   result,
-               CompareOp                  compare)
+OutputIt THRUST_HIP_FUNCTION set_difference(
+  execution_policy<Derived>& policy,
+  ItemsIt1 items1_first,
+  ItemsIt1 items1_last,
+  ItemsIt2 items2_first,
+  ItemsIt2 items2_last,
+  OutputIt result,
+  CompareOp compare)
 {
-    using dummy_type  = typename thrust::iterator_value<ItemsIt1>::type;
-    using set_op_type = typename __set_operations::serial_set_difference;
+  using dummy_type  = typename thrust::iterator_value<ItemsIt1>::type;
+  using set_op_type = typename __set_operations::serial_set_difference;
 
-    THRUST_HIP_PRESERVE_KERNELS_WORKAROUND((__set_operations::set_operations<false,
-                                                                             Derived,
-                                                                             ItemsIt1,
-                                                                             ItemsIt2,
-                                                                             dummy_type*,
-                                                                             dummy_type*,
-                                                                             OutputIt,
-                                                                             dummy_type*,
-                                                                             CompareOp,
-                                                                             set_op_type>));
-#if __THRUST_HAS_HIPRT__
-    dummy_type* null_ = nullptr;
-    return __set_operations::set_operations<false>(policy,
-                                                   items1_first,
-                                                   items1_last,
-                                                   items2_first,
-                                                   items2_last,
-                                                   null_,
-                                                   null_,
-                                                   result,
-                                                   null_,
-                                                   compare,
-                                                   set_op_type())
-        .first;
-#else
-    return thrust::set_difference(cvt_to_seq(derived_cast(policy)),
-                                  items1_first,
-                                  items1_last,
-                                  items2_first,
-                                  items2_last,
-                                  result,
-                                  compare);
-#endif
+  THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
+    (__set_operations::set_operations<
+      false,
+      Derived,
+      ItemsIt1,
+      ItemsIt2,
+      dummy_type*,
+      dummy_type*,
+      OutputIt,
+      dummy_type*,
+      CompareOp,
+      set_op_type>) );
+#  if __THRUST_HAS_HIPRT__
+  dummy_type* null_ = nullptr;
+  return __set_operations::set_operations<false>(
+           policy,
+           items1_first,
+           items1_last,
+           items2_first,
+           items2_last,
+           null_,
+           null_,
+           result,
+           null_,
+           compare,
+           set_op_type())
+    .first;
+#  else
+  return thrust::set_difference(
+    cvt_to_seq(derived_cast(policy)), items1_first, items1_last, items2_first, items2_last, result, compare);
+#  endif
 }
 
 template <class Derived, class ItemsIt1, class ItemsIt2, class OutputIt>
-OutputIt THRUST_HIP_FUNCTION
-set_difference(execution_policy<Derived>& policy,
-               ItemsIt1                   items1_first,
-               ItemsIt1                   items1_last,
-               ItemsIt2                   items2_first,
-               ItemsIt2                   items2_last,
-               OutputIt                   result)
+OutputIt THRUST_HIP_FUNCTION set_difference(
+  execution_policy<Derived>& policy,
+  ItemsIt1 items1_first,
+  ItemsIt1 items1_last,
+  ItemsIt2 items2_first,
+  ItemsIt2 items2_last,
+  OutputIt result)
 {
-    using value_type = typename thrust::iterator_value<ItemsIt1>::type;
-    return hip_rocprim::set_difference(
-        policy, items1_first, items1_last, items2_first, items2_last, result, less<value_type>());
+  using value_type = typename thrust::iterator_value<ItemsIt1>::type;
+  return hip_rocprim::set_difference(
+    policy, items1_first, items1_last, items2_first, items2_last, result, less<value_type>());
 }
 
 /*****************************/
 
 template <class Derived, class ItemsIt1, class ItemsIt2, class OutputIt, class CompareOp>
-OutputIt THRUST_HIP_FUNCTION
-set_intersection(execution_policy<Derived>& policy,
-                 ItemsIt1                   items1_first,
-                 ItemsIt1                   items1_last,
-                 ItemsIt2                   items2_first,
-                 ItemsIt2                   items2_last,
-                 OutputIt                   result,
-                 CompareOp                  compare)
+OutputIt THRUST_HIP_FUNCTION set_intersection(
+  execution_policy<Derived>& policy,
+  ItemsIt1 items1_first,
+  ItemsIt1 items1_last,
+  ItemsIt2 items2_first,
+  ItemsIt2 items2_last,
+  OutputIt result,
+  CompareOp compare)
 {
-    using dummy_type  = typename thrust::iterator_value<ItemsIt1>::type;
-    using set_op_type = typename __set_operations::serial_set_intersection;
+  using dummy_type  = typename thrust::iterator_value<ItemsIt1>::type;
+  using set_op_type = typename __set_operations::serial_set_intersection;
 
-    THRUST_HIP_PRESERVE_KERNELS_WORKAROUND((__set_operations::set_operations<false,
-                                                                             Derived,
-                                                                             ItemsIt1,
-                                                                             ItemsIt2,
-                                                                             dummy_type*,
-                                                                             dummy_type*,
-                                                                             OutputIt,
-                                                                             dummy_type*,
-                                                                             CompareOp,
-                                                                             set_op_type>));
-#if __THRUST_HAS_HIPRT__
-    dummy_type* null_ = nullptr;
-    return __set_operations::set_operations<false>(policy,
-                                                   items1_first,
-                                                   items1_last,
-                                                   items2_first,
-                                                   items2_last,
-                                                   null_,
-                                                   null_,
-                                                   result,
-                                                   null_,
-                                                   compare,
-                                                   set_op_type())
-        .first;
-#else
-    return thrust::set_intersection(cvt_to_seq(derived_cast(policy)),
-                                    items1_first,
-                                    items1_last,
-                                    items2_first,
-                                    items2_last,
-                                    result,
-                                    compare);
-#endif
+  THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
+    (__set_operations::set_operations<
+      false,
+      Derived,
+      ItemsIt1,
+      ItemsIt2,
+      dummy_type*,
+      dummy_type*,
+      OutputIt,
+      dummy_type*,
+      CompareOp,
+      set_op_type>) );
+#  if __THRUST_HAS_HIPRT__
+  dummy_type* null_ = nullptr;
+  return __set_operations::set_operations<false>(
+           policy,
+           items1_first,
+           items1_last,
+           items2_first,
+           items2_last,
+           null_,
+           null_,
+           result,
+           null_,
+           compare,
+           set_op_type())
+    .first;
+#  else
+  return thrust::set_intersection(
+    cvt_to_seq(derived_cast(policy)), items1_first, items1_last, items2_first, items2_last, result, compare);
+#  endif
 }
 
 template <class Derived, class ItemsIt1, class ItemsIt2, class OutputIt>
-OutputIt THRUST_HIP_FUNCTION
-set_intersection(execution_policy<Derived>& policy,
-                 ItemsIt1                   items1_first,
-                 ItemsIt1                   items1_last,
-                 ItemsIt2                   items2_first,
-                 ItemsIt2                   items2_last,
-                 OutputIt                   result)
+OutputIt THRUST_HIP_FUNCTION set_intersection(
+  execution_policy<Derived>& policy,
+  ItemsIt1 items1_first,
+  ItemsIt1 items1_last,
+  ItemsIt2 items2_first,
+  ItemsIt2 items2_last,
+  OutputIt result)
 {
-    using value_type = typename thrust::iterator_value<ItemsIt1>::type;
-    return hip_rocprim::set_intersection(
-        policy, items1_first, items1_last, items2_first, items2_last, result, less<value_type>());
+  using value_type = typename thrust::iterator_value<ItemsIt1>::type;
+  return hip_rocprim::set_intersection(
+    policy, items1_first, items1_last, items2_first, items2_last, result, less<value_type>());
 }
 
 /*****************************/
 
 template <class Derived, class ItemsIt1, class ItemsIt2, class OutputIt, class CompareOp>
-OutputIt THRUST_HIP_FUNCTION
-set_symmetric_difference(execution_policy<Derived>& policy,
-                         ItemsIt1                   items1_first,
-                         ItemsIt1                   items1_last,
-                         ItemsIt2                   items2_first,
-                         ItemsIt2                   items2_last,
-                         OutputIt                   result,
-                         CompareOp                  compare)
+OutputIt THRUST_HIP_FUNCTION set_symmetric_difference(
+  execution_policy<Derived>& policy,
+  ItemsIt1 items1_first,
+  ItemsIt1 items1_last,
+  ItemsIt2 items2_first,
+  ItemsIt2 items2_last,
+  OutputIt result,
+  CompareOp compare)
 {
-    using dummy_type  = typename thrust::iterator_value<ItemsIt1>::type;
-    using set_op_type = typename __set_operations::serial_set_symmetric_difference;
+  using dummy_type  = typename thrust::iterator_value<ItemsIt1>::type;
+  using set_op_type = typename __set_operations::serial_set_symmetric_difference;
 
-    THRUST_HIP_PRESERVE_KERNELS_WORKAROUND((__set_operations::set_operations<false,
-                                                                             Derived,
-                                                                             ItemsIt1,
-                                                                             ItemsIt2,
-                                                                             dummy_type*,
-                                                                             dummy_type*,
-                                                                             OutputIt,
-                                                                             dummy_type*,
-                                                                             CompareOp,
-                                                                             set_op_type>));
-#if __THRUST_HAS_HIPRT__
-    dummy_type* null_ = nullptr;
-    return __set_operations::set_operations<false>(policy,
-                                                   items1_first,
-                                                   items1_last,
-                                                   items2_first,
-                                                   items2_last,
-                                                   null_,
-                                                   null_,
-                                                   result,
-                                                   null_,
-                                                   compare,
-                                                   set_op_type())
-        .first;
-#else
-    return thrust::set_symmetric_difference(cvt_to_seq(derived_cast(policy)),
-                                            items1_first,
-                                            items1_last,
-                                            items2_first,
-                                            items2_last,
-                                            result,
-                                            compare);
-#endif
+  THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
+    (__set_operations::set_operations<
+      false,
+      Derived,
+      ItemsIt1,
+      ItemsIt2,
+      dummy_type*,
+      dummy_type*,
+      OutputIt,
+      dummy_type*,
+      CompareOp,
+      set_op_type>) );
+#  if __THRUST_HAS_HIPRT__
+  dummy_type* null_ = nullptr;
+  return __set_operations::set_operations<false>(
+           policy,
+           items1_first,
+           items1_last,
+           items2_first,
+           items2_last,
+           null_,
+           null_,
+           result,
+           null_,
+           compare,
+           set_op_type())
+    .first;
+#  else
+  return thrust::set_symmetric_difference(
+    cvt_to_seq(derived_cast(policy)), items1_first, items1_last, items2_first, items2_last, result, compare);
+#  endif
 }
 
 template <class Derived, class ItemsIt1, class ItemsIt2, class OutputIt>
-OutputIt THRUST_HIP_FUNCTION
-set_symmetric_difference(execution_policy<Derived>& policy,
-                         ItemsIt1                   items1_first,
-                         ItemsIt1                   items1_last,
-                         ItemsIt2                   items2_first,
-                         ItemsIt2                   items2_last,
-                         OutputIt                   result)
+OutputIt THRUST_HIP_FUNCTION set_symmetric_difference(
+  execution_policy<Derived>& policy,
+  ItemsIt1 items1_first,
+  ItemsIt1 items1_last,
+  ItemsIt2 items2_first,
+  ItemsIt2 items2_last,
+  OutputIt result)
 {
-    using value_type = typename thrust::iterator_value<ItemsIt1>::type;
-    return hip_rocprim::set_symmetric_difference(
-        policy, items1_first, items1_last, items2_first, items2_last, result, less<value_type>());
+  using value_type = typename thrust::iterator_value<ItemsIt1>::type;
+  return hip_rocprim::set_symmetric_difference(
+    policy, items1_first, items1_last, items2_first, items2_last, result, less<value_type>());
 }
 
 /*****************************/
 
 template <class Derived, class ItemsIt1, class ItemsIt2, class OutputIt, class CompareOp>
-OutputIt THRUST_HIP_FUNCTION
-set_union(execution_policy<Derived>& policy,
-          ItemsIt1                   items1_first,
-          ItemsIt1                   items1_last,
-          ItemsIt2                   items2_first,
-          ItemsIt2                   items2_last,
-          OutputIt                   result,
-          CompareOp                  compare)
+OutputIt THRUST_HIP_FUNCTION set_union(
+  execution_policy<Derived>& policy,
+  ItemsIt1 items1_first,
+  ItemsIt1 items1_last,
+  ItemsIt2 items2_first,
+  ItemsIt2 items2_last,
+  OutputIt result,
+  CompareOp compare)
 {
-    using dummy_type  = typename thrust::iterator_value<ItemsIt1>::type;
-    using set_op_type = typename __set_operations::serial_set_union;
+  using dummy_type  = typename thrust::iterator_value<ItemsIt1>::type;
+  using set_op_type = typename __set_operations::serial_set_union;
 
-    THRUST_HIP_PRESERVE_KERNELS_WORKAROUND((__set_operations::set_operations<false,
-                                                                             Derived,
-                                                                             ItemsIt1,
-                                                                             ItemsIt2,
-                                                                             dummy_type*,
-                                                                             dummy_type*,
-                                                                             OutputIt,
-                                                                             dummy_type*,
-                                                                             CompareOp,
-                                                                             set_op_type>));
-#if __THRUST_HAS_HIPRT__
-    dummy_type* null_ = nullptr;
-    return __set_operations::set_operations<false>(policy,
-                                                   items1_first,
-                                                   items1_last,
-                                                   items2_first,
-                                                   items2_last,
-                                                   null_,
-                                                   null_,
-                                                   result,
-                                                   null_,
-                                                   compare,
-                                                   set_op_type())
-        .first;
-#else
-    return thrust::set_union(cvt_to_seq(derived_cast(policy)),
-                             items1_first,
-                             items1_last,
-                             items2_first,
-                             items2_last,
-                             result,
-                             compare);
-#endif
+  THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
+    (__set_operations::set_operations<
+      false,
+      Derived,
+      ItemsIt1,
+      ItemsIt2,
+      dummy_type*,
+      dummy_type*,
+      OutputIt,
+      dummy_type*,
+      CompareOp,
+      set_op_type>) );
+#  if __THRUST_HAS_HIPRT__
+  dummy_type* null_ = nullptr;
+  return __set_operations::set_operations<false>(
+           policy,
+           items1_first,
+           items1_last,
+           items2_first,
+           items2_last,
+           null_,
+           null_,
+           result,
+           null_,
+           compare,
+           set_op_type())
+    .first;
+#  else
+  return thrust::set_union(
+    cvt_to_seq(derived_cast(policy)), items1_first, items1_last, items2_first, items2_last, result, compare);
+#  endif
 }
 
 template <class Derived, class ItemsIt1, class ItemsIt2, class OutputIt>
-OutputIt THRUST_HIP_FUNCTION
-set_union(execution_policy<Derived>& policy,
-          ItemsIt1                   items1_first,
-          ItemsIt1                   items1_last,
-          ItemsIt2                   items2_first,
-          ItemsIt2                   items2_last,
-          OutputIt                   result)
+OutputIt THRUST_HIP_FUNCTION set_union(
+  execution_policy<Derived>& policy,
+  ItemsIt1 items1_first,
+  ItemsIt1 items1_last,
+  ItemsIt2 items2_first,
+  ItemsIt2 items2_last,
+  OutputIt result)
 {
-    using value_type = typename thrust::iterator_value<ItemsIt1>::type;
-    return hip_rocprim::set_union(
-        policy, items1_first, items1_last, items2_first, items2_last, result, less<value_type>());
+  using value_type = typename thrust::iterator_value<ItemsIt1>::type;
+  return hip_rocprim::set_union(
+    policy, items1_first, items1_last, items2_first, items2_last, result, less<value_type>());
 }
 
 /*****************************/
@@ -1370,172 +1361,84 @@ template <class Derived,
           class KeysOutputIt,
           class ItemsOutputIt,
           class CompareOp>
-pair<KeysOutputIt, ItemsOutputIt> THRUST_HIP_FUNCTION
-set_difference_by_key(execution_policy<Derived>& policy,
-                      KeysIt1                    keys1_first,
-                      KeysIt1                    keys1_last,
-                      KeysIt2                    keys2_first,
-                      KeysIt2                    keys2_last,
-                      ItemsIt1                   items1_first,
-                      ItemsIt2                   items2_first,
-                      KeysOutputIt               keys_result,
-                      ItemsOutputIt              items_result,
-                      CompareOp                  compare_op)
+pair<KeysOutputIt, ItemsOutputIt> THRUST_HIP_FUNCTION set_difference_by_key(
+  execution_policy<Derived>& policy,
+  KeysIt1 keys1_first,
+  KeysIt1 keys1_last,
+  KeysIt2 keys2_first,
+  KeysIt2 keys2_last,
+  ItemsIt1 items1_first,
+  ItemsIt2 items2_first,
+  KeysOutputIt keys_result,
+  ItemsOutputIt items_result,
+  CompareOp compare_op)
 {
-    using set_op_type = typename __set_operations::serial_set_difference;
+  using set_op_type = typename __set_operations::serial_set_difference;
 
-    THRUST_HIP_PRESERVE_KERNELS_WORKAROUND((__set_operations::set_operations<true,
-                                                                             Derived,
-                                                                             KeysIt1,
-                                                                             KeysIt2,
-                                                                             ItemsIt1,
-                                                                             ItemsIt2,
-                                                                             KeysOutputIt,
-                                                                             ItemsOutputIt,
-                                                                             CompareOp,
-                                                                             set_op_type>));
-#if __THRUST_HAS_HIPRT__
-    return __set_operations::set_operations<true>(policy,
-                                                  keys1_first,
-                                                  keys1_last,
-                                                  keys2_first,
-                                                  keys2_last,
-                                                  items1_first,
-                                                  items2_first,
-                                                  keys_result,
-                                                  items_result,
-                                                  compare_op,
-                                                  set_op_type());
-#else
-    return thrust::set_difference_by_key(cvt_to_seq(derived_cast(policy)),
-                                         keys1_first,
-                                         keys1_last,
-                                         keys2_first,
-                                         keys2_last,
-                                         items1_first,
-                                         items2_first,
-                                         keys_result,
-                                         items_result,
-                                         compare_op);
-#endif
+  THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
+    (__set_operations::set_operations<
+      true,
+      Derived,
+      KeysIt1,
+      KeysIt2,
+      ItemsIt1,
+      ItemsIt2,
+      KeysOutputIt,
+      ItemsOutputIt,
+      CompareOp,
+      set_op_type>) );
+#  if __THRUST_HAS_HIPRT__
+  return __set_operations::set_operations<true>(
+    policy,
+    keys1_first,
+    keys1_last,
+    keys2_first,
+    keys2_last,
+    items1_first,
+    items2_first,
+    keys_result,
+    items_result,
+    compare_op,
+    set_op_type());
+#  else
+  return thrust::set_difference_by_key(
+    cvt_to_seq(derived_cast(policy)),
+    keys1_first,
+    keys1_last,
+    keys2_first,
+    keys2_last,
+    items1_first,
+    items2_first,
+    keys_result,
+    items_result,
+    compare_op);
+#  endif
 }
 
-template <class Derived,
-          class KeysIt1,
-          class KeysIt2,
-          class ItemsIt1,
-          class ItemsIt2,
-          class KeysOutputIt,
-          class ItemsOutputIt>
-pair<KeysOutputIt, ItemsOutputIt> THRUST_HIP_FUNCTION
-set_difference_by_key(execution_policy<Derived>& policy,
-                      KeysIt1                    keys1_first,
-                      KeysIt1                    keys1_last,
-                      KeysIt2                    keys2_first,
-                      KeysIt2                    keys2_last,
-                      ItemsIt1                   items1_first,
-                      ItemsIt2                   items2_first,
-                      KeysOutputIt               keys_result,
-                      ItemsOutputIt              items_result)
+template <class Derived, class KeysIt1, class KeysIt2, class ItemsIt1, class ItemsIt2, class KeysOutputIt, class ItemsOutputIt>
+pair<KeysOutputIt, ItemsOutputIt> THRUST_HIP_FUNCTION set_difference_by_key(
+  execution_policy<Derived>& policy,
+  KeysIt1 keys1_first,
+  KeysIt1 keys1_last,
+  KeysIt2 keys2_first,
+  KeysIt2 keys2_last,
+  ItemsIt1 items1_first,
+  ItemsIt2 items2_first,
+  KeysOutputIt keys_result,
+  ItemsOutputIt items_result)
 {
-    using value_type = typename thrust::iterator_value<KeysIt1>::type;
-    return hip_rocprim::set_difference_by_key(policy,
-                                              keys1_first,
-                                              keys1_last,
-                                              keys2_first,
-                                              keys2_last,
-                                              items1_first,
-                                              items2_first,
-                                              keys_result,
-                                              items_result,
-                                              less<value_type>());
-}
-
-/*****************************/
-
-template <class Derived,
-          class KeysIt1,
-          class KeysIt2,
-          class ItemsIt1,
-          class ItemsIt2,
-          class KeysOutputIt,
-          class ItemsOutputIt,
-          class CompareOp>
-pair<KeysOutputIt, ItemsOutputIt> THRUST_HIP_FUNCTION
-set_intersection_by_key(execution_policy<Derived>& policy,
-                        KeysIt1                    keys1_first,
-                        KeysIt1                    keys1_last,
-                        KeysIt2                    keys2_first,
-                        KeysIt2                    keys2_last,
-                        ItemsIt1                   items1_first,
-                        KeysOutputIt               keys_result,
-                        ItemsOutputIt              items_result,
-                        CompareOp                  compare_op)
-{
-    using set_op_type = typename __set_operations::serial_set_intersection;
-
-    THRUST_HIP_PRESERVE_KERNELS_WORKAROUND((__set_operations::set_operations<true,
-                                                                             Derived,
-                                                                             KeysIt1,
-                                                                             KeysIt2,
-                                                                             ItemsIt1,
-                                                                             ItemsIt1,
-                                                                             KeysOutputIt,
-                                                                             ItemsOutputIt,
-                                                                             CompareOp,
-                                                                             set_op_type>));
-#if __THRUST_HAS_HIPRT__
-    return __set_operations::set_operations<true>(policy,
-                                                  keys1_first,
-                                                  keys1_last,
-                                                  keys2_first,
-                                                  keys2_last,
-                                                  items1_first,
-                                                  items1_first,
-                                                  keys_result,
-                                                  items_result,
-                                                  compare_op,
-                                                  set_op_type());
-#else
-    return thrust::set_intersection_by_key(cvt_to_seq(derived_cast(policy)),
-                                           keys1_first,
-                                           keys1_last,
-                                           keys2_first,
-                                           keys2_last,
-                                           items1_first,
-                                           keys_result,
-                                           items_result,
-                                           compare_op);
-#endif
-}
-
-template <class Derived,
-          class KeysIt1,
-          class KeysIt2,
-          class ItemsIt1,
-          class ItemsIt2,
-          class KeysOutputIt,
-          class ItemsOutputIt>
-pair<KeysOutputIt, ItemsOutputIt> THRUST_HIP_FUNCTION
-set_intersection_by_key(execution_policy<Derived>& policy,
-                        KeysIt1                    keys1_first,
-                        KeysIt1                    keys1_last,
-                        KeysIt2                    keys2_first,
-                        KeysIt2                    keys2_last,
-                        ItemsIt1                   items1_first,
-                        KeysOutputIt               keys_result,
-                        ItemsOutputIt              items_result)
-{
-    using value_type = typename thrust::iterator_value<KeysIt1>::type;
-    return hip_rocprim::set_intersection_by_key(policy,
-                                                keys1_first,
-                                                keys1_last,
-                                                keys2_first,
-                                                keys2_last,
-                                                items1_first,
-                                                keys_result,
-                                                items_result,
-                                                less<value_type>());
+  using value_type = typename thrust::iterator_value<KeysIt1>::type;
+  return hip_rocprim::set_difference_by_key(
+    policy,
+    keys1_first,
+    keys1_last,
+    keys2_first,
+    keys2_last,
+    items1_first,
+    items2_first,
+    keys_result,
+    items_result,
+    less<value_type>());
 }
 
 /*****************************/
@@ -1548,85 +1451,80 @@ template <class Derived,
           class KeysOutputIt,
           class ItemsOutputIt,
           class CompareOp>
-pair<KeysOutputIt, ItemsOutputIt> THRUST_HIP_FUNCTION
-set_symmetric_difference_by_key(execution_policy<Derived>& policy,
-                                KeysIt1                    keys1_first,
-                                KeysIt1                    keys1_last,
-                                KeysIt2                    keys2_first,
-                                KeysIt2                    keys2_last,
-                                ItemsIt1                   items1_first,
-                                ItemsIt2                   items2_first,
-                                KeysOutputIt               keys_result,
-                                ItemsOutputIt              items_result,
-                                CompareOp                  compare_op)
+pair<KeysOutputIt, ItemsOutputIt> THRUST_HIP_FUNCTION set_intersection_by_key(
+  execution_policy<Derived>& policy,
+  KeysIt1 keys1_first,
+  KeysIt1 keys1_last,
+  KeysIt2 keys2_first,
+  KeysIt2 keys2_last,
+  ItemsIt1 items1_first,
+  KeysOutputIt keys_result,
+  ItemsOutputIt items_result,
+  CompareOp compare_op)
 {
-    using set_op_type = typename __set_operations::serial_set_symmetric_difference;
+  using set_op_type = typename __set_operations::serial_set_intersection;
 
-    THRUST_HIP_PRESERVE_KERNELS_WORKAROUND((__set_operations::set_operations<true,
-                                                                             Derived,
-                                                                             KeysIt1,
-                                                                             KeysIt2,
-                                                                             ItemsIt1,
-                                                                             ItemsIt2,
-                                                                             KeysOutputIt,
-                                                                             ItemsOutputIt,
-                                                                             CompareOp,
-                                                                             set_op_type>));
-#if __THRUST_HAS_HIPRT__
-    return __set_operations::set_operations<true>(policy,
-                                                  keys1_first,
-                                                  keys1_last,
-                                                  keys2_first,
-                                                  keys2_last,
-                                                  items1_first,
-                                                  items2_first,
-                                                  keys_result,
-                                                  items_result,
-                                                  compare_op,
-                                                  set_op_type());
-#else
-    return thrust::set_symmetric_difference_by_key(cvt_to_seq(derived_cast(policy)),
-                                                   keys1_first,
-                                                   keys1_last,
-                                                   keys2_first,
-                                                   keys2_last,
-                                                   items1_first,
-                                                   items2_first,
-                                                   keys_result,
-                                                   items_result,
-                                                   compare_op);
-#endif
+  THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
+    (__set_operations::set_operations<
+      true,
+      Derived,
+      KeysIt1,
+      KeysIt2,
+      ItemsIt1,
+      ItemsIt1,
+      KeysOutputIt,
+      ItemsOutputIt,
+      CompareOp,
+      set_op_type>) );
+#  if __THRUST_HAS_HIPRT__
+  return __set_operations::set_operations<true>(
+    policy,
+    keys1_first,
+    keys1_last,
+    keys2_first,
+    keys2_last,
+    items1_first,
+    items1_first,
+    keys_result,
+    items_result,
+    compare_op,
+    set_op_type());
+#  else
+  return thrust::set_intersection_by_key(
+    cvt_to_seq(derived_cast(policy)),
+    keys1_first,
+    keys1_last,
+    keys2_first,
+    keys2_last,
+    items1_first,
+    keys_result,
+    items_result,
+    compare_op);
+#  endif
 }
 
-template <class Derived,
-          class KeysIt1,
-          class KeysIt2,
-          class ItemsIt1,
-          class ItemsIt2,
-          class KeysOutputIt,
-          class ItemsOutputIt>
-pair<KeysOutputIt, ItemsOutputIt> THRUST_HIP_FUNCTION
-set_symmetric_difference_by_key(execution_policy<Derived>& policy,
-                                KeysIt1                    keys1_first,
-                                KeysIt1                    keys1_last,
-                                KeysIt2                    keys2_first,
-                                KeysIt2                    keys2_last,
-                                ItemsIt1                   items1_first,
-                                ItemsIt2                   items2_first,
-                                KeysOutputIt               keys_result,
-                                ItemsOutputIt              items_result)
+template <class Derived, class KeysIt1, class KeysIt2, class ItemsIt1, class ItemsIt2, class KeysOutputIt, class ItemsOutputIt>
+pair<KeysOutputIt, ItemsOutputIt> THRUST_HIP_FUNCTION set_intersection_by_key(
+  execution_policy<Derived>& policy,
+  KeysIt1 keys1_first,
+  KeysIt1 keys1_last,
+  KeysIt2 keys2_first,
+  KeysIt2 keys2_last,
+  ItemsIt1 items1_first,
+  KeysOutputIt keys_result,
+  ItemsOutputIt items_result)
 {
-    using value_type = typename thrust::iterator_value<KeysIt1>::type;
-    return hip_rocprim::set_symmetric_difference_by_key(policy,
-                                                        keys1_first,
-                                                        keys1_last,
-                                                        keys2_first,
-                                                        keys2_last,
-                                                        items1_first,
-                                                        items2_first,
-                                                        keys_result,
-                                                        items_result,
-                                                        less<value_type>());
+  using value_type = typename thrust::iterator_value<KeysIt1>::type;
+  return hip_rocprim::set_intersection_by_key(
+    policy,
+    keys1_first,
+    keys1_last,
+    keys2_first,
+    keys2_last,
+    items1_first,
+    keys_result,
+    items_result,
+    less<value_type>());
 }
 
 /*****************************/
@@ -1639,55 +1537,87 @@ template <class Derived,
           class KeysOutputIt,
           class ItemsOutputIt,
           class CompareOp>
-pair<KeysOutputIt, ItemsOutputIt> THRUST_HIP_FUNCTION
-set_union_by_key(execution_policy<Derived>& policy,
-                 KeysIt1                    keys1_first,
-                 KeysIt1                    keys1_last,
-                 KeysIt2                    keys2_first,
-                 KeysIt2                    keys2_last,
-                 ItemsIt1                   items1_first,
-                 ItemsIt2                   items2_first,
-                 KeysOutputIt               keys_result,
-                 ItemsOutputIt              items_result,
-                 CompareOp                  compare_op)
+pair<KeysOutputIt, ItemsOutputIt> THRUST_HIP_FUNCTION set_symmetric_difference_by_key(
+  execution_policy<Derived>& policy,
+  KeysIt1 keys1_first,
+  KeysIt1 keys1_last,
+  KeysIt2 keys2_first,
+  KeysIt2 keys2_last,
+  ItemsIt1 items1_first,
+  ItemsIt2 items2_first,
+  KeysOutputIt keys_result,
+  ItemsOutputIt items_result,
+  CompareOp compare_op)
 {
-    using set_op_type = typename __set_operations::serial_set_union;
+  using set_op_type = typename __set_operations::serial_set_symmetric_difference;
 
-    THRUST_HIP_PRESERVE_KERNELS_WORKAROUND((__set_operations::set_operations<true,
-                                                                             Derived,
-                                                                             KeysIt1,
-                                                                             KeysIt2,
-                                                                             ItemsIt1,
-                                                                             ItemsIt2,
-                                                                             KeysOutputIt,
-                                                                             ItemsOutputIt,
-                                                                             CompareOp,
-                                                                             set_op_type>));
-#if __THRUST_HAS_HIPRT__
-    return __set_operations::set_operations<true>(policy,
-                                                  keys1_first,
-                                                  keys1_last,
-                                                  keys2_first,
-                                                  keys2_last,
-                                                  items1_first,
-                                                  items2_first,
-                                                  keys_result,
-                                                  items_result,
-                                                  compare_op,
-                                                  set_op_type());
-#else
-    return thrust::set_union_by_key(cvt_to_seq(derived_cast(policy)),
-                                    keys1_first,
-                                    keys1_last,
-                                    keys2_first,
-                                    keys2_last,
-                                    items1_first,
-                                    items2_first,
-                                    keys_result,
-                                    items_result,
-                                    compare_op);
-#endif
+  THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
+    (__set_operations::set_operations<
+      true,
+      Derived,
+      KeysIt1,
+      KeysIt2,
+      ItemsIt1,
+      ItemsIt2,
+      KeysOutputIt,
+      ItemsOutputIt,
+      CompareOp,
+      set_op_type>) );
+#  if __THRUST_HAS_HIPRT__
+  return __set_operations::set_operations<true>(
+    policy,
+    keys1_first,
+    keys1_last,
+    keys2_first,
+    keys2_last,
+    items1_first,
+    items2_first,
+    keys_result,
+    items_result,
+    compare_op,
+    set_op_type());
+#  else
+  return thrust::set_symmetric_difference_by_key(
+    cvt_to_seq(derived_cast(policy)),
+    keys1_first,
+    keys1_last,
+    keys2_first,
+    keys2_last,
+    items1_first,
+    items2_first,
+    keys_result,
+    items_result,
+    compare_op);
+#  endif
 }
+
+template <class Derived, class KeysIt1, class KeysIt2, class ItemsIt1, class ItemsIt2, class KeysOutputIt, class ItemsOutputIt>
+pair<KeysOutputIt, ItemsOutputIt> THRUST_HIP_FUNCTION set_symmetric_difference_by_key(
+  execution_policy<Derived>& policy,
+  KeysIt1 keys1_first,
+  KeysIt1 keys1_last,
+  KeysIt2 keys2_first,
+  KeysIt2 keys2_last,
+  ItemsIt1 items1_first,
+  ItemsIt2 items2_first,
+  KeysOutputIt keys_result,
+  ItemsOutputIt items_result)
+{
+  using value_type = typename thrust::iterator_value<KeysIt1>::type;
+  return hip_rocprim::set_symmetric_difference_by_key(
+    policy,
+    keys1_first,
+    keys1_last,
+    keys2_first,
+    keys2_last,
+    items1_first,
+    items2_first,
+    keys_result,
+    items_result,
+    less<value_type>());
+}
+
+/*****************************/
 
 template <class Derived,
           class KeysIt1,
@@ -1695,29 +1625,86 @@ template <class Derived,
           class ItemsIt1,
           class ItemsIt2,
           class KeysOutputIt,
-          class ItemsOutputIt>
-pair<KeysOutputIt, ItemsOutputIt> THRUST_HIP_FUNCTION
-set_union_by_key(execution_policy<Derived>& policy,
-                 KeysIt1                    keys1_first,
-                 KeysIt1                    keys1_last,
-                 KeysIt2                    keys2_first,
-                 KeysIt2                    keys2_last,
-                 ItemsIt1                   items1_first,
-                 ItemsIt2                   items2_first,
-                 KeysOutputIt               keys_result,
-                 ItemsOutputIt              items_result)
+          class ItemsOutputIt,
+          class CompareOp>
+pair<KeysOutputIt, ItemsOutputIt> THRUST_HIP_FUNCTION set_union_by_key(
+  execution_policy<Derived>& policy,
+  KeysIt1 keys1_first,
+  KeysIt1 keys1_last,
+  KeysIt2 keys2_first,
+  KeysIt2 keys2_last,
+  ItemsIt1 items1_first,
+  ItemsIt2 items2_first,
+  KeysOutputIt keys_result,
+  ItemsOutputIt items_result,
+  CompareOp compare_op)
 {
-    using value_type = typename thrust::iterator_value<KeysIt1>::type;
-    return hip_rocprim::set_union_by_key(policy,
-                                         keys1_first,
-                                         keys1_last,
-                                         keys2_first,
-                                         keys2_last,
-                                         items1_first,
-                                         items2_first,
-                                         keys_result,
-                                         items_result,
-                                         less<value_type>());
+  using set_op_type = typename __set_operations::serial_set_union;
+
+  THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
+    (__set_operations::set_operations<
+      true,
+      Derived,
+      KeysIt1,
+      KeysIt2,
+      ItemsIt1,
+      ItemsIt2,
+      KeysOutputIt,
+      ItemsOutputIt,
+      CompareOp,
+      set_op_type>) );
+#  if __THRUST_HAS_HIPRT__
+  return __set_operations::set_operations<true>(
+    policy,
+    keys1_first,
+    keys1_last,
+    keys2_first,
+    keys2_last,
+    items1_first,
+    items2_first,
+    keys_result,
+    items_result,
+    compare_op,
+    set_op_type());
+#  else
+  return thrust::set_union_by_key(
+    cvt_to_seq(derived_cast(policy)),
+    keys1_first,
+    keys1_last,
+    keys2_first,
+    keys2_last,
+    items1_first,
+    items2_first,
+    keys_result,
+    items_result,
+    compare_op);
+#  endif
+}
+
+template <class Derived, class KeysIt1, class KeysIt2, class ItemsIt1, class ItemsIt2, class KeysOutputIt, class ItemsOutputIt>
+pair<KeysOutputIt, ItemsOutputIt> THRUST_HIP_FUNCTION set_union_by_key(
+  execution_policy<Derived>& policy,
+  KeysIt1 keys1_first,
+  KeysIt1 keys1_last,
+  KeysIt2 keys2_first,
+  KeysIt2 keys2_last,
+  ItemsIt1 items1_first,
+  ItemsIt2 items2_first,
+  KeysOutputIt keys_result,
+  ItemsOutputIt items_result)
+{
+  using value_type = typename thrust::iterator_value<KeysIt1>::type;
+  return hip_rocprim::set_union_by_key(
+    policy,
+    keys1_first,
+    keys1_last,
+    keys2_first,
+    keys2_last,
+    items1_first,
+    items2_first,
+    keys_result,
+    items_result,
+    less<value_type>());
 }
 
 } // namespace hip_rocprim

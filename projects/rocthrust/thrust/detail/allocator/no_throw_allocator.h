@@ -25,47 +25,45 @@ THRUST_NAMESPACE_BEGIN
 namespace detail
 {
 
-template<typename BaseAllocator>
-  struct no_throw_allocator : BaseAllocator
+template <typename BaseAllocator>
+struct no_throw_allocator : BaseAllocator
 {
-  private:
-    using super_t = BaseAllocator;
+private:
+  using super_t = BaseAllocator;
 
-  public:
-    inline THRUST_HOST_DEVICE
-    no_throw_allocator(const BaseAllocator &other = BaseAllocator())
+public:
+  inline THRUST_HOST_DEVICE no_throw_allocator(const BaseAllocator& other = BaseAllocator())
       : super_t(other)
-    {}
+  {}
 
-    template <typename U>
-    struct rebind
-    {
-      using other = no_throw_allocator<typename super_t::template rebind<U>::other>;
-    }; // end rebind
+  template <typename U>
+  struct rebind
+  {
+    using other = no_throw_allocator<typename super_t::template rebind<U>::other>;
+  }; // end rebind
 
-    THRUST_HOST_DEVICE
-    void deallocate(typename super_t::pointer p, typename super_t::size_type n)
-    {
-      NV_IF_TARGET(NV_IS_HOST, (
-        try
-        {
-          super_t::deallocate(p, n);
-        } // end try
-        catch(...)
-        {
-          // catch anything
-        } // end catch
-      ), (
-        super_t::deallocate(p, n);
-      ));
-    } // end deallocate()
+  THRUST_HOST_DEVICE void deallocate(typename super_t::pointer p, typename super_t::size_type n)
+  {
+    NV_IF_TARGET(
+      NV_IS_HOST,
+      (try { super_t::deallocate(p, n); } // end try
+       catch (...){
+         // catch anything
+       } // end catch
+       ),
+      (super_t::deallocate(p, n);));
+  } // end deallocate()
 
-    inline THRUST_HOST_DEVICE
-    bool operator==(no_throw_allocator const &other) { return super_t::operator==(other); }
+  inline THRUST_HOST_DEVICE bool operator==(no_throw_allocator const& other)
+  {
+    return super_t::operator==(other);
+  }
 
-    inline THRUST_HOST_DEVICE
-    bool operator!=(no_throw_allocator const &other) { return super_t::operator!=(other); }
+  inline THRUST_HOST_DEVICE bool operator!=(no_throw_allocator const& other)
+  {
+    return super_t::operator!=(other);
+  }
 }; // end no_throw_allocator
 
-} // end detail
+} // namespace detail
 THRUST_NAMESPACE_END

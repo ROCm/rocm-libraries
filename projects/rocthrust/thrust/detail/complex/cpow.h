@@ -47,12 +47,12 @@ template <typename T0, typename T1>
 THRUST_HOST_DEVICE complex<typename detail::promoted_numerical_type<T0, T1>::type> pow(const T0& x, const complex<T1>& y)
 {
   using T = typename detail::promoted_numerical_type<T0, T1>::type;
-  #ifdef __HIP_DEVICE_COMPILE__
-    using ::log;
-  #else
-    // Find `log` by ADL.
-    using std::log;
-  #endif
+#ifdef __HIP_DEVICE_COMPILE__
+  using ::log;
+#else
+  // Find `log` by ADL.
+  using std::log;
+#endif
   return exp(log(T(x)) * complex<T>(y));
 }
 

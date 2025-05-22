@@ -1,9 +1,30 @@
+// Copyright (c) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 #include <thrust/detail/config.h>
+
 #include <thrust/device_vector.h>
 #include <thrust/reduce.h>
 #include <thrust/system/cuda/execution_policy.h>
-#include <cassert>
 
+#include <cassert>
 #include <future>
 
 // This example demonstrates two ways to achieve algorithm invocations that are asynchronous with
@@ -11,7 +32,7 @@
 //
 // The first method wraps a call to thrust::reduce inside a __global__ function. Since __global__ function
 // launches are asynchronous with the launching thread, this achieves asynchrony. The result of the reduction
-// is stored to a pointer to CUDA global memory. The calling thread waits for the result of the reduction to 
+// is stored to a pointer to CUDA global memory. The calling thread waits for the result of the reduction to
 // be ready by synchronizing with the CUDA stream on which the __global__ function is launched.
 //
 // The second method uses the C++11 library function, std::async, to create concurrency. The lambda function
@@ -19,7 +40,7 @@
 // std::future to wait for the result of the reduction. This method requires a compiler which supports
 // C++11-capable language and library constructs.
 
-template<typename Iterator, typename T, typename BinaryOperation, typename Pointer>
+template <typename Iterator, typename T, typename BinaryOperation, typename Pointer>
 __global__ void reduce_kernel(Iterator first, Iterator last, T init, BinaryOperation binary_op, Pointer result)
 {
   *result = thrust::reduce(thrust::cuda::par, first, last, init, binary_op);
@@ -33,12 +54,12 @@ int main()
 
   // method 1: call thrust::reduce from an asynchronous CUDA kernel launch
 
-  // create a CUDA stream 
+  // create a CUDA stream
   cudaStream_t s;
   cudaStreamCreate(&s);
 
   // launch a CUDA kernel with only 1 thread on our stream
-  reduce_kernel<<<1,1,0,s>>>(data.begin(), data.end(), 0, thrust::plus<int>(), result.data());
+  reduce_kernel<<<1, 1, 0, s>>>(data.begin(), data.end(), 0, thrust::plus<int>(), result.data());
 
   // wait for the stream to finish
   cudaStreamSynchronize(s);
@@ -60,8 +81,7 @@ int main()
 
   // std::async captures the algorithm parameters by value
   // use std::launch::async to ensure the creation of a new thread
-  std::future<unsigned int> future_result = std::async(std::launch::async, [=]
-  {
+  std::future<unsigned int> future_result = std::async(std::launch::async, [=] {
     return thrust::reduce(begin, end, init, binary_op);
   });
 
@@ -70,4 +90,3 @@ int main()
 
   return 0;
 }
-
