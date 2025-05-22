@@ -17,53 +17,31 @@
 
 #include <thrust/detail/config.h>
 
-#if THRUST_CPP_DIALECT >= 2014
+#if THRUST_CPP_DIALECT >= 2017
 
-#include <unittest/unittest.h>
-#include <unittest/util_async.h>
+#  include <thrust/event.h>
 
-#include <thrust/event.h>
+#  include <unittest/unittest.h>
+#  include <unittest/util_async.h>
 
 ///////////////////////////////////////////////////////////////////////////////
 
 THRUST_HOST void test_event_default_constructed()
 {
-  THRUST_STATIC_ASSERT(
-    (std::is_same<
-      thrust::event<decltype(thrust::device)>
-    , thrust::unique_eager_event<decltype(thrust::device)>
-    >::value)
-  );
+  THRUST_STATIC_ASSERT((
+    std::is_same<thrust::event<decltype(thrust::device)>, thrust::unique_eager_event<decltype(thrust::device)>>::value));
 
-  THRUST_STATIC_ASSERT(
-    (std::is_same<
-      thrust::event<decltype(thrust::device)>
-    , thrust::device_event
-    >::value)
-  );
+  THRUST_STATIC_ASSERT((std::is_same<thrust::event<decltype(thrust::device)>, thrust::device_event>::value));
 
-  THRUST_STATIC_ASSERT(
-    (std::is_same<
-      thrust::device_event
-    , thrust::device_unique_eager_event
-    >::value)
-  );
+  THRUST_STATIC_ASSERT((std::is_same<thrust::device_event, thrust::device_unique_eager_event>::value));
 
   thrust::device_event e0;
 
   ASSERT_EQUAL(false, e0.valid_stream());
 
-  ASSERT_THROWS_EQUAL(
-    e0.wait()
-  , thrust::event_error
-  , thrust::event_error(thrust::event_errc::no_state)
-  );
+  ASSERT_THROWS_EQUAL(e0.wait(), thrust::event_error, thrust::event_error(thrust::event_errc::no_state));
 
-  ASSERT_THROWS_EQUAL(
-    e0.stream()
-  , thrust::event_error
-  , thrust::event_error(thrust::event_errc::no_state)
-  );
+  ASSERT_THROWS_EQUAL(e0.stream(), thrust::event_error, thrust::event_error(thrust::event_errc::no_state));
 }
 DECLARE_UNITTEST(test_event_default_constructed);
 
@@ -75,7 +53,7 @@ THRUST_HOST void test_event_new_stream()
 
   ASSERT_EQUAL(true, e0.valid_stream());
 
-  ASSERT_NOT_EQUAL_QUIET(nullptr, e0.stream().native_handle());    
+  ASSERT_NOT_EQUAL_QUIET(nullptr, e0.stream().native_handle());
 
   e0.wait();
 
@@ -102,7 +80,7 @@ THRUST_HOST void test_event_linear_chaining()
 
   for (std::int64_t i = 0; i < n; ++i)
   {
-    ASSERT_EQUAL(true,  e0.valid_stream());
+    ASSERT_EQUAL(true, e0.valid_stream());
 
     ASSERT_EQUAL(false, e1.valid_stream());
     ASSERT_EQUAL(false, e1.ready());
@@ -114,7 +92,7 @@ THRUST_HOST void test_event_linear_chaining()
     ASSERT_EQUAL(false, e0.valid_stream());
     ASSERT_EQUAL(false, e0.ready());
 
-    ASSERT_EQUAL(true,  e1.valid_stream());
+    ASSERT_EQUAL(true, e1.valid_stream());
 
     ASSERT_EQUAL(e0_stream, e1.stream().native_handle());
 
@@ -183,11 +161,10 @@ THRUST_HOST void test_event_when_all()
   ASSERT_EQUAL(false, e6.ready());
   ASSERT_EQUAL(false, e7.ready());
 
-  ASSERT_EQUAL(true,  e8.ready());
+  ASSERT_EQUAL(true, e8.ready());
 }
 DECLARE_UNITTEST(test_event_when_all);
 
 ///////////////////////////////////////////////////////////////////////////////
- 
-#endif
 
+#endif

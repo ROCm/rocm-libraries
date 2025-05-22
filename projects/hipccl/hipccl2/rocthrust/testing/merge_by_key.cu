@@ -15,15 +15,16 @@
  *  limitations under the License.
  */
 
-#include <unittest/unittest.h>
-#include <thrust/merge.h>
 #include <thrust/functional.h>
-#include <thrust/sort.h>
-#include <thrust/unique.h>
 #include <thrust/iterator/discard_iterator.h>
 #include <thrust/iterator/retag.h>
+#include <thrust/merge.h>
+#include <thrust/sort.h>
+#include <thrust/unique.h>
 
-template<typename Vector>
+#include <unittest/unittest.h>
+
+template <typename Vector>
 void TestMergeByKeySimple(void)
 {
   const Vector a_key{0, 2, 4}, a_val{13, 7, 42}, b_key{0, 3, 3, 4}, b_val{42, 42, 7, 13};
@@ -48,23 +49,22 @@ void TestMergeByKeySimple(void)
 }
 DECLARE_VECTOR_UNITTEST(TestMergeByKeySimple);
 
-
-template<typename InputIterator1,
-         typename InputIterator2,
-         typename InputIterator3,
-         typename InputIterator4,
-         typename OutputIterator1,
-         typename OutputIterator2>
-  thrust::pair<OutputIterator1,OutputIterator2>
-    merge_by_key(my_system &system,
-                 InputIterator1,
-                 InputIterator1,
-                 InputIterator2,
-                 InputIterator2,
-                 InputIterator3,
-                 InputIterator4,
-                 OutputIterator1 keys_result,
-                 OutputIterator2 values_result)
+template <typename InputIterator1,
+          typename InputIterator2,
+          typename InputIterator3,
+          typename InputIterator4,
+          typename OutputIterator1,
+          typename OutputIterator2>
+thrust::pair<OutputIterator1, OutputIterator2> merge_by_key(
+  my_system& system,
+  InputIterator1,
+  InputIterator1,
+  InputIterator2,
+  InputIterator2,
+  InputIterator3,
+  InputIterator4,
+  OutputIterator1 keys_result,
+  OutputIterator2 values_result)
 {
   system.validate_dispatch();
   return thrust::make_pair(keys_result, values_result);
@@ -75,37 +75,29 @@ void TestMergeByKeyDispatchExplicit()
   thrust::device_vector<int> vec(1);
 
   my_system sys(0);
-  thrust::merge_by_key(sys,
-                       vec.begin(),
-                       vec.begin(),
-                       vec.begin(),
-                       vec.begin(),
-                       vec.begin(),
-                       vec.begin(),
-                       vec.begin(),
-                       vec.begin());
+  thrust::merge_by_key(
+    sys, vec.begin(), vec.begin(), vec.begin(), vec.begin(), vec.begin(), vec.begin(), vec.begin(), vec.begin());
 
   ASSERT_EQUAL(true, sys.is_valid());
 }
 DECLARE_UNITTEST(TestMergeByKeyDispatchExplicit);
 
-
-template<typename InputIterator1,
-         typename InputIterator2,
-         typename InputIterator3,
-         typename InputIterator4,
-         typename OutputIterator1,
-         typename OutputIterator2>
-  thrust::pair<OutputIterator1,OutputIterator2>
-    merge_by_key(my_tag,
-                 InputIterator1,
-                 InputIterator1,
-                 InputIterator2,
-                 InputIterator2,
-                 InputIterator3,
-                 InputIterator4,
-                 OutputIterator1 keys_result,
-                 OutputIterator2 values_result)
+template <typename InputIterator1,
+          typename InputIterator2,
+          typename InputIterator3,
+          typename InputIterator4,
+          typename OutputIterator1,
+          typename OutputIterator2>
+thrust::pair<OutputIterator1, OutputIterator2> merge_by_key(
+  my_tag,
+  InputIterator1,
+  InputIterator1,
+  InputIterator2,
+  InputIterator2,
+  InputIterator3,
+  InputIterator4,
+  OutputIterator1 keys_result,
+  OutputIterator2 values_result)
 {
   *keys_result = 13;
   return thrust::make_pair(keys_result, values_result);
@@ -115,14 +107,15 @@ void TestMergeByKeyDispatchImplicit()
 {
   thrust::device_vector<int> vec(1);
 
-  thrust::merge_by_key(thrust::retag<my_tag>(vec.begin()),
-                       thrust::retag<my_tag>(vec.begin()),
-                       thrust::retag<my_tag>(vec.begin()),
-                       thrust::retag<my_tag>(vec.begin()),
-                       thrust::retag<my_tag>(vec.begin()),
-                       thrust::retag<my_tag>(vec.begin()),
-                       thrust::retag<my_tag>(vec.begin()),
-                       thrust::retag<my_tag>(vec.begin()));
+  thrust::merge_by_key(
+    thrust::retag<my_tag>(vec.begin()),
+    thrust::retag<my_tag>(vec.begin()),
+    thrust::retag<my_tag>(vec.begin()),
+    thrust::retag<my_tag>(vec.begin()),
+    thrust::retag<my_tag>(vec.begin()),
+    thrust::retag<my_tag>(vec.begin()),
+    thrust::retag<my_tag>(vec.begin()),
+    thrust::retag<my_tag>(vec.begin()));
 
   ASSERT_EQUAL(13, vec.front());
 }
@@ -139,7 +132,6 @@ auto call_merge_by_key(Args&&... args) -> decltype(thrust::merge_by_key(std::for
     // TODO(bgruber): remove next line in C++17 and pass CompareOp{} directly to stable_sort
     using C = std::conditional_t<std::is_void<CompareOp>::value, thrust::less<T>, CompareOp>;
     return thrust::merge_by_key(std::forward<Args>(args)..., C{});
-
   }
 }
 
@@ -222,9 +214,8 @@ void TestMergeByKey(size_t n)
 }
 DECLARE_VARIABLE_UNITTEST(TestMergeByKey);
 
-
-template<typename T>
-  void TestMergeByKeyToDiscardIterator(size_t n)
+template <typename T>
+void TestMergeByKeyToDiscardIterator(size_t n)
 {
   auto h_a_keys = unittest::random_integers<T>(n);
   auto h_b_keys = unittest::random_integers<T>(n);
@@ -272,11 +263,9 @@ template<typename T>
 }
 DECLARE_VARIABLE_UNITTEST(TestMergeByKeyToDiscardIterator);
 
-
-template<typename T>
-  void TestMergeByKeyDescending(size_t n)
+template <typename T>
+void TestMergeByKeyDescending(size_t n)
 {
   TestMergeByKey<T, thrust::greater<T>>(n);
 }
 DECLARE_VARIABLE_UNITTEST(TestMergeByKeyDescending);
-

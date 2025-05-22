@@ -14,7 +14,6 @@
  *  limitations under the License.
  */
 
-
 /*! \file scan_by_key.h
  *  \brief Generic implementations of key-value scans.
  */
@@ -22,6 +21,7 @@
 #pragma once
 
 #include <thrust/detail/config.h>
+
 #include <thrust/system/detail/generic/tag.h>
 
 THRUST_NAMESPACE_BEGIN
@@ -32,107 +32,90 @@ namespace detail
 namespace generic
 {
 
+template <typename DerivedPolicy, typename InputIterator1, typename InputIterator2, typename OutputIterator>
+THRUST_HOST_DEVICE OutputIterator inclusive_scan_by_key(
+  thrust::execution_policy<DerivedPolicy>& exec,
+  InputIterator1 first1,
+  InputIterator1 last1,
+  InputIterator2 first2,
+  OutputIterator result);
 
-template<typename DerivedPolicy,
-         typename InputIterator1,
-         typename InputIterator2,
-         typename OutputIterator>
-THRUST_HOST_DEVICE
-  OutputIterator inclusive_scan_by_key(thrust::execution_policy<DerivedPolicy> &exec,
-                                       InputIterator1 first1,
-                                       InputIterator1 last1,
-                                       InputIterator2 first2,
-                                       OutputIterator result);
+template <typename DerivedPolicy,
+          typename InputIterator1,
+          typename InputIterator2,
+          typename OutputIterator,
+          typename BinaryPredicate>
+THRUST_HOST_DEVICE OutputIterator inclusive_scan_by_key(
+  thrust::execution_policy<DerivedPolicy>& exec,
+  InputIterator1 first1,
+  InputIterator1 last1,
+  InputIterator2 first2,
+  OutputIterator result,
+  BinaryPredicate binary_pred);
 
+template <typename DerivedPolicy,
+          typename InputIterator1,
+          typename InputIterator2,
+          typename OutputIterator,
+          typename BinaryPredicate,
+          typename AssociativeOperator>
+THRUST_HOST_DEVICE OutputIterator inclusive_scan_by_key(
+  thrust::execution_policy<DerivedPolicy>& exec,
+  InputIterator1 first1,
+  InputIterator1 last1,
+  InputIterator2 first2,
+  OutputIterator result,
+  BinaryPredicate binary_pred,
+  AssociativeOperator binary_op);
 
-template<typename DerivedPolicy,
-         typename InputIterator1,
-         typename InputIterator2,
-         typename OutputIterator,
-         typename BinaryPredicate>
-THRUST_HOST_DEVICE
-  OutputIterator inclusive_scan_by_key(thrust::execution_policy<DerivedPolicy> &exec,
-                                       InputIterator1 first1,
-                                       InputIterator1 last1,
-                                       InputIterator2 first2,
-                                       OutputIterator result,
-                                       BinaryPredicate binary_pred);
+template <typename DerivedPolicy, typename InputIterator1, typename InputIterator2, typename OutputIterator>
+THRUST_HOST_DEVICE OutputIterator exclusive_scan_by_key(
+  thrust::execution_policy<DerivedPolicy>& exec,
+  InputIterator1 first1,
+  InputIterator1 last1,
+  InputIterator2 first2,
+  OutputIterator result);
 
+template <typename DerivedPolicy, typename InputIterator1, typename InputIterator2, typename OutputIterator, typename T>
+THRUST_HOST_DEVICE OutputIterator exclusive_scan_by_key(
+  thrust::execution_policy<DerivedPolicy>& exec,
+  InputIterator1 first1,
+  InputIterator1 last1,
+  InputIterator2 first2,
+  OutputIterator result,
+  T init);
 
-template<typename DerivedPolicy,
-         typename InputIterator1,
-         typename InputIterator2,
-         typename OutputIterator,
-         typename BinaryPredicate,
-         typename AssociativeOperator>
-THRUST_HOST_DEVICE
-  OutputIterator inclusive_scan_by_key(thrust::execution_policy<DerivedPolicy> &exec,
-                                       InputIterator1 first1,
-                                       InputIterator1 last1,
-                                       InputIterator2 first2,
-                                       OutputIterator result,
-                                       BinaryPredicate binary_pred,
-                                       AssociativeOperator binary_op);
+template <typename DerivedPolicy,
+          typename InputIterator1,
+          typename InputIterator2,
+          typename OutputIterator,
+          typename T,
+          typename BinaryPredicate>
+THRUST_HOST_DEVICE OutputIterator exclusive_scan_by_key(
+  thrust::execution_policy<DerivedPolicy>& exec,
+  InputIterator1 first1,
+  InputIterator1 last1,
+  InputIterator2 first2,
+  OutputIterator result,
+  T init,
+  BinaryPredicate binary_pred);
 
-
-template<typename DerivedPolicy,
-         typename InputIterator1,
-         typename InputIterator2,
-         typename OutputIterator>
-THRUST_HOST_DEVICE
-  OutputIterator exclusive_scan_by_key(thrust::execution_policy<DerivedPolicy> &exec,
-                                       InputIterator1 first1,
-                                       InputIterator1 last1,
-                                       InputIterator2 first2,
-                                       OutputIterator result);
-
-
-template<typename DerivedPolicy,
-         typename InputIterator1,
-         typename InputIterator2,
-         typename OutputIterator,
-         typename T>
-THRUST_HOST_DEVICE
-  OutputIterator exclusive_scan_by_key(thrust::execution_policy<DerivedPolicy> &exec,
-                                       InputIterator1 first1,
-                                       InputIterator1 last1,
-                                       InputIterator2 first2,
-                                       OutputIterator result,
-                                       T init);
-
-
-template<typename DerivedPolicy,
-         typename InputIterator1,
-         typename InputIterator2,
-         typename OutputIterator,
-         typename T,
-         typename BinaryPredicate>
-THRUST_HOST_DEVICE
-  OutputIterator exclusive_scan_by_key(thrust::execution_policy<DerivedPolicy> &exec,
-                                       InputIterator1 first1,
-                                       InputIterator1 last1,
-                                       InputIterator2 first2,
-                                       OutputIterator result,
-                                       T init,
-                                       BinaryPredicate binary_pred);
-
-
-template<typename DerivedPolicy,
-         typename InputIterator1,
-         typename InputIterator2,
-         typename OutputIterator,
-         typename T,
-         typename BinaryPredicate,
-         typename AssociativeOperator>
-THRUST_HOST_DEVICE
-  OutputIterator exclusive_scan_by_key(thrust::execution_policy<DerivedPolicy> &exec,
-                                       InputIterator1 first1,
-                                       InputIterator1 last1,
-                                       InputIterator2 first2,
-                                       OutputIterator result,
-                                       T init,
-                                       BinaryPredicate binary_pred,
-                                       AssociativeOperator binary_op);
+template <typename DerivedPolicy,
+          typename InputIterator1,
+          typename InputIterator2,
+          typename OutputIterator,
+          typename T,
+          typename BinaryPredicate,
+          typename AssociativeOperator>
+THRUST_HOST_DEVICE OutputIterator exclusive_scan_by_key(
+  thrust::execution_policy<DerivedPolicy>& exec,
+  InputIterator1 first1,
+  InputIterator1 last1,
+  InputIterator2 first2,
+  OutputIterator result,
+  T init,
+  BinaryPredicate binary_pred,
+  AssociativeOperator binary_op);
 
 } // end namespace generic
 } // end namespace detail
@@ -140,4 +123,3 @@ THRUST_HOST_DEVICE
 THRUST_NAMESPACE_END
 
 #include <thrust/system/detail/generic/scan_by_key.inl>
-

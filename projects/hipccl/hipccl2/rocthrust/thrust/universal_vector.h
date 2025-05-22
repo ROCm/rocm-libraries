@@ -22,6 +22,7 @@
 #pragma once
 
 #include <thrust/detail/config.h>
+
 #include <thrust/universal_allocator.h>
 
 /*! \cond

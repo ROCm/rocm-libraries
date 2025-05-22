@@ -31,33 +31,35 @@
 #include <cub/detail/device_synchronize.cuh>
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
-#include <thrust/system/cuda/detail/core/triple_chevron_launch.h>
-#include <thrust/system/cuda/detail/core/util.h>
+#  include <thrust/system/cuda/detail/core/triple_chevron_launch.h>
+#  include <thrust/system/cuda/detail/core/util.h>
 
-#include <cassert>
+#  include <cassert>
 
-#include <nv/target>
+#  include <nv/target>
 
 /**
  * @def THRUST_DISABLE_KERNEL_VISIBILITY_WARNING_SUPPRESSION
  * If defined, the default suppression of kernel visibility attribute warning is disabled.
  */
-#if !defined(THRUST_DISABLE_KERNEL_VISIBILITY_WARNING_SUPPRESSION)
+#  if !defined(THRUST_DISABLE_KERNEL_VISIBILITY_WARNING_SUPPRESSION)
 _CCCL_DIAG_SUPPRESS_GCC("-Wattributes")
 _CCCL_DIAG_SUPPRESS_CLANG("-Wattributes")
-#if !defined(_CCCL_CUDA_COMPILER_NVHPC)
+#    if !defined(_CCCL_CUDA_COMPILER_NVHPC)
 _CCCL_DIAG_SUPPRESS_NVHPC(attribute_requires_external_linkage)
-#endif // !_LIBCUDACXX_COMPILER_NVHPC_CUDA
-#endif // !THRUST_DISABLE_KERNEL_VISIBILITY_WARNING_SUPPRESSION
+#    endif // !_LIBCUDACXX_COMPILER_NVHPC_CUDA
+#  endif // !THRUST_DISABLE_KERNEL_VISIBILITY_WARNING_SUPPRESSION
 
 THRUST_NAMESPACE_BEGIN
 
-namespace cuda_cub {
-namespace core {
+namespace cuda_cub
+{
+namespace core
+{
 
-#ifndef THRUST_DETAIL_KERNEL_ATTRIBUTES
-#define THRUST_DETAIL_KERNEL_ATTRIBUTES CCCL_DETAIL_KERNEL_ATTRIBUTES
-#endif
+#  ifndef THRUST_DETAIL_KERNEL_ATTRIBUTES
+#    define THRUST_DETAIL_KERNEL_ATTRIBUTES CCCL_DETAIL_KERNEL_ATTRIBUTES
+#  endif
 
 #  if defined(__CUDA_ARCH__) || defined(_NVHPC_CUDA)
 template <class Agent, class... Args>

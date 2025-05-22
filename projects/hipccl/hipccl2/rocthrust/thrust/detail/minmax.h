@@ -20,30 +20,26 @@
 
 THRUST_NAMESPACE_BEGIN
 
-template<typename T, typename BinaryPredicate>
-THRUST_HOST_DEVICE
-  T min THRUST_PREVENT_MACRO_SUBSTITUTION (const T &lhs, const T &rhs, BinaryPredicate comp)
+template <typename T, typename BinaryPredicate>
+THRUST_HOST_DEVICE T min THRUST_PREVENT_MACRO_SUBSTITUTION(const T& lhs, const T& rhs, BinaryPredicate comp)
 {
   return comp(rhs, lhs) ? rhs : lhs;
 } // end min()
 
-template<typename T>
-THRUST_HOST_DEVICE
-  T min THRUST_PREVENT_MACRO_SUBSTITUTION (const T &lhs, const T &rhs)
+template <typename T>
+THRUST_HOST_DEVICE T min THRUST_PREVENT_MACRO_SUBSTITUTION(const T& lhs, const T& rhs)
 {
   return rhs < lhs ? rhs : lhs;
 } // end min()
 
-template<typename T, typename BinaryPredicate>
-THRUST_HOST_DEVICE
-  T max THRUST_PREVENT_MACRO_SUBSTITUTION (const T &lhs, const T &rhs, BinaryPredicate comp)
+template <typename T, typename BinaryPredicate>
+THRUST_HOST_DEVICE T max THRUST_PREVENT_MACRO_SUBSTITUTION(const T& lhs, const T& rhs, BinaryPredicate comp)
 {
-  return comp(lhs,rhs) ? rhs : lhs;
+  return comp(lhs, rhs) ? rhs : lhs;
 } // end max()
 
-template<typename T>
-THRUST_HOST_DEVICE
-  T max THRUST_PREVENT_MACRO_SUBSTITUTION (const T &lhs, const T &rhs)
+template <typename T>
+THRUST_HOST_DEVICE T max THRUST_PREVENT_MACRO_SUBSTITUTION(const T& lhs, const T& rhs)
 {
   return lhs < rhs ? rhs : lhs;
 } // end max()

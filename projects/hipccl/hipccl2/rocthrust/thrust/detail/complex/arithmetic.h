@@ -1,7 +1,7 @@
 /*
  *  Copyright 2008-2021 NVIDIA Corporation
  *  Copyright 2013 Filipe RNC Maia
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved. 
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -22,12 +22,13 @@
 
 #include <thrust/complex.h>
 #include <thrust/detail/complex/c99math.h>
+
 #include <cfloat>
 #include <cmath>
 
 THRUST_NAMESPACE_BEGIN
 
-  /* --- Binary Arithmetic Operators --- */
+/* --- Binary Arithmetic Operators --- */
 
 template <typename T0, typename T1>
 THRUST_HOST_DEVICE complex<typename detail::promoted_numerical_type<T0, T1>::type>
@@ -53,7 +54,6 @@ operator+(const T0& x, const complex<T1>& y)
   return complex<T>(x + y.real(), y.imag());
 }
 
-
 template <typename T0, typename T1>
 THRUST_HOST_DEVICE complex<typename detail::promoted_numerical_type<T0, T1>::type>
 operator-(const complex<T0>& x, const complex<T1>& y)
@@ -78,14 +78,12 @@ operator-(const T0& x, const complex<T1>& y)
   return complex<T>(x - y.real(), -y.imag());
 }
 
-
 template <typename T0, typename T1>
 THRUST_HOST_DEVICE complex<typename detail::promoted_numerical_type<T0, T1>::type>
 operator*(const complex<T0>& x, const complex<T1>& y)
 {
   using T = typename detail::promoted_numerical_type<T0, T1>::type;
-  return complex<T>( x.real() * y.real() - x.imag() * y.imag()
-			             , x.real() * y.imag() + x.imag() * y.real());
+  return complex<T>(x.real() * y.real() - x.imag() * y.imag(), x.real() * y.imag() + x.imag() * y.real());
 }
 
 template <typename T0, typename T1>
@@ -103,7 +101,6 @@ operator*(const T0& x, const complex<T1>& y)
   using T = typename detail::promoted_numerical_type<T0, T1>::type;
   return complex<T>(x * y.real(), x * y.imag());
 }
-
 
 template <typename T0, typename T1>
 THRUST_HOST_DEVICE complex<typename detail::promoted_numerical_type<T0, T1>::type>
@@ -127,8 +124,7 @@ operator/(const complex<T0>& x, const complex<T1>& y)
 
   oos = T(1.0) / s;
 
-  complex<T> quot( ((ars * brs) + (ais * bis)) * oos
-                 , ((ais * brs) - (ars * bis)) * oos);
+  complex<T> quot(((ars * brs) + (ais * bis)) * oos, ((ais * brs) - (ars * bis)) * oos);
   return quot;
 }
 
@@ -148,8 +144,6 @@ operator/(const T0& x, const complex<T1>& y)
   return complex<T>(x) / y;
 }
 
-
-
 /* --- Unary Arithmetic Operators --- */
 
 template <typename T>
@@ -164,7 +158,6 @@ THRUST_HOST_DEVICE complex<T> operator-(const complex<T>& y)
   return y * -T(1);
 }
 
-
 /* --- Other Basic Arithmetic Functions --- */
 
 // As std::hypot is only C++11 we have to use the C interface
@@ -175,17 +168,19 @@ THRUST_HOST_DEVICE T abs(const complex<T>& z)
 }
 
 // XXX Why are we specializing here?
-namespace detail {
-namespace complex {
+namespace detail
+{
+namespace complex
+{
 
 THRUST_HOST_DEVICE inline float abs(const thrust::complex<float>& z)
 {
-  return hypotf(z.real(),z.imag());
+  return hypotf(z.real(), z.imag());
 }
 
 THRUST_HOST_DEVICE inline double abs(const thrust::complex<double>& z)
 {
-  return hypot(z.real(),z.imag());
+  return hypot(z.real(), z.imag());
 }
 
 } // end namespace complex
@@ -203,26 +198,23 @@ THRUST_HOST_DEVICE inline double abs(const complex<double>& z)
   return detail::complex::abs(z);
 }
 
-
 template <typename T>
 THRUST_HOST_DEVICE T arg(const complex<T>& z)
 {
-  // Find `atan2` by ADL.
-  #ifdef __HIP_DEVICE_COMPILE__
-    using ::atan2;
-  #else
-    using std::atan2;
-  #endif
+// Find `atan2` by ADL.
+#ifdef __HIP_DEVICE_COMPILE__
+  using ::atan2;
+#else
+  using std::atan2;
+#endif
   return atan2(z.imag(), z.real());
 }
-
 
 template <typename T>
 THRUST_HOST_DEVICE complex<T> conj(const complex<T>& z)
 {
   return complex<T>(z.real(), -z.imag());
 }
-
 
 template <typename T>
 THRUST_HOST_DEVICE T norm(const complex<T>& z)
@@ -236,11 +228,11 @@ THRUST_HOST_DEVICE inline float norm(const complex<float>& z)
 {
   // Find `abs` and `sqrt` by ADL.
   using std::abs;
-  #ifdef __HIP_DEVICE_COMPILE__
-    using ::sqrt;
-  #else
-    using std::sqrt;
-  #endif
+#ifdef __HIP_DEVICE_COMPILE__
+  using ::sqrt;
+#else
+  using std::sqrt;
+#endif
 
   if (abs(z.real()) < sqrt(FLT_MIN) && abs(z.imag()) < sqrt(FLT_MIN))
   {
@@ -257,12 +249,11 @@ THRUST_HOST_DEVICE inline double norm(const complex<double>& z)
 {
   // Find `abs` and `sqrt` by ADL.
   using std::abs;
-  #ifdef __HIP_DEVICE_COMPILE__
-    using ::sqrt;
-  #else
-    using std::sqrt;
-  #endif
-
+#ifdef __HIP_DEVICE_COMPILE__
+  using ::sqrt;
+#else
+  using std::sqrt;
+#endif
 
   if (abs(z.real()) < sqrt(DBL_MIN) && abs(z.imag()) < sqrt(DBL_MIN))
   {
@@ -274,20 +265,19 @@ THRUST_HOST_DEVICE inline double norm(const complex<double>& z)
   return z.real() * z.real() + z.imag() * z.imag();
 }
 
-
 template <typename T0, typename T1>
 THRUST_HOST_DEVICE complex<typename detail::promoted_numerical_type<T0, T1>::type> polar(const T0& m, const T1& theta)
 {
   using T = typename detail::promoted_numerical_type<T0, T1>::type;
 
-  // Find `cos` and `sin` by ADL.
-  #ifdef __HIP_DEVICE_COMPILE__
-    using ::cos;
-    using ::sin;
-  #else
-    using std::cos;
-    using std::sin;
-  #endif
+// Find `cos` and `sin` by ADL.
+#ifdef __HIP_DEVICE_COMPILE__
+  using ::cos;
+  using ::sin;
+#else
+  using std::cos;
+  using std::sin;
+#endif
 
   return complex<T>(m * cos(theta), m * sin(theta));
 }

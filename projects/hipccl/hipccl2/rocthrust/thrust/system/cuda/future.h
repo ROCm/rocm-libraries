@@ -6,16 +6,19 @@
 #pragma once
 
 #include <thrust/detail/config.h>
-#include <thrust/detail/cpp14_required.h>
 
-#if THRUST_CPP_DIALECT >= 2014
+#include <thrust/detail/cpp_version_check.h>
 
-#include <thrust/system/cuda/pointer.h>
-#include <thrust/system/cuda/detail/execution_policy.h>
+#if THRUST_CPP_DIALECT >= 2017
+
+#  include <thrust/system/cuda/detail/execution_policy.h>
+#  include <thrust/system/cuda/pointer.h>
 
 THRUST_NAMESPACE_BEGIN
 
-namespace system { namespace cuda
+namespace system
+{
+namespace cuda
 {
 
 struct ready_event;
@@ -29,10 +32,10 @@ template <typename T>
 struct unique_eager_future;
 
 template <typename... Events>
-_CCCL_HOST
-unique_eager_event when_all(Events&&... evs);
+_CCCL_HOST unique_eager_event when_all(Events&&... evs);
 
-}} // namespace system::cuda
+} // namespace cuda
+} // namespace system
 
 namespace cuda
 {
@@ -45,29 +48,23 @@ using thrust::system::cuda::unique_eager_event;
 using event = unique_eager_event;
 
 using thrust::system::cuda::unique_eager_future;
-template <typename T> using future = unique_eager_future<T>;
+template <typename T>
+using future = unique_eager_future<T>;
 
 using thrust::system::cuda::when_all;
 
 } // namespace cuda
 
 template <typename DerivedPolicy>
-_CCCL_HOST
-thrust::cuda::unique_eager_event
-unique_eager_event_type(
-  thrust::cuda::execution_policy<DerivedPolicy> const&
-) noexcept;
+_CCCL_HOST thrust::cuda::unique_eager_event
+unique_eager_event_type(thrust::cuda::execution_policy<DerivedPolicy> const&) noexcept;
 
 template <typename T, typename DerivedPolicy>
-_CCCL_HOST
-thrust::cuda::unique_eager_future<T>
-unique_eager_future_type(
-  thrust::cuda::execution_policy<DerivedPolicy> const&
-) noexcept;
+_CCCL_HOST thrust::cuda::unique_eager_future<T>
+unique_eager_future_type(thrust::cuda::execution_policy<DerivedPolicy> const&) noexcept;
 
 THRUST_NAMESPACE_END
 
-#include <thrust/system/cuda/detail/future.inl>
+#  include <thrust/system/cuda/detail/future.inl>
 
 #endif // C++14
-

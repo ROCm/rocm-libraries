@@ -21,6 +21,7 @@
 #pragma once
 
 #include <thrust/detail/config.h>
+
 #include <thrust/detail/function.h>
 #include <thrust/system/detail/sequential/execution_policy.h>
 
@@ -32,26 +33,25 @@ namespace detail
 namespace sequential
 {
 
-
 THRUST_EXEC_CHECK_DISABLE
-template<typename DerivedPolicy,
-         typename InputIterator1,
-         typename InputIterator2,
-         typename OutputIterator,
-         typename Predicate>
-THRUST_HOST_DEVICE
-  OutputIterator copy_if(sequential::execution_policy<DerivedPolicy> &,
-                         InputIterator1 first,
-                         InputIterator1 last,
-                         InputIterator2 stencil,
-                         OutputIterator result,
-                         Predicate pred)
+template <typename DerivedPolicy,
+          typename InputIterator1,
+          typename InputIterator2,
+          typename OutputIterator,
+          typename Predicate>
+THRUST_HOST_DEVICE OutputIterator copy_if(
+  sequential::execution_policy<DerivedPolicy>&,
+  InputIterator1 first,
+  InputIterator1 last,
+  InputIterator2 stencil,
+  OutputIterator result,
+  Predicate pred)
 {
-  thrust::detail::wrapped_function<Predicate,bool> wrapped_pred(pred);
+  thrust::detail::wrapped_function<Predicate, bool> wrapped_pred(pred);
 
-  while(first != last)
+  while (first != last)
   {
-    if(wrapped_pred(*stencil))
+    if (wrapped_pred(*stencil))
     {
       *result = *first;
       ++result;
@@ -64,9 +64,7 @@ THRUST_HOST_DEVICE
   return result;
 } // end copy_if()
 
-
 } // end namespace sequential
 } // end namespace detail
 } // end namespace system
 THRUST_NAMESPACE_END
-

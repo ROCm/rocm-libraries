@@ -21,6 +21,7 @@
 
 #include <thrust/complex.h>
 #include <thrust/detail/complex/math_private.h>
+
 #include <cmath>
 
 THRUST_NAMESPACE_BEGIN
@@ -33,7 +34,9 @@ THRUST_HOST_DEVICE inline complex<float> cprojf(const complex<float>& z)
   if (!isinf(z.real()) && !isinf(z.imag()))
   {
     return z;
-  }else{
+  }
+  else
+  {
     // std::numeric_limits<T>::infinity() doesn't run on the GPU
     return complex<float>(infinity<float>(), copysignf(0.0, z.imag()));
   }
@@ -44,29 +47,30 @@ THRUST_HOST_DEVICE inline complex<double> cproj(const complex<double>& z)
   if (!isinf(z.real()) && !isinf(z.imag()))
   {
     return z;
-  }else{
+  }
+  else
+  {
     // std::numeric_limits<T>::infinity() doesn't run on the GPU
     return complex<double>(infinity<double>(), copysign(0.0, z.imag()));
   }
 }
 
-}
- 
-}
+} // namespace complex
+
+} // namespace detail
 
 template <typename T>
 THRUST_HOST_DEVICE inline thrust::complex<T> proj(const thrust::complex<T>& z)
 {
   return detail::complex::cproj(z);
 }
-  
 
 template <>
 THRUST_HOST_DEVICE inline thrust::complex<double> proj(const thrust::complex<double>& z)
 {
   return detail::complex::cproj(z);
 }
-  
+
 template <>
 THRUST_HOST_DEVICE inline thrust::complex<float> proj(const thrust::complex<float>& z)
 {
