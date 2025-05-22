@@ -135,23 +135,33 @@ namespace rocRoller::KernelGraph::ControlGraph
         if(nodeA > nodeB)
             return opposite(lookupOrder(CacheOnly, nodeB, nodeA));
 
-        auto iter = m_orderCache.find({nodeA, nodeB});
-        if(iter == m_orderCache.end())
+        if(not m_orderCache.contains(nodeA))
             return NodeOrdering::Undefined;
 
-        return iter->second;
+        auto const& nodeOrderPairs = m_orderCache.at(nodeA);
+        return nodeOrderPairs.contains(nodeB) ? nodeOrderPairs.at(nodeB) : NodeOrdering::Undefined;
     }
 
     inline Generator<int> ControlGraph::nodesAfter(int node) const
     {
         populateOrderCache();
 
-        for(auto const& pair : m_orderCache)
+        if(m_orderCache.contains(node))
         {
-            if(std::get<0>(pair.first) == node && pair.second == NodeOrdering::LeftFirst)
-                co_yield std::get<1>(pair.first);
-            else if(std::get<1>(pair.first) == node && pair.second == NodeOrdering::RightFirst)
-                co_yield std::get<0>(pair.first);
+            for(auto const& [otherNode, order] : m_orderCache.at(node))
+            {
+                if(order == NodeOrdering::LeftFirst)
+                    co_yield otherNode;
+            }
+        }
+
+        for(auto const& [otherNode, nodeOrderPairs] : m_orderCache)
+        {
+            if(otherNode >= node)
+                continue;
+
+            if(nodeOrderPairs.contains(node) && nodeOrderPairs.at(node) == NodeOrdering::RightFirst)
+                co_yield otherNode;
         }
     }
 
@@ -159,12 +169,22 @@ namespace rocRoller::KernelGraph::ControlGraph
     {
         populateOrderCache();
 
-        for(auto const& pair : m_orderCache)
+        if(m_orderCache.contains(node))
         {
-            if(std::get<0>(pair.first) == node && pair.second == NodeOrdering::RightFirst)
-                co_yield std::get<1>(pair.first);
-            else if(std::get<1>(pair.first) == node && pair.second == NodeOrdering::LeftFirst)
-                co_yield std::get<0>(pair.first);
+            for(auto const& [otherNode, order] : m_orderCache.at(node))
+            {
+                if(order == NodeOrdering::RightFirst)
+                    co_yield otherNode;
+            }
+        }
+
+        for(auto const& [otherNode, nodeOrderPairs] : m_orderCache)
+        {
+            if(otherNode >= node)
+                continue;
+
+            if(nodeOrderPairs.contains(node) && nodeOrderPairs.at(node) == NodeOrdering::LeftFirst)
+                co_yield otherNode;
         }
     }
 
@@ -172,13 +192,23 @@ namespace rocRoller::KernelGraph::ControlGraph
     {
         populateOrderCache();
 
-        for(auto const& pair : m_orderCache)
+        if(m_orderCache.contains(node))
         {
-            if(std::get<0>(pair.first) == node && pair.second == NodeOrdering::RightInBodyOfLeft)
-                co_yield std::get<1>(pair.first);
-            else if(std::get<1>(pair.first) == node
-                    && pair.second == NodeOrdering::LeftInBodyOfRight)
-                co_yield std::get<0>(pair.first);
+            for(auto const& [otherNode, order] : m_orderCache.at(node))
+            {
+                if(order == NodeOrdering::RightInBodyOfLeft)
+                    co_yield otherNode;
+            }
+        }
+
+        for(auto const& [otherNode, nodeOrderPairs] : m_orderCache)
+        {
+            if(otherNode >= node)
+                continue;
+
+            if(nodeOrderPairs.contains(node)
+               && nodeOrderPairs.at(node) == NodeOrdering::LeftInBodyOfRight)
+                co_yield otherNode;
         }
     }
 
@@ -186,13 +216,23 @@ namespace rocRoller::KernelGraph::ControlGraph
     {
         populateOrderCache();
 
-        for(auto const& pair : m_orderCache)
+        if(m_orderCache.contains(node))
         {
-            if(std::get<1>(pair.first) == node && pair.second == NodeOrdering::RightInBodyOfLeft)
-                co_yield std::get<0>(pair.first);
-            else if(std::get<0>(pair.first) == node
-                    && pair.second == NodeOrdering::LeftInBodyOfRight)
-                co_yield std::get<1>(pair.first);
+            for(auto const& [otherNode, order] : m_orderCache.at(node))
+            {
+                if(order == NodeOrdering::LeftInBodyOfRight)
+                    co_yield otherNode;
+            }
+        }
+
+        for(auto const& [otherNode, nodeOrderPairs] : m_orderCache)
+        {
+            if(otherNode >= node)
+                continue;
+
+            if(nodeOrderPairs.contains(node)
+               && nodeOrderPairs.at(node) == NodeOrdering::RightInBodyOfLeft)
+                co_yield otherNode;
         }
     }
 
