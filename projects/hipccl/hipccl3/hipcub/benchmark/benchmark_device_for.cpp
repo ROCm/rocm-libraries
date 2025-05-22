@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -71,7 +71,7 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t size)
     // Warm-up
     for(size_t i = 0; i < warmup_size; i++)
     {
-        HIP_CHECK(hipcub::ForEach(d_input, d_input + size, device_op, stream));
+        HIP_CHECK(hipcub::DeviceFor::ForEach(d_input, d_input + size, device_op, stream));
     }
     HIP_CHECK(hipDeviceSynchronize());
 
@@ -81,7 +81,7 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t size)
 
         for(size_t i = 0; i < batch_size; i++)
         {
-            HIP_CHECK(hipcub::ForEach(d_input, d_input + size, device_op, stream));
+            HIP_CHECK(hipcub::DeviceFor::ForEach(d_input, d_input + size, device_op, stream));
         }
         HIP_CHECK(hipStreamSynchronize(stream));
 

@@ -1,8 +1,7 @@
 /******************************************************************************
- * Copyright (c) 2011, Duane Merrill.  All rights reserved.
- * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2024-2025, Advanced Micro Devices, Inc.  All rights reserved.
- * 
+ * Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
+ * Modifications Copyright (c) 2025, Advanced Micro Devices, Inc.  All rights reserved.
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
  *     * Redistributions of source code must retain the above copyright
@@ -13,7 +12,7 @@
  *     * Neither the name of the NVIDIA CORPORATION nor the
  *       names of its contributors may be used to endorse or promote products
  *       derived from this software without specific prior written permission.
- * 
+ *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
  * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
  * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
@@ -27,45 +26,13 @@
  *
  ******************************************************************************/
 
-#ifndef HIPCUB_CUB_MACRO_HPP_
-#define HIPCUB_CUB_MACRO_HPP_
+#ifndef HIPCUB_DEVICE_DEVICE_MERGE_HPP_
+#define HIPCUB_DEVICE_DEVICE_MERGE_HPP_
 
-#include "../../config.hpp"
-
-#include "cub/util_macro.cuh" // IWYU pragma: export
-
-BEGIN_HIPCUB_NAMESPACE
-
-#ifndef HIPCUB_MAX
-    /// Select maximum(a, b)
-    #define HIPCUB_MAX(a, b) CUB_MAX(a, b)
+#ifdef __HIP_PLATFORM_AMD__
+    #include "../backend/rocprim/device/device_merge.hpp" // IWYU pragma: export
+#elif defined(__HIP_PLATFORM_NVIDIA__)
+    #include "../backend/cub/device/device_merge.hpp" // IWYU pragma: export
 #endif
 
-#ifndef HIPCUB_MIN
-    /// Select minimum(a, b)
-    #define HIPCUB_MIN(a, b) CUB_MIN(a, b)
-#endif
-
-#ifndef HIPCUB_QUOTIENT_FLOOR
-    /// Quotient of x/y rounded down to nearest integer
-    #define HIPCUB_QUOTIENT_FLOOR(x, y) CUB_QUOTIENT_FLOOR(x, y)
-#endif
-
-#ifndef HIPCUB_QUOTIENT_CEILING
-    /// Quotient of x/y rounded up to nearest integer
-    #define HIPCUB_QUOTIENT_CEILING(x, y) CUB_QUOTIENT_CEILING(x, y)
-#endif
-
-#ifndef HIPCUB_ROUND_UP_NEAREST
-    /// x rounded up to the nearest multiple of y
-    #define HIPCUB_ROUND_UP_NEAREST(x, y) CUB_ROUND_UP_NEAREST(x, y)
-#endif
-
-#ifndef HIPCUB_ROUND_DOWN_NEAREST
-    /// x rounded down to the nearest multiple of y
-    #define HIPCUB_ROUND_DOWN_NEAREST(x, y) CUB_ROUND_DOWN_NEAREST(x, y)
-#endif
-
-END_HIPCUB_NAMESPACE
-
-#endif // HIPCUB_CUB_MACRO_HPP_
+#endif // HIPCUB_DEVICE_DEVICE_MERGE_HPP_

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2020 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -21,18 +21,18 @@
 // SOFTWARE.
 
 #include <algorithm>
-#include <functional>
-#include <iostream>
-#include <type_traits>
-#include <vector>
-#include <utility>
-#include <tuple>
-#include <random>
-#include <limits> 
+#include <chrono>
 #include <cmath>
 #include <cstdlib>
+#include <functional>
+#include <iostream>
+#include <limits>
 #include <numeric>
-#include <chrono>
+#include <random>
+#include <tuple>
+#include <type_traits>
+#include <utility>
+#include <vector>
 
 // Google Benchmark
 #include "benchmark/benchmark.h"

@@ -1,4 +1,4 @@
-// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -18,26 +18,25 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef HIPCUB_ROCPRIM_TUPLE_HPP_
-#define HIPCUB_ROCPRIM_TUPLE_HPP_
+#ifndef HIPCUB_CUB_THREAD_THREAD_OPERATORS_HPP_
+#define HIPCUB_CUB_THREAD_THREAD_OPERATORS_HPP_
 
-#include "../../config.hpp"
-#include <rocprim/types/tuple.hpp> // IWYU pragma: export
+#include "../../../config.hpp"
+
+#include <cub/thread/thread_operators.cuh> // IWYU pragma: export
+
+#include <cuda/std/__functional/invoke.h>
 
 BEGIN_HIPCUB_NAMESPACE
 
-template<class... Args>
-using tuple = ::rocprim::tuple<Args...>;
+namespace detail
+{
 
-template<size_t I, class T>
-using tuple_element = ::rocprim::tuple_element<I, T>;
+template<typename Invokable, typename InputT, typename InitT = InputT>
+using accumulator_t = ::cuda::std::__accumulator_t<Invokable, InputT, InitT>;
 
-template<size_t I, class T>
-using tuple_element_t = ::rocprim::tuple_element_t<I, T>;
-
-template<class T>
-using tuple_size = ::rocprim::tuple_size<T>;
+} // namespace detail
 
 END_HIPCUB_NAMESPACE
 
-#endif // HIPCUB_ROCPRIM_TUPLE_HPP_
+#endif // HIPCUB_CUB_THREAD_THREAD_OPERATORS_HPP_
