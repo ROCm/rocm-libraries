@@ -68,11 +68,12 @@ template<typename T,
          unsigned int                        ItemsPerThread,
          unsigned int                        MaxRadixBits,
          rocprim::block_radix_rank_algorithm Algorithm>
-__global__ __launch_bounds__(BlockSize) void rank_kernel(const T* const      items_input,
-                                                         unsigned int* const ranks_output,
-                                                         const bool          descending,
-                                                         const unsigned int  start_bit,
-                                                         const unsigned int  radix_bits)
+__global__ __launch_bounds__(BlockSize)
+void rank_kernel(const T* const      items_input,
+                 unsigned int* const ranks_output,
+                 const bool          descending,
+                 const unsigned int  start_bit,
+                 const unsigned int  radix_bits)
 {
     using block_rank_type     = rocprim::block_radix_rank<BlockSize, MaxRadixBits, Algorithm>;
     using keys_exchange_type  = rocprim::block_exchange<T, BlockSize, ItemsPerThread>;
@@ -95,7 +96,7 @@ __global__ __launch_bounds__(BlockSize) void rank_kernel(const T* const      ite
     unsigned int ranks[ItemsPerThread];
 
     rocprim::block_load_direct_blocked(lid, items_input + block_offset, keys);
-    if ROCPRIM_IF_CONSTEXPR(warp_striped)
+    if constexpr(warp_striped)
     {
         // block_radix_rank_match requires warp striped input and output. Instead of using
         // rocprim::block_load_direct_warp_striped though, we load directly and exchange the
@@ -114,7 +115,7 @@ __global__ __launch_bounds__(BlockSize) void rank_kernel(const T* const      ite
         block_rank_type().rank_keys(keys, ranks, storage.rank, start_bit, radix_bits);
     }
 
-    if ROCPRIM_IF_CONSTEXPR(warp_striped)
+    if constexpr(warp_striped)
     {
         // See the comment above.
         rocprim::syncthreads();

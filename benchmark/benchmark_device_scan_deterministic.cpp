@@ -22,104 +22,12 @@
 
 #include "benchmark_device_scan.parallel.hpp"
 #include "benchmark_utils.hpp"
-// CmdParser
-#include "cmdparser.hpp"
-
-#include "../common/utils_custom_type.hpp"
-
-// Google Benchmark
-#include <benchmark/benchmark.h>
-
-// HIP API
-#include <hip/hip_runtime.h>
-
-#include <rocprim/functional.hpp>
-#include <rocprim/types.hpp>
-
-#include <cstddef>
-#include <stdint.h>
-#include <string>
-#include <vector>
-
-#ifndef DEFAULT_BYTES
-const size_t DEFAULT_BYTES = 1024 * 1024 * 32 * 4;
-#endif
-
-#define CREATE_EXCL_INCL_BENCHMARK(EXCL, T, SCAN_OP)                   \
-    {                                                                  \
-        const device_scan_benchmark<EXCL, T, SCAN_OP, true> instance;  \
-        REGISTER_BENCHMARK(benchmarks, bytes, seed, stream, instance); \
-    }
-
-#define CREATE_BENCHMARK(T, SCAN_OP)              \
-    CREATE_EXCL_INCL_BENCHMARK(false, T, SCAN_OP) \
-    CREATE_EXCL_INCL_BENCHMARK(true, T, SCAN_OP)
 
 int main(int argc, char* argv[])
 {
-    cli::Parser parser(argc, argv);
-    parser.set_optional<size_t>("size", "size", DEFAULT_BYTES, "number of bytes");
-    parser.set_optional<int>("trials", "trials", -1, "number of iterations");
-    parser.set_optional<std::string>("name_format",
-                                     "name_format",
-                                     "human",
-                                     "either: json,human,txt");
-    parser.set_optional<std::string>("seed", "seed", "random", get_seed_message());
-    parser.run_and_exit_if_error();
+    benchmark_utils::executor executor(argc, argv, 128 * benchmark_utils::MiB, 10, 5);
 
-    // Parse argv
-    benchmark::Initialize(&argc, argv);
-    const size_t bytes  = parser.get<size_t>("size");
-    const int    trials = parser.get<int>("trials");
-    bench_naming::set_format(parser.get<std::string>("name_format"));
-    const std::string  seed_type = parser.get<std::string>("seed");
-    const managed_seed seed(seed_type);
+    add_benchmarks<true>(executor);
 
-    // HIP
-    hipStream_t stream = 0; // default
-
-    // Benchmark info
-    add_common_benchmark_info();
-    benchmark::AddCustomContext("bytes", std::to_string(bytes));
-    benchmark::AddCustomContext("seed", seed_type);
-
-    // Add benchmarks
-    std::vector<benchmark::internal::Benchmark*> benchmarks = {};
-    using custom_float2                                     = common::custom_type<float, float>;
-    using custom_double2                                    = common::custom_type<double, double>;
-
-    CREATE_BENCHMARK(int, rocprim::plus<int>)
-    CREATE_BENCHMARK(float, rocprim::plus<float>)
-    CREATE_BENCHMARK(double, rocprim::plus<double>)
-    CREATE_BENCHMARK(long long, rocprim::plus<long long>)
-    CREATE_BENCHMARK(float2, rocprim::plus<float2>)
-    CREATE_BENCHMARK(custom_float2, rocprim::plus<custom_float2>)
-    CREATE_BENCHMARK(double2, rocprim::plus<double2>)
-    CREATE_BENCHMARK(custom_double2, rocprim::plus<custom_double2>)
-    CREATE_BENCHMARK(int8_t, rocprim::plus<int8_t>)
-    CREATE_BENCHMARK(uint8_t, rocprim::plus<uint8_t>)
-    CREATE_BENCHMARK(rocprim::half, rocprim::plus<rocprim::half>)
-    CREATE_BENCHMARK(rocprim::int128_t, rocprim::plus<rocprim::int128_t>)
-    CREATE_BENCHMARK(rocprim::uint128_t, rocprim::plus<rocprim::uint128_t>)
-
-    // Use manual timing
-    for(auto& b : benchmarks)
-    {
-        b->UseManualTime();
-        b->Unit(benchmark::kMillisecond);
-    }
-
-    // Force number of iterations
-    if(trials > 0)
-    {
-        for(auto& b : benchmarks)
-        {
-            b->Iterations(trials);
-        }
-    }
-
-    // Run benchmarks
-    benchmark::RunSpecifiedBenchmarks();
-
-    return 0;
+    executor.run();
 }

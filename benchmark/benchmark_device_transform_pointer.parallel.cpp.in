@@ -1,4 +1,6 @@
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// MIT License
+//
+// Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -7,22 +9,29 @@
 // copies of the Software, and to permit persons to whom the Software is
 // furnished to do so, subject to the following conditions:
 //
-// The above copyright notice and this permission notice shall be included in
-// all copies or substantial portions of the Software.
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
 //
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
 // AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-// THE SOFTWARE.
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
 
-#ifndef ROCPRIM_DETAIL_RADIX_SORT_HPP_
-#define ROCPRIM_DETAIL_RADIX_SORT_HPP_
+#include "benchmark_utils.hpp"
+#include "benchmark_device_transform.parallel.hpp"
 
-ROCPRIM_PRAGMA_MESSAGE("Functionality from rocprim/detail/radix_sort.hpp has been moved to "
-                       "rocprim/thread/radix_key_codec.hpp.")
-#include "../thread/radix_key_codec.hpp"
+#include <rocprim/types.hpp>
 
-#endif // ROCPRIM_DETAIL_RADIX_SORT_HPP_
+#include <stdint.h>
+
+namespace {
+    auto unused = benchmark_utils::executor::queue_autotune(
+        device_transform_benchmark_generator< 
+        @DataType@,
+        true, 
+        @BlockSize@,
+        @LoadType@>::create);
+}

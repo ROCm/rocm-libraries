@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -25,6 +25,8 @@
 
 #include "benchmark_utils.hpp"
 
+#include "../common/utils_device_ptr.hpp"
+
 // Google Benchmark
 #include <benchmark/benchmark.h>
 
@@ -47,7 +49,8 @@ std::string transform_config_name()
 {
     auto config = Config();
     return "{bs:" + std::to_string(config.block_size)
-           + ",ipt:" + std::to_string(config.items_per_thread) + "}";
+           + ",ipt:" + std::to_string(config.items_per_thread)
+           + ",lt:" + get_thread_load_method_name(config.load_type) + "}";
 }
 
 template<>
@@ -56,27 +59,29 @@ inline std::string transform_config_name<rocprim::default_config>()
     return "default_config";
 }
 
-template<typename T = int, typename Config = rocprim::default_config>
-struct device_transform_benchmark : public config_autotune_interface
+template<typename T,
+         bool IsPointer,
+         bool IsBinary   = false,
+         typename Config = rocprim::default_config>
+struct device_transform_benchmark : public benchmark_utils::autotune_interface
 {
 
     std::string name() const override
     {
 
         using namespace std::string_literals;
-        return bench_naming::format_name("{lvl:device,algo:transform,value_type:"
-                                         + std::string(Traits<T>::name())
-                                         + ",cfg:" + transform_config_name<Config>() + "}");
+        return bench_naming::format_name(
+            "{lvl:device,algo:transform" + std::string(IsPointer ? "_pointer" : "")
+            + ",op:" + std::string(IsBinary ? "binary" : "unary") + ",value_type:"
+            + std::string(Traits<T>::name()) + ",cfg:" + transform_config_name<Config>() + "}");
     }
 
-    static constexpr unsigned int batch_size  = 10;
-    static constexpr unsigned int warmup_size = 5;
-
-    void run(benchmark::State&   state,
-             size_t              bytes,
-             const managed_seed& seed,
-             hipStream_t         stream) const override
+    void run(benchmark_utils::state&& state) override
     {
+        const auto& stream = state.stream;
+        const auto& bytes  = state.bytes;
+        const auto& seed   = state.seed;
+
         using output_type = T;
 
         // Calculate the number of elements
@@ -89,88 +94,68 @@ struct device_transform_benchmark : public config_autotune_interface
         const std::vector<T> input
             = get_random_data<T>(size, random_range.first, random_range.second, seed.get_0());
 
-        T*           d_input;
-        output_type* d_output = nullptr;
-        HIP_CHECK(hipMalloc(&d_input, input.size() * sizeof(input[0])));
-        HIP_CHECK(hipMemcpy(d_input,
-                            input.data(),
-                            input.size() * sizeof(input[0]),
-                            hipMemcpyHostToDevice));
+        common::device_ptr<T>           d_input(input);
+        common::device_ptr<output_type> d_output(size);
 
-        HIP_CHECK(hipMalloc(&d_output, size * sizeof(output_type)));
-
-        const auto launch = [&]
+        if constexpr(IsBinary)
         {
-            auto transform_op = [](T v) { return v + T(5); };
-            return rocprim::transform<Config>(d_input,
-                                              d_output,
-                                              size,
-                                              transform_op,
-                                              stream,
-                                              debug_synchronous);
-        };
+            const std::vector<T> input2
+                = get_random_data<T>(size, random_range.first, random_range.second, seed.get_0());
+            common::device_ptr<T> d_input2(input2);
 
-        // Warm-up
-        for(size_t i = 0; i < warmup_size; ++i)
-        {
-            HIP_CHECK(launch());
-        }
-        HIP_CHECK(hipDeviceSynchronize());
-
-        // HIP events creation
-        hipEvent_t start, stop;
-        HIP_CHECK(hipEventCreate(&start));
-        HIP_CHECK(hipEventCreate(&stop));
-
-        // Run
-        for(auto _ : state)
-        {
-            // Record start event
-            HIP_CHECK(hipEventRecord(start, stream));
-
-            for(size_t i = 0; i < batch_size; ++i)
+            // If it is not a unary operator, it can not make use of the pointer optimization.
+            const auto launch = [&]
             {
-                HIP_CHECK(launch());
-            }
+                auto transform_op = [](T v1, T v2) { return v1 + v2; };
+                return rocprim::transform<Config>(rocprim::tuple(d_input.get(), d_input2.get()),
+                                                  d_output.get(),
+                                                  size,
+                                                  transform_op,
+                                                  stream,
+                                                  debug_synchronous);
+            };
 
-            // Record stop event and wait until it completes
-            HIP_CHECK(hipEventRecord(stop, stream));
-            HIP_CHECK(hipEventSynchronize(stop));
-
-            float elapsed_mseconds;
-            HIP_CHECK(hipEventElapsedTime(&elapsed_mseconds, start, stop));
-            state.SetIterationTime(elapsed_mseconds / 1000);
+            state.run([&] { HIP_CHECK(launch()); });
+            state.set_throughput(size, sizeof(T) + sizeof(T));
         }
+        else
+        {
+            const auto launch = [&]
+            {
+                auto transform_op = [](T v) { return v + T(5); };
+                return rocprim::detail::transform_impl<IsPointer, Config>(d_input.get(),
+                                                                          d_output.get(),
+                                                                          size,
+                                                                          transform_op,
+                                                                          stream,
+                                                                          debug_synchronous);
+            };
 
-        // Destroy HIP events
-        HIP_CHECK(hipEventDestroy(start));
-        HIP_CHECK(hipEventDestroy(stop));
-
-        state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(T));
-        state.SetItemsProcessed(state.iterations() * batch_size * size);
-
-        HIP_CHECK(hipFree(d_input));
-        HIP_CHECK(hipFree(d_output));
+            state.run([&] { HIP_CHECK(launch()); });
+            state.set_throughput(size, sizeof(T));
+        }
     }
 };
 
-template<typename T, unsigned int BlockSize>
+template<typename T, bool IsPointer, unsigned int BlockSize, rocprim::cache_load_modifier LoadType>
 struct device_transform_benchmark_generator
 {
 
     template<unsigned int ItemsPerThread>
     struct create_ipt
     {
-        using generated_config = rocprim::transform_config<BlockSize, 1 << ItemsPerThread>;
+        using generated_config = rocprim::
+            transform_config<BlockSize, 1 << ItemsPerThread, ROCPRIM_GRID_SIZE_LIMIT, LoadType>;
 
-        void operator()(std::vector<std::unique_ptr<config_autotune_interface>>& storage)
+        void operator()(std::vector<std::unique_ptr<benchmark_utils::autotune_interface>>& storage)
         {
             storage.emplace_back(
-                std::make_unique<device_transform_benchmark<T, generated_config>>());
+                std::make_unique<
+                    device_transform_benchmark<T, IsPointer, false, generated_config>>());
         }
     };
 
-    static void create(std::vector<std::unique_ptr<config_autotune_interface>>& storage)
+    static void create(std::vector<std::unique_ptr<benchmark_utils::autotune_interface>>& storage)
     {
         static constexpr unsigned int min_items_per_thread = 0;
         static constexpr unsigned int max_items_per_thread = rocprim::Log2<16>::VALUE;

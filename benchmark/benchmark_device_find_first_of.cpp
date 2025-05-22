@@ -23,15 +23,9 @@
 #include "benchmark_device_find_first_of.parallel.hpp"
 #include "benchmark_utils.hpp"
 
-// CmdParser
-#include "cmdparser.hpp"
-
 #ifndef BENCHMARK_CONFIG_TUNING
     #include "../common/utils_custom_type.hpp"
 #endif
-
-// Google Benchmark
-#include <benchmark/benchmark.h>
 
 // HIP API
 #include <hip/hip_runtime.h>
@@ -47,85 +41,28 @@
     #include <stdint.h>
 #endif
 
-#ifndef DEFAULT_BYTES
-constexpr size_t DEFAULT_BYTES = size_t{1} << 27; // 128 MiB
-#endif
-
-#define CREATE_BENCHMARK_FIND_FIRST_OF(TYPE, KEYS_SIZE, FIRST_OCCURENCE)                 \
-    {                                                                                    \
-        const device_find_first_of_benchmark<TYPE> instance(KEYS_SIZE, FIRST_OCCURENCE); \
-        REGISTER_BENCHMARK(benchmarks, size, seed, stream, instance);                    \
-    }
+#define CREATE_BENCHMARK_FIND_FIRST_OF(TYPE, KEYS_SIZE, FIRST_OCCURENCE) \
+    executor.queue_instance(device_find_first_of_benchmark<TYPE>(KEYS_SIZE, FIRST_OCCURENCE));
 
 // clang-format off
-#define CREATE_BENCHMARK0(TYPE, KEYS_SIZE)                   \
-    {                                                        \
-        CREATE_BENCHMARK_FIND_FIRST_OF(TYPE, KEYS_SIZE, 0.1) \
-        CREATE_BENCHMARK_FIND_FIRST_OF(TYPE, KEYS_SIZE, 0.5) \
-        CREATE_BENCHMARK_FIND_FIRST_OF(TYPE, KEYS_SIZE, 1.0) \
-    }
+#define CREATE_BENCHMARK0(TYPE, KEYS_SIZE) \
+    CREATE_BENCHMARK_FIND_FIRST_OF(TYPE, KEYS_SIZE, 0.1) \
+    CREATE_BENCHMARK_FIND_FIRST_OF(TYPE, KEYS_SIZE, 0.5) \
+    CREATE_BENCHMARK_FIND_FIRST_OF(TYPE, KEYS_SIZE, 1.0)
 
-#define CREATE_BENCHMARK(TYPE)         \
-    {                                  \
-        CREATE_BENCHMARK0(TYPE, 1)    \
-        CREATE_BENCHMARK0(TYPE, 10)    \
-        CREATE_BENCHMARK0(TYPE, 100)   \
-        CREATE_BENCHMARK0(TYPE, 1000)  \
-        CREATE_BENCHMARK0(TYPE, 10000) \
-    }
+#define CREATE_BENCHMARK(TYPE) \
+        CREATE_BENCHMARK0(TYPE, 1) \
+        CREATE_BENCHMARK0(TYPE, 10) \
+        CREATE_BENCHMARK0(TYPE, 100) \
+        CREATE_BENCHMARK0(TYPE, 1000) \
+        CREATE_BENCHMARK0(TYPE, 10000)
 // clang-format on
 
 int main(int argc, char* argv[])
 {
-    cli::Parser parser(argc, argv);
-    parser.set_optional<size_t>("size", "size", DEFAULT_BYTES, "number of bytes");
-    parser.set_optional<int>("trials", "trials", -1, "number of iterations");
-    parser.set_optional<std::string>("name_format",
-                                     "name_format",
-                                     "human",
-                                     "either: json,human,txt");
-    parser.set_optional<std::string>("seed", "seed", "random", get_seed_message());
-#ifdef BENCHMARK_CONFIG_TUNING
-    // optionally run an evenly split subset of benchmarks, when making multiple program invocations
-    parser.set_optional<int>("parallel_instance",
-                             "parallel_instance",
-                             0,
-                             "parallel instance index");
-    parser.set_optional<int>("parallel_instances",
-                             "parallel_instances",
-                             1,
-                             "total parallel instances");
-#endif
-    parser.run_and_exit_if_error();
+    benchmark_utils::executor executor(argc, argv, 128 * benchmark_utils::MiB, 10, 2);
 
-    // Parse argv
-    benchmark::Initialize(&argc, argv);
-    const size_t size   = parser.get<size_t>("size");
-    const int    trials = parser.get<int>("trials");
-    bench_naming::set_format(parser.get<std::string>("name_format"));
-    const std::string  seed_type = parser.get<std::string>("seed");
-    const managed_seed seed(seed_type);
-
-    // HIP
-    hipStream_t stream = 0; // default
-
-    // Benchmark info
-    add_common_benchmark_info();
-    benchmark::AddCustomContext("size", std::to_string(size));
-    benchmark::AddCustomContext("seed", seed_type);
-
-    // Add benchmarks
-    std::vector<benchmark::internal::Benchmark*> benchmarks{};
-#ifdef BENCHMARK_CONFIG_TUNING
-    const int parallel_instance  = parser.get<int>("parallel_instance");
-    const int parallel_instances = parser.get<int>("parallel_instances");
-    config_autotune_register::register_benchmark_subset(benchmarks,
-                                                        parallel_instance,
-                                                        parallel_instances,
-                                                        size,
-                                                        seed,
-                                                        stream);
-#else // BENCHMARK_CONFIG_TUNING
+#ifndef BENCHMARK_CONFIG_TUNING
     CREATE_BENCHMARK(int8_t)
     CREATE_BENCHMARK(int16_t)
     CREATE_BENCHMARK(int32_t)
@@ -140,25 +77,7 @@ int main(int argc, char* argv[])
 
     CREATE_BENCHMARK(custom_int2)
     CREATE_BENCHMARK(custom_longlong_double)
-#endif // BENCHMARK_CONFIG_TUNING
+#endif
 
-    // Use manual timing
-    for(auto& b : benchmarks)
-    {
-        b->UseManualTime();
-        b->Unit(benchmark::kMillisecond);
-    }
-
-    // Force number of iterations
-    if(trials > 0)
-    {
-        for(auto& b : benchmarks)
-        {
-            b->Iterations(trials);
-        }
-    }
-
-    // Run benchmarks
-    benchmark::RunSpecifiedBenchmarks();
-    return 0;
+    executor.run();
 }

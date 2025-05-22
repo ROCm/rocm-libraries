@@ -21,13 +21,9 @@
 // SOFTWARE.
 
 #include "benchmark_utils.hpp"
-// CmdParser
-#include "cmdparser.hpp"
 
 #include "../common/utils_data_generation.hpp"
-
-// Google Benchmark
-#include <benchmark/benchmark.h>
+#include "../common/utils_device_ptr.hpp"
 
 // HIP API
 #include <hip/hip_runtime.h>
@@ -43,10 +39,6 @@
 #include <stdint.h>
 #include <string>
 #include <vector>
-
-#ifndef DEFAULT_N
-const size_t DEFAULT_BYTES = 1024 * 1024 * 128 * 4;
-#endif
 
 template<typename T,
          unsigned int                        BlockSize,
@@ -78,7 +70,7 @@ void rank_kernel(const T* keys_input, unsigned int* ranks_output)
         while(begin_bit < end_bit)
         {
             const unsigned pass_bits = min(RadixBits, end_bit - begin_bit);
-            if ROCPRIM_IF_CONSTEXPR(Descending)
+            if constexpr(Descending)
             {
                 rank_type().rank_keys_desc(keys, ranks, storage, begin_bit, pass_bits);
             }
@@ -94,169 +86,89 @@ void rank_kernel(const T* keys_input, unsigned int* ranks_output)
 }
 
 template<typename T,
-         unsigned int                        BlockSize,
-         unsigned int                        ItemsPerThread,
+         size_t                              BlockSize,
+         size_t                              ItemsPerThread,
          rocprim::block_radix_rank_algorithm Algorithm,
-         unsigned int                        RadixBits  = 4,
+         size_t                              RadixBits  = 4,
          bool                                Descending = false,
-         unsigned int                        Trials     = 10>
-void run_benchmark(benchmark::State&   state,
-                   size_t              bytes,
-                   const managed_seed& seed,
-                   hipStream_t         stream)
+         size_t                              Trials     = 10>
+void run_benchmark(benchmark_utils::state&& state)
 {
+    const auto& bytes  = state.bytes;
+    const auto& seed   = state.seed;
+    const auto& stream = state.stream;
+
     // Calculate the number of elements N
-    size_t                 N               = bytes / sizeof(T);
-    constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
-    const unsigned int     grid_size       = ((N + items_per_block - 1) / items_per_block);
-    const unsigned int     size            = items_per_block * grid_size;
+    size_t           N               = bytes / sizeof(T);
+    constexpr size_t items_per_block = BlockSize * ItemsPerThread;
+    const size_t     grid_size       = ((N + items_per_block - 1) / items_per_block);
+    const size_t     size            = items_per_block * grid_size;
 
     std::vector<T> input = get_random_data<T>(size,
                                               common::generate_limits<T>::min(),
                                               common::generate_limits<T>::max(),
                                               seed.get_0());
 
-    T*            d_input;
-    unsigned int* d_output;
-    HIP_CHECK(hipMalloc(&d_input, size * sizeof(T)));
-    HIP_CHECK(hipMalloc(&d_output, size * sizeof(unsigned int)));
-    HIP_CHECK(hipMemcpy(d_input, input.data(), size * sizeof(T), hipMemcpyHostToDevice));
+    common::device_ptr<T>            d_input(input);
+    common::device_ptr<unsigned int> d_output(size);
     HIP_CHECK(hipDeviceSynchronize());
 
-    for(auto _ : state)
-    {
-        auto start = std::chrono::steady_clock::now();
+    state.run(
+        [&]
+        {
+            rank_kernel<T, BlockSize, ItemsPerThread, RadixBits, Descending, Algorithm, Trials>
+                <<<dim3(grid_size), dim3(BlockSize), 0, stream>>>(d_input.get(), d_output.get());
+            HIP_CHECK(hipGetLastError());
+        });
 
-        hipLaunchKernelGGL(HIP_KERNEL_NAME(rank_kernel<T,
-                                                       BlockSize,
-                                                       ItemsPerThread,
-                                                       RadixBits,
-                                                       Descending,
-                                                       Algorithm,
-                                                       Trials>),
-                           dim3(grid_size),
-                           dim3(BlockSize),
-                           0,
-                           stream,
-                           d_input,
-                           d_output);
-        HIP_CHECK(hipPeekAtLastError());
-        HIP_CHECK(hipDeviceSynchronize());
-
-        auto end = std::chrono::steady_clock::now();
-        auto elapsed_seconds
-            = std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
-        state.SetIterationTime(elapsed_seconds.count());
-    }
-    state.SetBytesProcessed(state.iterations() * Trials * size * sizeof(T));
-    state.SetItemsProcessed(state.iterations() * Trials * size);
-
-    HIP_CHECK(hipFree(d_input));
-    HIP_CHECK(hipFree(d_output));
+    state.set_throughput(size * Trials, sizeof(T));
 }
 
-#define CREATE_BENCHMARK(T, BS, IPT, KIND)                                                  \
-    benchmark::RegisterBenchmark(                                                           \
-        bench_naming::format_name("{lvl:block,algo:radix_rank,key_type:" #T ",cfg:{bs:" #BS \
-                                  ",ipt:" #IPT ",method:" #KIND "}}")                       \
-            .c_str(),                                                                       \
-        run_benchmark<T, BS, IPT, KIND>,                                                    \
-        bytes,                                                                              \
-        seed,                                                                               \
-        stream)
+#define CREATE_BENCHMARK(T, BS, IPT, KIND)                                                    \
+    executor.queue_fn(bench_naming::format_name("{lvl:block,algo:radix_rank,key_type:" #T     \
+                                                ",cfg:{bs:" #BS ",ipt:" #IPT ",method:" #KIND \
+                                                "}}")                                         \
+                          .c_str(),                                                           \
+                      run_benchmark<T, BS, IPT, KIND>);
 
 // clang-format off
-#define CREATE_BENCHMARK_KINDS(type, block, ipt)                                       \
-    CREATE_BENCHMARK(type, block, ipt, rocprim::block_radix_rank_algorithm::basic),         \
-    CREATE_BENCHMARK(type, block, ipt, rocprim::block_radix_rank_algorithm::basic_memoize), \
+#define CREATE_BENCHMARK_KINDS(type, block, ipt) \
+    CREATE_BENCHMARK(type, block, ipt, rocprim::block_radix_rank_algorithm::basic) \
+    CREATE_BENCHMARK(type, block, ipt, rocprim::block_radix_rank_algorithm::basic_memoize) \
     CREATE_BENCHMARK(type, block, ipt, rocprim::block_radix_rank_algorithm::match)
 
-#define BENCHMARK_TYPE(type, block)          \
-    CREATE_BENCHMARK_KINDS(type, block, 1),  \
-    CREATE_BENCHMARK_KINDS(type, block, 4),  \
-    CREATE_BENCHMARK_KINDS(type, block, 8),  \
-    CREATE_BENCHMARK_KINDS(type, block, 12), \
-    CREATE_BENCHMARK_KINDS(type, block, 16), \
+#define BENCHMARK_TYPE(type, block) \
+    CREATE_BENCHMARK_KINDS(type, block, 1) \
+    CREATE_BENCHMARK_KINDS(type, block, 4) \
+    CREATE_BENCHMARK_KINDS(type, block, 8) \
+    CREATE_BENCHMARK_KINDS(type, block, 12) \
+    CREATE_BENCHMARK_KINDS(type, block, 16) \
     CREATE_BENCHMARK_KINDS(type, block, 20)
 // clang-format on
 
-void add_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
-                    size_t                                        bytes,
-                    const managed_seed&                           seed,
-                    hipStream_t                                   stream)
-{
-    std::vector<benchmark::internal::Benchmark*> bs = {BENCHMARK_TYPE(int, 128),
-                                                       BENCHMARK_TYPE(int, 256),
-                                                       BENCHMARK_TYPE(int, 512),
-
-                                                       BENCHMARK_TYPE(uint8_t, 128),
-                                                       BENCHMARK_TYPE(uint8_t, 256),
-                                                       BENCHMARK_TYPE(uint8_t, 512),
-
-                                                       BENCHMARK_TYPE(long long, 128),
-                                                       BENCHMARK_TYPE(long long, 256),
-                                                       BENCHMARK_TYPE(long long, 512),
-
-                                                       BENCHMARK_TYPE(rocprim::int128_t, 128),
-                                                       BENCHMARK_TYPE(rocprim::int128_t, 256),
-                                                       BENCHMARK_TYPE(rocprim::int128_t, 512),
-
-                                                       BENCHMARK_TYPE(rocprim::uint128_t, 128),
-                                                       BENCHMARK_TYPE(rocprim::uint128_t, 256),
-                                                       BENCHMARK_TYPE(rocprim::uint128_t, 512)};
-
-    benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
-}
-
 int main(int argc, char* argv[])
 {
-    cli::Parser parser(argc, argv);
-    parser.set_optional<size_t>("size", "size", DEFAULT_BYTES, "number of bytes");
-    parser.set_optional<int>("trials", "trials", -1, "number of iterations");
-    parser.set_optional<std::string>("name_format",
-                                     "name_format",
-                                     "human",
-                                     "either: json,human,txt");
-    parser.set_optional<std::string>("seed", "seed", "random", get_seed_message());
-    parser.run_and_exit_if_error();
+    benchmark_utils::executor executor(argc, argv, 512 * benchmark_utils::MiB, 1, 0);
 
-    // Parse argv
-    benchmark::Initialize(&argc, argv);
-    const size_t bytes  = parser.get<size_t>("size");
-    const int    trials = parser.get<int>("trials");
-    bench_naming::set_format(parser.get<std::string>("name_format"));
-    const std::string  seed_type = parser.get<std::string>("seed");
-    const managed_seed seed(seed_type);
+    BENCHMARK_TYPE(int, 128)
+    BENCHMARK_TYPE(int, 256)
+    BENCHMARK_TYPE(int, 512)
 
-    // HIP
-    hipStream_t stream = 0; // default
+    BENCHMARK_TYPE(uint8_t, 128)
+    BENCHMARK_TYPE(uint8_t, 256)
+    BENCHMARK_TYPE(uint8_t, 512)
 
-    // Benchmark info
-    add_common_benchmark_info();
-    benchmark::AddCustomContext("bytes", std::to_string(bytes));
-    benchmark::AddCustomContext("seed", seed_type);
+    BENCHMARK_TYPE(long long, 128)
+    BENCHMARK_TYPE(long long, 256)
+    BENCHMARK_TYPE(long long, 512)
 
-    // Add benchmarks
-    std::vector<benchmark::internal::Benchmark*> benchmarks;
-    add_benchmarks(benchmarks, bytes, seed, stream);
+    BENCHMARK_TYPE(rocprim::int128_t, 128)
+    BENCHMARK_TYPE(rocprim::int128_t, 256)
+    BENCHMARK_TYPE(rocprim::int128_t, 512)
 
-    // Use manual timing
-    for(auto& b : benchmarks)
-    {
-        b->UseManualTime();
-        b->Unit(benchmark::kMillisecond);
-    }
+    BENCHMARK_TYPE(rocprim::uint128_t, 128)
+    BENCHMARK_TYPE(rocprim::uint128_t, 256)
+    BENCHMARK_TYPE(rocprim::uint128_t, 512)
 
-    // Force number of iterations
-    if(trials > 0)
-    {
-        for(auto& b : benchmarks)
-        {
-            b->Iterations(trials);
-        }
-    }
-
-    // Run benchmarks
-    benchmark::RunSpecifiedBenchmarks();
-    return 0;
+    executor.run();
 }

@@ -8,6 +8,16 @@
  Intrinsics
 ********************************************************************
 
+Hardware Architecture
+=====================
+
+.. doxygenfunction:: rocprim::arch::wavefront::size()
+.. doxygenfunction:: rocprim::arch::wavefront::min_size()
+.. doxygenfunction:: rocprim::arch::wavefront::max_size()
+
+.. doxygenenum:: rocprim::arch::wavefront::target
+.. doxygenfunction:: rocprim::arch::wavefront::target()
+.. doxygenfunction:: rocprim::arch::wavefront::size_from_target()
 
 Bitwise
 ========
@@ -21,10 +31,8 @@ Bitwise
 Warp size
 ===========
 
-.. doxygenfunction:: rocprim::warp_size()
 .. doxygenfunction:: rocprim::host_warp_size(const int device_id, unsigned int& warp_size)
 .. doxygenfunction:: rocprim::host_warp_size(const hipStream_t stream, unsigned int& warp_size)
-.. doxygenfunction:: rocprim::device_warp_size()
 
 Lane and Warp ID
 =================

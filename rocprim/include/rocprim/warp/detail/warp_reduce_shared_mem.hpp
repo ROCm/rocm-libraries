@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,9 +24,9 @@
 #include <type_traits>
 
 #include "../../config.hpp"
+#include "../../detail/various.hpp"
 #include "../../intrinsics.hpp"
 #include "../../types.hpp"
-#include "../../detail/various.hpp"
 
 #include "warp_segment_bounds.hpp"
 
@@ -35,16 +35,12 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-template<
-    class T,
-    unsigned int WarpSize,
-    bool UseAllReduce
->
+template<class T, unsigned int VirtualWaveSize, bool UseAllReduce>
 class warp_reduce_shared_mem
 {
     struct storage_type_
     {
-        T values[WarpSize];
+        T values[VirtualWaveSize];
     };
 
 public:
@@ -56,17 +52,17 @@ public:
     ROCPRIM_DEVICE ROCPRIM_INLINE
     void reduce(T input, T& output, storage_type& storage, BinaryFunction reduce_op)
     {
-        constexpr unsigned int ceiling = next_power_of_two(WarpSize);
-        const unsigned int lid = detail::logical_lane_id<WarpSize>();
-        storage_type_& storage_ = storage.get();
+        constexpr unsigned int ceiling  = next_power_of_two(VirtualWaveSize);
+        const unsigned int     lid      = detail::logical_lane_id<VirtualWaveSize>();
+        storage_type_&         storage_ = storage.get();
 
-        output = input;
+        output               = input;
         storage_.values[lid] = output;
         ::rocprim::wave_barrier();
         ROCPRIM_UNROLL
         for(unsigned int i = ceiling >> 1; i > 0; i >>= 1)
         {
-            const bool do_op = lid + i < WarpSize && lid < i;
+            const bool do_op = lid + i < VirtualWaveSize && lid < i;
             if(do_op)
             {
                 output  = storage_.values[lid];
@@ -85,20 +81,23 @@ public:
 
     template<class BinaryFunction>
     ROCPRIM_DEVICE ROCPRIM_INLINE
-    void reduce(T input, T& output, unsigned int valid_items,
-                storage_type& storage, BinaryFunction reduce_op)
+    void reduce(T              input,
+                T&             output,
+                unsigned int   valid_items,
+                storage_type&  storage,
+                BinaryFunction reduce_op)
     {
-        constexpr unsigned int ceiling = next_power_of_two(WarpSize);
-        const unsigned int lid = detail::logical_lane_id<WarpSize>();
-        storage_type_& storage_ = storage.get();
+        constexpr unsigned int ceiling  = next_power_of_two(VirtualWaveSize);
+        const unsigned int     lid      = detail::logical_lane_id<VirtualWaveSize>();
+        storage_type_&         storage_ = storage.get();
 
-        output = input;
+        output               = input;
         storage_.values[lid] = output;
         ::rocprim::wave_barrier();
         ROCPRIM_UNROLL
         for(unsigned int i = ceiling >> 1; i > 0; i >>= 1)
         {
-            const bool do_op = (lid + i) < WarpSize && lid < i && (lid + i) < valid_items;
+            const bool do_op = (lid + i) < VirtualWaveSize && lid < i && (lid + i) < valid_items;
             if(do_op)
             {
                 output  = storage_.values[lid];
@@ -117,16 +116,16 @@ public:
 
     template<class Flag, class BinaryFunction>
     ROCPRIM_DEVICE ROCPRIM_INLINE
-    void head_segmented_reduce(T input, T& output, Flag flag,
-                               storage_type& storage, BinaryFunction reduce_op)
+    void head_segmented_reduce(
+        T input, T& output, Flag flag, storage_type& storage, BinaryFunction reduce_op)
     {
         this->segmented_reduce<true>(input, output, flag, storage, reduce_op);
     }
 
     template<class Flag, class BinaryFunction>
     ROCPRIM_DEVICE ROCPRIM_INLINE
-    void tail_segmented_reduce(T input, T& output, Flag flag,
-                               storage_type& storage, BinaryFunction reduce_op)
+    void tail_segmented_reduce(
+        T input, T& output, Flag flag, storage_type& storage, BinaryFunction reduce_op)
     {
         this->segmented_reduce<false>(input, output, flag, storage, reduce_op);
     }
@@ -134,14 +133,14 @@ public:
 private:
     template<bool HeadSegmented, class Flag, class BinaryFunction>
     ROCPRIM_DEVICE ROCPRIM_INLINE
-    void segmented_reduce(T input, T& output, Flag flag,
-                          storage_type& storage, BinaryFunction reduce_op)
+    void segmented_reduce(
+        T input, T& output, Flag flag, storage_type& storage, BinaryFunction reduce_op)
     {
-        const unsigned int lid = detail::logical_lane_id<WarpSize>();
-        constexpr unsigned int ceiling = next_power_of_two(WarpSize);
-        storage_type_& storage_ = storage.get();
+        const unsigned int     lid      = detail::logical_lane_id<VirtualWaveSize>();
+        constexpr unsigned int ceiling  = next_power_of_two(VirtualWaveSize);
+        storage_type_&         storage_ = storage.get();
         // Get logical lane id of the last valid value in the segment
-        auto last = last_in_warp_segment<HeadSegmented, WarpSize>(flag);
+        auto last = last_in_warp_segment<HeadSegmented, VirtualWaveSize>(flag);
 
         output = input;
         ROCPRIM_UNROLL
@@ -152,7 +151,7 @@ private:
             if((lid + i) <= last)
             {
                 T other = storage_.values[lid + i];
-                output = reduce_op(output, other);
+                output  = reduce_op(output, other);
             }
             ::rocprim::wave_barrier();
         }
@@ -160,18 +159,16 @@ private:
 
     template<bool Switch>
     ROCPRIM_DEVICE ROCPRIM_INLINE
-    typename std::enable_if<(Switch == false)>::type
-    set_output(T& output, storage_type& storage)
+    typename std::enable_if<(Switch == false)>::type set_output(T& output, storage_type& storage)
     {
-        (void) output;
-        (void) storage;
+        (void)output;
+        (void)storage;
         // output already set correctly
     }
 
     template<bool Switch>
     ROCPRIM_DEVICE ROCPRIM_INLINE
-    typename std::enable_if<(Switch == true)>::type
-    set_output(T& output, storage_type& storage)
+    typename std::enable_if<(Switch == true)>::type set_output(T& output, storage_type& storage)
     {
         storage_type_& storage_ = storage.get();
         output                  = storage_.values[0];
