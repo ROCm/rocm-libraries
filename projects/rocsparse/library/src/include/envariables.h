@@ -55,7 +55,8 @@ namespace rocsparse
     ENVARIABLE(MEMSTAT_FORCE_MANAGED)   \
     ENVARIABLE(DEBUG_FORCE_HOST_ASSERT) \
     ENVARIABLE(MEMSTAT_GUARDS)          \
-    ENVARIABLE(ROCTX)
+    ENVARIABLE(ROCTX)                   \
+    ENVARIABLE(DEBUG_WARNINGS)
 
         //
         // Specification of the enum and the array of all values.

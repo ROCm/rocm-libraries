@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -41,6 +41,7 @@ namespace rocsparse
         bool debug_arguments_verbose;
         bool debug_kernel_launch;
         bool debug_force_host_assert;
+        bool debug_warnings;
 
     public:
         bool get_debug() const;
@@ -49,6 +50,7 @@ namespace rocsparse
         bool get_debug_arguments() const;
         bool get_debug_arguments_verbose() const;
         bool get_debug_force_host_assert() const;
+        bool get_debug_warnings() const;
 
         void set_debug(bool value);
         void set_debug_verbose(bool value);
@@ -56,6 +58,7 @@ namespace rocsparse
         void set_debug_kernel_launch(bool value);
         void set_debug_arguments_verbose(bool value);
         void set_debug_force_host_assert(bool value);
+        void set_debug_warnings(bool value);
     };
 
     struct debug_st
@@ -104,6 +107,11 @@ namespace rocsparse
                     rocsparse::envariables::names[rocsparse::envariables::DEBUG_FORCE_HOST_ASSERT]))
                     ? debug
                     : ROCSPARSE_ENVARIABLES.get(rocsparse::envariables::DEBUG_FORCE_HOST_ASSERT));
+
+            m_var.set_debug_verbose(
+                (!getenv(rocsparse::envariables::names[rocsparse::envariables::DEBUG_WARNINGS]))
+                    ? debug
+                    : ROCSPARSE_ENVARIABLES.get(rocsparse::envariables::DEBUG_WARNINGS));
 
             const bool debug_kernel_launch
                 = ROCSPARSE_ENVARIABLES.get(rocsparse::envariables::DEBUG_KERNEL_LAUNCH);
