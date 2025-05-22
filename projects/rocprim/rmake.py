@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 """ Copyright (c) 2021-2025 Advanced Micro Devices, Inc. All rights reserved.
-Manage build and installation"""
+Manage the build and installation"""
 
 import re
 import sys

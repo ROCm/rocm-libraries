@@ -17,7 +17,7 @@ on:
       #- 'develop'
       #- 'staging'
       #- 'main'
-  paths-ignore:
+    paths-ignore:
       - '.github/**'
       - 'docs/**'
       - '*.md'
