@@ -77,7 +77,6 @@ jobs:
     #       python TheRock/build_tools/github_actions/patch_monorepo.py \
     #         --repo rocm-libraries
 
-        # get the script, see what PR items there are (or do checkout process or share with Joseph's work)
       - name: Detect changed subtrees
         id: detect
         if: github.event_name == 'pull_request'
@@ -109,8 +108,7 @@ jobs:
     with:
       amdgpu_families: "gfx94X-dcgpu"
       expect_failure: false
-    #   extra_cmake_options: "-DTHEROCK_USE_EXTERNAL_ROCM_LIBRARIES=ON -DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=rocm-libraries -DTHEROCK_ENABLE_PRIM=ON -DTHEROCK_ENABLE_ALL=OFF"
-      extra_cmake_options: "-DTHEROCK_ENABLE_PRIM=ON -DTHEROCK_ENABLE_ALL=OFF"
+      extra_cmake_options: "-DTHEROCK_USE_EXTERNAL_ROCM_LIBRARIES=ON -DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=${{ github.workspace }}/rocm-libraries -DTHEROCK_ENABLE_PRIM=ON -DTHEROCK_ENABLE_ALL=OFF"
 
   therock-test-linux:
     name: "rocPRIM math-lib test"
