@@ -244,6 +244,9 @@ hipError_t segmented_reduce(void * temporary_storage,
                             hipStream_t stream = 0,
                             bool debug_synchronous = false)
 {
+    // Clear any existing error
+    (void) hipGetLastError();
+
     return detail::segmented_reduce_impl<Config>(
         temporary_storage, storage_size,
         input, output,

@@ -267,7 +267,6 @@ TYPED_TEST(RocprimDeviceFindFirstOfTests, FindFirstOf)
                     gHelper.createAndLaunchGraph(stream);
                 }
 
-                HIP_CHECK(hipGetLastError());
                 HIP_CHECK(hipDeviceSynchronize());
 
                 // Copy output to host
@@ -357,7 +356,6 @@ TEST(RocprimDeviceFindFirstOfTests, LargeIndices)
                                                      stream,
                                                      debug_synchronous));
 
-            HIP_CHECK(hipGetLastError());
             HIP_CHECK(hipDeviceSynchronize());
 
             // Copy output to host and check

@@ -232,7 +232,6 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKey)
                 gHelper.createAndLaunchGraph(stream);
             }
 
-            HIP_CHECK(hipGetLastError());
             HIP_CHECK(hipDeviceSynchronize());
 
             ASSERT_FALSE(out_of_bounds.get());
@@ -398,7 +397,6 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKeyValue)
                 gHelper.createAndLaunchGraph(stream, true, false);
             }
 
-            HIP_CHECK(hipGetLastError());
             HIP_CHECK(hipDeviceSynchronize());
 
             ASSERT_FALSE(out_of_bounds.get());

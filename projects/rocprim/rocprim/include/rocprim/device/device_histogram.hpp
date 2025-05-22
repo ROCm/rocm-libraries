@@ -502,6 +502,9 @@ inline hipError_t histogram_even(void*          temporary_storage,
                                  hipStream_t    stream            = 0,
                                  bool           debug_synchronous = false)
 {
+    // Clear any existing error
+    (void) hipGetLastError();
+
     Counter*     histogram_single[1]   = {histogram};
     unsigned int levels_single[1]      = {levels};
     Level        lower_level_single[1] = {lower_level};
@@ -611,6 +614,9 @@ inline hipError_t histogram_even(void*          temporary_storage,
                                  hipStream_t    stream            = 0,
                                  bool           debug_synchronous = false)
 {
+    // Clear any existing error
+    (void) hipGetLastError();
+
     Counter*     histogram_single[1]   = {histogram};
     unsigned int levels_single[1]      = {levels};
     Level        lower_level_single[1] = {lower_level};
@@ -731,6 +737,9 @@ inline hipError_t multi_histogram_even(void*          temporary_storage,
                                        hipStream_t    stream            = 0,
                                        bool           debug_synchronous = false)
 {
+    // Clear any existing error
+    (void) hipGetLastError();
+
     return detail::histogram_even_impl<Channels, ActiveChannels, Config>(temporary_storage,
                                                                          storage_size,
                                                                          samples,
@@ -856,6 +865,9 @@ inline hipError_t multi_histogram_even(void*          temporary_storage,
                                        hipStream_t    stream            = 0,
                                        bool           debug_synchronous = false)
 {
+    // Clear any existing error
+    (void) hipGetLastError();
+
     return detail::histogram_even_impl<Channels, ActiveChannels, Config>(temporary_storage,
                                                                          storage_size,
                                                                          samples,
@@ -946,6 +958,9 @@ inline hipError_t histogram_range(void*          temporary_storage,
                                   hipStream_t    stream            = 0,
                                   bool           debug_synchronous = false)
 {
+    // Clear any existing error
+    (void) hipGetLastError();
+
     Counter*     histogram_single[1]    = {histogram};
     unsigned int levels_single[1]       = {levels};
     Level*       level_values_single[1] = {level_values};
@@ -1049,6 +1064,9 @@ inline hipError_t histogram_range(void*          temporary_storage,
                                   hipStream_t    stream            = 0,
                                   bool           debug_synchronous = false)
 {
+    // Clear any existing error
+    (void) hipGetLastError();
+
     Counter*     histogram_single[1]    = {histogram};
     unsigned int levels_single[1]       = {levels};
     Level*       level_values_single[1] = {level_values};
@@ -1162,6 +1180,9 @@ inline hipError_t multi_histogram_range(void*          temporary_storage,
                                         hipStream_t    stream            = 0,
                                         bool           debug_synchronous = false)
 {
+    // Clear any existing error
+    (void) hipGetLastError();
+
     return detail::histogram_range_impl<Channels, ActiveChannels, Config>(temporary_storage,
                                                                           storage_size,
                                                                           samples,
@@ -1282,6 +1303,9 @@ inline hipError_t multi_histogram_range(void*          temporary_storage,
                                         hipStream_t    stream            = 0,
                                         bool           debug_synchronous = false)
 {
+    // Clear any existing error
+    (void) hipGetLastError();
+
     return detail::histogram_range_impl<Channels, ActiveChannels, Config>(temporary_storage,
                                                                           storage_size,
                                                                           samples,

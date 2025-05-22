@@ -198,7 +198,6 @@ TYPED_TEST(RocprimDeviceSortTests, SortKey)
                 gHelper.createAndLaunchGraph(stream);
             }
 
-            HIP_CHECK(hipGetLastError());
             HIP_CHECK(hipDeviceSynchronize());
 
             // Copy output to host
@@ -327,7 +326,6 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
                 gHelper.createAndLaunchGraph(stream, true, false);
             }
 
-            HIP_CHECK(hipGetLastError());
             HIP_CHECK(hipDeviceSynchronize());
 
             // Copy output to host

@@ -127,7 +127,6 @@ TYPED_TEST(RocprimTextureCacheIteratorTests, Transform)
         // Run
         HIP_CHECK(
             rocprim::transform(x, d_output.get(), size, transform<T>(), stream, debug_synchronous));
-        HIP_CHECK(hipGetLastError());
         HIP_CHECK(hipDeviceSynchronize());
 
         // Copy output to host

@@ -233,18 +233,23 @@ TYPED_TEST(HipcubBlockRunLengthDecodeTest, TestDecode)
         common::device_ptr<ItemT>   d_decoded_runs(expected.size());
         common::device_ptr<LengthT> d_decoded_offsets(expected.size());
 
-        block_run_length_decode_kernel<ItemT,
+        HIP_CHECK_LAUNCH_SYNC(
+            hipLaunchKernelGGL(
+                HIP_KERNEL_NAME(block_run_length_decode_kernel<ItemT,
                                        LengthT,
                                        block_size,
                                        runs_per_thread,
-                                       decoded_items_per_thread>
-            <<<dim3(1), dim3(block_size), 0, 0>>>(d_run_items.get(),
-                                                  d_run_lengths.get(),
-                                                  d_decoded_runs.get(),
-                                                  d_decoded_offsets.get());
-
-        HIP_CHECK(hipPeekAtLastError());
-        HIP_CHECK(hipDeviceSynchronize());
+                                       decoded_items_per_thread>),
+                dim3(1),
+                dim3(block_size),
+                0,
+                0,
+                d_run_items.get(),
+                d_run_lengths.get(),
+                d_decoded_runs.get(),
+                d_decoded_offsets.get()
+            )
+        );
 
         std::vector<ItemT>   output  = d_decoded_runs.load();
         std::vector<LengthT> offsets = d_decoded_offsets.load();

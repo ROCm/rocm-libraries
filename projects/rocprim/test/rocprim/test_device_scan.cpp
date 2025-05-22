@@ -331,7 +331,6 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanEmptyInput)
         gHelper.createAndLaunchGraph(stream, true, false);
     }
 
-    HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipDeviceSynchronize());
 
     ASSERT_FALSE(out_of_bounds.get());
@@ -455,7 +454,6 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScan)
                 gHelper.createAndLaunchGraph(stream, true, false);
             }
 
-            HIP_CHECK(hipGetLastError());
             HIP_CHECK(hipDeviceSynchronize());
 
             // Copy output to host
@@ -598,7 +596,6 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScan)
                 gHelper.createAndLaunchGraph(stream, true, false);
             }
 
-            HIP_CHECK(hipGetLastError());
             HIP_CHECK(hipDeviceSynchronize());
 
             // Copy output to host
@@ -748,7 +745,6 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanByKey)
                 gHelper.createAndLaunchGraph(stream, true, false);
             }
 
-            HIP_CHECK(hipGetLastError());
             HIP_CHECK(hipDeviceSynchronize());
 
             // Copy output to host
@@ -897,7 +893,6 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanByKey)
                 gHelper.createAndLaunchGraph(stream, true, false);
             }
 
-            HIP_CHECK(hipGetLastError());
             HIP_CHECK(hipDeviceSynchronize());
 
             // Copy output to host
@@ -1059,7 +1054,6 @@ void testLargeIndicesInclusiveScan()
                 gHelper.createAndLaunchGraph(stream, true, false);
             }
 
-            HIP_CHECK(hipGetLastError());
             HIP_CHECK(hipDeviceSynchronize());
 
             // Copy output to host
@@ -1177,7 +1171,6 @@ void testLargeIndicesExclusiveScan()
                 gHelper.createAndLaunchGraph(stream, true, false);
             }
 
-            HIP_CHECK(hipGetLastError());
             HIP_CHECK(hipDeviceSynchronize());
 
             // Copy output to host
@@ -1421,8 +1414,6 @@ void large_indices_scan_by_key_test(ScanByKeyFun scan_by_key_fun)
     {
         gHelper.createAndLaunchGraph(stream);
     }
-
-    HIP_CHECK(hipGetLastError());
 
     const auto incorrect_flag = d_incorrect_flag.load()[0];
 
@@ -1669,7 +1660,6 @@ TYPED_TEST(RocprimDeviceScanFutureTests, ExclusiveScan)
                 scan_op,
                 stream,
                 debug_synchronous)));
-            HIP_CHECK(hipGetLastError());
 
             if(TestFixture::use_graphs)
             {

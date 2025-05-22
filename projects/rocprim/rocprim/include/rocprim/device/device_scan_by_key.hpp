@@ -411,6 +411,9 @@ inline hipError_t inclusive_scan_by_key(void* const                temporary_sto
                                         const hipStream_t stream            = 0,
                                         const bool        debug_synchronous = false)
 {
+    // Clear any existing error
+    (void) hipGetLastError();
+
     using value_type = typename std::iterator_traits<ValuesInputIterator>::value_type;
     return detail::scan_by_key_impl<detail::lookback_scan_determinism::default_determinism,
                                     false,
@@ -463,6 +466,9 @@ inline hipError_t deterministic_inclusive_scan_by_key(void* const               
                                                       const hipStream_t stream            = 0,
                                                       const bool        debug_synchronous = false)
 {
+    // Clear any existing error
+    (void) hipGetLastError();
+
     using value_type = typename std::iterator_traits<ValuesInputIterator>::value_type;
     return detail::scan_by_key_impl<detail::lookback_scan_determinism::deterministic,
                                     false,
@@ -609,6 +615,9 @@ inline hipError_t exclusive_scan_by_key(void* const                temporary_sto
                                         const hipStream_t stream            = 0,
                                         const bool        debug_synchronous = false)
 {
+    // Clear any existing error
+    (void) hipGetLastError();
+
     return detail::scan_by_key_impl<detail::lookback_scan_determinism::default_determinism,
                                     true,
                                     Config,
@@ -662,6 +671,9 @@ inline hipError_t deterministic_exclusive_scan_by_key(void* const               
                                                       const hipStream_t stream            = 0,
                                                       const bool        debug_synchronous = false)
 {
+    // Clear any existing error
+    (void) hipGetLastError();
+
     return detail::scan_by_key_impl<detail::lookback_scan_determinism::deterministic,
                                     true,
                                     Config,

@@ -94,6 +94,9 @@ hipError_t search_n(void*          temporary_storage,
                     const hipStream_t     stream            = static_cast<hipStream_t>(0),
                     const bool            debug_synchronous = false)
 {
+    // Clear any existing error
+    (void) hipGetLastError();
+
     return detail::search_n_impl<Config>(temporary_storage,
                                          storage_size,
                                          input,

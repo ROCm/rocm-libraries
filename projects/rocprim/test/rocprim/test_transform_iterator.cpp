@@ -156,7 +156,7 @@ TYPED_TEST(RocprimTransformIteratorTests, TransformReduce)
                                   reduce_op,
                                   stream,
                                   TestFixture::debug_synchronous));
-        HIP_CHECK(hipGetLastError());
+
         HIP_CHECK(hipDeviceSynchronize());
 
         output = d_output.load();

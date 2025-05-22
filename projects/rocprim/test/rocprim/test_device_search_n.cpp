@@ -197,7 +197,6 @@ TYPED_TEST(RocprimDeviceSearchNTests, RandomTest)
                 gHelper.createAndLaunchGraph(stream);
             }
 
-            HIP_CHECK(hipGetLastError());
             HIP_CHECK(hipStreamSynchronize(stream));
 
             const auto expected
@@ -290,7 +289,6 @@ TYPED_TEST(RocprimDeviceSearchNTests, MaxCount)
                 gHelper.createAndLaunchGraph(stream);
             }
 
-            HIP_CHECK(hipGetLastError());
             HIP_CHECK(hipStreamSynchronize(stream));
 
             const auto expected
@@ -483,7 +481,6 @@ TYPED_TEST(RocprimDeviceSearchNTests, SmallCount)
                 gHelper.createAndLaunchGraph(stream);
             }
 
-            HIP_CHECK(hipGetLastError());
             HIP_CHECK(hipStreamSynchronize(stream));
 
             const auto expected
@@ -577,7 +574,6 @@ TYPED_TEST(RocprimDeviceSearchNTests, StartFromBegin)
                 gHelper.createAndLaunchGraph(stream);
             }
 
-            HIP_CHECK(hipGetLastError());
             HIP_CHECK(hipStreamSynchronize(stream));
 
             const auto expected
@@ -671,7 +667,6 @@ TYPED_TEST(RocprimDeviceSearchNTests, StartFromMiddle)
                 gHelper.createAndLaunchGraph(stream);
             }
 
-            HIP_CHECK(hipGetLastError());
             HIP_CHECK(hipStreamSynchronize(stream));
 
             const auto expected
@@ -765,7 +760,6 @@ TYPED_TEST(RocprimDeviceSearchNTests, StartFromEnd)
                 gHelper.createAndLaunchGraph(stream);
             }
 
-            HIP_CHECK(hipGetLastError());
             HIP_CHECK(hipStreamSynchronize(stream));
 
             const auto expected
@@ -863,7 +857,6 @@ TYPED_TEST(RocprimDeviceSearchNTests, StartFromEndButFail)
                 gHelper.createAndLaunchGraph(stream);
             }
 
-            HIP_CHECK(hipGetLastError());
             HIP_CHECK(hipStreamSynchronize(stream));
 
             const auto expected
@@ -983,7 +976,6 @@ TYPED_TEST(RocprimDeviceSearchNTests, NoiseTest_1block)
                 gHelper.createAndLaunchGraph(stream);
             }
 
-            HIP_CHECK(hipGetLastError());
             HIP_CHECK(hipStreamSynchronize(stream));
 
             const auto expected
@@ -1103,7 +1095,6 @@ TYPED_TEST(RocprimDeviceSearchNTests, NoiseTest_2block)
                 gHelper.createAndLaunchGraph(stream);
             }
 
-            HIP_CHECK(hipGetLastError());
             HIP_CHECK(hipStreamSynchronize(stream));
 
             const auto expected
@@ -1223,7 +1214,6 @@ TYPED_TEST(RocprimDeviceSearchNTests, NoiseTest_3block)
                 gHelper.createAndLaunchGraph(stream);
             }
 
-            HIP_CHECK(hipGetLastError());
             HIP_CHECK(hipStreamSynchronize(stream));
 
             const auto expected
@@ -1345,7 +1335,6 @@ TYPED_TEST(RocprimDeviceSearchNTests, MultiResult1)
                 gHelper.createAndLaunchGraph(stream);
             }
 
-            HIP_CHECK(hipGetLastError());
             HIP_CHECK(hipStreamSynchronize(stream));
 
             const auto expected
@@ -1460,7 +1449,6 @@ TYPED_TEST(RocprimDeviceSearchNTests, MultiResult2)
                 gHelper.createAndLaunchGraph(stream);
             }
 
-            HIP_CHECK(hipGetLastError());
             HIP_CHECK(hipStreamSynchronize(stream));
 
             const auto expected

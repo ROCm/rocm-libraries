@@ -53,10 +53,16 @@ bool test_func(int block_count, int thread_count)
 {
     common::device_ptr<unsigned int> d_flags(block_count);
 
-    test_kernel<<<block_count, thread_count>>>(d_flags.get());
-
-    HIP_CHECK(hipGetLastError());
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK_LAUNCH_SYNC(
+        hipLaunchKernelGGL(
+            test_kernel,
+            dim3(block_count),
+            dim3(thread_count),
+            0,
+            0,
+            d_flags.get()
+        )
+    );
 
     auto h_vec = d_flags.load();
     for(const auto i : h_vec)

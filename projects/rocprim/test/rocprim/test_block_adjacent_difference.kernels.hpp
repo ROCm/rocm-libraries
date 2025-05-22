@@ -439,17 +439,18 @@ auto test_block_adjacent_difference() -> typename std::enable_if<Method == 0>::t
         common::device_ptr<long long> device_heads(size);
 
         // Running kernel
-        hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(
-                flag_heads_kernel<type, flag_type, flag_op_type, block_size, items_per_thread>),
-            dim3(grid_size),
-            dim3(block_size),
-            0,
-            0,
-            device_input.get(),
-            device_heads.get());
-        HIP_CHECK(hipGetLastError());
-        HIP_CHECK(hipDeviceSynchronize());
+        HIP_CHECK_LAUNCH_SYNC(
+            hipLaunchKernelGGL(
+                HIP_KERNEL_NAME(
+                    flag_heads_kernel<type, flag_type, flag_op_type, block_size, items_per_thread>),
+                dim3(grid_size),
+                dim3(block_size),
+                0,
+                0,
+                device_input.get(),
+                device_heads.get()
+            )
+        );
 
         // Reading results
         const auto heads = device_heads.load();
@@ -541,17 +542,18 @@ auto test_block_adjacent_difference() -> typename std::enable_if<Method == 1>::t
         common::device_ptr<long long> device_tails(size);
 
         // Running kernel
-        hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(
-                flag_tails_kernel<type, flag_type, flag_op_type, block_size, items_per_thread>),
-            dim3(grid_size),
-            dim3(block_size),
-            0,
-            0,
-            device_input.get(),
-            device_tails.get());
-        HIP_CHECK(hipGetLastError());
-        HIP_CHECK(hipDeviceSynchronize());
+        HIP_CHECK_LAUNCH_SYNC(
+            hipLaunchKernelGGL(
+                HIP_KERNEL_NAME(
+                    flag_tails_kernel<type, flag_type, flag_op_type, block_size, items_per_thread>),
+                dim3(grid_size),
+                dim3(block_size),
+                0,
+                0,
+                device_input.get(),
+                device_tails.get()
+            )
+        );
 
         // Reading results
         const auto tails = device_tails.load();
@@ -659,20 +661,21 @@ auto test_block_adjacent_difference() -> typename std::enable_if<Method == 2>::t
         common::device_ptr<long long> device_tails(size);
 
         // Running kernel
-        hipLaunchKernelGGL(HIP_KERNEL_NAME(flag_heads_and_tails_kernel<type,
-                                                                       flag_type,
-                                                                       flag_op_type,
-                                                                       block_size,
-                                                                       items_per_thread>),
-                           dim3(grid_size),
-                           dim3(block_size),
-                           0,
-                           0,
-                           device_input.get(),
-                           device_heads.get(),
-                           device_tails.get());
-        HIP_CHECK(hipGetLastError());
-        HIP_CHECK(hipDeviceSynchronize());
+        HIP_CHECK_LAUNCH_SYNC(
+            hipLaunchKernelGGL(HIP_KERNEL_NAME(flag_heads_and_tails_kernel<type,
+                                               flag_type,
+                                               flag_op_type,
+                                               block_size,
+                                               items_per_thread>),
+                               dim3(grid_size),
+                               dim3(block_size),
+                               0,
+                               0,
+                               device_input.get(),
+                               device_heads.get(),
+                               device_tails.get()
+            )
+        );
 
         // Reading results
         const auto heads = device_heads.load();
@@ -749,19 +752,21 @@ auto test_block_adjacent_difference() -> typename std::enable_if<Method == 3>::t
         common::device_ptr<stored_type> d_output(size);
 
         // Running kernel
-        hipLaunchKernelGGL(HIP_KERNEL_NAME(subtract_left_kernel<T,
-                                                                Output,
-                                                                stored_type,
-                                                                BinaryFunction,
-                                                                block_size,
-                                                                items_per_thread>),
-                           dim3(grid_size),
-                           dim3(block_size),
-                           0,
-                           0,
-                           d_input.get(),
-                           d_output.get());
-        HIP_CHECK(hipGetLastError());
+        HIP_CHECK_LAUNCH_SYNC(
+            hipLaunchKernelGGL(HIP_KERNEL_NAME(subtract_left_kernel<T,
+                                               Output,
+                                               stored_type,
+                                               BinaryFunction,
+                                               block_size,
+                                               items_per_thread>),
+                               dim3(grid_size),
+                               dim3(block_size),
+                               0,
+                               0,
+                               d_input.get(),
+                               d_output.get()
+            )
+        );
 
         // Reading results
         const auto output = d_output.load();
@@ -836,19 +841,21 @@ auto test_block_adjacent_difference() -> typename std::enable_if<Method == 4>::t
         common::device_ptr<stored_type> d_output(size);
 
         // Running kernel
-        hipLaunchKernelGGL(HIP_KERNEL_NAME(subtract_right_kernel<T,
-                                                                 Output,
-                                                                 stored_type,
-                                                                 BinaryFunction,
-                                                                 block_size,
-                                                                 items_per_thread>),
-                           dim3(grid_size),
-                           dim3(block_size),
-                           0,
-                           0,
-                           d_input.get(),
-                           d_output.get());
-        HIP_CHECK(hipGetLastError());
+        HIP_CHECK_LAUNCH_SYNC(
+            hipLaunchKernelGGL(HIP_KERNEL_NAME(subtract_right_kernel<T,
+                                               Output,
+                                               stored_type,
+                                               BinaryFunction,
+                                               block_size,
+                                               items_per_thread>),
+                               dim3(grid_size),
+                               dim3(block_size),
+                               0,
+                               0,
+                               d_input.get(),
+                               d_output.get()
+            )
+        );
 
         // Reading results
         const auto output = d_output.load();
@@ -937,20 +944,22 @@ auto test_block_adjacent_difference() -> typename std::enable_if<Method == 5>::t
         common::device_ptr<stored_type>  d_output(size);
 
         // Running kernel
-        hipLaunchKernelGGL(HIP_KERNEL_NAME(subtract_left_partial_kernel<T,
-                                                                        Output,
-                                                                        stored_type,
-                                                                        BinaryFunction,
-                                                                        block_size,
-                                                                        items_per_thread>),
-                           dim3(grid_size),
-                           dim3(block_size),
-                           0,
-                           0,
-                           d_input.get(),
-                           d_tile_sizes.get(),
-                           d_output.get());
-        HIP_CHECK(hipGetLastError());
+        HIP_CHECK_LAUNCH_SYNC(
+            hipLaunchKernelGGL(HIP_KERNEL_NAME(subtract_left_partial_kernel<T,
+                                               Output,
+                                               stored_type,
+                                               BinaryFunction,
+                                               block_size,
+                                               items_per_thread>),
+                               dim3(grid_size),
+                               dim3(block_size),
+                               0,
+                               0,
+                               d_input.get(),
+                               d_tile_sizes.get(),
+                               d_output.get()
+            )
+        );
 
         // Reading results
         const auto output = d_output.load();
@@ -1039,20 +1048,22 @@ auto test_block_adjacent_difference() -> typename std::enable_if<Method == 6>::t
         common::device_ptr<stored_type>  d_output(size);
 
         // Running kernel
-        hipLaunchKernelGGL(HIP_KERNEL_NAME(subtract_right_partial_kernel<T,
-                                                                         Output,
-                                                                         stored_type,
-                                                                         BinaryFunction,
-                                                                         block_size,
-                                                                         items_per_thread>),
-                           dim3(grid_size),
-                           dim3(block_size),
-                           0,
-                           0,
-                           d_input.get(),
-                           d_tile_sizes.get(),
-                           d_output.get());
-        HIP_CHECK(hipGetLastError());
+        HIP_CHECK_LAUNCH_SYNC(
+            hipLaunchKernelGGL(HIP_KERNEL_NAME(subtract_right_partial_kernel<T,
+                                               Output,
+                                               stored_type,
+                                               BinaryFunction,
+                                               block_size,
+                                               items_per_thread>),
+                               dim3(grid_size),
+                               dim3(block_size),
+                               0,
+                               0,
+                               d_input.get(),
+                               d_tile_sizes.get(),
+                               d_output.get()
+            )
+        );
 
         // Reading results
         const auto output = d_output.load();

@@ -95,14 +95,16 @@ inline auto execute_warp_reduce_kernel(
     T* input, T* output, Flag* /* flags */, size_t size, hipStream_t stream) ->
     typename std::enable_if<!Segmented>::type
 {
-    hipLaunchKernelGGL(HIP_KERNEL_NAME(warp_reduce_kernel<AllReduce, T, WarpSize, Trials>),
-                       dim3(size / BlockSize),
-                       dim3(BlockSize),
-                       0,
-                       stream,
-                       input,
-                       output);
-    HIP_CHECK(hipGetLastError());
+    HIP_CHECK_LAUNCH(
+        hipLaunchKernelGGL(HIP_KERNEL_NAME(warp_reduce_kernel<AllReduce, T, WarpSize, Trials>),
+                           dim3(size / BlockSize),
+                           dim3(BlockSize),
+                           0,
+                           stream,
+                           input,
+                           output
+        )
+    );
 }
 
 template<bool         AllReduce,
@@ -116,15 +118,17 @@ inline auto
     execute_warp_reduce_kernel(T* input, T* output, Flag* flags, size_t size, hipStream_t stream) ->
     typename std::enable_if<Segmented>::type
 {
-    hipLaunchKernelGGL(HIP_KERNEL_NAME(segmented_warp_reduce_kernel<T, Flag, WarpSize, Trials>),
-                       dim3(size / BlockSize),
-                       dim3(BlockSize),
-                       0,
-                       stream,
-                       input,
-                       flags,
-                       output);
-    HIP_CHECK(hipGetLastError());
+    HIP_CHECK_LAUNCH(
+        hipLaunchKernelGGL(HIP_KERNEL_NAME(segmented_warp_reduce_kernel<T, Flag, WarpSize, Trials>),
+                           dim3(size / BlockSize),
+                           dim3(BlockSize),
+                           0,
+                           stream,
+                           input,
+                           flags,
+                           output
+        )
+    );
 }
 
 template<bool AllReduce,

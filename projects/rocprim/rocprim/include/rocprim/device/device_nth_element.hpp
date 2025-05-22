@@ -258,6 +258,9 @@ hipError_t nth_element(void*          temporary_storage,
                        hipStream_t    stream            = 0,
                        bool           debug_synchronous = false)
 {
+    // Clear any existing error
+    (void) hipGetLastError();
+
     return detail::nth_element_impl<Config>(temporary_storage,
                                             storage_size,
                                             keys,
@@ -370,6 +373,9 @@ hipError_t nth_element(void*              temporary_storage,
                        hipStream_t        stream            = 0,
                        bool               debug_synchronous = false)
 {
+    // Clear any existing error
+    (void) hipGetLastError();
+
     using key_type = typename std::iterator_traits<KeysInputIterator>::value_type;
     static_assert(
         std::is_same<key_type,

@@ -195,19 +195,21 @@ void test_block_radix_rank()
         common::device_ptr<unsigned int> d_ranks_output(size);
 
         // Running kernel
-        hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(
-                rank_kernel<T, block_size, items_per_thread, max_radix_bits, algorithm>),
-            dim3(grid_size),
-            dim3(block_size),
-            0,
-            0,
-            d_keys_input.get(),
-            d_ranks_output.get(),
-            descending,
-            start_bit,
-            radix_bits);
-        HIP_CHECK(hipGetLastError());
+        HIP_CHECK_LAUNCH_SYNC(
+            hipLaunchKernelGGL(
+                HIP_KERNEL_NAME(
+                    rank_kernel<T, block_size, items_per_thread, max_radix_bits, algorithm>),
+                dim3(grid_size),
+                dim3(block_size),
+                0,
+                0,
+                d_keys_input.get(),
+                d_ranks_output.get(),
+                descending,
+                start_bit,
+                radix_bits
+            )
+        );
 
         // Getting results to host
         auto ranks_output = d_ranks_output.load();

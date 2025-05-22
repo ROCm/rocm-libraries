@@ -253,7 +253,6 @@ TYPED_TEST(RocprimDeviceFindEndTests, FindEnd)
                     gHelper.createAndLaunchGraph(stream);
                 }
 
-                HIP_CHECK(hipGetLastError());
                 HIP_CHECK(hipDeviceSynchronize());
 
                 // Copy output to host
@@ -393,7 +392,6 @@ TYPED_TEST(RocprimDeviceFindEndTests, FindEndRepetition)
                 gHelper.createAndLaunchGraph(stream);
             }
 
-            HIP_CHECK(hipGetLastError());
             HIP_CHECK(hipDeviceSynchronize());
 
             // Copy output to host

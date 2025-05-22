@@ -311,7 +311,6 @@ TYPED_TEST(RocprimDeviceNthelementTests, NthelementKey)
                 gHelper.createAndLaunchGraph(stream);
             }
 
-            HIP_CHECK(hipGetLastError());
             HIP_CHECK(hipDeviceSynchronize());
 
             // Copy output to host
@@ -388,8 +387,6 @@ TEST(RocprimNthelementKeySameTests, NthelementKeySame)
                                        compare_op,
                                        stream,
                                        debug_synchronous));
-
-        HIP_CHECK(hipGetLastError());
 
         // Copy output to host
         const auto output = d_input.load();

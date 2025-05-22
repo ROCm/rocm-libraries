@@ -367,17 +367,18 @@ void test_shuffle()
                     d_data.store(input);
 
                     // Launching kernel
-                    hipLaunchKernelGGL(HIP_KERNEL_NAME(shuffle_kernel<test_type, T>),
-                                       dim3(1),
-                                       dim3(hardware_warp_size),
-                                       0,
-                                       0,
-                                       d_data.get(),
-                                       delta,
-                                       logical_warp_size,
-                                       active_lanes);
-                    HIP_CHECK(hipGetLastError());
-                    HIP_CHECK(hipDeviceSynchronize());
+                    HIP_CHECK_LAUNCH_SYNC(
+                        hipLaunchKernelGGL(HIP_KERNEL_NAME(shuffle_kernel<test_type, T>),
+                                           dim3(1),
+                                           dim3(hardware_warp_size),
+                                           0,
+                                           0,
+                                           d_data.get(),
+                                           delta,
+                                           logical_warp_size,
+                                           active_lanes
+                        )
+                    );
 
                     // Read from device memory
                     const auto output = d_data.load();
@@ -467,16 +468,17 @@ TYPED_TEST(RocprimIntrinsicsTests, ShuffleIndex)
             device_src_lanes.store(src_lanes);
 
             // Launching kernel
-            hipLaunchKernelGGL(HIP_KERNEL_NAME(shuffle_index_kernel<T>),
-                               dim3(1),
-                               dim3(hardware_warp_size),
-                               0,
-                               0,
-                               device_data.get(),
-                               device_src_lanes.get(),
-                               logical_warp_size);
-            HIP_CHECK(hipGetLastError());
-            HIP_CHECK(hipDeviceSynchronize());
+            HIP_CHECK_LAUNCH_SYNC(
+                hipLaunchKernelGGL(HIP_KERNEL_NAME(shuffle_index_kernel<T>),
+                                   dim3(1),
+                                   dim3(hardware_warp_size),
+                                   0,
+                                   0,
+                                   device_data.get(),
+                                   device_src_lanes.get(),
+                                   logical_warp_size
+                )
+            );
 
             // Read from device memory
             const auto output = device_data.load();
@@ -513,13 +515,16 @@ TEST(RocprimIntrinsicsTests, LaneId)
 
     common::device_ptr<unsigned int> d_output(size);
 
-    hipLaunchKernelGGL(lane_id_kernel,
-                       dim3(blocks),
-                       dim3(block_size),
-                       0,
-                       hipStreamDefault,
-                       d_output.get());
-    HIP_CHECK(hipGetLastError());
+    HIP_CHECK_LAUNCH_SYNC(
+        hipLaunchKernelGGL(
+            lane_id_kernel,
+            dim3(blocks),
+            dim3(block_size),
+            0,
+            hipStreamDefault,
+            d_output.get()
+        )
+    );
 
     const auto h_output = d_output.load();
 
@@ -622,16 +627,18 @@ TEST(RocprimIntrinsicsTests, MaskedBitCount)
                     }
                 }
 
-                hipLaunchKernelGGL(masked_bit_count_kernel,
-                                   dim3(blocks),
-                                   dim3(block_size),
-                                   0,
-                                   hipStreamDefault,
-                                   d_output.get(),
-                                   d_input.get(),
-                                   add,
-                                   active_lanes);
-                HIP_CHECK(hipGetLastError());
+                HIP_CHECK_LAUNCH_SYNC(
+                    hipLaunchKernelGGL(masked_bit_count_kernel,
+                                       dim3(blocks),
+                                       dim3(block_size),
+                                       0,
+                                       hipStreamDefault,
+                                       d_output.get(),
+                                       d_input.get(),
+                                       add,
+                                       active_lanes
+                    )
+                );
 
                 const auto output = d_output.load();
 
@@ -739,15 +746,17 @@ void warp_any_all_test()
 
             d_input.store(input);
 
-            hipLaunchKernelGGL(HIP_KERNEL_NAME(warp_any_all_kernel<test_type>),
-                               dim3(blocks),
-                               dim3(block_size),
-                               0,
-                               hipStreamDefault,
-                               d_output.get(),
-                               d_input.get(),
-                               active_lanes);
-            HIP_CHECK(hipGetLastError());
+            HIP_CHECK_LAUNCH_SYNC(
+                hipLaunchKernelGGL(HIP_KERNEL_NAME(warp_any_all_kernel<test_type>),
+                                   dim3(blocks),
+                                   dim3(block_size),
+                                   0,
+                                   hipStreamDefault,
+                                   d_output.get(),
+                                   d_input.get(),
+                                   active_lanes
+                )
+            );
 
             const auto output = d_output.load();
 
@@ -878,17 +887,19 @@ TYPED_TEST(RocprimIntrinsicsTests, WarpPermute)
                 d_input.store(input);
                 d_indices.store(indices);
 
-                hipLaunchKernelGGL(HIP_KERNEL_NAME(warp_permute_kernel<T>),
-                                   dim3(blocks),
-                                   dim3(block_size),
-                                   0,
-                                   hipStreamDefault,
-                                   d_output.get(),
-                                   d_input.get(),
-                                   d_indices.get(),
-                                   logical_warp_size,
-                                   active_lanes);
-                HIP_CHECK(hipGetLastError());
+                HIP_CHECK_LAUNCH_SYNC(
+                    hipLaunchKernelGGL(HIP_KERNEL_NAME(warp_permute_kernel<T>),
+                                       dim3(blocks),
+                                       dim3(block_size),
+                                       0,
+                                       hipStreamDefault,
+                                       d_output.get(),
+                                       d_input.get(),
+                                       d_indices.get(),
+                                       logical_warp_size,
+                                       active_lanes
+                    )
+                );
 
                 const auto output = d_output.load();
 
@@ -991,16 +1002,18 @@ TEST(RocprimIntrinsicsTests, MatchAny)
 
                 d_input.store(input);
 
-                hipLaunchKernelGGL(HIP_KERNEL_NAME(match_any_kernel<label_bits>),
-                                   dim3(blocks),
-                                   dim3(block_size),
-                                   0,
-                                   hipStreamDefault,
-                                   d_output.get(),
-                                   d_input.get(),
-                                   active_lanes,
-                                   lane_predicates);
-                HIP_CHECK(hipGetLastError());
+                HIP_CHECK_LAUNCH_SYNC(
+                    hipLaunchKernelGGL(HIP_KERNEL_NAME(match_any_kernel<label_bits>),
+                                       dim3(blocks),
+                                       dim3(block_size),
+                                       0,
+                                       hipStreamDefault,
+                                       d_output.get(),
+                                       d_input.get(),
+                                       active_lanes,
+                                       lane_predicates
+                    )
+                );
 
                 const auto output = d_output.load();
 
@@ -1080,15 +1093,17 @@ TEST(RocprimIntrinsicsTests, Ballot)
 
             d_input.store(input);
 
-            hipLaunchKernelGGL(ballot_kernel,
-                               dim3(blocks),
-                               dim3(block_size),
-                               0,
-                               hipStreamDefault,
-                               d_output.get(),
-                               d_input.get(),
-                               active_lanes);
-            HIP_CHECK(hipGetLastError());
+            HIP_CHECK_LAUNCH_SYNC(
+                hipLaunchKernelGGL(ballot_kernel,
+                                   dim3(blocks),
+                                   dim3(block_size),
+                                   0,
+                                   hipStreamDefault,
+                                   d_output.get(),
+                                   d_input.get(),
+                                   active_lanes
+                )
+            );
 
             const auto output = d_output.load();
 
@@ -1179,15 +1194,17 @@ TEST(RocprimIntrinsicsTests, GroupElect)
         d_input.store(input);
         d_output.store(output);
 
-        hipLaunchKernelGGL(HIP_KERNEL_NAME(group_elect_kernel),
-                           dim3(blocks),
-                           dim3(block_size),
-                           0,
-                           hipStreamDefault,
-                           d_output.get(),
-                           d_input.get(),
-                           warps_per_block);
-        HIP_CHECK(hipGetLastError());
+        HIP_CHECK_LAUNCH_SYNC(
+            hipLaunchKernelGGL(HIP_KERNEL_NAME(group_elect_kernel),
+                               dim3(blocks),
+                               dim3(block_size),
+                               0,
+                               hipStreamDefault,
+                               d_output.get(),
+                               d_input.get(),
+                               warps_per_block
+            )
+        );
 
         output = d_output.load();
 

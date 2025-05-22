@@ -504,6 +504,9 @@ inline hipError_t reduce_by_key(void*                     temporary_storage,
                                 hipStream_t               stream            = 0,
                                 bool                      debug_synchronous = false)
 {
+    // Clear any existing error
+    (void) hipGetLastError();
+
     return detail::reduce_by_key_impl<detail::lookback_scan_determinism::default_determinism,
                                       Config>(temporary_storage,
                                               storage_size,
@@ -550,6 +553,9 @@ inline hipError_t deterministic_reduce_by_key(void*                     temporar
                                               hipStream_t stream            = 0,
                                               bool        debug_synchronous = false)
 {
+    // Clear any existing error
+    (void) hipGetLastError();
+
     return detail::reduce_by_key_impl<detail::lookback_scan_determinism::deterministic, Config>(
         temporary_storage,
         storage_size,

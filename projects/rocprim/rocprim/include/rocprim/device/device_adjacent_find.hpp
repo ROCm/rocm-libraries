@@ -56,6 +56,9 @@ hipError_t adjacent_find_impl(void* const       temporary_storage,
                               const hipStream_t stream,
                               const bool        debug_synchronous)
 {
+    // Clear any existing error
+    (void) hipGetLastError();
+
     // Data types
     using input_type         = typename std::iterator_traits<InputIterator>::value_type;
     using op_result_type     = bool;
@@ -292,6 +295,9 @@ hipError_t adjacent_find(void* const       temporary_storage,
                          const hipStream_t stream            = 0,
                          const bool        debug_synchronous = false)
 {
+    // Clear any existing error
+    (void) hipGetLastError();
+
     return detail::adjacent_find_impl<Config>(temporary_storage,
                                               storage_size,
                                               input,

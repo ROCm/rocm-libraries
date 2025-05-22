@@ -255,12 +255,13 @@ struct static_run_algo
         );
 
         // Running kernel
-        hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(scan_kernel<Method, BlockSize, Algorithm, T>),
-            dim3(grid_size), dim3(BlockSize), 0, 0,
-            device_output, device_output_b, init
+        HIP_CHECK_LAUNCH_SYNC(
+            hipLaunchKernelGGL(
+                HIP_KERNEL_NAME(scan_kernel<Method, BlockSize, Algorithm, T>),
+                dim3(grid_size), dim3(BlockSize), 0, 0,
+                device_output, device_output_b, init
+            )
         );
-        HIP_CHECK(hipGetLastError());
 
         // Reading results back
         HIP_CHECK(
@@ -566,19 +567,19 @@ auto test_block_scan_input_arrays()
         common::device_ptr<T> device_output(output);
 
         // Launching kernel
-        hipLaunchKernelGGL(HIP_KERNEL_NAME(inclusive_scan_array_kernel<block_size,
-                                                                       items_per_thread,
-                                                                       algorithm,
-                                                                       T,
-                                                                       binary_op_type>),
-                           dim3(grid_size),
-                           dim3(block_size),
-                           0,
-                           0,
-                           device_output.get());
-
-        HIP_CHECK(hipGetLastError());
-        HIP_CHECK(hipDeviceSynchronize());
+        HIP_CHECK_LAUNCH_SYNC(
+            hipLaunchKernelGGL(HIP_KERNEL_NAME(inclusive_scan_array_kernel<block_size,
+                                               items_per_thread,
+                                               algorithm,
+                                               T,
+                                               binary_op_type>),
+                               dim3(grid_size),
+                               dim3(block_size),
+                               0,
+                               0,
+                               device_output.get()
+            )
+        );
 
         // Read from device memory
         output = device_output.load();
@@ -649,20 +650,20 @@ auto test_block_scan_input_arrays()
         common::device_ptr<T> device_output_reductions(output_reductions);
 
         // Launching kernel
-        hipLaunchKernelGGL(HIP_KERNEL_NAME(inclusive_scan_reduce_array_kernel<block_size,
-                                                                              items_per_thread,
-                                                                              algorithm,
-                                                                              T,
-                                                                              binary_op_type>),
-                           dim3(grid_size),
-                           dim3(block_size),
-                           0,
-                           0,
-                           device_output.get(),
-                           device_output_reductions.get());
-
-        HIP_CHECK(hipGetLastError());
-        HIP_CHECK(hipDeviceSynchronize());
+        HIP_CHECK_LAUNCH_SYNC(
+            hipLaunchKernelGGL(HIP_KERNEL_NAME(inclusive_scan_reduce_array_kernel<block_size,
+                                               items_per_thread,
+                                               algorithm,
+                                               T,
+                                               binary_op_type>),
+                               dim3(grid_size),
+                               dim3(block_size),
+                               0,
+                               0,
+                               device_output.get(),
+                               device_output_reductions.get()
+            )
+        );
 
         // Read from device memory
         output            = device_output.load();
@@ -735,22 +736,22 @@ auto test_block_scan_input_arrays()
         common::device_ptr<T> device_output_bp(output_block_prefixes);
 
         // Launching kernel
-        hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(inclusive_scan_array_prefix_callback_kernel<block_size,
-                                                                        items_per_thread,
-                                                                        algorithm,
-                                                                        T,
-                                                                        binary_op_type>),
-            dim3(grid_size),
-            dim3(block_size),
-            0,
-            0,
-            device_output.get(),
-            device_output_bp.get(),
-            block_prefix);
-
-        HIP_CHECK(hipGetLastError());
-        HIP_CHECK(hipDeviceSynchronize());
+        HIP_CHECK_LAUNCH_SYNC(
+            hipLaunchKernelGGL(
+                HIP_KERNEL_NAME(inclusive_scan_array_prefix_callback_kernel<block_size,
+                                items_per_thread,
+                                algorithm,
+                                T,
+                                binary_op_type>),
+                dim3(grid_size),
+                dim3(block_size),
+                0,
+                0,
+                device_output.get(),
+                device_output_bp.get(),
+                block_prefix
+            )
+        );
 
         // Read from device memory
         output                = device_output.load();
@@ -820,20 +821,20 @@ auto test_block_scan_input_arrays()
         common::device_ptr<T> device_output(output);
 
         // Launching kernel
-        hipLaunchKernelGGL(HIP_KERNEL_NAME(exclusive_scan_array_kernel<block_size,
-                                                                       items_per_thread,
-                                                                       algorithm,
-                                                                       T,
-                                                                       binary_op_type>),
-                           dim3(grid_size),
-                           dim3(block_size),
-                           0,
-                           0,
-                           device_output.get(),
-                           init);
-
-        HIP_CHECK(hipGetLastError());
-        HIP_CHECK(hipDeviceSynchronize());
+        HIP_CHECK_LAUNCH_SYNC(
+            hipLaunchKernelGGL(HIP_KERNEL_NAME(exclusive_scan_array_kernel<block_size,
+                                               items_per_thread,
+                                               algorithm,
+                                               T,
+                                               binary_op_type>),
+                               dim3(grid_size),
+                               dim3(block_size),
+                               0,
+                               0,
+                               device_output.get(),
+                               init
+            )
+        );
 
         // Read from device memory
         output = device_output.load();
@@ -910,21 +911,21 @@ auto test_block_scan_input_arrays()
         common::device_ptr<T> device_output_reductions(output_reductions.size());
 
         // Launching kernel
-        hipLaunchKernelGGL(HIP_KERNEL_NAME(exclusive_scan_reduce_array_kernel<block_size,
-                                                                              items_per_thread,
-                                                                              algorithm,
-                                                                              T,
-                                                                              binary_op_type>),
-                           dim3(grid_size),
-                           dim3(block_size),
-                           0,
-                           0,
-                           device_output.get(),
-                           device_output_reductions.get(),
-                           init);
-
-        HIP_CHECK(hipGetLastError());
-        HIP_CHECK(hipDeviceSynchronize());
+        HIP_CHECK_LAUNCH_SYNC(
+            hipLaunchKernelGGL(HIP_KERNEL_NAME(exclusive_scan_reduce_array_kernel<block_size,
+                                               items_per_thread,
+                                               algorithm,
+                                               T,
+                                               binary_op_type>),
+                               dim3(grid_size),
+                               dim3(block_size),
+                               0,
+                               0,
+                               device_output.get(),
+                               device_output_reductions.get(),
+                               init
+            )
+        );
 
         // Read from device memory
         output            = device_output.load();
@@ -1002,22 +1003,22 @@ auto test_block_scan_input_arrays()
         common::device_ptr<T> device_output_bp(output_block_prefixes.size());
 
         // Launching kernel
-        hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(exclusive_scan_prefix_callback_array_kernel<block_size,
-                                                                        items_per_thread,
-                                                                        algorithm,
-                                                                        T,
-                                                                        binary_op_type>),
-            dim3(grid_size),
-            dim3(block_size),
-            0,
-            0,
-            device_output.get(),
-            device_output_bp.get(),
-            block_prefix);
-
-        HIP_CHECK(hipGetLastError());
-        HIP_CHECK(hipDeviceSynchronize());
+        HIP_CHECK_LAUNCH_SYNC(
+            hipLaunchKernelGGL(
+                HIP_KERNEL_NAME(exclusive_scan_prefix_callback_array_kernel<block_size,
+                                items_per_thread,
+                                algorithm,
+                                T,
+                                binary_op_type>),
+                dim3(grid_size),
+                dim3(block_size),
+                0,
+                0,
+                device_output.get(),
+                device_output_bp.get(),
+                block_prefix
+            )
+        );
 
         // Read from device memory
         output                = device_output.load();

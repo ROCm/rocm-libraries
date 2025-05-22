@@ -130,6 +130,9 @@ ROCPRIM_INLINE static hipError_t batch_memcpy(void*              temporary_stora
                                               hipStream_t        stream = hipStreamDefault,
                                               bool               debug_synchronous = false)
 {
+    // Clear any existing error
+    (void) hipGetLastError();
+
     return detail::
         batch_memcpy_func<Config_, InputBufferItType, OutputBufferItType, BufferSizeItType, true>(
             temporary_storage,

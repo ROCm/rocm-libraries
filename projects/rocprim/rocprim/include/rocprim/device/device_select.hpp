@@ -138,6 +138,9 @@ hipError_t select(void * temporary_storage,
                   const hipStream_t stream = 0,
                   const bool debug_synchronous = false)
 {
+    // Clear any existing error
+    (void) hipGetLastError();
+
     // Dummy unary predicate
     using unary_predicate_type = ::rocprim::empty_type;
     // Dummy inequality operation
@@ -270,6 +273,9 @@ hipError_t select(void * temporary_storage,
                   const hipStream_t stream = 0,
                   const bool debug_synchronous = false)
 {
+    // Clear any existing error
+    (void) hipGetLastError();
+
     // Dummy flag type
     using flag_type = ::rocprim::empty_type;
     using offset_type = unsigned int;
@@ -408,6 +414,9 @@ inline hipError_t select(void*                       temporary_storage,
                          const hipStream_t           stream            = 0,
                          const bool                  debug_synchronous = false)
 {
+    // Clear any existing error
+    (void) hipGetLastError();
+
     // Dummy inequality operation
     using inequality_op_type             = ::rocprim::empty_type;
     using offset_type                    = unsigned int;
@@ -529,6 +538,9 @@ hipError_t unique(void * temporary_storage,
                   const hipStream_t stream = 0,
                   const bool debug_synchronous = false)
 {
+    // Clear any existing error
+    (void) hipGetLastError();
+
     // Dummy unary predicate
     using unary_predicate_type = ::rocprim::empty_type;
     using offset_type = unsigned int;
@@ -628,6 +640,9 @@ inline hipError_t unique_by_key(void*                           temporary_storag
                                 const hipStream_t               stream            = 0,
                                 const bool                      debug_synchronous = false)
 {
+    // Clear any existing error
+    (void) hipGetLastError();
+
     using offset_type = unsigned int;
     // Dummy flag
     ::rocprim::empty_type* const no_flags = nullptr;

@@ -429,6 +429,9 @@ inline hipError_t reduce(void*               temporary_storage,
                          const hipStream_t   stream            = 0,
                          bool                debug_synchronous = false)
 {
+    // Clear any existing error
+    (void) hipGetLastError();
+
     return detail::reduce_impl<true, Config>(temporary_storage,
                                              storage_size,
                                              input,
@@ -559,6 +562,9 @@ inline hipError_t reduce(void*             temporary_storage,
                          const hipStream_t stream            = 0,
                          bool              debug_synchronous = false)
 {
+    // Clear any existing error
+    (void) hipGetLastError();
+
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
 
     return detail::reduce_impl<false, Config>(temporary_storage,

@@ -135,6 +135,9 @@ hipError_t find_end(void*          temporary_storage,
                     hipStream_t    stream            = 0,
                     bool           debug_synchronous = false)
 {
+    // Clear any existing error
+    (void) hipGetLastError();
+
     return detail::search_impl<Config, false>(temporary_storage,
                                               storage_size,
                                               input,

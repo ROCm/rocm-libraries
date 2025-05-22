@@ -356,6 +356,9 @@ inline hipError_t run_length_encode(void*                   temporary_storage,
                                     hipStream_t             stream            = 0,
                                     bool                    debug_synchronous = false)
 {
+    // Clear any existing error
+    (void) hipGetLastError();
+
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
     using count_type = unsigned int;
 
@@ -469,6 +472,9 @@ inline hipError_t run_length_encode_non_trivial_runs(void*                   tem
                                                      hipStream_t             stream = 0,
                                                      bool debug_synchronous         = false)
 {
+    // Clear any existing error
+    (void) hipGetLastError();
+
     return detail::run_length_encode::run_length_encode_non_trivial_runs_impl<Config>(
         temporary_storage,
         storage_size,

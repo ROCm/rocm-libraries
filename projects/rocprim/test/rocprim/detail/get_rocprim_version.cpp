@@ -37,9 +37,16 @@ unsigned int get_rocprim_version_on_device()
 {
     common::device_ptr<unsigned int> d_version(1);
 
-    hipLaunchKernelGGL(get_version_kernel, dim3(1), dim3(1), 0, 0, d_version.get());
-    HIP_CHECK(hipGetLastError());
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK_LAUNCH_SYNC(
+        hipLaunchKernelGGL(
+            get_version_kernel,
+            dim3(1),
+            dim3(1),
+            0,
+            0,
+            d_version.get()
+        )
+    );
 
     return d_version.load_value_at(0);
 }

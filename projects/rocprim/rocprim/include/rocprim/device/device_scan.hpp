@@ -505,6 +505,9 @@ inline hipError_t inclusive_scan(void*             temporary_storage,
                                  const hipStream_t stream            = 0,
                                  bool              debug_synchronous = false)
 {
+    // Clear any existing error
+    (void) hipGetLastError();
+
     // AccType may be const or a reference. Get the non-const, non-reference type.
     // This is necessary because we may need to assign to instances of this type or create pointers to it.
     using safe_acc_type = typename std::remove_const<typename std::remove_reference<AccType>::type>::type;
@@ -550,6 +553,9 @@ inline hipError_t deterministic_inclusive_scan(void*             temporary_stora
                                                const hipStream_t stream  = 0,
                                                bool              debug_synchronous = false)
 {
+    // Clear any existing error
+    (void) hipGetLastError();
+
     // AccType may be const or a reference. Get the non-const, non-reference type.
     // This is necessary because we may need to assign to instances of this type or create pointers to it.
     using safe_acc_type = typename std::remove_const<typename std::remove_reference<AccType>::type>::type;
@@ -680,6 +686,9 @@ inline hipError_t exclusive_scan(void*               temporary_storage,
                                  const hipStream_t   stream            = 0,
                                  bool                debug_synchronous = false)
 {
+    // Clear any existing error
+    (void) hipGetLastError();
+
     // AccType may be const or a reference. Get the non-const, non-reference type.
     // This is necessary because we may need to assign to instances of this type or create pointers to it.
     using safe_acc_type = typename std::remove_const<typename std::remove_reference<AccType>::type>::type;
@@ -726,6 +735,9 @@ inline hipError_t deterministic_exclusive_scan(void*               temporary_sto
                                                const hipStream_t   stream  = 0,
                                                bool                debug_synchronous = false)
 {
+    // Clear any existing error
+    (void) hipGetLastError();
+
     // AccType may be const or a reference. Get the non-const, non-reference type.
     // This is necessary because we may need to assign to instances of this type or create pointers to it.
     using safe_acc_type = typename std::remove_const<typename std::remove_reference<AccType>::type>::type;

@@ -303,6 +303,9 @@ hipError_t merge(void * temporary_storage,
                  const hipStream_t stream = 0,
                  bool debug_synchronous = false)
 {
+    // Clear any existing error
+    (void) hipGetLastError();
+
     empty_type * values = nullptr;
     return detail::merge_impl<Config>(
         temporary_storage, storage_size,
@@ -430,6 +433,9 @@ hipError_t merge(void * temporary_storage,
                  const hipStream_t stream = 0,
                  bool debug_synchronous = false)
 {
+    // Clear any existing error
+    (void) hipGetLastError();
+
     return detail::merge_impl<Config>(
         temporary_storage, storage_size,
         keys_input1, keys_input2, keys_output,

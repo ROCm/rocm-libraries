@@ -204,7 +204,6 @@ TYPED_TEST(RocprimLookbackReproducibilityTests, Scan)
                                                                             test_scan_op,
                                                                             stream,
                                                                             debug_synchronous));
-                    HIP_CHECK(hipGetLastError());
 
                     std::vector<T> output = d_output.load();
                     return output;
@@ -292,7 +291,6 @@ TYPED_TEST(RocprimLookbackReproducibilityTests, ScanByKey)
                                          compare_op,
                                          stream,
                                          debug_synchronous));
-                                     HIP_CHECK(hipGetLastError());
 
                                      std::vector<V> output = d_output.load();
                                      return output;
@@ -382,7 +380,6 @@ TYPED_TEST(RocprimLookbackReproducibilityTests, ReduceByKey)
                                                                      compare_op,
                                                                      stream,
                                                                      debug_synchronous));
-                    HIP_CHECK(hipGetLastError());
 
                     [[maybe_unused]] size_t unique_count_output = d_unique_count_output.load()[0];
 
