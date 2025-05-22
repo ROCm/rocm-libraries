@@ -62,12 +62,8 @@
     END_ROCPRIM_INLINE_NAMESPACE \
     } /* namespace rocprim */
 
-#if __cplusplus == 201402L
-    #warning "rocPRIM C++14 will be deprecated in the next major release"
-#endif
-
-#if __cplusplus < 201402L
-    #error "rocPRIM requires at least C++14"
+#if __cplusplus < 201703L
+    #error "rocPRIM requires at least C++17"
 #endif
 
 #if !defined(ROCPRIM_DEVICE) || defined(DOXYGEN_DOCUMENTATION_BUILD)
@@ -107,31 +103,44 @@
 #undef ROCPRIM_TARGET_CDNA1
 #undef ROCPRIM_TARGET_CDNA2
 #undef ROCPRIM_TARGET_CDNA3
-#undef ROCPRIM_TARGET_CDNA4
+#undef ROCPRIM_TARGET_UNKNOWN
 
 // See https://llvm.org/docs/AMDGPUUsage.html#instructions
-#if defined(__gfx950__)
-    #define ROCPRIM_TARGET_CDNA4 1
-#elif defined(__gfx942__)
+#if defined(__gfx942__) || defined(__gfx950__) || defined(__gfx9_4_generic__)
     #define ROCPRIM_TARGET_CDNA3 1
 #elif defined(__gfx90a__)
     #define ROCPRIM_TARGET_CDNA2 1
 #elif defined(__gfx908__)
     #define ROCPRIM_TARGET_CDNA1 1
 #elif defined(__gfx900__) || defined(__gfx902__) || defined(__gfx904__) || defined(__gfx906__) \
-    || defined(__gfx90c__)
+    || defined(__gfx90c__) || defined(__gfx9_generic__)
     #define ROCPRIM_TARGET_GCN5 1
-#elif defined(__GFX12__)
+#elif defined(__GFX12__) || defined(__gfx12_generic__)
     #define ROCPRIM_TARGET_RDNA4 1
-#elif defined(__GFX11__)
+#elif defined(__GFX11__) || defined(__gfx11_generic__)
     #define ROCPRIM_TARGET_RDNA3 1
 #elif defined(__gfx1030__) || defined(__gfx1031__) || defined(__gfx1032__) || defined(__gfx1033__) \
-    || defined(__gfx1034__) || defined(__gfx1035__) || defined(__gfx1036__)
+    || defined(__gfx1034__) || defined(__gfx1035__) || defined(__gfx1036__)                        \
+    || defined(__gfx10_3_generic__)
     #define ROCPRIM_TARGET_RDNA2 1
-#elif defined(__gfx1010__) || defined(__gfx1011__) || defined(__gfx1012__) || defined(__gfx1013__)
+#elif defined(__gfx1010__) || defined(__gfx1011__) || defined(__gfx1012__) || defined(__gfx1013__) \
+    || defined(__gfx10_1_generic__)
     #define ROCPRIM_TARGET_RDNA1 1
 #elif defined(__GFX8__)
     #define ROCPRIM_TARGET_GCN3 1
+#elif defined(__SPIRV__)
+    #define ROCPRIM_TARGET_SPIRV 1
+#elif defined(__HIP_DEVICE_COMPILE__)
+    // Double check the build target for typos otherwise please submit an issue or pull request!
+    #warning "unknown build target"
+    #define ROCPRIM_TARGET_UNKNOWN 1
+#endif
+
+// SPIR-V and unknown targets do not support 128-bit atomics.
+#if defined(ROCPRIM_TARGET_UKNOWN) || defined(ROCPRIM_TARGET_SPIRV)
+    #define ROCPRIM_MAX_ATOMIC_SIZE 8
+#else
+    #define ROCPRIM_MAX_ATOMIC_SIZE 16
 #endif
 
 // DPP is supported only after Volcanic Islands (GFX8+)
@@ -142,7 +151,7 @@
     #define ROCPRIM_DETAIL_HAS_DPP 1
 #endif
 
-#if !defined(ROCPRIM_DISABLE_DPP) && defined(ROCPRIM_DETAIL_HAS_DPP)
+#if !defined(ROCPRIM_DISABLE_DPP) && defined(ROCPRIM_DETAIL_HAS_DPP) && !ROCPRIM_TARGET_SPIRV
     #define ROCPRIM_DETAIL_USE_DPP 1
 #else
     #define ROCPRIM_DETAIL_USE_DPP 0
@@ -194,12 +203,6 @@
     #define ROCPRIM_GRID_SIZE_LIMIT std::numeric_limits<unsigned int>::max()
 #endif
 
-#if __cpp_if_constexpr >= 201606
-    #define ROCPRIM_IF_CONSTEXPR constexpr
-#else
-    #define ROCPRIM_IF_CONSTEXPR
-#endif
-
 //  Copyright 2001 John Maddock.
 //  Copyright 2017 Peter Dimov.
 //
@@ -238,21 +241,6 @@
         static_assert(expression, message)
 #else
     #define ROCPRIM_DETAIL_DEVICE_STATIC_ASSERT(expression, message)
-#endif
-
-/// \brief Clang predefined macro for device code on AMD GPU targets, either 32 or 64.
-///   It is undefined behavior to use this macro in host code when compiling with Clang.
-#ifndef __AMDGCN_WAVEFRONT_SIZE
-    #define __AMDGCN_WAVEFRONT_SIZE 64
-#endif
-
-/// \brief Wavefront size, either 32 or 64. May be defined by compiler flags when compiling
-///   with Clang if the value is equal to the wavefront size of all AMD GPU architectures
-///   currently being compiled for.
-///
-///   Only defined in device code unless defined by compiler flags as described above.
-#ifndef ROCPRIM_WAVEFRONT_SIZE
-    #define ROCPRIM_WAVEFRONT_SIZE __AMDGCN_WAVEFRONT_SIZE
 #endif
 
 // Helper macros to disable warnings in clang

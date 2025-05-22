@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -51,16 +51,17 @@ namespace detail
 // Helper functions for performing exclusive or inclusive
 // block scan in single_scan.
 template<bool Exclusive,
+         bool UseInitialValue,
          class BlockScan,
          class T,
          unsigned int ItemsPerThread,
          class BinaryFunction>
-ROCPRIM_DEVICE ROCPRIM_INLINE auto single_scan_block_scan(T (&input)[ItemsPerThread],
-                                                          T (&output)[ItemsPerThread],
-                                                          T initial_value,
-                                                          typename BlockScan::storage_type& storage,
-                                                          BinaryFunction scan_op) ->
-    typename std::enable_if<Exclusive>::type
+ROCPRIM_DEVICE ROCPRIM_INLINE
+auto single_scan_block_scan(T (&input)[ItemsPerThread],
+                            T (&output)[ItemsPerThread],
+                            T                                 initial_value,
+                            typename BlockScan::storage_type& storage,
+                            BinaryFunction scan_op) -> typename std::enable_if<Exclusive>::type
 {
     BlockScan().exclusive_scan(input, // input
                                output, // output
@@ -70,26 +71,38 @@ ROCPRIM_DEVICE ROCPRIM_INLINE auto single_scan_block_scan(T (&input)[ItemsPerThr
 }
 
 template<bool Exclusive,
+         bool UseInitialValue,
          class BlockScan,
          class T,
          unsigned int ItemsPerThread,
          class BinaryFunction>
-ROCPRIM_DEVICE ROCPRIM_INLINE auto single_scan_block_scan(T (&input)[ItemsPerThread],
-                                                          T (&output)[ItemsPerThread],
-                                                          T initial_value,
-                                                          typename BlockScan::storage_type& storage,
-                                                          BinaryFunction scan_op) ->
-    typename std::enable_if<!Exclusive>::type
+ROCPRIM_DEVICE ROCPRIM_INLINE
+auto single_scan_block_scan(T (&input)[ItemsPerThread],
+                            T (&output)[ItemsPerThread],
+                            T                                 initial_value,
+                            typename BlockScan::storage_type& storage,
+                            BinaryFunction scan_op) -> typename std::enable_if<!Exclusive>::type
 {
-    (void)initial_value;
-    BlockScan().inclusive_scan(input, // input
-                               output, // output
-                               storage,
-                               scan_op);
+    if constexpr(UseInitialValue)
+    {
+        BlockScan().inclusive_scan(input, // input
+                                   initial_value,
+                                   output, // output
+                                   storage,
+                                   scan_op);
+    }
+    else
+    {
+        BlockScan().inclusive_scan(input, // input
+                                   output, // output
+                                   storage,
+                                   scan_op);
+    }
 }
 
 template<lookback_scan_determinism Determinism,
          bool                      Exclusive,
+         bool UseInitialValue,
          class Config,
          class InputIterator,
          class OutputIterator,
@@ -114,6 +127,7 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto lookback_scan_kernel_impl(InputIterator
 
 template<lookback_scan_determinism Determinism,
          bool                      Exclusive,
+         bool UseInitialValue,
          class Config,
          class InputIterator,
          class OutputIterator,
@@ -188,22 +202,61 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
         if(override_first_value)
         {
             if(Exclusive)
+            {
                 initial_value
                     = scan_op(previous_last_element[0], static_cast<AccType>(*(input - 1)));
+            }
             else if(flat_block_thread_id == 0)
+            {
                 values[0] = scan_op(previous_last_element[0], values[0]);
+            }
         }
 
         AccType reduction;
-        lookback_block_scan<Exclusive, block_scan_type>(values, // input/output
-                                                        initial_value,
-                                                        reduction,
-                                                        storage.scan,
-                                                        scan_op);
 
-        if(flat_block_thread_id == 0)
+        // Since `override_first_value` isn't a constexpr and there's no exclusive block scan
+        // overload without an initial_value parameter, the two scan types need separate
+        // code paths, this duplicates a bit of code.
+        if constexpr(Exclusive)
         {
-            scan_state.set_complete(flat_block_id, reduction);
+            lookback_block_scan<Exclusive, block_scan_type>(values, // input/output
+                                                            initial_value,
+                                                            reduction,
+                                                            storage.scan,
+                                                            scan_op);
+
+            // Reduction should not contain initial value.
+            if(flat_block_thread_id == 0)
+            {
+                scan_state.set_complete(flat_block_id, reduction);
+            }
+        }
+        else
+        {
+            if(UseInitialValue && !override_first_value)
+            {
+                lookback_block_scan<Exclusive, block_scan_type>(values, // input/output
+                                                                initial_value,
+                                                                reduction,
+                                                                storage.scan,
+                                                                scan_op);
+            }
+            else
+            {
+                // Only use the initial value on the first iteration
+                lookback_block_scan<Exclusive, block_scan_type>(values, // input/output
+                                                                reduction,
+                                                                storage.scan,
+                                                                scan_op);
+            }
+
+            // Reduction should include initial value. We can avoid block-wide communication
+            // communication by letting the thread that has the last element of the scan
+            // write it to memory.
+            if(flat_block_thread_id == block_size - 1)
+            {
+                scan_state.set_complete(flat_block_id, values[items_per_thread - 1]);
+            }
         }
     }
     else

@@ -201,12 +201,6 @@ public:
     {
         return index_ >= other.index_;
     }
-
-    [[deprecated]] friend std::ostream& operator<<(std::ostream& os,
-                                                   const discard_iterator& /* iter */)
-    {
-        return os;
-    }
     #endif // DOXYGEN_SHOULD_SKIP_THIS
 
 private:

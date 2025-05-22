@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,6 +24,8 @@
 #define ROCPRIM_BENCHMARK_DEVICE_RUN_LENGTH_ENCODE_NON_TRIVIAL_RUNS_PARALLEL_HPP_
 
 #include "benchmark_utils.hpp"
+
+#include "../common/utils_device_ptr.hpp"
 
 // Google Benchmark
 #include <benchmark/benchmark.h>
@@ -69,7 +71,7 @@ inline std::string non_trivial_runs_config_name<rocprim::default_config>()
 }
 
 template<typename T, size_t MaxLength, typename Config = rocprim::default_config>
-struct device_non_trivial_runs_benchmark : public config_autotune_interface
+struct device_non_trivial_runs_benchmark : public benchmark_utils::autotune_interface
 {
     std::string name() const override
     {
@@ -79,16 +81,15 @@ struct device_non_trivial_runs_benchmark : public config_autotune_interface
             + ",cfg:" + non_trivial_runs_config_name<Config>() + "}");
     }
 
-    void run(benchmark::State&   state,
-             size_t              bytes,
-             const managed_seed& seed,
-             hipStream_t         stream) const override
+    void run(benchmark_utils::state&& state) override
     {
+        const auto& stream = state.stream;
+        const auto& bytes  = state.bytes;
+        const auto& seed   = state.seed;
+
         using offset_type = unsigned int;
         using count_type  = unsigned int;
 
-        constexpr int                batch_size                 = 10;
-        constexpr int                warmup_size                = 5;
         constexpr std::array<int, 2> tuning_max_segment_lengths = {10, 1000};
         constexpr int num_input_arrays = is_tuning ? tuning_max_segment_lengths.size() : 1;
 
@@ -112,22 +113,15 @@ struct device_non_trivial_runs_benchmark : public config_autotune_interface
             input[0] = get_random_segments_iota<T>(size, MaxLength, seed.get_0());
         }
 
-        T* d_input[num_input_arrays];
+        common::device_ptr<T> d_input[num_input_arrays];
         for(int i = 0; i < num_input_arrays; ++i)
         {
-            HIP_CHECK(hipMalloc(&d_input[i], size * sizeof(*d_input[i])));
-            HIP_CHECK(hipMemcpy(d_input[i],
-                                input[i].data(),
-                                size * sizeof(*d_input[i]),
-                                hipMemcpyHostToDevice));
+            d_input[i].store(input[i]);
         }
 
-        offset_type* d_offsets_output;
-        HIP_CHECK(hipMalloc(&d_offsets_output, size * sizeof(*d_offsets_output)));
-        count_type* d_counts_output;
-        HIP_CHECK(hipMalloc(&d_counts_output, size * sizeof(*d_counts_output)));
-        count_type* d_runs_count_output;
-        HIP_CHECK(hipMalloc(&d_runs_count_output, sizeof(*d_runs_count_output)));
+        common::device_ptr<offset_type> d_offsets_output(size);
+        common::device_ptr<count_type>  d_counts_output(size);
+        common::device_ptr<count_type>  d_runs_count_output(1);
 
         const auto dispatch = [&](void* d_temporary_storage, size_t& temporary_storage_bytes)
         {
@@ -138,76 +132,28 @@ struct device_non_trivial_runs_benchmark : public config_autotune_interface
                                                                         temporary_storage_bytes,
                                                                         d_input,
                                                                         size,
-                                                                        d_offsets_output,
-                                                                        d_counts_output,
-                                                                        d_runs_count_output,
+                                                                        d_offsets_output.get(),
+                                                                        d_counts_output.get(),
+                                                                        d_runs_count_output.get(),
                                                                         stream,
                                                                         false));
             };
 
             for(int i = 0; i < num_input_arrays; ++i)
             {
-                dispatch_input(d_input[i]);
+                dispatch_input(d_input[i].get());
             }
         };
 
         // Allocate temporary storage memory
         size_t temporary_storage_bytes = 0;
         dispatch(nullptr, temporary_storage_bytes);
-        void* d_temporary_storage;
-        HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
+        common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
         HIP_CHECK(hipDeviceSynchronize());
 
-        // Warm-up
-        for(int i = 0; i < warmup_size; ++i)
-        {
-            dispatch(d_temporary_storage, temporary_storage_bytes);
-        }
-        HIP_CHECK(hipDeviceSynchronize());
+        state.run([&] { dispatch(d_temporary_storage.get(), temporary_storage_bytes); });
 
-        // HIP events creation
-        hipEvent_t start, stop;
-        HIP_CHECK(hipEventCreate(&start));
-        HIP_CHECK(hipEventCreate(&stop));
-
-        for(auto _ : state)
-        {
-            // Record start event
-            HIP_CHECK(hipEventRecord(start, stream));
-
-            for(int i = 0; i < batch_size; ++i)
-            {
-                dispatch(d_temporary_storage, temporary_storage_bytes);
-            }
-            HIP_CHECK(hipStreamSynchronize(stream));
-
-            // Record stop event and wait until it completes
-            HIP_CHECK(hipEventRecord(stop, stream));
-            HIP_CHECK(hipEventSynchronize(stop));
-
-            HIP_CHECK(hipGetLastError());
-            HIP_CHECK(hipDeviceSynchronize());
-
-            float elapsed_mseconds{};
-            HIP_CHECK(hipEventElapsedTime(&elapsed_mseconds, start, stop));
-            state.SetIterationTime(elapsed_mseconds / 1000);
-        }
-
-        // Destroy HIP events
-        HIP_CHECK(hipEventDestroy(start));
-        HIP_CHECK(hipEventDestroy(stop));
-
-        state.SetBytesProcessed(state.iterations() * batch_size * size * item_size);
-        state.SetItemsProcessed(state.iterations() * batch_size * size);
-
-        HIP_CHECK(hipFree(d_temporary_storage));
-        for(int i = 0; i < num_input_arrays; ++i)
-        {
-            HIP_CHECK(hipFree(d_input[i]));
-        }
-        HIP_CHECK(hipFree(d_offsets_output));
-        HIP_CHECK(hipFree(d_counts_output));
-        HIP_CHECK(hipFree(d_runs_count_output));
+        state.set_throughput(size, sizeof(T) + sizeof(offset_type) + sizeof(count_type));
     }
     static constexpr bool is_tuning = !std::is_same<Config, rocprim::default_config>::value;
 };
@@ -238,7 +184,7 @@ struct device_non_trivial_runs_benchmark_generator
     template<int ItemsPerThreadExp>
     struct create_ipt
     {
-        void operator()(std::vector<std::unique_ptr<config_autotune_interface>>& storage)
+        void operator()(std::vector<std::unique_ptr<benchmark_utils::autotune_interface>>& storage)
         {
             if(!is_load_warp_transpose || is_warp_load_supp)
             {
@@ -256,7 +202,7 @@ struct device_non_trivial_runs_benchmark_generator
         static constexpr unsigned int items_per_thread = 1u << ItemsPerThreadExp;
     };
 
-    static void create(std::vector<std::unique_ptr<config_autotune_interface>>& storage)
+    static void create(std::vector<std::unique_ptr<benchmark_utils::autotune_interface>>& storage)
     {
         static_for_each<
             make_index_range<int, min_items_per_thread_exponent, max_items_per_thread_exponent>,

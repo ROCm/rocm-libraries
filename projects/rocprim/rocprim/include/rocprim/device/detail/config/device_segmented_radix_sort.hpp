@@ -22,7 +22,7 @@
 #define ROCPRIM_DEVICE_DETAIL_CONFIG_DEVICE_SEGMENTED_RADIX_SORT_HPP_
 
 #include "../../../config.hpp"
-#include "../../../type_traits_interface.hpp"
+#include "../../../type_traits.hpp"
 #include "../../config_types.hpp"
 #include "../device_config_helper.hpp"
 
@@ -42,7 +42,7 @@ namespace detail
 {
 
 template<unsigned int arch, class key_type, typename value_type, class enable = void>
-struct default_segmented_radix_sort_config : default_segmented_radix_sort_config_base<6, 4>::type
+struct default_segmented_radix_sort_config : default_segmented_radix_sort_config_base<6>::type
 {};
 
 // Based on key_type = double, value_type = rocprim::int128_t
@@ -55,7 +55,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 16)
                       && (sizeof(value_type) > 8))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 8>,
           typename std::conditional<1,
@@ -75,7 +74,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 4))>>
     : segmented_radix_sort_config<
           7,
-          4,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 8, 256, 5, 16, 16, 256>,
@@ -94,7 +92,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 2))>>
     : segmented_radix_sort_config<
           7,
-          4,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<16, 8, 256, 5, 32, 16, 256>,
@@ -113,7 +110,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 1))>>
     : segmented_radix_sort_config<
           7,
-          4,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<16, 8, 256, 5, 32, 16, 256>,
@@ -132,7 +128,6 @@ struct default_segmented_radix_sort_config<
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          4,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<16, 8, 256, 5, 32, 16, 256>,
@@ -151,7 +146,6 @@ struct default_segmented_radix_sort_config<
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          4,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<16, 8, 256, 5, 32, 16, 256>,
@@ -169,7 +163,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 16)
                       && (sizeof(value_type) > 8))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 8>,
           typename std::conditional<1,
@@ -189,7 +182,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 4))>>
     : segmented_radix_sort_config<
           7,
-          2,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 8, 256, 5, 16, 16, 256>,
@@ -208,7 +200,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 2))>>
     : segmented_radix_sort_config<
           7,
-          2,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 8, 256, 5, 16, 16, 256>,
@@ -227,7 +218,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 1))>>
     : segmented_radix_sort_config<
           7,
-          2,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<16, 8, 256, 5, 32, 16, 256>,
@@ -246,7 +236,6 @@ struct default_segmented_radix_sort_config<
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          2,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<16, 8, 256, 5, 32, 16, 256>,
@@ -265,7 +254,6 @@ struct default_segmented_radix_sort_config<
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          5,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 8, 256, 5, 16, 16, 256>,
@@ -282,7 +270,6 @@ struct default_segmented_radix_sort_config<
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 8>,
           typename std::conditional<1,
@@ -301,7 +288,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
     : segmented_radix_sort_config<
           8,
-          8,
           kernel_config<256, 8>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
@@ -318,7 +304,6 @@ struct default_segmented_radix_sort_config<
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 4>,
           typename std::conditional<1,
@@ -337,7 +322,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
     : segmented_radix_sort_config<
           6,
-          4,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 8, 256, 5, 16, 16, 256>,
@@ -356,7 +340,6 @@ struct default_segmented_radix_sort_config<
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           8,
-          8,
           kernel_config<256, 4>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
@@ -374,7 +357,6 @@ struct default_segmented_radix_sort_config<
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -393,7 +375,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 8))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<128, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -411,7 +392,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(key_type) > 8) && (sizeof(value_type) <= 8)
                       && (sizeof(value_type) > 4))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 8>,
           typename std::conditional<1,
@@ -431,7 +411,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 2))>>
     : segmented_radix_sort_config<
           8,
-          8,
           kernel_config<256, 8>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
@@ -449,7 +428,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(key_type) > 8) && (sizeof(value_type) <= 2)
                       && (sizeof(value_type) > 1))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 8>,
           typename std::conditional<1,
@@ -469,7 +447,6 @@ struct default_segmented_radix_sort_config<
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           8,
-          8,
           kernel_config<256, 8>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
@@ -488,7 +465,6 @@ struct default_segmented_radix_sort_config<
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<128, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -507,7 +483,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 8))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<128, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -526,7 +501,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 4))>>
     : segmented_radix_sort_config<
           7,
-          4,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<16, 8, 256, 5, 32, 16, 256>,
@@ -545,7 +519,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 2))>>
     : segmented_radix_sort_config<
           7,
-          4,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<16, 8, 256, 5, 32, 16, 256>,
@@ -564,7 +537,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 1))>>
     : segmented_radix_sort_config<
           7,
-          4,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<16, 8, 256, 5, 32, 16, 256>,
@@ -583,7 +555,6 @@ struct default_segmented_radix_sort_config<
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          4,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<16, 8, 256, 5, 32, 16, 256>,
@@ -602,7 +573,6 @@ struct default_segmented_radix_sort_config<
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          4,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<16, 8, 256, 5, 32, 16, 256>,
@@ -620,7 +590,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 16)
                       && (sizeof(value_type) > 8))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 8>,
           typename std::conditional<1,
@@ -640,7 +609,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 4))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -659,7 +627,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 2))>>
     : segmented_radix_sort_config<
           7,
-          4,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<16, 8, 256, 5, 32, 16, 256>,
@@ -678,7 +645,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 1))>>
     : segmented_radix_sort_config<
           7,
-          4,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<16, 8, 256, 5, 32, 16, 256>,
@@ -697,7 +663,6 @@ struct default_segmented_radix_sort_config<
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          2,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<16, 8, 256, 5, 32, 16, 256>,
@@ -716,7 +681,6 @@ struct default_segmented_radix_sort_config<
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          2,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<16, 8, 256, 5, 32, 16, 256>,
@@ -734,7 +698,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(key_type) > 1) && (sizeof(value_type) <= 16)
                       && (sizeof(value_type) > 8))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 8>,
           typename std::conditional<1,
@@ -754,7 +717,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 4))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -773,7 +735,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 2))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -792,7 +753,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 1))>>
     : segmented_radix_sort_config<
           6,
-          4,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<16, 8, 256, 5, 32, 16, 256>,
@@ -811,7 +771,6 @@ struct default_segmented_radix_sort_config<
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -830,7 +789,6 @@ struct default_segmented_radix_sort_config<
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -847,7 +805,6 @@ struct default_segmented_radix_sort_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
                       && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 4>,
           typename std::conditional<1,
@@ -866,7 +823,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -884,7 +840,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -902,7 +857,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -921,7 +875,6 @@ struct default_segmented_radix_sort_config<
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           6,
-          4,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 8, 256, 5, 16, 16, 256>,
@@ -939,7 +892,6 @@ struct default_segmented_radix_sort_config<
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -957,7 +909,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 16)
                       && (sizeof(value_type) > 8))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 8>,
           typename std::conditional<1,
@@ -977,7 +928,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 4))>>
     : segmented_radix_sort_config<
           8,
-          8,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
@@ -995,7 +945,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 4)
                       && (sizeof(value_type) > 2))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 16>,
           typename std::conditional<1,
@@ -1015,7 +964,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 1))>>
     : segmented_radix_sort_config<
           8,
-          8,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
@@ -1033,7 +981,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 1)
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 16>,
           typename std::conditional<1,
@@ -1053,7 +1000,6 @@ struct default_segmented_radix_sort_config<
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<128, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -1071,7 +1017,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 16)
                       && (sizeof(value_type) > 8))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 8>,
           typename std::conditional<1,
@@ -1091,7 +1036,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 4))>>
     : segmented_radix_sort_config<
           8,
-          8,
           kernel_config<256, 8>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
@@ -1109,7 +1053,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 4)
                       && (sizeof(value_type) > 2))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 8>,
           typename std::conditional<1,
@@ -1129,7 +1072,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 1))>>
     : segmented_radix_sort_config<
           8,
-          8,
           kernel_config<256, 8>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
@@ -1147,7 +1089,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 1)
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 8>,
           typename std::conditional<1,
@@ -1167,7 +1108,6 @@ struct default_segmented_radix_sort_config<
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<128, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -1184,7 +1124,6 @@ struct default_segmented_radix_sort_config<
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 8>,
           typename std::conditional<1,
@@ -1203,7 +1142,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
     : segmented_radix_sort_config<
           8,
-          8,
           kernel_config<256, 8>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
@@ -1220,7 +1158,6 @@ struct default_segmented_radix_sort_config<
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 8>,
           typename std::conditional<1,
@@ -1239,7 +1176,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<128, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -1258,7 +1194,6 @@ struct default_segmented_radix_sort_config<
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           8,
-          8,
           kernel_config<256, 4>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
@@ -1276,7 +1211,6 @@ struct default_segmented_radix_sort_config<
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<128, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -1295,7 +1229,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 8))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<128, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -1313,7 +1246,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(key_type) > 8) && (sizeof(value_type) <= 8)
                       && (sizeof(value_type) > 4))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 4>,
           typename std::conditional<1,
@@ -1333,7 +1265,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 2))>>
     : segmented_radix_sort_config<
           8,
-          8,
           kernel_config<256, 4>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
@@ -1351,7 +1282,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(key_type) > 8) && (sizeof(value_type) <= 2)
                       && (sizeof(value_type) > 1))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 4>,
           typename std::conditional<1,
@@ -1371,7 +1301,6 @@ struct default_segmented_radix_sort_config<
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           8,
-          8,
           kernel_config<256, 4>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
@@ -1390,7 +1319,6 @@ struct default_segmented_radix_sort_config<
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<128, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -1409,7 +1337,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 8))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<128, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -1428,7 +1355,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 4))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<128, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -1446,7 +1372,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 4)
                       && (sizeof(value_type) > 2))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 16>,
           typename std::conditional<1,
@@ -1466,7 +1391,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 1))>>
     : segmented_radix_sort_config<
           8,
-          8,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
@@ -1484,7 +1408,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 1)
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 16>,
           typename std::conditional<1,
@@ -1504,7 +1427,6 @@ struct default_segmented_radix_sort_config<
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           8,
-          0,
           kernel_config<256, 8>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
@@ -1522,7 +1444,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 16)
                       && (sizeof(value_type) > 8))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 8>,
           typename std::conditional<1,
@@ -1542,7 +1463,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 4))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<128, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -1561,7 +1481,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 2))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<128, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -1579,7 +1498,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 2)
                       && (sizeof(value_type) > 1))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 8>,
           typename std::conditional<1,
@@ -1599,7 +1517,6 @@ struct default_segmented_radix_sort_config<
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           8,
-          8,
           kernel_config<256, 8>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
@@ -1618,7 +1535,6 @@ struct default_segmented_radix_sort_config<
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<128, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -1636,7 +1552,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(key_type) > 1) && (sizeof(value_type) <= 16)
                       && (sizeof(value_type) > 8))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 8>,
           typename std::conditional<1,
@@ -1656,7 +1571,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 4))>>
     : segmented_radix_sort_config<
           8,
-          8,
           kernel_config<256, 8>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
@@ -1674,7 +1588,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(key_type) > 1) && (sizeof(value_type) <= 4)
                       && (sizeof(value_type) > 2))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 8>,
           typename std::conditional<1,
@@ -1694,7 +1607,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 1))>>
     : segmented_radix_sort_config<
           8,
-          8,
           kernel_config<256, 8>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
@@ -1712,7 +1624,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(key_type) > 1) && (sizeof(value_type) <= 1)
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 8>,
           typename std::conditional<1,
@@ -1732,7 +1643,6 @@ struct default_segmented_radix_sort_config<
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           8,
-          0,
           kernel_config<256, 4>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
@@ -1749,7 +1659,6 @@ struct default_segmented_radix_sort_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
                       && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 4>,
           typename std::conditional<1,
@@ -1768,7 +1677,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
     : segmented_radix_sort_config<
           8,
-          8,
           kernel_config<256, 8>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
@@ -1786,7 +1694,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
     : segmented_radix_sort_config<
           8,
-          8,
           kernel_config<256, 8>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
@@ -1803,7 +1710,6 @@ struct default_segmented_radix_sort_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
                       && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 4>,
           typename std::conditional<1,
@@ -1823,7 +1729,6 @@ struct default_segmented_radix_sort_config<
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<128, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -1841,7 +1746,6 @@ struct default_segmented_radix_sort_config<
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<128, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -1860,7 +1764,6 @@ struct default_segmented_radix_sort_config<
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           8,
-          0,
           kernel_config<256, 8>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
@@ -1879,7 +1782,6 @@ struct default_segmented_radix_sort_config<
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           8,
-          0,
           kernel_config<256, 8>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
@@ -1897,7 +1799,6 @@ struct default_segmented_radix_sort_config<
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           8,
-          0,
           kernel_config<256, 8>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
@@ -1916,7 +1817,6 @@ struct default_segmented_radix_sort_config<
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           8,
-          0,
           kernel_config<256, 8>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
@@ -1935,7 +1835,6 @@ struct default_segmented_radix_sort_config<
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           8,
-          0,
           kernel_config<256, 8>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
@@ -1954,7 +1853,6 @@ struct default_segmented_radix_sort_config<
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           8,
-          0,
           kernel_config<256, 8>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
@@ -1972,7 +1870,6 @@ struct default_segmented_radix_sort_config<
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           8,
-          0,
           kernel_config<256, 8>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
@@ -1991,7 +1888,6 @@ struct default_segmented_radix_sort_config<
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           8,
-          8,
           kernel_config<256, 4>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
@@ -2009,7 +1905,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 1)
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 8>,
           typename std::conditional<1,
@@ -2029,7 +1924,6 @@ struct default_segmented_radix_sort_config<
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           8,
-          8,
           kernel_config<256, 4>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
@@ -2047,7 +1941,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 1)
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 4>,
           typename std::conditional<1,
@@ -2067,7 +1960,6 @@ struct default_segmented_radix_sort_config<
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           8,
-          8,
           kernel_config<256, 4>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
@@ -2085,7 +1977,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(key_type) > 1) && (sizeof(value_type) <= 1)
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 4>,
           typename std::conditional<1,
@@ -2105,7 +1996,6 @@ struct default_segmented_radix_sort_config<
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           8,
-          8,
           kernel_config<256, 8>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
@@ -2123,7 +2013,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 16)
                       && (sizeof(value_type) > 8))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 8>,
           typename std::conditional<1,
@@ -2143,7 +2032,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 4))>>
     : segmented_radix_sort_config<
           7,
-          2,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 8, 256, 5, 16, 16, 256>,
@@ -2162,7 +2050,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 2))>>
     : segmented_radix_sort_config<
           7,
-          4,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 8, 256, 5, 16, 16, 256>,
@@ -2181,7 +2068,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 1))>>
     : segmented_radix_sort_config<
           7,
-          4,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<16, 8, 256, 5, 32, 16, 256>,
@@ -2200,7 +2086,6 @@ struct default_segmented_radix_sort_config<
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          2,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<16, 8, 256, 5, 32, 16, 256>,
@@ -2219,7 +2104,6 @@ struct default_segmented_radix_sort_config<
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          4,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 8, 256, 5, 16, 16, 256>,
@@ -2237,7 +2121,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 16)
                       && (sizeof(value_type) > 8))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 8>,
           typename std::conditional<1,
@@ -2257,7 +2140,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 4))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -2276,7 +2158,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 2))>>
     : segmented_radix_sort_config<
           7,
-          4,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 8, 256, 5, 16, 16, 256>,
@@ -2295,7 +2176,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 1))>>
     : segmented_radix_sort_config<
           7,
-          4,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<16, 8, 256, 5, 32, 16, 256>,
@@ -2314,7 +2194,6 @@ struct default_segmented_radix_sort_config<
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          4,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<16, 8, 256, 5, 32, 16, 256>,
@@ -2333,7 +2212,6 @@ struct default_segmented_radix_sort_config<
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -2350,7 +2228,6 @@ struct default_segmented_radix_sort_config<
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 8>,
           typename std::conditional<1,
@@ -2369,7 +2246,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
     : segmented_radix_sort_config<
           8,
-          8,
           kernel_config<256, 8>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
@@ -2386,7 +2262,6 @@ struct default_segmented_radix_sort_config<
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 4>,
           typename std::conditional<1,
@@ -2405,7 +2280,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
     : segmented_radix_sort_config<
           6,
-          4,
           kernel_config<256, 8>,
           typename std::conditional<1,
                                     WarpSortConfig<16, 4, 256, 5, 32, 8, 256>,
@@ -2424,7 +2298,6 @@ struct default_segmented_radix_sort_config<
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           8,
-          8,
           kernel_config<256, 4>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
@@ -2442,7 +2315,6 @@ struct default_segmented_radix_sort_config<
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -2461,7 +2333,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 8))>>
     : segmented_radix_sort_config<
           6,
-          4,
           kernel_config<128, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -2479,7 +2350,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(key_type) > 8) && (sizeof(value_type) <= 8)
                       && (sizeof(value_type) > 4))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 8>,
           typename std::conditional<1,
@@ -2499,7 +2369,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 2))>>
     : segmented_radix_sort_config<
           8,
-          8,
           kernel_config<256, 8>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
@@ -2517,7 +2386,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(key_type) > 8) && (sizeof(value_type) <= 2)
                       && (sizeof(value_type) > 1))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 8>,
           typename std::conditional<1,
@@ -2537,7 +2405,6 @@ struct default_segmented_radix_sort_config<
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           8,
-          8,
           kernel_config<256, 8>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
@@ -2556,7 +2423,6 @@ struct default_segmented_radix_sort_config<
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<128, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -2575,7 +2441,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 8))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<128, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -2594,7 +2459,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 4))>>
     : segmented_radix_sort_config<
           7,
-          4,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 8, 256, 5, 16, 16, 256>,
@@ -2613,7 +2477,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 2))>>
     : segmented_radix_sort_config<
           7,
-          4,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<16, 8, 256, 5, 32, 16, 256>,
@@ -2632,7 +2495,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 1))>>
     : segmented_radix_sort_config<
           7,
-          4,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<16, 8, 256, 5, 32, 16, 256>,
@@ -2651,7 +2513,6 @@ struct default_segmented_radix_sort_config<
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          4,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<16, 8, 256, 5, 32, 16, 256>,
@@ -2670,7 +2531,6 @@ struct default_segmented_radix_sort_config<
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          4,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<16, 8, 256, 5, 32, 16, 256>,
@@ -2688,7 +2548,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 16)
                       && (sizeof(value_type) > 8))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 8>,
           typename std::conditional<1,
@@ -2708,7 +2567,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 4))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -2727,7 +2585,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 2))>>
     : segmented_radix_sort_config<
           7,
-          4,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<16, 8, 256, 5, 32, 16, 256>,
@@ -2746,7 +2603,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 1))>>
     : segmented_radix_sort_config<
           7,
-          4,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 8, 256, 5, 16, 16, 256>,
@@ -2765,7 +2621,6 @@ struct default_segmented_radix_sort_config<
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          4,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<16, 8, 256, 5, 32, 16, 256>,
@@ -2784,7 +2639,6 @@ struct default_segmented_radix_sort_config<
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -2802,7 +2656,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(key_type) > 1) && (sizeof(value_type) <= 16)
                       && (sizeof(value_type) > 8))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 8>,
           typename std::conditional<1,
@@ -2822,7 +2675,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 4))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -2841,7 +2693,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 2))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -2860,7 +2711,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 1))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -2879,7 +2729,6 @@ struct default_segmented_radix_sort_config<
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -2898,7 +2747,6 @@ struct default_segmented_radix_sort_config<
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -2915,7 +2763,6 @@ struct default_segmented_radix_sort_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
                       && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 4>,
           typename std::conditional<1,
@@ -2934,7 +2781,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
     : segmented_radix_sort_config<
           7,
-          4,
           kernel_config<256, 4>,
           typename std::conditional<1,
                                     WarpSortConfig<16, 2, 256, 5, 32, 4, 256>,
@@ -2951,7 +2797,6 @@ struct default_segmented_radix_sort_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
                       && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
     : segmented_radix_sort_config<6,
-                                  4,
                                   kernel_config<256, 8>,
                                   typename std::conditional<1,
                                                             WarpSortConfig<4, 4, 256, 5, 8, 8, 256>,
@@ -2969,7 +2814,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
     : segmented_radix_sort_config<
           6,
-          4,
           kernel_config<256, 8>,
           typename std::conditional<1,
                                     WarpSortConfig<16, 4, 256, 5, 32, 8, 256>,
@@ -2988,7 +2832,6 @@ struct default_segmented_radix_sort_config<
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           6,
-          4,
           kernel_config<256, 4>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 2, 256, 5, 16, 4, 256>,
@@ -3006,7 +2849,6 @@ struct default_segmented_radix_sort_config<
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -3024,7 +2866,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 16)
                       && (sizeof(value_type) > 8))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 8>,
           typename std::conditional<1,
@@ -3044,7 +2885,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 4))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -3063,7 +2903,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 2))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -3082,7 +2921,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 1))>>
     : segmented_radix_sort_config<
           7,
-          4,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 8, 256, 5, 16, 16, 256>,
@@ -3101,7 +2939,6 @@ struct default_segmented_radix_sort_config<
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          4,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 8, 256, 5, 16, 16, 256>,
@@ -3120,7 +2957,6 @@ struct default_segmented_radix_sort_config<
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          4,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 8, 256, 5, 16, 16, 256>,
@@ -3138,7 +2974,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 16)
                       && (sizeof(value_type) > 8))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 8>,
           typename std::conditional<1,
@@ -3158,7 +2993,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 4))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -3177,7 +3011,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 2))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -3196,7 +3029,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 1))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -3215,7 +3047,6 @@ struct default_segmented_radix_sort_config<
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -3234,7 +3065,6 @@ struct default_segmented_radix_sort_config<
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -3251,7 +3081,6 @@ struct default_segmented_radix_sort_config<
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 8>,
           typename std::conditional<1,
@@ -3270,7 +3099,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
     : segmented_radix_sort_config<
           8,
-          8,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
@@ -3287,7 +3115,6 @@ struct default_segmented_radix_sort_config<
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 16>,
           typename std::conditional<1,
@@ -3306,7 +3133,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -3325,7 +3151,6 @@ struct default_segmented_radix_sort_config<
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           8,
-          8,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
@@ -3343,7 +3168,6 @@ struct default_segmented_radix_sort_config<
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -3362,7 +3186,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 8))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<128, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -3380,7 +3203,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(key_type) > 8) && (sizeof(value_type) <= 8)
                       && (sizeof(value_type) > 4))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 8>,
           typename std::conditional<1,
@@ -3400,7 +3222,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 2))>>
     : segmented_radix_sort_config<
           8,
-          8,
           kernel_config<256, 8>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
@@ -3418,7 +3239,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(key_type) > 8) && (sizeof(value_type) <= 2)
                       && (sizeof(value_type) > 1))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 8>,
           typename std::conditional<1,
@@ -3438,7 +3258,6 @@ struct default_segmented_radix_sort_config<
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           8,
-          8,
           kernel_config<256, 8>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
@@ -3457,7 +3276,6 @@ struct default_segmented_radix_sort_config<
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<128, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -3476,7 +3294,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 8))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<128, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -3495,7 +3312,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 4))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -3514,7 +3330,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 2))>>
     : segmented_radix_sort_config<
           7,
-          4,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 8, 256, 5, 16, 16, 256>,
@@ -3533,7 +3348,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 1))>>
     : segmented_radix_sort_config<
           7,
-          4,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<16, 8, 256, 5, 32, 16, 256>,
@@ -3552,7 +3366,6 @@ struct default_segmented_radix_sort_config<
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          4,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<16, 8, 256, 5, 32, 16, 256>,
@@ -3571,7 +3384,6 @@ struct default_segmented_radix_sort_config<
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          4,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<16, 8, 256, 5, 32, 16, 256>,
@@ -3589,7 +3401,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 16)
                       && (sizeof(value_type) > 8))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 8>,
           typename std::conditional<1,
@@ -3609,7 +3420,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 4))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -3628,7 +3438,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 2))>>
     : segmented_radix_sort_config<
           7,
-          4,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 8, 256, 5, 16, 16, 256>,
@@ -3647,7 +3456,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 1))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -3666,7 +3474,6 @@ struct default_segmented_radix_sort_config<
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          4,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<16, 8, 256, 5, 32, 16, 256>,
@@ -3685,7 +3492,6 @@ struct default_segmented_radix_sort_config<
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -3703,7 +3509,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(key_type) > 1) && (sizeof(value_type) <= 16)
                       && (sizeof(value_type) > 8))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 8>,
           typename std::conditional<1,
@@ -3723,7 +3528,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 4))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -3742,7 +3546,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 2))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -3761,7 +3564,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 1))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -3780,7 +3582,6 @@ struct default_segmented_radix_sort_config<
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -3799,7 +3600,6 @@ struct default_segmented_radix_sort_config<
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -3816,7 +3616,6 @@ struct default_segmented_radix_sort_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
                       && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 8>,
           typename std::conditional<1,
@@ -3835,7 +3634,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -3853,7 +3651,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -3871,7 +3668,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -3890,7 +3686,6 @@ struct default_segmented_radix_sort_config<
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -3908,7 +3703,6 @@ struct default_segmented_radix_sort_config<
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -3926,7 +3720,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 16)
                       && (sizeof(value_type) > 8))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 8>,
           typename std::conditional<1,
@@ -3946,7 +3739,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 4))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -3965,7 +3757,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 2))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -3984,7 +3775,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 1))>>
     : segmented_radix_sort_config<
           7,
-          4,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 8, 256, 5, 16, 16, 256>,
@@ -4003,7 +3793,6 @@ struct default_segmented_radix_sort_config<
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          4,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 8, 256, 5, 16, 16, 256>,
@@ -4022,7 +3811,6 @@ struct default_segmented_radix_sort_config<
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          4,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 8, 256, 5, 16, 16, 256>,
@@ -4040,7 +3828,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 16)
                       && (sizeof(value_type) > 8))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 8>,
           typename std::conditional<1,
@@ -4060,7 +3847,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 4))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -4079,7 +3865,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 2))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -4098,7 +3883,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 1))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -4117,7 +3901,6 @@ struct default_segmented_radix_sort_config<
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -4136,7 +3919,6 @@ struct default_segmented_radix_sort_config<
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -4153,7 +3935,6 @@ struct default_segmented_radix_sort_config<
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 8>,
           typename std::conditional<1,
@@ -4172,7 +3953,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
     : segmented_radix_sort_config<
           8,
-          8,
           kernel_config<256, 8>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
@@ -4189,7 +3969,6 @@ struct default_segmented_radix_sort_config<
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 8>,
           typename std::conditional<1,
@@ -4208,7 +3987,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -4227,7 +4005,6 @@ struct default_segmented_radix_sort_config<
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           8,
-          8,
           kernel_config<256, 8>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
@@ -4245,7 +4022,6 @@ struct default_segmented_radix_sort_config<
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -4263,7 +4039,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(key_type) > 8) && (sizeof(value_type) <= 16)
                       && (sizeof(value_type) > 8))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 8>,
           typename std::conditional<1,
@@ -4283,7 +4058,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 4))>>
     : segmented_radix_sort_config<
           8,
-          8,
           kernel_config<256, 8>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
@@ -4301,7 +4075,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(key_type) > 8) && (sizeof(value_type) <= 4)
                       && (sizeof(value_type) > 2))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 8>,
           typename std::conditional<1,
@@ -4321,7 +4094,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 1))>>
     : segmented_radix_sort_config<
           8,
-          8,
           kernel_config<256, 8>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
@@ -4339,7 +4111,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(key_type) > 8) && (sizeof(value_type) <= 1)
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 8>,
           typename std::conditional<1,
@@ -4359,7 +4130,6 @@ struct default_segmented_radix_sort_config<
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<128, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -4378,7 +4148,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 8))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<128, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -4397,7 +4166,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 4))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -4416,7 +4184,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 2))>>
     : segmented_radix_sort_config<
           7,
-          4,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 8, 256, 5, 16, 16, 256>,
@@ -4435,7 +4202,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 1))>>
     : segmented_radix_sort_config<
           7,
-          4,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<16, 8, 256, 5, 32, 16, 256>,
@@ -4454,7 +4220,6 @@ struct default_segmented_radix_sort_config<
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          4,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<16, 8, 256, 5, 32, 16, 256>,
@@ -4473,7 +4238,6 @@ struct default_segmented_radix_sort_config<
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          4,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<16, 8, 256, 5, 32, 16, 256>,
@@ -4491,7 +4255,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 16)
                       && (sizeof(value_type) > 8))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 8>,
           typename std::conditional<1,
@@ -4511,7 +4274,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 4))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -4530,7 +4292,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 2))>>
     : segmented_radix_sort_config<
           7,
-          4,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 8, 256, 5, 16, 16, 256>,
@@ -4549,7 +4310,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 1))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -4568,7 +4328,6 @@ struct default_segmented_radix_sort_config<
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          4,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<16, 8, 256, 5, 32, 16, 256>,
@@ -4587,7 +4346,6 @@ struct default_segmented_radix_sort_config<
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -4605,7 +4363,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(key_type) > 1) && (sizeof(value_type) <= 16)
                       && (sizeof(value_type) > 8))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 8>,
           typename std::conditional<1,
@@ -4625,7 +4382,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 4))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -4644,7 +4400,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 2))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -4663,7 +4418,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 1))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -4682,7 +4436,6 @@ struct default_segmented_radix_sort_config<
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -4701,7 +4454,6 @@ struct default_segmented_radix_sort_config<
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -4718,7 +4470,6 @@ struct default_segmented_radix_sort_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
                       && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 4>,
           typename std::conditional<1,
@@ -4737,7 +4488,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -4755,7 +4505,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -4773,7 +4522,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -4792,7 +4540,6 @@ struct default_segmented_radix_sort_config<
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -4810,7 +4557,6 @@ struct default_segmented_radix_sort_config<
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -4828,7 +4574,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 16)
                       && (sizeof(value_type) > 8))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 8>,
           typename std::conditional<1,
@@ -4848,7 +4593,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 4))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -4867,7 +4611,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 2))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -4886,7 +4629,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 1))>>
     : segmented_radix_sort_config<
           7,
-          4,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 8, 256, 5, 16, 16, 256>,
@@ -4905,7 +4647,6 @@ struct default_segmented_radix_sort_config<
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          4,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 8, 256, 5, 16, 16, 256>,
@@ -4924,7 +4665,6 @@ struct default_segmented_radix_sort_config<
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          4,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 8, 256, 5, 16, 16, 256>,
@@ -4942,7 +4682,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 16)
                       && (sizeof(value_type) > 8))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 8>,
           typename std::conditional<1,
@@ -4962,7 +4701,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 4))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -4981,7 +4719,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 2))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -5000,7 +4737,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 1))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -5019,7 +4755,6 @@ struct default_segmented_radix_sort_config<
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -5038,7 +4773,6 @@ struct default_segmented_radix_sort_config<
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -5055,7 +4789,6 @@ struct default_segmented_radix_sort_config<
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 8>,
           typename std::conditional<1,
@@ -5074,7 +4807,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
     : segmented_radix_sort_config<
           8,
-          8,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
@@ -5091,7 +4823,6 @@ struct default_segmented_radix_sort_config<
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 16>,
           typename std::conditional<1,
@@ -5110,7 +4841,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -5129,7 +4859,6 @@ struct default_segmented_radix_sort_config<
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           8,
-          8,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
@@ -5147,7 +4876,6 @@ struct default_segmented_radix_sort_config<
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -5166,7 +4894,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 8))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<128, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -5184,7 +4911,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(key_type) > 8) && (sizeof(value_type) <= 8)
                       && (sizeof(value_type) > 4))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 8>,
           typename std::conditional<1,
@@ -5204,7 +4930,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 2))>>
     : segmented_radix_sort_config<
           8,
-          8,
           kernel_config<256, 8>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
@@ -5222,7 +4947,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(key_type) > 8) && (sizeof(value_type) <= 2)
                       && (sizeof(value_type) > 1))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 8>,
           typename std::conditional<1,
@@ -5242,7 +4966,6 @@ struct default_segmented_radix_sort_config<
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           8,
-          8,
           kernel_config<256, 8>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
@@ -5261,7 +4984,6 @@ struct default_segmented_radix_sort_config<
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<128, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -5280,7 +5002,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 8))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<128, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -5299,7 +5020,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 4))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -5318,7 +5038,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 2))>>
     : segmented_radix_sort_config<
           7,
-          4,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 8, 256, 5, 16, 16, 256>,
@@ -5337,7 +5056,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 1))>>
     : segmented_radix_sort_config<
           7,
-          4,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<16, 8, 256, 5, 32, 16, 256>,
@@ -5356,7 +5074,6 @@ struct default_segmented_radix_sort_config<
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          4,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<16, 8, 256, 5, 32, 16, 256>,
@@ -5375,7 +5092,6 @@ struct default_segmented_radix_sort_config<
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          4,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<16, 8, 256, 5, 32, 16, 256>,
@@ -5393,7 +5109,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 16)
                       && (sizeof(value_type) > 8))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 8>,
           typename std::conditional<1,
@@ -5413,7 +5128,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 4))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -5432,7 +5146,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 2))>>
     : segmented_radix_sort_config<
           7,
-          4,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 8, 256, 5, 16, 16, 256>,
@@ -5451,7 +5164,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 1))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -5470,7 +5182,6 @@ struct default_segmented_radix_sort_config<
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          4,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<16, 8, 256, 5, 32, 16, 256>,
@@ -5489,7 +5200,6 @@ struct default_segmented_radix_sort_config<
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -5507,7 +5217,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(key_type) > 1) && (sizeof(value_type) <= 16)
                       && (sizeof(value_type) > 8))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 8>,
           typename std::conditional<1,
@@ -5527,7 +5236,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 4))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -5546,7 +5254,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 2))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -5565,7 +5272,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 1))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -5584,7 +5290,6 @@ struct default_segmented_radix_sort_config<
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -5603,7 +5308,6 @@ struct default_segmented_radix_sort_config<
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -5620,7 +5324,6 @@ struct default_segmented_radix_sort_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
                       && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 8>,
           typename std::conditional<1,
@@ -5639,7 +5342,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -5657,7 +5359,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -5675,7 +5376,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -5694,7 +5394,6 @@ struct default_segmented_radix_sort_config<
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -5712,7 +5411,6 @@ struct default_segmented_radix_sort_config<
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           7,
-          6,
           kernel_config<256, 17>,
           typename std::conditional<1,
                                     WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
@@ -5730,7 +5428,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 16)
                       && (sizeof(value_type) > 8))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 8>,
           typename std::conditional<1,
@@ -5750,7 +5447,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 4))>>
     : segmented_radix_sort_config<
           8,
-          8,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
@@ -5768,7 +5464,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 4)
                       && (sizeof(value_type) > 2))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 8>,
           typename std::conditional<1,
@@ -5788,7 +5483,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 1))>>
     : segmented_radix_sort_config<
           8,
-          8,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
@@ -5806,7 +5500,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 1)
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 8>,
           typename std::conditional<1,
@@ -5826,7 +5519,6 @@ struct default_segmented_radix_sort_config<
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           8,
-          0,
           kernel_config<256, 8>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
@@ -5844,7 +5536,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 16)
                       && (sizeof(value_type) > 8))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 4>,
           typename std::conditional<1,
@@ -5864,7 +5555,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 4))>>
     : segmented_radix_sort_config<
           8,
-          8,
           kernel_config<256, 8>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
@@ -5882,7 +5572,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 4)
                       && (sizeof(value_type) > 2))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 8>,
           typename std::conditional<1,
@@ -5902,7 +5591,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 1))>>
     : segmented_radix_sort_config<
           8,
-          8,
           kernel_config<256, 8>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
@@ -5920,7 +5608,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 1)
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 8>,
           typename std::conditional<1,
@@ -5940,7 +5627,6 @@ struct default_segmented_radix_sort_config<
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           8,
-          0,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
@@ -5957,7 +5643,6 @@ struct default_segmented_radix_sort_config<
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 4>,
           typename std::conditional<1,
@@ -5976,7 +5661,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
     : segmented_radix_sort_config<
           8,
-          8,
           kernel_config<256, 8>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
@@ -5994,7 +5678,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
     : segmented_radix_sort_config<
           8,
-          8,
           kernel_config<256, 8>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
@@ -6011,7 +5694,6 @@ struct default_segmented_radix_sort_config<
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 8>,
           typename std::conditional<1,
@@ -6031,7 +5713,6 @@ struct default_segmented_radix_sort_config<
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           8,
-          8,
           kernel_config<256, 8>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
@@ -6049,7 +5730,6 @@ struct default_segmented_radix_sort_config<
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           8,
-          0,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
@@ -6067,7 +5747,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(key_type) > 8) && (sizeof(value_type) <= 16)
                       && (sizeof(value_type) > 8))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 8>,
           typename std::conditional<1,
@@ -6087,7 +5766,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 4))>>
     : segmented_radix_sort_config<
           8,
-          8,
           kernel_config<256, 8>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
@@ -6105,7 +5783,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(key_type) > 8) && (sizeof(value_type) <= 4)
                       && (sizeof(value_type) > 2))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 8>,
           typename std::conditional<1,
@@ -6125,7 +5802,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 1))>>
     : segmented_radix_sort_config<
           8,
-          8,
           kernel_config<256, 4>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
@@ -6143,7 +5819,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(key_type) > 8) && (sizeof(value_type) <= 1)
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 4>,
           typename std::conditional<1,
@@ -6163,7 +5838,6 @@ struct default_segmented_radix_sort_config<
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           8,
-          0,
           kernel_config<256, 4>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
@@ -6181,7 +5855,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 16)
                       && (sizeof(value_type) > 8))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 8>,
           typename std::conditional<1,
@@ -6201,7 +5874,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 4))>>
     : segmented_radix_sort_config<
           8,
-          8,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
@@ -6219,7 +5891,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 4)
                       && (sizeof(value_type) > 2))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 8>,
           typename std::conditional<1,
@@ -6239,7 +5910,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 1))>>
     : segmented_radix_sort_config<
           8,
-          8,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
@@ -6257,7 +5927,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 1)
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 8>,
           typename std::conditional<1,
@@ -6277,7 +5946,6 @@ struct default_segmented_radix_sort_config<
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           8,
-          0,
           kernel_config<256, 8>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
@@ -6295,7 +5963,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 16)
                       && (sizeof(value_type) > 8))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 8>,
           typename std::conditional<1,
@@ -6315,7 +5982,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 4))>>
     : segmented_radix_sort_config<
           8,
-          8,
           kernel_config<256, 8>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
@@ -6333,7 +5999,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 4)
                       && (sizeof(value_type) > 2))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 8>,
           typename std::conditional<1,
@@ -6353,7 +6018,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 1))>>
     : segmented_radix_sort_config<
           8,
-          8,
           kernel_config<256, 8>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
@@ -6371,7 +6035,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 1)
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 8>,
           typename std::conditional<1,
@@ -6391,7 +6054,6 @@ struct default_segmented_radix_sort_config<
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           8,
-          0,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
@@ -6409,7 +6071,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(key_type) > 1) && (sizeof(value_type) <= 16)
                       && (sizeof(value_type) > 8))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 4>,
           typename std::conditional<1,
@@ -6429,7 +6090,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 4))>>
     : segmented_radix_sort_config<
           8,
-          8,
           kernel_config<256, 8>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
@@ -6447,7 +6107,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(key_type) > 1) && (sizeof(value_type) <= 4)
                       && (sizeof(value_type) > 2))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 8>,
           typename std::conditional<1,
@@ -6467,7 +6126,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) > 1))>>
     : segmented_radix_sort_config<
           8,
-          8,
           kernel_config<256, 8>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
@@ -6485,7 +6143,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(key_type) > 1) && (sizeof(value_type) <= 1)
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 8>,
           typename std::conditional<1,
@@ -6505,7 +6162,6 @@ struct default_segmented_radix_sort_config<
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           8,
-          0,
           kernel_config<256, 16>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
@@ -6522,7 +6178,6 @@ struct default_segmented_radix_sort_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
                       && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 4>,
           typename std::conditional<1,
@@ -6541,7 +6196,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
     : segmented_radix_sort_config<
           8,
-          8,
           kernel_config<256, 8>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
@@ -6559,7 +6213,6 @@ struct default_segmented_radix_sort_config<
                       && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
     : segmented_radix_sort_config<
           8,
-          8,
           kernel_config<256, 8>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
@@ -6576,7 +6229,6 @@ struct default_segmented_radix_sort_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
                       && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
     : segmented_radix_sort_config<
-          8,
           8,
           kernel_config<256, 8>,
           typename std::conditional<1,
@@ -6596,7 +6248,6 @@ struct default_segmented_radix_sort_config<
                       && (!std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           8,
-          8,
           kernel_config<256, 8>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
@@ -6614,7 +6265,6 @@ struct default_segmented_radix_sort_config<
                       && (std::is_same<value_type, rocprim::empty_type>::value))>>
     : segmented_radix_sort_config<
           8,
-          0,
           kernel_config<256, 8>,
           typename std::conditional<1,
                                     WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,

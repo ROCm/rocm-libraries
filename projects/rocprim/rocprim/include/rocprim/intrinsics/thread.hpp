@@ -34,33 +34,6 @@ BEGIN_ROCPRIM_NAMESPACE
 
 // Sizes
 
-/// \brief Returns a number of threads in a hardware warp.
-///
-/// It is constant for a device.
-///
-/// \warning This function will be removed in a future release.
-[[deprecated(
-    "Use the functions provided in 'rocprim::arch::wavefront' instead.")]]
-ROCPRIM_HOST_DEVICE
-inline constexpr unsigned int warp_size()
-{
-    return ROCPRIM_WAVEFRONT_SIZE;
-}
-
-/// \brief Returns a number of threads in a hardware warp for the actual target.
-/// At device side this constant is available at compile time.
-///
-/// It is constant for a device.
-///
-/// \warning This function will be removed in a future release.
-[[deprecated("Use the functions provided in 'rocprim::arch::wavefront' "
-             "instead.")]]
-ROCPRIM_DEVICE ROCPRIM_INLINE
-constexpr unsigned int device_warp_size()
-{
-    return ROCPRIM_WAVEFRONT_SIZE;
-}
-
 /// \brief Returns flat size of a multidimensional block (tile).
 ROCPRIM_DEVICE ROCPRIM_INLINE
 unsigned int flat_block_size()
@@ -305,26 +278,12 @@ namespace detail
         return lane_id()%LogicalWarpSize;
     }
 
-    template<>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
-    unsigned int logical_lane_id<arch::wavefront::min_size()>()
-    {
-        return lane_id();
-    }
-
     // Return id of "logical warp" in a block
     template<unsigned int LogicalWarpSize>
     ROCPRIM_DEVICE ROCPRIM_INLINE
     unsigned int logical_warp_id()
     {
         return flat_block_thread_id()/LogicalWarpSize;
-    }
-
-    template<>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
-    unsigned int logical_warp_id<arch::wavefront::min_size()>()
-    {
-        return warp_id();
     }
 
     ROCPRIM_DEVICE ROCPRIM_INLINE

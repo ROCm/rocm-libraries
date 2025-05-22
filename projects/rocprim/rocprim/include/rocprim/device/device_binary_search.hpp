@@ -70,17 +70,14 @@ hipError_t binary_search(void * temporary_storage,
         return hipSuccess;
     }
 
-    return transform<Config>(
-        needles, output,
+    return detail::transform_impl<false, Config>(
+        needles,
+        output,
         needles_size,
-        [haystack, haystack_size, search_op, compare_op]
-        ROCPRIM_DEVICE
-        (const value_type& value)
-        {
-            return search_op(haystack, haystack_size, value, compare_op);
-        },
-        stream, debug_synchronous
-    );
+        [haystack, haystack_size, search_op, compare_op](const value_type& value)
+        { return search_op(haystack, haystack_size, value, compare_op); },
+        stream,
+        debug_synchronous);
 }
 
 template<class Config, class Tag>

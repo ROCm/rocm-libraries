@@ -22,7 +22,7 @@
 #define ROCPRIM_DEVICE_DETAIL_CONFIG_DEVICE_RUN_LENGTH_ENCODE_NON_TRIVIAL_RUNS_HPP_
 
 #include "../../../config.hpp"
-#include "../../../type_traits_interface.hpp"
+#include "../../../type_traits.hpp"
 #include "../../config_types.hpp"
 #include "../device_config_helper.hpp"
 

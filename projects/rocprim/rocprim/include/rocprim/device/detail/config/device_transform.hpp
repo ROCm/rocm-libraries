@@ -22,7 +22,7 @@
 #define ROCPRIM_DEVICE_DETAIL_CONFIG_DEVICE_TRANSFORM_HPP_
 
 #include "../../../config.hpp"
-#include "../../../type_traits_interface.hpp"
+#include "../../../type_traits.hpp"
 #include "../../config_types.hpp"
 #include "../device_config_helper.hpp"
 
@@ -656,7 +656,7 @@ struct default_transform_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
                       && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
-    : transform_config<1024, 4>
+    : transform_config<512, 4>
 {};
 
 // Based on value_type = float
@@ -675,7 +675,7 @@ struct default_transform_config<
     static_cast<unsigned int>(target_arch::gfx942),
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2))>> : transform_config<128, 16>
+                      && (sizeof(value_type) <= 2))>> : transform_config<256, 8>
 {};
 
 // Based on value_type = rocprim::int128_t
@@ -724,7 +724,7 @@ struct default_transform_config<
     static_cast<unsigned int>(target_arch::gfx942),
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 1))>> : transform_config<256, 16>
+                      && (sizeof(value_type) <= 1))>> : transform_config<1024, 8>
 {};
 
 } // end namespace detail

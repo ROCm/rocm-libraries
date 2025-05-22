@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -55,15 +55,21 @@ struct range_t
 };
 
 template<class KeysInputIterator1, class KeysInputIterator2, class OffsetT, class BinaryFunction>
-ROCPRIM_HOST_DEVICE ROCPRIM_INLINE OffsetT merge_path(KeysInputIterator1 keys_input1,
-                                                      KeysInputIterator2 keys_input2,
-                                                      const OffsetT      input1_size,
-                                                      const OffsetT      input2_size,
-                                                      const OffsetT      diag,
-                                                      BinaryFunction     compare_function)
+ROCPRIM_HOST_DEVICE ROCPRIM_INLINE
+OffsetT merge_path(KeysInputIterator1 keys_input1,
+                   KeysInputIterator2 keys_input2,
+                   const OffsetT      input1_size,
+                   const OffsetT      input2_size,
+                   const OffsetT      diag,
+                   BinaryFunction     compare_function)
 {
     using key_type_1 = typename std::iterator_traits<KeysInputIterator1>::value_type;
     using key_type_2 = typename std::iterator_traits<KeysInputIterator2>::value_type;
+
+    static_assert(
+        std::is_convertible_v<rocprim::invoke_result_t<BinaryFunction, key_type_1, key_type_2>,
+                              bool>,
+        "Comparison operator must be convertible to bool");
 
     OffsetT begin = diag < input2_size ? 0u : diag - input2_size;
     OffsetT end   = min(diag, input1_size);
@@ -100,8 +106,8 @@ void serial_merge(KeyType*                keys_shared,
                   OutputFunction          output_function)
 {
     // Pre condition, we're including some edge cases too.
-    if (!AllowUnsafe && range.begin1 > range.end1 && range.begin2 > range.end2)
-        return; // don't do anything, we have invalid inputs  
+    if(!AllowUnsafe && range.begin1 > range.end1 && range.begin2 > range.end2)
+        return; // don't do anything, we have invalid inputs
 
     // More descriptive names for ranges:
     auto       idx_a = range.begin1;
