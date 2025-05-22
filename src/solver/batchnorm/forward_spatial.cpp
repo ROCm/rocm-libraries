@@ -299,8 +299,17 @@ ConvSolution BnFwdTrainingSpatial::GetSolution(const ExecutionContext& context,
     auto result = ConvSolution{miopenStatusSuccess};
 
     {
-        auto use_hip = variant == 1;
+        constexpr bool enable_hip = true;
+        auto use_hip              = enable_hip && (variant == 1);
         auto kernel = KernelInfo{};
+        if(use_hip)
+        {
+            printf("forward_spatial: HIP variant %d\n", variant);
+        }
+        else
+        {
+            printf("forward_spatial: OCL variant %d\n", variant);
+        }
 
         auto build_params = KernelBuildParameters{
             {"MIOPEN_USE_FP16", static_cast<int>(bfp16parm)},

@@ -29,7 +29,7 @@
 #ifndef DEFAULT_CONFIGURATIONS_HPP
 #define DEFAULT_CONFIGURATIONS_HPP
 
-// general configs
+// ---------- general configs ----------
 
 // normalization of input macros (give default value to undefined macros)
 // TODO: we can consider to remove all of these default values, force the
@@ -70,7 +70,11 @@
 #define MIOPEN_USE_AMDGCN 0
 #endif
 
-// batchnorm configs
+#ifndef MIOPEN_NRN_OP_ID
+#define MIOPEN_NRN_OP_ID 0
+#endif
+
+// ---------- batchnorm configs ----------
 
 #ifndef HALF_MAX
 #define HALF_MAX 65504

@@ -389,6 +389,7 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         kernels/vector_types.hpp
         kernels/activation_functions.hpp
         kernels/batchnorm_functions.hpp
+        kernels/bnorm_spatial_activation_functions.hpp
         kernels/reduction_functions.hpp
         kernels/configuration.hpp
         kernels/default_configurations.hpp
