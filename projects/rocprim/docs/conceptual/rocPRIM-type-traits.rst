@@ -5,11 +5,8 @@
 .. _type_traits:
 
 ********************************************************************
- Implementing traits for custom types in rocPRIM
+Implementing traits for custom types in rocPRIM
 ********************************************************************
-
-Overview
-========
 
 This interface is designed to enable users to provide additional type trait information to rocPRIM, facilitating better compatibility with custom types.
 
