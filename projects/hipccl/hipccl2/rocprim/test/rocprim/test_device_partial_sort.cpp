@@ -140,7 +140,6 @@ void inline compare_partial_sort_cpp_14(InputVector     input,
     ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(sorted_output, sorted_input));
 }
 
-#if CPP17
 template<class InputVector, class OutputVector, class CompareFunction>
 void inline compare_partial_sort_cpp_17(InputVector     input,
                                         OutputVector    output,
@@ -169,7 +168,6 @@ void inline compare_partial_sort_cpp_17(InputVector     input,
     // Check if the values are the same
     ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(sorted_output, sorted_input));
 }
-#endif
 
 template<class InputVector, class OutputVector, class CompareFunction>
 void inline compare_partial_sort(InputVector     input,
@@ -178,12 +176,7 @@ void inline compare_partial_sort(InputVector     input,
                                  CompareFunction compare_op)
 {
     compare_partial_sort_cpp_14(input, output, middle, compare_op);
-#if CPP17
-    // this comparison is only compiled and executed if c++17 is available
     compare_partial_sort_cpp_17(input, output, middle, compare_op);
-#else
-    ROCPRIM_PRAGMA_MESSAGE("c++17 not available skips direct comparison with std::partial_sort");
-#endif
 }
 
 TYPED_TEST_SUITE(RocprimDevicePartialSortTests, RocprimDevicePartialSortTestsParams);
@@ -329,7 +322,6 @@ void inline compare_partial_sort_copy_cpp_14(InputVector     input,
     ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected_output));
 }
 
-#if CPP17
 template<class InputVector, class OutputVector, class CompareFunction>
 void inline compare_partial_sort_copy_cpp_17(InputVector     input,
                                              OutputVector    output,
@@ -355,7 +347,6 @@ void inline compare_partial_sort_copy_cpp_17(InputVector     input,
     // Check if the values are the same
     ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(sorted_output, output));
 }
-#endif
 
 template<class InputVector, class OutputVector, class CompareFunction>
 void inline compare_partial_sort_copy(InputVector     input,
@@ -365,13 +356,7 @@ void inline compare_partial_sort_copy(InputVector     input,
                                       CompareFunction compare_op)
 {
     compare_partial_sort_copy_cpp_14(input, output, orignal_output, middle, compare_op);
-#if CPP17
-    // this comparison is only compiled and executed if c++17 is available
     compare_partial_sort_copy_cpp_17(input, output, orignal_output, middle, compare_op);
-#else
-    ROCPRIM_PRAGMA_MESSAGE(
-        "c++17 not available skips direct comparison with std::partial_sort_copy");
-#endif
 }
 
 TYPED_TEST(RocprimDevicePartialSortTests, PartialSortCopy)

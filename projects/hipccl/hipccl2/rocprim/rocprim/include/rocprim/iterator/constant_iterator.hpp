@@ -203,12 +203,6 @@ public:
     {
         return distance_to(other) <= 0;
     }
-
-    [[deprecated]] friend std::ostream& operator<<(std::ostream& os, const constant_iterator& iter)
-    {
-        os << "[" << iter.value_ << "]";
-        return os;
-    }
     #endif // DOXYGEN_SHOULD_SKIP_THIS
 
 private:

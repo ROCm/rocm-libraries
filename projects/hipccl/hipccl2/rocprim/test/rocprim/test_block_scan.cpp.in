@@ -40,24 +40,29 @@
 struct RocprimBlockScanSingleValueTests;
 struct RocprimBlockScanInputArrayTests;
 
-#cmakedefine ROCPRIM_TEST_SLICE @ROCPRIM_TEST_SLICE@
-
-#if   ROCPRIM_TEST_SLICE == 0
-
-struct Integral;
-#define suite_name_single RocprimBlockScanSingleValueTests
-#define suite_name_array RocprimBlockScanInputArrayTests
-#define block_params BlockParamsIntegral
-#define name_suffix Integral
-
-#elif ROCPRIM_TEST_SLICE == 1
-
-struct Floating;
-#define suite_name_single RocprimBlockScanSingleValueTests
-#define suite_name_array RocprimBlockScanInputArrayTests
-#define block_params BlockExchParamsFloating
-#define name_suffix Floating
-
+#if !_CLANGD
+    #cmakedefine ROCPRIM_TEST_SLICE @ROCPRIM_TEST_SLICE@
 #endif
 
-#include "test_block_scan.hpp"
+#if ROCPRIM_TEST_SLICE == 0 || _CLANGD
+    struct Integral;
+    #define suite_name_single RocprimBlockScanSingleValueTests
+    #define suite_name_array RocprimBlockScanInputArrayTests
+    #define block_params BlockParamsIntegral
+    #define name_suffix Integral
+#endif
+
+#if ROCPRIM_TEST_SLICE == 1 || _CLANGD
+    struct Floating;
+    #define suite_name_single RocprimBlockScanSingleValueTests
+    #define suite_name_array RocprimBlockScanInputArrayTests
+    #define block_params BlockExchParamsFloating
+    #define name_suffix Floating
+#endif
+
+#if !_CLANGD
+    // When using clangd, the '.cpp.in' file is already included 
+    // in the header. To prevent recursive includes, the header is 
+    // not supposed to be added.
+    #include "test_block_scan.hpp"
+#endif

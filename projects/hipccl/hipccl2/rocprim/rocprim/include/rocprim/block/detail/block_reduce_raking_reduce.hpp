@@ -100,10 +100,11 @@ private:
 #endif // DOXYGEN_SHOULD_SKIP_THIS
 
 template<class T,
-         unsigned int BlockSizeX,
-         unsigned int BlockSizeY,
-         unsigned int BlockSizeZ,
-         bool         CommutativeOnly = false>
+         unsigned int            BlockSizeX,
+         unsigned int            BlockSizeY,
+         unsigned int            BlockSizeZ,
+         arch::wavefront::target TargetWaveSize,
+         bool                    CommutativeOnly = false>
 class block_reduce_raking_reduce
 {
     static constexpr unsigned int BlockSize = BlockSizeX * BlockSizeY * BlockSizeZ;
@@ -111,7 +112,7 @@ class block_reduce_raking_reduce
     // Warp reduce, warp_reduce_crosslane does not require shared memory (storage), but
     // logical warp size must be a power of two.
     static constexpr unsigned int warp_size_
-        = detail::get_min_warp_size(BlockSize, ::rocprim::arch::wavefront::min_size());
+        = detail::get_min_warp_size(BlockSize, arch::wavefront::size_from_target<TargetWaveSize>());
 
     static constexpr unsigned int segment_len = ceiling_div(BlockSize, warp_size_);
 

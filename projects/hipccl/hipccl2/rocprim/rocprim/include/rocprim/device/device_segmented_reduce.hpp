@@ -85,8 +85,7 @@ hipError_t segmented_reduce_impl(void * temporary_storage,
                                  bool debug_synchronous)
 {
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
-    using result_type =
-        typename ::rocprim::invoke_result_binary_op<input_type, BinaryFunction>::type;
+    using result_type = ::rocprim::accumulator_t<BinaryFunction, input_type>;
 
     using config = wrapped_segmented_reduce_config<Config, result_type>;
 
