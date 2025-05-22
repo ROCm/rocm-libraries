@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -25,7 +25,7 @@
 
 #include "../../../../config.hpp"
 
-#include <rocprim/warp/warp_exchange.hpp>
+#include <rocprim/warp/warp_exchange.hpp> // IWYU pragma: export
 
 BEGIN_HIPCUB_NAMESPACE
 

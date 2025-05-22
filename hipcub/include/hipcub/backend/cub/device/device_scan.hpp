@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2017-2024, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2017-2025, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -33,7 +33,7 @@
 #include "../../../config.hpp"
 #include "../../../util_deprecated.hpp"
 
-#include <cub/device/device_scan.cuh>
+#include <cub/device/device_scan.cuh> // IWYU pragma: export
 
 BEGIN_HIPCUB_NAMESPACE
 
@@ -174,6 +174,30 @@ public:
                                                  scan_op,
                                                  num_items,
                                                  stream);
+    }
+
+    template<typename InputIteratorT,
+             typename OutputIteratorT,
+             typename ScanOpT,
+             typename InitValueT>
+    HIPCUB_RUNTIME_FUNCTION
+    static hipError_t InclusiveScanInit(void*           d_temp_storage,
+                                        size_t&         temp_storage_bytes,
+                                        InputIteratorT  d_in,
+                                        OutputIteratorT d_out,
+                                        ScanOpT         scan_op,
+                                        InitValueT      init_value,
+                                        int             num_items,
+                                        hipStream_t     stream = 0)
+    {
+        return hipCUDAErrorTohipError(::cub::DeviceScan::InclusiveScanInit(d_temp_storage,
+                                                                           temp_storage_bytes,
+                                                                           d_in,
+                                                                           d_out,
+                                                                           scan_op,
+                                                                           init_value,
+                                                                           num_items,
+                                                                           stream));
     }
 
     template<typename InputIteratorT, typename OutputIteratorT>

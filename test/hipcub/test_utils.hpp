@@ -140,15 +140,21 @@ struct select_plus_operator_host
     using acc_type = T;
 };
 
-template<class InputIt, class OutputIt, class BinaryOperation, class acc_type>
+template<bool UseInitialValue = false,
+         class InputIt,
+         class OutputIt,
+         class BinaryOperation,
+         class acc_type>
 OutputIt host_inclusive_scan_impl(
-    InputIt first, InputIt last, OutputIt d_first, BinaryOperation op, acc_type)
+    InputIt first, InputIt last, OutputIt d_first, BinaryOperation op, acc_type init_value)
 {
-    if(first == last)
-        return d_first;
-
-    acc_type sum = *first;
+    acc_type sum = UseInitialValue ? op(init_value, *first) : *first;
     *d_first     = sum;
+
+    if(first == last)
+    {
+        return d_first;
+    }
 
     while(++first != last)
     {
@@ -163,6 +169,13 @@ OutputIt host_inclusive_scan(InputIt first, InputIt last, OutputIt d_first, Bina
 {
     using acc_type = typename std::iterator_traits<InputIt>::value_type;
     return host_inclusive_scan_impl(first, last, d_first, op, acc_type{});
+}
+
+template<class InputIt, class OutputIt, class BinaryOperation, class InitType>
+OutputIt host_inclusive_scan_init(
+    InputIt first, InputIt last, OutputIt d_first, InitType init_value, BinaryOperation op)
+{
+    return host_inclusive_scan_impl<true>(first, last, d_first, op, init_value);
 }
 
 template<class InputIt,
@@ -180,6 +193,30 @@ OutputIt host_inclusive_scan(InputIt first, InputIt last, OutputIt d_first, test
 {
     using acc_type = double;
     return host_inclusive_scan_impl(first, last, d_first, test_utils::plus(), acc_type{});
+}
+
+template<class InputIt,
+         class OutputIt,
+         class InitType,
+         class T,
+         std::enable_if_t<
+             std::is_same<typename std::iterator_traits<InputIt>::value_type,
+                          test_utils::bfloat16>::value
+                 || std::is_same<typename std::iterator_traits<InputIt>::value_type,
+                                 test_utils::half>::value
+                 || std::is_same<typename std::iterator_traits<InputIt>::value_type, float>::value,
+             bool>
+         = true>
+OutputIt host_inclusive_scan_init(
+    InputIt first, InputIt last, OutputIt d_first, InitType init_value, test_utils::plus)
+{
+    using acc_type = double;
+    return host_inclusive_scan_impl<true>(first,
+                                          last,
+                                          d_first,
+                                          init_value,
+                                          test_utils::plus(),
+                                          acc_type{});
 }
 
 template<class InputIt, class T, class OutputIt, class BinaryOperation, class acc_type>

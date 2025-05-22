@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2024, Advanced Micro Devices, Inc. All rights reserved.
+ * Modifications Copyright (c) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -34,7 +34,7 @@
 
 #include <hip/hip_runtime.h>
 
-#include <cub/agent/single_pass_scan_operators.cuh>
+#include <cub/agent/single_pass_scan_operators.cuh> // IWYU pragma: export
 
 BEGIN_HIPCUB_NAMESPACE
 

@@ -32,9 +32,11 @@
 
 #include "../../../config.hpp"
 
+#include "../util_macro.hpp"
 #include "../util_type.hpp"
 
-#include <rocprim/type_traits.hpp>
+#include <rocprim/type_traits.hpp> // IWYU pragma: export
+#include <rocprim/type_traits_functions.hpp>
 
 BEGIN_HIPCUB_NAMESPACE
 
@@ -104,7 +106,7 @@ struct Max
     HIPCUB_HOST_DEVICE inline constexpr typename std::common_type<T, U>::type
         operator()(T&& t, U&& u) const
     {
-        return t < u ? u : t;
+        return HIPCUB_MAX(t, u);
     }
 };
 
@@ -114,7 +116,7 @@ struct Min
     HIPCUB_HOST_DEVICE inline constexpr typename std::common_type<T, U>::type
         operator()(T&& t, U&& u) const
     {
-        return t < u ? t : u;
+        return HIPCUB_MIN(t, u);
     }
 };
 
@@ -274,13 +276,9 @@ template<typename IteratorT, typename FallbackT>
 using non_void_value_t =
     typename std::conditional<std::is_same<IteratorT, void>::value, FallbackT, IteratorT>::type;
 
-// Invoke result type.
-template<typename Invokable, typename... Args>
-using invoke_result_t = ::rocprim::invoke_result_t<Invokable, Args...>;
-
 /// Intermediate accumulator type.
-template<typename Invokable, typename InitT, typename InputT>
-using accumulator_t = std::decay_t<invoke_result_t<Invokable, InitT, InputT>>;
+template<typename Invokable, typename InputT, typename InitT = InputT>
+using accumulator_t = ::rocprim::accumulator_t<Invokable, InputT, InitT>;
 
 // CUB uses value_type of OutputIteratorT (if not void) as a type of intermediate results in segmented reduce,
 // for example:
@@ -297,9 +295,7 @@ using accumulator_t = std::decay_t<invoke_result_t<Invokable, InitT, InputT>>;
 // rocPRIM (as well as Thrust) uses result type of BinaryFunction instead (if not void):
 //
 // using input_type = typename std::iterator_traits<InputIterator>::value_type;
-// using result_type = typename ::rocprim::invoke_result_binary_op<
-//     input_type, BinaryFunction
-// >::type;
+// using result_type = ::rocprim::accumulator_t<BinaryFunction, input_type>;
 //
 // For short -> float using Sum()
 // CUB:     float Sum(float, float)
@@ -341,24 +337,23 @@ convert_result_type(BinaryFunction op)
     return convert_result_type_wrapper<InputIteratorT, OutputIteratorT, BinaryFunction>(op);
 }
 
-// CUB now uses as intermediate result type the return type of BinaryFunction in reduce, scan
-// and reduce_by_key.
+// CUB uses the return type of applying BinaryFunction to an Input and an InitialValue (if not void) as the intermediate result type in reduce.
 //
 // // The accumulator type
-// using AccumT = typename std::decay<invoke_result_t<BinaryFunction, InitT, InputT>>::type;
+// using AccumT = ::rocprim::accumulator_t<BinaryFunction, InputT, InitT>>;
 //
-// rocPRIM was being passed the value_type of OutputIteratorT (if not void) as intermediate
-// result type, following the previous behaviour of CUB.
+// rocPRIM uses the return type of applying BinaryFunction to two Inputs (if not void) instead.
+//
+// using AccumT = ::rocprim::accumulator_t<BinaryFunction, InputT, InputT>>;
 //
 // This wrapper allows to have compatibility with CUB in hipCUB.
 
-template<class InitT, class InputIteratorT, class OutputIteratorT, class BinaryFunction>
+template<class BinaryFunction, class InputIteratorT, class InitT>
 struct convert_binary_result_type_wrapper
 {
     using input_type  = typename std::iterator_traits<InputIteratorT>::value_type;
-    using output_type = typename std::iterator_traits<OutputIteratorT>::value_type;
     using init_type   = InitT;
-    using accum_type  = accumulator_t<BinaryFunction, init_type, input_type>;
+    using accum_type  = accumulator_t<BinaryFunction, input_type, init_type>;
 
     convert_binary_result_type_wrapper(BinaryFunction op) : op(op) {}
 
@@ -371,14 +366,11 @@ struct convert_binary_result_type_wrapper
     BinaryFunction op;
 };
 
-template<class InitT, class InputIteratorT, class OutputIteratorT, class BinaryFunction>
-inline convert_binary_result_type_wrapper<InitT, InputIteratorT, OutputIteratorT, BinaryFunction>
+template<class InputIteratorT, class InitT, class BinaryFunction>
+inline convert_binary_result_type_wrapper<BinaryFunction, InputIteratorT, InitT>
     convert_binary_result_type(BinaryFunction op)
 {
-    return convert_binary_result_type_wrapper<InitT,
-                                              InputIteratorT,
-                                              OutputIteratorT,
-                                              BinaryFunction>(op);
+    return convert_binary_result_type_wrapper<BinaryFunction, InputIteratorT, InitT>(op);
 }
 
 } // end detail namespace
