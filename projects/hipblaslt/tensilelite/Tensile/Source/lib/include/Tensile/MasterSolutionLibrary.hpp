@@ -115,7 +115,7 @@ namespace TensileLite
             {
                 return std::shared_ptr<MySolution>();
             }
-            auto       solution = solutions.at(index);
+            auto solution = solutions.at(index);
 
             if(solution->requiredHostWorkspaceSizePerProblem == static_cast<size_t>(-1))
             {
@@ -185,8 +185,9 @@ namespace TensileLite
                 {
                     std::lock_guard<std::mutex> guard(solutionsGuard);
                     auto                        selected_solution = solutions.at(solution_index);
-
+                    Task                        task(hardware, problem, *(selected_solution));
                     if((*selected_solution->problemPredicate)(problem)
+                       && (*selected_solution->taskPredicate)(task)
                        && (*selected_solution->hardwarePredicate)(hardware))
                         rv = selected_solution;
                     else
@@ -230,10 +231,10 @@ namespace TensileLite
         {
             if(Debug::Instance().printSolutionSelectionTime())
             {
-                auto start  = std::chrono::steady_clock::now();
-                auto result = library->findTopSolutions(problem, hardware, numSolutions);
-                auto end    = std::chrono::steady_clock::now();
-                double time = std::chrono::duration<double, std::micro>(end - start).count();
+                auto   start  = std::chrono::steady_clock::now();
+                auto   result = library->findTopSolutions(problem, hardware, numSolutions);
+                auto   end    = std::chrono::steady_clock::now();
+                double time   = std::chrono::duration<double, std::micro>(end - start).count();
                 std::cout << "Solution selection time: " << time << " us" << std::endl;
                 return result;
             }
