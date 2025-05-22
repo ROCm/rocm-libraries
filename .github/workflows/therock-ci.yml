@@ -112,7 +112,7 @@ jobs:
     #   extra_cmake_options: "-DTHEROCK_USE_EXTERNAL_ROCM_LIBRARIES=ON -DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=rocm-libraries -DTHEROCK_ENABLE_PRIM=ON -DTHEROCK_ENABLE_ALL=OFF"
       extra_cmake_options: "-DTHEROCK_ENABLE_PRIM=ON -DTHEROCK_ENABLE_ALL=OFF"
       bucket: "therock-artifacts-external"
-      path: "rocm-libraries"
+      repo: "rocm-libraries"
 
   therock-test-linux:
     name: "rocPRIM math-lib test"
@@ -124,4 +124,4 @@ jobs:
       test_runs_on: "linux-mi300-1gpu-ossci-rocm"
       platform: "linux"
       bucket: "therock-artifacts-external"
-      path: "rocm-libraries"
+      repo: "rocm-libraries"
