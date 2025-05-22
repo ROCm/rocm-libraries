@@ -29,6 +29,7 @@
 // TODO: actually these headers are not that independent due to the Macros that being used
 // currently. we should remove as more macros as we can.
 #include "batchnorm_functions.hpp"
+#include "bnorm_spatial_activation_functions.hpp"
 #include "activation_functions.hpp"
 #include "reduction_functions.hpp"
 
@@ -83,7 +84,10 @@ struct MIOpenBatchNormFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
                                                double epsilon,
                                                FpPrecType& mean,
                                                FpPrecType& variance,
-                                               FpPrecType& invVariance)
+                                               FpPrecType& invVariance,
+                                               FpPrecType alpha,
+                                               FpPrecType beta,
+                                               FpPrecType gamma)
     {
         FpPrecType pvscale, pvbias;
 
@@ -286,11 +290,14 @@ struct MIOpenBatchNormFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
                 {
                     index = nidx * mio_bn_config::chw + chwid + hwidx;
                 }
-                out[index] = fpprec_to_fp<FpType>(
+                out[index] = fpprec_to_fp<FpType>(miopen::batchnorm::activation_op(
                     fma(pvscale,
                         (fp_to_fpprec<FpPrecType>(in[index]) - fp_to_fpprec<FpPrecType>(mean)) *
                             fp_to_fpprec<FpPrecType>(invVariance),
-                        pvbias));
+                        pvbias),
+                    alpha,
+                    beta,
+                    gamma));
             }
         }
         else
@@ -319,7 +326,8 @@ struct MIOpenBatchNormFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
                     nidx                 = l / mio_bn_config::hw;
                     hwidx                = l - (nidx * mio_bn_config::hw);
                     index                = nidx * mio_bn_config::chw + chwid + hwidx;
-                    out[index]           = fpprec_to_fp<FpType>(fma(pvscale, xhat[j], pvbias));
+                    out[index]           = fpprec_to_fp<FpType>(miopen::batchnorm::activation_op(
+                        fma(pvscale, xhat[j], pvbias), alpha, beta, gamma));
                 }
 
                 if constexpr(remout > 0u)
@@ -351,7 +359,8 @@ struct MIOpenBatchNormFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
 
                         if(index < mio_bn_config::nchw)
                         {
-                            out[index] = fpprec_to_fp<FpType>(fma(pvscale, xhat[j], pvbias));
+                            out[index] = fpprec_to_fp<FpType>(miopen::batchnorm::activation_op(
+                                fma(pvscale, xhat[j], pvbias), alpha, beta, gamma));
                         }
                     }
                 }
@@ -391,9 +400,11 @@ extern "C" __global__ void __launch_bounds__(
 #if(MIO_SAVE_MEAN_VARIANCE == 1)
         ,
         typename mio_bn_config::fp_prec_type* __restrict resultSaveMean,
-        typename mio_bn_config::fp_prec_type* __restrict resultSaveInvVariance
+        typename mio_bn_config::fp_prec_type* __restrict resultSaveInvVariance,
 #endif
-    )
+        typename mio_bn_config::fp_prec_type alpha,
+        typename mio_bn_config::fp_prec_type beta,
+        typename mio_bn_config::fp_prec_type gamma)
 {
     using fp_type          = typename mio_bn_config::fp_type;
     using fp_prec_type     = typename mio_bn_config::fp_prec_type;
@@ -409,7 +420,8 @@ extern "C" __global__ void __launch_bounds__(
     const unsigned int lid   = threadIdx.x;
     const unsigned int grpid = blockIdx.x;
 
-    forward_train_spatial_impl{}(in, out, scale, bias, INHW, epsilon, mean, variance, invVariance);
+    forward_train_spatial_impl{}(
+        in, out, scale, bias, INHW, epsilon, mean, variance, invVariance, alpha, beta, gamma);
 
     if(lid == 0)
     {

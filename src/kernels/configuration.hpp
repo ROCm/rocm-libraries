@@ -30,6 +30,7 @@
 #define CONFIGURATION_HPP
 
 #include "default_configurations.hpp"
+
 #include "vector_types.hpp"
 #include "bfloat16_dev.hpp"
 #include "miopen_type_traits.hpp"
@@ -45,6 +46,21 @@ enum class type_strategy : int
     bfpmix,
 };
 
+enum class neuron_op_type : int
+{
+    pasthru      = 0, // x
+    logistic     = 1, // 1 / (1 + e^-x)  //Sigmoid
+    tanh         = 2, // beta * tanh(alpha * x)
+    relu         = 3, // max(0, x)
+    softrelu     = 4, // log(1 + e^x)   // bonomial normal log likelihood
+    abs          = 5, // abs(x)
+    power        = 6, // (alpha + beta * x )^gamma
+    clipped_relu = 7, // min(alpha, max(0, x))
+    leaky_relu   = 8, // alpha * x | x <= 0; x | x > 0
+    elu          = 9, // alpha * (e^x - 1) | x <= 0; x | x > 0
+    total        = 10,
+};
+
 namespace detail {
 
 template <int LayoutNHWC,
@@ -54,7 +70,8 @@ template <int LayoutNHWC,
           int UseFp32,
           int UseFpmix,
           int UseBfpmix,
-          int UseAMDGCN>
+          int UseAMDGCN,
+          int NrnOpId>
 struct proto_config
 {
     static_assert(LayoutNHWC == 0 || LayoutNHWC == 1,
@@ -69,6 +86,8 @@ struct proto_config
     static_assert((UseFp16 + UseFp32 + UseFpmix + UseBfpmix) == 1,
                   "only one of these configs can and must be chosen.");
     static_assert(UseAMDGCN == 0 || UseAMDGCN == 1, "UseAMDGCN must be 0 or 1");
+    static_assert(NrnOpId >= 0 && NrnOpId <= 10,
+                  "NrnOpId can only be interger between 0-10 (inclusive)");
 
     static constexpr bool layout_nhwc        = static_cast<bool>(LayoutNHWC);
     static constexpr bool save_mean_variance = static_cast<bool>(SaveMeanVariance);
@@ -78,6 +97,7 @@ struct proto_config
                 : (UseFp32 ? type_strategy::fp32
                            : (UseFpmix ? type_strategy::fpmix : type_strategy::bfpmix));
     static constexpr bool use_amdgnc = UseAMDGCN;
+    static constexpr auto neuron_op  = static_cast<neuron_op_type>(NrnOpId);
 };
 } // namespace detail
 
@@ -88,7 +108,8 @@ using config = detail::proto_config<MIO_LAYOUT_NHWC,
                                     MIOPEN_USE_FP32,
                                     MIOPEN_USE_FPMIX,
                                     MIOPEN_USE_BFPMIX,
-                                    MIOPEN_USE_AMDGCN>;
+                                    MIOPEN_USE_AMDGCN,
+                                    MIOPEN_NRN_OP_ID>;
 
 } // namespace miopen
 
