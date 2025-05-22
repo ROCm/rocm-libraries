@@ -50,7 +50,6 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: "ROCm/TheRock"
-          path: "TheRock"
           ref: users/geomin12/monorepo-therock-test
 
       - name: Generate a token
@@ -71,10 +70,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install pydantic requests
 
-      - name: Patch monorepo
-        run: |
-          python TheRock/build_tools/github_actions/patch_monorepo.py \
-            --repo rocm-libraries
+    # # For our "rocPRIM" MVP, there are no patches to apply. This will be un-commented and used later!
+    #   - name: Patch monorepo
+    #     run: |
+    #       python build_tools/github_actions/patch_monorepo.py \
+    #         --repo rocm-libraries
 
         # get the script, see what PR items there are (or do checkout process or share with Joseph's work)
       - name: Detect changed subtrees
@@ -94,12 +94,13 @@ jobs:
         env:
           SUBTREES: ${{ steps.detect.outputs.subtrees }}
         run: |
-          python ./TheRock/build_tools/github_actions/monorepo_configure_ci.py
+          python ./build_tools/github_actions/monorepo_configure_ci.py
 
   therock-build-linux:
     name: Build Linux Packages
     needs: setup
-    if: ${{ needs.setup.outputs.jobs != '[]' }}
+    # Commented out for testing
+    # if: ${{ needs.setup.outputs.jobs != '[]' }}
     permissions:
       contents: read
       id-token: write
