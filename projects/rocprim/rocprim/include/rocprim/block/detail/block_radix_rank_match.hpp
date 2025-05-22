@@ -272,6 +272,19 @@ public:
     }
 
     template<typename Key, unsigned ItemsPerThread, typename DigitExtractor>
+    ROCPRIM_DEVICE void rank_keys_desc(const Key (&keys)[ItemsPerThread],
+                                  unsigned int (&ranks)[ItemsPerThread],
+                                  storage_type&  storage,
+                                  DigitExtractor digit_extractor)
+    {
+        rank_keys_impl(keys, ranks, storage.get(),
+            [&digit_extractor](const Key & key){
+                const unsigned int digit = digit_extractor(key);
+                return radix_digits - 1 - digit;
+            });
+    }
+
+    template<typename Key, unsigned ItemsPerThread, typename DigitExtractor>
     ROCPRIM_DEVICE void rank_keys(const Key (&keys)[ItemsPerThread],
                                   unsigned int (&ranks)[ItemsPerThread],
                                   storage_type&  storage,

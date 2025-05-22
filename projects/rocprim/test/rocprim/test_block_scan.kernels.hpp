@@ -409,6 +409,138 @@ template<
 >
 __global__
 __launch_bounds__(BlockSize)
+void inclusive_scan_array_with_storage_kernel(T * device_output){
+
+    const unsigned int index = ((blockIdx.x * BlockSize) + threadIdx.x) * ItemsPerThread;
+    
+    T input[ItemsPerThread];
+    
+    for(size_t i = 0; i < ItemsPerThread; i++)
+        input[i] = device_output[i + index];
+    
+    
+    using bscan_t = rocprim::block_scan<T, BlockSize, Algorithm>;
+    __shared__ typename bscan_t::storage_type storage;
+    rocprim::block_scan<T, BlockSize, Algorithm> bscan;
+
+    bscan.inclusive_scan(input, input, storage, BinaryOp());
+
+    for(size_t i = 0; i < ItemsPerThread; i++)
+        device_output[i + index] = input[i];
+}
+
+template<
+    unsigned int BlockSize,
+    unsigned int ItemsPerThread,
+    rocprim::block_scan_algorithm Algorithm,
+    class T,
+    class BinaryOp
+>
+__global__
+__launch_bounds__(BlockSize)
+void inclusive_scan_array_with_storage_kernel(T * device_output, T init){
+
+    const unsigned int index = ((blockIdx.x * BlockSize) + threadIdx.x) * ItemsPerThread;
+    
+    T input[ItemsPerThread];
+    
+    for(size_t i = 0; i < ItemsPerThread; i++)
+        input[i] = device_output[i + index];
+    
+    
+    using bscan_t = rocprim::block_scan<T, BlockSize, Algorithm>;
+    __shared__ typename bscan_t::storage_type storage;
+    rocprim::block_scan<T, BlockSize, Algorithm> bscan;
+
+    bscan.inclusive_scan(input, init, input, storage, BinaryOp());
+
+    for(size_t i = 0; i < ItemsPerThread; i++)
+        device_output[i + index] = input[i];
+}
+
+template<
+    unsigned int BlockSize,
+    unsigned int ItemsPerThread,
+    rocprim::block_scan_algorithm Algorithm,
+    class T,
+    class BinaryOp
+>
+__global__
+__launch_bounds__(BlockSize)
+void inclusive_scan_reduce_array_with_storage_kernel(T* device_output, T* device_output_reductions)
+{
+    const unsigned int index = ((blockIdx.x * BlockSize ) + threadIdx.x) * ItemsPerThread;
+
+    // load
+    T in_out[ItemsPerThread];
+    for(unsigned int j = 0; j < ItemsPerThread; j++)
+    {
+        in_out[j] = device_output[index + j];
+    }
+    using bscan_t = rocprim::block_scan<T, BlockSize, Algorithm>;
+    __shared__ typename bscan_t::storage_type storage;
+    rocprim::block_scan<T, BlockSize, Algorithm> bscan;
+    T reduction;
+    bscan.inclusive_scan(in_out, in_out, reduction, storage, BinaryOp());
+
+    // store
+    for(unsigned int j = 0; j < ItemsPerThread; j++)
+    {
+        device_output[index + j] = in_out[j];
+    }
+
+    if(threadIdx.x == 0)
+    {
+        device_output_reductions[blockIdx.x] = reduction;
+    }
+}
+
+template<
+    unsigned int BlockSize,
+    unsigned int ItemsPerThread,
+    rocprim::block_scan_algorithm Algorithm,
+    class T,
+    class BinaryOp
+>
+__global__
+__launch_bounds__(BlockSize)
+void inclusive_scan_reduce_array_with_storage_kernel(T* device_output, T* device_output_reductions, T init)
+{
+    const unsigned int index = ((blockIdx.x * BlockSize ) + threadIdx.x) * ItemsPerThread;
+
+    // load
+    T in_out[ItemsPerThread];
+    for(unsigned int j = 0; j < ItemsPerThread; j++)
+    {
+        in_out[j] = device_output[index + j];
+    }
+    using bscan_t = rocprim::block_scan<T, BlockSize, Algorithm>;
+    __shared__ typename bscan_t::storage_type storage;
+    rocprim::block_scan<T, BlockSize, Algorithm> bscan;
+    T reduction;
+    bscan.inclusive_scan(in_out, init, in_out, reduction, storage, BinaryOp());
+
+    // store
+    for(unsigned int j = 0; j < ItemsPerThread; j++)
+    {
+        device_output[index + j] = in_out[j];
+    }
+
+    if(threadIdx.x == 0)
+    {
+        device_output_reductions[blockIdx.x] = reduction;
+    }
+}
+
+template<
+    unsigned int BlockSize,
+    unsigned int ItemsPerThread,
+    rocprim::block_scan_algorithm Algorithm,
+    class T,
+    class BinaryOp
+>
+__global__
+__launch_bounds__(BlockSize)
 void exclusive_scan_array_kernel(T* device_output, T init)
 {
     const unsigned int index = ((blockIdx.x * BlockSize) + threadIdx.x) * ItemsPerThread;
@@ -508,6 +640,72 @@ void exclusive_scan_prefix_callback_array_kernel(
     if(threadIdx.x == 0)
     {
         device_output_bp[blockIdx.x] = prefix_value;
+    }
+}
+
+template<
+    unsigned int BlockSize,
+    unsigned int ItemsPerThread,
+    rocprim::block_scan_algorithm Algorithm,
+    class T,
+    class BinaryOp
+>
+__global__
+__launch_bounds__(BlockSize)
+void exclusive_scan_array_with_storage_kernel(T * device_output, T init){
+
+    const unsigned int index = ((blockIdx.x * BlockSize) + threadIdx.x) * ItemsPerThread;
+    
+    T input[ItemsPerThread];
+    
+    for(size_t i = 0; i < ItemsPerThread; i++)
+        input[i] = device_output[i + index];
+    
+    
+    using bscan_t = rocprim::block_scan<T, BlockSize, Algorithm>;
+    __shared__ typename bscan_t::storage_type storage;
+    rocprim::block_scan<T, BlockSize, Algorithm> bscan;
+
+    bscan.exclusive_scan(input, input, init, storage, BinaryOp());
+
+    for(size_t i = 0; i < ItemsPerThread; i++)
+        device_output[i + index] = input[i];
+}
+
+template<
+    unsigned int BlockSize,
+    unsigned int ItemsPerThread,
+    rocprim::block_scan_algorithm Algorithm,
+    class T,
+    class BinaryOp
+>
+__global__
+__launch_bounds__(BlockSize)
+void exclusive_scan_reduce_array_with_storage_kernel(T* device_output, T* device_output_reductions, T init)
+{
+    const unsigned int index = ((blockIdx.x * BlockSize) + threadIdx.x) * ItemsPerThread;
+    // load
+    T in_out[ItemsPerThread];
+    for(unsigned int j = 0; j < ItemsPerThread; j++)
+    {
+        in_out[j] = device_output[index + j];
+    }
+    
+    using bscan_t = rocprim::block_scan<T, BlockSize, Algorithm>;
+    __shared__ typename bscan_t::storage_type storage;
+    rocprim::block_scan<T, BlockSize, Algorithm> bscan;
+    T reduction;
+    bscan.exclusive_scan(in_out, in_out, init, reduction, storage, BinaryOp());
+
+    // store
+    for(unsigned int j = 0; j < ItemsPerThread; j++)
+    {
+        device_output[index + j] = in_out[j];
+    }
+
+    if(threadIdx.x == 0)
+    {
+        device_output_reductions[blockIdx.x] = reduction;
     }
 }
 
@@ -760,6 +958,339 @@ auto test_block_scan_input_arrays()
         ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected));
         ASSERT_NO_FATAL_FAILURE(
             test_utils::assert_eq(output_block_prefixes, expected_block_prefixes));
+    }
+
+}
+
+template<
+    class T,
+    int Method,
+    unsigned int BlockSize = 256U,
+    unsigned int ItemsPerThread = 1U,
+    rocprim::block_scan_algorithm Algorithm = rocprim::block_scan_algorithm::using_warp_scan
+>
+auto test_block_scan_input_arrays()
+-> typename std::enable_if<Method == 6>::type
+{
+    using binary_op_type = rocprim::maximum<T>;
+
+    static constexpr auto algorithm = Algorithm;
+    static constexpr size_t block_size = BlockSize;
+    static constexpr size_t items_per_thread = ItemsPerThread;
+
+    // Given block size not supported
+    if(block_size > test_utils::get_max_block_size())
+    {
+        return;
+    }
+
+    const size_t items_per_block = block_size * items_per_thread;
+    const size_t size = items_per_block * 19;
+    const size_t grid_size = size / items_per_block;
+
+    SCOPED_TRACE(testing::Message() << "with items_per_block = " << items_per_block);
+    SCOPED_TRACE(testing::Message() << "with size = " << size);
+    SCOPED_TRACE(testing::Message() << "with grid_size = " << grid_size);
+
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
+    {
+        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
+
+        // Generate data
+        std::vector<T> output = test_utils::get_random_data_wrapped<T>(size, 2, 100, seed_value);
+
+        // Calculate expected results on host
+        std::vector<T> expected(output.size(), T(0));
+        binary_op_type binary_op;
+        for(size_t i = 0; i < output.size() / items_per_block; i++)
+        {
+            for(size_t j = 0; j < items_per_block; j++)
+            {
+                auto idx = i * items_per_block + j;
+                expected[idx] = binary_op(output[idx], expected[j > 0 ? idx-1 : idx]);
+            }
+        }
+
+        // Writing to device memory
+        common::device_ptr<T> device_output(output);
+
+        // Launching kernel
+        hipLaunchKernelGGL(HIP_KERNEL_NAME(inclusive_scan_array_with_storage_kernel<block_size,
+                                                                       items_per_thread,
+                                                                       algorithm,
+                                                                       T,
+                                                                       binary_op_type>),
+                           dim3(grid_size),
+                           dim3(block_size),
+                           0,
+                           0,
+                           device_output.get());
+
+        HIP_CHECK(hipGetLastError());
+        HIP_CHECK(hipDeviceSynchronize());
+
+        // Read from device memory
+        output = device_output.load();
+
+        // Validating results
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected));
+    }
+}
+
+template<
+    class T,
+    int Method,
+    unsigned int BlockSize = 256U,
+    unsigned int ItemsPerThread = 1U,
+    rocprim::block_scan_algorithm Algorithm = rocprim::block_scan_algorithm::using_warp_scan
+>
+auto test_block_scan_input_arrays()
+-> typename std::enable_if<Method == 7>::type
+{
+    using binary_op_type = rocprim::maximum<T>;
+
+    static constexpr auto algorithm = Algorithm;
+    static constexpr size_t block_size = BlockSize;
+    static constexpr size_t items_per_thread = ItemsPerThread;
+
+    // Given block size not supported
+    if(block_size > test_utils::get_max_block_size())
+    {
+        return;
+    }
+
+    const size_t items_per_block = block_size * items_per_thread;
+    const size_t size = items_per_block * 19;
+    const size_t grid_size = size / items_per_block;
+
+    SCOPED_TRACE(testing::Message() << "with items_per_block = " << items_per_block);
+    SCOPED_TRACE(testing::Message() << "with size = " << size);
+    SCOPED_TRACE(testing::Message() << "with grid_size = " << grid_size);
+
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
+    {
+        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
+        
+        // Generate data
+        std::vector<T> output = test_utils::get_random_data_wrapped<T>(size, 2, 100, seed_value);
+        
+        // Calculate expected results on host
+        std::vector<T> expected(output.size(), T(0));
+        const T init = test_utils::get_random_value<T>(0, 100, seed_value);
+        binary_op_type binary_op;
+        for(size_t i = 0; i < output.size() / items_per_block; i++)
+        {
+            expected[i * items_per_block] = init;
+            for(size_t j = 0; j < items_per_block; j++)
+            {
+                auto idx = i * items_per_block + j;
+                expected[idx] = binary_op(output[idx], expected[j > 0 ? idx-1 : idx]);
+            }
+        }
+
+        // Writing to device memory
+        common::device_ptr<T> device_output(output);
+
+        // Launching kernel
+        hipLaunchKernelGGL(HIP_KERNEL_NAME(inclusive_scan_array_with_storage_kernel<block_size,
+                                                                       items_per_thread,
+                                                                       algorithm,
+                                                                       T,
+                                                                       binary_op_type>),
+                            dim3(grid_size),
+                            dim3(block_size),
+                            0,
+                            0,
+                            device_output.get(),
+                            init
+                        );
+
+        HIP_CHECK(hipGetLastError());
+        HIP_CHECK(hipDeviceSynchronize());
+
+        // Read from device memory
+        output = device_output.load();
+
+        // Validating results
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected));
+    }
+}
+
+template<
+    class T,
+    int Method,
+    unsigned int BlockSize = 256U,
+    unsigned int ItemsPerThread = 1U,
+    rocprim::block_scan_algorithm Algorithm = rocprim::block_scan_algorithm::using_warp_scan
+>
+auto test_block_scan_input_arrays()
+-> typename std::enable_if<Method == 8>::type
+{
+    using binary_op_type = rocprim::maximum<T>;
+
+    static constexpr auto algorithm = Algorithm;
+    static constexpr size_t block_size = BlockSize;
+    static constexpr size_t items_per_thread = ItemsPerThread;
+
+    // Given block size not supported
+    if(block_size > test_utils::get_max_block_size())
+    {
+        return;
+    }
+
+    const size_t items_per_block = block_size * items_per_thread;
+    const size_t size = items_per_block * 19;
+    const size_t grid_size = size / items_per_block;
+
+    SCOPED_TRACE(testing::Message() << "with items_per_block = " << items_per_block);
+    SCOPED_TRACE(testing::Message() << "with size = " << size);
+    SCOPED_TRACE(testing::Message() << "with grid_size = " << grid_size);
+
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
+    {
+        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
+
+        // Generate data
+        std::vector<T> output = test_utils::get_random_data_wrapped<T>(size, 2, 100, seed_value);
+
+        // Output reduce results
+        std::vector<T> output_reductions(size / block_size, T(0));
+
+        // Calculate expected results on host
+        std::vector<T> expected(output.size(), T(0));
+        std::vector<T> expected_reductions(output_reductions.size(), T(0));
+        binary_op_type binary_op;
+        for(size_t i = 0; i < output.size() / items_per_block; i++)
+        {
+            for(size_t j = 0; j < items_per_block; j++)
+            {
+                auto idx = i * items_per_block + j;
+                expected[idx] = binary_op(output[idx], expected[j > 0 ? idx-1 : idx]);
+            }
+            expected_reductions[i] = expected[(i+1) * items_per_block - 1];
+        }
+
+        // Writing to device memory
+        common::device_ptr<T> device_output(output);
+        common::device_ptr<T> device_output_reductions(output_reductions);
+
+        // Launching kernel
+        hipLaunchKernelGGL(HIP_KERNEL_NAME(inclusive_scan_reduce_array_with_storage_kernel<block_size,
+                                                                              items_per_thread,
+                                                                              algorithm,
+                                                                              T,
+                                                                              binary_op_type>),
+                           dim3(grid_size),
+                           dim3(block_size),
+                           0,
+                           0,
+                           device_output.get(),
+                           device_output_reductions.get());
+
+        HIP_CHECK(hipGetLastError());
+        HIP_CHECK(hipDeviceSynchronize());
+
+        // Read from device memory
+        output            = device_output.load();
+        output_reductions = device_output_reductions.load();
+
+        // Validating results
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected));
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output_reductions, expected_reductions));
+    }
+
+}
+
+template<
+    class T,
+    int Method,
+    unsigned int BlockSize = 256U,
+    unsigned int ItemsPerThread = 1U,
+    rocprim::block_scan_algorithm Algorithm = rocprim::block_scan_algorithm::using_warp_scan
+>
+auto test_block_scan_input_arrays()
+-> typename std::enable_if<Method == 9>::type
+{
+    using binary_op_type = rocprim::maximum<T>;
+
+    static constexpr auto algorithm = Algorithm;
+    static constexpr size_t block_size = BlockSize;
+    static constexpr size_t items_per_thread = ItemsPerThread;
+
+    // Given block size not supported
+    if(block_size > test_utils::get_max_block_size())
+    {
+        return;
+    }
+
+    const size_t items_per_block = block_size * items_per_thread;
+    const size_t size = items_per_block * 19;
+    const size_t grid_size = size / items_per_block;
+
+    SCOPED_TRACE(testing::Message() << "with items_per_block = " << items_per_block);
+    SCOPED_TRACE(testing::Message() << "with size = " << size);
+    SCOPED_TRACE(testing::Message() << "with grid_size = " << grid_size);
+
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
+    {
+        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
+
+        // Generate data
+        std::vector<T> output = test_utils::get_random_data_wrapped<T>(size, 2, 100, seed_value);
+
+        // Output reduce results
+        std::vector<T> output_reductions(size / block_size, T(0));
+
+        // Calculate expected results on host
+        std::vector<T> expected(output.size(), T(0));
+        std::vector<T> expected_reductions(output_reductions.size(), T(0));
+        const T init = test_utils::get_random_value<T>(0, 100, seed_value);
+        
+        binary_op_type binary_op;
+        for(size_t i = 0; i < output.size() / items_per_block; i++)
+        {
+            expected[i * items_per_block] = init;
+            for(size_t j = 0; j < items_per_block; j++)
+            {
+                auto idx = i * items_per_block + j;
+                expected[idx] = binary_op(output[idx], expected[j > 0 ? idx-1 : idx]);
+            }
+            expected_reductions[i] = expected[(i+1) * items_per_block - 1];
+        }
+
+        // Writing to device memory
+        common::device_ptr<T> device_output(output);
+        common::device_ptr<T> device_output_reductions(output_reductions);
+
+        // Launching kernel
+        hipLaunchKernelGGL(HIP_KERNEL_NAME(inclusive_scan_reduce_array_with_storage_kernel<block_size,
+                                                                              items_per_thread,
+                                                                              algorithm,
+                                                                              T,
+                                                                              binary_op_type>),
+                           dim3(grid_size),
+                           dim3(block_size),
+                           0,
+                           0,
+                           device_output.get(),
+                           device_output_reductions.get(),
+                           init
+                        );
+
+        HIP_CHECK(hipGetLastError());
+        HIP_CHECK(hipDeviceSynchronize());
+
+        // Read from device memory
+        output            = device_output.load();
+        output_reductions = device_output_reductions.load();
+
+        // Validating results
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected));
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output_reductions, expected_reductions));
     }
 
 }
@@ -1027,6 +1558,179 @@ auto test_block_scan_input_arrays()
         ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected));
         ASSERT_NO_FATAL_FAILURE(
             test_utils::assert_eq(output_block_prefixes, expected_block_prefixes));
+    }
+
+}
+
+template<
+    class T,
+    int Method,
+    unsigned int BlockSize = 256U,
+    unsigned int ItemsPerThread = 1U,
+    rocprim::block_scan_algorithm Algorithm = rocprim::block_scan_algorithm::using_warp_scan
+>
+auto test_block_scan_input_arrays()
+-> typename std::enable_if<Method == 10>::type
+{
+    using binary_op_type = rocprim::maximum<T>;
+
+    static constexpr auto algorithm = Algorithm;
+    static constexpr size_t block_size = BlockSize;
+    static constexpr size_t items_per_thread = ItemsPerThread;
+
+    // Given block size not supported
+    if(block_size > test_utils::get_max_block_size())
+    {
+        return;
+    }
+
+    const size_t items_per_block = block_size * items_per_thread;
+    const size_t size            = items_per_block * 19;
+    const size_t grid_size       = size / items_per_block;
+
+    SCOPED_TRACE(testing::Message() << "with items_per_block = " << items_per_block);
+    SCOPED_TRACE(testing::Message() << "with size = " << size);
+    SCOPED_TRACE(testing::Message() << "with grid_size = " << grid_size);
+
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
+    {
+        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
+
+        // Generate data
+        std::vector<T> output = test_utils::get_random_data_wrapped<T>(size, 2, 100, seed_value);
+        const T init = test_utils::get_random_value<T>(0, 100, seed_value);
+
+        // Calculate expected results on host
+        std::vector<T> expected(output.size(), T(0));
+        binary_op_type binary_op;
+        for(size_t i = 0; i < output.size() / items_per_block; i++)
+        {
+            expected[i * items_per_block] = init;
+            for(size_t j = 1; j < items_per_block; j++)
+            {
+                auto idx = i * items_per_block + j;
+                expected[idx] = binary_op(output[idx-1], expected[idx-1]);
+            }
+        }
+
+        // Writing to device memory
+        common::device_ptr<T> device_output(output);
+
+        // Launching kernel
+        hipLaunchKernelGGL(HIP_KERNEL_NAME(exclusive_scan_array_with_storage_kernel<block_size,
+                                                                       items_per_thread,
+                                                                       algorithm,
+                                                                       T,
+                                                                       binary_op_type>),
+                           dim3(grid_size),
+                           dim3(block_size),
+                           0,
+                           0,
+                           device_output.get(),
+                           init);
+
+        HIP_CHECK(hipGetLastError());
+        HIP_CHECK(hipDeviceSynchronize());
+
+        // Read from device memory
+        output = device_output.load();
+
+        // Validating results
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected));
+    }
+
+}
+
+template<
+    class T,
+    int Method,
+    unsigned int BlockSize = 256U,
+    unsigned int ItemsPerThread = 1U,
+    rocprim::block_scan_algorithm Algorithm = rocprim::block_scan_algorithm::using_warp_scan
+>
+auto test_block_scan_input_arrays()
+-> typename std::enable_if<Method == 11>::type
+{
+    using binary_op_type = rocprim::maximum<T>;
+
+    static constexpr auto algorithm = Algorithm;
+    static constexpr size_t block_size = BlockSize;
+    static constexpr size_t items_per_thread = ItemsPerThread;
+
+    // Given block size not supported
+    if(block_size > test_utils::get_max_block_size())
+    {
+        return;
+    }
+
+    const size_t items_per_block = block_size * items_per_thread;
+    const size_t size = items_per_block * 19;
+    const size_t grid_size = size / items_per_block;
+
+    SCOPED_TRACE(testing::Message() << "with items_per_block = " << items_per_block);
+    SCOPED_TRACE(testing::Message() << "with size = " << size);
+    SCOPED_TRACE(testing::Message() << "with grid_size = " << grid_size);
+
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
+    {
+        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
+
+        // Generate data
+        std::vector<T> output = test_utils::get_random_data_wrapped<T>(size, 2, 100, seed_value);
+
+        // Output reduce results
+        std::vector<T> output_reductions(size / items_per_block);
+        const T init = test_utils::get_random_value<T>(0, 100, seed_value);
+
+        // Calculate expected results on host
+        std::vector<T> expected(output.size(), T(0));
+        std::vector<T> expected_reductions(output_reductions.size(), T(0));
+        binary_op_type binary_op;
+        for(size_t i = 0; i < output.size() / items_per_block; i++)
+        {
+            expected[i * items_per_block] = init;
+            for(size_t j = 1; j < items_per_block; j++)
+            {
+                auto idx = i * items_per_block + j;
+                expected[idx] = binary_op(output[idx-1], expected[idx-1]);
+            }
+            for(size_t j = 0; j < items_per_block; j++)
+            {
+                auto idx = i * items_per_block + j;
+                expected_reductions[i] = binary_op(expected_reductions[i], output[idx]);
+            }
+        }
+
+        // Writing to device memory
+        common::device_ptr<T> device_output(output);
+        common::device_ptr<T> device_output_reductions(output_reductions.size());
+
+        // Launching kernel
+        hipLaunchKernelGGL(HIP_KERNEL_NAME(exclusive_scan_reduce_array_with_storage_kernel<block_size,
+                                                                              items_per_thread,
+                                                                              algorithm,
+                                                                              T,
+                                                                              binary_op_type>),
+                           dim3(grid_size),
+                           dim3(block_size),
+                           0,
+                           0,
+                           device_output.get(),
+                           device_output_reductions.get(),
+                           init);
+
+        HIP_CHECK(hipGetLastError());
+        HIP_CHECK(hipDeviceSynchronize());
+
+        // Read from device memory
+        output            = device_output.load();
+        output_reductions = device_output_reductions.load();
+
+        // Validating results
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected));
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output_reductions, expected_reductions));
     }
 
 }
