@@ -1274,7 +1274,7 @@ public:
     template<typename T>
     void queue_fn(const std::string& name, T bench_fn)
     {
-        apply_settings(benchmark::RegisterBenchmark(name,
+        apply_settings(benchmark::RegisterBenchmark(name.c_str(),
                                                     [=](benchmark::State& gbench_state)
                                                     { bench_fn(new_state(gbench_state)); }));
     }
