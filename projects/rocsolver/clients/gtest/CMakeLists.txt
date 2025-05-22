@@ -117,6 +117,7 @@ set(rocauxiliary_test_source
   auxiliary/latrd_gtest.cpp
   # symmetric matrices
   auxiliary/lasyf_gtest.cpp
+  auxiliary/sb2st_hb2st_gtest.cpp
   auxiliary/sy2sb_he2hb_gtest.cpp
   # triangular matrices
   auxiliary/lauum_gtest.cpp
