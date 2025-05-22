@@ -28,6 +28,14 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
 #ifdef _CCCL_CUDA_COMPILER
 #  include <thrust/system/cuda/config.h>
 
@@ -170,8 +178,10 @@ struct binary_transform_f<InputIt1, InputIt2, OutputIt, no_stencil_tag, Transfor
   }
 }; // struct binary_transform_f
 
+// EAN 2024-10-04: when force-inlined, gcc's optimizer will generate bad code
+// for this function:
 template <class Policy, class InputIt, class Size, class OutputIt, class StencilIt, class TransformOp, class Predicate>
-OutputIt THRUST_FUNCTION unary(
+OutputIt _CCCL_HOST_DEVICE inline unary(
   Policy& policy,
   InputIt items,
   OutputIt result,
@@ -192,6 +202,8 @@ OutputIt THRUST_FUNCTION unary(
   return result + num_items;
 }
 
+// EAN 2024-10-04: when force-inlined, gcc's optimizer will generate bad code
+// for this function:
 template <class Policy,
           class InputIt1,
           class InputIt2,
@@ -200,7 +212,7 @@ template <class Policy,
           class StencilIt,
           class TransformOp,
           class Predicate>
-OutputIt THRUST_FUNCTION binary(
+OutputIt _CCCL_HOST_DEVICE inline binary(
   Policy& policy,
   InputIt1 items1,
   InputIt2 items2,
