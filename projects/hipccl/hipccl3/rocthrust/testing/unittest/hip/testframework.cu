@@ -14,24 +14,26 @@
  *  limitations under the License.
  */
 
-#include <unittest/ctest.h>
-#include <unittest/testframework.h>
-#include <unittest/hip/testframework.h>
 #include <thrust/system/hip/memory.h>
+
 #include <hip/hip_runtime.h>
+
 #include <numeric>
 
-#define HIP_CHECK(condition)                                                                     \
-    do                                                                                           \
-    {                                                                                            \
-        hipError_t error = condition;                                                            \
-        if(error != hipSuccess)                                                                  \
-        {                                                                                        \
-            std::cout << "HIP error: " << hipGetErrorString(error) << " on: " << __FILE__ << ":" \
-                      << __LINE__ << std::endl;                                                  \
-            exit(EXIT_FAILURE);                                                                  \
-        }                                                                                        \
-    } while(0)
+#include <unittest/ctest.h>
+#include <unittest/hip/testframework.h>
+#include <unittest/testframework.h>
+
+#define HIP_CHECK(condition)                                                                                         \
+  do                                                                                                                 \
+  {                                                                                                                  \
+    hipError_t error = condition;                                                                                    \
+    if (error != hipSuccess)                                                                                         \
+    {                                                                                                                \
+      std::cout << "HIP error: " << hipGetErrorString(error) << " on: " << __FILE__ << ":" << __LINE__ << std::endl; \
+      exit(EXIT_FAILURE);                                                                                            \
+    }                                                                                                                \
+  } while (0)
 
 __global__ void dummy_kernel() {}
 
@@ -45,7 +47,10 @@ bool binary_exists_for_current_device()
 
   // clear the HIP global error state if we just set it, so that
   // check_hip_error doesn't complain
-  if (hipSuccess != error) (void)hipGetLastError();
+  if (hipSuccess != error)
+  {
+    (void) hipGetLastError();
+  }
 
   return hipSuccess == error;
 }
@@ -54,9 +59,9 @@ void list_devices(void)
 {
   int deviceCount;
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
-  if(deviceCount == 0)
+  if (deviceCount == 0)
   {
-      std::cout << "There is no device supporting HIP" << std::endl;
+    std::cout << "There is no device supporting HIP" << std::endl;
   }
 
   int selected_device;
@@ -67,29 +72,38 @@ void list_devices(void)
     hipDeviceProp_t deviceProp;
     HIP_CHECK(hipGetDeviceProperties(&deviceProp, dev));
 
-    if(dev == 0)
+    if (dev == 0)
     {
-      if(deviceProp.major == 9999 && deviceProp.minor == 9999)
+      if (deviceProp.major == 9999 && deviceProp.minor == 9999)
+      {
         std::cout << "There is no device supporting HIP." << std::endl;
-      else if(deviceCount == 1)
-        std::cout << "There is 1 device supporting HIP" << std:: endl;
+      }
+      else if (deviceCount == 1)
+      {
+        std::cout << "There is 1 device supporting HIP" << std::endl;
+      }
       else
-        std::cout << "There are " << deviceCount <<  " devices supporting HIP" << std:: endl;
+      {
+        std::cout << "There are " << deviceCount << " devices supporting HIP" << std::endl;
+      }
     }
 
     std::cout << "\nDevice " << dev << ": \"" << deviceProp.name << "\"";
-    if(dev == selected_device)
+    if (dev == selected_device)
+    {
       std::cout << "  [SELECTED]";
+    }
     std::cout << std::endl;
 
     std::cout << "  Major revision number:                         " << deviceProp.major << std::endl;
     std::cout << "  Minor revision number:                         " << deviceProp.minor << std::endl;
-    std::cout << "  Total amount of global memory:                 " << deviceProp.totalGlobalMem << " bytes" << std::endl;
+    std::cout
+      << "  Total amount of global memory:                 " << deviceProp.totalGlobalMem << " bytes" << std::endl;
   }
   std::cout << std::endl;
 }
 
-std::vector<int> HIPTestDriver::target_devices(const ArgumentMap &kwargs)
+std::vector<int> HIPTestDriver::target_devices(const ArgumentMap& kwargs)
 {
   std::vector<int> result;
 
@@ -98,11 +112,12 @@ std::vector<int> HIPTestDriver::target_devices(const ArgumentMap &kwargs)
   // unless the target device is set by ctest
   int device_from_ctest = unittest::get_device_from_ctest();
 
-  if(device_id < 0 && device_from_ctest >= 0) {
+  if (device_id < 0 && device_from_ctest >= 0)
+  {
     device_id = device_from_ctest;
   }
 
-  if(device_id < 0)
+  if (device_id < 0)
   {
     // target all devices in the system
     int count = 0;
@@ -114,7 +129,7 @@ std::vector<int> HIPTestDriver::target_devices(const ArgumentMap &kwargs)
   else
   {
     // target the specified device
-    result = std::vector<int>(1,device_id);
+    result = std::vector<int>(1, device_id);
   }
 
   return result;
@@ -123,45 +138,40 @@ std::vector<int> HIPTestDriver::target_devices(const ArgumentMap &kwargs)
 bool HIPTestDriver::check_hip_error(bool concise)
 {
   hipError_t const error = hipGetLastError();
-  if(hipSuccess != error)
+  if (hipSuccess != error)
   {
-    if(!concise)
+    if (!concise)
     {
-      std::cout << "[ERROR] HIP error detected before running tests: ["
-                << std::string(hipGetErrorName(error))
-                << ": "
-                << std::string(hipGetErrorString(error))
-                << "]" << std::endl;
+      std::cout << "[ERROR] HIP error detected before running tests: [" << std::string(hipGetErrorName(error)) << ": "
+                << std::string(hipGetErrorString(error)) << "]" << std::endl;
     }
   }
 
   return hipSuccess != error;
 }
 
-bool HIPTestDriver::post_test_smoke_check(const UnitTest &test, bool concise)
+bool HIPTestDriver::post_test_smoke_check(const UnitTest& test, bool concise)
 {
   hipError_t const error = hipDeviceSynchronize();
-  if(hipSuccess != error)
+  if (hipSuccess != error)
   {
-    if(!concise)
+    if (!concise)
     {
-      std::cout << "\t[ERROR] HIP error detected after running " << test.name << ": ["
-                << std::string(hipGetErrorName(error))
-                << ": "
-                << std::string(hipGetErrorString(error))
-                << "]" << std::endl;
+      std::cout
+        << "\t[ERROR] HIP error detected after running " << test.name << ": [" << std::string(hipGetErrorName(error))
+        << ": " << std::string(hipGetErrorString(error)) << "]" << std::endl;
     }
   }
 
   return hipSuccess == error;
 }
 
-bool HIPTestDriver::run_tests(const ArgumentSet &args, const ArgumentMap &kwargs)
+bool HIPTestDriver::run_tests(const ArgumentSet& args, const ArgumentMap& kwargs)
 {
   bool verbose = kwargs.count("verbose");
   bool concise = kwargs.count("concise");
 
-  if(verbose && concise)
+  if (verbose && concise)
   {
     std::cout << "--verbose and --concise cannot be used together" << std::endl;
     exit(EXIT_FAILURE);
@@ -169,11 +179,14 @@ bool HIPTestDriver::run_tests(const ArgumentSet &args, const ArgumentMap &kwargs
   }
 
   // check error status before doing anything
-  if(check_hip_error(concise)) return false;
+  if (check_hip_error(concise))
+  {
+    return false;
+  }
 
   bool result = true;
 
-  if(kwargs.count("verbose"))
+  if (kwargs.count("verbose"))
   {
     list_devices();
   }
@@ -182,9 +195,7 @@ bool HIPTestDriver::run_tests(const ArgumentSet &args, const ArgumentMap &kwargs
   std::vector<int> devices = target_devices(kwargs);
 
   // target each device
-  for(std::vector<int>::iterator device = devices.begin();
-      device != devices.end();
-      ++device)
+  for (std::vector<int>::iterator device = devices.begin(); device != devices.end(); ++device)
   {
     HIP_CHECK(hipDeviceSynchronize());
 
@@ -193,7 +204,7 @@ bool HIPTestDriver::run_tests(const ArgumentSet &args, const ArgumentMap &kwargs
 
     // check if a binary exists for this device
     // if none exists, skip the device silently unless this is the only one we're targeting
-    if(devices.size() > 1 && !binary_exists_for_current_device())
+    if (devices.size() > 1 && !binary_exists_for_current_device())
     {
       // note which device we're skipping
       hipDeviceProp_t deviceProp;
@@ -204,7 +215,7 @@ bool HIPTestDriver::run_tests(const ArgumentSet &args, const ArgumentMap &kwargs
       continue;
     }
 
-    if(!concise)
+    if (!concise)
     {
       // note which device we're testing
       hipDeviceProp_t deviceProp;
@@ -214,12 +225,15 @@ bool HIPTestDriver::run_tests(const ArgumentSet &args, const ArgumentMap &kwargs
     }
 
     // check error status before running any tests
-    if(check_hip_error(concise)) return false;
+    if (check_hip_error(concise))
+    {
+      return false;
+    }
 
     // run tests
     result &= UnitTestDriver::run_tests(args, kwargs);
 
-    if(!concise && std::next(device) != devices.end())
+    if (!concise && std::next(device) != devices.end())
     {
       // provide some separation between the output of separate tests
       std::cout << std::endl;
@@ -239,13 +253,14 @@ int HIPTestDriver::current_device_architecture() const
   return 100 * deviceProp.major + 10 * deviceProp.minor;
 }
 
-UnitTestDriver &driver_instance(thrust::system::hip::tag)
+UnitTestDriver& driver_instance(thrust::system::hip::tag)
 {
   static HIPTestDriver s_instance;
   return s_instance;
 }
 
-bool HIPTestDriver::supports_managed_memory() const {
+bool HIPTestDriver::supports_managed_memory() const
+{
   int current = -1;
   HIP_CHECK(hipGetDevice(&current));
 

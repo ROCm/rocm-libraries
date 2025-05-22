@@ -21,13 +21,15 @@
 #pragma once
 
 #include <thrust/detail/config.h>
-#include <thrust/mr/new.h>
-#include <thrust/mr/fancy_pointer_resource.h>
 
+#include <thrust/mr/fancy_pointer_resource.h>
+#include <thrust/mr/new.h>
 #include <thrust/system/omp/pointer.h>
 
 THRUST_NAMESPACE_BEGIN
-namespace system { namespace omp
+namespace system
+{
+namespace omp
 {
 
 //! \cond
@@ -59,6 +61,7 @@ using universal_host_pinned_memory_resource = detail::native_resource;
 /*! \}
  */
 
-}} // namespace system::omp
+} // namespace omp
+} // namespace system
 
 THRUST_NAMESPACE_END

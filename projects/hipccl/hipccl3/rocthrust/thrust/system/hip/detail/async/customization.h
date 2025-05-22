@@ -33,89 +33,65 @@
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 
-#include <thrust/system/hip/config.h>
+#  include <thrust/system/hip/config.h>
 
-#include <thrust/detail/type_deduction.h>
-#include <thrust/detail/execute_with_allocator.h>
-#include <thrust/system/hip/memory_resource.h>
-#include <thrust/mr/host_memory_resource.h>
-#include <thrust/mr/allocator.h>
-#include <thrust/mr/disjoint_sync_pool.h>
-#include <thrust/mr/sync_pool.h>
-#include <thrust/per_device_resource.h>
+#  include <thrust/detail/execute_with_allocator.h>
+#  include <thrust/detail/type_deduction.h>
+#  include <thrust/mr/allocator.h>
+#  include <thrust/mr/disjoint_sync_pool.h>
+#  include <thrust/mr/host_memory_resource.h>
+#  include <thrust/mr/sync_pool.h>
+#  include <thrust/per_device_resource.h>
+#  include <thrust/system/hip/memory_resource.h>
 
-#include <cstdint>
+#  include <cstdint>
 
 THRUST_NAMESPACE_BEGIN
 
-namespace system { namespace hip { namespace detail
+namespace system
+{
+namespace hip
+{
+namespace detail
 {
 
-using default_async_host_resource =
-  thrust::mr::synchronized_pool_resource<
-    thrust::host_memory_resource
-  >;
+using default_async_host_resource = thrust::mr::synchronized_pool_resource<thrust::host_memory_resource>;
 
 template <typename DerivedPolicy>
-auto get_async_host_allocator(
-  thrust::detail::execution_policy_base<DerivedPolicy>&
-)
-THRUST_RETURNS(
-  thrust::mr::stateless_resource_allocator<
-    std::uint8_t, default_async_host_resource
-  >{}
-)
+auto get_async_host_allocator(thrust::detail::execution_policy_base<DerivedPolicy>&)
+  THRUST_RETURNS(thrust::mr::stateless_resource_allocator<std::uint8_t, default_async_host_resource>{})
 
-///////////////////////////////////////////////////////////////////////////////
+  ///////////////////////////////////////////////////////////////////////////////
 
-using default_async_device_resource =
-  thrust::mr::disjoint_synchronized_pool_resource<
-    thrust::system::hip::memory_resource
-  , thrust::mr::new_delete_resource
-  >;
+  using default_async_device_resource =
+    thrust::mr::disjoint_synchronized_pool_resource<thrust::system::hip::memory_resource,
+                                                    thrust::mr::new_delete_resource>;
 
 template <typename DerivedPolicy>
-auto get_async_device_allocator(
-  thrust::detail::execution_policy_base<DerivedPolicy>&
-)
-THRUST_RETURNS(
-  thrust::per_device_allocator<
-    std::uint8_t, default_async_device_resource, par_t
-  >{}
-)
+auto get_async_device_allocator(thrust::detail::execution_policy_base<DerivedPolicy>&)
+  THRUST_RETURNS(thrust::per_device_allocator<std::uint8_t, default_async_device_resource, par_t>{})
 
-template <typename Allocator, template <typename> class BaseSystem>
-auto get_async_device_allocator(
-  thrust::detail::execute_with_allocator<Allocator, BaseSystem>& exec
-)
-THRUST_RETURNS(exec.get_allocator())
+    template <typename Allocator, template <typename> class BaseSystem>
+    auto get_async_device_allocator(thrust::detail::execute_with_allocator<Allocator, BaseSystem>& exec)
+      THRUST_RETURNS(exec.get_allocator())
 
-template <typename Allocator, template <typename> class BaseSystem>
-auto get_async_device_allocator(
-  thrust::detail::execute_with_allocator_and_dependencies<
-    Allocator, BaseSystem
-  >& exec
-)
-THRUST_RETURNS(exec.get_allocator())
+        template <typename Allocator, template <typename> class BaseSystem>
+        auto get_async_device_allocator(
+          thrust::detail::execute_with_allocator_and_dependencies<Allocator, BaseSystem>& exec)
+          THRUST_RETURNS(exec.get_allocator())
 
-///////////////////////////////////////////////////////////////////////////////
+  ///////////////////////////////////////////////////////////////////////////////
 
-using default_async_universal_host_pinned_resource =
-  thrust::mr::synchronized_pool_resource<
-    thrust::system::hip::universal_host_pinned_memory_resource
-  >;
+  using default_async_universal_host_pinned_resource =
+    thrust::mr::synchronized_pool_resource<thrust::system::hip::universal_host_pinned_memory_resource>;
 
 template <typename DerivedPolicy>
-auto get_async_universal_host_pinned_allocator(
-  thrust::detail::execution_policy_base<DerivedPolicy>&
-)
-THRUST_RETURNS(
-  thrust::mr::stateless_resource_allocator<
-    std::uint8_t, default_async_universal_host_pinned_resource
-  >{}
-)
+auto get_async_universal_host_pinned_allocator(thrust::detail::execution_policy_base<DerivedPolicy>&)
+  THRUST_RETURNS(thrust::mr::stateless_resource_allocator<std::uint8_t, default_async_universal_host_pinned_resource>{})
 
-}}} // namespace system::hip::detail
+} // namespace detail
+} // namespace hip
+} // namespace system
 
 THRUST_NAMESPACE_END
 

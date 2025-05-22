@@ -35,26 +35,24 @@
 THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
 {
-    template <int PAR>
-    struct has_par : thrust::detail::true_type
-    {
-    };
+template <int PAR>
+struct has_par : thrust::detail::true_type
+{};
 
-    template <>
-    struct has_par<0> : thrust::detail::false_type
-    {
-    };
+template <>
+struct has_par<0> : thrust::detail::false_type
+{};
 
-    template <class Policy>
-    struct cvt_to_seq_impl
-    {
-        using seq_t = thrust::detail::seq_t;
+template <class Policy>
+struct cvt_to_seq_impl
+{
+  using seq_t = thrust::detail::seq_t;
 
-        static seq_t THRUST_HIP_FUNCTION doit(Policy&)
-        {
-            return seq_t();
-        }
-    }; // cvt_to_seq_impl
+  static seq_t THRUST_HIP_FUNCTION doit(Policy&)
+  {
+    return seq_t();
+  }
+}; // cvt_to_seq_impl
 
 #if 0
 template <class Allocator>
@@ -75,16 +73,16 @@ struct cvt_to_seq_impl<
 };    // specialization of struct cvt_to_seq_impl
 #endif
 
-    template <class Policy>
-    typename cvt_to_seq_impl<Policy>::seq_t THRUST_HIP_FUNCTION cvt_to_seq(Policy& policy)
-    {
-        return cvt_to_seq_impl<Policy>::doit(policy);
-    }
+template <class Policy>
+typename cvt_to_seq_impl<Policy>::seq_t THRUST_HIP_FUNCTION cvt_to_seq(Policy& policy)
+{
+  return cvt_to_seq_impl<Policy>::doit(policy);
+}
 
 #if __THRUST_HAS_HIPRT__
-    #define THRUST_HIPRT_DISPATCH par
+#  define THRUST_HIPRT_DISPATCH par
 #else
-    #define THRUST_HIPRT_DISPATCH seq
+#  define THRUST_HIPRT_DISPATCH seq
 #endif
 
 } // namespace hip_rocprim

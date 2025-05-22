@@ -14,7 +14,6 @@
  *  limitations under the License.
  */
 
-
 /*! \file count.h
  *  \brief Counting elements in a range
  */
@@ -22,6 +21,7 @@
 #pragma once
 
 #include <thrust/detail/config.h>
+
 #include <thrust/detail/execution_policy.h>
 #include <thrust/iterator/iterator_traits.h>
 
@@ -40,7 +40,6 @@ THRUST_NAMESPACE_BEGIN
  *  \{
  */
 
-
 /*! \p count finds the number of elements in <tt>[first,last)</tt> that are equal
  *  to \p value. More precisely, \p count returns the number of iterators \c i in
  *  <tt>[first, last)</tt> such that <tt>*i == value</tt>.
@@ -54,10 +53,14 @@ THRUST_NAMESPACE_BEGIN
  *  \return The number of elements equal to \p value.
  *
  *  \tparam DerivedPolicy The name of the derived execution policy.
- *  \tparam InputIterator must be a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a> and \c InputIterator's \c value_type must be a model of must be a model of <a href="https://en.cppreference.com/w/cpp/concepts/equality_comparable">Equality Comparable</a>.
- *  \tparam EqualityComparable must be a model of <a href="https://en.cppreference.com/w/cpp/concepts/equality_comparable">Equality Comparable</a> and can be compared for equality with \c InputIterator's \c value_type
+ *  \tparam InputIterator must be a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input
+ * Iterator</a> and \c InputIterator's \c value_type must be a model of must be a model of <a
+ * href="https://en.cppreference.com/w/cpp/concepts/equality_comparable">Equality Comparable</a>. \tparam
+ * EqualityComparable must be a model of <a
+ * href="https://en.cppreference.com/w/cpp/concepts/equality_comparable">Equality Comparable</a> and can be compared for
+ * equality with \c InputIterator's \c value_type
  *
- *  The following code snippet demonstrates how to use \p count to 
+ *  The following code snippet demonstrates how to use \p count to
  *  count the number of instances in a range of a value of interest using the \p thrust::device execution policy:
  *
  *  \code
@@ -70,7 +73,7 @@ THRUST_NAMESPACE_BEGIN
  *  vec[1] = 1;
  *  vec[3] = 1;
  *  vec[4] = 1;
- *  
+ *
  *  // count the 1s
  *  int result = thrust::count(thrust::device, vec.begin(), vec.end(), 1);
  *  // result == 3
@@ -78,12 +81,12 @@ THRUST_NAMESPACE_BEGIN
  *
  *  \see https://en.cppreference.com/w/cpp/algorithm/count
  */
-template<typename DerivedPolicy, typename InputIterator, typename EqualityComparable>
-THRUST_HOST_DEVICE
-  typename thrust::iterator_traits<InputIterator>::difference_type
-    count(const thrust::detail::execution_policy_base<DerivedPolicy> &exec, InputIterator first, InputIterator last, const EqualityComparable& value);
-
-
+template <typename DerivedPolicy, typename InputIterator, typename EqualityComparable>
+THRUST_HOST_DEVICE typename thrust::iterator_traits<InputIterator>::difference_type
+count(const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
+      InputIterator first,
+      InputIterator last,
+      const EqualityComparable& value);
 
 /*! \p count finds the number of elements in <tt>[first,last)</tt> that are equal
  *  to \p value. More precisely, \p count returns the number of iterators \c i in
@@ -94,10 +97,14 @@ THRUST_HOST_DEVICE
  *  \param value The value to be counted.
  *  \return The number of elements equal to \p value.
  *
- *  \tparam InputIterator must be a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a> and \c InputIterator's \c value_type must be a model of must be a model of <a href="https://en.cppreference.com/w/cpp/concepts/equality_comparable">Equality Comparable</a>.
- *  \tparam EqualityComparable must be a model of <a href="https://en.cppreference.com/w/cpp/concepts/equality_comparable">Equality Comparable</a> and can be compared for equality with \c InputIterator's \c value_type
+ *  \tparam InputIterator must be a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input
+ * Iterator</a> and \c InputIterator's \c value_type must be a model of must be a model of <a
+ * href="https://en.cppreference.com/w/cpp/concepts/equality_comparable">Equality Comparable</a>. \tparam
+ * EqualityComparable must be a model of <a
+ * href="https://en.cppreference.com/w/cpp/concepts/equality_comparable">Equality Comparable</a> and can be compared for
+ * equality with \c InputIterator's \c value_type
  *
- *  The following code snippet demonstrates how to use \p count to 
+ *  The following code snippet demonstrates how to use \p count to
  *  count the number of instances in a range of a value of interest.
  *  \code
  *  #include <thrust/count.h>
@@ -108,7 +115,7 @@ THRUST_HOST_DEVICE
  *  vec[1] = 1;
  *  vec[3] = 1;
  *  vec[4] = 1;
- *  
+ *
  *  // count the 1s
  *  int result = thrust::count(vec.begin(), vec.end(), 1);
  *  // result == 3
@@ -117,11 +124,10 @@ THRUST_HOST_DEVICE
  *  \see https://en.cppreference.com/w/cpp/algorithm/count
  */
 template <typename InputIterator, typename EqualityComparable>
-  typename thrust::iterator_traits<InputIterator>::difference_type
-    count(InputIterator first, InputIterator last, const EqualityComparable& value);
+typename thrust::iterator_traits<InputIterator>::difference_type
+count(InputIterator first, InputIterator last, const EqualityComparable& value);
 
-
-/*! \p count_if finds the number of elements in <tt>[first,last)</tt> for which 
+/*! \p count_if finds the number of elements in <tt>[first,last)</tt> for which
  *  a predicate is \c true. More precisely, \p count_if returns the number of iterators
  *  \c i in <tt>[first, last)</tt> such that <tt>pred(*i) == true</tt>.
  *
@@ -134,8 +140,9 @@ template <typename InputIterator, typename EqualityComparable>
  *  \return The number of elements where \p pred is \c true.
  *
  *  \tparam DerivedPolicy The name of the derived execution policy.
- *  \tparam InputIterator must be a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a> and \c InputIterator's \c value_type must be convertible to \c Predicate's \c argument_type.
- *  \tparam Predicate must be a model of <a href="https://en.cppreference.com/w/cpp/concepts/predicate">Predicate</a>.
+ *  \tparam InputIterator must be a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input
+ * Iterator</a> and \c InputIterator's \c value_type must be convertible to \c Predicate's \c argument_type. \tparam
+ * Predicate must be a model of <a href="https://en.cppreference.com/w/cpp/concepts/predicate">Predicate</a>.
  *
  *  The following code snippet demonstrates how to use \p count to
  *  count the number of odd numbers in a range using the \p thrust::device execution policy:
@@ -169,13 +176,14 @@ template <typename InputIterator, typename EqualityComparable>
  *
  *  \see https://en.cppreference.com/w/cpp/algorithm/count
  */
-template<typename DerivedPolicy, typename InputIterator, typename Predicate>
-THRUST_HOST_DEVICE
-  typename thrust::iterator_traits<InputIterator>::difference_type
-    count_if(const thrust::detail::execution_policy_base<DerivedPolicy> &exec, InputIterator first, InputIterator last, Predicate pred);
+template <typename DerivedPolicy, typename InputIterator, typename Predicate>
+THRUST_HOST_DEVICE typename thrust::iterator_traits<InputIterator>::difference_type
+count_if(const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
+         InputIterator first,
+         InputIterator last,
+         Predicate pred);
 
-
-/*! \p count_if finds the number of elements in <tt>[first,last)</tt> for which 
+/*! \p count_if finds the number of elements in <tt>[first,last)</tt> for which
  *  a predicate is \c true. More precisely, \p count_if returns the number of iterators
  *  \c i in <tt>[first, last)</tt> such that <tt>pred(*i) == true</tt>.
  *
@@ -184,8 +192,9 @@ THRUST_HOST_DEVICE
  *  \param pred The predicate.
  *  \return The number of elements where \p pred is \c true.
  *
- *  \tparam InputIterator must be a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a> and \c InputIterator's \c value_type must be convertible to \c Predicate's \c argument_type.
- *  \tparam Predicate must be a model of <a href="https://en.cppreference.com/w/cpp/concepts/predicate">Predicate</a>.
+ *  \tparam InputIterator must be a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input
+ * Iterator</a> and \c InputIterator's \c value_type must be convertible to \c Predicate's \c argument_type. \tparam
+ * Predicate must be a model of <a href="https://en.cppreference.com/w/cpp/concepts/predicate">Predicate</a>.
  *
  *  The following code snippet demonstrates how to use \p count to
  *  count the number of odd numbers in a range.
@@ -218,9 +227,8 @@ THRUST_HOST_DEVICE
  *  \see https://en.cppreference.com/w/cpp/algorithm/count
  */
 template <typename InputIterator, typename Predicate>
-  typename thrust::iterator_traits<InputIterator>::difference_type
-    count_if(InputIterator first, InputIterator last, Predicate pred);
-
+typename thrust::iterator_traits<InputIterator>::difference_type
+count_if(InputIterator first, InputIterator last, Predicate pred);
 
 /*! \} // end counting
  *  \} // end reductions

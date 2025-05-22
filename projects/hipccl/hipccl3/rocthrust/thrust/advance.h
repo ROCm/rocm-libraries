@@ -14,7 +14,6 @@
  *  limitations under the License.
  */
 
-
 /*! \file advance.h
  *  \brief Advance an iterator by a given distance.
  */
@@ -37,8 +36,8 @@ THRUST_NAMESPACE_BEGIN
  *  \param i The iterator to be advanced.
  *  \param n The distance by which to advance the iterator.
  *
- *  \tparam InputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>.
- *  \tparam Distance is an integral type that is convertible to \p InputIterator's distance type.
+ *  \tparam InputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input
+ * Iterator</a>. \tparam Distance is an integral type that is convertible to \p InputIterator's distance type.
  *
  *  \pre \p n shall be negative only for bidirectional and random access iterators.
  *
@@ -60,15 +59,15 @@ THRUST_NAMESPACE_BEGIN
  *  \see https://en.cppreference.com/w/cpp/iterator/advance
  */
 template <typename InputIterator, typename Distance>
-THRUST_HOST_DEVICE
-void advance(InputIterator& i, Distance n);
+THRUST_HOST_DEVICE void advance(InputIterator& i, Distance n);
 
 /*! \p next(i, n) returns the \p n th successor of the iterator \p i.
  *
  *  \param i An iterator.
  *  \param n The number of elements to advance.
  *
- *  \tparam InputIterator must meet the <a href="https://en.cppreference.com/w/cpp/named_req/InputIterator">InputIterator</a>.
+ *  \tparam InputIterator must meet the <a
+ * href="https://en.cppreference.com/w/cpp/named_req/InputIterator">InputIterator</a>.
  *
  *  \pre \p n shall be negative only for bidirectional and random access iterators.
  *
@@ -103,7 +102,8 @@ InputIterator next(
  *  \param i An iterator.
  *  \param n The number of elements to descend.
  *
- *  \tparam BidirectionalIterator must meet the <a href="https://en.cppreference.com/w/cpp/named_req/BidirectionalIterator">BidirectionalIterator</a>.
+ *  \tparam BidirectionalIterator must meet the <a
+ * href="https://en.cppreference.com/w/cpp/named_req/BidirectionalIterator">BidirectionalIterator</a>.
  *
  *  The following code snippet demonstrates how to use \p prev.
  *
@@ -137,4 +137,3 @@ BidirectionalIterator prev(
 THRUST_NAMESPACE_END
 
 #include <thrust/detail/advance.inl>
-

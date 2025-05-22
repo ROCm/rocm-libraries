@@ -5,7 +5,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 // SPDX-FileCopyrightText: Copyright (c) 2024 NVIDIA CORPORATION & AFFILIATES.
-// SPDX-FileCopyrightText: Modifications Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// SPDX-FileCopyrightText: Modifications Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 //===----------------------------------------------------------------------===//
 

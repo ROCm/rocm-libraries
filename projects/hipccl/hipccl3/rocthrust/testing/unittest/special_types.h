@@ -14,7 +14,7 @@
  *  See the License for the specific language governing permissions and
  *  limitations under the License.
  */
- 
+
 #pragma once
 
 #include <thrust/execution_policy.h>
@@ -24,97 +24,100 @@
 template <typename T, unsigned int N>
 struct FixedVector
 {
-    T data[N];
-    
-    THRUST_HOST_DEVICE
-    FixedVector()
-    {
-        for(unsigned int i = 0; i < N; i++)
-            data[i] = T();
-    }
+  T data[N];
 
-    THRUST_HOST_DEVICE
-    explicit FixedVector(T init)
+  THRUST_HOST_DEVICE FixedVector()
+  {
+    for (unsigned int i = 0; i < N; i++)
     {
-        for(unsigned int i = 0; i < N; i++)
-            data[i] = init;
+      data[i] = T();
     }
+  }
 
-    THRUST_HOST_DEVICE
-    FixedVector operator+(const FixedVector& bs) const
+  THRUST_HOST_DEVICE explicit FixedVector(T init)
+  {
+    for (unsigned int i = 0; i < N; i++)
     {
-        FixedVector output;
-        for(unsigned int i = 0; i < N; i++)
-            output.data[i] = data[i] + bs.data[i];
-        return output;
+      data[i] = init;
     }
-    
-    THRUST_HOST_DEVICE
-    bool operator<(const FixedVector& bs) const
+  }
+
+  THRUST_HOST_DEVICE FixedVector operator+(const FixedVector& bs) const
+  {
+    FixedVector output;
+    for (unsigned int i = 0; i < N; i++)
     {
-        for(unsigned int i = 0; i < N; i++)
-        {
-            if(data[i] < bs.data[i])
-                return true;
-            else if(bs.data[i] < data[i])
-                return false;
-        }
+      output.data[i] = data[i] + bs.data[i];
+    }
+    return output;
+  }
+
+  THRUST_HOST_DEVICE bool operator<(const FixedVector& bs) const
+  {
+    for (unsigned int i = 0; i < N; i++)
+    {
+      if (data[i] < bs.data[i])
+      {
+        return true;
+      }
+      else if (bs.data[i] < data[i])
+      {
         return false;
+      }
     }
+    return false;
+  }
 
-    THRUST_HOST_DEVICE
-    bool operator==(const FixedVector& bs) const
+  THRUST_HOST_DEVICE bool operator==(const FixedVector& bs) const
+  {
+    for (unsigned int i = 0; i < N; i++)
     {
-        for(unsigned int i = 0; i < N; i++)
-        {
-            if(!(data[i] == bs.data[i]))
-                return false;
-        }
-        return true;                
+      if (!(data[i] == bs.data[i]))
+      {
+        return false;
+      }
     }
+    return true;
+  }
 };
 
-template<typename Key, typename Value>
-  struct key_value
+template <typename Key, typename Value>
+struct key_value
 {
   using key_type   = Key;
   using value_type = Value;
 
-  THRUST_HOST_DEVICE
-  key_value(void)
-    : key(), value()
+  THRUST_HOST_DEVICE key_value(void)
+      : key()
+      , value()
   {}
 
-  THRUST_HOST_DEVICE
-  key_value(key_type k, value_type v)
-    : key(k), value(v)
+  THRUST_HOST_DEVICE key_value(key_type k, value_type v)
+      : key(k)
+      , value(v)
   {}
 
-  THRUST_HOST_DEVICE
-  bool operator<(const key_value &rhs) const
+  THRUST_HOST_DEVICE bool operator<(const key_value& rhs) const
   {
     return key < rhs.key;
   }
 
-  THRUST_HOST_DEVICE
-  bool operator>(const key_value &rhs) const
+  THRUST_HOST_DEVICE bool operator>(const key_value& rhs) const
   {
     return key > rhs.key;
   }
 
-  THRUST_HOST_DEVICE
-  bool operator==(const key_value &rhs) const
+  THRUST_HOST_DEVICE bool operator==(const key_value& rhs) const
   {
     return key == rhs.key && value == rhs.value;
   }
 
-  THRUST_HOST_DEVICE
-  bool operator!=(const key_value &rhs) const
+  THRUST_HOST_DEVICE bool operator!=(const key_value& rhs) const
   {
     return !(*this == rhs);
   }
 
-  friend std::ostream &operator<<(std::ostream &os, const key_value &kv)
+  friend std::ostream& operator<<(std::ostream& os, const key_value& kv)
   {
     return os << "(" << kv.key << ", " << kv.value << ")";
   }
@@ -173,7 +176,8 @@ private:
   unsigned int num_copies = 0;
 };
 
-struct my_tag : THRUST_NS_QUALIFIER::device_execution_policy<my_tag> {};
+struct my_tag : THRUST_NS_QUALIFIER::device_execution_policy<my_tag>
+{};
 
 #endif // THRUST_USE_ANON_NAMESPACE
 
@@ -190,6 +194,4 @@ using std::uint32_t;
 using std::uint64_t;
 using std::uint8_t;
 
-  
-}
-
+} // namespace unittest

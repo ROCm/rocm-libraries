@@ -17,6 +17,7 @@
 #pragma once
 
 #include <thrust/detail/config.h>
+
 #include <thrust/system/detail/generic/tag.h>
 
 THRUST_NAMESPACE_BEGIN
@@ -27,66 +28,39 @@ namespace detail
 namespace generic
 {
 
+template <typename DerivedPolicy, typename ForwardIterator>
+THRUST_HOST_DEVICE ForwardIterator
+unique(thrust::execution_policy<DerivedPolicy>& exec, ForwardIterator first, ForwardIterator last);
 
-template<typename DerivedPolicy,
-         typename ForwardIterator>
-THRUST_HOST_DEVICE
-ForwardIterator unique(thrust::execution_policy<DerivedPolicy> &exec,
-                       ForwardIterator first,
-                       ForwardIterator last);
+template <typename DerivedPolicy, typename ForwardIterator, typename BinaryPredicate>
+THRUST_HOST_DEVICE ForwardIterator unique(
+  thrust::execution_policy<DerivedPolicy>& exec,
+  ForwardIterator first,
+  ForwardIterator last,
+  BinaryPredicate binary_pred);
 
+template <typename DerivedPolicy, typename InputIterator, typename OutputIterator>
+THRUST_HOST_DEVICE OutputIterator unique_copy(
+  thrust::execution_policy<DerivedPolicy>& exec, InputIterator first, InputIterator last, OutputIterator output);
 
-template<typename DerivedPolicy,
-         typename ForwardIterator,
-         typename BinaryPredicate>
-THRUST_HOST_DEVICE
-ForwardIterator unique(thrust::execution_policy<DerivedPolicy> &exec,
-                       ForwardIterator first,
-                       ForwardIterator last,
-                       BinaryPredicate binary_pred);
+template <typename DerivedPolicy, typename InputIterator, typename OutputIterator, typename BinaryPredicate>
+THRUST_HOST_DEVICE OutputIterator unique_copy(
+  thrust::execution_policy<DerivedPolicy>& exec,
+  InputIterator first,
+  InputIterator last,
+  OutputIterator output,
+  BinaryPredicate binary_pred);
 
+template <typename DerivedPolicy, typename ForwardIterator>
+THRUST_HOST_DEVICE typename thrust::iterator_traits<ForwardIterator>::difference_type
+unique_count(thrust::execution_policy<DerivedPolicy>& exec, ForwardIterator first, ForwardIterator last);
 
-template<typename DerivedPolicy,
-         typename InputIterator,
-         typename OutputIterator>
-THRUST_HOST_DEVICE
-OutputIterator unique_copy(thrust::execution_policy<DerivedPolicy> &exec,
-                           InputIterator first,
-                           InputIterator last,
-                           OutputIterator output);
-
-
-template<typename DerivedPolicy,
-         typename InputIterator,
-         typename OutputIterator,
-         typename BinaryPredicate>
-THRUST_HOST_DEVICE
-OutputIterator unique_copy(thrust::execution_policy<DerivedPolicy> &exec,
-                           InputIterator first,
-                           InputIterator last,
-                           OutputIterator output,
-                           BinaryPredicate binary_pred);
-
-
-template<typename DerivedPolicy,
-         typename ForwardIterator>
-THRUST_HOST_DEVICE
-typename thrust::iterator_traits<ForwardIterator>::difference_type
-    unique_count(thrust::execution_policy<DerivedPolicy> &exec,
-                 ForwardIterator first,
-                 ForwardIterator last);
-
-
-template<typename DerivedPolicy,
-         typename ForwardIterator,
-         typename BinaryPredicate>
-THRUST_HOST_DEVICE
-typename thrust::iterator_traits<ForwardIterator>::difference_type
-    unique_count(thrust::execution_policy<DerivedPolicy> &exec,
-                 ForwardIterator first,
-                 ForwardIterator last,
-                 BinaryPredicate binary_pred);
-
+template <typename DerivedPolicy, typename ForwardIterator, typename BinaryPredicate>
+THRUST_HOST_DEVICE typename thrust::iterator_traits<ForwardIterator>::difference_type unique_count(
+  thrust::execution_policy<DerivedPolicy>& exec,
+  ForwardIterator first,
+  ForwardIterator last,
+  BinaryPredicate binary_pred);
 
 } // end namespace generic
 } // end namespace detail
@@ -94,4 +68,3 @@ typename thrust::iterator_traits<ForwardIterator>::difference_type
 THRUST_NAMESPACE_END
 
 #include <thrust/system/detail/generic/unique.inl>
-

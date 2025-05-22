@@ -23,10 +23,10 @@
 
 #include <thrust/detail/config.h>
 
-#if  THRUST_CPP_DIALECT >= 2017
-#if __has_include(<version>)
-#  include <version>
-#endif
+#if THRUST_CPP_DIALECT >= 2017
+#  if __has_include(<version>)
+#    include <version>
+#  endif
 #endif
 
 #include <type_traits>
@@ -61,9 +61,7 @@ using std::remove_cvref;
 template <typename T>
 struct remove_cvref
 {
-  using type = typename std::remove_cv<
-    typename std::remove_reference<T>::type
-  >::type;
+  using type = typename std::remove_cv<typename std::remove_reference<T>::type>::type;
 };
 #endif
 

@@ -14,7 +14,6 @@
  *  limitations under the License.
  */
 
-
 /*! \file normal_iterator.h
  *  \brief Defines the interface to an iterator class
  *         which adapts a pointer type.
@@ -24,56 +23,44 @@
 
 #include <thrust/detail/config.h>
 
-#include <thrust/iterator/iterator_adaptor.h>
 #include <thrust/detail/type_traits.h>
+#include <thrust/iterator/iterator_adaptor.h>
 #include <thrust/type_traits/is_contiguous_iterator.h>
 
 THRUST_NAMESPACE_BEGIN
 namespace detail
 {
 
-
-template<typename Pointer>
-  class normal_iterator
-    : public iterator_adaptor<
-        normal_iterator<Pointer>,
-        Pointer
-      >
+template <typename Pointer>
+class normal_iterator : public iterator_adaptor<normal_iterator<Pointer>, Pointer>
 {
   using super_t = iterator_adaptor<normal_iterator<Pointer>, Pointer>;
 
-  public:
-    THRUST_HOST_DEVICE
-    normal_iterator() {}
+public:
+  THRUST_HOST_DEVICE normal_iterator() {}
 
-    THRUST_HOST_DEVICE
-    normal_iterator(Pointer p)
-      : super_t(p) {}
-    
-    template<typename OtherPointer>
-    THRUST_HOST_DEVICE
-    normal_iterator(const normal_iterator<OtherPointer> &other,
-                    typename thrust::detail::enable_if_convertible<
-                      OtherPointer,
-                      Pointer
-                    >::type * = 0)
-      : super_t(other.base()) {}
+  THRUST_HOST_DEVICE normal_iterator(Pointer p)
+      : super_t(p)
+  {}
+
+  template <typename OtherPointer>
+  THRUST_HOST_DEVICE normal_iterator(const normal_iterator<OtherPointer>& other,
+                                     typename thrust::detail::enable_if_convertible<OtherPointer, Pointer>::type* = 0)
+      : super_t(other.base())
+  {}
 
 }; // end normal_iterator
 
-
-template<typename Pointer>
-  inline THRUST_HOST_DEVICE normal_iterator<Pointer> make_normal_iterator(Pointer ptr)
+template <typename Pointer>
+inline THRUST_HOST_DEVICE normal_iterator<Pointer> make_normal_iterator(Pointer ptr)
 {
   return normal_iterator<Pointer>(ptr);
 }
 
-} // end detail
+} // namespace detail
 
 template <typename T>
-struct proclaim_contiguous_iterator<
-  thrust::detail::normal_iterator<T>
-> : true_type {};
+struct proclaim_contiguous_iterator<thrust::detail::normal_iterator<T>> : true_type
+{};
 
 THRUST_NAMESPACE_END
-

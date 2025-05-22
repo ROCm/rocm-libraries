@@ -1,12 +1,33 @@
-#include <thrust/host_vector.h>
+// Copyright (c) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 #include <thrust/device_vector.h>
 #include <thrust/functional.h>
 #include <thrust/gather.h>
-#include <thrust/scan.h>
+#include <thrust/host_vector.h>
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/iterator/transform_iterator.h>
-#include <iostream>
+#include <thrust/scan.h>
+
 #include <iomanip>
+#include <iostream>
 
 #include "include/host_device.h"
 
@@ -18,16 +39,17 @@ struct transpose_index
 {
   size_t m, n;
 
-  __host__ __device__
-  transpose_index(size_t _m, size_t _n) : m(_m), n(_n) {}
+  __host__ __device__ transpose_index(size_t _m, size_t _n)
+      : m(_m)
+      , n(_n)
+  {}
 
-  __host__ __device__
-  size_t operator()(size_t linear_index)
+  __host__ __device__ size_t operator()(size_t linear_index)
   {
-      size_t i = linear_index / n;
-      size_t j = linear_index % n;
+    size_t i = linear_index / n;
+    size_t j = linear_index % n;
 
-      return m * j + i;
+    return m * j + i;
   }
 };
 
@@ -35,14 +57,14 @@ struct transpose_index
 struct row_index
 {
   size_t n;
-  
-  __host__ __device__
-  row_index(size_t _n) : n(_n) {}
 
-  __host__ __device__
-  size_t operator()(size_t i)
+  __host__ __device__ row_index(size_t _n)
+      : n(_n)
+  {}
+
+  __host__ __device__ size_t operator()(size_t i)
   {
-      return i / n;
+    return i / n;
   }
 };
 
@@ -51,14 +73,12 @@ template <typename T>
 void transpose(size_t m, size_t n, thrust::device_vector<T>& src, thrust::device_vector<T>& dst)
 {
   thrust::counting_iterator<size_t> indices(0);
-  
-  thrust::gather
-    (thrust::make_transform_iterator(indices, transpose_index(n, m)),
-     thrust::make_transform_iterator(indices, transpose_index(n, m)) + dst.size(),
-     src.begin(),
-     dst.begin());
-}
 
+  thrust::gather(thrust::make_transform_iterator(indices, transpose_index(n, m)),
+                 thrust::make_transform_iterator(indices, transpose_index(n, m)) + dst.size(),
+                 src.begin(),
+                 dst.begin());
+}
 
 // scan the rows of an M-by-N array
 template <typename T>
@@ -66,11 +86,11 @@ void scan_horizontally(size_t n, thrust::device_vector<T>& d_data)
 {
   thrust::counting_iterator<size_t> indices(0);
 
-  thrust::inclusive_scan_by_key
-    (thrust::make_transform_iterator(indices, row_index(n)),
-     thrust::make_transform_iterator(indices, row_index(n)) + d_data.size(),
-     d_data.begin(),
-     d_data.begin());
+  thrust::inclusive_scan_by_key(
+    thrust::make_transform_iterator(indices, row_index(n)),
+    thrust::make_transform_iterator(indices, row_index(n)) + d_data.size(),
+    d_data.begin(),
+    d_data.begin());
 }
 
 // print an M-by-N array
@@ -79,10 +99,12 @@ void print(size_t m, size_t n, thrust::device_vector<T>& d_data)
 {
   thrust::host_vector<T> h_data = d_data;
 
-  for(size_t i = 0; i < m; i++)
+  for (size_t i = 0; i < m; i++)
   {
-    for(size_t j = 0; j < n; j++)
+    for (size_t j = 0; j < n; j++)
+    {
       std::cout << std::setw(8) << h_data[i * n + j] << " ";
+    }
     std::cout << "\n";
   }
 }

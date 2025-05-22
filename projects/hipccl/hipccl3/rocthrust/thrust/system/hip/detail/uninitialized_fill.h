@@ -30,64 +30,58 @@
 #include <thrust/detail/config.h>
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
-#include <iterator>
-#include <thrust/detail/memory_wrapper.h>
-#include <thrust/distance.h>
-#include <thrust/system/hip/detail/execution_policy.h>
-#include <thrust/system/hip/detail/parallel_for.h>
-#include <thrust/system/hip/detail/util.h>
+#  include <thrust/detail/memory_wrapper.h>
+#  include <thrust/distance.h>
+#  include <thrust/system/hip/detail/execution_policy.h>
+#  include <thrust/system/hip/detail/parallel_for.h>
+#  include <thrust/system/hip/detail/util.h>
+
+#  include <iterator>
 
 THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
 {
 namespace __uninitialized_fill
 {
-    template <class Iterator, class T>
-    struct functor
-    {
-        Iterator items;
-        T        value;
+template <class Iterator, class T>
+struct functor
+{
+  Iterator items;
+  T value;
 
-        using value_type = typename iterator_traits<Iterator>::value_type;
+  using value_type = typename iterator_traits<Iterator>::value_type;
 
-        THRUST_HIP_FUNCTION
-        functor(Iterator items_, T const& value_)
-            : items(items_)
-            , value(value_)
-        {
-        }
+  THRUST_HIP_FUNCTION
+  functor(Iterator items_, T const& value_)
+      : items(items_)
+      , value(value_)
+  {}
 
-        template <class Size>
-        void THRUST_HIP_DEVICE_FUNCTION operator()(Size idx)
-        {
-            value_type& out = raw_reference_cast(items[static_cast<typename std::pointer_traits<Iterator>::difference_type>(idx)]);
+  template <class Size>
+  void THRUST_HIP_DEVICE_FUNCTION operator()(Size idx)
+  {
+    value_type& out =
+      raw_reference_cast(items[static_cast<typename std::pointer_traits<Iterator>::difference_type>(idx)]);
 
-            ::new(static_cast<void*>(&out)) value_type(value);
-        }
-    }; // struct functor
-} // namespace __uninitialized_copy
+    ::new (static_cast<void*>(&out)) value_type(value);
+  }
+}; // struct functor
+} // namespace __uninitialized_fill
 
 template <class Derived, class Iterator, class Size, class T>
 Iterator THRUST_HIP_FUNCTION
-uninitialized_fill_n(execution_policy<Derived>& policy,
-                     Iterator                   first,
-                     Size                       count,
-                     T const&                   x)
+uninitialized_fill_n(execution_policy<Derived>& policy, Iterator first, Size count, T const& x)
 {
-    using functor_t = __uninitialized_fill::functor<Iterator, T>;
+  using functor_t = __uninitialized_fill::functor<Iterator, T>;
 
-    hip_rocprim::parallel_for(policy, functor_t(first, x), count);
-    return first + static_cast<typename std::pointer_traits<Iterator>::difference_type>(count);
+  hip_rocprim::parallel_for(policy, functor_t(first, x), count);
+  return first + static_cast<typename std::pointer_traits<Iterator>::difference_type>(count);
 }
 
 template <class Derived, class Iterator, class T>
-void THRUST_HIP_FUNCTION
-uninitialized_fill(execution_policy<Derived>& policy,
-                   Iterator                   first,
-                   Iterator                   last,
-                   T const&                   x)
+void THRUST_HIP_FUNCTION uninitialized_fill(execution_policy<Derived>& policy, Iterator first, Iterator last, T const& x)
 {
-    hip_rocprim::uninitialized_fill_n(policy, first, thrust::distance(first, last), x);
+  hip_rocprim::uninitialized_fill_n(policy, first, thrust::distance(first, last), x);
 }
 
 } // namespace hip_rocprim

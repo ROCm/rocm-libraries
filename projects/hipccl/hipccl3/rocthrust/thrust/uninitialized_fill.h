@@ -14,7 +14,6 @@
  *  limitations under the License.
  */
 
-
 /*! \file uninitialized_fill.h
  *  \brief Copy construction into a range of uninitialized elements from a source value
  */
@@ -22,6 +21,7 @@
 #pragma once
 
 #include <thrust/detail/config.h>
+
 #include <thrust/detail/execution_policy.h>
 
 THRUST_NAMESPACE_BEGIN
@@ -31,7 +31,6 @@ THRUST_NAMESPACE_BEGIN
  *  \ingroup transformations
  *  \{
  */
-
 
 /*! In \c thrust, the function \c thrust::device_new allocates memory for
  *  an object and then creates an object at that location by calling a
@@ -43,16 +42,16 @@ THRUST_NAMESPACE_BEGIN
  *  calling \p ForwardIterator's \c value_type's copy constructor.
  *
  *  The algorithm's execution is parallelized as determined by \p exec.
- *  
+ *
  *  \param exec The execution policy to use for parallelization.
  *  \param first The first element of the range of interest.
  *  \param last The last element of the range of interest.
  *  \param x The value to use as the exemplar of the copy constructor.
  *
  *  \tparam DerivedPolicy The name of the derived execution policy.
- *  \tparam ForwardIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward Iterator</a>,
- *          \p ForwardIterator is mutable, and \p ForwardIterator's \c value_type has a constructor that
- *          takes a single argument of type \p T.
+ *  \tparam ForwardIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward
+ * Iterator</a>, \p ForwardIterator is mutable, and \p ForwardIterator's \c value_type has a constructor that takes a
+ * single argument of type \p T.
  *
  *  The following code snippet demonstrates how to use \p uninitialized_fill to initialize a range of
  *  uninitialized memory using the \p thrust::device execution policy for parallelization:
@@ -61,13 +60,13 @@ THRUST_NAMESPACE_BEGIN
  *  #include <thrust/uninitialized_fill.h>
  *  #include <thrust/device_malloc.h>
  *  #include <thrust/execution_policy.h>
- *  
+ *
  *  struct Int
  *  {
  *    THRUST_HOST_DEVICE
  *    Int(int x) : val(x) {}
  *    int val;
- *  };  
+ *  };
  *  ...
  *  const int N = 137;
  *
@@ -86,13 +85,12 @@ THRUST_NAMESPACE_BEGIN
  *  \see \c device_new
  *  \see \c device_malloc
  */
-template<typename DerivedPolicy, typename ForwardIterator, typename T>
-THRUST_HOST_DEVICE
-  void uninitialized_fill(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
-                          ForwardIterator first,
-                          ForwardIterator last,
-                          const T &x);
-
+template <typename DerivedPolicy, typename ForwardIterator, typename T>
+THRUST_HOST_DEVICE void uninitialized_fill(
+  const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
+  ForwardIterator first,
+  ForwardIterator last,
+  const T& x);
 
 /*! In \c thrust, the function \c thrust::device_new allocates memory for
  *  an object and then creates an object at that location by calling a
@@ -102,14 +100,14 @@ THRUST_HOST_DEVICE
  *  in that range. That is, for each iterator \c i in the range <tt>[first, last)</tt>,
  *  \p uninitialized_fill creates a copy of \c x in the location pointed to \c i by
  *  calling \p ForwardIterator's \c value_type's copy constructor.
- *  
+ *
  *  \param first The first element of the range of interest.
  *  \param last The last element of the range of interest.
  *  \param x The value to use as the exemplar of the copy constructor.
  *
- *  \tparam ForwardIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward Iterator</a>,
- *          \p ForwardIterator is mutable, and \p ForwardIterator's \c value_type has a constructor that
- *          takes a single argument of type \p T.
+ *  \tparam ForwardIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward
+ * Iterator</a>, \p ForwardIterator is mutable, and \p ForwardIterator's \c value_type has a constructor that takes a
+ * single argument of type \p T.
  *
  *  The following code snippet demonstrates how to use \p uninitialized_fill to initialize a range of
  *  uninitialized memory.
@@ -117,13 +115,13 @@ THRUST_HOST_DEVICE
  *  \code
  *  #include <thrust/uninitialized_fill.h>
  *  #include <thrust/device_malloc.h>
- *  
+ *
  *  struct Int
  *  {
  *    THRUST_HOST_DEVICE
  *    Int(int x) : val(x) {}
  *    int val;
- *  };  
+ *  };
  *  ...
  *  const int N = 137;
  *
@@ -142,11 +140,8 @@ THRUST_HOST_DEVICE
  *  \see \c device_new
  *  \see \c device_malloc
  */
-template<typename ForwardIterator, typename T>
-  void uninitialized_fill(ForwardIterator first,
-                          ForwardIterator last,
-                          const T &x);
-
+template <typename ForwardIterator, typename T>
+void uninitialized_fill(ForwardIterator first, ForwardIterator last, const T& x);
 
 /*! In \c thrust, the function \c thrust::device_new allocates memory for
  *  an object and then creates an object at that location by calling a
@@ -158,7 +153,7 @@ template<typename ForwardIterator, typename T>
  *  calling \p ForwardIterator's \c value_type's copy constructor.
  *
  *  The algorithm's execution is parallelized as determined by \p exec.
- *  
+ *
  *  \param exec The execution policy to use for parallelization.
  *  \param first The first element of the range of interest.
  *  \param n The size of the range of interest.
@@ -166,9 +161,9 @@ template<typename ForwardIterator, typename T>
  *  \return <tt>first+n</tt>
  *
  *  \tparam DerivedPolicy The name of the derived execution policy.
- *  \tparam ForwardIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward Iterator</a>,
- *          \p ForwardIterator is mutable, and \p ForwardIterator's \c value_type has a constructor that
- *          takes a single argument of type \p T.
+ *  \tparam ForwardIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward
+ * Iterator</a>, \p ForwardIterator is mutable, and \p ForwardIterator's \c value_type has a constructor that takes a
+ * single argument of type \p T.
  *
  *  The following code snippet demonstrates how to use \p uninitialized_fill to initialize a range of
  *  uninitialized memory using the \p thrust::device execution policy for parallelization:
@@ -177,13 +172,13 @@ template<typename ForwardIterator, typename T>
  *  #include <thrust/uninitialized_fill.h>
  *  #include <thrust/device_malloc.h>
  *  #include <thrust/execution_policy.h>
- *  
+ *
  *  struct Int
  *  {
  *    THRUST_HOST_DEVICE
  *    Int(int x) : val(x) {}
  *    int val;
- *  };  
+ *  };
  *  ...
  *  const int N = 137;
  *
@@ -202,13 +197,9 @@ template<typename ForwardIterator, typename T>
  *  \see \c device_new
  *  \see \c device_malloc
  */
-template<typename DerivedPolicy, typename ForwardIterator, typename Size, typename T>
-THRUST_HOST_DEVICE
-  ForwardIterator uninitialized_fill_n(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
-                                       ForwardIterator first,
-                                       Size n,
-                                       const T &x);
-
+template <typename DerivedPolicy, typename ForwardIterator, typename Size, typename T>
+THRUST_HOST_DEVICE ForwardIterator uninitialized_fill_n(
+  const thrust::detail::execution_policy_base<DerivedPolicy>& exec, ForwardIterator first, Size n, const T& x);
 
 /*! In \c thrust, the function \c thrust::device_new allocates memory for
  *  an object and then creates an object at that location by calling a
@@ -218,15 +209,15 @@ THRUST_HOST_DEVICE
  *  in that range. That is, for each iterator \c i in the range <tt>[first, first+n)</tt>,
  *  \p uninitialized_fill creates a copy of \c x in the location pointed to \c i by
  *  calling \p ForwardIterator's \c value_type's copy constructor.
- *  
+ *
  *  \param first The first element of the range of interest.
  *  \param n The size of the range of interest.
  *  \param x The value to use as the exemplar of the copy constructor.
  *  \return <tt>first+n</tt>
  *
- *  \tparam ForwardIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward Iterator</a>,
- *          \p ForwardIterator is mutable, and \p ForwardIterator's \c value_type has a constructor that
- *          takes a single argument of type \p T.
+ *  \tparam ForwardIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward
+ * Iterator</a>, \p ForwardIterator is mutable, and \p ForwardIterator's \c value_type has a constructor that takes a
+ * single argument of type \p T.
  *
  *  The following code snippet demonstrates how to use \p uninitialized_fill to initialize a range of
  *  uninitialized memory.
@@ -234,13 +225,13 @@ THRUST_HOST_DEVICE
  *  \code
  *  #include <thrust/uninitialized_fill.h>
  *  #include <thrust/device_malloc.h>
- *  
+ *
  *  struct Int
  *  {
  *    THRUST_HOST_DEVICE
  *    Int(int x) : val(x) {}
  *    int val;
- *  };  
+ *  };
  *  ...
  *  const int N = 137;
  *
@@ -259,10 +250,8 @@ THRUST_HOST_DEVICE
  *  \see \c device_new
  *  \see \c device_malloc
  */
-template<typename ForwardIterator, typename Size, typename T>
-  ForwardIterator uninitialized_fill_n(ForwardIterator first,
-                                       Size n,
-                                       const T &x);
+template <typename ForwardIterator, typename Size, typename T>
+ForwardIterator uninitialized_fill_n(ForwardIterator first, Size n, const T& x);
 
 /*! \} // end filling
  *  \} // transformations

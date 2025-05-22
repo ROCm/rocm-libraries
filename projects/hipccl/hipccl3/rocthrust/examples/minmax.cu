@@ -1,16 +1,35 @@
-#include <thrust/device_vector.h>
-#include <thrust/host_vector.h>
-#include <thrust/transform_reduce.h>
-#include <thrust/functional.h>
-#include <thrust/extrema.h>
-#include <thrust/random.h>
+// Copyright (c) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
 
+#include <thrust/device_vector.h>
+#include <thrust/extrema.h>
+#include <thrust/functional.h>
+#include <thrust/host_vector.h>
+#include <thrust/random.h>
+#include <thrust/transform_reduce.h>
 
 #include "include/host_device.h"
 
 // compute minimum and maximum values in a single reduction
 
-// minmax_pair stores the minimum and maximum 
+// minmax_pair stores the minimum and maximum
 // values that have been encountered so far
 template <typename T>
 struct minmax_pair
@@ -25,8 +44,7 @@ struct minmax_pair
 template <typename T>
 struct minmax_unary_op
 {
-  __host__ __device__
-  minmax_pair<T> operator()(const T& x) const
+  __host__ __device__ minmax_pair<T> operator()(const T& x) const
   {
     minmax_pair<T> result;
     result.min_val = x;
@@ -35,15 +53,14 @@ struct minmax_unary_op
   }
 };
 
-// minmax_binary_op is a functor that accepts two minmax_pair 
-// structs and returns a new minmax_pair whose minimum and 
-// maximum values are the min() and max() respectively of 
+// minmax_binary_op is a functor that accepts two minmax_pair
+// structs and returns a new minmax_pair whose minimum and
+// maximum values are the min() and max() respectively of
 // the minimums and maximums of the input pairs
 template <typename T>
 struct minmax_binary_op
 {
-  __host__ __device__
-  minmax_pair<T> operator()(const minmax_pair<T>& x, const minmax_pair<T>& y) const
+  __host__ __device__ minmax_pair<T> operator()(const minmax_pair<T>& x, const minmax_pair<T>& y) const
   {
     minmax_pair<T> result;
     result.min_val = thrust::min(x.min_val, y.min_val);
@@ -51,7 +68,6 @@ struct minmax_binary_op
     return result;
   }
 };
-
 
 int main(void)
 {
@@ -65,10 +81,12 @@ int main(void)
   // initialize data on host
   thrust::device_vector<int> data(N);
   for (size_t i = 0; i < data.size(); i++)
-      data[i] = dist(rng);
+  {
+    data[i] = dist(rng);
+  }
 
   // setup arguments
-  minmax_unary_op<int>  unary_op;
+  minmax_unary_op<int> unary_op;
   minmax_binary_op<int> binary_op;
 
   // initialize reduction with the first value
@@ -79,13 +97,14 @@ int main(void)
 
   // print results
   std::cout << "[ ";
-  for(size_t i = 0; i < N; i++)
+  for (size_t i = 0; i < N; i++)
+  {
     std::cout << data[i] << " ";
+  }
   std::cout << "]" << std::endl;
- 
+
   std::cout << "minimum = " << result.min_val << std::endl;
   std::cout << "maximum = " << result.max_val << std::endl;
 
   return 0;
 }
-

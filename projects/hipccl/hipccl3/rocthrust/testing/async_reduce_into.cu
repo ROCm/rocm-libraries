@@ -19,378 +19,351 @@
 
 #include <thrust/detail/config.h>
 
-#if THRUST_CPP_DIALECT >= 2014
+#if THRUST_CPP_DIALECT >= 2017
 
-#include <unittest/unittest.h>
-#include <unittest/util_async.h>
+#  include <thrust/async/copy.h>
+#  include <thrust/async/reduce.h>
+#  include <thrust/device_make_unique.h>
+#  include <thrust/device_vector.h>
+#  include <thrust/host_vector.h>
 
-#include <thrust/async/reduce.h>
-#include <thrust/async/copy.h>
-#include <thrust/host_vector.h>
-#include <thrust/device_vector.h>
-#include <thrust/device_make_unique.h>
+#  include <unittest/unittest.h>
+#  include <unittest/util_async.h>
 
 template <typename T>
 struct custom_plus
 {
-  THRUST_HOST_DEVICE
-  T operator()(T lhs, T rhs) const
+  THRUST_HOST_DEVICE T operator()(T lhs, T rhs) const
   {
     return lhs + rhs;
   }
 };
 
-#define DEFINE_STATEFUL_ASYNC_REDUCE_INTO_INVOKER(                            \
-    NAME, MEMBERS, CTOR, DTOR, VALIDATE, ...                                  \
-  )                                                                           \
-  template <typename T>                                                       \
-  struct NAME                                                                 \
-  {                                                                           \
-    MEMBERS                                                                   \
-                                                                              \
-    NAME() { CTOR }                                                           \
-                                                                              \
-    ~NAME() { DTOR }                                                          \
-                                                                              \
-    template <typename Event>                                                 \
-    void validate_event(Event& e)                                             \
-    {                                                                         \
-      THRUST_UNUSED_VAR(e);                                                   \
-      VALIDATE                                                                \
-    }                                                                         \
-                                                                              \
-    template <                                                                \
-      typename ForwardIt, typename Sentinel, typename OutputIt                \
-    >                                                                         \
-    THRUST_HOST                                                                  \
-    auto operator()(                                                          \
-      ForwardIt&& first, Sentinel&& last, OutputIt&& output                   \
-    )                                                                         \
-    THRUST_DECLTYPE_RETURNS(                                                  \
-      ::thrust::async::reduce_into(                                           \
-        __VA_ARGS__                                                           \
-      )                                                                       \
-    )                                                                         \
-  };                                                                          \
-  /**/
+#  define DEFINE_STATEFUL_ASYNC_REDUCE_INTO_INVOKER(NAME, MEMBERS, CTOR, DTOR, VALIDATE, ...) \
+    template <typename T>                                                                     \
+    struct NAME                                                                               \
+    {                                                                                         \
+      MEMBERS                                                                                 \
+                                                                                              \
+      NAME()                                                                                  \
+      {                                                                                       \
+        CTOR                                                                                  \
+      }                                                                                       \
+                                                                                              \
+      ~NAME()                                                                                 \
+      {                                                                                       \
+        DTOR                                                                                  \
+      }                                                                                       \
+                                                                                              \
+      template <typename Event>                                                               \
+      void validate_event(Event& e)                                                           \
+      {                                                                                       \
+        THRUST_UNUSED_VAR(e);                                                                 \
+        VALIDATE                                                                              \
+      }                                                                                       \
+                                                                                              \
+      template <typename ForwardIt, typename Sentinel, typename OutputIt>                     \
+      THRUST_HOST auto operator()(ForwardIt&& first, Sentinel&& last, OutputIt&& output)      \
+        THRUST_DECLTYPE_RETURNS(::thrust::async::reduce_into(__VA_ARGS__))                    \
+    };                                                                                        \
+    /**/
 
-#define DEFINE_ASYNC_REDUCE_INTO_INVOKER(NAME, ...)                           \
-  DEFINE_STATEFUL_ASYNC_REDUCE_INTO_INVOKER(                                  \
-    NAME                                                                      \
-  , THRUST_PP_EMPTY(), THRUST_PP_EMPTY(), THRUST_PP_EMPTY(), THRUST_PP_EMPTY()\
-  , __VA_ARGS__                                                               \
-  )                                                                           \
-  /**/
+#  define DEFINE_ASYNC_REDUCE_INTO_INVOKER(NAME, ...)                                                \
+    DEFINE_STATEFUL_ASYNC_REDUCE_INTO_INVOKER(                                                       \
+      NAME, THRUST_PP_EMPTY(), THRUST_PP_EMPTY(), THRUST_PP_EMPTY(), THRUST_PP_EMPTY(), __VA_ARGS__) \
+    /**/
 
-#define DEFINE_SYNC_REDUCE_INVOKER(NAME, ...)                                 \
-  template <typename T>                                                       \
-  struct NAME                                                                 \
-  {                                                                           \
-                                                                              \
-    template <                                                                \
-      typename ForwardIt, typename Sentinel                                   \
-    >                                                                         \
-    THRUST_HOST                                                                  \
-    auto operator()(                                                          \
-      ForwardIt&& first, Sentinel&& last                                      \
-    )                                                                         \
-    THRUST_RETURNS(                                                           \
-      ::thrust::reduce(                                                       \
-        __VA_ARGS__                                                           \
-      )                                                                       \
-    )                                                                         \
-  };                                                                          \
-  /**/
+#  define DEFINE_SYNC_REDUCE_INVOKER(NAME, ...)                                                                     \
+    template <typename T>                                                                                           \
+    struct NAME                                                                                                     \
+    {                                                                                                               \
+      template <typename ForwardIt, typename Sentinel>                                                              \
+      THRUST_HOST auto operator()(ForwardIt&& first, Sentinel&& last) THRUST_RETURNS(::thrust::reduce(__VA_ARGS__)) \
+    };                                                                                                              \
+    /**/
 
+DEFINE_ASYNC_REDUCE_INTO_INVOKER(reduce_into_async_invoker, THRUST_FWD(first), THRUST_FWD(last), THRUST_FWD(output));
 DEFINE_ASYNC_REDUCE_INTO_INVOKER(
-  reduce_into_async_invoker
-, THRUST_FWD(first), THRUST_FWD(last)
-, THRUST_FWD(output)
-);
+  reduce_into_async_invoker_device, thrust::device, THRUST_FWD(first), THRUST_FWD(last), THRUST_FWD(output));
 DEFINE_ASYNC_REDUCE_INTO_INVOKER(
-  reduce_into_async_invoker_device
-, thrust::device
-, THRUST_FWD(first), THRUST_FWD(last)
-, THRUST_FWD(output)
-);
-DEFINE_ASYNC_REDUCE_INTO_INVOKER(
-  reduce_into_async_invoker_device_allocator
-, thrust::device(thrust::device_allocator<void>{})
-, THRUST_FWD(first), THRUST_FWD(last)
-, THRUST_FWD(output)
-);
+  reduce_into_async_invoker_device_allocator,
+  thrust::device(thrust::device_allocator<void>{}),
+  THRUST_FWD(first),
+  THRUST_FWD(last),
+  THRUST_FWD(output));
 DEFINE_STATEFUL_ASYNC_REDUCE_INTO_INVOKER(
   reduce_into_async_invoker_device_on
   // Members.
-, SPECIALIZE_DEVICE_RESOURCE_NAME(Stream_t) stream_;
+  ,
+  SPECIALIZE_DEVICE_RESOURCE_NAME(Stream_t) stream_;
   // Constructor.
-, thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(
-    SPECIALIZE_DEVICE_RESOURCE_NAME(StreamCreateWithFlags)(&stream_, SPECIALIZE_DEVICE_RESOURCE_NAME(StreamNonBlocking))
-  );
+  ,
+  thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamCreateWithFlags)(
+    &stream_, SPECIALIZE_DEVICE_RESOURCE_NAME(StreamNonBlocking)));
   // Destructor.
-, thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(
-    SPECIALIZE_DEVICE_RESOURCE_NAME(StreamDestroy)(stream_)
-  );
+  ,
+  thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamDestroy)(stream_));
   // `validate_event` member.
-, ASSERT_EQUAL_QUIET(stream_, e.stream().native_handle());
+  ,
+  ASSERT_EQUAL_QUIET(stream_, e.stream().native_handle());
   // Arguments to `thrust::async::reduce_into`.
-, thrust::device.on(stream_)
-, THRUST_FWD(first), THRUST_FWD(last)
-, THRUST_FWD(output)
-);
+  ,
+  thrust::device.on(stream_),
+  THRUST_FWD(first),
+  THRUST_FWD(last),
+  THRUST_FWD(output));
 DEFINE_STATEFUL_ASYNC_REDUCE_INTO_INVOKER(
   reduce_into_async_invoker_device_allocator_on
   // Members.
-, SPECIALIZE_DEVICE_RESOURCE_NAME(Stream_t) stream_;
+  ,
+  SPECIALIZE_DEVICE_RESOURCE_NAME(Stream_t) stream_;
   // Constructor.
-, thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(
-    SPECIALIZE_DEVICE_RESOURCE_NAME(StreamCreateWithFlags)(&stream_, SPECIALIZE_DEVICE_RESOURCE_NAME(StreamNonBlocking))
-  );
+  ,
+  thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamCreateWithFlags)(
+    &stream_, SPECIALIZE_DEVICE_RESOURCE_NAME(StreamNonBlocking)));
   // Destructor.
-, thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(
-    SPECIALIZE_DEVICE_RESOURCE_NAME(StreamDestroy)(stream_)
-  );
+  ,
+  thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamDestroy)(stream_));
   // `validate_event` member.
-, ASSERT_EQUAL_QUIET(stream_, e.stream().native_handle());
+  ,
+  ASSERT_EQUAL_QUIET(stream_, e.stream().native_handle());
   // Arguments to `thrust::async::reduce_into`.
-, thrust::device(thrust::device_allocator<void>{}).on(stream_)
-, THRUST_FWD(first), THRUST_FWD(last)
-, THRUST_FWD(output)
-);
+  ,
+  thrust::device(thrust::device_allocator<void>{}).on(stream_),
+  THRUST_FWD(first),
+  THRUST_FWD(last),
+  THRUST_FWD(output));
 
-DEFINE_SYNC_REDUCE_INVOKER(
-  reduce_sync_invoker
-, THRUST_FWD(first), THRUST_FWD(last)
-);
+DEFINE_SYNC_REDUCE_INVOKER(reduce_sync_invoker, THRUST_FWD(first), THRUST_FWD(last));
 
 DEFINE_ASYNC_REDUCE_INTO_INVOKER(
-  reduce_into_async_invoker_init
-, THRUST_FWD(first), THRUST_FWD(last)
-, THRUST_FWD(output)
-, unittest::random_integer<T>()
-);
+  reduce_into_async_invoker_init,
+  THRUST_FWD(first),
+  THRUST_FWD(last),
+  THRUST_FWD(output),
+  unittest::random_integer<T>());
 DEFINE_ASYNC_REDUCE_INTO_INVOKER(
-  reduce_into_async_invoker_device_init
-, thrust::device
-, THRUST_FWD(first), THRUST_FWD(last)
-, THRUST_FWD(output)
-, unittest::random_integer<T>()
-);
+  reduce_into_async_invoker_device_init,
+  thrust::device,
+  THRUST_FWD(first),
+  THRUST_FWD(last),
+  THRUST_FWD(output),
+  unittest::random_integer<T>());
 DEFINE_ASYNC_REDUCE_INTO_INVOKER(
-  reduce_into_async_invoker_device_allocator_init
-, thrust::device(thrust::device_allocator<void>{})
-, THRUST_FWD(first), THRUST_FWD(last)
-, THRUST_FWD(output)
-, unittest::random_integer<T>()
-);
+  reduce_into_async_invoker_device_allocator_init,
+  thrust::device(thrust::device_allocator<void>{}),
+  THRUST_FWD(first),
+  THRUST_FWD(last),
+  THRUST_FWD(output),
+  unittest::random_integer<T>());
 DEFINE_STATEFUL_ASYNC_REDUCE_INTO_INVOKER(
   reduce_into_async_invoker_device_on_init
   // Members.
-, SPECIALIZE_DEVICE_RESOURCE_NAME(Stream_t) stream_;
+  ,
+  SPECIALIZE_DEVICE_RESOURCE_NAME(Stream_t) stream_;
   // Constructor.
-, thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(
-    SPECIALIZE_DEVICE_RESOURCE_NAME(StreamCreateWithFlags)(&stream_, SPECIALIZE_DEVICE_RESOURCE_NAME(StreamNonBlocking))
-  );
+  ,
+  thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamCreateWithFlags)(
+    &stream_, SPECIALIZE_DEVICE_RESOURCE_NAME(StreamNonBlocking)));
   // Destructor.
-, thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(
-    SPECIALIZE_DEVICE_RESOURCE_NAME(StreamDestroy)(stream_)
-  );
+  ,
+  thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamDestroy)(stream_));
   // `validate_event` member.
-, ASSERT_EQUAL_QUIET(stream_, e.stream().native_handle());
+  ,
+  ASSERT_EQUAL_QUIET(stream_, e.stream().native_handle());
   // Arguments to `thrust::async::reduce_into`.
-, thrust::device.on(stream_)
-, THRUST_FWD(first), THRUST_FWD(last)
-, THRUST_FWD(output)
-, unittest::random_integer<T>()
-);
+  ,
+  thrust::device.on(stream_),
+  THRUST_FWD(first),
+  THRUST_FWD(last),
+  THRUST_FWD(output),
+  unittest::random_integer<T>());
 DEFINE_STATEFUL_ASYNC_REDUCE_INTO_INVOKER(
   reduce_into_async_invoker_device_allocator_on_init
   // Members.
-, SPECIALIZE_DEVICE_RESOURCE_NAME(Stream_t) stream_;
+  ,
+  SPECIALIZE_DEVICE_RESOURCE_NAME(Stream_t) stream_;
   // Constructor.
-, thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(
-    SPECIALIZE_DEVICE_RESOURCE_NAME(StreamCreateWithFlags)(&stream_, SPECIALIZE_DEVICE_RESOURCE_NAME(StreamNonBlocking))
-  );
+  ,
+  thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamCreateWithFlags)(
+    &stream_, SPECIALIZE_DEVICE_RESOURCE_NAME(StreamNonBlocking)));
   // Destructor.
-, thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(
-    SPECIALIZE_DEVICE_RESOURCE_NAME(StreamDestroy)(stream_)
-  );
+  ,
+  thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamDestroy)(stream_));
   // `validate_event` member.
-, ASSERT_EQUAL_QUIET(stream_, e.stream().native_handle());
+  ,
+  ASSERT_EQUAL_QUIET(stream_, e.stream().native_handle());
   // Arguments to `thrust::async::reduce_into`.
-, thrust::device(thrust::device_allocator<void>{}).on(stream_)
-, THRUST_FWD(first), THRUST_FWD(last)
-, THRUST_FWD(output)
-, unittest::random_integer<T>()
-);
+  ,
+  thrust::device(thrust::device_allocator<void>{}).on(stream_),
+  THRUST_FWD(first),
+  THRUST_FWD(last),
+  THRUST_FWD(output),
+  unittest::random_integer<T>());
 
-DEFINE_SYNC_REDUCE_INVOKER(
-  reduce_sync_invoker_init
-, THRUST_FWD(first), THRUST_FWD(last)
-, unittest::random_integer<T>()
-);
+DEFINE_SYNC_REDUCE_INVOKER(reduce_sync_invoker_init, THRUST_FWD(first), THRUST_FWD(last), unittest::random_integer<T>());
 
 DEFINE_ASYNC_REDUCE_INTO_INVOKER(
-  reduce_into_async_invoker_init_plus
-, THRUST_FWD(first), THRUST_FWD(last)
-, THRUST_FWD(output)
-, unittest::random_integer<T>()
-, thrust::plus<T>()
-);
+  reduce_into_async_invoker_init_plus,
+  THRUST_FWD(first),
+  THRUST_FWD(last),
+  THRUST_FWD(output),
+  unittest::random_integer<T>(),
+  thrust::plus<T>());
 DEFINE_ASYNC_REDUCE_INTO_INVOKER(
-  reduce_into_async_invoker_device_init_plus
-, thrust::device
-, THRUST_FWD(first), THRUST_FWD(last)
-, THRUST_FWD(output)
-, unittest::random_integer<T>()
-, thrust::plus<T>()
-);
+  reduce_into_async_invoker_device_init_plus,
+  thrust::device,
+  THRUST_FWD(first),
+  THRUST_FWD(last),
+  THRUST_FWD(output),
+  unittest::random_integer<T>(),
+  thrust::plus<T>());
 DEFINE_ASYNC_REDUCE_INTO_INVOKER(
-  reduce_into_async_invoker_device_allocator_init_plus
-, thrust::device(thrust::device_allocator<void>{})
-, THRUST_FWD(first), THRUST_FWD(last)
-, THRUST_FWD(output)
-, unittest::random_integer<T>()
-, thrust::plus<T>()
-);
+  reduce_into_async_invoker_device_allocator_init_plus,
+  thrust::device(thrust::device_allocator<void>{}),
+  THRUST_FWD(first),
+  THRUST_FWD(last),
+  THRUST_FWD(output),
+  unittest::random_integer<T>(),
+  thrust::plus<T>());
 DEFINE_STATEFUL_ASYNC_REDUCE_INTO_INVOKER(
   reduce_into_async_invoker_device_on_init_plus
   // Members.
-, SPECIALIZE_DEVICE_RESOURCE_NAME(Stream_t) stream_;
+  ,
+  SPECIALIZE_DEVICE_RESOURCE_NAME(Stream_t) stream_;
   // Constructor.
-, thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(
-    SPECIALIZE_DEVICE_RESOURCE_NAME(StreamCreateWithFlags)(&stream_, SPECIALIZE_DEVICE_RESOURCE_NAME(StreamNonBlocking))
-  );
+  ,
+  thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamCreateWithFlags)(
+    &stream_, SPECIALIZE_DEVICE_RESOURCE_NAME(StreamNonBlocking)));
   // Destructor.
-, thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(
-    SPECIALIZE_DEVICE_RESOURCE_NAME(StreamDestroy)(stream_)
-  );
+  ,
+  thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamDestroy)(stream_));
   // `validate_event` member.
-, ASSERT_EQUAL_QUIET(stream_, e.stream().native_handle());
+  ,
+  ASSERT_EQUAL_QUIET(stream_, e.stream().native_handle());
   // Arguments to `thrust::async::reduce_into`.
-, thrust::device.on(stream_)
-, THRUST_FWD(first), THRUST_FWD(last)
-, THRUST_FWD(output)
-, unittest::random_integer<T>()
-, thrust::plus<T>()
-);
+  ,
+  thrust::device.on(stream_),
+  THRUST_FWD(first),
+  THRUST_FWD(last),
+  THRUST_FWD(output),
+  unittest::random_integer<T>(),
+  thrust::plus<T>());
 DEFINE_STATEFUL_ASYNC_REDUCE_INTO_INVOKER(
   reduce_into_async_invoker_device_allocator_on_init_plus
   // Members.
-, SPECIALIZE_DEVICE_RESOURCE_NAME(Stream_t) stream_;
+  ,
+  SPECIALIZE_DEVICE_RESOURCE_NAME(Stream_t) stream_;
   // Constructor.
-, thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(
-    SPECIALIZE_DEVICE_RESOURCE_NAME(StreamCreateWithFlags)(&stream_, SPECIALIZE_DEVICE_RESOURCE_NAME(StreamNonBlocking))
-  );
+  ,
+  thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamCreateWithFlags)(
+    &stream_, SPECIALIZE_DEVICE_RESOURCE_NAME(StreamNonBlocking)));
   // Destructor.
-, thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(
-    SPECIALIZE_DEVICE_RESOURCE_NAME(StreamDestroy)(stream_)
-  );
+  ,
+  thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamDestroy)(stream_));
   // `validate_event` member.
-, ASSERT_EQUAL_QUIET(stream_, e.stream().native_handle());
+  ,
+  ASSERT_EQUAL_QUIET(stream_, e.stream().native_handle());
   // Arguments to `thrust::async::reduce_into`.
-, thrust::device(thrust::device_allocator<void>{}).on(stream_)
-, THRUST_FWD(first), THRUST_FWD(last)
-, THRUST_FWD(output)
-, unittest::random_integer<T>()
-, thrust::plus<T>()
-);
+  ,
+  thrust::device(thrust::device_allocator<void>{}).on(stream_),
+  THRUST_FWD(first),
+  THRUST_FWD(last),
+  THRUST_FWD(output),
+  unittest::random_integer<T>(),
+  thrust::plus<T>());
 
 DEFINE_SYNC_REDUCE_INVOKER(
-  reduce_sync_invoker_init_plus
-, THRUST_FWD(first), THRUST_FWD(last)
-, unittest::random_integer<T>()
-, thrust::plus<T>()
-);
+  reduce_sync_invoker_init_plus, THRUST_FWD(first), THRUST_FWD(last), unittest::random_integer<T>(), thrust::plus<T>());
 
 DEFINE_ASYNC_REDUCE_INTO_INVOKER(
-  reduce_into_async_invoker_init_custom_plus
-, THRUST_FWD(first), THRUST_FWD(last)
-, THRUST_FWD(output)
-, unittest::random_integer<T>()
-, custom_plus<T>()
-);
+  reduce_into_async_invoker_init_custom_plus,
+  THRUST_FWD(first),
+  THRUST_FWD(last),
+  THRUST_FWD(output),
+  unittest::random_integer<T>(),
+  custom_plus<T>());
 DEFINE_ASYNC_REDUCE_INTO_INVOKER(
-  reduce_into_async_invoker_device_init_custom_plus
-, thrust::device
-, THRUST_FWD(first), THRUST_FWD(last)
-, THRUST_FWD(output)
-, unittest::random_integer<T>()
-, custom_plus<T>()
-);
+  reduce_into_async_invoker_device_init_custom_plus,
+  thrust::device,
+  THRUST_FWD(first),
+  THRUST_FWD(last),
+  THRUST_FWD(output),
+  unittest::random_integer<T>(),
+  custom_plus<T>());
 DEFINE_ASYNC_REDUCE_INTO_INVOKER(
-  reduce_into_async_invoker_device_allocator_init_custom_plus
-, thrust::device(thrust::device_allocator<void>{})
-, THRUST_FWD(first), THRUST_FWD(last)
-, THRUST_FWD(output)
-, unittest::random_integer<T>()
-, custom_plus<T>()
-);
+  reduce_into_async_invoker_device_allocator_init_custom_plus,
+  thrust::device(thrust::device_allocator<void>{}),
+  THRUST_FWD(first),
+  THRUST_FWD(last),
+  THRUST_FWD(output),
+  unittest::random_integer<T>(),
+  custom_plus<T>());
 DEFINE_STATEFUL_ASYNC_REDUCE_INTO_INVOKER(
   reduce_into_async_invoker_device_on_init_custom_plus
   // Members.
-, SPECIALIZE_DEVICE_RESOURCE_NAME(Stream_t) stream_;
+  ,
+  SPECIALIZE_DEVICE_RESOURCE_NAME(Stream_t) stream_;
   // Constructor.
-, thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(
-    SPECIALIZE_DEVICE_RESOURCE_NAME(StreamCreateWithFlags)(&stream_, SPECIALIZE_DEVICE_RESOURCE_NAME(StreamNonBlocking))
-  );
+  ,
+  thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamCreateWithFlags)(
+    &stream_, SPECIALIZE_DEVICE_RESOURCE_NAME(StreamNonBlocking)));
   // Destructor.
-, thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(
-    SPECIALIZE_DEVICE_RESOURCE_NAME(StreamDestroy)(stream_)
-  );
+  ,
+  thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamDestroy)(stream_));
   // `validate_event` member.
-, ASSERT_EQUAL_QUIET(stream_, e.stream().native_handle());
+  ,
+  ASSERT_EQUAL_QUIET(stream_, e.stream().native_handle());
   // Arguments to `thrust::async::reduce_into`.
-, thrust::device.on(stream_)
-, THRUST_FWD(first), THRUST_FWD(last)
-, THRUST_FWD(output)
-, unittest::random_integer<T>()
-, custom_plus<T>()
-);
+  ,
+  thrust::device.on(stream_),
+  THRUST_FWD(first),
+  THRUST_FWD(last),
+  THRUST_FWD(output),
+  unittest::random_integer<T>(),
+  custom_plus<T>());
 DEFINE_STATEFUL_ASYNC_REDUCE_INTO_INVOKER(
   reduce_into_async_invoker_device_allocator_on_init_custom_plus
   // Members.
-, SPECIALIZE_DEVICE_RESOURCE_NAME(Stream_t) stream_;
+  ,
+  SPECIALIZE_DEVICE_RESOURCE_NAME(Stream_t) stream_;
   // Constructor.
-, thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(
-    SPECIALIZE_DEVICE_RESOURCE_NAME(StreamCreateWithFlags)(&stream_, SPECIALIZE_DEVICE_RESOURCE_NAME(StreamNonBlocking))
-  );
+  ,
+  thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamCreateWithFlags)(
+    &stream_, SPECIALIZE_DEVICE_RESOURCE_NAME(StreamNonBlocking)));
   // Destructor.
-, thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(
-    SPECIALIZE_DEVICE_RESOURCE_NAME(StreamDestroy)(stream_)
-  );
+  ,
+  thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamDestroy)(stream_));
   // `validate_event` member.
-, ASSERT_EQUAL_QUIET(stream_, e.stream().native_handle());
+  ,
+  ASSERT_EQUAL_QUIET(stream_, e.stream().native_handle());
   // Arguments to `thrust::async::reduce_into`.
-, thrust::device(thrust::device_allocator<void>{}).on(stream_)
-, THRUST_FWD(first), THRUST_FWD(last)
-, THRUST_FWD(output)
-, unittest::random_integer<T>()
-, custom_plus<T>()
-);
+  ,
+  thrust::device(thrust::device_allocator<void>{}).on(stream_),
+  THRUST_FWD(first),
+  THRUST_FWD(last),
+  THRUST_FWD(output),
+  unittest::random_integer<T>(),
+  custom_plus<T>());
 
 DEFINE_SYNC_REDUCE_INVOKER(
-  reduce_sync_invoker_init_custom_plus
-, THRUST_FWD(first), THRUST_FWD(last)
-, unittest::random_integer<T>()
-, custom_plus<T>()
-);
+  reduce_sync_invoker_init_custom_plus,
+  THRUST_FWD(first),
+  THRUST_FWD(last),
+  unittest::random_integer<T>(),
+  custom_plus<T>());
 
 ///////////////////////////////////////////////////////////////////////////////
 
-template <
-  template <typename> class AsyncReduceIntoInvoker
-, template <typename> class SyncReduceIntoInvoker
->
+template <template <typename> class AsyncReduceIntoInvoker, template <typename> class SyncReduceIntoInvoker>
 struct test_async_reduce_into
 {
   template <typename T>
   struct tester
   {
-    THRUST_HOST
-    void operator()(std::size_t n)
+    THRUST_HOST void operator()(std::size_t n)
     {
-      thrust::host_vector<T>   h0(unittest::random_integers<T>(n));
+      thrust::host_vector<T> h0(unittest::random_integers<T>(n));
 
       thrust::device_vector<T> d0a(h0);
       thrust::device_vector<T> d0b(h0);
@@ -408,7 +381,7 @@ struct test_async_reduce_into
       auto const s0d_ptr = s0d.get();
 
       AsyncReduceIntoInvoker<T> invoke_async;
-      SyncReduceIntoInvoker<T>  invoke_sync;
+      SyncReduceIntoInvoker<T> invoke_sync;
 
       ASSERT_EQUAL(h0, d0a);
       ASSERT_EQUAL(h0, d0b);
@@ -438,205 +411,98 @@ struct test_async_reduce_into
   };
 };
 DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES_AND_NAME(
-  THRUST_PP_EXPAND_ARGS(
-    test_async_reduce_into<
-      reduce_into_async_invoker
-    , reduce_sync_invoker
-    >::tester
-  )
-, NumericTypes
-, test_async_reduce_into
-);
+  THRUST_PP_EXPAND_ARGS(test_async_reduce_into<reduce_into_async_invoker, reduce_sync_invoker>::tester),
+  NumericTypes,
+  test_async_reduce_into);
+DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES_AND_NAME(
+  THRUST_PP_EXPAND_ARGS(test_async_reduce_into<reduce_into_async_invoker_device, reduce_sync_invoker>::tester),
+  NumericTypes,
+  test_async_reduce_into_policy);
+DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES_AND_NAME(
+  THRUST_PP_EXPAND_ARGS(test_async_reduce_into<reduce_into_async_invoker_device_allocator, reduce_sync_invoker>::tester),
+  NumericTypes,
+  test_async_reduce_into_policy_allocator);
+DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES_AND_NAME(
+  THRUST_PP_EXPAND_ARGS(test_async_reduce_into<reduce_into_async_invoker_device_on, reduce_sync_invoker>::tester),
+  NumericTypes,
+  test_async_reduce_into_policy_on);
 DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES_AND_NAME(
   THRUST_PP_EXPAND_ARGS(
-    test_async_reduce_into<
-      reduce_into_async_invoker_device
-    , reduce_sync_invoker
-    >::tester
-  )
-, NumericTypes
-, test_async_reduce_into_policy
-);
+    test_async_reduce_into<reduce_into_async_invoker_device_allocator_on, reduce_sync_invoker>::tester),
+  NumericTypes,
+  test_async_reduce_into_policy_allocator_on);
+DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES_AND_NAME(
+  THRUST_PP_EXPAND_ARGS(test_async_reduce_into<reduce_into_async_invoker_init, reduce_sync_invoker_init>::tester),
+  NumericTypes,
+  test_async_reduce_into_init);
+DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES_AND_NAME(
+  THRUST_PP_EXPAND_ARGS(test_async_reduce_into<reduce_into_async_invoker_device_init, reduce_sync_invoker_init>::tester),
+  NumericTypes,
+  test_async_reduce_into_policy_init);
 DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES_AND_NAME(
   THRUST_PP_EXPAND_ARGS(
-    test_async_reduce_into<
-      reduce_into_async_invoker_device_allocator
-    , reduce_sync_invoker
-    >::tester
-  )
-, NumericTypes
-, test_async_reduce_into_policy_allocator
-);
+    test_async_reduce_into<reduce_into_async_invoker_device_allocator_init, reduce_sync_invoker_init>::tester),
+  NumericTypes,
+  test_async_reduce_into_policy_allocator_init);
 DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES_AND_NAME(
   THRUST_PP_EXPAND_ARGS(
-    test_async_reduce_into<
-      reduce_into_async_invoker_device_on
-    , reduce_sync_invoker
-    >::tester
-  )
-, NumericTypes
-, test_async_reduce_into_policy_on
-);
+    test_async_reduce_into<reduce_into_async_invoker_device_on_init, reduce_sync_invoker_init>::tester),
+  NumericTypes,
+  test_async_reduce_into_policy_on_init);
 DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES_AND_NAME(
   THRUST_PP_EXPAND_ARGS(
-    test_async_reduce_into<
-      reduce_into_async_invoker_device_allocator_on
-    , reduce_sync_invoker
-    >::tester
-  )
-, NumericTypes
-, test_async_reduce_into_policy_allocator_on
-);
+    test_async_reduce_into<reduce_into_async_invoker_device_allocator_on_init, reduce_sync_invoker_init>::tester),
+  NumericTypes,
+  test_async_reduce_into_policy_allocator_on_init);
 DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES_AND_NAME(
   THRUST_PP_EXPAND_ARGS(
-    test_async_reduce_into<
-      reduce_into_async_invoker_init
-    , reduce_sync_invoker_init
-    >::tester
-  )
-, NumericTypes
-, test_async_reduce_into_init
-);
+    test_async_reduce_into<reduce_into_async_invoker_init_plus, reduce_sync_invoker_init_plus>::tester),
+  NumericTypes,
+  test_async_reduce_into_init_plus);
 DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES_AND_NAME(
   THRUST_PP_EXPAND_ARGS(
-    test_async_reduce_into<
-      reduce_into_async_invoker_device_init
-    , reduce_sync_invoker_init
-    >::tester
-  )
-, NumericTypes
-, test_async_reduce_into_policy_init
-);
+    test_async_reduce_into<reduce_into_async_invoker_device_init_plus, reduce_sync_invoker_init_plus>::tester),
+  NumericTypes,
+  test_async_reduce_into_policy_init_plus);
 DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES_AND_NAME(
   THRUST_PP_EXPAND_ARGS(
-    test_async_reduce_into<
-      reduce_into_async_invoker_device_allocator_init
-    , reduce_sync_invoker_init
-    >::tester
-  )
-, NumericTypes
-, test_async_reduce_into_policy_allocator_init
-);
+    test_async_reduce_into<reduce_into_async_invoker_device_allocator_init_plus, reduce_sync_invoker_init_plus>::tester),
+  NumericTypes,
+  test_async_reduce_into_policy_allocator_init_plus);
 DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES_AND_NAME(
   THRUST_PP_EXPAND_ARGS(
-    test_async_reduce_into<
-      reduce_into_async_invoker_device_on_init
-    , reduce_sync_invoker_init
-    >::tester
-  )
-, NumericTypes
-, test_async_reduce_into_policy_on_init
-);
+    test_async_reduce_into<reduce_into_async_invoker_device_on_init_plus, reduce_sync_invoker_init_plus>::tester),
+  NumericTypes,
+  test_async_reduce_into_policy_on_init_plus);
+DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES_AND_NAME(
+  THRUST_PP_EXPAND_ARGS(test_async_reduce_into<reduce_into_async_invoker_device_allocator_on_init_plus,
+                                               reduce_sync_invoker_init_plus>::tester),
+  NumericTypes,
+  test_async_reduce_into_policy_allocator_on_init_plus);
 DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES_AND_NAME(
   THRUST_PP_EXPAND_ARGS(
-    test_async_reduce_into<
-      reduce_into_async_invoker_device_allocator_on_init
-    , reduce_sync_invoker_init
-    >::tester
-  )
-, NumericTypes
-, test_async_reduce_into_policy_allocator_on_init
-);
+    test_async_reduce_into<reduce_into_async_invoker_init_custom_plus, reduce_sync_invoker_init_custom_plus>::tester),
+  NumericTypes,
+  test_async_reduce_into_init_custom_plus);
 DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES_AND_NAME(
-  THRUST_PP_EXPAND_ARGS(
-    test_async_reduce_into<
-      reduce_into_async_invoker_init_plus
-    , reduce_sync_invoker_init_plus
-    >::tester
-  )
-, NumericTypes
-, test_async_reduce_into_init_plus
-);
+  THRUST_PP_EXPAND_ARGS(test_async_reduce_into<reduce_into_async_invoker_device_init_custom_plus,
+                                               reduce_sync_invoker_init_custom_plus>::tester),
+  NumericTypes,
+  test_async_reduce_into_policy_init_custom_plus);
 DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES_AND_NAME(
-  THRUST_PP_EXPAND_ARGS(
-    test_async_reduce_into<
-      reduce_into_async_invoker_device_init_plus
-    , reduce_sync_invoker_init_plus
-    >::tester
-  )
-, NumericTypes
-, test_async_reduce_into_policy_init_plus
-);
+  THRUST_PP_EXPAND_ARGS(test_async_reduce_into<reduce_into_async_invoker_device_allocator_init_custom_plus,
+                                               reduce_sync_invoker_init_custom_plus>::tester),
+  NumericTypes,
+  test_async_reduce_into_policy_allocator_init_custom_plus);
 DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES_AND_NAME(
-  THRUST_PP_EXPAND_ARGS(
-    test_async_reduce_into<
-      reduce_into_async_invoker_device_allocator_init_plus
-    , reduce_sync_invoker_init_plus
-    >::tester
-  )
-, NumericTypes
-, test_async_reduce_into_policy_allocator_init_plus
-);
+  THRUST_PP_EXPAND_ARGS(test_async_reduce_into<reduce_into_async_invoker_device_on_init_custom_plus,
+                                               reduce_sync_invoker_init_custom_plus>::tester),
+  NumericTypes,
+  test_async_reduce_into_policy_on_init_custom_plus);
 DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES_AND_NAME(
-  THRUST_PP_EXPAND_ARGS(
-    test_async_reduce_into<
-      reduce_into_async_invoker_device_on_init_plus
-    , reduce_sync_invoker_init_plus
-    >::tester
-  )
-, NumericTypes
-, test_async_reduce_into_policy_on_init_plus
-);
-DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES_AND_NAME(
-  THRUST_PP_EXPAND_ARGS(
-    test_async_reduce_into<
-      reduce_into_async_invoker_device_allocator_on_init_plus
-    , reduce_sync_invoker_init_plus
-    >::tester
-  )
-, NumericTypes
-, test_async_reduce_into_policy_allocator_on_init_plus
-);
-DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES_AND_NAME(
-  THRUST_PP_EXPAND_ARGS(
-    test_async_reduce_into<
-      reduce_into_async_invoker_init_custom_plus
-    , reduce_sync_invoker_init_custom_plus
-    >::tester
-  )
-, NumericTypes
-, test_async_reduce_into_init_custom_plus
-);
-DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES_AND_NAME(
-  THRUST_PP_EXPAND_ARGS(
-    test_async_reduce_into<
-      reduce_into_async_invoker_device_init_custom_plus
-    , reduce_sync_invoker_init_custom_plus
-    >::tester
-  )
-, NumericTypes
-, test_async_reduce_into_policy_init_custom_plus
-);
-DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES_AND_NAME(
-  THRUST_PP_EXPAND_ARGS(
-    test_async_reduce_into<
-      reduce_into_async_invoker_device_allocator_init_custom_plus
-    , reduce_sync_invoker_init_custom_plus
-    >::tester
-  )
-, NumericTypes
-, test_async_reduce_into_policy_allocator_init_custom_plus
-);
-DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES_AND_NAME(
-  THRUST_PP_EXPAND_ARGS(
-    test_async_reduce_into<
-      reduce_into_async_invoker_device_on_init_custom_plus
-    , reduce_sync_invoker_init_custom_plus
-    >::tester
-  )
-, NumericTypes
-, test_async_reduce_into_policy_on_init_custom_plus
-);
-DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES_AND_NAME(
-  THRUST_PP_EXPAND_ARGS(
-    test_async_reduce_into<
-      reduce_into_async_invoker_device_allocator_on_init_custom_plus
-    , reduce_sync_invoker_init_custom_plus
-    >::tester
-  )
-, NumericTypes
-, test_async_reduce_into_policy_allocator_on_init_custom_plus
-);
+  THRUST_PP_EXPAND_ARGS(test_async_reduce_into<reduce_into_async_invoker_device_allocator_on_init_custom_plus,
+                                               reduce_sync_invoker_init_custom_plus>::tester),
+  NumericTypes,
+  test_async_reduce_into_policy_allocator_on_init_custom_plus);
 
 #endif
-

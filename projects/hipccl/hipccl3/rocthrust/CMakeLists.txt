@@ -142,7 +142,11 @@ set(COMPILE_OPTIONS -Wall -Wextra)
 if(NOT DISABLE_WERROR)
   list(APPEND COMPILE_OPTIONS -Werror)
 endif()
-  
+
+if(NOT CMAKE_CXX_STANDARD EQUAL 17)
+  message(FATAL_ERROR "Only C++17 is supported")
+endif()
+
 if (WIN32)
   add_compile_options(-xhip)
   add_compile_definitions(THRUST_IGNORE_DEPRECATED_CPP_DIALECT)
@@ -155,7 +159,7 @@ if(BUILD_ADDRESS_SANITIZER)
 endif()
   
 # Setup VERSION
-rocm_setup_version(VERSION "3.4.0")
+rocm_setup_version(VERSION "4.0.0")
 math(EXPR rocthrust_VERSION_NUMBER "${rocthrust_VERSION_MAJOR} * 100000 + ${rocthrust_VERSION_MINOR} * 100 + ${rocthrust_VERSION_PATCH}")
   
 # Thrust (with HIP backend)

@@ -1,3 +1,23 @@
+// Copyright (c) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 // Occasionally, it is advantageous to avoid initializing the individual
 // elements of a device_vector. For example, the default behavior of
 // zero-initializing numeric data may introduce undesirable overhead.
@@ -6,8 +26,9 @@
 
 #include <thrust/device_allocator.h>
 #include <thrust/device_vector.h>
-#include <thrust/logical.h>
 #include <thrust/functional.h>
+#include <thrust/logical.h>
+
 #include <cassert>
 
 #include "include/host_device.h"
@@ -15,29 +36,26 @@
 // uninitialized_allocator is an allocator which
 // derives from device_allocator and which has a
 // no-op construct member function
-template<typename T>
-  struct uninitialized_allocator
-    : thrust::device_allocator<T>
+template <typename T>
+struct uninitialized_allocator : thrust::device_allocator<T>
 {
   // the default generated constructors and destructors are implicitly
   // marked __host__ __device__, but the current Thrust device_allocator
   // can only be constructed and destroyed on the host; therefore, we
   // define these as host only
-  __host__
-  uninitialized_allocator() {}
-  __host__
-  uninitialized_allocator(const uninitialized_allocator & other)
-    : thrust::device_allocator<T>(other) {}
-  __host__
-  ~uninitialized_allocator() {}
+  __host__ uninitialized_allocator() {}
+  __host__ uninitialized_allocator(const uninitialized_allocator& other)
+      : thrust::device_allocator<T>(other)
+  {}
+  __host__ ~uninitialized_allocator() {}
 
-uninitialized_allocator & operator=(const uninitialized_allocator &) = default;
+  uninitialized_allocator& operator=(const uninitialized_allocator&) = default;
 
   // for correctness, you should also redefine rebind when you inherit
   // from an allocator type; this way, if the allocator is rebound somewhere,
   // it's going to be rebound to the correct type - and not to its base
   // type for U
-  template<typename U>
+  template <typename U>
   struct rebind
   {
     using other = uninitialized_allocator<U>;
@@ -45,8 +63,7 @@ uninitialized_allocator & operator=(const uninitialized_allocator &) = default;
 
   // note that construct is annotated as
   // a __host__ __device__ function
-  __host__ __device__
-  void construct(T *)
+  __host__ __device__ void construct(T*)
   {
     // no-op
   }
@@ -54,7 +71,7 @@ uninitialized_allocator & operator=(const uninitialized_allocator &) = default;
 
 // to make a device_vector which does not initialize its elements,
 // use uninitialized_allocator as the 2nd template parameter
-using uninitialized_vector = thrust::device_vector<float, uninitialized_allocator<float> >;
+using uninitialized_vector = thrust::device_vector<float, uninitialized_allocator<float>>;
 
 int main()
 {
@@ -76,4 +93,3 @@ int main()
 
   return 0;
 }
-

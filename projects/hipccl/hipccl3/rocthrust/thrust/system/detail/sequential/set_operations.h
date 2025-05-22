@@ -14,7 +14,6 @@
  *  limitations under the License.
  */
 
-
 /*! \file set_operations.h
  *  \brief Sequential implementation of set operation functions.
  */
@@ -22,9 +21,10 @@
 #pragma once
 
 #include <thrust/detail/config.h>
-#include <thrust/system/detail/sequential/execution_policy.h>
+
 #include <thrust/detail/copy.h>
 #include <thrust/detail/function.h>
+#include <thrust/system/detail/sequential/execution_policy.h>
 
 THRUST_NAMESPACE_BEGIN
 namespace system
@@ -34,37 +34,33 @@ namespace detail
 namespace sequential
 {
 
-
 THRUST_EXEC_CHECK_DISABLE
-template<typename DerivedPolicy,
-         typename InputIterator1,
-         typename InputIterator2,
-         typename OutputIterator,
-         typename StrictWeakOrdering>
-THRUST_HOST_DEVICE
-  OutputIterator set_difference(sequential::execution_policy<DerivedPolicy> &exec,
-                                InputIterator1 first1,
-                                InputIterator1 last1,
-                                InputIterator2 first2,
-                                InputIterator2 last2,
-                                OutputIterator result,
-                                StrictWeakOrdering comp)
+template <typename DerivedPolicy,
+          typename InputIterator1,
+          typename InputIterator2,
+          typename OutputIterator,
+          typename StrictWeakOrdering>
+THRUST_HOST_DEVICE OutputIterator set_difference(
+  sequential::execution_policy<DerivedPolicy>& exec,
+  InputIterator1 first1,
+  InputIterator1 last1,
+  InputIterator2 first2,
+  InputIterator2 last2,
+  OutputIterator result,
+  StrictWeakOrdering comp)
 {
   // wrap comp
-  thrust::detail::wrapped_function<
-    StrictWeakOrdering,
-    bool
-  > wrapped_comp(comp);
+  thrust::detail::wrapped_function<StrictWeakOrdering, bool> wrapped_comp(comp);
 
-  while(first1 != last1 && first2 != last2)
+  while (first1 != last1 && first2 != last2)
   {
-    if(wrapped_comp(*first1,*first2))
+    if (wrapped_comp(*first1, *first2))
     {
       *result = *first1;
       ++first1;
       ++result;
     } // end if
-    else if(wrapped_comp(*first2,*first1))
+    else if (wrapped_comp(*first2, *first1))
     {
       ++first2;
     } // end else if
@@ -78,35 +74,31 @@ THRUST_HOST_DEVICE
   return thrust::copy(exec, first1, last1, result);
 } // end set_difference()
 
-
 THRUST_EXEC_CHECK_DISABLE
-template<typename DerivedPolicy,
-         typename InputIterator1,
-         typename InputIterator2,
-         typename OutputIterator,
-         typename StrictWeakOrdering>
-THRUST_HOST_DEVICE
-  OutputIterator set_intersection(sequential::execution_policy<DerivedPolicy> &,
-                                  InputIterator1 first1,
-                                  InputIterator1 last1,
-                                  InputIterator2 first2,
-                                  InputIterator2 last2,
-                                  OutputIterator result,
-                                  StrictWeakOrdering comp)
+template <typename DerivedPolicy,
+          typename InputIterator1,
+          typename InputIterator2,
+          typename OutputIterator,
+          typename StrictWeakOrdering>
+THRUST_HOST_DEVICE OutputIterator set_intersection(
+  sequential::execution_policy<DerivedPolicy>&,
+  InputIterator1 first1,
+  InputIterator1 last1,
+  InputIterator2 first2,
+  InputIterator2 last2,
+  OutputIterator result,
+  StrictWeakOrdering comp)
 {
   // wrap comp
-  thrust::detail::wrapped_function<
-    StrictWeakOrdering,
-    bool
-  > wrapped_comp(comp);
+  thrust::detail::wrapped_function<StrictWeakOrdering, bool> wrapped_comp(comp);
 
-  while(first1 != last1 && first2 != last2)
+  while (first1 != last1 && first2 != last2)
   {
-    if(wrapped_comp(*first1,*first2))
+    if (wrapped_comp(*first1, *first2))
     {
       ++first1;
     } // end if
-    else if(wrapped_comp(*first2,*first1))
+    else if (wrapped_comp(*first2, *first1))
     {
       ++first2;
     } // end else if
@@ -122,37 +114,33 @@ THRUST_HOST_DEVICE
   return result;
 } // end set_intersection()
 
-
 THRUST_EXEC_CHECK_DISABLE
-template<typename DerivedPolicy,
-         typename InputIterator1,
-         typename InputIterator2,
-         typename OutputIterator,
-         typename StrictWeakOrdering>
-THRUST_HOST_DEVICE
-  OutputIterator set_symmetric_difference(sequential::execution_policy<DerivedPolicy> &exec,
-                                          InputIterator1 first1,
-                                          InputIterator1 last1,
-                                          InputIterator2 first2,
-                                          InputIterator2 last2,
-                                          OutputIterator result,
-                                          StrictWeakOrdering comp)
+template <typename DerivedPolicy,
+          typename InputIterator1,
+          typename InputIterator2,
+          typename OutputIterator,
+          typename StrictWeakOrdering>
+THRUST_HOST_DEVICE OutputIterator set_symmetric_difference(
+  sequential::execution_policy<DerivedPolicy>& exec,
+  InputIterator1 first1,
+  InputIterator1 last1,
+  InputIterator2 first2,
+  InputIterator2 last2,
+  OutputIterator result,
+  StrictWeakOrdering comp)
 {
   // wrap comp
-  thrust::detail::wrapped_function<
-    StrictWeakOrdering,
-    bool
-  > wrapped_comp(comp);
+  thrust::detail::wrapped_function<StrictWeakOrdering, bool> wrapped_comp(comp);
 
-  while(first1 != last1 && first2 != last2)
+  while (first1 != last1 && first2 != last2)
   {
-    if(wrapped_comp(*first1,*first2))
+    if (wrapped_comp(*first1, *first2))
     {
       *result = *first1;
       ++first1;
       ++result;
     } // end if
-    else if(wrapped_comp(*first2,*first1))
+    else if (wrapped_comp(*first2, *first1))
     {
       *result = *first2;
       ++first2;
@@ -168,36 +156,32 @@ THRUST_HOST_DEVICE
   return thrust::copy(exec, first2, last2, thrust::copy(exec, first1, last1, result));
 } // end set_symmetric_difference()
 
-
 THRUST_EXEC_CHECK_DISABLE
-template<typename DerivedPolicy,
-         typename InputIterator1,
-         typename InputIterator2,
-         typename OutputIterator,
-         typename StrictWeakOrdering>
-THRUST_HOST_DEVICE
-  OutputIterator set_union(sequential::execution_policy<DerivedPolicy> &exec,
-                           InputIterator1 first1,
-                           InputIterator1 last1,
-                           InputIterator2 first2,
-                           InputIterator2 last2,
-                           OutputIterator result,
-                           StrictWeakOrdering comp)
+template <typename DerivedPolicy,
+          typename InputIterator1,
+          typename InputIterator2,
+          typename OutputIterator,
+          typename StrictWeakOrdering>
+THRUST_HOST_DEVICE OutputIterator set_union(
+  sequential::execution_policy<DerivedPolicy>& exec,
+  InputIterator1 first1,
+  InputIterator1 last1,
+  InputIterator2 first2,
+  InputIterator2 last2,
+  OutputIterator result,
+  StrictWeakOrdering comp)
 {
   // wrap comp
-  thrust::detail::wrapped_function<
-    StrictWeakOrdering,
-    bool
-  > wrapped_comp(comp);
+  thrust::detail::wrapped_function<StrictWeakOrdering, bool> wrapped_comp(comp);
 
-  while(first1 != last1 && first2 != last2)
+  while (first1 != last1 && first2 != last2)
   {
-    if(wrapped_comp(*first1,*first2))
+    if (wrapped_comp(*first1, *first2))
     {
       *result = *first1;
       ++first1;
     } // end if
-    else if(wrapped_comp(*first2,*first1))
+    else if (wrapped_comp(*first2, *first1))
     {
       *result = *first2;
       ++first2;
@@ -215,9 +199,7 @@ THRUST_HOST_DEVICE
   return thrust::copy(exec, first2, last2, thrust::copy(exec, first1, last1, result));
 } // end set_union()
 
-
 } // end namespace sequential
 } // end namespace detail
 } // end namespace system
 THRUST_NAMESPACE_END
-

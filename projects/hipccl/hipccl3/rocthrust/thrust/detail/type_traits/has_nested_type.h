@@ -27,7 +27,7 @@
     template <typename S>                                                     \
     static yes_type test(typename S::nested_type_name*);                      \
     template <typename S>                                                     \
-    static no_type    test(...);                                              \
+    static no_type test(...);                                                 \
     static bool const value = sizeof(test<T>(0)) == sizeof(yes_type);         \
     using type              = thrust::detail::integral_constant<bool, value>; \
   };
