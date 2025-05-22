@@ -3,11 +3,24 @@ name: TheRock CI
 on:
   push:
     branches:
+      # Remove later.
       - users/geomin12/therock-ci
-  pull_request:
+  pull_request_target:
     types:
       - opened
       - synchronize
+      - reopened
+      - ready_for_review
+    branches:
+      # Remove later.
+      - users/geomin12/therock-ci
+      #- 'develop'
+      #- 'staging'
+      #- 'main'
+  paths-ignore:
+      - '.github/**'
+      - 'docs/**'
+      - '*.md'
 
 permissions:
   contents: read
@@ -60,6 +73,7 @@ jobs:
         # get the script, see what PR items there are (or do checkout process or share with Joseph's work)
       - name: Detect changed subtrees
         id: detect
+        if: github.event_name == 'pull_request'
         env:
           GH_TOKEN: ${{ steps.generate-token.outputs.token }}
         run: |
