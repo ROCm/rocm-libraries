@@ -37,227 +37,224 @@ TYPED_TEST(CountingIteratorTests, TestCountingDefaultConstructor)
 
 TEST(CountingIteratorTests, TestCountingIteratorCopyConstructor)
 {
-    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    thrust::counting_iterator<int> iter0(100);
+  thrust::counting_iterator<int> iter0(100);
 
-    thrust::counting_iterator<int> iter1(iter0);
+  thrust::counting_iterator<int> iter1(iter0);
 
-    ASSERT_EQ(iter0, iter1);
-    ASSERT_EQ(*iter0, *iter1);
+  ASSERT_EQ(iter0, iter1);
+  ASSERT_EQ(*iter0, *iter1);
 
-    // construct from related space
-    thrust::counting_iterator<int, thrust::host_system_tag> h_iter = iter0;
-    ASSERT_EQ(*iter0, *h_iter);
+  // construct from related space
+  thrust::counting_iterator<int, thrust::host_system_tag> h_iter = iter0;
+  ASSERT_EQ(*iter0, *h_iter);
 
-    thrust::counting_iterator<int, thrust::device_system_tag> d_iter = iter0;
-    ASSERT_EQ(*iter0, *d_iter);
+  thrust::counting_iterator<int, thrust::device_system_tag> d_iter = iter0;
+  ASSERT_EQ(*iter0, *d_iter);
 }
 
 TEST(CountingIteratorTests, TestCountingIteratorIncrement)
 {
-    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    thrust::counting_iterator<int> iter(0);
+  thrust::counting_iterator<int> iter(0);
 
-    ASSERT_EQ(*iter, 0);
+  ASSERT_EQ(*iter, 0);
 
-    iter++;
+  iter++;
 
-    ASSERT_EQ(*iter, 1);
+  ASSERT_EQ(*iter, 1);
 
-    iter++;
-    iter++;
+  iter++;
+  iter++;
 
-    ASSERT_EQ(*iter, 3);
+  ASSERT_EQ(*iter, 3);
 
-    iter += 5;
+  iter += 5;
 
-    ASSERT_EQ(*iter, 8);
+  ASSERT_EQ(*iter, 8);
 
-    iter -= 10;
+  iter -= 10;
 
-    ASSERT_EQ(*iter, -2);
+  ASSERT_EQ(*iter, -2);
 }
 
 TEST(CountingIteratorTests, TestCountingIteratorComparison)
 {
-    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    thrust::counting_iterator<int> iter1(0);
-    thrust::counting_iterator<int> iter2(0);
+  thrust::counting_iterator<int> iter1(0);
+  thrust::counting_iterator<int> iter2(0);
 
-    ASSERT_EQ(iter1 - iter2, 0);
-    ASSERT_EQ(iter1 == iter2, true);
+  ASSERT_EQ(iter1 - iter2, 0);
+  ASSERT_EQ(iter1 == iter2, true);
 
-    iter1++;
+  iter1++;
 
-    ASSERT_EQ(iter1 - iter2, 1);
-    ASSERT_EQ(iter1 == iter2, false);
+  ASSERT_EQ(iter1 - iter2, 1);
+  ASSERT_EQ(iter1 == iter2, false);
 
-    iter2++;
+  iter2++;
 
-    ASSERT_EQ(iter1 - iter2, 0);
-    ASSERT_EQ(iter1 == iter2, true);
+  ASSERT_EQ(iter1 - iter2, 0);
+  ASSERT_EQ(iter1 == iter2, true);
 
-    iter1 += 100;
-    iter2 += 100;
+  iter1 += 100;
+  iter2 += 100;
 
-    ASSERT_EQ(iter1 - iter2, 0);
-    ASSERT_EQ(iter1 == iter2, true);
+  ASSERT_EQ(iter1 - iter2, 0);
+  ASSERT_EQ(iter1 == iter2, true);
 }
 
 TEST(CountingIteratorTests, TestCountingIteratorFloatComparison)
 {
-    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    thrust::counting_iterator<float> iter1(0);
-    thrust::counting_iterator<float> iter2(0);
+  thrust::counting_iterator<float> iter1(0);
+  thrust::counting_iterator<float> iter2(0);
 
-    ASSERT_EQ(iter1 - iter2, 0);
-    ASSERT_EQ(iter1 == iter2, true);
-    ASSERT_EQ(iter1 < iter2, false);
-    ASSERT_EQ(iter2 < iter1, false);
+  ASSERT_EQ(iter1 - iter2, 0);
+  ASSERT_EQ(iter1 == iter2, true);
+  ASSERT_EQ(iter1 < iter2, false);
+  ASSERT_EQ(iter2 < iter1, false);
 
-    iter1++;
+  iter1++;
 
-    ASSERT_EQ(iter1 - iter2, 1);
-    ASSERT_EQ(iter1 == iter2, false);
-    ASSERT_EQ(iter2 < iter1, true);
-    ASSERT_EQ(iter1 < iter2, false);
+  ASSERT_EQ(iter1 - iter2, 1);
+  ASSERT_EQ(iter1 == iter2, false);
+  ASSERT_EQ(iter2 < iter1, true);
+  ASSERT_EQ(iter1 < iter2, false);
 
-    iter2++;
+  iter2++;
 
-    ASSERT_EQ(iter1 - iter2, 0);
-    ASSERT_EQ(iter1 == iter2, true);
-    ASSERT_EQ(iter1 < iter2, false);
-    ASSERT_EQ(iter2 < iter1, false);
+  ASSERT_EQ(iter1 - iter2, 0);
+  ASSERT_EQ(iter1 == iter2, true);
+  ASSERT_EQ(iter1 < iter2, false);
+  ASSERT_EQ(iter2 < iter1, false);
 
-    iter1 += 100;
-    iter2 += 100;
+  iter1 += 100;
+  iter2 += 100;
 
-    ASSERT_EQ(iter1 - iter2, 0);
-    ASSERT_EQ(iter1 == iter2, true);
-    ASSERT_EQ(iter1 < iter2, false);
-    ASSERT_EQ(iter2 < iter1, false);
+  ASSERT_EQ(iter1 - iter2, 0);
+  ASSERT_EQ(iter1 == iter2, true);
+  ASSERT_EQ(iter1 < iter2, false);
+  ASSERT_EQ(iter2 < iter1, false);
 
-    thrust::counting_iterator<float> iter3(0);
-    thrust::counting_iterator<float> iter4(0.5);
+  thrust::counting_iterator<float> iter3(0);
+  thrust::counting_iterator<float> iter4(0.5);
 
-    ASSERT_EQ(iter3 - iter4, 0);
-    ASSERT_EQ(iter3 == iter4, true);
-    ASSERT_EQ(iter3 < iter4, false);
-    ASSERT_EQ(iter4 < iter3, false);
+  ASSERT_EQ(iter3 - iter4, 0);
+  ASSERT_EQ(iter3 == iter4, true);
+  ASSERT_EQ(iter3 < iter4, false);
+  ASSERT_EQ(iter4 < iter3, false);
 
-    iter3++; // iter3 = 1.0, iter4 = 0.5
+  iter3++; // iter3 = 1.0, iter4 = 0.5
 
-    ASSERT_EQ(iter3 - iter4, 0);
-    ASSERT_EQ(iter3 == iter4, true);
-    ASSERT_EQ(iter3 < iter4, false);
-    ASSERT_EQ(iter4 < iter3, false);
+  ASSERT_EQ(iter3 - iter4, 0);
+  ASSERT_EQ(iter3 == iter4, true);
+  ASSERT_EQ(iter3 < iter4, false);
+  ASSERT_EQ(iter4 < iter3, false);
 
-    iter4++; // iter3 = 1.0, iter4 = 1.5
+  iter4++; // iter3 = 1.0, iter4 = 1.5
 
-    ASSERT_EQ(iter3 - iter4, 0);
-    ASSERT_EQ(iter3 == iter4, true);
-    ASSERT_EQ(iter3 < iter4, false);
-    ASSERT_EQ(iter4 < iter3, false);
+  ASSERT_EQ(iter3 - iter4, 0);
+  ASSERT_EQ(iter3 == iter4, true);
+  ASSERT_EQ(iter3 < iter4, false);
+  ASSERT_EQ(iter4 < iter3, false);
 
-    iter4++; // iter3 = 1.0, iter4 = 2.5
+  iter4++; // iter3 = 1.0, iter4 = 2.5
 
-    ASSERT_EQ(iter3 - iter4, -1);
-    ASSERT_EQ(iter4 - iter3, 1);
-    ASSERT_EQ(iter3 == iter4, false);
-    ASSERT_EQ(iter3 < iter4, true);
-    ASSERT_EQ(iter4 < iter3, false);
+  ASSERT_EQ(iter3 - iter4, -1);
+  ASSERT_EQ(iter4 - iter3, 1);
+  ASSERT_EQ(iter3 == iter4, false);
+  ASSERT_EQ(iter3 < iter4, true);
+  ASSERT_EQ(iter4 < iter3, false);
 }
 
 TEST(CountingIteratorTests, TestCountingIteratorDistance)
 {
-    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    thrust::counting_iterator<int> iter1(0);
-    thrust::counting_iterator<int> iter2(5);
+  thrust::counting_iterator<int> iter1(0);
+  thrust::counting_iterator<int> iter2(5);
 
-    ASSERT_EQ(thrust::distance(iter1, iter2), 5);
+  ASSERT_EQ(thrust::distance(iter1, iter2), 5);
 
-    iter1++;
+  iter1++;
 
-    ASSERT_EQ(thrust::distance(iter1, iter2), 4);
+  ASSERT_EQ(thrust::distance(iter1, iter2), 4);
 
-    iter2 += 100;
+  iter2 += 100;
 
-    ASSERT_EQ(thrust::distance(iter1, iter2), 104);
+  ASSERT_EQ(thrust::distance(iter1, iter2), 104);
 
-    iter2 += 1000;
+  iter2 += 1000;
 
-    ASSERT_EQ(thrust::distance(iter1, iter2), 1104);
+  ASSERT_EQ(thrust::distance(iter1, iter2), 1104);
 }
 
 TEST(CountingIteratorTests, TestCountingIteratorUnsignedType)
 {
-    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    thrust::counting_iterator<unsigned int> iter0(0);
-    thrust::counting_iterator<unsigned int> iter1(5);
+  thrust::counting_iterator<unsigned int> iter0(0);
+  thrust::counting_iterator<unsigned int> iter1(5);
 
-    ASSERT_EQ(iter1 - iter0, 5);
-    ASSERT_EQ(iter0 - iter1, -5);
-    ASSERT_EQ(iter0 != iter1, true);
-    ASSERT_EQ(iter0 < iter1, true);
-    ASSERT_EQ(iter1 < iter0, false);
+  ASSERT_EQ(iter1 - iter0, 5);
+  ASSERT_EQ(iter0 - iter1, -5);
+  ASSERT_EQ(iter0 != iter1, true);
+  ASSERT_EQ(iter0 < iter1, true);
+  ASSERT_EQ(iter1 < iter0, false);
 }
 
 TEST(CountingIteratorTests, TestCountingIteratorLowerBound)
 {
-    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    size_t       n = 10000;
-    const size_t M = 100;
+  size_t n       = 10000;
+  const size_t M = 100;
 
-    for(auto seed : get_seeds())
+  for (auto seed : get_seeds())
+  {
+    SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+
+    thrust::host_vector<unsigned int> h_data = get_random_data<unsigned int>(
+      n, std::numeric_limits<unsigned int>::min(), std::numeric_limits<unsigned int>::max(), seed);
+    for (unsigned int i = 0; i < n; ++i)
     {
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed);
-
-        thrust::host_vector<unsigned int> h_data
-            = get_random_data<unsigned int>(n,
-                                            std::numeric_limits<unsigned int>::min(),
-                                            std::numeric_limits<unsigned int>::max(),
-                                            seed);
-        for(unsigned int i = 0; i < n; ++i)
-            h_data[i] %= M;
-
-        thrust::sort(h_data.begin(), h_data.end());
-
-        thrust::device_vector<unsigned int> d_data = h_data;
-
-        thrust::counting_iterator<unsigned int> search_begin(0);
-        thrust::counting_iterator<unsigned int> search_end(M);
-
-        thrust::host_vector<unsigned int>   h_result(M);
-        thrust::device_vector<unsigned int> d_result(M);
-
-        thrust::lower_bound(
-            h_data.begin(), h_data.end(), search_begin, search_end, h_result.begin());
-
-        thrust::lower_bound(
-            d_data.begin(), d_data.end(), search_begin, search_end, d_result.begin());
-
-        ASSERT_EQ(h_result, d_result);
+      h_data[i] %= M;
     }
+
+    thrust::sort(h_data.begin(), h_data.end());
+
+    thrust::device_vector<unsigned int> d_data = h_data;
+
+    thrust::counting_iterator<unsigned int> search_begin(0);
+    thrust::counting_iterator<unsigned int> search_end(M);
+
+    thrust::host_vector<unsigned int> h_result(M);
+    thrust::device_vector<unsigned int> d_result(M);
+
+    thrust::lower_bound(h_data.begin(), h_data.end(), search_begin, search_end, h_result.begin());
+
+    thrust::lower_bound(d_data.begin(), d_data.end(), search_begin, search_end, d_result.begin());
+
+    ASSERT_EQ(h_result, d_result);
+  }
 }
 
 TEST(CountingIteratorTests, TestCountingIteratorDifference)
 {
-    using Iterator   = typename thrust::counting_iterator<std::uint64_t>;
-    using Difference = typename thrust::iterator_difference<Iterator>::type;
+  using Iterator   = typename thrust::counting_iterator<std::uint64_t>;
+  using Difference = typename thrust::iterator_difference<Iterator>::type;
 
-    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    Difference diff = std::numeric_limits<std::uint32_t>::max() + 1;
+  Difference diff = std::numeric_limits<std::uint32_t>::max() + 1;
 
-    Iterator first(0);
-    Iterator last = first + diff;
+  Iterator first(0);
+  Iterator last = first + diff;
 
-    ASSERT_EQ(diff, last - first);
+  ASSERT_EQ(diff, last - first);
 }

@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -23,9 +23,10 @@
 #pragma once
 
 #include <thrust/detail/config.h>
+
 #include <thrust/detail/execution_policy.h>
-#include <thrust/system/detail/generic/tag.h>
 #include <thrust/detail/static_assert.h>
+#include <thrust/system/detail/generic/tag.h>
 
 THRUST_NAMESPACE_BEGIN
 namespace system
@@ -35,37 +36,21 @@ namespace detail
 namespace generic
 {
 
-
-template<typename DerivedPolicy,
-         typename InputIterator,
-         typename UnaryFunction>
-THRUST_HOST_DEVICE
-InputIterator for_each(thrust::execution_policy<DerivedPolicy> &,
-                       InputIterator first,
-                       InputIterator ,
-                       UnaryFunction )
+template <typename DerivedPolicy, typename InputIterator, typename UnaryFunction>
+THRUST_HOST_DEVICE InputIterator
+for_each(thrust::execution_policy<DerivedPolicy>&, InputIterator first, InputIterator, UnaryFunction)
 {
-  THRUST_STATIC_ASSERT_MSG(
-    (thrust::detail::depend_on_instantiation<InputIterator, false>::value)
-  , "unimplemented for this system"
-  );
+  THRUST_STATIC_ASSERT_MSG((thrust::detail::depend_on_instantiation<InputIterator, false>::value),
+                           "unimplemented for this system");
   return first;
 } // end for_each()
 
-template<typename DerivedPolicy,
-         typename InputIterator,
-         typename Size,
-         typename UnaryFunction>
-THRUST_HOST_DEVICE
-InputIterator for_each_n(thrust::execution_policy<DerivedPolicy> &,
-                         InputIterator first,
-                         Size ,
-                         UnaryFunction )
+template <typename DerivedPolicy, typename InputIterator, typename Size, typename UnaryFunction>
+THRUST_HOST_DEVICE InputIterator
+for_each_n(thrust::execution_policy<DerivedPolicy>&, InputIterator first, Size, UnaryFunction)
 {
-  THRUST_STATIC_ASSERT_MSG(
-    (thrust::detail::depend_on_instantiation<InputIterator, false>::value)
-  , "unimplemented for this system"
-  );
+  THRUST_STATIC_ASSERT_MSG((thrust::detail::depend_on_instantiation<InputIterator, false>::value),
+                           "unimplemented for this system");
   return first;
 } // end for_each_n()
 
@@ -73,4 +58,3 @@ InputIterator for_each_n(thrust::execution_policy<DerivedPolicy> &,
 } // end namespace detail
 } // end namespace system
 THRUST_NAMESPACE_END
-

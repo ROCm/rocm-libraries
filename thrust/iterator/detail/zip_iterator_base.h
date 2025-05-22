@@ -19,70 +19,71 @@
 #include <thrust/detail/config.h>
 
 #include <thrust/advance.h>
-#include <thrust/iterator/iterator_traits.h>
-#include <thrust/iterator/iterator_facade.h>
-#include <thrust/iterator/iterator_categories.h>
-#include <thrust/iterator/detail/minimum_category.h>
-#include <thrust/iterator/detail/minimum_system.h>
-#include <thrust/type_traits/integer_sequence.h>
-#include <thrust/tuple.h>
 #include <thrust/detail/tuple_meta_transform.h>
 #include <thrust/detail/tuple_transform.h>
 #include <thrust/detail/type_traits.h>
+#include <thrust/iterator/detail/minimum_category.h>
+#include <thrust/iterator/detail/minimum_system.h>
 #include <thrust/iterator/detail/tuple_of_iterator_references.h>
+#include <thrust/iterator/iterator_categories.h>
+#include <thrust/iterator/iterator_facade.h>
+#include <thrust/iterator/iterator_traits.h>
+#include <thrust/tuple.h>
+#include <thrust/type_traits/integer_sequence.h>
 
 THRUST_NAMESPACE_BEGIN
 
 // forward declare zip_iterator for zip_iterator_base
-template<typename IteratorTuple> class zip_iterator;
+template <typename IteratorTuple>
+class zip_iterator;
 
 namespace detail
 {
 
-
 // Functors to be used with tuple algorithms
 //
-template<typename DiffType>
+template <typename DiffType>
 class advance_iterator
 {
 public:
-  inline THRUST_HOST_DEVICE
-  advance_iterator(DiffType step) : m_step(step) {}
+  inline THRUST_HOST_DEVICE advance_iterator(DiffType step)
+      : m_step(step)
+  {}
 
   THRUST_EXEC_CHECK_DISABLE
-  template<typename Iterator>
-  inline THRUST_HOST_DEVICE
-  void operator()(Iterator& it) const
-  { thrust::advance(it, m_step); }
+  template <typename Iterator>
+  inline THRUST_HOST_DEVICE void operator()(Iterator& it) const
+  {
+    thrust::advance(it, m_step);
+  }
 
 private:
   DiffType m_step;
 }; // end advance_iterator
 
-
 struct increment_iterator
 {
   THRUST_EXEC_CHECK_DISABLE
-  template<typename Iterator>
-  inline THRUST_HOST_DEVICE
-  void operator()(Iterator& it)
-  { ++it; }
+  template <typename Iterator>
+  inline THRUST_HOST_DEVICE void operator()(Iterator& it)
+  {
+    ++it;
+  }
 }; // end increment_iterator
-
 
 struct decrement_iterator
 {
   THRUST_EXEC_CHECK_DISABLE
-  template<typename Iterator>
-  inline THRUST_HOST_DEVICE
-  void operator()(Iterator& it)
-  { --it; }
+  template <typename Iterator>
+  inline THRUST_HOST_DEVICE void operator()(Iterator& it)
+  {
+    --it;
+  }
 }; // end decrement_iterator
-
 
 struct dereference_iterator
 {
-  template<typename Iterator>
+  template <typename Iterator>
   struct apply
   {
     using type = typename iterator_traits<Iterator>::reference;
@@ -90,14 +91,12 @@ struct dereference_iterator
 
   // XXX silence warnings of the form "calling a __host__ function from a THRUST_HOST_DEVICE function is not allowed
   THRUST_EXEC_CHECK_DISABLE
-  template<typename Iterator>
-  THRUST_HOST_DEVICE
-    typename apply<Iterator>::type operator()(Iterator const& it)
+  template <typename Iterator>
+  THRUST_HOST_DEVICE typename apply<Iterator>::type operator()(Iterator const& it)
   {
     return *it;
   }
 }; // end dereference_iterator
-
 
 // The namespace tuple_impl_specific provides two meta-
 // algorithms and two algorithms for tuples.
@@ -105,45 +104,30 @@ namespace tuple_impl_specific
 {
 
 // define apply1 for tuple_meta_transform_impl
-template<typename UnaryMetaFunctionClass, class Arg>
-  struct apply1
-    : UnaryMetaFunctionClass::template apply<Arg>
-{
-}; // end apply1
-
+template <typename UnaryMetaFunctionClass, class Arg>
+struct apply1 : UnaryMetaFunctionClass::template apply<Arg>
+{}; // end apply1
 
 // define apply2 for tuple_meta_accumulate_impl
-template<typename UnaryMetaFunctionClass, class Arg1, class Arg2>
-  struct apply2
-    : UnaryMetaFunctionClass::template apply<Arg1,Arg2>
-{
-}; // end apply2
-
+template <typename UnaryMetaFunctionClass, class Arg1, class Arg2>
+struct apply2 : UnaryMetaFunctionClass::template apply<Arg1, Arg2>
+{}; // end apply2
 
 // Meta-accumulate algorithm for tuples. Note: The template
 // parameter StartType corresponds to the initial value in
 // ordinary accumulation.
 //
-template<class Tuple, class BinaryMetaFun, class StartType>
-  struct tuple_meta_accumulate;
+template <class Tuple, class BinaryMetaFun, class StartType>
+struct tuple_meta_accumulate;
 
-template<
-    class BinaryMetaFun
-  , typename StartType
->
-struct tuple_meta_accumulate<thrust::tuple<>,BinaryMetaFun,StartType>
+template <class BinaryMetaFun, typename StartType>
+struct tuple_meta_accumulate<thrust::tuple<>, BinaryMetaFun, StartType>
 {
   using type = typename thrust::detail::identity_<StartType>::type;
 };
 
-
-template<
-    class BinaryMetaFun
-  , typename StartType
-  , typename    T
-  , typename... Ts
->
-  struct tuple_meta_accumulate<thrust::tuple<T,Ts...>,BinaryMetaFun,StartType>
+template <class BinaryMetaFun, typename StartType, typename T, typename... Ts>
+struct tuple_meta_accumulate<thrust::tuple<T, Ts...>, BinaryMetaFun, StartType>
 {
   using type =
     typename apply2<BinaryMetaFun,
@@ -151,17 +135,14 @@ template<
                     typename tuple_meta_accumulate<thrust::tuple<Ts...>, BinaryMetaFun, StartType>::type>::type;
 };
 
-
-template<typename Fun>
-inline THRUST_HOST_DEVICE
-Fun tuple_for_each_helper(Fun f)
+template <typename Fun>
+inline THRUST_HOST_DEVICE Fun tuple_for_each_helper(Fun f)
 {
   return f;
 }
 
-template<typename Fun, typename T, typename... Ts>
-inline THRUST_HOST_DEVICE
-Fun tuple_for_each_helper(Fun f, T& t, Ts&... ts)
+template <typename Fun, typename T, typename... Ts>
+inline THRUST_HOST_DEVICE Fun tuple_for_each_helper(Fun f, T& t, Ts&... ts)
 {
   f(t);
   return tuple_for_each_helper(f, ts...);
@@ -169,51 +150,39 @@ Fun tuple_for_each_helper(Fun f, T& t, Ts&... ts)
 
 // for_each algorithm for tuples.
 
-template<typename Fun, typename... Ts, size_t... Is>
-inline THRUST_HOST_DEVICE
-Fun tuple_for_each(thrust::tuple<Ts...>& t, Fun f, thrust::index_sequence<Is...>)
+template <typename Fun, typename... Ts, size_t... Is>
+inline THRUST_HOST_DEVICE Fun tuple_for_each(thrust::tuple<Ts...>& t, Fun f, thrust::index_sequence<Is...>)
 {
   return tuple_for_each_helper(f, thrust::get<Is>(t)...);
 } // end tuple_for_each()
 
 // for_each algorithm for tuples.
-template<typename Fun, typename... Ts>
-inline THRUST_HOST_DEVICE
-Fun tuple_for_each(thrust::tuple<Ts...>& t, Fun f)
-{ 
+template <typename Fun, typename... Ts>
+inline THRUST_HOST_DEVICE Fun tuple_for_each(thrust::tuple<Ts...>& t, Fun f)
+{
   return tuple_for_each(t, f, thrust::make_index_sequence<thrust::tuple_size<thrust::tuple<Ts...>>::value>{});
 }
 
-
-} // end tuple_impl_specific
-
+} // namespace tuple_impl_specific
 
 // Metafunction to obtain the type of the tuple whose element types
 // are the value_types of an iterator tupel.
 //
-template<typename IteratorTuple>
-  struct tuple_of_value_types
-    : tuple_meta_transform<
-          IteratorTuple,
-          iterator_value
-        >
-{
-}; // end tuple_of_value_types
-
+template <typename IteratorTuple>
+struct tuple_of_value_types : tuple_meta_transform<IteratorTuple, iterator_value>
+{}; // end tuple_of_value_types
 
 struct minimum_category_lambda
 {
-  template<typename T1, typename T2>
-    struct apply : minimum_category<T1,T2>
+  template <typename T1, typename T2>
+  struct apply : minimum_category<T1, T2>
   {};
 };
-
-
 
 // Metafunction to obtain the minimal traversal tag in a tuple
 // of iterators.
 //
-template<typename IteratorTuple>
+template <typename IteratorTuple>
 struct minimum_traversal_category_in_iterator_tuple
 {
   using tuple_of_traversal_tags = typename tuple_meta_transform<IteratorTuple, thrust::iterator_traversal>::type;
@@ -222,19 +191,16 @@ struct minimum_traversal_category_in_iterator_tuple
     tuple_meta_accumulate<tuple_of_traversal_tags, minimum_category_lambda, thrust::random_access_traversal_tag>::type;
 };
 
-
 struct minimum_system_lambda
 {
-  template<typename T1, typename T2>
-    struct apply : minimum_system<T1,T2>
+  template <typename T1, typename T2>
+  struct apply : minimum_system<T1, T2>
   {};
 };
 
-
-
 // Metafunction to obtain the minimal system tag in a tuple
 // of iterators.
-template<typename IteratorTuple>
+template <typename IteratorTuple>
 struct minimum_system_in_iterator_tuple
 {
   using tuple_of_system_tags =
@@ -247,20 +213,17 @@ struct minimum_system_in_iterator_tuple
 namespace zip_iterator_base_ns
 {
 
+template <typename Tuple, typename IndexSequence>
+struct tuple_of_iterator_references_helper;
 
-template<typename Tuple, typename IndexSequence>
-  struct tuple_of_iterator_references_helper;
-
-
-template<typename Tuple, size_t... Is>
-  struct tuple_of_iterator_references_helper<Tuple, thrust::index_sequence<Is...>>
+template <typename Tuple, size_t... Is>
+struct tuple_of_iterator_references_helper<Tuple, thrust::index_sequence<Is...>>
 {
   using type = thrust::detail::tuple_of_iterator_references<typename thrust::tuple_element<Is, Tuple>::type...>;
 };
 
-
-template<typename IteratorTuple>
-  struct tuple_of_iterator_references
+template <typename IteratorTuple>
+struct tuple_of_iterator_references
 {
   // get a thrust::tuple of the iterators' references
   using tuple_of_references = typename tuple_meta_transform<IteratorTuple, thrust::iterator_reference>::type;
@@ -271,8 +234,7 @@ template<typename IteratorTuple>
     thrust::make_index_sequence<thrust::tuple_size<tuple_of_references>::value>>::type;
 };
 
-
-} // end zip_iterator_base_ns
+} // namespace zip_iterator_base_ns
 
 ///////////////////////////////////////////////////////////////////
 //
@@ -281,47 +243,37 @@ template<typename IteratorTuple>
 // Builds and exposes the iterator facade type from which the zip
 // iterator will be derived.
 //
-template<typename IteratorTuple>
-  struct zip_iterator_base
+template <typename IteratorTuple>
+struct zip_iterator_base
 {
- //private:
-    // reference type is the type of the tuple obtained from the
-    // iterators' reference types.
-    using reference = typename zip_iterator_base_ns::tuple_of_iterator_references<IteratorTuple>::type;
+  // private:
+  //  reference type is the type of the tuple obtained from the
+  //  iterators' reference types.
+  using reference = typename zip_iterator_base_ns::tuple_of_iterator_references<IteratorTuple>::type;
 
-    // Boost's Value type is the same as reference type.
-    //using value_type = reference;
-    using value_type = typename tuple_of_value_types<IteratorTuple>::type;
+  // Boost's Value type is the same as reference type.
+  // using value_type = reference;
+  using value_type = typename tuple_of_value_types<IteratorTuple>::type;
 
-    // Difference type is the first iterator's difference type
-    using difference_type = typename thrust::iterator_traits<
-                              typename thrust::tuple_element<0, IteratorTuple>::type
-                               >::difference_type;
+  // Difference type is the first iterator's difference type
+  using difference_type =
+    typename thrust::iterator_traits<typename thrust::tuple_element<0, IteratorTuple>::type>::difference_type;
 
-    // Iterator system is the minimum system tag in the
-    // iterator tuple
-    using system = typename
-      minimum_system_in_iterator_tuple<IteratorTuple>::type;
+  // Iterator system is the minimum system tag in the
+  // iterator tuple
+  using system = typename minimum_system_in_iterator_tuple<IteratorTuple>::type;
 
-    // Traversal category is the minimum traversal category in the
-    // iterator tuple
-    using traversal_category = typename
-      minimum_traversal_category_in_iterator_tuple<IteratorTuple>::type;
+  // Traversal category is the minimum traversal category in the
+  // iterator tuple
+  using traversal_category = typename minimum_traversal_category_in_iterator_tuple<IteratorTuple>::type;
 
- public:
-
-    // The iterator facade type from which the zip iterator will
-    // be derived.
-    using type = thrust::iterator_facade<
-                  zip_iterator<IteratorTuple>,
-                  value_type,
-                  system,
-                  traversal_category,
-                  reference,
-                  difference_type
-                  >;
+public:
+  // The iterator facade type from which the zip iterator will
+  // be derived.
+  using type = thrust::
+    iterator_facade<zip_iterator<IteratorTuple>, value_type, system, traversal_category, reference, difference_type>;
 }; // end zip_iterator_base
 
-} // end detail
+} // namespace detail
 
 THRUST_NAMESPACE_END

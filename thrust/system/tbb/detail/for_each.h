@@ -17,6 +17,7 @@
 #pragma once
 
 #include <thrust/detail/config.h>
+
 #include <thrust/system/tbb/detail/execution_policy.h>
 
 THRUST_NAMESPACE_BEGIN
@@ -27,22 +28,13 @@ namespace tbb
 namespace detail
 {
 
-template<typename DerivedPolicy,
-         typename RandomAccessIterator,
-         typename UnaryFunction>
-  RandomAccessIterator for_each(execution_policy<DerivedPolicy> &exec,
-                                RandomAccessIterator first,
-                                RandomAccessIterator last,
-                                UnaryFunction f);
+template <typename DerivedPolicy, typename RandomAccessIterator, typename UnaryFunction>
+RandomAccessIterator
+for_each(execution_policy<DerivedPolicy>& exec, RandomAccessIterator first, RandomAccessIterator last, UnaryFunction f);
 
-template<typename DerivedPolicy,
-         typename RandomAccessIterator,
-         typename Size,
-         typename UnaryFunction>
-  RandomAccessIterator for_each_n(execution_policy<DerivedPolicy> &exec,
-                                  RandomAccessIterator first,
-                                  Size n,
-                                  UnaryFunction f);
+template <typename DerivedPolicy, typename RandomAccessIterator, typename Size, typename UnaryFunction>
+RandomAccessIterator
+for_each_n(execution_policy<DerivedPolicy>& exec, RandomAccessIterator first, Size n, UnaryFunction f);
 
 } // end namespace detail
 } // end namespace tbb
@@ -50,4 +42,3 @@ template<typename DerivedPolicy,
 THRUST_NAMESPACE_END
 
 #include <thrust/system/tbb/detail/for_each.inl>
-

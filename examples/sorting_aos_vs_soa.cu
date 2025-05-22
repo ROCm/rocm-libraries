@@ -1,3 +1,23 @@
+// Copyright (c) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 #include <thrust/device_vector.h>
 #include <thrust/host_vector.h>
 #include <thrust/random.h>
@@ -21,11 +41,10 @@ struct MyStruct
   int key;
   float value;
 
-  __host__ __device__
-    bool operator<(const MyStruct other) const
-    {
-      return key < other.key;
-    }
+  __host__ __device__ bool operator<(const MyStruct other) const
+  {
+    return key < other.key;
+  }
 };
 
 void initialize_keys(thrust::device_vector<int>& keys)
@@ -35,12 +54,13 @@ void initialize_keys(thrust::device_vector<int>& keys)
 
   thrust::host_vector<int> h_keys(keys.size());
 
-  for(size_t i = 0; i < h_keys.size(); i++)
+  for (size_t i = 0; i < h_keys.size(); i++)
+  {
     h_keys[i] = dist(rng);
+  }
 
   keys = h_keys;
 }
-
 
 void initialize_keys(thrust::device_vector<MyStruct>& structures)
 {
@@ -49,8 +69,10 @@ void initialize_keys(thrust::device_vector<MyStruct>& structures)
 
   thrust::host_vector<MyStruct> h_structures(structures.size());
 
-  for(size_t i = 0; i < h_structures.size(); i++)
+  for (size_t i = 0; i < h_structures.size(); i++)
+  {
     h_structures[i].key = dist(rng);
+  }
 
   structures = h_structures;
 }
@@ -75,7 +97,7 @@ int main(void)
 
   // Sort Key-Value pairs using Structure of Arrays (SoA) storage
   {
-    thrust::device_vector<int>   keys(N);
+    thrust::device_vector<int> keys(N);
     thrust::device_vector<float> values(N);
 
     initialize_keys(keys);
@@ -90,4 +112,3 @@ int main(void)
 
   return 0;
 }
-

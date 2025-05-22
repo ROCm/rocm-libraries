@@ -18,8 +18,13 @@
 
 #include <thrust/detail/config/cpp_dialect.h>
 
-#ifndef THRUST_CPP14_REQUIRED_NO_ERROR
-#  if THRUST_CPP_DIALECT < 2014
-#    error C++14 is required for this Thrust feature; please upgrade your compiler or pass the appropriate -std=c++14 flag to it.
+// This should be removed after cpp14 is fully deprecated.
+#ifdef THRUST_CPP14_REQUIRED_NO_ERROR
+#  define THRUST_CPP_VERSTION_CHECK_NO_ERROR
+#endif
+
+#ifndef THRUST_CPP_VERSTION_CHECK_NO_ERROR
+#  if THRUST_CPP_DIALECT < 2017
+#    error C++17 is required for this Thrust feature; please upgrade your compiler or pass the appropriate -std=c++17 flag to it.
 #  endif
 #endif

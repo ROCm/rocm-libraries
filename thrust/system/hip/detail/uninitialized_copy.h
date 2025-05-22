@@ -30,12 +30,13 @@
 #include <thrust/detail/config.h>
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
-#include <iterator>
-#include <thrust/detail/memory_wrapper.h>
-#include <thrust/distance.h>
-#include <thrust/system/hip/detail/execution_policy.h>
-#include <thrust/system/hip/detail/util.h>
-#include <thrust/system/hip/detail/parallel_for.h>
+#  include <thrust/detail/memory_wrapper.h>
+#  include <thrust/distance.h>
+#  include <thrust/system/hip/detail/execution_policy.h>
+#  include <thrust/system/hip/detail/parallel_for.h>
+#  include <thrust/system/hip/detail/util.h>
+
+#  include <iterator>
 
 THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
@@ -43,57 +44,49 @@ namespace hip_rocprim
 namespace __uninitialized_copy
 {
 
-    template <class InputIt, class OutputIt>
-    struct functor
-    {
-        InputIt  input;
-        OutputIt output;
+template <class InputIt, class OutputIt>
+struct functor
+{
+  InputIt input;
+  OutputIt output;
 
-        using InputType  = typename iterator_traits<InputIt>::value_type;
-        using OutputType = typename iterator_traits<OutputIt>::value_type;
+  using InputType  = typename iterator_traits<InputIt>::value_type;
+  using OutputType = typename iterator_traits<OutputIt>::value_type;
 
-        THRUST_HIP_FUNCTION
-        functor(InputIt input_, OutputIt output_)
-            : input(input_)
-            , output(output_)
-        {
-        }
+  THRUST_HIP_FUNCTION
+  functor(InputIt input_, OutputIt output_)
+      : input(input_)
+      , output(output_)
+  {}
 
-        template <class Size>
-        void THRUST_HIP_DEVICE_FUNCTION operator()(Size idx)
-        {
-            InputType const& in  = raw_reference_cast(input[idx]);
-            OutputType&      out = raw_reference_cast(output[static_cast<typename std::pointer_traits<OutputIt>::difference_type>(idx)]);
+  template <class Size>
+  void THRUST_HIP_DEVICE_FUNCTION operator()(Size idx)
+  {
+    InputType const& in = raw_reference_cast(input[idx]);
+    OutputType& out =
+      raw_reference_cast(output[static_cast<typename std::pointer_traits<OutputIt>::difference_type>(idx)]);
 
-            ::new(static_cast<void*>(&out)) OutputType(in);
-        }
-    }; // struct functor
+    ::new (static_cast<void*>(&out)) OutputType(in);
+  }
+}; // struct functor
 
 } // namespace __uninitialized_copy
 
 template <class Derived, class InputIt, class Size, class OutputIt>
 OutputIt THRUST_HIP_FUNCTION
-uninitialized_copy_n(execution_policy<Derived>& policy,
-                     InputIt                    first,
-                     Size                       count,
-                     OutputIt                   result)
+uninitialized_copy_n(execution_policy<Derived>& policy, InputIt first, Size count, OutputIt result)
 {
-    using functor_t = __uninitialized_copy::functor<InputIt, OutputIt>;
+  using functor_t = __uninitialized_copy::functor<InputIt, OutputIt>;
 
-    hip_rocprim::parallel_for(policy, functor_t(first, result), count);
-    return result + static_cast<typename std::pointer_traits<OutputIt>::difference_type>(count);
+  hip_rocprim::parallel_for(policy, functor_t(first, result), count);
+  return result + static_cast<typename std::pointer_traits<OutputIt>::difference_type>(count);
 }
 
 template <class Derived, class InputIt, class OutputIt>
 OutputIt THRUST_HIP_FUNCTION
-uninitialized_copy(execution_policy<Derived>& policy,
-                   InputIt                    first,
-                   InputIt                    last,
-                   OutputIt                   result)
+uninitialized_copy(execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt result)
 {
-    return hip_rocprim::uninitialized_copy_n(
-        policy, first, thrust::distance(first, last), result
-    );
+  return hip_rocprim::uninitialized_copy_n(policy, first, thrust::distance(first, last), result);
 }
 
 } // namespace hip_rocprim

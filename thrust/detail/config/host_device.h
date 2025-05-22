@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -33,13 +33,12 @@
 // #define them if not defined already
 // XXX this will break if the client does #include <host_defines.h> later
 
-#ifndef __host__
-#define __host__
-#endif // __host__
+#  ifndef __host__
+#    define __host__
+#  endif // __host__
 
-#ifndef __device__
-#define __device__
-#endif // __device__
+#  ifndef __device__
+#    define __device__
+#  endif // __device__
 
 #endif
-

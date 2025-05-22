@@ -21,16 +21,16 @@
 #pragma once
 
 #include <thrust/detail/config.h>
-#include <thrust/detail/cpp14_required.h>
 
-#if THRUST_CPP_DIALECT >= 2014
+#include <thrust/detail/cpp_version_check.h>
 
-#include <thrust/detail/static_assert.h>
-#include <thrust/detail/select_system.h>
-#include <thrust/type_traits/remove_cvref.h>
-#include <thrust/system/detail/adl/async/transform.h>
+#if THRUST_CPP_DIALECT >= 2017
 
-#include <thrust/event.h>
+#  include <thrust/detail/select_system.h>
+#  include <thrust/detail/static_assert.h>
+#  include <thrust/event.h>
+#  include <thrust/system/detail/adl/async/transform.h>
+#  include <thrust/type_traits/remove_cvref.h>
 
 THRUST_NAMESPACE_BEGIN
 
@@ -43,22 +43,12 @@ namespace async
 namespace unimplemented
 {
 
-template <
-  typename DerivedPolicy
-, typename ForwardIt, typename Sentinel, typename OutputIt
-, typename UnaryOperation
->
-THRUST_HOST
-event<DerivedPolicy>
-async_transform(
-  thrust::execution_policy<DerivedPolicy>&
-, ForwardIt , Sentinel , OutputIt , UnaryOperation 
-)
+template <typename DerivedPolicy, typename ForwardIt, typename Sentinel, typename OutputIt, typename UnaryOperation>
+THRUST_HOST event<DerivedPolicy>
+async_transform(thrust::execution_policy<DerivedPolicy>&, ForwardIt, Sentinel, OutputIt, UnaryOperation)
 {
-  THRUST_STATIC_ASSERT_MSG(
-    (thrust::detail::depend_on_instantiation<ForwardIt, false>::value)
-  , "this algorithm is not implemented for the specified system"
-  );
+  THRUST_STATIC_ASSERT_MSG((thrust::detail::depend_on_instantiation<ForwardIt, false>::value),
+                           "this algorithm is not implemented for the specified system");
   return {};
 }
 
@@ -69,6 +59,7 @@ namespace transform_detail
 
 using thrust::async::unimplemented::async_transform;
 
+// clang-format off
 struct transform_fn final
 {
   template <
@@ -123,8 +114,9 @@ struct transform_fn final
     call(THRUST_FWD(args)...)
   )
 };
+// clang-format on
 
-} // namespace tranform_detail
+} // namespace transform_detail
 
 THRUST_INLINE_CONSTANT transform_detail::transform_fn transform{};
 

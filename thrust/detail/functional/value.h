@@ -26,6 +26,7 @@
 #pragma once
 
 #include <thrust/detail/config.h>
+
 #include <thrust/detail/functional/actor.h>
 
 THRUST_NAMESPACE_BEGIN
@@ -34,46 +35,39 @@ namespace detail
 namespace functional
 {
 
+template <typename Eval>
+struct actor;
 
-template<typename Eval> struct actor;
-
-
-template<typename T>
-  class value
+template <typename T>
+class value
 {
-  public:
+public:
+  template <typename Env>
+  struct result
+  {
+    using type = T;
+  };
 
-    template<typename Env>
-      struct result
-    {
-      using type = T;
-    };
-
-    THRUST_HOST_DEVICE
-    value(const T &arg)
+  THRUST_HOST_DEVICE value(const T& arg)
       : m_val(arg)
-    {}
+  {}
 
-    template<typename Env>
-    THRUST_HOST_DEVICE
-      T eval(const Env &) const
-    {
-      return m_val;
-    }
+  template <typename Env>
+  THRUST_HOST_DEVICE T eval(const Env&) const
+  {
+    return m_val;
+  }
 
-  private:
-    T m_val;
+private:
+  T m_val;
 }; // end value
 
-template<typename T>
-THRUST_HOST_DEVICE
-actor<value<T> > val(const T &x)
+template <typename T>
+THRUST_HOST_DEVICE actor<value<T>> val(const T& x)
 {
   return value<T>(x);
 } // end val()
 
-
-} // end functional
-} // end detail
+} // namespace functional
+} // namespace detail
 THRUST_NAMESPACE_END
-

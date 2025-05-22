@@ -17,6 +17,7 @@
 #pragma once
 
 #include <thrust/detail/config.h>
+
 #include <thrust/detail/functional/actor.h>
 #include <thrust/detail/functional/composite.h>
 #include <thrust/detail/functional/operators/operator_adaptors.h>
@@ -28,115 +29,59 @@ namespace detail
 namespace functional
 {
 
-template<typename T1, typename T2>
+template <typename T1, typename T2>
 THRUST_HOST_DEVICE
-actor<
-  composite<
-    transparent_binary_operator<thrust::logical_and<>>,
-    actor<T1>,
-    typename as_actor<T2>::type
-  >
->
-operator&&(const actor<T1> &_1, const T2 &_2)
+  actor<composite<transparent_binary_operator<thrust::logical_and<>>, actor<T1>, typename as_actor<T2>::type>>
+  operator&&(const actor<T1>& _1, const T2& _2)
 {
-  return compose(transparent_binary_operator<thrust::logical_and<>>(),
-                 make_actor(_1),
-                 make_actor(_2));
+  return compose(transparent_binary_operator<thrust::logical_and<>>(), make_actor(_1), make_actor(_2));
 } // end operator&&()
 
-template<typename T1, typename T2>
+template <typename T1, typename T2>
 THRUST_HOST_DEVICE
-actor<
-  composite<
-    transparent_binary_operator<thrust::logical_and<>>,
-    typename as_actor<T1>::type,
-    actor<T2>
-  >
->
-operator&&(const T1 &_1, const actor<T2> &_2)
+  actor<composite<transparent_binary_operator<thrust::logical_and<>>, typename as_actor<T1>::type, actor<T2>>>
+  operator&&(const T1& _1, const actor<T2>& _2)
 {
-  return compose(transparent_binary_operator<thrust::logical_and<>>(),
-                 make_actor(_1),
-                 make_actor(_2));
+  return compose(transparent_binary_operator<thrust::logical_and<>>(), make_actor(_1), make_actor(_2));
 } // end operator&&()
 
-template<typename T1, typename T2>
-THRUST_HOST_DEVICE
-actor<
-  composite<
-    transparent_binary_operator<thrust::logical_and<>>,
-    actor<T1>,
-    actor<T2>
-  >
->
-operator&&(const actor<T1> &_1, const actor<T2> &_2)
+template <typename T1, typename T2>
+THRUST_HOST_DEVICE actor<composite<transparent_binary_operator<thrust::logical_and<>>, actor<T1>, actor<T2>>>
+operator&&(const actor<T1>& _1, const actor<T2>& _2)
 {
-  return compose(transparent_binary_operator<thrust::logical_and<>>(),
-                 make_actor(_1),
-                 make_actor(_2));
+  return compose(transparent_binary_operator<thrust::logical_and<>>(), make_actor(_1), make_actor(_2));
 } // end operator&&()
 
-template<typename T1, typename T2>
+template <typename T1, typename T2>
 THRUST_HOST_DEVICE
-actor<
-  composite<
-    transparent_binary_operator<thrust::logical_or<>>,
-    actor<T1>,
-    typename as_actor<T2>::type
-  >
->
-operator||(const actor<T1> &_1, const T2 &_2)
+  actor<composite<transparent_binary_operator<thrust::logical_or<>>, actor<T1>, typename as_actor<T2>::type>>
+  operator||(const actor<T1>& _1, const T2& _2)
 {
-  return compose(transparent_binary_operator<thrust::logical_or<>>(),
-                 make_actor(_1),
-                 make_actor(_2));
+  return compose(transparent_binary_operator<thrust::logical_or<>>(), make_actor(_1), make_actor(_2));
 } // end operator&&()
 
-template<typename T1, typename T2>
+template <typename T1, typename T2>
 THRUST_HOST_DEVICE
-actor<
-  composite<
-    transparent_binary_operator<thrust::logical_or<>>,
-    typename as_actor<T1>::type,
-    actor<T2>
-  >
->
-operator||(const T1 &_1, const actor<T2> &_2)
+  actor<composite<transparent_binary_operator<thrust::logical_or<>>, typename as_actor<T1>::type, actor<T2>>>
+  operator||(const T1& _1, const actor<T2>& _2)
 {
-  return compose(transparent_binary_operator<thrust::logical_or<>>(),
-                 make_actor(_1),
-                 make_actor(_2));
+  return compose(transparent_binary_operator<thrust::logical_or<>>(), make_actor(_1), make_actor(_2));
 } // end operator&&()
 
-template<typename T1, typename T2>
-THRUST_HOST_DEVICE
-actor<
-  composite<
-    transparent_binary_operator<thrust::logical_or<>>,
-    actor<T1>,
-    actor<T2>
-  >
->
-operator||(const actor<T1> &_1, const actor<T2> &_2)
+template <typename T1, typename T2>
+THRUST_HOST_DEVICE actor<composite<transparent_binary_operator<thrust::logical_or<>>, actor<T1>, actor<T2>>>
+operator||(const actor<T1>& _1, const actor<T2>& _2)
 {
-  return compose(transparent_binary_operator<thrust::logical_or<>>(),
-                 make_actor(_1),
-                 make_actor(_2));
+  return compose(transparent_binary_operator<thrust::logical_or<>>(), make_actor(_1), make_actor(_2));
 } // end operator&&()
 
-template<typename Eval>
-THRUST_HOST_DEVICE
-actor<
-  composite<
-    transparent_unary_operator<thrust::logical_not<>>,
-    actor<Eval>
-  >
->
-operator!(const actor<Eval> &_1)
+template <typename Eval>
+THRUST_HOST_DEVICE actor<composite<transparent_unary_operator<thrust::logical_not<>>, actor<Eval>>>
+operator!(const actor<Eval>& _1)
 {
   return compose(transparent_unary_operator<thrust::logical_not<>>(), _1);
 } // end operator!()
 
-} // end functional
-} // end detail
+} // namespace functional
+} // namespace detail
 THRUST_NAMESPACE_END

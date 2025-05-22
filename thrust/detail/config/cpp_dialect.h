@@ -1,6 +1,6 @@
 /*
  *  Copyright 2020 NVIDIA Corporation
- *  Modifications Copyright (c) 2024, Advanced Micro Devices, Inc.  All rights reserved.
+ *  Modifications Copyright (c) 2024-2025, Advanced Micro Devices, Inc.  All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -35,17 +35,14 @@
 //   with C++03 and C++11 will still issue warnings.
 
 // Check for the CUB opt-outs as well:
-#if !defined(THRUST_IGNORE_DEPRECATED_CPP_DIALECT) && \
-     defined(CUB_IGNORE_DEPRECATED_CPP_DIALECT)
-#  define    THRUST_IGNORE_DEPRECATED_CPP_DIALECT
+#if !defined(THRUST_IGNORE_DEPRECATED_CPP_DIALECT) && defined(CUB_IGNORE_DEPRECATED_CPP_DIALECT)
+#  define THRUST_IGNORE_DEPRECATED_CPP_DIALECT
 #endif
-#if !defined(THRUST_IGNORE_DEPRECATED_CPP_11) && \
-     defined(CUB_IGNORE_DEPRECATED_CPP_11)
-#  define    THRUST_IGNORE_DEPRECATED_CPP_11
+#if !defined(THRUST_IGNORE_DEPRECATED_CPP_11) && defined(CUB_IGNORE_DEPRECATED_CPP_11)
+#  define THRUST_IGNORE_DEPRECATED_CPP_11
 #endif
-#if !defined(THRUST_IGNORE_DEPRECATED_COMPILER) && \
-     defined(CUB_IGNORE_DEPRECATED_COMPILER)
-#  define    THRUST_IGNORE_DEPRECATED_COMPILER
+#if !defined(THRUST_IGNORE_DEPRECATED_COMPILER) && defined(CUB_IGNORE_DEPRECATED_COMPILER)
+#  define THRUST_IGNORE_DEPRECATED_COMPILER
 #endif
 
 #ifdef THRUST_IGNORE_DEPRECATED_CPP_DIALECT
@@ -88,35 +85,37 @@
 
 // Define THRUST_COMPILER_DEPRECATION macro:
 #if THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC
-#  define THRUST_COMP_DEPR_IMPL(msg) \
-    __pragma(message(__FILE__ ":" THRUST_COMP_DEPR_IMPL0(__LINE__) ": warning: " #msg))
-#  define THRUST_COMP_DEPR_IMPL0(x) THRUST_COMP_DEPR_IMPL1(x)
-#  define THRUST_COMP_DEPR_IMPL1(x) #x
+#  define THRUST_COMP_DEPR_IMPL(msg) __pragma(message(__FILE__ ":" THRUST_COMP_DEPR_IMPL0(__LINE__) ": warning: " #msg))
+#  define THRUST_COMP_DEPR_IMPL0(x)  THRUST_COMP_DEPR_IMPL1(x)
+#  define THRUST_COMP_DEPR_IMPL1(x)  #x
 #else // clang / gcc:
-#  define THRUST_COMP_DEPR_IMPL(msg) THRUST_COMP_DEPR_IMPL0(GCC warning #msg)
+#  define THRUST_COMP_DEPR_IMPL(msg)   THRUST_COMP_DEPR_IMPL0(GCC warning #msg)
 #  define THRUST_COMP_DEPR_IMPL0(expr) _Pragma(#expr)
-#  define THRUST_COMP_DEPR_IMPL1 /* intentionally blank */
+#  define THRUST_COMP_DEPR_IMPL1       /* intentionally blank */
 #endif
 
 #define THRUST_COMPILER_DEPRECATION(REQ) \
-  THRUST_COMP_DEPR_IMPL(Thrust requires at least REQ. Define THRUST_IGNORE_DEPRECATED_COMPILER to suppress this message.)
+  THRUST_COMP_DEPR_IMPL(Thrust requires at least REQ.Define THRUST_IGNORE_DEPRECATED_COMPILER to suppress this message.)
 
-#define THRUST_COMPILER_DEPRECATION_SOFT(REQ, CUR) \
-  THRUST_COMP_DEPR_IMPL(Thrust requires at least REQ. CUR is deprecated but still supported. CUR support will be removed in a future release. Define THRUST_IGNORE_DEPRECATED_CPP_DIALECT to suppress this message.)
+#define THRUST_COMPILER_DEPRECATION_SOFT(REQ, CUR)                                                             \
+  THRUST_COMP_DEPR_IMPL(                                                                                       \
+    Thrust requires at least REQ.CUR is deprecated but still supported.CUR support will be removed in a future \
+      release.Define THRUST_IGNORE_DEPRECATED_CPP_DIALECT to suppress this message.)
 
 #ifndef THRUST_IGNORE_DEPRECATED_COMPILER
 
+// clang-format off
 // Compiler checks:
 #  if THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_GCC && THRUST_GCC_VERSION < 50000
-     THRUST_COMPILER_DEPRECATION(GCC 5.0);
+THRUST_COMPILER_DEPRECATION(GCC 5.0);
 #  elif THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_CLANG && THRUST_CLANG_VERSION < 70000
-     THRUST_COMPILER_DEPRECATION(Clang 7.0);
+THRUST_COMPILER_DEPRECATION(Clang 7.0);
 #  elif THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC && THRUST_MSVC_VERSION < 1910
-     // <2017. Hard upgrade message:
-     THRUST_COMPILER_DEPRECATION(MSVC 2019 (19.20/16.0/14.20));
+// <2017. Hard upgrade message:
+THRUST_COMPILER_DEPRECATION(MSVC 2019 (19.20/16.0/14.20));
 #  elif THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC && THRUST_MSVC_VERSION < 1920
-     // >=2017, <2019. Soft deprecation message:
-     THRUST_COMPILER_DEPRECATION_SOFT(MSVC 2019 (19.20/16.0/14.20), MSVC 2017);
+// >=2017, <2019. Soft deprecation message:
+THRUST_COMPILER_DEPRECATION_SOFT(MSVC 2019 (19.20/16.0/14.20), MSVC 2017);
 #  endif
 
 #endif // THRUST_IGNORE_DEPRECATED_COMPILER
@@ -125,12 +124,13 @@
 
 // Dialect checks:
 #  if THRUST_CPP_DIALECT < 2011
-     // <C++11. Hard upgrade message:
-     THRUST_COMPILER_DEPRECATION(C++14);
+// <C++11. Hard upgrade message:
+THRUST_COMPILER_DEPRECATION(C++14);
 #  elif THRUST_CPP_DIALECT == 2011 && !defined(THRUST_IGNORE_DEPRECATED_CPP_11)
-     // =C++11. Soft upgrade message:
-     THRUST_COMPILER_DEPRECATION_SOFT(C++14, C++11);
+// =C++11. Soft upgrade message:
+THRUST_COMPILER_DEPRECATION_SOFT(C++14, C++11);
 #  endif
+// clang-format on
 
 #endif // THRUST_IGNORE_DEPRECATED_DIALECT
 

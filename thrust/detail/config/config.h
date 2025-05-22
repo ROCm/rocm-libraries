@@ -22,7 +22,7 @@
 
 #if !defined(__HIP__)
 // For _CCCL_IMPLICIT_SYSTEM_HEADER
-#include <cuda/__cccl_config>
+#  include <cuda/__cccl_config>
 #endif
 
 // NOTE: The order of these #includes matters.
@@ -33,12 +33,12 @@
 #include <thrust/detail/config/deprecated.h>
 #include <thrust/detail/config/simple_defines.h>
 // host_system.h & device_system.h must be #included as early as possible because other config headers depend on it
+#include <thrust/detail/config/host_device.h>
 #include <thrust/detail/config/host_system.h>
 
 #include <thrust/detail/config/device_system.h>
-#include <thrust/detail/config/execution_space.h>
 #include <thrust/detail/config/diagnostic.h>
-#include <thrust/detail/config/host_device.h>
+#include <thrust/detail/config/execution_space.h>
 #include <thrust/detail/config/forceinline.h>
 #include <thrust/detail/config/global_workarounds.h>
 #include <thrust/detail/config/namespace.h>

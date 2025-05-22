@@ -25,288 +25,267 @@ TESTS_DEFINE(SortByKeyTests, FullTestsParams);
 TESTS_DEFINE(SortByKeyPrimitiveTests, NumericalTestsParams);
 
 template <typename RandomAccessIterator1, typename RandomAccessIterator2>
-void sort_by_key(my_system& system,
-                 RandomAccessIterator1,
-                 RandomAccessIterator1,
-                 RandomAccessIterator2)
+void sort_by_key(my_system& system, RandomAccessIterator1, RandomAccessIterator1, RandomAccessIterator2)
 {
-    system.validate_dispatch();
+  system.validate_dispatch();
 }
 
 TEST(SortByKeyTests, TestSortByKeyDispatchExplicit)
 {
-    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    thrust::device_vector<int> vec(1);
+  thrust::device_vector<int> vec(1);
 
-    my_system sys(0);
-    thrust::sort_by_key(sys, vec.begin(), vec.begin(), vec.begin());
+  my_system sys(0);
+  thrust::sort_by_key(sys, vec.begin(), vec.begin(), vec.begin());
 
-    ASSERT_EQ(true, sys.is_valid());
+  ASSERT_EQ(true, sys.is_valid());
 }
 
 template <typename RandomAccessIterator1, typename RandomAccessIterator2>
-void sort_by_key(my_tag,
-                 RandomAccessIterator1 keys_first,
-                 RandomAccessIterator1,
-                 RandomAccessIterator2)
+void sort_by_key(my_tag, RandomAccessIterator1 keys_first, RandomAccessIterator1, RandomAccessIterator2)
 {
-    *keys_first = 13;
+  *keys_first = 13;
 }
 
 TEST(SortByKeyTests, TestSortByKeyDispatchImplicit)
 {
-    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    thrust::device_vector<int> vec(1);
+  thrust::device_vector<int> vec(1);
 
-    thrust::sort_by_key(thrust::retag<my_tag>(vec.begin()),
-                        thrust::retag<my_tag>(vec.begin()),
-                        thrust::retag<my_tag>(vec.begin()));
+  thrust::sort_by_key(
+    thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.begin()));
 
-    ASSERT_EQ(13, vec.front());
+  ASSERT_EQ(13, vec.front());
 }
 
 template <class Vector>
-void InitializeSimpleKeyValueSortTest(Vector& unsorted_keys,
-                                      Vector& unsorted_values,
-                                      Vector& sorted_keys,
-                                      Vector& sorted_values)
+void InitializeSimpleKeyValueSortTest(
+  Vector& unsorted_keys, Vector& unsorted_values, Vector& sorted_keys, Vector& sorted_values)
 {
-    using T = typename Vector::value_type;
+  using T = typename Vector::value_type;
 
-    unsorted_keys.resize(7);
-    unsorted_values.resize(7);
-    unsorted_keys[0]   = T(1);
-    unsorted_values[0] = T(0);
-    unsorted_keys[1]   = T(3);
-    unsorted_values[1] = T(1);
-    unsorted_keys[2]   = T(6);
-    unsorted_values[2] = T(2);
-    unsorted_keys[3]   = T(5);
-    unsorted_values[3] = T(3);
-    unsorted_keys[4]   = T(2);
-    unsorted_values[4] = T(4);
-    unsorted_keys[5]   = T(0);
-    unsorted_values[5] = T(5);
-    unsorted_keys[6]   = T(4);
-    unsorted_values[6] = T(6);
+  unsorted_keys.resize(7);
+  unsorted_values.resize(7);
+  unsorted_keys[0]   = T(1);
+  unsorted_values[0] = T(0);
+  unsorted_keys[1]   = T(3);
+  unsorted_values[1] = T(1);
+  unsorted_keys[2]   = T(6);
+  unsorted_values[2] = T(2);
+  unsorted_keys[3]   = T(5);
+  unsorted_values[3] = T(3);
+  unsorted_keys[4]   = T(2);
+  unsorted_values[4] = T(4);
+  unsorted_keys[5]   = T(0);
+  unsorted_values[5] = T(5);
+  unsorted_keys[6]   = T(4);
+  unsorted_values[6] = T(6);
 
-    sorted_keys.resize(7);
-    sorted_values.resize(7);
-    sorted_keys[0]   = T(0);
-    sorted_values[1] = T(0);
-    sorted_keys[1]   = T(1);
-    sorted_values[3] = T(1);
-    sorted_keys[2]   = T(2);
-    sorted_values[6] = T(2);
-    sorted_keys[3]   = T(3);
-    sorted_values[5] = T(3);
-    sorted_keys[4]   = T(4);
-    sorted_values[2] = T(4);
-    sorted_keys[5]   = T(5);
-    sorted_values[0] = T(5);
-    sorted_keys[6]   = T(6);
-    sorted_values[4] = T(6);
+  sorted_keys.resize(7);
+  sorted_values.resize(7);
+  sorted_keys[0]   = T(0);
+  sorted_values[1] = T(0);
+  sorted_keys[1]   = T(1);
+  sorted_values[3] = T(1);
+  sorted_keys[2]   = T(2);
+  sorted_values[6] = T(2);
+  sorted_keys[3]   = T(3);
+  sorted_values[5] = T(3);
+  sorted_keys[4]   = T(4);
+  sorted_values[2] = T(4);
+  sorted_keys[5]   = T(5);
+  sorted_values[0] = T(5);
+  sorted_keys[6]   = T(6);
+  sorted_values[4] = T(6);
 }
 
 TYPED_TEST(SortByKeyTests, TestSortByKeySimple)
 {
-    using Vector = typename TestFixture::input_type;
-    using Policy = typename TestFixture::execution_policy;
+  using Vector = typename TestFixture::input_type;
+  using Policy = typename TestFixture::execution_policy;
 
-    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    Vector unsorted_keys, unsorted_values;
-    Vector sorted_keys, sorted_values;
+  Vector unsorted_keys, unsorted_values;
+  Vector sorted_keys, sorted_values;
 
-    InitializeSimpleKeyValueSortTest(unsorted_keys, unsorted_values, sorted_keys, sorted_values);
+  InitializeSimpleKeyValueSortTest(unsorted_keys, unsorted_values, sorted_keys, sorted_values);
 
-    thrust::sort_by_key(Policy{}, unsorted_keys.begin(), unsorted_keys.end(), unsorted_values.begin());
+  thrust::sort_by_key(Policy{}, unsorted_keys.begin(), unsorted_keys.end(), unsorted_values.begin());
 
-    ASSERT_EQ(unsorted_keys, sorted_keys);
-    ASSERT_EQ(unsorted_values, sorted_values);
+  ASSERT_EQ(unsorted_keys, sorted_keys);
+  ASSERT_EQ(unsorted_values, sorted_values);
 }
 
 TYPED_TEST(SortByKeyPrimitiveTests, TestSortAscendingKeyValue)
 {
-    using T = typename TestFixture::input_type;
+  using T = typename TestFixture::input_type;
 
-    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    for(auto size : get_sizes())
+  for (auto size : get_sizes())
+  {
+    SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+    for (auto seed : get_seeds())
     {
-        SCOPED_TRACE(testing::Message() << "with size= " << size);
+      SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
-        for(auto seed : get_seeds())
-        {
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+      thrust::host_vector<T> h_keys =
+        get_random_data<T>(size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
 
-            thrust::host_vector<T> h_keys = get_random_data<T>(
-                size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
+      thrust::device_vector<T> d_keys = h_keys;
 
-            thrust::device_vector<T> d_keys = h_keys;
+      thrust::host_vector<T> h_values   = h_keys;
+      thrust::device_vector<T> d_values = d_keys;
 
-            thrust::host_vector<T>   h_values = h_keys;
-            thrust::device_vector<T> d_values = d_keys;
+      thrust::sort_by_key(h_keys.begin(), h_keys.end(), h_values.begin(), thrust::less<T>());
+      thrust::sort_by_key(d_keys.begin(), d_keys.end(), d_values.begin(), thrust::less<T>());
 
-            thrust::sort_by_key(h_keys.begin(), h_keys.end(), h_values.begin(), thrust::less<T>());
-            thrust::sort_by_key(d_keys.begin(), d_keys.end(), d_values.begin(), thrust::less<T>());
-
-            ASSERT_EQ(h_keys, d_keys);
-            ASSERT_EQ(h_values, d_values);
-        }
+      ASSERT_EQ(h_keys, d_keys);
+      ASSERT_EQ(h_values, d_values);
     }
+  }
 }
 
 TEST(SortByKeyTests, TestSortDescendingKeyValue)
 {
-    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    for(auto size : get_sizes())
+  for (auto size : get_sizes())
+  {
+    SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+    for (auto seed : get_seeds())
     {
-        SCOPED_TRACE(testing::Message() << "with size= " << size);
+      SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
-        for(auto seed : get_seeds())
-        {
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+      thrust::host_vector<int> h_keys =
+        get_random_data<int>(size, std::numeric_limits<int>::min(), std::numeric_limits<int>::max(), seed);
 
-            thrust::host_vector<int> h_keys = get_random_data<int>(
-                size, std::numeric_limits<int>::min(), std::numeric_limits<int>::max(), seed);
+      thrust::device_vector<int> d_keys = h_keys;
 
-            thrust::device_vector<int> d_keys = h_keys;
+      thrust::host_vector<int> h_values   = h_keys;
+      thrust::device_vector<int> d_values = d_keys;
 
-            thrust::host_vector<int>   h_values = h_keys;
-            thrust::device_vector<int> d_values = d_keys;
+      thrust::sort_by_key(h_keys.begin(), h_keys.end(), h_values.begin(), thrust::greater<int>());
+      thrust::sort_by_key(d_keys.begin(), d_keys.end(), d_values.begin(), thrust::greater<int>());
 
-            thrust::sort_by_key(
-                h_keys.begin(), h_keys.end(), h_values.begin(), thrust::greater<int>());
-            thrust::sort_by_key(
-                d_keys.begin(), d_keys.end(), d_values.begin(), thrust::greater<int>());
-
-            ASSERT_EQ(h_keys, d_keys);
-            ASSERT_EQ(h_values, d_values);
-        }
+      ASSERT_EQ(h_keys, d_keys);
+      ASSERT_EQ(h_values, d_values);
     }
+  }
 }
 
 TEST(SortByKeyTests, TestSortByKeyBool)
 {
-    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    for(auto size : { 10027 })
+  for (auto size : {10027})
+  {
+    SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+    for (auto seed : get_seeds())
     {
-        SCOPED_TRACE(testing::Message() << "with size= " << size);
+      SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
-        for(auto seed : get_seeds())
-        {
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+      thrust::host_vector<bool> h_keys =
+        get_random_data<bool>(size, std::numeric_limits<bool>::min(), std::numeric_limits<bool>::max(), seed);
 
-            thrust::host_vector<bool> h_keys = get_random_data<bool>(
-                size, std::numeric_limits<bool>::min(), std::numeric_limits<bool>::max(), seed);
+      thrust::host_vector<int> h_values = get_random_data<int>(
+        size, std::numeric_limits<int>::min(), std::numeric_limits<int>::max(), seed + seed_value_addition);
 
-            thrust::host_vector<int> h_values = get_random_data<int>(
-                size,
-                std::numeric_limits<int>::min(),
-                std::numeric_limits<int>::max(),
-                seed + seed_value_addition
-            );
+      thrust::device_vector<bool> d_keys  = h_keys;
+      thrust::device_vector<int> d_values = h_values;
 
-            thrust::device_vector<bool> d_keys   = h_keys;
-            thrust::device_vector<int>  d_values = h_values;
+      thrust::sort_by_key(h_keys.begin(), h_keys.end(), h_values.begin());
+      thrust::sort_by_key(d_keys.begin(), d_keys.end(), d_values.begin());
 
-            thrust::sort_by_key(h_keys.begin(), h_keys.end(), h_values.begin());
-            thrust::sort_by_key(d_keys.begin(), d_keys.end(), d_values.begin());
-
-            ASSERT_EQ(h_keys, d_keys);
-            ASSERT_EQ(h_values, d_values);
-        }
+      ASSERT_EQ(h_keys, d_keys);
+      ASSERT_EQ(h_values, d_values);
     }
+  }
 }
 
 TEST(SortByKeyTests, TestSortByKeyBoolDescending)
 {
-    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    for(auto size : std::vector<size_t>{ 10027 })
+  for (auto size : std::vector<size_t>{10027})
+  {
+    SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+    for (auto seed : get_seeds())
     {
-        SCOPED_TRACE(testing::Message() << "with size= " << size);
+      SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
-        for(auto seed : get_seeds())
-        {
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+      thrust::host_vector<bool> h_keys =
+        get_random_data<bool>(size, std::numeric_limits<bool>::min(), std::numeric_limits<bool>::max(), seed);
 
-            thrust::host_vector<bool> h_keys = get_random_data<bool>(
-                size, std::numeric_limits<bool>::min(), std::numeric_limits<bool>::max(), seed);
+      thrust::host_vector<int> h_values =
+        get_random_data<int>(size, std::numeric_limits<int>::min(), std::numeric_limits<int>::max(), seed);
 
-            thrust::host_vector<int> h_values = get_random_data<int>(
-                size, std::numeric_limits<int>::min(), std::numeric_limits<int>::max(), seed);
+      thrust::device_vector<bool> d_keys  = h_keys;
+      thrust::device_vector<int> d_values = h_values;
 
-            thrust::device_vector<bool> d_keys   = h_keys;
-            thrust::device_vector<int>  d_values = h_values;
+      thrust::sort_by_key(h_keys.begin(), h_keys.end(), h_values.begin(), thrust::greater<bool>());
+      thrust::sort_by_key(d_keys.begin(), d_keys.end(), d_values.begin(), thrust::greater<bool>());
 
-            thrust::sort_by_key(
-                h_keys.begin(), h_keys.end(), h_values.begin(), thrust::greater<bool>());
-            thrust::sort_by_key(
-                d_keys.begin(), d_keys.end(), d_values.begin(), thrust::greater<bool>());
-
-            ASSERT_EQ(h_keys, d_keys);
-            ASSERT_EQ(h_values, d_values);
-        }
+      ASSERT_EQ(h_keys, d_keys);
+      ASSERT_EQ(h_values, d_values);
     }
+  }
 }
 
 #ifndef _WIN32
-__global__
-THRUST_HIP_LAUNCH_BOUNDS_DEFAULT
-void SortByKeyKernel(int const N, int* keys, short* values)
+__global__ THRUST_HIP_LAUNCH_BOUNDS_DEFAULT void SortByKeyKernel(int const N, int* keys, short* values)
 {
-    if(threadIdx.x == 0)
-    {
-        thrust::device_ptr<int>   keys_begin(keys);
-        thrust::device_ptr<int>   keys_end(keys + N);
-        thrust::device_ptr<short> val(values);
-        thrust::sort_by_key(thrust::hip::par, keys_begin, keys_end, val);
-    }
+  if (threadIdx.x == 0)
+  {
+    thrust::device_ptr<int> keys_begin(keys);
+    thrust::device_ptr<int> keys_end(keys + N);
+    thrust::device_ptr<short> val(values);
+    thrust::sort_by_key(thrust::hip::par, keys_begin, keys_end, val);
+  }
 }
 
 TEST(SortByKeyTests, TestSortByKeyDevice)
 {
-    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    for (auto size: get_sizes() )
+  for (auto size : get_sizes())
+  {
+    SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+    for (auto seed : get_seeds())
     {
-        SCOPED_TRACE(testing::Message() << "with size= " << size);
+      SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
-        for(auto seed : get_seeds())
-        {
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+      thrust::host_vector<int> h_keys = get_random_data<int>(size, 0, size, seed);
 
-            thrust::host_vector<int> h_keys = get_random_data<int>(size, 0, size, seed);
+      thrust::host_vector<short> h_values =
+        get_random_data<short>(size, std::numeric_limits<short>::min(), std::numeric_limits<short>::max(), seed);
 
-            thrust::host_vector<short> h_values
-                = get_random_data<short>(size,
-                                         std::numeric_limits<short>::min(),
-                                         std::numeric_limits<short>::max(),
-                                         seed);
+      thrust::device_vector<int> d_keys     = h_keys;
+      thrust::device_vector<short> d_values = h_values;
 
-            thrust::device_vector<int>   d_keys   = h_keys;
-            thrust::device_vector<short> d_values = h_values;
+      thrust::sort_by_key(h_keys.begin(), h_keys.end(), h_values.begin());
+      hipLaunchKernelGGL(
+        SortByKeyKernel,
+        dim3(1, 1, 1),
+        dim3(128, 1, 1),
+        0,
+        0,
+        size,
+        thrust::raw_pointer_cast(&d_keys[0]),
+        thrust::raw_pointer_cast(&d_values[0]));
 
-            thrust::sort_by_key(h_keys.begin(), h_keys.end(), h_values.begin());
-            hipLaunchKernelGGL(SortByKeyKernel,
-                               dim3(1, 1, 1),
-                               dim3(128, 1, 1),
-                               0,
-                               0,
-                               size,
-                               thrust::raw_pointer_cast(&d_keys[0]),
-                               thrust::raw_pointer_cast(&d_values[0]));
-
-            ASSERT_EQ(h_keys, d_keys);
-            // Only keys are compared here, the sequential stable_merge_sort that's used in
-            // CUDA and HIP don't generate the correct value sorting
-        }
+      ASSERT_EQ(h_keys, d_keys);
+      // Only keys are compared here, the sequential stable_merge_sort that's used in
+      // CUDA and HIP don't generate the correct value sorting
     }
+  }
 }
 #endif

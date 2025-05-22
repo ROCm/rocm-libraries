@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -27,37 +27,38 @@
 #include <hip/hip_runtime.h>
 
 THRUST_NAMESPACE_BEGIN
-namespace system { namespace hip { namespace detail {
+namespace system
+{
+namespace hip
+{
+namespace detail
+{
 template <typename T,
           typename U,
-          std::enable_if_t<thrust::detail::is_integral<T>::value && std::is_unsigned<U>::value, int>
-          = 0>
+          std::enable_if_t<thrust::detail::is_integral<T>::value && std::is_unsigned<U>::value, int> = 0>
 THRUST_HOST_DEVICE inline constexpr auto ceiling_div(const T a, const U b)
 {
-    return a / b + (a % b > 0 ? 1 : 0);
+  return a / b + (a % b > 0 ? 1 : 0);
 }
 
 THRUST_HOST_DEVICE inline size_t align_size(size_t size, size_t alignment = 256)
 {
-    return ceiling_div(size, alignment) * alignment;
+  return ceiling_div(size, alignment) * alignment;
 }
 
 template <class Tuple, class Function, size_t... Indices>
-THRUST_HOST_DEVICE inline void
-apply_to_each_in_tuple_impl(Tuple&& t, Function&& f, thrust::index_sequence<Indices...>)
+THRUST_HOST_DEVICE inline void apply_to_each_in_tuple_impl(Tuple&& t, Function&& f, thrust::index_sequence<Indices...>)
 {
-    int swallow[]
-        = {(std::forward<Function>(f)(thrust::get<Indices>(std::forward<Tuple>(t))), 0)...};
-    (void)swallow;
+  int swallow[] = {(std::forward<Function>(f)(thrust::get<Indices>(std::forward<Tuple>(t))), 0)...};
+  (void) swallow;
 }
 
 template <class Tuple, class Function>
 THRUST_HOST_DEVICE inline auto apply_to_each_in_tuple(Tuple&& t, Function&& f)
-    -> void_t<tuple_size<std::remove_reference_t<Tuple>>>
+  -> void_t<tuple_size<std::remove_reference_t<Tuple>>>
 {
-    static constexpr size_t size = tuple_size<std::remove_reference_t<Tuple>>::value;
-    apply_to_each_in_tuple_impl(
-        std::forward<Tuple>(t), std::forward<Function>(f), thrust::make_index_sequence<size>());
+  static constexpr size_t size = tuple_size<std::remove_reference_t<Tuple>>::value;
+  apply_to_each_in_tuple_impl(std::forward<Tuple>(t), std::forward<Function>(f), thrust::make_index_sequence<size>());
 }
 
 } // end namespace detail

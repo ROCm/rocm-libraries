@@ -18,85 +18,59 @@
 
 #include <thrust/detail/config.h>
 
-#include <tuple>
-
 #include <thrust/detail/execute_with_dependencies.h>
+
+#include <tuple>
 
 THRUST_NAMESPACE_BEGIN
 
 namespace detail
 {
 
-template<template<typename> class ExecutionPolicyCRTPBase>
+template <template <typename> class ExecutionPolicyCRTPBase>
 struct dependencies_aware_execution_policy
 {
-    template<typename ...Dependencies>
-    THRUST_HOST
-    thrust::detail::execute_with_dependencies<
-        ExecutionPolicyCRTPBase,
-        Dependencies...
-    >
-    after(Dependencies&& ...dependencies) const
-    {
-        return { capture_as_dependency(THRUST_FWD(dependencies))... };
-    }
+  template <typename... Dependencies>
+  THRUST_HOST thrust::detail::execute_with_dependencies<ExecutionPolicyCRTPBase, Dependencies...>
+  after(Dependencies&&... dependencies) const
+  {
+    return {capture_as_dependency(THRUST_FWD(dependencies))...};
+  }
 
-    template<typename ...Dependencies>
-    THRUST_HOST
-    thrust::detail::execute_with_dependencies<
-        ExecutionPolicyCRTPBase,
-        Dependencies...
-    >
-    after(std::tuple<Dependencies...>& dependencies) const
-    {
-        return { capture_as_dependency(dependencies) };
-    }
-    template<typename ...Dependencies>
-    THRUST_HOST
-    thrust::detail::execute_with_dependencies<
-        ExecutionPolicyCRTPBase,
-        Dependencies...
-    >
-    after(std::tuple<Dependencies...>&& dependencies) const
-    {
-        return { capture_as_dependency(std::move(dependencies)) };
-    }
+  template <typename... Dependencies>
+  THRUST_HOST thrust::detail::execute_with_dependencies<ExecutionPolicyCRTPBase, Dependencies...>
+  after(std::tuple<Dependencies...>& dependencies) const
+  {
+    return {capture_as_dependency(dependencies)};
+  }
+  template <typename... Dependencies>
+  THRUST_HOST thrust::detail::execute_with_dependencies<ExecutionPolicyCRTPBase, Dependencies...>
+  after(std::tuple<Dependencies...>&& dependencies) const
+  {
+    return {capture_as_dependency(std::move(dependencies))};
+  }
 
-    template<typename ...Dependencies>
-    THRUST_HOST
-    thrust::detail::execute_with_dependencies<
-        ExecutionPolicyCRTPBase,
-        Dependencies...
-    >
-    rebind_after(Dependencies&& ...dependencies) const
-    {
-        return { capture_as_dependency(THRUST_FWD(dependencies))... };
-    }
+  template <typename... Dependencies>
+  THRUST_HOST thrust::detail::execute_with_dependencies<ExecutionPolicyCRTPBase, Dependencies...>
+  rebind_after(Dependencies&&... dependencies) const
+  {
+    return {capture_as_dependency(THRUST_FWD(dependencies))...};
+  }
 
-    template<typename ...Dependencies>
-    THRUST_HOST
-    thrust::detail::execute_with_dependencies<
-        ExecutionPolicyCRTPBase,
-        Dependencies...
-    >
-    rebind_after(std::tuple<Dependencies...>& dependencies) const
-    {
-        return { capture_as_dependency(dependencies) };
-    }
-    template<typename ...Dependencies>
-    THRUST_HOST
-    thrust::detail::execute_with_dependencies<
-        ExecutionPolicyCRTPBase,
-        Dependencies...
-    >
-    rebind_after(std::tuple<Dependencies...>&& dependencies) const
-    {
-        return { capture_as_dependency(std::move(dependencies)) };
-    }
+  template <typename... Dependencies>
+  THRUST_HOST thrust::detail::execute_with_dependencies<ExecutionPolicyCRTPBase, Dependencies...>
+  rebind_after(std::tuple<Dependencies...>& dependencies) const
+  {
+    return {capture_as_dependency(dependencies)};
+  }
+  template <typename... Dependencies>
+  THRUST_HOST thrust::detail::execute_with_dependencies<ExecutionPolicyCRTPBase, Dependencies...>
+  rebind_after(std::tuple<Dependencies...>&& dependencies) const
+  {
+    return {capture_as_dependency(std::move(dependencies))};
+  }
 };
 
-} // end detail
+} // namespace detail
 
 THRUST_NAMESPACE_END
-
-

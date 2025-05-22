@@ -20,4 +20,3 @@
 
 // this system inherits merge
 #include <thrust/system/detail/sequential/merge.h>
-

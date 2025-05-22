@@ -21,13 +21,17 @@
 #pragma once
 
 #include <thrust/detail/config.h>
-#include <type_traits>
-#include <thrust/system/cpp/detail/execution_policy.h>
+
 #include <thrust/detail/pointer.h>
 #include <thrust/detail/reference.h>
+#include <thrust/system/cpp/detail/execution_policy.h>
+
+#include <type_traits>
 
 THRUST_NAMESPACE_BEGIN
-namespace system { namespace cpp
+namespace system
+{
+namespace cpp
 {
 
 /*! \p cpp::pointer stores a pointer to an object allocated in memory accessible
@@ -53,11 +57,7 @@ namespace system { namespace cpp
  *  \see raw_pointer_cast
  */
 template <typename T>
-using pointer = thrust::pointer<
-  T,
-  thrust::system::cpp::tag,
-  thrust::tagged_reference<T, thrust::system::cpp::tag>
->;
+using pointer = thrust::pointer<T, thrust::system::cpp::tag, thrust::tagged_reference<T, thrust::system::cpp::tag>>;
 
 /*! \p cpp::universal_pointer stores a pointer to an object allocated in memory
  * accessible by the \p cpp system and host systems.
@@ -82,11 +82,7 @@ using pointer = thrust::pointer<
  *  \see raw_pointer_cast
  */
 template <typename T>
-using universal_pointer = thrust::pointer<
-  T,
-  thrust::system::cpp::tag,
-  typename std::add_lvalue_reference<T>::type
->;
+using universal_pointer = thrust::pointer<T, thrust::system::cpp::tag, typename std::add_lvalue_reference<T>::type>;
 
 /*! \p reference is a wrapped reference to an object stored in memory available
  *  to the \p cpp system. \p reference is the type of the result of
@@ -97,7 +93,8 @@ using universal_pointer = thrust::pointer<
 template <typename T>
 using reference = thrust::reference<T, thrust::system::cpp::tag>;
 
-}} // namespace system::cpp
+} // namespace cpp
+} // namespace system
 
 /*! \addtogroup system_backends Systems
  *  \ingroup system
@@ -109,9 +106,8 @@ using reference = thrust::reference<T, thrust::system::cpp::tag>;
 namespace cpp
 {
 using thrust::system::cpp::pointer;
-using thrust::system::cpp::universal_pointer;
 using thrust::system::cpp::reference;
+using thrust::system::cpp::universal_pointer;
 } // namespace cpp
 
 THRUST_NAMESPACE_END
-

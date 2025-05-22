@@ -30,79 +30,63 @@ TESTS_DEFINE(ZipIteratorStableSortByKeyTests, TestParams);
 
 TYPED_TEST(ZipIteratorStableSortByKeyTests, TestZipIteratorStableSort)
 {
-    using T = typename TestFixture::input_type;
+  using T = typename TestFixture::input_type;
 
-    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    for(auto size : get_sizes())
+  for (auto size : get_sizes())
+  {
+    SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+    for (auto seed : get_seeds())
     {
-        SCOPED_TRACE(testing::Message() << "with size= " << size);
+      SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
-        for(auto seed : get_seeds())
-        {
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+      thrust::host_vector<T> h1 =
+        get_random_data<T>(size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
+      thrust::host_vector<T> h2 = get_random_data<T>(
+        size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed + seed_value_addition);
+      thrust::host_vector<T> h3 = get_random_data<T>(
+        size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed + 2 * seed_value_addition);
+      thrust::host_vector<T> h4 = get_random_data<T>(
+        size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed + 3 * +seed_value_addition);
 
-            thrust::host_vector<T> h1 = get_random_data<T>(
-                size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
-            thrust::host_vector<T> h2 = get_random_data<T>(
-                size,
-                get_default_limits<T>::min(),
-                get_default_limits<T>::max(),
-                seed + seed_value_addition
-            );
-            thrust::host_vector<T> h3 = get_random_data<T>(
-                size,
-                get_default_limits<T>::min(),
-                get_default_limits<T>::max(),
-                seed + 2 * seed_value_addition
-            );
-            thrust::host_vector<T> h4 = get_random_data<T>(
-                size,
-                get_default_limits<T>::min(),
-                get_default_limits<T>::max(),
-                seed + 3 *  + seed_value_addition
-            );
+      thrust::device_vector<T> d1 = h1;
+      thrust::device_vector<T> d2 = h2;
+      thrust::device_vector<T> d3 = h3;
+      thrust::device_vector<T> d4 = h4;
 
-            thrust::device_vector<T> d1 = h1;
-            thrust::device_vector<T> d2 = h2;
-            thrust::device_vector<T> d3 = h3;
-            thrust::device_vector<T> d4 = h4;
+      // sort with (tuple, scalar)
+      thrust::stable_sort_by_key(thrust::make_zip_iterator(thrust::make_tuple(h1.begin(), h2.begin())),
+                                 thrust::make_zip_iterator(thrust::make_tuple(h1.end(), h2.end())),
+                                 h3.begin());
+      thrust::stable_sort_by_key(thrust::make_zip_iterator(thrust::make_tuple(d1.begin(), d2.begin())),
+                                 thrust::make_zip_iterator(thrust::make_tuple(d1.end(), d2.end())),
+                                 d3.begin());
 
-            // sort with (tuple, scalar)
-            thrust::stable_sort_by_key(
-                thrust::make_zip_iterator(thrust::make_tuple(h1.begin(), h2.begin())),
-                thrust::make_zip_iterator(thrust::make_tuple(h1.end(), h2.end())),
-                h3.begin());
-            thrust::stable_sort_by_key(
-                thrust::make_zip_iterator(thrust::make_tuple(d1.begin(), d2.begin())),
-                thrust::make_zip_iterator(thrust::make_tuple(d1.end(), d2.end())),
-                d3.begin());
+      ASSERT_EQ_QUIET(h1, d1);
+      ASSERT_EQ_QUIET(h2, d2);
+      ASSERT_EQ_QUIET(h3, d3);
+      ASSERT_EQ_QUIET(h4, d4);
 
-            ASSERT_EQ_QUIET(h1, d1);
-            ASSERT_EQ_QUIET(h2, d2);
-            ASSERT_EQ_QUIET(h3, d3);
-            ASSERT_EQ_QUIET(h4, d4);
+      // sort with (scalar, tuple)
+      thrust::stable_sort_by_key(
+        h1.begin(), h1.end(), thrust::make_zip_iterator(thrust::make_tuple(h3.begin(), h4.begin())));
+      thrust::stable_sort_by_key(
+        d1.begin(), d1.end(), thrust::make_zip_iterator(thrust::make_tuple(d3.begin(), d4.begin())));
 
-            // sort with (scalar, tuple)
-            thrust::stable_sort_by_key(
-                h1.begin(), h1.end(), thrust::make_zip_iterator(thrust::make_tuple(h3.begin(), h4.begin())));
-            thrust::stable_sort_by_key(
-                d1.begin(), d1.end(), thrust::make_zip_iterator(thrust::make_tuple(d3.begin(), d4.begin())));
+      // sort with (tuple, tuple)
+      thrust::stable_sort_by_key(thrust::make_zip_iterator(thrust::make_tuple(h1.begin(), h2.begin())),
+                                 thrust::make_zip_iterator(thrust::make_tuple(h1.end(), h2.end())),
+                                 thrust::make_zip_iterator(thrust::make_tuple(h3.begin(), h4.begin())));
+      thrust::stable_sort_by_key(thrust::make_zip_iterator(thrust::make_tuple(d1.begin(), d2.begin())),
+                                 thrust::make_zip_iterator(thrust::make_tuple(d1.end(), d2.end())),
+                                 thrust::make_zip_iterator(thrust::make_tuple(d3.begin(), d4.begin())));
 
-            // sort with (tuple, tuple)
-            thrust::stable_sort_by_key(
-                thrust::make_zip_iterator(thrust::make_tuple(h1.begin(), h2.begin())),
-                thrust::make_zip_iterator(thrust::make_tuple(h1.end(), h2.end())),
-                thrust::make_zip_iterator(thrust::make_tuple(h3.begin(), h4.begin())));
-            thrust::stable_sort_by_key(
-                thrust::make_zip_iterator(thrust::make_tuple(d1.begin(), d2.begin())),
-                thrust::make_zip_iterator(thrust::make_tuple(d1.end(), d2.end())),
-                thrust::make_zip_iterator(thrust::make_tuple(d3.begin(), d4.begin())));
-
-            ASSERT_EQ_QUIET(h1, d1);
-            ASSERT_EQ_QUIET(h2, d2);
-            ASSERT_EQ_QUIET(h3, d3);
-            ASSERT_EQ_QUIET(h4, d4);
-        }
+      ASSERT_EQ_QUIET(h1, d1);
+      ASSERT_EQ_QUIET(h2, d2);
+      ASSERT_EQ_QUIET(h3, d3);
+      ASSERT_EQ_QUIET(h4, d4);
     }
+  }
 }

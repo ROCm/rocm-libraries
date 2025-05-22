@@ -27,7 +27,6 @@
 
 #pragma once
 
-#include <thrust/detail/cpp14_required.h>
-
+#include <thrust/detail/cpp_version_check.h>
 #include <thrust/system/cuda/detail/async/exclusive_scan.h>
 #include <thrust/system/cuda/detail/async/inclusive_scan.h>

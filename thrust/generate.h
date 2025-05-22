@@ -14,7 +14,6 @@
  *  limitations under the License.
  */
 
-
 /*! \file generate.h
  *  \brief Fills a range with values "generated" from a function of no arguments
  */
@@ -22,6 +21,7 @@
 #pragma once
 
 #include <thrust/detail/config.h>
+
 #include <thrust/detail/execution_policy.h>
 
 THRUST_NAMESPACE_BEGIN
@@ -29,7 +29,6 @@ THRUST_NAMESPACE_BEGIN
 /*! \addtogroup transformations
  *  \{
  */
-
 
 /*! \p generate assigns the result of invoking \p gen, a function object that takes no arguments,
  *  to each element in the range <tt>[first,last)</tt>.
@@ -43,10 +42,10 @@ THRUST_NAMESPACE_BEGIN
  *             elements in the range <tt>[first,last)</tt>.
  *
  *  \tparam DerivedPolicy The name of the derived execution policy.
- *  \tparam ForwardIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward Iterator</a>,
- *          and \p ForwardIterator is mutable.
- *  \tparam Generator is a model of <a href="https://en.cppreference.com/w/cpp/utility/functional">Generator</a>,
- *          and \p Generator's \c result_type is convertible to \p ForwardIterator's \c value_type.
+ *  \tparam ForwardIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward
+ * Iterator</a>, and \p ForwardIterator is mutable. \tparam Generator is a model of <a
+ * href="https://en.cppreference.com/w/cpp/utility/functional">Generator</a>, and \p Generator's \c result_type is
+ * convertible to \p ForwardIterator's \c value_type.
  *
  *  The following code snippet demonstrates how to fill a \c host_vector with random numbers,
  *  using the standard C library function \c rand using the \p thrust::host execution policy for parallelization:
@@ -67,15 +66,12 @@ THRUST_NAMESPACE_BEGIN
  *  \see generate_n
  *  \see https://en.cppreference.com/w/cpp/algorithm/generate
  */
-template<typename DerivedPolicy,
-         typename ForwardIterator,
-         typename Generator>
-THRUST_HOST_DEVICE
-  void generate(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
-                ForwardIterator first,
-                ForwardIterator last,
-                Generator gen);
-
+template <typename DerivedPolicy, typename ForwardIterator, typename Generator>
+THRUST_HOST_DEVICE void
+generate(const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
+         ForwardIterator first,
+         ForwardIterator last,
+         Generator gen);
 
 /*! \p generate assigns the result of invoking \p gen, a function object that takes no arguments,
  *  to each element in the range <tt>[first,last)</tt>.
@@ -85,10 +81,10 @@ THRUST_HOST_DEVICE
  *  \param gen A function argument, taking no parameters, used to generate values to assign to
  *             elements in the range <tt>[first,last)</tt>.
  *
- *  \tparam ForwardIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward Iterator</a>,
- *          and \p ForwardIterator is mutable.
- *  \tparam Generator is a model of <a href="https://en.cppreference.com/w/cpp/utility/functional">Generator</a>,
- *          and \p Generator's \c result_type is convertible to \p ForwardIterator's \c value_type.
+ *  \tparam ForwardIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward
+ * Iterator</a>, and \p ForwardIterator is mutable. \tparam Generator is a model of <a
+ * href="https://en.cppreference.com/w/cpp/utility/functional">Generator</a>, and \p Generator's \c result_type is
+ * convertible to \p ForwardIterator's \c value_type.
  *
  *  The following code snippet demonstrates how to fill a \c host_vector with random numbers,
  *  using the standard C library function \c rand.
@@ -109,12 +105,8 @@ THRUST_HOST_DEVICE
  *  \see generate_n
  *  \see https://en.cppreference.com/w/cpp/algorithm/generate
  */
-template<typename ForwardIterator,
-         typename Generator>
-  void generate(ForwardIterator first,
-                ForwardIterator last,
-                Generator gen);
-
+template <typename ForwardIterator, typename Generator>
+void generate(ForwardIterator first, ForwardIterator last, Generator gen);
 
 /*! \p generate_n assigns the result of invoking \p gen, a function object that takes no arguments,
  *  to each element in the range <tt>[first,first + n)</tt>. The return value is <tt>first + n</tt>.
@@ -128,10 +120,10 @@ template<typename ForwardIterator,
  *             elements in the range <tt>[first,first + n)</tt>.
  *
  *  \tparam DerivedPolicy The name of the derived execution policy.
- *  \tparam OutputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/output_iterator">Output Iterator</a>.
- *  \tparam Size is an integral type (either signed or unsigned).
- *  \tparam Generator is a model of <a href="https://en.cppreference.com/w/cpp/utility/functional">Generator</a>,
- *          and \p Generator's \c result_type is convertible to a type in \p OutputIterator's set of \c value_types.
+ *  \tparam OutputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/output_iterator">Output
+ * Iterator</a>. \tparam Size is an integral type (either signed or unsigned). \tparam Generator is a model of <a
+ * href="https://en.cppreference.com/w/cpp/utility/functional">Generator</a>, and \p Generator's \c result_type is
+ * convertible to a type in \p OutputIterator's set of \c value_types.
  *
  *  The following code snippet demonstrates how to fill a \c host_vector with random numbers,
  *  using the standard C library function \c rand using the \p thrust::host execution policy for parallelization:
@@ -152,16 +144,9 @@ template<typename ForwardIterator,
  *  \see generate
  *  \see https://en.cppreference.com/w/cpp/algorithm/generate
  */
-template<typename DerivedPolicy,
-         typename OutputIterator,
-         typename Size,
-         typename Generator>
-THRUST_HOST_DEVICE
-  OutputIterator generate_n(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
-                            OutputIterator first,
-                            Size n,
-                            Generator gen);
-
+template <typename DerivedPolicy, typename OutputIterator, typename Size, typename Generator>
+THRUST_HOST_DEVICE OutputIterator generate_n(
+  const thrust::detail::execution_policy_base<DerivedPolicy>& exec, OutputIterator first, Size n, Generator gen);
 
 /*! \p generate_n assigns the result of invoking \p gen, a function object that takes no arguments,
  *  to each element in the range <tt>[first,first + n)</tt>. The return value is <tt>first + n</tt>.
@@ -171,10 +156,10 @@ THRUST_HOST_DEVICE
  *  \param gen A function argument, taking no parameters, used to generate values to assign to
  *             elements in the range <tt>[first,first + n)</tt>.
  *
- *  \tparam OutputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/output_iterator">Output Iterator</a>.
- *  \tparam Size is an integral type (either signed or unsigned).
- *  \tparam Generator is a model of <a href="https://en.cppreference.com/w/cpp/utility/functional">Generator</a>,
- *          and \p Generator's \c result_type is convertible to a type in \p OutputIterator's set of \c value_types.
+ *  \tparam OutputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/output_iterator">Output
+ * Iterator</a>. \tparam Size is an integral type (either signed or unsigned). \tparam Generator is a model of <a
+ * href="https://en.cppreference.com/w/cpp/utility/functional">Generator</a>, and \p Generator's \c result_type is
+ * convertible to a type in \p OutputIterator's set of \c value_types.
  *
  *  The following code snippet demonstrates how to fill a \c host_vector with random numbers,
  *  using the standard C library function \c rand.
@@ -194,13 +179,8 @@ THRUST_HOST_DEVICE
  *  \see generate
  *  \see https://en.cppreference.com/w/cpp/algorithm/generate
  */
-template<typename OutputIterator,
-         typename Size,
-         typename Generator>
-  OutputIterator generate_n(OutputIterator first,
-                            Size n,
-                            Generator gen);
-
+template <typename OutputIterator, typename Size, typename Generator>
+OutputIterator generate_n(OutputIterator first, Size n, Generator gen);
 
 /*! \} // end transformations
  */
@@ -208,4 +188,3 @@ template<typename OutputIterator,
 THRUST_NAMESPACE_END
 
 #include <thrust/detail/generate.inl>
-

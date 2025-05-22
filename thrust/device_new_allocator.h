@@ -14,17 +14,19 @@
  *  limitations under the License.
  */
 
-/*! \file 
+/*! \file
  *  \brief An allocator which allocates storage with \p device_new.
  */
 
 #pragma once
 
 #include <thrust/detail/config.h>
+
+#include <thrust/device_delete.h>
+#include <thrust/device_new.h>
 #include <thrust/device_ptr.h>
 #include <thrust/device_reference.h>
-#include <thrust/device_new.h>
-#include <thrust/device_delete.h>
+
 #include <limits>
 #include <stdexcept>
 
@@ -42,125 +44,126 @@ THRUST_NAMESPACE_BEGIN
  *  \see device_ptr
  *  \see https://en.cppreference.com/w/cpp/memory/allocator
  */
-template<typename T>
-  class device_new_allocator
+template <typename T>
+class device_new_allocator
 {
-  public:
-    /*! Type of element allocated, \c T. */
-    using value_type = T;
+public:
+  /*! Type of element allocated, \c T. */
+  using value_type = T;
 
-    /*! Pointer to allocation, \c device_ptr<T>. */
-    using pointer = device_ptr<T>;
+  /*! Pointer to allocation, \c device_ptr<T>. */
+  using pointer = device_ptr<T>;
 
-    /*! \c const pointer to allocation, \c device_ptr<const T>. */
-    using const_pointer = device_ptr<const T>;
+  /*! \c const pointer to allocation, \c device_ptr<const T>. */
+  using const_pointer = device_ptr<const T>;
 
-    /*! Reference to allocated element, \c device_reference<T>. */
-    using reference = device_reference<T>;
+  /*! Reference to allocated element, \c device_reference<T>. */
+  using reference = device_reference<T>;
 
-    /*! \c const reference to allocated element, \c device_reference<const T>. */
-    using const_reference = device_reference<const T>;
+  /*! \c const reference to allocated element, \c device_reference<const T>. */
+  using const_reference = device_reference<const T>;
 
-    /*! Type of allocation size, \c std::size_t. */
-    using size_type = std::size_t;
+  /*! Type of allocation size, \c std::size_t. */
+  using size_type = std::size_t;
 
-    /*! Type of allocation difference, \c pointer::difference_type. */
-    using difference_type = typename pointer::difference_type;
+  /*! Type of allocation difference, \c pointer::difference_type. */
+  using difference_type = typename pointer::difference_type;
 
-    /*! The \p rebind metafunction provides the type of a \p device_new_allocator
-     *  instantiated with another type.
-     *
-     *  \tparam U The other type to use for instantiation.
+  /*! The \p rebind metafunction provides the type of a \p device_new_allocator
+   *  instantiated with another type.
+   *
+   *  \tparam U The other type to use for instantiation.
+   */
+  template <typename U>
+  struct rebind
+  {
+    /*! The typedef \p other gives the type of the rebound \p device_new_allocator.
      */
-    template<typename U>
-      struct rebind
+    using other = device_new_allocator<U>;
+  }; // end rebind
+
+  /*! No-argument constructor has no effect. */
+  THRUST_HOST_DEVICE inline device_new_allocator() {}
+
+  /*! No-argument destructor has no effect. */
+  THRUST_HOST_DEVICE inline ~device_new_allocator() {}
+
+  /*! Copy constructor has no effect. */
+  THRUST_HOST_DEVICE inline device_new_allocator(device_new_allocator const&) {}
+
+  /*! Constructor from other \p device_malloc_allocator has no effect. */
+  template <typename U>
+  THRUST_HOST_DEVICE inline device_new_allocator(device_new_allocator<U> const&)
+  {}
+
+  /*! Returns the address of an allocated object.
+   *  \return <tt>&r</tt>.
+   */
+  THRUST_HOST_DEVICE inline pointer address(reference r)
+  {
+    return &r;
+  }
+
+  /*! Returns the address an allocated object.
+   *  \return <tt>&r</tt>.
+   */
+  THRUST_HOST_DEVICE inline const_pointer address(const_reference r)
+  {
+    return &r;
+  }
+
+  /*! Allocates storage for \p cnt objects.
+   *  \param cnt The number of objects to allocate.
+   *  \return A \p pointer to uninitialized storage for \p cnt objects.
+   *  \note Memory allocated by this function must be deallocated with \p deallocate.
+   */
+  THRUST_HOST inline pointer allocate(size_type cnt, const_pointer = const_pointer(static_cast<T*>(0)))
+  {
+    if (cnt > this->max_size())
     {
-      /*! The typedef \p other gives the type of the rebound \p device_new_allocator.
-       */
-      using other = device_new_allocator<U>;
-    }; // end rebind
+      throw std::bad_alloc();
+    } // end if
 
-    /*! No-argument constructor has no effect. */
-    THRUST_HOST_DEVICE
-    inline device_new_allocator() {}
+    // use "::operator new" rather than keyword new
+    return pointer(device_new<T>(cnt));
+  } // end allocate()
 
-    /*! No-argument destructor has no effect. */
-    THRUST_HOST_DEVICE
-    inline ~device_new_allocator() {}
+  /*! Deallocates storage for objects allocated with \p allocate.
+   *  \param p A \p pointer to the storage to deallocate.
+   *  \param cnt The size of the previous allocation.
+   *  \note Memory deallocated by this function must previously have been
+   *        allocated with \p allocate.
+   */
+  THRUST_HOST inline void deallocate(pointer p, size_type cnt)
+  {
+    // use "::operator delete" rather than keyword delete
+    (void) cnt;
+    device_delete(p);
+  } // end deallocate()
 
-    /*! Copy constructor has no effect. */
-    THRUST_HOST_DEVICE
-    inline device_new_allocator(device_new_allocator const&) {}
+  /*! Returns the largest value \c n for which <tt>allocate(n)</tt> might succeed.
+   *  \return The largest value \c n for which <tt>allocate(n)</tt> might succeed.
+   */
+  THRUST_HOST_DEVICE inline size_type max_size() const
+  {
+    return std::numeric_limits<size_type>::max THRUST_PREVENT_MACRO_SUBSTITUTION() / sizeof(T);
+  } // end max_size()
 
-    /*! Constructor from other \p device_malloc_allocator has no effect. */
-    template<typename U>
-    THRUST_HOST_DEVICE
-    inline device_new_allocator(device_new_allocator<U> const&) {}
+  /*! Compares against another \p device_malloc_allocator for equality.
+   *  \return \c true
+   */
+  THRUST_HOST_DEVICE inline bool operator==(device_new_allocator const&)
+  {
+    return true;
+  }
 
-    /*! Returns the address of an allocated object.
-     *  \return <tt>&r</tt>.
-     */
-    THRUST_HOST_DEVICE
-    inline pointer address(reference r) { return &r; }
-    
-    /*! Returns the address an allocated object.
-     *  \return <tt>&r</tt>.
-     */
-    THRUST_HOST_DEVICE
-    inline const_pointer address(const_reference r) { return &r; }
-
-    /*! Allocates storage for \p cnt objects.
-     *  \param cnt The number of objects to allocate.
-     *  \return A \p pointer to uninitialized storage for \p cnt objects.
-     *  \note Memory allocated by this function must be deallocated with \p deallocate.
-     */
-    THRUST_HOST
-    inline pointer allocate(size_type cnt,
-                            const_pointer = const_pointer(static_cast<T*>(0)))
-    {
-      if(cnt > this->max_size())
-      {
-        throw std::bad_alloc();
-      } // end if
-
-      // use "::operator new" rather than keyword new
-      return pointer(device_new<T>(cnt));
-    } // end allocate()
-
-    /*! Deallocates storage for objects allocated with \p allocate.
-     *  \param p A \p pointer to the storage to deallocate.
-     *  \param cnt The size of the previous allocation.
-     *  \note Memory deallocated by this function must previously have been
-     *        allocated with \p allocate.
-     */
-    THRUST_HOST
-    inline void deallocate(pointer p, size_type cnt)
-    {
-      // use "::operator delete" rather than keyword delete
-      (void)cnt;
-      device_delete(p);
-    } // end deallocate()
-
-    /*! Returns the largest value \c n for which <tt>allocate(n)</tt> might succeed.
-     *  \return The largest value \c n for which <tt>allocate(n)</tt> might succeed.
-     */
-    THRUST_HOST_DEVICE
-    inline size_type max_size() const
-    {
-      return std::numeric_limits<size_type>::max THRUST_PREVENT_MACRO_SUBSTITUTION () / sizeof(T);
-    } // end max_size()
-
-    /*! Compares against another \p device_malloc_allocator for equality.
-     *  \return \c true
-     */
-    THRUST_HOST_DEVICE
-    inline bool operator==(device_new_allocator const&) { return true; }
-
-    /*! Compares against another \p device_malloc_allocator for inequality.
-     *  \return \c false
-     */
-    THRUST_HOST_DEVICE
-    inline bool operator!=(device_new_allocator const &a) {return !operator==(a); }
+  /*! Compares against another \p device_malloc_allocator for inequality.
+   *  \return \c false
+   */
+  THRUST_HOST_DEVICE inline bool operator!=(device_new_allocator const& a)
+  {
+    return !operator==(a);
+  }
 }; // end device_new_allocator
 
 /*! \} // allocators

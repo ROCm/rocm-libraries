@@ -17,6 +17,7 @@
 #pragma once
 
 #include <thrust/detail/config.h>
+
 #include <thrust/system/detail/sequential/execution_policy.h>
 
 THRUST_NAMESPACE_BEGIN
@@ -27,24 +28,16 @@ namespace detail
 namespace sequential
 {
 
+template <typename DerivedPolicy, typename RandomAccessIterator>
+THRUST_HOST_DEVICE void stable_radix_sort(
+  sequential::execution_policy<DerivedPolicy>& exec, RandomAccessIterator begin, RandomAccessIterator end);
 
-template<typename DerivedPolicy,
-         typename RandomAccessIterator>
-THRUST_HOST_DEVICE
-void stable_radix_sort(sequential::execution_policy<DerivedPolicy> &exec,
-                       RandomAccessIterator begin,
-                       RandomAccessIterator end);
-
-
-template<typename DerivedPolicy,
-         typename RandomAccessIterator1,
-         typename RandomAccessIterator2>
-THRUST_HOST_DEVICE
-void stable_radix_sort_by_key(sequential::execution_policy<DerivedPolicy> &exec,
-                              RandomAccessIterator1 keys_begin,
-                              RandomAccessIterator1 keys_end,
-                              RandomAccessIterator2 values_begin);
-
+template <typename DerivedPolicy, typename RandomAccessIterator1, typename RandomAccessIterator2>
+THRUST_HOST_DEVICE void stable_radix_sort_by_key(
+  sequential::execution_policy<DerivedPolicy>& exec,
+  RandomAccessIterator1 keys_begin,
+  RandomAccessIterator1 keys_end,
+  RandomAccessIterator2 values_begin);
 
 } // end namespace sequential
 } // end namespace detail
@@ -52,4 +45,3 @@ void stable_radix_sort_by_key(sequential::execution_policy<DerivedPolicy> &exec,
 THRUST_NAMESPACE_END
 
 #include <thrust/system/detail/sequential/stable_radix_sort.inl>
-

@@ -20,11 +20,11 @@
 // for demangling the result of type_info.name()
 // with msvc, type_info.name() is already demangled
 #ifdef __GNUC__
-#include <cxxabi.h>
+#  include <cxxabi.h>
 #endif // __GNUC__
 
-#include <string>
 #include <cstdlib>
+#include <string>
 
 namespace unittest
 {
@@ -32,7 +32,7 @@ namespace unittest
 #if __GNUC__ && !_NVHPC_CUDA
 inline std::string demangle(const char* name)
 {
-  int status = 0;
+  int status     = 0;
   char* realname = abi::__cxa_demangle(name, 0, 0, &status);
   std::string result(realname);
   std::free(realname);
@@ -46,5 +46,4 @@ inline std::string demangle(const char* name)
 }
 #endif
 
-} // end unittest
-
+} // namespace unittest

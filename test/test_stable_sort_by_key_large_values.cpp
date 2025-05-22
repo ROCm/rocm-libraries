@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2023 NVIDIA Corporation
- *  Modifications Copyright© 2024 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -23,9 +23,9 @@
 template <typename T>
 struct greater_div_10
 {
-  __host__ __device__ bool operator()(const T &lhs, const T &rhs) const
+  __host__ __device__ bool operator()(const T& lhs, const T& rhs) const
   {
-    return ((int)lhs) / 10 > ((int)rhs) / 10;
+    return ((int) lhs) / 10 > ((int) rhs) / 10;
   }
 };
 
@@ -55,14 +55,8 @@ void _TestStableSortByKeyWithLargeValues()
   ASSERT_EQ_QUIET(h_vals, d_vals);
 
   // so cuda::stable_merge_sort_by_key() is called
-  thrust::stable_sort_by_key(h_keys.begin(),
-                             h_keys.end(),
-                             h_vals.begin(),
-                             greater_div_10<unsigned int>());
-  thrust::stable_sort_by_key(d_keys.begin(),
-                             d_keys.end(),
-                             d_vals.begin(),
-                             greater_div_10<unsigned int>());
+  thrust::stable_sort_by_key(h_keys.begin(), h_keys.end(), h_vals.begin(), greater_div_10<unsigned int>());
+  thrust::stable_sort_by_key(d_keys.begin(), d_keys.end(), d_vals.begin(), greater_div_10<unsigned int>());
 
   ASSERT_EQ_QUIET(h_keys, d_keys);
   ASSERT_EQ_QUIET(h_vals, d_vals);
