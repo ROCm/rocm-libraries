@@ -25,6 +25,8 @@
 
 #include "benchmark_utils.hpp"
 
+#include "../common/utils_device_ptr.hpp"
+
 // Google Benchmark
 #include <benchmark/benchmark.h>
 
@@ -63,7 +65,7 @@ inline std::string run_length_encode_config_name<rocprim::default_config>()
 }
 
 template<typename T, size_t MaxLength, typename Config = rocprim::default_config>
-struct device_run_length_encode_benchmark : public config_autotune_interface
+struct device_run_length_encode_benchmark : public benchmark_utils::autotune_interface
 {
     std::string name() const override
     {
@@ -72,11 +74,12 @@ struct device_run_length_encode_benchmark : public config_autotune_interface
                                          + ",keys_max_length:" + std::to_string(MaxLength)
                                          + ",cfg:" + run_length_encode_config_name<Config>() + "}");
     }
-    void run(benchmark::State&   state,
-             size_t              bytes,
-             const managed_seed& seed,
-             hipStream_t         stream) const override
+    void run(benchmark_utils::state&& state) override
     {
+        const auto& stream = state.stream;
+        const auto& bytes  = state.bytes;
+        const auto& seed   = state.seed;
+
         using key_type   = T;
         using count_type = unsigned int;
 
@@ -105,95 +108,41 @@ struct device_run_length_encode_benchmark : public config_autotune_interface
             offset += key_count;
         }
 
-        key_type* d_input;
-        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_input), size * sizeof(key_type)));
-        HIP_CHECK(hipMemcpy(d_input, input.data(), size * sizeof(key_type), hipMemcpyHostToDevice));
+        common::device_ptr<key_type> d_input(input);
 
-        key_type*   d_unique_output;
-        count_type* d_counts_output;
-        count_type* d_runs_count_output;
-        HIP_CHECK(
-            hipMalloc(reinterpret_cast<void**>(&d_unique_output), runs_count * sizeof(key_type)));
-        HIP_CHECK(
-            hipMalloc(reinterpret_cast<void**>(&d_counts_output), runs_count * sizeof(count_type)));
-        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_runs_count_output), sizeof(count_type)));
+        common::device_ptr<key_type>   d_unique_output(runs_count);
+        common::device_ptr<count_type> d_counts_output(runs_count);
+        common::device_ptr<count_type> d_runs_count_output(1);
 
-        void*  d_temporary_storage     = nullptr;
         size_t temporary_storage_bytes = 0;
 
         HIP_CHECK(rocprim::run_length_encode<Config>(nullptr,
                                                      temporary_storage_bytes,
-                                                     d_input,
+                                                     d_input.get(),
                                                      size,
-                                                     d_unique_output,
-                                                     d_counts_output,
-                                                     d_runs_count_output,
+                                                     d_unique_output.get(),
+                                                     d_counts_output.get(),
+                                                     d_runs_count_output.get(),
                                                      stream,
                                                      false));
 
-        HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
+        common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
         HIP_CHECK(hipDeviceSynchronize());
 
-        // Warm-up
-        for(size_t i = 0; i < 10; ++i)
-        {
-            HIP_CHECK(rocprim::run_length_encode<Config>(d_temporary_storage,
-                                                         temporary_storage_bytes,
-                                                         d_input,
-                                                         size,
-                                                         d_unique_output,
-                                                         d_counts_output,
-                                                         d_runs_count_output,
-                                                         stream,
-                                                         false));
-        }
-        HIP_CHECK(hipDeviceSynchronize());
-
-        // HIP events creation
-        hipEvent_t start, stop;
-        HIP_CHECK(hipEventCreate(&start));
-        HIP_CHECK(hipEventCreate(&stop));
-
-        const unsigned int batch_size = 10;
-        for(auto _ : state)
-        {
-            // Record start event
-            HIP_CHECK(hipEventRecord(start, stream));
-
-            for(size_t i = 0; i < batch_size; ++i)
+        state.run(
+            [&]
             {
-                HIP_CHECK(rocprim::run_length_encode<Config>(d_temporary_storage,
+                HIP_CHECK(rocprim::run_length_encode<Config>(d_temporary_storage.get(),
                                                              temporary_storage_bytes,
-                                                             d_input,
+                                                             d_input.get(),
                                                              size,
-                                                             d_unique_output,
-                                                             d_counts_output,
-                                                             d_runs_count_output,
+                                                             d_unique_output.get(),
+                                                             d_counts_output.get(),
+                                                             d_runs_count_output.get(),
                                                              stream,
                                                              false));
-            }
-
-            // Record stop event and wait until it completes
-            HIP_CHECK(hipEventRecord(stop, stream));
-            HIP_CHECK(hipEventSynchronize(stop));
-
-            float elapsed_mseconds;
-            HIP_CHECK(hipEventElapsedTime(&elapsed_mseconds, start, stop));
-            state.SetIterationTime(elapsed_mseconds / 1000);
-        }
-
-        // Destroy HIP events
-        HIP_CHECK(hipEventDestroy(start));
-        HIP_CHECK(hipEventDestroy(stop));
-
-        state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(key_type));
-        state.SetItemsProcessed(state.iterations() * batch_size * size);
-
-        HIP_CHECK(hipFree(d_temporary_storage));
-        HIP_CHECK(hipFree(d_input));
-        HIP_CHECK(hipFree(d_unique_output));
-        HIP_CHECK(hipFree(d_counts_output));
-        HIP_CHECK(hipFree(d_runs_count_output));
+            });
+        state.set_throughput(size, sizeof(key_type));
     }
 };
 
@@ -205,7 +154,7 @@ struct device_run_length_encode_benchmark_generator
     template<unsigned int ItemsPerThread>
     struct create_ipt
     {
-        void operator()(std::vector<std::unique_ptr<config_autotune_interface>>& storage)
+        void operator()(std::vector<std::unique_ptr<benchmark_utils::autotune_interface>>& storage)
         {
             using config
                 = rocprim::reduce_by_key_config<BlockSize,
@@ -221,7 +170,7 @@ struct device_run_length_encode_benchmark_generator
         }
     };
 
-    static void create(std::vector<std::unique_ptr<config_autotune_interface>>& storage)
+    static void create(std::vector<std::unique_ptr<benchmark_utils::autotune_interface>>& storage)
     {
         static constexpr unsigned int max_items_per_thread
             = std::min(TUNING_SHARED_MEMORY_MAX / sizeof(T) / BlockSize - 1, size_t{15});

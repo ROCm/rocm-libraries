@@ -207,12 +207,6 @@ public:
     {
         offset_ = 0;
     }
-
-    [[deprecated]] friend std::ostream& operator<<(std::ostream& os,
-                                                   const arg_index_iterator& /* iter */)
-    {
-        return os;
-    }
     #endif // DOXYGEN_SHOULD_SKIP_THIS
 
 private:

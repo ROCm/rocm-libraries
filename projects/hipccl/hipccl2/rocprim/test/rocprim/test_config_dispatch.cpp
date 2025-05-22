@@ -62,6 +62,8 @@ TEST(RocprimConfigDispatchTests, StrEqualN)
     ASSERT_FALSE(prefix_equals("hasprefix", "hasp", 4));
 }
 
+#if !defined(ROCPRIM_EXPERIMENTAL_SPIRV) // This macro disables the config_dispatching
+
 TEST(RocprimConfigDispatchTests, HostMatchesDevice)
 {
     const int device_id = test_common_utils::obtain_device_from_ctest();
@@ -100,6 +102,8 @@ TEST(RocprimConfigDispatchTests, ParseCommonArches)
     ASSERT_EQ(parse_gcn_arch("gfx908:"), target_arch::gfx908);
     ASSERT_EQ(parse_gcn_arch("gfx90a:sramecc+:xnack-"), target_arch::gfx90a);
 }
+
+#endif // ROCPRIM_EXPERIMENTAL_SPIRV
 
 #ifndef _WIN32
 TEST(RocprimConfigDispatchTests, DeviceIdFromStream)
