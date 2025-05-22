@@ -142,7 +142,7 @@ build:rocm:
     expire_in: 2 weeks
   parallel:
     matrix:
-      - BUILD_VERSION: [14, 17]
+      - BUILD_VERSION: 17
 
 build:rocm-benchmark:
   extends:
@@ -163,7 +163,7 @@ build:rocm-benchmark:
       -D GPU_TARGETS="$GPU_TARGETS"
       -D CMAKE_C_COMPILER_LAUNCHER=phc_sccache_c
       -D CMAKE_CXX_COMPILER_LAUNCHER=phc_sccache_cxx
-      -D CMAKE_CXX_STANDARD=14
+      -D CMAKE_CXX_STANDARD=17
       -B $CI_PROJECT_DIR/build
       -S $CI_PROJECT_DIR
     - cmake --build $CI_PROJECT_DIR/build
@@ -228,7 +228,7 @@ build:rocm-windows:
     expire_in: 1 day
   parallel:
     matrix:
-      - BUILD_VERSION: [14, 17]
+      - BUILD_VERSION: 17
 
 build:rocm-windows-benchmark:
   extends:
@@ -274,7 +274,7 @@ build:rocm-windows-benchmark:
     - cd $CI_PROJECT_DIR/build
     - cmake
       -D CMAKE_PREFIX_PATH=/opt/rocm
-      -D CMAKE_CXX_STANDARD=14
+      -D CMAKE_CXX_STANDARD=17
       -P $CI_PROJECT_DIR/cmake/GenerateResourceSpec.cmake
     - cat ./resources.json
     # Parallel execution (with other AMDGPU processes) can oversubscribe the SDMA queue.
@@ -365,7 +365,7 @@ benchmark:rocm:
       -G Ninja
       -D CMAKE_CXX_FLAGS="-Wall -Wextra -Werror"
       "$GPU_TARGETS_ARG"
-      -D CMAKE_CXX_STANDARD=14
+      -D CMAKE_CXX_STANDARD=17
       -S $CI_PROJECT_DIR/test/extra
       -B $CI_PROJECT_DIR/build/package_test
     - cmake --build $CI_PROJECT_DIR/build/package_test
@@ -386,7 +386,7 @@ benchmark:rocm:
     - cmake
       -G Ninja
       -D BUILD_TEST=OFF
-      -D CMAKE_CXX_STANDARD=14
+      -D CMAKE_CXX_STANDARD=17
       -S $CI_PROJECT_DIR
       -B $CI_PROJECT_DIR/build_only_install
     # Preserve $PATH when sudoing
@@ -449,6 +449,7 @@ build:nvcc:
       -D CMAKE_BUILD_TYPE=Release
       -D BUILD_TEST=ON
       -D BUILD_EXAMPLE=ON
+      "$(if [ "$SCHEDULE" == "nightly" ]; then echo "-D BUILD_COMPUTE_SANITIZER=ON"; fi)"
       -D NVGPU_TARGETS="$GPU_TARGETS"
       -D ROCM_SYMLINK_LIBS=OFF
       -D CMAKE_C_COMPILER_LAUNCHER=phc_sccache_c
@@ -474,7 +475,7 @@ build:nvcc:
     expire_in: 2 weeks
   parallel:
     matrix:
-      - BUILD_VERSION: [14, 17]
+      - BUILD_VERSION: 17
 
 build:nvcc-benchmark:
   stage: build
@@ -494,7 +495,7 @@ build:nvcc-benchmark:
       -D CMAKE_C_COMPILER_LAUNCHER=phc_sccache_c
       -D CMAKE_CXX_COMPILER_LAUNCHER=phc_sccache_cxx
       -D CMAKE_CUDA_COMPILER_LAUNCHER=phc_sccache_cuda
-      -D CMAKE_CXX_STANDARD=14
+      -D CMAKE_CXX_STANDARD=17
       -B $CI_PROJECT_DIR/build
       -S $CI_PROJECT_DIR
     - cmake --build $CI_PROJECT_DIR/build
@@ -581,6 +582,10 @@ test:doc:
   extends:
     - .rules:test
     - .build:docs
+  artifacts:
+    paths:
+      - $DOCS_DIR/_build/html/
+    expire_in: 2 weeks
 
 scheduled-check-changes:
   extends: .rules:scheduled-check-changes

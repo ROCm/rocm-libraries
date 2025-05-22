@@ -35,7 +35,7 @@
 
 #include <hip/hip_runtime.h>
 
-#include <rocprim/device/detail/lookback_scan_state.hpp>
+#include <rocprim/device/detail/lookback_scan_state.hpp> // IWYU pragma: export
 
 BEGIN_HIPCUB_NAMESPACE
 

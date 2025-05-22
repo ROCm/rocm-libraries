@@ -38,9 +38,9 @@
 #include "../../../config.hpp"
 #include "../util_type.hpp"
 
-#include <rocprim/config.hpp>
-#include <rocprim/detail/various.hpp>
-#include <rocprim/type_traits.hpp>
+#include <rocprim/config.hpp> // IWYU pragma: export
+#include <rocprim/detail/various.hpp> // IWYU pragma: export
+#include <rocprim/type_traits.hpp> // IWYU pragma: export
 
 BEGIN_HIPCUB_NAMESPACE
 
