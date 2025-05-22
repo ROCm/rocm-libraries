@@ -59,6 +59,7 @@ option(BUILD_BENCHMARK "Build benchmarks" OFF)
 option(BUILD_EXAMPLE "Build Examples" OFF)
 option(BUILD_ADDRESS_SANITIZER "Build with address sanitizer enabled" OFF)
 option(BUILD_OFFLOAD_COMPRESS "Build hipCUB with offload compression" ON)
+option(BUILD_COMPUTE_SANITIZER "Build tests with cuda's compute sanitizer enabled" OFF)
 
 check_language(HIP)
 cmake_dependent_option(USE_HIPCXX "Use CMake HIP language support" OFF CMAKE_HIP_COMPILER OFF)
@@ -142,7 +143,7 @@ if(BUILD_OFFLOAD_COMPRESS)
 endif()
 
 # Setup VERSION
-set(VERSION_STRING "3.5.0")
+set(VERSION_STRING "4.0.0")
 rocm_setup_version(VERSION ${VERSION_STRING})
 math(EXPR hipcub_VERSION_NUMBER "${hipcub_VERSION_MAJOR} * 100000 + ${hipcub_VERSION_MINOR} * 100 + ${hipcub_VERSION_PATCH}")
 

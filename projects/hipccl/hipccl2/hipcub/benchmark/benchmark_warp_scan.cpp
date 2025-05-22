@@ -111,15 +111,17 @@ struct broadcast
     {
         (void)init;
 
-        const unsigned int i     = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
-        auto               value = input[i];
+        const unsigned int i        = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
+        const unsigned int warp_id  = i / WarpSize;
+        const unsigned int src_lane = warp_id % WarpSize;
+        auto               value    = input[i];
 
         using wscan_t = hipcub::WarpScan<T, WarpSize>;
         __shared__ typename wscan_t::TempStorage storage;
 #pragma nounroll
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
-            value = wscan_t(storage).Broadcast(value, 0);
+            value = wscan_t(storage).Broadcast(value, src_lane);
         }
 
         output[i] = value;
@@ -190,61 +192,75 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t size)
 #define CREATE_BENCHMARK(T, BS, WS) CREATE_BENCHMARK_IMPL(T, BS, WS, Benchmark)
 
 // clang-format off
-// If warp size limit is 16
-#define BENCHMARK_TYPE_WS16(type)   \
-    CREATE_BENCHMARK(type, 60, 15), \
-    CREATE_BENCHMARK(type, 256, 16)
+#if HIPCUB_WARP_THREADS_MACRO == 32
+    #define BENCHMARK_TYPE(type)         \
+        CREATE_BENCHMARK(type, 60, 15),  \
+        CREATE_BENCHMARK(type, 256, 16), \
+        CREATE_BENCHMARK(type, 62, 31),  \
+        CREATE_BENCHMARK(type, 256, 32)
+#else
+    #define BENCHMARK_TYPE(type)         \
+        CREATE_BENCHMARK(type, 60, 15),  \
+        CREATE_BENCHMARK(type, 256, 16), \
+        CREATE_BENCHMARK(type, 62, 31),  \
+        CREATE_BENCHMARK(type, 256, 32), \
+        CREATE_BENCHMARK(type, 63, 63),  \
+        CREATE_BENCHMARK(type, 64, 64),  \
+        CREATE_BENCHMARK(type, 128, 64), \
+        CREATE_BENCHMARK(type, 256, 64)
+#endif
 
-
-// If warp size limit is 32
-#define BENCHMARK_TYPE_WS32(type)   \
-    BENCHMARK_TYPE_WS16(type),      \
-    CREATE_BENCHMARK(type, 62, 31), \
-    CREATE_BENCHMARK(type, 256, 32)
-
-
-// If warp size limit is 64
-#define BENCHMARK_TYPE_WS64(type)    \
-    BENCHMARK_TYPE_WS32(type),       \
-    CREATE_BENCHMARK(type, 63, 63),  \
-    CREATE_BENCHMARK(type, 64, 64),  \
-    CREATE_BENCHMARK(type, 128, 64), \
-    CREATE_BENCHMARK(type, 256, 64)
+#if HIPCUB_WARP_THREADS_MACRO == 32
+    #define BENCHMARK_TYPE_P2(type)      \
+        CREATE_BENCHMARK(type, 256, 16), \
+        CREATE_BENCHMARK(type, 256, 32)
+#else
+    #define BENCHMARK_TYPE_P2(type)      \
+        CREATE_BENCHMARK(type, 256, 16), \
+        CREATE_BENCHMARK(type, 256, 32), \
+        CREATE_BENCHMARK(type, 64, 64),  \
+        CREATE_BENCHMARK(type, 128, 64), \
+        CREATE_BENCHMARK(type, 256, 64)
+#endif
 // clang-format on
 
 template<typename Benchmark>
-void add_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
+auto add_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
                     const std::string&                            method_name,
                     hipStream_t                                   stream,
                     size_t                                        size)
+    -> std::enable_if_t<std::is_same<Benchmark, inclusive_scan>::value
+                        || std::is_same<Benchmark, exclusive_scan>::value>
 {
     using custom_double2    = benchmark_utils::custom_type<double, double>;
     using custom_int_double = benchmark_utils::custom_type<int, double>;
 
-    std::vector<benchmark::internal::Benchmark*> new_benchmarks = {
-#if HIPCUB_WARP_THREADS_MACRO == 16
-        BENCHMARK_TYPE_WS16(int),
-        BENCHMARK_TYPE_WS16(float),
-        BENCHMARK_TYPE_WS16(double),
-        BENCHMARK_TYPE_WS16(int8_t),
-        BENCHMARK_TYPE_WS16(custom_double2),
-        BENCHMARK_TYPE_WS16(custom_int_double)
-#elif HIPCUB_WARP_THREADS_MACRO == 32
-        BENCHMARK_TYPE_WS32(int),
-        BENCHMARK_TYPE_WS32(float),
-        BENCHMARK_TYPE_WS32(double),
-        BENCHMARK_TYPE_WS32(int8_t),
-        BENCHMARK_TYPE_WS32(custom_double2),
-        BENCHMARK_TYPE_WS32(custom_int_double)
-#else
-        BENCHMARK_TYPE_WS64(int),
-        BENCHMARK_TYPE_WS64(float),
-        BENCHMARK_TYPE_WS64(double),
-        BENCHMARK_TYPE_WS64(int8_t),
-        BENCHMARK_TYPE_WS64(custom_double2),
-        BENCHMARK_TYPE_WS64(custom_int_double)
-#endif
-    };
+    std::vector<benchmark::internal::Benchmark*> new_benchmarks
+        = {BENCHMARK_TYPE(int),
+           BENCHMARK_TYPE(float),
+           BENCHMARK_TYPE(double),
+           BENCHMARK_TYPE(int8_t),
+           BENCHMARK_TYPE(custom_double2),
+           BENCHMARK_TYPE(custom_int_double)};
+    benchmarks.insert(benchmarks.end(), new_benchmarks.begin(), new_benchmarks.end());
+}
+
+template<typename Benchmark>
+auto add_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
+                    const std::string&                            method_name,
+                    hipStream_t                                   stream,
+                    size_t size) -> std::enable_if_t<std::is_same<Benchmark, broadcast>::value>
+{
+    using custom_double2    = benchmark_utils::custom_type<double, double>;
+    using custom_int_double = benchmark_utils::custom_type<int, double>;
+
+    std::vector<benchmark::internal::Benchmark*> new_benchmarks
+        = {BENCHMARK_TYPE_P2(int),
+           BENCHMARK_TYPE_P2(float),
+           BENCHMARK_TYPE_P2(double),
+           BENCHMARK_TYPE_P2(int8_t),
+           BENCHMARK_TYPE_P2(custom_double2),
+           BENCHMARK_TYPE_P2(custom_int_double)};
     benchmarks.insert(benchmarks.end(), new_benchmarks.begin(), new_benchmarks.end());
 }
 

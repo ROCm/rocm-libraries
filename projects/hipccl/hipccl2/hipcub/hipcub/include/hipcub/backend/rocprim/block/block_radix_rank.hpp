@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2021-2024, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2021-2025, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -44,7 +44,7 @@
 #include "../thread/thread_reduce.hpp"
 #include "../thread/thread_scan.hpp"
 
-#include <rocprim/block/block_radix_rank.hpp>
+#include <rocprim/block/block_radix_rank.hpp> // IWYU pragma: export IWYU pragma: export
 
 #include <stdint.h>
 
