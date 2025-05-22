@@ -11,6 +11,7 @@ on:
       - synchronize
       - reopened
       - ready_for_review
+      - draft
     branches:
       # Remove later.
       - users/geomin12/therock-ci
