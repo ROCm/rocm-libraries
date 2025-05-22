@@ -49,7 +49,7 @@ TEST_F(CPU_TuningPolicy_NONE, TestTuningPolicyGetterAndSetter)
     EXPECT_EQ(test_tuning_policy, miopenTuningPolicy_t::miopenTuningPolicyNone);
 }
 
-TEST(CPU_TuningPolicy_NULL, TestNullHandleForTuningPolicy)
+TEST(CPU_TuningPolicy_NONE, TestNullHandleForTuningPolicy)
 {
     miopenTuningPolicy_t test_tuning_policy;
 
