@@ -295,7 +295,6 @@ struct MIOPEN_EXPORT Handle : miopenHandle
     {
         return invokers.GetFound1_0SolverId(config, algo);
     }
-    std::string GetDeviceNameImpl() const;
 
     miopenTuningPolicy_t GetTuningPolicy() const { return tuning_policy; }
     void SetTuningPolicy(miopenTuningPolicy_t new_val) { tuning_policy = new_val; };
@@ -308,6 +307,8 @@ struct MIOPEN_EXPORT Handle : miopenHandle
 #endif
 
 private:
+    std::string GetDeviceNameImpl() const;
+
 #if MIOPEN_USE_ROCBLAS
     rocblas_handle_ptr CreateRocblasHandle(miopenAcceleratorQueue_t streamID) const;
 #endif
