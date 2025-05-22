@@ -33,8 +33,7 @@
 #ifdef __HIP_PLATFORM_AMD__
     #include "../backend/rocprim/thread/thread_operators.hpp" // IWYU pragma: export
 #elif defined(__HIP_PLATFORM_NVIDIA__)
-    #include "../config.hpp"
-    #include <cub/thread/thread_operators.cuh> // IWYU pragma: export
+    #include "../backend/cub/thread/thread_operators.hpp" // IWYU pragma: export
 #endif
 
 #endif // HIBCUB_ROCPRIM_THREAD_THREAD_OPERATORS_HPP_

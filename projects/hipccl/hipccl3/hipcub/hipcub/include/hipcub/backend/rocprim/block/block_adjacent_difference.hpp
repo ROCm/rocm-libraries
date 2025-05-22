@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2017-2024, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2017-2025, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -32,7 +32,7 @@
 
 #include "../../../config.hpp"
 
-#include <rocprim/block/block_adjacent_difference.hpp>
+#include <rocprim/block/block_adjacent_difference.hpp> // IWYU pragma: export
 
 BEGIN_HIPCUB_NAMESPACE
 
@@ -78,124 +78,6 @@ public:
     HIPCUB_DEVICE inline
     BlockAdjacentDifference(TempStorage& temp_storage) : temp_storage_(temp_storage)
     {
-    }
-
-    template<int ITEMS_PER_THREAD, typename FlagT, typename FlagOp>
-    [[deprecated("The Flags API of BlockAdjacentDifference is deprecated.")]]
-    HIPCUB_DEVICE inline
-    void FlagHeads(FlagT (&head_flags)[ITEMS_PER_THREAD],
-                   T (&input)[ITEMS_PER_THREAD],
-                   FlagOp flag_op)
-    {
-        HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
-        base_type::flag_heads(head_flags, input, flag_op, temp_storage_);
-        HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
-    }
-
-    template<int ITEMS_PER_THREAD, typename FlagT, typename FlagOp>
-    [[deprecated("The Flags API of BlockAdjacentDifference is deprecated.")]]
-    HIPCUB_DEVICE inline
-    void FlagHeads(FlagT (&head_flags)[ITEMS_PER_THREAD],
-                   T (&input)[ITEMS_PER_THREAD],
-                   FlagOp flag_op,
-                   T tile_predecessor_item)
-    {
-        HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
-        base_type::flag_heads(head_flags, tile_predecessor_item, input, flag_op, temp_storage_);
-        HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
-    }
-
-    template<int ITEMS_PER_THREAD, typename FlagT, typename FlagOp>
-    [[deprecated("The Flags API of BlockAdjacentDifference is deprecated.")]]
-    HIPCUB_DEVICE inline
-    void FlagTails(FlagT (&tail_flags)[ITEMS_PER_THREAD],
-                   T (&input)[ITEMS_PER_THREAD],
-                   FlagOp flag_op)
-    {
-        HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
-        base_type::flag_tails(tail_flags, input, flag_op, temp_storage_);
-        HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
-    }
-
-    template<int ITEMS_PER_THREAD, typename FlagT, typename FlagOp>
-    [[deprecated("The Flags API of BlockAdjacentDifference is deprecated.")]]
-    HIPCUB_DEVICE inline
-    void FlagTails(FlagT (&tail_flags)[ITEMS_PER_THREAD],
-                   T (&input)[ITEMS_PER_THREAD],
-                   FlagOp flag_op,
-                   T tile_successor_item)
-    {
-        HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
-        base_type::flag_tails(tail_flags, tile_successor_item, input, flag_op, temp_storage_);
-        HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
-    }
-
-    template<int ITEMS_PER_THREAD, typename FlagT, typename FlagOp>
-    [[deprecated("The Flags API of BlockAdjacentDifference is deprecated.")]]
-    HIPCUB_DEVICE inline
-    void FlagHeadsAndTails(FlagT (&head_flags)[ITEMS_PER_THREAD],
-                           FlagT (&tail_flags)[ITEMS_PER_THREAD],
-                           T (&input)[ITEMS_PER_THREAD],
-                           FlagOp flag_op)
-    {
-        HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
-        base_type::flag_heads_and_tails(
-            head_flags, tail_flags, input,
-            flag_op, temp_storage_
-        );
-        HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
-    }
-
-    template<int ITEMS_PER_THREAD, typename FlagT, typename FlagOp>
-    [[deprecated("The Flags API of BlockAdjacentDifference is deprecated.")]]
-    HIPCUB_DEVICE inline
-    void FlagHeadsAndTails(FlagT (&head_flags)[ITEMS_PER_THREAD],
-                           FlagT (&tail_flags)[ITEMS_PER_THREAD],
-                           T tile_successor_item,
-                           T (&input)[ITEMS_PER_THREAD],
-                           FlagOp flag_op)
-    {
-        HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
-        base_type::flag_heads_and_tails(
-            head_flags, tail_flags, tile_successor_item, input,
-            flag_op, temp_storage_
-        );
-        HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
-    }
-
-    template<int ITEMS_PER_THREAD, typename FlagT, typename FlagOp>
-    [[deprecated("The Flags API of BlockAdjacentDifference is deprecated.")]]
-    HIPCUB_DEVICE inline
-    void FlagHeadsAndTails(FlagT (&head_flags)[ITEMS_PER_THREAD],
-                           T tile_predecessor_item,
-                           FlagT (&tail_flags)[ITEMS_PER_THREAD],
-                           T (&input)[ITEMS_PER_THREAD],
-                           FlagOp flag_op)
-    {
-        HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
-        base_type::flag_heads_and_tails(
-            head_flags, tile_predecessor_item, tail_flags, input,
-            flag_op, temp_storage_
-        );
-        HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
-    }
-
-    template<int ITEMS_PER_THREAD, typename FlagT, typename FlagOp>
-    [[deprecated("The Flags API of BlockAdjacentDifference is deprecated.")]]
-    HIPCUB_DEVICE inline
-    void FlagHeadsAndTails(FlagT (&head_flags)[ITEMS_PER_THREAD],
-                           T tile_predecessor_item,
-                           FlagT (&tail_flags)[ITEMS_PER_THREAD],
-                           T tile_successor_item,
-                           T (&input)[ITEMS_PER_THREAD],
-                           FlagOp flag_op)
-    {
-        HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
-        base_type::flag_heads_and_tails(
-            head_flags, tile_predecessor_item, tail_flags, tile_successor_item, input,
-            flag_op, temp_storage_
-        );
-        HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
     }
 
     template <int ITEMS_PER_THREAD, typename OutputType, typename DifferenceOpT>

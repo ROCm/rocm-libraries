@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2017-2024, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2017-2025, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -35,7 +35,7 @@
 
 #include "../util_type.hpp"
 
-#include <rocprim/device/device_histogram.hpp>
+#include <rocprim/device/device_histogram.hpp> // IWYU pragma: export
 
 BEGIN_HIPCUB_NAMESPACE
 
@@ -87,7 +87,13 @@ HIPCUB_HOST_DEVICE
 HIPCUB_FORCEINLINE hipError_t check_overflow(LevelT lower_level, LevelT upper_level, int num_levels)
 {
     using sample_type      = typename std::iterator_traits<SampleIteratorT>::value_type;
-    using common_type      = typename std::common_type<LevelT, sample_type>::type;
+    using common_type      = typename hipcub::common_type<LevelT, sample_type>::type;
+    static_assert(std::is_convertible<common_type, int>::value,
+                  "The common type of `LevelT` and `SampleT` must be "
+                  "convertible to `int`.");
+    static_assert(std::is_trivially_copyable<common_type>::value,
+                  "The common type of `LevelT` and `SampleT` must be "
+                  "trivially copyable.");
     using int_arithmetic_t = typename int_arithmetic_t<sample_type, common_type>::type;
 
     if(may_overflow<int_arithmetic_t>(lower_level,

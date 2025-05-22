@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2017-2024, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2017-2025, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -34,11 +34,11 @@
 #include "../../../util_deprecated.hpp"
 #include "../thread/thread_operators.hpp"
 
-#include <rocprim/device/config_types.hpp>
-#include <rocprim/device/device_scan.hpp>
-#include <rocprim/device/device_scan_by_key.hpp>
-#include <rocprim/type_traits.hpp>
-#include <rocprim/types/future_value.hpp>
+#include <rocprim/device/config_types.hpp> // IWYU pragma: export
+#include <rocprim/device/device_scan.hpp> // IWYU pragma: export
+#include <rocprim/device/device_scan_by_key.hpp> // IWYU pragma: export
+#include <rocprim/type_traits.hpp> // IWYU pragma: export
+#include <rocprim/types/future_value.hpp> // IWYU pragma: export
 
 BEGIN_HIPCUB_NAMESPACE
 
@@ -115,22 +115,16 @@ public:
                                     size_t          num_items,
                                     hipStream_t     stream = 0)
     {
-        using acc_t = ::rocprim::invoke_result_binary_op_t<
-            typename std::iterator_traits<InputIteratorT>::value_type,
-            ScanOpT>;
-
-        return ::rocprim::inclusive_scan<::rocprim::default_config,
-                                         InputIteratorT,
-                                         OutputIteratorT,
-                                         ScanOpT,
-                                         acc_t>(d_temp_storage,
-                                                temp_storage_bytes,
-                                                d_in,
-                                                d_out,
-                                                num_items,
-                                                scan_op,
-                                                stream,
-                                                HIPCUB_DETAIL_DEBUG_SYNC_VALUE);
+        return ::rocprim::
+            inclusive_scan<::rocprim::default_config, InputIteratorT, OutputIteratorT, ScanOpT>(
+                d_temp_storage,
+                temp_storage_bytes,
+                d_in,
+                d_out,
+                num_items,
+                scan_op,
+                stream,
+                HIPCUB_DETAIL_DEBUG_SYNC_VALUE);
     }
 
     template<typename InputIteratorT, typename OutputIteratorT, typename ScanOpT>
@@ -189,6 +183,35 @@ public:
                                                  scan_op,
                                                  num_items,
                                                  stream);
+    }
+
+    template<typename InputIteratorT,
+             typename OutputIteratorT,
+             typename ScanOpT,
+             typename InitValueT>
+    HIPCUB_RUNTIME_FUNCTION
+    static hipError_t InclusiveScanInit(void*           d_temp_storage,
+                                        size_t&         temp_storage_bytes,
+                                        InputIteratorT  d_in,
+                                        OutputIteratorT d_out,
+                                        ScanOpT         scan_op,
+                                        InitValueT      init_value,
+                                        int             num_items,
+                                        hipStream_t     stream = 0)
+    {
+        return ::rocprim::inclusive_scan<::rocprim::default_config,
+                                         InputIteratorT,
+                                         OutputIteratorT,
+                                         InitValueT,
+                                         ScanOpT>(d_temp_storage,
+                                                  temp_storage_bytes,
+                                                  d_in,
+                                                  d_out,
+                                                  init_value,
+                                                  num_items,
+                                                  scan_op,
+                                                  stream,
+                                                  HIPCUB_DETAIL_DEBUG_SYNC_VALUE);
     }
 
     template<typename InputIteratorT, typename OutputIteratorT>
@@ -267,24 +290,19 @@ public:
                                     size_t          num_items,
                                     hipStream_t     stream = 0)
     {
-        using acc_t
-            = ::rocprim::invoke_result_binary_op_t<rocprim::detail::input_type_t<InitValueT>,
-                                                   ScanOpT>;
-
         return ::rocprim::exclusive_scan<::rocprim::default_config,
                                          InputIteratorT,
                                          OutputIteratorT,
                                          InitValueT,
-                                         ScanOpT,
-                                         acc_t>(d_temp_storage,
-                                                temp_storage_bytes,
-                                                d_in,
-                                                d_out,
-                                                init_value,
-                                                num_items,
-                                                scan_op,
-                                                stream,
-                                                HIPCUB_DETAIL_DEBUG_SYNC_VALUE);
+                                         ScanOpT>(d_temp_storage,
+                                                  temp_storage_bytes,
+                                                  d_in,
+                                                  d_out,
+                                                  init_value,
+                                                  num_items,
+                                                  scan_op,
+                                                  stream,
+                                                  HIPCUB_DETAIL_DEBUG_SYNC_VALUE);
     }
 
     template<typename InputIteratorT,
@@ -369,24 +387,19 @@ public:
                                     int                                     num_items,
                                     hipStream_t                             stream = 0)
     {
-        using acc_t
-            = ::rocprim::invoke_result_binary_op_t<rocprim::detail::input_type_t<InitValueT>,
-                                                   ScanOpT>;
-
         return ::rocprim::exclusive_scan<::rocprim::default_config,
                                          InputIteratorT,
                                          OutputIteratorT,
                                          InitValueT,
-                                         ScanOpT,
-                                         acc_t>(d_temp_storage,
-                                                temp_storage_bytes,
-                                                d_in,
-                                                d_out,
-                                                init_value,
-                                                num_items,
-                                                scan_op,
-                                                stream,
-                                                HIPCUB_DETAIL_DEBUG_SYNC_VALUE);
+                                         ScanOpT>(d_temp_storage,
+                                                  temp_storage_bytes,
+                                                  d_in,
+                                                  d_out,
+                                                  init_value,
+                                                  num_items,
+                                                  scan_op,
+                                                  stream,
+                                                  HIPCUB_DETAIL_DEBUG_SYNC_VALUE);
     }
 
     template<typename InputIteratorT,
@@ -535,8 +548,7 @@ public:
                                          EqualityOpT           equality_op = EqualityOpT(),
                                          hipStream_t           stream      = 0)
     {
-        using acc_t = rocprim::invoke_result_binary_op_t<rocprim::detail::input_type_t<InitValueT>,
-                                                         ScanOpT>;
+        using acc_t = rocprim::accumulator_t<ScanOpT, rocprim::detail::input_type_t<InitValueT>>;
 
         return ::rocprim::exclusive_scan_by_key<::rocprim::default_config,
                                                 KeysInputIteratorT,
@@ -657,9 +669,8 @@ public:
                                          EqualityOpT           equality_op = EqualityOpT(),
                                          hipStream_t           stream      = 0)
     {
-        using acc_t = ::rocprim::invoke_result_binary_op_t<
-            typename std::iterator_traits<ValuesInputIteratorT>::value_type,
-            ScanOpT>;
+        using acc_t = ::rocprim::
+            accumulator_t<ScanOpT, typename std::iterator_traits<ValuesInputIteratorT>::value_type>;
 
         return ::rocprim::inclusive_scan_by_key<::rocprim::default_config,
                                                 KeysInputIteratorT,

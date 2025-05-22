@@ -26,7 +26,7 @@ backend.
     * Requires CMake 3.16.9 or later
 * For NVIDIA GPUs:
   * CUDA Toolkit
-  * CCCL library (>= 2.6.0)
+  * CCCL library (>= 2.7.0)
     * Automatically downloaded and built by the CMake script
     * Requires CMake 3.15.0 or later
 * Python 3.6 or higher (for HIP on Windows only; this is only required for install scripts)
