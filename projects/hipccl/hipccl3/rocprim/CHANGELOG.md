@@ -2,7 +2,19 @@
 
 Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projects/rocPRIM/en/latest/](https://rocm.docs.amd.com/projects/rocPRIM/en/latest/).
 
-## rocPRIM 3.6.0 for ROCm 7.0
+## rocPRIM 4.0.0 for ROCm 7.0
+
+### Added
+
+* Added `rocprim::accumulator_t` to ensure parity with CCCL.
+* Added test for `rocprim::accumulator_t`
+* Added `rocprim::invoke_result_r` to ensure parity with CCCL.
+* Added function `is_build_in` into `rocprim::traits::get`.
+* Added virtual shared memory as a fallback option in `rocprim::device_merge` when it exceeds shared memory capacity, similar to `rocprim::device_select`, `rocprim::device_partition`, and `rocprim::device_merge_sort`, which already include this feature.
+* Added initial value support to device level inclusive scans.
+* Added new optimization to the backend for `device_transform` when the input and output are pointers.
+* Added `LoadType` to `transform_config`, which is used for the `device_transform` when the input and output are pointers.
+* Added `rocprim:device_transform` for n-ary transform operations API with as input `n` number of iterators inside a `rocprim::tuple`.
 
 ### Changed
 
@@ -24,6 +36,62 @@ This is a complete list of affected functions and how their default accumulator 
     * past default: `class AccType = detail::input_type_t<InitValueType>>`
     * new default: `class AccType = rocprim::invoke_result_binary_op_t<rocprim::detail::input_type_t<InitValueType>, BinaryFunction>`
 
+* Changed the parameters `long_radix_bits` and `LongRadixBits` from `segmented_radix_sort` to `radix_bits` and `RadixBits` respectively.
+* Marked the initialisation constructor of `rocprim::reverse_iterator<Iter>` `explicit`, use `rocprim::make_reverse_iterator`.
+* Merged `radix_key_codec` into type_traits system.
+* Renamed `type_traits_interface.hpp` to `type_traits.hpp`, rename the original `type_traits.hpp` to `type_traits_functions.hpp`.
+* Changed the default accumulator type for various device-level scan algorithms:
+  * `rocprim::inclusive_scan`
+    * Previous default: `class AccType = typename std::iterator_traits<InputIterator>::value_type>`
+    * Current default: `class AccType = rocprim::accumulator_t<BinaryFunction, typename std::iterator_traits<InputIterator>::value_type>`
+  * `rocprim::deterministic_inclusive_scan`
+    * Previous default: `class AccType = typename std::iterator_traits<InputIterator>::value_type>`
+    * Current default: `class AccType = rocprim::accumulator_t<BinaryFunction, typename std::iterator_traits<InputIterator>::value_type>`
+  * `rocprim::exclusive_scan`
+    * Previous default: `class AccType = detail::input_type_t<InitValueType>>`
+    * Current default: `class AccType = rocprim::accumulator_t<BinaryFunction, rocprim::detail::input_type_t<InitValueType>>`
+  * `rocprim::deterministic_exclusive_scan`
+    * Previous default: `class AccType = detail::input_type_t<InitValueType>>`
+    * Current default: `class AccType = rocprim::accumulator_t<BinaryFunction, rocprim::detail::input_type_t<InitValueType>>`
+    
+### Deprecations
+
+* `rocprim::invoke_result_binary_op` and `rocprim::invoke_result_binary_op_t` are deprecated. Use `rocprim::accumulator_t` now.
+
+### Removed
+
+* Removed `rocprim::detail::float_bit_mask` and relative tests, use `rocprim::traits::float_bit_mask` instead.
+* Removed `rocprim::traits::is_fundamental`, please use `rocprim::traits::get<T>::is_fundamental()` directly.
+* Removed the deprecated parameters `short_radix_bits` and `ShortRadixBits` from the `segmented_radix_sort` config. They were unused, it is only an API change.
+* Removed the deprecated `operator<<` from the iterators.
+* Removed the deprecated `TwiddleIn` and `TwiddleOut`. Use `radix_key_codec` instead.
+* Removed the deprecated flags API of `block_adjacent_difference`. Use `subtract_left()` or `block_discontinuity::flag_heads()` instead.
+* Removed the deprecated `to_exclusive` functions in the warp scans.
+* Removed the `rocprim::load_cs` from the `cache_load_modifier` enum. Use `rocprim::load_nontemporal` instead.
+* Removed the `rocprim::store_cs` from the `cache_store_modifier` enum. Use `rocprim::store_nontemporal` instead.
+* Removed the deprecated header file `rocprim/detail/match_result_type.hpp`. Include `rocprim/type_traits.hpp` instead.
+  * This header included `rocprim::detail::invoke_result`. Use `rocprim::invoke_result` instead.
+  * This header included `rocprim::detail::invoke_result_binary_op`. Use `rocprim::invoke_result_binary_op` instead.
+  * This header included `rocprim::detail::match_result_type`. Use `rocprim::invoke_result_binary_op_t` instead.
+* Removed the deprecated `rocprim::detail::radix_key_codec` function. Use `rocprim::radix_key_codec` instead.
+* Removed `rocprim/detail/radix_sort.hpp`, functionality can now be found in `rocprim/thread/radix_key_codec.hpp`.
+* Removed C++14 support, only C++17 is supported.
+* Due to the removal of `__AMDGCN_WAVEFRONT_SIZE` in the compiler, the following deprecated warp size-related symbols have been removed:
+  * `rocprim::device_warp_size()`
+    * For compile-time constants, this is replaced with `rocprim::arch::wavefront::min_size()` and `rocprim::arch::wavefront::max_size()`. Use this when allocating global or shared memory.
+    * For run-time constants, this is replaced with `rocprim::arch::wavefront::size().`
+  * `rocprim::warp_size()`
+    * Use `rocprim::host_warp_size()`, `rocprim::arch::wavefront::min_size()` or `rocprim::arch::wavefront::max_size()` instead.
+  * `ROCPRIM_WAVEFRONT_SIZE`
+    * Use `rocprim::arch::wavefront::min_size()` or `rocprim::arch::wavefront::max_size()` instead.
+  * `__AMDGCN_WAVEFRONT_SIZE`
+    * This was a fallback define for the compiler's removed symbol, having the same name. 
+
+### Resolved issues
+
+* Fixed an issue where `device_batch_memcpy` reported benchmarking throughput being 2x lower than it was in reality.
+* Fixed an issue where `device_segmented_reduce` reported autotuning throughput being 5x lower than it was in reality.
+
 ## rocPRIM 3.5.0 for ROCm 6.5.0
 
 ### Removed
@@ -40,6 +108,7 @@ This is a complete list of affected functions and how their default accumulator 
 * Added the `rocprim::merge_inplace` function for merging in-place.
 * Added initial value support for warp- and block-level inclusive scan.
 * Added support for building tests with device-side random data generation, making them finish faster. This requires rocRAND, and is enabled with the `WITH_ROCRAND=ON` build flag.
+* Added tests and documentation to `lookback_scan_state`. It is still in the `detail` namespace.
 
 ### Changed
 
@@ -599,3 +668,5 @@ The following is the complete list of affected functions and how their default a
 
 * Switched to HIP-Clang as the default compiler
 * CMake searches for rocPRIM locally first; if t's not found, CMake downloads it from GitHub
+
+

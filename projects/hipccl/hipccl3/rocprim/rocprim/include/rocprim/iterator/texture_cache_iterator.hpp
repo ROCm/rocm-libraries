@@ -326,12 +326,6 @@ public:
     {
         return (ptr - other.ptr) <= 0;
     }
-
-    [[deprecated]] friend std::ostream& operator<<(std::ostream& os,
-                                                   const texture_cache_iterator& /* iter */)
-    {
-        return os;
-    }
     #endif // DOXYGEN_SHOULD_SKIP_THIS
 
 private:

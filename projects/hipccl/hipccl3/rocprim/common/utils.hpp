@@ -55,9 +55,8 @@
 namespace common
 {
 template<unsigned int LogicalWarpSize>
-__device__
-constexpr bool device_test_enabled_for_warp_size_v
-    = ::rocprim::arch::wavefront::min_size() >= LogicalWarpSize;
+__device__ constexpr bool device_test_enabled_for_warp_size_v
+    = ::rocprim::arch::wavefront::max_size() >= LogicalWarpSize;
 
 inline char* __get_env(const char* name)
 {

@@ -255,7 +255,7 @@ constexpr target_arch get_target_arch_from_name(const char* const arch_name, con
  */
 constexpr target_arch device_target_arch()
 {
-#if defined(__amdgcn_processor__)
+#if defined(__amdgcn_processor__) && !defined(ROCPRIM_EXPERIMENTAL_SPIRV)
     // The terminating zero is not counted in the length of the string
     return get_target_arch_from_name(__amdgcn_processor__,
                                      sizeof(__amdgcn_processor__) - sizeof('\0'));
@@ -265,10 +265,12 @@ constexpr target_arch device_target_arch()
 }
 
 template<class Config>
-auto dispatch_target_arch(const target_arch target_arch)
+auto dispatch_target_arch([[maybe_unused]] const target_arch target_arch)
 {
+#if !defined(ROCPRIM_EXPERIMENTAL_SPIRV)
     switch(target_arch)
     {
+
         case target_arch::unknown:
             return Config::template architecture_config<target_arch::unknown>::params;
         case target_arch::gfx803:
@@ -296,6 +298,7 @@ auto dispatch_target_arch(const target_arch target_arch)
         case target_arch::invalid:
             assert(false && "Invalid target architecture selected at runtime.");
     }
+#endif
     return Config::template architecture_config<target_arch::unknown>::params;
 }
 
