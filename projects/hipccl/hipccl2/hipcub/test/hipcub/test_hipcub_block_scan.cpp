@@ -88,7 +88,8 @@ using SingleValueTestParams = ::testing::Types<
 TYPED_TEST_SUITE(HipcubBlockScanSingleValueTests, SingleValueTestParams);
 
 template<unsigned int BlockSize, hipcub::BlockScanAlgorithm Algorithm, class T>
-__global__ __launch_bounds__(BlockSize) void inclusive_scan_kernel(T* device_output)
+__global__ __launch_bounds__(BlockSize)
+void block_inclusive_scan_kernel(T* device_output)
 {
     const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
     T                  value = device_output[index];
@@ -158,7 +159,7 @@ TYPED_TEST(HipcubBlockScanSingleValueTests, InclusiveScan)
                             hipMemcpyHostToDevice));
 
         // Launching kernel
-        hipLaunchKernelGGL(HIP_KERNEL_NAME(inclusive_scan_kernel<block_size, algorithm, T>),
+        hipLaunchKernelGGL(HIP_KERNEL_NAME(block_inclusive_scan_kernel<block_size, algorithm, T>),
                            dim3(grid_size),
                            dim3(block_size),
                            0,
@@ -186,7 +187,7 @@ template<unsigned int               BlockSize,
          hipcub::BlockScanAlgorithm Algorithm,
          class T>
 __global__ __launch_bounds__(BlockSize)
-void inclusive_scan_initial_value_kernel(T* device_output, T initial_value)
+void block_inclusive_scan_initial_value_kernel(T* device_output, T initial_value)
 {
     const unsigned int index
         = (hipBlockIdx_x * BlockSize * ItemsPerThread) + hipThreadIdx_x * ItemsPerThread;
@@ -269,7 +270,7 @@ TYPED_TEST(HipcubBlockScanSingleValueTests, InclusiveScanInitialValue)
 
         // Launching kernel
         hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(inclusive_scan_initial_value_kernel<block_size, 1, algorithm, T>),
+            HIP_KERNEL_NAME(block_inclusive_scan_initial_value_kernel<block_size, 1, algorithm, T>),
             dim3(grid_size),
             dim3(block_size),
             0,
@@ -294,9 +295,8 @@ TYPED_TEST(HipcubBlockScanSingleValueTests, InclusiveScanInitialValue)
 }
 
 template<unsigned int BlockSize, hipcub::BlockScanAlgorithm Algorithm, class T>
-__global__
-    __launch_bounds__(BlockSize) void inclusive_scan_reduce_kernel(T* device_output,
-                                                                   T* device_output_reductions)
+__global__ __launch_bounds__(BlockSize)
+void block_inclusive_scan_reduce_kernel(T* device_output, T* device_output_reductions)
 {
     const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
     T                  value = device_output[index];
@@ -378,13 +378,14 @@ TYPED_TEST(HipcubBlockScanSingleValueTests, InclusiveScanReduce)
         HIP_CHECK(hipMemset(device_output_reductions, T(0), output_reductions.size() * sizeof(T)));
 
         // Launching kernel
-        hipLaunchKernelGGL(HIP_KERNEL_NAME(inclusive_scan_reduce_kernel<block_size, algorithm, T>),
-                           dim3(grid_size),
-                           dim3(block_size),
-                           0,
-                           0,
-                           device_output,
-                           device_output_reductions);
+        hipLaunchKernelGGL(
+            HIP_KERNEL_NAME(block_inclusive_scan_reduce_kernel<block_size, algorithm, T>),
+            dim3(grid_size),
+            dim3(block_size),
+            0,
+            0,
+            device_output,
+            device_output_reductions);
 
         HIP_CHECK(hipPeekAtLastError());
         HIP_CHECK(hipDeviceSynchronize());
@@ -415,11 +416,10 @@ template<unsigned int               BlockSize,
          unsigned int               ItemsPerThread,
          hipcub::BlockScanAlgorithm Algorithm,
          class T>
-__global__
-    __launch_bounds__(BlockSize)
-void inclusive_scan_reduce_initial_value_kernel(T* device_output,
-                                                T* device_output_reductions,
-                                                T  initial_value)
+__global__ __launch_bounds__(BlockSize)
+void block_inclusive_scan_reduce_initial_value_kernel(T* device_output,
+                                                      T* device_output_reductions,
+                                                      T  initial_value)
 {
     const unsigned int index
         = (hipBlockIdx_x * BlockSize * ItemsPerThread) + hipThreadIdx_x * ItemsPerThread;
@@ -445,9 +445,6 @@ void inclusive_scan_reduce_initial_value_kernel(T* device_output,
         device_output_reductions[hipBlockIdx_x] = reduction;
     }
 }
-
-// CUB fails to compute the block aggregate correctly when using the API for initial value support.
-#ifndef __HIP_PLATFORM_NVIDIA__
 
 TYPED_TEST(HipcubBlockScanSingleValueTests, InclusiveScanReduceInitialValue)
 {
@@ -486,18 +483,23 @@ TYPED_TEST(HipcubBlockScanSingleValueTests, InclusiveScanReduceInitialValue)
         SCOPED_TRACE(testing::Message() << "with initial_value = " << initial_value);
 
         // Calculate expected results on host
-        std::vector<T> expected(output.size(), 0);
-        std::vector<T> expected_reductions(output_reductions.size(), 0);
+        std::vector<T> expected(output.size(), T(0));
+        std::vector<T> expected_reductions(output_reductions.size(), T(0));
         for(size_t i = 0; i < output.size() / block_size; i++)
         {
             acc_type accumulator(initial_value);
+            acc_type reduction = output[i * block_size];
             for(size_t j = 0; j < block_size; j++)
             {
-                auto idx      = i * block_size + j;
-                accumulator   = binary_op_host(static_cast<acc_type>(output[idx]), accumulator);
+                size_t idx    = i * block_size + j;
+                accumulator   = binary_op_host(output[idx], accumulator);
                 expected[idx] = static_cast<T>(accumulator);
+                if(j > 0)
+                {
+                    reduction = binary_op_host(output[idx], reduction);
+                }
             }
-            expected_reductions[i] = expected[(i + 1) * block_size - 1];
+            expected_reductions[i] = reduction;
         }
 
         // Writing to device memory
@@ -520,7 +522,7 @@ TYPED_TEST(HipcubBlockScanSingleValueTests, InclusiveScanReduceInitialValue)
         // Launching kernel
         hipLaunchKernelGGL(
             HIP_KERNEL_NAME(
-                inclusive_scan_reduce_initial_value_kernel<block_size, 1, algorithm, T>),
+                block_inclusive_scan_reduce_initial_value_kernel<block_size, 1, algorithm, T>),
             dim3(grid_size),
             dim3(block_size),
             0,
@@ -553,11 +555,12 @@ TYPED_TEST(HipcubBlockScanSingleValueTests, InclusiveScanReduceInitialValue)
         HIP_CHECK(hipFree(device_output_reductions));
     }
 }
-#endif // __HIP_PLATFORM_NVIDIA__
 
 template<unsigned int BlockSize, hipcub::BlockScanAlgorithm Algorithm, class T>
-__global__ __launch_bounds__(BlockSize) void inclusive_scan_prefix_callback_kernel(
-    T* device_output, T* device_output_bp, T block_prefix)
+__global__ __launch_bounds__(BlockSize)
+void block_inclusive_scan_prefix_callback_kernel(T* device_output,
+                                                 T* device_output_bp,
+                                                 T  block_prefix)
 {
     const unsigned int index           = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
     T                  prefix_value    = block_prefix;
@@ -649,7 +652,7 @@ TYPED_TEST(HipcubBlockScanSingleValueTests, InclusiveScanPrefixCallback)
 
         // Launching kernel
         hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(inclusive_scan_prefix_callback_kernel<block_size, algorithm, T>),
+            HIP_KERNEL_NAME(block_inclusive_scan_prefix_callback_kernel<block_size, algorithm, T>),
             dim3(grid_size),
             dim3(block_size),
             0,
@@ -1111,7 +1114,7 @@ TYPED_TEST(HipcubBlockScanSingleValueTests, CustomStruct)
                             hipMemcpyHostToDevice));
 
         // Launching kernel
-        hipLaunchKernelGGL(HIP_KERNEL_NAME(inclusive_scan_kernel<block_size, algorithm, T>),
+        hipLaunchKernelGGL(HIP_KERNEL_NAME(block_inclusive_scan_kernel<block_size, algorithm, T>),
                            dim3(grid_size),
                            dim3(block_size),
                            0,
@@ -1184,7 +1187,8 @@ template<unsigned int               BlockSize,
          unsigned int               ItemsPerThread,
          hipcub::BlockScanAlgorithm Algorithm,
          class T>
-__global__ __launch_bounds__(BlockSize) void inclusive_scan_array_kernel(T* device_output)
+__global__ __launch_bounds__(BlockSize)
+void block_inclusive_scan_array_kernel(T* device_output)
 {
     const unsigned int index = ((hipBlockIdx_x * BlockSize) + hipThreadIdx_x) * ItemsPerThread;
 
@@ -1268,7 +1272,7 @@ TYPED_TEST(HipcubBlockScanInputArrayTests, InclusiveScan)
         // Launching kernel
         hipLaunchKernelGGL(
             HIP_KERNEL_NAME(
-                inclusive_scan_array_kernel<block_size, items_per_thread, algorithm, T>),
+                block_inclusive_scan_array_kernel<block_size, items_per_thread, algorithm, T>),
             dim3(grid_size),
             dim3(block_size),
             0,
@@ -1295,8 +1299,8 @@ template<unsigned int               BlockSize,
          unsigned int               ItemsPerThread,
          hipcub::BlockScanAlgorithm Algorithm,
          class T>
-__global__ __launch_bounds__(BlockSize) void inclusive_scan_reduce_array_kernel(
-    T* device_output, T* device_output_reductions)
+__global__ __launch_bounds__(BlockSize)
+void block_inclusive_scan_reduce_array_kernel(T* device_output, T* device_output_reductions)
 {
     const unsigned int index = ((hipBlockIdx_x * BlockSize) + hipThreadIdx_x) * ItemsPerThread;
 
@@ -1399,8 +1403,10 @@ TYPED_TEST(HipcubBlockScanInputArrayTests, InclusiveScanReduce)
 
         // Launching kernel
         hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(
-                inclusive_scan_reduce_array_kernel<block_size, items_per_thread, algorithm, T>),
+            HIP_KERNEL_NAME(block_inclusive_scan_reduce_array_kernel<block_size,
+                                                                     items_per_thread,
+                                                                     algorithm,
+                                                                     T>),
             dim3(grid_size),
             dim3(block_size),
             0,
@@ -1438,8 +1444,10 @@ template<unsigned int               BlockSize,
          unsigned int               ItemsPerThread,
          hipcub::BlockScanAlgorithm Algorithm,
          class T>
-__global__ __launch_bounds__(BlockSize) void inclusive_scan_array_prefix_callback_kernel(
-    T* device_output, T* device_output_bp, T block_prefix)
+__global__ __launch_bounds__(BlockSize)
+void block_inclusive_scan_array_prefix_callback_kernel(T* device_output,
+                                                       T* device_output_bp,
+                                                       T  block_prefix)
 {
     const unsigned int index = ((hipBlockIdx_x * BlockSize) + hipThreadIdx_x) * ItemsPerThread;
     T                  prefix_value    = block_prefix;
@@ -1552,10 +1560,10 @@ TYPED_TEST(HipcubBlockScanInputArrayTests, InclusiveScanPrefixCallback)
 
         // Launching kernel
         hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(inclusive_scan_array_prefix_callback_kernel<block_size,
-                                                                        items_per_thread,
-                                                                        algorithm,
-                                                                        T>),
+            HIP_KERNEL_NAME(block_inclusive_scan_array_prefix_callback_kernel<block_size,
+                                                                              items_per_thread,
+                                                                              algorithm,
+                                                                              T>),
             dim3(grid_size),
             dim3(block_size),
             0,

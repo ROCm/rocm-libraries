@@ -30,8 +30,6 @@
 #include "hipcub/device/device_segmented_reduce.hpp"
 #include "hipcub/iterator/counting_input_iterator.hpp"
 
-#include "test_utils_data_generation.hpp"
-
 template<class Input,
          class Output,
          class ReduceOp = hipcub::Sum,
@@ -584,6 +582,171 @@ TYPED_TEST(HipcubDeviceSegmentedReduce, Min)
 
     if(TestFixture::params::use_graphs)
         HIP_CHECK(hipStreamDestroy(stream));
+}
+
+TYPED_TEST(HipcubDeviceSegmentedReduce, Max)
+{
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    using input_type     = typename TestFixture::params::input_type;
+    using output_type    = typename TestFixture::params::output_type;
+    using reduce_op_type = typename hipcub::Max;
+    using result_type    = output_type;
+    using offset_type    = unsigned int;
+
+    constexpr input_type init = std::numeric_limits<input_type>::lowest();
+    reduce_op_type       reduce_op;
+
+    std::random_device         rd;
+    std::default_random_engine gen(rd());
+
+    std::uniform_int_distribution<size_t> segment_length_dis(
+        TestFixture::params::min_segment_length,
+        TestFixture::params::max_segment_length);
+
+    hipStream_t stream = 0; // default
+    if(TestFixture::params::use_graphs)
+    {
+        // Default stream does not support hipGraph stream capture, so create one
+        HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+    }
+
+    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    {
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+
+        for(size_t size : test_utils::get_sizes(seed_value))
+        {
+            SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+            // Generate data and calculate expected results
+            std::vector<output_type> aggregates_expected;
+
+            std::vector<input_type> values_input
+                = test_utils::get_random_data<input_type>(size, 0, 100, seed_value);
+
+            std::vector<offset_type> offsets;
+            unsigned int             segments_count     = 0;
+            size_t                   offset             = 0;
+            size_t                   max_segment_length = 0;
+            while(offset < size)
+            {
+                const size_t segment_length = segment_length_dis(gen);
+                offsets.push_back(offset);
+
+                const size_t end   = std::min(size, offset + segment_length);
+                max_segment_length = std::max(max_segment_length, end - offset);
+
+                result_type aggregate = init;
+                for(size_t i = offset; i < end; i++)
+                {
+                    aggregate = reduce_op(aggregate, static_cast<result_type>(values_input[i]));
+                }
+                aggregates_expected.push_back(aggregate);
+
+                segments_count++;
+                offset += segment_length;
+            }
+            offsets.push_back(size);
+
+            const float precision = test_utils::precision<result_type>::value * max_segment_length;
+            if(precision > 0.5)
+            {
+                std::cout << "Test is skipped from size " << size
+                          << " on, potential error of summation is more than 0.5 of the result "
+                             "with current or larger size"
+                          << std::endl;
+                continue;
+            }
+
+            input_type* d_values_input;
+            HIP_CHECK(
+                test_common_utils::hipMallocHelper(&d_values_input, size * sizeof(input_type)));
+            HIP_CHECK(hipMemcpy(d_values_input,
+                                values_input.data(),
+                                size * sizeof(input_type),
+                                hipMemcpyHostToDevice));
+
+            offset_type* d_offsets;
+            HIP_CHECK(
+                test_common_utils::hipMallocHelper(&d_offsets,
+                                                   (segments_count + 1) * sizeof(offset_type)));
+            HIP_CHECK(hipMemcpy(d_offsets,
+                                offsets.data(),
+                                (segments_count + 1) * sizeof(offset_type),
+                                hipMemcpyHostToDevice));
+
+            output_type* d_aggregates_output;
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_aggregates_output,
+                                                         segments_count * sizeof(output_type)));
+
+            size_t temporary_storage_bytes;
+
+            HIP_CHECK(hipcub::DeviceSegmentedReduce::Max(nullptr,
+                                                         temporary_storage_bytes,
+                                                         d_values_input,
+                                                         d_aggregates_output,
+                                                         segments_count,
+                                                         d_offsets,
+                                                         d_offsets + 1,
+                                                         stream));
+
+            ASSERT_GT(temporary_storage_bytes, 0U);
+
+            void* d_temporary_storage;
+            HIP_CHECK(
+                test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
+
+            test_utils::GraphHelper gHelper;
+            if(TestFixture::params::use_graphs)
+            {
+                gHelper.startStreamCapture(stream);
+            }
+
+            HIP_CHECK(hipcub::DeviceSegmentedReduce::Max(d_temporary_storage,
+                                                         temporary_storage_bytes,
+                                                         d_values_input,
+                                                         d_aggregates_output,
+                                                         segments_count,
+                                                         d_offsets,
+                                                         d_offsets + 1,
+                                                         stream));
+
+            if(TestFixture::params::use_graphs)
+            {
+                gHelper.createAndLaunchGraph(stream);
+            }
+
+            HIP_CHECK(hipFree(d_temporary_storage));
+
+            std::vector<output_type> aggregates_output(segments_count);
+            HIP_CHECK(hipMemcpy(aggregates_output.data(),
+                                d_aggregates_output,
+                                segments_count * sizeof(output_type),
+                                hipMemcpyDeviceToHost));
+
+            HIP_CHECK(hipFree(d_values_input));
+            HIP_CHECK(hipFree(d_offsets));
+            HIP_CHECK(hipFree(d_aggregates_output));
+
+            ASSERT_NO_FATAL_FAILURE(
+                test_utils::assert_near(aggregates_output, aggregates_expected, precision));
+
+            if(TestFixture::params::use_graphs)
+            {
+                gHelper.cleanupGraphHelper();
+            }
+        }
+    }
+
+    if(TestFixture::params::use_graphs)
+    {
+        HIP_CHECK(hipStreamDestroy(stream));
+    }
 }
 
 struct ArgMinDispatch

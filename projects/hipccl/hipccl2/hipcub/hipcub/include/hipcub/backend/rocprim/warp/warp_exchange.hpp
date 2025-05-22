@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2017-2024, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2017-2025, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -33,8 +33,8 @@
 #include "../../../config.hpp"
 #include "../util_type.hpp"
 
-#include "specializations/warp_exchange_shfl.hpp"
-#include "specializations/warp_exchange_smem.hpp"
+#include "specializations/warp_exchange_shfl.hpp" // IWYU pragma: export
+#include "specializations/warp_exchange_smem.hpp" // IWYU pragma: export
 
 #include <type_traits>
 

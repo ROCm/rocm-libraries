@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2024, NVIDIA CORPORATION. All rights reserved.
- * Modifications Copyright (c) 2024, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2024-2025, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -33,11 +33,18 @@
 
 #include "../iterator/counting_input_iterator.hpp"
 #include "../iterator/discard_output_iterator.hpp"
+#include "../thread/thread_operators.hpp"
 
-#include <rocprim/device/device_transform.hpp>
+#include <rocprim/device/device_transform.hpp> // IWYU pragma: export
+
+#include <type_traits>
 
 BEGIN_HIPCUB_NAMESPACE
 
+namespace detail
+{
+namespace bulk
+{
 template<class T, class OpT>
 struct OpWrapper
 {
@@ -53,160 +60,202 @@ struct OpWrapper
         return b;
     }
 };
+} // namespace bulk
+} // namespace detail
 
-template<class RandomAccessIteratorT, class OffsetT, class OpT>
-HIPCUB_RUNTIME_FUNCTION
-static hipError_t
-    ForEachN(RandomAccessIteratorT first, OffsetT num_items, OpT op, hipStream_t stream = 0)
+struct DeviceFor
 {
-    using T = typename std::iterator_traits<RandomAccessIteratorT>::value_type;
-
-    OpWrapper<T, OpT> wrapper_op = {op};
-
-    return rocprim::transform(first,
-                              first,
-                              num_items,
-                              wrapper_op,
-                              stream,
-                              HIPCUB_DETAIL_DEBUG_SYNC_VALUE);
-}
-
-template<class RandomAccessIteratorT, class OffsetT, class OpT>
-HIPCUB_RUNTIME_FUNCTION
-static hipError_t ForEachN(void*                 d_temp_storage,
-                           size_t&               temp_storage_bytes,
-                           RandomAccessIteratorT first,
-                           OffsetT               num_items,
-                           OpT                   op,
-                           hipStream_t           stream = 0)
-{
-    if(d_temp_storage == nullptr)
+    template<class RandomAccessIteratorT, class OffsetT, class OpT>
+    HIPCUB_RUNTIME_FUNCTION
+    static auto ForEachN(RandomAccessIteratorT first,
+                         OffsetT               num_items,
+                         OpT                   op,
+                         hipStream_t           stream = 0)
+        -> std::enable_if_t<!std::is_assignable<decltype(*std::declval<RandomAccessIteratorT>()),
+                                                typename std::iterator_traits<
+                                                    RandomAccessIteratorT>::value_type>::value,
+                            hipError_t>
     {
-        temp_storage_bytes = 1;
-        return hipSuccess;
+        using T              = typename std::iterator_traits<RandomAccessIteratorT>::value_type;
+        using OutputIterator = typename hipcub::DiscardOutputIterator<OffsetT>;
+
+        detail::bulk::OpWrapper<T, OpT> wrapper_op = {op};
+
+        OutputIterator output;
+
+        return rocprim::transform(first,
+                                  output,
+                                  num_items,
+                                  wrapper_op,
+                                  stream,
+                                  HIPCUB_DETAIL_DEBUG_SYNC_VALUE);
     }
 
-    return ForEachN(first, num_items, op, stream);
-}
+    template<class RandomAccessIteratorT, class OffsetT, class OpT>
+    HIPCUB_RUNTIME_FUNCTION
+    static auto
+        ForEachN(RandomAccessIteratorT first, OffsetT num_items, OpT op, hipStream_t stream = 0)
+            -> std::enable_if_t<std::is_assignable<decltype(*std::declval<RandomAccessIteratorT>()),
+                                                   typename std::iterator_traits<
+                                                       RandomAccessIteratorT>::value_type>::value,
+                                hipError_t>
+    {
+        using T = typename std::iterator_traits<RandomAccessIteratorT>::value_type;
 
-template<class RandomAccessIteratorT, class OffsetT, class OpT>
-HIPCUB_RUNTIME_FUNCTION
-static hipError_t
-    ForEachCopyN(RandomAccessIteratorT first, OffsetT num_items, OpT op, hipStream_t stream = 0)
-{
-    return ForEachN(first, num_items, op, stream);
-}
+        detail::bulk::OpWrapper<T, OpT> wrapper_op = {op};
 
-template<class RandomAccessIteratorT, class OffsetT, class OpT>
+        return rocprim::transform(first,
+                                  first,
+                                  num_items,
+                                  wrapper_op,
+                                  stream,
+                                  HIPCUB_DETAIL_DEBUG_SYNC_VALUE);
+    }
+
+    template<class RandomAccessIteratorT, class OffsetT, class OpT>
 HIPCUB_RUNTIME_FUNCTION
-static hipError_t ForEachCopyN(void*                 d_temp_storage,
+    static hipError_t ForEachN(void*                 d_temp_storage,
                                size_t&               temp_storage_bytes,
                                RandomAccessIteratorT first,
                                OffsetT               num_items,
                                OpT                   op,
                                hipStream_t           stream = 0)
-{
-    if(d_temp_storage == nullptr)
     {
-        temp_storage_bytes = 1;
-        return hipSuccess;
+        if(d_temp_storage == nullptr)
+        {
+            temp_storage_bytes = 1;
+            return hipSuccess;
+        }
+
+        return ForEachN(first, num_items, op, stream);
     }
 
-    return ForEachCopyN(first, num_items, op, stream);
-}
-
-template<class RandomAccessIteratorT, class OpT>
-HIPCUB_RUNTIME_FUNCTION
-static hipError_t
-    ForEach(RandomAccessIteratorT first, RandomAccessIteratorT last, OpT op, hipStream_t stream = 0)
-{
-    using offset_t = typename std::iterator_traits<RandomAccessIteratorT>::difference_type;
-    const offset_t num_items = static_cast<offset_t>(std::distance(first, last));
-
-    return ForEachN(first, num_items, op, stream);
-}
-
-template<class RandomAccessIteratorT, class OpT>
-HIPCUB_RUNTIME_FUNCTION
-static hipError_t ForEach(void*                 d_temp_storage,
-                          size_t&               temp_storage_bytes,
-                          RandomAccessIteratorT first,
-                          RandomAccessIteratorT last,
-                          OpT                   op,
-                          hipStream_t           stream = 0)
-{
-    if(d_temp_storage == nullptr)
+    template<class RandomAccessIteratorT, class OffsetT, class OpT>
+    HIPCUB_RUNTIME_FUNCTION
+    static hipError_t
+        ForEachCopyN(RandomAccessIteratorT first, OffsetT num_items, OpT op, hipStream_t stream = 0)
     {
-        temp_storage_bytes = 1;
-        return hipSuccess;
+        return ForEachN(first, num_items, op, stream);
     }
 
-    return ForEach(first, last, op, stream);
-}
-
-template<class RandomAccessIteratorT, class OpT>
+    template<class RandomAccessIteratorT, class OffsetT, class OpT>
 HIPCUB_RUNTIME_FUNCTION
-static hipError_t ForEachCopy(void*                 d_temp_storage,
+    static hipError_t ForEachCopyN(void*                 d_temp_storage,
+                                   size_t&               temp_storage_bytes,
+                                   RandomAccessIteratorT first,
+                                   OffsetT               num_items,
+                                   OpT                   op,
+                                   hipStream_t           stream = 0)
+    {
+        if(d_temp_storage == nullptr)
+        {
+            temp_storage_bytes = 1;
+            return hipSuccess;
+        }
+
+        return ForEachCopyN(first, num_items, op, stream);
+    }
+
+    template<class RandomAccessIteratorT, class OpT>
+HIPCUB_RUNTIME_FUNCTION
+    static hipError_t ForEach(RandomAccessIteratorT first,
+                              RandomAccessIteratorT last,
+                              OpT                   op,
+                              hipStream_t           stream = 0)
+    {
+        using offset_t = typename std::iterator_traits<RandomAccessIteratorT>::difference_type;
+        const offset_t num_items = static_cast<offset_t>(std::distance(first, last));
+
+        return ForEachN(first, num_items, op, stream);
+    }
+
+    template<class RandomAccessIteratorT, class OpT>
+HIPCUB_RUNTIME_FUNCTION
+    static hipError_t ForEach(void*                 d_temp_storage,
                               size_t&               temp_storage_bytes,
                               RandomAccessIteratorT first,
                               RandomAccessIteratorT last,
                               OpT                   op,
                               hipStream_t           stream = 0)
-{
-    if(d_temp_storage == nullptr)
     {
-        temp_storage_bytes = 1;
-        return hipSuccess;
+        if(d_temp_storage == nullptr)
+        {
+            temp_storage_bytes = 1;
+            return hipSuccess;
+        }
+
+        return ForEach(first, last, op, stream);
     }
 
-    return ForEachCopy(first, last, op, stream);
-}
-
-template<class RandomAccessIteratorT, class OpT>
+    template<class RandomAccessIteratorT, class OpT>
 HIPCUB_RUNTIME_FUNCTION
-static hipError_t ForEachCopy(RandomAccessIteratorT first,
-                              RandomAccessIteratorT last,
-                              OpT                   op,
-                              hipStream_t           stream = 0)
-{
-    return ForEach(first, last, op, stream);
-}
-
-template<class ShapeT, class OpT>
-HIPCUB_RUNTIME_FUNCTION
-static hipError_t Bulk(
-    void* d_temp_storage, size_t& temp_storage_bytes, ShapeT shape, OpT op, hipStream_t stream = 0)
-{
-    if(d_temp_storage == nullptr)
+    static hipError_t ForEachCopy(void*                 d_temp_storage,
+                                  size_t&               temp_storage_bytes,
+                                  RandomAccessIteratorT first,
+                                  RandomAccessIteratorT last,
+                                  OpT                   op,
+                                  hipStream_t           stream = 0)
     {
-        temp_storage_bytes = 1;
-        return hipSuccess;
+        if(d_temp_storage == nullptr)
+        {
+            temp_storage_bytes = 1;
+            return hipSuccess;
+        }
+
+        return ForEachCopy(first, last, op, stream);
     }
 
-    return Bulk(shape, op, stream);
-}
-
-template<class ShapeT, class OpT>
+    template<class RandomAccessIteratorT, class OpT>
 HIPCUB_RUNTIME_FUNCTION
-static hipError_t Bulk(ShapeT shape, OpT op, hipStream_t stream = 0)
-{
-    static_assert(std::is_integral<ShapeT>::value, "ShapeT must be an integral type");
+    static hipError_t ForEachCopy(RandomAccessIteratorT first,
+                                  RandomAccessIteratorT last,
+                                  OpT                   op,
+                                  hipStream_t           stream = 0)
+    {
+        return ForEach(first, last, op, stream);
+    }
 
-    using InputIterator  = typename hipcub::CountingInputIterator<ShapeT>;
-    using OutputIterator = typename hipcub::DiscardOutputIterator<ShapeT>;
+    template<class ShapeT, class OpT>
+HIPCUB_RUNTIME_FUNCTION
+    static hipError_t Bulk(ShapeT shape, OpT op, hipStream_t stream = 0)
+    {
+        static_assert(std::is_integral<ShapeT>::value, "ShapeT must be an integral type");
 
-    OpWrapper<ShapeT, OpT> wrapper_op = {op};
+        using InputIterator  = typename hipcub::CountingInputIterator<ShapeT>;
+        using OutputIterator = typename hipcub::DiscardOutputIterator<ShapeT>;
 
-    InputIterator  input(ShapeT(0));
-    OutputIterator output;
+        detail::bulk::OpWrapper<ShapeT, OpT> wrapper_op = {op};
 
-    return rocprim::transform(input,
-                              output,
-                              shape,
-                              wrapper_op,
-                              stream,
-                              HIPCUB_DETAIL_DEBUG_SYNC_VALUE);
-}
+        InputIterator  input(ShapeT(0));
+        OutputIterator output;
+
+        return rocprim::transform(input,
+                                  output,
+                                  shape,
+                                  wrapper_op,
+                                  stream,
+                                  HIPCUB_DETAIL_DEBUG_SYNC_VALUE);
+    }
+
+    template<class ShapeT, class OpT>
+HIPCUB_RUNTIME_FUNCTION
+    static hipError_t Bulk(void*       d_temp_storage,
+                           size_t&     temp_storage_bytes,
+                           ShapeT      shape,
+                           OpT         op,
+                           hipStream_t stream = 0)
+    {
+        static_assert(std::is_integral<ShapeT>::value, "ShapeT must be an integral type");
+
+        if(d_temp_storage == nullptr)
+        {
+            temp_storage_bytes = 1;
+            return hipSuccess;
+        }
+
+        return Bulk(shape, op, stream);
+    }
+};
 
 END_HIPCUB_NAMESPACE
 

@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2011-2021, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2022-2024, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2022-2025, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -33,7 +33,7 @@
 #include "../../../util_deprecated.hpp"
 
 #include <hipcub/thread/thread_operators.hpp>
-#include <rocprim/device/device_adjacent_difference.hpp>
+#include <rocprim/device/device_adjacent_difference.hpp> // IWYU pragma: export
 
 BEGIN_HIPCUB_NAMESPACE
 

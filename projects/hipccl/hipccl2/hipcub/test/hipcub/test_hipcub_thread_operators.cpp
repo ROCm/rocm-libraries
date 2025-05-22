@@ -141,7 +141,7 @@ TYPED_TEST(HipcubThreadOperatorsTests, InequalityWrapper)
 template<typename ScanOpT, typename InputT, typename OutputT>
 void algebraic_op_test(const InputT input_val, OutputT init_val)
 {
-    using accum_type = hipcub::detail::accumulator_t<ScanOpT, OutputT, InputT>;
+    using accum_type = hipcub::detail::accumulator_t<ScanOpT, InputT, OutputT>;
 
     ScanOpT op{};
 
