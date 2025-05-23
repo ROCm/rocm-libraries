@@ -23,15 +23,9 @@
 #include "benchmark_device_merge_sort_block_merge.parallel.hpp"
 #include "benchmark_utils.hpp"
 
-// CmdParser
-#include "cmdparser.hpp"
-
 #ifndef BENCHMARK_CONFIG_TUNING
     #include "../common/utils_custom_type.hpp"
 #endif
-
-// Google Benchmark
-#include <benchmark/benchmark.h>
 
 // HIP API
 #include <hip/hip_runtime.h>
@@ -47,67 +41,14 @@
     #include <stdint.h>
 #endif
 
-#ifndef DEFAULT_N
-const size_t DEFAULT_BYTES = 1024 * 1024 * 32 * 4;
-#endif
-
-#define CREATE_BENCHMARK(...)                                                \
-    {                                                                        \
-        const device_merge_sort_block_merge_benchmark<__VA_ARGS__> instance; \
-        REGISTER_BENCHMARK(benchmarks, bytes, seed, stream, instance);       \
-    }
+#define CREATE_BENCHMARK(...) \
+    executor.queue_instance(device_merge_sort_block_merge_benchmark<__VA_ARGS__>());
 
 int main(int argc, char* argv[])
 {
-    cli::Parser parser(argc, argv);
-    parser.set_optional<size_t>("size", "size", DEFAULT_BYTES, "number of bytes");
-    parser.set_optional<int>("trials", "trials", -1, "number of iterations");
-    parser.set_optional<std::string>("name_format",
-                                     "name_format",
-                                     "human",
-                                     "either: json,human,txt");
-    parser.set_optional<std::string>("seed", "seed", "random", get_seed_message());
-#ifdef BENCHMARK_CONFIG_TUNING
-    // optionally run an evenly split subset of benchmarks, when making multiple program invocations
-    parser.set_optional<int>("parallel_instance",
-                             "parallel_instance",
-                             0,
-                             "parallel instance index");
-    parser.set_optional<int>("parallel_instances",
-                             "parallel_instances",
-                             1,
-                             "total parallel instances");
-#endif
-    parser.run_and_exit_if_error();
+    benchmark_utils::executor executor(argc, argv, 128 * benchmark_utils::MiB, 10, 5);
 
-    // Parse argv
-    benchmark::Initialize(&argc, argv);
-    const size_t bytes  = parser.get<size_t>("size");
-    const int    trials = parser.get<int>("trials");
-    bench_naming::set_format(parser.get<std::string>("name_format"));
-    const std::string  seed_type = parser.get<std::string>("seed");
-    const managed_seed seed(seed_type);
-
-    // HIP
-    hipStream_t stream = 0; // default
-
-    // Benchmark info
-    add_common_benchmark_info();
-    benchmark::AddCustomContext("bytes", std::to_string(bytes));
-    benchmark::AddCustomContext("seed", seed_type);
-
-    // Add benchmarks
-    std::vector<benchmark::internal::Benchmark*> benchmarks = {};
-#ifdef BENCHMARK_CONFIG_TUNING
-    const int parallel_instance  = parser.get<int>("parallel_instance");
-    const int parallel_instances = parser.get<int>("parallel_instances");
-    config_autotune_register::register_benchmark_subset(benchmarks,
-                                                        parallel_instance,
-                                                        parallel_instances,
-                                                        bytes,
-                                                        seed,
-                                                        stream);
-#else // BENCHMARK_CONFIG_TUNING
+#ifndef BENCHMARK_CONFIG_TUNING
     CREATE_BENCHMARK(int)
     CREATE_BENCHMARK(long long)
     CREATE_BENCHMARK(int8_t)
@@ -137,25 +78,7 @@ int main(int argc, char* argv[])
     CREATE_BENCHMARK(custom_int2, custom_longlong_double)
     CREATE_BENCHMARK(rocprim::int128_t, rocprim::int128_t)
     CREATE_BENCHMARK(rocprim::uint128_t, rocprim::uint128_t)
-#endif // BENCHMARK_CONFIG_TUNING
+#endif
 
-    // Use manual timing
-    for(auto& b : benchmarks)
-    {
-        b->UseManualTime();
-        b->Unit(benchmark::kMillisecond);
-    }
-
-    // Force number of iterations
-    if(trials > 0)
-    {
-        for(auto& b : benchmarks)
-        {
-            b->Iterations(trials);
-        }
-    }
-
-    // Run benchmarks
-    benchmark::RunSpecifiedBenchmarks();
-    return 0;
+    executor.run();
 }

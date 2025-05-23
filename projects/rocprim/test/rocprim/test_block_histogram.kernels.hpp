@@ -38,7 +38,6 @@
 #include <rocprim/config.hpp>
 #include <rocprim/intrinsics/thread.hpp>
 #include <rocprim/type_traits.hpp>
-#include <rocprim/type_traits_interface.hpp>
 #include <rocprim/types.hpp>
 
 #include <type_traits>

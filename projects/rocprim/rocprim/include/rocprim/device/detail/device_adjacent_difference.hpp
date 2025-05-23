@@ -1,4 +1,4 @@
-// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -180,7 +180,7 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void adjacent_difference_kernel_impl(
     const std::size_t                                         starting_block)
 {
     using input_type  = typename std::iterator_traits<InputIt>::value_type;
-    using output_type = rocprim::invoke_result_binary_op_t<input_type, BinaryFunction>;
+    using output_type = ::rocprim::accumulator_t<BinaryFunction, input_type>;
 
     static constexpr adjacent_difference_config_params params = device_params<Config>();
 

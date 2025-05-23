@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -392,7 +392,7 @@ hipError_t search_impl(void*          temporary_storage,
         const unsigned int num_blocks = ceiling_div(size, items_per_block);
         if(key_size_bytes < shared_key_mem_size_bytes)
         {
-            if ROCPRIM_IF_CONSTEXPR(find_first)
+            if constexpr(find_first)
             {
                 start_timer();
                 search_kernels::search_kernel_shared<<<num_blocks, block_size, 0, stream>>>(
@@ -419,7 +419,7 @@ hipError_t search_impl(void*          temporary_storage,
         }
         else
         {
-            if ROCPRIM_IF_CONSTEXPR(find_first)
+            if constexpr(find_first)
             {
                 start_timer();
                 search_kernels::search_kernel<<<num_blocks, block_size, 0, stream>>>(
@@ -445,7 +445,7 @@ hipError_t search_impl(void*          temporary_storage,
             }
         }
 
-        if ROCPRIM_IF_CONSTEXPR(!find_first)
+        if constexpr(!find_first)
         {
             start_timer();
             search_kernels::reverse_index_kernel<<<1, 1, 0, stream>>>(tmp_output, size, keys_size);

@@ -21,18 +21,16 @@
 // SOFTWARE.
 
 #include "benchmark_utils.hpp"
-#include "cmdparser.hpp"
 
 #include "../common/utils_data_generation.hpp"
-
-#include <benchmark/benchmark.h>
+#include "../common/utils_device_ptr.hpp"
 
 #include <hip/driver_types.h>
 #include <hip/hip_runtime.h>
 
 #include <rocprim/device/device_merge_inplace.hpp>
 #include <rocprim/functional.hpp>
-#include <rocprim/type_traits_interface.hpp>
+#include <rocprim/type_traits.hpp>
 #include <rocprim/types.hpp>
 
 #include <cstddef>
@@ -42,10 +40,6 @@
 #include <string>
 #include <type_traits>
 #include <vector>
-
-#ifndef DEFAULT_BYTES
-const size_t DEFAULT_BYTES = 1024 * 1024 * 32 * 4;
-#endif
 
 template<typename T, T increment>
 struct random_monotonic_iterator
@@ -107,7 +101,7 @@ struct inplace_runner
     size_t      right_size;
     hipStream_t stream;
 
-    void*  d_temporary_storage     = nullptr;
+    common::device_ptr<void> d_temporary_storage;
     size_t temporary_storage_bytes = 0;
 
     compare_op_type compare_op{};
@@ -116,23 +110,21 @@ struct inplace_runner
         : d_data(data), left_size(left_size), right_size(right_size), stream(stream)
     {}
 
-    size_t prepare()
+    void prepare()
     {
-        HIP_CHECK(rocprim::merge_inplace(d_temporary_storage,
+        HIP_CHECK(rocprim::merge_inplace(d_temporary_storage.get(),
                                          temporary_storage_bytes,
                                          d_data,
                                          left_size,
                                          right_size,
                                          compare_op,
                                          stream));
-        HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
-
-        return temporary_storage_bytes;
+        d_temporary_storage.resize(temporary_storage_bytes);
     }
 
     void run()
     {
-        HIP_CHECK(rocprim::merge_inplace(d_temporary_storage,
+        HIP_CHECK(rocprim::merge_inplace(d_temporary_storage.get(),
                                          temporary_storage_bytes,
                                          d_data,
                                          left_size,
@@ -140,20 +132,16 @@ struct inplace_runner
                                          compare_op,
                                          stream));
     }
-
-    void clean()
-    {
-        HIP_CHECK(hipFree(d_temporary_storage));
-    }
 };
 
 template<class ValueT, class RunnerT>
-void run_merge_inplace_benchmarks(benchmark::State&   state,
-                                  size_t              size_a,
-                                  size_t              size_b,
-                                  const managed_seed& seed,
-                                  hipStream_t         stream)
+void run_merge_inplace_benchmarks(benchmark_utils::state&& state)
 {
+    const auto& stream = state.stream;
+    const auto& size_a = state.bytes;
+    const auto& size_b = state.bytes;
+    const auto& seed   = state.seed;
+
     using value_type  = ValueT;
     using runner_type = RunnerT;
 
@@ -175,117 +163,39 @@ void run_merge_inplace_benchmarks(benchmark::State&   state,
         h_data[size_a + i] = static_cast<value_type>(*(gen_b_it++));
     }
 
-    size_t num_bytes = total_size * sizeof(value_type);
+    common::device_ptr<value_type> d_data(total_size);
 
-    value_type* d_data;
+    runner_type runner{d_data.get(), size_a, size_b, stream};
 
-    HIP_CHECK(hipMalloc(&d_data, num_bytes));
+    runner.prepare();
 
-    runner_type runner{d_data, size_a, size_b, stream};
+    state.run_before_every_iteration([&] { d_data.store(h_data); });
 
-    size_t temp_storage_size = runner.prepare();
+    state.run([&] { runner.run(); });
 
-    hipEvent_t start, stop;
-    HIP_CHECK(hipEventCreate(&start));
-    HIP_CHECK(hipEventCreate(&stop));
-
-    for(auto _ : state)
-    {
-        HIP_CHECK(hipMemcpy(d_data, h_data.data(), num_bytes, hipMemcpyHostToDevice));
-
-        HIP_CHECK(hipEventRecord(start, stream));
-        runner.run();
-        HIP_CHECK(hipEventRecord(stop, stream));
-        HIP_CHECK(hipEventSynchronize(stop));
-
-        float elapsed_mseconds;
-        HIP_CHECK(hipEventElapsedTime(&elapsed_mseconds, start, stop));
-        state.SetIterationTime(elapsed_mseconds / 1000);
-
-        std::stringstream label;
-        label << "temp_storage=" << temp_storage_size;
-
-        state.SetLabel(label.str());
-    }
-
-    HIP_CHECK(hipEventDestroy(start));
-    HIP_CHECK(hipEventDestroy(stop));
-
-    state.SetBytesProcessed(state.iterations() * num_bytes);
-    state.SetItemsProcessed(state.iterations() * total_size);
-
-    HIP_CHECK(hipFree(d_data));
-    runner.clean();
+    state.set_throughput(total_size, sizeof(value_type));
 }
 
-#define CREATE_MERGE_INPLACE_BENCHMARK(Value)                                         \
-    benchmark::RegisterBenchmark(                                                     \
+#define CREATE_BENCHMARK(Value)                                                       \
+    executor.queue_fn(                                                                \
         bench_naming::format_name("{lvl:device,algo:merge_inplace,value_type:" #Value \
                                   ",cfg:default_config}")                             \
             .c_str(),                                                                 \
-        [=](benchmark::State& state) {                                                \
-            run_merge_inplace_benchmarks<Value, inplace_runner<Value>>(state,         \
-                                                                       size,          \
-                                                                       size,          \
-                                                                       seed,          \
-                                                                       stream);       \
-        })
+        [=](benchmark_utils::state&& state)                                           \
+        {                                                                             \
+            run_merge_inplace_benchmarks<Value, inplace_runner<Value>>(               \
+                std::forward<benchmark_utils::state>(state));                         \
+        });
 
 int main(int argc, char* argv[])
 {
-    cli::Parser parser(argc, argv);
-    parser.set_optional<size_t>("size", "size", DEFAULT_BYTES, "number of values");
-    parser.set_optional<int>("trials", "trials", -1, "number of iterations");
-    parser.set_optional<std::string>("name_format",
-                                     "name_format",
-                                     "human",
-                                     "either: json,human,txt");
-    parser.set_optional<std::string>("seed", "seed", "random", get_seed_message());
-    parser.run_and_exit_if_error();
+    benchmark_utils::executor executor(argc, argv, 128 * benchmark_utils::MiB, 1, 0);
 
-    // Parse argv
-    benchmark::Initialize(&argc, argv);
-    const size_t size   = parser.get<size_t>("size");
-    const int    trials = parser.get<int>("trials");
-    bench_naming::set_format(parser.get<std::string>("name_format"));
-    const std::string  seed_type = parser.get<std::string>("seed");
-    const managed_seed seed(seed_type);
+    CREATE_BENCHMARK(int8_t)
+    CREATE_BENCHMARK(int16_t)
+    CREATE_BENCHMARK(int32_t)
+    CREATE_BENCHMARK(int64_t)
+    CREATE_BENCHMARK(rocprim::int128_t)
 
-    // HIP
-    hipStream_t stream = hipStreamDefault; // default
-
-    // Benchmark info
-    add_common_benchmark_info();
-    benchmark::AddCustomContext("size", std::to_string(size));
-    benchmark::AddCustomContext("seed", seed_type);
-
-    // Add benchmarks
-    std::vector<benchmark::internal::Benchmark*> benchmarks = {
-        CREATE_MERGE_INPLACE_BENCHMARK(int8_t),
-        CREATE_MERGE_INPLACE_BENCHMARK(int16_t),
-        CREATE_MERGE_INPLACE_BENCHMARK(int32_t),
-        CREATE_MERGE_INPLACE_BENCHMARK(int64_t),
-        CREATE_MERGE_INPLACE_BENCHMARK(rocprim::int128_t),
-    };
-
-    // Use manual timing
-    for(auto& b : benchmarks)
-    {
-        b->UseManualTime();
-        b->Unit(benchmark::kMillisecond);
-    }
-
-    // Force number of iterations
-    if(trials > 0)
-    {
-        for(auto& b : benchmarks)
-        {
-            b->Iterations(trials);
-        }
-    }
-
-    // Run benchmarks
-    benchmark::RunSpecifiedBenchmarks();
-
-    return 0;
+    executor.run();
 }

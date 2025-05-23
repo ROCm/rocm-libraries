@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -59,7 +59,8 @@ struct radix_sort_condition_checker
     static constexpr bool descending
         = std::is_same<BinaryFunction, rocprim::greater<key_type>>::value;
     static constexpr bool ascending = std::is_same<BinaryFunction, rocprim::less<key_type>>::value;
-    static constexpr bool is_radix_key_fundamental = detail::radix_key_fundamental<key_type>::value;
+    static constexpr bool is_radix_key_fundamental
+        = rocprim::traits::radix_key_codec::radix_key_fundamental<key_type>::value;
     static constexpr bool use_radix_sort
         = (is_radix_key_fundamental || is_custom_decomposer) && (descending || ascending);
 };

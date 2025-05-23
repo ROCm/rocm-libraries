@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -34,12 +34,13 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-template<class Key, unsigned int WarpSize, class Value>
+template<class Key, unsigned int VirtualWaveSize, class Value>
 class warp_sort_shuffle
 {
 private:
     template<int warp, int xor_mask, class V, class BinaryFunction>
-    ROCPRIM_DEVICE ROCPRIM_INLINE typename std::enable_if<!(WarpSize > warp)>::type
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    typename std::enable_if<!(VirtualWaveSize > warp)>::type
         swap(Key& k, V& v, bool dir, BinaryFunction compare_function)
     {
         (void)k;
@@ -49,21 +50,25 @@ private:
     }
 
     template<int warp, int xor_mask, class V, class BinaryFunction>
-    ROCPRIM_DEVICE ROCPRIM_INLINE typename std::enable_if<(WarpSize > warp)>::type
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    typename std::enable_if<(VirtualWaveSize > warp)>::type
         swap(Key& k, V& v, bool dir, BinaryFunction compare_function)
     {
-        Key  k1   = warp_swizzle_shuffle(k, xor_mask, WarpSize);
+        Key  k1   = warp_swizzle_shuffle(k, xor_mask, VirtualWaveSize);
         bool swap = compare_function(dir ? k : k1, dir ? k1 : k);
         if(swap)
         {
             k = k1;
-            v = warp_swizzle_shuffle(v, xor_mask, WarpSize);
+            v = warp_swizzle_shuffle(v, xor_mask, VirtualWaveSize);
         }
     }
 
     template<int warp, int xor_mask, class V, class BinaryFunction, unsigned int ItemsPerThread>
-    ROCPRIM_DEVICE ROCPRIM_INLINE typename std::enable_if<!(WarpSize > warp)>::type swap(
-        Key (&k)[ItemsPerThread], V (&v)[ItemsPerThread], bool dir, BinaryFunction compare_function)
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    typename std::enable_if<!(VirtualWaveSize > warp)>::type swap(Key (&k)[ItemsPerThread],
+                                                                  V (&v)[ItemsPerThread],
+                                                                  bool           dir,
+                                                                  BinaryFunction compare_function)
     {
         (void)k;
         (void)v;
@@ -72,25 +77,29 @@ private:
     }
 
     template<int warp, int xor_mask, class V, class BinaryFunction, unsigned int ItemsPerThread>
-    ROCPRIM_DEVICE ROCPRIM_INLINE typename std::enable_if<(WarpSize > warp)>::type swap(
-        Key (&k)[ItemsPerThread], V (&v)[ItemsPerThread], bool dir, BinaryFunction compare_function)
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    typename std::enable_if<(VirtualWaveSize > warp)>::type swap(Key (&k)[ItemsPerThread],
+                                                                 V (&v)[ItemsPerThread],
+                                                                 bool           dir,
+                                                                 BinaryFunction compare_function)
     {
         Key k1[ItemsPerThread];
         ROCPRIM_UNROLL
         for(unsigned int item = 0; item < ItemsPerThread; item++)
         {
-            k1[item]  = warp_swizzle_shuffle(k[item], xor_mask, WarpSize);
+            k1[item]  = warp_swizzle_shuffle(k[item], xor_mask, VirtualWaveSize);
             bool swap = compare_function(dir ? k[item] : k1[item], dir ? k1[item] : k[item]);
             if(swap)
             {
                 k[item] = k1[item];
-                v[item] = warp_swizzle_shuffle(v[item], xor_mask, WarpSize);
+                v[item] = warp_swizzle_shuffle(v[item], xor_mask, VirtualWaveSize);
             }
         }
     }
 
     template<int warp, int xor_mask, class BinaryFunction>
-    ROCPRIM_DEVICE ROCPRIM_INLINE typename std::enable_if<!(WarpSize > warp)>::type
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    typename std::enable_if<!(VirtualWaveSize > warp)>::type
         swap(Key& k, bool dir, BinaryFunction compare_function)
     {
         (void)k;
@@ -99,10 +108,11 @@ private:
     }
 
     template<int warp, int xor_mask, class BinaryFunction>
-    ROCPRIM_DEVICE ROCPRIM_INLINE typename std::enable_if<(WarpSize > warp)>::type
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    typename std::enable_if<(VirtualWaveSize > warp)>::type
         swap(Key& k, bool dir, BinaryFunction compare_function)
     {
-        Key  k1   = warp_swizzle_shuffle(k, xor_mask, WarpSize);
+        Key  k1   = warp_swizzle_shuffle(k, xor_mask, VirtualWaveSize);
         bool swap = compare_function(dir ? k : k1, dir ? k1 : k);
         if(swap)
         {
@@ -111,7 +121,8 @@ private:
     }
 
     template<int warp, int xor_mask, class BinaryFunction, unsigned int ItemsPerThread>
-    ROCPRIM_DEVICE ROCPRIM_INLINE typename std::enable_if<!(WarpSize > warp)>::type
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    typename std::enable_if<!(VirtualWaveSize > warp)>::type
         swap(Key (&k)[ItemsPerThread], bool dir, BinaryFunction compare_function)
     {
         (void)k;
@@ -120,14 +131,15 @@ private:
     }
 
     template<int warp, int xor_mask, class BinaryFunction, unsigned int ItemsPerThread>
-    ROCPRIM_DEVICE ROCPRIM_INLINE typename std::enable_if<(WarpSize > warp)>::type
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    typename std::enable_if<(VirtualWaveSize > warp)>::type
         swap(Key (&k)[ItemsPerThread], bool dir, BinaryFunction compare_function)
     {
         Key k1[ItemsPerThread];
         ROCPRIM_UNROLL
         for(unsigned int item = 0; item < ItemsPerThread; item++)
         {
-            k1[item]  = warp_swizzle_shuffle(k[item], xor_mask, WarpSize);
+            k1[item]  = warp_swizzle_shuffle(k[item], xor_mask, VirtualWaveSize);
             bool swap = compare_function(dir ? k[item] : k1[item], dir ? k1[item] : k[item]);
             if(swap)
             {
@@ -207,7 +219,8 @@ private:
     }
 
     template<int warp, unsigned int ItemsPerThread, class BinaryFunction, class... KeyValue>
-    ROCPRIM_DEVICE ROCPRIM_INLINE typename std::enable_if<(WarpSize > warp)>::type
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    typename std::enable_if<(VirtualWaveSize > warp)>::type
         thread_merge(bool dir, BinaryFunction compare_function, KeyValue&... kv)
     {
         ROCPRIM_UNROLL
@@ -218,7 +231,8 @@ private:
     }
 
     template<int warp, unsigned int ItemsPerThread, class BinaryFunction, class... KeyValue>
-    ROCPRIM_DEVICE ROCPRIM_INLINE typename std::enable_if<!(WarpSize > warp)>::type
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    typename std::enable_if<!(VirtualWaveSize > warp)>::type
         thread_merge(bool /*dir*/, BinaryFunction /*compare_function*/, KeyValue&... /*kv*/)
     {}
 
@@ -229,7 +243,7 @@ private:
         static_assert(sizeof...(KeyValue) < 3,
                       "KeyValue parameter pack can 1 or 2 elements (key, or key and value)");
 
-        const unsigned int id = detail::logical_lane_id<WarpSize>();
+        const unsigned int id = detail::logical_lane_id<VirtualWaveSize>();
 
         swap<2, 1>(kv..., get_bit(id, 1) != get_bit(id, 0), compare_function);
 
@@ -268,7 +282,7 @@ private:
 
         static_assert(detail::is_power_of_two(ItemsPerThread), "ItemsPerThread must be power of 2");
 
-        const unsigned int id = detail::logical_lane_id<WarpSize>();
+        const unsigned int id = detail::logical_lane_id<VirtualWaveSize>();
 
         thread_sort<ItemsPerThread>(get_bit(id, 0) != 0, compare_function, kv...);
 
@@ -307,7 +321,7 @@ private:
     }
 
 public:
-    static_assert(detail::is_power_of_two(WarpSize), "WarpSize must be power of 2");
+    static_assert(detail::is_power_of_two(VirtualWaveSize), "VirtualWaveSize must be power of 2");
 
     using storage_type = ::rocprim::detail::empty_storage_type;
 
@@ -355,9 +369,9 @@ public:
         sort(Key& thread_key, Value& thread_value, BinaryFunction compare_function)
     {
         // Instead of passing large values between lanes we pass indices and gather values after sorting.
-        unsigned int v = detail::logical_lane_id<WarpSize>();
+        unsigned int v = detail::logical_lane_id<VirtualWaveSize>();
         bitonic_sort(compare_function, thread_key, v);
-        thread_value = warp_shuffle(thread_value, v, WarpSize);
+        thread_value = warp_shuffle(thread_value, v, VirtualWaveSize);
     }
 
     template<class BinaryFunction>
@@ -390,7 +404,7 @@ public:
         ROCPRIM_UNROLL
         for(unsigned int item = 0; item < ItemsPerThread; item++)
         {
-            v[item] = ItemsPerThread * detail::logical_lane_id<WarpSize>() + item;
+            v[item] = ItemsPerThread * detail::logical_lane_id<VirtualWaveSize>() + item;
         }
 
         bitonic_sort<ItemsPerThread>(compare_function, thread_keys, v);
@@ -408,7 +422,8 @@ public:
             ROCPRIM_UNROLL
             for(unsigned src_item = 0; src_item < ItemsPerThread; ++src_item)
             {
-                V temp = warp_shuffle(copy[src_item], v[dst_item] / ItemsPerThread, WarpSize);
+                V temp
+                    = warp_shuffle(copy[src_item], v[dst_item] / ItemsPerThread, VirtualWaveSize);
                 if(v[dst_item] % ItemsPerThread == src_item)
                     thread_values[dst_item] = temp;
             }

@@ -37,9 +37,11 @@
 #include <rocprim/intrinsics/arch.hpp>
 #include <rocprim/intrinsics/thread.hpp>
 #include <rocprim/type_traits.hpp>
-#include <rocprim/type_traits_interface.hpp>
 #include <rocprim/types.hpp>
 #include <rocprim/types/tuple.hpp>
+
+// CmdParser
+#include "cmdparser.hpp"
 
 #include <algorithm>
 #include <array>
@@ -48,6 +50,7 @@
 #include <iterator>
 #include <limits>
 #include <memory>
+#include <numeric>
 #include <random>
 #include <regex>
 #include <sstream>
@@ -83,6 +86,8 @@ public:
             seq.generate(seeds.begin(), seeds.end());
         }
     }
+
+    managed_seed() {}
 
     unsigned int get_0() const
     {
@@ -548,87 +553,6 @@ void static_for_each(Args&&... args)
                                                                  std::forward<Args>(args)...);
 }
 
-#define REGISTER_BENCHMARK(benchmarks, size, seed, stream, instance)                     \
-    benchmark::internal::Benchmark* benchmark = benchmark::RegisterBenchmark(            \
-        instance.name().c_str(),                                                         \
-        [instance](benchmark::State&   state,                                            \
-                   size_t              _size,                                            \
-                   const managed_seed& _seed,                                            \
-                   hipStream_t         _stream) { instance.run(state, _size, _seed, _stream); }, \
-        size,                                                                            \
-        seed,                                                                            \
-        stream);                                                                         \
-    benchmarks.emplace_back(benchmark)
-
-struct config_autotune_interface
-{
-    virtual std::string name() const = 0;
-    virtual std::string sort_key() const
-    {
-        return name();
-    };
-    virtual ~config_autotune_interface()                                                = default;
-    virtual void run(benchmark::State&, size_t, const managed_seed&, hipStream_t) const = 0;
-};
-
-struct config_autotune_register
-{
-    static std::vector<std::unique_ptr<config_autotune_interface>>& vector()
-    {
-        static std::vector<std::unique_ptr<config_autotune_interface>> storage;
-        return storage;
-    }
-
-    template<typename T>
-    static config_autotune_register create()
-    {
-        vector().push_back(std::make_unique<T>());
-        return config_autotune_register();
-    }
-
-    template<typename BulkCreateFunction>
-    static config_autotune_register create_bulk(BulkCreateFunction&& f)
-    {
-        std::forward<BulkCreateFunction>(f)(vector());
-        return config_autotune_register();
-    }
-
-    // Register a subset of all created benchmarks for the current parallel instance and add to vector.
-    static void register_benchmark_subset(std::vector<benchmark::internal::Benchmark*>& benchmarks,
-                                          int                 parallel_instance_index,
-                                          int                 parallel_instance_count,
-                                          size_t              size,
-                                          const managed_seed& seed,
-                                          hipStream_t         stream)
-    {
-        std::vector<std::unique_ptr<config_autotune_interface>>& configs = vector();
-        // sorting to get a consistent order because order of initialization of static variables is undefined by the C++ standard.
-        std::sort(configs.begin(),
-                  configs.end(),
-                  [](const auto& l, const auto& r) { return l->sort_key() < r->sort_key(); });
-        size_t configs_per_instance
-            = (configs.size() + parallel_instance_count - 1) / parallel_instance_count;
-        size_t start = std::min(parallel_instance_index * configs_per_instance, configs.size());
-        size_t end = std::min((parallel_instance_index + 1) * configs_per_instance, configs.size());
-        for(size_t i = start; i < end; ++i)
-        {
-            std::unique_ptr<config_autotune_interface>& uniq_ptr         = configs.at(i);
-            config_autotune_interface*                  tuning_benchmark = uniq_ptr.get();
-            benchmark::internal::Benchmark*             benchmark = benchmark::RegisterBenchmark(
-                tuning_benchmark->name().c_str(),
-                [tuning_benchmark](benchmark::State&   state,
-                                   size_t              size,
-                                   const managed_seed& seed,
-                                   hipStream_t         stream)
-                { tuning_benchmark->run(state, size, seed, stream); },
-                size,
-                seed,
-                stream);
-            benchmarks.emplace_back(benchmark);
-        }
-    }
-};
-
 // Inserts spaces at beginning of string if string shorter than specified length.
 inline std::string pad_string(std::string str, const size_t len)
 {
@@ -994,107 +918,6 @@ inline const char* Traits<rocprim::uint128_t>::name()
     return "rocprim::uint128_t";
 }
 
-inline void add_common_benchmark_info()
-{
-    hipDeviceProp_t devProp;
-    int             device_id = 0;
-    HIP_CHECK(hipGetDevice(&device_id));
-    HIP_CHECK(hipGetDeviceProperties(&devProp, device_id));
-
-    auto str = [](const std::string& name, const std::string& val)
-    { benchmark::AddCustomContext(name, val); };
-
-    auto num = [](const std::string& name, const auto& value)
-    { benchmark::AddCustomContext(name, std::to_string(value)); };
-
-    auto dim2 = [num](const std::string& name, const auto* values)
-    {
-        num(name + "_x", values[0]);
-        num(name + "_y", values[1]);
-    };
-
-    auto dim3 = [num, dim2](const std::string& name, const auto* values)
-    {
-        dim2(name, values);
-        num(name + "_z", values[2]);
-    };
-
-    str("hdp_name", devProp.name);
-    num("hdp_total_global_mem", devProp.totalGlobalMem);
-    num("hdp_shared_mem_per_block", devProp.sharedMemPerBlock);
-    num("hdp_regs_per_block", devProp.regsPerBlock);
-    num("hdp_warp_size", devProp.warpSize);
-    num("hdp_max_threads_per_block", devProp.maxThreadsPerBlock);
-    dim3("hdp_max_threads_dim", devProp.maxThreadsDim);
-    dim3("hdp_max_grid_size", devProp.maxGridSize);
-    num("hdp_clock_rate", devProp.clockRate);
-    num("hdp_memory_clock_rate", devProp.memoryClockRate);
-    num("hdp_memory_bus_width", devProp.memoryBusWidth);
-    num("hdp_total_const_mem", devProp.totalConstMem);
-    num("hdp_major", devProp.major);
-    num("hdp_minor", devProp.minor);
-    num("hdp_multi_processor_count", devProp.multiProcessorCount);
-    num("hdp_l2_cache_size", devProp.l2CacheSize);
-    num("hdp_max_threads_per_multiprocessor", devProp.maxThreadsPerMultiProcessor);
-    num("hdp_compute_mode", devProp.computeMode);
-    num("hdp_clock_instruction_rate", devProp.clockInstructionRate);
-    num("hdp_concurrent_kernels", devProp.concurrentKernels);
-    num("hdp_pci_domain_id", devProp.pciDomainID);
-    num("hdp_pci_bus_id", devProp.pciBusID);
-    num("hdp_pci_device_id", devProp.pciDeviceID);
-    num("hdp_max_shared_memory_per_multi_processor", devProp.maxSharedMemoryPerMultiProcessor);
-    num("hdp_is_multi_gpu_board", devProp.isMultiGpuBoard);
-    num("hdp_can_map_host_memory", devProp.canMapHostMemory);
-    str("hdp_gcn_arch_name", devProp.gcnArchName);
-    num("hdp_integrated", devProp.integrated);
-    num("hdp_cooperative_launch", devProp.cooperativeLaunch);
-    num("hdp_cooperative_multi_device_launch", devProp.cooperativeMultiDeviceLaunch);
-    num("hdp_max_texture_1d_linear", devProp.maxTexture1DLinear);
-    num("hdp_max_texture_1d", devProp.maxTexture1D);
-    dim2("hdp_max_texture_2d", devProp.maxTexture2D);
-    dim3("hdp_max_texture_3d", devProp.maxTexture3D);
-    num("hdp_mem_pitch", devProp.memPitch);
-    num("hdp_texture_alignment", devProp.textureAlignment);
-    num("hdp_texture_pitch_alignment", devProp.texturePitchAlignment);
-    num("hdp_kernel_exec_timeout_enabled", devProp.kernelExecTimeoutEnabled);
-    num("hdp_ecc_enabled", devProp.ECCEnabled);
-    num("hdp_tcc_driver", devProp.tccDriver);
-    num("hdp_cooperative_multi_device_unmatched_func", devProp.cooperativeMultiDeviceUnmatchedFunc);
-    num("hdp_cooperative_multi_device_unmatched_grid_dim",
-        devProp.cooperativeMultiDeviceUnmatchedGridDim);
-    num("hdp_cooperative_multi_device_unmatched_block_dim",
-        devProp.cooperativeMultiDeviceUnmatchedBlockDim);
-    num("hdp_cooperative_multi_device_unmatched_shared_mem",
-        devProp.cooperativeMultiDeviceUnmatchedSharedMem);
-    num("hdp_is_large_bar", devProp.isLargeBar);
-    num("hdp_asic_revision", devProp.asicRevision);
-    num("hdp_managed_memory", devProp.managedMemory);
-    num("hdp_direct_managed_mem_access_from_host", devProp.directManagedMemAccessFromHost);
-    num("hdp_concurrent_managed_access", devProp.concurrentManagedAccess);
-    num("hdp_pageable_memory_access", devProp.pageableMemoryAccess);
-    num("hdp_pageable_memory_access_uses_host_page_tables",
-        devProp.pageableMemoryAccessUsesHostPageTables);
-
-    const auto arch = devProp.arch;
-    num("hdp_arch_has_global_int32_atomics", arch.hasGlobalInt32Atomics);
-    num("hdp_arch_has_global_float_atomic_exch", arch.hasGlobalFloatAtomicExch);
-    num("hdp_arch_has_shared_int32_atomics", arch.hasSharedInt32Atomics);
-    num("hdp_arch_has_shared_float_atomic_exch", arch.hasSharedFloatAtomicExch);
-    num("hdp_arch_has_float_atomic_add", arch.hasFloatAtomicAdd);
-    num("hdp_arch_has_global_int64_atomics", arch.hasGlobalInt64Atomics);
-    num("hdp_arch_has_shared_int64_atomics", arch.hasSharedInt64Atomics);
-    num("hdp_arch_has_doubles", arch.hasDoubles);
-    num("hdp_arch_has_warp_vote", arch.hasWarpVote);
-    num("hdp_arch_has_warp_ballot", arch.hasWarpBallot);
-    num("hdp_arch_has_warp_shuffle", arch.hasWarpShuffle);
-    num("hdp_arch_has_funnel_shift", arch.hasFunnelShift);
-    num("hdp_arch_has_thread_fence_system", arch.hasThreadFenceSystem);
-    num("hdp_arch_has_sync_threads_ext", arch.hasSyncThreadsExt);
-    num("hdp_arch_has_surface_funcs", arch.hasSurfaceFuncs);
-    num("hdp_arch_has_3d_grid", arch.has3dGrid);
-    num("hdp_arch_has_dynamic_parallelism", arch.hasDynamicParallelism);
-}
-
 inline const char* get_block_scan_algorithm_name(rocprim::block_scan_algorithm alg)
 {
     switch(alg)
@@ -1126,6 +949,22 @@ inline const char* get_block_load_method_name(rocprim::block_load_method method)
     return "default_method";
 }
 
+inline const char* get_thread_load_method_name(rocprim::cache_load_modifier method)
+{
+    switch(method)
+    {
+        case rocprim::load_default: return "load_default";
+        case rocprim::load_ca: return "load_ca";
+        case rocprim::load_cg: return "load_cg";
+        case rocprim::load_nontemporal: return "load_nontemporal";
+        case rocprim::load_cv: return "load_cv";
+        case rocprim::load_ldg: return "load_ldg";
+        case rocprim::load_volatile: return "load_volatile";
+        case rocprim::load_count: return "load_count";
+    }
+    return "load_default";
+}
+
 template<std::size_t Size, std::size_t Alignment>
 struct alignas(Alignment) custom_aligned_type
 {
@@ -1145,5 +984,579 @@ inline std::string partition_config_name<rocprim::default_config>()
 {
     return "default_config";
 }
+
+namespace benchmark_utils
+{
+
+constexpr size_t KiB = 1024;
+constexpr size_t MiB = 1024 * KiB;
+constexpr size_t GiB = 1024 * MiB;
+
+class state
+{
+public:
+    state(hipStream_t         stream,
+          size_t              size,
+          const managed_seed& seed,
+          size_t              batch_iterations,
+          benchmark::State&   gbench_state,
+          size_t              warmup_iterations,
+          bool                cold,
+          bool                record_as_whole)
+        : stream(stream)
+        , size(size)
+        , bytes(size)
+        , seed(seed)
+        , batch_iterations(batch_iterations)
+        , gbench_state(gbench_state)
+        , warmup_iterations(warmup_iterations)
+        , cold(cold)
+        , record_as_whole(record_as_whole)
+        , events(record_as_whole ? 2 : batch_iterations * 2)
+    {}
+
+    // Used to reset the input array of algorithms like device_merge_inplace.
+    void run_before_every_iteration(std::function<void()> lambda)
+    {
+        run_before_every_iteration_lambda = lambda;
+    }
+
+    // Used to accumulate the results of state.run() calls.
+    void accumulate_total_gbench_iterations_every_run()
+    {
+        reset_total_gbench_iterations_every_run = false;
+    }
+
+    void run(std::function<void()> kernel)
+    {
+        for(auto& event : events)
+        {
+            HIP_CHECK(hipEventCreate(&event));
+        }
+
+        // Warm-up
+        for(size_t i = 0; i < warmup_iterations; ++i)
+        {
+            // Benchmarks may expect their kernel input to be prepared by this lambda,
+            // so to prevent any potential crashes, we call the lambda during warm-up.
+            if(run_before_every_iteration_lambda)
+            {
+                run_before_every_iteration_lambda();
+            }
+
+            kernel();
+        }
+        HIP_CHECK(hipDeviceSynchronize());
+
+        if(run_before_every_iteration_lambda && batch_iterations > 1 && record_as_whole)
+        {
+            std::cerr << "Error: This benchmark calls run_before_every_iteration() and has a "
+                         "batch_iterations count that is higher than 1, which means it does not "
+                         "support using --record_as_whole.\n";
+            exit(EXIT_FAILURE);
+        }
+
+        // Run
+        for(auto _ : gbench_state)
+        {
+            if(record_as_whole)
+            {
+                if(run_before_every_iteration_lambda)
+                {
+                    run_before_every_iteration_lambda();
+                }
+
+                HIP_CHECK(hipEventRecord(events[0], stream));
+                for(size_t i = 0; i < batch_iterations; ++i)
+                {
+                    kernel();
+                }
+                HIP_CHECK(hipEventRecord(events[1], stream));
+                HIP_CHECK(hipEventSynchronize(events[1]));
+
+                float elapsed_mseconds;
+                HIP_CHECK(hipEventElapsedTime(&elapsed_mseconds, events[0], events[1]));
+                times.emplace_back(elapsed_mseconds);
+                gbench_state.SetIterationTime(elapsed_mseconds / 1000);
+            }
+            else
+            {
+                for(size_t i = 0; i < batch_iterations; ++i)
+                {
+                    if(run_before_every_iteration_lambda)
+                    {
+                        run_before_every_iteration_lambda();
+                    }
+
+                    if(cold)
+                    {
+                        clear_gpu_cache(stream);
+                    }
+
+                    // Even events record the start time.
+                    HIP_CHECK(hipEventRecord(events[i * 2], stream));
+
+                    kernel();
+
+                    // Odd events record the stop time.
+                    HIP_CHECK(hipEventRecord(events[i * 2 + 1], stream));
+                }
+
+                // Wait until the last record event has completed.
+                HIP_CHECK(hipEventSynchronize(events[batch_iterations * 2 - 1]));
+
+                // Accumulate the total elapsed time.
+                double elapsed_mseconds = 0.0;
+                for(size_t i = 0; i < batch_iterations; i++)
+                {
+                    float iteration_mseconds;
+                    HIP_CHECK(
+                        hipEventElapsedTime(&iteration_mseconds, events[i * 2], events[i * 2 + 1]));
+                    times.emplace_back(iteration_mseconds);
+                    elapsed_mseconds += iteration_mseconds;
+                }
+                gbench_state.SetIterationTime(elapsed_mseconds / 1000);
+            }
+        }
+
+        if(reset_total_gbench_iterations_every_run)
+        {
+            total_gbench_iterations = 0;
+        }
+        total_gbench_iterations += gbench_state.iterations();
+
+        for(const auto& event : events)
+        {
+            HIP_CHECK(hipEventDestroy(event));
+        }
+    }
+
+    void set_throughput(size_t actual_size, size_t type_size)
+    {
+        if(has_set_throughput)
+        {
+            std::cerr << "Error: Benchmarks should only ever call set_throughput() once, at the "
+                         "very end.\n";
+            exit(EXIT_FAILURE);
+        }
+        has_set_throughput = true;
+
+        gbench_state.SetBytesProcessed(total_gbench_iterations * batch_iterations * actual_size
+                                       * type_size);
+        gbench_state.SetItemsProcessed(total_gbench_iterations * batch_iterations * actual_size);
+
+        output_statistics();
+    }
+
+    hipStream_t       stream;
+    size_t            size;
+    size_t            bytes;
+    managed_seed      seed;
+    size_t            batch_iterations;
+    benchmark::State& gbench_state;
+
+private:
+    // Zeros a 256 MiB buffer, used to clear the cache before each kernel call.
+    // 256 MiB is the size of the largest cache on any AMD GPU.
+    // It is currently not possible to fetch the L3 cache size from the runtime.
+    inline void clear_gpu_cache(hipStream_t stream)
+    {
+        constexpr size_t buf_size = 256 * MiB;
+        static void*     buf      = nullptr;
+        if(!buf)
+        {
+            HIP_CHECK(hipMalloc(&buf, buf_size));
+        }
+        HIP_CHECK(hipMemsetAsync(buf, 0, buf_size, stream));
+    }
+
+    void output_statistics()
+    {
+        double mean   = get_mean();
+        double median = get_median();
+        double stddev = get_stddev(mean);
+        double cv     = get_cv(stddev, mean);
+
+        gbench_state.counters["mean"]   = mean;
+        gbench_state.counters["median"] = median;
+        gbench_state.counters["stddev"] = stddev;
+        gbench_state.counters["cv"]     = cv;
+    }
+
+    double get_mean()
+    {
+        return std::reduce(times.begin(), times.end()) / times.size();
+    }
+
+    // Technically when times.size() is even, the median is the arithmetic mean
+    // of the elements k=N/2 and k=N/2+1. This would be overkill here,
+    // as times.size() is large enough, and recorded times are similar enough.
+    double get_median()
+    {
+        size_t center_index = times.size() / 2;
+        std::nth_element(times.begin(), times.begin() + center_index, times.end());
+        return times[center_index];
+    }
+
+    double get_stddev(double mean)
+    {
+        auto SumSquares = [](const std::vector<double>& v)
+        { return std::transform_reduce(v.begin(), v.end(), v.begin(), 0.0); };
+        auto Sqr  = [](double dat) { return dat * dat; };
+        auto Sqrt = [](double dat) { return dat < 0.0 ? 0.0 : std::sqrt(dat); };
+
+        double stddev = 0.0;
+        if(times.size() > 1)
+        {
+            double avg_squares = SumSquares(times) * (1.0 / times.size());
+            stddev = Sqrt(times.size() / (times.size() - 1.0) * (avg_squares - Sqr(mean)));
+        }
+        return stddev;
+    }
+
+    double get_cv(double stddev, double mean)
+    {
+        return times.size() >= 2 ? stddev / mean : 0.0;
+    }
+
+    size_t warmup_iterations;
+    bool   cold;
+    bool   record_as_whole;
+
+    std::vector<hipEvent_t> events;
+    std::function<void()>   run_before_every_iteration_lambda       = nullptr;
+    size_t                  total_gbench_iterations                 = 0;
+    bool                    reset_total_gbench_iterations_every_run = true;
+    std::vector<double>     times;
+    bool                    has_set_throughput = false;
+};
+
+struct autotune_interface
+{
+    virtual std::string name() const = 0;
+    virtual std::string sort_key() const
+    {
+        return name();
+    };
+    virtual ~autotune_interface()   = default;
+    virtual void run(state&& state) = 0;
+};
+
+class executor
+{
+public:
+    executor(int    argc,
+             char*  argv[],
+             size_t default_bytes,
+             size_t default_batch_iterations,
+             size_t default_warmup_iterations,
+             bool   default_cold   = true,
+             int    default_trials = -1)
+    {
+        cli::Parser parser(argc, argv);
+
+        set_optional_parser_flags(parser,
+                                  default_bytes,
+                                  default_batch_iterations,
+                                  default_warmup_iterations,
+                                  default_cold,
+                                  default_trials);
+
+        parser.run_and_exit_if_error();
+
+        benchmark::Initialize(&argc, argv);
+
+        parse(parser);
+
+        add_context();
+    }
+
+    template<typename T>
+    void queue_fn(const std::string& name, T bench_fn)
+    {
+        apply_settings(benchmark::RegisterBenchmark(name.c_str(),
+                                                    [=](benchmark::State& gbench_state)
+                                                    { bench_fn(new_state(gbench_state)); }));
+    }
+
+    template<typename Benchmark>
+    void queue_instance(Benchmark&& instance)
+    {
+        apply_settings(benchmark::RegisterBenchmark(
+            instance.name().c_str(),
+            [=](benchmark::State& gbench_state)
+            {
+                // run() requires a mutable instance, so create a mutable copy.
+                // Using [&instance] doesn't work, as it creates a dangling reference at runtime.
+                // Marking the lambda mutable doesn't work, as the &&instance it copies is const.
+                Benchmark(std::move(instance)).run(new_state(gbench_state));
+            }));
+    }
+
+    template<typename Benchmark>
+    static bool queue_sorted_instance()
+    {
+        sorted_benchmarks().push_back(std::make_unique<Benchmark>());
+        return true; // Must return something, as this function gets called in global scope.
+    }
+
+    template<typename BulkCreateFunction>
+    static bool queue_autotune(BulkCreateFunction&& f)
+    {
+        std::forward<BulkCreateFunction>(f)(sorted_benchmarks());
+        return true; // Must return something, as this function gets called in global scope.
+    }
+
+    void run()
+    {
+        register_sorted_subset(parallel_instance, parallel_instances);
+        benchmark::RunSpecifiedBenchmarks();
+    }
+
+private:
+    void set_optional_parser_flags(cli::Parser& parser,
+                                   size_t       default_bytes,
+                                   size_t       default_batch_iterations,
+                                   size_t       default_warmup_iterations,
+                                   bool         default_cold,
+                                   int          default_trials)
+    {
+        parser.set_optional<size_t>("size", "size", default_bytes, "size in bytes");
+        parser.set_optional<size_t>("batch_iterations",
+                                    "batch_iterations",
+                                    default_batch_iterations,
+                                    "number of batch iterations");
+        parser.set_optional<size_t>("warmup_iterations",
+                                    "warmup_iterations",
+                                    default_warmup_iterations,
+                                    "number of warmup iterations");
+        parser.set_optional<bool>("hot",
+                                  "hot",
+                                  !default_cold,
+                                  "don't clear the gpu cache on every batch iteration");
+        parser.set_optional<bool>(
+            "record_as_whole",
+            "record_as_whole",
+            false,
+            "record the batch iterations as a whole, at the very start and end, which necessitates "
+            "that gpu cache clearing between iterations can't be done");
+
+        parser.set_optional<std::string>("seed", "seed", "random", get_seed_message());
+        parser.set_optional<int>("trials", "trials", default_trials, "number of iterations");
+        parser.set_optional<std::string>("name_format",
+                                         "name_format",
+                                         "human",
+                                         "either: json,human,txt");
+
+        // Optionally run an evenly split subset of benchmarks for autotuning.
+        parser.set_optional<int>("parallel_instance",
+                                 "parallel_instance",
+                                 0,
+                                 "parallel instance index");
+        parser.set_optional<int>("parallel_instances",
+                                 "parallel_instances",
+                                 1,
+                                 "total parallel instances");
+    }
+
+    void parse(cli::Parser& parser)
+    {
+        size = parser.get<size_t>("size");
+
+        seed_type = parser.get<std::string>("seed");
+
+        seed = managed_seed(seed_type);
+
+        batch_iterations  = parser.get<size_t>("batch_iterations");
+        warmup_iterations = parser.get<size_t>("warmup_iterations");
+
+        cold            = !parser.get<bool>("hot");
+        record_as_whole = parser.get<bool>("record_as_whole");
+
+        trials             = parser.get<int>("trials");
+        parallel_instance  = parser.get<int>("parallel_instance");
+        parallel_instances = parser.get<int>("parallel_instances");
+
+        bench_naming::set_format(parser.get<std::string>("name_format"));
+    }
+
+    void add_context()
+    {
+        benchmark::AddCustomContext("size", std::to_string(size));
+        benchmark::AddCustomContext("seed", seed_type);
+
+        benchmark::AddCustomContext("batch_iterations", std::to_string(batch_iterations));
+        benchmark::AddCustomContext("warmup_iterations", std::to_string(warmup_iterations));
+
+        hipDeviceProp_t devProp;
+        int             device_id = 0;
+        HIP_CHECK(hipGetDevice(&device_id));
+        HIP_CHECK(hipGetDeviceProperties(&devProp, device_id));
+
+        auto str = [](const std::string& name, const std::string& val)
+        { benchmark::AddCustomContext(name, val); };
+
+        auto num = [](const std::string& name, const auto& value)
+        { benchmark::AddCustomContext(name, std::to_string(value)); };
+
+        auto dim2 = [num](const std::string& name, const auto* values)
+        {
+            num(name + "_x", values[0]);
+            num(name + "_y", values[1]);
+        };
+
+        auto dim3 = [num, dim2](const std::string& name, const auto* values)
+        {
+            dim2(name, values);
+            num(name + "_z", values[2]);
+        };
+
+        str("hdp_name", devProp.name);
+        num("hdp_total_global_mem", devProp.totalGlobalMem);
+        num("hdp_shared_mem_per_block", devProp.sharedMemPerBlock);
+        num("hdp_regs_per_block", devProp.regsPerBlock);
+        num("hdp_warp_size", devProp.warpSize);
+        num("hdp_max_threads_per_block", devProp.maxThreadsPerBlock);
+        dim3("hdp_max_threads_dim", devProp.maxThreadsDim);
+        dim3("hdp_max_grid_size", devProp.maxGridSize);
+        num("hdp_clock_rate", devProp.clockRate);
+        num("hdp_memory_clock_rate", devProp.memoryClockRate);
+        num("hdp_memory_bus_width", devProp.memoryBusWidth);
+        num("hdp_total_const_mem", devProp.totalConstMem);
+        num("hdp_major", devProp.major);
+        num("hdp_minor", devProp.minor);
+        num("hdp_multi_processor_count", devProp.multiProcessorCount);
+        num("hdp_l2_cache_size", devProp.l2CacheSize);
+        num("hdp_max_threads_per_multiprocessor", devProp.maxThreadsPerMultiProcessor);
+        num("hdp_compute_mode", devProp.computeMode);
+        num("hdp_clock_instruction_rate", devProp.clockInstructionRate);
+        num("hdp_concurrent_kernels", devProp.concurrentKernels);
+        num("hdp_pci_domain_id", devProp.pciDomainID);
+        num("hdp_pci_bus_id", devProp.pciBusID);
+        num("hdp_pci_device_id", devProp.pciDeviceID);
+        num("hdp_max_shared_memory_per_multi_processor", devProp.maxSharedMemoryPerMultiProcessor);
+        num("hdp_is_multi_gpu_board", devProp.isMultiGpuBoard);
+        num("hdp_can_map_host_memory", devProp.canMapHostMemory);
+        str("hdp_gcn_arch_name", devProp.gcnArchName);
+        num("hdp_integrated", devProp.integrated);
+        num("hdp_cooperative_launch", devProp.cooperativeLaunch);
+        num("hdp_cooperative_multi_device_launch", devProp.cooperativeMultiDeviceLaunch);
+        num("hdp_max_texture_1d_linear", devProp.maxTexture1DLinear);
+        num("hdp_max_texture_1d", devProp.maxTexture1D);
+        dim2("hdp_max_texture_2d", devProp.maxTexture2D);
+        dim3("hdp_max_texture_3d", devProp.maxTexture3D);
+        num("hdp_mem_pitch", devProp.memPitch);
+        num("hdp_texture_alignment", devProp.textureAlignment);
+        num("hdp_texture_pitch_alignment", devProp.texturePitchAlignment);
+        num("hdp_kernel_exec_timeout_enabled", devProp.kernelExecTimeoutEnabled);
+        num("hdp_ecc_enabled", devProp.ECCEnabled);
+        num("hdp_tcc_driver", devProp.tccDriver);
+        num("hdp_cooperative_multi_device_unmatched_func",
+            devProp.cooperativeMultiDeviceUnmatchedFunc);
+        num("hdp_cooperative_multi_device_unmatched_grid_dim",
+            devProp.cooperativeMultiDeviceUnmatchedGridDim);
+        num("hdp_cooperative_multi_device_unmatched_block_dim",
+            devProp.cooperativeMultiDeviceUnmatchedBlockDim);
+        num("hdp_cooperative_multi_device_unmatched_shared_mem",
+            devProp.cooperativeMultiDeviceUnmatchedSharedMem);
+        num("hdp_is_large_bar", devProp.isLargeBar);
+        num("hdp_asic_revision", devProp.asicRevision);
+        num("hdp_managed_memory", devProp.managedMemory);
+        num("hdp_direct_managed_mem_access_from_host", devProp.directManagedMemAccessFromHost);
+        num("hdp_concurrent_managed_access", devProp.concurrentManagedAccess);
+        num("hdp_pageable_memory_access", devProp.pageableMemoryAccess);
+        num("hdp_pageable_memory_access_uses_host_page_tables",
+            devProp.pageableMemoryAccessUsesHostPageTables);
+
+        const auto arch = devProp.arch;
+        num("hdp_arch_has_global_int32_atomics", arch.hasGlobalInt32Atomics);
+        num("hdp_arch_has_global_float_atomic_exch", arch.hasGlobalFloatAtomicExch);
+        num("hdp_arch_has_shared_int32_atomics", arch.hasSharedInt32Atomics);
+        num("hdp_arch_has_shared_float_atomic_exch", arch.hasSharedFloatAtomicExch);
+        num("hdp_arch_has_float_atomic_add", arch.hasFloatAtomicAdd);
+        num("hdp_arch_has_global_int64_atomics", arch.hasGlobalInt64Atomics);
+        num("hdp_arch_has_shared_int64_atomics", arch.hasSharedInt64Atomics);
+        num("hdp_arch_has_doubles", arch.hasDoubles);
+        num("hdp_arch_has_warp_vote", arch.hasWarpVote);
+        num("hdp_arch_has_warp_ballot", arch.hasWarpBallot);
+        num("hdp_arch_has_warp_shuffle", arch.hasWarpShuffle);
+        num("hdp_arch_has_funnel_shift", arch.hasFunnelShift);
+        num("hdp_arch_has_thread_fence_system", arch.hasThreadFenceSystem);
+        num("hdp_arch_has_sync_threads_ext", arch.hasSyncThreadsExt);
+        num("hdp_arch_has_surface_funcs", arch.hasSurfaceFuncs);
+        num("hdp_arch_has_3d_grid", arch.has3dGrid);
+        num("hdp_arch_has_dynamic_parallelism", arch.hasDynamicParallelism);
+    }
+
+    static std::vector<std::unique_ptr<autotune_interface>>& sorted_benchmarks()
+    {
+        static std::vector<std::unique_ptr<autotune_interface>> sorted_benchmarks;
+        return sorted_benchmarks;
+    }
+
+    state new_state(benchmark::State& gbench_state)
+    {
+        return state(stream,
+                     size,
+                     seed,
+                     batch_iterations,
+                     gbench_state,
+                     warmup_iterations,
+                     cold,
+                     record_as_whole);
+    }
+
+    void apply_settings(benchmark::internal::Benchmark* b)
+    {
+        b->UseManualTime();
+        b->Unit(benchmark::kMillisecond);
+
+        // trials is -1 by default.
+        if(trials > 0)
+        {
+            b->Iterations(trials);
+        }
+    }
+
+    // Register a subset of all benchmarks for the current parallel instance.
+    void register_sorted_subset(int parallel_instance_index, int parallel_instance_count)
+    {
+        // Sort to get a consistent order, because the order of static variable initialization is undefined by the C++ standard.
+        std::sort(sorted_benchmarks().begin(),
+                  sorted_benchmarks().end(),
+                  [](const auto& l, const auto& r) { return l->sort_key() < r->sort_key(); });
+
+        size_t configs_per_instance
+            = (sorted_benchmarks().size() + parallel_instance_count - 1) / parallel_instance_count;
+        size_t start
+            = std::min(parallel_instance_index * configs_per_instance, sorted_benchmarks().size());
+        size_t end = std::min((parallel_instance_index + 1) * configs_per_instance,
+                              sorted_benchmarks().size());
+
+        for(size_t i = start; i < end; ++i)
+        {
+            autotune_interface* benchmark = sorted_benchmarks().at(i).get();
+
+            apply_settings(benchmark::RegisterBenchmark(
+                benchmark->name().c_str(),
+                [=](benchmark::State& gbench_state) { benchmark->run(new_state(gbench_state)); }));
+        }
+    }
+
+    hipStream_t  stream = hipStreamDefault;
+    size_t       size;
+    std::string  seed_type;
+    managed_seed seed;
+    size_t       batch_iterations;
+    size_t       warmup_iterations;
+    bool         cold;
+    bool         record_as_whole;
+
+    int trials;
+    int parallel_instance;
+    int parallel_instances;
+};
+
+} // namespace benchmark_utils
 
 #endif // ROCPRIM_BENCHMARK_UTILS_HPP_

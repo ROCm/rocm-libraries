@@ -36,7 +36,6 @@
 #include "../intrinsics/thread.hpp"
 #include "../thread/thread_search.hpp"
 
-#include <hip/hip_cooperative_groups.h>
 #include <hip/hip_runtime.h>
 
 #include <chrono>
@@ -652,7 +651,7 @@ struct merge_inplace_impl
 /// signature of the function should be equivalent to the following: `bool f(const T &a, const T &b);`.
 /// The signature does not need to have `const &`, but the function object must not modify
 /// the objects passed to it. The default value is `BinaryFunction()`.
-/// \param [in] stream The HIP stream object. Default is `0` (`hipDefaultStream`).
+/// \param [in] stream The HIP stream object. Default is `0` (`hipStreamDefault`).
 /// \param [in] debug_synchronous If `true`, forces a device synchronization after every kernel
 /// launch in order to check for errors. Default value is `false`.
 ///
