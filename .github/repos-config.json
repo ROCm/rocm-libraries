@@ -133,7 +133,7 @@
       "category": "projects",
       "auto_subtree_pull": false,
       "auto_subtree_push": true,
-      "enable_pr_fanout": true
+      "enable_pr_fanout": false
     },
     {
       "name": "rocrand",
