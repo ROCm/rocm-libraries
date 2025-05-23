@@ -28,24 +28,23 @@
 #pragma once
 
 #include <thrust/detail/config.h>
-#include <thrust/detail/cpp14_required.h>
 
-#if THRUST_CPP_DIALECT >= 2014
+#include <thrust/detail/cpp_version_check.h>
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
+#if THRUST_CPP_DIALECT >= 2017
 
-#include <thrust/iterator/iterator_traits.h>
+#  if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
 
-#include <thrust/system/cuda/config.h>
-#include <thrust/system/cuda/detail/async/customization.h>
-#include <thrust/system/cuda/detail/util.h>
-#include <thrust/system/cuda/future.h>
+#    include <thrust/system/cuda/config.h>
 
-#include <thrust/type_traits/remove_cvref.h>
+#    include <thrust/distance.h>
+#    include <thrust/iterator/iterator_traits.h>
+#    include <thrust/system/cuda/detail/async/customization.h>
+#    include <thrust/system/cuda/detail/util.h>
+#    include <thrust/system/cuda/future.h>
+#    include <thrust/type_traits/remove_cvref.h>
 
-#include <thrust/distance.h>
-
-#include <type_traits>
+#    include <type_traits>
 
 // TODO specialize for thrust::plus to use e.g. InclusiveSum instead of IncScan
 //  - Note that thrust::plus<> is transparent, cub::Sum is not. This should be
@@ -60,31 +59,13 @@ namespace cuda
 namespace detail
 {
 
-template <typename DerivedPolicy,
-          typename ForwardIt,
-          typename Size,
-          typename OutputIt,
-          typename BinaryOp>
+template <typename DerivedPolicy, typename ForwardIt, typename Size, typename OutputIt, typename BinaryOp>
 unique_eager_event
-async_inclusive_scan_n(execution_policy<DerivedPolicy>& policy,
-                       ForwardIt first,
-                       Size n,
-                       OutputIt out,
-                       BinaryOp op)
+async_inclusive_scan_n(execution_policy<DerivedPolicy>& policy, ForwardIt first, Size n, OutputIt out, BinaryOp op)
 {
-  using AccumT = typename thrust::iterator_traits<ForwardIt>::value_type;
-  using Dispatch32 = cub::DispatchScan<ForwardIt,
-                                       OutputIt,
-                                       BinaryOp,
-                                       cub::NullType,
-                                       std::int32_t,
-                                       AccumT>;
-  using Dispatch64 = cub::DispatchScan<ForwardIt,
-                                       OutputIt,
-                                       BinaryOp,
-                                       cub::NullType,
-                                       std::int64_t,
-                                       AccumT>;
+  using AccumT     = typename thrust::iterator_traits<ForwardIt>::value_type;
+  using Dispatch32 = cub::DispatchScan<ForwardIt, OutputIt, BinaryOp, cub::NullType, std::int32_t, AccumT>;
+  using Dispatch64 = cub::DispatchScan<ForwardIt, OutputIt, BinaryOp, cub::NullType, std::int64_t, AccumT>;
 
   auto const device_alloc = get_async_device_allocator(policy);
   unique_eager_event ev;
@@ -93,27 +74,20 @@ async_inclusive_scan_n(execution_policy<DerivedPolicy>& policy,
   cudaError_t status;
   size_t tmp_size = 0;
   {
-    THRUST_INDEX_TYPE_DISPATCH2(status,
-                                Dispatch32::Dispatch,
-                                Dispatch64::Dispatch,
-                                n,
-                                (nullptr,
-                                  tmp_size,
-                                  first,
-                                  out,
-                                  op,
-                                  cub::NullType{},
-                                  n_fixed,
-                                  nullptr));
-    thrust::cuda_cub::throw_on_error(status,
-                                     "after determining tmp storage "
-                                     "requirements for inclusive_scan");
+    THRUST_INDEX_TYPE_DISPATCH2(
+      status,
+      Dispatch32::Dispatch,
+      Dispatch64::Dispatch,
+      n,
+      (nullptr, tmp_size, first, out, op, cub::NullType{}, n_fixed, nullptr));
+    thrust::cuda_cub::throw_on_error(
+      status,
+      "after determining tmp storage "
+      "requirements for inclusive_scan");
   }
 
   // Allocate temporary storage.
-  auto content = uninitialized_allocate_unique_n<std::uint8_t>(
-    device_alloc, tmp_size
-  );
+  auto content        = uninitialized_allocate_unique_n<std::uint8_t>(device_alloc, tmp_size);
   void* const tmp_ptr = raw_pointer_cast(content.get());
 
   // Set up stream with dependencies.
@@ -122,73 +96,151 @@ async_inclusive_scan_n(execution_policy<DerivedPolicy>& policy,
   if (thrust::cuda_cub::default_stream() != user_raw_stream)
   {
     ev = make_dependent_event(
-      std::tuple_cat(
-        std::make_tuple(
-          std::move(content),
-          unique_stream(nonowning, user_raw_stream)
-        ),
-        extract_dependencies(std::move(thrust::detail::derived_cast(policy)))));
+      std::tuple_cat(std::make_tuple(std::move(content), unique_stream(nonowning, user_raw_stream)),
+                     extract_dependencies(std::move(thrust::detail::derived_cast(policy)))));
   }
   else
   {
-    ev = make_dependent_event(
-      std::tuple_cat(
-        std::make_tuple(std::move(content)),
-        extract_dependencies(std::move(thrust::detail::derived_cast(policy)))));
+    ev = make_dependent_event(std::tuple_cat(
+      std::make_tuple(std::move(content)), extract_dependencies(std::move(thrust::detail::derived_cast(policy)))));
   }
 
   // Run scan.
   {
-    THRUST_INDEX_TYPE_DISPATCH2(status,
-                                Dispatch32::Dispatch,
-                                Dispatch64::Dispatch,
-                                n,
-                                (tmp_ptr,
-                                 tmp_size,
-                                 first,
-                                 out,
-                                 op,
-                                 cub::NullType{},
-                                 n_fixed,
-                                 user_raw_stream));
-    thrust::cuda_cub::throw_on_error(status,
-                                     "after dispatching inclusive_scan kernel");
+    THRUST_INDEX_TYPE_DISPATCH2(
+      status,
+      Dispatch32::Dispatch,
+      Dispatch64::Dispatch,
+      n,
+      (tmp_ptr, tmp_size, first, out, op, cub::NullType{}, n_fixed, user_raw_stream));
+    thrust::cuda_cub::throw_on_error(status, "after dispatching inclusive_scan kernel");
   }
 
   return ev;
 }
 
-}}} // namespace system::cuda::detail
+template <typename DerivedPolicy,
+          typename ForwardIt,
+          typename Size,
+          typename OutputIt,
+          typename InitialValueType,
+          typename BinaryOp>
+unique_eager_event async_inclusive_scan_n(
+  execution_policy<DerivedPolicy>& policy, ForwardIt first, Size n, OutputIt out, InitialValueType init, BinaryOp op)
+{
+  using InputValueT = cub::detail::InputValue<InitialValueType>;
+  using AccumT      = typename ::cuda::std::
+    __accumulator_t<BinaryOp, typename ::cuda::std::iterator_traits<ForwardIt>::value_type, InitialValueType>;
+  constexpr bool ForceInclusive = true;
+
+  using Dispatch32 =
+    cub::DispatchScan<ForwardIt,
+                      OutputIt,
+                      BinaryOp,
+                      InputValueT,
+                      std::int32_t,
+                      AccumT,
+                      cub::DeviceScanPolicy<AccumT, BinaryOp>,
+                      ForceInclusive>;
+  using Dispatch64 =
+    cub::DispatchScan<ForwardIt,
+                      OutputIt,
+                      BinaryOp,
+                      InputValueT,
+                      std::int64_t,
+                      AccumT,
+                      cub::DeviceScanPolicy<AccumT, BinaryOp>,
+                      ForceInclusive>;
+
+  InputValueT init_value(init);
+
+  auto const device_alloc = get_async_device_allocator(policy);
+  unique_eager_event ev;
+
+  // Determine temporary device storage requirements.
+  cudaError_t status;
+  size_t tmp_size = 0;
+  {
+    THRUST_INDEX_TYPE_DISPATCH2(
+      status,
+      Dispatch32::Dispatch,
+      Dispatch64::Dispatch,
+      n,
+      (nullptr, tmp_size, first, out, op, init_value, n_fixed, nullptr));
+    thrust::cuda_cub::throw_on_error(
+      status,
+      "after determining tmp storage "
+      "requirements for inclusive_scan");
+  }
+
+  // Allocate temporary storage.
+  auto content        = uninitialized_allocate_unique_n<std::uint8_t>(device_alloc, tmp_size);
+  void* const tmp_ptr = raw_pointer_cast(content.get());
+
+  // Set up stream with dependencies.
+  cudaStream_t const user_raw_stream = thrust::cuda_cub::stream(policy);
+
+  if (thrust::cuda_cub::default_stream() != user_raw_stream)
+  {
+    ev = make_dependent_event(
+      std::tuple_cat(std::make_tuple(std::move(content), unique_stream(nonowning, user_raw_stream)),
+                     extract_dependencies(std::move(thrust::detail::derived_cast(policy)))));
+  }
+  else
+  {
+    ev = make_dependent_event(std::tuple_cat(
+      std::make_tuple(std::move(content)), extract_dependencies(std::move(thrust::detail::derived_cast(policy)))));
+  }
+
+  // Run scan.
+  {
+    THRUST_INDEX_TYPE_DISPATCH2(
+      status,
+      Dispatch32::Dispatch,
+      Dispatch64::Dispatch,
+      n,
+      (tmp_ptr, tmp_size, first, out, op, init_value, n_fixed, user_raw_stream));
+    thrust::cuda_cub::throw_on_error(status, "after dispatching inclusive_scan kernel");
+  }
+
+  return ev;
+}
+
+} // namespace detail
+} // namespace cuda
+} // namespace system
 
 namespace cuda_cub
 {
 
 // ADL entry point.
-template <typename DerivedPolicy,
-          typename ForwardIt,
-          typename Sentinel,
-          typename OutputIt,
-          typename BinaryOp>
-auto async_inclusive_scan(execution_policy<DerivedPolicy>& policy,
-                          ForwardIt first,
-                          Sentinel&& last,
-                          OutputIt&& out,
-                          BinaryOp&& op)
-THRUST_RETURNS(
-  thrust::system::cuda::detail::async_inclusive_scan_n(
-    policy,
-    first,
-    distance(first, THRUST_FWD(last)),
-    THRUST_FWD(out),
-    THRUST_FWD(op)
-  )
-)
+template <typename DerivedPolicy, typename ForwardIt, typename Sentinel, typename OutputIt, typename BinaryOp>
+auto async_inclusive_scan(
+  execution_policy<DerivedPolicy>& policy, ForwardIt first, Sentinel&& last, OutputIt&& out, BinaryOp&& op)
+  THRUST_RETURNS(thrust::system::cuda::detail::async_inclusive_scan_n(
+    policy, first, distance(first, THRUST_FWD(last)), THRUST_FWD(out), THRUST_FWD(op)))
+
+  // ADL entry point.
+  template <typename DerivedPolicy,
+            typename ForwardIt,
+            typename Sentinel,
+            typename OutputIt,
+            typename InitialValueType,
+            typename BinaryOp>
+  auto async_inclusive_scan(
+    execution_policy<DerivedPolicy>& policy,
+    ForwardIt first,
+    Sentinel&& last,
+    OutputIt&& out,
+    InitialValueType&& init,
+    BinaryOp&& op)
+    THRUST_RETURNS(thrust::system::cuda::detail::async_inclusive_scan_n(
+      policy, first, thrust::distance(first, THRUST_FWD(last)), THRUST_FWD(out), THRUST_FWD(init), THRUST_FWD(op)))
 
 } // namespace cuda_cub
 
 THRUST_NAMESPACE_END
 
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
+#  endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
 
 #endif // C++14
-

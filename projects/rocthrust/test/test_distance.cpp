@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -25,52 +25,52 @@ TESTS_DEFINE(DistanceTests, FullTestsParams);
 
 TYPED_TEST(DistanceTests, TestDistance)
 {
-    using Vector   = typename TestFixture::input_type;
-    using Iterator = typename Vector::iterator;
+  using Vector   = typename TestFixture::input_type;
+  using Iterator = typename Vector::iterator;
 
-    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    Vector v(100);
+  Vector v(100);
 
-    Iterator i = v.begin();
+  Iterator i = v.begin();
 
-    ASSERT_EQ(thrust::distance(i, v.end()), 100);
+  ASSERT_EQ(thrust::distance(i, v.end()), 100);
 
-    i++;
+  i++;
 
-    ASSERT_EQ(thrust::distance(i, v.end()), 99);
+  ASSERT_EQ(thrust::distance(i, v.end()), 99);
 
-    i += 49;
+  i += 49;
 
-    ASSERT_EQ(thrust::distance(i, v.end()), 50);
+  ASSERT_EQ(thrust::distance(i, v.end()), 50);
 
-    ASSERT_EQ(thrust::distance(i, i), 0);
+  ASSERT_EQ(thrust::distance(i, i), 0);
 }
 
 TYPED_TEST(DistanceTests, TestDistanceLarge)
 {
-    using Vector   = typename TestFixture::input_type;
-    using Iterator = typename Vector::iterator;
+  using Vector   = typename TestFixture::input_type;
+  using Iterator = typename Vector::iterator;
 
-    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    Vector v(1000);
+  Vector v(1000);
 
-    Iterator i = v.begin();
+  Iterator i = v.begin();
 
-    ASSERT_EQ(thrust::distance(i, v.end()), 1000);
+  ASSERT_EQ(thrust::distance(i, v.end()), 1000);
 
-    i++;
+  i++;
 
-    ASSERT_EQ(thrust::distance(i, v.end()), 999);
+  ASSERT_EQ(thrust::distance(i, v.end()), 999);
 
-    i += 49;
+  i += 49;
 
-    ASSERT_EQ(thrust::distance(i, v.end()), 950);
+  ASSERT_EQ(thrust::distance(i, v.end()), 950);
 
-    i += 950;
+  i += 950;
 
-    ASSERT_EQ(thrust::distance(i, v.end()), 0);
+  ASSERT_EQ(thrust::distance(i, v.end()), 0);
 
-    ASSERT_EQ(thrust::distance(i, i), 0);
+  ASSERT_EQ(thrust::distance(i, i), 0);
 }

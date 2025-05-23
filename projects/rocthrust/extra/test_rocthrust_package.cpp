@@ -1,5 +1,5 @@
 /*
- *  Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -13,20 +13,19 @@
  *  See the License for the specific language governing permissions and
  *  limitations under the License.
  */
-#include <thrust/version.h>
+#include <thrust/device_vector.h>
+#include <thrust/execution_policy.h>
+#include <thrust/host_vector.h>
 #include <thrust/rocthrust_version.hpp>
 #include <thrust/transform.h>
-#include <thrust/execution_policy.h>
-#include <thrust/device_vector.h>
-#include <thrust/host_vector.h>
+#include <thrust/version.h>
 
 #include <iostream>
 
-template<class T>
+template <class T>
 struct unary_transform
 {
-  __device__ __host__ inline
-  constexpr T operator()(const T& a) const
+  __device__ __host__ inline constexpr T operator()(const T& a) const
   {
     return a + 5;
   }
@@ -47,9 +46,9 @@ int main(void)
   using T = int;
   using U = long;
 
-  size_t  size = 1<<16;
+  size_t size = 1 << 16;
   thrust::host_vector<T> h_input(size);
-  for(size_t i = 0; i < size; i++)
+  for (size_t i = 0; i < size; i++)
   {
     h_input[i] = i;
   }
@@ -63,15 +62,12 @@ int main(void)
   thrust::transform(d_input.begin(), d_input.end(), d_output.begin(), unary_transform<U>());
 
   thrust::host_vector<U> h_output = d_output;
-  for(size_t i = 0; i < size; i++)
+  for (size_t i = 0; i < size; i++)
   {
-    if(h_output[i] != expected[i])
+    if (h_output[i] != expected[i])
     {
-      std::cout
-          << "Failure: output (" << h_output[i]
-          << ") != expected (" << expected[i] << ")"
-          << "  at index:" << i
-          << std::endl;
+      std::cout << "Failure: output (" << h_output[i] << ") != expected (" << expected[i] << ")"
+                << "  at index:" << i << std::endl;
       return 1;
     }
   }

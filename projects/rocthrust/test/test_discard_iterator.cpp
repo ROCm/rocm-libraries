@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -23,108 +23,108 @@ using namespace thrust;
 
 TEST(DiscardIteratorTests, UsingHip)
 {
-    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    ASSERT_EQ(THRUST_DEVICE_SYSTEM, THRUST_DEVICE_SYSTEM_HIP);
+  ASSERT_EQ(THRUST_DEVICE_SYSTEM, THRUST_DEVICE_SYSTEM_HIP);
 }
 
 TEST(DiscardIteratorTests, DiscardIteratorIncrement)
 {
-    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    discard_iterator<> lhs(0);
-    discard_iterator<> rhs(0);
+  discard_iterator<> lhs(0);
+  discard_iterator<> rhs(0);
 
-    ASSERT_EQ(0, lhs - rhs);
+  ASSERT_EQ(0, lhs - rhs);
 
-    lhs++;
+  lhs++;
 
-    ASSERT_EQ(1, lhs - rhs);
+  ASSERT_EQ(1, lhs - rhs);
 
-    lhs++;
-    lhs++;
+  lhs++;
+  lhs++;
 
-    ASSERT_EQ(3, lhs - rhs);
+  ASSERT_EQ(3, lhs - rhs);
 
-    lhs += 5;
+  lhs += 5;
 
-    ASSERT_EQ(8, lhs - rhs);
+  ASSERT_EQ(8, lhs - rhs);
 
-    lhs -= 10;
+  lhs -= 10;
 
-    ASSERT_EQ(-2, lhs - rhs);
+  ASSERT_EQ(-2, lhs - rhs);
 }
 
 TEST(DiscardIteratorTests, DiscardIteratorComparison)
 {
-    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    discard_iterator<> iter1(0);
-    discard_iterator<> iter2(0);
+  discard_iterator<> iter1(0);
+  discard_iterator<> iter2(0);
 
-    ASSERT_EQ(0, iter1 - iter2);
-    ASSERT_EQ(true, iter1 == iter2);
+  ASSERT_EQ(0, iter1 - iter2);
+  ASSERT_EQ(true, iter1 == iter2);
 
-    iter1++;
+  iter1++;
 
-    ASSERT_EQ(1, iter1 - iter2);
-    ASSERT_EQ(false, iter1 == iter2);
+  ASSERT_EQ(1, iter1 - iter2);
+  ASSERT_EQ(false, iter1 == iter2);
 
-    iter2++;
+  iter2++;
 
-    ASSERT_EQ(0, iter1 - iter2);
-    ASSERT_EQ(true, iter1 == iter2);
+  ASSERT_EQ(0, iter1 - iter2);
+  ASSERT_EQ(true, iter1 == iter2);
 
-    iter1 += 100;
-    iter2 += 100;
+  iter1 += 100;
+  iter2 += 100;
 
-    ASSERT_EQ(0, iter1 - iter2);
-    ASSERT_EQ(true, iter1 == iter2);
+  ASSERT_EQ(0, iter1 - iter2);
+  ASSERT_EQ(true, iter1 == iter2);
 }
 
 TEST(DiscardIteratorTests, MakeDiscardIterator)
 {
-    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    discard_iterator<> iter0 = make_discard_iterator(13);
+  discard_iterator<> iter0 = make_discard_iterator(13);
 
-    *iter0 = 7;
+  *iter0 = 7;
 
-    discard_iterator<> iter1 = make_discard_iterator(7);
+  discard_iterator<> iter1 = make_discard_iterator(7);
 
-    *iter1 = 13;
+  *iter1 = 13;
 
-    ASSERT_EQ(6, iter0 - iter1);
+  ASSERT_EQ(6, iter0 - iter1);
 }
 
 TEST(DiscardIteratorTests, ZippedDiscardIterator)
 {
-    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
-    
-    using IteratorTuple1 = tuple<discard_iterator<>>;
-    using ZipIterator1   = zip_iterator<IteratorTuple1>;
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    IteratorTuple1 t = make_tuple(make_discard_iterator());
+  using IteratorTuple1 = tuple<discard_iterator<>>;
+  using ZipIterator1   = zip_iterator<IteratorTuple1>;
 
-    ZipIterator1 z_iter1_first = make_zip_iterator(t);
-    ZipIterator1 z_iter1_last  = z_iter1_first + 10;
-    for(; z_iter1_first != z_iter1_last; ++z_iter1_first)
-    {
-        ;
-    }
+  IteratorTuple1 t = make_tuple(make_discard_iterator());
 
-    ASSERT_EQ(10, get<0>(z_iter1_first.get_iterator_tuple()) - make_discard_iterator());
+  ZipIterator1 z_iter1_first = make_zip_iterator(t);
+  ZipIterator1 z_iter1_last  = z_iter1_first + 10;
+  for (; z_iter1_first != z_iter1_last; ++z_iter1_first)
+  {
+    ;
+  }
 
-    using IteratorTuple2 = tuple<int*, discard_iterator<>>;
-    using ZipIterator2   = zip_iterator<IteratorTuple2>;
+  ASSERT_EQ(10, get<0>(z_iter1_first.get_iterator_tuple()) - make_discard_iterator());
 
-    ZipIterator2 z_iter_first = make_zip_iterator(make_tuple((int*)0, make_discard_iterator()));
-    ZipIterator2 z_iter_last  = z_iter_first + 10;
+  using IteratorTuple2 = tuple<int*, discard_iterator<>>;
+  using ZipIterator2   = zip_iterator<IteratorTuple2>;
 
-    for(; z_iter_first != z_iter_last; ++z_iter_first)
-    {
-        ;
-    }
+  ZipIterator2 z_iter_first = make_zip_iterator(make_tuple((int*) 0, make_discard_iterator()));
+  ZipIterator2 z_iter_last  = z_iter_first + 10;
 
-    ASSERT_EQ(10, get<1>(z_iter_first.get_iterator_tuple()) - make_discard_iterator());
+  for (; z_iter_first != z_iter_last; ++z_iter_first)
+  {
+    ;
+  }
+
+  ASSERT_EQ(10, get<1>(z_iter_first.get_iterator_tuple()) - make_discard_iterator());
 }

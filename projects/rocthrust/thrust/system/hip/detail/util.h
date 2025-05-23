@@ -27,27 +27,27 @@
  ******************************************************************************/
 #pragma once
 
+#include <thrust/detail/config.h>
+
+#include <thrust/iterator/iterator_traits.h>
+
 #include <cstdio>
 #include <exception>
-#include <thrust/detail/config.h>
-#include <thrust/iterator/iterator_traits.h>
 // Not present in rocPRIM
 #include <thrust/system/hip/detail/execution_policy.h>
+#include <thrust/system/hip/detail/nv/target.h>
 #include <thrust/system/hip/error.h>
 #include <thrust/system_error.h>
 
-#include <thrust/system/hip/detail/nv/target.h>
-
 // Define the value to 0, if you want to disable printf on device side.
 #ifndef THRUST_HIP_PRINTF_ENABLED
-#define THRUST_HIP_PRINTF_ENABLED 1
+#  define THRUST_HIP_PRINTF_ENABLED 1
 #endif
 
 #if THRUST_HIP_PRINTF_ENABLED == 1
-  #define THRUST_HIP_PRINTF(text, ...) \
-    printf(text, ##__VA_ARGS__)
+#  define THRUST_HIP_PRINTF(text, ...) printf(text, ##__VA_ARGS__)
 #else
-  #define THRUST_HIP_PRINTF(text, ...)
+#  define THRUST_HIP_PRINTF(text, ...)
 #endif
 
 THRUST_NAMESPACE_BEGIN
@@ -56,30 +56,29 @@ namespace hip_rocprim
 
 inline THRUST_HOST_DEVICE hipStream_t default_stream()
 {
-  #ifdef HIP_API_PER_THREAD_DEFAULT_STREAM
-    return hipStreamPerThread;
-  #else
-    return hipStreamDefault; // There's not hipStreamLegacy
-  #endif
+#ifdef HIP_API_PER_THREAD_DEFAULT_STREAM
+  return hipStreamPerThread;
+#else
+  return hipStreamDefault; // There's not hipStreamLegacy
+#endif
 }
 
 template <class Derived>
-hipStream_t THRUST_HOST_DEVICE
-get_stream(execution_policy<Derived>&)
+hipStream_t THRUST_HOST_DEVICE get_stream(execution_policy<Derived>&)
 {
-    return default_stream();
+  return default_stream();
 }
 
 // Fallback implementation of the customization point.
-template <class Derived> THRUST_HOST_DEVICE
-bool must_perform_optional_stream_synchronization(execution_policy<Derived> &)
+template <class Derived>
+THRUST_HOST_DEVICE bool must_perform_optional_stream_synchronization(execution_policy<Derived>&)
 {
   return true;
 }
 
 // Entry point/interface.
-template <class Derived> THRUST_HOST_DEVICE
-bool must_perform_optional_synchronization(execution_policy<Derived> &policy)
+template <class Derived>
+THRUST_HOST_DEVICE bool must_perform_optional_synchronization(execution_policy<Derived>& policy)
 {
   return must_perform_optional_stream_synchronization(derived_cast(policy));
 }
@@ -87,14 +86,14 @@ bool must_perform_optional_synchronization(execution_policy<Derived> &policy)
 template <class Derived>
 THRUST_HOST_DEVICE integral_constant<bool, true> allows_nondeterminism(execution_policy<Derived>&)
 {
-    return {};
+  return {};
 }
 
 template <class Derived>
 THRUST_HOST_DEVICE auto nondeterministic(execution_policy<Derived>& policy)
-    -> decltype(allows_nondeterminism(derived_cast(policy)))
+  -> decltype(allows_nondeterminism(derived_cast(policy)))
 {
-    return {};
+  return {};
 }
 
 template <class Derived>
@@ -105,11 +104,11 @@ THRUST_HOST_DEVICE hipError_t synchronize_stream(execution_policy<Derived>& poli
   // instructions out of the target logic.
 #if __THRUST_HAS_HIPRT__
 
-#define THRUST_TEMP_DEVICE_CODE result = hipDeviceSynchronize();
+#  define THRUST_TEMP_DEVICE_CODE result = hipDeviceSynchronize();
 
 #else
 
-#define THRUST_TEMP_DEVICE_CODE result = hipSuccess
+#  define THRUST_TEMP_DEVICE_CODE result = hipSuccess
 
 #endif
 
@@ -123,8 +122,8 @@ THRUST_HOST_DEVICE hipError_t synchronize_stream(execution_policy<Derived>& poli
 }
 
 // Fallback implementation of the customization point.
-template <class Derived> THRUST_HOST_DEVICE
-hipError_t synchronize_stream_optional(execution_policy<Derived> &policy)
+template <class Derived>
+THRUST_HOST_DEVICE hipError_t synchronize_stream_optional(execution_policy<Derived>& policy)
 {
   hipError_t result;
 
@@ -141,118 +140,128 @@ hipError_t synchronize_stream_optional(execution_policy<Derived> &policy)
 }
 
 // Entry point/interface.
-template <class Policy> THRUST_HOST_DEVICE
-hipError_t synchronize_optional(Policy &policy)
+template <class Policy>
+THRUST_HOST_DEVICE hipError_t synchronize_optional(Policy& policy)
 {
   return synchronize_stream_optional(derived_cast(policy));
 }
 
-THRUST_EXEC_CHECK_DISABLE template <class Policy>
+THRUST_EXEC_CHECK_DISABLE
+template <class Policy>
 THRUST_HOST_DEVICE hipError_t synchronize(Policy& policy)
 {
 #if __THRUST_HAS_HIPRT__
-    return synchronize_stream(derived_cast(policy));
+  return synchronize_stream(derived_cast(policy));
 #else
-    THRUST_UNUSED_VAR(policy);
-    return hipSuccess;
+  THRUST_UNUSED_VAR(policy);
+  return hipSuccess;
 #endif
 }
 
 template <class Derived>
 THRUST_HOST_DEVICE hipStream_t stream(execution_policy<Derived>& policy)
 {
-    return get_stream(derived_cast(policy));
+  return get_stream(derived_cast(policy));
 }
 
 template <class Type>
 hipError_t THRUST_HIP_HOST_FUNCTION
 trivial_copy_from_device(Type* dst, Type const* src, size_t count, hipStream_t stream)
 {
-    hipError_t status = hipSuccess;
-    if(count == 0)
-        return status;
-
-    // hipMemcpyWithStream is only supported on rocm 3.1 and above
-    #if HIP_VERSION_MAJOR >= 3
-    #if HIP_VERSION_MINOR >= 1 || HIP_VERSION_MAJOR >= 4
-    status = ::hipMemcpyWithStream(dst, src, sizeof(Type) * count, hipMemcpyDeviceToHost, stream);
-    #else
-    status = ::hipMemcpyAsync(dst, src, sizeof(Type) * count, hipMemcpyDeviceToHost, stream);
-    if(status != hipSuccess)
-      return status;
-    status = hipStreamSynchronize(stream);
-    #endif
-    #endif
+  hipError_t status = hipSuccess;
+  if (count == 0)
+  {
     return status;
+  }
+
+// hipMemcpyWithStream is only supported on rocm 3.1 and above
+#if HIP_VERSION_MAJOR >= 3
+#  if HIP_VERSION_MINOR >= 1 || HIP_VERSION_MAJOR >= 4
+  status = ::hipMemcpyWithStream(dst, src, sizeof(Type) * count, hipMemcpyDeviceToHost, stream);
+#  else
+  status = ::hipMemcpyAsync(dst, src, sizeof(Type) * count, hipMemcpyDeviceToHost, stream);
+  if (status != hipSuccess)
+  {
+    return status;
+  }
+  status = hipStreamSynchronize(stream);
+#  endif
+#endif
+  return status;
 }
 
 template <class Type>
-hipError_t THRUST_HIP_HOST_FUNCTION
-trivial_copy_to_device(Type* dst, Type const* src, size_t count, hipStream_t stream)
+hipError_t THRUST_HIP_HOST_FUNCTION trivial_copy_to_device(Type* dst, Type const* src, size_t count, hipStream_t stream)
 {
-    hipError_t status = hipSuccess;
-    if(count == 0)
-        return status;
-
-    // hipMemcpyWithStream is only supported on rocm 3.1 and above
-    #if HIP_VERSION_MAJOR >= 3
-    #if HIP_VERSION_MINOR >= 1 || HIP_VERSION_MAJOR >= 4
-    status = ::hipMemcpyWithStream(dst, src, sizeof(Type) * count, hipMemcpyHostToDevice, stream);
-    #else
-    status = ::hipMemcpyAsync(dst, src, sizeof(Type) * count, hipMemcpyHostToDevice, stream);
-    if(status != hipSuccess)
-      return status;
-    status = hipStreamSynchronize(stream);
-    #endif
-    #endif
+  hipError_t status = hipSuccess;
+  if (count == 0)
+  {
     return status;
+  }
+
+// hipMemcpyWithStream is only supported on rocm 3.1 and above
+#if HIP_VERSION_MAJOR >= 3
+#  if HIP_VERSION_MINOR >= 1 || HIP_VERSION_MAJOR >= 4
+  status = ::hipMemcpyWithStream(dst, src, sizeof(Type) * count, hipMemcpyHostToDevice, stream);
+#  else
+  status = ::hipMemcpyAsync(dst, src, sizeof(Type) * count, hipMemcpyHostToDevice, stream);
+  if (status != hipSuccess)
+  {
+    return status;
+  }
+  status = hipStreamSynchronize(stream);
+#  endif
+#endif
+  return status;
 }
 
 template <class Policy, class Type>
-THRUST_HOST_DEVICE hipError_t
-trivial_copy_device_to_device(Policy& policy, Type* dst, Type const* src, size_t count)
+THRUST_HOST_DEVICE hipError_t trivial_copy_device_to_device(Policy& policy, Type* dst, Type const* src, size_t count)
 {
-    hipError_t status = hipSuccess;
-    if(count == 0)
-        return status;
-
-    hipStream_t stream = hip_rocprim::stream(policy);
-    //
-    status = ::hipMemcpyAsync(dst, src, sizeof(Type) * count, hipMemcpyDeviceToDevice, stream);
-    if(status != hipSuccess)
-        return status;
-    status = hip_rocprim::synchronize(policy);
+  hipError_t status = hipSuccess;
+  if (count == 0)
+  {
     return status;
+  }
+
+  hipStream_t stream = hip_rocprim::stream(policy);
+  //
+  status = ::hipMemcpyAsync(dst, src, sizeof(Type) * count, hipMemcpyDeviceToDevice, stream);
+  if (status != hipSuccess)
+  {
+    return status;
+  }
+  status = hip_rocprim::synchronize(policy);
+  return status;
 }
 
 inline void THRUST_HOST_DEVICE terminate()
 {
-    NV_IF_TARGET(NV_IS_HOST, (std::terminate();), (abort();));
+  NV_IF_TARGET(NV_IS_HOST, (std::terminate();), (abort();));
 }
 
 inline void THRUST_HOST_DEVICE throw_on_error(hipError_t status, char const* msg)
 {
-    // Clear the global HIP error state which may have been set by the last
-    // call. Otherwise, errors may "leak" to unrelated kernel launches.
-    NV_IF_TARGET(NV_IS_HOST, (hipError_t clear_error_status = hipGetLastError(); THRUST_UNUSED_VAR(clear_error_status);));
+  // Clear the global HIP error state which may have been set by the last
+  // call. Otherwise, errors may "leak" to unrelated kernel launches.
+  NV_IF_TARGET(NV_IS_HOST, (hipError_t clear_error_status = hipGetLastError(); THRUST_UNUSED_VAR(clear_error_status);));
 
-    if(hipSuccess != status)
-    {
+  if (hipSuccess != status)
+  {
+    // Can't use #if inside NV_IF_TARGET, use a temp macro to hoist the device
+    // instructions out of the target logic.
+#if THRUST_HIP_PRINTF_ENABLED == 0
+#  define THRUST_TEMP_DEVICE_CODE                            \
+    THRUST_HIP_PRINTF("Error %d :%s \n", (int) status, msg); \
+    THRUST_UNUSED_VAR(status);                               \
+    THRUST_UNUSED_VAR(msg)
+#else
+#  define THRUST_TEMP_DEVICE_CODE THRUST_HIP_PRINTF("Error %d :%s \n", (int) status, msg)
+#endif
 
-        // Can't use #if inside NV_IF_TARGET, use a temp macro to hoist the device
-        // instructions out of the target logic.
-    #if THRUST_HIP_PRINTF_ENABLED == 0
-    #define THRUST_TEMP_DEVICE_CODE                             \
-        THRUST_HIP_PRINTF("Error %d :%s \n", (int)status, msg); \
-        THRUST_UNUSED_VAR(status);                              \
-        THRUST_UNUSED_VAR(msg)
-    #else
-    #define THRUST_TEMP_DEVICE_CODE THRUST_HIP_PRINTF("Error %d :%s \n", (int)status, msg)
-    #endif
-
-            NV_IF_TARGET(NV_IS_HOST,
-                        (throw thrust::system_error(status, thrust::hip_category(), msg);),
-                        (THRUST_TEMP_DEVICE_CODE; hip_rocprim::terminate();));
+    NV_IF_TARGET(NV_IS_HOST,
+                 (throw thrust::system_error(status, thrust::hip_category(), msg);),
+                 (THRUST_TEMP_DEVICE_CODE; hip_rocprim::terminate();));
 
 #undef THRUST_TEMP_DEVICE_CODE
   }
@@ -261,26 +270,25 @@ inline void THRUST_HOST_DEVICE throw_on_error(hipError_t status, char const* msg
 // TODO this overload should be removed and messages should be passed.
 inline void THRUST_HOST_DEVICE throw_on_error(hipError_t status)
 {
-    // Clear the global HIP error state which may have been set by the last
-    // call. Otherwise, errors may "leak" to unrelated kernel launches.
-    NV_IF_TARGET(NV_IS_HOST, (hipError_t clear_error_status = hipGetLastError(); THRUST_UNUSED_VAR(clear_error_status);));
+  // Clear the global HIP error state which may have been set by the last
+  // call. Otherwise, errors may "leak" to unrelated kernel launches.
+  NV_IF_TARGET(NV_IS_HOST, (hipError_t clear_error_status = hipGetLastError(); THRUST_UNUSED_VAR(clear_error_status);));
 
-  if(hipSuccess != status)
+  if (hipSuccess != status)
   {
-
-        // Can't use #if inside NV_IF_TARGET, use a temp macro to hoist the device
-        // instructions out of the target logic.
+    // Can't use #if inside NV_IF_TARGET, use a temp macro to hoist the device
+    // instructions out of the target logic.
 #if THRUST_HIP_PRINTF_ENABLED == 0
-#define THRUST_TEMP_DEVICE_CODE                    \
-    THRUST_HIP_PRINTF("Error %d \n", (int)status); \
+#  define THRUST_TEMP_DEVICE_CODE                   \
+    THRUST_HIP_PRINTF("Error %d \n", (int) status); \
     THRUST_UNUSED_VAR(status)
 #else
-#define THRUST_TEMP_DEVICE_CODE THRUST_HIP_PRINTF("Error %d \n", (int)status)
+#  define THRUST_TEMP_DEVICE_CODE THRUST_HIP_PRINTF("Error %d \n", (int) status)
 #endif
 
-        NV_IF_TARGET(NV_IS_HOST,
-                     (throw thrust::system_error(status, thrust::hip_category());),
-                     (THRUST_TEMP_DEVICE_CODE; hip_rocprim::terminate();));
+    NV_IF_TARGET(NV_IS_HOST,
+                 (throw thrust::system_error(status, thrust::hip_category());),
+                 (THRUST_TEMP_DEVICE_CODE; hip_rocprim::terminate();));
 
 #undef THRUST_TEMP_DEVICE_CODE
   }
@@ -289,23 +297,22 @@ inline void THRUST_HOST_DEVICE throw_on_error(hipError_t status)
 template <class ValueType, class InputIt, class UnaryOp>
 struct transform_input_iterator_t
 {
-    using self_t            = transform_input_iterator_t;
-    using difference_type   = typename iterator_traits<InputIt>::difference_type;
-    using value_type        = ValueType;
-    using pointer           = void;
-    using reference         = value_type;
-    using iterator_category = std::random_access_iterator_tag;
+  using self_t            = transform_input_iterator_t;
+  using difference_type   = typename iterator_traits<InputIt>::difference_type;
+  using value_type        = ValueType;
+  using pointer           = void;
+  using reference         = value_type;
+  using iterator_category = std::random_access_iterator_tag;
 
-    InputIt         input;
-    mutable UnaryOp op;
+  InputIt input;
+  mutable UnaryOp op;
 
-    THRUST_HIP_FUNCTION transform_input_iterator_t(InputIt input, UnaryOp op)
-        : input(input)
-        , op(op)
-    {
-    }
+  THRUST_HIP_FUNCTION transform_input_iterator_t(InputIt input, UnaryOp op)
+      : input(input)
+      , op(op)
+  {}
 
-  transform_input_iterator_t(const self_t &) = default;
+  transform_input_iterator_t(const self_t&) = default;
 
   // UnaryOp might not be copy assignable, such as when it is a lambda.  Define
   // an explicit copy assignment operator that doesn't try to assign it.
@@ -315,312 +322,308 @@ struct transform_input_iterator_t
     return *this;
   }
 
-    /// Postfix increment
-    THRUST_HIP_FUNCTION self_t operator++(int)
-    {
-        self_t retval = *this;
-        ++input;
-        return retval;
-    }
+  /// Postfix increment
+  THRUST_HIP_FUNCTION self_t operator++(int)
+  {
+    self_t retval = *this;
+    ++input;
+    return retval;
+  }
 
-    /// Prefix increment
-    THRUST_HIP_FUNCTION self_t operator++()
-    {
-        ++input;
-        return *this;
-    }
+  /// Prefix increment
+  THRUST_HIP_FUNCTION self_t operator++()
+  {
+    ++input;
+    return *this;
+  }
 
-    /// Indirection
-    THRUST_HIP_FUNCTION reference operator*() const
-    {
-        typename thrust::iterator_value<InputIt>::type x = *input;
-        return op(x);
-    }
-    /// Indirection
-    THRUST_HIP_FUNCTION reference operator*()
-    {
-        typename thrust::iterator_value<InputIt>::type x = *input;
-        return op(x);
-    }
+  /// Indirection
+  THRUST_HIP_FUNCTION reference operator*() const
+  {
+    typename thrust::iterator_value<InputIt>::type x = *input;
+    return op(x);
+  }
+  /// Indirection
+  THRUST_HIP_FUNCTION reference operator*()
+  {
+    typename thrust::iterator_value<InputIt>::type x = *input;
+    return op(x);
+  }
 
-    /// Addition
-    THRUST_HIP_FUNCTION self_t operator+(difference_type n) const
-    {
-        return self_t(input + n, op);
-    }
+  /// Addition
+  THRUST_HIP_FUNCTION self_t operator+(difference_type n) const
+  {
+    return self_t(input + n, op);
+  }
 
-    /// Addition assignment
-    THRUST_HIP_FUNCTION self_t& operator+=(difference_type n)
-    {
-        input += n;
-        return *this;
-    }
+  /// Addition assignment
+  THRUST_HIP_FUNCTION self_t& operator+=(difference_type n)
+  {
+    input += n;
+    return *this;
+  }
 
-    /// Subtraction
-    THRUST_HIP_FUNCTION self_t operator-(difference_type n) const
-    {
-        return self_t(input - n, op);
-    }
+  /// Subtraction
+  THRUST_HIP_FUNCTION self_t operator-(difference_type n) const
+  {
+    return self_t(input - n, op);
+  }
 
-    /// Subtraction assignment
-    THRUST_HIP_FUNCTION self_t& operator-=(difference_type n)
-    {
-        input -= n;
-        return *this;
-    }
+  /// Subtraction assignment
+  THRUST_HIP_FUNCTION self_t& operator-=(difference_type n)
+  {
+    input -= n;
+    return *this;
+  }
 
-    /// Distance
-    THRUST_HIP_FUNCTION difference_type operator-(self_t other) const
-    {
-        return input - other.input;
-    }
+  /// Distance
+  THRUST_HIP_FUNCTION difference_type operator-(self_t other) const
+  {
+    return input - other.input;
+  }
 
-    /// Array subscript
-    THRUST_HIP_FUNCTION reference operator[](difference_type n) const
-    {
-        return op(input[n]);
-    }
+  /// Array subscript
+  THRUST_HIP_FUNCTION reference operator[](difference_type n) const
+  {
+    return op(input[n]);
+  }
 
-    /// Equal to
-    THRUST_HIP_FUNCTION bool operator==(const self_t& rhs) const
-    {
-        return (input == rhs.input);
-    }
+  /// Equal to
+  THRUST_HIP_FUNCTION bool operator==(const self_t& rhs) const
+  {
+    return (input == rhs.input);
+  }
 
-    /// Not equal to
-    THRUST_HIP_FUNCTION bool operator!=(const self_t& rhs) const
-    {
-        return (input != rhs.input);
-    }
+  /// Not equal to
+  THRUST_HIP_FUNCTION bool operator!=(const self_t& rhs) const
+  {
+    return (input != rhs.input);
+  }
 
 }; // struct transform_input_iterarot_t
 
 template <class ValueType, class InputIt1, class InputIt2, class BinaryOp>
 struct transform_pair_of_input_iterators_t
 {
-    using self_t            = transform_pair_of_input_iterators_t;
-    using difference_type   = typename iterator_traits<InputIt1>::difference_type;
-    using value_type        = ValueType;
-    using pointer           = void;
-    using reference         = value_type;
-    using iterator_category = std::random_access_iterator_tag;
+  using self_t            = transform_pair_of_input_iterators_t;
+  using difference_type   = typename iterator_traits<InputIt1>::difference_type;
+  using value_type        = ValueType;
+  using pointer           = void;
+  using reference         = value_type;
+  using iterator_category = std::random_access_iterator_tag;
 
-    InputIt1         input1;
-    InputIt2         input2;
-    mutable BinaryOp op;
+  InputIt1 input1;
+  InputIt2 input2;
+  mutable BinaryOp op;
 
-    THRUST_HIP_FUNCTION transform_pair_of_input_iterators_t(InputIt1 input1_,
-                                                                            InputIt2 input2_,
-                                                                            BinaryOp op_)
-        : input1(input1_)
-        , input2(input2_)
-        , op(op_)
-    {
-    }
+  THRUST_HIP_FUNCTION transform_pair_of_input_iterators_t(InputIt1 input1_, InputIt2 input2_, BinaryOp op_)
+      : input1(input1_)
+      , input2(input2_)
+      , op(op_)
+  {}
 
-    transform_pair_of_input_iterators_t(const self_t&) = default;
+  transform_pair_of_input_iterators_t(const self_t&) = default;
 
-    // BinaryOp might not be copy assignable, such as when it is a lambda.
-    // Define an explicit copy assignment operator that doesn't try to assign it.
-    THRUST_HIP_FUNCTION self_t& operator=(const self_t& o)
-    {
-        input1 = o.input1;
-        input2 = o.input2;
-        return *this;
-      }
+  // BinaryOp might not be copy assignable, such as when it is a lambda.
+  // Define an explicit copy assignment operator that doesn't try to assign it.
+  THRUST_HIP_FUNCTION self_t& operator=(const self_t& o)
+  {
+    input1 = o.input1;
+    input2 = o.input2;
+    return *this;
+  }
 
-    /// Postfix increment
-    THRUST_HIP_FUNCTION self_t operator++(int)
-    {
-        self_t retval = *this;
-        ++input1;
-        ++input2;
-        return retval;
-    }
+  /// Postfix increment
+  THRUST_HIP_FUNCTION self_t operator++(int)
+  {
+    self_t retval = *this;
+    ++input1;
+    ++input2;
+    return retval;
+  }
 
-    /// Prefix increment
-    THRUST_HIP_FUNCTION self_t operator++()
-    {
-        ++input1;
-        ++input2;
-        return *this;
-    }
+  /// Prefix increment
+  THRUST_HIP_FUNCTION self_t operator++()
+  {
+    ++input1;
+    ++input2;
+    return *this;
+  }
 
-    /// Indirection
-    THRUST_HIP_FUNCTION reference operator*() const
-    {
-        return op(*input1, *input2);
-    }
-    /// Indirection
-    THRUST_HIP_FUNCTION reference operator*()
-    {
-        return op(*input1, *input2);
-    }
+  /// Indirection
+  THRUST_HIP_FUNCTION reference operator*() const
+  {
+    return op(*input1, *input2);
+  }
+  /// Indirection
+  THRUST_HIP_FUNCTION reference operator*()
+  {
+    return op(*input1, *input2);
+  }
 
-    /// Addition
-    THRUST_HIP_FUNCTION self_t operator+(difference_type n) const
-    {
-        return self_t(input1 + n, input2 + n, op);
-    }
+  /// Addition
+  THRUST_HIP_FUNCTION self_t operator+(difference_type n) const
+  {
+    return self_t(input1 + n, input2 + n, op);
+  }
 
-    /// Addition assignment
-    THRUST_HIP_FUNCTION self_t& operator+=(difference_type n)
-    {
-        input1 += n;
-        input2 += n;
-        return *this;
-    }
+  /// Addition assignment
+  THRUST_HIP_FUNCTION self_t& operator+=(difference_type n)
+  {
+    input1 += n;
+    input2 += n;
+    return *this;
+  }
 
-    /// Subtraction
-    THRUST_HIP_FUNCTION self_t operator-(difference_type n) const
-    {
-        return self_t(input1 - n, input2 - n, op);
-    }
+  /// Subtraction
+  THRUST_HIP_FUNCTION self_t operator-(difference_type n) const
+  {
+    return self_t(input1 - n, input2 - n, op);
+  }
 
-    /// Subtraction assignment
-    THRUST_HIP_FUNCTION self_t& operator-=(difference_type n)
-    {
-        input1 -= n;
-        input2 -= n;
-        return *this;
-    }
+  /// Subtraction assignment
+  THRUST_HIP_FUNCTION self_t& operator-=(difference_type n)
+  {
+    input1 -= n;
+    input2 -= n;
+    return *this;
+  }
 
-    /// Distance
-    THRUST_HIP_FUNCTION difference_type operator-(self_t other) const
-    {
-        return input1 - other.input1;
-    }
+  /// Distance
+  THRUST_HIP_FUNCTION difference_type operator-(self_t other) const
+  {
+    return input1 - other.input1;
+  }
 
-    /// Array subscript
-    THRUST_HIP_FUNCTION reference operator[](difference_type n) const
-    {
-        return op(input1[n], input2[n]);
-    }
+  /// Array subscript
+  THRUST_HIP_FUNCTION reference operator[](difference_type n) const
+  {
+    return op(input1[n], input2[n]);
+  }
 
-    /// Equal to
-    THRUST_HIP_FUNCTION bool operator==(const self_t& rhs) const
-    {
-        return (input1 == rhs.input1) && (input2 == rhs.input2);
-    }
+  /// Equal to
+  THRUST_HIP_FUNCTION bool operator==(const self_t& rhs) const
+  {
+    return (input1 == rhs.input1) && (input2 == rhs.input2);
+  }
 
-    /// Not equal to
-    THRUST_HIP_FUNCTION bool operator!=(const self_t& rhs) const
-    {
-        return (input1 != rhs.input1) || (input2 != rhs.input2);
-    }
+  /// Not equal to
+  THRUST_HIP_FUNCTION bool operator!=(const self_t& rhs) const
+  {
+    return (input1 != rhs.input1) || (input2 != rhs.input2);
+  }
 
 }; // struct trasnform_pair_of_input_iterators_t
 
 struct identity
 {
-    template <class T>
-    THRUST_HOST_DEVICE T const& operator()(T const& t) const
-    {
-        return t;
-    }
+  template <class T>
+  THRUST_HOST_DEVICE T const& operator()(T const& t) const
+  {
+    return t;
+  }
 
-    template <class T>
-    THRUST_HOST_DEVICE T& operator()(T& t) const
-    {
-        return t;
-    }
+  template <class T>
+  THRUST_HOST_DEVICE T& operator()(T& t) const
+  {
+    return t;
+  }
 };
 
 template <class T>
 struct counting_iterator_t
 {
-    using self_t            = counting_iterator_t;
-    using difference_type   = T;
-    using value_type        = T;
-    using pointer           = void;
-    using reference         = T;
-    using iterator_category = std::random_access_iterator_tag;
+  using self_t            = counting_iterator_t;
+  using difference_type   = T;
+  using value_type        = T;
+  using pointer           = void;
+  using reference         = T;
+  using iterator_category = std::random_access_iterator_tag;
 
-    T count;
+  T count;
 
-    THRUST_HIP_FUNCTION counting_iterator_t(T count_)
-        : count(count_)
-    {
-    }
+  THRUST_HIP_FUNCTION counting_iterator_t(T count_)
+      : count(count_)
+  {}
 
-    /// Postfix increment
-    THRUST_HIP_FUNCTION self_t operator++(int)
-    {
-        self_t retval = *this;
-        ++count;
-        return retval;
-    }
+  /// Postfix increment
+  THRUST_HIP_FUNCTION self_t operator++(int)
+  {
+    self_t retval = *this;
+    ++count;
+    return retval;
+  }
 
-    /// Prefix increment
-    THRUST_HIP_FUNCTION self_t operator++()
-    {
-        ++count;
-        return *this;
-    }
+  /// Prefix increment
+  THRUST_HIP_FUNCTION self_t operator++()
+  {
+    ++count;
+    return *this;
+  }
 
-    /// Indirection
-    THRUST_HIP_FUNCTION reference operator*() const
-    {
-        return count;
-    }
+  /// Indirection
+  THRUST_HIP_FUNCTION reference operator*() const
+  {
+    return count;
+  }
 
-    /// Indirection
-    THRUST_HIP_FUNCTION reference operator*()
-    {
-        return count;
-    }
+  /// Indirection
+  THRUST_HIP_FUNCTION reference operator*()
+  {
+    return count;
+  }
 
-    /// Addition
-    THRUST_HIP_FUNCTION self_t operator+(difference_type n) const
-    {
-        return self_t(count + n);
-    }
+  /// Addition
+  THRUST_HIP_FUNCTION self_t operator+(difference_type n) const
+  {
+    return self_t(count + n);
+  }
 
-    /// Addition assignment
-    THRUST_HIP_FUNCTION self_t& operator+=(difference_type n)
-    {
-        count += n;
-        return *this;
-    }
+  /// Addition assignment
+  THRUST_HIP_FUNCTION self_t& operator+=(difference_type n)
+  {
+    count += n;
+    return *this;
+  }
 
-    /// Subtraction
-    THRUST_HIP_FUNCTION self_t operator-(difference_type n) const
-    {
-        return self_t(count - n);
-    }
+  /// Subtraction
+  THRUST_HIP_FUNCTION self_t operator-(difference_type n) const
+  {
+    return self_t(count - n);
+  }
 
-    /// Subtraction assignment
-    THRUST_HIP_FUNCTION self_t& operator-=(difference_type n)
-    {
-        count -= n;
-        return *this;
-    }
+  /// Subtraction assignment
+  THRUST_HIP_FUNCTION self_t& operator-=(difference_type n)
+  {
+    count -= n;
+    return *this;
+  }
 
-    /// Distance
-    THRUST_HIP_FUNCTION difference_type operator-(self_t other) const
-    {
-        return count - other.count;
-    }
+  /// Distance
+  THRUST_HIP_FUNCTION difference_type operator-(self_t other) const
+  {
+    return count - other.count;
+  }
 
-    /// Array subscript
-    THRUST_HIP_FUNCTION reference operator[](difference_type n) const
-    {
-        return count + n;
-    }
+  /// Array subscript
+  THRUST_HIP_FUNCTION reference operator[](difference_type n) const
+  {
+    return count + n;
+  }
 
-    /// Equal to
-    THRUST_HIP_FUNCTION bool operator==(const self_t& rhs) const
-    {
-        return (count == rhs.count);
-    }
+  /// Equal to
+  THRUST_HIP_FUNCTION bool operator==(const self_t& rhs) const
+  {
+    return (count == rhs.count);
+  }
 
-    /// Not equal to
-    THRUST_HIP_FUNCTION bool operator!=(const self_t& rhs) const
-    {
-        return (count != rhs.count);
-    }
+  /// Not equal to
+  THRUST_HIP_FUNCTION bool operator!=(const self_t& rhs) const
+  {
+    return (count != rhs.count);
+  }
 
 }; // struct count_iterator_t
 
-} // hip_rocprim
+} // namespace hip_rocprim
 THRUST_NAMESPACE_END

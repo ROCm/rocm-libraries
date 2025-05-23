@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ * Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -29,6 +29,7 @@
 #pragma once
 
 #include <thrust/detail/config.h>
+
 #include <thrust/system/hip/detail/util.h>
 
 #include <cstdio>
@@ -43,19 +44,19 @@ namespace detail
 
 void THRUST_HIP_DEVICE_FUNCTION terminate()
 {
-    thrust::hip_rocprim::terminate();
+  thrust::hip_rocprim::terminate();
 }
 
 void THRUST_HIP_FUNCTION terminate_with_message(const char* message)
 {
-    THRUST_HIP_PRINTF("%s\n", message);
+  THRUST_HIP_PRINTF("%s\n", message);
 #if THRUST_HIP_PRINTF_ENABLED == 0
-    THRUST_UNUSED_VAR(message);
+  THRUST_UNUSED_VAR(message);
 #endif
-    thrust::hip_rocprim::terminate();
+  thrust::hip_rocprim::terminate();
 }
 
-} // end detail
-} // end hip
-} // end system
+} // namespace detail
+} // namespace hip
+} // namespace system
 THRUST_NAMESPACE_END

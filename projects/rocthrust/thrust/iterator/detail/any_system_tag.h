@@ -17,16 +17,20 @@
 #pragma once
 
 #include <thrust/detail/config.h>
+
 #include <thrust/detail/execution_policy.h>
 
 THRUST_NAMESPACE_BEGIN
 
-struct any_system_tag
-  : thrust::execution_policy<any_system_tag>
+struct any_system_tag : thrust::execution_policy<any_system_tag>
 {
   // allow any_system_tag to convert to any type at all
   // XXX make this safer using enable_if<is_tag<T>> upon c++11
-  template<typename T> operator T () const {return T();}
+  template <typename T>
+  operator T() const
+  {
+    return T();
+  }
 };
 
 THRUST_NAMESPACE_END

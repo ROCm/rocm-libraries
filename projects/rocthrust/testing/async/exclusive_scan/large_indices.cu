@@ -17,22 +17,20 @@
 
 #include <thrust/detail/config.h>
 
-#if THRUST_CPP_DIALECT >= 2014
+#if THRUST_CPP_DIALECT >= 2017
 
-#include <async/test_policy_overloads.h>
+#  include <thrust/device_free.h>
+#  include <thrust/device_malloc.h>
+#  include <thrust/device_ptr.h>
+#  include <thrust/iterator/detail/device_system_tag.h>
+#  include <thrust/iterator/detail/iterator_facade_category.h>
+#  include <thrust/optional.h>
 
-#include <async/exclusive_scan/mixin.h>
+#  include <cinttypes>
+#  include <cstdint>
 
-#include <thrust/device_free.h>
-#include <thrust/device_malloc.h>
-#include <thrust/device_ptr.h>
-#include <thrust/optional.h>
-
-#include <thrust/iterator/detail/device_system_tag.h>
-#include <thrust/iterator/detail/iterator_facade_category.h>
-
-#include <cstdint>
-#include <cinttypes>
+#  include <async/exclusive_scan/mixin.h>
+#  include <async/test_policy_overloads.h>
 
 // This test is an adaptation of TestInclusiveScanWithBigIndices from scan.cu.
 
@@ -53,12 +51,8 @@ struct assert_sequence_iterator
   // Defined for thrust::iterator_traits:
   using pointer           = value_type*;
   using reference         = assert_sequence_iterator; // weird but convenient
-  using iterator_category =
-    typename thrust::detail::iterator_facade_category<
-      thrust::device_system_tag,
-      thrust::random_access_traversal_tag,
-      value_type,
-      reference>::type;
+  using iterator_category = typename thrust::detail::
+    iterator_facade_category<thrust::device_system_tag, thrust::random_access_traversal_tag, value_type, reference>::type;
 
   std::int64_t expected{0};
   std::int64_t max{0};
@@ -69,8 +63,8 @@ struct assert_sequence_iterator
   // done explicitly from the host.
   void initialize_shared_state()
   {
-    found_max        = thrust::device_malloc<bool>(1);
-    unexpected_value = thrust::device_malloc<bool>(1);
+    found_max         = thrust::device_malloc<bool>(1);
+    unexpected_value  = thrust::device_malloc<bool>(1);
     *found_max        = false;
     *unexpected_value = false;
   }
@@ -100,7 +94,7 @@ struct assert_sequence_iterator
   {
     if (val != expected)
     {
-      printf("Error: expected %" PRId64", got %" PRId64"\n", expected, val);
+      printf("Error: expected %" PRId64 ", got %" PRId64 "\n", expected, val);
       *unexpected_value = true;
     }
     else if (val == max)
@@ -112,8 +106,7 @@ struct assert_sequence_iterator
   }
 
 private:
-  THRUST_HOST_DEVICE
-  assert_sequence_iterator clone(value_type new_expected) const
+  THRUST_HOST_DEVICE assert_sequence_iterator clone(value_type new_expected) const
   {
     return {new_expected, max, found_max, unexpected_value};
   }
@@ -141,18 +134,22 @@ struct assert_sequence_output
       iter.free_shared_state();
     }
 
-    iterator begin() { return iter; }
+    iterator begin()
+    {
+      return iter;
+    }
   };
 
   template <typename InputType>
   static output_type generate_output(std::size_t num_values, InputType&)
   {
     using value_type = typename assert_sequence_iterator::value_type;
-    assert_sequence_iterator it{0,
-                                // minus one bc exclusive scan:
-                                static_cast<value_type>(num_values - 1),
-                                nullptr,
-                                nullptr};
+    assert_sequence_iterator it{
+      0,
+      // minus one bc exclusive scan:
+      static_cast<value_type>(num_values - 1),
+      nullptr,
+      nullptr};
     return output_type{std::move(it)};
   }
 };
@@ -162,9 +159,7 @@ struct validate_assert_sequence_iterators
   using output_t = assert_sequence_output::output_type;
 
   template <typename EventType>
-  static void compare_outputs(EventType& e,
-                              output_t const&,
-                              output_t const& test)
+  static void compare_outputs(EventType& e, output_t const&, output_t const& test)
   {
     testing::async::mixin::compare_outputs::detail::basic_event_validation(e);
 
@@ -179,8 +174,8 @@ struct validate_assert_sequence_iterators
 struct default_bin_op_overloads
 {
   using postfix_args_type = std::tuple< // List any extra arg overloads:
-    std::tuple<>,                       // - no extra args
-    std::tuple<uint64_t>                // - initial_value
+    std::tuple<>, // - no extra args
+    std::tuple<uint64_t> // - initial_value
     >;
 
   static postfix_args_type generate_postfix_args()
@@ -203,7 +198,7 @@ struct default_bin_op_invoker
   }
 };
 
-} // anon namespace
+} // namespace
 
 void test_large_indices_default_scan_op()
 {
@@ -223,9 +218,9 @@ namespace
 // custom operator overloads.
 struct custom_bin_op_overloads
 {
-  using postfix_args_type = std::tuple<     // List any extra arg overloads:
+  using postfix_args_type = std::tuple< // List any extra arg overloads:
     std::tuple<uint64_t, thrust::maximum<>> // - initial_value, binop
-  >;
+    >;
 
   static postfix_args_type generate_postfix_args()
   {
@@ -234,7 +229,7 @@ struct custom_bin_op_overloads
 };
 
 struct custom_bin_op_invoker
-  : testing::async::mixin::input::counting_iterator_from_1<std::int64_t>
+    : testing::async::mixin::input::counting_iterator_from_1<std::int64_t>
     , assert_sequence_output
     , custom_bin_op_overloads
     , testing::async::mixin::invoke_reference::noop

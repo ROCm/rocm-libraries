@@ -38,7 +38,8 @@ THRUST_NAMESPACE_BEGIN
 
 /*! \brief Utility trait that maps a sequence of any types to the type void.
  */
-template <typename...> struct voider
+template <typename...>
+struct voider
 {
   /*! \brief The resulting type (always void). */
   using type = void;
@@ -47,10 +48,9 @@ template <typename...> struct voider
 #if THRUST_CPP_DIALECT >= 2017
 using std::void_t;
 #else
-template <typename... Ts> using void_t = typename voider<Ts...>::type;
+template <typename... Ts>
+using void_t = typename voider<Ts...>::type;
 #endif
-
-
 
 /*! \} // type traits
  */

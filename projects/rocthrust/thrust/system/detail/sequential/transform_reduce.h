@@ -19,4 +19,3 @@
 #include <thrust/detail/config.h>
 
 // this system has no special transform_reduce functions
-

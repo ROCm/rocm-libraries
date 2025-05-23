@@ -14,7 +14,6 @@
  *  limitations under the License.
  */
 
-
 /*! \file adjacent_difference.h
  *  \brief Sequential implementation of adjacent_difference.
  */
@@ -22,6 +21,7 @@
 #pragma once
 
 #include <thrust/detail/config.h>
+
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/system/detail/sequential/execution_policy.h>
 
@@ -33,41 +33,37 @@ namespace detail
 namespace sequential
 {
 
-
 THRUST_EXEC_CHECK_DISABLE
-template<typename DerivedPolicy,
-         typename InputIterator,
-         typename OutputIterator,
-         typename BinaryFunction>
-THRUST_HOST_DEVICE
-OutputIterator adjacent_difference(sequential::execution_policy<DerivedPolicy> &,
-                                   InputIterator first,
-                                   InputIterator last,
-                                   OutputIterator result,
-                                   BinaryFunction binary_op)
+template <typename DerivedPolicy, typename InputIterator, typename OutputIterator, typename BinaryFunction>
+THRUST_HOST_DEVICE OutputIterator adjacent_difference(
+  sequential::execution_policy<DerivedPolicy>&,
+  InputIterator first,
+  InputIterator last,
+  OutputIterator result,
+  BinaryFunction binary_op)
 {
   using InputType = typename thrust::iterator_traits<InputIterator>::value_type;
 
-  if(first == last)
+  if (first == last)
+  {
     return result;
+  }
 
   InputType curr = *first;
 
   *result = curr;
 
-  while(++first != last)
+  while (++first != last)
   {
     InputType next = *first;
-    *(++result) = binary_op(next, curr);
-    curr = next;
+    *(++result)    = binary_op(next, curr);
+    curr           = next;
   }
 
   return ++result;
 }
 
-
 } // end namespace sequential
 } // end namespace detail
 } // end namespace system
 THRUST_NAMESPACE_END
-

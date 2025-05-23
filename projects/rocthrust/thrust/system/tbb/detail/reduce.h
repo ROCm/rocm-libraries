@@ -14,7 +14,6 @@
  *  limitations under the License.
  */
 
-
 /*! \file reduce.h
  *  \brief TBB implementation of reduce.
  */
@@ -22,6 +21,7 @@
 #pragma once
 
 #include <thrust/detail/config.h>
+
 #include <thrust/system/tbb/detail/execution_policy.h>
 
 THRUST_NAMESPACE_BEGIN
@@ -32,17 +32,12 @@ namespace tbb
 namespace detail
 {
 
-
-template<typename DerivedPolicy,
-         typename InputIterator, 
-         typename OutputType,
-         typename BinaryFunction>
-  OutputType reduce(execution_policy<DerivedPolicy> &exec,
-                    InputIterator begin,
-                    InputIterator end,
-                    OutputType init,
-                    BinaryFunction binary_op);
-
+template <typename DerivedPolicy, typename InputIterator, typename OutputType, typename BinaryFunction>
+OutputType reduce(execution_policy<DerivedPolicy>& exec,
+                  InputIterator begin,
+                  InputIterator end,
+                  OutputType init,
+                  BinaryFunction binary_op);
 
 } // end namespace detail
 } // end namespace tbb
@@ -50,4 +45,3 @@ template<typename DerivedPolicy,
 THRUST_NAMESPACE_END
 
 #include <thrust/system/tbb/detail/reduce.inl>
-

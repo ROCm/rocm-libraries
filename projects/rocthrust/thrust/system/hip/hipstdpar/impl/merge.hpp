@@ -1,3 +1,23 @@
+// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 /*
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -20,118 +40,72 @@
 
 #if defined(__HIPSTDPAR__)
 
-#include "hipstd.hpp"
+#  include <thrust/execution_policy.h>
+#  include <thrust/merge.h>
 
-#include <thrust/execution_policy.h>
-#include <thrust/merge.h>
+#  include <algorithm>
+#  include <execution>
+#  include <utility>
 
-#include <algorithm>
-#include <execution>
-#include <utility>
+#  include "hipstd.hpp"
 
 namespace std
 {
-    // BEGIN MERGE
-    template<
-        typename I0,
-        typename I1,
-        typename O,
-        enable_if_t<
-            ::hipstd::is_offloadable_iterator<I0, I1, O>()>* = nullptr>
-    inline
-    O merge(
-        execution::parallel_unsequenced_policy,
-        I0 f0,
-        I0 l0,
-        I1 f1,
-        I1 l1,
-        O fo)
-    {
-        return ::thrust::merge(::thrust::device, f0, l0, f1, l1, fo);
-    }
-
-    template<
-        typename I0,
-        typename I1,
-        typename O,
-        enable_if_t<
-            !::hipstd::is_offloadable_iterator<I0, I1, O>()>* = nullptr>
-    inline
-    O merge(
-        execution::parallel_unsequenced_policy,
-        I0 f0,
-        I0 l0,
-        I1 f1,
-        I1 l1,
-        O fo)
-    {
-        ::hipstd::unsupported_iterator_category<
-            typename iterator_traits<I0>::iterator_category,
-            typename iterator_traits<I1>::iterator_category,
-            typename iterator_traits<O>::iterator_category>();
-
-        return ::std::merge(::std::execution::par, f0, l0, f1, l1, fo);
-    }
-
-    template<
-        typename I0,
-        typename I1,
-        typename O,
-        typename R,
-        enable_if_t<
-            ::hipstd::is_offloadable_iterator<I0, I1, O>() &&
-            ::hipstd::is_offloadable_callable<R>()>* = nullptr>
-    inline
-    O merge(
-        execution::parallel_unsequenced_policy,
-        I0 f0,
-        I0 l0,
-        I1 f1,
-        I1 l1,
-        O fo,
-        R r)
-    {
-        return ::thrust::merge(
-            ::thrust::device, f0, l0, f1, l1, fo, ::std::move(r));
-    }
-
-    template<
-        typename I0,
-        typename I1,
-        typename O,
-        typename R,
-        enable_if_t<
-            !::hipstd::is_offloadable_iterator<I0, I1, O>() ||
-            !::hipstd::is_offloadable_callable<R>()>* = nullptr>
-    inline
-    O merge(
-        execution::parallel_unsequenced_policy,
-        I0 f0,
-        I0 l0,
-        I1 f1,
-        I1 l1,
-        O fo,
-        R r)
-    {
-        if constexpr (!::hipstd::is_offloadable_iterator<I0, I1, O>()) {
-            ::hipstd::unsupported_iterator_category<
-                typename iterator_traits<I0>::iterator_category,
-                typename iterator_traits<I1>::iterator_category,
-                typename iterator_traits<O>::iterator_category>();
-        }
-        if constexpr (!::hipstd::is_offloadable_callable<R>()) {
-            ::hipstd::unsupported_callable_type<R>();
-        }
-
-        return ::std::merge(
-            ::std::execution::par, f0, l0, f1, l1, fo, ::std::move(r));
-    }
-    // END MERGE
-
-    // BEGIN INPLACE_MERGE
-    // TODO: UNIMPLEMENTED IN THRUST
-    // END INPLACE_MERGE
+// BEGIN MERGE
+template <typename I0, typename I1, typename O, enable_if_t<::hipstd::is_offloadable_iterator<I0, I1, O>()>* = nullptr>
+inline O merge(execution::parallel_unsequenced_policy, I0 f0, I0 l0, I1 f1, I1 l1, O fo)
+{
+  return ::thrust::merge(::thrust::device, f0, l0, f1, l1, fo);
 }
+
+template <typename I0, typename I1, typename O, enable_if_t<!::hipstd::is_offloadable_iterator<I0, I1, O>()>* = nullptr>
+inline O merge(execution::parallel_unsequenced_policy, I0 f0, I0 l0, I1 f1, I1 l1, O fo)
+{
+  ::hipstd::unsupported_iterator_category<typename iterator_traits<I0>::iterator_category,
+                                          typename iterator_traits<I1>::iterator_category,
+                                          typename iterator_traits<O>::iterator_category>();
+
+  return ::std::merge(::std::execution::par, f0, l0, f1, l1, fo);
+}
+
+template <
+  typename I0,
+  typename I1,
+  typename O,
+  typename R,
+  enable_if_t<::hipstd::is_offloadable_iterator<I0, I1, O>() && ::hipstd::is_offloadable_callable<R>()>* = nullptr>
+inline O merge(execution::parallel_unsequenced_policy, I0 f0, I0 l0, I1 f1, I1 l1, O fo, R r)
+{
+  return ::thrust::merge(::thrust::device, f0, l0, f1, l1, fo, ::std::move(r));
+}
+
+template <
+  typename I0,
+  typename I1,
+  typename O,
+  typename R,
+  enable_if_t<!::hipstd::is_offloadable_iterator<I0, I1, O>() || !::hipstd::is_offloadable_callable<R>()>* = nullptr>
+inline O merge(execution::parallel_unsequenced_policy, I0 f0, I0 l0, I1 f1, I1 l1, O fo, R r)
+{
+  if constexpr (!::hipstd::is_offloadable_iterator<I0, I1, O>())
+  {
+    ::hipstd::unsupported_iterator_category<typename iterator_traits<I0>::iterator_category,
+                                            typename iterator_traits<I1>::iterator_category,
+                                            typename iterator_traits<O>::iterator_category>();
+  }
+  if constexpr (!::hipstd::is_offloadable_callable<R>())
+  {
+    ::hipstd::unsupported_callable_type<R>();
+  }
+
+  return ::std::merge(::std::execution::par, f0, l0, f1, l1, fo, ::std::move(r));
+}
+// END MERGE
+
+// BEGIN INPLACE_MERGE
+// TODO: UNIMPLEMENTED IN THRUST
+// END INPLACE_MERGE
+} // namespace std
 #else // __HIPSTDPAR__
-#    error "__HIPSTDPAR__ should be defined. Please use the '--hipstdpar' compile option."
+#  error "__HIPSTDPAR__ should be defined. Please use the '--hipstdpar' compile option."
 #endif // __HIPSTDPAR__

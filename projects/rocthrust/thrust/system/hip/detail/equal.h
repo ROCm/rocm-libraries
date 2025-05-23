@@ -30,9 +30,9 @@
 #include <thrust/detail/config.h>
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
-#include <thrust/system/hip/config.h>
+#  include <thrust/system/hip/config.h>
 
-#include <thrust/system/hip/detail/mismatch.h>
+#  include <thrust/system/hip/detail/mismatch.h>
 
 THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
@@ -40,24 +40,16 @@ namespace hip_rocprim
 
 template <class Derived, class InputIt1, class InputIt2, class BinaryPred>
 bool THRUST_HIP_FUNCTION
-equal(execution_policy<Derived>& policy,
-      InputIt1                   first1,
-      InputIt1                   last1,
-      InputIt2                   first2,
-      BinaryPred                 binary_pred)
+equal(execution_policy<Derived>& policy, InputIt1 first1, InputIt1 last1, InputIt2 first2, BinaryPred binary_pred)
 {
-    return hip_rocprim::mismatch(policy, first1, last1, first2, binary_pred).first == last1;
+  return hip_rocprim::mismatch(policy, first1, last1, first2, binary_pred).first == last1;
 }
 
 template <class Derived, class InputIt1, class InputIt2>
-bool THRUST_HIP_FUNCTION
-equal(execution_policy<Derived>& policy,
-      InputIt1                   first1,
-      InputIt1                   last1,
-      InputIt2                   first2)
+bool THRUST_HIP_FUNCTION equal(execution_policy<Derived>& policy, InputIt1 first1, InputIt1 last1, InputIt2 first2)
 {
-    using InputType1 = typename thrust::iterator_value<InputIt1>::type;
-    return hip_rocprim::equal(policy, first1, last1, first2, equal_to<InputType1>());
+  using InputType1 = typename thrust::iterator_value<InputIt1>::type;
+  return hip_rocprim::equal(policy, first1, last1, first2, equal_to<InputType1>());
 }
 
 } // namespace hip_rocprim

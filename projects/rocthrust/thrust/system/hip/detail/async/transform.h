@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright© 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Modifications Copyright© 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
  *     * Redistributions of source code must retain the above copyright
@@ -33,20 +33,24 @@
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 
-#include <thrust/system/hip/config.h>
+#  include <thrust/system/hip/config.h>
 
-#include <thrust/system/hip/detail/async/customization.h>
-#include <thrust/system/hip/detail/parallel_for.h>
-#include <thrust/system/hip/future.h>
-#include <thrust/iterator/iterator_traits.h>
-#include <thrust/distance.h>
-#include <thrust/advance.h>
+#  include <thrust/advance.h>
+#  include <thrust/distance.h>
+#  include <thrust/iterator/iterator_traits.h>
+#  include <thrust/system/hip/detail/async/customization.h>
+#  include <thrust/system/hip/detail/parallel_for.h>
+#  include <thrust/system/hip/future.h>
 
-#include <type_traits>
+#  include <type_traits>
 
 THRUST_NAMESPACE_BEGIN
 
-namespace system { namespace hip { namespace detail
+namespace system
+{
+namespace hip
+{
+namespace detail
 {
 
 template <typename ForwardIt, typename OutputIt, typename UnaryOperation>
@@ -56,30 +60,23 @@ struct async_transform_fn
   OutputIt output_;
   UnaryOperation op_;
 
-  THRUST_HOST_DEVICE
-  async_transform_fn(ForwardIt&& first, OutputIt&& output, UnaryOperation&& op)
-    : first_(std::move(first)), output_(std::move(output)), op_(std::move(op))
+  THRUST_HOST_DEVICE async_transform_fn(ForwardIt&& first, OutputIt&& output, UnaryOperation&& op)
+      : first_(std::move(first))
+      , output_(std::move(output))
+      , op_(std::move(op))
   {}
 
   template <typename Index>
-  THRUST_HOST_DEVICE
-  void operator()(Index idx)
+  THRUST_HOST_DEVICE void operator()(Index idx)
   {
     output_[idx] = op_(thrust::raw_reference_cast(first_[idx]));
   }
 };
 
-template <
-  typename DerivedPolicy
-, typename ForwardIt, typename Size, typename OutputIt, typename UnaryOperation
->
+template <typename DerivedPolicy, typename ForwardIt, typename Size, typename OutputIt, typename UnaryOperation>
 auto async_transform_n(
-  execution_policy<DerivedPolicy>& policy,
-  ForwardIt                        first,
-  Size                             n,
-  OutputIt                         output,
-  UnaryOperation                   op
-) -> unique_eager_event
+  execution_policy<DerivedPolicy>& policy, ForwardIt first, Size n, OutputIt output, UnaryOperation op)
+  -> unique_eager_event
 {
   unique_eager_event e;
 
@@ -89,27 +86,15 @@ auto async_transform_n(
 
   if (thrust::hip_rocprim::default_stream() != user_raw_stream)
   {
-    e = make_dependent_event(
-      std::tuple_cat(
-        std::make_tuple(
-          unique_stream(nonowning, user_raw_stream)
-        )
-      , extract_dependencies(
-          std::move(thrust::detail::derived_cast(policy))
-        )
-      )
-    );
+    e = make_dependent_event(std::tuple_cat(std::make_tuple(unique_stream(nonowning, user_raw_stream)),
+                                            extract_dependencies(std::move(thrust::detail::derived_cast(policy)))));
   }
   else
   {
-    e = make_dependent_event(
-      extract_dependencies(
-        std::move(thrust::detail::derived_cast(policy))
-      )
-    );
+    e = make_dependent_event(extract_dependencies(std::move(thrust::detail::derived_cast(policy))));
   }
 
-  if( n == 0)
+  if (n == 0)
   {
     e.ready();
     return e;
@@ -117,45 +102,30 @@ auto async_transform_n(
 
   // Run transform.
 
-  async_transform_fn<ForwardIt, OutputIt, UnaryOperation> wrapped(
-    std::move(first), std::move(output), std::move(op)
-  );
+  async_transform_fn<ForwardIt, OutputIt, UnaryOperation> wrapped(std::move(first), std::move(output), std::move(op));
 
   thrust::hip_rocprim::throw_on_error(
-    thrust::hip_rocprim::__parallel_for::parallel_for(
-      n, std::move(wrapped), e.stream().native_handle()
-    )
-  , "after transform launch"
-  );
+    thrust::hip_rocprim::__parallel_for::parallel_for(n, std::move(wrapped), e.stream().native_handle()),
+    "after transform launch");
 
   return e;
 }
 
-}}} // namespace system::hip::detail
+} // namespace detail
+} // namespace hip
+} // namespace system
 
 namespace hip_rocprim
 {
 
 // ADL entry point.
-template <
-  typename DerivedPolicy
-, typename ForwardIt, typename Sentinel, typename OutputIt
-, typename UnaryOperation
->
+template <typename DerivedPolicy, typename ForwardIt, typename Sentinel, typename OutputIt, typename UnaryOperation>
 auto async_transform(
-  execution_policy<DerivedPolicy>& policy,
-  ForwardIt                        first,
-  Sentinel                         last,
-  OutputIt                         output,
-  UnaryOperation&&                 op
-)
-THRUST_RETURNS(
-  thrust::system::hip::detail::async_transform_n(
-    policy, first, thrust::distance(first, last), output, THRUST_FWD(op)
-  )
-);
+  execution_policy<DerivedPolicy>& policy, ForwardIt first, Sentinel last, OutputIt output, UnaryOperation&& op)
+  THRUST_RETURNS(thrust::system::hip::detail::async_transform_n(
+    policy, first, thrust::distance(first, last), output, THRUST_FWD(op)));
 
-} // hip_rocprim
+} // namespace hip_rocprim
 
 THRUST_NAMESPACE_END
 

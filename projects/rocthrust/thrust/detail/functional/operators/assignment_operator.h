@@ -17,6 +17,7 @@
 #pragma once
 
 #include <thrust/detail/config.h>
+
 #include <thrust/detail/functional/actor.h>
 #include <thrust/detail/functional/composite.h>
 #include <thrust/detail/functional/operators/operator_adaptors.h>
@@ -25,7 +26,8 @@
 THRUST_NAMESPACE_BEGIN
 
 // XXX WAR circular inclusion with this forward declaration
-template<typename,typename,typename> struct binary_function;
+template <typename, typename, typename>
+struct binary_function;
 
 namespace detail
 {
@@ -33,7 +35,8 @@ namespace functional
 {
 
 // XXX WAR circular inclusion with this forward declaration
-template<typename> struct as_actor;
+template <typename>
+struct as_actor;
 
 // there's no standard assign functional, so roll an ad hoc one here
 struct assign
@@ -42,31 +45,25 @@ struct assign
 
   THRUST_EXEC_CHECK_DISABLE
   template <typename T1, typename T2>
-  THRUST_HOST_DEVICE
-  constexpr auto operator()(T1&& t1, T2&& t2) const
-  noexcept(noexcept(THRUST_FWD(t1) = THRUST_FWD(t2)))
-  -> decltype(THRUST_FWD(t1) = THRUST_FWD(t2))
+  THRUST_HOST_DEVICE constexpr auto operator()(T1&& t1, T2&& t2) const
+    noexcept(noexcept(THRUST_FWD(t1) = THRUST_FWD(t2))) -> decltype(THRUST_FWD(t1) = THRUST_FWD(t2))
   {
     return THRUST_FWD(t1) = THRUST_FWD(t2);
   }
 };
 
-template<typename Eval, typename T>
-  struct assign_result
+template <typename Eval, typename T>
+struct assign_result
 {
   using type = actor<composite<transparent_binary_operator<assign>, actor<Eval>, typename as_actor<T>::type>>;
 }; // end assign_result
 
-template<typename Eval, typename T>
-  THRUST_HOST_DEVICE
-    typename assign_result<Eval,T>::type
-      do_assign(const actor<Eval> &_1, const T &_2)
+template <typename Eval, typename T>
+THRUST_HOST_DEVICE typename assign_result<Eval, T>::type do_assign(const actor<Eval>& _1, const T& _2)
 {
-  return compose(transparent_binary_operator<assign>(),
-                 _1,
-                 as_actor<T>::convert(_2));
+  return compose(transparent_binary_operator<assign>(), _1, as_actor<T>::convert(_2));
 } // end do_assign()
 
-} // end functional
-} // end detail
+} // namespace functional
+} // namespace detail
 THRUST_NAMESPACE_END

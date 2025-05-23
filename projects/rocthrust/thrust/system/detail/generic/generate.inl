@@ -50,14 +50,9 @@ THRUST_HOST_DEVICE
   // operator() of the function object, but until we support pre-11, this is a
   // nice solution that validates the const_cast and doesn't take away any
   // functionality.
-  THRUST_STATIC_ASSERT_MSG(
-    !thrust::detail::is_const<
-      typename thrust::detail::remove_reference<
-        typename thrust::iterator_traits<ForwardIterator>::reference
-      >::type
-    >::value
-  , "generating to `const` iterators is not allowed"
-  );
+  THRUST_STATIC_ASSERT_MSG(!thrust::detail::is_const<typename thrust::detail::remove_reference<
+                             typename thrust::iterator_traits<ForwardIterator>::reference>::type>::value,
+                           "generating to `const` iterators is not allowed");
   thrust::for_each(exec, first, last, typename thrust::detail::generate_functor<ExecutionPolicy,Generator>::type(gen));
 } // end generate()
 

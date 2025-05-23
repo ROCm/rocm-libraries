@@ -14,7 +14,6 @@
  *  limitations under the License.
  */
 
-
 #pragma once
 
 #include <thrust/detail/config.h>
@@ -27,9 +26,8 @@ namespace detail
 namespace generic
 {
 
-template<typename InputIterator, typename Distance>
-THRUST_HOST_DEVICE
-void advance(InputIterator& i, Distance n);
+template <typename InputIterator, typename Distance>
+THRUST_HOST_DEVICE void advance(InputIterator& i, Distance n);
 
 } // end namespace generic
 } // end namespace detail
@@ -37,4 +35,3 @@ void advance(InputIterator& i, Distance n);
 THRUST_NAMESPACE_END
 
 #include <thrust/system/detail/generic/advance.inl>
-

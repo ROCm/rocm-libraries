@@ -56,17 +56,20 @@ struct conjunction;
  */
 
 template <>
-struct conjunction<> : std::true_type {};
+struct conjunction<> : std::true_type
+{};
 
 template <typename T>
-struct conjunction<T> : T {};
+struct conjunction<T> : T
+{};
 
 template <typename T0, typename T1>
-struct conjunction<T0, T1> : std::conditional<T0::value, T1, T0>::type {};
+struct conjunction<T0, T1> : std::conditional<T0::value, T1, T0>::type
+{};
 
-template<typename T0, typename T1, typename T2, typename... TN>
-struct conjunction<T0, T1, T2, TN...>
-  : std::conditional<T0::value, conjunction<T1, T2, TN...>, T0>::type {};
+template <typename T0, typename T1, typename T2, typename... TN>
+struct conjunction<T0, T1, T2, TN...> : std::conditional<T0::value, conjunction<T1, T2, TN...>, T0>::type
+{};
 
 /*! \endcond
  */
@@ -78,7 +81,7 @@ struct conjunction<T0, T1, T2, TN...>
  *  \see conjunction_value
  *  \see <a href="https://en.cppreference.com/w/cpp/types/conjunction"><tt>std::conjunction</tt></a>
  */
-#if THRUST_CPP_DIALECT >= 2014
+#if THRUST_CPP_DIALECT >= 2017
 template <typename... Ts>
 constexpr bool conjunction_v = conjunction<Ts...>::value;
 #endif
@@ -101,14 +104,16 @@ struct disjunction;
  */
 
 template <>
-struct disjunction<> : std::false_type {};
+struct disjunction<> : std::false_type
+{};
 
 template <typename T>
-struct disjunction<T> : T {};
+struct disjunction<T> : T
+{};
 
 template <typename T0, typename... TN>
-struct disjunction<T0, TN...>
-  : std::conditional<T0::value != false, T0, disjunction<TN...> >::type {};
+struct disjunction<T0, TN...> : std::conditional<T0::value != false, T0, disjunction<TN...>>::type
+{};
 
 /*! \endcond
  */
@@ -120,7 +125,7 @@ struct disjunction<T0, TN...>
  *  \see disjunction_value
  *  \see <a href="https://en.cppreference.com/w/cpp/types/disjunction"><tt>std::disjunction</tt></a>
  */
-#if THRUST_CPP_DIALECT >= 2014
+#if THRUST_CPP_DIALECT >= 2017
 template <typename... Ts>
 constexpr bool disjunction_v = disjunction<Ts...>::value;
 #endif
@@ -143,7 +148,8 @@ struct negation;
  */
 
 template <typename T>
-struct negation : std::integral_constant<bool, !T::value> {};
+struct negation : std::integral_constant<bool, !T::value>
+{};
 
 /*! \endcond
  */
@@ -155,7 +161,7 @@ struct negation : std::integral_constant<bool, !T::value> {};
  *  \see negation_value
  *  \see <a href="https://en.cppreference.com/w/cpp/types/negation"><tt>std::negation</tt></a>
  */
-#if THRUST_CPP_DIALECT >= 2014
+#if THRUST_CPP_DIALECT >= 2017
 template <typename T>
 constexpr bool negation_v = negation<T>::value;
 #endif
@@ -172,7 +178,7 @@ constexpr bool negation_v = negation<T>::value;
 template <bool... Bs>
 struct conjunction_value;
 
-#if THRUST_CPP_DIALECT >= 2014
+#if THRUST_CPP_DIALECT >= 2017
 /*! \brief <tt>constexpr bool</tt> whose value is <tt>(... && Bs)</tt>.
  *
  *  \see conjunction_value
@@ -187,14 +193,16 @@ constexpr bool conjunction_value_v = conjunction_value<Bs...>::value;
  */
 
 template <>
-struct conjunction_value<> : std::true_type {};
+struct conjunction_value<> : std::true_type
+{};
 
 template <bool B>
-struct conjunction_value<B> : std::integral_constant<bool, B> {};
+struct conjunction_value<B> : std::integral_constant<bool, B>
+{};
 
 template <bool B, bool... Bs>
-struct conjunction_value<B, Bs...>
-  : std::integral_constant<bool, B && conjunction_value<Bs...>::value> {};
+struct conjunction_value<B, Bs...> : std::integral_constant<bool, B && conjunction_value<Bs...>::value>
+{};
 
 /*! \endcond
  */
@@ -211,7 +219,7 @@ struct conjunction_value<B, Bs...>
 template <bool... Bs>
 struct disjunction_value;
 
-#if THRUST_CPP_DIALECT >= 2014
+#if THRUST_CPP_DIALECT >= 2017
 /*! \brief <tt>constexpr bool</tt> whose value is <tt>(... || Bs)</tt>.
  *
  *  \see disjunction_value
@@ -226,14 +234,16 @@ constexpr bool disjunction_value_v = disjunction_value<Bs...>::value;
  */
 
 template <>
-struct disjunction_value<> : std::false_type {};
+struct disjunction_value<> : std::false_type
+{};
 
 template <bool B>
-struct disjunction_value<B> : std::integral_constant<bool, B> {};
+struct disjunction_value<B> : std::integral_constant<bool, B>
+{};
 
 template <bool B, bool... Bs>
-struct disjunction_value<B, Bs...>
-  : std::integral_constant<bool, B || disjunction_value<Bs...>::value> {};
+struct disjunction_value<B, Bs...> : std::integral_constant<bool, B || disjunction_value<Bs...>::value>
+{};
 
 /*! \endcond
  */
@@ -250,7 +260,7 @@ struct disjunction_value<B, Bs...>
 template <bool B>
 struct negation_value;
 
-#if THRUST_CPP_DIALECT >= 2014
+#if THRUST_CPP_DIALECT >= 2017
 /*! \brief <tt>constexpr bool</tt> whose value is <tt>!B</tt>.
  *
  *  \see negation_value
@@ -265,7 +275,8 @@ constexpr bool negation_value_v = negation_value<B>::value;
  */
 
 template <bool B>
-struct negation_value : std::integral_constant<bool, !B> {};
+struct negation_value : std::integral_constant<bool, !B>
+{};
 
 /*! \endcond
  */
@@ -279,4 +290,3 @@ struct negation_value : std::integral_constant<bool, !B> {};
  */
 
 THRUST_NAMESPACE_END
-

@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright (c) 2019-2021, Advanced Micro Devices, Inc.  All rights reserved.
+ *  Modifications Copyright (c) 2019-2025, Advanced Micro Devices, Inc.  All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -23,8 +23,10 @@
 #pragma once
 
 #include <thrust/detail/config.h>
-#include <thrust/system/hip/memory.h>
+
 #include <thrust/detail/vector_base.h>
+#include <thrust/system/hip/memory.h>
+
 #include <vector>
 
 THRUST_NAMESPACE_BEGIN
@@ -74,16 +76,19 @@ using universal_vector = thrust::detail::vector_base<T, Allocator>;
 
 } // namespace hip_rocprim
 
-namespace system { namespace hip
+namespace system
 {
-using thrust::hip_rocprim::vector;
+namespace hip
+{
 using thrust::hip_rocprim::universal_vector;
-}}
+using thrust::hip_rocprim::vector;
+} // namespace hip
+} // namespace system
 
 namespace hip
 {
-using thrust::hip_rocprim::vector;
 using thrust::hip_rocprim::universal_vector;
-}
+using thrust::hip_rocprim::vector;
+} // namespace hip
 
 THRUST_NAMESPACE_END

@@ -20,23 +20,24 @@
 #pragma once
 
 #include <thrust/detail/config.h>
-#include <thrust/detail/cpp14_required.h>
 
-#if THRUST_CPP_DIALECT >= 2014
+#include <thrust/detail/cpp_version_check.h>
 
-#include <thrust/detail/type_traits.h>
-#include <thrust/system/error_code.h>
+#if THRUST_CPP_DIALECT >= 2017
 
-#include <stdexcept>
+#  include <thrust/detail/type_traits.h>
+#  include <thrust/system/error_code.h>
+
+#  include <stdexcept>
 
 THRUST_NAMESPACE_BEGIN
 
 enum class event_errc
 {
-  unknown_event_error
-, no_state
-, no_content
-, last_event_error
+  unknown_event_error,
+  no_state,
+  no_content,
+  last_event_error
 };
 
 /// \return <tt>error_code(static_cast<int>(e), event_category())</tt>
@@ -58,23 +59,20 @@ struct event_error_category : error_category
   {
     switch (static_cast<event_errc>(ev))
     {
-      case event_errc::no_state:
-      {
+      case event_errc::no_state: {
         return "no_state: an operation that requires an event or future to have "
                "a stream or content has been performed on a event or future "
                "without either, e.g. a moved-from or default constructed event "
                "or future (an event or future may have been consumed more than "
                "once)";
       }
-      case event_errc::no_content:
-      {
+      case event_errc::no_content: {
         return "no_content: an operation that requires a future to have content "
                "has been performed on future without any, e.g. a moved-from, "
                "default constructed, or `thrust::new_stream` constructed future "
                "(a future may have been consumed more than once)";
       }
-      default:
-      {
+      default: {
         return "unknown_event_error: an unknown error with a future "
                "object has occurred";
       }
@@ -83,12 +81,10 @@ struct event_error_category : error_category
 
   virtual error_condition default_error_condition(int ev) const
   {
-    if (
-         event_errc::last_event_error
-         >
-         static_cast<event_errc>(ev)
-       )
+    if (event_errc::last_event_error > static_cast<event_errc>(ev))
+    {
       return make_error_condition(static_cast<event_errc>(ev));
+    }
 
     return system_category().default_error_condition(ev);
   }
@@ -108,8 +104,10 @@ inline error_category const& event_category()
 namespace system
 {
 /// Specialization of \p is_error_code_enum for \p event_errc.
-template<> struct is_error_code_enum<event_errc> : true_type {};
-} // end system
+template <>
+struct is_error_code_enum<event_errc> : true_type
+{};
+} // namespace system
 
 /// \return <tt>error_code(static_cast<int>(e), event_category())</tt>
 inline error_code make_error_code(event_errc e)
@@ -125,24 +123,21 @@ inline error_condition make_error_condition(event_errc e)
 
 struct event_error : std::logic_error
 {
-  THRUST_HOST
-  explicit event_error(error_code ec)
-    : std::logic_error(ec.message()), ec_(ec)
+  THRUST_HOST explicit event_error(error_code ec)
+      : std::logic_error(ec.message())
+      , ec_(ec)
   {}
 
-  THRUST_HOST
-  explicit event_error(event_errc e)
-    : event_error(make_error_code(e))
+  THRUST_HOST explicit event_error(event_errc e)
+      : event_error(make_error_code(e))
   {}
 
-  THRUST_HOST
-  error_code const& code() const noexcept
+  THRUST_HOST error_code const& code() const noexcept
   {
     return ec_;
   }
 
-  THRUST_HOST
-  virtual ~event_error() noexcept {}
+  THRUST_HOST virtual ~event_error() noexcept {}
 
 private:
   error_code ec_;

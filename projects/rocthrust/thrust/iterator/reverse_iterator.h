@@ -14,7 +14,6 @@
  *  limitations under the License.
  */
 
-
 /*! \file thrust/iterator/reverse_iterator.h
  *  \brief An iterator adaptor which adapts another iterator to traverse backwards
  */
@@ -33,6 +32,7 @@
 #pragma once
 
 #include <thrust/detail/config.h>
+
 #include <thrust/detail/type_traits.h>
 #include <thrust/iterator/detail/reverse_iterator_base.h>
 #include <thrust/iterator/iterator_facade.h>
@@ -140,74 +140,67 @@ THRUST_NAMESPACE_BEGIN
  *
  *  \see make_reverse_iterator
  */
-template<typename BidirectionalIterator>
-  class reverse_iterator
-    : public detail::reverse_iterator_base<BidirectionalIterator>::type
+template <typename BidirectionalIterator>
+class reverse_iterator : public detail::reverse_iterator_base<BidirectionalIterator>::type
 {
   /*! \cond
    */
-  private:
-    using super_t =
-      typename thrust::detail::reverse_iterator_base<BidirectionalIterator>::type;
 
-    friend class thrust::iterator_core_access;
+private:
+  using super_t = typename thrust::detail::reverse_iterator_base<BidirectionalIterator>::type;
+
+  friend class thrust::iterator_core_access;
   /*! \endcond
    */
 
-  public:
-    /*! Default constructor does nothing.
-     */
+public:
+  /*! Default constructor does nothing.
+   */
 #if THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC && THRUST_MSVC_VERSION < 1920
-    THRUST_HOST_DEVICE reverse_iterator() {}
+  THRUST_HOST_DEVICE reverse_iterator() {}
 #else
-    reverse_iterator() = default;
+  reverse_iterator() = default;
 #endif
 
-    /*! \p Constructor accepts a \c BidirectionalIterator pointing to a range
-     *  for this \p reverse_iterator to reverse.
-     *
-     *  \param x A \c BidirectionalIterator pointing to a range to reverse.
-     */
-    THRUST_HOST_DEVICE
-    explicit reverse_iterator(BidirectionalIterator x)
+  /*! \p Constructor accepts a \c BidirectionalIterator pointing to a range
+   *  for this \p reverse_iterator to reverse.
+   *
+   *  \param x A \c BidirectionalIterator pointing to a range to reverse.
+   */
+  THRUST_HOST_DEVICE explicit reverse_iterator(BidirectionalIterator x)
       : super_t(x)
-    {}
+  {}
 
-    /*! \p Copy constructor allows construction from a related compatible
-     *  \p reverse_iterator.
-     *
-     *  \param rhs A \p reverse_iterator to copy from.
-     */
-    template <typename OtherBidirectionalIterator,
-              detail::enable_if_convertible_t<OtherBidirectionalIterator, BidirectionalIterator, int> = 0>
-    THRUST_HOST_DEVICE reverse_iterator(reverse_iterator<OtherBidirectionalIterator> const& rhs)
-        : super_t(rhs.base())
-    {}
+  /*! \p Copy constructor allows construction from a related compatible
+   *  \p reverse_iterator.
+   *
+   *  \param rhs A \p reverse_iterator to copy from.
+   */
+  template <typename OtherBidirectionalIterator,
+            detail::enable_if_convertible_t<OtherBidirectionalIterator, BidirectionalIterator, int> = 0>
+  THRUST_HOST_DEVICE reverse_iterator(reverse_iterator<OtherBidirectionalIterator> const& rhs)
+      : super_t(rhs.base())
+  {}
 
   /*! \cond
    */
-  private:
-    THRUST_EXEC_CHECK_DISABLE
-    THRUST_HOST_DEVICE
-    typename super_t::reference dereference() const;
 
-    THRUST_HOST_DEVICE
-    void increment();
+private:
+  THRUST_EXEC_CHECK_DISABLE
+  THRUST_HOST_DEVICE typename super_t::reference dereference() const;
 
-    THRUST_HOST_DEVICE
-    void decrement();
+  THRUST_HOST_DEVICE void increment();
 
-    THRUST_HOST_DEVICE
-    void advance(typename super_t::difference_type n);
+  THRUST_HOST_DEVICE void decrement();
 
-    template<typename OtherBidirectionalIterator>
-    THRUST_HOST_DEVICE
-    typename super_t::difference_type
-    distance_to(reverse_iterator<OtherBidirectionalIterator> const &y) const;
+  THRUST_HOST_DEVICE void advance(typename super_t::difference_type n);
+
+  template <typename OtherBidirectionalIterator>
+  THRUST_HOST_DEVICE typename super_t::difference_type
+  distance_to(reverse_iterator<OtherBidirectionalIterator> const& y) const;
   /*! \endcond
    */
 }; // end reverse_iterator
-
 
 /*! \p make_reverse_iterator creates a \p reverse_iterator
  *  from a \c BidirectionalIterator pointing to a range of elements to reverse.
@@ -215,10 +208,8 @@ template<typename BidirectionalIterator>
  *  \param x A \c BidirectionalIterator pointing to a range to reverse.
  *  \return A new \p reverse_iterator which reverses the range \p x.
  */
-template<typename BidirectionalIterator>
-THRUST_HOST_DEVICE
-reverse_iterator<BidirectionalIterator> make_reverse_iterator(BidirectionalIterator x);
-
+template <typename BidirectionalIterator>
+THRUST_HOST_DEVICE reverse_iterator<BidirectionalIterator> make_reverse_iterator(BidirectionalIterator x);
 
 /*! \} // end fancyiterators
  */
