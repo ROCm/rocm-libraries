@@ -3,19 +3,19 @@
 Documentation for hipRAND is available at
 [https://rocm.docs.amd.com/projects/hipRAND/en/latest/](https://rocm.docs.amd.com/projects/hipRAND/en/latest/).
 
-## hipRAND 2.13.0 for ROCm 6.5.0
+## hipRAND 2.13.0 for ROCm 7.0
 
-### Added 
+### Added
 
 * gfx950 support
 
 ### Changed
 
-* Changed the C++ version from 14 to 17. 
+* Deprecated hipRAND's Fortran API in favor of hipfort.
 
-### Upcoming changes
+### Removed
 
-* C++14 will be deprecated in the next major release.
+* Removed C++14 support, only C++17 is supported.
 
 ## hipRAND 2.12.0 for ROCm 6.4.0
 
@@ -23,7 +23,7 @@ Documentation for hipRAND is available at
 
 * When building hipRAND on Windows, use `HIP_PATH` (instead of the former `HIP_DIR`) to specify the path to the HIP SDK installation.
   * When building with the `rmake.py` script, if `HIP_PATH` is not set, it will default to `C:\hip`.
-  
+
 ### Resolved issues
 
 * Fixed an issue that was causing hipRAND build failures on Windows when the HIP SDK was installed to a location with a path that contains spaces.
