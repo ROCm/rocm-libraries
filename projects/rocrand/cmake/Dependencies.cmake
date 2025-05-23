@@ -134,7 +134,7 @@ if(BUILD_TEST)
     message(STATUS "Google Test not found or force download on. Fetching...")
     option(BUILD_GTEST "Builds the googletest subproject" ON)
     option(BUILD_GMOCK "Builds the googlemock subproject" OFF)
-    option(INSTALL_GTEST "Enable installation of googletest" OFF)
+    option(INSTALL_GTEST "Enable installation of googletest" ON)
     FetchContent_Declare(
       googletest
       GIT_REPOSITORY https://github.com/google/googletest.git

@@ -22,7 +22,6 @@
 #include <stdio.h>
 
 #include <cmath>
-#include <type_traits>
 #include <vector>
 
 #include <hip/hip_runtime.h>

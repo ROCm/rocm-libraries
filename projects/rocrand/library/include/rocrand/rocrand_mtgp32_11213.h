@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2021 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -57,8 +57,9 @@
 #ifndef ROCRAND_MTGP32_11213_H_
 #define ROCRAND_MTGP32_11213_H_
 
-#include <stdint.h>
 #include "rocrand/rocrand_mtgp32.h"
+
+#include <stdint.h>
 
 static rocrand_device::mtgp32_fast_params mtgp32dc_params_fast_11213[]
  = {

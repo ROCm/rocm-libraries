@@ -46,6 +46,8 @@
 #include "rocrand/rocrand_normal.h"
 #include "rocrand/rocrand_uniform.h"
 
+#include <hip/hip_runtime.h>
+
 namespace rocrand_device {
 namespace detail {
 
@@ -389,39 +391,40 @@ unsigned int rocrand_poisson(rocrand_state_scrambled_sobol32* state, double lamb
 }
 
 /**
- * \brief Returns a Poisson-distributed <tt>unsigned long long int</tt> using SOBOL64 generator.
+ * \brief Returns a Poisson-distributed <tt>unsigned int</tt> using SOBOL64 generator.
  *
- * Generates and returns Poisson-distributed distributed random <tt>unsigned long long int</tt>
+ * Generates and returns Poisson-distributed distributed random <tt>unsigned int</tt>
  * values using SOBOL64 generator in \p state. State is incremented by one position.
  *
  * \param state Pointer to a state to use
  * \param lambda Lambda parameter of the Poisson distribution
  *
- * \return Poisson-distributed <tt>unsigned long long int</tt>
+ * \return Poisson-distributed <tt>unsigned int</tt>
  */
 __forceinline__ __device__ __host__
-unsigned long long int rocrand_poisson(rocrand_state_sobol64* state, double lambda)
+unsigned int rocrand_poisson(rocrand_state_sobol64* state, double lambda)
 {
-    return rocrand_device::detail::poisson_distribution_inv<rocrand_state_sobol64*,
-                                                            unsigned long long int>(state, lambda);
+    return rocrand_device::detail::poisson_distribution_inv<rocrand_state_sobol64*, unsigned int>(
+        state,
+        lambda);
 }
 
 /**
- * \brief Returns a Poisson-distributed <tt>unsigned long long int</tt> using SCRAMBLED_SOBOL64 generator.
+ * \brief Returns a Poisson-distributed <tt>unsigned int</tt> using SCRAMBLED_SOBOL64 generator.
  *
- * Generates and returns Poisson-distributed distributed random <tt>unsigned long long int</tt>
+ * Generates and returns Poisson-distributed distributed random <tt>unsigned int</tt>
  * values using SCRAMBLED_SOBOL64 generator in \p state. State is incremented by one position.
  *
  * \param state Pointer to a state to use
  * \param lambda Lambda parameter of the Poisson distribution
  *
- * \return Poisson-distributed <tt>unsigned long long int</tt>
+ * \return Poisson-distributed <tt>unsigned int</tt>
  */
 __forceinline__ __device__ __host__
-unsigned long long int rocrand_poisson(rocrand_state_scrambled_sobol64* state, double lambda)
+unsigned int rocrand_poisson(rocrand_state_scrambled_sobol64* state, double lambda)
 {
     return rocrand_device::detail::poisson_distribution_inv<rocrand_state_scrambled_sobol64*,
-                                                            unsigned long long int>(state, lambda);
+                                                            unsigned int>(state, lambda);
 }
 
 /**
