@@ -245,6 +245,7 @@ template <bool BATCHED, bool STRIDED, typename T, typename U>
 rocblas_status rocsolver_sy2sb_he2hb_template(rocblas_handle handle,
                                               const rocblas_fill uplo,
                                               const rocblas_int n,
+                                              const rocblas_int b,
                                               const rocblas_int k,
                                               U A,
                                               const rocblas_int shiftA,
@@ -381,6 +382,10 @@ rocblas_status rocsolver_sy2sb_he2hb_template(rocblas_handle handle,
     }
     else
     {
+
+print_device_matrix(std::cout,"A init",n,n,A,lda);
+//print_device_matrix(std::cout,"AB init",k+1,n,AB,ldab);
+
         for(rocblas_int i = 0; i < n - k; i += k)
         {
             rocblas_int pn = n - i - k;
@@ -390,12 +395,18 @@ rocblas_status rocsolver_sy2sb_he2hb_template(rocblas_handle handle,
             rocsolver_geqrf_template<BATCHED, STRIDED>(handle, pn, k, A, shiftA + idx2D(i+k, i, lda), lda, strideA,
                 tau + i, strideP, batch_count, scalars, workS1, workS2, workW, workArr);
 
+print_device_matrix(std::cout,"A after qr",n,n,A,lda);
+
+
             // Copy A to AB
             const rocblas_int cpy_xblks = (k + 1) / 32 + 1;
             const rocblas_int cpy_yblks = (k) / 32 + 1;
             ROCSOLVER_LAUNCH_KERNEL((copyBand_setV), dim3(cpy_xblks, cpy_yblks, batch_count),
                                     dim3(32, 32), 0, stream, uplo, k, pk, i, A, shiftA, lda, strideA,
                                     AB, shiftAB, ldab, strideAB);
+
+print_device_matrix(std::cout,"A after copyset",n,n,A,lda);
+
 
             // Form matrix T
             rocsolver_larft_template<T>(handle, rocblas_forward_direction, rocblas_column_wise, pn, pk, A, shiftA + idx2D(i+k, i, lda),
@@ -406,8 +417,14 @@ rocblas_status rocsolver_sy2sb_he2hb_template(rocblas_handle handle,
                 shiftA + idx2D(i+k, i, lda), lda, strideA, workT, 0, ldt, strideT, &zero, workS2, 0, lds2,
                 strideS2, batch_count, workArr);
 
-            rocblasCall_symm_hemm(handle, rocblas_side_left, uplo, pn, pk, &one, A, shiftA + idx2D(i+k, i+k, lda),
-                lda, strideA, workS2, 0, lds2, strideS2, &zero, workW, 0, ldw, strideW, batch_count);
+//            rocblasCall_symm_hemm(handle, rocblas_side_left, uplo, pn, pk, &one, A, shiftA + idx2D(i+k, i+k, lda),
+//                lda, strideA, workS2, 0, lds2, strideS2, &zero, workW, 0, ldw, strideW, batch_count);
+            rocsolver_gemm(handle, rocblas_operation_none, rocblas_operation_none, pn, pk, pn, &one, A, shiftA + idx2D(i+k, i+k, lda),
+                lda, strideA, workS2, 0, lds2, strideS2, &zero, workW, 0, ldw, strideW, batch_count, workArr);
+
+//hipDeviceSynchronize();
+//print_device_matrix(std::cout,"con symm",pn,pk,workW,ldw);
+
             
             rocsolver_gemm(handle, rocblas_operation_conjugate_transpose, rocblas_operation_none, pk, pk, pn, &one, workS2,
                 0, lds2, strideS2, workW, 0, ldw, strideW, &zero, workS1, 0, lds1,
@@ -426,6 +443,10 @@ rocblas_status rocsolver_sy2sb_he2hb_template(rocblas_handle handle,
         ROCSOLVER_LAUNCH_KERNEL((copyTBand), dim3(cpy_blks, cpy_blks, batch_count),
                                 dim3(32, 32), 0, stream, uplo, k, A, shiftA + idx2D(n-k, n-k, lda), lda, strideA,
                                 AB, shiftAB + idx2D(0, n-k, ldab), ldab, strideAB);
+
+//print_device_matrix(std::cout,"A fin",n,n,A,lda);
+//print_device_matrix(std::cout,"AB fin",k+1,n,AB,ldab);
+
     }
 
     rocblas_set_pointer_mode(handle, old_mode);

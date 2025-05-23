@@ -33,53 +33,64 @@
  using ::testing::ValuesIn;
  using namespace std;
 
- typedef std::tuple<vector<int>, int> sy2sb_he2hb_tuple;
+ typedef std::tuple<vector<int>, vector<int>> sy2sb_he2hb_tuple;
 
- // each matrix_size_range is a {n, lda, kd, ldab}
+ // each matrix_size_range is a {n, lda}
 
- // each op_range is a ul
- // if ul = 0, then uplo = 'L'
- // if ul = 1, then uplo = 'U'
+ // each blk_range is a {b, k}
 
- // case when n = 0 and k = 0 will also execute the bad arguments test
+ // case when n = 0, k = 2, and b = 2 will also execute the bad arguments test
  // (null handle, null pointers and invalid values)
+ // TODO: no checking arguments for now.
 
  // for checkin_lapack tests
- const vector<vector<int>> matrix_size_range = {
+ const vector<vector<int>> size_range = {
      // quick return
-     {0, 1, 1, 2},
+     {0, 1},
      // invalid
-     {-1, 1, 1, 2},
-     {20, 5, 20, 21},
-     {20, 20, 5, 5},
+     {-1, 1},
+     {20, 5},
      // normal (valid) samples
-     {10, 10, 1, 2},
-     {10, 10, 3, 4},
-     {10, 15, 3, 5},
-     {20, 20, 18, 30},
-     {128, 128, 12, 13},
-     {128, 128, 150, 151},
-    };
+     {10, 10},
+     {10, 15},
+     {20, 20}};
 
- const vector<int> op_range = {1, 0};
+ const vector<vector<int>> blk_range = {
+    // invalid
+    {4, 2},
+    // normal (valid) samples 
+    {1, 10},
+    {10, 10},
+    {2, 2},
+    {2, 4},
+    {2, 8},
+    {3, 6},
+    {3, 9}};
 
  // for daily_lapack tests
- const vector<vector<int>> large_matrix_size_range
-     = {{152, 152, 64, 65}, {640, 640, 500, 501}, {1000, 1024, 800, 810}, {512, 512, 511, 512}};
+ const vector<vector<int>> large_size_range = {
+    {152, 152}, 
+    {640, 640}, 
+    {1000, 1024},
+    {2000, 2000};
+ 
+const vector<vector<int>> large_blk_range = {
+    {16, 32},
+    {16, 64},
+    {32, 64},
+    {32, 128}};
 
  Arguments sy2sb_he2hb_setup_arguments(sy2sb_he2hb_tuple tup)
  {
-     vector<int> matrix_size = std::get<0>(tup);
-     int op = std::get<1>(tup);
+     vector<int> size = std::get<0>(tup);
+     vector<int> blk = std::get<1>(tup);
 
      Arguments arg;
 
-     arg.set<rocblas_int>("n", matrix_size[0]);
-     arg.set<rocblas_int>("lda", matrix_size[1]);
-     arg.set<rocblas_int>("k", matrix_size[2]);
-     arg.set<rocblas_int>("ldb", matrix_size[3]);
-
-     arg.set<char>("uplo", op ? 'U' : 'L');
+     arg.set<rocblas_int>("n", size[0]);
+     arg.set<rocblas_int>("lda", size[1]);
+     arg.set<rocblas_int>("b", blk[0]);
+     arg.set<rocblas_int>("k", blk[1]);
 
      arg.timing = 0;
 
@@ -99,7 +110,8 @@
      {
          Arguments arg = sy2sb_he2hb_setup_arguments(GetParam());
 
-        //  if(arg.peek<rocblas_int>("k") == 0 && arg.peek<rocblas_int>("n") == 0)
+        //  if(arg.peek<rocblas_int>("k") == 2 && arg.peek<rocblas_int>("n") == 0
+        //     && arg.peek<rocblas_int>("b") == 2)
         //      testing_sy2sb_he2hb_bad_arg<T>();
 
          testing_sy2sb_he2hb<T>(arg);
@@ -130,8 +142,8 @@
 
  INSTANTIATE_TEST_SUITE_P(daily_lapack,
                           SY2SB_HE2HB,
-                          Combine(ValuesIn(large_matrix_size_range), ValuesIn(op_range)));
+                          Combine(ValuesIn(large_size_range), ValuesIn(large_blk_range)));
 
  INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                           SY2SB_HE2HB,
-                          Combine(ValuesIn(matrix_size_range), ValuesIn(op_range)));
+                          Combine(ValuesIn(size_range), ValuesIn(blk_range)));
