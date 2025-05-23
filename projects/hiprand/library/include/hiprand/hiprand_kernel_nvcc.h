@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -218,7 +218,11 @@ QUALIFIERS void hiprand_init(hiprandDirectionVectors64_t     direction_vectors,
 
 template<class StateType>
 QUALIFIERS
-void skipahead(unsigned long long n, StateType * state)
+    typename std::enable_if<!std::is_same<StateType, curandStateSobol32>::value
+                            && !std::is_same<StateType, curandStateScrambledSobol32>::value
+                            && !std::is_same<StateType, curandStateSobol64>::value
+                            && !std::is_same<StateType, curandStateScrambledSobol64>::value>::type
+    skipahead(unsigned long long n, StateType* state)
 {
     check_state_type<StateType>();
     static_assert(
