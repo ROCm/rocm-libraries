@@ -26,15 +26,16 @@
  *  @{
  */
 
+// IWYU pragma: begin_exports
 #include "rocrand/rocrand_discrete_types.h"
+#include "rocrand/rocrand_version.h"
+// IWYU pragma: end_exports
+
+#include "rocrand/rocrandapi.h"
 
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
 #include <hip/hip_vector_types.h>
-
-#include "rocrand/rocrandapi.h"
-
-#include "rocrand/rocrand_version.h"
 
 /// \cond ROCRAND_DOCS_TYPEDEFS
 /// rocRAND random number generator (opaque)

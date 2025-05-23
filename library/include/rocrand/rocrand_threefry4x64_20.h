@@ -55,6 +55,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "rocrand/rocrand_threefry4_impl.h"
 
+#include <hip/hip_runtime.h>
+
 namespace rocrand_device
 {
 

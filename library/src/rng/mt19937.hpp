@@ -1,4 +1,4 @@
-// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -50,7 +50,10 @@
 
 #ifndef ROCRAND_RNG_MT19937_H_
 #define ROCRAND_RNG_MT19937_H_
+
+// IWYU pragma: begin_keep
 #include "config/mt19937_config.hpp"
+// IWYU pragma: end_keep
 
 #include "common.hpp"
 #include "config_types.hpp"
@@ -59,9 +62,6 @@
 #include "mt19937_octo_engine.hpp"
 #include "system.hpp"
 #include "utils/cpp_utils.hpp"
-
-#include "config/config_defaults.hpp"
-#include "config_types.hpp"
 
 #include <rocrand/rocrand.h>
 #include <rocrand/rocrand_mt19937_precomputed.h>

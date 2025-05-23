@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -19,7 +19,6 @@
 // THE SOFTWARE.
 
 #include "test_common.hpp"
-#include "test_rocrand_common.hpp"
 #include "test_utils/rocrand_cpp_wrapper_traits.hpp"
 #include "test_utils/test_matrix.hpp"
 

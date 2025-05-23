@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -62,10 +62,8 @@ endif()
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-if (CMAKE_CXX_STANDARD EQUAL 14)
-  message(WARNING "C++14 will be deprecated in the next major release")
-elseif(NOT CMAKE_CXX_STANDARD EQUAL 17)
-  message(FATAL_ERROR "Only C++14 and C++17 are supported")
+if(NOT CMAKE_CXX_STANDARD EQUAL 17)
+  message(FATAL_ERROR "Only C++17 is supported")
 endif()
 
 # Find rocRAND
