@@ -2,19 +2,11 @@
 
 Full documentation for hipCUB is available at [https://rocm.docs.amd.com/projects/hipCUB/en/latest/](https://rocm.docs.amd.com/projects/hipCUB/en/latest/).
 
-## hipCUB-3.6.0 for ROCm 7.0
+## hipCUB-4.0.0 for ROCm 7.0
 
 ### Added
+
 * Added a new cmake option, `BUILD_OFFLOAD_COMPRESS`. When hipCUB is build with this option enabled, the `--offload-compress` switch is passed to the compiler. This causes the compiler to compress the binary that it generates. Compression can be useful in cases where you are compiling for a large number of targets, since this often results in a large binary. Without compression, in some cases, the generated binary may become so large symbols are placed out of range, resulting in linking errors. The new `BUILD_OFFLOAD_COMPRESS` option is set to `ON` by default.
-
-### Removed
-
-* The AMD GPU targets `gfx803` and `gfx900` are no longer built by default. If you would like to build for these architectures, please specify them explicitly in the `AMDGPU_TARGETS` cmake option.
-
-## hipCUB-3.5.0 for ROCm 6.5.0
-
-### Added
-
 * Added single pass operators in `agent/single_pass_scan_operators.hpp` which contains the following API:
   * `BlockScanRunningPrefixOp`
   * `ScanTileStatus`
@@ -26,20 +18,31 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 * Added an overload of `WarpScan::InclusiveScan` that accepts an initial value to seed the scan.
 * `UnrolledThreadLoad`, `UnrolledCopy`, and `ThreadLoadVolatilePointer` were added to align hipCUB with CUB.
 * `ThreadStoreVolatilePtr` and the `IterateThreadStore` struct were added to align hipCUB with CUB.
+* Added `hipcub::InclusiveScanInit` for CUB parity.
+
+### Removed
+
+* The AMD GPU targets `gfx803` and `gfx900` are no longer built by default. If you would like to build for these architectures, please specify them explicitly in the `AMDGPU_TARGETS` cmake option.
+* Deprecated `hipcub::AsmThreadLoad` is removed, use `hipcub::ThreadLoad` instead.
+* Deprecated `hipcub::AsmThreadStore` is removed, use `hipcub::ThreadStore` instead.
+* Deprecated `BlockAdjacentDifference::FlagHeads`, `BlockAdjacentDifference::FlagTails` and `BlockAdjacentDifference::FlagHeadsAndTails` have been removed.
+* This release removes support for custom builds on gfx940 and gfx941.
+* Removed C++14 support, only C++17 is supported.
 
 ### Changed
 
-* The NVIDIA backend now requires CUB, Thrust, and libcu++ 2.6.0. If they aren't found, they will be downloaded from the NVIDIA CCCL repository.
+* The NVIDIA backend now requires CUB, Thrust, and libcu++ 2.7.0. If they aren't found, they will be downloaded from the NVIDIA CCCL repository.
 * Updated `thread_load` and `thread_store` to align hipCUB with CUB.
 * All kernels now have hidden symbol visibility. All symbols now have inline namespaces that include the library version, (for example, hipcub::HIPCUB_300400_NS::symbol instead of hipcub::symbol), letting the user link multiple libraries built with different versions of hipCUB.
+* Modified the broadcast kernel in warp scan benchmarks. The reported performance may be different to previous versions.
+* The `hipcub::detail::accumulator_t` in rocPRIM backend has been changed to utilise `rocprim::accumulator_t`.
+* The usage of `rocprim::invoke_result_binary_op_t` has been replaced with `rocprim::accumulator_t`.
 
 ### Known issues
 
 * `BlockAdjacentDifference::FlagHeads`, `BlockAdjacentDifference::FlagTails` and `BlockAdjacentDifference::FlagHeadsAndTails` have been removed from hipCUB's CUB backend. They were already deprecated as of version 2.12.0 of hipCUB and they were removed from CCCL (CUB) as of CCCL's 2.6.0 release.
 * `BlockScan::InclusiveScan` for the NVIDIA backend does not compute the block aggregate correctly when passing an initial value parameter. This behavior is not matched by the AMD backend.
 
-### Removed
-* This release removes support for custom builds on gfx940 and gfx941.
 
 ### Upcoming Changes
 

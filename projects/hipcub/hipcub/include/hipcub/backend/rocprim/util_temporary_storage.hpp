@@ -32,7 +32,7 @@
 
 #include "../../config.hpp"
 
-#include <rocprim/detail/temp_storage.hpp>
+#include <rocprim/detail/temp_storage.hpp> // IWYU pragma: export
 
 #include <type_traits>
 

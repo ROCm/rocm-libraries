@@ -33,7 +33,7 @@
 #include "../../config.hpp"
 #include "util_type.hpp"
 
-#include <rocprim/intrinsics/warp_shuffle.hpp>
+#include <rocprim/intrinsics/warp_shuffle.hpp> // IWYU pragma: export
 
 #include <cstdint>
 #include <type_traits>

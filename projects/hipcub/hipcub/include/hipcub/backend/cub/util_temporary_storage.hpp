@@ -32,7 +32,7 @@
 
 #include "../../config.hpp"
 
-#include <cub/util_temporary_storage.cuh>
+#include <cub/util_temporary_storage.cuh> // IWYU pragma: export
 
 BEGIN_HIPCUB_NAMESPACE
 
