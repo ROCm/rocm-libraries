@@ -1061,19 +1061,19 @@ struct CommPointToPoint : public MultiPlanItem
     }
 
 private:
-    rocfft_precision  precision;
-    rocfft_array_type arrayType;
+    const rocfft_precision  precision;
+    const rocfft_array_type arrayType;
 
     // number of elements to copy
-    size_t numElems;
+    const size_t numElems;
 
-    rocfft_location_t srcLocation;
-    BufferPtr         srcPtr;
-    size_t            srcOffset = 0;
+    const rocfft_location_t srcLocation;
+    const BufferPtr         srcPtr;
+    const size_t            srcOffset = 0;
 
-    rocfft_location_t destLocation;
-    BufferPtr         destPtr;
-    size_t            destOffset = 0;
+    const rocfft_location_t destLocation;
+    const BufferPtr         destPtr;
+    const size_t            destOffset = 0;
     // Stream to run the async operation in
     hipStream_wrapper_t stream;
     // Event to signal when the async operations are finished.
@@ -1166,10 +1166,10 @@ struct CommScatter : public MultiPlanItem
     }
 
 private:
-    rocfft_precision  precision;
-    rocfft_array_type arrayType;
-    rocfft_location_t srcLocation;
-    BufferPtr         srcPtr;
+    const rocfft_precision  precision;
+    const rocfft_array_type arrayType;
+    const rocfft_location_t srcLocation;
+    const BufferPtr         srcPtr;
 
     std::vector<ScatterOp> ops;
 
@@ -1265,11 +1265,11 @@ struct CommGather : public MultiPlanItem
     }
 
 private:
-    rocfft_precision  precision;
-    rocfft_array_type arrayType;
+    const rocfft_precision  precision;
+    const rocfft_array_type arrayType;
 
-    rocfft_location_t destLocation;
-    BufferPtr         destPtr;
+    const rocfft_location_t destLocation;
+    const BufferPtr         destPtr;
 
     std::vector<GatherOp> ops;
 
@@ -1284,29 +1284,58 @@ private:
 // Send data from all ranks to all ranks in the plan.  Each rank must
 // send from/to a single buffer (with different read/write offsets
 // for each other rank).
-struct CommAllToAllv : public MultiPlanItem
+// The all-to-all communication is performed using MPI_Ialltoall or MPI_Ialltoallv.
+// The former is preferable, as it is usually more optimized.
+struct CommAllToAll : public MultiPlanItem
 {
-    CommAllToAllv() = default;
+    CommAllToAll(rocfft_precision           _precision,
+                 rocfft_array_type          _arrayType,
+                 const std::vector<size_t>& _sendOffsets,
+                 const std::vector<size_t>& _sendCounts,
+                 const std::vector<size_t>& _recvOffsets,
+                 const std::vector<size_t>& _recvCounts,
+                 BufferPtr                  _sendBuf,
+                 BufferPtr                  _recvBuf)
+        : precision(_precision)
+        , arrayType(_arrayType)
+        , sendOffsets(_sendOffsets)
+        , sendCounts(_sendCounts)
+        , recvOffsets(_recvOffsets)
+        , recvCounts(_recvCounts)
+        , sendBuf(_sendBuf)
+        , recvBuf(_recvBuf)
+    {
+        // Currently MPI interface uses 32-bit signed ints, so assert
+        // that our counts/offsets don't overflow that type
+        auto checkArray = [](const std::vector<size_t>& arr) {
+            if(std::any_of(arr.begin(), arr.end(), [](size_t elem) {
+                   return elem > std::numeric_limits<int>::max();
+               }))
+                throw std::runtime_error("count/offset exceeds int max");
+        };
 
-    rocfft_precision  precision;
-    rocfft_array_type arrayType;
+        checkArray(sendOffsets);
+        checkArray(sendCounts);
+        checkArray(recvOffsets);
+        checkArray(recvCounts);
+    }
 
-    // counts and offsets are all in elements (where element size is
-    // knowable from precision + array type), for the current rank
-    std::vector<size_t> sendOffsets;
-    std::vector<size_t> sendCounts;
-    std::vector<size_t> recvOffsets;
-    std::vector<size_t> recvCounts;
-
-    // send/receive buffers
-    BufferPtr sendBuf;
-    BufferPtr recvBuf;
+    // enum for error handling for different multi-process communication
+    // libraries such as MPI, RCCL, rocSHMEM, etc.
+    enum CommStatus
+    {
+        COMM_SUCCESS,
+        COMM_MPI_ERROR
+    };
+    CommStatus  comm_status = COMM_SUCCESS;
+    std::string error_message;
 
     void ExecuteAsync(const rocfft_plan     plan,
                       void*                 in_buffer[],
                       void*                 out_buffer[],
                       rocfft_execution_info info,
                       size_t                multiPlanIdx) override;
+
     void Wait() override;
 
     void Print(rocfft_ostream& os, const int indent) const override;
@@ -1322,6 +1351,21 @@ struct CommAllToAllv : public MultiPlanItem
         // runs on all ranks
         return true;
     }
+
+private:
+    const rocfft_precision  precision;
+    const rocfft_array_type arrayType;
+
+    // counts and offsets are all in elements (where element size is
+    // knowable from precision + array type), for the current rank
+    const std::vector<size_t> sendOffsets;
+    const std::vector<size_t> sendCounts;
+    const std::vector<size_t> recvOffsets;
+    const std::vector<size_t> recvCounts;
+
+    // send/receive buffers
+    const BufferPtr sendBuf;
+    const BufferPtr recvBuf;
 };
 
 // Tree-structured FFT plan.  This is specific to a single device on
