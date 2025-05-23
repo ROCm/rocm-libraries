@@ -55,10 +55,11 @@
 #ifndef ROCRAND_MTGP32_H_
 #define ROCRAND_MTGP32_H_
 
-#include <stdlib.h>
-
 #include "rocrand/rocrand.h"
-#include "rocrand/rocrand_common.h"
+
+#include <hip/hip_runtime.h>
+
+#include <stdlib.h>
 
 #define MTGP_MEXP 11213
 #define MTGP_N 351

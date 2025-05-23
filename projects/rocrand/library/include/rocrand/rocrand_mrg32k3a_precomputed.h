@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -27,7 +27,7 @@
 #define MRG323A_DIM 64
 #define MRG323A_N 576
 
-static const __device__ unsigned long long d_A1[MRG323A_N] = {
+static const __device__ unsigned int d_A1[MRG323A_N] = {
     // clang-format off
     0, 1, 0, 0, 0, 1, 4294156359, 1403580, 0, 
     0, 0, 1, 4294156359, 1403580, 0, 0, 4294156359, 1403580, 
@@ -96,7 +96,7 @@ static const __device__ unsigned long long d_A1[MRG323A_N] = {
     // clang-format on
 };
 
-static const unsigned long long h_A1[MRG323A_N] = {
+static const unsigned int h_A1[MRG323A_N] = {
     // clang-format off
     0, 1, 0, 0, 0, 1, 4294156359, 1403580, 0, 
     0, 0, 1, 4294156359, 1403580, 0, 0, 4294156359, 1403580, 
@@ -165,7 +165,7 @@ static const unsigned long long h_A1[MRG323A_N] = {
     // clang-format on
 };
 
-static const __device__ unsigned long long d_A2[MRG323A_N] = {
+static const __device__ unsigned int d_A2[MRG323A_N] = {
     // clang-format off
     0, 1, 0, 0, 0, 1, 4293573854, 0, 527612, 
     0, 0, 1, 4293573854, 0, 527612, 2706407399, 4293573854, 3497978192, 
@@ -234,7 +234,7 @@ static const __device__ unsigned long long d_A2[MRG323A_N] = {
     // clang-format on
 };
 
-static const unsigned long long h_A2[MRG323A_N] = {
+static const unsigned int h_A2[MRG323A_N] = {
     // clang-format off
     0, 1, 0, 0, 0, 1, 4293573854, 0, 527612, 
     0, 0, 1, 4293573854, 0, 527612, 2706407399, 4293573854, 3497978192, 
@@ -303,7 +303,7 @@ static const unsigned long long h_A2[MRG323A_N] = {
     // clang-format on
 };
 
-static const __device__ unsigned long long d_A1P76[MRG323A_N] = {
+static const __device__ unsigned int d_A1P76[MRG323A_N] = {
     // clang-format off
     82758667, 1871391091, 4127413238, 3672831523, 69195019, 1871391091, 3672091415, 3528743235, 69195019, 
     3361372532, 2329303404, 99651939, 2008671965, 2931758910, 2329303404, 1113529483, 2374097189, 2931758910, 
@@ -372,7 +372,7 @@ static const __device__ unsigned long long d_A1P76[MRG323A_N] = {
     // clang-format on
 };
 
-static const unsigned long long h_A1P76[MRG323A_N] = {
+static const unsigned int h_A1P76[MRG323A_N] = {
     // clang-format off
     82758667, 1871391091, 4127413238, 3672831523, 69195019, 1871391091, 3672091415, 3528743235, 69195019, 
     3361372532, 2329303404, 99651939, 2008671965, 2931758910, 2329303404, 1113529483, 2374097189, 2931758910, 
@@ -441,7 +441,7 @@ static const unsigned long long h_A1P76[MRG323A_N] = {
     // clang-format on
 };
 
-static const __device__ unsigned long long d_A2P76[MRG323A_N] = {
+static const __device__ unsigned int d_A2P76[MRG323A_N] = {
     // clang-format off
     1511326704, 3759209742, 1610795712, 4292754251, 1511326704, 3889917532, 3859662829, 4292754251, 3708466080, 
     972103006, 964807713, 878035866, 4248550197, 972103006, 1926628839, 1448629089, 4248550197, 3196114006, 
@@ -510,7 +510,7 @@ static const __device__ unsigned long long d_A2P76[MRG323A_N] = {
     // clang-format on
 };
 
-static const unsigned long long h_A2P76[MRG323A_N] = {
+static const unsigned int h_A2P76[MRG323A_N] = {
     // clang-format off
     1511326704, 3759209742, 1610795712, 4292754251, 1511326704, 3889917532, 3859662829, 4292754251, 3708466080, 
     972103006, 964807713, 878035866, 4248550197, 972103006, 1926628839, 1448629089, 4248550197, 3196114006, 
@@ -579,7 +579,7 @@ static const unsigned long long h_A2P76[MRG323A_N] = {
     // clang-format on
 };
 
-static const __device__ unsigned long long d_A1P127[MRG323A_N] = {
+static const __device__ unsigned int d_A1P127[MRG323A_N] = {
     // clang-format off
     2427906178, 3580155704, 949770784, 226153695, 1230515664, 3580155704, 1988835001, 986791581, 1230515664, 
     1774047142, 3199155377, 3106427820, 1901920839, 4290900039, 3199155377, 4178980191, 280623348, 4290900039, 
@@ -648,7 +648,7 @@ static const __device__ unsigned long long d_A1P127[MRG323A_N] = {
     // clang-format on
 };
 
-static const unsigned long long h_A1P127[MRG323A_N] = {
+static const unsigned int h_A1P127[MRG323A_N] = {
     // clang-format off
     2427906178, 3580155704, 949770784, 226153695, 1230515664, 3580155704, 1988835001, 986791581, 1230515664, 
     1774047142, 3199155377, 3106427820, 1901920839, 4290900039, 3199155377, 4178980191, 280623348, 4290900039, 
@@ -717,7 +717,7 @@ static const unsigned long long h_A1P127[MRG323A_N] = {
     // clang-format on
 };
 
-static const __device__ unsigned long long d_A2P127[MRG323A_N] = {
+static const __device__ unsigned int d_A2P127[MRG323A_N] = {
     // clang-format off
     1464411153, 277697599, 1610723613, 32183930, 1464411153, 1022607788, 2824425944, 32183930, 2093834863, 
     3492361727, 1027004383, 3167429889, 3674905362, 3492361727, 3572939265, 4270409313, 3674905362, 698814233, 
@@ -786,7 +786,7 @@ static const __device__ unsigned long long d_A2P127[MRG323A_N] = {
     // clang-format on
 };
 
-static const unsigned long long h_A2P127[MRG323A_N] = {
+static const unsigned int h_A2P127[MRG323A_N] = {
     // clang-format off
     1464411153, 277697599, 1610723613, 32183930, 1464411153, 1022607788, 2824425944, 32183930, 2093834863, 
     3492361727, 1027004383, 3167429889, 3674905362, 3492361727, 3572939265, 4270409313, 3674905362, 698814233, 

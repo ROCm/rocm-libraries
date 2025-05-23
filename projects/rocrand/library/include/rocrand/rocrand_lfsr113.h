@@ -21,8 +21,9 @@
 #ifndef ROCRAND_LFSR113_H_
 #define ROCRAND_LFSR113_H_
 
-#include "rocrand/rocrand_common.h"
 #include "rocrand/rocrand_lfsr113_precomputed.h"
+
+#include <hip/hip_runtime.h>
 
 /** \rocrand_internal \addtogroup rocranddevice
  *
