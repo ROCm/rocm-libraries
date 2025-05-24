@@ -110,7 +110,7 @@ void asm_thread_store(void* ptr, T val)
     ROCPRIM_ASM_THREAD_STORE(cache_modifier, llvm_cache_modifier, double, uint64_t, flat_store_dwordx2, v, wait_inst, wait_cmd);
     // clang-format on
 
-    #if defined(__gfx942__) || defined(__gfx950__)
+    #if defined(__gfx942__) || defined(__gfx950__) || defined(__gfx9_4_generic__)
 ROCPRIM_ASM_THREAD_STORE_GROUP(store_cg, "sc0 nt", "s_waitcnt", "");
     #elif defined(__gfx1200__) || defined(__gfx1201__)
 ROCPRIM_ASM_THREAD_STORE_GROUP(store_cg,
