@@ -294,6 +294,7 @@ public:
                 = common::hipMallocHelper(&device_temp_ptr, new_number_of_ele * value_size);
             if(err == hipErrorOutOfMemory)
             {
+                (void) hipGetLastError(); // reset internally recorded HIP error
                 return false;
             }
             HIP_CHECK(err);

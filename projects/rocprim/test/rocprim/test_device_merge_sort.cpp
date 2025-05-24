@@ -390,6 +390,7 @@ void testLargeIndices()
         hipError_t malloc_status = common::hipMallocHelper(&d_output, size * sizeof(*d_output));
         if(malloc_status == hipErrorOutOfMemory)
         {
+            (void) hipGetLastError(); // reset internally recorded HIP error
             std::cout << "Out of memory. Skipping size = " << size << std::endl;
             break;
         }
@@ -418,6 +419,7 @@ void testLargeIndices()
         malloc_status = common::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes);
         if(malloc_status == hipErrorOutOfMemory)
         {
+            (void) hipGetLastError(); // reset internally recorded HIP error
             std::cout << "Out of memory. Skipping size = " << size << std::endl;
             HIP_CHECK(hipFree(d_output));
             break;
