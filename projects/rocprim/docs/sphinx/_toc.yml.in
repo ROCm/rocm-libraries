@@ -10,6 +10,7 @@ subtrees:
       - file: concepts/glossary.rst
       - file: concepts/tuning.rst
       - file: concepts/developer.rst
+      - file: concepts/spirv.rst
   - file: reference/reference.rst
     title: API Reference
     subtrees:

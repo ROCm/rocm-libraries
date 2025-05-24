@@ -198,7 +198,7 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE static void vectorized_copy_bytes(const void
     using vector_type                      = uint4;
     constexpr uint32_t ints_in_vector_type = sizeof(uint4) / sizeof(uint32_t);
 
-    constexpr auto warp_size = ::rocprim::arch::wavefront::min_size();
+    const auto     warp_size = ::rocprim::arch::wavefront::size();
     const auto     rank      = ::rocprim::detail::block_thread_id<0>() % warp_size;
 
     const uint8_t* src = reinterpret_cast<const uint8_t*>(input_buffer) + offset;
@@ -229,9 +229,6 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE static void vectorized_copy_bytes(const void
         out_ptr += warp_size;
         in_ptr += warp_size;
     }
-
-    // This can be outside the while block since 'warp_size % ints_in_vector_type' always is '0'
-    static_assert(warp_size % ints_in_vector_type == 0, "Warp size is not a multiple of 4");
 
     in_ptr                          = aligned.in_begin + rank * sizeof(vector_type);
     const uint32_t  in_offset       = (reinterpret_cast<size_t>(in_ptr) % ints_in_vector_type);
@@ -315,7 +312,7 @@ template<bool IsMemCpy,
 ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE static void
     copy_items(InputIt input_buffer, OutputIt output_buffer, Offset num_items, Offset offset = 0)
 {
-    constexpr auto warp_size = ::rocprim::arch::wavefront::min_size();
+    const auto warp_size = ::rocprim::arch::wavefront::size();
     output_buffer += offset;
     input_buffer += offset;
     for(Offset i = threadIdx.x % warp_size; i < num_items; i += warp_size)
@@ -614,7 +611,7 @@ private:
         {
             const uint32_t warp_id = rocprim::warp_id();
             const uint32_t warps_per_block
-                = rocprim::flat_block_size() / ::rocprim::arch::wavefront::min_size();
+                = rocprim::flat_block_size() / ::rocprim::arch::wavefront::size();
 
             for(buffer_offset_type buffer_offset = warp_id; buffer_offset < num_wlev_buffers;
                 buffer_offset += warps_per_block)

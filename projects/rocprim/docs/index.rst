@@ -22,6 +22,7 @@ The rocPRIM documentation is structured as follows:
     * :ref:`glossary`
     * :ref:`tuning`
     * :ref:`developer`
+    * :ref:`spirv`
 
   .. grid-item-card:: API reference
 

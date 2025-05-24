@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -51,9 +51,6 @@ def run_benchmarks(benchmark_context):
         results_json_path = os.path.join(benchmark_context.benchmark_output_dir, results_json_name)
         args = [
             benchmark_path,
-            '--name_format',
-            'json',
-            '--benchmark_out_format=json',
             f'--benchmark_out={results_json_path}',
             f'--benchmark_filter={benchmark_context.benchmark_filter_regex}'
         ]
