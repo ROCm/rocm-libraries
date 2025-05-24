@@ -609,7 +609,8 @@ namespace rocRoller
             }
 
             // StoreLDS next
-            auto count = 0;
+            auto storeLDScounter = 0;
+            auto direct2LDSTile  = 0;
             for(auto load : loadsByUnroll[0])
             {
                 logger->debug("  prefetch: pre-loop commit lds: unroll {} user {}", 0, load.user);
@@ -618,9 +619,15 @@ namespace rocRoller
                 preChain.push_back(storeChain);
 
                 auto ldsTileTag = graph.mapper.get<LDS>(storeChain);
-                graph.mapper.connect<LDS>(preBarrier, ldsTileTag, count);
-                count++;
+                graph.mapper.connect<LDS>(preBarrier, ldsTileTag, storeLDScounter);
+                storeLDScounter++;
+
+                auto ldsTile = graph.coordinates.getNode<LDS>(ldsTileTag);
+                if(ldsTile.isDirect2LDS)
+                    direct2LDSTile++;
             }
+
+            auto prefetchDirect2LDS = ((direct2LDSTile > 0) && (storeLDScounter == direct2LDSTile));
 
             graph.control.addElement(Body(), {scope}, {preChain[0]});
             for(uint i = 1; i < preChain.size(); ++i)
@@ -826,8 +833,37 @@ namespace rocRoller
                     graph.mapper.connect<LDS>(barrier, ldsTileTag, i);
                 }
 
-                graph.control.addElement(
-                    Sequence(), {globalStores[globalStores.size() - 1].ldsChain}, {barrier});
+                // overlap the direct2lds and load lds when they do not access the same LDS allocation
+                if(prefetchDirect2LDS && !separateMemOps)
+                {
+                    auto singleIncomingSequence = only(
+                        graph.control.getInputNodeIndices<Sequence>(globalLoads[0].globalChain));
+                    auto singleIncomingBody
+                        = only(graph.control.getInputNodeIndices<Body>(globalLoads[0].globalChain));
+                    AssertFatal(singleIncomingSequence || singleIncomingBody);
+
+                    if(singleIncomingSequence)
+                    {
+                        graph.control.addElement(Sequence(), {*singleIncomingSequence}, {barrier});
+                        logger->debug("  prefetch: in-loop: prefetchDirect2LDS && mixMemOps: "
+                                      "ordering {} to barrier {}",
+                                      *singleIncomingSequence,
+                                      barrier);
+                    }
+                    if(singleIncomingBody)
+                    {
+                        graph.control.addElement(Body(), {*singleIncomingBody}, {barrier});
+                        logger->debug("  prefetch: in-loop: prefetchDirect2LDS && mixMemOps: "
+                                      "operation {} containes barrier {} in body",
+                                      *singleIncomingBody,
+                                      barrier);
+                    }
+                }
+                else
+                {
+                    graph.control.addElement(
+                        Sequence(), {globalStores[globalStores.size() - 1].ldsChain}, {barrier});
+                }
 
                 logger->debug("  prefetch: in-loop: ordering {} to {}",
                               globalLoads[globalLoads.size() - 1].globalChain,

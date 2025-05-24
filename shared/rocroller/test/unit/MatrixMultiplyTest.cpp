@@ -416,7 +416,8 @@ namespace MatrixMultiplyTest
                                            alpha,
                                            0.0,
                                            transA == "T",
-                                           transB == "T");
+                                           transB == "T",
+                                           scaleBlockSize);
                 }
                 else
                 {
@@ -1841,7 +1842,7 @@ namespace MatrixMultiplyTest
         std::fill(BX.begin(), BX.end(), scaleB);
 
         // TODO: now only works for _TN for A and B, need to enable other data layout
-        ScaledCPUMM(D, C, A, B, AX, BX, M, N, K, alpha, 0.0, transA, transB);
+        ScaledCPUMM(D, C, A, B, AX, BX, M, N, K, alpha, 0.0, transA, transB, scaleBlockSize);
 
         alpha *= std::pow(2.0f, int(scaleA) - 127) * std::pow(2.0f, int(scaleB) - 127);
 
@@ -1894,18 +1895,24 @@ namespace MatrixMultiplyTest
                           float               alpha,
                           double              err,
                           bool                transA,
-                          bool                transB)
+                          bool                transB,
+                          const uint          scaleBlockSize = 32)
     {
         if(typeA == rocRoller::DataType::FP8)
-            scaledCPUMMMixed<FP8>(typeB, m, n, k, scaleA, scaleB, alpha, err, transA, transB);
+            scaledCPUMMMixed<FP8>(
+                typeB, m, n, k, scaleA, scaleB, alpha, err, transA, transB, scaleBlockSize);
         else if(typeA == rocRoller::DataType::BF8)
-            scaledCPUMMMixed<BF8>(typeB, m, n, k, scaleA, scaleB, alpha, err, transA, transB);
+            scaledCPUMMMixed<BF8>(
+                typeB, m, n, k, scaleA, scaleB, alpha, err, transA, transB, scaleBlockSize);
         else if(typeA == rocRoller::DataType::FP6)
-            scaledCPUMMMixed<FP6>(typeB, m, n, k, scaleA, scaleB, alpha, err, transA, transB);
+            scaledCPUMMMixed<FP6>(
+                typeB, m, n, k, scaleA, scaleB, alpha, err, transA, transB, scaleBlockSize);
         else if(typeA == rocRoller::DataType::BF6)
-            scaledCPUMMMixed<BF6>(typeB, m, n, k, scaleA, scaleB, alpha, err, transA, transB);
+            scaledCPUMMMixed<BF6>(
+                typeB, m, n, k, scaleA, scaleB, alpha, err, transA, transB, scaleBlockSize);
         else if(typeA == rocRoller::DataType::FP4)
-            scaledCPUMMMixed<FP4>(typeB, m, n, k, scaleA, scaleB, alpha, err, transA, transB);
+            scaledCPUMMMixed<FP4>(
+                typeB, m, n, k, scaleA, scaleB, alpha, err, transA, transB, scaleBlockSize);
         else
             Throw<FatalError>("Invalid type.");
     }
