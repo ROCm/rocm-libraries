@@ -103,20 +103,20 @@ namespace rocRoller
                      float                       alpha,
                      float                       beta,
                      bool                        transA,
-                     bool                        transB)
+                     bool                        transB,
+                     const uint                  scaleBlockSize)
     {
-        constexpr int elementsPerMXBlock = 32;
-
         auto scaledA = floatA;
         auto scaledB = floatB;
 
         if(AX.size() > 1)
         {
             AssertFatal(floatA.size() % AX.size() == 0
-                            && floatA.size() / AX.size() == elementsPerMXBlock,
-                        "Matrix A size must be 32 times of the scale vector size.",
+                            && floatA.size() / AX.size() == scaleBlockSize,
+                        "Matrix A size must be scaleBlockSize times the scale vector size.",
                         ShowValue(floatA.size()),
-                        ShowValue(AX.size()));
+                        ShowValue(AX.size()),
+                        ShowValue(scaleBlockSize));
 
             if(transA)
             {
@@ -125,7 +125,7 @@ namespace rocRoller
                 {
                     auto  m      = mk / K;
                     auto  k      = mk % K;
-                    auto  idx    = m * (K / elementsPerMXBlock) + (k / elementsPerMXBlock);
+                    auto  idx    = m * (K / scaleBlockSize) + (k / scaleBlockSize);
                     float aScale = scaleToFloat(AX[idx]);
                     scaledA[mk] *= aScale;
                 }
@@ -137,7 +137,7 @@ namespace rocRoller
                 {
                     auto  m      = mk % M;
                     auto  k      = mk / M;
-                    auto  idx    = (k / elementsPerMXBlock) * M + m;
+                    auto  idx    = (k / scaleBlockSize) * M + m;
                     float aScale = scaleToFloat(AX[idx]);
                     scaledA[mk] *= aScale;
                 }
@@ -160,10 +160,11 @@ namespace rocRoller
         if(BX.size() > 1)
         {
             AssertFatal(floatB.size() % BX.size() == 0
-                            && floatB.size() / BX.size() == elementsPerMXBlock,
-                        "Matrix B size must be 32 times of the scale vector size.",
+                            && floatB.size() / BX.size() == scaleBlockSize,
+                        "Matrix B size must be scaleBlockSize times the scale vector size.",
                         ShowValue(floatB.size()),
-                        ShowValue(BX.size()));
+                        ShowValue(BX.size()),
+                        ShowValue(scaleBlockSize));
 
             if(transB)
             {
@@ -172,7 +173,7 @@ namespace rocRoller
                 {
                     auto  k      = kn / N;
                     auto  n      = kn % N;
-                    auto  idx    = (k / elementsPerMXBlock) * N + n;
+                    auto  idx    = (k / scaleBlockSize) * N + n;
                     float bScale = scaleToFloat(BX[idx]);
                     scaledB[kn] *= bScale;
                 }
@@ -184,7 +185,7 @@ namespace rocRoller
                 {
                     auto  k      = kn % K;
                     auto  n      = kn / K;
-                    auto  idx    = n * (K / elementsPerMXBlock) + (k / elementsPerMXBlock);
+                    auto  idx    = n * (K / scaleBlockSize) + (k / scaleBlockSize);
                     float bScale = scaleToFloat(BX[idx]);
                     scaledB[kn] *= bScale;
                 }

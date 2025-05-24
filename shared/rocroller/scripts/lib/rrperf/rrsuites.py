@@ -1549,8 +1549,8 @@ def fp4_kernels():
     yield from fp4_target()
     yield from fp4_target_d2lds_mi32x32x64_pf2x1()
     yield from fp4_target_d2lds_mi32x32x64_pf4x1()
-    # enable 16x16x128 tests when code generation time is reduced
-    # yield from fp4_target_d2lds_mi16x16x128_pf4x1()
+    yield from fp4_target_d2lds_mi16x16x128_pf4x1()
+    yield from fp4_no_scale_target_d2lds_mi16x16x128_pf4x1()
 
 
 def all():
