@@ -14,7 +14,7 @@
 #endif
 
 #include <cassert>
-#include <chrono>
+#include <hip/std/chrono>
 #include <cstdint>
 #include <cstdio> // for printf
 #include <string>

@@ -17,7 +17,7 @@
 // shared_lock(mutex_type& m, try_to_lock_t);
 
 #include <cassert>
-#include <chrono>
+#include <hip/std/chrono>
 #include <cstdlib>
 #include <mutex>
 #include <shared_mutex>
@@ -29,11 +29,11 @@
 
 std::shared_timed_mutex m;
 
-typedef std::chrono::system_clock Clock;
+typedef cuda::std::chrono::system_clock Clock;
 typedef Clock::time_point time_point;
 typedef Clock::duration duration;
-typedef std::chrono::milliseconds ms;
-typedef std::chrono::nanoseconds ns;
+typedef cuda::std::chrono::milliseconds ms;
+typedef cuda::std::chrono::nanoseconds ns;
 
 
 // Thread sanitizer causes more overhead and will sometimes cause this test

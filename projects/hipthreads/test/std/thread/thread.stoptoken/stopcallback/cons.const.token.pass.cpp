@@ -16,7 +16,7 @@
 
 #include <atomic>
 #include <cassert>
-#include <chrono>
+#include <hip/std/chrono>
 #include <stop_token>
 #include <type_traits>
 #include <utility>

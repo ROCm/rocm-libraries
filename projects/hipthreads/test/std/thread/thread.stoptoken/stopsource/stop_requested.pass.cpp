@@ -14,7 +14,7 @@
 // true if *this has ownership of a stop state that has received a stop request; otherwise, false.
 
 #include <cassert>
-#include <chrono>
+#include <hip/std/chrono>
 #include <concepts>
 #include <optional>
 #include <stop_token>

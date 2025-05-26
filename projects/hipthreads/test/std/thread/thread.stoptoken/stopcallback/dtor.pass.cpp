@@ -14,7 +14,7 @@
 
 #include <atomic>
 #include <cassert>
-#include <chrono>
+#include <hip/std/chrono>
 #include <functional>
 #include <memory>
 #include <optional>

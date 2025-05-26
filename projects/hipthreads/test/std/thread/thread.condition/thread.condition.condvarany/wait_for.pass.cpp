@@ -19,7 +19,7 @@
 #include <condition_variable>
 #include <atomic>
 #include <cassert>
-#include <chrono>
+#include <hip/std/chrono>
 #include <mutex>
 #include <gpu/thread>
 
@@ -32,11 +32,11 @@ struct MyLock : gpu::unique_lock<Mutex> {
 };
 
 template <class Function>
-std::chrono::microseconds measure(Function f) {
-  std::chrono::high_resolution_clock::time_point start = std::chrono::high_resolution_clock::now();
+cuda::std::chrono::microseconds measure(Function f) {
+  cuda::std::chrono::high_resolution_clock::time_point start = cuda::std::chrono::high_resolution_clock::now();
   f();
-  std::chrono::high_resolution_clock::time_point end = std::chrono::high_resolution_clock::now();
-  return std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+  cuda::std::chrono::high_resolution_clock::time_point end = cuda::std::chrono::high_resolution_clock::now();
+  return cuda::std::chrono::duration_cast<cuda::std::chrono::microseconds>(end - start);
 }
 
 template <class Lock>
@@ -51,7 +51,7 @@ void test() {
   {
     std::atomic<bool> ready(false);
     std::atomic<bool> likely_spurious(true);
-    auto timeout = std::chrono::seconds(3600);
+    auto timeout = cuda::std::chrono::seconds(3600);
     std::condition_variable_any cv;
     Mutex mutex;
 
@@ -94,7 +94,7 @@ void test() {
   // spurious wakeups, we wait again whenever we are awoken for a reason
   // other than a timeout.
   {
-    auto timeout = std::chrono::milliseconds(250);
+    auto timeout = cuda::std::chrono::milliseconds(250);
     std::condition_variable_any cv;
     Mutex mutex;
 

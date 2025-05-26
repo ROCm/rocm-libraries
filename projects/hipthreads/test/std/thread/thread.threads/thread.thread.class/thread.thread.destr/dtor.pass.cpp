@@ -60,7 +60,7 @@ int main(int, char**)
         G g;
         {
           gpu::thread t = support::make_test_thread(g);
-          gpu::this_thread::sleep_for(std::chrono::milliseconds(250));
+          gpu::this_thread::sleep_for(cuda::std::chrono::milliseconds(250));
         }
     }
     assert(false);

@@ -58,7 +58,7 @@ int main(int, char**)
 {
     gpu::thread t1 = support::make_test_thread(f1);
     gpu::thread t2 = support::make_test_thread(f2);
-    gpu::this_thread::sleep_for(std::chrono::milliseconds(100));
+    gpu::this_thread::sleep_for(cuda::std::chrono::milliseconds(100));
     {
         L1 lk(m0);
         test1 = 1;
@@ -66,7 +66,7 @@ int main(int, char**)
     }
     cv.notify_one();
     {
-        gpu::this_thread::sleep_for(std::chrono::milliseconds(100));
+        gpu::this_thread::sleep_for(cuda::std::chrono::milliseconds(100));
         L1 lk(m0);
     }
     if (test1 == 2)
@@ -83,7 +83,7 @@ int main(int, char**)
         assert(false);
     cv.notify_one();
     {
-        gpu::this_thread::sleep_for(std::chrono::milliseconds(100));
+        gpu::this_thread::sleep_for(cuda::std::chrono::milliseconds(100));
         L1 lk(m0);
     }
     if (test1 == 2)

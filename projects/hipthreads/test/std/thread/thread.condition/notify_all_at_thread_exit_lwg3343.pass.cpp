@@ -28,7 +28,7 @@
 
 #include <condition_variable>
 #include <cassert>
-#include <chrono>
+#include <hip/std/chrono>
 #include <memory>
 #include <mutex>
 #include <gpu/thread>
@@ -59,7 +59,7 @@ void test()
     for (int i = 0; i < N; ++i) {
         gpu::thread t = support::make_test_thread([&] {
             // Emulate work being done.
-            gpu::this_thread::sleep_for(std::chrono::milliseconds(1));
+            gpu::this_thread::sleep_for(cuda::std::chrono::milliseconds(1));
 
             // Signal thread completion.
             gpu::unique_lock<std::mutex> lk(m);

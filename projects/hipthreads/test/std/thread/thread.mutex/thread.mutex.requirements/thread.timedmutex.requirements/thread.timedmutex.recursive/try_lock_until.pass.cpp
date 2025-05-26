@@ -19,7 +19,7 @@
 #include <mutex>
 #include <atomic>
 #include <cassert>
-#include <chrono>
+#include <hip/std/chrono>
 #include <gpu/thread>
 
 #include "make_test_thread.h"
@@ -37,18 +37,18 @@ bool is_lockable(std::recursive_timed_mutex& m) {
 }
 
 template <class Function>
-std::chrono::microseconds measure(Function f) {
-  std::chrono::high_resolution_clock::time_point start = std::chrono::high_resolution_clock::now();
+cuda::std::chrono::microseconds measure(Function f) {
+  cuda::std::chrono::high_resolution_clock::time_point start = cuda::std::chrono::high_resolution_clock::now();
   f();
-  std::chrono::high_resolution_clock::time_point end = std::chrono::high_resolution_clock::now();
-  return std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+  cuda::std::chrono::high_resolution_clock::time_point end = cuda::std::chrono::high_resolution_clock::now();
+  return cuda::std::chrono::duration_cast<cuda::std::chrono::microseconds>(end - start);
 }
 
 int main(int, char**) {
   // Try to lock a mutex that is not locked yet. This should succeed immediately.
   {
     std::recursive_timed_mutex m;
-    bool succeeded = m.try_lock_until(std::chrono::steady_clock::now() + std::chrono::milliseconds(1));
+    bool succeeded = m.try_lock_until(cuda::std::chrono::steady_clock::now() + cuda::std::chrono::milliseconds(1));
     assert(succeeded);
     m.unlock();
   }
@@ -59,7 +59,7 @@ int main(int, char**) {
     std::recursive_timed_mutex m;
     int lock_count = 0;
     for (int i = 0; i != 10; ++i) {
-      assert(m.try_lock_until(std::chrono::steady_clock::now() + std::chrono::milliseconds(1)));
+      assert(m.try_lock_until(cuda::std::chrono::steady_clock::now() + cuda::std::chrono::milliseconds(1)));
       ++lock_count;
     }
     while (lock_count != 0) {
@@ -74,8 +74,8 @@ int main(int, char**) {
   // This is technically flaky, but we use such long durations that it should pass even
   // in slow or contended environments.
   {
-    std::chrono::milliseconds const wait_time(500);
-    std::chrono::milliseconds const tolerance = wait_time * 3;
+    cuda::std::chrono::milliseconds const wait_time(500);
+    cuda::std::chrono::milliseconds const tolerance = wait_time * 3;
     std::atomic<bool> ready(false);
 
     std::recursive_timed_mutex m;
@@ -84,7 +84,7 @@ int main(int, char**) {
     gpu::thread t = support::make_test_thread([&] {
       auto elapsed = measure([&] {
         ready          = true;
-        bool succeeded = m.try_lock_until(std::chrono::steady_clock::now() + wait_time);
+        bool succeeded = m.try_lock_until(cuda::std::chrono::steady_clock::now() + wait_time);
         assert(succeeded);
         m.unlock();
       });
@@ -109,15 +109,15 @@ int main(int, char**) {
   // Try to lock an already-locked mutex for a short amount of time and fail.
   // Again, this is technically flaky but we use such long durations that it should work.
   {
-    std::chrono::milliseconds const wait_time(10);
-    std::chrono::milliseconds const tolerance(750); // in case the thread we spawned goes to sleep or something
+    cuda::std::chrono::milliseconds const wait_time(10);
+    cuda::std::chrono::milliseconds const tolerance(750); // in case the thread we spawned goes to sleep or something
 
     std::recursive_timed_mutex m;
     m.lock();
 
     gpu::thread t = support::make_test_thread([&] {
       auto elapsed = measure([&] {
-        bool succeeded = m.try_lock_until(std::chrono::steady_clock::now() + wait_time);
+        bool succeeded = m.try_lock_until(cuda::std::chrono::steady_clock::now() + wait_time);
         assert(!succeeded);
       });
 

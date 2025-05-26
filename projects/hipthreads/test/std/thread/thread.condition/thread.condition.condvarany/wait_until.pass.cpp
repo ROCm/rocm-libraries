@@ -19,7 +19,7 @@
 #include <condition_variable>
 #include <atomic>
 #include <cassert>
-#include <chrono>
+#include <hip/std/chrono>
 #include <mutex>
 #include <gpu/thread>
 
@@ -27,10 +27,10 @@
 #include "test_macros.h"
 
 struct TestClock {
-  typedef std::chrono::milliseconds duration;
+  typedef cuda::std::chrono::milliseconds duration;
   typedef duration::rep rep;
   typedef duration::period period;
-  typedef std::chrono::time_point<TestClock> time_point;
+  typedef cuda::std::chrono::time_point<TestClock> time_point;
   static const bool is_steady = true;
 
   static time_point now() {
@@ -56,7 +56,7 @@ void test() {
   {
     std::atomic<bool> ready(false);
     std::atomic<bool> likely_spurious(true);
-    auto timeout = Clock::now() + std::chrono::seconds(3600);
+    auto timeout = Clock::now() + cuda::std::chrono::seconds(3600);
     std::condition_variable_any cv;
     Mutex mutex;
 
@@ -97,7 +97,7 @@ void test() {
   // spurious wakeups, we wait again whenever we are awoken for a reason
   // other than a timeout.
   {
-    auto timeout = Clock::now() + std::chrono::milliseconds(250);
+    auto timeout = Clock::now() + cuda::std::chrono::milliseconds(250);
     std::condition_variable_any cv;
     Mutex mutex;
 
@@ -117,15 +117,15 @@ void test() {
 
 int main(int, char**) {
   test<gpu::unique_lock<std::mutex>, TestClock>();
-  test<gpu::unique_lock<std::mutex>, std::chrono::steady_clock>();
+  test<gpu::unique_lock<std::mutex>, cuda::std::chrono::steady_clock>();
 
   test<gpu::unique_lock<std::timed_mutex>, TestClock>();
-  test<gpu::unique_lock<std::timed_mutex>, std::chrono::steady_clock>();
+  test<gpu::unique_lock<std::timed_mutex>, cuda::std::chrono::steady_clock>();
 
   test<MyLock<std::mutex>, TestClock>();
-  test<MyLock<std::mutex>, std::chrono::steady_clock>();
+  test<MyLock<std::mutex>, cuda::std::chrono::steady_clock>();
 
   test<MyLock<std::timed_mutex>, TestClock>();
-  test<MyLock<std::timed_mutex>, std::chrono::steady_clock>();
+  test<MyLock<std::timed_mutex>, cuda::std::chrono::steady_clock>();
   return 0;
 }

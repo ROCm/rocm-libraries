@@ -63,7 +63,7 @@
 
 #include <atomic>
 #include <cassert>
-#include <chrono>
+#include <hip/std/chrono>
 #include <condition_variable>
 #include <cstdlib>
 #include <exception>
@@ -117,8 +117,8 @@ void signal_me() {
   cv.notify_one();
 }
 
-typedef std::chrono::system_clock Clock;
-typedef std::chrono::milliseconds MS;
+typedef cuda::std::chrono::system_clock Clock;
+typedef cuda::std::chrono::milliseconds MS;
 
 int main(int argc, char **argv) {
   assert(argc == 2);

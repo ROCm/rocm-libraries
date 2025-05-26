@@ -22,7 +22,7 @@
 #include "make_test_thread.h"
 #include "test_macros.h"
 
-typedef std::chrono::milliseconds ms;
+typedef cuda::std::chrono::milliseconds ms;
 
 std::once_flag flg0;
 

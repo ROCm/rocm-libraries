@@ -20,7 +20,7 @@
 
 #include <atomic>
 #include <cassert>
-#include <chrono>
+#include <hip/std/chrono>
 #include <concepts>
 #include <condition_variable>
 #include <functional>
@@ -101,11 +101,11 @@ void test() {
     Mutex mutex;
     Lock lock{mutex};
 
-    auto old_time = std::chrono::steady_clock::now();
+    auto old_time = cuda::std::chrono::steady_clock::now();
 
     std::same_as<bool> auto r1 = cv.wait_for(lock, ss.get_token(), 2ms, [&]() { return false; });
 
-    assert((std::chrono::steady_clock::now() - old_time) >= 2ms);
+    assert((cuda::std::chrono::steady_clock::now() - old_time) >= 2ms);
     assert(!r1);
   }
 

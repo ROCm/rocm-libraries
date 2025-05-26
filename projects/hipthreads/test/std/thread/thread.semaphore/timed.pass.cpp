@@ -15,7 +15,7 @@
 
 #include <semaphore>
 #include <gpu/thread>
-#include <chrono>
+#include <hip/std/chrono>
 #include <cassert>
 
 #include "make_test_thread.h"
@@ -23,26 +23,26 @@
 
 int main(int, char**)
 {
-  auto const start = std::chrono::steady_clock::now();
+  auto const start = cuda::std::chrono::steady_clock::now();
 
   std::counting_semaphore<> s(0);
 
-  assert(!s.try_acquire_until(start + std::chrono::milliseconds(250)));
-  assert(!s.try_acquire_for(std::chrono::milliseconds(250)));
+  assert(!s.try_acquire_until(start + cuda::std::chrono::milliseconds(250)));
+  assert(!s.try_acquire_for(cuda::std::chrono::milliseconds(250)));
 
   gpu::thread t = support::make_test_thread([&](){
-    gpu::this_thread::sleep_for(std::chrono::milliseconds(250));
+    gpu::this_thread::sleep_for(cuda::std::chrono::milliseconds(250));
     s.release();
-    gpu::this_thread::sleep_for(std::chrono::milliseconds(250));
+    gpu::this_thread::sleep_for(cuda::std::chrono::milliseconds(250));
     s.release();
   });
 
-  assert(s.try_acquire_until(start + std::chrono::seconds(2)));
-  assert(s.try_acquire_for(std::chrono::seconds(2)));
+  assert(s.try_acquire_until(start + cuda::std::chrono::seconds(2)));
+  assert(s.try_acquire_for(cuda::std::chrono::seconds(2)));
   t.join();
 
-  auto const end = std::chrono::steady_clock::now();
-  assert(end - start < std::chrono::seconds(10));
+  auto const end = cuda::std::chrono::steady_clock::now();
+  assert(end - start < cuda::std::chrono::seconds(10));
 
   return 0;
 }

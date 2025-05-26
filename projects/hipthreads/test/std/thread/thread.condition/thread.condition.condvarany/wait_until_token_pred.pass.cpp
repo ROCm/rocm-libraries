@@ -21,7 +21,7 @@
 
 #include <atomic>
 #include <cassert>
-#include <chrono>
+#include <hip/std/chrono>
 #include <concepts>
 #include <condition_variable>
 #include <functional>
@@ -37,8 +37,8 @@
 template <class Mutex, class Lock>
 void test() {
   using namespace std::chrono_literals;
-  const auto oneHourAgo   = std::chrono::steady_clock::now() - 1h;
-  const auto oneHourLater = std::chrono::steady_clock::now() + 1h;
+  const auto oneHourAgo   = cuda::std::chrono::steady_clock::now() - 1h;
+  const auto oneHourLater = cuda::std::chrono::steady_clock::now() + 1h;
 
   // stop_requested before hand
   {
@@ -101,12 +101,12 @@ void test() {
     Mutex mutex;
     Lock lock{mutex};
 
-    auto oldTime = std::chrono::steady_clock::now();
+    auto oldTime = cuda::std::chrono::steady_clock::now();
 
     std::same_as<bool> auto r1 =
-        cv.wait_until(lock, ss.get_token(), oldTime + std::chrono::milliseconds(2), [&]() { return false; });
+        cv.wait_until(lock, ss.get_token(), oldTime + cuda::std::chrono::milliseconds(2), [&]() { return false; });
 
-    assert((std::chrono::steady_clock::now() - oldTime) >= std::chrono::milliseconds(2));
+    assert((cuda::std::chrono::steady_clock::now() - oldTime) >= cuda::std::chrono::milliseconds(2));
     assert(!r1);
   }
 
@@ -119,7 +119,7 @@ void test() {
 
     bool flag   = false;
     auto thread = support::make_test_thread([&]() {
-      gpu::this_thread::sleep_for(std::chrono::milliseconds(2));
+      gpu::this_thread::sleep_for(cuda::std::chrono::milliseconds(2));
       gpu::unique_lock<Mutex> lock2{mutex};
       flag = true;
       cv.notify_all();
@@ -149,7 +149,7 @@ void test() {
 
       while (!done) {
         cv.notify_all();
-        gpu::this_thread::sleep_for(std::chrono::milliseconds(2));
+        gpu::this_thread::sleep_for(cuda::std::chrono::milliseconds(2));
       }
     });
 
@@ -175,7 +175,7 @@ void test() {
         thread_ = support::make_test_jthread([this](std::stop_token st) {
           while (!st.stop_requested()) {
             gpu::unique_lock lock{m_};
-            cv_.wait_until(lock, st, std::chrono::steady_clock::now() + std::chrono::hours(1), [] { return false; });
+            cv_.wait_until(lock, st, cuda::std::chrono::steady_clock::now() + cuda::std::chrono::hours(1), [] { return false; });
           }
         });
       }

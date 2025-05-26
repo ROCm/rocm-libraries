@@ -16,7 +16,7 @@
 #include <shared_mutex>
 
 #include <atomic>
-#include <chrono>
+#include <hip/std/chrono>
 #include <gpu/thread>
 #include <cstdlib>
 #include <cassert>
@@ -33,7 +33,7 @@ std::atomic<int> readers_finished(0);
 // Wait for the readers to start then try and acquire the write lock.
 void writer_one() {
   while (readers_started != total_readers) {}
-  bool b = m.try_lock_for(std::chrono::milliseconds(500));
+  bool b = m.try_lock_for(cuda::std::chrono::milliseconds(500));
   assert(b == false);
 }
 
@@ -52,7 +52,7 @@ void blocked_reader() {
 
 int main(int, char**)
 {
-  typedef std::chrono::steady_clock Clock;
+  typedef cuda::std::chrono::steady_clock Clock;
 
   m.lock_shared();
   gpu::thread t1 = support::make_test_thread(writer_one);
@@ -60,9 +60,9 @@ int main(int, char**)
   gpu::thread t2 = support::make_test_thread(blocked_reader);
   gpu::thread t3 = support::make_test_thread(blocked_reader);
   // Kill the test after 10 seconds if it hasn't completed.
-  auto end_point = Clock::now() + std::chrono::seconds(10);
+  auto end_point = Clock::now() + cuda::std::chrono::seconds(10);
   while (readers_finished != total_readers && Clock::now() < end_point) {
-    gpu::this_thread::sleep_for(std::chrono::seconds(1));
+    gpu::this_thread::sleep_for(cuda::std::chrono::seconds(1));
   }
   assert(readers_finished == total_readers);
   m.unlock_shared();

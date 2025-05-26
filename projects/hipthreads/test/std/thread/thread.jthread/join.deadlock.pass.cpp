@@ -22,7 +22,7 @@
 
 #include <atomic>
 #include <cassert>
-#include <chrono>
+#include <hip/std/chrono>
 #include <concepts>
 #include <functional>
 #include <system_error>

@@ -19,14 +19,14 @@
 
 #include <atomic>
 #include <cassert>
-#include <chrono>
+#include <hip/std/chrono>
 #include <future>
 
 #include "make_test_thread.h"
 #include "test_macros.h"
 
 enum class WorkerThreadState { Uninitialized, AllowedToRun, Exiting };
-typedef std::chrono::milliseconds ms;
+typedef cuda::std::chrono::milliseconds ms;
 
 std::atomic<WorkerThreadState> thread_state(WorkerThreadState::Uninitialized);
 
@@ -67,7 +67,7 @@ void func5(std::promise<void> p)
 
 int main(int, char**)
 {
-  typedef std::chrono::high_resolution_clock Clock;
+  typedef cuda::std::chrono::high_resolution_clock Clock;
   {
     typedef int T;
     std::promise<T> p;

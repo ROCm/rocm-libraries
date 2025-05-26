@@ -19,7 +19,7 @@
 #include <gpu/thread>
 
 #include <atomic>
-#include <chrono>
+#include <hip/std/chrono>
 #include <cassert>
 #include <cstdlib>
 #include <shared_mutex>
@@ -30,11 +30,11 @@
 
 std::shared_timed_mutex m;
 
-typedef std::chrono::steady_clock Clock;
+typedef cuda::std::chrono::steady_clock Clock;
 typedef Clock::time_point time_point;
 typedef Clock::duration duration;
-typedef std::chrono::milliseconds ms;
-typedef std::chrono::nanoseconds ns;
+typedef cuda::std::chrono::milliseconds ms;
+typedef cuda::std::chrono::nanoseconds ns;
 
 ms LongTime = ms(5000);
 ms ShortTime = ms(50);

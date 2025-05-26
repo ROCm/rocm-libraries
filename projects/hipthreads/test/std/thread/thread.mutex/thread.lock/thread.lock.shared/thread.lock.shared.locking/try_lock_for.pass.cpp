@@ -17,7 +17,7 @@
 //   bool try_lock_for(const chrono::duration<Rep, Period>& rel_time);
 
 #include <cassert>
-#include <chrono>
+#include <hip/std/chrono>
 #include <mutex>
 #include <shared_mutex>
 #include <system_error>
@@ -26,12 +26,12 @@
 
 bool try_lock_for_called = false;
 
-typedef std::chrono::milliseconds ms;
+typedef cuda::std::chrono::milliseconds ms;
 
 struct mutex
 {
     template <class Rep, class Period>
-        bool try_lock_shared_for(const std::chrono::duration<Rep, Period>& rel_time)
+        bool try_lock_shared_for(const cuda::std::chrono::duration<Rep, Period>& rel_time)
     {
         assert(rel_time == ms(5));
         try_lock_for_called = !try_lock_for_called;

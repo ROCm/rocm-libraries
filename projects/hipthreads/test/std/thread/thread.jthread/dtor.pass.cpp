@@ -50,7 +50,7 @@ int main(int, char**) {
     jts.reserve(numberOfThreads);
     for (auto i = 0u; i < numberOfThreads; ++i) {
       jts.emplace_back(support::make_test_jthread([&calledTimes] {
-        gpu::this_thread::sleep_for(std::chrono::milliseconds{2});
+        gpu::this_thread::sleep_for(cuda::std::chrono::milliseconds{2});
         calledTimes.fetch_add(1, std::memory_order_relaxed);
       }));
     }

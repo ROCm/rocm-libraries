@@ -17,7 +17,7 @@
 //   bool try_lock_until(const chrono::time_point<Clock, Duration>& abs_time);
 
 #include <cassert>
-#include <chrono>
+#include <hip/std/chrono>
 #include <mutex>
 #include <shared_mutex>
 #include <system_error>
@@ -29,9 +29,9 @@ bool try_lock_until_called = false;
 struct mutex
 {
     template <class Clock, class Duration>
-        bool try_lock_shared_until(const std::chrono::time_point<Clock, Duration>& abs_time)
+        bool try_lock_shared_until(const cuda::std::chrono::time_point<Clock, Duration>& abs_time)
     {
-        typedef std::chrono::milliseconds ms;
+        typedef cuda::std::chrono::milliseconds ms;
         assert(Clock::now() - abs_time < ms(5));
         try_lock_until_called = !try_lock_until_called;
         return try_lock_until_called;
@@ -43,7 +43,7 @@ mutex m;
 
 int main(int, char**)
 {
-    typedef std::chrono::steady_clock Clock;
+    typedef cuda::std::chrono::steady_clock Clock;
     std::shared_lock<mutex> lk(m, std::defer_lock);
     assert(lk.try_lock_until(Clock::now()) == true);
     assert(try_lock_until_called == true);
