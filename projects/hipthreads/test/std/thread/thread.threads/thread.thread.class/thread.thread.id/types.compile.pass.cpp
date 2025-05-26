@@ -32,11 +32,11 @@
 
 #include <concepts>
 #include <format>
-#include <thread>
+#include <gpu/thread>
 
 #include "test_macros.h"
 
-static_assert(std::semiregular<std::formatter<std::thread::id, char>>);
+static_assert(std::semiregular<std::formatter<gpu::thread::id, char>>);
 #ifndef TEST_HAS_NO_WIDE_CHARACTERS
-static_assert(std::semiregular<std::formatter<std::thread::id, wchar_t>>);
+static_assert(std::semiregular<std::formatter<gpu::thread::id, wchar_t>>);
 #endif

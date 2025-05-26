@@ -17,7 +17,7 @@
 
 #include <atomic>
 #include <chrono>
-#include <thread>
+#include <gpu/thread>
 #include <cstdlib>
 #include <cassert>
 
@@ -55,14 +55,14 @@ int main(int, char**)
   typedef std::chrono::steady_clock Clock;
 
   m.lock_shared();
-  std::thread t1 = support::make_test_thread(writer_one);
+  gpu::thread t1 = support::make_test_thread(writer_one);
   // create some readers
-  std::thread t2 = support::make_test_thread(blocked_reader);
-  std::thread t3 = support::make_test_thread(blocked_reader);
+  gpu::thread t2 = support::make_test_thread(blocked_reader);
+  gpu::thread t3 = support::make_test_thread(blocked_reader);
   // Kill the test after 10 seconds if it hasn't completed.
   auto end_point = Clock::now() + std::chrono::seconds(10);
   while (readers_finished != total_readers && Clock::now() < end_point) {
-    std::this_thread::sleep_for(std::chrono::seconds(1));
+    gpu::this_thread::sleep_for(std::chrono::seconds(1));
   }
   assert(readers_finished == total_readers);
   m.unlock_shared();

@@ -16,7 +16,7 @@
 
 #include <condition_variable>
 #include <mutex>
-#include <thread>
+#include <gpu/thread>
 #include <cassert>
 
 #include "make_test_thread.h"
@@ -24,7 +24,7 @@
 
 std::condition_variable* cv;
 std::mutex m;
-typedef std::unique_lock<std::mutex> Lock;
+typedef gpu::unique_lock<std::mutex> Lock;
 
 bool f_ready = false;
 bool g_ready = false;
@@ -49,12 +49,12 @@ void g()
 int main(int, char**)
 {
     cv = new std::condition_variable;
-    std::thread th2 = support::make_test_thread(g);
+    gpu::thread th2 = support::make_test_thread(g);
     Lock lk(m);
     while (!g_ready)
         cv->wait(lk);
     lk.unlock();
-    std::thread th1 = support::make_test_thread(f);
+    gpu::thread th1 = support::make_test_thread(f);
     th1.join();
     th2.join();
 

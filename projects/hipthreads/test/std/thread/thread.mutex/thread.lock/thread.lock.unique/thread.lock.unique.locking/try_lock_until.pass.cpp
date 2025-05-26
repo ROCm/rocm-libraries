@@ -25,7 +25,7 @@ int main(int, char**) {
   typedef std::chrono::system_clock Clock;
   checking_mutex mux;
 
-  std::unique_lock<checking_mutex> lock(mux, std::defer_lock_t());
+  gpu::unique_lock<checking_mutex> lock(mux, std::defer_lock_t());
 
   assert(lock.try_lock_until(Clock::now()));
   assert(mux.current_state == checking_mutex::locked_via_try_lock_until);

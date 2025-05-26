@@ -69,7 +69,7 @@
 #include <exception>
 #include <string>
 #include <stop_token>
-#include <thread>
+#include <gpu/thread>
 
 #include "make_test_thread.h"
 #include "test_macros.h"

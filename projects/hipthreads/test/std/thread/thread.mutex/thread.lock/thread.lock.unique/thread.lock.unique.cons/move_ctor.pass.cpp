@@ -21,13 +21,13 @@
 #include "test_macros.h"
 
 #if TEST_STD_VER >= 11
-static_assert(std::is_nothrow_move_constructible<std::unique_lock<checking_mutex>>::value, "");
+static_assert(std::is_nothrow_move_constructible<gpu::unique_lock<checking_mutex>>::value, "");
 #endif
 
 int main(int, char**) {
   checking_mutex m;
-  std::unique_lock<checking_mutex> lk0(m);
-  std::unique_lock<checking_mutex> lk = std::move(lk0);
+  gpu::unique_lock<checking_mutex> lk0(m);
+  gpu::unique_lock<checking_mutex> lk = std::move(lk0);
 
   assert(lk.mutex() == std::addressof(m));
   assert(lk.owns_lock());

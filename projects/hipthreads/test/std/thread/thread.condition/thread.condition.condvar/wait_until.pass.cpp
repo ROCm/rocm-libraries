@@ -22,7 +22,7 @@
 #include <cassert>
 #include <chrono>
 #include <mutex>
-#include <thread>
+#include <gpu/thread>
 
 #include "make_test_thread.h"
 #include "test_macros.h"
@@ -55,8 +55,8 @@ void test() {
     std::condition_variable cv;
     std::mutex mutex;
 
-    std::thread t1 = support::make_test_thread([&] {
-      std::unique_lock<std::mutex> lock(mutex);
+    gpu::thread t1 = support::make_test_thread([&] {
+      gpu::unique_lock<std::mutex> lock(mutex);
       ready = true;
       do {
         std::cv_status result = cv.wait_until(lock, timeout);
@@ -68,14 +68,14 @@ void test() {
       assert(Clock::now() < timeout);
     });
 
-    std::thread t2 = support::make_test_thread([&] {
+    gpu::thread t2 = support::make_test_thread([&] {
       while (!ready) {
         // spin
       }
 
       // Acquire the same mutex as t1. This blocks the condition variable inside its wait call
       // so we can notify it while it is waiting.
-      std::unique_lock<std::mutex> lock(mutex);
+      gpu::unique_lock<std::mutex> lock(mutex);
       cv.notify_one();
       likely_spurious = false;
       lock.unlock();
@@ -96,8 +96,8 @@ void test() {
     std::condition_variable cv;
     std::mutex mutex;
 
-    std::thread t1 = support::make_test_thread([&] {
-      std::unique_lock<std::mutex> lock(mutex);
+    gpu::thread t1 = support::make_test_thread([&] {
+      gpu::unique_lock<std::mutex> lock(mutex);
       std::cv_status result;
       do {
         result = cv.wait_until(lock, timeout);

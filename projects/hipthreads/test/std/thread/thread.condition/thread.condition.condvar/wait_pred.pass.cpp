@@ -19,7 +19,7 @@
 #include <atomic>
 #include <cassert>
 #include <mutex>
-#include <thread>
+#include <gpu/thread>
 
 #include "make_test_thread.h"
 #include "test_macros.h"
@@ -36,20 +36,20 @@ int main(int, char**) {
     std::condition_variable cv;
     std::mutex mutex;
 
-    std::thread t1 = support::make_test_thread([&] {
-      std::unique_lock<std::mutex> lock(mutex);
+    gpu::thread t1 = support::make_test_thread([&] {
+      gpu::unique_lock<std::mutex> lock(mutex);
       ready = true;
       cv.wait(lock, [&] { return !likely_spurious; });
     });
 
-    std::thread t2 = support::make_test_thread([&] {
+    gpu::thread t2 = support::make_test_thread([&] {
       while (!ready) {
         // spin
       }
 
       // Acquire the same mutex as t1. This ensures that the condition variable has started
       // waiting (and hence released that mutex).
-      std::unique_lock<std::mutex> lock(mutex);
+      gpu::unique_lock<std::mutex> lock(mutex);
 
       likely_spurious = false;
       lock.unlock();
@@ -75,25 +75,25 @@ int main(int, char**) {
     std::condition_variable cv;
     std::mutex mutex;
 
-    std::thread t1 = support::make_test_thread([&] {
-      std::unique_lock<std::mutex> lock(mutex);
+    gpu::thread t1 = support::make_test_thread([&] {
+      gpu::unique_lock<std::mutex> lock(mutex);
       ready = true;
       cv.wait(lock, [&] { return true; });
       awoken = true;
     });
 
-    std::thread t2 = support::make_test_thread([&] {
+    gpu::thread t2 = support::make_test_thread([&] {
       while (!ready) {
         // spin
       }
 
       // Acquire the same mutex as t1. This ensures that the condition variable has started
       // waiting (and hence released that mutex).
-      std::unique_lock<std::mutex> lock(mutex);
+      gpu::unique_lock<std::mutex> lock(mutex);
       lock.unlock();
 
       // Give some time for t1 to be awoken spuriously so that code path is used.
-      std::this_thread::sleep_for(std::chrono::seconds(1));
+      gpu::this_thread::sleep_for(std::chrono::seconds(1));
 
       // We would want to assert that the thread has been awoken after this time,
       // however nothing guarantees us that it ever gets spuriously awoken, so

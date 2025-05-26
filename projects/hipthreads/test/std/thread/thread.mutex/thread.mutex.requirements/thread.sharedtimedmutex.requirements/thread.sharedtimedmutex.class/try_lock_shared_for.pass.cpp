@@ -20,7 +20,7 @@
 #include <atomic>
 #include <cassert>
 #include <chrono>
-#include <thread>
+#include <gpu/thread>
 #include <vector>
 
 #include "make_test_thread.h"
@@ -37,7 +37,7 @@ int main(int, char**) {
   // Try to lock-shared a mutex that is not locked yet. This should succeed immediately.
   {
     std::shared_timed_mutex m;
-    std::vector<std::thread> threads;
+    std::vector<gpu::thread> threads;
     for (int i = 0; i != 5; ++i) {
       threads.push_back(support::make_test_thread([&] {
         bool succeeded = m.try_lock_shared_for(std::chrono::milliseconds(1));
@@ -61,7 +61,7 @@ int main(int, char**) {
     std::shared_timed_mutex m;
     m.lock();
 
-    std::vector<std::thread> threads;
+    std::vector<gpu::thread> threads;
     for (int i = 0; i != 5; ++i) {
       threads.push_back(support::make_test_thread([&] {
         ++ready;
@@ -86,7 +86,7 @@ int main(int, char**) {
     // There is still technically a race condition here.
     while (ready < 5)
       /* spin */;
-    std::this_thread::sleep_for(wait_time / 5);
+    gpu::this_thread::sleep_for(wait_time / 5);
 
     m.unlock(); // this should allow the threads to lock-shared 'm'
 
@@ -103,7 +103,7 @@ int main(int, char**) {
     std::shared_timed_mutex m;
     m.lock();
 
-    std::vector<std::thread> threads;
+    std::vector<gpu::thread> threads;
     for (int i = 0; i != 5; ++i) {
       threads.push_back(support::make_test_thread([&] {
         auto elapsed = measure([&] {

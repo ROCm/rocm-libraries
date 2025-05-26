@@ -21,7 +21,7 @@
 #include <cstdlib>
 #include <mutex>
 #include <shared_mutex>
-#include <thread>
+#include <gpu/thread>
 #include <vector>
 
 #include "make_test_thread.h"
@@ -65,7 +65,7 @@ void f()
         std::shared_lock<std::shared_timed_mutex> lk(m, std::try_to_lock);
         if (lk.owns_lock())
             break;
-        std::this_thread::yield();
+        gpu::this_thread::pseudo_yield();
     }
     time_point t1 = Clock::now();
     ns d = t1 - t0 - ms(250);
@@ -75,10 +75,10 @@ void f()
 int main(int, char**)
 {
     m.lock();
-    std::vector<std::thread> v;
+    std::vector<gpu::thread> v;
     for (int i = 0; i < 5; ++i)
         v.push_back(support::make_test_thread(f));
-    std::this_thread::sleep_for(ms(250));
+    gpu::this_thread::sleep_for(ms(250));
     m.unlock();
     for (auto& t : v)
         t.join();

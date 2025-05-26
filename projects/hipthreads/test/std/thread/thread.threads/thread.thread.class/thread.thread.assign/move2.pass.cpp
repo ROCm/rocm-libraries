@@ -14,7 +14,7 @@
 
 // thread& operator=(thread&& t);
 
-#include <thread>
+#include <gpu/thread>
 #include <cassert>
 #include <cstdlib>
 #include <exception>
@@ -38,8 +38,8 @@ int main(int, char**)
     std::set_terminate(f1);
     {
         G g;
-        std::thread t0 = support::make_test_thread(g);
-        std::thread t1;
+        gpu::thread t0 = support::make_test_thread(g);
+        gpu::thread t1;
         t0 = std::move(t1);
         assert(false);
     }

@@ -14,7 +14,7 @@
 // <barrier>
 
 #include <barrier>
-#include <thread>
+#include <gpu/thread>
 #include <cassert>
 
 #include "make_test_thread.h"
@@ -24,7 +24,7 @@ int main(int, char**)
 {
   std::barrier<> b(2);
 
-  std::thread t = support::make_test_thread([&](){
+  gpu::thread t = support::make_test_thread([&](){
     b.arrive_and_drop();
   });
 

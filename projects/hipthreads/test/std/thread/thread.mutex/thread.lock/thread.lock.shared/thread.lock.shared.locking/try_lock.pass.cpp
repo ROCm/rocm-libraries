@@ -20,7 +20,7 @@
 #include <mutex> // std::defer_lock
 #include <shared_mutex>
 #include <system_error>
-#include <thread>
+#include <gpu/thread>
 #include <vector>
 
 #include "make_test_thread.h"
@@ -50,7 +50,7 @@ void test() {
   // Basic sanity test
   {
     Mutex mutex;
-    std::vector<std::thread> threads;
+    std::vector<gpu::thread> threads;
     std::atomic<bool> ready(false);
     for (int i = 0; i != 5; ++i) {
       threads.push_back(support::make_test_thread([&] {

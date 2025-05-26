@@ -20,7 +20,7 @@
 // in r280621.
 
 #include <mutex>
-#include <thread>
+#include <gpu/thread>
 #include <cassert>
 
 #include "make_test_thread.h"
@@ -42,8 +42,8 @@ void f0()
 
 int main(int, char**)
 {
-    std::thread t0 = support::make_test_thread(f0);
-    std::thread t1 = support::make_test_thread(f0);
+    gpu::thread t0 = support::make_test_thread(f0);
+    gpu::thread t1 = support::make_test_thread(f0);
     t0.join();
     t1.join();
     assert(global == 1);

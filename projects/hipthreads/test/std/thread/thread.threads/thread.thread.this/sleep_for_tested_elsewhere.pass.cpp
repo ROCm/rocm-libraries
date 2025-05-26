@@ -11,7 +11,7 @@
 // template <class Rep, class Period>
 //   void sleep_for(const chrono::duration<Rep, Period>& rel_time);
 
-// The std::this_thread::sleep_for test requires POSIX specific headers and
+// The gpu::this_thread::sleep_for test requires POSIX specific headers and
 // is therefore non-standard. For this reason the test lives under the 'libcxx'
 // subdirectory.
 

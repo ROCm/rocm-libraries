@@ -17,7 +17,7 @@
 
 #include <barrier>
 #include <semaphore>
-#include <thread>
+#include <gpu/thread>
 #include <vector>
 
 #include "make_test_thread.h"
@@ -50,7 +50,7 @@ void release() {
 
 int main(int, char**) {
   for (int run = 0; run < 20; ++run) {
-    std::vector<std::thread> threads;
+    std::vector<gpu::thread> threads;
     for (int i = 0; i < 8; ++i)
       threads.push_back(support::make_test_thread(acquire));
 

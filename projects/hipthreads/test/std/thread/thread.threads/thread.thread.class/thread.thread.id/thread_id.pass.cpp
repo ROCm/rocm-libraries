@@ -20,17 +20,17 @@
 
 #include <cassert>
 #include <functional>
-#include <thread>
+#include <gpu/thread>
 
 #include "test_macros.h"
 
 int main(int, char**)
 {
-    std::thread::id id1;
-    std::thread::id id2 = std::this_thread::get_id();
-    typedef std::hash<std::thread::id> H;
+    gpu::thread::id id1;
+    gpu::thread::id id2 = gpu::this_thread::get_id();
+    typedef std::hash<gpu::thread::id> H;
 #if TEST_STD_VER <= 14
-    static_assert((std::is_same<typename H::argument_type, std::thread::id>::value), "" );
+    static_assert((std::is_same<typename H::argument_type, gpu::thread::id>::value), "" );
     static_assert((std::is_same<typename H::result_type, std::size_t>::value), "" );
 #endif
     ASSERT_NOEXCEPT(H()(id2));

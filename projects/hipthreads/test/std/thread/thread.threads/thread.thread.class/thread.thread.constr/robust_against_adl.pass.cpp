@@ -15,7 +15,7 @@
 
 // template <class F, class ...Args> thread(F&& f, Args&&... args);
 
-#include <thread>
+#include <gpu/thread>
 
 #include "test_macros.h"
 
@@ -27,7 +27,7 @@ void f(Holder<Incomplete> *) { }
 int main(int, char **)
 {
     Holder<Incomplete> *p = nullptr;
-    std::thread t(f, p);
+    gpu::thread t(f, p);
     t.join();
     return 0;
 }

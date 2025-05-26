@@ -16,7 +16,7 @@
 
 // native_handle_type native_handle();
 
-#include <thread>
+#include <gpu/thread>
 #include <new>
 #include <cstdlib>
 #include <cassert>
@@ -49,7 +49,7 @@ int main(int, char**)
 {
     {
         G g;
-        std::thread t0(g);
+        gpu::thread t0(g);
         pthread_t pid = t0.native_handle();
         assert(pid != 0);
         t0.join();

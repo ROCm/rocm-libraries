@@ -13,8 +13,8 @@
 //  using id = thread::id;
 //  using native_handle_type = thread::native_handle_type;
 
-#include <thread>
+#include <gpu/thread>
 #include <type_traits>
 
-static_assert(std::is_same_v<std::jthread::id, std::thread::id>);
-static_assert(std::is_same_v<std::jthread::native_handle_type, std::thread::native_handle_type>);
+static_assert(std::is_same_v<std::jthread::id, gpu::thread::id>);
+static_assert(std::is_same_v<std::jthread::native_handle_type, gpu::thread::native_handle_type>);

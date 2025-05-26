@@ -20,7 +20,7 @@
 #include <atomic>
 #include <cassert>
 #include <chrono>
-#include <thread>
+#include <gpu/thread>
 
 #include "make_test_thread.h"
 
@@ -52,7 +52,7 @@ int main(int, char**) {
     std::shared_timed_mutex m;
     m.lock();
 
-    std::thread t = support::make_test_thread([&] {
+    gpu::thread t = support::make_test_thread([&] {
       auto elapsed = measure([&] {
         ready          = true;
         bool succeeded = m.try_lock_until(std::chrono::steady_clock::now() + wait_time);
@@ -71,7 +71,7 @@ int main(int, char**) {
     // There is still technically a race condition here.
     while (!ready)
       /* spin */;
-    std::this_thread::sleep_for(wait_time / 5);
+    gpu::this_thread::sleep_for(wait_time / 5);
 
     m.unlock(); // this should allow the thread to lock 'm'
     t.join();
@@ -86,7 +86,7 @@ int main(int, char**) {
     std::shared_timed_mutex m;
     m.lock();
 
-    std::thread t = support::make_test_thread([&] {
+    gpu::thread t = support::make_test_thread([&] {
       auto elapsed = measure([&] {
         bool succeeded = m.try_lock_until(std::chrono::steady_clock::now() + wait_time);
         assert(!succeeded);

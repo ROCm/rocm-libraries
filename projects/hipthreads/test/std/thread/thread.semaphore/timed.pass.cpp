@@ -14,7 +14,7 @@
 // <semaphore>
 
 #include <semaphore>
-#include <thread>
+#include <gpu/thread>
 #include <chrono>
 #include <cassert>
 
@@ -30,10 +30,10 @@ int main(int, char**)
   assert(!s.try_acquire_until(start + std::chrono::milliseconds(250)));
   assert(!s.try_acquire_for(std::chrono::milliseconds(250)));
 
-  std::thread t = support::make_test_thread([&](){
-    std::this_thread::sleep_for(std::chrono::milliseconds(250));
+  gpu::thread t = support::make_test_thread([&](){
+    gpu::this_thread::sleep_for(std::chrono::milliseconds(250));
     s.release();
-    std::this_thread::sleep_for(std::chrono::milliseconds(250));
+    gpu::this_thread::sleep_for(std::chrono::milliseconds(250));
     s.release();
   });
 

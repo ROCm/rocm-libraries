@@ -15,7 +15,7 @@
 
 #include <semaphore>
 #include <chrono>
-#include <thread>
+#include <gpu/thread>
 #include <type_traits>
 
 #include "make_test_thread.h"
@@ -30,12 +30,12 @@ int main(int, char**)
   auto l = [&](){
     for(int i = 0; i < 1024; ++i) {
         s.acquire();
-        std::this_thread::sleep_for(std::chrono::microseconds(1));
+        gpu::this_thread::sleep_for(std::chrono::microseconds(1));
         s.release();
     }
   };
 
-  std::thread t = support::make_test_thread(l);
+  gpu::thread t = support::make_test_thread(l);
   l();
 
   t.join();

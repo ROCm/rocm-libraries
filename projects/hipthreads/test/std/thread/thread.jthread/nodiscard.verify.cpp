@@ -17,7 +17,7 @@
 // [[nodiscard]] stop_token get_stop_token() const noexcept;
 // [[nodiscard]] static unsigned int hardware_concurrency() noexcept;
 
-#include <thread>
+#include <gpu/thread>
 
 void test() {
   std::jthread jt;

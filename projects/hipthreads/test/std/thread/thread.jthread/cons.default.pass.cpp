@@ -14,7 +14,7 @@
 
 #include <cassert>
 #include <stop_token>
-#include <thread>
+#include <gpu/thread>
 #include <type_traits>
 
 #include "test_macros.h"

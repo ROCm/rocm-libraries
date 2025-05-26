@@ -17,7 +17,7 @@
 
 #include <condition_variable>
 #include <mutex>
-#include <thread>
+#include <gpu/thread>
 #include <cassert>
 
 #include "make_test_thread.h"
@@ -26,7 +26,7 @@
 std::condition_variable_any cv;
 
 typedef std::timed_mutex L0;
-typedef std::unique_lock<L0> L1;
+typedef gpu::unique_lock<L0> L1;
 
 L0 m0;
 
@@ -47,7 +47,7 @@ void f()
 int main(int, char**)
 {
     L1 lk(m0);
-    std::thread t = support::make_test_thread(f);
+    gpu::thread t = support::make_test_thread(f);
     assert(test1 == 0);
     while (test1 == 0)
         cv.wait(lk);

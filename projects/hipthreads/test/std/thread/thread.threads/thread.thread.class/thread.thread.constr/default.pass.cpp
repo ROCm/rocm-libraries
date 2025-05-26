@@ -14,15 +14,15 @@
 
 // thread();
 
-#include <thread>
+#include <gpu/thread>
 #include <cassert>
 
 #include "test_macros.h"
 
 int main(int, char**)
 {
-    std::thread t;
-    assert(t.get_id() == std::thread::id());
+    gpu::thread t;
+    assert(t.get_id() == gpu::thread::id());
 
   return 0;
 }

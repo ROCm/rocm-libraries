@@ -20,23 +20,23 @@
 // bool operator>=(thread::id x, thread::id y) noexcept;
 // strong_ordering operator<=>(thread::id x, thread::id y) noexcept;
 
-#include <thread>
+#include <gpu/thread>
 #include <cassert>
 
 #include "test_macros.h"
 #include "test_comparisons.h"
 
 int main(int, char**) {
-  AssertComparisonsAreNoexcept<std::thread::id>();
-  AssertComparisonsReturnBool<std::thread::id>();
+  AssertComparisonsAreNoexcept<gpu::thread::id>();
+  AssertComparisonsReturnBool<gpu::thread::id>();
 #if TEST_STD_VER > 17
-  AssertOrderAreNoexcept<std::thread::id>();
-  AssertOrderReturn<std::strong_ordering, std::thread::id>();
+  AssertOrderAreNoexcept<gpu::thread::id>();
+  AssertOrderReturn<std::strong_ordering, gpu::thread::id>();
 #endif
 
-  std::thread::id id1;
-  std::thread::id id2;
-  std::thread::id id3 = std::this_thread::get_id();
+  gpu::thread::id id1;
+  gpu::thread::id id2;
+  gpu::thread::id id3 = gpu::this_thread::get_id();
 
   // `id1` and `id2` should compare equal
   assert(testComparisons(id1, id2, /*isEqual*/ true, /*isLess*/ false));

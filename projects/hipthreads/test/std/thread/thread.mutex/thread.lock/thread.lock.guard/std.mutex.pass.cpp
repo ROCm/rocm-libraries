@@ -27,7 +27,7 @@ int main(int, char**) {
     std::mutex m;
     {
       std::lock_guard<std::mutex> lg(m);
-      std::thread t = support::make_test_thread(do_try_lock, std::ref(m));
+      gpu::thread t = support::make_test_thread(do_try_lock, std::ref(m));
       t.join();
     }
 

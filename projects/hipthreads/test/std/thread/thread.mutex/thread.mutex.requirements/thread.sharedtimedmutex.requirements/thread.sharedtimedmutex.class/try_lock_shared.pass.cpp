@@ -17,7 +17,7 @@
 
 #include <shared_mutex>
 #include <cassert>
-#include <thread>
+#include <gpu/thread>
 #include <vector>
 
 #include "make_test_thread.h"
@@ -26,7 +26,7 @@ int main(int, char**) {
   // Try to lock-shared a mutex that is not locked yet. This should succeed.
   {
     std::shared_timed_mutex m;
-    std::vector<std::thread> threads;
+    std::vector<gpu::thread> threads;
     for (int i = 0; i != 5; ++i) {
       threads.push_back(support::make_test_thread([&] {
         bool succeeded = m.try_lock_shared();
@@ -44,7 +44,7 @@ int main(int, char**) {
     std::shared_timed_mutex m;
     m.lock();
 
-    std::vector<std::thread> threads;
+    std::vector<gpu::thread> threads;
     for (int i = 0; i != 5; ++i) {
       threads.push_back(support::make_test_thread([&] {
         bool succeeded = m.try_lock_shared();
@@ -62,7 +62,7 @@ int main(int, char**) {
   {
     std::shared_timed_mutex m;
     m.lock_shared();
-    std::vector<std::thread> threads;
+    std::vector<gpu::thread> threads;
     for (int i = 0; i != 5; ++i) {
       threads.push_back(support::make_test_thread([&] {
         bool succeeded = m.try_lock_shared();

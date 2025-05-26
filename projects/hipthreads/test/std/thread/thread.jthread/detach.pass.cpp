@@ -19,7 +19,7 @@
 #include <functional>
 #include <optional>
 #include <system_error>
-#include <thread>
+#include <gpu/thread>
 #include <type_traits>
 
 #include "make_test_thread.h"
@@ -69,6 +69,6 @@ int main(int, char**) {
   }
 #endif
 
-  std::this_thread::sleep_for(std::chrono::milliseconds{2});
+  gpu::this_thread::sleep_for(std::chrono::milliseconds{2});
   return 0;
 }

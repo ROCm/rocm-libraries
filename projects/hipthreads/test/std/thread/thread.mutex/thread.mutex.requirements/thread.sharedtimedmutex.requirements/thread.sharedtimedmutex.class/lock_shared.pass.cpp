@@ -19,7 +19,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cassert>
-#include <thread>
+#include <gpu/thread>
 #include <vector>
 
 #include "make_test_thread.h"
@@ -28,7 +28,7 @@ int main(int, char**) {
   // Lock-shared a mutex that is not locked yet. This should succeed.
   {
     std::shared_timed_mutex m;
-    std::vector<std::thread> threads;
+    std::vector<gpu::thread> threads;
     for (int i = 0; i != 5; ++i) {
       threads.push_back(support::make_test_thread([&] {
         m.lock_shared();
@@ -47,7 +47,7 @@ int main(int, char**) {
     m.lock();
     std::atomic<bool> is_locked_from_main(true);
 
-    std::vector<std::thread> threads;
+    std::vector<gpu::thread> threads;
     for (int i = 0; i != 5; ++i) {
       threads.push_back(support::make_test_thread([&] {
         ++ready;
@@ -79,7 +79,7 @@ int main(int, char**) {
     std::shared_timed_mutex m;
     m.lock_shared();
 
-    std::vector<std::thread> threads;
+    std::vector<gpu::thread> threads;
     for (int i = 0; i != 5; ++i) {
       threads.push_back(support::make_test_thread([&] {
         ++ready;
@@ -108,7 +108,7 @@ int main(int, char**) {
   // the same time.
   {
     std::shared_timed_mutex mutex;
-    std::vector<std::thread> threads;
+    std::vector<gpu::thread> threads;
     constexpr int n_threads = 5;
     std::atomic<int> holders(0);
     int concurrent_holders[n_threads] = {};

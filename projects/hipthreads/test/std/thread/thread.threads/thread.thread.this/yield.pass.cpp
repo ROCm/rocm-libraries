@@ -12,14 +12,14 @@
 
 // void this_thread::yield();
 
-#include <thread>
+#include <gpu/thread>
 #include <cassert>
 
 #include "test_macros.h"
 
 int main(int, char**)
 {
-    std::this_thread::yield();
+    gpu::this_thread::pseudo_yield();
 
   return 0;
 }

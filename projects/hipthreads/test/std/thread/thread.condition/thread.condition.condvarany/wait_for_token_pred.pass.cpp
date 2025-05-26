@@ -27,7 +27,7 @@
 #include <mutex>
 #include <shared_mutex>
 #include <stop_token>
-#include <thread>
+#include <gpu/thread>
 
 #include "helpers.h"
 #include "make_test_thread.h"
@@ -118,8 +118,8 @@ void test() {
 
     bool flag   = false;
     auto thread = support::make_test_thread([&]() {
-      std::this_thread::sleep_for(2ms);
-      std::unique_lock<Mutex> lock2{mutex};
+      gpu::this_thread::sleep_for(2ms);
+      gpu::unique_lock<Mutex> lock2{mutex};
       flag = true;
       cv.notify_all();
     });
@@ -148,7 +148,7 @@ void test() {
 
       while (!done) {
         cv.notify_all();
-        std::this_thread::sleep_for(2ms);
+        gpu::this_thread::sleep_for(2ms);
       }
     });
 
@@ -173,7 +173,7 @@ void test() {
       MyThread() {
         thread_ = support::make_test_jthread([this](std::stop_token st) {
           while (!st.stop_requested()) {
-            std::unique_lock lock{m_};
+            gpu::unique_lock lock{m_};
             cv_.wait_for(lock, st, 1h, [] { return false; });
           }
         });
@@ -240,7 +240,7 @@ void test() {
 }
 
 int main(int, char**) {
-  test<std::mutex, std::unique_lock<std::mutex>>();
+  test<std::mutex, gpu::unique_lock<std::mutex>>();
   test<std::shared_mutex, std::shared_lock<std::shared_mutex>>();
 
   return 0;

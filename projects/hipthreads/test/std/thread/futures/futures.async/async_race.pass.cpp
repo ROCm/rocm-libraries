@@ -24,7 +24,7 @@
 
 #include <future>
 #include <chrono>
-#include <thread>
+#include <gpu/thread>
 #include <memory>
 #include <cassert>
 
@@ -32,7 +32,7 @@
 
 int f_async() {
     typedef std::chrono::milliseconds ms;
-    std::this_thread::sleep_for(ms(200));
+    gpu::this_thread::sleep_for(ms(200));
     return 42;
 }
 

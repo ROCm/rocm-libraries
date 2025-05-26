@@ -16,7 +16,7 @@
 //   void call_once(once_flag& flag, Callable&& func, Args&&... args);
 
 #include <mutex>
-#include <thread>
+#include <gpu/thread>
 #include <cassert>
 
 #include "make_test_thread.h"
@@ -30,7 +30,7 @@ int init0_called = 0;
 
 void init0()
 {
-    std::this_thread::sleep_for(ms(250));
+    gpu::this_thread::sleep_for(ms(250));
     ++init0_called;
 }
 
@@ -47,7 +47,7 @@ int init3_completed = 0;
 void init3()
 {
     ++init3_called;
-    std::this_thread::sleep_for(ms(250));
+    gpu::this_thread::sleep_for(ms(250));
     if (init3_called == 1)
         TEST_THROW(1);
     ++init3_completed;
@@ -113,13 +113,13 @@ void init42();
 
 void init41()
 {
-    std::this_thread::sleep_for(ms(250));
+    gpu::this_thread::sleep_for(ms(250));
     ++init41_called;
 }
 
 void init42()
 {
-    std::this_thread::sleep_for(ms(250));
+    gpu::this_thread::sleep_for(ms(250));
     ++init42_called;
 }
 
@@ -191,8 +191,8 @@ int main(int, char**)
 {
     // check basic functionality
     {
-        std::thread t0 = support::make_test_thread(f0);
-        std::thread t1 = support::make_test_thread(f0);
+        gpu::thread t0 = support::make_test_thread(f0);
+        gpu::thread t1 = support::make_test_thread(f0);
         t0.join();
         t1.join();
         assert(init0_called == 1);
@@ -200,8 +200,8 @@ int main(int, char**)
 #ifndef TEST_HAS_NO_EXCEPTIONS
     // check basic exception safety
     {
-        std::thread t0 = support::make_test_thread(f3);
-        std::thread t1 = support::make_test_thread(f3);
+        gpu::thread t0 = support::make_test_thread(f3);
+        gpu::thread t1 = support::make_test_thread(f3);
         t0.join();
         t1.join();
         assert(init3_called == 2);
@@ -210,8 +210,8 @@ int main(int, char**)
 #endif
     // check deadlock avoidance
     {
-        std::thread t0 = support::make_test_thread(f41);
-        std::thread t1 = support::make_test_thread(f42);
+        gpu::thread t0 = support::make_test_thread(f41);
+        gpu::thread t1 = support::make_test_thread(f42);
         t0.join();
         t1.join();
         assert(init41_called == 1);
@@ -220,16 +220,16 @@ int main(int, char**)
 #if TEST_STD_VER >= 11
     // check functors with 1 arg
     {
-        std::thread t0 = support::make_test_thread(f1);
-        std::thread t1 = support::make_test_thread(f1);
+        gpu::thread t0 = support::make_test_thread(f1);
+        gpu::thread t1 = support::make_test_thread(f1);
         t0.join();
         t1.join();
         assert(init1::called == 1);
     }
     // check functors with 2 args
     {
-        std::thread t0 = support::make_test_thread(f2);
-        std::thread t1 = support::make_test_thread(f2);
+        gpu::thread t0 = support::make_test_thread(f2);
+        gpu::thread t1 = support::make_test_thread(f2);
         t0.join();
         t1.join();
         assert(init2::called == 5);

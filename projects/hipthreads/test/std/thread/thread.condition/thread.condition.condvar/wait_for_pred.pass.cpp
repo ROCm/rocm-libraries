@@ -23,7 +23,7 @@
 #include <cassert>
 #include <chrono>
 #include <mutex>
-#include <thread>
+#include <gpu/thread>
 
 #include "make_test_thread.h"
 #include "test_macros.h"
@@ -49,8 +49,8 @@ int main(int, char**) {
     std::condition_variable cv;
     std::mutex mutex;
 
-    std::thread t1 = support::make_test_thread([&] {
-      std::unique_lock<std::mutex> lock(mutex);
+    gpu::thread t1 = support::make_test_thread([&] {
+      gpu::unique_lock<std::mutex> lock(mutex);
       auto elapsed = measure([&] {
         ready       = true;
         bool result = cv.wait_for(lock, timeout, [&] { return !likely_spurious; });
@@ -59,14 +59,14 @@ int main(int, char**) {
       assert(elapsed < timeout);
     });
 
-    std::thread t2 = support::make_test_thread([&] {
+    gpu::thread t2 = support::make_test_thread([&] {
       while (!ready) {
         // spin
       }
 
       // Acquire the same mutex as t1. This ensures that the condition variable has started
       // waiting (and hence released that mutex).
-      std::unique_lock<std::mutex> lock(mutex);
+      gpu::unique_lock<std::mutex> lock(mutex);
 
       likely_spurious = false;
       lock.unlock();
@@ -87,8 +87,8 @@ int main(int, char**) {
     std::condition_variable cv;
     std::mutex mutex;
 
-    std::thread t1 = support::make_test_thread([&] {
-      std::unique_lock<std::mutex> lock(mutex);
+    gpu::thread t1 = support::make_test_thread([&] {
+      gpu::unique_lock<std::mutex> lock(mutex);
       auto elapsed = measure([&] {
         bool result = cv.wait_for(lock, timeout, [] { return false; }); // never stop waiting (until timeout)
         assert(!result); // return value should be false since the predicate returns false after the timeout
@@ -116,8 +116,8 @@ int main(int, char**) {
     std::condition_variable cv;
     std::mutex mutex;
 
-    std::thread t1 = support::make_test_thread([&] {
-      std::unique_lock<std::mutex> lock(mutex);
+    gpu::thread t1 = support::make_test_thread([&] {
+      gpu::unique_lock<std::mutex> lock(mutex);
       auto elapsed = measure([&] {
         ready       = true;
         bool result = cv.wait_for(lock, timeout, [&] { return true; });
@@ -127,18 +127,18 @@ int main(int, char**) {
       assert(elapsed < timeout); // can technically fail if t2 never executes and we timeout, but very unlikely
     });
 
-    std::thread t2 = support::make_test_thread([&] {
+    gpu::thread t2 = support::make_test_thread([&] {
       while (!ready) {
         // spin
       }
 
       // Acquire the same mutex as t1. This ensures that the condition variable has started
       // waiting (and hence released that mutex).
-      std::unique_lock<std::mutex> lock(mutex);
+      gpu::unique_lock<std::mutex> lock(mutex);
       lock.unlock();
 
       // Give some time for t1 to be awoken spuriously so that code path is used.
-      std::this_thread::sleep_for(std::chrono::seconds(1));
+      gpu::this_thread::sleep_for(std::chrono::seconds(1));
 
       // We would want to assert that the thread has been awoken after this time,
       // however nothing guarantees us that it ever gets spuriously awoken, so

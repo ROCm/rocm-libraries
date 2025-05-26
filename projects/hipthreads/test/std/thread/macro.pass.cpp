@@ -12,7 +12,7 @@
 
 // #define __STDCPP_THREADS__ 1
 
-#include <thread>
+#include <gpu/thread>
 
 #include "test_macros.h"
 

@@ -27,7 +27,7 @@
 #include <concepts>
 #include <format>
 #include <memory>
-#include <thread>
+#include <gpu/thread>
 
 #include "test_macros.h"
 #include "make_string.h"
@@ -38,7 +38,7 @@ template <class StringViewT>
 constexpr void test_parse(StringViewT fmt, std::size_t offset) {
   using CharT    = typename StringViewT::value_type;
   auto parse_ctx = std::basic_format_parse_context<CharT>(fmt);
-  std::formatter<std::thread::id, CharT> formatter;
+  std::formatter<gpu::thread::id, CharT> formatter;
   static_assert(std::semiregular<decltype(formatter)>);
 
   std::same_as<typename StringViewT::iterator> auto it = formatter.parse(parse_ctx);

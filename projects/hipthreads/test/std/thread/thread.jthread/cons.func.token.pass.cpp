@@ -15,7 +15,7 @@
 
 #include <cassert>
 #include <stop_token>
-#include <thread>
+#include <gpu/thread>
 #include <type_traits>
 #include <utility>
 
@@ -82,17 +82,17 @@ int main(int, char**) {
       bool copyConstructed = false;
       bool moveConstructed = false;
 
-      TrackThread() : threadId(std::this_thread::get_id()) {}
-      TrackThread(const TrackThread&) : threadId(std::this_thread::get_id()), copyConstructed(true) {}
-      TrackThread(TrackThread&&) : threadId(std::this_thread::get_id()), moveConstructed(true) {}
+      TrackThread() : threadId(gpu::this_thread::get_id()) {}
+      TrackThread(const TrackThread&) : threadId(gpu::this_thread::get_id()), copyConstructed(true) {}
+      TrackThread(TrackThread&&) : threadId(gpu::this_thread::get_id()), moveConstructed(true) {}
     };
 
-    auto mainThread = std::this_thread::get_id();
+    auto mainThread = gpu::this_thread::get_id();
 
     TrackThread arg1;
     std::jthread jt1{[mainThread](const TrackThread& arg) {
                        assert(arg.threadId == mainThread);
-                       assert(arg.threadId != std::this_thread::get_id());
+                       assert(arg.threadId != gpu::this_thread::get_id());
                        assert(arg.copyConstructed);
                      },
                      arg1};
@@ -100,7 +100,7 @@ int main(int, char**) {
     TrackThread arg2;
     std::jthread jt2{[mainThread](const TrackThread& arg) {
                        assert(arg.threadId == mainThread);
-                       assert(arg.threadId != std::this_thread::get_id());
+                       assert(arg.threadId != gpu::this_thread::get_id());
                        assert(arg.moveConstructed);
                      },
                      std::move(arg2)};
@@ -115,7 +115,7 @@ int main(int, char**) {
     };
     struct ThrowOnCopyFunc {
       ThrowOnCopyFunc() = default;
-      ThrowOnCopyFunc(const ThrowOnCopyFunc&) { throw Exception{std::this_thread::get_id()}; }
+      ThrowOnCopyFunc(const ThrowOnCopyFunc&) { throw Exception{gpu::this_thread::get_id()}; }
       void operator()() const {}
     };
     ThrowOnCopyFunc f1;
@@ -123,7 +123,7 @@ int main(int, char**) {
       std::jthread jt{f1};
       assert(false);
     } catch (const Exception& e) {
-      assert(e.threadId == std::this_thread::get_id());
+      assert(e.threadId == gpu::this_thread::get_id());
     }
   }
 #endif // !defined(TEST_HAS_NO_EXCEPTIONS)

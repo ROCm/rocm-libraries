@@ -33,7 +33,7 @@ static const ms waitTime(5000);
 
 void func1(std::promise<int> p)
 {
-  std::this_thread::sleep_for(sleepTime);
+  gpu::this_thread::sleep_for(sleepTime);
   p.set_value(3);
 }
 
@@ -41,14 +41,14 @@ int j = 0;
 
 void func3(std::promise<int&> p)
 {
-  std::this_thread::sleep_for(sleepTime);
+  gpu::this_thread::sleep_for(sleepTime);
   j = 5;
   p.set_value(j);
 }
 
 void func5(std::promise<void> p)
 {
-  std::this_thread::sleep_for(sleepTime);
+  gpu::this_thread::sleep_for(sleepTime);
   p.set_value();
 }
 

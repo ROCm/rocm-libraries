@@ -16,7 +16,7 @@
 
 #include <condition_variable>
 #include <mutex>
-#include <thread>
+#include <gpu/thread>
 #include <cassert>
 
 #include "make_test_thread.h"
@@ -50,12 +50,12 @@ void g()
 int main(int, char**)
 {
     cv = new std::condition_variable_any;
-    std::thread th2 = support::make_test_thread(g);
+    gpu::thread th2 = support::make_test_thread(g);
     m.lock();
     while (!g_ready)
         cv->wait(m);
     m.unlock();
-    std::thread th1 = support::make_test_thread(f);
+    gpu::thread th1 = support::make_test_thread(f);
     th1.join();
     th2.join();
 

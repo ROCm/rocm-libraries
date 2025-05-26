@@ -79,7 +79,7 @@ int main(int, char**) {
     std::optional<std::stop_source> ss{std::in_place};
     const auto st = ss->get_token();
 
-    std::thread t = support::make_test_thread([&]() {
+    gpu::thread t = support::make_test_thread([&]() {
       ss->request_stop();
       ss.reset();
     });

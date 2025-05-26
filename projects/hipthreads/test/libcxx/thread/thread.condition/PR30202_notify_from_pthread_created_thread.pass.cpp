@@ -18,12 +18,12 @@
 // void notify_all_at_thread_exit(condition_variable& cond, unique_lock<mutex> lk);
 
 // Test that this function works with threads that were not created by
-// std::thread. See https://llvm.org/PR30202
+// gpu::thread. See https://llvm.org/PR30202
 
 
 #include <condition_variable>
 #include <mutex>
-#include <thread>
+#include <gpu/thread>
 #include <chrono>
 #include <cassert>
 #include <pthread.h>
@@ -39,9 +39,9 @@ typedef std::chrono::high_resolution_clock Clock;
 
 void* func(void*)
 {
-    std::unique_lock<std::mutex> lk(mut);
+    gpu::unique_lock<std::mutex> lk(mut);
     std::notify_all_at_thread_exit(cv, std::move(lk));
-    std::this_thread::sleep_for(ms(300));
+    gpu::this_thread::sleep_for(ms(300));
     exited = true;
     return nullptr;
 }
@@ -49,7 +49,7 @@ void* func(void*)
 int main(int, char**)
 {
     {
-    std::unique_lock<std::mutex> lk(mut);
+    gpu::unique_lock<std::mutex> lk(mut);
     pthread_t id;
     int res = pthread_create(&id, 0, &func, nullptr);
     assert(res == 0);
@@ -63,8 +63,8 @@ int main(int, char**)
     }
     exited = false;
     {
-    std::unique_lock<std::mutex> lk(mut);
-    std::thread t(&func, nullptr);
+    gpu::unique_lock<std::mutex> lk(mut);
+    gpu::thread t(&func, nullptr);
     Clock::time_point t0 = Clock::now();
     assert(exited == false);
     cv.wait(lk);

@@ -17,7 +17,7 @@
 
 #include <condition_variable>
 #include <mutex>
-#include <thread>
+#include <gpu/thread>
 #include <chrono>
 #include <cassert>
 
@@ -32,15 +32,15 @@ typedef std::chrono::high_resolution_clock Clock;
 
 void func()
 {
-    std::unique_lock<std::mutex> lk(mut);
+    gpu::unique_lock<std::mutex> lk(mut);
     std::notify_all_at_thread_exit(cv, std::move(lk));
-    std::this_thread::sleep_for(ms(300));
+    gpu::this_thread::sleep_for(ms(300));
 }
 
 int main(int, char**)
 {
-    std::unique_lock<std::mutex> lk(mut);
-    std::thread t = support::make_test_thread(func);
+    gpu::unique_lock<std::mutex> lk(mut);
+    gpu::thread t = support::make_test_thread(func);
     Clock::time_point t0 = Clock::now();
     cv.wait(lk);
     Clock::time_point t1 = Clock::now();

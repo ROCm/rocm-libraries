@@ -15,7 +15,7 @@
 // hash specializations.
 
 #include <functional>
-#include <thread>
+#include <gpu/thread>
 
 #include "poisoned_hash_helper.h"
 
@@ -24,7 +24,7 @@
 int main(int, char**) {
   test_library_hash_specializations_available();
   {
-    test_hash_enabled<std::thread::id>();
+    test_hash_enabled<gpu::thread::id>();
   }
 
   return 0;

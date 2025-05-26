@@ -21,4 +21,4 @@
 
 #include "checking_mutex.h"
 
-static_assert(std::is_same<std::unique_lock<checking_mutex>::mutex_type, checking_mutex>::value, "");
+static_assert(std::is_same<gpu::unique_lock<checking_mutex>::mutex_type, checking_mutex>::value, "");

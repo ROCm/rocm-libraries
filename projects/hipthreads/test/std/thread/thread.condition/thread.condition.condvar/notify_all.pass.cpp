@@ -17,7 +17,7 @@
 #include <atomic>
 #include <condition_variable>
 #include <mutex>
-#include <thread>
+#include <gpu/thread>
 #include <cassert>
 
 #include "make_test_thread.h"
@@ -34,7 +34,7 @@ std::atomic<int> ready_count(0);
 
 void f1()
 {
-    std::unique_lock<std::mutex> lk(mut);
+    gpu::unique_lock<std::mutex> lk(mut);
     assert(test1 == 0);
     ready_count += 1;
     while (test1 == 0)
@@ -45,7 +45,7 @@ void f1()
 
 void f2()
 {
-    std::unique_lock<std::mutex> lk(mut);
+    gpu::unique_lock<std::mutex> lk(mut);
     assert(test2 == 0);
     ready_count += 1;
     while (test2 == 0)
@@ -56,20 +56,20 @@ void f2()
 
 int main(int, char**)
 {
-    std::thread t1 = support::make_test_thread(f1);
-    std::thread t2 = support::make_test_thread(f2);
+    gpu::thread t1 = support::make_test_thread(f1);
+    gpu::thread t2 = support::make_test_thread(f2);
     while (ready_count.load() != 2) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+      gpu::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
     {
-        std::unique_lock<std::mutex>lk(mut);
+        gpu::unique_lock<std::mutex>lk(mut);
         test1 = 1;
         test2 = 1;
     }
     cv.notify_all();
     {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        std::unique_lock<std::mutex>lk(mut);
+        gpu::this_thread::sleep_for(std::chrono::milliseconds(100));
+        gpu::unique_lock<std::mutex>lk(mut);
     }
     t1.join();
     t2.join();

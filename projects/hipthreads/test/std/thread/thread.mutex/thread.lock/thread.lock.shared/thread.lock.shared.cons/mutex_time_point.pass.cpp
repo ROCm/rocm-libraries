@@ -16,7 +16,7 @@
 // template <class Clock, class Duration>
 //   shared_lock(mutex_type& m, const chrono::time_point<Clock, Duration>& abs_time);
 
-#include <thread>
+#include <gpu/thread>
 
 #include <atomic>
 #include <chrono>
@@ -66,19 +66,19 @@ int main(int, char**)
 {
   {
     m.lock();
-    std::vector<std::thread> v;
+    std::vector<gpu::thread> v;
     for (unsigned i = 0; i < Threads; ++i)
       v.push_back(support::make_test_thread(f1));
     while (CountDown > 0)
-      std::this_thread::yield();
-    std::this_thread::sleep_for(ShortTime);
+      gpu::this_thread::pseudo_yield();
+    gpu::this_thread::sleep_for(ShortTime);
     m.unlock();
     for (auto& t : v)
       t.join();
   }
   {
     m.lock();
-    std::vector<std::thread> v;
+    std::vector<gpu::thread> v;
     for (unsigned i = 0; i < Threads; ++i)
       v.push_back(support::make_test_thread(f2));
     for (auto& t : v)

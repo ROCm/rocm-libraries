@@ -15,7 +15,7 @@
 // template <class Rep, class Period>
 //   void sleep_for(const chrono::duration<Rep, Period>& rel_time);
 
-#include <thread>
+#include <gpu/thread>
 #include <cassert>
 #include <chrono>
 
@@ -25,7 +25,7 @@ int main(int, char**)
   typedef Clock::time_point time_point;
   std::chrono::milliseconds ms(500);
   time_point t0 = Clock::now();
-  std::this_thread::sleep_for(ms);
+  gpu::this_thread::sleep_for(ms);
   time_point t1 = Clock::now();
   // NOTE: Operating systems are (by default) best effort and therefore we may
   // have slept longer, perhaps much longer than we requested.

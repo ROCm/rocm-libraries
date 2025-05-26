@@ -14,7 +14,7 @@
 // <latch>
 
 #include <latch>
-#include <thread>
+#include <gpu/thread>
 
 #include "make_test_thread.h"
 #include "test_macros.h"
@@ -23,7 +23,7 @@ int main(int, char**)
 {
   std::latch l(2);
 
-  std::thread t = support::make_test_thread([&](){
+  gpu::thread t = support::make_test_thread([&](){
       l.arrive_and_wait();
   });
   l.arrive_and_wait();

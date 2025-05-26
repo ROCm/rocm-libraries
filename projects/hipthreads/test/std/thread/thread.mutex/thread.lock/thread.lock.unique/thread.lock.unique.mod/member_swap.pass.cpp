@@ -21,14 +21,14 @@
 
 #if TEST_STD_VER >= 11
 static_assert(
-    noexcept(std::declval<std::unique_lock<checking_mutex>&>().swap(std::declval<std::unique_lock<checking_mutex>&>())),
+    noexcept(std::declval<gpu::unique_lock<checking_mutex>&>().swap(std::declval<gpu::unique_lock<checking_mutex>&>())),
     "");
 #endif
 
 int main(int, char**) {
   checking_mutex mux;
-  std::unique_lock<checking_mutex> lock1(mux);
-  std::unique_lock<checking_mutex> lock2;
+  gpu::unique_lock<checking_mutex> lock1(mux);
+  gpu::unique_lock<checking_mutex> lock2;
 
   lock1.swap(lock2);
 

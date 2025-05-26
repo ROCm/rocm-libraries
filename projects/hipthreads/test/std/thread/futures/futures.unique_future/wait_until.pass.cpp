@@ -38,7 +38,7 @@ void set_worker_thread_state(WorkerThreadState state)
 void wait_for_worker_thread_state(WorkerThreadState state)
 {
   while (thread_state.load(std::memory_order_relaxed) != state)
-    std::this_thread::yield();
+    gpu::this_thread::pseudo_yield();
 }
 
 void func1(std::promise<int> p)
