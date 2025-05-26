@@ -33,11 +33,11 @@ namespace gpu {
 
 namespace this_thread {
 
-_LIBGPU_EXPORTED_FROM_ABI __device__ void sleep_for(cuda::std::chrono::nanoseconds __ns);
+_LIBGPU_EXPORTED_FROM_ABI __host__ __device__ void sleep_for(cuda::std::chrono::nanoseconds __ns);
 
 // TODO: Should we also provide an implementation that accepts std::chrono::duration (and not just cuda::std::chrono::duration)?
 template <class _Rep, class _Period>
-__device__ _LIBGPU_HIDE_FROM_ABI void sleep_for(const cuda::std::chrono::duration<_Rep, _Period>& __d) {
+__host__ __device__ _LIBGPU_HIDE_FROM_ABI void sleep_for(const cuda::std::chrono::duration<_Rep, _Period>& __d) {
   if (__d > cuda::std::chrono::duration<_Rep, _Period>::zero()) {
     // The standard guarantees a 64bit signed integer resolution for nanoseconds,
     // so use INT64_MAX / 1e9 as cut-off point. Use a constant to avoid <climits>
