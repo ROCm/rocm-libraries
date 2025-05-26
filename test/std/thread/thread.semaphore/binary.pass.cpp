@@ -14,7 +14,7 @@
 // <semaphore>
 
 #include <semaphore>
-#include <chrono>
+#include <hip/std/chrono>
 #include <gpu/thread>
 #include <type_traits>
 
@@ -30,7 +30,7 @@ int main(int, char**)
   auto l = [&](){
     for(int i = 0; i < 1024; ++i) {
         s.acquire();
-        gpu::this_thread::sleep_for(std::chrono::microseconds(1));
+        gpu::this_thread::sleep_for(cuda::std::chrono::microseconds(1));
         s.release();
     }
   };

@@ -101,7 +101,7 @@ void test() {
       lock.unlock();
 
       // Give some time for t1 to be awoken spuriously so that code path is used.
-      gpu::this_thread::sleep_for(std::chrono::seconds(1));
+      gpu::this_thread::sleep_for(cuda::std::chrono::seconds(1));
 
       // We would want to assert that the thread has been awoken after this time,
       // however nothing guarantees us that it ever gets spuriously awoken, so

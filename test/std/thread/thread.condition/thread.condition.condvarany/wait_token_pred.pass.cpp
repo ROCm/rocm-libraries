@@ -62,7 +62,7 @@ void test() {
 
     bool flag   = false;
     auto thread = support::make_test_thread([&]() {
-      gpu::this_thread::sleep_for(std::chrono::milliseconds(2));
+      gpu::this_thread::sleep_for(cuda::std::chrono::milliseconds(2));
       gpu::unique_lock<Mutex> lock2{mutex};
       flag = true;
       cv.notify_all();
@@ -91,7 +91,7 @@ void test() {
 
       while (!done) {
         cv.notify_all();
-        gpu::this_thread::sleep_for(std::chrono::milliseconds(2));
+        gpu::this_thread::sleep_for(cuda::std::chrono::milliseconds(2));
       }
     });
 

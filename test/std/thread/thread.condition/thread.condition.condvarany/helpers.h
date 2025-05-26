@@ -9,7 +9,7 @@
 #ifndef TEST_STD_THREAD_CONDITION_CONDVARANY_HELPERS_H
 #define TEST_STD_THREAD_CONDITION_CONDVARANY_HELPERS_H
 
-#include <chrono>
+#include <hip/std/chrono>
 #include <cassert>
 
 #include "test_macros.h"
@@ -29,15 +29,15 @@
 // ensure that the wait_{for, until} function does not
 // wait until the timeout
 struct ElapsedTimeCheck {
-  ElapsedTimeCheck(std::chrono::steady_clock::duration timeoutDuration)
-      : timeout_(std::chrono::steady_clock::now() + timeoutDuration) {}
+  ElapsedTimeCheck(cuda::std::chrono::steady_clock::duration timeoutDuration)
+      : timeout_(cuda::std::chrono::steady_clock::now() + timeoutDuration) {}
 
   ElapsedTimeCheck(ElapsedTimeCheck&&)            = delete;
   ElapsedTimeCheck& operator=(ElapsedTimeCheck&&) = delete;
 
-  ~ElapsedTimeCheck() { assert(std::chrono::steady_clock::now() < timeout_); }
+  ~ElapsedTimeCheck() { assert(cuda::std::chrono::steady_clock::now() < timeout_); }
 
-  std::chrono::time_point<std::chrono::steady_clock> timeout_;
+  cuda::std::chrono::time_point<cuda::std::chrono::steady_clock> timeout_;
 };
 
 #endif

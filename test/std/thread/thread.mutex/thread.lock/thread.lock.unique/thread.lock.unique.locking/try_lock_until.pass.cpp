@@ -14,7 +14,7 @@
 //   bool try_lock_until(const chrono::time_point<Clock, Duration>& abs_time);
 
 #include <cassert>
-#include <chrono>
+#include <hip/std/chrono>
 #include <mutex>
 #include <system_error>
 
@@ -22,7 +22,7 @@
 #include "test_macros.h"
 
 int main(int, char**) {
-  typedef std::chrono::system_clock Clock;
+  typedef cuda::std::chrono::system_clock Clock;
   checking_mutex mux;
 
   gpu::unique_lock<checking_mutex> lock(mux, std::defer_lock_t());

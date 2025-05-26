@@ -24,15 +24,15 @@
 
 #include <atomic>
 #include <cassert>
-#include <chrono>
+#include <hip/std/chrono>
 #include <future>
 #include <memory>
 #include <gpu/thread>
 
 #include "test_macros.h"
 
-typedef std::chrono::high_resolution_clock Clock;
-typedef std::chrono::milliseconds ms;
+typedef cuda::std::chrono::high_resolution_clock Clock;
+typedef cuda::std::chrono::milliseconds ms;
 
 std::atomic_bool invoked{false};
 

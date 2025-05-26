@@ -37,7 +37,7 @@ void try_lock_thread() {
   child_thread_locked = true;
 
   while (keep_waiting)
-    gpu::this_thread::sleep_for(std::chrono::milliseconds(10));
+    gpu::this_thread::sleep_for(cuda::std::chrono::milliseconds(10));
 
   child_thread_unlocked = true;
 }
@@ -58,7 +58,7 @@ int main(int, char**) {
     keep_waiting          = true;
     gpu::thread t         = support::make_test_thread(try_lock_thread);
     while (!child_thread_locked)
-      gpu::this_thread::sleep_for(std::chrono::milliseconds(10));
+      gpu::this_thread::sleep_for(cuda::std::chrono::milliseconds(10));
     assert(!mux.try_lock());
     keep_waiting = false;
     t.join();

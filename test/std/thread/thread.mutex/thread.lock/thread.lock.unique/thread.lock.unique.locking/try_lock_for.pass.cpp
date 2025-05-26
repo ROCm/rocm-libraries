@@ -21,7 +21,7 @@
 #include "checking_mutex.h"
 
 int main(int, char**) {
-  using ms = std::chrono::milliseconds;
+  using ms = cuda::std::chrono::milliseconds;
 
   checking_mutex mux;
 

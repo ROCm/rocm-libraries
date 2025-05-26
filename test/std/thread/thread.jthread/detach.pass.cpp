@@ -14,7 +14,7 @@
 
 #include <atomic>
 #include <cassert>
-#include <chrono>
+#include <hip/std/chrono>
 #include <concepts>
 #include <functional>
 #include <optional>
@@ -69,6 +69,6 @@ int main(int, char**) {
   }
 #endif
 
-  gpu::this_thread::sleep_for(std::chrono::milliseconds{2});
+  gpu::this_thread::sleep_for(cuda::std::chrono::milliseconds{2});
   return 0;
 }

@@ -23,7 +23,7 @@
 
 #include <gpu/thread>
 #include <cassert>
-#include <chrono>
+#include <hip/std/chrono>
 #include <cstring> // for std::memset
 
 #include <signal.h>
@@ -53,9 +53,9 @@ int main(int, char**)
   ec = setitimer(ITIMER_REAL, &it, nullptr);
   assert(!ec);
 
-  typedef std::chrono::system_clock Clock;
+  typedef cuda::std::chrono::system_clock Clock;
   typedef Clock::time_point time_point;
-  std::chrono::milliseconds ms(500);
+  cuda::std::chrono::milliseconds ms(500);
   time_point t0 = Clock::now();
   gpu::this_thread::sleep_for(ms);
   time_point t1 = Clock::now();

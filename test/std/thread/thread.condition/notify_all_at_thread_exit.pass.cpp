@@ -18,7 +18,7 @@
 #include <condition_variable>
 #include <mutex>
 #include <gpu/thread>
-#include <chrono>
+#include <hip/std/chrono>
 #include <cassert>
 
 #include "make_test_thread.h"
@@ -27,8 +27,8 @@
 std::condition_variable cv;
 std::mutex mut;
 
-typedef std::chrono::milliseconds ms;
-typedef std::chrono::high_resolution_clock Clock;
+typedef cuda::std::chrono::milliseconds ms;
+typedef cuda::std::chrono::high_resolution_clock Clock;
 
 void func()
 {

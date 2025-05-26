@@ -14,7 +14,7 @@
 //   void sleep_until(const chrono::time_point<Clock, Duration>& abs_time);
 
 #include <cassert>
-#include <chrono>
+#include <hip/std/chrono>
 #include <cstdlib>
 #include <gpu/thread>
 
@@ -22,9 +22,9 @@
 
 int main(int, char**)
 {
-  typedef std::chrono::system_clock Clock;
+  typedef cuda::std::chrono::system_clock Clock;
   typedef Clock::time_point time_point;
-  std::chrono::milliseconds ms(500);
+  cuda::std::chrono::milliseconds ms(500);
   time_point t0 = Clock::now();
   std::this_thread::sleep_until(t0 + ms);
   time_point t1 = Clock::now();

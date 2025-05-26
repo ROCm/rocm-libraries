@@ -13,7 +13,7 @@
 // bool request_stop() noexcept;
 
 #include <cassert>
-#include <chrono>
+#include <hip/std/chrono>
 #include <concepts>
 #include <optional>
 #include <stop_token>

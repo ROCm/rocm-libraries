@@ -16,7 +16,7 @@
 // void wait() const;
 
 #include <cassert>
-#include <chrono>
+#include <hip/std/chrono>
 #include <future>
 #include <ratio>
 
@@ -25,7 +25,7 @@
 
 void func1(std::promise<int> p)
 {
-    gpu::this_thread::sleep_for(std::chrono::milliseconds(500));
+    gpu::this_thread::sleep_for(cuda::std::chrono::milliseconds(500));
     p.set_value(3);
 }
 
@@ -33,21 +33,21 @@ int j = 0;
 
 void func3(std::promise<int&> p)
 {
-    gpu::this_thread::sleep_for(std::chrono::milliseconds(500));
+    gpu::this_thread::sleep_for(cuda::std::chrono::milliseconds(500));
     j = 5;
     p.set_value(j);
 }
 
 void func5(std::promise<void> p)
 {
-    gpu::this_thread::sleep_for(std::chrono::milliseconds(500));
+    gpu::this_thread::sleep_for(cuda::std::chrono::milliseconds(500));
     p.set_value();
 }
 
 template <typename T, typename F>
 void test(F func) {
-    typedef std::chrono::high_resolution_clock Clock;
-    typedef std::chrono::duration<double, std::milli> ms;
+    typedef cuda::std::chrono::high_resolution_clock Clock;
+    typedef cuda::std::chrono::duration<double, std::milli> ms;
 
     std::promise<T> p;
     std::future<T> f = p.get_future();

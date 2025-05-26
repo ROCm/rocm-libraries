@@ -12,7 +12,7 @@
 // unique_lock::unique_lock(mutex_type& m, const chrono::time_point<Clock, Duration>& abs_time);
 
 #include <cassert>
-#include <chrono>
+#include <hip/std/chrono>
 #include <mutex>
 
 #include "checking_mutex.h"
@@ -22,7 +22,7 @@ int main(int, char**) {
 
   { // check successful lock
     mux.reject = false;
-    gpu::unique_lock<checking_mutex> lock(mux, std::chrono::time_point<std::chrono::system_clock>());
+    gpu::unique_lock<checking_mutex> lock(mux, cuda::std::chrono::time_point<cuda::std::chrono::system_clock>());
     assert(mux.current_state == checking_mutex::locked_via_try_lock_until);
     assert(lock.owns_lock());
   }
@@ -30,7 +30,7 @@ int main(int, char**) {
 
   { // check unsuccessful lock
     mux.reject = true;
-    gpu::unique_lock<checking_mutex> lock(mux, std::chrono::time_point<std::chrono::system_clock>());
+    gpu::unique_lock<checking_mutex> lock(mux, cuda::std::chrono::time_point<cuda::std::chrono::system_clock>());
     assert(mux.current_state == checking_mutex::unlocked);
     assert(mux.last_try == checking_mutex::locked_via_try_lock_until);
     assert(!lock.owns_lock());

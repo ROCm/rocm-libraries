@@ -18,13 +18,13 @@
 //   wait_for(const chrono::duration<Rep, Period>& rel_time) const;
 
 #include <cassert>
-#include <chrono>
+#include <hip/std/chrono>
 #include <future>
 
 #include "make_test_thread.h"
 #include "test_macros.h"
 
-typedef std::chrono::milliseconds ms;
+typedef cuda::std::chrono::milliseconds ms;
 
 static const ms sleepTime(500);
 static const ms waitTime(5000);
@@ -52,7 +52,7 @@ void func5(std::promise<void> p)
 
 int main(int, char**)
 {
-  typedef std::chrono::high_resolution_clock Clock;
+  typedef cuda::std::chrono::high_resolution_clock Clock;
 
   {
     typedef int T;

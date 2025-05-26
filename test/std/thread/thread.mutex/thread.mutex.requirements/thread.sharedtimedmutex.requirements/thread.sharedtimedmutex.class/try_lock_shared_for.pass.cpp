@@ -19,18 +19,18 @@
 #include <shared_mutex>
 #include <atomic>
 #include <cassert>
-#include <chrono>
+#include <hip/std/chrono>
 #include <gpu/thread>
 #include <vector>
 
 #include "make_test_thread.h"
 
 template <class Function>
-std::chrono::microseconds measure(Function f) {
-  std::chrono::high_resolution_clock::time_point start = std::chrono::high_resolution_clock::now();
+cuda::std::chrono::microseconds measure(Function f) {
+  cuda::std::chrono::high_resolution_clock::time_point start = cuda::std::chrono::high_resolution_clock::now();
   f();
-  std::chrono::high_resolution_clock::time_point end = std::chrono::high_resolution_clock::now();
-  return std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+  cuda::std::chrono::high_resolution_clock::time_point end = cuda::std::chrono::high_resolution_clock::now();
+  return cuda::std::chrono::duration_cast<cuda::std::chrono::microseconds>(end - start);
 }
 
 int main(int, char**) {
@@ -40,7 +40,7 @@ int main(int, char**) {
     std::vector<gpu::thread> threads;
     for (int i = 0; i != 5; ++i) {
       threads.push_back(support::make_test_thread([&] {
-        bool succeeded = m.try_lock_shared_for(std::chrono::milliseconds(1));
+        bool succeeded = m.try_lock_shared_for(cuda::std::chrono::milliseconds(1));
         assert(succeeded);
         m.unlock_shared();
       }));
@@ -54,8 +54,8 @@ int main(int, char**) {
   // This is technically flaky, but we use such long durations that it should pass even
   // in slow or contended environments.
   {
-    std::chrono::milliseconds const wait_time(500);
-    std::chrono::milliseconds const tolerance = wait_time * 3;
+    cuda::std::chrono::milliseconds const wait_time(500);
+    cuda::std::chrono::milliseconds const tolerance = wait_time * 3;
     std::atomic<int> ready(0);
 
     std::shared_timed_mutex m;
@@ -97,8 +97,8 @@ int main(int, char**) {
   // Try to lock-shared an already-locked mutex for a short amount of time and fail.
   // Again, this is technically flaky but we use such long durations that it should work.
   {
-    std::chrono::milliseconds const wait_time(10);
-    std::chrono::milliseconds const tolerance(750); // in case the thread we spawned goes to sleep or something
+    cuda::std::chrono::milliseconds const wait_time(10);
+    cuda::std::chrono::milliseconds const tolerance(750); // in case the thread we spawned goes to sleep or something
 
     std::shared_timed_mutex m;
     m.lock();

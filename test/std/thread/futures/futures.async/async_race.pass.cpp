@@ -23,7 +23,7 @@
 // reported in PR23293: https://llvm.org/PR23293
 
 #include <future>
-#include <chrono>
+#include <hip/std/chrono>
 #include <gpu/thread>
 #include <memory>
 #include <cassert>
@@ -31,7 +31,7 @@
 #include "test_macros.h"
 
 int f_async() {
-    typedef std::chrono::milliseconds ms;
+    typedef cuda::std::chrono::milliseconds ms;
     gpu::this_thread::sleep_for(ms(200));
     return 42;
 }

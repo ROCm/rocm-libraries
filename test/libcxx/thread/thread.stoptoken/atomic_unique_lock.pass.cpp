@@ -14,7 +14,7 @@
 #include <__stop_token/atomic_unique_lock.h>
 #include <atomic>
 #include <cassert>
-#include <chrono>
+#include <hip/std/chrono>
 #include <cstdint>
 #include <gpu/thread>
 
@@ -69,7 +69,7 @@ void test() {
     Lock l1(state);
 
     auto thread1 = support::make_test_thread([&] {
-      gpu::this_thread::sleep_for(std::chrono::milliseconds{10});
+      gpu::this_thread::sleep_for(cuda::std::chrono::milliseconds{10});
       i = 5;
       l1.__unlock();
     });

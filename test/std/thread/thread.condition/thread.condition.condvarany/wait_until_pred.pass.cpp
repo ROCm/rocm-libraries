@@ -21,7 +21,7 @@
 #include <condition_variable>
 #include <atomic>
 #include <cassert>
-#include <chrono>
+#include <hip/std/chrono>
 #include <mutex>
 #include <gpu/thread>
 
@@ -29,10 +29,10 @@
 #include "test_macros.h"
 
 struct TestClock {
-  typedef std::chrono::milliseconds duration;
+  typedef cuda::std::chrono::milliseconds duration;
   typedef duration::rep rep;
   typedef duration::period period;
-  typedef std::chrono::time_point<TestClock> time_point;
+  typedef cuda::std::chrono::time_point<TestClock> time_point;
   static const bool is_steady = true;
 
   static time_point now() {
@@ -57,7 +57,7 @@ void test() {
   {
     std::atomic<bool> ready(false);
     std::atomic<bool> likely_spurious(true);
-    auto timeout = Clock::now() + std::chrono::seconds(3600);
+    auto timeout = Clock::now() + cuda::std::chrono::seconds(3600);
     std::condition_variable_any cv;
     Mutex mutex;
 
@@ -93,7 +93,7 @@ void test() {
   // timeout, and we never awaken it. The "stop waiting" predicate always returns false,
   // which means that we can't get out of the wait via a spurious wakeup.
   {
-    auto timeout = Clock::now() + std::chrono::milliseconds(250);
+    auto timeout = Clock::now() + cuda::std::chrono::milliseconds(250);
     std::condition_variable_any cv;
     Mutex mutex;
 
@@ -120,7 +120,7 @@ void test() {
   {
     std::atomic<bool> ready(false);
     std::atomic<bool> awoken(false);
-    auto timeout = Clock::now() + std::chrono::seconds(3600);
+    auto timeout = Clock::now() + cuda::std::chrono::seconds(3600);
     std::condition_variable_any cv;
     Mutex mutex;
 
@@ -144,7 +144,7 @@ void test() {
       lock.unlock();
 
       // Give some time for t1 to be awoken spuriously so that code path is used.
-      gpu::this_thread::sleep_for(std::chrono::seconds(1));
+      gpu::this_thread::sleep_for(cuda::std::chrono::seconds(1));
 
       // We would want to assert that the thread has been awoken after this time,
       // however nothing guarantees us that it ever gets spuriously awoken, so
@@ -167,19 +167,19 @@ int main(int, char**) {
   gpu::thread tests[] = {
       support::make_test_thread([] {
         test<gpu::unique_lock<std::mutex>, TestClock>();
-        test<gpu::unique_lock<std::mutex>, std::chrono::steady_clock>();
+        test<gpu::unique_lock<std::mutex>, cuda::std::chrono::steady_clock>();
       }),
       support::make_test_thread([] {
         test<gpu::unique_lock<std::timed_mutex>, TestClock>();
-        test<gpu::unique_lock<std::timed_mutex>, std::chrono::steady_clock>();
+        test<gpu::unique_lock<std::timed_mutex>, cuda::std::chrono::steady_clock>();
       }),
       support::make_test_thread([] {
         test<MyLock<std::mutex>, TestClock>();
-        test<MyLock<std::mutex>, std::chrono::steady_clock>();
+        test<MyLock<std::mutex>, cuda::std::chrono::steady_clock>();
       }),
       support::make_test_thread([] {
         test<MyLock<std::timed_mutex>, TestClock>();
-        test<MyLock<std::timed_mutex>, std::chrono::steady_clock>();
+        test<MyLock<std::timed_mutex>, cuda::std::chrono::steady_clock>();
       })};
 
   for (gpu::thread& t : tests)

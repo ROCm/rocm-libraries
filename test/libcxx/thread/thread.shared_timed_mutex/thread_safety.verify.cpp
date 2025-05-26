@@ -21,24 +21,24 @@
 //
 // void lock();
 // bool try_lock();
-// bool try_lock_for(const std::chrono::duration<Rep, Period>&);
-// bool try_lock_until(const std::chrono::time_point<Clock, Duration>&);
+// bool try_lock_for(const cuda::std::chrono::duration<Rep, Period>&);
+// bool try_lock_until(const cuda::std::chrono::time_point<Clock, Duration>&);
 // void unlock();
 //
 // void lock_shared();
 // bool try_lock_shared();
-// bool try_lock_shared_for(const std::chrono::duration<Rep, Period>&);
-// bool try_lock_shared_until(const std::chrono::time_point<Clock, Duration>&);
+// bool try_lock_shared_for(const cuda::std::chrono::duration<Rep, Period>&);
+// bool try_lock_shared_until(const cuda::std::chrono::time_point<Clock, Duration>&);
 // void unlock_shared();
 
-#include <chrono>
+#include <hip/std/chrono>
 #include <shared_mutex>
 
 std::shared_timed_mutex m;
 int data __attribute__((guarded_by(m))) = 0;
 void read(int);
 
-void f(std::chrono::time_point<std::chrono::steady_clock> tp, std::chrono::milliseconds d) {
+void f(cuda::std::chrono::time_point<cuda::std::chrono::steady_clock> tp, cuda::std::chrono::milliseconds d) {
   // Exclusive locking
   {
     m.lock();

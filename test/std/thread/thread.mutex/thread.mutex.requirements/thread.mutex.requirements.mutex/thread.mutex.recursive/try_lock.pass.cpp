@@ -18,7 +18,7 @@
 #include <mutex>
 #include <atomic>
 #include <cassert>
-#include <chrono>
+#include <hip/std/chrono>
 #include <gpu/thread>
 
 #include "make_test_thread.h"
