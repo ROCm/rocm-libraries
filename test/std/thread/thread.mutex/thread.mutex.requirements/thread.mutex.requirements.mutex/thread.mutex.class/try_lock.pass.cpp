@@ -17,7 +17,7 @@
 
 #include <mutex>
 #include <cassert>
-#include <thread>
+#include <gpu/thread>
 
 #include "make_test_thread.h"
 
@@ -35,7 +35,7 @@ int main(int, char**) {
     std::mutex m;
     m.lock();
 
-    std::thread t = support::make_test_thread([&] {
+    gpu::thread t = support::make_test_thread([&] {
       for (int i = 0; i != 10; ++i) {
         bool succeeded = m.try_lock();
         assert(!succeeded);

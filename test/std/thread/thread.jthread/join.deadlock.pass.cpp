@@ -26,7 +26,7 @@
 #include <concepts>
 #include <functional>
 #include <system_error>
-#include <thread>
+#include <gpu/thread>
 #include <type_traits>
 #include <vector>
 

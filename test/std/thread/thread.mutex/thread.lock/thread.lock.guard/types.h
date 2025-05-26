@@ -15,13 +15,13 @@ struct MyMutex {
   bool locked = false;
 
   MyMutex() = default;
-  ~MyMutex() { assert(!locked); }
+  __host__ __device__ ~MyMutex() { assert(!locked); }
 
-  void lock() {
+  __host__ __device__ void lock() {
     assert(!locked);
     locked = true;
   }
-  void unlock() {
+  __host__ __device__ void unlock() {
     assert(locked);
     locked = false;
   }

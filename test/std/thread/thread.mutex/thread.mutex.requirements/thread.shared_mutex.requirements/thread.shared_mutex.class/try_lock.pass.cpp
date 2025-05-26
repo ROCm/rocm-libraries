@@ -19,7 +19,7 @@
 #include <atomic>
 #include <cassert>
 #include <chrono>
-#include <thread>
+#include <gpu/thread>
 
 #include "make_test_thread.h"
 
@@ -37,7 +37,7 @@ int main(int, char**) {
     std::shared_mutex m;
     m.lock();
 
-    std::thread t = support::make_test_thread([&] {
+    gpu::thread t = support::make_test_thread([&] {
       bool succeeded = m.try_lock();
       assert(!succeeded);
     });
@@ -51,7 +51,7 @@ int main(int, char**) {
     std::shared_mutex m;
     m.lock_shared();
 
-    std::thread t = support::make_test_thread([&] {
+    gpu::thread t = support::make_test_thread([&] {
       bool succeeded = m.try_lock();
       assert(!succeeded);
     });

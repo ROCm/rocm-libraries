@@ -21,7 +21,7 @@
 // This test ensures that we sleep for the right amount of time even when
 // we get interrupted by a signal, as fixed in 58a0a70fb2f1.
 
-#include <thread>
+#include <gpu/thread>
 #include <cassert>
 #include <chrono>
 #include <cstring> // for std::memset
@@ -57,7 +57,7 @@ int main(int, char**)
   typedef Clock::time_point time_point;
   std::chrono::milliseconds ms(500);
   time_point t0 = Clock::now();
-  std::this_thread::sleep_for(ms);
+  gpu::this_thread::sleep_for(ms);
   time_point t1 = Clock::now();
   // NOTE: Operating systems are (by default) best effort and therefore we may
   // have slept longer, perhaps much longer than we requested.

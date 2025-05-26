@@ -12,12 +12,12 @@
 
 // thread& operator=(thread&& t);
 
-#include <thread>
+#include <gpu/thread>
 
 int main(int, char**)
 {
-    std::thread t0;
-    std::thread t1;
+    gpu::thread t0;
+    gpu::thread t1;
     t0 = t1;
     return 0;
 }

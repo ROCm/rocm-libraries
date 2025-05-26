@@ -21,7 +21,7 @@
 
 int main(int, char**) {
   checking_mutex mux;
-  std::unique_lock<checking_mutex> lk(mux, std::defer_lock_t());
+  gpu::unique_lock<checking_mutex> lk(mux, std::defer_lock_t());
   assert(mux.last_try == checking_mutex::none);
   lk.lock();
   assert(mux.current_state == checking_mutex::locked_via_lock);

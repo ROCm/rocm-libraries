@@ -14,7 +14,7 @@
 
 // void join();
 
-#include <thread>
+#include <gpu/thread>
 #include <new>
 #include <cstdlib>
 #include <cassert>
@@ -54,7 +54,7 @@ int main(int, char**)
 {
     {
         G g;
-        std::thread t0 = support::make_test_thread(g);
+        gpu::thread t0 = support::make_test_thread(g);
         assert(t0.joinable());
         t0.join();
         assert(!t0.joinable());
@@ -68,7 +68,7 @@ int main(int, char**)
     }
 #ifndef TEST_HAS_NO_EXCEPTIONS
     {
-        std::thread t0 = support::make_test_thread(foo);
+        gpu::thread t0 = support::make_test_thread(foo);
         t0.detach();
         try {
             t0.join();

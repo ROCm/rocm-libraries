@@ -9,14 +9,14 @@
 #ifndef TEST_SUPPORT_MAKE_TEST_THREAD_H
 #define TEST_SUPPORT_MAKE_TEST_THREAD_H
 
-#include <thread>
+#include <gpu/thread>
 #include <utility>
 
 namespace support {
 
 template <class F, class ...Args>
-std::thread make_test_thread(F&& f, Args&& ...args) {
-    return std::thread(std::forward<F>(f), std::forward<Args>(args)...);
+__host__ __device__ gpu::thread make_test_thread(F&& f, Args&& ...args) {
+    return gpu::thread(std::forward<F>(f), std::forward<Args>(args)...);
 }
 
 } // end namespace support

@@ -14,7 +14,7 @@
 
 #include <cassert>
 #include <concepts>
-#include <thread>
+#include <gpu/thread>
 #include <type_traits>
 
 #include "make_test_thread.h"

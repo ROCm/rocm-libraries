@@ -19,7 +19,7 @@
 #include <cstdlib>
 #include <exception>
 #include <new>
-#include <thread>
+#include <gpu/thread>
 
 #include "make_test_thread.h"
 #include "test_macros.h"
@@ -59,8 +59,8 @@ int main(int, char**)
         assert(!G::op_run);
         G g;
         {
-          std::thread t = support::make_test_thread(g);
-          std::this_thread::sleep_for(std::chrono::milliseconds(250));
+          gpu::thread t = support::make_test_thread(g);
+          gpu::this_thread::sleep_for(std::chrono::milliseconds(250));
         }
     }
     assert(false);

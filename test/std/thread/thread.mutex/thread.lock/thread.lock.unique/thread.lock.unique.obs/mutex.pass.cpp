@@ -20,15 +20,15 @@
 #include "test_macros.h"
 
 #if TEST_STD_VER >= 11
-static_assert(noexcept(std::declval<std::unique_lock<checking_mutex>&>().mutex()), "");
+static_assert(noexcept(std::declval<gpu::unique_lock<checking_mutex>&>().mutex()), "");
 #endif
 
 int main(int, char**) {
   checking_mutex mux;
-  const std::unique_lock<checking_mutex> lock0; // Make sure `mutex()` is `const`
+  const gpu::unique_lock<checking_mutex> lock0; // Make sure `mutex()` is `const`
   static_assert(std::is_same<decltype(lock0.mutex()), checking_mutex*>::value, "");
   assert(lock0.mutex() == nullptr);
-  std::unique_lock<checking_mutex> lock1(mux);
+  gpu::unique_lock<checking_mutex> lock1(mux);
   assert(lock1.mutex() == std::addressof(mux));
   lock1.unlock();
   assert(lock1.mutex() == std::addressof(mux));

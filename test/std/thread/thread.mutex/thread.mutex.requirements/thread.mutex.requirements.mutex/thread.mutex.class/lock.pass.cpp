@@ -18,7 +18,7 @@
 #include <mutex>
 #include <atomic>
 #include <cassert>
-#include <thread>
+#include <gpu/thread>
 #include <vector>
 
 #include "make_test_thread.h"
@@ -38,7 +38,7 @@ int main(int, char**) {
     m.lock();
     std::atomic<bool> is_locked_from_main(true);
 
-    std::thread t = support::make_test_thread([&] {
+    gpu::thread t = support::make_test_thread([&] {
       ready = true;
       m.lock();
       assert(!is_locked_from_main);
@@ -62,7 +62,7 @@ int main(int, char**) {
     std::atomic<int> counter(0);
     std::mutex mutex;
 
-    std::vector<std::thread> threads;
+    std::vector<gpu::thread> threads;
     for (int i = 0; i != 10; ++i) {
       threads.push_back(support::make_test_thread([&] {
         mutex.lock();

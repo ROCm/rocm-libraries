@@ -92,7 +92,7 @@ int main(int, char**) {
     int calledTimes = 0;
     std::stop_callback sc(ss.get_token(), [&] { ++calledTimes; });
 
-    std::vector<std::thread> threads;
+    std::vector<gpu::thread> threads;
     for (auto i = 0; i < 10; ++i) {
       threads.emplace_back(support::make_test_thread([&] { ss.request_stop(); }));
     }
@@ -134,7 +134,7 @@ int main(int, char**) {
   {
     std::stop_source ss;
 
-    std::vector<std::thread> threads;
+    std::vector<gpu::thread> threads;
     std::atomic<int> callbackCalledTimes = 0;
     std::atomic<bool> done               = false;
     for (auto i = 0; i < 10; ++i) {
@@ -144,7 +144,7 @@ int main(int, char**) {
       }));
     }
     using namespace std::chrono_literals;
-    std::this_thread::sleep_for(1ms);
+    gpu::this_thread::sleep_for(1ms);
     ss.request_stop();
     done = true;
     done.notify_all();

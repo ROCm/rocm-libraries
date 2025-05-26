@@ -12,7 +12,7 @@
 // <barrier>
 
 #include <barrier>
-#include <thread>
+#include <gpu/thread>
 #include <cassert>
 
 #include "test_macros.h"

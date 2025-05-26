@@ -25,13 +25,13 @@ int main(int, char**) {
   checking_mutex mux;
 
   {
-    std::unique_lock<checking_mutex> lock(mux);
+    gpu::unique_lock<checking_mutex> lock(mux);
     assert(mux.current_state == checking_mutex::locked_via_lock);
   }
   assert(mux.current_state == checking_mutex::unlocked);
 
 #if TEST_STD_VER >= 17
-  static_assert(std::is_same_v<std::unique_lock<checking_mutex>, decltype(std::unique_lock{mux})>, "");
+  static_assert(std::is_same_v<gpu::unique_lock<checking_mutex>, decltype(gpu::unique_lock{mux})>, "");
 #endif
 
   return 0;

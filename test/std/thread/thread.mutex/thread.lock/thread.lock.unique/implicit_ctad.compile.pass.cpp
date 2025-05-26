@@ -19,4 +19,4 @@
 #include "checking_mutex.h"
 
 checking_mutex mux;
-static_assert(std::is_same_v<std::unique_lock<checking_mutex>, decltype(std::unique_lock{mux})>);
+static_assert(std::is_same_v<gpu::unique_lock<checking_mutex>, decltype(gpu::unique_lock{mux})>);

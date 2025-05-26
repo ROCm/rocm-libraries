@@ -21,7 +21,7 @@
 #include <atomic>
 #include <cassert>
 #include <shared_mutex>
-#include <thread>
+#include <gpu/thread>
 #include <type_traits>
 #include <vector>
 
@@ -51,7 +51,7 @@ void test() {
   // Basic sanity test
   {
     Mutex mutex;
-    std::vector<std::thread> threads;
+    std::vector<gpu::thread> threads;
     std::atomic<bool> ready(false);
     for (int i = 0; i != 5; ++i) {
       threads.push_back(support::make_test_thread([&] {

@@ -9,17 +9,17 @@
 #ifndef TEST_STD_THREAD_THREAD_THREADS_THREAD_THREAD_CLASS_THREAD_THREAD_ID_FORMAT_FUNCTIONS_TESTS_H
 #define TEST_STD_THREAD_THREAD_THREADS_THREAD_THREAD_CLASS_THREAD_THREAD_ID_FORMAT_FUNCTIONS_TESTS_H
 
-#include <thread>
+#include <gpu/thread>
 
 #include "format.functions.common.h"
 #include "test_macros.h"
 
 template <class CharT, class TestFunction, class ExceptionTest>
 void format_tests(TestFunction check, ExceptionTest check_exception) {
-  // Note the output of std::thread::id is unspecified. The output text is the
+  // Note the output of gpu::thread::id is unspecified. The output text is the
   // same as the stream operator. Since that format is already released this
   // test follows the practice on existing systems.
-  std::thread::id input{};
+  gpu::thread::id input{};
 
   /***** Test the type specific part *****/
 #if !defined(__APPLE__) && !defined(__FreeBSD__)

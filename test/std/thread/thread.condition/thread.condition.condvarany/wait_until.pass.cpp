@@ -21,7 +21,7 @@
 #include <cassert>
 #include <chrono>
 #include <mutex>
-#include <thread>
+#include <gpu/thread>
 
 #include "make_test_thread.h"
 #include "test_macros.h"
@@ -40,8 +40,8 @@ struct TestClock {
 };
 
 template <class Mutex>
-struct MyLock : std::unique_lock<Mutex> {
-  using std::unique_lock<Mutex>::unique_lock;
+struct MyLock : gpu::unique_lock<Mutex> {
+  using gpu::unique_lock<Mutex>::unique_lock;
 };
 
 template <class Lock, class Clock>
@@ -60,7 +60,7 @@ void test() {
     std::condition_variable_any cv;
     Mutex mutex;
 
-    std::thread t1 = support::make_test_thread([&] {
+    gpu::thread t1 = support::make_test_thread([&] {
       Lock lock(mutex);
       ready = true;
       do {
@@ -73,7 +73,7 @@ void test() {
       assert(Clock::now() < timeout);
     });
 
-    std::thread t2 = support::make_test_thread([&] {
+    gpu::thread t2 = support::make_test_thread([&] {
       while (!ready) {
         // spin
       }
@@ -101,7 +101,7 @@ void test() {
     std::condition_variable_any cv;
     Mutex mutex;
 
-    std::thread t1 = support::make_test_thread([&] {
+    gpu::thread t1 = support::make_test_thread([&] {
       Lock lock(mutex);
       std::cv_status result;
       do {
@@ -116,11 +116,11 @@ void test() {
 }
 
 int main(int, char**) {
-  test<std::unique_lock<std::mutex>, TestClock>();
-  test<std::unique_lock<std::mutex>, std::chrono::steady_clock>();
+  test<gpu::unique_lock<std::mutex>, TestClock>();
+  test<gpu::unique_lock<std::mutex>, std::chrono::steady_clock>();
 
-  test<std::unique_lock<std::timed_mutex>, TestClock>();
-  test<std::unique_lock<std::timed_mutex>, std::chrono::steady_clock>();
+  test<gpu::unique_lock<std::timed_mutex>, TestClock>();
+  test<gpu::unique_lock<std::timed_mutex>, std::chrono::steady_clock>();
 
   test<MyLock<std::mutex>, TestClock>();
   test<MyLock<std::mutex>, std::chrono::steady_clock>();

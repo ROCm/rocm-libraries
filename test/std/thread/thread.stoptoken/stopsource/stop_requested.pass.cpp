@@ -67,7 +67,7 @@ int main(int, char**) {
   {
     std::stop_source ss;
 
-    std::thread t = support::make_test_thread([&]() { ss.request_stop(); });
+    gpu::thread t = support::make_test_thread([&]() { ss.request_stop(); });
 
     t.join();
     assert(ss.stop_requested());
@@ -81,9 +81,9 @@ int main(int, char**) {
 
     bool flag = false;
 
-    std::thread t = support::make_test_thread([&]() {
+    gpu::thread t = support::make_test_thread([&]() {
       using namespace std::chrono_literals;
-      std::this_thread::sleep_for(1ms);
+      gpu::this_thread::sleep_for(1ms);
 
       // happens-before request_stop
       flag   = true;
@@ -92,7 +92,7 @@ int main(int, char**) {
     });
 
     while (!ss.stop_requested()) {
-      std::this_thread::yield();
+      gpu::this_thread::pseudo_yield();
     }
 
     // write should be visible to the current thread

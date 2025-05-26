@@ -14,7 +14,7 @@
 
 // void swap(thread& x, thread& y);
 
-#include <thread>
+#include <gpu/thread>
 #include <new>
 #include <cstdlib>
 #include <cassert>
@@ -48,10 +48,10 @@ int main(int, char**)
 {
     {
         G g;
-        std::thread t0 = support::make_test_thread(g);
-        std::thread::id id0 = t0.get_id();
-        std::thread t1;
-        std::thread::id id1 = t1.get_id();
+        gpu::thread t0 = support::make_test_thread(g);
+        gpu::thread::id id0 = t0.get_id();
+        gpu::thread t1;
+        gpu::thread::id id1 = t1.get_id();
         swap(t0, t1);
         assert(t0.get_id() == id1);
         assert(t1.get_id() == id0);

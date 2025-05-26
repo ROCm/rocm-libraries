@@ -17,7 +17,7 @@
 
 #include <condition_variable>
 #include <mutex>
-#include <thread>
+#include <gpu/thread>
 #include <cassert>
 
 #include "make_test_thread.h"
@@ -26,7 +26,7 @@
 std::condition_variable_any cv;
 
 typedef std::timed_mutex L0;
-typedef std::unique_lock<L0> L1;
+typedef gpu::unique_lock<L0> L1;
 
 L0 m0;
 
@@ -56,9 +56,9 @@ void f2()
 
 int main(int, char**)
 {
-    std::thread t1 = support::make_test_thread(f1);
-    std::thread t2 = support::make_test_thread(f2);
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    gpu::thread t1 = support::make_test_thread(f1);
+    gpu::thread t2 = support::make_test_thread(f2);
+    gpu::this_thread::sleep_for(std::chrono::milliseconds(100));
     {
         L1 lk(m0);
         test1 = 1;
@@ -66,7 +66,7 @@ int main(int, char**)
     }
     cv.notify_one();
     {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        gpu::this_thread::sleep_for(std::chrono::milliseconds(100));
         L1 lk(m0);
     }
     if (test1 == 2)
@@ -83,7 +83,7 @@ int main(int, char**)
         assert(false);
     cv.notify_one();
     {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        gpu::this_thread::sleep_for(std::chrono::milliseconds(100));
         L1 lk(m0);
     }
     if (test1 == 2)

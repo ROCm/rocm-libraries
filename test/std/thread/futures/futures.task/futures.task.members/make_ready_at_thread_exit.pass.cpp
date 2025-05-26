@@ -38,13 +38,13 @@ public:
 
 void func0(std::packaged_task<double(int, char)> p)
 {
-    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    gpu::this_thread::sleep_for(std::chrono::milliseconds(500));
     p.make_ready_at_thread_exit(3, 97);
 }
 
 void func1(std::packaged_task<double(int, char)> p)
 {
-    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    gpu::this_thread::sleep_for(std::chrono::milliseconds(500));
     p.make_ready_at_thread_exit(3, 122);
 }
 
@@ -111,7 +111,7 @@ int main(int, char**)
     }
     {
         std::packaged_task<double(int, char)> p;
-        std::thread t = support::make_test_thread(func3, std::move(p));
+        gpu::thread t = support::make_test_thread(func3, std::move(p));
         t.join();
     }
 #endif

@@ -14,7 +14,7 @@
 // <semaphore>
 
 #include <semaphore>
-#include <thread>
+#include <gpu/thread>
 
 #include "make_test_thread.h"
 #include "test_macros.h"
@@ -26,7 +26,7 @@ int main(int, char**)
   s.release();
   s.acquire();
 
-  std::thread t = support::make_test_thread([&](){
+  gpu::thread t = support::make_test_thread([&](){
     s.acquire();
   });
   s.release(2);

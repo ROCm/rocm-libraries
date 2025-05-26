@@ -21,7 +21,7 @@ int main(int, char**) {
   checking_mutex mux;
   { // check successful lock
     mux.reject = false;
-    std::unique_lock<checking_mutex> lock(mux, std::chrono::seconds());
+    gpu::unique_lock<checking_mutex> lock(mux, std::chrono::seconds());
     assert(mux.current_state == checking_mutex::locked_via_try_lock_for);
     assert(lock.owns_lock());
   }
@@ -29,7 +29,7 @@ int main(int, char**) {
 
   { // check unsuccessful lock
     mux.reject = true;
-    std::unique_lock<checking_mutex> lock(mux, std::chrono::seconds());
+    gpu::unique_lock<checking_mutex> lock(mux, std::chrono::seconds());
     assert(mux.current_state == checking_mutex::unlocked);
     assert(mux.last_try == checking_mutex::locked_via_try_lock_for);
     assert(!lock.owns_lock());

@@ -14,7 +14,7 @@
 
 // thread& operator=(thread&& t);
 
-#include <thread>
+#include <gpu/thread>
 #include <cassert>
 #include <utility>
 
@@ -52,13 +52,13 @@ int main(int, char**)
         assert(G::n_alive == 1);
         assert(!G::op_run);
 
-        std::thread t0 = support::make_test_thread(g);
-        std::thread::id id = t0.get_id();
+        gpu::thread t0 = support::make_test_thread(g);
+        gpu::thread::id id = t0.get_id();
 
-        std::thread t1;
+        gpu::thread t1;
         t1 = std::move(t0);
         assert(t1.get_id() == id);
-        assert(t0.get_id() == std::thread::id());
+        assert(t0.get_id() == gpu::thread::id());
 
         t1.join();
         assert(G::n_alive == 1);

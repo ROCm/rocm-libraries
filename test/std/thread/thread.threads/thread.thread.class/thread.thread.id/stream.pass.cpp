@@ -27,7 +27,7 @@
 #include <format>
 #include <locale>
 #include <sstream>
-#include <thread>
+#include <gpu/thread>
 
 #include "make_string.h"
 #include "platform_support.h" // locale name macros
@@ -35,7 +35,7 @@
 
 template <class CharT>
 static void basic() {
-  std::thread::id id0 = std::this_thread::get_id();
+  gpu::thread::id id0 = gpu::this_thread::get_id();
   std::basic_ostringstream<CharT> os;
   os << id0;
 
@@ -57,14 +57,14 @@ template <class CharT>
 static std::basic_string<CharT> format(std::ios_base::fmtflags flags) {
   std::basic_stringstream<CharT> sstr;
   sstr.flags(flags);
-  sstr << std::this_thread::get_id();
+  sstr << gpu::this_thread::get_id();
   return sstr.str();
 }
 
 template <class CharT>
 static void stream_state() {
   std::basic_stringstream<CharT> sstr;
-  sstr << std::this_thread::get_id();
+  sstr << gpu::this_thread::get_id();
   std::basic_string<CharT> expected = sstr.str();
 
   // Unaffected by fill, width, and align.
@@ -91,35 +91,35 @@ static void stream_state() {
   sstr.fill(CharT('#'));
   sstr.width(expected.size() + 10); // Make sure fill and align affect the output.
   sstr.flags(std::ios_base::dec | std::ios_base::skipws | std::ios_base::right);
-  sstr << std::this_thread::get_id();
+  sstr << gpu::this_thread::get_id();
   expected = sstr.str();
 
   sstr.str(std::basic_string<CharT>());
   sstr.fill(CharT('*'));
   sstr.width(expected.size());
   sstr.flags(std::ios_base::dec | std::ios_base::skipws | std::ios_base::right);
-  sstr << std::this_thread::get_id();
+  sstr << gpu::this_thread::get_id();
   assert(expected != sstr.str());
 
   sstr.str(std::basic_string<CharT>());
   sstr.fill(CharT('#'));
   sstr.width(expected.size() - 1);
   sstr.flags(std::ios_base::dec | std::ios_base::skipws | std::ios_base::right);
-  sstr << std::this_thread::get_id();
+  sstr << gpu::this_thread::get_id();
   assert(expected != sstr.str());
 
   sstr.str(std::basic_string<CharT>());
   sstr.fill(CharT('#'));
   sstr.width(expected.size());
   sstr.flags(std::ios_base::dec | std::ios_base::skipws | std::ios_base::left);
-  sstr << std::this_thread::get_id();
+  sstr << gpu::this_thread::get_id();
   assert(expected != sstr.str());
 
   sstr.str(std::basic_string<CharT>());
   sstr.fill(CharT('#'));
   sstr.width(expected.size());
   sstr.flags(std::ios_base::dec | std::ios_base::skipws | std::ios_base::internal);
-  sstr << std::this_thread::get_id();
+  sstr << gpu::this_thread::get_id();
   assert(expected == sstr.str()); // internal does *not* affect strings
 
   // Test the locale's numpunct.
@@ -128,7 +128,7 @@ static void stream_state() {
   sstr.str(std::basic_string<CharT>());
   sstr.fill(CharT('#'));
   sstr.width(expected.size());
-  sstr << std::this_thread::get_id();
+  sstr << gpu::this_thread::get_id();
   assert(expected == sstr.str());
 }
 

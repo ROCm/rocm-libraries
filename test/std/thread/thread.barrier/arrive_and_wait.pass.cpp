@@ -14,7 +14,7 @@
 // <barrier>
 
 #include <barrier>
-#include <thread>
+#include <gpu/thread>
 
 #include "make_test_thread.h"
 #include "test_macros.h"
@@ -23,7 +23,7 @@ int main(int, char**)
 {
   std::barrier<> b(2);
 
-  std::thread t = support::make_test_thread([&](){
+  gpu::thread t = support::make_test_thread([&](){
     for(int i = 0; i < 10; ++i)
       b.arrive_and_wait();
   });

@@ -31,7 +31,7 @@
 #include <chrono>
 #include <memory>
 #include <mutex>
-#include <thread>
+#include <gpu/thread>
 
 int condition_variable_lock_skipped_counter = 0;
 
@@ -57,12 +57,12 @@ void test()
     int threads_active = N;
 
     for (int i = 0; i < N; ++i) {
-        std::thread t = support::make_test_thread([&] {
+        gpu::thread t = support::make_test_thread([&] {
             // Emulate work being done.
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            gpu::this_thread::sleep_for(std::chrono::milliseconds(1));
 
             // Signal thread completion.
-            std::unique_lock<std::mutex> lk(m);
+            gpu::unique_lock<std::mutex> lk(m);
             --threads_active;
             std::notify_all_at_thread_exit(x.cv_, std::move(lk));
         });
@@ -75,7 +75,7 @@ void test()
     // but it won't be able to continue until the last thread
     // unlocks `m`.
     {
-        std::unique_lock<std::mutex> lk(m);
+        gpu::unique_lock<std::mutex> lk(m);
         // Due to OS scheduling the workers might have terminated when this
         // code is reached. In that case the wait will not sleep and the call
         // to notify_all_at_thread_exit has no effect; the condition variable

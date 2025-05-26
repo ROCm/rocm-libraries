@@ -608,7 +608,7 @@ inline bool ErrorIs(const std::error_code& ec, std::errc First, ErrcT... Rest) {
   return ErrorIsImp(ec, errors);
 }
 
-// Provide our own Sleep routine since std::this_thread::sleep_for is not
+// Provide our own Sleep routine since gpu::this_thread::sleep_for is not
 // available in single-threaded mode.
 template <class Dur> void SleepFor(Dur dur) {
     using namespace std::chrono;

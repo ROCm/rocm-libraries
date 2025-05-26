@@ -20,11 +20,11 @@
 #include "test_macros.h"
 
 #if TEST_STD_VER >= 11
-static_assert(std::is_nothrow_default_constructible<std::unique_lock<checking_mutex>>::value, "");
+static_assert(std::is_nothrow_default_constructible<gpu::unique_lock<checking_mutex>>::value, "");
 #endif
 
 int main(int, char**) {
-  std::unique_lock<checking_mutex> ul;
+  gpu::unique_lock<checking_mutex> ul;
   assert(!ul.owns_lock());
   assert(ul.mutex() == nullptr);
 

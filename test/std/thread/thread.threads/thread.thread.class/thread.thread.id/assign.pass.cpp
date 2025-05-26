@@ -14,18 +14,18 @@
 
 // id& operator=(const id&) = default;
 
-#include <thread>
+#include <gpu/thread>
 #include <cassert>
 
 #include "test_macros.h"
 
 int main(int, char**)
 {
-    std::thread::id id0;
-    std::thread::id id1;
+    gpu::thread::id id0;
+    gpu::thread::id id1;
     id1 = id0;
     assert(id1 == id0);
-    id1 = std::this_thread::get_id();
+    id1 = gpu::this_thread::get_id();
     assert(id1 != id0);
 
   return 0;

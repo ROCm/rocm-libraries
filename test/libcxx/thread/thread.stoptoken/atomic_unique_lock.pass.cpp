@@ -16,7 +16,7 @@
 #include <cassert>
 #include <chrono>
 #include <cstdint>
-#include <thread>
+#include <gpu/thread>
 
 #include "make_test_thread.h"
 #include "test_macros.h"
@@ -69,7 +69,7 @@ void test() {
     Lock l1(state);
 
     auto thread1 = support::make_test_thread([&] {
-      std::this_thread::sleep_for(std::chrono::milliseconds{10});
+      gpu::this_thread::sleep_for(std::chrono::milliseconds{10});
       i = 5;
       l1.__unlock();
     });

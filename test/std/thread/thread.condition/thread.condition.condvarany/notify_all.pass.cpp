@@ -16,7 +16,7 @@
 
 #include <condition_variable>
 #include <mutex>
-#include <thread>
+#include <gpu/thread>
 #include <vector>
 #include <atomic>
 #include <cassert>
@@ -27,7 +27,7 @@
 std::condition_variable_any cv;
 
 typedef std::timed_mutex L0;
-typedef std::unique_lock<L0> L1;
+typedef gpu::unique_lock<L0> L1;
 
 L0 m0;
 
@@ -45,12 +45,12 @@ void helper() {
 int main(int, char**)
 {
   notReady = threadCount;
-  std::vector<std::thread> threads(threadCount);
+  std::vector<gpu::thread> threads(threadCount);
   for (unsigned i = 0; i < threadCount; i++)
     threads[i] = support::make_test_thread(helper);
   {
     while (notReady > 0)
-      std::this_thread::yield();
+      gpu::this_thread::pseudo_yield();
     // At this point, both threads have had a chance to acquire the lock and are
     // either waiting on the condition variable or about to wait.
     L1 lk(m0);

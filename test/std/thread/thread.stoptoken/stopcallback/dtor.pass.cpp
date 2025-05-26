@@ -140,7 +140,7 @@ int main(int, char**) {
 
     auto thread2 = support::make_test_thread([&] {
       using namespace std::chrono_literals;
-      std::this_thread::sleep_for(1ms);
+      gpu::this_thread::sleep_for(1ms);
       waitDone = true;
       waitDone.notify_all();
     });

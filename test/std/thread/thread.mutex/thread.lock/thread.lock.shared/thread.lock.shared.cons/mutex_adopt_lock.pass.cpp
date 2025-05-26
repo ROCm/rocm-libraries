@@ -28,7 +28,7 @@ int main(int, char**)
     typedef std::shared_timed_mutex M;
     M m;
     m.lock();
-    std::unique_lock<M> lk(m, std::adopt_lock);
+    gpu::unique_lock<M> lk(m, std::adopt_lock);
     assert(lk.mutex() == std::addressof(m));
     assert(lk.owns_lock() == true);
     }
@@ -36,7 +36,7 @@ int main(int, char**)
     typedef nasty_mutex M;
     M m;
     m.lock();
-    std::unique_lock<M> lk(m, std::adopt_lock);
+    gpu::unique_lock<M> lk(m, std::adopt_lock);
     assert(lk.mutex() == std::addressof(m));
     assert(lk.owns_lock() == true);
     }

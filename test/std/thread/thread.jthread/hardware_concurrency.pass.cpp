@@ -14,7 +14,7 @@
 
 #include <cassert>
 #include <concepts>
-#include <thread>
+#include <gpu/thread>
 #include <type_traits>
 
 #include "test_macros.h"
@@ -23,7 +23,7 @@ static_assert(noexcept(std::jthread::hardware_concurrency()));
 
 int main(int, char**) {
   std::same_as<unsigned int> decltype(auto) result = std::jthread::hardware_concurrency();
-  assert(result == std::thread::hardware_concurrency());
+  assert(result == gpu::thread::hardware_concurrency());
 
   return 0;
 }

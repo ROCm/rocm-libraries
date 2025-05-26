@@ -12,14 +12,14 @@
 //     template <class _Fp, class ..._Args,
 //         explicit thread(_Fp&& __f, _Args&&... __args);
 //  This constructor shall not participate in overload resolution
-//       if decay<F>::type is the same type as std::thread.
+//       if decay<F>::type is the same type as gpu::thread.
 
 
-#include <thread>
+#include <gpu/thread>
 
 int main(int, char**)
 {
-    volatile std::thread t1;
-    std::thread t2 ( t1, 1, 2.0 );
+    volatile gpu::thread t1;
+    gpu::thread t2 ( t1, 1, 2.0 );
     return 0;
 }

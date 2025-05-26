@@ -21,8 +21,8 @@
 int main(int, char**) {
   checking_mutex m0;
   checking_mutex m1;
-  std::unique_lock<checking_mutex> lk0(m0);
-  std::unique_lock<checking_mutex> lk1(m1);
+  gpu::unique_lock<checking_mutex> lk0(m0);
+  gpu::unique_lock<checking_mutex> lk1(m1);
 
   auto& result = (lk1 = std::move(lk0));
 

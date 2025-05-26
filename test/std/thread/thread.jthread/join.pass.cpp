@@ -18,7 +18,7 @@
 #include <concepts>
 #include <functional>
 #include <system_error>
-#include <thread>
+#include <gpu/thread>
 #include <type_traits>
 #include <vector>
 
@@ -34,7 +34,7 @@ int main(int, char**) {
     jts.reserve(numberOfThreads);
     for (auto i = 0u; i < numberOfThreads; ++i) {
       jts.emplace_back(support::make_test_jthread([&] {
-        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        gpu::this_thread::sleep_for(std::chrono::milliseconds(2));
         calledTimes.fetch_add(1, std::memory_order_relaxed);
       }));
     }

@@ -27,7 +27,7 @@
 #include <chrono>
 #include <future>
 #include <memory>
-#include <thread>
+#include <gpu/thread>
 
 #include "test_macros.h"
 
@@ -39,7 +39,7 @@ std::atomic_bool invoked{false};
 int f0()
 {
     invoked = true;
-    std::this_thread::sleep_for(ms(200));
+    gpu::this_thread::sleep_for(ms(200));
     return 3;
 }
 
@@ -48,33 +48,33 @@ int i = 0;
 int& f1()
 {
     invoked = true;
-    std::this_thread::sleep_for(ms(200));
+    gpu::this_thread::sleep_for(ms(200));
     return i;
 }
 
 void f2()
 {
     invoked = true;
-    std::this_thread::sleep_for(ms(200));
+    gpu::this_thread::sleep_for(ms(200));
 }
 
 std::unique_ptr<int> f3(int j)
 {
     invoked = true;
-    std::this_thread::sleep_for(ms(200));
+    gpu::this_thread::sleep_for(ms(200));
     return std::unique_ptr<int>(new int(j));
 }
 
 std::unique_ptr<int> f4(std::unique_ptr<int>&& p)
 {
     invoked = true;
-    std::this_thread::sleep_for(ms(200));
+    gpu::this_thread::sleep_for(ms(200));
     return std::move(p);
 }
 
 void f5(int j)
 {
-    std::this_thread::sleep_for(ms(200));
+    gpu::this_thread::sleep_for(ms(200));
     ((void)j);
     TEST_THROW(j);
 }
@@ -86,7 +86,7 @@ void test(CheckLambda&& getAndCheckFn, bool IsDeferred, Args&&... args) {
 
   // Create the future and wait
   std::future<Ret> f = std::async(std::forward<Args>(args)...);
-  std::this_thread::sleep_for(ms(300));
+  gpu::this_thread::sleep_for(ms(300));
 
   // Check that deferred async's have not invoked the function.
   assert(invoked == !IsDeferred);
@@ -146,12 +146,12 @@ int main(int, char**)
 #ifndef TEST_HAS_NO_EXCEPTIONS
     {
         std::future<void> f = std::async(f5, 3);
-        std::this_thread::sleep_for(ms(300));
+        gpu::this_thread::sleep_for(ms(300));
         try { f.get(); assert (false); } catch ( int ) {}
     }
     {
         std::future<void> f = std::async(std::launch::deferred, f5, 3);
-        std::this_thread::sleep_for(ms(300));
+        gpu::this_thread::sleep_for(ms(300));
         try { f.get(); assert (false); } catch ( int ) {}
     }
 #endif
