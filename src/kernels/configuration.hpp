@@ -229,11 +229,15 @@ struct proto_config
         input_type_strategy == type_strategy::fpmix ? false : static_cast<bool>(UseNodpp);
     static constexpr int variant      = Variant;
     static constexpr auto target_arch = Architecture::value;
+#ifdef __AMDGCN__
     static constexpr bool use_amdgnc =
         MiopenConfig::use_amdgnc &&
-        (target_arch == architecture::gfx103x || target_arch == architecture::gfx110x ||
-         target_arch == architecture::gfx120x) &&
+        !(target_arch == architecture::gfx103x || target_arch == architecture::gfx110x ||
+          target_arch == architecture::gfx120x) &&
         !(use_nodpp && (variant != 0));
+#else
+    static constexpr bool use_amdgnc = false;
+#endif
     static constexpr unsigned int vec_size = vectorize ? 4 : 1;
     static constexpr unsigned int vec_size_x =
         vectorize && MiopenConfig::layout_nhwc ? vec_size : 1;

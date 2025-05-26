@@ -67,7 +67,7 @@
 #endif
 
 #ifndef MIOPEN_USE_AMDGCN
-#define MIOPEN_USE_AMDGCN 0
+#define MIOPEN_USE_AMDGCN 1
 #endif
 
 #ifndef MIOPEN_NRN_OP_ID

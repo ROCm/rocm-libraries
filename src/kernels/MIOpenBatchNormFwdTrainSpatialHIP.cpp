@@ -232,17 +232,16 @@ struct MIOpenBatchNormFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
             mio_bn_config::use_amdgnc ? mio_bn_config::lds_gcn_size : mio_bn_config::lds_size;
         __shared__ FpAccumType lcl_data_x[lcl_data_size];
         __shared__ FpAccumType lcl_data_y[lcl_data_size];
-
-        if constexpr(!mio_bn_config::use_amdgnc)
+        if constexpr(mio_bn_config::use_amdgnc)
         {
             // TODO: I don't know if this is right
             // mean is FpType, could be 16 bit floating point type
             // but we are going to perform lds_reduce2 over FpAccumType&
-            // which is hardcoded to float, so &mean which has type FpType&
+            // which is hardcoded to float, so &mean which has type FpPrecType&
             // should be case to FpAccumType&, which is unsafe. and the
             // internal data pattern could be inconsistent between these 2
             // types.
-            miopen::reduction::lds_reduce2<FpAccumType, lcl_data_size>(
+            miopen::reduction::gcn_reduce2<FpAccumType, lcl_data_size>(
                 reinterpret_cast<FpAccumType&>(mean),
                 reinterpret_cast<FpAccumType&>(variance),
                 static_cast<FpAccumType>(INHW),
@@ -253,7 +252,7 @@ struct MIOpenBatchNormFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
         else
         {
             // TODO: this as well as above
-            miopen::reduction::gcn_reduce2<FpAccumType, lcl_data_size>(
+            miopen::reduction::lds_reduce2<FpAccumType, lcl_data_size>(
                 reinterpret_cast<FpAccumType&>(mean),
                 reinterpret_cast<FpAccumType&>(variance),
                 static_cast<FpAccumType>(INHW),
