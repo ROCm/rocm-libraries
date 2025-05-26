@@ -27,6 +27,8 @@
 #ifndef GUARD_REDUCTION_FUNCTIONS_HPP
 #define GUARD_REDUCTION_FUNCTIONS_HPP
 
+#include "configuration.hpp"
+
 // NOTE: This header should be independent from batchnorm_functions.hpp
 // Even is in OpenCL implementation, these functions are only enabled under
 // certain condition. But now, these template will not be compiled before
@@ -46,7 +48,7 @@ __forceinline__ __device__ void lds_reduce2(FloatAccum& x,
     lcl_data_x[lid] = x;
     lcl_data_y[lid] = y;
     __syncthreads();
-    for(unsigned int red = (MIO_BN_LDS_SIZE >> 1); red > 0; red >>= 1)
+    for(unsigned int red = (miopen::batchnorm::config::lds_size >> 1); red > 0; red >>= 1)
     {
         if(lid < red)
         {
@@ -110,7 +112,7 @@ __forceinline__ __device__ void gcn_reduce2(FloatAccum& x,
     x = y = 0;
 // TODO: check all unrolls neto have hint
 #pragma unroll 2
-    for(unsigned int i = 0; i < MIO_BN_LDSGCN_SIZE; ++i)
+    for(unsigned int i = 0; i < miopen::batchnorm::config::lds_gcn_size; ++i)
     {
         x += lcl_data_x[i];
         y += lcl_data_y[i];

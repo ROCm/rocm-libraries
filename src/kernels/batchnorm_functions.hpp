@@ -42,7 +42,9 @@ __forceinline__ __device__ __host__ FpPrecType fp_to_fpprec(FpType x)
     }
     else
     {
-        if constexpr(MIOPEN_USE_BFPMIX == 1)
+        // TODO also change this
+        if constexpr(miopen::batchnorm::config::input_type_strategy ==
+                     miopen::type_strategy::bfpmix)
         {
             static_assert(std::is_same<FpType, ushort>::value &&
                               std::is_same<FpPrecType, float>::value,
@@ -68,7 +70,8 @@ __forceinline__ __device__ __host__ FpType fpprec_to_fp(FpPrecType x)
     else
     {
 
-        if constexpr(MIOPEN_USE_BFPMIX == 1)
+        if constexpr(miopen::batchnorm::config::input_type_strategy ==
+                     miopen::type_strategy::bfpmix)
         {
             static_assert(std::is_same<FpType, ushort>::value &&
                               std::is_same<FpPrecType, float>::value,
@@ -86,7 +89,7 @@ __forceinline__ __device__ __host__ FpType fpprec_to_fp(FpPrecType x)
 template <typename FpAccumType, typename FpType>
 __forceinline__ __device__ __host__ FpAccumType fp_to_fpaccum(FpType x)
 {
-    if constexpr(MIOPEN_USE_BFPMIX == 1)
+    if constexpr(miopen::batchnorm::config::input_type_strategy == miopen::type_strategy::bfpmix)
     {
         static_assert(std::is_same<decltype(fp_to_fpaccum(x)), decltype(fp_to_fpprec(x))>::value,
                       "In this case FpAccumType must be equal to "
@@ -102,7 +105,7 @@ __forceinline__ __device__ __host__ FpAccumType fp_to_fpaccum(FpType x)
 template <typename FpType, typename FpAccumType>
 __forceinline__ __device__ __host__ FpType fpaccum_to_fp(FpAccumType x)
 {
-    if constexpr(MIOPEN_USE_BFPMIX == 1)
+    if constexpr(miopen::batchnorm::config::input_type_strategy == miopen::type_strategy::bfpmix)
     {
         static_assert(std::is_same<decltype(fpaccum_to_fp(x)), decltype(fpprec_to_fp(x))>::value,
                       "In this case FpAccumType must be equal to "
@@ -201,7 +204,7 @@ _accumulate_mad4(T& a,
 template <typename T>
 __forceinline__ __device__ __host__ void _accumulate(T& a, T const& b)
 {
-    if constexpr(miopen::batchnorm::config::vectorize && (!static_cast<bool>(MIO_LAYOUT_NHWC)))
+    if constexpr(miopen::batchnorm::config::vectorize && !miopen::config::layout_nhwc)
     {
         _accumulate4(a, b);
     }
@@ -218,7 +221,7 @@ _accumulate_mad(T& a,
                 typename mapped_vector_type<T, 4>::type const& c,
                 T const& d)
 {
-    static_assert(miopen::batchnorm::config::vectorize && (!static_cast<bool>(MIO_LAYOUT_NHWC)),
+    static_assert(miopen::batchnorm::config::vectorize && (!miopen::config::layout_nhwc),
                   "_accumulate_mad for this particular arg list is disabled.");
     _accumulate_mad4(a, b, c, d);
 }
@@ -226,7 +229,7 @@ _accumulate_mad(T& a,
 template <typename T>
 __forceinline__ __device__ __host__ void _accumulate_mad(T& a, T const& b, T const& c, T const& d)
 {
-    static_assert(!miopen::batchnorm::config::vectorize && (!static_cast<bool>(MIO_LAYOUT_NHWC)),
+    static_assert(!miopen::batchnorm::config::vectorize && (!miopen::config::layout_nhwc),
                   "_accumulate_mad for this particular arg list is disabled.");
     _accumulate_mad1(a, b, c, d);
 }
@@ -254,9 +257,11 @@ __forceinline__ __device__ void running_stash(FpPrecType_C* __restrict resultRun
             static_cast<FpAccumType_C>(pvt_newRunMean))); // newMean*factor + tmp
 
     const FpAccumType_C adjust = static_cast<FpAccumType_C>(
-        (MIO_BN_NHW == 1) ? variance
-                          : variance * (static_cast<FpAccumType>(MIO_BN_NHW) /
-                                        (static_cast<FpAccumType>(MIO_BN_NHW) - FpAccumType{1.0})));
+        (miopen::batchnorm::config::nhw == 1)
+            ? variance
+            : variance *
+                  (static_cast<FpAccumType>(miopen::batchnorm::config::nhw) /
+                   (static_cast<FpAccumType>(miopen::batchnorm::config::nhw) - FpAccumType{1.0})));
 
     resultRunningVariance[channel] =
         static_cast<FpPrecType_C>((FpAccumType{1.0} - static_cast<FpAccumType>(expAvgFactor)) *
