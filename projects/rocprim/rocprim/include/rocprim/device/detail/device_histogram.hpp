@@ -463,17 +463,34 @@ void histogram_global(SampleIterator                                   samples,
                       unsigned int                                     row_stride,
                       fixed_array<Counter*, ActiveChannels>            histogram,
                       const fixed_array<SampleToBinOp, ActiveChannels> sample_to_bin_op,
-                      const fixed_array<unsigned int, ActiveChannels>  bins_bits)
+                      const fixed_array<unsigned int, ActiveChannels>  bins_bits,
+                      const fixed_array<unsigned int, ActiveChannels>  bins,
+                      unsigned int*                                    private_histograms)
 {
     using sample_type        = typename std::iterator_traits<SampleIterator>::value_type;
     using sample_vector_type = sample_vector<sample_type, Channels>;
 
     constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
 
-    const unsigned int flat_id      = ::rocprim::detail::block_thread_id<0>();
-    const unsigned int block_id0    = ::rocprim::detail::block_id<0>();
-    const unsigned int block_id1    = ::rocprim::detail::block_id<1>();
-    const unsigned int block_offset = block_id0 * items_per_block;
+    const unsigned int flat_id       = ::rocprim::detail::block_thread_id<0>();
+    const unsigned int block_id0     = ::rocprim::detail::block_id<0>();
+    const unsigned int block_id1     = ::rocprim::detail::block_id<1>();
+    const unsigned int flat_block_id = ::rocprim::flat_block_id();
+    const unsigned int block_offset  = block_id0 * items_per_block;
+
+    // starts of the first histogram for each channel
+    unsigned int* block_histogram[ActiveChannels];
+    unsigned int  total_bins = 0;
+    for(unsigned int channel = 0; channel < ActiveChannels; channel++)
+    {
+        block_histogram[channel] = private_histograms + total_bins;
+        total_bins += bins[channel];
+    }
+
+    for(unsigned int channel = 0; channel < ActiveChannels; channel++)
+    {
+        block_histogram[channel] += flat_block_id * total_bins;
+    }
 
     samples += block_id1 * row_stride + Channels * block_offset;
 
@@ -506,9 +523,23 @@ void histogram_global(SampleIterator                                   samples,
                 {
                     // Write the number of lanes having this bin,
                     // if the current lane is the first (and maybe only) lane with this bin.
-                    ::rocprim::detail::atomic_add(&histogram[channel][bin],
+                    ::rocprim::detail::atomic_add(&block_histogram[channel][bin],
                                                   ::rocprim::bit_count(same_bin_lanes_mask));
                 }
+            }
+        }
+    }
+
+    ::rocprim::syncthreads();
+
+    for(unsigned int channel = 0; channel < ActiveChannels; channel++)
+    {
+        for(unsigned int bin = flat_id; bin < bins[channel]; bin += BlockSize)
+        {
+            unsigned int total = block_histogram[channel][bin];
+            if(total > 0)
+            {
+                ::rocprim::detail::atomic_add(&histogram[channel][bin], total);
             }
         }
     }

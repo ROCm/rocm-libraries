@@ -105,7 +105,9 @@ ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(device_params<Config>().histogram_config.bl
                             unsigned int                                     row_stride,
                             fixed_array<Counter*, ActiveChannels>            histogram,
                             const fixed_array<SampleToBinOp, ActiveChannels> sample_to_bin_op,
-                            const fixed_array<unsigned int, ActiveChannels>  bins_bits)
+                            const fixed_array<unsigned int, ActiveChannels>  bins_bits,
+                            const fixed_array<unsigned int, ActiveChannels>  bins,
+                            unsigned int*                                    private_histograms)
 {
     static constexpr histogram_config_params params = device_params<Config>();
 
@@ -117,7 +119,9 @@ ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(device_params<Config>().histogram_config.bl
                                      row_stride,
                                      histogram,
                                      sample_to_bin_op,
-                                     bins_bits);
+                                     bins_bits,
+                                     bins,
+                                     private_histograms);
 }
 
 template<unsigned int Channels,
@@ -161,12 +165,56 @@ inline hipError_t histogram_impl(void*          temporary_storage,
     const unsigned int blocks_x   = ::rocprim::detail::ceiling_div(columns, items_per_block);
     const unsigned int row_stride = row_stride_bytes / sizeof(sample_type);
 
-    if(temporary_storage == nullptr)
+    unsigned int bins[ActiveChannels];
+    unsigned int bins_bits[ActiveChannels];
+    unsigned int total_shared_bins = 0;
+    unsigned int max_bins          = 0;
+    unsigned int total_bins        = 0;
+    for(unsigned int channel = 0; channel < ActiveChannels; channel++)
     {
-        // Make sure user won't try to allocate 0 bytes memory, because
-        // hipMalloc will return nullptr.
-        storage_size = 4;
-        return hipSuccess;
+        bins[channel] = levels[channel] - 1;
+        bins_bits[channel]
+            = static_cast<unsigned int>(std::log2(detail::next_power_of_two(bins[channel])));
+        const unsigned int size = bins[channel];
+        // Prevent LDS bank conflicts
+        total_shared_bins += rocprim::detail::is_power_of_two(size) ? size + 1 : size;
+        total_bins += size;
+        max_bins = std::max(max_bins, bins[channel]);
+    }
+
+    const bool use_shared_mem = total_shared_bins <= shared_impl_max_bins;
+
+
+    unsigned int* private_histograms = nullptr;
+
+    if(use_shared_mem)
+    {
+        if(temporary_storage == nullptr)
+        {
+            // Make sure user won't try to allocate 0 bytes memory, because
+            // hipMalloc will return nullptr.
+            storage_size = 4;
+            return hipSuccess;
+        }
+    }
+    else
+    {
+        const unsigned size_private_histograms = total_bins * blocks_x * rows;
+        const hipError_t partition_result = detail::temp_storage::partition(
+            temporary_storage,
+            storage_size,
+            detail::temp_storage::make_linear_partition(
+                detail::temp_storage::ptr_aligned_array(&private_histograms,
+                                                        total_bins * blocks_x * rows)));
+        if(partition_result != hipSuccess || temporary_storage == nullptr)
+        {
+            return partition_result;
+        }
+
+        HIP_CHECK(hipMemsetAsync(private_histograms,
+                                 0u,
+                                 size_private_histograms * sizeof(unsigned int),
+                                 stream));
     }
 
     if(debug_synchronous)
@@ -176,22 +224,6 @@ inline hipError_t histogram_impl(void*          temporary_storage,
         std::cout << "blocks_x " << blocks_x << '\n';
         HIP_CHECK(hipStreamSynchronize(stream));
     }
-
-    unsigned int bins[ActiveChannels];
-    unsigned int bins_bits[ActiveChannels];
-    unsigned int total_shared_bins = 0;
-    unsigned int max_bins          = 0;
-    for(unsigned int channel = 0; channel < ActiveChannels; channel++)
-    {
-        bins[channel] = levels[channel] - 1;
-        bins_bits[channel]
-            = static_cast<unsigned int>(std::log2(detail::next_power_of_two(bins[channel])));
-        const unsigned int size = bins[channel];
-        // Prevent LDS bank conflicts
-        total_shared_bins += rocprim::detail::is_power_of_two(size) ? size + 1 : size;
-        max_bins = std::max(max_bins, bins[channel]);
-    }
-
 
     std::chrono::steady_clock::time_point start;
 
@@ -212,7 +244,7 @@ inline hipError_t histogram_impl(void*          temporary_storage,
         return hipSuccess;
     }
 
-    if(total_shared_bins <= shared_impl_max_bins)
+    if(use_shared_mem)
     {
         if(debug_synchronous)
         {
@@ -292,7 +324,9 @@ inline hipError_t histogram_impl(void*          temporary_storage,
                 row_stride,
                 fixed_array<Counter*, ActiveChannels>(histogram),
                 fixed_array<SampleToBinOp, ActiveChannels>(sample_to_bin_op),
-                fixed_array<unsigned int, ActiveChannels>(bins_bits));
+                fixed_array<unsigned int, ActiveChannels>(bins_bits),
+                fixed_array<unsigned int, ActiveChannels>(bins),
+                private_histograms);
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("histogram_global",
                                                     blocks_x * block_size * rows,
                                                     start);
