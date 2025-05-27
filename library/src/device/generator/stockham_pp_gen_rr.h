@@ -27,6 +27,20 @@
 //       - Revisit lstride usage and input/output strides
 //       - Revisit factor 64 logic in calculate_offsets() with different input lengths
 
+// Variation of StockhamKernelRR that implements the partial pass
+// method. Similarities of StockhamPartialPassKernelRR with
+// StockhamKernelRR include the overal kernel structure with the
+// main operations: (1) global-to-LDS, (2) LDS-to-register,
+// (3) full forward/backward pass in the designated direction,
+// (4) register-to-LDS and (5) LDS-to-global. The main difference
+// with the base function is the added steps between operations
+// (4) and (5). These steps perform partial FFT work in the
+// off-direction. The full FFT work in the off-direction can be
+// performed when used in conjunction with another partial-pass kernel,
+// thus eliminating the need for a separate kernel with a full pass
+// in the off-direction. Another difference is how data is accessed
+// in global memory, and this is reflected in how calculate_offsets()
+// is implemented.
 struct StockhamPartialPassKernelRR : public StockhamKernelRR
 {
     explicit StockhamPartialPassKernelRR(const StockhamGeneratorSpecs&    specs,

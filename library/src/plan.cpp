@@ -1,4 +1,4 @@
-// Copyright (C) 2016 - 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2016 - 2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -1979,13 +1979,13 @@ void rocfft_plan_t::GlobalTranspose(size_t                     elem_size,
                                     std::vector<size_t>&       outputItems,
                                     size_t                     transposeNumber)
 {
-    // All-to-all transpose is preferred as it's faster.  But we use
-    // MPI Alltoallv, which requires that each rank have a single base
-    // pointer to send/receive with offsets for every other rank.
+    // All-to-all transpose is preferred as it's faster. This requires
+    // that each rank have a single base pointer to send/receive with
+    // offsets for every other rank.
     // That's only feasible if each rank has data on just one device
     // (since we can hipMalloc a single buffer per device and have
     // offsets into it).
-    //
+
     // Fall back to point-to-point transfers if all-to-all is not
     // possible.
     std::string itemGroup = "transpose_" + std::to_string(transposeNumber);
@@ -1997,6 +1997,8 @@ void rocfft_plan_t::GlobalTranspose(size_t                     elem_size,
     }
     else
     {
+        // GlobalTransposeA2A will use MPI_Ialltoall when possible,
+        // falling back to MPI_Ialltoallv otherwise.
         GlobalTransposeA2A(
             elem_size, inField, outField, input, output, inputAntecedents, outputItems, itemGroup);
     }
@@ -2267,15 +2269,14 @@ void rocfft_plan_t::GlobalTransposeA2A(size_t                     elem_size,
     }
 
     // add the all-to-all op itself, which depends on pack ops
-    auto alltoall_ptr                   = std::make_unique<CommAllToAllv>();
-    alltoall_ptr->precision             = precision;
-    alltoall_ptr->arrayType             = desc.inArrayType;
-    alltoall_ptr->sendOffsets           = send_offsets;
-    alltoall_ptr->sendCounts            = send_counts;
-    alltoall_ptr->recvOffsets           = recv_offsets;
-    alltoall_ptr->recvCounts            = recv_counts;
-    alltoall_ptr->sendBuf               = BufferPtr::temp(send_buf.data());
-    alltoall_ptr->recvBuf               = BufferPtr::temp(recv_buf.data());
+    auto alltoall_ptr                   = std::make_unique<CommAllToAll>(precision,
+                                                       desc.inArrayType,
+                                                       send_offsets,
+                                                       send_counts,
+                                                       recv_offsets,
+                                                       recv_counts,
+                                                       BufferPtr::temp(send_buf.data()),
+                                                       BufferPtr::temp(recv_buf.data()));
     auto alltoall_op                    = AddMultiPlanItem(std::move(alltoall_ptr), pack_ops);
     multiPlan[alltoall_op]->group       = itemGroup;
     multiPlan[alltoall_op]->description = "all-to-all communication";

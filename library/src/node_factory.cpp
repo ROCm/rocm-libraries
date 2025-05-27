@@ -696,7 +696,9 @@ ComputeScheme
         }
         else
         {
-            auto largest = pool.get_largest_length(nodeData.precision);
+            // get largest pow2 1D length
+            auto largest = pool.get_largest_pow2_length(nodeData.precision);
+
             // need to ignore len 1, or we're going into a infinity decompostion loop
             // basically not gonna happen unless someone builds only a len1 kernel...
             if(largest <= 1)

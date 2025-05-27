@@ -30,6 +30,20 @@
 //      - Revisit factor 192 logic in calculate_offsets() with different input lengths
 //      - Revisit and test local transpose logic for different input lengths
 
+// Variation of StockhamKernelCC that implements the partial pass
+// method. Similarities of StockhamPartialPassKernelCC with
+// StockhamKernelCC include the overal kernel structure with the
+// main operations: (1) global-to-LDS, (2) LDS-to-register,
+// (3) full forward/backward pass in the designated direction,
+// (4) register-to-LDS and (5) LDS-to-global. The main difference
+// with the base function is the added steps between operations
+// (1) and (2). These steps perform partial FFT work in the
+// off-direction. The full FFT work in the off-direction can be
+// performed when used in conjunction with another partial-pass kernel,
+// thus eliminating the need for a separate kernel with a full pass
+// in the off-direction. Another difference is how data is accessed
+// in global memory, and this is reflected in how calculate_offsets()
+// is implemented.
 struct StockhamPartialPassKernelCC : public StockhamKernelCC
 {
     explicit StockhamPartialPassKernelCC(const StockhamGeneratorSpecs&    specs,

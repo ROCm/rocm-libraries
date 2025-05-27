@@ -581,7 +581,6 @@ void BLOCKCR3DNode::AssignParams_internal()
 /*****************************************************
  * CS_3D_RC  *
  *****************************************************/
-
 void RC3DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
 {
     bool noSolution = child_scheme_trees.empty();
