@@ -76,18 +76,18 @@ struct MIOpenBatchNormFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
     static constexpr unsigned int lessout = mio_bn_config::nhw - remout;
 
     // Kernel
-    __forceinline__ __device__ void operator()(const FpType* __restrict in,
-                                               FpType* __restrict out,
-                                               const FpPrecType* __restrict scale,
-                                               const FpPrecType* __restrict bias,
-                                               FpPrecType INHW,
-                                               double epsilon,
-                                               FpPrecType& mean,
-                                               FpPrecType& variance,
-                                               FpPrecType& invVariance,
-                                               FpPrecType alpha,
-                                               FpPrecType beta,
-                                               FpPrecType gamma)
+    constexpr __forceinline__ __device__ void operator()(const FpType* __restrict in,
+                                                         FpType* __restrict out,
+                                                         const FpPrecType* __restrict scale,
+                                                         const FpPrecType* __restrict bias,
+                                                         FpPrecType INHW,
+                                                         double epsilon,
+                                                         FpPrecType& mean,
+                                                         FpPrecType& variance,
+                                                         FpPrecType& invVariance,
+                                                         FpPrecType alpha,
+                                                         FpPrecType beta,
+                                                         FpPrecType gamma)
     {
         FpPrecType pvscale, pvbias;
 
@@ -124,25 +124,33 @@ struct MIOpenBatchNormFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
         {
             using fp_type4 = typename mapped_vector_type<FpType, 4>::type;
             fp_type4 read4;
-#pragma unroll
-            for(unsigned int k = lid << 2; k < less4; k += grprd)
+            unsigned int k = 0;
+#pragma clang loop unroll_count(2)
+            for(; k < less4; k += grprd)
             {
-                nidx  = k / mio_bn_config::hw;
-                hwidx = k - (nidx * mio_bn_config::hw);
-                index = nidx * mio_bn_config::chw + chwid + hwidx;
-                read4 = *(reinterpret_cast<const fp_type4*>(in + index));
-                mean += fp_to_fpprec<FpPrecType>(read4.x);
-                mean += fp_to_fpprec<FpPrecType>(read4.y);
-                mean += fp_to_fpprec<FpPrecType>(read4.z);
-                mean += fp_to_fpprec<FpPrecType>(read4.w);
-                variance = fma(
-                    fp_to_fpprec<FpPrecType>(read4.x), fp_to_fpprec<FpPrecType>(read4.x), variance);
-                variance = fma(
-                    fp_to_fpprec<FpPrecType>(read4.y), fp_to_fpprec<FpPrecType>(read4.y), variance);
-                variance = fma(
-                    fp_to_fpprec<FpPrecType>(read4.z), fp_to_fpprec<FpPrecType>(read4.z), variance);
-                variance = fma(
-                    fp_to_fpprec<FpPrecType>(read4.w), fp_to_fpprec<FpPrecType>(read4.w), variance);
+                if((k + (lid << 2)) < less4)
+                {
+                    nidx  = (k + (lid << 2)) / mio_bn_config::hw;
+                    hwidx = (k + (lid << 2)) - (nidx * mio_bn_config::hw);
+                    index = nidx * mio_bn_config::chw + chwid + hwidx;
+                    read4 = *(reinterpret_cast<const fp_type4*>(in + index));
+                    mean += fp_to_fpprec<FpPrecType>(read4.x);
+                    mean += fp_to_fpprec<FpPrecType>(read4.y);
+                    mean += fp_to_fpprec<FpPrecType>(read4.z);
+                    mean += fp_to_fpprec<FpPrecType>(read4.w);
+                    variance = fma(fp_to_fpprec<FpPrecType>(read4.x),
+                                   fp_to_fpprec<FpPrecType>(read4.x),
+                                   variance);
+                    variance = fma(fp_to_fpprec<FpPrecType>(read4.y),
+                                   fp_to_fpprec<FpPrecType>(read4.y),
+                                   variance);
+                    variance = fma(fp_to_fpprec<FpPrecType>(read4.z),
+                                   fp_to_fpprec<FpPrecType>(read4.z),
+                                   variance);
+                    variance = fma(fp_to_fpprec<FpPrecType>(read4.w),
+                                   fp_to_fpprec<FpPrecType>(read4.w),
+                                   variance);
+                }
             }
 
             if constexpr(rem4 > 0u)
@@ -180,22 +188,26 @@ struct MIOpenBatchNormFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
         }
         else
         {
-#pragma unroll
-            for(unsigned int k = lid; k < less; k += mio_bn_config::launch_dim.grp0)
+            unsigned int k = 0;
+#pragma clang loop unroll_count(4)
+            for(; k < less; k += mio_bn_config::launch_dim.grp0)
             {
-                nidx  = k / mio_bn_config::hw;
-                hwidx = k - (nidx * mio_bn_config::hw);
-                if constexpr(mio_config::layout_nhwc)
+                if(k + lid < less)
                 {
-                    index = nidx * mio_bn_config::chw + hwidx * mio_bn_config::c + grpid;
+                    nidx  = (k + lid) / mio_bn_config::hw;
+                    hwidx = (k + lid) - (nidx * mio_bn_config::hw);
+                    if constexpr(mio_config::layout_nhwc)
+                    {
+                        index = nidx * mio_bn_config::chw + hwidx * mio_bn_config::c + grpid;
+                    }
+                    else
+                    {
+                        index = nidx * mio_bn_config::chw + chwid + hwidx;
+                    }
+                    const auto xin = fp_to_fpprec<FpPrecType>(in[index]);
+                    mean += xin;
+                    variance = fma(xin, xin, variance);
                 }
-                else
-                {
-                    index = nidx * mio_bn_config::chw + chwid + hwidx;
-                }
-                const auto xin = fp_to_fpprec<FpPrecType>(in[index]);
-                mean += xin;
-                variance = fma(xin, xin, variance);
             }
 
             if constexpr(rem > 0u)
@@ -234,13 +246,6 @@ struct MIOpenBatchNormFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
         __shared__ FpAccumType lcl_data_y[lcl_data_size];
         if constexpr(mio_bn_config::use_amdgnc)
         {
-            // TODO: I don't know if this is right
-            // mean is FpType, could be 16 bit floating point type
-            // but we are going to perform lds_reduce2 over FpAccumType&
-            // which is hardcoded to float, so &mean which has type FpPrecType&
-            // should be case to FpAccumType&, which is unsafe. and the
-            // internal data pattern could be inconsistent between these 2
-            // types.
             miopen::reduction::gcn_reduce2<FpAccumType, lcl_data_size>(
                 reinterpret_cast<FpAccumType&>(mean),
                 reinterpret_cast<FpAccumType&>(variance),
@@ -251,7 +256,6 @@ struct MIOpenBatchNormFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
         }
         else
         {
-            // TODO: this as well as above
             miopen::reduction::lds_reduce2<FpAccumType, lcl_data_size>(
                 reinterpret_cast<FpAccumType&>(mean),
                 reinterpret_cast<FpAccumType&>(variance),
@@ -272,54 +276,53 @@ struct MIOpenBatchNormFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
         invVariance = rsqrt(variance + static_cast<FpPrecType>(epsilon));
         pvscale     = lcl_scale;
         pvbias      = lcl_bias;
-
         if constexpr(mio_config::layout_nhwc || rem == 0)
         {
             constexpr unsigned int k_limit = mio_config::layout_nhwc ? mio_bn_config::nhw : less;
-#pragma unroll 2
-            for(unsigned int k = lid; k < k_limit; k += mio_bn_config::launch_dim.grp0)
+            unsigned int k                 = 0;
+#pragma clang loop unroll_count(2)
+            for(; k < k_limit; k += mio_bn_config::launch_dim.grp0)
             {
-                nidx  = k / mio_bn_config::hw;
-                hwidx = k - (nidx * mio_bn_config::hw);
-                if constexpr(mio_config::layout_nhwc)
+                if(k + lid < k_limit)
                 {
-                    index = nidx * mio_bn_config::chw + hwidx * mio_bn_config::c + grpid;
+                    nidx  = (k + lid) / mio_bn_config::hw;
+                    hwidx = (k + lid) - (nidx * mio_bn_config::hw);
+                    if constexpr(mio_config::layout_nhwc)
+                    {
+                        index = nidx * mio_bn_config::chw + hwidx * mio_bn_config::c + grpid;
+                    }
+                    else
+                    {
+                        index = nidx * mio_bn_config::chw + chwid + hwidx;
+                    }
+
+                    out[index] = fpprec_to_fp<FpType>(miopen::batchnorm::activation_op(
+                        fma(pvscale,
+                            (fp_to_fpprec<FpPrecType>(in[index]) - mean) * invVariance,
+                            pvbias),
+                        alpha,
+                        beta,
+                        gamma));
                 }
-                else
-                {
-                    index = nidx * mio_bn_config::chw + chwid + hwidx;
-                }
-                out[index] = fpprec_to_fp<FpType>(miopen::batchnorm::activation_op(
-                    fma(pvscale,
-                        (fp_to_fpprec<FpPrecType>(in[index]) - fp_to_fpprec<FpPrecType>(mean)) *
-                            fp_to_fpprec<FpPrecType>(invVariance),
-                        pvbias),
-                    alpha,
-                    beta,
-                    gamma));
             }
         }
         else
         {
             FpPrecType xhat[max_read];
-#pragma unroll 2
-            for(unsigned int k = (max_read * lid); k < lessout; k += chunk)
-            {
-#pragma unroll
+            auto do_calculation = [&](unsigned int k) {
+
                 for(unsigned int j = 0; j < max_read; ++j)
                 {
                     const unsigned int l = k + j;
                     nidx                 = l / mio_bn_config::hw;
                     hwidx                = l - (nidx * mio_bn_config::hw);
                     index                = nidx * mio_bn_config::chw + chwid + hwidx;
-                    xhat[j] =
-                        (fp_to_fpprec<FpPrecType>(in[index]) - fp_to_fpprec<FpPrecType>(mean)) *
-                        fp_to_fpprec<FpPrecType>(invVariance);
+                    xhat[j] = (fp_to_fpprec<FpPrecType>(in[index]) - mean) * invVariance;
                 }
 
                 __syncthreads();
-#pragma unroll
-                for(unsigned int j = 0; j < max_read; ++j)
+
+                for(unsigned int j = 0; j < max_read; ++j) // This part takes 0.405
                 {
                     const unsigned int l = k + j;
                     nidx                 = l / mio_bn_config::hw;
@@ -327,45 +330,50 @@ struct MIOpenBatchNormFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
                     index                = nidx * mio_bn_config::chw + chwid + hwidx;
                     out[index]           = fpprec_to_fp<FpType>(miopen::batchnorm::activation_op(
                         fma(pvscale, xhat[j], pvbias), alpha, beta, gamma));
+                } // target 0.501
+            };
+
+            unsigned int k = 0;
+#pragma clang loop unroll_count(2)
+            for(; k < lessout; k += chunk)
+            {
+                if(k + (max_read * lid) < lessout)
+                    do_calculation(k + (max_read * lid));
+            }
+
+            if constexpr(remout > 0u)
+            {
+                const unsigned int remkeyout = (max_read * lid) + lessout;
+                for(unsigned int j = 0; j < max_read; ++j)
+                {
+                    unsigned int l = remkeyout + j;
+                    nidx           = l / mio_bn_config::hw;
+                    hwidx          = l - (nidx * mio_bn_config::hw);
+                    index          = nidx * mio_bn_config::chw + chwid + hwidx;
+                    // TODO: comparing different types
+                    const auto xin = (index < mio_bn_config::nchw)
+                                         ? fp_to_fpprec<FpPrecType>(in[index])
+                                         : FpPrecType{0};
+                    xhat[j]        = (xin - fp_to_fpprec<FpPrecType>(mean)) *
+                              fp_to_fpprec<FpPrecType>(invVariance);
                 }
 
-                if constexpr(remout > 0u)
+                __syncthreads();
+                for(unsigned int j = 0; j < max_read; ++j)
                 {
-                    const unsigned int remkeyout = (max_read * lid) + lessout;
-#pragma unroll
-                    for(unsigned int j = 0; j < max_read; ++j)
-                    {
-                        unsigned int l = remkeyout + j;
-                        nidx           = l / mio_bn_config::hw;
-                        hwidx          = l - (nidx * mio_bn_config::hw);
-                        index          = nidx * mio_bn_config::chw + chwid + hwidx;
-                        // TODO: comparing different types
-                        const auto xin = (index < mio_bn_config::nchw)
-                                             ? fp_to_fpprec<FpPrecType>(in[index])
-                                             : FpPrecType{0};
-                        xhat[j]        = (xin - fp_to_fpprec<FpPrecType>(mean)) *
-                                  fp_to_fpprec<FpPrecType>(invVariance);
-                    }
+                    const unsigned int l = remkeyout + j;
+                    nidx                 = l / mio_bn_config::hw;
+                    hwidx                = l - (nidx * mio_bn_config::hw);
+                    index                = nidx * mio_bn_config::chw + chwid + hwidx;
 
-                    __syncthreads();
-#pragma unroll
-                    for(unsigned int j = 0; j < max_read; ++j)
+                    if(index < mio_bn_config::nchw)
                     {
-                        const unsigned int l = remkeyout + j;
-                        nidx                 = l / mio_bn_config::hw;
-                        hwidx                = l - (nidx * mio_bn_config::hw);
-                        index                = nidx * mio_bn_config::chw + chwid + hwidx;
-
-                        if(index < mio_bn_config::nchw)
-                        {
-                            out[index] = fpprec_to_fp<FpType>(miopen::batchnorm::activation_op(
-                                fma(pvscale, xhat[j], pvbias), alpha, beta, gamma));
-                        }
+                        out[index] = fpprec_to_fp<FpType>(miopen::batchnorm::activation_op(
+                            fma(pvscale, xhat[j], pvbias), alpha, beta, gamma));
                     }
                 }
             }
         }
-
         return;
     }
 };
@@ -399,8 +407,9 @@ extern "C" __global__ void __launch_bounds__(
 #if(MIO_SAVE_MEAN_VARIANCE == 1)
         ,
         typename mio_bn_config::fp_prec_type* __restrict resultSaveMean,
-        typename mio_bn_config::fp_prec_type* __restrict resultSaveInvVariance,
+        typename mio_bn_config::fp_prec_type* __restrict resultSaveInvVariance
 #endif
+        ,
         typename mio_bn_config::fp_prec_type alpha,
         typename mio_bn_config::fp_prec_type beta,
         typename mio_bn_config::fp_prec_type gamma)
@@ -424,17 +433,15 @@ extern "C" __global__ void __launch_bounds__(
 
     if(lid == 0)
     {
-        if constexpr(mio_config::running_result)
-        {
-            miopen::batchnorm::running_stash<fp_accum_type, fp_accum_c_type, fp_prec_c_type>(
-                resultRunningMean, resultRunningVariance, expAvgFactor, mean, variance, grpid);
-        }
-
-        if constexpr(mio_config::save_mean_variance)
-        {
-            miopen::batchnorm::saved_stash<fp_accum_c_type, fp_prec_c_type>(
-                resultSaveMean, resultSaveInvVariance, mean, invVariance, grpid);
-        }
+// TODO: this should also be removed, but using constexpr can lead compile error
+#if(MIO_RUNNING_RESULT == 1)
+        miopen::batchnorm::running_stash<fp_accum_type, fp_accum_c_type, fp_prec_c_type>(
+            resultRunningMean, resultRunningVariance, expAvgFactor, mean, variance, grpid);
+#endif
+#if(MIO_SAVE_MEAN_VARIANCE == 1)
+        miopen::batchnorm::saved_stash<fp_accum_c_type, fp_prec_c_type>(
+            resultSaveMean, resultSaveInvVariance, mean, invVariance, grpid);
+#endif
     }
 }
 

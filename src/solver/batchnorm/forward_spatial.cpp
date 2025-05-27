@@ -299,6 +299,7 @@ ConvSolution BnFwdTrainingSpatial::GetSolution(const ExecutionContext& context,
     auto result = ConvSolution{miopenStatusSuccess};
 
     {
+        // TODO: in final merge request, this should be removed
         constexpr bool enable_hip = true;
         auto use_hip              = enable_hip && (variant == 1);
         auto kernel = KernelInfo{};

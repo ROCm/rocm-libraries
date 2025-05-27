@@ -25,7 +25,7 @@
  *******************************************************************************/
 
 // TODO: if this header is only used for batch norm, it should also use the type defined
-// in batchnorm_functions.hpp. We should move these common parts into a separate header,
+// in configurations.hpp. We should move these common parts into a separate header,
 // maybe call it `batchnorm_common.hpp`.
 #ifndef MIOPEN_NRN_OP_ID
 #define MIOPEN_NRN_OP_ID 0
@@ -40,7 +40,7 @@
 #endif
 
 // TODO: this should also be deprecated
-// There is a system in batchnorm_functions.hpp
+// There is a system in configurations.hpp
 #if MIOPEN_USE_FP16 == 1
 #define FP_TYPE half
 #define FP_TYPE_PREC float

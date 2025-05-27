@@ -86,22 +86,6 @@ __forceinline__ __device__ __host__ FpType fpprec_to_fp(FpPrecType x)
     }
 }
 
-template <typename FpAccumType, typename FpType>
-__forceinline__ __device__ __host__ FpAccumType fp_to_fpaccum(FpType x)
-{
-    if constexpr(miopen::batchnorm::config::input_type_strategy == miopen::type_strategy::bfpmix)
-    {
-        static_assert(std::is_same<decltype(fp_to_fpaccum(x)), decltype(fp_to_fpprec(x))>::value,
-                      "In this case FpAccumType must be equal to "
-                      "FpPrecType.");
-        return fp_to_fpprec(x);
-    }
-    else
-    {
-        return static_cast<FpAccumType>(x);
-    }
-}
-
 template <typename FpType, typename FpAccumType>
 __forceinline__ __device__ __host__ FpType fpaccum_to_fp(FpAccumType x)
 {

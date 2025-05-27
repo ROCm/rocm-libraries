@@ -62,7 +62,6 @@ __forceinline__ __device__ void lds_reduce2(FloatAccum& x,
     y = lcl_data_y[0] * scale;
 }
 
-// TODO: don't know if this is right, passing c++ reference into this function
 template <typename FloatAccum>
 __forceinline__ __device__ void dpp_interleaved_reduction(FloatAccum& temp_sum1,
                                                           FloatAccum& temp_sum2)
@@ -110,9 +109,11 @@ __forceinline__ __device__ void gcn_reduce2(FloatAccum& x,
     __syncthreads();
 
     x = y = 0;
-// TODO: check all unrolls neto have hint
-#pragma unroll 2
-    for(unsigned int i = 0; i < miopen::batchnorm::config::lds_gcn_size; ++i)
+
+    unsigned int i = 0;
+    // This could be changeed to clang loop unroll(full), because the size is small
+#pragma clang loop unroll_count(2)
+    for(; i < miopen::batchnorm::config::lds_gcn_size; ++i)
     {
         x += lcl_data_x[i];
         y += lcl_data_y[i];
