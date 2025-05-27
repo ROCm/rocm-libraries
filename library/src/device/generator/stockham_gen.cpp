@@ -289,20 +289,21 @@ void stockham_partial_pass_variants(const std::string&               kernel_name
                           params_2.off_dim,
                           launchers);
         }
-        // SBRR_PP + SBCC_PP
+        // SBCC_PP + SBCC_PP
         else if((params_1.current_dim == 1 && params_2.current_dim == 2)
                 || (params_1.current_dim == 2 && params_2.current_dim == 1))
         {
-            throw std::runtime_error("CS_KERNEL_STOCKHAM_PP + CS_KERNEL_STOCKHAM_PP_BLOCK_CC not "
+            throw std::runtime_error("CS_KERNEL_STOCKHAM_PP_BLOCK_CC + "
+                                     "CS_KERNEL_STOCKHAM_PP_BLOCK_CC with x as off-dimension not "
                                      "yet implemented for CS_3D_PP");
         }
-        // SBRR_PP + SBRR_PP
+        // SBRR_PP + SBCC_PP
         else if((params_1.current_dim == 0 && params_2.current_dim == 1)
                 || (params_1.current_dim == 1 && params_2.current_dim == 0))
         {
-            throw std::runtime_error(
-                "CS_KERNEL_STOCKHAM_PP_BLOCK_CC + CS_KERNEL_STOCKHAM_PP_BLOCK_CC not yet "
-                "implemented for CS_3D_PP");
+            throw std::runtime_error("CS_KERNEL_STOCKHAM_PP + CS_KERNEL_STOCKHAM_PP_BLOCK_CC with "
+                                     "with z as off-dimension not yet "
+                                     "implemented for CS_3D_PP");
         }
         else
         {
@@ -535,6 +536,57 @@ void validate_pp_off_dim_length(const StockhamPartialPassParams& pp_params_1,
         throw std::runtime_error("Invalid partial-pass kernel off-dimension length");
 }
 
+void validate_pp_grid_params(const StockhamPartialPassParams& params_1,
+                             const StockhamPartialPassParams& params_2,
+                             const StockhamGeneratorSpecs&    specs_1,
+                             const StockhamGeneratorSpecs&    specs_2)
+{
+    if(specs_1.scheme == "CS_3D_PP" && specs_2.scheme == "CS_3D_PP")
+    {
+        // SBRR_PP + SBCC_PP
+        if((params_1.current_dim == 0 && params_2.current_dim == 2)
+           || (params_1.current_dim == 2 && params_2.current_dim == 0))
+        {
+            // SBRR needs tpb to be at least max(pp_factors),
+            // so that it has the required off-dim data in LDS
+            // to perform partial pass
+            auto tpb_sbrr = (params_1.current_dim == 0 && params_2.current_dim == 2)
+                                ? specs_1.workgroup_size / specs_1.threads_per_transform
+                                : specs_2.workgroup_size / specs_2.threads_per_transform;
+            if(tpb_sbrr < *std::max_element(params_1.factors_off_dim.begin(),
+                                            params_1.factors_off_dim.end()))
+            {
+                throw std::runtime_error("CS_KERNEL_STOCKHAM_PP requires transform-per-block "
+                                         "to be at least max(pp_factors)");
+            }
+        }
+        // SBCC_PP + SBCC_PP
+        else if((params_1.current_dim == 1 && params_2.current_dim == 2)
+                || (params_1.current_dim == 2 && params_2.current_dim == 1))
+        {
+            throw std::runtime_error("CS_KERNEL_STOCKHAM_PP_BLOCK_CC + "
+                                     "CS_KERNEL_STOCKHAM_PP_BLOCK_CC with x as off-dimension not "
+                                     "yet implemented for CS_3D_PP");
+        }
+        // SBRR_PP + SBCC_PP
+        else if((params_1.current_dim == 0 && params_2.current_dim == 1)
+                || (params_1.current_dim == 1 && params_2.current_dim == 0))
+        {
+            throw std::runtime_error("CS_KERNEL_STOCKHAM_PP + CS_KERNEL_STOCKHAM_PP_BLOCK_CC with "
+                                     "with z as off-dimension not yet "
+                                     "implemented for CS_3D_PP");
+        }
+        else
+        {
+            throw std::runtime_error("invalid dimensions for CS_3D_PP");
+        }
+    }
+    else
+    {
+        throw std::runtime_error("unhandled scheme");
+    }
+}
+
 static size_t max_bytes_per_element(const std::vector<unsigned int>& precisions)
 {
     // generate for the maximum element size in the available
@@ -663,6 +715,7 @@ int main()
             validate_pp_length(pp_params_1, factors1);
             validate_pp_length(pp_params_2, factors2);
             validate_pp_off_dim_length(pp_params_1, pp_params_2);
+            validate_pp_grid_params(pp_params_1, pp_params_2, specs1, specs2);
 
             stockham_partial_pass_variants(
                 kernel_name, specs1, specs2, pp_params_1, pp_params_2, std::cout);

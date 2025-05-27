@@ -1075,7 +1075,7 @@ def list_3d_partial_pass_kernels():
     """Return list of to generate."""
     
     pp_3d_kernels = [                
-        NS(length=[64,64,64], dims=[0, 2], factors=[[8, 8],[4, 4, 4]], factors_pp=[[4],[16]], threads_per_transform=[8, 8], workgroup_size=[64,128], direct_to_from_reg=[False, False])        
+        NS(length=[64,64,64], dims=[0, 2], factors=[[8, 8],[4, 4, 4]], factors_pp=[[4],[16]], threads_per_transform=[8, 8], workgroup_size=[64,128], direct_to_from_reg=[False, False])
     ]
 
     expanded = []

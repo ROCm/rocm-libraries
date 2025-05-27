@@ -53,9 +53,6 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
         , params(params)
 
     {
-        large_twiddle_steps.decl_default = 3;
-        large_twiddle_base.decl_default  = 8;
-
         factors_pp = params.factors_off_dim;
 
         max_factor_pp = *std::max_element(factors_pp.begin(), factors_pp.end());
