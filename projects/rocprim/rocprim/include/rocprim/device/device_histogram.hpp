@@ -143,11 +143,8 @@ inline hipError_t histogram_impl(void*          temporary_storage,
     using config = wrapped_histogram_config<Config, sample_type, Channels, ActiveChannels>;
 
     detail::target_arch target_arch;
-    hipError_t          result = host_target_arch(stream, target_arch);
-    if(result != hipSuccess)
-    {
-        return result;
-    }
+    HIP_CHECK(host_target_arch(stream, target_arch));
+
     const histogram_config_params params = dispatch_target_arch<config>(target_arch);
 
     const unsigned int block_size           = params.histogram_config.block_size;
@@ -177,11 +174,7 @@ inline hipError_t histogram_impl(void*          temporary_storage,
         std::cout << "columns " << columns << '\n';
         std::cout << "rows " << rows << '\n';
         std::cout << "blocks_x " << blocks_x << '\n';
-        hipError_t error = hipStreamSynchronize(stream);
-        if(error != hipSuccess)
-        {
-            return error;
-        }
+        HIP_CHECK(hipStreamSynchronize(stream));
     }
 
     unsigned int bins[ActiveChannels];
@@ -199,19 +192,19 @@ inline hipError_t histogram_impl(void*          temporary_storage,
         max_bins = std::max(max_bins, bins[channel]);
     }
 
+
     std::chrono::steady_clock::time_point start;
 
     if(debug_synchronous)
     {
         start = std::chrono::steady_clock::now();
     }
-    hipLaunchKernelGGL(HIP_KERNEL_NAME(init_histogram_kernel<config, ActiveChannels>),
-                       dim3(::rocprim::detail::ceiling_div(max_bins, block_size)),
-                       dim3(block_size),
-                       0,
-                       stream,
-                       fixed_array<Counter*, ActiveChannels>(histogram),
-                       fixed_array<unsigned int, ActiveChannels>(bins));
+    init_histogram_kernel<config, ActiveChannels>
+        <<<dim3(::rocprim::detail::ceiling_div(max_bins, block_size)),
+           dim3(block_size),
+           0,
+           stream>>>(fixed_array<Counter*, ActiveChannels>(histogram),
+                     fixed_array<unsigned int, ActiveChannels>(bins));
     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("init_histogram", max_bins, start);
 
     if(columns == 0 || rows == 0)
@@ -242,16 +235,12 @@ inline hipError_t histogram_impl(void*          temporary_storage,
         int          max_blocks_per_mp        = 0;
         for(unsigned int n = params.shared_impl_histograms; n >= 1; n--)
         {
-            int        blocks_per_mp;
-            hipError_t error
-                = hipOccupancyMaxActiveBlocksPerMultiprocessor(&blocks_per_mp,
-                                                               kernel,
-                                                               block_size,
-                                                               n * block_histogram_bytes);
-            if(error != hipSuccess)
-            {
-                return error;
-            }
+            int blocks_per_mp;
+            HIP_CHECK(hipOccupancyMaxActiveBlocksPerMultiprocessor(&blocks_per_mp,
+                                                                   kernel,
+                                                                   block_size,
+                                                                   n * block_histogram_bytes));
+
             if(blocks_per_mp > max_blocks_per_mp)
             {
                 chosen_shared_histograms = n;
@@ -261,16 +250,12 @@ inline hipError_t histogram_impl(void*          temporary_storage,
 
         // Choose minimum grid size needed to achieve the best occupancy
         int        min_grid_size, max_block_size;
-        hipError_t error
-            = hipOccupancyMaxPotentialBlockSize(&min_grid_size,
+        HIP_CHECK(hipOccupancyMaxPotentialBlockSize(&min_grid_size,
                                                 &max_block_size,
                                                 kernel,
                                                 chosen_shared_histograms * block_histogram_bytes,
-                                                int(block_size));
-        if(error != hipSuccess)
-        {
-            return error;
-        }
+                                                int(block_size)));
+
         const unsigned int chosen_grid_size
             = std::min(static_cast<unsigned int>(min_grid_size), params.max_grid_size);
 
@@ -278,12 +263,10 @@ inline hipError_t histogram_impl(void*          temporary_storage,
         grid_size.x = std::min(chosen_grid_size, blocks_x);
         grid_size.y = std::min(rows, ::rocprim::detail::ceiling_div(chosen_grid_size, grid_size.x));
         const unsigned int rows_per_block = ::rocprim::detail::ceiling_div(rows, grid_size.y);
-        hipLaunchKernelGGL(kernel,
-                           grid_size,
-                           dim3(block_size, 1),
-                           chosen_shared_histograms * block_histogram_bytes,
-                           stream,
-                           samples,
+        kernel<<<grid_size,
+                 dim3(block_size, 1),
+                 chosen_shared_histograms * block_histogram_bytes,
+                 stream>>>(samples,
                            columns,
                            rows,
                            row_stride,
@@ -302,18 +285,14 @@ inline hipError_t histogram_impl(void*          temporary_storage,
         {
             start = std::chrono::steady_clock::now();
         }
-        hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(histogram_global_kernel<config, Channels, ActiveChannels>),
-            dim3(blocks_x, rows),
-            dim3(block_size, 1),
-            0,
-            stream,
-            samples,
-            columns,
-            row_stride,
-            fixed_array<Counter*, ActiveChannels>(histogram),
-            fixed_array<SampleToBinOp, ActiveChannels>(sample_to_bin_op),
-            fixed_array<unsigned int, ActiveChannels>(bins_bits));
+        histogram_global_kernel<config, Channels, ActiveChannels>
+            <<<dim3(blocks_x, rows), dim3(block_size, 1), 0, stream>>>(
+                samples,
+                columns,
+                row_stride,
+                fixed_array<Counter*, ActiveChannels>(histogram),
+                fixed_array<SampleToBinOp, ActiveChannels>(sample_to_bin_op),
+                fixed_array<unsigned int, ActiveChannels>(bins_bits));
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("histogram_global",
                                                     blocks_x * block_size * rows,
                                                     start);
