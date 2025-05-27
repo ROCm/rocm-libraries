@@ -64,6 +64,8 @@ endif()
 include(CheckLanguage)
 include(CMakeDependentOption)
 
+#test
+
 # Build options
 # Disables building tests, benchmarks, examples
 option(ONLY_INSTALL "Only install" OFF)
