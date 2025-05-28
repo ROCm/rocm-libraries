@@ -21,10 +21,12 @@
 ################################################################################
 
 import re
+from pathlib import Path
 from subprocess import run, PIPE
-from typing import List, Optional
+from typing import List, Optional, Set, Tuple, Union, NamedTuple
 
 from .Types import IsaVersion
+from .Utilities import print2
 
 import rocisa
 
@@ -92,6 +94,17 @@ SUPPORTED_ISA = [
     IsaVersion(12, 0, 0),
     IsaVersion(12, 0, 1),
 ]
+
+SUPPORTED_ARCH_DEVICE_IDS = {
+    "id=75a0": "gfx950",
+    "id=75a2": "gfx950",
+    "id=75a3": "gfx950",
+}
+
+ARCH_DEVICE_ID_FALLBACKS = {
+    "id=75a2": "id=75a0",
+    "id=75a3": "id=75a0",
+}
 
 
 def isaToGfx(arch: IsaVersion) -> str:
@@ -216,3 +229,170 @@ def detectGlobalCurrentISA(deviceId: int, enumerator: str):
     if not isinstance(result, IsaVersion):
         raise Exception("Failed to detect currect ISA")
     return result
+
+
+class ArchInfo(NamedTuple):
+    Name: str
+    Gfx: str
+    DeviceIds: Optional[Set[str]]
+    CUCount: Optional[str] = None
+
+
+class LogicFileError(Exception):
+    def __init__(self, message="Expected line is either not present or is malformed"):
+        self.message = message
+        super().__init__(self.message)
+
+
+def _extractArchInfo(file: Union[str, Path]) -> ArchInfo:
+    """
+    Extracts architecture predicate information from a given logic file.
+
+    The file is expected to have the following format:
+    - Line 1: Minimum required version (e.g., "- {MinimumRequiredVersion: 4.33.0}")
+    - Line 2: Code name of the architecture (e.g., "- aquavanjaram")
+    - Line 3: GFX name of the architecture or a map with variant details (e.g., "- gfx950" or "- {Architecture: gfx950, CUCount: 256}")
+    - Line 4: Device IDs (e.g., "- [Device 1234, Device 5678]")
+
+    Args:
+        file: Path to a logic file.
+    Returns:
+        ArchInfo: An object containing the extracted architecture predicates.
+    Raises:
+        LogicFileError: If the file does not match the expected format.
+    """
+
+    def l0(line: str):
+        if not re.match(r"- \{MinimumRequiredVersion", line):
+            raise LogicFileError(
+                f"Expected minimum required version:\n  line: {line}  file: {file}"
+            )
+
+    def l1(line: str):
+        return line[2:].strip()
+
+    def l2(line: str):
+        match1 = re.match(r"- \{Architecture: (\w+), CUCount: (\d+)\}", line)
+        match2 = re.match(r"- gfx(\w+)", line)
+        if match1:
+            architecture, cu_count = match1.groups()
+            return architecture, f"cu={cu_count}"
+        elif match2:
+            return line[2:].strip(), None
+        else:
+            raise LogicFileError(
+                f"Expected architecture and CU count, or only an archiecture: line: {line}"
+            )
+
+    def l3(line: str):
+        emulationIds = {"0049", "0050", "0051", "0052", "0054", "0062"}
+        if re.match(r"- \[Device", line):
+            devIds = re.findall(r"Device (\w+)", line)
+            return set(f"id={id}" for id in devIds)
+        if re.match(r"-\[alldevices", line.lower().replace(" ", "")):
+            return None
+        else:
+            raise LogicFileError(f"No device IDs found: line: {line}")
+
+    with open(file, "r") as f:
+        l0(f.readline())
+        name = l1(f.readline())
+        gfx, cu = l2(f.readline())
+        deviceIds = l3(f.readline())
+
+    return ArchInfo(Name=name, Gfx=gfx, DeviceIds=deviceIds, CUCount=cu)
+
+
+def filterLogicFilesByArchPredicates(
+    logicFiles: List[str], archs: Set[str], requestedDeviceIds: Set[str]
+) -> List[str]:
+    """
+    Filter logic files based on architecture and requested device IDs.
+
+    Args:
+        logicFiles: List of logic file paths to filter
+        archs: List of target architectures (e.g. ['gfx908', 'gfx90a'])
+        requestedDeviceIds: Set of device IDs (e.g. {'id=1234', 'id=5678'})
+
+    Returns:
+        List of logic files that match architecture and requested device IDs.
+        For each base filename, prefers exact matches over fallbacks.
+    """
+    fallbackIds = {
+        ARCH_DEVICE_ID_FALLBACKS[v] for v in requestedDeviceIds if v in ARCH_DEVICE_ID_FALLBACKS
+    }
+    exactMatches = set()
+    fallbackMatches = dict()
+
+    for logicFile in map(Path, logicFiles):
+        archInfo = _extractArchInfo(logicFile)
+
+        if archInfo.Gfx not in archs:
+            print2(
+                f"Skipping {logicFile}\n  because architecture {archInfo.Gfx} not in targets {archs}"
+            )
+            continue
+
+        deviceIds = archInfo.DeviceIds
+        if any(devId in requestedDeviceIds for devId in deviceIds):
+            exactMatches.add(logicFile)
+        elif any(devId in fallbackIds for devId in deviceIds):
+            fallbackMatches[logicFile.name] = logicFile
+        else:
+            print2(
+                f"Skipping {logicFile}\n  because device IDs {deviceIds} don't match requested variants {requestedDeviceIds} or fallbacks {fallbackIds}"
+            )
+
+    validFallbacks = {
+        path
+        for name, path in fallbackMatches.items()
+        if not any(em.name == name for em in exactMatches)
+    }
+
+    if validFallbacks:
+        print2("Using fallbacks:\n  " + "\n  ".join(map(str, validFallbacks)))
+
+    return list(exactMatches.union(validFallbacks))
+
+
+def splitArchsFromPredicates(archSpecs: List[str]) -> Tuple[List[str], Optional[Set[str]]]:
+    """
+    Splits a list of architecture specifications into a list of architectures and a set of predicate specifications.
+
+    Args:
+        archSpecs: A list of architecture specifications.
+    Returns:
+        A tuple containing a list of architectures and a set of variant specifications.
+    """
+    pattern = r"(.*?)\[(.*?)\]"
+
+    variants = set()
+    archs = []
+    for archSpec in archSpecs:
+        match = re.match(pattern, archSpec)
+        if match:
+            archs.append(match.group(1).strip())
+            variantId = verifyPredicate(match.group(2))
+            variants.add(variantId)
+        else:
+            archs.append(archSpec)
+    return (archs, variants if variants else None)
+
+
+def verifyPredicate(predicateSpec: str) -> str:
+    """
+    Verifies that a predicate specification is valid.
+
+    Args:
+        predicateSpec: A string representing a predicate specification.
+    Returns:
+        The validated predicate specification.
+    Raises:
+        ValueError: If the predicate specification is invalid.
+    """
+    key, _, val = predicateSpec.partition("=")
+    if key == "id":
+        if predicateSpec not in SUPPORTED_ARCH_DEVICE_IDS:
+            raise ValueError(f"Invalid architecture variant: device ID not supported: {predicateSpec}")
+    return predicateSpec
+
