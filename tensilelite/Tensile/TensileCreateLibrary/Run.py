@@ -49,7 +49,8 @@ from Tensile.Common import (
     state,
     tqdm,
     setVerbosity,
-    getVerbosity
+    getVerbosity,
+    splitVariantsFromArchs,
 )
 from Tensile.Common.Architectures import gfxToIsa, isaToGfx, SUPPORTED_GFX
 from Tensile.Common.Capabilities import makeIsaInfoMap
@@ -609,6 +610,7 @@ def run():
     else:
         archs = arguments["Architecture"].split("_")
     archs = SUPPORTED_GFX if "all" in archs else archs
+    archs, variants = splitVariantsFromArchs(archs)
 
     targetIsas = [gfxToIsa(a) for a in archs]
     isaInfoMap = makeIsaInfoMap(targetIsas, cxxCompiler)
