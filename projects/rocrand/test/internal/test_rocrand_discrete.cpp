@@ -201,6 +201,7 @@ __global__ void block_wide_external_discrete_kernel(
 
         if(threadIdx.x == 0)
             states[blockIdx.x] = state;
+        __syncthreads();
     }
 }
 
@@ -301,7 +302,6 @@ __global__ void init_rocrand_states_kernel(RocRandPrngType * states, const InitF
 
     for(size_t i = 0; i < GlobalSizes::items_per_thread; i++)
         f(i, offset, &states[offset + i]);
-        // rocrand_init((123456 ^ i), offset + i, 0, &states[offset + i]);
 }
 
 TEST(ExternalDiscreteDistributionTests, Philox4x32_10Test){
