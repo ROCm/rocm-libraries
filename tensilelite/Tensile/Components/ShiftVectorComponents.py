@@ -72,6 +72,7 @@ class ShiftVectorComponentsVALU(ShiftVectorComponents):
             # wgMT value
             wg = tP["wg"]
             tmpSgpr = tmpSgprInfo.idx
+            dummy   = writer.vgprPool.checkOut(1)
             tmpVgpr = writer.vgprPool.checkOut(1,"tmpVgpr")
             wgMT = writer.vgprPool.checkOut(1,"wgMT")
             tmpVgprRes = ContinuousRegister(tmpVgpr, 2)
@@ -92,40 +93,30 @@ class ShiftVectorComponentsVALU(ShiftVectorComponents):
 
             # qReg
             qReg = writer.vgprPool.checkOut(1,"qReg")
-            divisor = vectorWidth
-            # kStr += vectorStaticDivide(qReg, wgMT, divisor, tmpSgpr)
-            module.add(vectorStaticDivide(qReg, wgMT, divisor, tmpVgprRes))
+            module.add(vectorStaticDivide(qReg, wgMT, vectorWidth, tmpVgprRes))
 
             # rReg
             rReg = writer.vgprPool.checkOut(1,"rReg")
-            divisor = glvw
-            # kStr += vectorStaticRemainder(rReg, wgMT, divisor, tmpSgpr)
-            module.add(vectorStaticDivide(qReg, wgMT, divisor, tmpVgprRes))
+            module.add(vectorStaticRemainder(dummy, rReg, wgMT, glvw, tmpVgprRes, tmpSgprInfo))
 
             # qReg %/ SG
             eReg = writer.vgprPool.checkOut(1,"eReg")
             divisor = kernel[tP["sg"]]
-            # kStr += vectorStaticRemainder(eReg, qReg, divisor, tmpSgpr)
-            module.add(vectorStaticDivide(eReg, qReg, divisor, tmpVgprRes))
+            module.add(vectorStaticRemainder(dummy, eReg, qReg, divisor, tmpVgprRes, tmpSgprInfo))
 
             if tP["isA"]:
                 # thread = serial % SG0
                 thread = writer.vgprPool.checkOut(1,"thread")
                 divisor = kernel["SubGroup0"]
-                # kStr += vectorStaticRemainder(thread, "Serial", divisor, tmpSgpr)
-                module.add(vectorStaticRemainder(thread, "Serial", divisor, tmpSgpr))
-                #kStr += dump(vgpr(thread))
-                #kStr += dump(vgpr(thread))
+                module.add(vectorStaticRemainder(dummy, thread, "Serial", divisor, tmpVgprRes, tmpSgprInfo))
             else:
                 # thread = (serial / SG0) % SG1
                 sd0 = writer.vgprPool.checkOut(1,"sd0")
                 divisor = kernel["SubGroup0"]
-                # kStr += vectorStaticDivide(sd0, "Serial", divisor, tmpSgpr) # thread = serial / SG0
                 module.add(vectorStaticDivide(sd0, "Serial", divisor, tmpVgprRes))
                 divisor = kernel["SubGroup1"]
                 thread = writer.vgprPool.checkOut(1,"thread")
-                # kStr += vectorStaticRemainder(thread, sd0, divisor, tmpSgpr) # thread = (serial / SG0) % SG1
-                module.add(vectorStaticRemainder(thread, sd0, divisor, tmpSgpr))
+                module.add(vectorStaticRemainder(dummy, thread, sd0, divisor, tmpVgprRes, tmpSgprInfo))
                 writer.vgprPool.checkIn(sd0)
 
             # which glvw vector of thread to shift? wgMT / (SG0*VW) -> (wgMT%VW) / glvw
@@ -258,6 +249,8 @@ class ShiftVectorComponentsVALU(ShiftVectorComponents):
         writer.vgprPool.checkIn(eReg)
         writer.vgprPool.checkIn(thread)
         writer.vgprPool.checkIn(vReg)
+        writer.vgprPool.checkIn(tmpVgpr)
+        writer.vgprPool.checkIn(dummy)
         return module
 
 class ShiftVectorComponentsMFMA(ShiftVectorComponents):
