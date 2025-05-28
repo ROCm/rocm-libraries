@@ -2,6 +2,7 @@ name: TheRock CI
 
 on:
   push:
+    # will remove after testing
     branches:
       - users/geomin12/dynamic-selecting
   pull_request:
@@ -82,9 +83,10 @@ jobs:
 
       - name: Determine jobs to run
         id: job
-        if: steps.detect.outputs.subtrees
         env:
-          SUBTREES: ${{ steps.detect.outputs.subtrees }}
+          # will remove after testing
+          SUBTREES: "projects/rocprim\n"
+          # SUBTREES: ${{ steps.detect.outputs.subtrees }}
         run: |
           python ./TheRock/build_tools/github_actions/monorepo_configure_ci.py
 
