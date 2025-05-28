@@ -674,7 +674,7 @@ def run():
         logicFiles = filterLogicFilesByArchPredicates(logicFiles, set(archs), requestedDeviceIds)
         print1(f"# Filtered {numPrior - len(logicFiles)} logic files not matching requested predicates")
 
-    print2(f"# LibraryLogicFiles: {len(logicFiles)}")
+    print1(f"# LibraryLogicFiles: {len(logicFiles)}")
 
     for logicFile in logicFiles:
         print2("#   %s" % logicFile)

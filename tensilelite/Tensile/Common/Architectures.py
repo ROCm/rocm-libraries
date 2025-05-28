@@ -99,6 +99,8 @@ SUPPORTED_ARCH_DEVICE_IDS = {
     "id=75a0": "gfx950",
     "id=75a2": "gfx950",
     "id=75a3": "gfx950",
+    # This dictionary should be extended to add predicate-based
+    # filtering support for other architectures.
 }
 
 ARCH_DEVICE_ID_FALLBACKS = {
@@ -352,7 +354,7 @@ def filterLogicFilesByArchPredicates(
     if validFallbacks:
         print2("Using fallbacks:\n  " + "\n  ".join(map(str, validFallbacks)))
 
-    return list(exactMatches.union(validFallbacks))
+    return list(map(str, exactMatches.union(validFallbacks)))
 
 
 def splitArchsFromPredicates(archSpecs: List[str]) -> Tuple[List[str], Optional[Set[str]]]:
@@ -372,8 +374,9 @@ def splitArchsFromPredicates(archSpecs: List[str]) -> Tuple[List[str], Optional[
         match = re.match(pattern, archSpec)
         if match:
             archs.append(match.group(1).strip())
-            variantId = verifyPredicate(match.group(2))
-            variants.add(variantId)
+            variantIds = match.group(2).split(",")
+            for variantId in variantIds:
+                variants.add(verifyPredicate(variantId.strip()))
         else:
             archs.append(archSpec)
     return (archs, variants if variants else None)
@@ -394,5 +397,7 @@ def verifyPredicate(predicateSpec: str) -> str:
     if key == "id":
         if predicateSpec not in SUPPORTED_ARCH_DEVICE_IDS:
             raise ValueError(f"Invalid architecture variant: device ID not supported: {predicateSpec}")
+    else:
+        raise ValueError(f"Invalid predicate: only device ID-based predicates are currently supported: {predicateSpec}")
     return predicateSpec
 
