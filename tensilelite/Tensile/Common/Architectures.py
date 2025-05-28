@@ -95,6 +95,8 @@ SUPPORTED_ISA = [
     IsaVersion(12, 0, 1),
 ]
 
+SUPPORTED_EMULATION_DEVICE_IDS = {"id=0049", "id=0050", "id=0051", "id=0052", "id=0054", "id=0062"}
+
 SUPPORTED_ARCH_DEVICE_IDS = {
     "id=75a0": "gfx950",
     "id=75a2": "gfx950",
@@ -103,9 +105,10 @@ SUPPORTED_ARCH_DEVICE_IDS = {
     # filtering support for other architectures.
 }
 
+# Here, `None` refers to an unspecified device ID, or only emulation device IDs.
 ARCH_DEVICE_ID_FALLBACKS = {
-    "id=75a2": "id=75a0",
-    "id=75a3": "id=75a0",
+    "id=75a2": ["id=75a0"] + list(SUPPORTED_EMULATION_DEVICE_IDS),
+    "id=75a3": ["id=75a0"] + list(SUPPORTED_EMULATION_DEVICE_IDS),
 }
 
 
@@ -287,12 +290,9 @@ def _extractArchInfo(file: Union[str, Path]) -> ArchInfo:
             )
 
     def l3(line: str):
-        emulationIds = {"0049", "0050", "0051", "0052", "0054", "0062"}
         if re.match(r"- \[Device", line):
             devIds = re.findall(r"Device (\w+)", line)
             return set(f"id={id}" for id in devIds)
-        if re.match(r"-\[alldevices", line.lower().replace(" ", "")):
-            return None
         else:
             raise LogicFileError(f"No device IDs found: line: {line}")
 
@@ -321,7 +321,7 @@ def filterLogicFilesByArchPredicates(
         For each base filename, prefers exact matches over fallbacks.
     """
     fallbackIds = {
-        ARCH_DEVICE_ID_FALLBACKS[v] for v in requestedDeviceIds if v in ARCH_DEVICE_ID_FALLBACKS
+        fallbackId  for v in requestedDeviceIds if v in ARCH_DEVICE_ID_FALLBACKS for fallbackId in ARCH_DEVICE_ID_FALLBACKS[v]
     }
     exactMatches = set()
     fallbackMatches = dict()

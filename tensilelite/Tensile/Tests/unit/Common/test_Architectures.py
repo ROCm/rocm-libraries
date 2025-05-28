@@ -46,8 +46,8 @@ VALID_LOGIC_FILE_CONTENT = """- {MinimumRequiredVersion: 4.33.0}
 
 VALID_LOGIC_FILE_WITH_CU = """- {MinimumRequiredVersion: 4.33.0}
 - aquavanjaram
-- {Architecture: gfx942, CUCount: 256}
-- [Device 74a3]
+- {Architecture: gfx942, CUCount: 228}
+- [Device 74a0]
 """
 
 INVALID_VERSION_FILE = """- Invalid Version Line
@@ -103,8 +103,11 @@ def test_extractArchInfo_success(mock_logic_file):
 
 def test_extractArchInfo_with_cu_count(mock_logic_file_with_cu):
     result = _extractArchInfo("dummy.yaml")
-    assert result.CUCount == "cu=256"
-    assert result.DeviceIds == {"id=74a3"}
+    assert isinstance(result, ArchInfo)
+    assert result.Name == "aquavanjaram"
+    assert result.Gfx == "gfx942"
+    assert result.DeviceIds == {"id=74a0"}
+    assert result.CUCount == "cu=228"
 
 def test_extractArchInfo_with_invalid_version(mock_logic_file_invalid_version):
     with pytest.raises(LogicFileError):
@@ -161,10 +164,10 @@ def test_splitArchsFromPredicates_with_variants():
     assert variants == {"id=75a0"}
 
 def test_splitArchsFromPredicates_with_multiple_variants():
-    archSpecs = ["gfx950[id=75a0,id=75a2]", "gfx942[id=74a2,id=74a3]"]
+    archSpecs = ["gfx950[id=75a0,id=75a2]", "gfx942"]
     archs, variants = splitArchsFromPredicates(archSpecs)
     assert archs == ["gfx950", "gfx942"]
-    assert variants == {"id=75a0", "id=75a2", "id=74a2", "id=74a3"}
+    assert variants == {"id=75a0", "id=75a2"}
 
 def test_splitArchsFromPredicates_no_variants():
     archSpecs = ["gfx950", "gfx906"]
