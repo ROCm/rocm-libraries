@@ -105,7 +105,8 @@ SUPPORTED_ARCH_DEVICE_IDS = {
     # filtering support for other architectures.
 }
 
-# Here, `None` refers to an unspecified device ID, or only emulation device IDs.
+# Here, emulation IDs are included in the fallback list as a stopgap
+# until proper device IDs are added to the logic files.
 ARCH_DEVICE_ID_FALLBACKS = {
     "id=75a2": ["id=75a0"] + list(SUPPORTED_EMULATION_DEVICE_IDS),
     "id=75a3": ["id=75a0"] + list(SUPPORTED_EMULATION_DEVICE_IDS),
