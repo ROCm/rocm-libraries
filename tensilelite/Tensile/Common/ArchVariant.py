@@ -28,6 +28,11 @@ from typing import NamedTuple, Optional, Union, Tuple, Set, Dict, List
 
 from .Utilities import printWarning, print2
 
+archVariantFallbacks = {
+    "id=75a2": "id=75a0",
+    "id=75a3": "id=75a0",
+}
+
 class ArchVariant(NamedTuple):
     Name: str
     Gfx: str
@@ -94,30 +99,44 @@ def _extractArchVariant(file: Union[str, Path]) -> ArchVariant:
     return ArchVariant(Name=name, Gfx=gfx, DeviceIds=deviceIds, CUCount=cu)
 
 
-def filterVariants(logicFiles: List[str], archs: List[str], variants: List[str]) -> List[str]:
+def filterVariants(logicFiles: List[str], archs: Set[str], requestedDeviceIds: Set[str]) -> List[str]:
     """Filter logic files based on architecture and device ID variants.
     
     Args:
         logicFiles: List of logic file paths to filter
         archs: List of target architectures (e.g. ['gfx908', 'gfx90a'])
-        variants: List of device ID variants (e.g. ['id=1234', 'id=5678'])
+        requestedDeviceIds: Set of device ID variants (e.g. {'id=1234', 'id=5678'})
     
     Returns:
-        List of logic files that match both architecture and variant requirements
+        List of logic files that match architecture and variant requirements.
+        For each base filename, prefers exact variant matches over fallbacks.
     """
-    keep = []
+    fallbackIds = {archVariantFallbacks[v] for v in requestedDeviceIds if v in archVariantFallbacks}
+    exactMatches = set()
+    fallbackMatches = dict()
     
-    for logicFile in logicFiles:
-        variantInfo = _extractArchVariant(logicFile)
+    for logicFile in map(Path, logicFiles):
+        variant = _extractArchVariant(logicFile)
         
-        if not variantInfo.Gfx in archs:
-            print2(f"Skipping {logicFile}: Architecture {variantInfo.Gfx} not in targets {archs}")
+        if variant.Gfx not in archs:
+            print2(f"Skipping {logicFile}\n  because architecture {variant.Gfx} not in targets {archs}")
             continue
-        if not any(dev_id in variants for dev_id in variantInfo.DeviceIds):
-            print2(f"Skipping {logicFile}: No matching device IDs between {variantInfo.DeviceIds} and {variants}")
-            continue
-        keep.append(logicFile)
-    return keep 
+
+        deviceIds = variant.DeviceIds
+        if any(devId in requestedDeviceIds for devId in deviceIds):
+            exactMatches.add(logicFile)
+        elif any(devId in fallbackIds for devId in deviceIds):
+            fallbackMatches[logicFile.name] = logicFile
+        else:
+            print2(f"Skipping {logicFile}\n  because device IDs {deviceIds} don't match requested variants {requestedDeviceIds} or fallbacks {fallbackIds}")
+
+    validFallbacks = {path for name, path in fallbackMatches.items() 
+                     if not any(em.name == name for em in exactMatches)}
+    
+    if validFallbacks:
+        print2("Using fallbacks:\n  " + "\n  ".join(map(str, validFallbacks)))
+    
+    return list(exactMatches.union(validFallbacks))
 
 
 def splitVariantsFromArchs(archSpecs: List[str]) -> Tuple[List[str], Optional[Set[str]]]:

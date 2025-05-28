@@ -673,15 +673,13 @@ def run():
     if variants:
         print1("# Variants: " + ' ,'.join(variants))
         numPrior = len(logicFiles)
-        logicFiles = filterVariants(logicFiles, archs, variants)
-        print1(f"# Filtered {numPrior - len(logicFiles)} logic files not matching request variants")
+        logicFiles = filterVariants(logicFiles, set(archs), variants)
+        print1(f"# Filtered {numPrior - len(logicFiles)} logic files not matching requested variants")
 
     print2(f"# LibraryLogicFiles: {len(logicFiles)}")
 
     for logicFile in logicFiles:
         print2("#   %s" % logicFile)
-
-    exit(3)
 
     start_glds = timer()
     solutions, masterLibraries = generateLogicDataAndSolutions(
