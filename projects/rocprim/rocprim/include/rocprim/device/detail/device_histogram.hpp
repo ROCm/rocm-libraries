@@ -460,23 +460,28 @@ template<unsigned int BlockSize,
 ROCPRIM_DEVICE ROCPRIM_INLINE
 void histogram_global(SampleIterator                                   samples,
                       unsigned int                                     columns,
+                      unsigned int                                     rows,
                       unsigned int                                     row_stride,
                       fixed_array<Counter*, ActiveChannels>            histogram,
                       const fixed_array<SampleToBinOp, ActiveChannels> sample_to_bin_op,
                       const fixed_array<unsigned int, ActiveChannels>  bins_bits,
                       const fixed_array<unsigned int, ActiveChannels>  bins,
-                      unsigned int*                                    private_histograms)
+                      unsigned int*                                    private_histograms,
+                      unsigned int                                     max_blocks,
+                      unsigned int                                     virtual_max_blocks,
+                      unsigned int*                                    block_id_count)
 {
     using sample_type        = typename std::iterator_traits<SampleIterator>::value_type;
     using sample_vector_type = sample_vector<sample_type, Channels>;
 
     constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
 
-    const unsigned int flat_id       = ::rocprim::detail::block_thread_id<0>();
-    const unsigned int block_id0     = ::rocprim::detail::block_id<0>();
-    const unsigned int block_id1     = ::rocprim::detail::block_id<1>();
+    const unsigned int flat_id       = ::rocprim::flat_block_thread_id();
     const unsigned int flat_block_id = ::rocprim::flat_block_id();
-    const unsigned int block_offset  = block_id0 * items_per_block;
+    const unsigned int total_items   = rows * columns;
+
+    __shared__
+    unsigned int       block_id_count_shared;
 
     // starts of the first histogram for each channel
     unsigned int* block_histogram[ActiveChannels];
@@ -492,39 +497,62 @@ void histogram_global(SampleIterator                                   samples,
         block_histogram[channel] += flat_block_id * total_bins;
     }
 
-    samples += block_id1 * row_stride + Channels * block_offset;
-
-    sample_vector_type values[ItemsPerThread];
-    unsigned int       valid_count;
-    if(block_offset + items_per_block <= columns)
+    unsigned int virtual_block_id = 0;
+    while(virtual_block_id < virtual_max_blocks)
     {
-        valid_count = items_per_block;
-        load_samples<BlockSize>(flat_id, samples, values);
-    }
-    else
-    {
-        valid_count = columns - block_offset;
-        load_samples<BlockSize>(flat_id, samples, values, valid_count);
-    }
-
-    ROCPRIM_UNROLL
-    for(unsigned int i = 0; i < ItemsPerThread; i++)
-    {
-        for(unsigned int channel = 0; channel < ActiveChannels; channel++)
+        if(flat_id == 0)
         {
-            unsigned int bin;
-            if(sample_to_bin_op[channel](values[i].values[channel], bin))
-            {
-                const unsigned int pos = flat_id * ItemsPerThread + i;
-                lane_mask_type     same_bin_lanes_mask
-                    = ::rocprim::match_any(bin, bins_bits[channel], pos < valid_count);
+            block_id_count_shared = ::rocprim::detail::atomic_add(block_id_count, 1u);
+        }
 
-                if(::rocprim::group_elect(same_bin_lanes_mask))
+        ::rocprim::syncthreads();
+
+        virtual_block_id = block_id_count_shared;
+
+        if (virtual_block_id >= virtual_max_blocks)
+        {
+            break;
+        }
+
+        const unsigned int row_id       = virtual_block_id % rows;
+        const unsigned int col_id       = virtual_block_id / rows;
+        const unsigned int block_offset = col_id * items_per_block;
+
+        SampleIterator samples_block = samples + row_id * row_stride + block_offset * Channels;
+
+        sample_vector_type values[ItemsPerThread];
+        unsigned int       valid_count;
+
+        if(block_offset + items_per_block <= columns)
+        {
+            valid_count = items_per_block;
+            load_samples<BlockSize>(flat_id, samples_block, values);
+        }
+        else
+        {
+            valid_count = columns - block_offset;
+            load_samples<BlockSize>(flat_id, samples_block, values, valid_count);
+        }
+
+        ROCPRIM_UNROLL
+        for(unsigned int i = 0; i < ItemsPerThread; i++)
+        {
+            for(unsigned int channel = 0; channel < ActiveChannels; channel++)
+            {
+                unsigned int bin;
+                if(sample_to_bin_op[channel](values[i].values[channel], bin))
                 {
-                    // Write the number of lanes having this bin,
-                    // if the current lane is the first (and maybe only) lane with this bin.
-                    ::rocprim::detail::atomic_add(&block_histogram[channel][bin],
-                                                  ::rocprim::bit_count(same_bin_lanes_mask));
+                    const unsigned int pos = flat_id * ItemsPerThread + i;
+                    lane_mask_type     same_bin_lanes_mask
+                        = ::rocprim::match_any(bin, bins_bits[channel], pos < valid_count);
+
+                    if(::rocprim::group_elect(same_bin_lanes_mask))
+                    {
+                        // Write the number of lanes having this bin,
+                        // if the current lane is the first (and maybe only) lane with this bin.
+                        ::rocprim::detail::atomic_add(&block_histogram[channel][bin],
+                                                      ::rocprim::bit_count(same_bin_lanes_mask));
+                    }
                 }
             }
         }
