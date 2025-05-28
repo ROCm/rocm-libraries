@@ -51,6 +51,7 @@ from Tensile.Common import (
     setVerbosity,
     getVerbosity,
     splitVariantsFromArchs,
+    filterVariants,
 )
 from Tensile.Common.Architectures import gfxToIsa, isaToGfx, SUPPORTED_GFX
 from Tensile.Common.Capabilities import makeIsaInfoMap
@@ -656,10 +657,11 @@ def run():
         arguments["LogicPath"], f"**/{arguments['LogicFilter']}{logicExtFormat}"
     )
     print1(f"# LogicFilter:       {globPattern}")
-    logicFiles = (
-        os.path.join(arguments["LogicPath"], file)
-        for file in glob.iglob(globPattern, recursive=True)
-    )
+    logicFiles = [
+        file for file in glob.iglob(globPattern, recursive=True)
+    ]
+
+    print("logicFiles: ", logicFiles)
     logicFiles = [file for file in logicFiles if validLogicFile(Path(file))]
 
     print1(f"# Experimental:      {arguments['Experimental']}")
@@ -668,10 +670,18 @@ def run():
             file for file in logicFiles if "experimental" not in map(str.lower, Path(file).parts)
         ]
 
+    if variants:
+        print1("# Variants:\n" + "\n".join(f"#   {arch}: {', '.join(v) if v else 'all variants'}" for arch, v in variants.items()))
+        numPrior = len(logicFiles)
+        logicFiles = filterVariants(logicFiles, variants)
+        print1(f"#   Filtered {numPrior - len(logicFiles)} logic files")
+
     print2(f"# LibraryLogicFiles: {len(logicFiles)}")
 
     for logicFile in logicFiles:
         print2("#   %s" % logicFile)
+
+    exit(3)
 
     start_glds = timer()
     solutions, masterLibraries = generateLogicDataAndSolutions(
