@@ -169,3 +169,73 @@ TEST(threefry_prng_state_tests, discard_sequence_test)
     EXPECT_EQ(state.counter.y, 457ULL);
     EXPECT_EQ(state.substate, 0U);
 }
+
+TEST(threefry_additional_tests, rocrand_test)
+{
+    // making sure the outputs are uniformly distributed!
+    rocrand_state_threefry2x64_20 state;
+
+    rocrand_init(0, 0, 0, &state);
+    size_t testSize = 40000;
+
+    unsigned long long * output = new unsigned long long[testSize];
+
+    double mean = 0;
+    for(size_t i = 0; i < testSize; i++){
+        output[i] = rocrand(&state);
+        mean += static_cast<double>(output[i]);
+    }
+    mean /= testSize;
+
+    double std = 0.0;
+    for(size_t i = 0; i < testSize; i++)
+        std += std::pow(output[i] - mean, 2);
+
+    std = std::sqrt(std / testSize);
+
+    double maxi = (double) std::numeric_limits<unsigned long long>::max();
+    double eMean = 0.5 * (maxi); // 0.5(a + b)
+    double eStd = (maxi) / (2 * std::sqrt(3)); // (b - a) / (2*3^0.5)
+
+    ASSERT_NEAR(mean, eMean, eMean * 0.1);
+    ASSERT_NEAR(std, eStd, eStd * 0.1);
+
+    delete [] output;
+}
+
+TEST(threefry_additional_tests, rocrand2_test)
+{
+    // making sure the outputs are uniformly distributed!
+    rocrand_state_threefry2x64_20 state;
+
+    rocrand_init(0, 0, 0, &state);
+    size_t testSize = 40000;
+
+    unsigned long long * output = new unsigned long long[testSize];
+
+    double mean = 0;
+    for(size_t i = 0; i < testSize; i += 2){
+        ulonglong2 t = rocrand2(&state);
+        output[i] = t.x;
+        output[i + 1] = t.y;
+        mean += static_cast<double>(output[i]); 
+        mean += static_cast<double>(output[i + 1]);
+    }
+    mean /= testSize;
+
+    double std = 0.0;
+    for(size_t i = 0; i < testSize; i++)
+        std += std::pow(output[i] - mean, 2);
+
+    std = std::sqrt(std / testSize);
+
+    double maxi = (double) std::numeric_limits<unsigned long long>::max();
+    // min val is 0
+    double eMean = 0.5 * (maxi); // 0.5(a + b)
+    double eStd = (maxi) / (2 * std::sqrt(3)); // (b - a) / (2*3^0.5)
+
+    ASSERT_NEAR(mean, eMean, eMean * 0.1);
+    ASSERT_NEAR(std, eStd, eStd * 0.1);\
+
+    delete [] output;
+}
