@@ -69,7 +69,7 @@ THRUST_HIP_RUNTIME_FUNCTION OutputIt lower_bound(
   hipStream_t stream  = hip_rocprim::stream(policy);
   bool debug_sync     = THRUST_HIP_DEBUG_SYNC_FLAG;
 
-  thrust::detail::wrapped_function<CompareOp, bool> wrapped_op(compare_op);
+  thrust::detail::wrapped_function<CompareOp, bool> wrapped_op{compare_op};
 
   // Determine temporary device storage requirements.
   hip_rocprim::throw_on_error(
@@ -133,7 +133,7 @@ THRUST_HIP_RUNTIME_FUNCTION OutputIt upper_bound(
   hipStream_t stream  = hip_rocprim::stream(policy);
   bool debug_sync     = THRUST_HIP_DEBUG_SYNC_FLAG;
 
-  thrust::detail::wrapped_function<CompareOp, bool> wrapped_op(compare_op);
+  thrust::detail::wrapped_function<CompareOp, bool> wrapped_op{compare_op};
 
   // Determine temporary device storage requirements.
   hip_rocprim::throw_on_error(
@@ -197,7 +197,7 @@ THRUST_HIP_RUNTIME_FUNCTION OutputIt binary_search(
   hipStream_t stream  = hip_rocprim::stream(policy);
   bool debug_sync     = THRUST_HIP_DEBUG_SYNC_FLAG;
 
-  thrust::detail::wrapped_function<CompareOp, bool> wrapped_op(compare_op);
+  thrust::detail::wrapped_function<CompareOp, bool> wrapped_op{compare_op};
 
   // Determine temporary device storage requirements.
   hip_rocprim::throw_on_error(
