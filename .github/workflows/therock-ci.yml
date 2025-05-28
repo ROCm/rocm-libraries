@@ -79,7 +79,6 @@ jobs:
 
       - name: Determine jobs to run
         id: jobs
-        if: steps.detect.outputs.subtrees
         env:
           SUBTREES: ${{ steps.detect.outputs.subtrees }}
         run: |
