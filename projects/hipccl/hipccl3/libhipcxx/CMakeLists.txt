@@ -21,7 +21,7 @@
 # 3.21 is for HIP
 cmake_minimum_required(VERSION 3.21)
 
-# Determine whether libcudacxx is the top-level project or included into
+# Determine whether libhipcxx is the top-level project or included into
 # another project via add_subdirectory().
 if ("${CMAKE_SOURCE_DIR}" STREQUAL "${CMAKE_CURRENT_LIST_DIR}")
   set(LIBCUDACXX_TOPLEVEL_PROJECT ON)
@@ -31,18 +31,18 @@ if (LIBCUDACXX_TOPLEVEL_PROJECT)
   cmake_minimum_required(VERSION 3.21)
 endif()
 
-set(PACKAGE_NAME libcudacxx)
+set(PACKAGE_NAME libhipcxx)
 set(PACKAGE_VERSION 11.0)
 set(PACKAGE_STRING "${PACKAGE_NAME} ${PACKAGE_VERSION}")
-project(libcudacxx LANGUAGES CXX)
+project(libhipcxx LANGUAGES CXX)
 
-option(libcudacxx_ENABLE_INSTALL_RULES "Enable installation of libcu++" ${LIBCUDACXX_TOPLEVEL_PROJECT})
-if (libcudacxx_ENABLE_INSTALL_RULES)
-  include(cmake/libcudacxxInstallRules.cmake)
+option(libhipcxx_ENABLE_INSTALL_RULES "Enable installation of libcu++" ${LIBCUDACXX_TOPLEVEL_PROJECT})
+if (libhipcxx_ENABLE_INSTALL_RULES)
+  include(cmake/libhipcxxInstallRules.cmake)
 endif()
 
 if (NOT LIBCUDACXX_TOPLEVEL_PROJECT)
-  include(cmake/libcudacxxAddSubdir.cmake)
+  include(cmake/libhipcxxAddSubdir.cmake)
   return()
 endif()
 
@@ -51,20 +51,20 @@ include(CTest)
 enable_testing()
 
 # Add codegen module
-option(libcudacxx_ENABLE_CODEGEN "Enable libcudacxx's atomics backend codegen and tests." OFF)
-if (libcudacxx_ENABLE_CODEGEN)
+option(libhipcxx_ENABLE_CODEGEN "Enable libhipcxx's atomics backend codegen and tests." OFF)
+if (libhipcxx_ENABLE_CODEGEN)
   add_subdirectory(codegen)
 endif()
 
 # Note that this currently returns and skips the rest of the build
 # system.
-option(libcudacxx_ENABLE_CMAKE_TESTS "Enable ctest-based testing." ON)
-if (libcudacxx_ENABLE_CMAKE_TESTS)
+option(libhipcxx_ENABLE_CMAKE_TESTS "Enable ctest-based testing." ON)
+if (libhipcxx_ENABLE_CMAKE_TESTS)
   add_subdirectory(cmake/test)
 endif()
 
-set(CMAKE_MODULE_PATH "${libcudacxx_SOURCE_DIR}/cmake")
-set(LLVM_PATH "${libcudacxx_SOURCE_DIR}" CACHE STRING "" FORCE)
+set(CMAKE_MODULE_PATH "${libhipcxx_SOURCE_DIR}/cmake")
+set(LLVM_PATH "${libhipcxx_SOURCE_DIR}" CACHE STRING "" FORCE)
 
 # Configuration options.
 option(LIBCUDACXX_ENABLE_CUDA "Enable the CUDA language support." OFF)

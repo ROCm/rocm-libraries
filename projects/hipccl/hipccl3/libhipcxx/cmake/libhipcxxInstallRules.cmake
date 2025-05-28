@@ -1,8 +1,25 @@
-option(libcudacxx_ENABLE_INSTALL_RULES
-  "Enable installation of libcudacxx" ${LIBCUDACXX_TOPLEVEL_PROJECT}
+# Modifications Copyright (c) 2025 Advanced Micro Devices, Inc.
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+option(libhipcxx_ENABLE_INSTALL_RULES
+  "Enable installation of libhipcxx" ${LIBCUDACXX_TOPLEVEL_PROJECT}
 )
 
-if (NOT libcudacxx_ENABLE_INSTALL_RULES)
+if (NOT libhipcxx_ENABLE_INSTALL_RULES)
   return()
 endif()
 
@@ -10,46 +27,28 @@ endif()
 include(GNUInstallDirs)
 
 # Libcudacxx headers
-install(DIRECTORY "${libcudacxx_SOURCE_DIR}/include/cuda"
+install(DIRECTORY "${libhipcxx_SOURCE_DIR}/include/cuda"
   DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
   PATTERN CMakeLists.txt EXCLUDE
 )
-install(DIRECTORY "${libcudacxx_SOURCE_DIR}/include/nv"
+install(DIRECTORY "${libhipcxx_SOURCE_DIR}/include/nv"
   DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
   PATTERN CMakeLists.txt EXCLUDE
 )
 
 # Libcudacxx cmake package
-install(DIRECTORY "${libcudacxx_SOURCE_DIR}/lib/cmake/libcudacxx"
+install(DIRECTORY "${libhipcxx_SOURCE_DIR}/lib/cmake/libhipcxx"
   DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake"
-  REGEX .*header-search.cmake.* EXCLUDE
+  PATTERN *.cmake.in EXCLUDE
 )
 
 # Need to configure a file to store CMAKE_INSTALL_INCLUDEDIR
 # since it can be defined by the user. This is common to work around collisions
 # with the CTK installed headers.
-set(_CCCL_RELATIVE_LIBDIR "${CMAKE_INSTALL_LIBDIR}")
-if(_CCCL_RELATIVE_LIBDIR MATCHES "^${CMAKE_INSTALL_PREFIX}")
-  # libdir is an abs string that starts with prefix
-  string(LENGTH "${CMAKE_INSTALL_PREFIX}" to_remove)
-  string(SUBSTRING "${_CCCL_RELATIVE_LIBDIR}" ${to_remove} -1 relative)
-  # remove any leading "/""
-  string(REGEX REPLACE "^/(.)" "\\1" _CCCL_RELATIVE_LIBDIR "${relative}")
-elseif(_CCCL_RELATIVE_LIBDIR MATCHES "^/")
-  message(FATAL_ERROR "CMAKE_INSTALL_LIBDIR ('${CMAKE_INSTALL_LIBDIR}') must be a relative path or an absolute path under CMAKE_INSTALL_PREFIX ('${CMAKE_INSTALL_PREFIX}')")
-endif()
-set(install_location "${_CCCL_RELATIVE_LIBDIR}/cmake/libcudacxx")
-
-# Transform to a list of directories, replace each directory with "../"
-# and convert back to a string
-string(REGEX REPLACE "/" ";" from_install_prefix "${install_location}")
-list(TRANSFORM from_install_prefix REPLACE ".+" "../")
-list(JOIN from_install_prefix "" from_install_prefix)
-
-configure_file("${libcudacxx_SOURCE_DIR}/lib/cmake/libcudacxx/libcudacxx-header-search.cmake.in"
-  "${libcudacxx_BINARY_DIR}/lib/cmake/libcudacxx/libcudacxx-header-search.cmake"
+configure_file("${libhipcxx_SOURCE_DIR}/lib/cmake/libhipcxx/libhipcxx-header-search.cmake.in"
+  "${libhipcxx_BINARY_DIR}/lib/cmake/libhipcxx/libhipcxx-header-search.cmake"
   @ONLY
 )
-install(FILES "${libcudacxx_BINARY_DIR}/lib/cmake/libcudacxx/libcudacxx-header-search.cmake"
-  DESTINATION "${install_location}"
+install(FILES "${libhipcxx_BINARY_DIR}/lib/cmake/libhipcxx/libhipcxx-header-search.cmake"
+  DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/libhipcxx"
 )
