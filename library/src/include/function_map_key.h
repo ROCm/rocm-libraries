@@ -41,7 +41,6 @@ struct KernelConfig
     int                 workgroup_size        = 0;
     std::array<int, 2>  threads_per_transform = {0, 0};
     std::vector<size_t> factors               = {0};
-    std::vector<size_t> factors_pp            = {0};
     // above data is what we can tune
     //
     // the followings are other information of this kernel.
@@ -70,7 +69,6 @@ struct KernelConfig
 
     KernelConfig(bool                  use_3steps,
                  std::vector<size_t>&& factors,
-                 std::vector<size_t>&& factors_pp,
                  int                   tpb,
                  int                   wgs,
                  std::array<int, 2>&&  tpt,
@@ -91,7 +89,6 @@ struct KernelConfig
         , workgroup_size(wgs)
         , threads_per_transform(tpt)
         , factors(factors)
-        , factors_pp(factors_pp)
         , ebType(ebType)
         , direction(direction)
         , static_dim(static_dim)
@@ -112,8 +109,7 @@ struct KernelConfig
                         transforms_per_block,
                         workgroup_size,
                         threads_per_transform,
-                        factors,
-                        factors_pp)
+                        factors)
                == std::tie(rhs.use_3steps_large_twd,
                            rhs.half_lds,
                            rhs.direct_to_from_reg,
@@ -121,8 +117,7 @@ struct KernelConfig
                            rhs.transforms_per_block,
                            rhs.workgroup_size,
                            rhs.threads_per_transform,
-                           rhs.factors,
-                           rhs.factors_pp);
+                           rhs.factors);
     }
 
     bool operator<(const KernelConfig& rhs) const
@@ -134,8 +129,7 @@ struct KernelConfig
                         transforms_per_block,
                         workgroup_size,
                         threads_per_transform,
-                        factors,
-                        factors_pp)
+                        factors)
                < std::tie(rhs.use_3steps_large_twd,
                           rhs.half_lds,
                           rhs.direct_to_from_reg,
@@ -143,8 +137,7 @@ struct KernelConfig
                           rhs.transforms_per_block,
                           rhs.workgroup_size,
                           rhs.threads_per_transform,
-                          rhs.factors,
-                          rhs.factors_pp);
+                          rhs.factors);
     }
 
     std::string Print() const
@@ -161,15 +154,6 @@ struct KernelConfig
 
         std::string COMMA = "";
         for(auto factor : factors)
-        {
-            ss << COMMA << factor;
-            COMMA = ", ";
-        }
-        ss << "]";
-
-        ss << ", factors_pp: [";
-        COMMA = "";
-        for(auto factor : factors_pp)
         {
             ss << COMMA << factor;
             COMMA = ", ";
@@ -210,12 +194,8 @@ namespace std
             // which means the maximal factorization pass is 8
             auto factors_max_len = config.factors;
             factors_max_len.resize(TWIDDLES_MAX_RADICES);
-            for(auto& v : factors_max_len)
-                h ^= std::hash<size_t>{}(v);
 
-            auto factors_pp_max_len = config.factors_pp;
-            factors_pp_max_len.resize(TWIDDLES_MAX_RADICES);
-            for(auto& v : factors_pp_max_len)
+            for(auto& v : factors_max_len)
                 h ^= std::hash<size_t>{}(v);
             return h;
         }
@@ -240,7 +220,6 @@ struct ToString<KernelConfig>
         str += FieldDescriptor<int>().describe("wgs", value.workgroup_size) + ",";
         str += VectorFieldDescriptor<int>().describe("tpt", tpt) + ",";
         str += VectorFieldDescriptor<size_t>().describe("factors", value.factors) + ",";
-        str += VectorFieldDescriptor<size_t>().describe("factors_pp", value.factors_pp) + ",";
         // below: not tunable data, for AOT cache
         str += FieldDescriptor<std::string>().describe("ebtype", PrintEBType(value.ebType)) + ",";
         str += FieldDescriptor<int>().describe("direction", value.direction) + ",";
@@ -275,7 +254,6 @@ struct FromString<KernelConfig>
         FieldParser<int>().parse("wgs", ret.workgroup_size, current);
         VectorFieldParser<int>().parse("tpt", tpt, current);
         VectorFieldParser<size_t>().parse("factors", ret.factors, current);
-        VectorFieldParser<size_t>().parse("factors_pp", ret.factors_pp, current);
 
         if(DescriptorFormatVersion::UsingVersion < 2)
         {

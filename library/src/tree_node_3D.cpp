@@ -681,16 +681,15 @@ void RC3DNode::AssignParams_internal()
  *****************************************************/
 size_t PP3DNode::GetPPOffDim() const
 {
-    // CS_3D_PP will have two corresponding kernels in
-    // the function pool, both will have the same off-dim
-    // value, and at least of one them must be an SBCC PP
-    auto child_scheme = CS_KERNEL_STOCKHAM_PP_BLOCK_CC;
-
     auto key = PPFMKey(length[0], length[1], length[2], precision, scheme);
     if(!pool.has_function(key))
         throw std::runtime_error("GetPPOffDim failed to find a valid kernel");
 
-    auto kernel = pool.get_kernel(key, child_scheme);
+    // CS_3D_PP will have two corresponding kernels in
+    // the function pool, both will have the same off-dim
+    // value, and at least of one them must be an SBCC PP
+    auto child_scheme = CS_KERNEL_STOCKHAM_PP_BLOCK_CC;
+    auto kernel       = pool.get_kernel(key, child_scheme);
 
     return kernel.pp_params.off_dim;
 }

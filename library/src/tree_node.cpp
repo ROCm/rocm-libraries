@@ -212,7 +212,8 @@ bool LeafNode::KernelCheck(std::vector<FMKey>& kernel_keys)
     // get the final key and check if we have the kernel.
     // Note that the check is trivial if we are using "specified_key"
     // since we definitly have the kernel, but not trivial if it's the auto-gen key
-    HasKernel();
+    if(!HasKernel())
+        return false;
 
     GetKernelFactors();
 
@@ -310,7 +311,6 @@ void LeafNode::SetupGridParam(GridParam& gp)
                 double_half_lds_alloc = true;
             }
 
-            // no support for half-lds in partial-pass mode
             auto kernel = pool.get_kernel(key);
             if(kernel.half_lds && (!double_half_lds_alloc))
                 gp.lds_bytes /= 2;

@@ -381,6 +381,8 @@ std::string stockham_rtc(const StockhamGeneratorSpecs&    specs,
             device = std::make_unique<Function>(kernel_pp->generate_device_function());
             break;
         }
+        default:
+            throw std::runtime_error("unhandled partial pass type");
         }
 
         if(fuseBluestein)

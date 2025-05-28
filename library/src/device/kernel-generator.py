@@ -1072,10 +1072,10 @@ def list_large_kernels():
     return sbcc_kernels + sbcr_kernels + sbrc_kernels
 
 def list_3d_partial_pass_kernels():
-    """Return list of to generate."""
+    """Return list of partial-pass 3D kernels to generate."""
     
     pp_3d_kernels = [                
-        NS(length=[64,64,64], dims=[0, 2], factors=[[8, 8],[4, 4, 4]], factors_pp=[[4],[16]], threads_per_transform=[8, 8], workgroup_size=[64,128], direct_to_from_reg=[False, False])
+        NS(length=[64,64,64], dims=[0, 2], factors=[[8, 8],[4, 4, 4]], factors_pp=[[4],[16]], threads_per_transform=[8, 8], workgroup_size=[64,128], direct_to_from_reg=[False, False]),
     ]
 
     expanded = []
@@ -1336,7 +1336,7 @@ def cli():
     #
 
     kernels = []
-    # move 2d out from all, no need to iterate the 2d-kernels for non-2d patterns    
+    # move 2d out from all, no need to iterate the 2d-kernels for non-2d patterns
     kernels_2d = list_2d_kernels()
     kernel_3d_pp = list_3d_partial_pass_kernels()
     all_kernels = list_small_kernels() + list_large_kernels()
