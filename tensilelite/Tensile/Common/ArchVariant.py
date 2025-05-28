@@ -26,7 +26,7 @@ import re
 from pathlib import Path
 from typing import NamedTuple, Optional, Union, Tuple, Set, Dict, List
 
-from .Utilities import printWarning
+from .Utilities import printWarning, print2
 
 class ArchVariant(NamedTuple):
     Name: str
@@ -79,10 +79,6 @@ def _extractArchVariant(file: Union[str, Path]) -> ArchVariant:
         emulationIds = {"0049", "0050", "0051", "0052", "0054", "0062"}
         if re.match(r"- \[Device", line):
             devIds = re.findall(r"Device (\w+)", line)
-
-            if any(id in emulationIds for id in devIds):
-                printWarning("Emulation device ID(s) found, ignoring...")
-                devIds = filter(lambda id: id not in emulationIds, devIds)
             return set(f"id={id}" for id in devIds)
         if re.match(r"-\[alldevices", line.lower().replace(" ", "")):
             return None
@@ -98,70 +94,52 @@ def _extractArchVariant(file: Union[str, Path]) -> ArchVariant:
     return ArchVariant(Name=name, Gfx=gfx, DeviceIds=deviceIds, CUCount=cu)
 
 
-def _addVariantMap(variantFiles: Dict[str, Set[Tuple[Path, str]]], spec: str, path: Path, fname: str) -> bool:
-    if fname not in {x for _, x in variantFiles[spec]}:
-        variantFiles[spec].add((path, fname))
-        return True
-    return False
-
-
-def _populateVariantMap(variantMap: Dict[str, Dict[str, Set[Tuple[Path, str]]]], targetLogicFile: Path, fallbackKey: str):
-        file = Path(targetLogicFile)
-        path, fname = file.parent, file.name
-
-        variant = _extractArchVariant(file)
-        if variant.Gfx not in variantMap:
-            return
-
-        variantFiles = variantMap[variant.Gfx]
-
-        # If CU and ID are both None, then this is a fallback file b/c no predicates are specified
-        if variant.CUCount is None and variant.DeviceIds is None:
-            if all(fname not in {nm for _, nm in variantFiles[spec]} for spec in variantFiles if spec != fallbackKey):
-                variantFiles[fallbackKey].add((path, fname))
-        else:
-            removeFallbacks= []
-            for spec in variantFiles:
-                if "id" in spec and variant.DeviceIds:
-                    removeFallbacks.extend(_addVariantMap(variantFiles, spec, path, fname) for id in variant.DeviceIds if id == spec)
-                if "cu" in spec and variant.CUCount:
-                    removeFallbacks.append(_addVariantMap(variantFiles, spec, path, fname) if variant.CUCount == spec else False)
-
-            if removeFallbacks and all(removeFallbacks):
-                variantFiles["fallback"] = set(filter(lambda x: x[1] != fname, variantFiles[fallbackKey]))
-
-def filterVariants(logicFiles: List[str], variants: Dict[str, Dict[str, Set[Tuple[Path, str]]]]) -> List[str]:
-    fallback = "fallback"
-    # A `spec` here is a variant specification passed via the command line, e.g., "cu=64"
-    # This is how the code differentiates variants of the same gfx, as well as "fallback" files
-    variantMap = {gfx: {spec: set() for spec in specs} for gfx, specs in variants.items()}
-    for file in variantMap.values():
-        file[fallback] = set()
-
+def filterVariants(logicFiles: List[str], archs: List[str], variants: List[str]) -> List[str]:
+    """Filter logic files based on architecture and device ID variants.
+    
+    Args:
+        logicFiles: List of logic file paths to filter
+        archs: List of target architectures (e.g. ['gfx908', 'gfx90a'])
+        variants: List of device ID variants (e.g. ['id=1234', 'id=5678'])
+    
+    Returns:
+        List of logic files that match both architecture and variant requirements
+    """
+    keep = []
+    
     for logicFile in logicFiles:
-        _populateVariantMap(variantMap, Path(logicFile), fallback)
+        variantInfo = _extractArchVariant(logicFile)
+        
+        if not variantInfo.Gfx in archs:
+            print2(f"Skipping {logicFile}: Architecture {variantInfo.Gfx} not in targets {archs}")
+            continue
+        if not any(dev_id in variants for dev_id in variantInfo.DeviceIds):
+            print2(f"Skipping {logicFile}: No matching device IDs between {variantInfo.DeviceIds} and {variants}")
+            continue
+        keep.append(logicFile)
+    return keep 
 
-    return [str(p / file) for variantFiles in variantMap.values() for files in variantFiles.values() for p, file in files]
 
-def splitVariantsFromArchs(archSpecs: List[str]) -> Optional[List[Tuple[str, List[str]]]]:
-    # Updated pattern to capture everything before the brackets as well
+def splitVariantsFromArchs(archSpecs: List[str]) -> Tuple[List[str], Optional[Set[str]]]:
     pattern = r"(.*?)\[(.*?)\]"
     
-    variants = []
+    variants = set()
     archs = []
     for archSpec in archSpecs:
         match = re.match(pattern, archSpec)
         if match:
             archs.append(match.group(1).strip())
             variantId = verifyVariant(match.group(2))
-            variants.append(variantId)
-    result = (archs, variants if variants else None)
-    return result
+            variants.add(variantId)
+        else:
+            archs.append(archSpec)
+    return (archs, variants if variants else None)
+
 
 def verifyVariant(variantSpec: str):
     deviceIdLength = 4
     hexChars = "1234567890abcdef"
     key, _, val = variantSpec.partition("=")
     if key != "id" and all(c in hexChars for c in val.lower()) and len(val) == deviceIdLength:
-        raise ValueError(f"Invalid architecture variant: {spec}")
+        raise ValueError(f"Invalid architecture variant: {variantSpec}")
     return variantSpec

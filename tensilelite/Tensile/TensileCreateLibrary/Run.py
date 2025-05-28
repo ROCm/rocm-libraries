@@ -661,7 +661,6 @@ def run():
         file for file in glob.iglob(globPattern, recursive=True)
     ]
 
-    print("logicFiles: ", logicFiles)
     logicFiles = [file for file in logicFiles if validLogicFile(Path(file))]
 
     print1(f"# Experimental:      {arguments['Experimental']}")
@@ -670,11 +669,12 @@ def run():
             file for file in logicFiles if "experimental" not in map(str.lower, Path(file).parts)
         ]
 
+    print("# Archs: " + ' ,'.join(archs))
     if variants:
-        print1("# Variants:\n" + "\n".join(f"#   {arch}: {', '.join(v) if v else 'all variants'}" for arch, v in variants.items()))
+        print1("# Variants: " + ' ,'.join(variants))
         numPrior = len(logicFiles)
-        logicFiles = filterVariants(logicFiles, variants)
-        print1(f"#   Filtered {numPrior - len(logicFiles)} logic files")
+        logicFiles = filterVariants(logicFiles, archs, variants)
+        print1(f"# Filtered {numPrior - len(logicFiles)} logic files not matching request variants")
 
     print2(f"# LibraryLogicFiles: {len(logicFiles)}")
 
