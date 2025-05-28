@@ -63,7 +63,7 @@ typedef void* hipsparseDnVecDescr_t;
  *  It should be destroyed at the end using hipsparseDestroySpMat().
  */
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 10010)
-typedef void* hipsparseSpMatDescr_t;
+typedef struct hipsparseSpMatDescr_st* hipsparseSpMatDescr_t;
 #endif
 
 /*! \ingroup types_module
@@ -115,7 +115,7 @@ typedef void const* hipsparseConstDnVecDescr_t;
  *  hipsparseDestroySpMat().
  */
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
-typedef void const* hipsparseConstSpMatDescr_t;
+typedef struct hipsparseSpMatDescr_st const* hipsparseConstSpMatDescr_t;
 #endif
 
 /*! \ingroup types_module

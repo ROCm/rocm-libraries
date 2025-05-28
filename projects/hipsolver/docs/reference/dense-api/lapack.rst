@@ -1,6 +1,6 @@
 .. meta::
-  :description: hipSOLVER documentation and API reference library
-  :keywords: hipSOLVER, rocSOLVER, ROCm, API, documentation
+  :description: hipSOLVER dense matrix LAPACK functions API documentation
+  :keywords: hipSOLVER, rocSOLVER, ROCm, API, documentation, dense matrix, Lapack
 
 .. _dense_lapackfunc:
 
@@ -8,16 +8,16 @@
 Dense matrix LAPACK functions
 *********************************
 
-LAPACK routines solve complex Numerical Linear Algebra problems. These functions are organized
-in the following categories:
+LAPACK routines solve complex numerical linear algebra problems. These functions are organized
+into the following categories:
 
-* :ref:`dense_triangular`. Based on Gaussian elimination.
-* :ref:`dense_orthogonal`. Based on Householder reflections.
-* :ref:`dense_reductions`. Transformation of matrices and problems into equivalent forms.
-* :ref:`dense_linears`. Based on triangular factorizations.
-* :ref:`dense_leastsqr`. Based on orthogonal factorizations.
-* :ref:`dense_eigens`. Eigenproblems for symmetric matrices.
-* :ref:`dense_svds`. Singular values and related problems for general matrices.
+* :ref:`dense_triangular`: Based on Gaussian elimination.
+* :ref:`dense_orthogonal`: Based on Householder reflections.
+* :ref:`dense_reductions`: Transformation of matrices and problems into equivalent forms.
+* :ref:`dense_linears`: Based on triangular factorizations.
+* :ref:`dense_leastsqr`: Based on orthogonal factorizations.
+* :ref:`dense_eigens`: Eigenproblems for symmetric matrices.
+* :ref:`dense_svds`: Singular values and related problems for general matrices.
 
 
 
@@ -444,7 +444,7 @@ hipsolverDn<type>hegvd()
 Singular value decomposition
 ================================
 
-.. contents:: List of SVD related functions
+.. contents:: List of SVD-related functions
    :local:
    :backlinks: top
 

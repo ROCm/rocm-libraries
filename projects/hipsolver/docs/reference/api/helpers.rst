@@ -1,5 +1,5 @@
 .. meta::
-  :description: hipSOLVER documentation and API reference library
+  :description: hipSOLVER helper functions API documentation
   :keywords: hipSOLVER, rocSOLVER, ROCm, API, documentation
 
 .. _api_helpers:
@@ -11,16 +11,16 @@ hipSOLVER helper functions
 These are helper functions that control aspects of the hipSOLVER library. They are divided
 into the following categories:
 
-* :ref:`initialize` functions. Used to initialize and cleanup the library handle.
-* :ref:`stream` functions. Provide functionality to manipulate streams.
-* :ref:`determinism` functions. Provide functionality to manipulate function determinism.
-* :ref:`gesvdj_info` functions. Provide functionality to manipulate gesvdj parameters.
-* :ref:`syevj_info` functions. Provide functionality to manipulate syevj parameters.
+* :ref:`initialize`: Functions to initialize and cleanup the library handle.
+* :ref:`stream`: Functions to manipulate streams.
+* :ref:`determinism`: Functions to manipulate function determinism.
+* :ref:`gesvdj_info`: Functions to manipulate gesvdj parameters.
+* :ref:`syevj_info`: Functions to manipulate syevj parameters.
 
 
 .. _initialize:
 
-Handle set-up and tear-down
+Handle setup and teardown
 ===============================
 
 .. contents:: List of handle initialization functions

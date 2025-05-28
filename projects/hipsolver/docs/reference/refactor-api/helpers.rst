@@ -1,6 +1,6 @@
 .. meta::
-  :description: hipSOLVER documentation and API reference library
-  :keywords: hipSOLVER, rocSOLVER, ROCm, API, documentation
+  :description: hipSOLVER refactorization helper functions API documentation
+  :keywords: hipSOLVER, rocSOLVER, ROCm, API, documentation, refactorization, helper functions
 
 .. _refactor_helpers:
 
@@ -8,18 +8,18 @@
 Refactorization helper functions
 **********************************
 
-These are helper functions that control aspects of the hipSOLVER library. They are divided 
+These helper functions control aspects of the hipSOLVER library. They are divided 
 into the following categories:
 
-* :ref:`refactor_initialize` functions. Used to initialize and cleanup the library handle.
-* :ref:`refactor_input` functions. Provide functionality to manipulate function input.
-* :ref:`refactor_output` functions. Provide functionality to access function output.
-* :ref:`refactor_parameters` functions. Provide functionality to manipulate parameters.
+* :ref:`refactor_initialize`: Functions to initialize and cleanup the library handle.
+* :ref:`refactor_input`: Functions to manipulate function input.
+* :ref:`refactor_output`: Functions to access function output.
+* :ref:`refactor_parameters`: Functions to manipulate parameters.
 
 
 .. _refactor_initialize:
 
-Handle set-up and tear-down
+Handle setup and teardown
 ===============================
 
 .. contents:: List of handle initialization functions

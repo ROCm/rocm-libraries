@@ -5,9 +5,16 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ## (Unreleased) rocSOLVER
 
 ### Added
+
+* Hybrid computation support for existing routines:
+    - STEQR
+
 ### Changed
 ### Removed
 ### Optimized
+
+* Improved the performance of LARFT and downstream functions such as GEQR2 and GEQRF
+
 ### Resolved issues
 ### Known issues
 ### Upcoming changes

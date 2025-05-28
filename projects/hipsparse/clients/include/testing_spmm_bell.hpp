@@ -277,8 +277,7 @@ hipsparseStatus_t testing_spmm_bell()
                               make_DataType<T>(45.0),
                               make_DataType<T>(58.0)};
 
-    std::vector<T> hC_2(m * n);
-    hC_2 = hC_1;
+    std::vector<T> hC_2(hC_1);
 
     // allocate memory on device
     auto drow_ptr_managed = hipsparse_unique_ptr{device_malloc(sizeof(I) * (m + 1)), device_free};

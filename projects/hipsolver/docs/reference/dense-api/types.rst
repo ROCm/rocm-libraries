@@ -1,14 +1,15 @@
 .. meta::
-  :description: hipSOLVER documentation and API reference library
-  :keywords: hipSOLVER, rocSOLVER, ROCm, API, documentation
+  :description: hipSOLVER dense matrix data types documentation
+  :keywords: hipSOLVER, rocSOLVER, ROCm, API, documentation, data types
 
 .. _dense_types:
 
 ********************************************************************
-Dense matrix datatypes
+Dense matrix data types
 ********************************************************************
 
-hipSOLVER defines types and enumerations that are internally converted to the corresponding backend types at runtime. Here we list the types used in this compatibility API.
+hipSOLVER defines types and enumerations that are internally converted to the corresponding backend types at runtime.
+Here is a list of the types used in this compatibility API.
 
 hipsolverDnHandle_t
 --------------------

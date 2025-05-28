@@ -1,6 +1,6 @@
 .. meta::
-  :description: hipSOLVER documentation and API reference library
-  :keywords: hipSOLVER, rocSOLVER, ROCm, API, documentation
+  :description: hipSOLVER sparse matrix functions API documentation
+  :keywords: hipSOLVER, rocSOLVER, ROCm, API, documentation, sparse matrix
 
 .. _sparse_sparsefunc:
 
@@ -8,8 +8,7 @@
 Sparse matrix functions
 ************************
 
-Sparse matrix routines to solve complex Numerical Linear Algebra problems for sparse matrices.
-These functions are organized in the following categories:
+Sparse matrix routines solve complex numerical linear algebra problems for sparse matrices.
 
 .. _sparse_factlinears:
 
