@@ -1,6 +1,9 @@
 name: TheRock CI
 
 on:
+  push:
+    branches:
+      - users/geomin12/dynamic-selecting
   pull_request:
     types:
       - opened
@@ -27,7 +30,7 @@ jobs:
     name: "Setup"
     runs-on: ubuntu-24.04
     outputs:
-      jobs: ${{ steps.jobs.outputs.jobs }}
+      job: ${{ steps.job.outputs.job }}
     steps:
       # Checkout the mono-repo which includes the PR.
       - name: Checkout rocm-libraries Repository
@@ -40,7 +43,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: a742718b33993332131863885a621fceef6f9b48
+          ref: 4e60042ce5a11e7cad8761f641961668c9a28c6b
 
       - name: Generate a token
         id: generate-token
@@ -78,7 +81,7 @@ jobs:
             --config "rocm-libraries/.github/repos-config.json"
 
       - name: Determine jobs to run
-        id: jobs
+        id: job
         if: steps.detect.outputs.subtrees
         env:
           SUBTREES: ${{ steps.detect.outputs.subtrees }}
@@ -88,22 +91,22 @@ jobs:
   therock-build-linux:
     name: Build Linux Packages
     needs: setup
-    if: ${{ needs.setup.outputs.jobs }}
+    if: ${{ needs.setup.outputs.job != 'null' }}
     permissions:
       contents: read
       id-token: write
-    uses: ROCm/TheRock/.github/workflows/build_linux_packages.yml@a742718b33993332131863885a621fceef6f9b48
+    uses: TheRock/.github/workflows/build_linux_packages.yml
     with:
       amdgpu_families: "gfx94X-dcgpu"
       expect_failure: false
-      extra_cmake_options: "-DTHEROCK_USE_EXTERNAL_ROCM_LIBRARIES=ON -DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=rocm-libraries -DTHEROCK_ENABLE_PRIM=ON -DTHEROCK_ENABLE_ALL=OFF"
+      extra_cmake_options: "-DTHEROCK_USE_EXTERNAL_ROCM_LIBRARIES=ON -DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=rocm-libraries ${{ needs.setup.outputs.job.flag }}"
 
   therock-test-linux:
-    name: "rocPRIM math-lib test"
-    needs: therock-build-linux
-    uses: ROCm/TheRock/.github/workflows/test_rocprim.yml@a742718b33993332131863885a621fceef6f9b48
+    name: "TheRock test packages"
+    needs: [setup, therock-build-linux]
+    uses: ./.github/workflows/therock-test-packages.yml
     with:
-      artifact_run_id: "${{ github.run_id }}"
+      test: ${{ needs.setup.outputs.job.test }}
       amdgpu_families: "gfx94X-dcgpu"
       test_runs_on: "linux-mi300-1gpu-ossci-rocm"
       platform: "linux"
