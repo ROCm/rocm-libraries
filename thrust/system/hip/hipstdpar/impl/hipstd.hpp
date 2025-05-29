@@ -1,3 +1,23 @@
+// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 /*
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -23,69 +43,62 @@
 
 #if defined(__HIPSTDPAR__)
 
-#include <cstddef>
-#include <iterator>
-#include <type_traits>
-#include <utility>
+#  include <cstddef>
+#  include <iterator>
+#  include <type_traits>
+#  include <utility>
 
 namespace hipstd
 {
 template <typename... Cs>
 inline constexpr bool is_offloadable_callable() noexcept
 {
-    return std::conjunction_v<std::negation<std::is_pointer<Cs>>...,
-                              std::negation<std::is_member_function_pointer<Cs>>...>;
+  return std::conjunction_v<std::negation<std::is_pointer<Cs>>..., std::negation<std::is_member_function_pointer<Cs>>...>;
 }
 
 template <typename I, typename = void>
 struct Is_offloadable_iterator : std::false_type
-{
-};
+{};
 template <typename I>
-struct Is_offloadable_iterator<
-    I,
-    std::void_t<decltype(std::declval<I>() < std::declval<I>()),
-                decltype(std::declval<I&>() += std::declval<std::ptrdiff_t>()),
-                decltype(std::declval<I>() + std::declval<std::ptrdiff_t>()),
-                decltype(std::declval<I>()[std::declval<std::ptrdiff_t>()]),
-                decltype(*std::declval<I>())>> : std::true_type
-{
-};
+struct Is_offloadable_iterator<I,
+                               std::void_t<decltype(std::declval<I>() < std::declval<I>()),
+                                           decltype(std::declval<I&>() += std::declval<std::ptrdiff_t>()),
+                                           decltype(std::declval<I>() + std::declval<std::ptrdiff_t>()),
+                                           decltype(std::declval<I>()[std::declval<std::ptrdiff_t>()]),
+                                           decltype(*std::declval<I>())>> : std::true_type
+{};
 
 template <typename... Is>
 inline constexpr bool is_offloadable_iterator() noexcept
 {
-#if defined(__cpp_lib_concepts)
-    return (... && std::random_access_iterator<Is>);
-#else
-    return std::conjunction_v<Is_offloadable_iterator<Is>...>;
-#endif
+#  if defined(__cpp_lib_concepts)
+  return (... && std::random_access_iterator<Is>);
+#  else
+  return std::conjunction_v<Is_offloadable_iterator<Is>...>;
+#  endif
 }
 
 template <typename... Cs>
-inline constexpr
-    __attribute__((diagnose_if(true,
-                               "HIP Standard Parallelism does not support passing pointers to "
-                               "function as callable arguments, execution will not be "
-                               "offloaded.",
-                               "warning"))) void
-    unsupported_callable_type() noexcept
-{
-}
+inline constexpr __attribute__((diagnose_if(
+  true,
+  "HIP Standard Parallelism does not support passing pointers to "
+  "function as callable arguments, execution will not be "
+  "offloaded.",
+  "warning"))) void
+unsupported_callable_type() noexcept
+{}
 
 template <typename... Is>
 inline constexpr
-    __attribute__((diagnose_if(true,
-                               "HIP Standard Parallelism requires random access iterators, "
-                               "execution will not be offloaded.",
-                               "warning"))) void
-    unsupported_iterator_category() noexcept
-{
-}
-}
+  __attribute__((diagnose_if(true,
+                             "HIP Standard Parallelism requires random access iterators, "
+                             "execution will not be offloaded.",
+                             "warning"))) void
+  unsupported_iterator_category() noexcept
+{}
+} // namespace hipstd
 #else // __HIPSTDPAR__
-#    error "__HIPSTDPAR__ should be defined. Please use the '--hipstdpar' compile option."
+#  error "__HIPSTDPAR__ should be defined. Please use the '--hipstdpar' compile option."
 #endif // __HIPSTDPAR__
 
 #endif // THRUST_SYSTEM_HIP_HIPSTDPAR_HIPSTD_HPP
-

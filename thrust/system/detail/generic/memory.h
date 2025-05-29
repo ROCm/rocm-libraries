@@ -14,7 +14,6 @@
  *  limitations under the License.
  */
 
-
 /*! \file generic/memory.h
  *  \brief Generic implementation of memory functions.
  *         Calling some of these is an error. They have no implementation.
@@ -23,11 +22,12 @@
 #pragma once
 
 #include <thrust/detail/config.h>
+
 #include <thrust/detail/execution_policy.h>
-#include <thrust/system/detail/generic/tag.h>
-#include <thrust/detail/type_traits.h>
 #include <thrust/detail/pointer.h>
+#include <thrust/detail/type_traits.h>
 #include <thrust/pair.h>
+#include <thrust/system/detail/generic/tag.h>
 
 THRUST_NAMESPACE_BEGIN
 namespace system
@@ -37,34 +37,27 @@ namespace detail
 namespace generic
 {
 
-template<typename DerivedPolicy, typename Size>
-THRUST_HOST_DEVICE
-void malloc(thrust::execution_policy<DerivedPolicy> &, Size);
+template <typename DerivedPolicy, typename Size>
+THRUST_HOST_DEVICE void malloc(thrust::execution_policy<DerivedPolicy>&, Size);
 
-template<typename T, typename DerivedPolicy>
-THRUST_HOST_DEVICE
-thrust::pointer<T,DerivedPolicy> malloc(thrust::execution_policy<DerivedPolicy> &s, std::size_t n);
+template <typename T, typename DerivedPolicy>
+THRUST_HOST_DEVICE thrust::pointer<T, DerivedPolicy> malloc(thrust::execution_policy<DerivedPolicy>& s, std::size_t n);
 
-template<typename DerivedPolicy, typename Pointer>
-THRUST_HOST_DEVICE
-void free(thrust::execution_policy<DerivedPolicy> &, Pointer);
+template <typename DerivedPolicy, typename Pointer>
+THRUST_HOST_DEVICE void free(thrust::execution_policy<DerivedPolicy>&, Pointer);
 
-template<typename Pointer1, typename Pointer2>
-THRUST_HOST_DEVICE
-void assign_value(tag, Pointer1, Pointer2);
+template <typename Pointer1, typename Pointer2>
+THRUST_HOST_DEVICE void assign_value(tag, Pointer1, Pointer2);
 
-template<typename DerivedPolicy, typename Pointer>
-THRUST_HOST_DEVICE
-void get_value(thrust::execution_policy<DerivedPolicy> &, Pointer);
+template <typename DerivedPolicy, typename Pointer>
+THRUST_HOST_DEVICE void get_value(thrust::execution_policy<DerivedPolicy>&, Pointer);
 
-template<typename DerivedPolicy, typename Pointer1, typename Pointer2>
-THRUST_HOST_DEVICE
-void iter_swap(thrust::execution_policy<DerivedPolicy>&, Pointer1, Pointer2);
+template <typename DerivedPolicy, typename Pointer1, typename Pointer2>
+THRUST_HOST_DEVICE void iter_swap(thrust::execution_policy<DerivedPolicy>&, Pointer1, Pointer2);
 
-} // end generic
-} // end detail
-} // end system
+} // namespace generic
+} // namespace detail
+} // namespace system
 THRUST_NAMESPACE_END
 
 #include <thrust/system/detail/generic/memory.inl>
-

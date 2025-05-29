@@ -21,22 +21,24 @@
 #pragma once
 
 #include <thrust/detail/config.h>
-#include <thrust/mr/new.h>
-#include <thrust/mr/fancy_pointer_resource.h>
 
+#include <thrust/mr/fancy_pointer_resource.h>
+#include <thrust/mr/new.h>
 #include <thrust/system/cpp/pointer.h>
 
 THRUST_NAMESPACE_BEGIN
-namespace system { namespace cpp
+namespace system
+{
+namespace cpp
 {
 
 //! \cond
 namespace detail
 {
-    using native_resource = thrust::mr::fancy_pointer_resource<thrust::mr::new_delete_resource, thrust::cpp::pointer<void>>;
+using native_resource = thrust::mr::fancy_pointer_resource<thrust::mr::new_delete_resource, thrust::cpp::pointer<void>>;
 
-    using universal_native_resource =
-    thrust::mr::fancy_pointer_resource<thrust::mr::new_delete_resource, thrust::cpp::universal_pointer<void>>;
+using universal_native_resource =
+  thrust::mr::fancy_pointer_resource<thrust::mr::new_delete_resource, thrust::cpp::universal_pointer<void>>;
 } // namespace detail
 //! \endcond
 
@@ -59,8 +61,7 @@ using universal_host_pinned_memory_resource = detail::native_resource;
 /*! \} // memory_resources
  */
 
-
-}} // namespace system::cpp
+} // namespace cpp
+} // namespace system
 
 THRUST_NAMESPACE_END
-

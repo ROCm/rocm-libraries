@@ -20,4 +20,3 @@
 
 // this system inherits for_each
 #include <thrust/system/detail/sequential/for_each.h>
-

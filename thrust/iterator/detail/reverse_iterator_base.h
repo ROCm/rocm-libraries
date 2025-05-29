@@ -23,18 +23,18 @@
 
 THRUST_NAMESPACE_BEGIN
 
-template <typename> class reverse_iterator;
+template <typename>
+class reverse_iterator;
 
 namespace detail
 {
 
-template<typename BidirectionalIterator>
-  struct reverse_iterator_base
+template <typename BidirectionalIterator>
+struct reverse_iterator_base
 {
   using type = thrust::iterator_adaptor<thrust::reverse_iterator<BidirectionalIterator>, BidirectionalIterator>;
 }; // end reverse_iterator_base
 
-} // end detail
+} // namespace detail
 
 THRUST_NAMESPACE_END
-

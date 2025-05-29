@@ -53,8 +53,10 @@
 #include <thrust/detail/complex/math_private.h>
 
 THRUST_NAMESPACE_BEGIN
-namespace detail{
-namespace complex{		      	
+namespace detail
+{
+namespace complex
+{
 
 /*
  * Hyperbolic cosine of a complex argument z = x + i y.
@@ -81,23 +83,33 @@ THRUST_HOST_DEVICE inline thrust::complex<double> ccosh(const thrust::complex<do
   iy = 0x7fffffff & hy;
 
   /* Handle the nearly-non-exceptional cases where x and y are finite. */
-  if (ix < 0x7ff00000 && iy < 0x7ff00000) {
+  if (ix < 0x7ff00000 && iy < 0x7ff00000)
+  {
     if ((iy | ly) == 0)
+    {
       return (thrust::complex<double>(::cosh(x), x * y));
-    if (ix < 0x40360000)	/* small x: normal case */
+    }
+    if (ix < 0x40360000) /* small x: normal case */
+    {
       return (thrust::complex<double>(::cosh(x) * ::cos(y), ::sinh(x) * ::sin(y)));
+    }
 
     /* |x| >= 22, so cosh(x) ~= exp(|x|) */
-    if (ix < 0x40862e42) {
+    if (ix < 0x40862e42)
+    {
       /* x < 710: exp(|x|) won't overflow */
       h = ::exp(::fabs(x)) * 0.5;
       return (thrust::complex<double>(h * cos(y), copysign(h, x) * sin(y)));
-    } else if (ix < 0x4096bbaa) {
+    }
+    else if (ix < 0x4096bbaa)
+    {
       /* x < 1455: scale to avoid overflow */
       thrust::complex<double> z_;
       z_ = ldexp_cexp(thrust::complex<double>(fabs(x), y), -1);
       return (thrust::complex<double>(z_.real(), z_.imag() * copysign(1.0, x)));
-    } else {
+    }
+    else
+    {
       /* x >= 1455: the result always overflows */
       h = huge * x;
       return (thrust::complex<double>(h * h * cos(y), h * sin(y)));
@@ -114,7 +126,9 @@ THRUST_HOST_DEVICE inline thrust::complex<double> ccosh(const thrust::complex<do
    * the same as d(NaN).
    */
   if ((ix | lx) == 0 && iy >= 0x7ff00000)
+  {
     return (thrust::complex<double>(y - y, copysign(0.0, x * (y - y))));
+  }
 
   /*
    * cosh(+-Inf +- I 0) = +Inf + I (+-)(+-)0.
@@ -122,9 +136,12 @@ THRUST_HOST_DEVICE inline thrust::complex<double> ccosh(const thrust::complex<do
    * cosh(NaN +- I 0)   = d(NaN) + I sign(d(NaN, +-0))0.
    * The sign of 0 in the result is unspecified.
    */
-  if ((iy | ly) == 0 && ix >= 0x7ff00000) {
+  if ((iy | ly) == 0 && ix >= 0x7ff00000)
+  {
     if (((hx & 0xfffff) | lx) == 0)
+    {
       return (thrust::complex<double>(x * x, copysign(0.0, x) * y));
+    }
     return (thrust::complex<double>(x * x, copysign(0.0, (x + x) * y)));
   }
 
@@ -137,7 +154,9 @@ THRUST_HOST_DEVICE inline thrust::complex<double> ccosh(const thrust::complex<do
    * nonzero x.  Choice = don't raise (except for signaling NaNs).
    */
   if (ix < 0x7ff00000 && iy >= 0x7ff00000)
+  {
     return (thrust::complex<double>(y - y, x * (y - y)));
+  }
 
   /*
    * cosh(+-Inf + I NaN)  = +Inf + I d(NaN).
@@ -148,9 +167,12 @@ THRUST_HOST_DEVICE inline thrust::complex<double> ccosh(const thrust::complex<do
    *
    * cosh(+-Inf + I y)   = +Inf cos(y) +- I Inf sin(y)
    */
-  if (ix >= 0x7ff00000 && ((hx & 0xfffff) | lx) == 0) {
+  if (ix >= 0x7ff00000 && ((hx & 0xfffff) | lx) == 0)
+  {
     if (iy >= 0x7ff00000)
+    {
       return (thrust::complex<double>(x * x, x * (y - y)));
+    }
     return (thrust::complex<double>((x * x) * cos(y), x * sin(y)));
   }
 
@@ -183,17 +205,15 @@ THRUST_HOST_DEVICE inline complex<ValueType> cos(const complex<ValueType>& z)
 {
   const ValueType re = z.real();
   const ValueType im = z.imag();
-  return complex<ValueType>(std::cos(re) * std::cosh(im), 
-			    -std::sin(re) * std::sinh(im));
+  return complex<ValueType>(std::cos(re) * std::cosh(im), -std::sin(re) * std::sinh(im));
 }
-  
+
 template <typename ValueType>
 THRUST_HOST_DEVICE inline complex<ValueType> cosh(const complex<ValueType>& z)
 {
   const ValueType re = z.real();
   const ValueType im = z.imag();
-  return complex<ValueType>(std::cosh(re) * std::cos(im), 
-			    std::sinh(re) * std::sin(im));
+  return complex<ValueType>(std::cosh(re) * std::cos(im), std::sinh(re) * std::sin(im));
 }
 
 template <>

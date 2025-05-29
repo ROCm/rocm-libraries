@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@
 #pragma once
 
 #include <thrust/detail/config.h>
+
 #include <thrust/detail/execution_policy.h>
 
 THRUST_NAMESPACE_BEGIN
@@ -27,7 +28,6 @@ namespace detail
 {
 namespace sequential
 {
-
 
 // this awkward sequence of definitions arises
 // from the desire both for tag to derive
@@ -39,12 +39,12 @@ namespace sequential
 struct tag;
 
 // forward declaration of execution_policy
-template<typename> struct execution_policy;
+template <typename>
+struct execution_policy;
 
 // specialize execution_policy for tag
-template<>
-  struct execution_policy<tag>
-    : thrust::execution_policy<tag>
+template <>
+struct execution_policy<tag> : thrust::execution_policy<tag>
 {};
 
 // tag's definition comes before the generic definition of execution_policy
@@ -54,22 +54,19 @@ struct tag : execution_policy<tag>
 };
 
 // allow conversion to tag when it is not a successor
-template<typename Derived>
-  struct execution_policy
-    : thrust::execution_policy<Derived>
+template <typename Derived>
+struct execution_policy : thrust::execution_policy<Derived>
 {
   // allow conversion to tag
-  inline operator tag () const
+  inline operator tag() const
   {
     return tag();
   }
 };
 
-
 THRUST_INLINE_CONSTANT tag seq;
 
-
-} // end sequential
-} // end detail
-} // end system
+} // namespace sequential
+} // namespace detail
+} // namespace system
 THRUST_NAMESPACE_END

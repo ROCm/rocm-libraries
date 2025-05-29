@@ -25,59 +25,54 @@ TESTS_DEFINE(PairSortTests, NumericalTestsParams);
 
 struct make_pair_functor
 {
-    template <typename T1, typename T2>
-    __host__ __device__ thrust::pair<T1, T2> operator()(const T1& x, const T2& y)
-    {
-        return thrust::make_pair(x, y);
-    } // end operator()()
+  template <typename T1, typename T2>
+  __host__ __device__ thrust::pair<T1, T2> operator()(const T1& x, const T2& y)
+  {
+    return thrust::make_pair(x, y);
+  } // end operator()()
 }; // end make_pair_functor
 
 TYPED_TEST(PairSortTests, TestPairStableSortByKey)
 {
-    using T = typename TestFixture::input_type;
-    using P = thrust::pair<T, T>;
+  using T = typename TestFixture::input_type;
+  using P = thrust::pair<T, T>;
 
-    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    for(auto size : get_sizes())
+  for (auto size : get_sizes())
+  {
+    SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+    for (auto seed : get_seeds())
     {
-        SCOPED_TRACE(testing::Message() << "with size= " << size);
+      SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
-        for(auto seed : get_seeds())
-        {
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+      thrust::host_vector<T> h_p1 =
+        get_random_data<T>(size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
 
-            thrust::host_vector<T> h_p1 = get_random_data<T>(
-                size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
+      thrust::host_vector<T> h_p2 = get_random_data<T>(
+        size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed + seed_value_addition);
 
-            thrust::host_vector<T> h_p2 = get_random_data<T>(
-                size,
-                get_default_limits<T>::min(),
-                get_default_limits<T>::max(),
-                seed + seed_value_addition
-            );
+      thrust::host_vector<P> h_pairs(size);
 
-            thrust::host_vector<P> h_pairs(size);
+      thrust::host_vector<int> h_values(size);
+      thrust::sequence(h_values.begin(), h_values.end());
 
-            thrust::host_vector<int> h_values(size);
-            thrust::sequence(h_values.begin(), h_values.end());
+      // zip up pairs on the host
+      thrust::transform(h_p1.begin(), h_p1.end(), h_p2.begin(), h_pairs.begin(), make_pair_functor());
 
-            // zip up pairs on the host
-            thrust::transform(
-                h_p1.begin(), h_p1.end(), h_p2.begin(), h_pairs.begin(), make_pair_functor());
+      // device arrays
+      thrust::device_vector<P> d_pairs    = h_pairs;
+      thrust::device_vector<int> d_values = h_values;
 
-            // device arrays
-            thrust::device_vector<P>   d_pairs  = h_pairs;
-            thrust::device_vector<int> d_values = h_values;
+      // sort on the host
+      thrust::stable_sort_by_key(h_pairs.begin(), h_pairs.end(), h_values.begin());
 
-            // sort on the host
-            thrust::stable_sort_by_key(h_pairs.begin(), h_pairs.end(), h_values.begin());
+      // sort on the device
+      thrust::stable_sort_by_key(d_pairs.begin(), d_pairs.end(), d_values.begin());
 
-            // sort on the device
-            thrust::stable_sort_by_key(d_pairs.begin(), d_pairs.end(), d_values.begin());
-
-            ASSERT_EQ_QUIET(h_pairs, d_pairs);
-            ASSERT_EQ_QUIET(h_values, d_values);
-        }
+      ASSERT_EQ_QUIET(h_pairs, d_pairs);
+      ASSERT_EQ_QUIET(h_values, d_values);
     }
+  }
 }

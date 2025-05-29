@@ -20,4 +20,3 @@
 
 // this system inherits transform_scan
 #include <thrust/system/cpp/detail/transform_scan.h>
-
