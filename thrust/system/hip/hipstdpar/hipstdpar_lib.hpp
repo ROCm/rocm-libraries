@@ -39,6 +39,7 @@
 #pragma once
 
 #if defined(__HIPSTDPAR__)
+
 // Interposed allocations
 #if defined(__HIPSTDPAR_INTERPOSE_ALLOC_V1__)
 #  include "impl/interpose_allocations_v1.hpp"
