@@ -17,7 +17,7 @@ This table provides the current status of the migration of specific ROCm librari
 | `hipblas`           | Pending     |  |
 | `hipblas-common`    | Pending     |  |
 | `hipblaslt`         | Pending     |  |
-| `hipcub`            | Pending     | Next in line |
+| `hipcub`            | In Progress 🔥     | Initial migration steps completed. |
 | `hipfft`            | Pending     | Considered in next set to migrate. |
 | `hiprand`           | Pending     | Considered in next set to migrate. |
 | `hipsolver`         | Pending     |  |
@@ -30,7 +30,7 @@ This table provides the current status of the migration of specific ROCm librari
 | `rocrand`           | In Progress 🔥     | Initial migration steps completed. |
 | `rocsolver`         | Pending     |  |
 | `rocsparse`         | Pending     |  |
-| `rocthrust`         | Pending     | 2nd in line |
+| `rocthrust`         | In Progress 🔥     | Initial migration steps completed. |
 | `rocroller`         | Pending     |  |
 | `tensile`           | Pending     |  |
 
