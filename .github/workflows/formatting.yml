@@ -62,9 +62,12 @@ jobs:
         uses: tj-actions/changed-files@v34  
   
       - name: Run pre-commit hooks  
-        run: |  
-          if [ -z "${{ steps.changed-files.outputs.all_modified_files }}" ]; then
+        run: |
+          CHANGED="${{ steps.changed-files.outputs.all_modified_files }}"
+          if [ -z "$CHANGED" ]; then
             echo "No files changed, skipping pre-commit."
             exit 0
           fi
-          pre-commit run --files ${{ steps.changed-files.outputs.all_modified_files }} --show-diff-on-failure
+          echo "Running pre-commit on these files:"
+          echo "$CHANGED"
+          pre-commit run --files $CHANGED --show-diff-on-failure
