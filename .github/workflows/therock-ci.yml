@@ -44,7 +44,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: 28d4fcdaeeda0e8aa883c8b44e322c778e591c60
+          ref: 71e056b0525e14b85d226e0555bf8a786e58d9be
 
       - name: Generate a token
         id: generate-token
@@ -97,7 +97,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ROCm/TheRock/.github/workflows/build_linux_packages.yml@78ee8b0be51a61a06e75b7a3a0eb3cfb7a8e0c97
+    uses: ROCm/TheRock/.github/workflows/build_linux_packages.yml@71e056b0525e14b85d226e0555bf8a786e58d9be
     with:
       amdgpu_families: "gfx94X-dcgpu"
       expect_failure: false
