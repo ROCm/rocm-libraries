@@ -73,8 +73,10 @@ jobs:
             exit 0  
           fi  
           echo "Running pre-commit on these files:"  
-          printf "  %s\n" "${files[@]}"  
-          pre-commit run --files "${files[@]}" --show-diff-on-failure  
+          printf "  %s\n" "${files[@]}"
+          set +e
+          pre-commit run --files "${files[@]}" --show-diff-on-failure 
+          set -e
           git add "${files[@]}"  
           if ! git diff --cached --quiet; then  
             git commit -m "ci: apply pre-commit fixes"  
