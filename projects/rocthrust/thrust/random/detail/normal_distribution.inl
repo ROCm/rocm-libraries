@@ -24,11 +24,20 @@
 
 #include <cstdint>
 
-// for floating point infinity
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
-#include <math_constants.h>
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+#  include <cuda/std/limits>
+namespace _std = ::cuda::std;
+#elif defined(__has_include)
+#  if __has_include(<cuda/std/functional>)
+#    include <cuda/std/limits>
+namespace _std = ::cuda::std;
+#  else
+#    include <limits>
+namespace _std = std;
+#  endif
 #else
-#include <limits>
+#  include <limits>
+namespace _std = std;
 #endif
 
 THRUST_NAMESPACE_BEGIN
@@ -112,7 +121,7 @@ template<typename RealType>
     normal_distribution<RealType>
       ::min THRUST_PREVENT_MACRO_SUBSTITUTION (void) const
 {
-  return -this->max THRUST_PREVENT_MACRO_SUBSTITUTION ();
+  return _std::numeric_limits<RealType>::lowest();
 } // end normal_distribution::min()
 
 
@@ -122,18 +131,7 @@ template<typename RealType>
     normal_distribution<RealType>
       ::max THRUST_PREVENT_MACRO_SUBSTITUTION (void) const
 {
-  // XXX this solution is pretty terrible
-  // we can't use numeric_traits<RealType>::max because nvcc will
-  // complain that it is a __host__ function
-  union
-  {
-    std::uint32_t inf_as_int;
-    float result;
-  } hack;
-
-  hack.inf_as_int = 0x7f800000u;
-
-  return hack.result;
+  return _std::numeric_limits<RealType>::max();
 } // end normal_distribution::max()
 
 

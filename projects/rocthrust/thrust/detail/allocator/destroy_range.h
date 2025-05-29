@@ -23,7 +23,7 @@ namespace detail
 {
 
 template <typename Allocator, typename Pointer, typename Size>
-THRUST_HOST_DEVICE inline void destroy_range(Allocator& a, Pointer p, Size n);
+THRUST_HOST_DEVICE inline void destroy_range(Allocator& a, Pointer p, Size n) noexcept;
 
 } // namespace detail
 THRUST_NAMESPACE_END

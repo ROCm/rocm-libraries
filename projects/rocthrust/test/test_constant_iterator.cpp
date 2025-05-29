@@ -147,14 +147,14 @@ TYPED_TEST(ConstantIteratorTests, ConstantIteratorTransform)
   ConstIter last1  = first1 + result.size();
   ConstIter first2 = make_constant_iterator<T>(3);
 
-  transform(first1, last1, result.begin(), negate<T>());
+  thrust::transform(first1, last1, result.begin(), thrust::negate<T>());
 
   ASSERT_EQ(-7, result[0]);
   ASSERT_EQ(-7, result[1]);
   ASSERT_EQ(-7, result[2]);
   ASSERT_EQ(-7, result[3]);
 
-  transform(first1, last1, first2, result.begin(), plus<T>());
+  thrust::transform(first1, last1, first2, result.begin(), thrust::plus<T>());
 
   ASSERT_EQ(10, result[0]);
   ASSERT_EQ(10, result[1]);
