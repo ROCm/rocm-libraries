@@ -140,6 +140,7 @@ ARCH_CU_COUNT_FALLBACKS = {
     "cu=304": None,
 }
 
+
 def isaToGfx(arch: IsaVersion) -> str:
     """Converts an ISA version to a gfx architecture name.
 
@@ -155,6 +156,7 @@ def isaToGfx(arch: IsaVersion) -> str:
 
 
 SUPPORTED_GFX = [isaToGfx(isa) for isa in SUPPORTED_ISA]
+
 
 def gfxToIsa(name: str) -> Optional[IsaVersion]:
     """Extracts the ISA version from a given gfx architecture name.
@@ -179,6 +181,7 @@ def gfxToIsa(name: str) -> Optional[IsaVersion]:
     major = int(ipart)
     return IsaVersion(major, minor, step)
 
+
 def gfxToSwCodename(gfxName: str) -> Optional[str]:
     """Retrieves the common name for a given gfx architecture name.
 
@@ -197,6 +200,7 @@ def gfxToSwCodename(gfxName: str) -> Optional[str]:
                 return architectureMap[archKey]
             return None
 
+
 def gfxToVariants(gfx: str) -> List[str]:
     """Retrieves the list of variants for a given gfx architecture name.
 
@@ -207,6 +211,7 @@ def gfxToVariants(gfx: str) -> List[str]:
         List of variants for the GPU architecture.
     """
     return gfxVariantMap.get(gfx, [gfx])
+
 
 def cliArchsToIsa(cliArchs: str) -> List[IsaVersion]:
     """Maps the requested gfx architectures to ISA numbers.
@@ -219,6 +224,7 @@ def cliArchsToIsa(cliArchs: str) -> List[IsaVersion]:
     """
     archs = cliArchs.split(";") if ";" in cliArchs else cliArchs.split("_")
     return SUPPORTED_ISA if "all" in archs else [gfxToIsa(''.join(map(str, arch))) for arch in archs]
+
 
 def _detectGlobalCurrentISA(detectionTool, deviceId: int):
     """
@@ -235,6 +241,7 @@ def _detectGlobalCurrentISA(detectionTool, deviceId: int):
     if process.returncode:
         print(f"{detectionTool} exited with code {process.returncode}")
     return archList[deviceId] if (len(archList) > 0 and process.returncode == 0) else process.returncode
+
 
 def detectGlobalCurrentISA(deviceId: int, enumerator: str):
     """Returns the ISA version for a given device.
@@ -254,16 +261,19 @@ def detectGlobalCurrentISA(deviceId: int, enumerator: str):
         raise Exception("Failed to detect currect ISA")
     return result
 
+
 class ArchInfo(NamedTuple):
     Name: str
     Gfx: str
     DeviceIds: Optional[Set[str]]
     CUCount: Optional[str] = None
 
+
 class LogicFileError(Exception):
     def __init__(self, message="Expected line is either not present or is malformed"):
         self.message = message
         super().__init__(self.message)
+
 
 def _extractArchInfo(file: Union[str, Path]) -> ArchInfo:
     """
@@ -321,7 +331,9 @@ def _extractArchInfo(file: Union[str, Path]) -> ArchInfo:
     return ArchInfo(Name=name, Gfx=gfx, DeviceIds=deviceIds, CUCount=cu)
 
 
-def splitArchsFromPredicates(archSpecs: List[str]) -> Tuple[List[str], Optional[Dict[str, List[str]]]]:
+def splitArchsFromPredicates(
+    archSpecs: List[str],
+) -> Tuple[List[str], Optional[Dict[str, List[str]]]]:
     """
     Splits a list of architecture specifications into a list of architectures and a set of predicate specifications.
 
@@ -330,7 +342,7 @@ def splitArchsFromPredicates(archSpecs: List[str]) -> Tuple[List[str], Optional[
     Returns:
         A tuple containing a list of architectures and a set of variant specifications.
     """
-    variantRegex = re.compile(r'\[(.*?)\]')  # matches text between square brackets
+    variantRegex = re.compile(r"\[(.*?)\]")  # matches text between square brackets
     gfxArchs = set()
     variantMap = collections.defaultdict(list)
     for archspec in archSpecs:
@@ -339,7 +351,7 @@ def splitArchsFromPredicates(archSpecs: List[str]) -> Tuple[List[str], Optional[
         gfxArch = archspec  # Assume no predicates are specified, which will be overridden if a match is found
         match = re.search(variantRegex, archspec)
         if match:
-            gfxArch = archspec[:match.start()]
+            gfxArch = archspec[: match.start()]
             variantSpecs = [re.sub(" ", "", s.lower()) for s in match.group(1).split(",")]
             for variant in variantSpecs:
                 variants.add(verifyPredicate(variant, gfxArch))
@@ -350,6 +362,7 @@ def splitArchsFromPredicates(archSpecs: List[str]) -> Tuple[List[str], Optional[
             raise ValueError(f"Architecture {archspec} not supported")
 
     return (list(gfxArchs), variantMap)
+
 
 def verifyPredicate(predicateSpec: str, gfx: str) -> str:
     """
@@ -367,81 +380,102 @@ def verifyPredicate(predicateSpec: str, gfx: str) -> str:
     key, _, val = predicateSpec.partition("=")
     if key == "id":
         if predicateSpec not in SUPPORTED_ARCH_DEVICE_IDS:
-            raise ValueError(f"Invalid architecture predicate: device ID not supported: {predicateSpec}")
+            raise ValueError(
+                f"Invalid architecture predicate: device ID not supported: {predicateSpec}"
+            )
         if gfx and SUPPORTED_ARCH_DEVICE_IDS[predicateSpec] != gfx:
-            raise ValueError(f"Invalid architecture predicate: device ID {predicateSpec} is not associated with {gfx}")
+            raise ValueError(
+                f"Invalid architecture predicate: device ID {predicateSpec} is not associated with {gfx}"
+            )
     elif key == "cu":
         if predicateSpec not in SUPPORTED_ARCH_CU_COUNTS:
-            raise ValueError(f"Invalid architecture predicate: CU count not supported: {predicateSpec}")
+            raise ValueError(
+                f"Invalid architecture predicate: CU count not supported: {predicateSpec}"
+            )
         if gfx and SUPPORTED_ARCH_CU_COUNTS[predicateSpec] != gfx:
-            raise ValueError(f"Invalid architecture predicate: CU count {predicateSpec} is not associated with {gfx}")
+            raise ValueError(
+                f"Invalid architecture predicate: CU count {predicateSpec} is not associated with {gfx}"
+            )
     else:
-        raise ValueError(f"Invalid predicate: only device ID and CU count-based predicates are currently supported: {predicateSpec}")
+        raise ValueError(
+            f"Invalid predicate: only device ID and CU count-based predicates are currently supported: {predicateSpec}"
+        )
     return predicateSpec
 
-def _addVariantMap(gfxPredicateMap: Dict[str, Set[Tuple[Path, str]]], spec: str, path: Path, fname: str) -> bool:
+
+def _addVariantMap(
+    gfxPredicateMap: Dict[str, Set[Tuple[Path, str]]], spec: str, path: Path, fname: str
+) -> bool:
     if fname not in {x for _, x in gfxPredicateMap[spec]}:
         gfxPredicateMap[spec].add((path, fname))
         return True
     return False
 
-def _populateVariantMap(predicateMap: Dict[str, Dict[str, Set[Tuple[Path, str]]]], targetLogicFile: Path, fallbackKey: str):
+
+def _populateVariantMap(
+    predicateMap: Dict[str, Dict[str, Set[Tuple[Path, str]]]],
+    targetLogicFile: Path,
+    fallbackKey: str,
+):
     file = Path(targetLogicFile)
     path, fname = file.parent, file.name
 
     variant = _extractArchInfo(file)
-    print("variant: ", variant)
     if variant.Gfx not in predicateMap:
         return
 
     gfxPredicateMap = predicateMap[variant.Gfx]
-    print("gfxPredicateMap: ", gfxPredicateMap)
-
-    requestedDevIds = {x for x in gfxPredicateMap if x.startswith('id=')}
-    requestedCUs = {x for x in gfxPredicateMap if x.startswith('cu=')}
-    print("requestedDevIds: ", requestedDevIds)
-    print("requestedCUs: ", requestedCUs)
+    requestedDevIds = {x for x in gfxPredicateMap if x.startswith("id=")}
+    requestedCUs = {x for x in gfxPredicateMap if x.startswith("cu=")}
 
     fallbackDevIds = {
-        fallbackId for v in requestedDevIds 
-        if v in ARCH_DEVICE_ID_FALLBACKS 
+        fallbackId
+        for v in requestedDevIds
+        if v in ARCH_DEVICE_ID_FALLBACKS
         for fallbackId in ARCH_DEVICE_ID_FALLBACKS[v]
     }
-    fallbackCUs = {
-        ARCH_CU_COUNT_FALLBACKS[v] for v in requestedCUs 
-        if v in ARCH_CU_COUNT_FALLBACKS
-    }
+    fallbackCUs = {ARCH_CU_COUNT_FALLBACKS[v] for v in requestedCUs if v in ARCH_CU_COUNT_FALLBACKS}
 
-    print("fallbackDevIds: ", fallbackDevIds)
-    print("fallbackCUs: ", fallbackCUs)
+    isCuFallback = not requestedCUs or variant.CUCount in fallbackCUs
+    isDevIdFallback = not requestedDevIds or (
+        variant.DeviceIds and any(fallbackId in variant.DeviceIds for fallbackId in fallbackDevIds)
+    )
 
-    print("variant.CUCount: ", variant.CUCount, variant.CUCount in fallbackCUs)
-    
-    is_cu_fallback = not requestedCUs or variant.CUCount in fallbackCUs
-    is_devid_fallback = not requestedDevIds or (variant.DeviceIds and any(fallbackId in variant.DeviceIds for fallbackId in fallbackDevIds))
-    print("is_cu_fallback: ", is_cu_fallback)
-    print("is_devid_fallback: ", is_devid_fallback)
-    
-    if is_cu_fallback and is_devid_fallback:
-        print("Found a fallback file: ", fname)
+    if isCuFallback and isDevIdFallback:
         # If the file name is not already in a requested predicate, then add it to the fallback set
-        if all(fname not in {nm for _, nm in gfxPredicateMap[spec]} for spec in gfxPredicateMap if spec != fallbackKey):
+        if all(
+            fname not in {nm for _, nm in gfxPredicateMap[spec]}
+            for spec in gfxPredicateMap
+            if spec != fallbackKey
+        ):
             gfxPredicateMap[fallbackKey].add((path, fname))
     else:
         removeFallbacks = []
         for spec in gfxPredicateMap:
             if spec != fallbackKey:  # Don't try to add to fallback set here
                 if "id" in spec and variant.DeviceIds:
-                    removeFallbacks.extend(_addVariantMap(gfxPredicateMap, spec, path, fname) for id in variant.DeviceIds if id == spec)
+                    removeFallbacks.extend(
+                        _addVariantMap(gfxPredicateMap, spec, path, fname)
+                        for id in variant.DeviceIds
+                        if id == spec
+                    )
                 if "cu" in spec and variant.CUCount:
-                    removeFallbacks.append(_addVariantMap(gfxPredicateMap, spec, path, fname) if variant.CUCount == spec else False)
-        print("removeFallbacks: ", removeFallbacks)
+                    removeFallbacks.append(
+                        _addVariantMap(gfxPredicateMap, spec, path, fname)
+                        if variant.CUCount == spec
+                        else False
+                    )
 
         # If we successfully added to any specific predicates, remove from fallbacks
         if removeFallbacks and any(removeFallbacks):
-            gfxPredicateMap[fallbackKey] = {x for x in gfxPredicateMap[fallbackKey] if x[1] != fname}
+            gfxPredicateMap[fallbackKey] = {
+                x for x in gfxPredicateMap[fallbackKey] if x[1] != fname
+            }
 
-def filterVariants(logicFiles: List[str], variants: Dict[str, Dict[str, Set[Tuple[Path, str]]]]) -> List[str]:
+
+def filterVariants(
+    logicFiles: List[str], variants: Dict[str, Dict[str, Set[Tuple[Path, str]]]]
+) -> List[str]:
     fallback = "fallback"
     # A `spec` here is a variant specification passed via the command line, e.g., "cu=64"
     # This is how the code differentiates variants of the same gfx, as well as "fallback" files
@@ -449,12 +483,12 @@ def filterVariants(logicFiles: List[str], variants: Dict[str, Dict[str, Set[Tupl
     for file in variantMap.values():
         file[fallback] = set()
 
-    import pprint
     for logicFile in logicFiles:
-        print("logicFile: ", logicFile)
         _populateVariantMap(variantMap, Path(logicFile), fallback)
 
-        pprint.pprint(variantMap)
-
-    return [str(p / file) for gfxPredicateMap in variantMap.values() for files in gfxPredicateMap.values() for p, file in files]
-
+    return [
+        str(p / file)
+        for gfxPredicateMap in variantMap.values()
+        for files in gfxPredicateMap.values()
+        for p, file in files
+    ]
