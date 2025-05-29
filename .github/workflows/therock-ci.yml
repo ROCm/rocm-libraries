@@ -97,12 +97,11 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ROCm/TheRock/.github/workflows/build_linux_packages.yml@a742718b33993332131863885a621fceef6f9b48
+    uses: ROCm/TheRock/.github/workflows/build_linux_packages.yml@68406cd6c9f68c07cf5014eefdb2f5011bf8d777
     with:
       amdgpu_families: "gfx94X-dcgpu"
       expect_failure: false
-      extra_cmake_options: "-DTHEROCK_USE_EXTERNAL_ROCM_LIBRARIES=ON -DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=rocm-libraries"
-      # extra_cmake_options: "-DTHEROCK_USE_EXTERNAL_ROCM_LIBRARIES=ON -DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=rocm-libraries ${{ fromJSON(needs.setup.outputs.job).flag }}"
+      extra_cmake_options: "-DTHEROCK_USE_EXTERNAL_ROCM_LIBRARIES=ON -DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=rocm-libraries ${{ fromJSON(needs.setup.outputs.job).flag }}"
 
   therock-test-linux:
     name: "TheRock test packages"
