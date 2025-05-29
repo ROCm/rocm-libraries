@@ -336,23 +336,4 @@ TEST(PoissonTest, philox4x32_10_uint4_output){
         4
     );
 }
-
-template<size_t items_per_thread, size_t block_size>
-__global__ void mtgp32_poisson_kernel(rocrand_state_mtgp32 * states, unsigned int * device_output, const double & lambda){
-    constexpr size_t items_per_block = items_per_thread * block_size;
-    const size_t offset = (items_per_block * blockIdx.x) + (items_per_thread * threadIdx.x); 
-
-    __shared__ rocrand_state_mtgp32 state;
-    if(threadIdx.x == 0)
-        state = states[blockIdx.x];
-    __syncthreads();
-    for(size_t i = 0; i < items_per_thread; i++){
-        device_output[offset + i] = rocrand_poisson(&state, lambda);
-
-        if(threadIdx.x == 0)
-            states[blockIdx.x] = state;
-        __syncthreads();
-    }
-}
-
 // TODO Figure out MTGP32 tests
