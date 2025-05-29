@@ -51,7 +51,7 @@ from Tensile.Common import (
     setVerbosity,
     getVerbosity,
 )
-from Tensile.Common.Architectures import gfxToIsa, isaToGfx, SUPPORTED_GFX, filterLogicFilesByArchPredicates, splitArchsFromPredicates
+from Tensile.Common.Architectures import gfxToIsa, isaToGfx, SUPPORTED_GFX, splitArchsFromPredicates, filterVariants
 from Tensile.Common.Capabilities import makeIsaInfoMap
 from Tensile.Common.GlobalParameters import assignGlobalParameters, globalParameters
 from Tensile.SolutionStructs.Naming import getKernelFileBase, getKeyNoInternalArgs
@@ -609,7 +609,9 @@ def run():
     else:
         archs = arguments["Architecture"].split("_")
     archs = SUPPORTED_GFX if "all" in archs else archs
-    archs, requestedDeviceIds = splitArchsFromPredicates(archs)
+    archs, requestedPredicateMap = splitArchsFromPredicates(archs)
+    print("requestedPredicateMap", requestedPredicateMap)
+    print("archs", archs)
 
     targetIsas = [gfxToIsa(a) for a in archs]
     isaInfoMap = makeIsaInfoMap(targetIsas, cxxCompiler)
@@ -668,10 +670,10 @@ def run():
         ]
 
     print("# Archs: " + ' ,'.join(archs))
-    if requestedDeviceIds:
-        print1("# Predicates: " + ' ,'.join(requestedDeviceIds))
+    if requestedPredicateMap:
+        print1("# Predicates: " + ' ,'.join(requestedPredicateMap))
         numPrior = len(logicFiles)
-        logicFiles = filterLogicFilesByArchPredicates(logicFiles, set(archs), requestedDeviceIds)
+        logicFiles = filterVariants(logicFiles, requestedPredicateMap)
         print1(f"# Filtered {numPrior - len(logicFiles)} logic files not matching requested predicates")
 
     print1(f"# LibraryLogicFiles: {len(logicFiles)}")
@@ -679,6 +681,7 @@ def run():
     for logicFile in logicFiles:
         print2("#   %s" % logicFile)
 
+    exit(3)
     start_glds = timer()
     solutions, masterLibraries = generateLogicDataAndSolutions(
         logicFiles, arguments, asmToolchain.assembler, isaInfoMap
