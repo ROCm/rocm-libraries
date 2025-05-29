@@ -546,11 +546,11 @@ private:
                 {
                     auto tile_buffer_id = buffer_by_size_class[blev_buffer_offset].buffer_id;
                     /* In the case that buffer_size_type is rocthrust::device_reference<T> a static cast to 
-                    / unsigned long long is needed so that the type passed into ceiling_div is not 
+                    / buffer_size_type is needed so that the type passed into ceiling_div is not 
                     / rocthrust::device_reference<T>. This is possible since rocthrust::device_reference<T>
                     / can be implicitly cast to type T.
                     */
-                    unsigned long long size = static_cast<unsigned long long>(buffers.sizes[tile_buffer_id]);
+                    buffer_size_type size = static_cast<buffer_size_type>(buffers.sizes[tile_buffer_id]);
                     tile_offsets[i]
                         = rocprim::detail::ceiling_div(size,
                                                        blev_block_size * blev_bytes_per_thread);
@@ -627,11 +627,11 @@ private:
             {
                 const auto buffer_id = buffers_by_size_class[buffer_offset].buffer_id;
                 /* In the case that buffer_size_type is rocthrust::device_reference<T> a static cast to 
-                / unsigned long long is needed so that the type passed into copy_items is not 
+                / buffer_size_type is needed so that the type passed into copy_items is not 
                 / rocthrust::device_reference<T>. This is possible since rocthrust::device_reference<T>
                 / can be implicitly cast to type T.
                 */
-                unsigned long long size = static_cast<unsigned long long>(tile_buffers.sizes[buffer_id]);
+                buffer_size_type size = static_cast<buffer_size_type>(tile_buffers.sizes[buffer_id]);
                 batch_memcpy::copy_items<IsMemCpy>(tile_buffers.srcs[buffer_id],
                             tile_buffers.dsts[buffer_id],
                             size);
