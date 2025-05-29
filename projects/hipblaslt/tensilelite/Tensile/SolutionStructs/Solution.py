@@ -1539,6 +1539,8 @@ class Solution(collections.abc.Mapping):
       if not hasLDSTrans:
         return False
 
+      if numBytes == 0.5:
+        return asmCaps["HasLDSTrB64B4"]
       if numBytes == 1:
         return asmCaps["HasLDSTrB64B8"]
       elif numBytes == 2:
@@ -1890,10 +1892,19 @@ class Solution(collections.abc.Mapping):
 
     state["ExpertSchedulingMode"] = evaluateExpertSchedulingMode()
     # Some restrictions for float4:
+    # TODO: remove this if edge and tail are supported for fp4
     if isa[:2] == (12, 5) and state["KernelLanguage"] == "Assembly" and state["ProblemType"]["DataType"].isFloat4():
       state["AssertFree0ElementMultiple"] = 16
       state["AssertFree1ElementMultiple"] = 16
       state["AssertSummationElementMultiple"] = state["DepthU"]
+
+      if not state["enableLDSTrA"] and not state["UnrollMajorLDSA"]:
+        reject(state, printRejectionReason, "Currently FP4 requires LDSTrInst == True for UnrolledMajorLDSA == False")
+        return
+
+      if not state["enableLDSTrB"] and not state["UnrollMajorLDSB"]:
+        reject(state, printRejectionReason, "Currently FP4 requires LDSTrInst == True for UnrolledMajorLDSB == False")
+        return
 
     # We have the real "1LDSBuffer" value now, so we have to test the rejection condition here
     # TODO-

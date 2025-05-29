@@ -1813,6 +1813,29 @@ namespace rocisa
             return std::make_shared<DSLoadB64>(*this);
         }
     };
+    struct DSLoadB64TrB4 : public DSLoadInstruction
+    {
+        DSLoadB64TrB4(const std::shared_ptr<RegisterContainer>& dst,
+                       const std::shared_ptr<RegisterContainer>& src,
+                       std::optional<DSModifiers>                ds      = std::nullopt,
+                       const std::string&                        comment = "")
+            : DSLoadInstruction(InstType::INST_B64, dst, src, ds, comment)
+        {
+            if(ds)
+                ds->na = 1;
+            setInst("ds_load_tr4_b64");
+        }
+
+        DSLoadB64TrB4(const DSLoadB64TrB4& other)
+            : DSLoadInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<DSLoadB64TrB4>(*this);
+        }
+    };
 
     struct DSLoadB64TrB16 : public DSLoadInstruction
     {

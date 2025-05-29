@@ -530,8 +530,7 @@ class KernelWriterAssembly(KernelWriter):
     if tP["enableLDSTr"]:
       lrInstPoolName = "TrLocalRead"
       maxTrLoadNumReturnedVgpr = 4 if self.states.asmCaps["HasLDSTrB128B16"] else 2
-
-      if tP["bpeDS"] == 1:
+      if tP["bpeDS"] in (0.5, 1):
         maxTrLoadNumReturnedVgpr = 2
       elif tP["bpeDS"] != 2:
         assert False, f"Unhandled bpeDS: {tP['bpeDS']}"

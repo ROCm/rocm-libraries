@@ -658,9 +658,28 @@ class LocalReadMFMA(LocalRead):
         if enableLDSTr:
             numberMTilesPerWave = kernel["MIWaveTile"][tile01]
             if writer.states.asmCaps["HasWMMA_V3"]:
-                if tP["bpeDS"] == 1:
+                if tP["bpeDS"] == 0.5:
                     LocalReadX = instruction.getInst(0)
                     wtRegStride = int(kernel[f"MIInputPerThread{tc}"] * tP["bpeDS"] // bpr)
+                    outerUnrolledIncrements = 64
+                    innerUnrolledIncrements = 16
+                    vwTrLoad = 16
+
+                    for tIdx in range(numberMTilesPerWave):
+                        constOffset = int((tP["localReadOffset"] + MIWaveGroupShape[tile01] * tIdx) * tP["bpeDS"])
+                        for outerIdx in range(kernel["MIInputPerThread%s"%tc]//kernel["LocalReadVectorWidth"]):
+                            for innerIdx in range(kernel["LocalReadVectorWidth"]//vwTrLoad):
+                                paddedOffset = constOffset
+                                paddedOffset += int((innerIdx * innerUnrolledIncrements + outerIdx * outerUnrolledIncrements) * UnrollStride * tP["bpeDS"])
+                                if (kernel["LdsBlockSizePerPad%s"%tc] != 0) and (kernel["LdsPad%s"%tc] != 0):
+                                    paddedOffset += int((paddedOffset // kernel["LdsBlockSizePerPad%s"%tc]) * kernel["LdsPad%s"%tc] * tP["bpeDS"])
+                                ds = DSModifiers(na=1, offset=paddedOffset)
+                                destVgpr = vgpr("Valu%s_X%u_I%u+%u+%u"%(tc, bufferIdx, iui, wtRegStride*tIdx, 2 * (innerIdx + 2 * outerIdx)), blockWidth)
+                                localReadCode = imod.add(Module("LocalRead%s Valu%u"%(tc, int(valufIdx))))
+                                localReadCode.add(LocalReadX(dst=destVgpr, src=vgpr("LocalReadAddr%s"%tc), ds=ds, comment="LDS Transpose"))
+                elif tP["bpeDS"] == 1:
+                    LocalReadX = instruction.getInst(0)
+                    wtRegStride = kernel[f"MIInputPerThread{tc}"] * tP["bpeDS"] // bpr
                     numUnrolledIncrements = 32
                     vwTrLoad = 8
                     for tIdx in range(numberMTilesPerWave):
@@ -690,7 +709,7 @@ class LocalReadMFMA(LocalRead):
                         localReadCode = imod.add(Module("LocalRead%s Valu%u"%(tc,valuiIdx)))
                         localReadCode.add(LocalReadX(dst=destVgpr, src=vgpr("LocalReadAddr%s"%tc), ds=ds, comment=comment))
                         destVgpr = vgpr("Valu%s_X%u_I%u+%u+%u"%(tc,bufferIdx,iui, wtRegStride*tIdx, blockWidth), blockWidth)
-                        incrementBytes = int(UnrollStride*inputPerThread*tP["bpeDS"])
+                        incrementBytes = int(2*UnrollStride*inputPerThread*tP["bpeDS"])
                         offset_val = unpaddedOffset + incrementBytes
                         if (kernel["LdsBlockSizePerPad%s"%tc] != 0) and (kernel["LdsPad%s"%tc] != 0):
                             offset_val += int((offset_val // kernel["LdsBlockSizePerPad%s"%tc]) * kernel["LdsPad%s"%tc] * tP["bpeDS"])

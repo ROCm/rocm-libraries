@@ -994,6 +994,19 @@ void mem_inst(nb::module_ m_mem)
             return new rocisa::DSLoadB64(self);
         });
 
+    nb::class_<rocisa::DSLoadB64TrB4, rocisa::DSLoadInstruction>(m_mem, "DSLoadB64TrB4")
+        .def(nb::init<const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const std::shared_ptr<rocisa::RegisterContainer>&,
+                      std::optional<rocisa::DSModifiers>,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("src"),
+             nb::arg("ds")      = std::nullopt,
+             nb::arg("comment") = "")
+        .def("__deepcopy__", [](const rocisa::DSLoadB64TrB4& self, const nb::dict&) {
+            return new rocisa::DSLoadB64TrB4(self);
+        });
+
     nb::class_<rocisa::DSLoadB64TrB16, rocisa::DSLoadInstruction>(m_mem, "DSLoadB64TrB16")
         .def(nb::init<const std::shared_ptr<rocisa::RegisterContainer>&,
                       const std::shared_ptr<rocisa::RegisterContainer>&,

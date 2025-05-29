@@ -323,7 +323,10 @@ inline std::map<std::string, int>
     rv["HasLDSTrB64B8"]
         = tryAssembler(isaVersion, assemblerPath, "ds_load_tr8_b64 v[0:1], v0 offset: 0", isDebug);
 
-    rv["HasLDSTr"] = rv["HasLDSTrB64B16"] || rv["HasLDSTrB128B16"] || rv["HasLDSTrB64B8"];
+    rv["HasLDSTrB64B4"] = tryAssembler(
+        isaVersion, assemblerPath, "ds_load_tr4_b64 v[0:1], v0 offset: 0", isDebug);
+
+    rv["HasLDSTr"] = rv["HasLDSTrB64B16"] || rv["HasLDSTrB128B16"] || rv["HasLDSTrB64B8"] || rv["HasLDSTrB64B4"];
 
     rv["v_prng_b32"] = tryAssembler(isaVersion, assemblerPath, "v_prng_b32 v47, v36", isDebug);
 

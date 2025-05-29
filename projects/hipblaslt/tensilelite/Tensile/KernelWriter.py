@@ -30,7 +30,7 @@ from rocisa.label import LabelManager
 from rocisa.asmpass import rocIsaPass, rocIsaPassOption
 from rocisa.instruction import BufferLoadB128, BufferLoadB32, BufferLoadB64, \
   BufferLoadD16B16, BufferLoadD16U8, DSLoad2B32, DSLoad2B64, DSLoadB128, \
-  DSLoadB32, DSLoadB64, DSLoadB64TrB16, DSLoadB128TrB16, DSLoadB64TrB8, DSLoadInstruction, DSLoadU16, \
+  DSLoadB32, DSLoadB64, DSLoadB64TrB16, DSLoadB128TrB16, DSLoadB64TrB8, DSLoadB64TrB4, DSLoadInstruction, DSLoadU16, \
   DSLoadU8, DSStore2B32, DSStore2B64, DSStoreB128, DSStoreB16, DSStoreB256, \
   DSStoreB32, DSStoreB64, DSStoreB8, DSStoreInstruction, FlatLoadB128, FlatLoadB32, \
   FlatLoadB64, FlatStoreB128, FlatStoreB32, FlatStoreB64, Instruction, MacroInstruction, \
@@ -4830,6 +4830,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     _ds_load_b64_tr_b16 = MemoryInstruction(DSLoadB64TrB16,    1, 1, 2, 2, bpe=2)
     _ds_load_b128_tr_b16 = MemoryInstruction(DSLoadB128TrB16,    1, 1, 4, 4, bpe=2)
     _ds_load_b64_tr_b8 = MemoryInstruction(DSLoadB64TrB8,    1, 1, 2, 2, bpe=1)
+    _ds_load_b64_tr_b4 = MemoryInstruction(DSLoadB64TrB4,    1, 1, 2, 2, bpe=0.5)
 
     ########################################
     # Local Write
@@ -4894,7 +4895,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
           "GlobalWrite": [ chosen_store_b128, chosen_store_b64, chosen_store_b32 ],
           "LocalRead"  : [ _ds_load_b128, _ds_load2_b64, _ds_load_b64,
                            _ds_load2_b32, _ds_load_b32, _ds_load_u16, _ds_load_u8],
-          "TrLocalRead": [_ds_load_b64_tr_b16, _ds_load_b128_tr_b16, _ds_load_b64_tr_b8],
+          "TrLocalRead": [_ds_load_b64_tr_b16, _ds_load_b128_tr_b16, _ds_load_b64_tr_b8,
+                          _ds_load_b64_tr_b4],
           "LocalWrite" : [ _ds_store_b256, _ds_store_b128, _ds_store2_b64,
                            _ds_store_b64, _ds_store2_b32, _ds_store_b32,
                            _ds_store_b16, _ds_store_b8 ]

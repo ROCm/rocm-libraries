@@ -44,7 +44,7 @@ class MemoryInstruction:
     numBlocks: int = field(init=False)
     totalWidth: float = field(init=False)
     issueLatency: int = field(init=False)
-    bpe: Optional[int] = field(kw_only=True, default=None)
+    bpe: Optional[float] = field(kw_only=True, default=None)
 
     def __post_init__(self):
         self.numBlocks = 2 if self.numAddresses > 1 or self.numOffsets > 1 else 1
