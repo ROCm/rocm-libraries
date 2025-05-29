@@ -159,7 +159,7 @@ __global__ void rocrand_init_consistency_kernel(
     for(size_t i = 0; i < scramble_offset_size; i++){
         for(size_t j = 0; j < scramble_offset_size; j++){
             uint scramble_constant = scramble_constants[i];
-            uint offset = offsets[i];
+            uint offset = offsets[j];
 
             rocrand_state_scrambled_sobol32 state1, state2;
             rocrand_init(device_directions, scramble_constant, offset, &state1);
@@ -306,7 +306,7 @@ __global__ void rocrand_kernel(
     for(size_t i = 0; i < scramble_offset_size; i++){
         for(size_t j = 0; j < scramble_offset_size; j++){
             uint scramble_constant = scramble_constants[i];
-            uint offset = offsets[i];
+            uint offset = offsets[j];
 
             rocrand_state_scrambled_sobol32 state;
             rocrand_init(device_directions, scramble_constant, offset, &state);
