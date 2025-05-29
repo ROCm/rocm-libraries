@@ -14,7 +14,6 @@
  *  limitations under the License.
  */
 
-
 /*! \file unique_by_key.h
  *  \brief Sequential implementations of unique_by_key algorithms.
  */
@@ -22,9 +21,10 @@
 #pragma once
 
 #include <thrust/detail/config.h>
-#include <thrust/system/detail/sequential/execution_policy.h>
+
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/pair.h>
+#include <thrust/system/detail/sequential/execution_policy.h>
 
 THRUST_NAMESPACE_BEGIN
 namespace system
@@ -34,40 +34,36 @@ namespace detail
 namespace sequential
 {
 
-
 THRUST_EXEC_CHECK_DISABLE
-template<typename DerivedPolicy,
-         typename InputIterator1,
-         typename InputIterator2,
-         typename OutputIterator1,
-         typename OutputIterator2,
-         typename BinaryPredicate>
-THRUST_HOST_DEVICE
-  thrust::pair<OutputIterator1,OutputIterator2>
-    unique_by_key_copy(sequential::execution_policy<DerivedPolicy> &,
-                       InputIterator1 keys_first, 
-                       InputIterator1 keys_last,
-                       InputIterator2 values_first,
-                       OutputIterator1 keys_output,
-                       OutputIterator2 values_output,
-                       BinaryPredicate binary_pred)
+template <typename DerivedPolicy,
+          typename InputIterator1,
+          typename InputIterator2,
+          typename OutputIterator1,
+          typename OutputIterator2,
+          typename BinaryPredicate>
+THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> unique_by_key_copy(
+  sequential::execution_policy<DerivedPolicy>&,
+  InputIterator1 keys_first,
+  InputIterator1 keys_last,
+  InputIterator2 values_first,
+  OutputIterator1 keys_output,
+  OutputIterator2 values_output,
+  BinaryPredicate binary_pred)
 {
   using InputKeyType    = typename thrust::iterator_traits<InputIterator1>::value_type;
   using OutputValueType = typename thrust::iterator_traits<OutputIterator2>::value_type;
 
-  if(keys_first != keys_last)
+  if (keys_first != keys_last)
   {
-    InputKeyType    temp_key   = *keys_first;
+    InputKeyType temp_key      = *keys_first;
     OutputValueType temp_value = *values_first;
 
-    for(++keys_first, ++values_first;
-        keys_first != keys_last;
-        ++keys_first, ++values_first)
+    for (++keys_first, ++values_first; keys_first != keys_last; ++keys_first, ++values_first)
     {
-      InputKeyType    key   = *keys_first;
+      InputKeyType key      = *keys_first;
       OutputValueType value = *values_first;
 
-      if(!binary_pred(temp_key, key))
+      if (!binary_pred(temp_key, key))
       {
         *keys_output   = temp_key;
         *values_output = temp_value;
@@ -90,26 +86,20 @@ THRUST_HOST_DEVICE
   return thrust::make_pair(keys_output, values_output);
 } // end unique_by_key_copy()
 
-
-template<typename DerivedPolicy,
-         typename ForwardIterator1,
-         typename ForwardIterator2,
-         typename BinaryPredicate>
-THRUST_HOST_DEVICE
-  thrust::pair<ForwardIterator1,ForwardIterator2>
-    unique_by_key(sequential::execution_policy<DerivedPolicy> &exec,
-                  ForwardIterator1 keys_first, 
-                  ForwardIterator1 keys_last,
-                  ForwardIterator2 values_first,
-                  BinaryPredicate binary_pred)
+template <typename DerivedPolicy, typename ForwardIterator1, typename ForwardIterator2, typename BinaryPredicate>
+THRUST_HOST_DEVICE thrust::pair<ForwardIterator1, ForwardIterator2> unique_by_key(
+  sequential::execution_policy<DerivedPolicy>& exec,
+  ForwardIterator1 keys_first,
+  ForwardIterator1 keys_last,
+  ForwardIterator2 values_first,
+  BinaryPredicate binary_pred)
 {
   // sequential unique_by_key_copy() permits in-situ operation
-  return sequential::unique_by_key_copy(exec, keys_first, keys_last, values_first, keys_first, values_first, binary_pred);
+  return sequential::unique_by_key_copy(
+    exec, keys_first, keys_last, values_first, keys_first, values_first, binary_pred);
 } // end unique_by_key()
-
 
 } // end namespace sequential
 } // end namespace detail
 } // end namespace system
 THRUST_NAMESPACE_END
-

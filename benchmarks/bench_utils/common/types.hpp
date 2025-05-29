@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -26,11 +26,58 @@
 #include <cstdint>
 
 // Types used in the benchmarks
-#if(defined(__GNUC__) || defined(__clang__)) && (defined(__GLIBCXX__) || defined(_LIBCPP_VERSION))
-#define THRUST_BENCHMARKS_HAVE_INT128_SUPPORT 1
+#if (defined(__GNUC__) || defined(__clang__)) && (defined(__GLIBCXX__) || defined(_LIBCPP_VERSION))
+#  define THRUST_BENCHMARKS_HAVE_INT128_SUPPORT 1
 #else
-#define THRUST_BENCHMARKS_HAVE_INT128_SUPPORT 0
+#  define THRUST_BENCHMARKS_HAVE_INT128_SUPPORT 0
 #endif
+
+namespace bench_utils
+{
+class large_data
+{
+public:
+  __host__ __device__ large_data()
+  {
+    data[0] = 0;
+  }
+  __host__ __device__ large_data(large_data const& val)
+  {
+    data[0] = val.data[0];
+  }
+  __host__ __device__ large_data(int n)
+  {
+    data[0] = static_cast<int8_t>(n);
+  }
+  large_data& __host__ __device__ operator=(large_data const& val)
+  {
+    data[0] = val.data[0];
+    return *this;
+  }
+  bool __host__ __device__ operator==(large_data const& val) const
+  {
+    return data[0] == val.data[0];
+  }
+  large_data& __host__ __device__ operator++()
+  {
+    ++data[0];
+    return *this;
+  }
+  __host__ __device__ operator int() const
+  {
+    return static_cast<int>(data[0]);
+  }
+
+  int8_t data[512];
+};
+
+template <class T>
+bool __host__ __device__ operator==(T const& lhs, large_data const& rhs)
+{
+  return static_cast<large_data>(lhs).data[0] == rhs.data[0];
+}
+
+}; // namespace bench_utils
 
 using int8_t   = std::int8_t;
 using int16_t  = std::int16_t;

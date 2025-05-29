@@ -17,8 +17,9 @@
 #pragma once
 
 #include <thrust/detail/config.h>
-#include <thrust/system/omp/detail/execution_policy.h>
+
 #include <thrust/pair.h>
+#include <thrust/system/omp/detail/execution_policy.h>
 
 THRUST_NAMESPACE_BEGIN
 namespace system
@@ -28,41 +29,25 @@ namespace omp
 namespace detail
 {
 
+template <typename DerivedPolicy, typename ForwardIterator, typename BinaryPredicate>
+ForwardIterator
+unique(execution_policy<DerivedPolicy>& exec, ForwardIterator first, ForwardIterator last, BinaryPredicate binary_pred);
 
-template<typename DerivedPolicy,
-         typename ForwardIterator,
-         typename BinaryPredicate>
-  ForwardIterator unique(execution_policy<DerivedPolicy> &exec,
-                         ForwardIterator first,
-                         ForwardIterator last,
-                         BinaryPredicate binary_pred);
+template <typename DerivedPolicy, typename InputIterator, typename OutputIterator, typename BinaryPredicate>
+OutputIterator unique_copy(
+  execution_policy<DerivedPolicy>& exec,
+  InputIterator first,
+  InputIterator last,
+  OutputIterator output,
+  BinaryPredicate binary_pred);
 
-
-template<typename DerivedPolicy,
-         typename InputIterator,
-         typename OutputIterator,
-         typename BinaryPredicate>
-  OutputIterator unique_copy(execution_policy<DerivedPolicy> &exec,
-                             InputIterator first,
-                             InputIterator last,
-                             OutputIterator output,
-                             BinaryPredicate binary_pred);
-
-
-template<typename DerivedPolicy,
-         typename ForwardIterator,
-         typename BinaryPredicate>
-  typename thrust::iterator_traits<ForwardIterator>::difference_type
-    unique_count(execution_policy<DerivedPolicy> &exec,
-                 ForwardIterator first,
-                 ForwardIterator last,
-                 BinaryPredicate binary_pred);
-
+template <typename DerivedPolicy, typename ForwardIterator, typename BinaryPredicate>
+typename thrust::iterator_traits<ForwardIterator>::difference_type unique_count(
+  execution_policy<DerivedPolicy>& exec, ForwardIterator first, ForwardIterator last, BinaryPredicate binary_pred);
 
 } // end namespace detail
-} // end namespace omp 
+} // end namespace omp
 } // end namespace system
 THRUST_NAMESPACE_END
 
 #include <thrust/system/omp/detail/unique.inl>
-

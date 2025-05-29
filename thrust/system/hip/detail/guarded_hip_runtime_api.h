@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -25,13 +25,13 @@
 
 #if !defined(HIP_INCLUDE_HIP_AMD_DETAIL_HOST_DEFINES_H)
 
-#ifdef THRUST_HOST
-#undef THRUST_HOST
-#endif // THRUST_HOST
+#  ifdef THRUST_HOST
+#    undef THRUST_HOST
+#  endif // THRUST_HOST
 
-#ifdef THRUST_DEVICE
-#undef THRUST_DEVICE
-#endif // THRUST_DEVICE
+#  ifdef THRUST_DEVICE
+#    undef THRUST_DEVICE
+#  endif // THRUST_DEVICE
 
 #endif // __HOST_DEFINES_H__
 

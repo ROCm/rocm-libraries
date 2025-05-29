@@ -27,208 +27,199 @@ TESTS_DEFINE(StableSortVectorTests, VectorIntegerTestsParams);
 template <typename RandomAccessIterator>
 void stable_sort(my_system& system, RandomAccessIterator, RandomAccessIterator)
 {
-    system.validate_dispatch();
+  system.validate_dispatch();
 }
 
 TEST(StableSortTests, TestStableSortDispatchExplicit)
 {
-    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    thrust::device_vector<int> vec(1);
+  thrust::device_vector<int> vec(1);
 
-    my_system sys(0);
-    thrust::stable_sort(sys, vec.begin(), vec.begin());
+  my_system sys(0);
+  thrust::stable_sort(sys, vec.begin(), vec.begin());
 
-    ASSERT_EQ(true, sys.is_valid());
+  ASSERT_EQ(true, sys.is_valid());
 }
 
 template <typename RandomAccessIterator>
 void stable_sort(my_tag, RandomAccessIterator first, RandomAccessIterator)
 {
-    *first = 13;
+  *first = 13;
 }
 
 TEST(StableSortTests, TestStableSortDispatchImplicit)
 {
-    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    thrust::device_vector<int> vec(1);
+  thrust::device_vector<int> vec(1);
 
-    thrust::stable_sort(thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.begin()));
+  thrust::stable_sort(thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.begin()));
 
-    ASSERT_EQ(13, vec.front());
+  ASSERT_EQ(13, vec.front());
 }
 
 template <typename T>
 struct less_div_10
 {
-    __host__ __device__ bool operator()(const T& lhs, const T& rhs) const
-    {
-        return ((int)lhs) / 10 < ((int)rhs) / 10;
-    }
+  __host__ __device__ bool operator()(const T& lhs, const T& rhs) const
+  {
+    return ((int) lhs) / 10 < ((int) rhs) / 10;
+  }
 };
 
 template <class Vector>
 void InitializeSimpleStableKeySortTest(Vector& unsorted_keys, Vector& sorted_keys)
 {
-    unsorted_keys.resize(9);
-    unsorted_keys[0] = 25;
-    unsorted_keys[1] = 14;
-    unsorted_keys[2] = 35;
-    unsorted_keys[3] = 16;
-    unsorted_keys[4] = 26;
-    unsorted_keys[5] = 34;
-    unsorted_keys[6] = 36;
-    unsorted_keys[7] = 24;
-    unsorted_keys[8] = 15;
+  unsorted_keys.resize(9);
+  unsorted_keys[0] = 25;
+  unsorted_keys[1] = 14;
+  unsorted_keys[2] = 35;
+  unsorted_keys[3] = 16;
+  unsorted_keys[4] = 26;
+  unsorted_keys[5] = 34;
+  unsorted_keys[6] = 36;
+  unsorted_keys[7] = 24;
+  unsorted_keys[8] = 15;
 
-    sorted_keys.resize(9);
-    sorted_keys[0] = 14;
-    sorted_keys[1] = 16;
-    sorted_keys[2] = 15;
-    sorted_keys[3] = 25;
-    sorted_keys[4] = 26;
-    sorted_keys[5] = 24;
-    sorted_keys[6] = 35;
-    sorted_keys[7] = 34;
-    sorted_keys[8] = 36;
+  sorted_keys.resize(9);
+  sorted_keys[0] = 14;
+  sorted_keys[1] = 16;
+  sorted_keys[2] = 15;
+  sorted_keys[3] = 25;
+  sorted_keys[4] = 26;
+  sorted_keys[5] = 24;
+  sorted_keys[6] = 35;
+  sorted_keys[7] = 34;
+  sorted_keys[8] = 36;
 }
 
 TYPED_TEST(StableSortVectorTests, TestStableSortSimple)
 {
-    using Vector = typename TestFixture::input_type;
-    using T      = typename Vector::value_type;
+  using Vector = typename TestFixture::input_type;
+  using T      = typename Vector::value_type;
 
-    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    Vector unsorted_keys;
-    Vector sorted_keys;
+  Vector unsorted_keys;
+  Vector sorted_keys;
 
-    InitializeSimpleStableKeySortTest(unsorted_keys, sorted_keys);
+  InitializeSimpleStableKeySortTest(unsorted_keys, sorted_keys);
 
-    thrust::stable_sort(unsorted_keys.begin(), unsorted_keys.end(), less_div_10<T>());
+  thrust::stable_sort(unsorted_keys.begin(), unsorted_keys.end(), less_div_10<T>());
 
-    ASSERT_EQ(unsorted_keys, sorted_keys);
+  ASSERT_EQ(unsorted_keys, sorted_keys);
 }
 
 TYPED_TEST(StableSortTests, TestStableSort)
 {
-    using T = typename TestFixture::input_type;
+  using T = typename TestFixture::input_type;
 
-    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    for(auto size : get_sizes())
+  for (auto size : get_sizes())
+  {
+    SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+    for (auto seed : get_seeds())
     {
-        SCOPED_TRACE(testing::Message() << "with size= " << size);
+      SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
-        for(auto seed : get_seeds())
-        {
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+      thrust::host_vector<T> h_data =
+        get_random_data<T>(size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
+      thrust::device_vector<T> d_data = h_data;
 
-            thrust::host_vector<T> h_data = get_random_data<T>(
-                size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
-            thrust::device_vector<T> d_data = h_data;
+      thrust::stable_sort(h_data.begin(), h_data.end(), less_div_10<T>());
+      thrust::stable_sort(d_data.begin(), d_data.end(), less_div_10<T>());
 
-            thrust::stable_sort(h_data.begin(), h_data.end(), less_div_10<T>());
-            thrust::stable_sort(d_data.begin(), d_data.end(), less_div_10<T>());
-
-            ASSERT_EQ(h_data, d_data);
-        }
+      ASSERT_EQ(h_data, d_data);
     }
+  }
 }
 
 template <typename T>
 struct comp_mod3
 {
-    T* table;
+  T* table;
 
-    comp_mod3(T* table)
-        : table(table)
-    {
-    }
+  comp_mod3(T* table)
+      : table(table)
+  {}
 
-    __host__ __device__ bool operator()(T a, T b) const
-    {
-        return table[(int)a] < table[(int)b];
-    }
+  __host__ __device__ bool operator()(T a, T b) const
+  {
+    return table[(int) a] < table[(int) b];
+  }
 };
 
 TYPED_TEST(StableSortVectorTests, TestStableSortWithIndirection)
 {
-    using Vector = typename TestFixture::input_type;
-    using T      = typename Vector::value_type;
+  using Vector = typename TestFixture::input_type;
+  using T      = typename Vector::value_type;
 
-    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    Vector data(7);
-    data[0] = T(1);
-    data[1] = T(3);
-    data[2] = T(5);
-    data[3] = T(3);
-    data[4] = T(0);
-    data[5] = T(2);
-    data[6] = T(1);
+  Vector data(7);
+  data[0] = T(1);
+  data[1] = T(3);
+  data[2] = T(5);
+  data[3] = T(3);
+  data[4] = T(0);
+  data[5] = T(2);
+  data[6] = T(1);
 
-    Vector table(6);
-    table[0] = T(0);
-    table[1] = T(1);
-    table[2] = T(2);
-    table[3] = T(0);
-    table[4] = T(1);
-    table[5] = T(2);
+  Vector table(6);
+  table[0] = T(0);
+  table[1] = T(1);
+  table[2] = T(2);
+  table[3] = T(0);
+  table[4] = T(1);
+  table[5] = T(2);
 
-    thrust::stable_sort(
-        data.begin(), data.end(), comp_mod3<T>(thrust::raw_pointer_cast(&table[0])));
+  thrust::stable_sort(data.begin(), data.end(), comp_mod3<T>(thrust::raw_pointer_cast(&table[0])));
 
-    ASSERT_EQ(data[0], T(3));
-    ASSERT_EQ(data[1], T(3));
-    ASSERT_EQ(data[2], T(0));
-    ASSERT_EQ(data[3], T(1));
-    ASSERT_EQ(data[4], T(1));
-    ASSERT_EQ(data[5], T(5));
-    ASSERT_EQ(data[6], T(2));
+  ASSERT_EQ(data[0], T(3));
+  ASSERT_EQ(data[1], T(3));
+  ASSERT_EQ(data[2], T(0));
+  ASSERT_EQ(data[3], T(1));
+  ASSERT_EQ(data[4], T(1));
+  ASSERT_EQ(data[5], T(5));
+  ASSERT_EQ(data[6], T(2));
 }
 
 #ifndef _WIN32
-__global__
-THRUST_HIP_LAUNCH_BOUNDS_DEFAULT
-void StableSortKernel(int const N, int* array)
+__global__ THRUST_HIP_LAUNCH_BOUNDS_DEFAULT void StableSortKernel(int const N, int* array)
 {
-    if(threadIdx.x == 0)
-    {
-        thrust::device_ptr<int> begin(array);
-        thrust::device_ptr<int> end(array + N);
-        thrust::stable_sort(thrust::hip::par, begin, end);
-    }
+  if (threadIdx.x == 0)
+  {
+    thrust::device_ptr<int> begin(array);
+    thrust::device_ptr<int> end(array + N);
+    thrust::stable_sort(thrust::hip::par, begin, end);
+  }
 }
 
 TEST(StableSortTests, TestStableSortDevice)
 {
-    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    for(auto size : get_sizes() )
+  for (auto size : get_sizes())
+  {
+    SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+    for (auto seed : get_seeds())
     {
-        SCOPED_TRACE(testing::Message() << "with size= " << size);
+      SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
-        for(auto seed : get_seeds())
-        {
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+      thrust::host_vector<int> h_data = get_random_data<int>(size, 0, size, seed);
 
-            thrust::host_vector<int> h_data = get_random_data<int>(size, 0, size, seed);
+      thrust::device_vector<int> d_data = h_data;
 
-            thrust::device_vector<int> d_data = h_data;
+      thrust::stable_sort(h_data.begin(), h_data.end());
+      hipLaunchKernelGGL(
+        StableSortKernel, dim3(1, 1, 1), dim3(128, 1, 1), 0, 0, size, thrust::raw_pointer_cast(&d_data[0]));
 
-            thrust::stable_sort(h_data.begin(), h_data.end());
-            hipLaunchKernelGGL(StableSortKernel,
-                               dim3(1, 1, 1),
-                               dim3(128, 1, 1),
-                               0,
-                               0,
-                               size,
-                               thrust::raw_pointer_cast(&d_data[0]));
-
-            ASSERT_EQ(h_data, d_data);
-        }
+      ASSERT_EQ(h_data, d_data);
     }
+  }
 }
 #endif

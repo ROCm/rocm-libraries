@@ -18,22 +18,21 @@
 
 #include <thrust/detail/config.h>
 
-#include <thrust/iterator/iterator_adaptor.h>
-#include <thrust/iterator/iterator_traits.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/iterator/detail/minimum_system.h>
+#include <thrust/iterator/iterator_adaptor.h>
+#include <thrust/iterator/iterator_traits.h>
 
 THRUST_NAMESPACE_BEGIN
 
-template<typename,typename> class permutation_iterator;
-
+template <typename, typename>
+class permutation_iterator;
 
 namespace detail
 {
 
-template<typename ElementIterator,
-         typename IndexIterator>
-  struct permutation_iterator_base
+template <typename ElementIterator, typename IndexIterator>
+struct permutation_iterator_base
 {
   using System1 = typename thrust::iterator_system<ElementIterator>::type;
   using System2 = typename thrust::iterator_system<IndexIterator>::type;
@@ -47,7 +46,6 @@ template<typename ElementIterator,
                              typename thrust::iterator_reference<ElementIterator>::type>;
 }; // end permutation_iterator_base
 
-} // end detail
+} // namespace detail
 
 THRUST_NAMESPACE_END
-

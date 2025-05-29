@@ -14,7 +14,6 @@
  *  limitations under the License.
  */
 
-
 /*! \file scan.h
  *  \brief TBB implementations of scan functions.
  */
@@ -22,6 +21,7 @@
 #pragma once
 
 #include <thrust/detail/config.h>
+
 #include <thrust/system/tbb/detail/execution_policy.h>
 
 THRUST_NAMESPACE_BEGIN
@@ -32,27 +32,17 @@ namespace tbb
 namespace detail
 {
 
-template<typename InputIterator,
-         typename OutputIterator,
-         typename BinaryFunction>
-  OutputIterator inclusive_scan(tag,
-                                InputIterator first,
-                                InputIterator last,
-                                OutputIterator result,
-                                BinaryFunction binary_op);
+template <typename InputIterator, typename OutputIterator, typename BinaryFunction>
+OutputIterator
+inclusive_scan(tag, InputIterator first, InputIterator last, OutputIterator result, BinaryFunction binary_op);
 
+template <typename InputIterator, typename OutputIterator, typename T, typename BinaryFunction>
+OutputIterator
+inclusive_scan(tag, InputIterator first, InputIterator last, OutputIterator result, T init, BinaryFunction binary_op);
 
-template<typename InputIterator,
-         typename OutputIterator,
-         typename T,
-         typename BinaryFunction>
-  OutputIterator exclusive_scan(tag,
-                                InputIterator first,
-                                InputIterator last,
-                                OutputIterator result,
-                                T init,
-                                BinaryFunction binary_op);
-
+template <typename InputIterator, typename OutputIterator, typename T, typename BinaryFunction>
+OutputIterator
+exclusive_scan(tag, InputIterator first, InputIterator last, OutputIterator result, T init, BinaryFunction binary_op);
 
 } // end namespace detail
 } // end namespace tbb
@@ -60,4 +50,3 @@ template<typename InputIterator,
 THRUST_NAMESPACE_END
 
 #include <thrust/system/tbb/detail/scan.inl>
-
