@@ -41,7 +41,7 @@ jobs:
   test_rocprim:
     name: "Test rocPRIM math-lib"
     if: ${{ inputs.test == 'test_rocprim' }}
-    uses: ROCm/TheRock/.github/workflows/test_rocprim.yml@4e60042ce5a11e7cad8761f641961668c9a28c6b
+    uses: ROCm/TheRock/.github/workflows/test_rocprim.yml@a742718b33993332131863885a621fceef6f9b48
     with:
       artifact_run_id: "${{ github.run_id }}"
       amdgpu_families: ${{ inputs.amdgpu_families }}
