@@ -27,14 +27,15 @@ from unittest.mock import mock_open, patch
 from pathlib import Path
 from Tensile.Common.Utilities import isRhel8
 from Tensile.Common.Architectures import (
-    _extractArchInfo,
-    filterLogicFilesByArchPredicates,
-    splitArchsFromPredicates,
-    verifyPredicate,
-    ArchInfo,
-    LogicFileError,
-    ARCH_DEVICE_ID_FALLBACKS,
     SUPPORTED_ARCH_DEVICE_IDS,
+    SUPPORTED_ARCH_CU_COUNTS,
+    ARCH_DEVICE_ID_FALLBACKS,
+    ArchInfo,
+    splitArchsFromPredicates,
+    LogicFileError,
+    filterLogicFilesByPredicates,
+    _extractArchInfo,
+    _verifyPredicate,
 )
 
 # Test data
@@ -121,58 +122,123 @@ def test_extractArchInfo_with_invalid_device(mock_logic_file_invalid_device):
     with pytest.raises(LogicFileError):
         _extractArchInfo("dummy.yaml")
 
-def test_filterLogicFiles_exact_match(mock_logic_file):
+def test_filterLogicFilesByPredicates_fallback_id_match(mock_logic_file):
     logicFiles = ["file1.yaml", "file2.yaml"]
-    archs = {"gfx950"}
-    deviceIds = {"id=75a0"}
+    predicateMap = {
+        "gfx950": {
+            "id=75a2": set(),  # Should fallback to 75a0
+            "fallback": set()
+        }
+    }
     
     with patch("Tensile.Common.Architectures._extractArchInfo") as mock_extract:
-        mock_extract.return_value = ArchInfo("test", "gfx950", {"id=75a0"})
-        result = filterLogicFilesByArchPredicates(logicFiles, archs, deviceIds)
+        mock_extract.return_value = ArchInfo("test", "gfx950", {"id=75a0"}, None)
+        result = filterLogicFilesByPredicates(logicFiles, predicateMap)
         assert len(result) == 2
         assert "file1.yaml" in result
         assert "file2.yaml" in result
         assert all(isinstance(r, str) for r in result)
 
-def test_filterLogicFiles_fallback_match(mock_logic_file):
-    logicFiles = ["file1.yaml", "file2.yaml"]
-    archs = {"gfx950"}
-    deviceIds = {"id=75a2"}  # Should fallback to 75a0
-    
-    with patch("Tensile.Common.Architectures._extractArchInfo") as mock_extract:
-        mock_extract.return_value = ArchInfo("test", "gfx950", {"id=75a0"})
-        result = filterLogicFilesByArchPredicates(logicFiles, archs, deviceIds)
-        assert len(result) == 2
-        assert "file1.yaml" in result
-        assert "file2.yaml" in result
-        assert all(isinstance(r, str) for r in result)
-
-def test_filterLogicFiles_no_match(mock_logic_file):
+def test_filterLogicFilesByPredicates_cu_match(mock_logic_file):
     logicFiles = ["file1.yaml"]
-    archs = {"gfx950"}
-    deviceIds = {"id=75a0"}
+    predicateMap = {
+        "gfx942": {
+            "cu=80": set(),
+            "fallback": set()
+        }
+    }
     
     with patch("Tensile.Common.Architectures._extractArchInfo") as mock_extract:
-        mock_extract.return_value = ArchInfo("test", "gfx950", {"id=75a3"})
-        result = filterLogicFilesByArchPredicates(logicFiles, archs, deviceIds)
+        mock_extract.return_value = ArchInfo("test", "gfx942", {"id=74a0"}, "cu=80")
+        result = filterLogicFilesByPredicates(logicFiles, predicateMap)
+        assert len(result) == 1
+        assert "file1.yaml" in result
+
+def test_filterLogicFilesByPredicates_cu_fallback(mock_logic_file):
+    logicFiles = ["file1.yaml"]
+    predicateMap = {
+        "gfx942": {
+            "cu=96": set(),  # Should fallback to None
+            "fallback": set()
+        }
+    }
+    
+    with patch("Tensile.Common.Architectures._extractArchInfo") as mock_extract:
+        mock_extract.return_value = ArchInfo("test", "gfx942", {"id=74a0"}, None)
+        result = filterLogicFilesByPredicates(logicFiles, predicateMap)
+        assert len(result) == 1
+        assert "file1.yaml" in result
+
+def test_filterLogicFilesByPredicates_mixed_match_fallback(mock_logic_file):
+    logicFiles = ["file1.yaml", "file2.yaml"]
+    predicateMap = {
+        "gfx942": {
+            "cu=96": set(),  # Should fallback to None
+            "fallback": set()
+        }
+    }
+    
+    with patch("Tensile.Common.Architectures._extractArchInfo") as mock_extract1:
+        mock_extract1.return_value = ArchInfo("test", "gfx942", {"id=74a0"}, None)
+        with patch("Tensile.Common.Architectures._extractArchInfo") as mock_extract2:
+            mock_extract2.return_value = ArchInfo("test", "gfx942", {"id=74a0"}, "cu=96")
+            result = filterLogicFilesByPredicates(logicFiles, predicateMap)
+            assert len(result) == 2
+            assert "file1.yaml" in result
+            assert "file2.yaml" in result
+
+def test_filterLogicFilesByPredicates_no_match(mock_logic_file):
+    logicFiles = ["file1.yaml"]
+    predicateMap = {
+        "gfx950": {
+            "id=75a0": set(),
+            "fallback": set()
+        }
+    }
+    
+    with patch("Tensile.Common.Architectures._extractArchInfo") as mock_extract:
+        mock_extract.return_value = ArchInfo("test", "gfx950", {"id=75a3"}, None)
+        result = filterLogicFilesByPredicates(logicFiles, predicateMap)
         assert len(result) == 0
+
+def test_filterLogicFilesByPredicates_match_emulation_ids(mock_logic_file):
+    logicFiles = ["file1.yaml"]
+    predicateMap = {
+        "gfx950": {
+            "id=75a0": set(),
+            "fallback": set()
+        }
+    }
+    
+    with patch("Tensile.Common.Architectures._extractArchInfo") as mock_extract:
+        mock_extract.return_value = ArchInfo("test", "gfx950", {"id=0049"}, None)
+        result = filterLogicFilesByPredicates(logicFiles, predicateMap)
+        assert len(result) == 1
+        assert "file1.yaml" in result
 
 def test_splitArchsFromPredicates_with_variants():
     archSpecs = ["gfx950[id=75a0]", "gfx906"]
     archs, variants = splitArchsFromPredicates(archSpecs)
-    assert archs == ["gfx950", "gfx906"]
-    assert variants == {"id=75a0"}
+    assert "gfx906" in archs and "gfx950" in archs
+    assert variants["gfx950"] == ["id=75a0"]
 
 def test_splitArchsFromPredicates_with_multiple_variants():
     archSpecs = ["gfx950[id=75a0,id=75a2]", "gfx942"]
     archs, variants = splitArchsFromPredicates(archSpecs)
-    assert archs == ["gfx950", "gfx942"]
-    assert variants == {"id=75a0", "id=75a2"}
+    assert "gfx942" in archs and "gfx950" in archs
+    assert set(variants["gfx950"]) == {"id=75a0", "id=75a2"}
+
+def test_splitArchsFromPredicates_with_mixed_predicates():
+    archSpecs = ["gfx942[id=74a0,cu=80]", "gfx950[id=75a0]"]
+    archs, variants = splitArchsFromPredicates(archSpecs)
+    assert "gfx942" in archs and "gfx950" in archs
+    assert set(variants["gfx942"]) == {"id=74a0", "cu=80"}
+    assert variants["gfx950"] == ["id=75a0"]
 
 def test_splitArchsFromPredicates_no_variants():
     archSpecs = ["gfx950", "gfx906"]
     archs, variants = splitArchsFromPredicates(archSpecs)
-    assert archs == ["gfx950", "gfx906"]
+    assert "gfx906" in archs and "gfx950" in archs
     assert variants is None
 
 def test_splitArchsFromPredicates_empty():
@@ -181,20 +247,38 @@ def test_splitArchsFromPredicates_empty():
     assert archs == []
     assert variants is None
 
-def test_verifyPredicate_valid():
+def test_verifyPredicate_valid_device_id():
     for device_id in SUPPORTED_ARCH_DEVICE_IDS:
-        assert verifyPredicate(device_id) == device_id
+        arch = SUPPORTED_ARCH_DEVICE_IDS[device_id]
+        assert _verifyPredicate(device_id, arch) == device_id
 
-def test_verifyPredicate_invalid():
+def test_verifyPredicate_valid_cu_count():
+    for cu_count in SUPPORTED_ARCH_CU_COUNTS:
+        arch = SUPPORTED_ARCH_CU_COUNTS[cu_count]
+        assert _verifyPredicate(cu_count, arch) == cu_count
+
+def test_verifyPredicate_invalid_device_id():
     with pytest.raises(ValueError) as exc_info:
-        verifyPredicate("id=invalid")
+        _verifyPredicate("id=invalid", "gfx950")
     assert "device ID not supported" in str(exc_info.value)
 
-def test_verifyPredicate_non_id():
-    with pytest.raises(ValueError, match=r"Invalid predicate: only device ID-based predicates are currently supported: (.*)"):
-        verifyPredicate("cu=304")
+def test_verifyPredicate_mismatched_device_id():
+    with pytest.raises(ValueError) as exc_info:
+        _verifyPredicate("id=75a0", "gfx942")  # 75a0 is for gfx950
+    assert "not associated with" in str(exc_info.value)
+
+def test_verifyPredicate_invalid_cu_count():
+    with pytest.raises(ValueError) as exc_info:
+        _verifyPredicate("cu=999", "gfx942")
+    assert "CU count not supported" in str(exc_info.value)
+
+def test_verifyPredicate_mismatched_cu_count():
+    with pytest.raises(ValueError) as exc_info:
+        _verifyPredicate("cu=80", "gfx950")  # cu=80 is for gfx942
+    assert "not associated with" in str(exc_info.value)
 
 def test_verifyPredicate_invalid_predicate():
-    with pytest.raises(ValueError, match=r"Invalid predicate: only device ID-based predicates are currently supported: (.*)"):
-        verifyPredicate("invalid=value")
+    with pytest.raises(ValueError) as exc_info:
+        _verifyPredicate("invalid=value", "gfx950")
+    assert "only device ID and CU count-based predicates" in str(exc_info.value)
 

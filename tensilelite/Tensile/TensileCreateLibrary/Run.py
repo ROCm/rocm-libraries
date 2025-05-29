@@ -51,7 +51,7 @@ from Tensile.Common import (
     setVerbosity,
     getVerbosity,
 )
-from Tensile.Common.Architectures import gfxToIsa, isaToGfx, SUPPORTED_GFX, splitArchsFromPredicates, filterVariants
+from Tensile.Common.Architectures import gfxToIsa, isaToGfx, SUPPORTED_GFX, splitArchsFromPredicates, filterLogicFilesByPredicates
 from Tensile.Common.Capabilities import makeIsaInfoMap
 from Tensile.Common.GlobalParameters import assignGlobalParameters, globalParameters
 from Tensile.SolutionStructs.Naming import getKernelFileBase, getKeyNoInternalArgs
@@ -610,8 +610,6 @@ def run():
         archs = arguments["Architecture"].split("_")
     archs = SUPPORTED_GFX if "all" in archs else archs
     archs, requestedPredicateMap = splitArchsFromPredicates(archs)
-    print("requestedPredicateMap", requestedPredicateMap)
-    print("archs", archs)
 
     targetIsas = [gfxToIsa(a) for a in archs]
     isaInfoMap = makeIsaInfoMap(targetIsas, cxxCompiler)
@@ -669,11 +667,11 @@ def run():
             file for file in logicFiles if "experimental" not in map(str.lower, Path(file).parts)
         ]
 
-    print("# Archs: " + ' ,'.join(archs))
+    print1("# Archs: " + ' ,'.join(archs))
     if requestedPredicateMap:
-        print1("# Predicates: " + ' ,'.join(requestedPredicateMap))
+        print1("# Predicates:\n" + "\n".join(f"#   {arch}: {', '.join(v) if v else 'all variants'}" for arch, v in requestedPredicateMap.items()))
         numPrior = len(logicFiles)
-        logicFiles = filterVariants(logicFiles, requestedPredicateMap)
+        logicFiles = filterLogicFilesByPredicates(logicFiles, requestedPredicateMap)
         print1(f"# Filtered {numPrior - len(logicFiles)} logic files not matching requested predicates")
 
     print1(f"# LibraryLogicFiles: {len(logicFiles)}")
@@ -681,7 +679,6 @@ def run():
     for logicFile in logicFiles:
         print2("#   %s" % logicFile)
 
-    exit(3)
     start_glds = timer()
     solutions, masterLibraries = generateLogicDataAndSolutions(
         logicFiles, arguments, asmToolchain.assembler, isaInfoMap

@@ -331,40 +331,7 @@ def _extractArchInfo(file: Union[str, Path]) -> ArchInfo:
     return ArchInfo(Name=name, Gfx=gfx, DeviceIds=deviceIds, CUCount=cu)
 
 
-def splitArchsFromPredicates(
-    archSpecs: List[str],
-) -> Tuple[List[str], Optional[Dict[str, List[str]]]]:
-    """
-    Splits a list of architecture specifications into a list of architectures and a set of predicate specifications.
-
-    Args:
-        archSpecs: A list of architecture specifications.
-    Returns:
-        A tuple containing a list of architectures and a set of variant specifications.
-    """
-    variantRegex = re.compile(r"\[(.*?)\]")  # matches text between square brackets
-    gfxArchs = set()
-    variantMap = collections.defaultdict(list)
-    for archspec in archSpecs:
-        variants = set()
-        archspec = archspec.strip()
-        gfxArch = archspec  # Assume no predicates are specified, which will be overridden if a match is found
-        match = re.search(variantRegex, archspec)
-        if match:
-            gfxArch = archspec[: match.start()]
-            variantSpecs = [re.sub(" ", "", s.lower()) for s in match.group(1).split(",")]
-            for variant in variantSpecs:
-                variants.add(verifyPredicate(variant, gfxArch))
-            variantMap[gfxArch].extend(variants)
-        if gfxArch in architectureMap:
-            gfxArchs.add(re.sub(":", "-", gfxArch))
-        else:
-            raise ValueError(f"Architecture {archspec} not supported")
-
-    return (list(gfxArchs), variantMap)
-
-
-def verifyPredicate(predicateSpec: str, gfx: str) -> str:
+def _verifyPredicate(predicateSpec: str, gfx: str) -> str:
     """
     Verifies that a predicate specification is valid.
 
@@ -403,9 +370,62 @@ def verifyPredicate(predicateSpec: str, gfx: str) -> str:
     return predicateSpec
 
 
+def splitArchsFromPredicates(archSpecs: List[str]) -> Tuple[List[str], Optional[Dict[str, List[str]]]]:
+    """
+    Splits a list of architecture specifications into architectures and their predicates.
+    
+    Example inputs:
+        ["gfx942"]  # No predicates
+        ["gfx942[id=74a0,id=74a1]"]  # With device IDs
+        ["gfx942[cu=80,cu=96]"]  # With CU counts
+        ["gfx942[id=74a0,cu=80]"]  # With both
+
+    Args:
+        archSpecs: List of architecture specifications, optionally with predicates in square brackets
+
+    Returns:
+        Tuple of:
+        - List of architecture names
+        - Dictionary mapping architectures to their predicates (or None if no predicates)
+    """
+    # Match predicates in square brackets, e.g., [id=74a0,cu=80]
+    pattern = re.compile(r"\[(.*?)\]")
+    
+    architectures = set()
+    predicateMap = collections.defaultdict(list)
+
+    for spec in archSpecs:
+        spec = spec.strip()
+        arch = spec  # Default to full spec if no predicates
+        
+        match = re.search(pattern, spec)
+        if match:
+            arch = spec[:match.start()].strip()
+            predicates = [p.strip().lower() for p in match.group(1).split(",")]
+            predicateMap[arch].extend(_verifyPredicate(p, arch) for p in predicates)
+
+        if arch not in architectureMap:
+            raise ValueError(f"Architecture {spec} not supported")
+            
+        architectures.add(re.sub(":", "-", arch))
+
+    return list(architectures), predicateMap or None
+
+
 def _addVariantMap(
     gfxPredicateMap: Dict[str, Set[Tuple[Path, str]]], spec: str, path: Path, fname: str
 ) -> bool:
+    """
+    Adds a logic file to a predicate map.
+
+    Args:
+        gfxPredicateMap: Nested dict mapping architectures to their predicate sets
+        spec: Predicate specification
+        path: Path to the logic file
+        fname: Filename of the logic file
+    Returns:
+        True if the logic file was added to the predicate map, False otherwise
+    """
     if fname not in {x for _, x in gfxPredicateMap[spec]}:
         gfxPredicateMap[spec].add((path, fname))
         return True
@@ -417,14 +437,27 @@ def _populateVariantMap(
     targetLogicFile: Path,
     fallbackKey: str,
 ):
+    """
+    Populates a predicate map with logic files, handling both exact matches and fallbacks.
+    
+    For each logic file:
+    1. First tries to match against specific predicates (device IDs, CU counts)
+    2. If matched to any specific predicate, removes from fallbacks
+    3. If no specific matches, tries to add to fallbacks based on fallback rules
+    
+    Args:
+        predicateMap: Nested dict mapping architectures to their predicate sets
+        targetLogicFile: Logic file to process
+        fallbackKey: Key used to store fallback matches
+    """
     file = Path(targetLogicFile)
     path, fname = file.parent, file.name
 
-    variant = _extractArchInfo(file)
-    if variant.Gfx not in predicateMap:
+    archinfo = _extractArchInfo(file)
+    if archinfo.Gfx not in predicateMap:
         return
 
-    gfxPredicateMap = predicateMap[variant.Gfx]
+    gfxPredicateMap = predicateMap[archinfo.Gfx]
     requestedDevIds = {x for x in gfxPredicateMap if x.startswith("id=")}
     requestedCUs = {x for x in gfxPredicateMap if x.startswith("cu=")}
 
@@ -436,9 +469,9 @@ def _populateVariantMap(
     }
     fallbackCUs = {ARCH_CU_COUNT_FALLBACKS[v] for v in requestedCUs if v in ARCH_CU_COUNT_FALLBACKS}
 
-    isCuFallback = not requestedCUs or variant.CUCount in fallbackCUs
+    isCuFallback = not requestedCUs or archinfo.CUCount in fallbackCUs
     isDevIdFallback = not requestedDevIds or (
-        variant.DeviceIds and any(fallbackId in variant.DeviceIds for fallbackId in fallbackDevIds)
+        archinfo.DeviceIds and any(fallbackId in archinfo.DeviceIds for fallbackId in fallbackDevIds)
     )
 
     if isCuFallback and isDevIdFallback:
@@ -453,38 +486,47 @@ def _populateVariantMap(
         removeFallbacks = []
         for spec in gfxPredicateMap:
             if spec != fallbackKey:  # Don't try to add to fallback set here
-                if "id" in spec and variant.DeviceIds:
+                if "id" in spec and archinfo.DeviceIds:
                     removeFallbacks.extend(
                         _addVariantMap(gfxPredicateMap, spec, path, fname)
-                        for id in variant.DeviceIds
+                        for id in archinfo.DeviceIds
                         if id == spec
                     )
-                if "cu" in spec and variant.CUCount:
+                if "cu" in spec and archinfo.CUCount:
                     removeFallbacks.append(
                         _addVariantMap(gfxPredicateMap, spec, path, fname)
-                        if variant.CUCount == spec
+                        if archinfo.CUCount == spec
                         else False
                     )
 
-        # If we successfully added to any specific predicates, remove from fallbacks
         if removeFallbacks and any(removeFallbacks):
             gfxPredicateMap[fallbackKey] = {
                 x for x in gfxPredicateMap[fallbackKey] if x[1] != fname
             }
 
 
-def filterVariants(
+def filterLogicFilesByPredicates(
     logicFiles: List[str], variants: Dict[str, Dict[str, Set[Tuple[Path, str]]]]
 ) -> List[str]:
-    fallback = "fallback"
+    """
+    Filters logic files based on the requested predicates.
+
+    Args:
+        logicFiles: List of logic file paths
+        variants: Dictionary mapping architectures to their predicate sets
+
+    Returns:
+        List of logic file paths that match the requested predicates
+    """
+    fallbackKey = "fallback"
     # A `spec` here is a variant specification passed via the command line, e.g., "cu=64"
     # This is how the code differentiates variants of the same gfx, as well as "fallback" files
     variantMap = {gfx: {spec: set() for spec in specs} for gfx, specs in variants.items()}
     for file in variantMap.values():
-        file[fallback] = set()
+        file[fallbackKey] = set()
 
     for logicFile in logicFiles:
-        _populateVariantMap(variantMap, Path(logicFile), fallback)
+        _populateVariantMap(variantMap, Path(logicFile), fallbackKey)
 
     return [
         str(p / file)
