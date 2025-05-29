@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -77,7 +77,8 @@ Arguments steqr_setup_arguments(steqr_tuple tup)
     return arg;
 }
 
-class STEQR : public ::TestWithParam<steqr_tuple>
+template <rocblas_int MODE>
+class STEQR_BASE : public ::TestWithParam<steqr_tuple>
 {
 protected:
     void TearDown() override
@@ -89,12 +90,21 @@ protected:
     void run_tests()
     {
         Arguments arg = steqr_setup_arguments(GetParam());
+        arg.alg_mode = MODE;
 
         if(arg.peek<rocblas_int>("n") == 0 && arg.peek<char>("evect") == 'N')
             testing_steqr_bad_arg<T>();
 
         testing_steqr<T>(arg);
     }
+};
+
+class STEQR : public STEQR_BASE<0>
+{
+};
+
+class STEQR_HYBRID : public STEQR_BASE<1>
+{
 };
 
 // non-batch tests
@@ -119,10 +129,38 @@ TEST_P(STEQR, __double_complex)
     run_tests<rocblas_double_complex>();
 }
 
+TEST_P(STEQR_HYBRID, __float)
+{
+    run_tests<float>();
+}
+
+TEST_P(STEQR_HYBRID, __double)
+{
+    run_tests<double>();
+}
+
+TEST_P(STEQR_HYBRID, __float_complex)
+{
+    run_tests<rocblas_float_complex>();
+}
+
+TEST_P(STEQR_HYBRID, __double_complex)
+{
+    run_tests<rocblas_double_complex>();
+}
+
 INSTANTIATE_TEST_SUITE_P(daily_lapack,
                          STEQR,
                          Combine(ValuesIn(large_matrix_size_range), ValuesIn(op_range)));
 
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          STEQR,
+                         Combine(ValuesIn(matrix_size_range), ValuesIn(op_range)));
+
+INSTANTIATE_TEST_SUITE_P(daily_lapack,
+                         STEQR_HYBRID,
+                         Combine(ValuesIn(large_matrix_size_range), ValuesIn(op_range)));
+
+INSTANTIATE_TEST_SUITE_P(checkin_lapack,
+                         STEQR_HYBRID,
                          Combine(ValuesIn(matrix_size_range), ValuesIn(op_range)));

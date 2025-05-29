@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -74,11 +74,11 @@ inline hiprandStatus_t hiprandMakeMTGP32Constants(const mtgp32_params_fast_t par
  * - HIPRAND_STATUS_ALLOCATION_FAILED if states could not be initialized
  * - HIPRAND_STATUS_SUCCESS if states are initialized
  */
-inline hiprandStatus_t hiprandMakeMTGP32KernelState(hiprandStateMtgp32_t*   s,
-                                                    mtgp32_params_fast_t    params[],
-                                                    mtgp32_kernel_params_t* k,
-                                                    int                     n,
-                                                    unsigned long long      seed)
+inline hiprandStatus_t hiprandMakeMTGP32KernelState(hiprandStateMtgp32_t* s,
+                                                    mtgp32_params_fast_t  params[],
+                                                    mtgp32_kernel_params_t* /*k*/,
+                                                    int                n,
+                                                    unsigned long long seed)
 {
     return to_hiprand_status(rocrand_make_state_mtgp32(s, params, n, seed));
 }

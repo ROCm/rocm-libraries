@@ -3,6 +3,13 @@
 Documentation for rocRAND is available at
 [https://rocm.docs.amd.com/projects/rocRAND/en/latest/](https://rocm.docs.amd.com/projects/rocRAND/en/latest/)
 
+## (Unreleased) rocRAND-4.x.x for ROCm 7.0.0
+
+### Changed
+
+* Changed return type for `rocrand_generate_poisson` for `SOBOL64` and `SCRAMBLED_SOBOL64` engines
+* Changed unnecessarily large 64-bit data type of constants used for skipping in `MRG32K3A` to 32-bit data type 
+
 ## rocRAND 3.4.0 for ROCm 6.5
 
 ### Added
@@ -34,6 +41,10 @@ Documentation for rocRAND is available at
 ### Fixed
 
 * Fixed an issue where `mt19937.hpp` would cause kernel errors during auto tuning.
+
+### Removed
+
+* Removed C++14 support, only C++17 is supported.
 
 ## rocRAND 3.3.0 for ROCm 6.4
 

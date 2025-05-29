@@ -7,7 +7,7 @@ Welcome to the ROCm Libraries monorepo. This repository consolidates multiple RO
 This table provides the current status of the migration of specific ROCm libraries.
 
 **Key:**
-- **Completed**: Fully migrated and integrated. This monorepo should be considered the source of truth for this project.
+- **Completed**: Fully migrated and integrated. This monorepo should be considered the source of truth for this project. The old repo may still be used for release activities.
 - **In Progress**: Ongoing migration, tests, or integration. Please refrain from submitting new pull requests on the individual repo of the project, and develop on the monorepo.
 - **Pending**: Not yet started or in the early planning stages. The individual repo should be considered the source of truth for this project.
 
@@ -17,7 +17,7 @@ This table provides the current status of the migration of specific ROCm librari
 | `hipblas`           | Pending     |  |
 | `hipblas-common`    | Pending     |  |
 | `hipblaslt`         | Pending     |  |
-| `hipcub`            | Pending     | 2nd in line |
+| `hipcub`            | In Progress 🔥     | Initial migration steps completed. |
 | `hipfft`            | Pending     | Considered in next set to migrate. |
 | `hiprand`           | Pending     | Considered in next set to migrate. |
 | `hipsolver`         | Pending     |  |
@@ -26,11 +26,11 @@ This table provides the current status of the migration of specific ROCm librari
 | `miopen`            | Pending     |  |
 | `rocblas`           | Pending     |  |
 | `rocfft`            | Pending     | Considered in next set to migrate. |
-| `rocprim`           | In Progress 🔥     | Initial migration steps completed.   |
-| `rocrand`           | Pending     | Next in line |
+| `rocprim`           | Completed   |    |
+| `rocrand`           | In Progress 🔥     | Initial migration steps completed. |
 | `rocsolver`         | Pending     |  |
 | `rocsparse`         | Pending     |  |
-| `rocthrust`         | Pending     | 3rd in line |
+| `rocthrust`         | In Progress 🔥     | Initial migration steps completed. |
 | `rocroller`         | Pending     |  |
 | `tensile`           | Pending     |  |
 

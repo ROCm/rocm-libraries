@@ -29,6 +29,8 @@
 #include "../types.hpp"
 #include "rocprim/intrinsics/arch.hpp"
 
+#include "../thread/thread_store.hpp"
+
 /// \addtogroup blockmodule
 /// @{
 
@@ -276,18 +278,18 @@ void block_store_direct_striped(unsigned int flat_id,
 /// into a blocked arrangement on continuous memory.
 ///
 /// \ingroup blockmodule_warp_store_functions
-/// The warp-striped arrangement is assumed to be (\p WarpSize * \p ItemsPerThread) items
+/// The warp-striped arrangement is assumed to be (\p VirtualWaveSize * \p ItemsPerThread) items
 /// across a thread block. Each thread uses a \p flat_id to store a range of
 /// \p ItemsPerThread \p items to the thread block.
 ///
-/// * The number of threads in the block must be a multiple of \p WarpSize.
-/// * The default \p WarpSize is a hardware warpsize and is an optimal value.
-/// * \p WarpSize must be a power of two and equal or less than the size of
+/// * The number of threads in the block must be a multiple of \p VirtualWaveSize.
+/// * The default \p VirtualWaveSize is a hardware warpsize and is an optimal value.
+/// * \p VirtualWaveSize must be a power of two and equal or less than the size of
 ///   hardware warp.
-/// * Using \p WarpSize smaller than hardware warpsize could result in lower
+/// * Using \p VirtualWaveSize smaller than hardware warpsize could result in lower
 ///   performance.
 ///
-/// \tparam WarpSize [optional] the number of threads in a warp
+/// \tparam VirtualWaveSize [optional] the number of threads in a warp
 /// \tparam OutputIterator [inferred] an iterator type for input (can be a simple
 /// pointer
 /// \tparam T [inferred] the data type
@@ -297,7 +299,7 @@ void block_store_direct_striped(unsigned int flat_id,
 /// \param flat_id a local flat 1D thread id in a block (tile) for the calling thread
 /// \param block_output the input iterator from the thread block to store to
 /// \param items array that data is stored to thread block
-template<unsigned int WarpSize = arch::wavefront::min_size(),
+template<unsigned int VirtualWaveSize = arch::wavefront::min_size(),
          class OutputIterator,
          class T,
          unsigned int ItemsPerThread>
@@ -310,18 +312,19 @@ void block_store_direct_warp_striped(unsigned int   flat_id,
                   "The type T must be such that an object of type OutputIterator "
                   "can be dereferenced and assigned a value of type T.");
 
-    static_assert(detail::is_power_of_two(WarpSize) && WarpSize <= arch::wavefront::max_size(),
-                  "WarpSize must be a power of two and equal or less"
+    static_assert(detail::is_power_of_two(VirtualWaveSize)
+                      && VirtualWaveSize <= arch::wavefront::max_size(),
+                  "VirtualWaveSize must be a power of two and equal or less"
                   "than the size of hardware warp.");
-    unsigned int thread_id = detail::logical_lane_id<WarpSize>();
-    unsigned int warp_id = flat_id / WarpSize;
-    unsigned int warp_offset = warp_id * WarpSize * ItemsPerThread;
+    unsigned int thread_id   = detail::logical_lane_id<VirtualWaveSize>();
+    unsigned int warp_id     = flat_id / VirtualWaveSize;
+    unsigned int warp_offset = warp_id * VirtualWaveSize * ItemsPerThread;
 
     OutputIterator thread_iter = block_output + thread_id + warp_offset;
     ROCPRIM_UNROLL
     for (unsigned int item = 0; item < ItemsPerThread; item++)
     {
-        thread_iter[item * WarpSize] = items[item];
+        thread_iter[item * VirtualWaveSize] = items[item];
     }
 }
 
@@ -329,18 +332,18 @@ void block_store_direct_warp_striped(unsigned int   flat_id,
 /// into a blocked arrangement on continuous memory, which is guarded by range \p valid.
 ///
 /// \ingroup blockmodule_warp_store_functions
-/// The warp-striped arrangement is assumed to be (\p WarpSize * \p ItemsPerThread) items
+/// The warp-striped arrangement is assumed to be (\p VirtualWaveSize * \p ItemsPerThread) items
 /// across a thread block. Each thread uses a \p flat_id to store a range of
 /// \p ItemsPerThread \p items to the thread block.
 ///
-/// * The number of threads in the block must be a multiple of \p WarpSize.
-/// * The default \p WarpSize is a hardware warpsize and is an optimal value.
-/// * \p WarpSize must be a power of two and equal or less than the size of
+/// * The number of threads in the block must be a multiple of \p VirtualWaveSize.
+/// * The default \p VirtualWaveSize is a hardware warpsize and is an optimal value.
+/// * \p VirtualWaveSize must be a power of two and equal or less than the size of
 ///   hardware warp.
-/// * Using \p WarpSize smaller than hardware warpsize could result in lower
+/// * Using \p VirtualWaveSize smaller than hardware warpsize could result in lower
 ///   performance.
 ///
-/// \tparam WarpSize [optional] the number of threads in a warp
+/// \tparam VirtualWaveSize [optional] the number of threads in a warp
 /// \tparam OutputIterator [inferred] an iterator type for input (can be a simple
 /// pointer
 /// \tparam T [inferred] the data type
@@ -351,7 +354,7 @@ void block_store_direct_warp_striped(unsigned int   flat_id,
 /// \param block_output the input iterator from the thread block to store to
 /// \param items array that data is stored to thread block
 /// \param valid maximum range of valid numbers to store
-template<unsigned int WarpSize = arch::wavefront::min_size(),
+template<unsigned int VirtualWaveSize = arch::wavefront::min_size(),
          class OutputIterator,
          class T,
          unsigned int ItemsPerThread>
@@ -365,25 +368,67 @@ void block_store_direct_warp_striped(unsigned int   flat_id,
                   "The type T must be such that an object of type OutputIterator "
                   "can be dereferenced and assigned a value of type T.");
 
-    static_assert(detail::is_power_of_two(WarpSize) && WarpSize <= arch::wavefront::max_size(),
-                  "WarpSize must be a power of two and equal or less"
+    static_assert(detail::is_power_of_two(VirtualWaveSize)
+                      && VirtualWaveSize <= arch::wavefront::max_size(),
+                  "VirtualWaveSize must be a power of two and equal or less"
                   "than the size of hardware warp.");
-    assert(WarpSize <= arch::wavefront::size());
+    assert(VirtualWaveSize <= arch::wavefront::size());
 
-    unsigned int thread_id = detail::logical_lane_id<WarpSize>();
-    unsigned int warp_id = flat_id / WarpSize;
-    unsigned int warp_offset = warp_id * WarpSize * ItemsPerThread;
+    unsigned int thread_id   = detail::logical_lane_id<VirtualWaveSize>();
+    unsigned int warp_id     = flat_id / VirtualWaveSize;
+    unsigned int warp_offset = warp_id * VirtualWaveSize * ItemsPerThread;
 
     OutputIterator thread_iter = block_output + thread_id + warp_offset;
     ROCPRIM_UNROLL
     for (unsigned int item = 0; item < ItemsPerThread; item++)
     {
-        unsigned int offset = item * WarpSize;
+        unsigned int offset = item * VirtualWaveSize;
         if (warp_offset + thread_id + offset < valid)
         {
             thread_iter[offset] = items[item];
         }
     }
+}
+
+template<class V                      = rocprim::uint128_t,
+         unsigned int VirtualWaveSize = arch::wavefront::min_size(),
+         class T,
+         class U,
+         unsigned int ItemsPerThread>
+ROCPRIM_DEVICE ROCPRIM_INLINE
+auto block_store_direct_blocked_cast(unsigned int flat_id,
+                                     T*           block_output,
+                                     U (&items)[ItemsPerThread]) ->
+    typename std::enable_if<detail::is_vectorizable<T, ItemsPerThread>::value
+                            && (ItemsPerThread * sizeof(T)) % sizeof(V) == 0>::type
+{
+    static_assert(std::is_convertible<U, T>::value,
+                  "The type U must be such that it can be implicitly converted to T.");
+
+    constexpr unsigned int vectors_per_thread = (sizeof(T) * ItemsPerThread) / sizeof(V);
+
+    V* vector_ptr = ::rocprim::detail::bit_cast<V*>(block_output) + flat_id * vectors_per_thread;
+
+    ROCPRIM_UNROLL
+    for(unsigned int item = 0; item < vectors_per_thread; item++)
+    {
+        vector_ptr[item] = *(reinterpret_cast<const V*>(items) + item);
+    }
+}
+
+template<class V                      = rocprim::uint128_t,
+         unsigned int VirtualWaveSize = arch::wavefront::min_size(),
+         class T,
+         class U,
+         unsigned int ItemsPerThread>
+ROCPRIM_DEVICE ROCPRIM_INLINE
+auto block_store_direct_blocked_cast(unsigned int flat_id,
+                                     T*           block_output,
+                                     U (&items)[ItemsPerThread]) ->
+    typename std::enable_if<!detail::is_vectorizable<T, ItemsPerThread>::value
+                            || (ItemsPerThread * sizeof(T)) % sizeof(V) != 0>::type
+{
+    block_store_direct_blocked(flat_id, block_output, items);
 }
 
 END_ROCPRIM_NAMESPACE

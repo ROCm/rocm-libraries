@@ -27,6 +27,7 @@
 #include "hipcub/iterator/constant_input_iterator.hpp"
 #include "hipcub/iterator/counting_input_iterator.hpp"
 #include "hipcub/iterator/transform_input_iterator.hpp"
+#include "hipcub/thread/thread_operators.hpp"
 
 #include "single_index_iterator.hpp"
 #include "test_utils_bfloat16.hpp"
@@ -114,6 +115,15 @@ std::vector<T>
     return keys;
 }
 } // namespace
+
+TYPED_TEST(HipcubDeviceScanTests, AccumulatorTypeTest)
+{
+    using T = hipcub::detail::accumulator_t<typename TestFixture::scan_op_type,
+                                            typename TestFixture::input_type>;
+    using U = typename TestFixture::input_type;
+    static_assert(std::is_same<T, U>::value, "accumulator type mismatch");
+    ASSERT_TRUE(true);
+}
 
 TYPED_TEST(HipcubDeviceScanTests, InclusiveScan)
 {
@@ -306,6 +316,190 @@ TYPED_TEST(HipcubDeviceScanTests, InclusiveScan)
 
     if(TestFixture::use_graphs)
         HIP_CHECK(hipStreamDestroy(stream));
+}
+
+TYPED_TEST(HipcubDeviceScanTests, InclusiveScanInit)
+{
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    using T = typename TestFixture::input_type;
+    using U = typename TestFixture::output_type;
+
+    using scan_op_type = typename TestFixture::scan_op_type;
+    // if scan_op_type is plus and input_type is bfloat16 or half,
+    // use float as device-side accumulator and double as host-side accumulator
+    using is_add_op    = test_utils::is_add_operator<scan_op_type>;
+    using acc_type     = typename accum_type<T, scan_op_type>::type;
+    using IteratorType = hipcub::TransformInputIterator<acc_type, hipcub::CastOp<acc_type>, T*>;
+
+    constexpr bool inplace = std::is_same<T, U>::value && std::is_same<acc_type, T>::value;
+
+    // for non-associative operations in inclusive scan
+    // intermediate results use the type of input iterator, then
+    // as all conversions in the tests are to more precise types,
+    // intermediate results use the same or more precise acc_type,
+    // all scan operations use the same acc_type,
+    // and all output types are the same acc_type,
+    // therefore the only source of error is precision of operation itself
+    constexpr float single_op_precision
+        = is_add_op::value ? test_utils::precision<acc_type>::value : 0;
+
+    hipStream_t stream = 0; // default
+    if(TestFixture::use_graphs)
+    {
+        // Default stream does not support hipGraph stream capture, so create one
+        HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+    }
+
+    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    {
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+
+        for(size_t size : test_utils::get_sizes(seed_value))
+        {
+            SCOPED_TRACE(testing::Message() << "with size= " << size);
+            if(single_op_precision * size > 0.5)
+            {
+                std::cout << "Test is skipped from size " << size
+                          << " on, potential error of summation is more than 0.5 of the result "
+                             "with current or larger size"
+                          << std::endl;
+                break;
+            }
+
+            // Generate data
+            std::vector<T> input
+                = test_utils::get_random_data<T>(size,
+                                                 test_utils::convert_to_device<T>(1),
+                                                 test_utils::convert_to_device<T>(10),
+                                                 seed_value);
+            std::vector<U> output(input.size(), test_utils::convert_to_device<U>(0));
+
+            const T initial_value
+                = test_utils::get_random_value<T>(test_utils::convert_to_device<T>(1),
+                                                  test_utils::convert_to_device<T>(100),
+                                                  seed_value + seed_value_addition);
+
+            T* d_input;
+            U* d_output;
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_input, input.size() * sizeof(T)));
+            if HIPCUB_IF_CONSTEXPR(!inplace)
+            {
+                HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, output.size() * sizeof(U)));
+            }
+            HIP_CHECK(
+                hipMemcpy(d_input, input.data(), input.size() * sizeof(T), hipMemcpyHostToDevice));
+            HIP_CHECK(hipDeviceSynchronize());
+
+            // scan function
+            scan_op_type scan_op;
+
+            // Calculate expected results on host
+            std::vector<U> expected(input.size());
+            test_utils::host_inclusive_scan_init(input.begin(),
+                                                 input.end(),
+                                                 expected.begin(),
+                                                 initial_value,
+                                                 scan_op);
+
+            // Scan operator: CastOp.
+            hipcub::CastOp<acc_type> op{};
+
+            // Transform input applying the casting operator.
+            auto input_iterator = IteratorType(d_input, op);
+
+            auto call = [&](void* d_temp_storage, size_t& temp_storage_size_bytes)
+            {
+                if HIPCUB_IF_CONSTEXPR(inplace)
+                {
+                    HIP_CHECK(hipcub::DeviceScan::InclusiveScanInit(d_temp_storage,
+                                                                    temp_storage_size_bytes,
+                                                                    d_input,
+                                                                    d_input,
+                                                                    scan_op,
+                                                                    initial_value,
+                                                                    input.size(),
+                                                                    stream));
+                }
+                else
+                {
+                    HIP_CHECK(hipcub::DeviceScan::InclusiveScanInit(d_temp_storage,
+                                                                    temp_storage_size_bytes,
+                                                                    input_iterator,
+                                                                    d_output,
+                                                                    scan_op,
+                                                                    initial_value,
+                                                                    input.size(),
+                                                                    stream));
+                }
+            };
+
+            // temp storage
+            size_t temp_storage_size_bytes;
+            void*  d_temp_storage = nullptr;
+            // Get size of d_temp_storage
+            call(d_temp_storage, temp_storage_size_bytes);
+
+            // temp_storage_size_bytes must be >0
+            ASSERT_GT(temp_storage_size_bytes, 0U);
+
+            // allocate temporary storage
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
+
+            test_utils::GraphHelper gHelper;
+            if(TestFixture::use_graphs)
+                gHelper.startStreamCapture(stream);
+
+            // Run
+            call(d_temp_storage, temp_storage_size_bytes);
+
+            if(TestFixture::use_graphs)
+                gHelper.createAndLaunchGraph(stream);
+
+            HIP_CHECK(hipPeekAtLastError());
+            HIP_CHECK(hipDeviceSynchronize());
+
+            // Copy output to host
+            if HIPCUB_IF_CONSTEXPR(inplace)
+            {
+                HIP_CHECK(hipMemcpy(output.data(),
+                                    d_input,
+                                    output.size() * sizeof(U),
+                                    hipMemcpyDeviceToHost));
+            }
+            else
+            {
+                HIP_CHECK(hipMemcpy(output.data(),
+                                    d_output,
+                                    output.size() * sizeof(U),
+                                    hipMemcpyDeviceToHost));
+            }
+            HIP_CHECK(hipDeviceSynchronize());
+
+            // Check if output values are as expected
+            ASSERT_NO_FATAL_FAILURE(
+                test_utils::assert_near(output, expected, single_op_precision * size));
+
+            if(TestFixture::use_graphs)
+                gHelper.cleanupGraphHelper();
+
+            HIP_CHECK(hipFree(d_input));
+            if(!inplace)
+            {
+                HIP_CHECK(hipFree(d_output));
+            }
+            HIP_CHECK(hipFree(d_temp_storage));
+        }
+    }
+
+    if(TestFixture::use_graphs)
+    {
+        HIP_CHECK(hipStreamDestroy(stream));
+    }
 }
 
 TYPED_TEST(HipcubDeviceScanTests, InclusiveScanByKey)
@@ -901,9 +1095,6 @@ TYPED_TEST(HipcubDeviceScanTests, ExclusiveScanByKey)
         HIP_CHECK(hipStreamDestroy(stream));
 }
 
-// CUB does not support large indices in inclusive and exclusive scans
-#ifndef __HIP_PLATFORM_NVIDIA__
-
 TEST(HipcubDeviceScanTests, LargeIndicesInclusiveScan)
 {
     using T              = unsigned int;
@@ -1050,8 +1241,6 @@ TEST(HipcubDeviceScanTests, LargeIndicesExclusiveScan)
     HIP_CHECK(hipFree(d_output));
     HIP_CHECK(hipFree(d_temp_storage));
 }
-
-#endif
 
 template<typename T>
 static __global__

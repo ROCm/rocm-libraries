@@ -29,8 +29,6 @@ extern "C" {
 #endif
 
 /*! \ingroup precond_module
-*  \brief Interleaved Batch pentadiagonal solver
-*
 *  \details
 *  \p hipsparseXgpsvInterleavedBatch_bufferSizeExt returns the size of the temporary storage
 *  buffer in bytes that is required by \ref hipsparseSgpsvInterleavedBatch "hipsparseXgpsvInterleavedBatch()". 
@@ -125,7 +123,58 @@ hipsparseStatus_t hipsparseZgpsvInterleavedBatch_bufferSizeExt(hipsparseHandle_t
 *  \brief Interleaved Batch pentadiagonal solver
 *
 *  \details
-*  \p hipsparseXgpsvInterleavedBatch solves a batched pentadiagonal linear system
+*  \p hipsparseXgpsvInterleavedBatch solves a batch of pentadiagonal linear systems
+*  \f[
+*    P^{i}*x^{i} = x^{i}
+*  \f]
+*  where for each batch \f$i=0\ldots\f$ \p batchCount, \f$P^{i}\f$ is a sparse pentadiagonal matrix and 
+*  \f$x^{i}\f$ is a dense right-hand side vector. All of the pentadiagonal matrices, \f$P^{i}\f$, are 
+*  packed in an interleaved fashion into five vectors: \p ds for the lowest diagonals, \p dl for the lower 
+*  diagonals, \p d for the main diagonals, \p du for the upper diagonals, and \p dw for the highest digaonals. 
+*  See below for a description of what this interleaved memory pattern looks like.
+*
+*  Solving the batched pentadiagonal system involves two steps. First, the user calls 
+*  \ref hipsparseSgpsvInterleavedBatch_bufferSizeExt "hipsparseSgpsvInterleavedBatch_bufferSizeExt()" 
+*  in order to determine the size of the required temporary storage buffer. Once determined, the user allocates 
+*  this buffer and passes it to \ref hipsparseSgpsvInterleavedBatch "hipsparseXgpsvInterleavedBatch()" 
+*  to perform the actual solve. The \f$x^{i}\f$ vectors, which initially stores the right-hand side values, are 
+*  overwritten with the solution after the call to 
+*  \ref hipsparseSgpsvInterleavedBatch "hipsparseXgpsvInterleavedBatch()".
+*
+*  Unlike the strided batch routines which write each batch matrix one after the other in memory, the interleaved 
+*  routines write the batch matrices such that each element from each matrix is written consecutively one after 
+*  the other. For example, consider the following batch matrices:
+*
+*  \f[
+*    \begin{bmatrix}
+*    t^{0}_{00} & t^{0}_{01} & t^{0}_{02} \\
+*    t^{0}_{10} & t^{0}_{11} & t^{0}_{12} \\
+*    t^{0}_{20} & t^{0}_{21} & t^{0}_{22}
+*    \end{bmatrix}
+*    \begin{bmatrix}
+*    t^{1}_{00} & t^{1}_{01} & t^{1}_{02} \\
+*    t^{1}_{10} & t^{1}_{11} & t^{1}_{12} \\
+*    t^{1}_{20} & t^{1}_{21} & t^{1}_{22}
+*    \end{bmatrix}
+*    \begin{bmatrix}
+*    t^{2}_{00} & t^{2}_{01} & t^{2}_{02} \\
+*    t^{2}_{10} & t^{2}_{11} & t^{2}_{12} \\
+*    t^{2}_{20} & t^{2}_{21} & t^{2}_{22}
+*    \end{bmatrix}
+*  \f] 
+*
+*  In interleaved format, the highest, higher, lowest, lower, and diagonal arrays would look like:
+*  \f[
+*    \begin{align}
+*    \text{lowest} &= \begin{bmatrix} 0 & 0 & 0 & 0 & 0 & 0 & t^{0}_{20} & t^{1}_{20} & t^{2}_{20} \end{bmatrix} \\
+*    \text{lower} &= \begin{bmatrix} 0 & 0 & 0 & t^{0}_{10} & t^{1}_{10} & t^{1}_{10} & t^{0}_{21} & t^{1}_{21} & t^{2}_{21} \end{bmatrix} \\
+*    \text{diagonal} &= \begin{bmatrix} t^{0}_{00} & t^{1}_{00} & t^{2}_{00} & t^{0}_{11} & t^{1}_{11} & t^{2}_{11} & t^{0}_{22} & t^{1}_{22} & t^{2}_{22} \end{bmatrix} \\
+*    \text{higher} &= \begin{bmatrix} t^{0}_{01} & t^{1}_{01} & t^{2}_{01} & t^{0}_{12} & t^{1}_{12} & t^{2}_{12} & 0 & 0 & 0 \end{bmatrix} \\
+*    \text{highest} &= \begin{bmatrix} t^{0}_{02} & t^{1}_{02} & t^{2}_{02} & 0 & 0 & 0 & 0 & 0 & 0 \end{bmatrix} \\
+*    \end{align}
+*  \f]
+*  For the lowest array, the first \p 2*batchCount entries are zero, for the lower array, the first \p batchCount entries are zero, 
+*  for the upper array the last \p batchCount entries are zero, and for the highest array, the last \p 2*batchCount entries are zero.
 *
 *  \note
 *  This function is non blocking and executed asynchronously with respect to the host.

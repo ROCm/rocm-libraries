@@ -211,7 +211,7 @@ void testing_sytrd_hetrd_bad_arg()
         // int size_W;
         // hipsolver_sytrd_hetrd_bufferSize(
         //     API, handle, uplo, n, dA.data(), lda, dD.data(), dE.data(), dTau.data(), &size_W);
-        // size_t bytes_W = sizeof(T) * size_W;
+        // size_t bytes_W = std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") != nullptr ? size_W : sizeof(T) * size_W;
         // device_strided_batch_vector<T> dWork(bytes_W, 1, bytes_W, 1);
         // if(size_W)
         //     CHECK_HIP_ERROR(dWork.memcheck());
@@ -251,7 +251,9 @@ void testing_sytrd_hetrd_bad_arg()
         int size_W;
         hipsolver_sytrd_hetrd_bufferSize(
             API, handle, uplo, n, dA.data(), lda, dD.data(), dE.data(), dTau.data(), &size_W);
-        size_t                         bytes_W = sizeof(T) * size_W;
+        size_t bytes_W = std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") != nullptr
+                             ? size_W
+                             : sizeof(T) * size_W;
         device_strided_batch_vector<T> dWork(bytes_W, 1, bytes_W, 1);
         if(size_W)
             CHECK_HIP_ERROR(dWork.memcheck());
@@ -770,7 +772,8 @@ void testing_sytrd_hetrd(Arguments& argus)
     int size_W;
     hipsolver_sytrd_hetrd_bufferSize(
         API, handle, uplo, n, (T*)nullptr, lda, (S*)nullptr, (S*)nullptr, (T*)nullptr, &size_W);
-    size_t bytes_W = sizeof(T) * size_W;
+    size_t bytes_W
+        = std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") != nullptr ? size_W : sizeof(T) * size_W;
 
     if(argus.mem_query)
     {

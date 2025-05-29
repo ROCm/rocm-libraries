@@ -24,9 +24,9 @@
 #include <type_traits>
 
 #include "../../config.hpp"
+#include "../../detail/various.hpp"
 #include "../../intrinsics.hpp"
 #include "../../types.hpp"
-#include "../../detail/various.hpp"
 
 #include "warp_reduce_shuffle.hpp"
 
@@ -35,15 +35,11 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-template<
-    class T,
-    unsigned int WarpSize,
-    bool UseAllReduce
->
+template<class T, unsigned int VirtualWaveSize, bool UseAllReduce>
 class warp_reduce_dpp
 {
 public:
-    static_assert(detail::is_power_of_two(WarpSize), "WarpSize must be power of 2");
+    static_assert(detail::is_power_of_two(VirtualWaveSize), "VirtualWaveSize must be power of 2");
 
     using storage_type = detail::empty_storage_type;
 
@@ -53,24 +49,24 @@ public:
     {
         output = input;
 
-        if(WarpSize > 1)
+        if(VirtualWaveSize > 1)
         {
             // quad_perm:[1,0,3,2] -> 10110001
             output = reduce_op(warp_move_dpp<T, 0xb1>(output), output);
         }
-        if(WarpSize > 2)
+        if(VirtualWaveSize > 2)
         {
             // quad_perm:[2,3,0,1] -> 01001110
             output = reduce_op(warp_move_dpp<T, 0x4e>(output), output);
         }
-        if(WarpSize > 4)
+        if(VirtualWaveSize > 4)
         {
             // row_ror:4
             // Use rotation instead of shift to avoid leaving invalid values in the destination
             // registers (asume warp size of at least hardware warp-size)
             output = reduce_op(warp_move_dpp<T, 0x124>(output), output);
         }
-        if(WarpSize > 8)
+        if(VirtualWaveSize > 8)
         {
             // row_ror:8
             // Use rotation instead of shift to avoid leaving invalid values in the destination
@@ -78,34 +74,35 @@ public:
             output = reduce_op(warp_move_dpp<T, 0x128>(output), output);
         }
 #ifdef ROCPRIM_DETAIL_HAS_DPP_BROADCAST
-        if(WarpSize > 16)
+        if(VirtualWaveSize > 16)
         {
             // row_bcast:15
             output = reduce_op(warp_move_dpp<T, 0x142>(output), output);
         }
-        if(WarpSize > 32)
+        if(VirtualWaveSize > 32)
         {
             // row_bcast:31
             output = reduce_op(warp_move_dpp<T, 0x143>(output), output);
         }
-        static_assert(WarpSize <= 64, "WarpSize > 64 is not supported");
+        static_assert(VirtualWaveSize <= 64, "VirtualWaveSize > 64 is not supported");
 #else
-        if(WarpSize > 16)
+        if(VirtualWaveSize > 16)
         {
             // row_bcast:15
             output = reduce_op(warp_swizzle<T, 0x1e0>(output), output);
         }
-        static_assert(WarpSize <= 32, "WarpSize > 32 is not supported without DPP broadcasts");
+        static_assert(VirtualWaveSize <= 32,
+                      "VirtualWaveSize > 32 is not supported without DPP broadcasts");
 #endif
         // Read the result from the last lane of the logical warp
-        output = warp_shuffle(output, WarpSize - 1, WarpSize);
+        output = warp_shuffle(output, VirtualWaveSize - 1, VirtualWaveSize);
     }
 
     template<class BinaryFunction>
     ROCPRIM_DEVICE ROCPRIM_INLINE
     void reduce_impl(T input, T& output, BinaryFunction reduce_op, std::true_type)
     {
-        warp_reduce_shuffle<T, WarpSize, UseAllReduce>().reduce(input, output, reduce_op);
+        warp_reduce_shuffle<T, VirtualWaveSize, UseAllReduce>().reduce(input, output, reduce_op);
     }
 
     template<class BinaryFunction>
@@ -116,14 +113,15 @@ public:
             input,
             output,
             reduce_op,
-            std::integral_constant<bool, (WarpSize < ::rocprim::arch::wavefront::min_size())>{});
+            std::integral_constant<bool,
+                                   (VirtualWaveSize < ::rocprim::arch::wavefront::min_size())>{});
     }
 
     template<class BinaryFunction>
     ROCPRIM_DEVICE ROCPRIM_INLINE
     void reduce(T input, T& output, storage_type& storage, BinaryFunction reduce_op)
     {
-        (void) storage; // disables unused parameter warning
+        (void)storage; // disables unused parameter warning
         this->reduce(input, output, reduce_op);
     }
 
@@ -132,16 +130,21 @@ public:
     void reduce(T input, T& output, unsigned int valid_items, BinaryFunction reduce_op)
     {
         // Fallback to shuffle-based implementation
-        warp_reduce_shuffle<T, WarpSize, UseAllReduce>()
-            .reduce(input, output, valid_items, reduce_op);
+        warp_reduce_shuffle<T, VirtualWaveSize, UseAllReduce>().reduce(input,
+                                                                       output,
+                                                                       valid_items,
+                                                                       reduce_op);
     }
 
     template<class BinaryFunction>
     ROCPRIM_DEVICE ROCPRIM_INLINE
-    void reduce(T input, T& output, unsigned int valid_items,
-                storage_type& storage, BinaryFunction reduce_op)
+    void reduce(T              input,
+                T&             output,
+                unsigned int   valid_items,
+                storage_type&  storage,
+                BinaryFunction reduce_op)
     {
-        (void) storage; // disables unused parameter warning
+        (void)storage; // disables unused parameter warning
         this->reduce(input, output, valid_items, reduce_op);
     }
 
@@ -150,8 +153,10 @@ public:
     void head_segmented_reduce(T input, T& output, Flag flag, BinaryFunction reduce_op)
     {
         // Fallback to shuffle-based implementation
-        warp_reduce_shuffle<T, WarpSize, UseAllReduce>()
-            .head_segmented_reduce(input, output, flag, reduce_op);
+        warp_reduce_shuffle<T, VirtualWaveSize, UseAllReduce>().head_segmented_reduce(input,
+                                                                                      output,
+                                                                                      flag,
+                                                                                      reduce_op);
     }
 
     template<class Flag, class BinaryFunction>
@@ -159,28 +164,36 @@ public:
     void tail_segmented_reduce(T input, T& output, Flag flag, BinaryFunction reduce_op)
     {
         // Fallback to shuffle-based implementation
-        warp_reduce_shuffle<T, WarpSize, UseAllReduce>()
-            .tail_segmented_reduce(input, output, flag, reduce_op);
+        warp_reduce_shuffle<T, VirtualWaveSize, UseAllReduce>().tail_segmented_reduce(input,
+                                                                                      output,
+                                                                                      flag,
+                                                                                      reduce_op);
     }
 
     template<class Flag, class BinaryFunction>
     ROCPRIM_DEVICE ROCPRIM_INLINE
-    void head_segmented_reduce(T input, T& output, Flag flag,
-                               storage_type& storage, BinaryFunction reduce_op)
+    void head_segmented_reduce(
+        T input, T& output, Flag flag, storage_type& storage, BinaryFunction reduce_op)
     {
         // Fallback to shuffle-based implementation
-        warp_reduce_shuffle<T, WarpSize, UseAllReduce>()
-            .head_segmented_reduce(input, output, flag, storage, reduce_op);
+        warp_reduce_shuffle<T, VirtualWaveSize, UseAllReduce>().head_segmented_reduce(input,
+                                                                                      output,
+                                                                                      flag,
+                                                                                      storage,
+                                                                                      reduce_op);
     }
 
     template<class Flag, class BinaryFunction>
     ROCPRIM_DEVICE ROCPRIM_INLINE
-    void tail_segmented_reduce(T input, T& output, Flag flag,
-                               storage_type& storage, BinaryFunction reduce_op)
+    void tail_segmented_reduce(
+        T input, T& output, Flag flag, storage_type& storage, BinaryFunction reduce_op)
     {
         // Fallback to shuffle-based implementation
-        warp_reduce_shuffle<T, WarpSize, UseAllReduce>()
-            .tail_segmented_reduce(input, output, flag, storage, reduce_op);
+        warp_reduce_shuffle<T, VirtualWaveSize, UseAllReduce>().tail_segmented_reduce(input,
+                                                                                      output,
+                                                                                      flag,
+                                                                                      storage,
+                                                                                      reduce_op);
     }
 };
 

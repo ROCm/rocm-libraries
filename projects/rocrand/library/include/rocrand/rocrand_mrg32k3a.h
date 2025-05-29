@@ -24,19 +24,22 @@
 #include "rocrand/rocrand_common.h"
 #include "rocrand/rocrand_mrg32k3a_precomputed.h"
 
-#define ROCRAND_MRG32K3A_POW32 4294967296
-#define ROCRAND_MRG32K3A_M1 4294967087
-#define ROCRAND_MRG32K3A_M1C 209
-#define ROCRAND_MRG32K3A_M2 4294944443
-#define ROCRAND_MRG32K3A_M2C 22853
-#define ROCRAND_MRG32K3A_A12 1403580
-#define ROCRAND_MRG32K3A_A13 (4294967087 -  810728)
-#define ROCRAND_MRG32K3A_A13N 810728
-#define ROCRAND_MRG32K3A_A21 527612
-#define ROCRAND_MRG32K3A_A23 (4294944443 - 1370589)
-#define ROCRAND_MRG32K3A_A23N 1370589
+#include <hip/hip_runtime.h>
+
+#define ROCRAND_MRG32K3A_POW32 4294967296U
+#define ROCRAND_MRG32K3A_M1 4294967087U
+#define ROCRAND_MRG32K3A_M1C 209U
+#define ROCRAND_MRG32K3A_M2 4294944443U
+#define ROCRAND_MRG32K3A_M2C 22853U
+#define ROCRAND_MRG32K3A_A12 1403580U
+#define ROCRAND_MRG32K3A_A13 (4294967087U - 810728U)
+#define ROCRAND_MRG32K3A_A13N 810728U
+#define ROCRAND_MRG32K3A_A21 527612U
+#define ROCRAND_MRG32K3A_A23 (4294944443U - 1370589U)
+#define ROCRAND_MRG32K3A_A23N 1370589U
 #define ROCRAND_MRG32K3A_NORM_DOUBLE (2.3283065498378288e-10) // 1/ROCRAND_MRG32K3A_M1
-#define ROCRAND_MRG32K3A_UINT_NORM (1.000000048661607) // (ROCRAND_MRG32K3A_POW32 - 1)/(ROCRAND_MRG32K3A_M1 - 1)
+#define ROCRAND_MRG32K3A_UINT_NORM \
+    (1.000000048661607) // (ROCRAND_MRG32K3A_POW32 - 1)/(ROCRAND_MRG32K3A_M1 - 1)
 
 /** \rocrand_internal \addtogroup rocranddevice
  *
@@ -259,48 +262,28 @@ protected:
     }
 
 private:
-    __forceinline__ __device__ __host__ static void mod_mat_vec_m1(const unsigned long long* A,
-                                                                   unsigned int*             s)
+    __forceinline__ __device__ __host__
+    static void mod_mat_vec_m1(const unsigned int* A, unsigned int* s)
     {
-        unsigned long long x[3];
+        unsigned long long x[3] = {s[0], s[1], s[2]};
 
-        x[0] = mod_m1(mod_m1(A[0] * s[0])
-                    + mod_m1(A[1] * s[1])
-                    + mod_m1(A[2] * s[2]));
+        s[0] = mod_m1(mod_m1(A[0] * x[0]) + mod_m1(A[1] * x[1]) + mod_m1(A[2] * x[2]));
 
-        x[1] = mod_m1(mod_m1(A[3] * s[0])
-                    + mod_m1(A[4] * s[1])
-                    + mod_m1(A[5] * s[2]));
+        s[1] = mod_m1(mod_m1(A[3] * x[0]) + mod_m1(A[4] * x[1]) + mod_m1(A[5] * x[2]));
 
-        x[2] = mod_m1(mod_m1(A[6] * s[0])
-                    + mod_m1(A[7] * s[1])
-                    + mod_m1(A[8] * s[2]));
-
-        s[0] = x[0];
-        s[1] = x[1];
-        s[2] = x[2];
+        s[2] = mod_m1(mod_m1(A[6] * x[0]) + mod_m1(A[7] * x[1]) + mod_m1(A[8] * x[2]));
     }
 
-    __forceinline__ __device__ __host__ static void mod_mat_vec_m2(const unsigned long long* A,
-                                                                   unsigned int*             s)
+    __forceinline__ __device__ __host__
+    static void mod_mat_vec_m2(const unsigned int* A, unsigned int* s)
     {
-        unsigned long long x[3];
+        unsigned long long x[3] = {s[0], s[1], s[2]};
 
-        x[0] = mod_m2(mod_m2(A[0] * s[0])
-                    + mod_m2(A[1] * s[1])
-                    + mod_m2(A[2] * s[2]));
+        s[0] = mod_m2(mod_m2(A[0] * x[0]) + mod_m2(A[1] * x[1]) + mod_m2(A[2] * x[2]));
 
-        x[1] = mod_m2(mod_m2(A[3] * s[0])
-                    + mod_m2(A[4] * s[1])
-                    + mod_m2(A[5] * s[2]));
+        s[1] = mod_m2(mod_m2(A[3] * x[0]) + mod_m2(A[4] * x[1]) + mod_m2(A[5] * x[2]));
 
-        x[2] = mod_m2(mod_m2(A[6] * s[0])
-                    + mod_m2(A[7] * s[1])
-                    + mod_m2(A[8] * s[2]));
-
-        s[0] = x[0];
-        s[1] = x[1];
-        s[2] = x[2];
+        s[2] = mod_m2(mod_m2(A[6] * x[0]) + mod_m2(A[7] * x[1]) + mod_m2(A[8] * x[2]));
     }
 
     __forceinline__ __device__ __host__ static unsigned long long mod_mul_m1(unsigned int       i,
@@ -466,6 +449,6 @@ void skipahead_sequence(unsigned long long sequence, rocrand_state_mrg32k3a* sta
     return state->discard_sequence(sequence);
 }
 
-#endif // ROCRAND_MRG32K3A_H_
-
 /** @} */ // end of group rocranddevice
+
+#endif // ROCRAND_MRG32K3A_H_

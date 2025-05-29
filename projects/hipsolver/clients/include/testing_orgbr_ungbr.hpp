@@ -88,7 +88,8 @@ void testing_orgbr_ungbr_bad_arg()
     int size_W;
     hipsolver_orgbr_ungbr_bufferSize(
         API, handle, side, m, n, k, dA.data(), lda, dIpiv.data(), &size_W);
-    size_t                         bytes_W = sizeof(T) * size_W;
+    size_t bytes_W
+        = std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") != nullptr ? size_W : sizeof(T) * size_W;
     device_strided_batch_vector<T> dWork(bytes_W, 1, bytes_W, 1);
     if(size_W)
         CHECK_HIP_ERROR(dWork.memcheck());
@@ -377,7 +378,8 @@ void testing_orgbr_ungbr(Arguments& argus)
     int size_W;
     hipsolver_orgbr_ungbr_bufferSize(
         API, handle, side, m, n, k, (T*)nullptr, lda, (T*)nullptr, &size_W);
-    size_t bytes_W = sizeof(T) * size_W;
+    size_t bytes_W
+        = std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") != nullptr ? size_W : sizeof(T) * size_W;
 
     if(argus.mem_query)
     {

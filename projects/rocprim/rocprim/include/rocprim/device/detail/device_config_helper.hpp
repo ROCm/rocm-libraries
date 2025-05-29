@@ -445,6 +445,7 @@ struct transform_config_tag
 struct transform_config_params
 {
     kernel_config_params kernel_config{};
+    cache_load_modifier  load_type;
 };
 
 } // namespace detail
@@ -479,11 +480,8 @@ struct segmented_radix_sort_config_params
 {
     /// \brief Kernel start parameters.
     kernel_config_params kernel_config{};
-    /// \brief Number of bits in long iterations.
-    unsigned int long_radix_bits = 0;
-    /// \brief Number of bits in short iterations.
-    /// \deprecated The short radix bits parameter is no longer used and will be removed in a future version.
-    unsigned int short_radix_bits = 0;
+    /// \brief Number of bits in iterations.
+    unsigned int radix_bits = 0;
     /// \brief If set to \p true, warp sort can be used to sort the small segments, even if no partitioning happens.
     bool enable_unpartitioned_warp_sort = true;
     /// \brief Warp sort config params
@@ -569,22 +567,19 @@ struct DisabledWarpSortConfig
 //// \brief Configuration of device-level segmented radix sort operation.
 ///
 /// Radix sort is excecuted in a few iterations (passes) depending on total number of bits to be sorted
-/// (`begin_bit` and `end_bit`), each iteration sorts either `LongRadixBits` or `ShortRadixBits` bits
+/// (`begin_bit` and `end_bit`), each iteration sorts `RadixBits` bits
 /// chosen to cover whole bit range in optimal way.
 ///
-/// For example, if `LongRadixBits` is 7, `ShortRadixBits` is 6, `begin_bit` is 0 and `end_bit` is 32
-/// there will be 5 iterations: 7 + 7 + 6 + 6 + 6 = 32 bits.
+/// For example, if `RadixBits` is 7, `begin_bit` is 0 and `end_bit` is 32
+/// there will be 5 iterations: 7 + 7 + 7 + 7 + 4 (still sorting with 7 bits) = 32 bits.
 ///
 /// If a segment's element count is low ( <= warp_sort_config::items_per_thread * warp_sort_config::logical_warp_size ),
 /// it is sorted by a special warp-level sorting method.
 ///
-/// \tparam LongRadixBits number of bits in long iterations.
-/// \tparam ShortRadixBits number of bits in short iterations, must be equal to or less than `LongRadixBits`.
-/// Deprecated and no longer used.
+/// \tparam RadixBits number of bits in long iterations.
 /// \tparam SortConfig configuration of radix sort kernel. Must be `kernel_config`.
 /// \tparam WarpSortConfig configuration of the warp sort that is used on the short segments.
-template<unsigned int LongRadixBits,
-         unsigned int ShortRadixBits,
+template<unsigned int RadixBits,
          class SortConfig,
          class WarpSortConfig             = DisabledWarpSortConfig,
          bool EnableUnpartitionedWarpSort = true>
@@ -594,12 +589,8 @@ struct segmented_radix_sort_config : public detail::segmented_radix_sort_config_
     using tag = detail::segmented_radix_sort_config_tag;
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 
-    /// \brief Number of bits in long iterations.
-    static constexpr unsigned int long_radix_bits = LongRadixBits;
-
-    /// \brief Number of bits in short iterations.
-    /// \deprecated The short radix bits parameter is no longer used and will be removed in a future version.
-    static constexpr unsigned int short_radix_bits = ShortRadixBits;
+    /// \brief Number of bits in iterations.
+    static constexpr unsigned int radix_bits = RadixBits;
 
     /// \brief Number of threads in a block.
     static constexpr unsigned int block_size = SortConfig::block_size;
@@ -618,8 +609,7 @@ struct segmented_radix_sort_config : public detail::segmented_radix_sort_config_
     constexpr segmented_radix_sort_config()
         : detail::segmented_radix_sort_config_params{
             SortConfig(),
-            LongRadixBits,
-            ShortRadixBits,
+            RadixBits,
             EnableUnpartitionedWarpSort,
             {warp_sort_config::partitioning_allowed,
               warp_sort_config::logical_warp_size_small,
@@ -638,16 +628,14 @@ namespace detail
 {
 /// \brief Default segmented_radix_sort kernel configurations, such that the maximum shared memory is not exceeded.
 ///
-/// \tparam LongRadixBits Long bits used during the sorting.
-/// \tparam ShortRadixBits Short bits used during the sorting.
+/// \tparam RadixBits Bits used during the sorting.
 /// \tparam ItemsPerThread Items per thread when type Key has size 1.
-template<unsigned int LongRadixBits, unsigned int ShortRadixBits>
+template<unsigned int RadixBits>
 struct default_segmented_radix_sort_config_base
 {
     static constexpr unsigned int item_scale = ::rocprim::detail::ceiling_div<unsigned int>(
         sizeof(unsigned int) + sizeof(unsigned int), sizeof(int));
-    using type = segmented_radix_sort_config<LongRadixBits,
-                                             ShortRadixBits,
+    using type = segmented_radix_sort_config<RadixBits,
                                              kernel_config<128, 17u>,
                                              WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
                                              true>;
@@ -659,9 +647,11 @@ struct default_segmented_radix_sort_config_base
 /// \tparam BlockSize Number of threads in a block.
 /// \tparam ItemsPerThread Number of items processed by each thread.
 /// \tparam SizeLimit Limit on the number of items for a single kernel launch.
-template<unsigned int BlockSize,
-         unsigned int ItemsPerThread,
-         unsigned int SizeLimit = ROCPRIM_GRID_SIZE_LIMIT>
+/// \tparam LoadType The type of thread_load used.
+template<unsigned int        BlockSize,
+         unsigned int        ItemsPerThread,
+         unsigned int        SizeLimit = ROCPRIM_GRID_SIZE_LIMIT,
+         cache_load_modifier LoadType  = load_default>
 struct transform_config : public detail::transform_config_params
 {
     /// \brief Identifies the algorithm associated to the config.
@@ -674,12 +664,51 @@ struct transform_config : public detail::transform_config_params
     /// \brief Number of items processed by each thread.
     static constexpr unsigned int items_per_thread = ItemsPerThread;
 
+    /// \brief The default load is being used.
+    static constexpr cache_load_modifier load_type = LoadType;
+
     /// \brief Limit on the number of items for a single kernel launch.
     static constexpr unsigned int size_limit = SizeLimit;
 
     constexpr transform_config()
         : detail::transform_config_params{
-            {BlockSize, ItemsPerThread, SizeLimit}
+            {BlockSize, ItemsPerThread, SizeLimit},
+            LoadType
+    }
+    {}
+#endif
+};
+
+/// \brief Configuration for the device-level transform operation for pointers.
+/// \tparam BlockSize Number of threads in a block.
+/// \tparam ItemsPerThread Number of items processed by each thread.
+/// \tparam SizeLimit Limit on the number of items for a single kernel launch.
+template<unsigned int        BlockSize,
+         unsigned int        ItemsPerThread,
+         unsigned int        SizeLimit = ROCPRIM_GRID_SIZE_LIMIT,
+         cache_load_modifier LoadType  = load_default>
+struct transform_pointer_config : public detail::transform_config_params
+{
+    /// \brief Identifies the algorithm associated to the config.
+    using tag = detail::transform_config_tag;
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
+
+    /// \brief Number of threads in a block.
+    static constexpr unsigned int block_size = BlockSize;
+
+    /// \brief Number of items processed by each thread.
+    static constexpr unsigned int items_per_thread = ItemsPerThread;
+
+    /// \brief The type of thread_load being used.
+    static constexpr cache_load_modifier load_type = LoadType;
+
+    /// \brief Limit on the number of items for a single kernel launch.
+    static constexpr unsigned int size_limit = SizeLimit;
+
+    constexpr transform_pointer_config()
+        : detail::transform_config_params{
+            {BlockSize, ItemsPerThread, SizeLimit},
+            LoadType
     }
     {}
 #endif
@@ -687,6 +716,15 @@ struct transform_config : public detail::transform_config_params
 
 namespace detail
 {
+
+template<class Value>
+struct default_transform_pointer_config_base
+{
+    static constexpr unsigned int item_scale
+        = ::rocprim::detail::ceiling_div<unsigned int>(sizeof(uint128_t), sizeof(Value));
+
+    using type = transform_config<256, item_scale>;
+};
 
 template<class Value>
 struct default_transform_config_base
@@ -713,7 +751,7 @@ struct lower_bound_config_tag : public transform_config_tag
 template<unsigned int BlockSize,
          unsigned int ItemsPerThread,
          unsigned int SizeLimit = ROCPRIM_GRID_SIZE_LIMIT>
-struct binary_search_config : transform_config<BlockSize, ItemsPerThread, SizeLimit>
+struct binary_search_config : transform_config<BlockSize, ItemsPerThread, SizeLimit, load_default>
 {
     /// \brief Identifies the algorithm associated to the config.
     using tag = detail::binary_search_config_tag;
@@ -726,7 +764,7 @@ struct binary_search_config : transform_config<BlockSize, ItemsPerThread, SizeLi
 template<unsigned int BlockSize,
          unsigned int ItemsPerThread,
          unsigned int SizeLimit = ROCPRIM_GRID_SIZE_LIMIT>
-struct upper_bound_config : transform_config<BlockSize, ItemsPerThread, SizeLimit>
+struct upper_bound_config : transform_config<BlockSize, ItemsPerThread, SizeLimit, load_default>
 {
     /// \brief Identifies the algorithm associated to the config.
     using tag = detail::upper_bound_config_tag;
@@ -739,7 +777,7 @@ struct upper_bound_config : transform_config<BlockSize, ItemsPerThread, SizeLimi
 template<unsigned int BlockSize,
          unsigned int ItemsPerThread,
          unsigned int SizeLimit = ROCPRIM_GRID_SIZE_LIMIT>
-struct lower_bound_config : transform_config<BlockSize, ItemsPerThread, SizeLimit>
+struct lower_bound_config : transform_config<BlockSize, ItemsPerThread, SizeLimit, load_default>
 {
     /// \brief Identifies the algorithm associated to the config.
     using tag = detail::lower_bound_config_tag;
@@ -1402,8 +1440,8 @@ namespace detail
 {
 struct search_n_config_params
 {
-    size_t               threshold;
     kernel_config_params kernel_config;
+    size_t               threshold;
 };
 } // namespace detail
 
@@ -1411,17 +1449,34 @@ struct search_n_config_params
 ///
 /// \tparam BlockSize number of threads in a block.
 /// \tparam ItemsPerThread number of items processed by each thread.
-template<unsigned int BlockSize, unsigned int ItemsPerThread>
+template<unsigned int BlockSize, unsigned int ItemsPerThread, size_t Threshold>
 struct search_n_config : public detail::search_n_config_params
 {
 #ifndef DOXYGEN_DOCUMENTATION_BUILD
     constexpr search_n_config()
         : detail::search_n_config_params{
-            8, {BlockSize, ItemsPerThread, 0}
+            {BlockSize, ItemsPerThread, ROCPRIM_GRID_SIZE_LIMIT},
+            Threshold
     }
     {}
 #endif
 };
+
+namespace detail
+{
+template<class InputType>
+struct default_search_n_config_base
+{
+    static constexpr unsigned int item_scale
+        = ::rocprim::detail::ceiling_div<unsigned int>(sizeof(InputType), sizeof(int));
+
+    using type
+        = search_n_config<limit_block_size<256u, sizeof(InputType), ROCPRIM_WARP_SIZE_64>::value,
+                          ::rocprim::max(1u, 10u / item_scale),
+                          8>;
+};
+
+} // namespace detail
 
 namespace detail
 {
@@ -1465,9 +1520,9 @@ struct default_merge_config_base
     static constexpr unsigned int item_scale = ::rocprim::detail::ceiling_div<unsigned int>(
         ::rocprim::max(sizeof(Key), sizeof(Value)), sizeof(int));
 
-    using type = merge_config<limit_block_size<256u,
-                                               rocprim::max(sizeof(Key), sizeof(Value)),
-                                               ROCPRIM_WARP_SIZE_64>::value,
+    using type = merge_config<fallback_block_size<256u,
+                                                  rocprim::max(sizeof(Key), sizeof(Value)),
+                                                  ROCPRIM_WARP_SIZE_64>::value,
                               ::rocprim::max(1u, 10u / item_scale)>;
 };
 
@@ -1477,12 +1532,12 @@ struct default_merge_config_base<Key, empty_type>
     static constexpr unsigned int item_scale
         = ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Key), sizeof(int));
 
-    using type
-        = select_type<select_type_case<sizeof(Key) <= 2, merge_config<256, 11>>,
-                      select_type_case<sizeof(Key) <= 4, merge_config<256, 10>>,
-                      select_type_case<sizeof(Key) <= 8, merge_config<256, 7>>,
-                      merge_config<limit_block_size<256u, sizeof(Key), ROCPRIM_WARP_SIZE_64>::value,
-                                   ::rocprim::max(1u, 10u / item_scale)>>;
+    using type = select_type<
+        select_type_case<sizeof(Key) <= 2, merge_config<256, 11>>,
+        select_type_case<sizeof(Key) <= 4, merge_config<256, 10>>,
+        select_type_case<sizeof(Key) <= 8, merge_config<256, 7>>,
+        merge_config<fallback_block_size<256u, sizeof(Key), ROCPRIM_WARP_SIZE_64>::value,
+                     ::rocprim::max(1u, 10u / item_scale)>>;
 };
 
 } // namespace detail

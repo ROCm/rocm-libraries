@@ -1,6 +1,6 @@
 .. meta::
-  :description: rocSOLVER documentation and API reference library
-  :keywords: rocSOLVER, ROCm, API, documentation
+  :description: Introduction to the rocSOLVER API reference library
+  :keywords: rocSOLVER, ROCm, API, documentation, introduction
 
 .. _intro:
 
@@ -8,16 +8,13 @@
 Introduction to the rocSOLVER API
 ********************************************************************
 
+The following tables summarize the functionality implemented for the different supported precisions in rocSOLVER.
+All LAPACK and LAPACK-like main functions include ``_batched`` and ``_strided_batched`` versions. For a complete description of the listed
+routines, see the corresponding reference guides.
+
 .. note::
-    The rocSOLVER library is in the early stages of active development. New features are being continuously added,
-    with new functionality documented at each `release of the ROCm platform <https://rocm.docs.amd.com/en/latest/release.html>`_.
 
-Currently implemented functionality
-====================================
-
-The following tables summarize the functionality implemented for the different supported precisions in rocSOLVER's latest release.
-All LAPACK and LAPACK-like main functions include *_batched* and *_strided_batched* versions. For a complete description of the listed
-routines, please see the corresponding reference guides.
+   The rocSOLVER library is in the early stages of active development, with new features being continuously added and documented.
 
 LAPACK auxiliary functions
 ----------------------------
@@ -221,10 +218,10 @@ LAPACK-like functions
     :ref:`rocsolver_gesvdj <gesvdj>`, x, x, x, x
 
 
-Re-factorization and direct solvers
+Refactorization and direct solvers
 ----------------------------------------
 
-.. csv-table:: Triangular re-factorization
+.. csv-table:: Triangular refactorization
     :header: "Function", "single", "double", "single complex", "double complex"
 
     :ref:`rocsolver_csrrf_sumlu <rfsumlu>`, x, x, ,

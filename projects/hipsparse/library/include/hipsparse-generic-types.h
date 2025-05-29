@@ -63,7 +63,7 @@ typedef void* hipsparseDnVecDescr_t;
  *  It should be destroyed at the end using hipsparseDestroySpMat().
  */
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 10010)
-typedef void* hipsparseSpMatDescr_t;
+typedef struct hipsparseSpMatDescr_st* hipsparseSpMatDescr_t;
 #endif
 
 /*! \ingroup types_module
@@ -115,7 +115,7 @@ typedef void const* hipsparseConstDnVecDescr_t;
  *  hipsparseDestroySpMat().
  */
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
-typedef void const* hipsparseConstSpMatDescr_t;
+typedef struct hipsparseSpMatDescr_st const* hipsparseConstSpMatDescr_t;
 #endif
 
 /*! \ingroup types_module
@@ -188,36 +188,36 @@ typedef struct hipsparseSpSMDescr* hipsparseSpSMDescr_t;
 #if(!defined(CUDART_VERSION))
 typedef enum
 {
-    HIPSPARSE_FORMAT_CSR         = 1, /* Compressed Sparse Row */
-    HIPSPARSE_FORMAT_CSC         = 2, /* Compressed Sparse Column */
-    HIPSPARSE_FORMAT_COO         = 3, /* Coordinate - Structure of Arrays */
-    HIPSPARSE_FORMAT_COO_AOS     = 4, /* Coordinate - Array of Structures */
-    HIPSPARSE_FORMAT_BLOCKED_ELL = 5 /* Blocked ELL */
+    HIPSPARSE_FORMAT_CSR         = 1, /**< Compressed Sparse Row */
+    HIPSPARSE_FORMAT_CSC         = 2, /**< Compressed Sparse Column */
+    HIPSPARSE_FORMAT_COO         = 3, /**< Coordinate - Structure of Arrays */
+    HIPSPARSE_FORMAT_COO_AOS     = 4, /**< Coordinate - Array of Structures */
+    HIPSPARSE_FORMAT_BLOCKED_ELL = 5 /**< Blocked ELL */
 } hipsparseFormat_t;
 #else
 #if(CUDART_VERSION >= 12000)
 typedef enum
 {
-    HIPSPARSE_FORMAT_CSR         = 1, /* Compressed Sparse Row */
-    HIPSPARSE_FORMAT_CSC         = 2, /* Compressed Sparse Column */
-    HIPSPARSE_FORMAT_COO         = 3, /* Coordinate - Structure of Arrays */
-    HIPSPARSE_FORMAT_BLOCKED_ELL = 5 /* Blocked ELL */
+    HIPSPARSE_FORMAT_CSR         = 1, /**< Compressed Sparse Row */
+    HIPSPARSE_FORMAT_CSC         = 2, /**< Compressed Sparse Column */
+    HIPSPARSE_FORMAT_COO         = 3, /**< Coordinate - Structure of Arrays */
+    HIPSPARSE_FORMAT_BLOCKED_ELL = 5 /**< Blocked ELL */
 } hipsparseFormat_t;
 #elif(CUDART_VERSION >= 11021 && CUDART_VERSION < 12000)
 typedef enum
 {
-    HIPSPARSE_FORMAT_CSR         = 1, /* Compressed Sparse Row */
-    HIPSPARSE_FORMAT_CSC         = 2, /* Compressed Sparse Column */
-    HIPSPARSE_FORMAT_COO         = 3, /* Coordinate - Structure of Arrays */
-    HIPSPARSE_FORMAT_COO_AOS     = 4, /* Coordinate - Array of Structures */
-    HIPSPARSE_FORMAT_BLOCKED_ELL = 5 /* Blocked ELL */
+    HIPSPARSE_FORMAT_CSR         = 1, /**< Compressed Sparse Row */
+    HIPSPARSE_FORMAT_CSC         = 2, /**< Compressed Sparse Column */
+    HIPSPARSE_FORMAT_COO         = 3, /**< Coordinate - Structure of Arrays */
+    HIPSPARSE_FORMAT_COO_AOS     = 4, /**< Coordinate - Array of Structures */
+    HIPSPARSE_FORMAT_BLOCKED_ELL = 5 /**< Blocked ELL */
 } hipsparseFormat_t;
 #elif(CUDART_VERSION >= 10010 && CUDART_VERSION < 11021)
 typedef enum
 {
-    HIPSPARSE_FORMAT_CSR     = 1, /* Compressed Sparse Row */
-    HIPSPARSE_FORMAT_COO     = 3, /* Coordinate - Structure of Arrays */
-    HIPSPARSE_FORMAT_COO_AOS = 4, /* Coordinate - Array of Structures */
+    HIPSPARSE_FORMAT_CSR     = 1, /**< Compressed Sparse Row */
+    HIPSPARSE_FORMAT_COO     = 3, /**< Coordinate - Structure of Arrays */
+    HIPSPARSE_FORMAT_COO_AOS = 4, /**< Coordinate - Array of Structures */
 } hipsparseFormat_t;
 #endif
 #endif
@@ -336,78 +336,78 @@ typedef enum
 #if(!defined(CUDART_VERSION))
 typedef enum
 {
-    HIPSPARSE_MM_ALG_DEFAULT        = 0,
-    HIPSPARSE_COOMM_ALG1            = 1,
-    HIPSPARSE_COOMM_ALG2            = 2,
-    HIPSPARSE_COOMM_ALG3            = 3,
-    HIPSPARSE_CSRMM_ALG1            = 4,
-    HIPSPARSE_SPMM_ALG_DEFAULT      = 0,
-    HIPSPARSE_SPMM_COO_ALG1         = 1,
-    HIPSPARSE_SPMM_COO_ALG2         = 2,
-    HIPSPARSE_SPMM_COO_ALG3         = 3,
-    HIPSPARSE_SPMM_COO_ALG4         = 5,
-    HIPSPARSE_SPMM_CSR_ALG1         = 4,
-    HIPSPARSE_SPMM_CSR_ALG2         = 6,
-    HIPSPARSE_SPMM_CSR_ALG3         = 12,
-    HIPSPARSE_SPMM_BLOCKED_ELL_ALG1 = 13
+    HIPSPARSE_MM_ALG_DEFAULT        = 0, /**< Default algorithm */
+    HIPSPARSE_COOMM_ALG1            = 1, /**< COO algorithm 1 */
+    HIPSPARSE_COOMM_ALG2            = 2, /**< COO algorithm 2 */
+    HIPSPARSE_COOMM_ALG3            = 3, /**< COO algorithm 3 */
+    HIPSPARSE_CSRMM_ALG1            = 4, /**< CSR algorithm 1 */
+    HIPSPARSE_SPMM_ALG_DEFAULT      = 0, /**< Default algorithm */
+    HIPSPARSE_SPMM_COO_ALG1         = 1, /**< COO algorithm 1 */
+    HIPSPARSE_SPMM_COO_ALG2         = 2, /**< COO algorithm 2 */
+    HIPSPARSE_SPMM_COO_ALG3         = 3, /**< COO algorithm 3 */
+    HIPSPARSE_SPMM_COO_ALG4         = 5, /**< COO algorithm 4 */
+    HIPSPARSE_SPMM_CSR_ALG1         = 4, /**< CSR algorithm 1 */
+    HIPSPARSE_SPMM_CSR_ALG2         = 6, /**< CSR algorithm 2 */
+    HIPSPARSE_SPMM_CSR_ALG3         = 12, /**< CSR algorithm 3 */
+    HIPSPARSE_SPMM_BLOCKED_ELL_ALG1 = 13 /**< Blocked ELL algorithm 1 */
 } hipsparseSpMMAlg_t;
 #else
 #if(CUDART_VERSION >= 12000)
 typedef enum
 {
-    HIPSPARSE_SPMM_ALG_DEFAULT      = 0,
-    HIPSPARSE_SPMM_COO_ALG1         = 1,
-    HIPSPARSE_SPMM_COO_ALG2         = 2,
-    HIPSPARSE_SPMM_COO_ALG3         = 3,
-    HIPSPARSE_SPMM_COO_ALG4         = 5,
-    HIPSPARSE_SPMM_CSR_ALG1         = 4,
-    HIPSPARSE_SPMM_CSR_ALG2         = 6,
-    HIPSPARSE_SPMM_CSR_ALG3         = 12,
-    HIPSPARSE_SPMM_BLOCKED_ELL_ALG1 = 13
+    HIPSPARSE_SPMM_ALG_DEFAULT      = 0, /**< Default algorithm */
+    HIPSPARSE_SPMM_COO_ALG1         = 1, /**< COO algorithm 1 */
+    HIPSPARSE_SPMM_COO_ALG2         = 2, /**< COO algorithm 2 */
+    HIPSPARSE_SPMM_COO_ALG3         = 3, /**< COO algorithm 3 */
+    HIPSPARSE_SPMM_COO_ALG4         = 5, /**< COO algorithm 4 */
+    HIPSPARSE_SPMM_CSR_ALG1         = 4, /**< CSR algorithm 1 */
+    HIPSPARSE_SPMM_CSR_ALG2         = 6, /**< CSR algorithm 2 */
+    HIPSPARSE_SPMM_CSR_ALG3         = 12, /**< CSR algorithm 3 */
+    HIPSPARSE_SPMM_BLOCKED_ELL_ALG1 = 13 /**< Blocked ELL algorithm 1 */
 } hipsparseSpMMAlg_t;
 #elif(CUDART_VERSION >= 11021 && CUDART_VERSION < 12000)
 typedef enum
 {
-    HIPSPARSE_MM_ALG_DEFAULT        = 0,
-    HIPSPARSE_COOMM_ALG1            = 1,
-    HIPSPARSE_COOMM_ALG2            = 2,
-    HIPSPARSE_COOMM_ALG3            = 3,
-    HIPSPARSE_CSRMM_ALG1            = 4,
-    HIPSPARSE_SPMM_ALG_DEFAULT      = 0,
-    HIPSPARSE_SPMM_COO_ALG1         = 1,
-    HIPSPARSE_SPMM_COO_ALG2         = 2,
-    HIPSPARSE_SPMM_COO_ALG3         = 3,
-    HIPSPARSE_SPMM_COO_ALG4         = 5,
-    HIPSPARSE_SPMM_CSR_ALG1         = 4,
-    HIPSPARSE_SPMM_CSR_ALG2         = 6,
-    HIPSPARSE_SPMM_CSR_ALG3         = 12,
-    HIPSPARSE_SPMM_BLOCKED_ELL_ALG1 = 13
+    HIPSPARSE_MM_ALG_DEFAULT        = 0, /**< Default algorithm */
+    HIPSPARSE_COOMM_ALG1            = 1, /**< COO algorithm 1 */
+    HIPSPARSE_COOMM_ALG2            = 2, /**< COO algorithm 2 */
+    HIPSPARSE_COOMM_ALG3            = 3, /**< COO algorithm 3 */
+    HIPSPARSE_CSRMM_ALG1            = 4, /**< CSR algorithm 1 */
+    HIPSPARSE_SPMM_ALG_DEFAULT      = 0, /**< Default algorithm */
+    HIPSPARSE_SPMM_COO_ALG1         = 1, /**< COO algorithm 1 */
+    HIPSPARSE_SPMM_COO_ALG2         = 2, /**< COO algorithm 2 */
+    HIPSPARSE_SPMM_COO_ALG3         = 3, /**< COO algorithm 3 */
+    HIPSPARSE_SPMM_COO_ALG4         = 5, /**< COO algorithm 4 */
+    HIPSPARSE_SPMM_CSR_ALG1         = 4, /**< CSR algorithm 1 */
+    HIPSPARSE_SPMM_CSR_ALG2         = 6, /**< CSR algorithm 2 */
+    HIPSPARSE_SPMM_CSR_ALG3         = 12, /**< CSR algorithm 3 */
+    HIPSPARSE_SPMM_BLOCKED_ELL_ALG1 = 13 /**< Blocked ELL algorithm 1 */
 } hipsparseSpMMAlg_t;
 #elif(CUDART_VERSION >= 11003 && CUDART_VERSION < 11021)
 typedef enum
 {
-    HIPSPARSE_MM_ALG_DEFAULT        = 0,
-    HIPSPARSE_COOMM_ALG1            = 1,
-    HIPSPARSE_COOMM_ALG2            = 2,
-    HIPSPARSE_COOMM_ALG3            = 3,
-    HIPSPARSE_CSRMM_ALG1            = 4,
-    HIPSPARSE_SPMM_ALG_DEFAULT      = 0,
-    HIPSPARSE_SPMM_COO_ALG1         = 1,
-    HIPSPARSE_SPMM_COO_ALG2         = 2,
-    HIPSPARSE_SPMM_COO_ALG3         = 3,
-    HIPSPARSE_SPMM_COO_ALG4         = 5,
-    HIPSPARSE_SPMM_CSR_ALG1         = 4,
-    HIPSPARSE_SPMM_CSR_ALG2         = 6,
-    HIPSPARSE_SPMM_BLOCKED_ELL_ALG1 = 13
+    HIPSPARSE_MM_ALG_DEFAULT        = 0, /**< Default algorithm */
+    HIPSPARSE_COOMM_ALG1            = 1, /**< COO algorithm 1 */
+    HIPSPARSE_COOMM_ALG2            = 2, /**< COO algorithm 2 */
+    HIPSPARSE_COOMM_ALG3            = 3, /**< COO algorithm 3 */
+    HIPSPARSE_CSRMM_ALG1            = 4, /**< CSR algorithm 1 */
+    HIPSPARSE_SPMM_ALG_DEFAULT      = 0, /**< Default algorithm */
+    HIPSPARSE_SPMM_COO_ALG1         = 1, /**< COO algorithm 1 */
+    HIPSPARSE_SPMM_COO_ALG2         = 2, /**< COO algorithm 2 */
+    HIPSPARSE_SPMM_COO_ALG3         = 3, /**< COO algorithm 3 */
+    HIPSPARSE_SPMM_COO_ALG4         = 5, /**< COO algorithm 4 */
+    HIPSPARSE_SPMM_CSR_ALG1         = 4, /**< CSR algorithm 1 */
+    HIPSPARSE_SPMM_CSR_ALG2         = 6, /**< CSR algorithm 2 */
+    HIPSPARSE_SPMM_BLOCKED_ELL_ALG1 = 13 /**< Blocked ELL algorithm 1 */
 } hipsparseSpMMAlg_t;
 #elif(CUDART_VERSION >= 10010 && CUDART_VERSION < 11003)
 typedef enum
 {
-    HIPSPARSE_MM_ALG_DEFAULT = 0,
-    HIPSPARSE_COOMM_ALG1     = 1,
-    HIPSPARSE_COOMM_ALG2     = 2,
-    HIPSPARSE_COOMM_ALG3     = 3,
-    HIPSPARSE_CSRMM_ALG1     = 4
+    HIPSPARSE_MM_ALG_DEFAULT = 0, /**< Default algorithm */
+    HIPSPARSE_COOMM_ALG1     = 1, /**< COO algorithm 1 */
+    HIPSPARSE_COOMM_ALG2     = 2, /**< COO algorithm 2 */
+    HIPSPARSE_COOMM_ALG3     = 3, /**< COO algorithm 3 */
+    HIPSPARSE_CSRMM_ALG1     = 4 /**< CSR algorithm 1 */
 } hipsparseSpMMAlg_t;
 #endif
 #endif

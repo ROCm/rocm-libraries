@@ -143,6 +143,17 @@ namespace TensileLite
             m_gsu = 0;
         }
 
+        // Fallback means if the problem is running with a CU-fallback sol.
+        void setFallbackStatus(bool cuFallback)
+        {
+            m_fallbackStatus = cuFallback;
+        }
+
+        bool fallbackStatus() const
+        {
+            return m_fallbackStatus;
+        }
+
     private:
         int16_t          m_gsu            = 0; // default value
         bool             m_gsuc           = false; // default value
@@ -153,6 +164,7 @@ namespace TensileLite
         rocisa::DataType m_biasType       = rocisa::DataType::None;
         int              m_factorDim      = 0;
         ActivationType   m_activationType = ActivationType::None;
+        bool             m_fallbackStatus = false; // default value
     };
 
     /**
@@ -292,6 +304,7 @@ namespace TensileLite
             METADATA      = 11,
             Synchronizer  = 12,
             AMAXD         = 13,
+            COMPRESSED    = 14,
             TENSOR_COUNT
         };
 
@@ -1012,9 +1025,9 @@ namespace TensileLite
         {
             return m_allocatedElementsNonBatchB;
         }
-        size_t allocatedElementsNonBatchCompressedA() const
+        size_t allocatedElementsNonBatchCompressed() const
         {
-            return m_allocatedElementsNonBatchCompressedA;
+            return m_allocatedElementsNonBatchCompressed;
         }
 
         size_t flopsPerMac() const;
@@ -1042,7 +1055,7 @@ namespace TensileLite
         }
         TensorDescriptor const& compressed() const
         {
-            return m_tensor_compressed;
+            return m_tensors[ContractionProblemGemm::TENSOR::COMPRESSED];
         }
         TensorDescriptor const& metadata() const
         {
@@ -1269,9 +1282,7 @@ namespace TensileLite
 
         size_t m_allocatedElementsNonBatchA;
         size_t m_allocatedElementsNonBatchB;
-        size_t m_allocatedElementsNonBatchCompressedA;
-
-        TensorDescriptor m_tensor_compressed;
+        size_t m_allocatedElementsNonBatchCompressed;
 
         void normalize();
         void normalizeSparse();
@@ -1328,7 +1339,8 @@ namespace TensileLite
                           void const*          _scaleAlphaVec,
                           void*                _ws,
                           void*                _Synchronizer,
-                          unsigned char const* _metadata);
+                          unsigned char const* _metadata,
+                          void const*          _compressed);
 
         ContractionInputs(void const*     _a,
                           void const*     _b,
@@ -1358,6 +1370,9 @@ namespace TensileLite
         void const* scaleD        = nullptr;
         void const* scaleAlphaVec = nullptr;
 
+        unsigned char const* metadata = nullptr;
+        void const* compressed        = nullptr;
+
         // Constants
         ConstantVariant              alpha = static_cast<float>(0);
         ConstantVariant              beta  = static_cast<float>(0);
@@ -1366,7 +1381,6 @@ namespace TensileLite
         // Workspace
         void*                ws           = nullptr;
         void*                Synchronizer = nullptr;
-        unsigned char const* metadata     = nullptr;
 
         std::vector<size_t> maxElements;
         size_t              workspaceSize;

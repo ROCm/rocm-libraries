@@ -1,6 +1,6 @@
 .. meta::
-  :description: hipSOLVER documentation and API reference library
-  :keywords: hipSOLVER, rocSOLVER, ROCm, API, documentation
+  :description: hipSOLVER dense matrix LAPACK auxiliary functions API documentation
+  :keywords: hipSOLVER, rocSOLVER, ROCm, API, documentation, dense matrix, Lapack
 
 .. _dense_auxiliary:
 
@@ -8,11 +8,11 @@
 Dense matrix LAPACK auxiliary functions
 ****************************************
 
-These are functions that support more :ref:`advanced LAPACK routines <dense_lapackfunc>`.
+These functions support more :ref:`advanced LAPACK routines <dense_lapackfunc>`.
 The auxiliary functions are divided into the following categories:
 
-* :ref:`dense_orthonormal`. Generation and application of orthonormal matrices.
-* :ref:`dense_unitary`. Generation and application of unitary matrices.
+* :ref:`dense_orthonormal`: Generation and application of orthonormal matrices.
+* :ref:`dense_unitary`: Generation and application of unitary matrices.
 
 
 

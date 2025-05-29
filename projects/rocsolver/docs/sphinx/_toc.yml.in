@@ -37,6 +37,8 @@ subtrees:
         title: rocSOLVER types
       - file: reference/precision.rst
         title: rocSOLVER precision support
+      - file: reference/env_variables.rst
+        title: rocSOLVER environment variables
       - file: reference/auxiliary.rst
         title: LAPACK auxiliary functions
       - file: reference/lapack.rst

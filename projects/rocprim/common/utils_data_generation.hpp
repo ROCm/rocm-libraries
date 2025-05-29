@@ -24,7 +24,6 @@
 #define COMMON_UTILS_DATA_GENERATION_HPP_
 
 #include <rocprim/type_traits.hpp>
-#include <rocprim/type_traits_interface.hpp>
 #include <rocprim/types.hpp>
 
 #include <iterator>
@@ -159,7 +158,9 @@ struct generate_limits
 };
 
 template<typename T>
-struct generate_limits<T, std::enable_if_t<rocprim::is_integral<T>::value>>
+struct generate_limits<
+    T,
+    std::enable_if_t<rocprim::traits::get<T>().is_build_in() && rocprim::is_integral<T>::value>>
 {
     static inline T min()
     {
@@ -172,7 +173,9 @@ struct generate_limits<T, std::enable_if_t<rocprim::is_integral<T>::value>>
 };
 
 template<typename T>
-struct generate_limits<T, std::enable_if_t<rocprim::is_floating_point<T>::value>>
+struct generate_limits<T,
+                       std::enable_if_t<rocprim::traits::get<T>().is_build_in()
+                                        && rocprim::is_floating_point<T>::value>>
 {
     static inline T min()
     {

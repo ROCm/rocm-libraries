@@ -1,6 +1,6 @@
 .. meta::
-  :description: hipSOLVER documentation and API reference library
-  :keywords: hipSOLVER, rocSOLVER, ROCm, API, documentation
+  :description: hipSOLVER dense matrix LAPACK-like functions API documentation
+  :keywords: hipSOLVER, rocSOLVER, ROCm, API, documentation, dense matrix, Lapack-like
 
 .. _dense_lapacklike:
 
@@ -8,10 +8,10 @@
 Dense matrix LAPACK-like functions
 ************************************
 
-Other Lapack-like routines provided by hipSOLVER. These are divided into the following subcategories:
+hipSOLVER provides other LAPACK-like routines. They are divided into the following subcategories:
 
-* :ref:`dense_likeeigens`. Eigenproblems for symmetric matrices.
-* :ref:`dense_likesvds`. Singular values and related problems for general matrices.
+* :ref:`dense_likeeigens`: Eigenproblems for symmetric matrices.
+* :ref:`dense_likesvds`: Singular values and related problems for general matrices.
 
 
 
@@ -20,7 +20,7 @@ Other Lapack-like routines provided by hipSOLVER. These are divided into the fol
 Symmetric eigensolvers
 ================================
 
-.. contents:: List of Lapack-like symmetric eigensolvers
+.. contents:: List of LAPACK-like symmetric eigensolvers
    :local:
    :backlinks: top
 
@@ -191,7 +191,7 @@ hipsolverDn<type>hegvj()
 Singular value decomposition
 ================================
 
-.. contents:: List of Lapack-like SVD related functions
+.. contents:: List of LAPACK-like SVD-related functions
    :local:
    :backlinks: top
 

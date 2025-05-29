@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -57,16 +57,16 @@ Tests:
   function: spmm_coo
   indextype: *i32_i64
   precision: *single_double_precisions
-  M: [0, 1, 16, 64, 143, 512]
-  N: [0, 1, 9, 11, 27, 300]
-  K: [0, 1, 10, 56, 138]
+  M: [0, 512]
+  N: [0, 1, 2, 16, 145, 200, 300]
+  K: [0, 512]
   alpha_beta: *alpha_beta_range_quick
   transA: [rocsparse_operation_none, rocsparse_operation_transpose]
   transB: [rocsparse_operation_none, rocsparse_operation_transpose]
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_random]
   spmm_alg: [rocsparse_spmm_alg_coo_atomic]
-  orderB: [rocsparse_order_row]
+  orderB: *all_rocsparse_order
   orderC: [rocsparse_order_row]
 
 - name: spmm_coo
@@ -74,16 +74,16 @@ Tests:
   function: spmm_coo
   indextype: *i32_i64
   precision: *single_double_precisions
-  M: [0, 1, 16, 64, 143, 512]
-  N: [0, 1, 9, 11, 27, 300]
-  K: [0, 1, 10, 56, 138]
+  M: [0, 1, 543]
+  N: [0, 1, 6, 7, 9, 11, 27, 300]
+  K: [0, 1, 538]
   alpha_beta: *alpha_beta_range_quick
   transA: [rocsparse_operation_none]
   transB: [rocsparse_operation_none]
   baseA: [rocsparse_index_base_one]
   matrix: [rocsparse_matrix_random]
   spmm_alg: [rocsparse_spmm_alg_coo_segmented, rocsparse_spmm_alg_coo_segmented_atomic]
-  orderB: [rocsparse_order_column]
+  orderB: *all_rocsparse_order
   orderC: [rocsparse_order_row]
 
 - name: spmm_coo_file
@@ -113,7 +113,7 @@ Tests:
   indextype: *i32_i64
   precision: *double_only_precisions
   M: 1
-  N: [4]
+  N: [1, 2, 4]
   K: 1
   alpha_beta: *alpha_beta_range_quick
   transA: [rocsparse_operation_none]
@@ -240,7 +240,7 @@ Tests:
   indextype: *i32_i64
   precision: *single_double_precisions
   M: [5111]
-  N: [21, 82]
+  N: [9, 10, 21, 82]
   K: [4441]
   alpha_beta: *alpha_beta_range_checkin
   transA: [rocsparse_operation_none]

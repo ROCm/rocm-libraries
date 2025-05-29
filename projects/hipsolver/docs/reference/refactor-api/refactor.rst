@@ -1,20 +1,18 @@
 .. meta::
-  :description: hipSOLVER documentation and API reference library
-  :keywords: hipSOLVER, rocSOLVER, ROCm, API, documentation
+  :description: hipSOLVER refactorization functions API documentation
+  :keywords: hipSOLVER, rocSOLVER, ROCm, API, documentation, refactorization
 
 .. _refactor_refactorfunc:
 
 **************************
-Refactorization Functions
+Refactorization functions
 **************************
 
-Refactoring routines to solve complex Numerical Linear Algebra problems for sparse matrices.
-These functions are organized in the following categories:
+Refactoring routines are used to solve complex numerical linear algebra problems for sparse matrices.
+These functions are organized into the following categories:
 
-* :ref:`refactor_triangular`.
-* :ref:`refactor_linears`. Based on triangular factorizations.
-
-
+*  :ref:`refactor_triangular`
+*  :ref:`refactor_linears`
 
 .. _refactor_triangular:
 

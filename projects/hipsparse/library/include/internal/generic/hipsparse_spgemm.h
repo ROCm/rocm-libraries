@@ -29,10 +29,9 @@ extern "C" {
 #endif
 
 /*! \ingroup generic_module
-*  \brief Create sparse matrix sparse matrix product descriptor
 *  \details
 *  \p hipsparseSpGEMM_createDescr creates a sparse matrix sparse matrix product descriptor. It should be
-*  destroyed at the end using hipsparseSpGEMM_destroyDescr().
+*  destroyed at the end using \ref hipsparseSpGEMM_destroyDescr().
 */
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11000)
 HIPSPARSE_EXPORT
@@ -40,7 +39,6 @@ hipsparseStatus_t hipsparseSpGEMM_createDescr(hipsparseSpGEMMDescr_t* descr);
 #endif
 
 /*! \ingroup generic_module
-*  \brief Destroy sparse matrix sparse matrix product descriptor
 *  \details
 *  \p hipsparseSpGEMM_destroyDescr destroys a sparse matrix sparse matrix product descriptor and releases all
 *  resources used by the descriptor.
@@ -62,6 +60,9 @@ hipsparseStatus_t hipsparseSpGEMM_destroyDescr(hipsparseSpGEMMDescr_t descr);
 *  buffer. After this buffer size is determined, the user allocates it and calls \p hipsparseSpGEMM_workEstimation
 *  a second time with the newly allocated buffer passed in. This second call inspects the matrices \f$A\f$ and \f$B\f$ to 
 *  determine the number of intermediate products that will result from multipltying \f$A\f$ and \f$B\f$ together.
+*
+*  \p hipsparseSpGEMM_workEstimation supports multiple combinations of data types and compute types. See \ref hipsparseSpGEMM_copy 
+*  for a complete listing of all the data type and compute type combinations available.
 *  
 *  @param[in]
 *  handle           handle to the hipsparse library context queue.
@@ -165,6 +166,9 @@ hipsparseStatus_t hipsparseSpGEMM_workEstimation(hipsparseHandle_t      handle,
 *  buffer. After this buffer size is determined, the user allocates it and calls \p hipsparseSpGEMM_compute
 *  a second time with the newly allocated buffer passed in. This second call performs the actual computation 
 *  of \f$C' = \alpha \cdot A \cdot B\f$ (the result is stored in the temporary buffers).
+*
+*  \p hipsparseSpGEMM_compute supports multiple combinations of data types and compute types. See \ref hipsparseSpGEMM_copy 
+*  for a complete listing of all the data type and compute type combinations available.
 *  
 *  @param[in]
 *  handle           handle to the hipsparse library context queue.
@@ -265,6 +269,24 @@ hipsparseStatus_t hipsparseSpGEMM_compute(hipsparseHandle_t      handle,
 *  to the output sparse matrix. If \f$\beta != 0\f$, then the \f$beta \cdot C\f$ portion of the computation: 
 *  \f$C' = \alpha \cdot A \cdot B + \beta * C\f$ is handled. This is possible because \f$C'\f$ and \f$C\f$ must have 
 *  the same sparsity pattern.
+*
+*  \p hipsparseSpGEMM_copy supports multiple combinations of data types and compute types. The tables below indicate the currently
+*  supported different data types that can be used for for the sparse matrices \f$op(A)\f$, \f$op(B)\f$, \f$C\f$, and \f$C'\f$
+*  and the compute type for \f$\alpha\f$ and \f$\beta\f$. The advantage of using different data types is to save on
+*  memory bandwidth and storage when a user application allows while performing the actual computation in a higher precision.
+*
+*  \par Uniform Precisions:
+*  <table>
+*  <caption id="spgemm_copy_uniform">Uniform Precisions</caption>
+*  <tr><th>A / B / C / C' / compute_type
+*  <tr><td>HIP_R_32F
+*  <tr><td>HIP_R_64F
+*  <tr><td>HIP_C_32F
+*  <tr><td>HIP_C_64F
+*  </table>
+*
+*  \p hipsparseSpGEMM_copy supports \ref HIPSPARSE_INDEX_32I and \ref HIPSPARSE_INDEX_64I index precisions 
+*  for storing the row pointer and row/column indices arrays of the sparse matrices.
 *
 *  \note The two user allocated temporary buffers can only be freed after the call to \p hipsparseSpGEMM_copy
 *

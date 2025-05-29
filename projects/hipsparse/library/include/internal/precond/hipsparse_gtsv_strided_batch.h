@@ -29,8 +29,6 @@ extern "C" {
 #endif
 
 /*! \ingroup precond_module
-*  \brief Strided Batch tridiagonal solver (no pivoting)
-*
 *  \details
 *  \p hipsparseXgtsv2StridedBatch_bufferSizeExt returns the size of the temporary storage
 *  buffer in bytes that is required by \ref hipsparseSgtsv2StridedBatch "hipsparseXgtsv2StridedBatch()". 
@@ -57,8 +55,7 @@ extern "C" {
 *  batchStride        The number of elements that separate each system. Must satisfy \p batchStride >= m.
 *  @param[out]
 *  pBufferSizeInBytes number of bytes of the temporary storage buffer required by
-*                     hipsparseSgtsv2StridedBatch(), hipsparseDgtsv2StridedBatch(), 
-*                     hipsparseCgtsv2StridedBatch() and hipsparseZgtsv2StridedBatch().
+*                     hipsparseSgtsv2StridedBatch "hipsparseXgtsv2StridedBatch()".
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p batchCount, \p batchStride, \p dl, 
@@ -116,6 +113,54 @@ hipsparseStatus_t hipsparseZgtsv2StridedBatch_bufferSizeExt(hipsparseHandle_t   
 *
 *  \details
 *  \p hipsparseXgtsv2StridedBatch solves a batched tridiagonal linear system
+*  \f[
+*    T^{i}*x^{i} = x^{i}
+*  \f]
+*  where for each batch \f$i=0\ldots\f$ \p batchCount, \f$T^{i}\f$ is a sparse tridiagonal matrix and
+*  \f$x^{i}\f$ is a dense right-hand side vector. All of the tridiagonal matrices, \f$T^{i}\f$, are
+*  packed one after the other into three vectors: \p dl for the lower diagonals, \p d for the main
+*  diagonals and \p du for the upper diagonals. See below for a description of what this strided
+*  memory pattern looks like.
+*
+*  Solving the batched tridiagonal system involves two steps. First, the user calls
+*  \ref hipsparseSgtsv2StridedBatch_bufferSizeExt "hipsparseXgtsv2StridedBatch_bufferSizeExt()"
+*  in order to determine the size of the required temporary storage buffer. Once determined, the user allocates
+*  this buffer and passes it to \ref hipsparseSgtsv2StridedBatch "hipsparseXgtsv2StridedBatch()"
+*  to perform the actual solve. The \f$x^{i}\f$ vectors, which initially stores the right-hand side values, are
+*  overwritten with the solution after the call to
+*  \ref hipsparseSgtsv2StridedBatch "hipsparseXgtsv2StridedBatch()".
+*
+*  The strided batch routines write each batch matrix one after the other in memory. For example, consider
+*  the following batch matrices:
+*
+*  \f[
+*    \begin{bmatrix}
+*    t^{0}_{00} & t^{0}_{01} & 0 \\
+*    t^{0}_{10} & t^{0}_{11} & t^{0}_{12} \\
+*    0 & t^{0}_{21} & t^{0}_{22}
+*    \end{bmatrix}
+*    \begin{bmatrix}
+*    t^{1}_{00} & t^{1}_{01} & 0 \\
+*    t^{1}_{10} & t^{1}_{11} & t^{1}_{12} \\
+*    0 & t^{1}_{21} & t^{1}_{22}
+*    \end{bmatrix}
+*    \begin{bmatrix}
+*    t^{2}_{00} & t^{2}_{01} & 0 \\
+*    t^{2}_{10} & t^{2}_{11} & t^{2}_{12} \\
+*    0 & t^{2}_{21} & t^{2}_{22}
+*    \end{bmatrix}
+*  \f]
+*
+*  In strided format, the upper, lower, and diagonal arrays would look like:
+*  \f[
+*    \begin{align}
+*    \text{lower} &= \begin{bmatrix} 0 & t^{0}_{10} & t^{0}_{21} & 0 & t^{1}_{10} & t^{1}_{21} & 0 & t^{2}_{10} & t^{2}_{21} \end{bmatrix} \\
+*    \text{diagonal} &= \begin{bmatrix} t^{0}_{00} & t^{0}_{11} & t^{0}_{22} & t^{1}_{00} & t^{1}_{11} & t^{1}_{22} & t^{2}_{00} & t^{2}_{11} & t^{2}_{22} \end{bmatrix} \\
+*    \text{upper} &= \begin{bmatrix} t^{0}_{01} & t^{0}_{12} & 0 & t^{1}_{01} & t^{1}_{12} & 0 & t^{2}_{01} & t^{2}_{12} & 0 \end{bmatrix} \\
+*    \end{align}
+*  \f]
+*  For the lower array, for each batch \p i, the \p i*batchStride entries are zero and for the upper array the
+*  \p i*batchStride+batchStride-1 entries are zero.
 *
 *  \note
 *  This function is non blocking and executed asynchronously with respect to the host.

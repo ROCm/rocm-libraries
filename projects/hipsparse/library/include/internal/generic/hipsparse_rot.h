@@ -32,7 +32,7 @@ extern "C" {
 *  \brief Apply Givens rotation to a dense and a sparse vector.
 *
 *  \details
-*  \ref hipsparseRot applies the Givens rotation matrix \f$G\f$ to the sparse vector
+*  \p hipsparseRot applies the Givens rotation matrix \f$G\f$ to the sparse vector
 *  \f$x\f$ and the dense vector \f$y\f$, where
 *  \f[
 *    G = \begin{pmatrix} c & s \\ -s & c \end{pmatrix}
@@ -41,13 +41,26 @@ extern "C" {
 *  \code{.c}
 *      for(i = 0; i < nnz; ++i)
 *      {
-*          x_tmp = xVal[i];
-*          y_tmp = y[xInd[i]];
+*          x_tmp = x_val[i];
+*          y_tmp = y[x_ind[i]];
 *
-*          xVal[i]    = c * x_tmp + s * y_tmp;
-*          y[xInd[i]] = c * y_tmp - s * x_tmp;
+*          x_val[i]    = c * x_tmp + s * y_tmp;
+*          y[x_ind[i]] = c * y_tmp - s * x_tmp;
 *      }
 *  \endcode
+*
+*  \p hipsparseRot supports the following uniform precision data types for the sparse and dense vectors \f$x\f$ and 
+*  \f$y\f$ and compute types for the scalars \f$c\f$ and \f$s\f$.
+*
+*  \par Uniform Precisions:
+*  <table>
+*  <caption id="rot_uniform">Uniform Precisions</caption>
+*  <tr><th>X / Y / compute_type
+*  <tr><td>HIP_R_32F
+*  <tr><td>HIP_R_64F
+*  <tr><td>HIP_C_32F
+*  <tr><td>HIP_C_64F
+*  </table>
 *
 *  @param[in]
 *  handle      handle to the hipsparse library context queue.

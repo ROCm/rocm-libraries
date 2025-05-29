@@ -30,8 +30,6 @@ extern "C" {
 
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
 /*! \ingroup level2_module
- *  \brief Dense matrix sparse vector multiplication
- *
  *  \details
  *  \p hipsparseXgemvi_bufferSize returns the size of the temporary storage buffer in bytes
  *  required by \ref hipsparseSgemvi "hipsparseXgemvi()". The temporary storage buffer must 
@@ -107,15 +105,16 @@ hipsparseStatus_t hipsparseZgemvi_bufferSize(hipsparseHandle_t    handle,
  *  \f[
  *    op(A) = \left\{
  *    \begin{array}{ll}
- *        A,   & \text{if transA == HIPSPARSE_OPERATION_NON_TRANSPOSE} \\
- *        A^T, & \text{if transA == HIPSPARSE_OPERATION_TRANSPOSE} \\
- *        A^H, & \text{if transA == HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE}
+ *        A,   & \text{if transA == HIPSPARSE_OPERATION_NON_TRANSPOSE}
  *    \end{array}
  *    \right.
  *  \f]
  *
- *  \p hipsparseXgemvi requires a user allocated temporary buffer. Its size is returned
- *  by \ref hipsparseSgemvi_bufferSize "hipsparseXgemvi_bufferSize()".
+ *  Performing the above operation involves two steps. First, the user calls 
+ *  \ref hipsparseSgemvi_bufferSize "hipsparseXgemvi_bufferSize()" in order to determine the size of 
+ *  the temporary storage buffer. Next, the user allocates this temporary buffer and passes it to 
+ *  \p hipsparseXgemvi to complete the computation. Once all calls to \p hipsparseXgemvi are complete the
+ *  temporary storage buffer can be freed.
  *
  *  \note
  *  This function is non blocking and executed asynchronously with respect to the host.

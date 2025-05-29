@@ -757,6 +757,7 @@ namespace rocsparse
         switch(value_)
         {
         case rocsparse_spgeam_input_alg:
+        case rocsparse_spgeam_input_scalar_datatype:
         case rocsparse_spgeam_input_compute_datatype:
         case rocsparse_spgeam_input_operation_A:
         case rocsparse_spgeam_input_operation_B:

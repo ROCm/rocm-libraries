@@ -777,6 +777,9 @@ INSTANTIATE(int64_t, int64_t, rocsparse_double_complex);
 INSTANTIATE(int32_t, int32_t, int8_t);
 INSTANTIATE(int64_t, int32_t, int8_t);
 INSTANTIATE(int64_t, int64_t, int8_t);
+INSTANTIATE(int32_t, int32_t, _Float16);
+INSTANTIATE(int64_t, int32_t, _Float16);
+INSTANTIATE(int64_t, int64_t, _Float16);
 
 #undef INSTANTIATE
 
@@ -849,6 +852,9 @@ INSTANTIATE(int32_t, int64_t, int64_t, int8_t, int8_t, int32_t);
 INSTANTIATE(float, int32_t, int32_t, int8_t, int8_t, float);
 INSTANTIATE(float, int64_t, int32_t, int8_t, int8_t, float);
 INSTANTIATE(float, int64_t, int64_t, int8_t, int8_t, float);
+INSTANTIATE(float, int32_t, int32_t, _Float16, _Float16, float);
+INSTANTIATE(float, int64_t, int32_t, _Float16, _Float16, float);
+INSTANTIATE(float, int64_t, int64_t, _Float16, _Float16, float);
 INSTANTIATE(rocsparse_float_complex,
             int32_t,
             int32_t,

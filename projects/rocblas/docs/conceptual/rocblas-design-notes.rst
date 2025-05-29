@@ -15,13 +15,19 @@ Use of Tensile and hipBLASLt
 ============================
 
 The rocBLAS library uses :doc:`Tensile <tensile:src/index>` and :doc:`hipBLASLt <hipblaslt:index>` internally, which
-supply the high-performance implementation of GEMM. They are installed as part of the rocBLAS package.
-rocBLAS uses CMake for build automation, and CMake downloads Tensile and hipBLASLt during library configuration and automatically
-configures them as part of the build. No further set-up work is required by the
-user. However, external facing APIs for Tensile or hipBLASLt are not provided.
+supply high-performance implementations of GEMM. Tensile is installed as part of the rocBLAS package, while hipBLASLt is
+available as a separate package. By default, the rocBLAS library is built with Tensile and depends on the
+external hipBLASLt library.
 
-The choice of whether to use Tensile or hipBLASLt is handled automatically based on the architecture and problem.
-For instance, hipBLASLt is used as the default backend for non-batched and strided batched problems on the gfx12 architecture.
+rocBLAS uses CMake for building, which by default downloads the Tensile component during library configuration and automatically
+builds it as an integrated part of the rocBLAS build. No further set-up work is required by the
+user.  For hermetic builds, the Tensile component can be built from a local path installation (see command line options).
+Note that external facing APIs for Tensile are not provided.
+
+The choice of whether to use the embedded Tensile backend or hipBLASLt is handled automatically based on the architecture and problem.
+For instance, hipBLASLt is used as the default backend for problems on the gfx12 architecture.  Source code GEMMs internal to the rocBLAS library also
+allow rocBLAS to be built without Tensile or hipBLASLt.
+They can potentially be used as fallbacks for problems that are not supported by the Tensile or hipBLASLt backends.
 
 The environment variable ``ROCBLAS_USE_HIPBLASLT`` is provided to manually control which GEMM backend is used,
 according to the following settings:
@@ -34,7 +40,7 @@ according to the following settings:
 
 .. note::
 
-   hipBLASLt with rocBLAS is not supported on Windows builds or static builds,
+   The hipBLASLt backend for rocBLAS is currently not supported on Windows builds or static builds,
    and is not included if building without Tensile.
 
 rocBLAS API and legacy BLAS functions

@@ -157,6 +157,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_log_flush_profile(void);
     @param[in]
     mode        #rocsolver_alg_mode.
                 The algorithm mode that will be used by the specified function.
+                rocsolver_alg_mode_mixed is not supported.
     *************************************************************************/
 
 ROCSOLVER_EXPORT rocblas_status rocsolver_set_alg_mode(rocblas_handle handle,

@@ -75,6 +75,7 @@ set(hipsolver_f90_source
 if(BUILD_FORTRAN_BINDINGS)
   # Create hipSOLVER Fortran module
   add_library(hipsolver_fortran ${hipsolver_f90_source})
+  rocm_install(TARGETS hipsolver_fortran)
 endif()
 
 add_library(hipsolver

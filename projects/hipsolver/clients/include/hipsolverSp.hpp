@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -248,7 +248,7 @@ inline hipsolverStatus_t hipsolver_csrlsvqr(bool                      HOST,
         return HIPSOLVER_STATUS_NOT_SUPPORTED;
 }
 
-/*inline hipsolverStatus_t hipsolver_csrlsvqr(bool                      HOST,
+inline hipsolverStatus_t hipsolver_csrlsvqr(bool                      HOST,
                                             hipsolverSpHandle_t       handle,
                                             int                       n,
                                             int                       nnz,
@@ -308,5 +308,5 @@ inline hipsolverStatus_t hipsolver_csrlsvqr(bool                          HOST,
                                     singularity);
     else
         return HIPSOLVER_STATUS_NOT_SUPPORTED;
-}*/
+}
 /********************************************************/

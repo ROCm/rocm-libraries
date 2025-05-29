@@ -37,9 +37,10 @@
 #include "test_utils_half.hpp"
 
 #include "common_test_header.hpp"
-#include <cstdint>
-#include <ostream>
+
+#include <stdint.h>
 #include <type_traits>
+#include <vector>
 
 template<class T>
 struct params
@@ -63,13 +64,9 @@ using ThreadOperationTestParams = ::testing::Types<params<int8_t>,
                                                    params<float>,
                                                    params<double>,
                                                    params<test_utils::bfloat16>,
-                                                   params<test_utils::half>
-#ifdef __HIP_PLATFORM_AMD__
-                                                   ,
+                                                   params<test_utils::half>,
                                                    params<test_utils::custom_test_type<uint64_t>>,
-                                                   params<test_utils::custom_test_type<double>>
-#endif
-                                                   >;
+                                                   params<test_utils::custom_test_type<double>>>;
 
 TYPED_TEST_SUITE(HipcubThreadOperationTests, ThreadOperationTestParams);
 
@@ -79,35 +76,31 @@ void thread_load_kernel(Type* volatile const device_input, Type* device_output)
 {
     size_t index = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
 
-    if(index % 8 == 0)
+    if(index % 8 == hipcub::LOAD_DEFAULT)
     {
         device_output[index] = hipcub::ThreadLoad<hipcub::LOAD_DEFAULT>(device_input + index);
     }
-    else if(index % 8 == 1)
+    else if(index % 8 == hipcub::LOAD_CA)
     {
         device_output[index] = hipcub::ThreadLoad<hipcub::LOAD_CA>(device_input + index);
     }
-    else if(index % 8 == 2)
+    else if(index % 8 == hipcub::LOAD_CG)
     {
         device_output[index] = hipcub::ThreadLoad<hipcub::LOAD_CG>(device_input + index);
     }
-    else if(index % 8 == 3)
+    else if(index % 8 == hipcub::LOAD_CS)
     {
         device_output[index] = hipcub::ThreadLoad<hipcub::LOAD_CS>(device_input + index);
     }
-    else if(index % 8 == 4)
+    else if(index % 8 == hipcub::LOAD_CV)
     {
         device_output[index] = hipcub::ThreadLoad<hipcub::LOAD_CV>(device_input + index);
     }
-    else if(index % 8 == 5)
+    else if(index % 8 == hipcub::LOAD_LDG)
     {
         device_output[index] = hipcub::ThreadLoad<hipcub::LOAD_LDG>(device_input + index);
     }
-    else if(index % 8 == 5)
-    {
-        device_output[index] = hipcub::ThreadLoad<hipcub::LOAD_LDG>(device_input + index);
-    }
-    else if(index % 8 == 6)
+    else if(index % 8 == hipcub::LOAD_VOLATILE)
     {
         device_output[index] = hipcub::ThreadLoad<hipcub::LOAD_VOLATILE>(device_input + index);
     }
@@ -195,7 +188,6 @@ void thread_unroll_kernel(Type* volatile const device_input, Type* device_output
     size_t id    = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
     size_t index = id * ItemsPerThread;
 
-#ifdef __HIP_PLATFORM_AMD__
     if(id % 2 == 0)
     {
         hipcub::UnrolledThreadLoad<ItemsPerThread, hipcub::LOAD_VOLATILE>(device_input + index,
@@ -205,9 +197,6 @@ void thread_unroll_kernel(Type* volatile const device_input, Type* device_output
     {
         hipcub::UnrolledCopy<ItemsPerThread>(device_input + index, device_output + index);
     }
-#else
-    hipcub::UnrolledCopy<ItemsPerThread>(device_input + index, device_output + index);
-#endif
 }
 
 TYPED_TEST(HipcubThreadOperationTests, Unrolled)
@@ -281,27 +270,27 @@ void thread_store_kernel(Type* const device_input, Type* device_output)
 {
     size_t index = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
 
-    if(index % 7 == 0)
+    if(index % 7 == hipcub::STORE_DEFAULT)
     {
         hipcub::ThreadStore<hipcub::STORE_DEFAULT>(device_output + index, device_input[index]);
     }
-    else if(index % 7 == 1)
+    else if(index % 7 == hipcub::STORE_WB)
     {
         hipcub::ThreadStore<hipcub::STORE_WB>(device_output + index, device_input[index]);
     }
-    else if(index % 7 == 2)
+    else if(index % 7 == hipcub::STORE_CG)
     {
         hipcub::ThreadStore<hipcub::STORE_CG>(device_output + index, device_input[index]);
     }
-    else if(index % 7 == 3)
+    else if(index % 7 == hipcub::STORE_CS)
     {
         hipcub::ThreadStore<hipcub::STORE_CS>(device_output + index, device_input[index]);
     }
-    else if(index % 7 == 4)
+    else if(index % 7 == hipcub::STORE_WT)
     {
         hipcub::ThreadStore<hipcub::STORE_WT>(device_output + index, device_input[index]);
     }
-    else if(index % 7 == 5)
+    else if(index % 7 == hipcub::STORE_VOLATILE)
     {
         hipcub::ThreadStore<hipcub::STORE_VOLATILE>(device_output + index, device_input[index]);
     }

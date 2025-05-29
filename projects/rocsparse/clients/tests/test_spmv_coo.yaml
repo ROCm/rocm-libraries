@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -75,6 +75,7 @@ Tests:
   matrix: [rocsparse_matrix_random]
   storage: [rocsparse_storage_mode_unsorted]
   spmv_alg: [rocsparse_spmv_alg_coo, rocsparse_spmv_alg_coo_atomic]
+  call_stage_analysis: [false, true]
 
 - name: spmv_coo
   category: nightly
@@ -240,6 +241,7 @@ Tests:
   storage: [rocsparse_storage_mode_sorted]
   spmv_alg: [rocsparse_spmv_alg_coo, rocsparse_spmv_alg_coo_atomic]
   graph_test: true
+  call_stage_analysis: [false, true]
 
 - name: spmv_coo
   category: stress
@@ -254,7 +256,7 @@ Tests:
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_pentadiagonal]
   storage: [rocsparse_storage_mode_sorted]
-  spmv_alg: [rocsparse_spmv_alg_coo]
+  spmv_alg: [rocsparse_spmv_alg_coo, rocsparse_spmv_alg_coo_atomic]
 
 #
 # mixed precision
@@ -321,6 +323,19 @@ Tests:
   storage: [rocsparse_storage_mode_sorted]
   spmv_alg: [rocsparse_spmv_alg_coo_atomic]
 
+- name: spmv_coo
+  category: pre_checkin
+  function: spmv_coo
+  indextype: *i32_i64
+  precision: *float16_float16_float32_float32_axyt_precision
+  M: [5867]
+  N: [5968]
+  alpha_beta: *alpha_beta_range_checkin
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+  storage: [rocsparse_storage_mode_sorted]
+  spmv_alg: [rocsparse_spmv_alg_coo_atomic]
 
 - name: spmv_coo
   category: pre_checkin
@@ -352,9 +367,6 @@ Tests:
   filename: [Chebyshev4,
              shipsec1,
              scircuit]
-
-
-
 
 - name: spmv_coo
   category: pre_checkin

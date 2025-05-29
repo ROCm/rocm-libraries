@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -21,7 +21,7 @@
 #ifndef ROCRAND_KERNEL_H_
 #define ROCRAND_KERNEL_H_
 
-#include "rocrand/rocrand_common.h"
+// IWYU pragma: begin_exports
 #include "rocrand/rocrand_lfsr113.h"
 #include "rocrand/rocrand_mrg31k3p.h"
 #include "rocrand/rocrand_mrg32k3a.h"
@@ -42,5 +42,6 @@
 #include "rocrand/rocrand_log_normal.h"
 #include "rocrand/rocrand_poisson.h"
 #include "rocrand/rocrand_discrete.h"
+// IWYU pragma: end_exports
 
 #endif // ROCRAND_KERNEL_H_

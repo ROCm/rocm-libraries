@@ -166,6 +166,31 @@ namespace rocRoller
         return rv;
     }
 
+    WaitCount WaitCount::Max(GPUArchitecture const& architecture, std::string const& message)
+    {
+        WaitCount rv{architecture, message};
+
+        if(architecture.HasCapability(GPUCapability::MaxVmcnt))
+        {
+            rv.m_loadcnt  = architecture.GetCapability(GPUCapability::MaxVmcnt);
+            rv.m_storecnt = architecture.GetCapability(GPUCapability::MaxVmcnt);
+        }
+
+        if(architecture.HasCapability(GPUCapability::MaxLgkmcnt))
+        {
+            rv.m_dscnt = architecture.GetCapability(GPUCapability::MaxLgkmcnt);
+            rv.m_kmcnt = architecture.GetCapability(GPUCapability::MaxLgkmcnt);
+        }
+
+        if(architecture.HasCapability(GPUCapability::HasExpcnt)
+           && architecture.HasCapability(GPUCapability::MaxExpcnt))
+        {
+            rv.m_expcnt = architecture.GetCapability(GPUCapability::MaxExpcnt);
+        }
+
+        return rv;
+    }
+
     int WaitCount::CombineValues(int lhs, int rhs)
     {
         if(lhs < 0)

@@ -27,6 +27,8 @@ from Tensile.Common.Architectures import isaToGfx
 import copy
 
 class HardwarePredicate(Properties.Predicate):
+    # TODO- And also FromISA() is hard to detect CU-fallback case.
+    #       Perhaps we can always use FromHardware(). FromISA() is not used so far.
     @classmethod
     def FromISA(cls, isa):
         gfxArch = isaToGfx(tuple(isa))

@@ -23,7 +23,19 @@
 ################################################################################
 
 from rocisa.enum import DataTypeEnum
+from functools import lru_cache
 import functools
+
+@lru_cache
+def _is8bitFloat(value):
+    return (value == DataTypeEnum.Float8.value \
+            or value == DataTypeEnum.BFloat8.value \
+            or value == DataTypeEnum.Float8BFloat8.value \
+            or value == DataTypeEnum.BFloat8Float8.value \
+            or value == DataTypeEnum.Float8_fnuz.value \
+            or value == DataTypeEnum.BFloat8_fnuz.value \
+            or value == DataTypeEnum.Float8BFloat8_fnuz.value \
+            or value == DataTypeEnum.BFloat8Float8_fnuz.value)
 
 @functools.total_ordering
 class DataType:
@@ -322,14 +334,7 @@ class DataType:
         return (self.value == DataTypeEnum.BFloat8Float8.value \
                 or self.value == DataTypeEnum.BFloat8Float8_fnuz.value)
     def is8bitFloat(self):
-        return (self.value == DataTypeEnum.Float8.value \
-                or self.value == DataTypeEnum.BFloat8.value \
-                or self.value == DataTypeEnum.Float8BFloat8.value \
-                or self.value == DataTypeEnum.BFloat8Float8.value \
-                or self.value == DataTypeEnum.Float8_fnuz.value \
-                or self.value == DataTypeEnum.BFloat8_fnuz.value \
-                or self.value == DataTypeEnum.Float8BFloat8_fnuz.value \
-                or self.value == DataTypeEnum.BFloat8Float8_fnuz.value)
+        return _is8bitFloat(self.value)
     def isFloat8A(self):
         return (self.value == DataTypeEnum.Float8.value \
                 or self.value == DataTypeEnum.Float8BFloat8.value)

@@ -81,7 +81,8 @@ jobs:
           python .github/scripts/pr_detect_changed_subtrees.py \
             --repo "${{ github.repository }}" \
             --pr "${{ github.event.pull_request.number }}" \
-            --config ".github/repos-config.json"
+            --config ".github/repos-config.json" \
+            --require-fanout
 
       - name: Checkout full repo with changed subtrees
         if: steps.detect.outputs.subtrees

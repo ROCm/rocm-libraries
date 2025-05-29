@@ -186,10 +186,18 @@ int main(int argc, char* argv[])
         handle, descr, rocsparse_spgeam_input_operation_A, &op, sizeof(op)));
     ROCSPARSE_CHECK(rocsparse_spgeam_set_input(
         handle, descr, rocsparse_spgeam_input_operation_B, &op, sizeof(op)));
-
-    const rocsparse_datatype datatype = rocsparse_datatype_f64_r;
-    ROCSPARSE_CHECK(rocsparse_spgeam_set_input(
-        handle, descr, rocsparse_spgeam_input_compute_datatype, &datatype, sizeof(datatype)));
+    const rocsparse_datatype scalar_datatype = rocsparse_datatype_f64_r;
+    ROCSPARSE_CHECK(rocsparse_spgeam_set_input(handle,
+                                               descr,
+                                               rocsparse_spgeam_input_scalar_datatype,
+                                               &scalar_datatype,
+                                               sizeof(scalar_datatype)));
+    const rocsparse_datatype compute_datatype = rocsparse_datatype_f64_r;
+    ROCSPARSE_CHECK(rocsparse_spgeam_set_input(handle,
+                                               descr,
+                                               rocsparse_spgeam_input_compute_datatype,
+                                               &compute_datatype,
+                                               sizeof(compute_datatype)));
 
     // Calculate NNZ phase
     size_t buffer_size_in_bytes;

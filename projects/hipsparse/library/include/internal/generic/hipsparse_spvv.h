@@ -29,13 +29,15 @@ extern "C" {
 #endif
 
 /*! \ingroup generic_module
-*  \brief Compute the inner dot product of a sparse vector with a dense vector
-*
 *  \details
 *  \p hipsparseSpVV_bufferSize computes the required user allocated buffer size needed when computing the 
-*  inner dot product of a sparse vector with a dense vector
+*  inner dot product of a sparse vector with a dense vector:
+*  \f[
+*    \text{result} := op(x) \cdot y,
+*  \f]
 *
-*  See \ref hipsparseSpVV for full code example.
+*  \p hipsparseSpVV_bufferSize supports multiple combinations of data types and compute types. See \ref hipsparseSpVV for a complete 
+*  listing of all the data type and compute type combinations available.
 *
 *  @param[in]
 *  handle              handle to the hipsparse library context queue.
@@ -82,8 +84,56 @@ hipsparseStatus_t hipsparseSpVV_bufferSize(hipsparseHandle_t     handle,
 *  \brief Compute the inner dot product of a sparse vector with a dense vector
 *
 *  \details
-*  \p hipsparseSpVV computes the inner dot product of a sparse vector with a dense vector. This routine takes a user 
-*  allocated buffer whose size must first be computed by calling \ref hipsparseSpVV_bufferSize
+*  \details
+*  \p hipsparseSpVV computes the inner dot product of the sparse vector \f$x\f$ with the
+*  dense vector \f$y\f$, such that
+*  \f[
+*    \text{result} := op(x) \cdot y,
+*  \f]
+*  with
+*  \f[
+*    op(x) = \left\{
+*    \begin{array}{ll}
+*        x,   & \text{if trans == HIPSPARSE_OPERATION_NON_TRANSPOSE} \\
+*        \bar{x}, & \text{if trans == HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE} \\
+*    \end{array}
+*    \right.
+*  \f]
+*
+*  \code{.c}
+*      result = 0;
+*      for(i = 0; i < nnz; ++i)
+*      {
+*          result += x_val[i] * y[x_ind[i]];
+*      }
+*  \endcode
+*
+*  Performing the above operation involves two steps. First, the user calls \p hipsparseSpVV_bufferSize which will return the 
+*  required temporary buffer size. The user then allocates this buffer. Finally, the user then completes the computation by 
+*  calling \p hipsparseSpVV with the newly allocated buffer. Once the computation is complete, the user is free to deallocate 
+*  the buffer. 
+*
+*  \p hipsparseSpVV supports the following uniform and mixed precision data types for the sparse and dense vectors \f$x\f$ and 
+*  \f$y\f$ and compute types for the scalar \f$result\f$.
+*
+*  \par Uniform Precisions:
+*  <table>
+*  <caption id="spvv_uniform">Uniform Precisions</caption>
+*  <tr><th>X / Y / compute_type
+*  <tr><td>HIP_R_32F
+*  <tr><td>HIP_R_64F
+*  <tr><td>HIP_C_32F
+*  <tr><td>HIP_C_64F
+*  </table>
+*
+*  \par Mixed precisions:
+*  <table>
+*  <caption id="spvv_mixed">Mixed Precisions</caption>
+*  <tr><th>X / Y     <th>compute_type
+*  <tr><td>HIP_R_8I  <td>HIP_R_32I
+*  <tr><td>HIP_R_8I  <td>HIP_R_32F
+*  <tr><td>HIP_R_16F <td>HIP_R_32F
+*  </table>
 *
 *  @param[in]
 *  handle          handle to the hipsparse library context queue.

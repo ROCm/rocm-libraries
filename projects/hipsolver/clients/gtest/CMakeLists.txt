@@ -172,9 +172,13 @@ if(WIN32)
       ARGS -E copy ${file_i} ${PROJECT_BINARY_DIR}/staging/
     )
   endforeach()
-  add_custom_command(TARGET hipsolver-test
-    POST_BUILD
-    COMMAND ${CMAKE_COMMAND}
-    ARGS -E copy_directory $ENV{rocblas_DIR}/bin/rocblas/library ${PROJECT_BINARY_DIR}/staging/library
-  )
+  if(DEFINED $ENV{rocblas_DIR})
+    add_custom_command(TARGET hipsolver-test
+      POST_BUILD
+      COMMAND ${CMAKE_COMMAND}
+      ARGS -E copy_directory $ENV{rocblas_DIR}/bin/rocblas/library ${PROJECT_BINARY_DIR}/staging/library
+    )
+  else()
+    message(WARNING "ENV{rocblas_DIR} not set, tests may be missing .dlls")
+  endif()
 endif()

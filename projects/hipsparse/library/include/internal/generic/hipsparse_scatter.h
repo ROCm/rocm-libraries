@@ -32,15 +32,30 @@ extern "C" {
 *  \brief Scatter elements from a sparse vector into a dense vector.
 *
 *  \details
-*  \ref hipsparseScatter scatters the elements from the sparse vector \f$x\f$ in the dense
+*  \p hipsparseScatter scatters the elements from the sparse vector \f$x\f$ in the dense
 *  vector \f$y\f$.
 *
 *  \code{.c}
 *      for(i = 0; i < nnz; ++i)
 *      {
-*          y[xInd[i]] = xVal[i];
+*          y[x_ind[i]] = x_val[i];
 *      }
 *  \endcode
+*
+*  \p hipsparseScatter supports the following uniform precision data types for the sparse and dense vectors \f$x\f$ and 
+*  \f$y\f$.
+*
+*  \par Uniform Precisions:
+*  <table>
+*  <caption id="scatter_uniform">Uniform Precisions</caption>
+*  <tr><th>X / Y
+*  <tr><td>HIP_R_8I
+*  <tr><td>HIP_R_16F
+*  <tr><td>HIP_R_32F
+*  <tr><td>HIP_R_64F
+*  <tr><td>HIP_C_32F
+*  <tr><td>HIP_C_64F
+*  </table>
 *
 *  @param[in]
 *  handle       handle to the hipsparse library context queue.

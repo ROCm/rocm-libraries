@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -23,39 +23,41 @@
 template <typename T, unsigned int N>
 void _TestStableSortWithLargeKeys(void)
 {
-    size_t n = (128 * 1024) / sizeof(FixedVector<T, N>);
+  size_t n = (128 * 1024) / sizeof(FixedVector<T, N>);
 
-    thrust::host_vector<FixedVector<T, N>> h_keys(n);
+  thrust::host_vector<FixedVector<T, N>> h_keys(n);
 
-    for(size_t i = 0; i < n; i++)
-        h_keys[i] = FixedVector<T, N>(rand());
+  for (size_t i = 0; i < n; i++)
+  {
+    h_keys[i] = FixedVector<T, N>(rand());
+  }
 
-    thrust::device_vector<FixedVector<T, N>> d_keys = h_keys;
+  thrust::device_vector<FixedVector<T, N>> d_keys = h_keys;
 
-    thrust::stable_sort(h_keys.begin(), h_keys.end());
-    thrust::stable_sort(d_keys.begin(), d_keys.end());
+  thrust::stable_sort(h_keys.begin(), h_keys.end());
+  thrust::stable_sort(d_keys.begin(), d_keys.end());
 
-    ASSERT_EQ_QUIET(h_keys, d_keys);
+  ASSERT_EQ_QUIET(h_keys, d_keys);
 }
 
 TEST(StableSortLargeTests, TestStableSortWithLargeKeys)
 {
-    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
-    
-    _TestStableSortWithLargeKeys<int, 1>();
-    _TestStableSortWithLargeKeys<int, 2>();
-    _TestStableSortWithLargeKeys<int, 4>();
-    _TestStableSortWithLargeKeys<int, 8>();
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  _TestStableSortWithLargeKeys<int, 1>();
+  _TestStableSortWithLargeKeys<int, 2>();
+  _TestStableSortWithLargeKeys<int, 4>();
+  _TestStableSortWithLargeKeys<int, 8>();
 // STREAM HPC investigate and fix `error: local memory limit exceeded`
 // (make block size smaller for large keys and values in rocPRIM)
 #if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_HIP
-    _TestStableSortWithLargeKeys<int, 16>();
-    _TestStableSortWithLargeKeys<int, 32>();
-    _TestStableSortWithLargeKeys<int, 64>();
-    _TestStableSortWithLargeKeys<int, 128>();
-    _TestStableSortWithLargeKeys<int, 256>();
-    _TestStableSortWithLargeKeys<int, 512>();
-    _TestStableSortWithLargeKeys<int, 1024>();
+  _TestStableSortWithLargeKeys<int, 16>();
+  _TestStableSortWithLargeKeys<int, 32>();
+  _TestStableSortWithLargeKeys<int, 64>();
+  _TestStableSortWithLargeKeys<int, 128>();
+  _TestStableSortWithLargeKeys<int, 256>();
+  _TestStableSortWithLargeKeys<int, 512>();
+  _TestStableSortWithLargeKeys<int, 1024>();
 
 // XXX these take too long to compile
 //    _TestStableSortWithLargeKeys<int, 2048>();

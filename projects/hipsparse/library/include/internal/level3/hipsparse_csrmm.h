@@ -34,8 +34,8 @@ extern "C" {
 *
 *  \details
 *  \p hipsparseXcsrmm multiplies the scalar \f$\alpha\f$ with a sparse \f$m \times k\f$
-*  matrix \f$A\f$, defined in CSR storage format, and the dense \f$k \times n\f$
-*  matrix \f$B\f$ and adds the result to the dense \f$m \times n\f$ matrix \f$C\f$ that
+*  matrix \f$A\f$, defined in CSR storage format, and the column-oriented dense \f$k \times n\f$
+*  matrix \f$B\f$ and adds the result to the column-oriented dense \f$m \times n\f$ matrix \f$C\f$ that
 *  is multiplied by the scalar \f$\beta\f$, such that
 *  \f[
 *    C := \alpha \cdot op(A) \cdot B + \beta \cdot C,
@@ -282,8 +282,8 @@ hipsparseStatus_t hipsparseZcsrmm(hipsparseHandle_t         handle,
 *
 *  \details
 *  \p hipsparseXcsrmm2 multiplies the scalar \f$\alpha\f$ with a sparse \f$m \times k\f$
-*  matrix \f$A\f$, defined in CSR storage format, and the dense \f$k \times n\f$
-*  matrix \f$B\f$ and adds the result to the dense \f$m \times n\f$ matrix \f$C\f$ that
+*  matrix \f$A\f$, defined in CSR storage format, and the column-oriented dense \f$k \times n\f$
+*  matrix \f$B\f$ and adds the result to the column-oriented dense \f$m \times n\f$ matrix \f$C\f$ that
 *  is multiplied by the scalar \f$\beta\f$, such that
 *  \f[
 *    C := \alpha \cdot op(A) \cdot op(B) + \beta \cdot C,

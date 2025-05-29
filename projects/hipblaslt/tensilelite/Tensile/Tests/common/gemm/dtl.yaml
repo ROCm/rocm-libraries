@@ -78,7 +78,7 @@ BenchmarkProblems:
         - LocalReadVectorWidth: [4]
         - DirectToLds: [1]
         #- StreamK: [0,3]
-        - AssertSummationElementMultiple: [2]
+        - AssertSummationElementMultiple: [1, 2]
         - DirectToVgprA: [0,1]
         - DirectToVgprB: [0,1]
         - Groups:
@@ -166,7 +166,7 @@ BenchmarkProblems:
         #- LocalReadVectorWidth: [4,8]
         - DirectToLds: [1]
         #- StreamK: [0,3]
-        - AssertSummationElementMultiple: [2]
+        - AssertSummationElementMultiple: [1, 2]
         - DirectToVgprA: [0,1]
         - DirectToVgprB: [0,1]
         - Groups:
@@ -254,7 +254,7 @@ BenchmarkProblems:
         #- LocalReadVectorWidth: [4,8]
         - DirectToLds: [1]
         #- StreamK: [0,3]
-        - AssertSummationElementMultiple: [2]
+        - AssertSummationElementMultiple: [1, 2]
         - DirectToVgprA: [0,1]
         - DirectToVgprB: [0,1]
         - Groups:
@@ -341,7 +341,7 @@ BenchmarkProblems:
         #- LocalReadVectorWidth: [4,8]
         - DirectToLds: [1]
         #- StreamK: [0,3]
-        - AssertSummationElementMultiple: [2]
+        - AssertSummationElementMultiple: [1, 2]
         - DirectToVgprA: [0,1]
         - DirectToVgprB: [0,1]
         - Groups:
@@ -744,7 +744,7 @@ BenchmarkProblems:
         - SourceSwap: [1]#[0, 1]
         - LocalReadVectorWidth: [8]
         - DirectToLds: [1]
-        - AssertSummationElementMultiple: [4]
+        - AssertSummationElementMultiple: [1, 4]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:

@@ -186,7 +186,8 @@ namespace rocRoller
              * Also, if a reference to the returned value is maintained through any changes
              * to the graph, the returned map will be cleared.
              */
-            std::unordered_map<std::tuple<int, int>, NodeOrdering> const& nodeOrderTable() const;
+            std::unordered_map<int, std::unordered_map<int, NodeOrdering>> const&
+                nodeOrderTable() const;
 
             template <typename T>
             requires(std::constructible_from<Operation, T>)
@@ -260,7 +261,7 @@ namespace rocRoller
                                  BRange const& nodesB,
                                  NodeOrdering  order) const;
 
-            mutable std::unordered_map<std::tuple<int, int>, NodeOrdering> m_orderCache;
+            mutable std::unordered_map<int, std::unordered_map<int, NodeOrdering>> m_orderCache;
             /**
              * If an entry is present, the value will be the IDs of every descendent from the key,
              * following every kind of edge.

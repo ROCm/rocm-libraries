@@ -564,6 +564,7 @@ const char* rocsparse::to_string(rocsparse_spgeam_input value_)
     switch(value_)
     {
         CASE(rocsparse_spgeam_input_alg);
+        CASE(rocsparse_spgeam_input_scalar_datatype);
         CASE(rocsparse_spgeam_input_compute_datatype);
         CASE(rocsparse_spgeam_input_operation_A);
         CASE(rocsparse_spgeam_input_operation_B);

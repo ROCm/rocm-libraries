@@ -35,8 +35,8 @@
 #include "../util_math.hpp"
 #include "../util_type.hpp"
 
-#include <rocprim/detail/various.hpp>
-#include <rocprim/functional.hpp>
+#include <rocprim/detail/various.hpp> // IWYU pragma: export
+#include <rocprim/functional.hpp> // IWYU pragma: export
 
 BEGIN_HIPCUB_NAMESPACE
 

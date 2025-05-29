@@ -23,9 +23,11 @@
 #ifndef FUNCTION_POOL_H
 #define FUNCTION_POOL_H
 
+#include "../../../shared/arithmetic.h"
 #include "../../../shared/rocfft_complex.h"
 #include "../device/kernels/common.h"
 #include "function_map_key.h"
+#include <functional>
 #include <optional>
 #include <sstream>
 #include <unordered_map>
@@ -218,16 +220,20 @@ public:
         return find_key_in_map(function_map, real_key) != function_map.end();
     }
 
-    size_t get_largest_length(rocfft_precision precision) const
+    size_t get_largest_pow2_length(rocfft_precision precision) const
     {
-        auto supported = get_lengths(precision, CS_KERNEL_STOCKHAM);
-        auto itr       = std::max_element(supported.cbegin(), supported.cend());
+        auto supported
+            = get_lengths(precision, CS_KERNEL_STOCKHAM, [](size_t len) { return IsPo2(len); });
+        auto itr = std::max_element(supported.cbegin(), supported.cend());
         if(itr != supported.cend())
             return *itr;
         return 0;
     }
 
-    std::vector<size_t> get_lengths(rocfft_precision precision, ComputeScheme scheme) const
+    // Optional filter can be specified to only get lengths where the filter returns true
+    std::vector<size_t> get_lengths(rocfft_precision            precision,
+                                    ComputeScheme               scheme,
+                                    std::function<bool(size_t)> filter = {}) const
     {
         std::vector<size_t> lengths;
         for(auto const& kv : function_map)
@@ -237,7 +243,10 @@ public:
             if(kv.first.lengths[1] == 0 && kv.first.precision == precision
                && kv.first.scheme == scheme && kv.first.sbrcTrans == NONE)
             {
-                lengths.push_back(kv.first.lengths[0]);
+                if(!filter || filter(kv.first.lengths[0]))
+                {
+                    lengths.push_back(kv.first.lengths[0]);
+                }
             }
         }
 

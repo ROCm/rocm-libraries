@@ -25,7 +25,7 @@ GlobalParameters:
 BenchmarkProblems:
 
   ########################################
-  # F8F8S TN DTL
+  # F8HS TN DTL
   ########################################
   -
     - # ProblemType
@@ -76,27 +76,146 @@ BenchmarkProblems:
         - StorePriorityOpt: [0]
         - VectorStore: [-1]
         - StoreSyncOpt: [0]
-        - LdsPadA: [0, 8, 16]
-        - LdsPadB: [0, 8, 16]
+        - LdsPadA: [0, 8]
+        - LdsPadB: [0, 8]
         - 1LDSBuffer: [0]
-        #- GlobalSplitU: [1,2]
+        - GlobalSplitU: [1,2]
         #- GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel"]
         - SourceSwap: [1]#[0, 1]
         - LocalReadVectorWidth: [8]
         - DirectToLds: [1]
-        - AssertSummationElementMultiple: [4]
+        - AssertSummationElementMultiple: [1, 4]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Range: [[16,9,34],   [16,9,34], [1], [4,4,12]]
-          - Range: [[16,9,34],   [16,9,34], [1], [64,4,72]]
-          - Range: [[16,9,34],   [16,9,34], [1], [128,4,140]]
+          - Range: [[19], [19], [1], [1,3,12]]
+          - Range: [[31], [31], [1], [1,7,72]]
+          - Range: [[127], [127], [1], [128,4,140]]
+          - Range: [[13], [17], [1], [258, 3, 512]]
           - Exact: [256, 256, 1, 64]
           - Exact: [256, 256, 1, 128]
           - Exact: [256, 256, 1, 320]
 
   ########################################
-  # F8F8S NN DTL
+  # F8HHS TT DTL
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DataTypeB: f8
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 1
+      UseBeta: True
+      UseBias: 0 # 1
+      Batched: True
+      Activation: False
+      ActivationHPA: False
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          #- [32, 32, 16, 1, 1, 2, 2, 2, 2 ]
+          - [32, 32, 16, 1, 1, 4, 4, 2, 2 ]
+          - [16, 16, 32, 1, 1, 8, 8, 2, 2 ]
+          - [16, 16, 32, 1, 1, 1, 1, 2, 2 ]
+          - [16, 16, 32, 1, 1, 2, 3, 2, 2 ]
+          - [32, 32, 16, 1, 1, 3, 2, 2, 2 ]
+        - PrefetchGlobalRead: [1, 2]
+        - PrefetchLocalRead: [1, 2]
+        - DepthU: [64]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [0]
+        - TransposeLDS: [1] #0,1
+        - LocalReadVectorWidth: [8]
+        - GlobalReadVectorWidthA: [8]
+        - GlobalReadVectorWidthB: [16]
+        - DirectToLds: [1]
+        - AssertSummationElementMultiple: [1, 2]
+        - LdsPadA: [0, 8]
+        - LdsPadB: [0, 8]
+        - 1LDSBuffer: [-1]
+        - GlobalSplitU: [1, 2]
+        - SourceSwap: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [[63], [127], [1], [1,63,512]]
+
+  ########################################
+  # F8B8HS TN DTL
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: f8b8
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1,   1, 1,  1,1 ]
+          - [32, 32, 64, 1,  1,   1, 1,  1,1 ]
+          - [16, 16, 128, 1,  1,   4, 4,  2,2 ]
+          - [32, 32, 64, 1,  1,   2, 2,  2,2 ]
+          - [32, 32, 64, 1,  1,   3, 2,  2,2 ]
+          - [32, 32, 64, 1,  1,   2, 3,  2,2 ]
+          - [16, 16, 128, 1,  1,   3, 2,  2,2 ]
+          - [16, 16, 128, 1,  1,   2, 3,  2,2 ]
+        - WorkGroup:
+          - [16,16,1]
+        - GlobalReadVectorWidthA: [4, 16]
+        - GlobalReadVectorWidthB: [4, 16]
+        - PrefetchGlobalRead: [1,2]
+        - PrefetchLocalRead: [1,2]
+        - ClusterLocalRead: [1]
+        - NumElementsPerBatchStore: [0]
+        - DepthU: [128]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - MIArchVgpr: [0]
+        - LocalWritePerMfma: [-1]
+        - StaggerU: [4]
+        - StaggerUStride: [256]
+        #- StaggerUMapping: [2]
+        - WorkGroupMapping: [1]
+        - ScheduleIterAlg: [3]
+        #- ExpandPointerSwap: [0,1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - StorePriorityOpt: [0]
+        - VectorStore: [-1]
+        - StoreSyncOpt: [0]
+        - LdsPadA: [0, 8]
+        - LdsPadB: [0, 8]
+        - 1LDSBuffer: [0]
+        - GlobalSplitU: [1,2]
+        #- GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel"]
+        - SourceSwap: [1]#[0, 1]
+        - LocalReadVectorWidth: [8]
+        - DirectToLds: [1]
+        - AssertSummationElementMultiple: [1, 4]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [[16,9,34],   [16,9,34], [1], [1,3,12]]
+          - Exact: [256, 256, 1, 320]
+
+  ########################################
+  # F8HS NN DTL
   ########################################
   -
     - # ProblemType
@@ -145,24 +264,76 @@ BenchmarkProblems:
         - StorePriorityOpt: [0]
         - VectorStore: [-1]
         - StoreSyncOpt: [0]
-        - LdsPadA: [-1, 0, 8, 16]
-        - LdsPadB: [-1, 0, 8, 16]
+        - LdsPadA: [-1, 0, 8]
+        - LdsPadB: [-1, 0, 8]
         - 1LDSBuffer: [0]
-        #- GlobalSplitU: [1,2]
+        - GlobalSplitU: [1,2]
         #- GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel"]
         - SourceSwap: [1]#[0, 1]
         - LocalReadVectorWidth: [8]
         - DirectToLds: [1]
-        - AssertSummationElementMultiple: [4]
+        - AssertSummationElementMultiple: [1, 4]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Range: [[16,9,34],   [16,9,34], [1], [4,4,12]]
-          - Range: [[16,9,34],   [16,9,34], [1], [64,4,72]]
-          - Range: [[16,9,34],   [16,9,34], [1], [128,4,140]]
+          - Range: [[19], [19], [1], [1,3,12]]
+          - Range: [[31], [31], [1], [1,7,72]]
+          - Range: [[127], [127], [1], [128,4,140]]
+          - Range: [[13],   [17], [1], [258, 3, 512]]
           - Exact: [256, 256, 1, 64]
           - Exact: [256, 256, 1, 128]
           - Exact: [256, 256, 1, 320]
+
+  ########################################
+  # F8HHS NN DTL
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DataTypeA: f8
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 0
+      TransposeB: 0
+      UseBeta: True
+      UseBias: 0 # 1
+      Batched: True
+      Activation: False
+      ActivationHPA: False
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          #- [32, 32, 16, 1, 1, 2, 2, 2, 2 ]
+          - [32, 32, 16, 1, 1, 4, 4, 2, 2 ]
+          - [16, 16, 32, 1, 1, 8, 8, 2, 2 ]
+          - [16, 16, 32, 1, 1, 1, 1, 2, 2 ]
+          - [16, 16, 32, 1, 1, 2, 3, 2, 2 ]
+          - [32, 32, 16, 1, 1, 3, 2, 2, 2 ]
+        - PrefetchGlobalRead: [1, 2]
+        - PrefetchLocalRead: [1, 2]
+        - DepthU: [64]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [0]
+        - TransposeLDS: [1] #0,1
+        - LocalReadVectorWidth: [8]
+        - GlobalReadVectorWidthA: [16]
+        - GlobalReadVectorWidthB: [8]
+        - DirectToLds: [1]
+        - AssertSummationElementMultiple: [1, 2]
+        - LdsPadA: [0, 8]
+        - LdsPadB: [0, 8]
+        - 1LDSBuffer: [-1]
+        - GlobalSplitU: [1, 2]
+        - SourceSwap: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [[63], [127], [1], [1,31,512]]
 
   ########################################
   # F8F8S TT DTL
@@ -214,21 +385,22 @@ BenchmarkProblems:
         - StorePriorityOpt: [0]
         - VectorStore: [-1]
         - StoreSyncOpt: [0]
-        - LdsPadA: [-1, 0, 8, 16]
-        - LdsPadB: [-1, 0, 8, 16]
+        - LdsPadA: [-1, 0, 8]
+        - LdsPadB: [-1, 0, 8]
         - 1LDSBuffer: [0]
-        #- GlobalSplitU: [1,2]
+        - GlobalSplitU: [1,2]
         #- GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel"]
         - SourceSwap: [1]#[0, 1]
         - LocalReadVectorWidth: [8]
         - DirectToLds: [1]
-        - AssertSummationElementMultiple: [4]
+        - AssertSummationElementMultiple: [1, 4]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Range: [[16,9,34],   [16,9,34], [1], [4,4,12]]
-          - Range: [[16,9,34],   [16,9,34], [1], [64,4,72]]
-          - Range: [[16,9,34],   [16,9,34], [1], [128,4,140]]
+          - Range: [[19], [19], [1], [1,3,12]]
+          - Range: [[31], [31], [1], [1,7,72]]
+          - Range: [[127], [127], [1], [128,4,140]]
+          - Range: [[13],   [17], [1], [258, 3, 512]]
           - Exact: [256, 256, 1, 64]
           - Exact: [256, 256, 1, 128]
           - Exact: [256, 256, 1, 320]
@@ -258,13 +430,12 @@ BenchmarkProblems:
         - MatrixInstruction:
           #- [32, 32, 16, 1, 1, 2, 2, 2, 2 ]
           - [32, 32, 16, 1, 1, 4, 4, 2, 2 ]
-          - [32, 32, 16, 1, 1, 2, 2, 2, 2 ]
           - [16, 16, 32, 1, 1, 8, 8, 2, 2 ]
           - [16, 16, 32, 1, 1, 1, 1, 2, 2 ]
           - [16, 16, 32, 1, 1, 2, 3, 2, 2 ]
           - [32, 32, 16, 1, 1, 3, 2, 2, 2 ]
         - PrefetchGlobalRead: [1, 2]
-        - PrefetchLocalRead: [2]
+        - PrefetchLocalRead: [1, 2]
         - DepthU: [64]
         - ScheduleIterAlg: [3]
         - ExpandPointerSwap: [0]
@@ -273,11 +444,11 @@ BenchmarkProblems:
         - GlobalReadVectorWidthA: [8]
         - GlobalReadVectorWidthB: [8]
         - DirectToLds: [1]
-        - AssertSummationElementMultiple: [64]
+        - AssertSummationElementMultiple: [1, 2]
         - LdsPadA: [0, 8]
         - LdsPadB: [0, 8]
         - 1LDSBuffer: [-1]
-        - GlobalSplitU: [1]
+        - GlobalSplitU: [1, 2]
         - SourceSwap: [1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -286,6 +457,7 @@ BenchmarkProblems:
           - Exact: [256, 256, 1, 128]
           - Exact: [256, 256, 1, 256]
           - Exact: [256, 256, 1, 512]
+          - Range: [[65], [123], [1], [1,123,512]]
           - Exact: [4096, 8192, 1, 128]
 
   ########################################
@@ -313,13 +485,12 @@ BenchmarkProblems:
         - MatrixInstruction:
           #- [32, 32, 16, 1, 1, 2, 2, 2, 2 ]
           - [32, 32, 16, 1, 1, 4, 4, 2, 2 ]
-          - [32, 32, 16, 1, 1, 2, 2, 2, 2 ]
           - [16, 16, 32, 1, 1, 8, 8, 2, 2 ]
           - [16, 16, 32, 1, 1, 1, 1, 2, 2 ]
           - [16, 16, 32, 1, 1, 2, 3, 2, 2 ]
           - [32, 32, 16, 1, 1, 3, 2, 2, 2 ]
         - PrefetchGlobalRead: [1, 2]
-        - PrefetchLocalRead: [2]
+        - PrefetchLocalRead: [1, 2]
         - DepthU: [64]
         - ScheduleIterAlg: [3]
         - ExpandPointerSwap: [0]
@@ -328,11 +499,11 @@ BenchmarkProblems:
         - GlobalReadVectorWidthA: [8]
         - GlobalReadVectorWidthB: [8]
         - DirectToLds: [1]
-        - AssertSummationElementMultiple: [64]
+        - AssertSummationElementMultiple: [1, 2]
         - LdsPadA: [-1, 0, 8]
         - LdsPadB: [-1, 0, 8]
         - 1LDSBuffer: [-1]
-        - GlobalSplitU: [1]
+        - GlobalSplitU: [1, 2]
         - SourceSwap: [1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -341,6 +512,7 @@ BenchmarkProblems:
           - Exact: [256, 256, 1, 128]
           - Exact: [256, 256, 1, 256]
           - Exact: [256, 256, 1, 512]
+          - Range: [[47], [97], [1], [1,31,512]]
           - Exact: [4096, 8192, 1, 128]
 
   ########################################
@@ -368,13 +540,12 @@ BenchmarkProblems:
         - MatrixInstruction:
           #- [32, 32, 16, 1, 1, 2, 2, 2, 2 ]
           - [32, 32, 16, 1, 1, 4, 4, 2, 2 ]
-          - [32, 32, 16, 1, 1, 2, 2, 2, 2 ]
           - [16, 16, 32, 1, 1, 8, 8, 2, 2 ]
           - [16, 16, 32, 1, 1, 1, 1, 2, 2 ]
           - [16, 16, 32, 1, 1, 2, 3, 2, 2 ]
           - [32, 32, 16, 1, 1, 3, 2, 2, 2 ]
         - PrefetchGlobalRead: [1, 2]
-        - PrefetchLocalRead: [2]
+        - PrefetchLocalRead: [1, 2]
         - DepthU: [64]
         - ScheduleIterAlg: [3]
         - ExpandPointerSwap: [0]
@@ -383,11 +554,11 @@ BenchmarkProblems:
         - GlobalReadVectorWidthA: [8]
         - GlobalReadVectorWidthB: [8]
         - DirectToLds: [1]
-        - AssertSummationElementMultiple: [64]
+        - AssertSummationElementMultiple: [1, 2]
         - LdsPadA: [-1, 0, 8]
         - LdsPadB: [-1, 0, 8]
         - 1LDSBuffer: [-1]
-        - GlobalSplitU: [1]
+        - GlobalSplitU: [1, 2]
         - SourceSwap: [1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -396,4 +567,53 @@ BenchmarkProblems:
           - Exact: [256, 256, 1, 128]
           - Exact: [256, 256, 1, 256]
           - Exact: [256, 256, 1, 512]
+          - Range: [[18], [99], [1], [1,31,512]]
+
+  ########################################
+  # HHS TT DTL
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 1
+      UseBeta: True
+      UseBias: 0 # 1
+      Batched: True
+      Activation: False
+      ActivationHPA: False
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          #- [32, 32, 16, 1, 1, 2, 2, 2, 2 ]
+          - [32, 32, 16, 1, 1, 4, 4, 2, 2 ]
+          - [16, 16, 32, 1, 1, 8, 8, 2, 2 ]
+          - [16, 16, 32, 1, 1, 1, 1, 2, 2 ]
+          - [16, 16, 32, 1, 1, 2, 3, 2, 2 ]
+          - [32, 32, 16, 1, 1, 3, 2, 2, 2 ]
+        - PrefetchGlobalRead: [1, 2]
+        - PrefetchLocalRead: [1, 2]
+        - DepthU: [64]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [0]
+        - TransposeLDS: [1] #0,1
+        - LocalReadVectorWidth: [8]
+        - GlobalReadVectorWidthA: [8]
+        - GlobalReadVectorWidthB: [8]
+        - DirectToLds: [1]
+        - LdsPadA: [8]
+        - LdsPadB: [8]
+        - 1LDSBuffer: [-1]
+        - SourceSwap: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
           - Range: [[4096], [8192], [1], [64,64,384]]
+

@@ -395,6 +395,72 @@ namespace TensileLite
         }
 
         template <typename T>
+        void pruneSparseArray(PruneSparseMode         mode,
+                              T*                      array,
+                              TensorDescriptor const& tensor,
+                              size_t                  pruneDim)
+        {
+            auto const& sizes        = tensor.sizes();
+            auto        count        = CoordCount(sizes.begin(), sizes.end());
+            size_t      pruneDimSize = sizes[pruneDim];
+            size_t      loop_count   = count / pruneDimSize;
+            if(pruneDimSize % 4 != 0)
+                throw std::runtime_error("prune dimension size must be multiple of 4.");
+            auto getPruneIndex = [](PruneSparseMode pruneMode, size_t* index1, size_t* index2) {
+                if(pruneMode == PruneSparseMode::PruneRandom)
+                    pruneMode = static_cast<PruneSparseMode>(
+                        rand() % (static_cast<int>(PruneSparseMode::MaxPruneMode) - 1) + 1);
+                switch(pruneMode)
+                {
+                case PruneSparseMode::PruneXX00:
+                    *index1 = 2;
+                    *index2 = 3;
+                    break;
+                case PruneSparseMode::PruneX0X0:
+                    *index1 = 1;
+                    *index2 = 3;
+                    break;
+                case PruneSparseMode::Prune0XX0:
+                    *index1 = 0;
+                    *index2 = 3;
+                    break;
+                case PruneSparseMode::PruneX00X:
+                    *index1 = 1;
+                    *index2 = 2;
+                    break;
+                case PruneSparseMode::Prune0X0X:
+                    *index1 = 0;
+                    *index2 = 2;
+                    break;
+                case PruneSparseMode::Prune00XX:
+                    *index1 = 0;
+                    *index2 = 1;
+                    break;
+                default:
+                    throw std::runtime_error("prune mode is not allowed.");
+                    break;
+                }
+            };
+#pragma omp parallel for
+            for(size_t loop = 0; loop < loop_count; loop++)
+            {
+                std::vector<size_t> coord(tensor.dimensions(), 0);
+                CoordNumberedExclude(
+                    loop, coord.begin(), coord.end(), sizes.begin(), sizes.end(), pruneDim);
+                for(size_t pruneDimIdx = 0; pruneDimIdx < pruneDimSize;
+                    pruneDimIdx += 4) //traverse along pruneDim
+                {
+                    size_t pruneIdx1, pruneIdx2;
+                    getPruneIndex(mode, &pruneIdx1, &pruneIdx2);
+                    coord[pruneDim]            = pruneDimIdx + pruneIdx1;
+                    array[tensor.index(coord)] = static_cast<T>(0);
+                    coord[pruneDim]            = pruneDimIdx + pruneIdx2;
+                    array[tensor.index(coord)] = static_cast<T>(0);
+                }
+            }
+        }
+
+        template <typename T>
         void compressSparseArray(T*                      dstCompressed,
                                  unsigned char*          dstMeta,
                                  T const*                src,
@@ -412,6 +478,11 @@ namespace TensileLite
 
             if(dimSize % 4 != 0)
                 throw std::runtime_error("compressed dimension size must be multiple of 4.");
+
+            std::memset((void*)dstCompressed,
+                        0,
+                        TypeInfo<T>::ElementSize * tensorC.totalAllocatedElements());
+            std::memset((void*)dstMeta, 0, tensorMeta.totalLogicalElements());
 
 #pragma omp parallel for
             for(size_t loop = 0; loop < loop_count; loop++)
@@ -512,41 +583,24 @@ namespace TensileLite
         }
 
         template <typename T>
-        void initGPUSparseInputTemplate(T*                      dstCompressed,
+        void initCPUSparseInputTemplate(PruneSparseMode         mode,
+                                        T*                      dstPruned,
+                                        T*                      dstCompressed,
                                         unsigned char*          dstMeta,
-                                        T*                      srcBuffer,
                                         TensorDescriptor const& tensor,
                                         TensorDescriptor const& tensorC,
                                         TensorDescriptor const& tensorMeta,
                                         size_t                  dim)
         {
-            T* cpuCompressed
-                = (T*)std::malloc(TypeInfo<T>::ElementSize * tensorC.totalAllocatedElements());
-            unsigned char* cpuMeta = (unsigned char*)std::malloc(tensorMeta.totalLogicalElements());
-
-            std::memset((void*)cpuCompressed,
-                        0,
-                        TypeInfo<T>::ElementSize * tensorC.totalAllocatedElements());
-            std::memset((void*)cpuMeta, 0, tensorMeta.totalLogicalElements());
-
-            //convert pruned matrix to metadata matrix and compresed sparse matrix
+            pruneSparseArray(mode, dstPruned, tensor, dim);
             compressSparseArray(
-                cpuCompressed, cpuMeta, srcBuffer, tensor, tensorC, tensorMeta, dim);
-
-            //copy compressed sparse matrix and metadata matrix to GPU
-            TensileLite::hip::CopyTensor(
-                dstCompressed, cpuCompressed, tensorC, hipMemcpyHostToDevice);
-            HIP_CHECK_EXC(hipMemcpy(
-                dstMeta, cpuMeta, tensorMeta.totalLogicalElements(), hipMemcpyHostToDevice));
-
-            // free temp cpu memory
-            std::free(cpuCompressed);
-            std::free(cpuMeta);
+                dstCompressed, dstMeta, dstPruned, tensor, tensorC, tensorMeta, dim);
         }
 
-        void initGPUSparseInput(void*                   dstCompressed,
+        void initCPUSparseInput(PruneSparseMode         mode,
+                                void*                   dstPruned,
+                                void*                   dstCompressed,
                                 void*                   dstMeta,
-                                void*                   srcBuffer,
                                 TensorDescriptor const& tensor,
                                 TensorDescriptor const& tensorC,
                                 TensorDescriptor const& tensorMeta,
@@ -557,63 +611,70 @@ namespace TensileLite
             switch(tensor.dataType())
             {
             case rocisa::DataType::Half:
-                initGPUSparseInputTemplate((Half*)(dstCompressed),
+                initCPUSparseInputTemplate(mode,
+                                           (Half*)(dstPruned),
+                                           (Half*)(dstCompressed),
                                            (unsigned char*)(dstMeta),
-                                           (Half*)srcBuffer,
                                            tensor,
                                            tensorC,
                                            tensorMeta,
                                            dim);
                 break;
             case rocisa::DataType::BFloat16:
-                initGPUSparseInputTemplate((BFloat16*)(dstCompressed),
+                initCPUSparseInputTemplate(mode,
+                                           (BFloat16*)(dstPruned),
+                                           (BFloat16*)(dstCompressed),
                                            (unsigned char*)(dstMeta),
-                                           (BFloat16*)srcBuffer,
                                            tensor,
                                            tensorC,
                                            tensorMeta,
                                            dim);
                 break;
             case rocisa::DataType::Int8:
-                initGPUSparseInputTemplate((int8_t*)(dstCompressed),
+                initCPUSparseInputTemplate(mode,
+                                           (int8_t*)(dstPruned),
+                                           (int8_t*)(dstCompressed),
                                            (unsigned char*)(dstMeta),
-                                           (int8_t*)srcBuffer,
                                            tensor,
                                            tensorC,
                                            tensorMeta,
                                            dim);
                 break;
             case rocisa::DataType::Float8:
-                initGPUSparseInputTemplate((Float8*)(dstCompressed),
+                initCPUSparseInputTemplate(mode,
+                                           (Float8*)(dstPruned),
+                                           (Float8*)(dstCompressed),
                                            (unsigned char*)(dstMeta),
-                                           (Float8*)srcBuffer,
                                            tensor,
                                            tensorC,
                                            tensorMeta,
                                            dim);
                 break;
             case rocisa::DataType::BFloat8:
-                initGPUSparseInputTemplate((BFloat8*)(dstCompressed),
+                initCPUSparseInputTemplate(mode,
+                                           (BFloat8*)(dstPruned),
+                                           (BFloat8*)(dstCompressed),
                                            (unsigned char*)(dstMeta),
-                                           (BFloat8*)srcBuffer,
                                            tensor,
                                            tensorC,
                                            tensorMeta,
                                            dim);
                 break;
             case rocisa::DataType::Float8_fnuz:
-                initGPUSparseInputTemplate((Float8_fnuz*)(dstCompressed),
+                initCPUSparseInputTemplate(mode,
+                                           (Float8_fnuz*)(dstPruned),
+                                           (Float8_fnuz*)(dstCompressed),
                                            (unsigned char*)(dstMeta),
-                                           (Float8_fnuz*)srcBuffer,
                                            tensor,
                                            tensorC,
                                            tensorMeta,
                                            dim);
                 break;
             case rocisa::DataType::BFloat8_fnuz:
-                initGPUSparseInputTemplate((BFloat8_fnuz*)(dstCompressed),
+                initCPUSparseInputTemplate(mode,
+                                           (BFloat8_fnuz*)(dstPruned),
+                                           (BFloat8_fnuz*)(dstCompressed),
                                            (unsigned char*)(dstMeta),
-                                           (BFloat8_fnuz*)srcBuffer,
                                            tensor,
                                            tensorC,
                                            tensorMeta,
@@ -1481,16 +1542,45 @@ namespace TensileLite
                 if((problem.sparse() == 1 && i == ContractionProblemGemm::TENSOR::A)
                    || (problem.sparse() == 2 && i == ContractionProblemGemm::TENSOR::B))
                 {
+                    auto caculate_padding = [](BoundsCheckMode mode, auto& p, auto& t) {
+                        ptrdiff_t padding = 0;
+                        if(mode == BoundsCheckMode::NaN)
+                        {
+                            padding = (p.maxElements - t.totalAllocatedElements()) / 2;
+                        }
+                        else if(mode == BoundsCheckMode::GuardPageBack)
+                        {
+                            padding = p.maxElements - t.totalAllocatedElements();
+                        }
+                        padding *= DataTypeInfo::Get(t.dataType()).elementSize;
+                        return padding;
+                    };
+
                     auto& pUnitM = m_vdata[ContractionProblemGemm::TENSOR::METADATA]
                                        .pristine[problem.metadata().dataType()];
-                    initGPUSparseInput(pUnit.gpuInput.current.get(),
-                                       pUnitM.gpuInput.current.get(),
-                                       m_cpuPtrs.empty() ? pUnit.cpuInput.valid.get() : pUnit.cpuInput.current.get(),
-                                       problem.sparse() == 2 ? problem.b() : problem.a(),
-                                       problem.compressed(),
-                                       problem.metadata(),
-                                       problem.sparse() == 2 ? problem.boundIndices()[0].b
-                                                             : problem.boundIndices()[0].a);
+
+                    padding = caculate_padding(
+                        m_curBoundsCheck,
+                        pUnitM,
+                        problem.tensors()[ContractionProblemGemm::TENSOR::METADATA]);
+                    offset = (uint8_t*)pUnitM.gpuInput.current.get();
+                    initGPUBatchedInput((void*)(offset + padding),
+                                        pUnitM.gpuInput.batch.get(),
+                                        problem.tensors()[ContractionProblemGemm::TENSOR::METADATA],
+                                        batchIdx);
+
+                    auto& pUnitCp = m_vdata[ContractionProblemGemm::TENSOR::COMPRESSED]
+                                        .pristine[problem.compressed().dataType()];
+                    padding = caculate_padding(
+                        m_curBoundsCheck,
+                        pUnitCp,
+                        problem.tensors()[ContractionProblemGemm::TENSOR::COMPRESSED]);
+                    offset = (uint8_t*)pUnitCp.gpuInput.current.get();
+                    initGPUBatchedInput(
+                        (void*)(offset + padding),
+                        pUnitCp.gpuInput.batch.get(),
+                        problem.tensors()[ContractionProblemGemm::TENSOR::COMPRESSED],
+                        batchIdx);
                 }
             }
         }
@@ -1501,6 +1591,9 @@ namespace TensileLite
             {
                 if(m_problemDependentData)
                 {
+                    if(i == ContractionProblemGemm::TENSOR::COMPRESSED
+                       or i == ContractionProblemGemm::TENSOR::METADATA)
+                        continue;
                     // Should this m_cEqualsD set in ContractionProblem or boost args?
                     for(auto& p : m_vdata[i].pristine)
                     {
@@ -1538,54 +1631,26 @@ namespace TensileLite
                                         tDataType = problem.gemms[j].a().dataType();
                                     }
 
-                                    switch(tDataType)
-                                    {
-                                    case rocisa::DataType::Half:
-                                        pruneSparseArray((Half*)p.second.cpuInput.valid.get()
-                                                             + gemmInitOffset,
-                                                         t,
-                                                         tDim);
-                                        break;
-                                    case rocisa::DataType::BFloat16:
-                                        pruneSparseArray((BFloat16*)p.second.cpuInput.valid.get()
-                                                             + gemmInitOffset,
-                                                         t,
-                                                         tDim);
-                                        break;
-                                    case rocisa::DataType::Int8:
-                                        pruneSparseArray((int8_t*)p.second.cpuInput.valid.get()
-                                                             + gemmInitOffset,
-                                                         t,
-                                                         tDim);
-                                        break;
-                                    case rocisa::DataType::Float8:
-                                        pruneSparseArray((Float8*)p.second.cpuInput.valid.get()
-                                                             + gemmInitOffset,
-                                                         t,
-                                                         tDim);
-                                        break;
-                                    case rocisa::DataType::BFloat8:
-                                        pruneSparseArray((BFloat8*)p.second.cpuInput.valid.get()
-                                                             + gemmInitOffset,
-                                                         t,
-                                                         tDim);
-                                        break;
-                                    case rocisa::DataType::Float8_fnuz:
-                                        pruneSparseArray((Float8_fnuz*)p.second.cpuInput.valid.get()
-                                                             + gemmInitOffset,
-                                                         t,
-                                                         tDim);
-                                        break;
-                                    case rocisa::DataType::BFloat8_fnuz:
-                                        pruneSparseArray(
-                                            (BFloat8_fnuz*)p.second.cpuInput.valid.get()
-                                                + gemmInitOffset,
-                                            t,
-                                            tDim);
-                                        break;
-                                    default:
-                                        throw std::runtime_error("SparseMatrix doesn't support");
-                                    }
+                                    const TensorDescriptor& tM = problem.gemms[j].metadata();
+                                    const TensorDescriptor& tC = problem.gemms[j].compressed();
+                                    auto& pUnitM = m_vdata[ContractionProblemGemm::TENSOR::METADATA]
+                                                       .pristine[p.first];
+                                    auto& pUnitCp
+                                        = m_vdata[ContractionProblemGemm::TENSOR::COMPRESSED]
+                                              .pristine[p.first];
+                                    pUnitM.initDescriptor[j]
+                                        = tensors[ContractionProblemGemm::TENSOR::METADATA];
+                                    pUnitCp.initDescriptor[j]
+                                        = tensors[ContractionProblemGemm::TENSOR::COMPRESSED];
+                                    initCPUSparseInput(
+                                        m_pruneMode,
+                                        (char*)p.second.cpuInput.valid.get() + gemmInitOffset,
+                                        (char*)pUnitCp.cpuInput.valid.get() + gemmInitOffset,
+                                        (char*)pUnitM.cpuInput.valid.get() + gemmInitOffset,
+                                        t,
+                                        tC,
+                                        tM,
+                                        tDim);
                                 }
                             }
                             gemmInitOffset
@@ -1601,6 +1666,10 @@ namespace TensileLite
             auto& tensors = problem.tensors();
             for(size_t i = 0; i < m_vdata.size(); i++)
             {
+                if(i == ContractionProblemGemm::TENSOR::COMPRESSED
+                   or i == ContractionProblemGemm::TENSOR::METADATA)
+                    continue;
+
                 if(m_problemDependentData)
                 {
                     // Should this m_cEqualsD set in ContractionProblem or boost args?
@@ -1632,38 +1701,25 @@ namespace TensileLite
                                     tDataType = problem.a().dataType();
                                 }
 
-                                switch(tDataType)
-                                {
-                                case rocisa::DataType::Half:
-                                    pruneSparseArray((Half*)p.second.cpuInput.valid.get(), t, tDim);
-                                    break;
-                                case rocisa::DataType::BFloat16:
-                                    pruneSparseArray(
-                                        (BFloat16*)p.second.cpuInput.valid.get(), t, tDim);
-                                    break;
-                                case rocisa::DataType::Int8:
-                                    pruneSparseArray(
-                                        (int8_t*)p.second.cpuInput.valid.get(), t, tDim);
-                                    break;
-                                case rocisa::DataType::Float8:
-                                    pruneSparseArray(
-                                        (Float8*)p.second.cpuInput.valid.get(), t, tDim);
-                                    break;
-                                case rocisa::DataType::BFloat8:
-                                    pruneSparseArray(
-                                        (BFloat8*)p.second.cpuInput.valid.get(), t, tDim);
-                                    break;
-                                case rocisa::DataType::Float8_fnuz:
-                                    pruneSparseArray(
-                                        (Float8_fnuz*)p.second.cpuInput.valid.get(), t, tDim);
-                                    break;
-                                case rocisa::DataType::BFloat8_fnuz:
-                                    pruneSparseArray(
-                                        (BFloat8_fnuz*)p.second.cpuInput.valid.get(), t, tDim);
-                                    break;
-                                default:
-                                    throw std::runtime_error("SparseMatrix doesn't support");
-                                }
+                                const TensorDescriptor& tM = problem.metadata();
+                                const TensorDescriptor& tC = problem.compressed();
+                                auto& pUnitM = m_vdata[ContractionProblemGemm::TENSOR::METADATA]
+                                                   .pristine[problem.metadata().dataType()];
+                                auto& pUnitCp = m_vdata[ContractionProblemGemm::TENSOR::COMPRESSED]
+                                                    .pristine[p.first];
+                                pUnitM.initDescriptor[0]
+                                    = tensors[ContractionProblemGemm::TENSOR::METADATA];
+                                pUnitCp.initDescriptor[0]
+                                    = tensors[ContractionProblemGemm::TENSOR::COMPRESSED];
+
+                                initCPUSparseInput(m_pruneMode,
+                                                   p.second.cpuInput.valid.get(),
+                                                   pUnitCp.cpuInput.valid.get(),
+                                                   pUnitM.cpuInput.valid.get(),
+                                                   t,
+                                                   tC,
+                                                   tM,
+                                                   tDim);
                             }
                         }
                     }
@@ -2091,6 +2147,7 @@ namespace TensileLite
             inputs->metadata      = (unsigned char*)ptrs[ContractionProblemGemm::TENSOR::METADATA];
             inputs->Synchronizer  = (void*)ptrs[ContractionProblemGemm::TENSOR::Synchronizer];
             inputs->amaxD         = (void*)ptrs[ContractionProblemGemm::TENSOR::AMAXD];
+            inputs->compressed    = (void*)ptrs[ContractionProblemGemm::TENSOR::COMPRESSED];
 
             inputs->batchA    = (void**)batchPtrs[ContractionProblemGemm::TENSOR::A];
             inputs->batchB    = (void**)batchPtrs[ContractionProblemGemm::TENSOR::B];

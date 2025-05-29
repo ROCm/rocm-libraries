@@ -68,7 +68,8 @@ __device__ __forceinline__ void swap(T& a, T& b)
 }
 
 template <typename T>
-__device__ void swap(const rocblas_int n, T* a, const rocblas_int inca, T* b, const rocblas_int incb)
+__device__ __host__ void
+    swap(const rocblas_int n, T* a, const rocblas_int inca, T* b, const rocblas_int incb)
 {
     int tid = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
     if(tid < n)
@@ -1250,7 +1251,7 @@ ROCSOLVER_KERNEL void check_singularity(const rocblas_int n,
 /** SWAP swaps the values of vectors x and y of dimension n.
     Launch this kernel with a desired number of threads organized in
     NG groups in the x direction with NT threads in the x direction. **/
-template <typename S, typename T, typename I>
+template <typename T, typename I>
 ROCSOLVER_KERNEL void swap_kernel(I const n, T* const x, I const incx, T* const y, I const incy)
 {
     if(n <= 0)

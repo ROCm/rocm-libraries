@@ -75,6 +75,7 @@ Tests:
   transA_transB: *transA_transB_range
   outofplace: [false, true]
   pointer_mode_device: false
+  gpu_arch: ['90a','942','12??']
 
 # special form of get_solutions testing via gemm_ex harness
 - name: gemm_ex_get_solutions_custom
@@ -98,5 +99,6 @@ Tests:
   solution_index: -2 # do get solutions and repeat for all
   algo: 1
   pointer_mode_device: false
+  gpu_arch: ['90a','942','12??']
 
 ...

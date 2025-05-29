@@ -30,154 +30,128 @@
 #include <thrust/detail/config.h>
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
-#include <thrust/distance.h>
-#include <thrust/iterator/counting_iterator.h>
-#include <thrust/system/hip/config.h>
-#include <thrust/system/hip/detail/execution_policy.h>
-#include <thrust/system/hip/detail/transform.h>
+#  include <thrust/system/hip/config.h>
+
+#  include <thrust/distance.h>
+#  include <thrust/iterator/counting_iterator.h>
+#  include <thrust/system/hip/detail/execution_policy.h>
+#  include <thrust/system/hip/detail/transform.h>
 
 THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
 {
 namespace __replace
 {
-    template <class T>
-    struct constant_f
-    {
-        T value;
+template <class T>
+struct constant_f
+{
+  T value;
 
-        THRUST_HIP_FUNCTION
-        constant_f(T const& x)
-            : value(x)
-        {
-        }
+  THRUST_HIP_FUNCTION
+  constant_f(T const& x)
+      : value(x)
+  {}
 
-        template <class U>
-        THRUST_HIP_DEVICE_FUNCTION T operator()(U const&) const
-        {
-            return value;
-        }
-    }; // struct constant_f
+  template <class U>
+  THRUST_HIP_DEVICE_FUNCTION T operator()(U const&) const
+  {
+    return value;
+  }
+}; // struct constant_f
 
-    template <class Predicate, class NewType, class OutputType>
-    struct new_value_if_f
-    {
-        Predicate pred;
-        NewType   new_value;
+template <class Predicate, class NewType, class OutputType>
+struct new_value_if_f
+{
+  Predicate pred;
+  NewType new_value;
 
-        THRUST_HIP_FUNCTION
-        new_value_if_f(Predicate pred_, NewType new_value_)
-            : pred(pred_)
-            , new_value(new_value_)
-        {
-        }
+  THRUST_HIP_FUNCTION
+  new_value_if_f(Predicate pred_, NewType new_value_)
+      : pred(pred_)
+      , new_value(new_value_)
+  {}
 
-        template <class T>
-        OutputType THRUST_HIP_DEVICE_FUNCTION operator()(T const& x)
-        {
-            return pred(x) ? new_value : x;
-        }
+  template <class T>
+  OutputType THRUST_HIP_DEVICE_FUNCTION operator()(T const& x)
+  {
+    return pred(x) ? new_value : x;
+  }
 
-        template <class T, class P>
-        OutputType THRUST_HIP_DEVICE_FUNCTION operator()(T const& x, P const& y)
-        {
-            return pred(y) ? new_value : x;
-        }
-    }; // struct new_value_if_f
+  template <class T, class P>
+  OutputType THRUST_HIP_DEVICE_FUNCTION operator()(T const& x, P const& y)
+  {
+    return pred(y) ? new_value : x;
+  }
+}; // struct new_value_if_f
 } // namespace __replace
 
 template <class Derived, class Iterator, class T>
 void THRUST_HIP_FUNCTION
-replace(execution_policy<Derived>& policy,
-        Iterator                   first,
-        Iterator                   last,
-        T const&                   old_value,
-        T const&                   new_value)
+replace(execution_policy<Derived>& policy, Iterator first, Iterator last, T const& old_value, T const& new_value)
 {
-    using thrust::placeholders::_1;
-    hip_rocprim::transform_if(policy,
-                              first,
-                              last,
-                              first,
-                              __replace::constant_f<T>(new_value),
-                              _1 == old_value);
+  using thrust::placeholders::_1;
+  hip_rocprim::transform_if(policy, first, last, first, __replace::constant_f<T>(new_value), _1 == old_value);
 }
 
 template <class Derived, class Iterator, class Predicate, class T>
 void THRUST_HIP_FUNCTION
-replace_if(execution_policy<Derived>& policy,
-           Iterator                   first,
-           Iterator                   last,
-           Predicate                  pred,
-           T const&                   new_value)
+replace_if(execution_policy<Derived>& policy, Iterator first, Iterator last, Predicate pred, T const& new_value)
 {
-    hip_rocprim::transform_if(
-        policy, first, last, first, __replace::constant_f<T>(new_value), pred);
+  hip_rocprim::transform_if(policy, first, last, first, __replace::constant_f<T>(new_value), pred);
 }
 
 template <class Derived, class Iterator, class StencilIt, class Predicate, class T>
-void THRUST_HIP_FUNCTION
-replace_if(execution_policy<Derived>& policy,
-           Iterator                   first,
-           Iterator                   last,
-           StencilIt                  stencil,
-           Predicate                  pred,
-           T const&                   new_value)
+void THRUST_HIP_FUNCTION replace_if(
+  execution_policy<Derived>& policy,
+  Iterator first,
+  Iterator last,
+  StencilIt stencil,
+  Predicate pred,
+  T const& new_value)
 {
-    hip_rocprim::transform_if(
-        policy, first, last, stencil, first, __replace::constant_f<T>(new_value), pred);
+  hip_rocprim::transform_if(policy, first, last, stencil, first, __replace::constant_f<T>(new_value), pred);
 }
 
 template <class Derived, class InputIt, class OutputIt, class Predicate, class T>
-OutputIt THRUST_HIP_FUNCTION
-replace_copy_if(execution_policy<Derived>& policy,
-                InputIt                    first,
-                InputIt                    last,
-                OutputIt                   result,
-                Predicate                  predicate,
-                T const&                   new_value)
+OutputIt THRUST_HIP_FUNCTION replace_copy_if(
+  execution_policy<Derived>& policy,
+  InputIt first,
+  InputIt last,
+  OutputIt result,
+  Predicate predicate,
+  T const& new_value)
 {
-    using output_type    = typename iterator_traits<OutputIt>::value_type;
-    using new_value_if_t = __replace::new_value_if_f<Predicate, T, output_type>;
-    return hip_rocprim::transform(
-        policy, first, last, result, new_value_if_t(predicate, new_value)
-    );
+  using output_type    = typename iterator_traits<OutputIt>::value_type;
+  using new_value_if_t = __replace::new_value_if_f<Predicate, T, output_type>;
+  return hip_rocprim::transform(policy, first, last, result, new_value_if_t(predicate, new_value));
 }
 
-template <class Derived,
-          class InputIt,
-          class StencilIt,
-          class OutputIt,
-          class Predicate,
-          class T>
-OutputIt THRUST_HIP_FUNCTION
-replace_copy_if(execution_policy<Derived>& policy,
-                InputIt                    first,
-                InputIt                    last,
-                StencilIt                  stencil,
-                OutputIt                   result,
-                Predicate                  predicate,
-                T const&                   new_value)
+template <class Derived, class InputIt, class StencilIt, class OutputIt, class Predicate, class T>
+OutputIt THRUST_HIP_FUNCTION replace_copy_if(
+  execution_policy<Derived>& policy,
+  InputIt first,
+  InputIt last,
+  StencilIt stencil,
+  OutputIt result,
+  Predicate predicate,
+  T const& new_value)
 {
-    using output_type    = typename iterator_traits<OutputIt>::value_type;
-    using new_value_if_t = __replace::new_value_if_f<Predicate, T, output_type>;
-    return hip_rocprim::transform(
-        policy, first, last, stencil, result, new_value_if_t(predicate, new_value)
-    );
+  using output_type    = typename iterator_traits<OutputIt>::value_type;
+  using new_value_if_t = __replace::new_value_if_f<Predicate, T, output_type>;
+  return hip_rocprim::transform(policy, first, last, stencil, result, new_value_if_t(predicate, new_value));
 }
 
 template <class Derived, class InputIt, class OutputIt, class T>
-OutputIt THRUST_HIP_FUNCTION
-replace_copy(execution_policy<Derived>& policy,
-             InputIt                    first,
-             InputIt                    last,
-             OutputIt                   result,
-             T const&                   old_value,
-             T const&                   new_value)
+OutputIt THRUST_HIP_FUNCTION replace_copy(
+  execution_policy<Derived>& policy,
+  InputIt first,
+  InputIt last,
+  OutputIt result,
+  T const& old_value,
+  T const& new_value)
 {
-    return hip_rocprim::replace_copy_if(
-        policy, first, last, result, thrust::detail::equal_to_value<T>(old_value), new_value
-    );
+  return hip_rocprim::replace_copy_if(
+    policy, first, last, result, thrust::detail::equal_to_value<T>(old_value), new_value);
 }
 
 } // namespace hip_rocprim

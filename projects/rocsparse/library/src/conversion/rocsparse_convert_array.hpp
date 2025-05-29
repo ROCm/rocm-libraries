@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -36,6 +36,25 @@ namespace rocsparse
     rocsparse_status dnvec_transfer_from(rocsparse_handle            handle_,
                                          rocsparse_dnvec_descr       target_,
                                          rocsparse_const_dnvec_descr source_);
+
+    /// @brief Convert an indexing array.
+    /// @param handle_ The rocsparse handle
+    /// @param nitems_ The number of items to copy
+    /// @param target_indextype_ The index type of the target array
+    /// @param target_ The target array
+    /// @param target_indexbase_ The index base of the target array
+    /// @param source_indextype_ The index type of the source array
+    /// @param source_ The source array
+    /// @param source_indexbase_ The index base of the source array
+    /// @return The rocsparse status
+    rocsparse_status convert_array(rocsparse_handle     handle_,
+                                   size_t               nitems_,
+                                   rocsparse_indextype  target_indextype_,
+                                   void*                target_,
+                                   rocsparse_index_base target_indexbase_,
+                                   rocsparse_indextype  source_indextype_,
+                                   const void*          source_,
+                                   rocsparse_index_base source_indexbase_);
 
     /// @brief Convert an indexing array.
     /// @param handle_ The rocsparse handle

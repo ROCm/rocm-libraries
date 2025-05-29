@@ -696,27 +696,6 @@ std::vector<unsigned int> compute_final_grid(const std::vector<unsigned int>& mp
     return final_grid;
 }
 
-// get number of nodes being required by user
-int get_num_nodes(MPI_Comm mpi_comm)
-{
-    int      node_rank, node_size;
-    MPI_Comm node_comm;
-
-    // split MPI ranks by node
-    MPI_Comm_split_type(mpi_comm, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL, &node_comm);
-
-    // get number of ranks within the same node
-    MPI_Comm_rank(node_comm, &node_rank);
-    MPI_Comm_size(node_comm, &node_size);
-
-    // get total number of unique nodes
-    int num_nodes;
-    MPI_Allreduce(&node_size, &num_nodes, 1, MPI_INT, MPI_MAX, mpi_comm);
-
-    MPI_Comm_free(&node_comm);
-    return num_nodes;
-}
-
 // AllParams is a callable that returns a container of fft_params
 // structs to test.  It accepts a vector of library strings, which
 // "dyna" workers will turn into params that load the specified
@@ -950,11 +929,10 @@ int mpi_worker_main(const char*                                               de
 
         // get number of nodes to asign local GPU indexing, since within
         // each node, GPUs are indexed 0,1,...,N
-        int num_nodes = get_num_nodes(mpi_comm);
 
         // distribute input and output among the available number of ranks and GPUs per rank
-        params.distribute_input(ngpus, input_grid, num_nodes);
-        params.distribute_output(ngpus, output_grid, num_nodes);
+        params.distribute_input(ngpus, input_grid, mp_size);
+        params.distribute_output(ngpus, output_grid, mp_size);
 
         params.validate();
         token = params.token();

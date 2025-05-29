@@ -14,7 +14,6 @@
  *  limitations under the License.
  */
 
-
 /*! \file thrust/iterator/discard_iterator.h
  *  \brief An iterator which "discards" (ignores) values assigned to it upon dereference
  */
@@ -22,6 +21,7 @@
 #pragma once
 
 #include <thrust/detail/config.h>
+
 #include <thrust/iterator/detail/discard_iterator_base.h>
 #include <thrust/iterator/iterator_facade.h>
 
@@ -89,51 +89,48 @@ THRUST_NAMESPACE_BEGIN
  *
  *  \see make_discard_iterator
  */
-template<typename System = use_default>
-  class discard_iterator
-    : public detail::discard_iterator_base<System>::type
+template <typename System = use_default>
+class discard_iterator : public detail::discard_iterator_base<System>::type
 {
-    /*! \cond
-     */
-    friend class thrust::iterator_core_access;
-    using super_t       = typename detail::discard_iterator_base<System>::type;
-    using incrementable = typename detail::discard_iterator_base<System>::incrementable;
-    using base_iterator = typename detail::discard_iterator_base<System>::base_iterator;
+  /*! \cond
+   */
+  friend class thrust::iterator_core_access;
+  using super_t       = typename detail::discard_iterator_base<System>::type;
+  using incrementable = typename detail::discard_iterator_base<System>::incrementable;
+  using base_iterator = typename detail::discard_iterator_base<System>::base_iterator;
 
-  public:
-    using reference  = typename super_t::reference;
-    using value_type = typename super_t::value_type;
+public:
+  using reference  = typename super_t::reference;
+  using value_type = typename super_t::value_type;
 
-    /*! \endcond
-     */
+  /*! \endcond
+   */
 
-    /*! This constructor receives an optional index specifying the position of this
-     *  \p discard_iterator in a range.
-     *
-     *  \p i The index of this \p discard_iterator in a range. Defaults to the
-     *       value returned by \c Incrementable's null constructor. For example,
-     *       when <tt>Incrementable == int</tt>, \c 0.
-     */
-    THRUST_HOST_DEVICE
-    discard_iterator(incrementable const &i = incrementable())
-      : super_t(base_iterator(i)) {}
+  /*! This constructor receives an optional index specifying the position of this
+   *  \p discard_iterator in a range.
+   *
+   *  \p i The index of this \p discard_iterator in a range. Defaults to the
+   *       value returned by \c Incrementable's null constructor. For example,
+   *       when <tt>Incrementable == int</tt>, \c 0.
+   */
+  THRUST_HOST_DEVICE discard_iterator(incrementable const& i = incrementable())
+      : super_t(base_iterator(i))
+  {}
 
-    /*! \cond
-     */
+  /*! \cond
+   */
 
-  private: // Core iterator interface
-    THRUST_HOST_DEVICE
-    reference dereference() const
-    {
-      return m_element;
-    }
+private: // Core iterator interface
+  THRUST_HOST_DEVICE reference dereference() const
+  {
+    return m_element;
+  }
 
-    mutable value_type m_element;
+  mutable value_type m_element;
 
-    /*! \endcond
-     */
+  /*! \endcond
+   */
 }; // end constant_iterator
-
 
 /*! \p make_discard_iterator creates a \p discard_iterator from an optional index parameter.
  *
@@ -144,8 +141,8 @@ template<typename System = use_default>
  *
  *  \see constant_iterator
  */
-inline THRUST_HOST_DEVICE
-discard_iterator<> make_discard_iterator(discard_iterator<>::difference_type i = discard_iterator<>::difference_type(0))
+inline THRUST_HOST_DEVICE discard_iterator<>
+make_discard_iterator(discard_iterator<>::difference_type i = discard_iterator<>::difference_type(0))
 {
   return discard_iterator<>(i);
 } // end make_discard_iterator()

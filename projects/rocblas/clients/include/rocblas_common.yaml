@@ -635,7 +635,7 @@ Defaults:
   solution_index: 0
   geam_op: rocblas_geam_ex_operation_min_plus
   flags: none
-  atomics_mode: atomics_allowed
+  atomics_mode: atomics_not_allowed
   initialization: rand_int
   category: nightly
   known_bug_platforms: ''

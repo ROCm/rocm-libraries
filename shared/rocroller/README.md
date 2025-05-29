@@ -216,7 +216,7 @@ library by default.
 To run the GEMM client from your build directory:
 
 ```
-./bin/client/gemm --help
+./bin/client/rocRoller_gemm --help
 ```
 
 ## File Structure
@@ -292,7 +292,7 @@ Each new feature is required to have a test.
 - Test sources are placed in the `test` folder.
 - CPP Files for Unit Tests should be included in the `rocRollerTests` executable in [CMakeLists.txt](https://github.com/ROCm/rocRoller/blob/master/test/CMakeLists.txt).
 
-Some tests require multiple threads for properly testing a desired or undesired behaviour (e.g. thread-safety) or to benefit from faster execution. Therfore, it is recommended to set `OMP_NUM_THREADS` appropriately. A value between `[NUM_PHYSICAL_CORES/2, NUM_PHYSICAL_CORES)` is recommended. Setting `OMP_NUM_THREADS` to the number of available cores or higher can cause test to run slower due to oversubscription (e.g. increased contention).
+Some tests require multiple threads for properly testing a desired or undesired behaviour (e.g. thread-safety) or to benefit from faster execution. Therefore, it is recommended to set `OMP_NUM_THREADS` appropriately. A value between `[NUM_PHYSICAL_CORES/2, NUM_PHYSICAL_CORES)` is recommended. Setting `OMP_NUM_THREADS` to the number of available cores or higher can cause test to run slower due to oversubscription (e.g. increased contention).
 
 Note a few conditions:
 - If your test requires a context but does not actually need to run on a GPU, inherit from `GenericContextFixture`.
@@ -389,7 +389,7 @@ To see how this works, check rrperf's help documentation:
 
 ## Kernel Analysis
 
-Setting the environment variable `ROCROLLER_KERNEL_ANALYSIS=1` will enable the following kernel analysis features built into rocRoler.
+Setting the environment variable `ROCROLLER_KERNEL_ANALYSIS=1` will enable the following kernel analysis features built into rocRoller.
 
 - Register Liveness
   - The file `${ROCROLLER_ASSEMBLY_FILE}.live` is created which reports register liveness.
@@ -443,7 +443,7 @@ The following commands can be used to visualize memory access patterns to png fi
 ```console
 $ cd ${build_dir}
 
-$ ./bin/client/gemm --M=512 --N=768 --K=512 --mac_m=128 --mac_n=256 --mac_k=16 --alpha=2.0 --beta=0.5 --workgroup_size_x=256 --workgroup_size_y=1 --type_A=half --type_B=half --type_C=half --type_D=half --type_acc=float --num_warmup=2 --num_outer=10 --num_inner=1 --trans_A=N --trans_B=T --loadLDS_A=True --loadLDS_B=True --storeLDS_D=False --scheduler=Priority --visualize=True --match_memory_access=False
+$ ./bin/client/rocRoller_gemm --M=512 --N=768 --K=512 --mac_m=128 --mac_n=256 --mac_k=16 --alpha=2.0 --beta=0.5 --workgroup_size_x=256 --workgroup_size_y=1 --type_A=half --type_B=half --type_C=half --type_D=half --type_acc=float --num_warmup=2 --num_outer=10 --num_inner=1 --trans_A=N --trans_B=T --loadLDS_A=True --loadLDS_B=True --storeLDS_D=False --scheduler=Priority --visualize=True --match_memory_access=False
 
 Visualizing to gemm.vis
 Wrote workitem_A.dat

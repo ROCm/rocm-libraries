@@ -328,7 +328,7 @@ Tests:
   matrix_size: *size_t_non_transpose_90a
   alpha_beta: *alpha_beta_range_size_t
   pointer_mode_host: false
-  atomics_mode: [1]
+  atomics_mode: [0, 1]
   os_flags: LINUX
   gpu_arch: ['90a']
 

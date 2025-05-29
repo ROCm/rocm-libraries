@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -28,6 +28,13 @@
 
 namespace TensileLite
 {
+    static const std::map<AMDGPU::Processor, std::vector<int>>& NonStandardCUMap()
+    {
+        static const std::map<AMDGPU::Processor, std::vector<int>> NonStandardCU = {
+            {AMDGPU::Processor::gfx90a, {104}}, {AMDGPU::Processor::gfx942, {20, 38, 64, 80, 228}}};
+        return NonStandardCU;
+    }
+
     TENSILE_API std::string AMDGPU::type() const
     {
         return Type();
@@ -48,6 +55,27 @@ namespace TensileLite
     }
 
     TENSILE_API AMDGPU::~AMDGPU() = default;
+
+    TENSILE_API bool AMDGPU::isStandardCU() const
+    {
+        // return the result if we already tested it.
+        if(isStandardCUs != -1)
+            return (isStandardCUs == 1);
+
+        // assume current device is a standard cu device.
+        isStandardCUs = 1;
+
+        auto mapIter = NonStandardCUMap().find(processor);
+        if(mapIter != NonStandardCUMap().end())
+        {
+            auto list = mapIter->second;
+            // current device is a speicalized cu device.
+            if(std::count(list.begin(), list.end(), computeUnitCount) > 0)
+                isStandardCUs = 0;
+        }
+
+        return (isStandardCUs == 1);
+    }
 
     TENSILE_API bool AMDGPU::runsKernelTargeting(AMDGPU::Processor other) const
     {

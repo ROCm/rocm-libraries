@@ -14,7 +14,6 @@
  *  limitations under the License.
  */
 
-
 /*! \file replace.h
  *  \brief Functions for replacing elements in a range with a particular value
  */
@@ -22,6 +21,7 @@
 #pragma once
 
 #include <thrust/detail/config.h>
+
 #include <thrust/detail/execution_policy.h>
 
 THRUST_NAMESPACE_BEGIN
@@ -32,7 +32,6 @@ THRUST_NAMESPACE_BEGIN
  *  \ingroup transformations
  *  \{
  */
-
 
 /*! \p replace replaces every element in the range [first, last) equal to \p old_value
  *  with \p new_value. That is: for every iterator \c i, if <tt>*i == old_value</tt>
@@ -47,13 +46,12 @@ THRUST_NAMESPACE_BEGIN
  *  \param new_value The new value to replace \p old_value.
  *
  *  \tparam DerivedPolicy The name of the derived execution policy.
- *  \tparam ForwardIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward Iterator</a>,
- *          and \p ForwardIterator is mutable.
- *  \tparam T is a model of <a href="https://en.cppreference.com/w/cpp/named_req/CopyAssignable">Assignable</a>,
- *          \p T is a model of <a href="https://en.cppreference.com/w/cpp/concepts/equality_comparable">EqualityComparable</a>,
- *          objects of \p T may be compared for equality with objects of
- *          \p ForwardIterator's \c value_type,
- *          and \p T is convertible to \p ForwardIterator's \c value_type.
+ *  \tparam ForwardIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward
+ * Iterator</a>, and \p ForwardIterator is mutable. \tparam T is a model of <a
+ * href="https://en.cppreference.com/w/cpp/named_req/CopyAssignable">Assignable</a>, \p T is a model of <a
+ * href="https://en.cppreference.com/w/cpp/concepts/equality_comparable">EqualityComparable</a>, objects of \p T may be
+ * compared for equality with objects of \p ForwardIterator's \c value_type, and \p T is convertible to \p
+ * ForwardIterator's \c value_type.
  *
  *  The following code snippet demonstrates how to use \p replace to replace
  *  a value of interest in a \c device_vector with another using the \p thrust::device
@@ -65,7 +63,7 @@ THRUST_NAMESPACE_BEGIN
  *  #include <thrust/execution_policy.h>
  *
  *  ...
- *  
+ *
  *  thrust::device_vector<int> A(4);
  *  A[0] = 1;
  *  A[1] = 2;
@@ -82,13 +80,13 @@ THRUST_NAMESPACE_BEGIN
  *  \see \c replace_copy
  *  \see \c replace_copy_if
  */
-template<typename DerivedPolicy, typename ForwardIterator, typename T>
-THRUST_HOST_DEVICE
-  void replace(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
-               ForwardIterator first, ForwardIterator last,
-               const T &old_value,
-               const T &new_value);
-
+template <typename DerivedPolicy, typename ForwardIterator, typename T>
+THRUST_HOST_DEVICE void
+replace(const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
+        ForwardIterator first,
+        ForwardIterator last,
+        const T& old_value,
+        const T& new_value);
 
 /*! \p replace replaces every element in the range [first, last) equal to \p old_value
  *  with \p new_value. That is: for every iterator \c i, if <tt>*i == old_value</tt>
@@ -99,13 +97,12 @@ THRUST_HOST_DEVICE
  *  \param old_value The value to replace.
  *  \param new_value The new value to replace \p old_value.
  *
- *  \tparam ForwardIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward Iterator</a>,
- *          and \p ForwardIterator is mutable.
- *  \tparam T is a model of <a href="https://en.cppreference.com/w/cpp/named_req/CopyAssignable">Assignable</a>,
- *          \p T is a model of <a href="https://en.cppreference.com/w/cpp/concepts/equality_comparable">EqualityComparable</a>,
- *          objects of \p T may be compared for equality with objects of
- *          \p ForwardIterator's \c value_type,
- *          and \p T is convertible to \p ForwardIterator's \c value_type.
+ *  \tparam ForwardIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward
+ * Iterator</a>, and \p ForwardIterator is mutable. \tparam T is a model of <a
+ * href="https://en.cppreference.com/w/cpp/named_req/CopyAssignable">Assignable</a>, \p T is a model of <a
+ * href="https://en.cppreference.com/w/cpp/concepts/equality_comparable">EqualityComparable</a>, objects of \p T may be
+ * compared for equality with objects of \p ForwardIterator's \c value_type, and \p T is convertible to \p
+ * ForwardIterator's \c value_type.
  *
  *  The following code snippet demonstrates how to use \p replace to replace
  *  a value of interest in a \c device_vector with another.
@@ -115,7 +112,7 @@ THRUST_HOST_DEVICE
  *  #include <thrust/device_vector.h>
  *
  *  ...
- *  
+ *
  *  thrust::device_vector<int> A(4);
  *  A[0] = 1;
  *  A[1] = 2;
@@ -132,10 +129,8 @@ THRUST_HOST_DEVICE
  *  \see \c replace_copy
  *  \see \c replace_copy_if
  */
-template<typename ForwardIterator, typename T>
-  void replace(ForwardIterator first, ForwardIterator last, const T &old_value,
-               const T &new_value);
-
+template <typename ForwardIterator, typename T>
+void replace(ForwardIterator first, ForwardIterator last, const T& old_value, const T& new_value);
 
 /*! \p replace_if replaces every element in the range <tt>[first, last)</tt> for which
  *  \p pred returns \c true with \p new_value. That is: for every iterator \c i, if
@@ -151,12 +146,12 @@ template<typename ForwardIterator, typename T>
  *         to \c true.
  *
  *  \tparam DerivedPolicy The name of the derived execution policy.
- *  \tparam ForwardIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward Iterator</a>,
- *          \p ForwardIterator is mutable,
- *          and \p ForwardIterator's \c value_type is convertible to \p Predicate's \c argument_type.
- *  \tparam Predicate is a model of <a href="https://en.cppreference.com/w/cpp/concepts/predicate">Predicate</a>.
- *  \tparam T is a model of <a href="https://en.cppreference.com/w/cpp/named_req/CopyAssignable">Assignable</a>,
- *          and \p T is convertible to \p ForwardIterator's \c value_type.
+ *  \tparam ForwardIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward
+ * Iterator</a>, \p ForwardIterator is mutable, and \p ForwardIterator's \c value_type is convertible to \p Predicate's
+ * \c argument_type. \tparam Predicate is a model of <a
+ * href="https://en.cppreference.com/w/cpp/concepts/predicate">Predicate</a>. \tparam T is a model of <a
+ * href="https://en.cppreference.com/w/cpp/named_req/CopyAssignable">Assignable</a>, and \p T is convertible to \p
+ * ForwardIterator's \c value_type.
  *
  *  The following code snippet demonstrates how to use \p replace_if to replace
  *  a \c device_vector's negative elements with \c 0 using the \p thrust::device execution policy
@@ -177,7 +172,7 @@ template<typename ForwardIterator, typename T>
  *  };
  *
  *  ...
- *  
+ *
  *  thrust::device_vector<int> A(4);
  *  A[0] =  1;
  *  A[1] = -3;
@@ -196,13 +191,13 @@ template<typename ForwardIterator, typename T>
  *  \see \c replace_copy
  *  \see \c replace_copy_if
  */
-template<typename DerivedPolicy, typename ForwardIterator, typename Predicate, typename T>
-THRUST_HOST_DEVICE
-  void replace_if(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
-                  ForwardIterator first, ForwardIterator last,
-                  Predicate pred,
-                  const T &new_value);
-
+template <typename DerivedPolicy, typename ForwardIterator, typename Predicate, typename T>
+THRUST_HOST_DEVICE void replace_if(
+  const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
+  ForwardIterator first,
+  ForwardIterator last,
+  Predicate pred,
+  const T& new_value);
 
 /*! \p replace_if replaces every element in the range <tt>[first, last)</tt> for which
  *  \p pred returns \c true with \p new_value. That is: for every iterator \c i, if
@@ -214,12 +209,12 @@ THRUST_HOST_DEVICE
  *  \param new_value The new value to replace elements which <tt>pred(*i)</tt> evaluates
  *         to \c true.
  *
- *  \tparam ForwardIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward Iterator</a>,
- *          \p ForwardIterator is mutable,
- *          and \p ForwardIterator's \c value_type is convertible to \p Predicate's \c argument_type.
- *  \tparam Predicate is a model of <a href="https://en.cppreference.com/w/cpp/concepts/predicate">Predicate</a>.
- *  \tparam T is a model of <a href="https://en.cppreference.com/w/cpp/named_req/CopyAssignable">Assignable</a>,
- *          and \p T is convertible to \p ForwardIterator's \c value_type.
+ *  \tparam ForwardIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward
+ * Iterator</a>, \p ForwardIterator is mutable, and \p ForwardIterator's \c value_type is convertible to \p Predicate's
+ * \c argument_type. \tparam Predicate is a model of <a
+ * href="https://en.cppreference.com/w/cpp/concepts/predicate">Predicate</a>. \tparam T is a model of <a
+ * href="https://en.cppreference.com/w/cpp/named_req/CopyAssignable">Assignable</a>, and \p T is convertible to \p
+ * ForwardIterator's \c value_type.
  *
  *  The following code snippet demonstrates how to use \p replace_if to replace
  *  a \c device_vector's negative elements with \c 0.
@@ -238,7 +233,7 @@ THRUST_HOST_DEVICE
  *  };
  *
  *  ...
- *  
+ *
  *  thrust::device_vector<int> A(4);
  *  A[0] =  1;
  *  A[1] = -3;
@@ -257,11 +252,8 @@ THRUST_HOST_DEVICE
  *  \see \c replace_copy
  *  \see \c replace_copy_if
  */
-template<typename ForwardIterator, typename Predicate, typename T>
-  void replace_if(ForwardIterator first, ForwardIterator last,
-                  Predicate pred,
-                  const T &new_value);
-
+template <typename ForwardIterator, typename Predicate, typename T>
+void replace_if(ForwardIterator first, ForwardIterator last, Predicate pred, const T& new_value);
 
 /*! \p replace_if replaces every element in the range <tt>[first, last)</tt> for which
  *  <tt>pred(*s)</tt> returns \c true with \p new_value. That is: for every iterator
@@ -279,13 +271,13 @@ template<typename ForwardIterator, typename Predicate, typename T>
  *         to \c true.
  *
  *  \tparam DerivedPolicy The name of the derived execution policy.
- *  \tparam ForwardIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward Iterator</a>,
- *          and \p ForwardIterator is mutable.
- *  \tparam InputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>,
- *          and \p InputIterator's \c value_type is convertible to \p Predicate's \c argument_type.
- *  \tparam Predicate is a model of <a href="https://en.cppreference.com/w/cpp/concepts/predicate">Predicate</a>.
- *  \tparam T is a model of <a href="https://en.cppreference.com/w/cpp/named_req/CopyAssignable">Assignable</a>,
- *          and \p T is convertible to \p ForwardIterator's \c value_type.
+ *  \tparam ForwardIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward
+ * Iterator</a>, and \p ForwardIterator is mutable. \tparam InputIterator is a model of <a
+ * href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>, and \p InputIterator's \c
+ * value_type is convertible to \p Predicate's \c argument_type. \tparam Predicate is a model of <a
+ * href="https://en.cppreference.com/w/cpp/concepts/predicate">Predicate</a>. \tparam T is a model of <a
+ * href="https://en.cppreference.com/w/cpp/named_req/CopyAssignable">Assignable</a>, and \p T is convertible to \p
+ * ForwardIterator's \c value_type.
  *
  *  The following code snippet demonstrates how to use \p replace_if to replace
  *  a \c device_vector's element with \c 0 when its corresponding stencil element is less than zero
@@ -304,9 +296,9 @@ template<typename ForwardIterator, typename Predicate, typename T>
  *      return x < 0;
  *    }
  *  };
- *  
+ *
  *  ...
- *  
+ *
  *  thrust::device_vector<int> A(4);
  *  A[0] =  10;
  *  A[1] =  20;
@@ -330,14 +322,14 @@ template<typename ForwardIterator, typename Predicate, typename T>
  *  \see \c replace_copy
  *  \see \c replace_copy_if
  */
-template<typename DerivedPolicy, typename ForwardIterator, typename InputIterator, typename Predicate, typename T>
-THRUST_HOST_DEVICE
-  void replace_if(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
-                  ForwardIterator first, ForwardIterator last,
-                  InputIterator stencil,
-                  Predicate pred,
-                  const T &new_value);
-
+template <typename DerivedPolicy, typename ForwardIterator, typename InputIterator, typename Predicate, typename T>
+THRUST_HOST_DEVICE void replace_if(
+  const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
+  ForwardIterator first,
+  ForwardIterator last,
+  InputIterator stencil,
+  Predicate pred,
+  const T& new_value);
 
 /*! \p replace_if replaces every element in the range <tt>[first, last)</tt> for which
  *  <tt>pred(*s)</tt> returns \c true with \p new_value. That is: for every iterator
@@ -351,13 +343,13 @@ THRUST_HOST_DEVICE
  *  \param new_value The new value to replace elements which <tt>pred(*i)</tt> evaluates
  *         to \c true.
  *
- *  \tparam ForwardIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward Iterator</a>,
- *          and \p ForwardIterator is mutable.
- *  \tparam InputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>,
- *          and \p InputIterator's \c value_type is convertible to \p Predicate's \c argument_type.
- *  \tparam Predicate is a model of <a href="https://en.cppreference.com/w/cpp/concepts/predicate">Predicate</a>.
- *  \tparam T is a model of <a href="https://en.cppreference.com/w/cpp/named_req/CopyAssignable">Assignable</a>,
- *          and \p T is convertible to \p ForwardIterator's \c value_type.
+ *  \tparam ForwardIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward
+ * Iterator</a>, and \p ForwardIterator is mutable. \tparam InputIterator is a model of <a
+ * href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>, and \p InputIterator's \c
+ * value_type is convertible to \p Predicate's \c argument_type. \tparam Predicate is a model of <a
+ * href="https://en.cppreference.com/w/cpp/concepts/predicate">Predicate</a>. \tparam T is a model of <a
+ * href="https://en.cppreference.com/w/cpp/named_req/CopyAssignable">Assignable</a>, and \p T is convertible to \p
+ * ForwardIterator's \c value_type.
  *
  *  The following code snippet demonstrates how to use \p replace_if to replace
  *  a \c device_vector's element with \c 0 when its corresponding stencil element is less than zero.
@@ -374,9 +366,9 @@ THRUST_HOST_DEVICE
  *      return x < 0;
  *    }
  *  };
- *  
+ *
  *  ...
- *  
+ *
  *  thrust::device_vector<int> A(4);
  *  A[0] =  10;
  *  A[1] =  20;
@@ -400,12 +392,8 @@ THRUST_HOST_DEVICE
  *  \see \c replace_copy
  *  \see \c replace_copy_if
  */
-template<typename ForwardIterator, typename InputIterator, typename Predicate, typename T>
-  void replace_if(ForwardIterator first, ForwardIterator last,
-                  InputIterator stencil,
-                  Predicate pred,
-                  const T &new_value);
-
+template <typename ForwardIterator, typename InputIterator, typename Predicate, typename T>
+void replace_if(ForwardIterator first, ForwardIterator last, InputIterator stencil, Predicate pred, const T& new_value);
 
 /*! \p replace_copy copies elements from the range <tt>[first, last)</tt> to the range
  *  <tt>[result, result + (last-first))</tt>, except that any element equal to \p old_value
@@ -426,14 +414,15 @@ template<typename ForwardIterator, typename InputIterator, typename Predicate, t
  *  \return <tt>result + (last-first)</tt>
  *
  *  \tparam DerivedPolicy The name of the derived execution policy.
- *  \tparam InputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>.
- *  \tparam OutputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/output_iterator">Output Iterator</a>.
- *  \tparam T is a model of <a href="https://en.cppreference.com/w/cpp/named_req/CopyAssignable">Assignable</a>,
- *          \p T is a model of <a href="https://en.cppreference.com/w/cpp/concepts/equality_comparable">Equality Comparable</a>,
- *          \p T may be compared for equality with \p InputIterator's \c value_type,
- *          and \p T is convertible to \p OutputIterator's \c value_type.
+ *  \tparam InputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input
+ * Iterator</a>. \tparam OutputIterator is a model of <a
+ * href="https://en.cppreference.com/w/cpp/iterator/output_iterator">Output Iterator</a>. \tparam T is a model of <a
+ * href="https://en.cppreference.com/w/cpp/named_req/CopyAssignable">Assignable</a>, \p T is a model of <a
+ * href="https://en.cppreference.com/w/cpp/concepts/equality_comparable">Equality Comparable</a>, \p T may be compared
+ * for equality with \p InputIterator's \c value_type, and \p T is convertible to \p OutputIterator's \c value_type.
  *
- *  \pre \p first may equal \p result, but the ranges <tt>[first, last)</tt> and <tt>[result, result + (last - first))</tt> shall not overlap otherwise.
+ *  \pre \p first may equal \p result, but the ranges <tt>[first, last)</tt> and <tt>[result, result + (last -
+ * first))</tt> shall not overlap otherwise.
  *
  *  \code
  *  #include <thrust/replace.h>
@@ -459,14 +448,14 @@ template<typename ForwardIterator, typename InputIterator, typename Predicate, t
  *  \see \c replace_if
  *  \see \c replace_copy_if
  */
-template<typename DerivedPolicy, typename InputIterator, typename OutputIterator, typename T>
-THRUST_HOST_DEVICE
-  OutputIterator replace_copy(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
-                              InputIterator first, InputIterator last,
-                              OutputIterator result,
-                              const T &old_value,
-                              const T &new_value);
-
+template <typename DerivedPolicy, typename InputIterator, typename OutputIterator, typename T>
+THRUST_HOST_DEVICE OutputIterator replace_copy(
+  const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
+  InputIterator first,
+  InputIterator last,
+  OutputIterator result,
+  const T& old_value,
+  const T& new_value);
 
 /*! \p replace_copy copies elements from the range <tt>[first, last)</tt> to the range
  *  <tt>[result, result + (last-first))</tt>, except that any element equal to \p old_value
@@ -483,14 +472,15 @@ THRUST_HOST_DEVICE
  *  \param new_value The replacement value for which <tt>*i == old_value</tt> evaluates to \c true.
  *  \return <tt>result + (last-first)</tt>
  *
- *  \tparam InputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>.
- *  \tparam OutputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/output_iterator">Output Iterator</a>.
- *  \tparam T is a model of <a href="https://en.cppreference.com/w/cpp/named_req/CopyAssignable">Assignable</a>,
- *          \p T is a model of <a href="https://en.cppreference.com/w/cpp/concepts/equality_comparable">Equality Comparable</a>,
- *          \p T may be compared for equality with \p InputIterator's \c value_type,
- *          and \p T is convertible to \p OutputIterator's \c value_type.
+ *  \tparam InputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input
+ * Iterator</a>. \tparam OutputIterator is a model of <a
+ * href="https://en.cppreference.com/w/cpp/iterator/output_iterator">Output Iterator</a>. \tparam T is a model of <a
+ * href="https://en.cppreference.com/w/cpp/named_req/CopyAssignable">Assignable</a>, \p T is a model of <a
+ * href="https://en.cppreference.com/w/cpp/concepts/equality_comparable">Equality Comparable</a>, \p T may be compared
+ * for equality with \p InputIterator's \c value_type, and \p T is convertible to \p OutputIterator's \c value_type.
  *
- *  \pre \p first may equal \p result, but the ranges <tt>[first, last)</tt> and <tt>[result, result + (last - first))</tt> shall not overlap otherwise.
+ *  \pre \p first may equal \p result, but the ranges <tt>[first, last)</tt> and <tt>[result, result + (last -
+ * first))</tt> shall not overlap otherwise.
  *
  *  \code
  *  #include <thrust/replace.h>
@@ -515,11 +505,9 @@ THRUST_HOST_DEVICE
  *  \see \c replace_if
  *  \see \c replace_copy_if
  */
-template<typename InputIterator, typename OutputIterator, typename T>
-  OutputIterator replace_copy(InputIterator first, InputIterator last,
-                              OutputIterator result, const T &old_value,
-                              const T &new_value);
-
+template <typename InputIterator, typename OutputIterator, typename T>
+OutputIterator
+replace_copy(InputIterator first, InputIterator last, OutputIterator result, const T& old_value, const T& new_value);
 
 /*! \p replace_copy_if copies elements from the range <tt>[first, last)</tt> to the range
  *  <tt>[result, result + (last-first))</tt>, except that any element for which \p pred
@@ -540,14 +528,17 @@ template<typename InputIterator, typename OutputIterator, typename T>
  *  \return <tt>result + (last-first)</tt>
  *
  *  \tparam DerivedPolicy The name of the derived execution policy.
- *  \tparam InputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>,
+ *  \tparam InputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input
+ Iterator</a>,
  *          and \p InputIterator's \c value_type is convertible to \p Predicate's \c argument_type.
- *  \tparam OutputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/output_iterator">Output Iterator</a>.
+ *  \tparam OutputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/output_iterator">Output
+ Iterator</a>.
  *  \tparam Predicate is a model of <a href="https://en.cppreference.com/w/cpp/concepts/predicate">Predicate</a>.
  *  \tparam T is a model of <a href="https://en.cppreference.com/w/cpp/named_req/CopyAssignable">Assignable</a>,
  *          and \p T is convertible to \p OutputIterator's \c value_type.
  *
- *  \pre \p first may equal \p result, but the ranges <tt>[first, last)</tt> and <tt>[result, result + (last - first))</tt> shall not overlap otherwise.
+ *  \pre \p first may equal \p result, but the ranges <tt>[first, last)</tt> and <tt>[result, result + (last -
+ first))</tt> shall not overlap otherwise.
  *
  *  \code
  *  #include <thrust/replace.h>
@@ -564,13 +555,13 @@ template<typename InputIterator, typename OutputIterator, typename T>
  *  };
  *
  *  ...
- *  
+ *
  *  thrust::device_vector<int> A(4);
  *  A[0] =  1;
  *  A[1] = -3;
  *  A[2] =  2;
  *  A[3] = -1;
- 
+
  *  thrust::device_vector<int> B(4);
  *  is_less_than_zero pred;
  *
@@ -584,14 +575,14 @@ template<typename InputIterator, typename OutputIterator, typename T>
  *  \see \c replace_if
  *  \see \c replace_copy
  */
-template<typename DerivedPolicy, typename InputIterator, typename OutputIterator, typename Predicate, typename T>
-THRUST_HOST_DEVICE
-  OutputIterator replace_copy_if(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
-                                 InputIterator first, InputIterator last,
-                                 OutputIterator result,
-                                 Predicate pred,
-                                 const T &new_value);
-
+template <typename DerivedPolicy, typename InputIterator, typename OutputIterator, typename Predicate, typename T>
+THRUST_HOST_DEVICE OutputIterator replace_copy_if(
+  const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
+  InputIterator first,
+  InputIterator last,
+  OutputIterator result,
+  Predicate pred,
+  const T& new_value);
 
 /*! \p replace_copy_if copies elements from the range <tt>[first, last)</tt> to the range
  *  <tt>[result, result + (last-first))</tt>, except that any element for which \p pred
@@ -608,14 +599,17 @@ THRUST_HOST_DEVICE
  *  \param new_value The replacement value to assign <tt>pred(*i)</tt> evaluates to \c true.
  *  \return <tt>result + (last-first)</tt>
  *
- *  \tparam InputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>,
+ *  \tparam InputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input
+ Iterator</a>,
  *          and \p InputIterator's \c value_type is convertible to \p Predicate's \c argument_type.
- *  \tparam OutputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/output_iterator">Output Iterator</a>.
+ *  \tparam OutputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/output_iterator">Output
+ Iterator</a>.
  *  \tparam Predicate is a model of <a href="https://en.cppreference.com/w/cpp/concepts/predicate">Predicate</a>.
  *  \tparam T is a model of <a href="https://en.cppreference.com/w/cpp/named_req/CopyAssignable">Assignable</a>,
  *          and \p T is convertible to \p OutputIterator's \c value_type.
  *
- *  \pre \p first may equal \p result, but the ranges <tt>[first, last)</tt> and <tt>[result, result + (last - first))</tt> shall not overlap otherwise.
+ *  \pre \p first may equal \p result, but the ranges <tt>[first, last)</tt> and <tt>[result, result + (last -
+ first))</tt> shall not overlap otherwise.
  *
  *  \code
  *  #include <thrust/replace.h>
@@ -631,13 +625,13 @@ THRUST_HOST_DEVICE
  *  };
  *
  *  ...
- *  
+ *
  *  thrust::device_vector<int> A(4);
  *  A[0] =  1;
  *  A[1] = -3;
  *  A[2] =  2;
  *  A[3] = -1;
- 
+
  *  thrust::device_vector<int> B(4);
  *  is_less_than_zero pred;
  *
@@ -651,12 +645,9 @@ THRUST_HOST_DEVICE
  *  \see \c replace_if
  *  \see \c replace_copy
  */
-template<typename InputIterator, typename OutputIterator, typename Predicate, typename T>
-  OutputIterator replace_copy_if(InputIterator first, InputIterator last,
-                                 OutputIterator result,
-                                 Predicate pred,
-                                 const T &new_value);
-
+template <typename InputIterator, typename OutputIterator, typename Predicate, typename T>
+OutputIterator
+replace_copy_if(InputIterator first, InputIterator last, OutputIterator result, Predicate pred, const T& new_value);
 
 /*! This version of \p replace_copy_if copies elements from the range <tt>[first, last)</tt> to the range
  *  <tt>[result, result + (last-first))</tt>, except that any element whose corresponding stencil
@@ -674,20 +665,22 @@ template<typename InputIterator, typename OutputIterator, typename Predicate, ty
  *  \param stencil The beginning of the stencil sequence.
  *  \param result The beginning of the sequence to copy to.
  *  \param pred The predicate to test on every value of the range <tt>[stencil, stencil + (last - first))</tt>.
- *  \param new_value The replacement value to assign when <tt>pred(*s)</tt> evaluates to \c true. 
+ *  \param new_value The replacement value to assign when <tt>pred(*s)</tt> evaluates to \c true.
  *  \return <tt>result + (last-first)</tt>
  *
  *  \tparam DerivedPolicy The name of the derived execution policy.
- *  \tparam InputIterator1 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>.
- *  \tparam InputIterator2 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>
- *                         and \p InputIterator2's \c value_type is convertible to \p Predicate's \c argument_type.
- *  \tparam OutputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/output_iterator">Output Iterator</a>.
- *  \tparam Predicate is a model of <a href="https://en.cppreference.com/w/cpp/concepts/predicate">Predicate</a>.
- *  \tparam T is a model of <a href="https://en.cppreference.com/w/cpp/named_req/CopyAssignable">Assignable</a>,
- *          and \p T is convertible to \p OutputIterator's \c value_type.
+ *  \tparam InputIterator1 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input
+ * Iterator</a>. \tparam InputIterator2 is a model of <a
+ * href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a> and \p InputIterator2's \c
+ * value_type is convertible to \p Predicate's \c argument_type. \tparam OutputIterator is a model of <a
+ * href="https://en.cppreference.com/w/cpp/iterator/output_iterator">Output Iterator</a>. \tparam Predicate is a model
+ * of <a href="https://en.cppreference.com/w/cpp/concepts/predicate">Predicate</a>. \tparam T is a model of <a
+ * href="https://en.cppreference.com/w/cpp/named_req/CopyAssignable">Assignable</a>, and \p T is convertible to \p
+ * OutputIterator's \c value_type.
  *
- *  \pre \p first may equal \p result, but the ranges <tt>[first, last)</tt> and <tt>[result, result + (last - first))</tt> shall not overlap otherwise.
- *  \pre \p stencil may equal \p result, but the ranges <tt>[stencil, stencil + (last - first))</tt> and <tt>[result, result + (last - first))</tt> shall not overlap otherwise.
+ *  \pre \p first may equal \p result, but the ranges <tt>[first, last)</tt> and <tt>[result, result + (last -
+ * first))</tt> shall not overlap otherwise. \pre \p stencil may equal \p result, but the ranges <tt>[stencil, stencil +
+ * (last - first))</tt> and <tt>[result, result + (last - first))</tt> shall not overlap otherwise.
  *
  *  \code
  *  #include <thrust/replace.h>
@@ -702,9 +695,9 @@ template<typename InputIterator, typename OutputIterator, typename Predicate, ty
  *      return x < 0;
  *    }
  *  };
- *  
+ *
  *  ...
- *  
+ *
  *  thrust::device_vector<int> A(4);
  *  A[0] =  10;
  *  A[1] =  20;
@@ -728,15 +721,20 @@ template<typename InputIterator, typename OutputIterator, typename Predicate, ty
  *  \see \c replace_copy
  *  \see \c replace_if
  */
-template<typename DerivedPolicy, typename InputIterator1, typename InputIterator2, typename OutputIterator, typename Predicate, typename T>
-THRUST_HOST_DEVICE
-  OutputIterator replace_copy_if(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
-                                 InputIterator1 first, InputIterator1 last,
-                                 InputIterator2 stencil,
-                                 OutputIterator result,
-                                 Predicate pred,
-                                 const T &new_value);
-
+template <typename DerivedPolicy,
+          typename InputIterator1,
+          typename InputIterator2,
+          typename OutputIterator,
+          typename Predicate,
+          typename T>
+THRUST_HOST_DEVICE OutputIterator replace_copy_if(
+  const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
+  InputIterator1 first,
+  InputIterator1 last,
+  InputIterator2 stencil,
+  OutputIterator result,
+  Predicate pred,
+  const T& new_value);
 
 /*! This version of \p replace_copy_if copies elements from the range <tt>[first, last)</tt> to the range
  *  <tt>[result, result + (last-first))</tt>, except that any element whose corresponding stencil
@@ -751,19 +749,21 @@ THRUST_HOST_DEVICE
  *  \param stencil The beginning of the stencil sequence.
  *  \param result The beginning of the sequence to copy to.
  *  \param pred The predicate to test on every value of the range <tt>[stencil, stencil + (last - first))</tt>.
- *  \param new_value The replacement value to assign when <tt>pred(*s)</tt> evaluates to \c true. 
+ *  \param new_value The replacement value to assign when <tt>pred(*s)</tt> evaluates to \c true.
  *  \return <tt>result + (last-first)</tt>
  *
- *  \tparam InputIterator1 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>.
- *  \tparam InputIterator2 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>
- *                         and \p InputIterator2's \c value_type is convertible to \p Predicate's \c argument_type.
- *  \tparam OutputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/output_iterator">Output Iterator</a>.
- *  \tparam Predicate is a model of <a href="https://en.cppreference.com/w/cpp/concepts/predicate">Predicate</a>.
- *  \tparam T is a model of <a href="https://en.cppreference.com/w/cpp/named_req/CopyAssignable">Assignable</a>,
- *          and \p T is convertible to \p OutputIterator's \c value_type.
+ *  \tparam InputIterator1 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input
+ * Iterator</a>. \tparam InputIterator2 is a model of <a
+ * href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a> and \p InputIterator2's \c
+ * value_type is convertible to \p Predicate's \c argument_type. \tparam OutputIterator is a model of <a
+ * href="https://en.cppreference.com/w/cpp/iterator/output_iterator">Output Iterator</a>. \tparam Predicate is a model
+ * of <a href="https://en.cppreference.com/w/cpp/concepts/predicate">Predicate</a>. \tparam T is a model of <a
+ * href="https://en.cppreference.com/w/cpp/named_req/CopyAssignable">Assignable</a>, and \p T is convertible to \p
+ * OutputIterator's \c value_type.
  *
- *  \pre \p first may equal \p result, but the ranges <tt>[first, last)</tt> and <tt>[result, result + (last - first))</tt> shall not overlap otherwise.
- *  \pre \p stencil may equal \p result, but the ranges <tt>[stencil, stencil + (last - first))</tt> and <tt>[result, result + (last - first))</tt> shall not overlap otherwise.
+ *  \pre \p first may equal \p result, but the ranges <tt>[first, last)</tt> and <tt>[result, result + (last -
+ * first))</tt> shall not overlap otherwise. \pre \p stencil may equal \p result, but the ranges <tt>[stencil, stencil +
+ * (last - first))</tt> and <tt>[result, result + (last - first))</tt> shall not overlap otherwise.
  *
  *  \code
  *  #include <thrust/replace.h>
@@ -777,9 +777,9 @@ THRUST_HOST_DEVICE
  *      return x < 0;
  *    }
  *  };
- *  
+ *
  *  ...
- *  
+ *
  *  thrust::device_vector<int> A(4);
  *  A[0] =  10;
  *  A[1] =  20;
@@ -803,13 +803,14 @@ THRUST_HOST_DEVICE
  *  \see \c replace_copy
  *  \see \c replace_if
  */
-template<typename InputIterator1, typename InputIterator2, typename OutputIterator, typename Predicate, typename T>
-  OutputIterator replace_copy_if(InputIterator1 first, InputIterator1 last,
-                                 InputIterator2 stencil,
-                                 OutputIterator result,
-                                 Predicate pred,
-                                 const T &new_value);
-
+template <typename InputIterator1, typename InputIterator2, typename OutputIterator, typename Predicate, typename T>
+OutputIterator replace_copy_if(
+  InputIterator1 first,
+  InputIterator1 last,
+  InputIterator2 stencil,
+  OutputIterator result,
+  Predicate pred,
+  const T& new_value);
 
 /*! \} // end replacing
  *  \} // transformations

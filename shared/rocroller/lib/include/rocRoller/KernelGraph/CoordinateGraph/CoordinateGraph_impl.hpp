@@ -30,8 +30,6 @@
 
 #include <rocRoller/KernelGraph/CoordinateGraph/CoordinateGraph.hpp>
 
-#include <rocRoller/Expression.hpp>
-
 namespace rocRoller
 {
 

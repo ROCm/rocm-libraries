@@ -30,8 +30,6 @@ extern "C" {
 
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
 /*! \ingroup level2_module
-*  \brief Sparse triangular solve using CSR storage format
-*
 *  \details
 *  \p hipsparseXcsrsv2_zeroPivot returns \ref HIPSPARSE_STATUS_ZERO_PIVOT, if either a
 *  structural or numerical zero has been found during hipsparseScsrsv2_solve(),
@@ -65,41 +63,36 @@ hipsparseStatus_t
 
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
 /*! \ingroup level2_module
-*  \brief Sparse triangular solve using CSR storage format
-*
 *  \details
 *  \p hipsparseXcsrsv2_bufferSize returns the size of the temporary storage buffer in bytes 
-*  that is required by hipsparseScsrsv2_analysis(), hipsparseDcsrsv2_analysis(),
-*  hipsparseCcsrsv2_analysis(), hipsparseZcsrsv2_analysis(), hipsparseScsrsv2_solve(),
-*  hipsparseDcsrsv2_solve(), hipsparseCcsrsv2_solve() and hipsparseZcsrsv2_solve(). The
-*  temporary storage buffer must be allocated by the user.
+*  that is required by \ref hipsparseScsrsv2_analysis "hipsparseScsrsv2_analysis()" and
+*  \ref hipsparseScsrsv2_solve "hipsparseXcsrsv2_solve()". The temporary storage buffer must 
+*  be allocated by the user.
 *
 *  @param[in]
-*  handle      handle to the hipsparse library context queue.
+*  handle           handle to the hipsparse library context queue.
 *  @param[in]
-*  transA      matrix operation type.
+*  transA           matrix operation type.
 *  @param[in]
-*  m           number of rows of the sparse CSR matrix.
+*  m                number of rows of the sparse CSR matrix.
 *  @param[in]
-*  nnz         number of non-zero entries of the sparse CSR matrix.
+*  nnz              number of non-zero entries of the sparse CSR matrix.
 *  @param[in]
-*  descrA      descriptor of the sparse CSR matrix.
+*  descrA           descriptor of the sparse CSR matrix.
 *  @param[in]
-*  csrSortedValA array of \p nnz elements of the sparse CSR matrix.
+*  csrSortedValA    array of \p nnz elements of the sparse CSR matrix.
 *  @param[in]
 *  csrSortedRowPtrA array of \p m+1 elements that point to the start of every row of the
-*              sparse CSR matrix.
+*                   sparse CSR matrix.
 *  @param[in]
 *  csrSortedColIndA array of \p nnz elements containing the column indices of the sparse
-*              CSR matrix.
+*                   CSR matrix.
 *  @param[out]
-*  info        structure that holds the information collected during the analysis step.
+*  info             structure that holds the information collected during the analysis step.
 *  @param[out]
 *  pBufferSizeInBytes number of bytes of the temporary storage buffer required by
-*              hipsparseScsrsv2_analysis(), hipsparseDcsrsv2_analysis(),
-*              hipsparseCcsrsv2_analysis(), hipsparseZcsrsv2_analysis(),
-*              hipsparseScsrsv2_solve(), hipsparseDcsrsv2_solve(),
-*              hipsparseCcsrsv2_solve() and hipsparseZcsrsv2_solve().
+*                     \ref hipsparseScsrsv2_analysis "hipsparseXcsrsv2_analysis()" and
+*                     \ref hipsparseScsrsv2_solve "hipsparseXcsrsv2_solve()".
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p nnz, \p descrA, \p csrSortedValA, 
@@ -162,41 +155,36 @@ hipsparseStatus_t hipsparseZcsrsv2_bufferSize(hipsparseHandle_t         handle,
 #endif
 
 /*! \ingroup level2_module
-*  \brief Sparse triangular solve using CSR storage format
-*
 *  \details
 *  \p hipsparseXcsrsv2_bufferSizeExt returns the size of the temporary storage buffer in bytes 
-*  that is required by hipsparseScsrsv2_analysis(), hipsparseDcsrsv2_analysis(),
-*  hipsparseCcsrsv2_analysis(), hipsparseZcsrsv2_analysis(), hipsparseScsrsv2_solve(),
-*  hipsparseDcsrsv2_solve(), hipsparseCcsrsv2_solve() and hipsparseZcsrsv2_solve(). The
-*  temporary storage buffer must be allocated by the user.
+*  that is required by \ref hipsparseScsrsv2_analysis "hipsparseXcsrsv2_analysis()" and 
+*  \ref hipsparseScsrsv2_solve "hipsparseScsrsv2_solve()". The temporary storage buffer must be 
+*  allocated by the user.
 *
 *  @param[in]
-*  handle      handle to the hipsparse library context queue.
+*  handle           handle to the hipsparse library context queue.
 *  @param[in]
-*  transA      matrix operation type.
+*  transA           matrix operation type.
 *  @param[in]
-*  m           number of rows of the sparse CSR matrix.
+*  m                number of rows of the sparse CSR matrix.
 *  @param[in]
-*  nnz         number of non-zero entries of the sparse CSR matrix.
+*  nnz              number of non-zero entries of the sparse CSR matrix.
 *  @param[in]
-*  descrA      descriptor of the sparse CSR matrix.
+*  descrA           descriptor of the sparse CSR matrix.
 *  @param[in]
-*  csrSortedValA array of \p nnz elements of the sparse CSR matrix.
+*  csrSortedValA    array of \p nnz elements of the sparse CSR matrix.
 *  @param[in]
 *  csrSortedRowPtrA array of \p m+1 elements that point to the start of every row of the
-*              sparse CSR matrix.
+*                   sparse CSR matrix.
 *  @param[in]
 *  csrSortedColIndA array of \p nnz elements containing the column indices of the sparse
-*              CSR matrix.
+*                   CSR matrix.
 *  @param[out]
-*  info        structure that holds the information collected during the analysis step.
+*  info             structure that holds the information collected during the analysis step.
 *  @param[out]
 *  pBufferSizeInBytes number of bytes of the temporary storage buffer required by
-*              hipsparseScsrsv2_analysis(), hipsparseDcsrsv2_analysis(),
-*              hipsparseCcsrsv2_analysis(), hipsparseZcsrsv2_analysis(),
-*              hipsparseScsrsv2_solve(), hipsparseDcsrsv2_solve(),
-*              hipsparseCcsrsv2_solve() and hipsparseZcsrsv2_solve().
+*                     \ref hipsparseScsrsv2_analysis "hipsparseXcsrsv2_analysis()" and
+*                     \ref hipsparseScsrsv2_solve "hipsparseXcsrsv2_solve()".
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p nnz, \p descrA, \p csrSortedValA, 
@@ -255,37 +243,37 @@ hipsparseStatus_t hipsparseZcsrsv2_bufferSizeExt(hipsparseHandle_t         handl
 
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
 /*! \ingroup level2_module
-*  \brief Sparse triangular solve using CSR storage format
-*
 *  \details
-*  \p hipsparseXcsrsv2_analysis performs the analysis step for hipsparseScsrsv2_solve(),
-*  hipsparseDcsrsv2_solve(), hipsparseCcsrsv2_solve() and hipsparseZcsrsv2_solve().
+*  \p hipsparseXcsrsv2_analysis performs the analysis step for 
+*  \ref hipsparseScsrsv2_solve "hipsparseXcsrsv2_solve()". It is expected that this 
+*  function will be executed only once for a given matrix and particular operation 
+*  type.
 *
 *  \note
 *  This function is non blocking and executed asynchronously with respect to the host.
 *  It may return before the actual computation has finished.
 *
 *  @param[in]
-*  handle      handle to the hipsparse library context queue.
+*  handle           handle to the hipsparse library context queue.
 *  @param[in]
-*  transA      matrix operation type.
+*  transA           matrix operation type.
 *  @param[in]
-*  m           number of rows of the sparse CSR matrix.
+*  m                number of rows of the sparse CSR matrix.
 *  @param[in]
-*  nnz         number of non-zero entries of the sparse CSR matrix.
+*  nnz              number of non-zero entries of the sparse CSR matrix.
 *  @param[in]
-*  descrA      descriptor of the sparse CSR matrix.
+*  descrA           descriptor of the sparse CSR matrix.
 *  @param[in]
-*  csrSortedValA array of \p nnz elements of the sparse CSR matrix.
+*  csrSortedValA    array of \p nnz elements of the sparse CSR matrix.
 *  @param[in]
 *  csrSortedRowPtrA array of \p m+1 elements that point to the start of every row of the
-*              sparse CSR matrix.
+*                   sparse CSR matrix.
 *  @param[in]
 *  csrSortedColIndA array of \p nnz elements containing the column indices of the sparse
-*              CSR matrix.
+*                   CSR matrix.
 *  @param[out]
-*  info        structure that holds the information collected during
-*              the analysis step.
+*  info             structure that holds the information collected during
+*                   the analysis step.
 *  @param[in]
 *  policy      \ref HIPSPARSE_SOLVE_POLICY_NO_LEVEL or
 *              \ref HIPSPARSE_SOLVE_POLICY_USE_LEVEL.
@@ -372,21 +360,39 @@ hipsparseStatus_t hipsparseZcsrsv2_analysis(hipsparseHandle_t         handle,
 *  \f[
 *    op(A) = \left\{
 *    \begin{array}{ll}
-*        A,   & \text{if transA == HIPSPARSE_OPERATION_NON_TRANSPOSE} \\
-*        A^T, & \text{if transA == HIPSPARSE_OPERATION_TRANSPOSE} \\
-*        A^H, & \text{if transA == HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE}
+*        A,   & \text{if trans == HIPSPARSE_OPERATION_NON_TRANSPOSE} \\
+*        A^T, & \text{if trans == HIPSPARSE_OPERATION_TRANSPOSE} \\
+*        A^H, & \text{if trans == HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE}
 *    \end{array}
 *    \right.
 *  \f]
 *
-*  \p hipsparseXcsrsv2_solve requires a user allocated temporary buffer. Its size is
-*  returned by \ref hipsparseScsrsv2_bufferSize "hipsparseXcsrsv2_bufferSize()" or 
-*  \ref hipsparseScsrsv2_bufferSizeExt "hipsparseXcsrsv2_bufferSizeExt()". Furthermore, 
-*  analysis meta data is required. It can be obtained by \ref hipsparseScsrsv2_analysis 
-*  "hipsparseXcsrsv2_analysis()". \p hipsparseXcsrsv2_solve reports the first zero pivot
-*  (either numerical or structural zero). The zero pivot status can be checked calling
-*  \ref hipsparseXcsrsv2_zeroPivot(). If \ref hipsparseDiagType_t == \ref HIPSPARSE_DIAG_TYPE_UNIT, 
-*  no zero pivot will be reported, even if \f$A_{j,j} = 0\f$ for some \f$j\f$.
+*  Performing the above operation requires three steps. First, the user calls 
+*  \ref hipsparseScsrsv2_bufferSize "hipsparseXcsrsv2_bufferSize()" (or 
+*  \ref hipsparseScsrsv2_bufferSizeExt "hipsparseXcsrsv2_bufferSizeExt()") which will determine the size of the 
+*  required temporary storage buffer. The user then allocates this buffer and calls 
+*  \ref hipsparseScsrsv2_analysis "hipsparseXcsrsv2_analysis()" which will perform analysis on the sparse matrix 
+*  \f$op(A)\f$. Finally, the user completes the computation by calling \p hipsparseXcsrsv2_solve. The buffer size, 
+*  buffer allocation, and analysis only need to be called once for a given sparse matrix \f$op(A)\f$ while the 
+*  computation stage can be repeatedly used with different \f$x\f$ and \f$y\f$ vectors. Once all calls to 
+*  \p hipsparseXcsrsv2_solve are complete, the temporary buffer can be deallocated. 
+*
+*  Solving a triangular system involves division by the diagonal elements. This means that if the sparse matrix is 
+*  missing the diagonal entry (referred to as a structural zero) or the diagonal entry is zero (referred to as a numerical zero)
+*  then a division by zero would occur. \p hipsparseXcsrsv2_solve tracks the location of the first zero pivot (either numerical 
+*  or structural zero). The zero pivot status can be checked calling \ref hipsparseXcsrsv2_zeroPivot(). If 
+*  \ref hipsparseXcsrsv2_zeroPivot() returns \ref HIPSPARSE_STATUS_SUCCESS, then no zero pivot was found and therefore 
+*  the matrix does not have a structural or numerical zero.
+*
+*  The user can specify that the sparse matrix should be interpreted as having ones on the diagonal by setting the diagonal type 
+*  on the descriptor \p descrA to \ref HIPSPARSE_DIAG_TYPE_UNIT using \ref hipsparseSetMatDiagType. If 
+*  \ref hipsparseDiagType_t == \ref HIPSPARSE_DIAG_TYPE_UNIT, no zero pivot will be reported, even if \f$A_{j,j} = 0\f$ for 
+*  some \f$j\f$.
+*
+*  The sparse CSR matrix passed to \p hipsparseXcsrsv2_solve does not actually have to be a triangular matrix. Instead the 
+*  triangular upper or lower part of the sparse matrix is solved based on \ref hipsparseFillMode_t set on the descriptor 
+*  \p descrA. If the fill mode is set to \ref HIPSPARSE_FILL_MODE_LOWER, then the lower triangular matrix is solved. If the 
+*  fill mode is set to \ref HIPSPARSE_FILL_MODE_UPPER then the upper triangular matrix is solved.
 *
 *  \note
 *  The sparse CSR matrix has to be sorted. This can be achieved by calling

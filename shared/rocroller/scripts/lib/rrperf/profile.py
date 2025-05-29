@@ -39,7 +39,7 @@ from typing import Dict, List
 
 import rrperf.args as args
 from rrperf.problems import GEMMRun
-from rrperf.run import get_build_dir, get_build_env, load_suite
+from rrperf.run import get_build_dir, load_suite
 
 
 def has_omniperf() -> bool:
@@ -180,15 +180,12 @@ def profile(
         else:
             build_dir = Path(build_dir)
 
-        env = get_build_env(build_dir)
-
         for i, problem in enumerate(load_suite(suite)):
             profile_rr(
                 problem,
                 f"{i:02}",
                 output_dir,
                 build_dir,
-                env,
             )
 
 

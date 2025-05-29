@@ -201,6 +201,7 @@ namespace TensileLite
         {
             return kernelName;
         }
+        virtual bool isFallbackForHW(Hardware const&) const;
 
         bool isStreamK() const
         {
@@ -530,8 +531,10 @@ namespace TensileLite
         std::string                  kernelName;
         std::string                  solutionName;
         ThreadSafeValue<std::string> codeObjectFilename;
-        bool                         debugKernel   = false;
-        bool                         kernelArgsLog = false;
+        bool                         debugKernel     = false;
+        bool                         kernelArgsLog   = false;
+        mutable int                  isFallbackCUSol = -1; // -1:unset, 0:false, 1:true
+
         std::shared_ptr<Predicates::Predicate<Task>> taskPredicate
             = std::make_shared<Predicates::True<Task>>();
         std::shared_ptr<Predicates::Predicate<Problem>> problemPredicate

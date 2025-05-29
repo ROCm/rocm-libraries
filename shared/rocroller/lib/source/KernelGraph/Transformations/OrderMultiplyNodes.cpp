@@ -39,17 +39,24 @@ namespace rocRoller
         {
             std::vector<std::set<int>> groupedNodes;
 
+            std::unordered_map<int, std::optional<int>> containingForLoops;
+
+            for(auto const& node : nodes)
+            {
+                containingForLoops[node]
+                    = findContainingOperation<ControlGraph::ForLoopOp>(node, graph);
+            }
+
             while(!nodes.empty())
             {
                 std::set<int> group = {*nodes.begin()};
                 nodes.erase(nodes.begin());
 
-                auto setLoop
-                    = findContainingOperation<ControlGraph::ForLoopOp>(*group.begin(), graph);
+                auto setLoop = containingForLoops.at(*group.begin());
 
                 for(auto node : nodes)
                 {
-                    auto nodeLoop = findContainingOperation<ControlGraph::ForLoopOp>(node, graph);
+                    auto nodeLoop = containingForLoops.at(node);
 
                     if(nodeLoop != setLoop)
                         continue;
@@ -108,14 +115,9 @@ namespace rocRoller
             };
 
             auto downstreamMemoryNodes = [&]() {
-                std::unordered_set<int> downstreamMemoryNodes;
-
-                for(auto const& node : nodes)
-                {
-                    auto dmns = graph.control.depthFirstVisit(node).filter(isMemoryNode);
-                    downstreamMemoryNodes.insert(dmns.begin(), dmns.end());
-                }
-
+                auto downstreamMemoryNodes = graph.control.depthFirstVisit(nodes)
+                                                 .filter(isMemoryNode)
+                                                 .to<std::unordered_set>();
                 return std::vector(downstreamMemoryNodes.begin(), downstreamMemoryNodes.end());
             }();
 
@@ -279,6 +281,7 @@ namespace rocRoller
 
         KernelGraph OrderMultiplyNodes::apply(KernelGraph const& original)
         {
+            TIMER(t, "KernelGraph::OrderMultiplyNodes");
             auto rv = original;
 
             for(auto const& group : findAndOrderGroups(original))

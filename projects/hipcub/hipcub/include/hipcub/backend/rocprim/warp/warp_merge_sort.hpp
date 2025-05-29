@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2011-2021, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2017-2021, Advanced Micro Devices, Inc.  All
+ * Modifications Copyright (c) 2017-2025, Advanced Micro Devices, Inc.  All
  * rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -36,8 +36,8 @@
 #include "../util_ptx.hpp"
 #include "../util_type.hpp"
 
-#include <rocprim/functional.hpp>
-#include <rocprim/intrinsics/thread.hpp>
+#include <rocprim/functional.hpp> // IWYU pragma: export
+#include <rocprim/intrinsics/thread.hpp> // IWYU pragma: export
 
 BEGIN_HIPCUB_NAMESPACE
 

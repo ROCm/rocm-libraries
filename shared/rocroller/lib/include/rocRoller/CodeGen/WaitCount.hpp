@@ -85,6 +85,8 @@ namespace rocRoller
 
         static WaitCount Zero(GPUArchitecture const& arch, std::string const& message = " ");
 
+        static WaitCount Max(GPUArchitecture const& arch, std::string const& message = " ");
+
         std::string toString(LogLevel level) const;
         void        toStream(std::ostream& os, LogLevel level) const;
 

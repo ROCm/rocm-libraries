@@ -59,6 +59,7 @@ namespace rocsparse
                                    rocsparse_datatype,
                                    rocsparse_datatype>;
 
+    // clang-format off
 #define CSRMV_CONFIG(T, I, J, A, X, Y)                                      \
     {                                                                       \
         csrmv_tuple(T, I, J, A, X, Y),                                      \
@@ -69,6 +70,7 @@ namespace rocsparse
                            typename rocsparse::datatype_traits<X>::type_t,  \
                            typename rocsparse::datatype_traits<Y>::type_t>  \
     }
+    // clang-format on
 
     static const std::map<csrmv_tuple, csrmv_t> s_csrmv_dispatch{
         {CSRMV_CONFIG(rocsparse_datatype_f32_r,
@@ -197,6 +199,27 @@ namespace rocsparse
                       rocsparse_datatype_i8_r,
                       rocsparse_datatype_f32_r),
 
+         CSRMV_CONFIG(rocsparse_datatype_f32_r,
+                      rocsparse_indextype_i32,
+                      rocsparse_indextype_i32,
+                      rocsparse_datatype_f16_r,
+                      rocsparse_datatype_f16_r,
+                      rocsparse_datatype_f32_r),
+
+         CSRMV_CONFIG(rocsparse_datatype_f32_r,
+                      rocsparse_indextype_i64,
+                      rocsparse_indextype_i32,
+                      rocsparse_datatype_f16_r,
+                      rocsparse_datatype_f16_r,
+                      rocsparse_datatype_f32_r),
+
+         CSRMV_CONFIG(rocsparse_datatype_f32_r,
+                      rocsparse_indextype_i64,
+                      rocsparse_indextype_i64,
+                      rocsparse_datatype_f16_r,
+                      rocsparse_datatype_f16_r,
+                      rocsparse_datatype_f32_r),
+
          CSRMV_CONFIG(rocsparse_datatype_f32_c,
                       rocsparse_indextype_i32,
                       rocsparse_indextype_i32,
@@ -279,9 +302,7 @@ namespace rocsparse
                       rocsparse_indextype_i64,
                       rocsparse_datatype_f32_c,
                       rocsparse_datatype_f64_c,
-                      rocsparse_datatype_f64_c)
-
-        }};
+                      rocsparse_datatype_f64_c)}};
 
     static rocsparse_status csrmv_find(csrmv_t*            function_,
                                        rocsparse_datatype  t_type_,
@@ -348,7 +369,6 @@ namespace rocsparse
 
         return rocsparse_status_success;
     }
-
 }
 
 rocsparse_status rocsparse::csrmv(rocsparse_handle          handle,

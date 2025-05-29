@@ -15,10 +15,13 @@
  *  limitations under the License.
  */
 
-#include <unittest/unittest.h>
-#include <string>
 #include <thrust/detail/preprocessor.h>
 
+#include <string>
+
+#include <unittest/unittest.h>
+
+// clang-format off
 void test_pp_stringize()
 {
   ASSERT_EQUAL(
@@ -725,10 +728,10 @@ void test_pp_dispatch()
   );
 }
 DECLARE_UNITTEST(test_pp_dispatch);
+// clang-format on
 
 #undef THRUST_TEST_PP_DISPATCH_PLUS
 #undef THRUST_TEST_PP_DISPATCH_PLUS0
 #undef THRUST_TEST_PP_DISPATCH_PLUS1
 #undef THRUST_TEST_PP_DISPATCH_PLUS2
 #undef THRUST_TEST_PP_DISPATCH_PLUS3
-

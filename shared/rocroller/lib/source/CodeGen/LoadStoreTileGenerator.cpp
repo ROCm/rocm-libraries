@@ -596,6 +596,7 @@ namespace rocRoller
                 AssertFatal(numBytes == 1 || numBytes == 2 || numBytes == 4, ShowValue(numBytes));
             auto m0 = m_context->getM0();
             AssertFatal(info.ldsWriteStride == m_workgroupSizeTotal * numBytes);
+
             if(setM0)
             {
                 auto tmp = Register::Value::Placeholder(

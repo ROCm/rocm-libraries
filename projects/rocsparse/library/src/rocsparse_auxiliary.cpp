@@ -1167,238 +1167,7 @@ try
         return rocsparse_status_success;
     }
 
-    // Uncouple shared meta data
-    if(info->bsrsv_lower_info == info->bsrilu0_info || info->bsrsv_lower_info == info->bsric0_info
-       || info->bsrsv_lower_info == info->bsrsm_lower_info)
-    {
-        info->bsrsv_lower_info = nullptr;
-    }
-
-    // Uncouple shared meta data
-    if(info->bsrsm_lower_info == info->bsrilu0_info || info->bsrsm_lower_info == info->bsric0_info)
-    {
-        info->bsrsm_lower_info = nullptr;
-    }
-
-    // Uncouple shared meta data
-    if(info->bsrilu0_info == info->bsric0_info)
-    {
-        info->bsrilu0_info = nullptr;
-    }
-
-    // Uncouple shared meta data
-    if(info->csrsv_lower_info == info->csrilu0_info || info->csrsv_lower_info == info->csric0_info
-       || info->csrsv_lower_info == info->csrsm_lower_info)
-    {
-        info->csrsv_lower_info = nullptr;
-    }
-
-    // Uncouple shared meta data
-    if(info->csrsm_lower_info == info->csrilu0_info || info->csrsm_lower_info == info->csric0_info)
-    {
-        info->csrsm_lower_info = nullptr;
-    }
-
-    // Uncouple shared meta data
-    if(info->csrilu0_info == info->csric0_info)
-    {
-        info->csrilu0_info = nullptr;
-    }
-
-    // Uncouple shared meta data
-    if(info->csrsv_upper_info == info->csrsm_upper_info)
-    {
-        info->csrsv_upper_info = nullptr;
-    }
-
-    // Uncouple shared meta data
-    if(info->bsrsv_upper_info == info->bsrsm_upper_info)
-    {
-        info->bsrsv_upper_info = nullptr;
-    }
-
-    // Uncouple shared meta data
-    if(info->csrsvt_lower_info == info->csrsmt_lower_info)
-    {
-        info->csrsvt_lower_info = nullptr;
-    }
-
-    // Uncouple shared meta data
-    if(info->bsrsvt_lower_info == info->bsrsmt_lower_info)
-    {
-        info->bsrsvt_lower_info = nullptr;
-    }
-
-    // Uncouple shared meta data
-    if(info->csrsvt_upper_info == info->csrsmt_upper_info)
-    {
-        info->csrsvt_upper_info = nullptr;
-    }
-
-    // Uncouple shared meta data
-    if(info->bsrsvt_upper_info == info->bsrsmt_upper_info)
-    {
-        info->bsrsvt_upper_info = nullptr;
-    }
-
-    // Clear bsrsvt upper info struct
-    if(info->bsrsvt_upper_info != nullptr)
-    {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::destroy_trm_info(info->bsrsvt_upper_info));
-    }
-
-    // Clear bsrsvt lower info struct
-    if(info->bsrsvt_lower_info != nullptr)
-    {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::destroy_trm_info(info->bsrsvt_lower_info));
-    }
-
-    // Clear bsric0 info struct
-    if(info->bsric0_info != nullptr)
-    {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::destroy_trm_info(info->bsric0_info));
-    }
-
-    // Clear bsrilu0 info struct
-    if(info->bsrilu0_info != nullptr)
-    {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::destroy_trm_info(info->bsrilu0_info));
-    }
-
-    // Clear csrsvt upper info struct
-    if(info->csrsvt_upper_info != nullptr)
-    {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::destroy_trm_info(info->csrsvt_upper_info));
-    }
-
-    // Clear csrsvt lower info struct
-    if(info->csrsvt_lower_info != nullptr)
-    {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::destroy_trm_info(info->csrsvt_lower_info));
-    }
-
-    // Clear csrsmt upper info struct
-    if(info->csrsmt_upper_info != nullptr)
-    {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::destroy_trm_info(info->csrsmt_upper_info));
-    }
-
-    // Clear csrsmt lower info struct
-    if(info->csrsmt_lower_info != nullptr)
-    {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::destroy_trm_info(info->csrsmt_lower_info));
-    }
-
-    // Clear bsrsmt upper info struct
-    if(info->bsrsmt_upper_info != nullptr)
-    {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::destroy_trm_info(info->bsrsmt_upper_info));
-    }
-
-    // Clear bsrsmt lower info struct
-    if(info->bsrsmt_lower_info != nullptr)
-    {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::destroy_trm_info(info->bsrsmt_lower_info));
-    }
-
-    // Clear csric0 info struct
-    if(info->csric0_info != nullptr)
-    {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::destroy_trm_info(info->csric0_info));
-    }
-
-    // Clear csrilu0 info struct
-    if(info->csrilu0_info != nullptr)
-    {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::destroy_trm_info(info->csrilu0_info));
-    }
-
-    // Clear bsrsv upper info struct
-    if(info->bsrsv_upper_info != nullptr)
-    {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::destroy_trm_info(info->bsrsv_upper_info));
-    }
-
-    // Clear bsrsv lower info struct
-    if(info->bsrsv_lower_info != nullptr)
-    {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::destroy_trm_info(info->bsrsv_lower_info));
-    }
-
-    // Clear csrsv upper info struct
-    if(info->csrsv_upper_info != nullptr)
-    {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::destroy_trm_info(info->csrsv_upper_info));
-    }
-
-    // Clear csrsv lower info struct
-    if(info->csrsv_lower_info != nullptr)
-    {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::destroy_trm_info(info->csrsv_lower_info));
-    }
-
-    // Clear csrsm upper info struct
-    if(info->csrsm_upper_info != nullptr)
-    {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::destroy_trm_info(info->csrsm_upper_info));
-    }
-
-    // Clear csrsm lower info struct
-    if(info->csrsm_lower_info != nullptr)
-    {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::destroy_trm_info(info->csrsm_lower_info));
-    }
-
-    // Clear bsrsm upper info struct
-    if(info->bsrsm_upper_info != nullptr)
-    {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::destroy_trm_info(info->bsrsm_upper_info));
-    }
-
-    // Clear bsrsm lower info struct
-    if(info->bsrsm_lower_info != nullptr)
-    {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::destroy_trm_info(info->bsrsm_lower_info));
-    }
-
-    // Clear csrgemm info struct
-    if(info->csrgemm_info != nullptr)
-    {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::destroy_csrgemm_info(info->csrgemm_info));
-    }
-
-    // Clear csritsv info struct
-    if(info->csritsv_info != nullptr)
-    {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::destroy_csritsv_info(info->csritsv_info));
-    }
-
-    // Clear zero pivot
-    if(info->zero_pivot != nullptr)
-    {
-        RETURN_IF_HIP_ERROR(rocsparse_hipFree(info->zero_pivot));
-        info->zero_pivot = nullptr;
-    }
-
-    // Clear singular pivot
-    if(info->singular_pivot != nullptr)
-    {
-        RETURN_IF_HIP_ERROR(rocsparse_hipFree(info->singular_pivot));
-        info->singular_pivot = nullptr;
-    }
-
-    // Clear singular tolerance
-    info->singular_tol = 0;
-
-    // Destruct
-    try
-    {
-        delete info;
-    }
-    catch(const rocsparse_status& status)
-    {
-        return status;
-    }
+    delete info;
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }
@@ -4853,7 +4622,17 @@ try
                            data_size_in_bytes != sizeof(rocsparse_spgeam_alg),
                            rocsparse_status_invalid_size);
         const rocsparse_spgeam_alg alg = *reinterpret_cast<const rocsparse_spgeam_alg*>(data);
-        descr->alg                     = alg;
+        descr->set_alg(alg);
+        return rocsparse_status_success;
+    }
+    case rocsparse_spgeam_input_scalar_datatype:
+    {
+        ROCSPARSE_CHECKARG(4,
+                           data_size_in_bytes,
+                           data_size_in_bytes != sizeof(rocsparse_datatype),
+                           rocsparse_status_invalid_size);
+        const rocsparse_datatype scalar_type = *reinterpret_cast<const rocsparse_datatype*>(data);
+        descr->set_scalar_datatype(scalar_type);
         return rocsparse_status_success;
     }
     case rocsparse_spgeam_input_compute_datatype:
@@ -4863,7 +4642,7 @@ try
                            data_size_in_bytes != sizeof(rocsparse_datatype),
                            rocsparse_status_invalid_size);
         const rocsparse_datatype compute_type = *reinterpret_cast<const rocsparse_datatype*>(data);
-        descr->compute_type                   = compute_type;
+        descr->set_compute_datatype(compute_type);
         return rocsparse_status_success;
     }
     case rocsparse_spgeam_input_operation_A:
@@ -4872,8 +4651,8 @@ try
                            data_size_in_bytes,
                            data_size_in_bytes != sizeof(rocsparse_operation),
                            rocsparse_status_invalid_size);
-        const rocsparse_operation trans_A = *reinterpret_cast<const rocsparse_operation*>(data);
-        descr->trans_A                    = trans_A;
+        const rocsparse_operation op_A = *reinterpret_cast<const rocsparse_operation*>(data);
+        descr->set_operation_A(op_A);
         return rocsparse_status_success;
     }
     case rocsparse_spgeam_input_operation_B:
@@ -4882,8 +4661,8 @@ try
                            data_size_in_bytes,
                            data_size_in_bytes != sizeof(rocsparse_operation),
                            rocsparse_status_invalid_size);
-        const rocsparse_operation trans_B = *reinterpret_cast<const rocsparse_operation*>(data);
-        descr->trans_B                    = trans_B;
+        const rocsparse_operation op_B = *reinterpret_cast<const rocsparse_operation*>(data);
+        descr->set_operation_B(op_B);
         return rocsparse_status_success;
     }
     }

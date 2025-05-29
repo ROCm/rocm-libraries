@@ -17,6 +17,7 @@
 #pragma once
 
 #include <thrust/detail/config.h>
+
 #include <thrust/detail/use_default.h>
 
 THRUST_NAMESPACE_BEGIN
@@ -25,4 +26,3 @@ template <typename Element, typename Pointer, typename Derived = use_default>
 class reference;
 
 THRUST_NAMESPACE_END
-
