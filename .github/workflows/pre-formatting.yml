@@ -67,11 +67,11 @@ jobs:
           GIT_AUTHOR_EMAIL: "assistant-librarian[bot]@users.noreply.github.com"  
           GITHUB_TOKEN: ${{ secrets.ROCM_SV_TOKEN }}
         run: |  
-          IFS=$'\n' read -rd '' -a files <<<"${{ steps.changed-files.outputs.all_modified_files }}"  
+          mapfile -t files <<<"${{ steps.changed-files.outputs.all_modified_files }}"
           if [ ${#files[@]} -eq 0 ]; then  
             echo "No files changed, skipping pre-commit."  
             exit 0  
-          fi  
+          fi 
           echo "Running pre-commit on these files:"  
           printf "  %s\n" "${files[@]}"
           set +e
