@@ -73,7 +73,7 @@ jobs:
           
       - name: Show changed-files output
         run: |
-          echo "Changed files are: ${{ steps.changed-files.outputs.all_modified_files }}
+          echo "Changed files are: ${{ steps.changed-files.outputs.all_modified_files }}"
           
       - name: Run and auto-commit pre-commit fixes
         env:
