@@ -319,8 +319,13 @@ inline __host__ thread::thread(uint32_t width, Fn_t &&typed_fn, Args_t &&...args
     // First two are prerequisites for the third, and produce more user-friendly error messages
     // Note: is_trivially_copyable can behave strangely for extended lambdas. See
     // https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html 14.7.2.18 Extended Lambda Restrictions
-    static_assert(std::is_trivially_copyable_v<std::remove_reference_t<Fn_t>>);
-    static_assert((std::is_trivially_copyable_v<std::remove_reference_t<Args_t>> && ...));
+    //
+    // TODO: We really can't accept raw fn pointers right now because references to device functions from host code is
+    // forbidden. However, if a __host__ __device__ function tries to construct a gpu::thread object using a function
+    // object passed in from a __device__ function, the compiler seems to try to instantiate this __host__ template and
+    // fail on this static_assert if we don't allow function types.
+    static_assert(std::is_trivially_copyable_v<std::remove_reference_t<Fn_t>> || std::is_function_v<std::remove_reference_t<Fn_t>>);
+    static_assert(((std::is_trivially_copyable_v<std::remove_reference_t<Args_t>> || std::is_function_v<std::remove_reference_t<Args_t>>) && ...));
     // We're about to memcpy the WorkNode from host to device memory. Make sure that's ok.
     static_assert(std::is_trivially_copyable_v<WorkNode_t>);
     // Check that it's safe-ish to do the memcpy using a WorkNode_Header* instead of a WorkNode_t*
