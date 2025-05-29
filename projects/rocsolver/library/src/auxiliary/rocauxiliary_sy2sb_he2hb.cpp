@@ -25,133 +25,135 @@
  * SUCH DAMAGE.
  * *************************************************************************/
 
- #include "rocauxiliary_sy2sb_he2hb.hpp"
+#include "rocauxiliary_sy2sb_he2hb.hpp"
 
- ROCSOLVER_BEGIN_NAMESPACE
+ROCSOLVER_BEGIN_NAMESPACE
 
- template <typename T, typename U>
- rocblas_status rocsolver_sy2sb_he2hb_impl(rocblas_handle handle,
-                                           const rocblas_int n,
-                                           const rocblas_int nb,
-                                           const rocblas_int k,
-                                           U A,
-                                           const rocblas_int lda,
-                                           T* V,
-                                           T* W)
- {
-     ROCSOLVER_ENTER_TOP("sy2sb_he2hb", "-n", n, "-nb", nb, "-k", k, "--lda", lda);
- 
-     if(!handle)
-         return rocblas_status_invalid_handle;
- 
-     // argument checking
-     rocblas_status st = rocsolver_sy2sb_he2hb_argCheck(handle, n, nb, k, A, lda, V, W);
-     if(st != rocblas_status_continue)
-         return st;
- 
-     // working with unshifted arrays
-     rocblas_int shiftA = 0;
- 
-     // normal (non-batched non-strided) execution
-     rocblas_stride strideA = 0;
-     rocblas_stride strideV = 0;
-     rocblas_stride strideW = 0;
-     rocblas_int batch_count = 1;
- 
-     // memory workspace sizes:
-     // size for constants in rocblas calls
-     size_t size_scalars;
-     // size of arrays of pointers (for batched cases) and re-usable workspace
-     size_t size_workArr;
-     // extra requirements
-     size_t size_workT, size_workS1, size_workS2, size_workW;
-     rocsolver_sy2sb_he2hb_getMemorySize<false, T>(uplo, n, k, batch_count, &size_scalars, &size_workT,
-                                         &size_workS1, &size_workS2, &size_workW, &size_workArr);
+template <typename T, typename U>
+rocblas_status rocsolver_sy2sb_he2hb_impl(rocblas_handle handle,
+                                          const rocblas_int n,
+                                          const rocblas_int nb,
+                                          const rocblas_int k,
+                                          U A,
+                                          const rocblas_int lda,
+                                          T* V,
+                                          T* W)
+{
+    ROCSOLVER_ENTER_TOP("sy2sb_he2hb", "-n", n, "-nb", nb, "-k", k, "--lda", lda);
 
-     if(rocblas_is_device_memory_size_query(handle))
-         return rocblas_set_optimal_device_memory_size(handle, size_scalars, size_workT,
-            size_workS1, size_workS2, size_workW, size_workArr);
- 
-     // memory workspace allocation
-     void *scalars, *workT, *workS1, *workS2, *workW, *workArr;
-     rocblas_device_malloc mem(handle, size_scalars, size_workT,
-        size_workS1, size_workS2, size_workW, size_workArr);
- 
-     if(!mem)
-         return rocblas_status_memory_error;
- 
-     scalars = mem[0];
-     workT = mem[1];
-     workS1 = mem[2];
-     workS2 = mem[3];
-     workW = mem[4];
-     workArr = mem[5];
-     if(size_scalars > 0)
-         init_scalars(handle, (T*)scalars);
- 
-     // execution
-     return rocsolver_sy2sb_he2hb_template<false, false, T>(handle, uplo, n, k, A, shiftA, lda, strideA, AB,
-                                              shiftAB, ldab, strideAB, tau, strideP, batch_count,
-                                              (T*)scalars, (T*)workT, (T*)workS1, (T*)workS2, (T*)workW, (T**)workArr);
- }
- 
- ROCSOLVER_END_NAMESPACE
- 
- /*
-  * ===========================================================================
-  *    C wrapper
-  * ===========================================================================
-  */
- 
- extern "C" {
+    if(!handle)
+        return rocblas_status_invalid_handle;
 
- ROCSOLVER_EXPORT rocblas_status rocsolver_ssy2sb(rocblas_handle handle,
-                                 const rocblas_int n,
-                                 const rocblas_int nb,
-                                 const rocblas_int k,
-                                 float* A,
-                                 const rocblas_int lda,
-                                 float* V,
-                                 float* W)
- {
-     return rocsolver::rocsolver_sy2sb_he2hb_impl<float>(handle, n, nb, k, A, lda, V, W);
- }
+    // argument checking
+    rocblas_status st = rocsolver_sy2sb_he2hb_argCheck(handle, n, nb, k, A, lda, V, W);
+    if(st != rocblas_status_continue)
+        return st;
 
- ROCSOLVER_EXPORT rocblas_status rocsolver_dsy2sb(rocblas_handle handle,
-                                 const rocblas_int n,
-                                 const rocblas_int nb,
-                                 const rocblas_int k,
-                                 double* A,
-                                 const rocblas_int lda,
-                                 double* V,
-                                 double* W)
- {
-     return rocsolver::rocsolver_sy2sb_he2hb_impl<double>(handle, n, nb, k, A, lda, V, W);
- }
+    // working with unshifted arrays
+    rocblas_int shiftA = 0;
 
- ROCSOLVER_EXPORT rocblas_status rocsolver_che2hb(rocblas_handle handle,
-                                 const rocblas_int n,
-                                 const rocblas_int nb,
-                                 const rocblas_int k,
-                                 rocblas_float_complex* A,
-                                 const rocblas_int lda,
-                                 rocblas_float_complex* V,
-                                 rocblas_float_complex* W)
- {
-     return rocsolver::rocsolver_sy2sb_he2hb_impl<rocblas_float_complex>(handle, n, nb, k, A, lda, V, W);
- }
+    // normal (non-batched non-strided) execution
+    rocblas_stride strideA = 0;
+    rocblas_stride strideV = 0;
+    rocblas_stride strideW = 0;
+    rocblas_int batch_count = 1;
 
- ROCSOLVER_EXPORT rocblas_status rocsolver_zhe2hb(rocblas_handle handle,
-                                 const rocblas_int n,
-                                 const rocblas_int nb,
-                                 const rocblas_int k,
-                                 rocblas_double_complex* A,
-                                 const rocblas_int lda,
-                                 rocblas_double_complex* V,
-                                 rocblas_double_complex* W)
- {
-     return rocsolver::rocsolver_sy2sb_he2hb_impl<rocblas_double_complex>(handle, n, nb, k, A, lda, V, W);
- }
- 
- } // extern C
- 
+    // memory workspace sizes:
+    // size for constants in rocblas calls
+    size_t size_scalars;
+    // size of arrays of pointers (for batched cases) and re-usable workspace
+    size_t size_workArr;
+    // extra requirements
+    size_t size_workT, size_workS1, size_workS2, size_workW;
+    rocsolver_sy2sb_he2hb_getMemorySize<false, T>(n, nb, k, batch_count, &size_scalars, &size_workT,
+                                        &size_workS1, &size_workS2, &size_workW, &size_workArr);
+
+    if(rocblas_is_device_memory_size_query(handle))
+        return rocblas_set_optimal_device_memory_size(handle, size_scalars, size_workT,
+           size_workS1, size_workS2, size_workW, size_workArr);
+
+    // memory workspace allocation
+    void *scalars, *workT, *workS1, *workS2, *workW, *workArr;
+    rocblas_device_malloc mem(handle, size_scalars, size_workT,
+       size_workS1, size_workS2, size_workW, size_workArr);
+
+    if(!mem)
+        return rocblas_status_memory_error;
+
+    scalars = mem[0];
+    workT = mem[1];
+    workS1 = mem[2];
+    workS2 = mem[3];
+    workW = mem[4];
+    workArr = mem[5];
+    if(size_scalars > 0)
+        init_scalars(handle, (T*)scalars);
+
+    // execution
+    rocblas_int ldv = n - nb;
+    rocblas_int ldw = n - nb;
+    return rocsolver_sy2sb_he2hb_template<false, false, T>(handle, n, nb, k, A, shiftA, lda, strideA, V, ldv,
+                                             strideV, W, ldw, strideW, batch_count,
+                                             (T*)scalars, (T*)workT, (T*)workS1, (T*)workS2, (T*)workW, (T**)workArr);
+}
+
+ROCSOLVER_END_NAMESPACE
+
+/*
+ * ===========================================================================
+ *    C wrapper
+ * ===========================================================================
+ */
+
+extern "C" {
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_ssy2sb(rocblas_handle handle,
+                                const rocblas_int n,
+                                const rocblas_int nb,
+                                const rocblas_int k,
+                                float* A,
+                                const rocblas_int lda,
+                                float* V,
+                                float* W)
+{
+    return rocsolver::rocsolver_sy2sb_he2hb_impl<float>(handle, n, nb, k, A, lda, V, W);
+}
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_dsy2sb(rocblas_handle handle,
+                                const rocblas_int n,
+                                const rocblas_int nb,
+                                const rocblas_int k,
+                                double* A,
+                                const rocblas_int lda,
+                                double* V,
+                                double* W)
+{
+    return rocsolver::rocsolver_sy2sb_he2hb_impl<double>(handle, n, nb, k, A, lda, V, W);
+}
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_che2hb(rocblas_handle handle,
+                                const rocblas_int n,
+                                const rocblas_int nb,
+                                const rocblas_int k,
+                                rocblas_float_complex* A,
+                                const rocblas_int lda,
+                                rocblas_float_complex* V,
+                                rocblas_float_complex* W)
+{
+    return rocsolver::rocsolver_sy2sb_he2hb_impl<rocblas_float_complex>(handle, n, nb, k, A, lda, V, W);
+}
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_zhe2hb(rocblas_handle handle,
+                                const rocblas_int n,
+                                const rocblas_int nb,
+                                const rocblas_int k,
+                                rocblas_double_complex* A,
+                                const rocblas_int lda,
+                                rocblas_double_complex* V,
+                                rocblas_double_complex* W)
+{
+    return rocsolver::rocsolver_sy2sb_he2hb_impl<rocblas_double_complex>(handle, n, nb, k, A, lda, V, W);
+}
+
+} // extern C
+

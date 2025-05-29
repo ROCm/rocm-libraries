@@ -37,7 +37,7 @@
 
  // each matrix_size_range is a {n, lda}
 
- // each blk_range is a {b, k}
+ // each blk_range is a {nb, k}
 
  // case when n = 0, k = 2, and b = 2 will also execute the bad arguments test
  // (null handle, null pointers and invalid values)
@@ -58,6 +58,7 @@
  const vector<vector<int>> blk_range = {
     // invalid
     {4, 2},
+    {0, 1},
     // normal (valid) samples 
     {1, 10},
     {10, 10},
@@ -72,7 +73,7 @@
     {152, 152}, 
     {640, 640}, 
     {1000, 1024},
-    {2000, 2000};
+    {2000, 2000}};
  
 const vector<vector<int>> large_blk_range = {
     {16, 32},
@@ -89,7 +90,7 @@ const vector<vector<int>> large_blk_range = {
 
      arg.set<rocblas_int>("n", size[0]);
      arg.set<rocblas_int>("lda", size[1]);
-     arg.set<rocblas_int>("b", blk[0]);
+     arg.set<rocblas_int>("nb", blk[0]);
      arg.set<rocblas_int>("k", blk[1]);
 
      arg.timing = 0;

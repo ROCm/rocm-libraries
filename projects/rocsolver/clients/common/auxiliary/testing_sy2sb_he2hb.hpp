@@ -101,7 +101,7 @@ void sy2sb_he2hb_initData(const rocblas_handle handle,
             {
                 if(i == j)
                     hA[0][i + j * lda] = hA[0][i + j * lda].real() + 400;
-                if(i <= j + k && i >= j - k)
+                if(i <= j + nb && i >= j - nb)
                     hA[0][i + j * lda] += 400;
                 else
                     hA[0][i + j * lda] -= 4;
@@ -110,7 +110,7 @@ void sy2sb_he2hb_initData(const rocblas_handle handle,
         for(rocblas_int i = 0; i < n; i++)
         {
             for(rocblas_int j = i+1; j < n; j++)
-                hA[0][i + j * lda] = conj(hA[0][j + i * lda]);
+                hA[0][i + j * lda] = std::conj(hA[0][j + i * lda]);
         }           
     }
 
@@ -149,9 +149,12 @@ void sy2sb_he2hb_getError(const rocblas_handle handle,
     CHECK_HIP_ERROR(hARes.transfer_from(dA));
 
     // CPU lapack
-    cpu_sy2sb_he2hb(uplo,
+
+//print_host_matrix(std::cout,"A in",n,n,hA[0],lda);
+
+    cpu_sy2sb_he2hb(rocblas_fill_lower,
         n,
-        k,
+        nb,
         hA[0],
         lda,
         hAB[0],
@@ -159,14 +162,33 @@ void sy2sb_he2hb_getError(const rocblas_handle handle,
         hTau[0],
         hwork.data(),
         lwork);
+//print_host_matrix(std::cout,"AB",nb+1,n,hAB[0],ldab);
 
     // error is ||hARes - hAB|| / ||hAB||
     // (THIS DOES NOT ACCOUNT FOR NUMERICAL REPRODUCIBILITY
     // ISSUES. IT MIGHT BE REVISITED IN THE FUTURE) using frobenius norm
-    double err;
-    rocblas_int offset = (uplo == rocblas_fill_lower) ? k : 0;
+
+    // first copy AB into A
+    rocblas_int i;
+    for(rocblas_int j = 0; j < n; ++j)
+    {
+        for(rocblas_int ii = 0; ii <= nb; ++ii)
+        {
+            i = ii + j; 
+            hA[0][i + j * lda] = hAB[0][ii + j * ldab];
+            hA[0][j + i * lda] = hAB[0][ii + j * ldab];
+        }
+        for(rocblas_int ii = j + nb + 1; ii < n; ++ii)
+        {
+            hA[0][ii + j * lda] = 0;
+            hA[0][j + ii * lda] = 0;   
+        }
+    } 
+//print_host_matrix(std::cout,"A out",n,n,hA[0],lda);
+
+    double err = 0;
     *max_err = 0;
-    err = norm_error('F', k+1, n, ldab, hAB[0], hARes[0]);
+    err = norm_error('F', n, n, lda, hA[0], hARes[0]);
     *max_err = err > *max_err ? err : *max_err;
 
     // TODO: Check V and W
@@ -239,7 +261,7 @@ void testing_sy2sb_he2hb(Arguments& argus)
     rocblas_local_handle handle;
     rocblas_int n = argus.get<rocblas_int>("n");
     rocblas_int nb = argus.get<rocblas_int>("nb", 1);
-    rocblas_int k = argus.get<rocblas_int>("k", 1);
+    rocblas_int k = argus.get<rocblas_int>("k", nb);
     rocblas_int lda = argus.get<rocblas_int>("lda", n);
     rocblas_int ldab = nb + 1;
 
@@ -259,7 +281,7 @@ void testing_sy2sb_he2hb(Arguments& argus)
     size_t size_ARes = (argus.unit_check || argus.norm_check) ? size_A : 0;
 
     // check invalid sizes
-    bool invalid_size = (n < 0 || k < 0 || lda < n || nb < 0);
+    bool invalid_size = (n < 0 || k < nb || lda < n || (n > 0 && nb < 1));
     if(invalid_size)
     {
         EXPECT_ROCBLAS_STATUS(rocsolver_sy2sb_he2hb(handle, n, nb, k, (T*)nullptr, lda, (T*)nullptr, (T*)nullptr),
