@@ -165,7 +165,7 @@ void run_internal_discrete_tests(const DiscreteFunc & f){
 }
 
 TYPED_TEST(InternalDiscreteDistributionTests, InternalDiscreteAliasTest){
-    using T = TestFixture::T;
+    using T = typename TestFixture::T;
     run_internal_discrete_tests<T>(
         [=] __device__(T val, rocrand_discrete_distribution_st & dis)
             {return rocrand_device::detail::discrete_alias(val, dis);}
@@ -173,7 +173,7 @@ TYPED_TEST(InternalDiscreteDistributionTests, InternalDiscreteAliasTest){
 }
 
 TYPED_TEST(InternalDiscreteDistributionTests, InternalDiscreteCDFTest){
-    using T = TestFixture::T;
+    using T = typename TestFixture::T;
     run_internal_discrete_tests<T>(
         [=] __device__(T val, rocrand_discrete_distribution_st & dis)
             {return rocrand_device::detail::discrete_cdf(val, dis);}

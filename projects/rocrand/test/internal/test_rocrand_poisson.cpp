@@ -218,7 +218,7 @@ void run_poisson_test(
 }
 
 TYPED_TEST(PoissonTest, poisson_distribution_small_lambda_test){
-    using type = TestFixture::prng_type;
+    using type = typename TestFixture::prng_type;
     run_poisson_test<type, unsigned int>(
         TestFixture::small_poisson_lambdas,
         [=] __host__ __device__ (type * state, const double lambda){
@@ -231,7 +231,7 @@ TYPED_TEST(PoissonTest, poisson_distribution_small_lambda_test){
 }
 
 TYPED_TEST(PoissonTest, poisson_distribution_large_lambda_test){
-    using type = TestFixture::prng_type;
+    using type = typename TestFixture::prng_type;
     run_poisson_test<type, unsigned int>(
         TestFixture::large_poisson_lambdas,
         [=] __host__ __device__ (type * state, const double lambda){
@@ -244,7 +244,7 @@ TYPED_TEST(PoissonTest, poisson_distribution_large_lambda_test){
 }
 
 TYPED_TEST(PoissonTest, poisson_distribution_huge_lambda_test){
-    using type = TestFixture::prng_type;
+    using type = typename TestFixture::prng_type;
     run_poisson_test<type, unsigned int>(
         TestFixture::massive_poisson_lambdas,
         [=] __host__ __device__ (type * state, const double lambda){
@@ -257,7 +257,7 @@ TYPED_TEST(PoissonTest, poisson_distribution_huge_lambda_test){
 }
 
 TYPED_TEST(PoissonTest, poisson_distribution_test){
-    using type = TestFixture::prng_type;
+    using type = typename TestFixture::prng_type;
 
     run_poisson_test<type, unsigned int>(
         TestFixture::small_poisson_lambdas,
@@ -291,7 +291,7 @@ TYPED_TEST(PoissonTest, poisson_distribution_test){
 }
 
 TYPED_TEST(PoissonTest, poisson_distribution_inv_test){
-    using type = TestFixture::prng_type;
+    using type = typename TestFixture::prng_type;
 
     run_poisson_test<type, unsigned int>(
         TestFixture::small_poisson_lambdas,
@@ -306,7 +306,7 @@ TYPED_TEST(PoissonTest, poisson_distribution_inv_test){
 
 // External Tests
 TYPED_TEST(PoissonTest, external_rocrand_poisson){
-    using type = TestFixture::prng_type;
+    using type = typename TestFixture::prng_type;
 
     // TODO: Figure out why higher lambda is hanging
     run_poisson_test<type, unsigned int>(
