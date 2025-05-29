@@ -97,7 +97,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ROCm/TheRock/.github/workflows/build_linux_packages.yml@20f961a413bc4e2d11d9d7b7614239b0d01bf29a
+    uses: ROCm/TheRock/.github/workflows/build_linux_packages.yml@78ee8b0be51a61a06e75b7a3a0eb3cfb7a8e0c97
     with:
       amdgpu_families: "gfx94X-dcgpu"
       expect_failure: false
