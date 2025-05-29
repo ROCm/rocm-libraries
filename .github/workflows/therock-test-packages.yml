@@ -20,7 +20,7 @@ jobs:
   test_hipblaslt:
     name: "Test hipBLASLt math-lib"
     if: ${{ inputs.test == 'test_hipblaslt' }}
-    uses: ROCm/TheRock/.github/workflows/test_hipblaslt.yml@71e056b0525e14b85d226e0555bf8a786e58d9be
+    uses: ROCm/TheRock/.github/workflows/test_hipblaslt.yml@fb0863bc0a191051df965251b3d08875f07e607b
     with:
       artifact_run_id: "${{ github.run_id }}"
       amdgpu_families: ${{ inputs.amdgpu_families }}
@@ -30,7 +30,7 @@ jobs:
   test_rocblas:
     name: "Test rocBLAS math-lib"
     if: ${{ inputs.test == 'test_rocblas' }}
-    uses: ROCm/TheRock/.github/workflows/test_rocblas.yml@71e056b0525e14b85d226e0555bf8a786e58d9be
+    uses: ROCm/TheRock/.github/workflows/test_rocblas.yml@fb0863bc0a191051df965251b3d08875f07e607b
     with:
       artifact_run_id: "${{ github.run_id }}"
       amdgpu_families: ${{ inputs.amdgpu_families }}
@@ -41,7 +41,7 @@ jobs:
   test_rocprim:
     name: "Test rocPRIM math-lib"
     if: ${{ inputs.test == 'test_rocprim' }}
-    uses: ROCm/TheRock/.github/workflows/test_rocprim.yml@71e056b0525e14b85d226e0555bf8a786e58d9be
+    uses: ROCm/TheRock/.github/workflows/test_rocprim.yml@fb0863bc0a191051df965251b3d08875f07e607b
     with:
       artifact_run_id: "${{ github.run_id }}"
       amdgpu_families: ${{ inputs.amdgpu_families }}
@@ -51,7 +51,7 @@ jobs:
   test_rocthrust:
     name: "Test rocTHRUST math-lib"
     if: ${{ inputs.test == 'test_rocthrust' }}
-    uses: ROCm/TheRock/.github/workflows/test_rocthrust.yml@71e056b0525e14b85d226e0555bf8a786e58d9be
+    uses: ROCm/TheRock/.github/workflows/test_rocthrust.yml@fb0863bc0a191051df965251b3d08875f07e607b
     with:
       artifact_run_id: "${{ github.run_id }}"
       amdgpu_families: ${{ inputs.amdgpu_families }}
@@ -61,7 +61,7 @@ jobs:
   test_hipcub:
     name: "Test hipCUB math-lib"
     if: ${{ inputs.test == 'test_hipcub' }}
-    uses: ROCm/TheRock/.github/workflows/test_hipcub.yml@71e056b0525e14b85d226e0555bf8a786e58d9be
+    uses: ROCm/TheRock/.github/workflows/test_hipcub.yml@fb0863bc0a191051df965251b3d08875f07e607b
     with:
       artifact_run_id: "${{ github.run_id }}"
       amdgpu_families: ${{ inputs.amdgpu_families }}
