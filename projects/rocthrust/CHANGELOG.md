@@ -8,6 +8,8 @@ Documentation for rocThrust available at
 ### Changed
 
 * Updated the required version of Google Benchmark from 1.8.0 to 1.9.0.
+* Drop `c++14` support for rocthrust.
+* Renamed `cpp14_required.h` to `cpp_version_check.h`
 
 ### Removed
 

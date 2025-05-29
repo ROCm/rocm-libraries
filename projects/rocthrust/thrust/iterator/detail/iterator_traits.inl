@@ -18,10 +18,11 @@
 
 #include <thrust/detail/config.h>
 
-#include <thrust/iterator/iterator_categories.h>
-#include <thrust/iterator/detail/iterator_category_to_traversal.h>
 #include <thrust/detail/type_traits.h>
-#include <thrust/type_traits/void_t.h>
+#include <thrust/iterator/detail/iterator_category_to_traversal.h>
+#include <thrust/iterator/iterator_categories.h>
+
+#include <type_traits>
 
 THRUST_NAMESPACE_BEGIN
 
@@ -68,15 +69,8 @@ template <typename Iterator, typename = void>
 struct iterator_system_impl {};
 
 template <typename Iterator>
-struct iterator_system_impl<
-  Iterator
-, typename voider<
-    typename iterator_traits<Iterator>::iterator_category
-  >::type
->
-  : detail::iterator_category_to_system<
-      typename iterator_traits<Iterator>::iterator_category
-    >
+struct iterator_system_impl<Iterator, std::void_t<typename iterator_traits<Iterator>::iterator_category>>
+    : detail::iterator_category_to_system<typename iterator_traits<Iterator>::iterator_category>
 {};
 
 } // namespace detail

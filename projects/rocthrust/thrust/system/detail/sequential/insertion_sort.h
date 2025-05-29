@@ -42,7 +42,7 @@ THRUST_HOST_DEVICE void insertion_sort(RandomAccessIterator first, RandomAccessI
   }
 
   // wrap comp
-  thrust::detail::wrapped_function<StrictWeakOrdering, bool> wrapped_comp(comp);
+  thrust::detail::wrapped_function<StrictWeakOrdering, bool> wrapped_comp{comp};
 
   for (RandomAccessIterator i = first + 1; i != last; ++i)
   {
@@ -87,7 +87,7 @@ THRUST_HOST_DEVICE void insertion_sort_by_key(
   }
 
   // wrap comp
-  thrust::detail::wrapped_function<StrictWeakOrdering, bool> wrapped_comp(comp);
+  thrust::detail::wrapped_function<StrictWeakOrdering, bool> wrapped_comp{comp};
 
   RandomAccessIterator1 i1 = first1 + 1;
   RandomAccessIterator2 i2 = first2 + 1;

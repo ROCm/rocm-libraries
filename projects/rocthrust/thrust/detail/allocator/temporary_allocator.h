@@ -55,7 +55,7 @@ public:
 
   THRUST_HOST_DEVICE pointer allocate(size_type cnt);
 
-  THRUST_HOST_DEVICE void deallocate(pointer p, size_type n);
+  THRUST_HOST_DEVICE void deallocate(pointer p, size_type n) noexcept;
 
   THRUST_HOST_DEVICE inline System& system()
   {
