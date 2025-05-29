@@ -21,7 +21,7 @@
 #include "rocrand/rocrand.h"
 #include "test_rocrand_sobol_qrng.hpp"
 
-#define ROCRAND_ERROR_CHECK(cmd)                                                                      \
+#define ROCRAND_ERROR_CHECK(cmd)                                                                \
     do                                                                                          \
     {                                                                                           \
         auto status = cmd;                                                                      \
