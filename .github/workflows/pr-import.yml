@@ -39,6 +39,10 @@ on:
       subrepo-upstream:
         description: "Canonical subrepo repo (e.g., ROCm/rocBLAS)"
         required: true
+      monorepo-target-branch:
+        description: "Target branch in the monorepo (default: develop)"
+        required: false
+        default: "develop"
 
 jobs:
   import:
@@ -109,6 +113,8 @@ jobs:
       - name: Create new branch for import
         id: import-branch
         run: |
+          git fetch origin ${{ github.event.inputs.monorepo-target-branch }}
+          git checkout ${{ github.event.inputs.monorepo-target-branch }}
           SANITIZED_REPO=$(echo "${{ github.event.inputs.subrepo-repo }}" | sed 's|/|_|g')
           SANITIZED_REF=$(echo "${{ steps.prdata.outputs.head_ref }}" | sed 's|/|_|g')
           IMPORT_BRANCH="import/${SANITIZED_REPO}/${SANITIZED_REF}"
@@ -146,7 +152,7 @@ jobs:
           fi
 
           gh pr create \
-            --base develop \
+            --base "${{ github.event.inputs.monorepo-target-branch }}" \
             --head "${{ steps.import-branch.outputs.import_branch }}" \
             --title "$PR_TITLE" \
             --label "imported pr" \
