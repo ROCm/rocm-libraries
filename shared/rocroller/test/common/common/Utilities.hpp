@@ -399,7 +399,8 @@ namespace rocRoller
                      float                       alpha,
                      float                       beta,
                      bool                        transA,
-                     bool                        transB);
+                     bool                        transB,
+                     const uint                  scaleBlockSize);
 
     template <typename TA, typename TB, typename TC, typename TD>
     void ScaledCPUMM(std::vector<TD>&            D,
@@ -414,13 +415,27 @@ namespace rocRoller
                      float                       alpha,
                      float                       beta,
                      bool                        transA,
-                     bool                        transB)
+                     bool                        transB,
+                     const uint                  scaleBlockSize)
     {
         if constexpr(std::same_as<TD, float> && std::same_as<TC, float>)
         {
             auto aConverted = unpackToFloat(A);
             auto bConverted = unpackToFloat(B);
-            ScaledCPUMM(D, C, aConverted, bConverted, AX, BX, M, N, K, alpha, beta, transA, transB);
+            ScaledCPUMM(D,
+                        C,
+                        aConverted,
+                        bConverted,
+                        AX,
+                        BX,
+                        M,
+                        N,
+                        K,
+                        alpha,
+                        beta,
+                        transA,
+                        transB,
+                        scaleBlockSize);
         }
         else if constexpr((std::same_as<TD, __half> && std::same_as<TC, __half>)
                           || (std::same_as<TD, BFloat16> && std::same_as<TC, BFloat16>))
@@ -440,7 +455,8 @@ namespace rocRoller
                         alpha,
                         beta,
                         transA,
-                        transB);
+                        transB,
+                        scaleBlockSize);
 #pragma omp parallel for
             for(std::size_t i = 0; i != floatD.size(); ++i)
             {

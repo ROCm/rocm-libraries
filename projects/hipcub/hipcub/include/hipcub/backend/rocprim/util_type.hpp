@@ -32,9 +32,10 @@
 
 #include "../../config.hpp"
 
-#include <rocprim/detail/various.hpp>
-#include <rocprim/thread/radix_key_codec.hpp>
-#include <rocprim/types/future_value.hpp>
+#include <rocprim/detail/various.hpp> // IWYU pragma: export
+#include <rocprim/thread/radix_key_codec.hpp> // IWYU pragma: export
+#include <rocprim/type_traits.hpp> // IWYU pragma: export
+#include <rocprim/types/future_value.hpp> // IWYU pragma: export
 
 #include <hip/hip_bfloat16.h>
 #include <hip/hip_fp16.h>
@@ -540,7 +541,7 @@ struct BaseTraits<UNSIGNED_INTEGER, true, false, _UnsignedBits, T>
         nullptr_TYPE = false,
     };
 
-    using key_codec = rocprim::radix_key_codec<T>;
+    using key_codec = decltype(::rocprim::traits::get<T>().template radix_key_codec<false>());
 
     static HIPCUB_HOST_DEVICE __forceinline__ UnsignedBits TwiddleIn(UnsignedBits key)
     {
@@ -589,7 +590,7 @@ struct BaseTraits<SIGNED_INTEGER, true, false, _UnsignedBits, T>
         nullptr_TYPE = false,
     };
 
-    using key_codec = rocprim::radix_key_codec<T>;
+    using key_codec = decltype(::rocprim::traits::get<T>().template radix_key_codec<false>());
 
     static HIPCUB_HOST_DEVICE __forceinline__ UnsignedBits TwiddleIn(UnsignedBits key)
     {
@@ -682,7 +683,7 @@ struct BaseTraits<FLOATING_POINT, true, false, _UnsignedBits, T>
     static const UnsignedBits   LOWEST_KEY  = UnsignedBits(-1);
     static const UnsignedBits   MAX_KEY     = UnsignedBits(-1) ^ HIGH_BIT;
 
-    using key_codec = rocprim::radix_key_codec<T>;
+    using key_codec = decltype(::rocprim::traits::get<T>().template radix_key_codec<false>());
 
     enum
     {
@@ -746,7 +747,7 @@ struct NumericTraits<__uint128_t>
     static constexpr bool PRIMITIVE = false;
     static constexpr bool nullptr_TYPE = false;
 
-    using key_codec = rocprim::radix_key_codec<T>;
+    using key_codec = decltype(::rocprim::traits::get<T>().template radix_key_codec<false>());
 
     static __host__ __device__ __forceinline__ UnsignedBits TwiddleIn(UnsignedBits key)
     {
@@ -783,7 +784,7 @@ struct NumericTraits<__int128_t>
     static constexpr bool PRIMITIVE = false;
     static constexpr bool nullptr_TYPE = false;
 
-    using key_codec = rocprim::radix_key_codec<T>;
+    using key_codec = decltype(::rocprim::traits::get<T>().template radix_key_codec<false>());
 
     static __host__ __device__ __forceinline__ UnsignedBits TwiddleIn(UnsignedBits key)
     {
@@ -821,6 +822,125 @@ template <> struct NumericTraits<bool> :                BaseTraits<UNSIGNED_INTE
  */
 template <typename T>
 struct Traits : NumericTraits<typename std::remove_cv<T>::type> {};
+
+/**
+ * \brief Common type of zero types.
+ */
+template<class...>
+struct common_type
+{};
+
+/**
+ * \brief Common type of a single type.
+ */
+template<class T>
+struct common_type<T> : common_type<T, T>
+{};
+
+// Common type of a pair of types.
+namespace detail
+{
+
+// Determines if type is half or bfloat16 (extended fp).
+template<class T>
+struct is_extended_fp
+    : std::integral_constant<
+          bool,
+          std::is_same<__half, typename std::remove_cv<T>::type>::value
+              || std::is_same<hip_bfloat16, typename std::remove_cv<T>::type>::value>
+{};
+
+// Gets "raw" type: drops reference and const qualifier.
+template<typename T>
+struct remove_cvref
+{
+    using type = typename std::remove_cv<typename std::remove_reference<T>::type>::type;
+};
+template<typename T>
+using remove_cvref_t = typename remove_cvref<T>::type;
+
+template<template<typename...> class MFn, bool condition, typename T>
+using apply_if_t = std::conditional_t<condition, MFn<T>, T>;
+
+template<typename From, typename To>
+using copy_cv_t
+    = apply_if_t<std::add_volatile_t,
+                 std::is_volatile_v<From>,
+                 apply_if_t<std::add_const_t, std::is_const_v<From>, std::remove_cv_t<To>>>;
+
+template<typename From, typename To>
+using copy_ref_t = apply_if_t<std::add_rvalue_reference_t,
+                              std::is_rvalue_reference_v<From>,
+                              apply_if_t<std::add_lvalue_reference_t,
+                                         std::is_lvalue_reference_v<From>,
+                                         std::remove_reference_t<To>>>;
+
+template<typename From, typename To>
+using copy_cvref_t = copy_ref_t<From, copy_cv_t<std::remove_reference_t<From>, remove_cvref_t<To>>>;
+
+// Captures non extended fp types.
+template<class T1, class T2, class = void>
+struct common_type_extended_fp
+{
+    using type = typename std::common_type<T1, T2>::type;
+};
+
+// Captures first type arithmetic, second one extended FP.
+template<class T1, class T2>
+struct common_type_extended_fp<
+    T1,
+    T2,
+    typename std::enable_if_t<std::is_arithmetic<remove_cvref_t<T1>>::value
+                              && is_extended_fp<remove_cvref_t<T2>>::value>>
+{
+    using type = typename std::common_type<T1, copy_cvref_t<T2, float>>::type;
+};
+
+// Captures first type extended FP, second one arithmetic.
+template<class T1, class T2>
+struct common_type_extended_fp<
+    T1,
+    T2,
+    typename std::enable_if_t<is_extended_fp<remove_cvref_t<T1>>::value
+                              && std::is_arithmetic<remove_cvref_t<T2>>::value>>
+{
+    using type = typename std::common_type<copy_cvref_t<T1, float>, T2>::type;
+};
+
+template<class...>
+using void_t = void;
+
+// Common type of more than two types.
+
+template<class AlwaysVoid, class T1, class T2, class... Rest>
+struct common_type_multi_impl
+{};
+
+template<class T1, class T2, class... Rest>
+struct common_type_multi_impl<void_t<typename common_type<T1, T2>::type>, T1, T2, Rest...>
+    : common_type<typename common_type<T1, T2>::type, Rest...>
+{};
+} // namespace detail
+
+/**
+ * \brief Common type of a pair of types
+ */
+template<class T1, class T2>
+struct common_type<T1, T2> : detail::common_type_extended_fp<T1, T2>
+{};
+
+/**
+ * \brief Common type of more than two types
+ */
+template<class T1, class T2, class... Rest>
+struct common_type<T1, T2, Rest...> : detail::common_type_multi_impl<void, T1, T2, Rest...>
+{};
+
+/**
+ * \brief Common type helper
+ */
+template<class... Ts>
+using common_type_t = typename common_type<Ts...>::type;
 
 #endif // DOXYGEN_SHOULD_SKIP_THIS
 

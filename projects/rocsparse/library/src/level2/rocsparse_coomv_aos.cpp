@@ -52,15 +52,15 @@ namespace rocsparse
                                        rocsparse_datatype,
                                        rocsparse_datatype>;
 
-#define COOMV_AOS_CONFIG(T, I, A, X, Y)                                         \
-    {                                                                           \
-        coomv_aos_tuple(T, I, A, X, Y),                                         \
-            coomv_aos_template<typename rocsparse::datatype_traits<T>::type_t,  \
-                               typename rocsparse::indextype_traits<I>::type_t, \
-                               typename rocsparse::datatype_traits<A>::type_t,  \
-                               typename rocsparse::datatype_traits<X>::type_t,  \
-                               typename rocsparse::datatype_traits<Y>::type_t>  \
-    }
+    // clang-format off
+#define COOMV_AOS_CONFIG(T, I, A, X, Y)                                  \
+    {coomv_aos_tuple(T, I, A, X, Y),                                     \
+     coomv_aos_template<typename rocsparse::datatype_traits<T>::type_t,  \
+                        typename rocsparse::indextype_traits<I>::type_t, \
+                        typename rocsparse::datatype_traits<A>::type_t,  \
+                        typename rocsparse::datatype_traits<X>::type_t,  \
+                        typename rocsparse::datatype_traits<Y>::type_t>}
+    // clang-format on
 
     static const std::map<coomv_aos_tuple, coomv_aos_t> s_coomv_aos_dispatch{
         {COOMV_AOS_CONFIG(rocsparse_datatype_f32_r,
@@ -127,6 +127,18 @@ namespace rocsparse
                           rocsparse_indextype_i64,
                           rocsparse_datatype_i8_r,
                           rocsparse_datatype_i8_r,
+                          rocsparse_datatype_f32_r),
+
+         COOMV_AOS_CONFIG(rocsparse_datatype_f32_r,
+                          rocsparse_indextype_i32,
+                          rocsparse_datatype_f16_r,
+                          rocsparse_datatype_f16_r,
+                          rocsparse_datatype_f32_r),
+
+         COOMV_AOS_CONFIG(rocsparse_datatype_f32_r,
+                          rocsparse_indextype_i64,
+                          rocsparse_datatype_f16_r,
+                          rocsparse_datatype_f16_r,
                           rocsparse_datatype_f32_r),
 
          COOMV_AOS_CONFIG(rocsparse_datatype_f32_c,

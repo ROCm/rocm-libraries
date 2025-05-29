@@ -27,6 +27,7 @@
 
 #pragma once
 
+#include "rocblas.hpp"
 #include "rocsolver_run_specialized_kernels.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE

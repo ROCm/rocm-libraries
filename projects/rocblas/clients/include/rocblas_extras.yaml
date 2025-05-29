@@ -460,7 +460,7 @@ Tests:
 
   - name: atomics_mode_L3_quick
     category: quick
-    atomics_mode: atomics_not_allowed
+    atomics_mode: [0, 1]
     function:
       - gemm: *single_double_precisions_complex
       - gemm_ex: *single_double_precisions_complex

@@ -21,27 +21,79 @@
  *
  * ************************************************************************ */
 
-#include <map>
-#include <sstream>
-
-#include "control.h"
 #include "internal/generic/rocsparse_spgeam.h"
+#include "control.h"
 #include "to_string.hpp"
 #include "utility.h"
 
+#include "../conversion/rocsparse_convert_scalar.hpp"
 #include "rocsparse_csrgeam.hpp"
 #include "rocsparse_csrgeam_numeric.hpp"
 #include "rocsparse_csrgeam_symbolic.hpp"
 
 namespace rocsparse
 {
-    static rocsparse_status spgeam_buffer_size_template(rocsparse_handle            handle,
-                                                        rocsparse_spgeam_descr      descr,
-                                                        rocsparse_const_spmat_descr mat_A,
-                                                        rocsparse_const_spmat_descr mat_B,
-                                                        rocsparse_const_spmat_descr mat_C,
-                                                        rocsparse_spgeam_stage      stage,
-                                                        size_t*                     buffer_size)
+    static rocsparse_status convert_scalars(rocsparse_handle             handle,
+                                            const rocsparse_spgeam_descr descr,
+                                            const void*                  alpha,
+                                            const void*                  beta,
+                                            const void**                 local_alpha,
+                                            const void**                 local_beta)
+    {
+        const rocsparse_datatype scalar_datatype  = descr->get_scalar_datatype();
+        const rocsparse_datatype compute_datatype = descr->get_compute_datatype();
+
+        *local_alpha = alpha;
+        *local_beta  = beta;
+
+        if(scalar_datatype != compute_datatype)
+        {
+            // Convert scalars from scalar_datatype to compute_datatype
+            switch(handle->pointer_mode)
+            {
+            case rocsparse_pointer_mode_host:
+            {
+                RETURN_IF_ROCSPARSE_ERROR(
+                    rocsparse::convert_host_scalars(scalar_datatype,
+                                                    compute_datatype,
+                                                    alpha,
+                                                    descr->get_local_host_alpha(),
+                                                    beta,
+                                                    descr->get_local_host_beta()));
+
+                *local_alpha = descr->get_local_host_alpha();
+                *local_beta  = descr->get_local_host_beta();
+
+                break;
+            }
+            case rocsparse_pointer_mode_device:
+            {
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::convert_device_scalars(handle->stream,
+                                                                            scalar_datatype,
+                                                                            compute_datatype,
+                                                                            alpha,
+                                                                            handle->alpha,
+                                                                            beta,
+                                                                            handle->beta));
+
+                *local_alpha = handle->alpha;
+                *local_beta  = handle->beta;
+
+                break;
+            }
+            }
+        }
+
+        return rocsparse_status_success;
+    }
+
+    static rocsparse_status spgeam_buffer_size(rocsparse_handle            handle,
+                                               rocsparse_spgeam_descr      descr,
+                                               rocsparse_const_spmat_descr mat_A,
+                                               rocsparse_const_spmat_descr mat_B,
+                                               rocsparse_const_spmat_descr mat_C,
+                                               rocsparse_spgeam_stage      stage,
+                                               size_t*                     buffer_size)
     {
         const rocsparse_format format_A = mat_A->format;
         switch(stage)
@@ -52,10 +104,10 @@ namespace rocsparse
             {
             case rocsparse_format_csr:
             {
-                RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrgeam_buffer_size_template(
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrgeam_buffer_size(
                     handle,
-                    descr->trans_A,
-                    descr->trans_B,
+                    descr->get_operation_A(),
+                    descr->get_operation_B(),
                     mat_A->rows,
                     mat_B->cols,
                     mat_A->descr,
@@ -92,330 +144,6 @@ namespace rocsparse
         return rocsparse_status_success;
     }
 
-    template <typename T, typename I, typename J, typename A, typename B, typename C>
-    static rocsparse_status spgeam_template(rocsparse_handle             handle,
-                                            const rocsparse_spgeam_descr descr,
-                                            const void*                  alpha,
-                                            rocsparse_const_spmat_descr  mat_A,
-                                            const void*                  beta,
-                                            rocsparse_const_spmat_descr  mat_B,
-                                            rocsparse_spmat_descr        mat_C,
-                                            rocsparse_spgeam_stage       stage,
-                                            size_t                       buffer_size,
-                                            void*                        temp_buffer)
-    {
-        const rocsparse_format format_A = mat_A->format;
-        switch(stage)
-        {
-        case rocsparse_spgeam_stage_analysis:
-        {
-            switch(format_A)
-            {
-            case rocsparse_format_csr:
-            {
-                if(mat_C == nullptr)
-                {
-                    RETURN_IF_ROCSPARSE_ERROR(
-                        rocsparse::csrgeam_allocate_descr_memory_template(handle,
-                                                                          mat_A->rows,
-                                                                          mat_B->cols,
-                                                                          alpha,
-                                                                          mat_A->nnz,
-                                                                          beta,
-                                                                          mat_B->nnz,
-                                                                          descr));
-                }
-
-                RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrgeam_record_descr_alpha_beta_template(
-                    handle, mat_A->rows, mat_B->cols, alpha, mat_A->nnz, beta, mat_B->nnz, descr));
-
-                I nnz_C;
-                RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrgeam_nnz_template(
-                    handle,
-                    descr->trans_A,
-                    descr->trans_B,
-                    mat_A->rows,
-                    mat_B->cols,
-                    mat_A->descr,
-                    mat_A->nnz,
-                    (const I*)mat_A->const_row_data,
-                    (const J*)mat_A->const_col_data,
-                    mat_B->descr,
-                    mat_B->nnz,
-                    (const I*)mat_B->const_row_data,
-                    (const J*)mat_B->const_col_data,
-                    mat_C != nullptr ? mat_C->descr : nullptr,
-                    mat_C != nullptr ? (I*)mat_C->row_data : nullptr,
-                    mat_C != nullptr ? &nnz_C : nullptr,
-                    descr,
-                    temp_buffer,
-                    true));
-
-                if(mat_C != nullptr)
-                {
-                    mat_C->nnz = nnz_C;
-                }
-
-                return rocsparse_status_success;
-            }
-            case rocsparse_format_bsr:
-            case rocsparse_format_coo:
-            case rocsparse_format_coo_aos:
-            case rocsparse_format_csc:
-            case rocsparse_format_ell:
-            case rocsparse_format_bell:
-            {
-                RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
-            }
-            }
-        }
-
-        case rocsparse_spgeam_stage_compute:
-        {
-            switch(format_A)
-            {
-            case rocsparse_format_csr:
-            {
-                RETURN_IF_ROCSPARSE_ERROR(
-                    rocsparse::csrgeam_copy_row_pointer_and_free_memory_template(
-                        handle,
-                        mat_A->rows,
-                        mat_B->cols,
-                        mat_C->descr,
-                        (I*)mat_C->row_data,
-                        &mat_C->nnz,
-                        descr));
-
-                RETURN_IF_ROCSPARSE_ERROR(
-                    rocsparse::csrgeam_template(handle,
-                                                descr->trans_A,
-                                                descr->trans_B,
-                                                mat_A->rows,
-                                                mat_B->cols,
-                                                (const T*)alpha,
-                                                mat_A->descr,
-                                                mat_A->nnz,
-                                                (const A*)mat_A->const_val_data,
-                                                (const I*)mat_A->const_row_data,
-                                                (const J*)mat_A->const_col_data,
-                                                (const T*)beta,
-                                                mat_B->descr,
-                                                mat_B->nnz,
-                                                (const B*)mat_B->const_val_data,
-                                                (const I*)mat_B->const_row_data,
-                                                (const J*)mat_B->const_col_data,
-                                                mat_C->descr,
-                                                (C*)mat_C->val_data,
-                                                (const I*)mat_C->const_row_data,
-                                                (J*)mat_C->col_data,
-                                                descr,
-                                                temp_buffer));
-
-                return rocsparse_status_success;
-            }
-            case rocsparse_format_bsr:
-            case rocsparse_format_coo:
-            case rocsparse_format_coo_aos:
-            case rocsparse_format_csc:
-            case rocsparse_format_ell:
-            case rocsparse_format_bell:
-            {
-                RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
-            }
-            }
-        }
-
-        case rocsparse_spgeam_stage_symbolic:
-        {
-            switch(format_A)
-            {
-            case rocsparse_format_csr:
-            {
-                RETURN_IF_ROCSPARSE_ERROR(
-                    rocsparse::csrgeam_copy_row_pointer_and_free_memory_template(
-                        handle,
-                        mat_A->rows,
-                        mat_B->cols,
-                        mat_C->descr,
-                        (I*)mat_C->row_data,
-                        &mat_C->nnz,
-                        descr));
-
-                RETURN_IF_ROCSPARSE_ERROR(
-                    rocsparse::csrgeam_symbolic_template(handle,
-                                                         descr->trans_A,
-                                                         descr->trans_B,
-                                                         mat_A->rows,
-                                                         mat_B->cols,
-                                                         mat_A->descr,
-                                                         mat_A->nnz,
-                                                         (const I*)mat_A->const_row_data,
-                                                         (const J*)mat_A->const_col_data,
-                                                         mat_B->descr,
-                                                         mat_B->nnz,
-                                                         (const I*)mat_B->const_row_data,
-                                                         (const J*)mat_B->const_col_data,
-                                                         mat_C->descr,
-                                                         (const I*)mat_C->const_row_data,
-                                                         (J*)mat_C->col_data,
-                                                         descr,
-                                                         temp_buffer));
-
-                return rocsparse_status_success;
-            }
-            case rocsparse_format_bsr:
-            case rocsparse_format_coo:
-            case rocsparse_format_coo_aos:
-            case rocsparse_format_csc:
-            case rocsparse_format_ell:
-            case rocsparse_format_bell:
-            {
-                RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
-            }
-            }
-        }
-
-        case rocsparse_spgeam_stage_numeric:
-        {
-            switch(format_A)
-            {
-            case rocsparse_format_csr:
-            {
-                RETURN_IF_ROCSPARSE_ERROR(
-                    rocsparse::csrgeam_numeric_template(handle,
-                                                        descr->trans_A,
-                                                        descr->trans_B,
-                                                        mat_A->rows,
-                                                        mat_B->cols,
-                                                        (const T*)alpha,
-                                                        mat_A->descr,
-                                                        mat_A->nnz,
-                                                        (const A*)mat_A->const_val_data,
-                                                        (const I*)mat_A->const_row_data,
-                                                        (const J*)mat_A->const_col_data,
-                                                        (const T*)beta,
-                                                        mat_B->descr,
-                                                        mat_B->nnz,
-                                                        (const B*)mat_B->const_val_data,
-                                                        (const I*)mat_B->const_row_data,
-                                                        (const J*)mat_B->const_col_data,
-                                                        mat_C->descr,
-                                                        (C*)mat_C->val_data,
-                                                        (const I*)mat_C->const_row_data,
-                                                        (const J*)mat_C->col_data,
-                                                        descr,
-                                                        temp_buffer));
-
-                return rocsparse_status_success;
-            }
-            case rocsparse_format_bsr:
-            case rocsparse_format_coo:
-            case rocsparse_format_coo_aos:
-            case rocsparse_format_csc:
-            case rocsparse_format_ell:
-            case rocsparse_format_bell:
-            {
-                RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
-            }
-            }
-        }
-        }
-
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
-    }
-
-    typedef rocsparse_status (*spgeam_template_t)(rocsparse_handle            handle,
-                                                  rocsparse_spgeam_descr      descr,
-                                                  const void*                 alpha,
-                                                  rocsparse_const_spmat_descr mat_A,
-                                                  const void*                 beta,
-                                                  rocsparse_const_spmat_descr mat_B,
-                                                  rocsparse_spmat_descr       mat_C,
-                                                  rocsparse_spgeam_stage      stage,
-                                                  size_t                      buffer_size,
-                                                  void*                       temp_buffer);
-
-    using spgeam_template_tuple
-        = std::tuple<rocsparse_datatype, rocsparse_indextype, rocsparse_indextype>;
-    // clang-format off
-#define SPGEAM_TEMPLATE_CONFIG(T_, I_, J_)                                    \
-    {                                                                         \
-        spgeam_template_tuple(T_, I_, J_),                                    \
-            spgeam_template<typename rocsparse::datatype_traits<T_>::type_t,  \
-                            typename rocsparse::indextype_traits<I_>::type_t, \
-                            typename rocsparse::indextype_traits<J_>::type_t, \
-                            typename rocsparse::datatype_traits<T_>::type_t,  \
-                            typename rocsparse::datatype_traits<T_>::type_t,  \
-                            typename rocsparse::datatype_traits<T_>::type_t>  \
-    }
-    // clang-format on
-    static const std::map<spgeam_template_tuple, spgeam_template_t> s_spgeam_template_dispatch{{
-
-        SPGEAM_TEMPLATE_CONFIG(
-            rocsparse_datatype_f32_r, rocsparse_indextype_i32, rocsparse_indextype_i32),
-
-        SPGEAM_TEMPLATE_CONFIG(
-            rocsparse_datatype_f32_r, rocsparse_indextype_i64, rocsparse_indextype_i32),
-
-        SPGEAM_TEMPLATE_CONFIG(
-            rocsparse_datatype_f32_r, rocsparse_indextype_i64, rocsparse_indextype_i64),
-
-        SPGEAM_TEMPLATE_CONFIG(
-            rocsparse_datatype_f64_r, rocsparse_indextype_i32, rocsparse_indextype_i32),
-
-        SPGEAM_TEMPLATE_CONFIG(
-            rocsparse_datatype_f64_r, rocsparse_indextype_i64, rocsparse_indextype_i32),
-
-        SPGEAM_TEMPLATE_CONFIG(
-            rocsparse_datatype_f64_r, rocsparse_indextype_i64, rocsparse_indextype_i64),
-
-        SPGEAM_TEMPLATE_CONFIG(
-            rocsparse_datatype_f64_c, rocsparse_indextype_i32, rocsparse_indextype_i32),
-
-        SPGEAM_TEMPLATE_CONFIG(
-            rocsparse_datatype_f64_c, rocsparse_indextype_i64, rocsparse_indextype_i32),
-
-        SPGEAM_TEMPLATE_CONFIG(
-            rocsparse_datatype_f64_c, rocsparse_indextype_i64, rocsparse_indextype_i64),
-
-        SPGEAM_TEMPLATE_CONFIG(
-            rocsparse_datatype_f32_c, rocsparse_indextype_i32, rocsparse_indextype_i32),
-
-        SPGEAM_TEMPLATE_CONFIG(
-            rocsparse_datatype_f32_c, rocsparse_indextype_i64, rocsparse_indextype_i32),
-
-        SPGEAM_TEMPLATE_CONFIG(
-            rocsparse_datatype_f32_c, rocsparse_indextype_i64, rocsparse_indextype_i64)}};
-
-    static rocsparse_status spgeam_template_find(spgeam_template_t*  spgeam_function_,
-                                                 rocsparse_datatype  compute_type_,
-                                                 rocsparse_indextype i_type_,
-                                                 rocsparse_indextype j_type_)
-    {
-        const auto& it = rocsparse::s_spgeam_template_dispatch.find(
-            rocsparse::spgeam_template_tuple(compute_type_, i_type_, j_type_));
-
-        if(it != rocsparse::s_spgeam_template_dispatch.end())
-        {
-            spgeam_function_[0] = it->second;
-        }
-        // LCOV_EXCL_START
-        else
-        {
-            std::stringstream sstr;
-            sstr << "invalid precision configuration: "
-                 << "compute_type: " << rocsparse::to_string(compute_type_)
-                 << ", i_type: " << rocsparse::to_string(i_type_)
-                 << ", j_type: " << rocsparse::to_string(j_type_);
-
-            RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value,
-                                                   sstr.str().c_str());
-        }
-        // LCOV_EXCL_STOP
-
-        return rocsparse_status_success;
-    }
-
     static rocsparse_status spgeam_buffer_size_checkarg(rocsparse_handle            handle, //0
                                                         rocsparse_spgeam_descr      descr, //1
                                                         rocsparse_const_spmat_descr mat_A, //2
@@ -428,10 +156,11 @@ namespace rocsparse
         ROCSPARSE_CHECKARG_POINTER(1, descr);
         ROCSPARSE_CHECKARG_POINTER(2, mat_A);
         ROCSPARSE_CHECKARG_POINTER(3, mat_B);
-        if(stage == rocsparse_spgeam_stage_compute)
-        {
-            ROCSPARSE_CHECKARG_POINTER(4, mat_C);
-        }
+        ROCSPARSE_CHECKARG(4,
+                           mat_C,
+                           ((stage == rocsparse_spgeam_stage_compute) && mat_C == nullptr),
+                           rocsparse_status_invalid_pointer);
+
         ROCSPARSE_CHECKARG_ENUM(5, stage);
 
         ROCSPARSE_CHECKARG(2, mat_A, (mat_A->init == false), rocsparse_status_not_initialized);
@@ -440,10 +169,14 @@ namespace rocsparse
         ROCSPARSE_CHECKARG(
             3, mat_B, (mat_B->format != mat_A->format), rocsparse_status_not_implemented);
 
-        ROCSPARSE_CHECKARG(
-            2, mat_A, (mat_A->data_type != descr->compute_type), rocsparse_status_not_implemented);
-        ROCSPARSE_CHECKARG(
-            3, mat_B, (mat_B->data_type != descr->compute_type), rocsparse_status_not_implemented);
+        ROCSPARSE_CHECKARG(2,
+                           mat_A,
+                           (mat_A->data_type != descr->get_compute_datatype()),
+                           rocsparse_status_not_implemented);
+        ROCSPARSE_CHECKARG(3,
+                           mat_B,
+                           (mat_B->data_type != descr->get_compute_datatype()),
+                           rocsparse_status_not_implemented);
 
         ROCSPARSE_CHECKARG(
             3, mat_B, (mat_B->row_type != mat_A->row_type), rocsparse_status_type_mismatch);
@@ -459,7 +192,7 @@ namespace rocsparse
 
             ROCSPARSE_CHECKARG(4,
                                mat_C,
-                               (mat_C->data_type != descr->compute_type),
+                               (mat_C->data_type != descr->get_compute_datatype()),
                                rocsparse_status_not_implemented);
 
             ROCSPARSE_CHECKARG(
@@ -492,6 +225,10 @@ namespace rocsparse
         {
             ROCSPARSE_CHECKARG_POINTER(6, mat_C);
         }
+        ROCSPARSE_CHECKARG(9,
+                           temp_buffer,
+                           (buffer_size > 0 && temp_buffer == nullptr),
+                           rocsparse_status_invalid_pointer);
 
         ROCSPARSE_CHECKARG_ENUM(7, stage);
 
@@ -500,10 +237,14 @@ namespace rocsparse
 
         ROCSPARSE_CHECKARG(
             5, mat_B, (mat_B->format != mat_A->format), rocsparse_status_not_implemented);
-        ROCSPARSE_CHECKARG(
-            3, mat_A, (mat_A->data_type != descr->compute_type), rocsparse_status_not_implemented);
-        ROCSPARSE_CHECKARG(
-            5, mat_B, (mat_B->data_type != descr->compute_type), rocsparse_status_not_implemented);
+        ROCSPARSE_CHECKARG(3,
+                           mat_A,
+                           (mat_A->data_type != descr->get_compute_datatype()),
+                           rocsparse_status_not_implemented);
+        ROCSPARSE_CHECKARG(5,
+                           mat_B,
+                           (mat_B->data_type != descr->get_compute_datatype()),
+                           rocsparse_status_not_implemented);
 
         ROCSPARSE_CHECKARG(
             5, mat_B, (mat_B->row_type != mat_A->row_type), rocsparse_status_type_mismatch);
@@ -519,7 +260,7 @@ namespace rocsparse
                 6, mat_C, (mat_C->format != mat_A->format), rocsparse_status_not_implemented);
             ROCSPARSE_CHECKARG(6,
                                mat_C,
-                               (mat_C->data_type != descr->compute_type),
+                               (mat_C->data_type != descr->get_compute_datatype()),
                                rocsparse_status_not_implemented);
 
             ROCSPARSE_CHECKARG(
@@ -527,7 +268,318 @@ namespace rocsparse
             ROCSPARSE_CHECKARG(
                 6, mat_C, (mat_C->col_type != mat_A->col_type), rocsparse_status_type_mismatch);
         }
+
+        // Validate spgeam descriptor inputs.
+        ROCSPARSE_CHECKARG(1,
+                           descr,
+                           rocsparse::enum_utils::is_invalid(descr->get_alg()),
+                           rocsparse_status_invalid_value);
+
+        ROCSPARSE_CHECKARG(1,
+                           descr,
+                           rocsparse::enum_utils::is_invalid(descr->get_operation_A()),
+                           rocsparse_status_invalid_value);
+
+        ROCSPARSE_CHECKARG(1,
+                           descr,
+                           rocsparse::enum_utils::is_invalid(descr->get_operation_B()),
+                           rocsparse_status_invalid_value);
+
+        ROCSPARSE_CHECKARG(1,
+                           descr,
+                           rocsparse::enum_utils::is_invalid(descr->get_compute_datatype()),
+                           rocsparse_status_invalid_value);
+
+        ROCSPARSE_CHECKARG(1,
+                           descr,
+                           rocsparse::enum_utils::is_invalid(descr->get_scalar_datatype()),
+                           rocsparse_status_invalid_value);
+
+        // Validate the stage.
+        switch(stage)
+        {
+        case rocsparse_spgeam_stage_analysis:
+        {
+            if(descr->get_stage() == rocsparse_spgeam_stage_compute)
+            {
+                RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
+                    rocsparse_status_invalid_value,
+                    "invalid stage, the stage rocsparse_spgeam_stage_analysis cannot be called "
+                    "after "
+                    "the stage rocsparse_spgeam_stage_compute");
+            }
+            else if(descr->get_stage() == rocsparse_spgeam_stage_analysis)
+            {
+                RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
+                    rocsparse_status_invalid_value,
+                    "invalid stage, the stage rocsparse_spgeam_stage_analysis has already been "
+                    "executed");
+            }
+            break;
+        }
+        case rocsparse_spgeam_stage_compute:
+        {
+            if(descr->get_stage() == ((rocsparse_spgeam_stage)-1))
+            {
+                RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
+                    rocsparse_status_invalid_value,
+                    "invalid stage, the stage rocsparse_spgeam_stage_analysis must be executed "
+                    "before "
+                    "the stage rocsparse_spgeam_stage_compute");
+            }
+            break;
+        }
+        }
+
         return rocsparse_status_continue;
+    }
+
+    static rocsparse_status spgeam(rocsparse_handle             handle,
+                                   const rocsparse_spgeam_descr descr,
+                                   const void*                  alpha,
+                                   rocsparse_const_spmat_descr  mat_A,
+                                   const void*                  beta,
+                                   rocsparse_const_spmat_descr  mat_B,
+                                   rocsparse_spmat_descr        mat_C,
+                                   rocsparse_spgeam_stage       stage,
+                                   size_t                       buffer_size,
+                                   void*                        temp_buffer)
+    {
+        const rocsparse_format format_A = mat_A->format;
+        switch(stage)
+        {
+        case rocsparse_spgeam_stage_analysis:
+        {
+            switch(format_A)
+            {
+            case rocsparse_format_csr:
+            {
+                if(mat_C == nullptr)
+                {
+                    RETURN_IF_ROCSPARSE_ERROR(descr->csrgeam_allocate_descr_memory(
+                        handle, mat_A->rows, mat_B->cols, alpha, mat_A->nnz, beta, mat_B->nnz));
+                }
+
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrgeam_nnz(
+                    handle,
+                    descr,
+                    descr->get_operation_A(),
+                    descr->get_operation_B(),
+                    mat_A->rows,
+                    mat_B->cols,
+                    mat_A->descr,
+                    mat_A->nnz,
+                    mat_A->row_type,
+                    mat_A->const_row_data,
+                    mat_A->col_type,
+                    mat_A->const_col_data,
+                    mat_B->descr,
+                    mat_B->nnz,
+                    mat_B->row_type,
+                    mat_B->const_row_data,
+                    mat_B->col_type,
+                    mat_B->const_col_data,
+                    mat_C != nullptr ? mat_C->descr : nullptr,
+                    mat_C != nullptr ? mat_C->row_type : ((rocsparse_indextype)-1),
+                    mat_C != nullptr ? mat_C->row_data : nullptr,
+                    mat_C != nullptr ? &mat_C->nnz : nullptr,
+                    temp_buffer,
+                    true));
+
+                return rocsparse_status_success;
+            }
+            case rocsparse_format_bsr:
+            case rocsparse_format_coo:
+            case rocsparse_format_coo_aos:
+            case rocsparse_format_csc:
+            case rocsparse_format_ell:
+            case rocsparse_format_bell:
+            {
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+            }
+            }
+        }
+
+        case rocsparse_spgeam_stage_compute:
+        {
+            const void* local_alpha = alpha;
+            const void* local_beta  = beta;
+            RETURN_IF_ROCSPARSE_ERROR(
+                convert_scalars(handle, descr, alpha, beta, &local_alpha, &local_beta));
+
+            switch(format_A)
+            {
+            case rocsparse_format_csr:
+            {
+                RETURN_IF_ROCSPARSE_ERROR(descr->csrgeam_copy_row_pointer(handle,
+                                                                          mat_A->rows,
+                                                                          mat_B->cols,
+                                                                          mat_C->descr,
+                                                                          mat_C->row_type,
+                                                                          mat_C->row_data,
+                                                                          &mat_C->nnz));
+
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrgeam(handle,
+                                                             descr->get_operation_A(),
+                                                             descr->get_operation_B(),
+                                                             mat_A->rows,
+                                                             mat_B->cols,
+                                                             descr->get_scalar_datatype(),
+                                                             local_alpha,
+                                                             mat_A->descr,
+                                                             mat_A->nnz,
+                                                             mat_A->data_type,
+                                                             mat_A->const_val_data,
+                                                             mat_A->row_type,
+                                                             mat_A->const_row_data,
+                                                             mat_A->col_type,
+                                                             mat_A->const_col_data,
+                                                             descr->get_scalar_datatype(),
+                                                             local_beta,
+                                                             mat_B->descr,
+                                                             mat_B->nnz,
+                                                             mat_B->data_type,
+                                                             mat_B->const_val_data,
+                                                             mat_B->row_type,
+                                                             mat_B->const_row_data,
+                                                             mat_B->col_type,
+                                                             mat_B->const_col_data,
+                                                             mat_C->descr,
+                                                             mat_C->data_type,
+                                                             mat_C->val_data,
+                                                             mat_C->row_type,
+                                                             mat_C->const_row_data,
+                                                             mat_C->col_type,
+                                                             mat_C->col_data,
+                                                             temp_buffer));
+
+                return rocsparse_status_success;
+            }
+            case rocsparse_format_bsr:
+            case rocsparse_format_coo:
+            case rocsparse_format_coo_aos:
+            case rocsparse_format_csc:
+            case rocsparse_format_ell:
+            case rocsparse_format_bell:
+            {
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+            }
+            }
+        }
+
+        case rocsparse_spgeam_stage_symbolic:
+        {
+            switch(format_A)
+            {
+            case rocsparse_format_csr:
+            {
+                RETURN_IF_ROCSPARSE_ERROR(descr->csrgeam_copy_row_pointer(handle,
+                                                                          mat_A->rows,
+                                                                          mat_B->cols,
+                                                                          mat_C->descr,
+                                                                          mat_C->row_type,
+                                                                          mat_C->row_data,
+                                                                          &mat_C->nnz));
+
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrgeam_symbolic(handle,
+                                                                      descr->get_operation_A(),
+                                                                      descr->get_operation_B(),
+                                                                      mat_A->rows,
+                                                                      mat_B->cols,
+                                                                      mat_A->descr,
+                                                                      mat_A->nnz,
+                                                                      mat_A->row_type,
+                                                                      mat_A->const_row_data,
+                                                                      mat_A->col_type,
+                                                                      mat_A->const_col_data,
+                                                                      mat_B->descr,
+                                                                      mat_B->nnz,
+                                                                      mat_B->row_type,
+                                                                      mat_B->const_row_data,
+                                                                      mat_B->col_type,
+                                                                      mat_B->const_col_data,
+                                                                      mat_C->descr,
+                                                                      mat_C->row_type,
+                                                                      mat_C->const_row_data,
+                                                                      mat_C->col_type,
+                                                                      mat_C->col_data,
+                                                                      temp_buffer));
+
+                return rocsparse_status_success;
+            }
+            case rocsparse_format_bsr:
+            case rocsparse_format_coo:
+            case rocsparse_format_coo_aos:
+            case rocsparse_format_csc:
+            case rocsparse_format_ell:
+            case rocsparse_format_bell:
+            {
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+            }
+            }
+        }
+
+        case rocsparse_spgeam_stage_numeric:
+        {
+            const void* local_alpha = alpha;
+            const void* local_beta  = beta;
+            RETURN_IF_ROCSPARSE_ERROR(
+                convert_scalars(handle, descr, alpha, beta, &local_alpha, &local_beta));
+
+            switch(format_A)
+            {
+            case rocsparse_format_csr:
+            {
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrgeam_numeric(handle,
+                                                                     descr->get_operation_A(),
+                                                                     descr->get_operation_B(),
+                                                                     mat_A->rows,
+                                                                     mat_B->cols,
+                                                                     descr->get_scalar_datatype(),
+                                                                     local_alpha,
+                                                                     mat_A->descr,
+                                                                     mat_A->nnz,
+                                                                     mat_A->data_type,
+                                                                     mat_A->const_val_data,
+                                                                     mat_A->row_type,
+                                                                     mat_A->const_row_data,
+                                                                     mat_A->col_type,
+                                                                     mat_A->const_col_data,
+                                                                     descr->get_scalar_datatype(),
+                                                                     local_beta,
+                                                                     mat_B->descr,
+                                                                     mat_B->nnz,
+                                                                     mat_B->data_type,
+                                                                     mat_B->const_val_data,
+                                                                     mat_B->row_type,
+                                                                     mat_B->const_row_data,
+                                                                     mat_B->col_type,
+                                                                     mat_B->const_col_data,
+                                                                     mat_C->descr,
+                                                                     mat_C->data_type,
+                                                                     mat_C->val_data,
+                                                                     mat_C->row_type,
+                                                                     mat_C->const_row_data,
+                                                                     mat_C->col_type,
+                                                                     mat_C->col_data,
+                                                                     temp_buffer));
+
+                return rocsparse_status_success;
+            }
+            case rocsparse_format_bsr:
+            case rocsparse_format_coo:
+            case rocsparse_format_coo_aos:
+            case rocsparse_format_csc:
+            case rocsparse_format_ell:
+            case rocsparse_format_bell:
+            {
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+            }
+            }
+        }
+        }
+
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
     }
 }
 
@@ -558,7 +610,7 @@ try
         return rocsparse_status_success;
     }
 
-    RETURN_IF_ROCSPARSE_ERROR((rocsparse::spgeam_buffer_size_template(
+    RETURN_IF_ROCSPARSE_ERROR((rocsparse::spgeam_buffer_size(
         handle, descr, mat_A, mat_B, mat_C, stage, buffer_size_in_bytes)));
 
     return rocsparse_status_success;
@@ -600,12 +652,11 @@ try
         return rocsparse_status_success;
     }
 
-    rocsparse::spgeam_template_t spgeam_function;
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse::spgeam_template_find(
-        &spgeam_function, descr->compute_type, mat_A->row_type, mat_A->col_type));
-
-    RETURN_IF_ROCSPARSE_ERROR(spgeam_function(
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::spgeam(
         handle, descr, alpha, mat_A, beta, mat_B, mat_C, stage, buffer_size, temp_buffer));
+
+    // Record the stage that has been executed.
+    descr->set_stage(stage);
 
     return rocsparse_status_success;
 }

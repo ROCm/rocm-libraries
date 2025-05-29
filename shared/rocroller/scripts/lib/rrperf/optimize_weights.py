@@ -50,6 +50,7 @@ import itertools
 import math
 import multiprocessing
 import numpy as np
+import os
 import pathlib
 import random
 import subprocess
@@ -284,8 +285,7 @@ def bench(
         result_file = f"result_{weights.short_hash}.yaml"
         result_path = thedir / result_file
 
-        build_dir = rrperf.run.get_build_dir()
-        env = rrperf.run.get_arch_env(build_dir)
+        env = dict(os.environ)
         env["ROCROLLER_SCHEDULER_WEIGHTS"] = str(weights_path.absolute())
         env["OMP_NUM_THREADS"] = str(1)
 
@@ -301,7 +301,7 @@ def bench(
         process_result = subprocess.run(
             cmd,
             env=env,
-            cwd=build_dir,
+            cwd=rrperf.run.get_build_dir(),
             stderr=subprocess.STDOUT,
             stdout=subprocess.PIPE,
         )

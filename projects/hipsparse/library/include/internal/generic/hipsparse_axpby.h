@@ -32,7 +32,7 @@ extern "C" {
 *  \brief Scale a sparse vector and add it to a scaled dense vector.
 *
 *  \details
-*  \ref hipsparseAxpby multiplies the sparse vector \f$x\f$ with scalar \f$\alpha\f$ and
+*  \p hipsparseAxpby multiplies the sparse vector \f$x\f$ with scalar \f$\alpha\f$ and
 *  adds the result to the dense vector \f$y\f$ that is multiplied with scalar
 *  \f$\beta\f$, such that
 *
@@ -50,6 +50,26 @@ extern "C" {
 *          y[xInd[i]] += alpha * xVal[i]
 *      }
 *  \endcode
+*
+*  \p hipsparseAxpby supports the following precision data types for the sparse and dense vectors \f$x\f$ and 
+*  \f$y\f$ and compute types for the scalars \f$\alpha\f$ and \f$\beta\f$.
+*
+*  \par Uniform Precisions:
+*  <table>
+*  <caption id="axpby_uniform">Uniform Precisions</caption>
+*  <tr><th>X / Y / compute_type
+*  <tr><td>HIP_R_32F
+*  <tr><td>HIP_R_64F
+*  <tr><td>HIP_C_32F
+*  <tr><td>HIP_C_64F
+*  </table>
+*
+*  \par Mixed precisions:
+*  <table>
+*  <caption id="axpby_mixed">Mixed Precisions</caption>
+*  <tr><th>X / Y     <th>compute_type
+*  <tr><td>HIP_R_16F <td>HIP_R_32F
+*  </table>
 *
 *  @param[in]
 *  handle      handle to the hipsparse library context queue.

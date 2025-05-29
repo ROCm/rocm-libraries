@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2017 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -42,7 +42,11 @@ function(add_relative_test test_name test_target)
         endif()
     endif()
     file(RELATIVE_PATH rel_path "${CMAKE_CURRENT_BINARY_DIR}" "${EXE_PATH}/${EXE_NAME}")
-    add_test(NAME "${test_name}" COMMAND "./${rel_path}")
+    if(BUILD_COMPUTE_SANITIZER)
+        add_test(NAME "${test_name}" COMMAND "compute-sanitizer" "./${rel_path}")
+    else()
+        add_test(NAME "${test_name}" COMMAND "./${rel_path}")
+    endif()
     rocm_install(TARGETS ${test_target} COMPONENT tests)
     file(APPEND "${INSTALL_TEST_FILE}" "add_test(${test_name} \"../${EXE_NAME}\")\n")
 endfunction()

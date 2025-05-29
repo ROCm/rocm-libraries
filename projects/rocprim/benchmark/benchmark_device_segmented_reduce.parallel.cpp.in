@@ -26,7 +26,7 @@
 #include "benchmark_device_segmented_reduce.parallel.hpp"
 
 namespace {
-    auto benchmark = config_autotune_register::create<device_segmented_reduce_benchmark<
+    auto unused = benchmark_utils::executor::queue_sorted_instance<device_segmented_reduce_benchmark<
         @DataType@, rocprim::plus<@DataType@>, 
         rocprim::reduce_config<@BlockSize@u, @ItemsPerThread@u, rocprim::block_reduce_algorithm::using_warp_reduce>>>();
 }

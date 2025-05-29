@@ -43,20 +43,24 @@ namespace rocsparse
 
     using coomv_analysis_tuple = std::tuple<rocsparse_indextype, rocsparse_datatype>;
 
-#define COOMV_ANALYSIS_CONFIG(I_, T_)                                                 \
+    // clang-format off
+#define COOMV_ANALYSIS_CONFIG(I_, A_)                                                 \
     {                                                                                 \
-        coomv_analysis_tuple(I_, T_),                                                 \
+        coomv_analysis_tuple(I_, A_),                                                 \
             coomv_analysis_template<typename rocsparse::indextype_traits<I_>::type_t, \
-                                    typename rocsparse::datatype_traits<T_>::type_t>  \
+                                    typename rocsparse::datatype_traits<A_>::type_t>  \
     }
+    // clang-format on
 
     static const std::map<coomv_analysis_tuple, coomv_analysis_t> s_coomv_analysis_dispatch{
         {COOMV_ANALYSIS_CONFIG(rocsparse_indextype_i32, rocsparse_datatype_i8_r),
+         COOMV_ANALYSIS_CONFIG(rocsparse_indextype_i32, rocsparse_datatype_f16_r),
          COOMV_ANALYSIS_CONFIG(rocsparse_indextype_i32, rocsparse_datatype_f32_r),
          COOMV_ANALYSIS_CONFIG(rocsparse_indextype_i32, rocsparse_datatype_f64_r),
          COOMV_ANALYSIS_CONFIG(rocsparse_indextype_i32, rocsparse_datatype_f32_c),
          COOMV_ANALYSIS_CONFIG(rocsparse_indextype_i32, rocsparse_datatype_f64_c),
          COOMV_ANALYSIS_CONFIG(rocsparse_indextype_i64, rocsparse_datatype_i8_r),
+         COOMV_ANALYSIS_CONFIG(rocsparse_indextype_i64, rocsparse_datatype_f16_r),
          COOMV_ANALYSIS_CONFIG(rocsparse_indextype_i64, rocsparse_datatype_f32_r),
          COOMV_ANALYSIS_CONFIG(rocsparse_indextype_i64, rocsparse_datatype_f64_r),
          COOMV_ANALYSIS_CONFIG(rocsparse_indextype_i64, rocsparse_datatype_f32_c),
@@ -64,10 +68,10 @@ namespace rocsparse
 
     static rocsparse_status coomv_analysis_find(coomv_analysis_t*   function_,
                                                 rocsparse_indextype i_type_,
-                                                rocsparse_datatype  t_type_)
+                                                rocsparse_datatype  a_type_)
     {
         const auto& it = rocsparse::s_coomv_analysis_dispatch.find(
-            rocsparse::coomv_analysis_tuple(i_type_, t_type_));
+            rocsparse::coomv_analysis_tuple(i_type_, a_type_));
 
         if(it != rocsparse::s_coomv_analysis_dispatch.end())
         {
@@ -79,25 +83,25 @@ namespace rocsparse
 #ifndef NDEBUG
             std::cout << "invalid precision configuration: "
                       << "i_type: " << rocsparse::to_string(i_type_) << std::endl
-                      << ", t_type: " << rocsparse::to_string(t_type_) << std::endl;
+                      << ", a_type: " << rocsparse::to_string(a_type_) << std::endl;
 
             std::cout << "available configuration are: " << std::endl;
             for(const auto& p : rocsparse::s_coomv_analysis_dispatch)
             {
                 const auto& t      = p.first;
                 const auto  i_type = std::get<0>(t);
-                const auto  t_type = std::get<1>(t);
+                const auto  a_type = std::get<1>(t);
                 std::cout << std::endl
                           << std::endl
                           << "i_type: " << rocsparse::to_string(i_type) << std::endl
-                          << ", t_type: " << rocsparse::to_string(t_type) << std::endl;
+                          << ", a_type: " << rocsparse::to_string(a_type) << std::endl;
             }
 #endif
 
             std::stringstream sstr;
             sstr << "invalid precision configuration: "
                  << "i_type: " << rocsparse::to_string(i_type_)
-                 << ", t_type: " << rocsparse::to_string(t_type_);
+                 << ", a_type: " << rocsparse::to_string(a_type_);
 
             RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value,
                                                    sstr.str().c_str());

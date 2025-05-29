@@ -14,10 +14,10 @@
  *  limitations under the License.
  */
 
-
 #pragma once
 
 #include <thrust/detail/config.h>
+
 #include <thrust/system/detail/generic/tag.h>
 
 THRUST_NAMESPACE_BEGIN
@@ -28,25 +28,17 @@ namespace detail
 namespace generic
 {
 
+template <typename DerivedPolicy, typename InputIterator1, typename InputIterator2>
+THRUST_HOST_DEVICE thrust::pair<InputIterator1, InputIterator2> mismatch(
+  thrust::execution_policy<DerivedPolicy>& exec, InputIterator1 first1, InputIterator1 last1, InputIterator2 first2);
 
-template<typename DerivedPolicy, typename InputIterator1, typename InputIterator2>
-THRUST_HOST_DEVICE
-  thrust::pair<InputIterator1, InputIterator2>
-    mismatch(thrust::execution_policy<DerivedPolicy> &exec,
-             InputIterator1 first1,
-             InputIterator1 last1,
-             InputIterator2 first2);
-
-
-template<typename DerivedPolicy, typename InputIterator1, typename InputIterator2, typename BinaryPredicate>
-THRUST_HOST_DEVICE
-  thrust::pair<InputIterator1, InputIterator2>
-    mismatch(thrust::execution_policy<DerivedPolicy> &exec,
-             InputIterator1 first1,
-             InputIterator1 last1,
-             InputIterator2 first2,
-             BinaryPredicate pred);
-
+template <typename DerivedPolicy, typename InputIterator1, typename InputIterator2, typename BinaryPredicate>
+THRUST_HOST_DEVICE thrust::pair<InputIterator1, InputIterator2> mismatch(
+  thrust::execution_policy<DerivedPolicy>& exec,
+  InputIterator1 first1,
+  InputIterator1 last1,
+  InputIterator2 first2,
+  BinaryPredicate pred);
 
 } // end namespace generic
 } // end namespace detail
@@ -54,4 +46,3 @@ THRUST_HOST_DEVICE
 THRUST_NAMESPACE_END
 
 #include <thrust/system/detail/generic/mismatch.inl>
-

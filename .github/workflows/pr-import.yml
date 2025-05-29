@@ -92,7 +92,9 @@ jobs:
 
           echo "$PR_JSON" > pr.json
 
-          echo "title=$(jq -r .title pr.json)" >> $GITHUB_OUTPUT
+          # properly escape backticks in title
+          TITLE=$(jq -r .title pr.json | sed 's/`/\\`/g')
+          echo "title=$TITLE" >> $GITHUB_OUTPUT
 
           {
             echo 'body<<EOF'
@@ -107,8 +109,9 @@ jobs:
       - name: Create new branch for import
         id: import-branch
         run: |
-          BRANCH_NAME=$(echo "${{ steps.prdata.outputs.head_ref }}" | sed 's|/|_|g')
-          IMPORT_BRANCH="import/$BRANCH_NAME"
+          SANITIZED_REPO=$(echo "${{ github.event.inputs.subrepo-repo }}" | sed 's|/|_|g')
+          SANITIZED_REF=$(echo "${{ steps.prdata.outputs.head_ref }}" | sed 's|/|_|g')
+          IMPORT_BRANCH="import/${SANITIZED_REPO}/${SANITIZED_REF}"
           echo "import_branch=$IMPORT_BRANCH" >> $GITHUB_OUTPUT
           git checkout -b "$IMPORT_BRANCH"
 

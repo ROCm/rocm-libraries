@@ -219,12 +219,17 @@ function(TensileCreateLibraryFiles
   if (WIN32 OR (VIRTUALENV_BIN_DIR AND VIRTUALENV_PYTHON_EXENAME))
     set(CommandLine ${VIRTUALENV_BIN_DIR}/${VIRTUALENV_PYTHON_EXENAME} ${CommandLine})
   endif()
-  # Tensile relies on the tools from the path, so capture the configure time
-  # path. It would be better if this were explicit, but that would be a pretty
-  # big change.
-  set(CommandLine
-    "${CMAKE_COMMAND}" -E env "'PATH=$ENV{PATH}'" --
-    ${CommandLine})
+
+  if (NOT WIN32)
+    # This removed for windows as breaking rocBLAS compilation
+    #
+    # Tensile relies on the tools from the path, so capture the configure time
+    # path. It would be better if this were explicit, but that would be a pretty
+    # big change.
+    set(CommandLine
+      "${CMAKE_COMMAND}" -E env "'PATH=$ENV{PATH}'" --
+      ${CommandLine})
+  endif()
   message(STATUS "Tensile_CREATE_COMMAND: ${CommandLine}")
 
   if(Tensile_EMBED_LIBRARY)

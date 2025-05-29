@@ -111,9 +111,10 @@ extern "C" {
 *  \par Mixed precisions:
 *  <table>
 *  <caption id="spmv_mixed">Mixed Precisions</caption>
-*  <tr><th>A / X                   <th>Y                        <th>compute_type
-*  <tr><td>rocsparse_datatype_i8_r <td>rocsparse_datatype_i32_r <td>rocsparse_datatype_i32_r
-*  <tr><td>rocsparse_datatype_i8_r <td>rocsparse_datatype_f32_r <td>rocsparse_datatype_f32_r
+*  <tr><th>A / X                    <th>Y                        <th>compute_type
+*  <tr><td>rocsparse_datatype_i8_r  <td>rocsparse_datatype_i32_r <td>rocsparse_datatype_i32_r
+*  <tr><td>rocsparse_datatype_i8_r  <td>rocsparse_datatype_f32_r <td>rocsparse_datatype_f32_r
+*  <tr><td>rocsparse_datatype_f16_r <td>rocsparse_datatype_f32_r <td>rocsparse_datatype_f32_r
 *  </table>
 *
 *  \par Mixed-regular real precisions

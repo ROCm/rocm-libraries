@@ -5,7 +5,7 @@
 .. _reference:
 
 ########################################
-Reference
+rocSOLVER API reference
 ########################################
 
 This section provides technical descriptions and important information about

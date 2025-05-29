@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -29,11 +29,11 @@
 // includes, so we fake it out by specifying all possible files we might end up
 // including inside an #if 0.
 #if 0
-#include <thrust/system/cpp/detail/scan.h>
-#include <thrust/system/cuda/detail/scan.h>
-#include <thrust/system/hip/detail/scan.h>
-#include <thrust/system/omp/detail/scan.h>
-#include <thrust/system/tbb/detail/scan.h>
+#  include <thrust/system/cpp/detail/scan.h>
+#  include <thrust/system/cuda/detail/scan.h>
+#  include <thrust/system/hip/detail/scan.h>
+#  include <thrust/system/omp/detail/scan.h>
+#  include <thrust/system/tbb/detail/scan.h>
 #endif
 
 #define __THRUST_HOST_SYSTEM_SCAN_HEADER <__THRUST_HOST_SYSTEM_ROOT/detail/scan.h>

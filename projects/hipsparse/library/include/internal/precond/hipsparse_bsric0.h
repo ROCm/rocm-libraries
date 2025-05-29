@@ -30,9 +30,6 @@ extern "C" {
 
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
 /*! \ingroup precond_module
- *  \brief Incomplete Cholesky factorization with 0 fill-ins and no pivoting using BSR
- *  storage format
- *
  *  \details
  *  \p hipsparseXbsric02_zeroPivot returns \ref HIPSPARSE_STATUS_ZERO_PIVOT, if either a
  *  structural or numerical zero has been found during \ref hipsparseSbsric02_analysis 
@@ -72,14 +69,11 @@ hipsparseStatus_t
 
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
 /*! \ingroup precond_module
- *  \brief Incomplete Cholesky factorization with 0 fill-ins and no pivoting using BSR
- *  storage format
- *
  *  \details
  *  \p hipsparseXbsric02_bufferSize returns the size of the temporary storage buffer
  *  in bytes that is required by \ref hipsparseSbsric02_analysis "hipsparseXbsric02_analysis()" 
  *  and \ref hipsparseSbsric02 "hipsparseXbsric02()". The temporary storage buffer must be 
- *  allocated by the user.
+ *  allocated by the user. 
  *
  *  @param[in]
  *  handle             handle to the hipsparse library context queue.
@@ -176,12 +170,10 @@ hipsparseStatus_t hipsparseZbsric02_bufferSize(hipsparseHandle_t         handle,
 
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
 /*! \ingroup precond_module
- *  \brief Incomplete Cholesky factorization with 0 fill-ins and no pivoting using BSR
- *  storage format
- *
  *  \details
  *  \p hipsparseXbsric02_analysis performs the analysis step for \ref hipsparseSbsric02 
- *  "hipsparseXbsric02()".
+ *  "hipsparseXbsric02()". It is expected that this function will be executed only once 
+ *  for a given matrix and particular operation type.
  *
  *  \note
  *  If the matrix sparsity pattern changes, the gathered information will become invalid.
@@ -296,12 +288,25 @@ hipsparseStatus_t hipsparseZbsric02_analysis(hipsparseHandle_t         handle,
  *    A \approx LL^T
  *  \f]
  *
+ *  Computing the above incomplete Cholesky factorization requires three steps to complete. First, 
+ *  the user determines the size of the required temporary storage buffer by calling 
+ *  \ref hipsparseSbsric02_bufferSize "hipsparseXbsric02_bufferSize()". Once this buffer size has been determined, 
+ *  the user allocates the buffer and passes it to \ref hipsparseSbsric02_analysis "hipsparseXbsric02_analysis()". 
+ *  This will perform analysis on the sparsity pattern of the matrix. Finally, the user calls \p hipsparseXbsric02 
+ *  to perform the actual factorization. The calculation of the buffer size and the analysis of the sparse matrix 
+ *  only need to be performed once for a given sparsity pattern while the factorization can be repeatedly applied 
+ *  to multiple matrices having the same sparsity pattern. Once all calls to \p hipsparseXbsric02 are complete, 
+ *  the temporary buffer can be deallocated.
+ *
  *  \p hipsparseXbsric02 requires a user allocated temporary buffer. Its size is returned
  *  by \ref hipsparseSbsric02_bufferSize "hipsparseXbsric02_bufferSize()". Furthermore, 
  *  analysis meta data is required. It can be obtained by \ref hipsparseSbsric02_analysis 
  *  "hipsparseXbsric02_analysis()". \p hipsparseXbsric02 reports the first zero pivot 
  *  (either numerical or structural zero). The zero pivot status can be obtained by calling 
  *  \ref hipsparseXbsric02_zeroPivot().
+ *
+ *  \p hipsparseXbsric02 reports the first zero pivot (either numerical or structural zero).
+ *  The zero pivot status can be obtained by calling \ref hipsparseXbsric02_zeroPivot().
  *
  *  \note
  *  This function is non blocking and executed asynchronously with respect to the host.

@@ -50,6 +50,7 @@ std::string stockham_rtc_kernel_name(const StockhamGeneratorSpecs& specs,
                                      SBRC_TRANSPOSE_TYPE           transpose_type,
                                      CallbackType                  cbtype,
                                      BluesteinFuseType             fuseBlue,
+                                     PartialPassType               ppType,
                                      const LoadOps&                loadOps,
                                      const StoreOps&               storeOps);
 
@@ -76,6 +77,9 @@ std::string stockham_rtc(const StockhamGeneratorSpecs& specs,
                          SBRC_TRANSPOSE_TYPE           transpose_type,
                          CallbackType                  cbtype,
                          const BluesteinFuseType&      fuseBlue,
+                         const PartialPassType&        ppType,
+                         const std::vector<size_t>&    ppFactors,
+                         const size_t                  ppLength,
                          const LoadOps&                loadOps,
                          const StoreOps&               storeOps);
 

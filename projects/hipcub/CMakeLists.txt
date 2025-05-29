@@ -58,6 +58,8 @@ option(DOWNLOAD_CUB "Download CUB and thrust. Do not search for CUB package" OFF
 option(BUILD_BENCHMARK "Build benchmarks" OFF)
 option(BUILD_EXAMPLE "Build Examples" OFF)
 option(BUILD_ADDRESS_SANITIZER "Build with address sanitizer enabled" OFF)
+option(BUILD_OFFLOAD_COMPRESS "Build hipCUB with offload compression" ON)
+option(BUILD_COMPUTE_SANITIZER "Build tests with cuda's compute sanitizer enabled" OFF)
 
 check_language(HIP)
 cmake_dependent_option(USE_HIPCXX "Use CMake HIP language support" OFF CMAKE_HIP_COMPILER OFF)
@@ -129,8 +131,19 @@ if(BUILD_ADDRESS_SANITIZER)
   add_link_options(-fuse-ld=lld)
 endif()
 
+include(CheckCXXCompilerFlag)
+
+if(BUILD_OFFLOAD_COMPRESS)
+  check_cxx_compiler_flag("--offload-compress" CXX_COMPILER_SUPPORTS_OFFLOAD_COMPRESS)
+  if(CXX_COMPILER_SUPPORTS_OFFLOAD_COMPRESS)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --offload-compress")
+  else()
+    message(STATUS "Warning: BUILD_OFFLOAD_COMPRESS=ON but flag not supported by compiler. Ignoring option.")
+  endif()
+endif()
+
 # Setup VERSION
-set(VERSION_STRING "3.5.0")
+set(VERSION_STRING "4.0.0")
 rocm_setup_version(VERSION ${VERSION_STRING})
 math(EXPR hipcub_VERSION_NUMBER "${hipcub_VERSION_MAJOR} * 100000 + ${hipcub_VERSION_MINOR} * 100 + ${hipcub_VERSION_PATCH}")
 

@@ -516,29 +516,31 @@ namespace rocsparse
         // Stream
         if(block_dim == 1)
         {
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrgeam_template(handle,
-                                                                  rocsparse_operation_none,
-                                                                  rocsparse_operation_none,
-                                                                  mb,
-                                                                  nb,
-                                                                  alpha_device_host,
-                                                                  descr_A,
-                                                                  nnzb_A,
-                                                                  bsr_val_A,
-                                                                  bsr_row_ptr_A,
-                                                                  bsr_col_ind_A,
-                                                                  beta_device_host,
-                                                                  descr_B,
-                                                                  nnzb_B,
-                                                                  bsr_val_B,
-                                                                  bsr_row_ptr_B,
-                                                                  bsr_col_ind_B,
-                                                                  descr_C,
-                                                                  bsr_val_C,
-                                                                  bsr_row_ptr_C,
-                                                                  bsr_col_ind_C,
-                                                                  nullptr,
-                                                                  nullptr));
+            void* temp_buffer = nullptr;
+            RETURN_IF_ROCSPARSE_ERROR((rocsparse::csrgeam_template<T, rocsparse_int, rocsparse_int>(
+                handle,
+                rocsparse_operation_none,
+                rocsparse_operation_none,
+                mb,
+                nb,
+                alpha_device_host,
+                descr_A,
+                nnzb_A,
+                bsr_val_A,
+                bsr_row_ptr_A,
+                bsr_col_ind_A,
+                beta_device_host,
+                descr_B,
+                nnzb_B,
+                bsr_val_B,
+                bsr_row_ptr_B,
+                bsr_col_ind_B,
+                descr_C,
+                bsr_val_C,
+                bsr_row_ptr_C,
+                bsr_col_ind_C,
+                temp_buffer)));
+
             return rocsparse_status_success;
         }
 

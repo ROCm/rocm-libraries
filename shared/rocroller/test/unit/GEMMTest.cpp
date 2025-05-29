@@ -671,7 +671,8 @@ namespace GEMMDriverTest
                                        alpha,
                                        beta,
                                        gemm.transA == "T",
-                                       gemm.transB == "T");
+                                       gemm.transB == "T",
+                                       gemm.scaleBlockSize);
             }
             else if constexpr(std::is_same_v<TC, TD>)
             {

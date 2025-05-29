@@ -218,8 +218,12 @@ namespace TensileLite
 
         std::vector<dtype> MLPNet::predict(std::vector<float> const& probkey) const
         {
-            dtype              M = probkey[0], N = probkey[1], B = probkey[2], K = probkey[3];
-            dtype              gflops = M * N * K / 1.e9, reads = (M * N + M * K + K * N) / 1.e6;
+            dtype M = probkey[0], N = probkey[1], B = probkey[2], K = probkey[3];
+            M = std::min(dtype(16384), M);
+            N = std::min(dtype(16384), N);
+            K = std::min(dtype(16384), K);
+            B = std::min(dtype(32), B);
+            dtype gflops = M * N * K / 1.e9, reads = (M * N + M * K + K * N) / 1.e6;
             std::vector<dtype> F = {M,
                                     N,
                                     K,

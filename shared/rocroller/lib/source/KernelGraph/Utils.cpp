@@ -1249,5 +1249,67 @@ namespace rocRoller
             Throw<FatalError>("getCodeGeneratorCoordinates tile type not implemented yet.");
         }
 
+        /**
+         * @brief Helper for removeRedundantBodyEdgesBaselineMethod (early return).
+         */
+        bool static isRedundantBodyEdge(KernelGraph const& graph, int edge)
+        {
+            namespace CF = rocRoller::KernelGraph::ControlGraph;
+
+            auto tail = *only(graph.control.getNeighbours<GD::Upstream>(edge));
+            auto head = *only(graph.control.getNeighbours<GD::Downstream>(edge));
+
+            auto onlyFollowDifferentBodyEdges = [&](int x) -> bool {
+                auto isSame = x == edge;
+                auto isBody = CF::isEdge<Body>(graph.control.getElement(x));
+                return !isSame && isBody;
+            };
+
+            {
+                auto reachable
+                    = !graph.control
+                           .depthFirstVisit(tail, onlyFollowDifferentBodyEdges, GD::Downstream)
+                           .filter([head](int x) { return x == head; })
+                           .empty();
+
+                if(reachable)
+                    return true;
+            }
+
+            auto otherBodies = graph.control.getOutputNodeIndices<Body>(tail).filter(
+                [head](int x) { return x != head; });
+
+            for(auto top : otherBodies)
+            {
+                auto reachable = !graph.control
+                                      .depthFirstVisit(
+                                          top, graph.control.isElemType<Sequence>(), GD::Downstream)
+                                      .filter([head](int x) { return x == head; })
+                                      .empty();
+
+                if(reachable)
+                    return true;
+            }
+            return false;
+        }
+
+        /**
+         * @brief Remove redundant body edges in control graph. This is a baseline method for
+         *        verifying correctness.
+         */
+        void removeRedundantBodyEdgesBaselineMethod(KernelGraph& graph)
+        {
+            auto edges = graph.control.getEdges()
+                             .filter(graph.control.isElemType<Body>())
+                             .to<std::vector>();
+            for(auto edge : edges)
+            {
+                if(isRedundantBodyEdge(graph, edge))
+                {
+                    Log::debug("Deleting redundant Body edge: {}", edge);
+                    graph.control.deleteElement(edge);
+                }
+            }
+        }
     }
 }

@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -180,6 +180,7 @@ typedef enum rocsolver_alg_mode_
     rocsolver_alg_mode_gpu
     = 291, /**< Computations are all performed on the GPU. This is the default mode. */
     rocsolver_alg_mode_hybrid = 292, /**< Computations are performed on the CPU and GPU. */
+    rocsolver_alg_mode_mixed = 293, /**< Nested functions use a mixture of hybrid and GPU-only modes. */
 } rocsolver_alg_mode;
 
 /*! \brief Used to specify a function with multiple supported algorithm modes.
@@ -187,8 +188,10 @@ typedef enum rocsolver_alg_mode_
 typedef enum rocsolver_function_
 {
     rocsolver_function_bdsqr = 401,
-    rocsolver_function_gesvd = 402,
+    rocsolver_function_gesvd = 402, /**< Affected by bdsqr. */
     rocsolver_function_sterf = 403,
+    rocsolver_function_steqr = 404,
+    rocsolver_function_syev_heev = 405, /**< Affected by sterf and steqr. */
 } rocsolver_function;
 
 #endif /* ROCSOLVER_EXTRA_TYPES_H */

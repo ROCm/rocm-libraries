@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -1219,7 +1219,7 @@ catch(...)
     return hipsolver::exception2hip_status();
 }
 
-/*hipsolverStatus_t hipsolverSpCcsrlsvqr(hipsolverSpHandle_t       handle,
+hipsolverStatus_t hipsolverSpCcsrlsvqr(hipsolverSpHandle_t       handle,
                                        int                       n,
                                        int                       nnz,
                                        const hipsparseMatDescr_t descrA,
@@ -1341,7 +1341,7 @@ try
     CHECK_HIP_ERROR(hipMemcpy((void*)x, b, sizeof(hipDoubleComplex) * n, hipMemcpyDeviceToDevice));
 
     // convert A to dense matrix
-    hipFloatComplex* denseA;
+    hipDoubleComplex* denseA;
     CHECK_HIP_ERROR(hipMalloc(&denseA, sizeof(hipDoubleComplex) * n * n));
     rocsparse_zcsr2dense(sp->sphandle,
                          n,
@@ -1379,6 +1379,6 @@ try
 catch(...)
 {
     return hipsolver::exception2hip_status();
-}*/
+}
 
 } //extern C

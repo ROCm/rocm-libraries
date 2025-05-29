@@ -114,6 +114,9 @@
 #include "common/refact/testing_csrrf_splitlu.hpp"
 #include "common/refact/testing_csrrf_sumlu.hpp"
 
+// unit
+#include "common/unit/testing_gemm.hpp"
+
 struct str_less
 {
     bool operator()(const char* a, const char* b) const
@@ -309,6 +312,13 @@ class rocsolver_dispatcher
             {"geblttrs_npvt", testing_geblttrs_npvt<false, false, T>},
             {"geblttrs_npvt_batched", testing_geblttrs_npvt<true, true, T>},
             {"geblttrs_npvt_strided_batched", testing_geblttrs_npvt<false, true, T>},
+            // unit
+            {"gemm", testing_gemm<false, false, T, rocblas_int>},
+            {"gemm_batched", testing_gemm<true, true, T, rocblas_int>},
+            {"gemm_strided_batched", testing_gemm<false, true, T, rocblas_int>},
+            {"gemm_64", testing_gemm<false, false, T, int64_t>},
+            {"gemm_batched_64", testing_gemm<true, true, T, int64_t>},
+            {"gemm_strided_batched_64", testing_gemm<false, true, T, int64_t>},
         };
 
         // Grab function from the map and execute

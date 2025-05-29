@@ -44,9 +44,7 @@ extern "C" {
 *  \f[
 *    op(A) = \left\{
 *    \begin{array}{ll}
-*        A,   & \text{if transA == HIPSPARSE_OPERATION_NON_TRANSPOSE} \\
-*        A^T, & \text{if transA == HIPSPARSE_OPERATION_TRANSPOSE} \\
-*        A^H, & \text{if transA == HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE}
+*        A,   & \text{if transA == HIPSPARSE_OPERATION_NON_TRANSPOSE}
 *    \end{array}
 *    \right.
 *  \f]

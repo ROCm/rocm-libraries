@@ -191,11 +191,11 @@ rocsparse_status rocsparse::coomv_analysis_template(rocsparse_handle          ha
     case rocsparse_coomv_alg_default:
     case rocsparse_coomv_alg_segmented:
     {
-        break;
+        return rocsparse_status_success;
     }
     case rocsparse_coomv_alg_atomic:
     {
-        return rocsparse_status_success;
+        break;
     }
     }
 
@@ -222,7 +222,7 @@ rocsparse_status rocsparse::coomv_analysis_template(rocsparse_handle          ha
     {
     case rocsparse_operation_none:
     {
-        if(std::is_same<I, int32_t>() && nnz < std::numeric_limits<int32_t>::max())
+        if(std::is_same<I, int32_t>() && nnz <= std::numeric_limits<int32_t>::max())
         {
             I* max_nnz     = nullptr;
             I* csr_row_ptr = nullptr;
@@ -259,11 +259,11 @@ rocsparse_status rocsparse::coomv_analysis_template(rocsparse_handle          ha
             int64_t* max_nnz     = nullptr;
             int64_t* csr_row_ptr = nullptr;
             RETURN_IF_HIP_ERROR(
-                rocsparse_hipMallocAsync((void**)&max_nnz, sizeof(I), handle->stream));
+                rocsparse_hipMallocAsync(&max_nnz, sizeof(int64_t), handle->stream));
 
-            RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(
-                (void**)&csr_row_ptr, sizeof(int64_t) * (m + 1), handle->stream));
-            RETURN_IF_HIP_ERROR(hipMemsetAsync(max_nnz, 0, sizeof(I), handle->stream));
+            RETURN_IF_HIP_ERROR(
+                rocsparse_hipMallocAsync(&csr_row_ptr, sizeof(int64_t) * (m + 1), handle->stream));
+            RETURN_IF_HIP_ERROR(hipMemsetAsync(max_nnz, 0, sizeof(int64_t), handle->stream));
 
             RETURN_IF_ROCSPARSE_ERROR(
                 rocsparse::coo2csr_template(handle, coo_row_ind, nnz, m, csr_row_ptr, descr->base));
@@ -278,9 +278,11 @@ rocsparse_status rocsparse::coomv_analysis_template(rocsparse_handle          ha
                 csr_row_ptr,
                 max_nnz);
 
-            int64_t local_max_nnz;
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync(
-                &local_max_nnz, max_nnz, sizeof(int64_t), hipMemcpyDeviceToHost, handle->stream));
+            RETURN_IF_HIP_ERROR(hipMemcpyAsync(&descr->max_nnz_per_row,
+                                               max_nnz,
+                                               sizeof(int64_t),
+                                               hipMemcpyDeviceToHost,
+                                               handle->stream));
             RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
 
             RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(max_nnz, handle->stream));
@@ -778,6 +780,8 @@ INSTANTIATE_MIXED_ANALYSIS(int32_t, int8_t);
 INSTANTIATE_MIXED_ANALYSIS(int64_t, int8_t);
 INSTANTIATE_MIXED_ANALYSIS(int32_t, int32_t);
 INSTANTIATE_MIXED_ANALYSIS(int64_t, int32_t);
+INSTANTIATE_MIXED_ANALYSIS(int32_t, _Float16);
+INSTANTIATE_MIXED_ANALYSIS(int64_t, _Float16);
 #undef INSTANTIATE_MIXED_ANALYSIS
 
 #define INSTANTIATE_MIXED(T, I, A, X, Y)                                                          \
@@ -801,6 +805,8 @@ INSTANTIATE_MIXED(int32_t, int32_t, int8_t, int8_t, int32_t);
 INSTANTIATE_MIXED(int32_t, int64_t, int8_t, int8_t, int32_t);
 INSTANTIATE_MIXED(float, int32_t, int8_t, int8_t, float);
 INSTANTIATE_MIXED(float, int64_t, int8_t, int8_t, float);
+INSTANTIATE_MIXED(float, int32_t, _Float16, _Float16, float);
+INSTANTIATE_MIXED(float, int64_t, _Float16, _Float16, float);
 INSTANTIATE_MIXED(
     rocsparse_float_complex, int32_t, float, rocsparse_float_complex, rocsparse_float_complex);
 INSTANTIATE_MIXED(

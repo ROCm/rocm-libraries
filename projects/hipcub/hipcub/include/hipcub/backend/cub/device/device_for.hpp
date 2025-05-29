@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2024, NVIDIA CORPORATION. All rights reserved.
- * Modifications Copyright (c) 2024, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2024-2025, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -31,115 +31,131 @@
 
 #include "../../../config.hpp"
 
-#include <cub/device/device_for.cuh>
+#include <cub/device/device_for.cuh> // IWYU pragma: export
 
 BEGIN_HIPCUB_NAMESPACE
 
-template<class RandomAccessIteratorT, class OpT>
-HIPCUB_RUNTIME_FUNCTION
-static hipError_t
-    ForEach(RandomAccessIteratorT first, RandomAccessIteratorT last, OpT op, hipStream_t stream = 0)
+struct DeviceFor
 {
-    return hipCUDAErrorTohipError(cub::DeviceFor::ForEach(first, last, op, stream));
-}
-
-template<class RandomAccessIteratorT, class OpT>
+    template<class RandomAccessIteratorT, class OpT>
 HIPCUB_RUNTIME_FUNCTION
-static hipError_t ForEach(void*                 d_temp_storage,
-                          size_t&               temp_storage_bytes,
-                          RandomAccessIteratorT first,
-                          RandomAccessIteratorT last,
-                          OpT                   op,
-                          hipStream_t           stream = 0)
-{
-    return hipCUDAErrorTohipError(
-        cub::DeviceFor::ForEach(d_temp_storage, temp_storage_bytes, first, last, op, stream));
-}
-
-template<class RandomAccessIteratorT, class OffsetT, class OpT>
-HIPCUB_RUNTIME_FUNCTION
-static hipError_t
-    ForEachN(RandomAccessIteratorT first, OffsetT num_items, OpT op, hipStream_t stream = 0)
-{
-    return hipCUDAErrorTohipError(cub::DeviceFor::ForEachN(first, num_items, op, stream));
-}
-
-template<class RandomAccessIteratorT, class OffsetT, class OpT>
-HIPCUB_RUNTIME_FUNCTION
-static hipError_t ForEachN(void*                 d_temp_storage,
-                           size_t&               temp_storage_bytes,
-                           RandomAccessIteratorT first,
-                           OffsetT               num_items,
-                           OpT                   op,
-                           hipStream_t           stream = 0)
-{
-    return hipCUDAErrorTohipError(
-        cub::DeviceFor::ForEachN(d_temp_storage, temp_storage_bytes, first, num_items, op, stream));
-}
-
-template<class RandomAccessIteratorT, class OpT>
-HIPCUB_RUNTIME_FUNCTION
-static hipError_t ForEachCopy(RandomAccessIteratorT first,
+    static hipError_t ForEach(RandomAccessIteratorT first,
                               RandomAccessIteratorT last,
                               OpT                   op,
                               hipStream_t           stream = 0)
-{
-    return hipCUDAErrorTohipError(cub::DeviceFor::ForEachCopy(first, last, op, stream));
-}
+    {
+        return hipCUDAErrorTohipError(cub::DeviceFor::ForEach(first, last, op, stream));
+    }
 
-template<class RandomAccessIteratorT, class OpT>
+    template<class RandomAccessIteratorT, class OpT>
 HIPCUB_RUNTIME_FUNCTION
-static hipError_t ForEachCopy(void*                 d_temp_storage,
+    static hipError_t ForEach(void*                 d_temp_storage,
                               size_t&               temp_storage_bytes,
                               RandomAccessIteratorT first,
                               RandomAccessIteratorT last,
                               OpT                   op,
                               hipStream_t           stream = 0)
-{
-    return hipCUDAErrorTohipError(
-        cub::DeviceFor::ForEachCopy(d_temp_storage, temp_storage_bytes, first, last, op, stream));
-}
+    {
+        return hipCUDAErrorTohipError(
+            cub::DeviceFor::ForEach(d_temp_storage, temp_storage_bytes, first, last, op, stream));
+    }
 
-template<class RandomAccessIteratorT, class OffsetT, class OpT>
-HIPCUB_RUNTIME_FUNCTION
-static hipError_t
-    ForEachCopyN(RandomAccessIteratorT first, OffsetT num_items, OpT op, hipStream_t stream = 0)
-{
-    return hipCUDAErrorTohipError(cub::DeviceFor::ForEachCopyN(first, num_items, op, stream));
-}
+    template<class RandomAccessIteratorT, class OffsetT, class OpT>
+    HIPCUB_RUNTIME_FUNCTION
+    static hipError_t
+        ForEachN(RandomAccessIteratorT first, OffsetT num_items, OpT op, hipStream_t stream = 0)
+    {
+        return hipCUDAErrorTohipError(cub::DeviceFor::ForEachN(first, num_items, op, stream));
+    }
 
-template<class RandomAccessIteratorT, class OffsetT, class OpT>
+    template<class RandomAccessIteratorT, class OffsetT, class OpT>
 HIPCUB_RUNTIME_FUNCTION
-static hipError_t ForEachCopyN(void*                 d_temp_storage,
+    static hipError_t ForEachN(void*                 d_temp_storage,
                                size_t&               temp_storage_bytes,
                                RandomAccessIteratorT first,
                                OffsetT               num_items,
                                OpT                   op,
                                hipStream_t           stream = 0)
-{
-    return hipCUDAErrorTohipError(cub::DeviceFor::ForEachCopyN(d_temp_storage,
+    {
+        return hipCUDAErrorTohipError(cub::DeviceFor::ForEachN(d_temp_storage,
                                                                temp_storage_bytes,
                                                                first,
                                                                num_items,
                                                                op,
                                                                stream));
-}
+    }
 
-template<class ShapeT, class OpT>
+    template<class RandomAccessIteratorT, class OpT>
 HIPCUB_RUNTIME_FUNCTION
-static hipError_t Bulk(ShapeT shape, OpT op, hipStream_t stream = 0)
-{
-    return hipCUDAErrorTohipError(cub::DeviceFor::Bulk(shape, op, stream));
-}
+    static hipError_t ForEachCopy(RandomAccessIteratorT first,
+                                  RandomAccessIteratorT last,
+                                  OpT                   op,
+                                  hipStream_t           stream = 0)
+    {
+        return hipCUDAErrorTohipError(cub::DeviceFor::ForEachCopy(first, last, op, stream));
+    }
 
-template<class ShapeT, class OpT>
+    template<class RandomAccessIteratorT, class OpT>
 HIPCUB_RUNTIME_FUNCTION
-static hipError_t Bulk(
-    void* d_temp_storage, size_t& temp_storage_bytes, ShapeT shape, OpT op, hipStream_t stream = 0)
-{
-    return hipCUDAErrorTohipError(
-        cub::DeviceFor::Bulk(d_temp_storage, temp_storage_bytes, shape, op, stream));
-}
+    static hipError_t ForEachCopy(void*                 d_temp_storage,
+                                  size_t&               temp_storage_bytes,
+                                  RandomAccessIteratorT first,
+                                  RandomAccessIteratorT last,
+                                  OpT                   op,
+                                  hipStream_t           stream = 0)
+    {
+        return hipCUDAErrorTohipError(cub::DeviceFor::ForEachCopy(d_temp_storage,
+                                                                  temp_storage_bytes,
+                                                                  first,
+                                                                  last,
+                                                                  op,
+                                                                  stream));
+    }
+
+    template<class RandomAccessIteratorT, class OffsetT, class OpT>
+    HIPCUB_RUNTIME_FUNCTION
+    static hipError_t
+        ForEachCopyN(RandomAccessIteratorT first, OffsetT num_items, OpT op, hipStream_t stream = 0)
+    {
+        return hipCUDAErrorTohipError(cub::DeviceFor::ForEachCopyN(first, num_items, op, stream));
+    }
+
+    template<class RandomAccessIteratorT, class OffsetT, class OpT>
+HIPCUB_RUNTIME_FUNCTION
+    static hipError_t ForEachCopyN(void*                 d_temp_storage,
+                                   size_t&               temp_storage_bytes,
+                                   RandomAccessIteratorT first,
+                                   OffsetT               num_items,
+                                   OpT                   op,
+                                   hipStream_t           stream = 0)
+    {
+        return hipCUDAErrorTohipError(cub::DeviceFor::ForEachCopyN(d_temp_storage,
+                                                                   temp_storage_bytes,
+                                                                   first,
+                                                                   num_items,
+                                                                   op,
+                                                                   stream));
+    }
+
+    template<class ShapeT, class OpT>
+HIPCUB_RUNTIME_FUNCTION
+    static hipError_t Bulk(ShapeT shape, OpT op, hipStream_t stream = 0)
+    {
+        return hipCUDAErrorTohipError(cub::DeviceFor::Bulk(shape, op, stream));
+    }
+
+    template<class ShapeT, class OpT>
+HIPCUB_RUNTIME_FUNCTION
+    static hipError_t Bulk(void*       d_temp_storage,
+                           size_t&     temp_storage_bytes,
+                           ShapeT      shape,
+                           OpT         op,
+                           hipStream_t stream = 0)
+    {
+        return hipCUDAErrorTohipError(
+            cub::DeviceFor::Bulk(d_temp_storage, temp_storage_bytes, shape, op, stream));
+    }
+};
 
 END_HIPCUB_NAMESPACE
 

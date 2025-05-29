@@ -1,5 +1,5 @@
 # Fortran Wrapper
-
+message(WARNING "hipRAND's Fortran API is deprecated. hipfort should be used instead.")
 if (BUILD_WITH_LIB STREQUAL "CUDA")
     configure_file(
         "${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_nvcc_m.f90"

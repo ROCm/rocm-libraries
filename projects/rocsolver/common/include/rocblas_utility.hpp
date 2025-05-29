@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -106,6 +106,24 @@ template <typename T, std::enable_if_t<rocblas_is_complex<T>, int> = 0>
 __device__ __host__ inline T conj(const T& z)
 {
     return std::conj(z);
+}
+
+// Exchange values between threads in a warp
+template <typename T, typename I, std::enable_if_t<!rocblas_is_complex<T>, int> = 0>
+__device__ T shfl(T val, I src)
+{
+    return __shfl(val, src);
+}
+
+template <typename T, typename I, std::enable_if_t<rocblas_is_complex<T>, int> = 0>
+__device__ T shfl(T val, I src)
+{
+    using S = decltype(std::real(T{}));
+
+    auto r = __shfl(val.real(), src);
+    auto i = __shfl(val.imag(), src);
+
+    return rocblas_complex_num<S>(r, i);
 }
 
 // Load a scalar. If the argument is a pointer, dereference it; otherwise copy

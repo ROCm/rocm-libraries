@@ -24,6 +24,8 @@
 #include "rocrand/rocrand_common.h"
 #include "rocrand/rocrand_mrg31k3p_precomputed.h"
 
+#include <hip/hip_runtime.h>
+
 #define ROCRAND_MRG31K3P_M1 2147483647U // 2 ^ 31 - 1
 #define ROCRAND_MRG31K3P_M2 2147462579U // 2 ^ 31 - 21069
 #define ROCRAND_MRG31K3P_MASK12 511U // 2 ^ 9 - 1

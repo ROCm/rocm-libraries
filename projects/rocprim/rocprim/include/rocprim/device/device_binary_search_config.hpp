@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -50,8 +50,8 @@ template<class Value, class Output>
 struct default_config_for_lower_bound
 {};
 
-template<class Unused, class Value, class Output>
-struct wrapped_transform_config<default_config_for_binary_search<Value, Output>, Unused>
+template<class Unused, bool IsPointer, class Value, class Output>
+struct wrapped_transform_config<default_config_for_binary_search<Value, Output>, Unused, IsPointer>
 {
     template<target_arch Arch>
     struct architecture_config
@@ -61,8 +61,8 @@ struct wrapped_transform_config<default_config_for_binary_search<Value, Output>,
     };
 };
 
-template<class Unused, class Value, class Output>
-struct wrapped_transform_config<default_config_for_upper_bound<Value, Output>, Unused>
+template<class Unused, bool IsPointer, class Value, class Output>
+struct wrapped_transform_config<default_config_for_upper_bound<Value, Output>, Unused, IsPointer>
 {
     template<target_arch Arch>
     struct architecture_config
@@ -72,8 +72,8 @@ struct wrapped_transform_config<default_config_for_upper_bound<Value, Output>, U
     };
 };
 
-template<class Unused, class Value, class Output>
-struct wrapped_transform_config<default_config_for_lower_bound<Value, Output>, Unused>
+template<class Unused, bool IsPointer, class Value, class Output>
+struct wrapped_transform_config<default_config_for_lower_bound<Value, Output>, Unused, IsPointer>
 {
     template<target_arch Arch>
     struct architecture_config
@@ -84,21 +84,21 @@ struct wrapped_transform_config<default_config_for_lower_bound<Value, Output>, U
 };
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
-template<class Unused, class Value, class Output>
+template<class Unused, bool IsPointer, class Value, class Output>
 template<target_arch Arch>
 constexpr transform_config_params
-    wrapped_transform_config<default_config_for_binary_search<Value, Output>,
-                             Unused>::architecture_config<Arch>::params;
-template<class Unused, class Value, class Output>
+    wrapped_transform_config<default_config_for_binary_search<Value, Output>, Unused, IsPointer>::
+        architecture_config<Arch>::params;
+template<class Unused, bool IsPointer, class Value, class Output>
 template<target_arch Arch>
 constexpr transform_config_params
-    wrapped_transform_config<default_config_for_upper_bound<Value, Output>,
-                             Unused>::architecture_config<Arch>::params;
-template<class Unused, class Value, class Output>
+    wrapped_transform_config<default_config_for_upper_bound<Value, Output>, Unused, IsPointer>::
+        architecture_config<Arch>::params;
+template<class Unused, bool IsPointer, class Value, class Output>
 template<target_arch Arch>
 constexpr transform_config_params
-    wrapped_transform_config<default_config_for_lower_bound<Value, Output>,
-                             Unused>::architecture_config<Arch>::params;
+    wrapped_transform_config<default_config_for_lower_bound<Value, Output>, Unused, IsPointer>::
+        architecture_config<Arch>::params;
 #endif // DOXYGEN_SHOULD_SKIP_THIS
 
 } // end namespace detail

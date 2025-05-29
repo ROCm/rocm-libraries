@@ -42,7 +42,7 @@ def runTestCommand (platform, project, gfilter, boolean rocmExamples=false, Stri
     if (platform.jenkinsLabel.contains('gfx90a'))
     {
         hmmTestCommand = """
-                            HSA_XNACK=0 GTEST_LISTENER=NO_PASS_LINE_IN_LOG  ./rocsparse-test  --rocsparse-enable-debug --rocsparse-clients-enable-test-debug-arguments --gtest_output=xml:test_detail_hmm_xnack_off.xml --gtest_color=yes --gtest_filter=${gfilter}-*known_bug*
+                            HSA_XNACK=0 GTEST_LISTENER=NO_PASS_LINE_IN_LOG ./rocsparse-test --gtest_output=xml:test_detail_hmm_xnack_off.xml --gtest_color=yes --gtest_filter=${gfilter}-*known_bug*
                             HSA_XNACK=1 GTEST_LISTENER=NO_PASS_LINE_IN_LOG ./rocsparse-test --gtest_output=xml:test_detail_hmm_xnack_on.xml --gtest_color=yes --gtest_filter=${gfilter}-*known_bug*
                          """
     }
@@ -52,7 +52,7 @@ def runTestCommand (platform, project, gfilter, boolean rocmExamples=false, Stri
                 cd ${project.paths.project_build_prefix}/build/${dirmode}/clients/staging
                 export LD_LIBRARY_PATH=/opt/rocm/lib/
                 ${centos7Workaround}
-                GTEST_LISTENER=NO_PASS_LINE_IN_LOG ./rocsparse-test --rocsparse-enable-debug --rocsparse-clients-enable-test-debug-arguments --gtest_output=xml --gtest_color=yes --gtest_filter=${gfilter}-*known_bug*
+                GTEST_LISTENER=NO_PASS_LINE_IN_LOG ./rocsparse-test --gtest_output=xml --gtest_color=yes --gtest_filter=${gfilter}-*known_bug*
                 ${hmmTestCommand}
             """
 
@@ -82,7 +82,7 @@ def runTestCommand (platform, project, gfilter, boolean rocmExamples=false, Stri
                         ctest --output-on-failure
                     done
                 """
-        platform.runCommand(this, testCommand, "ROCM Examples")  
+        platform.runCommand(this, testCommand, "ROCM Examples")
 
     }
 }
@@ -98,7 +98,7 @@ def runTestWithSanitizerCommand (platform, project, gfilter, String dirmode = "r
 		        export ASAN_LIB_PATH=\$(/opt/rocm/llvm/bin/clang -print-file-name=libclang_rt.asan-x86_64.so)
                 export LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:\$(dirname "\${ASAN_LIB_PATH}")
                 ${centos7Workaround}
-                GTEST_LISTENER=NO_PASS_LINE_IN_LOG ASAN_SYMBOLIZER_PATH=/opt/rocm/llvm/bin/llvm-symbolizer ASAN_OPTIONS=detect_leaks=1 LSAN_OPTIONS=suppressions=../../../../suppr.txt ./rocsparse-test --rocsparse-enable-debug --rocsparse-clients-enable-test-debug-arguments --gtest_output=xml --gtest_color=yes --gtest_filter=${gfilter}-*known_bug*
+                GTEST_LISTENER=NO_PASS_LINE_IN_LOG ASAN_SYMBOLIZER_PATH=/opt/rocm/llvm/bin/llvm-symbolizer ASAN_OPTIONS=detect_leaks=1 LSAN_OPTIONS=suppressions=../../../../suppr.txt ./rocsparse-test --gtest_output=xml --gtest_color=yes --gtest_filter=${gfilter}-*known_bug*
             """
 
     platform.runCommand(this, command)

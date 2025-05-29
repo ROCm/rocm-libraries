@@ -60,7 +60,7 @@ inline std::string config_name<rocprim::default_config>()
 }
 
 template<typename T, typename Config = rocprim::default_config>
-struct device_find_first_of_benchmark : public config_autotune_interface
+struct device_find_first_of_benchmark : public benchmark_utils::autotune_interface
 {
     std::vector<size_t> keys_sizes;
     std::vector<double> first_occurrences;
@@ -91,14 +91,12 @@ struct device_find_first_of_benchmark : public config_autotune_interface
             + "}");
     }
 
-    static constexpr unsigned int batch_size  = 10;
-    static constexpr unsigned int warmup_size = 2;
-
-    void run(benchmark::State&   state,
-             size_t              bytes,
-             const managed_seed& seed,
-             hipStream_t         stream) const override
+    void run(benchmark_utils::state&& state) override
     {
+        const auto& stream = state.stream;
+        const auto& bytes  = state.bytes;
+        const auto& seed   = state.seed;
+
         using type        = T;
         using key_type    = T;
         using output_type = size_t;
@@ -175,30 +173,8 @@ struct device_find_first_of_benchmark : public config_autotune_interface
         temporary_storage_bytes = max_temporary_storage_bytes;
         HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
 
-        // Warm-up
-        for(size_t i = 0; i < warmup_size; ++i)
-        {
-            for(size_t fi = 0; fi < first_occurrences.size(); ++fi)
-            {
-                for(size_t keys_size : keys_sizes)
-                {
-                    run(keys_size, d_inputs[fi]);
-                }
-            }
-        }
-        HIP_CHECK(hipDeviceSynchronize());
-
-        // HIP events creation
-        hipEvent_t start, stop;
-        HIP_CHECK(hipEventCreate(&start));
-        HIP_CHECK(hipEventCreate(&stop));
-
-        for(auto _ : state)
-        {
-            // Record start event
-            HIP_CHECK(hipEventRecord(start, stream));
-
-            for(size_t i = 0; i < batch_size; ++i)
+        state.run(
+            [&]
             {
                 for(size_t fi = 0; fi < first_occurrences.size(); ++fi)
                 {
@@ -207,20 +183,7 @@ struct device_find_first_of_benchmark : public config_autotune_interface
                         run(keys_size, d_inputs[fi]);
                     }
                 }
-            }
-
-            // Record stop event and wait until it completes
-            HIP_CHECK(hipEventRecord(stop, stream));
-            HIP_CHECK(hipEventSynchronize(stop));
-
-            float elapsed_mseconds;
-            HIP_CHECK(hipEventElapsedTime(&elapsed_mseconds, start, stop));
-            state.SetIterationTime(elapsed_mseconds / 1000);
-        }
-
-        // Destroy HIP events
-        HIP_CHECK(hipEventDestroy(start));
-        HIP_CHECK(hipEventDestroy(stop));
+            });
 
         // Only a part of data (before the first occurrence) must be actually processed. In ideal
         // cases when no thread blocks do unneeded work (i.e. exit early once the match is found),
@@ -235,17 +198,17 @@ struct device_find_first_of_benchmark : public config_autotune_interface
         {
             sum_keys_size += keys_size;
         }
-        state.SetBytesProcessed(state.iterations() * batch_size * sum_effective_size
-                                * sizeof(*d_inputs[0]));
-        state.SetItemsProcessed(state.iterations() * batch_size * sum_effective_size);
+
+        state.set_throughput(sum_effective_size, sizeof(type));
+
         // Each input is read once but all keys are read by all threads so performance is likely
         // compute-bound or bound by cache bandwidth for reading keys rather than reading inputs.
         // Let's additionally report the rate of comparisons to see if it reaches a plateau with
         // increasing keys_size.
-        state.counters["comparisons_per_second"]
-            = benchmark::Counter(static_cast<double>(state.iterations() * batch_size
-                                                     * sum_effective_size * sum_keys_size),
-                                 benchmark::Counter::kIsRate);
+        state.gbench_state.counters["comparisons_per_second"] = benchmark::Counter(
+            static_cast<double>(state.gbench_state.iterations() * state.batch_iterations
+                                * sum_effective_size * sum_keys_size),
+            benchmark::Counter::kIsRate);
 
         for(size_t fi = 0; fi < first_occurrences.size(); ++fi)
         {
@@ -266,7 +229,7 @@ struct device_find_first_of_benchmark_generator
     {
         using generated_config = rocprim::find_first_of_config<BlockSize, ItemsPerThread>;
 
-        void operator()(std::vector<std::unique_ptr<config_autotune_interface>>& storage)
+        void operator()(std::vector<std::unique_ptr<benchmark_utils::autotune_interface>>& storage)
         {
             std::vector<size_t> keys_sizes{1, 10, 100, 1000};
             std::vector<double> first_occurrences{0.1, 0.5, 1.0};
@@ -277,7 +240,7 @@ struct device_find_first_of_benchmark_generator
         }
     };
 
-    static void create(std::vector<std::unique_ptr<config_autotune_interface>>& storage)
+    static void create(std::vector<std::unique_ptr<benchmark_utils::autotune_interface>>& storage)
     {
         static constexpr unsigned int min_items_per_thread = 1;
         static constexpr unsigned int max_items_per_thread = 16;

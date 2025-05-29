@@ -29,8 +29,6 @@ extern "C" {
 #endif
 
 /*! \ingroup precond_module
-*  \brief Tridiagonal solver (no pivoting)
-*
 *  \details
 *  \p hipsparseXgtsv2_nopivot_bufferSizeExt returns the size of the temporary storage
 *  buffer in bytes that is required by \ref hipsparseSgtsv2_nopivot "hipsparseXgtsv2_nopivot()". 
@@ -54,8 +52,7 @@ extern "C" {
 *  ldb                Leading dimension of B. Must satisfy \p ldb >= max(1, m).
 *  @param[out]
 *  pBufferSizeInBytes number of bytes of the temporary storage buffer required by
-*                     hipsparseSgtsv2_nopivot(), hipsparseDgtsv2_nopivot(), hipsparseCgtsv2_nopivot()
-*                     and hipsparseZgtsv2_nopivot().
+*                     hipsparseSgtsv2_nopivot "hipsparseXgtsv2_nopivot()".
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p ldb, \p dl, \p d, \p du,
@@ -112,7 +109,20 @@ hipsparseStatus_t hipsparseZgtsv2_nopivot_bufferSizeExt(hipsparseHandle_t       
 *  \brief Tridiagonal solver (no pivoting)
 *
 *  \details
-*  \p hipsparseXgtsv2_nopivot solves a tridiagonal linear system for multiple right-hand sides
+*  \p hipsparseXgtsv2_nopivot solves a tridiagonal linear system for multiple right-hand sides without pivoting
+*  \f[
+*    T*B = B
+*  \f]
+*  where \f$T\f$ is a sparse tridiagonal matrix and \f$B\f$ is a dense \f$ldb \times n\f$ matrix storing the
+*  right-hand side vectors in column order. The tridiagonal matrix \f$T\f$ is defined by three vectors: \p dl
+*  for the lower diagonal, \p d for the main diagonal and \p du for the upper diagonal.
+*
+*  Solving the tridiagonal system with multiple right-hand sides without pivoting involves two steps. First,
+*  the user calls \ref hipsparseSgtsv2_nopivot_bufferSizeExt "hipsparseXgtsv2_nopivot_bufferSizeExt()" in order
+*  to determine the size of the required temporary storage buffer. Once determined, the user allocates this
+*  buffer and passes it to \ref hipsparseSgtsv2_nopivot "hipsparseXgtsv2_nopivot()" to perform the actual
+*  solve. The \f$B\f$ dense matrix, which initially stores the \p n right-hand side vectors, is overwritten
+*  with the \p n solution vectors after the call to \ref hipsparseSgtsv2_nopivot "hipsparseXgtsv2_nopivot()".
 *
 *  \note
 *  This function is non blocking and executed asynchronously with respect to the host.

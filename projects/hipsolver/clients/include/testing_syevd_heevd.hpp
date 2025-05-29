@@ -123,7 +123,7 @@ void testing_syevd_heevd_bad_arg()
         // int size_W;
         // hipsolver_syevd_heevd_bufferSize(
         //     API, handle, evect, uplo, n, dA.data(), lda, dD.data(), &size_W);
-        // size_t bytes_W = sizeof(T) * size_W;
+        // size_t bytes_W = std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") != nullptr ? size_W : sizeof(T) * size_W;
         // device_strided_batch_vector<T> dWork(bytes_W, 1, bytes_W, 1);
         // if(size_W)
         //     CHECK_HIP_ERROR(dWork.memcheck());
@@ -156,7 +156,9 @@ void testing_syevd_heevd_bad_arg()
         int size_W;
         hipsolver_syevd_heevd_bufferSize(
             API, handle, evect, uplo, n, dA.data(), lda, dD.data(), &size_W);
-        size_t                         bytes_W = sizeof(T) * size_W;
+        size_t bytes_W = std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") != nullptr
+                             ? size_W
+                             : sizeof(T) * size_W;
         device_strided_batch_vector<T> dWork(bytes_W, 1, bytes_W, 1);
         if(size_W)
             CHECK_HIP_ERROR(dWork.memcheck());
@@ -581,7 +583,8 @@ void testing_syevd_heevd(Arguments& argus)
     int size_W;
     hipsolver_syevd_heevd_bufferSize(
         API, handle, evect, uplo, n, (T*)nullptr, lda, (S*)nullptr, &size_W);
-    size_t bytes_W = sizeof(T) * size_W;
+    size_t bytes_W
+        = std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") != nullptr ? size_W : sizeof(T) * size_W;
 
     if(argus.mem_query)
     {

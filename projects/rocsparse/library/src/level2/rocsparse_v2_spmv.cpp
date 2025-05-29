@@ -109,17 +109,28 @@ public:
         this->m_bsrmv_info = value;
     }
 
-    ~_rocsparse_spmv_descr() = default;
+    ~_rocsparse_spmv_descr()
+    {
+        if(this->m_csrmv_info != nullptr)
+        {
+            delete this->m_csrmv_info;
+        }
+        if(this->m_cscmv_info != nullptr)
+        {
+            delete this->m_cscmv_info;
+        }
+        if(this->m_bsrmv_info != nullptr)
+        {
+            delete this->m_bsrmv_info;
+        }
+    }
 
     _rocsparse_spmv_descr()
-        : m_csrmv_info{}
-        , m_cscmv_info{}
-        , m_stage((rocsparse_v2_spmv_stage)-1)
+        : m_stage((rocsparse_v2_spmv_stage)-1)
         , m_alg((rocsparse_spmv_alg)-1)
         , m_operation((rocsparse_operation)-1)
         , m_scalar_datatype((rocsparse_datatype)-1)
         , m_compute_datatype((rocsparse_datatype)-1)
-
     {
     }
 
@@ -196,6 +207,7 @@ catch(...)
 extern "C" rocsparse_status rocsparse_destroy_spmv_descr(rocsparse_spmv_descr descr)
 try
 {
+
     ROCSPARSE_ROUTINE_TRACE;
     if(descr != nullptr)
     {

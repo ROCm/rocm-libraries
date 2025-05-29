@@ -147,13 +147,14 @@ void testing_bsrmv_bad_arg(const Arguments& arg)
 template <typename T>
 void testing_bsrmv(const Arguments& arg)
 {
-    rocsparse_int          M         = arg.M;
-    rocsparse_int          N         = arg.N;
-    rocsparse_direction    dir       = arg.direction;
-    rocsparse_operation    trans     = arg.transA;
-    rocsparse_index_base   base      = arg.baseA;
-    rocsparse_int          block_dim = arg.block_dim;
-    rocsparse_storage_mode storage   = arg.storage;
+    rocsparse_int          M                   = arg.M;
+    rocsparse_int          N                   = arg.N;
+    rocsparse_direction    dir                 = arg.direction;
+    rocsparse_operation    trans               = arg.transA;
+    rocsparse_index_base   base                = arg.baseA;
+    rocsparse_int          block_dim           = arg.block_dim;
+    rocsparse_storage_mode storage             = arg.storage;
+    const bool             call_stage_analysis = arg.call_stage_analysis;
 
     host_scalar<T> h_alpha(arg.get_alpha<T>());
     host_scalar<T> h_beta(arg.get_beta<T>());
@@ -174,7 +175,9 @@ void testing_bsrmv(const Arguments& arg)
     CHECK_ROCSPARSE_ERROR(rocsparse_set_mat_storage_mode(descr, storage));
 
     // Create matrix info
-    rocsparse_local_mat_info info;
+
+    rocsparse_local_mat_info local_info;
+    rocsparse_mat_info       info = (call_stage_analysis) ? local_info : nullptr;
 
     // BSR dimensions
     rocsparse_int mb = (M + block_dim - 1) / block_dim;
@@ -227,7 +230,10 @@ void testing_bsrmv(const Arguments& arg)
     device_dense_matrix<T> dx(hx), dy(hy);
 
     // bsrmv_analysis (Optional)
-    CHECK_ROCSPARSE_ERROR(rocsparse_bsrmv_analysis<T>(PARAMS_ANALYSIS(dA)));
+    if(call_stage_analysis)
+    {
+        CHECK_ROCSPARSE_ERROR(rocsparse_bsrmv_analysis<T>(PARAMS_ANALYSIS(dA)));
+    }
 
     if(arg.unit_check)
     {

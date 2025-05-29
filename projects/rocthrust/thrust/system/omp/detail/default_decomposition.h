@@ -14,7 +14,6 @@
  *  limitations under the License.
  */
 
-
 /*! \file default_decomposition.h
  *  \brief Return a decomposition that is appropriate for the OpenMP backend.
  */
@@ -22,6 +21,7 @@
 #pragma once
 
 #include <thrust/detail/config.h>
+
 #include <thrust/system/detail/internal/decompose.h>
 
 THRUST_NAMESPACE_BEGIN
@@ -41,4 +41,3 @@ thrust::system::detail::internal::uniform_decomposition<IndexType> default_decom
 THRUST_NAMESPACE_END
 
 #include <thrust/system/omp/detail/default_decomposition.inl>
-

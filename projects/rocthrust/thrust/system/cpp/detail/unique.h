@@ -20,4 +20,3 @@
 
 // this system inherits unique
 #include <thrust/system/detail/sequential/unique.h>
-

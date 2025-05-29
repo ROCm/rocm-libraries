@@ -59,6 +59,11 @@ bool rocsparse::debug_variables_st::get_debug_arguments() const
     return this->debug_arguments;
 }
 
+bool rocsparse::debug_variables_st::get_debug_warnings() const
+{
+    return this->debug_warnings;
+}
+
 bool rocsparse::debug_variables_st::get_debug_arguments_verbose() const
 {
     return this->debug_arguments_verbose;
@@ -80,6 +85,16 @@ void rocsparse::debug_variables_st::set_debug_verbose(bool value)
     {
         s_mutex.lock();
         this->debug_verbose = value;
+        s_mutex.unlock();
+    }
+}
+
+void rocsparse::debug_variables_st::set_debug_warnings(bool value)
+{
+    if(value != this->debug_warnings)
+    {
+        s_mutex.lock();
+        this->debug_warnings = value;
         s_mutex.unlock();
     }
 }
@@ -156,6 +171,16 @@ int rocsparse_state_debug()
     return rocsparse_debug_variables.get_debug() ? 1 : 0;
 }
 
+void rocsparse_enable_debug_warnings()
+{
+    rocsparse_debug_variables.set_debug_warnings(true);
+}
+
+void rocsparse_disable_debug_warnings()
+{
+    rocsparse_debug_variables.set_debug_warnings(false);
+}
+
 void rocsparse_enable_debug_arguments_verbose()
 {
     rocsparse_debug_variables.set_debug_arguments_verbose(true);
@@ -192,12 +217,14 @@ void rocsparse_enable_debug_verbose()
 {
     rocsparse_debug_variables.set_debug_verbose(true);
     rocsparse_enable_debug_arguments_verbose();
+    rocsparse_enable_debug_warnings();
 }
 
 void rocsparse_disable_debug_verbose()
 {
     rocsparse_debug_variables.set_debug_verbose(false);
     rocsparse_disable_debug_arguments_verbose();
+    rocsparse_disable_debug_warnings();
 }
 
 void rocsparse_enable_debug_force_host_assert()

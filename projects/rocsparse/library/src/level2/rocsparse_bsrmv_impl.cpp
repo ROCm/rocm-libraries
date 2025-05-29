@@ -457,22 +457,24 @@ rocsparse_status rocsparse::bsrmv_adaptive_template_dispatch(rocsparse_handle   
     // block_dim == 1 is the CSR case
     if(block_dim == 1)
     {
-        RETURN_IF_ROCSPARSE_ERROR(
-            rocsparse::csrmv_adaptive_template_dispatch(handle,
-                                                        trans,
-                                                        mb,
-                                                        nb,
-                                                        nnzb,
-                                                        alpha_device_host,
-                                                        descr,
-                                                        bsr_val,
-                                                        bsr_row_ptr,
-                                                        bsr_col_ind,
-                                                        bsrmv_info->get_csrmv_info(),
-                                                        x,
-                                                        beta_device_host,
-                                                        y,
-                                                        false));
+        rocsparse_csrmv_info csrmv_info
+            = (bsrmv_info != nullptr) ? bsrmv_info->get_csrmv_info() : nullptr;
+
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmv_adaptive_template_dispatch(handle,
+                                                                              trans,
+                                                                              mb,
+                                                                              nb,
+                                                                              nnzb,
+                                                                              alpha_device_host,
+                                                                              descr,
+                                                                              bsr_val,
+                                                                              bsr_row_ptr,
+                                                                              bsr_col_ind,
+                                                                              csrmv_info,
+                                                                              x,
+                                                                              beta_device_host,
+                                                                              y,
+                                                                              false));
         return rocsparse_status_success;
     }
 
@@ -707,23 +709,23 @@ namespace rocsparse
         ROCSPARSE_CHECKARG_POINTER(13, x);
         ROCSPARSE_CHECKARG_POINTER(15, y);
 
-        RETURN_IF_ROCSPARSE_ERROR(
-            (rocsparse::bsrmv_template<T, I, J, A, X, Y>(handle,
-                                                         dir,
-                                                         trans,
-                                                         mb,
-                                                         nb,
-                                                         nnzb,
-                                                         alpha_device_host,
-                                                         descr,
-                                                         bsr_val,
-                                                         bsr_row_ptr,
-                                                         bsr_col_ind,
-                                                         block_dim,
-                                                         info->get_bsrmv_info(),
-                                                         x,
-                                                         beta_device_host,
-                                                         y)));
+        rocsparse_bsrmv_info bsrmv_info = (info != nullptr) ? info->get_bsrmv_info() : nullptr;
+        RETURN_IF_ROCSPARSE_ERROR((rocsparse::bsrmv_template<T, I, J, A, X, Y>(handle,
+                                                                               dir,
+                                                                               trans,
+                                                                               mb,
+                                                                               nb,
+                                                                               nnzb,
+                                                                               alpha_device_host,
+                                                                               descr,
+                                                                               bsr_val,
+                                                                               bsr_row_ptr,
+                                                                               bsr_col_ind,
+                                                                               block_dim,
+                                                                               bsrmv_info,
+                                                                               x,
+                                                                               beta_device_host,
+                                                                               y)));
 
         return rocsparse_status_success;
     }
@@ -794,6 +796,9 @@ INSTANTIATE(rocsparse_double_complex, int64_t, int64_t);
 INSTANTIATE_MIXED_ANALYSIS(int32_t, int32_t, int8_t);
 INSTANTIATE_MIXED_ANALYSIS(int64_t, int32_t, int8_t);
 INSTANTIATE_MIXED_ANALYSIS(int64_t, int64_t, int8_t);
+INSTANTIATE_MIXED_ANALYSIS(int32_t, int32_t, _Float16);
+INSTANTIATE_MIXED_ANALYSIS(int64_t, int32_t, _Float16);
+INSTANTIATE_MIXED_ANALYSIS(int64_t, int64_t, _Float16);
 #undef INSTANTIATE_MIXED_ANALYSIS
 
 #define INSTANTIATE_MIXED(T, I, J, A, X, Y)                                \
@@ -821,6 +826,9 @@ INSTANTIATE_MIXED(int32_t, int64_t, int64_t, int8_t, int8_t, int32_t);
 INSTANTIATE_MIXED(float, int32_t, int32_t, int8_t, int8_t, float);
 INSTANTIATE_MIXED(float, int64_t, int32_t, int8_t, int8_t, float);
 INSTANTIATE_MIXED(float, int64_t, int64_t, int8_t, int8_t, float);
+INSTANTIATE_MIXED(float, int32_t, int32_t, _Float16, _Float16, float);
+INSTANTIATE_MIXED(float, int64_t, int32_t, _Float16, _Float16, float);
+INSTANTIATE_MIXED(float, int64_t, int64_t, _Float16, _Float16, float);
 INSTANTIATE_MIXED(rocsparse_float_complex,
                   int32_t,
                   int32_t,

@@ -94,7 +94,7 @@ namespace rocsparse
 
     template <uint32_t BLOCKSIZE, typename F, typename... P>
     __launch_bounds__(BLOCKSIZE) __global__
-        inline void convert_device_scalars_kernel(F f, const void* source, void* target, P... p)
+        void convert_device_scalars_kernel(F f, const void* source, void* target, P... p)
     {
         const size_t tid = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
         convert_device_scalars_kernel_device(f, tid, source, target, p...);

@@ -193,8 +193,8 @@ if( BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_TESTS)
 
   # Find the package ROCmSMI
   if(NOT WIN32)
-      find_package(rocm_smi CONFIG REQUIRED)
-      list( APPEND COMMON_LINK_LIBS rocm_smi64 )
+      find_package(ROCmSMI REQUIRED)
+      list( APPEND COMMON_LINK_LIBS rocm_smi )
   endif()
 
   find_package( GTest REQUIRED )

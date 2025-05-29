@@ -38,7 +38,6 @@
 #include <rocprim/device/device_histogram.hpp>
 #include <rocprim/iterator/transform_iterator.hpp>
 #include <rocprim/type_traits.hpp>
-#include <rocprim/type_traits_interface.hpp>
 #include <rocprim/types.hpp>
 
 #include <algorithm>

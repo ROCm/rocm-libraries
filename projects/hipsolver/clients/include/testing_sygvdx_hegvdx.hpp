@@ -372,7 +372,7 @@ void testing_sygvdx_hegvdx_bad_arg()
         //                                    hNev.data(),
         //                                    dW.data(),
         //                                    &size_W);
-        // size_t bytes_W = sizeof(T) * size_W;
+        // size_t bytes_W = std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") != nullptr ? size_W : sizeof(T) * size_W;
         // device_strided_batch_vector<T> dWork(bytes_W, 1, bytes_W, 1);
         // if(size_W)
         //     CHECK_HIP_ERROR(dWork.memcheck());
@@ -438,7 +438,9 @@ void testing_sygvdx_hegvdx_bad_arg()
                                            hNev.data(),
                                            dW.data(),
                                            &size_W);
-        size_t                         bytes_W = sizeof(T) * size_W;
+        size_t bytes_W = std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") != nullptr
+                             ? size_W
+                             : sizeof(T) * size_W;
         device_strided_batch_vector<T> dWork(bytes_W, 1, bytes_W, 1);
         if(size_W)
             CHECK_HIP_ERROR(dWork.memcheck());
@@ -1172,7 +1174,9 @@ void testing_sygvdx_hegvdx(Arguments& argus)
                                        (int*)nullptr,
                                        (S*)nullptr,
                                        &size_Work);
-    size_t bytes_Work = sizeof(T) * size_Work;
+    size_t bytes_Work = std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") != nullptr
+                            ? size_Work
+                            : sizeof(T) * size_Work;
 
     if(argus.mem_query)
     {

@@ -23,13 +23,12 @@
 #include "common_test_header.hpp"
 
 // Thread operators fixes for extended float types
+#include "test_utils_data_generation.hpp"
 #include "test_utils_thread_operators.hpp"
 
 // hipcub API
 #include "hipcub/device/device_reduce.hpp"
 #include "hipcub/iterator/constant_input_iterator.hpp"
-
-#include "test_utils_data_generation.hpp"
 
 #include <bitset>
 
@@ -127,9 +126,9 @@ TYPED_TEST(HipcubDeviceReduceTests, ReduceSum)
             // Calculate expected results on host using the same accumulator type than on device
             using Sum =
                 typename AlgebraicSelector<hipcub::Sum, T, U>::type; // For custom_type_test tests
-            using AccumT = hipcub::detail::accumulator_t<Sum, U, T>;
+            using AccumT = hipcub::detail::accumulator_t<Sum, T, U>;
             Sum    sum_op;
-            AccumT tmp_result = U(0.0f); // hipcub::Sum uses as initial type the output type
+            AccumT tmp_result = AccumT(0.0f); // hipcub::Sum uses as initial type the output type
             for(unsigned int i = 0; i < input.size(); i++)
             {
                 tmp_result = sum_op(tmp_result, input[i]);
@@ -140,13 +139,27 @@ TYPED_TEST(HipcubDeviceReduceTests, ReduceSum)
             size_t temp_storage_size_bytes;
             void*  d_temp_storage = nullptr;
             // Get size of d_temp_storage
-            DeviceReduceSelector<T, U> reduce_selector;
-            reduce_selector.reduce_sum(d_temp_storage,
-                                       temp_storage_size_bytes,
-                                       d_input,
-                                       d_output,
-                                       input.size(),
-                                       stream);
+            if constexpr(std::is_same<T, test_utils::half>::value
+                         || std::is_same<T, test_utils::bfloat16>::value)
+            {
+                HIP_CHECK(hipcub::DeviceReduce::Reduce(d_temp_storage,
+                                                       temp_storage_size_bytes,
+                                                       d_input,
+                                                       d_output,
+                                                       input.size(),
+                                                       ExtendedFloatBinOp<hipcub::Sum>(),
+                                                       U(0.f),
+                                                       stream));
+            }
+            else
+            {
+                HIP_CHECK(hipcub::DeviceReduce::Sum(d_temp_storage,
+                                                    temp_storage_size_bytes,
+                                                    d_input,
+                                                    d_output,
+                                                    input.size(),
+                                                    stream));
+            }
 
             // temp_storage_size_bytes must be >0
             ASSERT_GT(temp_storage_size_bytes, 0U);
@@ -160,12 +173,27 @@ TYPED_TEST(HipcubDeviceReduceTests, ReduceSum)
                 gHelper.startStreamCapture(stream);
 
             // Run
-            reduce_selector.reduce_sum(d_temp_storage,
-                                       temp_storage_size_bytes,
-                                       d_input,
-                                       d_output,
-                                       input.size(),
-                                       stream);
+            if constexpr(std::is_same<T, test_utils::half>::value
+                         || std::is_same<T, test_utils::bfloat16>::value)
+            {
+                HIP_CHECK(hipcub::DeviceReduce::Reduce(d_temp_storage,
+                                                       temp_storage_size_bytes,
+                                                       d_input,
+                                                       d_output,
+                                                       input.size(),
+                                                       ExtendedFloatBinOp<hipcub::Sum>(),
+                                                       U(0.f),
+                                                       stream));
+            }
+            else
+            {
+                HIP_CHECK(hipcub::DeviceReduce::Sum(d_temp_storage,
+                                                    temp_storage_size_bytes,
+                                                    d_input,
+                                                    d_output,
+                                                    input.size(),
+                                                    stream));
+            }
 
             if (TestFixture::use_graphs)
                 gHelper.createAndLaunchGraph(stream);
@@ -239,10 +267,10 @@ TYPED_TEST(HipcubDeviceReduceTests, ReduceMinimum)
 
             // Calculate expected results on host using the same accumulator type than on device
             using Min    = typename MinSelector<T, U>::type; // For custom_type_test tests
-            using AccumT = hipcub::detail::accumulator_t<hipcub::Min, U, T>;
+            using AccumT = hipcub::detail::accumulator_t<hipcub::Min, T, U>;
             Min    min_op;
             AccumT tmp_result = test_utils::numeric_limits<
-                T>::max(); // hipcub::Min uses as initial type the input type
+                AccumT>::max(); // hipcub::Min uses as initial type the input type
             for(unsigned int i = 0; i < input.size(); i++)
             {
                 tmp_result = min_op(tmp_result, input[i]);
@@ -293,15 +321,130 @@ TYPED_TEST(HipcubDeviceReduceTests, ReduceMinimum)
             HIP_CHECK(hipDeviceSynchronize());
 
             // Check if output values are as expected
-            ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(
-                output[0],
-                expected,
-                std::is_same<T, U>::value
-                    ? 0
-                    : std::max(test_utils::precision<T>::value, test_utils::precision<U>::value)));
+            ASSERT_NO_FATAL_FAILURE(
+                test_utils::assert_near(output[0], expected, test_utils::precision<U>::value));
 
             if(TestFixture::use_graphs)
+            {
                 gHelper.cleanupGraphHelper();
+            }
+
+            HIP_CHECK(hipFree(d_input));
+            HIP_CHECK(hipFree(d_output));
+            HIP_CHECK(hipFree(d_temp_storage));
+        }
+    }
+
+    if(TestFixture::use_graphs)
+    {
+        HIP_CHECK(hipStreamDestroy(stream));
+    }
+}
+
+TYPED_TEST(HipcubDeviceReduceTests, ReduceMaximum)
+{
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    using T = typename TestFixture::input_type;
+    using U = typename TestFixture::output_type;
+
+    hipStream_t stream = 0; // default
+    if(TestFixture::use_graphs)
+    {
+        // Default stream does not support hipGraph stream capture, so create one
+        HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+    }
+
+    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    {
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+
+        for(size_t size : test_utils::get_sizes(seed_value))
+        {
+            SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+            // Generate data
+            std::vector<T> input = test_utils::get_random_data<T>(size, 1.0f, 100.0f, seed_value);
+            std::vector<U> output(1, U(0.0f));
+
+            T* d_input;
+            U* d_output;
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_input, input.size() * sizeof(T)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, output.size() * sizeof(U)));
+            HIP_CHECK(
+                hipMemcpy(d_input, input.data(), input.size() * sizeof(T), hipMemcpyHostToDevice));
+            HIP_CHECK(hipDeviceSynchronize());
+
+            // Calculate expected results on host using the same accumulator type than on device
+            using Max    = typename MaxSelector<T, U>::type; // For custom_type_test tests
+            using AccumT = hipcub::detail::accumulator_t<hipcub::Max, T, U>;
+            Max    max_op;
+            AccumT tmp_result = test_utils::numeric_limits<AccumT>::min();
+            for(unsigned int i = 0; i < input.size(); i++)
+            {
+                tmp_result = max_op(tmp_result, input[i]);
+            }
+            const U expected = static_cast<U>(tmp_result);
+
+            // temp storage
+            size_t temp_storage_size_bytes;
+            void*  d_temp_storage = nullptr;
+            // Get size of d_temp_storage
+            HIP_CHECK(hipcub::DeviceReduce::Max(d_temp_storage,
+                                                temp_storage_size_bytes,
+                                                d_input,
+                                                d_output,
+                                                input.size(),
+                                                stream));
+
+            // temp_storage_size_bytes must be >0
+            ASSERT_GT(temp_storage_size_bytes, 0U);
+
+            // allocate temporary storage
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
+            HIP_CHECK(hipDeviceSynchronize());
+
+            test_utils::GraphHelper gHelper;
+            if(TestFixture::use_graphs)
+            {
+                gHelper.startStreamCapture(stream);
+            }
+
+            // Run
+            HIP_CHECK(hipcub::DeviceReduce::Max(d_temp_storage,
+                                                temp_storage_size_bytes,
+                                                d_input,
+                                                d_output,
+                                                input.size(),
+                                                stream));
+
+            if(TestFixture::use_graphs)
+            {
+                gHelper.createAndLaunchGraph(stream);
+            }
+
+            HIP_CHECK(hipPeekAtLastError());
+            HIP_CHECK(hipDeviceSynchronize());
+
+            // Copy output to host
+            HIP_CHECK(hipMemcpy(output.data(),
+                                d_output,
+                                output.size() * sizeof(U),
+                                hipMemcpyDeviceToHost));
+            HIP_CHECK(hipDeviceSynchronize());
+
+            // Check if output values are as expected
+            ASSERT_NO_FATAL_FAILURE(
+                test_utils::assert_near(output[0], expected, test_utils::precision<U>::value));
+
+            if(TestFixture::use_graphs)
+            {
+                gHelper.cleanupGraphHelper();
+            }
 
             HIP_CHECK(hipFree(d_input));
             HIP_CHECK(hipFree(d_output));
@@ -633,7 +776,7 @@ TYPED_TEST(HipcubDeviceReduceTests, TransformReduce)
             // Calculate expected results on host using the same accumulator type than on device
             using Sum =
                 typename AlgebraicSelector<hipcub::Sum, T, U>::type; // For custom_type_test tests
-            using AccumT = hipcub::detail::accumulator_t<Sum, U, T>;
+            using AccumT = hipcub::detail::accumulator_t<Sum, T, U>;
 
             Sum             reduction_op;
             TestTransformOp transform_op;

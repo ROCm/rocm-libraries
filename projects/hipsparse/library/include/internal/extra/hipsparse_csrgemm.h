@@ -30,13 +30,11 @@ extern "C" {
 
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
 /*! \ingroup extra_module
-*  \brief Sparse matrix sparse matrix multiplication using CSR storage format
-*
 *  \details
 *  \p hipsparseXcsrgemmNnz computes the total CSR non-zero elements and the CSR row
 *  offsets, that point to the start of every row of the sparse CSR matrix, of the
-*  resulting multiplied matrix C. It is assumed that \p csrRowPtrC has been allocated
-*  with size \p m+1. The desired index base in the output CSR matrix C is set in the 
+*  resulting multiplied matrix \f$C\f$. It is assumed that \p csrRowPtrC has been allocated
+*  with size \p m+1. The desired index base in the output CSR matrix \f$C\f$ is set in the 
 *  \ref hipsparseMatDescr_t \p descrC. See \ref hipsparseSetMatIndexBase().
 *
 *  \note
@@ -469,8 +467,6 @@ hipsparseStatus_t hipsparseZcsrgemm(hipsparseHandle_t         handle,
 
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
 /*! \ingroup extra_module
-*  \brief Sparse matrix sparse matrix multiplication using CSR storage format
-*
 *  \details
 *  \p hipsparseXcsrgemm2_bufferSizeExt returns the size of the temporary storage buffer
 *  in bytes that is required by \ref hipsparseXcsrgemm2Nnz() and \ref hipsparseScsrgemm2 
@@ -645,15 +641,13 @@ hipsparseStatus_t hipsparseZcsrgemm2_bufferSizeExt(hipsparseHandle_t         han
 
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
 /*! \ingroup extra_module
-*  \brief Sparse matrix sparse matrix multiplication using CSR storage format
-*
 *  \details
 *  \p hipsparseXcsrgemm2Nnz computes the total CSR non-zero elements and the CSR row
 *  offsets, that point to the start of every row of the sparse CSR matrix, of the
-*  resulting multiplied matrix C. It is assumed that \p csrRowPtrC has been allocated
+*  resulting multiplied matrix \f$C\f$. It is assumed that \p csrRowPtrC has been allocated
 *  with size \p m+1. The required buffer size can be obtained by 
 *  \ref hipsparseScsrgemm2_bufferSizeExt "hipsparseXcsrgemm2_bufferSizeExt()". The desired 
-*  index base in the output CSR matrix C is set in the \ref hipsparseMatDescr_t \p descrC. 
+*  index base in the output CSR matrix \f$C\f$ is set in the \ref hipsparseMatDescr_t \p descrC. 
 *  See \ref hipsparseSetMatIndexBase().
 *
 *  \note

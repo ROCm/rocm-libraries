@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -53,7 +53,9 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #ifndef ROCRAND_RNG_PHILOX4X32_10_H_
 #define ROCRAND_RNG_PHILOX4X32_10_H_
 
+// IWYU pragma: begin_keep
 #include "config/philox4_32_10_config.hpp"
+// IWYU pragma: end_keep
 
 #include "common.hpp"
 #include "config_types.hpp"

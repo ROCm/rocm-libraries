@@ -23,13 +23,12 @@
 
 #include "test_utils_custom_test_types.hpp"
 
-// For radix_key_codec
-#include <rocprim/thread/radix_key_codec.hpp>
-
-#include <ostream>
-#include <type_traits>
+#include <rocprim/config.hpp>
+#include <rocprim/type_traits.hpp>
+#include <rocprim/types.hpp>
 
 #include <cmath>
+#include <ostream>
 
 namespace test_utils
 {
@@ -110,31 +109,14 @@ struct is_custom_type<test_utils::custom_float_type> : std::true_type
 // because this is something that is unavoidable in some cases we should provide clear customization
 // points instead of hacks like these.
 // Nonetheless until that adding a test for this pattern should reduce accidental breakages
-namespace rocprim
-{
-
-namespace detail
-{
-
 template<>
-struct float_bit_mask<test_utils::custom_float_type>
+struct rocprim::traits::define<test_utils::custom_float_type>
 {
-    static constexpr uint32_t sign_bit = 0x80000000;
-    static constexpr uint32_t exponent = 0x7F800000;
-    static constexpr uint32_t mantissa = 0x007FFFFF;
-    using bit_type                     = uint32_t;
+    using is_arithmetic = rocprim::traits::is_arithmetic::values<true>;
+    using number_format
+        = rocprim::traits::number_format::values<number_format::kind::floating_point_type>;
+    using float_bit_mask
+        = rocprim::traits::float_bit_mask::values<uint32_t, 0x80000000, 0x7F800000, 0x007FFFFF>;
 };
-
-template<>
-struct radix_key_codec_base<test_utils::custom_float_type>
-    : radix_key_codec_floating<test_utils::custom_float_type, unsigned int>
-{};
-
-static_assert(!is_floating_point<test_utils::custom_float_type>::value,
-              "custom_float_type must not be rocprim::is_floating_point, "
-              "since that is how downstream libraries use it.");
-
-} // namespace detail
-} // namespace rocprim
 
 #endif //ROCPRIM_TEST_UTILS_CUSTOM_FLOAT_TYPE_HPP_

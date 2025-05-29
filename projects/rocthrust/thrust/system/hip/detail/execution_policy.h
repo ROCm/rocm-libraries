@@ -28,69 +28,80 @@
 #pragma once
 
 #include <thrust/detail/config.h>
-
-#include <thrust/version.h>
-
-#include <hip/hip_runtime.h>
+#include <thrust/system/hip/config.h>
 
 #include <thrust/detail/allocator_aware_execution_policy.h>
 #include <thrust/detail/dependencies_aware_execution_policy.h>
 #include <thrust/detail/execution_policy.h>
 #include <thrust/iterator/detail/any_system_tag.h>
-#include <thrust/system/hip/config.h>
+#include <thrust/version.h>
+
+#include <hip/hip_runtime.h>
 
 THRUST_NAMESPACE_BEGIN
 
 namespace hip_rocprim
 {
-    struct tag;
+struct tag;
 
-    template <class>
-    struct execution_policy;
+template <class>
+struct execution_policy;
 
-    template <>
-    struct execution_policy<tag> : thrust::execution_policy<tag>
-    {
-        using tag_type = tag;
-    };
+template <>
+struct execution_policy<tag> : thrust::execution_policy<tag>
+{
+  using tag_type = tag;
+};
 
-    struct tag : execution_policy<tag>,
-                 thrust::detail::allocator_aware_execution_policy<hip_rocprim::execution_policy>,
-                 thrust::detail::dependencies_aware_execution_policy<hip_rocprim::execution_policy>
-    {};
+struct tag
+    : execution_policy<tag>
+    , thrust::detail::allocator_aware_execution_policy<hip_rocprim::execution_policy>
+    , thrust::detail::dependencies_aware_execution_policy<hip_rocprim::execution_policy>
+{};
 
-    template <class Derived>
-    struct execution_policy : thrust::execution_policy<Derived>
-    {
-       using tag_type = tag;
-       operator tag() const { return tag(); }
-    };
+template <class Derived>
+struct execution_policy : thrust::execution_policy<Derived>
+{
+  using tag_type = tag;
+  operator tag() const
+  {
+    return tag();
+  }
+};
 
 } // namespace hip_rocprim
 
-namespace system { namespace hip { namespace detail
+namespace system
+{
+namespace hip
+{
+namespace detail
 {
 
-  using thrust::hip_rocprim::tag;
-  using thrust::hip_rocprim::execution_policy;
+using thrust::hip_rocprim::execution_policy;
+using thrust::hip_rocprim::tag;
 
-}}} // namespace system::hip_rocprim::detail
+} // namespace detail
+} // namespace hip
+} // namespace system
 
-namespace system { namespace hip
+namespace system
+{
+namespace hip
 {
 
-  using thrust::hip_rocprim::tag;
-  using thrust::hip_rocprim::execution_policy;
+using thrust::hip_rocprim::execution_policy;
+using thrust::hip_rocprim::tag;
 
-}} // namespace system::hip
+} // namespace hip
+} // namespace system
 
 namespace hip
 {
 
-  using thrust::hip_rocprim::tag;
-  using thrust::hip_rocprim::execution_policy;
+using thrust::hip_rocprim::execution_policy;
+using thrust::hip_rocprim::tag;
 
 } // namespace hip
-
 
 THRUST_NAMESPACE_END

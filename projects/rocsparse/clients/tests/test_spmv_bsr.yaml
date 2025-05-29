@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -75,6 +75,7 @@ Tests:
   direction: [rocsparse_direction_column]
   baseA: [rocsparse_index_base_one]
   matrix: [rocsparse_matrix_random]
+  call_stage_analysis: [false, true]
 
 
 - name: spmv_bsr
@@ -196,6 +197,7 @@ Tests:
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_random]
   graph_test: true
+  call_stage_analysis: [false, true]
 
 #
 # mixed precision
@@ -248,6 +250,19 @@ Tests:
   M: [534, 1604, 3413, 75196]
   N: [578, 4109, 9458, 34254]
   block_dim: [16]
+  alpha_beta: *alpha_beta_range_quick
+  direction: [rocsparse_direction_column]
+  baseA: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_random]
+
+- name: spmv_bsr
+  category: pre_checkin
+  function: spmv_bsr
+  indextype: *i32_i64
+  precision: *float16_float16_float32_float32_axyt_precision
+  M: [25196]
+  N: [31254]
+  block_dim: [8]
   alpha_beta: *alpha_beta_range_quick
   direction: [rocsparse_direction_column]
   baseA: [rocsparse_index_base_one]

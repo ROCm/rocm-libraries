@@ -34,6 +34,8 @@ using namespace std::placeholders;
 #include "stockham_gen_cr.h"
 #include "stockham_gen_rc.h"
 #include "stockham_gen_rr.h"
+#include "stockham_pp_gen_cc.h"
+#include "stockham_pp_gen_rr.h"
 
 #include "stockham_gen_2d.h"
 

@@ -19,4 +19,3 @@
 #include <thrust/detail/config.h>
 
 // cpp has no special transform
-

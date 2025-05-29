@@ -32,15 +32,30 @@ extern "C" {
 *  \brief Gather elements from a dense vector and store them into a sparse vector.
 *
 *  \details
-*  \ref hipsparseGather gathers the elements from the dense vector \f$y\f$ and stores
+*  \p hipsparseGather gathers the elements from the dense vector \f$y\f$ and stores
 *  them in the sparse vector \f$x\f$.
 *
 *  \code{.c}
 *      for(i = 0; i < nnz; ++i)
 *      {
-*          xVal[i] = y[xInd[i]];
+*          x_val[i] = y[x_ind[i]];
 *      }
 *  \endcode
+*
+*  \p hipsparseGather supports the following uniform precision data types for the sparse and dense vectors \f$x\f$ and 
+*  \f$y\f$.
+*
+*  \par Uniform Precisions:
+*  <table>
+*  <caption id="gather_uniform">Uniform Precisions</caption>
+*  <tr><th>X / Y
+*  <tr><td>HIP_R_8I
+*  <tr><td>HIP_R_16F
+*  <tr><td>HIP_R_32F
+*  <tr><td>HIP_R_64F
+*  <tr><td>HIP_C_32F
+*  <tr><td>HIP_C_64F
+*  </table>
 *
 *  @param[in]
 *  handle       handle to the hipsparse library context queue.

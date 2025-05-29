@@ -637,14 +637,7 @@ class GlobalWriteBatchWriter:
           module.add(self.parentWriter.addStore(self.kernel, self.ss, 'E', addrCalc, vgprDst, self.tmpS01, self.edge, comment="store E"))
 
         sumIdx = self.ss.elementSumIdx[elementIdx]
-        if not self.kernel["StoreRemapVectorWidth"]:
-          # tmpStoreCode = self.parentWriter.addStore(self.kernel, self.ss, 'D', addrCalc, sumIdx, self.tmpS01, self.edge, comment="store D %u" %sumIdx) #here
-          # if self.kernel["GroupLoadStore"]:
-          #   storeCodeGSUSK.add(tmpStoreCode)
-          # else:
-          #   module.add(tmpStoreCode)
-          pass
-        else:
+        if self.kernel["StoreRemapVectorWidth"]:
           rpe = self.parentWriter.states.bpeCinternal // self.parentWriter.states.bpr
           module.add(self.parentWriter.storeRemapAddLocalWrite(self.kernel, self.ss, addrCalc, sumIdx*rpe))
           # Column Block Shape has been written to LDS
@@ -1219,17 +1212,6 @@ class GlobalWriteBatchWriter:
             self.storesIssued += 1
 
     module.add(storeCode)
-
-    # if self.kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel":#GSUGSU
-    #   SynchronizerEndlabelString = "Sync_END%s%s" % ("_Beta" if self.beta else "", "_Edge" if self.edge else "" )
-    #   SynchronizerEndlabelComment = "Sync_END"
-    #   SynchronizerEndlabel = Label(self.parentWriter.labels.getName(SynchronizerEndlabelString), SynchronizerEndlabelComment)
-    #   module.add(SynchronizerEndlabel)
-
-      # module.addSpaceLine()
-      # module.addCommentAlign("synchronizer store end")
-
-    #   module.addSpaceLine()
 
     if self.parentWriter.db["CheckStoreC"]>=0:
       useBuffer = self.kernel["BufferStore"]

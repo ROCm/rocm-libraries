@@ -27,6 +27,7 @@
 #include <rocRoller/Graph/GraphUtilities.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/Transforms/Simplify.hpp>
+#include <rocRoller/KernelGraph/Utils.hpp>
 
 #include "../GenericContextFixture.hpp"
 
@@ -178,5 +179,56 @@ namespace KernelGraphTest
             graph1.control.getEdge(b1);
         });
         EXPECT_ANY_THROW(graph1.control.getEdge(b2));
+    }
+
+    TEST_F(KernelGraphSimplifyTest, MultipleRedundantBody)
+    {
+        //
+        //  graph0's control graph is like this:
+        //
+        //                  A
+        //                  | (body)
+        //  ------------------------------
+        //  |         |        |         |
+        //  |         |        |         | ...
+        //  v         v        v         v
+        // NOP ---> NOP --->  NOP ---> NOP
+        //    (seq)    (seq)     (seq)
+        //
+
+        auto graph0 = KernelGraph::KernelGraph();
+
+        auto A = graph0.control.addElement(NOP());
+
+        std::vector<int> bodyNodes;
+        std::vector<int> bodyEdges;
+        for(int i = 0; i < 10; i++)
+        {
+            auto nop = graph0.control.addElement(NOP());
+            bodyEdges.push_back(graph0.control.addElement(Body(), {A}, {nop}));
+            bodyNodes.push_back(nop);
+        }
+
+        //
+        // Chain the Body nodes with Sequence edges
+        //
+        for(int i = 1; i < bodyNodes.size(); i++)
+            graph0.control.addElement(Sequence(), {bodyNodes[i - 1]}, {bodyNodes[i]});
+
+        auto graph1 = KernelGraph::Simplify().apply(graph0);
+
+        //
+        // Use the result of baseline method as verification
+        //
+        rocRoller::KernelGraph::removeRedundantBodyEdgesBaselineMethod(graph0);
+
+        EXPECT_EQ(graph0.control.getEdges().to<std::vector>(),
+                  graph1.control.getEdges().to<std::vector>());
+
+        //
+        // Verify only the first Body edge remains
+        //
+        for(int i = 1; i < bodyEdges.size(); i++)
+            EXPECT_ANY_THROW(graph1.control.getEdge(bodyEdges[i]));
     }
 }

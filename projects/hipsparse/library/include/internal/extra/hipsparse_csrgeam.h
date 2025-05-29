@@ -30,12 +30,10 @@ extern "C" {
 
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
 /*! \ingroup extra_module
-*  \brief Sparse matrix sparse matrix addition using CSR storage format
-*
 *  \details
 *  \p hipsparseXcsrgeamNnz computes the total CSR non-zero elements and the CSR row
 *  offsets, that point to the start of every row of the sparse CSR matrix, of the
-*  resulting matrix C. It is assumed that \p csrRowPtrC has been allocated with
+*  resulting matrix \f$C\f$. It is assumed that \p csrRowPtrC has been allocated with
 *  size \p m+1. The desired index base in the output CSR matrix is set in the 
 *  \ref hipsparseMatDescr_t. See \ref hipsparseSetMatIndexBase().
 *
@@ -129,9 +127,9 @@ hipsparseStatus_t hipsparseXcsrgeamNnz(hipsparseHandle_t         handle,
 *
 *  This computation involves a multi step process. First the user must allocate \p csrRowPtrC
 *  to have size \p m+1. The user then calls \ref hipsparseXcsrgeamNnz which fills in the \p csrRowPtrC
-*  array as well as computes the total number of nonzeros in C, \p nnzC. The user then allocates both 
+*  array as well as computes the total number of nonzeros in \f$C\f$, \p nnzC. The user then allocates both 
 *  arrays \p csrColIndC and \p csrValC to have size \p nnzC and calls \p hipsparseXcsrgeam to complete 
-*  the computation. The desired index base in the output CSR matrix C is set in the 
+*  the computation. The desired index base in the output CSR matrix \f$C\f$ is set in the 
 *  \ref hipsparseMatDescr_t \p descrC. See \ref hipsparseSetMatIndexBase().
 *
 *  \note Both scalars \f$\alpha\f$ and \f$beta\f$ have to be valid.
@@ -406,8 +404,6 @@ hipsparseStatus_t hipsparseZcsrgeam(hipsparseHandle_t         handle,
 #endif
 
 /*! \ingroup extra_module
-*  \brief Sparse matrix sparse matrix multiplication using CSR storage format
-*
 *  \details
 *  \p hipsparseXcsrgeam2_bufferSizeExt returns the size of the temporary storage buffer
 *  in bytes that is required by \ref hipsparseXcsrgeam2Nnz() and \ref hipsparseScsrgeam2 
@@ -465,9 +461,7 @@ hipsparseStatus_t hipsparseZcsrgeam(hipsparseHandle_t         handle,
 *                     sparse CSR matrix \f$C\f$.
 *  @param[out]
 *  pBufferSizeInBytes number of bytes of the temporary storage buffer required by
-*                     hipsparseXcsrgeam2Nnz(), hipsparseScsrgeam2(),
-*                     hipsparseDcsrgeam2(), hipsparseCcsrgeam2(),
-*                     hipsparseZcsrgeam2().
+*                     hipsparseXcsrgeam2Nnz() and \ref hipsparseScsrgeam2 "hipsparseXcsrgeam2()".
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnzA, \p nnzB, 
@@ -569,15 +563,13 @@ hipsparseStatus_t hipsparseZcsrgeam2_bufferSizeExt(hipsparseHandle_t         han
 /**@}*/
 
 /*! \ingroup extra_module
-*  \brief Sparse matrix sparse matrix addition using CSR storage format
-*
 *  \details
 *  \p hipsparseXcsrgeam2Nnz computes the total CSR non-zero elements and the CSR row
 *  offsets, that point to the start of every row of the sparse CSR matrix, of the
-*  resulting matrix C. It is assumed that \p csrRowPtrC has been allocated with
+*  resulting matrix \f$C\f$. It is assumed that \p csrRowPtrC has been allocated with
 *  size \p m+1. The required buffer size can be obtained by 
 *  \ref hipsparseScsrgeam2_bufferSizeExt "hipsparseXcsrgeam2_bufferSizeExt()". The 
-*  desired index base in the output CSR matrix C is set in the \ref hipsparseMatDescr_t 
+*  desired index base in the output CSR matrix \f$C\f$ is set in the \ref hipsparseMatDescr_t 
 *  \p descrC. See \ref hipsparseSetMatIndexBase().
 *
 *  \note

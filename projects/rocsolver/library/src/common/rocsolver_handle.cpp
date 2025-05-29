@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -38,6 +38,8 @@ rocblas_status rocsolver_set_alg_mode_impl(rocblas_handle handle,
 {
     if(!handle)
         return rocblas_status_invalid_handle;
+    if(mode == rocsolver_alg_mode_mixed)
+        return rocblas_status_invalid_value;
 
     std::shared_ptr<void> handle_ptr;
     ROCBLAS_CHECK(rocblas_internal_get_data_ptr(handle, handle_ptr));
@@ -72,6 +74,19 @@ rocblas_status rocsolver_set_alg_mode_impl(rocblas_handle handle,
             handle_data->sterf_mode = mode;
             return rocblas_status_success;
         }
+    case rocsolver_function_steqr:
+        if(mode == rocsolver_alg_mode_gpu || mode == rocsolver_alg_mode_hybrid)
+        {
+            handle_data->steqr_mode = mode;
+            return rocblas_status_success;
+        }
+    case rocsolver_function_syev_heev:
+        if(mode == rocsolver_alg_mode_gpu || mode == rocsolver_alg_mode_hybrid)
+        {
+            handle_data->sterf_mode = mode;
+            handle_data->steqr_mode = mode;
+            return rocblas_status_success;
+        }
     }
 
     return rocblas_status_invalid_value;
@@ -102,6 +117,13 @@ rocblas_status rocsolver_get_alg_mode_impl(rocblas_handle handle,
         case rocsolver_function_gesvd:
         case rocsolver_function_bdsqr: *mode = handle_data->bdsqr_mode; break;
         case rocsolver_function_sterf: *mode = handle_data->sterf_mode; break;
+        case rocsolver_function_steqr: *mode = handle_data->steqr_mode; break;
+        case rocsolver_function_syev_heev:
+            if(handle_data->sterf_mode == handle_data->steqr_mode)
+                *mode = handle_data->sterf_mode;
+            else
+                *mode = rocsolver_alg_mode_mixed;
+            break;
         default: return rocblas_status_invalid_value;
         }
     }

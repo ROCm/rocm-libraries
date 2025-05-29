@@ -36,7 +36,7 @@ The hipSPARSE public repository is located at `<https://github.com/ROCm/hipSPARS
   .. grid-item-card:: API reference
 
     * :doc:`Exported functions <./reference/api>`
-    * :doc:`hipSPARSE datatypes <./reference/types>`
+    * :doc:`hipSPARSE data types <./reference/types>`
     * :doc:`hipSPARSE precision support <./reference/precision>`
     * :doc:`Sparse auxiliary functions <./reference/auxiliary>`
     * :doc:`Sparse level 1 functions <./reference/level1>`

@@ -1,6 +1,6 @@
 .. meta::
-  :description: rocSOLVER documentation and API reference library
-  :keywords: rocSOLVER, ROCm, API, documentation
+  :description: rocSOLVER deprecated components documentation
+  :keywords: rocSOLVER, ROCm, API, documentation, deprecated components
 
 .. _deprecated:
 
@@ -8,7 +8,7 @@
 Deprecated rocSOLVER components
 ********************************
 
-Originally, rocSOLVER maintained its own types and helpers as aliases to those of rocBLAS.
+rocSOLVER originally maintained its own types and helpers as aliases to those of rocBLAS.
 These aliases are now deprecated. See the :doc:`rocBLAS types <rocblas:reference/datatypes>`
 and :doc:`rocBLAS auxiliary functions <rocblas:reference/helper-functions>`
 documentation for information on the suggested replacements.

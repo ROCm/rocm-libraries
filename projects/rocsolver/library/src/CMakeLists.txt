@@ -356,7 +356,25 @@ set(auxiliaries
   common/rocsparse.cpp
 )
 
+set(common_source
+  ${PROJECT_SOURCE_DIR}/common/src/common_host_helpers.cpp
+)
+
+if(USE_HIPCXX)
+  set_source_files_properties(
+    ${common_source}
+    ${auxiliaries}
+    ${rocsolver_specialized_source}
+    ${rocsolver_auxiliary_source}
+    ${rocsolver_lapack_source}
+    ${rocsolver_refact_source}
+    PROPERTIES
+      LANGUAGE HIP
+  )
+endif()
+
 add_library(rocsolver
+  ${common_source}
   ${auxiliaries}
   ${rocsolver_specialized_source}
   ${rocsolver_auxiliary_source}
@@ -372,10 +390,12 @@ target_link_libraries(rocsolver
   PRIVATE
     $<BUILD_INTERFACE:rocsolver-common> # https://gitlab.kitware.com/cmake/cmake/-/issues/15415
     roc::rocprim
-    hip::device
     $<$<PLATFORM_ID:Linux>:--rtlib=compiler-rt>
     $<$<PLATFORM_ID:Linux>:--unwindlib=libgcc>
 )
+if(NOT USE_HIPCXX)
+  target_link_libraries(rocsolver PRIVATE hip::device)
+endif()
 
 if(NOT BUILD_WITH_SPARSE)
   target_link_libraries(rocsolver PRIVATE $<$<PLATFORM_ID:Linux>:${CMAKE_DL_LIBS}>)
@@ -400,14 +420,24 @@ else()
 endif()
 
 # In ROCm 4.0 and earlier, the default maximum threads per block is 256
-target_compile_options(rocsolver PRIVATE --gpu-max-threads-per-block=1024)
+if(USE_HIPCXX)
+  target_compile_options(rocsolver PRIVATE
+    $<$<COMPILE_LANGUAGE:HIP>:--gpu-max-threads-per-block=1024>)
+else()
+  target_compile_options(rocsolver PRIVATE --gpu-max-threads-per-block=1024)
+endif()
 
 # Ignore loop unrolling failures
 target_compile_options(rocsolver PRIVATE -Wno-pass-failed)
 
 # hipcc adds these options automatically. These options might have an effect
 # on performance, so add them when building with clang directly, just in case.
-if(CMAKE_CXX_COMPILER MATCHES ".*clang\\+\\+.*")
+if(USE_HIPCXX)
+  target_compile_options(rocsolver PRIVATE
+    "$<$<COMPILE_LANGUAGE:HIP>:SHELL:-mllvm -amdgpu-early-inline-all=true>"
+    "$<$<COMPILE_LANGUAGE:HIP>:SHELL:-mllvm -amdgpu-function-calls=false>"
+  )
+elseif(CMAKE_CXX_COMPILER MATCHES ".*clang\\+\\+.*")
   target_compile_options(rocsolver PRIVATE
     "SHELL:-mllvm -amdgpu-early-inline-all=true"
     "SHELL:-mllvm -amdgpu-function-calls=false"

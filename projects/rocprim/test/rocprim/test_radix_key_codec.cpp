@@ -33,7 +33,7 @@
 #include "test_utils_sort_comparator.hpp"
 
 #include <rocprim/device/detail/device_radix_sort.hpp>
-#include <rocprim/thread/radix_key_codec.hpp>
+#include <rocprim/type_traits.hpp>
 #include <rocprim/types.hpp>
 #include <rocprim/types/tuple.hpp>
 
@@ -94,7 +94,7 @@ struct custom_key_decomposer
 
 TEST_P(RadixKeyCodecTest, ExtractDigit)
 {
-    using codec = rocprim::detail::radix_key_codec<custom_key>;
+    using codec = decltype(rocprim::traits::get<custom_key>().radix_key_codec());
 
     const custom_key key{0xab, 0xcdef, 0x01};
     const auto       digit = codec::extract_digit(key,
@@ -126,7 +126,7 @@ struct custom_key_decomposer_with_unused
 
 TEST_P(RadixKeyCodecUnusedTest, ExtractDigitUnused)
 {
-    using codec = rocprim::detail::radix_key_codec<custom_key>;
+    using codec = decltype(rocprim::traits::get<custom_key>().radix_key_codec());
 
     const custom_key key{0xab, 0xcdef, 0x01};
     const auto       digit = codec::extract_digit(key,
@@ -140,7 +140,7 @@ TEST_P(RadixKeyCodecUnusedTest, ExtractDigitUnused)
 TEST(RadixKeyCodecTest, ExtractCustomTestType)
 {
     using T       = common::custom_type<int, int, true>;
-    using codec_t = rocprim::detail::radix_key_codec<T, true>;
+    using codec_t = decltype(rocprim::traits::get<T>().radix_key_codec<true>());
 
     T value{12, 34};
 
@@ -328,7 +328,9 @@ TYPED_TEST_SUITE(TypedRadixKeyCodecTest, TypedRadixKeyCodecTestTypes);
 template<bool Descending, class Key, class Decomposer>
 void encode_then_decode_test(Key key, Decomposer decomposer)
 {
-    using codec_t = ::rocprim::radix_key_codec<Key, Descending>;
+    constexpr auto input_traits = ::rocprim::traits::get<Key>();
+    constexpr auto codec        = input_traits.template radix_key_codec<Descending>();
+    using codec_t               = decltype(codec);
     using BitKey  = typename codec_t::bit_key_type;
 
     BitKey bit_key = codec_t::encode(key, decomposer);
@@ -353,7 +355,9 @@ void encode_then_extract_test(Key                key,
                               const unsigned int radix_bits,
                               Decomposer         decomposer)
 {
-    using codec_t = ::rocprim::radix_key_codec<Key, Descending>;
+    constexpr auto input_traits = ::rocprim::traits::get<Key>();
+    constexpr auto codec        = input_traits.template radix_key_codec<Descending>();
+    using codec_t               = decltype(codec);
     using BitKey  = typename codec_t::bit_key_type;
 
     BitKey bit_key = codec_t::encode(key, decomposer);
@@ -382,7 +386,9 @@ void encode_then_extract_test_custom(Key                key,
                                      const unsigned int radix_bits,
                                      Decomposer         decomposer)
 {
-    using codec_t = ::rocprim::radix_key_codec<Key, Descending>;
+    constexpr auto input_traits = ::rocprim::traits::get<Key>();
+    constexpr auto codec        = input_traits.template radix_key_codec<Descending>();
+    using codec_t               = decltype(codec);
     using BitKey  = typename codec_t::bit_key_type;
 
     BitKey bit_key = codec_t::encode(key, decomposer);

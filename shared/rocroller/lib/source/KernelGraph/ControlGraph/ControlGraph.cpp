@@ -32,7 +32,7 @@
 
 namespace rocRoller::KernelGraph::ControlGraph
 {
-    std::unordered_map<std::tuple<int, int>, NodeOrdering> const&
+    std::unordered_map<int, std::unordered_map<int, NodeOrdering>> const&
         ControlGraph::nodeOrderTable() const
     {
         populateOrderCache();
@@ -98,10 +98,13 @@ namespace rocRoller::KernelGraph::ControlGraph
 
         std::set<int> nodes;
 
-        for(auto const& pair : m_orderCache)
+        for(auto const& [node, nodeOrderPairs] : m_orderCache)
         {
-            nodes.insert(std::get<0>(pair.first));
-            nodes.insert(std::get<1>(pair.first));
+            for(auto const pair : nodeOrderPairs)
+            {
+                nodes.insert(node);
+                nodes.insert(pair.first);
+            }
         }
 
         return nodeOrderTableString(nodes);
@@ -130,9 +133,20 @@ namespace rocRoller::KernelGraph::ControlGraph
     {
         TIMER(t, "populateOrderCache");
 
+        if(m_cacheStatus == CacheStatus::Valid)
+            return;
+
         auto r = roots().to<std::set>();
         populateOrderCache(r);
         m_cacheStatus = CacheStatus::Valid;
+
+        //
+        // m_descendentCache is only used to help build m_orderCache,
+        // and it must be cleared after finish building m_orderCache
+        // to ensure no stale data being used when building m_orderCache
+        // next time.
+        //
+        m_descendentCache.clear();
     }
 
     template <CForwardRangeOf<int> Range>
@@ -232,18 +246,21 @@ namespace rocRoller::KernelGraph::ControlGraph
         }
         else
         {
-            auto it = m_orderCache.find({nodeA, nodeB});
-            if(it != m_orderCache.end())
+            auto [iter, _ignore] = m_orderCache.try_emplace(nodeA);
+
+            if(iter->second.contains(nodeB))
             {
-                AssertFatal(it->second == order,
+                AssertFatal(iter->second.at(nodeB) == order,
                             "Different kinds of orderings!",
                             ShowValue(nodeA),
                             ShowValue(nodeB),
-                            ShowValue(it->second),
+                            ShowValue(iter->second.at(nodeB)),
                             ShowValue(order));
             }
-
-            m_orderCache[{nodeA, nodeB}] = order;
+            else
+            {
+                iter->second.emplace(nodeB, order);
+            }
         }
     }
 

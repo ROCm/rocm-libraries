@@ -38,6 +38,7 @@ The rocSOLVER public repository is located at `<https://github.com/ROCm/rocSOLVE
     * :doc:`rocSOLVER API introduction <./reference/intro>`
     * :doc:`rocSOLVER types <./reference/types>`
     * :doc:`rocSOLVER precision support <./reference/precision>`
+    * :doc:`rocSOLVER environment variables <./reference/env_variables>`
     * :doc:`LAPACK auxiliary functions <./reference/auxiliary>`
     * :doc:`LAPACK functions <./reference/lapack>`
     * :doc:`LAPACK-like functions <./reference/lapacklike>`

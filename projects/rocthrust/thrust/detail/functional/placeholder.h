@@ -17,6 +17,7 @@
 #pragma once
 
 #include <thrust/detail/config.h>
+
 #include <thrust/detail/functional/actor.h>
 #include <thrust/detail/functional/argument.h>
 
@@ -26,13 +27,12 @@ namespace detail
 namespace functional
 {
 
-template<unsigned int i>
-  struct placeholder
+template <unsigned int i>
+struct placeholder
 {
   using type = actor<argument<i>>;
 };
 
-} // end functional
-} // end detail
+} // namespace functional
+} // namespace detail
 THRUST_NAMESPACE_END
-

@@ -14,7 +14,6 @@
  *  limitations under the License.
  */
 
-
 #pragma once
 
 #include <thrust/detail/config.h>
@@ -29,32 +28,24 @@ namespace detail
 namespace util
 {
 
-
-template<typename T>
-THRUST_HOST_DEVICE
-T *align_up(T * ptr, std::uintptr_t bytes)
+template <typename T>
+THRUST_HOST_DEVICE T* align_up(T* ptr, std::uintptr_t bytes)
 {
-  return (T *) ( bytes * (((std::uintptr_t) ptr + (bytes - 1)) / bytes) );
+  return (T*) (bytes * (((std::uintptr_t) ptr + (bytes - 1)) / bytes));
 }
 
-
-template<typename T>
-THRUST_HOST_DEVICE
-T *align_down(T * ptr, std::uintptr_t bytes)
+template <typename T>
+THRUST_HOST_DEVICE T* align_down(T* ptr, std::uintptr_t bytes)
 {
-  return (T *) ( bytes * (std::uintptr_t(ptr) / bytes) );
+  return (T*) (bytes * (std::uintptr_t(ptr) / bytes));
 }
 
-
-template<typename T>
-THRUST_HOST_DEVICE
-bool is_aligned(T * ptr, std::uintptr_t bytes = sizeof(T))
+template <typename T>
+THRUST_HOST_DEVICE bool is_aligned(T* ptr, std::uintptr_t bytes = sizeof(T))
 {
   return std::uintptr_t(ptr) % bytes == 0;
 }
 
-
 } // end namespace util
 } // end namespace detail
 THRUST_NAMESPACE_END
-
