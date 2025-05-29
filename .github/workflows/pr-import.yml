@@ -118,7 +118,7 @@ jobs:
           SANITIZED_BASE=$(echo "${{ github.event.inputs.monorepo-target-branch }}" | sed 's|/|_|g')
           SANITIZED_REPO=$(echo "${{ github.event.inputs.subrepo-repo }}" | sed 's|/|_|g')
           SANITIZED_REF=$(echo "${{ steps.prdata.outputs.head_ref }}" | sed 's|/|_|g')
-          IMPORT_BRANCH="import/SANITIZED_BASE/${SANITIZED_REPO}/${SANITIZED_REF}"
+          IMPORT_BRANCH="import/${SANITIZED_BASE}/${SANITIZED_REPO}/${SANITIZED_REF}"
           echo "import_branch=$IMPORT_BRANCH" >> $GITHUB_OUTPUT
           git checkout -b "$IMPORT_BRANCH"
 
