@@ -34,7 +34,7 @@ import importlib.util
 from dataclasses import fields
 from itertools import chain
 from pathlib import Path
-from typing import Dict, Tuple, Optional
+from typing import Dict, Tuple
 
 import pandas as pd
 import rrperf
@@ -94,30 +94,6 @@ def get_work_dir(rundir: str = None, build_dir: Path = None) -> Path:
     return root / Path(f"{date}-{commit}-{serial:03d}")
 
 
-def find_arch_file(build_dir: Path) -> Optional[Path]:
-    arch_file = build_dir / "source" / "rocRoller" / "GPUArchitecture_def.msgpack"
-    if arch_file.is_file():
-        return arch_file
-    return None
-
-
-def get_arch_env(build_dir: Optional[Path] = None) -> Dict[str, str]:
-    if build_dir is None:
-        build_dir = get_build_dir()
-    env = {}
-    if "ROCROLLER_ARCHITECTURE_FILE" not in env:
-        arch = find_arch_file(build_dir)
-        if arch:
-            env["ROCROLLER_ARCHITECTURE_FILE"] = str(arch)
-    return env
-
-
-def get_build_env(build_dir: Path) -> Dict[str, str]:
-    env = dict(os.environ)
-    env.update(get_arch_env(build_dir))
-    return env
-
-
 def get_build_dir() -> Path:
     varname = "ROCROLLER_BUILD_DIR"
     if varname in os.environ:
@@ -125,9 +101,6 @@ def get_build_dir() -> Path:
     default = rrperf.git.top() / "build"
     if default.is_dir():
         return default
-    cwd = Path.cwd()
-    if find_arch_file(cwd):
-        return cwd
 
     raise RuntimeError(f"Build directory not found.  Set {varname} to override.")
 
@@ -184,7 +157,6 @@ def run_problems(
             print(f"  command: {scmd}")
             print(f"  wrkdir:  {work_dir.resolve()}")
             print(f"  log:     {log.resolve()}")
-            print(f"  token:   {problem.token}", flush=True)
             p = subprocess.run(cmd, stdout=f, cwd=build_dir, env=env, check=False)
             status = None
             if p.returncode == 0:
@@ -293,7 +265,8 @@ def run_cli(
     else:
         build_dir = Path(build_dir)
 
-    env = get_build_env(build_dir)
+    env = dict(os.environ)
+    env["ROCROLLER_ENFORCE_GRAPH_CONSTRAINTS"] = "1"
 
     rundir = get_work_dir(rundir, build_dir)
     rundir.mkdir(parents=True, exist_ok=True)

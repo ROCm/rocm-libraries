@@ -21,8 +21,9 @@
 #ifndef ROCRAND_SCRAMBLED_SOBOL64_H_
 #define ROCRAND_SCRAMBLED_SOBOL64_H_
 
-#include "rocrand/rocrand_common.h"
 #include "rocrand/rocrand_sobol64.h"
+
+#include <hip/hip_runtime.h>
 
 namespace rocrand_device
 {

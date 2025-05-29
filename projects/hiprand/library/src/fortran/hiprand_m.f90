@@ -1,4 +1,4 @@
-!! Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
+!! Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 !!
 !! Permission is hereby granted, free of charge, to any person obtaining a copy
 !! of this software and associated documentation files (the "Software"), to deal
@@ -18,6 +18,7 @@
 !! OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 !! THE SOFTWARE.
 
+! hipRAND Fortran API is deprecated. hipfort should be used instead.
 module hiprand_m
     use hipfor
 

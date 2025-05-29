@@ -17,183 +17,155 @@
 
 #include <thrust/detail/config.h>
 
-#if THRUST_CPP_DIALECT >= 2014
+#if THRUST_CPP_DIALECT >= 2017
 
-#include <unittest/unittest.h>
-#include <unittest/util_async.h>
+#  include <thrust/async/copy.h>
+#  include <thrust/async/transform.h>
+#  include <thrust/device_vector.h>
+#  include <thrust/host_vector.h>
 
-#include <thrust/async/transform.h>
-#include <thrust/async/copy.h>
-#include <thrust/host_vector.h>
-#include <thrust/device_vector.h>
+#  include <unittest/unittest.h>
+#  include <unittest/util_async.h>
 
 template <typename T>
 struct divide_by_2
 {
-  THRUST_HOST_DEVICE
-  T operator()(T x) const
+  THRUST_HOST_DEVICE T operator()(T x) const
   {
     return x / 2;
   }
 };
 
-#define DEFINE_STATEFUL_ASYNC_TRANSFORM_UNARY_INVOKER(                        \
-    NAME, MEMBERS, CTOR, DTOR, VALIDATE, ...                                  \
-  )                                                                           \
-  template <typename T>                                                       \
-  struct NAME                                                                 \
-  {                                                                           \
-    MEMBERS                                                                   \
-                                                                              \
-    NAME() { CTOR }                                                           \
-                                                                              \
-    ~NAME() { DTOR }                                                          \
-                                                                              \
-    template <typename Event>                                                 \
-    void validate_event(Event& e)                                             \
-    {                                                                         \
-      THRUST_UNUSED_VAR(e);                                                   \
-      VALIDATE                                                                \
-    }                                                                         \
-                                                                              \
-    template <                                                                \
-      typename ForwardIt, typename Sentinel, typename OutputIt                \
-    , typename UnaryOperation                                                 \
-    >                                                                         \
-    THRUST_HOST                                                                  \
-    auto operator()(                                                          \
-      ForwardIt&& first, Sentinel&& last, OutputIt&& output                   \
-    , UnaryOperation&& op                                                     \
-    )                                                                         \
-    THRUST_DECLTYPE_RETURNS(                                                  \
-      ::thrust::async::transform(                                             \
-        __VA_ARGS__                                                           \
-      )                                                                       \
-    )                                                                         \
-  };                                                                          \
-  /**/
+#  define DEFINE_STATEFUL_ASYNC_TRANSFORM_UNARY_INVOKER(NAME, MEMBERS, CTOR, DTOR, VALIDATE, ...)             \
+    template <typename T>                                                                                     \
+    struct NAME                                                                                               \
+    {                                                                                                         \
+      MEMBERS                                                                                                 \
+                                                                                                              \
+      NAME()                                                                                                  \
+      {                                                                                                       \
+        CTOR                                                                                                  \
+      }                                                                                                       \
+                                                                                                              \
+      ~NAME()                                                                                                 \
+      {                                                                                                       \
+        DTOR                                                                                                  \
+      }                                                                                                       \
+                                                                                                              \
+      template <typename Event>                                                                               \
+      void validate_event(Event& e)                                                                           \
+      {                                                                                                       \
+        THRUST_UNUSED_VAR(e);                                                                                 \
+        VALIDATE                                                                                              \
+      }                                                                                                       \
+                                                                                                              \
+      template <typename ForwardIt, typename Sentinel, typename OutputIt, typename UnaryOperation>            \
+      THRUST_HOST auto operator()(ForwardIt&& first, Sentinel&& last, OutputIt&& output, UnaryOperation&& op) \
+        THRUST_DECLTYPE_RETURNS(::thrust::async::transform(__VA_ARGS__))                                      \
+    };                                                                                                        \
+    /**/
 
-#define DEFINE_ASYNC_TRANSFORM_UNARY_INVOKER(NAME, ...)                       \
-  DEFINE_STATEFUL_ASYNC_TRANSFORM_UNARY_INVOKER(                              \
-    NAME                                                                      \
-  , THRUST_PP_EMPTY(), THRUST_PP_EMPTY(), THRUST_PP_EMPTY(), THRUST_PP_EMPTY()\
-  , __VA_ARGS__                                                               \
-  )                                                                           \
-  /**/
+#  define DEFINE_ASYNC_TRANSFORM_UNARY_INVOKER(NAME, ...)                                            \
+    DEFINE_STATEFUL_ASYNC_TRANSFORM_UNARY_INVOKER(                                                   \
+      NAME, THRUST_PP_EMPTY(), THRUST_PP_EMPTY(), THRUST_PP_EMPTY(), THRUST_PP_EMPTY(), __VA_ARGS__) \
+    /**/
 
-#define DEFINE_SYNC_TRANSFORM_UNARY_INVOKER(NAME, ...)                        \
-  template <typename T>                                                       \
-  struct NAME                                                                 \
-  {                                                                           \
-                                                                              \
-    template <                                                                \
-      typename ForwardIt, typename Sentinel, typename OutputIt                \
-    , typename UnaryOperation                                                 \
-    >                                                                         \
-    THRUST_HOST                                                                  \
-    auto operator()(                                                          \
-      ForwardIt&& first, Sentinel&& last, OutputIt&& output                   \
-    , UnaryOperation&& op                                                     \
-    )                                                                         \
-    THRUST_RETURNS(                                                           \
-      ::thrust::transform(                                                    \
-        __VA_ARGS__                                                           \
-      )                                                                       \
-    )                                                                         \
-  };                                                                          \
-  /**/
+#  define DEFINE_SYNC_TRANSFORM_UNARY_INVOKER(NAME, ...)                                                      \
+    template <typename T>                                                                                     \
+    struct NAME                                                                                               \
+    {                                                                                                         \
+      template <typename ForwardIt, typename Sentinel, typename OutputIt, typename UnaryOperation>            \
+      THRUST_HOST auto operator()(ForwardIt&& first, Sentinel&& last, OutputIt&& output, UnaryOperation&& op) \
+        THRUST_RETURNS(::thrust::transform(__VA_ARGS__))                                                      \
+    };                                                                                                        \
+    /**/
 
 DEFINE_ASYNC_TRANSFORM_UNARY_INVOKER(
-  transform_unary_async_invoker
-, THRUST_FWD(first), THRUST_FWD(last)
-, THRUST_FWD(output)
-, THRUST_FWD(op)
-);
+  transform_unary_async_invoker, THRUST_FWD(first), THRUST_FWD(last), THRUST_FWD(output), THRUST_FWD(op));
 DEFINE_ASYNC_TRANSFORM_UNARY_INVOKER(
-  transform_unary_async_invoker_device
-, thrust::device
-, THRUST_FWD(first), THRUST_FWD(last)
-, THRUST_FWD(output)
-, THRUST_FWD(op)
-);
+  transform_unary_async_invoker_device,
+  thrust::device,
+  THRUST_FWD(first),
+  THRUST_FWD(last),
+  THRUST_FWD(output),
+  THRUST_FWD(op));
 DEFINE_ASYNC_TRANSFORM_UNARY_INVOKER(
-  transform_unary_async_invoker_device_allocator
-, thrust::device(thrust::device_allocator<void>{})
-, THRUST_FWD(first), THRUST_FWD(last)
-, THRUST_FWD(output)
-, THRUST_FWD(op)
-);
+  transform_unary_async_invoker_device_allocator,
+  thrust::device(thrust::device_allocator<void>{}),
+  THRUST_FWD(first),
+  THRUST_FWD(last),
+  THRUST_FWD(output),
+  THRUST_FWD(op));
 DEFINE_STATEFUL_ASYNC_TRANSFORM_UNARY_INVOKER(
   transform_unary_async_invoker_device_on
   // Members.
-, SPECIALIZE_DEVICE_RESOURCE_NAME(Stream_t) stream_;
+  ,
+  SPECIALIZE_DEVICE_RESOURCE_NAME(Stream_t) stream_;
   // Constructor.
-, thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(
-    SPECIALIZE_DEVICE_RESOURCE_NAME(StreamCreateWithFlags)(&stream_, SPECIALIZE_DEVICE_RESOURCE_NAME(StreamNonBlocking))
-  );
+  ,
+  thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamCreateWithFlags)(
+    &stream_, SPECIALIZE_DEVICE_RESOURCE_NAME(StreamNonBlocking)));
   // Destructor.
-, thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(
-    SPECIALIZE_DEVICE_RESOURCE_NAME(StreamDestroy)(stream_)
-  );
+  ,
+  thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamDestroy)(stream_));
   // `validate_event` member.
-, ASSERT_EQUAL_QUIET(stream_, e.stream().native_handle());
+  ,
+  ASSERT_EQUAL_QUIET(stream_, e.stream().native_handle());
   // Arguments to `thrust::async::transform`.
-, thrust::device.on(stream_)
-, THRUST_FWD(first), THRUST_FWD(last)
-, THRUST_FWD(output)
-, THRUST_FWD(op)
-);
+  ,
+  thrust::device.on(stream_),
+  THRUST_FWD(first),
+  THRUST_FWD(last),
+  THRUST_FWD(output),
+  THRUST_FWD(op));
 DEFINE_STATEFUL_ASYNC_TRANSFORM_UNARY_INVOKER(
   transform_unary_async_invoker_device_allocator_on
   // Members.
-, SPECIALIZE_DEVICE_RESOURCE_NAME(Stream_t) stream_;
+  ,
+  SPECIALIZE_DEVICE_RESOURCE_NAME(Stream_t) stream_;
   // Constructor.
-, thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(
-    SPECIALIZE_DEVICE_RESOURCE_NAME(StreamCreateWithFlags)(&stream_, SPECIALIZE_DEVICE_RESOURCE_NAME(StreamNonBlocking))
-  );
+  ,
+  thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamCreateWithFlags)(
+    &stream_, SPECIALIZE_DEVICE_RESOURCE_NAME(StreamNonBlocking)));
   // Destructor.
-, thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(
-    SPECIALIZE_DEVICE_RESOURCE_NAME(StreamDestroy)(stream_)
-  );
+  ,
+  thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamDestroy)(stream_));
   // `validate_event` member.
-, ASSERT_EQUAL_QUIET(stream_, e.stream().native_handle());
+  ,
+  ASSERT_EQUAL_QUIET(stream_, e.stream().native_handle());
   // Arguments to `thrust::async::transform`.
-, thrust::device(thrust::device_allocator<void>{}).on(stream_)
-, THRUST_FWD(first), THRUST_FWD(last)
-, THRUST_FWD(output)
-, THRUST_FWD(op)
-);
+  ,
+  thrust::device(thrust::device_allocator<void>{}).on(stream_),
+  THRUST_FWD(first),
+  THRUST_FWD(last),
+  THRUST_FWD(output),
+  THRUST_FWD(op));
 
 DEFINE_SYNC_TRANSFORM_UNARY_INVOKER(
-  transform_unary_sync_invoker
-, THRUST_FWD(first), THRUST_FWD(last)
-, THRUST_FWD(output)
-, THRUST_FWD(op)
-);
+  transform_unary_sync_invoker, THRUST_FWD(first), THRUST_FWD(last), THRUST_FWD(output), THRUST_FWD(op));
 
 ///////////////////////////////////////////////////////////////////////////////
 
-template <
-  template <typename> class AsyncTransformUnaryInvoker
-, template <typename> class SyncTransformUnaryInvoker
-, template <typename> class UnaryOperation
->
+template <template <typename> class AsyncTransformUnaryInvoker,
+          template <typename>
+          class SyncTransformUnaryInvoker,
+          template <typename>
+          class UnaryOperation>
 struct test_async_transform_unary
 {
   template <typename T>
   struct tester
   {
-    THRUST_HOST
-    void operator()(std::size_t n)
+    THRUST_HOST void operator()(std::size_t n)
     {
-      thrust::host_vector<T>   h0(unittest::random_integers<T>(n));
+      thrust::host_vector<T> h0(unittest::random_integers<T>(n));
 
       thrust::device_vector<T> d0a(h0);
       thrust::device_vector<T> d0b(h0);
       thrust::device_vector<T> d0c(h0);
       thrust::device_vector<T> d0d(h0);
 
-      thrust::host_vector<T>   h1(n);
+      thrust::host_vector<T> h1(n);
 
       thrust::device_vector<T> d1a(n);
       thrust::device_vector<T> d1b(n);
@@ -201,7 +173,7 @@ struct test_async_transform_unary
       thrust::device_vector<T> d1d(n);
 
       AsyncTransformUnaryInvoker<T> invoke_async;
-      SyncTransformUnaryInvoker<T>  invoke_sync;
+      SyncTransformUnaryInvoker<T> invoke_sync;
 
       UnaryOperation<T> op;
 
@@ -239,76 +211,48 @@ struct test_async_transform_unary
 };
 DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES_AND_NAME(
   THRUST_PP_EXPAND_ARGS(
-    test_async_transform_unary<
-      transform_unary_async_invoker
-    , transform_unary_sync_invoker
-    , divide_by_2
-    >::tester
-  )
-, NumericTypes
-, test_async_transform_unary_divide_by_2
-);
+    test_async_transform_unary<transform_unary_async_invoker, transform_unary_sync_invoker, divide_by_2>::tester),
+  NumericTypes,
+  test_async_transform_unary_divide_by_2);
 DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES_AND_NAME(
   THRUST_PP_EXPAND_ARGS(
-    test_async_transform_unary<
-      transform_unary_async_invoker_device
-    , transform_unary_sync_invoker
-    , divide_by_2
-    >::tester
-  )
-, NumericTypes
-, test_async_transform_unary_policy_divide_by_2
-);
+    test_async_transform_unary<transform_unary_async_invoker_device, transform_unary_sync_invoker, divide_by_2>::tester),
+  NumericTypes,
+  test_async_transform_unary_policy_divide_by_2);
+DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES_AND_NAME(
+  THRUST_PP_EXPAND_ARGS(test_async_transform_unary<transform_unary_async_invoker_device_allocator,
+                                                   transform_unary_sync_invoker,
+                                                   divide_by_2>::tester),
+  NumericTypes,
+  test_async_transform_unary_policy_allocator_divide_by_2);
 DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES_AND_NAME(
   THRUST_PP_EXPAND_ARGS(
-    test_async_transform_unary<
-      transform_unary_async_invoker_device_allocator
-    , transform_unary_sync_invoker
-    , divide_by_2
-    >::tester
-  )
-, NumericTypes
-, test_async_transform_unary_policy_allocator_divide_by_2
-);
+    test_async_transform_unary<transform_unary_async_invoker_device_on, transform_unary_sync_invoker, divide_by_2>::
+      tester),
+  NumericTypes,
+  test_async_transform_unary_policy_on_divide_by_2);
 DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES_AND_NAME(
-  THRUST_PP_EXPAND_ARGS(
-    test_async_transform_unary<
-      transform_unary_async_invoker_device_on
-    , transform_unary_sync_invoker
-    , divide_by_2
-    >::tester
-  )
-, NumericTypes
-, test_async_transform_unary_policy_on_divide_by_2
-);
-DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES_AND_NAME(
-  THRUST_PP_EXPAND_ARGS(
-    test_async_transform_unary<
-      transform_unary_async_invoker_device_allocator_on
-    , transform_unary_sync_invoker
-    , divide_by_2
-    >::tester
-  )
-, NumericTypes
-, test_async_transform_unary_policy_allocator_on_divide_by_2
-);
+  THRUST_PP_EXPAND_ARGS(test_async_transform_unary<transform_unary_async_invoker_device_allocator_on,
+                                                   transform_unary_sync_invoker,
+                                                   divide_by_2>::tester),
+  NumericTypes,
+  test_async_transform_unary_policy_allocator_on_divide_by_2);
 
 ///////////////////////////////////////////////////////////////////////////////
 
-template <
-  template <typename> class AsyncTransformUnaryInvoker
-, template <typename> class SyncTransformUnaryInvoker
-, template <typename> class UnaryOperation
->
+template <template <typename> class AsyncTransformUnaryInvoker,
+          template <typename>
+          class SyncTransformUnaryInvoker,
+          template <typename>
+          class UnaryOperation>
 struct test_async_transform_unary_inplace
 {
   template <typename T>
   struct tester
   {
-    THRUST_HOST
-    void operator()(std::size_t n)
+    THRUST_HOST void operator()(std::size_t n)
     {
-      thrust::host_vector<T>   h0(unittest::random_integers<T>(n));
+      thrust::host_vector<T> h0(unittest::random_integers<T>(n));
 
       thrust::device_vector<T> d0a(h0);
       thrust::device_vector<T> d0b(h0);
@@ -316,7 +260,7 @@ struct test_async_transform_unary_inplace
       thrust::device_vector<T> d0d(h0);
 
       AsyncTransformUnaryInvoker<T> invoke_async;
-      SyncTransformUnaryInvoker<T>  invoke_sync;
+      SyncTransformUnaryInvoker<T> invoke_sync;
 
       UnaryOperation<T> op;
 
@@ -349,74 +293,47 @@ struct test_async_transform_unary_inplace
 };
 DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES_AND_NAME(
   THRUST_PP_EXPAND_ARGS(
-    test_async_transform_unary_inplace<
-      transform_unary_async_invoker
-    , transform_unary_sync_invoker
-    , divide_by_2
-    >::tester
-  )
-, NumericTypes
-, test_async_transform_unary_inplace_divide_by_2
-);
+    test_async_transform_unary_inplace<transform_unary_async_invoker, transform_unary_sync_invoker, divide_by_2>::tester),
+  NumericTypes,
+  test_async_transform_unary_inplace_divide_by_2);
 DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES_AND_NAME(
-  THRUST_PP_EXPAND_ARGS(
-    test_async_transform_unary_inplace<
-      transform_unary_async_invoker_device
-    , transform_unary_sync_invoker
-    , divide_by_2
-    >::tester
-  )
-, NumericTypes
-, test_async_transform_unary_inplace_policy_divide_by_2
-);
+  THRUST_PP_EXPAND_ARGS(test_async_transform_unary_inplace<transform_unary_async_invoker_device,
+                                                           transform_unary_sync_invoker,
+                                                           divide_by_2>::tester),
+  NumericTypes,
+  test_async_transform_unary_inplace_policy_divide_by_2);
 DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES_AND_NAME(
-  THRUST_PP_EXPAND_ARGS(
-    test_async_transform_unary_inplace<
-      transform_unary_async_invoker_device_allocator
-    , transform_unary_sync_invoker
-    , divide_by_2
-    >::tester
-  )
-, NumericTypes
-, test_async_transform_unary_inplace_policy_allocator_divide_by_2
-);
+  THRUST_PP_EXPAND_ARGS(test_async_transform_unary_inplace<transform_unary_async_invoker_device_allocator,
+                                                           transform_unary_sync_invoker,
+                                                           divide_by_2>::tester),
+  NumericTypes,
+  test_async_transform_unary_inplace_policy_allocator_divide_by_2);
 DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES_AND_NAME(
-  THRUST_PP_EXPAND_ARGS(
-    test_async_transform_unary_inplace<
-      transform_unary_async_invoker_device_on
-    , transform_unary_sync_invoker
-    , divide_by_2
-    >::tester
-  )
-, NumericTypes
-, test_async_transform_unary_inplace_policy_on_divide_by_2
-);
+  THRUST_PP_EXPAND_ARGS(test_async_transform_unary_inplace<transform_unary_async_invoker_device_on,
+                                                           transform_unary_sync_invoker,
+                                                           divide_by_2>::tester),
+  NumericTypes,
+  test_async_transform_unary_inplace_policy_on_divide_by_2);
 DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES_AND_NAME(
-  THRUST_PP_EXPAND_ARGS(
-    test_async_transform_unary_inplace<
-      transform_unary_async_invoker_device_allocator_on
-    , transform_unary_sync_invoker
-    , divide_by_2
-    >::tester
-  )
-, NumericTypes
-, test_async_transform_unary_inplace_policy_allocator_on_divide_by_2
-);
+  THRUST_PP_EXPAND_ARGS(test_async_transform_unary_inplace<transform_unary_async_invoker_device_allocator_on,
+                                                           transform_unary_sync_invoker,
+                                                           divide_by_2>::tester),
+  NumericTypes,
+  test_async_transform_unary_inplace_policy_allocator_on_divide_by_2);
 
 ///////////////////////////////////////////////////////////////////////////////
 
-template <
-  template <typename> class AsyncTransformUnaryInvoker
-, template <typename> class SyncTransformUnaryInvoker
-, template <typename> class UnaryOperation
->
+template <template <typename> class AsyncTransformUnaryInvoker,
+          template <typename>
+          class SyncTransformUnaryInvoker,
+          template <typename>
+          class UnaryOperation>
 struct test_async_transform_unary_counting_iterator
 {
   template <typename T>
   struct tester
   {
-    THRUST_HOST
-    void operator()()
+    THRUST_HOST void operator()()
     {
       constexpr std::size_t n = 15 * sizeof(T);
 
@@ -425,7 +342,7 @@ struct test_async_transform_unary_counting_iterator
       thrust::counting_iterator<T> first(0);
       thrust::counting_iterator<T> last(n);
 
-      thrust::host_vector<T>   h0(n);
+      thrust::host_vector<T> h0(n);
 
       thrust::device_vector<T> d0a(n);
       thrust::device_vector<T> d0b(n);
@@ -433,7 +350,7 @@ struct test_async_transform_unary_counting_iterator
       thrust::device_vector<T> d0d(n);
 
       AsyncTransformUnaryInvoker<T> invoke_async;
-      SyncTransformUnaryInvoker<T>  invoke_sync;
+      SyncTransformUnaryInvoker<T> invoke_sync;
 
       UnaryOperation<T> op;
 
@@ -460,47 +377,34 @@ struct test_async_transform_unary_counting_iterator
   };
 };
 DECLARE_GENERIC_UNITTEST_WITH_TYPES_AND_NAME(
-  THRUST_PP_EXPAND_ARGS(
-    test_async_transform_unary_counting_iterator<
-      transform_unary_async_invoker
-    , transform_unary_sync_invoker
-    , divide_by_2
-    >::tester
-  )
-, BuiltinNumericTypes
-, test_async_transform_unary_counting_iterator_divide_by_2
-);
+  THRUST_PP_EXPAND_ARGS(test_async_transform_unary_counting_iterator<transform_unary_async_invoker,
+                                                                     transform_unary_sync_invoker,
+                                                                     divide_by_2>::tester),
+  BuiltinNumericTypes,
+  test_async_transform_unary_counting_iterator_divide_by_2);
 DECLARE_GENERIC_UNITTEST_WITH_TYPES_AND_NAME(
-  THRUST_PP_EXPAND_ARGS(
-    test_async_transform_unary_counting_iterator<
-      transform_unary_async_invoker_device
-    , transform_unary_sync_invoker
-    , divide_by_2
-    >::tester
-  )
-, BuiltinNumericTypes
-, test_async_transform_unary_counting_iterator_policy_divide_by_2
-);
+  THRUST_PP_EXPAND_ARGS(test_async_transform_unary_counting_iterator<transform_unary_async_invoker_device,
+                                                                     transform_unary_sync_invoker,
+                                                                     divide_by_2>::tester),
+  BuiltinNumericTypes,
+  test_async_transform_unary_counting_iterator_policy_divide_by_2);
 
 ///////////////////////////////////////////////////////////////////////////////
 
-template <
-  template <typename> class UnaryOperation
->
+template <template <typename> class UnaryOperation>
 struct test_async_transform_using
 {
   template <typename T>
   struct tester
   {
-    THRUST_HOST
-    void operator()(std::size_t n)
+    THRUST_HOST void operator()(std::size_t n)
     {
-      thrust::host_vector<T>   h0(unittest::random_integers<T>(n));
+      thrust::host_vector<T> h0(unittest::random_integers<T>(n));
 
       thrust::device_vector<T> d0a(h0);
       thrust::device_vector<T> d0b(h0);
 
-      thrust::host_vector<T>   h1(n);
+      thrust::host_vector<T> h1(n);
 
       thrust::device_vector<T> d1a(n);
       thrust::device_vector<T> d1b(n);
@@ -539,12 +443,10 @@ struct test_async_transform_using
   };
 };
 DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES_AND_NAME(
-  THRUST_PP_EXPAND(test_async_transform_using<divide_by_2>::tester)
-, NumericTypes
-, test_async_transform_using_divide_by_2
-);
+  THRUST_PP_EXPAND(test_async_transform_using<divide_by_2>::tester),
+  NumericTypes,
+  test_async_transform_using_divide_by_2);
 
 ///////////////////////////////////////////////////////////////////////////////
 
 #endif
-

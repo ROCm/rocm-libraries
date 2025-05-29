@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2018 NVIDIA Corporation
- * Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -22,10 +22,12 @@
 #pragma once
 
 #include <thrust/detail/config.h>
-#include <thrust/system/hip/memory_resource.h>
-#include <thrust/memory.h>
+
 #include <thrust/detail/type_traits.h>
+#include <thrust/memory.h>
 #include <thrust/mr/allocator.h>
+#include <thrust/system/hip/memory_resource.h>
+
 #include <ostream>
 
 THRUST_NAMESPACE_BEGIN
@@ -70,37 +72,36 @@ inline THRUST_HOST_DEVICE void free(pointer<void> ptr);
  *  provided. \p hip::allocator allocates (deallocates) storage with \p
  *  hip::malloc (\p hip::free).
  */
-template<typename T>
-using allocator = thrust::mr::stateless_resource_allocator<
-  T, thrust::system::hip::memory_resource
->;
+template <typename T>
+using allocator = thrust::mr::stateless_resource_allocator<T, thrust::system::hip::memory_resource>;
 
 /*! \p hip::universal_allocator allocates memory that can be used by the \p hip
  *  system and host systems.
  */
-template<typename T>
-using universal_allocator = thrust::mr::stateless_resource_allocator<
-  T, thrust::system::hip::universal_memory_resource
->;
+template <typename T>
+using universal_allocator = thrust::mr::stateless_resource_allocator<T, thrust::system::hip::universal_memory_resource>;
 
 } // namespace hip_rocprim
 
-namespace system { namespace hip
+namespace system
 {
-using thrust::hip_rocprim::malloc;
-using thrust::hip_rocprim::free;
+namespace hip
+{
 using thrust::hip_rocprim::allocator;
+using thrust::hip_rocprim::free;
+using thrust::hip_rocprim::malloc;
 using thrust::hip_rocprim::universal_allocator;
-}} // namespace system::hip
+} // namespace hip
+} // namespace system
 
 /*! \namespace thrust::hip
  *  \brief \p thrust::hip is a top-level alias for \p thrust::system::hip.
  */
 namespace hip
 {
-using thrust::hip_rocprim::malloc;
-using thrust::hip_rocprim::free;
 using thrust::hip_rocprim::allocator;
+using thrust::hip_rocprim::free;
+using thrust::hip_rocprim::malloc;
 using thrust::hip_rocprim::universal_allocator;
 } // namespace hip
 

@@ -37,8 +37,6 @@
 
 #include <hip/hip_runtime.h>
 
-#include <math.h>
-
 #define ROCRAND_KERNEL __global__ static
 
 #if __HIP_DEVICE_COMPILE__            \

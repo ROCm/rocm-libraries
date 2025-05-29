@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -448,7 +448,7 @@ catch(...)
     return hipsolver::exception2hip_status();
 }
 
-/*hipsolverStatus_t hipsolverSpCcsrlsvqr(hipsolverSpHandle_t       handle,
+hipsolverStatus_t hipsolverSpCcsrlsvqr(hipsolverSpHandle_t       handle,
                                        int                       n,
                                        int                       nnzA,
                                        const hipsparseMatDescr_t descrA,
@@ -520,6 +520,6 @@ try
 catch(...)
 {
     return hipsolver::exception2hip_status();
-}*/
+}
 
 } //extern C

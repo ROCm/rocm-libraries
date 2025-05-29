@@ -18,21 +18,18 @@
 #pragma once
 
 #include <thrust/detail/config.h>
-#include <thrust/detail/cpp14_required.h>
 
-#if THRUST_CPP_DIALECT >= 2014
+#include <thrust/detail/cpp_version_check.h>
 
-#include <unittest/unittest.h>
+#if THRUST_CPP_DIALECT >= 2017
 
-#include <thrust/future.h>
+#  include <thrust/future.h>
 
-#define TEST_EVENT_WAIT(e)                                                    \
-  ::unittest::test_event_wait(e, __FILE__, __LINE__)                          \
-  /**/
+#  include <unittest/unittest.h>
 
-#define TEST_FUTURE_VALUE_RETRIEVAL(f)                                        \
-  ::unittest::test_future_value_retrieval(f, __FILE__, __LINE__)              \
-  /**/
+#  define TEST_EVENT_WAIT(e) ::unittest::test_event_wait(e, __FILE__, __LINE__) /**/
+
+#  define TEST_FUTURE_VALUE_RETRIEVAL(f) ::unittest::test_future_value_retrieval(f, __FILE__, __LINE__) /**/
 
 namespace unittest
 {
@@ -68,11 +65,7 @@ THRUST_HOST auto test_future_value_retrieval(Future&& f, std::string const& file
 
   ASSERT_THROWS_EQUAL_WITH_FILE_AND_LINE(
     auto x = f.extract();
-    THRUST_UNUSED_VAR(x)
-  , thrust::event_error
-  , thrust::event_error(thrust::event_errc::no_content)
-  , filename, lineno
-  );
+    THRUST_UNUSED_VAR(x), thrust::event_error, thrust::event_error(thrust::event_errc::no_content), filename, lineno);
 
   ASSERT_EQUAL_WITH_FILE_AND_LINE(false, f.ready(), filename, lineno);
   ASSERT_EQUAL_WITH_FILE_AND_LINE(false, f.valid_stream(), filename, lineno);
@@ -85,4 +78,4 @@ THRUST_HOST auto test_future_value_retrieval(Future&& f, std::string const& file
 
 } // namespace unittest
 
-#endif // THRUST_CPP_DIALECT >= 2014
+#endif // THRUST_CPP_DIALECT >= 2017

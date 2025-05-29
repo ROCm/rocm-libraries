@@ -30,54 +30,42 @@
 #include <thrust/detail/config.h>
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
-#include <iterator>
-#include <thrust/detail/minmax.h>
-#include <thrust/distance.h>
-#include <thrust/system/hip/detail/reduce.h>
+#  include <thrust/detail/minmax.h>
+#  include <thrust/distance.h>
+#  include <thrust/system/hip/detail/reduce.h>
+
+#  include <iterator>
 
 // rocPRIM includes
-#include <rocprim/rocprim.hpp>
+#  include <rocprim/rocprim.hpp>
 
 THRUST_NAMESPACE_BEGIN
 
 namespace hip_rocprim
 {
 
-template <class Derived,
-          class InputIt1,
-          class InputIt2,
-          class T,
-          class ReduceOp,
-          class ProductOp>
-T THRUST_HIP_FUNCTION
-inner_product(execution_policy<Derived>& policy,
-              InputIt1                   first1,
-              InputIt1                   last1,
-              InputIt2                   first2,
-              T                          init,
-              ReduceOp                   reduce_op,
-              ProductOp                  product_op)
+template <class Derived, class InputIt1, class InputIt2, class T, class ReduceOp, class ProductOp>
+T THRUST_HIP_FUNCTION inner_product(
+  execution_policy<Derived>& policy,
+  InputIt1 first1,
+  InputIt1 last1,
+  InputIt2 first2,
+  T init,
+  ReduceOp reduce_op,
+  ProductOp product_op)
 {
-    using size_type = typename iterator_traits<InputIt1>::difference_type;
-    size_type num_items = static_cast<size_type>(thrust::distance(first1, last1));
-    using binop_iterator_t = transform_pair_of_input_iterators_t<T, InputIt1, InputIt2, ProductOp>;
+  using size_type        = typename iterator_traits<InputIt1>::difference_type;
+  size_type num_items    = static_cast<size_type>(thrust::distance(first1, last1));
+  using binop_iterator_t = transform_pair_of_input_iterators_t<T, InputIt1, InputIt2, ProductOp>;
 
-    return reduce_n(
-        policy, binop_iterator_t(first1, first2, product_op), num_items, init, reduce_op
-    );
+  return reduce_n(policy, binop_iterator_t(first1, first2, product_op), num_items, init, reduce_op);
 }
 
 template <class Derived, class InputIt1, class InputIt2, class T>
 T THRUST_HIP_FUNCTION
-inner_product(execution_policy<Derived>& policy,
-              InputIt1                   first1,
-              InputIt1                   last1,
-              InputIt2                   first2,
-              T                          init)
+inner_product(execution_policy<Derived>& policy, InputIt1 first1, InputIt1 last1, InputIt2 first2, T init)
 {
-    return inner_product(
-        policy, first1, last1, first2, init, plus<T>(), multiplies<T>()
-    );
+  return inner_product(policy, first1, last1, first2, init, plus<T>(), multiplies<T>());
 }
 
 } // namespace hip_rocprim

@@ -14,13 +14,12 @@
  *  limitations under the License.
  */
 
-
 #pragma once
+
+#include <thrust/detail/config.h>
 
 #include <new>
 #include <string>
-
-#include <thrust/detail/config.h>
 
 THRUST_NAMESPACE_BEGIN
 namespace system
@@ -29,30 +28,29 @@ namespace detail
 {
 
 // define our own bad_alloc so we can set its .what()
-class bad_alloc
-  : public std::bad_alloc
+class bad_alloc : public std::bad_alloc
 {
-  public:
-    inline bad_alloc(const std::string &w)
-      : std::bad_alloc(), m_what()
-    {
-      m_what = std::bad_alloc::what();
-      m_what += ": ";
-      m_what += w;
-    } // end bad_alloc()
+public:
+  inline bad_alloc(const std::string& w)
+      : std::bad_alloc()
+      , m_what()
+  {
+    m_what = std::bad_alloc::what();
+    m_what += ": ";
+    m_what += w;
+  } // end bad_alloc()
 
-    inline virtual ~bad_alloc(void) noexcept {};
+  inline virtual ~bad_alloc(void) noexcept {};
 
-    inline virtual const char *what(void) const noexcept
-    {
-      return m_what.c_str();
-    } // end what()
+  inline virtual const char* what(void) const noexcept
+  {
+    return m_what.c_str();
+  } // end what()
 
-  private:
-    std::string m_what;
+private:
+  std::string m_what;
 }; // end bad_alloc
-  
-} // end detail
-} // end system
-THRUST_NAMESPACE_END
 
+} // namespace detail
+} // namespace system
+THRUST_NAMESPACE_END

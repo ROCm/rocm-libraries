@@ -284,9 +284,13 @@ rocsparse_status rocsparse_spgeam_buffer_size(rocsparse_handle            handle
 *   rocsparse_spgeam_set_input(handle, descr, rocsparse_spgeam_input_operation_A, &trans_A, sizeof(trans_A));
 *   rocsparse_spgeam_set_input(handle, descr, rocsparse_spgeam_input_operation_B, &trans_B, sizeof(trans_B));
 *
+*   // Set the scalar type on the descriptor
+*   const rocsparse_datatype scalar_datatype = rocsparse_datatype_f32_r;
+*   rocsparse_spgeam_set_input(handle, descr, rocsparse_spgeam_input_scalar_datatype, &scalar_datatype, sizeof(scalar_datatype));
+*
 *   // Set the compute type on the descriptor
-*   const rocsparse_datatype datatype = rocsparse_datatype_f32_r;
-*   rocsparse_spgeam_set_input(handle, descr, rocsparse_spgeam_input_compute_datatype, &datatype, sizeof(datatype));
+*   const rocsparse_datatype compute_datatype = rocsparse_datatype_f32_r;
+*   rocsparse_spgeam_set_input(handle, descr, rocsparse_spgeam_input_compute_datatype, &compute_datatype, sizeof(compute_datatype));
 *
 *   // Calculate NNZ phase
 *   size_t buffer_size_in_bytes;

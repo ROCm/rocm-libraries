@@ -249,7 +249,8 @@ namespace rocRoller::Client::GEMMClient
                                    problemParams.alpha,
                                    problemParams.beta,
                                    problemParams.transA == TransposeType::T,
-                                   problemParams.transB == TransposeType::T);
+                                   problemParams.transB == TransposeType::T,
+                                   problemParams.scaleBlockSize);
         }
         else
         {

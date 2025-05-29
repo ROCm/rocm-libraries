@@ -225,8 +225,11 @@ void build_stockham_function_pool(CompileQueue& queue)
     // build everything in the 64k LDS function pool
     function_pool fp(65536);
 
-    // fused Bluestein kernels are always built at runtime
-    auto fuseBlue = BluesteinFuseType::BFT_NONE;
+    // fused Bluestein and partial-pass kernels are always built at runtime
+    auto fuseBlue  = BluesteinFuseType::BFT_NONE;
+    auto ppType    = PartialPassType::PPT_NONE;
+    auto ppFactors = std::vector<size_t>{};
+    auto ppLength  = 0;
 
     for(const auto& i : fp.get_map())
     {
@@ -298,6 +301,7 @@ void build_stockham_function_pool(CompileQueue& queue)
                                                             sbrc_trans_type,
                                                             cbtype,
                                                             fuseBlue,
+                                                            ppType,
                                                             {},
                                                             {});
                 std::function<std::string(const std::string&)> generate_src
@@ -330,6 +334,9 @@ void build_stockham_function_pool(CompileQueue& queue)
                                         sbrc_trans_type,
                                         cbtype,
                                         fuseBlue,
+                                        ppType,
+                                        ppFactors,
+                                        ppLength,
                                         {},
                                         {});
                 };
@@ -616,8 +623,11 @@ void build_solution_kernels(CompileQueue& queue)
     std::vector<SolutionNode> kernel_nodes;
     solmap.get_all_kernels(kernel_nodes, true);
 
-    // fused Bluestein kernels are always built at runtime
-    auto fuseBlue = BluesteinFuseType::BFT_NONE;
+    // fused Bluestein and partial-pass kernels are always built at runtime
+    auto fuseBlue  = BluesteinFuseType::BFT_NONE;
+    auto ppType    = PartialPassType::PPT_NONE;
+    auto ppFactors = std::vector<size_t>{};
+    auto ppLength  = 0;
 
     for(const SolutionNode& kernel_sol : kernel_nodes)
     {
@@ -693,6 +703,7 @@ void build_solution_kernels(CompileQueue& queue)
                                                             sbrc_trans_type,
                                                             cbtype,
                                                             fuseBlue,
+                                                            ppType,
                                                             {},
                                                             {});
 
@@ -718,6 +729,9 @@ void build_solution_kernels(CompileQueue& queue)
                                         sbrc_trans_type,
                                         cbtype,
                                         fuseBlue,
+                                        ppType,
+                                        ppFactors,
+                                        ppLength,
                                         {},
                                         {});
                 };

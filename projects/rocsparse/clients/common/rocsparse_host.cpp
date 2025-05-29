@@ -4634,26 +4634,6 @@ void host_csrgeam_nnz(J                    M,
         }
         return;
     }
-    else if(alpha && !beta)
-    {
-        for(J i = 0; i <= M; ++i)
-        {
-            csr_row_ptr_C[i] = (csr_row_ptr_A[i] - base_A) + base_C;
-        }
-
-        *nnz_C = (csr_row_ptr_C[M] - csr_row_ptr_C[0]);
-        return;
-    }
-    else if(!alpha && beta)
-    {
-        for(J i = 0; i <= M; ++i)
-        {
-            csr_row_ptr_C[i] = (csr_row_ptr_B[i] - base_B) + base_C;
-        }
-
-        *nnz_C = (csr_row_ptr_B[M] - csr_row_ptr_B[0]);
-        return;
-    }
 
 #ifdef _OPENMP
 #pragma omp parallel
@@ -4741,30 +4721,11 @@ void host_csrgeam(J                    M,
 {
     ROCSPARSE_CLIENTS_ROUTINE_TRACE
 
+    T alpha_val = (alpha == nullptr) ? 0 : *alpha;
+    T beta_val  = (beta == nullptr) ? 0 : *beta;
+
     if(M == 0 || N == 0)
     {
-        return;
-    }
-    else if(alpha && !beta)
-    {
-        I nnz_A = csr_row_ptr_A[M] - csr_row_ptr_A[0];
-        for(J i = 0; i < nnz_A; ++i)
-        {
-            csr_col_ind_C[i] = (csr_col_ind_A[i] - base_A) + base_C;
-            csr_val_C[i]     = *alpha * csr_val_A[i];
-        }
-
-        return;
-    }
-    else if(!alpha && beta)
-    {
-        I nnz_B = csr_row_ptr_B[M] - csr_row_ptr_B[0];
-        for(J i = 0; i < nnz_B; ++i)
-        {
-            csr_col_ind_C[i] = (csr_col_ind_B[i] - base_B) + base_C;
-            csr_val_C[i]     = *beta * csr_val_B[i];
-        }
-
         return;
     }
 
@@ -4802,7 +4763,7 @@ void host_csrgeam(J                    M,
                 J col_A = csr_col_ind_A[j] - base_A;
 
                 // Current value of A
-                T val_A = *alpha * csr_val_A[j];
+                T val_A = alpha_val * csr_val_A[j];
 
                 nnz[col_A] = row_end_C;
 
@@ -4821,7 +4782,7 @@ void host_csrgeam(J                    M,
                 J col_B = csr_col_ind_B[j] - base_B;
 
                 // Current value of B
-                T val_B = *beta * csr_val_B[j];
+                T val_B = beta_val * csr_val_B[j];
 
                 // Check if a new nnz is generated or if the value is added
                 if(nnz[col_B] < row_begin_C)

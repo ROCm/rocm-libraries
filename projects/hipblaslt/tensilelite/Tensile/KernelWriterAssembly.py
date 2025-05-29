@@ -23,7 +23,7 @@
 ################################################################################
 
 
-from rocisa import countInstruction, countGlobalRead, countSMemLoad
+from rocisa import countInstruction, countGlobalRead, countSMemLoad, findInstCount
 from rocisa.asmpass import getActFuncModuleName, getActFuncBranchModuleName
 from rocisa.code import KernelBody, Label, Macro, Module, RegSet, SrdUpperValue, \
                         StructuredModule, TextBlock, ValueEndif, ValueIf, ValueSet, SignatureBase
@@ -87,6 +87,7 @@ from Tensile.Toolchain.Component import Assembler
 from math import ceil, log
 from copy import deepcopy
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import List, NamedTuple, Optional, Tuple, Union
 
 import os
@@ -556,7 +557,7 @@ class KernelWriterAssembly(KernelWriter):
         needPackK8Lw = True
       if self.states.lrvwTileA > 2 or self.states.lrvwTileB > 2 or self.states.lrvwTileMetadata > 2:
         needPackK8Hi = True
-    
+
     # need extra sgpr for packing metadata
     tPackM = "M" if needPackK16 and needPackK8Lw else ""
 
@@ -9903,7 +9904,7 @@ class KernelWriterAssembly(KernelWriter):
     module = Module("SrdTDInit")
     tmpspgr0 = self.sgprPool.checkOut(1)
     tmpspgr = self.sgprPool.checkOutAligned(2, 4, preventOverflow=False)
-    
+
     module.addComment0("calculate SrdTD address")
 
     module.add(SMovB32(dst=sgpr("SrdTD+3"), src="Srd127_96", comment="Set bits 127_96 in post-loop SRD"))
@@ -10871,7 +10872,7 @@ class KernelWriterAssembly(KernelWriter):
         module.add(skipSrdTDLabel)
       else:
         module.add(SCBranchSCC1(labelName=gsuLabel.getLabelName(), comment="branch if GSU == 1"))
-    
+
     gsuLimitRange = range(0, gsuLimit) # generate GSU1 and GSUM label
     # TODO: generate only GSUM label for MBSK
     # if (kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel'):
@@ -11444,7 +11445,7 @@ class KernelWriterAssembly(KernelWriter):
         module.add(SMovB64(dst=sgpr("SrdTD+0", 2), src=sgpr("SrdD+0", 2), comment="SrdTD = SrdD for GSU == 1"))
         module.add(SMovB64(dst=sgpr("SrdTD+2", 2), src=sgpr("SrdD+2", 2), comment="SrdTD = SrdD for GSU == 1"))
         module.add(SBranch(labelName=reductionEndLabel.getLabelName(), comment="branch if GSU == 1"))
-        
+
       gsuComponent = Component.GSU.find(self)
       if kernel["GlobalSplitU"] > 1 and kernel["GlobalSplitUAlgorithm"] == "MultipleBufferSingleKernel":
         module.add(reductionStartLabel)
@@ -11514,17 +11515,6 @@ class KernelWriterAssembly(KernelWriter):
       # Check if branch exceeds
       if False in betas and True in betas:
         isBetaLongBranch = False
-        def findInstCount(module, targetItem, count):
-          for inst in module.items():
-            if isinstance(inst, Module):
-              count, found = findInstCount(inst, targetItem, count)
-              if found:
-                return count, True
-            elif (inst is targetItem):
-              return count, True
-            elif (not isinstance(inst, TextBlock)):
-              count += 1
-          return count, False
         count = 0
         count, found = findInstCount(betaModules, betaLabel, count)
         if found:
@@ -11579,7 +11569,7 @@ class KernelWriterAssembly(KernelWriter):
       if gsuLimit > 1 and gsuLimitIdx == 0:
         with self.allocTmpSgpr(3) as tmpSgprInfo:
           module.add(SLongBranchPositive(Label("KernelEnd", ""), tmpSgprInfo))
-          
+
     kernel["GlobalSplitU"] = gsuBackup
     kernel["_GlobalAccumulation"] = gsuAccumBackup
     self.states.bpeCexternal = bpeCexternalBackup

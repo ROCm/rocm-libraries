@@ -14,7 +14,6 @@
  *  limitations under the License.
  */
 
-
 /*! \file thrust/iterator/constant_iterator.h
  *  \brief An iterator which returns a constant value when
  *         dereferenced
@@ -23,6 +22,7 @@
 #pragma once
 
 #include <thrust/detail/config.h>
+
 #include <thrust/iterator/detail/constant_iterator_base.h>
 #include <thrust/iterator/iterator_facade.h>
 
@@ -92,105 +92,107 @@ THRUST_NAMESPACE_BEGIN
  *
  *  \see make_constant_iterator
  */
-template<typename Value,
-         typename Incrementable = use_default,
-         typename System = use_default>
-  class constant_iterator
-    : public detail::constant_iterator_base<Value, Incrementable, System>::type
+template <typename Value, typename Incrementable = use_default, typename System = use_default>
+class constant_iterator : public detail::constant_iterator_base<Value, Incrementable, System>::type
 {
-    /*! \cond
-     */
-    friend class thrust::iterator_core_access;
-    using super_t       = typename detail::constant_iterator_base<Value, Incrementable, System>::type;
-    using incrementable = typename detail::constant_iterator_base<Value, Incrementable, System>::incrementable;
-    using base_iterator = typename detail::constant_iterator_base<Value, Incrementable, System>::base_iterator;
+  /*! \cond
+   */
+  friend class thrust::iterator_core_access;
+  using super_t       = typename detail::constant_iterator_base<Value, Incrementable, System>::type;
+  using incrementable = typename detail::constant_iterator_base<Value, Incrementable, System>::incrementable;
+  using base_iterator = typename detail::constant_iterator_base<Value, Incrementable, System>::base_iterator;
 
-  public:
-    using reference  = typename super_t::reference;
-    using value_type = typename super_t::value_type;
+public:
+  using reference  = typename super_t::reference;
+  using value_type = typename super_t::value_type;
 
-    /*! \endcond
-     */
+  /*! \endcond
+   */
 
-    /*! Default constructor initializes this \p constant_iterator's constant using its default constructor
-     */
-    THRUST_HOST_DEVICE constant_iterator()
-        : super_t(), m_value() {}
+  /*! Default constructor initializes this \p constant_iterator's constant using its default constructor
+   */
+  THRUST_HOST_DEVICE constant_iterator()
+      : super_t()
+      , m_value()
+  {}
 
-    /*! Copy constructor copies the value of another \p constant_iterator with related
-     *  System type.
-     *
-     *  \param rhs The \p constant_iterator to copy.
-     */
-    template <class OtherSystem,
-              detail::enable_if_convertible_t<
-                typename thrust::iterator_system<constant_iterator<Value, Incrementable, OtherSystem>>::type,
-                typename thrust::iterator_system<super_t>::type,
-                int> = 0>
-    THRUST_HOST_DEVICE constant_iterator(constant_iterator<Value, Incrementable, OtherSystem> const& rhs)
-        : super_t(rhs.base())
-        , m_value(rhs.value())
-    {}
+  /*! Copy constructor copies the value of another \p constant_iterator with related
+   *  System type.
+   *
+   *  \param rhs The \p constant_iterator to copy.
+   */
+  template <class OtherSystem,
+            detail::enable_if_convertible_t<
+              typename thrust::iterator_system<constant_iterator<Value, Incrementable, OtherSystem>>::type,
+              typename thrust::iterator_system<super_t>::type,
+              int> = 0>
+  THRUST_HOST_DEVICE constant_iterator(constant_iterator<Value, Incrementable, OtherSystem> const& rhs)
+      : super_t(rhs.base())
+      , m_value(rhs.value())
+  {}
 
-    /*! This constructor receives a value to use as the constant value of this
-     *  \p constant_iterator and an index specifying the location of this
-     *  \p constant_iterator in a sequence.
-     *
-     *  \p v The value of this \p constant_iterator's constant value.
-     *  \p i The index of this \p constant_iterator in a sequence. Defaults to the
-     *       value returned by \c Incrementable's null constructor. For example,
-     *       when <tt>Incrementable == int</tt>, \c 0.
-     */
-    THRUST_HOST_DEVICE
-    constant_iterator(value_type const& v, incrementable const &i = incrementable())
-      : super_t(base_iterator(i)), m_value(v) {}
+  /*! This constructor receives a value to use as the constant value of this
+   *  \p constant_iterator and an index specifying the location of this
+   *  \p constant_iterator in a sequence.
+   *
+   *  \p v The value of this \p constant_iterator's constant value.
+   *  \p i The index of this \p constant_iterator in a sequence. Defaults to the
+   *       value returned by \c Incrementable's null constructor. For example,
+   *       when <tt>Incrementable == int</tt>, \c 0.
+   */
+  THRUST_HOST_DEVICE constant_iterator(value_type const& v, incrementable const& i = incrementable())
+      : super_t(base_iterator(i))
+      , m_value(v)
+  {}
 
-    /*! This constructor is templated to allow construction from a value type and
-     *  incrementable type related this this \p constant_iterator's respective types.
-     *
-     *  \p v The value of this \p constant_iterator's constant value.
-     *  \p i The index of this \p constant_iterator in a sequence. Defaults to the
-     *       value returned by \c Incrementable's null constructor. For example,
-     *       when <tt>Incrementable == int</tt>, \c 0.
-     */
-    template<typename OtherValue, typename OtherIncrementable>
-    THRUST_HOST_DEVICE
-    constant_iterator(OtherValue const& v, OtherIncrementable const& i = incrementable())
-      : super_t(base_iterator(i)), m_value(v) {}
+  /*! This constructor is templated to allow construction from a value type and
+   *  incrementable type related this this \p constant_iterator's respective types.
+   *
+   *  \p v The value of this \p constant_iterator's constant value.
+   *  \p i The index of this \p constant_iterator in a sequence. Defaults to the
+   *       value returned by \c Incrementable's null constructor. For example,
+   *       when <tt>Incrementable == int</tt>, \c 0.
+   */
+  template <typename OtherValue, typename OtherIncrementable>
+  THRUST_HOST_DEVICE constant_iterator(OtherValue const& v, OtherIncrementable const& i = incrementable())
+      : super_t(base_iterator(i))
+      , m_value(v)
+  {}
 
-    /*! This method returns the value of this \p constant_iterator's constant value.
-     *  \return A \c const reference to this \p constant_iterator's constant value.
-     */
-    THRUST_HOST_DEVICE
-    Value const& value() const
-    { return m_value; }
+  /*! This method returns the value of this \p constant_iterator's constant value.
+   *  \return A \c const reference to this \p constant_iterator's constant value.
+   */
+  THRUST_HOST_DEVICE Value const& value() const
+  {
+    return m_value;
+  }
 
-    /*! \cond
-     */
+  /*! \cond
+   */
 
-  protected:
-    THRUST_HOST_DEVICE
-    Value const& value_reference() const
-    { return m_value; }
+protected:
+  THRUST_HOST_DEVICE Value const& value_reference() const
+  {
+    return m_value;
+  }
 
-    THRUST_HOST_DEVICE
-    Value & value_reference()
-    { return m_value; }
+  THRUST_HOST_DEVICE Value& value_reference()
+  {
+    return m_value;
+  }
 
-  private: // Core iterator interface
-    THRUST_HOST_DEVICE
-    reference dereference() const
-    {
-      return m_value;
-    }
+private: // Core iterator interface
+  THRUST_HOST_DEVICE reference dereference() const
+  {
+    return m_value;
+  }
 
-  private:
-    Value m_value;
+private:
+  Value m_value;
 
-    /*! \endcond
-     */
+  /*! \endcond
+   */
 }; // end constant_iterator
-
 
 /*! This version of \p make_constant_iterator creates a \p constant_iterator
  *  from values given for both value and index. The type of \p constant_iterator
@@ -206,13 +208,11 @@ template<typename Value,
  *
  *  \see constant_iterator
  */
- template<typename ValueT, typename IndexT>
- inline THRUST_HOST_DEVICE
- constant_iterator<ValueT, IndexT> make_constant_iterator(ValueT x, IndexT i = int())
- {
-   return constant_iterator<ValueT, IndexT>(x, i);
- } // end make_constant_iterator()
-
+template <typename ValueT, typename IndexT>
+inline THRUST_HOST_DEVICE constant_iterator<ValueT, IndexT> make_constant_iterator(ValueT x, IndexT i = int())
+{
+  return constant_iterator<ValueT, IndexT>(x, i);
+} // end make_constant_iterator()
 
 /*! This version of \p make_constant_iterator creates a \p constant_iterator
  *  using only a parameter for the desired constant value. The value of the
@@ -223,9 +223,8 @@ template<typename Value,
  *          index equal to \c 0.
  *  \see constant_iterator
  */
-template<typename V>
-inline THRUST_HOST_DEVICE
-constant_iterator<V> make_constant_iterator(V x)
+template <typename V>
+inline THRUST_HOST_DEVICE constant_iterator<V> make_constant_iterator(V x)
 {
   return constant_iterator<V>(x, 0);
 } // end make_constant_iterator()

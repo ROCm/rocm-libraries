@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -55,9 +55,9 @@ const vector<vector<int>> order_size_range = {
     {10, 5, 0},
     {10, 3, 1},
     // normal (valid) samples
-    {15, 15, 0},
-    {20, 20, 1},
-    {35, 50, 0}};
+    {75, 75, 0},
+    {60, 60, 1},
+    {95, 100, 0}};
 
 const vector<vector<int>> reflector_size_range = {
     // invalid
@@ -66,14 +66,16 @@ const vector<vector<int>> reflector_size_range = {
     // normal (valid) samples
     {5, 5, 0},
     {10, 20, 1},
-    {15, 15, 0}};
+    {15, 15, 0},
+    {70, 70, 0},
+    {75, 80, 1}};
 
 // for daily_lapack tests
 const vector<vector<int>> large_order_size_range
     = {{192, 192, 0}, {640, 75, 1}, {1024, 1200, 0}, {2048, 100, 1}};
 
 const vector<vector<int>> large_reflector_size_range
-    = {{15, 15, 0}, {25, 40, 1}, {45, 45, 0}, {60, 70, 1}, {75, 75, 0}};
+    = {{15, 15, 0}, {25, 40, 1}, {45, 45, 0}, {60, 70, 1}, {75, 75, 0}, {85, 90, 1}};
 
 Arguments larft_setup_arguments(larft_tuple tup)
 {

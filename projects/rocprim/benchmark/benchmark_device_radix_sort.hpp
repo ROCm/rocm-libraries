@@ -45,12 +45,10 @@
 #include <type_traits>
 #include <vector>
 
-namespace rp = rocprim;
-
 template<typename Key    = int,
          typename Value  = rocprim::empty_type,
          typename Config = rocprim::default_config>
-struct device_radix_sort_benchmark : public config_autotune_interface
+struct device_radix_sort_benchmark : public benchmark_utils::autotune_interface
 {
     std::string name() const override
     {
@@ -59,17 +57,15 @@ struct device_radix_sort_benchmark : public config_autotune_interface
             + ",value_type:" + std::string(Traits<Value>::name()) + ",cfg: default_config}");
     }
 
-    static constexpr unsigned int batch_size  = 10;
-    static constexpr unsigned int warmup_size = 5;
-
     // keys benchmark
     template<typename val = Value>
-    auto do_run(benchmark::State&   state,
-                size_t              bytes,
-                const managed_seed& seed,
-                hipStream_t         stream) const
+    auto do_run(benchmark_utils::state&& state) const
         -> std::enable_if_t<std::is_same<val, ::rocprim::empty_type>::value, void>
     {
+        const auto& stream = state.stream;
+        const auto& bytes  = state.bytes;
+        const auto& seed   = state.seed;
+
         using key_type = Key;
 
         // Calculate the number of elements
@@ -105,31 +101,8 @@ struct device_radix_sort_benchmark : public config_autotune_interface
         HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
         HIP_CHECK(hipDeviceSynchronize());
 
-        // Warm-up
-        for(size_t i = 0; i < warmup_size; ++i)
-        {
-            HIP_CHECK(invoke_radix_sort(d_temporary_storage,
-                                        temporary_storage_bytes,
-                                        d_keys_input,
-                                        d_keys_output,
-                                        static_cast<Value*>(nullptr),
-                                        static_cast<Value*>(nullptr),
-                                        size,
-                                        stream));
-        }
-        HIP_CHECK(hipDeviceSynchronize());
-
-        // HIP events creation
-        hipEvent_t start, stop;
-        HIP_CHECK(hipEventCreate(&start));
-        HIP_CHECK(hipEventCreate(&stop));
-
-        for(auto _ : state)
-        {
-            // Record start event
-            HIP_CHECK(hipEventRecord(start, stream));
-
-            for(size_t i = 0; i < batch_size; ++i)
+        state.run(
+            [&]
             {
                 HIP_CHECK(invoke_radix_sort(d_temporary_storage,
                                             temporary_storage_bytes,
@@ -139,23 +112,9 @@ struct device_radix_sort_benchmark : public config_autotune_interface
                                             static_cast<Value*>(nullptr),
                                             size,
                                             stream));
-            }
+            });
 
-            // Record stop event and wait until it completes
-            HIP_CHECK(hipEventRecord(stop, stream));
-            HIP_CHECK(hipEventSynchronize(stop));
-
-            float elapsed_mseconds;
-            HIP_CHECK(hipEventElapsedTime(&elapsed_mseconds, start, stop));
-            state.SetIterationTime(elapsed_mseconds / 1000);
-        }
-
-        // Destroy HIP events
-        HIP_CHECK(hipEventDestroy(start));
-        HIP_CHECK(hipEventDestroy(stop));
-
-        state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(key_type));
-        state.SetItemsProcessed(state.iterations() * batch_size * size);
+        state.set_throughput(size, sizeof(key_type));
 
         HIP_CHECK(hipFree(d_temporary_storage));
         HIP_CHECK(hipFree(d_keys_input));
@@ -164,12 +123,13 @@ struct device_radix_sort_benchmark : public config_autotune_interface
 
     // pairs benchmark
     template<typename val = Value>
-    auto do_run(benchmark::State&   state,
-                size_t              bytes,
-                const managed_seed& seed,
-                hipStream_t         stream) const
+    auto do_run(benchmark_utils::state&& state) const
         -> std::enable_if_t<!std::is_same<val, ::rocprim::empty_type>::value, void>
     {
+        const auto& stream = state.stream;
+        const auto& bytes  = state.bytes;
+        const auto& seed   = state.seed;
+
         using key_type   = Key;
         using value_type = Value;
 
@@ -220,31 +180,8 @@ struct device_radix_sort_benchmark : public config_autotune_interface
         HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
         HIP_CHECK(hipDeviceSynchronize());
 
-        // Warm-up
-        for(size_t i = 0; i < warmup_size; ++i)
-        {
-            HIP_CHECK(invoke_radix_sort(d_temporary_storage,
-                                        temporary_storage_bytes,
-                                        d_keys_input,
-                                        d_keys_output,
-                                        d_values_input,
-                                        d_values_output,
-                                        size,
-                                        stream));
-        }
-        HIP_CHECK(hipDeviceSynchronize());
-
-        // HIP events creation
-        hipEvent_t start, stop;
-        HIP_CHECK(hipEventCreate(&start));
-        HIP_CHECK(hipEventCreate(&stop));
-
-        for(auto _ : state)
-        {
-            // Record start event
-            HIP_CHECK(hipEventRecord(start, stream));
-
-            for(size_t i = 0; i < batch_size; ++i)
+        state.run(
+            [&]
             {
                 HIP_CHECK(invoke_radix_sort(d_temporary_storage,
                                             temporary_storage_bytes,
@@ -254,24 +191,9 @@ struct device_radix_sort_benchmark : public config_autotune_interface
                                             d_values_output,
                                             size,
                                             stream));
-            }
+            });
 
-            // Record stop event and wait until it completes
-            HIP_CHECK(hipEventRecord(stop, stream));
-            HIP_CHECK(hipEventSynchronize(stop));
-
-            float elapsed_mseconds;
-            HIP_CHECK(hipEventElapsedTime(&elapsed_mseconds, start, stop));
-            state.SetIterationTime(elapsed_mseconds / 1000);
-        }
-
-        // Destroy HIP events
-        HIP_CHECK(hipEventDestroy(start));
-        HIP_CHECK(hipEventDestroy(stop));
-
-        state.SetBytesProcessed(state.iterations() * batch_size * size
-                                * (sizeof(key_type) + sizeof(value_type)));
-        state.SetItemsProcessed(state.iterations() * batch_size * size);
+        state.set_throughput(size, sizeof(key_type) + sizeof(value_type));
 
         HIP_CHECK(hipFree(d_temporary_storage));
         HIP_CHECK(hipFree(d_keys_input));
@@ -280,12 +202,9 @@ struct device_radix_sort_benchmark : public config_autotune_interface
         HIP_CHECK(hipFree(d_values_output));
     }
 
-    void run(benchmark::State&   state,
-             size_t              size,
-             const managed_seed& seed,
-             hipStream_t         stream) const override
+    void run(benchmark_utils::state&& state) override
     {
-        do_run(state, size, seed, stream);
+        do_run(std::forward<benchmark_utils::state>(state));
     }
 
 private:
@@ -299,19 +218,19 @@ private:
                                   size_t      size,
                                   hipStream_t stream)
         -> std::enable_if_t<!common::is_custom_type<K>::value
-                                && std::is_same<V, rp::empty_type>::value,
+                                && std::is_same<V, rocprim::empty_type>::value,
                             hipError_t>
     {
         (void)values_input;
         (void)values_output;
-        return rp::radix_sort_keys<Config>(d_temporary_storage,
-                                           temp_storage_bytes,
-                                           keys_input,
-                                           keys_output,
-                                           size,
-                                           0,
-                                           sizeof(K) * 8,
-                                           stream);
+        return rocprim::radix_sort_keys<Config>(d_temporary_storage,
+                                                temp_storage_bytes,
+                                                keys_input,
+                                                keys_output,
+                                                size,
+                                                0,
+                                                sizeof(K) * 8,
+                                                stream);
     }
 
     template<typename K = Key, typename V = Value>
@@ -324,18 +243,18 @@ private:
                                   size_t      size,
                                   hipStream_t stream)
         -> std::enable_if_t<common::is_custom_type<K>::value
-                                && std::is_same<V, rp::empty_type>::value,
+                                && std::is_same<V, rocprim::empty_type>::value,
                             hipError_t>
     {
         (void)values_input;
         (void)values_output;
-        return rp::radix_sort_keys<Config>(d_temporary_storage,
-                                           temp_storage_bytes,
-                                           keys_input,
-                                           keys_output,
-                                           size,
-                                           custom_type_decomposer<K>{},
-                                           stream);
+        return rocprim::radix_sort_keys<Config>(d_temporary_storage,
+                                                temp_storage_bytes,
+                                                keys_input,
+                                                keys_output,
+                                                size,
+                                                custom_type_decomposer<K>{},
+                                                stream);
     }
 
     template<typename K = Key, typename V = Value>
@@ -348,19 +267,19 @@ private:
                                   size_t      size,
                                   hipStream_t stream)
         -> std::enable_if_t<!common::is_custom_type<K>::value
-                                && !std::is_same<V, rp::empty_type>::value,
+                                && !std::is_same<V, rocprim::empty_type>::value,
                             hipError_t>
     {
-        return rp::radix_sort_pairs<Config>(d_temporary_storage,
-                                            temp_storage_bytes,
-                                            keys_input,
-                                            keys_output,
-                                            values_input,
-                                            values_output,
-                                            size,
-                                            0,
-                                            sizeof(K) * 8,
-                                            stream);
+        return rocprim::radix_sort_pairs<Config>(d_temporary_storage,
+                                                 temp_storage_bytes,
+                                                 keys_input,
+                                                 keys_output,
+                                                 values_input,
+                                                 values_output,
+                                                 size,
+                                                 0,
+                                                 sizeof(K) * 8,
+                                                 stream);
     }
 
     template<typename K = Key, typename V = Value>
@@ -373,73 +292,19 @@ private:
                                   size_t      size,
                                   hipStream_t stream)
         -> std::enable_if_t<common::is_custom_type<K>::value
-                                && !std::is_same<V, rp::empty_type>::value,
+                                && !std::is_same<V, rocprim::empty_type>::value,
                             hipError_t>
     {
-        return rp::radix_sort_pairs<Config>(d_temporary_storage,
-                                            temp_storage_bytes,
-                                            keys_input,
-                                            keys_output,
-                                            values_input,
-                                            values_output,
-                                            size,
-                                            custom_type_decomposer<K>{},
-                                            stream);
+        return rocprim::radix_sort_pairs<Config>(d_temporary_storage,
+                                                 temp_storage_bytes,
+                                                 keys_input,
+                                                 keys_output,
+                                                 values_input,
+                                                 values_output,
+                                                 size,
+                                                 custom_type_decomposer<K>{},
+                                                 stream);
     }
 };
-
-#define CREATE_RADIX_SORT_BENCHMARK(...)                               \
-    {                                                                  \
-        const device_radix_sort_benchmark<__VA_ARGS__> instance;       \
-        REGISTER_BENCHMARK(benchmarks, bytes, seed, stream, instance); \
-    }
-
-inline void add_sort_keys_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
-                                     size_t                                        bytes,
-                                     const managed_seed&                           seed,
-                                     hipStream_t                                   stream)
-{
-    using custom_key = common::custom_type<float, int16_t>;
-    CREATE_RADIX_SORT_BENCHMARK(int)
-    CREATE_RADIX_SORT_BENCHMARK(float)
-    CREATE_RADIX_SORT_BENCHMARK(long long)
-    CREATE_RADIX_SORT_BENCHMARK(int8_t)
-    CREATE_RADIX_SORT_BENCHMARK(uint8_t)
-    CREATE_RADIX_SORT_BENCHMARK(rocprim::half)
-    CREATE_RADIX_SORT_BENCHMARK(short)
-    CREATE_RADIX_SORT_BENCHMARK(custom_key)
-    CREATE_RADIX_SORT_BENCHMARK(rocprim::int128_t)
-    CREATE_RADIX_SORT_BENCHMARK(rocprim::uint128_t)
-}
-
-inline void add_sort_pairs_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
-                                      size_t                                        bytes,
-                                      const managed_seed&                           seed,
-                                      hipStream_t                                   stream)
-{
-    using custom_float2  = common::custom_type<float, float>;
-    using custom_double2 = common::custom_type<double, double>;
-    using custom_key     = common::custom_type<float, int16_t>;
-
-    CREATE_RADIX_SORT_BENCHMARK(int, float)
-    CREATE_RADIX_SORT_BENCHMARK(int, double)
-    CREATE_RADIX_SORT_BENCHMARK(int, float2)
-    CREATE_RADIX_SORT_BENCHMARK(int, custom_float2)
-    CREATE_RADIX_SORT_BENCHMARK(int, double2)
-    CREATE_RADIX_SORT_BENCHMARK(int, custom_double2)
-
-    CREATE_RADIX_SORT_BENCHMARK(long long, float)
-    CREATE_RADIX_SORT_BENCHMARK(long long, double)
-    CREATE_RADIX_SORT_BENCHMARK(long long, float2)
-    CREATE_RADIX_SORT_BENCHMARK(long long, custom_float2)
-    CREATE_RADIX_SORT_BENCHMARK(long long, double2)
-    CREATE_RADIX_SORT_BENCHMARK(long long, custom_double2)
-    CREATE_RADIX_SORT_BENCHMARK(int8_t, int8_t)
-    CREATE_RADIX_SORT_BENCHMARK(uint8_t, uint8_t)
-    CREATE_RADIX_SORT_BENCHMARK(rocprim::half, rocprim::half)
-    CREATE_RADIX_SORT_BENCHMARK(custom_key, double)
-    CREATE_RADIX_SORT_BENCHMARK(rocprim::int128_t, rocprim::int128_t)
-    CREATE_RADIX_SORT_BENCHMARK(rocprim::uint128_t, rocprim::uint128_t)
-}
 
 #endif // ROCPRIM_BENCHMARK_DEVICE_RADIX_SORT_PARALLEL_HPP_

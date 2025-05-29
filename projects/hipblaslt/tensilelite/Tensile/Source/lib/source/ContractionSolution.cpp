@@ -529,6 +529,23 @@ namespace TensileLite
 
     PerfModel perf;
 
+    // check if this solution is a CU-Fallback solution for current hardware
+    bool ContractionSolution::isFallbackForHW(Hardware const& hardware) const
+    {
+        // return the result if we already tested it.
+        if(isFallbackCUSol != -1)
+            return (isFallbackCUSol == 1);
+
+        auto hw_pred
+            = static_pointer_cast<Predicates::IsSubclass<Hardware, AMDGPU>>(hardwarePredicate);
+        auto amdGPU = static_cast<AMDGPU const*>(&hardware);
+        // if solution is from a standard cu lib, but current HW is not, then this is a Fallback sol.
+        isFallbackCUSol
+            = (hw_pred->value->type() == "Processor" && !(amdGPU->isStandardCU())) ? 1 : 0;
+
+        return (isFallbackCUSol == 1);
+    }
+
     // Return magic number.  If magicShift is 0, compute and return it.
     uint32_t ContractionSolution::magicNumberAlg1(uint32_t x, uint32_t* magicShift) const
     {
@@ -1245,10 +1262,13 @@ namespace TensileLite
             }
             else if(internalArgsSupport.version == 2)
             {
+                // NB: get value from param= set in runtime / vs value from sizeMapping: from logic yaml.
+                //     param: default values: [xcc = 0, xccg = 0]. So when we never set xcc/xccg in runtime: we always get from sizeMapping.
+                //     From sizeMapping = from logic yaml. If not set in Config-Yaml, use default value [1, -1]
                 wgmxcc = param.wgmxcc() > 0 ? param.wgmxcc() : sizeMapping.workGroupMappingXCC;
                 wgmxccg
                     = param.wgmxccg() != 0 ? param.wgmxccg() : sizeMapping.workGroupMappingXCCGroup;
-                if(wgmxcc > 1 && wgmxccg == -1)
+                if(wgmxcc >= 1 && wgmxccg == -1)
                 {
                     AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(hardware);
                     assert(pAMDGPU != nullptr && pAMDGPU->computeUnitCount != 0);
@@ -1346,15 +1366,15 @@ namespace TensileLite
         if(gsu > 0)
             rv.numWorkGroups.y *= gsu;
 
-        size_t skGrid    = 0;
-        auto   tiles     = problem.getNumTiles(sizeMapping, gsu);
+        size_t skGrid = 0;
+        auto   tiles  = problem.getNumTiles(sizeMapping, gsu);
         if(sizeMapping.streamK != 0 || sizeMapping.persistentKernel != 0)
         {
             AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(&hardware);
             assert(pAMDGPU != nullptr && pAMDGPU->computeUnitCount != 0);
             if(sizeMapping.streamK != 0)
             {
-                skGrid = getSKGrid(problem, hardware, tiles);
+                skGrid             = getSKGrid(problem, hardware, tiles);
                 rv.numWorkGroups.x = skGrid;
                 rv.numWorkGroups.y = 1;
                 rv.numWorkGroups.z = 1;
@@ -2995,9 +3015,10 @@ namespace TensileLite
             calculateAutoGSU(problem, &hardware);
             size_t gsu = problem.getParams().gsu() > 0 ? problem.getParams().gsu() : autoGSU;
             size_t gsuMultiplier = gsu > 1 ? gsu : 0;
-            size_t batch = problem.d().sizes()[2];
-            size_t tiles = problem.getNumTiles(sizeMapping, gsu) * batch;
-            size_t tileSize = sizeMapping.macroTile.x * sizeMapping.macroTile.y * sizeMapping.workspaceSizePerElemC;
+            size_t batch         = problem.d().sizes()[2];
+            size_t tiles         = problem.getNumTiles(sizeMapping, gsu) * batch;
+            size_t tileSize      = sizeMapping.macroTile.x * sizeMapping.macroTile.y
+                              * sizeMapping.workspaceSizePerElemC;
             size_t bufSize = gsu > 1 ? tiles * tileSize : 0;
             size += bufSize;
 

@@ -2634,12 +2634,28 @@ void rocsparse_enable_debug();
    */
 ROCSPARSE_EXPORT
 void rocsparse_disable_debug();
+
 /*! \ingroup aux_module
    * \brief Get state of  debug.
    * \return 1 if enabled, 0 otherwise.
    */
 ROCSPARSE_EXPORT
 int rocsparse_state_debug();
+
+/*! \ingroup aux_module
+   *  \brief Enable debug warnings
+   * \details If the debug warnings are enabled, then some specific warnings could be printed during the execution.
+   *  \note This routine ignores the environment variable ROCSPARSE_DEBUG_WARNINGS.
+   */
+ROCSPARSE_EXPORT
+void rocsparse_enable_debug_warnings();
+
+/*! \ingroup aux_module
+   *  \brief Disable debug warnings
+   *  \note This routine ignores the environment variable ROCSPARSE_DEBUG_WARNINGS.
+   */
+ROCSPARSE_EXPORT
+void rocsparse_disable_debug_warnings();
 
 /*! \ingroup aux_module
    *  \brief Enable debug verbose.

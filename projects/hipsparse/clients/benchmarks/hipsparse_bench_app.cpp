@@ -260,7 +260,7 @@ hipsparseStatus_t hipsparse_bench_app::export_file()
         exit(1);
     }
 
-    for(int isample = 0; isample < nsamples; ++isample)
+    for(size_t isample = 0; isample < nsamples; ++isample)
     {
         this->m_bench_cmdlines.get(isample, sample_argc, sample_argv);
 
@@ -339,7 +339,7 @@ hipsparseStatus_t hipsparse_bench_app::define_results_json(std::ostream& out)
     }
     out << "\"," << std::endl;
 
-    size_t option_index_x = this->m_bench_cmdlines.get_option_index_x();
+    const size_t option_index_x = this->m_bench_cmdlines.get_option_index_x();
     out << std::endl << "\"xargs\": \[";
     for(int j = 0; j < this->m_bench_cmdlines.get_option_nargs(option_index_x); ++j)
     {
@@ -358,7 +358,7 @@ hipsparseStatus_t hipsparse_bench_app::define_results_json(std::ostream& out)
     std::vector<int> y_options_index;
     for(int k = 0; k < this->m_bench_cmdlines.get_noptions(); ++k)
     {
-        if(k != option_index_x)
+        if(static_cast<size_t>(k) != option_index_x)
         {
             if(this->m_bench_cmdlines.get_option_nargs(k) > 1)
             {

@@ -702,6 +702,10 @@ static Assign AddAssign(const Variable& lhs, const Expression& rhs)
 {
     return Assign(lhs, rhs, "+=");
 }
+static Assign DivideAssign(const Variable& lhs, const Expression& rhs)
+{
+    return Assign(lhs, rhs, "/=");
+}
 static Assign MultiplyAssign(const Variable& lhs, const Expression& rhs)
 {
     return Assign(lhs, rhs, "*=");

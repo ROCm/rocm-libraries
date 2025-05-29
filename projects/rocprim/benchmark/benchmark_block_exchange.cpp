@@ -20,14 +20,10 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-// CmdParser
 #include "benchmark_utils.hpp"
-#include "cmdparser.hpp"
 
 #include "../common/utils_custom_type.hpp"
-
-// Google Benchmark
-#include <benchmark/benchmark.h>
+#include "../common/utils_device_ptr.hpp"
 
 // HIP API
 #include <hip/hip_runtime.h>
@@ -46,10 +42,6 @@
 #include <stdint.h>
 #include <string>
 #include <vector>
-
-#ifndef DEFAULT_N
-const size_t DEFAULT_BYTES = 1024 * 1024 * 32 * 4;
-#endif
 
 template<typename Runner,
          typename T,
@@ -215,11 +207,12 @@ template<typename Benchmark,
          unsigned int BlockSize,
          unsigned int ItemsPerThread,
          unsigned int Trials = 100>
-void run_benchmark(benchmark::State&   state,
-                   size_t              bytes,
-                   const managed_seed& seed,
-                   hipStream_t         stream)
+void run_benchmark(benchmark_utils::state&& state)
 {
+    const auto& bytes  = state.bytes;
+    const auto& seed   = state.seed;
+    const auto& stream = state.stream;
+
     // Calculate the number of elements N
     size_t N = bytes / sizeof(T);
 
@@ -241,159 +234,68 @@ void run_benchmark(benchmark::State&   state,
         std::iota(block_ranks, block_ranks + items_per_block, 0);
         std::shuffle(block_ranks, block_ranks + items_per_block, gen);
     }
-    T*            d_input;
-    unsigned int* d_ranks;
-    T*            d_output;
-    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_input), size * sizeof(T)));
-    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_ranks), size * sizeof(unsigned int)));
-    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_output), size * sizeof(T)));
-    HIP_CHECK(hipMemcpy(d_input, input.data(), size * sizeof(T), hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(d_ranks, ranks.data(), size * sizeof(unsigned int), hipMemcpyHostToDevice));
+    common::device_ptr<T>            d_input(input);
+    common::device_ptr<unsigned int> d_ranks(ranks);
+    common::device_ptr<T>            d_output(size);
     HIP_CHECK(hipDeviceSynchronize());
 
-    // HIP events creation
-    hipEvent_t start, stop;
-    HIP_CHECK(hipEventCreate(&start));
-    HIP_CHECK(hipEventCreate(&stop));
+    state.run(
+        [&]
+        {
+            kernel<Benchmark, T, BlockSize, ItemsPerThread, Trials>
+                <<<dim3(size / items_per_block), dim3(BlockSize), 0, stream>>>(d_input.get(),
+                                                                               d_ranks.get(),
+                                                                               d_output.get());
+            HIP_CHECK(hipGetLastError());
+        });
 
-    for(auto _ : state)
-    {
-        // Record start event
-        HIP_CHECK(hipEventRecord(start, stream));
-
-        hipLaunchKernelGGL(HIP_KERNEL_NAME(kernel<Benchmark, T, BlockSize, ItemsPerThread, Trials>),
-                           dim3(size / items_per_block),
-                           dim3(BlockSize),
-                           0,
-                           stream,
-                           d_input,
-                           d_ranks,
-                           d_output);
-        HIP_CHECK(hipGetLastError());
-
-        // Record stop event and wait until it completes
-        HIP_CHECK(hipEventRecord(stop, stream));
-        HIP_CHECK(hipEventSynchronize(stop));
-
-        float elapsed_mseconds;
-        HIP_CHECK(hipEventElapsedTime(&elapsed_mseconds, start, stop));
-        state.SetIterationTime(elapsed_mseconds / 1000);
-    }
-
-    // Destroy HIP events
-    HIP_CHECK(hipEventDestroy(start));
-    HIP_CHECK(hipEventDestroy(stop));
-
-    state.SetBytesProcessed(state.iterations() * Trials * size * sizeof(T));
-    state.SetItemsProcessed(state.iterations() * Trials * size);
-
-    HIP_CHECK(hipFree(d_input));
-    HIP_CHECK(hipFree(d_ranks));
-    HIP_CHECK(hipFree(d_output));
+    state.set_throughput(size * Trials, sizeof(T));
 }
 
-#define CREATE_BENCHMARK(T, BS, IPT)                                                   \
-    benchmark::RegisterBenchmark(                                                      \
-        bench_naming::format_name("{lvl:block,algo:exchange,subalgo:" + name           \
-                                  + ",key_type:" #T ",cfg:{bs:" #BS ",ipt:" #IPT "}}") \
-            .c_str(),                                                                  \
-        run_benchmark<Benchmark, T, BS, IPT>,                                          \
-        bytes,                                                                         \
-        seed,                                                                          \
-        stream)
+#define CREATE_BENCHMARK(T, BS, IPT)                                                           \
+    executor.queue_fn(bench_naming::format_name("{lvl:block,algo:exchange,subalgo:" + name     \
+                                                + ",key_type:" #T ",cfg:{bs:" #BS ",ipt:" #IPT \
+                                                  "}}")                                        \
+                          .c_str(),                                                            \
+                      run_benchmark<Benchmark, T, BS, IPT>);
 
-#define BENCHMARK_TYPE(type, block)                                         \
-    CREATE_BENCHMARK(type, block, 1), CREATE_BENCHMARK(type, block, 2),     \
-        CREATE_BENCHMARK(type, block, 3), CREATE_BENCHMARK(type, block, 4), \
-        CREATE_BENCHMARK(type, block, 7), CREATE_BENCHMARK(type, block, 8)
+#define BENCHMARK_TYPE(type, block)  \
+    CREATE_BENCHMARK(type, block, 1) \
+    CREATE_BENCHMARK(type, block, 2) \
+    CREATE_BENCHMARK(type, block, 3) \
+    CREATE_BENCHMARK(type, block, 4) \
+    CREATE_BENCHMARK(type, block, 7) \
+    CREATE_BENCHMARK(type, block, 8)
 
 template<typename Benchmark>
-void add_benchmarks(const std::string&                            name,
-                    std::vector<benchmark::internal::Benchmark*>& benchmarks,
-                    size_t                                        bytes,
-                    const managed_seed&                           seed,
-                    hipStream_t                                   stream)
+void add_benchmarks(const std::string& name, benchmark_utils::executor& executor)
 {
     using custom_float2  = common::custom_type<float, float>;
     using custom_double2 = common::custom_type<double, double>;
 
-    std::vector<benchmark::internal::Benchmark*> bs = {BENCHMARK_TYPE(int, 256),
-                                                       BENCHMARK_TYPE(int8_t, 256),
-                                                       BENCHMARK_TYPE(rocprim::half, 256),
-                                                       BENCHMARK_TYPE(long long, 256),
-                                                       BENCHMARK_TYPE(custom_float2, 256),
-                                                       BENCHMARK_TYPE(float2, 256),
-                                                       BENCHMARK_TYPE(custom_double2, 256),
-                                                       BENCHMARK_TYPE(double2, 256),
-                                                       BENCHMARK_TYPE(float4, 256),
-                                                       BENCHMARK_TYPE(rocprim::int128_t, 256),
-                                                       BENCHMARK_TYPE(rocprim::uint128_t, 256)};
-
-    benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
+    BENCHMARK_TYPE(int, 256)
+    BENCHMARK_TYPE(int8_t, 256)
+    BENCHMARK_TYPE(rocprim::half, 256)
+    BENCHMARK_TYPE(long long, 256)
+    BENCHMARK_TYPE(custom_float2, 256)
+    BENCHMARK_TYPE(float2, 256)
+    BENCHMARK_TYPE(custom_double2, 256)
+    BENCHMARK_TYPE(double2, 256)
+    BENCHMARK_TYPE(float4, 256)
+    BENCHMARK_TYPE(rocprim::int128_t, 256)
+    BENCHMARK_TYPE(rocprim::uint128_t, 256)
 }
 
 int main(int argc, char* argv[])
 {
-    cli::Parser parser(argc, argv);
-    parser.set_optional<size_t>("bytes", "bytes", DEFAULT_BYTES, "number of values");
-    parser.set_optional<int>("trials", "trials", -1, "number of iterations");
-    parser.set_optional<std::string>("name_format",
-                                     "name_format",
-                                     "human",
-                                     "either: json,human,txt");
-    parser.set_optional<std::string>("seed", "seed", "random", get_seed_message());
-    parser.run_and_exit_if_error();
+    benchmark_utils::executor executor(argc, argv, 128 * benchmark_utils::MiB, 1, 0);
 
-    // Parse argv
-    benchmark::Initialize(&argc, argv);
-    const size_t bytes  = parser.get<size_t>("bytes");
-    const int    trials = parser.get<int>("trials");
-    bench_naming::set_format(parser.get<std::string>("name_format"));
-    const std::string  seed_type = parser.get<std::string>("seed");
-    const managed_seed seed(seed_type);
+    add_benchmarks<blocked_to_striped>("blocked_to_striped", executor);
+    add_benchmarks<striped_to_blocked>("striped_to_blocked", executor);
+    add_benchmarks<blocked_to_warp_striped>("blocked_to_warp_striped", executor);
+    add_benchmarks<warp_striped_to_blocked>("warp_striped_to_blocked", executor);
+    add_benchmarks<scatter_to_blocked>("scatter_to_blocked", executor);
+    add_benchmarks<scatter_to_striped>("scatter_to_striped", executor);
 
-    // HIP
-    hipStream_t stream = 0; // default
-
-    // Benchmark info
-    add_common_benchmark_info();
-    benchmark::AddCustomContext("bytes", std::to_string(bytes));
-    benchmark::AddCustomContext("seed", seed_type);
-
-    // Add benchmarks
-    std::vector<benchmark::internal::Benchmark*> benchmarks;
-    add_benchmarks<blocked_to_striped>("blocked_to_striped", benchmarks, bytes, seed, stream);
-    add_benchmarks<striped_to_blocked>("striped_to_blocked", benchmarks, bytes, seed, stream);
-    add_benchmarks<blocked_to_warp_striped>("blocked_to_warp_striped",
-                                            benchmarks,
-                                            bytes,
-                                            seed,
-                                            stream);
-    add_benchmarks<warp_striped_to_blocked>("warp_striped_to_blocked",
-                                            benchmarks,
-                                            bytes,
-                                            seed,
-                                            stream);
-    add_benchmarks<scatter_to_blocked>("scatter_to_blocked", benchmarks, bytes, seed, stream);
-    add_benchmarks<scatter_to_striped>("scatter_to_striped", benchmarks, bytes, seed, stream);
-
-    // Use manual timing
-    for(auto& b : benchmarks)
-    {
-        b->UseManualTime();
-        b->Unit(benchmark::kMillisecond);
-    }
-
-    // Force number of iterations
-    if(trials > 0)
-    {
-        for(auto& b : benchmarks)
-        {
-            b->Iterations(trials);
-        }
-    }
-
-    // Run benchmarks
-    benchmark::RunSpecifiedBenchmarks();
-    return 0;
+    executor.run();
 }

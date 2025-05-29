@@ -33,10 +33,8 @@ extern "C" {
 *
 *  \details
 *  \p hipsparseXbsrmv multiplies the scalar \f$\alpha\f$ with a sparse
-*  \f$(mb \times \text{blockDim}) \times (nb \times \text{blockDim})\f$
-*  matrix, defined in BSR storage format, and the dense vector \f$x\f$ and adds the
-*  result to the dense vector \f$y\f$ that is multiplied by the scalar \f$\beta\f$,
-*  such that
+*  \f$m \times n\f$ matrix, defined in BSR storage format, and the dense vector \f$x\f$ and adds the
+*  result to the dense vector \f$y\f$ that is multiplied by the scalar \f$\beta\f$, such that
 *  \f[
 *    y := \alpha \cdot op(A) \cdot x + \beta \cdot y,
 *  \f]
@@ -44,12 +42,11 @@ extern "C" {
 *  \f[
 *    op(A) = \left\{
 *    \begin{array}{ll}
-*        A,   & \text{if transA == HIPSPARSE_OPERATION_NON_TRANSPOSE} \\
-*        A^T, & \text{if transA == HIPSPARSE_OPERATION_TRANSPOSE} \\
-*        A^H, & \text{if transA == HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE}
+*        A,   & \text{if trans == HIPSPARSE_OPERATION_NON_TRANSPOSE}
 *    \end{array}
 *    \right.
 *  \f]
+*  and where \f$m = mb \times blockDim\f$ and \f$n= nb \times blockDim\f$.
 *
 *  \note
 *  This function is non blocking and executed asynchronously with respect to the host.

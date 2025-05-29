@@ -26,6 +26,8 @@
 #include "logging.h"
 #include "utility.h"
 
+#include "conversion/rocsparse_convert_array.hpp"
+
 #include <hip/hip_runtime.h>
 
 ROCSPARSE_KERNEL(1) void init_kernel(){};
@@ -912,6 +914,73 @@ bool rocsparse::check_trm_shared(const rocsparse_mat_info info, rocsparse_trm_in
         ++shared;
 
     return (shared > 0) ? true : false;
+}
+
+rocsparse_status _rocsparse_spgeam_descr::csrgeam_allocate_descr_memory(rocsparse_handle handle,
+                                                                        int64_t          m,
+                                                                        int64_t          n,
+                                                                        const void*      alpha,
+                                                                        int64_t          nnz_A,
+                                                                        const void*      beta,
+                                                                        int64_t          nnz_B)
+{
+    ROCSPARSE_ROUTINE_TRACE;
+
+    // Clean up row pointer array
+    if(this->csr_row_ptr_C != nullptr)
+    {
+        RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(this->csr_row_ptr_C, handle->stream));
+    }
+
+    // Clean up rocprim buffer
+    if(this->rocprim_buffer != nullptr && this->rocprim_alloc)
+    {
+        RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(this->rocprim_buffer, handle->stream));
+    }
+
+    this->indextype = (nnz_A + nnz_B) <= std::numeric_limits<int32_t>::max()
+                          ? rocsparse_indextype_i32
+                          : rocsparse_indextype_i64;
+
+    // We do not know how many nonzeros will exist in C yet therefore use an int64_t row ptr array
+    RETURN_IF_HIP_ERROR(
+        rocsparse_hipMallocAsync(&this->csr_row_ptr_C,
+                                 rocsparse::indextype_sizeof(this->indextype) * (m + 1),
+                                 handle->stream));
+
+    this->rocprim_alloc  = false;
+    this->rocprim_buffer = nullptr;
+    this->rocprim_size   = 0;
+
+    this->m = m;
+
+    return rocsparse_status_success;
+}
+
+rocsparse_status
+    _rocsparse_spgeam_descr::csrgeam_copy_row_pointer(rocsparse_handle          handle,
+                                                      int64_t                   m,
+                                                      int64_t                   n,
+                                                      const rocsparse_mat_descr descr_C,
+                                                      rocsparse_indextype csr_row_ptr_C_indextype,
+                                                      void*               csr_row_ptr_C,
+                                                      int64_t*            nnz_C)
+{
+    ROCSPARSE_ROUTINE_TRACE;
+
+    if(this->csr_row_ptr_C != nullptr)
+    {
+        return rocsparse::convert_array(handle,
+                                        m + 1,
+                                        csr_row_ptr_C_indextype,
+                                        csr_row_ptr_C,
+                                        descr_C->base,
+                                        this->indextype,
+                                        this->csr_row_ptr_C,
+                                        rocsparse_index_base_zero);
+    }
+
+    return rocsparse_status_success;
 }
 
 /********************************************************************************

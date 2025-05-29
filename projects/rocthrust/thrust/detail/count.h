@@ -17,43 +17,32 @@
 #pragma once
 
 #include <thrust/detail/config.h>
+
 #include <thrust/detail/execution_policy.h>
 
 THRUST_NAMESPACE_BEGIN
 
-template<typename DerivedPolicy,
-         typename InputIterator,
-         typename EqualityComparable>
-THRUST_HOST_DEVICE
-  typename thrust::iterator_traits<InputIterator>::difference_type
-    count(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
-          InputIterator first,
-          InputIterator last,
-          const EqualityComparable& value);
+template <typename DerivedPolicy, typename InputIterator, typename EqualityComparable>
+THRUST_HOST_DEVICE typename thrust::iterator_traits<InputIterator>::difference_type
+count(const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
+      InputIterator first,
+      InputIterator last,
+      const EqualityComparable& value);
 
-template<typename DerivedPolicy,
-         typename InputIterator,
-         typename Predicate>
-THRUST_HOST_DEVICE
-  typename thrust::iterator_traits<InputIterator>::difference_type
-    count_if(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
-             InputIterator first,
-             InputIterator last,
-             Predicate pred);
+template <typename DerivedPolicy, typename InputIterator, typename Predicate>
+THRUST_HOST_DEVICE typename thrust::iterator_traits<InputIterator>::difference_type
+count_if(const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
+         InputIterator first,
+         InputIterator last,
+         Predicate pred);
 
-template <typename InputIterator,
-          typename EqualityComparable>
-  typename thrust::iterator_traits<InputIterator>::difference_type
-    count(InputIterator first,
-          InputIterator last,
-          const EqualityComparable& value);
+template <typename InputIterator, typename EqualityComparable>
+typename thrust::iterator_traits<InputIterator>::difference_type
+count(InputIterator first, InputIterator last, const EqualityComparable& value);
 
-template <typename InputIterator,
-          typename Predicate>
-  typename thrust::iterator_traits<InputIterator>::difference_type
-    count_if(InputIterator first,
-             InputIterator last,
-             Predicate pred);
+template <typename InputIterator, typename Predicate>
+typename thrust::iterator_traits<InputIterator>::difference_type
+count_if(InputIterator first, InputIterator last, Predicate pred);
 
 THRUST_NAMESPACE_END
 

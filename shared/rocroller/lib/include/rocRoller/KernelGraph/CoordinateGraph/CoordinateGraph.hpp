@@ -32,7 +32,7 @@
 #include <string>
 #include <vector>
 
-#include <rocRoller/Expression_fwd.hpp>
+#include <rocRoller/Expression.hpp>
 #include <rocRoller/Graph/Hypergraph.hpp>
 #include <rocRoller/KernelGraph/CoordinateGraph/CoordinateEdge.hpp>
 #include <rocRoller/KernelGraph/CoordinateGraph/Dimension.hpp>

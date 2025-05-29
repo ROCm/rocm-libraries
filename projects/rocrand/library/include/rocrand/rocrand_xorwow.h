@@ -24,6 +24,8 @@
 #include "rocrand/rocrand_common.h"
 #include "rocrand/rocrand_xorwow_precomputed.h"
 
+#include <hip/hip_runtime.h>
+
 /** \rocrand_internal \addtogroup rocranddevice
  *
  *  @{
@@ -310,6 +312,6 @@ void skipahead_sequence(unsigned long long sequence, rocrand_state_xorwow* state
     return state->discard_subsequence(sequence);
 }
 
-#endif // ROCRAND_XORWOW_H_
-
 /** @} */ // end of group rocranddevice
+
+#endif // ROCRAND_XORWOW_H_

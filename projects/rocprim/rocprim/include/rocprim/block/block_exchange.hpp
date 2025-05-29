@@ -77,20 +77,20 @@ BEGIN_ROCPRIM_NAMESPACE
 /// }
 /// \endcode
 /// \endparblock
-template<
-    class T,
-    unsigned int BlockSizeX,
-    unsigned int ItemsPerThread,
-    unsigned int BlockSizeY = 1,
-    unsigned int BlockSizeZ = 1,
-    block_padding_hint PaddingHint = block_padding_hint::avoid_conflicts
->
+template<class T,
+         unsigned int                       BlockSizeX,
+         unsigned int                       ItemsPerThread,
+         unsigned int                       BlockSizeY  = 1,
+         unsigned int                       BlockSizeZ  = 1,
+         block_padding_hint                 PaddingHint = block_padding_hint::avoid_conflicts,
+         ::rocprim::arch::wavefront::target TargetWaveSize
+         = ::rocprim::arch::wavefront::get_target()>
 class block_exchange
 {
     static constexpr unsigned int BlockSize = BlockSizeX * BlockSizeY * BlockSizeZ;
     // Select warp size
-    static constexpr unsigned int warp_size
-        = detail::get_min_warp_size(BlockSize, ::rocprim::arch::wavefront::min_size());
+    static constexpr unsigned int warp_size = ::rocprim::detail::get_min_warp_size(
+        BlockSize, ::rocprim::arch::wavefront::size_from_target<TargetWaveSize>());
     // Number of warps in block
     static constexpr unsigned int warps_no = ::rocprim::detail::ceiling_div(BlockSize, warp_size);
     static constexpr unsigned int banks_no = ::rocprim::detail::get_lds_banks_no();
@@ -657,23 +657,26 @@ public:
     ///     ...
     /// }
     /// \endcode
-    template<unsigned int WarpSize = arch::wavefront::min_size(), class U, class Offset>
+    template<unsigned int VirtualWaveSize = arch::wavefront::size_from_target<TargetWaveSize>(),
+             class U,
+             class Offset>
     ROCPRIM_DEVICE ROCPRIM_INLINE
     void scatter_to_warp_striped(const T (&input)[ItemsPerThread],
                                  U (&output)[ItemsPerThread],
                                  const Offset (&ranks)[ItemsPerThread],
                                  storage_type& storage)
     {
-        static_assert(detail::is_power_of_two(WarpSize) && WarpSize <= arch::wavefront::max_size(),
-                      "WarpSize must be a power of two and equal or less"
+        static_assert(detail::is_power_of_two(VirtualWaveSize)
+                          && VirtualWaveSize <= arch::wavefront::max_size(),
+                      "VirtualWaveSize must be a power of two and equal or less"
                       "than the size of hardware warp.");
-        assert(WarpSize <= arch::wavefront::size());
+        assert(VirtualWaveSize <= arch::wavefront::size());
 
         const unsigned int flat_id
             = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
-        const unsigned int thread_id     = detail::logical_lane_id<WarpSize>();
-        const unsigned int warp_id       = flat_id / WarpSize;
-        const unsigned int warp_offset   = warp_id * WarpSize * ItemsPerThread;
+        const unsigned int thread_id     = detail::logical_lane_id<VirtualWaveSize>();
+        const unsigned int warp_id       = flat_id / VirtualWaveSize;
+        const unsigned int warp_offset   = warp_id * VirtualWaveSize * ItemsPerThread;
         const unsigned int thread_offset = thread_id + warp_offset;
 
         ROCPRIM_UNROLL
@@ -690,7 +693,7 @@ public:
         ROCPRIM_UNROLL
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
-            output[i] = storage_buffer[index(thread_offset + i * WarpSize)];
+            output[i] = storage_buffer[index(thread_offset + i * VirtualWaveSize)];
         }
     }
 
@@ -883,6 +886,121 @@ private:
         return has_bank_conflicts ? (n + (n / (banks_no * buffer_size)) * buffer_size) : n;
     }
 };
+
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
+
+template<typename T,
+         unsigned int       BlockSizeX,
+         unsigned int       ItemsPerThread,
+         unsigned int       BlockSizeY,
+         unsigned int       BlockSizeZ,
+         block_padding_hint PaddingHint>
+class block_exchange<T,
+                     BlockSizeX,
+                     ItemsPerThread,
+                     BlockSizeY,
+                     BlockSizeZ,
+                     PaddingHint,
+                     ::rocprim::arch::wavefront::target::dynamic>
+{
+private:
+    using block_exchange_wave32 = block_exchange<T,
+                                                 BlockSizeX,
+                                                 ItemsPerThread,
+                                                 BlockSizeY,
+                                                 BlockSizeZ,
+                                                 PaddingHint,
+                                                 ::rocprim::arch::wavefront::target::size32>;
+    using block_exchange_wave64 = block_exchange<T,
+                                                 BlockSizeX,
+                                                 ItemsPerThread,
+                                                 BlockSizeY,
+                                                 BlockSizeZ,
+                                                 PaddingHint,
+                                                 ::rocprim::arch::wavefront::target::size64>;
+    using dispatch
+        = ::rocprim::detail::dispatch_wave_size<block_exchange_wave32, block_exchange_wave64>;
+
+public:
+    using storage_type = typename dispatch::storage_type;
+
+    template<typename... Args>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    auto blocked_to_striped(Args&&... args)
+    {
+        dispatch{}([](auto impl, auto&&... args) { impl.blocked_to_striped(args...); }, args...);
+    }
+
+    template<typename... Args>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    auto striped_to_blocked(Args&&... args)
+    {
+        dispatch{}([](auto impl, auto&&... args) { impl.striped_to_blocked(args...); }, args...);
+    }
+
+    template<typename... Args>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    auto blocked_to_warp_striped(Args&&... args)
+    {
+        dispatch{}([](auto impl, auto&&... args) { impl.blocked_to_warp_striped(args...); },
+                   args...);
+    }
+
+    template<typename... Args>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    auto warp_striped_to_blocked(Args&&... args)
+    {
+        dispatch{}([](auto impl, auto&&... args) { impl.warp_striped_to_blocked(args...); },
+                   args...);
+    }
+
+    template<typename... Args>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    auto scatter_to_blocked(Args&&... args)
+    {
+        dispatch{}([](auto impl, auto&&... args) { impl.scatter_to_blocked(args...); }, args...);
+    }
+
+    template<typename... Args>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    auto gather_from_striped(Args&&... args)
+    {
+        dispatch{}([](auto impl, auto&&... args) { impl.gather_from_striped(args...); }, args...);
+    }
+
+    template<typename... Args>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    auto scatter_to_striped(Args&&... args)
+    {
+        dispatch{}([](auto impl, auto&&... args) { impl.scatter_to_striped(args...); }, args...);
+    }
+
+    template<typename... Args>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    auto scatter_to_warp_striped(Args&&... args)
+    {
+        dispatch{}([](auto impl, auto&&... args) { impl.scatter_to_warp_striped(args...); },
+                   args...);
+    }
+
+    template<typename... Args>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    auto scatter_to_striped_guarded(Args&&... args)
+    {
+        dispatch{}([](auto impl, auto&&... args) { impl.scatter_to_striped_guarded(args...); },
+                   args...);
+    }
+
+    template<typename... Args>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    auto scatter_to_striped_flagged(Args&&... args)
+    {
+        dispatch{}([](auto impl, auto&&... args) { impl.scatter_to_striped_flagged(args...); },
+                   args...);
+    }
+};
+
+#endif
 
 END_ROCPRIM_NAMESPACE
 

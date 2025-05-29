@@ -905,12 +905,9 @@ void Stockham1DNode::SetupGridParam_internal(GridParam& gp)
 
     if(applyPartialPass)
     {
-        // Special case for partial pass 64 x 64 x 64.
-        // Kernel configuration is hardcoded for now.
-        // TODO: Once the partial-pass kernels are properly
-        // integrated into the Stockham kernel generators,
-        // this configuration will come from the usual location
-        // in kernel-generator.py.
+        // TODO: Hardcoded configuration for 64 x 64 x 64.
+        // Remove this once the partial-pass kernels are
+        // fully configurable in kernel-generator.py.
         kernel.threads_per_transform[0] = 8;
         kernel.workgroup_size           = 128;
         kernel.transforms_per_block     = kernel.workgroup_size / kernel.threads_per_transform[0];
@@ -939,15 +936,9 @@ bool Stockham1DNode::CreateDeviceResources()
 {
     if(applyPartialPass)
     {
-        // handles partial pass 64 x 64 x 64 case.
-        // current dimension y is the dimension to split
-        // into x and z.
-
-        // Create twiddle table for partial pass along y
-        size_t pp_dim = 1;
-
+        // Create twiddle table for partial pass along ppDim
         std::tie(twiddles_pp, twiddles_pp_size)
-            = Repo::GetTwiddlesPP(length[pp_dim], precision, deviceProp);
+            = Repo::GetTwiddlesPP(length[ppDim], precision, deviceProp);
     }
 
     twd_attach_halfN = (ebtype != EmbeddedType::NONE);
@@ -1125,11 +1116,9 @@ void SBCCNode::SetupGridParam_internal(GridParam& gp)
 
     if(applyPartialPass)
     {
-        // Special case for partial pass 64 x 64 x 64.
-        // Kernel configration is hardcoded for now.
-        // TODO: Once the partial-pass kernels are integrated
-        // into the stockham kernel generators, change this
-        // configuration to use kernel-generator.py data.
+        // TODO: Hardcoded configuration for 64 x 64 x 64.
+        // Remove this once the partial-pass kernels are
+        // fully configurable in kernel-generator.py.
         auto tpt = 8;
         wgs      = 64;
         bwd      = wgs / tpt;
@@ -1143,9 +1132,9 @@ void SBCCNode::SetupGridParam_internal(GridParam& gp)
 
     if(applyPartialPass)
     {
-        // grid and thread organization is different
-        // on partial pass sbcc kernels (for improved
-        // global memory access patterns).
+        // Grid arrangement is different for partial
+        // pass SBCC kernels. This arrangement leads
+        // to improved global memory access patterns.
         auto factor = *std::max_element(kernelFactorsPP.begin(), kernelFactorsPP.end());
 
         gp.b_x /= factor;

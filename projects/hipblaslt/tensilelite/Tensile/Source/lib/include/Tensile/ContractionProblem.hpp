@@ -143,6 +143,17 @@ namespace TensileLite
             m_gsu = 0;
         }
 
+        // Fallback means if the problem is running with a CU-fallback sol.
+        void setFallbackStatus(bool cuFallback)
+        {
+            m_fallbackStatus = cuFallback;
+        }
+
+        bool fallbackStatus() const
+        {
+            return m_fallbackStatus;
+        }
+
     private:
         int16_t          m_gsu            = 0; // default value
         bool             m_gsuc           = false; // default value
@@ -153,6 +164,7 @@ namespace TensileLite
         rocisa::DataType m_biasType       = rocisa::DataType::None;
         int              m_factorDim      = 0;
         ActivationType   m_activationType = ActivationType::None;
+        bool             m_fallbackStatus = false; // default value
     };
 
     /**

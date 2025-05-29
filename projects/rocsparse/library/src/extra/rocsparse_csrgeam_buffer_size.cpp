@@ -27,21 +27,21 @@
 
 #include "rocsparse_csrgeam.hpp"
 
-rocsparse_status rocsparse::csrgeam_buffer_size_template(rocsparse_handle          handle,
-                                                         rocsparse_operation       trans_A,
-                                                         rocsparse_operation       trans_B,
-                                                         int64_t                   m,
-                                                         int64_t                   n,
-                                                         const rocsparse_mat_descr descr_A,
-                                                         int64_t                   nnz_A,
-                                                         const void*               csr_row_ptr_A,
-                                                         const void*               csr_col_ind_A,
-                                                         const rocsparse_mat_descr descr_B,
-                                                         int64_t                   nnz_B,
-                                                         const void*               csr_row_ptr_B,
-                                                         const void*               csr_col_ind_B,
-                                                         const void*               csr_row_ptr_C,
-                                                         size_t*                   buffer_size)
+rocsparse_status rocsparse::csrgeam_buffer_size(rocsparse_handle          handle,
+                                                rocsparse_operation       trans_A,
+                                                rocsparse_operation       trans_B,
+                                                int64_t                   m,
+                                                int64_t                   n,
+                                                const rocsparse_mat_descr descr_A,
+                                                int64_t                   nnz_A,
+                                                const void*               csr_row_ptr_A,
+                                                const void*               csr_col_ind_A,
+                                                const rocsparse_mat_descr descr_B,
+                                                int64_t                   nnz_B,
+                                                const void*               csr_row_ptr_B,
+                                                const void*               csr_col_ind_B,
+                                                const void*               csr_row_ptr_C,
+                                                size_t*                   buffer_size)
 {
     *buffer_size = 0;
 

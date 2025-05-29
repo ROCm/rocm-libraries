@@ -95,7 +95,10 @@ BluesteinType BluesteinNode::DecideBlueType()
         return type;
     }
 
-    if(scheme == CS_L1D_CRT || scheme == CS_L1D_TRTRT)
+    // Handle lengthBlue with its own non-fused FFT sub-plan.  This
+    // can be a multi-kernel L1D plan, or a 1-kernel Stockham plan if
+    // lengthBlue can be done with a single non-pow2 kernel.
+    if(scheme == CS_L1D_CRT || scheme == CS_L1D_TRTRT || scheme == CS_KERNEL_STOCKHAM)
         return BluesteinType::BT_MULTI_KERNEL;
 
     return BluesteinType::BT_NONE;
@@ -420,8 +423,9 @@ bool BluesteinSingleNode::SizeFits(const function_pool& pool,
                                    size_t               length,
                                    rocfft_precision     precision)
 {
-    // 2N - 1 must fit into a single kernel
-    return 2 * length - 1 < pool.get_largest_length(precision);
+    // 2N - 1 must fit into a single kernel, and single-kernel
+    // Bluestein only uses pow2 FFT
+    return 2 * length - 1 < pool.get_largest_pow2_length(precision);
 }
 
 size_t BluesteinSingleNode::GetTwiddleTableLength()

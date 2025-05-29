@@ -3,11 +3,20 @@
 Documentation for rocThrust available at
 [https://rocm.docs.amd.com/projects/rocThrust/en/latest/](https://rocm.docs.amd.com/projects/rocThrust/en/latest/).
 
-## rocThrust 3.5.0 for ROCm 7.0
+## rocThrust 4.0.0 for ROCm 7.0
 
 ### Changed
 
 * Updated the required version of Google Benchmark from 1.8.0 to 1.9.0.
+
+### Removed
+
+* `device_malloc_allocator.h` has been removed. This header file was unused and should not impact users.
+* Removed C++14 support, only C++17 is supported.
+
+### Upcoming changes
+
+* `thrust::device_malloc_allocator` is deprecated as of this version. It will be removed in an upcoming version.
 
 ## rocThrust 3.4.0 for ROCm 6.5
 

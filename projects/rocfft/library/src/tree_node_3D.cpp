@@ -609,8 +609,8 @@ bool RC3DNode::CheckPartialPassSupport()
         }
     }
 
-    // TODO: Once partial pass is property integrated into
-    // the Stockham generators, revisit these restrictions.
+    // TODO: Revisit these restrictions once partial pass is
+    //       fully configurable in kernel-generator.py.
     bool batchCondition = (batch >= 5);
 
     size_t checkDist     = product(length.begin(), length.end());
@@ -644,6 +644,11 @@ void RC3DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
 
     if(CheckPartialPassSupport())
     {
+        // TODO: Child nodes currently hardcoded to a x+z configuration
+        //       in 3D partial-pass. Add support for other configurations,
+        //       e.g., x+y, y+z, once partial pass is fully configurable
+        //       in kernel-generator.py.
+
         // work along y will be split between x and z
         applyPartialPass = true;
 
@@ -666,6 +671,7 @@ void RC3DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
         xPartialPassPlan            = NodeFactory::CreateNodeFromScheme(CS_KERNEL_STOCKHAM, this);
         xPartialPassPlan->length    = xPartialPassPlanData.length;
         xPartialPassPlan->dimension = 1;
+        xPartialPassPlan->ppDim     = 1;
         xPartialPassPlan->allowInplace = true;
         xPartialPassPlan->comments.push_back("partial-pass enabled for second dimension.");
 
@@ -689,6 +695,7 @@ void RC3DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
         zPartialPassPlan = NodeFactory::CreateNodeFromScheme(CS_KERNEL_STOCKHAM_BLOCK_CC, this);
         zPartialPassPlan->length       = zPartialPassPlanData.length;
         zPartialPassPlan->dimension    = 1;
+        zPartialPassPlan->ppDim        = 1;
         zPartialPassPlan->allowInplace = false;
         zPartialPassPlan->comments.push_back("partial-pass enabled for second dimension.");
 

@@ -886,7 +886,7 @@ namespace TensileLite
                 virtual bool debugEval(ContractionProblemGemm const& problem,
                                        std::ostream&                 stream) const override
                 {
-                    if (value)
+                    if(value)
                     {
                         bool rv = (*this)(problem);
 
@@ -1535,10 +1535,10 @@ namespace TensileLite
                 {
                     int16_t gsu = problem.getParams().gsu() != 0 ? problem.getParams().gsu() : value[2];
                     // auto gsu will consider workgroup number, so bypassed
-                    if (gsu == -1)
+                    if(gsu == -1)
                         return 1;
 
-                    gsu     = gsu > 1 ? gsu : 1;
+                    gsu = gsu > 1 ? gsu : 1;
                     return (std::ceil(static_cast<float>(problem.freeSizeA(0)) / value[0])
                             * std::ceil(static_cast<float>(problem.freeSizeB(0)) / value[1]) * gsu
                             * problem.batchSize(0))
@@ -1548,7 +1548,7 @@ namespace TensileLite
                                        std::ostream&                 stream) const override
                 {
                     int16_t gsu = problem.getParams().gsu() != 0 ? problem.getParams().gsu() : value[2];
-                    if (gsu == -1)
+                    if(gsu == -1)
                     {
                         bool rv = (*this)(problem);
 
@@ -1558,7 +1558,7 @@ namespace TensileLite
                         return rv;
                     }
 
-                    gsu     = gsu > 1 ? gsu : 1;
+                    gsu = gsu > 1 ? gsu : 1;
                     int workgroupNumber
                         = std::ceil(static_cast<float>(problem.freeSizeA(0)) / value[0])
                           * std::ceil(static_cast<float>(problem.freeSizeB(0)) / value[1]) * gsu
@@ -1629,7 +1629,7 @@ namespace TensileLite
                     size_t minK
                         = (problem.getParams().gsu() != 0 ? problem.getParams().gsu() : value[1]);
                     // auto gsu will consider MinK, so bypassed
-                    if (minK == -1)
+                    if(minK == -1)
                         return 1;
                     if(minK == 1)
                         minK = 0;
@@ -1642,7 +1642,7 @@ namespace TensileLite
                 {
                     size_t minK
                         = (problem.getParams().gsu() != 0 ? problem.getParams().gsu() : value[1]);
-                    if (minK == -1)
+                    if(minK == -1)
                     {
                         bool rv = (*this)(problem);
 
@@ -2699,6 +2699,7 @@ namespace TensileLite
                     HasIndex = false,
                     HasValue = true
                 };
+                // value = [XCC, XCCG]
                 std::array<int, 2> value;
                 size_t             cuCount;
 
@@ -2727,20 +2728,28 @@ namespace TensileLite
 
                 virtual bool operator()(ContractionProblemGemm const& problem) const override
                 {
-                    size_t WGMXCCG = (value[1] == -1) ? cuCount : value[1];
-                    return ((value[0] & (value[0] - 1)) == 0) && WGMXCCG % value[0] == 0;
+                    // NB: If this solution is a cu-fallback for current hardware.
+                    // We overwrite the XCC to 1 to make sure this can pass.
+                    // But we also have to notice we are passing the correct XCC to kernel.
+                    // (i.e. Remember to do param.setWGMXCC(1) when running the kernel)
+
+                    size_t XCC  = (problem.getParams().fallbackStatus()) ? 1 : value[0];
+                    size_t XCCG = (value[1] == -1) ? cuCount : value[1];
+                    return ((XCC & (XCC - 1)) == 0) && XCCG % XCC == 0;
                 }
 
                 virtual bool debugEval(ContractionProblemGemm const& problem,
                                        std::ostream&                 stream) const override
                 {
+                    size_t XCC  = (problem.getParams().fallbackStatus()) ? 1 : value[0];
+                    size_t XCCG = (value[1] == -1) ? cuCount : value[1];
                     return debugEvalCmp(problem,
                                         stream,
-                                        "cuCount",
-                                        (value[1] == -1) ? cuCount : value[1],
+                                        "WGMXCCG",
+                                        XCCG,
                                         "%",
                                         "WGMXCC",
-                                        value[0],
+                                        XCC,
                                         "==",
                                         0);
                 }

@@ -19,25 +19,35 @@
 #include <thrust/detail/config.h>
 
 THRUST_NAMESPACE_BEGIN
-namespace cuda_cub {
+namespace cuda_cub
+{
 
-namespace detail {
+namespace detail
+{
 
-    template<typename Size>
-    struct make_unsigned_special;
+template <typename Size>
+struct make_unsigned_special;
 
-    template<>
-    struct make_unsigned_special<int> { using type = unsigned int; };
+template <>
+struct make_unsigned_special<int>
+{
+  using type = unsigned int;
+};
 
-    // this is special, because CUDA's atomicAdd doesn't have an overload
-    // for unsigned long, for some godforsaken reason
-    template<>
-    struct make_unsigned_special<long> { using type = unsigned long long; };
+// this is special, because CUDA's atomicAdd doesn't have an overload
+// for unsigned long, for some godforsaken reason
+template <>
+struct make_unsigned_special<long>
+{
+  using type = unsigned long long;
+};
 
-    template<>
-    struct make_unsigned_special<long long> { using type = unsigned long long; };
+template <>
+struct make_unsigned_special<long long>
+{
+  using type = unsigned long long;
+};
 
-}
-}
+} // namespace detail
+} // namespace cuda_cub
 THRUST_NAMESPACE_END
-

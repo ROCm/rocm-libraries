@@ -50,10 +50,14 @@ def _windowsLatestRocmBin(path: Union[Path, str]) -> Path:
     Returns:
         The path to the ROCm bin directory for the latest ROCm version.
         Typically of the form ``C:/Program Files/AMD/ROCm/X.Y/bin``.
+        May return ``None`` if no ``X.Y`` subdirectories exist, perhaps due to
+        a partial uninstall.
     """
     path = Path(path)
     pattern = re.compile(r"^\d+\.\d+$")
-    versions = filter(lambda d: d.is_dir() and pattern.match(d.name), path.iterdir())
+    versions = list(filter(lambda d: d.is_dir() and pattern.match(d.name), path.iterdir()))
+    if len(versions) == 0:
+        return None
     latest = max(versions, key=lambda d: tuple(map(int, d.name.split("."))))
     return latest / "bin"
 
@@ -67,7 +71,9 @@ def _windowsSearchPaths() -> List[Path]:
         searchPaths.extend(hipPaths)
 
     if Path(defaultPath).exists():
-        searchPaths.append(_windowsLatestRocmBin(defaultPath))
+        latestRocmBin = _windowsLatestRocmBin(defaultPath)
+        if latestRocmBin:
+            searchPaths.append(latestRocmBin)
 
     if os.environ.get("PATH"):
         envPath = [Path(p) for p in os.environ["PATH"].split(os.pathsep)]

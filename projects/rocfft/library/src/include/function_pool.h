@@ -23,6 +23,7 @@
 #ifndef FUNCTION_POOL_H
 #define FUNCTION_POOL_H
 
+#include "../../../shared/arithmetic.h"
 #include "../../../shared/rocfft_complex.h"
 #include "../device/kernels/common.h"
 #include "function_map_key.h"
@@ -219,10 +220,11 @@ public:
         return find_key_in_map(function_map, real_key) != function_map.end();
     }
 
-    size_t get_largest_length(rocfft_precision precision) const
+    size_t get_largest_pow2_length(rocfft_precision precision) const
     {
-        auto supported = get_lengths(precision, CS_KERNEL_STOCKHAM);
-        auto itr       = std::max_element(supported.cbegin(), supported.cend());
+        auto supported
+            = get_lengths(precision, CS_KERNEL_STOCKHAM, [](size_t len) { return IsPo2(len); });
+        auto itr = std::max_element(supported.cbegin(), supported.cend());
         if(itr != supported.cend())
             return *itr;
         return 0;

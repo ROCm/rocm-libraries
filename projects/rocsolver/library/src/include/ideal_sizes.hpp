@@ -62,6 +62,12 @@
 #define LARFG_SSKER_MAX_N 2048
 #endif
 
+/******************************* larft ****************************************
+*******************************************************************************/
+#ifndef LARFT_SWITCHSIZE
+#define LARFT_SWITCHSIZE 64
+#endif
+
 /***************** geqr2/geqrf and geql2/geqlf ********************************
 *******************************************************************************/
 /*! \brief Determines the size of the block column factorized at each step

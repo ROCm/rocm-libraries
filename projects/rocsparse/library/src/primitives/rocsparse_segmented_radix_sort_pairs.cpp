@@ -41,7 +41,6 @@ rocsparse_status
 
     using config
         = rocprim::segmented_radix_sort_config<7,
-                                               4,
                                                rocprim::kernel_config<256, 16>,
                                                rocprim::WarpSortConfig<8, 8, 256, 5, 16, 16, 256>,
                                                1>;
@@ -82,7 +81,6 @@ rocsparse_status rocsparse::primitives::segmented_radix_sort_pairs(rocsparse_han
 
     using config
         = rocprim::segmented_radix_sort_config<7,
-                                               4,
                                                rocprim::kernel_config<256, 16>,
                                                rocprim::WarpSortConfig<8, 8, 256, 5, 16, 16, 256>,
                                                1>;

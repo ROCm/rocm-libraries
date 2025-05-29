@@ -65,6 +65,11 @@ namespace hipblaslt_ext
             return ss.str();
         }
 
+        bool isFallbackForHW(TensileLite::Hardware const&) const override
+        {
+            return false;
+        }
+
         std::uint32_t getTileM() const
         {
             return tileM;
@@ -254,6 +259,11 @@ namespace hipblaslt_ext
             return ss.str();
         }
 
+        bool isFallbackForHW(TensileLite::Hardware const&) const override
+        {
+            return false;
+        }
+
         std::uint32_t getNumWorkitems() const
         {
             return numWorkitems;
@@ -418,6 +428,11 @@ namespace hipblaslt_ext
                << "(" << TensileLite::ToString(datatype) << ", "
                << TensileLite::ToString(outDatatype) << ")";
             return ss.str();
+        }
+
+        bool isFallbackForHW(TensileLite::Hardware const&) const override
+        {
+            return false;
         }
 
         std::uint32_t getNumWorkitems() const

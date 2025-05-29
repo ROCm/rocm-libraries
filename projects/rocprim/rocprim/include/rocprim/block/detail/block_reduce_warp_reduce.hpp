@@ -26,8 +26,8 @@
 #include "../../config.hpp"
 #include "../../detail/various.hpp"
 
-#include "../../intrinsics.hpp"
 #include "../../functional.hpp"
+#include "../../intrinsics.hpp"
 
 #include "../../warp/warp_reduce.hpp"
 
@@ -36,24 +36,23 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-template<
-    class T,
-    unsigned int BlockSizeX,
-    unsigned int BlockSizeY,
-    unsigned int BlockSizeZ
->
+template<class T,
+         unsigned int            BlockSizeX,
+         unsigned int            BlockSizeY,
+         unsigned int            BlockSizeZ,
+         arch::wavefront::target TargetWaveSize>
 class block_reduce_warp_reduce
 {
     static constexpr unsigned int BlockSize = BlockSizeX * BlockSizeY * BlockSizeZ;
     // Select warp size
     static constexpr unsigned int warp_size_
-        = detail::get_min_warp_size(BlockSize, ::rocprim::arch::wavefront::min_size());
+        = detail::get_min_warp_size(BlockSize, arch::wavefront::size_from_target<TargetWaveSize>());
     // Number of warps in block
     static constexpr unsigned int warps_no_ = (BlockSize + warp_size_ - 1) / warp_size_;
 
     // Check if we have to pass number of valid items into warp reduction primitive
     static constexpr bool block_size_is_warp_multiple_ = ((BlockSize % warp_size_) == 0);
-    static constexpr bool warps_no_is_pow_of_two_ = detail::is_power_of_two(warps_no_);
+    static constexpr bool warps_no_is_pow_of_two_      = detail::is_power_of_two(warps_no_);
 
     // typedef of warp_reduce primitive that will be used to perform warp-level
     // reduce operation on input values.
@@ -62,9 +61,8 @@ class block_reduce_warp_reduce
     using warp_reduce_input_type = ::rocprim::detail::warp_reduce_crosslane<T, warp_size_, false>;
     // typedef of warp_reduce primitive that will be used to perform reduction
     // of results of warp-level reduction.
-    using warp_reduce_output_type = ::rocprim::detail::warp_reduce_crosslane<
-        T, detail::next_power_of_two(warps_no_), false
-    >;
+    using warp_reduce_output_type
+        = ::rocprim::detail::warp_reduce_crosslane<T, detail::next_power_of_two(warps_no_), false>;
 
     struct storage_type_
     {
@@ -78,15 +76,13 @@ public:
 
     template<class BinaryFunction>
     ROCPRIM_DEVICE ROCPRIM_INLINE
-    void reduce(T input,
-                T& output,
-                storage_type& storage,
-                BinaryFunction reduce_op)
+    void reduce(T input, T& output, storage_type& storage, BinaryFunction reduce_op)
     {
-        this->reduce_impl(
-            ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>(),
-            input, output, storage, reduce_op
-        );
+        this->reduce_impl(::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>(),
+                          input,
+                          output,
+                          storage,
+                          reduce_op);
     }
 
     template<class BinaryFunction>
@@ -102,8 +98,8 @@ public:
     template<unsigned int ItemsPerThread, class BinaryFunction>
     ROCPRIM_DEVICE ROCPRIM_INLINE
     void reduce(T (&input)[ItemsPerThread],
-                T& output,
-                storage_type& storage,
+                T&             output,
+                storage_type&  storage,
                 BinaryFunction reduce_op)
     {
         // Reduce thread items
@@ -116,12 +112,11 @@ public:
 
         // Reduction of reduced values to get partials
         const auto flat_tid = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
-        this->reduce_impl(
-            flat_tid,
-            thread_input, output, // input, output
-            storage,
-            reduce_op
-        );
+        this->reduce_impl(flat_tid,
+                          thread_input,
+                          output, // input, output
+                          storage,
+                          reduce_op);
     }
 
     template<unsigned int ItemsPerThread, class BinaryFunction>
@@ -136,16 +131,18 @@ public:
 
     template<class BinaryFunction>
     ROCPRIM_DEVICE ROCPRIM_INLINE
-    void reduce(T input,
-                T& output,
-                unsigned int valid_items,
-                storage_type& storage,
+    void reduce(T              input,
+                T&             output,
+                unsigned int   valid_items,
+                storage_type&  storage,
                 BinaryFunction reduce_op)
     {
-        this->reduce_impl(
-            ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>(),
-            input, output, valid_items, storage, reduce_op
-        );
+        this->reduce_impl(::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>(),
+                          input,
+                          output,
+                          valid_items,
+                          storage,
+                          reduce_op);
     }
 
     template<class BinaryFunction>
@@ -163,25 +160,25 @@ private:
     template<class BinaryFunction>
     ROCPRIM_DEVICE ROCPRIM_INLINE
     void reduce_impl(const unsigned int flat_tid,
-                     T input,
-                     T& output,
-                     storage_type& storage,
-                     BinaryFunction reduce_op)
+                     T                  input,
+                     T&                 output,
+                     storage_type&      storage,
+                     BinaryFunction     reduce_op)
     {
-        const auto warp_id = ::rocprim::warp_id(flat_tid);
-        const auto lane_id = ::rocprim::lane_id();
+        const auto         warp_id     = ::rocprim::warp_id(flat_tid);
+        const auto         lane_id     = ::rocprim::lane_id();
         const unsigned int warp_offset = warp_id * warp_size_;
-        const unsigned int num_valid =
-            (warp_offset < BlockSize) ? BlockSize - warp_offset : 0;
-        storage_type_& storage_ = storage.get();
+        const unsigned int num_valid   = (warp_offset < BlockSize) ? BlockSize - warp_offset : 0;
+        storage_type_&     storage_    = storage.get();
 
         // Perform warp reduce
-        warp_reduce<!block_size_is_warp_multiple_, warp_reduce_input_type>(
-            input, output, num_valid, reduce_op
-        );
+        warp_reduce<!block_size_is_warp_multiple_, warp_reduce_input_type>(input,
+                                                                           output,
+                                                                           num_valid,
+                                                                           reduce_op);
 
         // Final reduction across warps is only required if there is more than 1 warp
-        if ROCPRIM_IF_CONSTEXPR (warps_no_ > 1)
+        if constexpr(warps_no_ > 1)
         {
             // i-th warp will have its partial stored in storage_.warp_partials[i-1]
             if(lane_id == 0)
@@ -205,54 +202,41 @@ private:
 
     template<bool UseValid, class WarpReduce, class BinaryFunction>
     ROCPRIM_DEVICE ROCPRIM_INLINE
-    auto warp_reduce(T input,
-                     T& output,
-                     const unsigned int valid_items,
-                     BinaryFunction reduce_op)
+    auto warp_reduce(T input, T& output, const unsigned int valid_items, BinaryFunction reduce_op)
         -> typename std::enable_if<UseValid>::type
     {
-        WarpReduce().reduce(
-            input, output, valid_items, reduce_op
-        );
+        WarpReduce().reduce(input, output, valid_items, reduce_op);
     }
 
     template<bool UseValid, class WarpReduce, class BinaryFunction>
     ROCPRIM_DEVICE ROCPRIM_INLINE
-    auto warp_reduce(T input,
-                     T& output,
-                     const unsigned int valid_items,
-                     BinaryFunction reduce_op)
+    auto warp_reduce(T input, T& output, const unsigned int valid_items, BinaryFunction reduce_op)
         -> typename std::enable_if<!UseValid>::type
     {
-        (void) valid_items;
-        WarpReduce().reduce(
-            input, output, reduce_op
-        );
+        (void)valid_items;
+        WarpReduce().reduce(input, output, reduce_op);
     }
 
     template<class BinaryFunction>
     ROCPRIM_DEVICE ROCPRIM_INLINE
     void reduce_impl(const unsigned int flat_tid,
-                     T input,
-                     T& output,
+                     T                  input,
+                     T&                 output,
                      const unsigned int valid_items,
-                     storage_type& storage,
-                     BinaryFunction reduce_op)
+                     storage_type&      storage,
+                     BinaryFunction     reduce_op)
     {
-        const auto warp_id = ::rocprim::warp_id(flat_tid);
-        const auto lane_id = ::rocprim::lane_id();
+        const auto         warp_id     = ::rocprim::warp_id(flat_tid);
+        const auto         lane_id     = ::rocprim::lane_id();
         const unsigned int warp_offset = warp_id * warp_size_;
-        const unsigned int num_valid =
-            (warp_offset < valid_items) ? valid_items - warp_offset : 0;
-        storage_type_& storage_ = storage.get();
+        const unsigned int num_valid = (warp_offset < valid_items) ? valid_items - warp_offset : 0;
+        storage_type_&     storage_  = storage.get();
 
         // Perform warp reduce
-        warp_reduce_input_type().reduce(
-            input, output, num_valid, reduce_op
-        );
+        warp_reduce_input_type().reduce(input, output, num_valid, reduce_op);
 
         // Final reduction across warps is only required if there is more than 1 warp
-        if ROCPRIM_IF_CONSTEXPR (warps_no_ > 1)
+        if constexpr(warps_no_ > 1)
         {
             // i-th warp will have its partial stored in storage_.warp_partials[i-1]
             if(lane_id == 0)
@@ -267,9 +251,7 @@ private:
                 auto warp_partial = storage_.warp_partials[lane_id];
 
                 unsigned int valid_warps_no = (valid_items + warp_size_ - 1) / warp_size_;
-                warp_reduce_output_type().reduce(
-                    warp_partial, output, valid_warps_no, reduce_op
-                );
+                warp_reduce_output_type().reduce(warp_partial, output, valid_warps_no, reduce_op);
             }
         }
     }

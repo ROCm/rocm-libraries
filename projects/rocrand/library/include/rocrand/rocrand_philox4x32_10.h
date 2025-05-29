@@ -55,12 +55,14 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "rocrand/rocrand_common.h"
 
+#include <hip/hip_runtime.h>
+
 // Constants from Random123
 // See https://www.deshawresearch.com/resources_random123.html
 #define ROCRAND_PHILOX_M4x32_0 0xD2511F53U
 #define ROCRAND_PHILOX_M4x32_1 0xCD9E8D57U
-#define ROCRAND_PHILOX_W32_0   0x9E3779B9U
-#define ROCRAND_PHILOX_W32_1   0xBB67AE85U
+#define ROCRAND_PHILOX_W32_0 0x9E3779B9U
+#define ROCRAND_PHILOX_W32_1 0xBB67AE85U
 
 /** \rocrand_internal \addtogroup rocranddevice
  *
@@ -422,6 +424,6 @@ void skipahead_sequence(unsigned long long sequence, rocrand_state_philox4x32_10
     return state->discard_subsequence(sequence);
 }
 
-#endif // ROCRAND_PHILOX4X32_10_H_
-
 /** @} */ // end of group rocranddevice
+
+#endif // ROCRAND_PHILOX4X32_10_H_

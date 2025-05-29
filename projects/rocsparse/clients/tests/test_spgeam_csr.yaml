@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2024 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2024-2025 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -54,7 +54,7 @@ Tests:
   baseB: [rocsparse_index_base_zero, rocsparse_index_base_one]
   baseC: [rocsparse_index_base_zero, rocsparse_index_base_one]
   spgeam_alg: [rocsparse_spgeam_alg_default]
-  hardware: [gfx90a, gfx942]
+  hardware: [gfx90a]
   function: spgeam_csr_extra
 
 # C = alpha * A + beta * B

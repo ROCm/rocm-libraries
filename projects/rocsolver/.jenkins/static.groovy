@@ -21,7 +21,7 @@ def runCI =
     prj.defaults.ccache = true
 
     // customize for project
-    prj.paths.build_command = './install.sh -c --cmake-arg -DWERROR=ON --static'
+    prj.paths.build_command = 'VERBOSE=1 ./install.sh -c --cmake-arg -DWERROR=ON --static'
 
     // Define test architectures, optional rocm version argument is available
     def nodes = new dockerNodes(nodeDetails, jobName, prj)

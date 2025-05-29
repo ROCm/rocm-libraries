@@ -491,14 +491,104 @@ struct _rocsparse_spgeam_descr
     size_t rocprim_size{};
     void*  rocprim_buffer{};
 
-    // Perform alpha * A + beta * B
-    bool alpha_mul{true};
-    bool beta_mul{true};
+protected:
+    rocsparse_spgeam_stage stage;
+    rocsparse_spgeam_alg   alg;
+    rocsparse_datatype     scalar_datatype;
+    rocsparse_datatype     compute_datatype;
+    rocsparse_operation    op_A;
+    rocsparse_operation    op_B;
 
-    rocsparse_spgeam_alg alg{rocsparse_spgeam_alg_default};
-    rocsparse_datatype   compute_type{rocsparse_datatype_f32_r};
-    rocsparse_operation  trans_A{rocsparse_operation_none};
-    rocsparse_operation  trans_B{rocsparse_operation_none};
+    float m_local_host_alpha_value[4];
+    float m_local_host_beta_value[4];
+
+public:
+    ~_rocsparse_spgeam_descr() = default;
+
+    _rocsparse_spgeam_descr()
+        : stage((rocsparse_spgeam_stage)-1)
+        , alg((rocsparse_spgeam_alg)-1)
+        , scalar_datatype((rocsparse_datatype)-1)
+        , compute_datatype((rocsparse_datatype)-1)
+        , op_A((rocsparse_operation)-1)
+        , op_B((rocsparse_operation)-1)
+    {
+    }
+
+    void* get_local_host_alpha()
+    {
+        return &this->m_local_host_alpha_value[0];
+    }
+    void* get_local_host_beta()
+    {
+        return &this->m_local_host_beta_value[0];
+    }
+
+    rocsparse_spgeam_stage get_stage() const
+    {
+        return this->stage;
+    }
+    rocsparse_spgeam_alg get_alg() const
+    {
+        return this->alg;
+    }
+    rocsparse_operation get_operation_A() const
+    {
+        return this->op_A;
+    }
+    rocsparse_operation get_operation_B() const
+    {
+        return this->op_B;
+    }
+    rocsparse_datatype get_scalar_datatype() const
+    {
+        return this->scalar_datatype;
+    }
+    rocsparse_datatype get_compute_datatype() const
+    {
+        return this->compute_datatype;
+    }
+
+    void set_stage(rocsparse_spgeam_stage value)
+    {
+        this->stage = value;
+    }
+    void set_alg(rocsparse_spgeam_alg value)
+    {
+        this->alg = value;
+    }
+    void set_operation_A(rocsparse_operation value)
+    {
+        this->op_A = value;
+    }
+    void set_operation_B(rocsparse_operation value)
+    {
+        this->op_B = value;
+    }
+    void set_scalar_datatype(rocsparse_datatype value)
+    {
+        this->scalar_datatype = value;
+    }
+    void set_compute_datatype(rocsparse_datatype value)
+    {
+        this->compute_datatype = value;
+    }
+
+    rocsparse_status csrgeam_allocate_descr_memory(rocsparse_handle handle,
+                                                   int64_t          m,
+                                                   int64_t          n,
+                                                   const void*      alpha,
+                                                   int64_t          nnz_A,
+                                                   const void*      beta,
+                                                   int64_t          nnz_B);
+
+    rocsparse_status csrgeam_copy_row_pointer(rocsparse_handle          handle,
+                                              int64_t                   m,
+                                              int64_t                   n,
+                                              const rocsparse_mat_descr descr_C,
+                                              rocsparse_indextype       csr_row_ptr_C_indextype,
+                                              void*                     csr_row_ptr_C,
+                                              int64_t*                  nnz_C);
 };
 
 namespace rocsparse

@@ -462,14 +462,19 @@ namespace rocRoller
         using CompressedTable      = std::map<std::string, CompressedTableEntry>;
 
         inline CompressedTable compressedNodeOrderTable(
-            std::unordered_map<std::tuple<int, int>, KernelGraph::ControlGraph::NodeOrdering> table)
+            std::unordered_map<int,
+                               std::unordered_map<int, KernelGraph::ControlGraph::NodeOrdering>>
+                table)
         {
             CompressedTable rv;
 
-            for(auto const& pair : table)
+            for(auto const& [node, nodeOrderPairs] : table)
             {
-                auto key = toString(pair.second);
-                rv[key][std::get<0>(pair.first)].push_back(std::get<1>(pair.first));
+                for(auto const& [otherNode, order] : nodeOrderPairs)
+                {
+                    auto key = toString(order);
+                    rv[key][node].push_back(otherNode);
+                }
             }
 
             return rv;

@@ -30,9 +30,6 @@ extern "C" {
 
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
 /*! \ingroup precond_module
- *  \brief Incomplete LU factorization with 0 fill-ins and no pivoting using BSR storage
- *  format
- *
  *  \details
  *  \p hipsparseXbsrilu02_zeroPivot returns \ref HIPSPARSE_STATUS_ZERO_PIVOT, if either a
  *  structural or numerical zero has been found during \ref hipsparseSbsrilu02_analysis 
@@ -72,9 +69,6 @@ hipsparseStatus_t
 
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
 /*! \ingroup precond_module
- *  \brief Incomplete LU factorization with 0 fill-ins and no pivoting using BSR storage
- *  format
- *
  *  \details
  *  \p hipsparseXbsrilu02_numericBoost enables the user to replace a numerical value in
  *  an incomplete LU factorization. \p tol is used to determine whether a numerical value
@@ -136,9 +130,6 @@ hipsparseStatus_t hipsparseZbsrilu02_numericBoost(hipsparseHandle_t handle,
 
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
 /*! \ingroup precond_module
- *  \brief Incomplete LU factorization with 0 fill-ins and no pivoting using BSR storage
- *  format
- *
  *  \details
  *  \p hipsparseXbsrilu02_bufferSize returns the size of the temporary storage buffer
  *  in bytes that is required by \ref hipsparseSbsrilu02_analysis "hipsparseXbsrilu02_analysis()" 
@@ -240,12 +231,10 @@ hipsparseStatus_t hipsparseZbsrilu02_bufferSize(hipsparseHandle_t         handle
 
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
 /*! \ingroup precond_module
- *  \brief Incomplete LU factorization with 0 fill-ins and no pivoting using BSR storage
- *  format
- *
  *  \details
  *  \p hipsparseXbsrilu02_analysis performs the analysis step for \ref hipsparseSbsrilu02 
- *  "hipsparseXbsrilu02()".
+ *  "hipsparseXbsrilu02()". It is expected that this function will be executed only once 
+ *  for a given matrix.
  *
  *  \note
  *  If the matrix sparsity pattern changes, the gathered information will become invalid.
@@ -361,12 +350,19 @@ hipsparseStatus_t hipsparseZbsrilu02_analysis(hipsparseHandle_t         handle,
  *    A \approx LU
  *  \f]
  *
- *  \p hipsparseXbsrilu02 requires a user allocated temporary buffer. Its size is
- *  returned by \ref hipsparseSbsrilu02_bufferSize "hipsparseXbsrilu02_bufferSize()". 
- *  Furthermore, analysis meta data is required. It can be obtained by 
- *  \ref hipsparseSbsrilu02_analysis "hipsparseXbsrilu02_analysis()". \p hipsparseXbsrilu02
- *  reports the first zero pivot (either numerical or structural zero). The zero pivot
- *  status can be obtained by calling hipsparseXbsrilu02_zeroPivot().
+ *  Computing the above incomplete LU factorization requires three steps to complete. First, 
+ *  the user determines the size of the required temporary storage buffer by calling 
+ *  \ref hipsparseSbsrilu02_bufferSize "hipsparseXbsrilu02_bufferSize()". Once this buffer size 
+ *  has been determined, the user allocates the buffer and passes it to 
+ *  \ref hipsparseSbsrilu02_analysis "hipsparseXbsrilu02_analysis()". This will perform analysis on 
+ *  the sparsity pattern of the matrix. Finally, the user calls \p hipsparseXbsrilu02 to perform the 
+ *  actual factorization. The calculation of the buffer size and the analysis of the sparse matrix 
+ *  only need to be performed once for a given sparsity pattern while the factorization can be 
+ *  repeatedly applied to multiple matrices having the same sparsity pattern. Once all calls to 
+ *  \ref hipsparseSbsrilu02 "hipsparseXbsrilu02()" are complete, the temporary buffer can be deallocated.
+ *  
+ *  \p hipsparseXbsrilu02 reports the first zero pivot (either numerical or structural zero).
+ *  The zero pivot status can be obtained by calling \ref hipsparseXbsrilu02_zeroPivot().
  *
  *  \note
  *  This function is non blocking and executed asynchronously with respect to the host.

@@ -37,9 +37,9 @@
 #include "../thread/thread_operators.hpp"
 #include "../util_sync.hpp"
 #include "device_reduce.hpp"
-#include "rocprim/type_traits.hpp"
 
-#include <rocprim/device/device_segmented_reduce.hpp>
+#include <rocprim/device/device_segmented_reduce.hpp> // IWYU pragma: export
+#include <rocprim/type_traits.hpp> // IWYU pragma: export
 
 #include <chrono>
 #include <iterator>
@@ -119,8 +119,7 @@ inline hipError_t segmented_arg_minmax(void*          temporary_storage,
                                        hipStream_t    stream)
 {
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
-    using result_type =
-        typename ::rocprim::invoke_result_binary_op<input_type, BinaryFunction>::type;
+    using result_type = ::rocprim::accumulator_t<BinaryFunction, input_type>;
 
     using config = ::rocprim::detail::wrapped_reduce_config<Config, result_type>;
 

@@ -30,8 +30,6 @@ extern "C" {
 
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
 /*! \ingroup level3_module
-*  \brief Sparse triangular system solve using BSR storage format
-*
 *  \details
 *  \p hipsparseXbsrsm2_zeroPivot returns \ref HIPSPARSE_STATUS_ZERO_PIVOT, if either a
 *  structural or numerical zero has been found during \ref hipsparseSbsrsm2_analysis "hipsparseXbsrsm2_analysis()" 
@@ -65,8 +63,6 @@ hipsparseStatus_t
 
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
 /*! \ingroup level3_module
-*  \brief Sparse triangular system solve using BSR storage format
-*
 *  \details
 *  \p hipsparseXbsrsm2_buffer_size returns the size of the temporary storage buffer in bytes 
 *  that is required by \ref hipsparseSbsrsm2_analysis "hipsparseXbsrsm2_analysis()" and 
@@ -103,10 +99,8 @@ hipsparseStatus_t
 *  info        structure that holds the information collected during the analysis step.
 *  @param[out]
 *  pBufferSizeInBytes number of bytes of the temporary storage buffer required by
-*              hipsparseSbsrsm2_analysis(), hipsparseDbsrsm2_analysis(),
-*              hipsparseCbsrsm2_analysis(), hipsparseZbsrsm2_analysis(),
-*              hipsparseSbsrsm2_solve(), hipsparseDbsrsm2_solve(),
-*              hipsparseCbsrsm2_solve() and hipsparseZbsrsm2_solve().
+*              \ref hipsparseSbsrsm2_analysis "hipsparseXbsrsm2_analysis()" and
+*              \ref hipsparseSbsrsm2_solve "hipsparseXbsrsm2_solve()".
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nrhs, \p nnzb, \p blockDim, 
@@ -195,7 +189,8 @@ hipsparseStatus_t hipsparseZbsrsm2_bufferSize(hipsparseHandle_t         handle,
 *
 *  \details
 *  \p hipsparseXbsrsm2_analysis performs the analysis step for \ref hipsparseSbsrsm2_solve 
-*  "hipsparseXbsrsm2_solve()".
+*  "hipsparseXbsrsm2_solve()". It is expected that this function will be executed only once 
+*  for a given matrix and particular operation type.
 *
 *  \note
 *  If the matrix sparsity pattern changes, the gathered information will become invalid.
@@ -329,8 +324,9 @@ hipsparseStatus_t hipsparseZbsrsm2_analysis(hipsparseHandle_t         handle,
 *
 *  \details
 *  \p hipsparseXbsrsm2_solve solves a sparse triangular linear system of a sparse
-*  \f$m \times m\f$ matrix, defined in BSR storage format, a dense solution matrix
-*  \f$X\f$ and the right-hand side matrix \f$B\f$ that is multiplied by \f$\alpha\f$, such that
+*  \f$m \times m\f$ matrix, defined in BSR storage format, a column-oriented dense solution matrix
+*  \f$X\f$ and the column-oriented dense right-hand side matrix \f$B\f$ that is multiplied by \f$\alpha\f$, 
+*  such that
 *  \f[
 *    op(A) \cdot op(X) = \alpha \cdot op(B),
 *  \f]
@@ -346,6 +342,16 @@ hipsparseStatus_t hipsparseZbsrsm2_analysis(hipsparseHandle_t         handle,
 *  \f]
 *  ,
 *  \f[
+*    op(B) = \left\{
+*    \begin{array}{ll}
+*        B,   & \text{if transX == HIPSPARSE_OPERATION_NON_TRANSPOSE} \\
+*        B^T, & \text{if transX == HIPSPARSE_OPERATION_TRANSPOSE} \\
+*        B^H, & \text{if transX == HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE}
+*    \end{array}
+*    \right.
+*  \f]
+*  and
+*  \f[
 *    op(X) = \left\{
 *    \begin{array}{ll}
 *        X,   & \text{if transX == HIPSPARSE_OPERATION_NON_TRANSPOSE} \\
@@ -354,14 +360,137 @@ hipsparseStatus_t hipsparseZbsrsm2_analysis(hipsparseHandle_t         handle,
 *    \end{array}
 *    \right.
 *  \f]
+*  and where \f$m = blockDim \times mb\f$.
 *
-*  \p hipsparseXbsrsm2_solve requires a user allocated temporary buffer. Its size is
-*  returned by \ref hipsparseSbsrsm2_bufferSize "hipsparseXbsrsm2_bufferSize()". Furthermore, 
-*  analysis meta data is required. It can be obtained by \ref hipsparseSbsrsm2_analysis 
-*  "hipsparseXbsrsm2_analysis()". \p hipsparseXbsrsm2_solve reports the first zero pivot 
-*  (either numerical or structural zero). The zero pivot status can be checked calling 
-*  \ref hipsparseXbsrsm2_zeroPivot(). If \ref hipsparseDiagType_t == \ref HIPSPARSE_DIAG_TYPE_UNIT, 
-*  no zero pivot will be reported, even if \f$A_{j,j} = 0\f$ for some \f$j\f$.
+*  Note that as indicated above, the operation type of both \f$op(B)\f$ and \f$op(X)\f$ is specified by the
+*  \p transX parameter and that the operation type of \f$B\f$ and \f$X\f$ must match. For example, if \f$op(B)=B\f$ then
+*  \f$op(X)=X\f$. Likewise, if \f$op(B)=B^T\f$ then \f$op(X)=X^T\f$.
+*
+*  Given that the sparse matrix \f$A\f$ is a square matrix, its size is \f$m \times m\f$ regardless of
+*  whether \f$A\f$ is transposed or not. The size of the column-oriented dense matrices \f$B\f$ and \f$X\f$ have
+*  size that depends on the value of \p transX:
+*
+*  \f[
+*    op(B) = \left\{
+*    \begin{array}{ll}
+*        ldb \times nrhs, \text{  } ldb \ge m, & \text{if transX == HIPSPARSE_OPERATION_NON_TRANSPOSE} \\
+*        ldb \times m, \text{  } ldb \ge nrhs,  & \text{if transX == HIPSPARSE_OPERATION_TRANSPOSE} \\
+*        ldb \times m, \text{  } ldb \ge nrhs, & \text{if transX == HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE}
+*    \end{array}
+*    \right.
+*  \f]
+*  and
+*  \f[
+*    op(X) = \left\{
+*    \begin{array}{ll}
+*        ldb \times nrhs, \text{  } ldb \ge m, & \text{if transX == HIPSPARSE_OPERATION_NON_TRANSPOSE} \\
+*        ldb \times m, \text{  } ldb \ge nrhs,  & \text{if transX == HIPSPARSE_OPERATION_TRANSPOSE} \\
+*        ldb \times m, \text{  } ldb \ge nrhs, & \text{if transX == HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE}
+*    \end{array}
+*    \right.
+*  \f]
+*
+*  \p hipsparseXbsrsm2_solve requires a user allocated temporary buffer. Its size is returned by
+*  \ref hipsparseSbsrsm2_bufferSize "hipsparseXbsrsm2_bufferSize()". The size of the required buffer is larger 
+*  when  \p transA equals \ref HIPSPARSE_OPERATION_TRANSPOSE or \ref HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE and 
+*  when \p transX is \ref HIPSPARSE_OPERATION_NON_TRANSPOSE. The subsequent solve will also be faster when \f$A\f$ is 
+*  non-transposed and \f$B\f$ is transposed (or conjugate transposed). For example, instead of solving:
+*
+*  \f[
+*   \left[
+*    \begin{array}{c | c}
+*      \begin{array}{c c}
+*       a_{00} & a_{01} \\
+*       a_{10} & a_{11}
+*      \end{array} &
+*      \begin{array}{c c}
+*       0 & 0 \\
+*       0 & 0
+*      \end{array} \\
+*    \hline
+*      \begin{array}{c c}
+*       a_{20} & a_{21} \\
+*       a_{30} & a_{31}
+*      \end{array} &
+*      \begin{array}{c c}
+*       a_{22} & a_{23} \\
+*       a_{32} & a_{33}
+*      \end{array} \\
+*    \end{array}
+*   \right]
+*    \cdot
+*    \begin{bmatrix}
+*    x_{00} & x_{01} \\
+*    x_{10} & x_{11} \\
+*    x_{20} & x_{21} \\
+*    x_{30} & x_{31} \\
+*    \end{bmatrix}
+*    =
+*    \begin{bmatrix}
+*    b_{00} & b_{01} \\
+*    b_{10} & b_{11} \\
+*    b_{20} & b_{21} \\
+*    b_{30} & b_{31} \\
+*    \end{bmatrix}
+*  \f]
+*
+*  Consider solving:
+*
+*  \f[
+*   \left[
+*    \begin{array}{c | c}
+*      \begin{array}{c c}
+*       a_{00} & a_{01} \\
+*       a_{10} & a_{11}
+*      \end{array} &
+*      \begin{array}{c c}
+*       0 & 0 \\
+*       0 & 0
+*      \end{array} \\
+*    \hline
+*      \begin{array}{c c}
+*       a_{20} & a_{21} \\
+*       a_{30} & a_{31}
+*      \end{array} &
+*      \begin{array}{c c}
+*       a_{22} & a_{23} \\
+*       a_{32} & a_{33}
+*      \end{array} \\
+*    \end{array}
+*   \right]
+*    \cdot
+*    \begin{bmatrix}
+*    x_{00} & x_{10} & x_{20} & x_{30} \\
+*    x_{01} & x_{11} & x_{21} & x_{31}
+*    \end{bmatrix}^{T}
+*    =
+*    \begin{bmatrix}
+*    b_{00} & b_{10} & b_{20} & b_{30} \\
+*    b_{01} & b_{11} & b_{21} & b_{31}
+*    \end{bmatrix}^{T}
+*  \f]
+*
+*  Once the temporary storage buffer has been allocated, analysis meta data is required. It can be obtained
+*  by hipsparseSbsrsm2_analysis "hipsparseXbsrsm2_analysis()". The triangular solve is completed by calling 
+*  \p hipsparseXbsrsm2_solve and once all solves are performed, the temporary storage buffer allocated by the 
+*  user can be freed.
+*
+*  Solving a triangular system involves inverting the diagonal blocks. This means that if the sparse matrix is 
+*  missing the diagonal block (referred to as a structural zero) or the diagonal block is not invertible (referred 
+*  to as a numerical zero) then a solution is not possible. \p hipsparseXbsrsm2_solve tracks the location of the first 
+*  zero pivot (either numerical or structural zero). The zero pivot status can be checked calling \ref hipsparseXbsrsm2_zeroPivot(). 
+*  If \ref hipsparseXbsrsm2_zeroPivot() returns \ref HIPSPARSE_STATUS_SUCCESS, then no zero pivot was found and therefore 
+*  the matrix does not have a structural or numerical zero.
+*
+*  The user can specify that the sparse matrix should be interpreted as having identity blocks on the diagonal by setting the diagonal 
+*  type on the descriptor \p descrA to \ref HIPSPARSE_DIAG_TYPE_UNIT using \ref hipsparseSetMatDiagType. If 
+*  \ref hipsparseDiagType_t == \ref HIPSPARSE_DIAG_TYPE_UNIT, no zero pivot will be reported, even if the diagonal block \f$A_{j,j}\f$ 
+*  for some \f$j\f$ is not invertible.
+*
+*  The sparse CSR matrix passed to \p hipsparseXbsrsm2_solve does not actually have to be a triangular matrix. Instead the 
+*  triangular upper or lower part of the sparse matrix is solved based on \ref hipsparseFillMode_t set on the descriptor 
+*  \p descrA. If the fill mode is set to \ref HIPSPARSE_FILL_MODE_LOWER, then the lower triangular matrix is solved. If the 
+*  fill mode is set to \ref HIPSPARSE_FILL_MODE_UPPER then the upper triangular matrix is solved.
 *
 *  \note
 *  The sparse BSR matrix has to be sorted.

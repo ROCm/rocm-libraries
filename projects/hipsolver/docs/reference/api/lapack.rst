@@ -1,6 +1,6 @@
 .. meta::
-  :description: hipSOLVER documentation and API reference library
-  :keywords: hipSOLVER, rocSOLVER, ROCm, API, documentation
+  :description: hipSOLVER LAPACK functions API documentation
+  :keywords: hipSOLVER, rocSOLVER, ROCm, API, documentation, lapack
 
 .. _lapackfunc:
 
@@ -8,18 +8,16 @@
 hipSOLVER LAPACK functions
 ***************************
 
-LAPACK routines solve complex Numerical Linear Algebra problems. These functions are organized
-in the following categories:
+LAPACK routines solve complex numerical linear algebra problems. These functions are organized
+into the following categories:
 
-* :ref:`triangular`. Based on Gaussian elimination.
-* :ref:`orthogonal`. Based on Householder reflections.
-* :ref:`reductions`. Transformation of matrices and problems into equivalent forms.
-* :ref:`linears`. Based on triangular factorizations.
-* :ref:`leastsqr`. Based on orthogonal factorizations.
-* :ref:`eigens`. Eigenproblems for symmetric matrices.
-* :ref:`svds`. Singular values and related problems for general matrices.
-
-
+*  :ref:`triangular`: Based on Gaussian elimination.
+*  :ref:`orthogonal`: Based on Householder reflections.
+*  :ref:`reductions`: Transformation of matrices and problems into equivalent forms.
+*  :ref:`linears`: Based on triangular factorizations.
+*  :ref:`leastsqr`: Based on orthogonal factorizations.
+*  :ref:`eigens`: Eigenproblems for symmetric matrices.
+*  :ref:`svds`: Singular values and related problems for general matrices.
 
 .. _triangular:
 
@@ -476,7 +474,7 @@ hipsolver<type>hegvd()
 Singular value decomposition
 ================================
 
-.. contents:: List of SVD related functions
+.. contents:: List of SVD-related functions
    :local:
    :backlinks: top
 

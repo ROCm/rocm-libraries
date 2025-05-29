@@ -254,7 +254,7 @@ Tests:
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_pentadiagonal]
   storage: [rocsparse_storage_mode_sorted]
-  spmv_alg: [rocsparse_spmv_alg_coo]
+  spmv_alg: [rocsparse_spmv_alg_coo, rocsparse_spmv_alg_coo_atomic]
 
 #
 # mixed precision

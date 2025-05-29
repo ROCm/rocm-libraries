@@ -1,0 +1,35 @@
+
+CompileFlags:
+    CompilationDatabase: build/release/
+    Compiler: hipcc
+    Add: 
+        - -x
+        - hip
+        - -D__AMDGCN_WAVEFRONT_SIZE=64
+        - -isystem/opt/rocm/include/
+        - -ferror-limit=0
+
+Diagnostics:
+    ClangTidy:
+        Add:
+            - readability-braces-around-statements
+            - readability-*
+            - bugprone-*
+        Remove:
+            - readability-function-cognitive-complexity
+            - readability-identifier-length
+            - bugprone-easily-swappable-parameters
+
+
+---
+If:
+
+    PathMatch: test/.*
+
+CompileFlags:
+    CompilationDatabase: build/release/
+
+Diagnostics:
+    ClangTidy:
+        Remove:
+            - readability-magic-numbers

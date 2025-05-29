@@ -1,6 +1,6 @@
 .. meta::
-  :description: rocSOLVER documentation and API reference library
-  :keywords: rocSOLVER, ROCm, API, documentation
+  :description: rocSOLVER logging documentation
+  :keywords: rocSOLVER, ROCm, API, documentation, logging, tracing
 
 .. _logging-label:
 
@@ -8,102 +8,106 @@
 rocSOLVER multi-level logging
 ******************************
 
-rocSOLVER provides logging facilities that can be used to output information on rocSOLVER function calls, 
-similar to `Logging in rocBLAS <https://rocm.docs.amd.com/projects/rocBLAS/en/latest/reference/logging.html>`_. 
+rocSOLVER provides logging facilities that can be used to output information on rocSOLVER function calls. The infrastructure is 
+similar to `rocBLAS logging <https://rocm.docs.amd.com/projects/rocBLAS/en/latest/reference/logging.html>`_. 
 Three logging modes are supported: trace logging, bench logging, and profile logging.
 
 .. note::
+
    Performance will degrade when logging is enabled.
 
 Logging modes
 ================================================
 
+This section discusses the three logging modes.
+
 Trace logging
 --------------
 
-Trace logging outputs a line each time an internal rocSOLVER or rocBLAS routine is called,
-outputting the function name and the values of its arguments (excluding stride arguments). The
-maximum depth of nested function calls that can appear in the log is specified by the user.
+Trace logging outputs a line each time an internal rocSOLVER or rocBLAS routine is called.
+The output includes the function name and the values of the arguments (excluding stride arguments). You
+can specify the maximum depth of nested function calls that can appear in the log.
 
 Bench logging
 ----------------
 
 Bench logging outputs a line each time a public rocSOLVER routine is called (excluding
-auxiliary library functions), outputting a line that can be used with the executable
-``rocsolver-bench`` to call the function with the same size arguments.
+auxiliary library functions). It outputs a line that can be used with the
+``rocsolver-bench`` executable to call the function with the same size arguments.
 
 .. _log_profile:
 
 Profile logging
 -------------------
 
-Profile logging, upon calling ``rocsolver_log_write_profile`` or ``rocsolver_log_flush_profile``,
-or terminating the logging session using ``rocsolver_log_end``, will output statistics on each
-called internal rocSOLVER and rocBLAS routine. These include the number of times each function
+Profile logging is triggered whenever you call ``rocsolver_log_write_profile`` or ``rocsolver_log_flush_profile``,
+or terminate the logging session using ``rocsolver_log_end``. It outputs statistics on each
+internal rocSOLVER and rocBLAS routine that was called. These metrics include the number of times each function
 was called, the total program runtime occupied by the function, and the total program runtime
-occupied by its nested function calls. As with trace logging, the maximum depth of nested output
-is specified by the user. Note that, when profile logging is enabled, the stream will be synchronized
-after every internal function call.
+occupied by its nested function calls. Similar to trace logging, you can specify the maximum depth of the nested output.
 
+.. note::
 
-Initialization and set-up
+   When profile logging is enabled, the stream is synchronized after every internal function call.
+
+Initialization and setup
 ================================================
 
-In order to use rocSOLVER's logging facilities, the user must first call ``rocsolver_log_begin``
-in order to allocate the internal data structures used for logging and begin the logging session.
-The user may then specify a layer mode and max level depth, either programmatically using
-``rocsolver_log_set_layer_mode``, ``rocsolver_log_set_max_levels``, or by setting the corresponding
+To use the rocSOLVER logging facilities, first call ``rocsolver_log_begin``
+to allocate the internal data structures and begin the logging session.
+You can then specify a layer mode and max level depth, either programmatically using
+``rocsolver_log_set_layer_mode`` and ``rocsolver_log_set_max_levels`` or by setting the corresponding
 environment variables.
 
-The layer mode specifies which logging type(s) are activated, and can be ``rocblas_layer_mode_none``,
+The layer mode specifies which logging types are activated. It can be set to ``rocblas_layer_mode_none``,
 ``rocblas_layer_mode_log_trace``, ``rocblas_layer_mode_log_bench``, ``rocblas_layer_mode_log_profile``,
-or a bitwise combination of these. The max level depth specifies the default maximum depth of nested
-function calls that may appear in the trace and profile logging.
+or a bitwise combination of these values. The max level depth specifies the default maximum depth for any nested
+function calls that might appear in the trace and profile logging.
 
-Both the default layer mode and max level depth can be specified using environment variables.
+The default layer mode and max level depth can be specified using the following environment variables:
 
-* ``ROCSOLVER_LAYER``
-* ``ROCSOLVER_LEVELS``
+*  ``ROCSOLVER_LAYER``
+*  ``ROCSOLVER_LEVELS``
 
-If these variables are not set, the layer mode will default to ``rocblas_layer_mode_none`` and the
-max level depth will default to 1. These defaults can be restored by calling the function
+If these variables are not set, the layer mode defaults to ``rocblas_layer_mode_none`` and the
+maximum level depth defaults to ``1``. These defaults can be restored by calling the function
 ``rocsolver_log_restore_defaults``.
 
 ``ROCSOLVER_LAYER`` is a bitwise OR of zero or more bit masks as follows:
 
-*  If ``ROCSOLVER_LAYER`` is not set, then there is no logging
-*  If ``(ROCSOLVER_LAYER & 1) != 0``, then there is trace logging
-*  If ``(ROCSOLVER_LAYER & 2) != 0``, then there is bench logging
-*  If ``(ROCSOLVER_LAYER & 4) != 0``, then there is profile logging
+*  If ``ROCSOLVER_LAYER`` is not set, then there is no logging.
+*  If ``(ROCSOLVER_LAYER & 1) != 0``, then there is trace logging.
+*  If ``(ROCSOLVER_LAYER & 2) != 0``, then there is bench logging.
+*  If ``(ROCSOLVER_LAYER & 4) != 0``, then there is profile logging.
 
-Three environment variables can set the full path name for a log file:
+Three environment variables are available to set the full path name for a log file:
 
-* ``ROCSOLVER_LOG_TRACE_PATH`` sets the full path name for trace logging
-* ``ROCSOLVER_LOG_BENCH_PATH`` sets the full path name for bench logging
-* ``ROCSOLVER_LOG_PROFILE_PATH`` sets the full path name for profile logging
+*  ``ROCSOLVER_LOG_TRACE_PATH`` sets the full path name for trace logging.
+*  ``ROCSOLVER_LOG_BENCH_PATH`` sets the full path name for bench logging.
+*  ``ROCSOLVER_LOG_PROFILE_PATH`` sets the full path name for profile logging.
 
-If one of these environment variables is not set, then ``ROCSOLVER_LOG_PATH`` sets the full path
-for the corresponding logging, if it is set. If neither the above nor ``ROCSOLVER_LOG_PATH`` are
-set, then the corresponding logging output is streamed to standard error.
+If any of these three environment variables have not been set, then the full path
+for the corresponding log file is set to ``ROCSOLVER_LOG_PATH``. If ``ROCSOLVER_LOG_PATH`` also isn't
+set, the corresponding logging output is streamed to standard error.
 
 The results of profile logging, if enabled, can be printed using ``rocsolver_log_write_profile``
-or ``rocsolver_log_flush_profile``. Once logging facilities are no longer required (e.g. at
-program termination), the user must call ``rocsolver_log_end`` to free the data structures used
+or ``rocsolver_log_flush_profile``. When logging facilities are no longer required, for example, at
+program termination, the user must call ``rocsolver_log_end`` to free the data structures used
 for logging. If the profile log has not been flushed beforehand, then ``rocsolver_log_end``
-will also output the results of profile logging.
+also outputs the profile logging results.
 
-For more details on the mentioned logging functions, see the :ref:`rocSOLVER Logging functions <api_logging>`
+For more details on these logging functions, see the :ref:`rocSOLVER Logging functions <api_logging>`
 reference section.
 
 
 Example code
 ================================================
 
-Code examples that illustrate the use of rocSOLVER's multi-level logging facilities can be found
+Code examples that illustrate the use of the rocSOLVER multi-level logging facilities can be found
 in this section or in the ``example_logging.cpp`` file in the ``clients/samples`` directory.
 
-The following example shows some basic use: enabling trace and profile logging, and setting the
-max depth for their output.
+The following example shows a basic use case. It enables trace and profile logging and sets the
+maximum depth for the logging output.
 
 .. code-block:: cpp
 
@@ -123,10 +127,10 @@ max depth for their output.
    rocsolver_log_end();
    rocblas_destroy_handle(handle);
 
-Alternatively, users may control which logging modes are enabled by using environment variables.
-The benefit of this approach is that the program does not need to be recompiled if a different
-logging environment is desired. This requires that ``rocsolver_log_set_layer_mode`` and
-``rocsolver_log_set_max_levels`` are not called in the code, e.g.
+Alternatively, you can control which logging modes are enabled by using environment variables.
+The benefit of this approach is that you don't need to recompile the program to use a different
+logging environment. With this approach, however, you cannot call ``rocsolver_log_set_layer_mode`` and
+``rocsolver_log_set_max_levels`` in the code. Here's an example:
 
 .. code-block:: cpp
 
@@ -141,7 +145,7 @@ logging environment is desired. This requires that ``rocsolver_log_set_layer_mod
    rocsolver_log_end();
    rocblas_destroy_handle(handle);
 
-The user may then set the desired logging modes and max depth on the command line as follows:
+You can then set the desired logging modes and maximum depth on the command line as follows:
 
 .. code-block:: bash
 
@@ -152,25 +156,23 @@ The user may then set the desired logging modes and max depth on the command lin
 Kernel logging
 ================================================
 
-Kernel launches from within rocSOLVER can be added to the trace and profile logs using an
-additional layer mode flag. The flag ``rocblas_layer_mode_ex_log_kernel`` can be combined with
-``rocblas_layer_mode`` flags and passed to ``rocsolver_log_set_layer_mode`` in order to enable
-kernel logging. Alternatively, the environment variable ``ROCSOLVER_LAYER`` can be set such that
-``(ROCSOLVER_LAYER & 16) != 0``:
+To add kernel launches from within rocSOLVER to the trace and profile logs, use an
+additional layer mode flag. The flag ``rocblas_layer_mode_ex_log_kernel`` can be combined with the
+``rocblas_layer_mode`` flags and passed to ``rocsolver_log_set_layer_mode`` to enable
+kernel logging. Alternatively, the environment variable ``ROCSOLVER_LAYER`` can be set so that
+``(ROCSOLVER_LAYER & 16) != 0``, as follows:
 
-*  If ``(ROCSOLVER_LAYER & 17) != 0``, then kernel calls will be added to the trace log
-*  If ``(ROCSOLVER_LAYER & 20) != 0``, then kernel calls will be added to the profile log
-
+*  If ``(ROCSOLVER_LAYER & 17) != 0``, then kernel calls are added to the trace log
+*  If ``(ROCSOLVER_LAYER & 20) != 0``, then kernel calls are added to the profile log
 
 Multiple host threads
 ================================================
 
 The logging facilities for rocSOLVER assume that each ``rocblas_handle`` is associated with at
-most one host thread. When using rocSOLVER's multi-level logging setup, it is recommended to
+most one host thread. When using the rocSOLVER multi-level logging setup, it's recommended to
 create a separate ``rocblas_handle`` for each host thread.
 
-The rocsolver_log_* functions are not thread-safe. Calling a log function while any rocSOLVER
-routine is executing on another host thread will result in undefined behaviour. Once enabled,
-logging data collection is thread-safe. However, note that trace logging will likely result in
-garbled trace trees if rocSOLVER routines are called from multiple host threads.
-
+The ``rocsolver_log_*`` functions are not thread safe. Calling a log function while any rocSOLVER
+routine is executing on another host thread results in undefined behavior. After it's enabled,
+logging data collection is thread safe. However, if rocSOLVER routines are called from multiple host threads,
+trace logging is likely to result in garbled trace trees.

@@ -189,6 +189,9 @@ std::string test_kernel_src(const std::string&               kernel_name,
                         SBRC_TRANSPOSE_TYPE::NONE,
                         CallbackType::NONE,
                         BluesteinFuseType::BFT_NONE,
+                        PartialPassType::PPT_NONE,
+                        {},
+                        0,
                         {},
                         {});
 }

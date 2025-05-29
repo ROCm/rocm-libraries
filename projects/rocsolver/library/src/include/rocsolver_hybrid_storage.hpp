@@ -283,6 +283,7 @@ struct rocsolver_hybrid_storage
 
         return rocblas_status_success;
     }
+
     /* Copies data from host buffer back to the device. Returns an error if initialized for pointers
        only. */
     rocblas_status write_to_device_async(hipStream_t stream)

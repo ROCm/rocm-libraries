@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2023, NVIDIA CORPORATION. All rights reserved.
- * Modifications Copyright (c) 2024, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2024-2025, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -31,7 +31,7 @@
 
 #include "../../../config.hpp"
 
-#include <rocprim/device/device_copy.hpp>
+#include <rocprim/device/device_copy.hpp> // IWYU pragma: export
 
 #include <hip/hip_runtime.h>
 

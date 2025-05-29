@@ -1,9 +1,30 @@
-#include <thrust/host_vector.h>
+// Copyright (c) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 #include <thrust/device_vector.h>
 #include <thrust/functional.h>
 #include <thrust/gather.h>
+#include <thrust/host_vector.h>
 #include <thrust/iterator/transform_input_output_iterator.h>
 #include <thrust/sequence.h>
+
 #include <iostream>
 
 #include "include/host_device.h"
@@ -15,28 +36,34 @@ class ScaledInteger
   int scale_;
 
 public:
-  __host__ __device__
-  ScaledInteger(int value, int scale): value_{value}, scale_{scale} {}
+  __host__ __device__ ScaledInteger(int value, int scale)
+      : value_{value}
+      , scale_{scale}
+  {}
 
-  __host__ __device__
-  int value() const { return value_; }
-
-  __host__ __device__
-  ScaledInteger rescale(int scale) const
+  __host__ __device__ int value() const
   {
-    int shift = scale - scale_;
+    return value_;
+  }
+
+  __host__ __device__ ScaledInteger rescale(int scale) const
+  {
+    int shift  = scale - scale_;
     int result = shift < 0 ? value_ << (-shift) : value_ >> shift;
     return ScaledInteger{result, scale};
   }
 
-  __host__ __device__
-  friend ScaledInteger operator+(ScaledInteger a, ScaledInteger b)
+  __host__ __device__ friend ScaledInteger operator+(ScaledInteger a, ScaledInteger b)
   {
     // Rescale inputs to the lesser of the two scales
     if (b.scale_ < a.scale_)
+    {
       a = a.rescale(b.scale_);
+    }
     else if (a.scale_ < b.scale_)
+    {
       b = b.rescale(a.scale_);
+    }
     return ScaledInteger{a.value_ + b.value_, a.scale_};
   }
 };
@@ -45,8 +72,7 @@ struct ValueToScaledInteger
 {
   int scale;
 
-  __host__ __device__
-  ScaledInteger operator()(const int& value) const
+  __host__ __device__ ScaledInteger operator()(const int& value) const
   {
     return ScaledInteger{value, scale};
   }
@@ -56,8 +82,7 @@ struct ScaledIntegerToValue
 {
   int scale;
 
-  __host__ __device__
-  int operator()(const ScaledInteger& scaled) const
+  __host__ __device__ int operator()(const ScaledInteger& scaled) const
   {
     return scaled.rescale(scale).value();
   }
@@ -74,17 +99,17 @@ int main(void)
   thrust::sequence(B.begin(), B.end(), 5);
 
   const int A_scale = 16; // Values in A are left shifted by 16
-  const int B_scale = 8;  // Values in B are left shifted by 8
-  const int C_scale = 4;  // Values in C are left shifted by 4
+  const int B_scale = 8; // Values in B are left shifted by 8
+  const int C_scale = 4; // Values in C are left shifted by 4
 
-  auto A_begin = thrust::make_transform_input_output_iterator(A.begin(),
-                    ValueToScaledInteger{A_scale}, ScaledIntegerToValue{A_scale});
-  auto A_end   = thrust::make_transform_input_output_iterator(A.end(),
-                    ValueToScaledInteger{A_scale}, ScaledIntegerToValue{A_scale});
-  auto B_begin = thrust::make_transform_input_output_iterator(B.begin(),
-                    ValueToScaledInteger{B_scale}, ScaledIntegerToValue{B_scale});
-  auto C_begin = thrust::make_transform_input_output_iterator(C.begin(),
-                    ValueToScaledInteger{C_scale}, ScaledIntegerToValue{C_scale});
+  auto A_begin = thrust::make_transform_input_output_iterator(
+    A.begin(), ValueToScaledInteger{A_scale}, ScaledIntegerToValue{A_scale});
+  auto A_end =
+    thrust::make_transform_input_output_iterator(A.end(), ValueToScaledInteger{A_scale}, ScaledIntegerToValue{A_scale});
+  auto B_begin = thrust::make_transform_input_output_iterator(
+    B.begin(), ValueToScaledInteger{B_scale}, ScaledIntegerToValue{B_scale});
+  auto C_begin = thrust::make_transform_input_output_iterator(
+    C.begin(), ValueToScaledInteger{C_scale}, ScaledIntegerToValue{C_scale});
 
   // Sum A and B as ScaledIntegers, storing the scaled result in C
   thrust::transform(A_begin, A_end, B_begin, C_begin, thrust::plus<ScaledInteger>{});
@@ -96,18 +121,19 @@ int main(void)
   std::cout << std::hex;
 
   std::cout << "Expected [ ";
-  for (size_t i = 0; i < size; i++) {
+  for (size_t i = 0; i < size; i++)
+  {
     const int expected = ((A_h[i] << A_scale) + (B_h[i] << B_scale)) >> C_scale;
-    std::cout << expected <<  " ";
+    std::cout << expected << " ";
   }
   std::cout << "] \n";
 
   std::cout << "Result   [ ";
-  for (size_t i = 0; i < size; i++) {
-    std::cout << C_h[i] <<  " ";
+  for (size_t i = 0; i < size; i++)
+  {
+    std::cout << C_h[i] << " ";
   }
   std::cout << "] \n";
 
   return 0;
 }
-

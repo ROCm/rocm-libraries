@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -25,11 +25,12 @@
 
 #include "benchmark_utils.hpp"
 
+#include "../common/utils_device_ptr.hpp"
+
 // Google Benchmark
 #include <benchmark/benchmark.h>
 
 // HIP API
-#include <cstdint>
 #include <hip/hip_runtime.h>
 
 // rocPRIM HIP API
@@ -66,7 +67,7 @@ inline std::string config_name<rocprim::default_config>()
 template<typename KeyType,
          typename ValueType = rocprim::empty_type,
          typename Config    = rocprim::default_config>
-struct device_merge_benchmark : public config_autotune_interface
+struct device_merge_benchmark : public benchmark_utils::autotune_interface
 {
     std::string name() const override
     {
@@ -76,17 +77,15 @@ struct device_merge_benchmark : public config_autotune_interface
                                          + ",cfg:" + config_name<Config>() + "}");
     }
 
-    static constexpr unsigned int batch_size  = 10;
-    static constexpr unsigned int warmup_size = 5;
-
     // keys benchmark
     template<typename val = ValueType>
-    auto do_run(benchmark::State&   state,
-                size_t              bytes,
-                const managed_seed& seed,
-                hipStream_t         stream) const ->
+    auto do_run(benchmark_utils::state&& state) const ->
         typename std::enable_if<std::is_same<val, ::rocprim::empty_type>::value, void>::type
     {
+        const auto& stream = state.stream;
+        const auto& bytes  = state.bytes;
+        const auto& seed   = state.seed;
+
         using key_type = KeyType;
         using compare_op_type =
             typename std::conditional<std::is_same<key_type, rocprim::half>::value,
@@ -114,106 +113,52 @@ struct device_merge_benchmark : public config_autotune_interface
         std::sort(keys_input1.begin(), keys_input1.end(), compare_op);
         std::sort(keys_input2.begin(), keys_input2.end(), compare_op);
 
-        key_type* d_keys_input1;
-        key_type* d_keys_input2;
-        key_type* d_keys_output;
-        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_keys_input1), size1 * sizeof(key_type)));
-        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_keys_input2), size2 * sizeof(key_type)));
-        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_keys_output), size * sizeof(key_type)));
-        HIP_CHECK(hipMemcpy(d_keys_input1,
-                            keys_input1.data(),
-                            size1 * sizeof(key_type),
-                            hipMemcpyHostToDevice));
-        HIP_CHECK(hipMemcpy(d_keys_input2,
-                            keys_input2.data(),
-                            size2 * sizeof(key_type),
-                            hipMemcpyHostToDevice));
+        common::device_ptr<key_type> d_keys_input1(keys_input1);
+        common::device_ptr<key_type> d_keys_input2(keys_input2);
+        common::device_ptr<key_type> d_keys_output(size);
 
-        void*  d_temporary_storage     = nullptr;
+        common::device_ptr<void> d_temporary_storage;
         size_t temporary_storage_bytes = 0;
-        HIP_CHECK(rocprim::merge<Config>(d_temporary_storage,
+        HIP_CHECK(rocprim::merge<Config>(d_temporary_storage.get(),
                                          temporary_storage_bytes,
-                                         d_keys_input1,
-                                         d_keys_input2,
-                                         d_keys_output,
+                                         d_keys_input1.get(),
+                                         d_keys_input2.get(),
+                                         d_keys_output.get(),
                                          size1,
                                          size2,
                                          compare_op,
                                          stream,
                                          false));
 
-        HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
+        d_temporary_storage.resize(temporary_storage_bytes);
 
-        // Warm-up
-        for(size_t i = 0; i < warmup_size; ++i)
-        {
-            HIP_CHECK(rocprim::merge<Config>(d_temporary_storage,
-                                             temporary_storage_bytes,
-                                             d_keys_input1,
-                                             d_keys_input2,
-                                             d_keys_output,
-                                             size1,
-                                             size2,
-                                             compare_op,
-                                             stream,
-                                             false));
-        }
-        HIP_CHECK(hipDeviceSynchronize());
-
-        // HIP events creation
-        hipEvent_t start, stop;
-        HIP_CHECK(hipEventCreate(&start));
-        HIP_CHECK(hipEventCreate(&stop));
-
-        for(auto _ : state)
-        {
-            // Record start event
-            HIP_CHECK(hipEventRecord(start, stream));
-
-            for(size_t i = 0; i < batch_size; ++i)
+        state.run(
+            [&]
             {
-                HIP_CHECK(rocprim::merge<Config>(d_temporary_storage,
+                HIP_CHECK(rocprim::merge<Config>(d_temporary_storage.get(),
                                                  temporary_storage_bytes,
-                                                 d_keys_input1,
-                                                 d_keys_input2,
-                                                 d_keys_output,
+                                                 d_keys_input1.get(),
+                                                 d_keys_input2.get(),
+                                                 d_keys_output.get(),
                                                  size1,
                                                  size2,
                                                  compare_op,
                                                  stream,
                                                  false));
-            }
+            });
 
-            // Record stop event and wait until it completes
-            HIP_CHECK(hipEventRecord(stop, stream));
-            HIP_CHECK(hipEventSynchronize(stop));
-
-            float elapsed_mseconds;
-            HIP_CHECK(hipEventElapsedTime(&elapsed_mseconds, start, stop));
-            state.SetIterationTime(elapsed_mseconds / 1000);
-        }
-
-        // Destroy HIP events
-        HIP_CHECK(hipEventDestroy(start));
-        HIP_CHECK(hipEventDestroy(stop));
-
-        state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(key_type));
-        state.SetItemsProcessed(state.iterations() * batch_size * size);
-
-        HIP_CHECK(hipFree(d_temporary_storage));
-        HIP_CHECK(hipFree(d_keys_input1));
-        HIP_CHECK(hipFree(d_keys_input2));
-        HIP_CHECK(hipFree(d_keys_output));
+        state.set_throughput(size, sizeof(key_type));
     }
 
     // pairs benchmark
     template<typename val = ValueType>
-    auto do_run(benchmark::State&   state,
-                size_t              bytes,
-                const managed_seed& seed,
-                hipStream_t         stream) const ->
+    auto do_run(benchmark_utils::state&& state) const ->
         typename std::enable_if<!std::is_same<val, ::rocprim::empty_type>::value, void>::type
     {
+        const auto& stream = state.stream;
+        const auto& bytes  = state.bytes;
+        const auto& seed   = state.seed;
+
         using key_type   = KeyType;
         using value_type = ValueType;
         using compare_op_type =
@@ -245,126 +190,56 @@ struct device_merge_benchmark : public config_autotune_interface
         std::iota(values_input1.begin(), values_input1.end(), 0);
         std::iota(values_input2.begin(), values_input2.end(), size1);
 
-        key_type*   d_keys_input1;
-        key_type*   d_keys_input2;
-        key_type*   d_keys_output;
-        value_type* d_values_input1;
-        value_type* d_values_input2;
-        value_type* d_values_output;
-        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_keys_input1), size1 * sizeof(key_type)));
-        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_keys_input2), size2 * sizeof(key_type)));
-        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_keys_output), size * sizeof(key_type)));
-        HIP_CHECK(
-            hipMalloc(reinterpret_cast<void**>(&d_values_input1), size1 * sizeof(value_type)));
-        HIP_CHECK(
-            hipMalloc(reinterpret_cast<void**>(&d_values_input2), size2 * sizeof(value_type)));
-        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_values_output), size * sizeof(value_type)));
-        HIP_CHECK(hipMemcpy(d_keys_input1,
-                            keys_input1.data(),
-                            size1 * sizeof(key_type),
-                            hipMemcpyHostToDevice));
-        HIP_CHECK(hipMemcpy(d_keys_input2,
-                            keys_input2.data(),
-                            size2 * sizeof(key_type),
-                            hipMemcpyHostToDevice));
+        common::device_ptr<key_type>   d_keys_input1(keys_input1);
+        common::device_ptr<key_type>   d_keys_input2(keys_input2);
+        common::device_ptr<key_type>   d_keys_output(size);
+        common::device_ptr<value_type> d_values_input1(size1);
+        common::device_ptr<value_type> d_values_input2(size2);
+        common::device_ptr<value_type> d_values_output(size);
 
-        void*  d_temporary_storage     = nullptr;
+        common::device_ptr<void> d_temporary_storage;
         size_t temporary_storage_bytes = 0;
-        HIP_CHECK(rocprim::merge<Config>(d_temporary_storage,
+        HIP_CHECK(rocprim::merge<Config>(d_temporary_storage.get(),
                                          temporary_storage_bytes,
-                                         d_keys_input1,
-                                         d_keys_input2,
-                                         d_keys_output,
-                                         d_values_input1,
-                                         d_values_input2,
-                                         d_values_output,
+                                         d_keys_input1.get(),
+                                         d_keys_input2.get(),
+                                         d_keys_output.get(),
+                                         d_values_input1.get(),
+                                         d_values_input2.get(),
+                                         d_values_output.get(),
                                          size1,
                                          size2,
                                          compare_op,
                                          stream,
                                          false));
 
-        HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
+        d_temporary_storage.resize(temporary_storage_bytes);
         HIP_CHECK(hipDeviceSynchronize());
 
-        // Warm-up
-        for(size_t i = 0; i < warmup_size; ++i)
-        {
-            HIP_CHECK(rocprim::merge<Config>(d_temporary_storage,
-                                             temporary_storage_bytes,
-                                             d_keys_input1,
-                                             d_keys_input2,
-                                             d_keys_output,
-                                             d_values_input1,
-                                             d_values_input2,
-                                             d_values_output,
-                                             size1,
-                                             size2,
-                                             compare_op,
-                                             stream,
-                                             false));
-        }
-        HIP_CHECK(hipDeviceSynchronize());
-
-        // HIP events creation
-        hipEvent_t start, stop;
-        HIP_CHECK(hipEventCreate(&start));
-        HIP_CHECK(hipEventCreate(&stop));
-
-        for(auto _ : state)
-        {
-            // Record start event
-            HIP_CHECK(hipEventRecord(start, stream));
-
-            for(size_t i = 0; i < batch_size; ++i)
+        state.run(
+            [&]
             {
-                HIP_CHECK(rocprim::merge<Config>(d_temporary_storage,
+                HIP_CHECK(rocprim::merge<Config>(d_temporary_storage.get(),
                                                  temporary_storage_bytes,
-                                                 d_keys_input1,
-                                                 d_keys_input2,
-                                                 d_keys_output,
-                                                 d_values_input1,
-                                                 d_values_input2,
-                                                 d_values_output,
+                                                 d_keys_input1.get(),
+                                                 d_keys_input2.get(),
+                                                 d_keys_output.get(),
+                                                 d_values_input1.get(),
+                                                 d_values_input2.get(),
+                                                 d_values_output.get(),
                                                  size1,
                                                  size2,
                                                  compare_op,
                                                  stream,
                                                  false));
-            }
+            });
 
-            // Record stop event and wait until it completes
-            HIP_CHECK(hipEventRecord(stop, stream));
-            HIP_CHECK(hipEventSynchronize(stop));
-
-            float elapsed_mseconds;
-            HIP_CHECK(hipEventElapsedTime(&elapsed_mseconds, start, stop));
-            state.SetIterationTime(elapsed_mseconds / 1000);
-        }
-
-        // Destroy HIP events
-        HIP_CHECK(hipEventDestroy(start));
-        HIP_CHECK(hipEventDestroy(stop));
-
-        state.SetBytesProcessed(state.iterations() * batch_size * size
-                                * (sizeof(key_type) + sizeof(value_type)));
-        state.SetItemsProcessed(state.iterations() * batch_size * size);
-
-        HIP_CHECK(hipFree(d_temporary_storage));
-        HIP_CHECK(hipFree(d_keys_input1));
-        HIP_CHECK(hipFree(d_keys_input2));
-        HIP_CHECK(hipFree(d_keys_output));
-        HIP_CHECK(hipFree(d_values_input1));
-        HIP_CHECK(hipFree(d_values_input2));
-        HIP_CHECK(hipFree(d_values_output));
+        state.set_throughput(size, sizeof(key_type) + sizeof(value_type));
     }
 
-    void run(benchmark::State&   state,
-             size_t              bytes,
-             const managed_seed& seed,
-             hipStream_t         stream) const override
+    void run(benchmark_utils::state&& state) override
     {
-        do_run(state, bytes, seed, stream);
+        do_run(std::forward<benchmark_utils::state>(state));
     }
 };
 
@@ -380,7 +255,7 @@ struct device_merge_benchmark_generator
         using generated_config = rocprim::merge_config<BlockSize, items_per_thread>;
         using benchmark_struct = device_merge_benchmark<KeyType, ValueType, generated_config>;
 
-        void operator()(std::vector<std::unique_ptr<config_autotune_interface>>& storage)
+        void operator()(std::vector<std::unique_ptr<benchmark_utils::autotune_interface>>& storage)
         {
             storage.emplace_back(std::make_unique<benchmark_struct>());
         }
@@ -392,13 +267,13 @@ struct device_merge_benchmark_generator
             typename rocprim::detail::default_merge_config_base<KeyType, ValueType>::type;
         using benchmark_struct = device_merge_benchmark<KeyType, ValueType, default_config>;
 
-        void operator()(std::vector<std::unique_ptr<config_autotune_interface>>& storage)
+        void operator()(std::vector<std::unique_ptr<benchmark_utils::autotune_interface>>& storage)
         {
             storage.emplace_back(std::make_unique<benchmark_struct>());
         }
     };
 
-    static void create(std::vector<std::unique_ptr<config_autotune_interface>>& storage)
+    static void create(std::vector<std::unique_ptr<benchmark_utils::autotune_interface>>& storage)
     {
         static constexpr unsigned int min_items_per_thread_exponent = 0u;
 

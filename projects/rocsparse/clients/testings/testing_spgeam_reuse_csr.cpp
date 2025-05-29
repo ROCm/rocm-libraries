@@ -238,6 +238,8 @@ void testing_spgeam_reuse_csr(const Arguments& arg)
     CHECK_ROCSPARSE_ERROR(rocsparse_spgeam_set_input(
         handle, descr, rocsparse_spgeam_input_operation_B, &trans_B, sizeof(trans_B)));
     CHECK_ROCSPARSE_ERROR(rocsparse_spgeam_set_input(
+        handle, descr, rocsparse_spgeam_input_scalar_datatype, &ttype, sizeof(ttype)));
+    CHECK_ROCSPARSE_ERROR(rocsparse_spgeam_set_input(
         handle, descr, rocsparse_spgeam_input_compute_datatype, &ttype, sizeof(ttype)));
 
     // Calculate NNZ phase
@@ -259,17 +261,6 @@ void testing_spgeam_reuse_csr(const Arguments& arg)
                                            h_alpha_ptr,
                                            mat_A,
                                            h_beta_ptr,
-                                           mat_B,
-                                           nullptr,
-                                           rocsparse_spgeam_stage_analysis,
-                                           buffer_size_in_bytes,
-                                           buffer));
-    CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_device));
-    CHECK_ROCSPARSE_ERROR(rocsparse_spgeam(handle,
-                                           descr,
-                                           d_alpha_ptr,
-                                           mat_A,
-                                           d_beta_ptr,
                                            mat_B,
                                            nullptr,
                                            rocsparse_spgeam_stage_analysis,
