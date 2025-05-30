@@ -190,7 +190,7 @@ namespace
     }
     INSTANTIATE_TEST_CATEGORIES(matmul_test);
 
-#ifdef USE_ROCROLLER
+#ifdef HIPBLASLT_USE_ROCROLLER
     // ----------------------------------------------------------------------------
     // rocRoller
     // ----------------------------------------------------------------------------

@@ -53,8 +53,13 @@ target_link_libraries(hipblaslt-clients-common
     PRIVATE
         hip::device
 )
+
 target_compile_definitions(hipblaslt-clients-common PRIVATE CLIENTS_NO_FORTRAN) # necessary?
 
+if(HIPBLASLT_ENABLE_ROCROLLER)
+    target_compile_definitions(hipblaslt-clients-common PRIVATE HIPBLASLT_USE_ROCROLLER)
+    target_link_libraries(hipblaslt-clients-common PRIVATE roc::rocroller)
+endif()
 if(HIPBLASLT_ENABLE_ASAN)
     hipblaslt_target_configure_sanitizers(hipblaslt-clients-common PUBLIC)
 endif()
@@ -110,11 +115,16 @@ if(BUILD_TESTING OR HIPBLASLT_BUILD_TESTING)
             hip::device
             hipblaslt-clients-common
             GTest::gtest
+            OpenMP::OpenMP_CXX
     )
     if(HIPBLASLT_ENABLE_BLIS)
         target_link_libraries(hipblaslt-test PRIVATE BLIS::BLIS) # necessary?
     endif()
     target_compile_definitions(hipblaslt-test PRIVATE GOOGLE_TEST HIPBLASLT_TEST)
+    if(HIPBLASLT_ENABLE_ROCROLLER)
+        target_compile_definitions(hipblaslt-test PRIVATE HIPBLASLT_USE_ROCROLLER)
+        target_link_libraries(hipblaslt-test PRIVATE roc::rocroller)
+    endif()
     add_subdirectory(test)
 endif()
 

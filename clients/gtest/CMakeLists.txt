@@ -39,7 +39,7 @@ add_executable( hipblaslt-test ${hipblaslt_test_source} ${hipblaslt_test_bench_c
 
 target_compile_definitions( hipblaslt-test PRIVATE GOOGLE_TEST )
 
-if( USE_ROCROLLER )
+if( HIPBLASLT_USE_ROCROLLER )
    set_source_files_properties(${mxDataGen_SRC} PROPERTIES LANGUAGE CXX COMPILE_OPTIONS "-std=c++20")
 endif()
 

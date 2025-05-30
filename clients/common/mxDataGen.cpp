@@ -275,7 +275,7 @@ std::vector<float> generateData(T                           dgen,
     }
 }
 
-#ifdef USE_ROCROLLER
+#ifdef HIPBLASLT_USE_ROCROLLER
 /**
  * @brief Generate random data for OCP (MX) F8/F6/F4 types
  *

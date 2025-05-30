@@ -135,7 +135,7 @@ endif()
 
 set_source_files_properties(tensile_host.cpp PROPERTIES LANGUAGE CXX COMPILE_OPTIONS "-std=c++17")
 
-if(USE_ROCROLLER)
+if(HIPBLASLT_USE_ROCROLLER)
   target_sources(hipblaslt
     PRIVATE
       rocroller_host.cpp

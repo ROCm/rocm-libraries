@@ -67,7 +67,7 @@ add_library(roc::hipblaslt ALIAS hipblaslt)
 # Include sources
 add_subdirectory(src)
 
-if(USE_ROCROLLER)
+if(HIPBLASLT_USE_ROCROLLER)
     set_source_files_properties(
       "${CMAKE_CURRENT_SOURCE_DIR}/src/amd_detail/rocblaslt/src/rocroller_host.cpp"
         PROPERTIES
@@ -176,7 +176,7 @@ endif()
 
 # RocRoller integration
 include(FetchContent)
-if(USE_ROCROLLER)
+if(HIPBLASLT_USE_ROCROLLER)
   _save_var(BUILD_TESTING)
   _save_var(BUILD_CLIENTS)
   _save_var(CMAKE_SHARED_LINKER_FLAGS)
@@ -192,7 +192,7 @@ if(USE_ROCROLLER)
   )
   FetchContent_MakeAvailable(rocRoller)
   target_link_libraries(hipblaslt PRIVATE rocroller_interface)
-  add_definitions(-DUSE_ROCROLLER)
+  add_definitions(-DHIPBLASLT_USE_ROCROLLER)
 
   _restore_var(BUILD_TESTING)
   _restore_var(BUILD_CLIENTS)

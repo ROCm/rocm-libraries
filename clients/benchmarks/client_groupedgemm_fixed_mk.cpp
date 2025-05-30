@@ -37,6 +37,7 @@
 #include <limits>
 #include <string>
 #include <vector>
+#include "utility.hpp"
 
 #ifndef CHECK_HIP_ERROR
 #define CHECK_HIP_ERROR(error)                    \
@@ -193,31 +194,6 @@ void mat_mul_bias_activation(Tc             alpha,
         }
     }
 }
-
-double get_time_us_no_sync()
-{
-    auto now = std::chrono::steady_clock::now();
-    // now.time_since_epoch() is the duration since epoch
-    // which is converted to microseconds
-    auto duration
-        = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count();
-    return (static_cast<double>(duration));
-};
-
-double get_time_us_sync()
-{
-    if(hipDeviceSynchronize() != hipSuccess)
-    {
-        std::cout << "Synchronizing device failed" << std::endl;
-    }
-
-    auto now = std::chrono::steady_clock::now();
-    // now.time_since_epoch() is the duration since epoch
-    // which is converted to microseconds
-    auto duration
-        = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count();
-    return (static_cast<double>(duration));
-};
 
 // cppcheck-suppress constParameter
 static void show_usage(char* argv[])

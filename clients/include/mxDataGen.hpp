@@ -29,7 +29,7 @@
 #include <hipblaslt/hipblaslt.h>
 #include <stdint.h>
 
-#ifdef USE_ROCROLLER
+#ifdef HIPBLASLT_USE_ROCROLLER
 std::vector<float> generateMXInput(hipDataType            dataType,
                                    void*                  data,
                                    void*                  scale,

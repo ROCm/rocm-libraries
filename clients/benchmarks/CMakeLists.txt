@@ -45,7 +45,7 @@ target_include_directories( hipblaslt-bench
 
 target_link_libraries( hipblaslt-bench PRIVATE ${BLAS_LIBRARY} roc::hipblaslt )
 
-if( USE_ROCROLLER )
+if( HIPBLASLT_USE_ROCROLLER )
     set_source_files_properties(${mxDataGen_SRC} PROPERTIES LANGUAGE CXX COMPILE_OPTIONS "-std=c++20")
 endif()
 

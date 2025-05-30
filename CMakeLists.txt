@@ -118,7 +118,7 @@ option(Tensile_NO_LAZY_LIBRARY_LOADING "Diasble loading kernels on demand?" OFF)
 include(CMakeDependentOption)
 cmake_dependent_option(HIPBLASLT_ENABLE_MARKER "Enable roctx marker in hipBLASLt" ON "BUILD_SHARED_LIBS" OFF)
 # For rocRoller
-option(USE_ROCROLLER "Build with the rocRoller library" ON)
+option(HIPBLASLT_USE_ROCROLLER "Build with the rocRoller library" ON)
 
 if(BUILD_CODE_COVERAGE)
   add_compile_options(-fprofile-arcs -ftest-coverage)
@@ -269,7 +269,7 @@ cmake_host_system_information(RESULT OS_INFO QUERY DISTRIB_INFO)
 if( ${OS_PLATFORM} STREQUAL "rhel")
   if( ${OS_INFO_VERSION_ID} VERSION_LESS "9.5")
     message(WARNING "RHEL version ${OS_INFO_VERSION_ID} too old, not building RocRoller")
-    set(USE_ROCROLLER OFF)
+    set(HIPBLASLT_USE_ROCROLLER OFF)
   endif()
 endif()
 
